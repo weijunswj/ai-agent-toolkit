@@ -37,12 +37,12 @@ test('a realistic user file, the global block and root AGENTS.md fit the raised 
 });
 
 test('each block stays inside its own budget', () => {
-  // 3.8.1 added the owner's scratch and invariant-model rules; the combined Codex limit above stays the hard cap.
-  assert.ok(crlfBytes(GLOBAL) <= 16900, `global block ${crlfBytes(GLOBAL)} bytes`);
+  // Raised for the owner's scratch, invariant-model, issue-closing and current-behaviour rules; the combined Codex limit above stays the hard cap.
+  assert.ok(crlfBytes(GLOBAL) <= 17200, `global block ${crlfBytes(GLOBAL)} bytes`);
   assert.ok(crlfBytes(GOVERNED) <= 9500, `governed rules ${crlfBytes(GOVERNED)} bytes`);
   assert.ok(crlfBytes(ROOT_AGENTS) <= 15000, `root AGENTS.md ${crlfBytes(ROOT_AGENTS)} bytes`);
-  // CONTROLLER.md loads only for controllers, not every session; 3.8.1 added the owner's promise,
-  // run-standard, scratch, feedback-intake and G0 model rules, so its budget rose from 18000.
+  // CONTROLLER.md loads only for controllers, not every session; the owner's promise, run-standard,
+  // scratch, feedback-intake and G0 model rules raised its budget from 18000.
   assert.ok(crlfBytes(read('repo/CONTROLLER.md')) <= 19000, 'CONTROLLER.md');
 });
 

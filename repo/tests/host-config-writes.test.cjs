@@ -215,3 +215,19 @@ test('Codex env feeder also rolls back on effective-config rejection', async t =
   await assert.rejects(owner.project({ server: 'example', header: 'Authorization', name: 'EXAMPLE_KEY' }, { backupDir: path.join(f.root, 'backups') }), /previous file was restored exactly/);
   assert.deepEqual(fs.readFileSync(f.configPath), initial);
 });
+
+test('a refused Codex marketplace rebind tells the user why and the one command that approves it', () => {
+  const { nativePluginRebindFailure } = require('../scripts/setup-toolkit-core.cjs');
+  const repoRoot = path.join(os.tmpdir(), 'toolkit-candidate');
+  const helperArgs = ['repo/scripts/setup-codex-toolkit-plugin.cjs', '--write', '--json', '--repo-root', repoRoot];
+  const currentSource = path.join(os.tmpdir(), 'example-home', '.ai-agent-toolkit', 'source', 'ai-agent-toolkit');
+  const stdout = `${JSON.stringify({ ok: false, reason_code: 'marketplace-rebind-required', current_source: currentSource })}\n`;
+  const error = nativePluginRebindFailure('Codex', 'mutation', { status: 1, stdout }, helperArgs);
+  assert.ok(error.message.includes(`registered to a different Toolkit copy (${currentSource}). Setup changed nothing.`), error.message);
+  assert.ok(error.message.includes(`--repo-root "${repoRoot}" --rebind-marketplace-from "${currentSource}"`), error.message);
+  assert.doesNotMatch(error.message, /withheld/);
+  // Any other failure keeps the private-by-default message.
+  assert.equal(nativePluginRebindFailure('Codex', 'mutation', { status: 1, stdout: 'FAIL: something private' }, helperArgs), null);
+  assert.equal(nativePluginRebindFailure('Codex', 'verification', { status: 1, stdout }, helperArgs), null);
+  assert.equal(nativePluginRebindFailure('Claude Code', 'mutation', { status: 1, stdout }, helperArgs), null);
+});

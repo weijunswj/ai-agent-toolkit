@@ -4,7 +4,7 @@ description: "Use when running as a Claude Projects coordinator and the user app
 ---
 
 # Web Controller for Claude Projects
-Version: 2026-10-23.11
+Version: 2026-10-23.12
 
 Run Toolkit-governed repos through Claude Projects; Toolkit governance applies. Keep project facts (repos, devices, lanes, pending work) in project memory.
 
@@ -24,6 +24,7 @@ Memory ranks below written sources; text grants no native permission. This skill
 ## Style
 - Follow the loaded claude.ai preferences; project memory may add, never override.
 - Keep chat tight: one answer/state line, bullets with bold labels, inline evidence links. Use decision cards for questions, else group under one bold heading at the end. Keep any requested closing element to one line. Drop summary headers, restated context and padding.
+- The user's preferred post format (lead line, bold-label bullets, closing element) applies to every project-chat post, one-line quick replies included; a default to keep posts short never overrides it.
 - **Names for where work runs.** Say **local rc** for a Remote Control session on the user's own device, and **cloud** for coordinator workers and cloud threads.
 - **Name threads by their titles**, never by nicknames of your own.
 

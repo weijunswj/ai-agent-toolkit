@@ -511,6 +511,18 @@ test('TTY blank enters one-at-a-time mode and invalid answers are re-prompted', 
   assert.equal(journey.remaining.length, 0);
 });
 
+test('TTY one-at-a-time "all recommended" applies the recommendation to that question and the rest', async () => {
+  const enters = await runInjectedTTY(['', ...Array(20).fill('')]);
+  const rest = await runInjectedTTY(['', 'A', 'disable', 'All Recommended']);
+  assert.equal(rest.remaining.length, 0);
+  assert.match(rest.prompts[1], /1\.1 Update source .*"all recommended" for the rest/);
+  assert.equal(rest.prompts.length, 4, 'no question is asked after "all recommended"');
+  assert.equal(rest.args.setupChoices.repoAutoUpdate, 'disable');
+  for (const [key, value] of Object.entries(enters.args.setupChoices)) {
+    if (key !== 'repoAutoUpdate') assert.equal(rest.args.setupChoices[key], value, key);
+  }
+});
+
 test('TTY malformed concise input can be corrected and secondary details are collected', async () => {
   const corrected = await runInjectedTTY(['1.2=B, 1.2=C', '9.9=A', '1.2=B; 2.1=A', '1.2=B']);
   assert.equal(corrected.args.setupChoices.repoAutoUpdate, 'disable');

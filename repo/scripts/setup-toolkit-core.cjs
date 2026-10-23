@@ -2659,6 +2659,10 @@ function resolveDisplayedChoiceAnswer(spec, answer) {
   return canonical?.value || normalized.toLowerCase();
 }
 
+// Typed at a one-at-a-time prompt, "all recommended" applies the displayed recommendation to that
+// question and every remaining one. Piped and line-by-line answers keep their exact per-line meaning.
+const ALL_RECOMMENDED_REST = Symbol('all-recommended-rest');
+
 async function promptForChoice(spec, lines, rl) {
   if (lines) {
     if (!lines.length) throw new Error(`Setup question bank requires an answer for ${spec.title}`);
@@ -2666,7 +2670,8 @@ async function promptForChoice(spec, lines, rl) {
   }
   for (;;) {
     const range = `${spec.choices[0].presentation_ref}-${spec.choices.at(-1).presentation_ref}`;
-    const answer = await rl.question(`${spec.presentation.question_ref} ${spec.title} [${range}] (letter or canonical value; Enter=${spec.presentation.recommended_choice_ref}): `);
+    const answer = await rl.question(`${spec.presentation.question_ref} ${spec.title} [${range}] (letter or canonical value; Enter=${spec.presentation.recommended_choice_ref}; "all recommended" for the rest): `);
+    if (/^all\s+recommended$/i.test(String(answer).trim())) return ALL_RECOMMENDED_REST;
     const resolved = resolveDisplayedChoiceAnswer(spec, answer);
     if (choiceValues(spec).includes(resolved)) return resolved;
     console.log(`${spec.title} must be one of: ${choiceValues(spec).join(', ')}. Enter a displayed letter or canonical value.`);
@@ -2926,8 +2931,13 @@ async function answerSetupQuestionBank(args, current, options = {}) {
       : readline.createInterface({ input: process.stdin, output: process.stdout });
   }
   try {
-    for (const spec of missing) {
+    for (const [position, spec] of missing.entries()) {
       const answer = await promptForChoice(spec, lines, rl);
+      if (answer === ALL_RECOMMENDED_REST) {
+        for (const rest of missing.slice(position)) assignChoice(args, rest.key, rest.recommended);
+        console.log(`Applying the displayed recommendation to the remaining ${missing.length - position} question(s).`);
+        break;
+      }
       if (!choiceValues(spec).includes(answer)) {
         throw new Error(`${spec.title} must be one of: ${choiceValues(spec).join(', ')}`);
       }
@@ -3176,6 +3186,21 @@ function nativePluginPhaseFailure(platform, phase, result = {}, error = null) {
   return new Error(`${platform} native plugin ${action} failed${status}. Captured helper diagnostics were withheld from routine output.`);
 }
 
+// Codex refuses to repoint its Toolkit marketplace without the owner's separate approval. Say so,
+// and give the one command that approves it, instead of withholding the helper's diagnostics.
+function nativePluginRebindFailure(platform, phase, result, helperArgs) {
+  if (platform !== 'Codex' || phase !== 'mutation') return null;
+  const status = parseFirstJsonObject(result?.stdout || '');
+  if (status?.reason_code !== 'marketplace-rebind-required' || typeof status.current_source !== 'string' || !status.current_source) return null;
+  const repoRoot = helperArgs[helperArgs.indexOf('--repo-root') + 1];
+  return new Error([
+    `Codex's Toolkit plugin is registered to a different Toolkit copy (${status.current_source}). Setup changed nothing.`,
+    'To use this copy instead, approve the switch by running:',
+    `  node "${path.join(repoRoot, 'repo', 'scripts', 'setup-codex-toolkit-plugin.cjs')}" --write --repo-root "${repoRoot}" --rebind-marketplace-from "${status.current_source}"`,
+    'then run setup again.',
+  ].join('\n'));
+}
+
 function runNativePluginJsonPhase({ platform, phase, label, args, cwd, timeout, allowRefreshRequired = false }) {
   let result;
   try {
@@ -3193,7 +3218,7 @@ function runNativePluginJsonPhase({ platform, phase, label, args, cwd, timeout, 
       console.log(`${platform} native plugin verification: current source identity was not established; approved refresh is required.`);
       return null;
     }
-    throw nativePluginPhaseFailure(platform, phase, result);
+    throw nativePluginRebindFailure(platform, phase, result, args) || nativePluginPhaseFailure(platform, phase, result);
   }
   const summary = parseFirstJsonObject(result.stdout);
   if (!summary || summary.ok !== true) {
@@ -4008,6 +4033,7 @@ if (require.main === module) {
 
 module.exports = {
   assertSupportedComputer,
+  nativePluginRebindFailure,
   installOfficialN8nSkills,
   applyAntigravitySkills,
   antigravityState,

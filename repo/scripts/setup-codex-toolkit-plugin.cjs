@@ -1384,7 +1384,12 @@ class CodexToolkitWriteTransaction {
       return this.#addMarketplace(binding, state);
     }
     if (binding.status === 'mismatch') {
-      if (!this.#options.rebindFrom) throw new Error(marketplaceMismatchMessage(binding));
+      if (!this.#options.rebindFrom) {
+        const error = new Error(marketplaceMismatchMessage(binding));
+        error.code = 'MARKETPLACE_REBIND_REQUIRED';
+        error.currentSource = binding.root;
+        throw error;
+      }
       return this.#rebindMarketplace(binding, state);
     }
     throw new Error(`${binding.reason}. The marketplace-source binding cannot be verified. No marketplace, plugin or cache changes were made.`);
@@ -1737,6 +1742,11 @@ if (require.main === module) {
   main().then((code) => {
     process.exitCode = code;
   }, (error) => {
+    // The orchestrator withholds helper stderr; this one structured line carries only the reason
+    // code and the user's own current marketplace path, so setup can say what to do next.
+    if (error.code === 'MARKETPLACE_REBIND_REQUIRED' && process.argv.includes('--json')) {
+      console.log(JSON.stringify({ ok: false, reason_code: 'marketplace-rebind-required', current_source: error.currentSource }));
+    }
     console.error(`FAIL: ${error.message}`);
     process.exitCode = 1;
   });
