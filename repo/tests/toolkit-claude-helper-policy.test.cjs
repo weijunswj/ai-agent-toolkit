@@ -155,6 +155,34 @@ test('in governed work the matching Toolkit helpers are allowed and other launch
   assert.match(reason(forced), /CLAUDE_CODE_SUBAGENT_MODEL/);
 });
 
+test('environment variables that would change the helper model or effort are refused; harmless values pass', t => {
+  const f = fixture(t);
+  const launch = env => f.decide({ tool_input: { subagent_type: 'toolkit-g0-helper', prompt: 'y' } }, { ...f.environment, ...env });
+  const refusals = [
+    [{ CLAUDE_CODE_SUBAGENT_MODEL_FORCE: '1' }, /^Toolkit: CLAUDE_CODE_SUBAGENT_MODEL_FORCE is set, so Claude Code ignores the helper model; unset it to use Toolkit helpers\.$/],
+    [{ CLAUDE_CODE_SUBAGENT_MODEL_FORCE: 'true' }, /CLAUDE_CODE_SUBAGENT_MODEL_FORCE is set/],
+    [{ CLAUDE_CODE_SUBAGENT_MODEL_FORCE: '1', CLAUDE_CODE_SUBAGENT_MODEL: 'claude-haiku-5-5' }, /CLAUDE_CODE_SUBAGENT_MODEL_FORCE is set/],
+    [{ CLAUDE_CODE_SUBAGENT_MODEL: 'claude-opus-5-5' }, /^Toolkit: CLAUDE_CODE_SUBAGENT_MODEL is set, and some Claude Code versions let it replace the helper model; unset it to use Toolkit helpers\.$/],
+    [{ CLAUDE_CODE_EFFORT_LEVEL: 'low' }, /^Toolkit: CLAUDE_CODE_EFFORT_LEVEL is set to low, which replaces the helper's xhigh effort; unset it to use Toolkit helpers\.$/],
+    [{ CLAUDE_CODE_EFFORT_LEVEL: 'auto' }, /set to auto, which replaces the helper's xhigh effort/],
+    [{ CLAUDE_CODE_EFFORT_LEVEL: 'XHIGH' }, /set to XHIGH/],
+  ];
+  for (const [env, expected] of refusals) {
+    const output = launch(env);
+    assert.ok(denied(output), JSON.stringify(env));
+    assert.match(reason(output), expected);
+  }
+  // Off values, an empty value and the helper's own effort leave the route unchanged.
+  for (const env of [{ CLAUDE_CODE_SUBAGENT_MODEL_FORCE: '0' }, { CLAUDE_CODE_SUBAGENT_MODEL_FORCE: 'false' }, { CLAUDE_CODE_SUBAGENT_MODEL_FORCE: '' },
+    { CLAUDE_CODE_EFFORT_LEVEL: '' }, { CLAUDE_CODE_EFFORT_LEVEL: 'xhigh' }, { CLAUDE_CODE_EFFORT_LEVEL: ' xhigh ' }]) {
+    assert.deepEqual(launch(env), {}, JSON.stringify(env));
+  }
+  // The effort check reads the definition Claude Code would load, so a stale definition is reported first.
+  const file = path.join(f.configDir, 'agents', 'toolkit-g0-helper.md');
+  fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace('effort: xhigh', 'effort: low'));
+  assert.match(reason(launch({ CLAUDE_CODE_EFFORT_LEVEL: 'low' })), /does not match the one rendered from the selected stack/);
+});
+
 test('a helper file rewritten after the session started is refused until a new session', t => {
   const f = fixture(t);
   const file = path.join(f.configDir, 'agents', 'toolkit-g0-helper.md');
