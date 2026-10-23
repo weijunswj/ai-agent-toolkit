@@ -3612,11 +3612,13 @@ test('hook mode refuses a dirty repo before update and does not sync targets', (
   const report = readLatestReport(hub);
   assert.match(result.stdout, /Toolkit local bridge sync complete\./);
   assert.match(report.text, /Repo: skipped \(configured Toolkit source checkout is dirty\)\./);
-  assert.match(report.text, /Action needed: finish or stash changes in the configured Toolkit source checkout, or run `setup toolkit` to use a dedicated clean `main` checkout for startup updates\./);
+  const repoPattern = fixture.repo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  assert.match(report.text, new RegExp(`Action needed: the configured Toolkit source checkout \\(\`${repoPattern}\`\\) has uncommitted changes, so startup updates stay skipped until it is clean: commit or stash them there, or run \`setup toolkit\` to use a dedicated clean \`main\` checkout\\.`));
+  assert.doesNotMatch(report.text, /will retry on the next hook run/);
   assert.match(report.text, new RegExp(`Configured repo path: \`${fixture.repo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\``));
   assert.match(report.text, /repo update status: `skipped`/);
   assert.match(report.text, /warning\/error: `dirty working tree`/i);
-  assert.match(report.text, /Suggested fix: finish or stash changes in the configured Toolkit source checkout, or run `setup toolkit` to use a dedicated clean `main` checkout for startup updates\./);
+  assert.match(report.text, /Suggested fix: the configured Toolkit source checkout \(`[^`]+`\) has uncommitted changes, so startup updates stay skipped until it is clean/);
 });
 
 test('hook mode auto-switches a clean repo back to main before update and sync', () => {
