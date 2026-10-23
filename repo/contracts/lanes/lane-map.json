@@ -5,6 +5,7 @@
     "claude": [
       "repo/scripts/claude-process-launch.cjs",
       "repo/scripts/setup-claude-toolkit-plugin.cjs",
+      "repo/scripts/setup-core-claude.cjs",
       "repo/scripts/toolkit-claude-agent-hook.cjs",
       "repo/scripts/toolkit-claude-attribution-hook.cjs",
       "repo/scripts/toolkit-claude-helper-agents.cjs",
@@ -41,6 +42,7 @@
       "repo/scripts/codex-delegation-layout.cjs",
       "repo/scripts/codex-delegation-state.cjs",
       "repo/scripts/setup-codex-toolkit-plugin.cjs",
+      "repo/scripts/setup-core-codex.cjs",
       "repo/scripts/toolkit-codex-helper-agents.cjs",
       "repo/scripts/toolkit-codex-helper-hook.cjs",
       "repo/scripts/toolkit-codex-helper-hook.ps1",
