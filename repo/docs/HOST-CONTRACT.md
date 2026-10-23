@@ -62,6 +62,19 @@ Stop or fence the old writer, settle in-flight effects, then assign the successo
 
 Named helper definitions carry the pinned model and effort. Only a G0 or G1 lead launches helpers, helpers never launch, and G2 has none. How each host carries out the route belongs to that host's own support work.
 
+Claude Code (rows refer to the launch matrix in `repo/tests/support/claude-helper-matrix.cjs`; stored results in `repo/contracts/host-qualification/claude-code.json`):
+
+| Need | How Claude Code meets it |
+|---|---|
+| Hook event | `PreToolUse` with matcher `Agent\|Task`, from the plugin's `hooks.json` (hook rows A1 to A8, A11 to A15, A17, A18, A21) |
+| Blocking output | JSON `permissionDecision: "deny"` with a plain reason; an allowed launch returns no decision, so Claude Code's own permissions still apply |
+| Failure and timeout | The hook has `onFailure: "block"` (A9); a decision module that fails becomes a deny in governed work (A8) |
+| Trust step | None: Claude Code has no separate trust step for plugin hooks. Setup checks that no setting turns hooks off and that the agent hook in the folder Claude Code runs refuses a test launch |
+| Helper definitions | Markdown agent files rendered from the pinned stack, looked up as Claude Code loads them: managed folder, project folders up to the repository root, user folder (A14 covers the order) |
+| Depth | Claude Code's own `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1` plus the hook's refusal of any launch from a helper (A15) |
+| Route proof | Served model and effort from Claude Code's run records (subagent transcript and `.meta.json`), never the helper's report (live rows A1, A2, A6, A26) |
+| Known limit | A session `--agents` definition of a helper name outranks the files and no hook sees it (A14); Toolkit launchers refuse it with `toolkit-claude-session-agents.cjs` |
+
 ## 7. Lane write fences
 
 The integration controller alone writes the parent, the version files and the integration files the lane map names (`repo/contracts/lanes/lane-map.json` once it lands). A lane controller writes only the child the catalogue delegates to it (`assign` and `interrupt`), with its own decision-ID prefix.

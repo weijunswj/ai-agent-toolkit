@@ -31,12 +31,15 @@ function deny(reason) {
   return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `Toolkit: ${reason}` } };
 }
 
-// The managed settings directory per platform (Claude Code managed settings docs); managed
-// agents live in its `.claude/agents` and outrank every other file location.
-function managedAgentsDirectory(platform = process.platform) {
-  const base = platform === 'win32' ? 'C:\\Program Files\\ClaudeCode'
+// The managed settings directory per platform (Claude Code managed settings docs).
+function managedSettingsDirectory(platform = process.platform) {
+  return platform === 'win32' ? 'C:\\Program Files\\ClaudeCode'
     : platform === 'darwin' ? '/Library/Application Support/ClaudeCode' : '/etc/claude-code';
-  return (platform === 'win32' ? path.win32 : path.posix).join(base, '.claude', 'agents');
+}
+
+// Managed agents live in the managed directory's `.claude/agents` and outrank every other file location.
+function managedAgentsDirectory(platform = process.platform) {
+  return (platform === 'win32' ? path.win32 : path.posix).join(managedSettingsDirectory(platform), '.claude', 'agents');
 }
 
 class ClaudeNamedHelperPolicy {
@@ -170,4 +173,4 @@ function changedSinceSessionStart(file, input) {
   } catch { return false; }
 }
 
-module.exports = Object.freeze({ ClaudeNamedHelperPolicy, HELPER_ROLES, changedSinceSessionStart, managedAgentsDirectory });
+module.exports = Object.freeze({ ClaudeNamedHelperPolicy, HELPER_ROLES, changedSinceSessionStart, managedAgentsDirectory, managedSettingsDirectory });
