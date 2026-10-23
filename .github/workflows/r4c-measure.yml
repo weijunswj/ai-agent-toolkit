@@ -1,7 +1,8 @@
 name: R4c test timing measurement
 
-# Temporary G0 measurement for release R4c (CI speed). Not a gate: it times each test file on its own
-# and the whole suite, on Linux and Windows, and prints a JSON summary. Removed before R4c merges.
+# Temporary G0 measurement for release R4c (CI speed). Not a gate: run 2 prints the slowest tests in
+# the slowest files on both systems, and the failure diagnostics of the files that fail on Windows.
+# Removed before R4c merges.
 
 on:
   push:
@@ -39,5 +40,17 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Measure test timing
-        run: node .github/r4c-measure/measure.cjs
+      - name: Tool versions
+        run: |
+          git --version
+          git config --global --list
+          python --version
+          python3 --version
+          pwsh --version
+
+      - name: Slowest tests
+        run: node .github/r4c-measure/measure.cjs --detail validate-toolkit.test.cjs,hostinger-coolify-production-guide.test.cjs,toolkit-local-bridge.test.cjs,update-source-watch-review-branch.test.cjs,toolkit-setup-orchestrator-1.test.cjs,toolkit-setup-managed-question-bank-protocol.test.cjs,toolkit-setup-orchestrator-2.test.cjs,n8n-workflow-transport.test.cjs
+
+      - name: Windows failure diagnostics
+        if: runner.os == 'Windows'
+        run: node .github/r4c-measure/measure.cjs --detail repo-backup-ignore-hygiene.test.cjs,codex-delegation-config.test.cjs,codex-delegation-v2.test.cjs,codex-delegation-malformed-repair.test.cjs,codex-delegation-review-regression.test.cjs,n8n-portable-import.test.cjs,toolkit-local-bridge-claude-install.test.cjs,toolkit-setup-malformed-repair.test.cjs,codex-session-start-launcher.test.cjs,n8n-launcher-runtime.test.cjs,toolkit-v3-current-procedure-consistency.test.cjs,controller-bootstrap.test.cjs
