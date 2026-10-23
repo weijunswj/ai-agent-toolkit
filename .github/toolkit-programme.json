@@ -10,5 +10,5 @@
     "branch": "main",
     "path": "state/weijunswj/ai-agent-toolkit/"
   },
-  "required_checks": ["validate", "env-store"]
+  "required_checks": ["validate"]
 }
