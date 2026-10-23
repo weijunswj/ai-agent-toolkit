@@ -54,7 +54,7 @@ The hub contains:
 - Repo auto-update state: `repo_auto_update_enabled`, `repo_path`, `repo_branch`, `repo_remote`, `last_repo_update`, `last_repo_update_status`, `last_repo_update_from_commit`, `last_repo_update_to_commit`, and `last_repo_update_error`.
 - Update-report state: `last_update_report_path`, `update_report_enabled`, failure-only opening behavior, `update_report_retention_days`, max retained report count, and last cleanup status. Legacy `update_report_open_enabled=true` is retained only as migration evidence and is normalized to failure-only behavior.
 - Codex instruction limit choice: `codex_doc_limit_enabled` (default false; set by the setup question "Raise Codex's instruction limit", or `--enable-codex-doc-limit` / `--disable-codex-doc-limit`). Only an explicit true lets the Codex session-start hook raise `project_doc_max_bytes` (see Instruction Layers).
-- Rule-refresh PR merge choice: `refresh_pr_auto_merge_enabled` (default false; set by the setup question "Merge rule-refresh PRs when the required checks pass"). `repository-agent-rules` reads it from read-only `--audit` output and merges its refresh pull request only when it is true and, on the exact head, at least one check has reported, every reported check has completed as passed or skipped, and every required check has passed. Only setup, with the owner's answer, sets it. The rate-limit ledger for SessionStart notes is `agent-rules-notices.json` beside the hub snapshot directory (next to `update.lock`), so snapshot writes by auto-sync or repo auto-update do not reset it.
+- Rule-refresh pull requests always stop at the open PR for the owner to merge; Toolkit 3.7.0 removed the auto-merge choice, and the next state write drops its old `refresh_pr_auto_merge_enabled` key. The rate-limit ledger for SessionStart notes is `agent-rules-notices.json` beside the hub snapshot directory (next to `update.lock`), so snapshot writes by auto-sync or repo auto-update do not reset it.
 - Codex plugin cache auto-refresh preference: `codex_plugin_auto_refresh_enabled`.
 - Target paths.
 - Target detected, enabled, disabled, stale, and synced state.
@@ -177,7 +177,6 @@ Supported flags:
 - `--disable-update-reports`.
 - `--update-report-retention-days <days>`, default `7`.
 - `--enable-update-report-open` and `--disable-update-report-open` remain compatibility flags; both retain failure-only opening and never restore success-report auto-opening.
-- `--enable-refresh-pr-auto-merge` and `--disable-refresh-pr-auto-merge`.
 - `--enable-codex-doc-limit` and `--disable-codex-doc-limit`.
 - `--enable-codex-plugin-auto-refresh`.
 - `--disable-codex-plugin-auto-refresh`.

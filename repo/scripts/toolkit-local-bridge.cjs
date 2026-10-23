@@ -115,8 +115,6 @@ function parseArgs(argv = process.argv.slice(2)) {
     disableUpdateReportOpen: false,
     enableCodexPluginAutoRefresh: false,
     disableCodexPluginAutoRefresh: false,
-    enableRefreshPrAutoMerge: false,
-    disableRefreshPrAutoMerge: false,
     suppressUpdateReport: false,
     reconcileStaging: '',
     syncSource: 'repo',
@@ -148,8 +146,6 @@ function parseArgs(argv = process.argv.slice(2)) {
     else if (arg === '--open-update-report') args.openUpdateReport = true;
     else if (arg === '--enable-update-reports') args.enableUpdateReports = true;
     else if (arg === '--disable-update-reports') args.disableUpdateReports = true;
-    else if (arg === '--enable-refresh-pr-auto-merge') args.enableRefreshPrAutoMerge = true;
-    else if (arg === '--disable-refresh-pr-auto-merge') args.disableRefreshPrAutoMerge = true;
     else if (arg === '--enable-codex-doc-limit') args.enableCodexDocLimit = true;
     else if (arg === '--disable-codex-doc-limit') args.disableCodexDocLimit = true;
     else if (arg === '--update-report-retention-days') {
@@ -202,9 +198,6 @@ function parseArgs(argv = process.argv.slice(2)) {
   }
   if (args.enableUpdateReports && args.disableUpdateReports) {
     throw new Error('--enable-update-reports and --disable-update-reports cannot be used together');
-  }
-  if (args.enableRefreshPrAutoMerge && args.disableRefreshPrAutoMerge) {
-    throw new Error('--enable-refresh-pr-auto-merge and --disable-refresh-pr-auto-merge cannot be used together');
   }
   if (args.enableCodexDocLimit && args.disableCodexDocLimit) {
     throw new Error('--enable-codex-doc-limit and --disable-codex-doc-limit cannot be used together');
@@ -285,8 +278,6 @@ function printHelp() {
     '                                positive integer, default: 7',
     '  --enable-update-report-open compatibility alias for failure-only opening; successful reports remain closed',
     '  --disable-update-report-open retain failure-only opening; successful reports remain closed',
-    '  --enable-refresh-pr-auto-merge  owner choice: merge rule-refresh PRs when the required checks pass',
-    '  --disable-refresh-pr-auto-merge stop rule-refresh PRs at the open PR',
     '  --enable-codex-doc-limit        owner choice: keep Codex project_doc_max_bytes raised to 65536',
     '  --disable-codex-doc-limit       leave Codex project_doc_max_bytes alone',
     '  --enable-codex-plugin-auto-refresh',
@@ -751,7 +742,6 @@ function defaultState() {
     last_update_report_path: '',
     last_update_report_signature: '',
     update_report_enabled: true,
-    refresh_pr_auto_merge_enabled: false,
     codex_doc_limit_enabled: false,
     update_report_open_enabled: false,
     update_report_open_behavior: 'action-required-only',
@@ -797,9 +787,8 @@ function normalizedState(raw) {
     ? state.last_update_report_cleanup
     : null;
   state.codex_plugin_auto_refresh_enabled = state.codex_plugin_auto_refresh_enabled === true;
-  // Owner choice read by repository-agent-rules: merge its refresh PR once the required
-  // checks pass. Only an explicit true enables it.
-  state.refresh_pr_auto_merge_enabled = state.refresh_pr_auto_merge_enabled === true;
+  // The rule-refresh PR auto-merge choice was removed in 3.7.0; drop its old key on the next write.
+  delete state.refresh_pr_auto_merge_enabled;
   // Owner choice from setup: keep Codex's project_doc_max_bytes raised. Only an explicit true enables it.
   state.codex_doc_limit_enabled = state.codex_doc_limit_enabled === true;
   return state;
@@ -828,8 +817,6 @@ function applyRequestedState(state, args) {
   if (args.updateReportRetentionDaysExplicit) next.update_report_retention_days = args.updateReportRetentionDays;
   if (args.enableCodexPluginAutoRefresh) next.codex_plugin_auto_refresh_enabled = true;
   if (args.disableCodexPluginAutoRefresh) next.codex_plugin_auto_refresh_enabled = false;
-  if (args.enableRefreshPrAutoMerge) next.refresh_pr_auto_merge_enabled = true;
-  if (args.disableRefreshPrAutoMerge) next.refresh_pr_auto_merge_enabled = false;
   if (args.enableCodexDocLimit) next.codex_doc_limit_enabled = true;
   if (args.disableCodexDocLimit) next.codex_doc_limit_enabled = false;
   return next;
@@ -2721,7 +2708,6 @@ function buildAudit({ args, hubPath, state, checksum }) {
     sync_source: args.syncSource,
     auto_sync_enabled: state.auto_sync_enabled,
     update_report_enabled: state.update_report_enabled,
-    refresh_pr_auto_merge_enabled: state.refresh_pr_auto_merge_enabled,
     codex_doc_limit_enabled: state.codex_doc_limit_enabled,
     update_report_open_enabled: state.update_report_open_enabled,
     update_report_open_behavior: state.update_report_open_behavior,

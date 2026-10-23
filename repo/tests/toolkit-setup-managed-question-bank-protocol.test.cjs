@@ -137,7 +137,7 @@ test('host and user arguments survive delegation exactly once and recursion dept
   createFakeManagedSetupScript(root, { argsLogPath });
   const result = run([
     '--execute', '--profile', 'auto-main', '--host', 'claude-code',
-    '--claude-plugin-behavior', 'instructions', '--keep-refresh-pr-auto-merge',
+    '--claude-plugin-behavior', 'instructions', '--keep-update-reports',
   ], { env: isolatedHomeEnv(root), timeout: 30000 });
   assert.equal(result.status, 23, result.stderr || result.stdout);
   const logged = JSON.parse(fs.readFileSync(argsLogPath, 'utf8'));
@@ -145,7 +145,7 @@ test('host and user arguments survive delegation exactly once and recursion dept
   assert.equal(logged.argv.filter((arg) => arg === 'claude-code').length, 1);
   assert.equal(logged.argv.filter((arg) => arg === '--claude-plugin-behavior').length, 1);
   assert.equal(logged.argv.filter((arg) => arg === 'instructions').length, 1);
-  assert.equal(logged.argv.filter((arg) => arg === '--keep-refresh-pr-auto-merge').length, 1);
+  assert.equal(logged.argv.filter((arg) => arg === '--keep-update-reports').length, 1);
   assert.equal(logged.depth, '1');
 });
 
@@ -319,7 +319,7 @@ test('managed explicit flags without yes-recommended complete with non-TTY stdin
   const result = await runWithUnclosedStdin(script, [
     '--execute', '--profile', 'auto-main', '--host', 'claude-code', '--repo-remote', fixture.origin,
     '--use-default-managed-checkout', '--enable-repo-auto-update', '--enable-update-reports',
-    '--default-update-report-retention-days', '--enable-refresh-pr-auto-merge', '--claude-topology', 'root-only',
+    '--default-update-report-retention-days', '--claude-topology', 'root-only',
     '--claude-plugin-behavior', 'instructions',
   ], { env: isolatedHomeEnv(fixture.root), deadlineMs: 300000 });
   assertCompletedWithoutClaudePlugin(result.code, result);
@@ -391,7 +391,7 @@ test('real partial piped answers still show one complete effective bank before p
 
 test('real complete piped answers show one bank before synthetic-home setup mutation', () => {
   const fixture = realManagedFixture();
-  const input = ['default', 'enable', 'enable', 'default', 'enable', 'root-only', 'instructions', ''].join('\n');
+  const input = ['default', 'enable', 'enable', 'default', 'root-only', 'instructions', ''].join('\n');
   const result = runRealManaged(fixture, [], input);
   assertCompletedWithoutClaudePlugin(result.status, result);
   assert.equal(markerCount(result.stdout, core.QUESTION_BANK_BEGIN), 1);

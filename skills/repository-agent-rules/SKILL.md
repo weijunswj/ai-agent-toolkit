@@ -76,21 +76,11 @@ Reading files does not reload native hooks, tools or permissions; when one of th
 
 1. Create a new non-main branch from the current base. Stage only the files this refresh wrote (the instruction files and shims it created, repaired or refreshed); never stage dirty, unrelated or backup files.
 2. Run the sync check where it exists, commit, push the branch, and open a pull request that lists the refreshed files.
-3. Watch every check on the pull request's exact head.
-4. Read the owner's stored choice with `node "<Toolkit plugin root>/repo/scripts/toolkit-local-bridge.cjs" --audit` (read-only; field `refresh_pr_auto_merge_enabled`). Merge only when that field is `true` and, on that exact head, at least one check has been reported, every reported check has completed as passed or skipped, and every required check has passed. This skill grants no merge authority of its own; the owner's setup choice "Merge rule-refresh PRs when the required checks pass" is the only source. Never set or change that choice yourself; only setup, with the owner's answer, does.
+3. Watch every check on the pull request's exact head, then stop at the open pull request: report its link, head and check results for the owner to merge. This skill never merges.
 
-Stop at the open pull request and report its link, head and the reason instead of merging when:
+When the repository has no GitHub remote, leave the refreshed files uncommitted and report them. Never use an admin bypass, force-push, rewrite history, or touch files this refresh did not write.
 
-- the stored choice is off, missing or cannot be read;
-- no check has been reported on the exact head by the end of the watch (checks can register only after the pull request opens, so zero checks never counts as passed);
-- any check on the exact head fails, or is still pending when the watch ends;
-- review rules or branch protection block the merge;
-- the pull request contains any file this refresh does not own;
-- the repository has no GitHub remote (then leave the refreshed files uncommitted and report them).
-
-Never use an admin bypass, force-push, rewrite history, or touch files this refresh did not write.
-
-**For a standalone install, repair, refresh, or bootstrap request with no task in flight**, after the pull request outcome above (merged, stopped at the open pull request, or no GitHub remote), stop and end with this exact format:
+**For a standalone install, repair, refresh, or bootstrap request with no task in flight**, after the pull request outcome above (stopped at the open pull request, or no GitHub remote), stop and end with this exact format:
 
 **SESSION RESET RECOMMENDED:**
 
