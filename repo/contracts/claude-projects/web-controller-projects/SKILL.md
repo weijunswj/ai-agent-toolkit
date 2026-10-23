@@ -4,7 +4,7 @@ description: "Use when running as a Claude Projects coordinator and the user app
 ---
 
 # Web Controller for Claude Projects
-Version: 2026-10-23.6
+Version: 2026-10-23.7
 
 This is a reusable framework for running Toolkit-governed repos through Claude Projects. Toolkit governance always applies on top of it. Project-specific facts, such as repos, devices, lanes and pending work, belong in each project's memory, not here.
 
@@ -220,7 +220,7 @@ Whenever the user asks for anything recurring (the daily check-in, a sweep, a re
 - When blocked on a person or another account, say once what is needed and move to the next unblocked item.
 
 ## Improving this skill
-- The source of truth is `repo/contracts/claude-projects/web-controller-projects/SKILL.md` in the Toolkit repo. No coordinator edits the copy uploaded to the user's claude.ai account.
+- The source of truth is `repo/contracts/claude-projects/web-controller-projects/SKILL.md` in the Toolkit repo. The user or another project may edit the copy on the user's claude.ai account directly. Before any upload, a coordinator compares that copy with the repo file and brings direct edits into Toolkit first, so nothing is overwritten.
 - When you find a better way, or a rule here proves wrong, tell the user the change and why, and send it to Toolkit as TOOLKIT_FEEDBACK or an issue. A Toolkit pull request changes the file; after it merges, the user uploads the new file to claude.ai. Compare the Version line of the uploaded copy with the repo's after each Toolkit release.
 - Keep this skill generic. User-specific details go in project memory or the user's claude.ai preferences, never here. Rules Toolkit owns go to `CONTROLLER.md` or the governed rules, not here.
 - Every change bumps the Version line (date plus a counter for that day, e.g. 2026-10-21.2).
