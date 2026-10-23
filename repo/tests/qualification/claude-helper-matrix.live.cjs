@@ -79,15 +79,26 @@ function sessionTools(definitions) {
   return [...tools].join(',');
 }
 
-// The folder Claude Code runs the installed Toolkit plugin from (readFromFolder for a local
-// marketplace, else the cache copy), so installed mode checks the hook that sessions actually run.
+// The installed Toolkit plugin Claude Code runs. A claude.ai account copy (scope "synced") loses
+// any name conflict to a local install, so it counts only when it is the sole enabled copy.
+function pickInstalledPlugin(list) {
+  const enabled = (Array.isArray(list) ? list : list?.installed || []).filter(e => /^ai-agent-toolkit@/.test(e.id || '') && e.enabled === true);
+  const local = enabled.filter(e => e.scope !== 'synced');
+  const entries = local.length ? local : enabled;
+  if (entries.length !== 1) {
+    const found = enabled.map(e => `${e.id} (${e.scope || 'no scope'})`).join(', ') || 'none';
+    throw new Error(`installed mode needs one enabled ai-agent-toolkit plugin in \`claude plugin list --json\`; found: ${found}`);
+  }
+  return { root: path.resolve(entries[0].readFromFolder || entries[0].installPath), version: entries[0].version || null, id: entries[0].id };
+}
+
+// The folder Claude Code runs it from (readFromFolder for a local marketplace, else the cache
+// copy), so installed mode checks the hook that sessions actually run.
 function installedPluginRoot() {
   const r = spawnSync(CLAUDE, ['plugin', 'list', '--json'], { encoding: 'utf8' });
   let list = [];
-  try { list = JSON.parse(r.stdout || '[]'); } catch { /* reported below */ }
-  const entries = (Array.isArray(list) ? list : list.installed || []).filter(e => /^ai-agent-toolkit@/.test(e.id || '') && e.enabled === true);
-  if (entries.length !== 1) throw new Error('installed mode needs exactly one enabled ai-agent-toolkit plugin in `claude plugin list --json`');
-  return { root: path.resolve(entries[0].readFromFolder || entries[0].installPath), version: entries[0].version || null };
+  try { list = JSON.parse(r.stdout || '[]'); } catch { /* reported by pickInstalledPlugin */ }
+  return pickInstalledPlugin(list);
 }
 
 // The pinned helper route as the rendered definition states it.
@@ -262,7 +273,7 @@ function main() {
     }
     const sorted = [...timings].sort((a, b) => a - b);
     const report = { schema: 'toolkit.qualification.claude-helper-matrix.v1', host: 'claude-code', host_version: hostVersion(), mode: options.mode,
-      host_runs: options.host, plugin_root: options.pluginRoot, installed_plugin_version: installed?.version ?? null, hook_sha256: sha256(hook), registry_sha256: sha256(REGISTRY),
+      host_runs: options.host, plugin_root: options.pluginRoot, installed_plugin: installed ? { id: installed.id, version: installed.version } : null, hook_sha256: sha256(hook), registry_sha256: sha256(REGISTRY),
       candidate_head: git(['rev-parse', 'HEAD']), candidate_dirty: (git(['status', '--porcelain']) || '') !== '', at: new Date().toISOString(),
       hook_process_ms: sorted.length ? { median: sorted[Math.floor(sorted.length / 2)], max: sorted[sorted.length - 1] } : null,
       not_run_here: Object.fromEntries(Object.entries(matrix.OTHER_ROWS).filter(([, e]) => e.proof !== 'live')),
@@ -284,4 +295,4 @@ if (require.main === module) {
   try { main(); } catch (error) { console.error(error.message); process.exitCode = 1; }
 }
 
-module.exports = Object.freeze({ parseArgs, pinnedRoute, sessionTools, turnSummary, runRecords, servedOnPin, KNOWN_LIMITS });
+module.exports = Object.freeze({ parseArgs, pinnedRoute, sessionTools, pickInstalledPlugin, turnSummary, runRecords, servedOnPin, KNOWN_LIMITS });
