@@ -185,15 +185,40 @@ class EnvManifest {
   }
 }
 
-// Reject assignments anywhere in a comment, common token prefixes, long opaque runs and hidden
-// controls. NFKC also catches fullwidth assignments. This is a conservative screen, not a proof
-// that arbitrary human-readable text is not a password. Refusals report line numbers only.
+// Screen NAME=value assignments, common token prefixes, long opaque runs and hidden controls.
+// Empty/unchanged assignments and decorative equals are harmless; NFKC catches fullwidth equals.
+// This cannot prove human-readable text is not a password. Refusals never repeat comment text.
 function secretLikeComment(text) {
-  if (/[\u0000-\u0008\u000a-\u001f\u007f-\u009f\p{Cf}\p{Zl}\p{Zp}]/u.test(text)) return true;
+  const chars = [...text];
+  for (let index = 0; index < chars.length; index += 1) {
+    const char = chars[index];
+    if (char === '\u200d') {
+      let before = index - 1;
+      while (before >= 0 && /[\uFE0F\p{Emoji_Modifier}]/u.test(chars[before])) before -= 1;
+      if (before < 0 || !/\p{Extended_Pictographic}/u.test(chars[before]) || !/\p{Extended_Pictographic}/u.test(chars[index + 1] || '')) return true;
+    } else if (/[\u0000-\u0008\u000a-\u001f\u007f-\u009f\p{Cf}\p{Zl}\p{Zp}]/u.test(char)) return true;
+  }
   const body = text.normalize('NFKC');
-  if (/[\p{L}_][\p{L}\p{N}_]*\s*=\s*\S/u.test(body)) return true;
+  // Consume each name once, then inspect its suffix rather than retrying a greedy name pattern
+  // at every letter when a long comment contains no equals sign.
+  for (const match of body.matchAll(/[\p{L}_][\p{L}\p{N}_]*/gu)) {
+    let at = match.index + match[0].length;
+    while (at < body.length && /\s/u.test(body[at])) at += 1;
+    if (body[at] !== '=' || body[at + 1] === '=') continue;
+    at += 1;
+    while (at < body.length && /\s/u.test(body[at])) at += 1;
+    if (at < body.length && body.slice(at).trim() !== UNCHANGED) return true;
+    if (body.slice(0, match.index).trim() === '#') return false;
+  }
   if (/(?:^|[^\p{L}\p{N}_])(?:sk[-_]|gh[pousr]_|github_pat_|xox[baprs]-|AKIA)[\p{L}\p{N}_-]+/u.test(body)) return true;
-  return [...body.matchAll(/[\p{L}\p{M}\p{N}_\-+/=.]{24,}/gu)].some(([run]) => /[\p{L}\p{N}]/u.test(run));
+  for (const [word] of body.matchAll(/\S+/gu)) {
+    const isPath = /^https?:\/\//i.test(word) || ((word.includes('/') || word.includes('\\')) && /\.[A-Za-z0-9]+$/.test(word));
+    // For URLs and file paths, screen each component so the separators are not counted as part
+    // of one opaque token. Other runs retain the base64 alphabet, including slash and padding.
+    const runs = isPath ? /[\p{L}\p{M}\p{N}_\-+=]{24,}/gu : /[\p{L}\p{M}\p{N}_\-+/=.]{24,}/gu;
+    for (const [run] of word.matchAll(runs)) if (/[\p{L}\p{N}]/u.test(run)) return true;
+  }
+  return false;
 }
 
 // Validate both old records and pending writes, so a pre-existing unsafe layout is never copied
@@ -207,7 +232,7 @@ function checkedLayout(layout) {
       : !nameProblem(entry)));
     if (!valid) invalid.push(index + 1);
   });
-  if (invalid.length) throw new EnvError(`The Toolkit env layout has unsafe or invalid entries at line${invalid.length === 1 ? '' : 's'} ${invalid.join(', ')}. Remove or reword them in ~/.ai-agent-toolkit/env/manifest.json before trying again.`);
+  if (invalid.length) throw new EnvError(`The Toolkit env layout is unsafe or invalid: layout entr${invalid.length === 1 ? 'y' : 'ies'} ${invalid.join(', ')} (counting from 1) in the "layout" list of ~/.ai-agent-toolkit/env/manifest.json. Remove or reword ${invalid.length === 1 ? 'it' : 'them'} before trying again.`);
   return layout;
 }
 
@@ -222,7 +247,7 @@ function layoutOf(lines, { skip = new Set() } = {}) {
     if (skip.has(text)) return;
     if (!text) { if (layout.length && layout.at(-1) !== '') layout.push(''); return; }
     if (text.startsWith('#')) {
-      if (secretLikeComment(text) || text.length > MAX_COMMENT_CHARS) refused.push(index + 1);
+      if (text.length > MAX_COMMENT_CHARS || secretLikeComment(text)) refused.push(index + 1);
       else layout.push(text);
       return;
     }

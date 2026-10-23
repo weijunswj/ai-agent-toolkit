@@ -155,7 +155,10 @@ test('n8n copies left in Antigravity by an earlier build are removed when Antigr
   const antigravity = path.join(dir, '.gemini', 'config', 'skills');
   assert.equal(fs.readdirSync(antigravity).length, 15);
   const result = new OfficialN8nSkills({ toolkitRoot: repoRoot, host: 'codex', homeDir: dir }).install();
-  assert.equal(result.pruned.length, 15);
+  assert.equal(result.antigravityRemoved.length, 15);
+  assert.deepEqual(result.pruned, []);
+  assert.match(installSummary(result), /removed 15 n8n skill copies from Antigravity \(not chosen\)/);
+  assert.doesNotMatch(installSummary(result), /retired/);
   assert.deepEqual(fs.readdirSync(antigravity), []);
   assert.equal(fs.readdirSync(path.join(dir, '.agents', 'skills')).length, 15);
 });

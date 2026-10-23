@@ -385,6 +385,7 @@ test('a comment that looks like a key or token stops apply and is reported by li
 function unsafeLayoutComments() {
   return [
     ['inline assignment', '# Previous credential: OLD_TOKEN=dummy-inline-secret'],
+    ['short assignment', '# OLD_TOKEN=abc123'],
     ['spaced assignment', '# Notes (export OLD_TOKEN = dummy-spaced-secret)'],
     ['quoted assignment', '# OLD_TOKEN="dummy quoted value"'],
     ['alphabetic token', '# ghp_abcdefghijklmnopqrstuvwxyzABCDEF'],
@@ -392,15 +393,64 @@ function unsafeLayoutComments() {
     ['base64 without digits', `# ${Buffer.from('a'.repeat(30)).toString('base64')}`],
     ['long base64', `# ${Buffer.from('synthetic only '.repeat(30)).toString('base64')}`],
     ['numeric token', `# ${'1234567890'.repeat(4)}`],
+    ['hex token', `# ${'abcdef0123456789'.repeat(3)}`],
     ['unicode assignment', '# Notes: \u5bc6\u94a5=dummy-unicode-secret'],
     ['unicode token', `# ${'\u5bc6\u94a5'.repeat(16)}`],
     ['fullwidth assignment', '# Notes: TOKEN\uff1ddummy-wide-secret'],
     ['invisible token separator', '# abcdefghijklmnop\u200bqrstuvwxyzABCDEF'],
+    ['ZWJ outside emoji', '# Heading\u200dtext'],
+    ['ZWJ after emoji only', '# \u{1f469}\u200dtext'],
+    ['bidi override', '# Heading\u202edummy-hidden-secret'],
+    ['C1 control', '# Heading\u0085dummy-hidden-secret'],
     ['unicode line separator', '# Heading\u2028dummy-hidden-secret'],
     ['bare carriage return', '# Heading\rdummy-carriage-secret'],
     ['NUL in comment', '# Heading\u0000dummy-control-secret'],
   ];
 }
+
+test('a 100 KB commented line is refused promptly before screening its contents', async (t) => {
+  const { run, paths, store } = harness(t);
+  await run('edit');
+  fs.writeFileSync(editFile(paths), `# ${'a'.repeat(100 * 1024)}\n`);
+  const started = performance.now();
+  const refused = await run('apply');
+  assert.ok(performance.now() - started < 1000, 'oversized comments must return promptly');
+  assert.equal(refused.code, 1);
+  assert.match(refused.stderr, /line 1: this comment looks like it may hold a key or token/);
+  assert.equal(store.writes, 0);
+  assert.equal(fs.existsSync(paths.manifest), false);
+});
+
+test('decorations, URLs, paths, empty or unchanged commented keys and emoji headings are kept', async (t) => {
+  const comments = [
+    '# ==== Hosting ====',
+    '# ---- Hosting ----',
+    '# #### Hosting ####',
+    '# Get it at https://dash.cloudflare.com/profile/api-tokens',
+    '# Used by repo/scripts/toolkit-env.cjs',
+    '# Used by C:\\repo\\scripts\\toolkit-env.cjs',
+    '#NAME=<unchanged>',
+    '# NAME=',
+    '# LONG_PROVIDER_SOLUTION_PURPOSE_KEY=<unchanged>',
+    '# \u{1f469}\u200d\u{1f4bb} Hosting',
+    '# \u{1f469}\u{1f3fd}\u200d\u{1f4bb} Hosting',
+    '# \u{1f3f3}\ufe0f\u200d\u{1f308} Hosting',
+  ];
+  for (const operation of ['apply', 'import-codex-env', 'retire-codex-env']) await t.test(operation, async (t) => {
+    const value = sentinel();
+    const { run, paths } = harness(t, { values: { X1_TEST_KEPT_KEY: value }, answers: ['yes'] });
+    if (operation === 'apply') {
+      await run('edit');
+      fs.writeFileSync(editFile(paths), `${comments.join('\n')}\nX1_TEST_KEPT_KEY=<unchanged>\n`);
+    } else writeCodexEnv(paths, `${comments.join('\n')}\nX1_TEST_KEPT_KEY=${value}\n`);
+    const result = await run(operation);
+    assert.equal(result.code, 0, result.stderr);
+    assert.deepEqual(JSON.parse(fs.readFileSync(paths.manifest, 'utf8')).layout, [...comments, 'X1_TEST_KEPT_KEY']);
+    await run('edit');
+    const reopened = fs.readFileSync(editFile(paths), 'utf8');
+    for (const comment of comments) assert.ok(reopened.includes(comment), comment);
+  });
+});
 
 test('layout refusals are atomic and disclose only line numbers across adversarial comment formats', async (t) => {
   for (const [label, comment] of unsafeLayoutComments()) await t.test(label, async (t) => {
@@ -467,10 +517,10 @@ test('manifest layout rejects unsafe existing entries and updates before propaga
   manifest.update((record) => { record.layout = ['# Safe section', 'X1_TEST_KEPT_KEY']; });
   const before = fs.readFileSync(paths.manifest, 'utf8');
   for (const [, comment] of unsafeLayoutComments()) {
-    assert.throws(() => manifest.update((record) => { record.layout = [comment]; }), /layout.*line 1/i);
+    assert.throws(() => manifest.update((record) => { record.layout = [comment]; }), /layout entry 1 \(counting from 1\) in the "layout" list of ~\/\.ai-agent-toolkit\/env\/manifest\.json/);
     assert.equal(fs.readFileSync(paths.manifest, 'utf8'), before);
     fs.writeFileSync(paths.manifest, JSON.stringify({ schema: 'ai-agent-toolkit.env-manifest.v1', names: {}, bindings: [], layout: [comment] }));
-    assert.throws(() => manifest.read(), (error) => /layout.*line 1/i.test(error.message) && !error.message.includes(comment));
+    assert.throws(() => manifest.read(), (error) => /layout entry 1 \(counting from 1\)/.test(error.message) && !error.message.includes(comment));
     fs.writeFileSync(paths.manifest, before);
   }
   assert.deepEqual(fs.readdirSync(paths.envDir), ['manifest.json']);

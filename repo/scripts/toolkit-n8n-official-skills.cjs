@@ -45,7 +45,7 @@ class OfficialN8nSkills extends ManagedSkillCopies {
   install() {
     const dropped = this.targets().includes(this.antigravityTarget()) ? [] : this.remove(this.antigravityTarget());
     const result = super.install();
-    return { ...result, pruned: [...dropped, ...(result.pruned || [])], loadTwice: this.#loadTwice() };
+    return { ...result, antigravityRemoved: dropped, loadTwice: this.#loadTwice() };
   }
 
   // The user's own copies that load next to Toolkit's: an older release's name (without "-official")
@@ -70,6 +70,7 @@ class OfficialN8nSkills extends ManagedSkillCopies {
 // One line for setup's summary; names only, no private paths.
 function installSummary(result) {
   const parts = copySummary(result);
+  if (result.antigravityRemoved?.length) parts.push(`removed ${result.antigravityRemoved.length} n8n skill cop${result.antigravityRemoved.length === 1 ? 'y' : 'ies'} from Antigravity (not chosen)`);
   if (result.loadTwice?.length) {
     const byFolder = new Map();
     for (const entry of result.loadTwice) {
