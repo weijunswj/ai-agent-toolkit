@@ -24,8 +24,8 @@ All action-blocking questions to the user are fully bold.
 Works for any git host, local git repositories and plain folders.
 
 1. Use the open target or the explicit target path; if neither exists, stop and ask for a target path.
-2. Required files by platform: Codex or unspecified: `AGENTS.md`. Claude Code: `AGENTS.md` and `CLAUDE.md`. Antigravity: `AGENTS.md`, `GEMINI.md` and `.agents/rules/00-agent-toolkit-bootstrap.md`.
-3. For each required file, check that it exists and that its `AI-AGENT-TOOLKIT` markers are structurally valid: at least one complete pair; every BEGIN has exactly one matching END with the same source and block name, in order; nothing missing, duplicated, nested or unmatched. Bare `AI-AGENT-TOOLKIT` text or zero blocks is not current.
+2. Required files by platform: Codex or unspecified: `AGENTS.md`. Claude Code: `AGENTS.md` and `CLAUDE.md`. Antigravity: `AGENTS.md` and `.agents/rules/00-agent-toolkit-bootstrap.md` (Antigravity reads `AGENTS.md` itself, so there is no `GEMINI.md` shim).
+3. For each required file, check that it exists. `CLAUDE.md` is current when it has the line `@AGENTS.md` on its own and no old Toolkit `CLAUDE.SHIM` block. For every other file, check that its `AI-AGENT-TOOLKIT` markers are structurally valid: at least one complete pair; every BEGIN has exactly one matching END with the same source and block name, in order; nothing missing, duplicated, nested or unmatched. Bare `AI-AGENT-TOOLKIT` text or zero blocks is not current.
 4. If every file is structurally current and the user did not ask to install, check, repair, refresh or bootstrap, stop here without reading templates or rewriting anything, and continue the original task.
 
 Native Toolkit startup hooks run a passive preflight: they compare only the expected managed blocks with the bundled templates, never write, back up or read unrelated content, stay silent outside Toolkit-managed git roots, and print at most one neutral note per finding. The note never pauses the current task; run this skill only when the user asks.
@@ -43,8 +43,7 @@ Every Toolkit insert uses versioned, hashed markers:
 For an explicit request, compare the Toolkit-owned blocks with the current templates instead of stopping at the structural check:
 
 - `repo-local/AGENTS.managed.template.md` -> `AGENTS.md`
-- `repo-local/CLAUDE.shim.template.md` -> `CLAUDE.md` (Claude Code only)
-- `repo-local/GEMINI.shim.template.md` -> `GEMINI.md` (Antigravity only)
+- `repo-local/CLAUDE.shim.template.md` -> `CLAUDE.md` (Claude Code only). The shim has no markers: `CLAUDE.md` is exactly the line `@AGENTS.md`. When `CLAUDE.md` already exists, keep its other text and make sure it has that line on its own; replace an old Toolkit `CLAUDE.SHIM` block with the line.
 - `repo-local/antigravity-bootstrap.template.md` -> `.agents/rules/00-agent-toolkit-bootstrap.md` (Antigravity only)
 - `repo-local/docs/agent-playbooks/` -> `docs/agent-playbooks/`, as a whole folder (every Markdown file: `INDEX.md`, `baseline-workflow.md`, `docs-governance.md`, `generated-files.md`, `git-completion.md`, `local-docs.md`, `model-safety-flags.md`, `n8n-workflows.md`, `release-readiness-audit.md`, `safety-gates.md`, `windows-command-hygiene.md`). After copying, verify every playbook `INDEX.md` links exists; copy any missing one before reporting. Leave other docs alone.
 
@@ -54,6 +53,7 @@ Rules:
 - A stale, edited or older-format block is backed up, then replaced from the template; unmarked content is preserved.
 - Broken, duplicate, unmatched, nested or out-of-order markers are repaired before any unrelated edit. If unmarked content cannot be separated safely, write a clean file and report the backup.
 - Never delete duplicate, conflicting or obsolete unmarked content automatically; keep it, or keep it in the backup, and report it. Never create shims for platforms out of scope.
+- A refresh removes the retired `GEMINI.md` shim: back it up, then remove a `GEMINI.md` that holds only the old Toolkit `GEMINI.SHIM` block, or remove just that block when the file has other text. Never touch a `GEMINI.md` without that block.
 - Before modifying, record the target path, git presence, branch, HEAD and dirty state where available, existing files, and whether they were already dirty or hand-edited. In a plain folder, treat existing instruction files as the user's unless complete markers say otherwise.
 
 ### Backups and ignore files

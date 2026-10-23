@@ -2990,18 +2990,38 @@ test('Codex SessionStart hook adds no missing-rule notice for current AGENTS', (
 });
 
 test('agent-rules preflight checks Claude shim content in Claude hook mode', () => {
-  const root = tmpRoot();
-  fs.mkdirSync(path.join(root, '.git'), { recursive: true });
   const templateDir = path.join(repoRoot, 'skills', 'repository-agent-rules', 'repo-local');
-  writeFile(path.join(root, 'AGENTS.md'), fs.readFileSync(path.join(templateDir, 'AGENTS.managed.template.md'), 'utf8'));
-  writeFile(path.join(root, 'CLAUDE.md'), fs.readFileSync(path.join(templateDir, 'CLAUDE.shim.template.md'), 'utf8').replace('@AGENTS.md', '@./AGENTS.md'));
-
-  const result = runAgentRulesPreflight(
-    { hook: true, syncSource: 'claude-plugin' },
-    { targetRoot: root, pluginRoot: repoRoot }
-  );
-  assert.equal(result.status, 'needs-attention');
-  assert.deepEqual(result.findings.map((finding) => `${finding.file}:${finding.kind}`), ['CLAUDE.md:stale-block']);
+  assert.equal(fs.readFileSync(path.join(templateDir, 'CLAUDE.shim.template.md'), 'utf8'), '@AGENTS.md\n');
+  const oldMarkedShim = [
+    '<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/repo-local/CLAUDE.shim.template.md:BEGIN CLAUDE.SHIM v2 toolkit=3.5.0 sha256=5bab3ffc1689 -->',
+    '# Claude Code Instructions',
+    '',
+    '@AGENTS.md',
+    '',
+    'Root `AGENTS.md` is canonical.',
+    '<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/repo-local/CLAUDE.shim.template.md:END CLAUDE.SHIM -->',
+    ''
+  ].join('\n');
+  const cases = [
+    ['@AGENTS.md\n', []],
+    ['@AGENTS.md\r\n', []],
+    ['# Our notes\n\n@AGENTS.md\n\nMore of our own text.\n', []],
+    [oldMarkedShim, ['CLAUDE.md:stale-block']],
+    ['@./AGENTS.md\n', ['CLAUDE.md:unmanaged']],
+    ['See `@AGENTS.md` for the rules.\n', ['CLAUDE.md:unmanaged']]
+  ];
+  for (const [claudeText, expected] of cases) {
+    const root = tmpRoot();
+    fs.mkdirSync(path.join(root, '.git'), { recursive: true });
+    writeFile(path.join(root, 'AGENTS.md'), fs.readFileSync(path.join(templateDir, 'AGENTS.managed.template.md'), 'utf8'));
+    writeFile(path.join(root, 'CLAUDE.md'), claudeText);
+    const result = runAgentRulesPreflight(
+      { hook: true, syncSource: 'claude-plugin' },
+      { targetRoot: root, pluginRoot: repoRoot }
+    );
+    assert.deepEqual(result.findings.map((finding) => `${finding.file}:${finding.kind}`), expected, JSON.stringify(claudeText));
+    if (expected.length) assert.equal(result.status, 'needs-attention');
+  }
 });
 
 test('hook report is generated when repo auto-update fast-forwards and lists changed files', () => {

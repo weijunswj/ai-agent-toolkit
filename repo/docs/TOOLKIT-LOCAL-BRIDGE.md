@@ -39,12 +39,7 @@ The shared bridge has one explicit portable route: Antigravity portable workspac
 
 ## Local Bridge Hub
 
-Default hub paths:
-
-| Platform | Path |
-|---|---|
-| POSIX | `~/.ai-agent-toolkit/current` |
-| Windows | `%USERPROFILE%\.ai-agent-toolkit\current` |
+Default hub path: `%USERPROFILE%\.ai-agent-toolkit\current`.
 
 The hub contains:
 
@@ -215,10 +210,6 @@ For `setup toolkit`, `refresh toolkit`, or plain `refresh` in a Toolkit setup/up
 node "%USERPROFILE%\.ai-agent-toolkit\source\ai-agent-toolkit\repo\scripts\setup-toolkit.cjs" --execute --profile auto-main
 ```
 
-```sh
-node "$HOME/.ai-agent-toolkit/source/ai-agent-toolkit/repo/scripts/setup-toolkit.cjs" --execute --profile auto-main
-```
-
 Append `--host claude-code` for Claude Code. Use `node repo/scripts/setup-toolkit.cjs --execute --profile auto-main` from the active repo only as bootstrap/fallback when the managed checkout script is missing. If fallback/bootstrap is used, say it is bootstrap-only and hand off to the managed checkout script after the managed checkout exists.
 
 The orchestrator discovers current state, renders one compact semantic setup wizard before preference or target writes, then runs to completion unless a real safety blocker appears. The same model drives chat text, terminal prompts, piped answers, flags, plans, JSON, summaries, and execution. It uses a managed clean `main` checkout as the default source for setup, not the active Codex or Claude Code conversation worktree. This routine is root-agent work: agents must not spawn subagents to inspect setup instructions, docs, state, choices, or validation output.
@@ -227,10 +218,7 @@ Exit code `23` is an intentional stop only when the managed child has emitted ex
 
 **Toolkit will use a dedicated clean `main` checkout as the single update source. Active Codex or Claude Code sessions may remain on PR branches, but plugin updates will not depend on those branches.**
 
-Default managed source path:
-
-- Windows: `%USERPROFILE%\.ai-agent-toolkit\source\ai-agent-toolkit`
-- POSIX: `~/.ai-agent-toolkit/source/ai-agent-toolkit`
+Default managed source path: `%USERPROFILE%\.ai-agent-toolkit\source\ai-agent-toolkit`.
 
 Setup creates or verifies that checkout, validates the expected remote, refuses dirty worktrees, fetches `origin main`, updates only by fast-forward, runs hook-light validation, and makes it the default `repo_path` for repo-backed auto-update. If the active Toolkit worktree is on a PR branch, setup warns that the active session may remain there and continues with the managed clean `main` source.
 

@@ -17,8 +17,6 @@ const repoLocalSourceRoot = 'repo/contracts/agent-rules/repo-local';
 const repoLocalPublishedRoot = 'skills/repository-agent-rules/repo-local';
 const VERSION = JSON.parse(fs.readFileSync(path.join(repoRoot, 'repo/contracts/toolkit-local-bridge/version.json'), 'utf8')).version;
 const SHIMS = [
-  { file: 'CLAUDE.shim.template.md', name: 'CLAUDE.SHIM', active: 'CLAUDE.md', heading: '# Claude Code Instructions', importLine: '@AGENTS.md' },
-  { file: 'GEMINI.shim.template.md', name: 'GEMINI.SHIM', active: 'GEMINI.md', heading: '# Gemini Instructions', importLine: '@./AGENTS.md' },
   { file: 'antigravity-bootstrap.template.md', name: 'ANTIGRAVITY.BOOTSTRAP', active: '.agents/rules/00-agent-toolkit-bootstrap.md', heading: '# Agent Toolkit Antigravity Bootstrap' }
 ];
 const safetyComment = [
@@ -94,6 +92,18 @@ test('host shims stay tiny, carry current markers and match their templates', ()
     assert.ok(Buffer.byteLength(active) < 1024, `${shim.active} under 1 KB`);
   }
   assert.doesNotMatch(readText('.agents/rules/00-agent-toolkit-bootstrap.md'), /@\.\.\/\.\.\/AGENTS\.md/);
+});
+
+test('the CLAUDE.md shim is exactly the import line and no GEMINI.md shim exists', () => {
+  for (const relPath of ['CLAUDE.md', `${repoLocalSourceRoot}/CLAUDE.shim.template.md`, `${repoLocalPublishedRoot}/CLAUDE.shim.template.md`]) {
+    assert.equal(fs.readFileSync(path.join(repoRoot, relPath), 'utf8'), '@AGENTS.md\n', relPath);
+  }
+  for (const relPath of ['GEMINI.md', `${repoLocalSourceRoot}/GEMINI.shim.template.md`, `${repoLocalPublishedRoot}/GEMINI.shim.template.md`]) {
+    assert.equal(exists(relPath), false, relPath);
+  }
+  const skill = readText('skills/repository-agent-rules/SKILL.md');
+  assert.match(skill, /`CLAUDE\.md` is exactly the line `@AGENTS\.md`/);
+  assert.match(skill, /remove a `GEMINI\.md` that holds only the old Toolkit `GEMINI\.SHIM` block/);
 });
 
 test('the n8n adapter template is generated from its source and stays compact and fail-closed', () => {
@@ -239,9 +249,9 @@ test('a rules refresh is carried to a pull request and merges only under the own
   assert.match(skill, /Never use an admin bypass, force-push, rewrite history, or touch files this refresh did not write/);
 });
 
-test('root README points repository installs at the governed template and the global rules', () => {
-  const text = readText('README.md');
-  const section = text.slice(text.indexOf('## Install Skills By Platform'), text.indexOf('\n## MCP'));
+test('install docs point repository installs at the governed template and the global rules', () => {
+  const text = readText('repo/docs/HOW-TO-USE.md');
+  const section = text.slice(text.indexOf('### Manual Skill-Folder Copying'), text.indexOf('### Manual Skill Folder Locations'));
   assert.match(section, /Generic rules reach every session through the global rules that `setup toolkit` installs/);
   assert.match(section, /\[repo-local\/AGENTS\.managed\.template\.md\]/);
   assert.match(section, /not from this toolkit repo's root \[AGENTS\.md\]/);
