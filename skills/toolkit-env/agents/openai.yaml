@@ -1,0 +1,11 @@
+interface:
+  display_name: Toolkit Env
+  short_description: See, add, change or remove your API keys without values in chat.
+  primary_color: '#0F766E'
+policy:
+  products:
+    - chatgpt
+    - codex
+    - api
+    - atlas
+  allow_implicit_invocation: true

@@ -1,5 +1,12 @@
 # Toolkit Changelog
 
+## 3.5.0 (keys and tokens)
+
+- **`toolkit env`:** one place for the API keys and tokens your coding apps use, kept in the computer's own credential store (Windows Credential Manager on this PC only, or the Linux Secret Service, with built-in tools only and no fallback file; macOS is not supported). `status` shows names only; `edit` opens a private Notepad file and `apply` saves it; `set`, `remove` (after a yes/no naming the key), `run --names A,B -- <tool>`, and `header` for the apps. See [Toolkit Env](TOOLKIT-ENV.md).
+- **Apps read keys at use time:** `connect SERVER --name NAME` points a Claude Code MCP entry (`headersHelper`, through the `claude mcp` command) and a Codex MCP entry (`http_headers_helper`, removing `bearer_token_env_var`) at the store, with a preview, a yes/no and a backup; `revoke --feeders` puts them back. OpenCode has a reserved slot.
+- **Moving off `~/.codex/.env`:** `import-codex-env` copies its keys into the store with a read-back check and leaves the file alone; `retire-codex-env`, which you run yourself, moves it into a private backup once nothing needs it.
+- **Skill and checks:** a new `toolkit-env` skill routes "edit my env", "what keys do I have" and similar requests in every app, one global-rules line points to it, and the install check reports missing keys, changed entries and entries still on the old `~/.codex/.env` helper, by name only. A new CI job runs the store tests on Windows.
+
 ## 3.4.0 (rules and records)
 
 - **Two instruction layers.** Generic rules now live in one global block (`repo/contracts/agent-rules/global-rules.md`) that setup installs into `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md` (and `~/.gemini/GEMINI.md` when enabled), refreshed at session start and checked by the install check. Repositories carry only the Toolkit-governed block (`toolkit-governed-rules.md`), which is also the opt-in. Root `AGENTS.md` dropped from 42.5 KB to under 14 KB, and a new setup question, "Raise Codex's instruction limit" (recommended yes), raises Codex's `project_doc_max_bytes` to 65536, because Codex desktop 26.1016 cut repository rules off at the 32 KiB default with the global block installed (open-source Codex does not count the user file; the owner's UAT showed the cut and the fix). The edit is checked with a real TOML parser, leaves 0 and higher values alone, sits inside Toolkit markers that keep the exact replaced line, is reported at every change, and is undone exactly on removal; setup and `--check` report the combined size.

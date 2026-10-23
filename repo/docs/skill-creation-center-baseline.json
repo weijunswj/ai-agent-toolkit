@@ -561,6 +561,41 @@
         "node repo/scripts/validate-toolkit.cjs",
         "node --test repo/tests/windows-local-dev-services.test.cjs repo/tests/skill-routing.test.cjs"
       ]
+    },
+    "toolkit-env": {
+      "public_id": "toolkit-env",
+      "public_name": "Toolkit Env",
+      "existing_skill_review": "Reviewed toolkit-env against toolkit-setup, self-hosted-service-safety, the Hostinger and Coolify maintainer and generic coding guidance; no current product owns the user's local API keys and tokens for their coding apps, their OS credential store, or the MCP entries that read them.",
+      "native_capability_review": "Claude Code and Codex can run a header helper and read process environment, but neither keeps keys in the OS credential store, edits them without a plain file, or keeps both apps pointed at one copy.",
+      "trigger": "Use when the user wants to see, list, check, add, set, change, update, edit, rotate, remove or delete their env keys, API keys or tokens, or connect a coding app's MCP entry to one.",
+      "positive_routing_examples": [
+        "Edit my env.",
+        "What keys do I have?",
+        "Remove the Coolify token."
+      ],
+      "negative_routing_examples": [
+        "Write a .env.example file for this project.",
+        "Explain what an environment variable is.",
+        "Rotate the database password on the production server."
+      ],
+      "overlap_boundary": "Use toolkit-setup to install or refresh Toolkit and self-hosted-service-safety or the Hostinger and Coolify maintainer for server-side secrets; toolkit-env owns the user's local keys for their coding apps.",
+      "invocation_mode": "implicit",
+      "invocation_mode_reason": "Packaged metadata permits implicit discovery after the behavioural routing corpus proves positive, negative, and adversarial discrimination; discovery never grants mutation authority.",
+      "decision": "new_product",
+      "decision_reason": "Keys and tokens need a distinct safety boundary (values never in chat, logs or files) and their own OS-store, editor and app-connector code paths.",
+      "unique_value": "One OS-native store per computer, a Notepad edit flow, names-only status, use-time header helpers for Claude Code and Codex, and a checked move off ~/.codex/.env.",
+      "runtime_footprint": "Instructions plus Node scripts that use only built-in OS tools (Windows PowerShell, Linux secret-tool); no packages or services.",
+      "local_assets": "Canonical README, SKILL.md, host metadata, the toolkit-env scripts, an owner doc and focused tests.",
+      "output_contract": "Report the command's own lines: key names, changed/added names, connected entries and the next step. Never a value, length or prefix.",
+      "anti_bloat_review": "One skill and one command family for every key action; it does not manage server-side secrets, provider rotation or project .env templates.",
+      "safety_boundary": "Never ask for, type, pipe or print a value. Removal, connecting or undoing MCP entries and retiring ~/.codex/.env need the user's own yes; retirement never deletes.",
+      "canonical_ownership": "Direct-canonical maintenance: skills/toolkit-env/ owns the portable product; coupled scripts, docs and tests are maintained under canonical repo/** paths.",
+      "source_provenance": "first_party",
+      "third_party_audit": "Not applicable first-party product; no third-party package, executable or credential is bundled.",
+      "validation": [
+        "node repo/scripts/validate-toolkit.cjs",
+        "node --test repo/tests/toolkit-env.test.cjs repo/tests/toolkit-env-store.test.cjs repo/tests/skill-routing.test.cjs"
+      ]
     }
   },
   "notes": "Schema-v3 evidence for the exact 15-product S2 portfolio. Historical identities are non-authoritative migration evidence only and cannot route, install, or exempt a current product."

@@ -10,7 +10,8 @@
 //
 // Checks: the Claude Code plugin (setup only; from the setup verifier's summary), the update
 // record in the Toolkit hub, the Toolkit helper definitions and global rules (each refreshed
-// when stale), and the Toolkit-owned Claude Code depth setting against the selected topology.
+// when stale), the Toolkit-owned Claude Code depth setting against the selected topology, and,
+// once toolkit env is in use, its store and connected MCP entries (by key name only).
 //
 // Usage (session-start hook): node repo/scripts/toolkit-install-health.cjs --session-start [--hub <path>]
 // Prints the result as JSON. Exit 0 when the check ran, 1 when it could not run.
@@ -22,6 +23,7 @@ const { samePath } = require('./toolkit-canonical-path.cjs');
 const { ClaudeHelperDefinitions } = require('./toolkit-claude-helper-agents.cjs');
 const { GlobalRules, describeResult: describeGlobalRules } = require('./toolkit-global-rules.cjs');
 const { ClaudeSubagentDepthSetting, SETTING: DEPTH_SETTING, STATES: DEPTH } = require('./toolkit-claude-subagent-depth.cjs');
+const { ToolkitEnv } = require('./toolkit-env.cjs');
 
 const STATUS = Object.freeze({ PASSED: 'passed', RESTART: 'restart-required', ACTION: 'action-required' });
 const RECORDED_SOURCES = Object.freeze(['claude-plugin', 'repo']);
@@ -43,15 +45,17 @@ function readJsonIfExists(file) {
 function slash(value) { return String(value || '').replace(/\\/g, '/'); }
 
 class ToolkitInstallHealthCheck {
-  #toolkitRoot; #expectedVersion; #hubPath; #helpers; #globalRules; #depth;
+  #toolkitRoot; #expectedVersion; #hubPath; #helpers; #globalRules; #depth; #env;
 
-  constructor({ toolkitRoot, expectedVersion, hubPath, helperDefinitions, globalRules, depthSetting }) {
+  // envHealth: an object with health() (see toolkit-env.cjs), or null to skip that check.
+  constructor({ toolkitRoot, expectedVersion, hubPath, helperDefinitions, globalRules, depthSetting, envHealth = null }) {
     this.#toolkitRoot = path.resolve(toolkitRoot);
     this.#expectedVersion = expectedVersion;
     this.#hubPath = hubPath;
     this.#helpers = helperDefinitions;
     this.#globalRules = globalRules;
     this.#depth = depthSetting;
+    this.#env = envHealth;
   }
 
   // The checks the installed session-start hook runs, wired to the real files.
@@ -68,6 +72,7 @@ class ToolkitInstallHealthCheck {
       helperDefinitions: new ClaudeHelperDefinitions({ environment, repositoryRoot: toolkitRoot, retentionDays }),
       globalRules: new GlobalRules({ environment, toolkitRoot, harnesses: ['claude-code'], retentionDays, respectRemoval: true }),
       depthSetting: new ClaudeSubagentDepthSetting({ environment }),
+      envHealth: ToolkitEnv.forUser({ environment }),
     });
   }
 
@@ -173,6 +178,17 @@ class ToolkitInstallHealthCheck {
     return this.#check('depth', label, STATUS.PASSED, 'matches the selected topology.');
   }
 
+  // Shown only once toolkit env is in use (or an entry still uses the old ~/.codex/.env helper).
+  #envCheck() {
+    const label = 'Toolkit env';
+    let result;
+    try { result = this.#env.health(); }
+    catch { return this.#check('env', label, STATUS.ACTION, 'The Toolkit env store and connected entries could not be checked.', 'Run `toolkit env status` to see why.'); }
+    if (result.state === 'not-set-up') return null;
+    if (result.state === 'passed') return this.#check('env', label, STATUS.PASSED, result.summary);
+    return this.#check('env', label, STATUS.ACTION, result.summary, result.actions.join(' '));
+  }
+
   // plugin: setup's plugin facts, or null at session start. topology: 'root-only' |
   // 'broader-native' | null (null skips the depth check).
   run({ plugin = null, topology = null, refreshHelpers = true, projectDirectories = [] } = {}) {
@@ -182,6 +198,8 @@ class ToolkitInstallHealthCheck {
     checks.push(this.#helperDefinitions(refreshHelpers, projectDirectories));
     checks.push(this.#globalRulesCheck());
     if (topology === 'root-only' || topology === 'broader-native') checks.push(this.#depthSetting(topology));
+    const env = this.#env ? this.#envCheck() : null;
+    if (env) checks.push(env);
     const status = checks.some((entry) => entry.status === STATUS.ACTION) ? STATUS.ACTION
       : checks.some((entry) => entry.status === STATUS.RESTART) ? STATUS.RESTART : STATUS.PASSED;
     const actions = checks.filter((entry) => entry.status !== STATUS.PASSED && entry.action).map((entry) => entry.action);

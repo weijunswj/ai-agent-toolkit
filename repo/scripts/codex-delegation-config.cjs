@@ -48,7 +48,7 @@ const {
   writeRegularFileAtomically,
 } = require('./codex-delegation-backup.cjs');
 
-const TOOLKIT_CLIENT_VERSION = '3.4.0';
+const TOOLKIT_CLIENT_VERSION = '3.5.0';
 const TRANSIENT_CLEANUP_CODES = new Set(['EBUSY', 'ENOTEMPTY', 'EPERM']);
 const APPROVAL_BINDING_SCHEMA = 'ai-agent-toolkit.codex-config-proposal-approval.v2';
 
@@ -406,7 +406,9 @@ async function cleanupTemporaryEditorDirectory(root, options = {}) {
 function terminateChildTree(child) {
   if (!child.pid) return;
   if (process.platform === 'win32') {
-    spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], {
+    // By full path: Windows looks for a bare program name in the working folder first.
+    const taskkill = path.win32.join(process.env.SystemRoot || process.env.SYSTEMROOT || 'C:\\Windows', 'System32', 'taskkill.exe');
+    spawnSync(taskkill, ['/PID', String(child.pid), '/T', '/F'], {
       windowsHide: true,
       timeout: 10000,
       stdio: 'ignore',
@@ -543,6 +545,8 @@ function configEdits(runtime, helperCount) {
   throw new Error(`Helper capacity cannot be configured for runtime ${runtime}.`);
 }
 
+// Applies Codex's own config/batchWrite to a copy of the config in an isolated home and returns the
+// edited bytes. options.edits is a batchWrite edit list; without it, the helper-capacity edits.
 async function editWithCodexAppServer(originalBytes, options = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-codex-config-edit-'));
   const isolatedHome = path.join(root, 'codex-home');
@@ -556,8 +560,11 @@ async function editWithCodexAppServer(originalBytes, options = {}) {
       try {
         await runAppServerRequest(command, isolatedHome, {
           method: 'config/batchWrite',
-          params: { edits: configEdits(options.runtime, options.helperCount) },
+          params: { edits: options.edits || configEdits(options.runtime, options.helperCount) },
         }, {
+          // A fresh empty folder: on Windows a bare `codex` is otherwise looked up in the caller's
+          // working folder first.
+          cwd: root,
           timeoutMs: options.timeoutMs,
           closeTimeoutMs: options.closeTimeoutMs,
           forceExitTimeoutMs: options.forceExitTimeoutMs,

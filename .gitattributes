@@ -21,6 +21,7 @@ repo/contracts/trusted-ci-repository-protection/templates/protected-ci-gate.work
 skills/repository-agent-rules/**/*.md text eol=lf
 skills/n8n-environment-setup/** text eol=lf
 skills/n8n-safety-router/scripts/install-n8n-agent-adapter.cjs text eol=lf
+skills/toolkit-env/** text eol=lf
 skills/toolkit-setup/** text eol=lf
 skills/windows-local-dev-services/agents/openai.yaml text eol=lf
 skills/**/*.yaml text eol=lf

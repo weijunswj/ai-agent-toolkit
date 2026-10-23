@@ -29,6 +29,7 @@ const currentSkillIds = [
   'secure-ci-cd',
   'self-hosted-service-safety',
   'skill-product-review',
+  'toolkit-env',
   'toolkit-setup',
   'windows-local-dev-services'
 ];
