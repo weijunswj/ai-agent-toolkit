@@ -714,8 +714,9 @@ test('Antigravity portable skills preview and copy only into an explicit workspa
   assert.equal(copied.target, '.agents/skills');
   assert.equal(copied.wrote, true);
   const skillsRoot = path.join(projectRoot, '.agents', 'skills');
-  assert.deepEqual(targetSkillDirs(skillsRoot), repoSkillNames());
-  assert.ok(fs.existsSync(path.join(skillsRoot, 'toolkit-setup', 'SKILL.md')));
+  const { INTERNAL_SKILLS } = require('../scripts/toolkit-antigravity-project-skills.cjs');
+  assert.deepEqual(targetSkillDirs(skillsRoot), repoSkillNames().filter((name) => !INTERNAL_SKILLS.includes(name)));
+  assert.equal(fs.existsSync(path.join(skillsRoot, 'toolkit-setup')), false, 'Toolkit-only skills stay out of the portable copy');
   assert.equal(fs.existsSync(path.join(projectRoot, '.gemini')), false);
   assert.equal(fs.existsSync(path.join(projectRoot, '.opencode')), false);
   assert.equal(fs.existsSync(path.join(root, 'hub')), false, 'portable copying must not mutate bridge state');
@@ -4311,7 +4312,7 @@ test('toolkit setup skill documents the end-to-end English setup journey', () =>
     const text = fs.readFileSync(path.join(repoRoot, relPath), 'utf8');
     assert.match(text, /setup toolkit/i, relPath);
     assert.match(text, /%USERPROFILE%\\\.ai-agent-toolkit\\source\\ai-agent-toolkit\\repo\\scripts\\setup-toolkit\.cjs/, relPath);
-    assert.match(text, /\$HOME\/\.ai-agent-toolkit\/source\/ai-agent-toolkit\/repo\/scripts\/setup-toolkit\.cjs/, relPath);
+    assert.doesNotMatch(text, /\$HOME\/\.ai-agent-toolkit/, relPath);
     assert.match(text, /active repo command is bootstrap\/fallback only|active `repo\/scripts\/setup-toolkit\.cjs --execute --profile auto-main` as bootstrap\/fallback only|active repo only as bootstrap\/fallback/i, relPath);
     assert.match(text, /append `--host claude-code`|with `--host claude-code`/i, relPath);
     assert.match(text, /Do not run an active stale verifier after managed setup|Verification after managed setup must use the managed checkout verifier/i, relPath);
@@ -4319,7 +4320,7 @@ test('toolkit setup skill documents the end-to-end English setup journey', () =>
     assert.match(text, /exact setup script path executed/i, relPath);
     assert.match(text, /dedicated clean `main` checkout as the single update source/, relPath);
     assert.match(text, /%USERPROFILE%\\\.ai-agent-toolkit\\source\\ai-agent-toolkit/, relPath);
-    assert.match(text, /~\/\.ai-agent-toolkit\/source\/ai-agent-toolkit/, relPath);
+    assert.doesNotMatch(text, /~\/\.ai-agent-toolkit\/source\/ai-agent-toolkit/, relPath);
     assert.match(text, /separate from the active Codex or Claude Code worktree, plugin caches, `\.tmp` directories, and temporary marketplace checkouts/i, relPath);
     assert.match(text, /complete compact bank|semantic wizard model/i, relPath);
     assert.match(text, /report auto-open is not an ordinary question|failure-only behavior/i, relPath);
