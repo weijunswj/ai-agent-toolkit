@@ -223,7 +223,7 @@ test('a refused Codex marketplace rebind tells the user why and the one command 
   const currentSource = path.join(os.tmpdir(), 'example-home', '.ai-agent-toolkit', 'source', 'ai-agent-toolkit');
   const stdout = `${JSON.stringify({ ok: false, reason_code: 'marketplace-rebind-required', current_source: currentSource })}\n`;
   const error = nativePluginRebindFailure('Codex', 'mutation', { status: 1, stdout }, helperArgs);
-  assert.ok(error.message.includes(`registered to a different Toolkit copy (${currentSource}). Setup changed nothing.`), error.message);
+  assert.ok(error.message.includes(`registered to a different Toolkit copy (${currentSource}). Codex's Toolkit plugin was not changed.`), error.message);
   assert.ok(error.message.includes(`--repo-root "${repoRoot}" --rebind-marketplace-from "${currentSource}"`), error.message);
   assert.doesNotMatch(error.message, /withheld/);
   // Any other failure keeps the private-by-default message.
@@ -237,8 +237,21 @@ test('a refused Codex downgrade says which versions conflict and that nothing ch
   const helperArgs = ['repo/scripts/setup-codex-toolkit-plugin.cjs', '--write', '--json', '--repo-root', os.tmpdir()];
   const stdout = `${JSON.stringify({ ok: false, reason_code: 'downgrade-refused', installed_version: '9.9.1', source_version: '9.9.0' })}\n`;
   const error = nativePluginRebindFailure('Codex', 'mutation', { status: 1, stdout }, helperArgs);
-  assert.match(error.message, /Codex already has Toolkit 9\.9\.1, which is newer than this Toolkit copy \(9\.9\.0\), so setup refused to downgrade it\. Setup changed nothing\./);
+  assert.match(error.message, /Codex already has Toolkit 9\.9\.1, which is newer than this Toolkit copy \(9\.9\.0\), so setup refused to downgrade it\. Codex's Toolkit plugin was not changed\./);
   assert.doesNotMatch(error.message, /withheld/);
   const odd = `${JSON.stringify({ ok: false, reason_code: 'downgrade-refused', installed_version: 'x; rm', source_version: '9.9.0' })}\n`;
   assert.equal(nativePluginRebindFailure('Codex', 'mutation', { status: 1, stdout: odd }, helperArgs), null);
+});
+
+test('only Codex refusing the file counts as a rejection; other start-up failures are not verified', () => {
+  const { probeErrorVerdict } = require('../scripts/codex-config-load-check.cjs');
+  for (const message of ['codex app-server exited 1: Error: agents.max_concurrent_threads_per_session must be at least 1',
+    'config/read failed: invalid configuration', 'codex app-server exited 1: TOML parse error at line 3']) {
+    assert.equal(probeErrorVerdict(new Error(message)).status, 'rejected', message);
+  }
+  for (const message of ['app-server initialize failed: unsupported client', 'codex app-server exited 3: something unrelated', 'spawn UNKNOWN']) {
+    const verdict = probeErrorVerdict(new Error(message));
+    assert.equal(verdict.status, 'unverified', message);
+    assert.match(verdict.detail, /not verified/);
+  }
 });

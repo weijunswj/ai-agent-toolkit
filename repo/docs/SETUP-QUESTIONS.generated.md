@@ -5,7 +5,7 @@ This reference uses a privacy-safe representative Codex state in which all curre
 
 Toolkit setup choices - 8 questions across 3 sections
 
-Bank reference: RJHS-KMPA-MSWF-S6Y3
+Bank reference: FBF9-VR40-CJ9D-J45M
 
 Quick index
 
@@ -171,7 +171,7 @@ Quick index
 **Choices:**
 
 - **A. One helper** - Allow one helper for G0/G1 evidence gathering and validation.
-- **B. No helpers** - Explicitly opt out of helpers using the existing V2 setting.
+- **B. No helpers** - Explicitly opt out of helpers.
 - **C. Choose a number** - Choose a non-negative helper count; more than one needs RAM-risk approval.
 - **D. Keep current** - Preserve this effective behavior: documentation fixture
 - **E. Remove Toolkit setting** - Remove only the owned block after approval.
@@ -239,8 +239,8 @@ Quick index
 
 Reply with the displayed bank reference and either:
 
-- `RJHS-KMPA-MSWF-S6Y3: all recommended`
-- only your changes, for example: `RJHS-KMPA-MSWF-S6Y3: 1.2=B, 1.3=B`
+- `FBF9-VR40-CJ9D-J45M: all recommended`
+- only your changes, for example: `FBF9-VR40-CJ9D-J45M: 1.2=B, 1.3=B`
 
 Anything you do not list takes its recommendation.
 

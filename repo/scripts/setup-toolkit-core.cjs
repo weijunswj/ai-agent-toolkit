@@ -1919,7 +1919,7 @@ function setupQuestionSpecs(args, current) {
       whatThisControls: 'How many helpers the main Codex session can open; helpers cannot start helpers under Toolkit rules. ' + (v1 ? 'Codex cannot limit helpers to zero; choose one helper or a custom number.' : 'Root-only is an explicit opt-out.'),
       choices: [
         wizardChoice('one-helper', 'One helper', 'Allow one helper for G0/G1 evidence gathering and validation.'),
-        ...(!v1 ? [wizardChoice('root-only', 'No helpers', 'Explicitly opt out of helpers using the existing V2 setting.')] : []),
+        ...(!v1 ? [wizardChoice('root-only', 'No helpers', 'Explicitly opt out of helpers.')] : []),
         wizardChoice('custom', 'Choose a number', v1 ? 'Choose a whole helper count of at least 1; more than one needs RAM-risk approval.' : 'Choose a non-negative helper count; more than one needs RAM-risk approval.'),
         wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${current.delegation?.detail || 'Helper capacity has not been verified.'}`),
         ...(current.delegation?.status === 'migration-required' ? [wizardChoice('migrate', 'Migrate legacy setting', 'Preview and approve migration of the exact Toolkit legacy block.')] : []),
@@ -3188,14 +3188,14 @@ function nativePluginRebindFailure(platform, phase, result, helperArgs) {
   const version = /^\d+\.\d+\.\d+$/;
   if (status?.reason_code === 'downgrade-refused' && version.test(status.installed_version || '') && version.test(status.source_version || '')) {
     return new Error([
-      `Codex already has Toolkit ${status.installed_version}, which is newer than this Toolkit copy (${status.source_version}), so setup refused to downgrade it. Setup changed nothing.`,
-      'Run setup from a copy that has the newer version (for example after that version merges), or keep the newer version as it is.',
+      `Codex already has Toolkit ${status.installed_version}, which is newer than this Toolkit copy (${status.source_version}), so setup refused to downgrade it. Codex's Toolkit plugin was not changed.`,
+      'Run setup from a Toolkit copy at that version or newer, or keep the newer version as it is.',
     ].join('\n'));
   }
   if (status?.reason_code !== 'marketplace-rebind-required' || typeof status.current_source !== 'string' || !status.current_source) return null;
   const repoRoot = helperArgs[helperArgs.indexOf('--repo-root') + 1];
   return new Error([
-    `Codex's Toolkit plugin is registered to a different Toolkit copy (${status.current_source}). Setup changed nothing.`,
+    `Codex's Toolkit plugin is registered to a different Toolkit copy (${status.current_source}). Codex's Toolkit plugin was not changed.`,
     'To use this copy instead, approve the switch by running:',
     `  node "${path.join(repoRoot, 'repo', 'scripts', 'setup-codex-toolkit-plugin.cjs')}" --write --repo-root "${repoRoot}" --rebind-marketplace-from "${status.current_source}"`,
     'then run setup again.',

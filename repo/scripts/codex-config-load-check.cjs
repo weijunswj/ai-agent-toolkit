@@ -18,6 +18,7 @@ function screenedHostError(error) {
 // Synchronous callers share the existing bounded async app-server client through a small
 // Node subprocess. Only a verdict leaves that subprocess, never effective configuration.
 const UNVERIFIED = 'Codex config check: not verified, because Codex could not be started or did not answer in time.';
+const CONFIG_REFUSAL = /config\/read failed|must be at least 1|unknown variant|unknown field|invalid type|missing field|TOML|toml|parse error|deserializ/;
 
 class CodexConfigLoadCheck {
   #options;
@@ -36,7 +37,7 @@ class CodexConfigLoadCheck {
       const verdict = JSON.parse(result.stdout);
       if (!['verified', 'unverified', 'rejected'].includes(verdict.status)) throw new Error();
       return verdict;
-    } catch { return { status: 'rejected', detail: 'Codex configuration load check returned no valid verdict.' }; }
+    } catch { return { status: 'unverified', detail: UNVERIFIED }; }
   }
 
   verify({ configPath, snapshot, backupPath, replacementBytes }) {
@@ -70,6 +71,10 @@ class CodexConfigLoadCheck {
   }
 }
 
+function probeErrorVerdict(error) {
+  return CONFIG_REFUSAL.test(String(error?.message || error || '')) ? { status: 'rejected', detail: screenedHostError(error) } : { status: 'unverified', detail: UNVERIFIED };
+}
+
 async function probeAppServer(codexHome, explicit) {
   const { appServerCandidates, runAppServerRequest } = require('./codex-app-server.cjs');
   for (const command of appServerCandidates(explicit, codexHome)) {
@@ -78,7 +83,7 @@ async function probeAppServer(codexHome, explicit) {
         method: 'config/read', params: { includeLayers: false },
       }, { cwd: codexHome, timeoutMs: 20000, closeTimeoutMs: 1000, forceExitTimeoutMs: 1000 });
       if (!result || typeof result.config !== 'object' || result.config === null) {
-        return { status: 'rejected', detail: 'config/read returned no effective configuration.' };
+        return { status: 'unverified', detail: UNVERIFIED };
       }
       return { status: 'verified', detail: 'Codex config check: Codex loaded config.toml.' };
     } catch (error) {
@@ -86,8 +91,10 @@ async function probeAppServer(codexHome, explicit) {
       if (error.code === 'ENOENT') continue;
       if (['EACCES', 'EPERM', 'ENOEXEC'].includes(error.code)) return { status: 'unverified', detail: UNVERIFIED };
       // Only Codex refusing the file is a rejection; a slow start or stuck shutdown proves nothing.
-      if (/timed out|did not exit/.test(String(error.message))) return { status: 'unverified', detail: UNVERIFIED };
-      return { status: 'rejected', detail: screenedHostError(error) };
+      // Rejected means Codex refused the file: a config/read error reply, or a start-up error that
+      // names a configuration problem. Anything else (a slow start, an initialize failure, an
+      // unrelated exit) proves nothing, so the write stays and the check says it is not verified.
+      return probeErrorVerdict(error);
     }
   }
   return { status: 'unverified', detail: UNVERIFIED };
@@ -100,4 +107,4 @@ if (require.main === module && process.argv[2] === '--probe') {
   );
 }
 
-module.exports = { CodexConfigLoadCheck, screenedHostError };
+module.exports = { CodexConfigLoadCheck, probeErrorVerdict, screenedHostError };
