@@ -9,6 +9,7 @@ const { spawn, spawnSync } = require('node:child_process');
 const {
   verifyInstalledCacheFreshness
 } = require('./setup-codex-toolkit-plugin.cjs');
+const { resolvePathExecutable } = require('./claude-process-launch.cjs');
 const {
   auditOwnedStaging,
   cleanupOwnedGeneration,
@@ -435,8 +436,9 @@ function fetchWithCredentialFallback(repoPath, branch) {
   };
 }
 
+// git comes from PATH by full path: Windows would otherwise run a git.exe in the working folder.
 function gitCommand(repoPath, args, options = {}) {
-  return runCommand('git', args, { cwd: repoPath, timeout: options.timeout || 30000 });
+  return runCommand(resolvePathExecutable('git'), args, { cwd: repoPath, timeout: options.timeout || 30000 });
 }
 
 function requireGit(repoPath, args, label) {
@@ -943,7 +945,9 @@ function pluginRootFromCwd() {
 
 function currentToolkitCommit(state = {}) {
   const root = state.repo_path ? path.resolve(state.repo_path) : (pluginRootFromCwd() || path.resolve(__dirname, '..', '..'));
-  const result = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8', timeout: 3000, windowsHide: true });
+  let git;
+  try { git = resolvePathExecutable('git'); } catch { return ''; }
+  const result = spawnSync(git, ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8', timeout: 3000, windowsHide: true });
   return result.status === 0 ? result.stdout.trim() : 'unknown';
 }
 

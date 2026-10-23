@@ -31,6 +31,27 @@ console.log(JSON.stringify({ bare: run('git'), resolved: run(launch.resolvePathE
   assert.match(seen.resolved, /^git version /);
 });
 
+test('the local clone step runs git from PATH, not from the folder setup was started in', { skip: process.platform !== 'win32' }, (t) => {
+  const plant = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-planted-clone-git-'));
+  t.after(() => fs.rmSync(plant, { recursive: true, force: true }));
+  try { fs.linkSync(process.execPath, path.join(plant, 'git.exe')); } catch { fs.copyFileSync(process.execPath, path.join(plant, 'git.exe')); }
+  const env = { ...process.env };
+  for (const key of Object.keys(env)) if (key.toLowerCase() === 'nodefaultcurrentdirectoryinexepath' || key === 'AI_AGENT_TOOLKIT_SETUP_START_FOLDER') delete env[key];
+  const probe = `const childProcess = require('node:child_process');
+const seen = [];
+const real = childProcess.spawnSync;
+childProcess.spawnSync = (command, ...rest) => { seen.push(String(command)); return real(command, ...rest); };
+const core = require(${JSON.stringify(path.join(repoRoot, 'repo', 'scripts', 'setup-toolkit-core.cjs'))});
+core.fastForwardLocalClone({ repoRoot: 'C:\\\\nowhere', repoRemote: 'https://example.invalid/x.git', repoBranch: 'main' });
+console.log(JSON.stringify(seen));`;
+  const result = spawnSync(process.execPath, ['-e', probe], { cwd: plant, env, encoding: 'utf8', windowsHide: true });
+  assert.equal(result.status, 0, result.stderr);
+  const seen = JSON.parse(result.stdout.trim().split(/\r?\n/).pop());
+  assert.ok(seen.length > 0);
+  for (const command of seen) assert.match(command, /^[A-Za-z]:\\.*\\git\.exe$/i, command);
+  assert.ok(seen.every((command) => !command.toLowerCase().startsWith(plant.toLowerCase())));
+});
+
 test('PATH resolution skips relative PATH entries and returns the .exe', { skip: process.platform !== 'win32' }, (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-path-exe-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -44,11 +65,14 @@ test('PATH resolution skips relative PATH entries and returns the .exe', { skip:
 });
 
 test('the fixed sites no longer start git or codex by a bare name', () => {
-  for (const file of ['setup-claude-toolkit-plugin.cjs', 'repo-ignore-hygiene.cjs', 'toolkit-capability-registry.cjs']) {
+  for (const file of ['setup-claude-toolkit-plugin.cjs', 'repo-ignore-hygiene.cjs', 'toolkit-capability-registry.cjs', 'toolkit-local-bridge.cjs']) {
     const text = fs.readFileSync(path.join(repoRoot, 'repo', 'scripts', file), 'utf8');
     assert.doesNotMatch(text, /spawnSync\('git'/, file);
     assert.match(text, /resolvePathExecutable\('git'\)/, file);
+    assert.doesNotMatch(text, /runCommand\('git'/, file);
   }
+  const core = fs.readFileSync(path.join(repoRoot, 'repo', 'scripts', 'setup-toolkit-core.cjs'), 'utf8');
+  assert.match(core, /spawnSync\(command === 'git' \? processLaunch\.resolvePathExecutable\('git'\) : command,/);
   const codex = fs.readFileSync(path.join(repoRoot, 'repo', 'scripts', 'setup-codex-toolkit-plugin.cjs'), 'utf8');
   assert.doesNotMatch(codex, /candidates\.push\('codex'\)/);
   assert.match(codex, /resolvePathExecutable\('codex'/);

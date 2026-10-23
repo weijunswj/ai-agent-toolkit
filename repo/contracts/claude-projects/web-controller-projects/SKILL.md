@@ -175,7 +175,7 @@ Whenever the user asks for anything recurring (the daily check-in, a sweep, a re
 - Each daily firing:
   1. Loads this skill and project memory. State the skill Version you loaded.
   2. Compare your loaded skill Version with the Version the check-in thread loaded. If the thread's is newer, have it return the full current SKILL.md, follow it from now on, save the Version to project memory, and mention the update in one line of the check-in summary. Never wait for a restart.
-  3. Confirms the hourly nudge is armed and ran within the last hour, and re-arms it if not.
+  3. Checks that the hourly nudge is armed and ran within the last hour. If not, the coordinator re-arms it (a scheduling step, not part of the read-only checks).
   4. Has the check-in thread check the parent issue and the lane's issues for outside activity since the last check-in.
   5. Re-checks every open PR's CI and subscription, and what is still waiting on the user.
   6. Posts only if something changed, something is stuck, or the user's answer has been waiting over a day.
@@ -183,7 +183,7 @@ Whenever the user asks for anything recurring (the daily check-in, a sweep, a re
 - Stop it when the user asks.
 
 ## Hourly nudge
-- Every project also runs an hourly stalled-work nudge, set up at project setup exactly as in **Recurring tasks**, in its own "Hourly nudge" thread. It must be a recurring routine: one-shot self-reminders have died silently, and nothing then woke the coordinator.
+- Every project also runs an hourly stalled-work nudge, set up at project setup exactly as in **Recurring tasks**, in its own "Hourly nudge" thread. It must be a recurring routine: one-shot self-reminders have died silently, and nothing then woke the coordinator. So the hidden self-reminder fallback never applies to it: if no recurring route works, tell the user the nudge could not be set up.
 - It fires every hour at a jittered minute (pick one at random, not :00 or :30, for example `CRON_TZ=<user zone> 23 * * * *`), and it is read-only.
 - Each firing reviews every open thread and the coordinator's open posts. That includes project-chat posts that became threads (a top-level post with replies, from the coordinator or the user): the app shows them as threads, but the thread list does not return them, so also page through the project chat with small page limits (large pages overflow). It lists:
   1. threads that are blocked, failed or stopped, or working but idle for over 45 minutes;

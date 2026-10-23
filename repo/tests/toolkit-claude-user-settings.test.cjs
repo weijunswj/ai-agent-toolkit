@@ -95,8 +95,8 @@ test('invalid JSON is held unchanged and BOM and CRLF are preserved on write', (
   assert.equal(crlf.read().theme, 'dark');
 });
 
-test('a concurrent edit between read and write is refused', (t) => {
-  const { owner, settingsPath } = fixture(t, { theme: 'dark' });
+test('a concurrent edit between read and write is refused and leaves no Toolkit record', (t) => {
+  const { owner, settingsPath, recordPath } = fixture(t, { theme: 'dark' });
   const realRead = fs.readFileSync;
   let reads = 0;
   t.mock.method(fs, 'readFileSync', function patched(file, ...rest) {
@@ -107,4 +107,6 @@ test('a concurrent edit between read and write is refused', (t) => {
   assert.throws(() => owner.apply('enable'), /changed while setup was running/);
   t.mock.restoreAll();
   assert.deepEqual(JSON.parse(fs.readFileSync(settingsPath, 'utf8')), { theme: 'light' });
+  const record = fs.existsSync(recordPath) ? JSON.parse(fs.readFileSync(recordPath, 'utf8')) : {};
+  assert.equal(JSON.stringify(record).includes('attribution'), false, JSON.stringify(record));
 });

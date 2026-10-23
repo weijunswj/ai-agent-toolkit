@@ -27,6 +27,8 @@ const { CODEX_AGENT_MAX_THREADS, CODEX_AGENT_MAX_DEPTH, CODEX_V2_RAM_SAFE_HELPER
 const CODEX_CONFIG_CLIENT_SCOPE = 'Codex effective runtime inspected through app-server experimentalFeature/list; writes target only the Codex user config';
 const SUPPORTED_HOSTS = ['codex', 'claude-code'];
 const SETUP_PAUSED_FOR_QUESTION_BANK = 23;
+// The folder setup was started from, passed to the managed child for the local clone step.
+const SETUP_START_FOLDER_ENV = 'AI_AGENT_TOOLKIT_SETUP_START_FOLDER';
 // Setup finished its steps, but the install check found something a person must fix.
 const SETUP_ACTION_REQUIRED = 24;
 const QUESTION_BANK_BEGIN = '<!-- setup-toolkit-question-bank:begin -->';
@@ -304,6 +306,7 @@ function parseArgs(argv = process.argv.slice(2)) {
   }
 
   if (args.plan && args.execute) throw new Error('--plan and --execute cannot be used together');
+  if (argv.some((arg) => arg === '--explain' || arg.startsWith('--explain=')) && !args.explain) throw new Error('--explain needs a question number, for example --explain 1.5');
   if (!args.plan && !args.execute && !args.help && !args.verifyClaudePlugin) args.plan = true;
   args.repoRoot = path.resolve(args.repoRoot);
   args.repoBranch = args.repoBranch || DEFAULT_REPO_BRANCH;
@@ -590,7 +593,8 @@ function runCommand(label, command, args, options = {}) {
     console.log(`\n==> ${label}`);
     console.log('Command arguments: withheld from routine output; see the named checklist step.');
   }
-  const result = spawnSync(command, args, {
+  // git comes from PATH by full path: Windows would otherwise run a git.exe in the working folder.
+  const result = spawnSync(command === 'git' ? processLaunch.resolvePathExecutable('git') : command, args, {
     cwd: options.cwd,
     env: options.env || process.env,
     stdio: options.capture ? ['ignore', 'pipe', 'pipe'] : 'inherit',
@@ -803,6 +807,8 @@ async function runManagedQuestionBankChild(managedScript, managedRoot, argv, opt
         ...process.env,
         [MANAGED_PROTOCOL_ENV]: MANAGED_QUESTION_BANK_PROTOCOL,
         [MANAGED_DELEGATION_DEPTH_ENV]: '1',
+        // The child runs in the managed checkout; it fast-forwards the user's clone from here.
+        [SETUP_START_FOLDER_ENV]: process.env[SETUP_START_FOLDER_ENV] || process.cwd(),
       },
       stdio: [pipeStdin ? 'pipe' : 'inherit', 'pipe', 'pipe', 'pipe', 'pipe'],
       windowsHide: true,
@@ -1663,7 +1669,7 @@ const copyFailure = (error) => (error?.code ? `file error ${error.code}` : error
 // Keeps Toolkit's copies of the official n8n skills current in this app's skills folder (and Antigravity's).
 // The n8n Skills plugin would load the same skills twice: after a good copy, Claude Code's user-scope
 // plugin is turned off; Codex has no supported switch, so the summary says how.
-function installOfficialN8nSkills(args, owner = new OfficialN8nSkills({ toolkitRoot: args.repoRoot, host: args.host }),
+function installOfficialN8nSkills(args, owner = new OfficialN8nSkills({ toolkitRoot: args.repoRoot, host: args.host, antigravity: antigravityState(args).copies }),
   disablePlugin = (id) => disableUserPlugin(id, { claudeCli: args.claudeCli })) {
   let summary;
   try { summary = n8nSkillsSummary(owner.install()); }
@@ -1680,7 +1686,7 @@ function antigravityState(args, owner = new AntigravityGlobalSkills({ toolkitRoo
 }
 
 function antigravitySkillsOutcome(state) {
-  if (state?.copies) return "Toolkit's skills are in Antigravity's global skills folder and setup keeps them current.";
+  if (state?.copies) return "Toolkit's skills are in Antigravity's global skills folder.";
   return "Toolkit's skills are not in Antigravity's global skills folder.";
 }
 
@@ -1709,11 +1715,15 @@ function antigravitySkillsQuestion(args, current) {
 }
 
 // Applies the owner's answer for Toolkit's skills in Antigravity; keep changes nothing.
-function applyAntigravitySkills(args, owner = new AntigravityGlobalSkills({ toolkitRoot: args.repoRoot })) {
+function applyAntigravitySkills(args, owner = new AntigravityGlobalSkills({ toolkitRoot: args.repoRoot }),
+  n8n = new OfficialN8nSkills({ toolkitRoot: args.repoRoot, host: args.host, antigravity: true })) {
   const choice = args.setupChoices.antigravitySkills || 'keep';
   try {
     if (choice === 'copy') return `${globalCopySummary(owner.install())}.`;
-    if (choice === 'remove') return `removed ${owner.remove().length} Toolkit skill folders.`;
+    if (choice === 'remove') {
+      // Toolkit's n8n skill copies in Antigravity go with them.
+      return `removed ${owner.remove().length + n8n.remove(n8n.antigravityTarget()).length} Toolkit skill folders.`;
+    }
   } catch (error) { return `not changed (${copyFailure(error)}).`; }
   return '';
 }
@@ -3016,7 +3026,7 @@ function applySetupChoices(args, current) {
 // The user's own clone of Toolkit (the folder setup was started from), when it is not the managed
 // checkout: fast-forward it to the default branch if it is clean and on that branch, else skip with the
 // reason. It never resets, forces, stashes or switches branches.
-function fastForwardLocalClone(args, startFolder = process.cwd()) {
+function fastForwardLocalClone(args, startFolder = process.env[SETUP_START_FOLDER_ENV] || process.cwd()) {
   const top = runGitCapture(startFolder, ['rev-parse', '--show-toplevel'], 'find the local Toolkit clone', true, true);
   if (!top) return null;
   const clone = path.resolve(top);
@@ -3892,8 +3902,9 @@ class ToolkitSetupExecution {
     const delegation = await applyHostDelegationControl(args, this.#current, nativeCache);
     const subagentDepth = args.host === 'claude-code' ? applyClaudeSubagentDepth(args) : null;
     const claudeSettings = args.host === 'claude-code' ? applyClaudeUserSettings(args) : null;
-    const n8nSkills = installOfficialN8nSkills(args);
+    // The Antigravity answer first: the n8n skills reach Antigravity only when Toolkit's skills are there.
     const antigravitySkills = applyAntigravitySkills(args);
+    const n8nSkills = installOfficialN8nSkills(args);
     const installCheck = args.host === 'claude-code' ? runClaudeInstallCheck(args, nativeCache, delegation) : null;
     printFinalSummary({ args, current: this.#current, managed, localClone, nativeCache, delegation, subagentDepth, claudeSettings, n8nSkills, antigravitySkills, audit,
       questionBank: this.#questionBank, validationResults: this.#validationResults, installCheck });
@@ -3946,7 +3957,7 @@ async function main(argv = process.argv.slice(2), options = {}) {
     if (args.explain) {
       const text = renderQuestionRows(planned.specs, args.explain);
       if (!text) throw new Error(`No setup question ${args.explain} in this bank.`);
-      console.log(text);
+      console.log(`Bank reference: ${ensurePresentationMetadata(planned.specs)[0]?.presentation.bank_reference || ''} (${args.host})\n\n${text}`);
       return 0;
     }
     printPlan(setupPlan({ ...planned.args, questionBank: planned.specs }), args.json);

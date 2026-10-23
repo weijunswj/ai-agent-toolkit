@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 
-// Claude Code PreToolUse hook for Bash: refuses a git commit or gh pr create/edit that carries AI
+// Claude Code PreToolUse hook for Bash and PowerShell: refuses a git commit or gh pr create/edit/merge that carries AI
 // attribution (see toolkit-attribution-guard.cjs). Any other command, or input it cannot read, passes.
 const fs = require('node:fs');
 

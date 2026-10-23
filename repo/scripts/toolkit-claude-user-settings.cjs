@@ -156,7 +156,8 @@ class ClaudeUserSettings {
     const entries = this.#readRecord();
     const key = this.#entryKey(spec);
     const before = this.#stateOf(read, spec, entries[key]);
-    const forget = () => { if (Object.hasOwn(entries, key)) { const rest = { ...entries }; delete rest[key]; this.#saveRecord(rest); } };
+    // Re-reads the record, so an entry saved earlier in this call is removed too.
+    const forget = () => { const now = this.#readRecord(); if (Object.hasOwn(now, key)) { delete now[key]; this.#saveRecord(now); } };
     if (before.state === STATES.UNREADABLE) return { status: 'held', changed: false, ...before };
     if (before.state === STATES.OWNER) { forget(); return { status: 'owner-value-kept', changed: false, ...before }; }
     if (choice === 'keep') {

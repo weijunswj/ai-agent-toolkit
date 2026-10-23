@@ -576,3 +576,8 @@ test('explain shows the full text of one question, numbered as in the whole bank
   assert.equal(core.parseArgs(['--explain', '1.2']).explain, '1.2');
   assert.equal(core.parseArgs(['--explain=1.2']).plan, true);
 });
+
+test('an empty --explain is refused', () => {
+  assert.throws(() => core.parseArgs(['--explain']), /--explain needs a question number/);
+  assert.throws(() => core.parseArgs(['--explain=']), /--explain needs a question number/);
+});
