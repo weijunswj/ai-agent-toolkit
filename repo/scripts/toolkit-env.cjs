@@ -187,7 +187,7 @@ function editorCommand(file, platform = process.platform, environment = process.
     const root = environment.SystemRoot || environment.SYSTEMROOT || 'C:\\Windows';
     return [path.win32.join(root, 'System32', 'notepad.exe'), [file]];
   }
-  return platform === 'darwin' ? ['/usr/bin/open', ['-t', file]] : ['xdg-open', [file]];
+  return ['xdg-open', [file]];
 }
 
 function defaultOpener(file, platform = process.platform) {

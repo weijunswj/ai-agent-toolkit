@@ -1,12 +1,10 @@
 'use strict';
 
 // The OS-native stores behind `toolkit env`. One store per operating system, built-in tools only,
-// no fallback store:
+// no fallback store (macOS is not supported):
 //   Windows  Credential Manager generic credentials, target ai-agent-toolkit/env/<NAME>, kept on
 //            this PC (local-machine persistence), written through the Win32 credential API from
 //            the built-in Windows PowerShell.
-//   macOS    login Keychain generic passwords, service ai-agent-toolkit/env, account <NAME>,
-//            through the built-in `security` tool.
 //   Linux    Secret Service through `secret-tool`, attributes service=ai-agent-toolkit/env name=<NAME>.
 // Values travel only on stdin and stdout of these tools, never in their arguments, and no store
 // method logs or reports a value. Every store has the same methods: backend, list(), readAll(names),
@@ -162,7 +160,6 @@ public static class ToolkitEnvCredentials {
 `;
 
 const WIN32_NOT_FOUND = 1168;
-const MAC_INTERACTIVE_LINE_BYTES = 4096;
 const WIN32_TOO_LONG = 1783;
 
 class WindowsCredentialStore {
@@ -244,98 +241,6 @@ class WindowsCredentialStore {
   }
 }
 
-// The macOS Keychain through the built-in `security` tool. A write goes through `security -i` with
-// the command on stdin and the value as hex (-X), so the value is never in any argument list.
-class MacKeychainStore {
-  #security; #keychain; #spawn; #service;
-
-  // keychain: a keychain file (tests use a throwaway one); empty means the default (login) keychain.
-  constructor({ keychain = '', security = '/usr/bin/security', service = STORE_PREFIX, spawn = spawnSync } = {}) {
-    if (/\s/.test(keychain) || /\s/.test(service)) throw new EnvStoreError('The keychain path and service name cannot contain spaces.', 'bad-config');
-    this.#security = security;
-    this.#keychain = keychain;
-    this.#spawn = spawn;
-    this.#service = service;
-  }
-
-  get backend() { return 'macOS Keychain'; }
-
-  #call(args, input) {
-    const result = this.#spawn(this.#security, args, { input, encoding: 'utf8', timeout: 30000, maxBuffer: 16 * 1024 * 1024 });
-    if (result.error && result.error.code === 'ENOENT') throw new EnvStoreError('The macOS `security` tool was not found.', 'backend-unavailable');
-    if (result.error) throw new EnvStoreError('The macOS Keychain did not answer.', 'backend-failed');
-    return result;
-  }
-
-  #keychainArgs() { return this.#keychain ? [this.#keychain] : []; }
-
-  #keychainFile() {
-    if (this.#keychain) return this.#keychain;
-    const result = this.#call(['default-keychain', '-d', 'user']);
-    const match = /"([^"]+)"/.exec(String(result.stdout || ''));
-    if (result.status !== 0 || !match) throw new EnvStoreError('The macOS default keychain could not be found.', 'backend-failed');
-    return match[1];
-  }
-
-  list() {
-    const result = this.#call(['dump-keychain', this.#keychainFile()]);
-    if (result.status !== 0) throw new EnvStoreError('The macOS Keychain could not list keys.', 'backend-failed');
-    const names = [];
-    for (const block of String(result.stdout || '').split(/^keychain: /m)) {
-      const service = /"svce"<blob>="([^"]*)"/.exec(block);
-      const account = /"acct"<blob>="([^"]*)"/.exec(block);
-      if (/^class: "genp"/m.test(block) && service && service[1] === this.#service && account && !nameProblem(account[1])) names.push(account[1]);
-    }
-    return sortedNames(names);
-  }
-
-  readAll(names) {
-    const values = new Map();
-    for (const name of names.map(assertName)) {
-      const result = this.#call(['find-generic-password', '-s', this.#service, '-a', name, '-g', ...this.#keychainArgs()]);
-      if (result.status === 44) continue;
-      if (result.status !== 0) throw new EnvStoreError(`The macOS Keychain could not read ${name}.`, 'backend-failed');
-      // -g prints `password: "<text>"`, or `password: 0x<HEX>  "<escaped>"` for other bytes, on stderr.
-      const line = String(result.stderr || '').split(/\r?\n/).find((entry) => entry.startsWith('password: '));
-      if (line === undefined) throw new EnvStoreError(`The macOS Keychain gave no value for ${name}.`, 'backend-failed');
-      const hex = /^password: 0x([0-9A-Fa-f]+)(?:\s|$)/.exec(line);
-      const text = /^password: "(.*)"$/.exec(line);
-      if (hex) values.set(name, Buffer.from(hex[1], 'hex').toString('utf8'));
-      else if (text) values.set(name, text[1]);
-      else if (line === 'password: ') values.set(name, '');
-      else throw new EnvStoreError(`The macOS Keychain gave an unreadable value for ${name}.`, 'backend-failed');
-    }
-    return values;
-  }
-
-  read(name) { return this.readAll([name]).get(name); }
-
-  writeAll(entries) {
-    const list = [...entries].map(([name, value]) => [assertName(name), assertValue(name, value)]);
-    for (const [name, value] of list) {
-      // `security -i` reads one line into a 4096-byte buffer (newline and end byte included) and
-      // splits it like a shell: a printable value goes as one double-quoted, backslash-escaped
-      // word (-w), anything with control characters as hex (-X), which is twice as long.
-      const word = /[\u0000-\u001f\u007f]/.test(value)
-        ? ['-X', Buffer.from(value, 'utf8').toString('hex')]
-        : ['-w', `"${value.replace(/["\\]/g, '\\$&')}"`];
-      const command = ['add-generic-password', '-U', '-s', this.#service, '-a', name, ...word, ...this.#keychainArgs()].join(' ');
-      if (Buffer.byteLength(command, 'utf8') + 1 >= MAC_INTERACTIVE_LINE_BYTES) {
-        throw new EnvStoreError(`${name}: value too long for the macOS Keychain (its command line holds 4096 bytes).`, 'value-too-long');
-      }
-      const result = this.#call(['-i'], `${command}\n`);
-      if (result.status !== 0 || /\S/.test(String(result.stderr || ''))) throw new EnvStoreError(`The macOS Keychain could not save ${name}.`, 'backend-failed');
-    }
-  }
-
-  remove(name) {
-    const result = this.#call(['delete-generic-password', '-s', this.#service, '-a', assertName(name), ...this.#keychainArgs()]);
-    if (result.status === 44) return false;
-    if (result.status !== 0) throw new EnvStoreError(`The macOS Keychain could not remove ${name}.`, 'backend-failed');
-    return true;
-  }
-}
-
 const LINUX_NO_KEYRING = 'This Linux session has no desktop keyring (Secret Service), so Toolkit cannot store keys here. Install and unlock a keyring such as GNOME Keyring or KWallet, with the `secret-tool` command (package libsecret-tools), then try again. Toolkit does not fall back to a plain file.';
 
 // Secret Service through `secret-tool`, which reads a stored value from stdin.
@@ -405,7 +310,6 @@ class LinuxSecretServiceStore {
 // The store for this operating system. There is no other store and no fallback.
 function storeForPlatform(platform = process.platform, options = {}) {
   if (platform === 'win32') return new WindowsCredentialStore(options);
-  if (platform === 'darwin') return new MacKeychainStore(options);
   if (platform === 'linux') return new LinuxSecretServiceStore(options);
   throw new EnvStoreError(`Toolkit env has no store for ${platform}.`, 'backend-unavailable');
 }
@@ -418,7 +322,6 @@ function supportReference() {
 module.exports = Object.freeze({
   EnvStoreError,
   LinuxSecretServiceStore,
-  MacKeychainStore,
   MAX_VALUE_BYTES,
   STORE_PREFIX,
   WindowsCredentialStore,

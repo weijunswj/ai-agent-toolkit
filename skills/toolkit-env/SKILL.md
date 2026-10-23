@@ -5,14 +5,14 @@ description: Use when the user talks about their env, env keys, secrets, API key
 
 # Toolkit Env
 
-`toolkit env` keeps the user's API keys and tokens in this computer's own credential store (Windows Credential Manager, the macOS Keychain or the Linux Secret Service) and feeds them to Claude Code and Codex. You run its commands; the user types any value themselves, outside the chat.
+`toolkit env` keeps the user's API keys and tokens in this computer's own credential store (Windows Credential Manager or the Linux Secret Service; macOS is not supported) and feeds them to Claude Code and Codex. You run its commands; the user types any value themselves, outside the chat.
 
 ## Run it
 
 Use the managed Toolkit checkout, so connected apps keep working after updates:
 
 - Windows: `node "%USERPROFILE%\.ai-agent-toolkit\source\ai-agent-toolkit\repo\scripts\toolkit-env.cjs" <command>`
-- macOS and Linux: `node "$HOME/.ai-agent-toolkit/source/ai-agent-toolkit/repo/scripts/toolkit-env.cjs" <command>`
+- Linux: `node "$HOME/.ai-agent-toolkit/source/ai-agent-toolkit/repo/scripts/toolkit-env.cjs" <command>`
 
 If that file is missing, ask the user to run `setup toolkit` first. When you tell the user about a command, call it `toolkit env <command>`.
 

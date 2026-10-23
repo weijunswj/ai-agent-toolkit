@@ -584,7 +584,7 @@
       "decision": "new_product",
       "decision_reason": "Keys and tokens need a distinct safety boundary (values never in chat, logs or files) and their own OS-store, editor and app-connector code paths.",
       "unique_value": "One OS-native store per computer, a Notepad edit flow, names-only status, use-time header helpers for Claude Code and Codex, and a checked move off ~/.codex/.env.",
-      "runtime_footprint": "Instructions plus Node scripts that use only built-in OS tools (Windows PowerShell, macOS security, Linux secret-tool); no packages or services.",
+      "runtime_footprint": "Instructions plus Node scripts that use only built-in OS tools (Windows PowerShell, Linux secret-tool); no packages or services.",
       "local_assets": "Canonical README, SKILL.md, host metadata, the toolkit-env scripts, an owner doc and focused tests.",
       "output_contract": "Report the command's own lines: key names, changed/added names, connected entries and the next step. Never a value, length or prefix.",
       "anti_bloat_review": "One skill and one command family for every key action; it does not manage server-side secrets, provider rotation or project .env templates.",

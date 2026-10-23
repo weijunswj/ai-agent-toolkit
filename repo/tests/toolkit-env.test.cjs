@@ -26,7 +26,7 @@ const TOML_AVAILABLE = parseTomlDocument(Buffer.from('a = 1\n')).ok === true;
 function sentinel() { return `dummy-${crypto.randomBytes(9).toString('hex')}`; }
 
 function tempHome(t) {
-  // The real path: CI temp folders are short 8.3 names (Windows) or behind a link (macOS), and the
+  // The real path: CI temp folders can be short 8.3 names (Windows) or sit behind a link, and the
   // Codex config backup refuses a config reached through either.
   const home = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-env-test-')));
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));
@@ -609,20 +609,6 @@ test('programs start without a shell: npm shims run what they wrap, other comman
   assert.throws(() => directSpawnParts('other', [], { env }), /not a standard npm shim, so it cannot be started without cmd\.exe/);
 });
 
-test('macOS writes go on stdin as one escaped word, hex only for control characters, and stop at the line limit', () => {
-  const { MacKeychainStore } = require('../scripts/toolkit-env-store.cjs');
-  const calls = [];
-  const spawn = (command, args, options) => { calls.push({ args, input: options.input }); return { status: 0, stdout: '', stderr: '' }; };
-  const store = new MacKeychainStore({ keychain: '/tmp/test.keychain-db', spawn });
-  const quoted = `say "hi" \\ ${sentinel()}`;
-  store.writeAll(new Map([['X1_TEST_STORE_ONE', quoted], ['X1_TEST_STORE_TWO', 'line\nbreak']]));
-  assert.deepEqual(calls.map((call) => call.args), [['-i'], ['-i']]);
-  assert.equal(calls[0].input, `add-generic-password -U -s ai-agent-toolkit/env -a X1_TEST_STORE_ONE -w "${quoted.replace(/["\\]/g, '\\$&')}" /tmp/test.keychain-db\n`);
-  assert.equal(calls[1].input, `add-generic-password -U -s ai-agent-toolkit/env -a X1_TEST_STORE_TWO -X ${Buffer.from('line\nbreak').toString('hex')} /tmp/test.keychain-db\n`);
-  store.writeAll(new Map([['X1_TEST_STORE_LONG', 'x'.repeat(2560)]]));
-  assert.throws(() => store.writeAll(new Map([['X1_TEST_STORE_LONG', `${'\u0001'}${'x'.repeat(2559)}`]])), /too long for the macOS Keychain/);
-});
-
 test('no-leak: a value typed where a name, command, program or option belongs is never repeated', async (t) => {
   const value = sentinel();
   const { run } = harness(t, { values: { X1_TEST_COOLIFY_TOKEN: sentinel() }, hidden: [sentinel()] });
@@ -650,7 +636,7 @@ test('no-leak: a value typed where a name, command, program or option belongs is
 test('the editor starts by its full path, so a program in the working folder is never picked up', () => {
   const { editorCommand } = require('../scripts/toolkit-env.cjs');
   assert.deepEqual(editorCommand('C:\\x\\f.txt', 'win32', { SystemRoot: 'C:\\Windows' }), ['C:\\Windows\\System32\\notepad.exe', ['C:\\x\\f.txt']]);
-  assert.deepEqual(editorCommand('/x/f.txt', 'darwin', {}), ['/usr/bin/open', ['-t', '/x/f.txt']]);
+  assert.deepEqual(editorCommand('/x/f.txt', 'linux', {}), ['xdg-open', ['/x/f.txt']]);
 });
 
 test('the global rules keep every clause and point keys and tokens at toolkit-env', () => {

@@ -1,8 +1,8 @@
 name: Env store
 
-# The toolkit env store tests on the operating systems the Validate job does not cover: the real
-# Windows Credential Manager and macOS Keychain, with dummy values under a test-only prefix or a
-# throwaway keychain. Linux runs these tests inside Validate.
+# The toolkit env store tests on Windows, which the Validate job does not cover: the real Windows
+# Credential Manager, with dummy values under a test-only prefix. Linux runs these tests inside
+# Validate.
 
 on:
   pull_request:
@@ -15,11 +15,7 @@ permissions:
 
 jobs:
   env-store:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: windows-latest
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

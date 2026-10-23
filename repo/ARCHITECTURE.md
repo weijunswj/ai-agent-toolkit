@@ -18,7 +18,7 @@ Last reviewed against `main` `1478dadaafb65cd5573a929f263cffbdbcc333b2`.
 | Docs | `repo/docs/` | Human and agent docs, routed by `repo/docs/agent-playbooks/INDEX.md` |
 | Provenance | `repo/source-watch/` | Third-party source locks and the notification-only source watch |
 | Native plugins | `.claude-plugin/`, `.codex-plugin/` | Claude Code and Codex plugin metadata and hooks |
-| CI | `.github/workflows/` | `validate.yml` is the full gate; `env-store.yml` runs the env store tests on Windows and macOS |
+| CI | `.github/workflows/` | `validate.yml` is the full gate; `env-store.yml` runs the env store tests on Windows |
 
 ## Entry points
 

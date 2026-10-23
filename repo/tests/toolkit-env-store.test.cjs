@@ -1,7 +1,7 @@
 'use strict';
 
-// The real OS stores with throwaway dummy values only, each under a test-only prefix or keychain
-// that is removed afterwards. Windows runs on Windows, macOS on macOS; the Linux "no keyring" stop
+// The real OS stores with throwaway dummy values only, each under a test-only prefix
+// that is removed afterwards. Windows runs on Windows; the Linux "no keyring" stop
 // runs everywhere. Every call is recorded so the tests can check no value is ever an argument.
 
 const test = require('node:test');
@@ -12,7 +12,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const {
-  LinuxSecretServiceStore, MacKeychainStore, WindowsCredentialStore, storeForPlatform,
+  LinuxSecretServiceStore, WindowsCredentialStore, storeForPlatform,
 } = require('../scripts/toolkit-env-store.cjs');
 
 const STORE_SCRIPT = path.resolve(__dirname, '..', 'scripts', 'toolkit-env-store.cjs');
@@ -89,22 +89,6 @@ test('Windows Credential Manager works with only the variables Codex gives a hea
   assert.equal(result.stdout, 'same');
 });
 
-test('macOS Keychain: a throwaway keychain, values only through stdin and stdout', { skip: process.platform !== 'darwin' && 'macOS only' }, (t) => {
-  const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-env-keychain-'));
-  const keychain = path.join(folder, 'toolkit-env-test.keychain-db');
-  const password = crypto.randomBytes(12).toString('hex');
-  assert.equal(spawnSync('/usr/bin/security', ['create-keychain', '-p', password, keychain]).status, 0);
-  t.after(() => {
-    spawnSync('/usr/bin/security', ['delete-keychain', keychain]);
-    fs.rmSync(folder, { recursive: true, force: true });
-  });
-  assert.equal(spawnSync('/usr/bin/security', ['unlock-keychain', '-p', password, keychain]).status, 0);
-  const calls = [];
-  const store = new MacKeychainStore({ keychain, spawn: recordingSpawn(calls) });
-  assert.equal(store.backend, 'macOS Keychain');
-  exercise(store, calls);
-});
-
 test('Linux without a keyring stops with a plain message and no fallback file', (t) => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-env-linux-'));
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));
@@ -120,7 +104,7 @@ test('Linux without a keyring stops with a plain message and no fallback file', 
 
 test('each operating system gets exactly its own store', () => {
   assert.equal(storeForPlatform('win32').backend, 'Windows Credential Manager');
-  assert.equal(storeForPlatform('darwin').backend, 'macOS Keychain');
   assert.equal(storeForPlatform('linux').backend, 'Linux Secret Service');
+  assert.throws(() => storeForPlatform('darwin'), /no store for darwin/);
   assert.throws(() => storeForPlatform('aix'), /no store for aix/);
 });

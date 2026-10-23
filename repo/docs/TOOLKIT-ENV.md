@@ -13,10 +13,9 @@ node ~/.ai-agent-toolkit/source/ai-agent-toolkit/repo/scripts/toolkit-env.cjs st
 | Computer | Store | Where you can see the entries |
 |---|---|---|
 | Windows | Credential Manager, generic credentials named `ai-agent-toolkit/env/<NAME>`, kept on this PC only | Control Panel > Credential Manager > Windows Credentials |
-| macOS | Login Keychain, service `ai-agent-toolkit/env`, account `<NAME>` | Keychain Access |
 | Linux | Secret Service (GNOME Keyring, KWallet) through `secret-tool` | Your keyring app |
 
-Toolkit uses only tools that come with the operating system. A Linux session without a desktop keyring stops with a message; there is no fallback file. One value can be up to 2560 bytes (the Windows limit, used everywhere); on macOS a value with line breaks or other control characters can be about 2000 bytes, because the Keychain tool reads it as hex on one line.
+Toolkit uses only tools that come with the operating system. A Linux session without a desktop keyring stops with a message; there is no fallback file. One value can be up to 2560 bytes (the Windows limit, used everywhere). macOS is not supported.
 
 Key names look like `PROVIDER_SOLUTION_PURPOSE`, for example `COOLIFY_SWOOSHZ_MCP_TOKEN`: upper case letters, digits and underscores, at least three parts. Names starting with `CODEX_` are refused because Codex reserves them.
 

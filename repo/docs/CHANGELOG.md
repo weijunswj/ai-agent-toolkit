@@ -2,10 +2,10 @@
 
 ## 3.5.0 (keys and tokens)
 
-- **`toolkit env`:** one place for the API keys and tokens your coding apps use, kept in the computer's own credential store (Windows Credential Manager on this PC only, the macOS Keychain, or the Linux Secret Service, with built-in tools only and no fallback file). `status` shows names only; `edit` opens a private Notepad file and `apply` saves it; `set`, `remove` (after a yes/no naming the key), `run --names A,B -- <tool>`, and `header` for the apps. See [Toolkit Env](TOOLKIT-ENV.md).
+- **`toolkit env`:** one place for the API keys and tokens your coding apps use, kept in the computer's own credential store (Windows Credential Manager on this PC only, or the Linux Secret Service, with built-in tools only and no fallback file; macOS is not supported). `status` shows names only; `edit` opens a private Notepad file and `apply` saves it; `set`, `remove` (after a yes/no naming the key), `run --names A,B -- <tool>`, and `header` for the apps. See [Toolkit Env](TOOLKIT-ENV.md).
 - **Apps read keys at use time:** `connect SERVER --name NAME` points a Claude Code MCP entry (`headersHelper`, through the `claude mcp` command) and a Codex MCP entry (`http_headers_helper`, removing `bearer_token_env_var`) at the store, with a preview, a yes/no and a backup; `revoke --feeders` puts them back. OpenCode has a reserved slot.
 - **Moving off `~/.codex/.env`:** `import-codex-env` copies its keys into the store with a read-back check and leaves the file alone; `retire-codex-env`, which you run yourself, moves it into a private backup once nothing needs it.
-- **Skill and checks:** a new `toolkit-env` skill routes "edit my env", "what keys do I have" and similar requests in every app, one global-rules line points to it, and the install check reports missing keys, changed entries and entries still on the old `~/.codex/.env` helper, by name only. A new CI job runs the store tests on Windows and macOS.
+- **Skill and checks:** a new `toolkit-env` skill routes "edit my env", "what keys do I have" and similar requests in every app, one global-rules line points to it, and the install check reports missing keys, changed entries and entries still on the old `~/.codex/.env` helper, by name only. A new CI job runs the store tests on Windows.
 
 ## 3.4.0 (rules and records)
 
