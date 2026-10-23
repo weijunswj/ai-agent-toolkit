@@ -46,6 +46,26 @@ function replayBridgeOutput(writes) {
   }
 }
 
+// The hook input Codex pipes in; {} when there is none (a manual run at a terminal). Read only after
+// the bridge has run, so the bridge still receives stdin untouched.
+function readHookInput() {
+  if (process.stdin.isTTY) return {};
+  try {
+    const parsed = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch { return {}; }
+}
+
+// One line stating this repository's governance state; nothing outside a repository.
+// SessionStart cannot block, so a failure here only drops the line.
+function governanceLine(input, dependencies) {
+  try {
+    const gate = dependencies.gate || require('./toolkit-governance-gate.cjs');
+    // Codex always sends the session's cwd; without one there is no repository to describe.
+    return input && typeof input.cwd === 'string' && input.cwd ? gate.sessionLine(input.cwd) : null;
+  } catch { return null; }
+}
+
 function main(argv = process.argv.slice(2), dependencies = {}) {
   // SessionStart is the only canonical Codex hook event.
   try {
@@ -62,9 +82,13 @@ function main(argv = process.argv.slice(2), dependencies = {}) {
   } catch {
     console.log(WARNING);
   }
+  let input = {};
+  try { input = dependencies.input || (dependencies.readInput ? dependencies.readInput() : {}); } catch { input = {}; }
+  const line = governanceLine(input, dependencies);
+  if (line) console.log(line);
   return 0;
 }
 
-if (require.main === module) process.exitCode = main();
+if (require.main === module) process.exitCode = main(process.argv.slice(2), { readInput: readHookInput });
 
 module.exports = { HOOK_ARGS, MAX_CAPTURE_BYTES, WARNING, main };

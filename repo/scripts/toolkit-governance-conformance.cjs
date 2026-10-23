@@ -25,7 +25,12 @@ const ROOT = path.resolve(__dirname, '..', '..');
 const GOVERNED_SOURCE_REL = 'repo/contracts/agent-rules/toolkit-governed-rules.md';
 const VERSION_REL = 'repo/contracts/toolkit-local-bridge/version.json';
 const PROMPT_HOLD_HOOK = 'toolkit-governance-hook';
-const HOST_HOOK_FILES = Object.freeze({ claude_code: ['.claude-plugin', 'hooks', 'hooks.json'], codex: ['.codex-plugin', 'hooks', 'hooks.json'] });
+// Each host's hook file and the script its UserPromptSubmit entry must run. Codex's prompt hold runs
+// the helper hook script, so it shares that hook's installed Windows launcher.
+const HOST_HOOK_FILES = Object.freeze({
+  claude_code: Object.freeze({ parts: ['.claude-plugin', 'hooks', 'hooks.json'], script: `${PROMPT_HOLD_HOOK}.cjs`, reason: 'installed-state-not-checked' }),
+  codex: Object.freeze({ parts: ['.codex-plugin', 'hooks', 'hooks.json'], script: 'toolkit-codex-helper-hook.cjs', reason: 'runs-once-you-trust-the-plugin-hooks' }),
+});
 
 // The governed block this Toolkit copy would install now.
 function expectedGovernedBlock(root = ROOT) {
@@ -39,19 +44,19 @@ function expectedGovernedBlock(root = ROOT) {
 // and trusted on this computer.
 function enforcementStatus(root = ROOT) {
   const hosts = {};
-  for (const [host, parts] of Object.entries(HOST_HOOK_FILES)) {
+  for (const [host, spec] of Object.entries(HOST_HOOK_FILES)) {
     let shipped = false;
     try {
-      const config = JSON.parse(fs.readFileSync(path.join(root, ...parts), 'utf8'));
+      const config = JSON.parse(fs.readFileSync(path.join(root, ...spec.parts), 'utf8'));
       const entries = config && config.hooks && Array.isArray(config.hooks.UserPromptSubmit) ? config.hooks.UserPromptSubmit : [];
-      shipped = JSON.stringify(entries).includes(PROMPT_HOLD_HOOK);
+      shipped = JSON.stringify(entries).includes(spec.script);
     } catch { shipped = false; }
     hosts[host] = shipped
-      ? { status: 'shipped', reason: 'installed-and-trusted-state-not-checked' }
+      ? { status: 'shipped', reason: spec.reason }
       : { status: 'inactive', reason: 'prompt-hold-hook-not-shipped' };
   }
   hosts.opencode = { status: 'unsupported', reason: 'no-prompt-blocking-mechanism' };
-  hosts.cloud_and_projects = { status: 'unsupported', reason: 'no-plugin-hooks' };
+  hosts.cloud_and_projects = { status: 'unsupported', reason: 'not-enforced-in-cloud-sessions' };
   return hosts;
 }
 

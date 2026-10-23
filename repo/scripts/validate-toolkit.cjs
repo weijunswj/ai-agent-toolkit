@@ -75,7 +75,7 @@ const skillProductMigrationEntryKeys = Object.freeze([
   'successor_ids',
   'transition_id'
 ]);
-const ignoredDirs = new Set(['.git', 'node_modules', '_dist', 'dist', 'coverage', '.tmp', '.n8n-local', '.n8n-production-cloudflare', '.to-sanitise', '.sanitised', '.n8n-workflow-backups', '.claude']);
+const ignoredDirs = new Set(['.git', 'node_modules', '_dist', 'dist', 'coverage', '.tmp', '.ai-agent-toolkit', '.n8n-local', '.n8n-production-cloudflare', '.to-sanitise', '.sanitised', '.n8n-workflow-backups', '.claude']);
 const allowedRootEntries = new Set([
   '.git', '.github', '.gitattributes', '.gitignore', '.codex-plugin', '.claude-plugin', '.claude', '.agents',
   'AGENTS.md', 'CLAUDE.md', 'README.md', 'package.json', 'package-lock.json', 'repo', 'skills'

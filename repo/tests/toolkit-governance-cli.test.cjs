@@ -220,10 +220,10 @@ test('K-01: check exit codes and read-only behaviour', async (t) => {
   assert.deepEqual(JSON.parse(ignored.stdout).findings.map(entry => entry.id), ['GOVERNED_BLOCK_IGNORED']);
 });
 
-test('I-12: enforcement is never reported active before a hold hook ships', () => {
+test('I-12: enforcement is reported as shipped, never as active, and Codex names its trust step', () => {
   const status = conformance.enforcementStatus();
-  assert.notEqual(status.claude_code.status, 'active');
-  assert.notEqual(status.codex.status, 'active');
+  assert.deepEqual(status.claude_code, { status: 'shipped', reason: 'installed-state-not-checked' });
+  assert.deepEqual(status.codex, { status: 'shipped', reason: 'runs-once-you-trust-the-plugin-hooks' });
   assert.equal(status.opencode.status, 'unsupported');
   assert.equal(status.cloud_and_projects.status, 'unsupported');
 });

@@ -6,9 +6,9 @@ const fs = require('node:fs');
 // denies with the blocking exit status instead of crashing as a non-blocking failure.
 const adapter = () => require('./toolkit-v3-native-helper-adapter.cjs');
 
-// Enforcement applies in Toolkit-governed work: a repository whose AGENTS.md carries the
-// Toolkit-governed rules block, a Toolkit checkout, or a session a Toolkit launcher started
-// (launcher marker), the same predicate the Claude hook uses. Elsewhere the hook makes no
+// Enforcement applies in Toolkit-governed work: a repository whose governance state is ENABLED
+// with the governed rules in force, or a session a Toolkit launcher started (launcher marker),
+// the same predicate the Claude hook uses. Elsewhere the hook makes no
 // decision. Helper depth on Codex stays instruction-level: PreToolUse carries no caller-agent identity.
 const LAUNCHER_MARKERS = ['TOOLKIT_GATE_ROLE', 'TOOLKIT_NATIVE_HELPER_BINDING', 'TOOLKIT_CLAUDE_TASK_PROFILE_SHA256'];
 function governance(input, environment = process.env) {
@@ -18,10 +18,38 @@ function governance(input, environment = process.env) {
 }
 function governed(input, environment = process.env) { return governance(input, environment).governed; }
 
+// Governance: the same script is Codex's UserPromptSubmit hook, so it shares the helper
+// hook's installed Windows launcher. In an undecided repository every prompt is held and every
+// state-changing tool refused (toolkit-governance-gate.cjs); everywhere, an agent may not answer the
+// governance question for the user. The gate loads inside the guarded path like the adapter.
+const gate = () => require('./toolkit-governance-gate.cjs');
+// Inside a git repository? Used after a failure, so it must work without the gate module: a missing
+// module still holds inside a repository (fail closed) and makes no decision elsewhere.
+function insideRepository(cwd) {
+  try { return gate().insideRepository(cwd); } catch { /* the plain walk below */ }
+  try {
+    let current = require('node:path').resolve(typeof cwd === 'string' && cwd ? cwd : process.cwd());
+    for (;;) {
+      if (fs.existsSync(require('node:path').join(current, '.git'))) return true;
+      const parent = require('node:path').dirname(current);
+      if (parent === current) return false;
+      current = parent;
+    }
+  } catch { return true; }
+}
+function promptEvent(input) {
+  return input?.hook_event_name === 'UserPromptSubmit' || (typeof input?.prompt === 'string' && !input?.tool_name);
+}
+
 // Native hook names: `spawn_agent` (V1 `multi_agent` and the default namespace), the `Agent`
 // alias, and the flattened V2 `multi_agent_v2` name `<namespace>spawn_agent` for any host-valid
 // namespace, hyphenated ones included (`collaborationspawn_agent`, `multi-agentspawn_agent`).
 async function decide(input, environment = process.env) {
+  let governanceDenial;
+  try { governanceDenial = new (gate().ToolGate)().decide(input || {}); } catch {
+    governanceDenial = insideRepository(input?.cwd) ? { deny: 'Toolkit: the governance check failed, so nothing runs in this repository until it works again.' } : null;
+  }
+  if (governanceDenial) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: governanceDenial.deny } };
   // Shell commands: refuse AI attribution in commits and pull requests, in every folder.
   if (input?.tool_name === 'Bash') return require('./toolkit-attribution-guard.cjs').attributionDecision(input);
   const state = governance(input, environment);
@@ -37,6 +65,24 @@ async function decide(input, environment = process.env) {
   // Otherwise only the Toolkit's own helpers, with the agent files setup installs, may launch.
   const { CodexNamedHelperPolicy } = require('./toolkit-codex-helper-policy.cjs');
   return new CodexNamedHelperPolicy({ environment }).decide(input, state);
+}
+
+// The UserPromptSubmit decision: { block: reason } or { context } or {}.
+function decidePrompt(input, environment = process.env) {
+  const decision = new (gate().PromptHold)({ environment }).decide({ cwd: input?.cwd, prompt: input?.prompt });
+  if (decision.action === 'block') return { block: decision.reason };
+  return decision.context ? { context: decision.context } : {};
+}
+
+const PROMPT_FAILED = 'Toolkit: the governance check failed, so your message was held and not sent. Run `setup toolkit` in Codex to repair the installed hook if this keeps happening.';
+function holdPrompt(reason) {
+  process.stdout.write(JSON.stringify({ decision: 'block', reason }) + '\n');
+  process.stderr.write(`${reason}\n`);
+  process.exitCode = 2;
+}
+// After a failure, a prompt is held inside a git repository (or when that cannot be told) only.
+function promptFailure(input) {
+  if (insideRepository(input?.cwd)) holdPrompt(PROMPT_FAILED);
 }
 
 const HELD = 'Toolkit helper guard failed';
@@ -56,10 +102,17 @@ async function main() {
   let input;
   try { input = JSON.parse(fs.readFileSync(0, 'utf8')); }
   catch { input = { tool_name: 'spawn_agent' }; }
+  if (promptEvent(input)) {
+    let output;
+    try { output = decidePrompt(input); } catch { return promptFailure(input); }
+    if (output.block) return holdPrompt(output.block);
+    if (output.context) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: output.context } }) + '\n');
+    return;
+  }
   const output = await decide(input);
   if (output?.hookSpecificOutput?.permissionDecision === 'deny') return deny(output.hookSpecificOutput.permissionDecisionReason);
   // Codex accepts no bare permissionDecision:allow (it records an unsupported-output
   // hook failure and continues). An admitted request is exit 0 with empty output.
 }
 if (require.main === module) main().catch(() => deny(HELD));
-module.exports = { main, decide, governed };
+module.exports = { main, decide, decidePrompt, governed, promptEvent };

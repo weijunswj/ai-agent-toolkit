@@ -27,22 +27,9 @@ function copyFile(relPath, pluginRoot) {
   fs.copyFileSync(path.join(repoRoot, ...relPath.split('/')), target);
 }
 
+// The real source hooks, so the fixture keeps up with every hook the plugin ships.
 function writeSourceHooks(pluginRoot) {
-  writeFile(path.join(pluginRoot, '.codex-plugin', 'hooks', 'hooks.json'), `${JSON.stringify({
-    hooks: {
-      SessionStart: [{
-        matcher: 'startup|resume|clear|compact',
-        hooks: [{ type: 'command', command: setup.sourceSessionStartCommand() }]
-      }],
-      PreToolUse: [{
-        matcher: '^(?:Agent|[A-Za-z0-9_-]*spawn_agent)$',
-        hooks: [{ type: 'command', command: setup.sourceHelperHookCommand() }]
-      }],
-      Stop: [{
-        hooks: [{ type: 'command', command: setup.sourceCheckpointHookCommand(), timeout: setup.CHECKPOINT_HOOK_TIMEOUT_SECONDS }]
-      }]
-    }
-  }, null, 2)}\n`);
+  copyFile('.codex-plugin/hooks/hooks.json', pluginRoot);
 }
 
 // The installed commandWindows for one hook, with ${PLUGIN_ROOT} replaced the way Codex does.
@@ -222,6 +209,23 @@ test('manual bridge command retains a non-zero exit for an equivalent explicit c
   });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /requires --repo-path/);
+});
+
+test('the launcher leaves the hook input on stdin for the bridge before reading it for the governance line', () => {
+  const root = tmpRoot();
+  const pluginRoot = path.join(root, 'plugin');
+  copyFile(setup.SESSION_START_LAUNCHER_REL_PATH, pluginRoot);
+  writeFile(path.join(pluginRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs'), [
+    "'use strict';",
+    "const fs = require('node:fs');",
+    "exports.run = () => { console.log('bridge stdin=' + fs.readFileSync(0, 'utf8')); return { status: 0 }; };",
+    '',
+  ].join('\n'));
+  const result = spawnSync(process.execPath, [path.join(pluginRoot, ...setup.SESSION_START_LAUNCHER_REL_PATH.split('/')), ...launcher.HOOK_ARGS], {
+    input: '{"source":"startup"}', encoding: 'utf8', timeout: 30000, windowsHide: true,
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /bridge stdin=\{"source":"startup"\}/);
 });
 
 test('Windows launcher uses exact Node metadata, preserves stdin and output, and handles metacharacter paths', { skip: process.platform !== 'win32' }, () => {
