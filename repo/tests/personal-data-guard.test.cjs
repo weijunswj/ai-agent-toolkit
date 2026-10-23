@@ -490,6 +490,22 @@ test('A CI pull_request: a change cannot switch off checks for itself; added ent
   assert.equal(result.status, 1, 'a reviewer range check keeps the base setting too');
 });
 
+test('A range and CI: a shallow clone fails closed instead of reading the cut as a rewrite', (t) => {
+  const origin = new TestRepo(t);
+  const base = origin.commit('base', { 'README.md': 'base\n' });
+  const head = origin.commit('next', { 'a.txt': 'clean\n' });
+  const shallow = new TestRepo(t);
+  fs.rmSync(shallow.root, { recursive: true, force: true });
+  shallow.git(['clone', '-q', '--depth', '1', `file://${origin.root}`, shallow.root], { cwd: shallow.dir });
+  shallow.write('.github/personal-data-guard.json', `${JSON.stringify(BASE_CONFIG)}\n`);
+  let result = shallow.guard(['range', `${base}..${head}`]);
+  assert.equal(result.status, 2, result.all);
+  assert.match(result.all, /this clone is shallow/);
+  result = ciRun(shallow, 'push', { ref: 'refs/heads/main', before: base, after: head, repository: { default_branch: 'main' } });
+  assert.equal(result.status, 2, 'a push event in a shallow clone is not a replaced history');
+  assert.doesNotMatch(result.all, /history was replaced/);
+});
+
 test('A range: the spec needs exactly two dots and two ends', (t) => {
   const repo = new TestRepo(t);
   repo.commit('base', { 'README.md': 'base\n' });
