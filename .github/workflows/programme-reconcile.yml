@@ -1,0 +1,74 @@
+name: Programme reconcile
+
+# Keeps the programme parent's Programme Graph, each task's status block and every comment trace
+# current without anyone typing the command. Runs on a merge to main, on any change to an issue or
+# its comments by the owner or a collaborator, and by hand.
+#
+# Inputs: the binding (.github/toolkit-programme.json), the secret TOOLKIT_PROGRAMME_TOKEN (writes
+# this repository's issues and the private state store) and the variable TOOLKIT_PROGRAMME_WRITER
+# (the controller's stable writer name, for example toolkit-421-controller, which holds the parent
+# fence; every coordinator and this run write under it, so replacing a coordinator changes nothing).
+# Without both, the run does nothing and says so. An issue that is not a catalogued task is skipped.
+# A run caused by the reconciler's own edit finds nothing to change and writes nothing, so runs
+# never loop. Failures leave the pass's intents for the next run to settle by readback.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  issues:
+    types: [opened, edited, closed, reopened, deleted]
+  issue_comment:
+    types: [created, edited, deleted]
+
+permissions:
+  contents: read
+
+# One run at a time for the repository; a newer event replaces any run still waiting.
+concurrency:
+  group: programme-reconcile
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    # Issue events run only for the owner or a collaborator, and never for pull request comments.
+    if: >-
+      github.event_name == 'workflow_dispatch' || github.event_name == 'push' ||
+      (github.event_name == 'issues' && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association) && github.event.sender.type != 'Bot') ||
+      (github.event_name == 'issue_comment' && !github.event.issue.pull_request && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) && github.event.sender.type != 'Bot')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Wait for a burst of edits to settle
+        if: github.event_name == 'issues' || github.event_name == 'issue_comment'
+        run: sleep 45
+
+      - name: Reconcile the programme
+        env:
+          GH_TOKEN: ${{ secrets.TOOLKIT_PROGRAMME_TOKEN }}
+          SESSION: ${{ vars.TOOLKIT_PROGRAMME_WRITER }}
+          ISSUE: ${{ github.event.issue.number }}
+        run: |
+          if [ -z "$GH_TOKEN" ] || [ -z "$SESSION" ]; then
+            echo "::notice::Programme reconcile is not set up: add the TOOLKIT_PROGRAMME_TOKEN secret and the TOOLKIT_PROGRAMME_WRITER variable. Nothing was read or written."
+            exit 0
+          fi
+          script=skills/github-program-reconciler/scripts/programme.cjs
+          parent=$(node -e "process.stdout.write(String(require('./.github/toolkit-programme.json').parent_issue))")
+          scope=()
+          if [ -n "$ISSUE" ] && [ "$ISSUE" != "$parent" ]; then
+            if ! node "$script" show --parent --json | node -e "let s = ''; process.stdin.on('data', d => { s += d; }).on('end', () => process.exit(JSON.parse(s).document.outcomes.some(o => o.issue === Number(process.argv[1])) ? 0 : 1))" "$ISSUE"; then
+              echo "#$ISSUE is not a catalogued task; nothing to do."
+              exit 0
+            fi
+            scope=(--issue "$ISSUE")
+          fi
+          node "$script" reconcile "${scope[@]}" --apply --controller --session "$SESSION" | tee -a "$GITHUB_STEP_SUMMARY"

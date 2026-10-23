@@ -6,18 +6,17 @@ const fs = require('node:fs');
 // denies with the blocking exit status instead of crashing as a non-blocking failure.
 const adapter = () => require('./toolkit-v3-native-helper-adapter.cjs');
 
-// Enforcement applies only inside Toolkit itself: a Toolkit checkout at the nearest git
-// root, or a session a Toolkit launcher started (launcher marker). It uses the predicate
-// shared with the Claude hook with the managed-block test turned off, so repositories that
-// only carry the Toolkit-governed rules block keep native Codex helpers until
-// the Codex lane (#469) adds a named-helper allow-list. Elsewhere the hook makes no
-// decision. Helper depth on Codex stays advisory: PreToolUse carries no caller-agent identity.
+// Enforcement applies in Toolkit-governed work: a repository whose governance state is ENABLED
+// with the governed rules in force, or a session a Toolkit launcher started (launcher marker),
+// the same predicate the Claude hook uses. Elsewhere the hook makes no
+// decision. Helper depth on Codex stays instruction-level: PreToolUse carries no caller-agent identity.
 const LAUNCHER_MARKERS = ['TOOLKIT_GATE_ROLE', 'TOOLKIT_NATIVE_HELPER_BINDING', 'TOOLKIT_CLAUDE_TASK_PROFILE_SHA256'];
-function governed(input, environment = process.env) {
-  try { return require('./toolkit-governed-repo.cjs').governedRepo(input?.cwd, environment, { managedBlock: false }).governed; }
+function governance(input, environment = process.env) {
+  try { return require('./toolkit-governed-repo.cjs').governedRepo(input?.cwd, environment); }
   // Without the predicate, gate only when a launcher marker says this is governed work.
-  catch { return LAUNCHER_MARKERS.some(name => Boolean(environment[name])); }
+  catch { return { governed: LAUNCHER_MARKERS.some(name => Boolean(environment[name])), root: null, gate_role: environment.TOOLKIT_GATE_ROLE || null }; }
 }
+function governed(input, environment = process.env) { return governance(input, environment).governed; }
 
 // Governance (#542 M3): the same script is Codex's UserPromptSubmit hook, so it shares the helper
 // hook's installed Windows launcher. In an undecided repository every prompt is held and every
@@ -42,9 +41,9 @@ function promptEvent(input) {
   return input?.hook_event_name === 'UserPromptSubmit' || (typeof input?.prompt === 'string' && !input?.tool_name);
 }
 
-// Native hook names: `spawn_agent` (default and multi_agent_v1 namespaces), the
-// `Agent` alias, and the flattened MultiAgentV2 name `<namespace>spawn_agent` for any
-// host-valid namespace, hyphenated ones included (`collaborationspawn_agent`, `multi-agentspawn_agent`).
+// Native hook names: `spawn_agent` (V1 `multi_agent` and the default namespace), the `Agent`
+// alias, and the flattened V2 `multi_agent_v2` name `<namespace>spawn_agent` for any host-valid
+// namespace, hyphenated ones included (`collaborationspawn_agent`, `multi-agentspawn_agent`).
 async function decide(input, environment = process.env) {
   let governanceDenial;
   try { governanceDenial = new (gate().ToolGate)().decide(input || {}); } catch {
@@ -53,14 +52,19 @@ async function decide(input, environment = process.env) {
   if (governanceDenial) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: governanceDenial.deny } };
   // Shell commands: refuse AI attribution in commits and pull requests, in every folder.
   if (input?.tool_name === 'Bash') return require('./toolkit-attribution-guard.cjs').attributionDecision(input);
-  if (!governed(input, environment)) return {};
+  const state = governance(input, environment);
+  if (!state.governed) return {};
   const { CodexDialect, commandDecision } = adapter();
   if (!CodexDialect.isSpawnRequest(input?.tool_name)) return {};
-  return commandDecision(input, 'codex', {
+  // A launcher that bound this session to a helper route checks the launch against that binding.
+  if (environment.TOOLKIT_NATIVE_HELPER_BINDING) return commandDecision(input, 'codex', {
     binding_path: environment.TOOLKIT_NATIVE_HELPER_BINDING,
     binding_sha256: environment.TOOLKIT_NATIVE_HELPER_BINDING_SHA256,
     helper_identity: environment.TOOLKIT_NATIVE_HELPER_IDENTITY
   });
+  // Otherwise only the Toolkit's own helpers, with the agent files setup installs, may launch.
+  const { CodexNamedHelperPolicy } = require('./toolkit-codex-helper-policy.cjs');
+  return new CodexNamedHelperPolicy({ environment }).decide(input, state);
 }
 
 // The UserPromptSubmit decision: { block: reason } or { context } or {}.

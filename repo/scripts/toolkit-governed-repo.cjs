@@ -13,28 +13,19 @@
 //     valid programme binding, and the user has not declined. A DECLINED, UNKNOWN or
 //     incomplete repository is not governed here; an UNKNOWN one is held by the
 //     governance gate before any helper launch is reached.
-// The `managedBlock: false` option keeps a host whose helper policy is only qualified inside
-// Toolkit itself to Toolkit checkouts: Codex keeps native helpers in other governed
-// repositories until its own allow-list exists (#469). The walk stops at the first `.git`
-// (a directory, or the file a worktree uses). Node built-ins only, no subprocess. Without a
-// launcher marker, an error is ungoverned.
+// The walk stops at the first `.git` (a directory, or the file a worktree uses). Node built-ins
+// only, no subprocess. Without a launcher marker, an error is ungoverned.
 
 const fs = require('node:fs');
 const path = require('node:path');
 
 const LAUNCHER_MARKERS = Object.freeze(['TOOLKIT_GATE_ROLE', 'TOOLKIT_NATIVE_HELPER_BINDING', 'TOOLKIT_CLAUDE_TASK_PROFILE_SHA256']);
 const GATE_ROLES = Object.freeze(['G0', 'G1', 'G2']);
-// Stable files every Toolkit checkout carries; documentation paths are not used.
-const CHECKOUT_FILES = Object.freeze([
-  ['repo', 'contracts', 'toolkit-local-bridge', 'version.json'],
-  ['skills', 'repository-agent-rules', 'repo-local', 'AGENTS.managed.template.md'],
-]);
 
 class GovernedRepoPredicate {
-  #environment; #managedBlock; #registryOptions;
-  constructor(environment = process.env, { managedBlock = true, registryOptions = {} } = {}) {
+  #environment; #registryOptions;
+  constructor(environment = process.env, { registryOptions = {} } = {}) {
     this.#environment = environment || {};
-    this.#managedBlock = managedBlock !== false;
     this.#registryOptions = registryOptions;
   }
 
@@ -58,10 +49,6 @@ class GovernedRepoPredicate {
     }
   }
 
-  static #isToolkitCheckout(root) {
-    return CHECKOUT_FILES.every(parts => fs.existsSync(path.join(root, ...parts)));
-  }
-
   // { governed, reason, root, marker, gate_role, state }
   evaluate(cwd) {
     const marker = this.launcherMarker();
@@ -74,9 +61,6 @@ class GovernedRepoPredicate {
       if (!root) return result(false, 'no-git-root');
       const state = require('./toolkit-governance-state.cjs').governanceState(root, this.#registryOptions);
       if (state.state !== 'ENABLED' || !state.governed_rules_bind) return result(false, `governance-${state.state === 'ENABLED' ? 'incomplete' : state.state.toLowerCase()}`, root, state.state);
-      if (!this.#managedBlock) {
-        return GovernedRepoPredicate.#isToolkitCheckout(root) ? result(true, 'toolkit-checkout', root, state.state) : result(false, 'outside-toolkit', root, state.state);
-      }
       return result(true, 'governance-enabled', root, state.state);
     } catch {
       return marker ? result(true, 'launcher-marker', root || null) : result(false, 'predicate-error');
