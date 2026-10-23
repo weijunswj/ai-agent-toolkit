@@ -23,7 +23,8 @@ function hasAttribution(text) {
   const value = String(text || '');
   const trailer = value.toLowerCase().split('\n').some((line) => {
     const start = line.indexOf('co-authored-by:');
-    return start !== -1 && (line.indexOf('claude', start) !== -1 || line.indexOf('anthropic.com', start) !== -1);
+    // A trailer naming Claude or an anthropic.com address; this is text matching, not URL checking.
+    return start !== -1 && /claude|anthropic\.com/.test(line.slice(start));
   });
   return trailer || ATTRIBUTION_PATTERNS.some((pattern) => pattern.test(value));
 }
