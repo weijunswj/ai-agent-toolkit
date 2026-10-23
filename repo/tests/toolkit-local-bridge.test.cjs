@@ -41,7 +41,7 @@ const {
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '3.7.0';
+const expectedBridgeVersion = '3.7.1';
 
 function tmpRoot() {
   const created = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-bridge-'));
@@ -3138,7 +3138,7 @@ test('Codex auto-refresh across a version bump checks the newly installed cache 
   const fixture = createRepoAutoUpdateFixture();
   const root = fixture.root;
   const oldPluginRoot = path.join(root, 'codex-cache', 'ai-agent-toolkit', '3.6.0');
-  const newPluginRoot = path.join(root, 'codex-cache', 'ai-agent-toolkit', '3.7.0');
+  const newPluginRoot = path.join(root, 'codex-cache', 'ai-agent-toolkit', '3.7.1');
   const hub = path.join(root, 'hub', 'current');
 
   writeCodexPluginRefreshFixture(fixture.repo);

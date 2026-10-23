@@ -23,7 +23,7 @@ const { samePath } = require('./toolkit-canonical-path.cjs');
 const { GlobalRules, describeResult: describeGlobalRules } = require('./toolkit-global-rules.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '3.7.0';
+const BRIDGE_VERSION = '3.7.1';
 const STATE_SCHEMA_VERSION = 1;
 const SYNC_SOURCES = ['repo', 'codex-plugin', 'claude-plugin'];
 const LOCK_STALE_MS = 10 * 60 * 1000;

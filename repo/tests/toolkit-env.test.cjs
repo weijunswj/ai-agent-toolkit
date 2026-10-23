@@ -313,18 +313,282 @@ test('retire moves ~/.codex/.env to a private backup only when every key is stor
   const backup = path.join(paths.backupsDir, folder, 'codex.env');
   assert.ok(fs.existsSync(backup));
   if (process.platform === 'win32') {
+    const identity = spawnSync(path.join(process.env.SystemRoot, 'System32', 'whoami.exe'), ['/user', '/fo', 'csv', '/nh'], { encoding: 'utf8' });
+    assert.equal(identity.status, 0, identity.stderr);
+    const sid = identity.stdout.match(/S-1-[0-9-]+/i)?.[0];
+    assert.ok(sid, 'the executing Windows identity must have a SID');
     // The folder and the moved file each hold one entry: the current user.
     for (const target of [path.dirname(backup), backup]) {
       const acl = spawnSync(path.join(process.env.SystemRoot, 'System32', 'icacls.exe'), [target], { encoding: 'utf8' }).stdout;
       assert.doesNotMatch(acl, /\(I\)|NT AUTHORITY|BUILTIN|Everyone/, acl);
       assert.equal(acl.split(/\r?\n/).filter((line) => /:\(/.test(line)).length, 1, acl);
-      assert.match(acl, new RegExp(`\\\\${process.env.USERNAME}:`, 'i'), acl);
+      // .NET directly, so no PowerShell module has to load (a runner's PSModulePath can point at PowerShell 7).
+      const aclScript = '$ErrorActionPreference = "Stop"; $p = [Console]::In.ReadToEnd(); $acl = if ([System.IO.Directory]::Exists($p)) { [System.IO.Directory]::GetAccessControl($p) } else { [System.IO.File]::GetAccessControl($p) }; $acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]) | ForEach-Object { $_.IdentityReference.Value }';
+      const access = spawnSync(path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), [
+        '-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(aclScript, 'utf16le').toString('base64'),
+      ], { input: target, encoding: 'utf8', windowsHide: true, timeout: 10000, env: Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toLowerCase() !== 'psmodulepath')) });
+      assert.equal(access.status, 0, access.stderr);
+      assert.equal(access.stdout.trim(), sid, 'the sole ACL entry must be the executing identity, not USERNAME');
     }
   } else {
     assert.equal(fs.statSync(backup).mode & 0o777, 0o600);
   }
   assert.match(moved.stdout, /delete that backup yourself/);
   assert.doesNotMatch(moved.stdout + moved.stderr, new RegExp(value));
+});
+
+test('the edit file keeps your comment and section lines in place, and never stores a value', async (t) => {
+  const value = sentinel();
+  const { run, paths, store } = harness(t, { values: { COOLIFY_SWOOSHZ_MCP_TOKEN: value, NEONDB_SWOOSHZ_API_KEY: value, CLOUDFLARE_ACCOUNT_ID: value } });
+  await run('edit');
+  let file = editFile(paths);
+  fs.writeFileSync(file, [
+    ...fs.readFileSync(file, 'utf8').split(/\r?\n/).filter((line) => line.startsWith('#')),
+    '# --- Hosting ---',
+    'COOLIFY_SWOOSHZ_MCP_TOKEN=<unchanged>',
+    '',
+    '# --- Databases (Swooshz team) ---',
+    'NEONDB_SWOOSHZ_API_KEY=<unchanged>',
+    'CLOUDFLARE_ACCOUNT_ID=<unchanged>',
+    '',
+  ].join('\n'));
+  const applied = await run('apply');
+  assert.equal(applied.code, 0, applied.stderr);
+  const record = JSON.parse(fs.readFileSync(paths.manifest, 'utf8'));
+  assert.deepEqual(record.layout, ['# --- Hosting ---', 'COOLIFY_SWOOSHZ_MCP_TOKEN', '', '# --- Databases (Swooshz team) ---', 'NEONDB_SWOOSHZ_API_KEY', 'CLOUDFLARE_ACCOUNT_ID']);
+  assert.doesNotMatch(fs.readFileSync(paths.manifest, 'utf8'), new RegExp(value));
+  // The next edit shows the same layout; a key added since then comes after it.
+  store.writeAll(new Map([['GITHUB_SWOOSHZ_PAT', value]]));
+  await run('edit');
+  file = editFile(paths);
+  const body = fs.readFileSync(file, 'utf8').split(/\r?\n/).filter((line) => !line.startsWith('# Toolkit env') && !/^# (To |Leaving|Save|Your own)/.test(line));
+  assert.deepEqual(body.filter(Boolean), ['# --- Hosting ---', 'COOLIFY_SWOOSHZ_MCP_TOKEN=<unchanged>', '# --- Databases (Swooshz team) ---', 'NEONDB_SWOOSHZ_API_KEY=<unchanged>', 'CLOUDFLARE_ACCOUNT_ID=<unchanged>', 'GITHUB_SWOOSHZ_PAT=<unchanged>']);
+  await run('apply');
+});
+
+test('a comment that looks like a key or token stops apply and is reported by line number only', async (t) => {
+  const value = sentinel();
+  const { run, paths } = harness(t, { values: { COOLIFY_SWOOSHZ_MCP_TOKEN: value } });
+  await run('edit');
+  const file = editFile(paths);
+  for (const comment of [`# OLD_TOKEN=${value}`, '# ghp_0123456789abcdefABCDEF0123456789']) {
+    fs.writeFileSync(file, [comment, 'COOLIFY_SWOOSHZ_MCP_TOKEN=<unchanged>', ''].join('\n'));
+    const refused = await run('apply');
+    assert.equal(refused.code, 1, comment);
+    assert.match(refused.stderr, /line 1: this comment looks like it may hold a key or token/);
+    assert.doesNotMatch(refused.stdout + refused.stderr, new RegExp(value));
+    assert.doesNotMatch(refused.stdout + refused.stderr, /ghp_/);
+  }
+  assert.equal(fs.existsSync(paths.manifest) && /ghp_|OLD_TOKEN/.test(fs.readFileSync(paths.manifest, 'utf8')), false);
+});
+
+function unsafeLayoutComments() {
+  return [
+    ['inline assignment', '# Previous credential: OLD_TOKEN=dummy-inline-secret'],
+    ['short assignment', '# OLD_TOKEN=abc123'],
+    ['spaced assignment', '# Notes (export OLD_TOKEN = dummy-spaced-secret)'],
+    ['quoted assignment', '# OLD_TOKEN="dummy quoted value"'],
+    ['alphabetic token', '# ghp_abcdefghijklmnopqrstuvwxyzABCDEF'],
+    ['short prefixed token', '# sk-abcdefgHIJKLMN'],
+    ['padded base64 as empty assignment', `# ${Buffer.from('a'.repeat(32)).toString('base64')}`],
+    ['base64 word with empty value', `# ${'AbCdEf'.repeat(7)}AB=`],
+    ['github token with empty value', `#ghp_${'a'.repeat(36)}=`],
+    ['github token with unchanged value', `# ghp_${'a'.repeat(36)}=<unchanged>`],
+    ['github PAT with unchanged value', `#github_pat_${'a'.repeat(36)}=<unchanged>`],
+    ['short sk token with empty value', '# sk-abcdefgHIJKLMN='],
+    ['hex word with empty value', `# ${'abcdef0123456789'.repeat(3)}=`],
+    ['token after ordinary empty assignment', '# NAME= sk-abcdefgHIJKLMN'],
+    ['token after unchanged assignment', '# NAME=<unchanged> ghp_abcdefgHIJKLMN'],
+    ['base64 without digits', `# ${Buffer.from('a'.repeat(30)).toString('base64')}`],
+    ['long base64', `# ${Buffer.from('synthetic only '.repeat(30)).toString('base64')}`],
+    ['numeric token', `# ${'1234567890'.repeat(4)}`],
+    ['hex token', `# ${'abcdef0123456789'.repeat(3)}`],
+    ['unicode assignment', '# Notes: \u5bc6\u94a5=dummy-unicode-secret'],
+    ['unicode token', `# ${'\u5bc6\u94a5'.repeat(16)}`],
+    ['fullwidth assignment', '# Notes: TOKEN\uff1ddummy-wide-secret'],
+    ['invisible token separator', '# abcdefghijklmnop\u200bqrstuvwxyzABCDEF'],
+    ['ZWJ outside emoji', '# Heading\u200dtext'],
+    ['ZWJ after emoji only', '# \u{1f469}\u200dtext'],
+    ['bidi override', '# Heading\u202edummy-hidden-secret'],
+    ['C1 control', '# Heading\u0085dummy-hidden-secret'],
+    ['unicode line separator', '# Heading\u2028dummy-hidden-secret'],
+    ['bare carriage return', '# Heading\rdummy-carriage-secret'],
+    ['NUL in comment', '# Heading\u0000dummy-control-secret'],
+  ];
+}
+
+test('a 100 KB commented line is refused promptly before screening its contents', async (t) => {
+  const { run, paths, store } = harness(t);
+  await run('edit');
+  fs.writeFileSync(editFile(paths), `# ${'a'.repeat(100 * 1024)}\n`);
+  const started = performance.now();
+  const refused = await run('apply');
+  assert.ok(performance.now() - started < 1000, 'oversized comments must return promptly');
+  assert.equal(refused.code, 1);
+  assert.match(refused.stderr, /line 1: this comment looks like it may hold a key or token/);
+  assert.equal(store.writes, 0);
+  assert.equal(fs.existsSync(paths.manifest), false);
+});
+
+test('decorations, URLs, paths, empty or unchanged commented keys and emoji headings are kept', async (t) => {
+  const comments = [
+    '# ==== Hosting ====',
+    '# ---- Hosting ----',
+    '# #### Hosting ####',
+    '# Get it at https://dash.cloudflare.com/profile/api-tokens',
+    '# Used by repo/scripts/toolkit-env.cjs',
+    '# Used by C:\\repo\\scripts\\toolkit-env.cjs',
+    '#NAME=<unchanged>',
+    '# NAME=',
+    '# NAME =',
+    '# LONG_PROVIDER_SOLUTION_PURPOSE_KEY=<unchanged>',
+    '# \u{1f469}\u200d\u{1f4bb} Hosting',
+    '# \u{1f469}\u{1f3fd}\u200d\u{1f4bb} Hosting',
+    '# \u{1f3f3}\ufe0f\u200d\u{1f308} Hosting',
+  ];
+  for (const operation of ['apply', 'import-codex-env', 'retire-codex-env']) await t.test(operation, async (t) => {
+    const value = sentinel();
+    const { run, paths } = harness(t, { values: { X1_TEST_KEPT_KEY: value }, answers: ['yes'] });
+    if (operation === 'apply') {
+      await run('edit');
+      fs.writeFileSync(editFile(paths), `${comments.join('\n')}\nX1_TEST_KEPT_KEY=<unchanged>\n`);
+    } else writeCodexEnv(paths, `${comments.join('\n')}\nX1_TEST_KEPT_KEY=${value}\n`);
+    const result = await run(operation);
+    assert.equal(result.code, 0, result.stderr);
+    assert.deepEqual(JSON.parse(fs.readFileSync(paths.manifest, 'utf8')).layout, [...comments, 'X1_TEST_KEPT_KEY']);
+    await run('edit');
+    const reopened = fs.readFileSync(editFile(paths), 'utf8');
+    for (const comment of comments) assert.ok(reopened.includes(comment), comment);
+  });
+});
+
+test('layout refusals are atomic and disclose only line numbers across adversarial comment formats', async (t) => {
+  for (const [label, comment] of unsafeLayoutComments()) await t.test(label, async (t) => {
+    const value = sentinel();
+    const { run, paths, store } = harness(t, { values: { X1_TEST_KEPT_KEY: value } });
+    await run('edit');
+    const file = editFile(paths);
+    fs.writeFileSync(file, `# Safe section\r\n\r\n${comment}\r\nX1_TEST_NEW_KEY=${value}\r\n`);
+    const refused = await run('apply');
+    assert.equal(refused.code, 1, label);
+    assert.match(refused.stderr, /line 3: this comment looks like it may hold a key or token/);
+    assert.ok(!(refused.stdout + refused.stderr).includes(comment), 'a refusal must not repeat comment content');
+    assert.ok(!(refused.stdout + refused.stderr).includes(value), 'a refusal must not repeat a value');
+    assert.equal(store.writes, 0, 'a refused layout must not save even valid assignments');
+    assert.equal(fs.existsSync(paths.manifest), false, 'a refused layout must not create a record');
+    assert.deepEqual(fs.readdirSync(paths.envDir), ['edit'], 'no other layout file may be written');
+    assert.equal(fs.existsSync(file), true, 'the private edit remains available for correction');
+  });
+});
+
+test('CRLF, BOM, unicode headings, sections and blank lines round-trip without assignment values', async (t) => {
+  const value = sentinel();
+  const { run, paths } = harness(t, { values: { X1_TEST_KEPT_KEY: value } });
+  await run('edit');
+  fs.writeFileSync(editFile(paths), `\uFEFF\r\n# --- Hosting ---\r\n\r\n\r\n# \u65e5\u672c / caf\u00e9\r\nX1_TEST_KEPT_KEY=<unchanged>\r\n\r\nX1_TEST_NEW_KEY=${value}\r\n\r\n`);
+  const applied = await run('apply');
+  assert.equal(applied.code, 0, applied.stderr);
+  const expected = ['# --- Hosting ---', '', '# \u65e5\u672c / caf\u00e9', 'X1_TEST_KEPT_KEY', '', 'X1_TEST_NEW_KEY'];
+  assert.deepEqual(JSON.parse(fs.readFileSync(paths.manifest, 'utf8')).layout, expected);
+  assert.ok(!fs.readFileSync(paths.manifest, 'utf8').includes(value));
+  await run('edit');
+  const reopened = fs.readFileSync(editFile(paths), 'utf8');
+  assert.ok(reopened.endsWith(`${expected.map((line) => line.startsWith('X1_') ? `${line}=<unchanged>` : line).join(os.EOL)}${os.EOL}`));
+  assert.ok(!reopened.includes(value));
+});
+
+test('import and retire never adopt adversarial comments into the layout or repeat their contents', async (t) => {
+  for (const operation of ['import-codex-env', 'retire-codex-env']) await t.test(operation, async (t) => {
+    const value = sentinel();
+    const { run, paths } = harness(t, { values: { X1_TEST_KEPT_KEY: value }, answers: ['yes'] });
+    const comments = unsafeLayoutComments().map(([, comment]) => comment);
+    const lines = ['# Safe section', `X1_TEST_KEPT_KEY=${value}`, '', ...comments, ''];
+    writeCodexEnv(paths, lines.join('\r\n'));
+    const result = await run(operation);
+    assert.equal(result.code, 0, result.stderr);
+    assert.match(result.stdout, new RegExp(`not kept as layout, comment lines ${comments.map((_, index) => index + 4).join(', ')}`));
+    const manifest = fs.readFileSync(paths.manifest, 'utf8');
+    assert.deepEqual(JSON.parse(manifest).layout, ['# Safe section', 'X1_TEST_KEPT_KEY']);
+    for (const text of [result.stdout, result.stderr, manifest]) {
+      assert.ok(!text.includes(value), 'the assignment value must stay out of layout and diagnostics');
+      for (const comment of comments) assert.ok(!text.includes(comment), 'unsafe comment content must stay out of layout and diagnostics');
+    }
+    assert.deepEqual(fs.readdirSync(paths.envDir), ['manifest.json'], 'the manifest is the only layout store');
+    await run('edit');
+    const reopened = fs.readFileSync(editFile(paths), 'utf8');
+    assert.ok(!reopened.includes(value));
+    for (const comment of comments) assert.ok(!reopened.includes(comment));
+  });
+});
+
+test('manifest layout rejects unsafe existing entries and updates before propagating them', (t) => {
+  const { paths } = harness(t);
+  const manifest = new EnvManifest({ file: paths.manifest });
+  manifest.update((record) => { record.layout = ['# Safe section', 'X1_TEST_KEPT_KEY']; });
+  const before = fs.readFileSync(paths.manifest, 'utf8');
+  for (const [, comment] of unsafeLayoutComments()) {
+    assert.throws(() => manifest.update((record) => { record.layout = [comment]; }), /layout entry 1 \(counting from 1\) in the "layout" list of ~\/\.ai-agent-toolkit\/env\/manifest\.json/);
+    assert.equal(fs.readFileSync(paths.manifest, 'utf8'), before);
+    fs.writeFileSync(paths.manifest, JSON.stringify({ schema: 'ai-agent-toolkit.env-manifest.v1', names: {}, bindings: [], layout: [comment] }));
+    assert.throws(() => manifest.read(), (error) => /layout entry 1 \(counting from 1\)/.test(error.message) && !error.message.includes(comment));
+    fs.writeFileSync(paths.manifest, before);
+  }
+  assert.deepEqual(fs.readdirSync(paths.envDir), ['manifest.json']);
+});
+
+test('manifest layout rejects malformed shapes and embedded line breaks without content in errors', (t) => {
+  const { paths } = harness(t);
+  const manifest = new EnvManifest({ file: paths.manifest });
+  for (const layout of [null, {}, [null], [42], ['X1_TEST_KEY\n'], ['# Safe\n# second line'], ['invalid layout value'], Array(501).fill('# Safe')]) {
+    fs.mkdirSync(paths.envDir, { recursive: true });
+    fs.writeFileSync(paths.manifest, JSON.stringify({ schema: 'ai-agent-toolkit.env-manifest.v1', layout }));
+    assert.throws(() => manifest.read(), /Toolkit env layout/);
+  }
+  fs.writeFileSync(paths.manifest, JSON.stringify({ schema: 'ai-agent-toolkit.env-manifest.v1' }));
+  assert.deepEqual(manifest.read().layout, [], 'records from before layout support remain readable');
+});
+
+test('duplicate keys and oversized values are refused without repeating any line content', async (t) => {
+  const { run, paths, store } = harness(t);
+  const value = sentinel();
+  await run('edit');
+  fs.writeFileSync(editFile(paths), `X1_TEST_DUPLICATE_KEY=${value}\r\nX1_TEST_DUPLICATE_KEY=${value}\r\nX1_TEST_OVERSIZED_KEY=${'x'.repeat(2561)}\r\n`);
+  const refused = await run('apply');
+  assert.equal(refused.code, 1);
+  assert.match(refused.stderr, /line 2: the key name appears more than once/);
+  assert.match(refused.stderr, /line 3: value too long/);
+  for (const text of [value, 'X1_TEST_DUPLICATE_KEY', 'X1_TEST_OVERSIZED_KEY']) assert.ok(!refused.stderr.includes(text));
+  assert.equal(store.writes, 0);
+  assert.equal(fs.existsSync(paths.manifest), false);
+});
+
+test('ordinary prose comments remain verbatim, so screening cannot certify absence of passphrases', async (t) => {
+  const { run, paths } = harness(t);
+  const phrase = 'violet paper canoe'; // Synthetic prose: indistinguishable from a heading or password.
+  await run('edit');
+  fs.writeFileSync(editFile(paths), `# ${phrase}\r\n`);
+  assert.equal((await run('apply')).code, 0);
+  assert.deepEqual(JSON.parse(fs.readFileSync(paths.manifest, 'utf8')).layout, [`# ${phrase}`]);
+});
+
+test('remove drops the name from the layout; import and retire keep the .env comments before the file can be deleted', async (t) => {
+  const value = sentinel();
+  const { run, paths, store } = harness(t, { answers: ['yes', 'yes'] });
+  writeCodexEnv(paths, ['# Hosting', `COOLIFY_SWOOSHZ_MCP_TOKEN=${value}`, '', '# Databases', `NEONDB_SWOOSHZ_API_KEY=${value}`, '# key_0123456789abcdefABCDEF012345', ''].join('\n'));
+  const imported = await run('import-codex-env');
+  assert.equal(imported.code, 0, imported.stderr);
+  assert.match(imported.stdout, /kept 2 comment lines and the key order for toolkit env edit/);
+  assert.match(imported.stdout, /not kept as layout, comment line 6/);
+  assert.deepEqual(JSON.parse(fs.readFileSync(paths.manifest, 'utf8')).layout, ['# Hosting', 'COOLIFY_SWOOSHZ_MCP_TOKEN', '', '# Databases', 'NEONDB_SWOOSHZ_API_KEY']);
+  const retired = await run('retire-codex-env');
+  assert.equal(retired.code, 0, retired.stderr);
+  assert.match(retired.stdout, /Kept your existing toolkit env edit layout/);
+  assert.match(retired.stdout, /last plain copy of these values, and the only copy of 1 comment line\./);
+  assert.ok(store.list().includes('NEONDB_SWOOSHZ_API_KEY'));
+  const removed = await run('remove', 'NEONDB_SWOOSHZ_API_KEY');
+  assert.equal(removed.code, 0, removed.stderr);
+  assert.deepEqual(JSON.parse(fs.readFileSync(paths.manifest, 'utf8')).layout, ['# Hosting', 'COOLIFY_SWOOSHZ_MCP_TOKEN', '', '# Databases']);
+  assert.doesNotMatch(imported.stdout + retired.stdout + fs.readFileSync(paths.manifest, 'utf8'), new RegExp(value));
 });
 
 // A stand-in for Codex's config/batchWrite on simple tables: removes or sets `key = value` lines.
