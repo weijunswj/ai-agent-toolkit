@@ -40,10 +40,10 @@ Retired internal sources are provenance-only, not active update targets. Third-p
 For normal human setup, keep the journey short:
 
 1. Pull or update this Toolkit repo from `weijunswj/ai-agent-toolkit`.
-2. In Codex or Claude Code, open the repo and say `setup toolkit`, `refresh toolkit`, or plain `refresh` while the conversation is clearly about Toolkit setup/update state. Agents must run the one-question-bank setup journey from the managed checkout instead of stopping after plugin verification or using the active repo worktree as the canonical source. Windows Codex uses `node "%USERPROFILE%\.ai-agent-toolkit\source\ai-agent-toolkit\repo\scripts\setup-toolkit.cjs" --execute --profile auto-main`; POSIX Codex uses `node "$HOME/.ai-agent-toolkit/source/ai-agent-toolkit/repo/scripts/setup-toolkit.cjs" --execute --profile auto-main`; Claude Code appends `--host claude-code`.
+2. In Codex or Claude Code, open the repo and say `setup toolkit`, `refresh toolkit`, or plain `refresh` while the conversation is clearly about Toolkit setup/update state. Agents must run the one-question-bank setup journey from the managed checkout instead of stopping after plugin verification or using the active repo worktree as the canonical source. Codex uses `node "%USERPROFILE%\.ai-agent-toolkit\source\ai-agent-toolkit\repo\scripts\setup-toolkit.cjs" --execute --profile auto-main`; Claude Code appends `--host claude-code`.
 3. Setup is handled by the root agent alone and must not spawn subagents for instructions, state, choices, or validation. In chat, the complete compact bank must be visible in the same response as any recommended-default shortcut; hidden command output or a summary does not count. Managed delegation uses one execution with an explicit child/parent visibility acknowledgement; missing, partial, duplicate, misordered, or wrong-stream bank output blocks approval and writes without retry. Do not rerun with `--yes-recommended` unless the user explicitly accepts the displayed recommendations.
 4. **Toolkit will use a dedicated clean `main` checkout as the single update source. Active Codex or Claude Code sessions may remain on PR branches, but plugin updates will not depend on those branches.**
-5. Default managed checkout paths are `%USERPROFILE%\.ai-agent-toolkit\source\ai-agent-toolkit` on Windows and `~/.ai-agent-toolkit/source/ai-agent-toolkit` on POSIX. Use `node repo/scripts/setup-toolkit.cjs --execute --profile auto-main` from the active repo only as bootstrap/fallback when the managed checkout script is missing, then hand off to the managed checkout script after it exists.
+5. The default managed checkout path is `%USERPROFILE%\.ai-agent-toolkit\source\ai-agent-toolkit`. Use `node repo/scripts/setup-toolkit.cjs --execute --profile auto-main` from the active repo only as bootstrap/fallback when the managed checkout script is missing, then hand off to the managed checkout script after it exists.
 6. Let the host install, verify, or refresh its own Toolkit native plugin path, then run the lite setup validation.
 7. If Codex installs or updates the plugin, manually approve the startup hook when Codex prompts.
 8. Restart the host if setup says the plugin needs a fresh session.
@@ -73,14 +73,16 @@ Manual installation means copying a Toolkit-owned `skills/<skill-name>/` folder 
 4. Choose **ANY ONE** supported install location per platform.
 5. Do not paste secrets, tokens, `.env` values, or credentials into repo files.
 
+Repo-local agent instruction installs need a selected or open target repo, or an explicit target path. Generic rules reach every session through the global rules that `setup toolkit` installs in each harness's user-level file. A repository opts into Toolkit governance with the governed block in its `AGENTS.md`, created or merged from [repo-local/AGENTS.managed.template.md](../../skills/repository-agent-rules/repo-local/AGENTS.managed.template.md), not from this toolkit repo's root [AGENTS.md](../../AGENTS.md). Claude Code uses a one-line `CLAUDE.md` (`@AGENTS.md`) and Antigravity a small bootstrap under `.agents/rules/`; both point back to the target repo's `AGENTS.md`, so never install one by itself.
+
 ### Manual Skill Folder Locations
 
-| Platform | Manual Toolkit-owned skill folder locations | Notes |
+| Platform | Manual Toolkit-owned skill folder locations | Active instruction files |
 |---|---|---|
-| Codex | `<repo>/.agents/skills/<skill-name>/`<br>`$HOME/.agents/skills/<skill-name>/`<br>`/etc/codex/skills/<skill-name>/` | Direct manual copy for a specific Toolkit skill. |
-| Claude Code | `<repo>/.claude/skills/<skill-name>/`<br>`$HOME/.claude/skills/<skill-name>/` | Direct manual copy for a specific Toolkit skill. |
-| OpenCode | `<repo>/.opencode/skills/<skill-name>/`<br>`$HOME/.config/opencode/skills/<skill-name>/`<br>`<repo>/.claude/skills/<skill-name>/`<br>`$HOME/.claude/skills/<skill-name>/`<br>`<repo>/.agents/skills/<skill-name>/`<br>`$HOME/.agents/skills/<skill-name>/` | Direct manual copy for a specific Toolkit skill. |
-| Antigravity 2 | `<workspace>/.agents/skills/<skill-name>/SKILL.md` | Portable skills copy only; no native plugin install or sync. |
+| Codex | `<repo>\.agents\skills\<skill-name>\`<br>`%USERPROFILE%\.agents\skills\<skill-name>\` | `AGENTS.md` |
+| Claude Code | `<repo>\.claude\skills\<skill-name>\`<br>`%USERPROFILE%\.claude\skills\<skill-name>\` | `AGENTS.md`, `CLAUDE.md` shim |
+| OpenCode | `<repo>\.opencode\skills\<skill-name>\`<br>`%USERPROFILE%\.config\opencode\skills\<skill-name>\`<br>`<repo>\.claude\skills\<skill-name>\`<br>`%USERPROFILE%\.claude\skills\<skill-name>\`<br>`<repo>\.agents\skills\<skill-name>\`<br>`%USERPROFILE%\.agents\skills\<skill-name>\` | `AGENTS.md` |
+| Antigravity 2 | `<workspace>\.agents\skills\<skill-name>\` (portable copy only; no native plugin) | `AGENTS.md`, Antigravity 2 bootstrap |
 
 This repo does not commit package archives. Keep `_dist/`, `.zip`, and `.tgz` artifacts out of commits.
 
@@ -94,9 +96,8 @@ Manual whole-skill-folder copying is for installing a specific Toolkit skill wit
 
 | Scope | Skill folder location |
 |---|---|
-| Repo-level | `<repo>/.agents/skills/<skill-name>/SKILL.md` |
-| User-level | `$HOME/.agents/skills/<skill-name>/SKILL.md` |
-| Admin-level | `/etc/codex/skills/<skill-name>/SKILL.md` |
+| Repo-level | `<repo>\.agents\skills\<skill-name>\SKILL.md` |
+| User-level | `%USERPROFILE%\.agents\skills\<skill-name>\SKILL.md` |
 
 Codex scans repo skills from `.agents/skills` from the current working directory up to the repo root. It initially sees each skill's name, description, and file path, then loads the full `SKILL.md` only when selected. Use `/skills` or `$skill-name` for explicit invocation; implicit invocation depends on the `description` frontmatter. `~/.codex/config.toml` is for Codex configuration, including disabling skills by `SKILL.md` path, not the main skill install surface.
 
@@ -108,8 +109,8 @@ Manual whole-skill-folder copying is for installing a specific Toolkit skill wit
 
 | Scope | Skill folder location |
 |---|---|
-| Project-level | `<repo>/.claude/skills/<skill-name>/SKILL.md` |
-| User-level | `$HOME/.claude/skills/<skill-name>/SKILL.md` |
+| Project-level | `<repo>\.claude\skills\<skill-name>\SKILL.md` |
+| User-level | `%USERPROFILE%\.claude\skills\<skill-name>\SKILL.md` |
 
 Use `CLAUDE.md`, `CLAUDE.local.md`, or `.claude/rules/` for always-on Claude Code instructions.
 
@@ -121,12 +122,12 @@ Manual whole-skill-folder copying is the way to install a Toolkit skill for Open
 
 | Scope | Skill folder location |
 |---|---|
-| Project OpenCode config | `<repo>/.opencode/skills/<skill-name>/SKILL.md` |
-| User OpenCode config | `$HOME/.config/opencode/skills/<skill-name>/SKILL.md` |
-| Project Claude-compatible | `<repo>/.claude/skills/<skill-name>/SKILL.md` |
-| User Claude-compatible | `$HOME/.claude/skills/<skill-name>/SKILL.md` |
-| Project agent-compatible | `<repo>/.agents/skills/<skill-name>/SKILL.md` |
-| User agent-compatible | `$HOME/.agents/skills/<skill-name>/SKILL.md` |
+| Project OpenCode config | `<repo>\.opencode\skills\<skill-name>\SKILL.md` |
+| User OpenCode config | `%USERPROFILE%\.config\opencode\skills\<skill-name>\SKILL.md` |
+| Project Claude-compatible | `<repo>\.claude\skills\<skill-name>\SKILL.md` |
+| User Claude-compatible | `%USERPROFILE%\.claude\skills\<skill-name>\SKILL.md` |
+| Project agent-compatible | `<repo>\.agents\skills\<skill-name>\SKILL.md` |
+| User agent-compatible | `%USERPROFILE%\.agents\skills\<skill-name>\SKILL.md` |
 
 OpenCode walks upward from the current working directory to the git worktree for project-local skill paths, and it also loads global skill definitions. Use `AGENTS.md`, `AGENTS.override.md`, or the configured OpenCode rules file for always-on OpenCode instructions.
 
@@ -146,21 +147,20 @@ After explicit approval of that exact write:
 node repo/scripts/toolkit-local-bridge.cjs --copy-antigravity-skills --antigravity-project-root <absolute-path> --write
 ```
 
-The copy writes only skill files under `<workspace>/.agents/skills/`. It does not install Python, Antigravity 2, AG2 or pip packages, change global settings or enable auto-sync.
+The copy writes only skill files under `<workspace>\.agents\skills\` and leaves out the Toolkit-only skills (see Packaging in the [Skill Safety Matrix](SKILL-SAFETY-MATRIX.md#packaging)). It does not install Python, Antigravity 2, AG2 or pip packages, change global settings or enable auto-sync.
 
 **Use the portable workspace location for Toolkit skills:**
 
 | Location type | Skill folder path |
 |---|---|
-| Workspace portable copy | `<workspace>/.agents/skills/<skill-name>/SKILL.md` |
+| Workspace portable copy | `<workspace>\.agents\skills\<skill-name>\SKILL.md` |
 
 **Put repo-local bootstrap outputs in the target repo:**
 
 1. `AGENTS.md`.
-2. `GEMINI.md`.
-3. `.agents/rules/00-agent-toolkit-bootstrap.md`.
+2. `.agents/rules/00-agent-toolkit-bootstrap.md`.
 
-Use `GEMINI.md` or the configured context file for always-on Antigravity 2 instructions.
+Antigravity 2 reads `AGENTS.md` itself, so Toolkit installs no `GEMINI.md` shim.
 
 `skills/**/SKILL.md` files are complete canonical toolkit surfaces. Edit the relevant skill folder directly and run the targeted skill portability and surface audits.
 
@@ -172,12 +172,7 @@ Human-facing navigational paths and URLs must be clickable Markdown links. Do no
 
 The Toolkit Local Bridge is for user-local, PC-level adapter state. It is not a project-repo installer.
 
-Default paths:
-
-| Platform | Hub path |
-|---|---|
-| POSIX | `~/.ai-agent-toolkit/current` |
-| Windows | `%USERPROFILE%\.ai-agent-toolkit\current` |
+Default hub path: `%USERPROFILE%\.ai-agent-toolkit\current`.
 
 Audit without writes:
 
@@ -225,7 +220,7 @@ Codex hooks run the bridge copy in Codex's plugin cache. Claude Code runs Toolki
 
 Refreshing one host never mutates the other host's cache.
 
-Claude strict root-only enforcement is applied only when native plugin installation freshness, enabled state, host-reported trust, and active hook execution all verify for proof schema 3: exact plugin version, cache identity, hooks configuration, controller bytes, process-launch bytes, and executed native-agent hook-script bytes. Every bound installed path must be a non-symlink regular file. Schema-2 proof is stale and unsupported. Setup does not approve trust or manufacture activation proof, and an install/update or restart instruction is not proof that the current session executes the hook. The verified setup CLI is persisted, with explicit and current environment overrides taking precedence without rewriting the profile. Relative path-like commands are rejected on every platform. POSIX bare `claude` remains unpinned for official launcher updates; Windows bare commands resolve only from absolute PATH entries and execute that exact candidate, so project-local shims cannot shadow the trusted launcher. Missing or lost proof leaves strict state root-only/unapplied; broader-native remains available explicitly outside Toolkit control.
+Claude strict root-only enforcement is applied only when native plugin installation freshness, enabled state, host-reported trust, and active hook execution all verify for proof schema 3: exact plugin version, cache identity, hooks configuration, controller bytes, process-launch bytes, and executed native-agent hook-script bytes. Every bound installed path must be a non-symlink regular file. Schema-2 proof is stale and unsupported. Setup does not approve trust or manufacture activation proof, and an install/update or restart instruction is not proof that the current session executes the hook. The verified setup CLI is persisted, with explicit and current environment overrides taking precedence without rewriting the profile. Relative path-like commands are rejected. Bare commands resolve only from absolute PATH entries and execute that exact candidate, so project-local shims cannot shadow the trusted launcher. Missing or lost proof leaves strict state root-only/unapplied; broader-native remains available explicitly outside Toolkit control.
 
 The Toolkit direct (`toolkit-direct`) Claude worker and checker topology is retired. Setup offers root-only, broader-native and keep, runs no launch-capability probes, and resolves a stored direct profile to root-only. Governed workers use the registry-pinned V3 launchers.
 
@@ -306,7 +301,6 @@ OpenCode [official n8n Skills](https://github.com/n8n-io/skills) support is plat
 Use:
 
 - [Shared managed agent rules template](../../skills/repository-agent-rules/repo-local/AGENTS.managed.template.md)
-- [Antigravity 2 GEMINI shim template](../../skills/repository-agent-rules/repo-local/GEMINI.shim.template.md)
 - [Antigravity 2 bootstrap template](../../skills/repository-agent-rules/repo-local/antigravity-bootstrap.template.md)
 - [n8n agent rules skill](../../skills/n8n-safety-router/)
 - [optional Antigravity 2 n8n adapter](../../skills/n8n-safety-router/adapters/GEMINI.n8n-brief.template.md)

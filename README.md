@@ -1,159 +1,74 @@
 # AI Agent Toolkit
 
-A practical skills-first toolkit of reusable AI-agent skills, machine contracts, provenance records, and safe maintenance scripts.
+**Supported OS:** Windows 10 and 11. macOS and Linux computers are not supported. (Linux is still used for CI, cloud agent sessions and the remote servers some skills manage.)
 
-## What this repo is
+Skills and working rules for AI coding agents. Toolkit installs them into Codex and Claude Code as a native plugin, keeps them current from this repository's `main` branch, and adds a short set of global rules every session follows. Antigravity gets a portable copy of the skills only.
 
-This repo keeps reusable AI-agent material in a direct canonical layout:
+## Install
 
-- [skills/](skills/) contains complete copyable AI-agent skill folders.
-- [repo/contracts/](repo/contracts/) contains machine contracts, fixtures, templates, agent-rule inputs, and plugin source contracts.
-- [repo/](repo/) contains maintenance docs, scripts, tests, provenance, and validation policy.
-- [.codex-plugin/](.codex-plugin/) and [.claude-plugin/](.claude-plugin/) contain platform-specific native plugin metadata.
+You need Git, Node.js and Codex or Claude Code on a Windows computer.
 
-Repo-wide MCP is intentionally not shipped, generated, maintained, or advertised as a supported surface for now. n8n work uses the [official n8n Skills](https://github.com/n8n-io/skills) and the n8n API, with setup guidance in [skills/n8n-environment-setup/](skills/n8n-environment-setup/).
+1. Clone this repository: `git clone https://github.com/weijunswj/ai-agent-toolkit`.
+2. Open the folder in Codex or Claude Code and say `setup toolkit`.
+3. Answer the setup questions. Reply `all recommended` to take every recommended choice.
+4. Start a new session when setup says so. In the Codex app, open `/hooks` and trust the updated Toolkit hook.
 
-## Quick Start
+Setup keeps its own clean copy of this repository at `%USERPROFILE%\.ai-agent-toolkit\source\ai-agent-toolkit` and installs from there. Details: [How To Use](repo/docs/HOW-TO-USE.md#install-toolkit-skills).
 
-| What you want | Start here |
-|---|---|
-| Full guide or source context | Open the relevant `skills/<skill-name>/` folder or `repo/contracts/` entry. |
-| Set up Toolkit itself | Use [Toolkit Setup](#toolkit-setup), then ask Codex or Claude Code: `setup toolkit` or `refresh toolkit`. |
-| Install a skill | Copy the whole skill folder using [Install Skills By Platform](#install-skills-by-platform). |
-| Review skill safety | Use the [Skill Safety Matrix](repo/docs/SKILL-SAFETY-MATRIX.md) before creating, extending, or importing skills. |
-| Maintenance work | Start with [repo/docs/](repo/docs/) and the validation commands below. |
+## Update
 
-## Toolkit Setup
+With automatic updates on (setup recommends it), Toolkit checks for a newer `main` when a Codex or Claude Code session starts and updates itself. To update now, say `refresh toolkit`. Start a new session afterwards so the new version loads.
 
-For normal human setup, keep the journey short:
+## Remove
 
-1. Pull or update this Toolkit repo from `weijunswj/ai-agent-toolkit`.
-2. In Codex or Claude Code, open the repo and say `setup toolkit`, `refresh toolkit`, or plain `refresh` while the conversation is clearly about Toolkit setup/update state.
-3. The agent must run the managed checkout setup script when it exists: Windows Codex uses `node "%USERPROFILE%\.ai-agent-toolkit\source\ai-agent-toolkit\repo\scripts\setup-toolkit.cjs" --execute --profile auto-main`; POSIX Codex uses `node "$HOME/.ai-agent-toolkit/source/ai-agent-toolkit/repo/scripts/setup-toolkit.cjs" --execute --profile auto-main`; Claude Code appends `--host claude-code`.
-4. Use `node repo/scripts/setup-toolkit.cjs --execute --profile auto-main` from the active repo only as bootstrap/fallback when the managed checkout script is missing, then hand off to the managed checkout script after it exists.
-5. If setup exits with code `23`, the complete compact bank must be visible in the same response as any recommended-default shortcut. Missing or incomplete output fails closed without retry and is never treated as approval; `--yes-recommended` is allowed only after you accept the displayed recommendations.
-6. Keep routine setup on the root agent; it must not spawn subagents for instruction, docs, state, choice, or validation inspection. Codex recommends root-only under the strict contract and exposes one helper only as a manual conservative memory backstop; runtime mechanics stay in a technical proposal. Capacity is not launch permission: unsupported admission, effort, or child non-fast enforcement stays root-only. Unsafe current capacity is labelled, user-owned conflicts require one exact `apply` confirmation in the same flow, and other hosts receive no invented enforcement profile.
-7. If Codex installs or updates the plugin, manually approve the startup hook when Codex prompts.
-8. Restart the host if setup says the plugin needs a fresh session.
-9. Keep native plugin installs host-local: Codex must not install/update Claude Code, and Claude Code must not install/update Codex.
-10. The bridge writes into no other app; OpenCode is not a Toolkit bridge target. Antigravity receives portable skills only, copied into a workspace by an explicit approved command; there is no native Antigravity plugin or sync.
-
-More setup context lives in [How To Use](repo/docs/HOW-TO-USE.md#install-toolkit-skills); detailed plugin and bridge mechanics live in [Toolkit Local Bridge](repo/docs/TOOLKIT-LOCAL-BRIDGE.md).
-
-## Terms
-
-| Term | What it means |
-|---|---|
-| Skill | A copyable AI-agent folder with instructions, references, templates, metadata, and helper files. |
-| MCP | Not a repo-wide shipped/generated surface in this repo right now. n8n work uses the [official n8n Skills](https://github.com/n8n-io/skills) and the n8n API; n8n Environment Setup holds the setup guidance. |
-| Contract | A schema, policy, fixture, template, or reviewed source input under [repo/contracts/](repo/contracts/). |
-| Native plugin metadata | Platform-specific `.codex-plugin/**` or `.claude-plugin/**` metadata that lets Codex and Claude Code update Toolkit through their own plugin systems. |
-
-## Canonical Map
-
-| Path | Purpose |
-|---|---|
-| [skills/](skills/) | Complete copyable skill folders. |
-| [repo/contracts/](repo/contracts/) | Machine contracts, fixtures, templates, agent-rule inputs, and plugin source contracts. |
-| [repo/source-watch/](repo/source-watch/) | Notification-only source-watch state and active third-party provenance. |
-| [repo/scripts/](repo/scripts/) | Deterministic runtime and maintenance helpers. |
-| [repo/tests/](repo/tests/) | Focused contract, safety, parser, and runtime tests. |
-| [repo/docs/](repo/docs/) | Policy, safety, architecture, and validation guidance. |
+- **Claude Code:** `claude plugin uninstall ai-agent-toolkit@ai-agent-toolkit-local`
+- **Codex:** `codex plugin remove ai-agent-toolkit@ai-agent-toolkit-local`
+- **Global rules:** `node "%USERPROFILE%\.ai-agent-toolkit\source\ai-agent-toolkit\repo\scripts\toolkit-global-rules.cjs" --remove` takes Toolkit's block out of `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md` and leaves the rest of each file alone.
+- **Automatic updates:** `node "%USERPROFILE%\.ai-agent-toolkit\source\ai-agent-toolkit\repo\scripts\toolkit-local-bridge.cjs" --disable-auto-sync --disable-repo-auto-update --write`
+- **Settings and files left behind:** before uninstalling, run `setup toolkit` in Claude Code and choose "Broader native behaviour" so Toolkit removes the subagent limit it set in your Claude Code settings, and in Codex answer "Leave it" for the instruction limit so Toolkit takes its `project_doc_max_bytes` line out of `~/.codex/config.toml`. Afterwards you can delete the `toolkit-*.md` helper files in `%USERPROFILE%\.claude\agents` and the `%USERPROFILE%\.ai-agent-toolkit` folder.
 
 ## Skills
 
-Skills are copyable folder packages. The portable package unit is `skills/<skill-name>/`. Copy whole skill folders, not just `SKILL.md`.
+Each skill is a folder under [skills/](skills/). Copy the whole folder, not just `SKILL.md`, if you install one by hand ([where each app looks](repo/docs/HOW-TO-USE.md#manual-skill-folder-locations)).
 
 | Skill | Use |
 |---|---|
-| [Repository Agent Rules](skills/repository-agent-rules/) | Install and maintain execution-first repository rules for supported coding agents. |
-| [Controller Bootstrap](skills/controller-bootstrap/) | Explicitly re-enter an already-assigned Toolkit repository controller from trusted CURRENT and exact governance-source evidence; grants no role, authority, or host permission. |
-| [Toolkit Setup](skills/toolkit-setup/) | Route Toolkit plugin setup, Windows hook repair, repo-backed auto-update, local bridge setup, Antigravity portable skills copying, audit, sync, disable, stale-state, and bridge troubleshooting requests to the shared setup subsystem. |
-| [Toolkit Env](skills/toolkit-env/) | See, add, change, rotate, or remove your API keys and tokens, and connect Claude Code or Codex MCP entries to them, with values kept in the computer's credential store and out of chat. |
-| [n8n Safety Router](skills/n8n-safety-router/) | Apply the full n8n operating contract before n8n workflow, MCP, import/export, credential, execution, or live-instance work. |
-| [n8n Environment Setup](skills/n8n-environment-setup/) | Set up n8n development, production-tunnel, or hosted environments, backups, launchers, and official n8n Skills setup. |
-| [n8n Workflow Transport](skills/n8n-workflow-transport/) | Sanitise, validate, compare, export, or prepare n8n workflow JSON for separately approved transport. |
-| [Secure CI/CD](skills/secure-ci-cd/) | Plan security-first CI/CD with approval gates, GitHub Actions guidance, and status templates. |
-| [Skill Product Review](skills/skill-product-review/) | Audit third-party agent products and maintain approved source-traceable skills, provenance, templates, and audits. |
-| [Local AI Safety](skills/local-ai-safety/) | Review local AI runtimes, model downloads, local AI web UIs, and endpoint exposure before setup. |
-| [Managed App Foundation Review](skills/managed-app-foundation-review/) | Compare low-cost managed or owner-hosted foundations before custom-building auth, backend, database, workflow automation, CRM, forms, email, analytics, ops, and account-security surfaces. |
-| [GitHub Program Reconciler](skills/github-program-reconciler/) | Explicit-only shipped parent/direct-child governance, deterministic bounded reconciliation, truthful exact-head review evidence, and Deferred Findings without review mutation or Web finality. |
-| [Release Readiness Audit](skills/release-readiness-audit/) | Run guarded release-readiness preflight, audit reporting, security review, and remediation batches. |
-| [Codex SSH Hostinger Coolify Setup Maintainer](skills/codex-ssh-hostinger-coolify-setup-maintainer/) | Guide Codex through Hostinger VPS plus Coolify deployment setup, SSH preflight, daily security checks, intrusion-signal review, optional Telegram/email maintenance alerts, and incident response with owner approval gates. |
-| [Self-Hosted Service Safety](skills/self-hosted-service-safety/) | Review non-n8n Docker/VPS, tunnel, public-port, credential, backup, SSH, traffic-log, and first-run safety. |
-| [Frontend Art Direction](skills/frontend-art-direction/) | Establish distinctive frontend direction or review implementation against an approved design with accessibility, privacy, and security guardrails. |
-| [Windows Local Dev Services](skills/windows-local-dev-services/) | Start, verify, and troubleshoot Windows local development services. |
+| [Repository Agent Rules](skills/repository-agent-rules/) | Put a repository under Toolkit's rules, or check and repair them. |
+| [Controller Bootstrap](skills/controller-bootstrap/) | Re-enter an already assigned Toolkit controller after lost context. |
+| [Toolkit Setup](skills/toolkit-setup/) | Set up, update, check or troubleshoot Toolkit itself. |
+| [Toolkit Env](skills/toolkit-env/) | Manage your API keys and tokens in Windows Credential Manager, kept out of chat. |
+| [n8n Safety Router](skills/n8n-safety-router/) | The safety rules to load before any n8n work. |
+| [n8n Environment Setup](skills/n8n-environment-setup/) | Set up n8n locally or on a server, with backups and the official n8n skills. |
+| [n8n Workflow Transport](skills/n8n-workflow-transport/) | Clean, check and compare n8n workflow files before an approved import or export. |
+| [Secure CI/CD](skills/secure-ci-cd/) | Plan security-first CI/CD and GitHub Actions. |
+| [Skill Product Review](skills/skill-product-review/) | Review third-party agent skills before using or adapting them. |
+| [Local AI Safety](skills/local-ai-safety/) | Review local AI runtimes, model downloads and exposed endpoints. |
+| [Managed App Foundation Review](skills/managed-app-foundation-review/) | Compare managed services before building auth, databases or other foundations yourself. |
+| [GitHub Program Reconciler](skills/github-program-reconciler/) | Keep a GitHub programme issue and its children in step with the real PR and review state. |
+| [Release Readiness Audit](skills/release-readiness-audit/) | Run a guarded release-readiness audit and fix batches. |
+| [Codex SSH Hostinger Coolify Setup Maintainer](skills/codex-ssh-hostinger-coolify-setup-maintainer/) | Set up and maintain a Hostinger VPS with Coolify, with owner approval gates. |
+| [Self-Hosted Service Safety](skills/self-hosted-service-safety/) | Review Docker, VPS, tunnel and public-port safety for self-hosted services. |
+| [Frontend Art Direction](skills/frontend-art-direction/) | Give a frontend a deliberate visual direction, or review one against an approved design. |
+| [Windows Local Dev Services](skills/windows-local-dev-services/) | Start, check and troubleshoot local dev servers on Windows. |
 
-## Install Skills By Platform
+How risky each skill is and what it may touch: [Skill Safety Matrix](repo/docs/SKILL-SAFETY-MATRIX.md).
 
-This section is only for manually copying Toolkit-owned skill folders under [skills/](skills/). Native Toolkit plugin setup belongs in [Toolkit Setup](#toolkit-setup).
+## Where the docs live
 
-> [!IMPORTANT]
-> Repo-local agent instruction installs require a selected/open target repo or an explicit target path. Standalone chats without a workspace cannot safely infer where to install `AGENTS.md`, `GEMINI.md`, `CLAUDE.md`, or `.agents/rules/00-agent-toolkit-bootstrap.md`.
-
-Copy the whole `skills/<skill-name>/` folder into **ANY ONE** supported location for the target platform. Keep `README.md`, `references/`, `templates/`, `agents/`, and other supporting files beside `SKILL.md` when present.
-
-Generic rules reach every session through the global rules that `setup toolkit` installs in each harness's user-level file. A repository opts into Toolkit governance with the governed block in its `AGENTS.md`, created or merged from [repo-local/AGENTS.managed.template.md](skills/repository-agent-rules/repo-local/AGENTS.managed.template.md), not from this toolkit repo's root [AGENTS.md](AGENTS.md). Claude Code and Antigravity 2 use tiny shims that point back to the target repo's `AGENTS.md`; do not install a shim by itself. Antigravity 2 also uses `.agents/rules/00-agent-toolkit-bootstrap.md` as a tiny bootstrap, but the target repo's `AGENTS.md` remains canonical.
-
-| Platform | Manual Toolkit-owned skill folder locations | Active instruction files | Reference |
-|---|---|---|---|
-| Codex | `<repo>/.agents/skills/<skill-name>/`<br>`$HOME/.agents/skills/<skill-name>/`<br>`/etc/codex/skills/<skill-name>/` | `AGENTS.md` | [Codex](repo/docs/HOW-TO-USE.md#codex). |
-| Claude Code | `<repo>/.claude/skills/<skill-name>/`<br>`$HOME/.claude/skills/<skill-name>/` | `AGENTS.md`, `CLAUDE.md` shim | [Claude Code](repo/docs/HOW-TO-USE.md#claude-code). |
-| OpenCode | `<repo>/.opencode/skills/<skill-name>/`<br>`$HOME/.config/opencode/skills/<skill-name>/`<br>`<repo>/.claude/skills/<skill-name>/`<br>`$HOME/.claude/skills/<skill-name>/`<br>`<repo>/.agents/skills/<skill-name>/`<br>`$HOME/.agents/skills/<skill-name>/` | `AGENTS.md` | [OpenCode](repo/docs/HOW-TO-USE.md#opencode). |
-| Antigravity 2 | `<workspace>/.agents/skills/<skill-name>/` (portable copy only; no native plugin) | `AGENTS.md`, `GEMINI.md`, Antigravity 2 bootstrap | [Antigravity 2](repo/docs/HOW-TO-USE.md#antigravity-2). |
-
-Humans and agents use the same canonical `skills/**` and `repo/**` surfaces. No intermediate publication step is required.
-
-## MCP Status
-
-Repo-wide MCP is intentionally not shipped, generated, maintained, or advertised as a supported surface for now.
-
-The supported path is direct and skills-first: humans and agents use `skills/**` and `repo/**`.
-
-n8n work uses the [official n8n Skills](https://github.com/n8n-io/skills) and the n8n API, with setup guidance in [skills/n8n-environment-setup/](skills/n8n-environment-setup/). This is not a repo-wide MCP surface.
-
-## Folder Map
-
-| Path | Use it when |
+| Doc | What it covers |
 |---|---|
-| [skills/](skills/) | You want copyable agent skills. |
-| [repo/contracts/](repo/contracts/) | You want machine contracts, templates, agent-rule inputs, or plugin source contracts. |
-| [.codex-plugin/](.codex-plugin/) | You want generated Codex native plugin metadata. |
-| [.claude-plugin/](.claude-plugin/) | You want generated Claude Code native plugin metadata. |
-| [repo/](repo/) | You are maintaining this toolkit. |
-| [repo/source-watch/](repo/source-watch/) | You are reviewing source-watch lanes, including host-harness capability drift. |
+| [How To Use](repo/docs/HOW-TO-USE.md) | Setup steps, manual skill copies, each app's details. |
+| [Toolkit Local Bridge](repo/docs/TOOLKIT-LOCAL-BRIDGE.md) | How updates, plugin installs and session-start checks work. |
+| [Toolkit Env](repo/docs/TOOLKIT-ENV.md) | Where API keys are kept and how apps reach them. |
+| [For AI Agents](repo/docs/FOR_AI_AGENTS.md) | What an agent working in this repository reads first. |
+| [Validation Strategy](repo/docs/VALIDATION-STRATEGY.md) | Which checks to run before a pull request. |
+| [repo/docs/](repo/docs/) | Everything else: policy, safety, architecture and the changelog. |
 
-## For Maintainers
-
-Edit the canonical surface directly:
-
-1. Update `skills/<skill-name>/` for skill content.
-2. Update `repo/contracts/` for schemas, policies, fixtures, templates, or agent-rule inputs.
-3. Update `repo/source-watch/provenance/` only for reviewed active third-party provenance changes.
-4. Run the two retained synchronizer checks when managed blocks or instruction shims changed.
-
-There is no secondary skill output to rebuild. Keep every retained skill complete and locally usable.
-
-For canonical surface rules, follow [repo/docs/PROJECT-MODULE-STANDARD.md](repo/docs/PROJECT-MODULE-STANDARD.md).
-
-## Validation
-
-Use targeted local checks before pushing. CI runs the full `npm run validate:all` merge gate; run it locally for broad or risky changes, workflow/sync/generator/package/security changes, or CI reproduction. See [repo/docs/VALIDATION-STRATEGY.md](repo/docs/VALIDATION-STRATEGY.md).
-
-```powershell
-node repo/scripts/sync-repo-doc-contract.cjs --check
-node repo/scripts/sync-agent-instruction-shims.cjs --check
-node repo/scripts/audit-project-source-locks.cjs
-node repo/scripts/validate-toolkit.cjs
-node --test repo/tests/*.test.cjs
-node repo/scripts/audit-skill-portability.cjs
-node repo/scripts/audit-published-surfaces.cjs --check
-git diff --check
-```
+Maintainers start with [AGENTS.md](AGENTS.md). There is no repo-wide MCP server; n8n work uses the [official n8n Skills](https://github.com/n8n-io/skills) and the n8n API.
 
 ## Appendix: Source-of-Truth Contract
 
-<!-- AI-AGENT-TOOLKIT:repo/contracts/source-of-truth-contract.md:BEGIN SOURCE-OF-TRUTH-CONTRACT v2 toolkit=3.5.0 sha256=24ee07475127 -->
+<!-- AI-AGENT-TOOLKIT:repo/contracts/source-of-truth-contract.md:BEGIN SOURCE-OF-TRUTH-CONTRACT v2 toolkit=3.6.0 sha256=24ee07475127 -->
 ## Source-of-Truth Contract
 
 - `skills/**` is the canonical copyable product surface; each skill folder is the install unit and is edited directly. `skills/controller-bootstrap/` is an explicit-only re-entry procedure for an assigned Toolkit controller; it depends on the live `repo/CONTROLLER.md` and `repo/contracts/controller-kernel/stack-registry-v3.json` and is not a policy copy, role assignment or permission.

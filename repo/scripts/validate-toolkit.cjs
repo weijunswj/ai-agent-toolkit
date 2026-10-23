@@ -76,7 +76,7 @@ const skillProductMigrationEntryKeys = Object.freeze([
 const ignoredDirs = new Set(['.git', 'node_modules', '_dist', 'dist', 'coverage', '.tmp', '.n8n-local', '.n8n-production-cloudflare', '.to-sanitise', '.sanitised', '.n8n-workflow-backups', '.claude']);
 const allowedRootEntries = new Set([
   '.git', '.github', '.gitattributes', '.gitignore', '.codex-plugin', '.claude-plugin', '.claude', '.agents',
-  'AGENTS.md', 'CLAUDE.md', 'GEMINI.md', 'README.md', 'package.json', 'package-lock.json', 'repo', 'skills'
+  'AGENTS.md', 'CLAUDE.md', 'README.md', 'package.json', 'package-lock.json', 'repo', 'skills'
 ]);
 const secretPatterns = [
   /\bsk-[A-Za-z0-9_-]{20,}/,
@@ -100,6 +100,8 @@ const allowedTrackedTemplatePrefixes = [
   'skills/n8n-environment-setup/templates/.n8n-local/',
   'skills/n8n-environment-setup/templates/.n8n-production-cloudflare/'
 ];
+// This repository's shared Claude Code settings (WebFetch/WebSearch allow); local settings stay untracked.
+const allowedTrackedSharedSettings = new Set(['.claude/settings.json']);
 
 function slash(value) {
   return value.split(path.sep).join('/');
@@ -578,7 +580,9 @@ function validateSkillSafetyMatrix(errors) {
     fail(errors, `Missing skill safety matrix: ${matrixPath}`);
     return;
   }
-  const matrix = readText(matrixPath);
+  const fullMatrix = readText(matrixPath);
+  validateSkillPackagingTable(errors, matrixPath, markdownSection(fullMatrix, 'Packaging'));
+  const matrix = markdownSection(fullMatrix, 'Skill Safety Matrix');
   const header = matrix.split('\n').find((line) => line.startsWith('| Skill |'));
   const expectedColumns = ['Skill', 'Primary Trigger', 'Risk Class', 'Local Writes', 'Scripts Or Tools', 'External Or Live Risk', 'Approval Boundary', 'Companion Skills', 'Source/Provenance', 'Notes And Boundaries'];
   if (!header || JSON.stringify(header.split('|').slice(1, -1).map((cell) => cell.trim())) !== JSON.stringify(expectedColumns)) {
@@ -599,8 +603,34 @@ function validateSkillSafetyMatrix(errors) {
   }
 }
 
+// The Packaging table says where each skill ships. Internal skills match the Antigravity copier's list,
+// which is what keeps them out of the portable copy; both native plugins carry every skill.
+function validateSkillPackagingTable(errors, matrixPath, section) {
+  const { INTERNAL_SKILLS } = require('./toolkit-antigravity-project-skills.cjs');
+  const header = section.split('\n').find((line) => line.startsWith('| Skill |'));
+  const columns = ['Skill', 'Class', 'Claude Code plugin', 'Codex plugin', 'Antigravity copy'];
+  if (!header || JSON.stringify(header.split('|').slice(1, -1).map((cell) => cell.trim())) !== JSON.stringify(columns)) {
+    fail(errors, `${matrixPath} has no valid Packaging table`);
+    return;
+  }
+  const rows = [...section.matchAll(/^\|\s*\[([^\]]+)\]\(\.\.\/\.\.\/skills\/([^/)]+)\/\)\s*\|(.+)$/gm)]
+    .map((match) => ({ name: match[2], cells: match[0].split('|').slice(1, -1).map((cell) => cell.trim()) }));
+  const names = rows.map((row) => row.name).sort();
+  const current = skillDirs().map((rel) => path.basename(rel)).sort();
+  if (JSON.stringify(names) !== JSON.stringify(current)) fail(errors, `${matrixPath} Packaging table must cover current skills exactly once`);
+  const internal = rows.filter((row) => row.cells[1] === 'internal').map((row) => row.name).sort();
+  if (JSON.stringify(internal) !== JSON.stringify([...INTERNAL_SKILLS].sort())) fail(errors, `${matrixPath} Packaging internal skills must match toolkit-antigravity-project-skills.cjs`);
+  for (const row of rows) {
+    const portable = row.cells[1] === 'portable';
+    if (!portable && row.cells[1] !== 'internal') fail(errors, `${matrixPath} Packaging row for ${row.name} has an invalid class`);
+    if (row.cells[2] !== 'Yes' || row.cells[3] !== 'Yes' || row.cells[4] !== (portable ? 'Yes' : 'No')) fail(errors, `${matrixPath} Packaging row for ${row.name} has the wrong hosts`);
+  }
+}
+
 function validateReadmeSkillTable(errors) {
   const readme = readText('README.md');
+  // Windows is the only supported computer OS (#532); the README says so right under its title.
+  if (!/^# AI Agent Toolkit\n\n\*\*Supported OS:\*\* Windows\b/.test(readme)) fail(errors, 'README must open with the "**Supported OS:** Windows" line under its title');
   const section = markdownSection(readme, 'Skills');
   const rows = [...section.matchAll(/^\|\s*\[([^\]]+)\]\(skills\/([^/)]+)\/\)\s*\|/gm)].map((match) => match[2]).sort();
   const current = skillDirs().map((rel) => path.basename(rel)).sort();
@@ -720,7 +750,8 @@ function validateTrackedLocalRuntimeFiles(errors) {
   if (result.status !== 0) return;
   for (const rel of result.stdout.split('\0').filter(Boolean).map(slash)) {
     if (rel.split('/').some((segment) => ignoredDirs.has(segment))
-      && !allowedTrackedTemplatePrefixes.some((prefix) => rel.startsWith(prefix))) {
+      && !allowedTrackedTemplatePrefixes.some((prefix) => rel.startsWith(prefix))
+      && !allowedTrackedSharedSettings.has(rel)) {
       fail(errors, `Tracked local runtime file is not allowed: ${rel}`);
     }
   }

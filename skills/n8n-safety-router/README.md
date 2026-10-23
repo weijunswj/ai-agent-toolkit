@@ -14,7 +14,7 @@ Install or load this skill for every n8n task. Other n8n skills depend on it:
 
 The full rules live at [n8n-safety-rules.md](n8n-safety-rules.md). Keep that file available locally when copying this skill folder.
 
-Adapters under [adapters/](adapters/) are optional brief snippets. For repo-local installs, the canonical adapter target is root `AGENTS.md`; `CLAUDE.md`, `GEMINI.md`, and `.agents/rules/00-agent-toolkit-bootstrap.md` should stay tiny platform shims maintained by `repository-agent-rules`.
+Adapters under [adapters/](adapters/) are optional brief snippets. For repo-local installs, the canonical adapter target is root `AGENTS.md`; `CLAUDE.md` and `.agents/rules/00-agent-toolkit-bootstrap.md` stay tiny platform shims maintained by `repository-agent-rules`, and the adapter never goes into a `GEMINI.md`.
 
 When this skill is used for an n8n task, agents should automatically check whether the current target repo has the managed adapter block in `AGENTS.md`. If `AGENTS.md` exists and the block is missing or stale, run [scripts/install-n8n-agent-adapter.cjs](scripts/install-n8n-agent-adapter.cjs) with `--target auto --dry-run`, show the preview, and ask for explicit current-turn approval naming `AGENTS.md` before `--write`.
 
