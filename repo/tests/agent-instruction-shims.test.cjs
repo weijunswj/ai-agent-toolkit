@@ -165,7 +165,7 @@ test('global rules hold the generic floor: precedence, entry routing, safety gat
 test('governed rules hold only Toolkit-governed workflow, records and routes', () => {
   const text = readText(governedPath);
   for (const rule of [
-    /This block opts the repository into AI Agent Toolkit governance; nothing Toolkit-governed applies without it/,
+    /This block and `\.github\/toolkit-programme\.json` opt the repository into AI Agent Toolkit governance; nothing Toolkit-governed applies without both, or once the user declines/,
     /read https:\/\/github\.com\/weijunswj\/ai-agent-toolkit\/blob\/main\/repo\/contracts\/agent-rules\/global-rules\.md before planning/,
     /`G0 Discovery -> G1 Builder, including UAT -> G2 Review`/,
     /G2 stays adversarial on every reachable path inside the frozen supported host\/environment matrix/,

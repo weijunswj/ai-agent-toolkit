@@ -179,7 +179,11 @@ function readIdentity(cwd) {
   if (origins.length !== 1) return { root, valid: false, reason: 'origin-ambiguous' };
   const remote = validateRemoteIdentity(origins[0]);
   if (!remote.valid) return { root, valid: false, reason: 'origin-unsupported' };
-  return { root, valid: true, reason: null, repository_id: registry.repositoryIdForCanonicalRemote(remote.canonical), remote };
+  return {
+    root, valid: true, reason: null, remote,
+    repository_id: registry.repositoryIdForCanonicalRemote(remote.canonical),
+    legacy_repository_ids: registry.legacyRepositoryIdsForCanonicalRemote(remote.canonical),
+  };
 }
 
 // "owner/name" for a remote whose path has exactly two segments (a trailing .git dropped).
@@ -252,16 +256,16 @@ function registryPathFor(options = {}) {
 }
 
 // The user's recorded governance decision for one identity: 'enabled', 'disabled' or
-// 'unresolved' (nothing recorded), with its decision kind. A missing file is 'unresolved'; a
-// file that cannot be read or does not validate throws.
-function readDecision(repositoryId, options = {}) {
+// 'unresolved' (nothing recorded), with its decision kind. Keys earlier versions stored for the
+// same repository count when the repository's own key has no entry and they agree. A missing
+// file is 'unresolved'; a file that cannot be read or does not validate throws.
+function readDecision(repositoryId, options = {}, legacyIds = []) {
   const bytes = readSmallFile(registryPathFor(options), registry.MAX_REGISTRY_BYTES, 'REGISTRY_TOO_LARGE');
   if (!bytes) return { state: 'unresolved', decision_kind: null };
   let parsed;
   try { parsed = registry.parseRegistryBytes(bytes); } catch (error) { fail(/^[A-Z][A-Z0-9_]{1,63}$/.test(error && error.code) ? error.code : 'REGISTRY_MALFORMED'); }
-  const record = parsed.repositories.find(entry => entry.repository_id === repositoryId);
-  const entry = record && record.capabilities.find(candidate => candidate.capability_id === GOVERNANCE_CAPABILITY);
-  return entry ? { state: entry.state, decision_kind: entry.decision_kind } : { state: 'unresolved', decision_kind: null };
+  const entry = registry.readCapabilityMap(parsed, repositoryId, legacyIds)[GOVERNANCE_CAPABILITY];
+  return { state: entry.state, decision_kind: entry.decision_kind };
 }
 
 // ---- derivation -------------------------------------------------------------------------------
@@ -301,7 +305,7 @@ class GovernanceState {
   constructor({ identityReader = readIdentity, materialsReader = readMaterials, decisionReader = readDecision, registryOptions = {} } = {}) {
     this.#readIdentity = identityReader;
     this.#readMaterials = materialsReader;
-    this.#readDecision = (repositoryId) => decisionReader(repositoryId, registryOptions);
+    this.#readDecision = (identity) => decisionReader(identity.repository_id, registryOptions, identity.legacy_repository_ids || []);
   }
 
   // The pure rule table over already-read inputs.
@@ -335,7 +339,7 @@ class GovernanceState {
     let decision;
     let materials;
     try {
-      decision = this.#readDecision(identity.repository_id);
+      decision = this.#readDecision(identity);
     } catch (error) {
       return result({ ...partial, state: 'UNKNOWN', rule: 'ERROR', reason: 'registry-unreadable', error_code: codeOf(error) });
     }
