@@ -67,6 +67,29 @@ const CLAUDE = (() => {
 function hostVersion() { const r = spawnSync(CLAUDE, ['--version'], { encoding: 'utf8' }); return (r.stdout || '').trim() || null; }
 function git(args) { const r = spawnSync('git', ['-C', ROOT, ...args], { encoding: 'utf8' }); return r.status === 0 ? r.stdout.trim() : null; }
 
+// The tools a session needs so its helpers keep their own: Agent for the lead plus every tool a
+// rendered helper lists. Claude Code 2.1.306 applies a session's --tools to its helpers too, and a
+// helper whose tools all fall outside it is refused with "spawned with zero tools". Only Agent is
+// pre-approved, so the lead still cannot run the others headless.
+function sessionTools(definitions) {
+  const tools = new Set(['Agent']);
+  for (const { text } of Object.values(definitions)) {
+    for (const tool of (/^tools: (.+)$/m.exec(text)?.[1] || '').split(',')) if (tool.trim()) tools.add(tool.trim());
+  }
+  return [...tools].join(',');
+}
+
+// The folder Claude Code runs the installed Toolkit plugin from (readFromFolder for a local
+// marketplace, else the cache copy), so installed mode checks the hook that sessions actually run.
+function installedPluginRoot() {
+  const r = spawnSync(CLAUDE, ['plugin', 'list', '--json'], { encoding: 'utf8' });
+  let list = [];
+  try { list = JSON.parse(r.stdout || '[]'); } catch { /* reported below */ }
+  const entries = (Array.isArray(list) ? list : list.installed || []).filter(e => /^ai-agent-toolkit@/.test(e.id || '') && e.enabled === true);
+  if (entries.length !== 1) throw new Error('installed mode needs exactly one enabled ai-agent-toolkit plugin in `claude plugin list --json`');
+  return { root: path.resolve(entries[0].readFromFolder || entries[0].installPath), version: entries[0].version || null };
+}
+
 // The pinned helper route as the rendered definition states it.
 function pinnedRoute(definitionText) {
   const field = name => new RegExp(`^${name}: (\\S+)$`, 'm').exec(definitionText)?.[1] || null;
@@ -131,7 +154,7 @@ class LiveRun {
     const sessionId = crypto.randomUUID();
     const decisions = path.join(dir, 'hook-decisions.ndjson');
     const args = ['-p', prompt, '--session-id', sessionId, '--model', 'claude-opus-5-5', '--effort', 'high', '--output-format', 'stream-json',
-      '--verbose', '--strict-mcp-config', '--tools', 'Agent', '--allowedTools', 'Agent', '--max-budget-usd', this.options.maxBudgetUsd];
+      '--verbose', '--strict-mcp-config', '--tools', sessionTools(this.context.definitions), '--allowedTools', 'Agent', '--max-budget-usd', this.options.maxBudgetUsd];
     if (this.options.mode === 'plugin') args.push('--setting-sources', 'project,local', '--plugin-dir', this.options.pluginRoot);
     if (agents) { const file = path.join(dir, 'agents.json'); fs.writeFileSync(file, JSON.stringify(agents)); args.push('--agents', file); }
     const environment = this.#environment(decisions);
@@ -207,6 +230,9 @@ function liveCases(live, context) {
 function main() {
   const options = parseArgs(process.argv.slice(2));
   fs.mkdirSync(options.out, { recursive: true });
+  // Installed mode checks the installed copy: its hook runs the hook rows, and the report names it.
+  const installed = options.mode === 'installed' ? installedPluginRoot() : null;
+  if (installed) options.pluginRoot = installed.root;
   const hook = path.join(options.pluginRoot, 'repo', 'scripts', 'toolkit-claude-agent-hook.cjs');
   if (!fs.existsSync(hook)) throw new Error(`no agent hook under ${options.pluginRoot}`);
   const context = new matrix.ClaudeMatrixContext();
@@ -236,7 +262,7 @@ function main() {
     }
     const sorted = [...timings].sort((a, b) => a - b);
     const report = { schema: 'toolkit.qualification.claude-helper-matrix.v1', host: 'claude-code', host_version: hostVersion(), mode: options.mode,
-      host_runs: options.host, plugin_root: options.pluginRoot, hook_sha256: sha256(hook), registry_sha256: sha256(REGISTRY),
+      host_runs: options.host, plugin_root: options.pluginRoot, installed_plugin_version: installed?.version ?? null, hook_sha256: sha256(hook), registry_sha256: sha256(REGISTRY),
       candidate_head: git(['rev-parse', 'HEAD']), candidate_dirty: (git(['status', '--porcelain']) || '') !== '', at: new Date().toISOString(),
       hook_process_ms: sorted.length ? { median: sorted[Math.floor(sorted.length / 2)], max: sorted[sorted.length - 1] } : null,
       not_run_here: Object.fromEntries(Object.entries(matrix.OTHER_ROWS).filter(([, e]) => e.proof !== 'live')),
@@ -258,4 +284,4 @@ if (require.main === module) {
   try { main(); } catch (error) { console.error(error.message); process.exitCode = 1; }
 }
 
-module.exports = Object.freeze({ parseArgs, pinnedRoute, turnSummary, runRecords, servedOnPin, KNOWN_LIMITS });
+module.exports = Object.freeze({ parseArgs, pinnedRoute, sessionTools, turnSummary, runRecords, servedOnPin, KNOWN_LIMITS });

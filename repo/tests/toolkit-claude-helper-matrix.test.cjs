@@ -38,3 +38,12 @@ test('A9: the agent hook blocks the launch when it fails or times out', () => {
   assert.equal(agent.hooks[0].onFailure, 'block');
   assert.match(agent.hooks[0].command, /toolkit-claude-agent-hook\.cjs/);
 });
+
+test('the live runner gives a session every tool its helpers list, so no helper starts with zero tools', () => {
+  const { sessionTools } = require('./qualification/claude-helper-matrix.live.cjs');
+  const tools = sessionTools({
+    g0: { text: '---\nname: toolkit-g0-helper\ntools: Read, Glob, Grep\ndisallowedTools: Agent, Task\n---\n' },
+    g1: { text: '---\nname: toolkit-g1-helper\ntools: Read, Glob, Grep, Bash, Edit, Write\n---\n' }
+  }).split(',');
+  assert.deepEqual(tools, ['Agent', 'Read', 'Glob', 'Grep', 'Bash', 'Edit', 'Write']);
+});
