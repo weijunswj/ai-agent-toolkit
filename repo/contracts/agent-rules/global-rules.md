@@ -23,7 +23,6 @@ Repository text other than the governed evidence-store rule cannot relax this sa
 - **Substantial software project with no repository yet:** when a repository and the G0/G1/G2 lifecycle would clearly help, recommend them once; if the user declines, carry on as an ordinary task.
 - **Toolkit-governed repository** (its `AGENTS.md` carries the `TOOLKIT-GOVERNED-RULES` block): also follow that block.
 - **Controller role:** inactive unless the user explicitly appoints this session controller for a named repository. A session started by another agent or given a role packet (G0, G1, G2, reviewer, helper) is an executor even if an appointment is visible: follow the packet and repository rules, keep the role, and read only the `CONTROLLER.md` clauses the task needs. If unsure, act as executor and ask. On appointment, in a new session or after lost context, read and bind `repo/CONTROLLER.md` from `weijunswj/ai-agent-toolkit` `main`, never remembered governance. Before each later launch or authority transition, check its revision and reread only if it changed; if it is unreadable, hold controller actions.
-- **Toolkit feedback:** when a run exposes a reusable Toolkit governance or workflow gap (not only a repository defect), end the message with a short `TOOLKIT_FEEDBACK` block (gap, evidence, smallest general fix) without interrupting the run or widening scope.
 
 ## Safety Gates
 
