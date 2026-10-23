@@ -56,7 +56,7 @@ function readHookInput() {
   } catch { return {}; }
 }
 
-// One line stating this repository's governance state (#542 M3); nothing outside a repository.
+// One line stating this repository's governance state; nothing outside a repository.
 // SessionStart cannot block, so a failure here only drops the line.
 function governanceLine(input, dependencies) {
   try {

@@ -1,6 +1,6 @@
 'use strict';
 
-// The hook gate for per-repository governance (#542 M3, owner rule of 23 Oct: a hard stop, like the
+// The hook gate for per-repository governance (owner rule of 23 Oct: a hard stop, like the
 // stale-Toolkit check, that keeps stopping until the state exists). Shared by the Claude Code and
 // Codex hooks:
 //

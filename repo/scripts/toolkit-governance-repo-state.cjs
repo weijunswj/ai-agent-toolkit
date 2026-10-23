@@ -1,6 +1,6 @@
 'use strict';
 
-// The governance state a repository carries in its own working tree (#542, owner rule of
+// The governance state a repository carries in its own working tree (owner rule of
 // 23 Oct: "STOP until the state is created in the repo's gitignored folder"). The file is
 // `.ai-agent-toolkit/governance.json` at the git root. It is a required copy, never the authority:
 // the decision itself stays in the user's registry (keyed by repository identity, with receipts),

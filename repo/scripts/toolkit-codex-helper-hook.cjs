@@ -18,7 +18,7 @@ function governance(input, environment = process.env) {
 }
 function governed(input, environment = process.env) { return governance(input, environment).governed; }
 
-// Governance (#542 M3): the same script is Codex's UserPromptSubmit hook, so it shares the helper
+// Governance: the same script is Codex's UserPromptSubmit hook, so it shares the helper
 // hook's installed Windows launcher. In an undecided repository every prompt is held and every
 // state-changing tool refused (toolkit-governance-gate.cjs); everywhere, an agent may not answer the
 // governance question for the user. The gate loads inside the guarded path like the adapter.

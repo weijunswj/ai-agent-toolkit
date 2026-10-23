@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 
-// Claude Code's governance hook (#542 M3): one script for three events, named by --event.
+// Claude Code's governance hook: one script for three events, named by --event.
 //   UserPromptSubmit  holds every prompt in an undecided repository (toolkit-governance-gate.cjs).
 //   PreToolUse        refuses state-changing tools there, and agent answers everywhere.
 //   SessionStart      adds one line stating the effective governance state.
