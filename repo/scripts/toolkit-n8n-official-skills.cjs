@@ -41,8 +41,11 @@ class OfficialN8nSkills extends ManagedSkillCopies {
   // Antigravity's skills folder, for removing Toolkit's n8n copies there when the user turns it off.
   antigravityTarget() { return path.join(this.#homeDir, ...ANTIGRAVITY_TARGET); }
 
+  // Without Antigravity consent, Toolkit's n8n copies recorded there (from an earlier build) are removed.
   install() {
-    return { ...super.install(), loadTwice: this.#loadTwice() };
+    const dropped = this.targets().includes(this.antigravityTarget()) ? [] : this.remove(this.antigravityTarget());
+    const result = super.install();
+    return { ...result, antigravityRemoved: dropped, loadTwice: this.#loadTwice() };
   }
 
   // The user's own copies that load next to Toolkit's: an older release's name (without "-official")
@@ -67,6 +70,7 @@ class OfficialN8nSkills extends ManagedSkillCopies {
 // One line for setup's summary; names only, no private paths.
 function installSummary(result) {
   const parts = copySummary(result);
+  if (result.antigravityRemoved?.length) parts.push(`removed ${result.antigravityRemoved.length} n8n skill cop${result.antigravityRemoved.length === 1 ? 'y' : 'ies'} from Antigravity (not chosen)`);
   if (result.loadTwice?.length) {
     const byFolder = new Map();
     for (const entry of result.loadTwice) {

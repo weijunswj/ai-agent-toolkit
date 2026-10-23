@@ -93,6 +93,12 @@ Read: `repo/docs/agent-playbooks/pr-review-and-ci.md`.
 
 Do not claim CI passed unless checked. Do not do reviews from metadata alone.
 
+## Match: Test Speed, Runner Or Shards
+
+Triggers: slow tests or CI, `repo/scripts/run-tests.cjs`, the shard manifest `repo/contracts/ci/test-shards.json`, test jobs in `.github/workflows/validate.yml`, or test time budgets.
+
+Read: `skills/repository-agent-rules/repo-local/docs/agent-playbooks/fast-tests-and-sharding.md` and the Test Shards section of `repo/docs/VALIDATION-STRATEGY.md`.
+
 ## Match: Project Completion Or Production-Readiness Audit Work
 
 Triggers: final audit, completion audit, production-readiness audit, release-candidate audit, launch-readiness audit, QA pass, "make sure everything works", "is this production ready?", `/goal` readiness remediation, audit against original docs, security-readiness check, or final readiness check.

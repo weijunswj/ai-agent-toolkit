@@ -222,8 +222,9 @@ function topologyScopeForPath(rel, policy = validTopologyScopePolicy()) {
   return entry ? entry.scope : policy.default_scope;
 }
 
-function legacyReferenceAllowed(rel) {
-  return topologyScopeForPath(rel) === 'non-operative-example';
+// Callers that check many files read the policy once and pass it in.
+function legacyReferenceAllowed(rel, policy = validTopologyScopePolicy()) {
+  return topologyScopeForPath(rel, policy) === 'non-operative-example';
 }
 
 function activePolicyFiles() {
@@ -298,12 +299,18 @@ function deduplicateDefinitionMatches(matches) {
   return kept.sort((left, right) => left.sourceSpan.start - right.sourceSpan.start);
 }
 
-function matchesForDefinition(source, definition, options = {}) {
+// One text is checked against every definition, so its normalized form, path spans and masked form
+// are worked out once.
+function prepareSource(source) {
   const normalized = normalizeSource(source);
   const pathSpans = filenamePathSpans(normalized);
-  const searchable = definition.matcher_kind === 'normalized-phrase'
-    ? maskSpans(normalized, pathSpans)
-    : normalized;
+  let masked = null;
+  return { normalized, pathSpans, masked: () => (masked === null ? (masked = maskSpans(normalized, pathSpans)) : masked) };
+}
+
+function matchesForDefinition(prepared, definition, options = {}) {
+  const { normalized, pathSpans } = prepared;
+  const searchable = definition.matcher_kind === 'normalized-phrase' ? prepared.masked() : normalized;
   const matches = [];
   for (const alias of definition.aliases) {
     const pattern = matcherPattern(alias, definition.matcher_kind);
@@ -331,7 +338,8 @@ function matchesForDefinition(source, definition, options = {}) {
 function detectRetiredTopologyAtoms(value, policy = validTopologyScopePolicy()) {
   if (!policy) return [];
   const source = normalizeSource(value);
-  const atoms = policy.primitive_definitions.flatMap((definition) => matchesForDefinition(source, definition));
+  const prepared = prepareSource(source);
+  const atoms = policy.primitive_definitions.flatMap((definition) => matchesForDefinition(prepared, definition));
   return atoms.sort((left, right) => left.sourceSpan.start - right.sourceSpan.start
     || left.id.localeCompare(right.id));
 }
@@ -339,15 +347,15 @@ function detectRetiredTopologyAtoms(value, policy = validTopologyScopePolicy()) 
 function standaloneIdentityMatches(value, policy = validTopologyScopePolicy()) {
   if (!policy) return [];
   const source = normalizeSource(value);
-  const matches = policy.standalone_identity_definitions.flatMap((definition) => matchesForDefinition(source, definition, {
+  const prepared = prepareSource(source);
+  const matches = policy.standalone_identity_definitions.flatMap((definition) => matchesForDefinition(prepared, definition, {
     excludePathTokens: definition.matcher_kind === 'identifier-token'
   }));
   return matches.sort((left, right) => left.sourceSpan.start - right.sourceSpan.start
     || left.id.localeCompare(right.id));
 }
 
-function activeTopologyFindings(text, rel = '') {
-  const policy = validTopologyScopePolicy();
+function activeTopologyFindings(text, rel = '', policy = validTopologyScopePolicy()) {
   if (!policy) return [];
   const scope = topologyScopeForPath(rel, policy);
   const atoms = detectRetiredTopologyAtoms(text, policy);
@@ -474,16 +482,17 @@ function validate(snapshotValue) {
     if (plugin.version !== packageVersion) errors.push(`${name} native plugin version ${plugin.version || '<missing>'} does not match ${packageVersion}`);
     for (const file of plugin.required_files) if (!file.present) errors.push(`Missing native plugin file: ${file.path}`);
   }
+  const scopePolicy = validTopologyScopePolicy();
   for (const rel of [...walk('skills'), ...walk('repo/contracts')]) {
     if (!/\.(md|json|ya?ml|txt)$/i.test(rel)) continue;
-    if (rel === topologyScopePolicyPath || rel.endsWith('.n6.json') || legacyReferenceAllowed(rel)) continue;
+    if (rel === topologyScopePolicyPath || rel.endsWith('.n6.json') || legacyReferenceAllowed(rel, scopePolicy)) continue;
     const text = readText(rel);
     if (text.includes(`${legacyProjectToken}/`) || text.includes('curated_output_for_ai/')) {
       errors.push(`${rel} references the retired project/publisher topology`);
     }
   }
   for (const rel of activePolicyFiles()) {
-    for (const finding of activeTopologyFindings(readText(rel), rel)) {
+    for (const finding of activeTopologyFindings(readText(rel), rel, scopePolicy)) {
       errors.push(`${rel}:${finding.lineNumber} ${finding.message}: ${finding.line}`);
     }
   }
@@ -538,5 +547,6 @@ module.exports = {
   skillDirs,
   snapshot,
   validateTopologyScopePolicy,
+  validTopologyScopePolicy,
   validate
 };

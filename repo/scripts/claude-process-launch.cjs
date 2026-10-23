@@ -43,7 +43,9 @@ function executableCandidates(command, options = {}) {
   const env = options.env || process.env;
   if (/[\\/]/.test(command)) return [command];
   const pathApi = platform === 'win32' ? path.win32 : path.posix;
+  // Windows PATH entries may be quoted ("C:\Program Files\Git\cmd"); the quotes are not part of the folder.
   const directories = String(env.PATH || env.Path || '').split(platform === 'win32' ? ';' : ':')
+    .map((directory) => directory.replace(/^"(.*)"$/, '$1'))
     .filter((directory) => directory && pathApi.isAbsolute(directory));
   if (platform !== 'win32') return directories.map((directory) => pathApi.join(directory, command));
   const extensions = path.extname(command)

@@ -332,4 +332,48 @@ function backupFiles(root) {
   return fs.readdirSync(location, { recursive: true });
 }
 
-module.exports = { assert, fs, path, spawnSync, repoRoot, script, tmpRoot, isolatedHomeEnv, writeFile, createFakeCodexAppServer, run, runTestGit, createMinimalSetupRepo, createGitBackedSetupRepo, createGitBackedRealSetupRepo, escapeRegExp, createFakeManagedSetupScript, runWithUnclosedStdin, codexConfig, backupFiles };
+// Question-bank helpers shared by the toolkit-setup-orchestrator test files.
+const core = require('../scripts/setup-toolkit-core.cjs');
+
+function displayedBankReference(output) {
+  const match = String(output || '').match(/Bank reference: ([0-9A-HJKMNP-TV-Z-]+)/);
+  assert.ok(match, output);
+  return match[1];
+}
+
+function auditFixture({ retentionDays = 7 } = {}) {
+  return {
+    update_report_enabled: true,
+    update_report_open_enabled: false,
+    update_report_retention_days: retentionDays,
+    codex_plugin_auto_refresh_enabled: false,
+    repo_auto_update: { enabled: false, last_status: 'configured', repo_path: '' },
+    update_report_cleanup: { retention_days: retentionDays, deleted_count: 0, error_count: 0, report_log_directory: 'private-value-never-rendered' },
+  };
+}
+
+function specsForAudit(audit) {
+  return core.setupQuestionSpecs(core.parseArgs(['--execute', '--host', 'codex']), {
+    managed: { currentPath: '', selectedPath: '', defaultPath: '', exists: false, git: false, dirty: false, branch: '', remote: '' },
+    audit,
+    runtime: { runtime: 'unknown' },
+    delegation: { status: 'unsupported', helper_count: null },
+    nativePlugin: { status: 'unknown' },
+  });
+}
+
+function parseConciseInFreshProcess(specs, input) {
+  const child = spawnSync(process.execPath, ['-e', [
+    `const core = require(${JSON.stringify(path.join(repoRoot, 'repo', 'scripts', 'setup-toolkit-core.cjs'))});`,
+    "const payload = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));",
+    'try { core.parseConciseQuestionBankAnswer(payload.input, payload.specs); process.stdout.write("accepted"); }',
+    'catch (error) { process.stderr.write(String(error.message)); process.exitCode = 1; }',
+  ].join('\n')], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    input: JSON.stringify({ specs, input }),
+  });
+  return child;
+}
+
+module.exports = { assert, fs, path, spawnSync, repoRoot, script, tmpRoot, isolatedHomeEnv, writeFile, createFakeCodexAppServer, run, runTestGit, createMinimalSetupRepo, createGitBackedSetupRepo, createGitBackedRealSetupRepo, escapeRegExp, createFakeManagedSetupScript, runWithUnclosedStdin, codexConfig, backupFiles, displayedBankReference, auditFixture, specsForAudit, parseConciseInFreshProcess };

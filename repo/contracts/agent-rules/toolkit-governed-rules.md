@@ -20,7 +20,7 @@ Models and effort come only from an explicitly selected stack registry revision 
 
 - Agree a release plan up front: releases, lanes and order. Keep one open release PR per lane; work outside the plan states its reason.
 - Finish fast: ship the biggest coherent batch that stays reviewable, reconcile records before the next task, and order work Core, then Hardening, then Later.
-- Keep tests fast: targeted local runs, CI as the full gate, and sharding or caching only when coverage is unchanged.
+- Keep tests fast: targeted local runs, CI as the full gate, and sharding or caching only when coverage is unchanged; measure before and after, and keep each test file under the repository's declared time budget.
 - Keep a recoverable packet: exact source or delta, scope and authority, current results and evidence, environment, unresolved effects and denials, verified custody, and one next action. A continuation loads the current packet and changed instructions, not the full history.
 - G1 checks the actual user or operator surface for clarity during validation and UAT, and G2 treats unsafe or misleading text as a real finding. Gate names `G0`, `G1` and `G2` are fine where the reader needs them.
 - Every governed repository keeps a current compact repo map (parts, entry points, sources of truth, ownership, recorded commit), updated in the change that moves what it describes.
