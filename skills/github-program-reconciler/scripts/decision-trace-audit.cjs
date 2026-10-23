@@ -4,14 +4,20 @@
 // Decision-trace audit for a programme issue. The issue body is the canonical record: every
 // non-bot comment must be reachable from it, either linked directly by fragment link
 // (#issuecomment-<id>) or listed in an index comment that the body links (one hop). Fails on any
-// unlinked comment, a SUPERSEDES= reference to an unknown record, or a body at or over the
-// threshold (default 60,000 characters; GitHub's limit is 65,536).
+// unlinked comment, a SUPERSEDES= reference to an unknown record, a superseded record that is not
+// marked "superseded by" (in its own comment or on an index line that links it), or a body at or
+// over the threshold (default 60,000 characters; GitHub's limit is 65,536).
 //
 // Read-only. --repair writes a proposed body (the missing lines added to the body's decision
-// index) to a local file; publishing it is the caller's separately authorised step.
+// index, in the shape "- <date> · <record> · [<summary>](#issuecomment-<id>)", plus
+// "SUPERSEDES=" and "superseded by" where they apply) to a local file; publishing it is the
+// caller's separately authorised step. The reconcile pass runs the same audit and reports gaps.
 //
 // Usage: node decision-trace-audit.cjs --repo <owner/name> --issue <n> [--record-prefix <prefix>]
-//          [--threshold <chars>] [--repair --out <file>]
+//          [--threshold <chars>] [--repair --out <file> [--ledger <file>]]
+//
+// --ledger takes a decision ledger (toolkit.decision-ledger.v1) and adds each comment's topic tag to
+// its repair line.
 
 const fs = require('node:fs');
 const { spawnSync } = require('node:child_process');
@@ -44,6 +50,52 @@ function recordId(text, prefix) {
   return null;
 }
 
+// Record IDs per comment and which record replaced which, from SUPERSEDES= lines naming a known record.
+function recordFacts(people, recordPrefix) {
+  const records = new Map(people.map(comment => [String(comment.id), recordId(comment.body, recordPrefix)]));
+  const commentOf = new Map();
+  for (const [id, record] of records) if (record && !commentOf.has(record)) commentOf.set(record, id);
+  const supersededBy = new Map();
+  const supersedes = new Map();
+  if (recordPrefix) {
+    for (const comment of people) {
+      for (const match of String(comment.body || '').matchAll(SUPERSEDES)) {
+        const old = recordId(match[1], recordPrefix);
+        if (!old || !commentOf.has(old)) continue;
+        const by = records.get(String(comment.id)) || `comment ${comment.id}`;
+        if (!supersededBy.has(old)) supersededBy.set(old, by);
+        supersedes.set(String(comment.id), [...(supersedes.get(String(comment.id)) || []), old]);
+      }
+    }
+  }
+  return { records, commentOf, supersededBy, supersedes };
+}
+
+function entryFor(comment, facts, index) {
+  const record = facts.records.get(String(comment.id));
+  return {
+    id: String(comment.id), record, index,
+    date: String(comment.created_at || '').slice(0, 10) || null, summary: commentSummary(comment.body),
+    supersedes: facts.supersedes.get(String(comment.id)) || [], superseded_by: facts.supersededBy.get(record) || null,
+  };
+}
+
+// The trace an issue body carries: its index comments (each a link) and, as index entries in
+// comment order, every comment none of them lists. `marks` names superseded records that an index
+// comment lists without "superseded by".
+function traceEntries(comments, recordPrefix = null) {
+  const people = comments.filter(comment => !isBot(comment));
+  const indexes = people.filter(comment => String(comment.body || '').includes(INDEX_COMMENT_MARKER));
+  const covered = new Map();
+  for (const index of indexes) for (const line of String(index.body || '').split('\n')) for (const id of linkedIds(line)) covered.set(id, `${covered.get(id) || ''}\n${line}`);
+  const facts = recordFacts(people, recordPrefix);
+  const entries = people.filter(comment => !indexes.includes(comment) && !covered.has(String(comment.id))).map(comment => entryFor(comment, facts, false));
+  const marks = [...facts.supersededBy].map(([record, by]) => ({ id: facts.commentOf.get(record), record, superseded_by: by }))
+    .filter(entry => covered.has(entry.id) && !/superseded by/i.test(covered.get(entry.id))
+      && !/superseded by/i.test(String(people.find(comment => String(comment.id) === entry.id)?.body || '')));
+  return { indexes: indexes.map(comment => ({ id: String(comment.id), date: String(comment.created_at || '').slice(0, 10) || null })), entries, marks };
+}
+
 // body: the issue body. comments: GitHub issue comments ({ id, user, body }).
 function auditDecisionTraces({ body, comments, recordPrefix = null, threshold = DEFAULT_THRESHOLD }) {
   if (recordPrefix !== null && !RECORD_PREFIX.test(recordPrefix)) throw new Error('--record-prefix must be 1-40 letters, digits, dots, underscores or hyphens');
@@ -53,11 +105,18 @@ function auditDecisionTraces({ body, comments, recordPrefix = null, threshold = 
   const linkedIndexes = indexes.filter(comment => fromBody.has(String(comment.id)));
   const reachable = new Set(fromBody);
   for (const index of linkedIndexes) for (const id of linkedIds(index.body)) reachable.add(id);
-  const records = new Map(people.map(comment => [String(comment.id), recordId(comment.body, recordPrefix)]));
+  const facts = recordFacts(people, recordPrefix);
+  const { records, commentOf, supersededBy } = facts;
   const knownIds = new Set([...records.values()].filter(Boolean));
 
-  const unlinked = people.filter(comment => !reachable.has(String(comment.id)))
-    .map(comment => ({ id: String(comment.id), record: records.get(String(comment.id)), index: indexes.includes(comment) }));
+  const linkedText = [String(body || ''), ...linkedIndexes.map(index => String(index.body || ''))].join('\n').split('\n');
+  const supersededUnmarked = [...supersededBy].map(([record, by]) => ({ id: commentOf.get(record), record, superseded_by: by }))
+    .filter(entry => {
+      const own = people.find(comment => String(comment.id) === entry.id);
+      if (/superseded by/i.test(String(own?.body || ''))) return false;
+      return !linkedText.some(line => line.includes(`#issuecomment-${entry.id}`) && /superseded by/i.test(line));
+    });
+  const unlinked = people.filter(comment => !reachable.has(String(comment.id))).map(comment => entryFor(comment, facts, indexes.includes(comment)));
   // Only a SUPERSEDES= value that starts with a record ID (the prefix plus digits) is a reference to
   // check, whatever follows it (a full stop, "-draft", "_x"); prose such as "SUPERSEDES=the
   // auto-refresh allowance" is left alone.
@@ -69,22 +128,49 @@ function auditDecisionTraces({ body, comments, recordPrefix = null, threshold = 
   const bodyLength = String(body || '').length;
   const overThreshold = bodyLength >= threshold;
   return {
-    ok: !unlinked.length && !unknownSupersedes.length && !overThreshold,
+    ok: !unlinked.length && !unknownSupersedes.length && !supersededUnmarked.length && !overThreshold,
     comments: people.length, linked: people.length - unlinked.length, unlinked, unknown_supersedes: unknownSupersedes,
+    superseded_unmarked: supersededUnmarked,
     unlabelled, body_length: bodyLength, threshold, over_threshold: overThreshold,
     index_comments: linkedIndexes.map(comment => String(comment.id))
   };
 }
 
-// One index line per unlinked comment, in comment order.
-function indexLines(unlinked) {
-  return unlinked.map(entry => `- [${entry.record || `comment ${entry.id}`}](#issuecomment-${entry.id})`);
+// A comment's first heading or line as one short plain line for an index entry. HTML comments go
+// first (across lines, closed or not), then every angle bracket, so no summary can open a comment
+// or tag that hides the rest of the index.
+function commentSummary(text) {
+  const visible = String(text || '').replace(/<!--[\s\S]*?(?:--!?>|$)/g, '');
+  const first = visible.split('\n').map(line => line.replace(/[<>#*_`]/g, '').trim()).find(Boolean) || 'comment';
+  const plain = first.replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/[[\]|]/g, ' ').replace(/\s+/g, ' ').trim();
+  return plain.length > 90 ? `${plain.slice(0, 87)}...` : plain;
+}
+
+// One index line per entry, in comment order, with a same-issue fragment link:
+// "- <date> · <record> · [<summary>](#issuecomment-<id>) · <topic>", then SUPERSEDES= and
+// "superseded by". `topics` maps a comment ID to its topic (from a decision ledger); no topic, no part.
+function indexLines(entries, topics = new Map()) {
+  return entries.map(entry => [
+    `- ${entry.date || 'undated'}`,
+    entry.record || 'comment',
+    `[${entry.summary || `comment ${entry.id}`}](#issuecomment-${entry.id})`,
+    ...(topics.get(String(entry.id)) ? [topics.get(String(entry.id))] : []),
+    ...(entry.supersedes || []).map(record => `SUPERSEDES=${record}`),
+    ...(entry.superseded_by ? [`superseded by ${entry.superseded_by}`] : []),
+  ].join(' · '));
 }
 
 // The body with the missing lines added inside its decision index, creating a collapsed index at
 // the end when the body has none. Never removes or reorders existing text.
-function repairedBody(body, unlinked) {
-  const lines = indexLines(unlinked);
+// A marking line for a superseded record that is linked but not marked.
+function markLines(marks) {
+  return marks.map(entry => `- superseded record · ${entry.record} · [${entry.record}](#issuecomment-${entry.id}) · superseded by ${entry.superseded_by}`);
+}
+
+// Superseded records that are already linked but not marked get a marking line of their own.
+function repairedBody(body, unlinked, supersededUnmarked = [], topics = new Map()) {
+  const missing = new Set(unlinked.map(entry => entry.id));
+  const lines = [...indexLines(unlinked, topics), ...markLines(supersededUnmarked.filter(entry => !missing.has(entry.id)))];
   if (!lines.length) return body;
   const text = String(body || '');
   const end = text.indexOf(INDEX_END);
@@ -108,7 +194,7 @@ function fetchIssue(repo, issue) {
 }
 
 function parseArgs(argv) {
-  const args = { repo: '', issue: '', recordPrefix: null, threshold: DEFAULT_THRESHOLD, repair: false, out: '' };
+  const args = { repo: '', issue: '', recordPrefix: null, threshold: DEFAULT_THRESHOLD, repair: false, out: '', ledger: '' };
   for (let i = 0; i < argv.length; i += 1) {
     const value = () => argv[++i] || '';
     if (argv[i] === '--repo') args.repo = value();
@@ -117,13 +203,29 @@ function parseArgs(argv) {
     else if (argv[i] === '--threshold') args.threshold = Number(value());
     else if (argv[i] === '--repair') args.repair = true;
     else if (argv[i] === '--out') args.out = value();
+    else if (argv[i] === '--ledger') args.ledger = value();
     else throw new Error(`Unknown argument: ${argv[i]}`);
   }
-  if (!/^[\w.-]+\/[\w.-]+$/.test(args.repo) || !/^\d+$/.test(args.issue)) throw new Error('Usage: decision-trace-audit.cjs --repo <owner/name> --issue <n> [--record-prefix <prefix>] [--threshold <chars>] [--repair --out <file>]');
+  if (!/^[\w.-]+\/[\w.-]+$/.test(args.repo) || !/^\d+$/.test(args.issue)) throw new Error('Usage: decision-trace-audit.cjs --repo <owner/name> --issue <n> [--record-prefix <prefix>] [--threshold <chars>] [--repair --out <file> [--ledger <file>]]');
   if (args.recordPrefix !== null && !RECORD_PREFIX.test(args.recordPrefix)) throw new Error('--record-prefix must be 1-40 letters, digits, dots, underscores or hyphens');
   if (!Number.isInteger(args.threshold) || args.threshold <= 0) throw new Error('--threshold must be a positive integer');
   if (args.repair && !args.out) throw new Error('--repair needs --out <file>');
+  if (args.ledger && !args.repair) throw new Error('--ledger is used only with --repair');
   return args;
+}
+
+// Topic per comment ID from a decision ledger (schema toolkit.decision-ledger.v1). Topics are
+// keyword tags; a missing or empty topic leaves the line without one.
+function ledgerTopics(ledger) {
+  if (ledger?.schema !== 'toolkit.decision-ledger.v1' || !Array.isArray(ledger.issues)) throw new Error('--ledger must be a toolkit.decision-ledger.v1 file');
+  const topics = new Map();
+  for (const issue of ledger.issues) {
+    for (const entry of Array.isArray(issue.entries) ? issue.entries : []) {
+      const topic = String(entry.topic || '').replace(/[\r\n|[\]·]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40);
+      if (entry.comment_id && topic) topics.set(String(entry.comment_id), topic);
+    }
+  }
+  return topics;
 }
 
 function main(argv = process.argv.slice(2)) {
@@ -131,7 +233,8 @@ function main(argv = process.argv.slice(2)) {
   const { body, comments } = fetchIssue(args.repo, args.issue);
   const result = auditDecisionTraces({ body, comments, recordPrefix: args.recordPrefix, threshold: args.threshold });
   if (args.repair) {
-    fs.writeFileSync(args.out, repairedBody(body, result.unlinked));
+    const topics = args.ledger ? ledgerTopics(JSON.parse(fs.readFileSync(args.ledger, 'utf8').replace(/^\uFEFF/, ''))) : new Map();
+    fs.writeFileSync(args.out, repairedBody(body, result.unlinked, result.superseded_unmarked, topics));
     result.repair_file = args.out;
   }
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
@@ -143,4 +246,4 @@ if (require.main === module) {
   catch (error) { console.error(`FAIL: ${error.message}`); process.exitCode = 2; }
 }
 
-module.exports = Object.freeze({ DEFAULT_THRESHOLD, INDEX_COMMENT_MARKER, INDEX_BEGIN, INDEX_END, auditDecisionTraces, indexLines, repairedBody, parseArgs });
+module.exports = Object.freeze({ DEFAULT_THRESHOLD, INDEX_COMMENT_MARKER, INDEX_BEGIN, INDEX_END, auditDecisionTraces, commentSummary, indexLines, markLines, traceEntries, ledgerTopics, repairedBody, parseArgs });

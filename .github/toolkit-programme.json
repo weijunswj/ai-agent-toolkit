@@ -10,5 +10,9 @@
     "branch": "main",
     "path": "state/weijunswj/ai-agent-toolkit/"
   },
-  "required_checks": ["validate"]
+  "required_checks": ["validate"],
+  "projection": {
+    "after_section": "CURRENT",
+    "replace_section": "Programme index"
+  }
 }
