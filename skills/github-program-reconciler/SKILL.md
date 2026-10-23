@@ -1,198 +1,131 @@
 ---
 name: github-program-reconciler
-description: Explicit-only GitHub programme parent/direct-child governance and truthful PR-review and Deferred Findings reconciliation. Uses the shipped governance and review-reconciliation contract; runtime redesign requires separate authority.
+description: Reconcile programme state on github.com where .github/toolkit-programme.json exists, at significant events (the binding is added; a child issue changes; a merge; a PR opens or its head moves; an issue closes or reopens; outcomes reorder; a release; a controller changes). Any session may run the dry-run reconcile or show and report it. Only the appointed controller writes programme state: it holds the parent document and runs every writing command itself, including gates, returns, UAT, review and completion. Executors (G0, G1, G2) and helpers never write. Every programme.cjs command refuses without the binding; the binding does not change governed issue records. Never closes, deletes or merges.
 ---
 
 # GitHub Program Reconciler
 
-This skill is explicit-only. Its OpenAI metadata sets `allow_implicit_invocation: false`.
-Use it only when the user explicitly asks for the shipped governance and
-truthful PR-review reconciler contract for a repository-scoped task. Ordinary
-GitHub inspection belongs to the GitHub skill, ordinary coding belongs to the
-coding agent, and final Web/controller work remains outside this skill.
+This skill loads on its own (its OpenAI metadata sets `allow_implicit_invocation: true`). The reconciler, its state documents, managed blocks and sub-issue links act only where `.github/toolkit-programme.json` exists; every `programme.cjs` command refuses without it. Ordinary GitHub reads, coding, reviews and the separate read-only decision-trace audit do not need that binding. Loading on its own grants no extra authority: every write still needs the fence and checks below.
 
-## Runtime status
+**Who uses it.** The owner opts into the reconciler by adding `.github/toolkit-programme.json`, binding the parent issue and its private state store. It supports github.com only, and its state store supports `kind: github` only. The binding does not change the Toolkit-governed rules (the `TOOLKIT-GOVERNED-RULES` block in `AGENTS.md`) or their issue records. Company or third-party repositories without that block get no governed issue writes, only the coding-governance gates, subagents and portable skills; global rules still apply, including PRs after requested edits and task issues when the user asks to add one.
 
-Apply the contract below as a written procedure with the GitHub tools you are authorised to use; do not invent a replacement reconciler runtime or adapter. The one bundled tool is the read-only decision-trace audit (see Decision traces).
+## When to run
+
+Any session may run the dry-run `reconcile` (or `show`) at these significant events and report it to the controller. Only the appointed controller writes programme state; see "Who records what" below.
+
+- The binding is added (the repository opts into the reconciler).
+- A task (child issue) is added, deleted or modified.
+- A merge completes.
+- A PR is opened or its head moves.
+- An issue is closed or reopened.
+- Outcomes are reordered or reprioritised.
+- A release ships.
+- A controller is appointed or rebinds.
+
+Check for the binding first at each event; without it, do not run `programme.cjs`. The separate decision-trace audit and governed issue records are unchanged. The reconciler never closes, deletes or merges.
+
+## What ships
+
+- `scripts/programme.cjs`: the command line. Run it from a checkout of the governed repository.
+- `scripts/programme-state.cjs`: the owners it uses (`GitHubTransport`, `StateStore`, `ProgrammeGraphReader`, `Reconciler`, the renderer and the managed-block helpers).
+- `scripts/decision-trace-audit.cjs`: the read-only decision-trace audit.
+- `scripts/resolve-executable.cjs`: shared executable resolution and its error type; `programme-state.cjs` keeps the public exports.
+- The document schemas live in the Toolkit repository under `repo/contracts/programme-state/`.
+
+Everything runs through `gh` (resolved to a full `.exe` path, never from the working folder) as the signed-in account. There is no scheduler, webhook or background loop: a pass runs when someone asks for it.
+
+## Binding
+
+The governed repository holds `.github/toolkit-programme.json` (no secrets):
+
+```json
+{
+  "schema": "toolkit.programme-binding.v1",
+  "repository": "owner/name",
+  "parent_issue": 421,
+  "record_prefix": "INT-TK421-",
+  "writer_prefix": "INT-TK421-",
+  "store": { "kind": "github", "repository": "owner/private-store", "branch": "main", "path": "state/owner/name/" },
+  "required_checks": ["validate"]
+}
+```
+
+- The repository is the `origin` remote as GitHub names it; the file must agree and cannot override it (`REPO_IDENTITY_MISMATCH`).
+- `store.kind` names the backend. The only kind is `github`: a separate repository that exists, is private and is writable, checked before every pass (`STATE_STORE_UNVERIFIED`). Another kind (a different store) is added in code with the same compare-and-swap contract; an unknown kind stops at setup. There is no fallback store.
+- `required_checks` adds check names to the ones GitHub marks required. With neither, checks are never `GREEN`. (Toolkit's `main` has no required status checks configured, so its binding names them.)
+
+## State documents
+
+One private JSON document per outcome (`issue-<n>.json`) and one for the parent (`parent-<n>.json`) under the store path.
+
+- **Parent:** fence, release-plan pointer and the **outcome catalogue** (issue, label, class `CORE`/`HARDENING`/`LATER`/`OPTIONAL`/`COMPLETED`/`RETIRED`, expected native parent, order within its class, lane, owner prefix). The catalogue is data: nothing is hard-coded to one programme.
+- **Child:** lifecycle, release, gate (role, state, session, route, returns), candidate (full 40-character SHAs), PR (number, state, head, required checks at that head), UAT, review verdicts, blockers, exactly one next action, pending effects and a `private` field that is never rendered.
+- Writes use Contents API compare-and-swap on the blob sha with readback. Unchanged state is never written (GitHub would still make an empty commit). The revision moves only when content changes; timestamps and pending effects do not count.
+- On a 409 the change is re-applied only when the other writer touched different top-level fields and the fence did not move; otherwise `STATE_CONFLICT` or `STALE_WRITER`.
+
+**Fence.** A document is held by one session and record prefix. Every write comes from the session that holds the parent document. `claim --takeover` increments the epoch in one compare-and-swap. A running pass re-reads the parent fence immediately before every state write and every GitHub change, so after a takeover the old pass stops at its next effect (`STALE_WRITER`); an intent it leaves `IN_FLIGHT` is settled by the successor's readback. The fence orders cooperating Toolkit writers under one account; it authenticates nobody and does not stop a person or another tool editing.
+
+**Who records what.** Only the appointed controller writes programme state. The controller creates the parent document (`init-parent --apply`) and holds it, and runs every writing command with `--controller`: `reconcile --apply`, `update-parent`, `claim`, `update` and `return`. It records each gate (`claim --issue <n> --role <gate>`), submits and consumes returns, records UAT and G2 review verdicts, and sets `DONE` or `RETIRED`. Without `--controller` a writing command is refused before it reads anything, and with it a session that does not hold the parent is refused by the fence. Every other session, including G0, G1 and G2 executors and helpers, runs only the dry-run `reconcile` and `show` and reports to the controller. A controller stopped by a takeover stops and reports to the owner; only a controller appointed after that takeover verifies that the previous writer stopped, posts its takeover record, then runs `claim --parent --takeover --controller`.
+
+**Returns (LIFE-1).** A gate return is consumed by its return ID, never by session. `REOPEN` puts the gate back to `ACTIVE` in the same session, a new submission takes a new ID, and `ACCEPT` retires the gate. Claiming an accepted gate again starts a new activation for a correction, which removes that acceptance until the new return is accepted. Consuming the same ID again with the same verdict does nothing; a different verdict is `RETURN_CONFLICT`; a return from before a takeover is `STALE_RETURN`.
+
+**Evidence at a head.** UAT `PASSED`, `UAT_RETAINED` and `UAT_PARTIAL_REQUIRED` must carry `at_head` (the full SHA), and a decided review must carry at least one verdict with its head; otherwise the write is refused. Evidence at an older head than the live PR head renders as `STALE_HEAD`.
+
+## Commands
+
+| Command | Writes |
+|---|---|
+| `reconcile [--issue <n>]` | Nothing: prints findings and the effect plan |
+| `reconcile --apply [--issue <n>]` | State documents and GitHub, as planned; controller only |
+| `show [--parent \| --issue <n>] [--include-private]` | Nothing; sessions and `private` are redacted unless asked |
+| `init-parent --catalogue <file> [--apply]` | Without `--apply`, nothing (validates the catalogue). Only the appointed controller runs `init-parent --apply`, which creates the parent document held by that controller |
+| `update-parent --patch <file>` | Catalogue, release plan or `private` (merge patch); controller only |
+| `claim (--parent \| --issue <n>) [--role G0\|G1\|G2] [--model <m> --effort <e> [--route-read-back]] [--takeover]` | The fence and gate; controller only |
+| `update --issue <n> --patch <file>` | Lifecycle, release, candidate, UAT, review, blockers, next action or `private`; controller only |
+| `return --issue <n> (--submit <id> \| --consume <id> --verdict ACCEPT\|REOPEN)` | Gate returns; controller only |
+
+Every write needs `--controller` and `--session <id>` (an environment variable never supplies a session), and every write except `init-parent --apply` and a parent takeover needs that session to hold the parent document; the record prefix defaults to the binding's writer prefix. Every `--issue` is 1 or more. `--json` prints machine-readable output. `reconcile --parent-file <file>` dry-runs a proposed catalogue before `init-parent`. The PR for a child is found from `candidate.branch` and then kept by number.
+
+## The reconcile pass
+
+1. **Bind** repository identity, the store and the binding; read the parent and every catalogued child document.
+2. **Observe** (read-only): issues, native parents, each expected parent's sub-issues in order, `blocked_by` edges, and for each child PR its head and required checks at that head.
+3. **Recover first:** each pending effect from an earlier pass is settled by reading its target. Done or not done leaves the document; an unreadable target stays `UNKNOWN` and holds that target. Nothing is replayed without that read.
+4. **Diff** into findings: `NATIVE_PARENT_MISSING`, `NATIVE_PARENT_WRONG`, `NATIVE_ORDER_DRIFT`, `PR_HEAD_MOVED` (review and UAT at the old head show `STALE_HEAD`), `CHECKS_PENDING`/`RED`/`UNKNOWN`/`GREEN_AT_HEAD`, `PROJECTION_STALE`, `CHILD_STATE_CONFLICT` (for example `DONE` on an open issue, or a merged PR where the current gate is not accepted, or only G0 is accepted), and report-only `READY_TO_CLOSE`, `NATIVE_PARENT_UNEXPECTED`, `NATIVE_CHILD_UNKNOWN`, `DEPENDENCY_IMPLIES_PARENT`. Outcomes sort by class (`CORE`, `HARDENING`, `LATER`, `OPTIONAL`, `COMPLETED`, `RETIRED`), then by `order` within the class, then issue number, for both native siblings and rendered siblings (including nested children and the parentless tail).
+5. **Plan** only these effects: create or update a child document, attach a sub-issue, reparent (`replace_parent`), reorder (fewest moves), replace a managed block. Closing, deleting, merging and detaching never appear. Dependencies never set a parent.
+6. **Apply** (only with `--apply`), one effect at a time: write an `IN_FLIGHT` intent into the owning document, mutate, read back (both the child's parent and the parent's list for links; the whole body for blocks), then clear the intent or mark it `UNKNOWN` and hold.
+7. **Report** the repository, store and parent revision, findings, effects with outcomes, holds, write counts and one next action. The `READY_TO_CLOSE` close list names open issues whose PR is merged with required checks `GREEN` at its head, with the PR, head, current gate, UAT and review states. `gate_accepted` records whether the current gate is `RETIRED` with its latest return consumed as `ACCEPT`; `accepted` counts completion only for G1 or G2. The controller decides; nothing is closed automatically, and a missing G1-or-later current-gate acceptance still reports `CHILD_STATE_CONFLICT`. A pass with nothing to do says `No changes` and writes nothing.
+
+GitHub details the code relies on (checked against the REST docs and a private sandbox): `sub_issue_id` is the issue's database `id`, not its number; a second parent without `replace_parent` and a duplicate attach both return 422; a reorder needs exactly one of `before_id`/`after_id`; a stale Contents sha returns 409 and a create over an existing file 422.
+
+## Managed blocks
+
+Each catalogued issue body gets one block in the Toolkit marker format (`<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN STATE v2 toolkit=<version> sha256=<12 hex> -->` ... `END STATE`), inserted at the top the first time:
+
+- the parent block is the generated outcome table (tree order, gate, PR, head as a 7-character link plus the full SHA as text, CI at head, UAT, next action); the controller's prose and the decision index stay hand-written outside it;
+- each child block shows that child's state and its document revision;
+- a hidden line in the parent block lists every child revision, so parent and child can be checked against each other.
+
+Issue `PATCH` has no compare-and-swap, so the pass builds the new body from a fresh read, re-reads just before writing and refuses on change (`BODY_MOVED`, re-planned next pass), changes only the bytes between its markers, proves the whole body read back exactly, and refuses a body that would reach 60,000 characters (`BODY_TOO_LARGE`, the decision-trace threshold). The renderer reads an allow-list of public fields: never `private`, sessions or routes.
 
 ## Decision traces
 
 The programme issue body is the canonical record: every non-bot comment must be linked from the body's collapsed decision index by fragment link (`#issuecomment-<id>`), directly or through an index comment the body links (one hop). Records that replace others carry `SUPERSEDES=<record ID>`. Keep the body under 60,000 characters (GitHub's limit is 65,536) by moving older index lines into an index comment marked `<!-- decision-trace-index -->`.
 
-Audit with `node scripts/decision-trace-audit.cjs --repo <owner/name> --issue <n> --record-prefix <prefix>` (for Toolkit #421: `INT-TK421-`; a record ID is the prefix plus digits). It reads the issue through `gh`, fails on any unlinked comment, unknown `SUPERSEDES=` target or a body at the threshold, and lists comments without a record ID. `--repair --out <file>` writes a proposed body with the missing index lines; publishing it is a separately authorised write followed by readback and a clean re-audit.
+Audit with `node scripts/decision-trace-audit.cjs --repo <owner/name> --issue <n> --record-prefix <prefix>` (for Toolkit #421: `INT-TK421-`). It fails on any unlinked comment, unknown `SUPERSEDES=` target or a body at the threshold, and lists comments without a record ID. `--repair --out <file>` writes a proposed body with the missing index lines; publishing it is a separately authorised write followed by readback and a clean re-audit.
 
-## Scope
+## Review truth
 
-The supported intents are `inspect`, `preview`, `initialise`, `migrate`,
-`validate`, `reconcile`, `show`, and `remove` for one canonical parent and its
-direct sibling children. The v3 tracker has exactly one flat pending queue,
-at most one Current child, deterministic queue order, unique lifecycle
-membership, and a current-state projection rather than an ever-growing event
-log. Parent Markdown is a managed deterministic block; do not improvise or
-reconstruct a large parent body in model context.
+- Inventory the PR's submitted reviews and inline conversations completely (all pages) before classifying findings. An empty, stale, unavailable or incomplete inventory is not green.
+- The controller records review verdicts with the reviewer and the exact full head SHA they reviewed (`update --patch` on `review.verdicts`). A verdict at an older head is stale once the PR head moves.
+- Classify materiality against the agreed acceptance (ship blocker, Hardening, Later or optional, unsupported or duplicate). A finding is not final because an executor calls it blocking; a disposition needs closing evidence at the exact head and a controller reference.
+- An initial nonblocking finding is recorded where the controller keeps deferred findings, with enough public-safe evidence to revalidate it before work on the same component, before that PR's finality and in the final programme sweep. Converge same-root findings instead of opening micro-issues.
+- Executors inspect and recommend. They never reply to or resolve threads, dismiss reviews, mark Ready, merge or claim finality; the controller and owner do.
 
-No runtime ships with this skill (see Runtime status), and a real adapter must not be invented here. Integration adapters must bind
-first-party evidence boundaries for review inventory and terminal proof.
-Review inventory authority comes only from getReviewEvidence and terminal
-compaction authority comes only from getTerminalEvidence. Caller arrays, counts,
-pagination facts, flags, digests, and durable evidence are equality assertions
-only; there is no fallback to caller durable evidence.
-must return a complete server-authoritative body, revision/ETag metadata when
-available, and a complete readback. Incomplete retrieval, missing/duplicate or
-ambiguous entries, parse uncertainty, concurrent movement, unrelated-byte
-drift, unverified body limits, and incomplete reconciliation fail closed.
+## Safety
 
-## Authority and consent
-
-- Control-plane authority remains the sole mutation authority and sole opaque authority-ticket
-  authority. The reconciler requests only typed `github.mutation` authority; it does not
-  mint, expose, or create another ticket or finality token.
-- The repository-capability registry owns consent and state only. Require the exact
-  canonical repository identity derived from the worktree, one local origin,
-  control-plane remote validation, and `toolkit.repository-identity.v1`; callers cannot
-  override it. Require enabled `repository.governance` consent; repository-capability consent does not
-  widen task scope, delegation, GitHub authority, provider/live access, Web
-  authority, review mutation, Ready, or merge.
-- The user remains the source of repository governance authority; an executor
-  acts only within the user's explicitly assigned repository and operation
-  scope. Do not create a generic independent web-controller authority class.
-
-Mutation requires exact repository identity, repository-capability consent, an accepted read-only
-preview, and control-plane authorization. Read-only inspection and preview do not mutate.
-`remove` is bounded and requires the same authority; it is not a cleanup or
-finality action.
-
-## Required reconciliation invariants
-
-Preserve these six reconciliation invariants:
-
-- **Repository identity:** bind the exact canonical repository-capability `repository_id` before control-plane authority or GitHub access;
-  it is derived from the worktree, one local origin, control-plane authority remote validation, and
-  `toolkit.repository-identity.v1`. Callers cannot supply a per-call
-  repository override or identity substitution.
-- **Lifecycle and PR uniqueness:** keep one flat queue, renumber pending entries after lifecycle changes,
-  rejects represented PR duplicates across every parent section, and requires
-  explicit terminal `completed` or `disposed` status. Completed additionally
-  requires stable accepted child completion evidence and its deterministic
-  digest; a merged implementation PR alone is insufficient. Failed or
-  non-delivery PR states never imply completion.
-- **Review inventory evidence:** require explicit current and expected candidate identity, exact
-  represented PR head/tree/base facts, explicit merged and inline-conversation
-  booleans, complete server-authoritative review pages/cursors/counts, and
-  recomputed finding/Deferred Finding digests. The first-party review evidence
-  adapter supplies the arrays, pagination facts, authoritative counts, flags,
-  and binding digest; caller values are equality assertions only. Fresh
-  Deferred-Finding evidence is re-derived at every revalidation, with its
-  materiality and evidence/root digests recomputed.
-- **Transaction ownership:** use one module/process owner registry for `repository+parent`; injected
-  maps cannot bypass it and every terminal path releases ownership.
-- **Evidence-gated compaction:** permit terminal compaction only with complete server-authoritative,
-  public-safe durable evidence from the first-party terminal evidence adapter
-  and a deterministic retained digest; caller proof is assertion-only.
-- **Initialisation and migration:** initialise only genuinely unmanaged bodies; exact recognised legacy
-  bodies require the existing migrate intent, and unknown or ambiguous
-  authority-like residue fails closed. Migrate remains limited to exact v3 or
-  `pre-n5-seven-section-v0` bodies with whole-body binding, one write, and
-  immediate readback.
-  Legacy residue detection is conservative and normalizes case and horizontal
-  spacing only; the strict migration parser remains exact and unrelated prose
-  is not residue.
-
-## Large-parent transaction
-
-For one bounded update, the transaction is:
-
-1. Fetch the complete raw server body into code/tool state and reject partial
-   retrieval.
-2. Bind the body digest and any authoritative revision metadata.
-3. Parse exactly one v3 managed block and resolve exactly one canonical target.
-4. Expose only a bounded projection plus digest/revision metadata to reasoning.
-5. Apply the bounded field/lifecycle update mechanically in code.
-6. Rebind immediately before the single write and reject concurrent movement.
-7. Reconstruct the complete body in code/tool state, write once, and reread.
-8. Parse the readback and prove target state plus unrelated prefix/suffix bytes
-   and order are preserved.
-
-Body-size thresholds are meaningful only with verified transport provenance. If
-the verified limit is exceeded, fail closed unless explicitly authorised safe
-terminal compaction can retain Current, Pending, owner detail, and Deferred
-Findings while reducing terminal detail. Never split one authoritative queue
-across multiple parents because a body is large.
-
-## Review truth model
-
-Inventory pull requests, submitted reviews, and inline conversations before
-classifying findings. Require a complete first-party server-authoritative
-review evidence adapter result with pages, cursors, authoritative counts,
-flags, and a binding digest; an empty, stale, unavailable, or incomplete
-inventory is not green. Keep review inventory, finding evidence, materiality,
-disposition, and thread/review mutation as separate records.
-
-Executors may inspect and recommend. They must not reply to threads, resolve or
-reopen conversations, dismiss reviews, manufacture final dispositions, mark
-Ready, merge, or claim Web finality. The current programme Web/user controller
-owns factual closure, review-thread mutation, final disposition, Web
-acceptance, Ready, merge, canonical verification, cleanup, and queue finality.
-
-Materiality follows the controller's finding classes against agreed acceptance (ship blocker, Hardening, Later/optional, unsupported/duplicate). A finding is not final merely because an
-executor calls it blocking. A truthful disposition needs factual closing
-evidence, exact-head/canonical identity, validation, readback, and a
-controller-owned reference.
-
-## Deferred Findings
-
-An initial nonblocking finding goes in the parent-managed Deferred Findings
-register. It is an index/provenance/revalidation record, not a second queue,
-task checkbox, or automatic backlog issue. Keep public-safe evidence sufficient
-to revalidate the same component/boundary. Every revalidation requires fresh
-finding evidence and recomputed materiality,
-evidence, and root digests. Caller materiality and digest values are equality
-assertions only; material findings cannot be disposed as nonmaterial and retain
-promotion authority. Preserve the root digest, source PR/thread/head when
-available, reason, materiality inputs, and disposition.
-
-Revalidate at least:
-
-- before work touching the same component or boundary;
-- before finality for a PR touching it;
-- before a relevant operational/live boundary;
-- during the final programme audit sweep.
-
-If no longer material, dispose truthfully. If material, prefer an existing
-compatible direct child that is not frozen. Create or promote a direct sibling
-execution issue only when material and no suitable child owns it. Never widen a
-frozen/current child silently; converge same-root findings rather than creating
-review-churn micro-issues.
-
-## Optional capabilities and historical evidence
-
-Codex review is an optional repository-scoped capability, separate from CI, G4,
-and Web finality. Its default is enabled; owner-disabled is explicit. Absence,
-timeout, or unavailability never becomes green and timers/probe history are not
-durable governance by default.
-
-Auto-code readiness is inspection-only. It does not install, schedule, claim a
-worker, mutate governance, or grant finality.
-
-PR #310 is closed and unmerged historical evidence. The old caller-token/cache
-concern is `NO_LONGER_APPLICABLE` to this shipped reconciler runtime only when the
-exact evidence says current-main search is complete, the workflow-inventory
-surface and caller-token/cache surface are absent, and no historical symbols
-are in scope. Do not copy or revive PR #310 or #318 implementation machinery.
-
-## Safety and output
-
-Do not access providers or live systems, create workflows or MCP tools, mutate
-review state, publish, mark Ready, merge, change the control-plane or
-repository-capability contracts, propagate repository instruction changes,
-modify repository memory/governance policy, or perform work outside this
-skill's supported reconciliation intents. Reject raw secrets, private paths,
-private connector data, raw code blobs, credentials, and unredacted runtime
-evidence. Secret values must never appear in output.
-
-Return a compact evidence packet with the exact repository binding, intent,
-managed-block parse/projection, lifecycle/queue result, transaction/revision
-result, review inventory status, finding/DF status, authority boundary,
-failures, and exactly one supported next action. A successful reconciler result points
-only to `READY_FOR_WEB_EXACT_HEAD_VALIDATION`; it does not authorise that next
-stage.
+- Dry runs and `show` write nothing. `--apply` and the other writing commands change only the bound repository's issue links and managed blocks and the bound store path.
+- The reconciler may report a stale PR or issue but never closes, deletes, merges, detaches or removes branches; those stay controller steps with the owner's approval. Removing a sub-issue link by hand is the rollback for a wrong attach.
+- No labels, Projects boards, milestones or assignees are changed.
+- Never put secrets or tokens anywhere in a state document, `private` included (it lives in the store's git history); secret-shaped values are refused. Keep local paths and session details in `private`, never in public fields.
+- Return a compact report: binding, store revision, findings, effects and outcomes, holds and exactly one next action.

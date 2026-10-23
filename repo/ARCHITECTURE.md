@@ -39,7 +39,9 @@ Last reviewed against `main` `9b7ffff3c30078c2290c809d20bc7c49e3f96e8d`.
 | Version bump | `repo/scripts/bump-version.cjs` |
 | Instruction sync | `repo/scripts/sync-agent-instruction-shims.cjs`, `repo/scripts/sync-repo-doc-contract.cjs` |
 | Full validation list | `repo/scripts/run-validation-gate.cjs` |
+| Shared executable resolution | `skills/github-program-reconciler/scripts/resolve-executable.cjs` |
 | Decision-trace audit | `skills/github-program-reconciler/scripts/decision-trace-audit.cjs` |
+| Programme state and reconcile pass | `skills/github-program-reconciler/scripts/programme.cjs`, `skills/github-program-reconciler/scripts/programme-state.cjs` |
 
 ## Sources of truth
 
@@ -52,6 +54,7 @@ Last reviewed against `main` `9b7ffff3c30078c2290c809d20bc7c49e3f96e8d`.
 | Models, effort and reviewers | `repo/contracts/controller-kernel/stack-registry-v3.json` |
 | Source ownership | `repo/contracts/source-of-truth-contract.md` |
 | Package version | `repo/contracts/toolkit-local-bridge/version.json`, read at runtime through `repo/scripts/toolkit-version.cjs` |
+| Programme binding and state document schemas | `.github/toolkit-programme.json`, `repo/contracts/programme-state/` |
 | Release notes | `repo/docs/CHANGELOG.md` |
 
 ## Ownership

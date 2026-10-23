@@ -9,10 +9,11 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const { TOOLKIT_VERSION } = require('../../scripts/toolkit-version.cjs');
 
 const repoRoot = path.resolve(__dirname, '..', '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '3.8.0';
+const expectedBridgeVersion = TOOLKIT_VERSION;
 
 function tmpRoot() {
   const created = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-bridge-'));
