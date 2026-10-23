@@ -18,3 +18,7 @@ Every Toolkit insert uses `repo/scripts/toolkit-managed-block.cjs` markers (`BEG
 ## Session reset
 
 When `repository-agent-rules` installs or repairs instructions in a consumer repo, keep its session-reset prompt and backup behaviour.
+
+## Approval surfaces
+
+Approval rules live on six surfaces: the global floor and Safety Gates, the governed block, `repo/CONTROLLER.md`, the Projects skill and the portable playbooks. Change them together: `repo/tests/agent-instruction-shims.test.cjs` checks the evidence-store exception on each.
