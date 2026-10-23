@@ -80,13 +80,15 @@ function sessionTools(definitions) {
 }
 
 // The installed Toolkit plugin Claude Code runs. A claude.ai account copy (scope "synced") loses
-// any name conflict to a local install, so it counts only when it is the sole enabled copy.
+// any name conflict to a local install, so it counts only when it is the sole enabled copy; a copy
+// with no folder on disk (Claude Desktop lists the account copy with an empty installPath) never does.
 function pickInstalledPlugin(list) {
   const enabled = (Array.isArray(list) ? list : list?.installed || []).filter(e => /^ai-agent-toolkit@/.test(e.id || '') && e.enabled === true);
-  const local = enabled.filter(e => e.scope !== 'synced');
-  const entries = local.length ? local : enabled;
+  const onDisk = enabled.filter(e => e.readFromFolder || e.installPath);
+  const local = onDisk.filter(e => e.scope !== 'synced');
+  const entries = local.length ? local : onDisk;
   if (entries.length !== 1) {
-    const found = enabled.map(e => `${e.id} (${e.scope || 'no scope'})`).join(', ') || 'none';
+    const found = enabled.map(e => `${e.id} (${e.scope || 'no scope'}${e.readFromFolder || e.installPath ? '' : ', no folder'})`).join(', ') || 'none';
     throw new Error(`installed mode needs one enabled ai-agent-toolkit plugin in \`claude plugin list --json\`; found: ${found}`);
   }
   return { root: path.resolve(entries[0].readFromFolder || entries[0].installPath), version: entries[0].version || null, id: entries[0].id };

@@ -54,6 +54,8 @@ test('installed mode picks the local Toolkit install over a claude.ai account co
   const synced = { id: 'ai-agent-toolkit@synced', scope: 'synced', enabled: true, version: '0.9.0', installPath: '/synced/tk' };
   assert.equal(pickInstalledPlugin([synced, local]).root, path.resolve('/src/tk'));
   assert.equal(pickInstalledPlugin([synced]).root, path.resolve('/synced/tk'));
+  assert.equal(pickInstalledPlugin([{ ...synced, installPath: '' }, local]).root, path.resolve('/src/tk'));
+  assert.throws(() => pickInstalledPlugin([{ ...synced, installPath: '' }]), /ai-agent-toolkit@synced \(synced, no folder\)/);
   assert.throws(() => pickInstalledPlugin([{ ...local, enabled: false }]), /found: none/);
   assert.throws(() => pickInstalledPlugin([local, { ...local, id: 'ai-agent-toolkit@other', scope: 'project' }]), /ai-agent-toolkit@other \(project\)/);
 });
