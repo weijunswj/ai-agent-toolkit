@@ -1,6 +1,6 @@
 # AI Agent Toolkit Repo Rules
 
-<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/toolkit-governed-rules.md:BEGIN TOOLKIT-GOVERNED-RULES v2 toolkit=3.9.1 sha256=a51d7b503374 -->
+<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/toolkit-governed-rules.md:BEGIN TOOLKIT-GOVERNED-RULES v2 toolkit=3.9.1 sha256=dc51535ad99b -->
 # Toolkit-Governed Repository Rules
 
 This block opts the repository into AI Agent Toolkit governance; nothing Toolkit-governed applies without it. Generic rules come from the Toolkit global rules in the harness's user-level file. If they are not in your context (for example in a cloud session), read https://github.com/weijunswj/ai-agent-toolkit/blob/main/repo/contracts/agent-rules/global-rules.md before planning, and load the `n8n-safety-router` skill before any n8n work; if it is unavailable, stop and report that. Repository rules outside this block win on conventions; nothing here relaxes the global safety floor except the evidence-store line, which the floor names.
@@ -25,7 +25,7 @@ Models and effort come only from an explicitly selected stack registry revision 
 - Finish fast: ship the biggest coherent batch that stays reviewable, reconcile records before the next task, and order work Core, then Hardening, then Later.
 - Keep tests fast: targeted local runs, CI as the full gate, and sharding or caching only when coverage is unchanged; measure before and after, and keep each test file under the repository's declared time budget.
 - Keep a recoverable packet: exact source or delta, scope and authority, current results and evidence, environment, unresolved effects and denials, verified custody, and one next action. A continuation loads the current packet and changed instructions, not the full history.
-- G1 checks the actual user or operator surface for clarity during validation and UAT, and G2 treats unsafe or misleading text as a real finding. Gate names `G0`, `G1` and `G2` are fine where the reader needs them.
+- G1 checks the actual user or operator surface for clarity during validation and UAT, and G2 treats unsafe or misleading text as a real finding. G2 also scans every commit, title and body of a PR for personal data, and checks where a computation ran before accepting that data stayed in place. Gate names `G0`, `G1` and `G2` are fine where the reader needs them.
 - Every governed repository keeps a current compact repo map (parts, entry points, sources of truth, ownership, recorded commit), updated in the change that moves what it describes.
 
 ## Records And Evidence

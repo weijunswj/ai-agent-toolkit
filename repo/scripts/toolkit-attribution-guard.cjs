@@ -5,6 +5,14 @@
 // link, or a "Generated with Claude Code" footer. It looks only at `git commit` and `gh pr create` /
 // `gh pr edit` / `gh pr merge`, in the command text and in a message or body file the command names. Ordinary text
 // that merely mentions Claude passes. Used by the Claude Code PreToolUse hook and the Codex helper hook.
+//
+// It also refuses commands that skip a repository's own commit and push checks (git commit -n or
+// --no-verify, git push --no-verify, or a different core.hooksPath) in a Toolkit-governed or
+// personal-data-guarded repository, and force pushes (--force, -f, --force-with-lease, --mirror or a
+// +refspec) there and to an evidence store (a TRANSPORT-* repository). This is best effort: CI and
+// branch rules are the backstop. Not covered:
+// GIT_CONFIG_* environment variables, remote.*.push or remote.*.mirror settings, git aliases, scripts and programs that run git themselves,
+// a cd that is not its own command in the same line, and commands nested more than two shells deep.
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -225,12 +233,182 @@ function attributionRefusal(command, cwd) {
   return '';
 }
 
+const BYPASS_MESSAGE = 'This command skips the repository\'s commit or push checks (git commit -n or --no-verify, git push --no-verify, or a different core.hooksPath). This repository runs them on every commit and push: fix what they report and retry without the bypass. If a check is wrong, tell the owner.';
+const FORCE_MESSAGE = 'This command force-pushes (--force, -f, --force-with-lease, --mirror or a +refspec). Toolkit-governed repositories and evidence stores keep their history: push a new commit or a merge commit instead, or push to a new branch.';
+const HOOKS_PATH = 'core.hookspath';
+const PUSH_VALUE_LETTERS = 'o';
+const PUSH_VALUE_OPTIONS = new Set(['--repo', '--receive-pack', '--exec', '--push-option']);
+const GIT_CONFIG_WRITES = new Set(['set', 'unset', '--unset', '--unset-all', '--replace-all', '--add', 'edit', '--edit', '-e', 'rename-section', 'remove-section', '--rename-section', '--remove-section']);
+const COMMIT_VALUE_LETTERS = 'mFcCtS';
+
+// git accepts any unambiguous prefix of a long option; "--no-veri" is the shortest that cannot
+// also mean --no-verbose.
+function noVerify(word) { return word.length >= 9 && '--no-verify'.startsWith(word); }
+
+// git's global options and its subcommand, with the folder the command runs in.
+function gitCommand({ words }, root) {
+  const start = words.findIndex((word) => /(?:^|[\\/])git(?:\.exe)?$/i.test(word));
+  if (start === -1) return null;
+  let base = root;
+  let directories = 0;
+  const configs = [];
+  for (let index = start + 1; index < words.length; index += 1) {
+    const word = words[index];
+    if (word === '-c' || word === '--config-env') configs.push(words[++index] || '');
+    else if (word.startsWith('--config-env=')) configs.push(word.slice(13));
+    else if (word.startsWith('-c') && word.length > 2) configs.push(word.slice(2));
+    else if (word === '-C' || word.startsWith('-C')) {
+      const value = word === '-C' ? words[++index] : word.slice(2);
+      if (value === undefined) return null;
+      if (++directories > MAX_DIRECTORY_OPTIONS) return { refusal: DIRECTORY_LIMIT };
+      if (value) base = path.resolve(base, value);
+    } else if (word === '--work-tree') { const value = words[++index]; if (value) base = path.resolve(base, value); }
+    else if (word.startsWith('--work-tree=')) base = path.resolve(base, word.slice(12));
+    else if (GIT_VALUE_OPTIONS.has(word)) index += 1;
+    else if (!word.startsWith('-')) return { base, configs, sub: word, args: words.slice(index + 1) };
+  }
+  return { base, configs, sub: null, args: [] };
+}
+
+function skipsChecks({ configs, sub, args }) {
+  if (configs.some((value) => value.toLowerCase().startsWith(`${HOOKS_PATH}=`) || value.toLowerCase() === HOOKS_PATH)) return true;
+  const end = args.indexOf('--');
+  const options = end === -1 ? args : args.slice(0, end);
+  if (sub === 'commit') {
+    for (let index = 0; index < options.length; index += 1) {
+      const word = options[index];
+      if (noVerify(word)) return true;
+      if (!word.startsWith('-') || word.startsWith('--')) continue;
+      // A short-option bundle such as -an. Letters after a value-taking letter are its value, and
+      // a value-taking letter at the end takes the next word (-S takes only an attached value).
+      for (let letter = 1; letter < word.length; letter += 1) {
+        if (word[letter] === 'n') return true;
+        if (COMMIT_VALUE_LETTERS.includes(word[letter])) {
+          if (letter === word.length - 1 && word[letter] !== 'S') index += 1;
+          break;
+        }
+      }
+    }
+  }
+  if (sub === 'push') return options.some(noVerify);
+  if (sub === 'config') {
+    const key = args.findIndex((word) => word.toLowerCase() === HOOKS_PATH);
+    if (key === -1) return false;
+    if (args.some((word) => GIT_CONFIG_WRITES.has(word))) return true;
+    // `git config core.hooksPath <value>` sets it; `--get` or the key alone only reads it.
+    return args.slice(key + 1).some((word) => !word.startsWith('-'));
+  }
+  return false;
+}
+
+// Whether a push rewrites history on the remote: --force and its abbreviations, -f in a
+// short-option bundle, --force-with-lease, --mirror, or a refspec that starts with +.
+function forcePush({ sub, args }) {
+  if (sub !== 'push') return false;
+  let positional = 0;
+  for (let index = 0; index < args.length; index += 1) {
+    const word = args[index];
+    if (word === '--') { positional = Infinity; continue; }
+    if (positional !== Infinity && word.startsWith('--')) {
+      if (word.startsWith('--force') || (word.length >= 5 && '--force'.startsWith(word)) || word === '--mirror') return true;
+      if (PUSH_VALUE_OPTIONS.has(word)) index += 1;
+      continue;
+    }
+    if (positional !== Infinity && word.startsWith('-') && word.length > 1) {
+      for (let letter = 1; letter < word.length; letter += 1) {
+        if (word[letter] === 'f') return true;
+        if (PUSH_VALUE_LETTERS.includes(word[letter])) { if (letter === word.length - 1) index += 1; break; }
+      }
+      continue;
+    }
+    // The first word after the options is the remote; the rest are refspecs.
+    if (positional++ > 0 && word.startsWith('+')) return true;
+  }
+  return false;
+}
+
+// The repository's git config text, also for a worktree whose .git is a file.
+function gitConfigText(root) {
+  const dotGit = path.join(root, '.git');
+  let gitDir = dotGit;
+  try {
+    if (fs.statSync(dotGit).isFile()) {
+      gitDir = path.resolve(root, readSmallFile(dotGit).replace(/^gitdir:\s*/, '').trim());
+      const common = readSmallFile(path.join(gitDir, 'commondir')).trim();
+      if (common) gitDir = path.resolve(gitDir, common);
+    }
+  } catch { return ''; }
+  return readSmallFile(path.join(gitDir, 'config'));
+}
+
+// An evidence store by its repository name: a remote URL ending in TRANSPORT-<name>.
+const STORE_URL = /(?:^|[/:])transport-[\w.-]+?(?:\.git)?\/?$/i;
+function storeUrl(url) { return STORE_URL.test(String(url || '').trim()); }
+
+// What protects the repository a folder is in: `checked` when the nearest folder with a .git entry
+// carries the governed rules block in AGENTS.md or the guard config, `store` when one of its
+// remotes is an evidence store.
+function repositoryKind(folder, cache) {
+  if (cache.has(folder)) return cache.get(folder);
+  let answer = { checked: false, store: false };
+  for (let current = folder, depth = 0; depth < 64; depth += 1) {
+    if (fs.existsSync(path.join(current, '.git'))) {
+      answer = {
+        checked: fs.existsSync(path.join(current, '.github', 'personal-data-guard.json'))
+          || /BEGIN TOOLKIT-GOVERNED-RULES\b/.test(readSmallFile(path.join(current, 'AGENTS.md'))),
+        store: [...gitConfigText(current).matchAll(/^\s*url\s*=\s*(.+)$/gim)].some((match) => storeUrl(match[1])),
+      };
+      break;
+    }
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  cache.set(folder, answer);
+  return answer;
+}
+
+const SHELLS = /(?:^|[\\/])(?:bash|sh|zsh|dash|ksh|pwsh|powershell|cmd|eval|invoke-expression|iex)(?:\.exe)?$/i;
+
+// Returns the refusal reason, or '' when the command may run. A quoted command handed to a
+// shell (bash -c "...", pwsh -Command "...") is read too, up to two levels deep.
+function bypassRefusal(command, cwd, depth = 0) {
+  const text = String(command || '');
+  if (text.length > MAX_COMMAND_CHARS || !/\bgit\b/i.test(text)) return '';
+  let root = cwd || process.cwd();
+  const cache = new Map();
+  for (const current of shellCommands(text)) {
+    // A cd earlier in the same command line moves the folder later git commands run in.
+    if (/^(?:cd|pushd|set-location|sl)$/i.test(current.words[0]) && current.words.length === 2) {
+      root = path.resolve(root, current.words[1]);
+      continue;
+    }
+    const git = gitCommand(current, root);
+    if (git?.refusal) return git.refusal;
+    if (git && skipsChecks(git) && repositoryKind(git.base, cache).checked) return BYPASS_MESSAGE;
+    if (git && forcePush(git)) {
+      const kind = repositoryKind(git.base, cache);
+      const target = git.args.find((word) => !word.startsWith('-'));
+      if (kind.checked || kind.store || storeUrl(target)) return FORCE_MESSAGE;
+    }
+    if (depth < 2 && SHELLS.test(current.words[0])) {
+      for (const word of current.words.slice(1)) {
+        if (/\s/.test(word) && /\bgit\b/i.test(word)) {
+          const nested = bypassRefusal(word, root, depth + 1);
+          if (nested) return nested;
+        }
+      }
+    }
+  }
+  return '';
+}
+
 // A PreToolUse decision for a shell tool call, in the shape Claude Code and Codex both read.
 function attributionDecision(input) {
   const command = input?.tool_input?.command;
   if (typeof command !== 'string') return {};
-  const reason = attributionRefusal(command, input?.cwd);
+  const reason = attributionRefusal(command, input?.cwd) || bypassRefusal(command, input?.cwd);
   return reason ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } } : {};
 }
 
-module.exports = Object.freeze({ MESSAGE, attributionDecision, attributionRefusal, hasAttribution });
+module.exports = Object.freeze({ BYPASS_MESSAGE, FORCE_MESSAGE, MESSAGE, attributionDecision, attributionRefusal, bypassRefusal, hasAttribution });
