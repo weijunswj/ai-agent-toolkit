@@ -27,6 +27,15 @@
       "type": "array",
       "description": "Check names that count as required at the PR head, in addition to the checks GitHub marks required. With none of either, checks are never GREEN.",
       "items": { "type": "string", "minLength": 1 }
+    },
+    "projection": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Where the Programme Graph goes on the parent issue page. Without it, the graph goes under the title. Child pages always put their block under the title and its marked note.",
+      "properties": {
+        "after_section": { "type": "string", "minLength": 1, "description": "Heading text of the section the graph follows, for example CURRENT." },
+        "replace_section": { "type": "string", "minLength": 1, "description": "Heading text of a hand-kept section the graph replaces when it is still on the page, for example Programme index. The section is removed in the same body write." }
+      }
     }
   }
 }
