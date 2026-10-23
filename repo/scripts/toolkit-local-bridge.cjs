@@ -7,14 +7,8 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
 const {
-  findInstalledPluginEntries,
-  inspectCodexConfiguredPluginState,
-  inspectCodexPluginList,
   verifyInstalledCacheFreshness
 } = require('./setup-codex-toolkit-plugin.cjs');
-const {
-  reconcileN8nSkillsPlugin
-} = require('./repair-codex-plugin-windows-hooks.cjs');
 const {
   auditOwnedStaging,
   cleanupOwnedGeneration,
@@ -28,7 +22,7 @@ const { samePath } = require('./toolkit-canonical-path.cjs');
 const { GlobalRules, describeResult: describeGlobalRules } = require('./toolkit-global-rules.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '3.6.0';
+const BRIDGE_VERSION = '3.7.0';
 const STATE_SCHEMA_VERSION = 1;
 const SYNC_SOURCES = ['repo', 'codex-plugin', 'claude-plugin'];
 const LOCK_STALE_MS = 10 * 60 * 1000;
@@ -43,7 +37,6 @@ const HOOK_LIGHT_VALIDATION_TEST = path.join('repo', 'tests', 'toolkit-local-bri
 const VALIDATE_TOOLKIT_TIMEOUT_MS = 120000;
 const HOOK_LIGHT_VALIDATION_TIMEOUT_MS = 30000;
 const NATIVE_PLUGIN_CACHE_REPORT_ERROR_LIMIT = 5;
-const THIRD_PARTY_HOOK_REPAIR_ERROR_LIMIT = 5;
 const GIT_CREDENTIAL_HELPERS = ['manager', 'manager-core'];
 const AGENT_RULES_TEMPLATE_DIR = path.join('skills', 'repository-agent-rules', 'repo-local');
 const AGENT_RULES_PREFLIGHT_FILES = {
@@ -297,7 +290,7 @@ function printHelp() {
     '  --enable-codex-doc-limit        owner choice: keep Codex project_doc_max_bytes raised to 65536',
     '  --disable-codex-doc-limit       leave Codex project_doc_max_bytes alone',
     '  --enable-codex-plugin-auto-refresh',
-    '                                persist opt-in Codex Toolkit cache refresh and Windows third-party hook repair',
+    '                                persist opt-in Codex Toolkit cache refresh',
     '  --disable-codex-plugin-auto-refresh',
     '  --audit',
     '  --reconcile-staging <generation-id>',
@@ -310,10 +303,6 @@ function printHelp() {
 
 function defaultHubPath() {
   return path.join(os.homedir(), '.ai-agent-toolkit', 'current');
-}
-
-function defaultCodexHome() {
-  return process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
 }
 
 function isInside(parent, child) {
@@ -1574,20 +1563,17 @@ function shouldConsiderUpdateReport(args, state) {
 function classifyUpdateReport(context) {
   const repoStatus = context.repo?.status || '';
   const cacheStatus = context.nativePluginCache?.status || '';
-  const repairStatus = context.thirdPartyHookRepair?.status || '';
   const installStatus = context.installCheck?.status || '';
   const actionable = installStatus === 'action-required'
     || repoStatus === 'validation-failed'
     || repoStatus === 'sync-delegation-failed'
     || (repoStatus === 'skipped' && Boolean(context.repo?.error))
     || ['stale', 'refresh-failed'].includes(cacheStatus)
-    || ['repair-failed', 'partial-failed'].includes(repairStatus)
     || Boolean(context.warning);
   const successfulActivity = Boolean(context.repo?.branchSwitchedFrom)
     || repoStatus === 'updated'
     || Boolean(context.repo?.externalAdvanceDetected)
     || cacheStatus === 'refreshed'
-    || repairStatus === 'repaired'
     || (context.installCheck?.checks || []).some((entry) => entry.updated === true);
   return {
     meaningful: actionable || successfulActivity,
@@ -1634,7 +1620,7 @@ function warningSuggestion(warning) {
   return branchMismatchSuggestion(warning) || dirtyWorkingTreeSuggestion(warning);
 }
 
-function actionTldr({ repo, nativePluginCache, thirdPartyHookRepair, installCheck, warning, state }) {
+function actionTldr({ repo, nativePluginCache, installCheck, warning, state }) {
   if (installCheck?.status === 'action-required') return 'see Install check below';
   if (nativePluginCache.status === 'stale') {
     if (state.codex_plugin_auto_refresh_enabled) {
@@ -1643,7 +1629,6 @@ function actionTldr({ repo, nativePluginCache, thirdPartyHookRepair, installChec
     return 'enable Codex plugin auto-refresh in setup, or run `setup toolkit`';
   }
   if (nativePluginCache.status === 'refresh-failed') return 'run `setup toolkit` to refresh the Codex plugin cache manually';
-  if (['repair-failed', 'partial-failed'].includes(thirdPartyHookRepair.status)) return 'check n8n Skills plugin compatibility drift';
   if (repo.status === 'validation-failed') return 'check hook-light validation';
   if (repo.status === 'sync-delegation-failed') return 'check the hub sync from the updated checkout';
   const suggestion = warningSuggestion(warning);
@@ -1661,7 +1646,6 @@ function triggeredFromTldr(syncSource) {
 function buildUpdateReport({ args, state, checksum, context }) {
   const repo = context.repo || {};
   const nativePluginCache = context.nativePluginCache || {};
-  const thirdPartyHookRepair = context.thirdPartyHookRepair || {};
   const installCheck = context.installCheck || null;
   const cleanup = context.cleanup || state.last_update_report_cleanup || {};
   const warning = repo.error || context.warning || '';
@@ -1676,7 +1660,7 @@ function buildUpdateReport({ args, state, checksum, context }) {
     '',
     `- Triggered from: ${triggeredFromTldr(args.syncSource)}.`,
     `- Repo: ${repoTldr(repo, previousCommit, commit, warning)}.`,
-    `- Action needed: ${actionTldr({ repo, nativePluginCache, thirdPartyHookRepair, installCheck, warning, state })}.`,
+    `- Action needed: ${actionTldr({ repo, nativePluginCache, installCheck, warning, state })}.`,
     '',
     '## Details',
     '',
@@ -1741,16 +1725,6 @@ function buildUpdateReport({ args, state, checksum, context }) {
       lines.push('- Codex native plugin cache is stale. Enable Codex plugin auto-refresh during setup or run `setup toolkit` to refresh Codex plugin skills, hooks, and metadata.');
     }
   }
-  if (thirdPartyHookRepair.status === 'repaired' || thirdPartyHookRepair.status === 'partial-failed') {
-    lines.push(`- Repaired ${inlineCode((thirdPartyHookRepair.repaired || []).length)} supported n8n Skills Codex plugin hook cache(s).`);
-    for (const entry of thirdPartyHookRepair.repaired || []) {
-      lines.push(`  - ${inlineCode(entry.plugin_id || entry.plugin_root)}`);
-    }
-  } else if (thirdPartyHookRepair.status === 'repair-failed') {
-    lines.push('- n8n Skills plugin hook reconciliation failed closed.');
-  } else if (thirdPartyHookRepair.status === 'not-needed') {
-    lines.push('- Supported n8n Skills plugin hooks were already Windows-safe, or no supported target was installed.');
-  }
   lines.push('- Skipped live n8n systems; not touched.');
 
   if (installCheck) {
@@ -1776,10 +1750,6 @@ function buildUpdateReport({ args, state, checksum, context }) {
     lines.push(`- Codex native plugin cache: ${inlineCode(nativePluginCache.status)}`);
     for (const error of nativePluginCache.errors || []) lines.push(`  - ${inlineCode(error)}`);
   }
-  if (thirdPartyHookRepair.status) {
-    lines.push(`- n8n Skills plugin hook reconciliation: ${inlineCode(thirdPartyHookRepair.status)}`);
-    for (const error of thirdPartyHookRepair.errors || []) lines.push(`  - ${inlineCode(error)}`);
-  }
   lines.push(`- checksum: ${inlineCode(checksum)}`);
   if (warning) {
     lines.push(`- warning/error: ${inlineCode(warning)}`);
@@ -1798,7 +1768,6 @@ function writeUpdateReportFile(markdown) {
 function updateReportSignature({ args, checksum, context }) {
   const repo = context.repo || {};
   const nativePluginCache = context.nativePluginCache || {};
-  const thirdPartyHookRepair = context.thirdPartyHookRepair || {};
   const cleanup = context.cleanup || {};
   const payload = {
     syncSource: args.syncSource,
@@ -1820,15 +1789,6 @@ function updateReportSignature({ args, checksum, context }) {
     nativePluginCache: {
       status: nativePluginCache.status || '',
       errors: nativePluginCache.errors || []
-    },
-    thirdPartyHookRepair: {
-      status: thirdPartyHookRepair.status || '',
-      repaired: (thirdPartyHookRepair.repaired || []).map((entry) => ({
-        plugin_id: entry.plugin_id || '',
-        plugin_root: entry.plugin_root || '',
-        actions: entry.actions || []
-      })),
-      errors: thirdPartyHookRepair.errors || []
     },
     cleanup: {
       retentionDays: cleanup.retention_days || '',
@@ -2888,241 +2848,6 @@ function sessionStartInstallCheck(args, hubPath, codexGlobalRules = null) {
   return { status: 'action-required', checks: [], actions: [`The Toolkit install check could not run (${reason}). Run \`setup toolkit\`.`] };
 }
 
-function isToolkitCodexCacheRoot(cacheRoot, currentPluginRoot) {
-  const normalized = path.resolve(cacheRoot);
-  if (currentPluginRoot && path.resolve(currentPluginRoot) === normalized) return true;
-  const parts = normalized.split(path.sep).map((part) => part.toLowerCase());
-  for (let index = 0; index < parts.length - 2; index += 1) {
-    if (
-      parts[index] === 'ai-agent-toolkit-local' &&
-      parts[index + 1] === 'ai-agent-toolkit'
-    ) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function discoverCodexPluginHookRoots({ codexHome = defaultCodexHome(), currentPluginRoot = '' } = {}) {
-  const cacheBase = path.join(codexHome, 'plugins', 'cache');
-  const roots = [];
-  const skipped = [];
-  if (!fs.existsSync(cacheBase)) return { roots, skipped };
-
-  for (const marketplace of fs.readdirSync(cacheBase, { withFileTypes: true })) {
-    if (!marketplace.isDirectory()) continue;
-    const marketplacePath = path.join(cacheBase, marketplace.name);
-    for (const plugin of fs.readdirSync(marketplacePath, { withFileTypes: true })) {
-      if (!plugin.isDirectory()) continue;
-      const pluginPath = path.join(marketplacePath, plugin.name);
-      for (const version of fs.readdirSync(pluginPath, { withFileTypes: true })) {
-        if (!version.isDirectory()) continue;
-        const cacheRoot = path.join(pluginPath, version.name);
-        const entry = {
-          plugin_id: `${plugin.name}@${marketplace.name}`,
-          version: version.name,
-          plugin_root: cacheRoot
-        };
-        if (isToolkitCodexCacheRoot(cacheRoot, currentPluginRoot)) {
-          skipped.push({ ...entry, reason: 'toolkit native plugin cache' });
-          continue;
-        }
-        roots.push(entry);
-      }
-    }
-  }
-  roots.sort((left, right) => left.plugin_root.localeCompare(right.plugin_root));
-  skipped.sort((left, right) => left.plugin_root.localeCompare(right.plugin_root));
-  return { roots, skipped };
-}
-
-function selectCurrentN8nSkillsCache({ codexHome, pluginList, discovered }) {
-  const matches = findInstalledPluginEntries(pluginList, {
-    pluginId: 'n8n-skills@n8n-io',
-    name: 'n8n-skills',
-    marketplaceName: 'n8n-io'
-  });
-  if (matches.length === 0) {
-    return { status: 'not-installed', entry: null, reason: 'Codex reports no installed n8n-skills@n8n-io plugin' };
-  }
-  if (matches.length !== 1) {
-    return {
-      status: 'ambiguous',
-      entry: null,
-      reason: 'Codex reports multiple installed n8n-skills@n8n-io entries; current cache is ambiguous'
-    };
-  }
-
-  const installed = matches[0];
-  if (installed.installed !== true || installed.enabled !== true) {
-    return {
-      status: 'not-installed',
-      entry: null,
-      reason: 'Codex does not report n8n-skills@n8n-io as installed and enabled'
-    };
-  }
-  const version = typeof installed.version === 'string' ? installed.version.trim() : '';
-  if (!version || version === '.' || version === '..' || /[\\/\0]/.test(version)) {
-    return {
-      status: 'ambiguous',
-      entry: null,
-      reason: 'Codex reported an invalid n8n-skills@n8n-io version; current cache cannot be proven'
-    };
-  }
-
-  const expectedRoot = path.resolve(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', version);
-  const entry = discovered.roots.find((candidate) =>
-    candidate.plugin_id === 'n8n-skills@n8n-io' && path.resolve(candidate.plugin_root) === expectedRoot
-  ) || null;
-  if (!entry) {
-    return {
-      status: 'missing',
-      entry: null,
-      reason: `Codex reports current n8n-skills@n8n-io version ${version}, but its installed cache root is missing`
-    };
-  }
-  return { status: 'selected', entry, reason: '' };
-}
-
-function selectCurrentN8nSkillsCacheFromConfig({ codexHome, discovered }) {
-  const configured = inspectCodexConfiguredPluginState({
-    codexHome,
-    identity: 'n8n-skills@n8n-io'
-  });
-  if (configured.status === 'disabled') {
-    return {
-      status: 'not-installed',
-      entry: null,
-      reason: 'Codex config explicitly reports n8n-skills@n8n-io disabled'
-    };
-  }
-  if (configured.status !== 'enabled') {
-    return {
-      status: 'ambiguous',
-      entry: null,
-      reason: `Codex CLI omitted n8n-skills@n8n-io and current installed/enabled state cannot be proven: ${configured.reason}`
-    };
-  }
-
-  const candidates = discovered.roots.filter((entry) => entry.plugin_id === 'n8n-skills@n8n-io');
-  if (candidates.length !== 1) {
-    return {
-      status: 'ambiguous',
-      entry: null,
-      reason: `Codex config explicitly enables n8n-skills@n8n-io, but ${candidates.length} cache candidates exist; the current cache cannot be proven without arbitrary selection`
-    };
-  }
-  return {
-    status: 'selected',
-    entry: candidates[0],
-    reason: 'Selected by explicit Codex config enablement plus one exact n8n Skills cache candidate'
-  };
-}
-
-function repairThirdPartyCodexPluginHooks(options = {}) {
-  const codexHome = path.resolve(options.codexHome || defaultCodexHome());
-  const windows = options.windows ?? process.platform === 'win32';
-  const write = Boolean(options.write);
-  const currentPluginRoot = options.currentPluginRoot || runtimeCodexPluginRoot();
-  const discovered = discoverCodexPluginHookRoots({ codexHome, currentPluginRoot });
-  const result = {
-    status: windows ? 'not-needed' : 'not-supported',
-    codex_home: codexHome,
-    write,
-    scanned: 0,
-    skipped: discovered.skipped,
-    repaired: [],
-    unchanged: [],
-    errors: []
-  };
-
-  if (!windows) return result;
-
-  const n8nCandidates = [];
-  for (const entry of discovered.roots) {
-    if (entry.plugin_id === 'n8n-skills@n8n-io') n8nCandidates.push(entry);
-    else result.skipped.push({ ...entry, reason: 'unrelated plugin; n8n Skills reconciliation is target-specific' });
-  }
-  if (n8nCandidates.length === 0) {
-    result.skipped.sort((left, right) => left.plugin_root.localeCompare(right.plugin_root));
-    return result;
-  }
-
-  const pluginInspection = Object.prototype.hasOwnProperty.call(options, 'pluginList')
-    ? { ok: true, pluginList: options.pluginList, errors: [] }
-    : inspectCodexPluginList({ codexCommand: options.codexCommand || '' });
-  const cliMatches = pluginInspection.ok
-    ? findInstalledPluginEntries(pluginInspection.pluginList, {
-      pluginId: 'n8n-skills@n8n-io',
-      name: 'n8n-skills',
-      marketplaceName: 'n8n-io'
-    })
-    : [];
-  const selection = pluginInspection.ok && cliMatches.length > 0
-    ? selectCurrentN8nSkillsCache({
-      codexHome,
-      pluginList: pluginInspection.pluginList,
-      discovered
-    })
-    : selectCurrentN8nSkillsCacheFromConfig({ codexHome, discovered });
-  if (selection.status !== 'selected') {
-    for (const entry of n8nCandidates) {
-      result.skipped.push({ ...entry, reason: 'historical or unverified n8n Skills cache; not current according to Codex installed state' });
-    }
-    result.skipped.sort((left, right) => left.plugin_root.localeCompare(right.plugin_root));
-    if (selection.status === 'not-installed') return result;
-    result.status = 'repair-failed';
-    result.errors = [
-      selection.reason,
-      ...(!pluginInspection.ok ? (pluginInspection.errors || []) : [])
-    ].slice(0, THIRD_PARTY_HOOK_REPAIR_ERROR_LIMIT);
-    return result;
-  }
-
-  const targets = [selection.entry];
-  for (const entry of n8nCandidates) {
-    if (path.resolve(entry.plugin_root) === path.resolve(selection.entry.plugin_root)) continue;
-    result.skipped.push({ ...entry, reason: 'historical n8n Skills cache; not current according to Codex installed state' });
-  }
-  result.scanned = 1;
-  result.skipped.sort((left, right) => left.plugin_root.localeCompare(right.plugin_root));
-
-  for (const entry of targets) {
-    try {
-      const repair = reconcileN8nSkillsPlugin(entry.plugin_root, {
-        windows: true,
-        write
-      });
-      if (repair.repaired) {
-        result.repaired.push({
-          ...entry,
-          actions: repair.actions || []
-        });
-      } else {
-        result.unchanged.push({ ...entry, classification: repair.status });
-      }
-    } catch (error) {
-      result.errors.push(`${entry.plugin_id}: ${error.message}`);
-    }
-  }
-
-  if (result.errors.length && result.repaired.length) result.status = 'partial-failed';
-  else if (result.errors.length) result.status = 'repair-failed';
-  else if (result.repaired.length) result.status = 'repaired';
-  else result.status = 'not-needed';
-  result.errors = result.errors.slice(0, THIRD_PARTY_HOOK_REPAIR_ERROR_LIMIT);
-  return result;
-}
-
-function maybeRepairThirdPartyCodexPluginHooks(args, state) {
-  if (!args.hook || args.syncSource !== 'codex-plugin') return { status: '' };
-  if (!state.codex_plugin_auto_refresh_enabled) return { status: '' };
-  return repairThirdPartyCodexPluginHooks({
-    write: true,
-    currentPluginRoot: runtimeCodexPluginRoot()
-  });
-}
-
 function refreshCodexNativePluginCacheFromRepo({ args, state, repoPath, validateRepo = false }) {
   const before = codexNativePluginCacheStatus(args, state);
   if (before.status !== 'stale') return before;
@@ -3228,7 +2953,7 @@ function runDelegatedRepoSync({ args, hubPath, repoPath }) {
 class RepositoryAutoUpdateOperation {
   #args; #hubPath; #state; #checksum; #testHooks;
   #statusState = null; #snapshot = null; #updateResult = null;
-  #nativePluginCache = { status: '' }; #thirdPartyHookRepair = { status: '' }; #previousObservedRepoCommit = ''; #installCheck = null;
+  #nativePluginCache = { status: '' }; #previousObservedRepoCommit = ''; #installCheck = null;
 
   #codexGlobalRules;
   constructor({ args, hubPath, state, checksum, testHooks = {}, codexGlobalRules = null }) {
@@ -3326,7 +3051,6 @@ class RepositoryAutoUpdateOperation {
   #delegateSync() {
     const args = this.#args, hubPath = this.#hubPath, updateResult = this.#updateResult;
     this.#nativePluginCache = nativePluginCacheStatusForReport(args, this.#statusState, { repoPath: updateResult.repoPath });
-    this.#thirdPartyHookRepair = maybeRepairThirdPartyCodexPluginHooks(args, this.#statusState);
     try {
       runDelegatedRepoSync({ args, hubPath, repoPath: updateResult.repoPath });
       return null;
@@ -3353,8 +3077,7 @@ class RepositoryAutoUpdateOperation {
                 validationStatus: updateResult.validation?.status || 'passed',
                 error: error.message
               },
-              nativePluginCache: this.#nativePluginCache,
-              thirdPartyHookRepair: this.#thirdPartyHookRepair
+              nativePluginCache: this.#nativePluginCache
             } });
           failedState = report.state;
           if (report.reportPath) {
@@ -3388,7 +3111,6 @@ class RepositoryAutoUpdateOperation {
         const reportContext = {
           repo: repoReportContextFromUpdate(reportState, this.#updateResult, this.#previousObservedRepoCommit),
           nativePluginCache: this.#nativePluginCache,
-          thirdPartyHookRepair: this.#thirdPartyHookRepair,
           installCheck: this.#installCheck
         };
         report = maybeWriteUpdateReport({ args, hubPath, state: reportState, checksum: reportSnapshot.checksum, context: reportContext });
@@ -3488,7 +3210,6 @@ class LocalBridgeRun {
     return {
       repo: repoReportContextFromState(state, args),
       nativePluginCache: nativePluginCacheStatusForReport(args, state, { repoPath: state.repo_path, validateRepo: true }),
-      thirdPartyHookRepair: maybeRepairThirdPartyCodexPluginHooks(args, state),
       installCheck: sessionStartInstallCheck(args, this.#hubPath, this.#codexGlobalRules)
     };
   }
@@ -3670,7 +3391,5 @@ module.exports = {
   runAgentRulesPreflight,
   formatAgentRulesPreflight,
   maybeRefreshCodexGlobalRules,
-  codexGlobalRulesReportEntry,
-  discoverCodexPluginHookRoots,
-  repairThirdPartyCodexPluginHooks
+  codexGlobalRulesReportEntry
 };

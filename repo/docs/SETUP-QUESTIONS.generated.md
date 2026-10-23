@@ -5,7 +5,7 @@ This reference uses a privacy-safe representative Codex state in which all curre
 
 Toolkit setup choices - 7 questions across 2 sections
 
-Bank reference: ACX5-56M2-K2YE-CDJN
+Bank reference: 8BG8-Y71P-H5RX-R3P2
 
 Quick index
 
@@ -74,7 +74,7 @@ Quick index
 
 ### 1.3 Update reports
 
-**What this controls:** Whether Toolkit keeps a privacy-safe maintenance report when an update, cache refresh, hook repair, or safety stop produced meaningful information. Routine successful maintenance stays quiet; failures needing action may open automatically, and routine output does not print private absolute paths.
+**What this controls:** Whether Toolkit keeps a privacy-safe maintenance report when an update, cache refresh, or safety stop produced meaningful information. Routine successful maintenance stays quiet; failures needing action may open automatically, and routine output does not print private absolute paths.
 
 **Current:** Meaningful maintenance reports are kept; only action-required reports open automatically.
 
@@ -181,7 +181,7 @@ Quick index
 
 ### 2.1 Codex Toolkit maintenance
 
-**What this controls:** Whether trusted Codex startup maintenance may refresh the installed Toolkit plugin cache from the verified managed source and, on Windows, safely repair incompatible installed plugin SessionStart hook launchers. It does not give Codex permission to update Claude Code.
+**What this controls:** Whether trusted Codex startup maintenance may refresh the installed Toolkit plugin cache from the verified managed source. It does not give Codex permission to update Claude Code.
 
 **Current:** Automatic Codex Toolkit maintenance is on.
 
@@ -195,8 +195,8 @@ Quick index
 
 **Choices:**
 
-- **A. Turn on** - Enable future native Toolkit cache refresh and safe Windows installed-hook repair when maintenance detects stale or incompatible files.
-- **B. Turn off** - Disable future automatic cache refresh and Windows hook repair; the installed Toolkit plugin is not uninstalled, and manual `setup toolkit` repair or refresh remains available.
+- **A. Turn on** - Enable future native Toolkit cache refresh when maintenance detects stale or incompatible files.
+- **B. Turn off** - Disable future automatic cache refresh; the installed Toolkit plugin is not uninstalled, and manual `setup toolkit` repair or refresh remains available.
 - **C. Keep current** - Preserve this effective behavior: Automatic Codex Toolkit maintenance is on.
 
 **After applying:** The approved setup always verifies the current native Toolkit plugin. If files change, setup may update the Codex plugin cache and Windows hook launchers; restart Codex, then review and trust the current SessionStart hook in `/hooks`. Turning maintenance off only changes future Toolkit state and does not uninstall the plugin.
@@ -207,8 +207,8 @@ Quick index
 
 Reply with the displayed bank reference and either:
 
-- `ACX5-56M2-K2YE-CDJN: all recommended`
-- only your changes, for example: `ACX5-56M2-K2YE-CDJN: 1.2=B, 1.3=B`
+- `8BG8-Y71P-H5RX-R3P2: all recommended`
+- only your changes, for example: `8BG8-Y71P-H5RX-R3P2: 1.2=B, 1.3=B`
 
 Unspecified entries in the changed-only form mean: apply the displayed recommendation for that exact rendered question.
 The bank reference binds indexed input to this exact displayed host, order, state, recommendations, and choices.
@@ -221,7 +221,7 @@ Setup run with `--host claude-code` shows this bank instead, for the same repres
 
 Toolkit setup choices - 8 questions across 3 sections
 
-Bank reference: 98ZQ-WT46-8Y41-W0KX
+Bank reference: 93CT-82QS-89K8-5A3B
 
 Quick index
 
@@ -291,7 +291,7 @@ Quick index
 
 ### 1.3 Update reports
 
-**What this controls:** Whether Toolkit keeps a privacy-safe maintenance report when an update, cache refresh, hook repair, or safety stop produced meaningful information. Routine successful maintenance stays quiet; failures needing action may open automatically, and routine output does not print private absolute paths.
+**What this controls:** Whether Toolkit keeps a privacy-safe maintenance report when an update, cache refresh, or safety stop produced meaningful information. Routine successful maintenance stays quiet; failures needing action may open automatically, and routine output does not print private absolute paths.
 
 **Current:** Meaningful maintenance reports are kept; only action-required reports open automatically.
 

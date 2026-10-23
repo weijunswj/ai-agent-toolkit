@@ -233,8 +233,6 @@ function validateInstalledEnforcement(installed, repoRoot, expectedVersion) {
     ["repo/scripts/toolkit-antigravity-project-skills.cjs",false],
     ["repo/scripts/toolkit-staging-generations.cjs",false],
     ["repo/scripts/setup-codex-toolkit-plugin.cjs",false],
-    ["repo/scripts/repair-codex-plugin-windows-hooks.cjs",false],
-    ["repo/scripts/audit-n8n-skills-plugin-hooks.cjs",false],
     ["repo/scripts/setup-toolkit-core.cjs",false],
     ["repo/scripts/setup-toolkit.cjs",false],
     ["repo/scripts/codex-delegation-backup.cjs",false],

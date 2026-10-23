@@ -51,8 +51,6 @@ function createRealBridgePluginFixture(root) {
     setup.SESSION_START_POWERSHELL_REL_PATH,
     'repo/scripts/toolkit-local-bridge.cjs',
     'repo/scripts/setup-codex-toolkit-plugin.cjs',
-    'repo/scripts/repair-codex-plugin-windows-hooks.cjs',
-    'repo/scripts/audit-n8n-skills-plugin-hooks.cjs',
     'repo/scripts/toolkit-staging-generations.cjs',
     'repo/scripts/toolkit-antigravity-project-skills.cjs',
     'repo/scripts/toolkit-claude-plugin-registry.cjs',

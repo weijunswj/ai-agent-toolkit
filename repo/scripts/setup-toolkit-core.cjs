@@ -553,7 +553,7 @@ function printHelp() {
     '  --keep-update-report-retention-days',
     '                               preserve current retention days',
     '  --enable-codex-plugin-auto-refresh',
-    '                               let Codex hooks refresh stale Codex Toolkit cache and repair unsafe third-party hooks on Windows',
+    '                               let Codex hooks refresh stale Codex Toolkit cache',
     '  --skip-codex-plugin-auto-refresh',
     '                               leave stale Codex plugin cache refresh manual',
     '  --keep-codex-plugin-auto-refresh',
@@ -1750,7 +1750,7 @@ function setupQuestionSpecs(args, current) {
       section: 'Updates and reports',
       title: 'Update reports',
       prompt: 'Update report choice',
-      whatThisControls: 'Whether Toolkit keeps a privacy-safe maintenance report when an update, cache refresh, hook repair, or safety stop produced meaningful information. Routine successful maintenance stays quiet; failures needing action may open automatically, and routine output does not print private absolute paths.',
+      whatThisControls: 'Whether Toolkit keeps a privacy-safe maintenance report when an update, cache refresh, or safety stop produced meaningful information. Routine successful maintenance stays quiet; failures needing action may open automatically, and routine output does not print private absolute paths.',
       choices: [
         wizardChoice('enable', 'Keep reports', 'Create deduplicated reports for meaningful maintenance, keep successful reports closed, and automatically open only reports classified as requiring action.'),
         wizardChoice('disable', 'Do not keep reports', 'Stop creating normal Toolkit maintenance reports; concise failure or safety status still appears when action is required.'),
@@ -1854,10 +1854,10 @@ function setupQuestionSpecs(args, current) {
       section: 'Computer performance',
       title: 'Codex Toolkit maintenance',
       prompt: 'Codex plugin maintenance choice',
-      whatThisControls: 'Whether trusted Codex startup maintenance may refresh the installed Toolkit plugin cache from the verified managed source and, on Windows, safely repair incompatible installed plugin SessionStart hook launchers. It does not give Codex permission to update Claude Code.',
+      whatThisControls: 'Whether trusted Codex startup maintenance may refresh the installed Toolkit plugin cache from the verified managed source. It does not give Codex permission to update Claude Code.',
       choices: [
-        wizardChoice('enable', 'Turn on', 'Enable future native Toolkit cache refresh and safe Windows installed-hook repair when maintenance detects stale or incompatible files.'),
-        wizardChoice('disable', 'Turn off', 'Disable future automatic cache refresh and Windows hook repair; the installed Toolkit plugin is not uninstalled, and manual `setup toolkit` repair or refresh remains available.'),
+        wizardChoice('enable', 'Turn on', 'Enable future native Toolkit cache refresh when maintenance detects stale or incompatible files.'),
+        wizardChoice('disable', 'Turn off', 'Disable future automatic cache refresh; the installed Toolkit plugin is not uninstalled, and manual `setup toolkit` repair or refresh remains available.'),
         wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${currentBooleanOutcome(current.audit?.codex_plugin_auto_refresh_enabled, 'Automatic Codex Toolkit maintenance is on.', 'Automatic Codex Toolkit maintenance is off; the installed plugin remains in place.', 'The automatic Codex maintenance preference could not be verified; setup will not claim that it is active.')}`),
       ],
       recommendation: {
