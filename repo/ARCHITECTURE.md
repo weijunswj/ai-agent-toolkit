@@ -34,6 +34,7 @@ Last reviewed against `main` `9b7ffff3c30078c2290c809d20bc7c49e3f96e8d`.
 | Global rules installer | `repo/scripts/toolkit-global-rules.cjs` |
 | Managed marker format | `repo/scripts/toolkit-managed-block.cjs` |
 | Helper hooks | `repo/scripts/toolkit-claude-agent-hook.cjs`, `repo/scripts/toolkit-codex-helper-hook.cjs` |
+| Governance gate hooks (hold prompts and tools until a repository has a decision) | `repo/scripts/toolkit-governance-gate.cjs` (the gate), `repo/scripts/toolkit-governance-hook.cjs` (Claude Code), `repo/scripts/toolkit-codex-helper-hook.cjs` and `repo/scripts/toolkit-codex-session-start.cjs` (Codex), `repo/scripts/toolkit-governance-repo-state.cjs` (the in-repository `.ai-agent-toolkit/governance.json` copy) |
 | Helper route guard and adapter | `repo/scripts/toolkit-v3-helper-guard.cjs`, `repo/scripts/toolkit-v3-native-helper-adapter.cjs` (shared core), `repo/scripts/toolkit-v3-native-helper-adapter-claude.cjs`, `repo/scripts/toolkit-v3-native-helper-adapter-codex.cjs` |
 | Claude helper agents | `repo/scripts/toolkit-claude-helper-agents.cjs`, `repo/scripts/toolkit-claude-helper-spec.cjs`, `repo/scripts/toolkit-claude-task-session.cjs` |
 | Version bump | `repo/scripts/bump-version.cjs` |
