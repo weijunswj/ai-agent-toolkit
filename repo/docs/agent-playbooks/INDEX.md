@@ -25,6 +25,12 @@ Triggers: a session or subagent switched to a fallback model by a safety classif
 
 Read: `skills/repository-agent-rules/repo-local/docs/agent-playbooks/model-safety-flags.md`.
 
+## Match: Programme Decision Traces
+
+Triggers: G0 planning a programme child, governance first enabled on a repository with a programme, or writing a decision comment on a programme issue.
+
+Read: `skills/repository-agent-rules/repo-local/docs/agent-playbooks/decision-trace.md`.
+
 ## Match: Personal Data In Checks, Fixtures Or Evidence
 
 Triggers: personal or private data in checks, tests, fixtures, queries, logs or evidence, the personal-data guard, or reviewing a change for leaked personal data.

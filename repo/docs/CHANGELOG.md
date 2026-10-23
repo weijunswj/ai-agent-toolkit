@@ -1,5 +1,13 @@
 # Toolkit Changelog
 
+## Unreleased (decision history before planning)
+
+- **Comment tags:** a decision comment starts with its tag on the first line, then a `---` line. Each tag is its own list, and within a tag the latest comment wins; untagged comments go under "Other comments". One parser, `decision-tags.cjs`, is shared by the reconciler and the new history reader.
+- **G0 reads the history first:** before planning a programme child, G0 runs the read-only `decision-history.cjs`. It reads the parent's and the child's comment traces separately, takes the latest comment per tag as live, and marks earlier ones as replaced (by an explicit `SUPERSEDES=`, by inference, or confirmed by the owner). It lists the untagged comments to read and prints a short live-scope summary with exact counts.
+- **The owner confirms before it is the spec:** the summary becomes the child's spec only after the owner confirms it. The controller records that as a `SCOPE-CONFIRMED` comment on the child, and each correction is its own tagged comment.
+- **Enablement backfill:** when governance is first enabled, the first reconcile pass writes every trace, and `decision-history.cjs --programme` reports each issue's coverage for the owner. An existing crawl can be read with `--ledger`.
+- **Rules:** the governed Decision traces rule, a new portable decision-trace playbook routed from both playbook indexes, one Projects skill brief line and one `CONTROLLER.md` clause.
+
 ## Unreleased (executor checkpoints and host contract)
 
 - **Gate assignments:** only the appointed controller writes programme state. It assigns each gate to an executor with `assign --issue <n> --role G0|G1|G2 --assignment <id>`; a live assignment refuses another one unless `--supersede --reason` interrupts it. `reopen` and `interrupt` take a reason. Executors no longer claim gates.

@@ -30,6 +30,8 @@ Check for the binding first at each event; without it, do not run `programme.cjs
 - `scripts/programme-state.cjs`: the owners it uses (`GitHubTransport`, `StateStore`, `ProgrammeGraphReader`, `Reconciler`, the renderer and the managed-block helpers).
 - `scripts/programme-checkpoint.cjs`: executor checkpoint journals, used by `bind`, `checkpoint` and the plugins' turn-end hook (`repo/scripts/toolkit-programme-checkpoint-hook.cjs`).
 - `scripts/decision-trace-audit.cjs`: the read-only decision-trace audit.
+- `scripts/decision-tags.cjs`: the one comment-tag parser (pure, no reads or writes).
+- `scripts/decision-history.cjs`: the read-only decision history G0 runs before planning a child.
 - `scripts/resolve-executable.cjs`: shared executable resolution and its error type; `programme-state.cjs` keeps the public exports.
 - The document and journal schemas live in the Toolkit repository under `repo/contracts/programme-state/`; `repo/docs/HOST-CONTRACT.md` says what each host provides.
 
@@ -138,3 +140,11 @@ Audit with `node scripts/decision-trace-audit.cjs --repo <owner/name> --issue <n
 - No labels, Projects boards, milestones or assignees are changed.
 - Never put secrets or tokens anywhere in a state document, `private` included (it lives in the store's git history); secret-shaped values are refused. Keep local paths and session details in `private`, never in public fields.
 - Return a compact report: binding, store revision, findings, effects and outcomes, holds and exactly one next action.
+
+## Decision history
+
+A decision comment starts with its tag on the first line and a `---` line after it. `scripts/decision-tags.cjs` is the only parser: the tag is 1-80 letters, digits, dots, underscores or hyphens, compared in upper case, with CRLF and leading blank lines accepted. A comment without one belongs to "Other comments". Each tag is its own list, and within a tag the latest comment wins.
+
+Before planning a child, G0 runs `node scripts/decision-history.cjs --repo <owner/name> --child <n> [--edits]`. The parent and the record prefix come from the binding, or from `--parent` and `--record-prefix`. It is read-only and needs no fence: it reads the parent's and the child's comments separately and never mixes them. It takes the latest comment per tag as live. A record named by an explicit `SUPERSEDES=` anywhere in the two traces is replaced outright. Earlier comments in a tag are replaced by inference, or confirmed once a later comment tagged `SCOPE-CONFIRMED` exists on that issue. It also lists untagged comments, untagged records, and untagged comments that name a tag after its latest decision. It prints a live-scope summary: lists are capped with a count (`--max`, `--full` lists everything), `--json` gives the structure, and `--edits` adds the child body's revision count through GraphQL, or says it could not read it. The summary becomes the spec only after the owner confirms it; see the decision-trace playbook (`skills/repository-agent-rules/repo-local/docs/agent-playbooks/decision-trace.md`).
+
+`--programme` reads the parent and every sub-issue once, for the report shown to the owner when governance is first enabled; G0 never uses it. `--ledger <file>` reads a `toolkit.decision-ledger.v1` crawl instead of GitHub. Its entries are untagged, its keyword topics are only hints, and issues it does not hold are reported as not read.
