@@ -1,6 +1,6 @@
 # Host Contract
 
-What the programme custody model needs from each supported host (Claude Code and Codex), and how the Toolkit meets it today. The machine-readable twin is [`repo/contracts/programme-state/host-contract-v1.json`](../contracts/programme-state/host-contract-v1.json); tests read it against the shipped plugin hooks. This page records needs and current mechanisms. It does not claim native qualification: route controls, subagent lifecycle and launch escalation stay with the host issues ([#469](https://github.com/weijunswj/ai-agent-toolkit/issues/469) Codex, [#470](https://github.com/weijunswj/ai-agent-toolkit/issues/470) Claude Code) under the shared contract [#467](https://github.com/weijunswj/ai-agent-toolkit/issues/467).
+What the programme custody model needs from each supported host (Claude Code and Codex), and how the Toolkit meets it today. The machine-readable twin is [`repo/contracts/programme-state/host-contract-v1.json`](../contracts/programme-state/host-contract-v1.json); tests read it against the shipped plugin hooks. This page records needs and current mechanisms. It does not claim native qualification: route controls, subagent lifecycle and launch escalation stay with each host's own support work (one for Codex, one for Claude Code), which follows this shared contract.
 
 ## Who writes what
 
@@ -11,7 +11,7 @@ Only the appointed controller writes programme state (the parent and child docum
 - **Hook input:** both hosts pass `session_id` to the turn-end hook. Only a 16-character hash of it is stored or used in a file name.
 - **Executor:** binds with `programme.cjs bind --issue <n> --assignment <id> --session <its own session ID>`. An inherited or empty value is never used.
   - Claude Code: the session's ID is in `CLAUDE_CODE_SESSION_ID`. This was observed in sessions and is not yet in the host's environment-variable reference, so a bind that cannot read it falls back to the assisted mode.
-  - Codex: no documented way for a session to read its own ID was found, so Codex executors use the assisted mode until the Codex host issue qualifies one.
+  - Codex: no documented way for a session to read its own ID was found, so Codex executors use the assisted mode until the Codex host support work qualifies one.
 - **Route proof:** the launched session reads its model and effort from session metadata before consequential work and passes them to `bind` (`--model`, `--effort`, `--route-read-back`), which records them in the journal. On Codex the lead verifies the route from the session log.
 
 ## 2. Turn-end hook
@@ -60,7 +60,7 @@ Stop or fence the old writer, settle in-flight effects, then assign the successo
 
 ## 6. Helpers
 
-Named helper definitions carry the pinned model and effort. Only a G0 or G1 lead launches helpers, helpers never launch, and G2 has none. Host-specific route realisation belongs to the host issues.
+Named helper definitions carry the pinned model and effort. Only a G0 or G1 lead launches helpers, helpers never launch, and G2 has none. How each host carries out the route belongs to that host's own support work.
 
 ## 7. Lane write fences
 

@@ -1,6 +1,6 @@
 {
   "schema": "toolkit.host-contract.v1",
-  "description": "Machine-readable twin of repo/docs/HOST-CONTRACT.md: what the programme custody model needs from each supported host. Tests read this file against the shipped plugin hooks. It records needs and current mechanisms; it does not claim native qualification, which the host issues own.",
+  "description": "Machine-readable twin of repo/docs/HOST-CONTRACT.md: what the programme custody model needs from each supported host. Tests read this file against the shipped plugin hooks. It records needs and current mechanisms; it does not claim native qualification, which belongs to each host's own support work.",
   "turn_end_hook": {
     "event": "Stop",
     "script": "repo/scripts/toolkit-programme-checkpoint-hook.cjs",
@@ -27,8 +27,7 @@
       "completion_mode": {
         "local": "native",
         "cloud_and_projects_threads": "toolkit_assisted"
-      },
-      "qualification_issue": 470
+      }
     },
     "codex": {
       "hooks_file": ".codex-plugin/hooks/hooks.json",
@@ -44,8 +43,7 @@
       "completion_mode": {
         "local": "toolkit_assisted",
         "cloud_and_projects_threads": "toolkit_assisted"
-      },
-      "qualification_issue": 469
+      }
     }
   },
   "completion_modes": {
