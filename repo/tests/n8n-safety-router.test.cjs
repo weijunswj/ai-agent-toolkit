@@ -260,7 +260,6 @@ test('generic AI coding agent templates stay slim and obsolete heavy templates a
   for (const relPath of [
     'skills/repository-agent-rules/repo-local/AGENTS.managed.template.md',
     'skills/repository-agent-rules/repo-local/CLAUDE.shim.template.md',
-    'skills/repository-agent-rules/repo-local/GEMINI.shim.template.md',
     'skills/repository-agent-rules/repo-local/antigravity-bootstrap.template.md'
   ]) {
     const text = readText(relPath);

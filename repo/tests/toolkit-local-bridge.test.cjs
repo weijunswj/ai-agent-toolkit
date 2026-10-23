@@ -46,7 +46,7 @@ const {
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '3.5.0';
+const expectedBridgeVersion = '3.6.0';
 const supportedN8nFixtureRoot = path.join(repoRoot, 'repo', 'tests', 'fixtures', 'n8n-skills-1.0.1');
 
 function tmpRoot() {
@@ -714,8 +714,9 @@ test('Antigravity portable skills preview and copy only into an explicit workspa
   assert.equal(copied.target, '.agents/skills');
   assert.equal(copied.wrote, true);
   const skillsRoot = path.join(projectRoot, '.agents', 'skills');
-  assert.deepEqual(targetSkillDirs(skillsRoot), repoSkillNames());
-  assert.ok(fs.existsSync(path.join(skillsRoot, 'toolkit-setup', 'SKILL.md')));
+  const { INTERNAL_SKILLS } = require('../scripts/toolkit-antigravity-project-skills.cjs');
+  assert.deepEqual(targetSkillDirs(skillsRoot), repoSkillNames().filter((name) => !INTERNAL_SKILLS.includes(name)));
+  assert.equal(fs.existsSync(path.join(skillsRoot, 'toolkit-setup')), false, 'Toolkit-only skills stay out of the portable copy');
   assert.equal(fs.existsSync(path.join(projectRoot, '.gemini')), false);
   assert.equal(fs.existsSync(path.join(projectRoot, '.opencode')), false);
   assert.equal(fs.existsSync(path.join(root, 'hub')), false, 'portable copying must not mutate bridge state');
@@ -2990,18 +2991,40 @@ test('Codex SessionStart hook adds no missing-rule notice for current AGENTS', (
 });
 
 test('agent-rules preflight checks Claude shim content in Claude hook mode', () => {
-  const root = tmpRoot();
-  fs.mkdirSync(path.join(root, '.git'), { recursive: true });
   const templateDir = path.join(repoRoot, 'skills', 'repository-agent-rules', 'repo-local');
-  writeFile(path.join(root, 'AGENTS.md'), fs.readFileSync(path.join(templateDir, 'AGENTS.managed.template.md'), 'utf8'));
-  writeFile(path.join(root, 'CLAUDE.md'), fs.readFileSync(path.join(templateDir, 'CLAUDE.shim.template.md'), 'utf8').replace('@AGENTS.md', '@./AGENTS.md'));
-
-  const result = runAgentRulesPreflight(
-    { hook: true, syncSource: 'claude-plugin' },
-    { targetRoot: root, pluginRoot: repoRoot }
-  );
-  assert.equal(result.status, 'needs-attention');
-  assert.deepEqual(result.findings.map((finding) => `${finding.file}:${finding.kind}`), ['CLAUDE.md:stale-block']);
+  assert.equal(fs.readFileSync(path.join(templateDir, 'CLAUDE.shim.template.md'), 'utf8'), '@AGENTS.md\n');
+  const oldMarkedShim = [
+    '<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/repo-local/CLAUDE.shim.template.md:BEGIN CLAUDE.SHIM v2 toolkit=3.5.0 sha256=5bab3ffc1689 -->',
+    '# Claude Code Instructions',
+    '',
+    '@AGENTS.md',
+    '',
+    'Root `AGENTS.md` is canonical.',
+    '<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/repo-local/CLAUDE.shim.template.md:END CLAUDE.SHIM -->',
+    ''
+  ].join('\n');
+  const cases = [
+    ['@AGENTS.md\n', []],
+    ['@AGENTS.md\r\n', []],
+    ['# Our notes\n\n@AGENTS.md\n\nMore of our own text.\n', []],
+    [oldMarkedShim, ['CLAUDE.md:stale-block']],
+    ['@./AGENTS.md\n', ['CLAUDE.md:unmanaged']],
+    ['See `@AGENTS.md` for the rules.\n', ['CLAUDE.md:unmanaged']],
+    ['# Notes\n\n```text\n@AGENTS.md\n```\n', ['CLAUDE.md:unmanaged']],
+    ['@AGENTS.md\n<!-- AI-AGENT-TOOLKIT:other.md:BEGIN OTHER v2 toolkit=3.6.0 sha256=000000000000 -->\n', ['CLAUDE.md:broken-marker']]
+  ];
+  for (const [claudeText, expected] of cases) {
+    const root = tmpRoot();
+    fs.mkdirSync(path.join(root, '.git'), { recursive: true });
+    writeFile(path.join(root, 'AGENTS.md'), fs.readFileSync(path.join(templateDir, 'AGENTS.managed.template.md'), 'utf8'));
+    writeFile(path.join(root, 'CLAUDE.md'), claudeText);
+    const result = runAgentRulesPreflight(
+      { hook: true, syncSource: 'claude-plugin' },
+      { targetRoot: root, pluginRoot: repoRoot }
+    );
+    assert.deepEqual(result.findings.map((finding) => `${finding.file}:${finding.kind}`), expected, JSON.stringify(claudeText));
+    if (expected.length) assert.equal(result.status, 'needs-attention');
+  }
 });
 
 test('hook report is generated when repo auto-update fast-forwards and lists changed files', () => {
@@ -4291,7 +4314,7 @@ test('toolkit setup skill documents the end-to-end English setup journey', () =>
     const text = fs.readFileSync(path.join(repoRoot, relPath), 'utf8');
     assert.match(text, /setup toolkit/i, relPath);
     assert.match(text, /%USERPROFILE%\\\.ai-agent-toolkit\\source\\ai-agent-toolkit\\repo\\scripts\\setup-toolkit\.cjs/, relPath);
-    assert.match(text, /\$HOME\/\.ai-agent-toolkit\/source\/ai-agent-toolkit\/repo\/scripts\/setup-toolkit\.cjs/, relPath);
+    assert.doesNotMatch(text, /\$HOME\/\.ai-agent-toolkit/, relPath);
     assert.match(text, /active repo command is bootstrap\/fallback only|active `repo\/scripts\/setup-toolkit\.cjs --execute --profile auto-main` as bootstrap\/fallback only|active repo only as bootstrap\/fallback/i, relPath);
     assert.match(text, /append `--host claude-code`|with `--host claude-code`/i, relPath);
     assert.match(text, /Do not run an active stale verifier after managed setup|Verification after managed setup must use the managed checkout verifier/i, relPath);
@@ -4299,7 +4322,7 @@ test('toolkit setup skill documents the end-to-end English setup journey', () =>
     assert.match(text, /exact setup script path executed/i, relPath);
     assert.match(text, /dedicated clean `main` checkout as the single update source/, relPath);
     assert.match(text, /%USERPROFILE%\\\.ai-agent-toolkit\\source\\ai-agent-toolkit/, relPath);
-    assert.match(text, /~\/\.ai-agent-toolkit\/source\/ai-agent-toolkit/, relPath);
+    assert.doesNotMatch(text, /~\/\.ai-agent-toolkit\/source\/ai-agent-toolkit/, relPath);
     assert.match(text, /separate from the active Codex or Claude Code worktree, plugin caches, `\.tmp` directories, and temporary marketplace checkouts/i, relPath);
     assert.match(text, /complete compact bank|semantic wizard model/i, relPath);
     assert.match(text, /report auto-open is not an ordinary question|failure-only behavior/i, relPath);

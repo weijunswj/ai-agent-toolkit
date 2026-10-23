@@ -128,8 +128,7 @@ test('generated Codex and Claude instruction surfaces preserve the compact host-
   for (const text of [agents, global]) {
     assert.doesNotMatch(text, /RAM|reservation|CPU|Children default|never use Fast|medium non-fast|special-worker|host-parity|profile\/capacity|ADMISSION_DENIED|worker-speedup|fork_turns/);
   }
-  assert.match(claude, /@AGENTS\.md/);
-  assert.match(claude, /Root `AGENTS\.md` is canonical/);
+  assert.equal(claude, '@AGENTS.md\n');
   assert.doesNotMatch(claude, /multi_agent_v2|max_concurrent_threads_per_session|agents\.max_threads/);
 });
 

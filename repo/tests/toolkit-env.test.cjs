@@ -641,7 +641,8 @@ test('the editor starts by its full path, so a program in the working folder is 
 
 test('the global rules keep every clause and point keys and tokens at toolkit-env', () => {
   const text = fs.readFileSync(path.join(ROOT, 'repo', 'contracts', 'agent-rules', 'global-rules.md'), 'utf8');
-  assert.match(text, /Otherwise inspect, make the narrow change, validate and report\./);
+  assert.match(text, /Work execution-first: inspect, make the smallest safe change, validate, report honestly\./);
+  assert.match(text, /make a repository-specific plan before editing\./);
   assert.match(text, /Carry every dependency-ready safe step of authorised work to the actual deliverable/);
   assert.match(text, /Never ask for or repeat a key or token in chat; use `toolkit-env`\./);
 });

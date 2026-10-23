@@ -1,5 +1,16 @@
 # Toolkit Changelog
 
+## 3.6.0 (instructions, README and packaging)
+
+- **Windows only.** Toolkit supports Windows 10 and 11 computers. The README says so on its first line, the validator keeps that line there, and setup docs drop the POSIX commands and `$HOME` paths. Linux stays for CI, cloud agent sessions and the remote servers some skills manage (#532).
+- **A short README.** The front page now covers what Toolkit is, install, update, remove, the skills and where the docs live; the detail moved to [How To Use](HOW-TO-USE.md).
+- **`CLAUDE.md` is one line, `@AGENTS.md`.** The shim has no markers; the sync and the session-start check recognise it by its content, and an old marked shim reads as stale. **`GEMINI.md` is gone**: Antigravity reads `AGENTS.md` itself. `repository-agent-rules` removes an old Toolkit `GEMINI.md` shim on refresh and never touches anyone else's.
+- **Global rules:** your own instructions rank with your current request; a shorter line for reading `AGENTS.md`; no AI attribution in commits or PRs; never create files at a drive root; and a task-intake rule (find the owning issue, else add a native sub-issue and read it back). The block stays inside its 16,500-byte budget (16,484).
+- **`CONTROLLER.md`:** the same task-intake rule; the owner's own custom instructions and the Projects skill at the top of the order; and the owner's standing rules: only merges, deletions, real keys and irreversible steps need the owner's OK, and agents fully manage evidence (transport) stores on any backend, with the secret scan and the sole-copy rule kept. The global floor's opening sentence and the governed evidence line now carry that one exception, and both `safety-gates.md` playbooks point at it. To stay in budget, Tool Preference no longer offers to remove unused connectors.
+- **Claude Projects controller skill** now lives in the repo at `repo/contracts/claude-projects/web-controller-projects/SKILL.md` (version 2026-10-23.7), outside `skills/` so no plugin offers it. You upload it to claude.ai yourself after a merge that changes it. You or another project may edit the uploaded copy directly; a coordinator brings those edits into Toolkit before the next upload.
+- **Packaging:** the Skill Safety Matrix has a Packaging table that marks each skill portable or internal. The Antigravity copy now leaves out the four Toolkit-only skills (`controller-bootstrap`, `github-program-reconciler`, `toolkit-env`, `toolkit-setup`), and the validator keeps the table and the copier in step (#424).
+- **This repository** tracks a `.claude/settings.json` that allows WebFetch and WebSearch here only.
+
 ## 3.5.0 (keys and tokens)
 
 - **`toolkit env`:** one place for the API keys and tokens your coding apps use, kept in the computer's own credential store (Windows Credential Manager on this PC only, or the Linux Secret Service, with built-in tools only and no fallback file; macOS is not supported). `status` shows names only; `edit` opens a private Notepad file and `apply` saves it; `set`, `remove` (after a yes/no naming the key), `run --names A,B -- <tool>`, and `header` for the apps. See [Toolkit Env](TOOLKIT-ENV.md).

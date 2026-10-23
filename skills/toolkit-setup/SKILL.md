@@ -30,10 +30,6 @@ Bridge setup, repo auto-update, sync, audit, disable, Windows plugin hook repair
 node "%USERPROFILE%\.ai-agent-toolkit\source\ai-agent-toolkit\repo\scripts\setup-toolkit.cjs" --execute --profile auto-main
 ```
 
-```sh
-node "$HOME/.ai-agent-toolkit/source/ai-agent-toolkit/repo/scripts/setup-toolkit.cjs" --execute --profile auto-main
-```
-
 The orchestrator discovers current state, shows one consolidated upfront setup question bank, pauses before preference or target writes, then runs to completion unless a real safety blocker appears.
 
 Treat exit code `23` as an intentional pause only after the managed child emits exactly one complete bank on stdout and the delegating parent acknowledges that it forwarded the bank visibly. In a chat host, emit the complete compact bank as ordinary visible text before asking for approval. Hidden tool output, an internal summary, or a statement that the bank exists does not count. A blanket recommended-default action is allowed only in the same visible response as every consequential current outcome, recommendation, effect, and choice. Never say `shown above` or equivalent unless the complete bank is in that same payload. Missing, partial, duplicate, misordered, wrong-stream, timed-out, signalled, failed, recursive, or invalid-identity managed output fails closed in one execution without retry, fallback, approval, or writes. Do not rerun with `--yes-recommended` unless the user explicitly asked to use the displayed recommended choices in the current turn.
@@ -48,10 +44,7 @@ It must show this explanation:
 
 **Toolkit will use a dedicated clean `main` checkout as the single update source. Active Codex or Claude Code sessions may remain on PR branches, but plugin updates will not depend on those branches.**
 
-Default managed source checkout:
-
-- Windows: `%USERPROFILE%\.ai-agent-toolkit\source\ai-agent-toolkit`
-- POSIX: `~/.ai-agent-toolkit/source/ai-agent-toolkit`
+Default managed source checkout: `%USERPROFILE%\.ai-agent-toolkit\source\ai-agent-toolkit`.
 
 The managed checkout is separate from the active Codex or Claude Code worktree, plugin caches, `.tmp` directories, and temporary marketplace checkouts. If the active Toolkit worktree is on a PR branch, setup should warn that this is okay and continue using the managed clean `main` checkout.
 

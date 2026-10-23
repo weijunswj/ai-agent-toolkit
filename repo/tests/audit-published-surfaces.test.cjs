@@ -218,7 +218,6 @@ test('active scan membership is rule-derived and includes roots, docs, contracts
   for (const relPath of [
     'AGENTS.md',
     'CLAUDE.md',
-    'GEMINI.md',
     'README.md',
     'repo/contracts/source-of-truth-contract.md',
     'repo/docs/FOR_AI_AGENTS.md',

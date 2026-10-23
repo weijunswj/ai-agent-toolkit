@@ -28,7 +28,7 @@ const { samePath } = require('./toolkit-canonical-path.cjs');
 const { GlobalRules, describeResult: describeGlobalRules } = require('./toolkit-global-rules.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '3.5.0';
+const BRIDGE_VERSION = '3.6.0';
 const STATE_SCHEMA_VERSION = 1;
 const SYNC_SOURCES = ['repo', 'codex-plugin', 'claude-plugin'];
 const LOCK_STALE_MS = 10 * 60 * 1000;
@@ -52,7 +52,7 @@ const AGENT_RULES_PREFLIGHT_FILES = {
   ],
   'claude-plugin': [
     { target: 'AGENTS.md', template: 'AGENTS.managed.template.md' },
-    { target: 'CLAUDE.md', template: 'CLAUDE.shim.template.md' }
+    { target: 'CLAUDE.md', template: 'CLAUDE.shim.template.md', exact: true }
   ]
 };
 const RECONCILIATION_ALLOWED_FLAGS = new Set([
@@ -1217,6 +1217,34 @@ function agentRulesPluginRoot(args, options = {}) {
   return runtimeCodexPluginRoot();
 }
 
+// The CLAUDE.md shim has no markers: it is exactly the import line. A file that
+// imports AGENTS.md on a line of its own is current; one still holding the old
+// marked CLAUDE.SHIM block is stale; anything else is the repository's own file.
+function compareExactAgentRuleFile(targetPath, templatePath, spec) {
+  const expected = normalizeManagedBlockText(fs.readFileSync(templatePath, 'utf8')).trim();
+  if (!fs.existsSync(targetPath)) {
+    return [{ file: spec.target, kind: 'missing', detail: 'required instruction file is missing' }];
+  }
+  if (!fs.statSync(targetPath).isFile()) {
+    return [{ file: spec.target, kind: 'not-file', detail: 'required instruction path is not a file' }];
+  }
+  const text = normalizeManagedBlockText(fs.readFileSync(targetPath, 'utf8'));
+  const parsed = parseManagedMarkerBlocks(text);
+  if (parsed.errors.length) {
+    return parsed.errors.map((error) => ({ file: spec.target, kind: 'broken-marker', detail: error }));
+  }
+  if ([...parsed.blocks.values()].some((block) => block.label === 'CLAUDE.SHIM')) {
+    return [{ file: spec.target, kind: 'stale-block', block: 'CLAUDE.SHIM', detail: `the Toolkit shim is now the single line ${expected}` }];
+  }
+  // Claude Code ignores imports inside fenced code blocks, so only a line outside a fence counts.
+  let fenced = false;
+  for (const line of text.split('\n')) {
+    if (/^\s*(?:```|~~~)/.test(line)) { fenced = !fenced; continue; }
+    if (!fenced && line.trim() === expected) return [];
+  }
+  return [{ file: spec.target, kind: 'unmanaged', detail: `no ${expected} import line found` }];
+}
+
 function compareAgentRuleFile({ targetRoot, templateRoot, spec }) {
   const targetPath = path.join(targetRoot, spec.target);
   const templatePath = path.join(templateRoot, spec.template);
@@ -1227,6 +1255,7 @@ function compareAgentRuleFile({ targetRoot, templateRoot, spec }) {
       detail: `bundled template missing: ${slash(templatePath)}`
     }];
   }
+  if (spec.exact) return compareExactAgentRuleFile(targetPath, templatePath, spec);
   const template = parseManagedMarkerBlocks(fs.readFileSync(templatePath, 'utf8'));
   if (template.errors.length) {
     return template.errors.map((error) => ({
