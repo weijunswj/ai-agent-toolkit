@@ -19,8 +19,6 @@ const ATTRIBUTION_PATTERNS = Object.freeze([
 const COMMIT_OR_PR = /\bgit\b[^\n;&|]*\bcommit\b|\bgh\s+pr\s+(?:create|edit|merge)\b/;
 // -F <file>, -F<file>, --file <file>, --file=<file>, --body-file <file>, --body-file=<file>
 const FILE_OPTIONS = /(?:^|\s)(?:-F(?:=|\s+)?|--file(?:=|\s+)|--body-file(?:=|\s+))("[^"]+"|'[^']+'|[^\s"']+)/g;
-// git [global options] -C <dir>: message files in that git command are relative to that folder.
-const GIT_DIR_OPTION = /\bgit\b(?:\s+(?:-c\s+\S+|--?[A-Za-z][\w-]*(?:=\S+)?))*?\s+-C\s+("[^"]+"|'[^']+'|\S+)/;
 // Separate commands in one line: each is checked against its own folder.
 const COMMAND_SEPARATORS = /&&|\|\||[;|\n]/;
 const MAX_FILE_BYTES = 1024 * 1024;
@@ -30,11 +28,26 @@ function hasAttribution(text) {
 }
 
 // The message or body files a command names, resolved against the command's working folder.
+// git [global options] -C <dir> ...: the folder message files in that git command are relative to.
+// Reads the words after `git` up to the subcommand; -c takes a value, other options do not.
+function gitDirectory(segment) {
+  const words = segment.match(/"[^"]*"|'[^']*'|\S+/g) || [];
+  const start = words.findIndex((word) => /(?:^|[\\/])git(?:\.exe)?$/i.test(word));
+  if (start === -1) return '';
+  for (let index = start + 1; index < words.length; index += 1) {
+    const word = words[index];
+    if (word === '-C') return (words[index + 1] || '').replace(/^["']|["']$/g, '');
+    if (word === '-c') { index += 1; continue; }
+    if (!word.startsWith('-')) return '';
+  }
+  return '';
+}
+
 function namedFiles(command, cwd) {
   const files = [];
   const root = cwd || process.cwd();
   for (const segment of String(command).split(COMMAND_SEPARATORS)) {
-    const gitDir = GIT_DIR_OPTION.exec(segment)?.[1]?.replace(/^["']|["']$/g, '');
+    const gitDir = gitDirectory(segment);
     const base = gitDir ? path.resolve(root, gitDir) : root;
     for (const match of segment.matchAll(FILE_OPTIONS)) {
       const raw = match[1].replace(/^["']|["']$/g, '');

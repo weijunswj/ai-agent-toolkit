@@ -322,10 +322,11 @@ test('retire moves ~/.codex/.env to a private backup only when every key is stor
       const acl = spawnSync(path.join(process.env.SystemRoot, 'System32', 'icacls.exe'), [target], { encoding: 'utf8' }).stdout;
       assert.doesNotMatch(acl, /\(I\)|NT AUTHORITY|BUILTIN|Everyone/, acl);
       assert.equal(acl.split(/\r?\n/).filter((line) => /:\(/.test(line)).length, 1, acl);
-      const aclScript = '$ErrorActionPreference = "Stop"; $acl = Get-Acl -LiteralPath ([Console]::In.ReadToEnd()); $acl.Access | ForEach-Object { $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value }';
+      // .NET directly, so no PowerShell module has to load (a runner's PSModulePath can point at PowerShell 7).
+      const aclScript = '$ErrorActionPreference = "Stop"; $p = [Console]::In.ReadToEnd(); $acl = if ([System.IO.Directory]::Exists($p)) { [System.IO.Directory]::GetAccessControl($p) } else { [System.IO.File]::GetAccessControl($p) }; $acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]) | ForEach-Object { $_.IdentityReference.Value }';
       const access = spawnSync(path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), [
         '-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(aclScript, 'utf16le').toString('base64'),
-      ], { input: target, encoding: 'utf8', windowsHide: true, timeout: 10000 });
+      ], { input: target, encoding: 'utf8', windowsHide: true, timeout: 10000, env: Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toLowerCase() !== 'psmodulepath')) });
       assert.equal(access.status, 0, access.stderr);
       assert.equal(access.stdout.trim(), sid, 'the sole ACL entry must be the executing identity, not USERNAME');
     }
