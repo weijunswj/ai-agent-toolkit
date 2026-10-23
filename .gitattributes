@@ -40,3 +40,6 @@ skills/frontend-art-direction/tools/design-system-generator/tests/test_local_onl
 skills/frontend-art-direction/tools/design-system-generator/data/** -text whitespace=cr-at-eol
 skills/frontend-art-direction/tools/design-system-generator/scripts/core.py -text
 skills/frontend-art-direction/tools/design-system-generator/scripts/design_system.py -text
+
+# Pinned third-party copies are compared by git blob SHA, so their bytes never change.
+repo/contracts/third-party/** -text

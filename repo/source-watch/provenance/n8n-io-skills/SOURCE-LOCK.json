@@ -1,0 +1,688 @@
+{
+  "source_repo": "n8n-io/skills",
+  "source_ref": "main",
+  "source_commit": "27b6b9f429ac0be90cae764512dbc579d7107e95",
+  "source_lifecycle": "active",
+  "source_role": "third_party_attribution_source",
+  "source_update_policy": "manual_review_required",
+  "public_attribution_required": true,
+  "files": [
+    {
+      "mode": "excluded",
+      "source_path": ".agents/plugins/marketplace.json",
+      "notes": "Codex marketplace wrapper. Excluded: skills only, no plugin."
+    },
+    {
+      "mode": "excluded",
+      "source_path": ".claude-plugin/marketplace.json",
+      "notes": "Claude Code plugin wrapper. Excluded: Toolkit ships the skill folders only, never the plugin."
+    },
+    {
+      "mode": "excluded",
+      "source_path": ".claude-plugin/plugin.json",
+      "notes": "Claude Code plugin wrapper. Excluded: Toolkit ships the skill folders only, never the plugin."
+    },
+    {
+      "mode": "excluded",
+      "source_path": ".codex-plugin/plugin.json",
+      "notes": "Codex plugin wrapper. Excluded: skills only, no plugin."
+    },
+    {
+      "mode": "excluded",
+      "source_path": ".gitignore",
+      "notes": "Upstream ignore rules. Excluded."
+    },
+    {
+      "mode": "excluded",
+      "source_path": "CLAUDE.md",
+      "notes": "Upstream repository instructions for its own maintainers. Excluded."
+    },
+    {
+      "mode": "excluded",
+      "source_path": "CONTRIBUTING.md",
+      "notes": "Upstream contribution guide. Excluded."
+    },
+    {
+      "mode": "exact",
+      "source_path": "LICENSE",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/LICENSE",
+      "source_blob_sha": "c87e50b21d7195576cfda86509960d9f80a1d3bd",
+      "notes": "Apache-2.0 licence text, kept with the copied skills."
+    },
+    {
+      "mode": "excluded",
+      "source_path": "README.md",
+      "notes": "Upstream readme, reviewed for install paths and hosts. Excluded; Toolkit docs describe the copy."
+    },
+    {
+      "mode": "excluded",
+      "source_path": "hooks/hooks.json",
+      "notes": "Plugin hook scripts (.sh). Excluded: nothing from upstream runs on the user's computer."
+    },
+    {
+      "mode": "excluded",
+      "source_path": "hooks/post-tool-use/validate-workflow.sh",
+      "notes": "Plugin hook scripts (.sh). Excluded: nothing from upstream runs on the user's computer."
+    },
+    {
+      "mode": "excluded",
+      "source_path": "hooks/pre-tool-use/_emit.sh",
+      "notes": "Plugin hook scripts (.sh). Excluded: nothing from upstream runs on the user's computer."
+    },
+    {
+      "mode": "excluded",
+      "source_path": "hooks/pre-tool-use/agent-build.sh",
+      "notes": "Plugin hook scripts (.sh). Excluded: nothing from upstream runs on the user's computer."
+    },
+    {
+      "mode": "excluded",
+      "source_path": "hooks/pre-tool-use/create-workflow.sh",
+      "notes": "Plugin hook scripts (.sh). Excluded: nothing from upstream runs on the user's computer."
+    },
+    {
+      "mode": "excluded",
+      "source_path": "hooks/pre-tool-use/execute-workflow.sh",
+      "notes": "Plugin hook scripts (.sh). Excluded: nothing from upstream runs on the user's computer."
+    },
+    {
+      "mode": "excluded",
+      "source_path": "hooks/pre-tool-use/get-node.sh",
+      "notes": "Plugin hook scripts (.sh). Excluded: nothing from upstream runs on the user's computer."
+    },
+    {
+      "mode": "excluded",
+      "source_path": "hooks/pre-tool-use/test-workflow.sh",
+      "notes": "Plugin hook scripts (.sh). Excluded: nothing from upstream runs on the user's computer."
+    },
+    {
+      "mode": "excluded",
+      "source_path": "hooks/pre-tool-use/update-workflow.sh",
+      "notes": "Plugin hook scripts (.sh). Excluded: nothing from upstream runs on the user's computer."
+    },
+    {
+      "mode": "excluded",
+      "source_path": "hooks/pre-tool-use/validate-workflow.sh",
+      "notes": "Plugin hook scripts (.sh). Excluded: nothing from upstream runs on the user's computer."
+    },
+    {
+      "mode": "excluded",
+      "source_path": "hooks/session-start.sh",
+      "notes": "Plugin hook scripts (.sh). Excluded: nothing from upstream runs on the user's computer."
+    },
+    {
+      "mode": "excluded",
+      "source_path": "opencode/README.md",
+      "notes": "OpenCode plugin wrapper. Excluded: OpenCode reads the Claude Code and Codex skill folders Toolkit fills."
+    },
+    {
+      "mode": "excluded",
+      "source_path": "opencode/plugin.ts",
+      "notes": "OpenCode plugin wrapper. Excluded: OpenCode reads the Claude Code and Codex skill folders Toolkit fills."
+    },
+    {
+      "mode": "excluded",
+      "source_path": "package.json",
+      "notes": "Package manifest. Excluded: no upstream package is installed."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-agents-official/SKILL.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-agents-official/SKILL.md",
+      "source_blob_sha": "2cc6bdd39ef5743ca2b107919424586247b6b73f",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-agents-official/references/APPROVALS.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-agents-official/references/APPROVALS.md",
+      "source_blob_sha": "f8825a9bb4e1f46f9e40155dd7cd937764a61223",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-agents-official/references/CHANNELS.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-agents-official/references/CHANNELS.md",
+      "source_blob_sha": "1b49ec2ca00d995a4c8622195421773c791c7084",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-agents-official/references/CONFIG.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-agents-official/references/CONFIG.md",
+      "source_blob_sha": "4cf4c8aefefe6b319b9468661b83c1787d4c9cc8",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-agents-official/references/KNOWLEDGE.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-agents-official/references/KNOWLEDGE.md",
+      "source_blob_sha": "65d37dd59ae41bf3bf621f71d685f5b7512323e3",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-agents-official/references/MCP_BUILD.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-agents-official/references/MCP_BUILD.md",
+      "source_blob_sha": "e90648cd240b7aab59540883fae5c61ea2beb402",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-agents-official/references/MEMORY.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-agents-official/references/MEMORY.md",
+      "source_blob_sha": "ac598014cb183e80cccae01e60f25fc80b20c5b4",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-agents-official/references/MESSAGE_AN_AGENT.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-agents-official/references/MESSAGE_AN_AGENT.md",
+      "source_blob_sha": "9f11921f3d8f8f6fb867e5f75233c49a942678db",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-agents-official/references/SESSIONS_AND_DEBUGGING.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-agents-official/references/SESSIONS_AND_DEBUGGING.md",
+      "source_blob_sha": "d4a274716d203d022a210c844e678482f50e143a",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-agents-official/references/SKILLS.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-agents-official/references/SKILLS.md",
+      "source_blob_sha": "0a938d79cf7149b96207e7b5764f3ca301a33d3b",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-agents-official/references/SUB_AGENTS.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-agents-official/references/SUB_AGENTS.md",
+      "source_blob_sha": "2ff2fe78b3b4e0c4e44853f2357e7080b8a88699",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-agents-official/references/TASKS.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-agents-official/references/TASKS.md",
+      "source_blob_sha": "6f9b6459181aa73f34c7fee946026eec0eaa7f58",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-agents-official/references/TOOLS.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-agents-official/references/TOOLS.md",
+      "source_blob_sha": "9a992277ef3f2214abdfef75cb0ea5b0872d35a7",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-ai-nodes-official/SKILL.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-ai-nodes-official/SKILL.md",
+      "source_blob_sha": "3bca21ce9371ae1537ad57b07907c5ec1c67ab66",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-ai-nodes-official/references/CHAT_SURFACE_PATTERNS.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-ai-nodes-official/references/CHAT_SURFACE_PATTERNS.md",
+      "source_blob_sha": "ff56fb4b96aef81194a2a34be9c51c0d9e1ee364",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-ai-nodes-official/references/HUMAN_REVIEW.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-ai-nodes-official/references/HUMAN_REVIEW.md",
+      "source_blob_sha": "06d71d1cd1a510f1a01b1d18ba0724ccaab27359",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-ai-nodes-official/references/MEMORY.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-ai-nodes-official/references/MEMORY.md",
+      "source_blob_sha": "d1df6701bc629d1bd2e98724b7c4d6a4c5e58961",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-ai-nodes-official/references/RAG.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-ai-nodes-official/references/RAG.md",
+      "source_blob_sha": "b2ead11f6a49f5ee3955e1ce90df93e62b693b4f",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-ai-nodes-official/references/STRUCTURED_OUTPUT.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-ai-nodes-official/references/STRUCTURED_OUTPUT.md",
+      "source_blob_sha": "95c84e0556bb67312c14b86d60a2cd1ff152f652",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-ai-nodes-official/references/SUBWORKFLOW_AS_TOOL.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-ai-nodes-official/references/SUBWORKFLOW_AS_TOOL.md",
+      "source_blob_sha": "0b890cc44ef3f83616c6c4768fb080bafc6b7437",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-ai-nodes-official/references/SYSTEM_PROMPT.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-ai-nodes-official/references/SYSTEM_PROMPT.md",
+      "source_blob_sha": "9afc08dfe55fee956eeb460155ccd96e52f923e1",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-ai-nodes-official/references/TOOLS.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-ai-nodes-official/references/TOOLS.md",
+      "source_blob_sha": "0a2d2493e24062a593e852adaa1f93777873b8a4",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-ai-nodes-official/references/examples/agent-core.json",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-ai-nodes-official/references/examples/agent-core.json",
+      "source_blob_sha": "9038b54c5f1d7281c97172863c71d43ba4e9a7a1",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-ai-nodes-official/references/examples/notion-ideas-subagent.json",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-ai-nodes-official/references/examples/notion-ideas-subagent.json",
+      "source_blob_sha": "df13734941f43a4e39f2ad72e381ad7f612c2a4f",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-ai-nodes-official/references/examples/slack-router.json",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-ai-nodes-official/references/examples/slack-router.json",
+      "source_blob_sha": "3e44e1f110c4d68a0f08b00930c9e084adbd8e17",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-binary-and-data-official/SKILL.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-binary-and-data-official/SKILL.md",
+      "source_blob_sha": "76cb0016fec245ac88c83ceda1f03b5528c628e1",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-binary-and-data-official/references/AGENT_TOOL_BINARY.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-binary-and-data-official/references/AGENT_TOOL_BINARY.md",
+      "source_blob_sha": "31d5c41ce1686ff8c0e195c8491c48b0b34759a3",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-binary-and-data-official/references/BINARY_BASICS.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-binary-and-data-official/references/BINARY_BASICS.md",
+      "source_blob_sha": "d80b902ad506f71c5a8397c7d79c3fb4ffa4d3ad",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-binary-and-data-official/references/CDN_REQUIREMENT.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-binary-and-data-official/references/CDN_REQUIREMENT.md",
+      "source_blob_sha": "3270d8cf70d2e5c0de744f204c7328d55eaa41d5",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-binary-and-data-official/references/MERGE_FOR_CONTEXT.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-binary-and-data-official/references/MERGE_FOR_CONTEXT.md",
+      "source_blob_sha": "592e9cf00d195e91ef54c79c3d226a3e4669e222",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-code-nodes-official/SKILL.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-code-nodes-official/SKILL.md",
+      "source_blob_sha": "2a5b08a00b5f47a2e89d5876f5ddae74625e41d2",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-code-nodes-official/references/ARROW_FUNCTIONS_IN_EDIT_FIELDS.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-code-nodes-official/references/ARROW_FUNCTIONS_IN_EDIT_FIELDS.md",
+      "source_blob_sha": "d7d5bbd99bbb3345c4bb451cb8887160dcaca3ba",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-code-nodes-official/references/DECISION_TREE.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-code-nodes-official/references/DECISION_TREE.md",
+      "source_blob_sha": "1a47f3b14e79004232f4237c9a67cc71732d4dbe",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-code-nodes-official/references/JAVASCRIPT_PATTERNS.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-code-nodes-official/references/JAVASCRIPT_PATTERNS.md",
+      "source_blob_sha": "c813c9e72811efc0dfec530cc2493d931647e7d5",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-credentials-and-security-official/SKILL.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-credentials-and-security-official/SKILL.md",
+      "source_blob_sha": "ab550731df56ce82b94b493b1427ae8fed9d8e88",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-credentials-and-security-official/references/CREDENTIAL_SYSTEM.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-credentials-and-security-official/references/CREDENTIAL_SYSTEM.md",
+      "source_blob_sha": "09429830e9563fba4d44b72cf8a6fe958183a032",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-credentials-and-security-official/references/CUSTOM_CREDENTIALS.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-credentials-and-security-official/references/CUSTOM_CREDENTIALS.md",
+      "source_blob_sha": "9e339571c5cf8ced0c2cfe96b460455bbc589df8",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-credentials-and-security-official/references/FINDING_API_DOCS.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-credentials-and-security-official/references/FINDING_API_DOCS.md",
+      "source_blob_sha": "4f1b41be6047ed97e6c1ad93bf69986d438b593c",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-credentials-and-security-official/references/HTTP_REQUEST_WITH_AUTH.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-credentials-and-security-official/references/HTTP_REQUEST_WITH_AUTH.md",
+      "source_blob_sha": "522aba689d49144ce8fca39660034147b9dd9f84",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-data-tables-official/SKILL.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-data-tables-official/SKILL.md",
+      "source_blob_sha": "a60ec281b3949a7d3130d750a1d232c74a539623",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-data-tables-official/references/DEDUP_PATTERNS.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-data-tables-official/references/DEDUP_PATTERNS.md",
+      "source_blob_sha": "3e376183c21f5786984414fb8ef66782756fffa9",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-data-tables-official/references/OPERATIONS.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-data-tables-official/references/OPERATIONS.md",
+      "source_blob_sha": "c0c04a0ee772f5ecb5e7ef418add9b6ff59895a6",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-data-tables-official/references/SCHEMA_DESIGN.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-data-tables-official/references/SCHEMA_DESIGN.md",
+      "source_blob_sha": "b324935e8741c1761da43bfd60d9504b00b6fd50",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-debugging-official/SKILL.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-debugging-official/SKILL.md",
+      "source_blob_sha": "acc1575ccfc5a4cda3369aed78b8c4cea7022510",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-debugging-official/references/FETCHING_N8N_SOURCE.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-debugging-official/references/FETCHING_N8N_SOURCE.md",
+      "source_blob_sha": "73975288fb54b5fc04aec289cfe1e8250d97094e",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-debugging-official/references/PARAMETER_VERIFICATION.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-debugging-official/references/PARAMETER_VERIFICATION.md",
+      "source_blob_sha": "f76fb06aa541ada62634980f5605f7c3c0e6bd67",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-error-handling-official/SKILL.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-error-handling-official/SKILL.md",
+      "source_blob_sha": "a8eaa5db28f4ccdfefffaf175a01916ffcccf761",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-error-handling-official/references/API_WORKFLOWS.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-error-handling-official/references/API_WORKFLOWS.md",
+      "source_blob_sha": "986c8f2a2018edbbbbab56b1488ef3a506581838",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-error-handling-official/references/ERROR_WORKFLOWS.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-error-handling-official/references/ERROR_WORKFLOWS.md",
+      "source_blob_sha": "d8d345a54f79375ff67b62cc326d5e374377643d",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-error-handling-official/references/NODE_ERROR_OUTPUTS.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-error-handling-official/references/NODE_ERROR_OUTPUTS.md",
+      "source_blob_sha": "050cf9fc6da4769adc81e51a65f28857138cabed",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-error-handling-official/references/RESPONSE_SHAPES.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-error-handling-official/references/RESPONSE_SHAPES.md",
+      "source_blob_sha": "fa0e36b93bcec4363fcc2fc15f616b4440138ca5",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-error-handling-official/references/examples/validation-subworkflow-usage.ts",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-error-handling-official/references/examples/validation-subworkflow-usage.ts",
+      "source_blob_sha": "ff3a8a0b318de6940a3411038df750ee1c59624c",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-error-handling-official/references/examples/validation-subworkflow.ts",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-error-handling-official/references/examples/validation-subworkflow.ts",
+      "source_blob_sha": "815887197a5148514fd9a60d80944942b1e6b2a0",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-expressions-official/SKILL.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-expressions-official/SKILL.md",
+      "source_blob_sha": "76de420cb9b0be4782869598d791b5c2523ef74b",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-extending-mcp-official/SKILL.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-extending-mcp-official/SKILL.md",
+      "source_blob_sha": "39c60e9888f226c01e1008f20cd544b8b3886d3a",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-loops-official/SKILL.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-loops-official/SKILL.md",
+      "source_blob_sha": "d740065da5f837dfdd816ff83539ff06ff20baab",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-loops-official/references/HTTP_PAGINATION.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-loops-official/references/HTTP_PAGINATION.md",
+      "source_blob_sha": "3acefc89c433faf8824fac312be8c5fd06914147",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-loops-official/references/LOOP_OVER_ITEMS.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-loops-official/references/LOOP_OVER_ITEMS.md",
+      "source_blob_sha": "eda6f24c0a6c31159c205d16b4b0099ce6db6233",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-node-configuration-official/SKILL.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-node-configuration-official/SKILL.md",
+      "source_blob_sha": "f74020b6d953b1e022e74a65d45cd90a3c5d7aba",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-node-configuration-official/references/AI_NODES.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-node-configuration-official/references/AI_NODES.md",
+      "source_blob_sha": "149f89d5d858f6fb7367fb38b8e7ec308b94a076",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-node-configuration-official/references/COMMS_NODES.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-node-configuration-official/references/COMMS_NODES.md",
+      "source_blob_sha": "c3dc77e867e23ab7ff6319e2670f65d36d38dd3c",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-node-configuration-official/references/DATABASE_NODES.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-node-configuration-official/references/DATABASE_NODES.md",
+      "source_blob_sha": "4675eb0d3396e0e7c21b9bf75c3fa5f231f21ba9",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-node-configuration-official/references/HTTP_NODES.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-node-configuration-official/references/HTTP_NODES.md",
+      "source_blob_sha": "ffa2e555762d296c3cf43f6a1f3e23abea97dd9f",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-node-configuration-official/references/MERGE_NODE.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-node-configuration-official/references/MERGE_NODE.md",
+      "source_blob_sha": "4794055b21cefbae4e038dc156432af922b53697",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-node-configuration-official/references/SWITCH_FALLBACK.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-node-configuration-official/references/SWITCH_FALLBACK.md",
+      "source_blob_sha": "17cc79ac27666d3b69c88dd5687bd233aa271408",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-node-configuration-official/references/TRIGGER_NODES.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-node-configuration-official/references/TRIGGER_NODES.md",
+      "source_blob_sha": "5686e4415555a7f3c69406dfeb2390613564aebf",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-node-configuration-official/references/WEBHOOK_NODES.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-node-configuration-official/references/WEBHOOK_NODES.md",
+      "source_blob_sha": "4a4a9940c2de2647b4e3b88f0462374c6a362890",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-subworkflows-official/SKILL.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-subworkflows-official/SKILL.md",
+      "source_blob_sha": "7b28ce283bab63de3734935304a54ff0802c56da",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-subworkflows-official/references/NAMING_AND_DISCOVERY.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-subworkflows-official/references/NAMING_AND_DISCOVERY.md",
+      "source_blob_sha": "6b301cb722066d59842bb251ed607d9947cdb8e2",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-subworkflows-official/references/SUBWORKFLOW_PATTERNS.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-subworkflows-official/references/SUBWORKFLOW_PATTERNS.md",
+      "source_blob_sha": "07b9c45912cc76eb34bd0ed109a1a26d0a118f3d",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-workflow-lifecycle-official/SKILL.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-workflow-lifecycle-official/SKILL.md",
+      "source_blob_sha": "d875adeb99306ffc3e8db42a3b14655d564e163c",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-workflow-lifecycle-official/references/FOLDER_LIMITATIONS.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-workflow-lifecycle-official/references/FOLDER_LIMITATIONS.md",
+      "source_blob_sha": "dbf2fadb17ec6f0b3f8baf729a766e592845c18f",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-workflow-lifecycle-official/references/MCP_ACCESS_PER_WORKFLOW.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-workflow-lifecycle-official/references/MCP_ACCESS_PER_WORKFLOW.md",
+      "source_blob_sha": "6ec8f71e358dd97bf2319f053b5c1bbfe7b1f829",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-workflow-lifecycle-official/references/NAMING_CONVENTIONS.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-workflow-lifecycle-official/references/NAMING_CONVENTIONS.md",
+      "source_blob_sha": "9fd4266f46a13553d236b20b2ed5c3b24118f3cc",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-workflow-lifecycle-official/references/NODE_GROUPS.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-workflow-lifecycle-official/references/NODE_GROUPS.md",
+      "source_blob_sha": "cbb8350ec5d3f099988ad274b1e01b84d2cdee6a",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-workflow-lifecycle-official/references/REVIEW_CHECKLIST.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-workflow-lifecycle-official/references/REVIEW_CHECKLIST.md",
+      "source_blob_sha": "4f34070c0f4dff2f7bd035d876c537de8ba02b31",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-workflow-lifecycle-official/references/STICKY_NOTES.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-workflow-lifecycle-official/references/STICKY_NOTES.md",
+      "source_blob_sha": "d833066c6aecf7daef331244a6d7334ffebfa88a",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-workflow-lifecycle-official/references/TESTING.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-workflow-lifecycle-official/references/TESTING.md",
+      "source_blob_sha": "a368d0f84e1aa5e9baa03a1f7ff29614155056fe",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/n8n-workflow-lifecycle-official/references/VALIDATION_CHECKLIST.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/n8n-workflow-lifecycle-official/references/VALIDATION_CHECKLIST.md",
+      "source_blob_sha": "6e4d1168f4d219f34753b29958ffdb7712401aed",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    },
+    {
+      "mode": "exact",
+      "source_path": "skills/using-n8n-skills-official/SKILL.md",
+      "root_surface_path": "repo/contracts/third-party/n8n-io-skills/skills/using-n8n-skills-official/SKILL.md",
+      "source_blob_sha": "2ce112a5e14fbd29db3b46128650b2b241a74ac5",
+      "notes": "Exact copy; setup copies this skill folder into each app's skills folder."
+    }
+  ]
+}

@@ -10,7 +10,7 @@ For non-n8n tasks, prefer the current user request and local project files first
 
 ## MCP routing
 
-Use [official n8n Skills](https://github.com/n8n-io/skills) first, then use the official n8n MCP tools that are actually available in the connected instance. Start by loading the [official n8n Skills](https://github.com/n8n-io/skills) entry-point meta-skill, currently `using-n8n-skills`, when [official n8n Skills](https://github.com/n8n-io/skills) are available.
+Use [official n8n Skills](https://github.com/n8n-io/skills) first, then use the official n8n MCP tools that are actually available in the connected instance. Start by loading the [official n8n Skills](https://github.com/n8n-io/skills) entry-point meta-skill, currently `using-n8n-skills`, when [official n8n Skills](https://github.com/n8n-io/skills) are available. Load it first in every n8n task; Toolkit setup ships it as `using-n8n-skills-official`.
 
 If the [official n8n Skills](https://github.com/n8n-io/skills) entry-point meta-skill is unavailable, report that [official n8n Skills](https://github.com/n8n-io/skills) are not installed or not available in the session. Do not invent a fallback route or pretend the current entry-point skill exists.
 

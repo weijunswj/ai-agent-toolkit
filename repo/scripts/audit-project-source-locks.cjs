@@ -29,7 +29,8 @@ const knownRetiredInternalSourceRepos = new Set([
 // Toolkit's local source-watch or published-surface layout.
 const toolkitLocalSourcePathPrefixes = ['repo/'];
 const sameRepoRootSurfaceSourcePathPrefixes = ['skills/'];
-const rootSurfacePathPrefixes = ['skills/'];
+// Exact third-party copies live with their skill (skills/) or, for skills setup copies into each app, under repo/contracts/third-party/.
+const rootSurfacePathPrefixes = ['skills/', 'repo/contracts/third-party/'];
 
 function slash(value) {
   return value.split(path.sep).join('/');
@@ -175,6 +176,9 @@ function validateSourcePathProvenance(lock, file, relPath, label, errors, normal
   if (!normalized) return;
   if (sameRepoRootSurfaceSourcePathPrefixes.some((prefix) => normalized === prefix.slice(0, -1) || normalized.startsWith(prefix))) {
     if (isSameRepoRetiredRootSurfaceSource(lock, normalized)) return;
+    // An upstream repository's own skills/ folder, copied exactly under repo/contracts/third-party/.
+    if (lock.source_repo !== 'weijunswj/ai-agent-toolkit' && file.mode === 'exact'
+      && String(file.root_surface_path || '').startsWith('repo/contracts/third-party/')) return;
     errors.push(`${relPath} root-surface source_path is allowed only for retired same-repo migrations: ${label} uses ${file.source_path}`);
     return;
   }
@@ -235,7 +239,7 @@ function validateLocalPathTopology(file, relPath, label, errors, normalizedRootS
       ? normalizeRepoRelativePath(file.root_surface_path, 'root_surface_path', relPath, label, errors)
       : normalizedRootSurfacePath;
     if (normalized && !rootSurfacePathPrefixes.some((prefix) => normalized.startsWith(prefix))) {
-      errors.push(`${relPath} root_surface_path must point under skills/: ${label} uses ${file.root_surface_path}`);
+      errors.push(`${relPath} root_surface_path must point under skills/ or repo/contracts/third-party/: ${label} uses ${file.root_surface_path}`);
     }
   }
 }
