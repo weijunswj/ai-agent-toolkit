@@ -3744,6 +3744,7 @@ function runClaudeInstallCheck(args, nativeCache, delegation) {
     globalRules: setupGlobalRules(args),
     depthSetting: new ClaudeSubagentDepthSetting(),
     envHealth: ToolkitEnv.forUser(),
+    syncedSkillsDir: path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'skills', 'synced'),
   });
   const installed = ['already fresh', 'installed this run'].includes(nativeCache.status);
   return check.run({

@@ -205,3 +205,21 @@ test('setup refreshes Toolkit helper definitions made stale by a stack registry 
   assert.match(result.stdout, /Toolkit helpers: updated this run \(backup: .+\)/);
   assert.deepEqual(policy.decide(launch, {}), {}, 'the hook policy admits the refreshed helper');
 });
+
+test('the Projects controller skill check compares the synced claude.ai copy with the repo and blocks nothing', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-projects-skill-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const repoVersion = /^Version:\s*(\S+)$/m.exec(fs.readFileSync(path.join(repoRoot, 'repo', 'contracts', 'claude-projects', 'web-controller-projects', 'SKILL.md'), 'utf8'))[1];
+  const synced = path.join(root, 'synced');
+  const check = () => new ToolkitInstallHealthCheck({ toolkitRoot: repoRoot, expectedVersion: VERSION, hubPath: path.join(root, 'hub'),
+    helperDefinitions: { refresh: () => ({ status: 'current' }), check: () => ({ status: 'current', project_overrides: [], detail: '' }) },
+    globalRules: fakeGlobalRules(), depthSetting: { inspect: () => ({ state: 'toolkit-one-layer', value: '1' }) }, syncedSkillsDir: synced })
+    .run({ refreshHelpers: false }).checks.find((entry) => entry.id === 'projects-skill');
+  assert.equal(check(), undefined, 'no synced copy: nothing is shown');
+  writeFile(path.join(synced, 'abc_def', 'web-controller-projects', 'SKILL.md'), '---\nname: web-controller-projects\n---\nVersion: 2026-01-01.1\n');
+  const older = check();
+  assert.equal(older.status, STATUS.PASSED);
+  assert.match(older.summary, new RegExp(`Your uploaded copy is 2026-01-01\.1; Toolkit has ${repoVersion.replace('.', '\.')}\. Upload .*web-controller-projects/SKILL\.md to claude\.ai`));
+  writeFile(path.join(synced, 'abc_def', 'web-controller-projects', 'SKILL.md'), `Version: ${repoVersion}\n`);
+  assert.match(check().summary, /Your uploaded copy is current/);
+});

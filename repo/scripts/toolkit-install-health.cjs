@@ -44,11 +44,21 @@ function readJsonIfExists(file) {
 
 function slash(value) { return String(value || '').replace(/\\/g, '/'); }
 
+const PROJECTS_SKILL_REL = path.join('repo', 'contracts', 'claude-projects', 'web-controller-projects', 'SKILL.md');
+const skillVersion = (text) => /^Version:\s*(\d{4}-\d{2}-\d{2}\.\d+)\s*$/m.exec(String(text || ''))?.[1] || '';
+// Versions look like 2026-10-23.6: the date, then a counter for that day.
+function compareSkillVersions(left, right) {
+  const [ld, ln] = left.split('.'), [rd, rn] = right.split('.');
+  if (ld !== rd) return ld > rd ? 1 : -1;
+  return Number(ln) === Number(rn) ? 0 : (Number(ln) > Number(rn) ? 1 : -1);
+}
+
 class ToolkitInstallHealthCheck {
-  #toolkitRoot; #expectedVersion; #hubPath; #helpers; #globalRules; #depth; #env;
+  #toolkitRoot; #expectedVersion; #hubPath; #helpers; #globalRules; #depth; #env; #syncedSkillsDir;
 
   // envHealth: an object with health() (see toolkit-env.cjs), or null to skip that check.
-  constructor({ toolkitRoot, expectedVersion, hubPath, helperDefinitions, globalRules, depthSetting, envHealth = null }) {
+  // syncedSkillsDir: where Claude Code keeps skills synced from claude.ai, or null to skip the Projects skill check.
+  constructor({ toolkitRoot, expectedVersion, hubPath, helperDefinitions, globalRules, depthSetting, envHealth = null, syncedSkillsDir = null }) {
     this.#toolkitRoot = path.resolve(toolkitRoot);
     this.#expectedVersion = expectedVersion;
     this.#hubPath = hubPath;
@@ -56,6 +66,7 @@ class ToolkitInstallHealthCheck {
     this.#globalRules = globalRules;
     this.#depth = depthSetting;
     this.#env = envHealth;
+    this.#syncedSkillsDir = syncedSkillsDir;
   }
 
   // The checks the installed session-start hook runs, wired to the real files.
@@ -73,7 +84,30 @@ class ToolkitInstallHealthCheck {
       globalRules: new GlobalRules({ environment, toolkitRoot, harnesses: ['claude-code'], retentionDays, respectRemoval: true }),
       depthSetting: new ClaudeSubagentDepthSetting({ environment }),
       envHealth: ToolkitEnv.forUser({ environment }),
+      syncedSkillsDir: path.join(environment.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'skills', 'synced'),
     });
+  }
+
+  // Shown only when a copy of the Projects controller skill is synced from claude.ai (the user runs a
+  // Claude Project as controller). An older upload is reported, with the file to upload; it blocks nothing.
+  #projectsSkillCheck() {
+    if (!this.#syncedSkillsDir) return null;
+    let copies = [];
+    try {
+      copies = fs.readdirSync(this.#syncedSkillsDir, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => path.join(this.#syncedSkillsDir, entry.name, 'web-controller-projects', 'SKILL.md'))
+        .filter((file) => fs.existsSync(file));
+    } catch { return null; }
+    if (!copies.length) return null;
+    const source = path.join(this.#toolkitRoot, PROJECTS_SKILL_REL);
+    const repoVersion = fs.existsSync(source) ? skillVersion(fs.readFileSync(source, 'utf8')) : '';
+    if (!repoVersion) return null;
+    const uploaded = copies.map((file) => skillVersion(fs.readFileSync(file, 'utf8'))).filter(Boolean).sort(compareSkillVersions).pop() || '';
+    const label = 'Claude Projects controller skill';
+    if (uploaded && compareSkillVersions(uploaded, repoVersion) >= 0) return this.#check('projects-skill', label, STATUS.PASSED, `Your uploaded copy is current (${uploaded}).`);
+    return this.#check('projects-skill', label, STATUS.PASSED,
+      `Your uploaded copy is ${uploaded || 'missing its Version line'}; Toolkit has ${repoVersion}. Upload ${slash(source)} to claude.ai (Customize > Skills, replace web-controller-projects).`);
   }
 
   #check(id, label, status, summary, action = '') {
@@ -200,6 +234,8 @@ class ToolkitInstallHealthCheck {
     if (topology === 'root-only' || topology === 'broader-native') checks.push(this.#depthSetting(topology));
     const env = this.#env ? this.#envCheck() : null;
     if (env) checks.push(env);
+    const projectsSkill = this.#projectsSkillCheck();
+    if (projectsSkill) checks.push(projectsSkill);
     const status = checks.some((entry) => entry.status === STATUS.ACTION) ? STATUS.ACTION
       : checks.some((entry) => entry.status === STATUS.RESTART) ? STATUS.RESTART : STATUS.PASSED;
     const actions = checks.filter((entry) => entry.status !== STATUS.PASSED && entry.action).map((entry) => entry.action);
