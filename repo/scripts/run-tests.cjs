@@ -10,11 +10,14 @@
 //   node repo/scripts/run-tests.cjs --plan             the shards and their estimated times
 //   node repo/scripts/run-tests.cjs --verify-ci <dir>  the CI aggregate check over the leg summaries
 //
-// Every run gets its own temp folder, <temp root>\<run id>, set as TEMP, TMP and TMPDIR for the
-// run and every child process, and removed afterwards, also when tests fail. The temp root is
-// %USERPROFILE%\t unless --temp-root names another folder (CI passes the runner's temp folder); a
-// folder directly under a drive root is refused. On Windows the folder is used in its long form,
-// never an 8.3 short name. Options: --summary <file> writes the run's JSON summary,
+// Every run gets its own scratch temp folder, <temp root>\<run id>, set as TEMP, TMP and TMPDIR for
+// the run and every child process. It is removed when the run finishes, also when tests fail.
+// The next run removes a folder an interrupted run left once it is more than a day old.
+// Write anything a run must keep with --summary or --report-durations to a path outside the run folder.
+// The temp root is %USERPROFILE%\t unless
+// --temp-root names another folder (CI passes the runner's temp folder); a folder directly under
+// a drive root is refused. On Windows the folder is used in its long form, never an 8.3 short name.
+// Options: --summary <file> writes the run's JSON summary,
 // --report-durations <file> writes seconds per file, --concurrency <n> (default 3), --base <ref>
 // for --changed (default origin/main).
 
@@ -27,6 +30,7 @@ const shards = require('./ci-test-shards.cjs');
 
 const REPORTER = path.join(__dirname, 'test-summary-reporter.cjs');
 const DEFAULT_CONCURRENCY = 3;
+const STALE_RUN_AGE_MS = 24 * 60 * 60 * 1000;
 const USAGE = 'Usage: node repo/scripts/run-tests.cjs [--changed | --all | --shard <id> --os <linux|windows> | --plan | --verify-ci <dir> | <test file>...] [--temp-root <dir>] [--summary <file>] [--report-durations <file>] [--concurrency <n>] [--base <ref>]';
 
 class UsageError extends Error {}
@@ -68,22 +72,23 @@ function parseArgs(argv) {
   return options;
 }
 
-// A temp root that is a drive or filesystem root, or sits directly under one, is refused.
+// Refuse a temp root at or directly under a drive root.
 function tempRootError(root) {
   const resolved = path.resolve(root);
   const fsRoot = path.parse(resolved).root;
-  if (resolved === fsRoot || path.dirname(resolved) === fsRoot) return `The temp root ${resolved} is at a drive root. Use a folder inside the user profile, such as ${path.join(os.homedir(), 't')}.`;
+  if (resolved === fsRoot || path.dirname(resolved) === fsRoot) return `The temp root ${resolved} is at a drive root. Use a folder inside the user profile, such as ${path.join(os.homedir(), 't')}; each run removes its own folder there when it finishes.`;
   return null;
 }
 
-// One test run: owns its temp folder, the node --test child and the summary it reports.
+// One test run: owns its temp folder (removed when the run finishes), the node --test child and the summary it reports.
 class TestRun {
-  constructor({ root, system, tempRoot, env = process.env, spawn = spawnSync, stdio = 'inherit', out = process.stdout, err = process.stderr }) {
+  constructor({ root, system, tempRoot, env = process.env, spawn = spawnSync, now = () => Date.now(), stdio = 'inherit', out = process.stdout, err = process.stderr }) {
     this.root = root;
     this.system = system;
     this.tempRoot = path.resolve(tempRoot);
     this.env = env;
     this.spawn = spawn;
+    this.now = now;
     this.stdio = stdio;
     this.out = out;
     this.err = err;
@@ -96,42 +101,54 @@ class TestRun {
     fs.mkdirSync(this.tempRoot, { recursive: true });
     // realpath.native gives the long form of every part, so tests never see an 8.3 short name.
     const longRoot = fs.realpathSync.native(this.tempRoot);
-    const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..*$/, '').replace('T', '-');
+    const now = this.now();
+    for (const entry of fs.readdirSync(longRoot, { withFileTypes: true })) {
+      if (!entry.isDirectory() || !entry.name.startsWith('run-')) continue;
+      const folder = path.join(longRoot, entry.name);
+      try {
+        if (now - fs.statSync(folder).mtimeMs <= STALE_RUN_AGE_MS) continue;
+        fs.rmSync(folder, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+        if (!fs.existsSync(folder)) continue;
+      } catch {}
+      this.err.write(`Could not remove the stale test temp folder ${folder}. The next run removes it once it is more than a day old and no longer held open.\n`);
+    }
+    const stamp = new Date(now).toISOString().replace(/[-:]/g, '').replace(/\..*$/, '').replace('T', '-');
     this.folder = fs.mkdtempSync(path.join(longRoot, `run-${stamp}-`));
     return this.folder;
   }
 
   removeFolder() {
     if (!this.folder) return true;
-    // Tests should clean up after themselves; whatever they left goes with the run folder.
-    let left = [];
-    try { left = fs.readdirSync(this.folder).filter((name) => name !== 'test-results.jsonl'); }
-    catch (error) { if (error.code !== 'ENOENT') throw error; }
-    if (left.length) this.out.write(`Removing ${left.length} temp item(s) tests left behind (${left.slice(0, 3).join(', ')}${left.length > 3 ? ', ...' : ''}).\n`);
-    fs.rmSync(this.folder, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
-    if (fs.existsSync(this.folder)) {
-      this.err.write(`Could not remove the test temp folder ${this.folder}. Remove it by hand once nothing holds it open.\n`);
-      return false;
-    }
-    return true;
+    // Tests should clean up after themselves; whatever they left goes with the run folder, also when tests fail.
+    try {
+      let left = [];
+      try { left = fs.readdirSync(this.folder).filter((name) => name !== 'test-results.jsonl'); }
+      catch (error) { if (error.code !== 'ENOENT') throw error; }
+      if (left.length) this.out.write(`Removing ${left.length} temp item(s) tests left behind (${left.slice(0, 3).join(', ')}${left.length > 3 ? ', ...' : ''}).\n`);
+      fs.rmSync(this.folder, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+      if (!fs.existsSync(this.folder)) return true;
+    } catch {}
+    this.err.write(`Could not remove the test temp folder ${this.folder}. The next run removes it once it is more than a day old and no longer held open.\n`);
+    return false;
   }
 
   childEnv() {
     const env = { ...this.env, TEMP: this.folder, TMP: this.folder, TMPDIR: this.folder };
     // toolkit-test-temp-guard.cjs watches the real update-report folder; it lives under the
-    // temp folder the run started with, not the run's own folder.
+    // temp root the run started with, not the run's own folder.
     env.TOOLKIT_TEST_REAL_TEMP = this.env.TOOLKIT_TEST_REAL_TEMP || os.tmpdir();
     return env;
   }
 
-  // Runs the files and returns { exitCode, summary }. The temp folder is removed in every case.
+  // Runs the files and returns { exitCode, summary }. The run folder is removed in every case;
+  // a folder an interrupted run left is removed by the next run once it is a day old.
   run(files, { concurrency = DEFAULT_CONCURRENCY, label = 'tests' } = {}) {
     this.createFolder();
     let exitCode = 1;
     let summary = null;
     try {
       const results = path.join(this.folder, 'test-results.jsonl');
-      this.out.write(`Running ${files.length} test file(s) (${label}) with temp folder ${this.folder}\n`);
+      this.out.write(`Running ${files.length} test file(s) (${label}) in temp folder ${this.folder}, removed when the run finishes.\n`);
       const result = this.spawn(process.execPath, [
         '--test', `--test-concurrency=${concurrency}`,
         '--test-reporter=spec', '--test-reporter-destination=stdout',

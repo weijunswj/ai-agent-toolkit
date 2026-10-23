@@ -11,7 +11,7 @@ Use when tests or CI got slow, or when adding a test runner, test shards or CI t
 ## Make Slow Files Fast
 
 - Tests inside one file run one after another, so the slowest file sets the floor. Fix it first.
-- Run a file's tests concurrently only when each test owns its temp folder and none touches shared `process.env`, the working directory, module state or a real user folder. Otherwise split the file by area.
+- Run a file's tests concurrently only when each test owns its temp folder and removes it when it ends, and none touches shared `process.env`, the working directory, module state or a real user folder. Otherwise split the file by area.
 - Replace repeated expensive setup with one template per file (a fixture repo or workspace copied or cloned per case), and call code in process instead of spawning it when the same path is covered.
 - Accept a converted file only after several consecutive green runs on every system with identical test counts.
 
@@ -24,5 +24,5 @@ Use when tests or CI got slow, or when adding a test runner, test shards or CI t
 
 ## Windows
 
-- Give each run its own long-form temp folder inside the user profile for local runs, or under the CI runner's temp folder in CI (never at a drive root, never an 8.3 short name), set as `TEMP` and `TMP` for every child, and remove it afterwards, also on failure.
+- Give each run its own long-form scratch temp folder inside the user profile for local runs, or under the CI runner's temp folder in CI (never at a drive root, never an 8.3 short name), set as `TEMP` and `TMP` for every child, and remove it when the run finishes, also on failure. Scratch must not outlive the run. Copy any report or evidence you need to its durable home first, then delete the folder; also clear folders an interrupted run left once they are more than a day old.
 - A Windows-only failure has a cause; fix the product or the test, never skip it.

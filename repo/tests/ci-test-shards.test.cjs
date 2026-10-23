@@ -3,7 +3,7 @@
 // CI and local runs share one test shard manifest. These tests prove the manifest covers every test
 // file once per system, the CI aggregate check refuses every way a shard can drop tests, the
 // workflow drift guard catches the known ways to narrow or mask a test step, and the runner's temp
-// folder is under the user profile and gone after the run.
+// folder is under the user profile and removed after every run, including failed and interrupted ones.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -236,6 +236,49 @@ test('a run uses its own temp folder under the user profile, for every child, an
   assert.equal(failed.summary.files.find((entry) => entry.file.endsWith('fail.test.cjs')).failed, 1);
   assert.equal(failed.summary.missing.length, 1, 'a file that does not load has no result');
   assert.equal(fs.existsSync(fail.folder), false, 'the run folder is gone after a failing run');
+});
+
+test('the next run removes run folders an interrupted run left more than a day ago, and nothing else', (t) => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-run-cleanup-'));
+  t.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
+  const now = Date.UTC(2026, 9, 23);
+  const day = 24 * 60 * 60 * 1000;
+  const old = path.join(tempRoot, 'run-old-xxxx');
+  const recent = path.join(tempRoot, 'run-new-xxxx');
+  const boundary = path.join(tempRoot, 'run-day-xxxx');
+  const keep = path.join(tempRoot, 'keep-me');
+  const file = path.join(tempRoot, 'run-file.txt');
+  for (const folder of [old, recent, boundary, keep]) fs.mkdirSync(folder);
+  fs.writeFileSync(file, 'keep');
+  for (const item of [old, keep, file]) fs.utimesSync(item, new Date(now - day - 1000), new Date(now - day - 1000));
+  fs.utimesSync(recent, new Date(now), new Date(now));
+  fs.utimesSync(boundary, new Date(now - day), new Date(now - day));
+  const run = new runner.TestRun({ root: ROOT, system: shards.platformSystem(), tempRoot, now: () => now, out: sink(), err: sink() });
+  const folder = run.createFolder();
+  assert.equal(fs.existsSync(old), false);
+  for (const item of [recent, boundary, keep, file, folder]) assert.equal(fs.existsSync(item), true, item);
+  assert.equal(run.removeFolder(), true);
+  assert.equal(fs.existsSync(folder), false);
+  for (const item of [recent, boundary, keep, file]) assert.equal(fs.existsSync(item), true, item);
+});
+
+test('a run folder that cannot be removed is reported without throwing', (t) => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-run-removal-'));
+  t.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
+  const err = sink();
+  const run = new runner.TestRun({ root: ROOT, system: shards.platformSystem(), tempRoot, out: sink(), err });
+  const folder = run.createFolder();
+  const rmSync = fs.rmSync;
+  try {
+    fs.rmSync = (target, options) => {
+      if (target === folder) throw Object.assign(new Error('held open'), { code: 'EBUSY' });
+      return rmSync(target, options);
+    };
+    assert.doesNotThrow(() => assert.equal(run.removeFolder(), false));
+  } finally {
+    fs.rmSync = rmSync;
+  }
+  assert.equal(err.text(), `Could not remove the test temp folder ${folder}. The next run removes it once it is more than a day old and no longer held open.\n`);
 });
 
 test('local runs pick the test files a change affects', () => {

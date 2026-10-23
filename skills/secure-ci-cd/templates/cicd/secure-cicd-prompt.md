@@ -270,7 +270,7 @@ CI workflow requirements:
 - Run security checks first.
 - Run lint if available.
 - Run tests if available.
-- Shard tests by default once the suite takes more than a few minutes: one manifest names the shards per operating system plus one `rest` shard that takes every unnamed test file, a matrix runs each shard with `fail-fast: false` and a timeout, and one final job `needs` every shard, runs with `if: ${{ always() }}`, and fails unless every shard succeeded and the shard summaries cover every discovered test file exactly once. Make that final job the required check, and add a drift-guard test that pins the test steps. On Windows, give each run its own long-form temp folder under the runner's temp folder. Follow the repo's `docs/agent-playbooks/fast-tests-and-sharding.md` when it exists.
+- Shard tests by default once the suite takes more than a few minutes: one manifest names the shards per operating system plus one `rest` shard that takes every unnamed test file, a matrix runs each shard with `fail-fast: false` and a timeout, and one final job `needs` every shard, runs with `if: ${{ always() }}`, and fails unless every shard succeeded and the shard summaries cover every discovered test file exactly once. Make that final job the required check, and add a drift-guard test that pins the test steps. On Windows, give each run its own long-form scratch temp folder under the runner's temp folder, removed when the run finishes, also on failure; save any report you need outside it first. Follow the repo's `docs/agent-playbooks/fast-tests-and-sharding.md` when it exists.
 - Run build if available.
 - Fail safely if important commands fail.
 - Skip gracefully only when a command/tool truly does not exist.
