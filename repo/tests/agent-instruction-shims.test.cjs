@@ -136,7 +136,6 @@ test('global rules hold the generic floor: precedence, entry routing, safety gat
     /\*\*Controller role:\*\* inactive unless the user explicitly appoints this session controller/,
     /is an executor even if an appointment is visible/,
     /read and bind `repo\/CONTROLLER\.md` from `weijunswj\/ai-agent-toolkit` `main`, never remembered governance/,
-    /if the user's own instructions define a feedback format, use it to report a reusable Toolkit governance or workflow gap/,
     /Words like `continue`, `next`, `apply` or `do it` stay within the approved scope/,
     /Outside Toolkit-governed work the limit is one layer/,
     /Run parallel builders only on disjoint files with no dependency on work still in review/,
@@ -159,7 +158,8 @@ test('global rules hold the generic floor: precedence, entry routing, safety gat
     /one fully bold sentence/
   ]) assert.match(text, rule);
   assert.doesNotMatch(text, /G0 MUST|stack registry|CURRENT admission|weijunswj\/TRANSPORT/, 'governed-only rules stay out of the global layer');
-  assert.doesNotMatch(text, /TOOLKIT_FEEDBACK/, 'the feedback format is the user\'s own rule, not a Toolkit one');
+  // Toolkit-improvement feedback is the owner's own rule, kept in their instructions, never Toolkit's.
+  assert.doesNotMatch(text, /TOOLKIT_FEEDBACK|Toolkit feedback/);
   for (const phrase of forbiddenDefaultPromptPhrases) assert.ok(!text.includes(phrase), phrase);
 });
 

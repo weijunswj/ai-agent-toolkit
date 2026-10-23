@@ -12,7 +12,7 @@
 
 ## Unreleased (Projects skill and block fixes)
 
-- **Claude Projects controller skill 2026-10-23.18** (re-upload it). The project-instructions block no longer carries a feedback-format line: a format such as `TOOLKIT_FEEDBACK` is your own rule from your claude.ai instructions, so the skill now says to follow your feedback format if you define one. The next instructions check reports the block as outdated, and the sync replaces it after your OK.
+- **Claude Projects controller skill 2026-10-23.18** (re-upload it). Toolkit no longer asks for feedback about Toolkit itself: the project-instructions block, the skill and the global rules drop their `TOOLKIT_FEEDBACK` rules. If you want such feedback, keep the rule in your own instructions, outside the Toolkit markers. The next instructions check reports the block as outdated, and the sync replaces it after your OK.
 - **Sync dedupes and reads the settings itself.** When the block is added or replaced, the coordinator also removes the lines outside the markers that the block now fully covers, in the same change and under the same OK; project-specific lines and lines that differ stay. Threads can't read project settings, so the coordinator reads them and runs the check itself or hands a thread the exact text.
 - **Briefs name sibling PRs.** A G0 lists the open sibling PRs it checked for overlap, and the G1 brief requires a re-check against them before building.
 

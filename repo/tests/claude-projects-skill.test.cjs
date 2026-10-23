@@ -15,7 +15,7 @@ test('the Projects controller skill has one source file with a Version line', ()
   const text = read(SKILL_REL);
   assert.match(text, /^---\nname: "web-controller-projects"\n/);
   assert.match(text, /^Version: \d{4}-\d{2}-\d{2}\.\d+$/m);
-  for (const kept of ['## Keep moving', '**Remote Control wake.**', '**Capture feedback every time.**', '**Feedback comes back in the reply.**']) {
+  for (const kept of ['## Keep moving', '**Remote Control wake.**']) {
     assert.ok(text.includes(kept), kept);
   }
   assert.doesNotMatch(text, /## Adding work to a repo/);
@@ -77,8 +77,8 @@ test('Projects wires managed instructions, promises and fresh scheduled sessions
   const body = read('repo/contracts/claude-projects/web-controller-projects/project-instructions.md');
   assert.match(body, /Every thread is an executor/);
   assert.match(body, /Do not copy CONTROLLER\.md/);
-  // The feedback format is the user's own rule, so neither the skill nor the block Toolkit renders names one.
-  assert.doesNotMatch(body, /TOOLKIT_FEEDBACK/);
-  assert.doesNotMatch(text, /TOOLKIT_FEEDBACK/);
-  assert.match(text, /If the user's own instructions define a feedback format, follow it/);
+  // Toolkit-improvement feedback is the owner's own rule, kept outside the markers, never Toolkit's.
+  for (const surface of [body, text]) {
+    assert.doesNotMatch(surface, /TOOLKIT_FEEDBACK|feedback format|Feedback comes back in the reply|Capture feedback|to Toolkit as/);
+  }
 });
