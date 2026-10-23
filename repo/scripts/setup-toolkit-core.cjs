@@ -16,6 +16,7 @@ const { OfficialN8nSkills, installSummary: n8nSkillsSummary } = require('./toolk
 const { disableUserPlugin } = require('./setup-claude-toolkit-plugin.cjs');
 const { AntigravityGlobalSkills, globalCopySummary } = require('./toolkit-antigravity-project-skills.cjs');
 const { ClaudeHelperDefinitions } = require('./toolkit-claude-helper-agents.cjs');
+const { CodexHelperDefinitions, describeSetupResult: describeCodexHelpers } = require('./toolkit-codex-helper-agents.cjs');
 const { ToolkitInstallHealthCheck, STATUS: INSTALL_CHECK_STATUS, claudeAccountPluginFolders } = require('./toolkit-install-health.cjs');
 const { ToolkitEnv } = require('./toolkit-env.cjs');
 const { GlobalRules, describeResult: describeGlobalRules } = require('./toolkit-global-rules.cjs');
@@ -3875,6 +3876,17 @@ function runCodexGlobalRules(args) {
   return result;
 }
 
+// Codex setup refreshes installed Toolkit helper agents to the stack each names and reports them.
+function runCodexHelperAgents(args) {
+  let result;
+  try { result = new CodexHelperDefinitions({ repositoryRoot: args.repoRoot }).refresh(); }
+  catch (error) { result = { status: 'held', detail: error.message }; }
+  console.log('');
+  console.log('## Toolkit helpers');
+  for (const line of describeCodexHelpers(result, '<managed-toolkit-checkout>')) console.log(line);
+  return result;
+}
+
 // The last setup step on Claude Code: checks what this run installed, refreshing stale Toolkit
 // helper definitions, and returns the result the summary and exit code report.
 function runClaudeInstallCheck(args, nativeCache, delegation) {
@@ -3959,7 +3971,8 @@ class ToolkitSetupExecution {
     printFinalSummary({ args, current: this.#current, managed, localClone, nativeCache, delegation, subagentDepth, claudeSettings, n8nSkills, antigravitySkills, audit,
       questionBank: this.#questionBank, validationResults: this.#validationResults, installCheck });
     const globalRules = args.host === 'claude-code' ? null : runCodexGlobalRules(args);
-    return installCheck?.status === INSTALL_CHECK_STATUS.ACTION || globalRules?.status === 'held' ? SETUP_ACTION_REQUIRED : 0;
+    const codexHelpers = args.host === 'claude-code' ? null : runCodexHelperAgents(args);
+    return installCheck?.status === INSTALL_CHECK_STATUS.ACTION || globalRules?.status === 'held' || codexHelpers?.status === 'held' ? SETUP_ACTION_REQUIRED : 0;
   }
 }
 

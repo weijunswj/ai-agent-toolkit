@@ -306,6 +306,25 @@ class CodexHelperDefinitions {
   }
 }
 
+// Setup's lines for the Codex helper step. Setup refreshes installed helpers to the stack each file
+// names and never picks a stack itself, so a computer without them is told how to install them.
+// `checkout` is the Toolkit checkout as shown to the reader; setup passes its placeholder so
+// the output names no local path.
+function describeSetupResult(result, checkout = path.resolve(TOOLKIT_ROOT).replace(/\\/g, '/')) {
+  const generator = `node "${checkout}/repo/scripts/toolkit-codex-helper-agents.cjs" --stack <stack> --write`;
+  if (result.status === 'current') return ['Toolkit helpers: current.'];
+  if (result.status === 'updated' || result.status === 'installed') {
+    const backup = result.backup_dir ? ` (backup: ${result.backup_dir.replace(/\\/g, '/')})` : '';
+    return [`Toolkit helpers: ${result.status} this run${backup}. Start a new Codex session to use them.`,
+      ...(result.load_check?.status === 'verified' ? [] : [`Codex load check: ${result.detail || NOT_CHECKED.detail}`])];
+  }
+  if (result.status === 'not-installed') {
+    return ['Toolkit helpers: not installed. In Toolkit-governed repositories Codex launches no helpers until they are.',
+      `To install them for your selected stack: ${generator}`];
+  }
+  return [`Toolkit helpers: held: ${result.detail}`];
+}
+
 function parseArgs(argv, environment = process.env) {
   const args = { stack: null, agentsDir: codexUserAgentsDirectory(environment), write: false, backupRoot: defaultBackupRoot(environment) };
   for (let i = 0; i < argv.length; i += 1) {
@@ -333,4 +352,4 @@ if (require.main === module) {
 }
 
 module.exports = Object.freeze({ CodexHelperAgentRenderer, CodexHelperDefinitions, CodexAgentDirectoryInstaller, MARKER,
-  codexUserAgentsDirectory, matchesRenderedDefinition, parseArgs, run });
+  codexUserAgentsDirectory, describeSetupResult, matchesRenderedDefinition, parseArgs, run });
