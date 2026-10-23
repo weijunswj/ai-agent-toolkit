@@ -185,6 +185,29 @@ test('rendered blocks never contain private values and use the Toolkit marker fo
   assert.equal(managedBlock.blockState(blocks[0], { source: state.BLOCK_SOURCE, name: state.BLOCK_NAME, version: '3.9.0', body: childBody }), 'current');
 });
 
+test('parent rows sort by class, then order and issue, including nested children and the parentless tail', () => {
+  const outcomes = [
+    { issue: 8, class: 'CORE', parent: 7, order: 9 },
+    { issue: 9, class: 'RETIRED', parent: 7, order: 0 },
+    { issue: 10, class: 'LATER', parent: 7, order: 0 },
+    { issue: 11, class: 'HARDENING', parent: 7, order: 0 },
+    { issue: 12, class: 'COMPLETED', parent: 7, order: 0 },
+    { issue: 13, class: 'OPTIONAL', parent: 7, order: 0 },
+    { issue: 15, class: 'CORE', parent: 7, order: 1 },
+    { issue: 14, class: 'CORE', parent: 7, order: 1 },
+    { issue: 16, class: 'RETIRED', parent: 8, order: 0 },
+    { issue: 17, class: 'CORE', parent: 8, order: 99 },
+    { issue: 18, class: 'OPTIONAL', parent: null, order: 0 },
+    { issue: 20, class: 'CORE', parent: null, order: 1 },
+    { issue: 19, class: 'CORE', parent: null, order: 1 },
+    { issue: 21, class: 'CORE', parent: null, order: 0 },
+  ];
+  const parent = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes });
+  const body = state.renderParentBlockBody(parent, new Map());
+  const rows = body.split('\n').filter(line => line.startsWith('| #')).map(line => Number(/^\| #(\d+)/.exec(line)[1]));
+  assert.deepEqual(rows, [14, 15, 8, 17, 16, 11, 10, 13, 12, 9, 21, 19, 20, 18]);
+});
+
 test('a state block is replaced without touching the bytes around it', () => {
   const before = 'Intro line\r\nwith CRLF\r\n\r\n';
   const after = '\r\n\r\n## Notes\r\nkept as is\r\n';

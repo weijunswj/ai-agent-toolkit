@@ -327,7 +327,7 @@ function validateBinding(binding) {
 function loadBinding(repoRoot) {
   const file = path.join(repoRoot, BINDING_FILE);
   if (!fs.existsSync(file)) {
-    throw new ProgrammeError('BINDING_MISSING', `No ${BINDING_FILE.replace(/\\/g, '/')} in this repository. Add one naming the parent issue and a private store repository (see the github-program-reconciler skill).`);
+    throw new ProgrammeError('BINDING_MISSING', `This repository has not opted into Toolkit GitHub tracking (no ${BINDING_FILE.replace(/\\/g, '/')}), so the reconciler does nothing here. Only the owner adds the binding, on purpose.`);
   }
   let binding;
   try { binding = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '')); }
@@ -588,20 +588,23 @@ function revisionLine(parent, children) {
   return `<!-- programme-state parent=${parent.parent_issue}@${parent.revision} children=${revs} -->`;
 }
 
-// Outcomes in tree order: each expected parent's children by order, nested ones straight after their
-// parent, then outcomes with no expected parent.
+function compareOutcomes(a, b) {
+  return CLASSES.indexOf(a.class) - CLASSES.indexOf(b.class) || a.order - b.order || a.issue - b.issue;
+}
+
+// Outcomes in tree order: each expected parent's children by class, order and issue, nested ones
+// straight after their parent, then outcomes with no expected parent sorted by the same rule.
 function treeOrder(parent) {
-  const byOrder = (a, b) => a.order - b.order || a.issue - b.issue;
   const ordered = [];
   const visit = number => {
-    for (const outcome of parent.outcomes.filter(entry => entry.parent === number).sort(byOrder)) {
+    for (const outcome of parent.outcomes.filter(entry => entry.parent === number).sort(compareOutcomes)) {
       ordered.push(outcome);
       visit(outcome.issue);
     }
   };
   visit(parent.parent_issue);
   const placed = new Set(ordered.map(outcome => outcome.issue));
-  return [...ordered, ...parent.outcomes.filter(outcome => !placed.has(outcome.issue)).sort(byOrder)];
+  return [...ordered, ...parent.outcomes.filter(outcome => !placed.has(outcome.issue)).sort(compareOutcomes)];
 }
 
 function renderParentBlockBody(parent, children) {
@@ -1049,7 +1052,7 @@ function intentId(kind, target) {
 
 // Findings the reconciler reports but never fixes itself; each needs a controller decision.
 const ATTENTION = new Set(['ISSUE_MISSING', 'NATIVE_PARENT_UNEXPECTED', 'NATIVE_CHILD_UNKNOWN', 'DEPENDENCY_IMPLIES_PARENT',
-  'PR_HEAD_MOVED', 'CHECKS_RED', 'CHILD_STATE_CONFLICT', 'MANAGED_BLOCK_BROKEN']);
+  'PR_HEAD_MOVED', 'CHECKS_RED', 'READY_TO_CLOSE', 'CHILD_STATE_CONFLICT', 'MANAGED_BLOCK_BROKEN']);
 
 const EFFECT_TEXT = {
   create_state: effect => `Create the state document for #${effect.target.issue}`,
@@ -1152,6 +1155,11 @@ class Reconciler {
     // PR head and checks.
     const pr = observed.prs.get(issueNumber);
     if (pr) {
+      if (pr.state === 'MERGED' && checks.state === 'GREEN' && checks.at_head === pr.head && issue.state === 'open') {
+        const accepted = desired.gate.returns.some(entry => entry.consumed && entry.verdict === 'ACCEPT');
+        findings.push({ code: 'READY_TO_CLOSE', issue: issueNumber, pr: pr.number, head: pr.head, accepted,
+          detail: `PR #${pr.number} merged, checks GREEN at ${shortSha(pr.head)}; ${accepted ? 'acceptance recorded' : 'no accepted return yet'}` });
+      }
       if (desired.candidate.head && pr.state !== 'MERGED' && pr.state !== 'CLOSED' && desired.candidate.head !== pr.head) {
         findings.push({ code: 'PR_HEAD_MOVED', issue: issueNumber, detail: `candidate ${shortSha(desired.candidate.head)}, PR #${pr.number} head ${shortSha(pr.head)}; review and UAT evidence at the old head is STALE_HEAD` });
       }
@@ -1178,7 +1186,7 @@ class Reconciler {
           findings.push({ code: 'NATIVE_CHILD_UNKNOWN', issue: sub.number, detail: `natively under #${parentNumber} but not in the outcome catalogue; not changed` });
         }
       }
-      const desired = outcomes.filter(outcome => outcome.parent === parentNumber).sort((a, b) => a.order - b.order || a.issue - b.issue).map(outcome => outcome.issue);
+      const desired = outcomes.filter(outcome => outcome.parent === parentNumber).sort(compareOutcomes).map(outcome => outcome.issue);
       // Simulate the planned attaches (appended at the end) and moves away.
       const current = list.map(sub => sub.number).filter(number => plannedParents.get(number) === undefined || plannedParents.get(number) === parentNumber);
       for (const [number, target] of plannedParents) if (target === parentNumber && !current.includes(number)) current.push(number);
@@ -1403,7 +1411,7 @@ class Reconciler {
     // 3. Order, recomputed from a fresh list for each parent just before moving.
     const reorderParents = [...new Set(plan.effects.filter(entry => entry.kind === 'reorder').map(entry => entry.target.parent))];
     for (const parentIssue of reorderParents) {
-      const desired = plan.parent.outcomes.filter(outcome => outcome.parent === parentIssue).sort((a, b) => a.order - b.order || a.issue - b.issue).map(outcome => outcome.issue);
+      const desired = plan.parent.outcomes.filter(outcome => outcome.parent === parentIssue).sort(compareOutcomes).map(outcome => outcome.issue);
       const fresh = this.reader.subIssues(parentIssue);
       const ids = new Map(fresh.map(sub => [sub.number, sub.id]));
       for (const move of orderMoves(fresh.map(sub => sub.number), desired)) {
@@ -1479,6 +1487,7 @@ class Reconciler {
       mode: apply ? 'apply' : 'dry-run',
       parent_revision: plan.parent?.revision ?? null,
       findings: plan.findings,
+      close_list: plan.findings.filter(finding => finding.code === 'READY_TO_CLOSE').map(({ issue, pr, head, accepted }) => ({ issue, pr, head, accepted })),
       effects: plan.effects.map(effect => ({ kind: effect.kind, target: effect.target, text: effect.text })),
       recovered: plan.resolutions,
       holds: plan.holds,

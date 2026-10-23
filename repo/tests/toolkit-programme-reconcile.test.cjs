@@ -109,7 +109,7 @@ test('parent and child blocks are rendered from the same state revision', () => 
   assert.match(childBlock.body, new RegExp(`child=423@${doc.revision} -->`));
   assert.ok(github.issues.get(421).body.endsWith('## CURRENT\nHand-written controller prose.\n'), 'hand-written text outside the block is kept');
   const rows = parentBlock.body.split('\n').filter(line => line.startsWith('| ') && !line.startsWith('| Outcome')).map(line => line.split(' | ')[0].slice(2));
-  assert.deepEqual(rows, ['C2 #423', 'Shared H #467', 'H1 Codex #469 (under #467)', 'H2 Claude #470 (under #467)', 'S1-A #459', 'C1 predecessor #422', 'Q #425', 'R1 #499'], 'rows follow the tree');
+  assert.deepEqual(rows, ['C2 #423', 'Shared H #467', 'H1 Codex #469 (under #467)', 'H2 Claude #470 (under #467)', 'S1-A #459', 'C1 predecessor #422', 'R1 #499', 'Q #425'], 'rows follow the tree');
 });
 
 test('reclassifying an outcome keeps its identity, document and native link', () => {
@@ -118,7 +118,7 @@ test('reclassifying an outcome keeps its identity, document and native link', ()
   const docBefore = store.read('child', 423).doc;
   store.mutate('parent', 421, { writer, change: doc => state.applyPatch('parent', doc, { outcomes: doc.outcomes.map(entry => (entry.issue === 423 ? { ...entry, class: 'HARDENING' } : entry)) }) });
   const report = reconciler().run({ apply: true });
-  assert.deepEqual(kinds(report).sort(), ['replace_block #421', 'replace_block #423']);
+  assert.deepEqual(kinds(report).sort(), ['reorder #423', 'replace_block #421', 'replace_block #423']);
   const docAfter = store.read('child', 423).doc;
   assert.equal(docAfter.revision, docBefore.revision);
   assert.deepEqual(docAfter.fence, docBefore.fence);
@@ -259,16 +259,99 @@ test('a body that would reach the trace threshold is refused', () => {
   assert.equal(github.issues.get(421).body.length, 59950);
 });
 
-test('a second repository with a different catalogue works with no code change', () => {
-  const outcomes = [{ issue: 8, class: 'CORE', parent: 7, order: 2 }, { issue: 9, class: 'LATER', parent: 7, order: 1 }];
+test('a second repository applies native class, order and issue ranking, including nested children', () => {
+  const outcomes = [
+    { issue: 8, class: 'CORE', parent: 7, order: 2 },
+    { issue: 9, class: 'LATER', parent: 7, order: 1 },
+    { issue: 10, class: 'RETIRED', parent: 7, order: 0 },
+    { issue: 11, class: 'COMPLETED', parent: 7, order: 0 },
+    { issue: 12, class: 'OPTIONAL', parent: 7, order: 0 },
+    { issue: 13, class: 'HARDENING', parent: 7, order: 0 },
+    { issue: 15, class: 'CORE', parent: 7, order: 1 },
+    { issue: 14, class: 'CORE', parent: 7, order: 1 },
+    { issue: 16, class: 'LATER', parent: 8, order: 0 },
+    { issue: 17, class: 'CORE', parent: 8, order: 99 },
+  ];
   const { github, reconciler } = setup({
     repository: 'other/tool', parentIssue: 7, outcomes,
-    issues: gh => { gh.addIssue(8); gh.addIssue(9); },
+    issues: gh => { for (const outcome of outcomes) gh.addIssue(outcome.issue, { parent: outcome.parent }); },
   });
+  const dry = reconciler().run();
+  assert.ok(codes(dry).includes('NATIVE_ORDER_DRIFT #7'));
+  assert.ok(codes(dry).includes('NATIVE_ORDER_DRIFT #8'));
+  assert.equal(github.mutations(), 0);
   const report = reconciler().run({ apply: true });
   assert.deepEqual(report.holds, []);
-  assert.deepEqual(github.issues.get(7).subs, [9, 8]);
+  assert.deepEqual(github.issues.get(7).subs, [14, 15, 8, 13, 9, 12, 11, 10]);
+  assert.deepEqual(github.issues.get(8).subs, [17, 16]);
   assert.equal(reconciler().run().summary, 'No changes');
+});
+
+test('merged PRs with green checks list open issues for the controller without closing them', () => {
+  for (const accepted of [false, true]) {
+    const outcomes = [{ issue: 8, class: 'CORE', parent: 7, order: 0 }];
+    const { github, store, reconciler } = setup({ parentIssue: 7, outcomes, issues: gh => gh.addIssue(8, { parent: 7 }) });
+    let doc = state.claimDocument(state.newChild({ repository: 'acme/app', outcome: outcomes[0] }), writer, { role: 'G1' });
+    doc.candidate.branch = 'feature';
+    doc = state.submitReturn(doc, { returnId: 'r1', writer });
+    if (accepted) doc = state.consumeReturn(doc, { returnId: 'r1', verdict: 'ACCEPT', writer, parentDoc: store.read('parent', 7).doc });
+    store.write('child', 8, doc, { sha: null, previous: null });
+    github.addPr(540, { head: SHA_A, merged: true, contexts: [green('validate')], branch: 'feature' });
+
+    const dry = reconciler().run();
+    const finding = dry.findings.find(entry => entry.code === 'READY_TO_CLOSE');
+    assert.equal(finding.issue, 8);
+    assert.match(finding.detail, /PR #540 merged, checks GREEN at aaaaaaa/);
+    assert.ok(finding.detail.endsWith(accepted ? 'acceptance recorded' : 'no accepted return yet'));
+    assert.deepEqual(dry.close_list, [{ issue: 8, pr: 540, head: SHA_A, accepted }]);
+    assert.equal(codes(dry).includes('CHILD_STATE_CONFLICT #8'), !accepted, 'a missing accepted return still conflicts');
+    assert.equal(github.mutations(), 0);
+    const formatted = cli.formatReport(dry);
+    assert.ok(formatted.includes('Ready to close (the controller decides; nothing is closed automatically)'));
+    assert.ok(formatted.includes(`- #8: PR #540, head aaaaaaa; ${accepted ? 'acceptance recorded' : 'no accepted return yet'}`));
+
+    const applied = reconciler().run({ apply: true });
+    assert.deepEqual(applied.holds, []);
+    assert.deepEqual(applied.close_list, dry.close_list);
+    assert.equal(github.issues.get(8).state, 'open');
+    const patches = github.calls.filter(call => call.method === 'PATCH' && /\/issues\/\d+$/.test(call.path));
+    assert.ok(patches.length > 0, 'the pass writes managed bodies');
+    assert.ok(patches.every(call => !Object.hasOwn(call.body, 'state')), 'no issue PATCH may change state');
+    const settled = reconciler().run();
+    assert.match(settled.next_action, /^Controller: decide on .*starting with READY_TO_CLOSE on #8/);
+    assert.deepEqual(settled.close_list, dry.close_list);
+  }
+});
+
+test('the close list excludes red, missing, pending or off-head checks, unmerged PRs and closed issues', () => {
+  const cases = [
+    { name: 'red', contexts: [{ ...green('validate'), conclusion: 'FAILURE' }] },
+    { name: 'missing', contexts: [green('other')] },
+    { name: 'pending', contexts: [{ ...green('validate'), status: 'IN_PROGRESS', conclusion: null }] },
+    { name: 'off-head', rollupOid: SHA_B },
+    { name: 'incomplete', hasNextPage: true },
+    { name: 'no required checks', requiredChecks: [] },
+    { name: 'open PR', merged: false },
+    { name: 'closed issue', issueState: 'closed' },
+  ];
+  for (const variant of cases) {
+    const outcomes = [{ issue: 8, class: 'CORE', parent: 7, order: 0 }];
+    const { github, store, binding, reconciler } = setup({ parentIssue: 7, outcomes, issues: gh => gh.addIssue(8, { parent: 7, state: variant.issueState || 'open' }) });
+    const doc = state.newChild({ repository: 'acme/app', outcome: outcomes[0] });
+    doc.candidate.branch = 'feature';
+    store.write('child', 8, doc, { sha: null, previous: null });
+    if (variant.requiredChecks) binding.required_checks = variant.requiredChecks;
+    github.addPr(540, { head: SHA_A, merged: true, contexts: [green('validate')], branch: 'feature', ...variant });
+    for (const apply of [false, true]) {
+      const report = reconciler().run({ apply });
+      assert.deepEqual(report.holds, [], variant.name);
+      assert.equal(codes(report).includes('READY_TO_CLOSE #8'), false, variant.name);
+      assert.deepEqual(report.close_list, [], variant.name);
+      assert.equal(cli.formatReport(report).includes('Ready to close ('), false, variant.name);
+    }
+    assert.equal(github.issues.get(8).state, variant.issueState || 'open');
+    assert.ok(github.calls.filter(call => call.method === 'PATCH' && /\/issues\/\d+$/.test(call.path)).every(call => !Object.hasOwn(call.body, 'state')));
+  }
 });
 
 test('the command line binds identity, refuses writes without a session and prints a readable plan', () => {

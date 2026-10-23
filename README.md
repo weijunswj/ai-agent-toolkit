@@ -2,6 +2,8 @@
 
 **Supported OS:** Windows 10 and 11. macOS and Linux computers are not supported. (Linux is still used for CI, cloud agent sessions and the remote servers some skills manage.)
 
+**Toolkit GitHub tracking:** issue tracking, parent and child tasks, records and the reconciler are off by default and opt-in per repository. They need GitHub (or a GitHub-like host with repositories and parent/child issues) and a `.github/toolkit-programme.json` binding the owner adds on purpose. Every other repository, such as a company repository or one you do not control, gets only the coding-governance gates, subagents and portable skills, and tracks tasks its own way. The private evidence (transport) store can be any backend.
+
 Skills and working rules for AI coding agents. Toolkit installs them into Codex and Claude Code as a native plugin, keeps them current from this repository's `main` branch, and adds a short set of global rules every session follows. Antigravity gets a portable copy of the skills only.
 
 ## Install

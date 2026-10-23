@@ -184,3 +184,17 @@ test('runtime validation matches the schemas on unknown and missing nested field
   assert.equal(validateParent(missingParentKey), false);
   assert.notDeepEqual(state.validateParent(missingParentKey), []);
 });
+
+test('without the opt-in binding the command line refuses before any GitHub call', () => {
+  const cli = require('../../skills/github-program-reconciler/scripts/programme.cjs');
+  const github = new FakeGitHub();
+  const dir = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'programme-unbound-'));
+  try {
+    for (const argv of [['reconcile'], ['reconcile', '--apply', '--session', 's'], ['show'], ['claim', '--issue', '1', '--session', 's']]) {
+      assert.throws(() => cli.main(argv, { transport: github, repoRoot: dir, originUrl: 'https://github.com/acme/app.git', stdout: { write() {} } }), { code: 'BINDING_MISSING' });
+    }
+    assert.equal(github.calls.length, 0, 'no GitHub call is made in a repository that has not opted in');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -112,7 +112,7 @@
       "public_name": "GitHub Program Reconciler",
       "existing_skill_review": "Reviewed github-program-reconciler against current governance, GitHub, review and setup surfaces; no other current product owns programme state documents, the native sub-issue reconcile pass, generated state blocks or the decision-trace audit.",
       "native_capability_review": "GitHub APIs and CLI expose issues, sub-issues, dependencies, pull requests, checks and file contents but do not keep a cross-host state document with compare-and-swap, fencing, return IDs, intent-before-mutation recovery or byte-preserving managed blocks.",
-      "trigger": "Use only when the user or the appointed controller explicitly asks for programme state work in one governed repository: a reconcile dry run or apply, reading or writing state documents, the decision-trace audit, or review-truth records.",
+      "trigger": "Use on its own only in a repository that has .github/toolkit-programme.json (Toolkit GitHub tracking opt-in), at significant events: governance setup; a task (child issue) added, deleted or modified; after a merge; a PR opened or its head moved; an issue closed or reopened; outcomes reordered or reprioritised; a release shipped; a controller appointed or rebinding; and whenever programme state, decision traces or review-truth records are involved there.",
       "positive_routing_examples": [
         "Dry-run the programme reconciler for this repository and show the planned sub-issue attaches.",
         "Claim the state document for issue 423 as G1 and record the candidate head.",
@@ -124,8 +124,8 @@
         "Read one pull request's checks and comments without any programme state scope."
       ],
       "overlap_boundary": "Use ordinary GitHub inspection tools for unrelated reads and the controller and owner for review-thread mutation, Ready and merge; this product owns only programme state documents, the reconcile pass, its managed blocks and the decision-trace audit.",
-      "invocation_mode": "explicit",
-      "invocation_mode_reason": "Packaged metadata keeps this product explicit-only because its broad or externally sensitive work requires deliberate routing and separate action authority.",
+      "invocation_mode": "implicit",
+      "invocation_mode_reason": "Packaged metadata permits implicit discovery after the behavioural routing corpus proves positive, negative, and adversarial discrimination; discovery never grants mutation authority.",
       "decision": "new_product",
       "decision_reason": "Programme state with compare-and-swap, fencing and native hierarchy reconciliation is distinct from generic GitHub inspection or executor implementation.",
       "unique_value": "Keeps the native sub-issue tree, PR heads and required checks in step with one private state document per outcome, renders parent and child blocks from the same revisions, and refuses stale writers, blind replays and hand-edit overwrites.",
