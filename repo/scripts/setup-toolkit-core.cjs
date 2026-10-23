@@ -3883,7 +3883,7 @@ function runCodexHelperAgents(args) {
   catch (error) { result = { status: 'held', detail: error.message }; }
   console.log('');
   console.log('## Toolkit helpers');
-  for (const line of describeCodexHelpers(result, args.repoRoot)) console.log(line);
+  for (const line of describeCodexHelpers(result, '<managed-toolkit-checkout>')) console.log(line);
   return result;
 }
 

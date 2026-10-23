@@ -308,8 +308,10 @@ class CodexHelperDefinitions {
 
 // Setup's lines for the Codex helper step. Setup refreshes installed helpers to the stack each file
 // names and never picks a stack itself, so a computer without them is told how to install them.
-function describeSetupResult(result, repositoryRoot = TOOLKIT_ROOT) {
-  const generator = `node "${path.resolve(repositoryRoot).replace(/\\/g, '/')}/repo/scripts/toolkit-codex-helper-agents.cjs" --stack <stack> --write`;
+// `checkout` is the Toolkit checkout as shown to the reader; setup passes its placeholder so
+// the output names no local path.
+function describeSetupResult(result, checkout = path.resolve(TOOLKIT_ROOT).replace(/\\/g, '/')) {
+  const generator = `node "${checkout}/repo/scripts/toolkit-codex-helper-agents.cjs" --stack <stack> --write`;
   if (result.status === 'current') return ['Toolkit helpers: current.'];
   if (result.status === 'updated' || result.status === 'installed') {
     const backup = result.backup_dir ? ` (backup: ${result.backup_dir.replace(/\\/g, '/')})` : '';
