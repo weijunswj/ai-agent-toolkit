@@ -20,7 +20,7 @@ Last reviewed against `main` `9b7ffff3c30078c2290c809d20bc7c49e3f96e8d`.
 | Docs | `repo/docs/` | Human and agent docs, routed by `repo/docs/agent-playbooks/INDEX.md` |
 | Provenance | `repo/source-watch/` | Third-party source locks and the notification-only source watch |
 | Native plugins | `.claude-plugin/`, `.codex-plugin/` | Claude Code and Codex plugin metadata and hooks |
-| CI | `.github/workflows/` | `validate.yml` is the full gate: test shards on Linux and Windows, then the `validate` job checks and verifies them (the Windows shards include the env store tests on the real Credential Manager) |
+| CI | `.github/workflows/` | `validate.yml` is the full gate: test shards on Linux and Windows and the `personal-data` check (config `.github/personal-data-guard.json`), then the `validate` job checks and verifies them (the Windows shards include the env store tests on the real Credential Manager) |
 
 ## Entry points
 
@@ -41,6 +41,7 @@ Last reviewed against `main` `9b7ffff3c30078c2290c809d20bc7c49e3f96e8d`.
 | Full validation list | `repo/scripts/run-validation-gate.cjs` |
 | Shared executable resolution | `skills/github-program-reconciler/scripts/resolve-executable.cjs` |
 | Decision-trace audit | `skills/github-program-reconciler/scripts/decision-trace-audit.cjs` |
+| Personal-data guard and installer | `skills/secure-ci-cd/scripts/personal-data-guard.cjs`, `skills/secure-ci-cd/scripts/install-personal-data-guard.cjs` |
 | Programme state and reconcile pass | `skills/github-program-reconciler/scripts/programme.cjs`, `skills/github-program-reconciler/scripts/programme-state.cjs` |
 
 ## Sources of truth
