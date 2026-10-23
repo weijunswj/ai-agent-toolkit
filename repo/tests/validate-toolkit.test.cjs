@@ -648,7 +648,7 @@ function addSkillToCatalogs(cwd, skillName) {
 
   insertBefore(
     path.join(cwd, 'README.md'),
-    '\n## Install Skills By Platform',
+    '\nHow risky each skill is',
     `| [${skillName}](skills/${skillName}/) | Fixture catalog entry used to prove current-skill gate enforcement. |\n`
   );
 
@@ -659,7 +659,8 @@ function addSkillToCatalogs(cwd, skillName) {
   const fixtureRow = sourceRow
     .replace('[managed-app-foundation-review](../../skills/managed-app-foundation-review/)', `[${skillName}](../../skills/${skillName}/)`)
     .replace('managed-app-foundation-review', skillName);
-  insertBefore(matrixPath, '\n## Description Review Notes', `${fixtureRow}\n`);
+  insertBefore(matrixPath, '\n## Packaging', `${fixtureRow}\n`);
+  insertBefore(matrixPath, '\n## Description Review Notes', `| [${skillName}](../../skills/${skillName}/) | portable | Yes | Yes | Yes |\n`);
 }
 
 function updateBaseline(cwd, mutate) {

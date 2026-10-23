@@ -100,6 +100,8 @@ const allowedTrackedTemplatePrefixes = [
   'skills/n8n-environment-setup/templates/.n8n-local/',
   'skills/n8n-environment-setup/templates/.n8n-production-cloudflare/'
 ];
+// This repository's shared Claude Code settings (WebFetch/WebSearch allow); local settings stay untracked.
+const allowedTrackedSharedSettings = new Set(['.claude/settings.json']);
 
 function slash(value) {
   return value.split(path.sep).join('/');
@@ -627,6 +629,8 @@ function validateSkillPackagingTable(errors, matrixPath, section) {
 
 function validateReadmeSkillTable(errors) {
   const readme = readText('README.md');
+  // Windows is the only supported computer OS (#532); the README says so right under its title.
+  if (!/^# AI Agent Toolkit\n\n\*\*Supported OS:\*\* Windows\b/.test(readme)) fail(errors, 'README must open with the "**Supported OS:** Windows" line under its title');
   const section = markdownSection(readme, 'Skills');
   const rows = [...section.matchAll(/^\|\s*\[([^\]]+)\]\(skills\/([^/)]+)\/\)\s*\|/gm)].map((match) => match[2]).sort();
   const current = skillDirs().map((rel) => path.basename(rel)).sort();
@@ -745,7 +749,8 @@ function validateTrackedLocalRuntimeFiles(errors) {
   if (result.status !== 0) return;
   for (const rel of result.stdout.split('\0').filter(Boolean).map(slash)) {
     if (rel.split('/').some((segment) => ignoredDirs.has(segment))
-      && !allowedTrackedTemplatePrefixes.some((prefix) => rel.startsWith(prefix))) {
+      && !allowedTrackedTemplatePrefixes.some((prefix) => rel.startsWith(prefix))
+      && !allowedTrackedSharedSettings.has(rel)) {
       fail(errors, `Tracked local runtime file is not allowed: ${rel}`);
     }
   }
