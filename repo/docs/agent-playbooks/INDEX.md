@@ -25,6 +25,12 @@ Triggers: a session or subagent switched to a fallback model by a safety classif
 
 Read: `skills/repository-agent-rules/repo-local/docs/agent-playbooks/model-safety-flags.md`.
 
+## Match: Personal Data In Checks, Fixtures Or Evidence
+
+Triggers: personal or private data in checks, tests, fixtures, queries, logs or evidence, the personal-data guard, or reviewing a change for leaked personal data.
+
+Read: `skills/repository-agent-rules/repo-local/docs/agent-playbooks/privacy-safe-checks.md`.
+
 ## Match: Invariant Models
 
 Triggers: a feature that touches authority, approvals, custody, state machines or host configuration (Codex, Claude Code or other app settings files).
@@ -36,6 +42,7 @@ Read: `skills/repository-agent-rules/repo-local/docs/agent-playbooks/invariant-m
 - Agent-instruction changes: `repo/docs/FOR_AI_AGENTS.md` and `repo/docs/SOURCE-OF-TRUTH.md`.
 - Skills, contracts or native plugin surfaces: also `repo/docs/PROJECT-MODULE-STANDARD.md` and `repo/docs/SURFACE-FIDELITY-AUDIT.md`.
 - Provenance or third-party source work: `repo/docs/RETIRED-SOURCE-PROVENANCE.md` and `repo/docs/THIRD-PARTY-SOURCE-NOTES.md`.
+- Programme custody, executor checkpoints or plugin hooks: `repo/docs/HOST-CONTRACT.md`.
 - Generated-output writeback or privileged workflows: `repo/docs/WRITE-SAFETY-MODEL.md` and `repo/docs/SAFE-UPDATES.md`.
 - Cleanup, retirement or human usage docs: `repo/docs/CLEANUP-POLICY.md`, `repo/docs/HOW-TO-USE.md` and `README.md`.
 

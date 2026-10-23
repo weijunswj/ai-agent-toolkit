@@ -274,10 +274,17 @@ test('Claude Toolkit plugin SessionStart hook validator requires sync-source cla
       PreToolUse: [{
         matcher: 'Agent|Task',
         hooks: [{ type: 'command', command: 'node "${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-claude-agent-hook.cjs"' }]
+      }],
+      Stop: [{
+        hooks: [{ type: 'command', command: 'node "${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-programme-checkpoint-hook.cjs"', timeout: 30 }]
       }]
     }
   });
   assert.deepEqual(setup.verifySessionStartHook(hooksPath), []);
+  const withoutStop = JSON.parse(fs.readFileSync(hooksPath, 'utf8'));
+  delete withoutStop.hooks.Stop;
+  writeJson(hooksPath, withoutStop);
+  assert.match(setup.verifySessionStartHook(hooksPath).join('\n'), /Stop must have exactly one hook/);
 
   writeJson(hooksPath, {
     hooks: {
@@ -968,7 +975,7 @@ test('installed enforcement byte verification rejects missing and stale cache fi
   const cache = tmpRoot();
   // A package fixture contains the actual canonical runtime and contracts.
   // Negative checks below independently remove/drift protected cache files.
-  for (const directory of ['repo/scripts','repo/contracts','.claude-plugin']) {
+  for (const directory of ['repo/scripts','repo/contracts','.claude-plugin','skills/github-program-reconciler/scripts']) {
     fs.cpSync(path.join(repoRoot,directory),path.join(cache,directory),{recursive:true});
   }
   for(const file of ['repo/CONTROLLER.md','repo/ARCHITECTURE.md'])fs.copyFileSync(path.join(repoRoot,file),path.join(cache,file));

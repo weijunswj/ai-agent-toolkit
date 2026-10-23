@@ -17,7 +17,7 @@
     "bridge:audit": "node repo/scripts/toolkit-local-bridge.cjs --audit",
     "watch:sources": "node repo/scripts/watch-project-sources.cjs",
     "check:source-updates": "node repo/scripts/check-project-source-updates.cjs",
-    "test:bridge": "node repo/scripts/run-tests.cjs repo/tests/toolkit-local-bridge.test.cjs",
+    "test:bridge": "node repo/scripts/run-tests.cjs repo/tests/toolkit-local-bridge.test.cjs repo/tests/toolkit-local-bridge-codex.test.cjs repo/tests/toolkit-local-bridge-claude.test.cjs",
     "validate:all": "node repo/scripts/run-validation-gate.cjs",
     "safe-source-update": "node repo/scripts/safe-source-update.cjs"
   },

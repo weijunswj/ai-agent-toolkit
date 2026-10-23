@@ -3271,7 +3271,7 @@ function runCodexNativePluginSetup(args) {
       restart_required: false,
       hook_trust_status: summary.hook_trust_status || 'verification-unavailable',
       hook_execution_status: summary.hook_execution_status || 'verification unavailable; open `/hooks` in Codex',
-      hook_trust_action: summary.hook_trust_message || 'Open `/hooks` in Codex and review the current Toolkit SessionStart hook'
+      hook_trust_action: summary.hook_trust_message || 'Open `/hooks` in Codex and review the current Toolkit hooks'
     };
   }
   runNativePluginJsonPhase({
@@ -3302,7 +3302,7 @@ function runCodexNativePluginSetup(args) {
     restart_required: true,
     hook_trust_status: 'pending-review',
     hook_execution_status: 'skipped until the current hook is reviewed and trusted',
-    hook_trust_action: 'Open `/hooks` in Codex, review and trust the current Toolkit SessionStart hook'
+    hook_trust_action: 'Open `/hooks` in Codex, review and trust the current Toolkit hooks'
   };
 }
 
@@ -3802,7 +3802,7 @@ function printFinalSummary({ args, current, managed, localClone, nativeCache, de
     console.log(`Codex: open /hooks and trust the updated Toolkit hooks: ${yesNo(nativeCache.restart_required === true)}`);
     console.log(`Codex hook trust status: ${unknown(nativeCache.hook_trust_status || 'verification-unavailable')}`);
     console.log(`Codex hook execution status: ${unknown(nativeCache.hook_execution_status || 'verification unavailable; open /hooks in Codex')}`);
-    console.log(`Codex hook trust action: Open /hooks and verify the enabled Toolkit SessionStart hook belongs to the installed ai-agent-toolkit plugin at version ${unknown(nativeCache.installed_version || nativeCache.expected_version)}. ${unknown(nativeCache.hook_trust_action || '')}`);
+    console.log(`Codex hook trust action: Open /hooks and verify the enabled Toolkit hooks belong to the installed ai-agent-toolkit plugin at version ${unknown(nativeCache.installed_version || nativeCache.expected_version)}. ${unknown(nativeCache.hook_trust_action || '')}`);
   } else {
     console.log('Codex plugin status: not checked for this host');
     console.log('Codex plugin mutation: no');

@@ -21,6 +21,17 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/repo/scripts/toolkit-programme-checkpoint-hook.cjs\"",
+            "timeout": 30
+          }
+        ]
+      }
     ]
   }
 }

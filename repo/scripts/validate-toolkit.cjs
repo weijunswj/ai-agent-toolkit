@@ -94,7 +94,7 @@ const executablePrefixes = [
   'skills/n8n-workflow-transport/templates/helper-scripts/sanitizer/',
   'skills/n8n-safety-router/scripts/', 'skills/github-program-reconciler/scripts/', 'skills/n8n-environment-setup/templates/.n8n-local/',
   'skills/n8n-environment-setup/templates/.n8n-production-cloudflare/',
-  'skills/codex-ssh-hostinger-coolify-setup-maintainer/scripts/'
+  'skills/codex-ssh-hostinger-coolify-setup-maintainer/scripts/', 'skills/secure-ci-cd/scripts/'
 ];
 const executableExtensions = new Set(['.ps1', '.cmd', '.bat', '.cjs', '.mjs', '.js', '.ts', '.tsx', '.py', '.sh']);
 const allowedTrackedTemplatePrefixes = [
@@ -630,8 +630,8 @@ function validateSkillPackagingTable(errors, matrixPath, section) {
 
 function validateReadmeSkillTable(errors) {
   const readme = readText('README.md');
-  // Windows is the only supported computer OS (#532); the README says so right under its title.
-  if (!/^# AI Agent Toolkit\n\n\*\*Supported OS:\*\* Windows\b/.test(readme)) fail(errors, 'README must open with the "**Supported OS:** Windows" line under its title');
+  // Windows is the only supported computer OS (#532); the README says so right after its title and one-paragraph intro.
+  if (!/^# AI Agent Toolkit\n\n[^#*\n][^\n]*\n\n\*\*Supported OS:\*\* Windows\b/.test(readme)) fail(errors, 'README must open with its title, a one-paragraph intro, then the "**Supported OS:** Windows" line');
   const section = markdownSection(readme, 'Skills');
   const rows = [...section.matchAll(/^\|\s*\[([^\]]+)\]\(skills\/([^/)]+)\/\)\s*\|/gm)].map((match) => match[2]).sort();
   const current = skillDirs().map((rel) => path.basename(rel)).sort();
@@ -678,10 +678,12 @@ function validatePluginVersions(errors) {
     ['repo/scripts/codex-app-server.cjs', 'TOOLKIT_CLIENT_VERSION'],
     ['repo/scripts/toolkit-agent-control.cjs', 'CONTROL_VERSION']
   ];
+  // Runtime constants read the one version source (toolkit-version.cjs); a literal version here
+  // would drift from version.json on the next bump.
   for (const [rel, name] of constants) {
-    const match = readText(rel).match(new RegExp(`const\\s+${name}\\s*=\\s*['\"]([^'\"]+)['\"]`));
-    if (!match) fail(errors, `${rel} is missing ${name}`);
-    else if (match[1] !== version) fail(errors, `${rel} ${name} does not match ${version}`);
+    const text = readText(rel);
+    if (!/require\('\.\/toolkit-version\.cjs'\)/.test(text)) fail(errors, `${rel} must read its version from repo/scripts/toolkit-version.cjs`);
+    if (!new RegExp(`const\\s+${name}\\s*=\\s*TOOLKIT_VERSION;`).test(text)) fail(errors, `${rel} ${name} must be TOOLKIT_VERSION from repo/scripts/toolkit-version.cjs, not a literal`);
   }
 }
 

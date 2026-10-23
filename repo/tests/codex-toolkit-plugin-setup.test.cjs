@@ -818,7 +818,7 @@ test('Codex Toolkit verifier falls back to config and cache when CLI list omits 
   assert.equal(state.verificationMethod, 'config-cache-fallback');
   assert.equal(state.hookTrustStatus, 'verification-unavailable');
   assert.match(state.hookTrustMessage, /Open `\/hooks` in Codex/);
-  assert.match(state.hookTrustMessage, /review and trust the current Toolkit `SessionStart` hook/);
+  assert.match(state.hookTrustMessage, /review and trust the current Toolkit hooks \(`SessionStart`, `PreToolUse` and `Stop`\)/);
   assert.equal(state.installed.enabled, true);
   assert.equal(path.resolve(state.installed.source.path), path.resolve(repoRoot));
   assert.equal(path.resolve(state.cacheRoot), path.resolve(cacheRoot));
@@ -950,7 +950,7 @@ test('Codex Toolkit verify-only human output keeps trust verification unavailabl
   assert.doesNotMatch(result.stdout, /Review and trust.*only if it runs:/);
   assert.match(result.stdout, /Hook trust verification is unavailable from supported non-interactive Codex inspection/i);
   assert.match(result.stdout, /Open `\/hooks` in Codex/i);
-  assert.match(result.stdout, /review and trust the current Toolkit `SessionStart` hook/i);
+  assert.match(result.stdout, /review and trust the current Toolkit hooks \(`SessionStart`, `PreToolUse` and `Stop`\)/i);
   assert.match(result.stdout, /applies to Codex only/i);
   assert.match(result.stdout, /Claude Code does not need Codex hook approval/i);
   assert.match(result.stdout, /Codex must not install or update Claude Code/i);
@@ -1038,8 +1038,9 @@ test('Codex Toolkit --write human output reports the changed hook with JSON-alig
   assert.match(humanResult.stdout, new RegExp(`Hook trust status: ${summary.hook_trust_status}`));
   assert.match(humanResult.stdout, new RegExp(`Hook execution status: ${summary.hook_execution_status}`));
   assert.match(humanResult.stdout, /Open `\/hooks` in Codex/);
-  assert.match(humanResult.stdout, /exact current Toolkit `SessionStart` hook must be reviewed and trusted/);
-  assert.match(humanResult.stdout, /Codex skips the hook until it is trusted/);
+  assert.match(humanResult.stdout, /exact current Toolkit hooks changed and are pending review/);
+  assert.match(humanResult.stdout, /review and trust the current Toolkit hooks \(`SessionStart`, `PreToolUse` and `Stop`\)/);
+  assert.match(humanResult.stdout, /Codex skips each hook until it is trusted/);
   assert.doesNotMatch(humanResult.stdout, /Hook trust status: verification-unavailable/);
 });
 

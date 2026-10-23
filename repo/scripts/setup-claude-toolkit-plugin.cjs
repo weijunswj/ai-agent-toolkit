@@ -138,6 +138,12 @@ function verifySessionStartHook(hooksPath) {
   if (!agentCommands.some((command) => command.includes('${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-claude-agent-hook.cjs'))) {
     errors.push('PreToolUse Agent hook must call toolkit-claude-agent-hook.cjs through CLAUDE_PLUGIN_ROOT');
   }
+  // The turn-end hook is only the programme checkpoint, which never blocks a turn.
+  const stopHooks = (Array.isArray(hooks?.hooks?.Stop) ? hooks.hooks.Stop : []).flatMap((group) => group?.hooks || []);
+  if (stopHooks.length !== 1 || stopHooks[0]?.type !== 'command'
+    || stopHooks[0].command !== 'node "${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-programme-checkpoint-hook.cjs"') {
+    errors.push('Stop must have exactly one hook, the programme checkpoint through CLAUDE_PLUGIN_ROOT');
+  }
   return errors;
 }
 
@@ -225,6 +231,8 @@ function validateInstalledEnforcement(installed, repoRoot, expectedVersion) {
     ['repo/scripts/toolkit-claude-agent-hook.cjs', false],
     ['repo/scripts/toolkit-claude-task-session.cjs', false],
     ['repo/scripts/toolkit-v3-native-helper-adapter.cjs', false],
+    ['repo/scripts/toolkit-v3-native-helper-adapter-claude.cjs', false],
+    ['repo/scripts/toolkit-v3-native-helper-adapter-codex.cjs', false],
     ['repo/scripts/toolkit-v3-helper-guard.cjs', false],
     ['repo/scripts/toolkit-gate-contract-compiler.cjs', false],
     ['repo/contracts/controller-kernel/stack-registry-v3.json', true],
@@ -265,12 +273,15 @@ function validateInstalledEnforcement(installed, repoRoot, expectedVersion) {
     ["repo/contracts/toolkit-local-bridge/codex-plugin/hooks/hooks.json",true],
     ["repo/contracts/toolkit-local-bridge/codex-plugin/plugin.json",true],
     ["repo/contracts/toolkit-local-bridge/version.json",true],
+    ["repo/scripts/toolkit-version.cjs",false],
     ["repo/scripts/toolkit-global-rules.cjs",false],
     ["repo/scripts/toolkit-managed-block.cjs",false],
     ["repo/contracts/agent-rules/global-rules.md",false],
     ["repo/contracts/agent-rules/n8n-safety-router-adapter.md",false],
     ["repo/CONTROLLER.md",false],
     ["repo/ARCHITECTURE.md",false],
+    ["repo/scripts/toolkit-programme-checkpoint-hook.cjs",false],
+    ["skills/github-program-reconciler/scripts/programme-checkpoint.cjs",false],
   ];
   for (const [relPath, json] of pairs) {
     const source = path.join(repoRoot, ...relPath.split('/'));
