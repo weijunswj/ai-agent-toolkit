@@ -4,7 +4,7 @@ description: "Use when running as a Claude Projects coordinator and the user app
 ---
 
 # Web Controller for Claude Projects
-Version: 2026-10-23.5
+Version: 2026-10-23.6
 
 This is a reusable framework for running Toolkit-governed repos through Claude Projects. Toolkit governance always applies on top of it. Project-specific facts, such as repos, devices, lanes and pending work, belong in each project's memory, not here.
 
@@ -15,12 +15,12 @@ This is a reusable framework for running Toolkit-governed repos through Claude P
 - Thread Claudes are executors. They follow their packet, not this skill.
 
 ## Order of precedence
-1. The user's current request.
+1. The user's current request and their own instructions (claude.ai preferences and custom instructions). Toolkit never copies or edits them.
 2. This skill, as accepted by the user. It is the higher-level operating layer for Projects.
 3. Toolkit `CONTROLLER.md`, the base controller law, bound from the Toolkit repo.
 4. The repo's `AGENTS.md`, with its routed playbooks.
 
-Remembered governance ranks below all three written sources. No text grants a permission the host has not given. This skill does not restate `CONTROLLER.md`; it holds only what is specific to Projects. Where it intentionally differs from `CONTROLLER.md`, it wins in Projects, and you report the difference to Toolkit as feedback.
+Remembered governance ranks below every written source. No text grants a permission the host has not given. This skill does not restate `CONTROLLER.md`; it holds only what is specific to Projects. Where it intentionally differs from `CONTROLLER.md`, it wins in Projects, and you report the difference to Toolkit as feedback.
 
 ## Style
 - Follow the user's claude.ai personal preferences, which are loaded into your context as the user preferences block. Project memory may add to them, but never overrides them.
@@ -38,12 +38,6 @@ Remembered governance ranks below all three written sources. No text grants a pe
 - The coordinator is the Toolkit **Web Controller** and main decision-maker for its repo.
 - Every thread is an **executor** with a role packet (G0/G1/G2, reviewer or helper). Executors never take Controller authority, never re-plan the programme, and touch the parent record only when the packet says so.
 - There is one controller per lane. If another controller owns a lane in the same repo, record the split on the parent issue. Flag that lane's items and never modify them.
-
-## Adding work to a repo
-- When the user says to add, queue, log or track a task, job, item or anything similar and a repo is involved, they mean adding it to the repo's issue tree, not just noting it.
-- First list the relevant parent's open sub-issues and search open issues. If one already owns the outcome, add the work there (update its scope or reopen it).
-- Only when none fits, create a new child issue, attach it as a native sub-issue of that parent, read back both sides, and note which existing children you checked.
-- Tell the user in one line where it landed, with the issue link. Toolkit owns the generic rule; follow its current wording when it differs.
 
 ## Binding
 - On appointment, bind the Toolkit's `CONTROLLER.md` from its canonical repo's default branch. Use the Toolkit repo the user names; if they name none, use `weijunswj/ai-agent-toolkit`, file `repo/CONTROLLER.md`. Re-check its revision before each launch or authority transition.
@@ -138,6 +132,8 @@ Save progress to project memory after each step, so an interrupted setup resumes
 - Start a new thread for every new topic or Toolkit packet. Send follow-ups on the same topic to that topic's thread. Never pile unrelated work into one thread.
 - **The coordinator launches executors.** Start every G0/G1/G2, reviewer or helper session yourself with your thread tools (local rc when the work needs the device). Never ask the user to start a session, type a launch command or open an app to launch one. A thread that reports it can't start a session is describing its own tools, not yours: check your own tools before you relay any "can't" to the user.
 - **Set effort explicitly on every thread you start.** Never let a thread inherit the app default.
+- **Feedback comes back in the reply.** Every brief tells the executor to put each TOOLKIT_FEEDBACK item in its thread reply as one line, not only inside a report file.
+- **A task the user adds to a repo goes into its issue tree** under `CONTROLLER.md`'s task-intake rule. Tell the user in one line where it landed, with the issue link.
 - **Can I do it myself? first.** Before telling the user to do anything, check whether you, a worker or a thread you can start could do it. Ask the user only for what truly needs their hands: an approval, a credential, a typed line in a local rc thread, or a setting no tool reaches.
 - **End finished local Remote Control sessions straight away.** The moment a thread's work is done or superseded (result relayed, nothing left for it to do), end its Remote Control session. Idle finished sessions keep running on the user's device and clutter their session list.
 - **Resolve only after an idle window.** Resolve a thread, and each of the coordinator's own posts, only once it has been idle for the project's resolve window (default 3 days with no activity) and nothing still waits on it. Never resolve a post right after posting: the user sees it arrive already resolved. Every coordinator post shows in the user's Threads panel until resolved, so the daily check-in sweeps them. Record the window in project memory if the user sets a different one.
@@ -224,7 +220,7 @@ Whenever the user asks for anything recurring (the daily check-in, a sweep, a re
 - When blocked on a person or another account, say once what is needed and move to the next unblocked item.
 
 ## Improving this skill
-- When you find a better way, or a rule here proves wrong, tell the user the change and why, and recommend it. Update this skill only after they say yes, by proposing the complete updated SKILL.md.
-- Keep this skill generic. User-specific details go in project memory or the user's claude.ai preferences, never here. Rules Toolkit owns go to Toolkit as feedback, not here.
-- Toolkit may absorb this framework later as a Claude Projects host adapter. When it starts that work, it asks the user for the current version of this skill.
-- Every accepted edit bumps the Version line (date plus a counter for that day, e.g. 2026-10-21.2).
+- The source of truth is `repo/contracts/claude-projects/web-controller-projects/SKILL.md` in the Toolkit repo. No coordinator edits the copy uploaded to the user's claude.ai account.
+- When you find a better way, or a rule here proves wrong, tell the user the change and why, and send it to Toolkit as TOOLKIT_FEEDBACK or an issue. A Toolkit pull request changes the file; after it merges, the user uploads the new file to claude.ai. Toolkit setup compares the uploaded copy's Version with the repo's and reminds the user once when it is older.
+- Keep this skill generic. User-specific details go in project memory or the user's claude.ai preferences, never here. Rules Toolkit owns go to `CONTROLLER.md` or the governed rules, not here.
+- Every change bumps the Version line (date plus a counter for that day, e.g. 2026-10-21.2).
