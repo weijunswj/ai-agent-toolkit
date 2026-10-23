@@ -22,5 +22,5 @@ Claude Code and future OpenCode support, including native CLI commands that chan
 Codex helper semantics: [configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference)
 and [subagents](https://learn.chatgpt.com/docs/agent-configuration/subagents), read
 2026-10-23. Codex CLI 0.164.0 additionally rejects a helper cap below 1 and accepts
-only `chatgpt`, `codex`, `atlas` in a skill's product enum. These V1 sources do not
-establish V2 thread-count semantics; keep that formula unchanged pending evidence.
+only `chatgpt`, `codex`, `atlas` in a skill's product enum. These sources cover only the older mode; they do not
+establish the newer mode's thread-count semantics, so keep that formula unchanged pending evidence.
