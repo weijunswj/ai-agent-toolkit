@@ -11,6 +11,7 @@ const hook = require('../scripts/toolkit-claude-agent-hook.cjs');
 const control = require('../scripts/toolkit-agent-control.cjs');
 const { governedRepo } = require('../scripts/toolkit-governed-repo.cjs');
 const { ClaudeHelperAgentRenderer } = require('../scripts/toolkit-claude-helper-agents.cjs');
+const { managedAgentsDirectory } = require('../scripts/toolkit-claude-helper-policy.cjs');
 
 const TEMPLATE = fs.readFileSync(path.join(ROOT, 'skills', 'repository-agent-rules', 'repo-local', 'AGENTS.managed.template.md'), 'utf8');
 
@@ -181,6 +182,37 @@ test('environment variables that would change the helper model or effort are ref
   const file = path.join(f.configDir, 'agents', 'toolkit-g0-helper.md');
   fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace('effort: xhigh', 'effort: low'));
   assert.match(reason(launch({ CLAUDE_CODE_EFFORT_LEVEL: 'low' })), /does not match the one rendered from the selected stack/);
+});
+
+test('A14: definitions are looked up the way Claude Code loads them: managed first, then every project folder from the working directory up, then the user folder', t => {
+  const f = fixture(t);
+  const managed = path.join(f.dir, 'managed', '.claude', 'agents');
+  const decide = (input, cwd = f.repo) => hook.decision({ tool_name: 'Agent', hook_event_name: 'PreToolUse', cwd, ...input },
+    { root: f.controlRoot, environment: f.environment, helper_policy: { toolkitRoot: ROOT, managedAgentsDirectory: managed } });
+  const launch = { tool_input: { subagent_type: 'toolkit-g1-helper', prompt: 'y' } };
+  const original = fs.readFileSync(path.join(f.configDir, 'agents', 'toolkit-g1-helper.md'), 'utf8');
+  const changed = original.replace('maxTurns: 60', 'maxTurns: 99');
+  // A copy in a folder between the working directory and the git root is loaded before the root's.
+  const deep = path.join(f.repo, 'packages', 'app', 'src');
+  fs.mkdirSync(deep, { recursive: true });
+  fs.mkdirSync(path.join(f.repo, 'packages', '.claude', 'agents'), { recursive: true });
+  fs.writeFileSync(path.join(f.repo, 'packages', '.claude', 'agents', 'toolkit-g1-helper.md'), changed);
+  assert.match(reason(decide(launch, deep)), /^Toolkit: the project copy .*packages[\\/]\.claude[\\/]agents[\\/]toolkit-g1-helper\.md does not match/);
+  assert.deepEqual(decide(launch, f.repo), {}, 'a folder below the working directory is not loaded');
+  fs.writeFileSync(path.join(f.repo, 'packages', '.claude', 'agents', 'toolkit-g1-helper.md'), original);
+  assert.deepEqual(decide(launch, deep), {}, 'a byte-matching intermediate copy is fine');
+  // A managed copy outranks every other location.
+  fs.mkdirSync(managed, { recursive: true });
+  fs.writeFileSync(path.join(managed, 'toolkit-g1-helper.md'), changed);
+  assert.match(reason(decide(launch)), /^Toolkit: the managed copy .* does not match the one rendered from the selected stack\. Toolkit does not change managed files; ask whoever manages this computer's Claude Code settings to update or remove it\.$/);
+  fs.writeFileSync(path.join(managed, 'toolkit-g1-helper.md'), original);
+  assert.deepEqual(decide(launch), {});
+});
+
+test('the managed agents folder follows the documented managed settings folder on each platform', () => {
+  assert.equal(managedAgentsDirectory('win32'), 'C:\\Program Files\\ClaudeCode\\.claude\\agents');
+  assert.equal(managedAgentsDirectory('darwin'), '/Library/Application Support/ClaudeCode/.claude/agents');
+  assert.equal(managedAgentsDirectory('linux'), '/etc/claude-code/.claude/agents');
 });
 
 test('a helper file rewritten after the session started is refused until a new session', t => {

@@ -7,9 +7,11 @@
 // decision, so Claude Code's own permissions still apply.
 //
 // Definition lookup follows Claude Code's file precedence for agents it reads from
-// disk: the project `.claude/agents` (working directory, then git root) before the
-// user agents directory. Session `--agents` definitions are not visible to a hook;
-// launchers that pass them use the pinned task-session path instead.
+// disk: the managed settings directory's `.claude/agents`, then every project
+// `.claude/agents` from the working directory up to the git root (closest first), then
+// the user agents directory. Session `--agents` definitions and `--add-dir` folders are
+// not visible to a hook; launchers that pass them use the pinned task-session path
+// instead, and the native qualification run proves the served route from run records.
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -29,18 +31,44 @@ function deny(reason) {
   return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `Toolkit: ${reason}` } };
 }
 
+// The managed settings directory per platform (Claude Code managed settings docs); managed
+// agents live in its `.claude/agents` and outrank every other file location.
+function managedAgentsDirectory(platform = process.platform) {
+  const base = platform === 'win32' ? 'C:\\Program Files\\ClaudeCode'
+    : platform === 'darwin' ? '/Library/Application Support/ClaudeCode' : '/etc/claude-code';
+  return (platform === 'win32' ? path.win32 : path.posix).join(base, '.claude', 'agents');
+}
+
 class ClaudeNamedHelperPolicy {
-  #environment; #toolkitRoot; #matches;
-  constructor({ environment = process.env, toolkitRoot = path.resolve(__dirname, '..', '..'), matchesRenderedDefinition } = {}) {
+  #environment; #toolkitRoot; #matches; #managedDirectory;
+  constructor({ environment = process.env, toolkitRoot = path.resolve(__dirname, '..', '..'), matchesRenderedDefinition,
+    managedAgentsDirectory: managed = managedAgentsDirectory() } = {}) {
     this.#environment = environment || {};
     this.#toolkitRoot = toolkitRoot;
     this.#matches = matchesRenderedDefinition || ((...args) => helperAgents().matchesRenderedDefinition(...args));
+    this.#managedDirectory = managed;
+  }
+
+  // Project directories run from the working directory up to the git root; a working directory
+  // outside that root contributes only itself.
+  #projectDirectories(input, governance) {
+    const dirs = [];
+    let current = typeof input.cwd === 'string' && input.cwd ? path.resolve(input.cwd) : null;
+    const root = governance.root ? path.resolve(governance.root) : null;
+    const inside = current && root && (current === root || current.startsWith(root.endsWith(path.sep) ? root : root + path.sep));
+    while (current) {
+      dirs.push(path.join(current, '.claude', 'agents'));
+      if (!inside || current === root) break;
+      current = path.dirname(current);
+    }
+    if (root) dirs.push(path.join(root, '.claude', 'agents'));
+    return dirs;
   }
 
   #agentDirectories(input, governance) {
     const dirs = [];
-    if (typeof input.cwd === 'string' && input.cwd) dirs.push(path.join(path.resolve(input.cwd), '.claude', 'agents'));
-    if (governance.root) dirs.push(path.join(governance.root, '.claude', 'agents'));
+    if (this.#managedDirectory) dirs.push(this.#managedDirectory);
+    dirs.push(...this.#projectDirectories(input, governance));
     dirs.push(helperAgents().claudeUserAgentsDirectory(this.#environment));
     return [...new Set(dirs)];
   }
@@ -114,6 +142,9 @@ class ClaudeNamedHelperPolicy {
       if (changedSinceSessionStart(loaded.file, input)) return deny('Helper settings changed after this session started. Start a new session to use them.');
       return {};
     }
+    if (this.#managedDirectory && samePath(path.dirname(loaded.file), this.#managedDirectory)) {
+      return deny(`the managed copy ${loaded.file} does not match the one rendered from the selected stack. Toolkit does not change managed files; ask whoever manages this computer's Claude Code settings to update or remove it.`);
+    }
     if (samePath(path.dirname(loaded.file), helperAgents().claudeUserAgentsDirectory(this.#environment))) {
       return deny(`the installed ${requested} definition (${loaded.file}) does not match the one rendered from the selected stack. Run \`setup toolkit\` to refresh it.`);
     }
@@ -139,4 +170,4 @@ function changedSinceSessionStart(file, input) {
   } catch { return false; }
 }
 
-module.exports = Object.freeze({ ClaudeNamedHelperPolicy, HELPER_ROLES, changedSinceSessionStart });
+module.exports = Object.freeze({ ClaudeNamedHelperPolicy, HELPER_ROLES, changedSinceSessionStart, managedAgentsDirectory });
