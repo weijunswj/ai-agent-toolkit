@@ -29,6 +29,7 @@ const SCHEMA = Object.freeze({
   binding: 'toolkit.programme-binding.v1',
   parent: 'toolkit.programme-state.parent.v1',
   child: 'toolkit.programme-state.child.v1',
+  journal: 'toolkit.programme-journal.v1',
 });
 const BINDING_FILE = path.join('.github', 'toolkit-programme.json');
 const SHA40 = /^[0-9a-f]{40}$/;
@@ -37,8 +38,19 @@ const PREFIX = /^[A-Za-z0-9._-]{1,40}$/;
 const CLASSES = ['CORE', 'HARDENING', 'LATER', 'OPTIONAL', 'COMPLETED', 'RETIRED'];
 const LIFECYCLES = ['PLANNED', 'ACTIVE', 'WAITING_OWNER', 'HOLD', 'DONE', 'RETIRED'];
 const GATE_ROLES = ['G0', 'G1', 'G2'];
-const GATE_STATES = ['ACTIVE', 'WAITING_OWNER', 'INTERRUPTED', 'SUBMITTED', 'RETIRED'];
-const VERDICTS = ['ACCEPT', 'REOPEN'];
+const GATE_STATES = ['ASSIGNED', 'ACTIVE', 'WAITING_OWNER', 'INTERRUPTED', 'SUBMITTED', 'RETIRED'];
+// A live assignment: its bound session may journal and the controller reads that journal.
+const LIVE_GATE_STATES = ['ASSIGNED', 'ACTIVE', 'SUBMITTED', 'WAITING_OWNER'];
+const VERDICTS = ['ACCEPT', 'REOPEN', 'WAITING_OWNER'];
+const RETURN_MODES = ['native', 'toolkit_assisted'];
+const REQUESTED_VERDICTS = ['ACCEPT', 'WAITING_OWNER'];
+const ASSIGNMENT_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,59}$/;
+const RETURN_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/;
+const SESSION_HASH = /^[0-9a-f]{16}$/;
+const JOURNAL_FILE = /^([A-Za-z0-9][A-Za-z0-9._-]{0,59})--([0-9a-f]{16})\.json$/;
+const ERROR_CODE = /^[A-Z][A-Z0-9_]{0,63}$/;
+const JOURNAL_TEXT_LIMIT = 500;
+const JOURNAL_RETURNS_LIMIT = 20;
 const PR_STATES = ['OPEN', 'DRAFT', 'MERGED', 'CLOSED'];
 const CHECK_STATES = ['GREEN', 'PENDING', 'RED', 'UNKNOWN'];
 const UAT_STATES = ['NOT_REQUIRED', 'PENDING', 'PASSED', 'UAT_RETAINED', 'UAT_PARTIAL_REQUIRED', 'UAT_FULL_REQUIRED'];
@@ -47,8 +59,9 @@ const REVIEW_VERDICTS = ['PASSED', 'NOT_PASSED'];
 const EFFECT_KINDS = ['attach', 'reparent', 'reorder', 'replace_block'];
 const EFFECT_STATES = ['IN_FLIGHT', 'DONE', 'UNKNOWN'];
 // Fields that never count towards a document's content digest or revision: the revision itself,
-// observation timestamps, and pending effects (an intent write must not make the rendered state stale).
-const UNHASHED = ['revision', 'volatile', 'pending_effects'];
+// observation timestamps, pending effects (an intent write must not make the rendered state stale) and
+// the journal blobs the controller has read.
+const UNHASHED = ['revision', 'volatile', 'pending_effects', 'journals_seen'];
 // Child fields `update` may change. UAT, review and a terminal lifecycle (DONE, RETIRED) are
 // acceptance records: only the parent's holder (the controller) writes them.
 const PATCHABLE_CHILD_FIELDS = ['lifecycle', 'release', 'candidate', 'uat', 'review', 'blockers', 'next_action', 'private'];
@@ -85,25 +98,33 @@ function contentDigest(doc) {
   return sha256(JSON.stringify(canonical(copy)));
 }
 
-// The same state: equal content and equal pending effects. Volatile timestamps never matter.
+// The same state: equal content, equal pending effects and equal journals read. Volatile timestamps
+// never matter.
 function sameState(previous, next) {
   return contentDigest(previous) === contentDigest(next)
-    && JSON.stringify(canonical(previous.pending_effects || [])) === JSON.stringify(canonical(next.pending_effects || []));
+    && JSON.stringify(canonical(previous.pending_effects || [])) === JSON.stringify(canonical(next.pending_effects || []))
+    && JSON.stringify(canonical(previous.journals_seen || {})) === JSON.stringify(canonical(next.journals_seen || {}));
 }
 
 function check(errors, condition, message) { if (!condition) errors.push(message); }
 
 // Fields each object may and must hold, as the schemas' additionalProperties: false and required.
 const SHAPES = {
-  child: { all: ['schema', 'repository', 'issue', 'revision', 'fence', 'lifecycle', 'release', 'gate', 'candidate', 'pr', 'uat', 'review', 'blockers', 'next_action', 'pending_effects', 'private', 'volatile'], optional: ['volatile'] },
+  child: { all: ['schema', 'repository', 'issue', 'revision', 'fence', 'lifecycle', 'release', 'gate', 'candidate', 'pr', 'uat', 'review', 'blockers', 'next_action', 'pending_effects', 'journals_seen', 'private', 'volatile'], optional: ['volatile', 'journals_seen'] },
   parent: { all: ['schema', 'repository', 'parent_issue', 'revision', 'fence', 'release_plan', 'outcomes', 'pending_effects', 'private', 'volatile'], optional: ['volatile'] },
   fence: { all: ['epoch', 'holder_prefix', 'holder_session'] },
   effect: { all: ['intent_id', 'kind', 'target', 'state'] },
   outcome: { all: ['issue', 'label', 'class', 'parent', 'order', 'lane', 'owner_prefix'], optional: ['label', 'lane', 'owner_prefix'] },
   release_plan: { all: ['record', 'comment_id'], optional: ['record', 'comment_id'] },
-  gate: { all: ['role', 'state', 'session_id', 'route', 'returns'] },
+  gate: { all: ['role', 'state', 'session_id', 'assignment', 'route', 'returns'], optional: ['assignment'] },
+  assignment: { all: ['id', 'role'] },
   route: { all: ['model', 'effort', 'read_back'], optional: ['model', 'effort', 'read_back'] },
-  return: { all: ['return_id', 'verdict', 'consumed', 'epoch'] },
+  return: { all: ['return_id', 'verdict', 'consumed', 'epoch', 'assignment', 'at_head', 'mode'], optional: ['assignment', 'at_head', 'mode'] },
+  journal: { all: ['schema', 'repository', 'issue', 'assignment', 'session_hash', 'completion_mode', 'route', 'seq', 'checkpoint', 'returns', 'last_error', 'volatile'], optional: ['volatile'] },
+  journal_route: { all: ['model', 'effort', 'read_back'] },
+  checkpoint: { all: ['branch', 'head', 'tree', 'dirty', 'ahead', 'behind'] },
+  journal_return: { all: ['return_id', 'verdict_requested', 'at_head', 'next_action', 'blockers'] },
+  journal_error: { all: ['code', 'at'] },
   candidate: { all: ['branch', 'head', 'tree', 'base'] },
   pr: { all: ['number', 'state', 'head', 'checks'] },
   checks: { all: ['state', 'required_total', 'required_passed', 'at_head'] },
@@ -235,6 +256,10 @@ function validateChild(doc) {
       check(errors, optional(gate.role, value => GATE_ROLES.includes(value)), 'gate.role must be G0, G1, G2 or null');
       check(errors, optional(gate.state, value => GATE_STATES.includes(value)), `gate.state must be one of ${GATE_STATES.join(', ')} or null`);
       check(errors, optional(gate.session_id, isText), 'gate.session_id must be text or null');
+      check(errors, optional(gate.assignment, value => isObject(value) && ASSIGNMENT_ID.test(String(value.id)) && GATE_ROLES.includes(value.role)),
+        'gate.assignment must hold an assignment id and its role (G0, G1 or G2), or be null');
+      checkShape(errors, gate.assignment, 'assignment', 'gate.assignment');
+      check(errors, gate.state !== 'ASSIGNED' || isObject(gate.assignment), 'gate.state ASSIGNED needs gate.assignment');
       check(errors, optional(gate.route, value => isObject(value) && optional(value.model, isText) && optional(value.effort, isText)
         && optional(value.read_back, v => typeof v === 'boolean')), 'gate.route must hold model, effort and read_back');
       check(errors, Array.isArray(gate.returns), 'gate.returns must be a list');
@@ -244,9 +269,12 @@ function validateChild(doc) {
         checkShape(errors, entry, 'return', `gate.returns[${index}]`);
         check(errors, !ids.has(entry?.return_id), `gate.returns[${index}].return_id is repeated`);
         ids.add(entry?.return_id);
-        check(errors, optional(entry?.verdict, value => VERDICTS.includes(value)), `gate.returns[${index}].verdict must be ACCEPT, REOPEN or null`);
+        check(errors, optional(entry?.verdict, value => VERDICTS.includes(value)), `gate.returns[${index}].verdict must be ACCEPT, REOPEN, WAITING_OWNER or null`);
         check(errors, typeof entry?.consumed === 'boolean', `gate.returns[${index}].consumed must be true or false`);
         check(errors, isInt(entry?.epoch), `gate.returns[${index}].epoch must be a whole number`);
+        check(errors, entry?.assignment === undefined || ASSIGNMENT_ID.test(String(entry.assignment)), `gate.returns[${index}].assignment must be an assignment id`);
+        check(errors, entry?.at_head === undefined || optional(entry.at_head, isSha), `gate.returns[${index}].at_head must be a full 40-character SHA or null`);
+        check(errors, entry?.mode === undefined || RETURN_MODES.includes(entry.mode), `gate.returns[${index}].mode must be native or toolkit_assisted`);
       }
     }
     const candidate = doc.candidate;
@@ -285,12 +313,53 @@ function validateChild(doc) {
     }
     check(errors, Array.isArray(doc.blockers) && doc.blockers.every(isText), 'blockers must be a list of text');
     check(errors, isText(doc.next_action), 'next_action must be exactly one non-empty action');
+    check(errors, doc.journals_seen === undefined || (isObject(doc.journals_seen)
+      && Object.entries(doc.journals_seen).every(([name, blob]) => JOURNAL_FILE.test(name) && isSha(blob))), 'journals_seen must map journal file names to blob SHAs');
   }
   return errors;
 }
 
+const isOptionalText = (value, limit = JOURNAL_TEXT_LIMIT) => value === null || (isText(value) && value.length <= limit);
+
+function validateJournal(doc) {
+  const errors = [];
+  check(errors, isObject(doc), 'journal must be an object');
+  if (!isObject(doc)) return errors;
+  checkShape(errors, doc, 'journal', 'journal');
+  screenSecrets(errors, doc, 'journal');
+  check(errors, doc.schema === SCHEMA.journal, `schema must be ${SCHEMA.journal}`);
+  check(errors, REPO.test(String(doc.repository || '')), 'repository must be owner/name');
+  check(errors, isInt(doc.issue, 1), 'issue must be an issue number');
+  check(errors, ASSIGNMENT_ID.test(String(doc.assignment || '')), 'assignment must be an assignment id');
+  check(errors, SESSION_HASH.test(String(doc.session_hash || '')), 'session_hash must be 16 hex characters');
+  check(errors, doc.completion_mode === 'native', 'completion_mode must be native');
+  check(errors, optional(doc.route, value => isObject(value) && optional(value.model, isText) && optional(value.effort, isText) && typeof value.read_back === 'boolean'), 'route must hold model, effort and read_back, or be null');
+  checkShape(errors, doc.route, 'journal_route', 'route');
+  check(errors, isInt(doc.seq, 1), 'seq must be a whole number from 1');
+  const point = doc.checkpoint;
+  check(errors, optional(point, value => isObject(value) && optional(value.branch, isText) && optional(value.head, isSha) && optional(value.tree, isSha)
+    && optional(value.dirty, v => typeof v === 'boolean') && optional(value.ahead, v => isInt(v)) && optional(value.behind, v => isInt(v))), 'checkpoint must hold branch, head, tree, dirty, ahead and behind, or be null');
+  checkShape(errors, point, 'checkpoint', 'checkpoint');
+  check(errors, Array.isArray(doc.returns) && doc.returns.length <= JOURNAL_RETURNS_LIMIT, `returns must be a list of at most ${JOURNAL_RETURNS_LIMIT}`);
+  const ids = new Set();
+  for (const [index, entry] of (Array.isArray(doc.returns) ? doc.returns : []).entries()) {
+    checkShape(errors, entry, 'journal_return', `returns[${index}]`);
+    check(errors, isObject(entry) && RETURN_ID.test(String(entry.return_id)), `returns[${index}].return_id must be a return id`);
+    check(errors, !ids.has(entry?.return_id), `returns[${index}].return_id is repeated`);
+    ids.add(entry?.return_id);
+    check(errors, optional(entry?.verdict_requested, value => REQUESTED_VERDICTS.includes(value)), `returns[${index}].verdict_requested must be ACCEPT, WAITING_OWNER or null`);
+    check(errors, optional(entry?.at_head, isSha), `returns[${index}].at_head must be a full 40-character SHA or null`);
+    check(errors, isOptionalText(entry?.next_action), `returns[${index}].next_action must be text of at most ${JOURNAL_TEXT_LIMIT} characters or null`);
+    check(errors, Array.isArray(entry?.blockers) && entry.blockers.every(value => isText(value) && value.length <= JOURNAL_TEXT_LIMIT), `returns[${index}].blockers must be a list of text`);
+  }
+  check(errors, optional(doc.last_error, value => isObject(value) && ERROR_CODE.test(String(value.code)) && isText(value.at)), 'last_error must hold code and at, or be null');
+  checkShape(errors, doc.last_error, 'journal_error', 'last_error');
+  check(errors, optional(doc.volatile, isObject), 'volatile must be an object');
+  return errors;
+}
+
 function assertValid(kind, doc) {
-  const errors = kind === 'parent' ? validateParent(doc) : validateChild(doc);
+  const errors = kind === 'parent' ? validateParent(doc) : kind === 'journal' ? validateJournal(doc) : validateChild(doc);
   if (errors.length) throw new ProgrammeError('STATE_INVALID', `The ${kind} state document is invalid: ${errors[0]}`, { errors });
   return doc;
 }
@@ -305,7 +374,7 @@ function validateBinding(binding) {
     check(errors, PREFIX.test(String(binding.record_prefix || '')), 'record_prefix must be a record prefix');
     check(errors, PREFIX.test(String(binding.writer_prefix || '')), 'writer_prefix must be a record prefix');
     const store = binding.store;
-    check(errors, isObject(store) && Object.hasOwn(STORE_BACKENDS, store.kind), `store.kind ${JSON.stringify(store?.kind)} is not supported by this Toolkit version (supported: ${Object.keys(STORE_BACKENDS).join(', ')})`);
+    check(errors, isObject(store) && Object.hasOwn(STORE_BACKENDS, store.kind), `store.kind ${JSON.stringify(store?.kind)} is not supported (supported: ${Object.keys(STORE_BACKENDS).join(', ')})`);
     check(errors, isObject(store) && REPO.test(String(store.repository || '')), 'store.repository must be owner/name');
     check(errors, isObject(store) && isText(store.branch) && !/\s|\.\./.test(store.branch), 'store.branch must be a branch name');
     check(errors, isObject(store) && /^(?:[A-Za-z0-9_.-]+\/)+$/.test(String(store.path || '')) && !String(store.path).split('/').includes('..'), 'store.path must be a relative folder ending in /');
@@ -367,18 +436,17 @@ function newChild({ repository, outcome }) {
 // The fence orders cooperating Toolkit writers that act as the same GitHub account; it does not
 // authenticate anyone.
 function isHolder(doc, writer) {
-  return Boolean(doc?.fence?.holder_session) && doc.fence.holder_session === writer.session && doc.fence.holder_prefix === writer.prefix;
+  return Boolean(writer && doc?.fence?.holder_session) && doc.fence.holder_session === writer.session && doc.fence.holder_prefix === writer.prefix;
 }
 
 function holderDescription(doc, kind = doc?.schema === SCHEMA.parent ? 'parent' : 'child', parentDoc = null) {
   const prefix = doc?.fence?.holder_prefix || 'nobody';
   const epoch = doc?.fence?.epoch ?? 0;
   if (kind === 'parent') return `parent holder (${prefix}, epoch ${epoch})`;
-  const gate = doc?.gate?.role || 'unassigned';
   if (doc?.fence?.holder_session && isHolder(parentDoc, { session: doc.fence.holder_session, prefix })) {
-    return `parent holder (${prefix}, gate ${gate}, epoch ${epoch})`;
+    return `parent holder (${prefix}, epoch ${epoch})`;
   }
-  return `holder ${prefix} for gate ${gate} (epoch ${epoch})`;
+  return doc?.fence?.holder_session ? `lane controller ${prefix} (epoch ${epoch})` : `controller (epoch ${epoch})`;
 }
 
 function parentRefusal(doc) {
@@ -387,7 +455,7 @@ function parentRefusal(doc) {
 
 function authoriseWrite(kind, doc, parentDoc, writer) {
   if (!writer || !isText(writer.session) || !PREFIX.test(String(writer.prefix || ''))) {
-    throw new ProgrammeError('WRITER_UNKNOWN', 'Controller writes need --session <the controller session id> and a record prefix.');
+    throw new ProgrammeError('WRITER_UNKNOWN', 'This write needs --session <this session\'s own id> and a record prefix.');
   }
   if (kind === 'parent') {
     if (doc && !isHolder(doc, writer)) throw new ProgrammeError('STALE_WRITER', parentRefusal(doc));
@@ -395,33 +463,42 @@ function authoriseWrite(kind, doc, parentDoc, writer) {
   }
   if (doc && isHolder(doc, writer)) return;
   if (parentDoc && isHolder(parentDoc, writer)) return;
-  throw new ProgrammeError('STALE_WRITER', `Issue ${doc?.issue ?? ''} is held by the ${holderDescription(doc, 'child', parentDoc)}; the parent document is held by the ${holderDescription(parentDoc, 'parent')}. This session holds neither document; report to the controller.`);
+  throw new ProgrammeError('STALE_WRITER', `Issue ${doc?.issue ?? ''} is held by the ${holderDescription(doc, 'child', parentDoc)}, and the parent document by the ${holderDescription(parentDoc, 'parent')}. This session holds neither, so the write was refused. ${parentRefusal(parentDoc).split('. ').slice(1).join('. ')}`);
 }
 
-// Claim or take over a document: one compare-and-swap that increments the epoch and records the holder.
-function claimDocument(doc, writer, { takeover = false, role = null, route = null, parentDoc = null } = {}) {
+// Claim or take over a document's fence: one compare-and-swap that increments the epoch and records
+// the holder. Gates are not claimed; the controller assigns them (assignGate).
+function claimDocument(doc, writer, { takeover = false, parentDoc = null } = {}) {
   const next = clone(doc);
   const held = Boolean(next.fence.holder_session);
-  if (isHolder(next, writer) && !role) return null;
-  if (held && !isHolder(next, writer) && !takeover) {
+  if (isHolder(next, writer)) return null;
+  if (held && !takeover) {
     throw new ProgrammeError('CLAIM_HELD', next.schema === SCHEMA.parent
       ? parentRefusal(next)
-      : `Issue ${next.issue} is held by the ${holderDescription(next, 'child', parentDoc)}; take over with --takeover only if the controller assigned this gate to you, otherwise report to the controller.`);
+      : `Issue ${next.issue} is held by the ${holderDescription(next, 'child', parentDoc)}. ${parentRefusal(parentDoc).split('. ').slice(1).join('. ')}`);
   }
-  if (!isHolder(next, writer)) next.fence = { epoch: next.fence.epoch + 1, holder_prefix: writer.prefix, holder_session: writer.session };
-  if (next.schema === SCHEMA.child && role) {
-    if (!GATE_ROLES.includes(role)) throw new ProgrammeError('USAGE', '--role must be G0, G1 or G2');
-    const sameSession = next.gate.role === role && next.gate.session_id === writer.session;
-    next.gate.role = role;
-    // Claiming a gate again starts a new activation of an accepted (RETIRED) gate, which only removes
-    // that acceptance; an unfinished gate keeps its state.
-    next.gate.state = sameSession && next.gate.state && next.gate.state !== 'RETIRED' ? next.gate.state : 'ACTIVE';
-    next.gate.session_id = writer.session;
-    if (route) next.gate.route = route;
-    if (next.lifecycle === 'PLANNED') next.lifecycle = 'ACTIVE';
-    next.private = { ...next.private, host_session: writer.session };
-  }
+  next.fence = { epoch: next.fence.epoch + 1, holder_prefix: writer.prefix, holder_session: writer.session };
   return next;
+}
+
+// A lane controller takes the fence of a child the catalogue delegates to its record prefix.
+function claimLane(doc, writer, outcome, { takeover = false } = {}) {
+  if (!outcome?.owner_prefix || outcome.owner_prefix !== writer.prefix) {
+    throw new ProgrammeError('NOT_DELEGATED', `#${doc.issue} is not delegated to ${writer.prefix}; the catalogue names ${outcome?.owner_prefix || 'no lane'} for it. Report to the controller.`);
+  }
+  if (isHolder(doc, writer)) return null;
+  if (doc.fence.holder_session && doc.fence.holder_prefix === writer.prefix && !takeover) {
+    throw new ProgrammeError('CLAIM_HELD', `Issue ${doc.issue} is held by another ${writer.prefix} session (epoch ${doc.fence.epoch}). The lane controller that replaces it uses --takeover after that session stopped.`);
+  }
+  const next = clone(doc);
+  next.fence = { epoch: next.fence.epoch + 1, holder_prefix: writer.prefix, holder_session: writer.session };
+  return next;
+}
+
+// The holder of the parent may write any child; a lane controller only the child it holds, and only
+// when the catalogue delegates that child to its prefix.
+function isLaneHolder(child, writer, outcome) {
+  return Boolean(child && outcome?.owner_prefix && outcome.owner_prefix === writer?.prefix && isHolder(child, writer));
 }
 
 function currentGateAccepted(child) {
@@ -433,30 +510,138 @@ function completionAccepted(child) {
   return ['G1', 'G2'].includes(child.gate.role) && currentGateAccepted(child);
 }
 
-// LIFE-1 successor: returns are consumed by return ID, never by session. REOPEN keeps the session
-// active, a new submission gets a new return ID, so ACCEPT after REOPEN works in the same session.
-function submitReturn(doc, { returnId, writer, parentDoc = null }) {
-  if (!isText(returnId)) throw new ProgrammeError('USAGE', 'A return needs a return ID.');
+const GATE_HISTORY_LIMIT = 20;
+const needsReason = (reason, command) => {
+  if (!isText(String(reason ?? '').trim())) throw new ProgrammeError('USAGE', `${command} needs --reason <why>.`);
+  return String(reason).trim();
+};
+
+// How an assignment ended, kept in `private` (bounded) so the controller can see the handover trail.
+function endAssignment(next, ended, reason = null) {
+  const assignment = next.gate.assignment;
+  if (!assignment) return;
+  const history = Array.isArray(next.private.gate_history) ? next.private.gate_history : [];
+  next.private = { ...next.private, gate_history: [...history, { assignment: assignment.id, role: assignment.role, ended, ...(reason ? { reason } : {}) }].slice(-GATE_HISTORY_LIMIT) };
+}
+
+function assignmentUsed(doc, id) {
+  return doc.gate.returns.some(entry => entry.assignment === id)
+    || (Array.isArray(doc.private?.gate_history) && doc.private.gate_history.some(entry => entry?.assignment === id));
+}
+
+// The controller (or the lane holding this child) issues an assignment. Only the session bound to the
+// current assignment may journal; nothing else can make a gate live.
+function assignGate(doc, { assignment, role, supersede = false, reason = null }) {
+  if (!ASSIGNMENT_ID.test(String(assignment || ''))) throw new ProgrammeError('USAGE', 'assign needs --assignment <id> (letters, digits, dot, dash or underscore; up to 60).');
+  if (!GATE_ROLES.includes(role)) throw new ProgrammeError('USAGE', '--role must be G0, G1 or G2.');
   const next = clone(doc);
-  const existing = next.gate.returns.find(entry => entry.return_id === returnId);
+  const gate = next.gate;
+  if (gate.assignment?.id === assignment) {
+    if (gate.assignment.role === role && gate.state === 'ASSIGNED' && !supersede) return null;
+    throw new ProgrammeError('USAGE', `Assignment ${assignment} is already issued; every assignment needs a new id.`);
+  }
+  if (assignmentUsed(next, assignment)) throw new ProgrammeError('USAGE', `Assignment ${assignment} was used before; every assignment needs a new id.`);
+  if (next.lifecycle === 'RETIRED') throw new ProgrammeError('GATE_STATE', `#${next.issue} is retired. Controller: change its lifecycle before assigning a gate.`);
+  const live = LIVE_GATE_STATES.includes(gate.state);
+  if (supersede) {
+    if (!live) throw new ProgrammeError('GATE_STATE', `--supersede replaces a live assignment, and #${next.issue} has none (${gate.state || 'no gate'}).`);
+    endAssignment(next, 'SUPERSEDED', needsReason(reason, 'assign --supersede'));
+  } else if (live) {
+    throw new ProgrammeError('ASSIGNMENT_LIVE', `#${next.issue} has a live ${gate.role} assignment ${gate.assignment?.id || '(none recorded)'} (${gate.state}). Controller: interrupt it first, or assign with --supersede --reason.`);
+  } else if (gate.state === 'RETIRED' && gate.role === role) {
+    throw new ProgrammeError('GATE_STATE', `The ${role} gate of #${next.issue} was accepted. Controller: reopen it for a correction instead of assigning it again.`);
+  } else if (gate.state === 'RETIRED') {
+    endAssignment(next, 'ACCEPTED');
+  }
+  gate.assignment = { id: assignment, role };
+  gate.role = role;
+  gate.state = 'ASSIGNED';
+  gate.session_id = null;
+  gate.route = null;
+  if (['PLANNED', 'DONE'].includes(next.lifecycle)) next.lifecycle = 'ACTIVE';
+  next.next_action = `Executor: bind to assignment ${assignment} and start ${role}`;
+  return next;
+}
+
+// The controller reopens a gate. An accepted (RETIRED) gate gets a new assignment for its correction,
+// which removes the acceptance; a submitted return is sent back (REOPEN); a gate waiting on the owner
+// continues once the controller has recorded the answer.
+function reopenGate(doc, { reason, assignment = null }) {
+  const why = needsReason(reason, 'reopen');
+  const next = clone(doc);
+  const gate = next.gate;
+  if (gate.state === 'RETIRED') {
+    if (!ASSIGNMENT_ID.test(String(assignment || ''))) throw new ProgrammeError('USAGE', 'Reopening an accepted gate needs --assignment <new id> for the correction.');
+    if (gate.assignment?.id === assignment || assignmentUsed(next, assignment)) throw new ProgrammeError('USAGE', `Assignment ${assignment} was used before; every assignment needs a new id.`);
+    endAssignment(next, 'REOPENED', why);
+    gate.assignment = { id: assignment, role: gate.role };
+    gate.state = 'ASSIGNED';
+    gate.session_id = null;
+    gate.route = null;
+    if (['PLANNED', 'DONE'].includes(next.lifecycle)) next.lifecycle = 'ACTIVE';
+    next.next_action = `Executor: bind to assignment ${assignment} and correct ${gate.role}`;
+    return next;
+  }
+  if (assignment) throw new ProgrammeError('GATE_STATE', `--assignment is only for reopening an accepted gate; #${next.issue} is ${gate.state || 'not assigned'}.`);
+  if (gate.state === 'SUBMITTED') {
+    const pending = gate.returns.filter(entry => !entry.consumed).at(-1);
+    if (pending) { pending.consumed = true; pending.verdict = 'REOPEN'; }
+    gate.state = 'ACTIVE';
+    next.next_action = `Executor: continue ${gate.role}; the next return needs a new return ID`;
+    return next;
+  }
+  if (gate.state === 'WAITING_OWNER') {
+    gate.state = 'ACTIVE';
+    next.next_action = `Executor: continue ${gate.role} with the owner's answer`;
+    return next;
+  }
+  throw new ProgrammeError('GATE_STATE', `reopen works on an accepted, submitted or waiting gate; #${next.issue} is ${gate.state || 'not assigned'}.`);
+}
+
+// The controller (or the lane holding this child) stops a live assignment, for example after a lost
+// session. Journals for it are stale from then on.
+function interruptGate(doc, { reason }) {
+  const why = needsReason(reason, 'interrupt');
+  const next = clone(doc);
+  if (!LIVE_GATE_STATES.includes(next.gate.state)) {
+    throw new ProgrammeError('GATE_STATE', `interrupt stops a live assignment; #${next.issue} is ${next.gate.state || 'not assigned'}.`);
+  }
+  endAssignment(next, 'INTERRUPTED', why);
+  next.gate.state = 'INTERRUPTED';
+  next.next_action = `Controller: assign a successor for ${next.gate.role}, or reopen the outcome later`;
+  return next;
+}
+
+// The controller records an executor's return from its report, for a session without the turn-end
+// hook (cloud and Projects threads): completion mode toolkit_assisted. Returns are kept by return ID.
+function recordReturn(doc, { returnId, assignment, atHead = null, mode = 'toolkit_assisted' }) {
+  if (!RETURN_ID.test(String(returnId || ''))) throw new ProgrammeError('USAGE', 'return --record needs a return ID (letters, digits, dot, dash or underscore; up to 80).');
+  if (!ASSIGNMENT_ID.test(String(assignment || ''))) throw new ProgrammeError('USAGE', 'return --record needs --assignment <id>.');
+  if (!optional(atHead, isSha)) throw new ProgrammeError('USAGE', '--at-head must be a full 40-character SHA.');
+  const next = clone(doc);
+  const gate = next.gate;
+  if (gate.assignment?.id !== assignment || !LIVE_GATE_STATES.includes(gate.state)) {
+    throw new ProgrammeError('STALE_ASSIGNMENT', `Assignment ${assignment} is not the live assignment of #${next.issue} (current: ${gate.assignment?.id || 'none'}, ${gate.state || 'no gate'}); its return is not recorded.`);
+  }
+  const existing = gate.returns.find(entry => entry.return_id === returnId);
   if (existing) {
     if (existing.consumed) throw new ProgrammeError('RETURN_CONFLICT', `Return ${returnId} was already consumed as ${existing.verdict}; a new submission needs a new return ID.`);
     return null;
   }
-  if (!['ACTIVE', 'WAITING_OWNER', 'INTERRUPTED'].includes(next.gate.state)) {
-    throw new ProgrammeError('GATE_NOT_ACTIVE', `The gate is ${next.gate.state || 'not started'}; only an active gate can submit a return. Report to the controller.`);
+  if (!['ASSIGNED', 'ACTIVE'].includes(gate.state)) {
+    throw new ProgrammeError('GATE_STATE', `#${next.issue} is ${gate.state}; a new return is recorded only while the gate is assigned or active.`);
   }
-  if (next.gate.session_id && writer && next.gate.session_id !== writer.session && !isHolder(next, writer)) {
-    throw new ProgrammeError('STALE_WRITER', `Only the gate session or the ${holderDescription(next, 'child', parentDoc)} can submit its return.`);
-  }
-  next.gate.returns.push({ return_id: returnId, verdict: null, consumed: false, epoch: next.fence.epoch });
-  next.gate.state = 'SUBMITTED';
+  gate.returns.push({ return_id: returnId, verdict: null, consumed: false, epoch: next.fence.epoch, assignment, at_head: atHead, mode });
+  gate.state = 'SUBMITTED';
+  next.next_action = `Controller: consume return ${returnId}`;
   return next;
 }
 
-// Only the parent's holder (the controller) consumes a return; an executor cannot accept its own.
-function consumeReturn(doc, { returnId, verdict, writer = null, parentDoc = null }) {
-  if (!VERDICTS.includes(verdict)) throw new ProgrammeError('USAGE', '--verdict must be ACCEPT or REOPEN');
+// LIFE-1: returns are consumed by return ID, never by session. REOPEN keeps the assignment and its
+// session; the next submission needs a new return ID. Only the parent's holder consumes a return, and a
+// G1 acceptance needs a G2 review PASSED at the live PR head (`liveHead`, else the recorded PR head).
+function consumeReturn(doc, { returnId, verdict, writer = null, parentDoc = null, liveHead = undefined }) {
+  if (!VERDICTS.includes(verdict)) throw new ProgrammeError('USAGE', '--verdict must be ACCEPT, REOPEN or WAITING_OWNER.');
   if (!isHolder(parentDoc, writer)) throw new ProgrammeError('ROLE_REFUSED', 'Only the holder of the parent document (the controller) consumes a gate return.');
   const next = clone(doc);
   const entry = next.gate.returns.find(item => item.return_id === returnId);
@@ -466,12 +651,88 @@ function consumeReturn(doc, { returnId, verdict, writer = null, parentDoc = null
     throw new ProgrammeError('RETURN_CONFLICT', `Return ${returnId} was already consumed as ${entry.verdict}, not ${verdict}.`);
   }
   if (entry.epoch !== next.fence.epoch) throw new ProgrammeError('STALE_RETURN', `Return ${returnId} was submitted at epoch ${entry.epoch}; the document is at epoch ${next.fence.epoch}.`);
+  if (entry.assignment && entry.assignment !== next.gate.assignment?.id) {
+    throw new ProgrammeError('STALE_ASSIGNMENT', `Return ${returnId} belongs to assignment ${entry.assignment}; the current assignment is ${next.gate.assignment?.id || 'none'}.`);
+  }
   const latest = next.gate.returns.filter(item => !item.consumed).at(-1);
   if (latest.return_id !== returnId) throw new ProgrammeError('STALE_RETURN', `Return ${returnId} is not the latest submission (${latest.return_id}).`);
+  if (next.gate.state !== 'SUBMITTED') throw new ProgrammeError('GATE_STATE', `#${next.issue} is ${next.gate.state || 'not assigned'}; only a submitted return is consumed.`);
+  if (verdict === 'ACCEPT' && next.gate.role === 'G1') {
+    // The command line passes the live PR head; without it the last observed head is used.
+    const head = liveHead === undefined ? next.pr.head : liveHead;
+    const passed = isSha(head) && next.review.state === 'PASSED'
+      && next.review.verdicts.some(item => item.verdict === 'PASSED' && item.head === head);
+    if (!passed) {
+      throw new ProgrammeError('EVIDENCE_STALE', `G1 is accepted only after a G2 review PASSED at the live PR head (${isSha(head) ? shortSha(head) : 'no PR head found'}). Controller: record the G2 verdict at that head first, or consume this return as REOPEN.`);
+    }
+  }
   entry.consumed = true;
   entry.verdict = verdict;
-  next.gate.state = verdict === 'REOPEN' ? 'ACTIVE' : 'RETIRED';
+  next.gate.state = verdict === 'REOPEN' ? 'ACTIVE' : verdict === 'WAITING_OWNER' ? 'WAITING_OWNER' : 'RETIRED';
+  next.next_action = verdict === 'ACCEPT' ? `Controller: ${next.gate.role} accepted; assign the next gate or record completion`
+    : verdict === 'REOPEN' ? `Executor: continue ${next.gate.role}; the next return needs a new return ID`
+      : 'Owner: answer the question, then Controller: reopen the gate';
   return next;
+}
+
+// Reads checkpoint journals into a child document (pure). `observation.files` lists every journal
+// file for the issue ({ name, assignment, session_hash, sha, doc, error }). Only the one session
+// journaling the live assignment moves the gate: ASSIGNED becomes ACTIVE, and a new return in its
+// journal is captured (ACTIVE becomes SUBMITTED). A journal for any other assignment, or for an
+// interrupted, retired or unassigned gate, is reported once as STALE_ASSIGNMENT and never consumed.
+// Two sessions on one live assignment hold the gate (DUPLICATE_SESSION).
+function foldJournals(doc, observation) {
+  const next = clone(doc);
+  const findings = [];
+  const holds = [];
+  const gate = next.gate;
+  const issue = next.issue;
+  const files = observation?.files || [];
+  const seen = { ...(next.journals_seen || {}) };
+  const liveId = LIVE_GATE_STATES.includes(gate.state) ? gate.assignment?.id || null : null;
+  const fresh = file => seen[file.name] !== file.sha;
+  const current = files.filter(file => file.assignment === liveId);
+  for (const file of files.filter(entry => entry.assignment !== liveId)) {
+    if (fresh(file)) {
+      findings.push({ code: 'STALE_ASSIGNMENT', issue, detail: `a checkpoint from assignment ${file.assignment} (session ${file.session_hash.slice(0, 8)}) arrived after that assignment stopped being live; current: ${gate.assignment?.id || 'none'} ${gate.state || ''}`.trim() + '; not consumed' });
+    }
+    seen[file.name] = file.sha;
+  }
+  // The session the controller already saw on this assignment counts even when its journal is gone.
+  const sessions = new Set(current.map(file => file.session_hash));
+  if (current.length && SESSION_HASH.test(String(gate.session_id || ''))) sessions.add(gate.session_id);
+  if (sessions.size > 1) {
+    holds.push({ code: 'DUPLICATE_SESSION', target: `#${issue}`, scope: 'gate',
+      detail: `${sessions.size} sessions are working on assignment ${liveId}; interrupt it and assign one successor` });
+    for (const file of current) seen[file.name] = file.sha;
+  } else if (current.length === 1) {
+    const file = current[0];
+    const journal = file.doc;
+    if (!journal || journal.issue !== issue || journal.assignment !== liveId || journal.session_hash !== file.session_hash) {
+      if (fresh(file)) findings.push({ code: 'JOURNAL_INVALID', issue, detail: `the checkpoint journal for assignment ${liveId} could not be used (${file.error || 'it names another issue, assignment or session'})` });
+    } else {
+      if (journal.last_error && fresh(file)) findings.push({ code: 'JOURNAL_ERROR', issue, detail: `the executor's checkpoint hook reported ${journal.last_error.code} at ${journal.last_error.at}` });
+      if (gate.state === 'ASSIGNED') {
+        gate.state = 'ACTIVE';
+        gate.session_id = file.session_hash;
+        gate.route = journal.route ? clone(journal.route) : null;
+        next.next_action = `Executor: working on ${gate.role} (assignment ${liveId})`;
+        findings.push({ code: 'GATE_ACTIVE', issue, detail: `assignment ${liveId} is bound (session ${file.session_hash.slice(0, 8)})` });
+      }
+      const known = new Set(gate.returns.map(entry => entry.return_id));
+      const latest = journal.returns.at(-1);
+      if (gate.state === 'ACTIVE' && latest && !known.has(latest.return_id)) {
+        gate.returns.push({ return_id: latest.return_id, verdict: null, consumed: false, epoch: next.fence.epoch, assignment: liveId, at_head: latest.at_head, mode: 'native' });
+        gate.state = 'SUBMITTED';
+        next.next_action = `Controller: consume return ${latest.return_id}`;
+        findings.push({ code: 'RETURN_CAPTURED', issue, detail: `return ${latest.return_id} (requested ${latest.verdict_requested || 'no verdict'}${latest.at_head ? ` at ${shortSha(latest.at_head)}` : ''}) waits for the controller's verdict` });
+      }
+    }
+    seen[file.name] = file.sha;
+  }
+  for (const name of Object.keys(seen)) if (!files.some(file => file.name === name)) delete seen[name];
+  if (Object.keys(seen).length || next.journals_seen) next.journals_seen = seen;
+  return { doc: next, findings, holds };
 }
 
 // RFC 7386 merge patch, limited to the named top-level fields.
@@ -803,8 +1064,17 @@ class StateStore {
   }
 
   contentsPath(kind, number) {
-    return `repos/${this.store.repository}/contents/${this.docPath(kind, number).split('/').map(encodeURIComponent).join('/')}`;
+    return this.encodedContents(this.docPath(kind, number));
   }
+
+  encodedContents(docPath) {
+    return `repos/${this.store.repository}/contents/${docPath.split('/').map(encodeURIComponent).join('/')}`;
+  }
+
+  // Checkpoint journals: one file per executor session and assignment, written only by that session.
+  journalDir(issue) { return `${this.store.path}journal/issue-${issue}`; }
+
+  journalPath(issue, name) { return `${this.journalDir(issue)}/${name}`; }
 
   // The store must exist, be private and be writable, and the branch must exist. No fallback store.
   verify() {
@@ -819,14 +1089,68 @@ class StateStore {
   }
 
   read(kind, number) {
-    const response = this.transport.request('GET', `${this.contentsPath(kind, number)}?ref=${encodeURIComponent(this.store.branch)}`);
+    return this.readPath(this.docPath(kind, number), kind);
+  }
+
+  readPath(docPath, kind) {
+    const response = this.transport.request('GET', `${this.encodedContents(docPath)}?ref=${encodeURIComponent(this.store.branch)}`);
     if (response.status === 404) return { doc: null, sha: null };
-    if (response.status !== 200) throw ghFailure(response, `Reading ${this.docPath(kind, number)}`);
-    if (response.json.encoding !== 'base64') throw new ProgrammeError('STATE_INVALID', `${this.docPath(kind, number)} is too large to read through the Contents API.`);
+    if (response.status !== 200) throw ghFailure(response, `Reading ${docPath}`);
+    if (response.json.encoding !== 'base64') throw new ProgrammeError('STATE_INVALID', `${docPath} is too large to read through the Contents API.`);
     let doc;
     try { doc = JSON.parse(Buffer.from(response.json.content, 'base64').toString('utf8')); }
-    catch { throw new ProgrammeError('STATE_INVALID', `${this.docPath(kind, number)} is not valid JSON.`); }
+    catch { throw new ProgrammeError('STATE_INVALID', `${docPath} is not valid JSON.`); }
     return { doc: assertValid(kind, doc), sha: response.json.sha };
+  }
+
+  // PUT with compare-and-swap, then read back. A stale sha (409) or a create over an existing file
+  // (422) is STATE_CONFLICT.
+  putVerified(docPath, kind, text, sha, message) {
+    const response = this.transport.request('PUT', this.encodedContents(docPath), {
+      message, content: Buffer.from(text, 'utf8').toString('base64'), branch: this.store.branch, ...(sha ? { sha } : {}),
+    });
+    if (response.status === 409 || (response.status === 422 && !sha)) {
+      throw new ProgrammeError('STATE_CONFLICT', `${docPath} moved since it was read.`, { status: response.status });
+    }
+    if (!okStatus(response.status)) throw ghFailure(response, `Writing ${docPath}`);
+    this.writes += 1;
+    const readback = this.readPath(docPath, kind);
+    if (!readback.doc || canonicalText(readback.doc) !== text) {
+      throw new ProgrammeError('STATE_READBACK_MISMATCH', `${docPath} did not read back as written.`);
+    }
+    return { outcome: 'WRITTEN', doc: readback.doc, sha: readback.sha };
+  }
+
+  listJournals(issue) {
+    const dir = this.journalDir(issue);
+    const response = this.transport.request('GET', `${this.encodedContents(dir)}?ref=${encodeURIComponent(this.store.branch)}`);
+    if (response.status === 404) return [];
+    if (response.status !== 200 || !Array.isArray(response.json)) throw ghFailure(response, `Listing ${dir}`);
+    return response.json.filter(entry => entry?.type === 'file').map(entry => {
+      const match = JOURNAL_FILE.exec(String(entry.name));
+      return match ? { name: entry.name, assignment: match[1], session_hash: match[2], sha: entry.sha } : null;
+    }).filter(Boolean).sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  readJournal(issue, name) {
+    return this.readPath(this.journalPath(issue, name), 'journal');
+  }
+
+  // Writes a journal only when something besides its timestamp changed.
+  writeJournal(issue, name, next, { sha, previous }) {
+    const strip = doc => { const copy = clone(doc); delete copy.volatile; return JSON.stringify(canonical(copy)); };
+    if (previous && strip(previous) === strip(next)) return { outcome: 'NOOP', doc: previous, sha };
+    const doc = { ...clone(next), volatile: { written_at: this.now() } };
+    assertValid('journal', doc);
+    return this.putVerified(this.journalPath(issue, name), 'journal', canonicalText(doc), sha, `programme journal: issue-${issue} ${name} seq ${doc.seq}`);
+  }
+
+  // When the store last committed a document, by GitHub's clock.
+  lastCommitDate(kind, number) {
+    const docPath = this.docPath(kind, number);
+    const response = this.transport.request('GET', `repos/${this.store.repository}/commits?path=${encodeURIComponent(docPath)}&sha=${encodeURIComponent(this.store.branch)}&per_page=1`);
+    if (response.status !== 200 || !Array.isArray(response.json)) throw ghFailure(response, `Reading the history of ${docPath}`);
+    return response.json[0]?.commit?.committer?.date || null;
   }
 
   // Writes `next` only when its state differs from `previous`. Bumps the revision only when the
@@ -837,23 +1161,8 @@ class StateStore {
     doc.revision = previous ? previous.revision + (contentDigest(previous) === contentDigest(doc) ? 0 : 1) : Math.max(1, doc.revision || 0);
     doc.volatile = { written_at: this.now(), ...(this.toolkitVersion ? { toolkit: this.toolkitVersion } : {}) };
     assertValid(kind, doc);
-    const text = canonicalText(doc);
-    const response = this.transport.request('PUT', this.contentsPath(kind, number), {
-      message: `programme state: ${kind === 'parent' ? 'parent' : 'issue'}-${number} revision ${doc.revision}`,
-      content: Buffer.from(text, 'utf8').toString('base64'),
-      branch: this.store.branch,
-      ...(sha ? { sha } : {}),
-    });
-    if (response.status === 409 || (response.status === 422 && !sha)) {
-      throw new ProgrammeError('STATE_CONFLICT', `${this.docPath(kind, number)} moved since it was read.`, { status: response.status });
-    }
-    if (!okStatus(response.status)) throw ghFailure(response, `Writing ${this.docPath(kind, number)}`);
-    this.writes += 1;
-    const readback = this.read(kind, number);
-    if (!readback.doc || canonicalText(readback.doc) !== text) {
-      throw new ProgrammeError('STATE_READBACK_MISMATCH', `${this.docPath(kind, number)} did not read back as written.`);
-    }
-    return { outcome: 'WRITTEN', doc: readback.doc, sha: readback.sha };
+    return this.putVerified(this.docPath(kind, number), kind, canonicalText(doc), sha,
+      `programme state: ${kind === 'parent' ? 'parent' : 'issue'}-${number} revision ${doc.revision}`);
   }
 
   // Read, authorise, change and write with compare-and-swap. On a conflict the change is re-applied
@@ -1057,7 +1366,10 @@ function intentId(kind, target) {
 
 // Findings the reconciler reports but never fixes itself; each needs a controller decision.
 const ATTENTION = new Set(['ISSUE_MISSING', 'NATIVE_PARENT_UNEXPECTED', 'NATIVE_CHILD_UNKNOWN', 'DEPENDENCY_IMPLIES_PARENT',
-  'PR_HEAD_MOVED', 'CHECKS_RED', 'READY_TO_CLOSE', 'CHILD_STATE_CONFLICT', 'MANAGED_BLOCK_BROKEN']);
+  'PR_HEAD_MOVED', 'CHECKS_RED', 'READY_TO_CLOSE', 'CHILD_STATE_CONFLICT', 'MANAGED_BLOCK_BROKEN',
+  'RETURN_CAPTURED', 'STALE_ASSIGNMENT', 'JOURNAL_ERROR', 'JOURNAL_INVALID']);
+// Child fields the journal fold owns; apply re-folds them on the document it reads, never copies them.
+const FOLD_FIELDS = ['gate', 'journals_seen', 'next_action'];
 
 const EFFECT_TEXT = {
   create_state: effect => `Create the state document for #${effect.target.issue}`,
@@ -1112,23 +1424,43 @@ class Reconciler {
       const number = doc?.pr?.number || (doc?.candidate?.branch ? this.reader.pullRequestForBranch(doc.candidate.branch) : null);
       if (number) prs.set(outcome.issue, this.reader.pullRequest(number));
     }
-    return { issues, subIssues, blockedBy, prs, outcomes };
+    const journals = new Map();
+    for (const outcome of outcomes) {
+      const doc = children.get(outcome.issue)?.doc;
+      if (doc && (doc.gate.assignment || Object.keys(doc.journals_seen || {}).length)) journals.set(outcome.issue, this.readJournals(doc));
+    }
+    return { issues, subIssues, blockedBy, prs, outcomes, journals };
   }
 
-  // The child document with observed PR facts applied (pure apart from reading `observed`).
+  // Every journal file for a child; only the live assignment's journals are read in full.
+  readJournals(doc) {
+    const live = LIVE_GATE_STATES.includes(doc.gate.state) ? doc.gate.assignment?.id : null;
+    const files = this.store.listJournals(doc.issue).map(file => {
+      if (file.assignment !== live) return { ...file, doc: null };
+      try { return { ...file, doc: this.store.readJournal(doc.issue, file.name).doc }; }
+      catch (error) { return { ...file, doc: null, error: error.code || 'UNREADABLE' }; }
+    });
+    return { files };
+  }
+
+  // The child document with observed PR facts and checkpoint journals applied (pure apart from
+  // reading `observed`).
   desiredChild(outcome, existing, observed) {
-    const child = existing ? clone(existing) : newChild({ repository: this.binding.repository, outcome });
+    let child = existing ? clone(existing) : newChild({ repository: this.binding.repository, outcome });
+    let checks = null;
     const pr = observed.prs.get(outcome.issue);
     if (pr) {
-      const checks = evaluateChecks({ head: pr.head, rollupOid: pr.rollupOid, contexts: pr.contexts, complete: pr.complete, configured: this.binding.required_checks });
+      checks = evaluateChecks({ head: pr.head, rollupOid: pr.rollupOid, contexts: pr.contexts, complete: pr.complete, configured: this.binding.required_checks });
       child.pr = { number: pr.number, state: pr.state, head: pr.head,
         checks: { state: checks.state, required_total: checks.required_total, required_passed: checks.required_passed, at_head: checks.at_head } };
-      return { doc: child, checks };
     }
-    return { doc: child, checks: null };
+    const journals = observed.journals?.get(outcome.issue) || null;
+    if (!journals) return { doc: child, checks, journals, findings: [], holds: [] };
+    const folded = foldJournals(child, journals);
+    return { doc: folded.doc, checks, journals, findings: folded.findings, holds: folded.holds };
   }
 
-  diffChild(outcome, existing, desired, checks, observed, findings, effects) {
+  diffChild(outcome, existing, desired, checks, observed, findings, effects, journals = null) {
     const issueNumber = outcome.issue;
     const issue = observed.issues.get(issueNumber);
     if (!issue || issue.is_pull_request) {
@@ -1137,8 +1469,9 @@ class Reconciler {
     }
     if (!existing) effects.push({ kind: 'create_state', target: { issue: issueNumber }, doc: desired });
     else {
-      const fields = Object.keys(desired).filter(key => !UNHASHED.includes(key) && JSON.stringify(canonical(existing[key])) !== JSON.stringify(canonical(desired[key])));
-      if (fields.length) effects.push({ kind: 'update_state', target: { issue: issueNumber }, fields, doc: desired });
+      const fields = Object.keys({ ...existing, ...desired }).filter(key => !['revision', 'volatile', 'pending_effects'].includes(key)
+        && JSON.stringify(canonical(existing[key])) !== JSON.stringify(canonical(desired[key])));
+      if (fields.length) effects.push({ kind: 'update_state', target: { issue: issueNumber }, fields, doc: desired, ...(journals ? { journals } : {}) });
     }
     // Native parent.
     if (outcome.parent) {
@@ -1260,7 +1593,7 @@ class Reconciler {
     const holds = [];
     const parentRead = this.loadParent(parentOverride);
     if (!parentRead.doc) {
-      return { parent: null, findings: [], effects: [], holds: [{ code: 'PARENT_STATE_MISSING', target: `#${this.binding.parent_issue}`, detail: `No parent state document for #${this.binding.parent_issue} yet. The appointed controller creates and holds it with init-parent --apply; other sessions report this to the controller.` }], resolutions: [] };
+      return { parent: null, findings: [], effects: [], holds: [{ code: 'PARENT_STATE_MISSING', target: `#${this.binding.parent_issue}`, detail: `No parent state document for #${this.binding.parent_issue} yet. The appointed controller creates and holds it with init-parent --apply --controller; other sessions report this to the controller.` }], resolutions: [] };
     }
     const parent = parentRead.doc;
     if (parent.repository.toLowerCase() !== this.binding.repository.toLowerCase() || parent.parent_issue !== this.binding.parent_issue) {
@@ -1279,8 +1612,10 @@ class Reconciler {
     for (const outcome of parent.outcomes) {
       const existing = children.get(outcome.issue)?.doc || null;
       if (only && outcome.issue !== only) { if (existing) desiredDocs.set(outcome.issue, existing); continue; }
-      const { doc: desired, checks } = this.desiredChild(outcome, existing, observed);
-      this.diffChild(outcome, existing, desired, checks, observed, findings, effects);
+      const { doc: desired, checks, journals, findings: journalFindings, holds: journalHolds } = this.desiredChild(outcome, existing, observed);
+      findings.push(...journalFindings);
+      holds.push(...journalHolds);
+      this.diffChild(outcome, existing, desired, checks, observed, findings, effects, journals);
       desiredDocs.set(outcome.issue, desired);
     }
     const plannedParents = new Map(effects.filter(effect => effect.kind === 'attach' || effect.kind === 'reparent').map(effect => [effect.target.issue, effect.target.parent]));
@@ -1384,14 +1719,18 @@ class Reconciler {
     for (const effect of plan.effects.filter(entry => entry.kind === 'create_state' || entry.kind === 'update_state')) {
       try {
         const desired = effect.doc;
-        // A first claim may have created the child after planning. Only PR observations belong
-        // to this pass; keep the gate, lifecycle and fence from the document read at apply time.
-        const fields = effect.kind === 'create_state' ? ['pr'] : effect.fields;
+        // The controller may have written the child after planning. Only PR observations and the
+        // journals read in this pass belong to it: the gate is re-folded from those journals on the
+        // document read at apply time, so an assignment issued since planning is never overwritten.
+        const fields = effect.kind === 'create_state' ? ['pr'] : effect.fields.filter(key => !effect.journals || !FOLD_FIELDS.includes(key));
         const result = mutateDoc('child', effect.target.issue, {
           create: () => newChild({ repository: this.binding.repository, outcome: outcomes.get(effect.target.issue) }),
           change: doc => {
-            for (const key of fields) doc[key] = clone(desired[key]);
-            return doc;
+            for (const key of fields) {
+              if (desired[key] === undefined) delete doc[key];
+              else doc[key] = clone(desired[key]);
+            }
+            return effect.journals ? foldJournals(doc, effect.journals).doc : doc;
           },
         });
         record(effect, result.outcome === 'NOOP' ? 'NOOP' : 'DONE');
@@ -1516,8 +1855,8 @@ class Reconciler {
           : `${report.effects.length} planned effect(s), ${report.holds.length} hold(s)`;
     const attention = report.findings.filter(finding => ATTENTION.has(finding.code));
     report.next_action = report.holds.length ? `Controller: resolve ${report.holds[0].code} on ${report.holds[0].target}: ${report.holds[0].detail}`
-      : !apply && report.effects.length ? 'Controller: run reconcile --apply for this plan; other sessions report it'
-        : !apply && plan.resolutions.some(entry => entry.outcome !== 'UNKNOWN') ? `Controller: run reconcile --apply to clear ${plan.resolutions.filter(entry => entry.outcome !== 'UNKNOWN').length} settled intent(s)`
+      : !apply && report.effects.length ? 'Controller: run reconcile --apply --controller for this plan; other sessions report it'
+        : !apply && plan.resolutions.some(entry => entry.outcome !== 'UNKNOWN') ? `Controller: run reconcile --apply --controller to clear ${plan.resolutions.filter(entry => entry.outcome !== 'UNKNOWN').length} settled intent(s)`
         : attention.length ? `Controller: decide on ${attention.length} finding(s) the reconciler does not change, starting with ${attention[0].code} on #${attention[0].issue}`
           : 'None: the state documents and GitHub agree';
     return report;
@@ -1550,7 +1889,8 @@ module.exports = Object.freeze({
   SCHEMA, BINDING_FILE, CLASSES, LIFECYCLES, PATCHABLE_CHILD_FIELDS, PATCHABLE_PARENT_FIELDS, BLOCK_SOURCE, BLOCK_NAME,
   ProgrammeError, GitHubTransport, StateStore, STORE_BACKENDS, ProgrammeGraphReader, GitHubMutator, Reconciler,
   canonical, canonicalText, contentDigest, sameState, validateParent, validateChild, validateBinding, assertValid, loadBinding,
-  newParent, newChild, isHolder, parentRefusal, authoriseWrite, claimDocument, submitReturn, consumeReturn, applyPatch,
+  newParent, newChild, isHolder, isLaneHolder, parentRefusal, authoriseWrite, claimDocument, claimLane, assignGate, reopenGate, interruptGate,
+  recordReturn, consumeReturn, foldJournals, validateJournal, currentGateAccepted, completionAccepted, applyPatch,
   evaluateChecks, renderParentBlockBody, renderChildBlockBody, renderBlock, blockDigest, findStateBlock, upsertStateBlock,
   orderMoves, intentId, describeEffect, resolveExecutable, originSlug, bindRepository,
 });

@@ -33,6 +33,7 @@
       "repo/scripts/codex-delegation-layout.cjs",
       "repo/scripts/codex-delegation-state.cjs",
       "repo/scripts/setup-codex-toolkit-plugin.cjs",
+      "repo/scripts/toolkit-codex-helper-agents.cjs",
       "repo/scripts/toolkit-codex-helper-hook.cjs",
       "repo/scripts/toolkit-codex-helper-hook.ps1",
       "repo/scripts/toolkit-codex-session-start.cjs",
@@ -45,6 +46,7 @@
       "repo/tests/codex-session-start-launcher.test.cjs",
       "repo/tests/codex-toolkit-plugin-setup.test.cjs",
       "repo/tests/codex-toolkit-windows-alias-route.test.cjs",
+      "repo/tests/toolkit-codex-helper-agents.test.cjs",
       "repo/tests/toolkit-codex-helper-hook.test.cjs",
       "repo/tests/toolkit-local-bridge-codex.test.cjs"
     ]
