@@ -17,7 +17,7 @@ const { disableUserPlugin } = require('./setup-claude-toolkit-plugin.cjs');
 const { AntigravityGlobalSkills, globalCopySummary } = require('./toolkit-antigravity-project-skills.cjs');
 const { ClaudeHelperDefinitions } = require('./toolkit-claude-helper-agents.cjs');
 const { CodexHelperDefinitions, describeSetupResult: describeCodexHelpers } = require('./toolkit-codex-helper-agents.cjs');
-const { ToolkitInstallHealthCheck, STATUS: INSTALL_CHECK_STATUS } = require('./toolkit-install-health.cjs');
+const { ToolkitInstallHealthCheck, STATUS: INSTALL_CHECK_STATUS, claudeAccountPluginFolders } = require('./toolkit-install-health.cjs');
 const { ToolkitEnv } = require('./toolkit-env.cjs');
 const { GlobalRules, describeResult: describeGlobalRules } = require('./toolkit-global-rules.cjs');
 
@@ -3899,6 +3899,7 @@ function runClaudeInstallCheck(args, nativeCache, delegation) {
     depthSetting: new ClaudeSubagentDepthSetting(),
     envHealth: ToolkitEnv.forUser(),
     syncedSkillsDir: path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'skills', 'synced'),
+    accountPluginFolders: claudeAccountPluginFolders(),
   });
   const installed = ['already fresh', 'installed this run'].includes(nativeCache.status);
   return check.run({
