@@ -10,6 +10,7 @@ const sourceLockAudit = require('./audit-project-source-locks.cjs');
 const sourceWatchReviewState = require('./source-watch-review-state.cjs');
 const surfaceAudit = require('./audit-published-surfaces.cjs');
 const skillPortabilityAudit = require('./audit-skill-portability.cjs');
+const plainReferences = require('./check-plain-references.cjs');
 
 function workspaceRootFromArgs(args = process.argv.slice(2)) {
   for (let index = 0; index < args.length; index += 1) {
@@ -630,7 +631,7 @@ function validateSkillPackagingTable(errors, matrixPath, section) {
 
 function validateReadmeSkillTable(errors) {
   const readme = readText('README.md');
-  // Windows is the only supported computer OS (#532); the README says so right after its title and one-paragraph intro.
+  // Windows is the only supported computer OS; the README says so right after its title and one-paragraph intro.
   if (!/^# AI Agent Toolkit\n\n[^#*\n][^\n]*\n\n\*\*Supported OS:\*\* Windows\b/.test(readme)) fail(errors, 'README must open with its title, a one-paragraph intro, then the "**Supported OS:** Windows" line');
   const section = markdownSection(readme, 'Skills');
   const rows = [...section.matchAll(/^\|\s*\[([^\]]+)\]\(skills\/([^/)]+)\/\)\s*\|/gm)].map((match) => match[2]).sort();
@@ -784,6 +785,13 @@ function validateTrackedLocalRuntimeFiles(errors) {
 }
 
 
+// User-facing docs, skills and instructions say what a reference means instead of linking GitHub issues or pull requests.
+function validatePlainReferences(errors) {
+  try {
+    for (const finding of plainReferences.check(root).failures) fail(errors, plainReferences.describeFailure(finding));
+  } catch (error) { fail(errors, `Plain-references check could not run: ${error.message}`); }
+}
+
 function validateContinuousCoreSources(errors) {
   try {
     const compiler=require('./toolkit-gate-contract-compiler.cjs');
@@ -815,6 +823,7 @@ function validate() {
   validateContracts(errors);
   validateContinuousCoreSources(errors);
   validateLegacyReferences(errors);
+  validatePlainReferences(errors);
   validateExecutables(errors);
   validateNoSecrets(errors);
   validateTrackedLocalRuntimeFiles(errors);

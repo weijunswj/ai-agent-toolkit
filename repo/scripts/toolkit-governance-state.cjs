@@ -2,7 +2,7 @@
 
 // The one answer to "which Toolkit governance state applies in this working directory?".
 // Every hook, setup step, conformance check and catalogue call asks this module, and nothing else
-// reads the three inputs it combines (#542):
+// reads the three inputs it combines:
 //
 //   identity   the origin-remote repository identity (toolkit.repository-identity.v1), read
 //              from the repository's own git config file, never from the path;

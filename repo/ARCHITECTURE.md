@@ -40,6 +40,7 @@ Last reviewed against `main` `9b7ffff3c30078c2290c809d20bc7c49e3f96e8d`.
 | Version bump | `repo/scripts/bump-version.cjs` |
 | Instruction sync | `repo/scripts/sync-agent-instruction-shims.cjs`, `repo/scripts/sync-repo-doc-contract.cjs` |
 | Full validation list | `repo/scripts/run-validation-gate.cjs` |
+| Plain-references check | `repo/scripts/check-plain-references.cjs` (run by `validate-toolkit.cjs`), baseline `repo/contracts/plain-references/baseline.json` |
 | Promise check | `repo/scripts/toolkit-promise-check.cjs` ([how to use it](docs/TOOLKIT-PROMISE-CHECK.md)) |
 | Projects instructions block | `repo/scripts/toolkit-projects-instructions.cjs`, source `repo/contracts/claude-projects/web-controller-projects/project-instructions.md` |
 | Shared executable resolution | `skills/github-program-reconciler/scripts/resolve-executable.cjs` |

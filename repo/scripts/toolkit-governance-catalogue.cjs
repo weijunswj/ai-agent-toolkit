@@ -1,6 +1,6 @@
 'use strict';
 
-// The skill catalogue per governance state (#542). It is computed, never stored: the tier of each
+// The skill catalogue per governance state. It is computed, never stored: the tier of each
 // skill comes from repo/contracts/agent-rules/governance-skill-tiers.json, the skill set from the
 // skills/ folders, and the routed set from repo/contracts/agent-rules/toolkit-skill-routing.md.
 // `catalogueProblems` is the drift check: a skill without a tier, a tier for a missing skill, or a

@@ -1,6 +1,6 @@
 'use strict';
 
-// GovernanceState (#542): the rule table, the git-free identity reader against the registry's own
+// GovernanceState: the rule table, the git-free identity reader against the registry's own
 // git-based identity, materials, the user's decision, fail-closed reads and the no-subprocess,
 // no-write guarantees. Closure rows S-01 to S-10 and the unit parts of H-09, H-15 and H-16.
 

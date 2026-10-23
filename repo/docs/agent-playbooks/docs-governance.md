@@ -10,6 +10,16 @@ Use this for docs maps, repo maps, documentation indexes, changelogs, decision l
 - Put detailed examples and checklists in routed docs, not always-loaded instructions.
 - Preserve provenance, source-of-truth links, validation commands, unresolved risks, and maintenance-critical context when compressing old docs.
 
+## Plain References
+
+User-facing docs, skills and AI-facing instructions say what a reference means in plain English, for example "the governance states work" or "the old helper-quantity migration".
+
+- No GitHub issue, pull request, discussion, commit or compare links, no hash-number references and no "PR" or "issue" number labels.
+- Links to repository files are fine, and so are plain links to a project's GitHub page.
+- Write Codex modes as V1 (`multi_agent`) and V2 (`multi_agent_v2`).
+- The changelog, frozen audits, vendored third-party copies, provenance and tests keep references where they are needed.
+- `repo/scripts/check-plain-references.cjs` enforces this in the required `validate` check. Older references sit in `repo/contracts/plain-references/baseline.json`; that list only shrinks: rewrite one, then run the check with `--prune-baseline`.
+
 ## Recommended Structure
 
 For downstream repos that do not already have a better convention, prefer:
