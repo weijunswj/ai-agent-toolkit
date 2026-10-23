@@ -74,8 +74,11 @@ test('(a) no Toolkit-shipped root entrypoint installs a root model or effort loc
     for (const entry of hooks.SessionStart) for (const hook of entry.hooks) {
       assert.doesNotMatch(hook.command, /--model|--effort|gate-session-launcher|EFFORT_LEVEL/, `${rel}: SessionStart ${hook.command}`);
     }
-    assert.deepEqual(Object.keys(hooks).sort(), ['PreToolUse', 'SessionStart', 'UserPromptSubmit'], `${rel}: only the reviewed hook events`);
+    for (const entry of hooks.Stop) for (const hook of entry.hooks) {
+      assert.doesNotMatch(hook.command, /--model|--effort|gate-session-launcher|EFFORT_LEVEL/, `${rel}: Stop ${hook.command}`);
+    }
     for (const entry of hooks.UserPromptSubmit) for (const hook of entry.hooks) assert.doesNotMatch(hook.command, /--model|--effort|gate-session-launcher|EFFORT_LEVEL/, `${rel}: UserPromptSubmit`);
+    assert.deepEqual(Object.keys(hooks).sort(), ['PreToolUse', 'SessionStart', 'Stop', 'UserPromptSubmit'], `${rel}: only the reviewed hook events`);
   }
   for (const rel of ['.claude-plugin/plugin.json', '.codex-plugin/plugin.json']) {
     const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, rel), 'utf8'));

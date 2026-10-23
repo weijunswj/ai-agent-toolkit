@@ -121,8 +121,11 @@ test('broader native behaviour lifts the normal-folder refusal; a missing or unr
     assert.deepEqual(nested(cwd), {}, cwd);
     assert.deepEqual(f.decide({ cwd, tool_name: 'Task', agent_id: 'a2', tool_input: {} }), {}, `${cwd} Task`);
   }
-  // Governed work under broader native still refuses a subagent caller (native adapter path, unchanged).
-  assert.ok(denied(await f.decide({ agent_id: 'a1', agent_type: 'Explore', tool_input: { subagent_type: 'toolkit-g0-helper' } })));
+  // Governed work under broader native without a launcher binding gets the named-helper policy:
+  // a subagent caller is refused, the lead may launch a current Toolkit helper, and nothing else.
+  assert.match(reason(await f.decide({ agent_id: 'a1', agent_type: 'Explore', tool_input: { subagent_type: 'toolkit-g0-helper' } })), /a helper cannot launch another agent/);
+  assert.deepEqual(await f.decide({ tool_input: { subagent_type: 'toolkit-g0-helper', prompt: 'y' } }), {});
+  assert.match(reason(await f.decide({ tool_input: { subagent_type: 'general-purpose' } })), /allows only the toolkit-g0-helper and toolkit-g1-helper agents/);
 });
 
 test('in governed work a main session started with --agent is the lead; only an agent_id caller is a helper', t => {

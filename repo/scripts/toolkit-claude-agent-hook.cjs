@@ -65,15 +65,20 @@ function decision(input, options = {}) {
     if (!input.agent_id) return {};
     return readProfile('claude-code', options).topology === TOPOLOGIES.BROADER_NATIVE ? {} : ONE_LAYER_DENIAL;
   }
+  // The pinned binding path applies only when a launcher bound this session to a helper route
+  // (it sets TOOLKIT_NATIVE_HELPER_BINDING). Setup writes no binding, so without one a broader-native
+  // profile gets the same named-helper policy as every other profile, instead of refusing even the
+  // Toolkit's own helpers for a missing binding.
   const profile = readProfile('claude-code', options);
-  if (profile.topology === TOPOLOGIES.BROADER_NATIVE) return nativeAdapter().commandDecision(input, 'claude-code', {
-    binding_path: process.env.TOOLKIT_NATIVE_HELPER_BINDING,
-    binding_sha256: process.env.TOOLKIT_NATIVE_HELPER_BINDING_SHA256,
-    helper_identity: process.env.TOOLKIT_NATIVE_HELPER_IDENTITY,
+  const bindingPath = options.native_guard?.binding_path ?? environment.TOOLKIT_NATIVE_HELPER_BINDING;
+  if (profile.topology === TOPOLOGIES.BROADER_NATIVE && bindingPath) return nativeAdapter().commandDecision(input, 'claude-code', {
+    binding_path: bindingPath,
+    binding_sha256: environment.TOOLKIT_NATIVE_HELPER_BINDING_SHA256,
+    helper_identity: environment.TOOLKIT_NATIVE_HELPER_IDENTITY,
     ...options.native_guard
   });
-  // Root-only, named-helpers and unconfigured profiles all admit only the Toolkit's own
-  // leaf helpers in governed work.
+  // Root-only, named-helpers, unconfigured and unbound broader-native profiles all admit only the
+  // Toolkit's own leaf helpers in governed work.
   const { ClaudeNamedHelperPolicy } = helperPolicy();
   return new ClaudeNamedHelperPolicy({ environment, ...options.helper_policy }).decide(input, governance);
 }

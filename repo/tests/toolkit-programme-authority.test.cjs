@@ -11,7 +11,7 @@ const path = require('node:path');
 const test = require('node:test');
 const Ajv2020 = require('ajv/dist/2020');
 const state = require('../../skills/github-program-reconciler/scripts/programme-state.cjs');
-const { FakeGitHub } = require('./toolkit-programme-fake-github.cjs');
+const { FakeGitHub, gatedChild } = require('./toolkit-programme-fake-github.cjs');
 
 const SHA_A = 'a'.repeat(40);
 const SHA_B = 'b'.repeat(40);
@@ -44,8 +44,8 @@ function setup({ initialiseParent = true } = {}) {
     mutator: new state.GitHubMutator({ transport: github, repository }), binding, writer: who, toolkitVersion: '3.9.0',
   });
   const parentDoc = () => store.read('parent', 421).doc;
-  const claimAsBuilder = () => store.mutate('child', 423, { writer: builder, authorise: false, create: () => state.newChild({ repository, outcome: CATALOGUE[0] }), change: doc => state.claimDocument(doc, builder, { role: 'G1' }) });
-  return { github, store, binding, reconciler, parentDoc, claimAsBuilder };
+  const assignG1 = () => store.mutate('child', 423, { writer: controller, parentDoc: parentDoc(), create: () => state.newChild({ repository, outcome: CATALOGUE[0] }), change: doc => state.assignGate(doc, { assignment: 'g1-a1', role: 'G1' }) });
+  return { github, store, binding, reconciler, parentDoc, assignG1 };
 }
 
 test('a takeover during a pass stops the old writer before its next GitHub or state write', () => {
@@ -72,14 +72,17 @@ test('a takeover during a pass stops the old writer before its next GitHub or st
   assert.equal(reconciler(successor).run().summary, 'No changes');
 });
 
-test('an executor cannot accept its own return; the controller can', () => {
-  const { store, parentDoc, claimAsBuilder } = setup();
-  claimAsBuilder();
-  store.mutate('child', 423, { writer: builder, parentDoc: parentDoc(), change: doc => state.submitReturn(doc, { returnId: 'r1', writer: builder }) });
-  assert.throws(() => store.mutate('child', 423, { writer: builder, parentDoc: parentDoc(), change: doc => state.consumeReturn(doc, { returnId: 'r1', verdict: 'ACCEPT', writer: builder, parentDoc: parentDoc() }) }), { code: 'ROLE_REFUSED' });
+test('an executor can neither record nor accept a return in the child document; the controller can', () => {
+  const { github, store, parentDoc, assignG1 } = setup();
+  assignG1();
+  const commits = github.commits;
+  assert.throws(() => store.mutate('child', 423, { writer: builder, parentDoc: parentDoc(), change: doc => state.recordReturn(doc, { returnId: 'r1', assignment: 'g1-a1' }) }), { code: 'STALE_WRITER' });
+  store.mutate('child', 423, { writer: controller, parentDoc: parentDoc(), change: doc => state.recordReturn(doc, { returnId: 'r1', assignment: 'g1-a1' }) });
+  assert.throws(() => store.mutate('child', 423, { writer: builder, parentDoc: parentDoc(), change: doc => state.consumeReturn(doc, { returnId: 'r1', verdict: 'REOPEN', writer: builder, parentDoc: parentDoc() }) }), { code: 'STALE_WRITER' });
+  assert.equal(github.commits, commits + 1, 'only the controller\'s write reached the store');
   assert.equal(store.read('child', 423).doc.gate.state, 'SUBMITTED');
-  store.mutate('child', 423, { writer: controller, parentDoc: parentDoc(), change: doc => state.consumeReturn(doc, { returnId: 'r1', verdict: 'ACCEPT', writer: controller, parentDoc: parentDoc() }) });
-  assert.equal(store.read('child', 423).doc.gate.state, 'RETIRED');
+  store.mutate('child', 423, { writer: controller, parentDoc: parentDoc(), change: doc => state.consumeReturn(doc, { returnId: 'r1', verdict: 'REOPEN', writer: controller, parentDoc: parentDoc() }) });
+  assert.equal(store.read('child', 423).doc.gate.state, 'ACTIVE');
 });
 
 test('claim rejects missing, ambiguous and invalid targets before opening the store', () => {
@@ -104,24 +107,24 @@ test('claim rejects missing, ambiguous and invalid targets before opening the st
   assert.deepEqual(store.read('parent', 421).doc, before, 'the parent and its epoch are unchanged');
 });
 
-test('a concurrent first G0 claim survives the controller applying a planned create_state', () => {
+test('an assignment the controller issues after planning survives applying a planned create_state', () => {
   const { store, reconciler, parentDoc } = setup();
   const pass = reconciler();
   const plan = pass.plan();
   const effect = plan.effects.find(entry => entry.kind === 'create_state' && entry.target.issue === 423);
   assert.ok(effect);
-  const claimed = store.mutate('child', 423, {
-    writer: builder, authorise: false, create: () => state.newChild({ repository: 'acme/app', outcome: CATALOGUE[0] }),
-    change: doc => state.claimDocument(doc, builder, { role: 'G0', parentDoc: parentDoc() }),
+  const assigned = store.mutate('child', 423, {
+    writer: controller, parentDoc: parentDoc(), create: () => state.newChild({ repository: 'acme/app', outcome: CATALOGUE[0] }),
+    change: doc => state.assignGate(doc, { assignment: 'g0-a1', role: 'G0' }),
   }).doc;
   const applied = pass.apply(plan);
   assert.deepEqual(applied.holds, []);
   const after = store.read('child', 423).doc;
   for (const key of ['gate', 'lifecycle', 'fence', 'candidate', 'release', 'next_action', 'private']) {
-    assert.deepEqual(after[key], claimed[key], `${key} survives apply`);
+    assert.deepEqual(after[key], assigned[key], `${key} survives apply`);
   }
   assert.deepEqual(after.pr, effect.doc.pr, 'observed PR fields are applied');
-  assert.doesNotThrow(() => state.submitReturn(after, { returnId: 'g0-r1', writer: builder, parentDoc: parentDoc() }));
+  assert.doesNotThrow(() => state.recordReturn(after, { returnId: 'g0-r1', assignment: 'g0-a1' }));
 });
 
 // Only the appointed controller writes. The matrix runs every CLI command, in every
@@ -146,10 +149,13 @@ test('only the appointed controller writes: every command x scenario x role', ()
   };
   const writes = [
     ['reconcile', '--apply'], ['init-parent', '--catalogue', catalogue, '--apply'], ['update-parent', '--patch', patches.parent],
-    ['claim', '--parent'], ['claim', '--parent', '--takeover'], ['claim', '--issue', '423', '--role', 'G1'],
-    ['claim', '--issue', '423', '--role', 'G1', '--takeover'], ['update', '--issue', '423', '--patch', patches.ordinary],
+    ['claim', '--parent'], ['claim', '--parent', '--takeover'], ['claim', '--issue', '423', '--lane'],
+    ['assign', '--issue', '423', '--role', 'G1', '--assignment', 'g1-new'], ['assign', '--issue', '423', '--role', 'G1', '--assignment', 'g1-new', '--supersede', '--reason', 'lost'],
+    ['reopen', '--issue', '423', '--reason', 'correction', '--assignment', 'g1-fix'], ['reopen', '--issue', '423', '--reason', 'correction'],
+    ['interrupt', '--issue', '423', '--reason', 'lost'], ['update', '--issue', '423', '--patch', patches.ordinary],
     ['update', '--issue', '423', '--patch', patches.uat], ['update', '--issue', '423', '--patch', patches.done],
-    ['return', '--issue', '423', '--submit', 'r9'], ['return', '--issue', '423', '--consume', 'r1', '--verdict', 'ACCEPT'],
+    ['return', '--issue', '423', '--record', 'r9', '--assignment', 'g1-a1'], ['return', '--issue', '423', '--consume', 'r1', '--verdict', 'ACCEPT'],
+    ['return', '--issue', '423', '--consume', 'r1', '--verdict', 'REOPEN'],
   ];
   const reads = [['reconcile'], ['reconcile', '--issue', '423'], ['show', '--parent'], ['show', '--issue', '423'], ['init-parent', '--catalogue', catalogue]];
   const scenarios = [
@@ -161,11 +167,11 @@ test('only the appointed controller writes: every command x scenario x role', ()
   ];
   const others = [builder, successor, { session: 'reviewer-g2', prefix: 'INT-TK421-' }, { session: 'helper-1', prefix: 'INT-TK421-' }];
   const inherent = args => (args[0] === 'init-parent' && args.includes('--apply')) || (args[0] === 'claim' && args.includes('--takeover') && args.includes('--parent'));
+  // A controller-only option or command may appear only in a sentence addressed to the controller.
   const addressed = text => {
-    assert.doesNotMatch(text, /--controller|--takeover|--consume|--verdict/, 'non-controller output names a controller-only option');
     for (const sentence of text.split(/\n|(?<=[.!?])\s+/)) {
-      if (!/--apply|init-parent|update-parent|claim --parent/.test(sentence)) continue;
-      assert.match(sentence, /(?:^|: )"?(?:Controller:|The appointed controller|Only the appointed controller)/, `not addressed to the controller: ${sentence}`);
+      if (!/--apply|--controller|--takeover|--consume|--verdict|init-parent|update-parent|claim --parent/.test(sentence)) continue;
+      assert.match(sentence, /(?:^|: )"?(?:Controller:|The appointed controller|Only the appointed controller|The new controller)/, `not addressed to the controller: ${sentence}`);
     }
   };
   let cases = 0;
@@ -174,8 +180,7 @@ test('only the appointed controller writes: every command x scenario x role', ()
       const prepare = () => {
         const fixture = setup({ initialiseParent: scenario.parent !== false });
         if (scenario.child) {
-          let doc = state.claimDocument(state.newChild({ repository: 'acme/app', outcome: CATALOGUE[0] }), controller, { role: 'G1' });
-          doc = state.submitReturn(doc, { returnId: 'r1', writer: controller });
+          const doc = gatedChild(state, state.newChild({ repository: 'acme/app', outcome: CATALOGUE[0] }), { role: 'G1', returnId: 'r1' });
           fixture.store.write('child', 423, doc, { sha: null, previous: null });
         }
         if (scenario.hold) fixture.github.issues.get(421).body = 'x'.repeat(59990);
@@ -193,6 +198,7 @@ test('only the appointed controller writes: every command x scenario x role', ()
             const childBefore = scenario.child ? store.read('child', 423).doc : null;
             const calls = github.calls.length;
             const mutations = github.mutations();
+            const commits = github.commits;
             let output = '';
             let error = null;
             const argv = [...args, '--session', role.session, ...(flagged && isWrite ? ['--controller'] : []), ...(json ? ['--json'] : [])];
@@ -211,6 +217,7 @@ test('only the appointed controller writes: every command x scenario x role', ()
             }
             if (isWrite) assert.ok(error, `${label}: a non-controller write succeeded`);
             assert.equal(github.mutations(), mutations, `${label}: GitHub changed`);
+            assert.equal(github.commits, commits, `${label}: the store changed`);
             if (parentBefore) assert.deepEqual(store.read('parent', 421).doc, parentBefore, `${label}: parent changed`);
             if (childBefore) assert.deepEqual(store.read('child', 423).doc, childBefore, `${label}: child changed`);
             addressed(output);
@@ -257,17 +264,21 @@ test('the controller can reopen an accepted gate for a correction, and acceptanc
   };
   const dir = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'programme-reopen-'));
   try {
-    const branch = path.join(dir, 'branch.json');
-    fs.writeFileSync(branch, JSON.stringify({ candidate: { branch: 'feature' } }));
-    run(['claim', '--issue', '423', '--role', 'G1']);
-    run(['update', '--issue', '423', '--patch', branch]);
-    run(['return', '--issue', '423', '--submit', 'g1-r1']);
+    const patch = (name, value) => { const file = path.join(dir, `${name}.json`); fs.writeFileSync(file, JSON.stringify(value)); return file; };
+    github.addPr(540, { head: SHA_B, contexts: [green('validate')], branch: 'feature' });
+    run(['assign', '--issue', '423', '--role', 'G1', '--assignment', 'g1-a1']);
+    run(['update', '--issue', '423', '--patch', patch('branch', { candidate: { branch: 'feature' } })]);
+    run(['return', '--issue', '423', '--record', 'g1-r1', '--assignment', 'g1-a1']);
+    assert.throws(() => run(['return', '--issue', '423', '--consume', 'g1-r1', '--verdict', 'ACCEPT']), { code: 'EVIDENCE_STALE' }, 'no G2 verdict at the live head yet');
+    run(['update', '--issue', '423', '--patch', patch('review', { review: { state: 'PASSED', verdicts: [{ reviewer: 'g2', head: SHA_B, verdict: 'PASSED' }] } })]);
     run(['return', '--issue', '423', '--consume', 'g1-r1', '--verdict', 'ACCEPT']);
     assert.equal(store.read('child', 423).doc.gate.state, 'RETIRED');
-    assert.equal(run(['claim', '--issue', '423', '--role', 'G1']).outcome, 'WRITTEN', 'claiming the accepted gate again starts a new activation');
-    assert.equal(store.read('child', 423).doc.gate.state, 'ACTIVE');
-    run(['return', '--issue', '423', '--submit', 'g1-r2']);
-    github.addPr(540, { head: SHA_B, merged: true, state: 'MERGED', contexts: [green('validate')], branch: 'feature' });
+    assert.throws(() => run(['assign', '--issue', '423', '--role', 'G1', '--assignment', 'g1-a2']), { code: 'GATE_STATE' }, 'an accepted gate is reopened, not assigned again');
+    assert.equal(run(['reopen', '--issue', '423', '--reason', 'G2 found a defect after acceptance', '--assignment', 'g1-a2']).outcome, 'WRITTEN');
+    assert.deepEqual([store.read('child', 423).doc.gate.state, store.read('child', 423).doc.gate.assignment.id], ['ASSIGNED', 'g1-a2']);
+    run(['return', '--issue', '423', '--record', 'g1-r2', '--assignment', 'g1-a2']);
+    github.prs.get(540).merged = true;
+    github.prs.get(540).state = 'MERGED';
     let report = reconciler().run();
     assert.deepEqual(report.close_list.map(entry => [entry.gate, entry.gate_accepted, entry.accepted]), [['G1', false, false]]);
     assert.ok(report.findings.some(finding => finding.code === 'CHILD_STATE_CONFLICT' && finding.issue === 423));
@@ -283,9 +294,7 @@ test('the close list shows evidence at an older head as STALE_HEAD', () => {
   const { github, store, reconciler, parentDoc } = setup();
   store.mutate('child', 423, { writer: controller, parentDoc: parentDoc(), create: () => state.newChild({ repository: 'acme/app', outcome: CATALOGUE[0] }), authorise: true,
     change: doc => {
-      let next = state.claimDocument(doc, controller, { role: 'G1' });
-      next = state.submitReturn(next, { returnId: 'r1', writer: controller });
-      next = state.consumeReturn(next, { returnId: 'r1', verdict: 'ACCEPT', writer: controller, parentDoc: parentDoc() });
+      const next = gatedChild(state, doc, { role: 'G1', returnId: 'r1', verdict: 'ACCEPT', writer: controller, parentDoc: parentDoc(), head: SHA_A });
       return state.applyPatch('child', next, { candidate: { branch: 'feature' }, uat: { state: 'PASSED', at_head: SHA_A },
         review: { state: 'PASSED', verdicts: [{ reviewer: 'g2', head: SHA_A, verdict: 'PASSED' }] } }, { writer: controller, parentDoc: parentDoc() });
     } });
@@ -306,6 +315,8 @@ test('sessions come from --session only, every --issue is 1 or more, and a dry r
     environment: { TOOLKIT_PROGRAMME_SESSION: controller.session }, stdout: { write() {} } };
   assert.throws(() => cli.main(['reconcile', '--apply', '--controller'], deps), { code: 'WRITER_UNKNOWN' }, 'an inherited session never writes');
   assert.throws(() => cli.parseArgs(['reconcile', '--apply', '--controller', '--session', '']), { code: 'USAGE' });
+  assert.throws(() => cli.parseArgs(['reconcile', '--apply', '--controller', '--session', '  ']), { code: 'USAGE' }, 'a whitespace-only session is refused');
+  assert.throws(() => cli.parseArgs(['bind', '--issue', '423', '--assignment', 'a', '--session', ' \t']), { code: 'USAGE' });
   for (const argv of [['show', '--issue', '0'], ['reconcile', '--issue', '0'], ['reconcile', '--issue', '-1'], ['show', '--issue', '1.5']]) {
     assert.throws(() => cli.parseArgs(argv), { code: 'USAGE' }, argv.join(' '));
   }
@@ -317,7 +328,7 @@ test('sessions come from --session only, every --issue is 1 or more, and a dry r
   } });
   const dry = reconciler().run();
   assert.deepEqual(dry.recovered.map(entry => entry.outcome), ['DONE']);
-  assert.match(dry.next_action, /^Controller: run reconcile --apply to clear 1 settled intent\(s\)$/);
+  assert.match(dry.next_action, /^Controller: run reconcile --apply --controller to clear 1 settled intent\(s\)$/);
   assert.equal(store.read('child', 423).doc.pending_effects.length, 1);
 });
 
@@ -337,10 +348,13 @@ test('binding documentation scopes opt-in to the reconciler while governed issue
 });
 
 test('an executor cannot record its own UAT, review or completion', () => {
-  const { store, parentDoc, claimAsBuilder } = setup();
-  claimAsBuilder();
+  const { store, parentDoc, assignG1 } = setup();
+  assignG1();
   const patch = { lifecycle: 'DONE', uat: { state: 'PASSED', at_head: SHA_A }, review: { state: 'PASSED', verdicts: [{ reviewer: 'self', head: SHA_A, verdict: 'PASSED' }] } };
-  assert.throws(() => store.mutate('child', 423, { writer: builder, parentDoc: parentDoc(), change: doc => state.applyPatch('child', doc, patch, { writer: builder, parentDoc: parentDoc() }) }), { code: 'ROLE_REFUSED' });
+  assert.throws(() => store.mutate('child', 423, { writer: builder, parentDoc: parentDoc(), change: doc => state.applyPatch('child', doc, patch, { writer: builder, parentDoc: parentDoc() }) }), { code: 'STALE_WRITER' });
+  // Even a document it somehow held would refuse the acceptance records.
+  const held = state.claimDocument(store.read('child', 423).doc, builder, { takeover: true });
+  assert.throws(() => state.applyPatch('child', held, patch, { writer: builder, parentDoc: parentDoc() }), { code: 'ROLE_REFUSED' });
   const doc = store.read('child', 423).doc;
   assert.deepEqual([doc.lifecycle, doc.uat.state, doc.review.state], ['ACTIVE', null, null]);
 });
@@ -444,7 +458,8 @@ test('without the opt-in binding the command line refuses before any GitHub call
   const github = new FakeGitHub();
   const dir = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'programme-unbound-'));
   try {
-    for (const argv of [['reconcile'], ['reconcile', '--apply', '--controller', '--session', 's'], ['show'], ['claim', '--issue', '1', '--controller', '--session', 's']]) {
+    for (const argv of [['reconcile'], ['reconcile', '--apply', '--controller', '--session', 's'], ['show'],
+      ['assign', '--issue', '1', '--role', 'G1', '--assignment', 'a', '--controller', '--session', 's'], ['bind', '--issue', '1', '--assignment', 'a', '--session', 's']]) {
       assert.throws(() => cli.main(argv, { transport: github, repoRoot: dir, originUrl: 'https://github.com/acme/app.git', stdout: { write() {} } }), { code: 'BINDING_MISSING' });
     }
     assert.equal(github.calls.length, 0, 'no GitHub call is made in a repository that has not opted in');
@@ -459,10 +474,11 @@ test('every custody surface says only the appointed controller writes', () => {
   const surfaces = {
     description: skill.split('description: ')[1].split('\n')[0],
     when: skill.split('## When to run')[1].split('## What ships')[0],
-    who: skill.split('**Who records what.**')[1].split('**Returns (LIFE-1).**')[0],
+    who: skill.split('**Who records what.**')[1].split('**Gates.**')[0],
     prompt: read('skills/github-program-reconciler/agents/openai.yaml').split('default_prompt: ')[1].split('\n')[0],
     readme: read('skills/github-program-reconciler/README.md'),
-    changelog: read('repo/docs/CHANGELOG.md').split('## 3.9.0')[1].split('## 3.8.0')[0],
+    changelog: read('repo/docs/CHANGELOG.md').split('## Unreleased')[1].split('## 3.9.0')[0],
+    history: read('repo/docs/CHANGELOG.md').split('## 3.9.0')[1].split('## 3.8.0')[0],
     trigger: JSON.parse(read('repo/docs/skill-creation-center-baseline.json')).skill_creation_review['github-program-reconciler'].trigger,
   };
   for (const [name, text] of Object.entries(surfaces)) {
@@ -471,16 +487,45 @@ test('every custody surface says only the appointed controller writes', () => {
   }
   assert.match(surfaces.who, /A controller stopped by a takeover stops and reports to the owner/);
   assert.match(surfaces.who, /verifies that the previous writer stopped, posts its takeover record/);
+  assert.match(surfaces.who, /--takeover-record <comment id>/);
+  // Executors write only their own journal; no surface says they never write at all.
+  for (const name of ['description', 'who', 'prompt', 'readme', 'trigger']) {
+    assert.match(surfaces[name], /writes only its own checkpoint journal/, name);
+    assert.doesNotMatch(surfaces[name], /Executors \(G0, G1, G2\)[^.]*never write/, name);
+  }
   assert.doesNotMatch(skill, /TOOLKIT_PROGRAMME_SESSION/);
 });
 
 test('user-facing reconciler text names no release numbers or roadmap', () => {
   const read = file => fs.readFileSync(path.resolve(__dirname, '..', '..', file), 'utf8');
-  for (const file of ['README.md', 'skills/github-program-reconciler/SKILL.md', 'skills/github-program-reconciler/README.md',
-    'skills/github-program-reconciler/agents/openai.yaml', 'skills/github-program-reconciler/scripts/programme.cjs',
-    'skills/github-program-reconciler/scripts/programme-state.cjs', 'repo/docs/SKILL-SAFETY-MATRIX.md', 'repo/docs/FOR_AI_AGENTS.md',
-    'repo/contracts/agent-rules/toolkit-skill-routing.md', 'repo/contracts/programme-state/binding-v1.schema.json']) {
-    const text = read(file).replace(/toolkit=\d+\.\d+\.\d+/g, '');
-    assert.doesNotMatch(text, /\bin \d+\.\d+\.\d+\b|this version|R5b custody|custody release/i, file);
+  // Release numbers (bare or "in/since x.y"), "this version" and roadmap labels. Managed-block markers
+  // (toolkit=x.y.z) and the reconciler's own version output are not prose.
+  const forbidden = [/\bv?\d+\.\d+\.\d+\b/, /\b(?:in|since|from|until) (?:version )?v?\d+\.\d+\b/i, /\bthis version\b/i, /\bR\d+[a-z]?(?:-\d+)?\b/, /\bcustody release\b/i, /\b(?:next|later|upcoming|future) release\b/i];
+  const prose = text => text.replace(/toolkit=\d+\.\d+\.\d+/g, '').replace(/toolkitVersion[^\n]*/g, '');
+  const whole = ['skills/github-program-reconciler/SKILL.md', 'skills/github-program-reconciler/README.md',
+    'skills/github-program-reconciler/agents/openai.yaml', 'repo/contracts/programme-state/binding-v1.schema.json',
+    'repo/contracts/programme-state/child-state-v1.schema.json', 'repo/contracts/programme-state/journal-v1.schema.json',
+    'repo/contracts/programme-state/host-contract-v1.json', 'repo/docs/HOST-CONTRACT.md'];
+  const texts = whole.map(file => [file, read(file)]);
+  // Shared files: only the reconciler's own row or paragraph is this skill's text.
+  const row = (file, marker) => {
+    const line = read(file).split('\n').find(text => text.includes(marker));
+    assert.ok(line, `${file} must mention ${marker}`);
+    return [file, line];
+  };
+  texts.push(row('README.md', 'github-program-reconciler'), row('repo/docs/SKILL-SAFETY-MATRIX.md', 'github-program-reconciler'),
+    row('repo/docs/FOR_AI_AGENTS.md', 'github-program-reconciler'), row('repo/contracts/agent-rules/toolkit-skill-routing.md', 'github-program-reconciler'));
+  texts.push(['skill-creation-center-baseline.json trigger', JSON.parse(read('repo/docs/skill-creation-center-baseline.json')).skill_creation_review['github-program-reconciler'].trigger]);
+  // Messages the command line prints: the quoted strings in its scripts.
+  for (const file of ['skills/github-program-reconciler/scripts/programme.cjs', 'skills/github-program-reconciler/scripts/programme-state.cjs',
+    'skills/github-program-reconciler/scripts/programme-checkpoint.cjs', 'repo/scripts/toolkit-programme-checkpoint-hook.cjs']) {
+    const strings = [...read(file).matchAll(/'((?:[^'\\\n]|\\.){12,})'|`((?:[^`\\]|\\.){12,})`/g)].map(match => match[1] || match[2]);
+    texts.push([`${file} messages`, strings.join('\n')]);
+  }
+  for (const [file, text] of texts) {
+    for (const pattern of forbidden) {
+      const found = prose(text).match(pattern);
+      assert.equal(found, null, `${file} has release or roadmap wording: "${found?.[0]}" in "${found ? found.input.slice(Math.max(0, found.index - 40), found.index + 40).replace(/\s+/g, ' ') : ''}"`);
+    }
   }
 });

@@ -43,6 +43,7 @@ Last reviewed against `main` `9b7ffff3c30078c2290c809d20bc7c49e3f96e8d`.
 | Decision-trace audit | `skills/github-program-reconciler/scripts/decision-trace-audit.cjs` |
 | Personal-data guard and installer | `skills/secure-ci-cd/scripts/personal-data-guard.cjs`, `skills/secure-ci-cd/scripts/install-personal-data-guard.cjs` |
 | Programme state and reconcile pass | `skills/github-program-reconciler/scripts/programme.cjs`, `skills/github-program-reconciler/scripts/programme-state.cjs` |
+| Executor checkpoint journals and turn-end hook | `skills/github-program-reconciler/scripts/programme-checkpoint.cjs`, `repo/scripts/toolkit-programme-checkpoint-hook.cjs`, `repo/scripts/toolkit-programme-checkpoint-hook.ps1` |
 
 ## Sources of truth
 
@@ -56,6 +57,7 @@ Last reviewed against `main` `9b7ffff3c30078c2290c809d20bc7c49e3f96e8d`.
 | Source ownership | `repo/contracts/source-of-truth-contract.md` |
 | Package version | `repo/contracts/toolkit-local-bridge/version.json`, read at runtime through `repo/scripts/toolkit-version.cjs` |
 | Programme binding and state document schemas | `.github/toolkit-programme.json`, `repo/contracts/programme-state/` |
+| Host needs for programme custody | `repo/docs/HOST-CONTRACT.md`, `repo/contracts/programme-state/host-contract-v1.json` |
 | Release notes | `repo/docs/CHANGELOG.md` |
 
 ## Ownership
