@@ -3314,6 +3314,9 @@ function readJsonFile(filePath) {
   }
 }
 
+// Claude Code installs show no hook trust prompt (seen on 2.1.304 to 2.1.309), so setup asks for none.
+const CLAUDE_HOOK_TRUST_ACTION = 'none: Claude Code has no separate trust step for plugin hooks; an enabled plugin\'s hooks run in sessions started after it is installed';
+
 function verifyClaudeNativePluginMetadata(args) {
   const pluginPath = path.join(args.repoRoot, '.claude-plugin', 'plugin.json');
   const hooksPath = path.join(args.repoRoot, '.claude-plugin', 'hooks', 'hooks.json');
@@ -3351,7 +3354,7 @@ function verifyClaudeNativePluginMetadata(args) {
     throw new Error('Claude Code plugin hooks must block native Agent launches through toolkit-claude-agent-hook.cjs');
   }
   console.log('Claude Code native plugin metadata verified.');
-  console.log('If Claude Code reports the Toolkit plugin is missing, stale, disabled, or untrusted, refresh it through Claude Code native plugin UI/flow. Codex will not mutate Claude Code plugin cache.');
+  console.log('If Claude Code reports the Toolkit plugin is missing, stale or disabled, refresh it through Claude Code native plugin UI/flow. Codex will not mutate Claude Code plugin cache.');
   return {
     status: 'metadata present',
     manifest_path: pluginPath,
@@ -3359,7 +3362,7 @@ function verifyClaudeNativePluginMetadata(args) {
     manifest_version: plugin.version || 'unknown',
     updated_this_run: false,
     restart_required: false,
-    hook_trust_action: 'follow Claude Code native plugin trust prompts if shown'
+    hook_trust_action: CLAUDE_HOOK_TRUST_ACTION
   };
 }
 
@@ -3449,7 +3452,7 @@ function runClaudeNativePluginSetup(args) {
       activation_proof: summary.activation_proof || null,
       updated_this_run: false,
       restart_required: false,
-      hook_trust_action: 'follow Claude Code native plugin trust prompts if shown'
+      hook_trust_action: CLAUDE_HOOK_TRUST_ACTION
     };
   }
   runNativePluginJsonPhase({
@@ -3487,7 +3490,7 @@ function runClaudeNativePluginSetup(args) {
     activation_proof: summary.activation_proof || null,
     updated_this_run: true,
     restart_required: true,
-    hook_trust_action: 'approve the Claude Code plugin trust prompt when Claude Code prompts'
+    hook_trust_action: CLAUDE_HOOK_TRUST_ACTION
   };
 }
 
@@ -3684,11 +3687,11 @@ function applyClaudeSubagentDepth(args, setting = new ClaudeSubagentDepthSetting
   return setting.apply(args.claudeSubagentDepthChoice || 'keep');
 }
 
-// safe-root-only is Toolkit's expected default whenever setup records no verified hook activation;
-// Claude Code 2.1.306 reports none, so it is not a failure and is never called verified.
+// safe-root-only is Toolkit's safe default whenever setup could not verify the installed hook this
+// run; it is not a failure and is never called verified.
 function profileOutcomeSummary(delegation) {
   if (delegation.status === 'safe-root-only') {
-    return 'safe-root-only: root-only, Toolkit\'s safe default. Setup recorded no verified hook activation (current Claude Code versions do not report one), so the Toolkit hook keeps root-only. This is expected; no action is needed.';
+    return 'safe-root-only: root-only, Toolkit\'s safe default. Setup could not verify the installed Toolkit hook this run (it was just installed, a setting turns hooks off, or its agent hook did not answer a test launch), so the Toolkit hook keeps root-only. This is safe; to verify it, run `setup toolkit` again in a new Claude Code session.';
   }
   return delegation.status || 'unchanged';
 }
