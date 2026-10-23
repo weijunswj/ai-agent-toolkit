@@ -474,10 +474,11 @@ test('every custody surface says only the appointed controller writes', () => {
   const surfaces = {
     description: skill.split('description: ')[1].split('\n')[0],
     when: skill.split('## When to run')[1].split('## What ships')[0],
-    who: skill.split('**Who records what.**')[1].split('**Returns (LIFE-1).**')[0],
+    who: skill.split('**Who records what.**')[1].split('**Gates.**')[0],
     prompt: read('skills/github-program-reconciler/agents/openai.yaml').split('default_prompt: ')[1].split('\n')[0],
     readme: read('skills/github-program-reconciler/README.md'),
-    changelog: read('repo/docs/CHANGELOG.md').split('## 3.9.0')[1].split('## 3.8.0')[0],
+    changelog: read('repo/docs/CHANGELOG.md').split('## Unreleased')[1].split('## 3.9.0')[0],
+    history: read('repo/docs/CHANGELOG.md').split('## 3.9.0')[1].split('## 3.8.0')[0],
     trigger: JSON.parse(read('repo/docs/skill-creation-center-baseline.json')).skill_creation_review['github-program-reconciler'].trigger,
   };
   for (const [name, text] of Object.entries(surfaces)) {
@@ -486,16 +487,45 @@ test('every custody surface says only the appointed controller writes', () => {
   }
   assert.match(surfaces.who, /A controller stopped by a takeover stops and reports to the owner/);
   assert.match(surfaces.who, /verifies that the previous writer stopped, posts its takeover record/);
+  assert.match(surfaces.who, /--takeover-record <comment id>/);
+  // Executors write only their own journal; no surface says they never write at all.
+  for (const name of ['description', 'who', 'prompt', 'readme', 'trigger']) {
+    assert.match(surfaces[name], /writes only its own checkpoint journal/, name);
+    assert.doesNotMatch(surfaces[name], /Executors \(G0, G1, G2\)[^.]*never write/, name);
+  }
   assert.doesNotMatch(skill, /TOOLKIT_PROGRAMME_SESSION/);
 });
 
 test('user-facing reconciler text names no release numbers or roadmap', () => {
   const read = file => fs.readFileSync(path.resolve(__dirname, '..', '..', file), 'utf8');
-  for (const file of ['README.md', 'skills/github-program-reconciler/SKILL.md', 'skills/github-program-reconciler/README.md',
-    'skills/github-program-reconciler/agents/openai.yaml', 'skills/github-program-reconciler/scripts/programme.cjs',
-    'skills/github-program-reconciler/scripts/programme-state.cjs', 'repo/docs/SKILL-SAFETY-MATRIX.md', 'repo/docs/FOR_AI_AGENTS.md',
-    'repo/contracts/agent-rules/toolkit-skill-routing.md', 'repo/contracts/programme-state/binding-v1.schema.json']) {
-    const text = read(file).replace(/toolkit=\d+\.\d+\.\d+/g, '');
-    assert.doesNotMatch(text, /\bin \d+\.\d+\.\d+\b|this version|R5b custody|custody release/i, file);
+  // Release numbers (bare or "in/since x.y"), "this version" and roadmap labels. Managed-block markers
+  // (toolkit=x.y.z) and the reconciler's own version output are not prose.
+  const forbidden = [/\bv?\d+\.\d+\.\d+\b/, /\b(?:in|since|from|until) (?:version )?v?\d+\.\d+\b/i, /\bthis version\b/i, /\bR\d+[a-z]?(?:-\d+)?\b/, /\bcustody release\b/i, /\b(?:next|later|upcoming|future) release\b/i];
+  const prose = text => text.replace(/toolkit=\d+\.\d+\.\d+/g, '').replace(/toolkitVersion[^\n]*/g, '');
+  const whole = ['skills/github-program-reconciler/SKILL.md', 'skills/github-program-reconciler/README.md',
+    'skills/github-program-reconciler/agents/openai.yaml', 'repo/contracts/programme-state/binding-v1.schema.json',
+    'repo/contracts/programme-state/child-state-v1.schema.json', 'repo/contracts/programme-state/journal-v1.schema.json',
+    'repo/contracts/programme-state/host-contract-v1.json', 'repo/docs/HOST-CONTRACT.md'];
+  const texts = whole.map(file => [file, read(file)]);
+  // Shared files: only the reconciler's own row or paragraph is this skill's text.
+  const row = (file, marker) => {
+    const line = read(file).split('\n').find(text => text.includes(marker));
+    assert.ok(line, `${file} must mention ${marker}`);
+    return [file, line];
+  };
+  texts.push(row('README.md', 'github-program-reconciler'), row('repo/docs/SKILL-SAFETY-MATRIX.md', 'github-program-reconciler'),
+    row('repo/docs/FOR_AI_AGENTS.md', 'github-program-reconciler'), row('repo/contracts/agent-rules/toolkit-skill-routing.md', 'github-program-reconciler'));
+  texts.push(['skill-creation-center-baseline.json trigger', JSON.parse(read('repo/docs/skill-creation-center-baseline.json')).skill_creation_review['github-program-reconciler'].trigger]);
+  // Messages the command line prints: the quoted strings in its scripts.
+  for (const file of ['skills/github-program-reconciler/scripts/programme.cjs', 'skills/github-program-reconciler/scripts/programme-state.cjs',
+    'skills/github-program-reconciler/scripts/programme-checkpoint.cjs', 'repo/scripts/toolkit-programme-checkpoint-hook.cjs']) {
+    const strings = [...read(file).matchAll(/'((?:[^'\\\n]|\\.){12,})'|`((?:[^`\\]|\\.){12,})`/g)].map(match => match[1] || match[2]);
+    texts.push([`${file} messages`, strings.join('\n')]);
+  }
+  for (const [file, text] of texts) {
+    for (const pattern of forbidden) {
+      const found = prose(text).match(pattern);
+      assert.equal(found, null, `${file} has release or roadmap wording: "${found?.[0]}" in "${found ? found.input.slice(Math.max(0, found.index - 40), found.index + 40).replace(/\s+/g, ' ') : ''}"`);
+    }
   }
 });
