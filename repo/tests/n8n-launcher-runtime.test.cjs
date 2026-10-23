@@ -132,6 +132,10 @@ test('Docker CLI missing exits both CMD launchers after one Enter with identical
       try {
         const binDir = path.join(root, 'bin');
         fs.mkdirSync(binDir, { recursive: true });
+        // The scenario needs Docker absent from the launcher's PATH; say so plainly when it is not,
+        // instead of letting the launcher wait for a real Docker until the timeout.
+        const docker = spawnSync('where.exe', ['docker'], { env: launcherEnv([binDir]), encoding: 'utf8' });
+        assert.notEqual(docker.status, 0, `Docker CLI is on the launcher PATH at ${String(docker.stdout).trim()}; this scenario needs it absent`);
         const wingetMarker = path.join(root, 'winget-called.txt');
         if (scenario === 'winget-present') {
           writeCmd(path.join(binDir, 'winget.cmd'), [
