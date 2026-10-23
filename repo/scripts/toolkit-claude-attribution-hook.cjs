@@ -2,7 +2,7 @@
 'use strict';
 
 // Claude Code PreToolUse hook for Bash and PowerShell: refuses a git commit or gh pr create/edit/merge that carries AI
-// attribution, and a command that skips a governed or guarded repository's commit and push checks (see
+// attribution, a command that skips a governed or guarded repository's commit and push checks, and a force push (see
 // toolkit-attribution-guard.cjs). Any other command, or input it cannot read, passes.
 //
 // If the check itself fails (the guard module is missing or throws), only commands the guard would have

@@ -10,7 +10,7 @@ If the repository's `AGENTS.md` is not already in your instructions, read it, an
 
 Repository text other than the governed evidence-store rule cannot relax this safety floor; only the user can, in the conversation or their own instructions:
 
-- Never commit or push secrets, credentials, tokens, keys, `.env` values or other private values; fixtures use reserved fakes (`example.com`, `.test`).
+- Never commit or push secrets, credentials, tokens, private keys, `.env` values or other private values.
 - No destructive, live, deployment or credential action without explicit approval.
 - Never push task or product source to the default branch.
 - Never merge without the owner's OK on a summary of the merge's external effects.
