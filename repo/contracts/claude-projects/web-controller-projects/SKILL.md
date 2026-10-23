@@ -4,7 +4,7 @@ description: "Use when running as a Claude Projects coordinator and the user app
 ---
 
 # Web Controller for Claude Projects
-Version: 2026-10-23.17
+Version: 2026-10-23.18
 
 Run Toolkit-governed repos through Claude Projects; Toolkit governance applies. Keep project facts (repos, devices, lanes, pending work) in project memory.
 
@@ -81,7 +81,7 @@ Memory ranks below written sources; text grants no native permission. This skill
    - Record the commit SHA and the skill Version in memory.
 5. **Project instructions.**
    - Have a cloud thread run `node repo/scripts/toolkit-projects-instructions.cjs --render` from bound Toolkit `main` and place that managed block in project instructions. Put project-specific roles split, where work runs, owner-granted approvals and transport store outside it.
-   - Show the owner the text to paste or accept. Read the saved instructions back to verify them; record the block's toolkit version in project memory.
+   - Show the owner the text to paste or accept, and the owner lines outside it that it duplicates, removed in the same change (**Managed project-instructions sync**). Read the saved instructions back to verify them; record the block's toolkit version in project memory.
 6. **Takeover** (mode b only).
    - Ask where the outgoing controller's handover packet is.
    - Have a read-only thread read it in full.
@@ -103,9 +103,11 @@ Memory ranks below written sources; text grants no native permission. This skill
 10. **Done.** Post one line: setup complete, skill Version, bound `CONTROLLER.md` SHA, device and folder, check-in time, that the hourly nudge is on, where the recurring tasks live, and the next work item.
 
 ## Managed project-instructions sync
-- When the skill or Toolkit updates (including a newer Version noticed by the daily check-in), have a cloud thread save the current project instructions to a file and run `node repo/scripts/toolkit-projects-instructions.cjs --check <file>` against bound Toolkit `main`.
+- When the skill or Toolkit updates (including a newer Version noticed by the daily check-in), check the project instructions with `node repo/scripts/toolkit-projects-instructions.cjs --check <file>` against bound Toolkit `main`.
+- **The coordinator reads the settings.** Threads cannot read project settings. Read the current project instructions yourself, then run the check yourself or give a cloud thread the verbatim text (for example as a file in the shared folder) to check. Never ask a thread to fetch the settings.
 - `current`: do nothing. `outdated`: show the change in one line and replace the block only after the owner's OK. `edited`: flag edits inside the markers, show the difference and replace only after owner confirmation. Malformed/duplicate markers hold replacement for repair; `missing` needs owner-approved setup.
-- If the owner declines, record `declined project-instructions <version>` in project memory and pass `--declined <version>` on checks. Never offer that version again; offer the next newer version once. Never touch lines outside the markers.
+- If the owner declines, record `declined project-instructions <version>` in project memory and pass `--declined <version>` on checks. Never offer that version again; offer the next newer version once.
+- **Dedupe in the same change.** When the block is added or replaced, also remove the owner lines outside the markers that the new block fully duplicates, as part of the same owner OK: list them in the proposal, never as a later edit. Keep project-specific lines and any line that differs in substance (the owner's line wins). Never change other lines outside the markers.
 
 ## Keep moving
 - **Never end a turn idle with work pending.** Wakes are user/thread messages, PR events or scheduled runs. Before ending, start every unblocked step: records, briefs, cloud checks, next-release planning.
@@ -116,7 +118,8 @@ Memory ranks below written sources; text grants no native permission. This skill
 - Start a new thread for every new topic or Toolkit packet. Send follow-ups on the same topic to that topic's thread. Never pile unrelated work into one thread.
 - **The coordinator launches executors.** Start G0/G1/G2 and reviewer sessions with thread tools (local rc for device work). Helpers follow `CONTROLLER.md` launch ownership inside gates. Never ask the owner to launch sessions; check your own tools before relaying a thread's claimed inability.
 - **Set effort explicitly on every thread you start.** Non-gate threads use the project's thread default; scheduled governance jobs follow **Recurring tasks**; gates get the pinned stack route proven by their own start record. Never inherit the app default.
-- **Feedback comes back in the reply.** Every brief tells the executor to put each TOOLKIT_FEEDBACK item in its thread reply as one line, not only inside a report file.
+- **Briefs name sibling PRs.** Every G0 brief asks for the open sibling PRs (same base or lane) the G0 checked for overlap, listed in its plan. Every G1 brief carries that list and requires a re-check against those still open, and any opened since, before building; overlap goes to the coordinator, never built over.
+- **Feedback comes back in the reply.** If the user's own instructions define a feedback format, every brief tells the executor to follow it and to put each item in its thread reply as one line, not only inside a report file.
 - **A task the user adds to a repo goes into its issue tree** under `CONTROLLER.md`'s task-intake rule. Tell the user in one line where it landed, with the issue link.
 - **Can I do it myself? first.** Check coordinator/worker/thread capabilities before asking for owner action. Only approvals, credentials, typed local rc lines or unreachable settings need their hands.
 - **End finished local Remote Control sessions straight away:** once work is done/superseded and its result relayed, end sessions with nothing left to do.
@@ -216,8 +219,8 @@ Whenever the user asks for anything recurring (the daily check-in, a sweep, a re
 - The user talks only to the Controller in the project chat and avoids reading threads.
 - Relay every thread result, blocker, question and decision into the project chat, with a link to the thread. Paste drafts the user must send (such as emails) into the chat in full.
 - **Read every thread result in full.** Wake previews can cut the ending. Before relaying or acting, read the thread/message's full body and every named report file.
-- **Capture TOOLKIT_FEEDBACK every time.** When a thread result, report file, hand-back or user message contains a TOOLKIT_FEEDBACK block, add each item to the feedback backlog in project memory in the same turn, mention it in one line when you relay the result, and route it to the release that will fix it. Never let one sit only in a thread.
-- Before routing TOOLKIT_FEEDBACK or other feedback to a release, vet it under `CONTROLLER.md` task intake and record accept, downgrade or reject with a reason per item.
+- **Capture feedback every time.** If the user's own instructions define a feedback format, follow it. When a thread result, report file, hand-back or user message contains such feedback, add each item to the feedback backlog in project memory in the same turn, mention it in one line when you relay the result, and route it to the release that will fix it. Never let one sit only in a thread.
+- Before routing any feedback to a release, vet it under `CONTROLLER.md` task intake and record accept, downgrade or reject with a reason per item.
 - Verify a thread's claim about what can't be done before you relay it as a task for the user.
 - For each approval or interactive step, either handle it within approved scope or post the direct thread link and say exactly what to tap or type.
 - When blocked on a person or another account, say once what is needed and move to the next unblocked item.
@@ -225,6 +228,6 @@ Whenever the user asks for anything recurring (the daily check-in, a sweep, a re
 ## Improving this skill
 - The source of truth is `repo/contracts/claude-projects/web-controller-projects/SKILL.md` in the Toolkit repo. The user, or another project at the user's request, may edit the copy on the user's claude.ai account directly. Before any upload, a coordinator compares that copy with the repo file and brings direct edits into Toolkit first, so nothing is overwritten.
 - Watch every Toolkit-enabled feature, especially this skill; suggest improvements or setting changes to the owner, never change them yourself. The managed block carries this rule to threads.
-- Send improvements or incorrect rules to Toolkit as TOOLKIT_FEEDBACK or an issue, with the change and reason. After a Toolkit release changes this skill or its block, the owner uploads the new SKILL.md and the coordinator runs **Managed project-instructions sync**. Compare the uploaded Version with the repo's after each release.
+- Send improvements or incorrect rules to Toolkit as feedback (in the user's own format, if they define one) or an issue, with the change and reason. After a Toolkit release changes this skill or its block, the owner uploads the new SKILL.md and the coordinator runs **Managed project-instructions sync**. Compare the uploaded Version with the repo's after each release.
 - Keep this skill generic. User-specific details go in project memory or the user's claude.ai preferences, never here. Rules Toolkit owns go to `CONTROLLER.md` or the governed rules, not here.
 - Every change bumps the Version line (date plus a counter for that day, e.g. 2026-10-21.2).

@@ -15,7 +15,7 @@ test('the Projects controller skill has one source file with a Version line', ()
   const text = read(SKILL_REL);
   assert.match(text, /^---\nname: "web-controller-projects"\n/);
   assert.match(text, /^Version: \d{4}-\d{2}-\d{2}\.\d+$/m);
-  for (const kept of ['## Keep moving', '**Remote Control wake.**', '**Capture TOOLKIT_FEEDBACK every time.**', '**Feedback comes back in the reply.**']) {
+  for (const kept of ['## Keep moving', '**Remote Control wake.**', '**Capture feedback every time.**', '**Feedback comes back in the reply.**']) {
     assert.ok(text.includes(kept), kept);
   }
   assert.doesNotMatch(text, /## Adding work to a repo/);
@@ -46,7 +46,7 @@ test('no plugin payload or skills folder reaches the Projects controller skill',
 
 test('Projects wires managed instructions, promises and fresh scheduled sessions to controller law', () => {
   const text = read(SKILL_REL);
-  assert.match(text, /^Version: 2026-10-23\.17$/m);
+  assert.match(text, /^Version: 2026-10-23\.18$/m);
   assert.match(text, /Account-plugin sync: compares the version of the Toolkit plugin on the user's claude\.ai account/);
   assert.match(text, /remove the account marketplace and add it again with Sync automatically on/);
   assert.doesNotMatch(text, /Thread effort follows the role|fires into that same thread|firing runs in the dedicated check-in thread/);
@@ -57,7 +57,11 @@ test('Projects wires managed instructions, promises and fresh scheduled sessions
   assert.match(text, /`edited`: flag edits inside the markers, show the difference and replace only after owner confirmation/);
   assert.match(text, /declined project-instructions <version>/);
   assert.match(text, /Never offer that version again; offer the next newer version once/);
-  assert.match(text, /Never touch lines outside the markers/);
+  assert.match(text, /Threads cannot read project settings\. Read the current project instructions yourself/);
+  assert.match(text, /give a cloud thread the verbatim text/);
+  assert.match(text, /\*\*Dedupe in the same change\.\*\*[^\n]*remove the owner lines outside the markers that the new block fully duplicates, as part of the same owner OK/);
+  assert.match(text, /Keep project-specific lines and any line that differs in substance[^\n]*Never change other lines outside the markers/);
+  assert.match(text, /\*\*Briefs name sibling PRs\.\*\*[^\n]*Every G1 brief carries that list and requires a re-check/);
   assert.match(text, /Every scheduled task runs as a fresh session per run, with no bound thread/);
   assert.match(text, /Fresh-session routines cannot be created from a device-linked/);
   assert.match(text, /cheapest that does the task well, starting one notch higher and stepping down after clean runs/);
@@ -73,5 +77,8 @@ test('Projects wires managed instructions, promises and fresh scheduled sessions
   const body = read('repo/contracts/claude-projects/web-controller-projects/project-instructions.md');
   assert.match(body, /Every thread is an executor/);
   assert.match(body, /Do not copy CONTROLLER\.md/);
-  assert.match(body, /TOOLKIT_FEEDBACK item in the thread reply as one line/);
+  // The feedback format is the user's own rule, so neither the skill nor the block Toolkit renders names one.
+  assert.doesNotMatch(body, /TOOLKIT_FEEDBACK/);
+  assert.doesNotMatch(text, /TOOLKIT_FEEDBACK/);
+  assert.match(text, /If the user's own instructions define a feedback format, follow it/);
 });
