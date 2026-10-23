@@ -78,30 +78,57 @@ class EnvPaths {
   show(file) { return displayHome(file, this.#home); }
 }
 
-// A folder only the current user can open: 0700 elsewhere; on Windows, inheritance removed and
-// full control for the current user only.
-function ensurePrivateDirectory(directory, { platform = process.platform, environment = process.env, spawn: run = spawnSync } = {}) {
+// Replaces a Windows file's or folder's whole permission list with one entry: full control for
+// the current user (inherited by a folder's contents). Removing inherited entries is not enough:
+// a folder made where nothing is inherited gets explicit SYSTEM and Administrators entries.
+const WINDOWS_PRIVATE_SCRIPT = String.raw`
+$env:PSModulePath = [System.IO.Path]::Combine($PSHOME, 'Modules')
+$ErrorActionPreference = 'Stop'
+try {
+  $request = [Console]::In.ReadToEnd() | ConvertFrom-Json
+  $user = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
+  if ($request.folder) {
+    $acl = [System.Security.AccessControl.DirectorySecurity]::new()
+    $acl.SetAccessRuleProtection($true, $false)
+    $acl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new($user, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow'))
+    [System.IO.Directory]::SetAccessControl($request.path, $acl)
+  } else {
+    $acl = [System.Security.AccessControl.FileSecurity]::new()
+    $acl.SetAccessRuleProtection($true, $false)
+    $acl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new($user, 'FullControl', 'Allow'))
+    [System.IO.File]::SetAccessControl($request.path, $acl)
+  }
+  [Console]::Out.Write('ok')
+} catch {
+  exit 3
+}
+`;
+
+// Only the current user can open the file or folder: 0700/0600 elsewhere, one entry on Windows.
+// Returns false when it could not be done.
+function restrictToCurrentUser(target, folder, { platform = process.platform, environment = process.env, spawn: run = spawnSync } = {}) {
+  if (platform !== 'win32') { fs.chmodSync(target, folder ? 0o700 : 0o600); return true; }
+  const root = environment.SystemRoot || environment.SYSTEMROOT || 'C:\\Windows';
+  const powershell = path.win32.join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+  const result = run(powershell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(WINDOWS_PRIVATE_SCRIPT, 'utf16le').toString('base64')], {
+    input: JSON.stringify({ path: target, folder }), encoding: 'utf8', windowsHide: true, timeout: 30000,
+  });
+  return !result.error && result.status === 0 && result.stdout === 'ok';
+}
+
+function ensurePrivateDirectory(directory, options = {}) {
   const existed = fs.existsSync(directory);
   fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
   if (existed) return;
-  if (platform !== 'win32') { fs.chmodSync(directory, 0o700); return; }
-  const user = environment.USERDOMAIN ? `${environment.USERDOMAIN}\\${environment.USERNAME}` : environment.USERNAME;
-  const icacls = path.win32.join(environment.SystemRoot || environment.SYSTEMROOT || 'C:\\Windows', 'System32', 'icacls.exe');
-  const result = run(icacls, [directory, '/inheritance:r', '/grant:r', `${user}:(OI)(CI)F`], { windowsHide: true, encoding: 'utf8', timeout: 30000 });
-  if (result.error || result.status !== 0) {
+  if (!restrictToCurrentUser(directory, true, options)) {
     fs.rmSync(directory, { recursive: true, force: true });
     throw new EnvError('Toolkit could not make a private folder for this, so it stopped.');
   }
 }
 
-// A moved file keeps the permissions it had, so give it its own: owner-only (0600), or on Windows
-// inheritance removed and full control for the current user only.
-function makePrivateFile(file, { platform = process.platform, environment = process.env, spawn: run = spawnSync } = {}) {
-  if (platform !== 'win32') { fs.chmodSync(file, 0o600); return; }
-  const user = environment.USERDOMAIN ? `${environment.USERDOMAIN}\\${environment.USERNAME}` : environment.USERNAME;
-  const icacls = path.win32.join(environment.SystemRoot || environment.SYSTEMROOT || 'C:\\Windows', 'System32', 'icacls.exe');
-  const result = run(icacls, [file, '/inheritance:r', '/grant:r', `${user}:F`], { windowsHide: true, encoding: 'utf8', timeout: 30000 });
-  if (result.error || result.status !== 0) throw new EnvError(`The file was moved to ${file}, but Toolkit could not limit it to your account; check its permissions.`);
+// A moved file keeps the permissions it had, so it gets its own.
+function makePrivateFile(file, options = {}) {
+  if (!restrictToCurrentUser(file, false, options)) throw new EnvError(`The file was moved to ${file}, but Toolkit could not limit it to your account; check its permissions.`);
 }
 
 function writeJsonAtomically(file, value) {

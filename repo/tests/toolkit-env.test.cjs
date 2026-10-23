@@ -312,10 +312,13 @@ test('retire moves ~/.codex/.env to a private backup only when every key is stor
   const backup = path.join(paths.backupsDir, folder, 'codex.env');
   assert.ok(fs.existsSync(backup));
   if (process.platform === 'win32') {
-    // The moved file gets its own current-user-only permissions, not the ones it came with.
-    const acl = spawnSync(path.join(process.env.SystemRoot, 'System32', 'icacls.exe'), [backup], { encoding: 'utf8' }).stdout;
-    assert.doesNotMatch(acl, /\(I\)|SYSTEM|Administrators/);
-    assert.match(acl, new RegExp(`${process.env.USERNAME}:\\(F\\)`));
+    // The folder and the moved file each hold one entry: the current user.
+    for (const target of [path.dirname(backup), backup]) {
+      const acl = spawnSync(path.join(process.env.SystemRoot, 'System32', 'icacls.exe'), [target], { encoding: 'utf8' }).stdout;
+      assert.doesNotMatch(acl, /\(I\)|NT AUTHORITY|BUILTIN|Everyone/, acl);
+      assert.equal(acl.split(/\r?\n/).filter((line) => /:\(/.test(line)).length, 1, acl);
+      assert.match(acl, new RegExp(`\\\\${process.env.USERNAME}:`, 'i'), acl);
+    }
   } else {
     assert.equal(fs.statSync(backup).mode & 0o777, 0o600);
   }
