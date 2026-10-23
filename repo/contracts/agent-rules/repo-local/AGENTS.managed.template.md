@@ -4,10 +4,10 @@ Source: repo/contracts/agent-rules/repo-local
 Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.
 -->
 
-<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/toolkit-governed-rules.md:BEGIN TOOLKIT-GOVERNED-RULES v2 toolkit=3.9.1 sha256=078ca598d9da -->
+<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/toolkit-governed-rules.md:BEGIN TOOLKIT-GOVERNED-RULES v2 toolkit=3.9.1 sha256=6223c67f377a -->
 # Toolkit-Governed Repository Rules
 
-This block and `.github/toolkit-programme.json` opt the repository into AI Agent Toolkit governance; nothing Toolkit-governed applies without both, or once the user declines. Generic rules come from the Toolkit global rules in the harness's user-level file. If they are not in your context (for example in a cloud session), read https://github.com/weijunswj/ai-agent-toolkit/blob/main/repo/contracts/agent-rules/global-rules.md before planning, and load the `n8n-safety-router` skill before any n8n work; if it is unavailable, stop and report that. Repository rules outside this block win on conventions; nothing here relaxes the global safety floor except the evidence-store line, which the floor names.
+This block and `.github/toolkit-programme.json` opt the repository into Toolkit governance; nothing governed applies without both or after the user declines. Generic rules are the Toolkit global rules in the harness's user-level file. If they are missing (for example in a cloud session), read https://github.com/weijunswj/ai-agent-toolkit/blob/main/repo/contracts/agent-rules/global-rules.md before planning, and load the `n8n-safety-router` skill before any n8n work; if it is unavailable, stop and report that. Repository rules outside this block win on conventions; nothing here relaxes the global safety floor except the evidence-store line, which the floor names.
 
 ## Gates
 
