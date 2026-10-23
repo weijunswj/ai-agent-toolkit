@@ -3,7 +3,9 @@
 
 // The full validation gate has one list: the "Run validation" step of .github/workflows/validate.yml,
 // which CI runs on every pull request and push to main. `npm run validate:all` runs the same commands,
-// in the same order, from that step, stopping at the first failure.
+// in the same order, from that step, stopping at the first failure. In CI the last command checks the
+// summaries of the test shards that ran before it; locally there are no shards, so the gate runs every
+// test file there instead (repo/scripts/run-tests.cjs --all).
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -12,6 +14,13 @@ const { spawnSync } = require('node:child_process');
 const ROOT = path.resolve(__dirname, '..', '..');
 const WORKFLOW = path.join(ROOT, '.github', 'workflows', 'validate.yml');
 const STEP_NAME = 'Run validation';
+const { VERIFY_COMMAND } = require('./ci-test-shards.cjs');
+const LOCAL_TESTS = 'node repo/scripts/run-tests.cjs --all';
+
+// The gate as a local run executes it.
+function localCommands(commands) {
+  return commands.map((command) => (command === VERIFY_COMMAND ? LOCAL_TESTS : command));
+}
 
 // The commands of the named step's `run: |` block, one per line.
 function gateCommands(source, stepName = STEP_NAME) {
@@ -33,7 +42,7 @@ function gateCommands(source, stepName = STEP_NAME) {
 }
 
 function main() {
-  const commands = gateCommands(fs.readFileSync(WORKFLOW, 'utf8'));
+  const commands = localCommands(gateCommands(fs.readFileSync(WORKFLOW, 'utf8')));
   for (const command of commands) {
     process.stdout.write(`\n> ${command}\n`);
     // The commands come from the repository's own workflow file, run in the repository root.
@@ -49,4 +58,4 @@ function main() {
 
 if (require.main === module) process.exitCode = main();
 
-module.exports = Object.freeze({ gateCommands, main });
+module.exports = Object.freeze({ LOCAL_TESTS, gateCommands, localCommands, main });

@@ -12,7 +12,15 @@ For this repo, the canonical full validation command is:
 npm run validate:all
 ```
 
-The gate has one list: the `Run validation` step of `.github/workflows/validate.yml`, which runs on every pull request and push to `main`. `npm run validate:all` runs the same commands in the same order from that step (`repo/scripts/run-validation-gate.cjs`), so the local and CI gates cannot drift. The workflow keeps the commands literal because the trusted-CI producer map (`repo/contracts/trusted-ci-repository-protection/candidate-producer-map.n6.json`) binds them. Its `approved_source_blob_sha` is the Git blob of the whole `.github/workflows/validate.yml` file, so any edit to that file, not only to this step, needs the new blob (`git rev-parse HEAD:.github/workflows/validate.yml` after committing the edit) written there in the same change. `validate:all` is the required CI and `main` merge gate.
+The gate has one list: the `Run validation` step of the `validate` job in `.github/workflows/validate.yml`, which runs on every pull request and push to `main`. `npm run validate:all` runs the same commands in the same order from that step (`repo/scripts/run-validation-gate.cjs`), so the local and CI gates cannot drift. In CI the test files run first, in shards on Linux and Windows, and the last command of the step (`run-tests.cjs --verify-ci`) proves from the shard summaries that every shard passed and that each system ran every test file exactly once; a local run has no shards, so that command runs every test file instead (`run-tests.cjs --all`). The workflow keeps the commands literal because the trusted-CI producer map (`repo/contracts/trusted-ci-repository-protection/candidate-producer-map.n6.json`) binds them, the `validate` job name and the step number (6). Its `approved_source_blob_sha` is the Git blob of the whole `.github/workflows/validate.yml` file, so any edit to that file, not only to this step, needs the new blob (`git rev-parse HEAD:.github/workflows/validate.yml` after committing the edit) written there in the same change. `validate:all` is the required CI and `main` merge gate.
+
+## Test Shards
+
+`repo/contracts/ci/test-shards.json` splits `repo/tests/*.test.cjs` into named shards per system. Each named shard lists its files; one `rest` shard per system runs every file no other shard names, so a new test file always runs. `durations_seconds` holds the last measured time per file, which orders files longest first inside a shard and lets `node repo/scripts/run-tests.cjs --plan` estimate each shard. Refresh it from a CI or local run with `--report-durations <file>`, and rebalance the named shards when one shard sets the critical path.
+
+The test jobs in `validate.yml` are pinned word for word by the drift guard (`workflowErrors` in `repo/scripts/ci-test-shards.cjs`, run by `repo/tests/ci-test-shards.test.cjs` and again by `--verify-ci` in CI). Adding or renaming a shard changes the manifest and the matrix together. The guard refuses narrowed file lists, `node --test` filters, `if: false`, masked exit codes, `continue-on-error`, matrix `include`/`exclude` edits and a `validate` job that does not wait for every shard.
+
+Every run, local or CI, gets its own temp folder: `%USERPROFILE%\t\run-<time>-<random>` by default, or under the `--temp-root` CI passes (the runner temp folder). It is set as `TEMP`, `TMP` and `TMPDIR` for every child process, used in its long form (never an 8.3 short name), and removed after the run, also when tests fail. A temp root at or directly under a drive root is refused.
 
 The whitespace check (`npm run validate:whitespace`, `repo/scripts/check-diff-whitespace.cjs`) compares the whole change with its base: in CI the pull request base or the previous `main` tip (`DIFF_BASE`), locally where the branch left `origin/main`, including uncommitted edits. A plain `git diff --check` sees only uncommitted edits, so on a clean CI checkout it checks nothing.
 
@@ -28,11 +36,12 @@ node repo/scripts/sync-agent-instruction-shims.cjs --check
 node repo/scripts/audit-project-source-locks.cjs
 npm run audit:surfaces
 npm run audit:surfaces:check
-node --test repo/tests/<specific-test-file>.test.cjs
+node repo/scripts/run-tests.cjs repo/tests/<specific-test-file>.test.cjs
+npm run test:changed
 git diff --check
 ```
 
-Pick the smallest command that checks the thing you changed.
+Pick the smallest command that checks the thing you changed. `npm run test:changed` runs the test files a change affects: changed test files, and test files that name a changed file.
 
 Before pushing, run the smallest relevant targeted checks that cover the edited files and any generated outputs.
 

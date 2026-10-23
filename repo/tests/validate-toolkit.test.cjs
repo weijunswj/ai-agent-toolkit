@@ -372,16 +372,29 @@ function parseWorkflowScalar(value) {
   return String(value || '').trim().replace(/^'(.*)'$/, '$1');
 }
 
-function parseValidationWorkflowSteps(source) {
+function workflowJobNames(source) {
+  const lines = source.replace(/\r\n/g, '\n').split('\n');
+  const jobsIndex = lines.findIndex((line) => /^jobs:\s*$/.test(line));
+  if (jobsIndex === -1) return [];
+  const names = [];
+  for (const line of lines.slice(jobsIndex + 1)) {
+    if (/^\S/.test(line)) break;
+    const match = line.match(/^  ([A-Za-z0-9_-]+):\s*$/);
+    if (match) names.push(match[1]);
+  }
+  return names;
+}
+
+function parseValidationWorkflowSteps(source, jobName = 'validate') {
   const lines = source.replace(/\r\n/g, '\n').split('\n');
   const jobsIndex = lines.findIndex((line) => /^jobs:\s*$/.test(line));
   if (jobsIndex === -1) return { steps: [], errors: ['missing jobs section'] };
-  const jobIndex = lines.findIndex((line, index) => index > jobsIndex && /^  validate:\s*$/.test(line));
-  if (jobIndex === -1) return { steps: [], errors: ['missing validate job'] };
+  const jobIndex = lines.findIndex((line, index) => index > jobsIndex && line.trimEnd() === `  ${jobName}:`);
+  if (jobIndex === -1) return { steps: [], errors: [`missing ${jobName} job`] };
   const nextJobIndex = lines.findIndex((line, index) => index > jobIndex && /^  [A-Za-z0-9_-]+:\s*$/.test(line));
   const jobEnd = nextJobIndex === -1 ? lines.length : nextJobIndex;
   const stepsIndex = lines.findIndex((line, index) => index > jobIndex && index < jobEnd && /^    steps:\s*$/.test(line));
-  if (stepsIndex === -1) return { steps: [], errors: ['missing validate job steps'] };
+  if (stepsIndex === -1) return { steps: [], errors: [`missing ${jobName} job steps`] };
   const stepStartIndexes = [];
   for (let index = stepsIndex + 1; index < jobEnd; index += 1) {
     if (/^      -(?:\s|$)/.test(lines[index])) stepStartIndexes.push(index);
@@ -414,12 +427,21 @@ function parseValidationWorkflowSteps(source) {
   return { steps, errors: [] };
 }
 
+// Every job of the validation workflow (test shards and the validate job) checks out the event's
+// full history before its validation floor.
 function validationWorkflowCheckoutErrors(source) {
-  const parsed = parseValidationWorkflowSteps(source);
+  const names = workflowJobNames(source);
+  if (!names.length) return ['missing jobs section'];
+  if (!names.includes('validate')) return ['missing validate job'];
+  return names.flatMap((name) => jobCheckoutErrors(source, name).map((error) => `${name}: ${error}`));
+}
+
+function jobCheckoutErrors(source, jobName) {
+  const parsed = parseValidationWorkflowSteps(source, jobName);
   if (parsed.errors.length) return parsed.errors;
   const errors = [];
   const checkouts = parsed.steps.filter((step) => /^actions\/checkout@/.test(step.uses));
-  if (checkouts.length !== 1) errors.push('validate job must have exactly one checkout action');
+  if (checkouts.length !== 1) errors.push('job must have exactly one checkout action');
   const checkout = checkouts[0];
   if (!checkout) return errors;
   if (!/^actions\/checkout@[0-9a-f]{40} # v7\.\d+\.\d+$/.test(checkout.uses)) errors.push('checkout must use actions/checkout v7 pinned to a commit SHA');
@@ -430,7 +452,7 @@ function validationWorkflowCheckoutErrors(source) {
   if (checkout.fields['continue-on-error'] === 'true') errors.push('checkout acquisition must not ignore failure');
   const validationIndex = parsed.steps.findIndex((step) => (
     step.source.includes('node repo/scripts/validate-toolkit.cjs') ||
-    step.source.includes('node --test repo/tests/*.test.cjs') ||
+    step.source.includes('node repo/scripts/run-tests.cjs') ||
     step.source.includes('npm run validate:all') ||
     step.source.includes('npm run validate:toolkit')
   ));
@@ -1288,9 +1310,8 @@ test('validator detects stale plugin package versions', () => {
   assert.match(result.stderr, /version does not match/);
 });
 
-test('automatic validation retains the canonical full gate while Validate toolkit is manual-only', () => {
+test('automatic validation keeps the canonical full gate and is the only validation workflow', () => {
   const validate = readText('.github/workflows/validate.yml');
-  const toolkit = readText('.github/workflows/validate-toolkit.yml');
 
   assert.match(validate, /^on:\n  pull_request:\n/m);
   assert.match(validate, /^  push:\n    branches:\n      - main$/m);
@@ -1300,42 +1321,32 @@ test('automatic validation retains the canonical full gate while Validate toolki
   assert.match(validate, /node repo\/scripts\/audit-project-source-locks\.cjs/);
   assert.match(validate, /node repo\/scripts\/audit-published-surfaces\.cjs --check/);
   assert.match(validate, /node repo\/scripts\/validate-toolkit\.cjs/);
-  assert.match(validate, /node --test repo\/tests\/\*\.test\.cjs/);
+  assert.match(validate, /node repo\/scripts\/run-tests\.cjs --shard \$\{\{ matrix\.shard \}\} --os linux /);
+  assert.match(validate, /node repo\/scripts\/run-tests\.cjs --shard \$\{\{ matrix\.shard \}\} --os windows /);
+  assert.match(validate, /node repo\/scripts\/run-tests\.cjs --verify-ci /);
   assert.doesNotMatch(validate, /sync-toolkit-projects\.cjs|package-skills\.cjs|package-packs\.cjs/);
-
-  assert.doesNotMatch(toolkit, /^  pull_request:$/m);
-  assert.doesNotMatch(toolkit, /^  push:$/m);
-  assert.match(toolkit, /^  workflow_dispatch:$/m);
-  assert.match(toolkit, /node --check repo\/scripts\/validate-toolkit\.cjs/);
-  assert.match(toolkit, /npm run validate:toolkit/);
-  assert.doesNotMatch(toolkit, /node --test repo\/tests\/\*\.test\.cjs|npm test/);
+  // The manual-only duplicate of the validator line was removed; Validate runs it on every change.
+  assert.equal(fs.existsSync(path.join(repoRoot, '.github', 'workflows', 'validate-toolkit.yml')), false);
 });
 
-test('automatic and manual validation workflows fetch full history before their own validation floor', () => {
-  const specs = [
-    { path: '.github/workflows/validate.yml', automatic: true, dispatch: false },
-    { path: '.github/workflows/validate-toolkit.yml', automatic: false, dispatch: true }
-  ];
-  for (const spec of specs) {
-    const source = readText(spec.path);
-    assert.deepEqual(validationWorkflowCheckoutErrors(source), [], spec.path);
-    assert.match(source, /^permissions:\n  contents: read$/m, spec.path + ' read-only permissions');
-    if (spec.automatic) {
-      assert.match(source, /^on:\n  pull_request:\n/m, spec.path + ' pull_request trigger');
-      assert.match(source, /^  push:\n    branches:\n      - main$/m, spec.path + ' main push trigger');
-    } else {
-      assert.doesNotMatch(source, /^  pull_request:$/m, spec.path + ' has no pull_request trigger');
-      assert.doesNotMatch(source, /^  push:$/m, spec.path + ' has no push trigger');
-    }
-    if (spec.dispatch) assert.match(source, /^  workflow_dispatch:$/m, spec.path + ' workflow_dispatch trigger');
-    else assert.doesNotMatch(source, /^  workflow_dispatch:$/m, spec.path + ' retains its existing trigger set');
-  }
+test('every validation job fetches full history before its own validation floor', () => {
+  const relPath = '.github/workflows/validate.yml';
+  const source = readText(relPath);
+  assert.deepEqual(validationWorkflowCheckoutErrors(source), [], relPath);
+  assert.deepEqual(workflowJobNames(source), ['tests-linux', 'tests-windows', 'validate']);
+  assert.match(source, /^permissions:\n  contents: read$/m, relPath + ' read-only permissions');
+  assert.match(source, /^on:\n  pull_request:\n/m, relPath + ' pull_request trigger');
+  assert.match(source, /^  push:\n    branches:\n      - main$/m, relPath + ' main push trigger');
+  assert.doesNotMatch(source, /^  workflow_dispatch:$/m, relPath + ' retains its existing trigger set');
 });
 
 test('validation workflow checkout regressions reject missing, shallow, misplaced, overridden, or bypassed acquisition', () => {
-  const specs = ['.github/workflows/validate.yml', '.github/workflows/validate-toolkit.yml'];
-  for (const relPath of specs) {
-    const source = readText(relPath);
+  const relPath = '.github/workflows/validate.yml';
+  const full = readText(relPath);
+  // Each mutation is applied to the first job (a test shard) and to the validate job.
+  const split = full.indexOf('\n  validate:\n');
+  const targets = [['first job', '', full], ['validate job', full.slice(0, split), full.slice(split)]];
+  for (const [where, head, source] of targets) {
     const withoutDepth = source.replace(/^          fetch-depth: 0\n/m, '');
     const variants = [
       ['omitted fetch depth', withoutDepth],
@@ -1346,8 +1357,8 @@ test('validation workflow checkout regressions reject missing, shallow, misplace
       ['checkout acquisition bypassed', source.replace(/^      - name: Checkout\n[\s\S]*?(?=^      - name: Set up Node)/m, '')]
     ];
     for (const [label, variant] of variants) {
-      assert.ok(variant !== source, relPath + ' variant must mutate source: ' + label);
-      assert.notDeepEqual(validationWorkflowCheckoutErrors(variant), [], relPath + ' must reject ' + label);
+      assert.ok(variant !== source, `${where} variant must mutate source: ${label}`);
+      assert.notDeepEqual(validationWorkflowCheckoutErrors(head + variant), [], `${where} must reject ${label}`);
     }
   }
 });

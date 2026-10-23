@@ -14,11 +14,11 @@ Last reviewed against `main` `1478dadaafb65cd5573a929f263cffbdbcc333b2`.
 | Controller kernel | `repo/contracts/controller-kernel/` | Stack registry, controller decision, gate IR and Codex adapter schemas |
 | Bridge contract | `repo/contracts/toolkit-local-bridge/` | Package version and native plugin inputs |
 | Scripts | `repo/scripts/` | Setup, bridge, hooks, synchronizers, audits and validators |
-| Tests | `repo/tests/` | Focused contract and runtime tests (`node --test repo/tests/*.test.cjs`) |
+| Tests | `repo/tests/` | Focused contract and runtime tests, run by `repo/scripts/run-tests.cjs` from the shard manifest `repo/contracts/ci/test-shards.json` |
 | Docs | `repo/docs/` | Human and agent docs, routed by `repo/docs/agent-playbooks/INDEX.md` |
 | Provenance | `repo/source-watch/` | Third-party source locks and the notification-only source watch |
 | Native plugins | `.claude-plugin/`, `.codex-plugin/` | Claude Code and Codex plugin metadata and hooks |
-| CI | `.github/workflows/` | `validate.yml` is the full gate; `env-store.yml` runs the env store tests on Windows |
+| CI | `.github/workflows/` | `validate.yml` is the full gate: test shards on Linux and Windows, then the `validate` job checks and verifies them; `env-store.yml` runs the env store tests on Windows |
 
 ## Entry points
 

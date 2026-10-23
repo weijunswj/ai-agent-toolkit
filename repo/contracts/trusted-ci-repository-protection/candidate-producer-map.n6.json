@@ -6,7 +6,7 @@
     "path": ".github/workflows/validate.yml",
     "event": "pull_request",
     "approved_ref": "refs/heads/main",
-    "approved_source_blob_sha": "ae90ef9f99c7690f204e2da11d22b7c2342c2341",
+    "approved_source_blob_sha": "6eae22fd74f6bd45809e6650d8c7af0ac4999677",
     "job": {
       "name": "validate"
     },
@@ -51,7 +51,7 @@
     },
     {
       "id": "repository-tests",
-      "command": "node --test repo/tests/*.test.cjs",
+      "command": "node repo/scripts/run-tests.cjs --verify-ci \"$RUNNER_TEMP/test-summaries\"",
       "path_classes": ["repository-tests"]
     },
     {

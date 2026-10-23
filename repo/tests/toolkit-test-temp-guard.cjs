@@ -16,7 +16,9 @@ const os = require('node:os');
 const path = require('node:path');
 const { after } = require('node:test');
 
-const REAL_REPORT_DIR = path.join(os.tmpdir(), 'ai-agent-toolkit', 'update-reports');
+// repo/scripts/run-tests.cjs gives each run its own temp folder and names the temp folder it started
+// with in TOOLKIT_TEST_REAL_TEMP, so the guard still watches the owner's real report folder.
+const REAL_REPORT_DIR = path.join(process.env.TOOLKIT_TEST_REAL_TEMP || os.tmpdir(), 'ai-agent-toolkit', 'update-reports');
 const NOTEPAD_PRELOAD = path.join(__dirname, 'toolkit-test-notepad-preload.cjs');
 
 function realReportNames() {

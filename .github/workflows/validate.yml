@@ -9,9 +9,18 @@ on:
 permissions:
   contents: read
 
+# The test files run in shards on Linux and Windows (repo/contracts/ci/test-shards.json). The
+# validate job runs after every shard, also when one failed: its "Run validation" step runs the
+# repository checks and then proves from the shard summaries that each system ran every test file
+# once with no failure. A failed, cancelled or skipped shard fails it.
 jobs:
-  validate:
+  tests-linux:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [linux-1, linux-2]
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -32,10 +41,90 @@ jobs:
         with:
           python-version: '3.12'
 
-      # The one gate list: `npm run validate:all` runs these same commands (repo/scripts/run-validation-gate.cjs).
+      - name: Run test shard
+        run: node repo/scripts/run-tests.cjs --shard ${{ matrix.shard }} --os linux --temp-root "${{ runner.temp }}/tests" --summary "${{ runner.temp }}/summary/test-summary-${{ matrix.shard }}.json"
+
+      - name: Upload test summary
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-summary-${{ matrix.shard }}
+          path: ${{ runner.temp }}/summary/test-summary-${{ matrix.shard }}.json
+          if-no-files-found: error
+          retention-days: 7
+
+  tests-windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [windows-1, windows-2, windows-3, windows-4]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Run test shard
+        run: node repo/scripts/run-tests.cjs --shard ${{ matrix.shard }} --os windows --temp-root "${{ runner.temp }}/tests" --summary "${{ runner.temp }}/summary/test-summary-${{ matrix.shard }}.json"
+
+      - name: Upload test summary
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-summary-${{ matrix.shard }}
+          path: ${{ runner.temp }}/summary/test-summary-${{ matrix.shard }}.json
+          if-no-files-found: error
+          retention-days: 7
+
+  validate:
+    needs: [tests-linux, tests-windows]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Download test summaries
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: test-summary-*
+          path: ${{ runner.temp }}/test-summaries
+          merge-multiple: true
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      # The one gate list: `npm run validate:all` runs these same commands (repo/scripts/run-validation-gate.cjs),
+      # except that locally the last command runs every test file instead of checking the shard summaries.
       - name: Run validation
         env:
           DIFF_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          TEST_LEGS: ${{ toJSON(needs) }}
         run: |
           node repo/scripts/sync-repo-doc-contract.cjs --check
           node repo/scripts/sync-agent-instruction-shims.cjs --check
@@ -43,7 +132,8 @@ jobs:
           node repo/scripts/audit-published-surfaces.cjs --check
           node repo/scripts/audit-fallback-risk.cjs
           node repo/scripts/validate-toolkit.cjs
-          node --test repo/tests/*.test.cjs
           node repo/scripts/audit-skill-portability.cjs
           node repo/scripts/run-design-tests.cjs
+          node repo/scripts/generate-n8n-stack-launcher-flow.cjs --check
           node repo/scripts/check-diff-whitespace.cjs
+          node repo/scripts/run-tests.cjs --verify-ci "$RUNNER_TEMP/test-summaries"
