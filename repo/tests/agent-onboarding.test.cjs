@@ -15,10 +15,11 @@ test('agent onboarding path exposes repo purpose and major navigation roots', ()
   const readme = readText('README.md');
   const agents = readText('AGENTS.md');
 
-  // The README is a short front page: supported OS, what it is, install, update, remove, skills, where the docs live.
+  // The README is a short front page: what it is, supported OS, install, update, remove, skills, where the docs live.
   const headings = [...readme.matchAll(/^## (.+)$/gm)].map((match) => match[1]);
   assert.deepEqual(headings.slice(0, 6), ['Install', 'Update', 'Remove', 'Skills', 'Where the docs live', 'Appendix: Source-of-Truth Contract']);
-  assert.equal(readme.split('\n')[2], '**Supported OS:** Windows 10 and 11. macOS and Linux computers are not supported. (Linux is still used for CI, cloud agent sessions and the remote servers some skills manage.)');
+  assert.match(readme.split('\n')[2], /^Skills and working rules for AI coding agents\. /);
+  assert.equal(readme.split('\n')[4], '**Supported OS:** Windows 10 and 11. macOS and Linux computers are not supported. (Linux is still used for CI, cloud agent sessions and the remote servers some skills manage.)');
   assert.match(readme, /Open the folder in Codex or Claude Code and say `setup toolkit`/);
   assert.match(readme, /say `refresh toolkit`/);
   assert.match(readme, /`claude plugin uninstall ai-agent-toolkit@ai-agent-toolkit-local`/);
