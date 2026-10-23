@@ -1,5 +1,9 @@
 # Toolkit Changelog
 
+## Unreleased (claude.ai account copy check)
+
+- **The Claude Code install check reports a stale claude.ai account copy of Toolkit.** The Claude desktop app runs the copy from your claude.ai account, and only claude.ai updates it (from main). Setup and each Claude Code session start now read that copy's version from the app's local plugin folder and, when it is older than the Toolkit on this computer, say so with the fix: check that Sync automatically is on for the ai-agent-toolkit marketplace in claude.ai, or remove that marketplace and add it again. Read only: Toolkit never changes the account copy, reports no ids or paths, and the notice blocks nothing.
+
 ## 3.9.0 (programme state and reconciler)
 
 - **State documents:** one private JSON document per programme outcome plus one for the parent, kept in a private store (`store.kind` `github`: `weijunswj/TRANSPORT-ai-agent-toolkit` under `state/weijunswj/ai-agent-toolkit/` for Toolkit) and bound by the new `.github/toolkit-programme.json`. Writes use compare-and-swap with readback and never write unchanged state; a fence epoch refuses stale writers after a takeover; gate returns are consumed by return ID, so reopen, resubmit and accept work in one session. Only the controller (the parent's holder) accepts a return or records UAT, review or completion; UAT and review must name the head they apply to; secret-shaped values are refused anywhere in a document. Schemas are in `repo/contracts/programme-state/`.
