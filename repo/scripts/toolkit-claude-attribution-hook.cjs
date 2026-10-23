@@ -2,12 +2,13 @@
 'use strict';
 
 // Claude Code PreToolUse hook for Bash and PowerShell: refuses a git commit or gh pr create/edit/merge that carries AI
-// attribution (see toolkit-attribution-guard.cjs). Any other command, or input it cannot read, passes.
+// attribution, and a command that skips a governed or guarded repository's commit and push checks (see
+// toolkit-attribution-guard.cjs). Any other command, or input it cannot read, passes.
 //
 // If the check itself fails (the guard module is missing or throws), only commands the guard would have
-// looked at are refused, with a plain reason; every other command still runs. The hook is registered
-// without `onFailure: "block"` on purpose: that would stop every shell command whenever the hook
-// process could not start.
+// looked at for attribution are refused, with a plain reason; every other command still runs. The hook is
+// registered without `onFailure: "block"` on purpose: that would stop every shell command whenever the
+// hook process could not start.
 const fs = require('node:fs');
 
 const CHECK_FAILED_REASON = 'Toolkit could not check this commit or pull request command for AI attribution lines. Retry it; if this repeats, run `setup toolkit` to repair the Toolkit plugin.';
