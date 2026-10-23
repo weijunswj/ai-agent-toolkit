@@ -348,16 +348,16 @@ function prepareInstalledSessionStartIfPresent(options = {}) {
 
 function prepareInstalledSessionStart(cacheRoot, options = {}) {
   if (!(options.platform || process.platform).startsWith('win')) return { changed: false };
+  // Codex puts the cache path inside double quotes in commandWindows; $ and ` expand in PowerShell and % in cmd.exe.
+  if (/[$`%"]/.test(path.resolve(cacheRoot))) {
+    throw new Error('The Codex plugin cache path contains $, `, % or ", which a Windows hook command cannot carry safely; move CODEX_HOME to a plain path.');
+  }
   const hooksPath = path.join(cacheRoot, '.codex-plugin', 'hooks', 'hooks.json');
   const nodePath = path.resolve(options.nodePath || process.execPath);
   const powershellPath = path.resolve(options.powershellPath || defaultWindowsPowerShellPath());
   for (const [filePath, label] of [[nodePath, 'Node executable'], [powershellPath, 'Windows PowerShell executable']]) {
     const stat = fs.lstatSync(filePath);
     if (stat.isSymbolicLink() || !stat.isFile()) throw new Error(`${label} must be a regular file for Toolkit SessionStart setup.`);
-  }
-  // Codex puts the cache path inside double quotes in commandWindows; $ and ` expand in PowerShell and % in cmd.exe.
-  if (/[$`%"]/.test(path.resolve(cacheRoot))) {
-    throw new Error('The Codex plugin cache path contains $, `, % or ", which a Windows hook command cannot carry safely; move CODEX_HOME to a plain path.');
   }
   const plain = withoutWindowsCommands(readJson(hooksPath));
   const sourceErrors = verifySessionStartHook(null, { hooks: plain });

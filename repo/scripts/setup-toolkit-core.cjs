@@ -2063,8 +2063,8 @@ function renderQuestionRows(specs, onlyRef = '') {
   return lines.join('\n').trimEnd();
 }
 
-// Table cells hold one line: pipes are escaped and line breaks become spaces.
-const tableCell = (text) => String(text || '').replace(/\r?\n/g, ' ').replace(/\|/g, '\\|');
+// Table cells hold one line: backslashes and pipes are escaped and line breaks become spaces.
+const tableCell = (text) => String(text || '').replace(/\r?\n/g, ' ').replace(/\\/g, '\\\\').replace(/\|/g, '\\|');
 
 // The bank as one compact table: the question, what is true now, the recommended choice and its
 // effect, and the other choices. The full text of a question is shown only on request.

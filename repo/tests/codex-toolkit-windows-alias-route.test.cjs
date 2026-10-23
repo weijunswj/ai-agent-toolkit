@@ -21,6 +21,8 @@ test('real Codex plugin verification route explains WindowsApps alias access den
   fs.writeFileSync(preload, [
     "'use strict';",
     "Object.defineProperty(process, 'platform', { value: 'win32' });",
+    // codex resolves to the WindowsApps alias on PATH, which then refuses to start.
+    `require(${JSON.stringify(path.join(repoRoot, 'repo', 'scripts', 'claude-process-launch.cjs'))}).resolvePathExecutable = () => 'C:\\\\Users\\\\me\\\\AppData\\\\Local\\\\Microsoft\\\\WindowsApps\\\\codex.exe';`,
     "const childProcess = require('node:child_process');",
     "childProcess.spawnSync = function fakeWindowsAliasFailure() {",
     "  return { status: 1, stdout: '', stderr: 'Access is denied', error: null };",

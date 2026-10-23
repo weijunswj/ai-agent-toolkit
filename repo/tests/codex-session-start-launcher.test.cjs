@@ -74,6 +74,8 @@ function createRealBridgePluginFixture(root) {
     'repo/scripts/setup-codex-toolkit-plugin.cjs',
     'repo/scripts/toolkit-staging-generations.cjs',
     'repo/scripts/toolkit-antigravity-project-skills.cjs',
+    'repo/scripts/toolkit-skill-copies.cjs',
+    'repo/scripts/claude-process-launch.cjs',
     'repo/scripts/toolkit-claude-plugin-registry.cjs',
     'repo/scripts/toolkit-canonical-path.cjs',
     'repo/scripts/toolkit-global-rules.cjs',
@@ -234,7 +236,7 @@ test('Windows installed commands use a full PowerShell path and -File with no ne
   assert.doesNotMatch(command, /\$env:|(?:^|\s)-Command(?:\s|$)|&\s*[{'"]/i);
   assert.doesNotMatch(command, /\.sh(?:["\s]|$)|(?:^|[\\/])code(?:\.exe)?(?:["\s]|$)/i);
   assert.match(setup.windowsHelperHookCommand('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'), /-File "\$\{PLUGIN_ROOT\}\/repo\/scripts\/toolkit-codex-helper-hook\.ps1"$/);
-  assert.throws(() => setup.prepareInstalledSessionStart(path.join(tmpRoot(), 'cache $dollar')), /cannot carry safely/);
+  assert.throws(() => setup.prepareInstalledSessionStart(path.join(tmpRoot(), 'cache $dollar'), { platform: 'win32' }), /cannot carry safely/);
 });
 
 test('Windows hook commands never run a planted node or powershell from the opened folder, under cmd and PowerShell', { skip: process.platform !== 'win32' }, () => {
