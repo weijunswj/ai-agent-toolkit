@@ -1715,7 +1715,9 @@ function buildUpdateReport({ args, state, checksum, context }) {
 
   lines.push('', '## What Has Been Done', '');
   if (nativePluginCache.status === 'refreshed') {
-    lines.push('- Codex native plugin cache was auto-refreshed from the trusted local Toolkit repo.');
+    lines.push(nativePluginCache.installed_version
+      ? `- Codex plugin updated to ${nativePluginCache.installed_version}. It takes effect in your next Codex session.`
+      : '- Codex plugin updated. It takes effect in your next Codex session.');
   } else if (nativePluginCache.status === 'refresh-failed') {
     lines.push('- Codex native plugin cache auto-refresh failed. Run `setup toolkit` to refresh Codex plugin skills, hooks, and metadata manually.');
   } else if (nativePluginCache.status === 'stale') {
@@ -2891,19 +2893,46 @@ function refreshCodexNativePluginCacheFromRepo({ args, state, repoPath, validate
     };
   }
 
-  const afterErrors = verifyInstalledCacheFreshness(before.plugin_root, resolvedRepoPath);
+  // Check the cache the helper just installed. After a version bump the folder this hook
+  // runs from is replaced, so re-checking it would report a failure that did not happen.
+  const installed = parseSetupHelperSummary(result.stdout);
+  if (!installed || installed.ok !== true || !installed.cache_root) {
+    return {
+      ...before,
+      status: 'refresh-failed',
+      errors: ['Codex plugin setup helper finished without reporting the installed cache folder']
+    };
+  }
+  const installedRoot = path.resolve(installed.cache_root);
+  const afterErrors = verifyInstalledCacheFreshness(installedRoot, resolvedRepoPath);
   if (afterErrors.length) {
     return {
       ...before,
+      plugin_root: installedRoot,
       status: 'refresh-failed',
       errors: afterErrors.slice(0, NATIVE_PLUGIN_CACHE_REPORT_ERROR_LIMIT)
     };
   }
   return {
     ...before,
+    plugin_root: installedRoot,
+    installed_version: typeof installed.version === 'string' ? installed.version : '',
     status: 'refreshed',
     errors: []
   };
+}
+
+// The Codex setup helper prints one pretty-printed JSON summary with --json; take the last one.
+function parseSetupHelperSummary(stdout) {
+  const text = String(stdout || '').replace(/\r\n/g, '\n').trim();
+  const start = text.startsWith('{') ? 0 : text.lastIndexOf('\n{') + 1;
+  if (start === 0 && !text.startsWith('{')) return null;
+  try {
+    const parsed = JSON.parse(text.slice(start));
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 function nativePluginCacheStatusForReport(args, state, options = {}) {

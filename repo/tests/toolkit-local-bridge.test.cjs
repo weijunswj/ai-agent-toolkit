@@ -491,8 +491,10 @@ function writeCodexPluginRefreshFixture(repoPath) {
     "const fs = require('node:fs');",
     "const path = require('node:path');",
     "const source = process.cwd();",
-    "const target = process.env.PLUGIN_ROOT;",
-    "if (!target) { console.error('missing PLUGIN_ROOT'); process.exit(9); }",
+    "const oldRoot = process.env.PLUGIN_ROOT;",
+    "if (!oldRoot) { console.error('missing PLUGIN_ROOT'); process.exit(9); }",
+    "const target = process.env.TOOLKIT_TEST_CODEX_NEW_CACHE || oldRoot;",
+    "fs.rmSync(oldRoot, { recursive: true, force: true });",
     "fs.rmSync(target, { recursive: true, force: true });",
     "fs.mkdirSync(path.dirname(target), { recursive: true });",
     "fs.cpSync(source, target, {",
@@ -507,7 +509,7 @@ function writeCodexPluginRefreshFixture(repoPath) {
     "  const runtimePath = path.join(target, '.codex-plugin', 'session-start-runtime.json');",
     "  fs.writeFileSync(runtimePath, JSON.stringify({ schema: 1, node_path: process.execPath }, null, 2) + '\\n');",
     "}",
-    "process.stdout.write(JSON.stringify({ ok: true }));",
+    "process.stdout.write(JSON.stringify({ ok: true, version: '9.9.9', cache_root: target }, null, 2));",
     ''
   ].join('\n'));
 }
@@ -3117,10 +3119,37 @@ test('hook report does not ask to enable Codex auto-refresh when it is already e
 
   const report = readLatestReport(hub);
   assert.match(report.text, /Action needed: none\./);
-  assert.match(report.text, /Codex native plugin cache was auto-refreshed/);
+  assert.match(report.text, /Codex plugin updated to 9\.9\.9\. It takes effect in your next Codex session\./);
   assert.match(report.text, /Codex native plugin cache: `refreshed`/);
   assert.doesNotMatch(report.text, /Enable Codex plugin auto-refresh/);
   assert.doesNotMatch(report.text, /run `setup toolkit`/);
+});
+
+test('Codex auto-refresh across a version bump checks the newly installed cache folder', () => {
+  const fixture = createRepoAutoUpdateFixture();
+  const root = fixture.root;
+  const oldPluginRoot = path.join(root, 'codex-cache', 'ai-agent-toolkit', '3.6.0');
+  const newPluginRoot = path.join(root, 'codex-cache', 'ai-agent-toolkit', '3.7.0');
+  const hub = path.join(root, 'hub', 'current');
+
+  writeCodexPluginRefreshFixture(fixture.repo);
+  writeFile(path.join(oldPluginRoot, 'skills', 'alpha', 'SKILL.md'), 'old alpha cache\n');
+  let result = run([
+    '--hub', hub, '--repo-path', fixture.repo, '--write', '--enable-auto-sync',
+    '--enable-codex-plugin-auto-refresh', '--sync-source', 'codex-plugin'
+  ], { env: isolatedHomeEnv(root, { PATH: process.env.PATH }) });
+  assert.equal(result.status, 0, result.stderr);
+
+  result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
+    env: isolatedHomeEnv(root, { PATH: process.env.PATH, PLUGIN_ROOT: oldPluginRoot, TOOLKIT_TEST_CODEX_NEW_CACHE: newPluginRoot })
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.existsSync(oldPluginRoot), false, 'the folder the hook ran from was replaced');
+  assert.equal(fs.existsSync(path.join(newPluginRoot, '.codex-plugin', 'plugin.json')), true);
+  const report = readLatestReport(hub);
+  assert.match(report.text, /Codex native plugin cache: `refreshed`/);
+  assert.match(report.text, /Codex plugin updated to 9\.9\.9\. It takes effect in your next Codex session\./);
+  assert.doesNotMatch(report.text, /refresh-failed|run `setup toolkit`/);
 });
 
 test('Claude hook reports the install check and never runs Codex refresh', () => {
@@ -3144,7 +3173,7 @@ test('Claude hook reports the install check and never runs Codex refresh', () =>
   assert.match(report.text, /^## Install check$/m);
   assert.doesNotMatch(report.text, /Claude Code native plugin cache/);
   assert.doesNotMatch(report.text, /Codex native plugin cache/);
-  assert.doesNotMatch(report.text, /Codex native plugin cache was auto-refreshed/);
+  assert.doesNotMatch(report.text, /Codex plugin updated/);
 });
 
 test('hook auto-refreshes stale Codex native plugin cache only after setup opt-in', () => {
@@ -3184,7 +3213,7 @@ test('hook auto-refreshes stale Codex native plugin cache only after setup opt-i
   );
 
   const report = readLatestReport(hub);
-  assert.match(report.text, /Codex native plugin cache was auto-refreshed/);
+  assert.match(report.text, /Codex plugin updated to 9\.9\.9\. It takes effect in your next Codex session\./);
   assert.match(report.text, /Codex native plugin cache: `refreshed`/);
   const state = readJson(path.join(hub, 'state.json'));
   assert.equal(state.codex_plugin_auto_refresh_enabled, true);
@@ -3236,7 +3265,7 @@ test('Codex auto-refresh runs before a delegated hub sync failure', () => {
   );
 
   const report = readLatestReport(hub);
-  assert.match(report.text, /Codex native plugin cache was auto-refreshed/);
+  assert.match(report.text, /Codex plugin updated to 9\.9\.9\. It takes effect in your next Codex session\./);
   assert.match(report.text, /Codex native plugin cache: `refreshed`/);
   assert.match(report.text, /repo update status: `sync-delegation-failed`/);
   assert.match(report.text, /warning\/error: `delegated repo sync failed:/);
