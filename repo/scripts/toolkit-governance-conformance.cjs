@@ -34,9 +34,9 @@ function expectedGovernedBlock(root = ROOT) {
   return { source: GOVERNED_SOURCE_REL, name: governance.GOVERNED_BLOCK, version, body };
 }
 
-// Whether this Toolkit copy ships a prompt-submit hold hook for a host. The installed and
-// trusted state on a computer is checked by the hook release; until a hook ships, every host
-// reports `inactive`.
+// Whether this Toolkit copy ships a prompt-submit hold hook for a host. A host whose hook files
+// carry no hold hook reports `inactive`; a shipped hook is not yet proof that it is installed
+// and trusted on this computer.
 function enforcementStatus(root = ROOT) {
   const hosts = {};
   for (const [host, parts] of Object.entries(HOST_HOOK_FILES)) {
@@ -132,7 +132,7 @@ function governedBlockFindings(repoRoot, toolkitRoot) {
   try { expected = expectedGovernedBlock(toolkitRoot); } catch { return [...out, finding('SOURCE_UNAVAILABLE', 'info', 'This Toolkit copy has no governed-rules source to compare with.')]; }
   const blockState = managedBlock.blockState(materials.block, expected);
   if (blockState === 'tampered') out.push(finding('GOVERNED_BLOCK_EDITED', 'drift', 'The governed block in AGENTS.md was edited by hand (its body no longer matches its digest).'));
-  else if (blockState === 'stale') out.push(finding('GOVERNED_BLOCK_STALE', 'drift', `The governed block in AGENTS.md is not the Toolkit ${expected.version} version; a refresh asks first and lands through a pull request.`));
+  else if (blockState === 'stale') out.push(finding('GOVERNED_BLOCK_STALE', 'drift', 'The governed block in AGENTS.md is older than, or different from, this Toolkit copy\'s governed rules; a refresh asks first and lands through a pull request.'));
   return out;
 }
 

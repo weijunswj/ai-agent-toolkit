@@ -214,7 +214,7 @@ function isPlainObject(value) { return value !== null && typeof value === 'objec
 function onlyKeys(value, allowed) { return Object.keys(value).every(key => allowed.includes(key)); }
 
 // The problems with a parsed binding against toolkit.programme-binding.v1
-// (repo/contracts/programme-state/binding-v1.schema.json, shipped with 3.9.0), plus the rule that
+// (repo/contracts/programme-state/binding-v1.schema.json), plus the rule that
 // the binding agrees with the origin identity and cannot override it. Empty when valid.
 function bindingProblems(binding, identity) {
   const problems = [];

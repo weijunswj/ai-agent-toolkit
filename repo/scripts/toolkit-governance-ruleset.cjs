@@ -1,7 +1,7 @@
 'use strict';
 
 // The no-force-push branch ruleset a Toolkit-governed (ENABLED) GitHub repository must carry
-// (#542, owner 2026-10-23): an active repository or organisation ruleset that targets branches,
+// (#542): an active repository or organisation ruleset that targets branches,
 // includes `~ALL` with no exclusions, and has a `non_fast_forward` rule. Only github.com
 // repositories can carry one; any other host reports `not-applicable`. A private repository on
 // GitHub Free cannot have rulesets at all (GitHub answers 403 "Upgrade to GitHub Pro"): that is
