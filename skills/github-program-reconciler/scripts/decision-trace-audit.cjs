@@ -95,7 +95,9 @@ function repairedBody(body, unlinked) {
 }
 
 function gh(args) {
-  const result = spawnSync('gh', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  // Load at call time: programme-state also imports this audit's threshold.
+  const { resolveExecutable } = require('./programme-state.cjs');
+  const result = spawnSync(resolveExecutable('gh'), args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, windowsHide: true });
   if (result.status !== 0) throw new Error(`gh ${args.join(' ')} failed: ${String(result.stderr || result.error?.message || '').trim()}`);
   return result.stdout;
 }

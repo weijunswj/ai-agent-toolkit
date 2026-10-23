@@ -45,7 +45,7 @@ function setup() {
   });
   const parentDoc = () => store.read('parent', 421).doc;
   const claimAsBuilder = () => store.mutate('child', 423, { writer: builder, authorise: false, create: () => state.newChild({ repository, outcome: CATALOGUE[0] }), change: doc => state.claimDocument(doc, builder, { role: 'G1' }) });
-  return { github, store, reconciler, parentDoc, claimAsBuilder };
+  return { github, store, binding, reconciler, parentDoc, claimAsBuilder };
 }
 
 test('a takeover during a pass stops the old writer before its next GitHub or state write', () => {
@@ -80,6 +80,65 @@ test('an executor cannot accept its own return; the controller can', () => {
   assert.equal(store.read('child', 423).doc.gate.state, 'SUBMITTED');
   store.mutate('child', 423, { writer: controller, parentDoc: parentDoc(), change: doc => state.consumeReturn(doc, { returnId: 'r1', verdict: 'ACCEPT', writer: controller, parentDoc: parentDoc() }) });
   assert.equal(store.read('child', 423).doc.gate.state, 'RETIRED');
+});
+
+test('executor apply and parent claim refusals name the controller without suggesting takeover', () => {
+  const cli = require('../../skills/github-program-reconciler/scripts/programme.cjs');
+  const { github, store, binding, claimAsBuilder } = setup();
+  claimAsBuilder();
+  const deps = { transport: github, binding, originUrl: 'https://github.com/acme/app.git', repoRoot: __dirname,
+    toolkitVersion: '3.9.0', environment: {}, stdout: { write() {} } };
+  const writes = github.mutations();
+  for (const [args, code] of [[['reconcile', '--apply'], 'STALE_WRITER'], [['claim', '--parent'], 'CLAIM_HELD']]) {
+    assert.throws(() => cli.main([...args, '--session', builder.session], deps), error => {
+      assert.equal(error.code, code);
+      assert.match(error.message, /appointed controller \(INT-TK421-, epoch 1\)/);
+      assert.match(error.message, /only that controller applies/);
+      assert.match(error.message, /dry run and report/);
+      assert.doesNotMatch(error.message, /--takeover|claim it first/i);
+      return true;
+    });
+  }
+  assert.equal(github.mutations(), writes);
+  assert.equal(store.read('parent', 421).doc.fence.holder_session, controller.session);
+  const child = store.read('child', 423).doc;
+  for (const action of [() => state.claimDocument(child, successor), () => state.authoriseWrite('child', child, null, successor)]) {
+    assert.throws(action, error => {
+      assert.match(error.message, /G1 gate holder \(INT-TK421-, epoch 1\)/);
+      return true;
+    });
+  }
+});
+
+test('binding documentation scopes opt-in to the reconciler while governed issue records remain', () => {
+  const read = file => fs.readFileSync(path.resolve(__dirname, '..', '..', file), 'utf8');
+  const rules = read('repo/contracts/agent-rules/global-rules.md');
+  if (!rules.includes('.github/toolkit-programme.json')) {
+    for (const file of ['README.md', 'skills/github-program-reconciler/SKILL.md']) {
+      const text = read(file);
+      assert.doesNotMatch(text, /(?:issue tracking|records|comments)[^.\n]*(?:off by default|opt-in)/i, file);
+      assert.doesNotMatch(text, /Toolkit writes no issues, comments or records|without the binding it does nothing/i, file);
+      assert.match(text, /Toolkit-governed rules[^\n]*issue records are unchanged in 3\.9\.0/, file);
+      assert.match(text, /without that block get no governed issue writes/i, file);
+      assert.match(text, /every `programme\.cjs` command refuses without it/, file);
+    }
+  }
+});
+
+test('implicit skill guidance limits apply and parent takeover to appointed controllers', () => {
+  const read = file => fs.readFileSync(path.resolve(__dirname, '..', '..', file), 'utf8');
+  const skill = read('skills/github-program-reconciler/SKILL.md');
+  const when = skill.split('## When to run')[1].split('## What ships')[0];
+  const prompt = read('skills/github-program-reconciler/agents/openai.yaml').split('default_prompt: ')[1].split('\n')[0];
+  const trigger = JSON.parse(read('repo/docs/skill-creation-center-baseline.json')).skill_creation_review['github-program-reconciler'].trigger;
+  for (const text of [when, prompt, trigger]) {
+    assert.match(text, /Any session may (?:run the )?dry-run/i);
+    assert.match(text, /only the appointed controller holding the parent document runs `?--apply/i);
+    assert.match(text, /Executors[^.]*never apply, claim the parent or take over/);
+    assert.match(text, /Only a newly appointed controller takes over[^.]*after posting its takeover record/);
+    assert.match(text, /the binding is added/i);
+    assert.doesNotMatch(text, /governance setup/);
+  }
 });
 
 test('an executor cannot record its own UAT, review or completion', () => {

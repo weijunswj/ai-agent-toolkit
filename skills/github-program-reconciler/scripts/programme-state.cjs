@@ -327,7 +327,7 @@ function validateBinding(binding) {
 function loadBinding(repoRoot) {
   const file = path.join(repoRoot, BINDING_FILE);
   if (!fs.existsSync(file)) {
-    throw new ProgrammeError('BINDING_MISSING', `This repository has not opted into Toolkit GitHub tracking (no ${BINDING_FILE.replace(/\\/g, '/')}), so the reconciler does nothing here. Only the owner adds the binding, on purpose.`);
+    throw new ProgrammeError('BINDING_MISSING', `This repository has no reconciler binding (${BINDING_FILE.replace(/\\/g, '/')}); every programme.cjs command refuses without it. Only the owner adds the binding, on purpose. Toolkit-governed rules and their issue records are unchanged.`);
   }
   let binding;
   try { binding = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '')); }
@@ -377,17 +377,22 @@ function isHolder(doc, writer) {
   return Boolean(doc?.fence?.holder_session) && doc.fence.holder_session === writer.session && doc.fence.holder_prefix === writer.prefix;
 }
 
+function holderDescription(doc, kind = doc?.schema === SCHEMA.parent ? 'parent' : 'child') {
+  const role = kind === 'parent' ? 'appointed controller' : `${doc?.gate?.role || 'unassigned'} gate holder`;
+  return `${role} (${doc?.fence?.holder_prefix || 'nobody'}, epoch ${doc?.fence?.epoch ?? 0})`;
+}
+
 function authoriseWrite(kind, doc, parentDoc, writer) {
   if (!writer || !isText(writer.session) || !PREFIX.test(String(writer.prefix || ''))) {
     throw new ProgrammeError('WRITER_UNKNOWN', 'Writes need a session (--session or TOOLKIT_PROGRAMME_SESSION) and a record prefix.');
   }
   if (kind === 'parent') {
-    if (doc && !isHolder(doc, writer)) throw new ProgrammeError('STALE_WRITER', `This session does not hold the parent document (held by ${doc.fence.holder_prefix || 'nobody'} at epoch ${doc.fence.epoch}). Claim it first, or take over explicitly.`);
+    if (doc && !isHolder(doc, writer)) throw new ProgrammeError('STALE_WRITER', `The parent document is held by the ${holderDescription(doc)}; only that controller applies. Run a dry run and report instead.`);
     return;
   }
   if (doc && isHolder(doc, writer)) return;
   if (parentDoc && isHolder(parentDoc, writer)) return;
-  throw new ProgrammeError('STALE_WRITER', `This session holds neither issue ${doc?.issue ?? ''} nor the parent document. Claim it first, or take over explicitly.`);
+  throw new ProgrammeError('STALE_WRITER', `Issue ${doc?.issue ?? ''} is held by the ${holderDescription(doc)}; the parent document is held by the ${holderDescription(parentDoc, 'parent')}. This session holds neither document; report to the controller.`);
 }
 
 // Claim or take over a document: one compare-and-swap that increments the epoch and records the holder.
@@ -396,7 +401,9 @@ function claimDocument(doc, writer, { takeover = false, role = null, route = nul
   const held = Boolean(next.fence.holder_session);
   if (isHolder(next, writer) && !role) return null;
   if (held && !isHolder(next, writer) && !takeover) {
-    throw new ProgrammeError('CLAIM_HELD', `Already held by ${next.fence.holder_prefix} at epoch ${next.fence.epoch}. Use --takeover after the old writer has stopped.`);
+    throw new ProgrammeError('CLAIM_HELD', next.schema === SCHEMA.parent
+      ? `The parent document is held by the ${holderDescription(next)}; only that controller applies. Run a dry run and report instead.`
+      : `Issue ${next.issue} is held by the ${holderDescription(next)}. Report to the controller before changing gate custody.`);
   }
   if (!isHolder(next, writer)) next.fence = { epoch: next.fence.epoch + 1, holder_prefix: writer.prefix, holder_session: writer.session };
   if (next.schema === SCHEMA.child && role) {
@@ -410,6 +417,11 @@ function claimDocument(doc, writer, { takeover = false, role = null, route = nul
     next.private = { ...next.private, host_session: writer.session };
   }
   return next;
+}
+
+function currentGateAccepted(child) {
+  const latest = child.gate.returns.at(-1);
+  return child.gate.state === 'RETIRED' && Boolean(latest?.consumed && latest.verdict === 'ACCEPT');
 }
 
 // LIFE-1 successor: returns are consumed by return ID, never by session. REOPEN keeps the session
@@ -426,7 +438,7 @@ function submitReturn(doc, { returnId, writer }) {
     throw new ProgrammeError('GATE_NOT_ACTIVE', `The gate is ${next.gate.state || 'not started'}; only an active gate can submit a return.`);
   }
   if (next.gate.session_id && writer && next.gate.session_id !== writer.session && !isHolder(next, writer)) {
-    throw new ProgrammeError('STALE_WRITER', 'Only the gate session or the holder can submit its return.');
+    throw new ProgrammeError('STALE_WRITER', `Only the gate session or the ${holderDescription(next)} can submit its return.`);
   }
   next.gate.returns.push({ return_id: returnId, verdict: null, consumed: false, epoch: next.fence.epoch });
   next.gate.state = 'SUBMITTED';
@@ -871,7 +883,7 @@ class StateStore {
         const fresh = this.read(kind, number);
         if (!fresh.doc) throw error;
         if (origin && (fresh.doc.fence.epoch !== origin.fence.epoch || fresh.doc.fence.holder_session !== origin.fence.holder_session)) {
-          throw new ProgrammeError('STALE_WRITER', `${this.docPath(kind, number)} was taken over (epoch ${fresh.doc.fence.epoch}); this write was refused.`);
+          throw new ProgrammeError('STALE_WRITER', `${this.docPath(kind, number)} is now held by the ${holderDescription(fresh.doc)}; this write was refused.`);
         }
         const touched = Object.keys({ ...start, ...next }).filter(key => key !== 'revision' && key !== 'volatile'
           && JSON.stringify(canonical(start[key])) !== JSON.stringify(canonical(next[key])));
@@ -1156,8 +1168,8 @@ class Reconciler {
     const pr = observed.prs.get(issueNumber);
     if (pr) {
       if (pr.state === 'MERGED' && checks.state === 'GREEN' && checks.at_head === pr.head && issue.state === 'open') {
-        const accepted = desired.gate.returns.some(entry => entry.consumed && entry.verdict === 'ACCEPT');
-        findings.push({ code: 'READY_TO_CLOSE', issue: issueNumber, pr: pr.number, head: pr.head, accepted,
+        const accepted = currentGateAccepted(desired);
+        findings.push({ code: 'READY_TO_CLOSE', issue: issueNumber, pr: pr.number, head: pr.head, accepted, uat: desired.uat.state, review: desired.review.state,
           detail: `PR #${pr.number} merged, checks GREEN at ${shortSha(pr.head)}; ${accepted ? 'acceptance recorded' : 'no accepted return yet'}` });
       }
       if (desired.candidate.head && pr.state !== 'MERGED' && pr.state !== 'CLOSED' && desired.candidate.head !== pr.head) {
@@ -1172,7 +1184,7 @@ class Reconciler {
     // Document versus issue.
     if (desired.lifecycle === 'DONE' && issue.state === 'open') findings.push({ code: 'CHILD_STATE_CONFLICT', issue: issueNumber, detail: 'the state document says DONE but the issue is open' });
     if (!['DONE', 'RETIRED'].includes(desired.lifecycle) && issue.state === 'closed') findings.push({ code: 'CHILD_STATE_CONFLICT', issue: issueNumber, detail: `the issue is closed but the state document says ${desired.lifecycle}` });
-    if (pr?.state === 'MERGED' && desired.lifecycle !== 'DONE' && !desired.gate.returns.some(entry => entry.consumed && entry.verdict === 'ACCEPT')) {
+    if (pr?.state === 'MERGED' && desired.lifecycle !== 'DONE' && !currentGateAccepted(desired)) {
       findings.push({ code: 'CHILD_STATE_CONFLICT', issue: issueNumber, detail: `PR #${pr.number} is merged but no accepted completion is recorded` });
     }
   }
@@ -1487,7 +1499,7 @@ class Reconciler {
       mode: apply ? 'apply' : 'dry-run',
       parent_revision: plan.parent?.revision ?? null,
       findings: plan.findings,
-      close_list: plan.findings.filter(finding => finding.code === 'READY_TO_CLOSE').map(({ issue, pr, head, accepted }) => ({ issue, pr, head, accepted })),
+      close_list: plan.findings.filter(finding => finding.code === 'READY_TO_CLOSE').map(({ issue, pr, head, accepted, uat, review }) => ({ issue, pr, head, accepted, uat, review })),
       effects: plan.effects.map(effect => ({ kind: effect.kind, target: effect.target, text: effect.text })),
       recovered: plan.resolutions,
       holds: plan.holds,
@@ -1508,7 +1520,7 @@ class Reconciler {
           : `${report.effects.length} planned effect(s), ${report.holds.length} hold(s)`;
     const attention = report.findings.filter(finding => ATTENTION.has(finding.code));
     report.next_action = report.holds.length ? `Resolve ${report.holds[0].code} on ${report.holds[0].target}: ${report.holds[0].detail}`
-      : !apply && report.effects.length ? 'Review this plan, then run reconcile --apply'
+      : !apply && report.effects.length ? 'Report this plan; only the appointed controller holding the parent document runs reconcile --apply'
         : attention.length ? `Controller: decide on ${attention.length} finding(s) the reconciler does not change, starting with ${attention[0].code} on #${attention[0].issue}`
           : 'None: the state documents and GitHub agree';
     return report;

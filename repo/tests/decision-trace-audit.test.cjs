@@ -2,10 +2,46 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
 const { auditDecisionTraces, repairedBody, parseArgs, INDEX_COMMENT_MARKER, INDEX_BEGIN, INDEX_END } = require('../../skills/github-program-reconciler/scripts/decision-trace-audit.cjs');
 
 const person = (id, body) => ({ id, user: { login: 'owner', type: 'User' }, body });
 const PREFIX = 'INT-TK421-';
+
+test('the CLI resolves gh to a full path and hides its window for both read-only requests', () => {
+  const source = fs.readFileSync(path.resolve(__dirname, '../../skills/github-program-reconciler/scripts/decision-trace-audit.cjs'), 'utf8');
+  const calls = [];
+  const resolved = path.resolve(__dirname, 'fake-gh.exe');
+  const context = {
+    module: {}, process: { argv: ['node', 'audit', '--repo', 'acme/app', '--issue', '7'], stdout: { write() {} } },
+    require(name) {
+      if (name === './programme-state.cjs') return { resolveExecutable(executable) { assert.equal(executable, 'gh'); return resolved; } };
+      if (name === 'node:child_process') return { spawnSync(executable, args, options) {
+        calls.push({ executable, args, options });
+        return { status: 0, stdout: args.includes('--paginate') ? '[[]]' : '{"body":""}' };
+      } };
+      return require(name);
+    },
+  };
+  context.require.main = context.module;
+  vm.runInNewContext(source, context);
+  assert.equal(context.process.exitCode, 0);
+  assert.equal(calls.length, 2);
+  for (const call of calls) {
+    assert.equal(call.executable, resolved);
+    assert.equal(call.options.windowsHide, true);
+    assert.equal(call.args[0], 'api');
+    assert.equal(call.args.includes('--method'), false);
+  }
+});
+
+test('loading the audit before programme state preserves the shared body threshold', () => {
+  const state = require('../../skills/github-program-reconciler/scripts/programme-state.cjs');
+  const reconciler = new state.Reconciler({});
+  assert.equal(reconciler.threshold, 60000);
+});
 
 test('every non-bot comment must be reachable from the body, directly or through a linked index comment', () => {
   const comments = [

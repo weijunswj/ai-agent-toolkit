@@ -1,19 +1,19 @@
 ---
 name: github-program-reconciler
-description: Toolkit GitHub tracking for repositories that opted in with .github/toolkit-programme.json - use it on its own at significant events (governance setup; a task (child issue) added, deleted or modified; after a merge; a PR opened or its head moved; an issue closed or reopened; outcomes reordered or reprioritised; a release shipped; a controller appointed or rebinding) to keep private per-child state documents, native sub-issue links, PR heads, required checks, state blocks, decision traces and review records in step. Without the binding it does nothing. Never closes, deletes or merges.
+description: Reconcile programme state on github.com where .github/toolkit-programme.json exists. Any session may dry-run reconcile and report at significant events (the binding is added; a child issue changes; a merge; a PR opens or its head moves; an issue closes or reopens; outcomes reorder; a release; a controller changes). Only the appointed controller holding the parent document runs --apply. Executors never apply, claim the parent or take over; only a newly appointed controller takes over after posting its takeover record. Every programme.cjs command refuses without the binding; governed issue records are unchanged in 3.9.0. Never closes, deletes or merges.
 ---
 
 # GitHub Program Reconciler
 
-This skill loads on its own (its OpenAI metadata sets `allow_implicit_invocation: true`), but only acts in a repository that has opted into Toolkit GitHub tracking. Check for `.github/toolkit-programme.json` first; without it, stop. Ordinary GitHub reads, coding and reviews do not need it, and loading on its own grants no extra authority: every write still needs the fence and checks below.
+This skill loads on its own (its OpenAI metadata sets `allow_implicit_invocation: true`). The reconciler, its state documents, managed blocks and sub-issue links act only where `.github/toolkit-programme.json` exists; every `programme.cjs` command refuses without it. Ordinary GitHub reads, coding, reviews and the separate read-only decision-trace audit do not need that binding. Loading on its own grants no extra authority: every write still needs the fence and checks below.
 
-**Who uses it.** Toolkit GitHub tracking (issue tracking, parent and child tasks, records, comments and this reconciler) is off by default and opt-in per repository: the owner adds `.github/toolkit-programme.json`, binding the parent issue and the private store, on purpose. It needs GitHub (or a GitHub-like host with repositories and parent/child issues). Every other repository, including ones the owner does not control such as a company or someone else's repository, gets only the coding-governance gates, subagents and portable skills; Toolkit writes no issues, comments or records there, the reconciler refuses to run, and tasks are tracked the way that repository decides.
+**Who uses it.** The owner opts into the reconciler by adding `.github/toolkit-programme.json`, binding the parent issue and its private state store. This version supports github.com only, and its state store supports `kind: github` only. The Toolkit-governed rules (the `TOOLKIT-GOVERNED-RULES` block in `AGENTS.md`) and their issue records are unchanged in 3.9.0; the binding does not switch them off. Company or third-party repositories without that block get no governed issue writes, only the coding-governance gates, subagents and portable skills.
 
 ## When to run
 
-Run a dry-run `reconcile` at these significant events, then use `--apply` within the fences when it plans effects:
+Any session may run the dry-run `reconcile` at these significant events and report it. Only the appointed controller holding the parent document runs `--apply`. Executors (G0, G1, G2 and helpers) never apply, claim the parent or take over. Only a newly appointed controller takes over, after posting its takeover record and verifying that the previous writer stopped.
 
-- The binding is added (the repository opts into Toolkit GitHub tracking).
+- The binding is added (the repository opts into the reconciler).
 - A task (child issue) is added, deleted or modified.
 - A merge completes.
 - A PR is opened or its head moves.
@@ -22,7 +22,7 @@ Run a dry-run `reconcile` at these significant events, then use `--apply` within
 - A release ships.
 - A controller is appointed or rebinds.
 
-Check for the binding first at each event; without it, do nothing. It never closes, deletes or merges.
+Check for the binding first at each event; without it, do not run `programme.cjs`. The separate decision-trace audit and governed issue records are unchanged. The reconciler never closes, deletes or merges.
 
 ## What ships
 
@@ -62,7 +62,7 @@ One private JSON document per outcome (`issue-<n>.json`) and one for the parent 
 - Writes use Contents API compare-and-swap on the blob sha with readback. Unchanged state is never written (GitHub would still make an empty commit). The revision moves only when content changes; timestamps and pending effects do not count.
 - On a 409 the change is re-applied only when the other writer touched different top-level fields and the fence did not move; otherwise `STATE_CONFLICT` or `STALE_WRITER`.
 
-**Fence.** A document is held by one session and record prefix. A child may be written by its holder or by the parent's holder. `claim --takeover` increments the epoch in one compare-and-swap. A running pass re-reads the parent fence immediately before every state write and every GitHub change, so after a takeover the old pass stops at its next effect (`STALE_WRITER`); an intent it leaves `IN_FLIGHT` is settled by the successor's readback. The fence orders cooperating Toolkit writers under one account; it authenticates nobody and does not stop a person or another tool editing.
+**Fence.** A document is held by one session and record prefix. A child may be written by its holder or by the parent's holder. `claim --takeover` increments the epoch in one compare-and-swap; for the parent it is only for a newly appointed controller after posting its takeover record and verifying that the previous writer stopped. Executors never claim the parent or take over; a controller arranges any child gate custody change. A running pass re-reads the parent fence immediately before every state write and every GitHub change, so after a takeover the old pass stops at its next effect (`STALE_WRITER`); an intent it leaves `IN_FLIGHT` is settled by the successor's readback. The fence orders cooperating Toolkit writers under one account; it authenticates nobody and does not stop a person or another tool editing.
 
 **Who records what.** The child's holder (for example the G1 builder) may set release, candidate, blockers, next action, `private`, a non-final lifecycle, and submit a return. Only the parent's holder (the controller) consumes a return, records UAT and review, or sets `DONE` or `RETIRED` (`ROLE_REFUSED` otherwise), so no executor records its own acceptance.
 
@@ -75,7 +75,7 @@ One private JSON document per outcome (`issue-<n>.json`) and one for the parent 
 | Command | Writes |
 |---|---|
 | `reconcile [--issue <n>]` | Nothing: prints findings and the effect plan |
-| `reconcile --apply [--issue <n>]` | State documents and GitHub, as planned; needs the parent fence |
+| `reconcile --apply [--issue <n>]` | State documents and GitHub, as planned; only the appointed controller holding the parent document |
 | `show [--parent \| --issue <n>] [--include-private]` | Nothing; sessions and `private` are redacted unless asked |
 | `init-parent --catalogue <file> [--apply]` | Creates the parent document, held by this session |
 | `update-parent --patch <file>` | Catalogue, release plan or `private` (merge patch) |
@@ -93,7 +93,7 @@ Writes need `--session <id>` (or `TOOLKIT_PROGRAMME_SESSION`); the record prefix
 4. **Diff** into findings: `NATIVE_PARENT_MISSING`, `NATIVE_PARENT_WRONG`, `NATIVE_ORDER_DRIFT`, `PR_HEAD_MOVED` (review and UAT at the old head show `STALE_HEAD`), `CHECKS_PENDING`/`RED`/`UNKNOWN`/`GREEN_AT_HEAD`, `PROJECTION_STALE`, `CHILD_STATE_CONFLICT` (for example `DONE` on an open issue, or a merged PR with no accepted return), and report-only `READY_TO_CLOSE`, `NATIVE_PARENT_UNEXPECTED`, `NATIVE_CHILD_UNKNOWN`, `DEPENDENCY_IMPLIES_PARENT`. Outcomes sort by class (`CORE`, `HARDENING`, `LATER`, `OPTIONAL`, `COMPLETED`, `RETIRED`), then by `order` within the class, then issue number, for both native siblings and rendered siblings (including nested children and the parentless tail).
 5. **Plan** only these effects: create or update a child document, attach a sub-issue, reparent (`replace_parent`), reorder (fewest moves), replace a managed block. Closing, deleting, merging and detaching never appear. Dependencies never set a parent.
 6. **Apply** (only with `--apply`), one effect at a time: write an `IN_FLIGHT` intent into the owning document, mutate, read back (both the child's parent and the parent's list for links; the whole body for blocks), then clear the intent or mark it `UNKNOWN` and hold.
-7. **Report** the repository, store and parent revision, findings, effects with outcomes, holds, write counts and one next action. The `READY_TO_CLOSE` close list names open issues whose PR is merged with required checks `GREEN` at its head, with the PR, head and whether an accepted return is recorded. The controller decides; nothing is closed automatically, and a missing accepted return still reports `CHILD_STATE_CONFLICT`. A pass with nothing to do says `No changes` and writes nothing.
+7. **Report** the repository, store and parent revision, findings, effects with outcomes, holds, write counts and one next action. The `READY_TO_CLOSE` close list names open issues whose PR is merged with required checks `GREEN` at its head, with the PR, head, UAT and review states, and whether the current gate is `RETIRED` with its latest return consumed as `ACCEPT`. The controller decides; nothing is closed automatically, and a missing current-gate acceptance still reports `CHILD_STATE_CONFLICT`. A pass with nothing to do says `No changes` and writes nothing.
 
 GitHub details the code relies on (checked against the REST docs and a private sandbox): `sub_issue_id` is the issue's database `id`, not its number; a second parent without `replace_parent` and a duplicate attach both return 422; a reorder needs exactly one of `before_id`/`after_id`; a stale Contents sha returns 409 and a create over an existing file 422.
 

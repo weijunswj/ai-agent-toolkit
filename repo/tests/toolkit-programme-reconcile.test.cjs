@@ -303,12 +303,13 @@ test('merged PRs with green checks list open issues for the controller without c
     assert.equal(finding.issue, 8);
     assert.match(finding.detail, /PR #540 merged, checks GREEN at aaaaaaa/);
     assert.ok(finding.detail.endsWith(accepted ? 'acceptance recorded' : 'no accepted return yet'));
-    assert.deepEqual(dry.close_list, [{ issue: 8, pr: 540, head: SHA_A, accepted }]);
+    assert.deepEqual(dry.close_list, [{ issue: 8, pr: 540, head: SHA_A, accepted, uat: null, review: null }]);
     assert.equal(codes(dry).includes('CHILD_STATE_CONFLICT #8'), !accepted, 'a missing accepted return still conflicts');
     assert.equal(github.mutations(), 0);
     const formatted = cli.formatReport(dry);
     assert.ok(formatted.includes('Ready to close (the controller decides; nothing is closed automatically)'));
     assert.ok(formatted.includes(`- #8: PR #540, head aaaaaaa; ${accepted ? 'acceptance recorded' : 'no accepted return yet'}`));
+    assert.ok(formatted.includes('; UAT: not recorded; review: not recorded'));
 
     const applied = reconciler().run({ apply: true });
     assert.deepEqual(applied.holds, []);
@@ -321,6 +322,36 @@ test('merged PRs with green checks list open issues for the controller without c
     assert.match(settled.next_action, /^Controller: decide on .*starting with READY_TO_CLOSE on #8/);
     assert.deepEqual(settled.close_list, dry.close_list);
   }
+});
+
+test('G0 acceptance cannot stand in for the current G1 gate acceptance on a merged PR', () => {
+  const outcomes = [{ issue: 8, class: 'CORE', parent: 7, order: 0 }];
+  const { github, store, reconciler } = setup({ parentIssue: 7, outcomes, issues: gh => gh.addIssue(8, { parent: 7 }) });
+  const g0 = { session: 'g0', prefix: writer.prefix };
+  const g1 = { session: 'g1', prefix: writer.prefix };
+  const parentDoc = store.read('parent', 7).doc;
+  let doc = state.claimDocument(state.newChild({ repository: 'acme/app', outcome: outcomes[0] }), g0, { role: 'G0' });
+  doc = state.submitReturn(doc, { returnId: 'g0-r1', writer: g0 });
+  doc = state.consumeReturn(doc, { returnId: 'g0-r1', verdict: 'ACCEPT', writer, parentDoc });
+  doc = state.claimDocument(doc, g1, { role: 'G1', takeover: true });
+  doc.candidate.branch = 'feature';
+  doc.uat.state = 'PENDING';
+  doc.review.state = 'IN_REVIEW';
+  store.write('child', 8, doc, { sha: null, previous: null });
+  github.addPr(540, { head: SHA_A, merged: true, contexts: [green('validate')], branch: 'feature' });
+
+  const check = accepted => {
+    const report = reconciler().run();
+    assert.deepEqual(report.close_list, [{ issue: 8, pr: 540, head: SHA_A, accepted, uat: 'PENDING', review: 'IN_REVIEW' }]);
+    assert.equal(codes(report).includes('CHILD_STATE_CONFLICT #8'), !accepted);
+    assert.match(cli.formatReport(report), /UAT: PENDING; review: IN_REVIEW/);
+  };
+  check(false);
+  store.mutate('child', 8, { writer: g1, parentDoc, change: child => state.submitReturn(child, { returnId: 'g1-r1', writer: g1 }) });
+  check(false);
+  store.mutate('child', 8, { writer, parentDoc, change: child => state.consumeReturn(child, { returnId: 'g1-r1', verdict: 'ACCEPT', writer, parentDoc }) });
+  check(true);
+  assert.equal(github.issues.get(8).state, 'open');
 });
 
 test('the close list excludes red, missing, pending or off-head checks, unmerged PRs and closed issues', () => {
@@ -360,7 +391,7 @@ test('the command line binds identity, refuses writes without a session and prin
   const deps = { transport: github, binding, originUrl: 'https://github.com/acme/app.git', repoRoot: os.tmpdir(), toolkitVersion: '3.9.0', environment: {}, stdout: { write: text => output.push(text) } };
   assert.equal(cli.main(['reconcile'], deps), 0);
   assert.match(output.join(''), /Planned effects\n1\. /);
-  assert.match(output.join(''), /Next action: Review this plan, then run reconcile --apply/);
+  assert.match(output.join(''), /Next action: Report this plan; only the appointed controller holding the parent document runs reconcile --apply/);
   assert.throws(() => cli.main(['reconcile', '--apply'], deps), { code: 'WRITER_UNKNOWN' });
   assert.throws(() => cli.main(['reconcile', '--apply', '--parent-file', 'x.json', '--session', 's'], deps), { code: 'USAGE' });
   assert.throws(() => cli.main(['reconcile'], { ...deps, originUrl: 'https://github.com/acme/other.git' }), { code: 'GH_FAILED' });

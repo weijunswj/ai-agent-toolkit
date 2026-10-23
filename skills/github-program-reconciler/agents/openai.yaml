@@ -2,7 +2,7 @@ interface:
   display_name: GitHub Program Reconciler
   short_description: Keep programme state documents and GitHub links in step.
   primary_color: '#1D4ED8'
-  default_prompt: If the repository has .github/toolkit-programme.json, use $github-program-reconciler at significant events (task added, changed or deleted; merge; PR opened or head moved; issue closed or reopened; reorder; release; controller change) to dry-run reconcile and apply within the fences; without the binding do nothing; never close, delete or merge.
+  default_prompt: If the repository has .github/toolkit-programme.json, use $github-program-reconciler at significant events (the binding is added; task added, changed or deleted; merge; PR opened or head moved; issue closed or reopened; reorder; release; controller change). Any session may run the dry-run reconcile and report it; only the appointed controller holding the parent document runs --apply. Executors never apply, claim the parent or take over. Only a newly appointed controller takes over after posting its takeover record. Every programme.cjs command refuses without the binding; governed issue records are unchanged in 3.9.0. Never close, delete or merge.
 policy:
   products:
     - chatgpt
