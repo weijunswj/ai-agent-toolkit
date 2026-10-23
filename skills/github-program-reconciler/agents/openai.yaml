@@ -1,8 +1,8 @@
 interface:
   display_name: GitHub Program Reconciler
-  short_description: Govern parent state and truthful review evidence explicitly.
+  short_description: Keep programme state documents and GitHub links in step.
   primary_color: '#1D4ED8'
-  default_prompt: Use $github-program-reconciler only for explicit parent/direct-child governance, bounded reconciliation, truthful PR-review inventory, or Deferred Findings work under the shipped contract; preserve control-plane authority, repository-capability consent and Web finality boundaries.
+  default_prompt: Use $github-program-reconciler only when asked for programme state work in a governed repository - a reconcile dry run or apply, state documents, the decision-trace audit or review-truth records; never close, delete or merge.
 policy:
   products:
     - chatgpt

@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "toolkit.programme-state.parent.v1",
+  "title": "Programme parent state document",
+  "description": "The parent issue's private document: fence, release plan pointer and the outcome catalogue. The catalogue is data, so a second repository works with no code change.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "repository", "parent_issue", "revision", "fence", "release_plan", "outcomes", "pending_effects", "private"],
+  "properties": {
+    "schema": { "const": "toolkit.programme-state.parent.v1" },
+    "repository": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" },
+    "parent_issue": { "type": "integer", "minimum": 1 },
+    "revision": { "type": "integer", "minimum": 0 },
+    "fence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["epoch", "holder_prefix", "holder_session"],
+      "properties": {
+        "epoch": { "type": "integer", "minimum": 0 },
+        "holder_prefix": { "type": ["string", "null"], "pattern": "^[A-Za-z0-9._-]{1,40}$" },
+        "holder_session": { "type": ["string", "null"], "minLength": 1 }
+      }
+    },
+    "release_plan": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "record": { "type": ["string", "null"], "minLength": 1 },
+        "comment_id": { "type": ["integer", "null"], "minimum": 1 }
+      }
+    },
+    "outcomes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["issue", "class", "parent", "order"],
+        "properties": {
+          "issue": { "type": "integer", "minimum": 1 },
+          "label": { "type": "string", "minLength": 1 },
+          "class": { "enum": ["CORE", "HARDENING", "LATER", "OPTIONAL", "COMPLETED", "RETIRED"] },
+          "parent": { "type": ["integer", "null"], "minimum": 1, "description": "Expected native parent: the programme parent or another outcome. Null means no native parent is expected." },
+          "order": { "type": "integer", "minimum": 0, "description": "Position among the expected parent's sub-issues, lowest first." },
+          "lane": { "type": "string", "minLength": 1 },
+          "owner_prefix": { "type": "string", "pattern": "^[A-Za-z0-9._-]{1,40}$" }
+        }
+      }
+    },
+    "pending_effects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["intent_id", "kind", "target", "state"],
+        "properties": {
+          "intent_id": { "type": "string", "minLength": 1 },
+          "kind": { "enum": ["attach", "reparent", "reorder", "replace_block"] },
+          "target": { "type": "object" },
+          "state": { "enum": ["IN_FLIGHT", "DONE", "UNKNOWN"] }
+        }
+      }
+    },
+    "private": { "type": "object" },
+    "volatile": { "type": "object" }
+  }
+}

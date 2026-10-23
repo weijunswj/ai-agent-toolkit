@@ -2,7 +2,7 @@
 
 A compact, pointer-only map of this repository. Rules live in [CONTROLLER.md](CONTROLLER.md), the root `AGENTS.md` and the sources named below; this file only says where things are. Update it in the change that moves what it describes; `repo/tests/repo-map.test.cjs` checks that every path listed here exists.
 
-Last reviewed against `main` `1478dadaafb65cd5573a929f263cffbdbcc333b2`.
+Last reviewed against `main` `aed6704d40f93e60cbe10ffd556271b26cb5a2db`.
 
 ## Parts
 
@@ -34,6 +34,7 @@ Last reviewed against `main` `1478dadaafb65cd5573a929f263cffbdbcc333b2`.
 | Instruction sync | `repo/scripts/sync-agent-instruction-shims.cjs`, `repo/scripts/sync-repo-doc-contract.cjs` |
 | Full validation list | `repo/scripts/run-validation-gate.cjs` |
 | Decision-trace audit | `skills/github-program-reconciler/scripts/decision-trace-audit.cjs` |
+| Programme state and reconcile pass | `skills/github-program-reconciler/scripts/programme.cjs`, `skills/github-program-reconciler/scripts/programme-state.cjs` |
 
 ## Sources of truth
 
@@ -46,6 +47,7 @@ Last reviewed against `main` `1478dadaafb65cd5573a929f263cffbdbcc333b2`.
 | Models, effort and reviewers | `repo/contracts/controller-kernel/stack-registry-v3.json` |
 | Source ownership | `repo/contracts/source-of-truth-contract.md` |
 | Package version | `repo/contracts/toolkit-local-bridge/version.json` |
+| Programme binding and state document schemas | `.github/toolkit-programme.json`, `repo/contracts/programme-state/` |
 | Release notes | `repo/docs/CHANGELOG.md` |
 
 ## Ownership

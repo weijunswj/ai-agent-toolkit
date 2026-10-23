@@ -1,5 +1,11 @@
 # Toolkit Changelog
 
+## 3.9.0 (programme state and reconciler)
+
+- **State documents:** one private JSON document per programme outcome plus one for the parent, kept in a private store (`store.kind` `github`: `weijunswj/TRANSPORT-ai-agent-toolkit` under `state/weijunswj/ai-agent-toolkit/` for Toolkit) and bound by the new `.github/toolkit-programme.json`. Writes use compare-and-swap with readback and never write unchanged state; a fence epoch refuses stale writers after a takeover; gate returns are consumed by return ID, so reopen, resubmit and accept work in one session. Schemas are in `repo/contracts/programme-state/`.
+- **Reconcile pass:** `skills/github-program-reconciler/scripts/programme.cjs reconcile` dry-runs by default and, with `--apply`, attaches, reparents and reorders native sub-issues (fewest moves), tracks each PR's head and required checks at that head (never `GREEN` when a check is missing, pending, skipped or off-head, or none is required), and keeps a generated state block in the parent and each child body, rendered from the same revisions. Every GitHub change writes an intent first and is read back; an interrupted pass is settled by readback, never replayed. Bodies change only between their markers, a body edited mid-pass is left alone, and a body that would reach 60,000 characters is refused. It never closes, deletes or merges.
+- **Skill:** `github-program-reconciler` now documents this runtime, the decision-trace audit and the review-truth procedure, replacing the old written procedure and its references to removed authority machinery.
+
 ## 3.5.0 (keys and tokens)
 
 - **`toolkit env`:** one place for the API keys and tokens your coding apps use, kept in the computer's own credential store (Windows Credential Manager on this PC only, or the Linux Secret Service, with built-in tools only and no fallback file; macOS is not supported). `status` shows names only; `edit` opens a private Notepad file and `apply` saves it; `set`, `remove` (after a yes/no naming the key), `run --names A,B -- <tool>`, and `header` for the apps. See [Toolkit Env](TOOLKIT-ENV.md).

@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "toolkit.programme-binding.v1",
+  "title": "Programme binding (.github/toolkit-programme.json)",
+  "description": "Non-secret binding in a governed repository: the parent issue, record prefixes, the private state store and the checks that count as required. Repository identity comes from the origin remote and GitHub; this file must agree and cannot override it.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "repository", "parent_issue", "record_prefix", "writer_prefix", "store", "required_checks"],
+  "properties": {
+    "schema": { "const": "toolkit.programme-binding.v1" },
+    "repository": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" },
+    "parent_issue": { "type": "integer", "minimum": 1 },
+    "record_prefix": { "type": "string", "pattern": "^[A-Za-z0-9._-]{1,40}$" },
+    "writer_prefix": { "type": "string", "pattern": "^[A-Za-z0-9._-]{1,40}$" },
+    "store": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "repository", "branch", "path"],
+      "properties": {
+        "kind": { "enum": ["github"], "description": "The store backend. This version ships github: a separate private repository written through the Contents API." },
+        "repository": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", "description": "A separate private repository; verified private and writable before every pass." },
+        "branch": { "type": "string", "minLength": 1 },
+        "path": { "type": "string", "pattern": "^([A-Za-z0-9_.-]+/)+$" }
+      }
+    },
+    "required_checks": {
+      "type": "array",
+      "description": "Check names that count as required at the PR head, in addition to the checks GitHub marks required. With none of either, checks are never GREEN.",
+      "items": { "type": "string", "minLength": 1 }
+    }
+  }
+}

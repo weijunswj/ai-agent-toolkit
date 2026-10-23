@@ -1,4 +1,4 @@
-<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/repo-local/GEMINI.shim.template.md:BEGIN GEMINI.SHIM v2 toolkit=3.5.0 sha256=7f96b4848d9c -->
+<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/repo-local/GEMINI.shim.template.md:BEGIN GEMINI.SHIM v2 toolkit=3.9.0 sha256=7f96b4848d9c -->
 # Gemini Instructions
 
 @./AGENTS.md
