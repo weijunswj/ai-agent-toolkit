@@ -4,7 +4,7 @@ description: "Use when running as a Claude Projects coordinator and the user app
 ---
 
 # Web Controller for Claude Projects
-Version: 2026-10-23.9
+Version: 2026-10-23.10
 
 This is a reusable framework for running Toolkit-governed repos through Claude Projects. Toolkit governance always applies on top of it. Project-specific facts, such as repos, devices, lanes and pending work, belong in each project's memory, not here.
 

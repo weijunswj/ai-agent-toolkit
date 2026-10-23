@@ -60,6 +60,7 @@ test('PATH resolution skips relative PATH entries and returns the .exe', { skip:
   fs.writeFileSync(path.join(bin, 'tool.exe'), '');
   fs.writeFileSync(path.join(bin, 'tool.cmd'), '');
   assert.equal(resolvePathExecutable('tool', { env: { PATH: `.;bin;${bin}` } }), path.join(bin, 'tool.exe'));
+  assert.equal(resolvePathExecutable('tool', { env: { PATH: `"${bin}"` } }), path.join(bin, 'tool.exe'), 'a quoted PATH entry counts');
   assert.throws(() => resolvePathExecutable('tool', { env: { PATH: '.;bin' } }), /not available/);
   assert.equal(resolvePathExecutable('tool', { platform: 'linux' }), 'tool');
 });

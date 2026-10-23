@@ -38,6 +38,8 @@ const {
 const MANIFEST_SCHEMA = 'ai-agent-toolkit.env-manifest.v1';
 const EDIT_STALE_MS = 30 * 60 * 1000;
 const UNCHANGED = '<unchanged>';
+const MAX_LAYOUT_LINES = 500;
+const MAX_COMMENT_CHARS = 200;
 const SCHEMES = new Set(['Bearer', 'none']);
 const DUMP_COMMANDS = new Set(['env', 'printenv', 'set', 'export', 'declare', 'typeset', 'compgen']);
 const SHELLS = new Set(['cmd', 'powershell', 'pwsh', 'bash', 'sh', 'zsh', 'dash', 'fish']);
@@ -144,8 +146,9 @@ function writeJsonAtomically(file, value) {
   }
 }
 
-// Names-only record: each key Toolkit saved (with times) and each MCP entry connected to a key.
-// It never holds a value or anything derived from one.
+// Names-only record: each key Toolkit saved (with times), each MCP entry connected to a key, and the
+// layout of the edit file (comment lines, key names and blank lines). Assignment values never
+// enter the layout. Comments are screened, but arbitrary prose cannot be certified secret-free.
 class EnvManifest {
   #file; #now;
 
@@ -160,17 +163,19 @@ class EnvManifest {
     let parsed;
     try { parsed = JSON.parse(fs.readFileSync(this.#file, 'utf8')); }
     catch (error) {
-      if (error.code === 'ENOENT') return { schema: MANIFEST_SCHEMA, names: {}, bindings: [] };
+      if (error.code === 'ENOENT') return { schema: MANIFEST_SCHEMA, names: {}, bindings: [], layout: [] };
       throw new EnvError('The Toolkit env record (~/.ai-agent-toolkit/env/manifest.json) could not be read.');
     }
     if (parsed?.schema !== MANIFEST_SCHEMA) throw new EnvError('The Toolkit env record has an unknown format.');
-    return { schema: MANIFEST_SCHEMA, names: parsed.names || {}, bindings: Array.isArray(parsed.bindings) ? parsed.bindings : [] };
+    const layout = checkedLayout(parsed.layout === undefined ? [] : parsed.layout);
+    return { schema: MANIFEST_SCHEMA, names: parsed.names || {}, bindings: Array.isArray(parsed.bindings) ? parsed.bindings : [], layout };
   }
 
   // Re-reads the record, applies the change and replaces the file in one step.
   update(change) {
     const record = this.read();
     change(record, this.#now().toISOString());
+    checkedLayout(record.layout);
     writeJsonAtomically(this.#file, record);
     return record;
   }
@@ -178,6 +183,109 @@ class EnvManifest {
   touch(record, names, at) {
     for (const name of names) record.names[name] = { added_at: record.names[name]?.added_at || at, updated_at: at };
   }
+}
+
+// Screen NAME=value assignments, common token prefixes, long opaque runs and hidden controls.
+// Empty/unchanged assignments still pass the token screens; NFKC catches fullwidth equals.
+// This cannot prove human-readable text is not a password. Refusals never repeat comment text.
+function secretLikeComment(text) {
+  const chars = [...text];
+  for (let index = 0; index < chars.length; index += 1) {
+    const char = chars[index];
+    if (char === '\u200d') {
+      let before = index - 1;
+      while (before >= 0 && /[\uFE0F\p{Emoji_Modifier}]/u.test(chars[before])) before -= 1;
+      if (before < 0 || !/\p{Extended_Pictographic}/u.test(chars[before]) || !/\p{Extended_Pictographic}/u.test(chars[index + 1] || '')) return true;
+    } else if (/[\u0000-\u0008\u000a-\u001f\u007f-\u009f\p{Cf}\p{Zl}\p{Zp}]/u.test(char)) return true;
+  }
+  const body = text.normalize('NFKC');
+  let commentedName = '';
+  // Consume each name once, then inspect its suffix rather than retrying a greedy name pattern
+  // at every letter when a long comment contains no equals sign.
+  for (const match of body.matchAll(/[\p{L}_][\p{L}\p{N}_]*/gu)) {
+    let at = match.index + match[0].length;
+    while (at < body.length && /\s/u.test(body[at])) at += 1;
+    if (body[at] !== '=' || body[at + 1] === '=') continue;
+    at += 1;
+    while (at < body.length && /\s/u.test(body[at])) at += 1;
+    if (at < body.length && body.slice(at).trim() !== UNCHANGED) return true;
+    if (body.slice(0, match.index).trim() === '#' && !nameProblem(match[0])) commentedName = match[0];
+  }
+  if (/(?:^|[^\p{L}\p{N}_])(?:sk[-_]|gh[pousr]_|github_pat_|xox[baprs]-|AKIA)[\p{L}\p{N}_-]+/u.test(body)) return true;
+  for (const [word] of body.matchAll(/\S+/gu)) {
+    const isPath = /^https?:\/\//i.test(word) || ((word.includes('/') || word.includes('\\')) && /\.[A-Za-z0-9]+$/.test(word));
+    // For URLs and file paths, screen each component so the separators are not counted as part
+    // of one opaque token. Other runs retain the base64 alphabet, including slash and padding.
+    const runs = isPath ? /[\p{L}\p{M}\p{N}_\-+=]{24,}/gu : /[\p{L}\p{M}\p{N}_\-+/=.]{24,}/gu;
+    // A valid stored-key name may itself be long. Exempt only that name (and its equals),
+    // never the rest of the comment or the token-prefix screen above.
+    for (const [run] of word.matchAll(runs)) {
+      if (commentedName && (run === commentedName || run === `${commentedName}=`)) continue;
+      if (/[\p{L}\p{N}]/u.test(run)) return true;
+    }
+  }
+  return false;
+}
+
+// Validate both old records and pending writes, so a pre-existing unsafe layout is never copied
+// into another edit file or propagated by an unrelated manifest update.
+function checkedLayout(layout) {
+  if (!Array.isArray(layout) || layout.length > MAX_LAYOUT_LINES) throw new EnvError('The Toolkit env layout has an invalid format or too many lines.');
+  const invalid = [];
+  layout.forEach((entry, index) => {
+    const valid = typeof entry === 'string' && entry === entry.trim() && (entry === '' || (entry.startsWith('#')
+      ? entry.length <= MAX_COMMENT_CHARS && !secretLikeComment(entry)
+      : !nameProblem(entry)));
+    if (!valid) invalid.push(index + 1);
+  });
+  if (invalid.length) throw new EnvError(`The Toolkit env layout is unsafe or invalid: layout entr${invalid.length === 1 ? 'y' : 'ies'} ${invalid.join(', ')} (counting from 1) in the "layout" list of ~/.ai-agent-toolkit/env/manifest.json. Remove or reword ${invalid.length === 1 ? 'it' : 'them'} before trying again.`);
+  return layout;
+}
+
+// The names-only layout of env-file lines: comment lines, key names and single blank lines, in
+// order. Values are never kept. Lines in `skip` (the edit file's own header) are left out.
+// Returns { layout, refused: [line numbers of comments that look like a secret or are too long] }.
+function layoutOf(lines, { skip = new Set() } = {}) {
+  const layout = [];
+  const refused = [];
+  lines.forEach((line, index) => {
+    const text = line.trim();
+    if (skip.has(text)) return;
+    if (!text) { if (layout.length && layout.at(-1) !== '') layout.push(''); return; }
+    if (text.startsWith('#')) {
+      if (text.length > MAX_COMMENT_CHARS || secretLikeComment(text)) refused.push(index + 1);
+      else layout.push(text);
+      return;
+    }
+    const match = /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/.exec(text);
+    if (match && !nameProblem(match[1]) && !layout.includes(match[1])) layout.push(match[1]);
+  });
+  while (layout.at(-1) === '') layout.pop();
+  return { layout: layout.slice(0, MAX_LAYOUT_LINES), refused };
+}
+
+// The edit file's body: the stored layout with each stored key as NAME=<unchanged>, then any stored
+// key the layout does not mention. Names in the layout that are no longer stored are left out.
+function editBody(names, layout = []) {
+  const stored = new Set(names);
+  const shown = new Set();
+  const body = [];
+  for (const entry of layout) {
+    if (entry === '' || entry.startsWith('#')) body.push(entry);
+    else if (stored.has(entry) && !shown.has(entry)) { body.push(`${entry}=${UNCHANGED}`); shown.add(entry); }
+  }
+  while (body.at(-1) === '') body.pop();
+  const rest = names.filter((name) => !shown.has(name));
+  if (rest.length && body.length) body.push('');
+  return [...body, ...rest.map((name) => `${name}=${UNCHANGED}`)];
+}
+
+// Keeps a layout's comments and blank lines and only the key names that are stored.
+function storedLayout(layout, names) {
+  const stored = new Set(names);
+  const kept = layout.filter((entry) => entry === '' || entry.startsWith('#') || stored.has(entry));
+  while (kept.at(-1) === '') kept.pop();
+  return kept;
 }
 
 // The editor to open the edit file with, by full path: Windows looks for a bare program name in the
@@ -203,6 +311,7 @@ const EDIT_HEADER = [
   '# To add a key, add a line NAME=value. Names look like PROVIDER_SOLUTION_PURPOSE.',
   '# Leaving <unchanged>, a blank value or a deleted line changes nothing.',
   '# To remove a key, use: toolkit env remove NAME',
+  '# Your own # comment and section lines are kept (never put a key or token in one).',
   '# Save and close this file, then tell your agent "done" (or run: toolkit env apply).',
 ];
 
@@ -241,24 +350,26 @@ class EnvEditSession {
     return files[0]?.file || null;
   }
 
-  async open(names, { launch = true } = {}) {
+  async open(names, { launch = true, layout = [] } = {}) {
     let file = this.current();
     const reused = Boolean(file);
     if (!file) {
       this.#privateDirectory(this.#directory);
       file = path.join(this.#directory, `env-edit-${stamp(this.#now())}-${crypto.randomBytes(3).toString('hex')}.txt`);
-      fs.writeFileSync(file, `${[...EDIT_HEADER, ...names.map((name) => `${name}=${UNCHANGED}`)].join(os.EOL)}${os.EOL}`, { mode: 0o600, flag: 'wx' });
+      fs.writeFileSync(file, `${[...EDIT_HEADER, ...editBody(names, layout)].join(os.EOL)}${os.EOL}`, { mode: 0o600, flag: 'wx' });
     }
     const opened = launch ? await this.#opener(file) : false;
     return { file, reused, opened };
   }
 
-  // { values: Map, problems: [line text without values] }. Nothing is saved when problems exist.
+  // { values: Map, problems: [line text without values], layout }. Nothing is saved when problems exist.
   read(file) {
     const values = new Map();
     const problems = [];
     let blank = 0;
     const lines = fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '').split(/\r?\n/);
+    const { layout, refused } = layoutOf(lines, { skip: new Set(EDIT_HEADER) });
+    for (const line of refused) problems.push(`line ${line}: this comment looks like it may hold a key or token (or is over ${MAX_COMMENT_CHARS} characters); remove or reword it`);
     lines.forEach((line, index) => {
       const text = line.trim();
       if (!text || text.startsWith('#')) return;
@@ -269,13 +380,13 @@ class EnvEditSession {
       const problem = nameProblem(name);
       // Never repeat text that is not a valid name: it may be part of a value.
       if (problem) { problems.push(`line ${index + 1}: the text before = is not a valid key name (${problem})`); return; }
-      if (values.has(name)) { problems.push(`line ${index + 1}: ${name} appears more than once`); return; }
+      if (values.has(name)) { problems.push(`line ${index + 1}: the key name appears more than once`); return; }
       if (value === UNCHANGED) return;
       if (value === '' || value === '<remove>') { blank += 1; return; }
-      if (Buffer.byteLength(value, 'utf8') > MAX_VALUE_BYTES) { problems.push(`line ${index + 1}: ${name}: value too long (max ${MAX_VALUE_BYTES} bytes)`); return; }
+      if (Buffer.byteLength(value, 'utf8') > MAX_VALUE_BYTES) { problems.push(`line ${index + 1}: value too long (max ${MAX_VALUE_BYTES} bytes)`); return; }
       values.set(name, value);
     });
-    return { values, problems, blank };
+    return { values, problems, blank, layout };
   }
 
   // Overwrites the file before deleting it, so typed values do not linger in free disk space.
@@ -409,7 +520,7 @@ class ToolkitEnv {
     const out = [];
     this.#sweep(out);
     const names = this.#store.list();
-    const session = await this.#edit.open(names, { launch });
+    const session = await this.#edit.open(names, { launch, layout: this.#manifest.read().layout });
     const where = this.#paths.show(session.file);
     if (!launch) out.push(`Edit file: ${session.file}`);
     else if (session.opened) out.push(`${session.reused ? 'Reopened' : 'Opened'} ${where} with your ${names.length} key${names.length === 1 ? '' : 's'}.`);
@@ -423,11 +534,12 @@ class ToolkitEnv {
     this.#sweep(out);
     const file = this.#edit.current();
     if (!file) return { code: 0, out: [...out, 'There is no open edit. Say "edit my env" (or run toolkit env edit) first.'], err: [] };
-    const { values, problems, blank } = this.#edit.read(file);
+    const { values, problems, blank, layout } = this.#edit.read(file);
     if (problems.length) {
       return { code: 1, out, err: ['Nothing was saved. Fix these lines in the edit file, save it, then apply again:', ...problems.map((problem) => `  ${problem}`), `Edit file: ${file}`] };
     }
     const result = this.#save(values);
+    this.#saveLayout(layout);
     this.#edit.discard(file);
     if (!result.changed.length && !result.added.length) out.push('No changes.');
     if (result.changed.length) out.push(`changed: ${result.changed.join(', ')}`);
@@ -435,6 +547,12 @@ class ToolkitEnv {
     if (blank) out.push(`${blank} blank value${blank === 1 ? ' was' : 's were'} ignored. To remove a key, use toolkit env remove NAME.`);
     out.push(...this.#feederLines());
     return { code: 0, out, err: [] };
+  }
+
+  // Records the edit file's layout (comments and the names that are stored), replacing the old one.
+  #saveLayout(layout) {
+    const names = this.#store.list();
+    this.#manifest.update((record) => { record.layout = storedLayout(layout, names); });
   }
 
   // Writes only what differs, reads it back and records names.
@@ -478,7 +596,7 @@ class ToolkitEnv {
     const answer = String(await this.#ask(`Remove ${name} from the Toolkit env store?${warning} Type yes to remove it: `) || '').trim().toLowerCase();
     if (answer !== 'yes' && answer !== 'y') return { code: 0, out: [...out, `Kept ${name}.`], err: [] };
     this.#store.remove(name);
-    this.#manifest.update((record) => { delete record.names[name]; });
+    this.#manifest.update((record) => { delete record.names[name]; record.layout = (record.layout || []).filter((entry) => entry !== name); });
     out.push(`removed: ${name}`);
     out.push(...this.#feederLines());
     return { code: 0, out, err: [] };
@@ -677,8 +795,22 @@ class ToolkitEnv {
     if (empty.length) out.push(`not imported, empty value: ${empty.sort().join(', ')}`);
     if (tooLong.length) out.push(`not imported, value too long (max ${MAX_VALUE_BYTES} bytes): ${tooLong.sort().join(', ')}`);
     if (skipped.length) out.push(`skipped lines: ${skipped.join(', ')} (not NAME=value; check them in Notepad before retiring the file)`);
+    out.push(...this.#adoptLayout(text));
     out.push(`${this.#paths.show(file)} was not changed.`);
     return { code: 0, out, err: [] };
+  }
+
+  // Saves an env file's comment and section lines (and key order) as the edit layout when Toolkit has
+  // none yet, so they survive the file being retired. Returns the lines to report.
+  #adoptLayout(text) {
+    const { layout, refused } = layoutOf(String(text).replace(/^\uFEFF/, '').split(/\r?\n/));
+    const out = [];
+    if (refused.length) out.push(`not kept as layout, comment line${refused.length === 1 ? '' : 's'} ${refused.join(', ')}: ${refused.length === 1 ? 'it looks' : 'they look'} like ${refused.length === 1 ? 'it' : 'they'} may hold a key or token`);
+    const comments = layout.filter((entry) => entry.startsWith('#')).length;
+    if (!comments) return out;
+    if (this.#manifest.read().layout.length) return [...out, 'Kept your existing toolkit env edit layout; the file\'s comment lines were not copied.'];
+    this.#manifest.update((record) => { record.layout = storedLayout(layout, this.#store.list()); });
+    return [...out, `kept ${comments} comment line${comments === 1 ? '' : 's'} and the key order for toolkit env edit (names and comments only).`];
   }
 
   // Moves ~/.codex/.env into a private backup folder once every key in it is in the store and no
@@ -702,6 +834,12 @@ class ToolkitEnv {
     const note = skipped.length ? ` Lines ${skipped.join(', ')} are not NAME=value with a valid key name and were not imported; check them first.` : '';
     const answer = String(await this.#ask(`Move ${this.#paths.show(file)} into a private backup folder?${note} Type yes to go ahead: `) || '').trim().toLowerCase();
     if (answer !== 'yes' && answer !== 'y') return { code: 0, out: ['Nothing was changed.'], err: [] };
+    const text = fs.readFileSync(file, 'utf8');
+    const layoutLines = this.#adoptLayout(text);
+    // Comment lines the record does not hold exist only in the file, so the backup is their only copy.
+    const fileLayout = layoutOf(text.replace(/^\uFEFF/, '').split(/\r?\n/));
+    const kept = new Set(this.#manifest.read().layout);
+    const onlyHere = fileLayout.refused.length + fileLayout.layout.filter((entry) => entry.startsWith('#') && !kept.has(entry)).length;
     ensurePrivateDirectory(this.#paths.backupsDir);
     const folder = path.join(this.#paths.backupsDir, `env-retire-${stamp(this.#now())}`);
     ensurePrivateDirectory(folder);
@@ -712,7 +850,8 @@ class ToolkitEnv {
       code: 0,
       out: [
         `Moved ${this.#paths.show(file)} to ${this.#paths.show(target)}.`,
-        'Restart Codex. Once everything still connects, delete that backup yourself; it is the last plain copy of these values.',
+        ...layoutLines,
+        `Restart Codex. Once everything still connects, delete that backup yourself; it is the last plain copy of these values${onlyHere ? `, and the only copy of ${onlyHere} comment line${onlyHere === 1 ? '' : 's'}` : ''}.`,
         `To undo before then, move it back to ${this.#paths.show(file)} and restart Codex.`,
       ],
       err: [],
