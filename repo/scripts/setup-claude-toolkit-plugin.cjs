@@ -61,7 +61,9 @@ function pluginId() {
 }
 
 function repoCommit(repoRoot) {
-  const result = spawnSync('git', ['-C', repoRoot, 'rev-parse', 'HEAD'], {
+  let git;
+  try { git = processLaunch.resolvePathExecutable('git'); } catch { return ''; }
+  const result = spawnSync(git, ['-C', repoRoot, 'rev-parse', 'HEAD'], {
     encoding: 'utf8',
     timeout: 10000,
     windowsHide: true

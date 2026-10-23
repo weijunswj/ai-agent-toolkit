@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
+const { resolvePathExecutable } = require('./claude-process-launch.cjs');
 
 const TOOLKIT_PLUGIN_NAME = 'ai-agent-toolkit';
 const TOOLKIT_MARKETPLACE_NAME = 'ai-agent-toolkit-local';
@@ -793,7 +794,7 @@ function windowsAliasCliCandidate() {
 function isWindowsAppsAliasAccessDenied(command, output) {
   const text = String(output || '');
   return process.platform === 'win32' &&
-    command === 'codex' &&
+    (command === 'codex' || /[\\/]WindowsApps[\\/]codex\.exe$/i.test(command)) &&
     /(access is denied|eperm|eacces)/i.test(text);
 }
 
@@ -865,7 +866,7 @@ function commandCandidates(explicitCommand) {
   if (process.env.CODEX_TOOLKIT_CODEX_CLI) candidates.push(process.env.CODEX_TOOLKIT_CODEX_CLI);
   if (process.env.CODEX_CLI_PATH) candidates.push(process.env.CODEX_CLI_PATH);
   candidates.push(windowsAliasCliCandidate());
-  candidates.push('codex');
+  try { candidates.push(resolvePathExecutable('codex', { label: 'Codex CLI' })); } catch {}
   return [...new Set(candidates.filter(Boolean))];
 }
 

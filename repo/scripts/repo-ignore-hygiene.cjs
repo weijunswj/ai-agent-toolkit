@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { CANONICAL_BACKUP_DIR, LEGACY_BACKUP_DIR, sha256 } = require('./repo-local-backup.cjs');
+const { resolvePathExecutable } = require('./claude-process-launch.cjs');
 
 const RULES = Object.freeze({
   canonical: `/${CANONICAL_BACKUP_DIR}/`,
@@ -39,7 +40,9 @@ function samePath(left, right) {
 }
 
 function runGit(repoRoot, args, options = {}) {
-  const result = spawnSync('git', ['-C', repoRoot, ...args], {
+  let git;
+  try { git = resolvePathExecutable('git'); } catch { throw publicError('Git inspection could not be started safely.'); }
+  const result = spawnSync(git, ['-C', repoRoot, ...args], {
     encoding: options.encoding === undefined ? 'utf8' : options.encoding,
     input: options.input,
     windowsHide: true,
