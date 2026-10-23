@@ -189,4 +189,14 @@ class FakeGitHub {
   }
 }
 
-module.exports = { FakeGitHub, blobSha };
+// A child whose gate the controller assigned and, optionally, whose return it recorded and consumed.
+// A G1 acceptance first records a G2 review PASSED at `head`, the live PR head it is checked against.
+function gatedChild(state, doc, { role = 'G1', assignment = `${role.toLowerCase()}-a1`, returnId = null, verdict = null, writer = null, parentDoc = null, head = 'c'.repeat(40) } = {}) {
+  let next = state.assignGate(doc, { assignment, role });
+  if (returnId) next = state.recordReturn(next, { returnId, assignment });
+  if (verdict === 'ACCEPT' && role === 'G1') next = state.applyPatch('child', next, { review: { state: 'PASSED', verdicts: [{ reviewer: 'g2', head, verdict: 'PASSED' }] } }, { writer, parentDoc });
+  if (verdict) next = state.consumeReturn(next, { returnId, verdict, writer, parentDoc, liveHead: head });
+  return next;
+}
+
+module.exports = { FakeGitHub, blobSha, gatedChild };
