@@ -331,3 +331,42 @@ test('the reconciler runs no programme command unless GitHub governance is ENABL
     assert.match(result.stderr + result.stdout, /GITHUB_GOVERNANCE_OFF|GitHub governance is (UNDECIDED|DISABLED)/, name);
   }
 });
+
+test('H3: repair moves an unreadable decisions file aside only after a typed yes in a terminal, and names it everywhere', async (t) => {
+  const ctx = scratch(t);
+  const repo = gitRepo(ctx, 'repo');
+  const options = { registryPath: ctx.registryPath, testOnly: true };
+  // Nothing to repair while the file reads (or is missing).
+  for (const setup of [() => {}, () => run(ctx, repo, ['enable'])]) {
+    await setup();
+    const fine = await run(ctx, repo, ['repair']);
+    assert.equal(fine.code, 0);
+    assert.match(fine.stdout, /reads fine .*nothing to repair/);
+  }
+  fs.appendFileSync(ctx.registryPath, 'junk');
+  const damaged = fs.readFileSync(ctx.registryPath);
+  const named = new RegExp(ctx.registryPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  const status = await run(ctx, repo, ['status']);
+  assert.equal(status.code, 2);
+  assert.match(status.stdout, named);
+  assert.match(status.stdout, /toolkit-governance\.cjs" repair/);
+  const check = conformance.checkConformance(repo, { ...options, offline: true });
+  assert.match(check.findings.find(item => item.id === 'STATE_ERROR').message, named);
+  const disable = await run(ctx, repo, ['disable']);
+  assert.match(disable.stderr, named);
+  for (const [label, runOptions, code] of [
+    ['an agent without a terminal', { interactive: false }, 2],
+    ['not confirmed', { answer: 'no' }, 1],
+  ]) {
+    const refused = await run(ctx, repo, ['repair'], runOptions);
+    assert.equal(refused.code, code, label);
+    assert.deepEqual(fs.readFileSync(ctx.registryPath), damaged, `${label}: nothing moved`);
+  }
+  const repaired = await run(ctx, repo, ['repair', '--json']);
+  assert.equal(repaired.code, 0, repaired.stderr);
+  const result = JSON.parse(repaired.stdout);
+  assert.equal(fs.existsSync(ctx.registryPath), false);
+  assert.deepEqual(fs.readFileSync(result.moved_to), damaged, 'the damaged file is kept next to the original');
+  assert.equal(path.dirname(result.moved_to), path.dirname(ctx.registryPath));
+  assert.deepEqual([governance.governanceState(repo, options).state, governance.governanceState(repo, options).rule], ['UNDECIDED', 'R7'], 'the question is asked again');
+});

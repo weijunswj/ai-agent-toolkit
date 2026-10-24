@@ -24,6 +24,7 @@ const SHA_B = 'b'.repeat(40);
 const TREE = 'e'.repeat(40);
 const GIT = 'git-for-tests';
 const controller = { session: 'controller-1', prefix: 'INT-TK421-' };
+const GOVERNED = () => ({ state: 'ENABLED', governed_rules_bind: true });
 const green = name => ({ kind: 'CheckRun', name, status: 'COMPLETED', conclusion: 'SUCCESS', required: false });
 const CATALOGUE = [
   { issue: 423, label: 'C2', class: 'CORE', parent: 421, order: 1 },
@@ -69,7 +70,7 @@ function fixture({ lane = false } = {}) {
   fx.child = (issue = 423) => store.read('child', issue).doc;
   fx.deps = (extra = {}) => ({
     transport: github, binding, originUrl: 'https://github.com/acme/app.git', repoRoot, toolkitVersion: '3.9.0', sessionsDir: fx.sessionsDir,
-    gitPath: GIT, run: fakeGit(fx), now: () => new Date(github.clock).toISOString(), environment: { TOOLKIT_PROGRAMME_SESSION: controller.session },
+    gitPath: GIT, run: fakeGit(fx), now: () => new Date(github.clock).toISOString(), environment: { TOOLKIT_PROGRAMME_SESSION: controller.session }, governanceState: GOVERNED,
     stdout: { write: text => { fx.output += text; } }, ...extra,
   });
   // Runs one command; returns { result, error }. Output is JSON for every command used here.
@@ -89,7 +90,7 @@ function fixture({ lane = false } = {}) {
   };
   // An executor's turn end, as its host would run the hook.
   fx.turnEnd = (session, message = null, extra = {}) => checkpoint.runHook({ hook_event_name: 'Stop', session_id: session, last_assistant_message: message },
-    { transport: github, sessionsDir: fx.sessionsDir, gitPath: GIT, run: fakeGit(fx), now: () => new Date(github.clock).toISOString(), ...extra });
+    { transport: github, sessionsDir: fx.sessionsDir, gitPath: GIT, run: fakeGit(fx), now: () => new Date(github.clock).toISOString(), governanceState: GOVERNED, ...extra });
   fx.reconcile = () => {
     const reconciler = new state.Reconciler({
       store, reader: new state.ProgrammeGraphReader({ transport: github, repository }), mutator: new state.GitHubMutator({ transport: github, repository }),
@@ -409,9 +410,9 @@ test('W10 hook failures exit 0, stay local, reach the journal on the next run an
     if (file === 'gh-for-tests') { ghCalls.push(options.timeout); return { status: 0, stdout: 'HTTP/2.0 500 Internal\n\n{}', stderr: '' }; }
     return fakeGit(fx)(file, args, options);
   };
-  assert.equal(checkpoint.runHook({ session_id: 'exec-a' }, { sessionsDir: fx.sessionsDir, gitPath: GIT, ghPath: 'gh-for-tests', run, deadline: Date.now() - 1 }).outcome, 'FAILED');
+  assert.equal(checkpoint.runHook({ session_id: 'exec-a' }, { sessionsDir: fx.sessionsDir, gitPath: GIT, ghPath: 'gh-for-tests', run, deadline: Date.now() - 1, governanceState: GOVERNED }).outcome, 'FAILED');
   assert.deepEqual(ghCalls, []);
-  checkpoint.runHook({ session_id: 'exec-a' }, { sessionsDir: fx.sessionsDir, gitPath: GIT, ghPath: 'gh-for-tests', run, deadline: Date.now() + 20000 });
+  checkpoint.runHook({ session_id: 'exec-a' }, { sessionsDir: fx.sessionsDir, gitPath: GIT, ghPath: 'gh-for-tests', run, deadline: Date.now() + 20000, governanceState: GOVERNED });
   assert.ok(ghCalls.length > 0 && ghCalls.every(timeout => timeout <= 8000), `per-call timeouts ${ghCalls}`);
   // A malformed block is not recorded as a return; the facts and the error code still reach the journal.
   const seqBefore = fx.store.readJournal(423, `g1-a1--${hash}.json`).doc.seq;
@@ -443,6 +444,52 @@ test('W11 bind takes the session only from --session, never from an inherited en
   }
   assert.equal(fx.run(['checkpoint', '--session', 'exec-a']).error?.code, 'NOT_BOUND');
   assert.equal(fx.store.listJournals(423).length, 0);
+});
+
+test('H4 the turn-end hook writes nothing to the store once GitHub governance is off or incomplete', () => {
+  const fx = fixture();
+  fx.ctrl(['assign', '--issue', '423', '--role', 'G1', '--assignment', 'g1-a1']);
+  fx.run(['bind', '--issue', '423', '--assignment', 'g1-a1', '--session', 'exec-a']);
+  const hash = checkpoint.sessionHash('exec-a');
+  const journal = () => JSON.stringify(fx.store.readJournal(423, `g1-a1--${hash}.json`).doc);
+  const before = journal();
+  for (const [label, governanceState] of [
+    ['disabled after bind', () => ({ state: 'DISABLED', governed_rules_bind: false })],
+    ['enabled, setup not finished', () => ({ state: 'ENABLED', governed_rules_bind: false })],
+    ['undecided', () => ({ state: 'UNDECIDED', governed_rules_bind: false })],
+    ['state unreadable', () => { throw new Error('boom'); }],
+  ]) {
+    let calls = 0;
+    const counting = { request: (...args) => { calls += 1; return fx.github.request(...args); }, graphql: (...args) => { calls += 1; return fx.github.graphql(...args); } };
+    const result = fx.turnEnd('exec-a', returnBlock('h4'), { governanceState, transport: counting });
+    assert.equal(result.outcome, 'GOVERNANCE_OFF', label);
+    assert.equal(calls, 0, `${label}: no store call`);
+    assert.equal(journal(), before, label);
+  }
+  assert.notEqual(fx.turnEnd('exec-a', returnBlock('h4')).outcome, 'GOVERNANCE_OFF', 'ENABLED with the governed rules: the journal is written');
+});
+
+test('H5 a session a Toolkit launcher started never writes programme state, even with --controller', () => {
+  const fx = fixture();
+  const writes = [
+    ['assign', '--issue', '423', '--role', 'G1', '--assignment', 'g1-a1'],
+    ['reconcile', '--apply'],
+    ['update-parent'],
+    ['return', '--issue', '423', '--consume', 'r1', '--verdict', 'ACCEPT'],
+  ];
+  for (const marker of ['TOOLKIT_GATE_ROLE', 'TOOLKIT_NATIVE_HELPER_BINDING']) {
+    const environment = { TOOLKIT_PROGRAMME_SESSION: controller.session, [marker]: 'G1' };
+    for (const argv of writes) {
+      const { error } = fx.run([...argv, '--session', controller.session, '--controller'], { environment });
+      assert.equal(error?.code, 'USAGE', `${marker} ${argv[0]}`);
+      assert.match(error.message, /started by a Toolkit launcher .* never writes programme state/, `${marker} ${argv[0]}`);
+    }
+    // Reading still works: the dry run and show.
+    assert.equal(fx.run(['reconcile'], { environment }).error, null, marker);
+  }
+  assert.equal(fx.store.listJournals(423).length, 0);
+  // Without a marker the controller writes as before.
+  assert.equal(fx.run([...writes[0], '--session', controller.session, '--controller']).error, null);
 });
 
 test('W12 a lane controller assigns and interrupts only its delegated child', () => {

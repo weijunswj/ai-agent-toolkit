@@ -75,7 +75,7 @@ function checkConformance(cwd, options = {}) {
   }
   const findings = [];
   if (state.rule === 'ERROR') {
-    findings.push(finding('STATE_ERROR', 'error', `The governance state could not be read (${state.error_code}); prompts in this repository are held until it can.`));
+    findings.push(finding('STATE_ERROR', 'error', `The governance state could not be read (${state.error_code}); prompts in this repository are held until it can. ${governance.repairHint(state, options)}`.trim()));
     return report(2, state, findings, toolkitRoot);
   }
   if (state.rule === 'R1') {

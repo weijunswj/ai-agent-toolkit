@@ -448,9 +448,18 @@ function formatReport(report) {
   return `${lines.join('\n')}\n`;
 }
 
+// A session a Toolkit launcher started (a gate or a pinned helper) is an executor, whatever flags it
+// passes: it never writes programme state.
+const EXECUTOR_MARKERS = Object.freeze(['TOOLKIT_GATE_ROLE', 'TOOLKIT_NATIVE_HELPER_BINDING']);
+
 function main(argv = process.argv.slice(2), deps = {}) {
   const out = deps.stdout || process.stdout;
   const args = parseArgs(argv);
+  const environment = deps.environment || process.env;
+  const marker = EXECUTOR_MARKERS.find(name => typeof environment[name] === 'string' && environment[name] !== '');
+  if (marker && isWrite(args)) {
+    throw usage(`This session was started by a Toolkit launcher (${marker}), so it is an executor: it never writes programme state, even with --controller. Run reconcile (a dry run) or show and report to the controller.`);
+  }
   let result;
   const local = args.command === 'checkpoint' || (args.command === 'show' && args.session && !args.parent && args.issue === undefined);
   if (local) result = localCommands[args.command](args, deps);

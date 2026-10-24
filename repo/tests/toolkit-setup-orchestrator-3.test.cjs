@@ -162,12 +162,21 @@ function pushToOrigin(setupRepo, rel, text) {
   return runTestGit(setupRepo, ['rev-parse', 'HEAD']).trim();
 }
 
-test('setup that updates its own scripts stops before plugin and config steps, and the next run finishes', () => {
+for (const [label, rel, edit] of [
+  ['its own scripts', 'repo/scripts/setup-self-update-marker.cjs', () => "'use strict';\n"],
+  // A release that changes only the version (the version source and plugin metadata) stops it too.
+  ['only the version source', 'repo/contracts/toolkit-local-bridge/version.json',
+    text => {
+      const source = JSON.parse(text || fs.readFileSync(path.join(repoRoot, 'repo', 'contracts', 'toolkit-local-bridge', 'version.json'), 'utf8'));
+      return `${JSON.stringify({ ...source, version_notes: `${source.version_notes} (updated)` }, null, 2)}\n`;
+    }],
+]) test(`setup that updates ${label} stops before plugin and config steps, and the next run finishes`, () => {
   const root = tmpRoot();
   const { origin, setupRepo } = createGitBackedRealSetupRepo(root);
   const managedPath = path.join(root, '.ai-agent-toolkit', 'source', 'ai-agent-toolkit');
   runTestGit(root, ['clone', '--branch', 'main', origin, managedPath]);
-  const updated = pushToOrigin(setupRepo, 'repo/scripts/setup-self-update-marker.cjs', "'use strict';\n");
+  const current = fs.existsSync(path.join(setupRepo, ...rel.split('/'))) ? fs.readFileSync(path.join(setupRepo, ...rel.split('/')), 'utf8') : '';
+  const updated = pushToOrigin(setupRepo, rel, edit(current));
 
   const first = runOwnManagedSetup(root, origin, managedPath);
   assert.equal(first.status, 24, first.stderr || first.stdout);

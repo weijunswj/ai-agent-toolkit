@@ -160,6 +160,9 @@ test('S-01, S-02: no git root is DISABLED automatically; a git repository not on
     ['file', 'file:///srv/git/repo.git', 'origin-unsupported', null],
     ['gitlab', 'https://gitlab.com/example-owner/example-repo.git', 'other-host', 'gitlab.com'],
     ['gitea', 'git@git.example.invalid:a/b.git', 'other-host', 'git.example.invalid'],
+    // A GitHub Enterprise server is not github.com: the reconciler could not serve it.
+    ['enterprise', 'https://github.example-corp.invalid/a/b.git', 'other-host', 'github.example-corp.invalid'],
+    ['enterprise-ssh', 'git@github.example-corp.invalid:a/b.git', 'other-host', 'github.example-corp.invalid'],
   ]) {
     const repo = fakeRepo(ctx.root, name, { remote, block: true, binding: true });
     const result = state(ctx, repo);

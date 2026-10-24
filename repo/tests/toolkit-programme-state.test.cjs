@@ -467,4 +467,10 @@ test('repository identity comes from origin and GitHub; the binding cannot overr
   assert.equal(state.originSlug('git@github.com:acme/app.git'), 'acme/app');
   assert.throws(() => state.bindRepository({ transport: github, originUrl: 'https://github.com/acme/app.git', binding: { repository: 'acme/other' } }), { code: 'REPO_IDENTITY_MISMATCH' });
   assert.throws(() => state.bindRepository({ transport: github, originUrl: 'https://gitlab.com/acme/app.git', binding }), { code: 'REPO_IDENTITY_MISMATCH' });
+  // One github.com test, shared with the governance state: aliases and ssh.github.com count, Enterprise servers do not.
+  for (const [url, slug] of [
+    ['https://github.com/acme/app.git', 'acme/app'], ['git@github.com:acme/app.git', 'acme/app'], ['git@github-work:acme/app.git', 'acme/app'],
+    ['ssh://git@ssh.github.com:443/acme/app.git', 'acme/app'], ['https://token@github.com/acme/app', 'acme/app'],
+    ['https://github.example-corp.invalid/acme/app.git', null], ['git@github.example-corp.invalid:acme/app.git', null], ['https://gitlab.com/acme/app.git', null],
+  ]) assert.equal(state.originSlug(url), slug, url);
 });

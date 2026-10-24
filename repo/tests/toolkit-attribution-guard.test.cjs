@@ -4,7 +4,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { spawnSync } = require('node:child_process');
+const childProcess = require('node:child_process');
+const { spawnSync } = childProcess;
 const test = require('node:test');
 const { BYPASS_MESSAGE, FORCE_MESSAGE, attributionRefusal, attributionDecision, bypassRefusal, MESSAGE } = require('../scripts/toolkit-attribution-guard.cjs');
 
@@ -370,4 +371,28 @@ test('force pushes are refused in governed and guarded repositories and to evide
     assert.equal(bypassRefusal(command, repos.store), '', command);
   }
   for (const command of forced) assert.equal(bypassRefusal(command, repos.plain), '', `plain repository: ${command}`);
+});
+
+test('N3: an ENABLED repository is protected even before its governed block lands; a DISABLED one with a leftover block stays protected', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-bypass-state-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const registryOptions = { registryPath: path.join(dir, 'home', '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json'), testOnly: true };
+  const gate = require('../scripts/toolkit-governance-gate.cjs');
+  const repo = (name, { block = false } = {}) => {
+    const root = path.join(dir, name);
+    fs.mkdirSync(root, { recursive: true });
+    childProcess.execFileSync('git', ['init', '--quiet', root]);
+    childProcess.execFileSync('git', ['-C', root, 'remote', 'add', 'origin', `https://github.com/example-owner/${name}.git`]);
+    if (block) fs.writeFileSync(path.join(root, 'AGENTS.md'), '<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/toolkit-governed-rules.md:BEGIN TOOLKIT-GOVERNED-RULES v2 toolkit=0.0.0 sha256=000000000000 -->\n');
+    return root;
+  };
+  const enabled = repo('enabled');
+  gate.writeGovernanceDecision(enabled, 'enable', { registryOptions });
+  const disabledWithBlock = repo('disabled-block', { block: true });
+  gate.writeGovernanceDecision(disabledWithBlock, 'disable', { registryOptions });
+  const undecided = repo('undecided');
+  for (const [root, refused] of [[enabled, true], [disabledWithBlock, true], [undecided, false]]) {
+    assert.equal(bypassRefusal('git push --force origin main', root, 0, registryOptions), refused ? FORCE_MESSAGE : '', path.basename(root));
+    assert.equal(bypassRefusal('git commit --no-verify -m x', root, 0, registryOptions), refused ? BYPASS_MESSAGE : '', path.basename(root));
+  }
 });

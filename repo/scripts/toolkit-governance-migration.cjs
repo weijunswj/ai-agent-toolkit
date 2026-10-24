@@ -61,7 +61,7 @@ function discoverRepositories(roots) {
 function slugFor(root) {
   try {
     const identity = governance.readIdentity(root);
-    return identity.valid && identity.remote.host === 'github.com' ? governance.remoteSlug(identity.remote) : null;
+    return identity.valid && governance.isGitHubHost(identity.remote.host) ? governance.remoteSlug(identity.remote) : null;
   } catch { return null; }
 }
 

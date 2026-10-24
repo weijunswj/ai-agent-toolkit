@@ -45,11 +45,12 @@ const { validateRemoteIdentity } = require('./toolkit-control-plane/control-plan
 const programmeState = require('../../skills/github-program-reconciler/scripts/programme-state.cjs');
 
 const SCHEMA = 'toolkit.governance-state.v1';
-// GitHub governance (the reconciler and its records) supports github.com. A host whose name
-// mentions github (ssh.github.com, or an SSH alias such as github-work) is treated as GitHub too,
-// since an alias cannot be resolved from the repository alone.
+// GitHub governance (the reconciler and its records) supports github.com: github.com itself, its
+// subdomains (ssh.github.com), and an SSH alias with no dot whose name mentions github (github-work),
+// since an alias cannot be resolved from the repository alone. Any other dotted host, a GitHub
+// Enterprise server included, is not github.com. The reconciler uses the same test.
 const TRACKING_HOST = 'github.com';
-const trackingHost = host => /github/i.test(host);
+const trackingHost = programmeState.isGitHubHost;
 const STATES = Object.freeze(['ENABLED', 'DISABLED', 'UNDECIDED']);
 const NOT_GITHUB_BASENAME = 'governance-not-github.v1.json';
 const NOT_GITHUB_SCHEMA = 'toolkit.governance-not-github.v1';
@@ -480,6 +481,41 @@ function governanceState(cwd, options = {}) {
   return new GovernanceState({ registryOptions: options }).evaluate(cwd);
 }
 
+// ---- repair -----------------------------------------------------------------------------------
+
+// For a state held because the user's decisions file cannot be read: one sentence naming the file
+// and the terminal repair. Empty otherwise.
+function repairHint(state, options = {}) {
+  if (!state || state.reason !== 'registry-unreadable') return '';
+  let file;
+  try { file = registryPathFor(options); } catch { return ''; }
+  return `Your governance decisions file (${file}) could not be read. To start it afresh, run ${governanceCommand('repair')} in your own terminal: after you type yes it moves the file aside (kept next to it), and Toolkit asks about each repository again.`;
+}
+
+// Whether the decisions file needs the repair: { file, problem } with problem null when it reads
+// (or is missing), else the error code.
+function registryProblem(options = {}) {
+  const file = registryPathFor(options);
+  try {
+    const bytes = readSmallFile(file, registry.MAX_REGISTRY_BYTES, 'REGISTRY_TOO_LARGE');
+    if (bytes) registry.parseRegistryBytes(bytes);
+    return { file, problem: null };
+  } catch (error) {
+    return { file, problem: codeOf(error) };
+  }
+}
+
+// Moves an unreadable decisions file aside, next to the original, and reads back that the file is
+// gone. Only the terminal command calls this, after the user typed yes. Returns the new path.
+function moveRegistryAside(options = {}, now = () => new Date()) {
+  const { file, problem } = registryProblem(options);
+  if (!problem) fail('REGISTRY_READABLE');
+  const aside = `${file}.damaged-${now().toISOString().replace(/[:.]/g, '-')}-${crypto.randomBytes(2).toString('hex')}`;
+  try { fs.renameSync(file, aside); } catch { fail('REGISTRY_NOT_MOVED'); }
+  if (fs.existsSync(file) || !fs.existsSync(aside)) fail('REGISTRY_NOT_MOVED');
+  return aside;
+}
+
 module.exports = Object.freeze({
   SCHEMA,
   STATES,
@@ -498,6 +534,10 @@ module.exports = Object.freeze({
   GovernanceStateError,
   governanceState,
   governanceCommand,
+  isGitHubHost: trackingHost,
+  repairHint,
+  registryProblem,
+  moveRegistryAside,
   readIdentity,
   readMaterials,
   readGovernedBlock,
