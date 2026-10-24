@@ -91,6 +91,11 @@ test('bypass attempts: ignoring, skipping, near-misses and a "yes" before the qu
     const decision = hold(ctx).decide({ cwd: repo, prompt });
     assert.equal(decision.action, 'block', JSON.stringify(prompt));
   }
+  // With messages held, a bare short reply still counts only from a session that was shown the
+  // question: never from one with no id, nor from another session (such as a nested `claude -p yes`).
+  for (const reply of ['yes', 'y', 'no', 'n', 'not now', 'later']) {
+    for (const sessionId of [undefined, `other-${reply}`]) assert.equal(hold(ctx).decide({ cwd: repo, prompt: reply, sessionId }).action, 'block', `${reply} ${sessionId}`);
+  }
   assert.equal(registryBytes(ctx), null);
   assert.equal(stateOf(ctx, repo).state, 'UNDECIDED');
   // Letter case and a final full stop are accepted forms of the answer.
@@ -179,6 +184,59 @@ test('not now: nothing is recorded, this session carries on under the global rul
   // A later yes in the new session still decides.
   assert.equal(hold(ctx).decide({ cwd: repo, prompt: 'yes', sessionId: 's2' }).action, 'pass');
   assert.equal(stateOf(ctx, repo).state, 'ENABLED');
+});
+
+test('after "not now": the full answer still decides, and a short reply is an ordinary message', (t) => {
+  const ctx = scratch(t);
+  for (const [index, [answer, expected]] of [['toolkit governance enable', 'ENABLED'], ['Toolkit governance disable.', 'DISABLED'], ['toolkit governance decline', 'DISABLED']].entries()) {
+    const slug = `after-not-now-${index}`;
+    const repo = gitRepo(ctx, slug, { remote: `https://github.com/example-owner/${slug}.git` });
+    hold(ctx).decide({ cwd: repo, prompt: 'go', sessionId: 's1' });
+    assert.equal(hold(ctx).decide({ cwd: repo, prompt: 'not now', sessionId: 's1' }).action, 'pass');
+    assert.deepEqual(hold(ctx).decide({ cwd: repo, prompt: 'yes', sessionId: 's1' }), { action: 'pass' }, 'a short reply is not taken as the answer');
+    assert.equal(stateOf(ctx, repo).state, 'UNDECIDED');
+    const decided = hold(ctx).decide({ cwd: repo, prompt: answer, sessionId: 's1' });
+    assert.equal(decided.action, 'pass', answer);
+    assert.match(decided.context, new RegExp(`now ${expected}`));
+    assert.equal(stateOf(ctx, repo).state, expected, answer);
+  }
+  // A launcher-started session still cannot answer, even after "not now".
+  const repo = gitRepo(ctx, 'after-not-now-launcher', { remote: 'https://github.com/example-owner/after-not-now-launcher.git' });
+  hold(ctx).decide({ cwd: repo, prompt: 'go', sessionId: 's1' });
+  hold(ctx).decide({ cwd: repo, prompt: 'not now', sessionId: 's1' });
+  assert.match(hold(ctx, { TOOLKIT_GATE_ROLE: 'G1' }).decide({ cwd: repo, prompt: 'toolkit governance enable', sessionId: 's1' }).reason, /automated session cannot answer/);
+  assert.equal(stateOf(ctx, repo).state, 'UNDECIDED');
+  assert.match(gate.sessionLine(repo, { registryOptions: ctx.options, sessionId: 's1' }), /send `toolkit governance enable` or `toolkit governance disable` as a message/);
+});
+
+test('"not now" in one session never re-holds another session that said it, and old single-session entries still count', (t) => {
+  const ctx = scratch(t);
+  const repo = gitRepo(ctx, 'repo');
+  const notNowPath = path.join(path.dirname(ctx.registryPath), gate.NOT_NOW_BASENAME);
+  for (const session of ['a', 'b']) {
+    hold(ctx).decide({ cwd: repo, prompt: 'go', sessionId: session });
+    assert.equal(hold(ctx).decide({ cwd: repo, prompt: 'not now', sessionId: session }).action, 'pass', session);
+  }
+  for (const session of ['a', 'b']) {
+    assert.deepEqual(hold(ctx).decide({ cwd: repo, prompt: 'next', sessionId: session }), { action: 'pass' }, session);
+    assert.equal(tools(ctx).decide({ tool_name: 'Bash', cwd: repo, session_id: session, tool_input: { command: 'ls' } }), null, session);
+  }
+  assert.equal(hold(ctx).decide({ cwd: repo, prompt: 'go', sessionId: 'c' }).action, 'block', 'a session that did not say it is still held');
+  // Only the newest few are kept.
+  for (let index = 0; index < 10; index += 1) {
+    const session = `s${index}`;
+    const at = new Date(Date.UTC(2099, 0, 1, 0, index));
+    const timed = new gate.PromptHold({ registryOptions: ctx.options, environment: {}, now: () => at });
+    timed.decide({ cwd: repo, prompt: 'go', sessionId: session });
+    assert.equal(timed.decide({ cwd: repo, prompt: 'not now', sessionId: session }).action, 'pass');
+  }
+  const kept = Object.keys(Object.values(JSON.parse(fs.readFileSync(notNowPath, 'utf8')).repositories)[0].sessions);
+  assert.equal(kept.length, 8);
+  assert.ok(kept.includes('s9') && !kept.includes('a'));
+  // An entry written by the earlier one-session shape is read as that session.
+  const repositoryId = stateOf(ctx, repo).repository_id;
+  fs.writeFileSync(notNowPath, JSON.stringify({ schema: 'toolkit.governance-not-now.v1', repositories: { [repositoryId]: { session_id: 'old', at: '2026-10-24T08:00:00.000Z' } } }));
+  assert.deepEqual(hold(ctx).decide({ cwd: repo, prompt: 'next', sessionId: 'old' }), { action: 'pass' });
 });
 
 test('short replies need a session id, and a launcher-started session cannot give any short reply', (t) => {
@@ -305,7 +363,7 @@ test('a damaged "not now" file keeps the repository held with the real question,
     assert.equal(hold(ctx).decide({ cwd: repo, prompt: reply, sessionId: 's1' }).action, 'pass', reply);
     assert.equal(stateOf(ctx, repo).state, expected);
     if (reply === 'not now') {
-      assert.equal(JSON.parse(fs.readFileSync(notNowPath, 'utf8')).repositories[stateOf(ctx, repo).repository_id].session_id, 's1', 'the damaged file is replaced');
+      assert.ok(JSON.parse(fs.readFileSync(notNowPath, 'utf8')).repositories[stateOf(ctx, repo).repository_id].sessions.s1, 'the damaged file is replaced');
     }
   }
   // A "not now" that cannot be saved keeps the repository held and says so.

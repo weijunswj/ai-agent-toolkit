@@ -203,7 +203,7 @@ function codexWindowsShells() {
   ];
   const pwsh = path.join(process.env.ProgramFiles || 'C:\\Program Files', 'PowerShell', '7', 'pwsh.exe');
   if (fs.existsSync(pwsh)) shells.push(['PowerShell 7 -Command', pwsh, command => ['-NoProfile', '-Command', command], false]);
-  return shells;
+  return { shells, missing: fs.existsSync(pwsh) ? null : pwsh };
 }
 
 // A plugin-shaped folder with the real launcher, runtime metadata naming this Node, and a hook script
@@ -228,7 +228,13 @@ test('Windows: a held prompt and a refused tool call reach Codex as exit 2 under
   t.after(() => fs.rmSync(base, { recursive: true, force: true }));
   const plain = path.join(base, 'plain');
   fs.mkdirSync(plain, { recursive: true });
-  for (const [name, shell, args, verbatim] of codexWindowsShells()) {
+  const { shells, missing } = codexWindowsShells();
+  // A missing PowerShell 7 is reported, never dropped quietly; the GitHub Windows runner has it.
+  if (missing) {
+    assert.notEqual(process.env.GITHUB_ACTIONS, 'true', `PowerShell 7 is expected on the Windows runner at ${missing}`);
+    t.test('PowerShell 7 -Command', { skip: `PowerShell 7 is not installed at ${missing}` }, () => {});
+  }
+  for (const [name, shell, args, verbatim] of shells) {
     // A fresh undecided repository and home per shell, so each run sees the first question.
     const slug = name.replace(/\W+/g, '-'), repo = path.join(base, `undecided-${slug}`), home = path.join(base, `home-${slug}`);
     fs.mkdirSync(home, { recursive: true });

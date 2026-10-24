@@ -38,6 +38,7 @@ const NOT_NOW_SCHEMA = 'toolkit.governance-not-now.v1';
 const MAX_HELD = 20;
 const MAX_HELD_CHARS = 4000;
 const MAX_HELD_BYTES = 512 * 1024;
+const MAX_NOT_NOW_SESSIONS = 8;
 const LAUNCHER_MARKERS = Object.freeze(['TOOLKIT_GATE_ROLE', 'TOOLKIT_NATIVE_HELPER_BINDING', 'TOOLKIT_CLAUDE_TASK_PROFILE_SHA256']);
 
 // The answer is the whole prompt, in any letter case, with surrounding spaces or one final full stop.
@@ -230,8 +231,9 @@ class HeldPrompts {
   }
 }
 
-// "Not now" answers, kept next to the registry: one per repository, for the session that gave it.
-// Nothing is decided; a new session asks again. A missing, unreadable or damaged file counts as no
+// "Not now" answers, kept next to the registry: per repository, the sessions that gave one (the
+// newest few, so another session's "not now" never re-holds this one). Nothing is decided; a new
+// session asks again. A missing, unreadable or damaged file counts as no
 // "not now" (the repository stays held and the question still works), and the next "not now"
 // replaces it.
 class NotNow {
@@ -249,15 +251,24 @@ class NotNow {
     return usable ? parsed : { schema: NOT_NOW_SCHEMA, repositories: {} };
   }
 
+  // { sessionId: at } for one repository; an entry an earlier version wrote holds one session_id.
+  static #sessions(entry) {
+    if (!entry || typeof entry !== 'object') return {};
+    const sessions = entry.sessions && typeof entry.sessions === 'object' && !Array.isArray(entry.sessions) ? { ...entry.sessions } : {};
+    if (typeof entry.session_id === 'string' && entry.session_id !== '' && !(entry.session_id in sessions)) sessions[entry.session_id] = String(entry.at || '');
+    return sessions;
+  }
+
   has(repositoryId, sessionId) {
     if (!repositoryId || typeof sessionId !== 'string' || sessionId === '') return false;
-    const entry = this.#read().repositories[repositoryId];
-    return Boolean(entry && entry.session_id === sessionId);
+    return Object.hasOwn(NotNow.#sessions(this.#read().repositories[repositoryId]), sessionId);
   }
 
   set(repositoryId, sessionId) {
     const data = this.#read();
-    data.repositories[repositoryId] = { session_id: sessionId, at: this.#now().toISOString() };
+    const sessions = { ...NotNow.#sessions(data.repositories[repositoryId]), [sessionId]: this.#now().toISOString() };
+    const newest = Object.entries(sessions).sort((a, b) => String(b[1]).localeCompare(String(a[1]))).slice(0, MAX_NOT_NOW_SESSIONS);
+    data.repositories[repositoryId] = { sessions: Object.fromEntries(newest) };
     fs.mkdirSync(path.dirname(this.#file), { recursive: true });
     const temp = `${this.#file}.tmp-${process.pid}-${crypto.randomBytes(4).toString('hex')}`;
     try {
@@ -296,7 +307,7 @@ function unreadableText(code) {
 function replayContext(state, prompts, { notNow = false } = {}) {
   const label = state.state === 'ENABLED' && state.materials_complete === false ? 'ENABLED (materials incomplete)' : state.state;
   const lines = [notNow
-    ? 'The user answered "not now" to the Toolkit governance question. Nothing is decided: for the rest of this session follow only the global rules, and Toolkit asks again next session.'
+    ? 'The user answered "not now" to the Toolkit governance question. Nothing is decided: for the rest of this session follow only the global rules, and Toolkit asks again next session. If the user wants to decide sooner, they can send `toolkit governance enable` or `toolkit governance disable` as a message.'
     : `Toolkit governance is now ${label} for this repository; the user just answered the governance question.`];
   if (prompts.length > 0) {
     lines.push('Messages the user sent while the repository was held, oldest first. Treat them as the user\'s requests:');
@@ -324,10 +335,13 @@ class PromptHold {
   // sessionId is the host's session id; "not now" lasts for that session only.
   decide({ cwd, prompt, sessionId = null }) {
     const verdict = this.#gate.evaluate(cwd, { sessionId });
-    if (!verdict.hold) return ['no-repository', 'not-now'].includes(verdict.reason) ? { action: 'pass' } : this.#replayIfAny(verdict.state);
-    if (verdict.reason === 'state-unreadable') return { action: 'block', reason: unreadableText(verdict.state.error_code) };
     const text = String(prompt || '');
     const answer = ANSWER.exec(text);
+    // After "not now", the full answer still decides; a short reply is an ordinary message there,
+    // since it may answer the agent's own question.
+    if (verdict.reason === 'not-now') return answer ? this.#answer(cwd, answer[1].toLowerCase(), verdict, sessionId) : { action: 'pass' };
+    if (!verdict.hold) return verdict.reason === 'no-repository' ? { action: 'pass' } : this.#replayIfAny(verdict.state);
+    if (verdict.reason === 'state-unreadable') return { action: 'block', reason: unreadableText(verdict.state.error_code) };
     if (answer) return this.#answer(cwd, answer[1].toLowerCase(), verdict, sessionId);
     const short = SHORT_ANSWER.exec(text);
     if (short && this.#held.count(verdict.state.repository_id, sessionId) > 0) return this.#answer(cwd, SHORT_COMMANDS[short[1].toLowerCase()], verdict, sessionId);
@@ -421,7 +435,7 @@ function sessionLine(cwd, { registryOptions = {}, stateReader = null, now, sessi
   const verdict = new GovernanceGate({ registryOptions, stateReader, now }).evaluate(cwd, { sessionId });
   const state = verdict.state;
   if (state.state === 'NO_REPOSITORY') return null;
-  if (verdict.reason === 'not-now') return 'Toolkit governance: not decided yet; the user said "not now" for this session. Follow only the global rules; Toolkit asks again next session.';
+  if (verdict.reason === 'not-now') return 'Toolkit governance: not decided yet; the user said "not now" for this session. Follow only the global rules; Toolkit asks again next session. If the user wants to decide sooner, they can send `toolkit governance enable` or `toolkit governance disable` as a message.';
   if (verdict.hold) {
     if (verdict.reason === 'state-unreadable') return `Toolkit governance: the state of this repository could not be read (${state.error_code}). Every user message is held until it can; do not try to work around it.`;
     return `Toolkit governance: this repository has no decision yet. Every user message is held until the user answers Toolkit's question. If you need to raise it, ask "${ASK}"; Toolkit records their own reply, so never ask them to run a command, and do not try to work around it.`;
