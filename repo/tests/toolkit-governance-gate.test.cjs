@@ -112,7 +112,14 @@ test('H-04: the answer is recorded, written into the repository\'s own ignored f
   const answered = hold(ctx).decide({ cwd: repo, prompt: 'toolkit governance enable' });
   assert.equal(answered.action, 'pass');
   assert.match(answered.context, /now ENABLED \(materials incomplete\)/);
+  // A yes leads straight into the setup questions, asked before the held messages are handled.
+  assert.match(answered.context, /GitHub governance setup is not finished here\. Before other work, ask the user in one message: \(1\) the private evidence store/);
+  assert.match(answered.context, /\(2\) the parent issue[^\n]*\(3\) confirm the defaults[^\n]*If the user says not now, carry on under the global rules and ask again next session\./);
+  assert.ok(answered.context.indexOf('Before other work') < answered.context.indexOf('1. first request'));
   assert.ok(answered.context.indexOf('1. first request') < answered.context.indexOf('2. second request'));
+  // Until the block and binding land, every new session is reminded, and nothing is held.
+  assert.match(gate.sessionLine(repo, { registryOptions: ctx.options, sessionId: 'later-session' }), /^Toolkit governance: ENABLED, setup not finished [^\n]*Before other work, ask the user in one message: \(1\) the private evidence store/);
+  assert.equal(tools(ctx).decide({ tool_name: 'Bash', cwd: repo, session_id: 'later-session', tool_input: { command: 'ls' } }), null);
   assert.equal(stateOf(ctx, repo).recorded_decision, 'enabled');
   const record = fileOf(repo);
   assert.deepEqual([record.schema, record.state, record.basis, record.history.length], [repoState.SCHEMA, 'ENABLED', 'your decision', 1]);

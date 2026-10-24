@@ -376,6 +376,10 @@ function unreadableText(code) {
   return `Toolkit: the governance state of this repository could not be read (${code}), so your message was held and not sent. Run ${terminalCommand('check')} in a terminal to see why.`;
 }
 
+// What the agent does in an ENABLED repository whose setup is not finished (the governed block or the
+// binding is missing): right after the user's yes, and at every session start until both land.
+const SETUP_ASK = 'GitHub governance setup is not finished here. Before other work, ask the user in one message: (1) the private evidence store, an existing private repository or a new `TRANSPORT-<repository>` one, separate from this repository; (2) the parent issue, an existing number or a new one; (3) confirm the defaults: record and writer prefix `INT-<SHORT>-`, required checks from the default branch protection, store branch `main`. Then use `repository-agent-rules` to add the governed block and `.github/toolkit-programme.json` in one pull request for the user to merge. If the user says not now, carry on under the global rules and ask again next session.';
+
 function replayContext(state, prompts, { notNow = false } = {}) {
   const label = state.state === 'ENABLED' && state.materials_complete === false ? 'ENABLED (materials incomplete)' : state.state;
   const lines = [notNow
@@ -383,6 +387,7 @@ function replayContext(state, prompts, { notNow = false } = {}) {
     : state.rule === 'R8'
       ? 'Toolkit GitHub governance is now DISABLED for this repository: it is not on github.com and the user said ok. Follow the global rules, coding gates included; any TOOLKIT-GOVERNED-RULES block in AGENTS.md does not apply.'
       : `Toolkit governance is now ${label} for this repository; the user just answered the governance question.`];
+  if (!notNow && state.state === 'ENABLED' && state.materials_complete === false) lines.push(`${SETUP_ASK} Handle the held messages below after that question.`);
   if (prompts.length > 0) {
     lines.push('Messages the user sent while the repository was held, oldest first. Treat them as the user\'s requests:');
     prompts.forEach((text, index) => lines.push(`${index + 1}. ${text}`));
@@ -548,7 +553,7 @@ function decidedLine(state) {
   if (state.rule === 'R1') return 'Toolkit governance: DISABLED automatically (this folder is not a git repository, so there is no GitHub governance). Follow the global rules, coding gates included.';
   if (state.rule === 'R8') return `Toolkit governance: DISABLED for this repository (not on github.com: it ${whereText(state)}; the user said ok). Follow the global rules, coding gates included; any TOOLKIT-GOVERNED-RULES block in AGENTS.md does not apply.`;
   if (state.state === 'DISABLED') return 'Toolkit governance: DISABLED for this repository (no GitHub governance). Follow the global rules, coding gates included; any TOOLKIT-GOVERNED-RULES block in AGENTS.md does not apply.';
-  if (state.materials_complete === false) return 'Toolkit governance: ENABLED, materials incomplete (the governed block or `.github/toolkit-programme.json` is missing). Follow the global rules, coding gates included; GitHub governance starts once both are in the repository.';
+  if (state.materials_complete === false) return `Toolkit governance: ENABLED, setup not finished (the governed block or \`.github/toolkit-programme.json\` is missing). Follow the global rules, coding gates included; GitHub governance starts once both are in the repository. ${SETUP_ASK}`;
   return 'Toolkit governance: ENABLED for this repository. Follow the global rules, coding gates included, and the TOOLKIT-GOVERNED-RULES block in AGENTS.md (GitHub governance: records and evidence).';
 }
 
