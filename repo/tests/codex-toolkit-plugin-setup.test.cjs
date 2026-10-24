@@ -459,9 +459,15 @@ function runSetupWrite(codexHome, fakeCodexPath, options = {}) {
       CODEX_TOOLKIT_CODEX_PLUGIN_ADD_POLL_MS: '50'
     },
     encoding: 'utf8',
-    timeout: options.timeout || 10000,
+    // Slow Windows runners have needed more than 10 s here; a kill leaves status null, so allow a minute.
+    timeout: options.timeout || 60000,
     windowsHide: true
   });
+}
+
+// The whole result for an assertion message, so a killed or failed spawn is diagnosable.
+function describeRun(result) {
+  return `status=${result.status} signal=${result.signal} error=${result.error ? result.error.message : 'none'}\n${result.stdout}\n${result.stderr}`;
 }
 
 function runSetupVerify(codexHome, fakeCodexPath, extraEnv = {}) {
@@ -641,8 +647,8 @@ test('installed hooks keep the portable command and add commandWindows to both h
   const helper = installed.hooks.PreToolUse[0].hooks[0];
   assert.equal(session.command, setup.sourceSessionStartCommand());
   assert.equal(helper.command, setup.sourceHelperHookCommand());
-  assert.equal(session.commandWindows, `${powershellPath} -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "\${PLUGIN_ROOT}/repo/scripts/toolkit-codex-session-start.ps1"`);
-  assert.equal(helper.commandWindows, `${powershellPath} -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "\${PLUGIN_ROOT}/repo/scripts/toolkit-codex-helper-hook.ps1"`);
+  assert.equal(session.commandWindows, `${powershellPath} -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "\${PLUGIN_ROOT}/repo/scripts/toolkit-codex-session-start.ps1" ; exit $LASTEXITCODE`);
+  assert.equal(helper.commandWindows, `${powershellPath} -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "\${PLUGIN_ROOT}/repo/scripts/toolkit-codex-helper-hook.ps1" ; exit $LASTEXITCODE`);
   const source = JSON.parse(fs.readFileSync(path.join(repoRoot, '.codex-plugin', 'hooks', 'hooks.json'), 'utf8'));
   assert.equal(JSON.stringify(source).includes('commandWindows'), false);
   assert.equal(setup.CACHE_FINGERPRINT_PATHS.includes(setup.HELPER_HOOK_POWERSHELL_REL_PATH), true);
@@ -818,7 +824,11 @@ test('Codex Toolkit verifier falls back to config and cache when CLI list omits 
   assert.equal(state.verificationMethod, 'config-cache-fallback');
   assert.equal(state.hookTrustStatus, 'verification-unavailable');
   assert.match(state.hookTrustMessage, /Open `\/hooks` in Codex/);
-  assert.match(state.hookTrustMessage, /review and trust the current Toolkit `SessionStart` hook/);
+  assert.match(state.hookTrustMessage, /review and trust the current Toolkit hooks \(`SessionStart`, `UserPromptSubmit`, `PreToolUse` and `Stop`\)/);
+  // Every event the plugin registers must be named, or Codex skips the ones the user never trusted.
+  for (const event of Object.keys(JSON.parse(fs.readFileSync(path.join(repoRoot, '.codex-plugin', 'hooks', 'hooks.json'), 'utf8')).hooks)) {
+    assert.match(state.hookTrustMessage, new RegExp(`\`${event}\``), event);
+  }
   assert.equal(state.installed.enabled, true);
   assert.equal(path.resolve(state.installed.source.path), path.resolve(repoRoot));
   assert.equal(path.resolve(state.cacheRoot), path.resolve(cacheRoot));
@@ -950,7 +960,7 @@ test('Codex Toolkit verify-only human output keeps trust verification unavailabl
   assert.doesNotMatch(result.stdout, /Review and trust.*only if it runs:/);
   assert.match(result.stdout, /Hook trust verification is unavailable from supported non-interactive Codex inspection/i);
   assert.match(result.stdout, /Open `\/hooks` in Codex/i);
-  assert.match(result.stdout, /review and trust the current Toolkit `SessionStart` hook/i);
+  assert.match(result.stdout, /review and trust the current Toolkit hooks \(`SessionStart`, `UserPromptSubmit`, `PreToolUse` and `Stop`\)/i);
   assert.match(result.stdout, /applies to Codex only/i);
   assert.match(result.stdout, /Claude Code does not need Codex hook approval/i);
   assert.match(result.stdout, /Codex must not install or update Claude Code/i);
@@ -1026,20 +1036,21 @@ test('Codex cache fingerprints include every new installed setup dependency and 
 test('Codex Toolkit --write human output reports the changed hook with JSON-aligned pending review state', () => {
   const jsonHome = tmpRoot();
   const jsonResult = runSetupWrite(jsonHome, writeFakeHangingCodex(jsonHome));
-  assert.equal(jsonResult.status, 0, `${jsonResult.stdout}\n${jsonResult.stderr}`);
+  assert.equal(jsonResult.status, 0, describeRun(jsonResult));
   const summary = JSON.parse(jsonResult.stdout);
 
   const humanHome = tmpRoot();
   const humanResult = runSetupWrite(humanHome, writeFakeHangingCodex(humanHome), { json: false });
 
-  assert.equal(humanResult.status, 0, `${humanResult.stdout}\n${humanResult.stderr}`);
+  assert.equal(humanResult.status, 0, describeRun(humanResult));
   assert.equal(summary.hook_trust_status, 'pending-review');
   assert.equal(summary.hook_execution_status, 'skipped until the current hook is reviewed and trusted');
   assert.match(humanResult.stdout, new RegExp(`Hook trust status: ${summary.hook_trust_status}`));
   assert.match(humanResult.stdout, new RegExp(`Hook execution status: ${summary.hook_execution_status}`));
   assert.match(humanResult.stdout, /Open `\/hooks` in Codex/);
-  assert.match(humanResult.stdout, /exact current Toolkit `SessionStart` hook must be reviewed and trusted/);
-  assert.match(humanResult.stdout, /Codex skips the hook until it is trusted/);
+  assert.match(humanResult.stdout, /exact current Toolkit hooks changed and are pending review/);
+  assert.match(humanResult.stdout, /review and trust the current Toolkit hooks \(`SessionStart`, `UserPromptSubmit`, `PreToolUse` and `Stop`\)/);
+  assert.match(humanResult.stdout, /Codex skips each hook until it is trusted/);
   assert.doesNotMatch(humanResult.stdout, /Hook trust status: verification-unavailable/);
 });
 

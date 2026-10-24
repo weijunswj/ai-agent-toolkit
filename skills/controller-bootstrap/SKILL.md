@@ -7,6 +7,10 @@ description: Use only when explicitly asked to bootstrap or recover the assigned
 
 Guides an already-authorised repository controller through a bounded re-entry. It does not appoint the controller, create repository authority, grant a worker capability or supply native host permission. The root agent must not infer that it owns the controller role merely because it is the root agent, and must not self-verify root admission.
 
+## Where it applies
+
+Controllers are a Toolkit default: the user can appoint one for any repository or chat, and this skill recovers it. The programme parts below (the CURRENT carrier, the takeover record on the parent issue and other programme records) apply only in a repository whose governance state is ENABLED. Elsewhere, recover from the current task packet and its evidence, and post no GitHub records.
+
 ## Entry checks
 
 1. Confirm the explicit task, canonical repository binding, parent, child and release identity, owner, current recoverable packet and assigned controller route from trusted current evidence. A link, packet, prior chat, installation, skill invocation or worker statement is not role or mutation authority.

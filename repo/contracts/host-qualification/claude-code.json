@@ -1,0 +1,37 @@
+{
+  "schema": "ai-agent-toolkit.host-qualification.v1",
+  "host": "claude-code",
+  "purpose": "Stored native results for the Claude Code helper route (lead to named helper). The install check reads this file; a platform with no run here is reported as not yet qualified.",
+  "runs": [
+    {
+      "claude_code_version": "2.1.309",
+      "platform": "linux",
+      "plugin_mode": "plugin-dir",
+      "date": "2026-10-23",
+      "toolkit_commit": "b04ced9",
+      "cases": 37,
+      "cases_passed": 36,
+      "not_passed": ["A14"],
+      "runner": "repo/tests/qualification/claude-helper-matrix.live.cjs",
+      "evidence": "TRANSPORT archives/TK-A7F2/r6a-claude-qualification-20261023/"
+    },
+    {
+      "claude_code_version": "2.1.306",
+      "platform": "win32",
+      "plugin_mode": "plugin-dir",
+      "date": "2026-10-23",
+      "toolkit_commit": "ad21cc5",
+      "cases": 39,
+      "cases_passed": 38,
+      "not_passed": ["A14"],
+      "runner": "repo/tests/qualification/claude-helper-matrix.live.cjs",
+      "evidence": "TRANSPORT archives/TK-A7F2/r6a-claude-qualification-20261023/windows-2.1.306-rerun-ad21cc5/"
+    }
+  ],
+  "known_limits": [
+    {
+      "row": "A14",
+      "summary": "A session started with --agents can redefine a Toolkit helper name, and that definition outranks the helper files. No hook can see it, so the agent hook cannot hold that helper to its route. Toolkit launchers refuse such a launch with repo/scripts/toolkit-claude-session-agents.cjs."
+    }
+  ]
+}

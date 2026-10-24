@@ -3,7 +3,9 @@
 const path = require('node:path');
 const readline = require('node:readline');
 const { spawn, spawnSync } = require('node:child_process');
-const TOOLKIT_CLIENT_VERSION = '3.9.1';
+const { TOOLKIT_VERSION } = require('./toolkit-version.cjs');
+
+const TOOLKIT_CLIENT_VERSION = TOOLKIT_VERSION;
 
 function codexCommandParts(command, args) {
   if (/\.(?:cjs|mjs|js)$/i.test(command)) return { command: process.execPath, args: [command, ...args] };

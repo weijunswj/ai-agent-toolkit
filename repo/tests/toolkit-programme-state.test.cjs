@@ -70,33 +70,37 @@ test('the content digest ignores the revision, timestamps and pending effects', 
   assert.equal(state.canonicalText({ b: 1, a: { d: 2, c: 3 } }), '{\n  "a": {\n    "c": 3,\n    "d": 2\n  },\n  "b": 1\n}\n');
 });
 
-test('reopen, resubmit and accept work in one session; return IDs are idempotent and conflicts refused (LIFE-1)', () => {
-  let doc = state.claimDocument(child(), writer, { role: 'G1' });
-  assert.equal(doc.fence.epoch, 1);
-  assert.equal(doc.gate.state, 'ACTIVE');
-  doc = state.submitReturn(doc, { returnId: 'r1', writer });
+test('reopen, resubmit and accept work under one assignment; return IDs are idempotent and conflicts refused (LIFE-1)', () => {
+  let doc = state.assignGate(child(), { assignment: 'g1-a1', role: 'G1' });
+  assert.deepEqual([doc.gate.state, doc.gate.assignment, doc.lifecycle], ['ASSIGNED', { id: 'g1-a1', role: 'G1' }, 'ACTIVE']);
+  assert.equal(state.assignGate(doc, { assignment: 'g1-a1', role: 'G1' }), null, 'issuing the same assignment again is a no-op');
+  assert.throws(() => state.assignGate(doc, { assignment: 'g1-a2', role: 'G1' }), { code: 'ASSIGNMENT_LIVE' });
+  assert.throws(() => state.recordReturn(doc, { returnId: 'r1', assignment: 'g1-old' }), { code: 'STALE_ASSIGNMENT' });
+  doc = state.recordReturn(doc, { returnId: 'r1', assignment: 'g1-a1', atHead: SHA_A });
   assert.equal(doc.gate.state, 'SUBMITTED');
-  assert.equal(state.submitReturn(doc, { returnId: 'r1', writer }), null, 'resubmitting the same return is a no-op');
+  assert.deepEqual(doc.gate.returns[0], { return_id: 'r1', verdict: null, consumed: false, epoch: 0, assignment: 'g1-a1', at_head: SHA_A, mode: 'toolkit_assisted' });
+  assert.equal(state.recordReturn(doc, { returnId: 'r1', assignment: 'g1-a1' }), null, 'recording the same return again is a no-op');
   const decide = { writer: controller, parentDoc: heldParent() };
-  assert.throws(() => state.consumeReturn(doc, { returnId: 'r1', verdict: 'ACCEPT', writer, parentDoc: decide.parentDoc }), { code: 'ROLE_REFUSED' }, 'the builder cannot accept its own return');
+  assert.throws(() => state.consumeReturn(doc, { returnId: 'r1', verdict: 'ACCEPT', writer, parentDoc: decide.parentDoc }), { code: 'ROLE_REFUSED' }, 'only the parent holder consumes a return');
   assert.throws(() => state.consumeReturn(doc, { returnId: 'r1', verdict: 'ACCEPT' }), { code: 'ROLE_REFUSED' });
   doc = state.consumeReturn(doc, { returnId: 'r1', verdict: 'REOPEN', ...decide });
   assert.equal(doc.gate.state, 'ACTIVE');
-  assert.equal(doc.gate.session_id, writer.session, 'REOPEN keeps the session');
-  assert.throws(() => state.submitReturn(doc, { returnId: 'r1', writer }), { code: 'RETURN_CONFLICT' });
-  doc = state.submitReturn(doc, { returnId: 'r2', writer });
-  doc = state.consumeReturn(doc, { returnId: 'r2', verdict: 'ACCEPT', ...decide });
+  assert.equal(doc.gate.assignment.id, 'g1-a1', 'REOPEN keeps the assignment');
+  assert.throws(() => state.recordReturn(doc, { returnId: 'r1', assignment: 'g1-a1' }), { code: 'RETURN_CONFLICT' });
+  doc = state.recordReturn(doc, { returnId: 'r2', assignment: 'g1-a1' });
+  assert.throws(() => state.consumeReturn(doc, { returnId: 'r2', verdict: 'ACCEPT', ...decide, liveHead: SHA_B }), { code: 'EVIDENCE_STALE' }, 'G1 needs G2 PASSED at the live head');
+  doc = state.applyPatch('child', doc, { review: { state: 'PASSED', verdicts: [{ reviewer: 'g2', head: SHA_B, verdict: 'PASSED' }] } }, decide);
+  doc = state.consumeReturn(doc, { returnId: 'r2', verdict: 'ACCEPT', ...decide, liveHead: SHA_B });
   assert.equal(doc.gate.state, 'RETIRED');
   assert.equal(state.consumeReturn(doc, { returnId: 'r2', verdict: 'ACCEPT', ...decide }), null, 'consuming the same return twice is idempotent');
   assert.throws(() => state.consumeReturn(doc, { returnId: 'r2', verdict: 'REOPEN', ...decide }), { code: 'RETURN_CONFLICT' });
   assert.throws(() => state.consumeReturn(doc, { returnId: 'r9', verdict: 'ACCEPT', ...decide }), { code: 'RETURN_UNKNOWN' });
   assert.deepEqual(state.validateChild(doc), []);
 
-  // A return submitted before a takeover is stale.
-  let fenced = state.claimDocument(child(), writer, { role: 'G1' });
-  fenced = state.submitReturn(fenced, { returnId: 'old', writer });
-  fenced = state.claimDocument(fenced, other, { takeover: true });
-  assert.equal(fenced.fence.epoch, 2);
+  // A return recorded before a takeover of the child's fence is stale.
+  let fenced = state.recordReturn(state.assignGate(child(), { assignment: 'g1-b', role: 'G1' }), { returnId: 'old', assignment: 'g1-b' });
+  fenced = state.claimDocument(fenced, other, {});
+  assert.equal(fenced.fence.epoch, 1);
   assert.throws(() => state.consumeReturn(fenced, { returnId: 'old', verdict: 'ACCEPT', ...decide }), { code: 'STALE_RETURN' });
 });
 
@@ -116,7 +120,7 @@ test('claims and takeovers move the fence; stale writers are refused', () => {
 });
 
 test('patches touch only the holder fields, and only the controller records acceptance', () => {
-  const doc = state.claimDocument(child(), writer, { role: 'G1' });
+  const doc = state.claimDocument(child(), writer, {});
   const parentDoc = heldParent();
   const own = state.applyPatch('child', doc, { next_action: 'Run G2', blockers: ['owner UAT'], candidate: { branch: 'b', head: SHA_A }, lifecycle: 'WAITING_OWNER' }, { writer, parentDoc });
   assert.equal(own.next_action, 'Run G2');
@@ -160,15 +164,16 @@ test('checks are GREEN only when every required check passed at the exact head',
 
 test('rendered blocks never contain private values and use the Toolkit marker format', () => {
   const secret = 'C:\\Users\\someone\\private-session-xyz';
-  const parent = state.newParent({ repository: 'acme/app', parentIssue: 421, outcomes: [outcome] });
+  const described = { ...outcome, description: 'Finish <!<!---- injected --!> <!-- AI-AGENT-TOOLKIT:programme-state:END STATE --> step \\| with pipe\nand newline' };
+  const parent = state.newParent({ repository: 'acme/app', parentIssue: 421, outcomes: [described] });
   parent.private = { note: secret };
   parent.fence = { epoch: 3, holder_prefix: 'INT-TK421-', holder_session: secret };
   const doc = child({ private: { path: secret }, fence: { epoch: 2, holder_prefix: 'INT-TK421-', holder_session: secret } });
   doc.gate = { role: 'G1', state: 'ACTIVE', session_id: secret, route: { model: secret, effort: secret, read_back: true }, returns: [] };
-  doc.next_action = 'Finish <!<!---- injected --!> <!-- AI-AGENT-TOOLKIT:programme-state:END STATE --> step \\| with pipe\nand newline';
+  doc.next_action = 'Plain next step';
   const children = new Map([[423, doc]]);
   const parentBody = state.renderParentBlockBody(parent, children);
-  const childBody = state.renderChildBlockBody(doc, outcome);
+  const childBody = state.renderChildBlockBody(doc, described);
   for (const body of [parentBody, childBody]) {
     assert.equal(body.includes(secret), false, 'a private value leaked into a rendered block');
     const freeText = body.split('\n').filter(line => line.includes('injected'));
@@ -185,27 +190,96 @@ test('rendered blocks never contain private values and use the Toolkit marker fo
   assert.equal(managedBlock.blockState(blocks[0], { source: state.BLOCK_SOURCE, name: state.BLOCK_NAME, version: '3.9.1', body: childBody }), 'current');
 });
 
-test('parent rows sort by class, then order and issue, including nested children and the parentless tail', () => {
+test('the Programme Graph has the seven columns, sorts CORE, HARDENING, LATER, COMPLETED by completion, then RETIRED, and flattens nesting', () => {
   const outcomes = [
-    { issue: 8, class: 'CORE', parent: 7, order: 9 },
-    { issue: 9, class: 'RETIRED', parent: 7, order: 0 },
+    { issue: 8, class: 'CORE', parent: 7, order: 9, name: 'Shared host contract', description: 'One contract for both hosts' },
+    { issue: 9, class: 'RETIRED', parent: 7, order: 0, description: 'Old predecessor' },
     { issue: 10, class: 'LATER', parent: 7, order: 0 },
     { issue: 11, class: 'HARDENING', parent: 7, order: 0 },
     { issue: 12, class: 'COMPLETED', parent: 7, order: 0 },
     { issue: 13, class: 'OPTIONAL', parent: 7, order: 0 },
     { issue: 15, class: 'CORE', parent: 7, order: 1 },
     { issue: 14, class: 'CORE', parent: 7, order: 1 },
-    { issue: 16, class: 'RETIRED', parent: 8, order: 0 },
+    { issue: 16, class: 'CORE', parent: 8, order: 0 },
     { issue: 17, class: 'CORE', parent: 8, order: 99 },
     { issue: 18, class: 'OPTIONAL', parent: null, order: 0 },
-    { issue: 20, class: 'CORE', parent: null, order: 1 },
-    { issue: 19, class: 'CORE', parent: null, order: 1 },
     { issue: 21, class: 'CORE', parent: null, order: 0 },
   ];
   const parent = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes });
-  const body = state.renderParentBlockBody(parent, new Map());
-  const rows = body.split('\n').filter(line => line.startsWith('| #')).map(line => Number(/^\| #(\d+)/.exec(line)[1]));
-  assert.deepEqual(rows, [14, 15, 8, 17, 16, 11, 10, 13, 12, 9, 21, 19, 20, 18]);
+  const doc = (issue, changes = {}) => ({ ...state.newChild({ repository: 'acme/app', outcome: outcomes.find(entry => entry.issue === issue) }), ...changes });
+  const children = new Map([
+    [8, doc(8, { lifecycle: 'ACTIVE', gate: { role: 'G1', state: 'ACTIVE', session_id: null, route: null, returns: [] }, pr: { number: 549, state: 'DRAFT', head: null, checks: { state: 'UNKNOWN', required_total: 0, required_passed: 0, at_head: null } } })],
+    [9, doc(9, { completed_at: '2026-10-01T00:00:00Z' })],
+    [12, doc(12)],
+    [16, doc(16, { lifecycle: 'DONE', completed_at: '2026-10-20T00:00:00Z' })],
+    [17, doc(17, { lifecycle: 'WAITING_OWNER' })],
+  ]);
+  const issues = new Map([
+    [12, { title: 'X3 — External Operation Authority', closed_at: '2026-10-05T00:00:00Z' }],
+    [14, { title: 'Toolkit 3.11.0: per-repository governance states' }],
+    [15, { title: 'W2-A — Toolkit temporary-resource hygiene' }],
+  ]);
+  const body = state.renderParentBlockBody(parent, children, issues);
+  const lines = body.split('\n');
+  assert.equal(lines[1], '## Programme Graph');
+  assert.ok(lines.includes('| Task | Child # | PR # | Class | Status | Lane | Task Description |'));
+  const rows = lines.filter(line => /^\| [^|]+ \| #\d+ \|/.test(line)).map(line => line.split(' | ').map(cell => cell.replace(/^\| | \|$/g, '')));
+  assert.deepEqual(rows.map(row => Number(row[1].slice(1))), [21, 14, 15, 8, 17, 11, 10, 13, 18, 12, 16, 9], 'active by class, then order and issue; finished oldest first');
+  assert.deepEqual(rows[3], ['Shared host contract', '#8', '#549', 'CORE', 'IN PROGRESS', 'G1', 'One contract for both hosts']);
+  assert.deepEqual(rows[1].slice(0, 2), ['per-repository governance states', '#14'], 'a release prefix is not part of the name');
+  assert.deepEqual(rows[2].slice(0, 2), ['Toolkit temporary-resource hygiene', '#15'], 'a code prefix is not part of the name');
+  assert.deepEqual(rows[4].slice(3, 6), ['CORE', 'IN PROGRESS', '-'], 'no gate, no lane');
+  assert.deepEqual(rows[7].slice(3, 6), ['LATER', 'QUEUED', '-'], 'OPTIONAL shows as LATER');
+  assert.deepEqual(rows[11].slice(3), ['-', 'RETIRED', '-', 'Old predecessor'], 'retired is its own group below COMPLETED');
+  assert.deepEqual(rows[10].slice(3, 6), ['CORE', 'COMPLETED', '-'], 'a finished nested child goes down to COMPLETED');
+  assert.equal(rows[9][0], 'External Operation Authority');
+  assert.equal(body.includes('Roadmap') || body.includes('<details>'), false, 'one table, nothing else');
+});
+
+test('the generated CURRENT summary names work in progress, what waits on the owner and the next queued tasks', () => {
+  const outcomes = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(issue => ({ issue, class: issue === 10 ? 'HARDENING' : 'CORE', parent: 7, order: issue, name: `Task ${issue}` }));
+  outcomes.push({ issue: 11, class: 'COMPLETED', parent: 7, order: 0, name: 'Done task' });
+  const parent = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes });
+  const doc = (issue, changes = {}) => ({ ...state.newChild({ repository: 'acme/app', outcome: outcomes.find(entry => entry.issue === issue) }), ...changes });
+  const pr = number => ({ number, state: 'OPEN', head: null, checks: { state: 'UNKNOWN', required_total: 0, required_passed: 0, at_head: null } });
+  const gate = role => ({ role, state: 'ACTIVE', session_id: null, route: null, returns: [] });
+  const children = new Map([
+    [1, doc(1, { lifecycle: 'ACTIVE', gate: gate('G1'), pr: pr(541), next_action: 'Finish the sweep' })],
+    [2, doc(2, { lifecycle: 'ACTIVE', gate: gate('G1'), pr: pr(543), uat: { state: 'PENDING', at_head: null } })],
+    [3, doc(3, { lifecycle: 'WAITING_OWNER' })],
+    [4, doc(4, { lifecycle: 'HOLD', blockers: ['needs the key'] })],
+    [11, doc(11, { lifecycle: 'DONE' })],
+  ]);
+  const body = state.renderCurrentBlockBody(parent, children, new Map());
+  assert.equal(body, [
+    '<!-- programme-current -->',
+    '_Generated from the programme state (revision 0); hand-written notes follow this summary._',
+    '',
+    '**In progress**',
+    '- Task 1 (#1): G1, PR #541; next: Finish the sweep',
+    '',
+    '**Waiting on you**',
+    '- Task 2 (#2): your UAT on PR #543',
+    '- Task 3 (#3): your decision',
+    '- Task 4 (#4): blocked: needs the key',
+    '',
+    '**Next up**',
+    '- Task 5 (#5)',
+    '- Task 6 (#6)',
+    '- Task 7 (#7)',
+    '- Task 8 (#8)',
+    '- Task 9 (#9)',
+  ].join('\n'));
+  const idle = state.renderCurrentBlockBody(state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes: [] }), new Map());
+  assert.match(idle, /\*\*In progress\*\*\n- None\.\n\n\*\*Waiting on you\*\*\n- None\.\n\n\*\*Next up\*\*\n- None\.$/);
+});
+
+test('a finished outcome takes the issue close time once, and the controller may set it', () => {
+  const outcomeDone = { issue: 459, class: 'COMPLETED', parent: 421, order: 1 };
+  const parentDoc = state.claimDocument(state.newParent({ repository: 'acme/app', parentIssue: 421, outcomes: [outcomeDone] }), controller, {});
+  const done = state.applyPatch('child', { ...state.newChild({ repository: 'acme/app', outcome: outcomeDone }), fence: parentDoc.fence }, { lifecycle: 'DONE', completed_at: '2026-10-23T10:00:00Z' }, { writer: controller, parentDoc });
+  assert.equal(done.completed_at, '2026-10-23T10:00:00Z');
+  assert.throws(() => state.assertValid('child', state.applyPatch('child', done, { completed_at: 'yesterday' }, { writer: controller, parentDoc })), /completed_at/);
 });
 
 test('a state block is replaced without touching the bytes around it', () => {
@@ -225,6 +299,34 @@ test('a state block is replaced without touching the bytes around it', () => {
   assert.throws(() => state.upsertStateBlock(twice, state.renderBlock('c', '3.9.1')), { code: 'MANAGED_BLOCK_BROKEN' });
   const edited = state.renderBlock('original', '3.9.1').replace('\noriginal\n', '\nedited\n');
   assert.equal(state.findStateBlock(edited).block.tampered, true);
+});
+
+test('the block goes in place of the named section, after the status section, or under the title and its note, and moves once', () => {
+  const block = state.renderBlock('graph', '3.9.1');
+  const page = '# Programme\n\nIntro.\n\n## CURRENT\n\nLive now.\n\n## Delivery model\n\nText.\n\n## Programme index\n\n| old | table |\n\n## Parent completion\n\nDone when.\n';
+  const placement = { after_section: 'CURRENT', replace_section: 'Programme index' };
+  const replaced = state.upsertStateBlock(page, block, placement).body;
+  assert.equal(replaced, `# Programme\n\nIntro.\n\n## CURRENT\n\nLive now.\n\n## Delivery model\n\nText.\n\n${block}\n\n## Parent completion\n\nDone when.\n`);
+  assert.equal(state.upsertStateBlock(replaced, block, placement).body, replaced, 'once the section is gone the block stays where it is');
+
+  const noIndex = page.replace('## Programme index\n\n| old | table |\n\n', '');
+  const afterCurrent = state.upsertStateBlock(noIndex, block, placement).body;
+  assert.ok(afterCurrent.includes(`Live now.\n\n${block}\n\n## Delivery model`));
+
+  const topped = `${block}\n\n${noIndex}`;
+  const moved = state.upsertStateBlock(topped, block, placement);
+  assert.equal(moved.moved, true, 'a block above its place moves down');
+  assert.equal(moved.body, afterCurrent);
+  assert.equal(state.upsertStateBlock(moved.body, block, placement).moved, false, 'and stays there');
+
+  const lower = noIndex.replace('Done when.\n', `Done when.\n\n${block}\n`);
+  assert.equal(state.upsertStateBlock(lower, block, placement).body, lower, 'a block placed lower by hand is left there');
+
+  const child = '# Child title\n\n<!-- INT-X:CURRENT-DIRECTION:BEGIN -->\n> Direction note.\n<!-- INT-X:CURRENT-DIRECTION:END -->\n\nParent: #421\n\n## Status\n\nText.\n';
+  assert.equal(state.upsertStateBlock(`${block}\n\n${child}`, block).body, child.replace('END -->\n\n', `END -->\n\n${block}\n\n`));
+  assert.equal(state.upsertStateBlock('No title here.\n', block).body, `${block}\n\nNo title here.\n`);
+  const fenced = '```\n# not a title\n```\n# Real title\nBody.\n';
+  assert.ok(state.upsertStateBlock(fenced, block).body.includes(`# Real title\n\n${block}\n\nBody.`));
 });
 
 test('order moves reach the catalogue order and leave other sub-issues alone', () => {
@@ -301,6 +403,31 @@ test('the state store refuses a public or read-only store and never writes uncha
   assert.throws(() => store.write('child', 423, child({ next_action: 'Racing create' }), { sha: null, previous: null }), { code: 'STATE_CONFLICT' });
 });
 
+test('a branch read that lags behind a write neither fails the read-back nor the next compare-and-swap', () => {
+  const github = new FakeGitHub();
+  const store = new state.StateStore({ transport: github, store: { repository: 'acme/state-store', branch: 'main', path: 'state/acme/app/' } });
+  const parent = state.claimDocument(state.newParent({ repository: 'acme/app', parentIssue: 421, outcomes: [outcome] }), writer, {});
+  github.branchLag = true;
+  const created = store.write('child', 423, child(), { sha: null, previous: null });
+  assert.equal(created.outcome, 'WRITTEN', 'the read-back reads the new commit, not the lagging branch');
+  assert.equal(github.calls.at(-1).path.endsWith('?ref=c1'), true);
+  const first = store.mutate('child', 423, { writer, parentDoc: parent, change: doc => { doc.next_action = 'First'; return doc; } });
+  assert.equal(first.outcome, 'WRITTEN', 'a branch read showing nothing yet returns the version this process created');
+  const second = store.mutate('child', 423, { writer, parentDoc: parent, change: doc => { doc.next_action = 'Second'; return doc; } });
+  assert.equal(second.outcome, 'WRITTEN', 'a branch read showing the replaced version returns the written one, so its sha is current');
+  assert.equal(second.doc.next_action, 'Second');
+  github.branchLag = false;
+  assert.equal(github.readFile(store.docPath('child', 423)).next_action, 'Second');
+  assert.equal(store.read('child', 423).doc.next_action, 'Second');
+
+  // Another writer's version is never replaced by this process's own copy.
+  const filePath = store.docPath('child', 423);
+  const theirs = github.readFile(filePath);
+  theirs.blockers = ['theirs'];
+  github.putFile(filePath, theirs);
+  assert.deepEqual(store.read('child', 423).doc.blockers, ['theirs']);
+});
+
 test('a compare-and-swap conflict re-applies disjoint changes and holds overlapping ones or takeovers', () => {
   const github = new FakeGitHub();
   const store = new state.StateStore({ transport: github, store: { repository: 'acme/state-store', branch: 'main', path: 'state/acme/app/' } });
@@ -340,4 +467,10 @@ test('repository identity comes from origin and GitHub; the binding cannot overr
   assert.equal(state.originSlug('git@github.com:acme/app.git'), 'acme/app');
   assert.throws(() => state.bindRepository({ transport: github, originUrl: 'https://github.com/acme/app.git', binding: { repository: 'acme/other' } }), { code: 'REPO_IDENTITY_MISMATCH' });
   assert.throws(() => state.bindRepository({ transport: github, originUrl: 'https://gitlab.com/acme/app.git', binding }), { code: 'REPO_IDENTITY_MISMATCH' });
+  // One github.com test, shared with the governance state: aliases and ssh.github.com count, Enterprise servers do not.
+  for (const [url, slug] of [
+    ['https://github.com/acme/app.git', 'acme/app'], ['git@github.com:acme/app.git', 'acme/app'], ['git@github-work:acme/app.git', 'acme/app'],
+    ['ssh://git@ssh.github.com:443/acme/app.git', 'acme/app'], ['https://token@github.com/acme/app', 'acme/app'],
+    ['https://github.example-corp.invalid/acme/app.git', null], ['git@github.example-corp.invalid:acme/app.git', null], ['https://gitlab.com/acme/app.git', null],
+  ]) assert.equal(state.originSlug(url), slug, url);
 });

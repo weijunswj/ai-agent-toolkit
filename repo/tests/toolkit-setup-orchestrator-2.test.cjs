@@ -86,7 +86,7 @@ test('migration-required defaults and yes-recommended keep the legacy block unch
     assert.equal(result.status, 0, `${mode}: ${result.stderr || result.stdout}`);
     assert.doesNotMatch(result.stdout, /Update the existing Toolkit helper setting|Codex helper agents[\s\S]*\*\*Selected:/);
     assert.match(result.stdout, /Helper-capacity outcome this run: kept/);
-    assert.match(result.stdout, /PR #237 legacy block migrated: no/);
+    assert.match(result.stdout, /Old Toolkit helper block migrated: no/);
     assert.match(result.stdout, /Configuration changed this run: no/);
     assert.deepEqual(fs.readFileSync(configPath), original);
     assert.equal(fs.existsSync(editorLog), false);
@@ -116,7 +116,7 @@ test('legacy migration is a distinct explicit choice with a full visible preview
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.ok(result.stdout.indexOf('setup-toolkit-question-bank:complete') < result.stdout.indexOf('# Codex helper-agent config preview'));
   assert.match(result.stdout, /Before semantics:[\s\S]*After semantics:[\s\S]*Proposed Toolkit-managed TOML block:[\s\S]*Planned exact backup metadata:[\s\S]*Restore command setup script:[\s\S]*Exact restore command after the approved write \(PowerShell\):/);
-  assert.match(result.stdout, /PR #237 legacy block migrated: yes/);
+  assert.match(result.stdout, /Old Toolkit helper block migrated: yes/);
   assert.match(result.stdout, /Helper-capacity outcome this run: migrated/);
   assert.match(fs.readFileSync(configPath, 'utf8'), /model = "gpt-5.6"/);
   assert.match(fs.readFileSync(configPath, 'utf8'), /\[agents\.security-reviewer\]\ndescription = "preserve me"/);
@@ -131,7 +131,7 @@ test('legacy migration is a distinct explicit choice with a full visible preview
   ], { env: { ...isolatedHomeEnv(root), SETUP_FAKE_CODEX_EDITOR_LOG: editorLog }, timeout: 300000 });
   assert.equal(repeated.status, 0, repeated.stderr || repeated.stdout);
   assert.match(repeated.stdout, /Helper-capacity outcome this run: kept|already configured/);
-  assert.match(repeated.stdout, /PR #237 legacy block migrated: no/);
+  assert.match(repeated.stdout, /Old Toolkit helper block migrated: no/);
   assert.deepEqual(fs.readFileSync(configPath), configuredBytes);
   assert.equal(fs.readFileSync(editorLog, 'utf8').trim(), 'config/batchWrite');
   assert.equal(backupFiles(root).length, backupCount);

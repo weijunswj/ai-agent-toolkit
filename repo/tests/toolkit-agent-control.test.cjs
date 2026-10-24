@@ -8,6 +8,9 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const control = require('../scripts/toolkit-agent-control.cjs');
 const hook = require('../scripts/toolkit-claude-agent-hook.cjs');
+// The Toolkit checkout counts as governed work here through the user's recorded yes, kept in a
+// scratch home this test process and its hooks use (the governed block and binding alone are not an answer).
+require('./toolkit-governed-fixture-support.cjs').recordEnabled(path.resolve(__dirname, '..', '..'));
 
 const SCRIPT = path.join(__dirname, '..', 'scripts', 'toolkit-agent-control.cjs');
 // The wire value of the retired Toolkit direct topology, as an older Toolkit stored it.
@@ -126,7 +129,7 @@ test('Codex and Claude profile state is isolated', () => {
   assert.equal(control.readProfile('claude-code', { root: work }).topology, control.TOPOLOGIES.BROADER_NATIVE);
 });
 
-test('the Claude hook denies native Agent under root-only and retired direct profiles and requires a routing binding for broader-native', async () => {
+test('the Claude hook denies a default Agent launch in governed work under root-only, retired direct and unbound broader-native profiles', async () => {
   const rootOnlyRoot = root();
   control.configureProfile('claude-code', rootOnly(), { root: rootOnlyRoot });
   const denied = hook.decision({ tool_name: 'Agent' }, { root: rootOnlyRoot }).hookSpecificOutput;
@@ -199,45 +202,47 @@ test('a Claude hook whose decision modules cannot load still denies Agent and Ta
   // so a missing or broken module must surface as the hook's own deny, not as a crash.
   // In governed work (here the Toolkit checkout) a missing decision module denies; without the shared
   // predicate only a launcher marker gates, so ordinary work is never blocked by a broken install.
+  // The test preload makes the named modules fail to load inside the real hook file.
   const HOOK = path.join(__dirname, '..', 'scripts', 'toolkit-claude-agent-hook.cjs');
+  const PRELOAD = path.join(__dirname, 'toolkit-test-module-blocker-preload.cjs');
+  const DECISION_MODULES = 'toolkit-agent-control.cjs,toolkit-v3-native-helper-adapter.cjs,toolkit-claude-helper-policy.cjs';
   const ONE_LAYER = /^Toolkit: a subagent can't start another agent \(one layer only\)\. Do the work in this subagent, or hand it back to the main session\.$/;
   const CHECKOUT = path.resolve(__dirname, '..', '..');
   const dir = root();
   const clean = { ...process.env, AI_AGENT_TOOLKIT_CONTROL_ROOT: dir };
   for (const key of ['TOOLKIT_GATE_ROLE', 'TOOLKIT_NATIVE_HELPER_BINDING', 'TOOLKIT_CLAUDE_TASK_PROFILE_SHA256']) delete clean[key];
-  const call = (file, input, env = clean) => spawnSync(process.execPath, [file], { input: JSON.stringify(input), encoding: 'utf8', windowsHide: true, env });
+  const call = (blockedModules, input, env = clean) => spawnSync(process.execPath, blockedModules ? ['--require', PRELOAD, HOOK] : [HOOK],
+    { input: JSON.stringify(input), encoding: 'utf8', windowsHide: true, env: blockedModules ? { ...env, TOOLKIT_TEST_BLOCKED_MODULES: blockedModules } : env });
   try {
-    const copy = path.join(dir, 'toolkit-claude-agent-hook.cjs'); fs.copyFileSync(HOOK, copy);
-    fs.copyFileSync(path.join(__dirname, '..', 'scripts', 'toolkit-governed-repo.cjs'), path.join(dir, 'toolkit-governed-repo.cjs'));
     for (const tool of ['Agent', 'Task']) {
-      const broken = call(copy, { tool_name: tool, hook_event_name: 'PreToolUse', cwd: CHECKOUT, tool_input: { subagent_type: 'toolkit-g1-helper' } });
+      const broken = call(DECISION_MODULES, { tool_name: tool, hook_event_name: 'PreToolUse', cwd: CHECKOUT, tool_input: { subagent_type: 'toolkit-g1-helper' } });
       assert.equal(broken.status, 0, broken.stderr);
       const output = JSON.parse(broken.stdout).hookSpecificOutput;
       assert.equal(output.permissionDecision, 'deny', tool);
       assert.match(output.permissionDecisionReason, /could not check this helper launch safely/);
     }
     // Same boundary, intact modules: the named-helper policy decides.
-    const intact = call(HOOK, { tool_name: 'Agent', hook_event_name: 'PreToolUse', cwd: CHECKOUT, tool_input: {} });
+    const intact = call(null, { tool_name: 'Agent', hook_event_name: 'PreToolUse', cwd: CHECKOUT, tool_input: {} });
     assert.equal(intact.status, 0, intact.stderr);
     assert.match(JSON.parse(intact.stdout).hookSpecificOutput.permissionDecisionReason, /allows only the toolkit-g0-helper and toolkit-g1-helper agents/);
-    const outside = call(copy, { tool_name: 'Agent', hook_event_name: 'PreToolUse', cwd: dir, tool_input: {} });
+    const outside = call(DECISION_MODULES, { tool_name: 'Agent', hook_event_name: 'PreToolUse', cwd: dir, tool_input: {} });
     assert.deepEqual(JSON.parse(outside.stdout), {}, 'ungoverned work is untouched by a broken install');
-    const nested = JSON.parse(call(copy, { tool_name: 'Agent', hook_event_name: 'PreToolUse', cwd: dir, agent_id: 'a1', agent_type: 'Explore', tool_input: {} }).stdout);
+    const nested = JSON.parse(call(DECISION_MODULES, { tool_name: 'Agent', hook_event_name: 'PreToolUse', cwd: dir, agent_id: 'a1', agent_type: 'Explore', tool_input: {} }).stdout);
     assert.equal(nested.hookSpecificOutput.permissionDecision, 'deny', 'a subagent launch stays refused when modules are missing');
     assert.match(nested.hookSpecificOutput.permissionDecisionReason, ONE_LAYER);
     // Intact modules outside governed work: a subagent launch gets the plain one-layer reason.
-    const nestedIntact = call(HOOK, { tool_name: 'Task', hook_event_name: 'PreToolUse', cwd: dir, agent_id: 'a1', agent_type: 'Explore', tool_input: {} });
+    const nestedIntact = call(null, { tool_name: 'Task', hook_event_name: 'PreToolUse', cwd: dir, agent_id: 'a1', agent_type: 'Explore', tool_input: {} });
     assert.equal(nestedIntact.status, 0, nestedIntact.stderr);
     assert.match(JSON.parse(nestedIntact.stdout).hookSpecificOutput.permissionDecisionReason, ONE_LAYER);
-    fs.rmSync(path.join(dir, 'toolkit-governed-repo.cjs'));
-    assert.deepEqual(JSON.parse(call(copy, { tool_name: 'Agent', cwd: CHECKOUT, tool_input: {} }).stdout), {}, 'no predicate and no launcher marker: no gate');
+    const withoutPredicate = `${DECISION_MODULES},toolkit-governed-repo.cjs`;
+    assert.deepEqual(JSON.parse(call(withoutPredicate, { tool_name: 'Agent', cwd: CHECKOUT, tool_input: {} }).stdout), {}, 'no predicate and no launcher marker: no gate');
     // The module-failure path gives a subagent caller the same plain one-layer reason.
-    const failedNested = JSON.parse(call(copy, { tool_name: 'Agent', cwd: dir, agent_id: 'a1', tool_input: {} }).stdout).hookSpecificOutput;
+    const failedNested = JSON.parse(call(withoutPredicate, { tool_name: 'Agent', cwd: dir, agent_id: 'a1', tool_input: {} }).stdout).hookSpecificOutput;
     assert.equal(failedNested.permissionDecision, 'deny');
     assert.match(failedNested.permissionDecisionReason, ONE_LAYER);
-    const marked = JSON.parse(call(copy, { tool_name: 'Agent', cwd: CHECKOUT, tool_input: {} }, { ...clean, TOOLKIT_GATE_ROLE: 'G1' }).stdout);
+    const marked = JSON.parse(call(withoutPredicate, { tool_name: 'Agent', cwd: CHECKOUT, tool_input: {} }, { ...clean, TOOLKIT_GATE_ROLE: 'G1' }).stdout);
     assert.equal(marked.hookSpecificOutput.permissionDecision, 'deny', 'a launcher marker gates even without the predicate');
-    const other = call(copy, { tool_name: 'Read' });
+    const other = call(withoutPredicate, { tool_name: 'Read' });
     assert.deepEqual(JSON.parse(other.stdout), {}, 'other tools are untouched even when modules are missing');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

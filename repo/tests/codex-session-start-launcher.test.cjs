@@ -27,19 +27,9 @@ function copyFile(relPath, pluginRoot) {
   fs.copyFileSync(path.join(repoRoot, ...relPath.split('/')), target);
 }
 
+// The real source hooks, so the fixture keeps up with every hook the plugin ships.
 function writeSourceHooks(pluginRoot) {
-  writeFile(path.join(pluginRoot, '.codex-plugin', 'hooks', 'hooks.json'), `${JSON.stringify({
-    hooks: {
-      SessionStart: [{
-        matcher: 'startup|resume|clear|compact',
-        hooks: [{ type: 'command', command: setup.sourceSessionStartCommand() }]
-      }],
-      PreToolUse: [{
-        matcher: '^(?:Agent|[A-Za-z0-9_-]*spawn_agent)$',
-        hooks: [{ type: 'command', command: setup.sourceHelperHookCommand() }]
-      }]
-    }
-  }, null, 2)}\n`);
+  copyFile('.codex-plugin/hooks/hooks.json', pluginRoot);
 }
 
 // The installed commandWindows for one hook, with ${PLUGIN_ROOT} replaced the way Codex does.
@@ -59,6 +49,7 @@ function createPluginFixture(root, bridgeText) {
   copyFile(setup.SESSION_START_LAUNCHER_REL_PATH, pluginRoot);
   copyFile(setup.SESSION_START_POWERSHELL_REL_PATH, pluginRoot);
   copyFile(setup.HELPER_HOOK_POWERSHELL_REL_PATH, pluginRoot);
+  copyFile(setup.CHECKPOINT_HOOK_POWERSHELL_REL_PATH, pluginRoot);
   writeSourceHooks(pluginRoot);
   writeFile(path.join(pluginRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs'), bridgeText);
   setup.prepareInstalledSessionStart(pluginRoot);
@@ -87,6 +78,7 @@ function createRealBridgePluginFixture(root) {
     'repo/contracts/agent-rules/global-rules.md',
     'repo/contracts/agent-rules/n8n-safety-router-adapter.md',
     'repo/contracts/toolkit-local-bridge/version.json',
+    'repo/scripts/toolkit-version.cjs',
   ]) copyFile(relPath, pluginRoot);
   writeSourceHooks(pluginRoot);
   setup.prepareInstalledSessionStart(pluginRoot);
@@ -219,6 +211,23 @@ test('manual bridge command retains a non-zero exit for an equivalent explicit c
   assert.match(result.stderr, /requires --repo-path/);
 });
 
+test('the launcher leaves the hook input on stdin for the bridge before reading it for the governance line', () => {
+  const root = tmpRoot();
+  const pluginRoot = path.join(root, 'plugin');
+  copyFile(setup.SESSION_START_LAUNCHER_REL_PATH, pluginRoot);
+  writeFile(path.join(pluginRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs'), [
+    "'use strict';",
+    "const fs = require('node:fs');",
+    "exports.run = () => { console.log('bridge stdin=' + fs.readFileSync(0, 'utf8')); return { status: 0 }; };",
+    '',
+  ].join('\n'));
+  const result = spawnSync(process.execPath, [path.join(pluginRoot, ...setup.SESSION_START_LAUNCHER_REL_PATH.split('/')), ...launcher.HOOK_ARGS], {
+    input: '{"source":"startup"}', encoding: 'utf8', timeout: 30000, windowsHide: true,
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /bridge stdin=\{"source":"startup"\}/);
+});
+
 test('Windows launcher uses exact Node metadata, preserves stdin and output, and handles metacharacter paths', { skip: process.platform !== 'win32' }, () => {
   const root = tmpRoot();
   const pluginRoot = createPluginFixture(root, [
@@ -235,10 +244,11 @@ test('Windows launcher uses exact Node metadata, preserves stdin and output, and
 
 test('Windows installed commands use a full PowerShell path and -File with no nested command text', () => {
   const command = setup.windowsSessionStartCommand('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe');
-  assert.equal(command, 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${PLUGIN_ROOT}/repo/scripts/toolkit-codex-session-start.ps1"');
+  assert.equal(command, 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${PLUGIN_ROOT}/repo/scripts/toolkit-codex-session-start.ps1" ; exit $LASTEXITCODE');
   assert.doesNotMatch(command, /\$env:|(?:^|\s)-Command(?:\s|$)|&\s*[{'"]/i);
   assert.doesNotMatch(command, /\.sh(?:["\s]|$)|(?:^|[\\/])code(?:\.exe)?(?:["\s]|$)/i);
-  assert.match(setup.windowsHelperHookCommand('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'), /-File "\$\{PLUGIN_ROOT\}\/repo\/scripts\/toolkit-codex-helper-hook\.ps1"$/);
+  assert.match(setup.windowsHelperHookCommand('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'), /-File "\$\{PLUGIN_ROOT\}\/repo\/scripts\/toolkit-codex-helper-hook\.ps1" ; exit \$LASTEXITCODE$/);
+  assert.match(setup.windowsCheckpointHookCommand('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'), /-File "\$\{PLUGIN_ROOT\}\/repo\/scripts\/toolkit-programme-checkpoint-hook\.ps1" ; exit \$LASTEXITCODE$/);
   assert.throws(() => setup.prepareInstalledSessionStart(path.join(tmpRoot(), 'cache $dollar'), { platform: 'win32' }), /cannot carry safely/);
 });
 
@@ -252,6 +262,10 @@ test('Windows hook commands never run a planted node or powershell from the open
   ].join('\n'));
   writeFile(path.join(pluginRoot, 'repo', 'scripts', 'toolkit-codex-helper-hook.cjs'),
     "'use strict';\nlet input = '';\nprocess.stdin.on('data', (chunk) => { input += chunk; }).on('end', () => { process.stdout.write(JSON.stringify({ real_helper_hook: true, input: JSON.parse(input) })); });\n");
+  // The turn-end checkpoint stand-in records its input in a file: the real launcher prints nothing.
+  const checkpointMarker = path.join(root, 'checkpoint-input.txt');
+  writeFile(path.join(pluginRoot, 'repo', 'scripts', 'toolkit-programme-checkpoint-hook.cjs'),
+    `'use strict';\nconst fs = require('node:fs');\nfs.appendFileSync(${JSON.stringify(checkpointMarker)}, fs.readFileSync(0, 'utf8') + '\\n');\nprocess.stdout.write('ignored');\nprocess.exitCode = 2;\n`);
   const opened = path.join(root, 'opened folder');
   for (const name of ['node.bat', 'node.cmd', 'powershell.bat', 'powershell.cmd']) writeFile(path.join(opened, name), '@echo planted>"%~dp0planted-marker.txt"\r\n');
   const powershellPath = setup.defaultWindowsPowerShellPath();
@@ -267,7 +281,11 @@ test('Windows hook commands never run a planted node or powershell from the open
     const helper = spawnSync(exe, args(installedWindowsCommand(pluginRoot, 'PreToolUse')), { cwd: opened, env, input: hookInput, encoding: 'utf8', timeout: 30000, windowsHide: true, windowsVerbatimArguments: shell === 'cmd' });
     assert.equal(helper.status, 0, `${shell}: ${helper.stderr}`);
     assert.deepEqual(JSON.parse(helper.stdout), { real_helper_hook: true, input: JSON.parse(hookInput) }, shell);
+    const stop = spawnSync(exe, args(installedWindowsCommand(pluginRoot, 'Stop')), { cwd: opened, env, input: '{"hook_event_name":"Stop"}', encoding: 'utf8', timeout: 30000, windowsHide: true, windowsVerbatimArguments: shell === 'cmd' });
+    assert.equal(stop.status, 0, `${shell}: the turn-end launcher never blocks a turn`);
+    assert.equal(stop.stdout, '', `${shell}: the turn-end launcher prints nothing`);
   }
+  assert.equal(fs.readFileSync(checkpointMarker, 'utf8'), '{"hook_event_name":"Stop"}\n{"hook_event_name":"Stop"}\n', 'the checkpoint hook got its input under both shells');
   assert.equal(fs.existsSync(path.join(opened, 'planted-marker.txt')), false, 'no planted file ran');
   // Control: a bare node under cmd.exe in that folder does run the planted file.
   spawnSync(process.env.ComSpec, ['/C', 'node -v'], { cwd: opened, env, encoding: 'utf8', timeout: 30000, windowsHide: true });

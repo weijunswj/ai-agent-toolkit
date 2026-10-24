@@ -1,0 +1,24 @@
+{
+  "schema": "toolkit.governance-skill-tiers.v1",
+  "description": "Governance tier of every skill under skills/. The per-state skill catalogue is computed from this file and the skill folders by repo/scripts/toolkit-governance-catalogue.cjs; it is never written to a second file. portable: offered wherever the plugin is installed, in every state. governed: the GitHub governance skills, offered only in an ENABLED repository whose governed block and programme binding are both present.",
+  "tiers": ["portable", "governed"],
+  "skills": {
+    "codex-ssh-hostinger-coolify-setup-maintainer": "portable",
+    "controller-bootstrap": "portable",
+    "frontend-art-direction": "portable",
+    "github-program-reconciler": "governed",
+    "local-ai-safety": "portable",
+    "managed-app-foundation-review": "portable",
+    "n8n-environment-setup": "portable",
+    "n8n-safety-router": "portable",
+    "n8n-workflow-transport": "portable",
+    "release-readiness-audit": "portable",
+    "repository-agent-rules": "portable",
+    "secure-ci-cd": "portable",
+    "self-hosted-service-safety": "portable",
+    "skill-product-review": "portable",
+    "toolkit-env": "portable",
+    "toolkit-setup": "portable",
+    "windows-local-dev-services": "portable"
+  }
+}

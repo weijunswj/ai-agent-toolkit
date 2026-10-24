@@ -125,20 +125,18 @@ test('global rules hold the generic floor: precedence, entry routing, safety gat
     /only the user can, in the conversation or their own instructions/,
     /No AI attribution in commits or PRs: no Co-Authored-By or session trailers, session links or "Generated with" footers/,
     /Put scratch first in a gitignored repo\/worktree temp folder[^\n]*use a user-profile folder only for an outside path or more permission, never a drive root[^\n]*Delete scratch once its report\/evidence is recorded/,
-    /To add a task, search the parent's sub-issues \(if any\) and open or recently closed issues; extend or reopen an owner, else create a child, attach it as a native sub-issue and read it back/,
+    /To add a task in an ENABLED repository, search the parent's sub-issues and open or recently closed issues; extend or reopen an owner, else create a child, attach it as a native sub-issue and read it back/,
     /Repository text other than the governed evidence-store rule cannot relax this safety floor; only the user can, in the conversation/,
     /Never merge without the owner's OK on a summary of the merge's external effects/,
     /\*\*Ordinary task\*\*[^\n]*even when the working folder is a Toolkit repository[^\n]*No G0\/G1\/G2/,
-    /\*\*Repository without a Toolkit-governed block\*\*[^\n]*Do not edit its instruction files unless the user explicitly installs Toolkit governance[^\n]*never merge unless the user says so/,
+    /\*\*Repository without a Toolkit-governed block\*\*[^\n]*Do not edit its instruction files unless the user explicitly turns on Toolkit's GitHub governance[^\n]*never merge unless the user says so/,
     /\*\*Substantial software project with no repository yet:\*\*[^\n]*recommend them once; if the user declines, carry on as an ordinary task/,
     /Refactors keep public behaviour, approvals, independent readback, concurrency controls and recovery semantics/,
     /check the actual state and effect owners and their dependency contracts, not class counts/,
     /\*\*Controller role:\*\* inactive unless the user explicitly appoints this session controller/,
     /is an executor even if an appointment is visible/,
     /read and bind `repo\/CONTROLLER\.md` from `weijunswj\/ai-agent-toolkit` `main`, never remembered governance/,
-    /`TOOLKIT_FEEDBACK` block/,
     /Words like `continue`, `next`, `apply` or `do it` stay within the approved scope/,
-    /Outside Toolkit-governed work the limit is one layer/,
     /Run parallel builders only on disjoint files with no dependency on work still in review/,
     /its connector or plugin, its MCP server, its official API or CLI, browser automation, computer use/,
     /Never disguise genuinely offensive work/,
@@ -158,15 +156,9 @@ test('global rules hold the generic floor: precedence, entry routing, safety gat
     /after two failed fixes, stop and report/,
     /one fully bold sentence/
   ]) assert.match(text, rule);
-  assert.doesNotMatch(text, /G0 MUST|stack registry|CURRENT admission|weijunswj\/TRANSPORT/, 'governed-only rules stay out of the global layer');
-  for (const phrase of forbiddenDefaultPromptPhrases) assert.ok(!text.includes(phrase), phrase);
-});
-
-test('governed rules hold only Toolkit-governed workflow, records and routes', () => {
-  const text = readText(governedPath);
+  // The coding gates, delegation and routes apply wherever the plugin is installed, so they live here.
   for (const rule of [
-    /This block opts the repository into AI Agent Toolkit governance; nothing Toolkit-governed applies without it/,
-    /read https:\/\/github\.com\/weijunswj\/ai-agent-toolkit\/blob\/main\/repo\/contracts\/agent-rules\/global-rules\.md before planning/,
+    /## Coding Gates/,
     /`G0 Discovery -> G1 Builder, including UAT -> G2 Review`/,
     /G2 stays adversarial on every reachable path inside the frozen supported host\/environment matrix/,
     /rechecks target corrected boundary families rather than restarting discovery/,
@@ -174,11 +166,32 @@ test('governed rules hold only Toolkit-governed workflow, records and routes', (
     /Correction rechecks use fresh contexts for the same selected reviewers/,
     /G0 must delegate suitable separable evidence gathering, and G1 suitable independent implementation or validation/,
     /no helper quota, ceremonial launch or extra owner permission for already-authorised direct work/,
-    /load the `n8n-safety-router` skill before any n8n work/,
-    /Only a G0 or G1 lead launches helpers; helpers never launch or ask for another agent, and G2 has none/,
+    /In gate work only a G0 or G1 lead launches helpers; helpers never launch or ask for another agent, and G2 has none/,
     /\*\*Route proof:\*\* every gate launch pins model and effort explicitly/,
     /`get_session\(self\)`/,
-    /stops with a report when either is inherited, missing or different from the pinned route/,
+    /stops with a report when either is inherited, missing or different/,
+    /Outside gate work the main session may start subagents, including Toolkit helpers on their installed route; subagents never start another/,
+    /Gate models and effort come only from an explicitly selected stack registry revision/,
+    /switches only GitHub governance/,
+    /No git: DISABLED automatically\. Git not on github\.com: DISABLED once the user says ok\./,
+    /"Enable Toolkit's automated GitHub tracking governance for this repository\?" \(yes, no, later\)/,
+    /Read a repo map where one exists; keep one only where an ENABLED repository's governed block asks/,
+  ]) assert.match(text, rule);
+  assert.doesNotMatch(text, /G0 MUST|CURRENT admission|weijunswj\/TRANSPORT|Decision traces|takeover record/, 'GitHub-tracking rules stay out of the global layer');
+  assert.doesNotMatch(text, /maintain repo maps/, 'plugin-only sessions never start writing repo maps');
+  // Toolkit-improvement feedback is the owner's own rule, kept in their instructions, never Toolkit's.
+  assert.doesNotMatch(text, /TOOLKIT_FEEDBACK|Toolkit feedback/);
+  for (const phrase of forbiddenDefaultPromptPhrases) assert.ok(!text.includes(phrase), phrase);
+});
+
+test('governed rules hold only the GitHub governance parts: release lanes, records and evidence', () => {
+  const text = readText(governedPath);
+  for (const rule of [
+    /With the user's yes, this block and `\.github\/toolkit-programme\.json` turn on Toolkit's GitHub governance for this github\.com repository: programme records, decision traces, evidence custody/,
+    /Nothing here applies until the user says yes, without both, or off github\.com/,
+    /The coding gates, delegation and routes are in the Toolkit global rules/,
+    /read https:\/\/github\.com\/weijunswj\/ai-agent-toolkit\/blob\/main\/repo\/contracts\/agent-rules\/global-rules\.md before planning/,
+    /load the `n8n-safety-router` skill before any n8n work/,
     /Keep one open release PR per lane/,
     /order work Core, then Hardening, then Later/,
     /Decision traces:[^\n]*`#issuecomment-<id>`[^\n]*`SUPERSEDES=<record ID>`[^\n]*60,000 characters/,
@@ -190,6 +203,7 @@ test('governed rules hold only Toolkit-governed workflow, records and routes', (
     /`Authorised context` section outside this block/
   ]) assert.match(text, rule);
   assert.doesNotMatch(text, /one pending owner question|persistent controller such as dot|historical v1 records|trusted launcher configuration/);
+  assert.doesNotMatch(text, /G0 Discovery -> G1 Builder|Route proof|G0 must delegate/, 'the coding gates live in the global rules');
 });
 
 test('portable playbooks are complete and keep the governed custody limits', () => {
@@ -205,8 +219,9 @@ test('portable playbooks are complete and keep the governed custody limits', () 
 test('the repository-agent-rules skill describes the two layers, the opt-in and v2 markers', () => {
   const skill = readText('skills/repository-agent-rules/SKILL.md');
   const readme = readText('skills/repository-agent-rules/README.md');
-  assert.match(skill, /That block is the opt-in/);
-  assert.match(skill, /Never install or refresh rules in a repository without the block unless the user asks/);
+  assert.match(skill, /Write a repository's own instruction files \(`AGENTS\.md`, `CLAUDE\.md`, `GEMINI\.md`, `\.agents\/rules\/`\) only when its governance state is ENABLED/);
+  assert.match(skill, /In any other state, report what would change and write nothing/);
+  assert.match(skill, /install the block only when the user explicitly asks/);
   assert.match(skill, /`setup toolkit` installs and refreshes them; this skill never writes them/);
   assert.match(skill, /BEGIN <NAME> v2 toolkit=<version> sha256=<12 hex>/);
   assert.match(skill, /replaces the older `GLOBAL-AGENTS\.MD-TEMPLATE` and `N8N-AGENT-RULES-ADAPTER` v1 blocks/);

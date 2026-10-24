@@ -166,7 +166,7 @@ test('--yes-recommended applies the visibly recommended one-helper Codex outcome
   const ordinaryBank = result.stdout.split('<!-- setup-toolkit-question-bank:complete -->')[0];
   assert.doesNotMatch(ordinaryBank, /Codex helper agents|helper quantity/i);
   assert.match(result.stdout, /Helper-agent capacity questions shown: yes/);
-  assert.match(result.stdout, /Codex helper-agent runtime: MultiAgentV2/);
+  assert.match(result.stdout, /Codex helper-agent runtime: V2 \(multi_agent_v2\)/);
   assert.match(result.stdout, /Helper-capacity outcome this run: configured/);
   assert.match(result.stdout, /Configuration changed this run: yes/);
   assert.match(fs.readFileSync(codexConfig(root), 'utf8'), /max_concurrent_threads_per_session = 2/);

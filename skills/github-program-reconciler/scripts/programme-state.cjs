@@ -22,13 +22,15 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const { DEFAULT_THRESHOLD } = require('./decision-trace-audit.cjs');
+const { DEFAULT_THRESHOLD, INDEX_COMMENT_MARKER, auditDecisionTraces, traceEntries, indexLines, markLines } = require('./decision-trace-audit.cjs');
+const { OTHER_COMMENTS } = require('./decision-tags.cjs');
 const { ProgrammeError, resolveExecutable } = require('./resolve-executable.cjs');
 
 const SCHEMA = Object.freeze({
   binding: 'toolkit.programme-binding.v1',
   parent: 'toolkit.programme-state.parent.v1',
   child: 'toolkit.programme-state.child.v1',
+  journal: 'toolkit.programme-journal.v1',
 });
 const BINDING_FILE = path.join('.github', 'toolkit-programme.json');
 const SHA40 = /^[0-9a-f]{40}$/;
@@ -37,21 +39,33 @@ const PREFIX = /^[A-Za-z0-9._-]{1,40}$/;
 const CLASSES = ['CORE', 'HARDENING', 'LATER', 'OPTIONAL', 'COMPLETED', 'RETIRED'];
 const LIFECYCLES = ['PLANNED', 'ACTIVE', 'WAITING_OWNER', 'HOLD', 'DONE', 'RETIRED'];
 const GATE_ROLES = ['G0', 'G1', 'G2'];
-const GATE_STATES = ['ACTIVE', 'WAITING_OWNER', 'INTERRUPTED', 'SUBMITTED', 'RETIRED'];
-const VERDICTS = ['ACCEPT', 'REOPEN'];
+const GATE_STATES = ['ASSIGNED', 'ACTIVE', 'WAITING_OWNER', 'INTERRUPTED', 'SUBMITTED', 'RETIRED'];
+// A live assignment: its bound session may journal and the controller reads that journal.
+const LIVE_GATE_STATES = ['ASSIGNED', 'ACTIVE', 'SUBMITTED', 'WAITING_OWNER'];
+const VERDICTS = ['ACCEPT', 'REOPEN', 'WAITING_OWNER'];
+const RETURN_MODES = ['native', 'toolkit_assisted'];
+const REQUESTED_VERDICTS = ['ACCEPT', 'WAITING_OWNER'];
+const ASSIGNMENT_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,59}$/;
+const RETURN_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/;
+const SESSION_HASH = /^[0-9a-f]{16}$/;
+const JOURNAL_FILE = /^([A-Za-z0-9][A-Za-z0-9._-]{0,59})--([0-9a-f]{16})\.json$/;
+const ERROR_CODE = /^[A-Z][A-Z0-9_]{0,63}$/;
+const JOURNAL_TEXT_LIMIT = 500;
+const JOURNAL_RETURNS_LIMIT = 20;
 const PR_STATES = ['OPEN', 'DRAFT', 'MERGED', 'CLOSED'];
 const CHECK_STATES = ['GREEN', 'PENDING', 'RED', 'UNKNOWN'];
 const UAT_STATES = ['NOT_REQUIRED', 'PENDING', 'PASSED', 'UAT_RETAINED', 'UAT_PARTIAL_REQUIRED', 'UAT_FULL_REQUIRED'];
 const REVIEW_STATES = ['NOT_STARTED', 'IN_REVIEW', 'PASSED', 'NOT_PASSED'];
 const REVIEW_VERDICTS = ['PASSED', 'NOT_PASSED'];
-const EFFECT_KINDS = ['attach', 'reparent', 'reorder', 'replace_block'];
+const EFFECT_KINDS = ['attach', 'reparent', 'reorder', 'replace_block', 'post_index_comment', 'replace_pr_nav'];
 const EFFECT_STATES = ['IN_FLIGHT', 'DONE', 'UNKNOWN'];
 // Fields that never count towards a document's content digest or revision: the revision itself,
-// observation timestamps, and pending effects (an intent write must not make the rendered state stale).
-const UNHASHED = ['revision', 'volatile', 'pending_effects'];
+// observation timestamps, pending effects (an intent write must not make the rendered state stale) and
+// the journal blobs the controller has read.
+const UNHASHED = ['revision', 'volatile', 'pending_effects', 'journals_seen'];
 // Child fields `update` may change. UAT, review and a terminal lifecycle (DONE, RETIRED) are
 // acceptance records: only the parent's holder (the controller) writes them.
-const PATCHABLE_CHILD_FIELDS = ['lifecycle', 'release', 'candidate', 'uat', 'review', 'blockers', 'next_action', 'private'];
+const PATCHABLE_CHILD_FIELDS = ['lifecycle', 'completed_at', 'release', 'candidate', 'uat', 'review', 'blockers', 'next_action', 'private'];
 const CONTROLLER_CHILD_FIELDS = ['uat', 'review'];
 const TERMINAL_LIFECYCLES = ['DONE', 'RETIRED'];
 // UAT states that speak for one head, and review states that need verdicts at a head.
@@ -60,6 +74,13 @@ const DECIDED_REVIEW = ['PASSED', 'NOT_PASSED'];
 const PATCHABLE_PARENT_FIELDS = ['outcomes', 'release_plan', 'private'];
 const BLOCK_SOURCE = 'programme-state';
 const BLOCK_NAME = 'STATE';
+const TRACE_BLOCK_NAME = 'TRACE';
+const NAV_BLOCK_NAME = 'NAV';
+const CURRENT_BLOCK_NAME = 'CURRENT';
+// How many queued tasks the CURRENT summary names under "Next up".
+const NEXT_UP_LIMIT = 5;
+// Index comments are cut below this size (GitHub's comment limit is 65,536 characters).
+const INDEX_COMMENT_LIMIT = 60000;
 const TEXT_LIMIT = 200;
 
 const sha256 = text => crypto.createHash('sha256').update(text).digest('hex');
@@ -85,25 +106,33 @@ function contentDigest(doc) {
   return sha256(JSON.stringify(canonical(copy)));
 }
 
-// The same state: equal content and equal pending effects. Volatile timestamps never matter.
+// The same state: equal content, equal pending effects and equal journals read. Volatile timestamps
+// never matter.
 function sameState(previous, next) {
   return contentDigest(previous) === contentDigest(next)
-    && JSON.stringify(canonical(previous.pending_effects || [])) === JSON.stringify(canonical(next.pending_effects || []));
+    && JSON.stringify(canonical(previous.pending_effects || [])) === JSON.stringify(canonical(next.pending_effects || []))
+    && JSON.stringify(canonical(previous.journals_seen || {})) === JSON.stringify(canonical(next.journals_seen || {}));
 }
 
 function check(errors, condition, message) { if (!condition) errors.push(message); }
 
 // Fields each object may and must hold, as the schemas' additionalProperties: false and required.
 const SHAPES = {
-  child: { all: ['schema', 'repository', 'issue', 'revision', 'fence', 'lifecycle', 'release', 'gate', 'candidate', 'pr', 'uat', 'review', 'blockers', 'next_action', 'pending_effects', 'private', 'volatile'], optional: ['volatile'] },
+  child: { all: ['schema', 'repository', 'issue', 'revision', 'fence', 'lifecycle', 'completed_at', 'release', 'gate', 'candidate', 'pr', 'uat', 'review', 'blockers', 'next_action', 'pending_effects', 'journals_seen', 'private', 'volatile'], optional: ['volatile', 'journals_seen', 'completed_at'] },
   parent: { all: ['schema', 'repository', 'parent_issue', 'revision', 'fence', 'release_plan', 'outcomes', 'pending_effects', 'private', 'volatile'], optional: ['volatile'] },
   fence: { all: ['epoch', 'holder_prefix', 'holder_session'] },
   effect: { all: ['intent_id', 'kind', 'target', 'state'] },
-  outcome: { all: ['issue', 'label', 'class', 'parent', 'order', 'lane', 'owner_prefix'], optional: ['label', 'lane', 'owner_prefix'] },
+  outcome: { all: ['issue', 'label', 'name', 'description', 'class', 'parent', 'order', 'lane', 'owner_prefix'], optional: ['label', 'name', 'description', 'lane', 'owner_prefix'] },
   release_plan: { all: ['record', 'comment_id'], optional: ['record', 'comment_id'] },
-  gate: { all: ['role', 'state', 'session_id', 'route', 'returns'] },
+  gate: { all: ['role', 'state', 'session_id', 'assignment', 'route', 'returns'], optional: ['assignment'] },
+  assignment: { all: ['id', 'role'] },
   route: { all: ['model', 'effort', 'read_back'], optional: ['model', 'effort', 'read_back'] },
-  return: { all: ['return_id', 'verdict', 'consumed', 'epoch'] },
+  return: { all: ['return_id', 'verdict', 'consumed', 'epoch', 'assignment', 'at_head', 'mode'], optional: ['assignment', 'at_head', 'mode'] },
+  journal: { all: ['schema', 'repository', 'issue', 'assignment', 'session_hash', 'completion_mode', 'route', 'seq', 'checkpoint', 'returns', 'last_error', 'volatile'], optional: ['volatile'] },
+  journal_route: { all: ['model', 'effort', 'read_back'] },
+  checkpoint: { all: ['branch', 'head', 'tree', 'dirty', 'ahead', 'behind'] },
+  journal_return: { all: ['return_id', 'verdict_requested', 'at_head', 'next_action', 'blockers'] },
+  journal_error: { all: ['code', 'at'] },
   candidate: { all: ['branch', 'head', 'tree', 'base'] },
   pr: { all: ['number', 'state', 'head', 'checks'] },
   checks: { all: ['state', 'required_total', 'required_passed', 'at_head'] },
@@ -205,6 +234,8 @@ function validateParent(doc) {
       check(errors, optional(outcome.label, isText), `${at}.label must be text`);
       check(errors, optional(outcome.lane, isText), `${at}.lane must be text`);
       check(errors, optional(outcome.owner_prefix, value => PREFIX.test(value)), `${at}.owner_prefix must be a record prefix`);
+      check(errors, optional(outcome.name, isText), `${at}.name must be text`);
+      check(errors, optional(outcome.description, isText), `${at}.description must be text`);
     }
     // Expected parents must be the programme parent or another outcome, and the tree must have no loop.
     const outcomes = new Map((Array.isArray(doc.outcomes) ? doc.outcomes : []).filter(isObject).map(entry => [entry.issue, entry]));
@@ -227,6 +258,7 @@ function validateChild(doc) {
     check(errors, isInt(doc.issue, 1), 'issue must be an issue number');
     check(errors, LIFECYCLES.includes(doc.lifecycle), `lifecycle must be one of ${LIFECYCLES.join(', ')}`);
     check(errors, optional(doc.release, isText), 'release must be text or null');
+    check(errors, optional(doc.completed_at, value => isText(value) && !Number.isNaN(Date.parse(value))), 'completed_at must be a date and time or null');
     const gate = doc.gate;
     check(errors, isObject(gate), 'gate must be an object');
     if (isObject(gate)) {
@@ -235,6 +267,10 @@ function validateChild(doc) {
       check(errors, optional(gate.role, value => GATE_ROLES.includes(value)), 'gate.role must be G0, G1, G2 or null');
       check(errors, optional(gate.state, value => GATE_STATES.includes(value)), `gate.state must be one of ${GATE_STATES.join(', ')} or null`);
       check(errors, optional(gate.session_id, isText), 'gate.session_id must be text or null');
+      check(errors, optional(gate.assignment, value => isObject(value) && ASSIGNMENT_ID.test(String(value.id)) && GATE_ROLES.includes(value.role)),
+        'gate.assignment must hold an assignment id and its role (G0, G1 or G2), or be null');
+      checkShape(errors, gate.assignment, 'assignment', 'gate.assignment');
+      check(errors, gate.state !== 'ASSIGNED' || isObject(gate.assignment), 'gate.state ASSIGNED needs gate.assignment');
       check(errors, optional(gate.route, value => isObject(value) && optional(value.model, isText) && optional(value.effort, isText)
         && optional(value.read_back, v => typeof v === 'boolean')), 'gate.route must hold model, effort and read_back');
       check(errors, Array.isArray(gate.returns), 'gate.returns must be a list');
@@ -244,9 +280,12 @@ function validateChild(doc) {
         checkShape(errors, entry, 'return', `gate.returns[${index}]`);
         check(errors, !ids.has(entry?.return_id), `gate.returns[${index}].return_id is repeated`);
         ids.add(entry?.return_id);
-        check(errors, optional(entry?.verdict, value => VERDICTS.includes(value)), `gate.returns[${index}].verdict must be ACCEPT, REOPEN or null`);
+        check(errors, optional(entry?.verdict, value => VERDICTS.includes(value)), `gate.returns[${index}].verdict must be ACCEPT, REOPEN, WAITING_OWNER or null`);
         check(errors, typeof entry?.consumed === 'boolean', `gate.returns[${index}].consumed must be true or false`);
         check(errors, isInt(entry?.epoch), `gate.returns[${index}].epoch must be a whole number`);
+        check(errors, entry?.assignment === undefined || ASSIGNMENT_ID.test(String(entry.assignment)), `gate.returns[${index}].assignment must be an assignment id`);
+        check(errors, entry?.at_head === undefined || optional(entry.at_head, isSha), `gate.returns[${index}].at_head must be a full 40-character SHA or null`);
+        check(errors, entry?.mode === undefined || RETURN_MODES.includes(entry.mode), `gate.returns[${index}].mode must be native or toolkit_assisted`);
       }
     }
     const candidate = doc.candidate;
@@ -285,12 +324,53 @@ function validateChild(doc) {
     }
     check(errors, Array.isArray(doc.blockers) && doc.blockers.every(isText), 'blockers must be a list of text');
     check(errors, isText(doc.next_action), 'next_action must be exactly one non-empty action');
+    check(errors, doc.journals_seen === undefined || (isObject(doc.journals_seen)
+      && Object.entries(doc.journals_seen).every(([name, blob]) => JOURNAL_FILE.test(name) && isSha(blob))), 'journals_seen must map journal file names to blob SHAs');
   }
   return errors;
 }
 
+const isOptionalText = (value, limit = JOURNAL_TEXT_LIMIT) => value === null || (isText(value) && value.length <= limit);
+
+function validateJournal(doc) {
+  const errors = [];
+  check(errors, isObject(doc), 'journal must be an object');
+  if (!isObject(doc)) return errors;
+  checkShape(errors, doc, 'journal', 'journal');
+  screenSecrets(errors, doc, 'journal');
+  check(errors, doc.schema === SCHEMA.journal, `schema must be ${SCHEMA.journal}`);
+  check(errors, REPO.test(String(doc.repository || '')), 'repository must be owner/name');
+  check(errors, isInt(doc.issue, 1), 'issue must be an issue number');
+  check(errors, ASSIGNMENT_ID.test(String(doc.assignment || '')), 'assignment must be an assignment id');
+  check(errors, SESSION_HASH.test(String(doc.session_hash || '')), 'session_hash must be 16 hex characters');
+  check(errors, doc.completion_mode === 'native', 'completion_mode must be native');
+  check(errors, optional(doc.route, value => isObject(value) && optional(value.model, isText) && optional(value.effort, isText) && typeof value.read_back === 'boolean'), 'route must hold model, effort and read_back, or be null');
+  checkShape(errors, doc.route, 'journal_route', 'route');
+  check(errors, isInt(doc.seq, 1), 'seq must be a whole number from 1');
+  const point = doc.checkpoint;
+  check(errors, optional(point, value => isObject(value) && optional(value.branch, isText) && optional(value.head, isSha) && optional(value.tree, isSha)
+    && optional(value.dirty, v => typeof v === 'boolean') && optional(value.ahead, v => isInt(v)) && optional(value.behind, v => isInt(v))), 'checkpoint must hold branch, head, tree, dirty, ahead and behind, or be null');
+  checkShape(errors, point, 'checkpoint', 'checkpoint');
+  check(errors, Array.isArray(doc.returns) && doc.returns.length <= JOURNAL_RETURNS_LIMIT, `returns must be a list of at most ${JOURNAL_RETURNS_LIMIT}`);
+  const ids = new Set();
+  for (const [index, entry] of (Array.isArray(doc.returns) ? doc.returns : []).entries()) {
+    checkShape(errors, entry, 'journal_return', `returns[${index}]`);
+    check(errors, isObject(entry) && RETURN_ID.test(String(entry.return_id)), `returns[${index}].return_id must be a return id`);
+    check(errors, !ids.has(entry?.return_id), `returns[${index}].return_id is repeated`);
+    ids.add(entry?.return_id);
+    check(errors, optional(entry?.verdict_requested, value => REQUESTED_VERDICTS.includes(value)), `returns[${index}].verdict_requested must be ACCEPT, WAITING_OWNER or null`);
+    check(errors, optional(entry?.at_head, isSha), `returns[${index}].at_head must be a full 40-character SHA or null`);
+    check(errors, isOptionalText(entry?.next_action), `returns[${index}].next_action must be text of at most ${JOURNAL_TEXT_LIMIT} characters or null`);
+    check(errors, Array.isArray(entry?.blockers) && entry.blockers.every(value => isText(value) && value.length <= JOURNAL_TEXT_LIMIT), `returns[${index}].blockers must be a list of text`);
+  }
+  check(errors, optional(doc.last_error, value => isObject(value) && ERROR_CODE.test(String(value.code)) && isText(value.at)), 'last_error must hold code and at, or be null');
+  checkShape(errors, doc.last_error, 'journal_error', 'last_error');
+  check(errors, optional(doc.volatile, isObject), 'volatile must be an object');
+  return errors;
+}
+
 function assertValid(kind, doc) {
-  const errors = kind === 'parent' ? validateParent(doc) : validateChild(doc);
+  const errors = kind === 'parent' ? validateParent(doc) : kind === 'journal' ? validateJournal(doc) : validateChild(doc);
   if (errors.length) throw new ProgrammeError('STATE_INVALID', `The ${kind} state document is invalid: ${errors[0]}`, { errors });
   return doc;
 }
@@ -305,12 +385,17 @@ function validateBinding(binding) {
     check(errors, PREFIX.test(String(binding.record_prefix || '')), 'record_prefix must be a record prefix');
     check(errors, PREFIX.test(String(binding.writer_prefix || '')), 'writer_prefix must be a record prefix');
     const store = binding.store;
-    check(errors, isObject(store) && Object.hasOwn(STORE_BACKENDS, store.kind), `store.kind ${JSON.stringify(store?.kind)} is not supported by this Toolkit version (supported: ${Object.keys(STORE_BACKENDS).join(', ')})`);
+    check(errors, isObject(store) && Object.hasOwn(STORE_BACKENDS, store.kind), `store.kind ${JSON.stringify(store?.kind)} is not supported (supported: ${Object.keys(STORE_BACKENDS).join(', ')})`);
     check(errors, isObject(store) && REPO.test(String(store.repository || '')), 'store.repository must be owner/name');
     check(errors, isObject(store) && isText(store.branch) && !/\s|\.\./.test(store.branch), 'store.branch must be a branch name');
     check(errors, isObject(store) && /^(?:[A-Za-z0-9_.-]+\/)+$/.test(String(store.path || '')) && !String(store.path).split('/').includes('..'), 'store.path must be a relative folder ending in /');
     check(errors, isObject(store) && String(store.repository || '').toLowerCase() !== String(binding.repository || '').toLowerCase(), 'store.repository must be a separate repository');
     check(errors, Array.isArray(binding.required_checks) && binding.required_checks.every(isText), 'required_checks must be a list of check names');
+    const projection = binding.projection;
+    if (projection !== undefined) {
+      check(errors, isObject(projection) && Object.keys(projection).every(key => ['after_section', 'replace_section'].includes(key)), 'projection may hold only after_section and replace_section');
+      check(errors, isObject(projection) && optional(projection.after_section, isText) && optional(projection.replace_section, isText), 'projection.after_section and projection.replace_section must be heading text');
+    }
     screenSecrets(errors, binding, 'binding');
   }
   if (errors.length) throw new ProgrammeError('BINDING_INVALID', `${BINDING_FILE} is invalid: ${errors[0]}`, { errors });
@@ -367,18 +452,17 @@ function newChild({ repository, outcome }) {
 // The fence orders cooperating Toolkit writers that act as the same GitHub account; it does not
 // authenticate anyone.
 function isHolder(doc, writer) {
-  return Boolean(doc?.fence?.holder_session) && doc.fence.holder_session === writer.session && doc.fence.holder_prefix === writer.prefix;
+  return Boolean(writer && doc?.fence?.holder_session) && doc.fence.holder_session === writer.session && doc.fence.holder_prefix === writer.prefix;
 }
 
 function holderDescription(doc, kind = doc?.schema === SCHEMA.parent ? 'parent' : 'child', parentDoc = null) {
   const prefix = doc?.fence?.holder_prefix || 'nobody';
   const epoch = doc?.fence?.epoch ?? 0;
   if (kind === 'parent') return `parent holder (${prefix}, epoch ${epoch})`;
-  const gate = doc?.gate?.role || 'unassigned';
   if (doc?.fence?.holder_session && isHolder(parentDoc, { session: doc.fence.holder_session, prefix })) {
-    return `parent holder (${prefix}, gate ${gate}, epoch ${epoch})`;
+    return `parent holder (${prefix}, epoch ${epoch})`;
   }
-  return `holder ${prefix} for gate ${gate} (epoch ${epoch})`;
+  return doc?.fence?.holder_session ? `lane controller ${prefix} (epoch ${epoch})` : `controller (epoch ${epoch})`;
 }
 
 function parentRefusal(doc) {
@@ -387,7 +471,7 @@ function parentRefusal(doc) {
 
 function authoriseWrite(kind, doc, parentDoc, writer) {
   if (!writer || !isText(writer.session) || !PREFIX.test(String(writer.prefix || ''))) {
-    throw new ProgrammeError('WRITER_UNKNOWN', 'Controller writes need --session <the controller session id> and a record prefix.');
+    throw new ProgrammeError('WRITER_UNKNOWN', 'This write needs --session <this session\'s own id> and a record prefix.');
   }
   if (kind === 'parent') {
     if (doc && !isHolder(doc, writer)) throw new ProgrammeError('STALE_WRITER', parentRefusal(doc));
@@ -395,33 +479,42 @@ function authoriseWrite(kind, doc, parentDoc, writer) {
   }
   if (doc && isHolder(doc, writer)) return;
   if (parentDoc && isHolder(parentDoc, writer)) return;
-  throw new ProgrammeError('STALE_WRITER', `Issue ${doc?.issue ?? ''} is held by the ${holderDescription(doc, 'child', parentDoc)}; the parent document is held by the ${holderDescription(parentDoc, 'parent')}. This session holds neither document; report to the controller.`);
+  throw new ProgrammeError('STALE_WRITER', `Issue ${doc?.issue ?? ''} is held by the ${holderDescription(doc, 'child', parentDoc)}, and the parent document by the ${holderDescription(parentDoc, 'parent')}. This session holds neither, so the write was refused. ${parentRefusal(parentDoc).split('. ').slice(1).join('. ')}`);
 }
 
-// Claim or take over a document: one compare-and-swap that increments the epoch and records the holder.
-function claimDocument(doc, writer, { takeover = false, role = null, route = null, parentDoc = null } = {}) {
+// Claim or take over a document's fence: one compare-and-swap that increments the epoch and records
+// the holder. Gates are not claimed; the controller assigns them (assignGate).
+function claimDocument(doc, writer, { takeover = false, parentDoc = null } = {}) {
   const next = clone(doc);
   const held = Boolean(next.fence.holder_session);
-  if (isHolder(next, writer) && !role) return null;
-  if (held && !isHolder(next, writer) && !takeover) {
+  if (isHolder(next, writer)) return null;
+  if (held && !takeover) {
     throw new ProgrammeError('CLAIM_HELD', next.schema === SCHEMA.parent
       ? parentRefusal(next)
-      : `Issue ${next.issue} is held by the ${holderDescription(next, 'child', parentDoc)}; take over with --takeover only if the controller assigned this gate to you, otherwise report to the controller.`);
+      : `Issue ${next.issue} is held by the ${holderDescription(next, 'child', parentDoc)}. ${parentRefusal(parentDoc).split('. ').slice(1).join('. ')}`);
   }
-  if (!isHolder(next, writer)) next.fence = { epoch: next.fence.epoch + 1, holder_prefix: writer.prefix, holder_session: writer.session };
-  if (next.schema === SCHEMA.child && role) {
-    if (!GATE_ROLES.includes(role)) throw new ProgrammeError('USAGE', '--role must be G0, G1 or G2');
-    const sameSession = next.gate.role === role && next.gate.session_id === writer.session;
-    next.gate.role = role;
-    // Claiming a gate again starts a new activation of an accepted (RETIRED) gate, which only removes
-    // that acceptance; an unfinished gate keeps its state.
-    next.gate.state = sameSession && next.gate.state && next.gate.state !== 'RETIRED' ? next.gate.state : 'ACTIVE';
-    next.gate.session_id = writer.session;
-    if (route) next.gate.route = route;
-    if (next.lifecycle === 'PLANNED') next.lifecycle = 'ACTIVE';
-    next.private = { ...next.private, host_session: writer.session };
-  }
+  next.fence = { epoch: next.fence.epoch + 1, holder_prefix: writer.prefix, holder_session: writer.session };
   return next;
+}
+
+// A lane controller takes the fence of a child the catalogue delegates to its record prefix.
+function claimLane(doc, writer, outcome, { takeover = false } = {}) {
+  if (!outcome?.owner_prefix || outcome.owner_prefix !== writer.prefix) {
+    throw new ProgrammeError('NOT_DELEGATED', `#${doc.issue} is not delegated to ${writer.prefix}; the catalogue names ${outcome?.owner_prefix || 'no lane'} for it. Report to the controller.`);
+  }
+  if (isHolder(doc, writer)) return null;
+  if (doc.fence.holder_session && doc.fence.holder_prefix === writer.prefix && !takeover) {
+    throw new ProgrammeError('CLAIM_HELD', `Issue ${doc.issue} is held by another ${writer.prefix} session (epoch ${doc.fence.epoch}). The lane controller that replaces it uses --takeover after that session stopped.`);
+  }
+  const next = clone(doc);
+  next.fence = { epoch: next.fence.epoch + 1, holder_prefix: writer.prefix, holder_session: writer.session };
+  return next;
+}
+
+// The holder of the parent may write any child; a lane controller only the child it holds, and only
+// when the catalogue delegates that child to its prefix.
+function isLaneHolder(child, writer, outcome) {
+  return Boolean(child && outcome?.owner_prefix && outcome.owner_prefix === writer?.prefix && isHolder(child, writer));
 }
 
 function currentGateAccepted(child) {
@@ -433,30 +526,138 @@ function completionAccepted(child) {
   return ['G1', 'G2'].includes(child.gate.role) && currentGateAccepted(child);
 }
 
-// LIFE-1 successor: returns are consumed by return ID, never by session. REOPEN keeps the session
-// active, a new submission gets a new return ID, so ACCEPT after REOPEN works in the same session.
-function submitReturn(doc, { returnId, writer, parentDoc = null }) {
-  if (!isText(returnId)) throw new ProgrammeError('USAGE', 'A return needs a return ID.');
+const GATE_HISTORY_LIMIT = 20;
+const needsReason = (reason, command) => {
+  if (!isText(String(reason ?? '').trim())) throw new ProgrammeError('USAGE', `${command} needs --reason <why>.`);
+  return String(reason).trim();
+};
+
+// How an assignment ended, kept in `private` (bounded) so the controller can see the handover trail.
+function endAssignment(next, ended, reason = null) {
+  const assignment = next.gate.assignment;
+  if (!assignment) return;
+  const history = Array.isArray(next.private.gate_history) ? next.private.gate_history : [];
+  next.private = { ...next.private, gate_history: [...history, { assignment: assignment.id, role: assignment.role, ended, ...(reason ? { reason } : {}) }].slice(-GATE_HISTORY_LIMIT) };
+}
+
+function assignmentUsed(doc, id) {
+  return doc.gate.returns.some(entry => entry.assignment === id)
+    || (Array.isArray(doc.private?.gate_history) && doc.private.gate_history.some(entry => entry?.assignment === id));
+}
+
+// The controller (or the lane holding this child) issues an assignment. Only the session bound to the
+// current assignment may journal; nothing else can make a gate live.
+function assignGate(doc, { assignment, role, supersede = false, reason = null }) {
+  if (!ASSIGNMENT_ID.test(String(assignment || ''))) throw new ProgrammeError('USAGE', 'assign needs --assignment <id> (letters, digits, dot, dash or underscore; up to 60).');
+  if (!GATE_ROLES.includes(role)) throw new ProgrammeError('USAGE', '--role must be G0, G1 or G2.');
   const next = clone(doc);
-  const existing = next.gate.returns.find(entry => entry.return_id === returnId);
+  const gate = next.gate;
+  if (gate.assignment?.id === assignment) {
+    if (gate.assignment.role === role && gate.state === 'ASSIGNED' && !supersede) return null;
+    throw new ProgrammeError('USAGE', `Assignment ${assignment} is already issued; every assignment needs a new id.`);
+  }
+  if (assignmentUsed(next, assignment)) throw new ProgrammeError('USAGE', `Assignment ${assignment} was used before; every assignment needs a new id.`);
+  if (next.lifecycle === 'RETIRED') throw new ProgrammeError('GATE_STATE', `#${next.issue} is retired. Controller: change its lifecycle before assigning a gate.`);
+  const live = LIVE_GATE_STATES.includes(gate.state);
+  if (supersede) {
+    if (!live) throw new ProgrammeError('GATE_STATE', `--supersede replaces a live assignment, and #${next.issue} has none (${gate.state || 'no gate'}).`);
+    endAssignment(next, 'SUPERSEDED', needsReason(reason, 'assign --supersede'));
+  } else if (live) {
+    throw new ProgrammeError('ASSIGNMENT_LIVE', `#${next.issue} has a live ${gate.role} assignment ${gate.assignment?.id || '(none recorded)'} (${gate.state}). Controller: interrupt it first, or assign with --supersede --reason.`);
+  } else if (gate.state === 'RETIRED' && gate.role === role) {
+    throw new ProgrammeError('GATE_STATE', `The ${role} gate of #${next.issue} was accepted. Controller: reopen it for a correction instead of assigning it again.`);
+  } else if (gate.state === 'RETIRED') {
+    endAssignment(next, 'ACCEPTED');
+  }
+  gate.assignment = { id: assignment, role };
+  gate.role = role;
+  gate.state = 'ASSIGNED';
+  gate.session_id = null;
+  gate.route = null;
+  if (['PLANNED', 'DONE'].includes(next.lifecycle)) next.lifecycle = 'ACTIVE';
+  next.next_action = `Executor: bind to assignment ${assignment} and start ${role}`;
+  return next;
+}
+
+// The controller reopens a gate. An accepted (RETIRED) gate gets a new assignment for its correction,
+// which removes the acceptance; a submitted return is sent back (REOPEN); a gate waiting on the owner
+// continues once the controller has recorded the answer.
+function reopenGate(doc, { reason, assignment = null }) {
+  const why = needsReason(reason, 'reopen');
+  const next = clone(doc);
+  const gate = next.gate;
+  if (gate.state === 'RETIRED') {
+    if (!ASSIGNMENT_ID.test(String(assignment || ''))) throw new ProgrammeError('USAGE', 'Reopening an accepted gate needs --assignment <new id> for the correction.');
+    if (gate.assignment?.id === assignment || assignmentUsed(next, assignment)) throw new ProgrammeError('USAGE', `Assignment ${assignment} was used before; every assignment needs a new id.`);
+    endAssignment(next, 'REOPENED', why);
+    gate.assignment = { id: assignment, role: gate.role };
+    gate.state = 'ASSIGNED';
+    gate.session_id = null;
+    gate.route = null;
+    if (['PLANNED', 'DONE'].includes(next.lifecycle)) next.lifecycle = 'ACTIVE';
+    next.next_action = `Executor: bind to assignment ${assignment} and correct ${gate.role}`;
+    return next;
+  }
+  if (assignment) throw new ProgrammeError('GATE_STATE', `--assignment is only for reopening an accepted gate; #${next.issue} is ${gate.state || 'not assigned'}.`);
+  if (gate.state === 'SUBMITTED') {
+    const pending = gate.returns.filter(entry => !entry.consumed).at(-1);
+    if (pending) { pending.consumed = true; pending.verdict = 'REOPEN'; }
+    gate.state = 'ACTIVE';
+    next.next_action = `Executor: continue ${gate.role}; the next return needs a new return ID`;
+    return next;
+  }
+  if (gate.state === 'WAITING_OWNER') {
+    gate.state = 'ACTIVE';
+    next.next_action = `Executor: continue ${gate.role} with the owner's answer`;
+    return next;
+  }
+  throw new ProgrammeError('GATE_STATE', `reopen works on an accepted, submitted or waiting gate; #${next.issue} is ${gate.state || 'not assigned'}.`);
+}
+
+// The controller (or the lane holding this child) stops a live assignment, for example after a lost
+// session. Journals for it are stale from then on.
+function interruptGate(doc, { reason }) {
+  const why = needsReason(reason, 'interrupt');
+  const next = clone(doc);
+  if (!LIVE_GATE_STATES.includes(next.gate.state)) {
+    throw new ProgrammeError('GATE_STATE', `interrupt stops a live assignment; #${next.issue} is ${next.gate.state || 'not assigned'}.`);
+  }
+  endAssignment(next, 'INTERRUPTED', why);
+  next.gate.state = 'INTERRUPTED';
+  next.next_action = `Controller: assign a successor for ${next.gate.role}, or reopen the outcome later`;
+  return next;
+}
+
+// The controller records an executor's return from its report, for a session without the turn-end
+// hook (cloud and Projects threads): completion mode toolkit_assisted. Returns are kept by return ID.
+function recordReturn(doc, { returnId, assignment, atHead = null, mode = 'toolkit_assisted' }) {
+  if (!RETURN_ID.test(String(returnId || ''))) throw new ProgrammeError('USAGE', 'return --record needs a return ID (letters, digits, dot, dash or underscore; up to 80).');
+  if (!ASSIGNMENT_ID.test(String(assignment || ''))) throw new ProgrammeError('USAGE', 'return --record needs --assignment <id>.');
+  if (!optional(atHead, isSha)) throw new ProgrammeError('USAGE', '--at-head must be a full 40-character SHA.');
+  const next = clone(doc);
+  const gate = next.gate;
+  if (gate.assignment?.id !== assignment || !LIVE_GATE_STATES.includes(gate.state)) {
+    throw new ProgrammeError('STALE_ASSIGNMENT', `Assignment ${assignment} is not the live assignment of #${next.issue} (current: ${gate.assignment?.id || 'none'}, ${gate.state || 'no gate'}); its return is not recorded.`);
+  }
+  const existing = gate.returns.find(entry => entry.return_id === returnId);
   if (existing) {
     if (existing.consumed) throw new ProgrammeError('RETURN_CONFLICT', `Return ${returnId} was already consumed as ${existing.verdict}; a new submission needs a new return ID.`);
     return null;
   }
-  if (!['ACTIVE', 'WAITING_OWNER', 'INTERRUPTED'].includes(next.gate.state)) {
-    throw new ProgrammeError('GATE_NOT_ACTIVE', `The gate is ${next.gate.state || 'not started'}; only an active gate can submit a return. Report to the controller.`);
+  if (!['ASSIGNED', 'ACTIVE'].includes(gate.state)) {
+    throw new ProgrammeError('GATE_STATE', `#${next.issue} is ${gate.state}; a new return is recorded only while the gate is assigned or active.`);
   }
-  if (next.gate.session_id && writer && next.gate.session_id !== writer.session && !isHolder(next, writer)) {
-    throw new ProgrammeError('STALE_WRITER', `Only the gate session or the ${holderDescription(next, 'child', parentDoc)} can submit its return.`);
-  }
-  next.gate.returns.push({ return_id: returnId, verdict: null, consumed: false, epoch: next.fence.epoch });
-  next.gate.state = 'SUBMITTED';
+  gate.returns.push({ return_id: returnId, verdict: null, consumed: false, epoch: next.fence.epoch, assignment, at_head: atHead, mode });
+  gate.state = 'SUBMITTED';
+  next.next_action = `Controller: consume return ${returnId}`;
   return next;
 }
 
-// Only the parent's holder (the controller) consumes a return; an executor cannot accept its own.
-function consumeReturn(doc, { returnId, verdict, writer = null, parentDoc = null }) {
-  if (!VERDICTS.includes(verdict)) throw new ProgrammeError('USAGE', '--verdict must be ACCEPT or REOPEN');
+// LIFE-1: returns are consumed by return ID, never by session. REOPEN keeps the assignment and its
+// session; the next submission needs a new return ID. Only the parent's holder consumes a return, and a
+// G1 acceptance needs a G2 review PASSED at the live PR head (`liveHead`, else the recorded PR head).
+function consumeReturn(doc, { returnId, verdict, writer = null, parentDoc = null, liveHead = undefined }) {
+  if (!VERDICTS.includes(verdict)) throw new ProgrammeError('USAGE', '--verdict must be ACCEPT, REOPEN or WAITING_OWNER.');
   if (!isHolder(parentDoc, writer)) throw new ProgrammeError('ROLE_REFUSED', 'Only the holder of the parent document (the controller) consumes a gate return.');
   const next = clone(doc);
   const entry = next.gate.returns.find(item => item.return_id === returnId);
@@ -466,12 +667,88 @@ function consumeReturn(doc, { returnId, verdict, writer = null, parentDoc = null
     throw new ProgrammeError('RETURN_CONFLICT', `Return ${returnId} was already consumed as ${entry.verdict}, not ${verdict}.`);
   }
   if (entry.epoch !== next.fence.epoch) throw new ProgrammeError('STALE_RETURN', `Return ${returnId} was submitted at epoch ${entry.epoch}; the document is at epoch ${next.fence.epoch}.`);
+  if (entry.assignment && entry.assignment !== next.gate.assignment?.id) {
+    throw new ProgrammeError('STALE_ASSIGNMENT', `Return ${returnId} belongs to assignment ${entry.assignment}; the current assignment is ${next.gate.assignment?.id || 'none'}.`);
+  }
   const latest = next.gate.returns.filter(item => !item.consumed).at(-1);
   if (latest.return_id !== returnId) throw new ProgrammeError('STALE_RETURN', `Return ${returnId} is not the latest submission (${latest.return_id}).`);
+  if (next.gate.state !== 'SUBMITTED') throw new ProgrammeError('GATE_STATE', `#${next.issue} is ${next.gate.state || 'not assigned'}; only a submitted return is consumed.`);
+  if (verdict === 'ACCEPT' && next.gate.role === 'G1') {
+    // The command line passes the live PR head; without it the last observed head is used.
+    const head = liveHead === undefined ? next.pr.head : liveHead;
+    const passed = isSha(head) && next.review.state === 'PASSED'
+      && next.review.verdicts.some(item => item.verdict === 'PASSED' && item.head === head);
+    if (!passed) {
+      throw new ProgrammeError('EVIDENCE_STALE', `G1 is accepted only after a G2 review PASSED at the live PR head (${isSha(head) ? shortSha(head) : 'no PR head found'}). Controller: record the G2 verdict at that head first, or consume this return as REOPEN.`);
+    }
+  }
   entry.consumed = true;
   entry.verdict = verdict;
-  next.gate.state = verdict === 'REOPEN' ? 'ACTIVE' : 'RETIRED';
+  next.gate.state = verdict === 'REOPEN' ? 'ACTIVE' : verdict === 'WAITING_OWNER' ? 'WAITING_OWNER' : 'RETIRED';
+  next.next_action = verdict === 'ACCEPT' ? `Controller: ${next.gate.role} accepted; assign the next gate or record completion`
+    : verdict === 'REOPEN' ? `Executor: continue ${next.gate.role}; the next return needs a new return ID`
+      : 'Owner: answer the question, then Controller: reopen the gate';
   return next;
+}
+
+// Reads checkpoint journals into a child document (pure). `observation.files` lists every journal
+// file for the issue ({ name, assignment, session_hash, sha, doc, error }). Only the one session
+// journaling the live assignment moves the gate: ASSIGNED becomes ACTIVE, and a new return in its
+// journal is captured (ACTIVE becomes SUBMITTED). A journal for any other assignment, or for an
+// interrupted, retired or unassigned gate, is reported once as STALE_ASSIGNMENT and never consumed.
+// Two sessions on one live assignment hold the gate (DUPLICATE_SESSION).
+function foldJournals(doc, observation) {
+  const next = clone(doc);
+  const findings = [];
+  const holds = [];
+  const gate = next.gate;
+  const issue = next.issue;
+  const files = observation?.files || [];
+  const seen = { ...(next.journals_seen || {}) };
+  const liveId = LIVE_GATE_STATES.includes(gate.state) ? gate.assignment?.id || null : null;
+  const fresh = file => seen[file.name] !== file.sha;
+  const current = files.filter(file => file.assignment === liveId);
+  for (const file of files.filter(entry => entry.assignment !== liveId)) {
+    if (fresh(file)) {
+      findings.push({ code: 'STALE_ASSIGNMENT', issue, detail: `a checkpoint from assignment ${file.assignment} (session ${file.session_hash.slice(0, 8)}) arrived after that assignment stopped being live; current: ${gate.assignment?.id || 'none'} ${gate.state || ''}`.trim() + '; not consumed' });
+    }
+    seen[file.name] = file.sha;
+  }
+  // The session the controller already saw on this assignment counts even when its journal is gone.
+  const sessions = new Set(current.map(file => file.session_hash));
+  if (current.length && SESSION_HASH.test(String(gate.session_id || ''))) sessions.add(gate.session_id);
+  if (sessions.size > 1) {
+    holds.push({ code: 'DUPLICATE_SESSION', target: `#${issue}`, scope: 'gate',
+      detail: `${sessions.size} sessions are working on assignment ${liveId}; interrupt it and assign one successor` });
+    for (const file of current) seen[file.name] = file.sha;
+  } else if (current.length === 1) {
+    const file = current[0];
+    const journal = file.doc;
+    if (!journal || journal.issue !== issue || journal.assignment !== liveId || journal.session_hash !== file.session_hash) {
+      if (fresh(file)) findings.push({ code: 'JOURNAL_INVALID', issue, detail: `the checkpoint journal for assignment ${liveId} could not be used (${file.error || 'it names another issue, assignment or session'})` });
+    } else {
+      if (journal.last_error && fresh(file)) findings.push({ code: 'JOURNAL_ERROR', issue, detail: `the executor's checkpoint hook reported ${journal.last_error.code} at ${journal.last_error.at}` });
+      if (gate.state === 'ASSIGNED') {
+        gate.state = 'ACTIVE';
+        gate.session_id = file.session_hash;
+        gate.route = journal.route ? clone(journal.route) : null;
+        next.next_action = `Executor: working on ${gate.role} (assignment ${liveId})`;
+        findings.push({ code: 'GATE_ACTIVE', issue, detail: `assignment ${liveId} is bound (session ${file.session_hash.slice(0, 8)})` });
+      }
+      const known = new Set(gate.returns.map(entry => entry.return_id));
+      const latest = journal.returns.at(-1);
+      if (gate.state === 'ACTIVE' && latest && !known.has(latest.return_id)) {
+        gate.returns.push({ return_id: latest.return_id, verdict: null, consumed: false, epoch: next.fence.epoch, assignment: liveId, at_head: latest.at_head, mode: 'native' });
+        gate.state = 'SUBMITTED';
+        next.next_action = `Controller: consume return ${latest.return_id}`;
+        findings.push({ code: 'RETURN_CAPTURED', issue, detail: `return ${latest.return_id} (requested ${latest.verdict_requested || 'no verdict'}${latest.at_head ? ` at ${shortSha(latest.at_head)}` : ''}) waits for the controller's verdict` });
+      }
+    }
+    seen[file.name] = file.sha;
+  }
+  for (const name of Object.keys(seen)) if (!files.some(file => file.name === name)) delete seen[name];
+  if (Object.keys(seen).length || next.journals_seen) next.journals_seen = seen;
+  return { doc: next, findings, holds };
 }
 
 // RFC 7386 merge patch, limited to the named top-level fields.
@@ -569,11 +846,6 @@ function shaLink(repository, sha) {
   return isSha(sha) ? `[${shortSha(sha)}](https://github.com/${repository}/commit/${sha}) \`${sha}\`` : '-';
 }
 
-function gateText(child) {
-  if (!child.gate.role && !child.gate.state) return child.lifecycle;
-  return [child.gate.role, child.gate.state].filter(Boolean).join(' ');
-}
-
 function checksText(child) {
   const checks = child.pr.checks;
   if (!child.pr.number) return '-';
@@ -609,54 +881,177 @@ function revisionLine(parent, children) {
   return `<!-- programme-state parent=${parent.parent_issue}@${parent.revision} children=${revs} -->`;
 }
 
-function compareOutcomes(a, b) {
-  return CLASSES.indexOf(a.class) - CLASSES.indexOf(b.class) || a.order - b.order || a.issue - b.issue;
+// The Programme Graph shows three classes and three statuses. OPTIONAL shows as LATER; a finished
+// outcome (class COMPLETED or RETIRED, or a DONE or RETIRED lifecycle) shows as COMPLETED, and a
+// retired one says so in its description. Lane is the gate the work is in now.
+const GRAPH_CLASS = Object.freeze({ CORE: 'CORE', HARDENING: 'HARDENING', LATER: 'LATER', OPTIONAL: 'LATER' });
+const GRAPH_GROUPS = Object.freeze(['CORE', 'HARDENING', 'LATER']);
+const GRAPH_HEADER = ['| Task | Child # | PR # | Class | Status | Lane | Task Description |', '|---|---|---|---|---|---|---|'];
+
+function isFinished(outcome, child) {
+  return outcome.class === 'COMPLETED' || outcome.class === 'RETIRED' || Boolean(child && TERMINAL_LIFECYCLES.includes(child.lifecycle));
 }
 
-// Outcomes in tree order: each expected parent's children by class, order and issue, nested ones
-// straight after their parent, then outcomes with no expected parent sorted by the same rule.
-function treeOrder(parent) {
-  const ordered = [];
-  const visit = number => {
-    for (const outcome of parent.outcomes.filter(entry => entry.parent === number).sort(compareOutcomes)) {
-      ordered.push(outcome);
-      visit(outcome.issue);
-    }
+function isRetired(outcome, child) {
+  return outcome.class === 'RETIRED' || child?.lifecycle === 'RETIRED';
+}
+
+// A planned outcome with an open or draft PR is already in progress.
+function statusText(outcome, child) {
+  if (isRetired(outcome, child)) return 'RETIRED';
+  if (isFinished(outcome, child)) return 'COMPLETED';
+  if (!child) return 'QUEUED';
+  return child.lifecycle === 'PLANNED' && !['OPEN', 'DRAFT'].includes(child.pr.state) ? 'QUEUED' : 'IN PROGRESS';
+}
+
+function laneText(outcome, child) {
+  return statusText(outcome, child) === 'IN PROGRESS' && child.gate.role ? child.gate.role : '-';
+}
+
+// The task's name: the catalogue name, else the issue title without a leading short code and dash
+// or a leading "Toolkit <version>:".
+function taskName(outcome, issue) {
+  if (outcome.name) return publicText(outcome.name);
+  const title = String(issue?.title || '').replace(/^Toolkit \d+\.\d+(?:\.\d+)?\s*[:—–-]\s*/, '').replace(/^[A-Z][A-Za-z0-9]*(?:-[A-Z0-9]+)?\s+[—–-]\s+/, '');
+  return publicText(title || outcome.label || `#${outcome.issue}`);
+}
+
+function descriptionText(outcome) {
+  return publicText(outcome.description || '') || '-';
+}
+
+// When an outcome finished: the state's completion time, else the issue's close time.
+function completedAt(child, issue) {
+  return child?.completed_at || issue?.closed_at || null;
+}
+
+// Active rows by class (CORE, HARDENING, LATER), each by catalogue order and issue; then every finished row,
+// oldest completion first and the most recent last (unknown times last). Nested children sort like
+// any other row.
+function graphOrder(parent, children, issues) {
+  const finished = parent.outcomes.filter(outcome => isFinished(outcome, children.get(outcome.issue)));
+  const active = parent.outcomes.filter(outcome => !finished.includes(outcome));
+  const byOrder = (a, b) => a.order - b.order || a.issue - b.issue;
+  const groups = GRAPH_GROUPS.map(cls => active.filter(outcome => GRAPH_CLASS[outcome.class] === cls).sort(byOrder));
+  const when = outcome => completedAt(children.get(outcome.issue), issues.get(outcome.issue));
+  const byCompletion = (a, b) => {
+    const left = when(a);
+    const right = when(b);
+    if (left && right && left !== right) return left < right ? -1 : 1;
+    if (Boolean(left) !== Boolean(right)) return left ? -1 : 1;
+    return a.issue - b.issue;
   };
-  visit(parent.parent_issue);
-  const placed = new Set(ordered.map(outcome => outcome.issue));
-  return [...ordered, ...parent.outcomes.filter(outcome => !placed.has(outcome.issue)).sort(compareOutcomes)];
+  const retired = finished.filter(outcome => isRetired(outcome, children.get(outcome.issue)));
+  const completed = finished.filter(outcome => !retired.includes(outcome));
+  return [...groups.flat(), ...completed.sort(byCompletion), ...retired.sort(byCompletion)];
 }
 
-function renderParentBlockBody(parent, children) {
-  const repository = parent.repository;
-  const rows = treeOrder(parent).map(outcome => {
+// `issues` maps an issue number to what GitHub shows for it (title, close time).
+function renderParentBlockBody(parent, children, issues = new Map()) {
+  const rows = graphOrder(parent, children, issues).map(outcome => {
     const child = children.get(outcome.issue);
-    const nested = outcome.parent && outcome.parent !== parent.parent_issue ? ` (under #${outcome.parent})` : '';
-    const label = `${outcome.label ? `${publicText(outcome.label)} ` : ''}#${outcome.issue}${nested}`;
-    const lane = publicText(outcome.lane || '-');
-    if (!child) return `| ${label} | ${outcome.class} | ${lane} | (no state yet) | - | - | - | - | - |`;
-    return `| ${label} | ${outcome.class} | ${lane} | ${gateText(child)} | ${prText(child)} | ${shaLink(repository, child.pr.head)} | ${checksText(child)} | ${uatText(child)} | ${publicText(child.next_action)} |`;
+    const cls = GRAPH_CLASS[outcome.class] || '-';
+    const pr = child?.pr.number ? `#${child.pr.number}` : '-';
+    return `| ${taskName(outcome, issues.get(outcome.issue))} | #${outcome.issue} | ${pr} | ${cls} | ${statusText(outcome, child)} | ${laneText(outcome, child)} | ${descriptionText(outcome)} |`;
   });
   return [
     revisionLine(parent, children),
-    `**Programme state** (state revision ${parent.revision}; generated from the state documents, so edit those rather than this table)`,
+    '## Programme Graph',
     '',
-    '| Outcome | Class | Lane | Gate | PR | Head | CI at head | UAT | Next action |',
-    '|---|---|---|---|---|---|---|---|---|',
+    `Generated from the programme state documents (state revision ${parent.revision}), so edit those rather than this table. Sorted CORE, HARDENING, LATER, then COMPLETED with the most recent last.`,
+    '',
+    ...GRAPH_HEADER,
     ...rows,
   ].join('\n');
 }
 
+// The comment trace an issue body carries: links to its index comments, then one line per comment
+// none of them lists, then marks for superseded records an index comment left unmarked.
+// A trace's lists, one per tag in first-seen order and "Other comments" last. Tags never mix.
+function traceGroups(trace) {
+  const groups = new Map();
+  const add = (tag, kind, item) => {
+    const key = tag || null;
+    if (!groups.has(key)) groups.set(key, { tag: key, indexes: [], entries: [], marks: [] });
+    groups.get(key)[kind].push(item);
+  };
+  for (const index of trace.indexes) add(index.tag, 'indexes', index);
+  for (const entry of trace.entries) add(entry.tag, 'entries', entry);
+  for (const mark of trace.marks) add(mark.tag, 'marks', mark);
+  const other = groups.get(null);
+  groups.delete(null);
+  return [...groups.values(), ...(other ? [other] : [])];
+}
+
+// The comment trace an issue body carries: for each tag, links to that tag's index comments, one
+// line per comment none of them lists, and marks for superseded records an index comment left
+// unmarked.
+function renderTraceBlockBody(number, trace) {
+  const lines = [
+    `<!-- programme-trace issue=${number} -->`,
+    '**Comment trace** (generated from every comment on this issue). Read the body first. Each tag is its own list and tags are never combined; within a tag, where comments disagree, the latest one wins. Tag a comment by making its first line the tag and its second line `---`.',
+  ];
+  const groups = traceGroups(trace);
+  for (const group of groups) {
+    lines.push('', `**${group.tag ? publicText(group.tag) : OTHER_COMMENTS}**`, '',
+      ...group.indexes.map((index, at) => `- ${index.date || 'undated'} · index · [Earlier comments, part ${at + 1}](#issuecomment-${index.id})`),
+      ...indexLines(group.entries), ...markLines(group.marks));
+  }
+  if (!groups.length) lines.push('', '- No comments yet.');
+  return lines.join('\n');
+}
+
+// What waits on the owner for one task, or null: an owner decision, a UAT, or a blocker.
+function ownerWait(child) {
+  if (!child) return null;
+  if (child.lifecycle === 'WAITING_OWNER' || child.gate?.state === 'WAITING_OWNER') return 'your decision';
+  if (['PENDING', 'UAT_PARTIAL_REQUIRED', 'UAT_FULL_REQUIRED'].includes(child.uat.state)) return `your UAT${child.pr.number ? ` on PR #${child.pr.number}` : ''}`;
+  if (child.blockers.length) return `blocked: ${child.blockers.map(publicText).join('; ')}`;
+  return null;
+}
+
+// The generated CURRENT summary: what is in progress, what waits on the owner, and the next queued
+// tasks, from the same documents and order as the Programme Graph.
+function renderCurrentBlockBody(parent, children, issues = new Map()) {
+  const rows = graphOrder(parent, children, issues).map(outcome => ({ outcome, child: children.get(outcome.issue) }));
+  const name = ({ outcome }) => `${taskName(outcome, issues.get(outcome.issue))} (#${outcome.issue})`;
+  const active = rows.filter(row => statusText(row.outcome, row.child) === 'IN PROGRESS');
+  const waiting = active.filter(row => ownerWait(row.child));
+  const working = active.filter(row => !ownerWait(row.child)).map(row => {
+    const parts = [row.child.gate.role, row.child.pr.number ? `PR #${row.child.pr.number}` : null].filter(Boolean).join(', ');
+    return `- ${name(row)}${parts ? `: ${parts}` : ''}${row.child.next_action ? `; next: ${publicText(row.child.next_action)}` : ''}`;
+  });
+  const queued = rows.filter(row => statusText(row.outcome, row.child) === 'QUEUED').slice(0, NEXT_UP_LIMIT).map(row => `- ${name(row)}`);
+  const list = items => (items.length ? items : ['- None.']);
+  return [
+    '<!-- programme-current -->',
+    `_Generated from the programme state (revision ${parent.revision}); hand-written notes follow this summary._`,
+    '',
+    '**In progress**',
+    ...list(working),
+    '',
+    '**Waiting on you**',
+    ...list(waiting.map(row => `- ${name(row)}: ${ownerWait(row.child)}`)),
+    '',
+    '**Next up**',
+    ...list(queued),
+  ].join('\n');
+}
+
+// The links that open a task page or PR: the programme parent, any expected parents in between,
+// the task, then its PR. GitHub turns each #n into a link.
+function renderNavBlockBody(chain, pr) {
+  return ['<!-- programme-nav -->', `**Path:** ${chain.map(number => `#${number}`).join(' > ')}${pr ? ` > PR #${pr}` : ''}`].join('\n');
+}
+
 function renderChildBlockBody(child, outcome) {
-  const repository = child.repository;
   const lines = [
     `<!-- programme-state child=${child.issue}@${child.revision} -->`,
-    `**Programme state** (issue-${child.issue}.json revision ${child.revision}; generated, so edit the state document rather than this block)`,
+    `**Status** (issue-${child.issue}.json revision ${child.revision}; generated, so edit the state document rather than this block)`,
     '',
-    `- Class: ${outcome?.class || '-'}; lane: ${publicText(outcome?.lane || '-')}; lifecycle: ${child.lifecycle}; release: ${publicText(child.release || '-')}`,
-    `- Gate: ${gateText(child)}`,
-    `- PR: ${prText(child)}; head ${shaLink(repository, child.pr.head)}; CI at head: ${checksText(child)}`,
+    `- Status: ${outcome ? statusText(outcome, child) : '-'}; class: ${GRAPH_CLASS[outcome?.class] || '-'}; lane: ${outcome ? laneText(outcome, child) : '-'}; release: ${publicText(child.release || '-')}`,
+    `- Task: ${outcome ? descriptionText(outcome) : '-'}`,
+    `- PR: ${prText(child)}; head ${shaLink(child.repository, child.pr.head)}; CI at head: ${checksText(child)}`,
     `- UAT: ${uatText(child)}; review: ${reviewText(child)}`,
     `- Next action: ${publicText(child.next_action)}`,
   ];
@@ -675,21 +1070,22 @@ function normalizeBlockBody(body) {
 
 function blockDigest(body) { return sha256(normalizeBlockBody(body)).slice(0, 12); }
 
-function renderBlock(body, version) {
+function renderBlock(body, version, name = BLOCK_NAME) {
   return [
-    `<!-- AI-AGENT-TOOLKIT:${BLOCK_SOURCE}:BEGIN ${BLOCK_NAME} v2 toolkit=${version} sha256=${blockDigest(body)} -->`,
+    `<!-- AI-AGENT-TOOLKIT:${BLOCK_SOURCE}:BEGIN ${name} v2 toolkit=${version} sha256=${blockDigest(body)} -->`,
     normalizeBlockBody(body),
-    `<!-- AI-AGENT-TOOLKIT:${BLOCK_SOURCE}:END ${BLOCK_NAME} -->`,
+    `<!-- AI-AGENT-TOOLKIT:${BLOCK_SOURCE}:END ${name} -->`,
   ].join('\n');
 }
 
-const BLOCK_BEGIN = new RegExp(`^<!-- AI-AGENT-TOOLKIT:${BLOCK_SOURCE}:BEGIN ${BLOCK_NAME} v2 toolkit=(\\d+\\.\\d+\\.\\d+) sha256=([0-9a-f]{12}) -->$`);
-const BLOCK_END = new RegExp(`^<!-- AI-AGENT-TOOLKIT:${BLOCK_SOURCE}:END ${BLOCK_NAME} -->$`);
+const BLOCK_BEGIN = new RegExp(`^<!-- AI-AGENT-TOOLKIT:${BLOCK_SOURCE}:BEGIN ([A-Z]+) v2 toolkit=(\\d+\\.\\d+\\.\\d+) sha256=([0-9a-f]{12}) -->$`);
+const BLOCK_END = new RegExp(`^<!-- AI-AGENT-TOOLKIT:${BLOCK_SOURCE}:END ([A-Z]+) -->$`);
 // Only a line that starts as an HTML comment is a marker; rendered free text has `<` escaped.
 const BLOCK_ANY = new RegExp(`^\\s*<!--\\s*AI-AGENT-TOOLKIT:${BLOCK_SOURCE}:`);
 
-// The one state block in a body, with offsets; `error` for broken or duplicated markers.
-function findStateBlock(text) {
+// The one block with this name in a body, with offsets; `error` for broken, nested or duplicated
+// markers. Blocks with other names are skipped.
+function findStateBlock(text, name = BLOCK_NAME) {
   const source = String(text || '');
   const lines = [];
   for (let offset = 0; offset <= source.length;) {
@@ -705,12 +1101,15 @@ function findStateBlock(text) {
   for (const [index, line] of lines.entries()) {
     if (!BLOCK_ANY.test(line.content)) continue;
     const begin = BLOCK_BEGIN.exec(line.content);
+    const end = BLOCK_END.exec(line.content);
+    if ((begin || end) && open && (begin || end[1] !== name)) return { error: `a block marker inside the ${name} block at line ${index + 1}` };
+    if ((begin && begin[1] !== name) || (end && end[1] !== name)) continue;
     if (begin) {
-      if (open || found) return { error: `duplicate or nested state block at line ${index + 1}` };
-      open = { index, start: line.start, version: begin[1], digest: begin[2] };
+      if (found) return { error: `duplicate ${name} block at line ${index + 1}` };
+      open = { index, start: line.start, version: begin[2], digest: begin[3] };
       continue;
     }
-    if (BLOCK_END.test(line.content) && open) {
+    if (end && open) {
       const body = lines.slice(open.index + 1, index).map(entry => entry.content).join('\n');
       found = { start: open.start, end: line.end, version: open.version, digest: open.digest, body, tampered: open.digest !== blockDigest(body) };
       open = null;
@@ -718,19 +1117,143 @@ function findStateBlock(text) {
     }
     return { error: `malformed state block marker at line ${index + 1}` };
   }
-  if (open) return { error: 'state block BEGIN without END' };
+  if (open) return { error: `${name} block BEGIN without END` };
   return { block: found };
 }
 
-// The body with the state block replaced, or inserted at the top. Uses the body's own line ending.
-function upsertStateBlock(text, rendered) {
+// The body with the trace block written: replaced in place, else added at the end of the body.
+function upsertTraceBlock(text, rendered) {
+  const source = String(text || '');
+  const eol = /\r\n/.test(source) ? '\r\n' : '\n';
+  const block = rendered.split('\n').join(eol);
+  const { block: found, error } = findStateBlock(source, TRACE_BLOCK_NAME);
+  if (error) throw new ProgrammeError('MANAGED_BLOCK_BROKEN', error);
+  if (found) return source.slice(0, found.start) + block + source.slice(found.end);
+  const before = source.replace(/\s+$/, '');
+  return `${before ? `${before}${eol}${eol}` : ''}${block}${eol}`;
+}
+
+// The body with the CURRENT summary written: replaced in place, else added right under the heading
+// of the named status section (else under the first title, else at the top).
+function upsertCurrentBlock(text, rendered, sectionName) {
+  const source = String(text || '');
+  const eol = /\r\n/.test(source) ? '\r\n' : '\n';
+  const block = rendered.split('\n').join(eol);
+  const { block: found, error } = findStateBlock(source, CURRENT_BLOCK_NAME);
+  if (error) throw new ProgrammeError('MANAGED_BLOCK_BROKEN', error);
+  if (found) return source.slice(0, found.start) + block + source.slice(found.end);
+  const all = headings(source);
+  const heading = (sectionName && all.find(entry => entry.text.toLowerCase() === String(sectionName).trim().toLowerCase())) || all.find(entry => entry.level === 1);
+  const at = heading ? heading.end : 0;
+  const before = source.slice(0, at).replace(/\s+$/, '');
+  const after = source.slice(at).replace(/^\s+/, '');
+  return `${before ? `${before}${eol}${eol}` : ''}${block}${after ? `${eol}${eol}${after}` : eol}`;
+}
+
+// The body with the links block first: replaced in place, else added at the very top.
+function upsertNavBlock(text, rendered) {
+  const source = String(text || '');
+  const eol = /\r\n/.test(source) ? '\r\n' : '\n';
+  const block = rendered.split('\n').join(eol);
+  const { block: found, error } = findStateBlock(source, NAV_BLOCK_NAME);
+  if (error) throw new ProgrammeError('MANAGED_BLOCK_BROKEN', error);
+  if (found) return source.slice(0, found.start) + block + source.slice(found.end);
+  const after = source.replace(/^\s+/, '');
+  return `${block}${eol}${after ? `${eol}${after}` : ''}`;
+}
+
+// Index comment bodies for trace lines, each under the comment size limit.
+// A tagged list's index comment carries the tag on its first line, so it stays in that tag's list.
+function indexCommentBodies(number, lines, intent, tag = null) {
+  const head = (part, total) => [...(tag ? [tag, '---'] : []), INDEX_COMMENT_MARKER, `<!-- programme-trace intent=${intent} part=${part}/${total} -->`,
+    `## Comment trace for #${number}: ${tag || OTHER_COMMENTS}`, ''];
+  const chunks = [[]];
+  let size = 0;
+  for (const line of lines) {
+    if (size + line.length + 1 > INDEX_COMMENT_LIMIT && chunks.at(-1).length) { chunks.push([]); size = 0; }
+    chunks.at(-1).push(line);
+    size += line.length + 1;
+  }
+  return chunks.map((chunk, at) => [...head(at + 1, chunks.length), ...chunk, ''].join('\n'));
+}
+
+// Headings outside fenced code, with their level, text and line offsets.
+function headings(text) {
+  const found = [];
+  let fenced = false;
+  for (let offset = 0; offset < text.length;) {
+    const next = text.indexOf('\n', offset);
+    const stop = next === -1 ? text.length : next;
+    const line = text.slice(offset, stop).replace(/\r$/, '');
+    if (/^\s*(```|~~~)/.test(line)) fenced = !fenced;
+    const heading = !fenced && /^(#{1,6})\s+(.*?)\s*#*\s*$/.exec(line);
+    if (heading) found.push({ level: heading[1].length, text: heading[2].trim(), start: offset, end: next === -1 ? stop : next + 1 });
+    offset = next === -1 ? text.length : next + 1;
+  }
+  return found;
+}
+
+// Where the block belongs in a body that has no block: in place of the `replace_section`
+// section; else right after the `after_section` section; else after the first title and a marked
+// note directly under it (`<!-- NAME:BEGIN -->` ... `<!-- NAME:END -->`); else at the top.
+function blockTarget(text, placement = {}) {
+  const all = headings(text);
+  const sectionEnd = heading => {
+    const next = all.find(entry => entry.start > heading.start && entry.level <= heading.level);
+    return next ? next.start : text.length;
+  };
+  const named = name => name && all.find(entry => entry.text.toLowerCase() === String(name).trim().toLowerCase());
+  const replaced = named(placement.replace_section);
+  if (replaced) return { start: replaced.start, end: sectionEnd(replaced), replaces: true };
+  const after = named(placement.after_section);
+  if (after) return { start: sectionEnd(after), end: sectionEnd(after), replaces: false };
+  const title = all.find(entry => entry.level === 1);
+  if (!title) return { start: 0, end: 0, replaces: false };
+  let at = title.end;
+  const rest = text.slice(at);
+  const lead = /^\s*/.exec(rest)[0].length;
+  const note = /^<!--\s*([A-Za-z0-9_.:-]+):BEGIN\b[^\n]*-->[^\n]*\n/.exec(rest.slice(lead));
+  if (note) {
+    const close = rest.indexOf(`<!-- ${note[1]}:END`, lead);
+    if (close !== -1) {
+      const lineEnd = rest.indexOf('\n', close);
+      at += lineEnd === -1 ? rest.length : lineEnd + 1;
+    }
+  }
+  return { start: at, end: at, replaces: false };
+}
+
+const trimEnd = text => text.replace(/\s+$/, '');
+const trimStart = text => text.replace(/^\s+/, '');
+
+// The body with the state block written. An existing block is replaced in place, byte for byte
+// around it, unless it sits above its place (for example at the very top) or the binding's
+// `replace_section` is still in the body: then it moves, once. A new block goes to its place.
+// Uses the body's own line ending; `moved` says whether the block changed position.
+function upsertStateBlock(text, rendered, placement = {}) {
   const source = String(text || '');
   const eol = /\r\n/.test(source) ? '\r\n' : '\n';
   const block = rendered.split('\n').join(eol);
   const { block: found, error } = findStateBlock(source);
   if (error) throw new ProgrammeError('MANAGED_BLOCK_BROKEN', error);
-  if (found) return { body: source.slice(0, found.start) + block + source.slice(found.end), start: found.start, end: found.start + block.length };
-  return { body: source ? `${block}${eol}${eol}${source}` : `${block}${eol}`, start: 0, end: block.length };
+  let rest = source;
+  if (found) {
+    const before = trimEnd(source.slice(0, found.start));
+    const after = trimStart(source.slice(found.end));
+    rest = before && after ? `${before}${eol}${eol}${after}` : before || after;
+    const target = blockTarget(rest, placement);
+    const goal = trimEnd(rest.slice(0, target.start));
+    const above = goal.length > before.length && goal.startsWith(before);
+    if (!target.replaces && !above) {
+      return { body: source.slice(0, found.start) + block + source.slice(found.end), start: found.start, end: found.start + block.length, moved: false };
+    }
+  }
+  const target = blockTarget(rest, placement);
+  const before = trimEnd(rest.slice(0, target.start));
+  const after = trimStart(rest.slice(target.end));
+  const head = before ? `${before}${eol}${eol}` : '';
+  const body = `${head}${block}${after ? `${eol}${eol}${after}` : eol}`;
+  return { body, start: head.length, end: head.length + block.length, moved: Boolean(found) };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -796,6 +1319,9 @@ class StateStore {
     this.now = now;
     this.toolkitVersion = toolkitVersion;
     this.writes = 0;
+    // Per document this process wrote: the blob its write replaced and the version it wrote.
+    // GitHub can serve the replaced version on a branch read made right after the write.
+    this.ownWrites = new Map();
   }
 
   docPath(kind, number) {
@@ -803,8 +1329,17 @@ class StateStore {
   }
 
   contentsPath(kind, number) {
-    return `repos/${this.store.repository}/contents/${this.docPath(kind, number).split('/').map(encodeURIComponent).join('/')}`;
+    return this.encodedContents(this.docPath(kind, number));
   }
+
+  encodedContents(docPath) {
+    return `repos/${this.store.repository}/contents/${docPath.split('/').map(encodeURIComponent).join('/')}`;
+  }
+
+  // Checkpoint journals: one file per executor session and assignment, written only by that session.
+  journalDir(issue) { return `${this.store.path}journal/issue-${issue}`; }
+
+  journalPath(issue, name) { return `${this.journalDir(issue)}/${name}`; }
 
   // The store must exist, be private and be writable, and the branch must exist. No fallback store.
   verify() {
@@ -819,14 +1354,80 @@ class StateStore {
   }
 
   read(kind, number) {
-    const response = this.transport.request('GET', `${this.contentsPath(kind, number)}?ref=${encodeURIComponent(this.store.branch)}`);
+    return this.readPath(this.docPath(kind, number), kind);
+  }
+
+  // Reads the branch, or a fixed commit when `ref` is given. A branch read that still shows the
+  // version this process's own write replaced returns the written version instead.
+  readPath(docPath, kind, ref = null) {
+    const response = this.transport.request('GET', `${this.encodedContents(docPath)}?ref=${encodeURIComponent(ref || this.store.branch)}`);
+    const own = ref ? null : this.ownWrites.get(docPath);
+    if (own && (response.status === 404 ? own.replaced === null : response.status === 200 && response.json.sha === own.replaced)) {
+      return { doc: clone(own.doc), sha: own.sha };
+    }
     if (response.status === 404) return { doc: null, sha: null };
-    if (response.status !== 200) throw ghFailure(response, `Reading ${this.docPath(kind, number)}`);
-    if (response.json.encoding !== 'base64') throw new ProgrammeError('STATE_INVALID', `${this.docPath(kind, number)} is too large to read through the Contents API.`);
+    if (response.status !== 200) throw ghFailure(response, `Reading ${docPath}`);
+    if (response.json.encoding !== 'base64') throw new ProgrammeError('STATE_INVALID', `${docPath} is too large to read through the Contents API.`);
     let doc;
     try { doc = JSON.parse(Buffer.from(response.json.content, 'base64').toString('utf8')); }
-    catch { throw new ProgrammeError('STATE_INVALID', `${this.docPath(kind, number)} is not valid JSON.`); }
+    catch { throw new ProgrammeError('STATE_INVALID', `${docPath} is not valid JSON.`); }
     return { doc: assertValid(kind, doc), sha: response.json.sha };
+  }
+
+  // PUT with compare-and-swap, then read back. A stale sha (409) or a create over an existing file
+  // (422) is STATE_CONFLICT.
+  putVerified(docPath, kind, text, sha, message) {
+    const response = this.transport.request('PUT', this.encodedContents(docPath), {
+      message, content: Buffer.from(text, 'utf8').toString('base64'), branch: this.store.branch, ...(sha ? { sha } : {}),
+    });
+    if (response.status === 409 || (response.status === 422 && !sha)) {
+      this.ownWrites.delete(docPath);
+      throw new ProgrammeError('STATE_CONFLICT', `${docPath} moved since it was read.`, { status: response.status });
+    }
+    if (!okStatus(response.status)) throw ghFailure(response, `Writing ${docPath}`);
+    this.writes += 1;
+    // Read back at the commit the write created: a branch read can still serve the old version.
+    const commit = response.json?.commit?.sha;
+    const blob = response.json?.content?.sha;
+    if (!commit || !blob) throw new ProgrammeError('STATE_READBACK_MISMATCH', `${docPath} was written but GitHub returned no commit to read it back from.`);
+    const readback = this.readPath(docPath, kind, commit);
+    if (!readback.doc || canonicalText(readback.doc) !== text || readback.sha !== blob) {
+      throw new ProgrammeError('STATE_READBACK_MISMATCH', `${docPath} did not read back as written.`);
+    }
+    this.ownWrites.set(docPath, { replaced: sha || null, doc: clone(readback.doc), sha: blob });
+    return { outcome: 'WRITTEN', doc: readback.doc, sha: blob };
+  }
+
+  listJournals(issue) {
+    const dir = this.journalDir(issue);
+    const response = this.transport.request('GET', `${this.encodedContents(dir)}?ref=${encodeURIComponent(this.store.branch)}`);
+    if (response.status === 404) return [];
+    if (response.status !== 200 || !Array.isArray(response.json)) throw ghFailure(response, `Listing ${dir}`);
+    return response.json.filter(entry => entry?.type === 'file').map(entry => {
+      const match = JOURNAL_FILE.exec(String(entry.name));
+      return match ? { name: entry.name, assignment: match[1], session_hash: match[2], sha: entry.sha } : null;
+    }).filter(Boolean).sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  readJournal(issue, name) {
+    return this.readPath(this.journalPath(issue, name), 'journal');
+  }
+
+  // Writes a journal only when something besides its timestamp changed.
+  writeJournal(issue, name, next, { sha, previous }) {
+    const strip = doc => { const copy = clone(doc); delete copy.volatile; return JSON.stringify(canonical(copy)); };
+    if (previous && strip(previous) === strip(next)) return { outcome: 'NOOP', doc: previous, sha };
+    const doc = { ...clone(next), volatile: { written_at: this.now() } };
+    assertValid('journal', doc);
+    return this.putVerified(this.journalPath(issue, name), 'journal', canonicalText(doc), sha, `programme journal: issue-${issue} ${name} seq ${doc.seq}`);
+  }
+
+  // When the store last committed a document, by GitHub's clock.
+  lastCommitDate(kind, number) {
+    const docPath = this.docPath(kind, number);
+    const response = this.transport.request('GET', `repos/${this.store.repository}/commits?path=${encodeURIComponent(docPath)}&sha=${encodeURIComponent(this.store.branch)}&per_page=1`);
+    if (response.status !== 200 || !Array.isArray(response.json)) throw ghFailure(response, `Reading the history of ${docPath}`);
+    return response.json[0]?.commit?.committer?.date || null;
   }
 
   // Writes `next` only when its state differs from `previous`. Bumps the revision only when the
@@ -837,23 +1438,8 @@ class StateStore {
     doc.revision = previous ? previous.revision + (contentDigest(previous) === contentDigest(doc) ? 0 : 1) : Math.max(1, doc.revision || 0);
     doc.volatile = { written_at: this.now(), ...(this.toolkitVersion ? { toolkit: this.toolkitVersion } : {}) };
     assertValid(kind, doc);
-    const text = canonicalText(doc);
-    const response = this.transport.request('PUT', this.contentsPath(kind, number), {
-      message: `programme state: ${kind === 'parent' ? 'parent' : 'issue'}-${number} revision ${doc.revision}`,
-      content: Buffer.from(text, 'utf8').toString('base64'),
-      branch: this.store.branch,
-      ...(sha ? { sha } : {}),
-    });
-    if (response.status === 409 || (response.status === 422 && !sha)) {
-      throw new ProgrammeError('STATE_CONFLICT', `${this.docPath(kind, number)} moved since it was read.`, { status: response.status });
-    }
-    if (!okStatus(response.status)) throw ghFailure(response, `Writing ${this.docPath(kind, number)}`);
-    this.writes += 1;
-    const readback = this.read(kind, number);
-    if (!readback.doc || canonicalText(readback.doc) !== text) {
-      throw new ProgrammeError('STATE_READBACK_MISMATCH', `${this.docPath(kind, number)} did not read back as written.`);
-    }
-    return { outcome: 'WRITTEN', doc: readback.doc, sha: readback.sha };
+    return this.putVerified(this.docPath(kind, number), kind, canonicalText(doc), sha,
+      `programme state: ${kind === 'parent' ? 'parent' : 'issue'}-${number} revision ${doc.revision}`);
   }
 
   // Read, authorise, change and write with compare-and-swap. On a conflict the change is re-applied
@@ -933,7 +1519,7 @@ class ProgrammeGraphReader {
     const issue = response.json;
     return {
       number: issue.number, id: issue.id, state: issue.state, state_reason: issue.state_reason || null,
-      title: issue.title, body: issue.body || '', updated_at: issue.updated_at,
+      title: issue.title, body: issue.body || '', updated_at: issue.updated_at, closed_at: issue.closed_at || null,
       is_pull_request: Boolean(issue.pull_request),
       parent: parentFromUrl(issue.parent_issue_url, this.repository),
       blocked_by_total: issue.issue_dependencies_summary?.total_blocked_by ?? 0,
@@ -949,6 +1535,18 @@ class ProgrammeGraphReader {
       if (response.json.length < 100) return all;
     }
     throw new ProgrammeError('GH_FAILED', `Issue ${number} has more sub-issues than this reader pages through.`);
+  }
+
+  // Every comment on an issue, for the comment trace and its audit.
+  comments(number) {
+    const all = [];
+    for (let page = 1; page < 100; page += 1) {
+      const response = this.transport.request('GET', `repos/${this.repository}/issues/${number}/comments?per_page=100&page=${page}`);
+      if (response.status !== 200) throw ghFailure(response, `Reading comments of ${number}`);
+      all.push(...response.json.map(comment => ({ id: comment.id, user: comment.user, body: comment.body || '', created_at: comment.created_at })));
+      if (response.json.length < 100) return all;
+    }
+    throw new ProgrammeError('GH_FAILED', `Issue ${number} has more comments than this reader pages through.`);
   }
 
   blockedBy(number) {
@@ -976,6 +1574,18 @@ class ProgrammeGraphReader {
     };
   }
 
+  // Open pull requests with their bodies, for PRs that reference an outcome the state does not track.
+  openPullRequests() {
+    const all = [];
+    for (let page = 1; page < 50; page += 1) {
+      const response = this.transport.request('GET', `repos/${this.repository}/pulls?state=open&per_page=100&page=${page}`);
+      if (response.status !== 200) throw ghFailure(response, 'Listing open pull requests');
+      all.push(...response.json.map(pr => ({ number: pr.number, body: pr.body || '' })));
+      if (response.json.length < 100) return all;
+    }
+    throw new ProgrammeError('GH_FAILED', 'The repository has more open pull requests than this reader pages through.');
+  }
+
   pullRequestForBranch(branch) {
     const owner = this.repository.split('/')[0];
     const response = this.transport.request('GET', `repos/${this.repository}/pulls?head=${encodeURIComponent(`${owner}:${branch}`)}&state=all&per_page=10`);
@@ -983,6 +1593,21 @@ class ProgrammeGraphReader {
     const open = response.json.find(pr => pr.state === 'open');
     return (open || response.json[0])?.number || null;
   }
+}
+
+// Issue numbers each PR body references with Refs, Completes, Closes, Fixes or Resolves, including
+// lists such as "Refs #421, #423": issue -> sorted PR numbers.
+function referencedIssues(prs) {
+  const references = new Map();
+  for (const pr of prs) {
+    for (const match of String(pr.body || '').matchAll(/\b(?:refs|completes|closes|fixes|resolves)\b:?\s+((?:#\d+(?:\s*(?:,|and)\s*)?)+)/gi)) {
+      for (const [, number] of match[1].matchAll(/#(\d+)/g)) {
+        const list = references.get(Number(number)) || [];
+        if (!list.includes(pr.number)) references.set(Number(number), [...list, pr.number].sort((a, b) => a - b));
+      }
+    }
+  }
+  return references;
 }
 
 // Native hierarchy and body mutations; each returns the raw status. Readback decides the outcome.
@@ -1002,6 +1627,10 @@ class GitHubMutator {
   reorder(parent, childId, anchor) {
     this.mutations += 1;
     return this.transport.request('PATCH', `repos/${this.repository}/issues/${parent}/sub_issues/priority`, { sub_issue_id: childId, ...anchor });
+  }
+
+  postComment(number, body) {
+    return this.transport.request('POST', `repos/${this.repository}/issues/${number}/comments`, { body });
   }
 
   writeBody(number, body) {
@@ -1057,7 +1686,10 @@ function intentId(kind, target) {
 
 // Findings the reconciler reports but never fixes itself; each needs a controller decision.
 const ATTENTION = new Set(['ISSUE_MISSING', 'NATIVE_PARENT_UNEXPECTED', 'NATIVE_CHILD_UNKNOWN', 'DEPENDENCY_IMPLIES_PARENT',
-  'PR_HEAD_MOVED', 'CHECKS_RED', 'READY_TO_CLOSE', 'CHILD_STATE_CONFLICT', 'MANAGED_BLOCK_BROKEN']);
+  'PR_HEAD_MOVED', 'CHECKS_RED', 'READY_TO_CLOSE', 'CHILD_STATE_CONFLICT', 'MANAGED_BLOCK_BROKEN', 'TRACE_UNLINKED', 'TRACE_SUPERSEDED_UNMARKED', 'PR_UNTRACKED',
+  'RETURN_CAPTURED', 'STALE_ASSIGNMENT', 'JOURNAL_ERROR', 'JOURNAL_INVALID']);
+// Child fields the journal fold owns; apply re-folds them on the document it reads, never copies them.
+const FOLD_FIELDS = ['gate', 'journals_seen', 'next_action'];
 
 const EFFECT_TEXT = {
   create_state: effect => `Create the state document for #${effect.target.issue}`,
@@ -1065,14 +1697,17 @@ const EFFECT_TEXT = {
   attach: effect => `Attach #${effect.target.issue} under #${effect.target.parent}`,
   reparent: effect => `Move #${effect.target.issue} from under ${typeof effect.from === 'number' ? `#${effect.from}` : effect.from} to under #${effect.target.parent}`,
   reorder: effect => `Move #${effect.target.issue} ${effect.target.before !== undefined ? `before #${effect.target.before}` : `after #${effect.target.after}`} under #${effect.target.parent}`,
-  replace_block: effect => `${effect.insert ? 'Add' : 'Update'} the state block in #${effect.target.issue}'s body`,
+  replace_block: effect => (effect.state === false ? `Update the comment trace in #${effect.target.issue}'s body` : `${effect.insert ? 'Add' : effect.move ? 'Move' : 'Update'} the state block in #${effect.target.issue}'s body`),
+  replace_pr_nav: effect => `Add the parent and task links at the top of PR #${effect.target.pr}`,
+  post_index_comment: effect => `Move #${effect.target.issue}'s "${effect.target.tag || OTHER_COMMENTS}" comment trace (${effect.lines.length} line(s)) into a new index comment`,
 };
 
 function describeEffect(effect) { return EFFECT_TEXT[effect.kind](effect); }
 
 // What a hold on an issue stops for the rest of a pass: its body, its links, or everything.
 function holdScope(kind) {
-  if (kind === 'replace_block') return 'body';
+  if (kind === 'replace_block' || kind === 'post_index_comment') return 'body';
+  if (kind === 'replace_pr_nav') return 'pr';
   if (kind === 'attach' || kind === 'reparent' || kind === 'reorder') return 'links';
   return 'all';
 }
@@ -1112,23 +1747,67 @@ class Reconciler {
       const number = doc?.pr?.number || (doc?.candidate?.branch ? this.reader.pullRequestForBranch(doc.candidate.branch) : null);
       if (number) prs.set(outcome.issue, this.reader.pullRequest(number));
     }
-    return { issues, subIssues, blockedBy, prs, outcomes };
+    const journals = new Map();
+    for (const outcome of outcomes) {
+      const doc = children.get(outcome.issue)?.doc;
+      if (doc && (doc.gate.assignment || Object.keys(doc.journals_seen || {}).length)) journals.set(outcome.issue, this.readJournals(doc));
+    }
+    // Open PRs are listed only when some open outcome tracks no PR and no branch.
+    const untracked = outcomes.some(outcome => {
+      const doc = children.get(outcome.issue)?.doc;
+      return !isFinished(outcome, doc) && !doc?.pr?.number && !doc?.candidate?.branch;
+    });
+    const references = untracked ? referencedIssues(this.reader.openPullRequests()) : new Map();
+    const comments = new Map([parent.parent_issue, ...outcomes.map(outcome => outcome.issue)].filter(number => issues.get(number)).map(number => [number, this.reader.comments(number)]));
+    const prPages = new Map();
+    for (const pr of prs.values()) if (pr && ['OPEN', 'DRAFT'].includes(pr.state)) prPages.set(pr.number, this.reader.issue(pr.number));
+    return { issues, subIssues, blockedBy, prs, outcomes, journals, references, comments, prPages };
   }
 
-  // The child document with observed PR facts applied (pure apart from reading `observed`).
+  // Report-only: an open PR that says "Refs #n" (or Completes, Closes, Fixes, Resolves) for an open
+  // outcome whose state tracks no PR and no branch. The controller confirms before recording it.
+  diffUntracked(parent, docs, observed, only, findings) {
+    for (const outcome of parent.outcomes) {
+      if (only && outcome.issue !== only) continue;
+      const doc = docs.get(outcome.issue);
+      if (isFinished(outcome, doc) || doc?.pr?.number || doc?.candidate?.branch) continue;
+      const numbers = observed.references.get(outcome.issue) || [];
+      if (numbers.length) findings.push({ code: 'PR_UNTRACKED', issue: outcome.issue, detail: `open PR ${numbers.map(number => `#${number}`).join(', ')} references this outcome, but its state records no PR or branch; the controller confirms and records it with update --patch` });
+    }
+  }
+
+  // Every journal file for a child; only the live assignment's journals are read in full.
+  readJournals(doc) {
+    const live = LIVE_GATE_STATES.includes(doc.gate.state) ? doc.gate.assignment?.id : null;
+    const files = this.store.listJournals(doc.issue).map(file => {
+      if (file.assignment !== live) return { ...file, doc: null };
+      try { return { ...file, doc: this.store.readJournal(doc.issue, file.name).doc }; }
+      catch (error) { return { ...file, doc: null, error: error.code || 'UNREADABLE' }; }
+    });
+    return { files };
+  }
+
+  // The child document with observed PR facts and checkpoint journals applied (pure apart from
+  // reading `observed`).
   desiredChild(outcome, existing, observed) {
-    const child = existing ? clone(existing) : newChild({ repository: this.binding.repository, outcome });
+    let child = existing ? clone(existing) : newChild({ repository: this.binding.repository, outcome });
+    let checks = null;
+    // A finished outcome with no completion time takes the issue's close time, once.
+    const closedAt = observed.issues.get(outcome.issue)?.closed_at;
+    if (!child.completed_at && closedAt && (TERMINAL_LIFECYCLES.includes(child.lifecycle) || ['COMPLETED', 'RETIRED'].includes(outcome.class))) child.completed_at = closedAt;
     const pr = observed.prs.get(outcome.issue);
     if (pr) {
-      const checks = evaluateChecks({ head: pr.head, rollupOid: pr.rollupOid, contexts: pr.contexts, complete: pr.complete, configured: this.binding.required_checks });
+      checks = evaluateChecks({ head: pr.head, rollupOid: pr.rollupOid, contexts: pr.contexts, complete: pr.complete, configured: this.binding.required_checks });
       child.pr = { number: pr.number, state: pr.state, head: pr.head,
         checks: { state: checks.state, required_total: checks.required_total, required_passed: checks.required_passed, at_head: checks.at_head } };
-      return { doc: child, checks };
     }
-    return { doc: child, checks: null };
+    const journals = observed.journals?.get(outcome.issue) || null;
+    if (!journals) return { doc: child, checks, journals, findings: [], holds: [] };
+    const folded = foldJournals(child, journals);
+    return { doc: folded.doc, checks, journals, findings: folded.findings, holds: folded.holds };
   }
 
-  diffChild(outcome, existing, desired, checks, observed, findings, effects) {
+  diffChild(outcome, existing, desired, checks, observed, findings, effects, journals = null) {
     const issueNumber = outcome.issue;
     const issue = observed.issues.get(issueNumber);
     if (!issue || issue.is_pull_request) {
@@ -1137,8 +1816,9 @@ class Reconciler {
     }
     if (!existing) effects.push({ kind: 'create_state', target: { issue: issueNumber }, doc: desired });
     else {
-      const fields = Object.keys(desired).filter(key => !UNHASHED.includes(key) && JSON.stringify(canonical(existing[key])) !== JSON.stringify(canonical(desired[key])));
-      if (fields.length) effects.push({ kind: 'update_state', target: { issue: issueNumber }, fields, doc: desired });
+      const fields = Object.keys({ ...existing, ...desired }).filter(key => !['revision', 'volatile', 'pending_effects'].includes(key)
+        && JSON.stringify(canonical(existing[key])) !== JSON.stringify(canonical(desired[key])));
+      if (fields.length) effects.push({ kind: 'update_state', target: { issue: issueNumber }, fields, doc: desired, ...(journals ? { journals } : {}) });
     }
     // Native parent.
     if (outcome.parent) {
@@ -1184,8 +1864,9 @@ class Reconciler {
     }
   }
 
-  diffOrder(parent, observed, effects, findings, plannedParents) {
-    const outcomes = observed.outcomes;
+  // Native siblings follow the Programme Graph order.
+  diffOrder(parent, observed, effects, findings, plannedParents, docs) {
+    const graph = graphOrder(parent, docs, observed.issues);
     const catalogued = new Set(parent.outcomes.map(outcome => outcome.issue));
     for (const [parentNumber, list] of observed.subIssues) {
       for (const sub of list) {
@@ -1193,7 +1874,7 @@ class Reconciler {
           findings.push({ code: 'NATIVE_CHILD_UNKNOWN', issue: sub.number, detail: `natively under #${parentNumber} but not in the outcome catalogue; not changed` });
         }
       }
-      const desired = outcomes.filter(outcome => outcome.parent === parentNumber).sort(compareOutcomes).map(outcome => outcome.issue);
+      const desired = graph.filter(outcome => outcome.parent === parentNumber).map(outcome => outcome.issue);
       // Simulate the planned attaches (appended at the end) and moves away.
       const current = list.map(sub => sub.number).filter(number => plannedParents.get(number) === undefined || plannedParents.get(number) === parentNumber);
       for (const [number, target] of plannedParents) if (target === parentNumber && !current.includes(number)) current.push(number);
@@ -1203,30 +1884,131 @@ class Reconciler {
     }
   }
 
-  renderAll(parent, children) {
+  // The links block for a task page (null for the parent page).
+  navFor(parent, number, docs) {
+    if (number === parent.parent_issue) return null;
     const outcomes = new Map(parent.outcomes.map(outcome => [outcome.issue, outcome]));
-    const blocks = new Map([[parent.parent_issue, renderParentBlockBody(parent, children)]]);
+    const chain = [number];
+    const seen = new Set(chain);
+    for (let at = outcomes.get(number)?.parent; at && at !== parent.parent_issue && outcomes.has(at) && !seen.has(at); at = outcomes.get(at).parent) {
+      chain.unshift(at);
+      seen.add(at);
+    }
+    chain.unshift(parent.parent_issue);
+    return renderNavBlockBody(chain, docs.get(number)?.pr?.number || null);
+  }
+
+  renderAll(parent, children, issues) {
+    const outcomes = new Map(parent.outcomes.map(outcome => [outcome.issue, outcome]));
+    const blocks = new Map([[parent.parent_issue, renderParentBlockBody(parent, children, issues)]]);
     for (const child of children.values()) blocks.set(child.issue, renderChildBlockBody(child, outcomes.get(child.issue)));
     return blocks;
   }
 
+  // The decision-trace audit on the parent and each catalogued issue whose body this pass does not
+  // rewrite with a fresh comment trace. Report only.
+  auditTraces(parent, observed, only, findings, effects) {
+    const numbers = only ? [only, parent.parent_issue] : [parent.parent_issue, ...parent.outcomes.map(outcome => outcome.issue)];
+    const traced = new Set(effects.filter(effect => effect.kind === 'replace_block').map(effect => effect.target.issue));
+    for (const number of numbers) {
+      const issue = observed.issues.get(number);
+      if (!issue || traced.has(number)) continue;
+      const result = auditDecisionTraces({ body: issue.body, comments: observed.comments.get(number) || [], recordPrefix: this.binding.record_prefix, threshold: this.threshold });
+      if (result.unlinked.length) findings.push({ code: 'TRACE_UNLINKED', issue: number, detail: `${result.unlinked.length} comment(s) are not linked from the body or an index comment it links; write the lines from decision-trace-audit --repair` });
+      for (const entry of result.superseded_unmarked) findings.push({ code: 'TRACE_SUPERSEDED_UNMARKED', issue: number, detail: `${entry.record} is superseded by ${entry.superseded_by} but not marked "superseded by"` });
+    }
+  }
+
+  // The parent page follows the binding's projection; child pages put the block under the title.
+  placementFor(number) {
+    return number === this.binding.parent_issue ? (this.binding.projection || {}) : {};
+  }
+
+  // The body with the state block and the comment trace written. When it would reach the threshold,
+  // the trace's own lines move to a new index comment: `overflow` lists them, and the body is
+  // measured with a link to that comment in their place.
+  projectBody(number, source, stateBody, comments, version, navBody = null, currentBody = null) {
+    const trace = traceEntries(comments, this.binding.record_prefix);
+    const build = entries => {
+      const traceBody = renderTraceBlockBody(number, entries);
+      const withState = upsertStateBlock(source, renderBlock(stateBody, version), this.placementFor(number));
+      const withCurrent = currentBody ? upsertCurrentBlock(withState.body, renderBlock(currentBody, version, CURRENT_BLOCK_NAME), this.placementFor(number).after_section) : withState.body;
+      const withNav = navBody ? upsertNavBlock(withCurrent, renderBlock(navBody, version, NAV_BLOCK_NAME)) : withCurrent;
+      return { body: upsertTraceBlock(withNav, renderBlock(traceBody, version, TRACE_BLOCK_NAME)), traceBody, moved: withState.moved };
+    };
+    const full = build(trace);
+    if (full.body.length < this.threshold) return { ...full, overflow: [] };
+    // Tag by tag, largest list first, the whole list moves into its own new index comment until the
+    // body fits; the body keeps a link in that tag's list. Tags are never combined.
+    const size = group => [...indexLines(group.entries), ...markLines(group.marks)].join('\n').length;
+    const movable = traceGroups(trace).filter(group => group.entries.length || group.marks.length).sort((a, b) => size(b) - size(a));
+    let current = trace;
+    let projected = full;
+    const overflow = [];
+    for (const group of movable) {
+      current = {
+        indexes: [...current.indexes, { id: '9'.repeat(19), tag: group.tag, date: '0000-00-00' }],
+        entries: current.entries.filter(entry => (entry.tag || null) !== group.tag),
+        marks: current.marks.filter(mark => (mark.tag || null) !== group.tag),
+      };
+      overflow.push({ tag: group.tag, lines: [...indexLines(group.entries), ...markLines(group.marks)] });
+      projected = build(current);
+      if (projected.body.length < this.threshold) break;
+    }
+    return { ...projected, overflow };
+  }
+
+  // An open or draft PR for a task starts with the same links as the task page, plus the PR itself.
+  diffPrNav(number, doc, navBody, observed, effects) {
+    const pr = doc?.pr;
+    if (!navBody || !pr?.number || !['OPEN', 'DRAFT'].includes(pr.state)) return;
+    const page = observed.prPages?.get(pr.number);
+    if (!page) return;
+    const found = findStateBlock(page.body, NAV_BLOCK_NAME);
+    if (found.error) return;
+    if (found.block && normalizeBlockBody(found.block.body) === normalizeBlockBody(navBody) && !found.block.tampered) return;
+    effects.push({ kind: 'replace_pr_nav', target: { issue: number, pr: pr.number, digest: blockDigest(navBody) }, body: navBody });
+  }
+
   diffBlocks(parent, children, observed, only, effects, findings, holds) {
-    const blocks = this.renderAll(parent, children);
+    const blocks = this.renderAll(parent, children, observed.issues);
+    const version = this.toolkitVersion || '0.0.0';
     const targets = only ? [only, parent.parent_issue] : [...blocks.keys()];
     for (const number of targets) {
       const issue = observed.issues.get(number);
       const body = blocks.get(number);
       if (!issue || body === undefined) continue;
       const { block, error } = findStateBlock(issue.body);
-      if (error) { findings.push({ code: 'MANAGED_BLOCK_BROKEN', issue: number, detail: error }); continue; }
-      if (block && normalizeBlockBody(block.body) === normalizeBlockBody(body) && !block.tampered) continue;
-      findings.push({ code: 'PROJECTION_STALE', issue: number, detail: block ? (block.tampered ? 'the block was edited by hand' : 'the block differs from the state documents') : 'no state block yet' });
-      const length = upsertStateBlock(issue.body, renderBlock(body, this.toolkitVersion || '0.0.0')).body.length;
-      if (length >= this.threshold) {
-        holds.push({ code: 'BODY_TOO_LARGE', target: `#${number}`, detail: `Controller: the body would reach ${length} characters (threshold ${this.threshold}); shorten it first`, scope: 'body' });
+      const traced = findStateBlock(issue.body, TRACE_BLOCK_NAME);
+      const nav = findStateBlock(issue.body, NAV_BLOCK_NAME);
+      if (error || traced.error || nav.error) { findings.push({ code: 'MANAGED_BLOCK_BROKEN', issue: number, detail: error || traced.error || nav.error }); continue; }
+      const navBody = this.navFor(parent, number, children);
+      const currentBody = number === parent.parent_issue ? renderCurrentBlockBody(parent, children, observed.issues) : null;
+      const summary = currentBody ? findStateBlock(issue.body, CURRENT_BLOCK_NAME) : { block: null, error: null };
+      if (summary.error) { findings.push({ code: 'MANAGED_BLOCK_BROKEN', issue: number, detail: summary.error }); continue; }
+      const currentCurrent = !currentBody || (Boolean(summary.block) && normalizeBlockBody(summary.block.body) === normalizeBlockBody(currentBody) && !summary.block.tampered);
+      const navCurrent = !navBody || (Boolean(nav.block) && normalizeBlockBody(nav.block.body) === normalizeBlockBody(navBody) && !nav.block.tampered);
+      this.diffPrNav(number, children.get(number), navBody, observed, effects, version);
+      const comments = observed.comments.get(number) || [];
+      const placement = this.placementFor(number);
+      const current = block && normalizeBlockBody(block.body) === normalizeBlockBody(body) && !block.tampered;
+      const move = Boolean(block) && upsertStateBlock(issue.body, renderBlock(block.body, block.version), placement).moved;
+      const traceBody = renderTraceBlockBody(number, traceEntries(comments, this.binding.record_prefix));
+      const traceCurrent = Boolean(traced.block) && normalizeBlockBody(traced.block.body) === normalizeBlockBody(traceBody) && !traced.block.tampered;
+      // A current body at or over the threshold still moves its largest tag lists out.
+      if (current && !move && traceCurrent && navCurrent && currentCurrent && issue.body.length < this.threshold) continue;
+      if (!current || move) findings.push({ code: 'PROJECTION_STALE', issue: number, detail: !block ? 'no state block yet' : block.tampered ? 'the block was edited by hand' : current ? 'the block is not in its place on the page' : 'the block differs from the state documents' });
+      if (!traceCurrent) findings.push({ code: 'TRACE_STALE', issue: number, detail: !traced.block ? 'no comment trace yet' : traced.block.tampered ? 'the comment trace was edited by hand' : 'the comment trace differs from the comments' });
+      if (!navCurrent) findings.push({ code: 'PROJECTION_STALE', issue: number, detail: nav.block ? 'the parent and task links differ from the state' : 'no parent and task links yet' });
+      if (!currentCurrent) findings.push({ code: 'PROJECTION_STALE', issue: number, detail: summary.block ? 'the CURRENT summary differs from the state documents' : 'no CURRENT summary yet' });
+      const projected = this.projectBody(number, issue.body, body, comments, version, navBody, currentBody);
+      if (projected.body.length >= this.threshold) {
+        holds.push({ code: 'BODY_TOO_LARGE', target: `#${number}`, detail: `Controller: the body would reach ${projected.body.length} characters (threshold ${this.threshold}) even with its comment trace in an index comment; shorten it first`, scope: 'body' });
         continue;
       }
-      effects.push({ kind: 'replace_block', target: { issue: number, digest: blockDigest(body) }, insert: !block, body, updated_at: issue.updated_at });
+      for (const part of projected.overflow) effects.push({ kind: 'post_index_comment', target: { issue: number, tag: part.tag, after: String(comments.at(-1)?.id || '') }, lines: part.lines });
+      effects.push({ kind: 'replace_block', target: { issue: number, digest: blockDigest(body), trace: blockDigest(projected.traceBody), ...(navBody ? { nav: blockDigest(navBody) } : {}), ...(currentBody ? { current: blockDigest(currentBody) } : {}) },
+        insert: !block, move: current && move, state: !current || move, body, updated_at: issue.updated_at });
     }
   }
 
@@ -1247,7 +2029,18 @@ class Reconciler {
         } else if (effect.kind === 'replace_block') {
           const issue = observed.issues.has(target.issue) ? observed.issues.get(target.issue) : this.reader.issue(target.issue);
           const found = issue ? findStateBlock(issue.body).block : undefined;
-          done = issue ? Boolean(found && blockDigest(found.body) === target.digest && !found.tampered) : null;
+          const trace = issue && target.trace ? findStateBlock(issue.body, TRACE_BLOCK_NAME).block : undefined;
+          const nav = issue && target.nav ? findStateBlock(issue.body, NAV_BLOCK_NAME).block : undefined;
+          done = issue ? Boolean(found && blockDigest(found.body) === target.digest && !found.tampered && (!target.trace || (trace && blockDigest(trace.body) === target.trace))
+            && (!target.nav || (nav && blockDigest(nav.body) === target.nav))
+            && (!target.current || Boolean(findStateBlock(issue.body, CURRENT_BLOCK_NAME).block && blockDigest(findStateBlock(issue.body, CURRENT_BLOCK_NAME).block.body) === target.current))) : null;
+        } else if (effect.kind === 'replace_pr_nav') {
+          const page = this.reader.issue(target.pr);
+          const nav = page ? findStateBlock(page.body, NAV_BLOCK_NAME).block : undefined;
+          done = page ? Boolean(nav && blockDigest(nav.body) === target.digest) : null;
+        } else if (effect.kind === 'post_index_comment') {
+          const comments = observed.comments.get(target.issue) || this.reader.comments(target.issue);
+          done = comments.some(comment => String(comment.body || '').includes(`programme-trace intent=${effect.intent_id} `));
         }
         if (done === null) holds.push({ code: 'EFFECT_UNKNOWN', target: `#${target.issue}`, detail: `${effect.kind} from an earlier pass could not be checked; held`, scope: holdScope(effect.kind) });
         resolutions.push({ kind, number, intent_id: effect.intent_id, outcome: done === null ? 'UNKNOWN' : done ? 'DONE' : 'NOT_DONE' });
@@ -1260,7 +2053,7 @@ class Reconciler {
     const holds = [];
     const parentRead = this.loadParent(parentOverride);
     if (!parentRead.doc) {
-      return { parent: null, findings: [], effects: [], holds: [{ code: 'PARENT_STATE_MISSING', target: `#${this.binding.parent_issue}`, detail: `No parent state document for #${this.binding.parent_issue} yet. The appointed controller creates and holds it with init-parent --apply; other sessions report this to the controller.` }], resolutions: [] };
+      return { parent: null, findings: [], effects: [], holds: [{ code: 'PARENT_STATE_MISSING', target: `#${this.binding.parent_issue}`, detail: `No parent state document for #${this.binding.parent_issue} yet. The appointed controller creates and holds it with init-parent --apply --controller; other sessions report this to the controller.` }], resolutions: [] };
     }
     const parent = parentRead.doc;
     if (parent.repository.toLowerCase() !== this.binding.repository.toLowerCase() || parent.parent_issue !== this.binding.parent_issue) {
@@ -1279,12 +2072,14 @@ class Reconciler {
     for (const outcome of parent.outcomes) {
       const existing = children.get(outcome.issue)?.doc || null;
       if (only && outcome.issue !== only) { if (existing) desiredDocs.set(outcome.issue, existing); continue; }
-      const { doc: desired, checks } = this.desiredChild(outcome, existing, observed);
-      this.diffChild(outcome, existing, desired, checks, observed, findings, effects);
+      const { doc: desired, checks, journals, findings: journalFindings, holds: journalHolds } = this.desiredChild(outcome, existing, observed);
+      findings.push(...journalFindings);
+      holds.push(...journalHolds);
+      this.diffChild(outcome, existing, desired, checks, observed, findings, effects, journals);
       desiredDocs.set(outcome.issue, desired);
     }
     const plannedParents = new Map(effects.filter(effect => effect.kind === 'attach' || effect.kind === 'reparent').map(effect => [effect.target.issue, effect.target.parent]));
-    if (!only) this.diffOrder(parent, observed, effects, findings, plannedParents);
+    if (!only) this.diffOrder(parent, observed, effects, findings, plannedParents, desiredDocs);
     // Blocks are rendered from the revisions the documents will have after this pass.
     const projected = new Map([...desiredDocs].map(([number, doc]) => {
       const existing = children.get(number)?.doc;
@@ -1293,6 +2088,8 @@ class Reconciler {
       return [number, copy];
     }));
     this.diffBlocks(parent, projected, observed, only, effects, findings, holds);
+    this.auditTraces(parent, observed, only, findings, effects);
+    this.diffUntracked(parent, desiredDocs, observed, only, findings);
     for (const effect of effects) effect.text = describeEffect(effect);
     return { parent, parentSha: parentRead.sha, override: Boolean(parentRead.override), children, observed, findings, effects, holds, resolutions };
   }
@@ -1384,14 +2181,19 @@ class Reconciler {
     for (const effect of plan.effects.filter(entry => entry.kind === 'create_state' || entry.kind === 'update_state')) {
       try {
         const desired = effect.doc;
-        // A first claim may have created the child after planning. Only PR observations belong
-        // to this pass; keep the gate, lifecycle and fence from the document read at apply time.
-        const fields = effect.kind === 'create_state' ? ['pr'] : effect.fields;
+        // The controller may have written the child after planning. Only PR observations, a
+        // completion time taken from the issue and the journals read in this pass belong to it: the
+        // gate is re-folded from those journals on the document read at apply time, so an
+        // assignment issued since planning is never overwritten.
+        const fields = effect.kind === 'create_state' ? ['pr', ...(desired.completed_at ? ['completed_at'] : [])] : effect.fields.filter(key => !effect.journals || !FOLD_FIELDS.includes(key));
         const result = mutateDoc('child', effect.target.issue, {
           create: () => newChild({ repository: this.binding.repository, outcome: outcomes.get(effect.target.issue) }),
           change: doc => {
-            for (const key of fields) doc[key] = clone(desired[key]);
-            return doc;
+            for (const key of fields) {
+              if (desired[key] === undefined) delete doc[key];
+              else doc[key] = clone(desired[key]);
+            }
+            return effect.journals ? foldJournals(doc, effect.journals).doc : doc;
           },
         });
         record(effect, result.outcome === 'NOOP' ? 'NOOP' : 'DONE');
@@ -1418,8 +2220,9 @@ class Reconciler {
 
     // 3. Order, recomputed from a fresh list for each parent just before moving.
     const reorderParents = [...new Set(plan.effects.filter(entry => entry.kind === 'reorder').map(entry => entry.target.parent))];
+    const graph = graphOrder(plan.parent, new Map([...plan.children].filter(([, entry]) => entry.doc).map(([number, entry]) => [number, entry.doc])), plan.observed.issues);
     for (const parentIssue of reorderParents) {
-      const desired = plan.parent.outcomes.filter(outcome => outcome.parent === parentIssue).sort(compareOutcomes).map(outcome => outcome.issue);
+      const desired = graph.filter(outcome => outcome.parent === parentIssue).map(outcome => outcome.issue);
       const fresh = this.reader.subIssues(parentIssue);
       const ids = new Map(fresh.map(sub => [sub.number, sub.id]));
       for (const move of orderMoves(fresh.map(sub => sub.number), desired)) {
@@ -1445,25 +2248,42 @@ class Reconciler {
     if (blockEffects.length) {
       guard();
       const docs = new Map(plan.parent.outcomes.map(outcome => [outcome.issue, this.store.read('child', outcome.issue).doc]).filter(([, doc]) => doc));
-      const blocks = this.renderAll(parentDoc, docs);
+      const blocks = this.renderAll(parentDoc, docs, plan.observed.issues);
       const version = this.toolkitVersion;
       const ordered = [...blockEffects.filter(effect => effect.target.issue !== parentNumber), ...blockEffects.filter(effect => effect.target.issue === parentNumber)];
       for (const planned of ordered) {
         const number = planned.target.issue;
         const body = blocks.get(number);
-        const effect = { ...planned, target: { issue: number, digest: blockDigest(body) } };
+        let effect = { ...planned, target: { ...planned.target, digest: blockDigest(body) } };
         if (isHeld(`#${number}`, 'body')) { record(effect, 'SKIPPED', 'held earlier in this pass'); continue; }
         if (!version) { record(effect, 'HELD', 'the Toolkit version could not be read'); hold(effect, 'TOOLKIT_VERSION_UNKNOWN', 'the Toolkit version could not be read, so no block was written'); continue; }
         const owner = docOwner(number);
         if (owner === 'child' && !docs.has(number)) { record(effect, 'SKIPPED', 'no state document yet'); continue; }
+        // An overflowing tag's list first moves into its own new index comment, checked by reading it back.
+        for (const post of plan.effects.filter(entry => entry.kind === 'post_index_comment' && entry.target.issue === number)) {
+          if (isHeld(`#${number}`, 'body')) break;
+          withIntent(post, owner, number, () => {
+            const intent = intentId(post.kind, post.target);
+            const bodies = indexCommentBodies(number, post.lines, intent, post.target.tag);
+            guard();
+            for (const text of bodies) this.mutator.postComment(number, text);
+            const kept = this.reader.comments(number).filter(comment => String(comment.body || '').includes(`programme-trace intent=${intent} `)).length;
+            if (kept === bodies.length) return { outcome: 'DONE' };
+            return kept ? { outcome: 'UNKNOWN', detail: `${kept} of ${bodies.length} index comment part(s) read back` } : { outcome: 'NOT_DONE', detail: 'the index comment did not read back' };
+          });
+        }
+        if (isHeld(`#${number}`, 'body')) { record(effect, 'SKIPPED', 'the comment trace could not move to an index comment'); continue; }
         // The new body is built from a fresh read, so earlier edits by people are kept. Refuse before
         // writing an intent when the block is broken or the body would grow past the threshold.
         const before = this.reader.issue(number);
         if (!before) { record(effect, 'HELD', 'the issue could not be read'); hold(effect, 'ISSUE_MISSING', 'the issue could not be read'); continue; }
         let next;
-        try { next = upsertStateBlock(before.body, renderBlock(body, version)); }
+        const navBody = this.navFor(parentDoc, number, docs);
+        const currentBody = number === parentNumber ? renderCurrentBlockBody(parentDoc, docs, plan.observed.issues) : null;
+        try { next = this.projectBody(number, before.body, body, this.reader.comments(number), version, navBody, currentBody); }
         catch (error) { record(effect, 'HELD', error.message); hold(effect, error.code, error.message); continue; }
-        if (next.body.length >= this.threshold) {
+        effect = { ...effect, target: { ...effect.target, trace: blockDigest(next.traceBody), ...(navBody ? { nav: blockDigest(navBody) } : {}), ...(currentBody ? { current: blockDigest(currentBody) } : {}) } };
+        if (next.overflow.length || next.body.length >= this.threshold) {
           record(effect, 'HELD', `the body would be ${next.body.length} characters`);
           hold(effect, 'BODY_TOO_LARGE', `Controller: the body would reach ${next.body.length} characters (threshold ${this.threshold}); shorten it first`);
           continue;
@@ -1482,6 +2302,35 @@ class Reconciler {
           return { outcome: 'UNKNOWN', detail: 'the body did not read back exactly as written' };
         });
       }
+    }
+
+    // 5. The parent and task links at the top of each open or draft PR, built from a fresh read.
+    for (const effect of plan.effects.filter(entry => entry.kind === 'replace_pr_nav')) {
+      const number = effect.target.issue;
+      const pr = effect.target.pr;
+      if (isHeld(`#${number}`, 'pr')) { record(effect, 'SKIPPED', 'held earlier in this pass'); continue; }
+      if (!this.toolkitVersion) { record(effect, 'HELD', 'the Toolkit version could not be read'); hold(effect, 'TOOLKIT_VERSION_UNKNOWN', 'the Toolkit version could not be read, so no links were written'); continue; }
+      if (!plan.children.get(number)?.doc && !results.some(entry => entry.kind === 'create_state' && entry.target.issue === number && entry.outcome === 'DONE')) {
+        record(effect, 'SKIPPED', `#${number} has no state document to hold the intent`);
+        continue;
+      }
+      const before = this.reader.issue(pr);
+      if (!before) { record(effect, 'HELD', 'the PR could not be read'); hold(effect, 'ISSUE_MISSING', `PR #${pr} could not be read`); continue; }
+      let next;
+      try { next = upsertNavBlock(before.body, renderBlock(effect.body, this.toolkitVersion, NAV_BLOCK_NAME)); }
+      catch (error) { record(effect, 'HELD', error.message); hold(effect, error.code, error.message); continue; }
+      withIntent(effect, 'child', number, () => {
+        const latest = this.reader.issue(pr);
+        if (!latest || latest.body !== before.body || latest.updated_at !== before.updated_at) {
+          return { outcome: 'NOT_DONE', code: 'BODY_MOVED', detail: 'the PR changed between the read and the write; the next pass re-plans it' };
+        }
+        guard();
+        const response = this.mutator.writeBody(pr, next);
+        const after = this.reader.issue(pr);
+        if (after && after.body === next) return { outcome: 'DONE' };
+        if (!okStatus(response.status) && after && after.body === before.body) return { outcome: 'NOT_DONE', detail: `GitHub answered ${response.status}` };
+        return { outcome: 'UNKNOWN', detail: 'the PR description did not read back exactly as written' };
+      });
     }
     return { results, holds };
   }
@@ -1516,8 +2365,8 @@ class Reconciler {
           : `${report.effects.length} planned effect(s), ${report.holds.length} hold(s)`;
     const attention = report.findings.filter(finding => ATTENTION.has(finding.code));
     report.next_action = report.holds.length ? `Controller: resolve ${report.holds[0].code} on ${report.holds[0].target}: ${report.holds[0].detail}`
-      : !apply && report.effects.length ? 'Controller: run reconcile --apply for this plan; other sessions report it'
-        : !apply && plan.resolutions.some(entry => entry.outcome !== 'UNKNOWN') ? `Controller: run reconcile --apply to clear ${plan.resolutions.filter(entry => entry.outcome !== 'UNKNOWN').length} settled intent(s)`
+      : !apply && report.effects.length ? 'Controller: run reconcile --apply --controller for this plan; other sessions report it'
+        : !apply && plan.resolutions.some(entry => entry.outcome !== 'UNKNOWN') ? `Controller: run reconcile --apply --controller to clear ${plan.resolutions.filter(entry => entry.outcome !== 'UNKNOWN').length} settled intent(s)`
         : attention.length ? `Controller: decide on ${attention.length} finding(s) the reconciler does not change, starting with ${attention[0].code} on #${attention[0].issue}`
           : 'None: the state documents and GitHub agree';
     return report;
@@ -1527,9 +2376,16 @@ class Reconciler {
 // ---------------------------------------------------------------------------------------------
 // Repository identity
 
+// github.com, its subdomains (ssh.github.com), or an SSH alias with no dot that mentions github
+// (github-work). Any other dotted host, a GitHub Enterprise server included, is not github.com.
+function isGitHubHost(host) {
+  const name = String(host || '').toLowerCase();
+  return name === 'github.com' || name.endsWith('.github.com') || (!name.includes('.') && name.includes('github'));
+}
+
 function originSlug(url) {
-  const match = /github\.com[:/]([^/]+)\/([^/]+?)(?:\.git)?\/?$/i.exec(String(url || '').trim());
-  return match ? `${match[1]}/${match[2]}` : null;
+  const match = /^(?:[a-z][a-z0-9+.-]*:\/\/(?:[^@/]+@)?|[^@/\s]+@)?([^/:@\s]+)(?::\d+)?[:/]([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/i.exec(String(url || '').trim());
+  return match && isGitHubHost(match[1]) ? `${match[2]}/${match[3]}` : null;
 }
 
 // The repository is the `origin` remote, confirmed by GitHub's own name for it. The binding file
@@ -1547,10 +2403,11 @@ function bindRepository({ transport, originUrl, binding }) {
 }
 
 module.exports = Object.freeze({
-  SCHEMA, BINDING_FILE, CLASSES, LIFECYCLES, PATCHABLE_CHILD_FIELDS, PATCHABLE_PARENT_FIELDS, BLOCK_SOURCE, BLOCK_NAME,
+  SCHEMA, BINDING_FILE, CLASSES, LIFECYCLES, PATCHABLE_CHILD_FIELDS, PATCHABLE_PARENT_FIELDS, BLOCK_SOURCE, BLOCK_NAME, TRACE_BLOCK_NAME,
   ProgrammeError, GitHubTransport, StateStore, STORE_BACKENDS, ProgrammeGraphReader, GitHubMutator, Reconciler,
   canonical, canonicalText, contentDigest, sameState, validateParent, validateChild, validateBinding, assertValid, loadBinding,
-  newParent, newChild, isHolder, parentRefusal, authoriseWrite, claimDocument, submitReturn, consumeReturn, applyPatch,
-  evaluateChecks, renderParentBlockBody, renderChildBlockBody, renderBlock, blockDigest, findStateBlock, upsertStateBlock,
-  orderMoves, intentId, describeEffect, resolveExecutable, originSlug, bindRepository,
+  newParent, newChild, isHolder, isLaneHolder, parentRefusal, authoriseWrite, claimDocument, claimLane, assignGate, reopenGate, interruptGate,
+  recordReturn, consumeReturn, foldJournals, validateJournal, currentGateAccepted, completionAccepted, applyPatch,
+  evaluateChecks, renderParentBlockBody, renderChildBlockBody, renderTraceBlockBody, renderCurrentBlockBody, renderBlock, blockDigest, findStateBlock, upsertStateBlock, upsertTraceBlock,
+  orderMoves, intentId, describeEffect, resolveExecutable, isGitHubHost, originSlug, bindRepository,
 });

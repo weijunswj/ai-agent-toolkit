@@ -12,6 +12,7 @@ const { samePath } = require('./toolkit-canonical-path.cjs');
 const {
   ClaudePluginRegistry, TOOLKIT_PLUGIN_NAME, TOOLKIT_MARKETPLACE_NAME, TOOLKIT_PLUGIN_ID,
 } = require('./toolkit-claude-plugin-registry.cjs');
+const { managedSettingsDirectory } = require('./toolkit-claude-helper-policy.cjs');
 
 const PLUGIN_MANIFEST_REL_PATH = '.claude-plugin/plugin.json';
 const MARKETPLACE_REL_PATH = '.claude-plugin/marketplace.json';
@@ -138,6 +139,12 @@ function verifySessionStartHook(hooksPath) {
   if (!agentCommands.some((command) => command.includes('${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-claude-agent-hook.cjs'))) {
     errors.push('PreToolUse Agent hook must call toolkit-claude-agent-hook.cjs through CLAUDE_PLUGIN_ROOT');
   }
+  // The turn-end hook is only the programme checkpoint, which never blocks a turn.
+  const stopHooks = (Array.isArray(hooks?.hooks?.Stop) ? hooks.hooks.Stop : []).flatMap((group) => group?.hooks || []);
+  if (stopHooks.length !== 1 || stopHooks[0]?.type !== 'command'
+    || stopHooks[0].command !== 'node "${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-programme-checkpoint-hook.cjs"') {
+    errors.push('Stop must have exactly one hook, the programme checkpoint through CLAUDE_PLUGIN_ROOT');
+  }
   return errors;
 }
 
@@ -208,10 +215,18 @@ function validateRepoPluginSource(repoRoot, expectedVersion = '') {
 
   return errors;
 }
+// The folder Claude Code runs the plugin from. For a local (directory) marketplace, Claude Code
+// 2.1.306 and later lists it as `readFromFolder` and runs the hooks from there, not from the cache
+// copy at `installPath`; older lists name only `installPath`.
+function pluginRunFolder(installed) {
+  const folder = installed?.readFromFolder || installed?.installPath;
+  return folder ? path.resolve(String(folder)) : '';
+}
+
 function validateInstalledEnforcement(installed, repoRoot, expectedVersion) {
   const errors = [];
-  const installPath = installed?.installPath ? path.resolve(installed.installPath) : '';
-  if (!installPath) return ['installed plugin state does not expose an exact cache path'];
+  const installPath = pluginRunFolder(installed);
+  if (!installPath) return ['installed plugin state does not expose the folder Claude Code runs it from'];
   const pairs = [
     ["repo/scripts/toolkit-stack-selection.cjs",false],
     ["repo/scripts/toolkit-capability-registry.cjs",false],
@@ -225,6 +240,8 @@ function validateInstalledEnforcement(installed, repoRoot, expectedVersion) {
     ['repo/scripts/toolkit-claude-agent-hook.cjs', false],
     ['repo/scripts/toolkit-claude-task-session.cjs', false],
     ['repo/scripts/toolkit-v3-native-helper-adapter.cjs', false],
+    ['repo/scripts/toolkit-v3-native-helper-adapter-claude.cjs', false],
+    ['repo/scripts/toolkit-v3-native-helper-adapter-codex.cjs', false],
     ['repo/scripts/toolkit-v3-helper-guard.cjs', false],
     ['repo/scripts/toolkit-gate-contract-compiler.cjs', false],
     ['repo/contracts/controller-kernel/stack-registry-v3.json', true],
@@ -240,6 +257,8 @@ function validateInstalledEnforcement(installed, repoRoot, expectedVersion) {
     ["repo/scripts/toolkit-staging-generations.cjs",false],
     ["repo/scripts/setup-codex-toolkit-plugin.cjs",false],
     ["repo/scripts/setup-toolkit-core.cjs",false],
+    ["repo/scripts/setup-core-claude.cjs",false],
+    ["repo/scripts/setup-core-codex.cjs",false],
     ["repo/scripts/setup-toolkit.cjs",false],
     ["repo/scripts/codex-delegation-backup.cjs",false],
     ["repo/scripts/codex-config-load-check.cjs",false],
@@ -265,12 +284,15 @@ function validateInstalledEnforcement(installed, repoRoot, expectedVersion) {
     ["repo/contracts/toolkit-local-bridge/codex-plugin/hooks/hooks.json",true],
     ["repo/contracts/toolkit-local-bridge/codex-plugin/plugin.json",true],
     ["repo/contracts/toolkit-local-bridge/version.json",true],
+    ["repo/scripts/toolkit-version.cjs",false],
     ["repo/scripts/toolkit-global-rules.cjs",false],
     ["repo/scripts/toolkit-managed-block.cjs",false],
     ["repo/contracts/agent-rules/global-rules.md",false],
     ["repo/contracts/agent-rules/n8n-safety-router-adapter.md",false],
     ["repo/CONTROLLER.md",false],
     ["repo/ARCHITECTURE.md",false],
+    ["repo/scripts/toolkit-programme-checkpoint-hook.cjs",false],
+    ["skills/github-program-reconciler/scripts/programme-checkpoint.cjs",false],
   ];
   for (const [relPath, json] of pairs) {
     const source = path.join(repoRoot, ...relPath.split('/'));
@@ -306,8 +328,9 @@ function validateInstalledEnforcement(installed, repoRoot, expectedVersion) {
   return errors;
 }
 
+// `cache_identity` names the folder Claude Code runs the plugin from (see pluginRunFolder).
 function installedActivationProof(installed, expectedVersion) {
-  const cachePath = path.resolve(String(installed?.installPath || ''));
+  const cachePath = pluginRunFolder(installed);
   const hookPath = path.join(cachePath, '.claude-plugin', 'hooks', 'hooks.json');
   const controllerPath = path.join(cachePath, 'repo', 'scripts', 'toolkit-agent-control.cjs');
   const processLaunchPath = path.join(cachePath, 'repo', 'scripts', 'claude-process-launch.cjs');
@@ -345,17 +368,18 @@ function verifyCurrentInstalledEnforcement(expectedProof, options = {}) {
     if (versionResult.status !== 0) throw new Error(commandOutput(versionResult) || 'Claude CLI version probe failed.');
     const matches = findPluginEntries(runClaudeJson(command, ['plugin', 'list', '--json'], { env: options.env }));
     const matching = matches.filter((entry) => {
-      if (!entry?.installPath) return false;
-      const identity = crypto.createHash('sha256').update(path.resolve(entry.installPath)).digest('hex');
+      const folder = pluginRunFolder(entry);
+      if (!folder) return false;
+      const identity = crypto.createHash('sha256').update(folder).digest('hex');
       return identity === expectedProof?.cache_identity;
     });
-    if (matching.length !== 1) throw new Error('Current Claude plugin cache identity is missing or ambiguous.');
+    if (matching.length !== 1) throw new Error('The folder Claude Code runs the Toolkit plugin from is missing or ambiguous.');
     const installed = matching[0];
     if (installed.enabled !== true) throw new Error('Current Claude plugin enabled state is not verified.');
-    if (installed.trusted !== true) throw new Error('Current Claude plugin trust state is not verified.');
-    if (installed.hooksActive !== true && installed.hookExecutionActive !== true) throw new Error('Current Claude hook-active state is not verified.');
+    const activation = hookActivation(installed, { env: options.env });
+    if (!activation.hook_active) throw new Error(activation.reasons.join(' '));
     if (installed.version !== expectedProof?.plugin_version) throw new Error('Current Claude plugin version does not match the activation proof.');
-    const cachePath = path.resolve(installed.installPath);
+    const cachePath = pluginRunFolder(installed);
     const cacheStat = fs.lstatSync(cachePath);
     if (!cacheStat.isDirectory() || cacheStat.isSymbolicLink()) throw new Error('Current Claude plugin cache is not a regular directory.');
     const hookErrors = verifySessionStartHook(path.join(cachePath, '.claude-plugin', 'hooks', 'hooks.json'));
@@ -366,6 +390,72 @@ function verifyCurrentInstalledEnforcement(expectedProof, options = {}) {
   } catch (error) {
     return { verified: false, reason: error.message };
   }
+}
+
+// Settings that stop Claude Code from running this plugin's hooks. Claude Code has no per-plugin
+// hook trust step: installing a plugin enables it, and an enabled plugin's hooks run unless
+// `disableAllHooks` is set (user or managed settings) or managed settings set
+// `allowManagedHooksOnly`. A project's own settings can also set `disableAllHooks`; that applies
+// to one repository and is not checked here. Returns one plain reason per blocker.
+function hookBlockers({ env = process.env, platform = process.platform, managedDirectory = managedSettingsDirectory(platform) } = {}) {
+  const home = env.USERPROFILE || env.HOME || os.homedir();
+  const userSettings = path.join(env.CLAUDE_CONFIG_DIR || path.join(home, '.claude'), 'settings.json');
+  const managedFiles = [path.join(managedDirectory, 'managed-settings.json')];
+  try {
+    const dropIns = path.join(managedDirectory, 'managed-settings.d');
+    for (const name of fs.readdirSync(dropIns).sort()) if (name.endsWith('.json')) managedFiles.push(path.join(dropIns, name));
+  } catch { /* no drop-in folder */ }
+  const reasons = [];
+  const read = (file) => {
+    try { return readJson(file); }
+    catch (error) {
+      if (error.code !== 'ENOENT') reasons.push(`${slash(file)} could not be read, so Toolkit cannot tell whether it turns hooks off.`);
+      return null;
+    }
+  };
+  if (read(userSettings)?.disableAllHooks === true) reasons.push(`Your Claude Code user settings set disableAllHooks, so Claude Code runs no hooks, including Toolkit's.`);
+  for (const file of managedFiles) {
+    const settings = read(file);
+    if (settings?.disableAllHooks === true) reasons.push(`The managed settings in ${slash(file)} set disableAllHooks, so Claude Code runs no hooks, including Toolkit's.`);
+    if (settings?.allowManagedHooksOnly === true) reasons.push(`The managed settings in ${slash(file)} set allowManagedHooksOnly, so Claude Code may skip Toolkit's hooks.`);
+  }
+  return reasons;
+}
+
+// Runs the agent hook from the folder Claude Code runs the plugin from, with a launch that every
+// Toolkit topology except broader-native refuses: a subagent starting another in a normal folder,
+// under an empty control root (which reads as root-only). A deny proves those exact bytes load and
+// decide; it does not prove Claude Code loaded them, which the next session start shows.
+function agentHookSelfTest(runFolder, { env = process.env } = {}) {
+  const hook = path.join(runFolder, 'repo', 'scripts', 'toolkit-claude-agent-hook.cjs');
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-hook-check-'));
+  try {
+    const childEnv = { ...env, AI_AGENT_TOOLKIT_CONTROL_ROOT: path.join(scratch, 'control') };
+    // Launcher markers would select a launch-bound path instead of the default one.
+    for (const name of Object.keys(childEnv)) if (/^TOOLKIT_(GATE|NATIVE|CLAUDE|HOOK)_/.test(name)) delete childEnv[name];
+    const input = { hook_event_name: 'PreToolUse', tool_name: 'Agent', agent_id: 'toolkit-activation-check', cwd: scratch,
+      tool_input: { subagent_type: 'general-purpose', description: 'activation check', prompt: 'activation check' } };
+    const result = spawnSync(process.execPath, [hook], { cwd: scratch, input: JSON.stringify(input), encoding: 'utf8',
+      env: childEnv, timeout: probeTimeoutMs(), windowsHide: true });
+    let decision = '';
+    try { decision = JSON.parse(result.stdout || '{}')?.hookSpecificOutput?.permissionDecision || ''; } catch { /* reported below */ }
+    return result.status === 0 && decision === 'deny'
+      ? { ok: true }
+      : { ok: false, reason: `The Toolkit agent hook in ${slash(runFolder)} did not refuse a test launch, so setup cannot show it works.` };
+  } finally {
+    fs.rmSync(scratch, { recursive: true, force: true });
+  }
+}
+
+// What setup can prove about the hooks of an enabled, current install, from the folder Claude Code
+// runs: no setting turns hooks off, and the agent hook there refuses a test launch.
+function hookActivation(installed, options = {}) {
+  const runFolder = pluginRunFolder(installed);
+  const reasons = hookBlockers(options);
+  const runnable = installed?.enabled === true && reasons.length === 0;
+  const selfTest = runnable && runFolder ? agentHookSelfTest(runFolder, options) : { ok: false };
+  if (runnable && !selfTest.ok && selfTest.reason) reasons.push(selfTest.reason);
+  return { hooks_allowed: runnable, hook_active: runnable && selfTest.ok, run_folder: runFolder, reasons };
 }
 
 function commandOutput(result) {
@@ -780,7 +870,7 @@ function nextSteps(scope) {
   return [
     '**Next Steps:**',
     '1. Start a new Claude Code session if the plugin install changed anything, and close sessions opened before it.',
-    `2. If Claude Code prompts to trust this local marketplace/plugin, approve it (source is this repo, scope ${scope}).`,
+    `2. Nothing to approve: Claude Code has no separate trust step for plugin hooks. The plugin (source: this repo, scope ${scope}) runs its hooks in new sessions.`,
     '',
     'Claude Code must not install or update Codex. Codex must not install or update Claude Code.'
   ];
@@ -948,10 +1038,14 @@ async function main(argv = process.argv.slice(2)) {
     return 1;
   }
 
-  const trusted = state.installed.trusted === true;
-  const active = state.installed.hooksActive === true || state.installed.hookExecutionActive === true;
-  const cachePath = state.installed.installPath || '';
+  // Claude Code reports no trust or hook-active state for plugins, so the proof comes from the folder
+  // it runs: `trusted` means no setting stops its hooks, `hook_active` that the agent hook there works.
+  const activation = hookActivation(state.installed);
+  const trusted = activation.hooks_allowed;
+  const active = activation.hook_active;
+  const cachePath = activation.run_folder;
   const activationProof = trusted && active ? installedActivationProof(state.installed, expectedVersion) : null;
+  warnings.push(...activation.reasons);
   const summary = {
     ok: true,
     plugin_id: pluginId(),
@@ -1000,6 +1094,8 @@ module.exports = {
   commandCandidates,
   disableUserPlugin,
   evaluateClaudeToolkitPluginState,
+  hookActivation,
+  hookBlockers,
   mutationDeadlineMs,
   mutationPollMs,
   installedActivationProof,
@@ -1013,5 +1109,6 @@ module.exports = {
   verifyCurrentInstalledEnforcement,
   verifySessionStartHook,
   writeBudgetMs,
-  pluginId
+  pluginId,
+  pluginRunFolder
 };

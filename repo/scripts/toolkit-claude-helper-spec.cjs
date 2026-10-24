@@ -9,7 +9,7 @@ const ROLES = Object.freeze({
   G0: Object.freeze({
     name: 'toolkit-g0-helper', registryRole: 'DISCOVERY_HELPER', title: 'Toolkit V3 G0 evidence helper',
     tools: ['Read', 'Glob', 'Grep'], disallowed: ['Agent', 'Task', 'Bash', 'PowerShell', 'Write', 'Edit', 'NotebookEdit'], maxTurns: 50,
-    description: 'Leaf read-only evidence helper for the Toolkit V3 G0.Subagent role. Use when a G0 or G1 lead assigns bounded, separable evidence gathering: source or dependency inventories, bounded file and configuration inspection, or factual answers with exact provenance. Never for implementation, tests, decisions or delegation.',
+    description: 'Leaf read-only evidence helper for the Toolkit V3 G0.Subagent role. Use for bounded, separable evidence gathering (source or dependency inventories, bounded file and configuration inspection, or factual answers with exact provenance) when a G0 or G1 lead assigns it in gate work, or when the main session asks outside gate work, where no admission is needed. Never for implementation, tests, decisions or delegation.',
     scope: [
       'Permitted: the assigned, bounded, read-only evidence question, within the named read scope.',
       'Forbidden: edits, commands or any effect; architecture, scope, authority, UAT or release decisions; publication, acceptance or finality; delegation of any kind; credential, permission or security changes.',
@@ -21,7 +21,7 @@ const ROLES = Object.freeze({
   G1: Object.freeze({
     name: 'toolkit-g1-helper', registryRole: 'BUILDER_HELPER', title: 'Toolkit V3 G1 bounded helper',
     tools: ['Read', 'Glob', 'Grep', 'Bash', 'Edit', 'Write'], disallowed: ['Agent', 'Task'], maxTurns: 60,
-    description: 'Leaf bounded implementation or validation helper for the Toolkit V3 G1.Subagent role. Use when the G1 lead assigns independent, separable implementation or testing within explicitly named files and commands. The lead integrates and validates; this helper never owns the Core, publishes or declares acceptance.',
+    description: 'Leaf bounded implementation or validation helper for the Toolkit V3 G1.Subagent role. Use for independent, separable implementation or testing within explicitly named files and commands when the G1 lead assigns it in gate work, or when the main session asks outside gate work, where no admission is needed. The caller integrates and validates; this helper never owns the Core, publishes or declares acceptance.',
     scope: [
       'Permitted: the assigned implementation or test work, inside the named write scope and command allowlist.',
       'Follow the Toolkit engineering default: cohesive responsibilities, encapsulated state, clear interfaces and composition. Keep configuration as data, and record a concrete reason for any functional or data-only boundary. Do not wrap functions in cosmetic classes.',
@@ -62,7 +62,7 @@ function roleInstructions(spec) {
     '## Return',
     list(spec.output),
     '',
-    'Your result is input for the lead\'s own verification, not a decision. Never state more than you observed.',
+    'Your result is input for the caller\'s own verification, not a decision. Never state more than you observed.',
     '',
   ].join('\n');
 }

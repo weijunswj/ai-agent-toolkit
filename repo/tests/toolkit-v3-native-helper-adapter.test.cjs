@@ -6,6 +6,9 @@ const compiler = require('../scripts/toolkit-gate-contract-compiler.cjs');
 const { HOST_ENTRIES } = require('../scripts/toolkit-v3-helper-guard.cjs');
 const { renderNativeHelperDefinition, createNativeHelperAdapter, commandDecision, pinnedBindingObserver, resolveClaudeNativeState, verifyCodexHelperRegistration, CodexHookMatcher } = require('../scripts/toolkit-v3-native-helper-adapter.cjs');
 const { capturedStack, TEST_PROFILES } = require('./support/captured-stack-fixture.cjs');
+// The Toolkit checkout counts as governed work here through the user's recorded yes, kept in a
+// scratch home this test process and its hooks use (the governed block and binding alone are not an answer).
+require('./toolkit-governed-fixture-support.cjs').recordEnabled(path.resolve(__dirname, '..', '..'));
 const clone = value => JSON.parse(JSON.stringify(value));
 function fixture(entry_id) {
   const entry = HOST_ENTRIES[entry_id], profile = TEST_PROFILES[entry.host];
@@ -154,10 +157,11 @@ test('Codex namespaced MultiAgentV2 spawns are guarded like spawn_agent, and onl
   for(const change of [{model:'other-model'},{reasoning_effort:'low'},{subagent_type:'unchecked-helper'}]){
     assert.equal((await commandDecision(v2({fork_turns:'none',...change}),'codex',options)).hookSpecificOutput.permissionDecision,'deny',JSON.stringify(change));
   }
-  // Without a binding the V2 name is held in the governed checkout, through the real hook process.
+  // Without a binding the V2 name meets the named-helper policy in the governed checkout, through
+  // the real hook process: an unnamed agent is refused before any agent file is read.
   const script=path.resolve(__dirname,'../scripts/toolkit-codex-helper-hook.cjs'),env={...process.env};delete env.TOOLKIT_NATIVE_HELPER_BINDING;delete env.TOOLKIT_NATIVE_HELPER_BINDING_SHA256;
   const r=spawnSync(process.execPath,[script],{input:JSON.stringify({hook_event_name:'PreToolUse',tool_name:'collaborationspawn_agent',cwd:path.resolve(__dirname,'../..'),tool_input:{task_name:'x',message:'x',fork_turns:'none'}}),encoding:'utf8',env,timeout:10000});
-  assert.equal(r.status,2);assert.match(r.stderr,/NATIVE_BINDING_REQUIRED/);
+  assert.equal(r.status,2);assert.match(r.stderr,/allows only the toolkit-g0-helper and toolkit-g1-helper agents \(requested: the default agent\)/);
 });
 test('native aliases, variants and inherited context cannot hide conflicting invocation values', async () => {
   for (const [entry, change] of [

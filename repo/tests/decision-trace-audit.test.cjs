@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const { spawnSync } = require('node:child_process');
-const { auditDecisionTraces, repairedBody, parseArgs, INDEX_COMMENT_MARKER, INDEX_BEGIN, INDEX_END } = require('../../skills/github-program-reconciler/scripts/decision-trace-audit.cjs');
+const { auditDecisionTraces, commentSummary, ledgerTopics, repairedBody, parseArgs, INDEX_COMMENT_MARKER, INDEX_BEGIN, INDEX_END } = require('../../skills/github-program-reconciler/scripts/decision-trace-audit.cjs');
 
 const person = (id, body) => ({ id, user: { login: 'owner', type: 'User' }, body });
 const PREFIX = 'INT-TK421-';
@@ -19,6 +19,7 @@ test('the CLI resolves gh to a full path and hides its window for both read-only
     module: {}, process: { argv: ['node', 'audit', '--repo', 'acme/app', '--issue', '7'], stdout: { write() {} } },
     require(name) {
       if (name === './resolve-executable.cjs') return { resolveExecutable(executable) { assert.equal(executable, 'gh'); return resolved; } };
+      if (name === './decision-tags.cjs') return require('../../skills/github-program-reconciler/scripts/decision-tags.cjs');
       if (name === 'node:child_process') return { spawnSync(executable, args, options) {
         calls.push({ executable, args, options });
         return { status: 0, stdout: args.includes('--paginate') ? '[[]]' : '{"body":""}' };
@@ -70,16 +71,55 @@ test('every non-bot comment must be reachable from the body, directly or through
   const body = 'Index: [one](#issuecomment-1) [older](#issuecomment-2)';
   const result = auditDecisionTraces({ body, comments, recordPrefix: PREFIX });
   assert.equal(result.ok, false);
-  assert.deepEqual(result.unlinked, [{ id: '4', record: 'INT-TK421-004', index: false }]);
+  assert.deepEqual(result.unlinked, [{ id: '4', record: 'INT-TK421-004', index: false, tag: null, date: null, summary: 'INT-TK421-004 SUPERSEDES=INT-TK421-001', supersedes: ['INT-TK421-001'], superseded_by: null }]);
+  assert.deepEqual(result.superseded_unmarked, [{ id: '1', record: 'INT-TK421-001', superseded_by: 'INT-TK421-004' }], 'the replaced record is not marked yet');
   assert.deepEqual(result.index_comments, ['2']);
   assert.equal(result.comments, 4, 'bots are ignored');
   assert.deepEqual(result.unlabelled, []);
 
-  const fixed = repairedBody(body, result.unlinked);
+  const fixed = repairedBody(body, result.unlinked, result.superseded_unmarked);
   assert.ok(fixed.startsWith(body), 'existing text is kept');
-  assert.ok(fixed.includes(`${INDEX_BEGIN}\n- [INT-TK421-004](#issuecomment-4)\n${INDEX_END}`));
+  assert.ok(fixed.includes([
+    INDEX_BEGIN,
+    '- undated · INT-TK421-004 · [INT-TK421-004 SUPERSEDES=INT-TK421-001](#issuecomment-4) · SUPERSEDES=INT-TK421-001',
+    '- superseded record · INT-TK421-001 · [INT-TK421-001](#issuecomment-1) · superseded by INT-TK421-004',
+    INDEX_END,
+  ].join('\n')));
   assert.equal(auditDecisionTraces({ body: fixed, comments, recordPrefix: PREFIX }).ok, true);
   assert.equal(repairedBody(fixed, [{ id: '9', record: null, index: false }]).split(INDEX_BEGIN).length, 2, 'lines join the existing index');
+
+  // A record marked in its own comment needs no marking line.
+  const marked = comments.map(comment => (comment.id === 1 ? person(1, 'INT-TK421-001 decision (superseded by INT-TK421-004)') : comment));
+  assert.deepEqual(auditDecisionTraces({ body, comments: marked, recordPrefix: PREFIX }).superseded_unmarked, []);
+});
+
+test('index lines carry the date, record, summary, fragment link and supersession', () => {
+  const comments = [
+    { ...person(10, '## INT-TK421-010 - First decision\nDetails.'), created_at: '2026-10-01T00:00:00Z' },
+    { ...person(11, 'INT-TK421-011 replaces it\nSUPERSEDES=INT-TK421-010'), created_at: '2026-10-02T00:00:00Z' },
+    { ...person(12, 'Plain note with [a link](https://example.com) | and a pipe'), created_at: '2026-10-03T00:00:00Z' },
+  ];
+  const result = auditDecisionTraces({ body: '', comments, recordPrefix: PREFIX });
+  const repaired = repairedBody('', result.unlinked, result.superseded_unmarked);
+  assert.deepEqual(repaired.split('\n').filter(line => line.startsWith('- ')), [
+    '- 2026-10-01 · INT-TK421-010 · [INT-TK421-010 - First decision](#issuecomment-10) · superseded by INT-TK421-011',
+    '- 2026-10-02 · INT-TK421-011 · [INT-TK421-011 replaces it](#issuecomment-11) · SUPERSEDES=INT-TK421-010',
+    '- 2026-10-03 · comment · [Plain note with a link and a pipe](#issuecomment-12)',
+  ]);
+  assert.equal(auditDecisionTraces({ body: repaired, comments, recordPrefix: PREFIX }).ok, true);
+
+  // Topics from a decision ledger go after the link; a missing topic leaves the line as it was.
+  const topics = ledgerTopics({ schema: 'toolkit.decision-ledger.v1', issues: [{ issue: 7, entries: [
+    { comment_id: 10, topic: 'page-format' }, { comment_id: 12, topic: 'uat | [x]' }, { comment_id: 11, topic: '' },
+  ] }] });
+  assert.deepEqual(repairedBody('', result.unlinked, result.superseded_unmarked, topics).split('\n').filter(line => line.startsWith('- ')), [
+    '- 2026-10-01 · INT-TK421-010 · [INT-TK421-010 - First decision](#issuecomment-10) · page-format · superseded by INT-TK421-011',
+    '- 2026-10-02 · INT-TK421-011 · [INT-TK421-011 replaces it](#issuecomment-11) · SUPERSEDES=INT-TK421-010',
+    '- 2026-10-03 · comment · [Plain note with a link and a pipe](#issuecomment-12) · uat x',
+  ]);
+  assert.throws(() => ledgerTopics({ schema: 'other', issues: [] }), /toolkit\.decision-ledger\.v1/);
+  assert.throws(() => parseArgs(['--repo', 'o/r', '--issue', '7', '--ledger', 'l.json']), /only with --repair/);
+  assert.equal(parseArgs(['--repo', 'o/r', '--issue', '7', '--repair', '--out', 'b.md', '--ledger', 'l.json']).ledger, 'l.json');
 });
 
 test('unknown SUPERSEDES targets and a body at the threshold fail', () => {
@@ -115,4 +155,12 @@ test('arguments are validated before any GitHub read', () => {
   }
   const mixed = auditDecisionTraces({ body: '[x](#issuecomment-1)', comments: [person(1, 'see INT-TK421-x then INT-TK421-007')], recordPrefix: PREFIX });
   assert.deepEqual(mixed.unlabelled, []);
+});
+
+test('an index summary never carries an HTML comment or tag opener', () => {
+  assert.equal(commentSummary('<!-- record -->\nDecision: keep the table'), 'Decision: keep the table');
+  assert.equal(commentSummary('<!-- spans\ntwo lines -->\nReal line'), 'Real line');
+  assert.equal(commentSummary('<!-- never closed\nhides everything'), 'comment');
+  assert.equal(commentSummary('<!<!---->-- trick'), '!-- trick');
+  for (const text of ['a <!-- b', '<b>bold</b> text', 'x --!> y <!--']) assert.doesNotMatch(commentSummary(text), /[<>]/, text);
 });

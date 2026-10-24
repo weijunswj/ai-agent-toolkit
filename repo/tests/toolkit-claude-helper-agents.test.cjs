@@ -271,3 +271,23 @@ test('backup pruning removes only old timestamp-named backup folders', t => {
   assert.equal(refreshed.status, 'current');
   assert.deepEqual(fs.readdirSync(f.backupRoot).sort(), [...kept, '2026-10-01T00-00-00-000Z'].sort());
 });
+
+test('a backup prune that fails is a warning on a settled refresh, not a failed check', t => {
+  const f = userFixture(t);
+  install(f);
+  fs.writeFileSync(f.backupRoot, 'a file where the backup folder should be');
+  const refreshed = f.defs().refresh();
+  assert.equal(refreshed.status, 'current');
+  assert.match(refreshed.prune_warning, /Old helper backups in .* could not be removed \(ENOTDIR\); the helpers themselves are fine\./);
+});
+
+test('helper files and the global rules agree on who may launch a helper', () => {
+  const { ROLES } = require('../scripts/toolkit-claude-helper-spec.cjs');
+  const rules = read(path.join(__dirname, '..', 'contracts', 'agent-rules', 'global-rules.md'));
+  assert.match(rules, /In gate work only a G0 or G1 lead launches helpers/);
+  assert.match(rules, /Outside gate work the main session may start subagents, including Toolkit helpers on their installed route/);
+  for (const spec of Object.values(ROLES)) {
+    assert.match(spec.description, /in gate work, or when the main session asks outside gate work, where no admission is needed/, spec.name);
+    assert.doesNotMatch(spec.description, /Use when (a|the) G[01]/, spec.name);
+  }
+});

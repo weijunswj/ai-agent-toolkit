@@ -232,7 +232,7 @@ test('a refused Codex marketplace rebind tells the user why and the one command 
   assert.equal(nativePluginRebindFailure('Claude Code', 'mutation', { status: 1, stdout }, helperArgs), null);
 });
 
-test('a refused Codex downgrade says which versions conflict and that nothing changed', () => {
+test('a refused Codex downgrade says which versions conflict and that the plugin was not changed', () => {
   const { nativePluginRebindFailure } = require('../scripts/setup-toolkit-core.cjs');
   const helperArgs = ['repo/scripts/setup-codex-toolkit-plugin.cjs', '--write', '--json', '--repo-root', os.tmpdir()];
   const stdout = `${JSON.stringify({ ok: false, reason_code: 'downgrade-refused', installed_version: '9.9.1', source_version: '9.9.0' })}\n`;
@@ -249,9 +249,20 @@ test('only Codex refusing the file counts as a rejection; other start-up failure
     'config/read failed: invalid configuration', 'codex app-server exited 1: TOML parse error at line 3']) {
     assert.equal(probeErrorVerdict(new Error(message)).status, 'rejected', message);
   }
-  for (const message of ['app-server initialize failed: unsupported client', 'codex app-server exited 3: something unrelated', 'spawn UNKNOWN']) {
+  for (const message of ['app-server initialize failed: unsupported client', 'app-server initialize failed: Invalid request: missing field `clientInfo`',
+    'app-server initialize failed: unknown field `capabilities`', 'app-server initialize failed: invalid type: string, expected struct',
+    'codex app-server exited 3: something unrelated', 'spawn UNKNOWN']) {
     const verdict = probeErrorVerdict(new Error(message));
     assert.equal(verdict.status, 'unverified', message);
     assert.match(verdict.detail, /not verified/);
   }
+});
+
+test('a git exit 128 tells the user to run setup outside the Codex sandbox; other failures add nothing', () => {
+  const { gitFailureHint } = require('../scripts/setup-toolkit-core.cjs');
+  assert.match(gitFailureHint('git', 128), /run setup outside the Codex sandbox/);
+  assert.equal(gitFailureHint('git', 1), '');
+  assert.equal(gitFailureHint('node', 128), '');
+  const skill = fs.readFileSync(path.join(__dirname, '..', '..', 'skills', 'toolkit-setup', 'SKILL.md'), 'utf8');
+  assert.match(skill, /Run the setup command with escalated permissions \(outside the sandbox\) from the first call/);
 });

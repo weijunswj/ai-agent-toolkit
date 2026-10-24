@@ -310,9 +310,10 @@ test('resolved Codex and Claude banks expose contiguous deterministic presentati
   claudeCurrent.agentProfile = { supported: false, topology: 'root-only' };
   claudeCurrent.nativePlugin = { status: 'unknown', trusted: false, hook_active: false };
   const claude = core.setupQuestionSpecs(claudeArgs, claudeCurrent);
-  assert.equal(claude[0].presentation.total_visible_question_count, 8);
+  // Claude Code setup does not ask about Codex's instruction limit.
+  assert.equal(claude[0].presentation.total_visible_question_count, 7);
   assert.equal(claude[0].presentation.total_visible_section_count, 3);
-  assert.deepEqual(claude.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '1.5', '2.1', '3.1', '3.2']);
+  assert.deepEqual(claude.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '2.1', '3.1', '3.2']);
 });
 
 test('compact table, full text, recommendations, and choices share one indexed ordering', () => {
@@ -320,7 +321,7 @@ test('compact table, full text, recommendations, and choices share one indexed o
   const rendered = core.renderSetupQuestionBank(rows);
   const detailed = core.renderSetupQuestionDocumentation(rows, rows);
   assert.equal(rendered.includes('### '), false, 'the bank shows the compact table, not the full text');
-  assert.match(rendered, /For the full text of a question, say "explain 1\.5"/);
+  assert.match(rendered, /For the full text of a question, say "explain 1\.2"/);
   const references = rows.map((row) => row.presentation.question_ref);
   assert.equal(new Set(references).size, rows.length);
   let previousIndex = -1;
@@ -561,16 +562,18 @@ test('the removed rule-refresh PR merge question and its flags are gone', () => 
 
 test('the Codex instruction limit question is recommended on, explains the edit and passes the bridge flag', () => {
   const current = stateWithManaged(managedState());
-  for (const host of ['codex', 'claude-code']) {
-    const row = core.setupQuestionSpecs(core.parseArgs(['--plan', '--host', host]), current).find((spec) => spec.id === 'codex-instruction-limit');
-    assert.equal(row.section, 'Updates and reports', host);
-    assert.equal(row.recommended, 'enable');
-    assert.deepEqual(row.choices.map((choice) => choice.label), ['Raise it', 'Leave it', 'Keep current']);
-    assert.match(row.whatThisControls, /never changes 0 \(project docs off\) or a value of 65536 or more/);
-    assert.match(row.whatThisControls, /--remove` puts the previous value back/);
-    assert.equal(row.currentState.verification, 'defaulted');
-    assert.match(row.current, /No choice is recorded, so Toolkit leaves Codex's instruction limit alone/);
-  }
+  const row = core.setupQuestionSpecs(core.parseArgs(['--plan', '--host', 'codex']), current).find((spec) => spec.id === 'codex-instruction-limit');
+  assert.equal(row.section, 'Updates and reports');
+  assert.equal(row.recommended, 'enable');
+  assert.deepEqual(row.choices.map((choice) => choice.label), ['Raise it', 'Leave it', 'Keep current']);
+  assert.match(row.whatThisControls, /never changes 0 \(project docs off\) or a value of 65536 or more/);
+  assert.match(row.whatThisControls, /--remove` puts the previous value back/);
+  assert.equal(row.currentState.verification, 'defaulted');
+  assert.match(row.current, /No choice is recorded, so Toolkit leaves Codex's instruction limit alone/);
+  // Claude Code setup does not ask; its plan keeps the stored choice.
+  const claudeArgs = core.parseArgs(['--plan', '--host', 'claude-code']);
+  assert.equal(core.setupQuestionSpecs(claudeArgs, current).some((spec) => spec.id === 'codex-instruction-limit'), false);
+  assert.equal(core.setupPlan({ host: 'claude-code', setupChoices: claudeArgs.setupChoices }).preferences.raise_codex_instruction_limit, 'keep');
   for (const flag of ['--enable-codex-doc-limit', '--disable-codex-doc-limit']) {
     const args = core.parseArgs(['--plan', flag]);
     assert.ok(JSON.stringify(core.setupPlan({ host: 'codex', setupChoices: args.setupChoices })).includes(flag), flag);

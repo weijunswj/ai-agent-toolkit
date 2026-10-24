@@ -11,7 +11,7 @@ The skill folder carries ready-to-copy templates (a curated-source comment plus 
 
 | Template | Target | When |
 |---|---|---|
-| [repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md) | `AGENTS.md` | Always; the block is the opt-in |
+| [repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md) | `AGENTS.md` | After the user's yes; the block carries the governed rules |
 | [repo-local/CLAUDE.shim.template.md](repo-local/CLAUDE.shim.template.md) | `CLAUDE.md` | Claude Code; exactly the line `@AGENTS.md`, no markers |
 | [repo-local/antigravity-bootstrap.template.md](repo-local/antigravity-bootstrap.template.md) | `.agents/rules/00-agent-toolkit-bootstrap.md` | Antigravity |
 | [repo-local/docs/agent-playbooks/](repo-local/docs/agent-playbooks/) | `docs/agent-playbooks/` | The whole folder, so the governed block's links work |

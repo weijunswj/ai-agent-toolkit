@@ -4,9 +4,10 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { spawnSync } = require('node:child_process');
+const childProcess = require('node:child_process');
+const { spawnSync } = childProcess;
 const test = require('node:test');
-const { attributionRefusal, attributionDecision, MESSAGE } = require('../scripts/toolkit-attribution-guard.cjs');
+const { BYPASS_MESSAGE, FORCE_MESSAGE, attributionRefusal, attributionDecision, bypassRefusal, MESSAGE } = require('../scripts/toolkit-attribution-guard.cjs');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const trailer = 'Co-Authored-By: Claude <noreply@anthropic.com>';
@@ -262,4 +263,136 @@ test('both plugins route shell commands to the attribution check', () => {
     input: JSON.stringify({ tool_name: 'Bash', cwd: os.tmpdir(), tool_input: { command: 'gh pr create --body "Generated with Claude Code"' } }), encoding: 'utf8'
   });
   assert.equal(JSON.parse(helper.stdout.trim().split('\n').pop()).hookSpecificOutput.permissionDecision, 'deny');
+});
+
+// Folders shaped like repositories (a .git folder is enough): Toolkit-governed, guarded, or neither.
+function bypassRepos(t) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-bypass-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const make = (name, files) => {
+    const root = path.join(dir, name);
+    fs.mkdirSync(path.join(root, '.git'), { recursive: true });
+    fs.mkdirSync(path.join(root, 'sub'), { recursive: true });
+    for (const [file, text] of Object.entries(files)) {
+      fs.mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
+      fs.writeFileSync(path.join(root, file), text);
+    }
+    return root;
+  };
+  return {
+    governed: make('governed', { 'AGENTS.md': '<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/toolkit-governed-rules.md:BEGIN TOOLKIT-GOVERNED-RULES v2 toolkit=0.0.0 sha256=000000000000 -->\n' }),
+    guarded: make('guarded', { '.github/personal-data-guard.json': '{}\n' }),
+    plain: make('plain', { 'AGENTS.md': '# Rules\n' }),
+    store: make('store', { '.git/config': '[remote "origin"]\n\turl = https://github.com/owner/TRANSPORT-evidence.git\n' }),
+  };
+}
+
+test('commands that skip commit or push checks are refused in governed and guarded repositories', (t) => {
+  const repos = bypassRepos(t);
+  const refused = [
+    'git commit -n -m x',
+    'git commit --no-verify -m x',
+    'git commit -anm x',
+    'git commit -a -n',
+    'git push --no-verify origin main',
+    'git push --no-veri',
+    'git -c core.hooksPath=/dev/null commit -m x',
+    'git -c CORE.HOOKSPATH= push',
+    'git -ccore.hooksPath=x push',
+    'git --config-env=core.hooksPath=EMPTY push',
+    'git config core.hooksPath .nothing',
+    'git config --local --unset core.hooksPath',
+    'git config set core.hooksPath x',
+    'bash -c "git push --no-verify"',
+    'pwsh -Command "git commit -n -m x"',
+    'cmd /c "git push --no-verify"',
+    'git status; git commit --no-verify -m x',
+    'git commit `\n  --no-verify -m x',
+    'cd sub && git -C .. push --no-verify',
+  ];
+  for (const root of [repos.governed, repos.guarded]) {
+    for (const command of refused) assert.equal(bypassRefusal(command, root), BYPASS_MESSAGE, `${path.basename(root)}: ${command}`);
+    assert.equal(bypassRefusal('git commit -n -m x', path.join(root, 'sub')), BYPASS_MESSAGE, 'from a subfolder');
+  }
+});
+
+test('ordinary commits and pushes, reads of core.hooksPath and other repositories pass', (t) => {
+  const repos = bypassRepos(t);
+  for (const command of [
+    'git commit -m x',
+    'git commit -m -nope',
+    'git commit -am "fix -n handling"',
+    'git commit --no-verbose -m x',
+    'git push -n origin main',
+    'git push origin main',
+    'git config --get core.hooksPath',
+    'git config core.hooksPath',
+    'git -c core.editor=true commit -m x',
+    'git commit -- -n',
+    'echo "use git commit --no-verify only in docs"',
+  ]) assert.equal(bypassRefusal(command, repos.governed), '', command);
+  for (const command of ['git commit -n -m x', 'git push --no-verify']) assert.equal(bypassRefusal(command, repos.plain), '', `plain repository: ${command}`);
+  assert.equal(bypassRefusal(`git -C ${JSON.stringify(repos.plain)} commit -n -m x`, repos.governed), '', 'the -C folder decides');
+  assert.equal(bypassRefusal(`git -C ${JSON.stringify(repos.governed)} commit -n -m x`, repos.plain), BYPASS_MESSAGE);
+});
+
+test('the Claude Code hook and the Codex helper hook refuse a bypass with a deny decision', (t) => {
+  const repos = bypassRepos(t);
+  const input = (tool) => JSON.stringify({ tool_name: tool, cwd: repos.guarded, tool_input: { command: 'git push --no-verify origin main' } });
+  for (const tool of ['Bash', 'PowerShell']) {
+    const result = spawnSync(process.execPath, [path.join(repoRoot, 'repo', 'scripts', 'toolkit-claude-attribution-hook.cjs')], { input: input(tool), encoding: 'utf8' });
+    assert.equal(result.status, 2, tool);
+    assert.equal(JSON.parse(result.stdout).hookSpecificOutput.permissionDecisionReason, BYPASS_MESSAGE);
+  }
+  const helper = spawnSync(process.execPath, [path.join(repoRoot, 'repo', 'scripts', 'toolkit-codex-helper-hook.cjs')], { input: input('Bash'), encoding: 'utf8' });
+  assert.equal(JSON.parse(helper.stdout.trim().split('\n').pop()).hookSpecificOutput.permissionDecision, 'deny');
+  assert.deepEqual(attributionDecision({ tool_input: { command: 'git push --no-verify' }, cwd: repos.plain }), {});
+});
+
+test('force pushes are refused in governed and guarded repositories and to evidence stores', (t) => {
+  const repos = bypassRepos(t);
+  const forced = [
+    'git push --force',
+    'git push -f origin feature',
+    'git push -uf origin feature',
+    'git push --force-with-lease',
+    'git push --force-with-lease=main:abc123 origin main',
+    'git push --forc',
+    'git push origin +main',
+    'git push origin +HEAD:main',
+    'git push --mirror',
+    'bash -c "git push --force origin main"',
+  ];
+  for (const root of [repos.governed, repos.guarded, repos.store]) {
+    for (const command of forced) assert.equal(bypassRefusal(command, root), FORCE_MESSAGE, `${path.basename(root)}: ${command}`);
+  }
+  assert.equal(bypassRefusal('git push https://github.com/owner/TRANSPORT-evidence.git +main', repos.plain), FORCE_MESSAGE, 'a store named on the command line');
+  for (const command of ['git push origin main', 'git push -u origin feature', 'git push -o ci.skip origin main', 'git push --follow-tags origin main', 'git push origin :old-branch']) {
+    assert.equal(bypassRefusal(command, repos.store), '', command);
+  }
+  for (const command of forced) assert.equal(bypassRefusal(command, repos.plain), '', `plain repository: ${command}`);
+});
+
+test('N3: an ENABLED repository is protected even before its governed block lands; a DISABLED one with a leftover block stays protected', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-bypass-state-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const registryOptions = { registryPath: path.join(dir, 'home', '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json'), testOnly: true };
+  const gate = require('../scripts/toolkit-governance-gate.cjs');
+  const repo = (name, { block = false } = {}) => {
+    const root = path.join(dir, name);
+    fs.mkdirSync(root, { recursive: true });
+    childProcess.execFileSync('git', ['init', '--quiet', root]);
+    childProcess.execFileSync('git', ['-C', root, 'remote', 'add', 'origin', `https://github.com/example-owner/${name}.git`]);
+    if (block) fs.writeFileSync(path.join(root, 'AGENTS.md'), '<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/toolkit-governed-rules.md:BEGIN TOOLKIT-GOVERNED-RULES v2 toolkit=0.0.0 sha256=000000000000 -->\n');
+    return root;
+  };
+  const enabled = repo('enabled');
+  gate.writeGovernanceDecision(enabled, 'enable', { registryOptions });
+  const disabledWithBlock = repo('disabled-block', { block: true });
+  gate.writeGovernanceDecision(disabledWithBlock, 'disable', { registryOptions });
+  const undecided = repo('undecided');
+  for (const [root, refused] of [[enabled, true], [disabledWithBlock, true], [undecided, false]]) {
+    assert.equal(bypassRefusal('git push --force origin main', root, 0, registryOptions), refused ? FORCE_MESSAGE : '', path.basename(root));
+    assert.equal(bypassRefusal('git commit --no-verify -m x', root, 0, registryOptions), refused ? BYPASS_MESSAGE : '', path.basename(root));
+  }
 });

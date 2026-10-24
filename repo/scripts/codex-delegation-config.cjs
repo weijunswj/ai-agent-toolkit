@@ -30,6 +30,7 @@ const {
 } = require('./codex-delegation-common.cjs');
 const { structuralLayout } = require('./codex-delegation-layout.cjs');
 const {
+  runtimeLabel,
   RUNTIMES,
   tomlString,
   managedAssignmentBlock,
@@ -422,7 +423,7 @@ async function inspectCodexMultiAgentRuntime(options = {}) {
         detector: 'Codex app-server experimentalFeature/list',
         multi_agent_v2_enabled: v2 ? v2.enabled : null,
         multi_agent_v1_enabled: v1 ? v1.enabled : null,
-        detail: `${runtime} detected from effective app-server feature state.`,
+        detail: `${runtimeLabel(runtime)} detected from effective app-server feature state.`,
       };
     } catch (error) {
       failures.push(`${command}: ${cleanError(error)}`);
@@ -491,7 +492,7 @@ function configEdits(runtime, helperCount) {
       { keyPath: 'agents.max_depth', value: CODEX_AGENT_MAX_DEPTH, mergeStrategy: 'upsert' },
     ];
   }
-  throw new Error(`Helper capacity cannot be configured for runtime ${runtime}.`);
+  throw new Error(`Helper capacity cannot be configured for runtime ${runtimeLabel(runtime)}.`);
 }
 
 // Applies Codex's own config/batchWrite to a copy of the config in an isolated home and returns the
@@ -652,7 +653,7 @@ function markToolkitProposal(configBytes, configPath, runtime, helperCount, orig
   const proposed = codexDelegationConfigState(configBytes, configPath, runtime);
   const expectedOwnership = runtime === RUNTIMES.V2 ? 'user-owned-compatible-v2' : 'user-owned-compatible-v1';
   if (proposed.status !== 'configured' || proposed.ownership !== expectedOwnership || proposed.helper_count !== helperCount) {
-    throw new Error(`Official Codex editor proposal must contain exactly the approved unmarked ${runtime} helper capacity before Toolkit markers can be added.`);
+    throw new Error(`Official Codex editor proposal must contain exactly the approved unmarked ${runtimeLabel(runtime)} helper capacity before Toolkit markers can be added.`);
   }
   assertProposalTextDelta(originalBytes, proposed, runtime, helperCount);
   const layout = proposed.layout;
@@ -715,14 +716,14 @@ function removeManagedBlockBytes(state) {
 }
 
 function migrateV2BooleanEnablement(state) {
-  if (state.ownership !== 'user-owned-compatible-v2-enable') throw new Error('No compatible MultiAgentV2 boolean enablement is available for migration.');
+  if (state.ownership !== 'user-owned-compatible-v2-enable') throw new Error('No compatible Codex V2 (multi_agent_v2) boolean enablement is available for migration.');
   const table = state.layout.featuresTables[0];
   const nextTable = state.layout.tables.find((entry) => entry.index > table.index);
   const assignment = state.layout.assignments.find((entry) => entry.index > table.index
     && (!nextTable || entry.index < nextTable.index)
     && entry.key.replace(/\s+/g, '') === 'multi_agent_v2'
     && entry.value.trim() === 'true');
-  if (!assignment) throw new Error('The compatible MultiAgentV2 boolean enablement could not be located exactly.');
+  if (!assignment) throw new Error('The compatible Codex V2 (multi_agent_v2) boolean enablement could not be located exactly.');
   const raw = state.text.slice(assignment.start, assignment.end);
   const eol = raw.endsWith('\r\n') ? '\r\n' : (raw.endsWith('\n') ? '\n' : '');
   const line = eol ? raw.slice(0, -eol.length) : raw;
@@ -902,7 +903,7 @@ async function configureCodexDelegation(configPath = codexConfigPath(), options 
     };
   }
   if (stagedState.status !== 'unconfigured' && !replaceUserOwned) {
-    return { ...initial, status: 'conflicting', changed: false, detail: `Toolkit-owned block removal did not produce an unconfigured ${runtime} proposal base: ${stagedState.detail}` };
+    return { ...initial, status: 'conflicting', changed: false, detail: `Toolkit-owned block removal did not produce an unconfigured ${runtimeLabel(runtime)} proposal base: ${stagedState.detail}` };
   }
   if (approvedProposal) {
     try {
