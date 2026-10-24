@@ -477,7 +477,7 @@ test('every custody surface says only the appointed controller writes', () => {
     who: skill.split('**Who records what.**')[1].split('**Gates.**')[0],
     prompt: read('skills/github-program-reconciler/agents/openai.yaml').split('default_prompt: ')[1].split('\n')[0],
     readme: read('skills/github-program-reconciler/README.md'),
-    changelog: read('repo/docs/CHANGELOG.md').split('## Unreleased')[1].split('## 3.9.0')[0],
+    changelog: read('repo/docs/CHANGELOG.md').split('## 3.10.0')[1].split('## 3.9.0')[0],
     history: read('repo/docs/CHANGELOG.md').split('## 3.9.0')[1].split('## 3.8.0')[0],
     trigger: JSON.parse(read('repo/docs/skill-creation-center-baseline.json')).skill_creation_review['github-program-reconciler'].trigger,
   };
