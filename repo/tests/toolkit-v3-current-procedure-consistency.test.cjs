@@ -268,14 +268,16 @@ const PROJECTS_SKILL = 'repo/contracts/claude-projects/web-controller-projects/S
 
 function ownerUatScopeContract(texts) {
   assert.match(texts[GLOBAL], /G2 starts after the working result and any owner UAT acceptance/);
-  assert.match(texts[GLOBAL], /Owner UAT holds only owner-hands steps \(real app UI, signed-in accounts, device behaviour CI cannot reach\); CI, tests and G2 prove the rest, each UAT list names the check covering every dropped item, and with none UAT is NOT_REQUIRED\./);
+  assert.match(texts[GLOBAL], /Owner UAT holds only owner-hands steps \(real app UI, signed-in accounts, device behaviour CI cannot reach\); CI, tests and G2 prove the rest, each UAT list names the check covering every dropped item, and with none, UAT is NOT_REQUIRED\./);
   assert.match(texts[GLOBAL], /only when the merge completes every criterion and any owner UAT has passed/);
   assert.match(texts[GLOBAL], /Close an issue only after its PR merged and any owner UAT passed/);
   assert.match(texts['repo/CONTROLLER.md'], /At admission split acceptance: owner UAT only for owner-hands steps \(global rules\), objective acceptance \(CI, tests, G2\) for the rest; with no such step record NOT_REQUIRED\. Missing authority never waives a needed UAT\./);
   assert.match(texts['repo/CONTROLLER.md'], /G2 begins after builder readiness and any owner UAT acceptance/);
   assert.match(texts[V3_DOC], /User acceptance covers only what needs the owner's own hands/);
+  assert.match(texts[V3_DOC], /listed beside the owner steps with the passing check that covers it; when nothing needs the owner's hands, UAT is recorded as not required/);
+  assert.match(texts[GLOBAL], /Source-only checks, fixtures and CI do not prove user acceptance or an installed result: before acceptance, check the real installed or deployed result where one exists\./);
   assert.match(texts[V3_DOC], /G2 starts after G1's working version and any required user UAT are accepted/);
-  assert.match(texts[PROJECTS_SKILL], /\*\*Owner UAT lists carry only owner-hands steps\*\* \(global rules\)/);
+  assert.match(texts[PROJECTS_SKILL], /\*\*Owner UAT lists carry only owner-hands steps\*\* \(global rules\): real app UI, signed-in accounts and device behaviour CI cannot reach\. End each list with what was dropped and the passing check that covers each/);
 }
 
 test('owner UAT is limited to owner-hands steps on every current surface', () => {
