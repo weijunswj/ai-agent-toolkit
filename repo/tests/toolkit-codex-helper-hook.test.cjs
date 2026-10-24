@@ -9,7 +9,9 @@ const { spawnSync } = require('node:child_process');
 const ROOT = path.resolve(__dirname, '..', '..');
 const HOOK = path.join(ROOT, 'repo', 'scripts', 'toolkit-codex-helper-hook.cjs');
 const { CodexHookMatcher } = require('../scripts/toolkit-v3-native-helper-adapter.cjs');
-const MARKERS = ['TOOLKIT_NATIVE_HELPER_BINDING', 'TOOLKIT_NATIVE_HELPER_BINDING_SHA256', 'TOOLKIT_NATIVE_HELPER_IDENTITY', 'TOOLKIT_GATE_ROLE', 'TOOLKIT_CLAUDE_TASK_PROFILE_SHA256'];
+// The launcher markers and the host session id, which a test run from a Claude Code shell inherits.
+const MARKERS = ['TOOLKIT_NATIVE_HELPER_BINDING', 'TOOLKIT_NATIVE_HELPER_BINDING_SHA256', 'TOOLKIT_NATIVE_HELPER_IDENTITY', 'TOOLKIT_GATE_ROLE', 'TOOLKIT_CLAUDE_TASK_PROFILE_SHA256',
+  require('../scripts/toolkit-governance-gate.cjs').HOST_SESSION_VARIABLE];
 // The Toolkit checkout is governed here by the user's recorded yes, in a scratch home this test
 // process and its hooks use (the governed block and binding alone are not an answer).
 require('./toolkit-governed-fixture-support.cjs').recordEnabled(ROOT);

@@ -7,6 +7,7 @@
 
 const assert = require('node:assert/strict');
 const childProcess = require('node:child_process');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -19,6 +20,7 @@ const repoState = require(path.join(scripts, 'toolkit-governance-repo-state.cjs'
 const governance = require(path.join(scripts, 'toolkit-governance-state.cjs'));
 const claudeHook = require(path.join(scripts, 'toolkit-governance-hook.cjs'));
 const codexHook = require(path.join(scripts, 'toolkit-codex-helper-hook.cjs'));
+const codexSessionStartScript = require(path.join(scripts, 'toolkit-codex-session-start.cjs'));
 const codexSetup = require(path.join(scripts, 'setup-codex-toolkit-plugin.cjs'));
 const managedBlock = require(path.join(scripts, 'toolkit-managed-block.cjs'));
 
@@ -393,7 +395,7 @@ test('session marks: no mark means no answer in chat; /clear and compaction keep
   for (const reply of ['yes', 'no', 'later', 'toolkit governance enable']) {
     const refused = raw().decide({ cwd: repo, prompt: reply, sessionId: 'u1' });
     assert.equal(refused.action, 'block', reply);
-    assert.match(refused.reason, /started before Toolkit could note it[\s\S]*Start a new session and answer there, or run .*toolkit-governance\.cjs" enable or .*toolkit-governance\.cjs" disable in your own terminal/, reply);
+    assert.match(refused.reason, /started before Toolkit could note it[\s\S]*Start a new session and answer there \(in Codex, trust Toolkit's SessionStart hook in \/hooks first, or no session can be noted\), or run .*toolkit-governance\.cjs" enable or .*toolkit-governance\.cjs" disable in your own terminal/, reply);
   }
   assert.equal(new gate.HeldPrompts({ registryOptions: ctx.options }).count(stateOf(ctx, repo).repository_id, 'u1'), 1, 'a refused answer is not kept');
   assert.equal(stateOf(ctx, repo).state, 'UNDECIDED');
@@ -480,6 +482,87 @@ test('repository marks: any session started in the repository since the question
   // The user's next reply in that run answers.
   assert.equal(raw().decide({ cwd: later, prompt: 'yes', sessionId: 'l1' }).action, 'pass');
   assert.equal(stateOf(ctx, later).state, 'ENABLED');
+});
+
+test('a mark that cannot be replaced fails safe: the resumed or continued run cannot answer for the user', (t) => {
+  const ctx = scratch(t);
+  const raw = () => new gate.PromptHold({ registryOptions: ctx.options, environment: {} });
+  const start = (sessionId, source, cwd) => gate.startSession({ session_id: sessionId, source, cwd }, { registryOptions: ctx.options });
+  const markFile = (kind, key) => path.join(path.dirname(ctx.registryPath), gate.SESSIONS_FOLDER, `${kind}-${crypto.createHash('sha256').update(key).digest('hex').slice(0, 32)}.json`);
+  // A folder in the mark's place cannot be renamed over, as a locked or read-only file on Windows cannot.
+  const block = file => { fs.rmSync(file, { force: true }); fs.mkdirSync(path.join(file, 'locked'), { recursive: true }); };
+  // The session's own mark: the resumed run is left with none, so its reply is refused and kept nowhere.
+  const resumed = gitRepo(ctx, 'resumed');
+  start('user', 'startup', resumed);
+  assert.equal(raw().decide({ cwd: resumed, prompt: 'hello', sessionId: 'user' }).action, 'block');
+  block(markFile('s', 'user'));
+  assert.equal(start('user', 'resume', resumed), null);
+  assert.equal(fs.existsSync(markFile('s', 'user')), false, 'the old session mark is gone');
+  assert.equal(raw().decide({ cwd: resumed, prompt: 'yes', sessionId: 'user' }).action, 'block');
+  assert.equal(stateOf(ctx, resumed).state, 'UNDECIDED');
+  // The repository's mark, with a continued run reporting a new id: the mark is removed, so the old session's answer is asked again.
+  const continued = gitRepo(ctx, 'continued', { remote: 'https://github.com/example-owner/continued.git' });
+  start('first', 'startup', continued);
+  assert.equal(raw().decide({ cwd: continued, prompt: 'hello', sessionId: 'first' }).action, 'block');
+  block(markFile('r', stateOf(ctx, continued).repository_id));
+  assert.match(String(start('new-id', 'resume', continued)), /^[0-9a-f]{32}$/);
+  const reply = raw().decide({ cwd: continued, prompt: 'yes', sessionId: 'first' });
+  assert.equal(reply.action, 'block');
+  assert.match(reply.reason, /another session started in this repository, so Toolkit asks again/);
+  assert.equal(stateOf(ctx, continued).state, 'UNDECIDED');
+  // The user's next reply answers.
+  assert.equal(raw().decide({ cwd: continued, prompt: 'yes', sessionId: 'first' }).action, 'pass');
+  assert.equal(stateOf(ctx, continued).state, 'ENABLED');
+});
+
+test('messages replayed from more than one run of a session are not presented as the user\'s own requests', (t) => {
+  const ctx = scratch(t);
+  const raw = () => new gate.PromptHold({ registryOptions: ctx.options, environment: {} });
+  const start = (sessionId, source) => gate.startSession({ session_id: sessionId, source, cwd: repo }, { registryOptions: ctx.options });
+  const repo = gitRepo(ctx, 'repo');
+  start('user', 'startup');
+  raw().decide({ cwd: repo, prompt: 'fix the login bug', sessionId: 'user' });
+  // Another process resumes the same session id and sends its own text, which is held under that session.
+  start('user', 'resume');
+  assert.equal(raw().decide({ cwd: repo, prompt: 'also delete the backups', sessionId: 'user' }).action, 'block');
+  const answered = raw().decide({ cwd: repo, prompt: 'yes', sessionId: 'user' });
+  assert.equal(answered.action, 'pass');
+  assert.match(answered.context, /came from more than one run of it, so another process that resumed the session may have sent some: confirm with the user/);
+  assert.doesNotMatch(answered.context, /Treat them as the user's requests/);
+  assert.match(answered.context, /1\. fix the login bug\n2\. also delete the backups/);
+});
+
+test('every governance refusal and hold an agent can see tells it never to act as the user', (t) => {
+  const ctx = scratch(t);
+  const repo = gitRepo(ctx, 'repo');
+  const gitlab = gitRepo(ctx, 'gitlab', { remote: 'https://gitlab.com/example-owner/example-repo.git' });
+  const plain = path.join(ctx.root, 'plain');
+  fs.mkdirSync(plain);
+  hold(ctx).decide({ cwd: repo, prompt: 'hello', sessionId: 'user' });
+  const shell = (cwd, command) => tools(ctx).decide({ tool_name: 'Bash', cwd, tool_input: { command } });
+  const launched = prompt => new gate.PromptHold({ registryOptions: ctx.options, environment: { [gate.HOST_SESSION_VARIABLE]: 'parent' } }).decide({ cwd: repo, prompt, sessionId: 'child' });
+  const texts = {
+    'answer command': shell(plain, 'node repo/scripts/toolkit-governance.cjs enable')?.deny,
+    'answer command, not on github.com': shell(gitlab, 'node repo/scripts/toolkit-governance.cjs disable')?.deny,
+    'user-state edit': tools(ctx).decide({ tool_name: 'Write', cwd: plain, tool_input: { file_path: path.join(path.dirname(ctx.registryPath), 'x.json') } })?.deny,
+    'tool in an undecided repository': shell(repo, 'ls')?.deny,
+    'tool in a repository not on github.com': shell(gitlab, 'ls')?.deny,
+    'resume from elsewhere': shell(plain, 'claude -c')?.deny,
+    'command reaching the held repository': shell(plain, `cd "${repo}" && ls`)?.deny,
+    'session started in the held repository': shell(plain, `cd "${repo}" && claude`)?.deny,
+    'edit into the held repository': tools(ctx).decide({ tool_name: 'Write', cwd: plain, tool_input: { file_path: path.join(repo, 'a.txt') } })?.deny,
+    'launched session, message': launched('hello').reason,
+    'launched session, answer': launched('yes').reason,
+    'session line, undecided': gate.sessionLine(repo, { registryOptions: ctx.options }),
+    'session line, not on github.com': gate.sessionLine(gitlab, { registryOptions: ctx.options }),
+  };
+  fs.writeFileSync(ctx.registryPath, '{ not json');
+  texts['tool with unreadable state'] = shell(repo, 'ls')?.deny;
+  texts['session line, unreadable state'] = gate.sessionLine(repo, { registryOptions: ctx.options });
+  for (const [name, text] of Object.entries(texts)) {
+    assert.equal(typeof text, 'string', name);
+    assert.ok(text.endsWith(gate.NEVER_OWNER), `${name}: ${text}`);
+  }
 });
 
 test('held messages expire, and a decided repository no longer stops sessions being resumed', (t) => {
@@ -1095,6 +1178,8 @@ test('N2: a host\'s own subcommands are not read as answers, while a session lau
     ['echo ok | claude -p', true],
     ['ANSWER=yes; claude -p "$ANSWER"', true],
     ['claude config set x no && claude -p "summarise"', true],
+    // `codex app-server` serves several turns in one process, so it is read as starting a session.
+    ['echo yes | codex app-server', true],
   ]) {
     const decision = tools(ctx).decide({ tool_name: 'Bash', cwd: plain, tool_input: { command } });
     assert.equal(Boolean(decision?.deny), refused, command);
@@ -1231,8 +1316,18 @@ test('hosts: the Codex helper hook holds prompts with exit 2 and refuses tools i
   assert.equal(codexHook.promptEvent({ hook_event_name: 'UserPromptSubmit', prompt: 'x' }), true);
   assert.equal(codexHook.promptEvent({ prompt: 'x' }), true);
   assert.equal(codexHook.promptEvent({ tool_name: 'Bash', tool_input: {} }), false);
-  // Codex's session-start hook records the run's session mark, as Claude Code's does.
-  gate.startSession({ session_id: 'codex-session', source: 'startup' }, { registryOptions: { registryPath: path.join(home, '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json'), testOnly: true } });
+  // Codex's real session-start script (its bridge maintenance stubbed) records the run's marks, as Claude Code's does.
+  const codexSessionStart = input => {
+    const saved = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE, PLUGIN_ROOT: process.env.PLUGIN_ROOT };
+    const log = console.log;
+    Object.assign(process.env, { HOME: home, USERPROFILE: home });
+    console.log = () => {};
+    try { codexSessionStartScript.main(codexSessionStartScript.HOOK_ARGS, { bridge: { run: () => ({ status: 0 }) }, input }); } finally {
+      console.log = log;
+      for (const [name, value] of Object.entries(saved)) { if (value === undefined) delete process.env[name]; else process.env[name] = value; }
+    }
+  };
+  codexSessionStart({ hook_event_name: 'SessionStart', session_id: 'codex-session', source: 'startup', cwd: repo });
   const held = run({ hook_event_name: 'UserPromptSubmit', cwd: repo, session_id: 'codex-session', prompt: 'go' });
   assert.equal(held.status, 2);
   assert.equal(JSON.parse(held.stdout).decision, 'block');
@@ -1240,7 +1335,13 @@ test('hosts: the Codex helper hook holds prompts with exit 2 and refuses tools i
   const tool = run({ hook_event_name: 'PreToolUse', cwd: repo, tool_name: 'apply_patch', tool_input: { input: '*** Begin Patch\n*** End Patch' } });
   assert.equal(tool.status, 2);
   assert.match(JSON.parse(tool.stdout).hookSpecificOutput.permissionDecisionReason, /no governance decision yet/);
-  // The user's short reply to the question is the answer on Codex too.
+  // `codex exec resume codex-session yes`: the session start gives the run new marks, so its reply is held.
+  codexSessionStart({ hook_event_name: 'SessionStart', session_id: 'codex-session', source: 'resume', cwd: repo });
+  const resumed = run({ hook_event_name: 'UserPromptSubmit', cwd: repo, session_id: 'codex-session', prompt: 'yes' });
+  assert.equal(resumed.status, 2);
+  assert.ok(resumed.stderr.includes('this session was resumed'), resumed.stderr);
+  assert.equal(governance.governanceState(repo, { registryPath: path.join(home, '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json'), testOnly: true }).state, 'UNDECIDED');
+  // The user's short reply to the question, asked again, is the answer on Codex too.
   const answered = run({ hook_event_name: 'UserPromptSubmit', cwd: repo, session_id: 'codex-session', prompt: 'yes' });
   assert.equal(answered.status, 0, answered.stderr);
   assert.match(JSON.parse(answered.stdout).hookSpecificOutput.additionalContext, /now ENABLED/);

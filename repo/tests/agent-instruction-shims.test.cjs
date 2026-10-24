@@ -186,8 +186,8 @@ test('global rules hold the generic floor: precedence, entry routing, safety gat
 test('governed rules hold only the GitHub governance parts: release lanes, records and evidence', () => {
   const text = readText(governedPath);
   for (const rule of [
-    /This block and `\.github\/toolkit-programme\.json` turn on Toolkit's GitHub governance for this github\.com repository: programme records, decision traces, evidence custody/,
-    /Nothing here applies without both, off github\.com, or after the user declines/,
+    /With the user's yes, this block and `\.github\/toolkit-programme\.json` turn on Toolkit's GitHub governance for this github\.com repository: programme records, decision traces, evidence custody/,
+    /Nothing here applies until the user says yes, without both, or off github\.com/,
     /The coding gates, delegation and routes are in the Toolkit global rules/,
     /read https:\/\/github\.com\/weijunswj\/ai-agent-toolkit\/blob\/main\/repo\/contracts\/agent-rules\/global-rules\.md before planning/,
     /load the `n8n-safety-router` skill before any n8n work/,

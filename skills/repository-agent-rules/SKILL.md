@@ -15,7 +15,7 @@ Installs and maintains the Toolkit-governed rules block and host shims in one re
 ## Two layers
 
 - **Global rules** live in each harness's user-level file (`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, optionally `~/.gemini/GEMINI.md`). `setup toolkit` installs and refreshes them; this skill never writes them.
-- **Toolkit-governed rules** live in one block in the repository's `AGENTS.md` and turn on Toolkit's GitHub governance there. Write a repository's own instruction files (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.agents/rules/`) only when its governance state is ENABLED (`toolkit-governance.cjs status`), and install the block only when the user explicitly asks. In any other state, report what would change and write nothing. Repository rules outside the block stay authoritative.
+- **Toolkit-governed rules** live in one block in the repository's `AGENTS.md` and, with the user's yes, turn on Toolkit's GitHub governance there. Write a repository's own instruction files (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.agents/rules/`) only when its governance state is ENABLED (`toolkit-governance.cjs status`), and install the block only when the user explicitly asks. In any other state, report what would change and write nothing. Repository rules outside the block stay authoritative.
 
 All action-blocking questions to the user are fully bold.
 

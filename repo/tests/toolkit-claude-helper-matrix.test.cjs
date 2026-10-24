@@ -31,8 +31,9 @@ test('each hook row gives the expected decision through the real hook process', 
   }
 });
 
-test('the matrix context leaves the process home alone, so the live runner keeps the user\'s login', () => {
-  const home = path.join(ROOT, 'never-written-home');
+test('the matrix context leaves the process home alone and writes nothing there', t => {
+  const home = path.join(fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'toolkit-matrix-home-')), 'never-written-home');
+  t.after(() => fs.rmSync(path.dirname(home), { recursive: true, force: true }));
   const probe = `const os = require('node:os');
     const { ClaudeMatrixContext } = require(${JSON.stringify(path.join(__dirname, 'support', 'claude-helper-matrix.cjs'))});
     const context = new ClaudeMatrixContext();
@@ -43,6 +44,32 @@ test('the matrix context leaves the process home alone, so the live runner keeps
     { env: { ...process.env, HOME: home, USERPROFILE: home }, encoding: 'utf8', timeout: 60000 });
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(JSON.parse(result.stdout), { HOME: home, USERPROFILE: home, homedir: home, context: true });
+  assert.equal(fs.existsSync(home), false, 'nothing was written to the home folder');
+});
+
+test('live sessions in both modes keep the real login and read the scratch registry, where the repository is ENABLED', t => {
+  const { liveEnvironment } = require('./qualification/claude-helper-matrix.live.cjs');
+  const context = new ClaudeMatrixContext();
+  t.after(() => context.remove());
+  const userHome = path.join(context.base, 'user-home');
+  // The runner's own environment, outside a cloud session and with one machine setting installed mode keeps.
+  const runner = { ...process.env, CLAUDE_CODE_SUBAGENT_MODEL: 'from-the-machine' };
+  for (const name of ['CLAUDE_CODE_REMOTE', 'CLAUDE_CONFIG_DIR', 'AI_AGENT_TOOLKIT_CONTROL_ROOT']) delete runner[name];
+  const hold = environment => JSON.parse(require('node:child_process').spawnSync(process.execPath, [path.join(ROOT, 'repo', 'scripts', 'toolkit-governance-hook.cjs'), '--event', 'UserPromptSubmit'],
+    { input: JSON.stringify({ hook_event_name: 'UserPromptSubmit', session_id: 'live-env', cwd: context.repo, prompt: 'hello' }), env: environment, encoding: 'utf8' }).stdout || '{}').decision === 'block';
+  const modes = [['plugin', context.controlRoot, undefined], ['installed', path.join(userHome, '.ai-agent-toolkit', 'agent-control'), 'from-the-machine']];
+  const environments = modes.map(([mode, controlRoot, subagentModel]) => {
+    const environment = liveEnvironment(mode, context, { environment: runner, userHome, decisions: path.join(context.base, 'log.ndjson') });
+    assert.deepEqual([environment.HOME, environment.USERPROFILE, environment.CLAUDE_CONFIG_DIR, environment.AI_AGENT_TOOLKIT_CONTROL_ROOT, environment.CLAUDE_CODE_SUBAGENT_MODEL, environment.TOOLKIT_HOOK_DECISION_LOG],
+      [context.home, context.home, path.join(userHome, '.claude'), controlRoot, subagentModel, path.join(context.base, 'log.ndjson')], mode);
+    assert.equal(hold(environment), false, `${mode}: the scratch repository is ENABLED for the session's hooks`);
+    return environment;
+  });
+  assert.equal(fs.existsSync(userHome), false, 'nothing was written to the user\'s home or user-state');
+  // With the user's own home, as the runner gave installed mode before, the scratch repository is held.
+  for (const environment of environments) assert.equal(hold({ ...environment, HOME: userHome, USERPROFILE: userHome }), true);
+  const configured = liveEnvironment('plugin', context, { environment: { ...runner, CLAUDE_CONFIG_DIR: path.join(userHome, 'work') }, userHome });
+  assert.equal(configured.CLAUDE_CONFIG_DIR, path.join(userHome, 'work'));
 });
 
 test('A9: the agent hook blocks the launch when it fails or times out', () => {

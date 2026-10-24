@@ -12,9 +12,13 @@
 // Modes:
 //   --mode plugin     (default) user settings are skipped; the plugin under test is loaded with
 //                     --plugin-dir and the rendered helpers are written to the scratch project's
-//                     `.claude/agents`. Nothing in the user's Claude setup is read or changed.
-//   --mode installed  the user's own settings, installed plugin and installed helpers are used
-//                     unchanged, so the result covers that machine as it is.
+//                     `.claude/agents`. Only the login is read from the user's Claude setup.
+//   --mode installed  the user's own settings, installed plugin, installed helpers and Toolkit
+//                     helper profile are used unchanged, so the result covers that machine as it is.
+// In both modes a live session signs in from the user's Claude config folder (CLAUDE_CONFIG_DIR,
+// else ~/.claude) and runs with HOME and USERPROFILE set to the scratch context's private home,
+// where the scratch repository's yes is recorded, so its hooks read that registry and never the
+// user's. On macOS a Keychain login is tied to CLAUDE_CONFIG_DIR: set it as it was at login.
 //
 // Output: <out>/verdicts.json (one verdict per case, with host version, hook hash and registry
 // hash) and, for live rows, one folder per run holding the stream output, the hook decision log and
@@ -147,18 +151,18 @@ function runRecords(configDir, sessionId) {
   return { found: true, folder: found.folder, lead: turnSummary(found.transcript), helpers };
 }
 
+// The environment of a live session (see Modes above). `userHome` is the runner's own home.
+function liveEnvironment(mode, context, { environment = process.env, userHome = os.homedir(), decisions = null } = {}) {
+  const base = mode === 'installed'
+    ? { ...environment, AI_AGENT_TOOLKIT_CONTROL_ROOT: environment.AI_AGENT_TOOLKIT_CONTROL_ROOT || path.join(userHome, '.ai-agent-toolkit', 'agent-control') }
+    : { ...context.environment };
+  return { ...base, HOME: context.home, USERPROFILE: context.home, CLAUDE_CONFIG_DIR: environment.CLAUDE_CONFIG_DIR || path.join(userHome, '.claude'),
+    ...(decisions ? { TOOLKIT_HOOK_DECISION_LOG: decisions } : {}) };
+}
+
 class LiveRun {
   constructor(options, context, configDir, recordFolders) {
     this.options = options; this.context = context; this.configDir = configDir; this.recordFolders = recordFolders;
-  }
-
-  // Plugin mode runs on the scratch context; installed mode keeps this machine's own environment.
-  #environment(decisions) {
-    if (this.options.mode === 'installed') return { ...process.env, TOOLKIT_HOOK_DECISION_LOG: decisions };
-    const environment = { ...this.context.environment, TOOLKIT_HOOK_DECISION_LOG: decisions };
-    // The scratch config folder only holds helper definitions; the session signs in with the real one.
-    delete environment.CLAUDE_CONFIG_DIR;
-    return environment;
   }
 
   run(label, prompt, { agents = null } = {}) {
@@ -170,7 +174,7 @@ class LiveRun {
       '--verbose', '--strict-mcp-config', '--tools', sessionTools(this.context.definitions), '--allowedTools', 'Agent', '--max-budget-usd', this.options.maxBudgetUsd];
     if (this.options.mode === 'plugin') args.push('--setting-sources', 'project,local', '--plugin-dir', this.options.pluginRoot);
     if (agents) { const file = path.join(dir, 'agents.json'); fs.writeFileSync(file, JSON.stringify(agents)); args.push('--agents', file); }
-    const environment = this.#environment(decisions);
+    const environment = liveEnvironment(this.options.mode, this.context, { decisions });
     const started = Date.now();
     const r = spawnSync(CLAUDE, args, { cwd: this.context.repo, env: environment, encoding: 'utf8', timeout: 600000, maxBuffer: 64 * 1024 * 1024 });
     fs.writeFileSync(path.join(dir, 'stream.ndjson'), r.stdout || '');
@@ -225,8 +229,12 @@ function liveCases(live, context) {
       const s = { ...live.run('a14-session-agents', ask('toolkit-g0-helper'), { agents }), launcher_check: launcher };
       // Known limit: no hook input carries session definitions and SubagentStart cannot block, so a
       // session started with its own --agents copy of a Toolkit helper is not route-enforced. The row
-      // records what ran; it passes only if no helper turn ran off the pin.
-      const onPin = s.helpers.flatMap(h => h.turns).every(t => t.model === g0.model && t.effort === g0.effort);
+      // records what ran; it passes only if the session ran, a helper turn ran or the launch was
+      // refused, and no helper turn ran off the pin.
+      const turns = s.helpers.flatMap(h => h.turns);
+      const ran = s.exit === 0 && (turns.length > 0 || s.hook_decisions.some(d => d.decision === 'deny'));
+      if (!ran) return { observed: s, pass: false };
+      const onPin = turns.every(t => t.model === g0.model && t.effort === g0.effort);
       return { observed: s, pass: onPin, limit: onPin ? null : launcher.refused ? KNOWN_LIMITS.A14 : `${KNOWN_LIMITS.A14} The launcher check did not refuse it either.` };
     }],
     ['A16', 'no helper requested: no agent call, no hook decision, no helper records', () => {
@@ -297,4 +305,4 @@ if (require.main === module) {
   try { main(); } catch (error) { console.error(error.message); process.exitCode = 1; }
 }
 
-module.exports = Object.freeze({ parseArgs, pinnedRoute, sessionTools, pickInstalledPlugin, turnSummary, runRecords, servedOnPin, KNOWN_LIMITS });
+module.exports = Object.freeze({ liveEnvironment, parseArgs, pinnedRoute, sessionTools, pickInstalledPlugin, turnSummary, runRecords, servedOnPin, KNOWN_LIMITS });
