@@ -48,7 +48,20 @@ function expectedRecord(state) {
   return { repository_id: state.repository_id, state: state.state, basis: state.rule === 'R4' ? BASES.optIn : BASES.decision };
 }
 
+// 'directory', 'missing' or 'other' (a file, symlink or junction where the folder belongs).
+function folderStatus(root) {
+  let stat;
+  try { stat = fs.lstatSync(path.join(root, FOLDER)); } catch (error) {
+    if (error && error.code === 'ENOENT') return 'missing';
+    fail('REPO_STATE_UNREADABLE');
+  }
+  return stat.isDirectory() && !stat.isSymbolicLink() ? 'directory' : 'other';
+}
+
 function readRecord(root) {
+  const folder = folderStatus(root);
+  if (folder === 'missing') return { status: 'missing', record: null };
+  if (folder !== 'directory') return { status: 'invalid', record: null };
   const target = filePath(root);
   let stat;
   try { stat = fs.lstatSync(target); } catch (error) {
@@ -80,10 +93,13 @@ function writeAtomically(target, text) {
   }
 }
 
-// The folder and its own ignore-everything `.gitignore`, rewritten only when it differs.
+// The folder and its own ignore-everything `.gitignore`, rewritten only when it differs. The folder
+// must be a real directory: a symlink or junction in its place is never followed, so Toolkit cannot
+// write into another directory through it.
 function ensureIgnored(root) {
   const folder = path.join(root, FOLDER);
-  fs.mkdirSync(folder, { recursive: true });
+  if (folderStatus(root) === 'missing') fs.mkdirSync(folder);
+  if (folderStatus(root) !== 'directory') fail('REPO_STATE_FOLDER_NOT_A_DIRECTORY');
   const inner = path.join(folder, '.gitignore');
   let innerText = null;
   try { innerText = fs.readFileSync(inner, 'utf8'); } catch { innerText = null; }
