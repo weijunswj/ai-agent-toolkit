@@ -7,7 +7,8 @@
 //
 //   status      the repository's governance state and which rules apply
 //   enable      record that you want Toolkit governance here (asks you to confirm)
-//   decline     record that you do not (asks you to confirm); Toolkit stops asking
+//   disable     record that you do not (asks you to confirm); Toolkit stops asking.
+//               `decline` is kept as the older word for it.
 //   reopen      changes nothing: says what was decided and which command changes it
 //   check       read-only conformance report; exit 0 conformant, 1 drift or pending, 2 error
 //   catalogue   the skills offered in this repository's state
@@ -15,7 +16,7 @@
 //               list, one typed yes, then an offer to add missing no-force-push rulesets
 //
 // `--json` prints the machine-readable result instead. `check --offline` skips the one network
-// read (the repository's no-force-push ruleset, asked of GitHub through `gh`). Only `enable` and `decline` write, only
+// read (the repository's no-force-push ruleset, asked of GitHub through `gh`). Only `enable` and `disable` write, only
 // after you type yes in a terminal, and only to your own user-state file through
 // toolkit-capability-registry.cjs. An agent running this without a terminal cannot record a
 // decision. Enabling records consent only: the governed block and the programme binding still
@@ -34,17 +35,18 @@ const { GovernanceMigration, MigrationError } = require('./toolkit-governance-mi
 const CMD = subcommand => `\`${governance.governanceCommand(subcommand)}\``;
 
 const CAPABILITY = governance.GOVERNANCE_CAPABILITY;
-const COMMANDS = Object.freeze(['status', 'enable', 'decline', 'reopen', 'check', 'catalogue', 'migrate']);
-const USAGE = `Usage: ${governance.governanceCommand('<status|enable|decline|reopen|catalogue> [--json]')}\n`
+const COMMANDS = Object.freeze(['status', 'enable', 'disable', 'reopen', 'check', 'catalogue', 'migrate']);
+const ALIASES = Object.freeze({ decline: 'disable' });
+const USAGE = `Usage: ${governance.governanceCommand('<status|enable|disable|reopen|catalogue> [--json]')}\n`
   + `       ${governance.governanceCommand('check [--json] [--offline]')}\n`
   + `       ${governance.governanceCommand('migrate [--root <folder>]...')}\n`;
 
 const RULES_TEXT = Object.freeze({
   ENABLED: 'Global rules plus the Toolkit governed rules (gates, records and evidence custody).',
   ENABLED_INCOMPLETE: 'Global rules, coding gates, subagents and portable skills. The governed rules start once the governed block and the programme binding are both in the repository.',
-  DECLINED: 'Global rules only. A governed block in AGENTS.md is not followed.',
-  PORTABLE: 'Global rules only.',
-  UNKNOWN: `Nothing yet: decide with ${CMD('enable')} or ${CMD('decline')}.`,
+  DISABLED: 'Global rules only. A governed block in AGENTS.md is not followed.',
+  NO_REPOSITORY: 'Global rules only.',
+  UNDECIDED: `Nothing yet: decide with ${CMD('enable')} or ${CMD('disable')}.`,
 });
 
 class GovernanceCliError extends Error {
@@ -77,7 +79,7 @@ class ToolkitGovernanceCli {
     const json = args.includes('--json');
     const offline = args.includes('--offline');
     const rest = args.filter(arg => arg !== '--json' && arg !== '--offline');
-    const command = rest[0];
+    const command = ALIASES[rest[0]] || rest[0];
     const roots = [];
     if (command === 'migrate') {
       for (let index = 1; index < rest.length; index += 2) {
@@ -141,7 +143,7 @@ class ToolkitGovernanceCli {
     const state = this.#state();
     const skills = catalogue.catalogueForState(state);
     const lines = [`Skills offered in this repository (${label(state)}):`];
-    if (skills.length === 0) lines.push(`- none until you decide with ${CMD('enable')} or ${CMD('decline')}`);
+    if (skills.length === 0) lines.push(`- none until you decide with ${CMD('enable')} or ${CMD('disable')}`);
     for (const entry of skills) lines.push(`- ${entry.skill}${entry.tier === 'governed' ? ' (governed)' : ''}`);
     this.#print(json, { state: state.state, materials_complete: state.materials_complete, skills }, lines);
     return 0;
@@ -150,18 +152,18 @@ class ToolkitGovernanceCli {
   #reopen(json) {
     const state = this.#state();
     if (state.rule === 'ERROR') throw new GovernanceCliError(`The governance state could not be read (${state.error_code}).`);
-    const lines = state.state === 'DECLINED'
-      ? ['Nothing changed. You declined Toolkit governance for this repository, so Toolkit does not ask about it.', `To turn it on, run ${CMD('enable')}. To keep it off, do nothing.`]
-      : [`Nothing changed. This repository is ${label(state)}, so there is no declined decision to reopen.`, state.state === 'ENABLED'
-        ? `To turn governance off, run ${CMD('decline')}.`
-        : `To decide, run ${CMD('enable')} or ${CMD('decline')}.`];
+    const lines = state.state === 'DISABLED'
+      ? ['Nothing changed. You disabled Toolkit governance for this repository, so Toolkit does not ask about it.', `To turn it on, run ${CMD('enable')}. To keep it off, do nothing.`]
+      : [`Nothing changed. This repository is ${label(state)}, so there is no disabled decision to reopen.`, state.state === 'ENABLED'
+        ? `To turn governance off, run ${CMD('disable')}.`
+        : `To decide, run ${CMD('enable')} or ${CMD('disable')}.`];
     this.#print(json, { state: state.state, writes: 0 }, lines);
     return 0;
   }
 
   async #decide(command, json) {
     const before = this.#state();
-    if (before.state === 'PORTABLE') {
+    if (before.state === 'NO_REPOSITORY') {
       throw new GovernanceCliError(before.reason === 'no-git-root'
         ? 'This folder is not inside a git repository, so there is nothing to decide.'
         : 'This repository has no usable origin remote, so a decision cannot be stored for it. Only the global rules apply.');
@@ -172,16 +174,17 @@ class ToolkitGovernanceCli {
     const status = registry.getRepositoryStatus({ cwd: this.#cwd, ...this.#registryOptions });
     if (status.status === 'actionable') throw new GovernanceCliError(`Your governance decisions could not be read (${status.reason_code}). Nothing was written.`);
     const current = status.capabilities[CAPABILITY].state;
+    // The registry keeps its own operation names: a first "no" is 'decline', turning off an enabled one is 'disable'.
     const operation = command === 'enable' ? 'enable' : current === 'enabled' ? 'disable' : 'decline';
-    if ((command === 'enable' && current === 'enabled') || (command === 'decline' && current === 'disabled')) {
+    if ((command === 'enable' && current === 'enabled') || (command === 'disable' && current === 'disabled')) {
       // The repository's own copy is still made to agree, so the hooks open.
       new gate.GovernanceGate({ registryOptions: this.#registryOptions }).evaluate(this.#cwd);
-      this.#print(json, { state: before.state, writes: 0 }, [`Already ${command === 'enable' ? 'enabled' : 'declined'} for this repository; no new decision was written.`]);
+      this.#print(json, { state: before.state, writes: 0 }, [`Already ${command === 'enable' ? 'enabled' : 'disabled'} for this repository; no new decision was written.`]);
       return 0;
     }
     const question = command === 'enable'
       ? `Turn on Toolkit governance for ${before.root}?\nToolkit's governed rules apply once the repository also carries the governed block and the programme binding, which arrive only through a pull request you approve.\nType yes to confirm: `
-      : `Decline Toolkit governance for ${before.root}?\nOnly the global rules will apply here, and Toolkit will not ask again unless you run ${CMD('enable')}.\nType yes to confirm: `;
+      : `Turn off Toolkit governance for ${before.root}?\nOnly the global rules will apply here, and Toolkit will not ask again unless you run ${CMD('enable')}.\nType yes to confirm: `;
     const answer = String(await this.#ask(question) || '').trim().toLowerCase();
     if (answer !== 'yes') {
       this.#print(json, { state: before.state, writes: 0 }, ['Not confirmed. Nothing was written.']);
@@ -202,17 +205,17 @@ class ToolkitGovernanceCli {
 
 function label(state) {
   if (state.state === 'ENABLED' && state.materials_complete === false) return 'ENABLED (materials incomplete)';
-  return state.state;
+  return state.state.replace(/_/g, ' ');
 }
 
 function describe(state) {
-  if (state.rule === 'ERROR') return [`State: UNKNOWN (the state could not be read: ${state.error_code}). Prompts in this repository are held until it can.`];
+  if (state.rule === 'ERROR') return [`State: UNDECIDED (the state could not be read: ${state.error_code}). Prompts in this repository are held until it can.`];
   const key = state.state === 'ENABLED' && state.materials_complete === false ? 'ENABLED_INCOMPLETE' : state.state;
   const lines = [`State: ${label(state)}`, `Rules: ${RULES_TEXT[key]}`];
   if (state.root) lines.push(`Repository: ${state.root}`);
-  if (state.state === 'UNKNOWN' && state.rule === 'R6') lines.push('This repository carries the governed block but no programme binding yet.');
-  if (state.state === 'ENABLED' && state.rule === 'R4') lines.push('The repository opted in and you have not declined.');
-  if (state.state === 'PORTABLE' && state.reason !== 'no-git-root') lines.push('There is no usable origin remote, so no decision can be stored for this repository.');
+  if (state.state === 'UNDECIDED' && state.rule === 'R6') lines.push('This repository carries the governed block but no programme binding yet.');
+  if (state.state === 'ENABLED' && state.rule === 'R4') lines.push('The repository opted in and you have not disabled it.');
+  if (state.state === 'NO_REPOSITORY' && state.reason !== 'no-git-root') lines.push('There is no usable origin remote, so no decision can be stored for this repository.');
   return lines;
 }
 

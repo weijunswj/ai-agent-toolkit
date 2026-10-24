@@ -162,8 +162,8 @@ const HOOK_CASES = [
   ['A21', 'installed definition rendered from another registry revision', launch(G1), 'deny', MISMATCH,
     { setup: editDefinition(G1, /\(SHA-256 `[0-9a-f]{64}`\)/, `(SHA-256 \`${'0'.repeat(64)}\`)`) }],
   ['A22', 'ENABLED repository is governed: a built-in agent is refused', launch('general-purpose'), 'deny', NOT_ALLOWED],
-  ['A22', 'DECLINED repository is ungoverned: the lead launches any agent', launch('general-purpose'), 'pass', null, { cwd: c => c.declined }],
-  ['A22', 'UNKNOWN repository is the hard block: the governance gate refuses the launch', launch(G0), 'deny', /no governance decision yet/,
+  ['A22', 'DISABLED repository is ungoverned: the lead launches any agent', launch('general-purpose'), 'pass', null, { cwd: c => c.declined }],
+  ['A22', 'UNDECIDED repository is the hard block: the governance gate refuses the launch', launch(G0), 'deny', /no governance decision yet/,
     { cwd: c => c.undecided, gate: true }],
   ['A22', 'ENABLED repository passes the governance gate', launch(G0), 'pass', null, { gate: true }],
 ];

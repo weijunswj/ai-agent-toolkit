@@ -97,7 +97,7 @@ function treeDigest(dir) {
 test('H-07 (unit): without a terminal nothing is recorded', async (t) => {
   const ctx = scratch(t);
   const repo = gitRepo(ctx, 'repo');
-  for (const command of ['enable', 'decline']) {
+  for (const command of ['enable', 'disable', 'decline']) {
     const result = await run(ctx, repo, [command], { interactive: false });
     assert.equal(result.code, 2);
     assert.match(result.stderr, /Run this yourself in a terminal/);
@@ -106,29 +106,31 @@ test('H-07 (unit): without a terminal nothing is recorded', async (t) => {
   assert.equal(fs.existsSync(ctx.registryPath), false);
 });
 
-test('H-06 (unit): anything but yes writes nothing and keeps the repository UNKNOWN', async (t) => {
+test('H-06 (unit): anything but yes writes nothing and keeps the repository UNDECIDED', async (t) => {
   const ctx = scratch(t);
   const repo = gitRepo(ctx, 'repo');
   for (const answer of ['', 'y', 'enable', 'no', 'yes please']) {
-    const result = await run(ctx, repo, ['decline'], { answer });
+    const result = await run(ctx, repo, ['disable'], { answer });
     assert.equal(result.code, 1, JSON.stringify(answer));
     assert.match(result.stdout, /Nothing was written/);
   }
   assert.equal(fs.existsSync(ctx.registryPath), false);
   const status = await run(ctx, repo, ['status', '--json']);
-  assert.equal(JSON.parse(status.stdout).state, 'UNKNOWN');
+  assert.equal(JSON.parse(status.stdout).state, 'UNDECIDED');
 });
 
-test('enable and decline: confirmed, written, read back; repeats write nothing', async (t) => {
+test('enable and disable: confirmed, written, read back; repeats write nothing; decline is an alias', async (t) => {
   const ctx = scratch(t);
   const repo = gitRepo(ctx, 'repo');
-  const declined = await run(ctx, repo, ['decline']);
-  assert.equal(declined.code, 0, declined.stderr);
-  assert.match(declined.asked[0], /Decline Toolkit governance for /);
-  assert.match(declined.stdout, /Recorded\. State: DECLINED/);
+  const disabled = await run(ctx, repo, ['disable']);
+  assert.equal(disabled.code, 0, disabled.stderr);
+  assert.match(disabled.asked[0], /Turn off Toolkit governance for /);
+  assert.match(disabled.stdout, /Recorded\. State: DISABLED/);
   const before = fs.readFileSync(ctx.registryPath);
-  const again = await run(ctx, repo, ['decline']);
-  assert.match(again.stdout, /Already declined/);
+  for (const command of ['disable', 'decline']) {
+    const again = await run(ctx, repo, [command]);
+    assert.match(again.stdout, /Already disabled/, command);
+  }
   assert.deepEqual(fs.readFileSync(ctx.registryPath), before);
   const reopen = await run(ctx, repo, ['reopen']);
   assert.match(reopen.stdout, /^Nothing changed\. /);
@@ -139,7 +141,7 @@ test('enable and decline: confirmed, written, read back; repeats write nothing',
   assert.equal(enabled.code, 0, enabled.stderr);
   const enabledState = JSON.parse(enabled.stdout);
   assert.deepEqual([enabledState.state, enabledState.rule, enabledState.materials_complete], ['ENABLED', 'R5', false]);
-  // Declining an enabled repository records a disable, which reads back as DECLINED.
+  // The older word still works: declining an enabled repository records a disable.
   const off = await run(ctx, repo, ['decline', '--json']);
   assert.equal(JSON.parse(off.stdout).reason, 'user-disabled');
 });
@@ -209,12 +211,12 @@ test('K-01: check exit codes and read-only behaviour', async (t) => {
   assert.equal(JSON.parse(offline.stdout).no_force_push_ruleset.status, 'not-checked');
   assert.equal((await run(ctx, conformant, ['status', '--offline'])).code, 2, '--offline belongs to check only');
 
-  // Enabled without the binding is incomplete; declined with a block reports it ignored.
+  // Enabled without the binding is incomplete; disabled with a block reports it ignored.
   await run(ctx, incomplete, ['enable']);
   const enabledIncomplete = JSON.parse((await run(ctx, incomplete, ['check', '--json'])).stdout);
   assert.deepEqual(enabledIncomplete.findings.map(entry => entry.id), ['BINDING_MISSING']);
   assert.equal(enabledIncomplete.no_force_push_ruleset.status, 'present', 'the ruleset applies to every ENABLED repository');
-  await run(ctx, stale, ['decline']);
+  await run(ctx, stale, ['disable']);
   const ignored = await run(ctx, stale, ['check', '--json']);
   assert.equal(ignored.code, 0);
   assert.deepEqual(JSON.parse(ignored.stdout).findings.map(entry => entry.id), ['GOVERNED_BLOCK_IGNORED']);
@@ -253,12 +255,12 @@ test('C-02: governed-only skills are offered only in a complete ENABLED reposito
   const names = (state, materialsComplete) => catalogue.catalogueFor(state, { materialsComplete }).map(entry => entry.skill);
   for (const name of governedOnly) {
     assert.ok(names('ENABLED', true).includes(name));
-    for (const [state, complete] of [['ENABLED', false], ['DECLINED', false], ['PORTABLE', false], ['UNKNOWN', false]]) {
+    for (const [state, complete] of [['ENABLED', false], ['DISABLED', false], ['NO_REPOSITORY', false], ['UNDECIDED', false]]) {
       assert.equal(names(state, complete).includes(name), false, `${name} in ${state}`);
     }
   }
-  assert.deepEqual(names('UNKNOWN', false), []);
-  assert.ok(names('DECLINED', false).includes('repository-agent-rules'));
+  assert.deepEqual(names('UNDECIDED', false), []);
+  assert.ok(names('DISABLED', false).includes('repository-agent-rules'));
   const ctx = scratch(t);
   const repo = gitRepo(ctx, 'repo');
   writeGoverned(repo);

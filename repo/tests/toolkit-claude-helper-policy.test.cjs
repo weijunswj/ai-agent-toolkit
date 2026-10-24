@@ -49,7 +49,7 @@ test('the governed-repo predicate walks to the first .git and follows the govern
   assert.equal(governedRepo(path.join(managed, 'src', 'deep'), {}).reason, 'governance-enabled');
   // The managed block alone no longer governs: without the binding the repository is undecided.
   fs.rmSync(path.join(managed, '.github'), { recursive: true });
-  assert.deepEqual([governedRepo(managed, {}).governed, governedRepo(managed, {}).reason], [false, 'governance-unknown']);
+  assert.deepEqual([governedRepo(managed, {}).governed, governedRepo(managed, {}).reason], [false, 'governance-undecided']);
   // Declined: the block is ignored.
   const registryPath = path.join(dir, 'state', 'repository-governance.v1.json');
   const registry = require('../scripts/toolkit-capability-registry.cjs');
@@ -63,7 +63,7 @@ test('the governed-repo predicate walks to the first .git and follows the govern
       choice_semantic_id: registry.capabilityDecisionSemanticId('repository.governance', 'decline'), contract_digest: registry.CONTRACT_DIGEST,
       scope_digest: registry.capabilityScopeDigest(status.repository_id, 'repository.governance', 'decline', 'capability-route') },
     expectedRevision: status.registry_revision, expectedHash: status.snapshot_hash });
-  assert.equal(governedRepo(declined, {}, { registryOptions: options }).reason, 'governance-declined');
+  assert.equal(governedRepo(declined, {}, { registryOptions: options }).reason, 'governance-disabled');
   // A nested repository (here a worktree-style `.git` file) stops the walk before the managed parent.
   const nested = path.join(managed, 'vendor', 'lib');
   fs.mkdirSync(nested, { recursive: true });

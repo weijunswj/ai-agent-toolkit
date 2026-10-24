@@ -681,10 +681,27 @@ function verifyLocalMarketplaceConfig(configText, repoRoot) {
   return { sourcePath, errors };
 }
 
-function detectHookTrustStatus() {
+// The hook events the user must trust in Codex `/hooks`, read from the plugin's own hooks file so the
+// list cannot drift from what setup installs. Codex records trust per hook and skips an untrusted one.
+const FALLBACK_HOOK_EVENTS = Object.freeze(['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'Stop']);
+function trustedHookEvents(pluginRoot = repoRootFromScript()) {
+  try {
+    const events = Object.keys(readJson(path.join(pluginRoot, '.codex-plugin', 'hooks', 'hooks.json')).hooks || {});
+    return events.length ? events : [...FALLBACK_HOOK_EVENTS];
+  } catch {
+    return [...FALLBACK_HOOK_EVENTS];
+  }
+}
+function hookTrustList(pluginRoot) {
+  const names = trustedHookEvents(pluginRoot).map(name => `\`${name}\``);
+  return names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names.join('');
+}
+
+// The list comes from the installed cache's hooks file when there is one, else from this checkout.
+function detectHookTrustStatus(codexHome, cacheRoot) {
   return {
     status: 'verification-unavailable',
-    message: 'Hook trust verification is unavailable from supported non-interactive Codex inspection. Open `/hooks` in Codex, review and trust the current Toolkit hooks (`SessionStart`, `PreToolUse` and `Stop`). Codex skips each hook until it is trusted.'
+    message: `Hook trust verification is unavailable from supported non-interactive Codex inspection. Open \`/hooks\` in Codex, review and trust the current Toolkit hooks (${hookTrustList(cacheRoot || undefined)}). Codex skips each hook until it is trusted.`
   };
 }
 
@@ -1755,7 +1772,7 @@ async function main(argv = process.argv.slice(2), dependencies = {}) {
 
   const hookTrustStatus = pluginChanged ? 'pending-review' : state.hookTrustStatus;
   const hookTrustMessage = pluginChanged
-    ? 'The exact current Toolkit hooks changed and are pending review. Open `/hooks` in Codex and review and trust the current Toolkit hooks (`SessionStart`, `PreToolUse` and `Stop`). Codex skips each hook until it is trusted.'
+    ? `The exact current Toolkit hooks changed and are pending review. Open \`/hooks\` in Codex and review and trust the current Toolkit hooks (${hookTrustList(options.repoRoot)}). Codex skips each hook until it is trusted.`
     : state.hookTrustMessage;
   const reportedState = { ...state, hookTrustStatus, hookTrustMessage };
   const summary = {

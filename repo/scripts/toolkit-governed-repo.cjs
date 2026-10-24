@@ -10,8 +10,8 @@
 //     must hold wherever it is supplied);
 //   - the repository's governance state (toolkit-governance-state.cjs, the single authority)
 //     is ENABLED with the governed rules in force: the TOOLKIT-GOVERNED-RULES block and a
-//     valid programme binding, and the user has not declined. A DECLINED, UNKNOWN or
-//     incomplete repository is not governed here; an UNKNOWN one is held by the
+//     valid programme binding, and the user has not disabled it. A DISABLED, UNDECIDED or
+//     incomplete repository is not governed here; an UNDECIDED one is held by the
 //     governance gate before any helper launch is reached.
 // The walk stops at the first `.git` (a directory, or the file a worktree uses). Node built-ins
 // only, no subprocess. Without a launcher marker, an error is ungoverned.
@@ -60,7 +60,7 @@ class GovernedRepoPredicate {
       if (marker) return result(true, 'launcher-marker', root);
       if (!root) return result(false, 'no-git-root');
       const state = require('./toolkit-governance-state.cjs').governanceState(root, this.#registryOptions);
-      if (state.state !== 'ENABLED' || !state.governed_rules_bind) return result(false, `governance-${state.state === 'ENABLED' ? 'incomplete' : state.state.toLowerCase()}`, root, state.state);
+      if (state.state !== 'ENABLED' || !state.governed_rules_bind) return result(false, `governance-${state.state === 'ENABLED' ? 'incomplete' : state.state.toLowerCase().replace(/_/g, '-')}`, root, state.state);
       return result(true, 'governance-enabled', root, state.state);
     } catch {
       return marker ? result(true, 'launcher-marker', root || null) : result(false, 'predicate-error');
