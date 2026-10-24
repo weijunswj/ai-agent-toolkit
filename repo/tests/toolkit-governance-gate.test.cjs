@@ -515,6 +515,84 @@ test('a mark that cannot be replaced fails safe: the resumed or continued run ca
   assert.equal(stateOf(ctx, continued).state, 'ENABLED');
 });
 
+test('a mark that can be neither replaced nor removed fails safe: held messages and "later" forget their marks', (t) => {
+  const ctx = scratch(t);
+  const raw = () => new gate.PromptHold({ registryOptions: ctx.options, environment: {} });
+  const start = (sessionId, source, cwd) => gate.startSession({ session_id: sessionId, source, ...(cwd ? { cwd } : {}) }, { registryOptions: ctx.options });
+  const markFile = (kind, key) => path.join(path.dirname(ctx.registryPath), gate.SESSIONS_FOLDER, `${kind}-${crypto.createHash('sha256').update(key).digest('hex').slice(0, 32)}.json`);
+  // A locked mark (another process holds it open without delete sharing, or its folder is read-only):
+  // it cannot be renamed over or removed, though it can still be read.
+  const locked = new Set();
+  const busy = file => { const error = new Error(`EBUSY: resource busy or locked, ${file}`); error.code = 'EBUSY'; return error; };
+  const { renameSync, rmSync } = fs;
+  t.mock.method(fs, 'renameSync', (from, to) => { if (locked.has(path.resolve(to))) throw busy(to); return renameSync(from, to); });
+  t.mock.method(fs, 'rmSync', (target, options) => { if (locked.has(path.resolve(target))) throw busy(target); return rmSync(target, options); });
+  // A resumed run whose session mark is locked and whose start names no repository: the earlier run's
+  // held message no longer carries a mark the resumed run can match.
+  const resumed = gitRepo(ctx, 'resumed');
+  start('A', 'startup', resumed);
+  assert.equal(raw().decide({ cwd: resumed, prompt: 'hello', sessionId: 'A' }).action, 'block');
+  locked.add(markFile('s', 'A'));
+  assert.equal(start('A', 'resume'), null);
+  assert.ok(fs.existsSync(markFile('s', 'A')), 'the locked mark is still there');
+  const reply = raw().decide({ cwd: resumed, prompt: 'yes', sessionId: 'A' });
+  assert.equal(reply.action, 'block');
+  assert.match(reply.reason, /asks again/);
+  assert.equal(stateOf(ctx, resumed).state, 'UNDECIDED');
+  // The same resume started in the repository: its mark is replaced, so the earlier answer is asked again.
+  start('A', 'startup', resumed);
+  raw().decide({ cwd: resumed, prompt: 'hello', sessionId: 'A' });
+  assert.equal(start('A', 'resume', resumed), null);
+  assert.equal(raw().decide({ cwd: resumed, prompt: 'yes', sessionId: 'A' }).action, 'block');
+  assert.equal(stateOf(ctx, resumed).state, 'UNDECIDED');
+  locked.delete(markFile('s', 'A'));
+  // A continued run reporting a new id while the repository mark is locked: B's earlier message is
+  // asked again, and the user's next reply in B's run answers.
+  const continued = gitRepo(ctx, 'continued', { remote: 'https://github.com/example-owner/continued.git' });
+  start('B', 'startup', continued);
+  assert.equal(raw().decide({ cwd: continued, prompt: 'hello', sessionId: 'B' }).action, 'block');
+  locked.add(markFile('r', stateOf(ctx, continued).repository_id));
+  assert.equal(start('new-id', 'resume', continued), null);
+  const continuedReply = raw().decide({ cwd: continued, prompt: 'yes', sessionId: 'B' });
+  assert.equal(continuedReply.action, 'block');
+  assert.match(continuedReply.reason, /another session started in this repository, so Toolkit asks again/);
+  assert.equal(stateOf(ctx, continued).state, 'UNDECIDED');
+  assert.equal(raw().decide({ cwd: continued, prompt: 'yes', sessionId: 'B' }).action, 'pass');
+  assert.equal(stateOf(ctx, continued).state, 'ENABLED');
+  // After "later", a start with the repository mark locked ends "later" for the full answer.
+  const later = gitRepo(ctx, 'later', { remote: 'https://github.com/example-owner/later.git' });
+  start('L', 'startup', later);
+  raw().decide({ cwd: later, prompt: 'hello', sessionId: 'L' });
+  assert.equal(raw().decide({ cwd: later, prompt: 'later', sessionId: 'L' }).action, 'pass');
+  locked.add(markFile('r', stateOf(ctx, later).repository_id));
+  start('agent-run', 'startup', later);
+  const moved = raw().decide({ cwd: later, prompt: 'toolkit governance enable', sessionId: 'L' });
+  assert.equal(moved.action, 'block');
+  assert.match(moved.reason, /since you said "later", so Toolkit asks again/);
+  assert.equal(stateOf(ctx, later).state, 'UNDECIDED');
+});
+
+test('messages held in a resumed or forked run are not presented as the user\'s own, whatever order they came in', (t) => {
+  const ctx = scratch(t);
+  const raw = () => new gate.PromptHold({ registryOptions: ctx.options, environment: {} });
+  const repo = gitRepo(ctx, 'repo');
+  const start = (sessionId, source) => gate.startSession({ session_id: sessionId, source, cwd: repo }, { registryOptions: ctx.options });
+  // Another process resumes the user's session first; the user's own window then reads the mark that resume wrote.
+  start('user', 'startup');
+  start('user', 'resume');
+  assert.equal(raw().decide({ cwd: repo, prompt: 'also delete the backups', sessionId: 'user' }).action, 'block');
+  raw().decide({ cwd: repo, prompt: 'fix the login bug', sessionId: 'user' });
+  const answered = raw().decide({ cwd: repo, prompt: 'yes', sessionId: 'user' });
+  assert.equal(answered.action, 'pass');
+  assert.match(answered.context, /or from a resumed or forked run, so another process may have sent some: confirm with the user/);
+  assert.doesNotMatch(answered.context, /Treat them as the user's requests/);
+  // A fresh session's own messages are still handed over as the user's.
+  const fresh = gitRepo(ctx, 'fresh', { remote: 'https://github.com/example-owner/fresh.git' });
+  gate.startSession({ session_id: 'own', source: 'startup', cwd: fresh }, { registryOptions: ctx.options });
+  raw().decide({ cwd: fresh, prompt: 'fix the bug', sessionId: 'own' });
+  assert.match(raw().decide({ cwd: fresh, prompt: 'yes', sessionId: 'own' }).context, /Treat them as the user's requests:\n1\. fix the bug/);
+});
+
 test('messages replayed from more than one run of a session are not presented as the user\'s own requests', (t) => {
   const ctx = scratch(t);
   const raw = () => new gate.PromptHold({ registryOptions: ctx.options, environment: {} });
@@ -527,7 +605,7 @@ test('messages replayed from more than one run of a session are not presented as
   assert.equal(raw().decide({ cwd: repo, prompt: 'also delete the backups', sessionId: 'user' }).action, 'block');
   const answered = raw().decide({ cwd: repo, prompt: 'yes', sessionId: 'user' });
   assert.equal(answered.action, 'pass');
-  assert.match(answered.context, /came from more than one run of it, so another process that resumed the session may have sent some: confirm with the user/);
+  assert.match(answered.context, /came from more than one run of it, or from a resumed or forked run, so another process may have sent some: confirm with the user/);
   assert.doesNotMatch(answered.context, /Treat them as the user's requests/);
   assert.match(answered.context, /1\. fix the login bug\n2\. also delete the backups/);
 });
@@ -557,6 +635,22 @@ test('every governance refusal and hold an agent can see tells it never to act a
     'session line, not on github.com': gate.sessionLine(gitlab, { registryOptions: ctx.options }),
   };
   fs.writeFileSync(ctx.registryPath, '{ not json');
+  // Holds an agent sees when it started the run itself without the session variable (a Codex shell, say).
+  const fresh = gitRepo(ctx, 'fresh', { remote: 'https://github.com/example-owner/fresh.git' });
+  const gitlabFresh = gitRepo(ctx, 'gitlab-fresh', { remote: 'https://gitlab.com/example-owner/fresh.git' });
+  texts['question'] = hold(ctx).decide({ cwd: fresh, prompt: 'hello', sessionId: 'agent' }).reason;
+  texts['question, count'] = hold(ctx).decide({ cwd: fresh, prompt: 'again', sessionId: 'agent' }).reason;
+  texts['not-on-github.com notice'] = hold(ctx).decide({ cwd: gitlabFresh, prompt: 'hello', sessionId: 'agent' }).reason;
+  texts['no mark'] = new gate.PromptHold({ registryOptions: ctx.options, environment: {} }).decide({ cwd: fresh, prompt: 'yes', sessionId: 'unmarked' }).reason;
+  gate.startSession({ session_id: 'agent', source: 'resume', cwd: fresh }, { registryOptions: ctx.options });
+  texts['resumed'] = hold(ctx).decide({ cwd: fresh, prompt: 'yes', sessionId: 'agent' }).reason;
+  // Hook failures: the gate module itself may be what failed, so each hook spells the line out.
+  const broken = { environment: {}, gate: { insideRepository: () => true, PromptHold: class { constructor() { throw new Error('broken'); } }, ToolGate: class { constructor() { throw new Error('broken'); } } } };
+  texts['Claude hook failure, prompt'] = claudeHook.respond('UserPromptSubmit', { cwd: repo, prompt: 'x', session_id: 'user' }, broken)?.reason;
+  texts['Claude hook failure, tool'] = claudeHook.respond('PreToolUse', { cwd: repo, tool_name: 'Bash', tool_input: { command: 'ls' } }, broken)?.hookSpecificOutput?.permissionDecisionReason;
+  assert.equal(claudeHook.NEVER_OWNER, gate.NEVER_OWNER);
+  assert.equal(codexHook.NEVER_OWNER, gate.NEVER_OWNER);
+  texts['Codex hook failure, prompt'] = codexHook.PROMPT_FAILED;
   texts['tool with unreadable state'] = shell(repo, 'ls')?.deny;
   texts['session line, unreadable state'] = gate.sessionLine(repo, { registryOptions: ctx.options });
   for (const [name, text] of Object.entries(texts)) {
