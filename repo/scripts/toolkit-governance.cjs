@@ -46,7 +46,7 @@ const RULES_TEXT = Object.freeze({
   ENABLED_INCOMPLETE: 'Global rules, coding gates, subagents and portable skills. The governed rules start once the governed block and the programme binding are both in the repository.',
   DISABLED: 'Global rules only. A governed block in AGENTS.md is not followed.',
   NO_REPOSITORY: 'Global rules only.',
-  UNDECIDED: `Nothing yet: decide with ${CMD('enable')} or ${CMD('disable')}.`,
+  UNDECIDED: `Nothing yet. Toolkit asks in chat (yes, no or not now) and records your reply; in your own terminal, ${CMD('enable')} or ${CMD('disable')} also works.`,
 });
 
 class GovernanceCliError extends Error {
@@ -143,7 +143,7 @@ class ToolkitGovernanceCli {
     const state = this.#state();
     const skills = catalogue.catalogueForState(state);
     const lines = [`Skills offered in this repository (${label(state)}):`];
-    if (skills.length === 0) lines.push(`- none until you decide with ${CMD('enable')} or ${CMD('disable')}`);
+    if (skills.length === 0) lines.push(`- none until you answer Toolkit's question in chat, or run ${CMD('enable')} or ${CMD('disable')} in your own terminal`);
     for (const entry of skills) lines.push(`- ${entry.skill}${entry.tier === 'governed' ? ' (governed)' : ''}`);
     this.#print(json, { state: state.state, materials_complete: state.materials_complete, skills }, lines);
     return 0;
@@ -156,7 +156,7 @@ class ToolkitGovernanceCli {
       ? ['Nothing changed. You disabled Toolkit governance for this repository, so Toolkit does not ask about it.', `To turn it on, run ${CMD('enable')}. To keep it off, do nothing.`]
       : [`Nothing changed. This repository is ${label(state)}, so there is no disabled decision to reopen.`, state.state === 'ENABLED'
         ? `To turn governance off, run ${CMD('disable')}.`
-        : `To decide, run ${CMD('enable')} or ${CMD('disable')}.`];
+        : `To decide, answer Toolkit's question in chat, or run ${CMD('enable')} or ${CMD('disable')} in your own terminal.`];
     this.#print(json, { state: state.state, writes: 0 }, lines);
     return 0;
   }
@@ -169,7 +169,7 @@ class ToolkitGovernanceCli {
         : 'This repository has no usable origin remote, so a decision cannot be stored for it. Only the global rules apply.');
     }
     if (!this.#interactive) {
-      throw new GovernanceCliError('Run this yourself in a terminal: a governance decision is recorded only when you type it. Nothing was written.');
+      throw new GovernanceCliError(`Nothing was written: a governance decision is recorded only when you make it yourself. If you are an agent, ask the user in chat instead: "${gate.ASK}" Toolkit records their own reply. If you are the user, run this in your own terminal.`);
     }
     const status = registry.getRepositoryStatus({ cwd: this.#cwd, ...this.#registryOptions });
     if (status.status === 'actionable') throw new GovernanceCliError(`Your governance decisions could not be read (${status.reason_code}). Nothing was written.`);

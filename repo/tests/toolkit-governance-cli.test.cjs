@@ -100,7 +100,7 @@ test('H-07 (unit): without a terminal nothing is recorded', async (t) => {
   for (const command of ['enable', 'disable', 'decline']) {
     const result = await run(ctx, repo, [command], { interactive: false });
     assert.equal(result.code, 2);
-    assert.match(result.stderr, /Run this yourself in a terminal/);
+    assert.match(result.stderr, /Nothing was written: .*ask the user in chat instead: "Turn on Toolkit governance for this repository\?.*run this in your own terminal/);
     assert.equal(result.asked.length, 0);
   }
   assert.equal(fs.existsSync(ctx.registryPath), false);

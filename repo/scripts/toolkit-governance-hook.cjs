@@ -39,7 +39,7 @@ function respond(event, input, options = {}) {
   try {
     gate = options.gate || require('./toolkit-governance-gate.cjs');
     if (event === 'UserPromptSubmit') {
-      const decision = new gate.PromptHold(options).decide({ cwd: input.cwd, prompt: input.prompt });
+      const decision = new gate.PromptHold(options).decide({ cwd: input.cwd, prompt: input.prompt, sessionId: gate.sessionIdOf(input) });
       if (decision.action === 'block') return { decision: 'block', reason: decision.reason };
       return decision.context ? { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: decision.context } } : {};
     }
@@ -47,7 +47,7 @@ function respond(event, input, options = {}) {
       const decision = new gate.ToolGate(options).decide(input);
       return decision ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: decision.deny } } : {};
     }
-    const line = gate.sessionLine(input.cwd, options);
+    const line = gate.sessionLine(input.cwd, { ...options, sessionId: gate.sessionIdOf(input) });
     return line ? { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: line } } : {};
   } catch {
     return failed(event, input, gate);
