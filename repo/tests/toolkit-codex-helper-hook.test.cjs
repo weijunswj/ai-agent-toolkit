@@ -192,3 +192,69 @@ test('Windows launcher treats unreadable, unsupported or relative runtime metada
     assert.match(r.stderr, new RegExp(reason), reason);
   }
 });
+
+// Codex runs a hook's Windows command in the session shell, usually `<PowerShell> -Command "<command>"`
+// and otherwise `cmd.exe /C`. Codex blocks a prompt or a tool call only on exit 2 with the reason on
+// stderr; exit 1 is a hook failure and the prompt or call goes ahead.
+function codexWindowsShells() {
+  const shells = [
+    ['cmd.exe /C', process.env.ComSpec, command => ['/d', '/s', '/c', `"${command}"`], true],
+    ['Windows PowerShell -Command', path.join(process.env.SystemRoot || process.env.SYSTEMROOT || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), command => ['-NoProfile', '-Command', command], false],
+  ];
+  const pwsh = path.join(process.env.ProgramFiles || 'C:\\Program Files', 'PowerShell', '7', 'pwsh.exe');
+  if (fs.existsSync(pwsh)) shells.push(['PowerShell 7 -Command', pwsh, command => ['-NoProfile', '-Command', command], false]);
+  return shells;
+}
+
+// A plugin-shaped folder with the real launcher, runtime metadata naming this Node, and a hook script
+// that loads the real hook from this checkout, run through the command setup installs.
+function installedWindowsHelperHook(t) {
+  const setup = require('../scripts/setup-codex-toolkit-plugin.cjs');
+  const pluginRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-codex-launcher-'));
+  t.after(() => fs.rmSync(pluginRoot, { recursive: true, force: true }));
+  const scripts = path.join(pluginRoot, 'repo', 'scripts');
+  fs.mkdirSync(scripts, { recursive: true });
+  fs.mkdirSync(path.join(pluginRoot, '.codex-plugin'), { recursive: true });
+  fs.writeFileSync(path.join(pluginRoot, '.codex-plugin', 'session-start-runtime.json'), JSON.stringify({ schema: 1, node_path: process.execPath }));
+  fs.copyFileSync(path.join(ROOT, 'repo', 'scripts', 'toolkit-codex-helper-hook.ps1'), path.join(scripts, 'toolkit-codex-helper-hook.ps1'));
+  fs.writeFileSync(path.join(scripts, 'toolkit-codex-helper-hook.cjs'),
+    `'use strict';\nrequire(${JSON.stringify(HOOK)}).main().catch(() => { process.stderr.write('hook failed\\n'); process.exitCode = 1; });\n`);
+  return setup.windowsHelperHookCommand(setup.defaultWindowsPowerShellPath()).split('${PLUGIN_ROOT}').join(pluginRoot.split(path.sep).join('/'));
+}
+
+test('Windows: a held prompt and a refused tool call reach Codex as exit 2 under cmd.exe, Windows PowerShell and PowerShell 7', { skip: process.platform !== 'win32' }, t => {
+  const command = installedWindowsHelperHook(t);
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-codex-launcher-repos-'));
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  const plain = path.join(base, 'plain');
+  fs.mkdirSync(plain, { recursive: true });
+  for (const [name, shell, args, verbatim] of codexWindowsShells()) {
+    // A fresh undecided repository and home per shell, so each run sees the first question.
+    const slug = name.replace(/\W+/g, '-'), repo = path.join(base, `undecided-${slug}`), home = path.join(base, `home-${slug}`);
+    fs.mkdirSync(home, { recursive: true });
+    spawnSync('git', ['init', '--quiet', repo], { windowsHide: true });
+    spawnSync('git', ['-C', repo, 'remote', 'add', 'origin', 'https://github.com/example-owner/example-repo.git'], { windowsHide: true });
+    const env = { ...process.env, PATH: '', HOME: home, USERPROFILE: home, CODEX_HOME: path.join(home, '.codex') };
+    for (const key of MARKERS) delete env[key];
+    const hook = input => {
+      const r = spawnSync(shell, args(command), { input: JSON.stringify(input), env, cwd: plain, encoding: 'utf8', timeout: 60000, windowsHide: true, windowsVerbatimArguments: verbatim });
+      return { status: r.status, stdout: r.stdout, stderr: r.stderr };
+    };
+
+    const held = hook({ hook_event_name: 'UserPromptSubmit', cwd: repo, prompt: 'list the files here' });
+    assert.equal(held.status, 2, `${name} prompt hold: ${held.stderr}`);
+    assert.equal(JSON.parse(held.stdout.trim()).decision, 'block', name);
+    assert.match(held.stderr, /Toolkit: this repository has no governance decision yet, so your message was held and not sent\./, name);
+
+    const denied = hook({ hook_event_name: 'PreToolUse', cwd: repo, tool_name: 'apply_patch', tool_input: { input: '*** Begin Patch\n*** End Patch' } });
+    assert.equal(denied.status, 2, `${name} tool deny: ${denied.stderr}`);
+    const deny = JSON.parse(denied.stdout.trim()).hookSpecificOutput;
+    assert.equal(deny.permissionDecision, 'deny', name);
+    assert.ok(denied.stderr.includes(deny.permissionDecisionReason), `${name}: stderr carries the deny reason`);
+
+    const allowed = hook({ hook_event_name: 'PreToolUse', cwd: plain, tool_name: 'Bash', tool_input: { command: 'dir' } });
+    assert.deepEqual([allowed.status, allowed.stdout], [0, ''], `${name}: an allowed call is exit 0 with no output: ${allowed.stderr}`);
+    const passed = hook({ hook_event_name: 'UserPromptSubmit', cwd: plain, prompt: 'hello' });
+    assert.deepEqual([passed.status, passed.stdout], [0, ''], `${name}: a prompt outside any repository passes`);
+  }
+});

@@ -139,12 +139,16 @@ function sourceHelperHookCommand() {
 // quotes and the script runs through -File, so the same text works in cmd.exe and PowerShell and neither
 // shell looks for node or powershell in the opened folder. Codex replaces ${PLUGIN_ROOT} before the shell
 // sees the command. A PowerShell path with spaces or quotes cannot be written this way, so setup stops.
+// Codex runs the command in the session shell, usually as `<PowerShell> -Command "<command>"`, and that
+// form turns any non-zero exit of the last program into 1 (PowerShell issue 13501). Codex blocks only on
+// exit 2, so the trailing `; exit $LASTEXITCODE` hands the launcher's own exit code back; under cmd.exe
+// the same words reach the launcher as unused script arguments, and cmd.exe already keeps the code.
 function windowsHookCommand(scriptRelPath, powershellPath = defaultWindowsPowerShellPath()) {
   const value = String(powershellPath);
   if (!path.win32.isAbsolute(value) || /[\s"'&|<>^%]/.test(value)) {
     throw new Error(`Toolkit can only write a Windows hook command for a PowerShell path without spaces or special characters: ${value}`);
   }
-  return `${value} -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "\${PLUGIN_ROOT}/${scriptRelPath}"`;
+  return `${value} -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "\${PLUGIN_ROOT}/${scriptRelPath}" ; exit $LASTEXITCODE`;
 }
 
 function windowsSessionStartCommand(powershellPath = defaultWindowsPowerShellPath()) {

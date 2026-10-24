@@ -647,8 +647,8 @@ test('installed hooks keep the portable command and add commandWindows to both h
   const helper = installed.hooks.PreToolUse[0].hooks[0];
   assert.equal(session.command, setup.sourceSessionStartCommand());
   assert.equal(helper.command, setup.sourceHelperHookCommand());
-  assert.equal(session.commandWindows, `${powershellPath} -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "\${PLUGIN_ROOT}/repo/scripts/toolkit-codex-session-start.ps1"`);
-  assert.equal(helper.commandWindows, `${powershellPath} -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "\${PLUGIN_ROOT}/repo/scripts/toolkit-codex-helper-hook.ps1"`);
+  assert.equal(session.commandWindows, `${powershellPath} -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "\${PLUGIN_ROOT}/repo/scripts/toolkit-codex-session-start.ps1" ; exit $LASTEXITCODE`);
+  assert.equal(helper.commandWindows, `${powershellPath} -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "\${PLUGIN_ROOT}/repo/scripts/toolkit-codex-helper-hook.ps1" ; exit $LASTEXITCODE`);
   const source = JSON.parse(fs.readFileSync(path.join(repoRoot, '.codex-plugin', 'hooks', 'hooks.json'), 'utf8'));
   assert.equal(JSON.stringify(source).includes('commandWindows'), false);
   assert.equal(setup.CACHE_FINGERPRINT_PATHS.includes(setup.HELPER_HOOK_POWERSHELL_REL_PATH), true);

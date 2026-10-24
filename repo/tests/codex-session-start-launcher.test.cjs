@@ -244,11 +244,11 @@ test('Windows launcher uses exact Node metadata, preserves stdin and output, and
 
 test('Windows installed commands use a full PowerShell path and -File with no nested command text', () => {
   const command = setup.windowsSessionStartCommand('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe');
-  assert.equal(command, 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${PLUGIN_ROOT}/repo/scripts/toolkit-codex-session-start.ps1"');
+  assert.equal(command, 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${PLUGIN_ROOT}/repo/scripts/toolkit-codex-session-start.ps1" ; exit $LASTEXITCODE');
   assert.doesNotMatch(command, /\$env:|(?:^|\s)-Command(?:\s|$)|&\s*[{'"]/i);
   assert.doesNotMatch(command, /\.sh(?:["\s]|$)|(?:^|[\\/])code(?:\.exe)?(?:["\s]|$)/i);
-  assert.match(setup.windowsHelperHookCommand('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'), /-File "\$\{PLUGIN_ROOT\}\/repo\/scripts\/toolkit-codex-helper-hook\.ps1"$/);
-  assert.match(setup.windowsCheckpointHookCommand('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'), /-File "\$\{PLUGIN_ROOT\}\/repo\/scripts\/toolkit-programme-checkpoint-hook\.ps1"$/);
+  assert.match(setup.windowsHelperHookCommand('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'), /-File "\$\{PLUGIN_ROOT\}\/repo\/scripts\/toolkit-codex-helper-hook\.ps1" ; exit \$LASTEXITCODE$/);
+  assert.match(setup.windowsCheckpointHookCommand('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'), /-File "\$\{PLUGIN_ROOT\}\/repo\/scripts\/toolkit-programme-checkpoint-hook\.ps1" ; exit \$LASTEXITCODE$/);
   assert.throws(() => setup.prepareInstalledSessionStart(path.join(tmpRoot(), 'cache $dollar'), { platform: 'win32' }), /cannot carry safely/);
 });
 
