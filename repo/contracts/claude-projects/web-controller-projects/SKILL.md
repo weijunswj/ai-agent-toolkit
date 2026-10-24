@@ -4,7 +4,7 @@ description: "Use when running as a Claude Projects coordinator and the user app
 ---
 
 # Web Controller for Claude Projects
-Version: 2026-10-24.3
+Version: 2026-10-24.4
 
 Run Toolkit repos through Claude Projects. The global rules and coding gates apply in every project; GitHub governance (parent and child issues, records, decision traces, evidence custody) applies only to a github.com repo whose governance state is ENABLED. Keep project facts (repos, devices, lanes, pending work) in project memory.
 
@@ -254,6 +254,7 @@ A `malformed` prompt holds and is reported.
 - When you answer inside a post's reply thread and the answer carries a decision, a question, an action for the owner or a change of plan, also post a one-line pointer to it in top-level project chat. The owner may close that reply thread, which hides your answer. Plain acknowledgements need no pointer.
 - For each approval or interactive step, either handle it within approved scope or post the direct thread link and say exactly what to tap or type.
 - When blocked on a person or another account, say once what is needed and move to the next unblocked item.
+- **Owner UAT lists carry only owner-hands steps** (global rules): real app UI, signed-in accounts and device behaviour CI cannot reach. End each list with what was dropped and the passing check that covers each; the user can pull any item back in.
 
 ## Improving this skill
 - The source of truth is `repo/contracts/claude-projects/web-controller-projects/SKILL.md` in the Toolkit repo. The user, or another project at the user's request, may edit the copy on the user's claude.ai account directly. Before any upload, a coordinator compares that copy with the repo file and brings direct edits into Toolkit first, so nothing is overwritten.
