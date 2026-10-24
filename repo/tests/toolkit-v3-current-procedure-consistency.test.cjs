@@ -232,7 +232,7 @@ function ownerLawContract(texts) {
   assert.match(shipping, /\*\*Finish authorised work before stopping\.\*\*/, 'finish-before-stop sits in the global Shipping section');
   for (const clause of [/is not a finish/, /holds only the steps that depend on it/, /report the exact hold and next action/,
     /never authorises working around a denial, an unsafe retry, a duplicate writer, an unapproved model launch or claimed background work/]) assert.match(shipping, clause);
-  for (const rel of GATE_SURFACES) assert.match(texts[rel], /Models and effort come only from an explicitly selected stack registry revision/, rel);
+  for (const rel of GATE_SURFACES) assert.match(texts[rel], /Gate models and effort come only from an explicitly selected stack registry revision/, rel);
   const v3 = texts[V3_DOC];
   assert.ok(section(v3, 10).includes('**Launch ownership.** ' + LAUNCH_OWNERSHIP_V3));
   assert.ok(section(v3, 6).includes(FINISH_BEFORE_STOP));
@@ -256,7 +256,7 @@ test('launch ownership and finish-before-stop keep their meaning on every curren
     [V3_DOC, 'holds only its dependent steps', 'stops all work'],
     [V3_DOC, 'a model or effort difference alone is not a G2 failure', 'a model difference fails G2'],
     ['skills/controller-bootstrap/SKILL.md', 'without fallback or weaker effort', 'with the controller choosing the effort'],
-    [GLOBAL, 'Models and effort come only from an explicitly selected stack registry revision', 'Models and effort come from any registry']
+    [GLOBAL, 'Gate models and effort come only from an explicitly selected stack registry revision', 'Gate models and effort come from any registry']
   ]) {
     assert.ok(texts[rel].includes(before), `mutation target exists in ${rel}: ${before}`);
     assert.throws(() => ownerLawContract({ ...texts, [rel]: texts[rel].replace(before, after) }), `reject ${rel}: ${before}`);

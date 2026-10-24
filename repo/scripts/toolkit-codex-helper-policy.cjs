@@ -78,7 +78,7 @@ class CodexNamedHelperPolicy {
 
   decide(input, governance) {
     // Codex sends no caller-agent identity today; if a future version does, a helper is refused.
-    if (input.agent_id) return deny('a helper cannot launch another agent. Only the G0 or G1 lead launches helpers.');
+    if (input.agent_id) return deny('a helper cannot launch another agent. Only the main session launches helpers.');
     if (governance.gate_role === 'G2') return deny('G2 review sessions launch no helpers; do the review in this session.');
     const args = input.tool_input && typeof input.tool_input === 'object' && !Array.isArray(input.tool_input) ? input.tool_input : {};
     if (args.subagent_type !== undefined && args.agent_type !== undefined && args.subagent_type !== args.agent_type) {
