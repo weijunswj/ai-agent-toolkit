@@ -262,3 +262,33 @@ test('launch ownership and finish-before-stop keep their meaning on every curren
     assert.throws(() => ownerLawContract({ ...texts, [rel]: texts[rel].replace(before, after) }), `reject ${rel}: ${before}`);
   }
 });
+
+// Owner UAT holds only what needs the owner's own hands; CI, tests and G2 prove the rest.
+const PROJECTS_SKILL = 'repo/contracts/claude-projects/web-controller-projects/SKILL.md';
+
+function ownerUatScopeContract(texts) {
+  assert.match(texts[GLOBAL], /G2 starts after the working result and any owner UAT acceptance/);
+  assert.match(texts[GLOBAL], /Owner UAT holds only owner-hands steps \(real app UI, signed-in accounts, device behaviour CI cannot reach\); CI, tests and G2 prove the rest, each UAT list names the check covering every dropped item, and with none UAT is NOT_REQUIRED\./);
+  assert.match(texts[GLOBAL], /only when the merge completes every criterion and any owner UAT has passed/);
+  assert.match(texts[GLOBAL], /Close an issue only after its PR merged and any owner UAT passed/);
+  assert.match(texts['repo/CONTROLLER.md'], /At admission split acceptance: owner UAT only for owner-hands steps \(global rules\), objective acceptance \(CI, tests, G2\) for the rest; with no such step record NOT_REQUIRED\. Missing authority never waives a needed UAT\./);
+  assert.match(texts['repo/CONTROLLER.md'], /G2 begins after builder readiness and any owner UAT acceptance/);
+  assert.match(texts[V3_DOC], /User acceptance covers only what needs the owner's own hands/);
+  assert.match(texts[V3_DOC], /G2 starts after G1's working version and any required user UAT are accepted/);
+  assert.match(texts[PROJECTS_SKILL], /\*\*Owner UAT lists carry only owner-hands steps\*\* \(global rules\)/);
+}
+
+test('owner UAT is limited to owner-hands steps on every current surface', () => {
+  const texts = { ...surfaces(), [V3_DOC]: read(V3_DOC), [PROJECTS_SKILL]: read(PROJECTS_SKILL) };
+  ownerUatScopeContract(texts);
+  for (const [rel, before, after] of [
+    [GLOBAL, 'Owner UAT holds only owner-hands steps', 'Owner UAT holds every step'],
+    [GLOBAL, 'any owner UAT has passed', "the owner's UAT has passed"],
+    ['repo/CONTROLLER.md', 'with no such step record NOT_REQUIRED', 'always run owner UAT'],
+    [V3_DOC, 'User acceptance covers only', 'User acceptance covers every step, not only'],
+    [PROJECTS_SKILL, '**Owner UAT lists carry only owner-hands steps**', '**Owner UAT lists carry every step**']
+  ]) {
+    assert.ok(texts[rel].includes(before), `mutation target exists in ${rel}: ${before}`);
+    assert.throws(() => ownerUatScopeContract({ ...texts, [rel]: texts[rel].replace(before, after) }), `reject ${rel}: ${before}`);
+  }
+});

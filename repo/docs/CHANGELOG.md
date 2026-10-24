@@ -1,5 +1,10 @@
 # Toolkit Changelog
 
+## 3.10.1 (owner UAT only where the owner's hands are needed)
+
+- **Owner UAT is narrowed:** it holds only steps that need the owner's own hands, such as real app UI, signed-in accounts and device behaviour CI cannot reach. CI (Windows runners included), automated tests and G2 review prove everything else, and each UAT list names the passing check for every step it leaves out. When nothing needs the owner's hands, UAT is recorded as not required.
+- **Where it lives:** the Coding Gates in the global rules, the issue-closing rule there ("any owner UAT"), the controller's admission rule, the V3 direction and one Projects skill line for UAT lists. Duplicated sentences in the global rules and the controller file were trimmed to keep both inside their size budgets.
+
 ## 3.10.0 (host support, governance states, decision history and the personal-data guard)
 
 ### Decision history before planning
