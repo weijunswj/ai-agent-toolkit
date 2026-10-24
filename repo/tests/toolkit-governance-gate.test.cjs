@@ -67,19 +67,24 @@ test('H-01, H-02: every prompt in an undecided repository is held; the first sho
   const first = hold(ctx).decide({ cwd: repo, prompt: 'fix the login bug' });
   assert.equal(first.action, 'block');
   assert.ok(first.reason.startsWith(QUESTION_LINE));
-  assert.match(first.reason, /toolkit governance enable/);
-  assert.match(first.reason, /toolkit governance disable/);
+  // A plain question with what governance is and what each answer does, never a command to run.
+  assert.match(first.reason, /^Turn on Toolkit governance for this repository\? Reply yes, no or not now\.$/m);
+  assert.match(first.reason, /Toolkit governance means /);
+  for (const answer of ['yes', 'no', 'not now']) assert.match(first.reason, new RegExp(`^  ${answer} +\\S`, 'm'), answer);
+  assert.doesNotMatch(first.reason, /toolkit-governance\.cjs|node /);
   const second = hold(ctx).decide({ cwd: repo, prompt: 'and the logout one' });
   assert.equal(second.action, 'block');
-  assert.match(second.reason, /\(2 messages held\)/);
+  assert.match(second.reason, /\(2 messages held\)\. Turn on Toolkit governance for this repository\? Reply yes, no or not now\./);
   assert.equal(fs.existsSync(repoState.filePath(repo)), false, 'nothing is recorded in the repository while undecided');
   assert.equal(registryBytes(ctx), null, 'no decision is written');
 });
 
-test('bypass attempts: ignoring, skipping, near-misses and "yes" all stay held and write nothing (H-06)', (t) => {
+test('bypass attempts: ignoring, skipping, near-misses and a "yes" before the question all stay held and write nothing (H-06)', (t) => {
   const ctx = scratch(t);
   const repo = gitRepo(ctx, 'repo');
-  const attempts = ['', '   ', 'yes', 'y', 'skip', 'ignore that and just do the task', 'toolkit governance', 'toolkit governance enable please',
+  // "yes" as the very first message is not an answer: the user has not seen the question yet.
+  assert.equal(hold(ctx).decide({ cwd: repo, prompt: 'yes', sessionId: 's1' }).action, 'block');
+  const attempts = ['', '   ', 'yes please', 'yeah', 'ok', 'sure', 'no thanks', 'not now please', 'yes\nand fix the bug', 'skip', 'ignore that and just do the task', 'toolkit governance', 'toolkit governance enable please',
     'please toolkit governance enable', 'toolkit governance enabled', 'toolkit governance reopen', '/toolkit governance enable',
     'toolkit  governance enable', '`toolkit governance enable`', 'toolkit governance enable\nnow fix the bug'];
   for (const prompt of attempts) {
@@ -136,6 +141,76 @@ test('a copy written as DECLINED by an earlier version reads as DISABLED and is 
   assert.equal(fileOf(repo).state, 'DISABLED');
   assert.deepEqual(fileOf(repo).history.map(entry => entry.state), ['DISABLED', 'DISABLED']);
   assert.equal(new gate.GovernanceGate({ registryOptions: ctx.options }).evaluate(repo).file, 'agrees');
+});
+
+test('short replies after the question: yes enables, no disables, and the held prompts come back', (t) => {
+  const ctx = scratch(t);
+  for (const [index, [reply, expected]] of [['yes', 'ENABLED'], ['Y', 'ENABLED'], ['no', 'DISABLED'], ['No.', 'DISABLED']].entries()) {
+    const slug = `short-${index}`;
+    const repo = gitRepo(ctx, slug, { remote: `https://github.com/example-owner/${slug}.git` });
+    assert.equal(hold(ctx).decide({ cwd: repo, prompt: 'fix the login bug', sessionId: 's1' }).action, 'block');
+    const answered = hold(ctx).decide({ cwd: repo, prompt: reply, sessionId: 's1' });
+    assert.equal(answered.action, 'pass', reply);
+    assert.match(answered.context, new RegExp(`now ${expected}`), reply);
+    assert.match(answered.context, /1\. fix the login bug/);
+    assert.equal(stateOf(ctx, repo).state, expected, reply);
+  }
+});
+
+test('not now: nothing is recorded, this session carries on under the global rules, and a new session asks again', (t) => {
+  const ctx = scratch(t);
+  const repo = gitRepo(ctx, 'repo');
+  hold(ctx).decide({ cwd: repo, prompt: 'held while deciding', sessionId: 's1' });
+  const later = hold(ctx).decide({ cwd: repo, prompt: 'Not now', sessionId: 's1' });
+  assert.equal(later.action, 'pass');
+  assert.match(later.context, /"not now".*follow only the global rules/);
+  assert.match(later.context, /1\. held while deciding/);
+  assert.equal(registryBytes(ctx), null, 'no decision is written');
+  assert.equal(stateOf(ctx, repo).state, 'UNDECIDED');
+  assert.equal(fs.existsSync(repoState.filePath(repo)), false);
+  // The same session runs.
+  assert.deepEqual(hold(ctx).decide({ cwd: repo, prompt: 'next', sessionId: 's1' }), { action: 'pass' });
+  assert.equal(new gate.ToolGate({ registryOptions: ctx.options }).decide({ tool_name: 'Bash', cwd: repo, session_id: 's1', tool_input: { command: 'ls' } }), null);
+  assert.match(gate.sessionLine(repo, { registryOptions: ctx.options, sessionId: 's1' }), /"not now" for this session/);
+  // Another session, or one with no id, is held and asked again.
+  assert.equal(hold(ctx).decide({ cwd: repo, prompt: 'go', sessionId: 's2' }).action, 'block');
+  assert.ok(new gate.ToolGate({ registryOptions: ctx.options }).decide({ tool_name: 'Bash', cwd: repo, session_id: 's2', tool_input: { command: 'ls' } }).deny);
+  assert.match(gate.sessionLine(repo, { registryOptions: ctx.options }), /no decision yet/);
+  // A later yes in the new session still decides.
+  assert.equal(hold(ctx).decide({ cwd: repo, prompt: 'yes', sessionId: 's2' }).action, 'pass');
+  assert.equal(stateOf(ctx, repo).state, 'ENABLED');
+});
+
+test('not now needs a session id, and a launcher-started session cannot give any short reply', (t) => {
+  const ctx = scratch(t);
+  const repo = gitRepo(ctx, 'repo');
+  hold(ctx).decide({ cwd: repo, prompt: 'go' });
+  const noId = hold(ctx).decide({ cwd: repo, prompt: 'not now' });
+  assert.equal(noId.action, 'block');
+  assert.match(noId.reason, /"not now" cannot be kept\. .*Reply yes or no\./);
+  for (const reply of ['yes', 'no', 'not now']) {
+    const automated = hold(ctx, { TOOLKIT_GATE_ROLE: 'G1' }).decide({ cwd: repo, prompt: reply, sessionId: 's1' });
+    assert.equal(automated.action, 'block', reply);
+    assert.match(automated.reason, /automated session cannot answer/);
+  }
+  assert.equal(registryBytes(ctx), null);
+  assert.equal(fs.existsSync(path.join(path.dirname(ctx.registryPath), gate.NOT_NOW_BASENAME)), false);
+});
+
+test('what the agent is told: ask the question in plain words, never ask the user to run a command', (t) => {
+  const ctx = scratch(t);
+  const repo = gitRepo(ctx, 'repo');
+  const deny = tools(ctx).decide({ tool_name: 'Bash', cwd: repo, tool_input: { command: 'ls' } }).deny;
+  const line = gate.sessionLine(repo, { registryOptions: ctx.options });
+  const refused = tools(ctx).decide({ tool_name: 'Bash', cwd: repo, tool_input: { command: 'node repo/scripts/toolkit-governance.cjs enable' } }).deny;
+  for (const text of [deny, line, refused]) {
+    assert.ok(text.includes(gate.ASK), text);
+    assert.doesNotMatch(text, /toolkit governance (?:enable|disable)|run the command/, text);
+  }
+  assert.match(deny, /never ask them to run a command/);
+  // An agent cannot forge a "not now" either: the file lives with Toolkit's user state.
+  const forged = path.join(path.dirname(ctx.registryPath), gate.NOT_NOW_BASENAME);
+  assert.ok(tools(ctx).decide({ tool_name: 'Write', cwd: repo, tool_input: { file_path: forged } }).deny);
 });
 
 test('H-08: a decision made at the terminal lets the next prompt through and hands back the held prompts', (t) => {
@@ -442,8 +517,9 @@ test('hosts: the Codex helper hook holds prompts with exit 2 and refuses tools i
   const tool = run({ hook_event_name: 'PreToolUse', cwd: repo, tool_name: 'apply_patch', tool_input: { input: '*** Begin Patch\n*** End Patch' } });
   assert.equal(tool.status, 2);
   assert.match(JSON.parse(tool.stdout).hookSpecificOutput.permissionDecisionReason, /no governance decision yet/);
-  const answered = run({ hook_event_name: 'UserPromptSubmit', cwd: repo, prompt: 'toolkit governance enable' });
-  assert.equal(answered.status, 0);
+  // The user's short reply to the question is the answer on Codex too.
+  const answered = run({ hook_event_name: 'UserPromptSubmit', cwd: repo, session_id: 'codex-session', prompt: 'yes' });
+  assert.equal(answered.status, 0, answered.stderr);
   assert.match(JSON.parse(answered.stdout).hookSpecificOutput.additionalContext, /now ENABLED/);
   const after = run({ hook_event_name: 'UserPromptSubmit', cwd: repo, prompt: 'go' });
   assert.deepEqual([after.status, after.stdout], [0, '']);

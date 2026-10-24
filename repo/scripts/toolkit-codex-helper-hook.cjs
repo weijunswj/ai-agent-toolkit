@@ -69,7 +69,7 @@ async function decide(input, environment = process.env) {
 
 // The UserPromptSubmit decision: { block: reason } or { context } or {}.
 function decidePrompt(input, environment = process.env) {
-  const decision = new (gate().PromptHold)({ environment }).decide({ cwd: input?.cwd, prompt: input?.prompt });
+  const decision = new (gate().PromptHold)({ environment }).decide({ cwd: input?.cwd, prompt: input?.prompt, sessionId: gate().sessionIdOf(input) });
   if (decision.action === 'block') return { block: decision.reason };
   return decision.context ? { context: decision.context } : {};
 }

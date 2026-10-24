@@ -86,8 +86,8 @@ function checkConformance(cwd, options = {}) {
   }
   if (state.state === 'UNDECIDED') {
     findings.push(finding('DECISION_PENDING', 'drift', state.rule === 'R6'
-      ? `The repository carries the governed block but no programme binding, and you have not decided yet. Run \`${governance.governanceCommand('enable')}\` or \`${governance.governanceCommand('disable')}\`.`
-      : `You have not decided whether Toolkit governs this repository. Run \`${governance.governanceCommand('enable')}\` or \`${governance.governanceCommand('disable')}\`.`));
+      ? `The repository carries the governed block but no programme binding, and you have not decided yet. Answer Toolkit's question in chat (yes, no or not now), or run \`${governance.governanceCommand('enable')}\` or \`${governance.governanceCommand('disable')}\` in your own terminal.`
+      : `You have not decided whether Toolkit governs this repository. Answer Toolkit's question in chat (yes, no or not now), or run \`${governance.governanceCommand('enable')}\` or \`${governance.governanceCommand('disable')}\` in your own terminal.`));
   }
   if (state.state === 'DISABLED') {
     if (state.materials.governed_block) findings.push(finding('GOVERNED_BLOCK_IGNORED', 'info', 'You disabled Toolkit governance here, so the governed block in AGENTS.md is not followed.'));
