@@ -192,3 +192,81 @@ test('Windows launcher treats unreadable, unsupported or relative runtime metada
     assert.match(r.stderr, new RegExp(reason), reason);
   }
 });
+
+// The shells Codex can run a Windows hook command through: Windows PowerShell 5.1, which setup
+// writes, and PowerShell 7 when it is installed.
+function windowsShells() {
+  const shells = [['Windows PowerShell', path.join(process.env.SystemRoot || process.env.SYSTEMROOT || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')]];
+  const pwsh = path.join(process.env.ProgramFiles || 'C:\\Program Files', 'PowerShell', '7', 'pwsh.exe');
+  if (fs.existsSync(pwsh)) shells.push(['PowerShell 7', pwsh]);
+  return shells;
+}
+
+// A plugin-shaped folder whose launcher starts the real Node with a script that loads the real
+// hook from this checkout, so every decision comes from the shipped code.
+function workingWindowsPlugin(t, launcher, script) {
+  const pluginRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-codex-launcher-'));
+  t.after(() => fs.rmSync(pluginRoot, { recursive: true, force: true }));
+  const scripts = path.join(pluginRoot, 'repo', 'scripts');
+  fs.mkdirSync(scripts, { recursive: true });
+  fs.mkdirSync(path.join(pluginRoot, '.codex-plugin'), { recursive: true });
+  fs.writeFileSync(path.join(pluginRoot, '.codex-plugin', 'session-start-runtime.json'), JSON.stringify({ schema: 1, node_path: process.execPath }));
+  fs.copyFileSync(path.join(ROOT, 'repo', 'scripts', launcher), path.join(scripts, launcher));
+  fs.writeFileSync(path.join(scripts, launcher.replace(/\.ps1$/, '.cjs')), script);
+  return path.join(scripts, launcher);
+}
+
+function runWindowsLauncher(shell, launcherPath, input, env = {}) {
+  const r = spawnSync(shell, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', launcherPath],
+    { input, env: { ...process.env, PATH: '', ...env }, encoding: 'utf8', timeout: 60000, windowsHide: true });
+  return { status: r.status, stdout: r.stdout, stderr: r.stderr };
+}
+
+// Codex blocks a prompt or a tool call only on exit 2 with the reason on stderr; exit 1 is a hook
+// failure and the prompt or call goes ahead. Windows PowerShell 5.1 can turn a native command's
+// stderr into an error, so the launcher must pass Node's exit code and streams through unchanged.
+test('Windows launcher passes Node holds and denies through with exit 2, unchanged stderr and the JSON decision', { skip: process.platform !== 'win32' }, t => {
+  const real = JSON.stringify(HOOK);
+  const launcher = workingWindowsPlugin(t, 'toolkit-codex-helper-hook.ps1',
+    `'use strict';\nrequire(${real}).main().catch(() => { process.stderr.write('hook failed\\n'); process.exitCode = 1; });\n`);
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-codex-launcher-repos-'));
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  const repo = path.join(base, 'undecided'), plain = path.join(base, 'plain'), home = path.join(base, 'home');
+  for (const dir of [plain, home]) fs.mkdirSync(dir, { recursive: true });
+  spawnSync('git', ['init', '--quiet', repo], { windowsHide: true });
+  spawnSync('git', ['-C', repo, 'remote', 'add', 'origin', 'https://github.com/example-owner/example-repo.git'], { windowsHide: true });
+  const env = { HOME: home, USERPROFILE: home, CODEX_HOME: path.join(home, '.codex') };
+  const clean = { ...env };
+  for (const key of MARKERS) clean[key] = '';
+  for (const [name, shell] of windowsShells()) {
+    const held = runWindowsLauncher(shell, launcher, JSON.stringify({ hook_event_name: 'UserPromptSubmit', cwd: repo, prompt: 'list the files here' }), clean);
+    assert.equal(held.status, 2, `${name} prompt hold: ${held.stderr}`);
+    assert.equal(JSON.parse(held.stdout.trim()).decision, 'block', name);
+    assert.match(held.stderr, /^Toolkit: this repository has no governance decision yet, so your message was held and not sent\.\r?\nReply with exactly one of these/, name);
+    assert.doesNotMatch(held.stderr, /NativeCommandError|CategoryInfo|At line/, `${name}: the reason reaches Codex as Node wrote it`);
+
+    const denied = runWindowsLauncher(shell, launcher, JSON.stringify({ hook_event_name: 'PreToolUse', cwd: repo, tool_name: 'apply_patch', tool_input: { input: '*** Begin Patch\n*** End Patch' } }), clean);
+    assert.equal(denied.status, 2, `${name} tool deny: ${denied.stderr}`);
+    const deny = JSON.parse(denied.stdout.trim()).hookSpecificOutput;
+    assert.equal(deny.permissionDecision, 'deny', name);
+    assert.equal(denied.stderr.trim(), deny.permissionDecisionReason, `${name}: stderr carries exactly the deny reason`);
+
+    const allowed = runWindowsLauncher(shell, launcher, JSON.stringify({ hook_event_name: 'PreToolUse', cwd: plain, tool_name: 'Bash', tool_input: { command: 'dir' } }), clean);
+    assert.deepEqual([allowed.status, allowed.stdout, allowed.stderr], [0, '', ''], `${name}: an allowed call is exit 0 with no output`);
+    const passed = runWindowsLauncher(shell, launcher, JSON.stringify({ hook_event_name: 'UserPromptSubmit', cwd: plain, prompt: 'hello' }), clean);
+    assert.deepEqual([passed.status, passed.stdout], [0, ''], `${name}: a prompt outside any repository passes`);
+  }
+});
+
+test('Windows turn-end and session-start launchers keep Node stderr from failing the hook', { skip: process.platform !== 'win32' }, t => {
+  const noisy = "'use strict';\nprocess.stdin.resume(); process.stdin.on('end', () => {});\nprocess.stderr.write('a warning on stderr\\n');\nprocess.stdout.write(process.env.TOOLKIT_TEST_STDOUT || '');\n";
+  const checkpoint = workingWindowsPlugin(t, 'toolkit-programme-checkpoint-hook.ps1', noisy);
+  const session = workingWindowsPlugin(t, 'toolkit-codex-session-start.ps1', noisy);
+  for (const [name, shell] of windowsShells()) {
+    const turnEnd = runWindowsLauncher(shell, checkpoint, '{"hook_event_name":"Stop"}', { TOOLKIT_TEST_STDOUT: 'ignored' });
+    assert.deepEqual([turnEnd.status, turnEnd.stdout], [0, ''], `${name} turn end: ${turnEnd.stderr}`);
+    const start = runWindowsLauncher(shell, session, '{"hook_event_name":"SessionStart"}', { TOOLKIT_TEST_STDOUT: 'Toolkit context line' });
+    assert.equal(start.status, 0, `${name} session start: ${start.stderr}`);
+    assert.equal(start.stdout.trim(), 'Toolkit context line', `${name}: Node's own output, not the repair warning`);
+  }
+});
