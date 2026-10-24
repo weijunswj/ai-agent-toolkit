@@ -117,7 +117,8 @@ test('M-01: one batched question; the evidence store is disabled, the no-origin 
   assert.equal(result.asked.filter(question => /apply the proposed answers/.test(question)).length, 1);
   assert.match(result.stdout, /evidence: disable \(evidence store named in a programme binding/);
   assert.match(result.stdout, /no-origin: skip/);
-  assert.match(result.stdout, /governed: keep/);
+  // The governed block and binding are not the user's answer: the typed yes records it.
+  assert.match(result.stdout, /governed: enable \(carries the governed block and programme binding\)/);
   assert.deepEqual(states(ctx, repos), { governed: 'ENABLED', blockOnly: 'ENABLED', plain: 'DISABLED', noOrigin: 'UNDECIDED', store: 'DISABLED' });
   assert.deepEqual(treeDigest(ctx.projects), before, 'no repository file was written');
   // The block-only repository is enabled without a binding: reported with the template, not written.
@@ -127,8 +128,8 @@ test('M-01: one batched question; the evidence store is disabled, the no-origin 
 test('M-01: answers can be changed in the same reply; anything else writes nothing', async (t) => {
   const ctx = scratch(t);
   const repos = fixture(ctx);
-  for (const answer of ['', 'no', 'yes 99=enable', 'yes 1=maybe', 'yes 3=enable']) {
-    // Row 3 is the governed repository (sorted: block-only, evidence, governed, no-origin, plain), which has nothing to change.
+  for (const answer of ['', 'no', 'yes 99=enable', 'yes 1=maybe', 'yes 4=enable']) {
+    // Row 4 is the repository with no origin (sorted: block-only, evidence, governed, no-origin, plain), which cannot change.
     const result = await migrate(ctx, { answers: [answer] });
     assert.equal(result.code, 1, answer);
     assert.equal(fs.existsSync(ctx.registryPath), false, answer);

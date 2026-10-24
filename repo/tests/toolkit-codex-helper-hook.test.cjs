@@ -10,6 +10,9 @@ const ROOT = path.resolve(__dirname, '..', '..');
 const HOOK = path.join(ROOT, 'repo', 'scripts', 'toolkit-codex-helper-hook.cjs');
 const { CodexHookMatcher } = require('../scripts/toolkit-v3-native-helper-adapter.cjs');
 const MARKERS = ['TOOLKIT_NATIVE_HELPER_BINDING', 'TOOLKIT_NATIVE_HELPER_BINDING_SHA256', 'TOOLKIT_NATIVE_HELPER_IDENTITY', 'TOOLKIT_GATE_ROLE', 'TOOLKIT_CLAUDE_TASK_PROFILE_SHA256'];
+// The Toolkit checkout is governed here by the user's recorded yes, in a scratch home this test
+// process and its hooks use (the governed block and binding alone are not an answer).
+require('./toolkit-governed-fixture-support.cjs').recordEnabled(ROOT);
 // An empty Codex home, so the real ~/.codex/agents never decides a test.
 const EMPTY_CODEX_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-codex-hook-home-'));
 process.on('exit', () => fs.rmSync(EMPTY_CODEX_HOME, { recursive: true, force: true }));

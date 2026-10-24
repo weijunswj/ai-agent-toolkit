@@ -260,7 +260,7 @@ function describe(state, registryOptions = {}) {
   if (state.root) lines.push(`Repository: ${state.root}`);
   if (state.rule === 'R1') lines.push(`Folder: ${state.folder || 'no copy is kept here'} (not a git repository, so DISABLED automatically).`);
   if (state.state === 'UNDECIDED' && state.rule === 'R6') lines.push('This repository carries the governed block but no programme binding yet.');
-  if (state.state === 'ENABLED' && state.rule === 'R4') lines.push('The repository opted in and you have not disabled it.');
+  if (state.state === 'UNDECIDED' && state.rule === 'R4') lines.push('This repository carries the governed block and programme binding; Toolkit still asks you, because files in a repository are not your answer.');
   if (state.rule === 'R8' || state.rule === 'R9') lines.push(`Not on github.com: ${state.host ? `this repository is on ${state.host}` : 'there is no single github.com origin remote'}. Toolkit asks about GitHub governance if the repository moves to github.com.`);
   return lines;
 }

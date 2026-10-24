@@ -23,7 +23,8 @@
 //                                                   DISABLED       the user said ok; nothing to enable here
 //   R9 not GitHub, K absent                         UNDECIDED      held until the user says ok
 //   R3 U enabled, B and P present                   ENABLED        global rules plus the governed block
-//   R4 U not recorded, B and P present              ENABLED        as R3 (the repository opted in, the user did not disable it)
+//   R4 U not recorded, B and P present              UNDECIDED      held until the user answers: files in a repository are
+//                                                                  not the user's answer, since an agent can write them
 //   R5 U enabled, B or P missing                    ENABLED        materials incomplete: no GitHub governance yet
 //   R6 U not recorded, B present, P absent          UNDECIDED      held until the one-time migration or the user answers
 //   R7 anything else                                UNDECIDED      held until the user answers
@@ -404,7 +405,7 @@ class GovernanceState {
     if (block && binding) {
       return decision.state === 'enabled'
         ? result({ ...base, state: 'ENABLED', rule: 'R3', reason: 'user-enabled', materials_complete: true })
-        : result({ ...base, state: 'ENABLED', rule: 'R4', reason: 'repository-opt-in', materials_complete: true });
+        : result({ ...base, state: 'UNDECIDED', rule: 'R4', reason: 'repository-carries-governance' });
     }
     if (decision.state === 'enabled') return result({ ...base, state: 'ENABLED', rule: 'R5', reason: block ? 'binding-missing' : 'governed-block-missing', materials_complete: false });
     if (block) return result({ ...base, state: 'UNDECIDED', rule: 'R6', reason: 'governed-block-without-binding' });

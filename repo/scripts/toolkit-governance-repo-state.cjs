@@ -23,11 +23,11 @@ const SCHEMA = 'toolkit.repository-governance.v1';
 const INNER_IGNORE = '# Toolkit keeps this folder out of git.\n*\n';
 const MAX_BYTES = 64 * 1024;
 const MAX_HISTORY = 50;
-// The bases a recorded state can have; 'repository opt-in' is rule R4 (the binding and the governed
-// block are present and the user has not disabled it), 'no git' is rule R1 (a plain folder, DISABLED
+// The bases a recorded state can have; 'repository opt-in' is read only from copies earlier versions
+// wrote (the governed block and binding no longer decide anything on their own), 'no git' is rule R1 (a plain folder, DISABLED
 // automatically) and 'not on github.com' is rule R8 (the user said ok to GitHub governance being off).
 const BASES = Object.freeze({ decision: 'your decision', optIn: 'repository opt-in', noGit: 'no git', notGitHub: 'not on github.com' });
-const BASIS_BY_RULE = Object.freeze({ R1: BASES.noGit, R4: BASES.optIn, R8: BASES.notGitHub });
+const BASIS_BY_RULE = Object.freeze({ R1: BASES.noGit, R8: BASES.notGitHub });
 // Earlier copies wrote DECLINED for what is now DISABLED. Such a file is read, never agrees, and is
 // rewritten as DISABLED with its history carried on.
 const LEGACY_STATES = Object.freeze({ DECLINED: 'DISABLED' });

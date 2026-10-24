@@ -7,8 +7,8 @@
 //
 // Proposals: a repository already decided stays as it is; a decision stored under an earlier
 // key is carried over to the repository's own key; an evidence store named in another
-// repository's programme binding is disabled; a repository carrying the governed block without
-// a binding is enabled (its binding still arrives through a pull request); any other undecided
+// repository's programme binding is disabled; a repository carrying the governed block (with or
+// without its binding, which then still arrives through a pull request) is enabled; any other undecided
 // repository is disabled, which the user can change in the same answer. Repositories without an
 // origin remote are skipped.
 //
@@ -72,8 +72,9 @@ function proposalFor(state, slug, transportSlugs) {
   if (state.rule === 'R1') return { action: 'skip', reason: 'not a git repository, so GitHub governance is DISABLED automatically' };
   if (state.rule === 'R9') return { action: 'skip', reason: 'not on github.com, so GitHub governance is off here once the user says ok in chat' };
   if (state.recorded_under_legacy_key) return { action: 'carry-over', reason: `already ${state.recorded_decision === 'enabled' ? 'enabled' : 'disabled'} under an earlier key; kept under its own key` };
-  if (state.state !== 'UNDECIDED') return { action: 'keep', reason: state.rule === 'R4' ? 'enabled by its governed block and binding' : `already ${state.state === 'ENABLED' ? 'enabled' : 'disabled'}` };
+  if (state.state !== 'UNDECIDED') return { action: 'keep', reason: `already ${state.state === 'ENABLED' ? 'enabled' : 'disabled'}` };
   if (slug && transportSlugs.has(slug.toLowerCase())) return { action: 'disable', reason: 'evidence store named in a programme binding (agent-managed, not governed)' };
+  if (state.rule === 'R4') return { action: 'enable', reason: 'carries the governed block and programme binding' };
   if (state.rule === 'R6') return { action: 'enable', reason: 'carries the governed block; its programme binding still has to be added' };
   return { action: 'disable', reason: 'no Toolkit materials' };
 }

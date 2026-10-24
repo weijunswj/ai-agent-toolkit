@@ -364,7 +364,7 @@ test('session marks: a later process that resumes the session cannot answer, on 
       assert.equal(send({ cwd: repo, session_id: slug, prompt: 'hello' }, 'startup').held, true);
       const resumed = send({ cwd: repo, session_id: slug, prompt: reply }, 'resume');
       assert.equal(resumed.held, true, `${host} ${reply}`);
-      assert.match(resumed.reason, /this session was resumed, so Toolkit asks again in this run/, `${host} ${reply}`);
+      assert.match(resumed.reason, /this session was resumed, or another session started in this repository, so Toolkit asks again/, `${host} ${reply}`);
       // Every further resume is a new run again, so a reply never meets a question from its own run.
       assert.equal(send({ cwd: repo, session_id: slug, prompt: reply }, 'resume').held, true, `${host} ${reply} again`);
       assert.equal(stateAt(repo), 'UNDECIDED', `${host} ${reply}`);
@@ -449,6 +449,59 @@ test('session marks: no mark means no answer in chat; /clear and compaction keep
   assert.ok(fs.readdirSync(folder).length <= 256);
 });
 
+test('repository marks: any session started in the repository since the question means the answer is asked again, whatever session id the run reports', (t) => {
+  const ctx = scratch(t);
+  const raw = () => new gate.PromptHold({ registryOptions: ctx.options, environment: {} });
+  const start = (sessionId, source, cwd) => gate.startSession({ session_id: sessionId, source, cwd }, { registryOptions: ctx.options });
+  // `claude -p hello`, then `claude -pc yes`, whose session-start hook reports a new id while its prompt carries the old one.
+  const repo = gitRepo(ctx, 'continued');
+  start('first', 'startup', repo);
+  assert.equal(raw().decide({ cwd: repo, prompt: 'hello', sessionId: 'first' }).action, 'block');
+  start('new-id', 'resume', repo);
+  const continued = raw().decide({ cwd: repo, prompt: 'yes', sessionId: 'first' });
+  assert.equal(continued.action, 'block');
+  assert.match(continued.reason, /another session started in this repository, so Toolkit asks again/);
+  assert.equal(stateOf(ctx, repo).state, 'UNDECIDED');
+  // A session started in another folder leaves this repository's question alone.
+  start('elsewhere', 'startup', path.join(ctx.root));
+  assert.equal(raw().decide({ cwd: repo, prompt: 'no', sessionId: 'first' }).action, 'pass');
+  assert.equal(stateOf(ctx, repo).state, 'DISABLED');
+  // After "later", a session started in the repository ends it for the full answer: Toolkit asks again.
+  const later = gitRepo(ctx, 'later-moved', { remote: 'https://github.com/example-owner/later-moved.git' });
+  start('l1', 'startup', later);
+  raw().decide({ cwd: later, prompt: 'hello', sessionId: 'l1' });
+  assert.equal(raw().decide({ cwd: later, prompt: 'later', sessionId: 'l1' }).action, 'pass');
+  assert.deepEqual(raw().decide({ cwd: later, prompt: 'carry on', sessionId: 'l1' }), { action: 'pass' }, '"later" still holds for ordinary messages');
+  start('agent-run', 'startup', later);
+  const moved = raw().decide({ cwd: later, prompt: 'toolkit governance enable', sessionId: 'l1' });
+  assert.equal(moved.action, 'block');
+  assert.match(moved.reason, /another session started in this repository since you said "later", so Toolkit asks again/);
+  assert.equal(stateOf(ctx, later).state, 'UNDECIDED');
+  // The user's next reply in that run answers.
+  assert.equal(raw().decide({ cwd: later, prompt: 'yes', sessionId: 'l1' }).action, 'pass');
+  assert.equal(stateOf(ctx, later).state, 'ENABLED');
+});
+
+test('held messages expire, and a decided repository no longer stops sessions being resumed', (t) => {
+  const ctx = scratch(t);
+  const plain = path.join(ctx.root, 'plain');
+  fs.mkdirSync(plain);
+  const resume = () => tools(ctx).decide({ tool_name: 'Bash', cwd: plain, tool_input: { command: 'claude -c' } });
+  // Sessions A and B are held; A answers, B never comes back.
+  const repo = gitRepo(ctx, 'repo');
+  hold(ctx).decide({ cwd: repo, prompt: 'from b', sessionId: 'b' });
+  hold(ctx).decide({ cwd: repo, prompt: 'from a', sessionId: 'a' });
+  assert.match(resume().deny, /a message is held for a repository's governance answer/);
+  assert.equal(hold(ctx).decide({ cwd: repo, prompt: 'yes', sessionId: 'a' }).action, 'pass');
+  assert.equal(resume(), null, 'the repository is decided, so B\'s leftover message no longer counts');
+  // A message held long ago is dropped when the store is read.
+  const old = gitRepo(ctx, 'old', { remote: 'https://github.com/example-owner/old.git' });
+  const longAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
+  new gate.PromptHold({ registryOptions: ctx.options, environment: {}, now: () => longAgo }).decide({ cwd: old, prompt: 'stale', sessionId: 'c' });
+  assert.equal(resume(), null);
+  assert.equal(new gate.HeldPrompts({ registryOptions: ctx.options }).count(stateOf(ctx, old).repository_id), 0);
+});
+
 test('nested sessions: an agent cannot start or resume a host session with a short reply, in any folder', (t) => {
   const ctx = scratch(t);
   const decided = gitRepo(ctx, 'decided');
@@ -473,6 +526,10 @@ test('nested sessions: an agent cannot start or resume a host session with a sho
     ['exec_command', { cmd: 'codex exec "Not now"' }],
     ['shell', { command: ['bash', '-lc', 'claude -p yes'] }],
     ['local_shell', { command: ['codex', 'exec', 'yes'] }],
+    // A host subcommand joined to a session start by a newline, a single & or a pipe.
+    ['Bash', { command: 'claude doctor\nclaude -p yes' }],
+    ['Bash', { command: 'claude --version & claude -p yes' }],
+    ['Bash', { command: 'claude mcp list | claude -p yes' }],
   ];
   for (const cwd of [decided, plain]) {
     for (const [tool_name, tool_input] of refused) {
@@ -682,11 +739,29 @@ test('a decided repository whose state folder cannot be written is reported, nev
   }
 });
 
-test('R4 opt-in passes; a plain folder is DISABLED automatically with its own copy, never held, and personal folders get no copy', (t) => {
+test('R4: files in a repository are not the user\'s answer; the governed block and binding are held and asked until the user says yes', (t) => {
   const ctx = scratch(t);
-  const optIn = gitRepo(ctx, 'opt-in', { block: true, binding: true });
-  assert.deepEqual(hold(ctx).decide({ cwd: optIn, prompt: 'go' }), { action: 'pass' });
-  assert.equal(fileOf(optIn).basis, 'repository opt-in');
+  const carried = gitRepo(ctx, 'carried', { block: true, binding: true });
+  const before = stateOf(ctx, carried);
+  assert.deepEqual([before.state, before.rule, before.reason, before.governed_rules_bind], ['UNDECIDED', 'R4', 'repository-carries-governance', false]);
+  const first = hold(ctx).decide({ cwd: carried, prompt: 'go', sessionId: 's1' });
+  assert.equal(first.action, 'block');
+  assert.match(first.reason, /^It carries the Toolkit governed rules block and programme binding, but files in a repository are not your answer\.$/m);
+  assert.match(tools(ctx).decide({ tool_name: 'Bash', cwd: carried, session_id: 's1', tool_input: { command: 'ls' } }).deny, /no governance decision yet/);
+  assert.match(gate.sessionLine(carried, { registryOptions: ctx.options, sessionId: 's1' }), /no GitHub governance decision yet/);
+  // An earlier version's copy saying ENABLED by repository opt-in grants nothing.
+  fs.mkdirSync(path.join(carried, repoState.FOLDER), { recursive: true });
+  fs.writeFileSync(repoState.filePath(carried), JSON.stringify({ schema: 'toolkit.repository-governance.v1', repository_id: before.repository_id, state: 'ENABLED', basis: 'repository opt-in', history: [] }));
+  assert.equal(hold(ctx).decide({ cwd: carried, prompt: 'again', sessionId: 's1' }).action, 'block');
+  const answered = hold(ctx).decide({ cwd: carried, prompt: 'yes', sessionId: 's1' });
+  assert.equal(answered.action, 'pass');
+  const after = stateOf(ctx, carried);
+  assert.deepEqual([after.state, after.rule, after.governed_rules_bind], ['ENABLED', 'R3', true]);
+  assert.equal(fileOf(carried).basis, 'your decision');
+});
+
+test('a plain folder is DISABLED automatically with its own copy, never held, and personal folders get no copy', (t) => {
+  const ctx = scratch(t);
   const plain = path.join(ctx.root, 'X-Boundaries');
   fs.mkdirSync(plain);
   if (governance.findGitRoot(plain) !== null) return;
