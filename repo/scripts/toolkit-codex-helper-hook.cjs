@@ -74,7 +74,7 @@ function decidePrompt(input, environment = process.env) {
   return decision.context ? { context: decision.context } : {};
 }
 
-const PROMPT_FAILED = 'Toolkit: the governance check failed, so your message was held and not sent. Run `setup toolkit` in Codex to repair the installed hook if this keeps happening.';
+const PROMPT_FAILED = 'Toolkit: the governance check failed, so your message was held and not sent. If this keeps happening, open Codex in a folder outside any git repository and say `setup toolkit` to repair the installed hooks.';
 function holdPrompt(reason) {
   process.stdout.write(JSON.stringify({ decision: 'block', reason }) + '\n');
   process.stderr.write(`${reason}\n`);

@@ -58,7 +58,7 @@ function failed(event, input, gate) {
   let inside = true;
   try { inside = (gate || require('./toolkit-governance-gate.cjs')).insideRepository(input.cwd); } catch { inside = true; }
   if (!inside || event === 'SessionStart') return {};
-  if (event === 'UserPromptSubmit') return { decision: 'block', reason: 'Toolkit: the governance check failed, so your message was held and not sent. Run `setup toolkit` to repair the installed hooks if this keeps happening.' };
+  if (event === 'UserPromptSubmit') return { decision: 'block', reason: 'Toolkit: the governance check failed, so your message was held and not sent. If this keeps happening, open Claude Code in a folder outside any git repository and say `setup toolkit` to repair the installed hooks.' };
   return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'Toolkit: the governance check failed, so nothing runs in this repository until it works again.' } };
 }
 

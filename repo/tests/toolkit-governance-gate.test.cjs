@@ -92,7 +92,7 @@ test('bypass attempts: ignoring, skipping, near-misses and "yes" all stay held a
   assert.match(gate.ANSWER.exec('Toolkit Governance Enable.')[1], /enable/i);
 });
 
-test('H-04: the answer is recorded, written into the repository with its gitignore, and held prompts come back in order', (t) => {
+test('H-04: the answer is recorded, written into the repository\'s own ignored folder, and held prompts come back in order', (t) => {
   const ctx = scratch(t);
   const repo = gitRepo(ctx, 'repo');
   hold(ctx).decide({ cwd: repo, prompt: 'first request' });
@@ -105,10 +105,10 @@ test('H-04: the answer is recorded, written into the repository with its gitigno
   const record = fileOf(repo);
   assert.deepEqual([record.schema, record.state, record.basis, record.history.length], [repoState.SCHEMA, 'ENABLED', 'your decision', 1]);
   assert.equal(record.repository_id, stateOf(ctx, repo).repository_id);
-  assert.match(fs.readFileSync(path.join(repo, '.gitignore'), 'utf8'), /^\/\.ai-agent-toolkit\/$/m);
+  assert.equal(fs.existsSync(path.join(repo, '.gitignore')), false, 'the root .gitignore is never created');
   assert.equal(fs.readFileSync(path.join(repo, repoState.FOLDER, '.gitignore'), 'utf8').trim().split('\n').pop(), '*');
   assert.equal(git(repo, ['check-ignore', `${repoState.FOLDER}/${repoState.FILE}`]), `${repoState.FOLDER}/${repoState.FILE}`);
-  assert.equal(git(repo, ['status', '--porcelain', '--untracked-files=all']).split('\n').filter(Boolean).join('|'), '?? .gitignore', 'only the root .gitignore line shows; the state folder never does');
+  assert.equal(git(repo, ['status', '--porcelain', '--untracked-files=all']).split('\n').filter(Boolean).join('|'), '', 'the state folder never shows in git status');
   assert.equal(fs.existsSync(ctx.heldPath), false, 'held prompts are deleted after the replay');
   assert.deepEqual(hold(ctx).decide({ cwd: repo, prompt: 'next request' }), { action: 'pass' });
 });
@@ -160,30 +160,74 @@ test('the repository file is never the authority: forged, copied, edited and del
   fs.rmSync(path.join(repo, repoState.FOLDER), { recursive: true });
   assert.equal(hold(ctx).decide({ cwd: repo, prompt: 'go' }).action, 'pass');
   assert.equal(fileOf(repo).state, 'DECLINED');
-  // A read-only check of a missing copy holds.
+  // A read-only check of a missing copy reports it and holds nothing.
   fs.rmSync(repoState.filePath(repo));
-  assert.equal(new gate.GovernanceGate({ registryOptions: ctx.options }).evaluate(repo, { write: false }).hold, true);
+  const checked = new gate.GovernanceGate({ registryOptions: ctx.options }).evaluate(repo, { write: false });
+  assert.deepEqual([checked.hold, checked.file], [false, 'missing']);
+  assert.equal(fs.existsSync(repoState.filePath(repo)), false);
 });
 
-test('the root .gitignore keeps its line endings, gains the line once, and a directory in its place holds (fail closed)', (t) => {
+// Root `.gitignore` shapes a decided repository can have. Toolkit never edits it, so every shape
+// stays exactly as committed and git status stays clean. Symlinks need privileges on Windows.
+const ROOT_GITIGNORE_ROWS = [
+  { name: 'absent', make() {} },
+  { name: 'plain file without the Toolkit line', make(repo) { fs.writeFileSync(path.join(repo, '.gitignore'), 'node_modules/\r\ndist/'); } },
+  { name: 'line removed by the user', make(repo) { fs.writeFileSync(path.join(repo, '.gitignore'), 'node_modules/\n# was /.ai-agent-toolkit/\n'); } },
+  { name: 'symlink', make(repo) { fs.writeFileSync(path.join(repo, 'shared-ignore'), 'build/\n'); fs.symlinkSync('shared-ignore', path.join(repo, '.gitignore')); } },
+  { name: 'directory', make(repo) { fs.mkdirSync(path.join(repo, '.gitignore')); fs.writeFileSync(path.join(repo, '.gitignore', 'keep'), ''); } },
+  { name: 'read-only file', make(repo) { fs.writeFileSync(path.join(repo, '.gitignore'), 'node_modules/\n'); }, after(repo) { fs.chmodSync(path.join(repo, '.gitignore'), 0o444); } },
+];
+
+function snapshot(target) {
+  let stat;
+  try { stat = fs.lstatSync(target); } catch { return 'absent'; }
+  if (stat.isSymbolicLink()) return `link:${fs.readlinkSync(target)}`;
+  if (stat.isDirectory()) return `dir:${fs.readdirSync(target).join(',')}`;
+  return `file:${fs.readFileSync(target, 'utf8')}`;
+}
+
+for (const decision of ['decline', 'enable']) {
+  for (const row of ROOT_GITIGNORE_ROWS) {
+    test(`B2 matrix: ${decision}d repository, root .gitignore ${row.name}: never edited, never held, git status clean`, (t) => {
+      const ctx = scratch(t);
+      const slug = `${decision}-${row.name.replace(/[^a-z]+/g, '-')}`;
+      const repo = gitRepo(ctx, slug, { remote: `https://github.com/example-owner/${slug}.git` });
+      try { row.make(repo); } catch (error) {
+        if (error.code === 'EPERM' && process.platform === 'win32') return t.skip('symlinks need privileges on this Windows runner');
+        throw error;
+      }
+      git(repo, ['add', '-A']);
+      git(repo, ['-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--quiet', '--allow-empty', '-m', 'fixture']);
+      if (row.after) row.after(repo);
+      t.after(() => { try { fs.chmodSync(path.join(repo, '.gitignore'), 0o644); } catch { /* absent or not a file */ } });
+      const before = snapshot(path.join(repo, '.gitignore'));
+      gate.writeGovernanceDecision(repo, decision, { registryOptions: ctx.options });
+      for (let round = 0; round < 3; round += 1) {
+        assert.equal(hold(ctx).decide({ cwd: repo, prompt: `request ${round}` }).action, 'pass');
+        assert.equal(tools(ctx).decide({ tool_name: 'Bash', cwd: repo, tool_input: { command: 'ls' } }), null);
+        assert.equal(tools(ctx).decide({ tool_name: 'Edit', cwd: repo, tool_input: { file_path: path.join(repo, 'a.txt') } }), null);
+      }
+      assert.equal(snapshot(path.join(repo, '.gitignore')), before);
+      assert.equal(fileOf(repo).state, decision === 'enable' ? 'ENABLED' : 'DECLINED');
+      assert.equal(git(repo, ['status', '--porcelain', '--untracked-files=all']), '');
+    });
+  }
+}
+
+test('a decided repository whose state folder cannot be written is reported, never held', (t) => {
   const ctx = scratch(t);
-  const crlf = gitRepo(ctx, 'crlf');
-  fs.writeFileSync(path.join(crlf, '.gitignore'), 'node_modules/\r\ndist/');
-  gate.writeGovernanceDecision(crlf, 'decline', { registryOptions: ctx.options });
-  new gate.GovernanceGate({ registryOptions: ctx.options }).evaluate(crlf);
-  const text = fs.readFileSync(path.join(crlf, '.gitignore'), 'utf8');
-  assert.equal(text, 'node_modules/\r\ndist/\r\n# Toolkit governance state (local, never committed)\r\n/.ai-agent-toolkit/\r\n');
-  const present = gitRepo(ctx, 'present', { remote: 'https://github.com/example-owner/present.git' });
-  fs.writeFileSync(path.join(present, '.gitignore'), '.ai-agent-toolkit/\n');
-  gate.writeGovernanceDecision(present, 'decline', { registryOptions: ctx.options });
-  assert.equal(fs.readFileSync(path.join(present, '.gitignore'), 'utf8'), '.ai-agent-toolkit/\n');
-  const odd = gitRepo(ctx, 'odd', { remote: 'https://github.com/example-owner/odd.git' });
-  fs.mkdirSync(path.join(odd, '.gitignore'));
-  assert.throws(() => gate.writeGovernanceDecision(odd, 'decline', { registryOptions: ctx.options }), { code: 'ROOT_GITIGNORE_NOT_A_FILE' });
-  const decision = hold(ctx).decide({ cwd: odd, prompt: 'go' });
-  assert.equal(decision.action, 'block');
-  assert.match(decision.reason, /could not be saved .*ROOT_GITIGNORE_NOT_A_FILE/);
-  assert.ok(tools(ctx).decide({ tool_name: 'Edit', cwd: odd, tool_input: { file_path: path.join(odd, 'a.txt') } }).deny);
+  for (const decision of ['decline', 'enable']) {
+    const repo = gitRepo(ctx, `blocked-${decision}`, { remote: `https://github.com/example-owner/blocked-${decision}.git` });
+    // A plain file where the folder belongs: the copy cannot be made, the registry decision still stands.
+    fs.writeFileSync(path.join(repo, repoState.FOLDER), 'not a folder\n');
+    const decided = gate.writeGovernanceDecision(repo, decision, { registryOptions: ctx.options });
+    assert.deepEqual([decided.hold, decided.reason, decided.file], [false, 'decided', 'unwritable']);
+    assert.match(decided.error_code, /^[A-Z0-9_]+$/);
+    assert.equal(hold(ctx).decide({ cwd: repo, prompt: 'go' }).action, 'pass');
+    assert.equal(tools(ctx).decide({ tool_name: 'Bash', cwd: repo, tool_input: { command: 'ls' } }), null);
+    assert.match(gate.sessionLine(repo, { registryOptions: ctx.options }), new RegExp(`${decision === 'enable' ? 'ENABLED' : 'DECLINED'}.*could not save its copy .*nothing is held`));
+    assert.equal(fs.readFileSync(path.join(repo, repoState.FOLDER), 'utf8'), 'not a folder\n');
+  }
 });
 
 test('R4 opt-in and PORTABLE folders pass; nothing is written where no decision can be stored', (t) => {
@@ -230,6 +274,8 @@ test('H-07: an agent cannot answer for the user, in any folder, while ordinary c
     ['Write', { file_path: path.join(os.homedir(), '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json') }],
     ['Edit', { file_path: '~/../x/.ai-agent-toolkit/user-state/held-prompts.v1.json' }],
     ['apply_patch', { input: '*** Begin Patch\n*** Update File: /home/me/.ai-agent-toolkit/user-state/repository-governance.v1.json\n*** End Patch' }],
+    ['apply_patch', { command: '*** Begin Patch\n*** Add File: /home/me/.ai-agent-toolkit/user-state/held-prompts.v1.json\n+[]\n*** End Patch' }],
+    ['apply_patch', { patch: '*** Begin Patch\n*** Update File: notes.txt\n*** Move to: /home/me/.ai-agent-toolkit/user-state/repository-governance.v1.json\n*** End Patch' }],
   ];
   for (const cwd of [decided, plain]) {
     for (const [tool_name, tool_input] of refused) assert.ok(tools(ctx).decide({ tool_name, cwd, tool_input })?.deny, `${tool_name} ${JSON.stringify(tool_input)}`);
@@ -364,10 +410,12 @@ test('hook wiring: both Claude copies hold prompts and tools with onFailure bloc
     assert.equal(prompt.onFailure, 'block');
     const tool = hooks.PreToolUse.find(entry => entry.hooks[0].command.includes('toolkit-governance-hook.cjs'));
     assert.equal(tool.hooks[0].onFailure, 'block');
-    for (const name of ['Bash', 'PowerShell', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'Agent', 'Task', 'mcp__github__create_pull_request']) {
-      assert.match(name, new RegExp(`^(?:${tool.matcher})$`), name);
+    // Claude Code tests a matcher with these characters as an unanchored regex, so it carries its own anchors.
+    assert.match(tool.matcher, /^\^\(\?:.*\)\$$/);
+    for (const name of ['Bash', 'PowerShell', 'Monitor', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'Agent', 'Task', 'mcp__github__create_pull_request']) {
+      assert.match(name, new RegExp(tool.matcher), name);
     }
-    for (const name of ['Read', 'Grep', 'Glob']) assert.doesNotMatch(name, new RegExp(`^(?:${tool.matcher})$`), name);
+    for (const name of ['Read', 'Grep', 'Glob', 'TodoWrite', 'TaskCreate', 'TaskStop', 'BashOutput']) assert.doesNotMatch(name, new RegExp(tool.matcher), name);
     assert.ok(hooks.SessionStart[0].hooks.some(hook => hook.command.endsWith('toolkit-governance-hook.cjs" --event SessionStart')));
   }
   for (const file of ['.codex-plugin/hooks/hooks.json', 'repo/contracts/toolkit-local-bridge/codex-plugin/hooks/hooks.json']) {

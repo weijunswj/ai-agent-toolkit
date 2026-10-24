@@ -47,7 +47,7 @@ const USER_STATE_PATH = /[\\/]\.ai-agent-toolkit[\\/]user-state(?:[\\/]|$)/i;
 // Tools that read only; everything else changes something and is held.
 const READ_ONLY_TOOLS = /^(?:Read|Glob|Grep|LS|WebFetch|WebSearch|TodoWrite|update_plan|view_image)$/;
 const EDIT_TOOLS = /^(?:Edit|Write|MultiEdit|NotebookEdit|apply_patch)$/;
-const SHELL_TOOLS = /^(?:Bash|PowerShell|exec_command|shell|local_shell)$/;
+const SHELL_TOOLS = /^(?:Bash|PowerShell|Monitor|exec_command|shell|local_shell)$/;
 
 class GovernanceGateError extends Error {
   constructor(code) {
@@ -76,9 +76,10 @@ class GovernanceGate {
     this.#now = now;
   }
 
-  // { hold, reason, state, file } where reason is one of 'portable', 'decided', 'undecided',
-  // 'state-unreadable' or 'repo-state-unwritable'. With write: false the in-repository copy is only
-  // checked, so a missing or disagreeing copy holds.
+  // { hold, reason, state, file } where reason is one of 'portable', 'decided', 'undecided' or
+  // 'state-unreadable'. Only the registry decides whether a repository holds: a decided repository
+  // never holds over its in-repository copy, and a copy that cannot be written is reported as
+  // file 'unwritable' with its error_code. With write: false the copy is only checked.
   evaluate(cwd, { write = true } = {}) {
     const state = this.#stateReader(cwd);
     const verdict = (hold, reason, extra = {}) => Object.freeze({ hold, reason, state, file: null, ...extra });
@@ -86,13 +87,13 @@ class GovernanceGate {
     if (state.state === 'UNKNOWN') return verdict(true, state.rule === 'ERROR' ? 'state-unreadable' : 'undecided');
     if (!write) {
       const status = repoState.recordStatus(state);
-      return status === 'agrees' ? verdict(false, 'decided', { file: 'agrees' }) : verdict(true, 'repo-state-missing', { file: status });
+      return verdict(false, 'decided', { file: status });
     }
     try {
       const synced = repoState.syncRecord(state, { now: this.#now });
-      return verdict(false, 'decided', { file: synced.written ? 'written' : 'agrees', gitignore_updated: synced.gitignore_updated });
+      return verdict(false, 'decided', { file: synced.written ? 'written' : 'agrees' });
     } catch (error) {
-      return verdict(true, 'repo-state-unwritable', { error_code: codeOf(error) });
+      return verdict(false, 'decided', { file: 'unwritable', error_code: codeOf(error) });
     }
   }
 }
@@ -128,7 +129,6 @@ function writeGovernanceDecision(cwd, command, { registryOptions = {}, registry 
   const verdict = new GovernanceGate({ registryOptions, now }).evaluate(cwd);
   const expected = command === 'enable' ? 'ENABLED' : 'DECLINED';
   if (verdict.state.state !== expected || verdict.state.repository_id !== status.repository_id) throw new GovernanceGateError('READBACK_MISMATCH');
-  if (verdict.hold) throw new GovernanceGateError(verdict.error_code || 'REPO_STATE_UNWRITABLE');
   return verdict;
 }
 
@@ -217,10 +217,6 @@ function unreadableText(code) {
   return `Toolkit: the governance state of this repository could not be read (${code}), so your message was held and not sent. Run ${terminalCommand('check')} in a terminal to see why.`;
 }
 
-function unwritableText(code) {
-  return `Toolkit: the governance state could not be saved in this repository's ${repoState.FOLDER} folder (${code}), so your message was held and not sent. Check that the folder and .gitignore are writable, then send your message again.`;
-}
-
 function replayContext(state, prompts) {
   const label = state.state === 'ENABLED' && state.materials_complete === false ? 'ENABLED (materials incomplete)' : state.state;
   const lines = [`Toolkit governance is now ${label} for this repository; the user just answered the governance question.`];
@@ -250,7 +246,6 @@ class PromptHold {
     const verdict = this.#gate.evaluate(cwd);
     if (!verdict.hold) return verdict.reason === 'portable' ? { action: 'pass' } : this.#replayIfAny(verdict.state);
     if (verdict.reason === 'state-unreadable') return { action: 'block', reason: unreadableText(verdict.state.error_code) };
-    if (verdict.reason === 'repo-state-unwritable') return { action: 'block', reason: unwritableText(verdict.error_code) };
     const answer = ANSWER.exec(String(prompt || ''));
     if (answer) return this.#answer(cwd, answer[1].toLowerCase(), verdict);
     const held = this.#held.add(verdict.state.repository_id, prompt);
@@ -291,9 +286,9 @@ function toolText(input) {
 function editTargets(input) {
   const args = input && input.tool_input && typeof input.tool_input === 'object' ? input.tool_input : {};
   const targets = [args.file_path, args.path, args.notebook_path].filter(value => typeof value === 'string');
-  // apply_patch carries its paths inside the patch text.
-  const patch = typeof args.input === 'string' ? args.input : (typeof args.patch === 'string' ? args.patch : '');
-  for (const match of patch.matchAll(/^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm)) targets.push(match[1].trim());
+  // apply_patch carries its paths inside the patch text, which a host may pass as input, patch or command.
+  const patch = [args.input, args.patch, args.command].filter(value => typeof value === 'string').join('\n');
+  for (const match of patch.matchAll(/^\*\*\* (?:(?:Add|Update|Delete) File|Move to): (.+)$/gm)) targets.push(match[1].trim());
   return targets;
 }
 
@@ -317,7 +312,6 @@ class ToolGate {
     const verdict = this.#gate.evaluate(input && input.cwd);
     if (!verdict.hold) return null;
     if (verdict.reason === 'state-unreadable') return { deny: `Toolkit: the governance state of this repository could not be read (${verdict.state.error_code}), so nothing runs here until it can.` };
-    if (verdict.reason === 'repo-state-unwritable') return { deny: `Toolkit: the governance state could not be saved in this repository (${verdict.error_code}), so nothing runs here until it can.` };
     return { deny: 'Toolkit: this repository has no governance decision yet, so nothing runs here. Ask the user to reply `toolkit governance enable` or `toolkit governance decline`; do not try to work around it.' };
   }
 }
@@ -330,9 +324,14 @@ function sessionLine(cwd, { registryOptions = {}, stateReader = null, now } = {}
   if (state.state === 'PORTABLE') return null;
   if (verdict.hold) {
     if (verdict.reason === 'state-unreadable') return `Toolkit governance: the state of this repository could not be read (${state.error_code}). Every user message is held until it can; do not try to work around it.`;
-    if (verdict.reason === 'repo-state-unwritable') return `Toolkit governance: the state could not be saved in this repository (${verdict.error_code}). Every user message is held until it can.`;
     return 'Toolkit governance: this repository has no decision yet. Every user message is held until the user replies `toolkit governance enable` or `toolkit governance decline`; do not try to work around it.';
   }
+  return decidedLine(state) + (verdict.file === 'unwritable'
+    ? ` (Toolkit could not save its copy in the ${repoState.FOLDER} folder (${verdict.error_code}); nothing is held because of that.)`
+    : '');
+}
+
+function decidedLine(state) {
   if (state.state === 'DECLINED') return 'Toolkit governance: DECLINED for this repository. Follow only the global rules; any TOOLKIT-GOVERNED-RULES block in AGENTS.md does not apply.';
   if (state.materials_complete === false) return 'Toolkit governance: ENABLED, materials incomplete (the governed block or `.github/toolkit-programme.json` is missing). The global rules plus gates, subagents and portable skills apply; programme records do not.';
   return 'Toolkit governance: ENABLED for this repository. Follow the global rules and the TOOLKIT-GOVERNED-RULES block in AGENTS.md.';

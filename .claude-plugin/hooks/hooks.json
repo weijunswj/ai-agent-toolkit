@@ -48,7 +48,7 @@
         ]
       },
       {
-        "matcher": "Bash|PowerShell|Edit|Write|MultiEdit|NotebookEdit|Agent|Task|mcp__.*",
+        "matcher": "^(?:Bash|PowerShell|Monitor|Edit|Write|MultiEdit|NotebookEdit|Agent|Task|mcp__.*)$",
         "hooks": [
           {
             "type": "command",

@@ -6,11 +6,12 @@
 // the decision itself stays in the user's registry (keyed by repository identity, with receipts),
 // so every clone and worktree shares one answer. A file the registry does not back counts for
 // nothing, which means repository content, a copied file or an agent's write can never grant
-// consent. The hook gate opens only when this file exists and agrees with the registry, and it
-// rewrites a missing or disagreeing file from the registry.
+// consent. The hook gate rewrites a missing or disagreeing file from the registry; a write that
+// fails never holds the repository, because the registry decision is the authority.
 //
-// The folder is kept out of git twice: a `.gitignore` inside it that ignores everything, and a
-// `/.ai-agent-toolkit/` line in the repository's root `.gitignore`. No git subprocess, no network.
+// The folder keeps itself out of git with a `.gitignore` inside it that ignores everything, so
+// Toolkit never edits a tracked file such as the repository's root `.gitignore`. No git
+// subprocess, no network.
 
 const crypto = require('node:crypto');
 const fs = require('node:fs');
@@ -19,7 +20,6 @@ const path = require('node:path');
 const FOLDER = '.ai-agent-toolkit';
 const FILE = 'governance.json';
 const SCHEMA = 'toolkit.repository-governance.v1';
-const IGNORE_LINE = `/${FOLDER}/`;
 const INNER_IGNORE = '# Toolkit keeps this folder out of git.\n*\n';
 const MAX_BYTES = 64 * 1024;
 const MAX_HISTORY = 50;
@@ -67,10 +67,6 @@ function agrees(record, expected) {
     && record.state === expected.state && record.basis === expected.basis);
 }
 
-function ignoredByRootGitignore(text) {
-  return text.split(/\r?\n/).some(line => ['/.ai-agent-toolkit/', '.ai-agent-toolkit/', '/.ai-agent-toolkit', '.ai-agent-toolkit'].includes(line.trim()));
-}
-
 function writeAtomically(target, text) {
   const temp = `${target}.tmp-${process.pid}-${crypto.randomBytes(4).toString('hex')}`;
   try {
@@ -81,8 +77,7 @@ function writeAtomically(target, text) {
   }
 }
 
-// Both ignore rules, added only where missing. A root `.gitignore` that is not a plain file is
-// left alone and reported, because Toolkit cannot add the line safely.
+// The folder and its own ignore-everything `.gitignore`, rewritten only when it differs.
 function ensureIgnored(root) {
   const folder = path.join(root, FOLDER);
   fs.mkdirSync(folder, { recursive: true });
@@ -90,26 +85,16 @@ function ensureIgnored(root) {
   let innerText = null;
   try { innerText = fs.readFileSync(inner, 'utf8'); } catch { innerText = null; }
   if (innerText !== INNER_IGNORE) writeAtomically(inner, INNER_IGNORE);
-  const rootIgnore = path.join(root, '.gitignore');
-  let stat = null;
-  try { stat = fs.lstatSync(rootIgnore); } catch { stat = null; }
-  if (stat && !stat.isFile()) fail('ROOT_GITIGNORE_NOT_A_FILE');
-  const current = stat ? fs.readFileSync(rootIgnore, 'utf8') : '';
-  if (ignoredByRootGitignore(current)) return false;
-  const eol = /\r\n/.test(current) ? '\r\n' : '\n';
-  const separator = current === '' || current.endsWith('\n') ? '' : eol;
-  fs.writeFileSync(rootIgnore, `${current}${separator}# Toolkit governance state (local, never committed)${eol}${IGNORE_LINE}${eol}`);
-  return true;
 }
 
-// Makes the repository's file match the decided state. Returns { written, gitignore_updated }.
-// Throws RepoGovernanceFileError when it cannot, so callers fail closed.
+// Makes the repository's file match the decided state. Returns { written }. Throws when it cannot;
+// the gate reports that and carries on.
 function syncRecord(state, { now = () => new Date() } = {}) {
   const expected = expectedRecord(state);
   if (!expected || !state.root) fail('NOTHING_TO_RECORD');
   const current = readRecord(state.root);
-  const gitignoreUpdated = ensureIgnored(state.root);
-  if (current.status === 'present' && agrees(current.record, expected)) return Object.freeze({ written: false, gitignore_updated: gitignoreUpdated });
+  ensureIgnored(state.root);
+  if (current.status === 'present' && agrees(current.record, expected)) return Object.freeze({ written: false });
   const at = now().toISOString();
   // History carries on only for the same repository; a file from another repository starts over.
   const previous = current.status === 'present' && current.record.repository_id === expected.repository_id ? current.record.history : [];
@@ -118,7 +103,7 @@ function syncRecord(state, { now = () => new Date() } = {}) {
   writeAtomically(filePath(state.root), `${JSON.stringify(record, null, 2)}\n`);
   const readBack = readRecord(state.root);
   if (readBack.status !== 'present' || !agrees(readBack.record, expected)) fail('REPO_STATE_READBACK_FAILED');
-  return Object.freeze({ written: true, gitignore_updated: gitignoreUpdated });
+  return Object.freeze({ written: true });
 }
 
 // Read-only check: 'agrees', 'missing', 'invalid' or 'disagrees'.
@@ -134,7 +119,6 @@ module.exports = Object.freeze({
   FOLDER,
   FILE,
   SCHEMA,
-  IGNORE_LINE,
   BASES,
   RepoGovernanceFileError,
   filePath,
