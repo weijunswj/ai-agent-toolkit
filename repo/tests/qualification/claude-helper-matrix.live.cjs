@@ -28,6 +28,7 @@
 //
 // Usage: node repo/tests/qualification/claude-helper-matrix.live.cjs --out <dir> [--host]
 //          [--mode plugin|installed] [--plugin-root <dir>] [--max-budget-usd <n>] [--only <row,...>]
+//   --max-budget-usd  optional per-session dollar cap passed to `claude -p`; no cap unless given.
 
 const fs = require('node:fs');
 const os = require('node:os');
@@ -46,7 +47,7 @@ const KNOWN_LIMITS = Object.freeze({
 const sha256 = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 
 function parseArgs(argv) {
-  const options = { host: false, mode: 'plugin', pluginRoot: ROOT, maxBudgetUsd: '1', only: null, out: null };
+  const options = { host: false, mode: 'plugin', pluginRoot: ROOT, maxBudgetUsd: null, only: null, out: null };
   for (let i = 0; i < argv.length; i += 1) {
     const flag = argv[i], value = () => { if (i + 1 >= argv.length) throw new Error(`${flag} needs a value`); return argv[++i]; };
     if (flag === '--host') options.host = true;
@@ -59,7 +60,7 @@ function parseArgs(argv) {
   }
   if (!options.out) throw new Error('--out <dir> is required');
   if (!['plugin', 'installed'].includes(options.mode)) throw new Error('--mode is plugin or installed');
-  if (!/^\d+(\.\d+)?$/.test(options.maxBudgetUsd)) throw new Error('--max-budget-usd takes a number');
+  if (options.maxBudgetUsd !== null && !/^\d+(\.\d+)?$/.test(options.maxBudgetUsd)) throw new Error('--max-budget-usd takes a number');
   return options;
 }
 
@@ -171,7 +172,8 @@ class LiveRun {
     const sessionId = crypto.randomUUID();
     const decisions = path.join(dir, 'hook-decisions.ndjson');
     const args = ['-p', prompt, '--session-id', sessionId, '--model', 'claude-opus-5-5', '--effort', 'high', '--output-format', 'stream-json',
-      '--verbose', '--strict-mcp-config', '--tools', sessionTools(this.context.definitions), '--allowedTools', 'Agent', '--max-budget-usd', this.options.maxBudgetUsd];
+      '--verbose', '--strict-mcp-config', '--tools', sessionTools(this.context.definitions), '--allowedTools', 'Agent'];
+    if (this.options.maxBudgetUsd !== null) args.push('--max-budget-usd', this.options.maxBudgetUsd);
     if (this.options.mode === 'plugin') args.push('--setting-sources', 'project,local', '--plugin-dir', this.options.pluginRoot);
     if (agents) { const file = path.join(dir, 'agents.json'); fs.writeFileSync(file, JSON.stringify(agents)); args.push('--agents', file); }
     const environment = liveEnvironment(this.options.mode, this.context, { decisions });

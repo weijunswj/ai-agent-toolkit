@@ -100,3 +100,10 @@ test('installed mode picks the local Toolkit install over a claude.ai account co
   assert.throws(() => pickInstalledPlugin([{ ...local, enabled: false }]), /found: none/);
   assert.throws(() => pickInstalledPlugin([local, { ...local, id: 'ai-agent-toolkit@other', scope: 'project' }]), /ai-agent-toolkit@other \(project\)/);
 });
+
+test('the live runner sets no dollar cap unless one is given', () => {
+  const { parseArgs } = require('./qualification/claude-helper-matrix.live.cjs');
+  assert.equal(parseArgs(['--out', 'x']).maxBudgetUsd, null);
+  assert.equal(parseArgs(['--out', 'x', '--max-budget-usd', '2']).maxBudgetUsd, '2');
+  assert.throws(() => parseArgs(['--out', 'x', '--max-budget-usd', 'lots']), /takes a number/);
+});
