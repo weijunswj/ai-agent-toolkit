@@ -42,11 +42,11 @@ const USAGE = `Usage: ${governance.governanceCommand('<status|enable|disable|reo
   + `       ${governance.governanceCommand('migrate [--root <folder>]...')}\n`;
 
 const RULES_TEXT = Object.freeze({
-  ENABLED: 'Global rules plus the Toolkit governed rules (gates, records and evidence custody).',
-  ENABLED_INCOMPLETE: 'Global rules, coding gates, subagents and portable skills. The governed rules start once the governed block and the programme binding are both in the repository.',
-  DISABLED: 'Global rules only. A governed block in AGENTS.md is not followed.',
-  NO_REPOSITORY: 'Global rules only.',
-  UNDECIDED: `Nothing yet. Toolkit asks in chat (yes, no or not now) and records your reply; in your own terminal, ${CMD('enable')} or ${CMD('disable')} also works.`,
+  ENABLED: 'Global rules and coding gates, plus GitHub governance: programme records, decision traces and evidence custody.',
+  ENABLED_INCOMPLETE: 'Global rules and coding gates. GitHub governance starts once the governed block and the programme binding are both in the repository.',
+  DISABLED: 'Global rules and coding gates, without GitHub governance. A governed block in AGENTS.md is not followed.',
+  UNDECIDED: `GitHub governance is not decided yet. Toolkit asks in chat (yes, no or later) and records your reply; in your own terminal, ${CMD('enable')} or ${CMD('disable')} also works.`,
+  NOT_GITHUB: `GitHub governance works only for github.com repositories, so it will be DISABLED here once you say ok. Toolkit asks in chat; in your own terminal, ${CMD('disable')} also works.`,
 });
 
 class GovernanceCliError extends Error {
@@ -163,14 +163,15 @@ class ToolkitGovernanceCli {
 
   async #decide(command, json) {
     const before = this.#state();
-    if (before.state === 'NO_REPOSITORY') {
-      throw new GovernanceCliError(before.reason === 'no-git-root'
-        ? 'This folder is not inside a git repository, so there is nothing to decide.'
-        : 'This repository has no usable origin remote, so a decision cannot be stored for it. Only the global rules apply.');
+    if (before.rule === 'R1') throw new GovernanceCliError('This folder is not inside a git repository, so GitHub governance is DISABLED automatically and there is nothing to decide.');
+    const notGitHub = before.rule === 'R8' || before.rule === 'R9';
+    if (notGitHub && command === 'enable') {
+      throw new GovernanceCliError('GitHub governance works only for github.com repositories, and this one is not on github.com, so it cannot be enabled here. Nothing was written.');
     }
     if (!this.#interactive) {
-      throw new GovernanceCliError(`Nothing was written: a governance decision is recorded only when you make it yourself. If you are an agent, ask the user in chat instead: "${gate.ASK}" Toolkit records their own reply. If you are the user, run this in your own terminal.`);
+      throw new GovernanceCliError(`Nothing was written: a governance decision is recorded only when you make it yourself. If you are an agent, ask the user in chat instead: "${notGitHub ? 'Reply ok to turn GitHub governance off for this repository.' : gate.ASK}" Toolkit records their own reply. If you are the user, run this in your own terminal.`);
     }
+    if (notGitHub) return this.#notGitHubOk(before, json);
     const status = registry.getRepositoryStatus({ cwd: this.#cwd, ...this.#registryOptions });
     if (status.status === 'actionable') throw new GovernanceCliError(`Your governance decisions could not be read (${status.reason_code}). Nothing was written.`);
     const current = status.capabilities[CAPABILITY].state;
@@ -183,8 +184,8 @@ class ToolkitGovernanceCli {
       return 0;
     }
     const question = command === 'enable'
-      ? `Turn on Toolkit governance for ${before.root}?\nToolkit's governed rules apply once the repository also carries the governed block and the programme binding, which arrive only through a pull request you approve.\nType yes to confirm: `
-      : `Turn off Toolkit governance for ${before.root}?\nOnly the global rules will apply here, and Toolkit will not ask again unless you run ${CMD('enable')}.\nType yes to confirm: `;
+      ? `Enable Toolkit's GitHub governance for ${before.root}?\nIt starts once the repository also carries the governed block and the programme binding, which arrive only through a pull request you approve.\nType yes to confirm: `
+      : `Turn off Toolkit's GitHub governance for ${before.root}?\nThe global rules and coding gates still apply here, and Toolkit will not ask again unless you run ${CMD('enable')}.\nType yes to confirm: `;
     const answer = String(await this.#ask(question) || '').trim().toLowerCase();
     if (answer !== 'yes') {
       this.#print(json, { state: before.state, writes: 0 }, ['Not confirmed. Nothing was written.']);
@@ -201,6 +202,27 @@ class ToolkitGovernanceCli {
     this.#print(json, after, [`Recorded. ${describe(after).join('\n')}`]);
     return 0;
   }
+  // A repository not on github.com: the user's own ok, at their terminal, records DISABLED.
+  async #notGitHubOk(before, json) {
+    if (before.rule === 'R8') {
+      new gate.GovernanceGate({ registryOptions: this.#registryOptions }).evaluate(this.#cwd);
+      this.#print(json, { state: before.state, writes: 0 }, ['Already disabled for this repository; nothing new was written.']);
+      return 0;
+    }
+    const answer = String(await this.#ask(`Turn off Toolkit's GitHub governance for ${before.root}?\nIt works only for github.com repositories. The global rules and coding gates still apply here.\nType yes to confirm: `) || '').trim().toLowerCase();
+    if (answer !== 'yes') {
+      this.#print(json, { state: before.state, writes: 0 }, ['Not confirmed. Nothing was written.']);
+      return 1;
+    }
+    let after;
+    try {
+      after = gate.writeNotGitHubOk(this.#cwd, { registryOptions: this.#registryOptions }).state;
+    } catch (error) {
+      throw new GovernanceCliError(`Your decision could not be recorded and read back (${error && error.code ? error.code : 'UNEXPECTED'}). Run ${CMD('check')}.`);
+    }
+    this.#print(json, after, [`Recorded. ${describe(after).join('\n')}`]);
+    return 0;
+  }
 }
 
 function label(state) {
@@ -210,12 +232,13 @@ function label(state) {
 
 function describe(state) {
   if (state.rule === 'ERROR') return [`State: UNDECIDED (the state could not be read: ${state.error_code}). Prompts in this repository are held until it can.`];
-  const key = state.state === 'ENABLED' && state.materials_complete === false ? 'ENABLED_INCOMPLETE' : state.state;
+  const key = state.rule === 'R9' ? 'NOT_GITHUB' : state.state === 'ENABLED' && state.materials_complete === false ? 'ENABLED_INCOMPLETE' : state.state;
   const lines = [`State: ${label(state)}`, `Rules: ${RULES_TEXT[key]}`];
   if (state.root) lines.push(`Repository: ${state.root}`);
+  if (state.rule === 'R1') lines.push(`Folder: ${state.folder || 'no copy is kept here'} (not a git repository, so DISABLED automatically).`);
   if (state.state === 'UNDECIDED' && state.rule === 'R6') lines.push('This repository carries the governed block but no programme binding yet.');
   if (state.state === 'ENABLED' && state.rule === 'R4') lines.push('The repository opted in and you have not disabled it.');
-  if (state.state === 'NO_REPOSITORY' && state.reason !== 'no-git-root') lines.push('There is no usable origin remote, so no decision can be stored for this repository.');
+  if (state.rule === 'R8' || state.rule === 'R9') lines.push(`Not on github.com: ${state.host ? `this repository is on ${state.host}` : 'there is no single github.com origin remote'}. Toolkit asks about GitHub governance if the repository moves to github.com.`);
   return lines;
 }
 

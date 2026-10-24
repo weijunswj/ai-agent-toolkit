@@ -5,15 +5,16 @@
 // Codex hooks:
 //
 //   - GovernanceGate decides whether a working directory is held. UNDECIDED (including an unreadable
-//     state) is held; NO_REPOSITORY never is, and neither is a decided repository. The gate keeps
-//     the in-repository copy (`.ai-agent-toolkit/governance.json`) in step with the registry, and a
-//     copy it cannot write never holds.
+//     state) is held; a plain folder (no git) never is, and neither is a decided repository. The
+//     gate keeps the copy (`.ai-agent-toolkit/governance.json`, in the repository or plain folder) in
+//     step with the state, and a copy it cannot write never holds.
 //   - PromptHold is the UserPromptSubmit core. In a held repository every prompt is blocked and kept
-//     on this computer, and the block asks the user a plain question: turn Toolkit governance on,
-//     yes, no or not now. The user's own reply is the answer (`toolkit governance enable` or
-//     `disable` also work, and `decline` is the older word for disable); it is recorded, read
-//     back and then let through with the held
-//     prompts attached, oldest first.
+//     on this computer. On github.com the block asks a plain question: enable Toolkit's GitHub
+//     governance, yes, no or later ("not now" also works). In a git repository that is not on
+//     github.com it says GitHub governance is off there and asks for an ok. The user's own reply is
+//     the answer (`toolkit governance enable` or `disable` also work, and `decline` is the older word
+//     for disable); it is recorded, read back and then let through with the held prompts attached,
+//     oldest first.
 //   - ToolGate is the PreToolUse core. A held repository runs no state-changing tool. In every
 //     folder, an agent may not answer the question for the user: commands that run the governance
 //     CLI or start a host session with the answer as its prompt are refused, and so are edits to
@@ -35,23 +36,41 @@ const HELD_BASENAME = 'held-prompts.v1.json';
 const HELD_SCHEMA = 'toolkit.held-prompts.v1';
 const NOT_NOW_BASENAME = 'governance-not-now.v1.json';
 const NOT_NOW_SCHEMA = 'toolkit.governance-not-now.v1';
+const NOT_GITHUB_BASENAME = governance.NOT_GITHUB_BASENAME;
+const NOT_GITHUB_SCHEMA = governance.NOT_GITHUB_SCHEMA;
+const MAX_NOT_GITHUB = 500;
 const MAX_HELD = 20;
 const MAX_HELD_CHARS = 4000;
 const MAX_HELD_BYTES = 512 * 1024;
+const MAX_NOT_NOW_SESSIONS = 8;
 const LAUNCHER_MARKERS = Object.freeze(['TOOLKIT_GATE_ROLE', 'TOOLKIT_NATIVE_HELPER_BINDING', 'TOOLKIT_CLAUDE_TASK_PROFILE_SHA256']);
 
 // The answer is the whole prompt, in any letter case, with surrounding spaces or one final full stop.
 // `decline` is kept as the older word for `disable`.
 const ANSWER = /^\s*toolkit governance (enable|disable|decline)\.?\s*$/i;
 // The short replies to the question Toolkit asked. They count only once a prompt has been held for
-// the repository, so the user has seen the question; the whole message must be the reply.
+// the repository in the same host session, so that session was shown the question; the whole
+// message must be the reply.
 const SHORT_ANSWER = /^\s*(yes|y|no|n|not now|later)[.!]?\s*$/i;
 const SHORT_COMMANDS = Object.freeze({ yes: 'enable', y: 'enable', no: 'disable', n: 'disable', 'not now': 'not-now', later: 'not-now' });
+// The replies that say ok to GitHub governance being off in a repository that is not on github.com.
+// Every one of them has the same effect, so a plain "yes" or "no" works too.
+const OK_ANSWER = /^\s*(ok|okay|yes|y|no|n|not now|later)[.!]?\s*$/i;
 // An agent's command that would answer for the user: the CLI script with a decision, or a host
-// session started (or fed on stdin) with the answer as its prompt.
+// session started, resumed or fed on stdin with an answer (long or short) as its prompt. This reads
+// the command's text, so it is best effort; the same-session rule above is what really stops a
+// fresh nested session.
+const HOST_COMMAND = /(?:^|[\s;&|()`'"\\/])(?:claude|codex)(?:-code)?(?:\.exe|\.cmd|\.ps1)?(?=$|[\s;&|()`'"])/im;
+const SHELL_WORD = /"((?:[^"\\]|\\.)*)"|'([^']*)'|([^\s;&|()<>"'=`]+)/g;
+function shortAnswerWord(text) {
+  const words = [...text.matchAll(SHELL_WORD)].map(match => match[1] ?? match[2] ?? match[3]);
+  return [...words, ...text.split(/\r?\n/)]
+    .some(word => OK_ANSWER.test(word.replace(/^\$/, '').replace(/(?:\\[nr])+$/, '')));
+}
 function answerCommand(text) {
   return /toolkit-governance\.cjs["']?\s+(?:enable|disable|decline|reopen|migrate)\b/i.test(text)
-    || (/\b(?:claude|codex)\b/i.test(text) && /toolkit governance (?:enable|disable|decline)\b/i.test(text));
+    || (/\b(?:claude|codex)\b/i.test(text) && /toolkit governance (?:enable|disable|decline)\b/i.test(text))
+    || (HOST_COMMAND.test(text) && shortAnswerWord(text));
 }
 const USER_STATE_PATH = /[\\/]\.ai-agent-toolkit[\\/]user-state(?:[\\/]|$)/i;
 // Tools that read only; everything else changes something and is held.
@@ -87,25 +106,26 @@ class GovernanceGate {
     this.#notNow = new NotNow({ registryOptions, now });
   }
 
-  // { hold, reason, state, file } where reason is one of 'no-repository', 'decided', 'undecided',
-  // 'not-now' (the user said not now in this session) or 'state-unreadable'. Only the registry decides whether a repository holds: a decided repository
-  // never holds over its in-repository copy, and a copy that cannot be written is reported as
-  // file 'unwritable' with its error_code. With write: false the copy is only checked.
+  // { hold, reason, state, file } where reason is one of 'no-git' (a plain folder, DISABLED
+  // automatically), 'decided', 'undecided' (the github.com question), 'not-github' (a git repository
+  // not on github.com, waiting for the user's ok), 'not-now' (the user said later in this session)
+  // or 'state-unreadable'. Only the user-state files decide whether a repository holds: a decided
+  // repository never holds over its copy, and a copy that cannot be written is reported as file
+  // 'unwritable' with its error_code. With write: false the copy is only checked.
   evaluate(cwd, { write = true, sessionId = null } = {}) {
     const state = this.#stateReader(cwd);
     const verdict = (hold, reason, extra = {}) => Object.freeze({ hold, reason, state, file: null, ...extra });
-    if (state.state === 'NO_REPOSITORY') return verdict(false, 'no-repository');
     if (state.state === 'UNDECIDED' && state.rule === 'ERROR') return verdict(true, 'state-unreadable');
+    if (state.state === 'UNDECIDED' && state.rule === 'R9') return verdict(true, 'not-github');
     if (state.state === 'UNDECIDED') return this.#notNow.has(state.repository_id, sessionId) ? verdict(false, 'not-now') : verdict(true, 'undecided');
-    if (!write) {
-      const status = repoState.recordStatus(state);
-      return verdict(false, 'decided', { file: status });
-    }
+    const reason = state.rule === 'R1' ? 'no-git' : 'decided';
+    if (!repoState.expectedRecord(state)) return verdict(false, reason, { file: 'not-applicable' });
+    if (!write) return verdict(false, reason, { file: repoState.recordStatus(state) });
     try {
       const synced = repoState.syncRecord(state, { now: this.#now });
-      return verdict(false, 'decided', { file: synced.written ? 'written' : 'agrees' });
+      return verdict(false, reason, { file: synced.written ? 'written' : 'agrees' });
     } catch (error) {
-      return verdict(false, 'decided', { file: 'unwritable', error_code: codeOf(error) });
+      return verdict(false, reason, { file: 'unwritable', error_code: codeOf(error) });
     }
   }
 }
@@ -156,17 +176,21 @@ class HeldPrompts {
     this.#now = now;
   }
 
+  // A store that cannot be read holds (fail closed). A damaged or oversized one is moved aside, kept
+  // on this computer next to the original, and a fresh store starts, so the question still works.
   #read() {
+    const empty = () => ({ schema: HELD_SCHEMA, repositories: {} });
     let text;
     try { text = fs.readFileSync(this.#file, 'utf8'); } catch (error) {
-      if (error && error.code === 'ENOENT') return { schema: HELD_SCHEMA, repositories: {} };
+      if (error && error.code === 'ENOENT') return empty();
       throw new GovernanceGateError('HELD_PROMPTS_UNREADABLE');
     }
-    if (Buffer.byteLength(text) > MAX_HELD_BYTES) throw new GovernanceGateError('HELD_PROMPTS_TOO_LARGE');
-    let parsed;
-    try { parsed = JSON.parse(text); } catch { throw new GovernanceGateError('HELD_PROMPTS_MALFORMED'); }
-    if (!parsed || parsed.schema !== HELD_SCHEMA || !parsed.repositories || typeof parsed.repositories !== 'object') throw new GovernanceGateError('HELD_PROMPTS_MALFORMED');
-    return parsed;
+    let parsed = null;
+    if (Buffer.byteLength(text) <= MAX_HELD_BYTES) { try { parsed = JSON.parse(text); } catch { parsed = null; } }
+    if (parsed && parsed.schema === HELD_SCHEMA && parsed.repositories && typeof parsed.repositories === 'object' && !Array.isArray(parsed.repositories)) return parsed;
+    const aside = `${this.#file}.damaged-${this.#now().toISOString().replace(/[:.]/g, '-')}-${crypto.randomBytes(2).toString('hex')}`;
+    try { fs.renameSync(this.#file, aside); } catch { throw new GovernanceGateError('HELD_PROMPTS_MALFORMED'); }
+    return empty();
   }
 
   #write(data) {
@@ -182,18 +206,24 @@ class HeldPrompts {
     }
   }
 
-  count(repositoryId) {
+  // The number held for the repository, or with a session id, the number that session sent.
+  count(repositoryId, sessionId = undefined) {
     const list = this.#read().repositories[repositoryId];
-    return Array.isArray(list) ? list.length : 0;
+    if (!Array.isArray(list)) return 0;
+    if (sessionId === undefined) return list.length;
+    if (typeof sessionId !== 'string' || sessionId === '') return 0;
+    return list.filter(entry => entry && entry.session_id === sessionId).length;
   }
 
-  // Keeps the prompt (trimmed to a size cap; the oldest go first past the count cap) and returns the
-  // number now held.
-  add(repositoryId, prompt) {
+  // Keeps the prompt with the session that sent it (trimmed to a size cap; the oldest go first past
+  // the count cap) and returns the number now held.
+  add(repositoryId, prompt, sessionId = null) {
     const data = this.#read();
     const list = Array.isArray(data.repositories[repositoryId]) ? data.repositories[repositoryId] : [];
     const text = String(prompt || '').slice(0, MAX_HELD_CHARS);
-    data.repositories[repositoryId] = [...list, { at: this.#now().toISOString(), text }].slice(-MAX_HELD);
+    const entry = { at: this.#now().toISOString(), text };
+    if (typeof sessionId === 'string' && sessionId !== '') entry.session_id = sessionId;
+    data.repositories[repositoryId] = [...list, entry].slice(-MAX_HELD);
     this.#write(data);
     return data.repositories[repositoryId].length;
   }
@@ -209,8 +239,11 @@ class HeldPrompts {
   }
 }
 
-// "Not now" answers, kept next to the registry: one per repository, for the session that gave it.
-// Nothing is decided; a new session asks again.
+// "Not now" answers, kept next to the registry: per repository, the sessions that gave one (the
+// newest few, so another session's "not now" never re-holds this one). Nothing is decided; a new
+// session asks again. A missing, unreadable or damaged file counts as no
+// "not now" (the repository stays held and the question still works), and the next "not now"
+// replaces it.
 class NotNow {
   #file; #now;
 
@@ -220,24 +253,30 @@ class NotNow {
   }
 
   #read() {
-    let parsed;
-    try { parsed = JSON.parse(fs.readFileSync(this.#file, 'utf8')); } catch (error) {
-      if (error && error.code === 'ENOENT') return { schema: NOT_NOW_SCHEMA, repositories: {} };
-      throw new GovernanceGateError('NOT_NOW_UNREADABLE');
-    }
-    if (!parsed || parsed.schema !== NOT_NOW_SCHEMA || !parsed.repositories || typeof parsed.repositories !== 'object') throw new GovernanceGateError('NOT_NOW_MALFORMED');
-    return parsed;
+    let parsed = null;
+    try { parsed = JSON.parse(fs.readFileSync(this.#file, 'utf8')); } catch { parsed = null; }
+    const usable = parsed && parsed.schema === NOT_NOW_SCHEMA && parsed.repositories && typeof parsed.repositories === 'object' && !Array.isArray(parsed.repositories);
+    return usable ? parsed : { schema: NOT_NOW_SCHEMA, repositories: {} };
+  }
+
+  // { sessionId: at } for one repository; an entry an earlier version wrote holds one session_id.
+  static #sessions(entry) {
+    if (!entry || typeof entry !== 'object') return {};
+    const sessions = entry.sessions && typeof entry.sessions === 'object' && !Array.isArray(entry.sessions) ? { ...entry.sessions } : {};
+    if (typeof entry.session_id === 'string' && entry.session_id !== '' && !(entry.session_id in sessions)) sessions[entry.session_id] = String(entry.at || '');
+    return sessions;
   }
 
   has(repositoryId, sessionId) {
     if (!repositoryId || typeof sessionId !== 'string' || sessionId === '') return false;
-    const entry = this.#read().repositories[repositoryId];
-    return Boolean(entry && entry.session_id === sessionId);
+    return Object.hasOwn(NotNow.#sessions(this.#read().repositories[repositoryId]), sessionId);
   }
 
   set(repositoryId, sessionId) {
     const data = this.#read();
-    data.repositories[repositoryId] = { session_id: sessionId, at: this.#now().toISOString() };
+    const sessions = { ...NotNow.#sessions(data.repositories[repositoryId]), [sessionId]: this.#now().toISOString() };
+    const newest = Object.entries(sessions).sort((a, b) => String(b[1]).localeCompare(String(a[1]))).slice(0, MAX_NOT_NOW_SESSIONS);
+    data.repositories[repositoryId] = { sessions: Object.fromEntries(newest) };
     fs.mkdirSync(path.dirname(this.#file), { recursive: true });
     const temp = `${this.#file}.tmp-${process.pid}-${crypto.randomBytes(4).toString('hex')}`;
     try {
@@ -249,16 +288,61 @@ class NotNow {
   }
 }
 
+// The user's ok that GitHub governance is off in a git repository that is not on github.com, kept
+// next to the registry (the state module reads it). Only PromptHold, from the user's own reply, and
+// the terminal command write it.
+class NotGitHubOk {
+  #file; #now;
+
+  constructor({ registryOptions = {}, now = () => new Date() } = {}) {
+    this.#file = path.join(path.dirname(governance.registryPathFor(registryOptions)), NOT_GITHUB_BASENAME);
+    this.#now = now;
+  }
+
+  set(repositoryId) {
+    let parsed = null;
+    try { parsed = JSON.parse(fs.readFileSync(this.#file, 'utf8')); } catch { parsed = null; }
+    const usable = parsed && parsed.schema === NOT_GITHUB_SCHEMA && parsed.repositories && typeof parsed.repositories === 'object' && !Array.isArray(parsed.repositories);
+    const repositories = usable ? { ...parsed.repositories } : {};
+    repositories[repositoryId] = { at: this.#now().toISOString() };
+    const newest = Object.entries(repositories).sort((a, b) => String(b[1] && b[1].at).localeCompare(String(a[1] && a[1].at))).slice(0, MAX_NOT_GITHUB);
+    fs.mkdirSync(path.dirname(this.#file), { recursive: true });
+    const temp = `${this.#file}.tmp-${process.pid}-${crypto.randomBytes(4).toString('hex')}`;
+    try {
+      fs.writeFileSync(temp, `${JSON.stringify({ schema: NOT_GITHUB_SCHEMA, repositories: Object.fromEntries(newest) })}\n`, { mode: 0o600 });
+      fs.renameSync(temp, this.#file);
+    } finally {
+      fs.rmSync(temp, { force: true });
+    }
+  }
+}
+
+// Records the user's ok for a repository that is not on github.com and reads it back through the
+// gate (which also writes the copy). Throws GovernanceGateError unless the result is DISABLED (R8).
+function writeNotGitHubOk(cwd, { registryOptions = {}, now } = {}) {
+  const gate = new GovernanceGate({ registryOptions, now });
+  const before = gate.evaluate(cwd, { write: false });
+  if (before.state.state === 'DISABLED' && ['R2', 'R8'].includes(before.state.rule)) return before;
+  if (before.state.rule !== 'R9' || !before.state.repository_id) throw new GovernanceGateError('NOT_WAITING_FOR_OK');
+  new NotGitHubOk({ registryOptions, now }).set(before.state.repository_id);
+  const after = gate.evaluate(cwd);
+  if (after.state.state !== 'DISABLED' || after.state.rule !== 'R8' || after.state.repository_id !== before.state.repository_id) throw new GovernanceGateError('READBACK_MISMATCH');
+  return after;
+}
+
 // ---- messages ---------------------------------------------------------------------------------
 
-const ASK = 'Turn on Toolkit governance for this repository? Reply yes, no or not now.';
+const ASK = "Enable Toolkit's automated GitHub tracking governance for this repository? Reply yes, no or later.";
 const QUESTION = [
   'Toolkit: this repository has no governance decision yet, so your message was held and not sent.',
   ASK,
-  'Toolkit governance means AI Agent Toolkit runs coding work here in planned steps (plan, build, then an independent review) and, once the repository is set up for it, keeps a record of that work in its GitHub issues.',
-  '  yes      Toolkit tracks and guards work in this repository.',
-  '  no       Toolkit stays out: only its general safety rules apply, and it will not ask again.',
-  '  not now  Nothing is recorded: this session carries on under the general rules, and Toolkit asks again next session.',
+  "Toolkit takes over this repository's task tracking on GitHub and adds the no-force-push ruleset:",
+  '  1. Creates PARENT and CHILD GitHub issues for programme management.',
+  '  2. Records plans, reviews and decisions.',
+  '  3. Uses a private evidence store of your choice.',
+  '  yes    Toolkit keeps those records here; setup helps add the governed block and programme file.',
+  '  no     No GitHub records here, the coding rules still apply, and Toolkit will not ask again.',
+  '  later  Nothing is recorded, and Toolkit asks again next session.',
   'Your held messages stay on this computer and are handed over, in order, after you answer.',
 ];
 
@@ -269,21 +353,49 @@ function questionText(verdict, held) {
   return lines.join('\n');
 }
 
+// Where the repository lives, for the not-on-github.com notice.
+function whereText(state) {
+  if (state.host) return `is on ${state.host}`;
+  return state.reason === 'origin-ambiguous' ? 'has more than one origin remote' : 'has no github.com origin remote';
+}
+
+const OK_ASK = 'Reply ok to continue.';
+
+function notGitHubText(verdict, held) {
+  if (held > 1) return `Toolkit: still waiting for your ok (${held} messages held). GitHub governance will be DISABLED for this repository because it ${whereText(verdict.state)}. ${OK_ASK}`;
+  return [
+    'Toolkit: this repository is not on github.com, so your message was held and not sent.',
+    `Toolkit's GitHub governance (GitHub issues for programme tracking, records and a private evidence store) works only for github.com repositories, and this one ${whereText(verdict.state)}.`,
+    'So GitHub governance will be DISABLED here. The global rules and coding gates still apply.',
+    `${OK_ASK} Toolkit records DISABLED and hands over your held messages, in order.`,
+    'If this repository moves to github.com later, Toolkit asks whether to enable GitHub governance there. If a similar repository host becomes available, it can be set up then.',
+  ].join('\n');
+}
+
 function unreadableText(code) {
   return `Toolkit: the governance state of this repository could not be read (${code}), so your message was held and not sent. Run ${terminalCommand('check')} in a terminal to see why.`;
 }
 
+// What the agent does in an ENABLED repository whose setup is not finished (the governed block or the
+// binding is missing): right after the user's yes, and at every session start until both land.
+const SETUP_ASK = 'GitHub governance setup is not finished here. Before other work, ask the user in one message: (1) the private evidence store, an existing private repository or a new `TRANSPORT-<repository>` one, separate from this repository; (2) the parent issue, an existing number or a new one; (3) confirm the defaults: record and writer prefix `INT-<SHORT>-`, required checks from the default branch protection, store branch `main`. Then use `repository-agent-rules` to add the governed block and `.github/toolkit-programme.json` in one pull request for the user to merge. If the user says not now, carry on under the global rules and ask again next session.';
+
 function replayContext(state, prompts, { notNow = false } = {}) {
   const label = state.state === 'ENABLED' && state.materials_complete === false ? 'ENABLED (materials incomplete)' : state.state;
   const lines = [notNow
-    ? 'The user answered "not now" to the Toolkit governance question. Nothing is decided: for the rest of this session follow only the global rules, and Toolkit asks again next session.'
-    : `Toolkit governance is now ${label} for this repository; the user just answered the governance question.`];
+    ? 'The user answered "later" to the Toolkit GitHub governance question. Nothing is decided: for the rest of this session follow the global rules (coding gates included) without GitHub governance, and Toolkit asks again next session. If the user wants to decide sooner, they can send `toolkit governance enable` or `toolkit governance disable` as a message.'
+    : state.rule === 'R8'
+      ? 'Toolkit GitHub governance is now DISABLED for this repository: it is not on github.com and the user said ok. Follow the global rules, coding gates included; any TOOLKIT-GOVERNED-RULES block in AGENTS.md does not apply.'
+      : `Toolkit governance is now ${label} for this repository; the user just answered the governance question.`];
+  if (!notNow && state.state === 'ENABLED' && state.materials_complete === false) lines.push(`${SETUP_ASK} Handle the held messages below after that question.`);
   if (prompts.length > 0) {
     lines.push('Messages the user sent while the repository was held, oldest first. Treat them as the user\'s requests:');
     prompts.forEach((text, index) => lines.push(`${index + 1}. ${text}`));
   }
   return lines.join('\n');
 }
+
+const LAUNCHED_TEXT = 'Toolkit: an automated session cannot answer the governance question. Answer it in your own chat, or run the command in your own terminal.';
 
 // ---- prompt hold ------------------------------------------------------------------------------
 
@@ -304,15 +416,45 @@ class PromptHold {
   // sessionId is the host's session id; "not now" lasts for that session only.
   decide({ cwd, prompt, sessionId = null }) {
     const verdict = this.#gate.evaluate(cwd, { sessionId });
-    if (!verdict.hold) return ['no-repository', 'not-now'].includes(verdict.reason) ? { action: 'pass' } : this.#replayIfAny(verdict.state);
-    if (verdict.reason === 'state-unreadable') return { action: 'block', reason: unreadableText(verdict.state.error_code) };
     const text = String(prompt || '');
     const answer = ANSWER.exec(text);
+    // After "not now", the full answer still decides; a short reply is an ordinary message there,
+    // since it may answer the agent's own question.
+    if (verdict.reason === 'not-now') return answer ? this.#answer(cwd, answer[1].toLowerCase(), verdict, sessionId) : { action: 'pass' };
+    if (!verdict.hold) return verdict.reason === 'no-git' ? { action: 'pass' } : this.#replayIfAny(verdict.state);
+    if (verdict.reason === 'state-unreadable') return { action: 'block', reason: unreadableText(verdict.state.error_code) };
+    if (verdict.reason === 'not-github') return this.#notGitHub(cwd, text, answer, verdict, sessionId);
     if (answer) return this.#answer(cwd, answer[1].toLowerCase(), verdict, sessionId);
     const short = SHORT_ANSWER.exec(text);
-    if (short && this.#held.count(verdict.state.repository_id) > 0) return this.#answer(cwd, SHORT_COMMANDS[short[1].toLowerCase()], verdict, sessionId);
-    const held = this.#held.add(verdict.state.repository_id, prompt);
-    return { action: 'block', reason: questionText(verdict, held) };
+    if (short && this.#held.count(verdict.state.repository_id, sessionId) > 0) return this.#answer(cwd, SHORT_COMMANDS[short[1].toLowerCase()], verdict, sessionId);
+    const held = this.#held.add(verdict.state.repository_id, prompt, sessionId);
+    // A session sees the whole question on its first held message, even when another session is waiting too.
+    const shown = typeof sessionId === 'string' && sessionId !== '' ? this.#held.count(verdict.state.repository_id, sessionId) : held;
+    return { action: 'block', reason: questionText(verdict, shown) };
+  }
+
+  // A git repository not on github.com: the only outcome is DISABLED, once the user says ok.
+  #notGitHub(cwd, text, answer, verdict, sessionId) {
+    const id = verdict.state.repository_id;
+    if (answer && answer[1].toLowerCase() === 'enable') {
+      return { action: 'block', reason: `Toolkit: GitHub governance cannot be enabled here, because this repository ${whereText(verdict.state)}. ${OK_ASK}` };
+    }
+    if (answer || (OK_ANSWER.test(text) && this.#held.count(id, sessionId) > 0)) {
+      if (this.#launched()) return { action: 'block', reason: LAUNCHED_TEXT };
+      let decided;
+      try { decided = writeNotGitHubOk(cwd, { registryOptions: this.#registryOptions, now: this.#now }); } catch (error) {
+        return { action: 'block', reason: `Toolkit: your ok could not be recorded (${codeOf(error)}), so this repository is still held. Reply ok again, or run ${terminalCommand('disable')} in your own terminal.` };
+      }
+      return { action: 'pass', context: replayContext(decided.state, this.#held.take(id)) };
+    }
+    const held = this.#held.add(id, text, sessionId);
+    const shown = typeof sessionId === 'string' && sessionId !== '' ? this.#held.count(id, sessionId) : held;
+    return { action: 'block', reason: notGitHubText(verdict, shown) };
+  }
+
+  // A session a Toolkit launcher started is automation, not the user typing.
+  #launched() {
+    return LAUNCHER_MARKERS.some(name => typeof this.#environment[name] === 'string' && this.#environment[name] !== '');
   }
 
   // A decision made elsewhere (the terminal command, another clone) still hands back held prompts.
@@ -323,16 +465,13 @@ class PromptHold {
   }
 
   #answer(cwd, command, verdict, sessionId) {
-    // A session a Toolkit launcher started is automation, not the user typing.
-    if (LAUNCHER_MARKERS.some(name => typeof this.#environment[name] === 'string' && this.#environment[name] !== '')) {
-      return { action: 'block', reason: 'Toolkit: an automated session cannot answer the governance question. Answer it in your own chat, or run the command in your own terminal.' };
-    }
+    if (this.#launched()) return { action: 'block', reason: LAUNCHED_TEXT };
     if (command === 'not-now') {
       if (typeof sessionId !== 'string' || sessionId === '') {
-        return { action: 'block', reason: `Toolkit: this app does not say which session this is, so "not now" cannot be kept. ${ASK.replace(', no or not now', ' or no')}` };
+        return { action: 'block', reason: `Toolkit: this app does not say which session this is, so "later" cannot be kept. ${ASK.replace(', no or later', ' or no')}` };
       }
       try { this.#notNow.set(verdict.state.repository_id, sessionId); } catch (error) {
-        return { action: 'block', reason: `Toolkit: "not now" could not be saved (${codeOf(error)}), so this repository is still held. Reply yes or no, or try again.` };
+        return { action: 'block', reason: `Toolkit: "later" could not be saved (${codeOf(error)}), so this repository is still held. Reply yes or no, or try again.` };
       }
       return { action: 'pass', context: replayContext(verdict.state, this.#held.take(verdict.state.repository_id), { notNow: true }) };
     }
@@ -389,6 +528,7 @@ class ToolGate {
     const verdict = this.#gate.evaluate(input && input.cwd, { sessionId: sessionIdOf(input) });
     if (!verdict.hold) return null;
     if (verdict.reason === 'state-unreadable') return { deny: `Toolkit: the governance state of this repository could not be read (${verdict.state.error_code}), so nothing runs here until it can.` };
+    if (verdict.reason === 'not-github') return { deny: `Toolkit: this repository ${whereText(verdict.state)}, so GitHub governance will be off here, and nothing runs until the user says ok. Ask them in plain words to reply ok; Toolkit records their own reply, so never ask them to run a command, and do not try to work around it.` };
     return { deny: `Toolkit: this repository has no governance decision yet, so nothing runs here. Ask the user in plain words: "${ASK}" Toolkit records their own reply, so never ask them to run a command, and do not try to work around it.` };
   }
 }
@@ -398,11 +538,11 @@ class ToolGate {
 function sessionLine(cwd, { registryOptions = {}, stateReader = null, now, sessionId = null } = {}) {
   const verdict = new GovernanceGate({ registryOptions, stateReader, now }).evaluate(cwd, { sessionId });
   const state = verdict.state;
-  if (state.state === 'NO_REPOSITORY') return null;
-  if (verdict.reason === 'not-now') return 'Toolkit governance: not decided yet; the user said "not now" for this session. Follow only the global rules; Toolkit asks again next session.';
+  if (verdict.reason === 'not-now') return 'Toolkit governance: not decided yet; the user said "later" for this session. Follow the global rules (coding gates included) without GitHub governance; Toolkit asks again next session. If the user wants to decide sooner, they can send `toolkit governance enable` or `toolkit governance disable` as a message.';
   if (verdict.hold) {
     if (verdict.reason === 'state-unreadable') return `Toolkit governance: the state of this repository could not be read (${state.error_code}). Every user message is held until it can; do not try to work around it.`;
-    return `Toolkit governance: this repository has no decision yet. Every user message is held until the user answers Toolkit's question. If you need to raise it, ask "${ASK}"; Toolkit records their own reply, so never ask them to run a command, and do not try to work around it.`;
+    if (verdict.reason === 'not-github') return `Toolkit governance: this repository ${whereText(state)}, so GitHub governance will be DISABLED here once the user says ok. Every user message is held until then. If you need to raise it, ask the user to reply ok; Toolkit records their own reply, so never ask them to run a command, and do not try to work around it.`;
+    return `Toolkit governance: this repository has no GitHub governance decision yet. Every user message is held until the user answers Toolkit's question. If you need to raise it, ask "${ASK}"; Toolkit records their own reply, so never ask them to run a command, and do not try to work around it.`;
   }
   return decidedLine(state) + (verdict.file === 'unwritable'
     ? ` (Toolkit could not save its copy in the ${repoState.FOLDER} folder (${verdict.error_code}); nothing is held because of that.)`
@@ -410,9 +550,11 @@ function sessionLine(cwd, { registryOptions = {}, stateReader = null, now, sessi
 }
 
 function decidedLine(state) {
-  if (state.state === 'DISABLED') return 'Toolkit governance: DISABLED for this repository. Follow only the global rules; any TOOLKIT-GOVERNED-RULES block in AGENTS.md does not apply.';
-  if (state.materials_complete === false) return 'Toolkit governance: ENABLED, materials incomplete (the governed block or `.github/toolkit-programme.json` is missing). The global rules plus gates, subagents and portable skills apply; programme records do not.';
-  return 'Toolkit governance: ENABLED for this repository. Follow the global rules and the TOOLKIT-GOVERNED-RULES block in AGENTS.md.';
+  if (state.rule === 'R1') return 'Toolkit governance: DISABLED automatically (this folder is not a git repository, so there is no GitHub governance). Follow the global rules, coding gates included.';
+  if (state.rule === 'R8') return `Toolkit governance: DISABLED for this repository (not on github.com: it ${whereText(state)}; the user said ok). Follow the global rules, coding gates included; any TOOLKIT-GOVERNED-RULES block in AGENTS.md does not apply.`;
+  if (state.state === 'DISABLED') return 'Toolkit governance: DISABLED for this repository (no GitHub governance). Follow the global rules, coding gates included; any TOOLKIT-GOVERNED-RULES block in AGENTS.md does not apply.';
+  if (state.materials_complete === false) return `Toolkit governance: ENABLED, setup not finished (the governed block or \`.github/toolkit-programme.json\` is missing). Follow the global rules, coding gates included; GitHub governance starts once both are in the repository. ${SETUP_ASK}`;
+  return 'Toolkit governance: ENABLED for this repository. Follow the global rules, coding gates included, and the TOOLKIT-GOVERNED-RULES block in AGENTS.md (GitHub governance: records and evidence).';
 }
 
 // ---- fail-closed fallbacks --------------------------------------------------------------------
@@ -426,6 +568,8 @@ module.exports = Object.freeze({
   ANSWER,
   ASK,
   NOT_NOW_BASENAME,
+  NOT_GITHUB_BASENAME,
+  OK_ANSWER,
   SHORT_ANSWER,
   sessionIdOf,
   answerCommand,
@@ -441,4 +585,5 @@ module.exports = Object.freeze({
   sessionLine,
   terminalCommand,
   writeGovernanceDecision,
+  writeNotGitHubOk,
 });

@@ -46,7 +46,7 @@ test('no plugin payload or skills folder reaches the Projects controller skill',
 
 test('Projects wires managed instructions, promises and fresh scheduled sessions to controller law', () => {
   const text = read(SKILL_REL);
-  assert.match(text, /^Version: 2026-10-24\.2$/m);
+  assert.match(text, /^Version: 2026-10-24\.3$/m);
   // Plugin lag: removing the plugin alone is the fix that worked; the marketplace re-add is the fallback.
   assert.match(text, /`PLUGIN BEHIND`: the Toolkit plugin on the user's claude\.ai account is more than a day behind `main`/);
   assert.match(text, /remove the Toolkit plugin only in claude\.ai Customize > Plugins and let it reinstall; if it is still behind, remove the marketplace and add it again with Sync automatically on/);

@@ -117,6 +117,19 @@ function runGit(gitPath, cwd, args) {
   return result.stdout.trim();
 }
 
+// Refuses unless the Toolkit governance state for the repository is ENABLED with the governed block and
+// binding present. The state module ships with the plugin; without it nothing can show the repository
+// is ENABLED, so the command refuses.
+function requireGitHubGovernance(repoRoot) {
+  let governance;
+  try { governance = require('../../../repo/scripts/toolkit-governance-state.cjs'); } catch {
+    throw new ProgrammeError('GOVERNANCE_STATE_UNAVAILABLE', 'The Toolkit governance state could not be read from this copy, so no programme command runs. Use a full Toolkit install.');
+  }
+  const current = governance.governanceState(repoRoot);
+  if (current.state === 'ENABLED' && current.governed_rules_bind) return;
+  throw new ProgrammeError('GITHUB_GOVERNANCE_OFF', `Toolkit's GitHub governance is ${current.state === 'ENABLED' ? 'ENABLED but incomplete (the governed block or binding is missing)' : current.state} for this repository, so no programme command runs. Nothing changed.`);
+}
+
 // Binds repository identity, the store and the writer. `deps` lets tests supply a transport and the
 // origin URL instead of running gh and git.
 function openContext(args, deps = {}) {
@@ -127,6 +140,9 @@ function openContext(args, deps = {}) {
     repoRoot = repoRoot || runGit(gitPath, process.cwd(), ['rev-parse', '--show-toplevel']);
     originUrl = originUrl || runGit(gitPath, repoRoot, ['remote', 'get-url', 'origin']);
   }
+  // GitHub governance must be ENABLED with its materials in place; a DISABLED or undecided repository
+  // never runs programme commands, whatever files it carries. Tests that supply the origin own the state.
+  if (!deps.originUrl) requireGitHubGovernance(repoRoot);
   const binding = deps.binding || state.loadBinding(repoRoot);
   const transport = deps.transport || new state.GitHubTransport({ ghPath: state.resolveExecutable('gh') });
   const repository = state.bindRepository({ transport, originUrl, binding });

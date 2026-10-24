@@ -15,7 +15,7 @@ Installs and maintains the Toolkit-governed rules block and host shims in one re
 ## Two layers
 
 - **Global rules** live in each harness's user-level file (`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, optionally `~/.gemini/GEMINI.md`). `setup toolkit` installs and refreshes them; this skill never writes them.
-- **Toolkit-governed rules** live in one block in the repository's `AGENTS.md`. That block is the opt-in: a repository is Toolkit-governed only when it carries it. Install it only when the user explicitly asks to put the repository under Toolkit governance. Never install or refresh rules in a repository without the block unless the user asks; repository rules outside the block stay authoritative.
+- **Toolkit-governed rules** live in one block in the repository's `AGENTS.md` and turn on Toolkit's GitHub governance there. Write a repository's own instruction files (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.agents/rules/`) only when its governance state is ENABLED (`toolkit-governance.cjs status`), and install the block only when the user explicitly asks. In any other state, report what would change and write nothing. Repository rules outside the block stay authoritative.
 
 All action-blocking questions to the user are fully bold.
 
@@ -45,7 +45,7 @@ For an explicit request, compare the Toolkit-owned blocks with the current templ
 - `repo-local/AGENTS.managed.template.md` -> `AGENTS.md`
 - `repo-local/CLAUDE.shim.template.md` -> `CLAUDE.md` (Claude Code only). The shim has no markers: `CLAUDE.md` is exactly the line `@AGENTS.md`. When `CLAUDE.md` already exists, keep its other text and make sure it has that line on its own; replace an old Toolkit `CLAUDE.SHIM` block with the line.
 - `repo-local/antigravity-bootstrap.template.md` -> `.agents/rules/00-agent-toolkit-bootstrap.md` (Antigravity only)
-- `repo-local/toolkit-programme.template.json` -> `.github/toolkit-programme.json`, only when the user enables Toolkit governance for the repository (`toolkit-governance.cjs enable`) and asks for the binding. Fill in the repository, parent issue, record prefixes and the separate private evidence store from the user's answers; the binding lands through a pull request, never a push to the default branch.
+- `repo-local/toolkit-programme.template.json` -> `.github/toolkit-programme.json`, only when the repository is ENABLED (a github.com repository whose user answered yes to Toolkit's GitHub governance question) and asks for the binding. Fill in the repository, parent issue, record prefixes and the separate private evidence store from the user's answers; the binding lands through a pull request, never a push to the default branch.
 - `repo-local/docs/agent-playbooks/` -> `docs/agent-playbooks/`, as a whole folder (every Markdown file: `INDEX.md`, `baseline-workflow.md`, `decision-trace.md`, `docs-governance.md`, `fast-tests-and-sharding.md`, `generated-files.md`, `git-completion.md`, `invariant-models.md`, `local-docs.md`, `model-safety-flags.md`, `n8n-workflows.md`, `privacy-safe-checks.md`, `release-readiness-audit.md`, `safety-gates.md`, `windows-command-hygiene.md`). After copying, verify every playbook `INDEX.md` links exists; copy any missing one before reporting. Leave other docs alone.
 
 Rules:

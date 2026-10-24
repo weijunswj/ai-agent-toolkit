@@ -19,6 +19,8 @@ const { ToolkitGovernanceCli } = require(path.join(scripts, 'toolkit-governance.
 const conformance = require(path.join(scripts, 'toolkit-governance-conformance.cjs'));
 const catalogue = require(path.join(scripts, 'toolkit-governance-catalogue.cjs'));
 const managedBlock = require(path.join(scripts, 'toolkit-managed-block.cjs'));
+const governance = require(path.join(scripts, 'toolkit-governance-state.cjs'));
+const repoState = require(path.join(scripts, 'toolkit-governance-repo-state.cjs'));
 
 const REMOTE = 'https://github.com/example-owner/example-repo.git';
 
@@ -100,7 +102,7 @@ test('H-07 (unit): without a terminal nothing is recorded', async (t) => {
   for (const command of ['enable', 'disable', 'decline']) {
     const result = await run(ctx, repo, [command], { interactive: false });
     assert.equal(result.code, 2);
-    assert.match(result.stderr, /Nothing was written: .*ask the user in chat instead: "Turn on Toolkit governance for this repository\?.*run this in your own terminal/);
+    assert.match(result.stderr, /Nothing was written: .*ask the user in chat instead: "Enable Toolkit's automated GitHub tracking governance for this repository\?.*run this in your own terminal/);
     assert.equal(result.asked.length, 0);
   }
   assert.equal(fs.existsSync(ctx.registryPath), false);
@@ -124,7 +126,7 @@ test('enable and disable: confirmed, written, read back; repeats write nothing; 
   const repo = gitRepo(ctx, 'repo');
   const disabled = await run(ctx, repo, ['disable']);
   assert.equal(disabled.code, 0, disabled.stderr);
-  assert.match(disabled.asked[0], /Turn off Toolkit governance for /);
+  assert.match(disabled.asked[0], /Turn off Toolkit's GitHub governance for .*\nThe global rules and coding gates still apply here/);
   assert.match(disabled.stdout, /Recorded\. State: DISABLED/);
   const before = fs.readFileSync(ctx.registryPath);
   for (const command of ['disable', 'decline']) {
@@ -146,13 +148,40 @@ test('enable and disable: confirmed, written, read back; repeats write nothing; 
   assert.equal(JSON.parse(off.stdout).reason, 'user-disabled');
 });
 
-test('decisions refuse where no identity can hold them', async (t) => {
+test('not on github.com: enable refuses, disable records the ok and reads back DISABLED; a plain folder has nothing to decide', async (t) => {
   const ctx = scratch(t);
-  const repo = gitRepo(ctx, 'no-origin', null);
-  const result = await run(ctx, repo, ['enable']);
-  assert.equal(result.code, 2);
-  assert.match(result.stderr, /no usable origin remote/);
-  assert.equal(result.asked.length, 0);
+  for (const [name, remote] of [['no-origin', null], ['gitlab', 'https://gitlab.com/example-owner/example-repo.git']]) {
+    const repo = gitRepo(ctx, name, remote);
+    const status = JSON.parse((await run(ctx, repo, ['status', '--json'])).stdout);
+    assert.deepEqual([status.state, status.rule], ['UNDECIDED', 'R9'], name);
+    assert.match((await run(ctx, repo, ['status'])).stdout, /works only for github\.com repositories, so it will be DISABLED here once you say ok/);
+    const enable = await run(ctx, repo, ['enable']);
+    assert.equal(enable.code, 2, name);
+    assert.match(enable.stderr, /cannot be enabled here\. Nothing was written\./);
+    assert.equal(enable.asked.length, 0);
+    const headless = await run(ctx, repo, ['disable'], { interactive: false });
+    assert.equal(headless.code, 2);
+    assert.match(headless.stderr, /ask the user in chat instead: "Reply ok to turn GitHub governance off for this repository\."/);
+    const declined = await run(ctx, repo, ['disable'], { answer: 'no' });
+    assert.equal(declined.code, 1);
+    const disabled = await run(ctx, repo, ['disable']);
+    assert.equal(disabled.code, 0, disabled.stderr);
+    assert.match(disabled.asked[0], /Turn off Toolkit's GitHub governance for .*\nIt works only for github\.com repositories/);
+    assert.match(disabled.stdout, /Recorded\. State: DISABLED/);
+    assert.equal(JSON.parse((await run(ctx, repo, ['status', '--json'])).stdout).rule, 'R8');
+    assert.equal(JSON.parse(fs.readFileSync(repoState.filePath(repo), 'utf8')).basis, 'not on github.com');
+    const again = await run(ctx, repo, ['disable']);
+    assert.equal(again.code, 0);
+    assert.match(again.stdout, /Already disabled/);
+  }
+  assert.equal(fs.existsSync(ctx.registryPath), false, 'the registry only holds github.com decisions');
+  const plain = path.join(ctx.root, 'plain-folder');
+  fs.mkdirSync(plain);
+  if (governance.findGitRoot(plain) === null) {
+    const result = await run(ctx, plain, ['enable']);
+    assert.equal(result.code, 2);
+    assert.match(result.stderr, /not inside a git repository, so GitHub governance is DISABLED automatically/);
+  }
 });
 
 test('K-01: check exit codes and read-only behaviour', async (t) => {
@@ -249,18 +278,22 @@ test('C-01: the catalogue sources agree (every skill has a tier, routed skills e
   assert.ok(problems.some(line => line.includes('routes delta')), problems.join('\n'));
 });
 
-test('C-02: governed-only skills are offered only in a complete ENABLED repository', async (t) => {
+test('C-02: governed-only skills are offered only in a complete ENABLED repository, portable ones everywhere', async (t) => {
   const governedOnly = Object.entries(catalogue.loadTiers().skills).filter(([, tier]) => tier === 'governed').map(([name]) => name);
   assert.ok(governedOnly.includes('github-program-reconciler'));
   const names = (state, materialsComplete) => catalogue.catalogueFor(state, { materialsComplete }).map(entry => entry.skill);
   for (const name of governedOnly) {
     assert.ok(names('ENABLED', true).includes(name));
-    for (const [state, complete] of [['ENABLED', false], ['DISABLED', false], ['NO_REPOSITORY', false], ['UNDECIDED', false]]) {
+    for (const [state, complete] of [['ENABLED', false], ['DISABLED', false], ['UNDECIDED', false]]) {
       assert.equal(names(state, complete).includes(name), false, `${name} in ${state}`);
     }
   }
-  assert.deepEqual(names('UNDECIDED', false), []);
-  assert.ok(names('DISABLED', false).includes('repository-agent-rules'));
+  // Portable skills come with the plugin: every state offers them, an undecided repository included.
+  const portable = Object.entries(catalogue.loadTiers().skills).filter(([, tier]) => tier === 'portable').map(([name]) => name).sort();
+  for (const state of ['UNDECIDED', 'DISABLED']) assert.deepEqual(names(state, false).sort(), portable, state);
+  assert.ok(portable.includes('repository-agent-rules'));
+  assert.ok(portable.includes('controller-bootstrap'));
+  assert.ok(names('ENABLED', true).includes('controller-bootstrap'));
   const ctx = scratch(t);
   const repo = gitRepo(ctx, 'repo');
   writeGoverned(repo);
@@ -282,5 +315,19 @@ test('usage errors exit 2', async (t) => {
     const result = await run(ctx, ctx.root, argv);
     assert.equal(result.code, 2);
     assert.match(result.stderr, /^Usage: node "[^"]*toolkit-governance\.cjs" /);
+  }
+});
+
+test('the reconciler runs no programme command unless GitHub governance is ENABLED, whatever files the repository carries', (t) => {
+  const ctx = scratch(t);
+  const home = path.join(ctx.root, 'home');
+  fs.mkdirSync(home);
+  const programme = path.join(repoRoot, 'skills', 'github-program-reconciler', 'scripts', 'programme.cjs');
+  for (const [name, remote] of [['gitlab', 'https://gitlab.com/example-owner/example-repo.git'], ['github-undecided', REMOTE]]) {
+    const repo = gitRepo(ctx, name, remote);
+    writeGoverned(repo, { binding: name !== 'github-undecided' });
+    const result = childProcess.spawnSync(process.execPath, [programme, 'show', '--parent'], { cwd: repo, encoding: 'utf8', env: { ...process.env, HOME: home, USERPROFILE: home }, windowsHide: true });
+    assert.notEqual(result.status, 0, name);
+    assert.match(result.stderr + result.stdout, /GITHUB_GOVERNANCE_OFF|GitHub governance is (UNDECIDED|DISABLED)/, name);
   }
 });

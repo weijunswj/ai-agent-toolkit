@@ -115,6 +115,7 @@ test('derive: the rule table, first match wins', () => {
   ];
   for (const [decision, block, binding, expectedState, rule] of cases) {
     const result = governance.GovernanceState.derive({ identity, materials: materials(block, binding), decision: { state: decision, decision_kind: null } });
+    assert.equal(governance.GovernanceState.derive({ identity, materials: materials(block, binding), decision: { state: decision, decision_kind: null }, ok: true }).rule, rule, 'an ok never matters on GitHub');
     assert.equal(result.state, expectedState, `${decision}/${block}/${binding}`);
     assert.equal(result.rule, rule, `${decision}/${block}/${binding}`);
     assert.equal(result.hold, expectedState === 'UNDECIDED');
@@ -124,9 +125,22 @@ test('derive: the rule table, first match wins', () => {
     assert.equal(result.materials_complete, expectedState === 'ENABLED' ? complete : null);
     assert.ok(Object.isFrozen(result));
   }
+
+  // Not on github.com: a recorded disable still wins; otherwise the user's ok decides, whatever is enabled or present.
+  const gitlab = { root: '/r', repository_id: 'c'.repeat(64), valid: true, remote: { host: 'gitlab.com' } };
+  const noOrigin = { root: '/r', repository_id: 'path:' + 'd'.repeat(64), valid: false, reason: 'origin-missing' };
+  for (const id of [gitlab, noOrigin]) {
+    for (const decision of ['enabled', 'unresolved']) {
+      for (const [ok, expectedState, rule] of [[false, 'UNDECIDED', 'R9'], [true, 'DISABLED', 'R8']]) {
+        const result = governance.GovernanceState.derive({ identity: id, materials: materials(true, true), decision: { state: decision, decision_kind: null }, ok });
+        assert.deepEqual([result.state, result.rule, result.governed_rules_bind, result.hold], [expectedState, rule, false, expectedState === 'UNDECIDED'], `${id.reason || 'gitlab'}/${decision}/${ok}`);
+      }
+    }
+    assert.equal(governance.GovernanceState.derive({ identity: id, materials: materials(true, true), decision: { state: 'disabled', decision_kind: 'disable' } }).rule, 'R2');
+  }
 });
 
-test('S-01, S-02: no git root or no usable origin is NO_REPOSITORY, never held, never persisted', (t) => {
+test('S-01, S-02: no git root is DISABLED automatically; a git repository not on github.com waits for the user\'s ok', (t) => {
   const ctx = scratch(t);
   const plain = path.join(ctx.root, 'plain');
   fs.mkdirSync(plain);
@@ -134,26 +148,56 @@ test('S-01, S-02: no git root or no usable origin is NO_REPOSITORY, never held, 
   // The scratch folder may sit inside some git checkout on a developer machine; only check the
   // no-root case when that is not so.
   if (governance.findGitRoot(plain) === null) {
-    assert.equal(outside.state, 'NO_REPOSITORY');
-    assert.equal(outside.reason, 'no-git-root');
+    assert.deepEqual([outside.state, outside.rule, outside.reason, outside.hold], ['DISABLED', 'R1', 'no-git', false]);
+    assert.equal(outside.folder, plain);
+    assert.match(outside.repository_id, /^path:[0-9a-f]{64}$/);
+    assert.equal(outside.root, null);
   }
-  for (const [name, remote, reason] of [
-    ['none', null, 'origin-missing'],
-    ['local-path', '/srv/git/repo.git', 'origin-unsupported'],
-    ['http', 'http://example.invalid/a/b.git', 'origin-unsupported'],
-    ['file', 'file:///srv/git/repo.git', 'origin-unsupported'],
+  for (const [name, remote, reason, host] of [
+    ['none', null, 'origin-missing', null],
+    ['local-path', '/srv/git/repo.git', 'origin-unsupported', null],
+    ['http', 'http://example.invalid/a/b.git', 'origin-unsupported', null],
+    ['file', 'file:///srv/git/repo.git', 'origin-unsupported', null],
+    ['gitlab', 'https://gitlab.com/example-owner/example-repo.git', 'other-host', 'gitlab.com'],
+    ['gitea', 'git@git.example.invalid:a/b.git', 'other-host', 'git.example.invalid'],
   ]) {
     const repo = fakeRepo(ctx.root, name, { remote, block: true, binding: true });
     const result = state(ctx, repo);
-    assert.equal(result.state, 'NO_REPOSITORY', name);
-    assert.equal(result.reason, reason, name);
-    assert.equal(result.hold, false);
-    assert.equal(result.persistable, false);
-    assert.equal(result.repository_id, null);
+    assert.deepEqual([result.state, result.rule, result.reason, result.hold, result.host], ['UNDECIDED', 'R9', reason, true, host], name);
+    assert.equal(result.governed_rules_bind, false, `${name}: a governed block never binds off github.com`);
+    assert.ok(result.repository_id, name);
   }
+  // Without an origin the repository is known by its path on this computer; with one, by the remote.
+  assert.equal(state(ctx, path.join(ctx.root, 'none')).repository_id, governance.localRepositoryId(path.join(ctx.root, 'none')));
   const twoOrigins = fakeRepo(ctx.root, 'ambiguous', { configText: `[remote "origin"]\n\turl = ${REMOTE}\n\turl = git@github.com:x/y.git\n` });
-  assert.equal(state(ctx, twoOrigins).reason, 'origin-ambiguous');
+  assert.deepEqual([state(ctx, twoOrigins).rule, state(ctx, twoOrigins).reason], ['R9', 'origin-ambiguous']);
+  // GitHub, by name or SSH alias, still gets the question.
+  for (const remote of ['git@github.com:a/b.git', 'git@github-work:a/b.git', 'ssh://git@ssh.github.com:443/a/b.git']) {
+    assert.equal(state(ctx, fakeRepo(ctx.root, `gh-${remote.length}-${remote.charCodeAt(4)}`, { remote })).rule, 'R7', remote);
+  }
   assert.equal(fs.existsSync(ctx.registryPath), false, 'nothing is written');
+  // The user's ok, kept next to the registry, turns the waiting repository DISABLED (R8).
+  const okFile = path.join(path.dirname(ctx.registryPath), governance.NOT_GITHUB_BASENAME);
+  const gitlab = state(ctx, path.join(ctx.root, 'gitlab'));
+  fs.mkdirSync(path.dirname(okFile), { recursive: true });
+  fs.writeFileSync(okFile, JSON.stringify({ schema: governance.NOT_GITHUB_SCHEMA, repositories: { [gitlab.repository_id]: { at: '2026-10-24T00:00:00.000Z' } } }));
+  assert.deepEqual([state(ctx, path.join(ctx.root, 'gitlab')).state, state(ctx, path.join(ctx.root, 'gitlab')).rule], ['DISABLED', 'R8']);
+  assert.equal(state(ctx, path.join(ctx.root, 'none')).rule, 'R9', 'an ok counts only for its own repository');
+  // A damaged ok file counts as no ok: the repository asks again.
+  fs.writeFileSync(okFile, '{ damaged');
+  assert.equal(state(ctx, path.join(ctx.root, 'gitlab')).rule, 'R9');
+});
+
+test('R1 copies: plain folders record DISABLED, but never at a root, the home folder, Toolkit\'s own folder or the personal folders', (t) => {
+  const ctx = scratch(t);
+  const options = opts(ctx);
+  const home = path.dirname(path.dirname(path.dirname(ctx.registryPath)));
+  assert.equal(governance.recordFolderFor(path.join(home, 'projects', 'x-boundaries'), options), path.join(home, 'projects', 'x-boundaries'));
+  assert.equal(governance.recordFolderFor(path.join(home, 'Desktop', 'X-Boundaries'), options), path.join(home, 'Desktop', 'X-Boundaries'));
+  for (const folder of [path.parse(home).root, home, path.dirname(home), path.join(home, '.ai-agent-toolkit'), path.join(home, '.ai-agent-toolkit', 'user-state'),
+    path.resolve(os.tmpdir()), path.join(home, 'Desktop'), path.join(home, 'documents'), path.join(home, 'Downloads'), path.join(home, 'OneDrive - Work', 'Desktop')]) {
+    assert.equal(governance.recordFolderFor(folder, options), null, folder);
+  }
 });
 
 test('S-03, S-06, S-07: materials without a decision', (t) => {
@@ -277,8 +321,8 @@ test('H-09 (unit): unreadable inputs hold inside a repository and never outside 
   const corrupt = state(ctx, repo);
   assert.deepEqual([corrupt.state, corrupt.rule, corrupt.reason, corrupt.hold], ['UNDECIDED', 'ERROR', 'registry-unreadable', true]);
   assert.match(corrupt.error_code, /^[A-Z_]+$/);
-  // The same broken registry does not hold a repository without an identity.
-  assert.equal(state(ctx, fakeRepo(ctx.root, 'no-origin', { remote: null })).hold, false);
+  // A repository without an identity never reads the registry: it waits for the user's ok (R9).
+  assert.equal(state(ctx, fakeRepo(ctx.root, 'no-origin', { remote: null })).rule, 'R9');
 
   fs.rmSync(ctx.registryPath);
   const worktreeFile = path.join(ctx.root, 'dangling');

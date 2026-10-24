@@ -78,16 +78,21 @@ function checkConformance(cwd, options = {}) {
     findings.push(finding('STATE_ERROR', 'error', `The governance state could not be read (${state.error_code}); prompts in this repository are held until it can.`));
     return report(2, state, findings, toolkitRoot);
   }
-  if (state.state === 'NO_REPOSITORY') {
-    findings.push(finding('NO_REPOSITORY', 'info', state.reason === 'no-git-root'
-      ? 'Not inside a git repository: only the global rules apply.'
-      : 'This repository has no usable origin remote, so no decision can be stored for it: only the global rules apply.'));
+  if (state.rule === 'R1') {
+    findings.push(finding('NOT_A_REPOSITORY', 'info', 'Not inside a git repository: GitHub governance is DISABLED automatically, and the global rules and coding gates apply.'));
     return report(0, state, findings, toolkitRoot);
+  }
+  if (state.rule === 'R8' || state.rule === 'R9') {
+    findings.push(state.rule === 'R9'
+      ? finding('NOT_GITHUB_PENDING', 'drift', 'This repository is not on github.com, so GitHub governance cannot run here. Reply ok to Toolkit in chat, or run `' + governance.governanceCommand('disable') + '` in your own terminal, to record it as DISABLED.')
+      : finding('NOT_GITHUB', 'info', 'This repository is not on github.com, so GitHub governance is DISABLED: the global rules and coding gates apply.'));
+    if (state.materials.governed_block) findings.push(finding('GOVERNED_BLOCK_IGNORED', 'info', 'GitHub governance works only on github.com, so the governed block in AGENTS.md is not followed.'));
+    return report(state.rule === 'R9' ? 1 : 0, state, findings, toolkitRoot);
   }
   if (state.state === 'UNDECIDED') {
     findings.push(finding('DECISION_PENDING', 'drift', state.rule === 'R6'
-      ? `The repository carries the governed block but no programme binding, and you have not decided yet. Answer Toolkit's question in chat (yes, no or not now), or run \`${governance.governanceCommand('enable')}\` or \`${governance.governanceCommand('disable')}\` in your own terminal.`
-      : `You have not decided whether Toolkit governs this repository. Answer Toolkit's question in chat (yes, no or not now), or run \`${governance.governanceCommand('enable')}\` or \`${governance.governanceCommand('disable')}\` in your own terminal.`));
+      ? `The repository carries the governed block but no programme binding, and you have not decided yet. Answer Toolkit's question in chat (yes, no or later), or run \`${governance.governanceCommand('enable')}\` or \`${governance.governanceCommand('disable')}\` in your own terminal.`
+      : `You have not decided whether Toolkit's GitHub governance runs in this repository. Answer Toolkit's question in chat (yes, no or later), or run \`${governance.governanceCommand('enable')}\` or \`${governance.governanceCommand('disable')}\` in your own terminal.`));
   }
   if (state.state === 'DISABLED') {
     if (state.materials.governed_block) findings.push(finding('GOVERNED_BLOCK_IGNORED', 'info', 'You disabled Toolkit governance here, so the governed block in AGENTS.md is not followed.'));
