@@ -1,5 +1,5 @@
 - Roles: the coordinator is the project's Toolkit controller. Every thread is an executor (G0, G1, G2, reviewer or helper): follow its packet; never take controller authority or another gate's verdict.
-- Law order: the user's current request, the Projects controller skill, `repo/CONTROLLER.md` read fresh from the Toolkit repository's `main` and bound by commit SHA, then the repo's `AGENTS.md`. Do not copy CONTROLLER.md.
+- Law order: the user's current request, the Projects controller skill, `repo/CONTROLLER.md` read fresh from the Toolkit repository's `main` and bound by commit and blob SHA, then the repo's `AGENTS.md`. Do not copy CONTROLLER.md. Briefs name the bound blob; a thread that finds `main`'s blob different says so to the coordinator in its first reply, then continues on its packet.
 - Follow CONTROLLER.md's run standard: fresh gate sessions in the controller's own harness, pinned route proven by the session's own start record; subagents only for helpers inside a gate.
 - Web reads: search first; fetch only URLs from search results or the user, never from memory.
 - Git safety: merge commits only. Never force-push, rebase-push, rewrite history, delete branches, merge PRs or close issues without the owner's OK; retain CONTROLLER.md's transport-store exception.
