@@ -4,9 +4,10 @@
 // Claude Code's governance hook: one script for three events, named by --event.
 //   UserPromptSubmit  holds every prompt in an undecided repository (toolkit-governance-gate.cjs).
 //   PreToolUse        refuses state-changing tools there, and agent answers everywhere.
-//   SessionStart      adds one line stating the effective governance state, and exports the
-//                     session's id to its shell commands (CLAUDE_ENV_FILE), so a session an agent
-//                     starts from one of them is known not to be the user typing.
+//   SessionStart      adds one line stating the effective governance state, exports the session's
+//                     id to its shell commands (CLAUDE_ENV_FILE), so a session an agent starts from
+//                     one of them is known not to be the user typing, and records the run's session
+//                     mark, so a later process that resumes the session cannot answer.
 // The gate module loads inside the guarded path, so a missing or broken module still holds in a
 // repository instead of crashing; hooks.json also sets onFailure: "block" for the two blocking events.
 //
@@ -60,6 +61,7 @@ function respond(event, input, options = {}) {
       return decision ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: decision.deny } } : {};
     }
     exportHostSession(input, options.environment || process.env, gate);
+    gate.startSession(input, options);
     const line = gate.sessionLine(input.cwd, { ...options, sessionId: gate.sessionIdOf(input) });
     return line ? { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: line } } : {};
   } catch {

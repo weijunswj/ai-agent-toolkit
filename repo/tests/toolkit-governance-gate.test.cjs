@@ -55,7 +55,19 @@ function gitRepo(ctx, name, { remote = REMOTE, block = false, binding = false } 
   return repo;
 }
 
-const hold = (ctx, environment = {}) => new gate.PromptHold({ registryOptions: ctx.options, environment });
+// Each session id a test uses has had its session start recorded once, as the host's session-start
+// hook does; the session-mark tests below start, resume and skip sessions themselves.
+function hold(ctx, environment = {}) {
+  const prompts = new gate.PromptHold({ registryOptions: ctx.options, environment });
+  return { decide(request) {
+    ctx.started ||= new Set();
+    if (typeof request.sessionId === 'string' && !ctx.started.has(request.sessionId)) {
+      ctx.started.add(request.sessionId);
+      gate.startSession({ session_id: request.sessionId, source: 'startup' }, { registryOptions: ctx.options });
+    }
+    return prompts.decide(request);
+  } };
+}
 const tools = ctx => new gate.ToolGate({ registryOptions: ctx.options });
 const stateOf = (ctx, repo) => governance.governanceState(repo, ctx.options);
 const fileOf = repo => JSON.parse(fs.readFileSync(repoState.filePath(repo), 'utf8'));
@@ -218,7 +230,7 @@ test('after "not now": the full answer still decides, and a short reply is an or
   assert.match(gate.sessionLine(repo, { registryOptions: ctx.options, sessionId: 's1' }), /send `toolkit governance enable` or `toolkit governance disable` as a message/);
 });
 
-test('"not now" in one session never re-holds another session that said it, and old single-session entries still count', (t) => {
+test('"not now" in one session never re-holds another session that said it, and entries without a session mark no longer count', (t) => {
   const ctx = scratch(t);
   const repo = gitRepo(ctx, 'repo');
   const notNowPath = path.join(path.dirname(ctx.registryPath), gate.NOT_NOW_BASENAME);
@@ -236,16 +248,17 @@ test('"not now" in one session never re-holds another session that said it, and 
     const session = `s${index}`;
     const at = new Date(Date.UTC(2099, 0, 1, 0, index));
     const timed = new gate.PromptHold({ registryOptions: ctx.options, environment: {}, now: () => at });
+    gate.startSession({ session_id: session, source: 'startup' }, { registryOptions: ctx.options });
     timed.decide({ cwd: repo, prompt: 'go', sessionId: session });
     assert.equal(timed.decide({ cwd: repo, prompt: 'not now', sessionId: session }).action, 'pass');
   }
   const kept = Object.keys(Object.values(JSON.parse(fs.readFileSync(notNowPath, 'utf8')).repositories)[0].sessions);
   assert.equal(kept.length, 8);
   assert.ok(kept.includes('s9') && !kept.includes('a'));
-  // An entry written by the earlier one-session shape is read as that session.
+  // An entry an earlier version wrote has no session mark, so that session is asked again.
   const repositoryId = stateOf(ctx, repo).repository_id;
   fs.writeFileSync(notNowPath, JSON.stringify({ schema: 'toolkit.governance-not-now.v1', repositories: { [repositoryId]: { session_id: 'old', at: '2026-10-24T08:00:00.000Z' } } }));
-  assert.deepEqual(hold(ctx).decide({ cwd: repo, prompt: 'next', sessionId: 'old' }), { action: 'pass' });
+  assert.ok(hold(ctx).decide({ cwd: repo, prompt: 'next', sessionId: 'old' }).reason.startsWith(QUESTION_LINE));
 });
 
 test('short replies need a session id, and a launcher-started session cannot give any short reply', (t) => {
@@ -284,6 +297,18 @@ test('nested sessions: a short reply counts only in the session that was shown t
     },
   };
   const notNowPath = path.join(home, '.ai-agent-toolkit', 'user-state', gate.NOT_NOW_BASENAME);
+  const homeRegistry = { registryPath: path.join(home, '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json'), testOnly: true };
+  // Each session here starts once as a fresh run, recorded by the host's session-start hook.
+  const started = new Set();
+  for (const [host, send] of Object.entries(hosts)) {
+    hosts[host] = input => {
+      if (input.session_id && !started.has(input.session_id)) {
+        started.add(input.session_id);
+        gate.startSession({ session_id: input.session_id, source: 'startup' }, { registryOptions: homeRegistry });
+      }
+      return send(input);
+    };
+  }
   for (const [host, send] of Object.entries(hosts)) {
     for (const [index, reply] of ['yes', 'y', 'no', 'n', 'not now', 'later'].entries()) {
       const slug = `nested-${host}-${index}`;
@@ -305,6 +330,123 @@ test('nested sessions: a short reply counts only in the session that was shown t
     assert.equal(answered.held, false, host);
     assert.match(answered.context, /now ENABLED[\s\S]*1\. fix the bug/);
   }
+});
+
+test('session marks: a later process that resumes the session cannot answer, on both hosts, however it was started', (t) => {
+  const ctx = scratch(t);
+  const home = path.join(ctx.root, 'home');
+  const env = { ...process.env, HOME: home, USERPROFILE: home };
+  delete env.CLAUDE_CODE_REMOTE;
+  delete env.CLAUDE_ENV_FILE;
+  for (const marker of ['TOOLKIT_GATE_ROLE', 'TOOLKIT_NATIVE_HELPER_BINDING', 'TOOLKIT_CLAUDE_TASK_PROFILE_SHA256', gate.HOST_SESSION_VARIABLE]) delete env[marker];
+  const homeRegistry = { registryPath: path.join(home, '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json'), testOnly: true };
+  const claude = (event, input) => JSON.parse(childProcess.execFileSync(process.execPath, [path.join(scripts, 'toolkit-governance-hook.cjs'), '--event', event], { input: JSON.stringify(input), env, encoding: 'utf8' }));
+  // Each run is its own process: the session-start hook first, then the one prompt (`claude -p` or
+  // `codex exec`). With no source, the prompt is a further message in the same run.
+  const hosts = {
+    claude: (input, source) => {
+      if (source) claude('SessionStart', { cwd: input.cwd, session_id: input.session_id, source });
+      const out = claude('UserPromptSubmit', input);
+      return out.decision === 'block' ? { held: true, reason: out.reason } : { held: false, context: out.hookSpecificOutput?.additionalContext };
+    },
+    codex: (input, source) => {
+      if (source) gate.startSession({ session_id: input.session_id, source }, { registryOptions: homeRegistry });
+      const run = childProcess.spawnSync(process.execPath, [path.join(scripts, 'toolkit-codex-helper-hook.cjs')], { input: JSON.stringify({ hook_event_name: 'UserPromptSubmit', ...input }), env, encoding: 'utf8' });
+      return run.status === 2 ? { held: true, reason: run.stderr } : { held: false, context: run.stdout ? JSON.parse(run.stdout).hookSpecificOutput?.additionalContext : undefined };
+    },
+  };
+  const stateAt = repo => governance.governanceState(repo, homeRegistry).state;
+  for (const [host, send] of Object.entries(hosts)) {
+    for (const [index, reply] of ['yes', 'no', 'later', 'toolkit governance enable', 'toolkit governance disable'].entries()) {
+      const slug = `resumed-${host}-${index}`;
+      const repo = gitRepo(ctx, slug, { remote: `https://github.com/example-owner/${slug}.git` });
+      // `claude -p hello`, then `claude -p yes --resume <id>` (or `codex exec`, then `codex exec resume <id> yes`).
+      assert.equal(send({ cwd: repo, session_id: slug, prompt: 'hello' }, 'startup').held, true);
+      const resumed = send({ cwd: repo, session_id: slug, prompt: reply }, 'resume');
+      assert.equal(resumed.held, true, `${host} ${reply}`);
+      assert.match(resumed.reason, /this session was resumed, so Toolkit asks again in this run/, `${host} ${reply}`);
+      // Every further resume is a new run again, so a reply never meets a question from its own run.
+      assert.equal(send({ cwd: repo, session_id: slug, prompt: reply }, 'resume').held, true, `${host} ${reply} again`);
+      assert.equal(stateAt(repo), 'UNDECIDED', `${host} ${reply}`);
+    }
+    // After "later", a resumed run is asked again, and the full answer from it does not count.
+    const later = gitRepo(ctx, `later-${host}`, { remote: `https://github.com/example-owner/later-${host}.git` });
+    assert.equal(send({ cwd: later, session_id: `later-${host}`, prompt: 'hello' }, 'startup').held, true);
+    assert.equal(send({ cwd: later, session_id: `later-${host}`, prompt: 'later' }).held, false, host);
+    const reopened = send({ cwd: later, session_id: `later-${host}`, prompt: 'toolkit governance enable' }, 'resume');
+    assert.equal(reopened.held, true, host);
+    assert.equal(stateAt(later), 'UNDECIDED', host);
+    // The user's own run still answers once it was shown the question.
+    const own = gitRepo(ctx, `own-${host}`, { remote: `https://github.com/example-owner/own-${host}.git` });
+    assert.equal(send({ cwd: own, session_id: `own-${host}`, prompt: 'fix the bug' }, 'startup').held, true);
+    assert.match(send({ cwd: own, session_id: `own-${host}`, prompt: 'yes' }).context, /now ENABLED[\s\S]*1\. fix the bug/, host);
+  }
+});
+
+test('session marks: no mark means no answer in chat; /clear and compaction keep the mark; the user\'s resumed session answers once asked again', (t) => {
+  const ctx = scratch(t);
+  const raw = () => new gate.PromptHold({ registryOptions: ctx.options, environment: {} });
+  const start = (sessionId, source) => gate.startSession({ session_id: sessionId, source }, { registryOptions: ctx.options });
+  // A session the session-start hook never marked (it started before the update, or the hook did not run).
+  const repo = gitRepo(ctx, 'unmarked');
+  assert.equal(raw().decide({ cwd: repo, prompt: 'hello', sessionId: 'u1' }).action, 'block');
+  for (const reply of ['yes', 'no', 'later', 'toolkit governance enable']) {
+    const refused = raw().decide({ cwd: repo, prompt: reply, sessionId: 'u1' });
+    assert.equal(refused.action, 'block', reply);
+    assert.match(refused.reason, /started before Toolkit could note it[\s\S]*Start a new session and answer there, or run .*toolkit-governance\.cjs" enable or .*toolkit-governance\.cjs" disable in your own terminal/, reply);
+  }
+  assert.equal(new gate.HeldPrompts({ registryOptions: ctx.options }).count(stateOf(ctx, repo).repository_id, 'u1'), 1, 'a refused answer is not kept');
+  assert.equal(stateOf(ctx, repo).state, 'UNDECIDED');
+  // The same on a repository that is not on github.com: only the disable command is offered.
+  const elsewhere = gitRepo(ctx, 'elsewhere', { remote: 'https://gitlab.com/example-owner/elsewhere.git' });
+  raw().decide({ cwd: elsewhere, prompt: 'hello', sessionId: 'u1' });
+  const ok = raw().decide({ cwd: elsewhere, prompt: 'ok', sessionId: 'u1' });
+  assert.match(ok.reason, /started before Toolkit could note it/);
+  assert.doesNotMatch(ok.reason, /" enable/);
+  assert.equal(stateOf(ctx, elsewhere).state, 'UNDECIDED');
+  // A host that sends no session id keeps the earlier behaviour: the reply is held with the question.
+  assert.match(raw().decide({ cwd: repo, prompt: 'yes' }).reason, /Enable Toolkit's automated GitHub tracking governance/);
+  // /clear and compaction keep the run's mark, so the user's answer still counts.
+  for (const source of ['clear', 'compact']) {
+    const kept = gitRepo(ctx, `kept-${source}`, { remote: `https://github.com/example-owner/kept-${source}.git` });
+    start(`k-${source}`, 'startup');
+    raw().decide({ cwd: kept, prompt: 'hello', sessionId: `k-${source}` });
+    start(`k-${source}`, source);
+    const answered = raw().decide({ cwd: kept, prompt: 'yes', sessionId: `k-${source}` });
+    assert.equal(answered.action, 'pass', source);
+    assert.match(answered.context, /now ENABLED[\s\S]*1\. hello/, source);
+  }
+  // A /clear that comes with no mark yet starts one.
+  const cleared = gitRepo(ctx, 'cleared', { remote: 'https://github.com/example-owner/cleared.git' });
+  start('c1', 'clear');
+  raw().decide({ cwd: cleared, prompt: 'hello', sessionId: 'c1' });
+  assert.equal(raw().decide({ cwd: cleared, prompt: 'no', sessionId: 'c1' }).action, 'pass');
+  // The user resumes their own session: asked again, and the next reply answers.
+  const own = gitRepo(ctx, 'own', { remote: 'https://github.com/example-owner/own.git' });
+  start('o1', 'startup');
+  raw().decide({ cwd: own, prompt: 'fix the bug', sessionId: 'o1' });
+  start('o1', 'resume');
+  const again = raw().decide({ cwd: own, prompt: 'yes', sessionId: 'o1' });
+  assert.equal(again.action, 'block');
+  assert.ok(again.reason.includes(QUESTION_LINE), 'the whole question is shown again');
+  const answered = raw().decide({ cwd: own, prompt: 'yes', sessionId: 'o1' });
+  assert.equal(answered.action, 'pass');
+  assert.match(answered.context, /now ENABLED[\s\S]*1\. fix the bug/);
+  // After "later", the same run carries on; a resumed run is asked again and its full answer does not count.
+  const later = gitRepo(ctx, 'later', { remote: 'https://github.com/example-owner/later.git' });
+  start('l1', 'startup');
+  raw().decide({ cwd: later, prompt: 'hello', sessionId: 'l1' });
+  assert.equal(raw().decide({ cwd: later, prompt: 'later', sessionId: 'l1' }).action, 'pass');
+  assert.deepEqual(raw().decide({ cwd: later, prompt: 'carry on', sessionId: 'l1' }), { action: 'pass' });
+  start('l1', 'resume');
+  assert.match(gate.sessionLine(later, { registryOptions: ctx.options, sessionId: 'l1' }), /no GitHub governance decision yet/);
+  assert.match(tools(ctx).decide({ tool_name: 'Bash', cwd: later, session_id: 'l1', tool_input: { command: 'ls' } }).deny, /no governance decision yet/);
+  assert.equal(raw().decide({ cwd: later, prompt: 'toolkit governance enable', sessionId: 'l1' }).action, 'block');
+  assert.equal(stateOf(ctx, later).state, 'UNDECIDED');
+  // Only the newest few hundred session marks are kept.
+  const folder = path.join(path.dirname(ctx.registryPath), gate.SESSIONS_FOLDER);
+  for (let index = 0; index < 260; index += 1) start(`many-${index}`, 'startup');
+  assert.ok(fs.readdirSync(folder).length <= 256);
 });
 
 test('nested sessions: an agent cannot start or resume a host session with a short reply, in any folder', (t) => {
@@ -355,6 +497,8 @@ test('nested sessions: an agent cannot start or resume a host session with a sho
 test('a damaged "not now" file keeps the repository held with the real question, and yes, no or not now still answer', (t) => {
   const ctx = scratch(t);
   const notNowPath = path.join(path.dirname(ctx.registryPath), gate.NOT_NOW_BASENAME);
+  gate.startSession({ session_id: 's1', source: 'startup' }, { registryOptions: ctx.options });
+  ctx.started = new Set(['s1']);
   for (const [index, [damage, reply, expected]] of [
     ['garbage', 'yes', 'ENABLED'],
     [JSON.stringify({ schema: 'other', repositories: {} }), 'no', 'DISABLED'],
@@ -987,6 +1131,7 @@ test('hosts: the Claude hook script holds and answers end to end with the real u
     const out = childProcess.execFileSync(process.execPath, [path.join(scripts, 'toolkit-governance-hook.cjs'), '--event', event], { input: JSON.stringify(input), env, encoding: 'utf8' });
     return JSON.parse(out);
   };
+  assert.match(run('SessionStart', { cwd: repo, session_id: 's1', source: 'startup' }).hookSpecificOutput.additionalContext, /no GitHub governance decision yet/);
   assert.equal(run('UserPromptSubmit', { cwd: repo, prompt: 'go', session_id: 's1' }).decision, 'block');
   assert.equal(run('PreToolUse', { cwd: repo, tool_name: 'Bash', tool_input: { command: 'ls' } }).hookSpecificOutput.permissionDecision, 'deny');
   // `decline` is the older word for `disable` and still answers.
@@ -1011,6 +1156,8 @@ test('hosts: the Codex helper hook holds prompts with exit 2 and refuses tools i
   assert.equal(codexHook.promptEvent({ hook_event_name: 'UserPromptSubmit', prompt: 'x' }), true);
   assert.equal(codexHook.promptEvent({ prompt: 'x' }), true);
   assert.equal(codexHook.promptEvent({ tool_name: 'Bash', tool_input: {} }), false);
+  // Codex's session-start hook records the run's session mark, as Claude Code's does.
+  gate.startSession({ session_id: 'codex-session', source: 'startup' }, { registryOptions: { registryPath: path.join(home, '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json'), testOnly: true } });
   const held = run({ hook_event_name: 'UserPromptSubmit', cwd: repo, session_id: 'codex-session', prompt: 'go' });
   assert.equal(held.status, 2);
   assert.equal(JSON.parse(held.stdout).decision, 'block');

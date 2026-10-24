@@ -56,11 +56,13 @@ function readHookInput() {
   } catch { return {}; }
 }
 
-// One line stating this repository's governance state; nothing outside a repository.
-// SessionStart cannot block, so a failure here only drops the line.
+// Records the run's session mark (so a later process that resumes the session cannot answer the
+// governance question) and returns one line stating this repository's governance state; nothing
+// outside a repository. SessionStart cannot block, so a failure here only drops the line.
 function governanceLine(input, dependencies) {
   try {
     const gate = dependencies.gate || require('./toolkit-governance-gate.cjs');
+    gate.startSession(input);
     // Codex always sends the session's cwd; without one there is no repository to describe.
     return input && typeof input.cwd === 'string' && input.cwd ? gate.sessionLine(input.cwd, { sessionId: gate.sessionIdOf(input) }) : null;
   } catch { return null; }
