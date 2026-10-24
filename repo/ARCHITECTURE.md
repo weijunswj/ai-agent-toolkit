@@ -11,7 +11,7 @@ Last reviewed against `main` `9b7ffff3c30078c2290c809d20bc7c49e3f96e8d`.
 | Skills | `skills/` | The copyable product: one folder per skill, edited directly |
 | Agent-rule sources | `repo/contracts/agent-rules/` | Global rules, governed-repository rules, n8n safety rules, skill routing |
 | Repo-local templates | `repo/contracts/agent-rules/repo-local/` | Managed `AGENTS.md` template, the one-line `CLAUDE.md` and the Antigravity bootstrap, projected into `skills/repository-agent-rules/repo-local/` |
-| Projects controller skill | `repo/contracts/claude-projects/web-controller-projects/` | Source of the Claude Projects coordinator skill, uploaded to claude.ai by hand, and the managed project-instructions block it places; never offered as a plugin skill |
+| Projects controller skill | `repo/contracts/claude-projects/web-controller-projects/` | Source of the Claude Projects coordinator skill, uploaded to claude.ai by hand, the managed project-instructions block it places and its scheduled task templates; never offered as a plugin skill |
 | Controller kernel | `repo/contracts/controller-kernel/` | Stack registry, controller decision, gate IR and Codex adapter schemas |
 | Bridge contract | `repo/contracts/toolkit-local-bridge/` | Package version and native plugin inputs |
 | Lane map | `repo/contracts/lanes/lane-map.json` | Which files the Claude and Codex lanes own and which stay integration-owned |
@@ -43,6 +43,7 @@ Last reviewed against `main` `9b7ffff3c30078c2290c809d20bc7c49e3f96e8d`.
 | Plain-references check | `repo/scripts/check-plain-references.cjs` (run by `validate-toolkit.cjs`), baseline `repo/contracts/plain-references/baseline.json` |
 | Promise check | `repo/scripts/toolkit-promise-check.cjs` ([how to use it](docs/TOOLKIT-PROMISE-CHECK.md)) |
 | Projects instructions block | `repo/scripts/toolkit-projects-instructions.cjs`, source `repo/contracts/claude-projects/web-controller-projects/project-instructions.md` |
+| Projects scheduled task prompts | `repo/scripts/toolkit-projects-tasks.cjs`, templates `repo/contracts/claude-projects/web-controller-projects/tasks/`, setup inventory `repo/contracts/claude-projects/web-controller-projects/setup-inventory.json` |
 | Shared executable resolution | `skills/github-program-reconciler/scripts/resolve-executable.cjs` |
 | Decision-trace audit | `skills/github-program-reconciler/scripts/decision-trace-audit.cjs` |
 | Comment tags and G0 decision history | `skills/github-program-reconciler/scripts/decision-tags.cjs`, `skills/github-program-reconciler/scripts/decision-history.cjs` |
