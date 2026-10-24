@@ -104,6 +104,24 @@ test('--place keeps lines added inside an edited block, labelled, and refuses br
   assert.equal(result.stdout, '');
 });
 
+// An edited block is read against the block its marker was written from: lines of an older block
+// version are not kept as edits, only the lines someone really added or changed.
+test('--place keeps only real edits of a block written from an older version', t => {
+  const expected = owner().expectedBlock();
+  const oldBody = `${expected.body.trimEnd()}\n- Law order: an old rule the new version reworded.\n`;
+  const oldRendered = renderBlock({ ...expected, version: '3.9.1', body: oldBody });
+  const edited = oldRendered.replace('- Law order: an old rule the new version reworded.', '- Law order: an old rule the new version reworded.\n- Owner rule added inside the block.');
+  const rendered = renderBlock(expected);
+  for (const [label, bodyForDigest, kept] of [
+    ['the marker\'s block is found in history', digest => (digest === findBlocks(oldRendered).blocks[0].digest ? oldBody : null), ['- Owner rule added inside the block.']],
+    ['no history: compared with main\'s block', () => null, ['- Law order: an old rule the new version reworded.', '- Owner rule added inside the block.']],
+  ]) {
+    const file = fixture(t, `${edited}\n\n- Project line.\n`);
+    const placed = new ProjectsInstructions({ root: ROOT, bodyForDigest }).place(file);
+    assert.equal(placed, `${rendered}\n\n${['(kept from an edit inside the block)', ...kept].join('\n')}\n\n- Project line.\n`, label);
+  }
+});
+
 // The overlap hint flags project lines that repeat block lines; it never flags project-only rules,
 // lines already trimmed and labelled "(adds to the block)", or anything inside the block.
 test('overlap hint flags repeated project lines and stays quiet on deduped fixtures', t => {

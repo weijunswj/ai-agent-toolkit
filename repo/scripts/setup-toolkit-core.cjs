@@ -2833,11 +2833,13 @@ function applySetupChoices(args, current) {
 }
 
 // Setup that runs from the checkout it just fast-forwarded keeps executing the scripts it loaded
-// before the update. When the update changed setup's own scripts, this run stops before any plugin,
-// settings or config step and asks for one more run, which starts with the updated code.
+// before the update, and the Toolkit version it read when it started. When the update changed setup's
+// own scripts or the version source, this run stops before any plugin, settings or config step and
+// asks for one more run, which starts with the updated code and version.
+const SETUP_SELF_PATHS = Object.freeze(['repo/scripts', 'repo/contracts/toolkit-local-bridge/version.json']);
 function setupSelfUpdateRerun(args, managed) {
   if (managed.update_action !== 'fast-forwarded' || !samePath(repoRootFromScript(), args.repoRoot)) return null;
-  const changed = runGitCapture(args.repoRoot, ['diff', '--name-only', managed.commit_before, managed.commit_after, '--', 'repo/scripts'],
+  const changed = runGitCapture(args.repoRoot, ['diff', '--name-only', managed.commit_before, managed.commit_after, '--', ...SETUP_SELF_PATHS],
     'git diff --name-only (setup scripts)', false, true);
   if (!changed) return null;
   return [

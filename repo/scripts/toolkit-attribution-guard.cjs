@@ -7,7 +7,7 @@
 // that merely mentions Claude passes. Used by the Claude Code PreToolUse hook and the Codex helper hook.
 //
 // It also refuses commands that skip a repository's own commit and push checks (git commit -n or
-// --no-verify, git push --no-verify, or a different core.hooksPath) in a Toolkit-governed or
+// --no-verify, git push --no-verify, or a different core.hooksPath) in a Toolkit-governed (GitHub governance ENABLED, or the governed block present) or
 // personal-data-guarded repository, and force pushes (--force, -f, --force-with-lease, --mirror or a
 // +refspec) there and to an evidence store (a TRANSPORT-* repository). This is best effort: CI and
 // branch rules are the backstop. Not covered:
@@ -345,17 +345,25 @@ function gitConfigText(root) {
 const STORE_URL = /(?:^|[/:])transport-[\w.-]+?(?:\.git)?\/?$/i;
 function storeUrl(url) { return STORE_URL.test(String(url || '').trim()); }
 
+// Whether the repository's GitHub governance state is ENABLED (setup finished or not). A state that
+// cannot be read, or a copy without the state module, counts as not enabled here; the block and
+// guard-config checks below still apply.
+function governanceEnabled(root, registryOptions) {
+  try { return require('./toolkit-governance-state.cjs').governanceState(root, registryOptions).state === 'ENABLED'; } catch { return false; }
+}
+
 // What protects the repository a folder is in: `checked` when the nearest folder with a .git entry
-// carries the governed rules block in AGENTS.md or the guard config, `store` when one of its
-// remotes is an evidence store.
-function repositoryKind(folder, cache) {
+// carries the governed rules block in AGENTS.md or the guard config, or its GitHub governance is
+// ENABLED, `store` when one of its remotes is an evidence store.
+function repositoryKind(folder, cache, registryOptions = {}) {
   if (cache.has(folder)) return cache.get(folder);
   let answer = { checked: false, store: false };
   for (let current = folder, depth = 0; depth < 64; depth += 1) {
     if (fs.existsSync(path.join(current, '.git'))) {
       answer = {
         checked: fs.existsSync(path.join(current, '.github', 'personal-data-guard.json'))
-          || /BEGIN TOOLKIT-GOVERNED-RULES\b/.test(readSmallFile(path.join(current, 'AGENTS.md'))),
+          || /BEGIN TOOLKIT-GOVERNED-RULES\b/.test(readSmallFile(path.join(current, 'AGENTS.md')))
+          || governanceEnabled(current, registryOptions),
         store: [...gitConfigText(current).matchAll(/^\s*url\s*=\s*(.+)$/gim)].some((match) => storeUrl(match[1])),
       };
       break;
@@ -372,7 +380,8 @@ const SHELLS = /(?:^|[\\/])(?:bash|sh|zsh|dash|ksh|pwsh|powershell|cmd|eval|invo
 
 // Returns the refusal reason, or '' when the command may run. A quoted command handed to a
 // shell (bash -c "...", pwsh -Command "...") is read too, up to two levels deep.
-function bypassRefusal(command, cwd, depth = 0) {
+// `registryOptions` is for tests (the governance decisions file to read).
+function bypassRefusal(command, cwd, depth = 0, registryOptions = {}) {
   const text = String(command || '');
   if (text.length > MAX_COMMAND_CHARS || !/\bgit\b/i.test(text)) return '';
   let root = cwd || process.cwd();
@@ -385,16 +394,16 @@ function bypassRefusal(command, cwd, depth = 0) {
     }
     const git = gitCommand(current, root);
     if (git?.refusal) return git.refusal;
-    if (git && skipsChecks(git) && repositoryKind(git.base, cache).checked) return BYPASS_MESSAGE;
+    if (git && skipsChecks(git) && repositoryKind(git.base, cache, registryOptions).checked) return BYPASS_MESSAGE;
     if (git && forcePush(git)) {
-      const kind = repositoryKind(git.base, cache);
+      const kind = repositoryKind(git.base, cache, registryOptions);
       const target = git.args.find((word) => !word.startsWith('-'));
       if (kind.checked || kind.store || storeUrl(target)) return FORCE_MESSAGE;
     }
     if (depth < 2 && SHELLS.test(current.words[0])) {
       for (const word of current.words.slice(1)) {
         if (/\s/.test(word) && /\bgit\b/i.test(word)) {
-          const nested = bypassRefusal(word, root, depth + 1);
+          const nested = bypassRefusal(word, root, depth + 1, registryOptions);
           if (nested) return nested;
         }
       }

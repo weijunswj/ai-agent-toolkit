@@ -179,6 +179,16 @@ function deadlineTransport(deps) {
   return transport;
 }
 
+// Whether the repository's GitHub governance is ENABLED with its governed rules in force. A state that
+// cannot be read, or a copy without the state module, counts as off. `deps.governanceState` is for tests.
+function githubGovernanceOn(repoRoot, deps = {}) {
+  try {
+    const read = deps.governanceState || require('../../../repo/scripts/toolkit-governance-state.cjs').governanceState;
+    const current = read(repoRoot);
+    return current.state === 'ENABLED' && current.governed_rules_bind === true;
+  } catch { return false; }
+}
+
 // One checkpoint for a bound session. Returns { outcome, ... } and throws only for a programme error
 // the caller records. `UNBOUND` means no binding for this session or repository: nothing else ran.
 function runCheckpoint({ sessionId, message = null }, deps = {}) {
@@ -187,6 +197,8 @@ function runCheckpoint({ sessionId, message = null }, deps = {}) {
   if (!local) return { outcome: 'UNBOUND' };
   const state = require('./programme-state.cjs');
   if (!local.repo_root || !fs.existsSync(path.join(local.repo_root, state.BINDING_FILE))) return { outcome: 'UNBOUND' };
+  // GitHub governance turned off (or never complete) after bind: nothing reaches the store.
+  if (!githubGovernanceOn(local.repo_root, deps)) return { outcome: 'GOVERNANCE_OFF' };
   const binding = state.loadBinding(local.repo_root);
   if (binding.repository.toLowerCase() !== String(local.repository).toLowerCase()) {
     throw new ProgrammeError('BINDING_MOVED', 'The repository binding no longer names the repository this session was bound in; bind again.');

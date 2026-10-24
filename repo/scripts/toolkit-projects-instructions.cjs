@@ -10,15 +10,18 @@
 //                               then `overlaps: <n> (...)` when project lines repeat block lines
 //   --place <file>              the instructions with main's block at the top and every project
 //                               line kept, in order
+const childProcess = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
-const { renderBlock, findBlocks, blockState, removeBlock, normalizeBody } = require('./toolkit-managed-block.cjs');
+const { renderBlock, findBlocks, blockState, removeBlock, normalizeBody, bodyDigest } = require('./toolkit-managed-block.cjs');
 
 const SOURCE_FILE = 'repo/contracts/claude-projects/web-controller-projects/project-instructions.md';
 const VERSION_FILE = 'repo/contracts/toolkit-local-bridge/version.json';
 const SOURCE = 'claude-projects';
 const NAME = 'PROJECT-INSTRUCTIONS';
 const VERSION = /^\d+\.\d+\.\d+$/;
+// How far back the source's history is searched for the block an edited marker was written from.
+const HISTORY_COMMITS = 100;
 const KEPT_LABEL = '(kept from an edit inside the block)';
 // Trimmed lines carry this label and are never flagged again.
 const ADDS_LABEL = /\(adds to the block/i;
@@ -87,16 +90,18 @@ function overlapsLine(overlaps) {
   return `overlaps: ${overlaps.length} (${overlaps.map(entry => `line ${entry.line} ~ block line ${entry.block}`).join('; ')})`;
 }
 
-// Main's block first, then every project line in its original order. Lines someone added inside
-// an edited block move just below it under a label, so no project text is lost.
-function placeInstructions(text, expected) {
+// Main's block first, then every project line in its original order. Lines someone added or changed
+// inside an edited block move just below it under a label, so no project text is lost. They are
+// found against the block the marker was written from (`baseBody`, looked up by the marker's digest)
+// so lines of an older block version are not kept as edits; without it, against main's block.
+function placeInstructions(text, expected, { baseBody = null } = {}) {
   const { malformed, found } = target(text);
   if (malformed) throw Object.assign(new Error('PROJECT_INSTRUCTIONS_MALFORMED'), { code: 'MALFORMED' });
   const eol = /\r\n/.test(text) ? '\r\n' : '\n';
   const rendered = renderBlock(expected).split('\n').join(eol);
   const kept = [];
   if (found && blockState(found, expected) === 'tampered') {
-    const base = new Set(normalizeBody(expected.body).split('\n').map(line => line.trim()));
+    const base = new Set(normalizeBody(baseBody === null ? expected.body : baseBody).split('\n').map(line => line.trim()));
     for (const line of normalizeBody(found.body).split('\n')) if (line.trim() && !base.has(line.trim())) kept.push(line);
   }
   const rest = (found ? removeBlock(text, NAME) : text).replace(/^(?:[ \t]*\r?\n)+/, '');
@@ -122,10 +127,25 @@ function parseArgs(args) {
   throw new Error('PROJECT_INSTRUCTIONS_ARGUMENTS');
 }
 
+// The body of the source file at the most recent commit whose body has this digest, or null (no git,
+// a shallow history, or no match).
+function gitBodyForDigest(root, digest) {
+  const git = args => childProcess.execFileSync('git', ['-C', root, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true, maxBuffer: 4 * 1024 * 1024 });
+  try {
+    for (const commit of git(['log', '--format=%H', '-n', String(HISTORY_COMMITS), '--', SOURCE_FILE]).split('\n').filter(Boolean)) {
+      const body = git(['show', `${commit}:${SOURCE_FILE}`]);
+      if (bodyDigest(body) === digest) return body;
+    }
+  } catch { return null; }
+  return null;
+}
+
 class ProjectsInstructions {
-  constructor({ root = path.resolve(__dirname, '../..'), readFile = fs.readFileSync } = {}) {
+  // `bodyForDigest(digest)` finds an earlier block body by its marker digest (tests pass their own).
+  constructor({ root = path.resolve(__dirname, '../..'), readFile = fs.readFileSync, bodyForDigest = digest => gitBodyForDigest(root, digest) } = {}) {
     this.root = root;
     this.readFile = readFile;
+    this.bodyForDigest = bodyForDigest;
   }
 
   expectedBlock() {
@@ -152,7 +172,11 @@ class ProjectsInstructions {
   }
 
   place(file) {
-    return placeInstructions(this.readFile(file, 'utf8'), this.expectedBlock());
+    const text = this.readFile(file, 'utf8');
+    const expected = this.expectedBlock();
+    const { found } = target(text);
+    const edited = found && found.digest && blockState(found, expected) === 'tampered';
+    return placeInstructions(text, expected, { baseBody: edited ? this.bodyForDigest(found.digest) : null });
   }
 }
 

@@ -2376,9 +2376,16 @@ class Reconciler {
 // ---------------------------------------------------------------------------------------------
 // Repository identity
 
+// github.com, its subdomains (ssh.github.com), or an SSH alias with no dot that mentions github
+// (github-work). Any other dotted host, a GitHub Enterprise server included, is not github.com.
+function isGitHubHost(host) {
+  const name = String(host || '').toLowerCase();
+  return name === 'github.com' || name.endsWith('.github.com') || (!name.includes('.') && name.includes('github'));
+}
+
 function originSlug(url) {
-  const match = /github\.com[:/]([^/]+)\/([^/]+?)(?:\.git)?\/?$/i.exec(String(url || '').trim());
-  return match ? `${match[1]}/${match[2]}` : null;
+  const match = /^(?:[a-z][a-z0-9+.-]*:\/\/(?:[^@/]+@)?|[^@/\s]+@)?([^/:@\s]+)(?::\d+)?[:/]([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/i.exec(String(url || '').trim());
+  return match && isGitHubHost(match[1]) ? `${match[2]}/${match[3]}` : null;
 }
 
 // The repository is the `origin` remote, confirmed by GitHub's own name for it. The binding file
@@ -2402,5 +2409,5 @@ module.exports = Object.freeze({
   newParent, newChild, isHolder, isLaneHolder, parentRefusal, authoriseWrite, claimDocument, claimLane, assignGate, reopenGate, interruptGate,
   recordReturn, consumeReturn, foldJournals, validateJournal, currentGateAccepted, completionAccepted, applyPatch,
   evaluateChecks, renderParentBlockBody, renderChildBlockBody, renderTraceBlockBody, renderCurrentBlockBody, renderBlock, blockDigest, findStateBlock, upsertStateBlock, upsertTraceBlock,
-  orderMoves, intentId, describeEffect, resolveExecutable, originSlug, bindRepository,
+  orderMoves, intentId, describeEffect, resolveExecutable, isGitHubHost, originSlug, bindRepository,
 });

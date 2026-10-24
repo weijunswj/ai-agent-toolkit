@@ -14,9 +14,11 @@
 //   catalogue   the skills offered in this repository's state
 //   migrate     one pass over the repositories in --root folders (default: this folder): one
 //               list, one typed yes, then an offer to add missing no-force-push rulesets
+//   repair      when your governance decisions file cannot be read: moves it aside (kept next to
+//               it) after you type yes, so Toolkit can ask about each repository again
 //
 // `--json` prints the machine-readable result instead. `check --offline` skips the one network
-// read (the repository's no-force-push ruleset, asked of GitHub through `gh`). Only `enable` and `disable` write, only
+// read (the repository's no-force-push ruleset, asked of GitHub through `gh`). Only `enable`, `disable` and `repair` write, only
 // after you type yes in a terminal, and only to your own user-state file through
 // toolkit-capability-registry.cjs. An agent running this without a terminal cannot record a
 // decision. Enabling records consent only: the governed block and the programme binding still
@@ -35,9 +37,9 @@ const { GovernanceMigration, MigrationError } = require('./toolkit-governance-mi
 const CMD = subcommand => `\`${governance.governanceCommand(subcommand)}\``;
 
 const CAPABILITY = governance.GOVERNANCE_CAPABILITY;
-const COMMANDS = Object.freeze(['status', 'enable', 'disable', 'reopen', 'check', 'catalogue', 'migrate']);
+const COMMANDS = Object.freeze(['status', 'enable', 'disable', 'reopen', 'check', 'catalogue', 'migrate', 'repair']);
 const ALIASES = Object.freeze({ decline: 'disable' });
-const USAGE = `Usage: ${governance.governanceCommand('<status|enable|disable|reopen|catalogue> [--json]')}\n`
+const USAGE = `Usage: ${governance.governanceCommand('<status|enable|disable|reopen|catalogue|repair> [--json]')}\n`
   + `       ${governance.governanceCommand('check [--json] [--offline]')}\n`
   + `       ${governance.governanceCommand('migrate [--root <folder>]...')}\n`;
 
@@ -102,6 +104,7 @@ class ToolkitGovernanceCli {
       if (command === 'check') return this.#check(json, offline);
       if (command === 'catalogue') return this.#catalogue(json);
       if (command === 'reopen') return this.#reopen(json);
+      if (command === 'repair') return await this.#repair(json);
       return await this.#decide(command, json);
     } catch (error) {
       if (error instanceof GovernanceCliError || error instanceof MigrationError) {
@@ -121,7 +124,7 @@ class ToolkitGovernanceCli {
 
   #status(json) {
     const state = this.#state();
-    this.#print(json, state, describe(state));
+    this.#print(json, state, describe(state, this.#registryOptions));
     return state.rule === 'ERROR' ? 2 : 0;
   }
 
@@ -151,13 +154,32 @@ class ToolkitGovernanceCli {
 
   #reopen(json) {
     const state = this.#state();
-    if (state.rule === 'ERROR') throw new GovernanceCliError(`The governance state could not be read (${state.error_code}).`);
+    if (state.rule === 'ERROR') throw new GovernanceCliError(`The governance state could not be read (${state.error_code}). ${governance.repairHint(state, this.#registryOptions)}`.trim());
     const lines = state.state === 'DISABLED'
       ? ['Nothing changed. You disabled Toolkit governance for this repository, so Toolkit does not ask about it.', `To turn it on, run ${CMD('enable')}. To keep it off, do nothing.`]
       : [`Nothing changed. This repository is ${label(state)}, so there is no disabled decision to reopen.`, state.state === 'ENABLED'
         ? `To turn governance off, run ${CMD('disable')}.`
         : `To decide, answer Toolkit's question in chat, or run ${CMD('enable')} or ${CMD('disable')} in your own terminal.`];
     this.#print(json, { state: state.state, writes: 0 }, lines);
+    return 0;
+  }
+
+  // The terminal-only way out of a decisions file that cannot be read: it is moved aside, never
+  // deleted, and only after the user types yes.
+  async #repair(json) {
+    const { file, problem } = governance.registryProblem(this.#registryOptions);
+    if (!problem) {
+      this.#print(json, { file, problem: null, writes: 0 }, [`Your governance decisions file reads fine (${file}); nothing to repair.`]);
+      return 0;
+    }
+    if (!this.#interactive) throw new GovernanceCliError(`Nothing was moved: the repair runs only when you type yes in your own terminal. Your governance decisions file (${file}) could not be read (${problem}).`);
+    const answer = String(await this.#ask(`Your governance decisions file could not be read (${problem}):\n  ${file}\nMove it aside (kept next to it, nothing deleted)? Toolkit then asks about each repository again.\nType yes to confirm: `) || '').trim().toLowerCase();
+    if (answer !== 'yes') {
+      this.#print(json, { file, problem, writes: 0 }, ['Not confirmed. Nothing was moved.']);
+      return 1;
+    }
+    const aside = governance.moveRegistryAside(this.#registryOptions);
+    this.#print(json, { file, problem, moved_to: aside, writes: 1 }, [`Moved aside to ${aside}. Toolkit asks about each repository again; the old file stays there if you need it.`]);
     return 0;
   }
 
@@ -173,7 +195,7 @@ class ToolkitGovernanceCli {
     }
     if (notGitHub) return this.#notGitHubOk(before, json);
     const status = registry.getRepositoryStatus({ cwd: this.#cwd, ...this.#registryOptions });
-    if (status.status === 'actionable') throw new GovernanceCliError(`Your governance decisions could not be read (${status.reason_code}). Nothing was written.`);
+    if (status.status === 'actionable') throw new GovernanceCliError(`Your governance decisions could not be read (${status.reason_code}). Nothing was written. ${governance.repairHint({ reason: 'registry-unreadable' }, this.#registryOptions)}`);
     const current = status.capabilities[CAPABILITY].state;
     // The registry keeps its own operation names: a first "no" is 'decline', turning off an enabled one is 'disable'.
     const operation = command === 'enable' ? 'enable' : current === 'enabled' ? 'disable' : 'decline';
@@ -230,8 +252,9 @@ function label(state) {
   return state.state.replace(/_/g, ' ');
 }
 
-function describe(state) {
-  if (state.rule === 'ERROR') return [`State: UNDECIDED (the state could not be read: ${state.error_code}). Prompts in this repository are held until it can.`];
+function describe(state, registryOptions = {}) {
+  const hint = governance.repairHint(state, registryOptions);
+  if (state.rule === 'ERROR') return [`State: UNDECIDED (the state could not be read: ${state.error_code}). Prompts in this repository are held until it can.`, ...(hint ? [hint] : [])];
   const key = state.rule === 'R9' ? 'NOT_GITHUB' : state.state === 'ENABLED' && state.materials_complete === false ? 'ENABLED_INCOMPLETE' : state.state;
   const lines = [`State: ${label(state)}`, `Rules: ${RULES_TEXT[key]}`];
   if (state.root) lines.push(`Repository: ${state.root}`);
