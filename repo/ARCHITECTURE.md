@@ -9,9 +9,9 @@ Last reviewed against `main` `9b7ffff3c30078c2290c809d20bc7c49e3f96e8d`.
 | Part | Path | Owns |
 |---|---|---|
 | Skills | `skills/` | The copyable product: one folder per skill, edited directly |
-| Agent-rule sources | `repo/contracts/agent-rules/` | Global rules, governed-repository rules, n8n safety rules, skill routing |
+| Agent-rule sources | `repo/contracts/agent-rules/` | Global rules, gate rules, governed-repository rules, n8n safety rules, skill routing |
 | Repo-local templates | `repo/contracts/agent-rules/repo-local/` | Managed `AGENTS.md` template, the one-line `CLAUDE.md` and the Antigravity bootstrap, projected into `skills/repository-agent-rules/repo-local/` |
-| Projects controller skill | `repo/contracts/claude-projects/web-controller-projects/` | Source of the Claude Projects coordinator skill, uploaded to claude.ai by hand, the managed project-instructions block it places and its scheduled task templates; never offered as a plugin skill |
+| Projects controller skill | `repo/contracts/claude-projects/web-controller-projects/` | Source of the Claude Projects coordinator skill and its `reference/` files, uploaded to claude.ai by hand, the managed project-instructions block it places and its scheduled task templates; never offered as a plugin skill |
 | Controller kernel | `repo/contracts/controller-kernel/` | Stack registry, controller decision, gate IR and Codex adapter schemas |
 | Bridge contract | `repo/contracts/toolkit-local-bridge/` | Package version and native plugin inputs |
 | Lane map | `repo/contracts/lanes/lane-map.json` | Which files the Claude and Codex lanes own and which stay integration-owned |
@@ -38,10 +38,10 @@ Last reviewed against `main` `9b7ffff3c30078c2290c809d20bc7c49e3f96e8d`.
 | Helper route guard and adapter | `repo/scripts/toolkit-v3-helper-guard.cjs`, `repo/scripts/toolkit-v3-native-helper-adapter.cjs` (shared core), `repo/scripts/toolkit-v3-native-helper-adapter-claude.cjs`, `repo/scripts/toolkit-v3-native-helper-adapter-codex.cjs` |
 | Claude helper agents | `repo/scripts/toolkit-claude-helper-agents.cjs`, `repo/scripts/toolkit-claude-helper-spec.cjs`, `repo/scripts/toolkit-claude-task-session.cjs` |
 | Version bump | `repo/scripts/bump-version.cjs` |
+| Risk tier of a change | `repo/scripts/toolkit-risk-tier.cjs`, this repository's list `.github/toolkit-risk-tiers.json` |
 | Instruction sync | `repo/scripts/sync-agent-instruction-shims.cjs`, `repo/scripts/sync-repo-doc-contract.cjs` |
 | Full validation list | `repo/scripts/run-validation-gate.cjs` |
 | Plain-references check | `repo/scripts/check-plain-references.cjs` (run by `validate-toolkit.cjs`), baseline `repo/contracts/plain-references/baseline.json` |
-| Promise check | `repo/scripts/toolkit-promise-check.cjs` ([how to use it](docs/TOOLKIT-PROMISE-CHECK.md)) |
 | Projects instructions block | `repo/scripts/toolkit-projects-instructions.cjs`, source `repo/contracts/claude-projects/web-controller-projects/project-instructions.md` |
 | Projects scheduled task prompts | `repo/scripts/toolkit-projects-tasks.cjs`, templates `repo/contracts/claude-projects/web-controller-projects/tasks/`, setup inventory `repo/contracts/claude-projects/web-controller-projects/setup-inventory.json` |
 | Shared executable resolution | `skills/github-program-reconciler/scripts/resolve-executable.cjs` |
@@ -61,6 +61,7 @@ Host config writes reuse `repo/scripts/codex-app-server.cjs` and share `repo/scr
 | Controller procedure | `repo/CONTROLLER.md` |
 | Programme direction | `repo/docs/TOOLKIT-V3.md` |
 | Global rules (every harness session) | `repo/contracts/agent-rules/global-rules.md` |
+| Gate rules (gate sessions and their controllers) | `repo/contracts/agent-rules/gate-rules.md` |
 | Governed-repository rules | `repo/contracts/agent-rules/toolkit-governed-rules.md` |
 | Models, effort and reviewers | `repo/contracts/controller-kernel/stack-registry-v3.json` |
 | Source ownership | `repo/contracts/source-of-truth-contract.md` |

@@ -21,7 +21,7 @@ test('current complete independent review law applies to the actual selected 1\/
 });
 
 test('native verification preserves exact supported configuration and scoped historical overrides',()=>{
- const body=current(document);assert.match(body,/verify the supported actual route and exact effective configuration before consequential effects/i);assert.match(body,/read back before consequential work, is the route proof/);assert.match(body,/post one takeover record on the parent's CURRENT/);assert.match(body,/No unavailable route authorises a model\/effort\/provider fallback/);assert.match(body,/Admitted historical qualification overrides retain their exact scoped authority and immutable inputs/);assert.match(body,/Source tests.*cannot establish native qualification/);assert.doesNotMatch(body,/selected native qualification bindings are/);
+ const body=current(document);assert.match(body,/verify the supported actual route and exact effective configuration before consequential effects/i);assert.match(body,/read once before consequential work, is the route proof, never the model's self-report/);assert.match(body,/a host that keeps no record is recorded as not checkable/);assert.match(body,/post one takeover record, one line, on the parent's CURRENT when ENABLED, else in the evidence store/);assert.match(body,/No unavailable route authorises a model\/effort\/provider fallback/);assert.match(body,/Admitted historical qualification overrides retain their exact scoped authority and immutable inputs/);assert.match(body,/Source tests.*cannot establish native qualification/);assert.doesNotMatch(body,/selected native qualification bindings are/);
 });
 
 test('actual bootstrap consumer references exact Controller and version-bound registry sources',()=>{

@@ -115,17 +115,19 @@ test('generated Codex and Claude instruction surfaces preserve the compact host-
   const agents = fs.readFileSync(path.join(repoRoot, 'skills/repository-agent-rules/repo-local/AGENTS.managed.template.md'), 'utf8');
   const global = fs.readFileSync(path.join(repoRoot, 'repo/contracts/agent-rules/global-rules.md'), 'utf8');
   const claude = fs.readFileSync(path.join(repoRoot, 'skills/repository-agent-rules/repo-local/CLAUDE.shim.template.md'), 'utf8');
+  const gate = fs.readFileSync(path.join(repoRoot, 'repo/contracts/agent-rules/gate-rules.md'), 'utf8');
   for (const pattern of [
-    /G0 must delegate suitable separable evidence gathering, and G1 suitable independent implementation or validation/,
+    /Delegate when it saves context or wall time; no note is needed when you don't/,
     /In gate work only a G0 or G1 lead launches helpers; helpers never launch or ask for another agent, and G2 has none/,
-    /Keep model, effort, tier and route out of portable task prompts unless a runtime requires them/,
   ]) assert.match(global, pattern);
+  // Prompt hygiene for gate launches is a gate mechanic, kept in the gate rules.
+  assert.match(gate, /Keep model, effort, tier and route out of portable task prompts unless a runtime requires them/);
   for (const pattern of [
     /root session owns integration, validation, conflict resolution and final judgement/,
     /isolated context and one minimal self-contained task/,
     /Mutating siblings need disjoint files and scope; read-only siblings may investigate separable questions in parallel/,
   ]) assert.match(global, pattern);
-  for (const text of [agents, global]) {
+  for (const text of [agents, global, gate]) {
     assert.doesNotMatch(text, /RAM|reservation|CPU|Children default|never use Fast|medium non-fast|special-worker|host-parity|profile\/capacity|ADMISSION_DENIED|worker-speedup|fork_turns/);
   }
   assert.equal(claude, '@AGENTS.md\n');
