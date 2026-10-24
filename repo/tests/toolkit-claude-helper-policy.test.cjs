@@ -47,13 +47,16 @@ test('the governed-repo predicate walks to the first .git and follows the govern
   const managed = makeGoverned(path.join(dir, 'managed'), 'predicate');
   fs.mkdirSync(path.join(managed, 'src', 'deep'), { recursive: true });
   assert.equal(governedRepo(path.join(managed, 'src', 'deep'), {}).reason, 'governance-enabled');
-  // The managed block alone no longer governs: without the binding the repository is undecided.
+  // The managed block alone does not govern: without the binding the repository's setup is unfinished.
   fs.rmSync(path.join(managed, '.github'), { recursive: true });
-  assert.deepEqual([governedRepo(managed, {}).governed, governedRepo(managed, {}).reason], [false, 'governance-undecided']);
+  assert.deepEqual([governedRepo(managed, {}).governed, governedRepo(managed, {}).reason], [false, 'governance-incomplete']);
+  // The block and binding without the user's yes do not govern either: the repository is asked.
+  const unasked = makeGoverned(path.join(dir, 'unasked'), 'predicate-unasked', { enable: false });
+  assert.deepEqual([governedRepo(unasked, {}).governed, governedRepo(unasked, {}).reason], [false, 'governance-undecided']);
   // Declined: the block is ignored.
   const registryPath = path.join(dir, 'state', 'repository-governance.v1.json');
   const registry = require('../scripts/toolkit-capability-registry.cjs');
-  const declined = makeGoverned(path.join(dir, 'declined'), 'predicate-declined');
+  const declined = makeGoverned(path.join(dir, 'declined'), 'predicate-declined', { enable: false });
   const childProcess = require('node:child_process');
   childProcess.execFileSync('git', ['-C', declined, 'init', '--quiet']);
   const options = { registryPath, testOnly: true };
@@ -70,7 +73,7 @@ test('the governed-repo predicate walks to the first .git and follows the govern
   fs.writeFileSync(path.join(nested, '.git'), 'gitdir: ../../.git/worktrees/lib\n');
   const inner = governedRepo(nested, {});
   assert.equal(inner.governed, false); assert.equal(inner.root, nested);
-  assert.equal(governedRepo(ROOT, {}).governed, true, 'the Toolkit checkout opts in like any other repository');
+  assert.equal(governedRepo(ROOT, {}).governed, false, 'the Toolkit checkout is asked like any other repository');
 });
 
 test('outside governed work every main-session agent launch is left to Claude Code', t => {

@@ -106,7 +106,8 @@ test('derive: the rule table, first match wins', () => {
     ['disabled', true, true, 'DISABLED', 'R2'],
     ['disabled', false, false, 'DISABLED', 'R2'],
     ['enabled', true, true, 'ENABLED', 'R3'],
-    ['unresolved', true, true, 'ENABLED', 'R4'],
+    // The block and binding are files an agent can write, never the user's answer.
+    ['unresolved', true, true, 'UNDECIDED', 'R4'],
     ['enabled', true, false, 'ENABLED', 'R5'],
     ['enabled', false, true, 'ENABLED', 'R5'],
     ['unresolved', true, false, 'UNDECIDED', 'R6'],
@@ -119,7 +120,7 @@ test('derive: the rule table, first match wins', () => {
     assert.equal(result.state, expectedState, `${decision}/${block}/${binding}`);
     assert.equal(result.rule, rule, `${decision}/${block}/${binding}`);
     assert.equal(result.hold, expectedState === 'UNDECIDED');
-    const complete = rule === 'R3' || rule === 'R4';
+    const complete = rule === 'R3';
     assert.equal(result.governed_rules_bind, complete);
     assert.equal(result.programme_records_bind, complete);
     assert.equal(result.materials_complete, expectedState === 'ENABLED' ? complete : null);
@@ -206,7 +207,7 @@ test('R1 copies: plain folders record DISABLED, but never at a root, the home fo
 test('S-03, S-06, S-07: materials without a decision', (t) => {
   const ctx = scratch(t);
   const optIn = state(ctx, fakeRepo(ctx.root, 'opt-in', { block: true, binding: true }));
-  assert.deepEqual([optIn.state, optIn.rule, optIn.reason, optIn.governed_rules_bind], ['ENABLED', 'R4', 'repository-opt-in', true]);
+  assert.deepEqual([optIn.state, optIn.rule, optIn.reason, optIn.governed_rules_bind, optIn.hold], ['UNDECIDED', 'R4', 'repository-carries-governance', false, true]);
   const blockOnly = state(ctx, fakeRepo(ctx.root, 'block-only', { block: true }));
   assert.deepEqual([blockOnly.state, blockOnly.rule, blockOnly.hold], ['UNDECIDED', 'R6', true]);
   const plain = state(ctx, fakeRepo(ctx.root, 'plain'));
@@ -216,16 +217,16 @@ test('S-03, S-06, S-07: materials without a decision', (t) => {
   const legacy = fakeRepo(ctx.root, 'legacy', { binding: true });
   writeBlock(legacy, 'GLOBAL-AGENTS.MD-TEMPLATE');
   const legacyState = state(ctx, legacy);
-  assert.deepEqual([legacyState.state, legacyState.materials.governed_block_legacy], ['ENABLED', true]);
-  assert.equal(fs.existsSync(ctx.registryPath), false, 'R4 derives ENABLED without writing a decision');
+  assert.deepEqual([legacyState.state, legacyState.rule, legacyState.materials.governed_block_legacy], ['UNDECIDED', 'R4', true]);
+  assert.equal(fs.existsSync(ctx.registryPath), false, 'nothing is written without the user\'s answer');
 });
 
-test('S-04, S-05: recorded decisions decide, a decline beats the repository opt-in', (t) => {
+test('S-04, S-05: recorded decisions decide; a repository carrying the block and binding is asked, and a decline wins', (t) => {
   const ctx = scratch(t);
   const declined = gitRepo(ctx.root, 'declined', 'https://github.com/example-owner/declined.git');
   writeBlock(declined);
   writeBinding(declined, { repository: 'example-owner/declined' });
-  assert.equal(state(ctx, declined).state, 'ENABLED');
+  assert.equal(state(ctx, declined).state, 'UNDECIDED');
   decide(ctx, declined, 'decline');
   const afterDecline = state(ctx, declined);
   assert.deepEqual([afterDecline.state, afterDecline.rule, afterDecline.reason, afterDecline.governed_rules_bind], ['DISABLED', 'R2', 'user-declined', false]);
@@ -368,7 +369,7 @@ test('H-15, H-16 (unit): no subprocess, no writes, no raw remote in the result',
     Object.assign(fs, savedFs);
   }
   const perRunMs = Number(process.hrtime.bigint() - started) / 1e6 / 20;
-  assert.equal(result.state, 'ENABLED');
+  assert.deepEqual([result.state, result.rule], ['UNDECIDED', 'R4']);
   assert.ok(perRunMs < 250, `one evaluation took ${perRunMs} ms`);
   const text = JSON.stringify(result);
   assert.doesNotMatch(text, /example-owner/, 'the raw remote is not in the result');

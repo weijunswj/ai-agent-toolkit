@@ -8,6 +8,9 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const control = require('../scripts/toolkit-agent-control.cjs');
 const hook = require('../scripts/toolkit-claude-agent-hook.cjs');
+// The Toolkit checkout counts as governed work here through the user's recorded yes, kept in a
+// scratch home this test process and its hooks use (the governed block and binding alone are not an answer).
+require('./toolkit-governed-fixture-support.cjs').recordEnabled(path.resolve(__dirname, '..', '..'));
 
 const SCRIPT = path.join(__dirname, '..', 'scripts', 'toolkit-agent-control.cjs');
 // The wire value of the retired Toolkit direct topology, as an older Toolkit stored it.

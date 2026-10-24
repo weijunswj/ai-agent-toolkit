@@ -45,9 +45,9 @@ class ClaudeMatrixContext {
     this.undecided = path.join(this.base, 'undecided');
     this.home = path.join(this.base, 'home');
     for (const dir of [this.repo, this.plain]) fs.mkdirSync(path.join(dir, '.git'), { recursive: true });
-    makeGoverned(this.repo, 'matrix');
-    makeGoverned(this.declined, 'matrix-declined');
-    makeGoverned(this.undecided, 'matrix-undecided');
+    makeGoverned(this.repo, 'matrix', { home: this.home });
+    makeGoverned(this.declined, 'matrix-declined', { enable: false });
+    makeGoverned(this.undecided, 'matrix-undecided', { enable: false });
     fs.rmSync(path.join(this.undecided, '.github'), { recursive: true });
     fs.writeFileSync(path.join(this.plain, 'AGENTS.md'), '# Project rules\n');
     this.#decline(this.declined);

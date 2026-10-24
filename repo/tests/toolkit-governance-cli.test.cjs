@@ -68,12 +68,12 @@ function expectedBlockText(version) {
   return managedBlock.renderBlock({ ...expected, version: version || expected.version });
 }
 
-function writeGoverned(repo, { blockText = expectedBlockText(), binding = true } = {}) {
+function writeGoverned(repo, { blockText = expectedBlockText(), binding = true, repository = 'example-owner/example-repo' } = {}) {
   fs.writeFileSync(path.join(repo, 'AGENTS.md'), `# Repo\n\n${blockText}\n`);
   if (binding) {
     fs.mkdirSync(path.join(repo, '.github'), { recursive: true });
     fs.writeFileSync(path.join(repo, '.github', 'toolkit-programme.json'), JSON.stringify({
-      schema: 'toolkit.programme-binding.v1', repository: 'example-owner/example-repo', parent_issue: 7,
+      schema: 'toolkit.programme-binding.v1', repository, parent_issue: 7,
       record_prefix: 'INT-EX', writer_prefix: 'EX',
       store: { kind: 'github', repository: 'example-owner/example-store', branch: 'main', path: 'state/' },
       required_checks: ['validate'],
@@ -82,6 +82,12 @@ function writeGoverned(repo, { blockText = expectedBlockText(), binding = true }
 }
 
 // Every file under `dir` with its content digest, to prove a command wrote nothing.
+// Records the user's yes, as the governance gate does from their reply: the governed block and binding
+// alone are not an answer.
+function enable(ctx, repo) {
+  require(path.join(scripts, 'toolkit-governance-gate.cjs')).writeGovernanceDecision(repo, 'enable', { registryOptions: { registryPath: ctx.registryPath, testOnly: true } });
+}
+
 function treeDigest(dir) {
   const out = {};
   const walk = (current) => {
@@ -192,13 +198,16 @@ test('K-01: check exit codes and read-only behaviour', async (t) => {
   writeGoverned(stale, { blockText: expectedBlockText('0.0.1') });
   const edited = gitRepo(ctx, 'edited');
   writeGoverned(edited, { blockText: expectedBlockText().replace(/\n([^\n]+)\n(<!-- AI-AGENT-TOOLKIT:[^\n]*:END)/, '\n$1 (edited)\n$2') });
-  const incomplete = gitRepo(ctx, 'incomplete');
+  enable(ctx, conformant); // stale and edited share its remote, so the one yes covers them
+  const unasked = gitRepo(ctx, 'unasked', 'https://github.com/example-owner/unasked.git');
+  writeGoverned(unasked, { repository: 'example-owner/unasked' });
+  const incomplete = gitRepo(ctx, 'incomplete', 'https://github.com/example-owner/incomplete.git');
   writeGoverned(incomplete, { binding: false });
-  const plain = gitRepo(ctx, 'plain');
+  const plain = gitRepo(ctx, 'plain', 'https://github.com/example-owner/plain.git');
 
   const snapshot = treeDigest(ctx.root);
   const codes = {};
-  for (const [name, repo] of Object.entries({ conformant, stale, edited, incomplete, plain })) {
+  for (const [name, repo] of Object.entries({ conformant, stale, edited, unasked, incomplete, plain })) {
     const result = await run(ctx, repo, ['check', '--json']);
     const parsed = JSON.parse(result.stdout);
     codes[name] = [result.code, parsed.status, parsed.findings.map(entry => entry.id).sort().join(',')];
@@ -207,16 +216,17 @@ test('K-01: check exit codes and read-only behaviour', async (t) => {
     conformant: [0, 'conformant', ''],
     stale: [1, 'drift', 'GOVERNED_BLOCK_STALE'],
     edited: [1, 'drift', 'GOVERNED_BLOCK_EDITED'],
+    unasked: [1, 'drift', 'DECISION_PENDING'],
     incomplete: [1, 'drift', 'DECISION_PENDING'],
     plain: [1, 'drift', 'DECISION_PENDING'],
   });
 
-  fs.mkdirSync(path.dirname(ctx.registryPath), { recursive: true });
+  const decisions = fs.readFileSync(ctx.registryPath);
   fs.writeFileSync(ctx.registryPath, 'corrupt');
   const broken = await run(ctx, conformant, ['check', '--json']);
   assert.equal(broken.code, 2);
   assert.equal(JSON.parse(broken.stdout).status, 'error');
-  fs.rmSync(path.dirname(ctx.registryPath), { recursive: true });
+  fs.writeFileSync(ctx.registryPath, decisions);
   assert.deepEqual(treeDigest(ctx.root), snapshot, 'check wrote nothing');
 
   // An ENABLED repository without the no-force-push ruleset drifts; one GitHub cannot protect, or
@@ -297,6 +307,8 @@ test('C-02: governed-only skills are offered only in a complete ENABLED reposito
   const ctx = scratch(t);
   const repo = gitRepo(ctx, 'repo');
   writeGoverned(repo);
+  assert.equal(JSON.parse((await run(ctx, repo, ['catalogue', '--json'])).stdout).state, 'UNDECIDED', 'the block and binding alone are not an answer');
+  enable(ctx, repo);
   const listed = JSON.parse((await run(ctx, repo, ['catalogue', '--json'])).stdout);
   assert.equal(listed.state, 'ENABLED');
   assert.ok(listed.skills.some(entry => entry.skill === 'github-program-reconciler'));

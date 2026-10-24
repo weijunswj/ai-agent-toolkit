@@ -14,7 +14,8 @@
 //     github.com it says GitHub governance is off there and asks for an ok. The user's own reply is
 //     the answer (`toolkit governance enable` or `disable` also work, and `decline` is the older word
 //     for disable); it is recorded, read back and then let through with the held prompts attached,
-//     oldest first. Each session gets back only the messages it sent itself, and a session another
+//     oldest first. An answer counts only in the run of the session that was shown the question
+//     (SessionEpochs). Each session gets back only the messages it sent itself, and a session another
 //     session or a Toolkit launcher started is refused in a held repository and nothing is kept.
 //   - ToolGate is the PreToolUse core. A held repository runs no state-changing tool. In every
 //     folder, an agent may not answer the question for the user: commands that run the governance
@@ -45,7 +46,13 @@ const MAX_NOT_GITHUB = 500;
 const MAX_HELD = 20;
 const MAX_HELD_CHARS = 4000;
 const MAX_HELD_BYTES = 512 * 1024;
+// A held message older than this is dropped when the store is read: its session is long gone.
+const MAX_HELD_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_NOT_NOW_SESSIONS = 8;
+const SESSIONS_FOLDER = 'governance-sessions.v1';
+const SESSION_SCHEMA = 'toolkit.governance-session.v1';
+const MAX_SESSIONS = 256;
+const EPOCH = /^[0-9a-f]{32}$/;
 const LAUNCHER_MARKERS = Object.freeze(['TOOLKIT_GATE_ROLE', 'TOOLKIT_NATIVE_HELPER_BINDING', 'TOOLKIT_CLAUDE_TASK_PROFILE_SHA256']);
 // Toolkit's Claude Code session-start hook exports the session's own id under this name for the shell
 // commands that session runs. A host session an agent starts from one of those commands inherits it,
@@ -56,8 +63,8 @@ const HOST_SESSION_VARIABLE = 'TOOLKIT_HOST_SESSION';
 // `decline` is kept as the older word for `disable`.
 const ANSWER = /^\s*toolkit governance (enable|disable|decline)\.?\s*$/i;
 // The short replies to the question Toolkit asked. Like the full answer above, they count only once a
-// prompt has been held for the repository in the same host session, so that session was shown the
-// question (or, for the full answer, the session said "later"); the whole message must be the reply.
+// prompt has been held for the repository in the same run of the host session, so that run was shown
+// the question (or, for the full answer, the run said "later"); the whole message must be the reply.
 const SHORT_ANSWER = /^\s*(yes|y|no|n|not now|later)[.!]?\s*$/i;
 const SHORT_COMMANDS = Object.freeze({ yes: 'enable', y: 'enable', no: 'disable', n: 'disable', 'not now': 'not-now', later: 'not-now' });
 // The replies that say ok to GitHub governance being off in a repository that is not on github.com.
@@ -67,8 +74,8 @@ const OK_ANSWER = /^\s*(ok|okay|yes|y|no|n|not now|later)[.!]?\s*$/i;
 // session started, resumed or fed on stdin with an answer (long or short) as its prompt. A host's
 // own subcommands (`claude config`, `codex login` and the like) start no session and are not read.
 // This reads the command's text, so it is best effort. What stops a fresh nested session is the
-// same-session rule above (it has nothing held, so nothing it sends answers) together with the
-// refusal of sessions another session started; resuming a session is refused while anything is held.
+// same-run rule above (it has nothing held, so nothing it sends answers) together with the refusal
+// of sessions another session started; a resumed session is a new run (SessionEpochs).
 const HOST_COMMAND = /(?:^|[\s;&|()`'"\\/])(?:claude|codex)(?:-code)?(?:\.exe|\.cmd|\.ps1)?(?=$|[\s;&|()`'"])/im;
 const SHELL_WORD = /"((?:[^"\\]|\\.)*)"|'([^']*)'|([^\s;&|()<>"'=`]+)/g;
 function shortAnswerWord(text) {
@@ -80,11 +87,11 @@ const HOST_SUBCOMMAND = /^\s*(?:\S*[\\/])?(?:claude|codex)(?:-code)?(?:\.exe|\.c
 function answerCommand(text) {
   return /toolkit-governance\.cjs["']?\s+(?:enable|disable|decline|reopen|migrate|repair)\b/i.test(text)
     || (/\b(?:claude|codex)\b/i.test(text) && /toolkit governance (?:enable|disable|decline)\b/i.test(text))
-    || (text.split(/;|&&|\|\|/).some(part => HOST_COMMAND.test(part) && !HOST_SUBCOMMAND.test(part)) && shortAnswerWord(text));
+    || (text.split(/[;&|\r\n]+/).some(part => HOST_COMMAND.test(part) && !HOST_SUBCOMMAND.test(part)) && shortAnswerWord(text));
 }
 // A command that resumes, continues or forks a host session (Claude Code `--resume`, `-r`,
-// `--continue`, `-c`, `--session-id`; Codex `resume` or `fork`). A resumed session keeps its id, so
-// while any message is held an agent may not resume one: it could pass the same-session rule.
+// `--continue`, `-c`, `--session-id`; Codex `resume` or `fork`). While any message is held an agent
+// may not resume one; a resume that gets past this text check is a new run and cannot answer anyway.
 const HOST_RESUME = /(?:^|[\s;&|()`'"\\/])claude(?:-code)?(?:\.exe|\.cmd|\.ps1)?(?=\s)[^\n;&|]*?\s(?:--resume|-r|--continue|-c|--session-id|--fork-session)(?=$|[\s=])|(?:^|[\s;&|()`'"\\/])codex(?:\.exe|\.cmd|\.ps1)?\s+(?:exec\s+)?(?:resume|fork)(?=$|\s)/im;
 const USER_STATE_PATH = /[\\/]\.ai-agent-toolkit[\\/]user-state(?:[\\/]|$)/i;
 // Tools that read only; everything else changes something and is held.
@@ -112,26 +119,28 @@ function terminalCommand(subcommand) {
 // ---- gate -------------------------------------------------------------------------------------
 
 class GovernanceGate {
-  #stateReader; #now; #notNow;
+  #stateReader; #now; #notNow; #epochs;
 
   constructor({ registryOptions = {}, stateReader = null, now = () => new Date() } = {}) {
     this.#stateReader = stateReader || (cwd => governance.governanceState(cwd, registryOptions));
     this.#now = now;
     this.#notNow = new NotNow({ registryOptions, now });
+    this.#epochs = new SessionEpochs({ registryOptions, now });
   }
 
   // { hold, reason, state, file } where reason is one of 'no-git' (a plain folder, DISABLED
   // automatically), 'decided', 'undecided' (the github.com question), 'not-github' (a git repository
-  // not on github.com, waiting for the user's ok), 'not-now' (the user said later in this session)
+  // not on github.com, waiting for the user's ok), 'not-now' (the user said later in this run of the session)
   // or 'state-unreadable'. Only the user-state files decide whether a repository holds: a decided
   // repository never holds over its copy, and a copy that cannot be written is reported as file
-  // 'unwritable' with its error_code. With write: false the copy is only checked.
+  // 'unwritable' with its error_code. With write: false the copy is only checked. "Not now" lasts for
+// the run of the session that said it (its session mark).
   evaluate(cwd, { write = true, sessionId = null } = {}) {
     const state = this.#stateReader(cwd);
     const verdict = (hold, reason, extra = {}) => Object.freeze({ hold, reason, state, file: null, ...extra });
     if (state.state === 'UNDECIDED' && state.rule === 'ERROR') return verdict(true, 'state-unreadable');
     if (state.state === 'UNDECIDED' && state.rule === 'R9') return verdict(true, 'not-github');
-    if (state.state === 'UNDECIDED') return this.#notNow.has(state.repository_id, sessionId) ? verdict(false, 'not-now') : verdict(true, 'undecided');
+    if (state.state === 'UNDECIDED') return this.#notNow.has(state.repository_id, sessionId, this.#epochs.get(sessionId)) ? verdict(false, 'not-now') : verdict(true, 'undecided');
     const reason = state.rule === 'R1' ? 'no-git' : 'decided';
     if (!repoState.expectedRecord(state)) return verdict(false, reason, { file: 'not-applicable' });
     if (!write) return verdict(false, reason, { file: repoState.recordStatus(state) });
@@ -179,6 +188,100 @@ function writeGovernanceDecision(cwd, command, { registryOptions = {}, registry 
   return verdict;
 }
 
+// ---- session epochs ---------------------------------------------------------------------------
+
+// Random marks written by the session-start hook (both hosts run it in headless runs too) and kept
+// next to the registry, one small file each: one per host session and one per repository. Starting,
+// resuming or forking a session gives it a new mark and gives the repository it starts in a new
+// mark; /clear and compaction keep both. A held message carries both marks of the run that sent it,
+// and an answer counts only when both still match, so a later process (an agent's `claude -p yes
+// --resume <id>`, or `claude -pc yes`, whatever session id it reports) cannot answer for the user.
+// A session with no mark (it started before the hook could record one) cannot answer in chat at
+// all. Neither host's hook input says whether a run is headless or who is typing, so this is the
+// signal; one process an agent feeds several messages is the known limit.
+class SessionEpochs {
+  #folder; #now;
+
+  constructor({ registryOptions = {}, now = () => new Date() } = {}) {
+    this.#folder = path.join(path.dirname(governance.registryPathFor(registryOptions)), SESSIONS_FOLDER);
+    this.#now = now;
+  }
+
+  static #valid(key) { return typeof key === 'string' && key !== ''; }
+
+  #file(kind, key) {
+    return path.join(this.#folder, `${kind}-${crypto.createHash('sha256').update(key).digest('hex').slice(0, 32)}.json`);
+  }
+
+  #read(kind, key) {
+    if (!SessionEpochs.#valid(key)) return null;
+    try {
+      const parsed = JSON.parse(fs.readFileSync(this.#file(kind, key), 'utf8'));
+      return parsed && parsed.schema === SESSION_SCHEMA && EPOCH.test(parsed.epoch) ? parsed.epoch : null;
+    } catch { return null; }
+  }
+
+  #write(kind, key) {
+    const epoch = crypto.randomBytes(16).toString('hex');
+    fs.mkdirSync(this.#folder, { recursive: true });
+    const file = this.#file(kind, key);
+    const temp = `${file}.tmp-${process.pid}-${crypto.randomBytes(4).toString('hex')}`;
+    try {
+      fs.writeFileSync(temp, `${JSON.stringify({ schema: SESSION_SCHEMA, epoch, at: this.#now().toISOString() })}\n`, { mode: 0o600 });
+      fs.renameSync(temp, file);
+    } finally {
+      fs.rmSync(temp, { force: true });
+    }
+    this.#prune(kind);
+    return epoch;
+  }
+
+  // This run's session mark, or null when there is none or it cannot be read.
+  get(sessionId) { return this.#read('s', sessionId); }
+
+  // The repository's current mark, or null when no session has started in it since this version.
+  repository(repositoryId) { return this.#read('r', repositoryId); }
+
+  // Records a session start and returns the session's mark. source is the hook input's: startup,
+  // resume, fork, clear or compact. Anything but clear or compact starts new marks.
+  start(sessionId, source, repositoryId = null) {
+    if (!SessionEpochs.#valid(sessionId)) return null;
+    if (source === 'clear' || source === 'compact') {
+      const kept = this.get(sessionId);
+      if (kept) return kept;
+    } else if (SessionEpochs.#valid(repositoryId)) {
+      this.#write('r', repositoryId);
+    }
+    return this.#write('s', sessionId);
+  }
+
+  // Keeps the newest few hundred of each kind; older ones are long finished.
+  #prune(kind) {
+    try {
+      const pattern = new RegExp(`^${kind}-[0-9a-f]{32}\\.json$`);
+      const names = fs.readdirSync(this.#folder).filter(name => pattern.test(name));
+      if (names.length <= MAX_SESSIONS) return;
+      const aged = names.map(name => {
+        const file = path.join(this.#folder, name);
+        try { return { file, at: fs.statSync(file).mtimeMs }; } catch { return { file, at: 0 }; }
+      }).sort((a, b) => b.at - a.at);
+      for (const { file } of aged.slice(MAX_SESSIONS)) fs.rmSync(file, { force: true });
+    } catch { /* pruning is housekeeping only */ }
+  }
+}
+
+// The session-start hook's call on both hosts: records the session's mark and refreshes the mark of
+// the repository it starts in. Never throws.
+function startSession(input, { registryOptions = {}, now } = {}) {
+  try {
+    let repositoryId = null;
+    if (input && typeof input.cwd === 'string' && input.cwd && input.source !== 'clear' && input.source !== 'compact') {
+      try { repositoryId = governance.governanceState(input.cwd, registryOptions).repository_id || null; } catch { repositoryId = null; }
+    }
+    return new SessionEpochs({ registryOptions, now }).start(sessionIdOf(input), input && input.source, repositoryId);
+  } catch { return null; }
+}
+
 // ---- held prompts -----------------------------------------------------------------------------
 
 // Prompts held in undecided repositories, kept next to the registry, private to this computer.
@@ -201,10 +304,20 @@ class HeldPrompts {
     }
     let parsed = null;
     if (Buffer.byteLength(text) <= MAX_HELD_BYTES) { try { parsed = JSON.parse(text); } catch { parsed = null; } }
-    if (parsed && parsed.schema === HELD_SCHEMA && parsed.repositories && typeof parsed.repositories === 'object' && !Array.isArray(parsed.repositories)) return parsed;
+    if (parsed && parsed.schema === HELD_SCHEMA && parsed.repositories && typeof parsed.repositories === 'object' && !Array.isArray(parsed.repositories)) return this.#fresh(parsed);
     const aside = `${this.#file}.damaged-${this.#now().toISOString().replace(/[:.]/g, '-')}-${crypto.randomBytes(2).toString('hex')}`;
     try { fs.renameSync(this.#file, aside); } catch { throw new GovernanceGateError('HELD_PROMPTS_MALFORMED'); }
     return empty();
+  }
+
+  // Drops messages past the age limit (an entry without a readable time counts as old).
+  #fresh(data) {
+    const oldest = this.#now().getTime() - MAX_HELD_AGE_MS;
+    for (const [id, list] of Object.entries(data.repositories)) {
+      const kept = Array.isArray(list) ? list.filter(entry => entry && Date.parse(entry.at) >= oldest) : [];
+      if (kept.length > 0) data.repositories[id] = kept; else delete data.repositories[id];
+    }
+    return data;
   }
 
   #write(data) {
@@ -229,19 +342,38 @@ class HeldPrompts {
     return list.filter(entry => entry && entry.session_id === sessionId).length;
   }
 
-  // Whether anything is held for any repository.
-  any() {
-    return Object.values(this.#read().repositories).some(list => Array.isArray(list) && list.length > 0);
+  // Whether this session sent a held message in this run (the same session and repository marks),
+  // so this run was shown the question. marks is { session, repository }.
+  asked(repositoryId, sessionId, marks) {
+    const { session = null, repository = null } = marks || {};
+    if (typeof sessionId !== 'string' || sessionId === '' || !EPOCH.test(String(session))) return false;
+    const list = this.#read().repositories[repositoryId];
+    return Array.isArray(list) && list.some(entry => entry && entry.session_id === sessionId && entry.epoch === session && (entry.repository_mark || null) === repository);
   }
 
-  // Keeps the prompt with the session that sent it (trimmed to a size cap; the oldest go first past
-  // the count cap) and returns the number now held.
-  add(repositoryId, prompt, sessionId = null) {
+  // The folders of the repositories with something held: { repositoryId: root or null }.
+  heldRoots() {
+    const roots = {};
+    for (const [id, list] of Object.entries(this.#read().repositories)) {
+      if (!Array.isArray(list) || list.length === 0) continue;
+      const root = list.map(entry => entry && entry.root).find(value => typeof value === 'string' && value !== '');
+      roots[id] = root || null;
+    }
+    return roots;
+  }
+
+  // Keeps the prompt with the session and run that sent it and the repository's folder (trimmed to
+  // a size cap; the oldest go first past the count cap) and returns the number now held.
+  add(repositoryId, prompt, sessionId = null, marks = {}, root = null) {
     const data = this.#read();
     const list = Array.isArray(data.repositories[repositoryId]) ? data.repositories[repositoryId] : [];
     const text = String(prompt || '').slice(0, MAX_HELD_CHARS);
     const entry = { at: this.#now().toISOString(), text };
     if (typeof sessionId === 'string' && sessionId !== '') entry.session_id = sessionId;
+    const { session = null, repository = null } = marks || {};
+    if (entry.session_id && EPOCH.test(String(session))) entry.epoch = session;
+    if (entry.session_id && EPOCH.test(String(repository))) entry.repository_mark = repository;
+    if (typeof root === 'string' && root !== '') entry.root = root;
     data.repositories[repositoryId] = [...list, entry].slice(-MAX_HELD);
     this.#write(data);
     return data.repositories[repositoryId].length;
@@ -264,10 +396,10 @@ class HeldPrompts {
 }
 
 // "Not now" answers, kept next to the registry: per repository, the sessions that gave one (the
-// newest few, so another session's "not now" never re-holds this one). Nothing is decided; a new
-// session asks again. A missing, unreadable or damaged file counts as no
-// "not now" (the repository stays held and the question still works), and the next "not now"
-// replaces it.
+// newest few, so another session's "not now" never re-holds this one) and each one's session and
+// repository marks. Nothing is decided; a new session, or the same one resumed, asks again. A
+// missing, unreadable or damaged file counts as no "not now" (the repository stays held and the
+// question still works), and the next "not now" replaces it.
 class NotNow {
   #file; #now;
 
@@ -291,16 +423,34 @@ class NotNow {
     return sessions;
   }
 
-  has(repositoryId, sessionId) {
-    if (!repositoryId || typeof sessionId !== 'string' || sessionId === '') return false;
-    return Object.hasOwn(NotNow.#sessions(this.#read().repositories[repositoryId]), sessionId);
+  static #map(entry, field) {
+    return entry && entry[field] && typeof entry[field] === 'object' && !Array.isArray(entry[field]) ? entry[field] : {};
   }
 
-  set(repositoryId, sessionId) {
+  // Only the run that said "not now" (the same session mark); an entry without a mark never counts.
+  has(repositoryId, sessionId, epoch) {
+    if (!repositoryId || typeof sessionId !== 'string' || sessionId === '' || !EPOCH.test(String(epoch))) return false;
+    const entry = this.#read().repositories[repositoryId];
+    return Object.hasOwn(NotNow.#sessions(entry), sessionId) && NotNow.#map(entry, 'epochs')[sessionId] === epoch;
+  }
+
+  // The repository mark when the session said "not now", or null.
+  repositoryMark(repositoryId, sessionId) {
+    const value = NotNow.#map(this.#read().repositories[repositoryId], 'repository_marks')[sessionId];
+    return EPOCH.test(String(value)) ? value : null;
+  }
+
+  // marks is { session, repository } of the run that said it; without marks the session is removed.
+  set(repositoryId, sessionId, marks = null) {
     const data = this.#read();
-    const sessions = { ...NotNow.#sessions(data.repositories[repositoryId]), [sessionId]: this.#now().toISOString() };
+    const entry = data.repositories[repositoryId];
+    const sessions = { ...NotNow.#sessions(entry) };
+    if (marks) sessions[sessionId] = this.#now().toISOString(); else delete sessions[sessionId];
     const newest = Object.entries(sessions).sort((a, b) => String(b[1]).localeCompare(String(a[1]))).slice(0, MAX_NOT_NOW_SESSIONS);
-    data.repositories[repositoryId] = { sessions: Object.fromEntries(newest) };
+    const epochs = { ...NotNow.#map(entry, 'epochs'), [sessionId]: marks && marks.session };
+    const repositoryMarks = { ...NotNow.#map(entry, 'repository_marks'), [sessionId]: marks && marks.repository };
+    const keep = values => Object.fromEntries(newest.map(([id]) => [id, values[id]]).filter(([, value]) => EPOCH.test(String(value))));
+    data.repositories[repositoryId] = { sessions: Object.fromEntries(newest), epochs: keep(epochs), repository_marks: keep(repositoryMarks) };
     fs.mkdirSync(path.dirname(this.#file), { recursive: true });
     const temp = `${this.#file}.tmp-${process.pid}-${crypto.randomBytes(4).toString('hex')}`;
     try {
@@ -374,6 +524,7 @@ function questionText(verdict, held) {
   if (held > 1) return `Toolkit: still waiting for this repository's governance decision (${held} messages held). ${ASK}`;
   const lines = [...QUESTION];
   if (verdict.state.rule === 'R6') lines.splice(1, 0, 'It carries the Toolkit governed rules block but no programme binding.');
+  if (verdict.state.rule === 'R4') lines.splice(1, 0, 'It carries the Toolkit governed rules block and programme binding, but files in a repository are not your answer.');
   return lines.join('\n');
 }
 
@@ -384,6 +535,8 @@ function whereText(state) {
 }
 
 const OK_ASK = 'Reply ok to continue.';
+// Said to the agent wherever it meets the question: only the user answers.
+const NEVER_OWNER = 'Never act as the user: do not answer it yourself, start a session or script to answer it, or click a confirmation through a UI or computer use.';
 
 function notGitHubText(verdict, held) {
   if (held > 1) return `Toolkit: still waiting for your ok (${held} messages held). GitHub governance will be DISABLED for this repository because it ${whereText(verdict.state)}. ${OK_ASK}`;
@@ -423,6 +576,11 @@ function replayContext(state, prompts, { notNow = false, elsewhere = false } = {
 }
 
 const LAUNCHED_TEXT = 'Toolkit: an automated session cannot answer the governance question. Answer it in your own chat, or run the command in your own terminal.';
+function noMarkText(commands) {
+  return `Toolkit: this session started before Toolkit could note it, so it cannot take the governance answer. Start a new session and answer there, or run ${commands.map(terminalCommand).join(' or ')} in your own terminal.`;
+}
+const RESUMED_LINE = 'Toolkit: this session was resumed, or another session started in this repository, so Toolkit asks again and your reply was held.';
+const MOVED_LINE = 'Toolkit: another session started in this repository since you said "later", so Toolkit asks again and your reply was held.';
 const LAUNCHED_HOLD_TEXT = "Toolkit: this repository is waiting for the user's governance answer, and this session was started by another session or a Toolkit launcher, so its message was not sent and not kept. The user answers in their own chat; start this again after that.";
 
 // ---- prompt hold ------------------------------------------------------------------------------
@@ -430,55 +588,90 @@ const LAUNCHED_HOLD_TEXT = "Toolkit: this repository is waiting for the user's g
 // The host-neutral UserPromptSubmit decision: { action: 'pass' } | { action: 'pass', context } |
 // { action: 'block', reason }.
 class PromptHold {
-  #gate; #held; #notNow; #registryOptions; #environment; #now;
+  #gate; #held; #notNow; #epochs; #registryOptions; #environment; #now;
 
   constructor({ registryOptions = {}, environment = process.env, now = () => new Date(), stateReader = null } = {}) {
     this.#registryOptions = registryOptions;
     this.#gate = new GovernanceGate({ registryOptions, stateReader, now });
     this.#held = new HeldPrompts({ registryOptions, now });
     this.#notNow = new NotNow({ registryOptions, now });
+    this.#epochs = new SessionEpochs({ registryOptions, now });
     this.#environment = environment || {};
     this.#now = now;
   }
 
-  // sessionId is the host's session id; "not now" lasts for that session only.
+  // sessionId is the host's session id; "not now" lasts for that session's run only.
   decide({ cwd, prompt, sessionId = null }) {
     const verdict = this.#gate.evaluate(cwd, { sessionId });
     const text = String(prompt || '');
     const answer = ANSWER.exec(text);
-    // After "not now", the full answer still decides; a short reply is an ordinary message there,
-    // since it may answer the agent's own question.
-    if (verdict.reason === 'not-now') return answer ? this.#answer(cwd, answer[1].toLowerCase(), verdict, sessionId) : { action: 'pass' };
+    // After "not now", the full answer still decides in the same run, unless a session has started in
+    // the repository since; a short reply is an ordinary message there, since it may answer the
+    // agent's own question.
+    if (verdict.reason === 'not-now') return answer ? this.#afterNotNow(cwd, answer, verdict, sessionId) : { action: 'pass' };
     if (!verdict.hold) return verdict.reason === 'no-git' ? { action: 'pass' } : this.#replayIfAny(verdict.state, sessionId);
     if (verdict.reason === 'state-unreadable') return { action: 'block', reason: unreadableText(verdict.state, this.#registryOptions) };
     // A session another session or a launcher started never answers and never adds to what is held.
     if (this.#launched(sessionId)) return { action: 'block', reason: answer || OK_ANSWER.test(text) ? LAUNCHED_TEXT : LAUNCHED_HOLD_TEXT };
-    if (verdict.reason === 'not-github') return this.#notGitHub(cwd, text, answer, verdict, sessionId);
-    // Only the session that was shown the question answers it, in either form.
-    const asked = this.#held.count(verdict.state.repository_id, sessionId) > 0;
-    if (answer && asked) return this.#answer(cwd, answer[1].toLowerCase(), verdict, sessionId);
+    const marks = this.#marks(verdict, sessionId);
+    if (verdict.reason === 'not-github') return this.#notGitHub(cwd, text, answer, verdict, sessionId, marks);
+    // Only the run of the session that was shown the question answers it, in either form.
+    const id = verdict.state.repository_id;
+    const asked = this.#held.asked(id, sessionId, marks);
+    if (answer && asked) return this.#answer(cwd, answer[1].toLowerCase(), verdict, sessionId, marks);
     const short = SHORT_ANSWER.exec(text);
-    if (short && asked) return this.#answer(cwd, SHORT_COMMANDS[short[1].toLowerCase()], verdict, sessionId);
-    const held = this.#held.add(verdict.state.repository_id, prompt, sessionId);
+    if (short && asked) return this.#answer(cwd, SHORT_COMMANDS[short[1].toLowerCase()], verdict, sessionId, marks);
+    const unmarked = this.#unmarked(sessionId, marks, answer || short);
+    if (unmarked) return unmarked;
+    const resumed = Boolean(answer || short) && this.#held.count(id, sessionId) > 0;
+    const held = this.#held.add(id, prompt, sessionId, marks, verdict.state.root);
+    if (resumed) return { action: 'block', reason: `${RESUMED_LINE}\n${questionText(verdict, 1)}` };
     // A session sees the whole question on its first held message, even when another session is waiting too.
-    const shown = typeof sessionId === 'string' && sessionId !== '' ? this.#held.count(verdict.state.repository_id, sessionId) : held;
+    const shown = typeof sessionId === 'string' && sessionId !== '' ? this.#held.count(id, sessionId) : held;
     return { action: 'block', reason: questionText(verdict, shown) };
   }
 
+  // An answer from a session the session-start hook never marked cannot count, so it is refused
+  // (and not kept) with the ways that still work.
+  #unmarked(sessionId, marks, isAnswer) {
+    return isAnswer && typeof sessionId === 'string' && sessionId !== '' && marks.session === null ? { action: 'block', reason: noMarkText(['enable', 'disable']) } : null;
+  }
+
+  // This run's marks: the session's own and the repository's.
+  #marks(verdict, sessionId) {
+    return { session: this.#epochs.get(sessionId), repository: this.#epochs.repository(verdict.state.repository_id) };
+  }
+
+  // The full answer after "not now": it counts in the run that said it while no session has started
+  // in the repository since; otherwise "not now" ends for this session and Toolkit asks again.
+  #afterNotNow(cwd, answer, verdict, sessionId) {
+    const marks = this.#marks(verdict, sessionId);
+    const id = verdict.state.repository_id;
+    if (this.#notNow.repositoryMark(id, sessionId) === marks.repository) return this.#answer(cwd, answer[1].toLowerCase(), verdict, sessionId, marks);
+    try { this.#notNow.set(id, sessionId, null); } catch { /* the reply is held below either way */ }
+    this.#held.add(id, answer[0], sessionId, marks, verdict.state.root);
+    return { action: 'block', reason: `${MOVED_LINE}\n${questionText(verdict, 1)}` };
+  }
+
   // A git repository not on github.com: the only outcome is DISABLED, once the user says ok.
-  #notGitHub(cwd, text, answer, verdict, sessionId) {
+  #notGitHub(cwd, text, answer, verdict, sessionId, marks) {
     const id = verdict.state.repository_id;
     if (answer && answer[1].toLowerCase() === 'enable') {
       return { action: 'block', reason: `Toolkit: GitHub governance cannot be enabled here, because this repository ${whereText(verdict.state)}. ${OK_ASK}` };
     }
-    if ((answer || OK_ANSWER.test(text)) && this.#held.count(id, sessionId) > 0) {
+    const ok = Boolean(answer) || OK_ANSWER.test(text);
+    if (ok && this.#held.asked(id, sessionId, marks)) {
       let decided;
       try { decided = writeNotGitHubOk(cwd, { registryOptions: this.#registryOptions, now: this.#now }); } catch (error) {
         return { action: 'block', reason: `Toolkit: your ok could not be recorded (${codeOf(error)}), so this repository is still held. Reply ok again, or run ${terminalCommand('disable')} in your own terminal.` };
       }
       return { action: 'pass', context: replayContext(decided.state, this.#held.take(id, sessionId)) };
     }
-    const held = this.#held.add(id, text, sessionId);
+    const unmarked = this.#unmarked(sessionId, marks, ok);
+    if (unmarked) return { action: 'block', reason: noMarkText(['disable']) };
+    const resumed = ok && this.#held.count(id, sessionId) > 0;
+    const held = this.#held.add(id, text, sessionId, marks, verdict.state.root);
+    if (resumed) return { action: 'block', reason: `${RESUMED_LINE}\n${notGitHubText(verdict, 1)}` };
     const shown = typeof sessionId === 'string' && sessionId !== '' ? this.#held.count(id, sessionId) : held;
     return { action: 'block', reason: notGitHubText(verdict, shown) };
   }
@@ -499,13 +692,13 @@ class PromptHold {
     return prompts.length === 0 ? { action: 'pass' } : { action: 'pass', context: replayContext(state, prompts, { elsewhere: true }) };
   }
 
-  #answer(cwd, command, verdict, sessionId) {
+  #answer(cwd, command, verdict, sessionId, marks) {
     if (this.#launched(sessionId)) return { action: 'block', reason: LAUNCHED_TEXT };
     if (command === 'not-now') {
       if (typeof sessionId !== 'string' || sessionId === '') {
         return { action: 'block', reason: `Toolkit: this app does not say which session this is, so "later" cannot be kept. ${ASK.replace(', no or later', ' or no')}` };
       }
-      try { this.#notNow.set(verdict.state.repository_id, sessionId); } catch (error) {
+      try { this.#notNow.set(verdict.state.repository_id, sessionId, marks); } catch (error) {
         return { action: 'block', reason: `Toolkit: "later" could not be saved (${codeOf(error)}), so this repository is still held. Reply yes or no, or try again.` };
       }
       return { action: 'pass', context: replayContext(verdict.state, this.#held.take(verdict.state.repository_id, sessionId), { notNow: true }) };
@@ -598,8 +791,8 @@ class ToolGate {
       if (answerCommand(text)) {
         const notGitHub = [cwd, ...commandTargets(text, cwd)].some(target => this.#verdict(target, sessionId)?.reason === 'not-github');
         return { deny: notGitHub
-          ? 'Toolkit: only the user can say ok to GitHub governance being off in a repository that is not on github.com. Ask them in chat to reply ok; Toolkit records their own reply.'
-          : `Toolkit: only the user answers the governance question. Ask them in chat instead: "${ASK}" Toolkit records their own reply.` };
+          ? `Toolkit: only the user can say ok to GitHub governance being off in a repository that is not on github.com. Ask them in chat to reply ok; Toolkit records their own reply. ${NEVER_OWNER}`
+          : `Toolkit: only the user answers the governance question. Ask them in chat instead: "${ASK}" Toolkit records their own reply. ${NEVER_OWNER}` };
       }
     }
     if (EDIT_TOOLS.test(tool) && editTargets(input).some(target => USER_STATE_PATH.test(resolveTarget(input, target)))) {
@@ -609,8 +802,8 @@ class ToolGate {
     const verdict = this.#gate.evaluate(input && input.cwd, { sessionId });
     if (verdict.hold) {
       if (verdict.reason === 'state-unreadable') return { deny: `Toolkit: the governance state of this repository could not be read (${verdict.state.error_code}), so nothing runs here until it can. ${governance.repairHint(verdict.state, this.#registryOptions)}`.trim() };
-      if (verdict.reason === 'not-github') return { deny: `Toolkit: this repository ${whereText(verdict.state)}, so GitHub governance will be off here, and nothing runs until the user says ok. Ask them in plain words to reply ok; Toolkit records their own reply, so never ask them to run a command, and do not try to work around it.` };
-      return { deny: `Toolkit: this repository has no governance decision yet, so nothing runs here. Ask the user in plain words: "${ASK}" Toolkit records their own reply, so never ask them to run a command, and do not try to work around it.` };
+      if (verdict.reason === 'not-github') return { deny: `Toolkit: this repository ${whereText(verdict.state)}, so GitHub governance will be off here, and nothing runs until the user says ok. Ask them in plain words to reply ok; Toolkit records their own reply, so never ask them to run a command, and do not try to work around it. ${NEVER_OWNER}` };
+      return { deny: `Toolkit: this repository has no governance decision yet, so nothing runs here. Ask the user in plain words: "${ASK}" Toolkit records their own reply, so never ask them to run a command, and do not try to work around it. ${NEVER_OWNER}` };
     }
     // From a folder that is not held, a command or edit may still reach into one that is.
     return this.#reachesHeld(tool, input, sessionId);
@@ -621,7 +814,7 @@ class ToolGate {
       const text = toolText(input);
       const cwd = path.resolve(String(input.cwd || process.cwd()));
       if (HOST_RESUME.test(text) && this.#anyHeld()) {
-        return { deny: "Toolkit: a repository is waiting for the user's governance answer, so no Claude or Codex session may be resumed, continued or forked from here until the user answers in their own chat." };
+        return { deny: "Toolkit: a message is held for a repository's governance answer, so no Claude or Codex session may be resumed, continued or forked from here until the user answers in their own chat." };
       }
       const targets = [...new Set([...commandTargets(text, cwd), ...absoluteTargets(text)])];
       if (targets.some(target => this.#verdict(target, sessionId)?.hold)) {
@@ -641,9 +834,12 @@ class ToolGate {
     try { return this.#gate.evaluate(target, { write: false, sessionId }); } catch { return null; }
   }
 
-  // Whether any message is held anywhere; a store that cannot be read counts as yes.
+  // Whether a message is held for a repository that is still waiting for its answer (one decided
+  // since no longer counts); a store that cannot be read, or an entry without its folder, counts as yes.
   #anyHeld() {
-    try { return this.#held.any(); } catch { return true; }
+    let roots;
+    try { roots = this.#held.heldRoots(); } catch { return true; }
+    return Object.values(roots).some(root => root === null || this.#verdict(root, null)?.hold !== false);
   }
 }
 
@@ -655,8 +851,8 @@ function sessionLine(cwd, { registryOptions = {}, stateReader = null, now, sessi
   if (verdict.reason === 'not-now') return 'Toolkit governance: not decided yet; the user said "later" for this session. Follow the global rules (coding gates included) without GitHub governance; Toolkit asks again next session. If the user wants to decide sooner, they can send `toolkit governance enable` or `toolkit governance disable` as a message.';
   if (verdict.hold) {
     if (verdict.reason === 'state-unreadable') return `Toolkit governance: the state of this repository could not be read (${state.error_code}). Every user message is held until it can; do not try to work around it. ${governance.repairHint(state, registryOptions)}`.trim();
-    if (verdict.reason === 'not-github') return `Toolkit governance: this repository ${whereText(state)}, so GitHub governance will be DISABLED here once the user says ok. Every user message is held until then. If you need to raise it, ask the user to reply ok; Toolkit records their own reply, so never ask them to run a command, and do not try to work around it.`;
-    return `Toolkit governance: this repository has no GitHub governance decision yet. Every user message is held until the user answers Toolkit's question. If you need to raise it, ask "${ASK}"; Toolkit records their own reply, so never ask them to run a command, and do not try to work around it.`;
+    if (verdict.reason === 'not-github') return `Toolkit governance: this repository ${whereText(state)}, so GitHub governance will be DISABLED here once the user says ok. Every user message is held until then. If you need to raise it, ask the user to reply ok; Toolkit records their own reply, so never ask them to run a command, and do not try to work around it. ${NEVER_OWNER}`;
+    return `Toolkit governance: this repository has no GitHub governance decision yet. Every user message is held until the user answers Toolkit's question. If you need to raise it, ask "${ASK}"; Toolkit records their own reply, so never ask them to run a command, and do not try to work around it. ${NEVER_OWNER}`;
   }
   return decidedLine(state) + (verdict.file === 'unwritable'
     ? ` (Toolkit could not save its copy in the ${repoState.FOLDER} folder (${verdict.error_code}); nothing is held because of that.)`
@@ -687,11 +883,14 @@ module.exports = Object.freeze({
   OK_ANSWER,
   SHORT_ANSWER,
   sessionIdOf,
+  startSession,
+  SESSIONS_FOLDER,
   answerCommand,
   commandTargets,
   HELD_BASENAME,
   MAX_HELD,
   MAX_HELD_CHARS,
+  NEVER_OWNER,
   GovernanceGate,
   GovernanceGateError,
   HeldPrompts,

@@ -6,6 +6,9 @@ const compiler = require('../scripts/toolkit-gate-contract-compiler.cjs');
 const { HOST_ENTRIES } = require('../scripts/toolkit-v3-helper-guard.cjs');
 const { renderNativeHelperDefinition, createNativeHelperAdapter, commandDecision, pinnedBindingObserver, resolveClaudeNativeState, verifyCodexHelperRegistration, CodexHookMatcher } = require('../scripts/toolkit-v3-native-helper-adapter.cjs');
 const { capturedStack, TEST_PROFILES } = require('./support/captured-stack-fixture.cjs');
+// The Toolkit checkout counts as governed work here through the user's recorded yes, kept in a
+// scratch home this test process and its hooks use (the governed block and binding alone are not an answer).
+require('./toolkit-governed-fixture-support.cjs').recordEnabled(path.resolve(__dirname, '..', '..'));
 const clone = value => JSON.parse(JSON.stringify(value));
 function fixture(entry_id) {
   const entry = HOST_ENTRIES[entry_id], profile = TEST_PROFILES[entry.host];
