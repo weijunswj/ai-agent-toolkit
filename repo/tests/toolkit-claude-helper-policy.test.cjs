@@ -139,7 +139,7 @@ test('in governed work a main session started with --agent is the lead; only an 
     /allows only the toolkit-g0-helper and toolkit-g1-helper agents \(requested: general-purpose\)/);
   for (const caller of [{ agent_id: 'a1', agent_type: 'toolkit-g1-helper' }, { agent_id: 'a2' }]) {
     const output = f.decide({ ...caller, tool_input: { subagent_type: 'toolkit-g0-helper' } });
-    assert.equal(reason(output), 'Toolkit: a helper cannot launch another agent. Only the G0 or G1 lead launches helpers.', JSON.stringify(caller));
+    assert.equal(reason(output), 'Toolkit: a helper cannot launch another agent. Only the main session launches helpers.', JSON.stringify(caller));
   }
 });
 

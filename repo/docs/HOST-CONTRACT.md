@@ -60,7 +60,7 @@ Stop or fence the old writer, settle in-flight effects, then assign the successo
 
 ## 6. Helpers
 
-Named helper definitions carry the pinned model and effort. Only a G0 or G1 lead launches helpers, helpers never launch, and G2 has none. How each host carries out the route belongs to that host's own support work.
+Named helper definitions carry the pinned model and effort. In gate work only a G0 or G1 lead launches helpers; outside gate work the main session may launch them on their installed route, with no admission. Helpers never launch, and G2 has none. How each host carries out the route belongs to that host's own support work.
 
 Claude Code (rows refer to the launch matrix in `repo/tests/support/claude-helper-matrix.cjs`; stored results in `repo/contracts/host-qualification/claude-code.json`):
 

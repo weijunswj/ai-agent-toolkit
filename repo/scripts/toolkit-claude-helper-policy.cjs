@@ -1,8 +1,9 @@
 'use strict';
 
-// Claude Code named-helper policy for Toolkit-governed work. Only a G0 or G1 lead may
-// launch a helper, only the two Toolkit helpers may be launched, and the definition
-// Claude Code would load must byte-match the one rendered from the selected stack.
+// Claude Code named-helper policy for Toolkit-governed work. Only the main session (in gate
+// work, the G0 or G1 lead) may launch a helper, only the two Toolkit helpers may be launched,
+// and the definition Claude Code would load must byte-match the one rendered from the
+// selected stack.
 // Everything else is refused with a plain reason. An allowed launch returns no hook
 // decision, so Claude Code's own permissions still apply.
 //
@@ -119,7 +120,7 @@ class ClaudeNamedHelperPolicy {
   decide(input, governance) {
     // `agent_id` marks a subagent or teammate caller. `agent_type` alone also comes from a
     // main session started with --agent, which is the lead, not a helper.
-    if (input.agent_id) return deny('a helper cannot launch another agent. Only the G0 or G1 lead launches helpers.');
+    if (input.agent_id) return deny('a helper cannot launch another agent. Only the main session launches helpers.');
     if (governance.gate_role === 'G2') return deny('G2 review sessions launch no helpers; do the review in this session.');
     const args = input.tool_input && typeof input.tool_input === 'object' && !Array.isArray(input.tool_input) ? input.tool_input : {};
     const requested = args.subagent_type;

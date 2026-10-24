@@ -21,6 +21,7 @@
 - **Limits:** Claude Code cloud sessions are not gated, because they keep no registry. On Codex, a hook that crashes or times out lets the message through, because Codex has no fail-closed setting for hooks. Codex also runs the new hooks only after you trust them in `/hooks`.
 - **Force pushes and skipped checks:** the guard that refuses them now also covers an ENABLED repository whose governed block has not landed yet.
 - **Helper launches follow the state:** the helper hooks on both hosts treat a repository as governed only when its state is ENABLED with the binding, or when a Toolkit launcher started the session.
+- **Who may launch a helper:** in gate work, the G0 or G1 lead; outside gate work, the main session, for a bounded task on the route its installed helper file sets, with no admission. The global rules, both helper files and both hosts' hooks now say the same thing, so a one-off request such as "launch a toolkit-g0-helper to list the top-level folders" works the same in Codex Desktop, the Codex CLI and Claude Code.
 
 ### Executor checkpoints and host contract
 
