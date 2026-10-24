@@ -99,14 +99,11 @@ test('migration ledger records the complete atomic portfolio transition', () => 
   );
 });
 
-test('the global rules carry the binding shipping law, and the governed block carries the gate order', () => {
+test('the global rules carry the binding shipping law and the gate order', () => {
   const global = read('repo/contracts/agent-rules/global-rules.md');
   assert.match(global, /COMPLETE THE BASICS -> SHIP -> OBSERVE -> IMPROVE/);
   assert.match(global, /`SHIP_BLOCKER` or `POST_SHIP`/);
   assert.match(global, /Shipping bias never overrides approvals, safety gates, privacy, required validation or finality/);
   assert.match(global, /Perfection is not completion/);
-  for (const relPath of ['repo/contracts/agent-rules/repo-local/AGENTS.managed.template.md',
-    'skills/repository-agent-rules/repo-local/AGENTS.managed.template.md', 'AGENTS.md']) {
-    assert.match(read(relPath), /`G0 Discovery -> G1 Builder, including UAT -> G2 Review`/, relPath);
-  }
+  assert.match(global, /`G0 Discovery -> G1 Builder, including UAT -> G2 Review`/);
 });

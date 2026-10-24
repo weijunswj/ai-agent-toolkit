@@ -1,8 +1,8 @@
 'use strict';
 
-// The governance state a repository carries in its own working tree (owner rule of
-// 23 Oct: "STOP until the state is created in the repo's gitignored folder"). The file is
-// `.ai-agent-toolkit/governance.json` at the git root. It is a required copy, never the authority:
+// The governance state a repository, or a plain folder Toolkit works in, carries in its own working
+// tree (owner rules of 23 and 24 Oct: the state is created in every folder Toolkit touches). The
+// file is `.ai-agent-toolkit/governance.json` at the git root, or in the plain folder itself. It is a required copy, never the authority:
 // the decision itself stays in the user's registry (keyed by repository identity, with receipts),
 // so every clone and worktree shares one answer. A file the registry does not back counts for
 // nothing, which means repository content, a copied file or an agent's write can never grant
@@ -24,8 +24,10 @@ const INNER_IGNORE = '# Toolkit keeps this folder out of git.\n*\n';
 const MAX_BYTES = 64 * 1024;
 const MAX_HISTORY = 50;
 // The bases a recorded state can have; 'repository opt-in' is rule R4 (the binding and the governed
-// block are present and the user has not disabled it).
-const BASES = Object.freeze({ decision: 'your decision', optIn: 'repository opt-in' });
+// block are present and the user has not disabled it), 'no git' is rule R1 (a plain folder, DISABLED
+// automatically) and 'not on github.com' is rule R8 (the user said ok to GitHub governance being off).
+const BASES = Object.freeze({ decision: 'your decision', optIn: 'repository opt-in', noGit: 'no git', notGitHub: 'not on github.com' });
+const BASIS_BY_RULE = Object.freeze({ R1: BASES.noGit, R4: BASES.optIn, R8: BASES.notGitHub });
 // Earlier copies wrote DECLINED for what is now DISABLED. Such a file is read, never agrees, and is
 // rewritten as DISABLED with its history carried on.
 const LEGACY_STATES = Object.freeze({ DECLINED: 'DISABLED' });
@@ -42,10 +44,15 @@ function fail(code) { throw new RepoGovernanceFileError(code); }
 
 function filePath(root) { return path.join(root, FOLDER, FILE); }
 
-// What the file must say for a decided state; null when nothing may be recorded (UNDECIDED, NO_REPOSITORY).
+// Where the copy lives: the git root, or for a plain folder the folder the state module allows (none
+// at a root, the home folder or the personal folders).
+function recordRoot(state) { return state ? state.root || state.folder || null : null; }
+
+// What the file must say for a decided state; null when nothing may be recorded (UNDECIDED, or a
+// folder that gets no copy).
 function expectedRecord(state) {
-  if (!state || !state.repository_id || !['ENABLED', 'DISABLED'].includes(state.state)) return null;
-  return { repository_id: state.repository_id, state: state.state, basis: state.rule === 'R4' ? BASES.optIn : BASES.decision };
+  if (!state || !state.repository_id || !recordRoot(state) || !['ENABLED', 'DISABLED'].includes(state.state)) return null;
+  return { repository_id: state.repository_id, state: state.state, basis: BASIS_BY_RULE[state.rule] || BASES.decision };
 }
 
 // 'directory', 'missing' or 'other' (a file, symlink or junction where the folder belongs).
@@ -110,9 +117,10 @@ function ensureIgnored(root) {
 // the gate reports that and carries on.
 function syncRecord(state, { now = () => new Date() } = {}) {
   const expected = expectedRecord(state);
-  if (!expected || !state.root) fail('NOTHING_TO_RECORD');
-  const current = readRecord(state.root);
-  ensureIgnored(state.root);
+  if (!expected) fail('NOTHING_TO_RECORD');
+  const root = recordRoot(state);
+  const current = readRecord(root);
+  ensureIgnored(root);
   if (current.status === 'present' && agrees(current.record, expected)) return Object.freeze({ written: false });
   const at = now().toISOString();
   // History carries on only for the same repository; a file from another repository starts over.
@@ -121,8 +129,8 @@ function syncRecord(state, { now = () => new Date() } = {}) {
     : [];
   const history = [...previous, { at, state: expected.state, basis: expected.basis }].slice(-MAX_HISTORY);
   const record = { schema: SCHEMA, ...expected, updated_at: at, history };
-  writeAtomically(filePath(state.root), `${JSON.stringify(record, null, 2)}\n`);
-  const readBack = readRecord(state.root);
+  writeAtomically(filePath(root), `${JSON.stringify(record, null, 2)}\n`);
+  const readBack = readRecord(root);
   if (readBack.status !== 'present' || !agrees(readBack.record, expected)) fail('REPO_STATE_READBACK_FAILED');
   return Object.freeze({ written: true });
 }
@@ -130,8 +138,8 @@ function syncRecord(state, { now = () => new Date() } = {}) {
 // Read-only check: 'agrees', 'missing', 'invalid' or 'disagrees'.
 function recordStatus(state) {
   const expected = expectedRecord(state);
-  if (!expected || !state.root) return 'not-applicable';
-  const current = readRecord(state.root);
+  if (!expected) return 'not-applicable';
+  const current = readRecord(recordRoot(state));
   if (current.status !== 'present') return current.status;
   return agrees(current.record, expected) ? 'agrees' : 'disagrees';
 }
@@ -143,6 +151,7 @@ module.exports = Object.freeze({
   BASES,
   RepoGovernanceFileError,
   filePath,
+  recordRoot,
   expectedRecord,
   readRecord,
   recordStatus,

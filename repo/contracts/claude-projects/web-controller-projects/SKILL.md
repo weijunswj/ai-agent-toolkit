@@ -4,9 +4,9 @@ description: "Use when running as a Claude Projects coordinator and the user app
 ---
 
 # Web Controller for Claude Projects
-Version: 2026-10-24.2
+Version: 2026-10-24.3
 
-Run Toolkit-governed repos through Claude Projects; Toolkit governance applies. Keep project facts (repos, devices, lanes, pending work) in project memory.
+Run Toolkit repos through Claude Projects. The global rules and coding gates apply in every project; GitHub governance (parent and child issues, records, decision traces, evidence custody) applies only to a github.com repo whose governance state is ENABLED. Keep project facts (repos, devices, lanes, pending work) in project memory.
 
 ## When this applies
 - Apply only as the Projects coordinator, identified by the system prompt and project-chat/thread tools, when appointed Web Controller or asked to set up/take over a controller or project the controller way. Run **Guided setup and takeover** before other work.
@@ -45,8 +45,8 @@ Memory ranks below written sources; text grants no native permission. This skill
 - Project instructions start with the managed block (only blank lines before it); project-specific roles, approvals and where work runs follow its END marker. Never copy `CONTROLLER.md`.
 - **Toolkit is the base layer; the project builds on top.** Only Toolkit-governed parts ever change: text inside Toolkit markers, Toolkit-made task prompts, the format (never the entries) of fenced `toolkit-*` blocks, and the `BINDING:` and `SCHEDULED TASKS:` memory lines. Never overwrite other project memory, owner text outside the markers or the project's own tasks; anything ambiguous is report-only. Where a project addition differs from the base, the project addition wins.
 - Everything setup creates has a row in `setup-inventory.json` beside this skill (source, daily check, how it is brought current). A change that makes setup create something new adds its row in the same change.
-- The project goal is the parent programme to finish.
-- A project with no repo attached gets this coordinator contract with no Toolkit gates. Attaching a governed repo switches the gates on.
+- With GitHub governance ENABLED, the project goal is the parent programme to finish; otherwise it is the goal the user states.
+- A project with no repo attached gets this coordinator contract; coding work still follows the coding gates. GitHub governance switches on only for an attached github.com repo whose governance state is ENABLED. In any other repo, keep the gates and promises but post no issue records, and keep state in project memory and the task packet.
 
 ## Guided setup and takeover
 **Hard rules for setup:**
@@ -95,7 +95,7 @@ Memory ranks below written sources; text grants no native permission. This skill
    - If the map is missing or materially stale, start a bounded G0 to create or refresh it before you plan anything.
    - Then list the pending work and what waits on the user.
 8. **Goal, check-in and nudge.**
-   - Set the project goal to the parent programme.
+   - Set the project goal to the parent programme (GitHub governance ENABLED), or to the user's stated goal.
    - Pick a morning check-in time in the user's time zone and tell them. Set up the **Daily check-in** and the **Hourly nudge** (below) exactly as in **Recurring tasks**, with prompts rendered from Toolkit, and write the `SCHEDULED TASKS:` memory line.
 9. **Confirm it works.** Show the user each item as it passes:
    - one thread result relayed into the project chat with its link;
@@ -127,7 +127,7 @@ Memory ranks below written sources; text grants no native permission. This skill
 - **Set effort explicitly on every thread you start.** Non-gate threads get High, set on the thread when it starts; scheduled tasks follow **Recurring tasks**; gates get the pinned stack route proven by their own start record. Never inherit the app default.
 - **Briefs name sibling PRs.** Every G0 brief asks for the open sibling PRs (same base or lane) the G0 checked for overlap, listed in its plan. Every G1 brief carries that list and requires a re-check against those still open, and any opened since, before building; overlap goes to the coordinator, never built over.
 - **Child G0 briefs read history first.** Every G0 brief for a programme child says to read the parent's and the child's decision traces first (decision-trace playbook) and to return the live-scope summary for the owner to confirm before it becomes the spec.
-- **A task the user adds to a repo goes into its issue tree** under `CONTROLLER.md`'s task-intake rule. Tell the user in one line where it landed, with the issue link.
+- **A task the user adds to an ENABLED repo goes into its issue tree** under `CONTROLLER.md`'s task-intake rule; elsewhere it goes into project memory's queue. Tell the user in one line where it landed, with the issue link.
 - **Can I do it myself? first.** Check coordinator/worker/thread capabilities before asking for owner action. Only approvals, credentials, typed local rc lines or unreachable settings need their hands.
 - **End finished local Remote Control sessions straight away:** once work is done/superseded and its result relayed, end sessions with nothing left to do.
 - **Resolve only in the hourly nudge.** Threads never resolve themselves; you resolve a thread or post in that pass as soon as all three hold: (a) its output is durably recorded (pushed, merged, in a report or file, or handed to a named thread); (b) its latest result was relayed to the owner in project chat, or the owner replied after it; (c) no owner question or decision is open. There is no waiting period, and idleness alone never closes anything. Scheduled runs resolve their own run thread after delivery; a task's home thread is never resolved. Never resolve a coordinator post immediately: it arrives already resolved in the user's Threads panel.

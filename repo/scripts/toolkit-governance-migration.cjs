@@ -69,7 +69,8 @@ function slugFor(root) {
 // enable or disable.
 function proposalFor(state, slug, transportSlugs) {
   if (state.rule === 'ERROR') return { action: 'skip', reason: `its state could not be read (${state.error_code})` };
-  if (state.state === 'NO_REPOSITORY') return { action: 'skip', reason: 'no origin remote, so no decision can be stored' };
+  if (state.rule === 'R1') return { action: 'skip', reason: 'not a git repository, so GitHub governance is DISABLED automatically' };
+  if (state.rule === 'R9') return { action: 'skip', reason: 'not on github.com, so GitHub governance is off here once the user says ok in chat' };
   if (state.recorded_under_legacy_key) return { action: 'carry-over', reason: `already ${state.recorded_decision === 'enabled' ? 'enabled' : 'disabled'} under an earlier key; kept under its own key` };
   if (state.state !== 'UNDECIDED') return { action: 'keep', reason: state.rule === 'R4' ? 'enabled by its governed block and binding' : `already ${state.state === 'ENABLED' ? 'enabled' : 'disabled'}` };
   if (slug && transportSlugs.has(slug.toLowerCase())) return { action: 'disable', reason: 'evidence store named in a programme binding (agent-managed, not governed)' };

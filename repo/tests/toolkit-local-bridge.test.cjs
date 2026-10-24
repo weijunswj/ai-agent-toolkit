@@ -2439,7 +2439,7 @@ test('SessionStart notice says repository rules from a newer Toolkit are authori
   // Hub state records a newer Toolkit than the running copy, and the repository block differs.
   const root = tmpRoot();
   fs.mkdirSync(path.join(root, '.git'), { recursive: true });
-  writeFile(path.join(root, 'AGENTS.md'), managedAgentsTemplate().replace('Keep tests fast', 'Keep tests in newer wording'));
+  writeFile(path.join(root, 'AGENTS.md'), managedAgentsTemplate().replace('Repository-wide CI', 'Repository CI in newer wording'));
   const state = { bridge_versions_by_source: { 'codex-plugin': '99.0.0' } };
   const result = runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, { targetRoot: root, pluginRoot: repoRoot, state });
   assert.equal(result.status, 'needs-attention');
@@ -2489,7 +2489,7 @@ test('SessionStart notice says repository rules from a newer Toolkit are authori
 
 test('SessionStart notice offers a refresh for differing or broken repository blocks, once per finding, without writing', async (t) => {
   const cases = [
-    { name: 'stale managed block', agents: managedAgentsTemplate().replace('Keep tests fast', 'Keep tests in edited wording') },
+    { name: 'stale managed block', agents: managedAgentsTemplate().replace('Repository-wide CI', 'Keep tests in edited wording') },
     { name: 'malformed managed block', agents: '<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/toolkit-governed-rules.md:BEGIN TOOLKIT-GOVERNED-RULES v2 toolkit=3.4.0 sha256=000000000000 -->\n# broken\n' }
   ];
   for (const fixture of cases) {
@@ -2532,7 +2532,7 @@ test('SessionStart notice offers a refresh for differing or broken repository bl
 test('SessionStart notice ledger survives hub snapshot swaps when auto-sync is on', () => {
   const root = tmpRoot();
   fs.mkdirSync(path.join(root, '.git'), { recursive: true });
-  writeFile(path.join(root, 'AGENTS.md'), managedAgentsTemplate().replace('Keep tests fast', 'Keep tests in ledger swap wording'));
+  writeFile(path.join(root, 'AGENTS.md'), managedAgentsTemplate().replace('Repository-wide CI', 'Keep tests in ledger swap wording'));
   const home = tmpRoot();
   const hub = path.join(home, 'hub', 'current');
   writeJson(path.join(hub, 'state.json'), { schema_version: 1, architecture_version: 2, hub_version: expectedBridgeVersion, auto_sync_enabled: true, targets: {} });

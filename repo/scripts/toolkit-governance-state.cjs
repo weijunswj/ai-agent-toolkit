@@ -2,7 +2,7 @@
 
 // The one answer to "which Toolkit governance state applies in this working directory?".
 // Every hook, setup step, conformance check and catalogue call asks this module, and nothing else
-// reads the three inputs it combines:
+// reads the inputs it combines:
 //
 //   identity   the origin-remote repository identity (toolkit.repository-identity.v1), read
 //              from the repository's own git config file, never from the path;
@@ -10,23 +10,31 @@
 //              `.github/toolkit-programme.json` (P);
 //   registry   the user's own decision for that identity in
 //              ~/.ai-agent-toolkit/user-state/repository-governance.v1.json (U), stored and
-//              written only by toolkit-capability-registry.cjs.
+//              written only by toolkit-capability-registry.cjs;
+//   ok         the user's ok that GitHub governance is off in a git repository that is not on
+//              github.com (K), in governance-not-github.v1.json next to the registry, written only
+//              by the hook gate from the user's own reply.
 //
-// States, first matching rule wins:
-//   R1 no git root, or no usable origin identity    NO_REPOSITORY  global rules only, never held
+// GitHub governance (programme records, decision traces, evidence custody, the governed block)
+// works only for github.com repositories. States, first matching rule wins:
+//   R1 no git root                                  DISABLED       automatically, never held; the folder gets a copy
 //   R2 U declined or disabled                       DISABLED       global rules only; a governed block is ignored
+//   R8 not GitHub (no usable origin, or another host), K present
+//                                                   DISABLED       the user said ok; nothing to enable here
+//   R9 not GitHub, K absent                         UNDECIDED      held until the user says ok
 //   R3 U enabled, B and P present                   ENABLED        global rules plus the governed block
 //   R4 U not recorded, B and P present              ENABLED        as R3 (the repository opted in, the user did not disable it)
-//   R5 U enabled, B or P missing                    ENABLED        materials incomplete: gates, subagents, portable skills only
+//   R5 U enabled, B or P missing                    ENABLED        materials incomplete: no GitHub governance yet
 //   R6 U not recorded, B present, P absent          UNDECIDED      held until the one-time migration or the user answers
 //   R7 anything else                                UNDECIDED      held until the user answers
-// A read error after a git root and identity are found gives UNDECIDED (rule ERROR): the state
-// cannot be shown not to be UNDECIDED, so callers that hold must hold (fail closed). A folder with
-// no git root or no identity is never held.
+// A read error after a git root is found gives UNDECIDED (rule ERROR): the state cannot be shown
+// not to be UNDECIDED, so callers that hold must hold (fail closed). A folder with no git root is
+// never held.
 //
 // Reads local files only: no network, no git or gh subprocess, no writes. Node built-ins plus the
 // existing registry, managed-block, remote-identity and programme-binding modules.
 
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -37,7 +45,17 @@ const { validateRemoteIdentity } = require('./toolkit-control-plane/control-plan
 const programmeState = require('../../skills/github-program-reconciler/scripts/programme-state.cjs');
 
 const SCHEMA = 'toolkit.governance-state.v1';
-const STATES = Object.freeze(['ENABLED', 'DISABLED', 'UNDECIDED', 'NO_REPOSITORY']);
+// GitHub governance (the reconciler and its records) supports github.com. A host whose name
+// mentions github (ssh.github.com, or an SSH alias such as github-work) is treated as GitHub too,
+// since an alias cannot be resolved from the repository alone.
+const TRACKING_HOST = 'github.com';
+const trackingHost = host => /github/i.test(host);
+const STATES = Object.freeze(['ENABLED', 'DISABLED', 'UNDECIDED']);
+const NOT_GITHUB_BASENAME = 'governance-not-github.v1.json';
+const NOT_GITHUB_SCHEMA = 'toolkit.governance-not-github.v1';
+const NOT_GITHUB_READ_LIMIT = 256 * 1024;
+// Folders that never get a copy: they hold the user's own things, not a project.
+const PERSONAL_FOLDERS = Object.freeze(['desktop', 'documents', 'downloads']);
 const GOVERNANCE_CAPABILITY = 'repository.governance';
 const GOVERNED_BLOCK = 'TOOLKIT-GOVERNED-RULES';
 const LEGACY_GOVERNED_BLOCK = 'GLOBAL-AGENTS.MD-TEMPLATE';
@@ -282,6 +300,48 @@ function readDecision(repositoryId, options = {}, legacyIds = []) {
   return { state: entry.state, decision_kind: entry.decision_kind, legacy_key: entry.state !== 'unresolved' && own.state === 'unresolved' };
 }
 
+// The key a git repository without a usable origin is known by on this computer: its real path.
+function localRepositoryId(root) {
+  let real = root;
+  try { real = fs.realpathSync.native(root); } catch { real = path.resolve(root); }
+  return `path:${crypto.createHash('sha256').update(process.platform === 'win32' ? real.toLowerCase() : real).digest('hex')}`;
+}
+
+// Whether the user said ok to GitHub governance being off for this key. A missing, unreadable or
+// damaged file counts as no ok: the repository stays held and asks again, which is safe.
+function readNotGitHubOk(key, options = {}) {
+  let parsed = null;
+  try {
+    const file = path.join(path.dirname(registryPathFor(options)), NOT_GITHUB_BASENAME);
+    const stat = fs.lstatSync(file);
+    if (stat.isFile() && stat.size <= NOT_GITHUB_READ_LIMIT) parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (error) {
+    if (error && error.code === 'REGISTRY_PATH_OVERRIDE_FORBIDDEN') throw error;
+    parsed = null;
+  }
+  const entries = parsed && parsed.schema === NOT_GITHUB_SCHEMA && parsed.repositories && typeof parsed.repositories === 'object' && !Array.isArray(parsed.repositories) ? parsed.repositories : {};
+  return Object.hasOwn(entries, key) && entries[key] !== null && typeof entries[key] === 'object';
+}
+
+// The folder a plain (non-git) working directory records its DISABLED copy in, or null where no copy
+// belongs: a drive or filesystem root, the user's home folder or anything above it, Toolkit's own
+// state folder, the system temporary folder itself, and the Desktop, Documents and Downloads folders
+// themselves.
+function recordFolderFor(cwd, options = {}) {
+  const folder = path.resolve(typeof cwd === 'string' && cwd ? cwd : process.cwd());
+  let home;
+  try { home = path.dirname(path.dirname(path.dirname(registryPathFor(options)))); } catch { return null; }
+  const same = (a, b) => (process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b);
+  const within = (child, parent) => { const rel = path.relative(parent, child); return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel)); };
+  if (path.parse(folder).root === folder) return null;
+  if (within(home, folder)) return null;
+  if (within(folder, path.join(home, '.ai-agent-toolkit'))) return null;
+  if (same(folder, path.resolve(os.tmpdir()))) return null;
+  const parent = path.dirname(folder);
+  if (PERSONAL_FOLDERS.includes(path.basename(folder).toLowerCase()) && (same(parent, home) || /^onedrive/i.test(path.basename(parent)))) return null;
+  return folder;
+}
+
 // ---- derivation -------------------------------------------------------------------------------
 
 function result(fields) {
@@ -310,26 +370,36 @@ function result(fields) {
       legacy_binding_file: fields.materials.legacy_binding_file === true,
     }) : null,
     error_code: fields.error_code || null,
+    host: fields.host || null,
+    folder: fields.folder || null,
   });
 }
 
 class GovernanceState {
-  #readIdentity; #readMaterials; #readDecision;
+  #readIdentity; #readMaterials; #readDecision; #readOk; #recordFolder;
 
   // Readers are injectable so the derivation can be tested on its own; the defaults read the
-  // real repository and the real user-state file.
-  constructor({ identityReader = readIdentity, materialsReader = readMaterials, decisionReader = readDecision, registryOptions = {} } = {}) {
+  // real repository and the real user-state files.
+  constructor({ identityReader = readIdentity, materialsReader = readMaterials, decisionReader = readDecision, okReader = readNotGitHubOk, registryOptions = {} } = {}) {
     this.#readIdentity = identityReader;
     this.#readMaterials = materialsReader;
     this.#readDecision = (identity) => decisionReader(identity.repository_id, registryOptions, identity.legacy_repository_ids || []);
+    this.#readOk = key => okReader(key, registryOptions);
+    this.#recordFolder = cwd => recordFolderFor(cwd, registryOptions);
   }
 
-  // The pure rule table over already-read inputs.
-  static derive({ identity, materials, decision }) {
+  // The pure rule table over already-read inputs. `ok` is whether the user said ok to GitHub
+  // governance being off (read only for a repository that is not on GitHub).
+  static derive({ identity, materials, decision, ok = false }) {
     const base = { root: identity.root, repository_id: identity.repository_id, persistable: true, recorded_decision: decision.state, legacy_key: decision.legacy_key === true, materials };
     const block = materials.governed_block.present === true;
     const binding = materials.binding.valid === true;
     if (decision.state === 'disabled') return result({ ...base, state: 'DISABLED', rule: 'R2', reason: decision.decision_kind === 'disable' ? 'user-disabled' : 'user-declined' });
+    const notGitHub = notGitHubOf(identity);
+    if (notGitHub) {
+      const fields = { ...base, host: notGitHub.host, reason: notGitHub.reason };
+      return ok ? result({ ...fields, state: 'DISABLED', rule: 'R8' }) : result({ ...fields, state: 'UNDECIDED', rule: 'R9' });
+    }
     if (block && binding) {
       return decision.state === 'enabled'
         ? result({ ...base, state: 'ENABLED', rule: 'R3', reason: 'user-enabled', materials_complete: true })
@@ -349,13 +419,26 @@ class GovernanceState {
       // not be read: the state cannot be shown not to be UNDECIDED.
       return result({ state: 'UNDECIDED', rule: 'ERROR', reason: 'identity-unreadable', error_code: codeOf(error), root: findGitRootQuietly(cwd) });
     }
-    if (!identity.root) return result({ state: 'NO_REPOSITORY', rule: 'R1', reason: 'no-git-root' });
-    if (!identity.valid) return result({ state: 'NO_REPOSITORY', rule: 'R1', reason: identity.reason, root: identity.root });
+    if (!identity.root) {
+      const folder = this.#recordFolder(cwd);
+      return result({ state: 'DISABLED', rule: 'R1', reason: 'no-git', folder, repository_id: folder ? localRepositoryId(folder) : null });
+    }
+    if (!identity.valid) {
+      // No usable origin: the repository is known on this computer by its path, and never by a remote.
+      const local = { ...identity, repository_id: localRepositoryId(identity.root), legacy_repository_ids: [] };
+      let ok;
+      try { ok = this.#readOk(local.repository_id); } catch (error) {
+        return result({ root: identity.root, repository_id: local.repository_id, state: 'UNDECIDED', rule: 'ERROR', reason: 'registry-unreadable', error_code: codeOf(error) });
+      }
+      return GovernanceState.derive({ identity: local, materials: EMPTY_MATERIALS, decision: { state: 'unresolved', decision_kind: null }, ok });
+    }
     const partial = { root: identity.root, repository_id: identity.repository_id, persistable: true };
     let decision;
     let materials;
+    let ok = false;
     try {
       decision = this.#readDecision(identity);
+      if (notGitHubOf(identity)) ok = this.#readOk(identity.repository_id);
     } catch (error) {
       return result({ ...partial, state: 'UNDECIDED', rule: 'ERROR', reason: 'registry-unreadable', error_code: codeOf(error) });
     }
@@ -364,8 +447,18 @@ class GovernanceState {
     } catch (error) {
       return result({ ...partial, state: 'UNDECIDED', rule: 'ERROR', reason: 'materials-unreadable', error_code: codeOf(error), recorded_decision: decision.state });
     }
-    return GovernanceState.derive({ identity, materials, decision });
+    return GovernanceState.derive({ identity, materials, decision, ok });
   }
+}
+
+const EMPTY_MATERIALS = Object.freeze({ governed_block: Object.freeze({ present: false }), binding: Object.freeze({ present: false, valid: false, problems: [] }), legacy_binding_file: false });
+
+// { host, reason } when the repository is not a github.com repository, else null. reason is
+// 'origin-missing', 'origin-ambiguous', 'origin-unsupported' or 'other-host'.
+function notGitHubOf(identity) {
+  if (identity.valid === false) return { host: null, reason: identity.reason || 'origin-missing' };
+  const host = identity.remote && typeof identity.remote.host === 'string' ? identity.remote.host.toLowerCase() : TRACKING_HOST;
+  return trackingHost(host) ? null : { host, reason: 'other-host' };
 }
 
 function codeOf(error) {
@@ -390,6 +483,12 @@ function governanceState(cwd, options = {}) {
 module.exports = Object.freeze({
   SCHEMA,
   STATES,
+  TRACKING_HOST,
+  NOT_GITHUB_BASENAME,
+  NOT_GITHUB_SCHEMA,
+  localRepositoryId,
+  readNotGitHubOk,
+  recordFolderFor,
   GOVERNANCE_CAPABILITY,
   GOVERNED_BLOCK,
   LEGACY_GOVERNED_BLOCK,

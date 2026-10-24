@@ -110,18 +110,22 @@ test('a hook whose decision modules cannot load blocks a governed spawn with exi
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('A19: a repository with the Toolkit-governed rules block is governed on Codex too; a plain repository is not', () => {
+test('A19: a repository with the Toolkit-governed rules block is governed on Codex too; a plain folder is not', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-codex-hook-scope-'));
   try {
-    const plain = path.join(dir, 'plain'), managed = path.join(dir, 'managed');
-    for (const repo of [plain, managed]) fs.mkdirSync(path.join(repo, '.git'), { recursive: true });
+    const plain = path.join(dir, 'plain'), managed = path.join(dir, 'managed'), noOrigin = path.join(dir, 'no-origin');
+    fs.mkdirSync(plain, { recursive: true });
+    for (const repo of [managed, noOrigin]) fs.mkdirSync(path.join(repo, '.git'), { recursive: true });
     fs.writeFileSync(path.join(plain, 'AGENTS.md'), '# Rules\n');
     // A governed repository by its governance state: the managed block plus a valid binding (#542).
     require('./toolkit-governed-fixture-support.cjs').makeGoverned(managed, 'codex-scope');
     const nested = path.join(managed, 'src'); fs.mkdirSync(nested);
     const spawn = cwd => ({ tool_name: 'collaborationspawn_agent', hook_event_name: 'PreToolUse', cwd, tool_input: { fork_turns: 'none' } });
     const r = run(spawn(plain));
-    assert.equal(r.status, 0); assert.deepEqual(r.output, {}, 'plain repository: no decision');
+    assert.equal(r.status, 0); assert.deepEqual(r.output, {}, 'plain folder: no decision');
+    // A git repository that is not on github.com waits for the user's ok before anything runs.
+    const waiting = run(spawn(noOrigin));
+    assert.equal(waiting.status, 2); assert.match(waiting.stderr, /nothing runs until the user says ok/);
     // Same predicate as the Claude hook: the managed block makes the repository governed.
     assert.equal(require('../scripts/toolkit-governed-repo.cjs').governedRepo(nested, {}).governed, true);
     for (const cwd of [managed, nested, ROOT]) {

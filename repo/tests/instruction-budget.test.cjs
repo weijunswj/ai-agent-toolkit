@@ -38,9 +38,12 @@ test('a realistic user file, the global block and root AGENTS.md fit the raised 
 
 test('each block stays inside its own budget', () => {
   // Raised for the owner's scratch, invariant-model, issue-closing and current-behaviour rules, then
-  // for the governance-state routing rule; the combined Codex limit above stays the hard cap.
-  assert.ok(crlfBytes(GLOBAL) <= 17450, `global block ${crlfBytes(GLOBAL)} bytes`);
-  assert.ok(crlfBytes(GOVERNED) <= 9500, `governed rules ${crlfBytes(GOVERNED)} bytes`);
+  // for the governance-state routing rule. The coding gates, delegation and routes then moved from the
+  // governed rules into the global block (they apply wherever the plugin is installed), so the global
+  // budget rose by what the governed budget fell, plus the three-way governance routing (no git,
+  // not on github.com, github.com); the combined Codex limit above stays the hard cap.
+  assert.ok(crlfBytes(GLOBAL) <= 22700, `global block ${crlfBytes(GLOBAL)} bytes`);
+  assert.ok(crlfBytes(GOVERNED) <= 4100, `governed rules ${crlfBytes(GOVERNED)} bytes`);
   assert.ok(crlfBytes(ROOT_AGENTS) <= 15000, `root AGENTS.md ${crlfBytes(ROOT_AGENTS)} bytes`);
   // CONTROLLER.md loads only for controllers, not every session; the owner's promise, run-standard,
   // scratch, feedback-intake and G0 model rules raised its budget from 18000.
@@ -56,8 +59,8 @@ test('guidance moved out of root AGENTS.md is still reachable from a loaded laye
     ['## Human-readable Work', GLOBAL],
     ['n8n-safety-router', GLOBAL],
     ['load the `n8n-safety-router` skill before any n8n work; if it is unavailable, stop and report that', GOVERNED],
-    ['G0 Discovery -> G1 Builder, including UAT -> G2 Review', ROOT_AGENTS],
-    ['Route proof', ROOT_AGENTS],
+    ['G0 Discovery -> G1 Builder, including UAT -> G2 Review', GLOBAL],
+    ['Route proof', GLOBAL],
     ['Decision traces', ROOT_AGENTS],
     ['global-rules.md', ROOT_AGENTS],
     ['repo/contracts/source-of-truth-contract.md', ROOT_AGENTS],

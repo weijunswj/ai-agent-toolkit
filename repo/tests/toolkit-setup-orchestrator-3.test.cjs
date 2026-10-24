@@ -119,7 +119,7 @@ test('generated Codex and Claude instruction surfaces preserve the compact host-
     /G0 must delegate suitable separable evidence gathering, and G1 suitable independent implementation or validation/,
     /Only a G0 or G1 lead launches helpers; helpers never launch or ask for another agent, and G2 has none/,
     /Keep model, effort, tier and route out of portable task prompts unless a runtime requires them/,
-  ]) assert.match(agents, pattern);
+  ]) assert.match(global, pattern);
   for (const pattern of [
     /root session owns integration, validation, conflict resolution and final judgement/,
     /isolated context and one minimal self-contained task/,

@@ -68,13 +68,15 @@ test('H-01, H-02: every prompt in an undecided repository is held; the first sho
   assert.equal(first.action, 'block');
   assert.ok(first.reason.startsWith(QUESTION_LINE));
   // A plain question with what governance is and what each answer does, never a command to run.
-  assert.match(first.reason, /^Turn on Toolkit governance for this repository\? Reply yes, no or not now\.$/m);
-  assert.match(first.reason, /Toolkit governance means /);
-  for (const answer of ['yes', 'no', 'not now']) assert.match(first.reason, new RegExp(`^  ${answer} +\\S`, 'm'), answer);
+  assert.match(first.reason, /^Enable Toolkit's automated GitHub tracking governance for this repository\? Reply yes, no or later\.$/m);
+  assert.match(first.reason, /Toolkit takes over this repository's task tracking on GitHub and adds the no-force-push ruleset:/);
+  for (const item of ['1. Creates PARENT and CHILD GitHub issues', '2. Records plans, reviews and decisions', '3. Uses a private evidence store']) assert.ok(first.reason.includes(item), item);
+  for (const answer of ['yes', 'no', 'later']) assert.match(first.reason, new RegExp(`^  ${answer} +\\S`, 'm'), answer);
+  assert.match(first.reason, /^  no +.*the coding rules still apply/m);
   assert.doesNotMatch(first.reason, /toolkit-governance\.cjs|node /);
   const second = hold(ctx).decide({ cwd: repo, prompt: 'and the logout one' });
   assert.equal(second.action, 'block');
-  assert.match(second.reason, /\(2 messages held\)\. Turn on Toolkit governance for this repository\? Reply yes, no or not now\./);
+  assert.match(second.reason, /\(2 messages held\)\. Enable Toolkit's automated GitHub tracking governance for this repository\? Reply yes, no or later\./);
   assert.equal(fs.existsSync(repoState.filePath(repo)), false, 'nothing is recorded in the repository while undecided');
   assert.equal(registryBytes(ctx), null, 'no decision is written');
 });
@@ -162,13 +164,13 @@ test('short replies after the question: yes enables, no disables, and the held p
   }
 });
 
-test('not now: nothing is recorded, this session carries on under the global rules, and a new session asks again', (t) => {
+test('later: nothing is recorded, this session carries on under the global rules and coding gates, and a new session asks again', (t) => {
   const ctx = scratch(t);
   const repo = gitRepo(ctx, 'repo');
   hold(ctx).decide({ cwd: repo, prompt: 'held while deciding', sessionId: 's1' });
-  const later = hold(ctx).decide({ cwd: repo, prompt: 'Not now', sessionId: 's1' });
+  const later = hold(ctx).decide({ cwd: repo, prompt: 'Later', sessionId: 's1' });
   assert.equal(later.action, 'pass');
-  assert.match(later.context, /"not now".*follow only the global rules/);
+  assert.match(later.context, /"later".*follow the global rules \(coding gates included\) without GitHub governance/);
   assert.match(later.context, /1\. held while deciding/);
   assert.equal(registryBytes(ctx), null, 'no decision is written');
   assert.equal(stateOf(ctx, repo).state, 'UNDECIDED');
@@ -176,11 +178,11 @@ test('not now: nothing is recorded, this session carries on under the global rul
   // The same session runs.
   assert.deepEqual(hold(ctx).decide({ cwd: repo, prompt: 'next', sessionId: 's1' }), { action: 'pass' });
   assert.equal(new gate.ToolGate({ registryOptions: ctx.options }).decide({ tool_name: 'Bash', cwd: repo, session_id: 's1', tool_input: { command: 'ls' } }), null);
-  assert.match(gate.sessionLine(repo, { registryOptions: ctx.options, sessionId: 's1' }), /"not now" for this session/);
+  assert.match(gate.sessionLine(repo, { registryOptions: ctx.options, sessionId: 's1' }), /the user said "later" for this session\. Follow the global rules \(coding gates included\) without GitHub governance/);
   // Another session, or one with no id, is held and asked again.
   assert.equal(hold(ctx).decide({ cwd: repo, prompt: 'go', sessionId: 's2' }).action, 'block');
   assert.ok(new gate.ToolGate({ registryOptions: ctx.options }).decide({ tool_name: 'Bash', cwd: repo, session_id: 's2', tool_input: { command: 'ls' } }).deny);
-  assert.match(gate.sessionLine(repo, { registryOptions: ctx.options }), /no decision yet/);
+  assert.match(gate.sessionLine(repo, { registryOptions: ctx.options }), /no GitHub governance decision yet/);
   // A later yes in the new session still decides.
   assert.equal(hold(ctx).decide({ cwd: repo, prompt: 'yes', sessionId: 's2' }).action, 'pass');
   assert.equal(stateOf(ctx, repo).state, 'ENABLED');
@@ -246,7 +248,7 @@ test('short replies need a session id, and a launcher-started session cannot giv
   for (const reply of ['yes', 'no', 'not now']) {
     const noId = hold(ctx).decide({ cwd: repo, prompt: reply });
     assert.equal(noId.action, 'block', reply);
-    assert.match(noId.reason, /still waiting .*Turn on Toolkit governance/, reply);
+    assert.match(noId.reason, /still waiting .*Enable Toolkit's automated GitHub tracking governance/, reply);
   }
   hold(ctx).decide({ cwd: repo, prompt: 'go', sessionId: 's1' });
   for (const reply of ['yes', 'no', 'not now']) {
@@ -359,7 +361,7 @@ test('a damaged "not now" file keeps the repository held with the real question,
     assert.equal(first.decision, 'block');
     assert.ok(first.reason.startsWith(QUESTION_LINE), first.reason);
     assert.match(tools(ctx).decide({ tool_name: 'Bash', cwd: repo, session_id: 's1', tool_input: { command: 'ls' } }).deny, /no governance decision yet/);
-    assert.match(gate.sessionLine(repo, { registryOptions: ctx.options, sessionId: 's1' }), /no decision yet/);
+    assert.match(gate.sessionLine(repo, { registryOptions: ctx.options, sessionId: 's1' }), /no GitHub governance decision yet/);
     assert.equal(hold(ctx).decide({ cwd: repo, prompt: reply, sessionId: 's1' }).action, 'pass', reply);
     assert.equal(stateOf(ctx, repo).state, expected);
     if (reply === 'not now') {
@@ -373,7 +375,7 @@ test('a damaged "not now" file keeps the repository held with the real question,
   hold(ctx).decide({ cwd: repo, prompt: 'go', sessionId: 's1' });
   const blocked = hold(ctx).decide({ cwd: repo, prompt: 'not now', sessionId: 's1' });
   assert.equal(blocked.action, 'block');
-  assert.match(blocked.reason, /"not now" could not be saved .*Reply yes or no/);
+  assert.match(blocked.reason, /"later" could not be saved .*Reply yes or no/);
   assert.equal(stateOf(ctx, repo).state, 'UNDECIDED');
 });
 
@@ -529,21 +531,79 @@ test('a decided repository whose state folder cannot be written is reported, nev
   }
 });
 
-test('R4 opt-in and NO_REPOSITORY folders pass; nothing is written where no decision can be stored', (t) => {
+test('R4 opt-in passes; a plain folder is DISABLED automatically with its own copy, never held, and personal folders get no copy', (t) => {
   const ctx = scratch(t);
   const optIn = gitRepo(ctx, 'opt-in', { block: true, binding: true });
   assert.deepEqual(hold(ctx).decide({ cwd: optIn, prompt: 'go' }), { action: 'pass' });
   assert.equal(fileOf(optIn).basis, 'repository opt-in');
-  const plain = path.join(ctx.root, 'plain-folder');
+  const plain = path.join(ctx.root, 'X-Boundaries');
   fs.mkdirSync(plain);
-  const noOrigin = gitRepo(ctx, 'no-origin', { remote: null });
-  for (const cwd of [plain, noOrigin]) {
-    assert.deepEqual(hold(ctx).decide({ cwd, prompt: 'go' }), { action: 'pass' });
-    assert.equal(tools(ctx).decide({ tool_name: 'Bash', cwd, tool_input: { command: 'ls' } }), null);
-    assert.equal(gate.sessionLine(cwd, { registryOptions: ctx.options }), null);
-    assert.equal(fs.existsSync(path.join(cwd, repoState.FOLDER)), false);
+  if (governance.findGitRoot(plain) !== null) return;
+  assert.deepEqual(hold(ctx).decide({ cwd: plain, prompt: 'go' }), { action: 'pass' });
+  assert.equal(tools(ctx).decide({ tool_name: 'Bash', cwd: plain, tool_input: { command: 'ls' } }), null);
+  assert.match(gate.sessionLine(plain, { registryOptions: ctx.options }), /^Toolkit governance: DISABLED automatically \(this folder is not a git repository/);
+  const copy = fileOf(plain);
+  assert.deepEqual([copy.state, copy.basis], ['DISABLED', 'no git']);
+  assert.equal(fs.readFileSync(path.join(plain, repoState.FOLDER, '.gitignore'), 'utf8'), '# Toolkit keeps this folder out of git.\n*\n');
+  assert.equal(new gate.GovernanceGate({ registryOptions: ctx.options }).evaluate(plain).file, 'agrees');
+  for (const personal of [path.join(ctx.root, 'home'), path.join(ctx.root, 'home', 'Desktop'), path.join(ctx.root, 'home', 'Downloads')]) {
+    fs.mkdirSync(personal, { recursive: true });
+    assert.deepEqual(hold(ctx).decide({ cwd: personal, prompt: 'go' }), { action: 'pass' }, personal);
+    assert.equal(fs.existsSync(path.join(personal, repoState.FOLDER, repoState.FILE)), false, personal);
   }
   assert.equal(fs.existsSync(ctx.heldPath), false);
+  assert.equal(registryBytes(ctx), null);
+});
+
+// Closure rows for a git repository that is not on github.com: command x state x who answers.
+test('not on github.com: held with a notice; only the user\'s ok in the asked session records DISABLED, enable is refused, and nothing reaches the registry', (t) => {
+  const ctx = scratch(t);
+  for (const [name, remote, where] of [
+    ['no-origin', null, /has no github\.com origin remote/],
+    ['gitlab', 'https://gitlab.com/example-owner/example-repo.git', /is on gitlab\.com/],
+  ]) {
+    const repo = gitRepo(ctx, name, { remote });
+    const first = hold(ctx).decide({ cwd: repo, prompt: 'fix the bug', sessionId: 's1' });
+    assert.equal(first.action, 'block', name);
+    assert.ok(first.reason.startsWith('Toolkit: this repository is not on github.com, so your message was held and not sent.'), first.reason);
+    assert.match(first.reason, where);
+    assert.match(first.reason, /So GitHub governance will be DISABLED here\. The global rules and coding gates still apply\./);
+    assert.match(first.reason, /^Reply ok to continue\./m);
+    assert.match(first.reason, /If a similar repository host becomes available, it can be set up then\./);
+    assert.doesNotMatch(first.reason, /toolkit-governance\.cjs|node /);
+    assert.match(hold(ctx).decide({ cwd: repo, prompt: 'and the other one', sessionId: 's1' }).reason, /still waiting for your ok \(2 messages held\)/);
+    assert.match(tools(ctx).decide({ tool_name: 'Bash', cwd: repo, session_id: 's1', tool_input: { command: 'ls' } }).deny, /nothing runs until the user says ok/);
+    assert.match(gate.sessionLine(repo, { registryOptions: ctx.options, sessionId: 's1' }), /GitHub governance will be DISABLED here once the user says ok/);
+    // Enable cannot apply; another session's short reply is only held; automation cannot answer.
+    assert.match(hold(ctx).decide({ cwd: repo, prompt: 'toolkit governance enable', sessionId: 's1' }).reason, /GitHub governance cannot be enabled here/);
+    assert.equal(hold(ctx).decide({ cwd: repo, prompt: 'ok', sessionId: 'other' }).action, 'block');
+    assert.match(hold(ctx, { TOOLKIT_GATE_ROLE: 'G1' }).decide({ cwd: repo, prompt: 'ok', sessionId: 's1' }).reason, /automated session cannot answer/);
+    assert.equal(stateOf(ctx, repo).rule, 'R9');
+    // The user's ok in the session that was asked decides, and the held messages come back in order.
+    const ok = hold(ctx).decide({ cwd: repo, prompt: 'OK.', sessionId: 's1' });
+    assert.equal(ok.action, 'pass');
+    assert.match(ok.context, /now DISABLED for this repository: it is not on github\.com and the user said ok/);
+    assert.match(ok.context, /1\. fix the bug\n2\. and the other one/);
+    assert.deepEqual([stateOf(ctx, repo).state, stateOf(ctx, repo).rule], ['DISABLED', 'R8']);
+    assert.equal(fileOf(repo).basis, 'not on github.com');
+    assert.deepEqual(hold(ctx).decide({ cwd: repo, prompt: 'next', sessionId: 's2' }), { action: 'pass' });
+    assert.match(gate.sessionLine(repo, { registryOptions: ctx.options }), /DISABLED for this repository \(not on github\.com/);
+  }
+  // A plain yes or no is an ok too, and the full disable answer works without a held message.
+  const yes = gitRepo(ctx, 'gitea-yes', { remote: 'git@git.example.invalid:a/b.git' });
+  hold(ctx).decide({ cwd: yes, prompt: 'go', sessionId: 's1' });
+  assert.equal(hold(ctx).decide({ cwd: yes, prompt: 'no', sessionId: 's1' }).action, 'pass');
+  assert.equal(stateOf(ctx, yes).rule, 'R8');
+  const full = gitRepo(ctx, 'gitea-full', { remote: 'git@git.example.invalid:c/d.git' });
+  assert.equal(hold(ctx).decide({ cwd: full, prompt: 'toolkit governance disable' }).action, 'pass');
+  assert.equal(stateOf(ctx, full).rule, 'R8');
+  assert.equal(registryBytes(ctx), null, 'the registry holds only github.com decisions');
+  // An agent cannot say ok for the user through a nested host session.
+  assert.ok(tools(ctx).decide({ tool_name: 'Bash', cwd: full, tool_input: { command: 'echo ok | claude -p' } }).deny);
+  // Moving to github.com asks the github.com question.
+  git(full, ['remote', 'set-url', 'origin', 'https://github.com/example-owner/moved.git']);
+  assert.equal(stateOf(ctx, full).rule, 'R7');
+  assert.ok(hold(ctx).decide({ cwd: full, prompt: 'go' }).reason.startsWith(QUESTION_LINE));
 });
 
 test('tools: an undecided repository runs nothing that changes state; read-only tools and decided repositories are not held', (t) => {

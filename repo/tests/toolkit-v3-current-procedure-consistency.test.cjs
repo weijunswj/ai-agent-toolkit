@@ -25,25 +25,25 @@ function section(text, number) {
 }
 
 // CONTROLLER.md holds only the current operating procedure (R3 removed its pre-V3 history); the
-// governed rules block holds the executor procedure and is projected unchanged into root AGENTS.md
-// and both portable templates (the projection itself is checked by agent-instruction-shims).
+// global rules hold the executor procedure (coding gates, delegation and routes apply wherever the
+// plugin is installed). The governed block keeps only the GitHub-tracking parts and is projected
+// unchanged into root AGENTS.md and both portable templates (checked by agent-instruction-shims).
 function current(text) {
   assert.equal(text.includes('## Historical compatibility reference'), false, 'the pre-V3 history is removed');
   return text;
 }
 
-const GOVERNED_SURFACES = ['repo/contracts/agent-rules/toolkit-governed-rules.md', 'AGENTS.md',
-  'repo/contracts/agent-rules/repo-local/AGENTS.managed.template.md', 'skills/repository-agent-rules/repo-local/AGENTS.managed.template.md'];
+const GATE_SURFACES = ['repo/contracts/agent-rules/global-rules.md'];
 const RENEWAL_SURFACES = ['skills/controller-bootstrap/SKILL.md'];
 
 function surfaces() {
   const value = { 'repo/CONTROLLER.md': current(read('repo/CONTROLLER.md')) };
-  for (const rel of [...GOVERNED_SURFACES, ...RENEWAL_SURFACES]) value[rel] = read(rel);
+  for (const rel of [...GATE_SURFACES, ...RENEWAL_SURFACES]) value[rel] = read(rel);
   return value;
 }
 
 function currentOperatingContract(texts) {
-  for (const rel of GOVERNED_SURFACES) {
+  for (const rel of GATE_SURFACES) {
     const text = texts[rel];
     assert.match(text, /Planned G1 segment completion alone checkpoints and continues in the same session/, rel);
     assert.match(text, /Correction rechecks use fresh contexts for the same selected reviewers/, rel);
@@ -53,7 +53,7 @@ function currentOperatingContract(texts) {
   }
   const controller = texts['repo/CONTROLLER.md'];
   assert.match(controller, /Stored temporary owned bulk expires 21 days after its immutable verified transfer/);
-  assert.match(controller, /fresh-context and family-closure rules are in the governed block/);
+  assert.match(controller, /fresh-context and family-closure rules are in the global rules/);
   assert.match(controller, /G2 stays adversarial on every reachable path inside the release brief's frozen supported host\/environment matrix/);
   assert.match(controller, /a private `TRANSPORT-\*` Git repository is only the recommended default when no store was previously selected/);
   for (const rel of RENEWAL_SURFACES) {
@@ -77,13 +77,13 @@ test('current procedure is one wording across CONTROLLER, the governed block and
   const texts = surfaces();
   currentOperatingContract(texts);
   const mutations = [
-    ['repo/contracts/agent-rules/toolkit-governed-rules.md', 'Planned G1 segment completion alone checkpoints and continues in the same session.',
+    ['repo/contracts/agent-rules/global-rules.md', 'Planned G1 segment completion alone checkpoints and continues in the same session.',
       'Mandatory fresh executor contexts follow each planned G1 segment.'],
     ['repo/CONTROLLER.md', 'Stored temporary owned bulk expires 21 days after its immutable verified transfer',
       'remote temporary bulk uses 30 days after the latest required consumer'],
-    ['AGENTS.md', 'Correction rechecks use fresh contexts for the same selected reviewers',
+    ['repo/contracts/agent-rules/global-rules.md', 'Correction rechecks use fresh contexts for the same selected reviewers',
       'Reuse independent G2 reviewers for corrections'],
-    ['repo/contracts/agent-rules/toolkit-governed-rules.md', 'no added peer, duplicate or automatic closing panel',
+    ['repo/contracts/agent-rules/global-rules.md', 'no added peer, duplicate or automatic closing panel',
       'broad changes may require two complementary peers'],
     ['skills/controller-bootstrap/SKILL.md', 'Planned G1 segment completion checkpoints and continues in the same session',
       'Planned G1 segment completion and newly activated instruction/profile versions require a fresh executor']
@@ -221,7 +221,7 @@ const LAUNCH_OWNERSHIP_V3 = "Model and effort follow launch ownership. A human's
 const LAUNCH_CLAUSES = [/Model and effort follow launch ownership/, /advisory, not a blocker/, /never labelled the recommended one/,
   /Every automation-launched G0\/G1\/G2 worker or successor/, /every G0\/G1 helper/, /(?:with no|without) fallback or weaker effort/,
   /A root label is not a human override/, /Native permissions, independence, reviewer obligations and delegation limits still apply/];
-const LAUNCH_SURFACES = [...GOVERNED_SURFACES, ...RENEWAL_SURFACES];
+const LAUNCH_SURFACES = [...GATE_SURFACES, ...RENEWAL_SURFACES];
 const FINISH_SURFACES = ['repo/CONTROLLER.md', V3_DOC];
 
 function ownerLawContract(texts) {
@@ -232,7 +232,7 @@ function ownerLawContract(texts) {
   assert.match(shipping, /\*\*Finish authorised work before stopping\.\*\*/, 'finish-before-stop sits in the global Shipping section');
   for (const clause of [/is not a finish/, /holds only the steps that depend on it/, /report the exact hold and next action/,
     /never authorises working around a denial, an unsafe retry, a duplicate writer, an unapproved model launch or claimed background work/]) assert.match(shipping, clause);
-  for (const rel of GOVERNED_SURFACES) assert.match(texts[rel], /Models and effort come only from an explicitly selected stack registry revision/, rel);
+  for (const rel of GATE_SURFACES) assert.match(texts[rel], /Models and effort come only from an explicitly selected stack registry revision/, rel);
   const v3 = texts[V3_DOC];
   assert.ok(section(v3, 10).includes('**Launch ownership.** ' + LAUNCH_OWNERSHIP_V3));
   assert.ok(section(v3, 6).includes(FINISH_BEFORE_STOP));
@@ -251,12 +251,12 @@ test('launch ownership and finish-before-stop keep their meaning on every curren
   const texts = { ...surfaces(), [V3_DOC]: read(V3_DOC), [GLOBAL]: read(GLOBAL) };
   ownerLawContract(texts);
   for (const [rel, before, after] of [
-    ['repo/contracts/agent-rules/toolkit-governed-rules.md', 'is advisory, not a blocker', 'must equal the stack recommendation'],
+    [GLOBAL, 'is advisory, not a blocker', 'must equal the stack recommendation'],
     [GLOBAL, 'progress note is not a finish', 'progress note is a finish'],
     [V3_DOC, 'holds only its dependent steps', 'stops all work'],
     [V3_DOC, 'a model or effort difference alone is not a G2 failure', 'a model difference fails G2'],
     ['skills/controller-bootstrap/SKILL.md', 'without fallback or weaker effort', 'with the controller choosing the effort'],
-    ['AGENTS.md', 'Models and effort come only from an explicitly selected stack registry revision', 'Models and effort come from any registry']
+    [GLOBAL, 'Models and effort come only from an explicitly selected stack registry revision', 'Models and effort come from any registry']
   ]) {
     assert.ok(texts[rel].includes(before), `mutation target exists in ${rel}: ${before}`);
     assert.throws(() => ownerLawContract({ ...texts, [rel]: texts[rel].replace(before, after) }), `reject ${rel}: ${before}`);
