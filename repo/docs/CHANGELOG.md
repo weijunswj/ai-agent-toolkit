@@ -1,5 +1,9 @@
 # Toolkit Changelog
 
+## 3.10.1 (one running post)
+
+- **The coordinator keeps one running post.** After your last message, the Projects coordinator keeps all its output in one post that it edits, appending each new result, PR or question and keeping every earlier detail. It starts a fresh post once you write again, or when the running post nears about 8 KB, and still answers a burst of your messages in one post. The Projects skill and the managed project instructions block say the same.
+
 ## 3.10.0 (host support, governance states, decision history and the personal-data guard)
 
 ### Decision history before planning
