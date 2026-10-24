@@ -181,13 +181,16 @@ test('not now: nothing is recorded, this session carries on under the global rul
   assert.equal(stateOf(ctx, repo).state, 'ENABLED');
 });
 
-test('not now needs a session id, and a launcher-started session cannot give any short reply', (t) => {
+test('short replies need a session id, and a launcher-started session cannot give any short reply', (t) => {
   const ctx = scratch(t);
   const repo = gitRepo(ctx, 'repo');
   hold(ctx).decide({ cwd: repo, prompt: 'go' });
-  const noId = hold(ctx).decide({ cwd: repo, prompt: 'not now' });
-  assert.equal(noId.action, 'block');
-  assert.match(noId.reason, /"not now" cannot be kept\. .*Reply yes or no\./);
+  for (const reply of ['yes', 'no', 'not now']) {
+    const noId = hold(ctx).decide({ cwd: repo, prompt: reply });
+    assert.equal(noId.action, 'block', reply);
+    assert.match(noId.reason, /still waiting .*Turn on Toolkit governance/, reply);
+  }
+  hold(ctx).decide({ cwd: repo, prompt: 'go', sessionId: 's1' });
   for (const reply of ['yes', 'no', 'not now']) {
     const automated = hold(ctx, { TOOLKIT_GATE_ROLE: 'G1' }).decide({ cwd: repo, prompt: reply, sessionId: 's1' });
     assert.equal(automated.action, 'block', reply);
@@ -195,6 +198,125 @@ test('not now needs a session id, and a launcher-started session cannot give any
   }
   assert.equal(registryBytes(ctx), null);
   assert.equal(fs.existsSync(path.join(path.dirname(ctx.registryPath), gate.NOT_NOW_BASENAME)), false);
+});
+
+test('nested sessions: a short reply counts only in the session that was shown the question, on both hosts', (t) => {
+  const ctx = scratch(t);
+  const home = path.join(ctx.root, 'home');
+  const env = { ...process.env, HOME: home, USERPROFILE: home };
+  delete env.CLAUDE_CODE_REMOTE;
+  for (const marker of ['TOOLKIT_GATE_ROLE', 'TOOLKIT_NATIVE_HELPER_BINDING', 'TOOLKIT_CLAUDE_TASK_PROFILE_SHA256']) delete env[marker];
+  const hosts = {
+    claude: input => {
+      const out = JSON.parse(childProcess.execFileSync(process.execPath, [path.join(scripts, 'toolkit-governance-hook.cjs'), '--event', 'UserPromptSubmit'], { input: JSON.stringify(input), env, encoding: 'utf8' }));
+      return out.decision === 'block' ? { held: true, reason: out.reason } : { held: false, context: out.hookSpecificOutput?.additionalContext };
+    },
+    codex: input => {
+      const run = childProcess.spawnSync(process.execPath, [path.join(scripts, 'toolkit-codex-helper-hook.cjs')], { input: JSON.stringify({ hook_event_name: 'UserPromptSubmit', ...input }), env, encoding: 'utf8' });
+      return run.status === 2 ? { held: true, reason: run.stderr } : { held: false, context: run.stdout ? JSON.parse(run.stdout).hookSpecificOutput?.additionalContext : undefined };
+    },
+  };
+  const notNowPath = path.join(home, '.ai-agent-toolkit', 'user-state', gate.NOT_NOW_BASENAME);
+  for (const [host, send] of Object.entries(hosts)) {
+    for (const [index, reply] of ['yes', 'y', 'no', 'n', 'not now', 'later'].entries()) {
+      const slug = `nested-${host}-${index}`;
+      const repo = gitRepo(ctx, slug, { remote: `https://github.com/example-owner/${slug}.git` });
+      // `claude -p hello && claude -p yes` (or `codex exec`): two fresh sessions, each with its own id.
+      assert.equal(send({ cwd: repo, session_id: `${slug}-first`, prompt: 'hello' }).held, true);
+      const second = send({ cwd: repo, session_id: `${slug}-second`, prompt: reply });
+      assert.equal(second.held, true, `${host} ${reply}`);
+      assert.ok(second.reason.startsWith(QUESTION_LINE), `${host} ${reply}: the new session is shown the whole question`);
+      // A session with no id never answers with a short reply either.
+      assert.equal(send({ cwd: repo, prompt: reply }).held, true, `${host} ${reply} without a session id`);
+      assert.equal(governance.governanceState(repo, { registryPath: path.join(home, '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json'), testOnly: true }).state, 'UNDECIDED', `${host} ${reply}`);
+      assert.equal(fs.existsSync(notNowPath), false, `${host} ${reply}: no "not now" is kept`);
+    }
+    // The user's own session, which was shown the question, still answers with a short reply.
+    const own = gitRepo(ctx, `own-${host}`, { remote: `https://github.com/example-owner/own-${host}.git` });
+    assert.equal(send({ cwd: own, session_id: `own-${host}`, prompt: 'fix the bug' }).held, true);
+    const answered = send({ cwd: own, session_id: `own-${host}`, prompt: 'yes' });
+    assert.equal(answered.held, false, host);
+    assert.match(answered.context, /now ENABLED[\s\S]*1\. fix the bug/);
+  }
+});
+
+test('nested sessions: an agent cannot start or resume a host session with a short reply, in any folder', (t) => {
+  const ctx = scratch(t);
+  const decided = gitRepo(ctx, 'decided');
+  gate.writeGovernanceDecision(decided, 'enable', { registryOptions: ctx.options });
+  const plain = path.join(ctx.root, 'plain');
+  fs.mkdirSync(plain);
+  const undecided = path.join(ctx.root, 'undecided');
+  const refused = [
+    ['Bash', { command: `cd ${undecided} && claude -p hello && claude -p yes` }],
+    ['Bash', { command: `cd ${undecided} && codex exec "y"` }],
+    ['Bash', { command: `cd ${undecided} && echo "not now" | claude -p` }],
+    ['Bash', { command: 'claude --resume 0b4e -p no' }],
+    ['Bash', { command: 'claude -c -p N.' }],
+    ['Bash', { command: 'codex exec resume --last later' }],
+    ['Bash', { command: "printf 'y\\n' | codex exec -" }],
+    ['Bash', { command: 'claude -p <<EOF\nyes\nEOF' }],
+    ['Bash', { command: 'ANSWER=yes; claude -p "$ANSWER"' }],
+    ['Bash', { command: '/usr/local/bin/claude -p yes' }],
+    ['Bash', { command: 'npx @anthropic-ai/claude-code -p yes' }],
+    ['PowerShell', { command: '"yes" | claude.exe -p' }],
+    ['PowerShell', { command: 'C:\\Users\\me\\AppData\\Roaming\\npm\\codex.cmd exec no' }],
+    ['exec_command', { cmd: 'codex exec "Not now"' }],
+    ['shell', { command: ['bash', '-lc', 'claude -p yes'] }],
+    ['local_shell', { command: ['codex', 'exec', 'yes'] }],
+  ];
+  for (const cwd of [decided, plain]) {
+    for (const [tool_name, tool_input] of refused) {
+      const decision = tools(ctx).decide({ tool_name, cwd, tool_input });
+      assert.ok(decision?.deny, `${tool_name} ${JSON.stringify(tool_input)}`);
+      assert.ok(decision.deny.includes(gate.ASK));
+    }
+  }
+  for (const command of [
+    'claude mcp list',
+    'codex --version',
+    'claude -p "summarise the yes and no answers in notes.md"',
+    'cat ~/.claude/settings.json | grep -n yes',
+    'ls .claude-plugin && git commit -m "no"',
+    'head -n 3 notes.txt; claude --version',
+    'node repo/tests/support/claude-helper-matrix.cjs --answer yes',
+  ]) {
+    assert.equal(tools(ctx).decide({ tool_name: 'Bash', cwd: decided, tool_input: { command } }), null, command);
+  }
+});
+
+test('a damaged "not now" file keeps the repository held with the real question, and yes, no or not now still answer', (t) => {
+  const ctx = scratch(t);
+  const notNowPath = path.join(path.dirname(ctx.registryPath), gate.NOT_NOW_BASENAME);
+  for (const [index, [damage, reply, expected]] of [
+    ['garbage', 'yes', 'ENABLED'],
+    [JSON.stringify({ schema: 'other', repositories: {} }), 'no', 'DISABLED'],
+    [JSON.stringify({ schema: 'toolkit.governance-not-now.v1', repositories: [] }), 'not now', 'UNDECIDED'],
+  ].entries()) {
+    const slug = `damaged-${index}`;
+    const repo = gitRepo(ctx, slug, { remote: `https://github.com/example-owner/${slug}.git` });
+    fs.mkdirSync(path.dirname(notNowPath), { recursive: true });
+    fs.writeFileSync(notNowPath, damage);
+    const first = claudeHook.respond('UserPromptSubmit', { cwd: repo, prompt: 'go', session_id: 's1' }, { registryOptions: ctx.options, environment: {} });
+    assert.equal(first.decision, 'block');
+    assert.ok(first.reason.startsWith(QUESTION_LINE), first.reason);
+    assert.match(tools(ctx).decide({ tool_name: 'Bash', cwd: repo, session_id: 's1', tool_input: { command: 'ls' } }).deny, /no governance decision yet/);
+    assert.match(gate.sessionLine(repo, { registryOptions: ctx.options, sessionId: 's1' }), /no decision yet/);
+    assert.equal(hold(ctx).decide({ cwd: repo, prompt: reply, sessionId: 's1' }).action, 'pass', reply);
+    assert.equal(stateOf(ctx, repo).state, expected);
+    if (reply === 'not now') {
+      assert.equal(JSON.parse(fs.readFileSync(notNowPath, 'utf8')).repositories[stateOf(ctx, repo).repository_id].session_id, 's1', 'the damaged file is replaced');
+    }
+  }
+  // A "not now" that cannot be saved keeps the repository held and says so.
+  fs.rmSync(notNowPath, { force: true });
+  fs.mkdirSync(notNowPath);
+  const repo = gitRepo(ctx, 'unsaveable', { remote: 'https://github.com/example-owner/unsaveable.git' });
+  hold(ctx).decide({ cwd: repo, prompt: 'go', sessionId: 's1' });
+  const blocked = hold(ctx).decide({ cwd: repo, prompt: 'not now', sessionId: 's1' });
+  assert.equal(blocked.action, 'block');
+  assert.match(blocked.reason, /"not now" could not be saved .*Reply yes or no/);
+  assert.equal(stateOf(ctx, repo).state, 'UNDECIDED');
 });
 
 test('what the agent is told: ask the question in plain words, never ask the user to run a command', (t) => {
@@ -430,8 +552,22 @@ test('H-09: unreadable state, an unreadable held-prompt store and a broken gate 
   assert.match(tools(ctx).decide({ tool_name: 'Bash', cwd: repo, tool_input: { command: 'ls' } }).deny, /could not be read/);
   assert.match(gate.sessionLine(repo, { registryOptions: ctx.options }), /could not be read/);
   fs.rmSync(ctx.registryPath);
+  // A damaged held-prompt store is moved aside (kept on this computer) and the question still works.
   fs.writeFileSync(ctx.heldPath, 'garbage');
-  assert.throws(() => hold(ctx).decide({ cwd: repo, prompt: 'go' }), { code: 'HELD_PROMPTS_MALFORMED' });
+  const fresh = hold(ctx).decide({ cwd: repo, prompt: 'go', sessionId: 's1' });
+  assert.equal(fresh.action, 'block');
+  assert.ok(fresh.reason.startsWith(QUESTION_LINE));
+  const aside = fs.readdirSync(path.dirname(ctx.heldPath)).filter(name => name.startsWith(`${gate.HELD_BASENAME}.damaged-`));
+  assert.equal(aside.length, 1);
+  assert.equal(fs.readFileSync(path.join(path.dirname(ctx.heldPath), aside[0]), 'utf8'), 'garbage');
+  assert.equal(hold(ctx).decide({ cwd: repo, prompt: 'no', sessionId: 's1' }).action, 'pass');
+  assert.equal(stateOf(ctx, repo).state, 'DISABLED');
+  // A store that cannot be read at all still holds (fail closed).
+  const unreadableRepo = gitRepo(ctx, 'unreadable', { remote: 'https://github.com/example-owner/unreadable.git' });
+  fs.rmSync(ctx.heldPath, { force: true });
+  fs.mkdirSync(ctx.heldPath);
+  assert.throws(() => hold(ctx).decide({ cwd: unreadableRepo, prompt: 'go' }), { code: 'HELD_PROMPTS_UNREADABLE' });
+  fs.rmSync(ctx.heldPath, { recursive: true });
   // The hook turns any throw into a hold inside a repository, and into no decision outside one.
   const broken = { PromptHold: class { decide() { throw new Error('boom'); } }, ToolGate: class { decide() { throw new Error('boom'); } },
     sessionLine() { throw new Error('boom'); }, insideRepository: gate.insideRepository };
@@ -510,7 +646,7 @@ test('hosts: the Codex helper hook holds prompts with exit 2 and refuses tools i
   assert.equal(codexHook.promptEvent({ hook_event_name: 'UserPromptSubmit', prompt: 'x' }), true);
   assert.equal(codexHook.promptEvent({ prompt: 'x' }), true);
   assert.equal(codexHook.promptEvent({ tool_name: 'Bash', tool_input: {} }), false);
-  const held = run({ hook_event_name: 'UserPromptSubmit', cwd: repo, prompt: 'go' });
+  const held = run({ hook_event_name: 'UserPromptSubmit', cwd: repo, session_id: 'codex-session', prompt: 'go' });
   assert.equal(held.status, 2);
   assert.equal(JSON.parse(held.stdout).decision, 'block');
   assert.ok(held.stderr.startsWith(QUESTION_LINE));

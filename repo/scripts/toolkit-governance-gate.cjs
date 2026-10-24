@@ -44,14 +44,25 @@ const LAUNCHER_MARKERS = Object.freeze(['TOOLKIT_GATE_ROLE', 'TOOLKIT_NATIVE_HEL
 // `decline` is kept as the older word for `disable`.
 const ANSWER = /^\s*toolkit governance (enable|disable|decline)\.?\s*$/i;
 // The short replies to the question Toolkit asked. They count only once a prompt has been held for
-// the repository, so the user has seen the question; the whole message must be the reply.
+// the repository in the same host session, so that session was shown the question; the whole
+// message must be the reply.
 const SHORT_ANSWER = /^\s*(yes|y|no|n|not now|later)[.!]?\s*$/i;
 const SHORT_COMMANDS = Object.freeze({ yes: 'enable', y: 'enable', no: 'disable', n: 'disable', 'not now': 'not-now', later: 'not-now' });
 // An agent's command that would answer for the user: the CLI script with a decision, or a host
-// session started (or fed on stdin) with the answer as its prompt.
+// session started, resumed or fed on stdin with an answer (long or short) as its prompt. This reads
+// the command's text, so it is best effort; the same-session rule above is what really stops a
+// fresh nested session.
+const HOST_COMMAND = /(?:^|[\s;&|()`'"\\/])(?:claude|codex)(?:-code)?(?:\.exe|\.cmd|\.ps1)?(?=$|[\s;&|()`'"])/im;
+const SHELL_WORD = /"((?:[^"\\]|\\.)*)"|'([^']*)'|([^\s;&|()<>"'=`]+)/g;
+function shortAnswerWord(text) {
+  const words = [...text.matchAll(SHELL_WORD)].map(match => match[1] ?? match[2] ?? match[3]);
+  return [...words, ...text.split(/\r?\n/)]
+    .some(word => SHORT_ANSWER.test(word.replace(/^\$/, '').replace(/(?:\\[nr])+$/, '')));
+}
 function answerCommand(text) {
   return /toolkit-governance\.cjs["']?\s+(?:enable|disable|decline|reopen|migrate)\b/i.test(text)
-    || (/\b(?:claude|codex)\b/i.test(text) && /toolkit governance (?:enable|disable|decline)\b/i.test(text));
+    || (/\b(?:claude|codex)\b/i.test(text) && /toolkit governance (?:enable|disable|decline)\b/i.test(text))
+    || (HOST_COMMAND.test(text) && shortAnswerWord(text));
 }
 const USER_STATE_PATH = /[\\/]\.ai-agent-toolkit[\\/]user-state(?:[\\/]|$)/i;
 // Tools that read only; everything else changes something and is held.
@@ -156,17 +167,21 @@ class HeldPrompts {
     this.#now = now;
   }
 
+  // A store that cannot be read holds (fail closed). A damaged or oversized one is moved aside, kept
+  // on this computer next to the original, and a fresh store starts, so the question still works.
   #read() {
+    const empty = () => ({ schema: HELD_SCHEMA, repositories: {} });
     let text;
     try { text = fs.readFileSync(this.#file, 'utf8'); } catch (error) {
-      if (error && error.code === 'ENOENT') return { schema: HELD_SCHEMA, repositories: {} };
+      if (error && error.code === 'ENOENT') return empty();
       throw new GovernanceGateError('HELD_PROMPTS_UNREADABLE');
     }
-    if (Buffer.byteLength(text) > MAX_HELD_BYTES) throw new GovernanceGateError('HELD_PROMPTS_TOO_LARGE');
-    let parsed;
-    try { parsed = JSON.parse(text); } catch { throw new GovernanceGateError('HELD_PROMPTS_MALFORMED'); }
-    if (!parsed || parsed.schema !== HELD_SCHEMA || !parsed.repositories || typeof parsed.repositories !== 'object') throw new GovernanceGateError('HELD_PROMPTS_MALFORMED');
-    return parsed;
+    let parsed = null;
+    if (Buffer.byteLength(text) <= MAX_HELD_BYTES) { try { parsed = JSON.parse(text); } catch { parsed = null; } }
+    if (parsed && parsed.schema === HELD_SCHEMA && parsed.repositories && typeof parsed.repositories === 'object' && !Array.isArray(parsed.repositories)) return parsed;
+    const aside = `${this.#file}.damaged-${this.#now().toISOString().replace(/[:.]/g, '-')}-${crypto.randomBytes(2).toString('hex')}`;
+    try { fs.renameSync(this.#file, aside); } catch { throw new GovernanceGateError('HELD_PROMPTS_MALFORMED'); }
+    return empty();
   }
 
   #write(data) {
@@ -182,18 +197,24 @@ class HeldPrompts {
     }
   }
 
-  count(repositoryId) {
+  // The number held for the repository, or with a session id, the number that session sent.
+  count(repositoryId, sessionId = undefined) {
     const list = this.#read().repositories[repositoryId];
-    return Array.isArray(list) ? list.length : 0;
+    if (!Array.isArray(list)) return 0;
+    if (sessionId === undefined) return list.length;
+    if (typeof sessionId !== 'string' || sessionId === '') return 0;
+    return list.filter(entry => entry && entry.session_id === sessionId).length;
   }
 
-  // Keeps the prompt (trimmed to a size cap; the oldest go first past the count cap) and returns the
-  // number now held.
-  add(repositoryId, prompt) {
+  // Keeps the prompt with the session that sent it (trimmed to a size cap; the oldest go first past
+  // the count cap) and returns the number now held.
+  add(repositoryId, prompt, sessionId = null) {
     const data = this.#read();
     const list = Array.isArray(data.repositories[repositoryId]) ? data.repositories[repositoryId] : [];
     const text = String(prompt || '').slice(0, MAX_HELD_CHARS);
-    data.repositories[repositoryId] = [...list, { at: this.#now().toISOString(), text }].slice(-MAX_HELD);
+    const entry = { at: this.#now().toISOString(), text };
+    if (typeof sessionId === 'string' && sessionId !== '') entry.session_id = sessionId;
+    data.repositories[repositoryId] = [...list, entry].slice(-MAX_HELD);
     this.#write(data);
     return data.repositories[repositoryId].length;
   }
@@ -210,7 +231,9 @@ class HeldPrompts {
 }
 
 // "Not now" answers, kept next to the registry: one per repository, for the session that gave it.
-// Nothing is decided; a new session asks again.
+// Nothing is decided; a new session asks again. A missing, unreadable or damaged file counts as no
+// "not now" (the repository stays held and the question still works), and the next "not now"
+// replaces it.
 class NotNow {
   #file; #now;
 
@@ -220,13 +243,10 @@ class NotNow {
   }
 
   #read() {
-    let parsed;
-    try { parsed = JSON.parse(fs.readFileSync(this.#file, 'utf8')); } catch (error) {
-      if (error && error.code === 'ENOENT') return { schema: NOT_NOW_SCHEMA, repositories: {} };
-      throw new GovernanceGateError('NOT_NOW_UNREADABLE');
-    }
-    if (!parsed || parsed.schema !== NOT_NOW_SCHEMA || !parsed.repositories || typeof parsed.repositories !== 'object') throw new GovernanceGateError('NOT_NOW_MALFORMED');
-    return parsed;
+    let parsed = null;
+    try { parsed = JSON.parse(fs.readFileSync(this.#file, 'utf8')); } catch { parsed = null; }
+    const usable = parsed && parsed.schema === NOT_NOW_SCHEMA && parsed.repositories && typeof parsed.repositories === 'object' && !Array.isArray(parsed.repositories);
+    return usable ? parsed : { schema: NOT_NOW_SCHEMA, repositories: {} };
   }
 
   has(repositoryId, sessionId) {
@@ -310,9 +330,11 @@ class PromptHold {
     const answer = ANSWER.exec(text);
     if (answer) return this.#answer(cwd, answer[1].toLowerCase(), verdict, sessionId);
     const short = SHORT_ANSWER.exec(text);
-    if (short && this.#held.count(verdict.state.repository_id) > 0) return this.#answer(cwd, SHORT_COMMANDS[short[1].toLowerCase()], verdict, sessionId);
-    const held = this.#held.add(verdict.state.repository_id, prompt);
-    return { action: 'block', reason: questionText(verdict, held) };
+    if (short && this.#held.count(verdict.state.repository_id, sessionId) > 0) return this.#answer(cwd, SHORT_COMMANDS[short[1].toLowerCase()], verdict, sessionId);
+    const held = this.#held.add(verdict.state.repository_id, prompt, sessionId);
+    // A session sees the whole question on its first held message, even when another session is waiting too.
+    const shown = typeof sessionId === 'string' && sessionId !== '' ? this.#held.count(verdict.state.repository_id, sessionId) : held;
+    return { action: 'block', reason: questionText(verdict, shown) };
   }
 
   // A decision made elsewhere (the terminal command, another clone) still hands back held prompts.
