@@ -28,7 +28,8 @@ function fixture(t, { install = true } = {}) {
     for (const role of ['G0', 'G1']) { const { file, text } = renderer.render(role); fs.writeFileSync(path.join(agents, file), text); }
   }
   const plain = path.join(base, 'plain');
-  fs.mkdirSync(path.join(plain, '.git'), { recursive: true });
+  // A plain folder (no git): GitHub governance is DISABLED there automatically and nothing is held.
+  fs.mkdirSync(plain, { recursive: true });
   return { base, repo, home, agents, plain };
 }
 
