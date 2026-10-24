@@ -1,6 +1,8 @@
 # Toolkit Changelog
 
-## Unreleased (decision history before planning)
+## 3.10.0 (host support, governance states, decision history and the personal-data guard)
+
+### Decision history before planning
 
 - **Comment tags:** a decision comment starts with its tag on the first line, then a `---` line. Each tag is its own list, and within a tag the latest comment wins; untagged comments go under "Other comments". One parser, `decision-tags.cjs`, is shared by the reconciler and the new history reader.
 - **G0 reads the history first:** before planning a programme child, G0 runs the read-only `decision-history.cjs`. It reads the parent's and the child's comment traces separately, takes the latest comment per tag as live, and marks earlier ones as replaced (by an explicit `SUPERSEDES=`, by inference, or confirmed by the owner). It lists the untagged comments to read and prints a short live-scope summary with exact counts. It writes nothing: only the appointed controller writes programme state.
@@ -8,7 +10,7 @@
 - **Enablement backfill:** when governance is first enabled, the first reconcile pass writes every trace, and `decision-history.cjs --programme` reports each issue's coverage for the owner. An existing crawl can be read with `--ledger`.
 - **Rules:** the governed Decision traces rule, a new portable decision-trace playbook routed from both playbook indexes, one Projects skill brief line and one `CONTROLLER.md` clause.
 
-## Unreleased (governance states)
+### Governance states
 
 - **Per-repository governance decision:** each repository is ENABLED, DECLINED, UNKNOWN or PORTABLE, computed by one function (`toolkit-governance-state.cjs`). The decision is stored in the user's own registry on this computer, keyed by repository identity, so every clone and worktree shares one answer. HTTPS, SSH and `git@` clones of a repository map to the same identity, and decisions stored under older key forms are still read. `node <Toolkit>/repo/scripts/toolkit-governance.cjs` has `status`, `enable`, `decline`, `reopen`, `check` (a read-only conformance report), `catalogue` (skills per state) and `migrate` (moves an old-form decision to the current identity).
 - **Rules follow the state:** the governed rules apply only in ENABLED repositories that also carry `.github/toolkit-programme.json`. DECLINED or incomplete repositories get the global rules, gates, subagents and portable skills. The global rules gain a governance-state line, and the governed block's opening says both pieces are needed. Repository rules can ship the binding from a new template, and a governed repository is offered a no-force-push branch ruleset.
@@ -16,7 +18,7 @@
 - **Limits:** Claude Code cloud sessions are not gated, because they keep no registry. On Codex, a hook that crashes or times out lets the message through, because Codex has no fail-closed setting for hooks. Codex also runs the new hooks only after you trust them in `/hooks`.
 - **Helper launches follow the state:** the helper hooks on both hosts treat a repository as governed only when its state is ENABLED with the binding, or when a Toolkit launcher started the session.
 
-## Unreleased (executor checkpoints and host contract)
+### Executor checkpoints and host contract
 
 - **Gate assignments:** only the appointed controller writes programme state. It assigns each gate to an executor with `assign --issue <n> --role G0|G1|G2 --assignment <id>`; a live assignment refuses another one unless `--supersede --reason` interrupts it. `reopen` and `interrupt` take a reason. Executors no longer claim gates.
 - **Executor checkpoints:** an assigned executor runs `bind` once with its own session ID and then writes only its own checkpoint journal in the private store: branch, head, tree, dirty flag, ahead and behind, its route read-back and any `toolkit-return` block in its final message. A new turn-end (`Stop`) hook in both plugins refreshes the journal after each turn. It returns at once for any session that has not bound, never blocks a turn, prints nothing and records failures locally. Codex asks you to trust the new hook in `/hooks`.
@@ -26,29 +28,29 @@
 - **Host contract:** `repo/docs/HOST-CONTRACT.md` and its JSON twin record what custody needs from Claude Code and Codex: session identity, the turn-end hook rules, completion modes, duplicate-launch and handover checks, and honest limits.
 - **Clearer messages:** next actions addressed to the controller name `--controller`; a write without a session says it needs this session's own ID; an unsupported store kind names the supported one; whitespace-only values are refused.
 
-## Unreleased (generated CURRENT)
+### Generated CURRENT
 
 - **CURRENT writes itself.** The parent's status section opens with a generated summary from the programme state: what is in progress (gate, PR, next action), what waits on the owner (a decision, a UAT or a blocker) and the next five queued tasks. Hand-written notes below it are kept as they are.
 
-## Unreleased (programme page: tags, retired and links)
+### Programme page: tags, retired and links
 
 - **Comment traces by tag.** A comment's tag is its first line when its second line is `---`. Each page lists every comment per tag, with untagged comments under "Other comments"; tags are never combined. On overflow, tag lists move out largest first, each into its own index comment that carries the tag. The parent's list and a task's list stay separate.
 - **RETIRED is its own status.** Retired tasks sort in their own group below COMPLETED and no longer show as completed.
 - **Parent > Child > PR links.** Every task page, and every open or draft PR for a task, opens with `Path: #<parent> > ... > #<task> > PR #<pr>`, kept current by the reconcile pass; merged and closed PRs are left alone.
 - **Over-threshold pages are caught.** A page at or over the size threshold is re-planned even when nothing else changed, so its largest tag lists move out or it is held as `BODY_TOO_LARGE`.
 
-## Unreleased (Projects skill and block fixes)
+### Projects skill and block fixes
 
 - **Controller law no longer goes stale between launches.** Claude Projects controller skill 2026-10-24.1 (re-upload it). The coordinator keeps one binding line in project memory with the bound commit and the full `CONTROLLER.md` blob, and compares `main`'s blob with it before every launch, rebinding first when the law changed. The daily check-in and the hourly nudge now run the same check: a mismatch puts `BINDING STALE` on the report's first line, and a missing binding line or a failed read puts `BINDING UNKNOWN` there. Briefs name the bound commit and blob, and when a skill update changes what the check-in or nudge does, the coordinator updates those task prompts in the same turn. The block's law-order line now says bound by commit and blob, so the next instructions check reports the block as outdated.
 - **Claude Projects controller skill 2026-10-23.18** (re-upload it). Toolkit no longer asks for feedback about Toolkit itself: the project-instructions block, the skill and the global rules drop their `TOOLKIT_FEEDBACK` rules. If you want such feedback, keep the rule in your own instructions, outside the Toolkit markers. The next instructions check reports the block as outdated, and the sync replaces it after your OK.
 - **Sync dedupes and reads the settings itself.** When the block is added or replaced, the coordinator also removes the lines outside the markers that the block now fully covers and trims the repeated part of lines that partly repeat it, in the same change and under the same OK; project-specific text and anything that differs stays. Threads can't read project settings, so the coordinator reads them and runs the check itself or hands a thread the exact text.
 - **Briefs name sibling PRs.** A G0 lists the open sibling PRs it checked for overlap, and the G1 brief requires a re-check against them before building.
 
-## Unreleased (claude.ai account copy check)
+### claude.ai account copy check
 
 - **The Claude Code install check reports a stale claude.ai account copy of Toolkit.** The Claude desktop app runs the copy from your claude.ai account, and only claude.ai updates it (from main). Setup and each Claude Code session start now read that copy's version from the app's local plugin folder and, when it is older than the Toolkit on this computer, say so with the fix: check that Sync automatically is on for the ai-agent-toolkit marketplace in claude.ai, or remove that marketplace and add it again. Read only: Toolkit never changes the account copy, reports no ids or paths, and the notice blocks nothing.
 
-## Unreleased (programme page and state read-back)
+### Programme page and state read-back
 
 - **The Programme Graph replaces the hand-kept Programme index.** It sits below the status section (the binding's new `projection`: `replace_section` "Programme index", `after_section` "CURRENT"), and child status blocks move under the title and the current-direction note. A block at the very top moves once.
 - **Seven columns, sorted by class then completion.** `Task | Child # | PR # | Class | Status | Lane | Task Description`, with classes `CORE`, `HARDENING`, `LATER` and statuses `QUEUED`, `IN PROGRESS`, `COMPLETED`, `RETIRED` (retired tasks have their own status; `OPTIONAL` shows as `LATER`; a planned task with an open PR shows as in progress). Rows sort `CORE`, `HARDENING`, `LATER`, then `COMPLETED` by completion time with the latest last; nested children sort like any row, and native sub-issues follow the same order. The catalogue gains `name` and `description`, and child state gains `completed_at` (filled once from the issue close time, or set by the controller).
@@ -56,11 +58,11 @@
 - **Trace audit and repair.** The decision-trace audit fails on a superseded record left unmarked; reconcile reports `TRACE_STALE`, `TRACE_UNLINKED` and `TRACE_SUPERSEDED_UNMARKED`; `--repair` writes lines in the same shape, plus topic tags from a decision ledger with `--ledger`.
 - **Untracked PRs are flagged.** `PR_UNTRACKED` (report only) names an open PR that says `Refs #n` (or Completes, Closes, Fixes, Resolves) for an open task whose state records no PR or branch.
 - **State writes read back at the commit they created.** GitHub can serve the previous version of a file on a branch read made right after a write, which stopped the first programme apply with `STATE_READBACK_MISMATCH` although the stored copy was correct. The store now reads each write back at the commit the write returned and takes the next compare-and-swap sha from the write itself.
-## Unreleased (setup self-update)
+### Setup self-update
 
 - **Fix: setup no longer runs old code after updating itself.** When setup fast-forwards the Toolkit copy it is running from and the update changes setup's own scripts, it now stops right there, before any plugin, settings or config step, says so under `## Setup updated itself`, and asks for one more run (exit code 24). Before, the rest of the run kept using the scripts it had loaded before the update, so a just-shipped setup message could still read "diagnostics withheld". The setup skill reruns the same command straight away.
 
-## Unreleased (personal-data guard)
+### Personal-data guard
 
 - **Personal-data guard.** `secure-ci-cd` now ships `scripts/personal-data-guard.cjs`, a zero-dependency check for email addresses, phone numbers (with a `+` country code, or Singapore numbers written as 65 and eight digits) and WhatsApp number links. It reads file content, including the text of Word, Excel, PowerPoint and PDF files, plus file names, commit and tag messages, branch names and pull request titles and bodies, after folding Unicode spaces, dashes, zero-width and direction marks, full-width digits, and percent or HTML-entity encodings. In CI and range checks, a change cannot switch off checks for itself: the base commit's settings apply until it is merged. Only content a change introduces is checked, every commit of a range is checked, and a merge is not blamed for lines from its other parent. Output names the place, class and rule, never the value, part of it or a hash of it. Any error that stops a complete scan fails. Images, legacy Office files and archives block unless the config lists them with a reason, and every run prints what it did not scan.
 - **Hooks and CI for any repository.** `scripts/install-personal-data-guard.cjs` installs it on the owner's opt-in: a copy with a managed version and hash header, the config `.github/personal-data-guard.json` (the owner chooses whether author and committer addresses are scanned; public role addresses can be allowed; other exceptions need a line-level reason marker), `pre-commit`, `commit-msg` and `pre-push` hooks in the folder git really uses (`core.hooksPath` included, an existing hook kept and run after it), and with `--workflow` a CI job that checks every pull request and every branch push. `--check` reports drift. The repository-agent-rules install offers it.
@@ -71,7 +73,7 @@
 - **Rules:** G2 in governed repositories scans every commit, title and body of a pull request for personal data and checks where a computation ran before accepting that data stayed in place.
 - **Names-only key listing proven.** New tests show that a synthetic value stored in Windows Credential Manager never crosses the `toolkit env` listing child's output, including malformed, partial and failing answers.
 
-## Unreleased (setup fixes)
+### Setup fixes
 
 - **Claude Code setup no longer asks about Codex's instruction limit.** That question is Codex-only now; Claude Code setup keeps whatever choice is stored.
 - **Clearer Claude Code rows.** The plugin row says setup checks the plugin after you answer and installs or refreshes it only if needed. The settings row recommends keeping them when all four are already set, and otherwise sets only the values that are not set yet.
