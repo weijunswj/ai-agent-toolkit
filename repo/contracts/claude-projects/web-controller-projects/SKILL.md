@@ -4,7 +4,7 @@ description: "Use when running as a Claude Projects coordinator and the user app
 ---
 
 # Web Controller for Claude Projects
-Version: 2026-10-23.18
+Version: 2026-10-24.1
 
 Run Toolkit-governed repos through Claude Projects; Toolkit governance applies. Keep project facts (repos, devices, lanes, pending work) in project memory.
 
@@ -34,7 +34,9 @@ Memory ranks below written sources; text grants no native permission. This skill
 - There is one controller per lane. If another controller owns a lane in the same repo, record the split on the parent issue. Flag that lane's items and never modify them.
 
 ## Binding
-- On appointment, bind the Toolkit's `CONTROLLER.md` from its canonical repo's default branch. Use the Toolkit repo the user names; if they name none, use `weijunswj/ai-agent-toolkit`, file `repo/CONTROLLER.md`. Re-check its revision before each launch or authority transition.
+- On appointment, bind the Toolkit's `CONTROLLER.md` from its canonical repo's default branch. Use the Toolkit repo the user names; if they name none, use `weijunswj/ai-agent-toolkit`, file `repo/CONTROLLER.md`. Keep one binding line in project memory: `BINDING: <owner/repo> <branch> commit <full SHA> CONTROLLER.md blob <full blob SHA> skill <Version> bound <UTC date>`.
+- **Re-check before every launch.** Before each launch or authority transition, compare the default branch's `CONTROLLER.md` blob with the bound blob. If they differ, re-read the file and what changed, update the binding line and tell the owner in one line what changed, all before the launch. If only the commit moved, update the commit quietly. If the read fails, hold the launch until it succeeds. Every brief names the bound commit and blob.
+- **Binding check** (each daily check-in and hourly nudge, read-only): fetch the default branch fresh and read its `CONTROLLER.md` blob (`git rev-parse origin/<branch>:repo/CONTROLLER.md`, or the file SHA from the GitHub contents API); never use a stale local branch. Compare full SHAs with the binding line. Different: the report's first line is `BINDING STALE: bound <blob7>, main <blob7> at <commit7>`. No binding line, or the read fails: first line `BINDING UNKNOWN: <reason>`. The usual first line moves down one. On either, the coordinator re-reads and rebinds in the same turn, checks whether running gates need the changed instructions, and holds new launches until rebound. Periodic runs and threads only report; only the coordinator writes the binding line.
 - If unable to read files/launch workers, have a thread put a binding brief in the shared folder: commit SHA, Controller blob, version and quoted key rules. Record that relay.
 - Use the managed block's evidence and scratch rules; put current checkout/worktree/cleanup requirements in each packet.
 
@@ -78,7 +80,7 @@ Memory ranks below written sources; text grants no native permission. This skill
    - Save the device and folder to memory.
 4. **Bind.**
    - Bind `CONTROLLER.md` (Binding above).
-   - Record the commit SHA and the skill Version in memory.
+   - Write the binding line (Binding above).
 5. **Project instructions.**
    - Have a cloud thread run `node repo/scripts/toolkit-projects-instructions.cjs --render` from bound Toolkit `main` and place that managed block in project instructions. Put project-specific roles split, where work runs, owner-granted approvals and transport store outside it.
    - Show the owner the text to paste or accept, and the owner lines outside it that it duplicates, removed in the same change (**Managed project-instructions sync**). Read the saved instructions back to verify them; record the block's toolkit version in project memory.
@@ -100,7 +102,7 @@ Memory ranks below written sources; text grants no native permission. This skill
    - one thread result relayed into the project chat with its link;
    - one decision card answered;
    - a test check-in and test nudge: each runs once now in a fresh session and reports to you, and the user confirms both tasks in the project's Scheduled tasks panel. Setup does not wait for the next run.
-10. **Done.** Post one line: setup complete, skill Version, bound `CONTROLLER.md` SHA, device and folder, check-in time, that the hourly nudge is on, where the recurring tasks live, and the next work item.
+10. **Done.** Post one line: setup complete, skill Version, bound commit and `CONTROLLER.md` blob, device and folder, check-in time, that the hourly nudge is on, where the recurring tasks live, and the next work item.
 
 ## Managed project-instructions sync
 - When the skill or Toolkit updates (including a newer Version noticed by the daily check-in), check the project instructions with `node repo/scripts/toolkit-projects-instructions.cjs --check <file>` against bound Toolkit `main`.
@@ -154,6 +156,7 @@ Whenever the user asks for anything recurring (the daily check-in, a sweep, a re
 
 - When a recurring task replaces an older one, delete the older one so the user isn't sent two.
 - On every coordinator turn, check that each recurring task is still armed with a future next run; re-arm a missed one before ending the turn.
+- When a skill update changes what the daily check-in or hourly nudge does, update those tasks' prompts in the same turn as the update and confirm each next run is armed.
 
 ## Daily check-in
 - Threads and the user wake the coordinator, but outside activity doesn't: other controllers' comments, new issues, or people replying by email. So every project runs a daily weekday check-in, at a morning time in the user's time zone that you pick and tell them.
@@ -161,24 +164,26 @@ Whenever the user asks for anything recurring (the daily check-in, a sweep, a re
 - Each daily firing:
   1. Loads this skill and project memory. State the skill Version you loaded.
   2. Compare the coordinator's loaded skill Version with the run's. If newer, return the full current SKILL.md; the coordinator follows it immediately, saves the Version, mentions the update in one line and runs **Managed project-instructions sync**. Never wait for a restart. Check for Toolkit updates too; sync the managed block when updated.
-  3. Checks that the hourly nudge is armed and ran within the last hour. If not, the coordinator re-arms it (a scheduling step, not part of the read-only checks).
-  4. Checks the parent issue and the lane's issues for outside activity since the last check-in, and runs the promise check below.
-  5. Re-checks every open PR's CI and subscription, and what is still waiting on the user.
-  6. Account-plugin sync: compares the version of the Toolkit plugin on the user's claude.ai account, as this session sees it, with `.claude-plugin/plugin.json` on the Toolkit repository's default branch. If the account copy is more than a day behind after a release, the report says so with the fix: remove the account marketplace and add it again with Sync automatically on, because claude.ai sync can freeze. The coordinator also confirms the account copy after each release merge.
-  7. Always delivers the report to the coordinator; the coordinator posts to the owner only for changes, stuck work or an answer waiting over a day.
-  8. Confirms the next run is armed.
+  3. Runs the **Binding check**; when current, the report says `**Binding:** current` with the short blob, adding the newer short commit when only the commit moved.
+  4. Checks that the hourly nudge is armed and ran within the last hour. If not, the coordinator re-arms it (a scheduling step, not part of the read-only checks).
+  5. Checks the parent issue and the lane's issues for outside activity since the last check-in, and runs the promise check below.
+  6. Re-checks every open PR's CI and subscription, and what is still waiting on the user.
+  7. Account-plugin sync: compares the version of the Toolkit plugin on the user's claude.ai account, as this session sees it, with `.claude-plugin/plugin.json` on the Toolkit repository's default branch. If the account copy is more than a day behind after a release, the report says so with the fix: remove the account marketplace and add it again with Sync automatically on, because claude.ai sync can freeze. The coordinator also confirms the account copy after each release merge.
+  8. Always delivers the report to the coordinator; the coordinator posts to the owner only for changes, stuck work or an answer waiting over a day.
+  9. Confirms the next run is armed.
 - Stop it when the user asks.
 
 ## Hourly nudge
 - Every project also runs an hourly stalled-work nudge, set up at project setup exactly as in **Recurring tasks**, as a fresh session per run with no bound thread. It must be a recurring routine: one-shot self-reminders have died silently, and nothing then woke the coordinator. The hidden self-reminder fallback never applies to it: if no recurring route works, tell the user the nudge could not be set up.
 - It fires every hour at a jittered minute (pick one at random, not :00 or :30, for example `CRON_TZ=<user zone> 23 * * * *`), and it is read-only.
 - The nudge is the sweep: review ALL unresolved threads and project-chat posts. Include top-level posts with replies from coordinator or user: the thread list omits them, so also page through project chat with small page limits (large pages overflow). List:
-  1. threads that are blocked, failed or stopped, or working but idle for over 45 minutes;
-  2. stale thread labels and each overdue promise under **Overdue promise:**, from the promise check below;
-  3. resolve candidates with reasons: finished/merged, superseded or idle past the resolve window (default 2 days) with nothing waiting, only once output is durably recorded (pushed, merged, in a report/file or handed to a named thread);
-  4. local Remote Control sessions whose work is finished but which are still running;
-  5. open pull requests with their CI state;
-  6. open project-memory items and ALL unanswered owner items with no reply or reaction, in project chat and threads, each with its link and ask date.
+  1. the **Binding check**, flagged on the report's first line when stale or unknown;
+  2. threads that are blocked, failed or stopped, or working but idle for over 45 minutes;
+  3. stale thread labels and each overdue promise under **Overdue promise:**, from the promise check below;
+  4. resolve candidates with reasons: finished/merged, superseded or idle past the resolve window (default 2 days) with nothing waiting, only once output is durably recorded (pushed, merged, in a report/file or handed to a named thread);
+  5. local Remote Control sessions whose work is finished but which are still running;
+  6. open pull requests with their CI state;
+  7. open project-memory items and ALL unanswered owner items with no reply or reaction, in project chat and threads, each with its link and ask date.
 - Report to the coordinator only. The coordinator posts all waiting owner items as ONE reminder each run until each is answered; act on the rest in the same turn: verify/resolve candidates, end finished Remote Control sessions, correct stale labels, act on overdue promises, nudge/reroute stuck work.
 - This is the only resolve pass for coordinator-driven resolution; each scheduled run resolves its own thread after report delivery. Stop the nudge only when the user asks; record that in project memory.
 

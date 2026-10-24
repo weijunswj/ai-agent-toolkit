@@ -46,7 +46,7 @@ test('no plugin payload or skills folder reaches the Projects controller skill',
 
 test('Projects wires managed instructions, promises and fresh scheduled sessions to controller law', () => {
   const text = read(SKILL_REL);
-  assert.match(text, /^Version: 2026-10-23\.18$/m);
+  assert.match(text, /^Version: 2026-10-24\.1$/m);
   assert.match(text, /Account-plugin sync: compares the version of the Toolkit plugin on the user's claude\.ai account/);
   assert.match(text, /remove the account marketplace and add it again with Sync automatically on/);
   assert.doesNotMatch(text, /Thread effort follows the role|fires into that same thread|firing runs in the dedicated check-in thread/);
@@ -84,4 +84,36 @@ test('Projects wires managed instructions, promises and fresh scheduled sessions
   for (const surface of [body, text]) {
     assert.doesNotMatch(surface, /TOOLKIT_FEEDBACK|feedback format|Feedback comes back in the reply|Capture feedback|to Toolkit as/);
   }
+});
+
+// A binding that is only re-checked at launch goes stale on an idle project; each rule of the
+// binding-drift closure matrix (launch, periodic check, rebind, unknown, briefs, task prompts) is pinned.
+test('Projects re-checks the bound CONTROLLER.md blob before launches and on every periodic run', () => {
+  const text = read(SKILL_REL);
+  const body = read('repo/contracts/claude-projects/web-controller-projects/project-instructions.md');
+  // Binding line format: full commit and full blob, so a periodic run has something exact to compare.
+  assert.ok(text.includes('`BINDING: <owner/repo> <branch> commit <full SHA> CONTROLLER.md blob <full blob SHA> skill <Version> bound <UTC date>`'));
+  // Coordinator before a launch: stale rebinds first, commit-only moves are quiet, a failed read holds.
+  assert.match(text, /\*\*Re-check before every launch\.\*\* Before each launch or authority transition, compare the default branch's `CONTROLLER\.md` blob with the bound blob/);
+  assert.match(text, /update the binding line and tell the owner in one line what changed, all before the launch/);
+  assert.match(text, /If only the commit moved, update the commit quietly/);
+  assert.match(text, /If the read fails, hold the launch until it succeeds/);
+  assert.match(text, /Every brief names the bound commit and blob/);
+  // Periodic runs: fresh, exact compare and loud first-line forms for stale and unknown.
+  assert.match(text, /fetch the default branch fresh[^\n]*never use a stale local branch\. Compare full SHAs with the binding line/);
+  assert.ok(text.includes('first line is `BINDING STALE: bound <blob7>, main <blob7> at <commit7>`'));
+  assert.ok(text.includes('No binding line, or the read fails: first line `BINDING UNKNOWN: <reason>`'));
+  // Coordinator on a report: same-turn rebind, running gates checked, launches held; runs never write.
+  assert.match(text, /re-reads and rebinds in the same turn, checks whether running gates need the changed instructions, and holds new launches until rebound/);
+  assert.match(text, /Periodic runs and threads only report; only the coordinator writes the binding line/);
+  assert.match(text, /^   - Write the binding line \(Binding above\)\.$/m);
+  assert.doesNotMatch(text, /Record the commit SHA and the skill Version in memory|Re-check its revision before each launch/);
+  // Both periodic runs carry the check.
+  assert.match(text, /^  3\. Runs the \*\*Binding check\*\*; when current, the report says `\*\*Binding:\*\* current` with the short blob, adding the newer short commit when only the commit moved\.$/m);
+  assert.match(text, /^  1\. the \*\*Binding check\*\*, flagged on the report's first line when stale or unknown;$/m);
+  // Running projects pick up changed task behaviour.
+  assert.match(text, /When a skill update changes what the daily check-in or hourly nudge does, update those tasks' prompts in the same turn/);
+  // Threads at start: briefs carry the blob and a mismatch is reported first.
+  assert.match(body, /bound by commit and blob SHA/);
+  assert.match(body, /a thread that finds `main`'s blob different says so to the coordinator in its first reply, then continues on its packet/);
 });
