@@ -14,11 +14,13 @@
 //     github.com it says GitHub governance is off there and asks for an ok. The user's own reply is
 //     the answer (`toolkit governance enable` or `disable` also work, and `decline` is the older word
 //     for disable); it is recorded, read back and then let through with the held prompts attached,
-//     oldest first.
+//     oldest first. Each session gets back only the messages it sent itself, and a session another
+//     session or a Toolkit launcher started is refused in a held repository and nothing is kept.
 //   - ToolGate is the PreToolUse core. A held repository runs no state-changing tool. In every
 //     folder, an agent may not answer the question for the user: commands that run the governance
 //     CLI or start a host session with the answer as its prompt are refused, and so are edits to
-//     Toolkit's user-state files.
+//     Toolkit's user-state files. A command that starts a host session in a held repository (after
+//     `cd`, or with Codex's `-C`) is refused too.
 //   - sessionLine is the one SessionStart line that states the effective state.
 //
 // Every failure inside a git repository holds (fail closed). Held prompts never leave this computer
@@ -26,6 +28,7 @@
 
 const crypto = require('node:crypto');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 
 const governance = require('./toolkit-governance-state.cjs');
@@ -44,6 +47,10 @@ const MAX_HELD_CHARS = 4000;
 const MAX_HELD_BYTES = 512 * 1024;
 const MAX_NOT_NOW_SESSIONS = 8;
 const LAUNCHER_MARKERS = Object.freeze(['TOOLKIT_GATE_ROLE', 'TOOLKIT_NATIVE_HELPER_BINDING', 'TOOLKIT_CLAUDE_TASK_PROFILE_SHA256']);
+// Toolkit's Claude Code session-start hook exports the session's own id under this name for the shell
+// commands that session runs. A host session an agent starts from one of those commands inherits it,
+// sees an id that is not its own, and is treated as automation, not the user typing.
+const HOST_SESSION_VARIABLE = 'TOOLKIT_HOST_SESSION';
 
 // The answer is the whole prompt, in any letter case, with surrounding spaces or one final full stop.
 // `decline` is kept as the older word for `disable`.
@@ -228,14 +235,19 @@ class HeldPrompts {
     return data.repositories[repositoryId].length;
   }
 
-  // Returns the held prompts, oldest first, and forgets them.
-  take(repositoryId) {
+  // Returns the prompts this session sent, oldest first, and forgets them; other sessions' prompts
+  // stay for those sessions. Without a session id, only prompts held without one are returned.
+  take(repositoryId, sessionId = null) {
     const data = this.#read();
     const list = Array.isArray(data.repositories[repositoryId]) ? data.repositories[repositoryId] : [];
-    if (list.length === 0) return [];
-    delete data.repositories[repositoryId];
+    const owner = typeof sessionId === 'string' && sessionId !== '' ? sessionId : null;
+    const mine = entry => (entry && typeof entry.session_id === 'string' && entry.session_id !== '' ? entry.session_id : null) === owner;
+    const taken = list.filter(mine);
+    if (taken.length === 0) return [];
+    const rest = list.filter(entry => !mine(entry));
+    if (rest.length > 0) data.repositories[repositoryId] = rest; else delete data.repositories[repositoryId];
     this.#write(data);
-    return list.map(entry => String(entry.text || ''));
+    return taken.map(entry => String(entry.text || ''));
   }
 }
 
@@ -389,13 +401,14 @@ function replayContext(state, prompts, { notNow = false } = {}) {
       : `Toolkit governance is now ${label} for this repository; the user just answered the governance question.`];
   if (!notNow && state.state === 'ENABLED' && state.materials_complete === false) lines.push(`${SETUP_ASK} Handle the held messages below after that question.`);
   if (prompts.length > 0) {
-    lines.push('Messages the user sent while the repository was held, oldest first. Treat them as the user\'s requests:');
+    lines.push('Messages the user sent in this session while the repository was held, oldest first. Treat them as the user\'s requests:');
     prompts.forEach((text, index) => lines.push(`${index + 1}. ${text}`));
   }
   return lines.join('\n');
 }
 
 const LAUNCHED_TEXT = 'Toolkit: an automated session cannot answer the governance question. Answer it in your own chat, or run the command in your own terminal.';
+const LAUNCHED_HOLD_TEXT = "Toolkit: this repository is waiting for the user's governance answer, and this session was started by another session or a Toolkit launcher, so its message was not sent and not kept. The user answers in their own chat; start this again after that.";
 
 // ---- prompt hold ------------------------------------------------------------------------------
 
@@ -421,8 +434,10 @@ class PromptHold {
     // After "not now", the full answer still decides; a short reply is an ordinary message there,
     // since it may answer the agent's own question.
     if (verdict.reason === 'not-now') return answer ? this.#answer(cwd, answer[1].toLowerCase(), verdict, sessionId) : { action: 'pass' };
-    if (!verdict.hold) return verdict.reason === 'no-git' ? { action: 'pass' } : this.#replayIfAny(verdict.state);
+    if (!verdict.hold) return verdict.reason === 'no-git' ? { action: 'pass' } : this.#replayIfAny(verdict.state, sessionId);
     if (verdict.reason === 'state-unreadable') return { action: 'block', reason: unreadableText(verdict.state.error_code) };
+    // A session another session or a launcher started never answers and never adds to what is held.
+    if (this.#launched(sessionId)) return { action: 'block', reason: answer || OK_ANSWER.test(text) ? LAUNCHED_TEXT : LAUNCHED_HOLD_TEXT };
     if (verdict.reason === 'not-github') return this.#notGitHub(cwd, text, answer, verdict, sessionId);
     if (answer) return this.#answer(cwd, answer[1].toLowerCase(), verdict, sessionId);
     const short = SHORT_ANSWER.exec(text);
@@ -440,32 +455,35 @@ class PromptHold {
       return { action: 'block', reason: `Toolkit: GitHub governance cannot be enabled here, because this repository ${whereText(verdict.state)}. ${OK_ASK}` };
     }
     if (answer || (OK_ANSWER.test(text) && this.#held.count(id, sessionId) > 0)) {
-      if (this.#launched()) return { action: 'block', reason: LAUNCHED_TEXT };
       let decided;
       try { decided = writeNotGitHubOk(cwd, { registryOptions: this.#registryOptions, now: this.#now }); } catch (error) {
         return { action: 'block', reason: `Toolkit: your ok could not be recorded (${codeOf(error)}), so this repository is still held. Reply ok again, or run ${terminalCommand('disable')} in your own terminal.` };
       }
-      return { action: 'pass', context: replayContext(decided.state, this.#held.take(id)) };
+      return { action: 'pass', context: replayContext(decided.state, this.#held.take(id, sessionId)) };
     }
     const held = this.#held.add(id, text, sessionId);
     const shown = typeof sessionId === 'string' && sessionId !== '' ? this.#held.count(id, sessionId) : held;
     return { action: 'block', reason: notGitHubText(verdict, shown) };
   }
 
-  // A session a Toolkit launcher started is automation, not the user typing.
-  #launched() {
-    return LAUNCHER_MARKERS.some(name => typeof this.#environment[name] === 'string' && this.#environment[name] !== '');
+  // A session a Toolkit launcher started, or one started from another session's shell command, is
+  // automation, not the user typing.
+  #launched(sessionId) {
+    if (LAUNCHER_MARKERS.some(name => typeof this.#environment[name] === 'string' && this.#environment[name] !== '')) return true;
+    const host = this.#environment[HOST_SESSION_VARIABLE];
+    return typeof host === 'string' && host !== '' && host !== sessionId;
   }
 
-  // A decision made elsewhere (the terminal command, another clone) still hands back held prompts.
-  #replayIfAny(state) {
+  // A decision made elsewhere (the terminal command, another clone, another session) still hands
+  // this session back the prompts it sent.
+  #replayIfAny(state, sessionId) {
     if (!state.repository_id) return { action: 'pass' };
-    const prompts = this.#held.take(state.repository_id);
+    const prompts = this.#held.take(state.repository_id, sessionId);
     return prompts.length === 0 ? { action: 'pass' } : { action: 'pass', context: replayContext(state, prompts) };
   }
 
   #answer(cwd, command, verdict, sessionId) {
-    if (this.#launched()) return { action: 'block', reason: LAUNCHED_TEXT };
+    if (this.#launched(sessionId)) return { action: 'block', reason: LAUNCHED_TEXT };
     if (command === 'not-now') {
       if (typeof sessionId !== 'string' || sessionId === '') {
         return { action: 'block', reason: `Toolkit: this app does not say which session this is, so "later" cannot be kept. ${ASK.replace(', no or later', ' or no')}` };
@@ -473,7 +491,7 @@ class PromptHold {
       try { this.#notNow.set(verdict.state.repository_id, sessionId); } catch (error) {
         return { action: 'block', reason: `Toolkit: "later" could not be saved (${codeOf(error)}), so this repository is still held. Reply yes or no, or try again.` };
       }
-      return { action: 'pass', context: replayContext(verdict.state, this.#held.take(verdict.state.repository_id), { notNow: true }) };
+      return { action: 'pass', context: replayContext(verdict.state, this.#held.take(verdict.state.repository_id, sessionId), { notNow: true }) };
     }
     let decided;
     try {
@@ -481,7 +499,7 @@ class PromptHold {
     } catch (error) {
       return { action: 'block', reason: `Toolkit: your answer could not be recorded (${codeOf(error)}), so nothing changed and this repository is still held. Reply again, or run ${terminalCommand(command)} in your own terminal.` };
     }
-    const prompts = this.#held.take(verdict.state.repository_id);
+    const prompts = this.#held.take(verdict.state.repository_id, sessionId);
     return { action: 'pass', context: replayContext(decided.state, prompts) };
   }
 }
@@ -503,6 +521,23 @@ function editTargets(input) {
   return targets;
 }
 
+// The folders a shell command moves into (`cd`, `pushd`, `Set-Location`) or points a host at (Codex's
+// `-C` or `--cd`), resolved against the tool's working directory. Best effort, like answerCommand.
+const CD_TARGET = /(?:^|[;&|({\n]\s*)(?:cd|pushd|chdir|set-location|sl)(?:\s+(?:\/d|-literalpath|-path))?\s+(?:"([^"]+)"|'([^']+)'|([^\s;&|()<>]+))/gi;
+const DIR_FLAG = /(?:^|\s)(?:-C|--cd)(?:\s+|=)(?:"([^"]+)"|'([^']+)'|([^\s;&|()<>]+))/g;
+function commandTargets(text, cwd) {
+  const targets = [];
+  for (const pattern of [CD_TARGET, DIR_FLAG]) {
+    for (const match of text.matchAll(pattern)) {
+      const target = match[1] ?? match[2] ?? match[3];
+      if (!target || target === '-') continue;
+      const expanded = /^~(?=$|[\\/])/.test(target) ? path.join(os.homedir(), target.slice(1)) : target;
+      targets.push(path.resolve(cwd, expanded));
+    }
+  }
+  return targets;
+}
+
 // The host's session id from hook input (Claude Code and Codex both send session_id).
 function sessionIdOf(input) {
   return input && typeof input.session_id === 'string' && input.session_id ? input.session_id : null;
@@ -518,18 +553,34 @@ class ToolGate {
 
   decide(input) {
     const tool = String(input && (input.tool_name || input.toolName) || '');
-    if (SHELL_TOOLS.test(tool) && answerCommand(toolText(input))) {
-      return { deny: `Toolkit: only the user answers the governance question. Ask them in chat instead: "${ASK}" Toolkit records their own reply.` };
+    const sessionId = sessionIdOf(input);
+    if (SHELL_TOOLS.test(tool)) {
+      const text = toolText(input);
+      const cwd = path.resolve(String(input.cwd || process.cwd()));
+      if (answerCommand(text)) {
+        const notGitHub = [cwd, ...commandTargets(text, cwd)].some(target => this.#verdict(target, sessionId)?.reason === 'not-github');
+        return { deny: notGitHub
+          ? 'Toolkit: only the user can say ok to GitHub governance being off in a repository that is not on github.com. Ask them in chat to reply ok; Toolkit records their own reply.'
+          : `Toolkit: only the user answers the governance question. Ask them in chat instead: "${ASK}" Toolkit records their own reply.` };
+      }
+      if (HOST_COMMAND.test(text) && commandTargets(text, cwd).some(target => this.#verdict(target, sessionId)?.hold)) {
+        return { deny: "Toolkit: this command starts a Claude or Codex session in a repository that is waiting for the user's governance answer, so it is refused. Ask the user to answer in their own chat first; do not try to work around it." };
+      }
     }
     if (EDIT_TOOLS.test(tool) && editTargets(input).some(target => USER_STATE_PATH.test(path.resolve(String(input.cwd || process.cwd()), target)))) {
       return { deny: 'Toolkit: its user-state files (governance decisions and held messages) are changed only by Toolkit itself.' };
     }
     if (READ_ONLY_TOOLS.test(tool)) return null;
-    const verdict = this.#gate.evaluate(input && input.cwd, { sessionId: sessionIdOf(input) });
+    const verdict = this.#gate.evaluate(input && input.cwd, { sessionId });
     if (!verdict.hold) return null;
     if (verdict.reason === 'state-unreadable') return { deny: `Toolkit: the governance state of this repository could not be read (${verdict.state.error_code}), so nothing runs here until it can.` };
     if (verdict.reason === 'not-github') return { deny: `Toolkit: this repository ${whereText(verdict.state)}, so GitHub governance will be off here, and nothing runs until the user says ok. Ask them in plain words to reply ok; Toolkit records their own reply, so never ask them to run a command, and do not try to work around it.` };
     return { deny: `Toolkit: this repository has no governance decision yet, so nothing runs here. Ask the user in plain words: "${ASK}" Toolkit records their own reply, so never ask them to run a command, and do not try to work around it.` };
+  }
+
+  // The gate's verdict for a folder a command names, or null when it cannot be told.
+  #verdict(target, sessionId) {
+    try { return this.#gate.evaluate(target, { write: false, sessionId }); } catch { return null; }
   }
 }
 
@@ -567,12 +618,14 @@ function insideRepository(cwd) {
 module.exports = Object.freeze({
   ANSWER,
   ASK,
+  HOST_SESSION_VARIABLE,
   NOT_NOW_BASENAME,
   NOT_GITHUB_BASENAME,
   OK_ANSWER,
   SHORT_ANSWER,
   sessionIdOf,
   answerCommand,
+  commandTargets,
   HELD_BASENAME,
   MAX_HELD,
   MAX_HELD_CHARS,

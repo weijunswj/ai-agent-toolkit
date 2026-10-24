@@ -4,7 +4,9 @@
 // Claude Code's governance hook: one script for three events, named by --event.
 //   UserPromptSubmit  holds every prompt in an undecided repository (toolkit-governance-gate.cjs).
 //   PreToolUse        refuses state-changing tools there, and agent answers everywhere.
-//   SessionStart      adds one line stating the effective governance state.
+//   SessionStart      adds one line stating the effective governance state, and exports the
+//                     session's id to its shell commands (CLAUDE_ENV_FILE), so a session an agent
+//                     starts from one of them is known not to be the user typing.
 // The gate module loads inside the guarded path, so a missing or broken module still holds in a
 // repository instead of crashing; hooks.json also sets onFailure: "block" for the two blocking events.
 //
@@ -27,6 +29,16 @@ const CLOUD_LINE = 'Toolkit governance: not enforced in cloud sessions (no lasti
 
 function cloudSession(environment) { return Boolean(environment) && environment.CLAUDE_CODE_REMOTE === 'true'; }
 
+// Appends `export TOOLKIT_HOST_SESSION=<id>` to the file Claude Code runs before each shell command of
+// this session (the last line wins after /clear). Optional: any failure is ignored.
+function exportHostSession(input, environment, gate) {
+  const file = environment && environment.CLAUDE_ENV_FILE;
+  const id = input && input.session_id;
+  if (typeof file !== 'string' || file === '' || typeof id !== 'string' || !/^[A-Za-z0-9._:-]{1,128}$/.test(id)) return false;
+  if (!gate || typeof gate.HOST_SESSION_VARIABLE !== 'string') return false;
+  try { fs.appendFileSync(file, `export ${gate.HOST_SESSION_VARIABLE}=${id}\n`); return true; } catch { return false; }
+}
+
 // The hook's stdout for one event. Never throws.
 function respond(event, input, options = {}) {
   if (cloudSession(options.environment || process.env)) {
@@ -47,6 +59,7 @@ function respond(event, input, options = {}) {
       const decision = new gate.ToolGate(options).decide(input);
       return decision ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: decision.deny } } : {};
     }
+    exportHostSession(input, options.environment || process.env, gate);
     const line = gate.sessionLine(input.cwd, { ...options, sessionId: gate.sessionIdOf(input) });
     return line ? { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: line } } : {};
   } catch {
@@ -75,4 +88,4 @@ function main(argv = process.argv.slice(2), stdin = () => fs.readFileSync(0, 'ut
 
 if (require.main === module) process.exitCode = main();
 
-module.exports = Object.freeze({ EVENTS, CLOUD_LINE, respond, main });
+module.exports = Object.freeze({ EVENTS, CLOUD_LINE, exportHostSession, respond, main });
