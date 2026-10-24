@@ -14,6 +14,8 @@ const ROOT = path.resolve(__dirname, '../..');
 const SCRIPT = path.join(ROOT, 'repo/scripts/toolkit-projects-tasks.cjs');
 const TASKS = path.join(ROOT, 'repo/contracts/claude-projects/web-controller-projects/tasks');
 const SKILL = path.join(ROOT, 'repo/contracts/claude-projects/web-controller-projects/SKILL.md');
+// Guided setup moved out of SKILL.md into its reference file, uploaded with the skill.
+const SETUP = path.join(ROOT, 'repo/contracts/claude-projects/web-controller-projects/reference/setup.md');
 const INVENTORY = path.join(ROOT, 'repo/contracts/claude-projects/web-controller-projects/setup-inventory.json');
 const run = args => spawnSync(process.execPath, [SCRIPT, ...args], { encoding: 'utf8' });
 const tasks = () => new ProjectsTasks({ root: ROOT });
@@ -245,7 +247,11 @@ test('the check-in carries every prefix in the fixed order and checks both Toolk
     assert.ok(text.includes(required), required);
   }
   const nudge = rendered('hourly-nudge');
-  assert.ok(nudge.indexOf('git ls-remote') > -1 && nudge.indexOf('git ls-remote') < nudge.indexOf('git clone'), 'cheap compare before clone');
+  // The cheap check reads the last run's state first and skips the full sweep when nothing moved;
+  // the binding check is daily only, so the nudge clones nothing.
+  assert.ok(nudge.indexOf('nudge-state.md') > -1 && nudge.indexOf('nudge-state.md') < nudge.indexOf('list_threads'), 'cheap compare before the sweep');
+  assert.match(nudge, /no change since <time>/);
+  assert.doesNotMatch(nudge, /git ls-remote|git clone|BINDING/);
   for (const required of ['all three hold', 'Idleness is never a reason', 'Never list a task home thread', 'Unrelayed', 'Hidden reply',
     'state done', '"EXAMPLE: Daily check-in"', 'CHECK-IN NOT ARMED', 'limit 10', 'list all of them every run']) {
     assert.ok(nudge.includes(required), required);
@@ -270,8 +276,8 @@ test('memory check reads only the BINDING and SCHEDULED TASKS lines', () => {
 
 test('every setup step that creates something has an inventory row, and every row is checked by the daily check-in', () => {
   const inventory = JSON.parse(fs.readFileSync(INVENTORY, 'utf8'));
-  const skill = fs.readFileSync(SKILL, 'utf8').replace(/\r\n/g, '\n');
-  const setup = skill.slice(skill.indexOf('## Guided setup and takeover'), skill.indexOf('## Managed project-instructions sync'));
+  const setup = fs.readFileSync(SETUP, 'utf8').replace(/\r\n/g, '\n');
+  assert.match(fs.readFileSync(SKILL, 'utf8'), /reference\/setup\.md/, 'the skill routes setup to its reference file');
   const steps = [...setup.matchAll(/^(\d+)\. \*\*/gm)].map(match => Number(match[1]));
   assert.deepEqual(steps, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
   const covered = new Set(inventory.rows.flatMap(row => row.setup_steps));

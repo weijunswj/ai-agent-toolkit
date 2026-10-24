@@ -1,0 +1,29 @@
+# Web Controller for Claude Projects: recurring tasks
+
+Reference for the `web-controller-projects` skill, opened when the coordinator sets up, renders, swaps or deletes a scheduled task. The skill's precedence, style and approvals apply; where this file and the skill differ, the skill wins.
+
+## Recurring tasks
+Whenever the user asks for anything recurring (the daily check-in, a sweep, a reminder), set it up this way, and tell the user which kind you used and where they will see it.
+
+**How to set one up (project panel):**
+1. A cloud thread creates, recreates and deletes tasks; you have no scheduling tool. Fresh-session routines cannot be created from a device-linked (local Remote Control) session, or from one that was ever linked, so brief that thread with no folder, device or Remote Control tools. If creation is refused, it reports; start a fresh cloud thread, then use the next fallback.
+2. Every scheduled task runs as a fresh session per run, with no bound thread, except the hourly nudge (bound to its own home thread, **Hourly nudge**). Run every day by default (`CRON_TZ=<user zone> <m> <h> * * *`) unless the user picks another schedule; the hourly nudge runs in the user's waking hours only. Model and effort: the cheapest that does the task well, starting one notch higher and stepping down after clean runs; the model is set on the task, the effort in the prompt.
+3. Write these requirements into every task prompt: fresh session per run (or its home thread); task model/effort; full report to a file in the project's shared folder; capped short message to the coordinator with retry; never end with a question to the owner; resolve its own thread after the report is delivered, never a home thread. Specify the message cap and retry bound in the prompt; report delivery failure, never claim success.
+4. Test one run now; report trigger id and next run. Ask the user to confirm the task in the project's Scheduled tasks panel. Record it on the `SCHEDULED TASKS:` line.
+
+**Toolkit-made tasks** (the daily check-in and the hourly nudge) are rendered from Toolkit `main`, never hand-written: a cloud thread runs `node repo/scripts/toolkit-projects-tasks.cjs --render <daily-check-in|hourly-nudge> --params <file>`, and `--name` for the name (`<PROJECT>: Daily check-in`, `<PROJECT>: Hourly nudge`). Params: `project` (the project name in capitals), `repo` (`owner/name` or `none`), `parent_issue` (or `none`), `report_dir` (under `/mnt/project-files/`), `effort`, and `toolkit_repo` when not the default. Toolkit owns only the text inside the prompt's markers; the project-additions section is kept on every refresh and wins where it differs.
+
+**Change = recreate.** A fresh-session task cannot be edited or renamed. When the daily check-in reports TASKS OUTDATED for a Toolkit-made task, a cloud thread swaps it the same turn, without asking:
+1. Save the old task's record (name, cron, model, prompt from `get_trigger`) to the shared folder and read it back. No saved copy, no change.
+2. Render the new prompt: `--refresh <kind> <old prompt file>` keeps the params and project text. A hand-written prompt (`missing`) is rendered from params taken from memory, with its project-specific steps moved word for word into the project-additions section (`--project-text <file>`).
+3. Create the replacement (same name, cron and model), fire it once and confirm its report arrived; only then delete the old task. If the test run fails, delete the new one, keep the old one and report.
+4. Rewrite the `SCHEDULED TASKS:` line, read back with `get_trigger` and `--check` (`current`), and post one note: which task, what changed, the new id, and "say undo task sync <name> and I'll recreate it from the saved copy".
+A `malformed` prompt holds and is reported.
+
+**The project's own tasks** are never changed without the owner: the check-in lists their gaps as advice. The owner may opt one into the Toolkit shell once (`custom` kind: Toolkit run setup and delivery around the task's own steps, which never change); even then a shell update waits for the owner's word. Local, desktop and device-bound tasks are only listed, never recreated or moved to the cloud.
+
+**Project memory lines.** Only these two are Toolkit's to rewrite: `BINDING:` (**Binding**) and `SCHEDULED TASKS: <name> | <trigger id> | <cron> | <fresh, bound home <thread id> since <YYYY-MM-DD>, local or device>[ | owner schedule]; <next task> ...`, listing every task in the project, the project's own included. Trigger ids live only on this line, never in a prompt, so recreating one task changes nothing else. `node repo/scripts/toolkit-projects-tasks.cjs --check-memory <file>` checks both lines.
+
+**Fallback order, only if that fails:**
+- **Scheduled task on the user's Scheduled tasks page,** including a local task on their computer when the work needs the device. A local task only runs while that computer is awake and online: say so.
+- **Hidden self-reminder (last resort).** A `send_later` reminder from the coordinator or a thread appears in neither the project panel nor the Scheduled tasks page, and a one-shot cannot be made recurring. Use it only when neither option above works, tell the user it is invisible to them, and re-arm it on every firing.

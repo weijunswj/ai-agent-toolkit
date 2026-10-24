@@ -2,11 +2,12 @@
 'use strict';
 
 // Decision-trace audit for a programme issue. The issue body is the canonical record: every
-// non-bot comment must be reachable from it, either linked directly by fragment link
-// (#issuecomment-<id>) or listed in an index comment that the body links (one hop). Fails on any
-// unlinked comment, a SUPERSEDES= reference to an unknown record, a superseded record that is not
-// marked "superseded by" (in its own comment or on an index line that links it), or a body at or
-// over the threshold (default 60,000 characters; GitHub's limit is 65,536).
+// decision comment (one with a tag on its first line or a record ID) must be reachable from it,
+// either linked directly by fragment link (#issuecomment-<id>) or listed in an index comment that
+// the body links (one hop). Other comments need no index entry: they are listed as unlinked, never
+// a failure. Fails on any unlinked decision comment, a SUPERSEDES= reference to an unknown record,
+// a superseded record that is not marked "superseded by" (in its own comment or on an index line
+// that links it), or a body at or over the threshold (default 60,000 characters; GitHub's limit is 65,536).
 //
 // Read-only. --repair writes a proposed body (the missing lines added to the body's decision
 // index, in the shape "- <date> · <record> · [<summary>](#issuecomment-<id>)", plus
@@ -122,6 +123,7 @@ function auditDecisionTraces({ body, comments, recordPrefix = null, threshold = 
       return !linkedText.some(line => line.includes(`#issuecomment-${entry.id}`) && /superseded by/i.test(line));
     });
   const unlinked = people.filter(comment => !reachable.has(String(comment.id))).map(comment => entryFor(comment, facts, indexes.includes(comment)));
+  const unlinkedDecisions = unlinked.filter(entry => entry.tag || entry.record);
   // Only a SUPERSEDES= value that starts with a record ID (the prefix plus digits) is a reference to
   // check, whatever follows it (a full stop, "-draft", "_x"); prose such as "SUPERSEDES=the
   // auto-refresh allowance" is left alone.
@@ -133,8 +135,8 @@ function auditDecisionTraces({ body, comments, recordPrefix = null, threshold = 
   const bodyLength = String(body || '').length;
   const overThreshold = bodyLength >= threshold;
   return {
-    ok: !unlinked.length && !unknownSupersedes.length && !supersededUnmarked.length && !overThreshold,
-    comments: people.length, linked: people.length - unlinked.length, unlinked, unknown_supersedes: unknownSupersedes,
+    ok: !unlinkedDecisions.length && !unknownSupersedes.length && !supersededUnmarked.length && !overThreshold,
+    comments: people.length, linked: people.length - unlinked.length, unlinked, unlinked_decisions: unlinkedDecisions, unknown_supersedes: unknownSupersedes,
     superseded_unmarked: supersededUnmarked,
     unlabelled, body_length: bodyLength, threshold, over_threshold: overThreshold,
     index_comments: linkedIndexes.map(comment => String(comment.id))

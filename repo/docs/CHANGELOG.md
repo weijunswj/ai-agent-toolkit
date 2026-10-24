@@ -1,5 +1,26 @@
 # Toolkit Changelog
 
+## 3.10.1
+
+### Rules audit: leaner always-loaded rules
+
+- **Risk tiers pick the checking:** `node repo/scripts/toolkit-risk-tier.cjs` matches the changed paths against `.github/toolkit-risk-tiers.json` and prints RISKY, NORMAL or LIGHT; a mixed change takes its highest tier, and a change that only moves version lines is LIGHT. RISKY work (governance and helper hooks, setup, the bridge, installers, home-folder and app-config writes, the rules themselves, toolkit-env, cleanup code) gets agent and owner UAT and a full G2; NORMAL work (other scripts, tests and tooling) gets one independent review; LIGHT work (docs and wording) gets the builder's own diff read. G0 still runs for every new task, repository or environment, whatever the tier. Every tier runs tests and CI.
+- **Gate rules on demand:** the gate mechanics (fresh contexts, recoverable work, design policy, UAT, review, delta reviews and route proof) moved out of the global rules into `repo/contracts/agent-rules/gate-rules.md`, which gate sessions read before starting. The global block is about a fifth smaller, and with a typical hand-written user file, the global block and this repository's `AGENTS.md` together now sit just under Codex's default 32 KiB limit (setup still offers the raise as headroom).
+- **No handover packets:** state lives in the branch, the PR or brief, the programme comments or the evidence store, so a controller or executor can be switched at any time. Generic rules never rely on chat or host memory.
+- **Route proof reads the host's record:** pin model and effort in the launch command or config and read the host's own launch record once; a host that keeps none is recorded as not checkable. A model's self-report proves nothing.
+- **No dollar caps:** failure budgets count attempts, never dollars.
+- **Evidence without ritual:** in a Git evidence store the commit is the manifest and a push plus one fetch is the read-back. Archive once, at gate end, and keep run streams only for a FAIL or a disputed verdict. The expiry clock, pins and cleanup ledger are gone: scratch is deleted once its report is stored.
+- **Decision traces:** only decision comments (a tag or record ID) must be linked from the programme issue; other comments need no index entry.
+- **One home per rule:** the takeover record lives in `CONTROLLER.md`, the issue rules in the governed block, and the finish rule in the global Shipping section. Full SHAs appear only in review verdicts, UAT results and merge summaries. One PR bumps the version once, and its body is refreshed when scope changes and once before asking to merge.
+- **Toolkit V3:** the contract is now a short statement of current law; the dated decisions and one-off evaluations that produced it stay in git history.
+- **Promise checker removed:** the promise list is a plain list in project memory, read by the hourly nudge; `toolkit-promise-check.cjs` and its fenced block are gone.
+
+### Claude Projects
+
+- **Skill split:** guided setup, the instructions sync and the recurring-task procedures moved into `reference/` files beside the Projects skill, which is now 2026-10-24.4. Upload the skill together with its reference files.
+- **Cheaper nudge:** the hourly nudge checks first whether anything moved since its last run and stops early when nothing did; it runs in waking hours on a small model. The binding check runs only in the daily check-in.
+- **Feedback intake:** record only rejections and downgrades, one line each with the reason.
+
 ## 3.10.0 (host support, governance states, decision history and the personal-data guard)
 
 ### Decision history before planning
