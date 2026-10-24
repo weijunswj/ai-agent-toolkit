@@ -4,9 +4,10 @@
 // the governed rules in force (rule R3): an origin remote in .git/config, the Toolkit-governed rules
 // block in AGENTS.md, a valid `.github/toolkit-programme.json`, and the user's recorded yes. The
 // block and binding alone are not the user's answer, so the yes is recorded in a scratch home: the
-// first call points this test process (HOME, USERPROFILE) at one, so the hooks it runs, in process or
-// as child processes, read that registry and never the real user's. Pass `home` to record into a
-// home a test already uses for its child processes. The remote names a fixture owner.
+// first yes recorded without a `home` points this test process (HOME, USERPROFILE) at one, so the
+// hooks it runs, in process or as child processes, read that registry and never the real user's.
+// Pass `home` to record into a home a test already uses for its child processes. The remote names a
+// fixture owner.
 
 const fs = require('node:fs');
 const os = require('node:os');
@@ -27,7 +28,8 @@ function governedHome() {
   return scratchHome;
 }
 
-function makeGoverned(repo, name, { home = governedHome(), enable = true } = {}) {
+// With `enable: false` nothing is recorded and the process's home is left alone.
+function makeGoverned(repo, name, { home, enable = true } = {}) {
   const slug = `toolkit-test-fixture/${name}`;
   fs.mkdirSync(repo, { recursive: true });
   if (enable) require('node:child_process').execFileSync('git', ['init', '--quiet', repo], { stdio: 'ignore', windowsHide: true });

@@ -31,6 +31,20 @@ test('each hook row gives the expected decision through the real hook process', 
   }
 });
 
+test('the matrix context leaves the process home alone, so the live runner keeps the user\'s login', () => {
+  const home = path.join(ROOT, 'never-written-home');
+  const probe = `const os = require('node:os');
+    const { ClaudeMatrixContext } = require(${JSON.stringify(path.join(__dirname, 'support', 'claude-helper-matrix.cjs'))});
+    const context = new ClaudeMatrixContext();
+    const seen = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE, homedir: os.homedir(), context: context.environment.HOME === context.home };
+    context.remove();
+    process.stdout.write(JSON.stringify(seen));`;
+  const result = require('node:child_process').spawnSync(process.execPath, ['-e', probe],
+    { env: { ...process.env, HOME: home, USERPROFILE: home }, encoding: 'utf8', timeout: 60000 });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), { HOME: home, USERPROFILE: home, homedir: home, context: true });
+});
+
 test('A9: the agent hook blocks the launch when it fails or times out', () => {
   const hooks = JSON.parse(fs.readFileSync(path.join(ROOT, '.claude-plugin', 'hooks', 'hooks.json'), 'utf8'));
   const agent = hooks.hooks.PreToolUse.find(group => group.matcher === 'Agent|Task');
