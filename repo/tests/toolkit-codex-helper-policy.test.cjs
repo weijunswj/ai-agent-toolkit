@@ -15,9 +15,8 @@ const HOOK = path.join(ROOT, 'repo', 'scripts', 'toolkit-codex-helper-hook.cjs')
 const MARKERS = ['TOOLKIT_NATIVE_HELPER_BINDING', 'TOOLKIT_NATIVE_HELPER_BINDING_SHA256', 'TOOLKIT_NATIVE_HELPER_IDENTITY', 'TOOLKIT_GATE_ROLE', 'TOOLKIT_CLAUDE_TASK_PROFILE_SHA256'];
 const renderer = CodexHelperAgentRenderer.fromRepository('owner-gpt');
 
-// A governed repository (ENABLED by repository opt-in: the governed rules block and a programme
-// binding) and an isolated Codex home with the
-// current helper agent files. Nothing here reads the real ~/.codex.
+// A governed repository (the governed rules block, a programme binding and the user's recorded yes)
+// and an isolated Codex home with the current helper agent files. Nothing here reads the real ~/.codex.
 function fixture(t, { install = true } = {}) {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-codex-policy-'));
   t.after(() => fs.rmSync(base, { recursive: true, force: true }));
