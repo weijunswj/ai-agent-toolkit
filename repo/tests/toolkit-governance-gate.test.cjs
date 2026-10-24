@@ -68,7 +68,7 @@ test('H-01, H-02: every prompt in an undecided repository is held; the first sho
   assert.equal(first.action, 'block');
   assert.ok(first.reason.startsWith(QUESTION_LINE));
   assert.match(first.reason, /toolkit governance enable/);
-  assert.match(first.reason, /toolkit governance decline/);
+  assert.match(first.reason, /toolkit governance disable/);
   const second = hold(ctx).decide({ cwd: repo, prompt: 'and the logout one' });
   assert.equal(second.action, 'block');
   assert.match(second.reason, /\(2 messages held\)/);
@@ -87,7 +87,7 @@ test('bypass attempts: ignoring, skipping, near-misses and "yes" all stay held a
     assert.equal(decision.action, 'block', JSON.stringify(prompt));
   }
   assert.equal(registryBytes(ctx), null);
-  assert.equal(stateOf(ctx, repo).state, 'UNKNOWN');
+  assert.equal(stateOf(ctx, repo).state, 'UNDECIDED');
   // Letter case and a final full stop are accepted forms of the answer.
   assert.match(gate.ANSWER.exec('Toolkit Governance Enable.')[1], /enable/i);
 });
@@ -113,23 +113,36 @@ test('H-04: the answer is recorded, written into the repository\'s own ignored f
   assert.deepEqual(hold(ctx).decide({ cwd: repo, prompt: 'next request' }), { action: 'pass' });
 });
 
-test('H-05: decline is recorded, never asked again in new sessions, and the session line says the block does not apply', (t) => {
+test('H-05: disable is recorded, never asked again in new sessions, and the session line says the block does not apply', (t) => {
   const ctx = scratch(t);
   const repo = gitRepo(ctx, 'repo', { block: true });
   assert.match(hold(ctx).decide({ cwd: repo, prompt: 'hello' }).reason, /governed rules block but no programme binding/);
-  const answered = hold(ctx).decide({ cwd: repo, prompt: 'TOOLKIT GOVERNANCE DECLINE' });
+  const answered = hold(ctx).decide({ cwd: repo, prompt: 'TOOLKIT GOVERNANCE DISABLE' });
   assert.equal(answered.action, 'pass');
-  assert.match(answered.context, /now DECLINED/);
+  assert.match(answered.context, /now DISABLED/);
   for (let index = 0; index < 3; index += 1) assert.deepEqual(hold(ctx).decide({ cwd: repo, prompt: `task ${index}` }), { action: 'pass' });
-  assert.match(gate.sessionLine(repo, { registryOptions: ctx.options }), /DECLINED .*does not apply/);
-  assert.equal(fileOf(repo).state, 'DECLINED');
+  assert.match(gate.sessionLine(repo, { registryOptions: ctx.options }), /DISABLED .*does not apply/);
+  assert.equal(fileOf(repo).state, 'DISABLED');
+});
+
+test('a copy written as DECLINED by an earlier version reads as DISABLED and is rewritten, keeping its history', (t) => {
+  const ctx = scratch(t);
+  const repo = gitRepo(ctx, 'repo');
+  gate.writeGovernanceDecision(repo, 'disable', { registryOptions: ctx.options });
+  const legacy = { ...fileOf(repo), state: 'DECLINED', history: fileOf(repo).history.map(entry => ({ ...entry, state: 'DECLINED' })) };
+  fs.writeFileSync(repoState.filePath(repo), JSON.stringify(legacy));
+  assert.equal(repoState.readRecord(repo).status, 'present');
+  assert.equal(new gate.GovernanceGate({ registryOptions: ctx.options }).evaluate(repo).file, 'written');
+  assert.equal(fileOf(repo).state, 'DISABLED');
+  assert.deepEqual(fileOf(repo).history.map(entry => entry.state), ['DISABLED', 'DISABLED']);
+  assert.equal(new gate.GovernanceGate({ registryOptions: ctx.options }).evaluate(repo).file, 'agrees');
 });
 
 test('H-08: a decision made at the terminal lets the next prompt through and hands back the held prompts', (t) => {
   const ctx = scratch(t);
   const repo = gitRepo(ctx, 'repo');
   hold(ctx).decide({ cwd: repo, prompt: 'held while away' });
-  gate.writeGovernanceDecision(repo, 'decline', { registryOptions: ctx.options });
+  gate.writeGovernanceDecision(repo, 'disable', { registryOptions: ctx.options });
   const next = hold(ctx).decide({ cwd: repo, prompt: 'anything' });
   assert.equal(next.action, 'pass');
   assert.match(next.context, /1\. held while away/);
@@ -145,11 +158,11 @@ test('the repository file is never the authority: forged, copied, edited and del
   fs.writeFileSync(repoState.filePath(repo), JSON.stringify(forged));
   assert.equal(hold(ctx).decide({ cwd: repo, prompt: 'go' }).action, 'block');
   assert.ok(tools(ctx).decide({ tool_name: 'Bash', cwd: repo, tool_input: { command: 'ls' } }).deny);
-  // Decided as DECLINED: a file edited to ENABLED is rewritten, and the change is added to its history.
-  gate.writeGovernanceDecision(repo, 'decline', { registryOptions: ctx.options });
+  // Decided as DISABLED: a file edited to ENABLED is rewritten, and the change is added to its history.
+  gate.writeGovernanceDecision(repo, 'disable', { registryOptions: ctx.options });
   fs.writeFileSync(repoState.filePath(repo), JSON.stringify({ ...fileOf(repo), state: 'ENABLED' }));
   assert.equal(new gate.GovernanceGate({ registryOptions: ctx.options }).evaluate(repo).file, 'written');
-  assert.equal(fileOf(repo).state, 'DECLINED');
+  assert.equal(fileOf(repo).state, 'DISABLED');
   assert.equal(fileOf(repo).history.length, 2);
   // Copied from another repository: rewritten for this one, with its own history.
   fs.writeFileSync(repoState.filePath(repo), JSON.stringify({ ...fileOf(repo), repository_id: 'f'.repeat(64) }));
@@ -159,7 +172,7 @@ test('the repository file is never the authority: forged, copied, edited and del
   // Deleted: recreated from the decision on the next prompt.
   fs.rmSync(path.join(repo, repoState.FOLDER), { recursive: true });
   assert.equal(hold(ctx).decide({ cwd: repo, prompt: 'go' }).action, 'pass');
-  assert.equal(fileOf(repo).state, 'DECLINED');
+  assert.equal(fileOf(repo).state, 'DISABLED');
   // A read-only check of a missing copy reports it and holds nothing.
   fs.rmSync(repoState.filePath(repo));
   const checked = new gate.GovernanceGate({ registryOptions: ctx.options }).evaluate(repo, { write: false });
@@ -186,7 +199,7 @@ function snapshot(target) {
   return `file:${fs.readFileSync(target, 'utf8')}`;
 }
 
-for (const decision of ['decline', 'enable']) {
+for (const decision of ['disable', 'enable']) {
   for (const row of ROOT_GITIGNORE_ROWS) {
     test(`B2 matrix: ${decision}d repository, root .gitignore ${row.name}: never edited, never held, git status clean`, (t) => {
       const ctx = scratch(t);
@@ -208,7 +221,7 @@ for (const decision of ['decline', 'enable']) {
         assert.equal(tools(ctx).decide({ tool_name: 'Edit', cwd: repo, tool_input: { file_path: path.join(repo, 'a.txt') } }), null);
       }
       assert.equal(snapshot(path.join(repo, '.gitignore')), before);
-      assert.equal(fileOf(repo).state, decision === 'enable' ? 'ENABLED' : 'DECLINED');
+      assert.equal(fileOf(repo).state, decision === 'enable' ? 'ENABLED' : 'DISABLED');
       assert.equal(git(repo, ['status', '--porcelain', '--untracked-files=all']), '');
     });
   }
@@ -216,7 +229,7 @@ for (const decision of ['decline', 'enable']) {
 
 test('a decided repository whose state folder cannot be written is reported, never held', (t) => {
   const ctx = scratch(t);
-  for (const decision of ['decline', 'enable']) {
+  for (const decision of ['disable', 'enable']) {
     const repo = gitRepo(ctx, `blocked-${decision}`, { remote: `https://github.com/example-owner/blocked-${decision}.git` });
     // A plain file where the folder belongs: the copy cannot be made, the registry decision still stands.
     fs.writeFileSync(path.join(repo, repoState.FOLDER), 'not a folder\n');
@@ -225,12 +238,12 @@ test('a decided repository whose state folder cannot be written is reported, nev
     assert.match(decided.error_code, /^[A-Z0-9_]+$/);
     assert.equal(hold(ctx).decide({ cwd: repo, prompt: 'go' }).action, 'pass');
     assert.equal(tools(ctx).decide({ tool_name: 'Bash', cwd: repo, tool_input: { command: 'ls' } }), null);
-    assert.match(gate.sessionLine(repo, { registryOptions: ctx.options }), new RegExp(`${decision === 'enable' ? 'ENABLED' : 'DECLINED'}.*could not save its copy .*nothing is held`));
+    assert.match(gate.sessionLine(repo, { registryOptions: ctx.options }), new RegExp(`${decision === 'enable' ? 'ENABLED' : 'DISABLED'}.*could not save its copy .*nothing is held`));
     assert.equal(fs.readFileSync(path.join(repo, repoState.FOLDER), 'utf8'), 'not a folder\n');
   }
 });
 
-test('R4 opt-in and PORTABLE folders pass; nothing is written where no decision can be stored', (t) => {
+test('R4 opt-in and NO_REPOSITORY folders pass; nothing is written where no decision can be stored', (t) => {
   const ctx = scratch(t);
   const optIn = gitRepo(ctx, 'opt-in', { block: true, binding: true });
   assert.deepEqual(hold(ctx).decide({ cwd: optIn, prompt: 'go' }), { action: 'pass' });
@@ -270,6 +283,8 @@ test('H-07: an agent cannot answer for the user, in any folder, while ordinary c
     ['Bash', { command: 'cd ../other && node repo/scripts/toolkit-governance.cjs decline' }],
     ['Bash', { command: 'claude -p "toolkit governance enable"' }],
     ['PowerShell', { command: "codex exec 'toolkit governance decline'" }],
+    ['Bash', { command: 'node repo/scripts/toolkit-governance.cjs disable' }],
+    ['Bash', { command: 'claude -p "toolkit governance disable"' }],
     ['exec_command', { cmd: 'echo toolkit governance enable | claude -p' }],
     ['Write', { file_path: path.join(os.homedir(), '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json') }],
     ['Edit', { file_path: '~/../x/.ai-agent-toolkit/user-state/held-prompts.v1.json' }],
@@ -367,10 +382,11 @@ test('hosts: the Claude hook script holds and answers end to end with the real u
   };
   assert.equal(run('UserPromptSubmit', { cwd: repo, prompt: 'go' }).decision, 'block');
   assert.equal(run('PreToolUse', { cwd: repo, tool_name: 'Bash', tool_input: { command: 'ls' } }).hookSpecificOutput.permissionDecision, 'deny');
+  // `decline` is the older word for `disable` and still answers.
   const answered = run('UserPromptSubmit', { cwd: repo, prompt: 'toolkit governance decline' });
   assert.match(answered.hookSpecificOutput.additionalContext, /1\. go/);
   assert.deepEqual(run('UserPromptSubmit', { cwd: repo, prompt: 'go' }), {});
-  assert.match(run('SessionStart', { cwd: repo }).hookSpecificOutput.additionalContext, /DECLINED/);
+  assert.match(run('SessionStart', { cwd: repo }).hookSpecificOutput.additionalContext, /DISABLED/);
   assert.ok(fs.existsSync(path.join(home, '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json')));
   // An unknown event name is a broken install and holds.
   const broken = childProcess.execFileSync(process.execPath, [path.join(scripts, 'toolkit-governance-hook.cjs'), '--event', 'Nope'],
@@ -432,10 +448,10 @@ test('hook wiring: both Claude copies hold prompts and tools with onFailure bloc
   }
 });
 
-test('H-16: decided and portable repositories add only local reads', (t) => {
+test('H-16: decided and no-repository folders add only local reads', (t) => {
   const ctx = scratch(t);
   const repo = gitRepo(ctx, 'repo');
-  gate.writeGovernanceDecision(repo, 'decline', { registryOptions: ctx.options });
+  gate.writeGovernanceDecision(repo, 'disable', { registryOptions: ctx.options });
   const spawnNames = ['spawn', 'spawnSync', 'execFile', 'execFileSync', 'exec', 'execSync', 'fork'];
   const saved = Object.fromEntries(spawnNames.map(name => [name, childProcess[name]]));
   let spawned = 0;

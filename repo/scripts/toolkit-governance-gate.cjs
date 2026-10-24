@@ -4,12 +4,14 @@
 // stale-Toolkit check, that keeps stopping until the state exists). Shared by the Claude Code and
 // Codex hooks:
 //
-//   - GovernanceGate decides whether a working directory is held. UNKNOWN (including an unreadable
-//     state) is held; PORTABLE never is. A decided repository is held until its in-repository copy
-//     (`.ai-agent-toolkit/governance.json`) exists and agrees with the registry; the gate writes it.
+//   - GovernanceGate decides whether a working directory is held. UNDECIDED (including an unreadable
+//     state) is held; NO_REPOSITORY never is, and neither is a decided repository. The gate keeps
+//     the in-repository copy (`.ai-agent-toolkit/governance.json`) in step with the registry, and a
+//     copy it cannot write never holds.
 //   - PromptHold is the UserPromptSubmit core. In a held repository every prompt is blocked and kept
 //     on this computer, except the user's own answer, `toolkit governance enable` or
-//     `toolkit governance decline`, which is recorded, read back and then let through with the held
+//     `toolkit governance disable` (`decline` is the older word for it), which is recorded, read
+//     back and then let through with the held
 //     prompts attached, oldest first.
 //   - ToolGate is the PreToolUse core. A held repository runs no state-changing tool. In every
 //     folder, an agent may not answer the question for the user: commands that run the governance
@@ -36,12 +38,13 @@ const MAX_HELD_BYTES = 512 * 1024;
 const LAUNCHER_MARKERS = Object.freeze(['TOOLKIT_GATE_ROLE', 'TOOLKIT_NATIVE_HELPER_BINDING', 'TOOLKIT_CLAUDE_TASK_PROFILE_SHA256']);
 
 // The answer is the whole prompt, in any letter case, with surrounding spaces or one final full stop.
-const ANSWER = /^\s*toolkit governance (enable|decline)\.?\s*$/i;
+// `decline` is kept as the older word for `disable`.
+const ANSWER = /^\s*toolkit governance (enable|disable|decline)\.?\s*$/i;
 // An agent's command that would answer for the user: the CLI script with a decision, or a host
 // session started (or fed on stdin) with the answer as its prompt.
 function answerCommand(text) {
-  return /toolkit-governance\.cjs["']?\s+(?:enable|decline|reopen|migrate)\b/i.test(text)
-    || (/\b(?:claude|codex)\b/i.test(text) && /toolkit governance (?:enable|decline)\b/i.test(text));
+  return /toolkit-governance\.cjs["']?\s+(?:enable|disable|decline|reopen|migrate)\b/i.test(text)
+    || (/\b(?:claude|codex)\b/i.test(text) && /toolkit governance (?:enable|disable|decline)\b/i.test(text));
 }
 const USER_STATE_PATH = /[\\/]\.ai-agent-toolkit[\\/]user-state(?:[\\/]|$)/i;
 // Tools that read only; everything else changes something and is held.
@@ -76,15 +79,15 @@ class GovernanceGate {
     this.#now = now;
   }
 
-  // { hold, reason, state, file } where reason is one of 'portable', 'decided', 'undecided' or
+  // { hold, reason, state, file } where reason is one of 'no-repository', 'decided', 'undecided' or
   // 'state-unreadable'. Only the registry decides whether a repository holds: a decided repository
   // never holds over its in-repository copy, and a copy that cannot be written is reported as
   // file 'unwritable' with its error_code. With write: false the copy is only checked.
   evaluate(cwd, { write = true } = {}) {
     const state = this.#stateReader(cwd);
     const verdict = (hold, reason, extra = {}) => Object.freeze({ hold, reason, state, file: null, ...extra });
-    if (state.state === 'PORTABLE') return verdict(false, 'portable');
-    if (state.state === 'UNKNOWN') return verdict(true, state.rule === 'ERROR' ? 'state-unreadable' : 'undecided');
+    if (state.state === 'NO_REPOSITORY') return verdict(false, 'no-repository');
+    if (state.state === 'UNDECIDED') return verdict(true, state.rule === 'ERROR' ? 'state-unreadable' : 'undecided');
     if (!write) {
       const status = repoState.recordStatus(state);
       return verdict(false, 'decided', { file: status });
@@ -104,10 +107,11 @@ class GovernanceGate {
 // the gate (which also writes the in-repository copy). Throws GovernanceGateError when the result
 // is not the decided state.
 function writeGovernanceDecision(cwd, command, { registryOptions = {}, registry = require('./toolkit-capability-registry.cjs'), now } = {}) {
-  if (!['enable', 'decline'].includes(command)) throw new GovernanceGateError('UNKNOWN_COMMAND');
+  if (!['enable', 'disable', 'decline'].includes(command)) throw new GovernanceGateError('UNKNOWN_COMMAND');
   const status = registry.getRepositoryStatus({ cwd, ...registryOptions });
   if (status.actionable) throw new GovernanceGateError('REGISTRY_UNAVAILABLE');
   const current = status.capabilities[CAPABILITY].state;
+  // The registry keeps its own operation names: a first "no" is 'decline', turning off an enabled one is 'disable'.
   const operation = command === 'enable' ? 'enable' : (current === 'enabled' ? 'disable' : 'decline');
   registry.writeCapabilityDecision({
     cwd,
@@ -127,7 +131,7 @@ function writeGovernanceDecision(cwd, command, { registryOptions = {}, registry 
     expectedHash: status.snapshot_hash,
   });
   const verdict = new GovernanceGate({ registryOptions, now }).evaluate(cwd);
-  const expected = command === 'enable' ? 'ENABLED' : 'DECLINED';
+  const expected = command === 'enable' ? 'ENABLED' : 'DISABLED';
   if (verdict.state.state !== expected || verdict.state.repository_id !== status.repository_id) throw new GovernanceGateError('READBACK_MISMATCH');
   return verdict;
 }
@@ -202,12 +206,12 @@ const QUESTION = [
   'Toolkit: this repository has no governance decision yet, so your message was held and not sent.',
   'Reply with exactly one of these as your next message:',
   '  toolkit governance enable    Toolkit gates, records and programme rules apply here.',
-  '  toolkit governance decline   Only the global rules apply, and Toolkit will not ask again.',
+  '  toolkit governance disable   Only the global rules apply, and Toolkit will not ask again.',
   'Every message until then is held too. Held messages stay on this computer and are handed over, in order, after you answer.',
 ];
 
 function questionText(verdict, held) {
-  if (held > 1) return `Toolkit: still waiting for this repository's governance decision (${held} messages held). Reply \`toolkit governance enable\` or \`toolkit governance decline\`.`;
+  if (held > 1) return `Toolkit: still waiting for this repository's governance decision (${held} messages held). Reply \`toolkit governance enable\` or \`toolkit governance disable\`.`;
   const lines = [...QUESTION];
   if (verdict.state.rule === 'R6') lines.splice(1, 0, 'It carries the Toolkit governed rules block but no programme binding.');
   return lines.join('\n');
@@ -244,7 +248,7 @@ class PromptHold {
 
   decide({ cwd, prompt }) {
     const verdict = this.#gate.evaluate(cwd);
-    if (!verdict.hold) return verdict.reason === 'portable' ? { action: 'pass' } : this.#replayIfAny(verdict.state);
+    if (!verdict.hold) return verdict.reason === 'no-repository' ? { action: 'pass' } : this.#replayIfAny(verdict.state);
     if (verdict.reason === 'state-unreadable') return { action: 'block', reason: unreadableText(verdict.state.error_code) };
     const answer = ANSWER.exec(String(prompt || ''));
     if (answer) return this.#answer(cwd, answer[1].toLowerCase(), verdict);
@@ -312,7 +316,7 @@ class ToolGate {
     const verdict = this.#gate.evaluate(input && input.cwd);
     if (!verdict.hold) return null;
     if (verdict.reason === 'state-unreadable') return { deny: `Toolkit: the governance state of this repository could not be read (${verdict.state.error_code}), so nothing runs here until it can.` };
-    return { deny: 'Toolkit: this repository has no governance decision yet, so nothing runs here. Ask the user to reply `toolkit governance enable` or `toolkit governance decline`; do not try to work around it.' };
+    return { deny: 'Toolkit: this repository has no governance decision yet, so nothing runs here. Ask the user to reply `toolkit governance enable` or `toolkit governance disable`; do not try to work around it.' };
   }
 }
 
@@ -321,10 +325,10 @@ class ToolGate {
 function sessionLine(cwd, { registryOptions = {}, stateReader = null, now } = {}) {
   const verdict = new GovernanceGate({ registryOptions, stateReader, now }).evaluate(cwd);
   const state = verdict.state;
-  if (state.state === 'PORTABLE') return null;
+  if (state.state === 'NO_REPOSITORY') return null;
   if (verdict.hold) {
     if (verdict.reason === 'state-unreadable') return `Toolkit governance: the state of this repository could not be read (${state.error_code}). Every user message is held until it can; do not try to work around it.`;
-    return 'Toolkit governance: this repository has no decision yet. Every user message is held until the user replies `toolkit governance enable` or `toolkit governance decline`; do not try to work around it.';
+    return 'Toolkit governance: this repository has no decision yet. Every user message is held until the user replies `toolkit governance enable` or `toolkit governance disable`; do not try to work around it.';
   }
   return decidedLine(state) + (verdict.file === 'unwritable'
     ? ` (Toolkit could not save its copy in the ${repoState.FOLDER} folder (${verdict.error_code}); nothing is held because of that.)`
@@ -332,7 +336,7 @@ function sessionLine(cwd, { registryOptions = {}, stateReader = null, now } = {}
 }
 
 function decidedLine(state) {
-  if (state.state === 'DECLINED') return 'Toolkit governance: DECLINED for this repository. Follow only the global rules; any TOOLKIT-GOVERNED-RULES block in AGENTS.md does not apply.';
+  if (state.state === 'DISABLED') return 'Toolkit governance: DISABLED for this repository. Follow only the global rules; any TOOLKIT-GOVERNED-RULES block in AGENTS.md does not apply.';
   if (state.materials_complete === false) return 'Toolkit governance: ENABLED, materials incomplete (the governed block or `.github/toolkit-programme.json` is missing). The global rules plus gates, subagents and portable skills apply; programme records do not.';
   return 'Toolkit governance: ENABLED for this repository. Follow the global rules and the TOOLKIT-GOVERNED-RULES block in AGENTS.md.';
 }

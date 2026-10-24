@@ -107,7 +107,7 @@ test('ID-02: a clone in another form sees the decision made in the first (asked 
   const https = gitRepo(ctx, 'https', 'https://github.com/example-owner/example-repo.git');
   const scp = gitRepo(ctx, 'scp', 'git@github.com:Example-Owner/example-repo');
   decide(ctx, https, 'decline');
-  assert.equal(governance.governanceState(scp, opts(ctx)).state, 'DECLINED');
+  assert.equal(governance.governanceState(scp, opts(ctx)).state, 'DISABLED');
   assert.equal(registry.getRepositoryStatus({ cwd: scp, ...opts(ctx) }).capabilities[CAPABILITY].state, 'disabled');
 });
 
@@ -119,10 +119,10 @@ test('ID-03: a decision stored under an earlier key still counts, and a new deci
   const newKey = registry.repositoryIdForCanonicalRemote(remote);
   assert.notEqual(oldKey(remote), newKey);
   rekey(ctx, newKey, oldKey(remote));
-  assert.equal(governance.governanceState(repo, opts(ctx)).state, 'DECLINED', 'the earlier key is honoured');
+  assert.equal(governance.governanceState(repo, opts(ctx)).state, 'DISABLED', 'the earlier key is honoured');
   // An scp clone of the same repository finds it too.
   const scp = gitRepo(ctx, 'scp', 'git@github.com:example-owner/example-repo.git');
-  assert.equal(governance.governanceState(scp, opts(ctx)).state, 'DECLINED');
+  assert.equal(governance.governanceState(scp, opts(ctx)).state, 'DISABLED');
   // Enabling from a declined earlier key is a valid transition and lands under the new key.
   decide(ctx, scp, 'enable');
   const stored = JSON.parse(fs.readFileSync(ctx.registryPath, 'utf8'));
@@ -144,10 +144,10 @@ test('ID-04: earlier keys that disagree are unresolved until answered once', (t)
   rekey(ctx, registry.repositoryIdForCanonicalRemote('https://github.com/example-owner/scratch-repo.git'), oldKey('git@github.com:example-owner/example-repo.git'));
   for (const repo of [first, second]) {
     const result = governance.governanceState(repo, opts(ctx));
-    assert.deepEqual([result.state, result.hold], ['UNKNOWN', true]);
+    assert.deepEqual([result.state, result.hold], ['UNDECIDED', true]);
   }
   decide(ctx, second, 'decline');
-  for (const repo of [first, second]) assert.equal(governance.governanceState(repo, opts(ctx)).state, 'DECLINED');
+  for (const repo of [first, second]) assert.equal(governance.governanceState(repo, opts(ctx)).state, 'DISABLED');
 });
 
 test('ID-05: the git-free reader and the registry agree on the normalised key and the earlier keys', (t) => {

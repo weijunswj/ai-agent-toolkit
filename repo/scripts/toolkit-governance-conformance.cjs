@@ -78,19 +78,19 @@ function checkConformance(cwd, options = {}) {
     findings.push(finding('STATE_ERROR', 'error', `The governance state could not be read (${state.error_code}); prompts in this repository are held until it can.`));
     return report(2, state, findings, toolkitRoot);
   }
-  if (state.state === 'PORTABLE') {
-    findings.push(finding('PORTABLE', 'info', state.reason === 'no-git-root'
+  if (state.state === 'NO_REPOSITORY') {
+    findings.push(finding('NO_REPOSITORY', 'info', state.reason === 'no-git-root'
       ? 'Not inside a git repository: only the global rules apply.'
       : 'This repository has no usable origin remote, so no decision can be stored for it: only the global rules apply.'));
     return report(0, state, findings, toolkitRoot);
   }
-  if (state.state === 'UNKNOWN') {
+  if (state.state === 'UNDECIDED') {
     findings.push(finding('DECISION_PENDING', 'drift', state.rule === 'R6'
-      ? `The repository carries the governed block but no programme binding, and you have not decided yet. Run \`${governance.governanceCommand('enable')}\` or \`${governance.governanceCommand('decline')}\`.`
-      : `You have not decided whether Toolkit governs this repository. Run \`${governance.governanceCommand('enable')}\` or \`${governance.governanceCommand('decline')}\`.`));
+      ? `The repository carries the governed block but no programme binding, and you have not decided yet. Run \`${governance.governanceCommand('enable')}\` or \`${governance.governanceCommand('disable')}\`.`
+      : `You have not decided whether Toolkit governs this repository. Run \`${governance.governanceCommand('enable')}\` or \`${governance.governanceCommand('disable')}\`.`));
   }
-  if (state.state === 'DECLINED') {
-    if (state.materials.governed_block) findings.push(finding('GOVERNED_BLOCK_IGNORED', 'info', 'You declined Toolkit governance here, so the governed block in AGENTS.md is not followed.'));
+  if (state.state === 'DISABLED') {
+    if (state.materials.governed_block) findings.push(finding('GOVERNED_BLOCK_IGNORED', 'info', 'You disabled Toolkit governance here, so the governed block in AGENTS.md is not followed.'));
     return report(0, state, findings, toolkitRoot);
   }
   if (state.state === 'ENABLED' && !state.materials_complete) {

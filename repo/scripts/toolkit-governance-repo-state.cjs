@@ -24,8 +24,11 @@ const INNER_IGNORE = '# Toolkit keeps this folder out of git.\n*\n';
 const MAX_BYTES = 64 * 1024;
 const MAX_HISTORY = 50;
 // The bases a recorded state can have; 'repository opt-in' is rule R4 (the binding and the governed
-// block are present and the user has not declined).
+// block are present and the user has not disabled it).
 const BASES = Object.freeze({ decision: 'your decision', optIn: 'repository opt-in' });
+// Earlier copies wrote DECLINED for what is now DISABLED. Such a file is read, never agrees, and is
+// rewritten as DISABLED with its history carried on.
+const LEGACY_STATES = Object.freeze({ DECLINED: 'DISABLED' });
 
 class RepoGovernanceFileError extends Error {
   constructor(code) {
@@ -39,9 +42,9 @@ function fail(code) { throw new RepoGovernanceFileError(code); }
 
 function filePath(root) { return path.join(root, FOLDER, FILE); }
 
-// What the file must say for a decided state; null when nothing may be recorded (UNKNOWN, PORTABLE).
+// What the file must say for a decided state; null when nothing may be recorded (UNDECIDED, NO_REPOSITORY).
 function expectedRecord(state) {
-  if (!state || !state.repository_id || !['ENABLED', 'DECLINED'].includes(state.state)) return null;
+  if (!state || !state.repository_id || !['ENABLED', 'DISABLED'].includes(state.state)) return null;
   return { repository_id: state.repository_id, state: state.state, basis: state.rule === 'R4' ? BASES.optIn : BASES.decision };
 }
 
@@ -57,7 +60,7 @@ function readRecord(root) {
   let parsed;
   try { parsed = JSON.parse(fs.readFileSync(target, 'utf8')); } catch { return { status: 'invalid', record: null }; }
   if (!parsed || typeof parsed !== 'object' || parsed.schema !== SCHEMA
-    || typeof parsed.repository_id !== 'string' || !['ENABLED', 'DECLINED'].includes(parsed.state)
+    || typeof parsed.repository_id !== 'string' || !['ENABLED', 'DISABLED', ...Object.keys(LEGACY_STATES)].includes(parsed.state)
     || !Object.values(BASES).includes(parsed.basis) || !Array.isArray(parsed.history)) return { status: 'invalid', record: null };
   return { status: 'present', record: parsed };
 }
@@ -97,7 +100,9 @@ function syncRecord(state, { now = () => new Date() } = {}) {
   if (current.status === 'present' && agrees(current.record, expected)) return Object.freeze({ written: false });
   const at = now().toISOString();
   // History carries on only for the same repository; a file from another repository starts over.
-  const previous = current.status === 'present' && current.record.repository_id === expected.repository_id ? current.record.history : [];
+  const previous = current.status === 'present' && current.record.repository_id === expected.repository_id
+    ? current.record.history.map(entry => (entry && LEGACY_STATES[entry.state] ? { ...entry, state: LEGACY_STATES[entry.state] } : entry))
+    : [];
   const history = [...previous, { at, state: expected.state, basis: expected.basis }].slice(-MAX_HISTORY);
   const record = { schema: SCHEMA, ...expected, updated_at: at, history };
   writeAtomically(filePath(state.root), `${JSON.stringify(record, null, 2)}\n`);

@@ -7,9 +7,9 @@
 //
 // Proposals: a repository already decided stays as it is; a decision stored under an earlier
 // key is carried over to the repository's own key; an evidence store named in another
-// repository's programme binding is declined; a repository carrying the governed block without
+// repository's programme binding is disabled; a repository carrying the governed block without
 // a binding is enabled (its binding still arrives through a pull request); any other undecided
-// repository is declined, which the user can change in the same answer. Repositories without an
+// repository is disabled, which the user can change in the same answer. Repositories without an
 // origin remote are skipped.
 //
 // Afterwards, ENABLED GitHub repositories without the no-force-push ruleset are listed and the
@@ -66,28 +66,29 @@ function slugFor(root) {
 }
 
 // The proposal for one repository: { action, reason } where action is keep, skip, carry-over,
-// enable or decline.
+// enable or disable.
 function proposalFor(state, slug, transportSlugs) {
   if (state.rule === 'ERROR') return { action: 'skip', reason: `its state could not be read (${state.error_code})` };
-  if (state.state === 'PORTABLE') return { action: 'skip', reason: 'no origin remote, so no decision can be stored' };
-  if (state.recorded_under_legacy_key) return { action: 'carry-over', reason: `already ${state.recorded_decision === 'enabled' ? 'enabled' : 'declined'} under an earlier key; kept under its own key` };
-  if (state.state !== 'UNKNOWN') return { action: 'keep', reason: state.rule === 'R4' ? 'enabled by its governed block and binding' : `already ${state.state === 'ENABLED' ? 'enabled' : 'declined'}` };
-  if (slug && transportSlugs.has(slug.toLowerCase())) return { action: 'decline', reason: 'evidence store named in a programme binding (agent-managed, not governed)' };
+  if (state.state === 'NO_REPOSITORY') return { action: 'skip', reason: 'no origin remote, so no decision can be stored' };
+  if (state.recorded_under_legacy_key) return { action: 'carry-over', reason: `already ${state.recorded_decision === 'enabled' ? 'enabled' : 'disabled'} under an earlier key; kept under its own key` };
+  if (state.state !== 'UNDECIDED') return { action: 'keep', reason: state.rule === 'R4' ? 'enabled by its governed block and binding' : `already ${state.state === 'ENABLED' ? 'enabled' : 'disabled'}` };
+  if (slug && transportSlugs.has(slug.toLowerCase())) return { action: 'disable', reason: 'evidence store named in a programme binding (agent-managed, not governed)' };
   if (state.rule === 'R6') return { action: 'enable', reason: 'carries the governed block; its programme binding still has to be added' };
-  return { action: 'decline', reason: 'no Toolkit materials' };
+  return { action: 'disable', reason: 'no Toolkit materials' };
 }
 
-// "yes", optionally followed by changes such as "3=enable 5=decline". null when not confirmed.
+// "yes", optionally followed by changes such as "3=enable 5=disable" (`decline` is the older word
+// for disable). null when not confirmed.
 function parseAnswer(answer, rows) {
   const words = String(answer || '').trim().toLowerCase().split(/[\s,]+/).filter(Boolean);
   if (words[0] !== 'yes') return null;
   const changes = new Map();
   for (const word of words.slice(1)) {
-    const match = /^(\d+)=(enable|decline)$/.exec(word);
+    const match = /^(\d+)=(enable|disable|decline)$/.exec(word);
     if (!match) return null;
     const row = rows.find(entry => entry.number === Number(match[1]));
-    if (!row || !['enable', 'decline', 'carry-over'].includes(row.action)) return null;
-    changes.set(row.number, match[2]);
+    if (!row || !['enable', 'disable', 'carry-over'].includes(row.action)) return null;
+    changes.set(row.number, match[2] === 'enable' ? 'enable' : 'disable');
   }
   return changes;
 }
@@ -123,18 +124,18 @@ class GovernanceMigration {
       return 0;
     }
     this.#say(['Repositories found:', ...rows.map(row => `${row.number}. ${row.root}: ${row.action} (${row.reason})`)]);
-    const pending = rows.filter(row => ['carry-over', 'enable', 'decline'].includes(row.action));
+    const pending = rows.filter(row => ['carry-over', 'enable', 'disable'].includes(row.action));
     const written = [];
     if (pending.length === 0) {
       this.#say('Every repository is already decided or skipped. Nothing to migrate.');
     } else {
-      const changes = parseAnswer(await this.#ask('Type yes to apply the proposed answers, or yes followed by changes such as "3=enable 5=decline": '), rows);
+      const changes = parseAnswer(await this.#ask('Type yes to apply the proposed answers, or yes followed by changes such as "3=enable 5=disable": '), rows);
       if (changes === null) {
         this.#say('Not confirmed. Nothing was written.');
         return 1;
       }
       for (const row of pending) {
-        const target = changes.get(row.number) || (row.action === 'carry-over' ? (row.state.recorded_decision === 'enabled' ? 'enable' : 'decline') : row.action);
+        const target = changes.get(row.number) || (row.action === 'carry-over' ? (row.state.recorded_decision === 'enabled' ? 'enable' : 'disable') : row.action);
         written.push(this.#decide(row, target));
       }
     }
@@ -150,6 +151,7 @@ class GovernanceMigration {
     const status = registry.getRepositoryStatus({ cwd: row.root, ...this.#registryOptions });
     if (status.status === 'actionable') return { repository_id: row.state.repository_id, action: target, result: `not-written (${status.reason_code})` };
     const current = status.capabilities[CAPABILITY].state;
+    // The registry keeps its own operation names: a first "no" is 'decline', turning off an enabled one is 'disable'.
     const operation = target === 'enable' ? 'enable' : current === 'unresolved' ? 'decline' : 'disable';
     try {
       registry.writeCapabilityDecision({
@@ -174,7 +176,7 @@ class GovernanceMigration {
       return { repository_id: status.repository_id, action: target, result: 'failed' };
     }
     const readBack = governance.governanceState(row.root, this.#registryOptions);
-    const expected = target === 'enable' ? 'ENABLED' : 'DECLINED';
+    const expected = target === 'enable' ? 'ENABLED' : 'DISABLED';
     const ok = readBack.state === expected && readBack.recorded_under_legacy_key === false;
     this.#say(`${row.number}. ${row.root}: ${ok ? `recorded ${expected}` : `written, but reading it back gave ${readBack.state}`}.`);
     return { repository_id: status.repository_id, action: target, result: ok ? 'written' : 'read-back-mismatch' };

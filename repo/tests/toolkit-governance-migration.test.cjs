@@ -1,7 +1,7 @@
 'use strict';
 
 // `toolkit governance migrate` (#542): one batched question over the repositories found, evidence
-// stores declined, earlier keys carried over, missing bindings and legacy markers reported (never
+// stores disabled, earlier keys carried over, missing bindings and legacy markers reported (never
 // written), idempotent re-runs, one private record, and the no-force-push ruleset offered only
 // after a second typed yes. Closure rows M-01 to M-04, NF-05, NF-06 and T-01 (template).
 
@@ -108,17 +108,17 @@ function treeDigest(dir) {
   return out;
 }
 
-test('M-01: one batched question; the evidence store is declined, the no-origin repository skipped', async (t) => {
+test('M-01: one batched question; the evidence store is disabled, the no-origin repository skipped', async (t) => {
   const ctx = scratch(t);
   const repos = fixture(ctx);
   const before = treeDigest(ctx.projects);
   const result = await migrate(ctx, { answers: ['yes', 'no'] });
   assert.equal(result.code, 0, result.stderr + result.stdout);
   assert.equal(result.asked.filter(question => /apply the proposed answers/.test(question)).length, 1);
-  assert.match(result.stdout, /evidence: decline \(evidence store named in a programme binding/);
+  assert.match(result.stdout, /evidence: disable \(evidence store named in a programme binding/);
   assert.match(result.stdout, /no-origin: skip/);
   assert.match(result.stdout, /governed: keep/);
-  assert.deepEqual(states(ctx, repos), { governed: 'ENABLED', blockOnly: 'ENABLED', plain: 'DECLINED', noOrigin: 'PORTABLE', store: 'DECLINED' });
+  assert.deepEqual(states(ctx, repos), { governed: 'ENABLED', blockOnly: 'ENABLED', plain: 'DISABLED', noOrigin: 'NO_REPOSITORY', store: 'DISABLED' });
   assert.deepEqual(treeDigest(ctx.projects), before, 'no repository file was written');
   // The block-only repository is enabled without a binding: reported with the template, not written.
   assert.match(result.stdout, /block-only: governance is on but the programme binding is missing\. Copy skills\/repository-agent-rules\/repo-local\/toolkit-programme\.template\.json/);
@@ -133,9 +133,10 @@ test('M-01: answers can be changed in the same reply; anything else writes nothi
     assert.equal(result.code, 1, answer);
     assert.equal(fs.existsSync(ctx.registryPath), false, answer);
   }
+  // `decline` is the older word for `disable` and is still understood.
   const changed = await migrate(ctx, { answers: ['yes 5=enable 1=decline', 'no'] });
   assert.equal(changed.code, 0, changed.stdout);
-  assert.deepEqual(states(ctx, repos), { governed: 'ENABLED', blockOnly: 'DECLINED', plain: 'ENABLED', noOrigin: 'PORTABLE', store: 'DECLINED' });
+  assert.deepEqual(states(ctx, repos), { governed: 'ENABLED', blockOnly: 'DISABLED', plain: 'ENABLED', noOrigin: 'NO_REPOSITORY', store: 'DISABLED' });
   const refused = await migrate(ctx, { interactive: false });
   assert.equal(refused.code, 2);
   assert.match(refused.stderr, /Run this yourself in a terminal/);

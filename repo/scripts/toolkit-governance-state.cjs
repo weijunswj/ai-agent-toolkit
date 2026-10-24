@@ -13,15 +13,15 @@
 //              written only by toolkit-capability-registry.cjs.
 //
 // States, first matching rule wins:
-//   R1 no git root, or no usable origin identity    PORTABLE  global rules only, never held
-//   R2 U declined or disabled                       DECLINED  global rules only; a governed block is ignored
-//   R3 U enabled, B and P present                   ENABLED   global rules plus the governed block
-//   R4 U not recorded, B and P present              ENABLED   as R3 (the repository opted in, the user did not decline)
-//   R5 U enabled, B or P missing                    ENABLED   materials incomplete: gates, subagents, portable skills only
-//   R6 U not recorded, B present, P absent          UNKNOWN   held until the one-time migration or the user answers
-//   R7 anything else                                UNKNOWN   held until the user answers
-// A read error after a git root and identity are found gives UNKNOWN (rule ERROR): the state
-// cannot be shown not to be UNKNOWN, so callers that hold must hold (fail closed). A folder with
+//   R1 no git root, or no usable origin identity    NO_REPOSITORY  global rules only, never held
+//   R2 U declined or disabled                       DISABLED       global rules only; a governed block is ignored
+//   R3 U enabled, B and P present                   ENABLED        global rules plus the governed block
+//   R4 U not recorded, B and P present              ENABLED        as R3 (the repository opted in, the user did not disable it)
+//   R5 U enabled, B or P missing                    ENABLED        materials incomplete: gates, subagents, portable skills only
+//   R6 U not recorded, B present, P absent          UNDECIDED      held until the one-time migration or the user answers
+//   R7 anything else                                UNDECIDED      held until the user answers
+// A read error after a git root and identity are found gives UNDECIDED (rule ERROR): the state
+// cannot be shown not to be UNDECIDED, so callers that hold must hold (fail closed). A folder with
 // no git root or no identity is never held.
 //
 // Reads local files only: no network, no git or gh subprocess, no writes. Node built-ins plus the
@@ -37,7 +37,7 @@ const { validateRemoteIdentity } = require('./toolkit-control-plane/control-plan
 const programmeState = require('../../skills/github-program-reconciler/scripts/programme-state.cjs');
 
 const SCHEMA = 'toolkit.governance-state.v1';
-const STATES = Object.freeze(['ENABLED', 'DECLINED', 'UNKNOWN', 'PORTABLE']);
+const STATES = Object.freeze(['ENABLED', 'DISABLED', 'UNDECIDED', 'NO_REPOSITORY']);
 const GOVERNANCE_CAPABILITY = 'repository.governance';
 const GOVERNED_BLOCK = 'TOOLKIT-GOVERNED-RULES';
 const LEGACY_GOVERNED_BLOCK = 'GLOBAL-AGENTS.MD-TEMPLATE';
@@ -292,7 +292,7 @@ function result(fields) {
     state,
     rule: fields.rule,
     reason: fields.reason,
-    hold: state === 'UNKNOWN',
+    hold: state === 'UNDECIDED',
     persistable: fields.persistable === true,
     materials_complete: state === 'ENABLED' ? complete : null,
     governed_rules_bind: complete,
@@ -329,15 +329,15 @@ class GovernanceState {
     const base = { root: identity.root, repository_id: identity.repository_id, persistable: true, recorded_decision: decision.state, legacy_key: decision.legacy_key === true, materials };
     const block = materials.governed_block.present === true;
     const binding = materials.binding.valid === true;
-    if (decision.state === 'disabled') return result({ ...base, state: 'DECLINED', rule: 'R2', reason: decision.decision_kind === 'disable' ? 'user-disabled' : 'user-declined' });
+    if (decision.state === 'disabled') return result({ ...base, state: 'DISABLED', rule: 'R2', reason: decision.decision_kind === 'disable' ? 'user-disabled' : 'user-declined' });
     if (block && binding) {
       return decision.state === 'enabled'
         ? result({ ...base, state: 'ENABLED', rule: 'R3', reason: 'user-enabled', materials_complete: true })
         : result({ ...base, state: 'ENABLED', rule: 'R4', reason: 'repository-opt-in', materials_complete: true });
     }
     if (decision.state === 'enabled') return result({ ...base, state: 'ENABLED', rule: 'R5', reason: block ? 'binding-missing' : 'governed-block-missing', materials_complete: false });
-    if (block) return result({ ...base, state: 'UNKNOWN', rule: 'R6', reason: 'governed-block-without-binding' });
-    return result({ ...base, state: 'UNKNOWN', rule: 'R7', reason: 'no-decision' });
+    if (block) return result({ ...base, state: 'UNDECIDED', rule: 'R6', reason: 'governed-block-without-binding' });
+    return result({ ...base, state: 'UNDECIDED', rule: 'R7', reason: 'no-decision' });
   }
 
   evaluate(cwd) {
@@ -346,23 +346,23 @@ class GovernanceState {
       identity = this.#readIdentity(cwd);
     } catch (error) {
       // A git root exists (identity reading only throws after finding one) but its config could
-      // not be read: the state cannot be shown not to be UNKNOWN.
-      return result({ state: 'UNKNOWN', rule: 'ERROR', reason: 'identity-unreadable', error_code: codeOf(error), root: findGitRootQuietly(cwd) });
+      // not be read: the state cannot be shown not to be UNDECIDED.
+      return result({ state: 'UNDECIDED', rule: 'ERROR', reason: 'identity-unreadable', error_code: codeOf(error), root: findGitRootQuietly(cwd) });
     }
-    if (!identity.root) return result({ state: 'PORTABLE', rule: 'R1', reason: 'no-git-root' });
-    if (!identity.valid) return result({ state: 'PORTABLE', rule: 'R1', reason: identity.reason, root: identity.root });
+    if (!identity.root) return result({ state: 'NO_REPOSITORY', rule: 'R1', reason: 'no-git-root' });
+    if (!identity.valid) return result({ state: 'NO_REPOSITORY', rule: 'R1', reason: identity.reason, root: identity.root });
     const partial = { root: identity.root, repository_id: identity.repository_id, persistable: true };
     let decision;
     let materials;
     try {
       decision = this.#readDecision(identity);
     } catch (error) {
-      return result({ ...partial, state: 'UNKNOWN', rule: 'ERROR', reason: 'registry-unreadable', error_code: codeOf(error) });
+      return result({ ...partial, state: 'UNDECIDED', rule: 'ERROR', reason: 'registry-unreadable', error_code: codeOf(error) });
     }
     try {
       materials = this.#readMaterials(identity.root, identity);
     } catch (error) {
-      return result({ ...partial, state: 'UNKNOWN', rule: 'ERROR', reason: 'materials-unreadable', error_code: codeOf(error), recorded_decision: decision.state });
+      return result({ ...partial, state: 'UNDECIDED', rule: 'ERROR', reason: 'materials-unreadable', error_code: codeOf(error), recorded_decision: decision.state });
     }
     return GovernanceState.derive({ identity, materials, decision });
   }

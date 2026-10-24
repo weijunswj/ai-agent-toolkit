@@ -103,21 +103,21 @@ test('derive: the rule table, first match wins', () => {
   const identity = { root: '/r', repository_id: 'a'.repeat(64) };
   const materials = (block, binding) => ({ governed_block: { present: block }, binding: { present: binding, valid: binding, problems: [] } });
   const cases = [
-    ['disabled', true, true, 'DECLINED', 'R2'],
-    ['disabled', false, false, 'DECLINED', 'R2'],
+    ['disabled', true, true, 'DISABLED', 'R2'],
+    ['disabled', false, false, 'DISABLED', 'R2'],
     ['enabled', true, true, 'ENABLED', 'R3'],
     ['unresolved', true, true, 'ENABLED', 'R4'],
     ['enabled', true, false, 'ENABLED', 'R5'],
     ['enabled', false, true, 'ENABLED', 'R5'],
-    ['unresolved', true, false, 'UNKNOWN', 'R6'],
-    ['unresolved', false, true, 'UNKNOWN', 'R7'],
-    ['unresolved', false, false, 'UNKNOWN', 'R7'],
+    ['unresolved', true, false, 'UNDECIDED', 'R6'],
+    ['unresolved', false, true, 'UNDECIDED', 'R7'],
+    ['unresolved', false, false, 'UNDECIDED', 'R7'],
   ];
   for (const [decision, block, binding, expectedState, rule] of cases) {
     const result = governance.GovernanceState.derive({ identity, materials: materials(block, binding), decision: { state: decision, decision_kind: null } });
     assert.equal(result.state, expectedState, `${decision}/${block}/${binding}`);
     assert.equal(result.rule, rule, `${decision}/${block}/${binding}`);
-    assert.equal(result.hold, expectedState === 'UNKNOWN');
+    assert.equal(result.hold, expectedState === 'UNDECIDED');
     const complete = rule === 'R3' || rule === 'R4';
     assert.equal(result.governed_rules_bind, complete);
     assert.equal(result.programme_records_bind, complete);
@@ -126,7 +126,7 @@ test('derive: the rule table, first match wins', () => {
   }
 });
 
-test('S-01, S-02: no git root or no usable origin is PORTABLE, never held, never persisted', (t) => {
+test('S-01, S-02: no git root or no usable origin is NO_REPOSITORY, never held, never persisted', (t) => {
   const ctx = scratch(t);
   const plain = path.join(ctx.root, 'plain');
   fs.mkdirSync(plain);
@@ -134,7 +134,7 @@ test('S-01, S-02: no git root or no usable origin is PORTABLE, never held, never
   // The scratch folder may sit inside some git checkout on a developer machine; only check the
   // no-root case when that is not so.
   if (governance.findGitRoot(plain) === null) {
-    assert.equal(outside.state, 'PORTABLE');
+    assert.equal(outside.state, 'NO_REPOSITORY');
     assert.equal(outside.reason, 'no-git-root');
   }
   for (const [name, remote, reason] of [
@@ -145,7 +145,7 @@ test('S-01, S-02: no git root or no usable origin is PORTABLE, never held, never
   ]) {
     const repo = fakeRepo(ctx.root, name, { remote, block: true, binding: true });
     const result = state(ctx, repo);
-    assert.equal(result.state, 'PORTABLE', name);
+    assert.equal(result.state, 'NO_REPOSITORY', name);
     assert.equal(result.reason, reason, name);
     assert.equal(result.hold, false);
     assert.equal(result.persistable, false);
@@ -161,11 +161,11 @@ test('S-03, S-06, S-07: materials without a decision', (t) => {
   const optIn = state(ctx, fakeRepo(ctx.root, 'opt-in', { block: true, binding: true }));
   assert.deepEqual([optIn.state, optIn.rule, optIn.reason, optIn.governed_rules_bind], ['ENABLED', 'R4', 'repository-opt-in', true]);
   const blockOnly = state(ctx, fakeRepo(ctx.root, 'block-only', { block: true }));
-  assert.deepEqual([blockOnly.state, blockOnly.rule, blockOnly.hold], ['UNKNOWN', 'R6', true]);
+  assert.deepEqual([blockOnly.state, blockOnly.rule, blockOnly.hold], ['UNDECIDED', 'R6', true]);
   const plain = state(ctx, fakeRepo(ctx.root, 'plain'));
-  assert.deepEqual([plain.state, plain.rule, plain.hold], ['UNKNOWN', 'R7', true]);
+  assert.deepEqual([plain.state, plain.rule, plain.hold], ['UNDECIDED', 'R7', true]);
   const bindingOnly = state(ctx, fakeRepo(ctx.root, 'binding-only', { binding: true }));
-  assert.deepEqual([bindingOnly.state, bindingOnly.rule], ['UNKNOWN', 'R7']);
+  assert.deepEqual([bindingOnly.state, bindingOnly.rule], ['UNDECIDED', 'R7']);
   const legacy = fakeRepo(ctx.root, 'legacy', { binding: true });
   writeBlock(legacy, 'GLOBAL-AGENTS.MD-TEMPLATE');
   const legacyState = state(ctx, legacy);
@@ -181,14 +181,14 @@ test('S-04, S-05: recorded decisions decide, a decline beats the repository opt-
   assert.equal(state(ctx, declined).state, 'ENABLED');
   decide(ctx, declined, 'decline');
   const afterDecline = state(ctx, declined);
-  assert.deepEqual([afterDecline.state, afterDecline.rule, afterDecline.reason, afterDecline.governed_rules_bind], ['DECLINED', 'R2', 'user-declined', false]);
+  assert.deepEqual([afterDecline.state, afterDecline.rule, afterDecline.reason, afterDecline.governed_rules_bind], ['DISABLED', 'R2', 'user-declined', false]);
 
   const incomplete = gitRepo(ctx.root, 'incomplete', 'https://github.com/example-owner/incomplete.git');
   decide(ctx, incomplete, 'enable');
   const enabled = state(ctx, incomplete);
   assert.deepEqual([enabled.state, enabled.rule, enabled.materials_complete, enabled.programme_records_bind], ['ENABLED', 'R5', false, false]);
   decide(ctx, incomplete, 'disable');
-  assert.deepEqual([state(ctx, incomplete).state, state(ctx, incomplete).reason], ['DECLINED', 'user-disabled']);
+  assert.deepEqual([state(ctx, incomplete).state, state(ctx, incomplete).reason], ['DISABLED', 'user-disabled']);
   decide(ctx, incomplete, 'enable');
   assert.equal(state(ctx, incomplete).state, 'ENABLED');
 });
@@ -202,15 +202,15 @@ test('S-08, S-09: state follows the origin identity, not the path; clones and wo
   git(first, ['worktree', 'add', '--quiet', '--detach', worktree]);
   const nested = path.join(worktree, 'deep', 'folder');
   fs.mkdirSync(nested, { recursive: true });
-  for (const cwd of [first, second, worktree, nested]) assert.equal(state(ctx, cwd).state, 'UNKNOWN');
+  for (const cwd of [first, second, worktree, nested]) assert.equal(state(ctx, cwd).state, 'UNDECIDED');
   decide(ctx, second, 'decline');
-  for (const cwd of [first, second, worktree, nested]) assert.equal(state(ctx, cwd).state, 'DECLINED', cwd);
+  for (const cwd of [first, second, worktree, nested]) assert.equal(state(ctx, cwd).state, 'DISABLED', cwd);
   const ids = new Set([first, second, worktree, nested].map(cwd => state(ctx, cwd).repository_id));
   assert.equal(ids.size, 1);
   // The same path pointed at another repository gets that repository's state.
   git(first, ['remote', 'set-url', 'origin', 'https://github.com/example-owner/other-repo.git']);
   const moved = state(ctx, first);
-  assert.equal(moved.state, 'UNKNOWN');
+  assert.equal(moved.state, 'UNDECIDED');
   assert.notEqual(moved.repository_id, [...ids][0]);
   assert.equal(state(ctx, worktree).repository_id, moved.repository_id, 'a worktree reads the shared config');
 });
@@ -262,7 +262,7 @@ test('binding: schema shape and agreement with the origin identity', (t) => {
   fs.mkdirSync(path.join(invalid, '.github'));
   fs.writeFileSync(path.join(invalid, '.github', 'toolkit-programme.json'), '{not json');
   const result = state(ctx, invalid);
-  assert.deepEqual([result.state, result.rule, result.materials.binding_present, result.materials.binding_problems], ['UNKNOWN', 'R6', true, ['not valid JSON']]);
+  assert.deepEqual([result.state, result.rule, result.materials.binding_present, result.materials.binding_problems], ['UNDECIDED', 'R6', true, ['not valid JSON']]);
   // This repository's own binding is valid for its own origin.
   const own = path.join(repoRoot, '.github', 'toolkit-programme.json');
   const ownIdentity = { remote: { path: '/weijunswj/ai-agent-toolkit.git' } };
@@ -275,7 +275,7 @@ test('H-09 (unit): unreadable inputs hold inside a repository and never outside 
   fs.mkdirSync(path.dirname(ctx.registryPath), { recursive: true });
   fs.writeFileSync(ctx.registryPath, '{"schema": "not-a-registry"');
   const corrupt = state(ctx, repo);
-  assert.deepEqual([corrupt.state, corrupt.rule, corrupt.reason, corrupt.hold], ['UNKNOWN', 'ERROR', 'registry-unreadable', true]);
+  assert.deepEqual([corrupt.state, corrupt.rule, corrupt.reason, corrupt.hold], ['UNDECIDED', 'ERROR', 'registry-unreadable', true]);
   assert.match(corrupt.error_code, /^[A-Z_]+$/);
   // The same broken registry does not hold a repository without an identity.
   assert.equal(state(ctx, fakeRepo(ctx.root, 'no-origin', { remote: null })).hold, false);
@@ -285,7 +285,7 @@ test('H-09 (unit): unreadable inputs hold inside a repository and never outside 
   fs.mkdirSync(worktreeFile);
   fs.writeFileSync(path.join(worktreeFile, '.git'), 'not a gitdir pointer');
   const dangling = state(ctx, worktreeFile);
-  assert.deepEqual([dangling.state, dangling.rule, dangling.reason, dangling.hold], ['UNKNOWN', 'ERROR', 'identity-unreadable', true]);
+  assert.deepEqual([dangling.state, dangling.rule, dangling.reason, dangling.hold], ['UNDECIDED', 'ERROR', 'identity-unreadable', true]);
 
   const thrower = new governance.GovernanceState({
     identityReader: () => ({ root: '/r', valid: true, repository_id: 'b'.repeat(64) }),
@@ -293,7 +293,7 @@ test('H-09 (unit): unreadable inputs hold inside a repository and never outside 
     decisionReader: () => ({ state: 'unresolved', decision_kind: null }),
   });
   const materialsError = thrower.evaluate('/r');
-  assert.deepEqual([materialsError.state, materialsError.reason, materialsError.error_code], ['UNKNOWN', 'materials-unreadable', 'UNEXPECTED']);
+  assert.deepEqual([materialsError.state, materialsError.reason, materialsError.error_code], ['UNDECIDED', 'materials-unreadable', 'UNEXPECTED']);
 
   assert.throws(() => governance.registryPathFor({ registryPath: ctx.registryPath }), /REGISTRY_PATH_OVERRIDE_FORBIDDEN/);
 });
