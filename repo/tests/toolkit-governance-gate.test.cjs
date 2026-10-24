@@ -227,6 +227,37 @@ for (const decision of ['disable', 'enable']) {
   }
 }
 
+// A link where the state folder belongs is never followed: the directory it points at (here another
+// repository with a tracked .gitignore) stays untouched, and the decided repository is not held.
+// A directory symlink needs privileges on Windows; a junction does not (other platforms ignore the type).
+for (const decision of ['disable', 'enable']) {
+  for (const type of ['dir', 'junction']) {
+    test(`H7 matrix: ${decision}d repository, state folder is a ${type} link: never followed, never held`, (t) => {
+      const ctx = scratch(t);
+      const repo = gitRepo(ctx, `linked-${decision}-${type}`, { remote: `https://github.com/example-owner/linked-${decision}-${type}.git` });
+      const sibling = gitRepo(ctx, `sibling-${decision}-${type}`, { remote: `https://github.com/example-owner/sibling-${decision}-${type}.git` });
+      fs.writeFileSync(path.join(sibling, '.gitignore'), 'node_modules/\n');
+      git(sibling, ['add', '-A']);
+      git(sibling, ['-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--quiet', '-m', 'fixture']);
+      try { fs.symlinkSync(sibling, path.join(repo, repoState.FOLDER), type); } catch (error) {
+        if (error.code === 'EPERM' && process.platform === 'win32') return t.skip('directory symlinks need privileges on this Windows runner');
+        throw error;
+      }
+      const decided = gate.writeGovernanceDecision(repo, decision, { registryOptions: ctx.options });
+      assert.deepEqual([decided.hold, decided.file, decided.error_code], [false, 'unwritable', 'REPO_STATE_FOLDER_NOT_A_DIRECTORY']);
+      for (let round = 0; round < 2; round += 1) {
+        assert.equal(hold(ctx).decide({ cwd: repo, prompt: `request ${round}` }).action, 'pass');
+        assert.equal(tools(ctx).decide({ tool_name: 'Bash', cwd: repo, tool_input: { command: 'ls' } }), null);
+      }
+      assert.match(gate.sessionLine(repo, { registryOptions: ctx.options }), /could not save its copy .*REPO_STATE_FOLDER_NOT_A_DIRECTORY.*nothing is held/);
+      assert.equal(fs.readFileSync(path.join(sibling, '.gitignore'), 'utf8'), 'node_modules/\n');
+      assert.equal(fs.existsSync(path.join(sibling, repoState.FILE)), false);
+      assert.equal(git(sibling, ['status', '--porcelain', '--untracked-files=all']), '');
+      assert.equal(fs.lstatSync(path.join(repo, repoState.FOLDER)).isSymbolicLink(), true, 'the link itself is left in place');
+    });
+  }
+}
+
 test('a decided repository whose state folder cannot be written is reported, never held', (t) => {
   const ctx = scratch(t);
   for (const decision of ['disable', 'enable']) {

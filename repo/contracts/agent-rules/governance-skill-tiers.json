@@ -1,6 +1,6 @@
 {
   "schema": "toolkit.governance-skill-tiers.v1",
-  "description": "Governance tier of every skill under skills/. The per-state skill catalogue is computed from this file and the skill folders by repo/scripts/toolkit-governance-catalogue.cjs; it is never written to a second file. portable: offered in PORTABLE, DECLINED and ENABLED repositories. governed: offered only in an ENABLED repository whose governed block and programme binding are both present. Nothing is offered in an UNKNOWN repository until the user decides.",
+  "description": "Governance tier of every skill under skills/. The per-state skill catalogue is computed from this file and the skill folders by repo/scripts/toolkit-governance-catalogue.cjs; it is never written to a second file. portable: offered in NO REPOSITORY, DISABLED and ENABLED repositories. governed: offered only in an ENABLED repository whose governed block and programme binding are both present. Nothing is offered in an UNDECIDED repository until the user decides.",
   "tiers": ["portable", "governed"],
   "skills": {
     "codex-ssh-hostinger-coolify-setup-maintainer": "portable",
