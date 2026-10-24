@@ -1,5 +1,31 @@
 # Toolkit Changelog
 
+## 3.10.1 (hardening after 3.10.0)
+
+### Governance question
+
+- **A locked session mark now fails safe.** The 3.10.0 notes said a mark that cannot be replaced fails safe, but a mark that could be neither replaced nor removed (a file another process held open, or a read-only folder) still let a resumed or continued run answer. Now the repository's mark is handled even when the session's cannot be, and when an old mark stays in place, the held messages and "later" answers that carry it lose their marks, so the question is asked again. Only if the held-messages file is locked too can the old run still answer, which is part of the speed-bump limit.
+- **Replayed messages from a resumed run are flagged.** The session mark now records whether a run was a resume or a fork. When any held message came from such a run, the messages handed over after your answer carry the "confirm with the user first" wording, whatever order they came in.
+- **Every hold says never to act as the user.** The question, the not-on-github.com notice, the no-mark and resumed notices, and both hosts' "governance check failed" texts now end with the never-act line, so an agent that started the run itself and reads the hold is told not to answer it.
+
+### Global rules
+
+- **Delivery no longer assumes GitHub.** Commit, push and open-a-PR now apply to a git repository with a remote; without git or a remote, the agent reports the changed files instead. `gh pr checks` and `gh run watch` are named as the GitHub way to check CI, and a full local test run is the gate where there is no CI.
+- **Offer to clean up after a merge.** After a merge, the agent offers to delete the branches of closed unmerged PRs that are not default, protected or in use. Deleting still needs your yes.
+- **Run streams are evidence.** Deleting scratch needs no approval only once its report and evidence are stored and read back; run streams and logs are evidence too. `CONTROLLER.md` and the Projects instructions block say the same, so a stream is not deleted before its archive is read back.
+- Two repeated lines were folded into the rules they repeated, to stay within the size budget.
+
+### Helpers and hosts
+
+- **The bridge doc no longer says the hooks decide the same way in and outside gate work:** a G2 session launches no helper, and a launcher-bound session is checked against its binding. A Codex test now pins the full "only the main session launches helpers" refusal, as the Claude Code test does. `CONTROLLER.md` now says subagents are helpers, never gates, without limiting helpers to gate work.
+- **Known limit in Codex Desktop on Windows:** a helper's shell commands can fail with "Requested registry access is not allowed", from Codex Desktop's sandbox for subagents. The helper still starts on its route; the main session can run the command instead. The suggested hand check is "Launch a toolkit-g0-helper to list the top-level folders of this checkout. Stay on the current branch.", since naming another branch makes agents try to switch first.
+- **Codex size line:** setup's "Codex instructions" line now counts the `AGENTS.md` of the repository you are in, and 0 bytes when it has none, instead of falling back to the Toolkit checkout's own file.
+
+### Claude Code qualification runner
+
+- **Rows A14 and A16 are unit-tested.** A16 now also requires a successful result, run records where the runner reads them, and the lead on its route, so a held, signed-out or unrecorded run no longer passes. Both row checks are tested with stub run summaries.
+- **The runner cleans up the config file it creates.** With `CLAUDE_CONFIG_DIR` set, Claude Code keeps its global config in `<config>/.claude.json`; a file the live runs created there is now removed at the end. The runner notes that macOS is not supported.
+
 ## 3.10.0 (host support, governance states, decision history and the personal-data guard)
 
 ### Decision history before planning

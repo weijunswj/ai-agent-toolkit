@@ -23,6 +23,8 @@ function governed(input, environment = process.env) { return governance(input, e
 // state-changing tool refused (toolkit-governance-gate.cjs); everywhere, an agent may not answer the
 // governance question for the user. The gate loads inside the guarded path like the adapter.
 const gate = () => require('./toolkit-governance-gate.cjs');
+// The gate's never-act line, spelled out here because the gate module may be what failed to load.
+const NEVER_OWNER = 'Never act as the user: do not answer the governance question yourself, start a session or script to answer it, or click a confirmation through a UI or computer use.';
 // Inside a git repository? Used after a failure, so it must work without the gate module: a missing
 // module still holds inside a repository (fail closed) and makes no decision elsewhere.
 function insideRepository(cwd) {
@@ -47,7 +49,7 @@ function promptEvent(input) {
 async function decide(input, environment = process.env) {
   let governanceDenial;
   try { governanceDenial = new (gate().ToolGate)().decide(input || {}); } catch {
-    governanceDenial = insideRepository(input?.cwd) ? { deny: 'Toolkit: the governance check failed, so nothing runs in this repository until it works again.' } : null;
+    governanceDenial = insideRepository(input?.cwd) ? { deny: `Toolkit: the governance check failed, so nothing runs in this repository until it works again. ${NEVER_OWNER}` } : null;
   }
   if (governanceDenial) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: governanceDenial.deny } };
   // Shell commands: refuse AI attribution in commits and pull requests, in every folder.
@@ -74,7 +76,7 @@ function decidePrompt(input, environment = process.env) {
   return decision.context ? { context: decision.context } : {};
 }
 
-const PROMPT_FAILED = 'Toolkit: the governance check failed, so your message was held and not sent. If this keeps happening, open Codex in a folder outside any git repository and say `setup toolkit` to repair the installed hooks.';
+const PROMPT_FAILED = `Toolkit: the governance check failed, so your message was held and not sent. If this keeps happening, open Codex in a folder outside any git repository and say \`setup toolkit\` to repair the installed hooks. ${NEVER_OWNER}`;
 function holdPrompt(reason) {
   process.stdout.write(JSON.stringify({ decision: 'block', reason }) + '\n');
   process.stderr.write(`${reason}\n`);
@@ -115,4 +117,4 @@ async function main() {
   // hook failure and continues). An admitted request is exit 0 with empty output.
 }
 if (require.main === module) main().catch(() => deny(HELD));
-module.exports = { main, decide, decidePrompt, governed, promptEvent };
+module.exports = { main, decide, decidePrompt, governed, promptEvent, NEVER_OWNER, PROMPT_FAILED };
