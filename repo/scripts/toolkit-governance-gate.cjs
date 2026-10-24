@@ -242,10 +242,13 @@ class SessionEpochs {
   // The repository's current mark, or null when no session has started in it since this version.
   repository(repositoryId) { return this.#read('r', repositoryId); }
 
-  // Removes a mark, read-only or not; true once it is gone.
+  // Removes a mark, read-only or not; true once it is gone. A link is removed, never followed.
   #drop(kind, key) {
     const file = this.#file(kind, key);
-    try { fs.chmodSync(file, 0o600); } catch { /* removal below decides */ }
+    try {
+      const stat = fs.lstatSync(file);
+      if (stat.isFile() || stat.isDirectory()) fs.chmodSync(file, stat.isDirectory() ? 0o700 : 0o600);
+    } catch { /* removal below decides */ }
     try { fs.rmSync(file, { force: true, recursive: true }); } catch { /* checked below */ }
     return !fs.existsSync(file);
   }
