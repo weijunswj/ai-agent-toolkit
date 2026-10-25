@@ -1,14 +1,14 @@
 {
   "schemaVersion": 1,
   "kind": "ai-agent-toolkit n8n import-export helpers",
-  "setId": "155d2683eebd",
+  "setId": "a48d730f8a0b",
   "files": {
     "_export-n8n-workflows-live.cmd": "29c29daf078b49d808ed7798d6a97da76b8e929080478bf8ca3a6e47739df1e8",
     "_import-n8n-workflows-live.cmd": "2b66d00c559e052db51dab8cef11b2befee9750a506c7df4bb80bf0055cd1ab0",
     "check-n8n-helper-machine.cjs": "774fe0a6d922bc794dabd531a7f5977779c2c207d4e5184ec9967daea74b4ecd",
     "compare-n8n-workflow-credentials.cjs": "3acb9d60a7e2d40e6932592f90d57546952a5b5192add0ff2e480a5e4b1e17b7",
-    "export-n8n-workflows-live.ps1": "c2cc4576242e1d8bd4f7648a1ef3d175e44a600a4b31229534876ba89d1b2b34",
-    "import-n8n-workflows-live.ps1": "f8eb8f8e3c690850061c6685a4ad5f3ea6349c4419a522dbc2f548569a04f301",
+    "export-n8n-workflows-live.ps1": "69fe83acc26f74a496e76741a1256e27def0be765600f1baa9c7e946330db4ba",
+    "import-n8n-workflows-live.ps1": "3a9be277b30d855dc8a1c3eaa4d869993fa80fd4cfd29b0127e3b66308ddaed6",
     "n8n-cli-workflow-json.cjs": "d3e45d7035126f49facc46a56c9509c663d6ff3c7adfd85dee966ce0f44a6bb5",
     "n8n-credential-metadata.cjs": "c7a65a93699e431ae7f2ff86d5cdb0b1361f42692d599327f5b8d1230d28a047",
     "n8n-helper-set.cjs": "63caf01d392983cb649b482160c2908700fb0c933cc10e997f82e7f4f38be771",

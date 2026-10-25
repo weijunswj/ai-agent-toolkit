@@ -3440,7 +3440,7 @@ $tokens = $null
 $errors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile(${psSingleQuoted(path.join(sourceScriptDir, 'export-n8n-workflows-live.ps1'))}, [ref]$tokens, [ref]$errors)
 if ($errors.Count -gt 0) { throw $errors[0].Message }
-$names = @("ConvertTo-NativeArgument", "Invoke-CapturedCommand", "Write-Utf8NoBomText", "Invoke-CliWorkflowJson", "Get-LiveWorkflowListDir", "Read-LiveWorkflowList", "Write-LiveWorkflowJsonFile", "Get-N8nCliLogArguments", "Remove-LiveWorkflowList", "Clear-StaleLiveWorkflowList")
+$names = @("ConvertTo-NativeArgument", "Invoke-CapturedCommand", "Write-Utf8NoBomText", "Invoke-CliWorkflowJson", "Get-LiveWorkflowListDir", "Read-LiveWorkflowList", "Write-LiveWorkflowJsonFile", "Get-N8nCliLogArguments", "Remove-LiveWorkflowList", "Clear-StaleLiveWorkflowList", "Get-SafeLiveWorkflowListDir", "New-LiveWorkflowListToken", "Test-PathItemIsUnsafeLink")
 foreach ($function in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $names -contains $node.Name }, $true)) {
   Invoke-Expression $function.Extent.Text
 }
@@ -3448,14 +3448,16 @@ $RepoRoot = ${psSingleQuoted(root)}
 $HelperScriptDir = ${psSingleQuoted(sourceScriptDir)}
 $Container = "test-container"
 $staleDir = Get-LiveWorkflowListDir
-$stale = Join-Path $staleDir "killed-run.workflows.json"
-$fresh = Join-Path $staleDir "running-run.workflows.json"
-Set-Content -LiteralPath $stale -Value "[]"
-Set-Content -LiteralPath $fresh -Value "[]"
-(Get-Item -LiteralPath $stale).LastWriteTime = (Get-Date).AddHours(-2)
+$hex = "0123456789abcdef0123456789abcdef"
+$killed = Join-Path $staleDir "999999999-$hex.workflows.json"
+$killedRaw = Join-Path $staleDir "999999999-$hex.n8n-output.txt"
+$legacy = Join-Path $staleDir "$hex.workflows.json"
+$running = Join-Path $staleDir "$PID-$hex.workflows.json"
+$other = Join-Path $staleDir "notes.txt"
+foreach ($file in @($killed, $killedRaw, $legacy, $running, $other)) { Set-Content -LiteralPath $file -Value "[]" }
 Clear-StaleLiveWorkflowList
-Write-Output ("STALE=" + (Test-Path -LiteralPath $stale) + " FRESH=" + (Test-Path -LiteralPath $fresh))
-Remove-Item -LiteralPath $fresh
+Write-Output ("KILLED=" + (Test-Path -LiteralPath $killed) + "," + (Test-Path -LiteralPath $killedRaw) + " LEGACY=" + (Test-Path -LiteralPath $legacy) + " RUNNING=" + (Test-Path -LiteralPath $running) + " OTHER=" + (Test-Path -LiteralPath $other))
+Remove-Item -LiteralPath $running, $other
 $lines = @((Get-Content -LiteralPath (Join-Path $RepoRoot "noisy.txt")) | Where-Object { $_ -ne "" })
 $live = Read-LiveWorkflowList ([PSCustomObject]@{ StdOut = $lines })
 Write-Output ("COUNT=" + $live.Count)
@@ -3473,9 +3475,43 @@ Write-Output ("LEFT=" + (Test-Path -LiteralPath (Join-Path $RepoRoot ".tmp/n8n-l
   assert.match(result.stdout, /PUBLISHED=Wf2xPublished01/);
   assert.match(result.stdout, /LOGARGS=-e N8N_LOG_LEVEL=info -e N8N_LOG_OUTPUT=console -e N8N_LOG_FORMAT=text -e NO_COLOR=1/);
   assert.deepEqual(JSON.parse(fs.readFileSync(outPath, 'utf8')), n8n2xWorkflows()[0]);
-  assert.match(result.stdout, /STALE=False FRESH=True/, 'a killed run\'s old copy is removed and a running one is kept');
+  assert.match(result.stdout, /KILLED=False,False LEGACY=False RUNNING=True OTHER=True/, 'a killed run\'s files go at once; a running run\'s files and other files stay');
   assert.match(result.stdout, /STORED=1/);
   assert.match(result.stdout, /LEFT=False/, 'the stored live workflow list is removed when the run ends');
+});
+
+test('live workflow list clean-up never deletes or writes through a linked folder', { skip: findPowerShell() ? false : 'PowerShell not available' }, () => {
+  const shell = findPowerShell();
+  const root = tempDir();
+  const outside = tempDir();
+  const killedName = '999999999-0123456789abcdef0123456789abcdef.workflows.json';
+  fs.writeFileSync(path.join(outside, killedName), '[]');
+  fs.mkdirSync(path.join(root, '.tmp'), { recursive: true });
+  fs.symlinkSync(outside, path.join(root, '.tmp', 'n8n-live-workflow-list'), 'junction');
+  const harnessPath = path.join(root, 'link-harness.ps1');
+  fs.writeFileSync(harnessPath, `
+$ErrorActionPreference = "Stop"
+$tokens = $null
+$errors = $null
+foreach ($script in @(${psSingleQuoted(path.join(sourceScriptDir, 'export-n8n-workflows-live.ps1'))}, ${psSingleQuoted(path.join(sourceScriptDir, 'import-n8n-workflows-live.ps1'))})) {
+  $ast = [System.Management.Automation.Language.Parser]::ParseFile($script, [ref]$tokens, [ref]$errors)
+  if ($errors.Count -gt 0) { throw $errors[0].Message }
+  $names = @("Get-LiveWorkflowListDir", "Remove-LiveWorkflowList", "Clear-StaleLiveWorkflowList", "Get-SafeLiveWorkflowListDir", "Test-PathItemIsUnsafeLink")
+  foreach ($function in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $names -contains $node.Name }, $true)) {
+    Invoke-Expression $function.Extent.Text
+  }
+  $RepoRoot = ${psSingleQuoted(root)}
+  Clear-StaleLiveWorkflowList
+  Remove-LiveWorkflowList
+  $refused = $false
+  try { Get-LiveWorkflowListDir | Out-Null } catch { $refused = $_.Exception.Message -match "through a link" }
+  Write-Output ("KEPT=" + (Test-Path -LiteralPath ${psSingleQuoted(path.join(outside, killedName))}) + " REFUSED=" + $refused)
+}
+`, 'utf8');
+
+  const result = spawnSync(shell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', harnessPath], { cwd: root, encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  assert.equal((result.stdout.match(/KEPT=True REFUSED=True/g) || []).length, 2, result.stdout);
 });
 
 test('live import and export helpers keep workflow JSON out of PowerShell and pin n8n log settings', () => {
