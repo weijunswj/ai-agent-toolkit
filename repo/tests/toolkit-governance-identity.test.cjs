@@ -16,7 +16,6 @@ const test = require('node:test');
 const scripts = path.join(__dirname, '..', 'scripts');
 const registry = require(path.join(scripts, 'toolkit-capability-registry.cjs'));
 const governance = require(path.join(scripts, 'toolkit-governance-state.cjs'));
-const a1 = require(path.join(scripts, 'toolkit-control-plane', 'control-plane-kernel.cjs'));
 
 const CAPABILITY = 'repository.governance';
 
@@ -60,7 +59,7 @@ function oldKey(remote) {
   return crypto.createHash('sha256').update(registry.canonicalSerialize({
     identity_contract: registry.IDENTITY_CONTRACT,
     remote_contract: registry.REMOTE_IDENTITY_CONTRACT_VERSION,
-    remote: a1.validateRemoteIdentity(remote).canonical,
+    remote: registry.validateRemoteIdentity(remote).canonical,
   }), 'utf8').digest('hex');
 }
 
@@ -93,7 +92,7 @@ test('ID-01: every clone form of one repository is one identity; other repositor
     'ssh://git@github.com/example-owner/example-repo.git',
     'ssh://git@github.com:22/example-owner/example-repo',
   ];
-  const ids = new Set(forms.map(form => registry.repositoryIdForCanonicalRemote(a1.validateRemoteIdentity(form).canonical)));
+  const ids = new Set(forms.map(form => registry.repositoryIdForCanonicalRemote(registry.validateRemoteIdentity(form).canonical)));
   assert.equal(ids.size, 1);
   const other = registry.repositoryIdForCanonicalRemote('https://github.com/example-owner/other-repo.git');
   assert.equal(ids.has(other), false);
@@ -161,4 +160,15 @@ test('ID-05: the git-free reader and the registry agree on the normalised key an
     assert.ok(fromGit.legacy_repository_ids.includes(oldKey(remote)), remote);
     assert.equal(fromGit.legacy_repository_ids.includes(fromGit.repository_id), false);
   }
+});
+
+test('ID-06: remote validation accepts HTTPS, SSH and SCP forms and refuses broad ones', () => {
+  for (const remote of ['https://github.com/weijunswj/ai-agent-toolkit.git', 'ssh://git@github.com:22/weijunswj/ai-agent-toolkit.git', 'git@github.com:weijunswj/ai-agent-toolkit.git']) {
+    assert.equal(registry.validateRemoteIdentity(remote).valid, true, remote);
+  }
+  for (const remote of [
+    'https://user:secret@example.com/repo.git', 'https://github.com/repo.git?token=synthetic',
+    'https://github.com', 'https://[::1]:65536/repo.git', 'git@@github.com:repo.git',
+    'git@github.com:', 'C:\\fixture\\repo', '\\\\server\\share', './relative/repo', '', 'x'.repeat(4097),
+  ]) assert.equal(registry.validateRemoteIdentity(remote).valid, false, remote);
 });
