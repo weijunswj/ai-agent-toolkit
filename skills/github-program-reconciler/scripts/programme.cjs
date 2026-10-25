@@ -164,7 +164,10 @@ function readLock(file) {
 // uptime counter, which only grows within one boot.
 function thisBoot() {
   let bootId = null;
-  try { bootId = fs.readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim() || null; } catch { /* not Linux */ }
+  // Only on Linux: elsewhere the same path can name a file anyone may create.
+  if (process.platform === 'linux') {
+    try { bootId = fs.readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim() || null; } catch { /* unavailable */ }
+  }
   return { bootId, uptime: os.uptime() };
 }
 // The lock was written in an earlier boot when the boot ids differ, or when the uptime now is below
@@ -631,7 +634,7 @@ function runPasses(args, deps, out) {
   const file = deps.lockFile !== undefined ? deps.lockFile : (deps.originUrl ? null : defaultLockFile(context.binding.repository));
   let lock = takeLock(file, deps);
   if (!lock && args.command !== 'refresh') {
-    throw new ProgrammeError('PASS_RUNNING', `Another reconcile or refresh pass for ${context.binding.repository} is running on this computer (lock ${file}). Nothing changed; run again when it ends. A lock left by a pass that was killed is taken over once its process has ended, when this computer restarts (on Windows, a shutdown with Fast Startup does not count), or after 6 hours.`);
+    throw new ProgrammeError('PASS_RUNNING', `Another reconcile or refresh pass for ${context.binding.repository} is running on this computer (lock ${file}). Nothing changed; run again when it ends. A lock left by a pass that was killed is taken over once its process has ended, after a restart that this computer can tell from the boot id (Linux) or a lower uptime than the lock recorded (on Windows, a shutdown with Fast Startup is not a restart), or after 6 hours.`);
   }
   if (!lock) {
     setAgain(file);

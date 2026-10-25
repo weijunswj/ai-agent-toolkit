@@ -43,11 +43,12 @@ const GH_WRITE = /\bgh(?:\.exe)?\s+(?:issue|pr)\s+(?:create|edit|comment|close|r
 const GIT_WORD = /(?:^|[\\/&("'])git(?:\.exe)?$/i;
 const GIT_OPTIONS_MAX = 16;
 const WRAPPER_FLAG = /^(?:-\w*c|-Command|\/c)$/i;
+const SHELL_WORD = /(?:^|[\\/&("'])(?:bash|sh|zsh|dash|pwsh|powershell|cmd)(?:\.exe)?$/i;
 function gitPushes(command) {
   const words = command.split(/\s+/).filter(Boolean);
   for (let start = 0; start < words.length; start += 1) {
     if (!GIT_WORD.test(words[start])) continue;
-    if (/^["']/.test(words[start]) && !WRAPPER_FLAG.test(words[start - 1] || '')) continue;
+    if (/^["']/.test(words[start]) && !(WRAPPER_FLAG.test(words[start - 1] || '') && SHELL_WORD.test(words[start - 2] || ''))) continue;
     for (let index = start + 1; index < words.length && index - start <= GIT_OPTIONS_MAX; index += 1) {
       const word = words[index];
       if (word === '-C' || word === '-c') { index += 1; continue; }

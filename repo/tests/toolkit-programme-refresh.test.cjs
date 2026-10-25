@@ -413,6 +413,7 @@ test('GitHub writes are recognised; reads and other repositories are not', () =>
     post('Bash', { command: "git commit -m 'git push'" }),
     post('Bash', { command: 'printf "%s" "git push"' }),
     post('Bash', { command: 'git log --grep "git push"' }),
+    post('Bash', { command: 'grep -c "git push" notes.md' }),
     post('Edit', { file_path: 'x' }),
   ];
   for (const input of reads) assert.equal(trigger.githubWrite(input), null, `${input.tool_name} ${JSON.stringify(input.tool_input)}`);
