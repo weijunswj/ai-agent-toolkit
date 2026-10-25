@@ -25,7 +25,7 @@ A hard stop is never offered, never honoured from the ledger, and only explained
 - Merging without the owner's OK on a summary of its external effects (each merge stays its own OK).
 - Production, live-system, deployment, firewall or security-setting changes.
 - Turning off tests, validation, guardrails, attribution rules or any safety check.
-- Editing the agent's own permission settings, or adding allow rules, `autoMode` entries or Codex allow rules to any saved settings or rules file (user, project, local or managed settings, a Codex rules file, or a reusable `--settings` file, meaning one kept for more than one launch rather than written for a single session and discarded). Per-launch options for a session the agent starts, such as `--allowedTools`, are not covered here, and they never clear a hard stop.
+- Editing the agent's own permission settings, or adding allow rules, `autoMode` entries or Codex allow rules to any saved settings or rules file (user, project, local or managed settings, a Codex rules file, or a reusable `--settings` file, meaning one kept for more than one launch rather than written for one session and deleted when it ends). Per-launch options for a session the agent starts, such as `--allowedTools`, are not covered here, and they never clear a hard stop.
 - Anything the host hard-denies.
 - Anything that means acting as the owner.
 - Anything else in the global safety floor.
