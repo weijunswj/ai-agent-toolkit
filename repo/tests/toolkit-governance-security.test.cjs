@@ -559,6 +559,15 @@ test('SE-08: the reader only reads, hides nothing it could not see, and reads th
     ['%TAG ! tag:yaml.org,2002:\n---\non: push\njobs:\n  a:\n    steps:\n      - run: echo hi\n', 'unsure', 'a %TAG directive'],
     ['on: push\njobs:\n  a:\n    steps:\n      - uses: !!binary Z2l0aHViL2NvZGVxbC1hY3Rpb24vaW5pdEB2Mw==\n', 'unsure', 'a binary uses value'],
     ['on: push\u0000\njobs: {}\n', 'unsure', 'a NUL byte'],
+    ['on: push\njobs:\n  a:\n    steps:\n      - uses: "github/code\\\r        ql-action/init@v3"\n      - uses: github/codeql-action/analyze@v3\n', 'unsure', 'an escaped lone CR line break inside codeql (N24)'],
+    ['on: push\njobs:\n  a:\n    steps:\n      - uses: "github/code\\\u2028        ql-action/init@v3"\n      - uses: github/codeql-action/analyze@v3\n', 'unsure', 'an escaped LS line break inside codeql (N24)'],
+    ['on: push\r\njobs:\r\n  a:\r\n    steps:\r\n      - uses: github/codeql-action/upload-sarif@v3\r\n', false, 'upload-sarif only, CRLF'],
+    ['\uFEFF%TAG !e! tag:yaml.org,2002:\n---\non: push\njobs:\n  a:\n    steps:\n      - uses: !e!binary Z2l0aHViL2NvZGVxbC1hY3Rpb24vaW5pdEB2Mw==\n', 'unsure', 'a %TAG directive after a BOM (N25)'],
+    ['on: push\njobs:\n  a:\n    steps:\n      - uses: !<tag:yaml.org,2002:%62inary> Z2l0aHViL2NvZGVxbC1hY3Rpb24vaW5pdEB2Mw==\n', 'unsure', 'a verbatim escaped tag (N25)'],
+    ['on: push\njobs:\n  a:\n    steps:\n      - uses: !!%62inary Z2l0aHViL2NvZGVxbC1hY3Rpb24vaW5pdEB2Mw==\n', 'unsure', 'an escaped shorthand tag (N25)'],
+    ['on: push\njobs:\n  a:\n    steps:\n      - uses: example/github/codeql-action/upload-sarif@v1\n', 'unsure', 'another action whose path ends like upload-sarif (N26)'],
+    ['on: push\njobs:\n  a:\n    steps:\n      - uses: xgithub/codeql-action/upload-sarif@v3\n', 'unsure', 'another owner named like github (N26)'],
+    ['on: push\njobs:\n  a:\n    steps:\n      - run: echo hi!!\n      - uses: !!str github/codeql-action/upload-sarif@v3\n', false, 'a !!str upload-sarif step and !! in a script'],
     ['on: push\njobs:\n  a:\n    steps:\n      - uses: "github/codeql-action/upload-sarif@v3"\n      - uses: "github/codeql-action/upload-sarif\\x40v3"\n', 'unsure', 'an escape near upload-sarif is never trusted blind'],
   ]) assert.equal(security.runsCodeql(text), runs, why);
   // A default ref GitHub cannot resolve is unreadable, never "not merged".

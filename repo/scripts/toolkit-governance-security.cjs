@@ -353,11 +353,15 @@ function jobSteps(block, keyIndent) {
 // This is a plain text search, so no YAML shape can hide a step from it: the text is searched raw and
 // decoded the way any YAML scalar could spell it (escaped line breaks joined, every \x, \u and \U
 // escape decoded, every other backslash dropped), comments included, and every `codeql` in either
-// copy must belong to `github/codeql-action/upload-sarif@`. Text that may not decode as written (a
-// NUL, a decoding error, a %TAG directive, a binary tag) is never ruled out.
+// copy must belong to `github/codeql-action/upload-sarif@` with nothing before `github/` that could
+// make it another action's path. Text that may not decode as written (a NUL, a decoding error, a
+// line break other than LF or CRLF, a %TAG directive, a verbatim, escaped or binary tag) is never
+// ruled out.
 function codeqlRuledOut(text) {
   const raw = String(text);
-  if (/[\u0000\uFFFD]/.test(raw) || /^[ \t]*%TAG\b/m.test(raw) || /!!binary|tag:yaml\.org,2002:binary/i.test(raw)) return false;
+  // A line break other than LF or CRLF (a lone CR, NEL, LS, PS) could hide an escaped line break.
+  if (/[\u0000\uFFFD\u0085\u2028\u2029]|\r(?!\n)/.test(raw) || /^\uFEFF?[ \t]*%TAG\b/m.test(raw)
+    || /!!binary|tag:yaml\.org,2002:binary|!<|![\w-]*!\S*%/i.test(raw)) return false;
   const decoded = raw.replace(/\\\r?\n[ \t]*/g, '')
     .replace(/\\x([0-9A-Fa-f]{2})|\\u([0-9A-Fa-f]{4})|\\U([0-9A-Fa-f]{8})/g, (all, a, b, c) => {
       try { return String.fromCodePoint(parseInt(a || b || c, 16)); } catch { return ''; }
@@ -367,7 +371,7 @@ function codeqlRuledOut(text) {
   return [raw, decoded].every(copy => {
     const lower = copy.toLowerCase();
     for (let at = lower.indexOf('codeql'); at >= 0; at = lower.indexOf('codeql', at + 1)) {
-      if (at < 7 || lower.slice(at - 7, at - 7 + safe.length) !== safe) return false;
+      if (at < 7 || lower.slice(at - 7, at - 7 + safe.length) !== safe || /[\w./-]/.test(lower[at - 8] || '')) return false;
     }
     return true;
   });
