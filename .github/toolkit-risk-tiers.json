@@ -1,6 +1,6 @@
 {
   "schema": "toolkit-risk-tiers/v1",
-  "description": "How repo/scripts/toolkit-risk-tier.cjs tags a change in this repository. A changed path takes the first list it matches: risky, then normal, then light; anything else is NORMAL. A file whose changed lines only set a version is LIGHT. Editing this list is itself RISKY.",
+  "description": "How repo/scripts/toolkit-risk-tier.cjs tags a change in this repository. A changed path takes the first list it matches: risky, then normal, then light; anything else is NORMAL. Risky patterns ignore letter case. A file whose changed lines only bump the product version (a JSON \"version\" key, a version constant or a managed-block marker) is LIGHT. Editing this list is itself RISKY.",
   "risky": [
     ".github/toolkit-risk-tiers.json",
     "repo/scripts/toolkit-risk-tier.cjs",

@@ -4,7 +4,9 @@
 // Tags a change RISKY, NORMAL or LIGHT by the paths it touches, never by its size, so the tier is not
 // a model's guess. Each changed path takes the first list it matches in the repository's
 // .github/toolkit-risk-tiers.json (risky, then normal, then light), or NORMAL when it matches none.
-// A file whose changed lines only set a version counts as LIGHT. A mixed change takes its highest tier.
+// RISKY patterns match regardless of letter case, so a path typed in another case on Windows still
+// counts. A file whose changed lines only bump the product version counts as LIGHT. A mixed change
+// takes its highest tier.
 // Without a repository list, a generic default list is used and the output says so.
 //
 // Usage: node repo/scripts/toolkit-risk-tier.cjs [--repo <dir>] [--base <ref>] [--json] [-- <path>...]
@@ -27,18 +29,21 @@ const DEFAULT_CONFIG = Object.freeze({
   normal: [],
   light: ['**/*.md', '**/*.txt', '**/*.rst', 'LICENSE*'],
 });
-// A changed line that only sets a version, such as "version": "1.2.3" or const VERSION = '1.2.3';, or a
-// Toolkit managed-block marker whose toolkit= version is the only thing a version bump changes.
+// A changed line that only bumps the product version: a "version" key in a JSON file, a version or
+// __version__ constant in a code file, or a Toolkit managed-block marker whose toolkit= version is the
+// only thing a bump changes. Other version-like names, such as MIN_VERSION, can change behaviour, so
+// they keep the path's tier.
 const VERSION_LINES = Object.freeze([
-  /^\s*(?:(?:export\s+)?(?:const|let|var)\s+)?["'`]?[A-Za-z_]*version[A-Za-z_]*["'`]?\s*[:=]\s*["'`]v?\d+\.\d+\.\d+["'`]\s*[,;]?\s*$/i,
-  /^\s*<!-- AI-AGENT-TOOLKIT:[^\s]+:BEGIN [A-Z0-9-]+ v\d+ toolkit=\d+\.\d+\.\d+ sha256=[0-9a-f]{12} -->\s*$/,
+  { files: /\.json$/i, line: /^\s*"version"\s*:\s*"v?\d+\.\d+\.\d+"\s*,?\s*$/ },
+  { files: /\.(?:[cm]?js|ts|py)$/i, line: /^\s*(?:(?:export\s+)?(?:const|let|var)\s+)?(?:version|__version__)\s*=\s*["'`]v?\d+\.\d+\.\d+["'`]\s*;?\s*$/i },
+  { files: /./, line: /^\s*<!-- AI-AGENT-TOOLKIT:[^\s]+:BEGIN [A-Z0-9-]+ v\d+ toolkit=\d+\.\d+\.\d+ sha256=[0-9a-f]{12} -->\s*$/ },
 ]);
 
 function fail(message) { throw Object.assign(new Error(message), { code: 'RISK_TIER_INPUT' }); }
 
 // gitignore-style globs: `**` spans folders, `*` and `?` stay inside one name, and a pattern
 // without a slash matches the name in any folder.
-function globToRegExp(glob) {
+function globToRegExp(glob, { ignoreCase = false } = {}) {
   let source = '';
   for (let index = 0; index < glob.length; index += 1) {
     const char = glob[index];
@@ -48,7 +53,7 @@ function globToRegExp(glob) {
     else if (char === '?') source += '[^/]';
     else source += char.replace(/[.+^${}()|[\]\\]/g, '\\$&');
   }
-  return new RegExp(glob.includes('/') ? `^${source}$` : `(?:^|/)${source}$`);
+  return new RegExp(glob.includes('/') ? `^${source}$` : `(?:^|/)${source}$`, ignoreCase ? 'i' : '');
 }
 
 function loadConfig(repoRoot) {
@@ -63,16 +68,17 @@ function loadConfig(repoRoot) {
   return { config, source: CONFIG_REL };
 }
 
-function versionOnly(changedLines) {
-  return changedLines.length > 0 && changedLines.every(line => VERSION_LINES.some(pattern => pattern.test(line)));
+function versionOnly(rel, changedLines) {
+  const rules = VERSION_LINES.filter(rule => rule.files.test(rel));
+  return changedLines.length > 0 && changedLines.every(line => rules.some(rule => rule.line.test(line)));
 }
 
 // One changed file: { path, changedLines } where changedLines is null when the content is unknown
 // (an added, deleted or binary file, or a path given on the command line).
 function classifyFile(file, config) {
-  if (file.changedLines && versionOnly(file.changedLines)) return { path: file.path, tier: 'LIGHT', rule: 'version-only change' };
+  if (file.changedLines && versionOnly(file.path, file.changedLines)) return { path: file.path, tier: 'LIGHT', rule: 'version-only change' };
   for (const [key, tier] of LISTS) {
-    const pattern = config[key].find(glob => globToRegExp(glob).test(file.path));
+    const pattern = config[key].find(glob => globToRegExp(glob, { ignoreCase: key === 'risky' }).test(file.path));
     if (pattern) return { path: file.path, tier, rule: `${key}: ${pattern}` };
   }
   return { path: file.path, tier: 'NORMAL', rule: 'no list matched' };

@@ -59,13 +59,34 @@ test('every RISKY pattern in this repository matches a tracked file, so the list
 });
 
 test('a version-only edit is LIGHT even on a RISKY path; any other line keeps the path tier', () => {
-  assert.equal(tierOf('repo/scripts/toolkit-local-bridge.cjs', ["const BRIDGE_VERSION = '3.10.0';", "const BRIDGE_VERSION = '3.11.0';"]), 'LIGHT');
+  assert.equal(tierOf('repo/scripts/toolkit-local-bridge.cjs', ["const VERSION = '3.10.0';", "const VERSION = '3.11.0';"]), 'LIGHT');
   assert.equal(tierOf('.claude-plugin/plugin.json', ['  "version": "3.10.0",', '  "version": "3.11.0",']), 'LIGHT');
-  assert.equal(tierOf('repo/scripts/toolkit-local-bridge.cjs', ["const BRIDGE_VERSION = '3.11.0';", 'process.exit(0);']), 'RISKY');
+  assert.equal(tierOf('repo/scripts/toolkit-local-bridge.cjs', ["const VERSION = '3.11.0';", 'process.exit(0);']), 'RISKY');
   assert.equal(tierOf('AGENTS.md', ['<!-- AI-AGENT-TOOLKIT:a.md:BEGIN X v2 toolkit=3.10.0 sha256=0123456789ab -->',
     '<!-- AI-AGENT-TOOLKIT:a.md:BEGIN X v2 toolkit=3.11.0 sha256=0123456789ab -->']), 'LIGHT', 'a managed-block marker bump');
   assert.equal(tierOf('AGENTS.md', ['<!-- AI-AGENT-TOOLKIT:a.md:BEGIN X v2 toolkit=3.11.0 sha256=0123456789ab -->', '- a new rule']), 'RISKY');
   assert.equal(tierOf('repo/scripts/toolkit-local-bridge.cjs', []), 'RISKY', 'a mode-only change is not a version bump');
+});
+
+test('a version-like line that can change behaviour, or sits in the wrong kind of file, keeps the path tier', () => {
+  for (const [rel, lines] of [
+    ['repo/scripts/toolkit-governance-gate.cjs', ["const MIN_VERSION = '1.0.0';", "const MIN_VERSION = '9.9.9';"]],
+    ['repo/scripts/toolkit-local-bridge.cjs', ["const BRIDGE_VERSION = '3.10.0';", "const BRIDGE_VERSION = '3.11.0';"]],
+    ['.claude-plugin/plugin.json', ['  "minVersion": "1.0.0",', '  "minVersion": "2.0.0",']],
+    ['repo/CONTROLLER.md', ["const MIN_VERSION = '1.0.0';", "const MIN_VERSION = '9.9.9';"]],
+    ['repo/CONTROLLER.md', ['  "version": "3.10.0",', '  "version": "3.11.0",']],
+    ['repo/CONTROLLER.md', ["version = '3.10.0'", "version = '3.11.0'"]],
+  ]) assert.equal(tierOf(rel, lines), 'RISKY', `${rel}: ${lines[1]}`);
+  assert.equal(tierOf('pkg/__init__.py', ["__version__ = '1.0.0'", "__version__ = '1.1.0'"], DEFAULT_CONFIG), 'LIGHT');
+});
+
+test('RISKY patterns ignore letter case, so a hand-typed Windows path cannot drop the tier', () => {
+  for (const rel of ['REPO/controller.MD', 'Repo/Scripts/Setup-Toolkit.cjs', 'agents.md', '.Agents/Rules/x.md', 'repo/scripts/TOOLKIT-GOVERNANCE-HOOK.cjs']) {
+    assert.equal(tierOf(rel), 'RISKY', rel);
+  }
+  assert.equal(tierOf(parseArgs(['--', 'Repo\\Scripts\\Setup-Toolkit.cjs']).paths[0]), 'RISKY');
+  assert.equal(tierOf('Scripts/Install.sh', null, DEFAULT_CONFIG), 'RISKY');
+  assert.equal(globToRegExp('repo/CONTROLLER.md').test('repo/controller.md'), false, 'matching stays exact unless asked');
 });
 
 test('a mixed change takes its highest tier, and no change is LIGHT', () => {
