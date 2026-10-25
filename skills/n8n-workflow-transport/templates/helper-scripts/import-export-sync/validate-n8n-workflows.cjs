@@ -426,8 +426,8 @@ for (const filePath of files) {
       ? 'holds a workflow id from one n8n instance'
       : 'is the live instance\'s MCP exposure decision';
     if (preparedImportMode) {
-      // The preparation step only carries the target's own value here and refuses anything else.
-      messages.push(`${relative} keeps the target's own settings.${key}.`);
+      // This validator never sees the target; preparation checked the value against it.
+      messages.push(`${relative} carries settings.${key}; preparation checked it against the target.`);
     } else {
       warn(`${relative} sets settings.${key}, which ${reason}. Re-export to drop it from Git.`);
     }

@@ -5,6 +5,12 @@
 - **The CI drift guard pins the whole of `validate.yml`:** the file must match its pinned text everywhere except the gate command list, including the final `validate` job, comments and anything before the jobs. Each gate command must be a plain repository script line with no shell syntax, and the usual spellings of `set +e`, `|| echo` and a `shell:` key are refused as a second check.
 - **No test file is skipped silently:** a `.test.cjs` entry in `repo/tests` with a name outside the allowed pattern, or a folder or link named like a test, now fails every runner mode instead of never running.
 
+## 3.10.3 (n8n helper review follow-ups)
+
+- **One live rule everywhere:** the transport module's own postcondition check now uses the same fail-closed rule as the live helpers, so a published version or a missing state never passes as unpublished.
+- **Truthful messages:** preparing a new workflow says it gets no MCP exposure or error workflow, the prepared-import validator says preparation checked the setting against the target, and the helper README states the fail-closed rule and which machine check reads Docker.
+- **Killed runs:** the next run deletes a stored live workflow list older than an hour, so a run that was killed before its clean-up does not leave a copy behind for long.
+
 ## 3.10.2 (n8n helpers that work on any machine, and n8n 2.x publish state)
 
 ### n8n import and export helpers on any machine

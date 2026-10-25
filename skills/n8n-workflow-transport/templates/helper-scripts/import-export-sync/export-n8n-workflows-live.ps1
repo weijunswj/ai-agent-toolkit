@@ -570,6 +570,19 @@ function Remove-LiveWorkflowList {
   }
 }
 
+function Clear-StaleLiveWorkflowList {
+  # A run that was killed (window closed, power loss) cannot reach its finally block, so the next run
+  # removes any stored list older than an hour. Newer files may belong to a run still in progress.
+  $listDir = Join-Path (Join-Path $RepoRoot ".tmp") "n8n-live-workflow-list"
+  if (-not (Test-Path -LiteralPath $listDir -PathType Container)) {
+    return
+  }
+  $cutoff = (Get-Date).AddHours(-1)
+  Get-ChildItem -LiteralPath $listDir -File -Force | Where-Object { $_.LastWriteTime -lt $cutoff } | ForEach-Object {
+    Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue
+  }
+}
+
 function Write-LiveWorkflowJsonFile($Workflow, $Path) {
   Invoke-CliWorkflowJson @("write", "--store", $script:LiveWorkflowStorePath, "--id", [string]$Workflow.id, "--output", $Path) "Could not write the live workflow file $Path."
 }
@@ -862,6 +875,7 @@ if ($Mode -eq "RepoTrackedOnly") {
 
 # Every exit path, including errors, removes the stored live workflow list in the finally block below.
 try {
+Clear-StaleLiveWorkflowList
 Assert-HelperSetReady
 Assert-WorkflowIdentityStateReadable
 $workflowFiles = Get-RootWorkflowFiles $WorkflowDirPath ($Mode -eq "RepoTrackedOnly")

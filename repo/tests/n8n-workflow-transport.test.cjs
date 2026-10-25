@@ -3440,13 +3440,22 @@ $tokens = $null
 $errors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile(${psSingleQuoted(path.join(sourceScriptDir, 'export-n8n-workflows-live.ps1'))}, [ref]$tokens, [ref]$errors)
 if ($errors.Count -gt 0) { throw $errors[0].Message }
-$names = @("ConvertTo-NativeArgument", "Invoke-CapturedCommand", "Write-Utf8NoBomText", "Invoke-CliWorkflowJson", "Get-LiveWorkflowListDir", "Read-LiveWorkflowList", "Write-LiveWorkflowJsonFile", "Get-N8nCliLogArguments", "Remove-LiveWorkflowList")
+$names = @("ConvertTo-NativeArgument", "Invoke-CapturedCommand", "Write-Utf8NoBomText", "Invoke-CliWorkflowJson", "Get-LiveWorkflowListDir", "Read-LiveWorkflowList", "Write-LiveWorkflowJsonFile", "Get-N8nCliLogArguments", "Remove-LiveWorkflowList", "Clear-StaleLiveWorkflowList")
 foreach ($function in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $names -contains $node.Name }, $true)) {
   Invoke-Expression $function.Extent.Text
 }
 $RepoRoot = ${psSingleQuoted(root)}
 $HelperScriptDir = ${psSingleQuoted(sourceScriptDir)}
 $Container = "test-container"
+$staleDir = Get-LiveWorkflowListDir
+$stale = Join-Path $staleDir "killed-run.workflows.json"
+$fresh = Join-Path $staleDir "running-run.workflows.json"
+Set-Content -LiteralPath $stale -Value "[]"
+Set-Content -LiteralPath $fresh -Value "[]"
+(Get-Item -LiteralPath $stale).LastWriteTime = (Get-Date).AddHours(-2)
+Clear-StaleLiveWorkflowList
+Write-Output ("STALE=" + (Test-Path -LiteralPath $stale) + " FRESH=" + (Test-Path -LiteralPath $fresh))
+Remove-Item -LiteralPath $fresh
 $lines = @((Get-Content -LiteralPath (Join-Path $RepoRoot "noisy.txt")) | Where-Object { $_ -ne "" })
 $live = Read-LiveWorkflowList ([PSCustomObject]@{ StdOut = $lines })
 Write-Output ("COUNT=" + $live.Count)
@@ -3464,6 +3473,7 @@ Write-Output ("LEFT=" + (Test-Path -LiteralPath (Join-Path $RepoRoot ".tmp/n8n-l
   assert.match(result.stdout, /PUBLISHED=Wf2xPublished01/);
   assert.match(result.stdout, /LOGARGS=-e N8N_LOG_LEVEL=info -e N8N_LOG_OUTPUT=console -e N8N_LOG_FORMAT=text -e NO_COLOR=1/);
   assert.deepEqual(JSON.parse(fs.readFileSync(outPath, 'utf8')), n8n2xWorkflows()[0]);
+  assert.match(result.stdout, /STALE=False FRESH=True/, 'a killed run\'s old copy is removed and a running one is kept');
   assert.match(result.stdout, /STORED=1/);
   assert.match(result.stdout, /LEFT=False/, 'the stored live workflow list is removed when the run ends');
 });
@@ -3477,7 +3487,7 @@ test('live import and export helpers keep workflow JSON out of PowerShell and pi
     assert.match(text, /@\("exec"\) \+ \(Get-N8nCliLogArguments\)/, name);
     assert.match(text, /\nAssert-HelperSetReady\r?\n/, name);
     assert.match(text, /No workflows with published versions found/, name);
-    assert.match(text, /\ntry \{\r?\nAssert-HelperSetReady\r?\n/, name);
+    assert.match(text, /\ntry \{\r?\nClear-StaleLiveWorkflowList\r?\nAssert-HelperSetReady\r?\n/, name);
     assert.match(text, /\n\} finally \{\r?\n  Remove-LiveWorkflowList\r?\n\}\r?\n$/, name);
   }
   const importText = readText(path.join(sourceScriptDir, 'import-n8n-workflows-live.ps1'));
@@ -3583,11 +3593,12 @@ test('legacy prepared imports keep the target\'s own instance-only settings too'
   let result = runNode(prepareScript, [repoFile, path.join(cwd, 'missing-bindings.json'), outFile, liveFile], { cwd });
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(JSON.parse(fs.readFileSync(outFile, 'utf8')).settings, { executionOrder: 'v1', availableInMCP: false });
-  assert.match(result.stdout, /kept the target's own availableInMCP; left out Git's errorWorkflow/);
+  assert.match(result.stdout, /kept the target's own availableInMCP; left out Git's errorWorkflow\. MCP exposure and the error workflow end up exactly as the target has them\./);
 
   result = runNode(prepareScript, [repoFile, path.join(cwd, 'missing-bindings.json'), outFile], { cwd });
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(JSON.parse(fs.readFileSync(outFile, 'utf8')).settings, { executionOrder: 'v1' });
+  assert.match(result.stdout, /left out Git's errorWorkflow, availableInMCP\. The new workflow gets no MCP exposure or error workflow\./);
 });
 
 test('validator reports risky nodes offline, flags instance-only settings and refuses published workflow files', () => {
@@ -3619,7 +3630,7 @@ test('validator reports risky nodes offline, flags instance-only settings and re
   writeJson(path.join(preparedDir, 'safe.live-import.json'), { ...portableWorkflow.canonicalWorkflowForGit(safeWorkflow()), settings: { availableInMCP: true } });
   result = runNode(validateScript, ['--mode', 'prepared-import', preparedDir], { cwd });
   assert.equal(result.status, 0, result.stderr + result.stdout);
-  assert.match(result.stdout, /keeps the target's own settings\.availableInMCP/);
+  assert.match(result.stdout, /carries settings\.availableInMCP; preparation checked it against the target/);
 });
 
 test('risky node report names each category the safety rules require', () => {
