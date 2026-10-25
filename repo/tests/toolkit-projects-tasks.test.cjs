@@ -8,7 +8,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const test = require('node:test');
 const { renderBlock, findBlocks } = require('../scripts/toolkit-managed-block.cjs');
-const { ProjectsTasks, KEPT_LABEL, PROJECT_HEADING, validateParams, checkMemory, parseArgs } = require('../scripts/toolkit-projects-tasks.cjs');
+const { ProjectsTasks, KEPT_LABEL, PROJECT_HEADING, LEGACY_RAISE, validateParams, checkMemory, parseArgs } = require('../scripts/toolkit-projects-tasks.cjs');
 
 const ROOT = path.resolve(__dirname, '../..');
 const SCRIPT = path.join(ROOT, 'repo/scripts/toolkit-projects-tasks.cjs');
@@ -219,14 +219,38 @@ test('model tier and effort: cheapest by default, medium floor, every raise carr
   const legacy = rendered('hourly-nudge').replace(/,\n {2}"model": "small"/, '');
   assert.doesNotMatch(legacy, /"model"/);
   assert.equal(tasks().check('hourly-nudge', legacy).state, 'current');
+  // A prompt rendered before tiers (no model key) with any old effort still checks and refreshes.
+  const projectText = 'Project additions:\n- Keep this owner line.';
+  for (const kind of ['daily-check-in', 'hourly-nudge', 'custom']) {
+    for (const [effort, want, reason] of [['low', 'medium', undefined], ['medium', 'medium', undefined], ['high', 'high', LEGACY_RAISE], ['max', 'max', LEGACY_RAISE]]) {
+      const old = laterMain({ version: '1.0.0' }).render(kind, params(kind), kind === 'custom' ? OWN_TEXT : projectText);
+      const legacyPrompt = old.replace(/,\n {2}"model": "[a-z]+"/, '').replace('"effort": "medium"', `"effort": "${effort}"`);
+      assert.doesNotMatch(legacyPrompt, /"model"/);
+      assert.equal(tasks().check(kind, legacyPrompt).state, 'outdated', `${kind} ${effort}`);
+      const session = kind === 'custom' ? undefined : 'bound';
+      const refreshed = tasks().refresh(kind, legacyPrompt, { session });
+      assert.equal(tasks().check(kind, refreshed).state, 'current', `${kind} ${effort} refreshed`);
+      const migrated = JSON.parse(refreshed.match(/```toolkit-task-params\n([\s\S]*?)\n```/)[1]);
+      assert.equal(migrated.effort, want);
+      assert.equal(migrated.raise_reason, reason);
+      assert.ok(refreshed.includes(kind === 'custom' ? 'List the folder.' : 'Keep this owner line.'), 'project text kept');
+    }
+  }
+  // New-format params stay strict: no migration once a model key is present.
+  assert.equal(tasks().check('hourly-nudge', rendered('hourly-nudge').replace('"effort": "medium"', '"effort": "low"')).state, 'malformed');
   // The check-in reports model and effort gaps, and a recorded raise excuses them.
   const checkIn = fs.readFileSync(path.join(TASKS, 'daily-check-in.md'), 'utf8');
   assert.match(checkIn, /weekdays-only, no-effort, model, effort, name/);
-  assert.match(checkIn, /neither applies when the served settings match a `raised <tier>\/<effort>` field/);
+  assert.match(checkIn, /unless the served settings match a `raised <tier>\/<effort>` field/);
+  // A gap a swap cannot fix never causes a daily swap: fresh entries and repeats are advice only.
+  assert.match(checkIn, /Report each model or effort gap in the prefix only once: when the entry says fresh[^\n]*list it under \*\*Tasks:\*\* as "tier gap still open" instead, so it never causes a daily swap/);
+  assert.match(checkIn, /each model or effort gap reported \(task, served, wanted\)/);
   // The nudge closes quiet chat reply threads and lists threads due for rotation.
   const nudge = fs.readFileSync(path.join(TASKS, 'hourly-nudge.md'), 'utf8');
   assert.match(nudge, /reason QUIET-6H, unresolved post reply threads with no new message for 6 hours or more/);
-  assert.match(nudge, /Rotate: long-lived worker threads/);
+  assert.match(nudge, /Rotate: long-lived non-gate worker threads \(integrator, review runner, record keeper; never gate sessions/);
+  assert.match(nudge, /the QUIET-6H due time in the state file has not passed/);
+  assert.match(nudge, /no answer; never a task home thread\./);
   assert.match(nudge, /\*\*Rotate:\*\*/);
 });
 

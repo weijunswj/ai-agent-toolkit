@@ -41,11 +41,14 @@ A task that fires into a thread or session it is bound to runs on that thread's 
 
 ## Threads and sessions
 
+These apply to non-gate work. Gate sessions (G0, G1, G2, reviewers) follow their gate rules' fresh-context and recoverable-work rules instead.
+
 - **One job per thread or session.** A finished thread is never reused for new work, even on the same topic: start a new one and link the old one.
-- **Rotate long-lived workers automatically** (integrators, review runners, record keepers, task home threads): after each milestone (a merge, a release, a finished review round), when the thread shows its context was summarised, or when its context use passes about 40% of the window. The old thread writes a short handoff file (state, open items, ids, next step, under about 2 KB) where the next one can read it, the controller starts a fresh thread on the same tier with a brief that points to that file, and the old one closes once its output is saved and relayed.
+- **Rotate long-lived workers automatically** (integrators, review runners, record keepers): after each milestone (a merge, a release, a finished review round), when the thread shows its context was summarised, or, where the host reports context use, when it passes about 40% of the window. The old thread writes a short handoff file (state, open items, ids, next step, under about 2 KB) where the next one can read it, the controller starts a fresh thread on the same tier with a brief that points to that file, and the old one closes once its output is saved and relayed.
+- **Task home threads** are rebuilt with their task, never closed while the task fires into them: start the new home thread and task first, then delete the old task.
 - **Never rotate the controller's own thread.** In plain chats the user starts a fresh chat now and then.
 - **Briefs point to files.** Link plans, handoffs and reports by path; never paste history or earlier thread text.
-- **Closing:** a work thread closes as soon as its output is saved and relayed and nothing is open for it. A chat reply thread closes after 6 hours with no new messages. A task's home thread is never closed. Host skills (for Claude Projects, `web-controller-projects`) say which pass does the closing.
+- **Closing:** a work thread closes as soon as its output is saved and relayed and nothing is open for it. A chat reply thread closes after 6 hours with no new messages, unless it holds an owner question or decision with no answer. A task's home thread is never closed while its task fires into it. Host skills (for Claude Projects, `web-controller-projects`) say which pass does the closing.
 
 ## Output
 

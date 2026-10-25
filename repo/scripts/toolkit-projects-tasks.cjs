@@ -154,12 +154,31 @@ function findParams(text) {
   return found[0] || null;
 }
 
-function parseParams(kind, text) {
+// A params block with no model key was rendered before tiers existed. It is migrated, not
+// refused, so every live prompt still checks and refreshes: effort low rises to the medium floor,
+// and effort above medium is kept with LEGACY_RAISE as its reason for the coordinator to confirm.
+const LEGACY_RAISE = 'kept from the setting before tiers, confirm or lower it';
+
+function migrateLegacy(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw) || 'model' in raw) return { raw, legacy: false };
+  const next = { ...raw };
+  if (next.effort === 'low') next.effort = EFFORTS[0];
+  if (EFFORTS.slice(1).includes(next.effort) && next.raise_reason === undefined) next.raise_reason = LEGACY_RAISE;
+  // Only a migration that changed a value rewrites the block; a medium prompt keeps it as it is.
+  return { raw: next, legacy: next.effort !== raw.effort || next.raise_reason !== raw.raise_reason };
+}
+
+function storedParams(kind, text) {
   const fence = findParams(text);
   if (!fence) throw new TaskInputError('TASK_PARAMS_FENCE');
-  let raw;
-  try { raw = JSON.parse(fence.json); } catch { throw new TaskInputError('TASK_PARAMS'); }
-  return validateParams(kind, raw);
+  let parsed;
+  try { parsed = JSON.parse(fence.json); } catch { throw new TaskInputError('TASK_PARAMS'); }
+  const { raw, legacy } = migrateLegacy(parsed);
+  return { params: validateParams(kind, raw), legacy };
+}
+
+function parseParams(kind, text) {
+  return storedParams(kind, text).params;
 }
 
 class ProjectsTasks {
@@ -212,7 +231,7 @@ class ProjectsTasks {
     }
     if (override || projectText !== undefined) throw new TaskInputError('TASK_ARGUMENTS');
     const lf = lfText(text);
-    const stored = parseParams(kind, lf);
+    const { params: stored, legacy } = storedParams(kind, lf);
     const params = withSession(stored);
     const expected = this.expectedBlocks(kind, params);
     const { blocks } = findBlocks(lf);
@@ -227,8 +246,8 @@ class ProjectsTasks {
     const fence = findParams(lf);
     let project = projectSegments(lf, own, fence).join('\n\n');
     if (kept.length) project = [project, KEPT_LABEL, ...kept].filter(Boolean).join('\n');
-    // A session change rewrites the params block; otherwise it is kept byte for byte.
-    const fenceText = params.session === stored.session ? lf.split('\n').slice(fence.startLine, fence.endLine + 1).join('\n') : paramsFence(params);
+    // A session change or a legacy migration rewrites the params block; otherwise it is kept byte for byte.
+    const fenceText = params.session === stored.session && !legacy ? lf.split('\n').slice(fence.startLine, fence.endLine + 1).join('\n') : paramsFence(params);
     return this.render(kind, params, project, fenceText);
   }
 }
@@ -404,4 +423,4 @@ function main(args = process.argv.slice(2)) {
 }
 
 if (require.main === module) process.exitCode = main();
-module.exports = Object.freeze({ ProjectsTasks, KINDS, PROJECT_HEADING, KEPT_LABEL, validateParams, taskName, checkTask, checkMemory, parseArgs, fill });
+module.exports = Object.freeze({ ProjectsTasks, KINDS, LEGACY_RAISE, PROJECT_HEADING, KEPT_LABEL, validateParams, taskName, checkTask, checkMemory, parseArgs, fill });

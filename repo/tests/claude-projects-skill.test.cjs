@@ -170,7 +170,12 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.match(text, /\*\*Set model and effort explicitly on every thread you start\.\*\* Gates get the pinned stack route/);
   assert.match(text, /cheapest step of the `agent-cost-control` ladder that fits its brief \(small, mid or top tier; medium effort at least\)/);
   // One job per thread, automatic rotation with a handoff file, never the coordinator's own thread.
-  assert.match(text, /\*\*One job per thread; rotate long-lived ones\.\*\* A finished thread is never reused for new work/);
+  assert.match(text, /\*\*One job per non-gate thread; rotate long-lived ones\.\*\* A finished non-gate thread is never reused for new work/);
+  // Gate sessions keep the gate rules' fresh-context rules; the old reuse-after-rename sentence is gone.
+  assert.match(text, /Gate sessions follow the gate rules' fresh-context and recoverable-work rules, never this one/);
+  assert.doesNotMatch(text, /Rename an idle finished non-gate thread before reusing it/);
+  assert.match(text, /scheduled tasks take theirs from their home thread's start settings/);
+  assert.match(text, /never swap again for the same gap/);
   assert.match(text, /it writes a handoff file in the shared folder/);
   assert.match(text, /Never rotate your own coordinator thread/);
   // Closing: work threads on saved and relayed output, chat reply threads after 6 quiet hours, home threads never.
