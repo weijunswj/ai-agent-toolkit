@@ -1,5 +1,11 @@
 # Toolkit Changelog
 
+## 3.13.4
+
+### Projects skill
+
+- **Pending lists name every owner-hands step:** whenever the coordinator tells the owner what waits on them, it lists every step only the owner can do, optional ones and ones posted only inside a thread included, each with its link. The hourly nudge's **Waiting on owner:** list now carries those steps too, so its live task prompt is swapped after merge. The Claude Projects controller skill is 2026-10-25.7 (re-upload it).
+
 ## 3.13.3
 
 ### Workspace and temp hygiene
