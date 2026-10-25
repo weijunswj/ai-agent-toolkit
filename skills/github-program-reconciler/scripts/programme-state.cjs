@@ -22,7 +22,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const { DEFAULT_THRESHOLD, INDEX_COMMENT_MARKER, auditDecisionTraces, traceEntries, indexLines, markLines } = require('./decision-trace-audit.cjs');
+const { DEFAULT_THRESHOLD, INDEX_COMMENT_MARKER, auditDecisionTraces, traceEntries, indexLines, markLines, commentLink, issueUrl } = require('./decision-trace-audit.cjs');
 const { OTHER_COMMENTS } = require('./decision-tags.cjs');
 const { ProgrammeError, resolveExecutable } = require('./resolve-executable.cjs');
 
@@ -985,8 +985,9 @@ function traceGroups(trace) {
 
 // The comment trace an issue body carries: for each tag, links to that tag's index comments, one
 // line per comment none of them lists, and marks for superseded records an index comment left
-// unmarked.
-function renderTraceBlockBody(number, trace) {
+// unmarked. With `repository`, every link is a full URL to the comment.
+function renderTraceBlockBody(number, trace, repository = '') {
+  const base = issueUrl(repository, number);
   const lines = [
     `<!-- programme-trace issue=${number} -->`,
     '**Comment trace** (generated from every comment on this issue). Read the body first. Each tag is its own list and tags are never combined; within a tag, where comments disagree, the latest one wins. Tag a comment by making its first line the tag and its second line `---`.',
@@ -994,8 +995,8 @@ function renderTraceBlockBody(number, trace) {
   const groups = traceGroups(trace);
   for (const group of groups) {
     lines.push('', `**${group.tag ? publicText(group.tag) : OTHER_COMMENTS}**`, '',
-      ...group.indexes.map((index, at) => `- ${index.date || 'undated'} · index · [Earlier comments, part ${at + 1}](#issuecomment-${index.id})`),
-      ...indexLines(group.entries), ...markLines(group.marks));
+      ...group.indexes.map((index, at) => `- ${index.date || 'undated'} · index · [Earlier comments, part ${at + 1}](${commentLink(base, index.id)})`),
+      ...indexLines(group.entries, new Map(), base), ...markLines(group.marks, base));
   }
   if (!groups.length) lines.push('', '- No comments yet.');
   return lines.join('\n');
@@ -1025,7 +1026,7 @@ function renderCurrentBlockBody(parent, children, issues = new Map()) {
   const list = items => (items.length ? items : ['- None.']);
   return [
     '<!-- programme-current -->',
-    `_Generated from the programme state (revision ${parent.revision}); hand-written notes follow this summary._`,
+    `_Generated from the programme state (revision ${parent.revision}). The Programme Graph follows; hand-written notes come after it._`,
     '',
     '**In progress**',
     ...list(working),
@@ -1193,10 +1194,14 @@ function headings(text) {
   return found;
 }
 
-// Where the block belongs in a body that has no block: in place of the `replace_section`
-// section; else right after the `after_section` section; else after the first title and a marked
-// note directly under it (`<!-- NAME:BEGIN -->` ... `<!-- NAME:END -->`); else at the top.
+// Where the block belongs. Generated parts lead and hand-written text follows: directly after the
+// `after_block` managed block (the parent's CURRENT summary, so the Programme Graph sits right under
+// it); else in place of the `replace_section` section; else right after the `after_section`
+// section; else directly under the first title, above any hand-written note; else under the links
+// block at the top; else at the top.
 function blockTarget(text, placement = {}) {
+  const anchor = placement.after_block ? findStateBlock(text, placement.after_block).block : null;
+  if (anchor) return { start: anchor.end, end: anchor.end, replaces: false };
   const all = headings(text);
   const sectionEnd = heading => {
     const next = all.find(entry => entry.start > heading.start && entry.level <= heading.level);
@@ -1208,28 +1213,31 @@ function blockTarget(text, placement = {}) {
   const after = named(placement.after_section);
   if (after) return { start: sectionEnd(after), end: sectionEnd(after), replaces: false };
   const title = all.find(entry => entry.level === 1);
-  if (!title) return { start: 0, end: 0, replaces: false };
-  let at = title.end;
-  const rest = text.slice(at);
-  const lead = /^\s*/.exec(rest)[0].length;
-  const note = /^<!--\s*([A-Za-z0-9_.:-]+):BEGIN\b[^\n]*-->[^\n]*\n/.exec(rest.slice(lead));
-  if (note) {
-    const close = rest.indexOf(`<!-- ${note[1]}:END`, lead);
-    if (close !== -1) {
-      const lineEnd = rest.indexOf('\n', close);
-      at += lineEnd === -1 ? rest.length : lineEnd + 1;
-    }
-  }
-  return { start: at, end: at, replaces: false };
+  if (title) return { start: title.end, end: title.end, replaces: false };
+  const nav = findStateBlock(text, NAV_BLOCK_NAME).block;
+  return nav ? { start: nav.end, end: nav.end, replaces: false } : { start: 0, end: 0, replaces: false };
+}
+
+// The text without the `replace_section` section, when the block goes after `after_block` instead:
+// the section it replaces is removed once, wherever the block lands.
+function withoutReplacedSection(text, placement = {}) {
+  if (!placement.after_block || !placement.replace_section || !findStateBlock(text, placement.after_block).block) return { text, dropped: false };
+  const target = blockTarget(text, { replace_section: placement.replace_section });
+  if (!target.replaces) return { text, dropped: false };
+  const before = trimEnd(text.slice(0, target.start));
+  const after = trimStart(text.slice(target.end));
+  const eol = /\r\n/.test(text) ? '\r\n' : '\n';
+  return { text: before && after ? `${before}${eol}${eol}${after}` : before || after, dropped: true };
 }
 
 const trimEnd = text => text.replace(/\s+$/, '');
 const trimStart = text => text.replace(/^\s+/, '');
 
-// The body with the state block written. An existing block is replaced in place, byte for byte
-// around it, unless it sits above its place (for example at the very top) or the binding's
-// `replace_section` is still in the body: then it moves, once. A new block goes to its place.
-// Uses the body's own line ending; `moved` says whether the block changed position.
+// The body with the state block written. An existing block in its place is replaced in place, byte
+// for byte around it; one anywhere else (higher or lower) moves to its place, as does one whose
+// `replace_section` is still in the body. A new block goes to its place. Hand-written text is
+// never changed, only moved past. Uses the body's own line ending; `moved` says whether the block
+// changed position.
 function upsertStateBlock(text, rendered, placement = {}) {
   const source = String(text || '');
   const eol = /\r\n/.test(source) ? '\r\n' : '\n';
@@ -1237,23 +1245,22 @@ function upsertStateBlock(text, rendered, placement = {}) {
   const { block: found, error } = findStateBlock(source);
   if (error) throw new ProgrammeError('MANAGED_BLOCK_BROKEN', error);
   let rest = source;
+  let before = '';
   if (found) {
-    const before = trimEnd(source.slice(0, found.start));
+    before = trimEnd(source.slice(0, found.start));
     const after = trimStart(source.slice(found.end));
     rest = before && after ? `${before}${eol}${eol}${after}` : before || after;
-    const target = blockTarget(rest, placement);
-    const goal = trimEnd(rest.slice(0, target.start));
-    const above = goal.length > before.length && goal.startsWith(before);
-    if (!target.replaces && !above) {
-      return { body: source.slice(0, found.start) + block + source.slice(found.end), start: found.start, end: found.start + block.length, moved: false };
-    }
   }
-  const target = blockTarget(rest, placement);
-  const before = trimEnd(rest.slice(0, target.start));
-  const after = trimStart(rest.slice(target.end));
-  const head = before ? `${before}${eol}${eol}` : '';
-  const body = `${head}${block}${after ? `${eol}${eol}${after}` : eol}`;
-  return { body, start: head.length, end: head.length + block.length, moved: Boolean(found) };
+  const cut = withoutReplacedSection(rest, placement);
+  const target = blockTarget(cut.text, placement);
+  if (found && !cut.dropped && !target.replaces && trimEnd(cut.text.slice(0, target.start)) === before) {
+    return { body: source.slice(0, found.start) + block + source.slice(found.end), start: found.start, end: found.start + block.length, moved: false };
+  }
+  const head = trimEnd(cut.text.slice(0, target.start));
+  const tail = trimStart(cut.text.slice(target.end));
+  const lead = head ? `${head}${eol}${eol}` : '';
+  const body = `${lead}${block}${tail ? `${eol}${eol}${tail}` : eol}`;
+  return { body, start: lead.length, end: lead.length + block.length, moved: Boolean(found) };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1919,9 +1926,10 @@ class Reconciler {
     }
   }
 
-  // The parent page follows the binding's projection; child pages put the block under the title.
+  // The parent page puts the Programme Graph right under the CURRENT summary (the binding's
+  // projection places the summary); task pages put their status block right under the title.
   placementFor(number) {
-    return number === this.binding.parent_issue ? (this.binding.projection || {}) : {};
+    return number === this.binding.parent_issue ? { ...(this.binding.projection || {}), after_block: CURRENT_BLOCK_NAME } : {};
   }
 
   // The body with the state block and the comment trace written. When it would reach the threshold,
@@ -1930,17 +1938,18 @@ class Reconciler {
   projectBody(number, source, stateBody, comments, version, navBody = null, currentBody = null) {
     const trace = traceEntries(comments, this.binding.record_prefix);
     const build = entries => {
-      const traceBody = renderTraceBlockBody(number, entries);
-      const withState = upsertStateBlock(source, renderBlock(stateBody, version), this.placementFor(number));
-      const withCurrent = currentBody ? upsertCurrentBlock(withState.body, renderBlock(currentBody, version, CURRENT_BLOCK_NAME), this.placementFor(number).after_section) : withState.body;
-      const withNav = navBody ? upsertNavBlock(withCurrent, renderBlock(navBody, version, NAV_BLOCK_NAME)) : withCurrent;
+      const traceBody = renderTraceBlockBody(number, entries, this.binding.repository);
+      const withCurrent = currentBody ? upsertCurrentBlock(source, renderBlock(currentBody, version, CURRENT_BLOCK_NAME), this.placementFor(number).after_section) : source;
+      const withState = upsertStateBlock(withCurrent, renderBlock(stateBody, version), this.placementFor(number));
+      const withNav = navBody ? upsertNavBlock(withState.body, renderBlock(navBody, version, NAV_BLOCK_NAME)) : withState.body;
       return { body: upsertTraceBlock(withNav, renderBlock(traceBody, version, TRACE_BLOCK_NAME)), traceBody, moved: withState.moved };
     };
     const full = build(trace);
     if (full.body.length < this.threshold) return { ...full, overflow: [] };
     // Tag by tag, largest list first, the whole list moves into its own new index comment until the
     // body fits; the body keeps a link in that tag's list. Tags are never combined.
-    const size = group => [...indexLines(group.entries), ...markLines(group.marks)].join('\n').length;
+    const base = issueUrl(this.binding.repository, number);
+    const size = group => [...indexLines(group.entries, new Map(), base), ...markLines(group.marks, base)].join('\n').length;
     const movable = traceGroups(trace).filter(group => group.entries.length || group.marks.length).sort((a, b) => size(b) - size(a));
     let current = trace;
     let projected = full;
@@ -1951,7 +1960,7 @@ class Reconciler {
         entries: current.entries.filter(entry => (entry.tag || null) !== group.tag),
         marks: current.marks.filter(mark => (mark.tag || null) !== group.tag),
       };
-      overflow.push({ tag: group.tag, lines: [...indexLines(group.entries), ...markLines(group.marks)] });
+      overflow.push({ tag: group.tag, lines: [...indexLines(group.entries, new Map(), base), ...markLines(group.marks, base)] });
       projected = build(current);
       if (projected.body.length < this.threshold) break;
     }
@@ -1993,7 +2002,7 @@ class Reconciler {
       const placement = this.placementFor(number);
       const current = block && normalizeBlockBody(block.body) === normalizeBlockBody(body) && !block.tampered;
       const move = Boolean(block) && upsertStateBlock(issue.body, renderBlock(block.body, block.version), placement).moved;
-      const traceBody = renderTraceBlockBody(number, traceEntries(comments, this.binding.record_prefix));
+      const traceBody = renderTraceBlockBody(number, traceEntries(comments, this.binding.record_prefix), this.binding.repository);
       const traceCurrent = Boolean(traced.block) && normalizeBlockBody(traced.block.body) === normalizeBlockBody(traceBody) && !traced.block.tampered;
       // A current body at or over the threshold still moves its largest tag lists out.
       if (current && !move && traceCurrent && navCurrent && currentCurrent && issue.body.length < this.threshold) continue;

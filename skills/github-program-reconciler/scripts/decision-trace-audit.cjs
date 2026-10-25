@@ -3,14 +3,14 @@
 
 // Decision-trace audit for a programme issue. The issue body is the canonical record: every
 // decision comment (one with a tag on its first line or a record ID) must be reachable from it,
-// either linked directly by fragment link (#issuecomment-<id>) or listed in an index comment that
+// either linked directly (<issue URL>#issuecomment-<id>, or the bare fragment) or listed in an index comment that
 // the body links (one hop). Other comments need no index entry: they are listed as unlinked, never
 // a failure. Fails on any unlinked decision comment, a SUPERSEDES= reference to an unknown record,
 // a superseded record that is not marked "superseded by" (in its own comment or on an index line
 // that links it), or a body at or over the threshold (default 60,000 characters; GitHub's limit is 65,536).
 //
 // Read-only. --repair writes a proposed body (the missing lines added to the body's decision
-// index, in the shape "- <date> · <record> · [<summary>](#issuecomment-<id>)", plus
+// index, in the shape "- <date> · <record> · [<summary>](<issue URL>#issuecomment-<id>)", plus
 // "SUPERSEDES=" and "superseded by" where they apply) to a local file; publishing it is the
 // caller's separately authorised step. The reconcile pass runs the same audit and reports gaps.
 //
@@ -153,14 +153,22 @@ function commentSummary(text) {
   return plain.length > 90 ? `${plain.slice(0, 87)}...` : plain;
 }
 
-// One index line per entry, in comment order, with a same-issue fragment link:
-// "- <date> · <record> · [<summary>](#issuecomment-<id>) · <topic>", then SUPERSEDES= and
+// The link to one comment: the issue's full URL plus the comment anchor when `base` (the issue URL)
+// is known, else a bare fragment. A bare fragment only works when the comment is already on the
+// page: GitHub folds the middle of a long timeline and the mobile app opens the issue itself.
+function commentLink(base, id) { return `${base || ''}#issuecomment-${id}`; }
+
+// The issue URL that comment links start from.
+function issueUrl(repo, issue) { return repo && issue ? `https://github.com/${repo}/issues/${issue}` : ''; }
+
+// One index line per entry, in comment order, linking the comment:
+// "- <date> · <record> · [<summary>](<issue URL>#issuecomment-<id>) · <topic>", then SUPERSEDES= and
 // "superseded by". `topics` maps a comment ID to its topic (from a decision ledger); no topic, no part.
-function indexLines(entries, topics = new Map()) {
+function indexLines(entries, topics = new Map(), base = '') {
   return entries.map(entry => [
     `- ${entry.date || 'undated'}`,
     entry.record || 'comment',
-    `[${entry.summary || `comment ${entry.id}`}](#issuecomment-${entry.id})`,
+    `[${entry.summary || `comment ${entry.id}`}](${commentLink(base, entry.id)})`,
     ...(topics.get(String(entry.id)) ? [topics.get(String(entry.id))] : []),
     ...(entry.supersedes || []).map(record => `SUPERSEDES=${record}`),
     ...(entry.superseded_by ? [`superseded by ${entry.superseded_by}`] : []),
@@ -170,14 +178,14 @@ function indexLines(entries, topics = new Map()) {
 // The body with the missing lines added inside its decision index, creating a collapsed index at
 // the end when the body has none. Never removes or reorders existing text.
 // A marking line for a superseded record that is linked but not marked.
-function markLines(marks) {
-  return marks.map(entry => `- superseded record · ${entry.record} · [${entry.record}](#issuecomment-${entry.id}) · superseded by ${entry.superseded_by}`);
+function markLines(marks, base = '') {
+  return marks.map(entry => `- superseded record · ${entry.record} · [${entry.record}](${commentLink(base, entry.id)}) · superseded by ${entry.superseded_by}`);
 }
 
 // Superseded records that are already linked but not marked get a marking line of their own.
-function repairedBody(body, unlinked, supersededUnmarked = [], topics = new Map()) {
+function repairedBody(body, unlinked, supersededUnmarked = [], topics = new Map(), base = '') {
   const missing = new Set(unlinked.map(entry => entry.id));
-  const lines = [...indexLines(unlinked, topics), ...markLines(supersededUnmarked.filter(entry => !missing.has(entry.id)))];
+  const lines = [...indexLines(unlinked, topics, base), ...markLines(supersededUnmarked.filter(entry => !missing.has(entry.id)), base)];
   if (!lines.length) return body;
   const text = String(body || '');
   const end = text.indexOf(INDEX_END);
@@ -241,7 +249,7 @@ function main(argv = process.argv.slice(2)) {
   const result = auditDecisionTraces({ body, comments, recordPrefix: args.recordPrefix, threshold: args.threshold });
   if (args.repair) {
     const topics = args.ledger ? ledgerTopics(JSON.parse(fs.readFileSync(args.ledger, 'utf8').replace(/^\uFEFF/, ''))) : new Map();
-    fs.writeFileSync(args.out, repairedBody(body, result.unlinked, result.superseded_unmarked, topics));
+    fs.writeFileSync(args.out, repairedBody(body, result.unlinked, result.superseded_unmarked, topics, issueUrl(args.repo, args.issue)));
     result.repair_file = args.out;
   }
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
@@ -253,4 +261,4 @@ if (require.main === module) {
   catch (error) { console.error(`FAIL: ${error.message}`); process.exitCode = 2; }
 }
 
-module.exports = Object.freeze({ DEFAULT_THRESHOLD, INDEX_COMMENT_MARKER, INDEX_BEGIN, INDEX_END, auditDecisionTraces, commentSummary, indexLines, markLines, traceEntries, ledgerTopics, repairedBody, parseArgs });
+module.exports = Object.freeze({ DEFAULT_THRESHOLD, INDEX_COMMENT_MARKER, INDEX_BEGIN, INDEX_END, auditDecisionTraces, commentSummary, commentLink, issueUrl, indexLines, markLines, traceEntries, ledgerTopics, repairedBody, parseArgs });
