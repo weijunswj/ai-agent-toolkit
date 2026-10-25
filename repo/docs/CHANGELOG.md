@@ -8,6 +8,7 @@
 - **Notice closes itself:** when nothing is left to review, the notifier closes the one notice pull request it opened, unmerged, with a short comment. It keeps the branch and never touches a pull request anyone else opened.
 - **Trackers shown as history:** reports call a cursor's tracker the tracker at last review, so a closed task is never shown as the current owner.
 - **Host drift review recorded:** the first Codex and Claude Code drift review is recorded, with findings routed to their owners and no Toolkit component changed. Its evidence links point at the current Codex and Claude Code docs.
+- **design.md upstream reviewed:** the latest upstream change lets design tokens also sit in YAML blocks inside each section. No Toolkit code reads or writes those tokens; the design.md reference is left for its separate refresh.
 
 ## 3.12.0 (server operations)
 

@@ -13,10 +13,10 @@
       "repository": "google-labs-code/design.md",
       "ref": "main",
       "source_lock_path": "repo/source-watch/provenance/google-design-md/SOURCE-LOCK.json",
-      "reviewed_through_sha": "9bf8eae67128b6cc55ad9bf86665767deb4c11cd",
-      "reviewed_at": "2026-07-30",
+      "reviewed_through_sha": "6e5da5382f41edbba9d73b2c62f33f32e9971f15",
+      "reviewed_at": "2026-10-25",
       "disposition": "SEPARATE_IMPLEMENTATION_PR_RECOMMENDED",
-      "owning_tracker": "#322"
+      "owning_tracker": "#473"
     },
     {
       "target_key": "source-lock:repo/source-watch/provenance/n8n-io-skills",
