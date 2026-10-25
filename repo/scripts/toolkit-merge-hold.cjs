@@ -3,34 +3,43 @@
 // The merge hold (global rules: never merge without the owner's OK). Shared by the Claude Code
 // governance hook and the Codex helper hook.
 //
-// What an approval is: the user's own typed message (UserPromptSubmit) in which the whole message,
-// or one line of it, is "merge N" ("merge 618", "merge #618", "merge owner/name#618", "merge 601,
-// 605 and 609", "yes merge 618", "merge 618 at 62405eb"). Anything else on that line ("don't",
-// "if CI is green", "later", a question) means it is not one. It is recorded only in a session the
-// user started: not one another session or a Toolkit launcher started, and not a resumed or forked
-// run (the governance gate's session marks). It is for the repository the session is in, or the
-// one the message names; a bare number typed outside a GitHub repository records nothing.
+// It is a tripwire, not a lock. It catches an agent that merges, or pushes to the default branch, on
+// its own initiative or by mistake. It reads command text, and text can be reshaped (wrappers, nested
+// sessions, scripts, files), so it cannot stop an agent set on getting past it. Agents also act as
+// the user on GitHub, so GitHub cannot tell an agent's merge from the user's either. The hard limits
+// sit in the repository's own rules (pull request required, no force-push, no deletion of the
+// default branch).
+//
+// What an approval is: one line of the user's own typed message (UserPromptSubmit) that says "merge"
+// and names a pull request: "merge 618", "618 merge", "ok to merge #618", "can merge 618", "merge
+// owner/name#618", "merge 601, 605 and 609", "merge 618 at 62405eb". A line with a no, a condition,
+// a delay, a quote or a question ("don't", "not yet", "if CI is green", "later", "should we ...?")
+// is not one. It is recorded only in a session the user started: not one another session or a
+// Toolkit launcher started, and not a resumed or forked run (the governance gate's session marks).
+// It is for the repository the session is in, or the one the message names; a bare number typed
+// outside a GitHub repository records nothing.
 //
 // What one approval allows: one merge, of that pull request in that repository, within a day, by any
 // session on this computer. A typed SHA pins the head commit; without one the merge must still name
 // the head it expects, so a push after that read makes GitHub refuse it. The approval is used when
 // the hook lets the call through, even if a later prompt or the merge itself fails.
 //
-// What is held (decide, PreToolUse):
+// What is held (decide, PreToolUse), with line continuations joined first:
 //   - needs an approval: `gh pr merge` (any flags, --auto included), `gh api` to a pull request's
 //     merge endpoint, and the GitHub connector's merge and auto-merge tools;
 //   - always refused: GraphQL merges (the number cannot be read), the merge queue, branch merges,
 //     writes to the default branch's ref, `gh repo sync`, gh aliases that mention merge, a `git push`
-//     to the remote's default branch (evidence stores excepted), and a merge whose target is moved
-//     by cd, pushd, Set-Location or GH_REPO without naming --repo or a URL;
-//   - refused so an agent cannot make an approval itself: a command that starts a Claude or Codex
-//     session and mentions merge, or that sets or clears TOOLKIT_HOST_SESSION, names Toolkit's user-state folder,
-//     or the hook scripts together with what would feed them a prompt.
+//     to the remote's default branch (evidence stores excepted, by name), a merge whose target is
+//     moved by cd, pushd, Set-Location or GH_REPO, and a bare number in a folder with more than one
+//     remote, unless --repo or a URL names the repository;
+//   - refused, as a tripwire against an agent approving for itself: a command that starts a Claude
+//     or Codex session and mentions merge, or that sets or clears TOOLKIT_HOST_SESSION, names
+//     Toolkit's user-state folder, or the hook scripts together with what would feed them a prompt.
 //
-// Not covered: scripts or programs that call git or the GitHub API themselves, curl and other HTTP
-// clients, git and shell aliases, commands inside files, a fresh session started with a cleaned
-// environment and a prompt read from a file (the hold stops an agent acting on its own initiative;
-// it is not a sandbox), cloud sessions (the governance hook skips them) and stale plugin copies.
+// Not covered: wrapped or nested host launches (bash -lc, timeout, Start-Process and the like), a
+// prompt file fed to a hook script, scripts or programs that call git or the GitHub API themselves,
+// curl and other HTTP clients, git and shell aliases, commands inside files, pushes through a second
+// remote or a wrapper, cloud sessions (the governance hook skips them) and stale plugin copies.
 
 const crypto = require('node:crypto');
 const fs = require('node:fs');
@@ -49,10 +58,15 @@ const MAX_COMMAND_CHARS = 1024 * 1024;
 const SHELL_TOOLS = /^(?:Bash|PowerShell|Monitor|exec_command|shell|local_shell)$/;
 const CONNECTOR_MERGE = /^mcp__.*github.*?_(merge_pull_request|enable_pr_auto_merge)$/i;
 const SLUG = '[A-Za-z0-9._-]+\\/[A-Za-z0-9._-]+';
-const ITEM = `(?:${SLUG}#)?#?\\d{1,6}`;
-// One line that is a merge instruction and nothing else.
-const APPROVAL_LINE = new RegExp(`^\\s*(?:[-*\\u2022]\\s*|\\d{1,3}[.):]\\s*)?(?:(?:yes|ok|okay)[,!.:]?\\s+)?merge\\s+(${ITEM}(?:\\s*(?:,|&|\\band\\b)\\s*${ITEM}|\\s+${ITEM})*)(?:\\s+(?:at\\s+|@\\s*)([0-9a-f]{7,40})|\\s+([0-9a-f]{7,40}))?\\s*[.!]?\\s*$`, 'i');
-const ITEMS = new RegExp(`(?:(${SLUG})#)?#?(\\d{1,6})`, 'g');
+const MAX_APPROVAL_LINE = 200;
+// A no, a doubt, a condition, a delay, a hand-off or a report: the line is not an approval.
+const HOLD_WORDS = /n't\b|\b(?:not|no|nope|never|dont|wont|cant|cannot|wait|hold|later|until|till|unless|if|after|before|once|when|whenever|cancel|stop|without|tomorrow|tonight|minutes?|mins?|hours?|hrs?|maybe|perhaps|probably|possibly|might|guess|think|unsure|idk|hmm+|or|myself|i'll|we'll|you'll|says?|said|reply|type|wrote|summary|merged|merging)\b/i;
+// A question: a question mark, or a line that opens like one.
+const QUESTION = /\?|^(?:should|shall|could|would|why|what|how|is|are|did|does|do\s+(?:we|you|i)|will|have|has|was|were)\b/i;
+const LIST_MARKER = /^\s*(?:[-*\u2022]|\d{1,3}[.):])\s*/;
+const APPROVAL_URL = /https?:\/\/github\.com\/([A-Za-z0-9._-]+\/[A-Za-z0-9._-]+)\/pull\/(\d{1,6})\S*/gi;
+const APPROVAL_SHA = /\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b/gi;
+const ITEMS = new RegExp(`(?:(${SLUG})#|#|\\b)(\\d{1,6})\\b`, 'g');
 
 const GH_PR_MERGE = /\bgh(?:\.exe)?\s+pr\s+((?:(?:-R|--repo)(?:=|\s+)\S+\s+)*)merge\b([^\n;&|]*)/gi;
 const GH_API = /\bgh(?:\.exe)?\s+api\b([^\n;&|]*)/gi;
@@ -72,7 +86,7 @@ const HOST_WORD = /^(?:claude|codex)(?:-code)?(?:\.exe|\.cmd|\.ps1)?$|claude-cod
 const VALUE_FLAGS = new Set(['--repo', '-R', '--match-head-commit', '--subject', '-t', '--body', '-b', '--body-file', '-F', '--author-email', '-A']);
 const GIT_VALUE_OPTIONS = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--config-env', '--exec-path']);
 
-const ASK_TEXT = 'Ask the user to type "merge N" on its own line in their own chat, in a session opened in that repository\'s folder (or "merge owner/name#N"), after reading the merge summary. Never type it yourself, start a session or script to type it, or touch Toolkit\'s user-state files.';
+const ASK_TEXT = 'Ask the user to type a line with "merge" and the pull request number (such as "merge N", or "merge owner/name#N") in their own chat, in a session opened in that repository\'s folder, after reading the merge summary. Never type it yourself, start a session or script to type it, or touch Toolkit\'s user-state files.';
 
 class MergeHoldError extends Error {
   constructor(code) { super(code); this.name = 'MergeHoldError'; this.code = code; }
@@ -144,14 +158,18 @@ function normalise(text) {
 // The approvals in one typed message: [{ repository|null, pr, sha|null }].
 function approvalsIn(prompt) {
   const found = [];
-  for (const line of normalise(prompt).slice(0, MAX_PROMPT_CHARS).split(/\r?\n/)) {
-    const match = APPROVAL_LINE.exec(line);
-    if (!match) continue;
-    const loose = match[3] || null;
-    // A trailing number without "at" is another pull request, not a SHA.
-    if (loose && !/[a-f]/i.test(loose)) continue;
-    const items = [...match[1].matchAll(ITEMS)].map(item => ({ repository: item[1] || null, pr: Number(item[2]) }));
-    const sha = items.length === 1 ? (match[2] || loose || '').toLowerCase() || null : null;
+  for (const raw of normalise(prompt).slice(0, MAX_PROMPT_CHARS).split(/\r?\n/)) {
+    const line = raw.replace(LIST_MARKER, '').trim();
+    if (line.length > MAX_APPROVAL_LINE || !/\bmerge\b/i.test(line) || HOLD_WORDS.test(line) || QUESTION.test(line) || /["`]/.test(line)) continue;
+    const items = [...line.matchAll(APPROVAL_URL)].map(match => ({ repository: match[1], pr: Number(match[2]) }));
+    let rest = line.replace(APPROVAL_URL, ' ');
+    const shas = [...rest.matchAll(APPROVAL_SHA)].map(match => match[0].toLowerCase());
+    rest = rest.replace(APPROVAL_SHA, ' ');
+    // A longer bare number is neither a pull request nor a SHA, so the line is unclear.
+    if (/\d{7,}/.test(rest) || shas.length > 1) continue;
+    for (const match of rest.matchAll(ITEMS)) items.push({ repository: match[1] || null, pr: Number(match[2]) });
+    if (items.length === 0) continue;
+    const sha = items.length === 1 ? shas[0] || null : null;
     for (const item of items) found.push({ ...item, sha });
   }
   return found;
@@ -285,13 +303,23 @@ function pushRefusal(words, cwd) {
 
 // ---- requested merges -------------------------------------------------------------------------
 
+// How many remotes the folder's repository has: with more than one, gh may target another than origin.
+function remoteCount(cwd) {
+  try {
+    const root = governance.findGitRoot(cwd);
+    const dirs = root ? gitDirs(root) : null;
+    if (!dirs) return 0;
+    return new Set([...fs.readFileSync(path.join(dirs.common, 'config'), 'utf8').matchAll(/^\s*\[remote\s+"([^"]+)"\]/gm)].map(match => match[1])).size;
+  } catch { return 0; }
+}
+
 // The default branch name for ref-write checks from this folder.
 function defaultBranchOf(cwd) { return pushTarget(cwd, 'origin')?.default || 'main'; }
 
 // Every merge a shell command asks for: [{ repository, pr, sha, auto, explicit }], or a refusal.
 function shellMerges(text, cwd, environment = {}) {
   const merges = [];
-  const here = () => (typeof environment.GH_REPO === 'string' && environment.GH_REPO ? environment.GH_REPO : repositoryOf(cwd));
+  const here = () => (typeof environment.GH_REPO === 'string' && environment.GH_REPO ? environment.GH_REPO : remoteCount(cwd) > 1 ? null : repositoryOf(cwd));
   for (const match of text.matchAll(GH_PR_MERGE)) {
     const before = wordsOf(match[1]);
     const words = wordsOf(match[2]);
@@ -327,7 +355,7 @@ function refuse(reason) { return { deny: `Toolkit: ${reason}` }; }
 // The refusal for one requested merge, or the approval it uses.
 function judge(merge, approvals) {
   if (merge.pr === null) return { refusal: deny('this command merges a pull request Toolkit cannot identify, so it is refused. Name the pull request by number.') };
-  if (typeof merge.repository !== 'string') return { refusal: deny(`Toolkit cannot tell which repository pull request #${merge.pr} is in, so the merge is refused. Name it with --repo owner/name.`) };
+  if (typeof merge.repository !== 'string') return { refusal: deny(`Toolkit cannot tell which repository pull request #${merge.pr} is in, so the merge is refused. Name it with --repo owner/name or a pull request URL.`) };
   const name = `${merge.repository}#${merge.pr}`;
   const approval = approvals.find(merge.repository, merge.pr);
   if (!approval) return { refusal: deny(`the user has not approved a merge of ${name} in the last day, so this merge is refused.`) };
@@ -335,6 +363,9 @@ function judge(merge, approvals) {
   const needsSha = !(merge.connector && merge.auto);
   if (needsSha && !(typeof merge.sha === 'string' && /^[0-9a-f]{7,40}$/i.test(merge.sha))) {
     return { refusal: refuse(`name the head commit this merge expects, so GitHub refuses it if the branch moves: add --match-head-commit <sha> (gh), sha= (API) or expectedHeadSha (connector) and retry.${approval.sha ? ` The user approved ${approval.sha}.` : ''}`) };
+  }
+  if (approval.sha && !needsSha) {
+    return { refusal: refuse(`the user approved ${name} at ${approval.sha}, and auto-merge cannot pin a commit, so it is refused. Merge it directly naming that head commit (expectedHeadSha or --match-head-commit).`) };
   }
   if (approval.sha && needsSha && !merge.sha.toLowerCase().startsWith(approval.sha) && !approval.sha.startsWith(merge.sha.toLowerCase())) {
     return { refusal: deny(`the user approved ${name} at ${approval.sha}, but this merge names ${merge.sha}, so it is refused.`) };
@@ -357,10 +388,10 @@ function shellRefusal(text, cwd) {
   }
   if (GH_ALIAS_MERGE.test(text)) return refuse('a gh alias would hide a merge from Toolkit\'s check, so it is refused.');
   if (GH_REPO_SYNC.test(text)) return refuse('`gh repo sync` writes to a default branch without a pull request, so it is refused. Ask the user to run it themselves.');
-  for (const match of text.matchAll(GH_API)) {
-    const rest = match[1];
+  // Checked across the whole command, so a GraphQL query or path on a later line still counts.
+  if (/\bgh(?:\.exe)?\s+api\b/i.test(text)) {
     const branch = defaultBranchOf(cwd);
-    if (ALWAYS_REFUSED_API.test(rest) || new RegExp(`\\bgit\\/refs\\/heads\\/(?:${branch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}|main|master)\\b`).test(rest)) {
+    if (ALWAYS_REFUSED_API.test(text) || new RegExp(`\\bgit\\/refs\\/heads\\/(?:${branch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}|main|master)\\b`).test(text)) {
       return refuse('this API call merges or moves a branch in a way an approval cannot cover (GraphQL merges, the merge queue, branch merges or a ref write to the default branch), so it is refused. Use `gh pr merge <number> --match-head-commit <sha>` after the user approves, or ask the user to do it.');
     }
   }
@@ -380,7 +411,8 @@ function decide(input, { registryOptions = {}, now, environment = process.env } 
   if (CONNECTOR_MERGE.test(tool)) merges = [connectorMerge(tool, input)];
   else if (SHELL_TOOLS.test(tool)) {
     const args = input && (input.tool_input || input.toolInput) || {};
-    const text = String(args.command || '');
+    // A line continuation (\ or a PowerShell backtick before a line break) joins the next line.
+    const text = String(args.command || '').replace(/[\\`]\r?\n/g, ' ');
     if (text.length > MAX_COMMAND_CHARS) return /merge|push/i.test(text.slice(0, MAX_COMMAND_CHARS)) ? refuse('this command is too long to check for a merge or push, so it is refused. Split it.') : null;
     const cwd = input && input.cwd ? path.resolve(String(input.cwd)) : process.cwd();
     const refusal = shellRefusal(text, cwd);

@@ -1,7 +1,7 @@
 'use strict';
 
-// The merge hold: an agent merges a pull request only after the user typed "merge N" for it, and
-// never pushes to the default branch. Every case uses a temporary user-state folder and temporary
+// The merge hold, a tripwire: an agent merges a pull request only after the user typed a line with
+// "merge" and its number, and never pushes to the default branch. Every case uses a temporary user-state folder and temporary
 // git repositories.
 
 const assert = require('node:assert/strict');
@@ -57,7 +57,7 @@ function userSession(ctx, id = 'user', source = 'startup') {
 const typed = (ctx, prompt, { cwd = ctx.repo, session = userSession(ctx), environment = {} } = {}) =>
   hold.recordPrompt({ cwd, prompt, session_id: session }, { environment, ...ctx.options });
 
-test('only a line that is a merge instruction and nothing else is an approval', () => {
+test('a plain yes with "merge" and a number is an approval; a no, a doubt or a question is not', () => {
   const approvals = [
     ['merge 618', [[null, 618, null]]],
     ['merge #618', [[null, 618, null]]],
@@ -69,6 +69,11 @@ test('only a line that is a merge instruction and nothing else is an approval', 
     ['merge owner/a#618', [['owner/a', 618, null]]],
     ['1. merge 612\n2. hold 613', [[null, 612, null]]],
     ['looks good\nmerge 618', [[null, 618, null]]],
+    ['618 merge', [[null, 618, null]]],
+    ['ok to merge 622', [[null, 622, null]]],
+    ['can merge 622', [[null, 622, null]]],
+    ['proceed to merge #622', [[null, 622, null]]],
+    ['merge https://github.com/owner/a/pull/618/files', [['owner/a', 618, null]]],
   ];
   for (const [text, expected] of approvals) assert.deepEqual(hold.approvalsIn(text).map(({ repository, pr, sha }) => [repository, pr, sha]), expected, text);
   const refusals = [
@@ -77,6 +82,9 @@ test('only a line that is a merge instruction and nothing else is an approval', 
     'merge 618 only once I say so', 'We need to merge 618 later', 'Did you merge 618', 'should we merge 618?',
     'Reply "merge 618" to approve. Not yet.', 'the summary says: merge 618 at 62405eb', 'merge conflicts again',
     'merge 618 1234567', 'hold off, we merge 618 after the test',
+    'ok to merge', 'can merge', 'proceed to merge', 'I merged 618', 'merge 618 maybe', 'probably merge 618',
+    'I think merge 618', 'not sure, merge 618', 'merge 618 or 619', 'merge 618 in 5 minutes', 'is it ok to merge 618',
+    'merge 618 at 62405eb or 7a1b2c3d',
   ];
   for (const text of refusals) assert.deepEqual(hold.approvalsIn(text), [], text);
 });
@@ -143,6 +151,25 @@ test('every merge route needs an approval, and the always-refused routes are ref
   assert.equal(decide(ctx, bash(ctx.repo, 'gh pr view 618')), null);
   assert.equal(decide(ctx, bash(ctx.repo, 'git merge origin/main')), null, 'a local merge alone changes nothing remote');
   assert.equal(decide(ctx, connector('pull_request_read', { pullNumber: 618 })), null);
+});
+
+test('line continuations and multi-line GraphQL do not get a merge past the hold', (t) => {
+  const ctx = context(t);
+  const held = [`gh pr \\\nmerge 618 --admin --match-head-commit ${SHA}`, `gh \\\npr merge 618 --match-head-commit ${SHA}`,
+    `gh pr \`\r\nmerge 618 --match-head-commit ${SHA}`, `gh api \\\n-X PUT repos/owner/a/pulls/618/merge -f sha=${SHA}`];
+  for (const command of held) assert.match(decide(ctx, bash(ctx.repo, command))?.deny || '', /has not approved a merge of owner\/a#618/, command);
+  const always = ['gh api graphql -f query=\'\nmutation {\n  mergePullRequest(input: {pullRequestId: "x"}) { clientMutationId }\n}\'',
+    `gh api \\\n-X PATCH repos/owner/a/git/refs/heads/main -f sha=${SHA}`];
+  for (const command of always) assert.match(decide(ctx, bash(ctx.repo, command))?.deny || '', /merges or moves a branch/, command);
+});
+
+test('a SHA-pinned approval refuses auto-merge, and a folder with two remotes needs the repository named', (t) => {
+  const ctx = context(t);
+  typed(ctx, 'merge 618 at 62405eb');
+  assert.match(decide(ctx, connector('enable_pr_auto_merge', { pullNumber: 618 })).deny, /auto-merge cannot pin a commit/);
+  git(ctx.repo, ['remote', 'add', 'upstream', 'https://github.com/owner/up.git']);
+  assert.match(decide(ctx, bash(ctx.repo, `gh pr merge 618 --match-head-commit ${SHA}`)).deny, /cannot tell which repository/);
+  assert.equal(decide(ctx, bash(ctx.repo, `gh pr merge 618 --repo owner/a --match-head-commit ${SHA}`)), null);
 });
 
 test('one approval allows one merge of that pull request in that repository, naming a head commit', (t) => {
