@@ -8,7 +8,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const { spawnSync } = require('node:child_process');
-const { DEFAULT_CONFIG, GitChange, classify, globToRegExp, loadConfig, parseArgs } = require('../scripts/toolkit-risk-tier.cjs');
+const { DEFAULT_CONFIG, GitChange, classify, globToRegExp, loadConfig, normalizePath, parseArgs } = require('../scripts/toolkit-risk-tier.cjs');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const { config: TOOLKIT } = loadConfig(ROOT);
@@ -49,6 +49,12 @@ test('the owner\'s RISKY categories are RISKY in this repository', () => {
     'repo/scripts/toolkit-canonical-path.cjs', 'repo/scripts/codex-app-server.cjs', 'repo/scripts/toolkit-projects-tasks.cjs',
     'repo/scripts/toolkit-version.cjs', 'skills/github-program-reconciler/scripts/resolve-executable.cjs',
     'skills/github-program-reconciler/scripts/decision-tags.cjs', 'repo/scripts/update-source-watch-review-branch.sh',
+    // What setup and the bridge run after an update, what a workflow with a write token runs, and what an installer copies out.
+    'repo/scripts/validate-toolkit.cjs', 'repo/scripts/sync-repo-doc-contract.cjs', 'repo/scripts/check-plain-references.cjs',
+    'repo/tests/toolkit-local-bridge-hook-light.test.cjs', 'repo/tests/toolkit-local-bridge.test.cjs', 'repo/tests/toolkit-test-temp-guard.cjs',
+    'repo/scripts/check-project-source-updates.cjs', 'repo/scripts/plan-source-watch-pr-lifecycle.cjs', 'repo/scripts/source-watch-advisory-targets.cjs',
+    'skills/secure-ci-cd/templates/github-actions/personal-data-guard.yml', 'skills/skill-product-review/templates/ci/generated-surface-check.template.yml',
+    'repo/scripts/run-tests.cjs', 'repo/docs/published-surface-audit-baseline.json',
   ]) {
     assert.ok(fs.existsSync(path.join(ROOT, rel)), `${rel} exists`);
     assert.equal(tierOf(rel), 'RISKY', rel);
@@ -60,33 +66,72 @@ test('tests and other scripts are NORMAL, docs are LIGHT, skills are NORMAL', ()
   assert.equal(tierOf('repo/tests/qualification/claude-helper-matrix.live.cjs'), 'NORMAL');
   assert.equal(tierOf('skills/github-program-reconciler/scripts/decision-history.cjs'), 'NORMAL');
   assert.equal(tierOf('skills/github-program-reconciler/scripts/programme-state.cjs'), 'RISKY', 'programme state is authority');
+  for (const glob of TOOLKIT.risky.filter(entry => entry.startsWith('!'))) assert.equal(tierOf(glob.slice(1)), 'NORMAL', glob);
+  assert.equal(tierOf('repo/scripts/a-new-tool.cjs'), 'RISKY', 'a new script is RISKY until it is shown not to be');
+  assert.equal(tierOf('skills/any-skill/scripts/new.py'), 'RISKY');
   assert.equal(tierOf('skills/secure-ci-cd/SKILL.md'), 'NORMAL');
   assert.equal(tierOf('repo/docs/agent-playbooks/INDEX.md'), 'NORMAL');
   for (const rel of ['README.md', 'repo/docs/CHANGELOG.md', 'repo/ARCHITECTURE.md', 'repo/docs/HOW-TO-USE.md']) assert.equal(tierOf(rel), 'LIGHT', rel);
 });
 
-test('every local module a RISKY script loads is RISKY too, so a family cannot be split', () => {
-  const tracked = spawnSync('git', ['-C', ROOT, 'ls-files'], { encoding: 'utf8' }).stdout.split('\n').filter(Boolean);
-  const scripts = tracked.filter(rel => /\.c?js$/.test(rel) && !rel.startsWith('repo/tests/') && !rel.includes('/third-party/') && tierOf(rel) === 'RISKY');
-  const missing = [];
-  for (const rel of scripts) {
-    for (const match of fs.readFileSync(path.join(ROOT, rel), 'utf8').matchAll(/require\(\s*['"](\.{1,2}\/[^'"]+)['"]\s*\)/g)) {
-      const base = path.posix.normalize(path.posix.join(path.posix.dirname(rel), match[1]));
-      const target = [base, `${base}.cjs`, `${base}.js`].find(candidate => tracked.includes(candidate));
-      if (target && tierOf(target) !== 'RISKY') missing.push(`${target} (loaded by ${rel})`);
+// Every way a RISKY file reaches another file: require, a path built from __dirname or the
+// repository root, a repository path named in code (comments and generated headers skipped), a
+// plugin hook command, and the steps of a workflow that holds a write permission or a secret. Only
+// code, JSON, YAML and templates count as reached; a doc a script reads to check it does not.
+function riskyReach(tracked) {
+  const known = new Set(tracked);
+  const code = /\.(?:c?js|mjs|ps1|sh|py)$/i;
+  const counts = rel => code.test(rel) || /\.(?:json|ya?ml)$/i.test(rel) || rel.includes('/templates/');
+  const resolve = base => [base, `${base}.cjs`, `${base}.js`, `${base}/index.cjs`, `${base}/index.js`].find(candidate => known.has(candidate));
+  const literals = list => [...list.matchAll(/['"]([^'"]*)['"]/g)].map(match => match[1]);
+  const links = rel => {
+    const text = fs.readFileSync(path.join(ROOT, rel), 'utf8');
+    if (rel.startsWith('.github/workflows/') && !/:\s*write\b/.test(text) && !/\$\{\{\s*secrets\.(?!GITHUB_TOKEN)/.test(text)) return [];
+    const dir = path.posix.dirname(rel);
+    const found = [];
+    for (const match of text.matchAll(/require\(\s*['"](\.{1,2}\/[^'"]+)['"]\s*\)/g)) found.push(resolve(path.posix.join(dir, match[1])));
+    for (const match of text.matchAll(/path\.(?:join|resolve)\(\s*__dirname((?:\s*,\s*['"][^'"]*['"])+)/g)) found.push(path.posix.join(dir, ...literals(match[1])));
+    for (const match of text.matchAll(/path\.(?:join|resolve)\(\s*[A-Za-z_$][\w$.]*((?:\s*,\s*['"][^'"]*['"])+)/g)) found.push(path.posix.normalize(literals(match[1]).join('/')));
+    const named = text.split('\n').filter(line => !/^\s*(?:\/\/|\*|\/\*|#)/.test(line) && !line.includes('Generated by')).join('\n');
+    for (const match of named.matchAll(/(?:^|[^\w./-])((?:repo|skills|\.github|\.claude-plugin|\.codex-plugin)\/[\w.@/-]+\.(?:c?js|mjs|ps1|sh|py|ya?ml|json))/g)) found.push(match[1]);
+    return found.filter(target => target && known.has(target) && counts(target));
+  };
+  const roots = tracked.filter(rel => tierOf(rel) === 'RISKY' && !rel.includes('/third-party/')
+    && (code.test(rel) || /hooks\/[^/]+\.json$/.test(rel) || rel.startsWith('.github/workflows/')));
+  const reached = new Map(roots.map(rel => [rel, 'a RISKY root']));
+  for (const queue = [...roots]; queue.length;) {
+    const rel = queue.shift();
+    for (const target of links(rel)) {
+      if (reached.has(target)) continue;
+      reached.set(target, rel);
+      if (code.test(target)) queue.push(target);
     }
   }
-  assert.deepEqual([...new Set(missing)], []);
+  return reached;
+}
+
+test('everything RISKY code loads, starts, copies out or runs with a write token is RISKY, so a family cannot be split', () => {
+  const tracked = spawnSync('git', ['-C', ROOT, 'ls-files'], { encoding: 'utf8' }).stdout.split('\n').filter(Boolean);
+  const reached = riskyReach(tracked);
+  const missing = [...reached].filter(([rel]) => tierOf(rel) !== 'RISKY').map(([rel, from]) => `${rel} (reached from ${from})`);
+  assert.deepEqual(missing, []);
+  for (const rel of ['repo/scripts/validate-toolkit.cjs', 'repo/tests/toolkit-local-bridge-hook-light.test.cjs', 'repo/scripts/plan-source-watch-pr-lifecycle.cjs',
+    'skills/secure-ci-cd/templates/github-actions/personal-data-guard.yml', 'repo/scripts/source-watch-advisory-targets.cjs']) {
+    assert.ok(reached.has(rel), `the scan follows the link to ${rel}`);
+  }
+  for (const glob of TOOLKIT.risky.filter(entry => entry.startsWith('!'))) {
+    assert.ok(!reached.has(glob.slice(1)), `${glob} is an exception, so nothing RISKY may reach it`);
+  }
 });
 
 test('every RISKY pattern in this repository matches a tracked file, so the list cannot go stale unnoticed', () => {
   const tracked = spawnSync('git', ['-C', ROOT, 'ls-files'], { encoding: 'utf8' }).stdout.split('\n').filter(Boolean);
-  const stale = TOOLKIT.risky.filter(glob => !tracked.some(rel => globToRegExp(glob).test(rel)));
+  const stale = TOOLKIT.risky.filter(glob => !tracked.some(rel => globToRegExp(glob.replace(/^!/, '')).test(rel)));
   assert.deepEqual(stale, []);
 });
 
 test('a version-only edit is LIGHT even on a RISKY path; any other line keeps the path tier', () => {
-  assert.equal(tierOf('repo/scripts/release-notes.cjs', ["const VERSION = '3.10.0';", "const VERSION = '3.11.0';"]), 'LIGHT', 'a code constant on a NORMAL path');
+  assert.equal(tierOf('repo/tests/support/release-notes.cjs', ["const VERSION = '3.10.0';", "const VERSION = '3.11.0';"]), 'LIGHT', 'a code constant on a NORMAL path');
   assert.equal(tierOf('repo/scripts/toolkit-local-bridge.cjs', ["const VERSION = '3.10.0';", "const VERSION = '3.11.0';"]), 'RISKY', 'a code constant never lowers a RISKY path');
   assert.equal(tierOf('scripts/install-tool.js', ['const VERSION = "1.0.0";', 'const VERSION = "9.9.9";'], DEFAULT_CONFIG), 'RISKY', "an installer's VERSION picks what it downloads");
   assert.equal(tierOf('.claude-plugin/plugin.json', ['  "version": "3.10.0",', '  "version": "3.11.0",']), 'LIGHT');
@@ -219,6 +264,83 @@ test('the git reader reads raw paths, counts only hunk lines, and keeps the tier
     assert.equal(tierFor('docs/caf\u00e9/AGENTS.md'), 'RISKY');
     assert.equal(tierFor('docs/rules.md'), 'LIGHT', 'a real marker bump read from git');
     assert.equal(classify(files, current).files.find(f => f.path === 'scripts/agent-hook.cjs').tier, 'LIGHT', 'the current list alone would have lowered it');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('a ! pattern takes a path back out of its list, and the last match wins', () => {
+  const config = { schema: 'toolkit-risk-tiers/v1', risky: ['tools/**', '!tools/dev-*.cjs', 'tools/dev-release.cjs'], normal: [], light: ['**/*.md'] };
+  assert.equal(tierOf('tools/setup.cjs', null, config), 'RISKY');
+  assert.equal(tierOf('tools/dev-lint.cjs', null, config), 'NORMAL');
+  assert.equal(tierOf('tools/dev-release.cjs', null, config), 'RISKY', 'a later pattern puts it back');
+  assert.equal(tierOf('Tools/Dev-Lint.cjs', null, config), 'NORMAL', 'exceptions ignore case too');
+  assert.equal(tierOf('tools/notes.md', null, config), 'RISKY', 'an exception never reaches past its own pattern');
+  assert.throws(() => loadConfigText({ risky: ['!'] }), /"risky" must be a list of path patterns/);
+});
+
+function loadConfigText(lists) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'risk-tier-list-'));
+  try {
+    fs.mkdirSync(path.join(dir, '.github'));
+    fs.writeFileSync(path.join(dir, '.github', 'toolkit-risk-tiers.json'), JSON.stringify({ schema: 'toolkit-risk-tiers/v1', risky: [], normal: [], light: [], ...lists }));
+    return loadConfig(dir).config;
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+}
+
+test('a hand-typed path is tidied before matching, so ./, .., doubled slashes or a trailing space or dot cannot drop the tier', () => {
+  for (const typed of ['repo/./CONTROLLER.md', 'repo/scripts/../CONTROLLER.md', 'repo//CONTROLLER.md', 'repo/CONTROLLER.md ', 'repo/CONTROLLER.md.', '/repo/CONTROLLER.md', 'repo\\CONTROLLER.md', './AGENTS.md']) {
+    assert.equal(tierOf(typed), 'RISKY', JSON.stringify(typed));
+    assert.equal(tierOf(parseArgs(['--', typed]).paths[0]), 'RISKY', JSON.stringify(typed));
+  }
+  assert.equal(normalizePath('repo/./scripts//x.cjs '), 'repo/scripts/x.cjs');
+});
+
+test('a moved marker or an unchanged line is not a version bump, and only the marker\'s toolkit= value may change', () => {
+  const marker = version => `<!-- AI-AGENT-TOOLKIT:src.md:BEGIN RULES v2 toolkit=${version} sha256=0123456789ab -->`;
+  const moved = { path: 'AGENTS.md', removed: [marker('3.10.0')], added: [marker('3.10.0')], hunks: [{ removed: [marker('3.10.0')], added: [] }, { removed: [], added: [marker('3.10.0')] }] };
+  assert.equal(classify([moved], TOOLKIT).tier, 'RISKY', 'a marker moved below rule lines');
+  const movedBumped = { ...moved, added: [marker('3.11.0')], hunks: [{ removed: [marker('3.10.0')], added: [] }, { removed: [], added: [marker('3.11.0')] }] };
+  assert.equal(classify([movedBumped], TOOLKIT).tier, 'RISKY', 'a marker moved and bumped');
+  assert.equal(classify([{ path: 'AGENTS.md', removed: [marker('3.10.0')], added: [marker('3.11.0')], hunks: [{ removed: [marker('3.10.0')], added: [marker('3.11.0')] }] }], TOOLKIT).tier, 'LIGHT');
+  assert.equal(classify([{ path: 'AGENTS.md', removed: [marker('3.10.0')], added: [marker('3.10.0')] }], TOOLKIT).tier, 'RISKY', 'identical lines are a move');
+  assert.equal(tierOf('AGENTS.md', [marker('3.10.0'), marker('3.10.0')]), 'RISKY', 'identical bare lines are a move');
+  const source = version => `<!-- AI-AGENT-TOOLKIT:rules-${version}.md:BEGIN RULES v2 toolkit=3.10.0 sha256=0123456789ab -->`;
+  assert.equal(classify([{ path: 'AGENTS.md', removed: [source('1.0.0')], added: [source('2.0.0')] }], TOOLKIT).tier, 'RISKY', 'a version in the source name is not the toolkit= value');
+});
+
+test('reading from git, adding a list for the first time cannot lower its own change, and paths are literal', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'risk-tier-git3-'));
+  const write = (rel, text) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), text); };
+  const git = (...args) => {
+    const result = spawnSync('git', ['-C', dir, '-c', 'user.name=Test', '-c', 'user.email=test@example.com', ...args], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+  };
+  const cli = () => JSON.parse(spawnSync(process.execPath, [path.join(ROOT, 'repo', 'scripts', 'toolkit-risk-tier.cjs'), '--repo', dir, '--base', 'main', '--json'], { encoding: 'utf8' }).stdout);
+  try {
+    git('init', '-q', '-b', 'main');
+    write('AGENTS.md', 'Never push to main.\n');
+    write('.github/workflows/ci.yml', 'on: pull_request\n');
+    write('cfg/[ab].json', '{\n  "version": "1.0.0"\n}\n');
+    write('cfg/a.json', '{\n  "name": "one"\n}\n');
+    git('add', '.'); git('commit', '-q', '-m', 'base');
+    git('checkout', '-q', '-b', 'work');
+    write('.github/toolkit-risk-tiers.json', JSON.stringify({ schema: 'toolkit-risk-tiers/v1', risky: [], normal: [], light: ['**'] }));
+    write('AGENTS.md', 'Push to main is fine.\n');
+    write('.github/workflows/ci.yml', 'on: pull_request_target\n');
+    git('add', '.'); git('commit', '-q', '-m', 'work');
+    const first = cli();
+    const tierFor = (result, rel) => result.files.find(f => f.path === rel).tier;
+    assert.equal(tierFor(first, 'AGENTS.md'), 'RISKY', 'the built-in default list applied at the merge base');
+    assert.equal(tierFor(first, '.github/workflows/ci.yml'), 'RISKY');
+    git('checkout', '-q', 'main');
+    write('.github/toolkit-risk-tiers.json', JSON.stringify({ schema: 'toolkit-risk-tiers/v1', risky: ['cfg/**'], normal: [], light: [] }));
+    git('add', '.'); git('commit', '-q', '-m', 'list');
+    git('checkout', '-q', '-b', 'bump');
+    write('cfg/[ab].json', '{\n  "version": "1.1.0"\n}\n');
+    write('cfg/a.json', '{\n  "name": "two"\n}\n');
+    git('commit', '-q', '-am', 'bump');
+    const bump = cli();
+    assert.equal(tierFor(bump, 'cfg/[ab].json'), 'LIGHT', 'the bracketed name is read on its own, not as a pattern that also matches cfg/a.json');
+    assert.equal(tierFor(bump, 'cfg/a.json'), 'RISKY');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 

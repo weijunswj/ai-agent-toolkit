@@ -4,10 +4,14 @@
 // Tags a change RISKY, NORMAL or LIGHT by the paths it touches, never by its size, so the tier is not
 // a model's guess. Each changed path takes the first list it matches in the repository's
 // .github/toolkit-risk-tiers.json (risky, then normal, then light), or NORMAL when it matches none.
-// Patterns match regardless of letter case, so a path typed in another case on Windows still counts.
+// Inside a list a pattern starting with ! takes a path back out, and the last matching pattern wins,
+// as in .gitignore. Patterns match regardless of letter case, so a path typed in another case on
+// Windows still counts, and a typed path is tidied first (separators, ./ and .. parts, a trailing
+// space or dot Windows would drop).
 // A file whose changed lines only bump the product version counts as LIGHT. A mixed change takes its
-// highest tier. Reading from git, each path also takes the tier the list at the merge base gives it,
-// so a change cannot lower its own tier by editing the list.
+// highest tier. Reading from git, each path also takes the tier the list at the merge base gives it
+// (the built-in default list when the merge base had none), so a change cannot lower its own tier by
+// editing or adding the list.
 // Without a repository list, a generic default list is used and the output says so.
 //
 // Usage: node repo/scripts/toolkit-risk-tier.cjs [--repo <dir>] [--base <ref>] [--json] [-- <path>...]
@@ -32,11 +36,12 @@ const DEFAULT_CONFIG = Object.freeze({
 });
 // A changed line that only bumps the product version: a "version" key in a JSON file, a version or
 // __version__ constant in a code file, or a Toolkit managed-block marker whose toolkit= version is the
-// only thing a bump changes. Every removed line must pair with an added line that differs only in that
-// version. Other version-like names, such as MIN_VERSION, can change behaviour, so they keep the
+// only thing a bump changes. Every removed line must pair with an added line at the same place in its
+// hunk that differs only in that version, so a moved line is never a bump. Other version-like names, such as MIN_VERSION, can change behaviour, so they keep the
 // path's tier, and a code constant never lowers a RISKY path (an installer's VERSION picks what it
 // downloads).
 const SEMVER_VALUE = /v?\d+\.\d+\.\d+/;
+const MARKER_VERSION = / toolkit=\d+\.\d+\.\d+ /;
 const VERSION_LINES = Object.freeze([
   { files: /\.json$/i, line: /^\s*"version"\s*:\s*"v?\d+\.\d+\.\d+"\s*,?\s*$/, risky: true },
   { files: /\.(?:[cm]?js|ts|py)$/i, line: /^\s*(?:(?:export\s+)?(?:const|let|var)\s+)?(?:version|__version__)\s*=\s*["'`]v?\d+\.\d+\.\d+["'`]\s*;?\s*$/i, risky: false },
@@ -60,12 +65,20 @@ function globToRegExp(glob, { ignoreCase = false } = {}) {
   return new RegExp(glob.includes('/') ? `^${source}$` : `(?:^|/)${source}$`, ignoreCase ? 'i' : '');
 }
 
+// The path as git would write it: forward slashes, no ./ or .. parts, no leading slash, and no
+// trailing space or dot on a name (Windows drops them, so "AGENTS.md " is AGENTS.md).
+function normalizePath(rel) {
+  const parts = path.posix.normalize(String(rel).replace(/\\/g, '/')).split('/')
+    .map(part => (part === '.' || part === '..' ? part : part.replace(/[. ]+$/, '')));
+  return path.posix.normalize(parts.join('/')).replace(/^(?:\.\/)+/, '').replace(/^\/+/, '').replace(/\/+$/, '');
+}
+
 function parseConfig(text, where) {
   let config;
   try { config = JSON.parse(text); } catch (error) { fail(`${where} is not valid JSON: ${error.message}`); }
   if (!config || config.schema !== SCHEMA) fail(`${where} must have schema ${SCHEMA}.`);
   for (const [key] of LISTS) {
-    if (!Array.isArray(config[key]) || config[key].some(entry => typeof entry !== 'string' || !entry.trim())) fail(`${where} "${key}" must be a list of path patterns.`);
+    if (!Array.isArray(config[key]) || config[key].some(entry => typeof entry !== 'string' || !entry.replace(/^!/, '').trim())) fail(`${where} "${key}" must be a list of path patterns.`);
   }
   return config;
 }
@@ -76,27 +89,40 @@ function loadConfig(repoRoot) {
   return { config: parseConfig(fs.readFileSync(file, 'utf8'), CONFIG_REL), source: CONFIG_REL };
 }
 
-// A version change is a removed line and an added line that differ only in the version. With the
-// signs known (removed and added), each removed line pairs with one added line; with bare changed
-// lines, every line needs a partner that differs only in the version.
+// A version change is a removed line and an added line that differ only in the version (for a marker,
+// only its toolkit= value). With hunks known (read from git), each hunk's removed lines pair in order
+// with its added lines; with only the signs known, each removed line pairs with one added line; with
+// bare changed lines, every line needs a partner. A pair of identical lines is a move, not a bump.
 function versionOnly(rel, changes, { risky = false } = {}) {
   const rules = VERSION_LINES.filter(rule => rule.files.test(rel) && (!risky || rule.risky));
   const signed = !Array.isArray(changes);
   const lines = signed ? [...changes.removed, ...changes.added] : changes;
   if (!lines.length || !lines.every(line => rules.some(rule => rule.line.test(line)))) return false;
-  const key = line => line.replace(SEMVER_VALUE, '<version>');
+  const key = line => (MARKER_VERSION.test(line) ? line.replace(MARKER_VERSION, ' toolkit=<version> ') : line.replace(SEMVER_VALUE, '<version>'));
+  const bump = (removed, added) => removed !== added && key(removed) === key(added);
+  if (signed && Array.isArray(changes.hunks)) {
+    return changes.hunks.every(hunk => hunk.removed.length === hunk.added.length && hunk.removed.every((line, index) => bump(line, hunk.added[index])));
+  }
+  if (signed && changes.removed.some(line => changes.added.includes(line))) return false;
   const count = (list, sign) => list.reduce((map, line) => map.set(key(line), (map.get(key(line)) || 0) + sign), new Map());
   if (signed) {
     const balance = count(changes.added, 1);
     for (const line of changes.removed) balance.set(key(line), (balance.get(key(line)) || 0) - 1);
     return [...balance.values()].every(value => value === 0);
   }
-  return [...count(lines, 1).values()].every(value => value % 2 === 0);
+  const groups = new Map();
+  for (const line of lines) groups.set(key(line), [...(groups.get(key(line)) || []), line]);
+  return [...groups.values()].every(group => group.length % 2 === 0 && new Set(group).size > 1);
 }
 
 function pathTier(rel, config) {
+  const clean = normalizePath(rel);
   for (const [key, tier] of LISTS) {
-    const pattern = config[key].find(glob => globToRegExp(glob, { ignoreCase: true }).test(rel));
+    let pattern = null;
+    for (const entry of config[key]) {
+      const negated = entry.startsWith('!');
+      if (globToRegExp(negated ? entry.slice(1) : entry, { ignoreCase: true }).test(clean)) pattern = negated ? null : entry;
+    }
     if (pattern) return { tier, rule: `${key}: ${pattern}` };
   }
   return { tier: 'NORMAL', rule: 'no list matched' };
@@ -109,7 +135,7 @@ function classifyFile(file, configs) {
   const lists = Array.isArray(configs) ? configs : [configs];
   const byPath = lists.map(config => pathTier(file.path, config))
     .reduce((top, entry) => (TIERS.indexOf(entry.tier) > TIERS.indexOf(top.tier) ? entry : top));
-  const changes = file.removed && file.added ? { removed: file.removed, added: file.added } : file.changedLines;
+  const changes = file.removed && file.added ? { removed: file.removed, added: file.added, ...(file.hunks ? { hunks: file.hunks } : {}) } : file.changedLines;
   if (changes && versionOnly(file.path, changes, { risky: byPath.tier === 'RISKY' })) return { path: file.path, tier: 'LIGHT', rule: 'version-only change' };
   return { path: file.path, ...byPath };
 }
@@ -127,7 +153,7 @@ class GitChange {
   }
 
   git(args) {
-    const result = this.run('git', ['-C', this.repoRoot, ...args], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    const result = this.run('git', ['-C', this.repoRoot, '--literal-pathspecs', ...args], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
     if (result.error || result.status !== 0) fail(`git ${args.join(' ')} failed: ${(result.stderr || result.error?.message || '').trim()}`);
     return result.stdout;
   }
@@ -155,24 +181,23 @@ class GitChange {
   }
 
   // Only lines inside hunks count, so a content line that starts with "-- " or "++ " is never
-  // mistaken for a diff header.
+  // mistaken for a diff header. Paths are literal (--literal-pathspecs), so * or [ in a name is not a
+  // pattern.
   changes(mergeBase, rel) {
     const diff = this.git(['diff', '-U0', '--no-color', mergeBase, '--', rel]);
     if (/^Binary files /m.test(diff)) return null;
-    const removed = [];
-    const added = [];
-    let inHunk = false;
+    const hunks = [];
     for (const line of diff.split('\n')) {
-      if (line.startsWith('@@')) inHunk = true;
-      else if (inHunk && line.startsWith('-')) removed.push(line.slice(1));
-      else if (inHunk && line.startsWith('+')) added.push(line.slice(1));
+      if (line.startsWith('@@')) hunks.push({ removed: [], added: [] });
+      else if (hunks.length && line.startsWith('-')) hunks[hunks.length - 1].removed.push(line.slice(1));
+      else if (hunks.length && line.startsWith('+')) hunks[hunks.length - 1].added.push(line.slice(1));
     }
-    return { removed, added };
+    return { removed: hunks.flatMap(hunk => hunk.removed), added: hunks.flatMap(hunk => hunk.added), hunks };
   }
 
   // The list as it was at the merge base, or null when there was none.
   baseConfig() {
-    const result = this.run('git', ['-C', this.repoRoot, 'show', `${this.mergeBase}:${CONFIG_REL}`], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
+    const result = this.run('git', ['-C', this.repoRoot, '--literal-pathspecs', 'show', `${this.mergeBase}:${CONFIG_REL}`], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
     return result.status === 0 ? parseConfig(result.stdout, `${CONFIG_REL} at ${this.mergeBase.slice(0, 7)}`) : null;
   }
 }
@@ -187,7 +212,7 @@ function parseArgs(argv) {
     else if (arg === '--') { args.paths = argv.slice(index + 1); break; }
     else fail(`Unknown argument: ${arg}`);
   }
-  if (args.paths) args.paths = args.paths.map(rel => rel.replace(/\\/g, '/').replace(/^\.\//, ''));
+  if (args.paths) args.paths = args.paths.map(normalizePath);
   return args;
 }
 
@@ -201,8 +226,7 @@ function main(argv = process.argv.slice(2)) {
   else {
     const change = new GitChange(repoRoot);
     files = change.files(args.base);
-    const base = change.baseConfig();
-    if (base) configs.push(base);
+    configs.push(change.baseConfig() || DEFAULT_CONFIG);
   }
   const result = { ...classify(files, configs), list: source };
   if (args.json) process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
@@ -221,4 +245,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { DEFAULT_CONFIG, GitChange, classify, classifyFile, globToRegExp, loadConfig, main, parseArgs, parseConfig, versionOnly };
+module.exports = { DEFAULT_CONFIG, GitChange, classify, classifyFile, globToRegExp, loadConfig, main, normalizePath, parseArgs, parseConfig, versionOnly };
