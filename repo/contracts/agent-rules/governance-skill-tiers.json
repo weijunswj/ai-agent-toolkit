@@ -8,6 +8,7 @@
     "external-operation-preflight": "portable",
     "frontend-art-direction": "portable",
     "github-program-reconciler": "governed",
+    "host-observability": "portable",
     "local-ai-safety": "portable",
     "managed-app-foundation-review": "portable",
     "n8n-environment-setup": "portable",

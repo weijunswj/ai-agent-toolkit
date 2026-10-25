@@ -1274,10 +1274,18 @@ test('transport contract exposes only supported inactive workflow operations', (
   assert.ok(transport.importWorkflow('n8n', '/tmp/workflow.json').args.includes('--activeState=false'));
   assert.throws(() => transports.validateTransport({ id: 'bypass' }), /missing required operation/);
   assert.deepEqual(transports.verifyInactivePostcondition([{ id: 'target', active: false }], 'target'), { inactive: true, executionState: 'not_executed' });
-  assert.throws(
-    () => transports.verifyInactivePostcondition([{ id: 'target', active: true }], 'target'),
-    (error) => error.code === 'N8N_POSTCONDITION_FAILED'
-  );
+  for (const target of [
+    { id: 'target', active: true },
+    { id: 'target', active: false, activeVersionId: 'v1' },
+    { id: 'target' },
+    { id: 'target', active: 'false' },
+  ]) {
+    assert.throws(
+      () => transports.verifyInactivePostcondition([target], 'target'),
+      (error) => error.code === 'N8N_POSTCONDITION_FAILED',
+      JSON.stringify(target)
+    );
+  }
 });
 
 test('dedicated local workflow identity makes unchanged reruns deterministic without exposing IDs in canonical Git', () => {

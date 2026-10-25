@@ -16,14 +16,14 @@ const writer = { session: 'controller-1', prefix: 'INT-TK421-' };
 const green = name => ({ kind: 'CheckRun', name, status: 'COMPLETED', conclusion: 'SUCCESS', required: false });
 
 const CATALOGUE = [
-  { issue: 423, label: 'C2', class: 'CORE', parent: 421, order: 1, lane: 'integration' },
-  { issue: 467, label: 'Shared H', class: 'CORE', parent: 421, order: 2, lane: 'integration' },
-  { issue: 469, label: 'H1 Codex', class: 'CORE', parent: 467, order: 1, lane: 'codex', owner_prefix: 'CDX-TK469-' },
-  { issue: 470, label: 'H2 Claude', class: 'CORE', parent: 467, order: 2, lane: 'claude' },
+  { issue: 423, label: 'C2', class: 'COMMITTED', parent: 421, order: 1, lane: 'integration' },
+  { issue: 467, label: 'Shared H', class: 'COMMITTED', parent: 421, order: 2, lane: 'integration' },
+  { issue: 469, label: 'H1 Codex', class: 'COMMITTED', parent: 467, order: 1, lane: 'codex', owner_prefix: 'CDX-TK469-' },
+  { issue: 470, label: 'H2 Claude', class: 'COMMITTED', parent: 467, order: 2, lane: 'claude' },
   { issue: 459, label: 'S1-A', class: 'COMPLETED', parent: 421, order: 3 },
   { issue: 422, label: 'C1 predecessor', class: 'RETIRED', parent: 421, order: 4 },
   { issue: 425, label: 'Q', class: 'OPTIONAL', parent: null, order: 0 },
-  { issue: 499, label: 'R1', class: 'CORE', parent: null, order: 0 },
+  { issue: 499, label: 'R1', class: 'COMMITTED', parent: null, order: 0 },
 ];
 
 function setup({ repository = 'acme/app', parentIssue = 421, outcomes = CATALOGUE, issues = null, version = '3.9.1', controller = writer, initialiseParent = true } = {}) {
@@ -295,14 +295,49 @@ test('reclassifying an outcome keeps its identity, document and native link', ()
   const { github, store, reconciler } = setup();
   reconciler().run({ apply: true });
   const docBefore = store.read('child', 423).doc;
-  store.mutate('parent', 421, { writer, change: doc => state.applyPatch('parent', doc, { outcomes: doc.outcomes.map(entry => (entry.issue === 423 ? { ...entry, class: 'HARDENING' } : entry)) }) });
+  store.mutate('parent', 421, { writer, change: doc => state.applyPatch('parent', doc, { outcomes: doc.outcomes.map(entry => (entry.issue === 423 ? { ...entry, class: 'OPTIONAL' } : entry)) }) });
   const report = reconciler().run({ apply: true });
   assert.deepEqual(kinds(report).sort(), ['reorder #423', 'replace_block #421', 'replace_block #423']);
   const docAfter = store.read('child', 423).doc;
   assert.equal(docAfter.revision, docBefore.revision);
   assert.deepEqual(docAfter.fence, docBefore.fence);
   assert.equal(github.issues.get(423).parent, 421);
-  assert.match(state.findStateBlock(github.issues.get(423).body).block.body, /class: HARDENING/);
+  assert.match(state.findStateBlock(github.issues.get(423).body).block.body, /class: OPTIONAL/);
+});
+
+test('older classes keep their CORE, HARDENING, LATER order, are reported as CLASS_LEGACY, and migrate in one patch without moving a task', () => {
+  // Written by 3.12.0: `order` counted within each old class.
+  const outcomes = [
+    { issue: 8, class: 'CORE', parent: 7, order: 2 },
+    { issue: 9, class: 'CORE', parent: 7, order: 3 },
+    { issue: 10, class: 'HARDENING', parent: 7, order: 1 },
+    { issue: 11, class: 'LATER', parent: 7, order: 0 },
+    { issue: 12, class: 'COMPLETED', parent: 7, order: 0 },
+  ];
+  const { github, store, reconciler } = setup({
+    repository: 'other/tool', parentIssue: 7, outcomes,
+    issues: gh => { for (const outcome of outcomes) gh.addIssue(outcome.issue, { parent: outcome.parent, state: outcome.class === 'COMPLETED' ? 'closed' : 'open' }); },
+  });
+  const legacy = reconciler().run({ apply: true });
+  assert.deepEqual(legacy.holds, []);
+  assert.deepEqual(github.issues.get(7).subs, [8, 9, 10, 11, 12], 'the old sequence is kept, so nothing is reordered before the migration');
+  assert.equal(kinds(legacy).some(kind => kind.startsWith('reorder')), false);
+  const finding = legacy.findings.find(entry => entry.code === 'CLASS_LEGACY');
+  assert.ok(finding, 'CLASS_LEGACY is reported');
+  assert.match(finding.detail, /#8 CORE, #9 CORE, #10 HARDENING, #11 LATER read as COMMITTED, kept in their old CORE, HARDENING, LATER sequence/);
+  assert.match(finding.detail, /apply it whole with update-parent/);
+  assert.deepEqual(finding.patch.outcomes.map(entry => [entry.issue, entry.class, entry.order]),
+    [[8, 'COMMITTED', 0], [9, 'COMMITTED', 1], [10, 'COMMITTED', 2], [11, 'COMMITTED', 3], [12, 'COMPLETED', 0]]);
+
+  // A write never adds an older class, even to an entry that had another one.
+  assert.throws(() => store.mutate('parent', 7, { writer, change: doc => state.applyPatch('parent', doc, { outcomes: doc.outcomes.map(entry => (entry.issue === 11 ? { ...entry, class: 'HARDENING' } : entry)) }) }), /PATCH_REFUSED|older class names/);
+  assert.throws(() => state.refuseNewLegacy(null, state.newParent({ repository: 'other/tool', parentIssue: 7, outcomes: [{ issue: 8, class: 'CORE', parent: 7, order: 0 }] })), /older class names/, 'init-parent refuses them too');
+
+  store.mutate('parent', 7, { writer, change: doc => state.applyPatch('parent', doc, finding.patch) });
+  const migrated = reconciler().run({ apply: true });
+  assert.equal(codes(migrated).includes('CLASS_LEGACY #7'), false);
+  assert.equal(kinds(migrated).some(kind => kind.startsWith('reorder')), false, 'the migration moves no task');
+  assert.deepEqual(github.issues.get(7).subs, [8, 9, 10, 11, 12]);
 });
 
 test('a moved PR head marks evidence STALE_HEAD and updates both projections together', () => {
@@ -332,7 +367,7 @@ test('a moved PR head marks evidence STALE_HEAD and updates both projections tog
   assert.match(parentBlock, new RegExp(`423:${doc.revision}\\b`));
   assert.match(childBlock, new RegExp(`child=423@${doc.revision} -->`));
   assert.match(childBlock, new RegExp(`\\[bbbbbbb\\]\\(https://github.com/acme/app/commit/${SHA_B}\\) \`${SHA_B}\``), 'short link plus full SHA as text');
-  assert.match(parentBlock, /^\| Issue 423 \| #423 \| #540 \| CORE \| IN PROGRESS \| - \| - \|$/m, 'an open PR means the work is in progress');
+  assert.match(parentBlock, /^\| Issue 423 \| #423 \| #540 \| NOW \| IN PROGRESS \| - \| - \|$/m, 'an open PR means the work is in progress');
 });
 
 test('a body edited between read and write is held, then completed on the next pass with the edit kept', () => {
@@ -440,16 +475,16 @@ test('a body that would reach the trace threshold is refused', () => {
 
 test('a second repository orders native sub-issues like the Programme Graph, including nested children', () => {
   const outcomes = [
-    { issue: 8, class: 'CORE', parent: 7, order: 2 },
-    { issue: 9, class: 'LATER', parent: 7, order: 1 },
+    { issue: 8, class: 'COMMITTED', parent: 7, order: 2 },
+    { issue: 9, class: 'COMMITTED', parent: 7, order: 1 },
     { issue: 10, class: 'RETIRED', parent: 7, order: 0 },
     { issue: 11, class: 'COMPLETED', parent: 7, order: 0 },
     { issue: 12, class: 'OPTIONAL', parent: 7, order: 0 },
-    { issue: 13, class: 'HARDENING', parent: 7, order: 0 },
-    { issue: 15, class: 'CORE', parent: 7, order: 1 },
-    { issue: 14, class: 'CORE', parent: 7, order: 1 },
-    { issue: 16, class: 'LATER', parent: 8, order: 0 },
-    { issue: 17, class: 'CORE', parent: 8, order: 99 },
+    { issue: 13, class: 'COMMITTED', parent: 7, order: 0 },
+    { issue: 15, class: 'COMMITTED', parent: 7, order: 1 },
+    { issue: 14, class: 'COMMITTED', parent: 7, order: 1 },
+    { issue: 16, class: 'OPTIONAL', parent: 8, order: 0 },
+    { issue: 17, class: 'COMMITTED', parent: 8, order: 99 },
   ];
   const { github, reconciler } = setup({
     repository: 'other/tool', parentIssue: 7, outcomes,
@@ -461,14 +496,14 @@ test('a second repository orders native sub-issues like the Programme Graph, inc
   assert.equal(github.mutations(), 0);
   const report = reconciler().run({ apply: true });
   assert.deepEqual(report.holds, []);
-  assert.deepEqual(github.issues.get(7).subs, [14, 15, 8, 13, 12, 9, 11, 10], 'CORE, HARDENING, LATER (OPTIONAL with it), COMPLETED, then RETIRED');
+  assert.deepEqual(github.issues.get(7).subs, [13, 9, 14, 15, 8, 12, 11, 10], 'LATER by order and issue, OPTIONAL, COMPLETED, then RETIRED');
   assert.deepEqual(github.issues.get(8).subs, [17, 16]);
   assert.equal(reconciler().run().summary, 'No changes');
 });
 
 test('merged PRs with green checks list open issues for the controller without closing them', () => {
   for (const accepted of [false, true]) {
-    const outcomes = [{ issue: 8, class: 'CORE', parent: 7, order: 0 }];
+    const outcomes = [{ issue: 8, class: 'COMMITTED', parent: 7, order: 0 }];
     const { github, store, reconciler } = setup({ parentIssue: 7, outcomes, issues: gh => gh.addIssue(8, { parent: 7 }) });
     const doc = gatedChild(state, state.newChild({ repository: 'acme/app', outcome: outcomes[0] }), { role: 'G1', returnId: 'r1',
       verdict: accepted ? 'ACCEPT' : null, writer, parentDoc: store.read('parent', 7).doc, head: SHA_A });
@@ -503,7 +538,7 @@ test('merged PRs with green checks list open issues for the controller without c
 });
 
 test('G0 acceptance cannot stand in for the current G1 gate acceptance on a merged PR', () => {
-  const outcomes = [{ issue: 8, class: 'CORE', parent: 7, order: 0 }];
+  const outcomes = [{ issue: 8, class: 'COMMITTED', parent: 7, order: 0 }];
   const { github, store, reconciler } = setup({ parentIssue: 7, outcomes, issues: gh => gh.addIssue(8, { parent: 7 }) });
   const parentDoc = store.read('parent', 7).doc;
   let doc = gatedChild(state, state.newChild({ repository: 'acme/app', outcome: outcomes[0] }), { role: 'G0', returnId: 'g0-r1', verdict: 'ACCEPT', writer, parentDoc });
@@ -532,7 +567,7 @@ test('G0 acceptance cannot stand in for the current G1 gate acceptance on a merg
 
 test('the CLI bootstraps with the controller, which records gates and acceptance; executors only dry-run', () => {
   const ctrl = { session: 'ctrl', prefix: writer.prefix };
-  const outcomes = [{ issue: 8, class: 'CORE', parent: 7, order: 0 }];
+  const outcomes = [{ issue: 8, class: 'COMMITTED', parent: 7, order: 0 }];
   const { github, store, binding } = setup({ parentIssue: 7, outcomes, controller: ctrl, initialiseParent: false, issues: gh => gh.addIssue(8, { parent: 7 }) });
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'programme-handover-'));
   const output = [];
@@ -589,7 +624,7 @@ test('the CLI bootstraps with the controller, which records gates and acceptance
 
 test('G0-only acceptance is named but cannot count as merged implementation completion', () => {
   for (const gate of ['G0', 'G1', 'G2']) {
-    const outcomes = [{ issue: 8, class: 'CORE', parent: 7, order: 0 }];
+    const outcomes = [{ issue: 8, class: 'COMMITTED', parent: 7, order: 0 }];
     const { github, store, reconciler } = setup({ parentIssue: 7, outcomes, issues: gh => gh.addIssue(8, { parent: 7 }) });
     const doc = gatedChild(state, state.newChild({ repository: 'acme/app', outcome: outcomes[0] }), { role: gate, returnId: 'r1', verdict: 'ACCEPT', writer, parentDoc: store.read('parent', 7).doc, head: SHA_A });
     doc.candidate.branch = 'feature';
@@ -643,7 +678,7 @@ test('the close list excludes red, missing, pending or off-head checks, unmerged
     { name: 'closed issue', issueState: 'closed' },
   ];
   for (const variant of cases) {
-    const outcomes = [{ issue: 8, class: 'CORE', parent: 7, order: 0 }];
+    const outcomes = [{ issue: 8, class: 'COMMITTED', parent: 7, order: 0 }];
     const { github, store, binding, reconciler } = setup({ parentIssue: 7, outcomes, issues: gh => gh.addIssue(8, { parent: 7, state: variant.issueState || 'open' }) });
     const doc = state.newChild({ repository: 'acme/app', outcome: outcomes[0] });
     doc.candidate.branch = 'feature';
