@@ -38,9 +38,9 @@
         "properties": {
           "issue": { "type": "integer", "minimum": 1 },
           "label": { "type": "string", "minLength": 1 },
-          "class": { "enum": ["CORE", "HARDENING", "LATER", "OPTIONAL", "COMPLETED", "RETIRED"] },
+          "class": { "enum": ["COMMITTED", "OPTIONAL", "COMPLETED", "RETIRED", "CORE", "HARDENING", "LATER"], "description": "What the owner decided: committed, optional, completed or retired. Now, Next and Later are worked out from the task's PR and release, never stored. CORE, HARDENING and LATER are older names read as COMMITTED and reported as CLASS_LEGACY until the catalogue is patched." },
           "parent": { "type": ["integer", "null"], "minimum": 1, "description": "Expected native parent: the programme parent or another outcome. Null means no native parent is expected." },
-          "order": { "type": "integer", "minimum": 0, "description": "Position among the open outcomes of the same class in the Programme Graph and in native sub-issue order, lowest first; ties use issue number. Finished outcomes sort by completion time instead." },
+          "order": { "type": "integer", "minimum": 0, "description": "Position among the open outcomes in the same Programme Graph group and in native sub-issue order, lowest first; ties use issue number. Finished outcomes sort by completion time instead." },
           "lane": { "type": "string", "minLength": 1 },
           "owner_prefix": { "type": "string", "pattern": "^[A-Za-z0-9._-]{1,40}$" },
           "name": { "type": "string", "minLength": 1, "description": "The task name shown in the Task column. Without it, the issue title is shown without a leading code or release." },

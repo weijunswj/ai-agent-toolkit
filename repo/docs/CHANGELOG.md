@@ -1,5 +1,13 @@
 # Toolkit Changelog
 
+## 3.13.0
+
+### Now, Next and Later
+
+- **The roadmap groups come from the release:** the Programme Graph's Class column is worked out from each task, never set by hand: `NOW` when it has an open or draft PR, `NEXT` when its state names a planned release (a name, not a version number), `LATER` when it is committed with no release, and `OPTIONAL` for an optional task with no release. Rows and native sub-issues sort in that order, then completed and retired work as before, so a task moves up when its release is set or its PR opens. Finished rows show `-` in the Class column.
+- **The catalogue keeps only what the owner decides:** an outcome's class is `COMMITTED`, `OPTIONAL`, `COMPLETED` or `RETIRED`. The older `CORE`, `HARDENING` and `LATER` still read as `COMMITTED`, and each reconcile reports `CLASS_LEGACY` naming them until the controller patches the catalogue with `update-parent`.
+- **Hardening is gone:** the rules order work Now, then Next, then Later. A G2 finding that adds protection without breaking acceptance is a follow-up that gets a planned release (Next) or none (Later); ship blocker, Later or optional, and unsupported or duplicate are unchanged.
+
 ## 3.12.0 (server operations)
 
 ### External operation preflight
