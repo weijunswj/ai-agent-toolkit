@@ -1,5 +1,10 @@
 # Toolkit Changelog
 
+## Unreleased
+
+- **The CI drift guard pins the whole of `validate.yml`:** the file must match its pinned text everywhere except the gate command list, including the final `validate` job, comments and anything before the jobs. Each gate command must be a plain repository script line with no shell syntax, and the usual spellings of `set +e`, `|| echo` and a `shell:` key are refused as a second check.
+- **No test file is skipped silently:** a `.test.cjs` entry in `repo/tests` with a name outside the allowed pattern, or a folder or link named like a test, now fails every runner mode instead of never running.
+
 ## 3.10.2 (n8n helpers that work on any machine, and n8n 2.x publish state)
 
 ### n8n import and export helpers on any machine

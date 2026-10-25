@@ -673,7 +673,7 @@ test('Skill Creation retains exactly the fourteen operational free-text fields',
 test('validator and surface audit keep the publisher reference allowlist empty', () => {
   const validator = require(validateScript);
   const audit = require(path.join(repoRoot, 'repo', 'scripts', 'audit-published-surfaces.cjs'));
-  assert.deepEqual(publisherReferencePaths.filter(audit.legacyReferenceAllowed), []);
+  assert.deepEqual(publisherReferencePaths.filter((rel) => audit.legacyReferenceAllowed(rel)), []);
   assert.equal(audit.legacyReferenceAllowed('skills/skill-product-review/README.md'), false);
   assert.deepEqual(validator.validate(), []);
 });

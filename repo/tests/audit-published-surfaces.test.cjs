@@ -139,7 +139,7 @@ test('policy v2 owns the closed primitive, identity, and exact scope contracts',
 });
 
 test('retired publisher references have no non-operative compatibility exemptions', () => {
-  assert.deepEqual(publisherReferencePaths.filter(audit.legacyReferenceAllowed), []);
+  assert.deepEqual(publisherReferencePaths.filter((rel) => audit.legacyReferenceAllowed(rel)), []);
   assert.equal(audit.legacyReferenceAllowed('skills/skill-product-review/README.md'), false);
   assert.equal(audit.legacyReferenceAllowed('skills/skill-product-review/references/examples.md'), false);
 });
