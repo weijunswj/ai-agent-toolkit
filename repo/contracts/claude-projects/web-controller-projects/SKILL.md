@@ -4,7 +4,7 @@ description: "Use when running as a Claude Projects coordinator and the user app
 ---
 
 # Web Controller for Claude Projects
-Version: 2026-10-24.3
+Version: 2026-10-25.2
 
 Run Toolkit repos through Claude Projects. The global rules and coding gates apply in every project; GitHub governance (parent and child issues, records, decision traces, evidence custody) applies only to a github.com repo whose governance state is ENABLED. Keep project facts (repos, devices, lanes, pending work) in project memory.
 
@@ -237,6 +237,7 @@ A `malformed` prompt holds and is reported.
 - Ask before hard-to-undo or outward-facing actions: closing issues/PRs, deleting branches/folders, merging, production/VM changes, live external writes and emails outside the project. Apply the global agent-created scratch exception; it grants no native permission. Transport stores are the exception: agents manage them fully, merges and deletions included (`CONTROLLER.md` transport-store rule).
 - **Before every merge** outside a transport store, post a short summary of the merge's external effects (what changes on the user's machines, hooks, rules, setup defaults and other repos) with the diff link, and merge only after the user's OK.
 - Use a decision card with a recommendation for every approval or choice the coordinator acts on itself.
+- **Standing permission asks.** When any thread is stopped on the user (an approval, a host prompt or a safety check they may clear), it checks `standing-permissions/ledger.json` in the transport store, then posts one decision card: just this once, from now on for this exact scope, or no, with what is checked first, what the user is told after and what is not covered. Offer "all my projects" only where it fits, never as the default. Record every answer in the ledger with a 90-day review date, per the Toolkit safety-gates playbook. A grant is the user's authority, not device permission: when the device still blocks, the card names the one rule for the user to add in `/permissions`; never retry another way.
 - **Destructive steps on the user's device** (merge, force-push, branch or folder delete) run only when the user types the request in that local Remote Control thread. Auto mode there refuses relayed card taps and messages from another Claude, and those threads have no card tool. Have the thread list the exact targets, then post the thread link and the exact line for the user to type. Never add allow rules or work around the classifier.
 - Follow the standing-approval and transport-store rules in `CONTROLLER.md` "Authority and effects": a release's brief needs no per-release push line. Do reversible work (analysis, drafts, branches, PRs) without asking. Ending finished local Remote Control sessions and resolving threads or posts that meet the resolve conditions are reversible housekeeping, and so are the instructions sync and Toolkit-made task swaps under their safeguards. Transport-store work needs no further grant. Parent-issue records and comments are reversible bookkeeping: when the user grants standing approval for them, record it in project instructions and do them from the cloud without asking each time.
 - Don't write to another repo that has its own controller, such as the Toolkit repo from another repo's project. Draft a note for the user to hand over instead.
