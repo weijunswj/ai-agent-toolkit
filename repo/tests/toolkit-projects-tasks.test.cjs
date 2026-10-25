@@ -293,9 +293,11 @@ test('the check-in carries every prefix in the fixed order and checks both Toolk
     assert.ok(text.includes(required), required);
   }
   // The check-in posts the skill update card itself, once per main Version, and never over direct account edits.
-  for (const required of ['SKILL CARD: when the account SKILL.md is behind main', 'never SKILL DRIFT: a card would overwrite direct edits',
-    'state.md records no card for this main Version', 'post one skill update card with propose_skills', 'skillMd main\'s SKILL.md byte for byte',
-    ', card posted', ', card failed: <reason>', 'tap Save on the skill card']) {
+  for (const required of ['SKILL CARD: post one skill update card only when all of these hold', 'never on SKILL DRIFT: a card would overwrite direct edits',
+    'the account folder is under 26 hours old', 'every account reference/*.md is absent or equal to main', 'state.md records no "card <main Version>"',
+    'Call propose_skills', 'skillMd main\'s SKILL.md byte for byte', 'even when state.md already reported this Version',
+    ', card posted', 'fails or is skipped for any reason', ', card failed: <reason>', 'tap Save on the skill card',
+    'A reference file missing from the account is not drift', 'every "card <Version>" record (this run\'s and all earlier ones, carried forward)']) {
     assert.ok(text.includes(required), required);
   }
   assert.doesNotMatch(text, /skip the resolve in DELIVERY/, 'bound runs never resolve, so no fresh-only card line');
