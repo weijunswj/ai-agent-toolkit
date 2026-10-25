@@ -10,7 +10,9 @@ const repoRoot = path.resolve(__dirname, '..', '..');
 const skillRoot = path.join(repoRoot, 'skills', 'external-operation-preflight');
 const checkerPath = path.join(skillRoot, 'scripts', 'preflight-check.cjs');
 const examplePath = path.join(skillRoot, 'templates', 'operation-plan.example.json');
-const { BACKUP_LEVELS, PLAN_SCHEMA, REASONS, TRIGGERS, checkPlan, planHash } = require(checkerPath);
+const {
+  BACKUP_LEVELS, NON_PRODUCTION_WORDS, PLAN_SCHEMA, PRODUCTION_WORDS, REASONS, TEMPORARY_WORDS, TRIGGERS, checkPlan, planHash
+} = require(checkerPath);
 
 const NOW = Date.parse('2026-10-25T00:00:00Z');
 const FUTURE = '2026-12-31';
@@ -569,7 +571,7 @@ test('production is any environment that is not plainly non-production', async (
       assert.equal(covered.verdict, 'ALLOW', JSON.stringify(covered.reasons));
     });
   }
-  for (const environment of ['alpha', 'alpha-eu', 'staging', 'dev', 'qa', 'uat', 'sandbox']) {
+  for (const environment of ['alpha', 'alpha-eu', 'beta', 'staging', 'stage', 'dev', 'development', 'qa', 'uat', 'sandbox', 'local']) {
     await t.test(`${environment} needs neither`, () => {
       assert.equal(checkPlan(envPlan(environment), { now: NOW }).verdict, 'ALLOW');
     });
@@ -578,7 +580,7 @@ test('production is any environment that is not plainly non-production', async (
     await t.test(`${environment} resources must be temporary`, () => {
       const result = checkPlan(envPlan(environment), { now: NOW });
       assert.equal(result.verdict, 'HOLD');
-      assert.ok(codes(result).includes(REASONS.TEMPORARY_RESOURCE_INCOMPLETE), JSON.stringify(result.reasons));
+      assert.deepEqual(codes(result), [REASONS.TEMPORARY_RESOURCE_INCOMPLETE], JSON.stringify(result.reasons));
     });
   }
 });
@@ -626,7 +628,36 @@ test('remaining refusal rules each have a row', async (t) => {
       plan: plan({ routes: [{ route: 'mcp', outcome: 'failed_before_effect' }, { route: 'api', outcome: 'selected', pre_approved: true }] }),
       codes: [REASONS.ROUTE_FALLBACK_REFUSED]
     },
-    { name: 'secret-shaped object key', plan: plan({ labels: { [`ghp_${'c'.repeat(36)}`]: 'x' } }), codes: [REASONS.SECRET_IN_PLAN] }
+    { name: 'secret-shaped object key', plan: plan({ labels: { [`ghp_${'c'.repeat(36)}`]: 'x' } }), codes: [REASONS.SECRET_IN_PLAN] },
+    {
+      name: 'alpha deploy with a production target declared through an owner exception and no evidence',
+      plan: {
+        ...crossBucket({ resources: ['bucket'], environments: ['production'], reason: 'shared media', end_date: FUTURE }),
+        operation: { action: 'deploy', environment: 'alpha', targets: ['app'] }
+      },
+      codes: [REASONS.BACKUP_EVIDENCE_MISSING, REASONS.ROLLBACK_EVIDENCE_MISSING]
+    },
+    { name: 'qa-prd is production', plan: envPlan('qa-prd'), codes: [REASONS.BACKUP_EVIDENCE_MISSING, REASONS.ROLLBACK_EVIDENCE_MISSING] },
+    { name: 'staging-live is production', plan: envPlan('staging-live'), codes: [REASONS.BACKUP_EVIDENCE_MISSING, REASONS.ROLLBACK_EVIDENCE_MISSING] },
+    { name: 'uat-production is production', plan: envPlan('uat-production'), codes: [REASONS.BACKUP_EVIDENCE_MISSING, REASONS.ROLLBACK_EVIDENCE_MISSING] },
+    { name: 'drill resources must be temporary', plan: envPlan('drill'), codes: [REASONS.TEMPORARY_RESOURCE_INCOMPLETE] },
+    { name: 'testing resources must be temporary', plan: envPlan('testing'), codes: [REASONS.TEMPORARY_RESOURCE_INCOMPLETE] },
+    {
+      name: 'production rollback with an environment but no plan',
+      plan: envPlan('production', { rollback: { environment: 'production' }, backup_evidence: BACKUP }),
+      codes: [REASONS.ROLLBACK_EVIDENCE_MISSING]
+    },
+    ...[
+      ['target named alpha read back as production', [target('app', 'alpha', 'production')], [resource('db', 'alpha'), resource('bucket', 'alpha')]],
+      ['target named production read back as alpha', [target('app', 'production', 'alpha')], [resource('db', 'alpha'), resource('bucket', 'alpha')]],
+      ['resource named production read back as alpha', [target('app', 'alpha')], [resource('db', 'production', 'alpha'), resource('bucket', 'alpha')]],
+      ['resource named alpha read back as production', [target('app', 'alpha')], [resource('db', 'alpha', 'production'), resource('bucket', 'alpha')]]
+    ].map(([name, targets, resources]) => ({
+      name: `${name} also needs production evidence`,
+      plan: plan({ operation: { action: 'deploy', environment: 'alpha', targets: ['app'] }, targets, resources }),
+      codes: [REASONS.BACKUP_EVIDENCE_MISSING, REASONS.RESOURCE_IDENTITY_MISMATCH, REASONS.ROLLBACK_EVIDENCE_MISSING]
+    })),
+    { name: 'selected route with an unknown name', plan: plan({ routes: [{ ...first, route: 'ssh', outcome: 'selected', pre_approved: true }] }), codes: [REASONS.PLAN_INVALID] }
   ];
   for (const row of rows) {
     await t.test(row.name, () => {
@@ -671,6 +702,13 @@ test('skill text stays within its budget and names every reason the checker can 
   const skill = fs.readFileSync(path.join(skillRoot, 'SKILL.md'), 'utf8');
   assert.ok(Buffer.byteLength(skill) <= 6144, 'SKILL.md should stay under about 6 KB');
   for (const code of Object.values(REASONS)) assert.ok(skill.includes(code), `SKILL.md should explain ${code}`);
+  const listed = (lead) => {
+    const line = skill.split('\n').find((entry) => entry.includes(lead));
+    return line.slice(line.indexOf(lead) + lead.length).split(/[.)]| in it/)[0].split(/, | or /).map((word) => word.trim()).filter(Boolean);
+  };
+  assert.deepEqual(listed('has a production word ('), [...PRODUCTION_WORDS], 'SKILL.md production words should match the checker');
+  assert.deepEqual(listed('none of these words: '), [...NON_PRODUCTION_WORDS], 'SKILL.md non-production words should match the checker');
+  assert.deepEqual(listed('whose name has '), [...TEMPORARY_WORDS], 'SKILL.md temporary words should match the checker');
   const contract = fs.readFileSync(path.join(skillRoot, 'references', 'backup-and-recovery.md'), 'utf8');
   for (const claim of ['configured', 'local copy made', 'uploaded', 'retrievable', 'database recoverable', 'fully recoverable', 'unlimited']) {
     assert.ok(contract.includes(claim), `backup contract should state the "${claim}" level`);

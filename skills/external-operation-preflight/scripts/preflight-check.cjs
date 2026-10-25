@@ -553,4 +553,6 @@ function main(argv) {
 
 if (require.main === module) process.exitCode = main(process.argv.slice(2));
 
-module.exports = { BACKUP_LEVELS, PLAN_SCHEMA, REASONS, TRIGGERS, checkPlan, planHash };
+module.exports = {
+  BACKUP_LEVELS, NON_PRODUCTION_WORDS, PLAN_SCHEMA, PRODUCTION_WORDS, REASONS, TEMPORARY_WORDS, TRIGGERS, checkPlan, planHash
+};
