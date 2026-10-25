@@ -21,8 +21,9 @@
 //      what GitHub showed before.
 //   I5 A write GitHub refuses as not on the plan or against an organisation policy is left alone
 //      and is not a failure; any other refusal fails.
-//   I6 Default setup is never turned on over an advanced CodeQL workflow (codeql-action init or
-//      analyze, on the default branch; unreadable workflows rule nothing out), and a dependabot config
+//   I6 Default setup is never turned on over an advanced CodeQL workflow (a triggered workflow with
+//      real codeql-action init and analyze steps, on the default branch; unreadable workflows rule
+//      nothing out), and a dependabot config
 //      (.yml or .yaml) or workflow Toolkit did not write is never replaced. Protection counts for
 //      auto-merge only when it was checked against the merged binding's required checks.
 //   I7 The workflow turns auto-merge on only for a pull request Dependabot opened, last pushed and
@@ -79,7 +80,7 @@ function binding(policy, paid = null) {
 const merged = (policy, paid) => ({ status: 'ok', text: binding(policy, paid) });
 const ON = Object.freeze({
   ok: true, visibility: 'public', allow_auto_merge: true, alerts: 'enabled', security_updates: 'enabled',
-  secret_scanning: 'enabled', push_protection: 'enabled', code_scanning: 'enabled', private_reporting: 'enabled',
+  secret_scanning: 'enabled', push_protection: 'enabled', code_security: 'enabled', code_scanning: 'enabled', private_reporting: 'enabled',
   binding: merged(), advanced_codeql: null,
 });
 const reader = (overrides = {}) => () => ({ ...ON, ...overrides });
@@ -88,6 +89,7 @@ const PRIVATE = Object.freeze({ visibility: 'private', private_reporting: 'not-o
 const PAID_OFF = Object.freeze({ secret_scanning: 'disabled', push_protection: 'disabled', code_scanning: 'disabled' });
 const NO_PLAN = Object.freeze({ secret_scanning: 'not-on-plan', push_protection: 'not-on-plan', code_scanning: 'not-on-plan' });
 const PATCH_MINOR = Object.freeze({ auto_merge: 'patch-minor' });
+const CODEQL_WORKFLOW = 'on:\n  push:\n    branches: [main]\njobs:\n  analyze:\n    steps:\n      - uses: "github/codeql-action/init@abc"\n      - uses: "github/codeql-action/analyze@abc"\n';
 const COVERED = 'updates:\n  - package-ecosystem: "npm"\n    directory: "/"\n';
 
 test('SE-01: ecosystems are found at the root and one folder down, and the written config covers them', (t) => {
@@ -282,6 +284,20 @@ const APPLY = [
   { id: 'A13 allow auto-merge written and read back', binding: binding(PATCH_MINOR),
     before: reader({ allow_auto_merge: false, binding: merged(PATCH_MINOR) }), writer: () => [ok('allow_auto_merge')], after: reader({ binding: merged(PATCH_MINOR) }),
     expect: { result: 'applied', writes: 1, lines: [/allow auto-merge turned on\./, /read back\./] } },
+  { id: 'A14 Code Security written, default setup not on the plan, Code Security unreadable after: unverified (I4)', binding: binding(null, 'on'),
+    before: reader({ ...PRIVATE, ...PAID_OFF, code_security: 'disabled', binding: merged(null, 'on') }), writer: () => [ok('code_security'), refused('code_scanning', 'not-on-plan')],
+    after: reader({ ...PRIVATE, ...PAID_OFF, code_security: 'unreadable', binding: merged(null, 'on') }),
+    expect: { result: 'unverified', writes: 1, unconfirmed: ['code_security'], lines: [/could not read back: GitHub Code Security/], never: [/: read back\./] } },
+  { id: 'A15 Code Security written, default setup forbidden: failed, never "read back" (I5)', binding: binding(null, 'on'),
+    before: reader({ ...PRIVATE, ...PAID_OFF, code_security: 'disabled', binding: merged(null, 'on') }), writer: () => [ok('code_security'), refused('code_scanning', 'forbidden')],
+    after: reader({ ...PRIVATE, ...PAID_OFF, binding: merged(null, 'on') }),
+    expect: { result: 'failed', writes: 1, lines: [/CodeQL code scanning not turned on \(forbidden\)/], never: [/: read back\./] } },
+  { id: 'A16 Code Security written and read back on, default setup refused by an organisation policy', binding: binding(null, 'on'),
+    before: reader({ ...PRIVATE, ...PAID_OFF, code_security: 'disabled', binding: merged(null, 'on') }), writer: () => [ok('code_security'), refused('code_scanning', 'refused-by-policy')],
+    after: reader({ ...PRIVATE, ...PAID_OFF, code_security: 'enabled', binding: merged(null, 'on') }),
+    expect: { result: 'applied', writes: 1, unavailable: ['code_scanning'], lines: [/GitHub Code Security turned on\./, /read back\./] } },
+  { id: 'A17 a written setting with no read-back is never "read back" (I4)', before: reader(ALERTS_OFF), writer: () => [ok('alerts'), ok('something_new')], after: reader(),
+    expect: { result: 'unverified', writes: 1, unconfirmed: ['something_new'], never: [/: read back\./] } },
 ];
 
 test('SE-05 (APPLY): every write and read-back outcome, and what is said about it', async (t) => {
@@ -364,7 +380,7 @@ test('SE-08: the reader only reads, hides nothing it could not see, and reads th
   }, calls) });
   assert.deepEqual(read, {
     ok: true, visibility: 'public', allow_auto_merge: false, alerts: 'disabled', security_updates: 'enabled', secret_scanning: 'enabled',
-    push_protection: 'disabled', code_scanning: 'disabled', private_reporting: 'disabled', binding: { status: 'ok', text: binding(PATCH_MINOR) },
+    push_protection: 'disabled', code_security: 'unreadable', code_scanning: 'disabled', private_reporting: 'disabled', binding: { status: 'ok', text: binding(PATCH_MINOR) },
     advanced_codeql: null,
   }, 'an upload-sarif step for another scanner is not an advanced CodeQL setup');
   assert.ok(calls.every(args => !args.includes('-X')), 'reads are GETs');
@@ -388,11 +404,23 @@ test('SE-08: the reader only reads, hides nothing it could not see, and reads th
   const codeql = name => security.ghSecurityReader('o/c', { spawn: fakeGh({
     'repos/o/c': repoRead, 'repos/o/c/code-scanning/default-setup': { state: 'not-configured' },
     'repos/o/c/contents/.github/workflows?ref=main': [{ type: 'file', name }],
-    'repos/o/c/contents/.github/workflows/codeql.yml?ref=main': { encoding: 'base64', content: Buffer.from('steps:\n  - uses: "github/codeql-action/init@abc"\n').toString('base64') },
+    'repos/o/c/contents/.github/workflows/codeql.yml?ref=main': { encoding: 'base64', content: Buffer.from(CODEQL_WORKFLOW).toString('base64') },
   }, []) }).advanced_codeql;
   assert.equal(codeql('codeql.yml'), 'codeql.yml');
   assert.equal(codeql('gone.yml'), 'unreadable');
-  for (const [text, runs] of [['uses: github/codeql-action/init@v3', true], ['uses: github/codeql-action/analyze@v3', true], ['uses: github/codeql-action/upload-sarif@v3', false], ['# github/codeql-action/init', false]]) assert.equal(security.runsCodeql(text), runs, text);
+  const steps = 'jobs:\n  analyze:\n    steps:\n      - uses: github/codeql-action/init@v3\n      - uses: github/codeql-action/analyze@v3\n';
+  for (const [text, runs, why] of [
+    [CODEQL_WORKFLOW, true, 'init and analyze on push'],
+    [`'on':\n  schedule:\n    - cron: '0 0 * * 1'\n${steps}`, true, 'quoted on, schedule only'],
+    [`on: [push, pull_request]\r\n${steps.replace(/\n/g, '\r\n')}`, true, 'flow-style trigger, CRLF'],
+    ['on: push\njobs:\n  a:\n    steps:\n      - uses: github/codeql-action/init@v3\n', false, 'init only'],
+    ['on: push\njobs:\n  a:\n    steps:\n      - uses: github/codeql-action/analyze@v3\n', false, 'analyze only'],
+    [steps, false, 'no on: key'],
+    [`on:\n  workflow_dispatch:\n${steps}`, false, 'manual trigger only'],
+    ['on: push\njobs:\n  a:\n    steps:\n      # - uses: github/codeql-action/init@v3\n      # - uses: github/codeql-action/analyze@v3\n      - uses: github/codeql-action/upload-sarif@v3\n', false, 'commented-out steps'],
+    ['on: push\njobs:\n  a:\n    steps:\n      - run: echo "uses: github/codeql-action/init@v3 uses: github/codeql-action/analyze@v3"\n', false, 'text inside a run step'],
+    ['on: push\njobs:\n  a:\n    steps:\n      - uses: github/codeql-action/upload-sarif@v3\n', false, 'upload-sarif for another scanner'],
+  ]) assert.equal(security.runsCodeql(text), runs, why);
   // A default ref GitHub cannot resolve is unreadable, never "not merged".
   const noRef = security.ghSecurityReader('o/r', { spawn: fakeGh({
     'repos/o/r': repoRead, 'repos/o/r/code-scanning/default-setup': { state: 'configured' },
@@ -436,7 +464,7 @@ test('SE-10: the auto-merge workflow stays guarded, and this repository carries 
   const jobs = jobBlocks(TEMPLATE);
   for (const [name, text] of Object.entries(jobs)) assert.match(text, /^ {4}permissions:\n/m, `${name} sets its own permissions`);
   assert.match(jobs['auto-merge'], /^ {4}permissions:\n {6}contents: write\n {6}pull-requests: write\n/m);
-  assert.match(jobs.disarm, /^ {4}permissions:\n {6}pull-requests: write\n {4}steps:/m, 'the turn-off job only needs pull requests');
+  assert.match(jobs.disarm, /^ {4}permissions:\n {6}contents: write\n {6}pull-requests: write\n {4}steps:/m, 'the turn-off job has the rights GitHub documents for auto-merge, no more');
   assert.match(jobs['auto-merge'], /^ {4}concurrency:\n/m);
   assert.doesNotMatch(jobs.disarm, /concurrency/, 'a turn-off run is never a waiting run a newer one cancels (I7)');
   assert.doesNotMatch(TEMPLATE.split('\njobs:\n')[0], /concurrency/, 'no workflow-wide concurrency');

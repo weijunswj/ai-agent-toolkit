@@ -11,7 +11,9 @@
 # and GitHub Actions updates unless the binding sets github_actions to "auto-merge" (the default
 # keeps them for the owner). When anyone but Dependabot pushes to the pull request, re-runs it, or
 # changes its base branch, auto-merge is turned off again and the owner is told; if that cannot be
-# confirmed, the job fails instead of saying so.
+# confirmed, the job fails instead of saying so. GitHub starts no pull request workflow for a push
+# whose commit message asks to skip CI, so such a push does not turn auto-merge off; the required
+# checks then never report on it, which still blocks the merge until someone runs them.
 # It never checks out the pull request's code and uses only the built-in token. GitHub starts no
 # workflow for what the built-in token does, so a merge made this way does not run push workflows
 # on the base branch; they run on its next push.
@@ -113,7 +115,9 @@ jobs:
     if: github.event.pull_request.user.login == 'dependabot[bot]' && ((github.event.action != 'edited' && (github.actor != 'dependabot[bot]' || github.triggering_actor != 'dependabot[bot]')) || (github.event.action == 'edited' && github.event.changes.base))
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # The same rights GitHub documents for turning auto-merge on; this job runs no pull request code.
     permissions:
+      contents: write
       pull-requests: write
     steps:
       - name: Turn auto-merge off and tell the owner

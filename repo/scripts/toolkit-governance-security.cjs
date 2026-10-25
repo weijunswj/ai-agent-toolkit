@@ -229,12 +229,16 @@ function workflowState(root, toolkitRoot = ROOT) {
   return text.startsWith(WORKFLOW_MARKER) ? 'outdated' : 'foreign';
 }
 
-// True when workflow `text` runs CodeQL itself (an advanced setup): it uses codeql-action's init or
-// analyze step. Other codeql-action steps, such as upload-sarif for another scanner, do not count.
-// GitHub refuses an advanced setup's results once default setup is on, so default setup is never
-// turned on over one.
+// True when workflow `text` runs CodeQL itself (an advanced setup): it has a trigger (`on:` with push,
+// pull_request, merge_group or schedule) and real codeql-action init and analyze steps. Commented-out
+// steps, text inside a run script and other codeql-action steps, such as upload-sarif for another
+// scanner, do not count. GitHub refuses an advanced setup's results once default setup is on, so
+// default setup is never turned on over one.
 function runsCodeql(text) {
-  return /uses:\s*['"]?github\/codeql-action\/(?:init|analyze)@/.test(String(text));
+  const source = String(text).replace(/\r\n/g, '\n');
+  const step = action => new RegExp(`^\\s*(?:-\\s+)?uses:\\s*['"]?github\\/codeql-action\\/${action}@`, 'm').test(source);
+  const trigger = /^(?:on|"on"|'on'):(.*(?:\n(?:[ \t]+.*|[ \t]*#.*|[ \t]*))*)/m.exec(source);
+  return Boolean(trigger) && /\b(?:push|pull_request|pull_request_target|merge_group|schedule)\b/.test(trigger[1]) && step('init') && step('analyze');
 }
 
 // The binding's policy as committed on the default branch: { policy, required_checks, source } where
@@ -285,12 +289,12 @@ function statusOf(section) {
 }
 
 // What GitHub says about `slug`: { ok, visibility, allow_auto_merge, alerts, security_updates,
-// secret_scanning, push_protection, code_scanning, private_reporting, binding } where each setting is
-// 'enabled' | 'disabled' | 'not-on-plan' | 'unreadable', `binding` is the programme binding on the
-// default branch ({ status: 'ok', text } | { status: 'missing' } | { status: 'unreadable' }), and
-// `advanced_codeql` names a default-branch workflow that runs CodeQL itself (null for none,
-// 'unreadable'; read only when default setup is off); or { ok: false, reason }. Without admin rights
-// GitHub hides these settings, so they read unreadable.
+// secret_scanning, push_protection, code_security, code_scanning, private_reporting, binding } where
+// each setting is 'enabled' | 'disabled' | 'not-on-plan' | 'unreadable', `binding` is the programme
+// binding on the default branch ({ status: 'ok', text } | { status: 'missing' } |
+// { status: 'unreadable' }), and `advanced_codeql` names a default-branch workflow that runs CodeQL
+// itself (null for none, 'unreadable'; read only when default setup is off); or { ok: false, reason }.
+// Without admin rights GitHub hides these settings, so they read unreadable.
 function ghSecurityReader(slug, { spawn = childProcess.spawnSync } = {}) {
   const repository = ghRun([`repos/${slug}`], spawn);
   if (!repository.ok) return repository;
@@ -352,6 +356,7 @@ function ghSecurityReader(slug, { spawn = childProcess.spawnSync } = {}) {
     security_updates: securityUpdates,
     secret_scanning: fromAnalysis('secret_scanning'),
     push_protection: fromAnalysis('secret_scanning_push_protection'),
+    code_security: fromAnalysis('code_security'),
     code_scanning: codeScanning,
     private_reporting: privateReporting,
     binding,
@@ -442,7 +447,8 @@ function applySecurity(root, result, { writer = ghSecurityWriter, fileWriter = w
   const readBack = Boolean(after && after.settings);
   const stillOff = [];
   const unconfirmed = [];
-  for (const entry of settings.filter(item => item.ok && READ_BACK[item.setting])) {
+  for (const entry of settings.filter(item => item.ok)) {
+    if (!READ_BACK[entry.setting]) { unconfirmed.push(entry.setting); continue; }
     const values = READ_BACK[entry.setting].map(key => (readBack ? after.settings[key] : undefined));
     if (values.every(item => item === 'enabled' || item === true)) continue;
     if (values.some(item => item === 'disabled' || item === false)) stillOff.push(entry.setting);
@@ -453,11 +459,11 @@ function applySecurity(root, result, { writer = ghSecurityWriter, fileWriter = w
   return { prior, settings, files, unavailable, still_off: stillOff, unconfirmed, read_back: readBack, result: status };
 }
 
-// The read values that show each written setting on. GitHub Code Security has no read of its own: the
-// code scanning write that follows it is read back instead.
+// The read values that show each written setting on. A written setting with no entry here can never
+// count as read back.
 const READ_BACK = Object.freeze({
   alerts: ['alerts'], security_updates: ['security_updates'], secret_scanning: ['secret_scanning', 'push_protection'],
-  code_scanning: ['code_scanning'], private_reporting: ['private_reporting'], allow_auto_merge: ['allow_auto_merge'],
+  code_security: ['code_security'], code_scanning: ['code_scanning'], private_reporting: ['private_reporting'], allow_auto_merge: ['allow_auto_merge'],
 });
 
 const SETTING_LABELS = Object.freeze({
@@ -482,7 +488,8 @@ function describeOutcome(slug, root, result, outcome) {
   const unconfirmed = outcome.unconfirmed || [];
   if (outcome.still_off.length) lines.push(`- ${slug}: reading back still shows off: ${outcome.still_off.map(key => SETTING_LABELS[key] || key).join(', ')}.`);
   if (unconfirmed.length) lines.push(`- ${slug}: could not read back: ${unconfirmed.map(key => SETTING_LABELS[key] || key).join(', ')}; the change is unverified, so run the check again.`);
-  if (wrote && !outcome.still_off.length && !unconfirmed.length) lines.push(`- ${slug}: read back.`);
+  // Only when every successful write was itself read back on, and nothing else failed.
+  if (wrote && outcome.result === 'applied') lines.push(`- ${slug}: read back.`);
   for (const [id, check] of Object.entries(result.checks || {})) {
     if (check.status === 'unverified') lines.push(`- ${slug}: could not check ${id}: ${check.details.join('; ')}.`);
   }
@@ -510,7 +517,7 @@ function verdict(status, reason, checks = {}, extra = {}) {
   return Object.freeze({ status, reason, checks: Object.freeze(checks), ...extra });
 }
 
-const SNAPSHOT_KEYS = Object.freeze(['visibility', 'allow_auto_merge', 'alerts', 'security_updates', 'secret_scanning', 'push_protection', 'code_scanning', 'private_reporting']);
+const SNAPSHOT_KEYS = Object.freeze(['visibility', 'allow_auto_merge', 'alerts', 'security_updates', 'secret_scanning', 'push_protection', 'code_security', 'code_scanning', 'private_reporting']);
 const PAID_QUESTION = 'ask the owner whether to turn on GitHub\'s paid Secret Protection and Code Security for this repository (billed per active committer; default off), and record only the owner\'s own answer, "off" or "on", as paid_security in the binding through a merged pull request';
 
 function sameValues(a, b) {
