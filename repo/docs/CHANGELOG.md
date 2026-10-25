@@ -1,5 +1,12 @@
 # Toolkit Changelog
 
+## 3.12.1
+
+### Gate rules: no-weakening review checks
+
+- **No-weakening proof:** when a change touches detection or guard code, G2 compares head against base, runs the base tests and fixtures against the head, and requires a reason for every case that was blocked or flagged before and is now allowed.
+- **Early returns keep the guards:** every early return, skip or fast path in changed code must show that the generic guards still run first or are provably not needed, with a test for the return path.
+
 ## 3.12.0 (server operations)
 
 ### External operation preflight
