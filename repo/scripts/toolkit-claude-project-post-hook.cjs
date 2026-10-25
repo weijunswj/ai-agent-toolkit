@@ -19,11 +19,15 @@ const EDIT_TOOL = 'mcp__hearthbot__edit_message';
 const NEAR_LIMIT_BYTES = 7000;
 const MESSAGE_ID = /\b(cmsg_[A-Za-z0-9]+)\b/;
 
-// An owner message counts unless it sits inside a message, note, citation or relay, so an owner tag quoted or
-// forwarded by another session never counts. The runtime also escapes "<" in message text, so a quoted tag usually
-// arrives as plain text; this is the second line of defence. Any wake wrapper (wake, project, thread or a newer one)
-// is accepted, so a change in the wake's outer shape cannot silently stop owner messages from counting.
-const QUOTE_TAGS = new Set(['message', 'note', 'cited', 'relay', 'coordinator-relay']);
+// An owner message counts unless it sits inside one of the quoting tags below (a message, note, citation, relay,
+// task notification or another session's output), so an owner tag quoted or forwarded inside one of them never counts.
+// The runtime also escapes "<" in message text, so a quoted tag usually arrives as plain text; this is the second line
+// of defence. Any other wrapper (wake, project, thread or a newer one) is accepted, so a change in the wake's outer
+// shape cannot silently stop owner messages from counting.
+const QUOTE_TAGS = new Set([
+  'message', 'note', 'cited', 'relay', 'coordinator-relay',
+  'cross-session-message', 'task-notification', 'child-session-output', 'project_claude_message',
+]);
 function hasOwnerMessage(text) {
   const open = [];
   for (const tag of text.matchAll(/<(\/?)([A-Za-z][\w-]*)\b([^<>]*?)(\/?)>/g)) {

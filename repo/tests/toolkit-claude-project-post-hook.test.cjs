@@ -138,12 +138,12 @@ test('each PR in a list needs its own link', () => {
   // A colon or bracket after the PR word still starts a list.
   assert.match(linkIssue('Ready PRs: 612 and 613'), /PR 612/);
   assert.match(linkIssue('PRs (612, 613)'), /PR 612/);
-  // A long run of spaces after a comma stays fast.
-  const started = Date.now();
-  linkIssue(`PR 1,${' '.repeat(32000)}x`);
-  linkIssue(`PR${' '.repeat(32000)}x`);
-  linkIssue(`PR(${' '.repeat(32000)}x`);
-  assert.ok(Date.now() - started < 500);
+  // A long run of spaces after the PR word, a colon, a bracket or a list comma stays fast.
+  for (const start of ['PR 1,', 'PR', 'PR:', 'PR(']) {
+    const started = Date.now();
+    linkIssue(`${start}${' '.repeat(32000)}x`);
+    assert.ok(Date.now() - started < 500, start);
+  }
 });
 
 test('guards hold: failed posts, size in bytes, the 8 KB escape and quoted owner text', () => {
@@ -166,6 +166,15 @@ test('guards hold: failed posts, size in bytes, the 8 KB escape and quoted owner
   ]) {
     assert.match(post([wake(), call(POST, { text: 'First.' }), entry]), /one running post/);
   }
+  // Each quoting tag hides an owner tag inside it, including a sibling's message and a bare coordinator relay.
+  for (const name of [
+    'message', 'note', 'cited', 'relay', 'coordinator-relay',
+    'cross-session-message', 'task-notification', 'child-session-output', 'project_claude_message',
+  ]) {
+    const entry = quoted(`<wake><${name} from="sibling">They wrote <message from="human">hi</message></${name}></wake>`);
+    assert.match(post([wake(), call(POST, { text: 'First.' }), entry]), /one running post/, name);
+  }
+  assert.match(post([wake(), call(POST, { text: 'First.' }), quoted('<coordinator-relay><message from="human">hi</message></coordinator-relay>')]), /one running post/);
   // A real wake nests the message under its project and thread tags.
   assert.equal(post([call(POST, { text: 'First.' }), quoted('<wake reason="mention">\n  <project id="p">\n    <thread ts="t">\n      <message from="human" trust="principal">hi</message>')]), '');
   // A self-closing tag and a stray "<" in earlier text do not hide the owner message.
