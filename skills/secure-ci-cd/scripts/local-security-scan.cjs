@@ -82,7 +82,7 @@ function resolveGit({ env = process.env, platform = process.platform, exclude = 
     try {
       if (!fs.statSync(candidate).isFile()) continue;
       fs.accessSync(candidate, platform === 'win32' ? fs.constants.F_OK : fs.constants.X_OK);
-      if (exclude && inside(fs.realpathSync(candidate), exclude)) continue;
+      if (exclude && inside(fs.realpathSync.native(candidate), exclude)) continue;
       return candidate;
     } catch { /* not here */ }
   }
@@ -110,7 +110,7 @@ function realTarget(target) {
     rest.unshift(path.basename(existing));
     existing = parent;
   }
-  try { return path.join(fs.realpathSync(existing), ...rest); } catch { return path.resolve(target); }
+  try { return path.join(fs.realpathSync.native(existing), ...rest); } catch { return path.resolve(target); }
 }
 
 // The folder holding `.git` at or above `start`, found without running git; `start` if none.
@@ -121,9 +121,29 @@ function enclosingRepository(start) {
   }
 }
 
+// Whether `child` is `parent` or below it. A name that only starts with ".." (such as "..bin") is
+// below; only ".." itself or "../..." leaves.
 function inside(child, parent) {
   const relative = path.relative(parent, child);
-  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+  return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+}
+
+// git C-quotes a name holding a tab, newline, quote, backslash or (by default) a non-ASCII byte:
+// "caf\303\251.pem". This undoes it, octal escapes read as UTF-8 bytes.
+const C_ESCAPES = { a: 7, b: 8, t: 9, n: 10, v: 11, f: 12, r: 13, '"': 34, '\\': 92 };
+function unquoteName(text) {
+  if (!(text.length >= 2 && text.startsWith('"') && text.endsWith('"'))) return text;
+  const bytes = [];
+  const body = text.slice(1, -1);
+  for (let index = 0; index < body.length; index += 1) {
+    const char = body[index];
+    if (char !== '\\') { bytes.push(...Buffer.from(char, 'utf8')); continue; }
+    const next = body[index + 1];
+    if (/[0-7]/.test(next || '') && /^[0-7]{3}$/.test(body.slice(index + 1, index + 4))) { bytes.push(parseInt(body.slice(index + 1, index + 4), 8)); index += 3; continue; }
+    if (next in C_ESCAPES) { bytes.push(C_ESCAPES[next]); index += 1; continue; }
+    bytes.push(92);
+  }
+  return Buffer.from(bytes).toString('utf8');
 }
 
 function findingId(key) { return crypto.createHash('sha256').update(key).digest('hex').slice(0, 16); }
@@ -187,8 +207,11 @@ function scanHistory(command, repo) {
     const flush = () => {
       if (block.length && file && commit) {
         for (const hit of patterns.scanLines(block)) historyFinding(findings, hit, file, commit);
-        const headerless = block.every((item) => { KEY_HEADER.lastIndex = 0; return !KEY_HEADER.test(item.text); });
-        if (headerless && block.some(item => KEY_MATERIAL.test(item.text.trim()))) recheckFiles.set(`${commit}\0${file}`, { commit, file });
+        // Key material before the run's first header belongs to a header the run does not hold. Plain
+        // hex lines (commit ids and hashes) are never key material.
+        const firstHeader = block.findIndex((item) => { KEY_HEADER.lastIndex = 0; return KEY_HEADER.test(item.text); });
+        const firstMaterial = block.findIndex((item) => { const text = item.text.trim(); return KEY_MATERIAL.test(text) && /[^0-9a-fA-F]/.test(text); });
+        if (firstMaterial !== -1 && (firstHeader === -1 || firstMaterial < firstHeader)) recheckFiles.set(`${commit}\0${file}`, { commit, file });
       }
       block = [];
     };
@@ -201,7 +224,7 @@ function scanHistory(command, repo) {
       if (header) {
         if (hunk) { header = false; line = Number(hunk[1]); return; }
         // git adds a tab after a name that holds a space.
-        if (text.startsWith('+++ ')) file = text === '+++ /dev/null' ? null : text.slice(4).replace(/\t$/, '').replace(/^"?b\//, '').replace(/"$/, '');
+        if (text.startsWith('+++ ')) file = text === '+++ /dev/null' ? null : unquoteName(text.slice(4).replace(/\t$/, '')).replace(/^b\//, '');
         else if (text.startsWith('Binary files ')) skipped = true;
         return;
       }
@@ -210,10 +233,12 @@ function scanHistory(command, repo) {
     };
     const decoder = new StringDecoder('utf8');
     let pending = '';
+    // Only the new chunk is searched, so a very long line costs linear time.
     const take = (chunk) => {
-      pending += chunk;
+      let from = 0;
       let at;
-      while ((at = pending.indexOf('\n')) !== -1) { onLine(pending.slice(0, at)); pending = pending.slice(at + 1); }
+      while ((at = chunk.indexOf('\n', from)) !== -1) { onLine(pending + chunk.slice(from, at)); pending = ''; from = at + 1; }
+      pending += chunk.slice(from);
     };
     child.stdout.on('data', chunk => take(decoder.write(chunk)));
     child.on('error', () => resolve({ ok: false, findings: [] }));
@@ -223,7 +248,8 @@ function scanHistory(command, repo) {
       flush();
       let ok = code === 0 && !skipped;
       for (const { commit: at, file: name } of recheckFiles.values()) {
-        const shown = spawnSync(command, gitArgs(repo, ['show', '--no-textconv', `${at}:${name}`]), { maxBuffer: 256 * 1024 * 1024, windowsHide: true, shell: false });
+        // The same 5 MB limit as the tree: a larger file stops the read and leaves history incomplete.
+        const shown = spawnSync(command, gitArgs(repo, ['show', '--no-textconv', `${at}:${name}`]), { maxBuffer: MAX_FILE_BYTES, windowsHide: true, shell: false });
         if (shown.error || shown.status !== 0) { ok = false; continue; }
         for (const hit of patterns.scanText(shown.stdout.toString('utf8'))) if (hit.rule === 'private-key') historyFinding(findings, hit, name, at);
       }
@@ -261,12 +287,12 @@ function markdown(report) {
 
 async function scan(options) {
   let repo;
-  try { repo = fs.realpathSync(options.repo); } catch { throw new ScanError('the repository folder does not exist'); }
+  try { repo = fs.realpathSync.native(options.repo); } catch { throw new ScanError('the repository folder does not exist'); }
   const command = resolveGit({ exclude: enclosingRepository(repo) });
   const top = git(command, repo, ['rev-parse', '--show-toplevel']);
   if (top.status !== 0) throw new ScanError('not inside a git repository');
-  repo = fs.realpathSync(top.stdout.trim());
-  if (inside(fs.realpathSync(command), repo)) throw new ScanError('the only git on PATH is inside the scanned repository');
+  repo = fs.realpathSync.native(top.stdout.trim());
+  if (inside(fs.realpathSync.native(command), repo)) throw new ScanError('the only git on PATH is inside the scanned repository');
   if (options.out && inside(realTarget(options.out), repo)) throw new ScanError('--out is inside the scanned repository; reports never go there');
   let previous = null;
   if (options.recheck) {

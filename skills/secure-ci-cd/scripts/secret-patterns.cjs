@@ -25,16 +25,22 @@ function rule(id, label, body, { bounded = true, next = null } = {}) {
   return Object.freeze({ id, label, regex: new RegExp(bounded ? `${LEFT}(?:${body})${RIGHT}` : body, 'g'), next });
 }
 
+// At least `min` characters of `cls`, taken whole: the run is captured inside a lookahead, so a very long
+// line is matched without backtracking (an open `{n,}` overflows the regex stack on a line of many MB).
+function atLeast(cls, min, name) {
+  return `(?=${cls}{${min}})(?=(?<${name}>${cls}+))\\k<${name}>`;
+}
+
 const PATTERNS = Object.freeze([
   // GitHub: prefixes from GitHub's token format announcement; 36 letters or digits after the prefix today.
   rule('github-token', 'GitHub token', '(?:ghp|gho|ghu|ghr)_[A-Za-z0-9]{36}'),
   // GitHub App installation tokens are now a ghs_-prefixed JWT of about 520 characters; this is the
   // pattern GitHub's changelog gives for them, which also covers the older 36-character form.
-  rule('github-installation-token', 'GitHub App installation token', 'ghs_[A-Za-z0-9._\\-]{36,}'),
+  rule('github-installation-token', 'GitHub App installation token', `ghs_${atLeast('[A-Za-z0-9._\\-]', 36, 'ghs')}`),
   rule('github-fine-grained-token', 'GitHub fine-grained token', 'github_pat_[A-Za-z0-9]{22}_[A-Za-z0-9]{59}'),
   // GitLab: the classic token is glpat- plus 20 characters; newer routable tokens are longer and may
   // hold dots, so any length from 20 counts.
-  rule('gitlab-token', 'GitLab personal access token', 'glpat-[A-Za-z0-9_\\-.]{20,}'),
+  rule('gitlab-token', 'GitLab personal access token', `glpat-${atLeast('[A-Za-z0-9_\\-.]', 20, 'glpat')}`),
   rule('slack-token', 'Slack bot or user token', 'xox[bpae]-[0-9]{10,13}-[0-9]{10,13}(?:-[0-9]{10,13})?-[A-Za-z0-9]{24,32}'),
   rule('slack-app-token', 'Slack app-level token', 'xapp-[0-9]-[A-Z0-9]{9,11}-[0-9]{10,13}-[a-f0-9]{64}'),
   rule('slack-webhook', 'Slack incoming webhook URL', 'https://hooks\\.slack\\.com/services/T[A-Z0-9]{8,11}/B[A-Z0-9]{8,11}/[A-Za-z0-9]{24}'),
@@ -46,14 +52,14 @@ const PATTERNS = Object.freeze([
   rule('anthropic-key', 'Anthropic API key', 'sk-ant-(?:api03|admin01)-[A-Za-z0-9_\\-]{93}AA'),
   rule('npm-token', 'npm access token', 'npm_[A-Za-z0-9]{36}'),
   // PyPI documents pypi- plus at least 85 base64 characters; its macaroons start with the encoded "pypi.org".
-  rule('pypi-token', 'PyPI API token', 'pypi-AgEIcHlwaS5vcmc[A-Za-z0-9_\\-]{70,}'),
+  rule('pypi-token', 'PyPI API token', `pypi-AgEIcHlwaS5vcmc${atLeast('[A-Za-z0-9_\\-]', 70, 'pypi')}`),
   rule('huggingface-token', 'Hugging Face access token', 'hf_[A-Za-z]{34}'),
   rule('digitalocean-token', 'DigitalOcean token', 'do[opr]_v1_[a-f0-9]{64}'),
   rule('shopify-token', 'Shopify access token or shared secret', 'shp(?:at|ss|ca|pa)_[a-fA-F0-9]{32}'),
   rule('sendgrid-key', 'SendGrid API key', 'SG\\.[A-Za-z0-9_\\-]{22}\\.[A-Za-z0-9_\\-]{43}'),
   rule('twilio-api-key', 'Twilio API key', 'SK[0-9a-f]{32}'),
   rule('square-token', 'Square access token or OAuth secret', 'sq0atp-[A-Za-z0-9_\\-]{22}|sq0csp-[A-Za-z0-9_\\-]{43}'),
-  rule('mapbox-secret-token', 'Mapbox secret token', 'sk\\.eyJ[A-Za-z0-9_\\-]{50,}\\.[A-Za-z0-9_\\-]{20,}'),
+  rule('mapbox-secret-token', 'Mapbox secret token', `sk\\.eyJ${atLeast('[A-Za-z0-9_\\-]', 50, 'mapbox')}\\.${atLeast('[A-Za-z0-9_\\-]', 20, 'mapboxTail')}`),
   rule('linear-api-key', 'Linear API key', 'lin_api_[A-Za-z0-9]{40}'),
   rule('postman-api-key', 'Postman API key', 'PMAK-[a-f0-9]{24}-[a-f0-9]{34}'),
   rule('discord-webhook', 'Discord webhook URL', 'https://(?:ptb\\.|canary\\.)?discord(?:app)?\\.com/api/webhooks/[0-9]{17,20}/[A-Za-z0-9_\\-]{60,70}'),
@@ -63,20 +69,24 @@ const PATTERNS = Object.freeze([
   // A private key block counts only when key material follows the header (on a later line, or after
   // a literal \n inside a JSON string), so a mention of the header in prose never matches. Blank lines
   // and armour headers such as "Version:" (PGP) or "Proc-Type:" (encrypted PEM) may come first.
-  rule('private-key', 'private key', '-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED |PGP )?PRIVATE KEY(?: BLOCK)?-----', { bounded: false, next: /^[A-Za-z0-9+/]{40,}={0,2}/ }),
+  rule('private-key', 'private key', '-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED |PGP )?PRIVATE KEY(?: BLOCK)?-----', { bounded: false, next: /^[A-Za-z0-9+/]{40}/ }),
 ]);
 
 const ALLOW_MARKER = /secret-scan:\s*allow\b\s*(.*)$/i;
 
 // Obvious placeholders and documentation samples.
+// In a long token the words are looked for only near the start, so random characters that happen to
+// spell one are never skipped.
 function isPlaceholder(value) {
   const text = String(value);
-  if (/example|x{6,}|placeholder|dummy|sample|redacted|your[_-]|changeme|<|>|\$\{|\{\{|\*\*\*/i.test(text)) return true;
-  return /(.)\1{7,}/.test(text);
+  const head = text.length > 120 ? text.slice(0, 40) : text;
+  if (/example|placeholder|dummy|sample|redacted|your[_-]|changeme/i.test(head)) return true;
+  if (/x{6}|<|>|\$\{|\{\{|\*\*\*/i.test(text)) return true;
+  return /(.)\1{7}/.test(text);
 }
 
 // Comment closers that contain letters, removed before a reason is measured.
-const CLOSERS = /\{%-?\s*end\w*\s*-?%\}|\\end\{comment\}|<\/\w+\s*>|<%-?\s*end\s*-?%>|\{\{~?\/\w+~?\}\}/gi;
+const CLOSERS = /\{%-?\s*end\w*\s*-?%\}|\\end\{comment\}|<\/\s*\w+\s*>|<%-?\s*end\s*-?%>|\{\{[~-]?\s*(?:end|\/\s*\w+)\s*[~-]?\}\}|@end\w+|\bend\b/gi;
 // Where a reviewed exception starts on a line, or -1. The reason must hold at least three letters or
 // digits once comment closers are removed, so a closer or punctuation alone never counts as one. The
 // marker covers only matches before it: a credential written after it is still found.

@@ -436,7 +436,7 @@ test('LS-12: git inside the scanned repository is never used, even from an absol
 
 // Every file name a report gives must be a real path in history: a crafted line can never become one.
 function assertNamesReal(repo, report) {
-  const names = new Set(git(repo, ['log', '--all', '--name-only', '--format=']).split('\n').filter(Boolean));
+  const names = new Set(git(repo, ['-c', 'core.quotePath=false', 'log', '--all', '--name-only', '-z', '--format=']).split(/[\0\n]/).filter(Boolean));
   for (const item of report.findings) assert.ok(names.has(item.file), `reported file ${JSON.stringify(item.file)} is not a path in history`);
 }
 
@@ -466,8 +466,8 @@ test('LS-14: key material added without its header is still found in history', a
   const pem = (seed) => [j('-----BEGIN ', 'RSA PRIVATE', ' KEY-----'), filler(64, B64, seed), filler(64, B64, seed + 1), j('-----END ', 'RSA PRIVATE', ' KEY-----')].join('\n');
   const template = [j('-----BEGIN ', 'RSA PRIVATE', ' KEY-----'), 'paste the key here', j('-----END ', 'RSA PRIVATE', ' KEY-----')].join('\n');
   const repo = repository(root, { 'README.md': '# Notes\n\nSee below.\n', 'deploy/rotate.pem': `${pem(91)}\n`, 'deploy/template.pem': `${template}\n` });
-  // The PGP block's blank line lines up with the README's own, so git splits it into two sections.
-  write(repo, { 'README.md': `# Notes\n${pgp(93)}\n\nSee below.\n`, 'deploy/rotate.pem': `${pem(95)}\n`, 'deploy/template.pem': `${pem(97)}\n` });
+  // The PGP block's own blank line lines up with the README's, so git splits it into two sections.
+  write(repo, { 'README.md': `# Notes\n${pgp(93)}\nSee below.\n`, 'deploy/rotate.pem': `${pem(95)}\n`, 'deploy/template.pem': `${pem(97)}\n` });
   git(repo, ['commit', '--quiet', '-am', 'keys']);
   const keys = git(repo, ['rev-parse', 'HEAD']).slice(0, 12);
   write(repo, { 'README.md': '# Notes\n\nSee below.\n', 'deploy/rotate.pem': 'moved\n', 'deploy/template.pem': 'moved\n' });
@@ -493,4 +493,67 @@ test('LS-15: hunk merging, names with spaces and uncommitted deletions', async (
   assert.equal(deleted.code, 0, deleted.stderr);
   const after = JSON.parse(deleted.stdout);
   assert.deepEqual([after.status, after.scanned.dirty, after.not_scanned.length], ['clean', true, 0]);
+});
+
+// ---- review fixes, third round ------------------------------------------------------------------
+
+test('LS-16: a rotated key is found when its section also adds another key, and in a C-quoted file name', async (t) => {
+  const root = scratch(t);
+  const begin = j('-----BEGIN ', 'RSA PRIVATE', ' KEY-----');
+  const end = j('-----END ', 'RSA PRIVATE', ' KEY-----');
+  const key = (seed) => [begin, filler(64, B64, seed), end].join('\n');
+  const repo = repository(root, { 'mixed.pem': `${key(111)}\n`, 'caf\u00e9.pem': `${key(113)}\n` });
+  // Rotating mixed.pem and appending a second key gives git one section: -m +m +E +H +m.
+  write(repo, { 'mixed.pem': `${key(115)}\n${key(117)}\n`, 'caf\u00e9.pem': `${key(119)}\n` });
+  git(repo, ['commit', '--quiet', '-am', 'rotate']);
+  const rotated = git(repo, ['rev-parse', 'HEAD']).slice(0, 12);
+  write(repo, { 'mixed.pem': 'moved\n', 'caf\u00e9.pem': 'moved\n' });
+  git(repo, ['commit', '--quiet', '-am', 'remove']);
+  const result = await scan(['--repo', repo, '--json']);
+  const report = JSON.parse(result.stdout);
+  assert.equal(report.scanned.history_complete, true, result.stderr);
+  const atRotate = report.findings.filter(item => item.commit === rotated).map(item => `${item.file} ${item.line}`).sort();
+  assert.deepEqual(atRotate, ['caf\u00e9.pem 1', 'mixed.pem 1', 'mixed.pem 4']);
+  assertNamesReal(repo, report);
+});
+
+test('LS-17: a folder named ..bin is inside the repository, for git and for --out', async (t) => {
+  const root = scratch(t);
+  const repo = repository(root, { 'a.js': 'one\n' });
+  const name = process.platform === 'win32' ? 'git.exe' : 'git';
+  const planted = path.join(repo, '..bin');
+  const outside = path.join(root, 'bin');
+  for (const dir of [planted, outside]) { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(path.join(dir, name), ''); fs.chmodSync(path.join(dir, name), 0o755); }
+  const sep = process.platform === 'win32' ? ';' : ':';
+  const real = fs.realpathSync.native(repo);
+  assert.equal(scanner.resolveGit({ env: { PATH: [planted, outside].join(sep) }, exclude: real }), path.join(outside, name));
+  const out = await scan(['--repo', repo, '--out', path.join(repo, '..reports')]);
+  assert.equal(out.code, 2);
+  assert.match(out.stderr, /inside the scanned repository/);
+  assert.equal(fs.existsSync(path.join(repo, '..reports')), false);
+});
+
+test('SP-09: template and Blade closers are not reasons, and placeholder words count only at the start of a long body', () => {
+  const value = SAMPLES['github-token'](121);
+  for (const closer of ['{{ end }}', '{{- end }}', '{{end}}', '{{/each }}', '{{ /each }}', '@endif', '</ script>', 'end']) {
+    assert.deepEqual(rules(`t = "${value}" secret-scan: allow ${closer}`), ['github-token'], closer);
+  }
+  assert.deepEqual(rules(j('gh', 's_', filler(240, ALNUM, 122), 'dummy', filler(240, ALNUM, 123))), ['github-installation-token']);
+  assert.deepEqual(rules(j('gh', 's_', filler(240, ALNUM, 124), 'your_', filler(240, ALNUM, 125))), ['github-installation-token']);
+  assert.deepEqual(rules(j('gh', 's_', 'dummy', filler(500, ALNUM, 126))), [], 'a placeholder word at the start still counts');
+});
+
+test('LS-18: a history line of many MB is scanned without overflowing the regexes', async (t) => {
+  const root = scratch(t);
+  const body = filler(4096, ALNUM, 131).repeat(4096); // 16 MB, built fast from a repeated block
+  const header = j('-----BEGIN ', 'RSA PRIVATE', ' KEY-----');
+  const files = { 'dist/app.js': `var a="${j('gh', 's_', body)}";\n`, 'dist/b.js': `${j('gl', 'pat-', body)}\n`, 'dist/k.txt': `${header}\n${body}\n` };
+  const repo = repository(root, files);
+  git(repo, ['rm', '--quiet', ...Object.keys(files)]);
+  git(repo, ['commit', '--quiet', '-m', 'remove']);
+  const result = await scan(['--repo', repo, '--json']);
+  assert.equal(result.code, 1, result.stderr);
+  const report = JSON.parse(result.stdout);
+  assert.equal(report.scanned.history_complete, true);
+  assert.deepEqual(report.findings.map(item => `${item.file} ${item.rule}`).sort(), ['dist/app.js github-installation-token', 'dist/b.js gitlab-token', 'dist/k.txt private-key']);
 });
