@@ -60,7 +60,7 @@ test('the real audit CLI without gh fails without a circular dependency warning'
   assert.match(result.stderr.trim(), /^FAIL: gh was not found on PATH\. Install it or add its folder to PATH\.$/);
 });
 
-test('every non-bot comment must be reachable from the body, directly or through a linked index comment', () => {
+test('every decision comment must be reachable from the body, directly or through a linked index comment', () => {
   const comments = [
     person(1, 'INT-TK421-001 decision'),
     person(2, `${INDEX_COMMENT_MARKER}\n- [INT-TK421-003](#issuecomment-3)`),
@@ -87,6 +87,16 @@ test('every non-bot comment must be reachable from the body, directly or through
   ].join('\n')));
   assert.equal(auditDecisionTraces({ body: fixed, comments, recordPrefix: PREFIX }).ok, true);
   assert.equal(repairedBody(fixed, [{ id: '9', record: null, index: false }]).split(INDEX_BEGIN).length, 2, 'lines join the existing index');
+
+  // A comment that is neither tagged nor a record needs no index entry: listed, never a failure.
+  const plain = [...comments, person(6, 'A progress note.')];
+  const quiet = auditDecisionTraces({ body: fixed, comments: plain, recordPrefix: PREFIX });
+  assert.equal(quiet.ok, true);
+  assert.deepEqual(quiet.unlinked.map(entry => entry.id), ['6']);
+  assert.deepEqual(quiet.unlinked_decisions, []);
+  const tagged = auditDecisionTraces({ body: fixed, comments: [...comments, person(7, 'SCOPE-CONFIRMED\n---\nThe owner confirmed the scope.')], recordPrefix: PREFIX });
+  assert.equal(tagged.ok, false, 'an unlinked tagged decision still fails');
+  assert.deepEqual(tagged.unlinked_decisions.map(entry => entry.id), ['7']);
 
   // A record marked in its own comment needs no marking line.
   const marked = comments.map(comment => (comment.id === 1 ? person(1, 'INT-TK421-001 decision (superseded by INT-TK421-004)') : comment));

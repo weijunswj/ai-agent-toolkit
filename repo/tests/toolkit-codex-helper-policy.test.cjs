@@ -120,7 +120,9 @@ test('a G2 session launches no helpers, and a caller agent id is refused', t => 
   const g2 = hook(v1(f.repo, { agent_type: 'toolkit-g1-helper' }), { CODEX_HOME: f.home, TOOLKIT_GATE_ROLE: 'G2' });
   assert.equal(g2.status, 2); assert.match(g2.stderr, /G2 review sessions launch no helpers/);
   const leaf = hook({ ...v1(f.repo, { agent_type: 'toolkit-g1-helper' }), agent_id: 'child-1' }, { CODEX_HOME: f.home });
-  assert.equal(leaf.status, 2); assert.match(leaf.stderr, /a helper cannot launch another agent/);
+  assert.equal(leaf.status, 2);
+  // The same words as the Claude Code hook: only the main session launches helpers.
+  assert.equal(leaf.output.hookSpecificOutput.permissionDecisionReason, 'Toolkit: a helper cannot launch another agent. Only the main session launches helpers.');
 });
 
 test('outside governed work the policy is not consulted: any agent launches with no decision', t => {

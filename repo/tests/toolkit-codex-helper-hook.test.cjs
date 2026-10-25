@@ -95,7 +95,7 @@ test('a hook whose decision modules cannot load blocks a governed spawn with exi
       { input: JSON.stringify(input), env: { ...env, TOOLKIT_TEST_BLOCKED_MODULES: modules }, encoding: 'utf8', timeout: 20000 });
     const ADAPTER = 'toolkit-v3-native-helper-adapter.cjs';
     const broken = blocked(ADAPTER);
-    assert.equal(broken.status, 2); assert.match(broken.stderr, /Toolkit helper guard failed/);
+    assert.equal(broken.status, 2); assert.match(broken.stderr, /Toolkit helper guard failed\. Never act as the user/);
     assert.equal(JSON.parse(broken.stdout).hookSpecificOutput.permissionDecision, 'deny');
     // Same boundary, intact modules: the guard itself decides.
     const intact = run(event);

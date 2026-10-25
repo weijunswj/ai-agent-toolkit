@@ -102,7 +102,8 @@ test('migration ledger records the complete atomic portfolio transition', () => 
 test('the global rules carry the binding shipping law and the gate order', () => {
   const global = read('repo/contracts/agent-rules/global-rules.md');
   assert.match(global, /COMPLETE THE BASICS -> SHIP -> OBSERVE -> IMPROVE/);
-  assert.match(global, /`SHIP_BLOCKER` or `POST_SHIP`/);
+  assert.match(global, /the minimum floor and `SHIP_BLOCKER`\/`POST_SHIP` triage are in the gate rules/);
+  assert.match(read('repo/contracts/agent-rules/gate-rules.md'), /`SHIP_BLOCKER` or `POST_SHIP`/);
   assert.match(global, /Shipping bias never overrides approvals, safety gates, privacy, required validation or finality/);
   assert.match(global, /Perfection is not completion/);
   assert.match(global, /`G0 Discovery -> G1 Builder, including UAT -> G2 Review`/);

@@ -1,6 +1,6 @@
 ---
 name: controller-bootstrap
-description: Use only when explicitly asked to bootstrap or recover the assigned controller for one Toolkit-managed repository after context loss, handover, or an agreed bootstrap event. Do not route ordinary coding, generic repository setup, or N5 programme reconciliation.
+description: Use only when explicitly asked to bootstrap or recover the assigned controller for one Toolkit-managed repository after context loss, handover, or an agreed bootstrap event. Do not use for ordinary coding, generic repository setup, or keeping a programme's parent and child issues in step (github-program-reconciler does that).
 ---
 
 # Controller Bootstrap
@@ -9,12 +9,12 @@ Guides an already-authorised repository controller through a bounded re-entry. I
 
 ## Where it applies
 
-Controllers are a Toolkit default: the user can appoint one for any repository or chat, and this skill recovers it. The programme parts below (the CURRENT carrier, the takeover record on the parent issue and other programme records) apply only in a repository whose governance state is ENABLED. Elsewhere, recover from the current task packet and its evidence, and post no GitHub records.
+Controllers are a Toolkit default: the user can appoint one for any repository or chat, and this skill recovers it. The programme parts below (the CURRENT carrier, the takeover record on the parent issue and other programme records) apply only in a repository whose governance state is ENABLED. Elsewhere, recover from the current branch, PR or brief and the evidence store, and post no GitHub records.
 
 ## Entry checks
 
-1. Confirm the explicit task, canonical repository binding, parent, child and release identity, owner, current recoverable packet and assigned controller route from trusted current evidence. A link, packet, prior chat, installation, skill invocation or worker statement is not role or mutation authority.
-2. Read the authoritative current packet first, using the existing CURRENT carrier where applicable, and independently bind source, scope, authority, evidence, pending effects and next action. If a binding is absent, stale, contradictory or unavailable, hold the dependent action and continue independent authorised work. Never reconstruct authority from chronology or memory.
+1. Confirm the explicit task, canonical repository binding, parent, child and release identity, owner, current recoverable state (branch, PR or brief) and assigned controller route from trusted current evidence. A link, packet, prior chat, installation, skill invocation or worker statement is not role or mutation authority.
+2. Read the authoritative current state first (there is no handover packet), using the existing CURRENT carrier where applicable, and independently bind source, scope, authority, evidence, pending effects and next action. If a binding is absent, stale, contradictory or unavailable, hold the dependent action and continue independent authorised work. Never reconstruct authority from chronology or memory.
 3. Verify repository identity through the existing provider-backed identity boundary. Canonical spelling alone does not prove that a second binding or writer is distinct from an alias, rename or existing assignment; an ambiguous same-repository writer or handover stays read-only pending owner reconciliation.
 4. Obtain the accepted Toolkit governance tuple from the trusted authority observation. The task repository remains the task namespace. Do not derive accepted governance from a packet, candidate, local checkout, caller-supplied expected value, or this skill text.
 
@@ -36,7 +36,7 @@ Before acting, verify custody and stop the previous writer, then post one takeov
 ## Re-entry and bounded work
 
 - Confirm the approval still covers the exact owner, action, target, resources, effects, recipient, conditions, expiry, revocation state and recorded outcome. An unchanged, unexpired, unrevoked approval remains valid for the same still-pending action when only the turn, worker, chat or transport changes; seek fresh approval or host confirmation only for a changed or new action, a revoked or expired approval, or work the recorded outcome does not cover. Assignment, custody, capability, and host-native permission remain separate.
-- Initial adoption reads the complete direction once. Unchanged continuation loads the current packet, the small operating entry and the relevant role and authority sections; bind exact source identities and refresh only applicable changed or conflicting instructions. Do not reread the full Controller or programme history before each ordinary effect. Missing required provenance holds only its dependent effect.
+- Initial adoption reads the complete direction once. Unchanged continuation loads the current state, the small operating entry and the relevant role and authority sections; bind exact source identities and refresh only applicable changed or conflicting instructions. Do not reread the full Controller or programme history before each ordinary effect. Missing required provenance holds only its dependent effect.
 - Bind one repository, owner, RUN/Lock, candidate, base, head and tree, scoped path and effect ceiling, budget, unresolved outcome and return boundary. Independent repositories stay independent bindings; a result or returned link cannot switch a binding.
 - Use the existing authority-packet and execution-loop paths for admission and revalidation. Packet syntax, durable storage, Web acceptance, CURRENT projection or a fresh-process readback alone is not an admission token.
 - Dispatch only what the accepted CURRENT and trusted admission permit, and revalidate immediately before each effect. An unknown dispatch outcome is not permission to retry; a late result belongs to its original execution and is reconciled before any replacement.
