@@ -54,6 +54,7 @@ Use installed skills only when they clearly match the task and improve correctne
 | `release-readiness-audit` | Guarded final audit, completion audit, production-readiness audit, release-candidate audit, launch-readiness audit, QA pass, "make sure everything works", "is this production ready", `/goal` readiness remediation, audit against original docs, security-readiness check, or final readiness check. Performs preflight only before explicit confirmation. |
 | `codex-ssh-hostinger-coolify-setup-maintainer` | Codex SSH Hostinger VPS plus Coolify deployment setup, SSH preflight, daily security checks, intrusion-signal review, optional Telegram/email maintenance alerts, evidence-based maintenance, and incident response with owner approval gates. Use when the user asks Codex to help set up Hostinger for deployment, configure daily maintenance alerts, or review Hostinger/Coolify security signals. |
 | `external-operation-preflight` | Before any live change on an outside system: bind exact targets to one environment, run the offline checker for resource identity, authority and downstream effects (a merge that auto-deploys is a deployment), and apply the backup and restore evidence contract. |
+| `host-observability` | Setting up, checking or repairing monitoring on one Linux server or VPS: an hourly read-only host pulse with capacity states, an off-host heartbeat, and owner-chosen alert channels (no default). Explicit-only; installing its timer needs the owner's approval for that host. |
 | `self-hosted-service-safety` | Reviewing non-n8n self-hosted service setup, Docker/VPS, public ports, tunnels, credentials, backups, public admin/backup paths, honeypot/canary paths, traffic logs, SSH access, firewall exposure, or first-run hardening. |
 | `windows-local-dev-services` | Starting, relaunching, verifying, or debugging local Windows dev servers. |
 | `frontend-art-direction` | Frontend design systems, landing pages, dashboards, forms, accessibility, responsive polish, privacy-safe UX, and implementation review. |
@@ -64,6 +65,7 @@ Use installed skills only when they clearly match the task and improve correctne
 - When changing skill names, `SKILL.md` frontmatter, or descriptions, update README skill tables when applicable, the routing source, and portable rule templates.
 - When a new skill should not be auto-routed, document why it is intentionally omitted from routing.
 - Do not let the routing table become stale relative to current `skills/*/SKILL.md`.
+- `host-observability` is explicit-only as well: it installs a timer on owner servers, so it runs only when asked by name.
 - `knowledge-index-updater` is intentionally omitted because that repository-side Notion index skill was retired under #328.
 - Behavioural routing admission permits implicit discovery for 15 products. `codex-ssh-hostinger-coolify-setup-maintainer`, `controller-bootstrap` and `release-readiness-audit` remain explicit-only. Implicit discovery never grants repository, live-system, provider, GitHub, deployment, or broad-audit mutation authority. Native plugin `interface.defaultPrompt` should stay at three or fewer strong starter prompts.
 

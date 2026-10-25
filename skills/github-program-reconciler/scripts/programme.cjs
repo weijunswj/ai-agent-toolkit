@@ -273,8 +273,10 @@ const commands = {
     const doc = state.newParent({ repository: context.repository, parentIssue: context.binding.parent_issue, outcomes: catalogue.outcomes || [], releasePlan: catalogue.release_plan || null });
     if (!args.apply) {
       const errors = state.validateParent(doc);
+      try { state.refuseNewLegacy(null, doc); } catch (error) { errors.push(error.message); }
       return { mode: 'dry-run', valid: !errors.length, errors, document: doc };
     }
+    state.refuseNewLegacy(null, doc);
     const writer = requireWriter(context);
     if (context.store.read('parent', context.binding.parent_issue).doc) throw new ProgrammeError('STATE_EXISTS', 'The parent state document already exists. Only its holder, the appointed controller, changes it.');
     doc.fence = { epoch: 1, holder_prefix: writer.prefix, holder_session: writer.session };
