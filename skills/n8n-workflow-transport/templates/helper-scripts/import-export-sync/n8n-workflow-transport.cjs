@@ -68,7 +68,7 @@ function getTransport(id = 'docker-server-cli') {
 function verifyInactivePostcondition(workflows, targetWorkflowId) {
   const matches = (workflows || []).filter((workflow) => workflow && workflow.id === targetWorkflowId);
   if (matches.length !== 1 || matches[0].active !== false) {
-    const error = new Error('Imported workflow was not uniquely observable as inactive.');
+    const error = new Error('Imported workflow was not uniquely observable as unpublished.');
     error.code = 'N8N_POSTCONDITION_FAILED';
     throw error;
   }

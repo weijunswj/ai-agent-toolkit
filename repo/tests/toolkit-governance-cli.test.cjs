@@ -20,7 +20,6 @@ const conformance = require(path.join(scripts, 'toolkit-governance-conformance.c
 const catalogue = require(path.join(scripts, 'toolkit-governance-catalogue.cjs'));
 const managedBlock = require(path.join(scripts, 'toolkit-managed-block.cjs'));
 const governance = require(path.join(scripts, 'toolkit-governance-state.cjs'));
-const repoState = require(path.join(scripts, 'toolkit-governance-repo-state.cjs'));
 
 const REMOTE = 'https://github.com/example-owner/example-repo.git';
 
@@ -175,7 +174,7 @@ test('not on github.com: enable refuses, disable records the ok and reads back D
     assert.match(disabled.asked[0], /Turn off Toolkit's GitHub governance for .*\nIt works only for github\.com repositories/);
     assert.match(disabled.stdout, /Recorded\. State: DISABLED/);
     assert.equal(JSON.parse((await run(ctx, repo, ['status', '--json'])).stdout).rule, 'R8');
-    assert.equal(JSON.parse(fs.readFileSync(repoState.filePath(repo), 'utf8')).basis, 'not on github.com');
+    assert.equal(fs.existsSync(path.join(repo, '.ai-agent-toolkit')), false, 'nothing is written into the repository');
     const again = await run(ctx, repo, ['disable']);
     assert.equal(again.code, 0);
     assert.match(again.stdout, /Already disabled/);

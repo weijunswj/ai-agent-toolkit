@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "kind": "ai-agent-toolkit n8n import-export helpers",
+  "setId": "6f6a832162b1",
+  "files": {
+    "_export-n8n-workflows-live.cmd": "29c29daf078b49d808ed7798d6a97da76b8e929080478bf8ca3a6e47739df1e8",
+    "_import-n8n-workflows-live.cmd": "2b66d00c559e052db51dab8cef11b2befee9750a506c7df4bb80bf0055cd1ab0",
+    "check-n8n-helper-machine.cjs": "774fe0a6d922bc794dabd531a7f5977779c2c207d4e5184ec9967daea74b4ecd",
+    "compare-n8n-workflow-credentials.cjs": "3acb9d60a7e2d40e6932592f90d57546952a5b5192add0ff2e480a5e4b1e17b7",
+    "export-n8n-workflows-live.ps1": "e48f0b4d3a6f4657ca9e7938e315c75903a1a886076ee34acb56cf99276a0f74",
+    "import-n8n-workflows-live.ps1": "6d117369e16f9d9b9c50448101d139dbdbd22c0e6f7581071188476c268a5d78",
+    "n8n-cli-workflow-json.cjs": "d3e45d7035126f49facc46a56c9509c663d6ff3c7adfd85dee966ce0f44a6bb5",
+    "n8n-credential-metadata.cjs": "c7a65a93699e431ae7f2ff86d5cdb0b1361f42692d599327f5b8d1230d28a047",
+    "n8n-helper-set.cjs": "63caf01d392983cb649b482160c2908700fb0c933cc10e997f82e7f4f38be771",
+    "n8n-portable-workflow.cjs": "cfa3a55df34d70901d651af305669b212bfe17600fa8b0ae3435558235900d7d",
+    "n8n-risky-nodes.cjs": "29c26cf7d6d2c58a4cbe20201cabf503ad87d04fd38427fef629c0cdaca5f509",
+    "n8n-workflow-identity.cjs": "ef653eabbb6a7b4186e663f4ea6b4335d4f4069f0687573e8526950c07deb027",
+    "n8n-workflow-operation-report.cjs": "7157028ba27c27a253a604b6918624c60ff1fba10a8ed149c3ec3cf806af83e4",
+    "n8n-workflow-sync-menu.ps1": "e4ee8983cbb5f93b9845683dda4ce7911c9e8896fc80e4b5acf321e0aa30fe42",
+    "n8n-workflow-transport.cjs": "35bd3f56006483cee346f6a705f2e27f596235bbf53b7193f52c32b185eeafb5",
+    "prepare-n8n-live-import.cjs": "ee27895223023eb862dcbc0373bef7cbaed1b0fb325a79beedb6ef02f444672d",
+    "resolve-n8n-docker-target.cjs": "6d8a80f1f4111a1730824f81b243e9180fdb573d451eaa6d959d2384352661a7",
+    "should-import-n8n-workflow.cjs": "6402b889262f26a48b33bbdd774330fc752cac68ef16c36aecc59427418abd83",
+    "sync-n8n-live-exports.cjs": "b527cd9935bcfb641cd0a24507e5f7cdcfe5b06c99841ebdb1a0b1543adfe4b8",
+    "validate-n8n-workflows.cjs": "f945c9d11ed2d926cd6b0e2fa6f1f2b45cae324808bd3219a1407a5824b1a2d4"
+  }
+}

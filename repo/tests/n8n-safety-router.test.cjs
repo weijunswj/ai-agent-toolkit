@@ -584,3 +584,36 @@ test('adapter installer rejects malformed managed markers', () => {
     assert.equal(fs.readFileSync(activePath, 'utf8'), existing, label);
   }
 });
+
+test('adapter installer reports no adapter needed in the canonical Toolkit source repository', () => {
+  // The real checkout is only ever previewed; --write runs against a temporary copy of its markers.
+  const preview = runInstaller(repoRoot, ['--target', 'auto', '--dry-run']);
+  assert.equal(preview.status, 0, preview.stderr);
+  assert.match(preview.stdout, /No adapter needed: this is the canonical Toolkit source repository/);
+
+  const canonical = makeN8nWorkspace('n8n-agent-adapter-canonical-');
+  const before = '# Toolkit AGENTS without the managed n8n adapter\n';
+  fs.writeFileSync(path.join(canonical, 'AGENTS.md'), before);
+  for (const marker of [
+    'repo/contracts/agent-rules/n8n-safety-router-adapter.md',
+    'repo/contracts/toolkit-local-bridge/version.json',
+    'skills/n8n-safety-router/scripts/install-n8n-agent-adapter.cjs',
+  ]) {
+    fs.mkdirSync(path.dirname(path.join(canonical, marker)), { recursive: true });
+    fs.copyFileSync(path.join(repoRoot, marker), path.join(canonical, marker));
+  }
+  for (const mode of ['--dry-run', '--write']) {
+    const result = runInstaller(canonical, ['--target', 'auto', mode]);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /No adapter needed: this is the canonical Toolkit source repository/);
+    assert.doesNotMatch(result.stdout, /Would update AGENTS\.md|Updated AGENTS\.md/);
+  }
+  assert.equal(fs.readFileSync(path.join(canonical, 'AGENTS.md'), 'utf8'), before);
+
+  const consumer = makeN8nWorkspace('n8n-agent-adapter-consumer-with-contract-name-');
+  fs.writeFileSync(path.join(consumer, 'AGENTS.md'), '# Existing AGENTS\n\n');
+  fs.mkdirSync(path.join(consumer, 'repo', 'contracts', 'agent-rules'), { recursive: true });
+  fs.writeFileSync(path.join(consumer, 'repo', 'contracts', 'agent-rules', 'n8n-safety-router-adapter.md'), 'copy\n');
+  const consumerResult = runInstaller(consumer, ['--target', 'auto', '--dry-run']);
+  assert.match(consumerResult.stdout, /Would update AGENTS\.md/, 'one marker file alone does not make a repository canonical');
+});

@@ -26,6 +26,19 @@
       "not_passed": ["A14"],
       "runner": "repo/tests/qualification/claude-helper-matrix.live.cjs",
       "evidence": "TRANSPORT archives/TK-A7F2/r6a-claude-qualification-20261023/windows-2.1.306-rerun-ad21cc5/"
+    },
+    {
+      "claude_code_version": "2.1.310",
+      "platform": "win32",
+      "plugin_mode": "installed",
+      "installed_toolkit_version": "3.10.0",
+      "date": "2026-10-25",
+      "toolkit_commit": "02f2895",
+      "cases": 43,
+      "cases_passed": 42,
+      "not_passed": ["A14"],
+      "runner": "repo/tests/qualification/claude-helper-matrix.live.cjs",
+      "evidence": "TRANSPORT archives/TK-A7F2/r6a-claude-qualification-20261023/windows-2.1.310-installed-02f2895/"
     }
   ],
   "known_limits": [

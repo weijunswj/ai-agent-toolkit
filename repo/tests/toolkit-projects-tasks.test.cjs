@@ -14,6 +14,8 @@ const ROOT = path.resolve(__dirname, '../..');
 const SCRIPT = path.join(ROOT, 'repo/scripts/toolkit-projects-tasks.cjs');
 const TASKS = path.join(ROOT, 'repo/contracts/claude-projects/web-controller-projects/tasks');
 const SKILL = path.join(ROOT, 'repo/contracts/claude-projects/web-controller-projects/SKILL.md');
+// Guided setup moved out of SKILL.md into its reference file, uploaded with the skill.
+const SETUP = path.join(ROOT, 'repo/contracts/claude-projects/web-controller-projects/reference/setup.md');
 const INVENTORY = path.join(ROOT, 'repo/contracts/claude-projects/web-controller-projects/setup-inventory.json');
 const run = args => spawnSync(process.execPath, [SCRIPT, ...args], { encoding: 'utf8' });
 const tasks = () => new ProjectsTasks({ root: ROOT });
@@ -141,7 +143,8 @@ test('refresh replaces only Toolkit text and keeps the params block and project 
   assert.ok(refreshed.includes(`\n${project}\n`), 'project text kept byte for byte');
   // CLI agrees, and a refresh of a current prompt changes nothing.
   const target = file(t, 'live.md', live);
-  assert.equal(run(['--refresh', 'daily-check-in', target]).stdout, refreshed);
+  assert.equal(run(['--refresh', 'daily-check-in', target, '--session', 'bound']).stdout, refreshed);
+  assert.equal(run(['--refresh', 'daily-check-in', target]).status, 2, 'a Toolkit task refresh names the session its replacement runs in');
   assert.equal(tasks().refresh('daily-check-in', refreshed), refreshed);
   // Misplaced project text (after delivery) moves into the project section, words unchanged.
   const misplaced = tasks().refresh('daily-check-in', `${refreshed}Late owner line.\n`);
@@ -156,7 +159,7 @@ test('refresh of an edited block keeps the added lines, labelled, and malformed 
   assert.equal(tasks().check('hourly-nudge', refreshed).state, 'current');
   assert.ok(refreshed.includes(`${PROJECT_HEADING}\n- none\n${KEPT_LABEL}\n- Project step typed inside the block.\n`));
   assert.throws(() => tasks().refresh('hourly-nudge', `${edited}\n${edited}`));
-  assert.equal(run(['--refresh', 'hourly-nudge', file(t, 'bad.md', edited.replace(':END TASK-DELIVERY', ':END X'))]).status, 2);
+  assert.equal(run(['--refresh', 'hourly-nudge', file(t, 'bad.md', edited.replace(':END TASK-DELIVERY', ':END X')), '--session', 'bound']).status, 2);
 });
 
 test('a legacy prompt migrates only with params and moved project text; custom needs its own steps', t => {
@@ -169,7 +172,7 @@ test('a legacy prompt migrates only with params and moved project text; custom n
   assert.throws(() => tasks().render('custom', params('custom')), 'custom has no default section');
   assert.throws(() => tasks().render('daily-check-in', params('daily-check-in'), rendered('hourly-nudge')), 'no markers in project text');
   const paramsFile = file(t, 'p.json', JSON.stringify(PARAMS['hourly-nudge']));
-  const result = run(['--refresh', 'hourly-nudge', file(t, 'legacy.md', legacy), '--params', paramsFile]);
+  const result = run(['--refresh', 'hourly-nudge', file(t, 'legacy.md', legacy), '--params', paramsFile, '--session', 'bound']);
   assert.equal(result.status, 0, result.stderr);
   assert.equal(tasks().check('hourly-nudge', result.stdout).state, 'current');
 });
@@ -181,7 +184,7 @@ test('params are strict: known keys, safe values, report folder in the shared fo
     { ...base, project: 'BAD;NAME' }, { ...base, repo: 'no-slash' }, { ...base, repo: 'a/b/c' },
     { ...base, parent_issue: '#12' }, { ...base, parent_issue: '0' }, { ...base, report_dir: '/mnt/project-files/../x' },
     { ...base, report_dir: '/mnt/project-files/x/' }, { ...base, report_dir: '/mnt/other' }, { ...base, effort: 'ultra' },
-    { ...base, effort: 2 }, { ...base, session: 'fresh' }, { ...base, extra: 'x' }, (({ effort, ...rest }) => rest)(base), [], null
+    { ...base, effort: 2 }, { ...base, session: 'sometimes' }, { ...base, extra: 'x' }, (({ effort, ...rest }) => rest)(base), [], null
   ]) assert.throws(() => validateParams('daily-check-in', bad), JSON.stringify(bad));
   assert.deepEqual(validateParams('daily-check-in', { ...base, repo: 'none' }).toolkit_repo, 'weijunswj/ai-agent-toolkit');
   assert.equal(validateParams('custom', { ...PARAMS.custom, session: 'bound' }).session, 'bound');
@@ -193,7 +196,8 @@ test('templates hold no ids, owner names, project-only tasks or old resolve rule
   for (const name of fs.readdirSync(TASKS)) {
     const text = fs.readFileSync(path.join(TASKS, name), 'utf8');
     assert.doesNotMatch(text, /trig_|chan_|cmsg_|session_01|weijunswj|xPass|WJ_Lappy|TOOLKIT:|SWOO/, name);
-    assert.doesNotMatch(text, /skill drift|drift watch|resolve window|idle window|default 2 days|IDLE-2D/i, name);
+    // The skill drift watch is part of the daily check-in now (SKILL DRIFT), never a separate task.
+    assert.doesNotMatch(text, /drift watch|resolve window|idle window|default 2 days|IDLE-2D/i, name);
     assert.doesNotMatch(text, /AI-AGENT-TOOLKIT:/, name);
     assert.doesNotMatch(text, /[^\x00-\x7f]/, name);
   }
@@ -220,8 +224,10 @@ test('every Toolkit-made prompt carries the recurring-task requirements; fresh r
       assert.ok(text.includes(required), `${kind}: ${required}`);
     }
   }
-  assert.match(rendered('daily-check-in'), /Fresh session per run/);
-  assert.match(rendered('daily-check-in'), /resolve this run's own thread with mcp__hearthbot__set_thread_resolved/);
+  const checkIn = rendered('daily-check-in');
+  assert.match(checkIn, /fires into its own home thread/);
+  assert.match(checkIn, /Never resolve this home thread/);
+  assert.doesNotMatch(checkIn, /set_thread_resolved|Fresh session per run/);
   const nudge = rendered('hourly-nudge');
   assert.match(nudge, /fires into its own home thread/);
   assert.match(nudge, /Never resolve this home thread/);
@@ -230,38 +236,95 @@ test('every Toolkit-made prompt carries the recurring-task requirements; fresh r
   const bound = tasks().render('custom', validateParams('custom', { ...PARAMS.custom, session: 'bound' }), OWN_TEXT);
   assert.match(bound, /Never resolve this home thread/);
   assert.doesNotMatch(bound, /set_thread_resolved/);
+  // The fresh-session fallback renders as a fresh run that resolves its own thread, keeps session in
+  // its params so a refresh or check keeps it, and a bound Toolkit task stores no session at all.
+  for (const kind of ['daily-check-in', 'hourly-nudge']) {
+    assert.equal(validateParams(kind, PARAMS[kind]).session, undefined, kind);
+    const params = validateParams(kind, { ...PARAMS[kind], session: 'fresh' });
+    assert.equal(params.session, 'fresh');
+    const fresh = tasks().render(kind, params, '');
+    assert.match(fresh, /set_thread_resolved/, kind);
+    assert.doesNotMatch(fresh, /Never resolve this home thread/, kind);
+    assert.equal(tasks().check(kind, fresh).state, 'current', kind);
+    // A swap moves a task between the fallback and bound, keeping the project text.
+    const withText = tasks().render(kind, params, 'Project step kept.');
+    const moved = tasks().refresh(kind, withText, { session: 'bound' });
+    assert.match(moved, /Never resolve this home thread/, kind);
+    assert.doesNotMatch(moved, /set_thread_resolved|"session"/, kind);
+    assert.match(moved, /Project step kept\./, kind);
+    assert.equal(tasks().check(kind, moved).state, 'current', kind);
+    const back = tasks().refresh(kind, moved, { session: 'fresh' });
+    assert.match(back, /"session": "fresh"/, kind);
+    assert.match(back, /set_thread_resolved/, kind);
+    assert.throws(() => tasks().refresh(kind, moved, { session: 'sometimes' }), kind);
+    // The session-mismatch loop: a bound entry whose stored prompt was rendered fresh. The swap
+    // always names the replacement's session, so the result is bound and the check stays current.
+    const repaired = tasks().refresh(kind, tasks().render(kind, params, ''), { session: 'bound' });
+    assert.doesNotMatch(repaired, /"session"|set_thread_resolved/, kind);
+    assert.equal(tasks().refresh(kind, repaired, { session: 'bound' }), repaired, `${kind}: a second swap changes nothing`);
+  }
+  assert.throws(() => tasks().refresh('custom', tasks().render('custom', validateParams('custom', PARAMS.custom), OWN_TEXT), { session: 'bound' }), 'a custom task keeps its own session');
+});
+
+test('only the project that runs the Toolkit repo watches other projects, and only reports', () => {
+  const other = rendered('daily-check-in');
+  assert.doesNotMatch(other, /OTHER PROJECTS:/);
+  const own = tasks().render('daily-check-in', validateParams('daily-check-in', { ...PARAMS['daily-check-in'], repo: 'weijunswj/ai-agent-toolkit' }));
+  assert.match(own, /OTHER PROJECTS: this project runs the Toolkit repo/);
+  for (const required of ['reusing the same list_triggers result (no extra calls)', 'Group the cloud tasks by hearth_channel_id',
+    '"PROJECT TASKS MISSING: <PROJECT>=<task>[+<task>], ... | "', 'unless state.md already reported the same set',
+    'Report only: that project\'s own coordinator recreates its tasks on its next wake']) {
+    assert.ok(own.includes(required), required);
+  }
 });
 
 test('the check-in carries every prefix in the fixed order and checks both Toolkit tasks; the nudge compares cheaply first', () => {
   const text = rendered('daily-check-in');
-  const order = ['SKILL UPDATE', 'BLOCK OUTDATED', 'BINDING STALE or BINDING UNKNOWN', 'TOOLKIT CHANGED', 'MEMORY FORMAT', 'TASKS OUTDATED', 'NUDGE NOT ARMED', 'PLUGIN BEHIND'];
+  const order = ['CONTEXT RESET DUE', 'SKILL UPDATE', 'SKILL DRIFT', 'SKILL BEHIND', 'BLOCK OUTDATED', 'BINDING STALE or BINDING UNKNOWN', 'TOOLKIT CHANGED', 'MEMORY FORMAT', 'TASKS OUTDATED', 'NUDGE NOT ARMED', 'PROJECT TASKS MISSING', 'PLUGIN BEHIND'];
   const line = text.split('\n').find(entry => entry.startsWith('- First line:'));
   const positions = order.map(prefix => line.indexOf(prefix));
   assert.ok(positions.every((at, index) => at > -1 && (index === 0 || at > positions[index - 1])), line);
   for (const required of ['"EXAMPLE: Daily check-in"', '"EXAMPLE: Hourly nudge"', '--check daily-check-in', '--check hourly-nudge',
-    '--check-memory', 'persist_session false', 'persist_session true', 'weekly-rebuild', 'unlisted', 'hearth_channel_id',
+    '--check-memory', 'bound to its home thread (persist_session true), or a fresh session per run (persist_session false) only where the entry says fresh', 'CONTEXT RESET DUE, SKILL UPDATE', 'weekly-rebuild', 'unlisted', 'hearth_channel_id',
     'advice only', 'local, advice', 'Never suggest moving a local task to the cloud', '--declined-dedupe', 'overlaps',
-    'remove the Toolkit plugin only', 'state done', 'older than 65 minutes', 'Never flag other memory lines']) {
+    'remove the Toolkit plugin only', 'state done', 'older than 65 minutes', 'Never flag other memory lines',
+    'git hash-object --stdin', 'matches no revision', '/skill-drift/', 'unless state.md already reported these hashes',
+    'every run reaches the owner as one line', 'swaps each named Toolkit task from the template on main the same turn']) {
     assert.ok(text.includes(required), required);
   }
+  // Both Toolkit tasks are bound now, so a bound check-in is never its own gap.
+  assert.doesNotMatch(text, /the check-in runs a fresh session per run/);
+  assert.match(text, /bound-session or fresh-session when that differs from the entry/);
   const nudge = rendered('hourly-nudge');
-  assert.ok(nudge.indexOf('git ls-remote') > -1 && nudge.indexOf('git ls-remote') < nudge.indexOf('git clone'), 'cheap compare before clone');
+  // The cheap check reads the last run's state first and skips the full sweep when nothing moved;
+  // the binding check is daily only, so the nudge clones nothing.
+  assert.ok(nudge.indexOf('nudge-state.md') > -1 && nudge.indexOf('nudge-state.md') < nudge.indexOf('list_threads'), 'cheap compare before the sweep');
+  assert.match(nudge, /no change since <time>/);
+  assert.doesNotMatch(nudge, /git ls-remote|git clone|BINDING/);
+  assert.match(nudge, /CONTEXT RESET DUE \(weekly\)/);
+  // Each task reports the other missing, so the coordinator recreates a deleted one.
+  assert.ok(nudge.includes('is missing (no such trigger in list_triggers'), 'nudge sees a deleted check-in');
+  assert.ok(rendered('daily-check-in').includes('is missing (no such trigger in list_triggers'), 'check-in sees a deleted nudge');
+  assert.match(nudge, /It runs silently: it never posts in its home thread except to report a failed delivery/);
   for (const required of ['all three hold', 'Idleness is never a reason', 'Never list a task home thread', 'Unrelayed', 'Hidden reply',
     'state done', '"EXAMPLE: Daily check-in"', 'CHECK-IN NOT ARMED', 'limit 10', 'list all of them every run']) {
     assert.ok(nudge.includes(required), required);
   }
+  assert.match(nudge, /not SUCCEEDED, or its home thread is resolved, start the first line with "CHECK-IN NOT ARMED/);
 });
 
 test('memory check reads only the BINDING and SCHEDULED TASKS lines', () => {
-  const binding = `- BINDING: example-owner/ai-agent-toolkit main commit ${'a'.repeat(40)} CONTROLLER.md blob ${'b'.repeat(40)} toolkit 3.10.0 skill 2026-10-24.3 bound 2026-10-24`;
+  const binding = `- BINDING: example-owner/ai-agent-toolkit main commit ${'a'.repeat(40)} CONTROLLER.md blob ${'b'.repeat(40)} toolkit 3.10.1 skill 2026-10-24.5 bound 2026-10-24`;
   const tasksLine = '- SCHEDULED TASKS: EXAMPLE: Daily check-in | trig_01abc | CRON_TZ=Asia/Singapore 47 8 * * * | fresh; EXAMPLE: Hourly nudge | trig_02def | CRON_TZ=Asia/Singapore 37 * * * * | bound home cmsg_03ghi since 2026-10-24; Sweep | trig_04jkl | CRON_TZ=Asia/Singapore 0 9 * * 1-5 | local | owner schedule';
   const rows = [
     [`# Memory\n${binding}\n${tasksLine}\n- Owner note: anything at all.\n`, ['current'], 0],
     [`${tasksLine}\n`, ['MEMORY FORMAT: BINDING missing'], 1],
-    [`${binding.replace(' toolkit 3.10.0', '')}\n${tasksLine}\n`, ['MEMORY FORMAT: BINDING old format'], 1],
+    [`${binding.replace(' toolkit 3.10.1', '')}\n${tasksLine}\n`, ['MEMORY FORMAT: BINDING old format'], 1],
     [`${binding}\n${binding}\n${tasksLine}\n`, ['MEMORY FORMAT: BINDING more than one line'], 1],
     [`${binding}\n`, ['MEMORY FORMAT: SCHEDULED TASKS missing'], 1],
     [`${binding}\n- SCHEDULED TASKS: EXAMPLE daily trig_01abc\n`, ['MEMORY FORMAT: SCHEDULED TASKS old format'], 1],
+    [`${binding}\n${tasksLine.replace('since 2026-10-24;', 'since 2026-10-24 | stopped by owner 2026-10-25;')}\n`, ['current'], 0],
+    [`${binding}\n${tasksLine.replace('since 2026-10-24;', 'since 2026-10-24 | stopped;')}\n`, ['MEMORY FORMAT: SCHEDULED TASKS old format'], 1],
     [`${binding}\n${tasksLine.replace('fresh;', 'sometimes;')}\n`, ['MEMORY FORMAT: SCHEDULED TASKS old format'], 1],
     ['', ['MEMORY FORMAT: BINDING missing', 'MEMORY FORMAT: SCHEDULED TASKS missing'], 1]
   ];
@@ -270,8 +333,8 @@ test('memory check reads only the BINDING and SCHEDULED TASKS lines', () => {
 
 test('every setup step that creates something has an inventory row, and every row is checked by the daily check-in', () => {
   const inventory = JSON.parse(fs.readFileSync(INVENTORY, 'utf8'));
-  const skill = fs.readFileSync(SKILL, 'utf8').replace(/\r\n/g, '\n');
-  const setup = skill.slice(skill.indexOf('## Guided setup and takeover'), skill.indexOf('## Managed project-instructions sync'));
+  const setup = fs.readFileSync(SETUP, 'utf8').replace(/\r\n/g, '\n');
+  assert.match(fs.readFileSync(SKILL, 'utf8'), /reference\/setup\.md/, 'the skill routes setup to its reference file');
   const steps = [...setup.matchAll(/^(\d+)\. \*\*/gm)].map(match => Number(match[1]));
   assert.deepEqual(steps, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
   const covered = new Set(inventory.rows.flatMap(row => row.setup_steps));
@@ -302,4 +365,45 @@ test('invalid arguments and unreadable input fail with one generic error', t => 
   assert.equal(result.status, 0);
   assert.equal(JSON.parse(result.stdout).project, 'EXAMPLE');
   assert.throws(() => parseArgs(['--refresh', 'daily-check-in', prompt, '--params', 'a', '--params', 'b']));
+  assert.equal(parseArgs(['--refresh', 'daily-check-in', prompt, '--session', 'bound']).session, 'bound');
+  assert.throws(() => parseArgs(['--check', 'daily-check-in', prompt, '--session', 'bound']));
+});
+
+test('every line that re-arms, updates, swaps, rebuilds, recreates or sets up a Toolkit task honours a stopped by owner entry', () => {
+  // Scans by what a line does, not where it sits, so a new path that forgets the exception fails
+  // here, whatever it calls the task (a job, a schedule, a home thread, both).
+  // The named lines are not automatic paths: introductions, how a task is created or rendered (every
+  // path that uses them carries the exception), the project's own tasks, the tool route, the steps
+  // under the swap paragraph (which carries the exception), runs of the task itself, and thread
+  // resolving.
+  const dir = path.join(ROOT, 'repo', 'contracts', 'claude-projects', 'web-controller-projects');
+  const files = ['SKILL.md', 'project-instructions.md', ...['reference', 'tasks'].flatMap(sub => fs.readdirSync(path.join(dir, sub)).filter(name => name.endsWith('.md')).map(name => `${sub}/${name}`))];
+  const acts = /\b(?:re-?arm|rebuil[dt]|re-?creat|swap|set up the|re-?enabl|restor|refresh|replac|switch|re-?add|resum|fire (?:it |them )?again|update (?:the|those|its)\b[^.]*prompt|creat(?:e|es) (?:it|them|the|a)\b|starts? (?:a )?new home thread)/i;
+  for (const line of ['Re-arm any recurring job that missed its run.', 'Rebuild the home thread when it is a week old.', 'Re-create the schedule when its cron drifts.',
+    'Swap both from the template on main.', 'Start a new home thread for it.', 'The coordinator creates it again from main.']) assert.match(line, acts, line);
+  const notPaths = [
+    'Whenever the user asks for anything recurring', "**The project's own tasks**", 'Reference for the `web-controller-projects` skill',
+    'A cloud thread creates, recreates and deletes tasks', '3. Create the replacement', '4. Rewrite the `SCHEDULED TASKS:` line', '7. Weekly rebuild:', '**It is bound to its own home thread,**',
+    'Every Toolkit scheduled task is bound to its own home thread (`<PROJECT>: <task name>`): start', '**Toolkit-made tasks** (the daily check-in and the hourly nudge) are rendered', 'Resolve candidates:',
+    'When a recurring task replaces an older one, delete the older one',
+    'Toolkit-made task swaps under their safeguards', 'so the coordinator rebuilds this home thread', '2. Render the new prompt',
+    // Lines about other things that happen to use one of the verbs: repos, setup, GitHub reads,
+    // shared checkouts, Remote Control, the instructions sync and the repo map.
+    '- A project with no repo attached gets this coordinator contract', 'Before any other work as a newly appointed controller', '**Threads do GitHub reads.**',
+    '- Local sessions sharing one checkout must not clash', '**Remote Control wake.**', '4. Check the result: `--check` reads `current`', '5. Post one short note in project chat: block version',
+    '- On undo, restore the saved copy and record `declined project-instructions', '**Dedupe in the same change.**', '**Evidence before "done":**',
+    'start a bounded G0 to create or refresh it before you plan anything',
+  ];
+  const unguarded = [];
+  for (const rel of files) {
+    fs.readFileSync(path.join(dir, rel), 'utf8').replace(/\r\n/g, '\n').split('\n').forEach((line, index) => {
+      if (acts.test(line) && !/stopped by owner|owner stopped them/.test(line) && !notPaths.some(text => line.includes(text))) unguarded.push(`${rel}:${index + 1}: ${line.slice(0, 120)}`);
+    });
+  }
+  assert.deepEqual(unguarded, []);
+  const skill = fs.readFileSync(path.join(dir, 'SKILL.md'), 'utf8');
+  assert.match(skill, /\*\*Stopped by owner:\*\* a task whose `SCHEDULED TASKS:` entry says `stopped by owner` is outside every automatic path/);
+  assert.match(skill, /the restart removes the mark/);
+  assert.match(fs.readFileSync(path.join(dir, 'reference', 'recurring-tasks.md'), 'utf8'), /When the owner restarts it, remove the mark\./);
+  assert.match(fs.readFileSync(path.join(dir, 'reference', 'recurring-tasks.md'), 'utf8'), /--refresh <kind> <old prompt file> --session <bound\|fresh>` keeps the params and project text and always names the session the replacement runs in/);
 });

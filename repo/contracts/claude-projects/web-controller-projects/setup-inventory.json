@@ -1,17 +1,16 @@
 {
   "schema": "toolkit-projects-setup-inventory/v1",
-  "description": "Everything Projects setup creates, where its Toolkit source lives, how the daily check-in checks it and how it is brought current. Only Toolkit-governed parts ever change: text inside Toolkit markers, Toolkit-made task prompts, the format of fenced toolkit-* blocks and the BINDING and SCHEDULED TASKS memory lines. Resync kinds: auto (the coordinator does it the same turn, reversibly, with safeguards), owner (the owner acts), report (advice only). Any new thing setup creates adds a row here in the same change.",
+  "description": "Everything Projects setup creates, where its Toolkit source lives, how the daily check-in checks it and how it is brought current. Only Toolkit-governed parts ever change: text inside Toolkit markers, Toolkit-made task prompts and the BINDING and SCHEDULED TASKS memory lines. Resync kinds: auto (the coordinator does it the same turn, reversibly, with safeguards), owner (the owner acts), report (advice only). Any new thing setup creates adds a row here in the same change.",
   "rows": [
     { "id": "skill", "artefact": "Skill copy on the account", "setup_steps": [0], "source": "repo/contracts/claude-projects/web-controller-projects/SKILL.md", "check": "SKILL UPDATE", "resync": "auto when the loaded copy is newer; owner saves it when main is newer" },
     { "id": "instructions", "artefact": "Managed project-instructions block, at the top, with project lines deduped", "setup_steps": [5], "source": "repo/contracts/claude-projects/web-controller-projects/project-instructions.md", "check": "BLOCK OUTDATED", "resync": "auto" },
     { "id": "binding", "artefact": "BINDING line in project memory", "setup_steps": [4], "source": "repo/CONTROLLER.md", "check": "BINDING STALE", "resync": "auto" },
     { "id": "toolkit-version", "artefact": "Toolkit version on the BINDING line", "setup_steps": [4], "source": ".claude-plugin/plugin.json", "check": "TOOLKIT CHANGED", "resync": "auto" },
-    { "id": "toolkit-tasks", "artefact": "Daily check-in and hourly nudge, and the hourly nudge's home thread", "setup_steps": [8], "source": "repo/contracts/claude-projects/web-controller-projects/tasks/", "check": "TASKS OUTDATED", "resync": "auto" },
+    { "id": "toolkit-tasks", "artefact": "Daily check-in and hourly nudge, and their home threads", "setup_steps": [8], "source": "repo/contracts/claude-projects/web-controller-projects/tasks/", "check": "TASKS OUTDATED", "resync": "auto" },
     { "id": "nudge-armed", "artefact": "Hourly nudge armed with an unresolved home thread", "setup_steps": [8], "source": "repo/contracts/claude-projects/web-controller-projects/tasks/hourly-nudge.md", "check": "NUDGE NOT ARMED", "resync": "auto" },
     { "id": "project-tasks", "artefact": "The project's own cloud tasks", "setup_steps": [], "source": "shell blocks only, once the owner opts a task in", "check": "**Tasks:**", "resync": "report" },
     { "id": "local-tasks", "artefact": "Local, desktop or device-bound tasks", "setup_steps": [], "source": "none", "check": "local, advice", "resync": "report" },
     { "id": "memory-lines", "artefact": "BINDING and SCHEDULED TASKS memory lines", "setup_steps": [4, 8], "source": "line formats in SKILL.md", "check": "MEMORY FORMAT", "resync": "auto" },
-    { "id": "promises-block", "artefact": "Fenced toolkit-promises block (format only, never its entries)", "setup_steps": [], "source": "repo/docs/TOOLKIT-PROMISE-CHECK.md", "check": "MEMORY FORMAT", "resync": "auto" },
     { "id": "other-memory", "artefact": "Every other memory line and note", "setup_steps": [], "source": "none", "check": "never changed", "resync": "report" },
     { "id": "account-plugin", "artefact": "Toolkit plugin on the claude.ai account", "setup_steps": [], "source": ".claude-plugin/plugin.json", "check": "PLUGIN BEHIND", "resync": "owner" },
     { "id": "report-files", "artefact": "Report files in the shared folder", "setup_steps": [8], "source": "report_dir param", "check": "{{report_dir}}/state.md", "resync": "auto" },
@@ -22,7 +21,7 @@
     { "id": "goal", "artefact": "Project goal", "setup_steps": [8], "source": "parent programme in memory", "check": "**Setup:**", "resync": "report" }
   ],
   "steps_without_artefacts": {
-    "6": "Takeover reads the handover and posts a repo record; it leaves nothing in the project to keep current.",
+    "6": "Takeover reads the outgoing controller's state and posts a one-line record; it leaves nothing in the project to keep current.",
     "7": "Orientation only reads.",
     "9": "Confirms the earlier steps work.",
     "10": "Posts the completion line."

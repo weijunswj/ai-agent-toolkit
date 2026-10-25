@@ -1,9 +1,9 @@
 'use strict';
 
 // The governance hook gate (#542 M3, owner rule of 23 Oct: a hard stop that keeps stopping until the
-// repository's state exists in its own gitignored folder). Closure rows H-01 to H-09, H-12, H-13,
-// H-15 and H-16 at unit level, plus the in-repository state file, bypass attempts, fail-closed
-// paths, the cloud exemption and both hosts' hook wiring.
+// user decides). Closure rows H-01 to H-09, H-12, H-13, H-15 and H-16 at unit level, plus nothing
+// written into the repository or folder, bypass attempts, fail-closed paths, the cloud exemption and
+// both hosts' hook wiring.
 
 const assert = require('node:assert/strict');
 const childProcess = require('node:child_process');
@@ -16,7 +16,6 @@ const test = require('node:test');
 const repoRoot = path.resolve(__dirname, '..', '..');
 const scripts = path.join(repoRoot, 'repo', 'scripts');
 const gate = require(path.join(scripts, 'toolkit-governance-gate.cjs'));
-const repoState = require(path.join(scripts, 'toolkit-governance-repo-state.cjs'));
 const governance = require(path.join(scripts, 'toolkit-governance-state.cjs'));
 const claudeHook = require(path.join(scripts, 'toolkit-governance-hook.cjs'));
 const codexHook = require(path.join(scripts, 'toolkit-codex-helper-hook.cjs'));
@@ -72,7 +71,11 @@ function hold(ctx, environment = {}) {
 }
 const tools = ctx => new gate.ToolGate({ registryOptions: ctx.options });
 const stateOf = (ctx, repo) => governance.governanceState(repo, ctx.options);
-const fileOf = repo => JSON.parse(fs.readFileSync(repoState.filePath(repo), 'utf8'));
+// The folder earlier versions kept a copy of the state in. Toolkit no longer writes it, and a copy
+// left over from before is read by nothing.
+const OLD_FOLDER = '.ai-agent-toolkit';
+const oldCopy = folder => path.join(folder, OLD_FOLDER, 'governance.json');
+const writesNothingIn = folder => assert.equal(fs.existsSync(path.join(folder, OLD_FOLDER)), false, `nothing is written into ${folder}`);
 const registryBytes = ctx => (fs.existsSync(ctx.registryPath) ? fs.readFileSync(ctx.registryPath, 'utf8') : null);
 
 test('H-01, H-02: every prompt in an undecided repository is held; the first shows the question, later ones a count', (t) => {
@@ -91,7 +94,7 @@ test('H-01, H-02: every prompt in an undecided repository is held; the first sho
   const second = hold(ctx).decide({ cwd: repo, prompt: 'and the logout one' });
   assert.equal(second.action, 'block');
   assert.match(second.reason, /\(2 messages held\)\. Enable Toolkit's automated GitHub tracking governance for this repository\? Reply yes, no or later\./);
-  assert.equal(fs.existsSync(repoState.filePath(repo)), false, 'nothing is recorded in the repository while undecided');
+  writesNothingIn(repo);
   assert.equal(registryBytes(ctx), null, 'no decision is written');
 });
 
@@ -118,7 +121,7 @@ test('bypass attempts: ignoring, skipping, near-misses and a "yes" before the qu
   assert.match(gate.ANSWER.exec('Toolkit Governance Enable.')[1], /enable/i);
 });
 
-test('H-04: the answer is recorded, written into the repository\'s own ignored folder, and held prompts come back in order', (t) => {
+test('H-04: the answer is recorded in the user-state files only, nothing is written into the repository, and held prompts come back in order', (t) => {
   const ctx = scratch(t);
   const repo = gitRepo(ctx, 'repo');
   hold(ctx).decide({ cwd: repo, prompt: 'first request', sessionId: 's1' });
@@ -135,13 +138,9 @@ test('H-04: the answer is recorded, written into the repository\'s own ignored f
   assert.match(gate.sessionLine(repo, { registryOptions: ctx.options, sessionId: 'later-session' }), /^Toolkit governance: ENABLED, setup not finished [^\n]*Before other work, ask the user in one message: \(1\) the private evidence store/);
   assert.equal(tools(ctx).decide({ tool_name: 'Bash', cwd: repo, session_id: 'later-session', tool_input: { command: 'ls' } }), null);
   assert.equal(stateOf(ctx, repo).recorded_decision, 'enabled');
-  const record = fileOf(repo);
-  assert.deepEqual([record.schema, record.state, record.basis, record.history.length], [repoState.SCHEMA, 'ENABLED', 'your decision', 1]);
-  assert.equal(record.repository_id, stateOf(ctx, repo).repository_id);
+  writesNothingIn(repo);
   assert.equal(fs.existsSync(path.join(repo, '.gitignore')), false, 'the root .gitignore is never created');
-  assert.equal(fs.readFileSync(path.join(repo, repoState.FOLDER, '.gitignore'), 'utf8').trim().split('\n').pop(), '*');
-  assert.equal(git(repo, ['check-ignore', `${repoState.FOLDER}/${repoState.FILE}`]), `${repoState.FOLDER}/${repoState.FILE}`);
-  assert.equal(git(repo, ['status', '--porcelain', '--untracked-files=all']).split('\n').filter(Boolean).join('|'), '', 'the state folder never shows in git status');
+  assert.equal(git(repo, ['status', '--porcelain', '--untracked-files=all']).split('\n').filter(Boolean).join('|'), '', 'git status stays clean');
   assert.equal(fs.existsSync(ctx.heldPath), false, 'held prompts are deleted after the replay');
   assert.deepEqual(hold(ctx).decide({ cwd: repo, prompt: 'next request' }), { action: 'pass' });
 });
@@ -155,20 +154,21 @@ test('H-05: disable is recorded, never asked again in new sessions, and the sess
   assert.match(answered.context, /now DISABLED/);
   for (let index = 0; index < 3; index += 1) assert.deepEqual(hold(ctx).decide({ cwd: repo, prompt: `task ${index}` }), { action: 'pass' });
   assert.match(gate.sessionLine(repo, { registryOptions: ctx.options }), /DISABLED .*does not apply/);
-  assert.equal(fileOf(repo).state, 'DISABLED');
+  writesNothingIn(repo);
 });
 
-test('a copy written as DECLINED by an earlier version reads as DISABLED and is rewritten, keeping its history', (t) => {
+test('a copy left by an earlier version is read by nothing and left exactly as it was', (t) => {
   const ctx = scratch(t);
   const repo = gitRepo(ctx, 'repo');
   gate.writeGovernanceDecision(repo, 'disable', { registryOptions: ctx.options });
-  const legacy = { ...fileOf(repo), state: 'DECLINED', history: fileOf(repo).history.map(entry => ({ ...entry, state: 'DECLINED' })) };
-  fs.writeFileSync(repoState.filePath(repo), JSON.stringify(legacy));
-  assert.equal(repoState.readRecord(repo).status, 'present');
-  assert.equal(new gate.GovernanceGate({ registryOptions: ctx.options }).evaluate(repo).file, 'written');
-  assert.equal(fileOf(repo).state, 'DISABLED');
-  assert.deepEqual(fileOf(repo).history.map(entry => entry.state), ['DISABLED', 'DISABLED']);
-  assert.equal(new gate.GovernanceGate({ registryOptions: ctx.options }).evaluate(repo).file, 'agrees');
+  fs.mkdirSync(path.join(repo, OLD_FOLDER));
+  const leftover = JSON.stringify({ schema: 'toolkit.repository-governance.v1', repository_id: stateOf(ctx, repo).repository_id, state: 'DECLINED', basis: 'your decision', history: [] });
+  fs.writeFileSync(oldCopy(repo), leftover);
+  assert.deepEqual(hold(ctx).decide({ cwd: repo, prompt: 'go' }), { action: 'pass' });
+  assert.equal(stateOf(ctx, repo).state, 'DISABLED');
+  assert.match(gate.sessionLine(repo, { registryOptions: ctx.options }), /^Toolkit governance: DISABLED for this repository/);
+  assert.equal(fs.readFileSync(oldCopy(repo), 'utf8'), leftover, 'never rewritten');
+  assert.deepEqual(fs.readdirSync(path.join(repo, OLD_FOLDER)), ['governance.json'], 'nothing added beside it');
 });
 
 test('short replies after the question: yes enables, no disables, and the held prompts come back', (t) => {
@@ -195,7 +195,7 @@ test('later: nothing is recorded, this session carries on under the global rules
   assert.match(later.context, /1\. held while deciding/);
   assert.equal(registryBytes(ctx), null, 'no decision is written');
   assert.equal(stateOf(ctx, repo).state, 'UNDECIDED');
-  assert.equal(fs.existsSync(repoState.filePath(repo)), false);
+  writesNothingIn(repo);
   // The same session runs.
   assert.deepEqual(hold(ctx).decide({ cwd: repo, prompt: 'next', sessionId: 's1' }), { action: 'pass' });
   assert.equal(new gate.ToolGate({ registryOptions: ctx.options }).decide({ tool_name: 'Bash', cwd: repo, session_id: 's1', tool_input: { command: 'ls' } }), null);
@@ -515,6 +515,84 @@ test('a mark that cannot be replaced fails safe: the resumed or continued run ca
   assert.equal(stateOf(ctx, continued).state, 'ENABLED');
 });
 
+test('a mark that can be neither replaced nor removed fails safe: held messages and "later" forget their marks', (t) => {
+  const ctx = scratch(t);
+  const raw = () => new gate.PromptHold({ registryOptions: ctx.options, environment: {} });
+  const start = (sessionId, source, cwd) => gate.startSession({ session_id: sessionId, source, ...(cwd ? { cwd } : {}) }, { registryOptions: ctx.options });
+  const markFile = (kind, key) => path.join(path.dirname(ctx.registryPath), gate.SESSIONS_FOLDER, `${kind}-${crypto.createHash('sha256').update(key).digest('hex').slice(0, 32)}.json`);
+  // A locked mark (another process holds it open without delete sharing, or its folder is read-only):
+  // it cannot be renamed over or removed, though it can still be read.
+  const locked = new Set();
+  const busy = file => { const error = new Error(`EBUSY: resource busy or locked, ${file}`); error.code = 'EBUSY'; return error; };
+  const { renameSync, rmSync } = fs;
+  t.mock.method(fs, 'renameSync', (from, to) => { if (locked.has(path.resolve(to))) throw busy(to); return renameSync(from, to); });
+  t.mock.method(fs, 'rmSync', (target, options) => { if (locked.has(path.resolve(target))) throw busy(target); return rmSync(target, options); });
+  // A resumed run whose session mark is locked and whose start names no repository: the earlier run's
+  // held message no longer carries a mark the resumed run can match.
+  const resumed = gitRepo(ctx, 'resumed');
+  start('A', 'startup', resumed);
+  assert.equal(raw().decide({ cwd: resumed, prompt: 'hello', sessionId: 'A' }).action, 'block');
+  locked.add(markFile('s', 'A'));
+  assert.equal(start('A', 'resume'), null);
+  assert.ok(fs.existsSync(markFile('s', 'A')), 'the locked mark is still there');
+  const reply = raw().decide({ cwd: resumed, prompt: 'yes', sessionId: 'A' });
+  assert.equal(reply.action, 'block');
+  assert.match(reply.reason, /asks again/);
+  assert.equal(stateOf(ctx, resumed).state, 'UNDECIDED');
+  // The same resume started in the repository: its mark is replaced, so the earlier answer is asked again.
+  start('A', 'startup', resumed);
+  raw().decide({ cwd: resumed, prompt: 'hello', sessionId: 'A' });
+  assert.equal(start('A', 'resume', resumed), null);
+  assert.equal(raw().decide({ cwd: resumed, prompt: 'yes', sessionId: 'A' }).action, 'block');
+  assert.equal(stateOf(ctx, resumed).state, 'UNDECIDED');
+  locked.delete(markFile('s', 'A'));
+  // A continued run reporting a new id while the repository mark is locked: B's earlier message is
+  // asked again, and the user's next reply in B's run answers.
+  const continued = gitRepo(ctx, 'continued', { remote: 'https://github.com/example-owner/continued.git' });
+  start('B', 'startup', continued);
+  assert.equal(raw().decide({ cwd: continued, prompt: 'hello', sessionId: 'B' }).action, 'block');
+  locked.add(markFile('r', stateOf(ctx, continued).repository_id));
+  assert.equal(start('new-id', 'resume', continued), null);
+  const continuedReply = raw().decide({ cwd: continued, prompt: 'yes', sessionId: 'B' });
+  assert.equal(continuedReply.action, 'block');
+  assert.match(continuedReply.reason, /another session started in this repository, so Toolkit asks again/);
+  assert.equal(stateOf(ctx, continued).state, 'UNDECIDED');
+  assert.equal(raw().decide({ cwd: continued, prompt: 'yes', sessionId: 'B' }).action, 'pass');
+  assert.equal(stateOf(ctx, continued).state, 'ENABLED');
+  // After "later", a start with the repository mark locked ends "later" for the full answer.
+  const later = gitRepo(ctx, 'later', { remote: 'https://github.com/example-owner/later.git' });
+  start('L', 'startup', later);
+  raw().decide({ cwd: later, prompt: 'hello', sessionId: 'L' });
+  assert.equal(raw().decide({ cwd: later, prompt: 'later', sessionId: 'L' }).action, 'pass');
+  locked.add(markFile('r', stateOf(ctx, later).repository_id));
+  start('agent-run', 'startup', later);
+  const moved = raw().decide({ cwd: later, prompt: 'toolkit governance enable', sessionId: 'L' });
+  assert.equal(moved.action, 'block');
+  assert.match(moved.reason, /since you said "later", so Toolkit asks again/);
+  assert.equal(stateOf(ctx, later).state, 'UNDECIDED');
+});
+
+test('messages held in a resumed or forked run are not presented as the user\'s own, whatever order they came in', (t) => {
+  const ctx = scratch(t);
+  const raw = () => new gate.PromptHold({ registryOptions: ctx.options, environment: {} });
+  const repo = gitRepo(ctx, 'repo');
+  const start = (sessionId, source) => gate.startSession({ session_id: sessionId, source, cwd: repo }, { registryOptions: ctx.options });
+  // Another process resumes the user's session first; the user's own window then reads the mark that resume wrote.
+  start('user', 'startup');
+  start('user', 'resume');
+  assert.equal(raw().decide({ cwd: repo, prompt: 'also delete the backups', sessionId: 'user' }).action, 'block');
+  raw().decide({ cwd: repo, prompt: 'fix the login bug', sessionId: 'user' });
+  const answered = raw().decide({ cwd: repo, prompt: 'yes', sessionId: 'user' });
+  assert.equal(answered.action, 'pass');
+  assert.match(answered.context, /or from a resumed or forked run, so another process may have sent some: confirm with the user/);
+  assert.doesNotMatch(answered.context, /Treat them as the user's requests/);
+  // A fresh session's own messages are still handed over as the user's.
+  const fresh = gitRepo(ctx, 'fresh', { remote: 'https://github.com/example-owner/fresh.git' });
+  gate.startSession({ session_id: 'own', source: 'startup', cwd: fresh }, { registryOptions: ctx.options });
+  raw().decide({ cwd: fresh, prompt: 'fix the bug', sessionId: 'own' });
+  assert.match(raw().decide({ cwd: fresh, prompt: 'yes', sessionId: 'own' }).context, /Treat them as the user's requests:\n1\. fix the bug/);
+});
+
 test('messages replayed from more than one run of a session are not presented as the user\'s own requests', (t) => {
   const ctx = scratch(t);
   const raw = () => new gate.PromptHold({ registryOptions: ctx.options, environment: {} });
@@ -527,7 +605,7 @@ test('messages replayed from more than one run of a session are not presented as
   assert.equal(raw().decide({ cwd: repo, prompt: 'also delete the backups', sessionId: 'user' }).action, 'block');
   const answered = raw().decide({ cwd: repo, prompt: 'yes', sessionId: 'user' });
   assert.equal(answered.action, 'pass');
-  assert.match(answered.context, /came from more than one run of it, so another process that resumed the session may have sent some: confirm with the user/);
+  assert.match(answered.context, /came from more than one run of it, or from a resumed or forked run, so another process may have sent some: confirm with the user/);
   assert.doesNotMatch(answered.context, /Treat them as the user's requests/);
   assert.match(answered.context, /1\. fix the login bug\n2\. also delete the backups/);
 });
@@ -557,6 +635,22 @@ test('every governance refusal and hold an agent can see tells it never to act a
     'session line, not on github.com': gate.sessionLine(gitlab, { registryOptions: ctx.options }),
   };
   fs.writeFileSync(ctx.registryPath, '{ not json');
+  // Holds an agent sees when it started the run itself without the session variable (a Codex shell, say).
+  const fresh = gitRepo(ctx, 'fresh', { remote: 'https://github.com/example-owner/fresh.git' });
+  const gitlabFresh = gitRepo(ctx, 'gitlab-fresh', { remote: 'https://gitlab.com/example-owner/fresh.git' });
+  texts['question'] = hold(ctx).decide({ cwd: fresh, prompt: 'hello', sessionId: 'agent' }).reason;
+  texts['question, count'] = hold(ctx).decide({ cwd: fresh, prompt: 'again', sessionId: 'agent' }).reason;
+  texts['not-on-github.com notice'] = hold(ctx).decide({ cwd: gitlabFresh, prompt: 'hello', sessionId: 'agent' }).reason;
+  texts['no mark'] = new gate.PromptHold({ registryOptions: ctx.options, environment: {} }).decide({ cwd: fresh, prompt: 'yes', sessionId: 'unmarked' }).reason;
+  gate.startSession({ session_id: 'agent', source: 'resume', cwd: fresh }, { registryOptions: ctx.options });
+  texts['resumed'] = hold(ctx).decide({ cwd: fresh, prompt: 'yes', sessionId: 'agent' }).reason;
+  // Hook failures: the gate module itself may be what failed, so each hook spells the line out.
+  const broken = { environment: {}, gate: { insideRepository: () => true, PromptHold: class { constructor() { throw new Error('broken'); } }, ToolGate: class { constructor() { throw new Error('broken'); } } } };
+  texts['Claude hook failure, prompt'] = claudeHook.respond('UserPromptSubmit', { cwd: repo, prompt: 'x', session_id: 'user' }, broken)?.reason;
+  texts['Claude hook failure, tool'] = claudeHook.respond('PreToolUse', { cwd: repo, tool_name: 'Bash', tool_input: { command: 'ls' } }, broken)?.hookSpecificOutput?.permissionDecisionReason;
+  assert.equal(claudeHook.NEVER_OWNER, gate.NEVER_OWNER);
+  assert.equal(codexHook.NEVER_OWNER, gate.NEVER_OWNER);
+  texts['Codex hook failure, prompt'] = codexHook.PROMPT_FAILED;
   texts['tool with unreadable state'] = shell(repo, 'ls')?.deny;
   texts['session line, unreadable state'] = gate.sessionLine(repo, { registryOptions: ctx.options });
   for (const [name, text] of Object.entries(texts)) {
@@ -697,35 +791,25 @@ test('H-08: a decision made at the terminal lets the next prompt through and han
   assert.deepEqual(hold(ctx).decide({ cwd: repo, prompt: 'again' }), { action: 'pass' });
 });
 
-test('the repository file is never the authority: forged, copied, edited and deleted copies', (t) => {
+test('a copy in the repository is never the authority: forged and edited copies open and change nothing', (t) => {
   const ctx = scratch(t);
   const repo = gitRepo(ctx, 'repo');
   // Forged: a hand-written ENABLED file with no decision behind it opens nothing.
-  fs.mkdirSync(path.join(repo, repoState.FOLDER), { recursive: true });
-  const forged = { schema: repoState.SCHEMA, repository_id: stateOf(ctx, repo).repository_id, state: 'ENABLED', basis: 'your decision', updated_at: 'x', history: [] };
-  fs.writeFileSync(repoState.filePath(repo), JSON.stringify(forged));
+  fs.mkdirSync(path.join(repo, OLD_FOLDER), { recursive: true });
+  const forged = JSON.stringify({ schema: 'toolkit.repository-governance.v1', repository_id: stateOf(ctx, repo).repository_id, state: 'ENABLED', basis: 'your decision', updated_at: 'x', history: [] });
+  fs.writeFileSync(oldCopy(repo), forged);
   assert.equal(hold(ctx).decide({ cwd: repo, prompt: 'go' }).action, 'block');
   assert.ok(tools(ctx).decide({ tool_name: 'Bash', cwd: repo, tool_input: { command: 'ls' } }).deny);
-  // Decided as DISABLED: a file edited to ENABLED is rewritten, and the change is added to its history.
+  assert.equal(stateOf(ctx, repo).state, 'UNDECIDED');
+  // Decided as DISABLED: the ENABLED file changes nothing and is never rewritten.
   gate.writeGovernanceDecision(repo, 'disable', { registryOptions: ctx.options });
-  fs.writeFileSync(repoState.filePath(repo), JSON.stringify({ ...fileOf(repo), state: 'ENABLED' }));
-  assert.equal(new gate.GovernanceGate({ registryOptions: ctx.options }).evaluate(repo).file, 'written');
-  assert.equal(fileOf(repo).state, 'DISABLED');
-  assert.equal(fileOf(repo).history.length, 2);
-  // Copied from another repository: rewritten for this one, with its own history.
-  fs.writeFileSync(repoState.filePath(repo), JSON.stringify({ ...fileOf(repo), repository_id: 'f'.repeat(64) }));
-  new gate.GovernanceGate({ registryOptions: ctx.options }).evaluate(repo);
-  assert.equal(fileOf(repo).repository_id, stateOf(ctx, repo).repository_id);
-  assert.equal(fileOf(repo).history.length, 1);
-  // Deleted: recreated from the decision on the next prompt.
-  fs.rmSync(path.join(repo, repoState.FOLDER), { recursive: true });
   assert.equal(hold(ctx).decide({ cwd: repo, prompt: 'go' }).action, 'pass');
-  assert.equal(fileOf(repo).state, 'DISABLED');
-  // A read-only check of a missing copy reports it and holds nothing.
-  fs.rmSync(repoState.filePath(repo));
-  const checked = new gate.GovernanceGate({ registryOptions: ctx.options }).evaluate(repo, { write: false });
-  assert.deepEqual([checked.hold, checked.file], [false, 'missing']);
-  assert.equal(fs.existsSync(repoState.filePath(repo)), false);
+  assert.equal(stateOf(ctx, repo).state, 'DISABLED');
+  assert.equal(fs.readFileSync(oldCopy(repo), 'utf8'), forged);
+  // Deleted: nothing comes back.
+  fs.rmSync(path.join(repo, OLD_FOLDER), { recursive: true });
+  assert.equal(hold(ctx).decide({ cwd: repo, prompt: 'go' }).action, 'pass');
+  writesNothingIn(repo);
 });
 
 // Root `.gitignore` shapes a decided repository can have. Toolkit never edits it, so every shape
@@ -769,58 +853,49 @@ for (const decision of ['disable', 'enable']) {
         assert.equal(tools(ctx).decide({ tool_name: 'Edit', cwd: repo, tool_input: { file_path: path.join(repo, 'a.txt') } }), null);
       }
       assert.equal(snapshot(path.join(repo, '.gitignore')), before);
-      assert.equal(fileOf(repo).state, decision === 'enable' ? 'ENABLED' : 'DISABLED');
+      assert.equal(stateOf(ctx, repo).state, decision === 'enable' ? 'ENABLED' : 'DISABLED');
+      writesNothingIn(repo);
       assert.equal(git(repo, ['status', '--porcelain', '--untracked-files=all']), '');
     });
   }
 }
 
-// A link where the state folder belongs is never followed: the directory it points at (here another
-// repository with a tracked .gitignore) stays untouched, and the decided repository is not held.
-// A directory symlink needs privileges on Windows; a junction does not (other platforms ignore the type).
+// Whatever sits where earlier versions kept their copy (a file, or a link to another repository)
+// is never read, followed or changed, and a decided repository is not held. A directory symlink
+// needs privileges on Windows; a junction does not (other platforms ignore the type).
 for (const decision of ['disable', 'enable']) {
-  for (const type of ['dir', 'junction']) {
-    test(`H7 matrix: ${decision}d repository, state folder is a ${type} link: never followed, never held`, (t) => {
+  for (const type of ['file', 'dir', 'junction']) {
+    test(`${decision}d repository with a ${type} where the old copy folder was: never touched, never held`, (t) => {
       const ctx = scratch(t);
-      const repo = gitRepo(ctx, `linked-${decision}-${type}`, { remote: `https://github.com/example-owner/linked-${decision}-${type}.git` });
+      const repo = gitRepo(ctx, `leftover-${decision}-${type}`, { remote: `https://github.com/example-owner/leftover-${decision}-${type}.git` });
       const sibling = gitRepo(ctx, `sibling-${decision}-${type}`, { remote: `https://github.com/example-owner/sibling-${decision}-${type}.git` });
       fs.writeFileSync(path.join(sibling, '.gitignore'), 'node_modules/\n');
       git(sibling, ['add', '-A']);
       git(sibling, ['-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--quiet', '-m', 'fixture']);
-      try { fs.symlinkSync(sibling, path.join(repo, repoState.FOLDER), type); } catch (error) {
-        if (error.code === 'EPERM' && process.platform === 'win32') return t.skip('directory symlinks need privileges on this Windows runner');
-        throw error;
+      const placed = path.join(repo, OLD_FOLDER);
+      if (type === 'file') fs.writeFileSync(placed, 'not a folder\n');
+      else {
+        try { fs.symlinkSync(sibling, placed, type); } catch (error) {
+          if (error.code === 'EPERM' && process.platform === 'win32') return t.skip('directory symlinks need privileges on this Windows runner');
+          throw error;
+        }
       }
       const decided = gate.writeGovernanceDecision(repo, decision, { registryOptions: ctx.options });
-      assert.deepEqual([decided.hold, decided.file, decided.error_code], [false, 'unwritable', 'REPO_STATE_FOLDER_NOT_A_DIRECTORY']);
+      assert.deepEqual([decided.hold, decided.reason], [false, 'decided']);
       for (let round = 0; round < 2; round += 1) {
         assert.equal(hold(ctx).decide({ cwd: repo, prompt: `request ${round}` }).action, 'pass');
         assert.equal(tools(ctx).decide({ tool_name: 'Bash', cwd: repo, tool_input: { command: 'ls' } }), null);
       }
-      assert.match(gate.sessionLine(repo, { registryOptions: ctx.options }), /could not save its copy .*REPO_STATE_FOLDER_NOT_A_DIRECTORY.*nothing is held/);
+      assert.match(gate.sessionLine(repo, { registryOptions: ctx.options }), new RegExp(`^Toolkit governance: ${decision === 'enable' ? 'ENABLED' : 'DISABLED'}`));
+      assert.doesNotMatch(gate.sessionLine(repo, { registryOptions: ctx.options }), /copy/);
+      if (type === 'file') assert.equal(fs.readFileSync(placed, 'utf8'), 'not a folder\n');
+      else assert.equal(fs.lstatSync(placed).isSymbolicLink(), true, 'the link itself is left in place');
+      assert.equal(fs.existsSync(path.join(sibling, 'governance.json')), false);
       assert.equal(fs.readFileSync(path.join(sibling, '.gitignore'), 'utf8'), 'node_modules/\n');
-      assert.equal(fs.existsSync(path.join(sibling, repoState.FILE)), false);
       assert.equal(git(sibling, ['status', '--porcelain', '--untracked-files=all']), '');
-      assert.equal(fs.lstatSync(path.join(repo, repoState.FOLDER)).isSymbolicLink(), true, 'the link itself is left in place');
     });
   }
 }
-
-test('a decided repository whose state folder cannot be written is reported, never held', (t) => {
-  const ctx = scratch(t);
-  for (const decision of ['disable', 'enable']) {
-    const repo = gitRepo(ctx, `blocked-${decision}`, { remote: `https://github.com/example-owner/blocked-${decision}.git` });
-    // A plain file where the folder belongs: the copy cannot be made, the registry decision still stands.
-    fs.writeFileSync(path.join(repo, repoState.FOLDER), 'not a folder\n');
-    const decided = gate.writeGovernanceDecision(repo, decision, { registryOptions: ctx.options });
-    assert.deepEqual([decided.hold, decided.reason, decided.file], [false, 'decided', 'unwritable']);
-    assert.match(decided.error_code, /^[A-Z0-9_]+$/);
-    assert.equal(hold(ctx).decide({ cwd: repo, prompt: 'go' }).action, 'pass');
-    assert.equal(tools(ctx).decide({ tool_name: 'Bash', cwd: repo, tool_input: { command: 'ls' } }), null);
-    assert.match(gate.sessionLine(repo, { registryOptions: ctx.options }), new RegExp(`${decision === 'enable' ? 'ENABLED' : 'DISABLED'}.*could not save its copy .*nothing is held`));
-    assert.equal(fs.readFileSync(path.join(repo, repoState.FOLDER), 'utf8'), 'not a folder\n');
-  }
-});
 
 test('R4: files in a repository are not the user\'s answer; the governed block and binding are held and asked until the user says yes', (t) => {
   const ctx = scratch(t);
@@ -833,17 +908,18 @@ test('R4: files in a repository are not the user\'s answer; the governed block a
   assert.match(tools(ctx).decide({ tool_name: 'Bash', cwd: carried, session_id: 's1', tool_input: { command: 'ls' } }).deny, /no governance decision yet/);
   assert.match(gate.sessionLine(carried, { registryOptions: ctx.options, sessionId: 's1' }), /no GitHub governance decision yet/);
   // An earlier version's copy saying ENABLED by repository opt-in grants nothing.
-  fs.mkdirSync(path.join(carried, repoState.FOLDER), { recursive: true });
-  fs.writeFileSync(repoState.filePath(carried), JSON.stringify({ schema: 'toolkit.repository-governance.v1', repository_id: before.repository_id, state: 'ENABLED', basis: 'repository opt-in', history: [] }));
+  fs.mkdirSync(path.join(carried, OLD_FOLDER), { recursive: true });
+  const leftover = JSON.stringify({ schema: 'toolkit.repository-governance.v1', repository_id: before.repository_id, state: 'ENABLED', basis: 'repository opt-in', history: [] });
+  fs.writeFileSync(oldCopy(carried), leftover);
   assert.equal(hold(ctx).decide({ cwd: carried, prompt: 'again', sessionId: 's1' }).action, 'block');
   const answered = hold(ctx).decide({ cwd: carried, prompt: 'yes', sessionId: 's1' });
   assert.equal(answered.action, 'pass');
   const after = stateOf(ctx, carried);
   assert.deepEqual([after.state, after.rule, after.governed_rules_bind], ['ENABLED', 'R3', true]);
-  assert.equal(fileOf(carried).basis, 'your decision');
+  assert.equal(fs.readFileSync(oldCopy(carried), 'utf8'), leftover, 'the old copy is never rewritten');
 });
 
-test('a plain folder is DISABLED automatically with its own copy, never held, and personal folders get no copy', (t) => {
+test('a plain folder is DISABLED automatically, never held, and nothing is written into it', (t) => {
   const ctx = scratch(t);
   const plain = path.join(ctx.root, 'X-Boundaries');
   fs.mkdirSync(plain);
@@ -851,14 +927,12 @@ test('a plain folder is DISABLED automatically with its own copy, never held, an
   assert.deepEqual(hold(ctx).decide({ cwd: plain, prompt: 'go' }), { action: 'pass' });
   assert.equal(tools(ctx).decide({ tool_name: 'Bash', cwd: plain, tool_input: { command: 'ls' } }), null);
   assert.match(gate.sessionLine(plain, { registryOptions: ctx.options }), /^Toolkit governance: DISABLED automatically \(this folder is not a git repository/);
-  const copy = fileOf(plain);
-  assert.deepEqual([copy.state, copy.basis], ['DISABLED', 'no git']);
-  assert.equal(fs.readFileSync(path.join(plain, repoState.FOLDER, '.gitignore'), 'utf8'), '# Toolkit keeps this folder out of git.\n*\n');
-  assert.equal(new gate.GovernanceGate({ registryOptions: ctx.options }).evaluate(plain).file, 'agrees');
+  assert.deepEqual(new gate.GovernanceGate({ registryOptions: ctx.options }).evaluate(plain).reason, 'no-git');
+  writesNothingIn(plain);
   for (const personal of [path.join(ctx.root, 'home'), path.join(ctx.root, 'home', 'Desktop'), path.join(ctx.root, 'home', 'Downloads')]) {
     fs.mkdirSync(personal, { recursive: true });
     assert.deepEqual(hold(ctx).decide({ cwd: personal, prompt: 'go' }), { action: 'pass' }, personal);
-    assert.equal(fs.existsSync(path.join(personal, repoState.FOLDER, repoState.FILE)), false, personal);
+    writesNothingIn(personal);
   }
   assert.equal(fs.existsSync(ctx.heldPath), false);
   assert.equal(registryBytes(ctx), null);
@@ -894,7 +968,7 @@ test('not on github.com: held with a notice; only the user\'s ok in the asked se
     assert.match(ok.context, /now DISABLED for this repository: it is not on github\.com and the user said ok/);
     assert.match(ok.context, /1\. fix the bug\n2\. and the other one/);
     assert.deepEqual([stateOf(ctx, repo).state, stateOf(ctx, repo).rule], ['DISABLED', 'R8']);
-    assert.equal(fileOf(repo).basis, 'not on github.com');
+    writesNothingIn(repo);
     assert.deepEqual(hold(ctx).decide({ cwd: repo, prompt: 'next', sessionId: 's2' }), { action: 'pass' });
     assert.match(gate.sessionLine(repo, { registryOptions: ctx.options }), /DISABLED for this repository \(not on github\.com/);
   }
@@ -955,8 +1029,8 @@ test('H-07: an agent cannot answer for the user, in any folder, while ordinary c
   for (const command of ['git commit -m "docs: explain the governance question"', 'node repo/scripts/toolkit-governance.cjs status', 'node repo/scripts/run-tests.cjs repo/tests/toolkit-governance-gate.test.cjs']) {
     assert.equal(tools(ctx).decide({ tool_name: 'Bash', cwd: decided, tool_input: { command } }), null, command);
   }
-  assert.equal(tools(ctx).decide({ tool_name: 'Write', cwd: decided, tool_input: { file_path: path.join(decided, repoState.FOLDER, repoState.FILE) } }), null,
-    'the repository copy is not protected: it grants nothing and is rewritten from the decision');
+  assert.equal(tools(ctx).decide({ tool_name: 'Write', cwd: decided, tool_input: { file_path: oldCopy(decided) } }), null,
+    'a copy in the repository is not protected: nothing reads it');
 });
 
 test('held messages: every answer hands back only the answering session\'s own messages; other sessions keep theirs', (t) => {
@@ -1276,7 +1350,7 @@ test('cloud sessions are not enforced and write nothing; the session line says s
   assert.deepEqual(claudeHook.respond('PreToolUse', { cwd: repo, tool_name: 'Bash', tool_input: { command: 'ls' } }, { environment, registryOptions: ctx.options }), {});
   assert.equal(claudeHook.respond('SessionStart', { cwd: repo }, { environment }).hookSpecificOutput.additionalContext, claudeHook.CLOUD_LINE);
   assert.deepEqual(claudeHook.respond('SessionStart', { cwd: ctx.root }, { environment }), {});
-  assert.equal(fs.existsSync(path.join(repo, repoState.FOLDER)), false);
+  writesNothingIn(repo);
   assert.equal(fs.existsSync(ctx.heldPath), false);
 });
 

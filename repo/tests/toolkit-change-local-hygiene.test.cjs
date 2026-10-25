@@ -15,7 +15,7 @@ function assertChangeLocalLaw(contents) {
 test('generic change-local hygiene law is in the global rules and the controller law', () => {
   assertChangeLocalLaw(read('repo/contracts/agent-rules/global-rules.md'));
   assert.match(read('repo/CONTROLLER.md'), /Change-local hygiene law \(generic and prospective\)/);
-  assert.match(read('repo/docs/TOOLKIT-V3.md'), /Owner-approved Core hygiene amendment/);
+  assert.match(read('repo/docs/TOOLKIT-V3.md'), /every change follows the global change-local hygiene law/);
   assert.throws(() => assertChangeLocalLaw(read('repo/contracts/agent-rules/global-rules.md').replace(LAW, '')),
     'missing hygiene rule must fail');
 });

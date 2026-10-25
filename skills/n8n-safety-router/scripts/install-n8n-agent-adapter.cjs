@@ -213,6 +213,18 @@ function replaceManagedBlock(existing, block, activeFile = 'active instruction f
   return `${before}\n\n${block}\n${after ? `\n${after.trimEnd()}\n` : ''}`;
 }
 
+// The canonical Toolkit source repository owns the adapter source and routes n8n work through its own
+// AGENTS.md and playbook index, so it never takes the adapter block.
+const CANONICAL_TOOLKIT_MARKERS = Object.freeze([
+  'repo/contracts/agent-rules/n8n-safety-router-adapter.md',
+  'repo/contracts/toolkit-local-bridge/version.json',
+  'skills/n8n-safety-router/scripts/install-n8n-agent-adapter.cjs'
+]);
+
+function isCanonicalToolkitSource(root) {
+  return CANONICAL_TOOLKIT_MARKERS.every((relPath) => fs.existsSync(path.join(root, ...relPath.split('/'))));
+}
+
 function targetList(root, target) {
   if (target !== 'auto') return [targetDefinitions[target]];
   const agents = targetDefinitions.agents;
@@ -240,6 +252,11 @@ function main() {
     console.log(`Detected n8n involvement: ${hits.slice(0, 8).join(', ')}${hits.length > 8 ? ', ...' : ''}`);
   } else {
     console.log('No n8n involvement detected. Adapter installation is not recommended.');
+  }
+
+  if (isCanonicalToolkitSource(root)) {
+    console.log('No adapter needed: this is the canonical Toolkit source repository. Its AGENTS.md routes n8n work through the playbook index, and it owns the adapter source. Nothing was written.');
+    return;
   }
 
   if (!targets.length) {
@@ -276,6 +293,7 @@ module.exports = {
   adapterBlock,
   assertSafeActiveInstructionPath,
   detectN8nInvolvement,
+  isCanonicalToolkitSource,
   replaceManagedBlock,
   targetList
 };

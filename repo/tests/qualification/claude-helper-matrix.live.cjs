@@ -12,13 +12,17 @@
 // Modes:
 //   --mode plugin     (default) user settings are skipped; the plugin under test is loaded with
 //                     --plugin-dir and the rendered helpers are written to the scratch project's
-//                     `.claude/agents`. Only the login is read from the user's Claude setup.
+//                     `.claude/agents`. From the user's Claude setup only the config folder is used
+//                     (the login, and Claude Code's global config file in it; see below).
 //   --mode installed  the user's own settings, installed plugin, installed helpers and Toolkit
 //                     helper profile are used unchanged, so the result covers that machine as it is.
 // In both modes a live session signs in from the user's Claude config folder (CLAUDE_CONFIG_DIR,
 // else ~/.claude) and runs with HOME and USERPROFILE set to the scratch context's private home,
 // where the scratch repository's yes is recorded, so its hooks read that registry and never the
-// user's. On macOS a Keychain login is tied to CLAUDE_CONFIG_DIR: set it as it was at login.
+// user's. With CLAUDE_CONFIG_DIR set, Claude Code keeps its global config in <config>/.claude.json
+// instead of ~/.claude.json; a file the runs created there is removed at the end. macOS is not
+// supported by this runner: its Keychain login depends on how CLAUDE_CONFIG_DIR was set at sign-in,
+// and the runner always sets it.
 //
 // Output: <out>/verdicts.json (one verdict per case, with host version, hook hash and registry
 // hash) and, for live rows, one folder per run holding the stream output, the hook decision log and
@@ -28,6 +32,8 @@
 //
 // Usage: node repo/tests/qualification/claude-helper-matrix.live.cjs --out <dir> [--host]
 //          [--mode plugin|installed] [--plugin-root <dir>] [--max-budget-usd <n>] [--only <row,...>]
+//   --max-budget-usd  optional per-session dollar cap above 0 passed to `claude -p`; no cap unless
+//                     given. verdicts.json records it (null for none).
 
 const fs = require('node:fs');
 const os = require('node:os');
@@ -46,7 +52,7 @@ const KNOWN_LIMITS = Object.freeze({
 const sha256 = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 
 function parseArgs(argv) {
-  const options = { host: false, mode: 'plugin', pluginRoot: ROOT, maxBudgetUsd: '1', only: null, out: null };
+  const options = { host: false, mode: 'plugin', pluginRoot: ROOT, maxBudgetUsd: null, only: null, out: null };
   for (let i = 0; i < argv.length; i += 1) {
     const flag = argv[i], value = () => { if (i + 1 >= argv.length) throw new Error(`${flag} needs a value`); return argv[++i]; };
     if (flag === '--host') options.host = true;
@@ -59,7 +65,9 @@ function parseArgs(argv) {
   }
   if (!options.out) throw new Error('--out <dir> is required');
   if (!['plugin', 'installed'].includes(options.mode)) throw new Error('--mode is plugin or installed');
-  if (!/^\d+(\.\d+)?$/.test(options.maxBudgetUsd)) throw new Error('--max-budget-usd takes a number');
+  if (options.maxBudgetUsd !== null && !(/^\d+(\.\d+)?$/.test(options.maxBudgetUsd) && Number(options.maxBudgetUsd) > 0)) {
+    throw new Error('--max-budget-usd takes a dollar amount above 0, such as 2 or 0.5; leave it out for no cap');
+  }
   return options;
 }
 
@@ -81,6 +89,16 @@ function sessionTools(definitions) {
     for (const tool of (/^tools: (.+)$/m.exec(text)?.[1] || '').split(',')) if (tool.trim()) tools.add(tool.trim());
   }
   return [...tools].join(',');
+}
+
+// The `claude -p` arguments for one live session. A dollar cap is passed only when one was given.
+function sessionArgs(options, definitions, { prompt, sessionId, agentsFile = null }) {
+  const args = ['-p', prompt, '--session-id', sessionId, '--model', 'claude-opus-5-5', '--effort', 'high', '--output-format', 'stream-json',
+    '--verbose', '--strict-mcp-config', '--tools', sessionTools(definitions), '--allowedTools', 'Agent'];
+  if (options.maxBudgetUsd !== null) args.push('--max-budget-usd', options.maxBudgetUsd);
+  if (options.mode === 'plugin') args.push('--setting-sources', 'project,local', '--plugin-dir', options.pluginRoot);
+  if (agentsFile) args.push('--agents', agentsFile);
+  return args;
 }
 
 // The installed Toolkit plugin Claude Code runs. A claude.ai account copy (scope "synced") loses
@@ -170,10 +188,9 @@ class LiveRun {
     fs.mkdirSync(dir, { recursive: true });
     const sessionId = crypto.randomUUID();
     const decisions = path.join(dir, 'hook-decisions.ndjson');
-    const args = ['-p', prompt, '--session-id', sessionId, '--model', 'claude-opus-5-5', '--effort', 'high', '--output-format', 'stream-json',
-      '--verbose', '--strict-mcp-config', '--tools', sessionTools(this.context.definitions), '--allowedTools', 'Agent', '--max-budget-usd', this.options.maxBudgetUsd];
-    if (this.options.mode === 'plugin') args.push('--setting-sources', 'project,local', '--plugin-dir', this.options.pluginRoot);
-    if (agents) { const file = path.join(dir, 'agents.json'); fs.writeFileSync(file, JSON.stringify(agents)); args.push('--agents', file); }
+    let agentsFile = null;
+    if (agents) { agentsFile = path.join(dir, 'agents.json'); fs.writeFileSync(agentsFile, JSON.stringify(agents)); }
+    const args = sessionArgs(this.options, this.context.definitions, { prompt, sessionId, agentsFile });
     const environment = liveEnvironment(this.options.mode, this.context, { decisions });
     const started = Date.now();
     const r = spawnSync(CLAUDE, args, { cwd: this.context.repo, env: environment, encoding: 'utf8', timeout: 600000, maxBuffer: 64 * 1024 * 1024 });
@@ -202,6 +219,27 @@ function servedOnPin(summary, agentType, pin) {
 }
 const leadOnRoute = summary => summary.lead_turns.length > 0 && summary.lead_turns.every(t => t.model === 'claude-opus-5-5' && t.effort === 'high');
 
+// Row verdicts from a run summary (and, for A14, the launcher check), pure so they can be tested
+// with stub summaries.
+const ROW_CHECKS = Object.freeze({
+  // Known limit: no hook input carries session definitions and SubagentStart cannot block, so a
+  // session started with its own --agents copy of a Toolkit helper is not route-enforced. The row
+  // records what ran; it passes only if the session ran, a helper turn ran or the launch was
+  // refused, and no helper turn ran off the pin.
+  A14(s, pin, launcher) {
+    const turns = s.helpers.flatMap(h => h.turns);
+    const ran = s.exit === 0 && (turns.length > 0 || s.hook_decisions.some(d => d.decision === 'deny'));
+    if (!ran) return { pass: false, limit: null };
+    const onPin = turns.every(t => t.model === pin.model && t.effort === pin.effort);
+    return { pass: onPin, limit: onPin ? null : launcher.refused ? KNOWN_LIMITS.A14 : `${KNOWN_LIMITS.A14} The launcher check did not refuse it either.` };
+  },
+  // A run that was held, signed out or wrote no records where the runner reads them does not pass.
+  A16(s) {
+    return { pass: s.exit === 0 && s.result_subtype === 'success' && s.records_found === true && leadOnRoute(s)
+      && s.agent_calls.length === 0 && s.hook_decisions.length === 0 && s.helpers.length === 0, limit: null };
+  },
+});
+
 function liveCases(live, context) {
   const g0 = pinnedRoute(context.definitions.G0.text), g1 = pinnedRoute(context.definitions.G1.text);
   const ask = name => `Use the Agent tool exactly once with subagent_type "${name}" and prompt "Reply with exactly HELPER-OK and nothing else." Do not pass a model or effort. Then reply with the helper's answer.`;
@@ -227,19 +265,11 @@ function liveCases(live, context) {
       // A Toolkit launcher runs this check first and would not start the session.
       const launcher = sessionAgents.checkClaudeArguments(['--agents', JSON.stringify(agents)], { stack: 'owner-claude', toolkitRoot: ROOT });
       const s = { ...live.run('a14-session-agents', ask('toolkit-g0-helper'), { agents }), launcher_check: launcher };
-      // Known limit: no hook input carries session definitions and SubagentStart cannot block, so a
-      // session started with its own --agents copy of a Toolkit helper is not route-enforced. The row
-      // records what ran; it passes only if the session ran, a helper turn ran or the launch was
-      // refused, and no helper turn ran off the pin.
-      const turns = s.helpers.flatMap(h => h.turns);
-      const ran = s.exit === 0 && (turns.length > 0 || s.hook_decisions.some(d => d.decision === 'deny'));
-      if (!ran) return { observed: s, pass: false };
-      const onPin = turns.every(t => t.model === g0.model && t.effort === g0.effort);
-      return { observed: s, pass: onPin, limit: onPin ? null : launcher.refused ? KNOWN_LIMITS.A14 : `${KNOWN_LIMITS.A14} The launcher check did not refuse it either.` };
+      return { observed: s, ...ROW_CHECKS.A14(s, g0, launcher) };
     }],
     ['A16', 'no helper requested: no agent call, no hook decision, no helper records', () => {
       const s = live.run('a16-no-helper', 'Reply with exactly NO-HELPER. Do not use any tools.');
-      return { observed: s, pass: s.exit === 0 && s.agent_calls.length === 0 && s.hook_decisions.length === 0 && s.helpers.length === 0 };
+      return { observed: s, ...ROW_CHECKS.A16(s) };
     }],
     ['A26', 'headless lead and helper both on their routes, from run records', () => {
       const s = live.run('a26-headless', ask('toolkit-g1-helper'));
@@ -260,6 +290,10 @@ function main() {
   const verdicts = [];
   const wanted = row => !options.only || options.only.has(row);
   const recordFolders = new Set();
+  const configDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
+  // Claude Code's global config file under the config folder, which live runs create when it is missing.
+  const configFile = path.join(configDir, '.claude.json');
+  const configFileExisted = fs.existsSync(configFile);
   try {
     const timings = [];
     for (const entry of matrix.HOOK_CASES.filter(([row]) => wanted(row))) {
@@ -268,7 +302,6 @@ function main() {
       verdicts.push({ kind: 'hook', ...verdict });
     }
     if (options.host) {
-      const configDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
       if (options.mode === 'plugin') {
         // Project agents outrank the user's, so the session loads the rendered helpers from here.
         const agents = path.join(context.repo, '.claude', 'agents');
@@ -283,7 +316,7 @@ function main() {
     }
     const sorted = [...timings].sort((a, b) => a - b);
     const report = { schema: 'toolkit.qualification.claude-helper-matrix.v1', host: 'claude-code', host_version: hostVersion(), mode: options.mode,
-      host_runs: options.host, plugin_root: options.pluginRoot, installed_plugin: installed ? { id: installed.id, version: installed.version } : null, hook_sha256: sha256(hook), registry_sha256: sha256(REGISTRY),
+      host_runs: options.host, max_budget_usd: options.maxBudgetUsd, plugin_root: options.pluginRoot, installed_plugin: installed ? { id: installed.id, version: installed.version } : null, hook_sha256: sha256(hook), registry_sha256: sha256(REGISTRY),
       candidate_head: git(['rev-parse', 'HEAD']), candidate_dirty: (git(['status', '--porcelain']) || '') !== '', at: new Date().toISOString(),
       hook_process_ms: sorted.length ? { median: sorted[Math.floor(sorted.length / 2)], max: sorted[sorted.length - 1] } : null,
       not_run_here: Object.fromEntries(Object.entries(matrix.OTHER_ROWS).filter(([, e]) => e.proof !== 'live')),
@@ -298,6 +331,7 @@ function main() {
     context.remove();
     // Only folders Claude Code created for this run's scratch repository; the folder name derives from its path.
     for (const folder of recordFolders) if (path.basename(folder).includes(path.basename(context.base))) fs.rmSync(folder, { recursive: true, force: true });
+    if (options.host && !configFileExisted) fs.rmSync(configFile, { force: true });
   }
 }
 
@@ -305,4 +339,4 @@ if (require.main === module) {
   try { main(); } catch (error) { console.error(error.message); process.exitCode = 1; }
 }
 
-module.exports = Object.freeze({ liveEnvironment, parseArgs, pinnedRoute, sessionTools, pickInstalledPlugin, turnSummary, runRecords, servedOnPin, KNOWN_LIMITS });
+module.exports = Object.freeze({ liveEnvironment, parseArgs, pinnedRoute, sessionTools, sessionArgs, pickInstalledPlugin, turnSummary, runRecords, servedOnPin, leadOnRoute, ROW_CHECKS, KNOWN_LIMITS });
