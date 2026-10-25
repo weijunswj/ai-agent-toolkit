@@ -10,6 +10,12 @@ const test = require('node:test');
 const repoRoot = path.resolve(__dirname, '..', '..');
 const SKILL_REL = 'repo/contracts/claude-projects/web-controller-projects/SKILL.md';
 const read = (rel) => fs.readFileSync(path.join(repoRoot, rel), 'utf8').replace(/\r\n/g, '\n');
+// SKILL.md keeps the always-needed rules; setup, instructions sync and recurring-task procedures
+// live in its reference files, uploaded with it. Content checks read the whole bundle.
+const REFERENCE_DIR = 'repo/contracts/claude-projects/web-controller-projects/reference';
+const referenceFiles = () => fs.readdirSync(path.join(repoRoot, REFERENCE_DIR)).filter(name => name.endsWith('.md')).sort()
+  .map(name => `${REFERENCE_DIR}/${name}`);
+const bundle = () => [SKILL_REL, ...referenceFiles()].map(read).join('\n');
 
 test('the Projects controller skill has one source file with a Version line', () => {
   const text = read(SKILL_REL);
@@ -45,10 +51,14 @@ test('no plugin payload or skills folder reaches the Projects controller skill',
 });
 
 test('Projects wires managed instructions, promises and fresh scheduled sessions to controller law', () => {
-  const text = read(SKILL_REL);
+  const text = bundle();
   assert.match(text, /^Version: 2026-10-24\.4$/m);
   // Plugin lag: removing the plugin alone is the fix that worked; the marketplace re-add is the fallback.
   assert.match(text, /`PLUGIN BEHIND`: the Toolkit plugin on the user's claude\.ai account is more than a day behind `main`/);
+  // The skill drift watch lives in the daily check-in: direct account edits come back into Toolkit first.
+  assert.match(text, /`SKILL DRIFT`: the account copy has direct edits that match no Toolkit revision\. Bring them into Toolkit from the saved copy/);
+  assert.match(text, /Post its first line to the owner every run, "nothing changed" included/);
+  assert.match(text, /The hourly nudge stays silent/);
   assert.match(text, /remove the Toolkit plugin only in claude\.ai Customize > Plugins and let it reinstall; if it is still behind, remove the marketplace and add it again with Sync automatically on/);
   assert.doesNotMatch(text, /Thread effort follows the role|fires into that same thread|firing runs in the dedicated check-in thread/);
   assert.match(text, /toolkit-projects-instructions\.cjs --render/);
@@ -72,11 +82,13 @@ test('Projects wires managed instructions, promises and fresh scheduled sessions
   for (const required of ['capped short message to the coordinator with retry', 'full report to a file',
     'resolve its own thread after the report is delivered', 'ALL unresolved threads and project-chat posts',
     'small page limits', 'ALL unanswered owner items with no reply or reaction', 'link and ask date',
-    'ONE reminder each run', 'stale thread labels', '**Overdue promise:**', 'fenced `toolkit-promises` block',
-    'toolkit-promise-check.cjs --list <file>', 'Pre-wire follow-ups into briefs',
-    'never take over a gate\'s verdict', 'accept, downgrade or reject with a reason per item']) {
+    'ONE reminder each run', 'stale thread labels', '**Overdue promise:**', 'promise list in project memory as a plain list',
+    'Pre-wire follow-ups into briefs', 'never take over a gate\'s verdict',
+    'record only rejections and downgrades, one line each with the reason']) {
     assert.ok(text.includes(required), required);
   }
+  // The promise checker and its fenced block are gone: the list is plain, read by the nudge.
+  assert.doesNotMatch(text, /toolkit-promises|toolkit-promise-check/);
   const body = read('repo/contracts/claude-projects/web-controller-projects/project-instructions.md');
   assert.match(body, /Every thread is an executor/);
   assert.match(body, /Do not copy CONTROLLER\.md/);
@@ -89,7 +101,7 @@ test('Projects wires managed instructions, promises and fresh scheduled sessions
 // A binding that is only re-checked at launch goes stale on an idle project; each rule of the
 // binding-drift closure matrix (launch, periodic check, rebind, unknown, briefs, task prompts) is pinned.
 test('Projects re-checks the bound CONTROLLER.md blob before launches and on every periodic run', () => {
-  const text = read(SKILL_REL);
+  const text = bundle();
   const body = read('repo/contracts/claude-projects/web-controller-projects/project-instructions.md');
   // Binding line format: full commit and full blob, so a periodic run has something exact to compare.
   assert.ok(text.includes('`BINDING: <owner/repo> <branch> commit <full SHA> CONTROLLER.md blob <full blob SHA> toolkit <x.y.z> skill <Version> bound <UTC date>`'));
@@ -110,18 +122,20 @@ test('Projects re-checks the bound CONTROLLER.md blob before launches and on eve
   assert.doesNotMatch(text, /Record the commit SHA and the skill Version in memory|Re-check its revision before each launch/);
   // Both periodic runs carry the check.
   assert.match(text, /^  - `BINDING STALE` or `BINDING UNKNOWN`: rebind \(\*\*Binding\*\*\)\. When current, the report says `\*\*Binding:\*\* current` with the short blob, adding the newer short commit when only the commit moved\.$/m);
-  assert.match(text, /^  1\. the \*\*Binding check\*\*, flagged on the report's first line when stale or unknown;$/m);
+  // The binding check runs once a day; the hourly nudge leaves it out.
+  assert.match(text, /\*\*Binding check\*\* \(each daily check-in, read-only; the hourly nudge leaves it out\)/);
+  assert.doesNotMatch(text, /^  1\. the \*\*Binding check\*\*/m);
   // Running projects pick up changed task behaviour.
   assert.match(text, /When a skill update changes what the daily check-in or hourly nudge does, update those tasks' prompts in the same turn/);
   // Threads at start: briefs carry the blob and a mismatch is reported first.
   assert.match(body, /bound by commit and blob SHA/);
-  assert.match(body, /a thread that finds `main`'s blob different says so to the coordinator in its first reply, then continues on its packet/);
+  assert.match(body, /a thread that finds `main`'s blob different says so to the coordinator in its first reply, then continues on its brief/);
 });
 
 // Self-updating projects: the base layer stays current through the daily check-in, applied
 // automatically under safeguards, and only Toolkit-governed parts ever change.
 test('Projects keeps its Toolkit base layer current without touching the project layer', () => {
-  const text = read(SKILL_REL);
+  const text = bundle();
   const body = read('repo/contracts/claude-projects/web-controller-projects/project-instructions.md');
   const templates = ['daily-check-in.md', 'hourly-nudge.md', 'run-setup.md', 'delivery.md']
     .map(name => read(`repo/contracts/claude-projects/web-controller-projects/tasks/${name}`));
@@ -167,11 +181,12 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.match(text, /every project runs a daily check-in every day/);
   assert.match(text, /\*\*It is bound to its own home thread,\*\* because a fresh-session task posts a run card/);
   for (const required of ['Never resolve the home thread or list it as a resolve candidate', 'TASKS OUTDATED `weekly-rebuild`',
-    'If the bound nudge dies twice in 7 days', '`UNRELAYED`', '`HIDDEN REPLY`', 'whether the daily check-in is armed']) {
+    'If the bound nudge dies twice in 7 days', '`UNRELAYED`', '`HIDDEN REPLY`', 'whether the daily check-in exists and is armed',
+    '`CHECK-IN NOT ARMED` (including a deleted check-in)', '**Both gone:** the two tasks watch each other', 'call `list_triggers` once (a cheap read)']) {
     assert.ok(text.includes(required), required);
   }
   // The coordinator acts on every check-in prefix, in dependency order.
-  const prefixes = ['`SKILL UPDATE`', '`BLOCK OUTDATED`', '`BINDING STALE`', '`TOOLKIT CHANGED`', '`MEMORY FORMAT`', '`TASKS OUTDATED`', '`NUDGE NOT ARMED`', '`PLUGIN BEHIND`'];
+  const prefixes = ['`SKILL UPDATE`', '`BLOCK OUTDATED`', '`BINDING STALE`', '`TOOLKIT CHANGED`', '`MEMORY FORMAT`', '`TASKS OUTDATED`', '`NUDGE NOT ARMED`', '`PROJECT TASKS MISSING`', '`PLUGIN BEHIND`'];
   const section = text.slice(text.indexOf('## Daily check-in'), text.indexOf('## Hourly nudge'));
   const at = prefixes.map(prefix => section.indexOf(`  - ${prefix}`));
   assert.ok(at.every((position, index) => position > -1 && (index === 0 || position > at[index - 1])), at.join(','));

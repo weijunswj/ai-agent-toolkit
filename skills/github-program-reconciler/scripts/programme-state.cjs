@@ -1914,7 +1914,7 @@ class Reconciler {
       const issue = observed.issues.get(number);
       if (!issue || traced.has(number)) continue;
       const result = auditDecisionTraces({ body: issue.body, comments: observed.comments.get(number) || [], recordPrefix: this.binding.record_prefix, threshold: this.threshold });
-      if (result.unlinked.length) findings.push({ code: 'TRACE_UNLINKED', issue: number, detail: `${result.unlinked.length} comment(s) are not linked from the body or an index comment it links; write the lines from decision-trace-audit --repair` });
+      if (result.unlinked_decisions.length) findings.push({ code: 'TRACE_UNLINKED', issue: number, detail: `${result.unlinked_decisions.length} decision comment(s) are not linked from the body or an index comment it links; write the lines from decision-trace-audit --repair` });
       for (const entry of result.superseded_unmarked) findings.push({ code: 'TRACE_SUPERSEDED_UNMARKED', issue: number, detail: `${entry.record} is superseded by ${entry.superseded_by} but not marked "superseded by"` });
     }
   }

@@ -25,15 +25,15 @@ function section(text, number) {
 }
 
 // CONTROLLER.md holds only the current operating procedure (R3 removed its pre-V3 history); the
-// global rules hold the executor procedure (coding gates, delegation and routes apply wherever the
-// plugin is installed). The governed block keeps only the GitHub-tracking parts and is projected
+// gate rules hold the executor gate procedure (fresh contexts, review, delta reviews and routes,
+// read by every gate session wherever the plugin is installed). The governed block keeps only the GitHub-tracking parts and is projected
 // unchanged into root AGENTS.md and both portable templates (checked by agent-instruction-shims).
 function current(text) {
   assert.equal(text.includes('## Historical compatibility reference'), false, 'the pre-V3 history is removed');
   return text;
 }
 
-const GATE_SURFACES = ['repo/contracts/agent-rules/global-rules.md'];
+const GATE_SURFACES = ['repo/contracts/agent-rules/gate-rules.md'];
 const RENEWAL_SURFACES = ['skills/controller-bootstrap/SKILL.md'];
 
 function surfaces() {
@@ -52,8 +52,11 @@ function currentOperatingContract(texts) {
     assert.match(text, /no added peer, duplicate or automatic closing panel/, rel);
   }
   const controller = texts['repo/CONTROLLER.md'];
-  assert.match(controller, /Stored temporary owned bulk expires 21 days after its immutable verified transfer/);
-  assert.match(controller, /fresh-context and family-closure rules are in the global rules/);
+  // The audit dropped the expiry clock, pins and cleanup ledger: delete scratch once its report is stored.
+  assert.doesNotMatch(controller, /expires 21 days|21-day/);
+  assert.match(controller, /Delete scratch once its report is stored; never delete the only copy/);
+  assert.match(controller, /in a Git evidence store the commit is the manifest, and a successful push plus one fetch is the read-back/);
+  assert.match(controller, /fresh-context, family-closure and delta-review rules are in the gate rules/);
   assert.match(controller, /G2 stays adversarial on every reachable path inside the release brief's frozen supported host\/environment matrix/);
   assert.match(controller, /a private `TRANSPORT-\*` Git repository is only the recommended default when no store was previously selected/);
   for (const rel of RENEWAL_SURFACES) {
@@ -69,7 +72,7 @@ function currentOperatingContract(texts) {
     assert.doesNotMatch(text, /agreed private TRANSPORT store/, rel);
   }
   assert.match(read('repo/docs/TOOLKIT-V3.md'), /selection of another supported private backend takes precedence over that recommendation/);
-  assert.match(read('repo/docs/TOOLKIT-V3.md'), /Git current-tree expiry is the adapter for a Git store, not a universal storage interface/);
+  assert.match(read('repo/docs/TOOLKIT-V3.md'), /Git cleanup is an ordinary non-force commit and never removes history; another backend uses its own supported capability or holds the cleanup/);
   assert.doesNotMatch(read('repo/docs/TOOLKIT-V3.md'), /TRANSPORT repo retaining the small index/);
 }
 
@@ -77,13 +80,13 @@ test('current procedure is one wording across CONTROLLER, the governed block and
   const texts = surfaces();
   currentOperatingContract(texts);
   const mutations = [
-    ['repo/contracts/agent-rules/global-rules.md', 'Planned G1 segment completion alone checkpoints and continues in the same session.',
+    ['repo/contracts/agent-rules/gate-rules.md', 'Planned G1 segment completion alone checkpoints and continues in the same session.',
       'Mandatory fresh executor contexts follow each planned G1 segment.'],
-    ['repo/CONTROLLER.md', 'Stored temporary owned bulk expires 21 days after its immutable verified transfer',
-      'remote temporary bulk uses 30 days after the latest required consumer'],
-    ['repo/contracts/agent-rules/global-rules.md', 'Correction rechecks use fresh contexts for the same selected reviewers',
+    ['repo/CONTROLLER.md', 'Delete scratch once its report is stored; never delete the only copy',
+      'Stored temporary owned bulk expires 21 days after its immutable verified transfer'],
+    ['repo/contracts/agent-rules/gate-rules.md', 'Correction rechecks use fresh contexts for the same selected reviewers',
       'Reuse independent G2 reviewers for corrections'],
-    ['repo/contracts/agent-rules/global-rules.md', 'no added peer, duplicate or automatic closing panel',
+    ['repo/contracts/agent-rules/gate-rules.md', 'no added peer, duplicate or automatic closing panel',
       'broad changes may require two complementary peers'],
     ['skills/controller-bootstrap/SKILL.md', 'Planned G1 segment completion checkpoints and continues in the same session',
       'Planned G1 segment completion and newly activated instruction/profile versions require a fresh executor']
@@ -113,10 +116,13 @@ test('documented reviewer cardinalities are derived from the pinned registry', (
     'a registry change cannot pass against stale prose');
 });
 
-test('the directive keeps the retention clocks, and CONTROLLER names only the current one', () => {
+test('neither the directive nor CONTROLLER keeps a retention clock', () => {
+  // The rules audit dropped the expiry clock, pins and cleanup ledger: scratch goes once its report is stored.
   const v3 = section(read('repo/docs/TOOLKIT-V3.md'), 13);
-  assert.match(v3, /Current v2 remote temporary bulk expires exactly 21 days after its immutable verified-transfer timestamp/);
-  assert.match(current(read('repo/CONTROLLER.md')), /Stored temporary owned bulk expires 21 days after its immutable verified transfer/);
+  assert.match(v3, /There is no expiry clock, pin or cleanup ledger/);
+  assert.match(v3, /In a Git store the commit is the manifest, and a successful push plus one fetch is the read-back/);
+  assert.doesNotMatch(v3, /21 days|30-day|restart the clock/);
+  assert.doesNotMatch(current(read('repo/CONTROLLER.md')), /expires 21 days|restart the clock/);
   assert.doesNotMatch(current(read('repo/CONTROLLER.md')), /Historical v1 records/);
 });
 
@@ -222,41 +228,46 @@ const LAUNCH_CLAUSES = [/Model and effort follow launch ownership/, /advisory, n
   /Every automation-launched G0\/G1\/G2 worker or successor/, /every G0\/G1 helper/, /(?:with no|without) fallback or weaker effort/,
   /A root label is not a human override/, /Native permissions, independence, reviewer obligations and delegation limits still apply/];
 const LAUNCH_SURFACES = [...GATE_SURFACES, ...RENEWAL_SURFACES];
-const FINISH_SURFACES = ['repo/CONTROLLER.md', V3_DOC];
+const GATE = GATE_SURFACES[0];
 
 function ownerLawContract(texts) {
   for (const rel of LAUNCH_SURFACES) for (const clause of LAUNCH_CLAUSES) assert.match(texts[rel], clause, `${rel}: launch ownership ${clause}`);
-  assert.ok(texts[V3_DOC].includes(LAUNCH_OWNERSHIP_V3), 'V3 directive keeps the full launch-ownership wording');
-  for (const rel of FINISH_SURFACES) assert.ok(texts[rel].includes(FINISH_BEFORE_STOP), `${rel}: finish before stopping`);
+  // One home per rule: launch ownership lives in the gate rules and finish-before-stop in the global
+  // Shipping section; the V3 directive points at them instead of repeating either.
+  assert.equal(texts[V3_DOC].includes(LAUNCH_OWNERSHIP_V3), false, 'V3 directive does not repeat launch ownership');
+  assert.equal(texts[V3_DOC].includes(FINISH_BEFORE_STOP), false, 'V3 directive does not repeat finish-before-stop');
+  assert.match(section(texts[V3_DOC], 10), /Launch ownership and route proof are in the gate rules/);
+  assert.match(section(texts[V3_DOC], 6), /work finishes before stopping as the global Shipping section says/);
   const shipping = texts[GLOBAL].match(/## Shipping\n([\s\S]*?)(?=\n## )/)?.[0] || '';
   assert.match(shipping, /\*\*Finish authorised work before stopping\.\*\*/, 'finish-before-stop sits in the global Shipping section');
   for (const clause of [/is not a finish/, /holds only the steps that depend on it/, /report the exact hold and next action/,
     /never authorises working around a denial, an unsafe retry, a duplicate writer, an unapproved model launch or claimed background work/]) assert.match(shipping, clause);
   for (const rel of GATE_SURFACES) assert.match(texts[rel], /Gate models and effort come only from an explicitly selected stack registry revision/, rel);
   const v3 = texts[V3_DOC];
-  assert.ok(section(v3, 10).includes('**Launch ownership.** ' + LAUNCH_OWNERSHIP_V3));
-  assert.ok(section(v3, 6).includes(FINISH_BEFORE_STOP));
-  assert.match(section(v3, 7), /It is not a terminal outcome; section 6's finish-before-stop rule continues the next dependency-ready authorised step/);
-  assert.match(section(v3, 8), /When the owner manually opens a G2 chat and selects its model and effort, that choice is authoritative for that first layer/);
-  assert.match(section(v3, 8), /keep independence, the complete scope and the reviewer-count obligation; a model or effort difference alone is not a G2 failure/);
+  assert.match(texts[GATE], /a human's own choice for an agent they open directly \(including a G2 chat\) is advisory/);
+  assert.match(texts[GATE], /a model or effort difference alone is not a G2 failure/);
+  assert.match(texts[GATE], /A checkpoint \(work pushed, the PR or brief current\) is not a terminal outcome/);
   assert.match(section(v3, 14), /Before inference by an automation-launched agent or helper, deterministically enforce/);
   assert.match(section(v3, 14), /These checks never lock a human's manually selected first-layer model or effort/);
   assert.match(section(v3, 18), /Missing, duplicate, stale or wrong-route automated returns cannot complete the set; an owner's manually selected reviewer model and effort are recorded as actual/);
   assert.match(section(v3, 18), /a genuine HOLD blocks only its dependent steps/);
   assert.match(section(v3, 19), /through a launcher that enforces the exact pinned-stack route for the role, not a prompt that merely names it/);
   assert.match(texts['repo/CONTROLLER.md'], /Launch every gate with model and effort pinned explicitly/);
+  // One home per rule: CONTROLLER points at the global Shipping rule instead of repeating it.
+  assert.match(texts['repo/CONTROLLER.md'], /Finish authorised work before stopping, as the global rules' Shipping section says/);
 }
 
 test('launch ownership and finish-before-stop keep their meaning on every current surface', () => {
   const texts = { ...surfaces(), [V3_DOC]: read(V3_DOC), [GLOBAL]: read(GLOBAL) };
   ownerLawContract(texts);
   for (const [rel, before, after] of [
-    [GLOBAL, 'is advisory, not a blocker', 'must equal the stack recommendation'],
+    [GATE, 'is advisory, not a blocker', 'must equal the stack recommendation'],
     [GLOBAL, 'progress note is not a finish', 'progress note is a finish'],
-    [V3_DOC, 'holds only its dependent steps', 'stops all work'],
-    [V3_DOC, 'a model or effort difference alone is not a G2 failure', 'a model difference fails G2'],
+    [GLOBAL, 'holds only the steps that depend on it', 'stops all work'],
+    [V3_DOC, 'a genuine HOLD blocks only its dependent steps', 'a HOLD stops all work'],
+    [GATE, 'a model or effort difference alone is not a G2 failure', 'a model difference fails G2'],
     ['skills/controller-bootstrap/SKILL.md', 'without fallback or weaker effort', 'with the controller choosing the effort'],
-    [GLOBAL, 'Gate models and effort come only from an explicitly selected stack registry revision', 'Gate models and effort come from any registry']
+    [GATE, 'Gate models and effort come only from an explicitly selected stack registry revision', 'Gate models and effort come from any registry']
   ]) {
     assert.ok(texts[rel].includes(before), `mutation target exists in ${rel}: ${before}`);
     assert.throws(() => ownerLawContract({ ...texts, [rel]: texts[rel].replace(before, after) }), `reject ${rel}: ${before}`);
@@ -265,12 +276,14 @@ test('launch ownership and finish-before-stop keep their meaning on every curren
 
 // Owner UAT holds only what needs the owner's own hands; CI, tests and G2 prove the rest.
 const PROJECTS_SKILL = 'repo/contracts/claude-projects/web-controller-projects/SKILL.md';
+const GATE_RULES = GATE_SURFACES[0];
+const GOVERNED = 'repo/contracts/agent-rules/toolkit-governed-rules.md';
 
 function ownerUatScopeContract(texts) {
-  assert.match(texts[GLOBAL], /G2 starts after the working result and any owner UAT acceptance/);
+  assert.match(texts[GATE_RULES], /G2 starts after the working result and any owner UAT acceptance/);
   assert.match(texts[GLOBAL], /Owner UAT holds only owner-hands steps \(real app UI, signed-in accounts, device behaviour CI cannot reach\); CI, tests and G2 prove the rest, each UAT list names the check covering every dropped item, and with none, UAT is NOT_REQUIRED\./);
-  assert.match(texts[GLOBAL], /only when the merge completes every criterion and any owner UAT has passed/);
-  assert.match(texts[GLOBAL], /Close an issue only after its PR merged and any owner UAT passed/);
+  // The issue rules live in the governed block; closing waits for any owner UAT.
+  assert.match(texts[GOVERNED], /`Closes`\/`Fixes`, and closing, only once the merge completes every criterion and any owner UAT passed/);
   assert.match(texts['repo/CONTROLLER.md'], /At admission split acceptance: owner UAT only for owner-hands steps \(global rules\), objective acceptance \(CI, tests, G2\) for the rest; with no such step record NOT_REQUIRED\. Missing authority never waives a needed UAT\./);
   assert.match(texts['repo/CONTROLLER.md'], /G2 begins after builder readiness and any owner UAT acceptance/);
   assert.match(texts[V3_DOC], /User acceptance covers only what needs the owner's own hands/);
@@ -281,11 +294,12 @@ function ownerUatScopeContract(texts) {
 }
 
 test('owner UAT is limited to owner-hands steps on every current surface', () => {
-  const texts = { ...surfaces(), [V3_DOC]: read(V3_DOC), [PROJECTS_SKILL]: read(PROJECTS_SKILL) };
+  const texts = { ...surfaces(), [V3_DOC]: read(V3_DOC), [PROJECTS_SKILL]: read(PROJECTS_SKILL), [GLOBAL]: read(GLOBAL), [GOVERNED]: read(GOVERNED) };
   ownerUatScopeContract(texts);
   for (const [rel, before, after] of [
     [GLOBAL, 'Owner UAT holds only owner-hands steps', 'Owner UAT holds every step'],
-    [GLOBAL, 'any owner UAT has passed', "the owner's UAT has passed"],
+    [GOVERNED, 'any owner UAT passed', "the owner's UAT passed"],
+    [GATE_RULES, 'any owner UAT acceptance', "the owner's actual UAT acceptance"],
     ['repo/CONTROLLER.md', 'with no such step record NOT_REQUIRED', 'always run owner UAT'],
     [V3_DOC, 'User acceptance covers only', 'User acceptance covers every step, not only'],
     [PROJECTS_SKILL, '**Owner UAT lists carry only owner-hands steps**', '**Owner UAT lists carry every step**']

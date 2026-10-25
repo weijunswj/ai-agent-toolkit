@@ -1,6 +1,30 @@
 # Toolkit Changelog
 
-## 3.10.1 (one running post, owner UAT only where the owner's hands are needed, and hardening after 3.10.0)
+## 3.10.1
+
+### Rules audit: leaner always-loaded rules
+
+- **Risk tiers pick the checking:** `node repo/scripts/toolkit-risk-tier.cjs` matches the changed paths against `.github/toolkit-risk-tiers.json` and prints RISKY, NORMAL or LIGHT; a mixed change takes its highest tier, and a change that only moves version lines is LIGHT. RISKY work (governance and helper hooks, setup, the bridge, installers, home-folder and app-config writes, the rules themselves, toolkit-env, cleanup code) gets agent and owner UAT and a full G2; NORMAL work (other scripts, tests and tooling) gets one independent review; LIGHT work (docs and wording) gets the builder's own diff read. G0 still runs for every new task, repository or environment, whatever the tier. Every tier runs tests and CI.
+- **Gate rules on demand:** the gate mechanics (fresh contexts, recoverable work, design policy, UAT, review, delta reviews and route proof) moved out of the global rules into `repo/contracts/agent-rules/gate-rules.md`, which gate sessions read before starting. The global block is about a fifth smaller, and with a typical hand-written user file, the global block and this repository's `AGENTS.md` together now sit just under Codex's default 32 KiB limit (setup still offers the raise as headroom).
+- **No handover packets:** state lives in the branch, the PR or brief, the programme comments or the evidence store, so a controller or executor can be switched at any time. Generic rules never rely on chat or host memory.
+- **Route proof reads the host's record:** pin model and effort in the launch command or config and read the host's own launch record once; a host that keeps none is recorded as not checkable. A model's self-report proves nothing.
+- **No dollar caps:** failure budgets count attempts, never dollars.
+- **Evidence without ritual:** in a Git evidence store the commit is the manifest and a push plus one fetch is the read-back. Archive once, at gate end, and keep run streams only for a FAIL or a disputed verdict. The expiry clock, pins and cleanup ledger are gone: scratch is deleted once its report is stored.
+- **Decision traces:** only decision comments (a tag or record ID) must be linked from the programme issue; other comments need no index entry.
+- **One home per rule:** the takeover record lives in `CONTROLLER.md`, the issue rules in the governed block, and the finish rule in the global Shipping section. Full SHAs appear only in review verdicts, UAT results and merge summaries. One PR bumps the version once, and its body is refreshed when scope changes and once before asking to merge.
+- **Toolkit V3:** the contract is now a short statement of current law; the dated decisions and one-off evaluations that produced it stay in git history.
+- **Promise checker removed:** the promise list is a plain list in project memory, read by the hourly nudge; `toolkit-promise-check.cjs` and its fenced block are gone.
+
+### Claude Projects
+
+- **One running post:** after your last message, the Projects coordinator keeps all its output in one post that it edits, appending each new result, PR or question and keeping every earlier detail. It starts a fresh post once you write again, or when the running post nears about 8 KB, and still answers a burst of your messages in one post. The Projects skill and the managed project instructions block say the same.
+- **Skill split:** guided setup, the instructions sync and the recurring-task procedures moved into `reference/` files beside the Projects skill, which is now 2026-10-24.4. Upload the skill together with its reference files.
+- **Cheaper nudge:** the hourly nudge checks first whether anything moved since its last run and stops early when nothing did; it runs in waking hours on a small model. The binding check runs only in the daily check-in.
+- **Feedback intake:** record only rejections and downgrades, one line each with the reason.
+- **Skill drift in the daily check-in:** the check-in now compares the account copy of the Projects skill and its reference files with every Toolkit revision. A copy that matches an older revision reports `SKILL BEHIND`; one that matches none is saved and reports `SKILL DRIFT`, so direct edits come into Toolkit before anyone re-uploads. A separate drift task is no longer needed.
+- **Loud check-in, silent nudge:** the coordinator posts the check-in's first line to the owner every run, so a missing day shows. The hourly nudge never posts in its home thread except to report a failed delivery, and asks for its own rebuild once a week.
+- **Deleted tasks come back:** the check-in and the nudge each report the other as missing, and the coordinator recreates it from the template on `main` the same turn. If both are gone, the coordinator's once-a-day `list_triggers` check starts a cloud thread that recreates them and tells the owner once. Task runs stay read-only.
+- **The Toolkit project watches the others:** its daily check-in reuses the same `list_triggers` read to spot any other Claude project missing its check-in or nudge, and reports it as one `PROJECT TASKS MISSING` line. It never recreates another project's tasks; that project's coordinator does on its next wake.
 
 ### Governance question
 
@@ -27,11 +51,10 @@
 - **Rows A14 and A16 are unit-tested.** A16 now also requires a successful result, run records where the runner reads them, and the lead on its route, so a held, signed-out or unrecorded run no longer passes. Both row checks are tested with stub run summaries.
 - **The runner cleans up the config file it creates.** With `CLAUDE_CONFIG_DIR` set, Claude Code keeps its global config in `<config>/.claude.json`; a file the live runs created there is now removed at the end. The runner notes that macOS is not supported.
 
-### Projects and owner UAT
+### Owner UAT
 
-- **The coordinator keeps one running post.** After your last message, the Projects coordinator keeps all its output in one post that it edits, appending each new result, PR or question and keeping every earlier detail. It starts a fresh post once you write again, or when the running post nears about 8 KB, and still answers a burst of your messages in one post. The Projects skill and the managed project instructions block say the same.
 - **Owner UAT is narrowed:** it holds only steps that need the owner's own hands, such as real app UI, signed-in accounts and device behaviour CI cannot reach. CI (Windows runners included), automated tests and G2 review prove everything else, and each UAT list names the passing check for every step it leaves out. When nothing needs the owner's hands, UAT is recorded as not required.
-- **Where it lives:** the Coding Gates in the global rules, the issue-closing rule there ("any owner UAT"), the controller's admission rule, the V3 direction and one Projects skill line for UAT lists. The Claude Projects controller skill is 2026-10-24.4 (re-upload it). Duplicated sentences in the global rules and the controller file were trimmed to keep both inside their size budgets.
+- **Where it lives:** the Coding Gates in the global rules, the issue-closing rule in the governed block ("any owner UAT"), the controller's admission rule, the V3 direction and one Projects skill line for UAT lists. The Claude Projects controller skill is 2026-10-24.4 (re-upload it). Duplicated sentences in the global rules and the controller file were trimmed to keep both inside their size budgets.
 
 ## 3.10.0 (host support, governance states, decision history and the personal-data guard)
 

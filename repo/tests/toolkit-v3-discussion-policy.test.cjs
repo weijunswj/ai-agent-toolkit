@@ -7,6 +7,9 @@ const path = require('node:path');
 const test = require('node:test');
 
 const directive = fs.readFileSync(path.join(__dirname, '..', 'docs', 'TOOLKIT-V3.md'), 'utf8');
+// Checkpoints and successor launch have one home: the gate rules (V3 points there).
+// Windows checkouts may convert text files to CRLF; the contracts are about the words, not line ends.
+const gateRules = fs.readFileSync(path.join(__dirname, '..', 'contracts', 'agent-rules', 'gate-rules.md'), 'utf8').replace(/\r\n/g, '\n');
 
 function section(text, number) {
   const heading = new RegExp(`^## ${number}\\. .+$`, 'm');
@@ -24,7 +27,7 @@ function discussionContract(text) {
   assert.match(discovery, /material alternative, disagreement or question.*returns it to the accountable controller for discussion and agreement before proceeding/s);
   assert.match(discovery, /agrees and the scope is clear, it proceeds directly with discovery without a forced extra turn/);
   assert.match(discovery, /must not choose an unresolved direction autonomously or manufacture a debate/);
-  assert.match(discovery, /After discovery, G0 records the evidence and recommended direction in the current delivery packet/);
+  assert.match(discovery, /After discovery, G0 records the evidence and recommended direction in the current release brief/);
   assert.match(discovery, /Resolve material deviations.*before G1/s);
   assert.match(discovery, /Genuine owner boundaries.*remain owner decisions/);
 }
@@ -47,67 +50,70 @@ test('G0 considers every proposed goal but discusses only a material issue', () 
 function authorisedContinuationContract(text) {
   const discovery = section(text, 5);
   assert.match(discovery, /Routine technical decisions remain with the strong lead/);
-  assert.match(discovery, /records the evidence and recommended direction in the current delivery packet/);
+  assert.match(discovery, /records the evidence and recommended direction in the current release brief/);
   assert.match(discovery, /within approved scope and current authority, continue already-authorised G1 without renewed semantic approval/);
   assert.match(discovery, /Preserve the actual G0-to-G1 role\/context handoff/);
   assert.match(discovery, /material scope, trust, security, risk, spend, consent or acceptance changes, remain owner decisions/);
   const acceptance = section(text, 18);
-  assert.match(acceptance, /Record discovery evidence and recommended direction in the current delivery packet; within approved scope and current authority, continue already-authorised G1 without renewed semantic approval/);
-  assert.match(acceptance, /Preserve owner boundaries, routine technical decisions with the strong lead, the actual G0-to-G1 role\/context handoff, same-G0 context reuse and independent final review/);
+  assert.match(acceptance, /\| G0 consideration and discussion \| Section 5's discussion and continuation rules hold in a real run/);
+  assert.match(acceptance, /approved direction continues into a fresh G1/);
 }
 
 test('approved G0 direction is recorded and continues into G1 without another semantic approval', () => {
   authorisedContinuationContract(directive);
   for (const [before, after] of [
     ['Routine technical decisions remain with the strong lead', 'Routine technical decisions require owner approval'],
-    ['records the evidence and recommended direction in the current delivery packet', 'keeps the evidence and recommended direction only in chat'],
+    ['records the evidence and recommended direction in the current release brief', 'keeps the evidence and recommended direction only in chat'],
     ['within approved scope and current authority, continue already-authorised G1 without renewed semantic approval', 'within approved scope and current authority, wait for renewed semantic approval before G1'],
     ['Preserve the actual G0-to-G1 role/context handoff', 'Omit the G0-to-G1 role/context handoff'],
     ['material scope, trust, security, risk, spend, consent or acceptance changes, remain owner decisions', 'material scope, trust, security, risk, spend, consent or acceptance changes, become executor decisions'],
-    ['Record discovery evidence and recommended direction in the current delivery packet; within approved scope and current authority, continue already-authorised G1 without renewed semantic approval', 'After discovery, always request another semantic approval before G1']
+    ['approved direction continues into a fresh G1', 'approved direction waits for another semantic approval']
   ]) {
     assert.ok(directive.includes(before), `mutation target exists: ${before}`);
     assert.throws(() => authorisedContinuationContract(directive.replace(before, after)), `reject continuation regression: ${before}`);
   }
 });
 
-function checkpointContinuationContract(text) {
-  const context = section(text, 7);
-  assert.match(context, /An execution segment is a bounded working slice within the assignment/);
-  assert.match(context, /For the approved whole-phase Core assignment, planned G1 segment completion alone requires a recoverable checkpoint and continuation in the same working session, not fresh-context renewal/);
-  assert.doesNotMatch(context, /after each planned G1 segment before the next/);
-  assert.match(context, /Fresh executor contexts are mandatory between G0 and G1, for initial G2/);
-  assert.match(context, /required model\/effort\/harness switch, runtime\/environment replacement, changed active instruction\/profile configuration or executor replacement/);
-  assert.match(context, /genuine session loss or actual context-capacity limits, including forced compaction/);
-  assert.match(context, /ordinary commit, test, helper return, tool call, internal milestone or evidence upload does not require renewal/);
+function checkpointContinuationContract(rules, text) {
+  const fresh = rules.match(/## Fresh contexts\n([\s\S]*?)(?=\n## )/)?.[1] || '';
+  assert.match(fresh, /Planned G1 segment completion alone checkpoints and continues in the same session/);
+  assert.doesNotMatch(fresh, /after each planned G1 segment/);
+  assert.match(fresh, /Fresh executor contexts are mandatory between G0 and G1, for initial G2/);
+  assert.match(fresh, /required model, effort or harness switch, runtime or environment replacement, activated instruction or profile revision or executor replacement/);
+  assert.match(fresh, /after genuine session loss or forced compaction/);
+  assert.match(fresh, /ordinary commit, test, helper return, tool call, milestone or evidence upload never requires renewal/);
+  assert.match(fresh, /is not a terminal outcome: the executor continues its next dependency-ready authorised step/);
+  assert.match(section(text, 7), /Fresh executor contexts are mandatory between G0 and G1, for initial G2 and at the other renewal boundaries in the gate rules/);
   assert.match(section(text, 18), /Planned G1 segment completion alone checkpoints and continues the approved whole-phase Core in the same session; actual required renewal and fresh independent review remain binding/);
 }
 
 test('whole-phase G1 checkpoints and continues while genuine renewal boundaries remain', () => {
-  checkpointContinuationContract(directive);
-  for (const [before, after] of [
-    ['An execution segment is a bounded working slice within the assignment', 'An execution segment is a bounded working slice between renewal boundaries'],
-    ['planned G1 segment completion alone requires a recoverable checkpoint and continuation in the same working session, not fresh-context renewal', 'planned G1 segment completion always requires a fresh executor'],
-    ['for initial G2', 'without fresh initial G2'],
-    ['required model/effort/harness switch, runtime/environment replacement, changed active instruction/profile configuration or executor replacement', 'optional model or runtime changes'],
-    ['genuine session loss or actual context-capacity limits, including forced compaction', 'ordinary status observations'],
-    ['Planned G1 segment completion alone checkpoints and continues the approved whole-phase Core in the same session; actual required renewal and fresh independent review remain binding', 'Every planned segment launches a fresh executor']
+  checkpointContinuationContract(gateRules, directive);
+  for (const [target, before, after] of [
+    ['rules', 'Planned G1 segment completion alone checkpoints and continues in the same session', 'Planned G1 segment completion always requires a fresh executor'],
+    ['rules', 'for initial G2', 'without fresh initial G2'],
+    ['rules', 'required model, effort or harness switch, runtime or environment replacement, activated instruction or profile revision or executor replacement', 'optional model or runtime changes'],
+    ['rules', 'after genuine session loss or forced compaction', 'after ordinary status observations'],
+    ['rules', 'never requires renewal', 'requires renewal'],
+    ['rules', 'is not a terminal outcome', 'is a terminal outcome'],
+    ['text', 'Planned G1 segment completion alone checkpoints and continues the approved whole-phase Core in the same session; actual required renewal and fresh independent review remain binding', 'Every planned segment launches a fresh executor']
   ]) {
-    assert.ok(directive.includes(before), `mutation target exists: ${before}`);
-    assert.throws(() => checkpointContinuationContract(directive.replace(before, after)), `reject renewal regression: ${before}`);
+    const source = target === 'rules' ? gateRules : directive;
+    assert.ok(source.includes(before), `mutation target exists: ${before}`);
+    const mutated = source.replace(before, after);
+    assert.throws(() => checkpointContinuationContract(target === 'rules' ? mutated : gateRules, target === 'text' ? mutated : directive),
+      `reject renewal regression: ${before}`);
   }
-  assert.throws(() => checkpointContinuationContract(directive.replace(
+  assert.throws(() => checkpointContinuationContract(gateRules.replace(
     'Fresh executor contexts are mandatory between G0 and G1, for initial G2',
     'Fresh executor contexts are mandatory between G0 and G1, after each planned G1 segment before the next, for initial G2'
-  )), 'reject contradictory segment-only mandatory renewal');
+  ), directive), 'reject contradictory segment-only mandatory renewal');
 });
 
-function conditionalSuccessorContract(text) {
-  const context = section(text, 7);
-  assert.match(context, /When renewal is actually required, bind the next segment to its checkpoint and durable successor identity/);
-  assert.match(context, /Launch exactly one successor only for that required renewal when the next work is authorised and its dependencies are satisfied/);
-  assert.match(context, /checkpoint-only save persists changed recoverable state and the current executor continues its safe authorised work/);
-  assert.match(context, /checkpoint save\/verification failure is a recovery boundary.*not an automatic successor-launch trigger/s);
+function conditionalSuccessorContract(rules, text) {
+  const fresh = rules.match(/## Fresh contexts\n([\s\S]*?)(?=\n## )/)?.[1] || '';
+  assert.match(fresh, /When renewal is actually required, reconcile any existing successor or uncertain launch, verify custody, stop the old writer and launch exactly one successor/);
+  assert.match(fresh, /A failed checkpoint save is a recovery boundary, never an automatic successor launch/);
   const acceptance = section(text, 18);
   assert.match(acceptance, /Test the actual supported controller\/launcher continuation path when section 7 requires renewal/);
   assert.match(acceptance, /\| 1\. Required renewal at a completed segment \| An actual section 7 renewal trigger, verified checkpoint, stopped old writer, satisfied dependencies and an already-authorised next segment cause exactly one successor/);
@@ -115,17 +121,20 @@ function conditionalSuccessorContract(text) {
 }
 
 test('successor launch and its acceptance cases require an actual renewal trigger', () => {
-  conditionalSuccessorContract(directive);
-  for (const [before, after] of [
-    ['When renewal is actually required, bind the next segment', 'Always bind the next segment'],
-    ['Launch exactly one successor only for that required renewal', 'Launch exactly one successor after every segment'],
-    ['not an automatic successor-launch trigger', 'an automatic successor-launch trigger'],
-    ['continuation path when section 7 requires renewal', 'continuation path after every planned segment'],
-    ['An actual section 7 renewal trigger, verified checkpoint', 'A verified checkpoint'],
-    ['Renew only when section 7 requires it, into authorised repair/validation when safe', 'Always renew into authorised repair/validation']
+  conditionalSuccessorContract(gateRules, directive);
+  for (const [target, before, after] of [
+    ['rules', 'When renewal is actually required, reconcile', 'Always reconcile'],
+    ['rules', 'launch exactly one successor', 'launch a successor after every segment'],
+    ['rules', 'never an automatic successor launch', 'an automatic successor launch'],
+    ['text', 'continuation path when section 7 requires renewal', 'continuation path after every planned segment'],
+    ['text', 'An actual section 7 renewal trigger, verified checkpoint', 'A verified checkpoint'],
+    ['text', 'Renew only when section 7 requires it, into authorised repair/validation when safe', 'Always renew into authorised repair/validation']
   ]) {
-    assert.ok(directive.includes(before), `mutation target exists: ${before}`);
-    assert.throws(() => conditionalSuccessorContract(directive.replace(before, after)), `reject successor regression: ${before}`);
+    const source = target === 'rules' ? gateRules : directive;
+    assert.ok(source.includes(before), `mutation target exists: ${before}`);
+    const mutated = source.replace(before, after);
+    assert.throws(() => conditionalSuccessorContract(target === 'rules' ? mutated : gateRules, target === 'text' ? mutated : directive),
+      `reject successor regression: ${before}`);
   }
 });
 
@@ -155,13 +164,16 @@ test('context-dependent discussion may reuse G0 while G1 and final review stay f
   assert.match(review, /G2 does not spawn subagents/);
 });
 
-test('adoption is prospective and keeps the three-role workflow and implementation claims honest', () => {
+test('the contract keeps the three-role workflow current and leaves dated history to git', () => {
   assert.equal((directive.match(/^## \d+\. /gm) || []).length, 20);
   assert.match(section(directive, 1), /G0 Discuss\/Discovery.*G1 Builder, including UAT.*G2 Review/);
+  assert.match(section(directive, 1), /Every new task, repository or environment starts with G0; the risk tier of the changed paths .* sets only the depth of UAT and review/);
   assert.match(section(directive, 18), /G0 consideration and discussion/);
-  const provenance = section(directive, 20);
-  assert.match(provenance, /15 October 2026.*mandatory consideration, conditional discussion/s);
-  assert.match(provenance, /future G0 admissions only/);
-  assert.match(provenance, /Preserve every in-flight contract and its pinned proposal revision/);
-  assert.match(provenance, /does not establish runtime enforcement, installation or broad repository activation/);
+  const history = section(directive, 20);
+  assert.match(history, /in git history at commit `[0-9a-f]{40}`/);
+  assert.match(history, /History is evidence, never a competing current instruction/);
+  // No dated amendments, deadlines or handover packets return to the current contract.
+  assert.doesNotMatch(directive, /\b\d{1,2} (?:January|February|March|April|May|June|July|August|September|October|November|December) 20\d\d\b/);
+  assert.deepEqual(directive.match(/\bpackets?\b/gi), ['packet'], 'the only packet mention is the rule that there is none');
+  assert.match(section(directive, 7), /There is no handover packet/);
 });

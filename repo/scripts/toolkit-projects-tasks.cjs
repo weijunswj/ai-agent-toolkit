@@ -86,7 +86,8 @@ function taskName(kind, params) {
   return `${params.project}: ${title}`;
 }
 
-// Template lines may start with a condition tag: [repo], [no-repo], [parent], [fresh], [bound].
+// Template lines may start with a condition tag: [repo], [no-repo], [parent], [toolkit], [fresh], [bound].
+// [toolkit] is the project whose repo is the Toolkit repo itself.
 // Placeholders are {{name}}; an unknown placeholder or tag is a broken source.
 function fill(template, kind, params) {
   const session = KINDS[kind].session || params.session;
@@ -98,6 +99,7 @@ function fill(template, kind, params) {
   };
   const conditions = {
     repo: params.repo !== 'none', 'no-repo': params.repo === 'none', parent: params.parent_issue !== 'none',
+    toolkit: params.repo === params.toolkit_repo,
     fresh: session === 'fresh', bound: session === 'bound'
   };
   const lines = [];

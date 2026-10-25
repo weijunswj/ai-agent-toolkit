@@ -166,9 +166,10 @@ function checkDefaultRules(load) {
   assert.match(law, /New or changed human-facing work/);
   for (const item of ['labels', 'errors', 'documents', 'n8n', 'historical receipts', 'not internal programme, release or run labels', 'misleading text is a real defect']) assert.ok(law.includes(item), item);
   assert.match(law, /retained unclear label names its consumer, owner, need and removal condition/);
-  // The gate review duties apply wherever the plugin is installed, so they sit in the global rules.
-  assert.match(source, /G1 checks the actual user or operator surface for clarity during validation and UAT, and G2 treats unsafe or misleading text as a real finding/);
-  assert.match(source, /Gate names `G0`, `G1` and `G2` are fine where the reader needs them/);
+  // The gate review duties are gate mechanics, so they sit in the gate rules every gate session reads.
+  const gate = normalise(load('repo/contracts/agent-rules/gate-rules.md'));
+  assert.match(gate, /G1 checks the actual user or operator surface for clarity during validation and UAT, and G2 treats unsafe or misleading text as a real finding/);
+  assert.match(gate, /Gate names `G0`, `G1` and `G2` are fine where the reader needs them/);
 }
 
 function checkController(load) {

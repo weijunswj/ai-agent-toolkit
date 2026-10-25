@@ -18,7 +18,7 @@ test('controller bootstrap documents full re-entry, custody, actor, feedback, an
     'Initial adoption reads the complete direction once',
     "post one takeover record on the parent's CURRENT",
     "Route proof is the launched session's own metadata",
-    'Unchanged continuation loads the current packet',
+    'Unchanged continuation loads the current state',
     'refresh only applicable changed or conflicting instructions',
     'controller actor and stable provider/host actor identifier',
     'planned child, seed, shared, and deferred contracts',
@@ -68,7 +68,7 @@ test('controller bootstrap is explicit-only and depends on accepted live governa
   assert.match(host, /allow_implicit_invocation: false/);
   assert.match(skill, /root agent must not infer that it owns the controller role/);
   assert.match(skill, /must not self-verify root admission/);
-  assert.match(skill, /Read the authoritative current packet first/);
+  assert.match(skill, /Read the authoritative current state first \(there is no handover packet\)/);
   assert.match(skill, /existing CURRENT carrier where applicable/);
   assert.match(skill, /Service tier is controller\/launcher metadata/);
   assert.match(skill, /Standard for future launches, never a semantic worker\/helper admission condition/);

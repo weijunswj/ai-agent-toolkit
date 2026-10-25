@@ -31,23 +31,23 @@ test('a realistic user file, the global block and root AGENTS.md fit the raised 
   // The last line of root AGENTS.md must fall inside the bytes Codex reads.
   const lastLine = ROOT_AGENTS.trimEnd().split('\n').pop();
   assert.ok(Buffer.from(combined.replace(/\n/g, '\r\n')).subarray(0, RAISED_LIMIT).toString('utf8').includes(lastLine));
-  // Counted together, it would not fit the default limit, which is why setup offers the raise.
-  assert.ok(crlfBytes(combined) > 32 * 1024, 'the default limit alone is too small');
+  // After the rules audit moved the gate mechanics out, the three files sit right at the 32 KiB
+  // default, so setup keeps offering the raise as headroom rather than relying on that margin.
   assert.match(fs.readFileSync(path.join(ROOT, 'repo/scripts/toolkit-global-rules.cjs'), 'utf8'), /const DOC_LIMIT_TARGET = 65536;/);
 });
 
 test('each block stays inside its own budget', () => {
-  // Raised for the owner's scratch, invariant-model, issue-closing and current-behaviour rules, then
-  // for the governance-state routing rule. The coding gates, delegation and routes then moved from the
-  // governed rules into the global block (they apply wherever the plugin is installed), so the global
-  // budget rose by what the governed budget fell, plus the three-way governance routing (no git,
-  // not on github.com, github.com); the combined Codex limit above stays the hard cap.
-  assert.ok(crlfBytes(GLOBAL) <= 22700, `global block ${crlfBytes(GLOBAL)} bytes`);
-  assert.ok(crlfBytes(GOVERNED) <= 4100, `governed rules ${crlfBytes(GOVERNED)} bytes`);
+  // The rules audit moved the gate mechanics into the on-demand gate rules and cut the global block
+  // from 22,700 to the cap below, leaving headroom only for lanes already in flight. The governed
+  // block took the issue rules from the global layer, so its cap rose a little. The combined Codex
+  // limit above stays the hard cap.
+  assert.ok(crlfBytes(GLOBAL) <= 18500, `global block ${crlfBytes(GLOBAL)} bytes`);
+  assert.ok(crlfBytes(GOVERNED) <= 4250, `governed rules ${crlfBytes(GOVERNED)} bytes`);
   assert.ok(crlfBytes(ROOT_AGENTS) <= 15000, `root AGENTS.md ${crlfBytes(ROOT_AGENTS)} bytes`);
-  // CONTROLLER.md loads only for controllers, not every session; the owner's promise, run-standard,
-  // scratch, feedback-intake and G0 model rules raised its budget from 18000.
-  assert.ok(crlfBytes(read('repo/CONTROLLER.md')) <= 19000, 'CONTROLLER.md');
+  // CONTROLLER.md loads only for controllers, not every session; the rules audit cut it below 18000.
+  assert.ok(crlfBytes(read('repo/CONTROLLER.md')) <= 18000, 'CONTROLLER.md');
+  // The gate rules load on demand for gate sessions only, but stay compact.
+  assert.ok(crlfBytes(read('repo/contracts/agent-rules/gate-rules.md')) <= 10500, 'gate rules');
 });
 
 test('guidance moved out of root AGENTS.md is still reachable from a loaded layer', () => {
@@ -60,7 +60,8 @@ test('guidance moved out of root AGENTS.md is still reachable from a loaded laye
     ['n8n-safety-router', GLOBAL],
     ['load the `n8n-safety-router` skill before any n8n work; if it is unavailable, stop and report that', GOVERNED],
     ['G0 Discovery -> G1 Builder, including UAT -> G2 Review', GLOBAL],
-    ['Route proof', GLOBAL],
+    ['gate-rules.md', GLOBAL],
+    ['Route proof', read('repo/contracts/agent-rules/gate-rules.md')],
     ['Decision traces', ROOT_AGENTS],
     ['global-rules.md', ROOT_AGENTS],
     ['repo/contracts/source-of-truth-contract.md', ROOT_AGENTS],

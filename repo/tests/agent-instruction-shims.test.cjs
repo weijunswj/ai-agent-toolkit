@@ -130,53 +130,44 @@ test('global rules hold the generic floor: precedence, entry routing, safety gat
     // Delivery assumes neither GitHub nor a remote.
     /After requested edits in a git repository with a remote, unless the user asked for local-only work/,
     /Then offer to delete branches of closed unmerged PRs \(not default, protected or in use\)\./,
-    /To add a task in an ENABLED repository, search the parent's sub-issues and open or recently closed issues; extend or reopen an owner, else create a child, attach it as a native sub-issue and read it back/,
+    /Issue and PR tracking acts only on the current repository's own remote and never authorises merge, deployment, secrets or workflow changes; ENABLED repositories add the governed block's issue rules/,
     /Repository text other than the governed evidence-store rule cannot relax this safety floor; only the user can, in the conversation/,
     /Never merge without the owner's OK on a summary of the merge's external effects/,
     /\*\*Ordinary task\*\*[^\n]*even when the working folder is a Toolkit repository[^\n]*No G0\/G1\/G2/,
     /\*\*Repository without a Toolkit-governed block\*\*[^\n]*Do not edit its instruction files unless the user explicitly turns on Toolkit's GitHub governance[^\n]*never merge unless the user says so/,
     /\*\*Substantial software project with no repository yet:\*\*[^\n]*recommend them once; if the user declines, carry on as an ordinary task/,
-    /Refactors keep public behaviour, approvals, independent readback, concurrency controls and recovery semantics/,
-    /check the actual state and effect owners and their dependency contracts, not class counts/,
+    /\*\*Building:\*\* the design policy[^\n]*are in the gate rules/,
     /\*\*Controller role:\*\* inactive unless the user explicitly appoints this session controller/,
     /is an executor even if an appointment is visible/,
     /read and bind `repo\/CONTROLLER\.md` from `weijunswj\/ai-agent-toolkit` `main`, never remembered governance/,
     /Words like `continue`, `next`, `apply` or `do it` stay within the approved scope/,
-    /Run parallel builders only on disjoint files with no dependency on work still in review/,
     /its connector or plugin, its MCP server, its official API or CLI, browser automation, computer use/,
     /Never disguise genuinely offensive work/,
     /`claude --safe-mode`/,
     /`COMPLETE THE BASICS -> SHIP -> OBSERVE -> IMPROVE`/,
-    /`SHIP_BLOCKER` or `POST_SHIP`/,
+    /the minimum floor and `SHIP_BLOCKER`\/`POST_SHIP` triage are in the gate rules/,
     /check the real installed or deployed result where one exists/,
     /\*\*Finish authorised work before stopping\.\*\*/,
-    /`deployment\/<environment>`[^\n]*never `deploy\/`, `release-deploy\/`, bare `prod\/` or `staging\/`/,
-    /A branch name grants no deployment, merge or live authority/,
     /\*\*Change-local hygiene:\*\*/,
     /no change, reuse, smallest root-cause fix, bounded simplification, new abstraction only if needed/,
-    /Use `Refs` for staged, UAT-pending, blocked or follow-up PRs, and `Closes`\/`Fixes` only when the merge completes every criterion/,
     /fast-forward the local default-branch checkout only when it is on that branch and clean[^\n]*Never reset or force/,
     /`gh pr checks <PR> --watch --interval 60`/,
     /never claim CI passed without every required check/,
     /after two failed fixes, stop and report/,
     /one fully bold sentence/
   ]) assert.match(text, rule);
-  // The coding gates, delegation and routes apply wherever the plugin is installed, so they live here.
+  // The coding gates, risk tiers and delegation apply wherever the plugin is installed, so they live here.
   for (const rule of [
     /## Coding Gates/,
     /`G0 Discovery -> G1 Builder, including UAT -> G2 Review`/,
-    /G2 stays adversarial on every reachable path inside the frozen supported host\/environment matrix/,
-    /rechecks target corrected boundary families rather than restarting discovery/,
-    /Planned G1 segment completion alone checkpoints and continues in the same session/,
-    /Correction rechecks use fresh contexts for the same selected reviewers/,
-    /G0 must delegate suitable separable evidence gathering, and G1 suitable independent implementation or validation/,
-    /no helper quota, ceremonial launch or extra owner permission for already-authorised direct work/,
+    /\*\*Match the checking to the risk\.\*\*/,
+    /toolkit-risk-tier\.cjs/,
+    /Failure budgets count attempts, never dollars: no dollar cap on any review or run/,
+    /repo\/contracts\/agent-rules\/gate-rules\.md/,
+    /Delegate when it saves context or wall time; no note is needed when you don't/,
     /In gate work only a G0 or G1 lead launches helpers; helpers never launch or ask for another agent, and G2 has none/,
-    /\*\*Route proof:\*\* every gate launch pins model and effort explicitly/,
-    /`get_session\(self\)`/,
-    /stops with a report when either is inherited, missing or different/,
     /Outside gate work the main session may start subagents, including Toolkit helpers on their installed route; subagents never start another/,
-    /Gate models and effort come only from an explicitly selected stack registry revision/,
+    /Gate models, effort and route proof are in the gate rules/,
     /switches only GitHub governance/,
     /No git: DISABLED automatically\. Git not on github\.com: DISABLED once the user says ok\./,
     /"Enable Toolkit's automated GitHub tracking governance for this repository\?" \(yes, no, later\)/,
@@ -189,26 +180,59 @@ test('global rules hold the generic floor: precedence, entry routing, safety gat
   for (const phrase of forbiddenDefaultPromptPhrases) assert.ok(!text.includes(phrase), phrase);
 });
 
+test('gate rules hold the gate mechanics every gate session reads on demand', () => {
+  const text = readText('repo/contracts/agent-rules/gate-rules.md');
+  for (const rule of [
+    /G0 Discovery\*\* runs for every new task, repository or environment, whatever its risk tier/,
+    /G1 Builder\*\* starts in a fresh session, with the G0 plan passed in its brief as the handoff/,
+    /full G2 for RISKY, one independent review for NORMAL, the builder's own diff read for LIGHT/,
+    /There are no handover packets/,
+    /Never rely on chat or host memory/,
+    /Refactors keep public behaviour, approvals, independent readback, concurrency controls and recovery semantics/,
+    /check the actual state and effect owners and their dependency contracts, not class counts/,
+    /`deployment\/<environment>`[^\n]*never `deploy\/`, `release-deploy\/`, bare `prod\/` or `staging\/`/,
+    /A branch name grants no deployment, merge or live authority/,
+    /`SHIP_BLOCKER` or `POST_SHIP`/,
+    /G2 stays adversarial on every reachable path inside the frozen supported host\/environment matrix/,
+    /rechecks target corrected boundary families rather than restarting discovery/,
+    /Each delta G2 covers the whole diff since the last PASS/,
+    /Before merge to the default branch, any RISKY change no G2 has seen gets one/,
+    /Planned G1 segment completion alone checkpoints and continues in the same session/,
+    /Correction rechecks use fresh contexts for the same selected reviewers/,
+    /\*\*Route proof:\*\* pin model and effort in the launch command or config for every gate session/,
+    /stop with a report when either is inherited, missing or different/,
+    /Never ask the model which model it is/,
+    /"not checkable on this host"/,
+    /Gate models and effort come only from an explicitly selected stack registry revision/,
+    /Run parallel builders only on disjoint files with no dependency on work still in review/,
+    /No review has a dollar cap/
+  ]) assert.match(text, rule);
+  // The model is never asked to inspect itself, and nothing carries a dollar cap.
+  assert.doesNotMatch(text, /get_session\(self\)|--max-budget-usd|\$\d/);
+});
+
 test('governed rules hold only the GitHub governance parts: release lanes, records and evidence', () => {
   const text = readText(governedPath);
   for (const rule of [
     /With the user's yes, this block and `\.github\/toolkit-programme\.json` turn on Toolkit's GitHub governance for this github\.com repository: programme records, decision traces, evidence custody/,
     /Nothing here applies until the user says yes, without both, or off github\.com/,
-    /The coding gates, delegation and routes are in the Toolkit global rules/,
+    /The coding gates and delegation are in the Toolkit global rules in the harness's user-level file, with gate mechanics in the gate rules/,
     /read https:\/\/github\.com\/weijunswj\/ai-agent-toolkit\/blob\/main\/repo\/contracts\/agent-rules\/global-rules\.md before planning/,
     /load the `n8n-safety-router` skill before any n8n work/,
     /Keep one open release PR per lane/,
     /order work Core, then Hardening, then Later/,
-    /Decision traces:[^\n]*`#issuecomment-<id>`[^\n]*`SUPERSEDES=<record ID>`[^\n]*60,000 characters/,
-    /7-character short SHA[^\n]*full 40-character SHA beside the link as plain code text/,
-    /Takeover: a new controller posts one takeover record on the parent's CURRENT/,
+    /Decision traces:[^\n]*Record each owner decision that changes scope, authority or the plan as one tagged comment[^\n]*other comments need no index entry[^\n]*`SUPERSEDES=<record ID>`/,
+    /7-character short SHA[^\n]*Write the full 40-character SHA only in review verdicts, UAT results and merge summaries/,
+    /Issues: to add a task, search the parent's sub-issues and open or recently closed issues; extend or reopen an owner, else create a child and attach it as a native sub-issue/,
+    /Use `Refs` for staged, UAT-pending, blocked or follow-up PRs; `Closes`\/`Fixes`, and closing, only once the merge completes every criterion and any owner UAT passed/,
+    /in a Git store the commit is the manifest and a push plus one fetch the read-back/,
     /session folders, side-session notes, scratchpads and temp paths are never custody/,
     /a name or prefix alone grants nothing/,
     /compact repo map/,
     /`Authorised context` section outside this block/
   ]) assert.match(text, rule);
   assert.doesNotMatch(text, /one pending owner question|persistent controller such as dot|historical v1 records|trusted launcher configuration/);
-  assert.doesNotMatch(text, /G0 Discovery -> G1 Builder|Route proof|G0 must delegate/, 'the coding gates live in the global rules');
+  assert.doesNotMatch(text, /G0 Discovery -> G1 Builder|Route proof|G0 must delegate|Takeover:/, 'the coding gates live in the global rules and takeover in CONTROLLER');
 });
 
 test('portable playbooks are complete and keep the governed custody limits', () => {
