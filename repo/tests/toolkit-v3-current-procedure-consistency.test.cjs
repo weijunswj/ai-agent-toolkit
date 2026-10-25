@@ -274,7 +274,7 @@ test('launch ownership and finish-before-stop keep their meaning on every curren
   }
 });
 
-// Owner UAT holds only what needs the owner's own hands; CI, tests and G2 prove the rest.
+// Owner UAT tests only the final product; CI, tests, G2 and agent UAT prove internals.
 const PROJECTS_SKILL = 'repo/contracts/claude-projects/web-controller-projects/SKILL.md';
 const GATE_RULES = GATE_SURFACES[0];
 const GOVERNED = 'repo/contracts/agent-rules/toolkit-governed-rules.md';
@@ -287,6 +287,8 @@ function ownerUatScopeContract(texts) {
   assert.match(texts['repo/CONTROLLER.md'], /At admission split acceptance: owner UAT only for final-product steps \(global rules\), objective acceptance \(CI, G2\) for the rest; with no such step record NOT_REQUIRED\. Missing authority never waives a needed UAT\./);
   assert.match(texts['repo/CONTROLLER.md'], /G2 begins after builder readiness and any owner UAT acceptance/);
   assert.match(texts[V3_DOC], /User acceptance covers only the final product: features a Toolkit user runs and sees/);
+  assert.match(texts[GLOBAL], /G0, G1 with agent UAT on the real hosts and owner UAT for any final-product steps, full G2/);
+  assert.match(texts[V3_DOC], /RISKY work gets agent UAT plus owner UAT for any final-product steps;/);
   assert.match(texts[V3_DOC], /listed beside the owner steps with the passing check that covers it; when no final-product step changed, UAT is recorded as not required/);
   assert.match(texts[GLOBAL], /Source-only checks, fixtures and CI do not prove user acceptance or an installed result: before acceptance, check the real installed or deployed result where one exists\./);
   assert.match(texts[V3_DOC], /G2 starts after G1's working version and any required user UAT are accepted/);
@@ -299,6 +301,8 @@ test('owner UAT is limited to final-product steps on every current surface', () 
   for (const [rel, before, after] of [
     [GLOBAL, 'Owner UAT tests only the final product', 'Owner UAT tests every step'],
     [GLOBAL, 'CI, tests, G2 and agent UAT prove internals', 'the owner proves internals'],
+    [GLOBAL, 'owner UAT for any final-product steps, full G2', 'owner UAT for any owner-hands steps, full G2'],
+    [V3_DOC, 'owner UAT for any final-product steps;', 'owner UAT for any owner-hands steps;'],
     [GOVERNED, 'any owner UAT passed', "the owner's UAT passed"],
     [GATE_RULES, 'any owner UAT acceptance', "the owner's actual UAT acceptance"],
     ['repo/CONTROLLER.md', 'with no such step record NOT_REQUIRED', 'always run owner UAT'],

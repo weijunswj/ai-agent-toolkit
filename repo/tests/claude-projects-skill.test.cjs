@@ -203,7 +203,7 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.ok(at.every((position, index) => position > -1 && (index === 0 || position > at[index - 1])), at.join(','));
 });
 
-test('device steps go to the Remote Control session, and owner UAT asks are plain words', () => {
+test('device steps go to the Remote Control session, not the owner', () => {
   const text = read(SKILL_REL);
   // The owner was once asked to create a local scheduled task that a Remote Control session could create.
   assert.match(text, /installs, setup checks and device tasks \(such as a local scheduled task\), which the Remote Control session on the user's computer does itself; hand the user a step on their computer only when its safety check blocks the session;/);
@@ -211,16 +211,20 @@ test('device steps go to the Remote Control session, and owner UAT asks are plai
 });
 
 test('Toolkit text says computer or Remote Control session, not laptop', () => {
-  // Work runs on whatever computer the user has; "laptop" stays only as a screen size or icon name.
-  const allowed = /^skills\/frontend-art-direction\//;
+  // Work runs on whatever computer the user has. "laptop" stays only as a screen size or an icon
+  // name in the frontend art direction skill, matched line by line.
+  const allowedFolder = /^skills\/frontend-art-direction\//;
+  const allowedLine = /mobile, tablet, laptop, and wide|^81,Device,laptop,/i;
   const roots = ['skills', 'repo/contracts', 'repo/docs', 'repo/scripts', 'repo/tests/fixtures'];
   const hits = [];
   const walk = (rel) => {
     for (const entry of fs.readdirSync(path.join(repoRoot, rel), { withFileTypes: true })) {
       const child = `${rel}/${entry.name}`;
       if (entry.isDirectory()) { if (entry.name !== 'node_modules') walk(child); continue; }
-      if (allowed.test(child) || !/\.(md|cjs|mjs|js|json|txt|ya?ml)$/.test(entry.name)) continue;
-      if (/laptop/i.test(fs.readFileSync(path.join(repoRoot, child), 'utf8'))) hits.push(child);
+      if (/\.(png|jpe?g|gif|ico)$/i.test(entry.name)) continue;
+      fs.readFileSync(path.join(repoRoot, child), 'utf8').split(/\r?\n/).forEach((line, index) => {
+        if (/laptop/i.test(line) && !(allowedFolder.test(child) && allowedLine.test(line))) hits.push(`${child}:${index + 1}`);
+      });
     }
   };
   roots.forEach(walk);
