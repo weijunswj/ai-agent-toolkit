@@ -18,12 +18,12 @@ const green = name => ({ kind: 'CheckRun', name, status: 'COMPLETED', conclusion
 const CATALOGUE = [
   { issue: 423, label: 'C2', class: 'COMMITTED', parent: 421, order: 1, lane: 'integration' },
   { issue: 467, label: 'Shared H', class: 'COMMITTED', parent: 421, order: 2, lane: 'integration' },
-  { issue: 469, label: 'H1 Codex', class: 'COMMITTED', parent: 467, order: 1, lane: 'codex', owner_prefix: 'CDX-TK469-' },
-  { issue: 470, label: 'H2 Claude', class: 'COMMITTED', parent: 467, order: 2, lane: 'claude' },
+  { issue: 469, label: 'H1 Codex', class: 'COMMITTED', parent: 467, order: 3, lane: 'codex', owner_prefix: 'CDX-TK469-' },
+  { issue: 470, label: 'H2 Claude', class: 'COMMITTED', parent: 467, order: 4, lane: 'claude' },
   { issue: 459, label: 'S1-A', class: 'COMPLETED', parent: 421, order: 3 },
   { issue: 422, label: 'C1 predecessor', class: 'RETIRED', parent: 421, order: 4 },
   { issue: 425, label: 'Q', class: 'OPTIONAL', parent: null, order: 0 },
-  { issue: 499, label: 'R1', class: 'COMMITTED', parent: null, order: 0 },
+  { issue: 499, label: 'R1', class: 'COMMITTED', parent: null, order: 5 },
 ];
 
 function setup({ repository = 'acme/app', parentIssue = 421, outcomes = CATALOGUE, issues = null, version = '3.9.1', controller = writer, initialiseParent = true } = {}) {
@@ -305,9 +305,9 @@ test('reclassifying an outcome keeps its identity, document and native link', ()
   assert.match(state.findStateBlock(github.issues.get(423).body).block.body, /class: OPTIONAL/);
 });
 
-test('older classes read as COMMITTED and sort by child number like any task, are reported as CLASS_LEGACY, and migrate in one patch', () => {
-  // Written by 3.12.0: `order` counted within each old class. The issue numbers do not follow the
-  // old CORE, HARDENING, LATER sequence, so the graph's child-number sort reorders them.
+test('older classes read as COMMITTED and sort by priority like any task, are reported as CLASS_LEGACY, and migrate in one patch', () => {
+  // Written by 3.12.0: `order` counted within each old class, so the old numbers tie across classes
+  // and child number breaks the ties until the migration patch renumbers them.
   const outcomes = [
     { issue: 12, class: 'CORE', parent: 7, order: 0 },
     { issue: 9, class: 'CORE', parent: 7, order: 1 },
@@ -322,11 +322,12 @@ test('older classes read as COMMITTED and sort by child number like any task, ar
   assert.deepEqual(github.issues.get(7).subs, [12, 9, 8, 11, 10]);
   const legacy = reconciler().run({ apply: true });
   assert.deepEqual(legacy.holds, []);
-  assert.equal(kinds(legacy).some(kind => kind.startsWith('reorder')), true, 'the catalogue order no longer sets position, so the pass reorders');
-  assert.deepEqual(github.issues.get(7).subs, [8, 9, 11, 12, 10], 'open tasks by child number, then the finished one');
+  assert.equal(kinds(legacy).some(kind => kind.startsWith('reorder')), true, 'the old per-class numbers tie, so the pass reorders');
+  assert.deepEqual(github.issues.get(7).subs, [8, 11, 12, 9, 10], 'open tasks by order, then child number, then the finished one');
+  assert.match(legacy.findings.find(entry => entry.code === 'ORDER_TIE').detail, /#8, #11, #12 share priority order 0, so child number decides\. Controller: set a distinct order/);
   const finding = legacy.findings.find(entry => entry.code === 'CLASS_LEGACY');
   assert.ok(finding, 'CLASS_LEGACY is reported');
-  assert.match(finding.detail, /#12 CORE, #9 CORE, #8 HARDENING, #11 LATER read as COMMITTED and sort like any other task/);
+  assert.match(finding.detail, /#12 CORE, #9 CORE, #8 HARDENING, #11 LATER read as COMMITTED and sort like any other task, by group, priority \(order\) and child number/);
   assert.doesNotMatch(finding.detail, /kept in their old|moves no task/);
   assert.match(finding.detail, /apply it whole with update-parent/);
   assert.deepEqual(finding.patch.outcomes.map(entry => [entry.issue, entry.class, entry.order]),
@@ -339,8 +340,9 @@ test('older classes read as COMMITTED and sort by child number like any task, ar
   store.mutate('parent', 7, { writer, change: doc => state.applyPatch('parent', doc, finding.patch) });
   const migrated = reconciler().run({ apply: true });
   assert.equal(codes(migrated).includes('CLASS_LEGACY #7'), false);
-  assert.equal(kinds(migrated).some(kind => kind.startsWith('reorder')), false, 'the migration itself moves nothing');
-  assert.deepEqual(github.issues.get(7).subs, [8, 9, 11, 12, 10]);
+  assert.equal(codes(migrated).some(code => code.startsWith('ORDER_TIE')), false, 'the renumbered order has no ties');
+  assert.deepEqual(github.issues.get(7).subs, [12, 9, 8, 11, 10], 'the old CORE, HARDENING, LATER sequence becomes the priority');
+  assert.equal(kinds(reconciler().run({ apply: true })).some(kind => kind.startsWith('reorder')), false, 'a later pass moves nothing');
 });
 
 test('a moved PR head marks evidence STALE_HEAD and updates both projections together', () => {
@@ -499,7 +501,7 @@ test('a second repository orders native sub-issues like the Programme Graph, inc
   assert.equal(github.mutations(), 0);
   const report = reconciler().run({ apply: true });
   assert.deepEqual(report.holds, []);
-  assert.deepEqual(github.issues.get(7).subs, [8, 9, 13, 14, 15, 12, 11, 10], 'LATER by status and child number, OPTIONAL, COMPLETED, then RETIRED');
+  assert.deepEqual(github.issues.get(7).subs, [13, 9, 14, 15, 8, 12, 11, 10], 'LATER by priority order and then child number, OPTIONAL, COMPLETED, then RETIRED');
   assert.deepEqual(github.issues.get(8).subs, [17, 16]);
   assert.equal(reconciler().run().summary, 'No changes');
 });

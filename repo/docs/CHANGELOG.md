@@ -1,5 +1,16 @@
 # Toolkit Changelog
 
+## 3.13.8
+
+### Now and Later
+
+- **Two roadmap groups:** the Programme Graph's Class column shows `NOW` for work in progress (an open or draft PR, or an active, owner-waiting or held gate) and `LATER` for every other committed, unfinished task. Optional work still sorts last as `OPTIONAL`. There is no `NEXT` group: a planned release still shows on the task page but no longer moves a task.
+- **Later is in priority order:** the catalogue `order` is the priority again. Inside each group rows sort by `order`, lowest first, then by child number, and native sub-issues follow. The top Later task is what starts next.
+- **Start next:** the CURRENT summary ends with one **Start next** line naming the top Later task, or None.
+- **Ties are named:** a reconcile finding `ORDER_TIE` lists queued tasks in one group that share an `order`, so the controller can set a distinct priority with `update-parent`.
+- **Older classes:** the CORE, HARDENING and LATER migration patch renumbers `order` in the old sequence, which becomes the priority. Before migration their old per-class numbers tie, so a pass may reorder them.
+- **Rules text:** the governed rules order work Now, then Later by priority; Toolkit V3, CONTROLLER.md and the reconciler skill say the same.
+
 ## 3.13.7
 
 ### Programme pages
