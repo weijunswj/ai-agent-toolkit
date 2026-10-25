@@ -250,16 +250,20 @@ function workflowLines(text) {
       else if (char === '#' && /\s/.test(body[index - 1] || '')) { body = body.slice(0, index).trimEnd(); break; }
     }
     lines.push({ indent, text: body });
-    if (/:\s*[|>][+-]?\d*$/.test(body)) scalarIndent = indent;
+    // A block scalar header (`|`, `>-`, `|2-` ...), also on a `- ` list line, whose script lines are
+    // indented past the key.
+    if (/:\s*[|>](?:[+-]?\d?|\d[+-])$/.test(body)) scalarIndent = indent + /^(?:-\s+)*/.exec(body)[0].length;
   }
   return lines;
 }
 
-// The child lines of the top-level `key:` and its inline value: { inline, children } or null.
+// The child lines of the top-level `key:` and its inline value: { inline, children } or null. The
+// document may itself be indented.
 function topLevel(lines, key) {
-  const start = lines.findIndex(line => line.indent === 0 && new RegExp(`^(?:${key}|"${key}"|'${key}'):(?:\\s|$)`).test(line.text));
+  const base = (lines.find(line => line.text !== '---' && !line.text.startsWith('--- ')) || { indent: 0 }).indent;
+  const start = lines.findIndex(line => line.indent === base && new RegExp(`^(?:${key}|"${key}"|'${key}'):(?:\\s|$)`).test(line.text));
   if (start < 0) return null;
-  const end = lines.findIndex((line, index) => index > start && line.indent === 0);
+  const end = lines.findIndex((line, index) => index > start && line.indent <= base);
   return { inline: lines[start].text.replace(/^[^:]+:\s*/, ''), children: lines.slice(start + 1, end < 0 ? lines.length : end) };
 }
 
@@ -273,26 +277,39 @@ function childKeys(children) {
 const CODEQL_EVENTS = Object.freeze(['push', 'pull_request', 'pull_request_target', 'merge_group', 'schedule', 'workflow_call']);
 const FALSE_IF = /^(?:-\s+)?if:\s*(?:false|\$\{\{\s*false\s*\}\})$/;
 
-// True when workflow `text` runs CodeQL itself (an advanced setup): its `on:` names push,
-// pull_request, pull_request_target, merge_group, schedule or workflow_call (a reusable workflow runs
-// when it is called), and one job that is not switched off with `if: false` has real codeql-action
-// init and analyze steps that are not switched off either. Comments, text inside a run script and
-// other codeql-action steps, such as upload-sarif for another scanner, do not count. GitHub refuses
-// an advanced setup's results once default setup is on, so default setup is never turned on over one.
+// Whether workflow `text` runs CodeQL itself (an advanced setup). GitHub refuses an advanced setup's
+// results once default setup is on, so default setup is never turned on over one. Returns:
+//   true      placed: `on:` names push, pull_request, pull_request_target, merge_group, schedule or
+//             workflow_call (a reusable workflow runs when it is called), and one job that is not
+//             switched off with `if: false` has real codeql-action init and analyze steps that are not
+//             switched off either;
+//   false     no init and analyze step text outside comments, or both placed and ruled out (another
+//             trigger only, switched off, or in different jobs); upload-sarif for another scanner
+//             does not count;
+//   'unsure'  init and analyze step text is there, but this reader cannot place it. The caller
+//             treats that as unreadable, so a shape this reader does not know never turns default
+//             setup on.
 function runsCodeql(text) {
+  const uncommented = String(text).replace(/^\uFEFF/, '').split(/\r?\n/).filter(line => !/^\s*#/.test(line)).join('\n');
+  const mentions = action => new RegExp(`uses:\\s*['"]?github\\/codeql-action\\/${action}@`).test(uncommented);
+  if (!mentions('init') || !mentions('analyze')) return false;
   const lines = workflowLines(text);
   const on = topLevel(lines, 'on');
-  if (!on) return false;
+  if (!on) return 'unsure';
   let events = childKeys(on.children);
   if (on.inline) {
-    const value = on.inline.trim();
+    let value = on.inline.trim();
+    // A flow value may run over several lines.
+    if (/^[[{]/.test(value) && !/[\]}]$/.test(value)) value = [value, ...on.children.map(line => line.text)].join(' ');
     if (value.startsWith('[')) events = value.replace(/[[\]\s'"]/g, '').split(',');
     else if (value.startsWith('{')) events = [...value.slice(1).matchAll(/(?:^|[{,])\s*["']?([A-Za-z_]+)["']?\s*:/g)].map(match => match[1]);
     else events = [value.replace(/['"]/g, '')];
   }
+  events = events.filter(Boolean);
+  if (!events.length) return 'unsure';
   if (!events.some(event => CODEQL_EVENTS.includes(event))) return false;
   const jobs = topLevel(lines, 'jobs');
-  if (!jobs || !jobs.children.length) return false;
+  if (!jobs || !jobs.children.length) return 'unsure';
   const jobIndent = jobs.children[0].indent;
   const blocks = [];
   for (const line of jobs.children) {
@@ -300,10 +317,11 @@ function runsCodeql(text) {
     else if (blocks.length) blocks[blocks.length - 1].push(line);
   }
   const uses = action => new RegExp(`(?:^|[\\s{,])uses:\\s*['"]?github\\/codeql-action\\/${action}@`);
-  return blocks.some(block => {
+  const placed = { init: false, analyze: false };
+  const live = blocks.some(block => {
     if (!block.length) return false;
     const keyIndent = block[0].indent;
-    if (block.some(line => line.indent === keyIndent && !line.text.startsWith('-') && FALSE_IF.test(line.text))) return false;
+    const jobOff = block.some(line => line.indent === keyIndent && !line.text.startsWith('-') && FALSE_IF.test(line.text));
     // Steps: each starts at a `- ` line (GitHub's starter workflows put these at the job's own key
     // indent); flow-style steps are split on their items.
     const steps = [];
@@ -316,9 +334,14 @@ function runsCodeql(text) {
       if (/^-\s/.test(line.text)) steps.push([line.text.replace(/^-\s+/, '')]);
       else if (steps.length) steps[steps.length - 1].push(line.text);
     }
-    const live = steps.filter(step => !step.some(item => FALSE_IF.test(item) || /(?:^|[{,]\s*)if:\s*(?:false|\$\{\{\s*false\s*\}\})\s*(?:[,}]|$)/.test(item)));
-    return ['init', 'analyze'].every(action => live.some(step => step.some(item => uses(action).test(item))));
+    for (const action of ['init', 'analyze']) if (steps.some(step => step.some(item => uses(action).test(item)))) placed[action] = true;
+    if (jobOff) return false;
+    const enabled = steps.filter(step => !step.some(item => FALSE_IF.test(item) || /(?:^|[{,]\s*)if:\s*(?:false|\$\{\{\s*false\s*\}\})\s*(?:[,}]|$)/.test(item)));
+    return ['init', 'analyze'].every(action => enabled.some(step => step.some(item => uses(action).test(item))));
   });
+  if (live) return true;
+  // Ruled out only when both steps were found where this reader understands them.
+  return placed.init && placed.analyze ? false : 'unsure';
 }
 
 // The binding's policy as committed on the default branch: { policy, required_checks, source } where
@@ -373,7 +396,8 @@ function statusOf(section) {
 // each setting is 'enabled' | 'disabled' | 'not-on-plan' | 'unreadable', `binding` is the programme
 // binding on the default branch ({ status: 'ok', text } | { status: 'missing' } |
 // { status: 'unreadable' }), and `advanced_codeql` names a default-branch workflow that runs CodeQL
-// itself (null for none, 'unreadable'; read only when default setup is off); or { ok: false, reason }.
+// itself (null for none, 'unreadable'; read only when default setup is off; `codeql_unplaced` names a
+// workflow whose CodeQL steps could not be placed, which reads unreadable); or { ok: false, reason }.
 // Without admin rights GitHub hides these settings, so they read unreadable.
 function ghSecurityReader(slug, { spawn = childProcess.spawnSync } = {}) {
   const repository = ghRun([`repos/${slug}`], spawn);
@@ -414,6 +438,7 @@ function ghSecurityReader(slug, { spawn = childProcess.spawnSync } = {}) {
   };
   const binding = committed(governance.BINDING_FILE);
   let advancedCodeql = null;
+  let unplaced = null;
   if (codeScanning === 'disabled') {
     const listing = branch ? ghRun([`repos/${slug}/contents/.github/workflows?ref=${encodeURIComponent(branch)}`], spawn) : { ok: false, reason: 'no-branch' };
     if (!listing.ok) advancedCodeql = listing.reason === 'not-found' ? null : 'unreadable';
@@ -423,8 +448,11 @@ function ghSecurityReader(slug, { spawn = childProcess.spawnSync } = {}) {
       for (const name of names.slice(0, 50)) {
         const file = committed(`.github/workflows/${name}`);
         if (file.status !== 'ok') { advancedCodeql = 'unreadable'; break; }
-        if (runsCodeql(file.text)) { advancedCodeql = name; break; }
+        const runs = runsCodeql(file.text);
+        if (runs === true) { advancedCodeql = name; break; }
+        if (runs === 'unsure' && unplaced === null) unplaced = name;
       }
+      if (unplaced !== null && advancedCodeql === null) advancedCodeql = 'unreadable';
       if (names.length > 50 && advancedCodeql === null) advancedCodeql = 'unreadable';
     }
   }
@@ -441,6 +469,7 @@ function ghSecurityReader(slug, { spawn = childProcess.spawnSync } = {}) {
     private_reporting: privateReporting,
     binding,
     advanced_codeql: advancedCodeql,
+    ...(unplaced !== null && advancedCodeql === 'unreadable' ? { codeql_unplaced: unplaced } : {}),
   };
 }
 
@@ -534,10 +563,10 @@ function applySecurity(root, result, { writer = ghSecurityWriter, fileWriter = w
     if (values.some(item => item === 'disabled' || item === false)) stillOff.push(entry.setting);
     else unconfirmed.push(entry.setting);
   }
-  // GitHub can answer "needs Code Security" for default setup just after Code Security went on, while
-  // the change takes effect. Once Code Security reads back on, that answer is not "not on this plan":
-  // CodeQL is still off, so the run is unverified and the next check looks again.
-  const paidOn = settings.some(entry => entry.ok && entry.setting === 'code_security') && !unconfirmed.includes('code_security') && !stillOff.includes('code_security');
+  // GitHub can answer "needs Code Security" for default setup just after Code Security was turned on,
+  // while the change takes effect. That answer is then not "not on this plan": CodeQL is still off,
+  // so the run is unverified and the next check looks again.
+  const paidOn = settings.some(entry => entry.ok && entry.setting === 'code_security');
   if (paidOn && settings.some(entry => entry.setting === 'code_scanning' && entry.reason === 'not-on-plan')) {
     unavailable = unavailable.filter(setting => setting !== 'code_scanning');
     unconfirmed.push('code_scanning');
@@ -569,11 +598,13 @@ function describeOutcome(slug, root, result, outcome) {
     const label = SETTING_LABELS[entry.setting] || entry.setting;
     if (entry.ok) lines.push(`- ${slug}: ${label} turned on.`);
     else if (UNAVAILABLE.includes(entry.reason) && (outcome.unavailable || []).includes(entry.setting)) lines.push(`- ${slug}: ${label} left alone: GitHub does not allow it here (${entry.reason === 'not-on-plan' ? 'not on this plan' : 'an organisation or enterprise policy'}).`);
+    else if (entry.setting === 'code_scanning' && entry.reason === 'not-on-plan') lines.push(`- ${slug}: ${label} not turned on yet: GitHub answered that it needs Code Security, which was just turned on; run this again shortly.`);
     else lines.push(`- ${slug}: ${label} not turned on (${entry.reason}).`);
   }
   for (const entry of outcome.files) lines.push(`- ${root}: ${entry.file} ${entry.result}${entry.result === 'written' ? '; commit it through a pull request' : ''}.`);
   const wrote = outcome.settings.some(entry => entry.ok);
-  const unconfirmed = outcome.unconfirmed || [];
+  // Only settings that were written can fail to read back.
+  const unconfirmed = (outcome.unconfirmed || []).filter(key => outcome.settings.some(entry => entry.ok && entry.setting === key));
   if (outcome.still_off.length) lines.push(`- ${slug}: reading back still shows off: ${outcome.still_off.map(key => SETTING_LABELS[key] || key).join(', ')}.`);
   if (unconfirmed.length) lines.push(`- ${slug}: could not read back: ${unconfirmed.map(key => SETTING_LABELS[key] || key).join(', ')}; the change is unverified, so run the check again.`);
   // Only when every successful write was itself read back on, and nothing else failed.
@@ -654,7 +685,9 @@ function dependencySecurity(root, { offline = false, reader = ghSecurityReader, 
   checks.S4 = off.length ? { status: 'drift', details: off.flatMap(item => item.details) }
     : [scanning, pushProtection].find(item => item.status !== 'ok') || scanning;
   checks.S5 = online && advanced === 'unreadable' && read.code_scanning === 'disabled'
-    ? { status: 'unverified', details: ['the default branch\'s workflows could not be read, so an advanced CodeQL setup cannot be ruled out; default setup stays off'] }
+    ? { status: 'unverified', details: [read.codeql_unplaced
+      ? `.github/workflows/${read.codeql_unplaced} has CodeQL init and analyze steps Toolkit could not place, so an advanced CodeQL setup cannot be ruled out; default setup stays off, so check that workflow by hand`
+      : 'the default branch\'s workflows could not be read, so an advanced CodeQL setup cannot be ruled out; default setup stays off'] }
     : online && advanced && read.code_scanning === 'disabled'
       ? { status: 'ok', details: [`CodeQL runs from .github/workflows/${advanced} (advanced setup), so default setup stays off`] }
       : settingCheck(value('code_scanning'), 'CodeQL code scanning');

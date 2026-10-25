@@ -165,6 +165,8 @@ const MATRIX = [
     expect: { checks: { S5: 'drift' }, fixes: { code_scanning: true } } },
   { id: 'M14c the default branch\'s workflows are unreadable: default setup stays off', read: { code_scanning: 'disabled', advanced_codeql: 'unreadable' },
     expect: { status: 'unverified', checks: { S5: 'unverified' }, fixes: { code_scanning: false } } },
+  { id: 'M14d a workflow whose CodeQL steps cannot be placed: default setup stays off (I6)', read: { code_scanning: 'disabled', advanced_codeql: 'unreadable', codeql_unplaced: 'odd.yml' },
+    expect: { status: 'unverified', checks: { S5: 'unverified' }, details: { S5: [/odd\.yml has CodeQL init and analyze steps Toolkit could not place/] }, fixes: { code_scanning: false } } },
   { id: 'M15 a dependabot.yaml counts (I6)', files: { 'package.json': '{}', '.github/dependabot.yaml': COVERED },
     expect: { checks: { S3: 'ok' }, files: { dependabot: false } } },
   { id: 'M16 merged patch-minor, nothing in place yet (I3)', read: { allow_auto_merge: false, binding: merged(PATCH_MINOR) }, protection: CONFORMANT,
@@ -287,7 +289,7 @@ const APPLY = [
   { id: 'A14 Code Security written, default setup not on the plan, Code Security unreadable after: unverified (I4)', binding: binding(null, 'on'),
     before: reader({ ...PRIVATE, ...PAID_OFF, code_security: 'disabled', binding: merged(null, 'on') }), writer: () => [ok('code_security'), refused('code_scanning', 'not-on-plan')],
     after: reader({ ...PRIVATE, ...PAID_OFF, code_security: 'unreadable', binding: merged(null, 'on') }),
-    expect: { result: 'unverified', writes: 1, unconfirmed: ['code_security'], lines: [/could not read back: GitHub Code Security/], never: [/: read back\./] } },
+    expect: { result: 'unverified', writes: 1, unavailable: [], unconfirmed: ['code_security', 'code_scanning'], lines: [/could not read back: GitHub Code Security\;/, /CodeQL code scanning not turned on yet: GitHub answered that it needs Code Security/], never: [/: read back\./, /left alone/] } },
   { id: 'A15 Code Security written, default setup forbidden: failed, never "read back" (I5)', binding: binding(null, 'on'),
     before: reader({ ...PRIVATE, ...PAID_OFF, code_security: 'disabled', binding: merged(null, 'on') }), writer: () => [ok('code_security'), refused('code_scanning', 'forbidden')],
     after: reader({ ...PRIVATE, ...PAID_OFF, binding: merged(null, 'on') }),
@@ -299,7 +301,7 @@ const APPLY = [
   { id: 'A18 Code Security read back on, default setup then answered "not on the plan": unverified, never left alone (I4)', binding: binding(null, 'on'),
     before: reader({ ...PRIVATE, ...PAID_OFF, code_security: 'disabled', binding: merged(null, 'on') }), writer: () => [ok('code_security'), refused('code_scanning', 'not-on-plan')],
     after: reader({ ...PRIVATE, ...PAID_OFF, code_security: 'enabled', binding: merged(null, 'on') }),
-    expect: { result: 'unverified', writes: 1, unavailable: [], unconfirmed: ['code_scanning'], lines: [/could not read back: CodeQL code scanning/], never: [/: read back\./] } },
+    expect: { result: 'unverified', writes: 1, unavailable: [], unconfirmed: ['code_scanning'], lines: [/CodeQL code scanning not turned on yet: GitHub answered that it needs Code Security, which was just turned on/], never: [/: read back\./, /could not read back/, /left alone/, /\(not-on-plan\)/] } },
   { id: 'A17 a written setting with no read-back is never "read back" (I4)', before: reader(ALERTS_OFF), writer: () => [ok('alerts'), ok('something_new')], after: reader(),
     expect: { result: 'unverified', writes: 1, unconfirmed: ['something_new'], never: [/: read back\./] } },
 ];
@@ -413,6 +415,12 @@ test('SE-08: the reader only reads, hides nothing it could not see, and reads th
   assert.equal(codeql('codeql.yml'), 'codeql.yml');
   assert.equal(codeql('gone.yml'), 'unreadable');
   assert.equal(codeql('codeql.yml', CODEQL_WORKFLOW.replace('    steps:', '    if: false\n    steps:')), null, 'a switched-off job is not an advanced setup');
+  const odd = security.ghSecurityReader('o/c', { spawn: fakeGh({
+    'repos/o/c': repoRead, 'repos/o/c/code-scanning/default-setup': { state: 'not-configured' },
+    'repos/o/c/contents/.github/workflows?ref=main': [{ type: 'file', name: 'odd.yml' }],
+    'repos/o/c/contents/.github/workflows/odd.yml?ref=main': { encoding: 'base64', content: Buffer.from('on: push\nsteps:\n  - uses: github/codeql-action/init@v3\n  - uses: github/codeql-action/analyze@v3\n').toString('base64') },
+  }, []) });
+  assert.deepEqual([odd.advanced_codeql, odd.codeql_unplaced], ['unreadable', 'odd.yml'], 'CodeQL steps the reader cannot place are never ruled out (I6)');
   assert.equal(codeql('codeql.yml', CODEQL_WORKFLOW.replace(/^on:\n {2}push:\n {4}branches: \[main\]/, 'on: workflow_call')), 'codeql.yml', 'a reusable CodeQL workflow is an advanced setup');
   const steps = 'jobs:\n  analyze:\n    steps:\n      - uses: github/codeql-action/init@v3\n      - uses: github/codeql-action/analyze@v3\n';
   const indentless = 'on:\n  push:\njobs:\n  analyze:\n    runs-on: ubuntu-latest\n    steps:\n    - name: Initialise\n      uses: github/codeql-action/init@v3\n    - uses: github/codeql-action/analyze@v3\n';
@@ -429,7 +437,7 @@ test('SE-08: the reader only reads, hides nothing it could not see, and reads th
     ['on: push\njobs:\n  a:\n    steps:\n      - uses: github/codeql-action/init@v3\n', false, 'init only'],
     ['on: push\njobs:\n  a:\n    steps:\n      - uses: github/codeql-action/analyze@v3\n', false, 'analyze only'],
     ['on: push\njobs:\n  a:\n    steps:\n      - uses: github/codeql-action/init@v3\n  b:\n    steps:\n      - uses: github/codeql-action/analyze@v3\n', false, 'init and analyze in different jobs'],
-    [steps, false, 'no on: key'],
+    [steps, 'unsure', 'no on: key found, so nothing is ruled out'],
     [`on:\n  workflow_dispatch:\n${steps}`, false, 'manual trigger only'],
     [`on:\n  workflow_dispatch:\n  # push:\n${steps}`, false, 'a commented-out trigger'],
     [`on: workflow_dispatch\n# push\n${steps}`, false, 'a column-0 comment naming push'],
@@ -440,8 +448,16 @@ test('SE-08: the reader only reads, hides nothing it could not see, and reads th
     [job('    if: ${{ false }}\n'), false, 'a job switched off with if: ${{ false }}'],
     ['on: push\njobs:\n  a:\n    steps:\n      - uses: github/codeql-action/init@v3\n        if: false\n      - uses: github/codeql-action/analyze@v3\n', false, 'a step switched off with if: false'],
     ['on: push\njobs:\n  a:\n    steps:\n      # - uses: github/codeql-action/init@v3\n      # - uses: github/codeql-action/analyze@v3\n      - uses: github/codeql-action/upload-sarif@v3\n', false, 'commented-out steps'],
-    ['on: push\njobs:\n  a:\n    steps:\n      - run: echo "uses: github/codeql-action/init@v3 uses: github/codeql-action/analyze@v3"\n', false, 'text inside a run step'],
-    ['on: push\njobs:\n  a:\n    steps:\n      - run: |\n          - uses: github/codeql-action/init@v3\n          - uses: github/codeql-action/analyze@v3\n', false, 'lines inside a run script'],
+    ['on: push\njobs:\n  a:\n    steps:\n      - run: echo "uses: github/codeql-action/init@v3 uses: github/codeql-action/analyze@v3"\n', 'unsure', 'step text inside a run step cannot be placed, so it is never ruled out'],
+    ['on: push\njobs:\n  a:\n    steps:\n      - run: |\n          - uses: github/codeql-action/init@v3\n          - uses: github/codeql-action/analyze@v3\n', 'unsure', 'step lines inside a run script cannot be placed either'],
+    ['on: push\njobs:\n  a:\n    steps:\n      - run: |2-\n          - uses: github/codeql-action/init@v3\n          - uses: github/codeql-action/analyze@v3\n', 'unsure', 'a |2- script header'],
+    ['on: push\njobs:\n  a:\n    steps:\n      - name: >-\n          Initialise\n          CodeQL\n        uses: github/codeql-action/init@v3\n      - uses: github/codeql-action/analyze@v3\n', true, 'a folded name on the step\'s - line'],
+    [`  on: push\n  jobs:\n    analyze:\n      steps:\n        - uses: github/codeql-action/init@v3\n        - uses: github/codeql-action/analyze@v3\n`, true, 'an indented document'],
+    [`---\n  on: push\n  jobs:\n    analyze:\n      steps:\n        - uses: github/codeql-action/init@v3\n        - uses: github/codeql-action/analyze@v3\n`, true, 'an indented document after ---'],
+    [`on: [\n  push,\n  pull_request\n]\n${steps}`, true, 'a flow trigger list over several lines'],
+    [`on: {\n  workflow_dispatch: {}\n}\n${steps}`, false, 'a several-line flow trigger with dispatch only'],
+    [`on:\n${steps}`, 'unsure', 'an empty on: cannot be placed'],
+    ['on: push\nsteps:\n  - uses: github/codeql-action/init@v3\n  - uses: github/codeql-action/analyze@v3\n', 'unsure', 'steps outside any job'],
     ['on: push\njobs:\n  a:\n    steps:\n      - uses: github/codeql-action/upload-sarif@v3\n', false, 'upload-sarif for another scanner'],
   ]) assert.equal(security.runsCodeql(text), runs, why);
   // A default ref GitHub cannot resolve is unreadable, never "not merged".
