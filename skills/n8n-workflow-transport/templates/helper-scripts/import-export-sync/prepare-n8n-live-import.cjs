@@ -2,7 +2,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 const {
   N8nPortableWorkflowError,
+  assertTargetInstanceSettings,
   buildPortableCredentialDeclaration,
+  keepTargetInstanceSettings,
   preparePortableWorkflow,
 } = require('./n8n-portable-workflow.cjs');
 
@@ -214,6 +216,16 @@ function parsePortableArgs(argv) {
   return options;
 }
 
+// An import replaces the whole workflow, settings included, so say exactly what the payload carries
+// for the two instance-only settings.
+function instanceSettingsLine(dropped, kept) {
+  const parts = [];
+  if (kept.length > 0) parts.push(`kept the target's own ${kept.join(', ')}`);
+  if (dropped.length > 0) parts.push(`left out Git's ${dropped.join(', ')}`);
+  if (parts.length === 0) return 'Instance-only settings: none on the target or in Git; the import sets no MCP exposure or error workflow.';
+  return `Instance-only settings: ${parts.join('; ')}. MCP exposure and the error workflow end up exactly as the target has them.`;
+}
+
 function safePortableResult(result) {
   return {
     schemaVersion: 1,
@@ -267,7 +279,8 @@ function preparePortableImport(options) {
     });
     writeJson(options.output, result.preparedWorkflow);
     writeJson(options.result, { result: 'PASS', code: 'N8N_IMPORT_READY', ...safePortableResult(result) });
-    console.log(`Prepared inactive portable import payload: ${options.output}`);
+    console.log(`Prepared unpublished portable import payload: ${options.output}`);
+    console.log(instanceSettingsLine(result.droppedSettings, result.keptTargetSettings));
     console.log(`Credential resolution: ${result.credentialResult.resolvedCount} resolved, ${result.credentialResult.issues.length} unresolved.`);
     return result;
   } catch (error) {
@@ -477,11 +490,14 @@ function main() {
   const { restored, missed } = restoreCredentials(workflow, workflowBindings, migrationMap);
   const liveWorkflow = liveWorkflowPath && fs.existsSync(liveWorkflowPath) ? readWorkflow(liveWorkflowPath) : null;
   const restoredWebhookIds = restoreLiveWebhookIds(workflow, liveWorkflow);
+  const instanceSettings = keepTargetInstanceSettings(workflow, liveWorkflow);
+  assertTargetInstanceSettings(workflow, liveWorkflow);
 
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   fs.writeFileSync(outputPath, JSON.stringify(workflow, null, 2) + '\n');
 
   console.log(`Prepared ${outputPath} with ${restored} credential binding(s) and ${restoredWebhookIds} live webhookId(s) restored.`);
+  console.log(instanceSettingsLine(instanceSettings.dropped.filter((key) => !instanceSettings.kept.includes(key)), instanceSettings.kept));
   if (missed.length) {
     console.warn(`Skipped ${missed.length} binding(s) with no matching node: ${missed.join(', ')}`);
   }
@@ -496,6 +512,7 @@ module.exports = {
   selectBindingsWithMeta,
   restoreCredentials,
   restoreLiveWebhookIds,
+  instanceSettingsLine,
   isStaleNodeIdBinding,
   preparePortableImport,
   parsePortableArgs,

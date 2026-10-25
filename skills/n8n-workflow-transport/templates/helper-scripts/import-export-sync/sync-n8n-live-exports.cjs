@@ -1082,6 +1082,9 @@ function main() {
       reviewedSourceUpdate: options.reviewedSourceUpdate,
     });
     const cleanWorkflow = exportResult.workflow;
+    if (exportResult.droppedSettings.length > 0) {
+      writeStep('SETTING', `${path.basename(target.workflowFile)} left out instance-only setting(s) ${exportResult.droppedSettings.join(', ')}; every other setting is kept.`);
+    }
     receiptWorkflows.push({ workflowFile: relativePath(target.workflowFile), workflowName: cleanWorkflow.name || '' });
     portableCredentialDocument = mergeCredentialDeclarationDocument(portableCredentialDocument, exportResult.declaration);
     const previousSize = fs.existsSync(target.workflowFile) ? fs.statSync(target.workflowFile).size : 0;
@@ -1098,7 +1101,10 @@ function main() {
       validateContent(candidateContent) {
         const raw = JSON.parse(candidateContent.toString('utf8'));
         const verification = Array.isArray(raw) ? raw[0] : raw.workflow || raw;
-        if (verification.active !== false) throw transactionError('Staged canonical workflow must remain inactive.');
+        if (verification.active !== false) throw transactionError('Staged canonical workflow must remain unpublished.');
+        if (verification.activeVersionId !== undefined && verification.activeVersionId !== null) {
+          throw transactionError('Staged canonical workflow must not carry a published version.');
+        }
       },
     });
   }
