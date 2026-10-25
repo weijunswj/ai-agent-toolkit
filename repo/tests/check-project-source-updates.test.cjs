@@ -9,6 +9,15 @@ const { spawn } = require('node:child_process');
 const test = require('node:test');
 const reviewState = require('../scripts/source-watch-review-state.cjs');
 
+// Every temp folder a test makes is removed after the file's tests, also when they fail.
+const tempFolders = [];
+test.after(() => { for (const dir of tempFolders) fs.rmSync(dir, { recursive: true, force: true }); });
+function tempFolder(prefix) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  tempFolders.push(dir);
+  return dir;
+}
+
 const repoRoot = path.resolve(__dirname, '..', '..');
 const scriptPath = path.join(repoRoot, 'repo', 'scripts', 'check-project-source-updates.cjs');
 const sourceLockRel = 'repo/source-watch/provenance/example/SOURCE-LOCK.json';
@@ -89,7 +98,7 @@ function reviewStateDoc(reviewedThroughSha) {
 }
 
 function tempWorkspace() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'source-watch-test-'));
+  return tempFolder('source-watch-test-');
 }
 
 async function withMockGitHub(sha, fn) {

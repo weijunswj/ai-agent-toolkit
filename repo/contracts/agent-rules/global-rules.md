@@ -92,7 +92,7 @@ Keep the diff narrow and in style. Change order: no change, reuse, smallest root
 
 Status, reports, plans and notes go under an existing documented path, never new root `STATUS.md`, `REPORT.md` or `PLAN.md`. Broad docs work merges durable findings into the smallest canonical home without losing decisions, validation, risks, provenance, ownership or licensing, and reports what moved or was deleted.
 
-Put scratch first in a gitignored repo/worktree temp folder (e.g. `.tmp/`); use a user-profile folder only for an outside path or more permission, never a drive root.
+Put scratch first in a gitignored repo/worktree temp folder (e.g. `.tmp/`, worktrees in `.tmp/worktrees/<lane>-<gate>-<sha>`); use a user-profile folder only for an outside path or more permission, never a drive root.
 
 When a file says it is generated, edit its source, template or generator and regenerate, unless the user asks for generated output only or a manifest marks it directly maintained. Use plain ASCII punctuation in agent-facing and machine-read text unless the file already uses another character set.
 

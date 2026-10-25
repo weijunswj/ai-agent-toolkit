@@ -7,8 +7,17 @@ const os = require('node:os');
 const path = require('node:path');
 const config = require('../scripts/codex-delegation-config.cjs');
 
+// Every temp folder a test makes is removed after the file's tests, also when they fail.
+const tempFolders = [];
+test.after(() => { for (const dir of tempFolders) fs.rmSync(dir, { recursive: true, force: true }); });
+function tempFolder(prefix) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  tempFolders.push(dir);
+  return dir;
+}
+
 test('removal preview derives V2 affected keys from owned block when runtime is unknown', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-review-regression-'));
+  const root = tempFolder('toolkit-review-regression-');
   const filePath = path.join(root, '.codex', 'config.toml');
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, `[features.multi_agent_v2]\n${config.expectedV2Block(1, '\n')}`);
@@ -19,7 +28,7 @@ test('removal preview derives V2 affected keys from owned block when runtime is 
 });
 
 test('removal preview derives V2 affected keys from owned block when runtime is disabled', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-review-regression-'));
+  const root = tempFolder('toolkit-review-regression-');
   const filePath = path.join(root, '.codex', 'config.toml');
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, `[features.multi_agent_v2]\n${config.expectedV2Block(1, '\n')}`);
@@ -31,7 +40,7 @@ test('removal preview derives V2 affected keys from owned block when runtime is 
 
 test('approved V2 removal executes under unknown and disabled runtime detection', () => {
   for (const runtime of [config.RUNTIMES.UNKNOWN, config.RUNTIMES.DISABLED]) {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-review-removal-execute-'));
+    const root = tempFolder('toolkit-review-removal-execute-');
     const filePath = path.join(root, '.codex', 'config.toml');
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
     fs.writeFileSync(filePath, `[features.multi_agent_v2]\n${config.expectedV2Block(1, '\n')}`);
