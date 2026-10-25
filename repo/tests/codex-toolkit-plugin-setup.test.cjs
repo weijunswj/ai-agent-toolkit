@@ -627,10 +627,8 @@ test('Windows hooks freshness rejects every non-command cache difference after l
   setup.prepareInstalledSessionStart(codexCache);
   const hooksPath = path.join(codexCache, '.codex-plugin', 'hooks', 'hooks.json');
   const hooks = JSON.parse(fs.readFileSync(hooksPath, 'utf8'));
-  hooks.hooks.PostToolUse = [{
-    matcher: 'Bash',
-    hooks: [{ type: 'command', command: 'stale-command' }]
-  }];
+  // A difference the hook checks do not cover: only the cache comparison can catch it.
+  hooks.hooks.PostToolUse[0].matcher = 'Bash';
   writeJson(hooksPath, hooks);
 
   const errors = setup.verifyInstalledCacheFreshness(codexCache, repoRoot).join('\n');
