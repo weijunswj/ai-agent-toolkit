@@ -21,11 +21,11 @@ Services (failed systemd units, unhealthy or restarting containers, containers t
 - **Out-of-memory kills:** new kills since the last pulse, from the kernel counter, compared within one boot.
 - **Uptime and reboots:** a reboot since the last pulse is a notice and sends an alert.
 - **Pulse continuity:** a gap of more than `PULSE_STALE_MINUTES` whole minutes (default 60, for the hourly timer) means the host or timer was down. `--status` uses the same limit.
-- **systemd and Docker:** reported as not applicable, with the reason, when missing, and every other row is still classified; a command that fails is a degraded row. Containers listed in `DOCKER_EXITED_OK_CONTAINERS` may stay exited.
+- **systemd and Docker:** reported as not applicable, with the reason, when missing, and every other row is still classified; a command that fails is a degraded row. Containers listed in `DOCKER_EXITED_OK_CONTAINERS` may stay exited. When Docker checks are off (installed without `--with-docker`), the Docker rows read "Not checked" and are not degraded: that is the owner's choice. The pulse leaves its own test units out of the failed-unit list.
 - **Health URLs:** plain URLs only; a URL with credentials or token-like values is skipped and reported. Without `curl` they are reported as not checked, never as failing.
 
 Thresholds are per-host settings in the env file. Defaults suit a small single-purpose VPS; tune them to the host and record why.
 
 ## Alerts
 
-An alert goes out when the state, the services or the names of the failing services change, at once on `EMERGENCY_PRESSURE` (every run while it lasts), on a notice such as a reboot, and again on the next run after a failed delivery. A failed delivery stays in the report, is never recorded as sent, and makes that pulse `OBSERVABILITY_DEGRADED`, so the failure heartbeat URL and `--status` show it too.
+An alert goes out when the state, the services or the names of the failing services change, at once on `EMERGENCY_PRESSURE` (every run while it lasts), on a notice such as a reboot, and again on the next run after a failed delivery. A failed delivery stays in the report, is never recorded as sent, and makes that pulse `OBSERVABILITY_DEGRADED`, so the failure heartbeat URL and `--status` show it too. With no failure URL set, that pulse skips the heartbeat ping instead, so the off-host monitor raises its missed-ping alarm.

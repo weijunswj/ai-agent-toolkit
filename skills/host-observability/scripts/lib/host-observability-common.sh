@@ -46,14 +46,15 @@ safe_transport_url() {
 
 # A URL that carries a secret (webhook or heartbeat): https, or plain http only to this host itself.
 secret_transport_url() {
+  local authority
   safe_transport_url "$1" || return 1
   case "$1" in
     https://*) return 0 ;;
-    'http://127.0.0.1' | 'http://127.0.0.1:'* | 'http://127.0.0.1/'*) return 0 ;;
-    'http://localhost' | 'http://localhost:'* | 'http://localhost/'*) return 0 ;;
-    'http://[::1]' | 'http://[::1]:'* | 'http://[::1]/'*) return 0 ;;
   esac
-  return 1
+  # Plain http: the whole host part must be this host, with an optional port and nothing else.
+  authority="${1#http://}"
+  authority="${authority%%/*}"
+  [[ "$authority" =~ ^(127\.0\.0\.1|localhost|\[::1\])(:[0-9]+)?$ ]]
 }
 
 is_uint() { case "$1" in ''|*[!0-9]*) return 1 ;; *) return 0 ;; esac; }

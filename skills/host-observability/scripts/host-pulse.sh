@@ -37,6 +37,11 @@ esac
 [ "$#" -le 1 ] || { usage >&2; exit 2; }
 
 HOST_PULSE_ROOT="${HOST_PULSE_ROOT:-/var/lib/host-observability}"
+# The pulse creates and tightens folders under HOST_PULSE_ROOT, so it only accepts its own folder.
+case "$HOST_PULSE_ROOT" in
+  /*/host-observability) ;;
+  *) printf 'HOST_PULSE_ROOT must be an absolute path ending in /host-observability (got: %s)\n' "$HOST_PULSE_ROOT" >&2; exit 2 ;;
+esac
 REPORT_DIR="$HOST_PULSE_ROOT/reports"
 STATE_DIR="$HOST_PULSE_ROOT/state"
 STATE_FILE="$STATE_DIR/pulse.state"
@@ -240,6 +245,8 @@ collect_systemd() {
     add_row OBSERVABILITY_DEGRADED 'systemd units' 'systemctl list-units failed'
     return
   fi
+  # The pulse's own test units are left out: a failed test alert is reported where it was run.
+  failed="$(printf '%s\n' "$failed" | awk 'NF && $1 !~ /^host-pulse-test-(alert|heartbeat)\.service$/')"
   count="$(printf '%s\n' "$failed" | awk 'NF { n++ } END { print n + 0 }')"
   names="$(printf '%s\n' "$failed" | awk 'NF { print $1 }' | head -n 10 | paste -sd ',' -)"
   if [ "$count" -gt 0 ]; then add_service FAILING 'systemd units' "$count failed: $names" "systemd:$names"
@@ -248,6 +255,11 @@ collect_systemd() {
 
 collect_docker() {
   local listing bad restarts prev delta ids
+  if [ "${DOCKER_ACCESS:-}" = no ]; then
+    add_service N/A 'Docker containers' 'Not checked: Docker access is off (owner choice; it equals root on this host)'
+    add_row NORMAL 'Container restarts' 'Not checked: Docker access is off (owner choice)'
+    return
+  fi
   if ! have docker; then
     add_service N/A 'Docker containers' 'Not applicable: Docker is not installed'
     add_row NORMAL 'Container restarts' 'Not applicable: Docker is not installed'
@@ -352,6 +364,12 @@ ping_heartbeat() {
   case "$pre" in
     EMERGENCY_PRESSURE|OBSERVABILITY_DEGRADED) [ -n "${HEARTBEAT_FAIL_URL:-}" ] && url="$HEARTBEAT_FAIL_URL" ;;
   esac
+  # A failed alert with no failure URL: skip the ping, so the off-host monitor raises its
+  # missed-ping alarm and the owner still hears that something is wrong.
+  if [ "${NEW_PENDING:-0}" = 1 ] && [ -z "${HEARTBEAT_FAIL_URL:-}" ]; then
+    add_row OBSERVABILITY_DEGRADED 'Off-host heartbeat' 'Not pinged: the alert failed to send and no HEARTBEAT_FAIL_URL is set, so the off-host monitor raises its missed-ping alarm'
+    return
+  fi
   if curl_private "$url" -o /dev/null; then
     if [ "$url" = "$HEARTBEAT_URL" ]; then add_row NORMAL 'Off-host heartbeat' 'Pinged'
     else add_row NORMAL 'Off-host heartbeat' 'Pinged the failure URL'; fi
@@ -403,7 +421,7 @@ prepare_dirs() {
 
 # --status: the last pulse as recorded, judged by its age. Never reports a missing or old pulse as fine.
 state_unreadable() {
-  [ -e "$HOST_PULSE_ROOT" ] || return 1
+  [ -e "$HOST_PULSE_ROOT" ] || [ -L "$HOST_PULSE_ROOT" ] || return 1
   [ -r "$HOST_PULSE_ROOT" ] && [ -x "$HOST_PULSE_ROOT" ] || return 0
   [ ! -e "$STATE_DIR" ] || { [ -r "$STATE_DIR" ] && [ -x "$STATE_DIR" ]; } || return 0
   [ ! -e "$STATE_FILE" ] || [ -r "$STATE_FILE" ] || return 0
@@ -494,7 +512,7 @@ PENDING="$(state_get "$STATE_FILE" alert_pending)"
 DELIVERY='not needed (no change since the last alert)'
 NEW_SENT="$LAST_SENT"; NEW_PENDING=0
 if [ "$ALERTING_READY" -ne 1 ]; then
-  DELIVERY='not attempted: no alert channel set up'
+  DELIVERY='not attempted: alerting is not ready (see the Alerting row)'
 elif [ "$PRE_STATE" = EMERGENCY_PRESSURE ] || [ "$SIGNATURE" != "$LAST_SENT" ] || [ "${PENDING:-0}" = 1 ] || [ "${#NOTICES[@]}" -gt 0 ]; then
   BODY="$(mktemp "$STATE_DIR/.alert.XXXXXX")"
   alert_body "$PRE_STATE" "$SERVICES" > "$BODY"

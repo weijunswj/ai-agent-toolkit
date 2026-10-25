@@ -90,7 +90,7 @@ function makeHost(t, options = {}) {
     '  *) exit 0 ;;',
     'esac'
   ].join('\n'));
-  const root = path.join(dir, 'root');
+  const root = path.join(dir, 'host-observability');
   return { dir, proc, stub, tools, root, systemdDir, stateFile: path.join(root, 'state', 'pulse.state') };
 }
 
@@ -212,19 +212,31 @@ const stateMatrix = [
     report: [/Docker containers \| N\/A \| Not applicable: Docker is not installed/, /Container restarts \| NORMAL \| Not applicable/, /systemd units \| OK/] },
   { name: 'systemd absent, memory over the review threshold', host: { systemd: false, memAvailKb: 800000 }, expect: 'REVIEW_CAPACITY',
     report: [/systemd units \| N\/A \| Not applicable: systemd is not running/, /Docker containers \| OK/] },
+  { name: 'Docker access turned off by the owner, disk over the upgrade threshold', env: { DOCKER_ACCESS: 'no' }, expect: 'UPGRADE_OR_REBALANCE_REQUIRED',
+    report: [/Docker containers \| N\/A \| Not checked: Docker access is off \(owner choice; it equals root on this host\)/, /Container restarts \| NORMAL \| Not checked/],
+    host: { diskPct: 90, docker: 'fail' } },
+  { name: 'the pulse leaves out its own failed test units', host: { failedUnits: 'host-pulse-test-alert.service loaded failed failed Test\n' }, expect: 'NORMAL',
+    report: [/systemd units \| OK \| No failed units/, /^Services: OK$/m] },
   { name: 'kernel without an oom counter, swap over the upgrade threshold', host: { oom: null, swapFreeKb: 400000 }, expect: 'UPGRADE_OR_REBALANCE_REQUIRED',
     report: [/Out-of-memory kills \| NORMAL \| Not applicable: this kernel has no oom_kill counter/] },
   // Row 7: alert transport fails: the report keeps it, it is never marked sent, and the pulse is degraded.
   { name: 'alert transport fails', responses: { '/hook': 500 }, env: failURL, expect: 'OBSERVABILITY_DEGRADED',
     report: [/Alert delivery \| OBSERVABILITY_DEGRADED \| Failed \(webhook=failed\)/, /## Alert delivery\n\nFAILED \(webhook=failed\); the next pulse retries/],
     check: ({ host, rx }) => { assert.equal(readState(host).alert_pending, '1'); assert.equal(readState(host).last_sent_signature, ''); assert.deepEqual(pinged(rx), ['hb-fail']); } },
+  { name: 'alert transport fails with no failure heartbeat URL: the ping is skipped', responses: { '/hook': 500 }, expect: 'OBSERVABILITY_DEGRADED',
+    report: [/Off-host heartbeat \| OBSERVABILITY_DEGRADED \| Not pinged: the alert failed to send and no HEARTBEAT_FAIL_URL is set/],
+    check: ({ rx }) => assert.deepEqual(pinged(rx), [], 'the off-host monitor misses a ping and raises its alarm') },
   { name: 'unsupported webhook format', env: { ALERT_WEBHOOK_FORMAT: 'xml' }, expect: 'OBSERVABILITY_DEGRADED',
     report: [/Alerting \| OBSERVABILITY_DEGRADED \| Not set up: unknown ALERT_WEBHOOK_FORMAT xml/], check: ({ rx }) => assert.equal(hooks(rx).length, 0) },
   { name: 'plain http webhook to another host', env: { ALERT_WEBHOOK_URL: `http://alerts.example.com/hook/${SECRET_HOOK}` }, expect: 'OBSERVABILITY_DEGRADED',
     report: [/Not set up: ALERT_WEBHOOK_URL must be an https URL/] },
+  { name: 'plain http webhook disguised as this host', env: { ALERT_WEBHOOK_URL: `http://localhost:1@alerts.example.com/hook/${SECRET_HOOK}` }, expect: 'OBSERVABILITY_DEGRADED',
+    report: [/Not set up: ALERT_WEBHOOK_URL must be an https URL/], check: ({ rx }) => assert.equal(hooks(rx).length, 0) },
+  { name: 'plain http heartbeat disguised as this host', env: { HEARTBEAT_URL: 'http://127.0.0.1.example.com/ping' }, expect: 'OBSERVABILITY_DEGRADED',
+    report: [/Off-host heartbeat \| OBSERVABILITY_DEGRADED \| Heartbeat URL must be https/] },
   // Row 8: no alert channel chosen: reports kept locally, alerting degraded, never NORMAL.
   { name: 'no alert channel chosen', env: { ALERT_CHANNELS: '' }, expect: 'OBSERVABILITY_DEGRADED',
-    report: [/Alerting \| OBSERVABILITY_DEGRADED \| Not set up: no alert channel chosen/, /not attempted: no alert channel set up/],
+    report: [/Alerting \| OBSERVABILITY_DEGRADED \| Not set up: no alert channel chosen/, /not attempted: alerting is not ready \(see the Alerting row\)/],
     check: ({ rx }) => assert.equal(hooks(rx).length, 0) },
   { name: 'alert channel set to none', env: { ALERT_CHANNELS: 'none' }, expect: 'OBSERVABILITY_DEGRADED', report: [/Not set up: alert channel set to none/] },
   { name: 'telegram chosen without its settings', env: { ALERT_CHANNELS: 'telegram' }, expect: 'OBSERVABILITY_DEGRADED', report: [/TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is empty/] },
@@ -281,6 +293,17 @@ for (const [ageSeconds, expect] of [[59 * 60, 'NORMAL'], [3630, 'NORMAL'], [3660
     if (expect !== 'NORMAL') assert.match(status.stdout, new RegExp(`${Math.floor(ageSeconds / 60)} minutes old \\(limit 60\\)`));
   });
 }
+
+test('the pulse refuses a state folder that is not its own', { skip }, async (t) => {
+  const host = makeHost(t);
+  for (const root of ['/', '/etc', 'relative/host-observability', path.join(host.dir, 'state')]) {
+    for (const args of [[], ['--status'], ['--test-alert']]) {
+      const result = await run(pulseScript, args, host, { HOST_PULSE_ROOT: root });
+      assert.equal(result.code, 2, `${root} ${args}`);
+      assert.match(result.stderr, /HOST_PULSE_ROOT must be an absolute path ending in \/host-observability/);
+    }
+  }
+});
 
 test('--status with no pulse recorded is degraded', { skip }, async (t) => {
   const host = makeHost(t);
@@ -444,26 +467,45 @@ function installerHost(t, uid, options = {}) {
   linkRealTools(tools, options.uname ? ['uname'] : []);
   writeExec(path.join(stub, 'id'), `echo ${uid}`);
   if (options.uname) writeExec(path.join(stub, 'uname'), `echo ${options.uname}`);
+  // A fake systemctl that logs each call and remembers whether the timer is enabled, like the real one.
   if (options.systemctl !== false) {
     writeExec(path.join(stub, 'systemctl'), [
       `echo "$*" >> "${dir}/systemctl.log"`,
       `[ -n "\${FAIL_SYSTEMCTL:-}" ] && [ "$1" = "$FAIL_SYSTEMCTL" ] && exit 1`,
-      'exit 0'
+      'case "$1" in',
+      `  enable) touch "${dir}/timer-enabled" ;;`,
+      `  disable) rm -f "${dir}/timer-enabled" ;;`,
+      `  is-enabled) [ -e "${dir}/timer-enabled" ] ;;`,
+      'esac'
     ].join('\n'));
   }
+  // Fake getent, useradd and userdel that remember whether the host-pulse system user exists.
+  const userFile = path.join(dir, 'user-host-pulse');
+  if (options.userExists) fs.writeFileSync(userFile, '');
+  writeExec(path.join(stub, 'getent'), [
+    'case "$1" in',
+    `  group) ${options.dockerGroup ? 'echo "docker:x:999:"' : 'exit 2'} ;;`,
+    `  passwd) [ "$2" = host-pulse ] && [ -e "${userFile}" ] && echo "host-pulse:x:998:998::/nonexistent:/usr/sbin/nologin" ;;`,
+    '  *) exit 2 ;;',
+    'esac'
+  ].join('\n'));
+  writeExec(path.join(stub, 'useradd'), `echo "useradd $*" >> "${dir}/users.log"; touch "${userFile}"`);
+  writeExec(path.join(stub, 'userdel'), `echo "userdel $*" >> "${dir}/users.log"; rm -f "${userFile}"`);
   const env = {
     PATH: `${stub}:${tools}`,
     HOME: dir,
-    INSTALL_PREFIX: path.join(dir, 'prefix'),
-    CONFIG_DIR: path.join(dir, 'etc'),
-    HOST_PULSE_ROOT: path.join(dir, 'var'),
+    INSTALL_PREFIX: path.join(dir, 'lib', 'host-observability'),
+    CONFIG_DIR: path.join(dir, 'etc', 'host-observability'),
     SYSTEMD_UNIT_DIR: path.join(dir, 'units'),
     SYSTEMD_RUN_DIR: path.join(dir, 'run-systemd')
   };
+  for (const parent of ['lib', 'etc']) fs.mkdirSync(path.join(dir, parent));
   fs.mkdirSync(env.SYSTEMD_UNIT_DIR);
   if (options.systemdRunning !== false) fs.mkdirSync(env.SYSTEMD_RUN_DIR);
-  return { dir, tools, env };
+  return { dir, tools, env, userFile };
 }
+
+const usersLog = (host) => (fs.existsSync(path.join(host.dir, 'users.log')) ? fs.readFileSync(path.join(host.dir, 'users.log'), 'utf8') : '');
 
 function runInstaller(host, args, extra = {}) {
   return spawnSync(path.join(host.tools, 'bash'), [installScript, ...args], { encoding: 'utf8', env: { ...host.env, ...extra } });
@@ -471,7 +513,10 @@ function runInstaller(host, args, extra = {}) {
 
 function assertNothingInstalled(host) {
   assert.deepEqual(fs.readdirSync(host.env.SYSTEMD_UNIT_DIR), []);
-  for (const key of ['INSTALL_PREFIX', 'CONFIG_DIR', 'HOST_PULSE_ROOT']) assert.equal(fs.existsSync(host.env[key]), false, key);
+  for (const key of ['INSTALL_PREFIX', 'CONFIG_DIR']) assert.equal(fs.existsSync(host.env[key]), false, key);
+  assert.deepEqual(fs.readdirSync(path.join(host.dir, 'lib')), []);
+  assert.deepEqual(fs.readdirSync(path.join(host.dir, 'etc')), []);
+  assert.equal(fs.existsSync(host.userFile), false, 'no system user is left behind');
 }
 
 test('installer prints its plan and changes nothing without --install', { skip }, (t) => {
@@ -479,7 +524,10 @@ test('installer prints its plan and changes nothing without --install', { skip }
   const result = runInstaller(host, []);
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /^Plan \(nothing has been changed\):/);
-  assert.match(result.stdout, /runs as root with no capabilities/);
+  assert.match(result.stdout, /Create the system user host-pulse \(no login, no home folder\) for the service; --remove deletes it/);
+  assert.match(result.stdout, /The service runs as the unprivileged user host-pulse, with no\n\s+capabilities, a read-only view of the system/);
+  assert.match(result.stdout, /Docker checks OFF: the service cannot reach the Docker socket/);
+  assert.doesNotMatch(result.stdout, /runs as root|only to read the Docker socket/);
   assert.match(result.stdout, /Run again with --install/);
   assertNothingInstalled(host);
   assert.equal(fs.existsSync(path.join(host.dir, 'systemctl.log')), false);
@@ -510,6 +558,13 @@ test('installer refuses to install without root', { skip }, (t) => {
   assertNothingInstalled(host);
 });
 
+const sandboxLines = ['User=host-pulse', 'Group=host-pulse', 'StateDirectory=host-observability', 'StateDirectoryMode=0700', 'Environment=HOST_PULSE_ROOT=%S/host-observability',
+  'NoNewPrivileges=yes', 'CapabilityBoundingSet=', 'AmbientCapabilities=', 'PrivateTmp=yes', 'PrivateDevices=yes', 'ProtectSystem=strict',
+  'ProtectHome=yes', 'ProtectKernelTunables=yes', 'ProtectKernelModules=yes', 'ProtectKernelLogs=yes', 'ProtectControlGroups=yes',
+  'ProtectClock=yes', 'ProtectHostname=yes', 'RestrictNamespaces=yes', 'LockPersonality=yes', 'RestrictRealtime=yes', 'RestrictSUIDSGID=yes',
+  'SystemCallArchitectures=native', 'SystemCallFilter=@system-service', 'RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6', 'UMask=0077'];
+const lineRegExp = (line) => new RegExp(`^${line.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm');
+
 test('installer writes a hardened hourly timer, keeps one backup, and removes cleanly', { skip }, (t) => {
   const host = installerHost(t, 0);
   const first = runInstaller(host, ['--install']);
@@ -520,14 +575,10 @@ test('installer writes a hardened hourly timer, keeps one backup, and removes cl
   const pulseService = fs.readFileSync(path.join(units, 'host-pulse.service'), 'utf8');
   assert.match(pulseService, new RegExp(`^ExecStart=${host.env.INSTALL_PREFIX}/host-pulse\\.sh$`, 'm'));
   assert.match(pulseService, new RegExp(`^EnvironmentFile=-${host.env.CONFIG_DIR}/host-pulse\\.env$`, 'm'));
-  assert.match(pulseService, new RegExp(`^ReadWritePaths=${host.env.HOST_PULSE_ROOT}$`, 'm'));
-  assert.match(pulseService, /^# Root for the Docker socket/m);
-  for (const line of ['NoNewPrivileges=yes', 'CapabilityBoundingSet=', 'AmbientCapabilities=', 'PrivateTmp=yes', 'PrivateDevices=yes',
-    'ProtectSystem=strict', 'ProtectHome=read-only', 'ProtectKernelTunables=yes', 'ProtectKernelModules=yes', 'ProtectControlGroups=yes',
-    'RestrictSUIDSGID=yes', 'RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6', 'UMask=0077']) {
-    assert.match(pulseService, new RegExp(`^${line.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'), line);
-  }
-  assert.doesNotMatch(pulseService, /^User=|^ProtectSystem=full/m);
+  for (const line of sandboxLines) assert.match(pulseService, lineRegExp(line), line);
+  assert.match(pulseService, lineRegExp('Environment=DOCKER_ACCESS=no'));
+  assert.doesNotMatch(pulseService, /^DynamicUser=|^ProtectSystem=full|^ReadWritePaths=|^SupplementaryGroups=/m);
+  assert.doesNotMatch(pulseService, /^# Root/m);
   for (const name of ['alert', 'heartbeat']) {
     const testUnit = fs.readFileSync(path.join(units, `host-pulse-test-${name}.service`), 'utf8');
     assert.match(testUnit, new RegExp(`^ExecStart=${host.env.INSTALL_PREFIX}/host-pulse\\.sh --test-${name}$`, 'm'));
@@ -541,6 +592,8 @@ test('installer writes a hardened hourly timer, keeps one backup, and removes cl
   assert.equal(fs.statSync(envFile).mode & 0o777, 0o600);
   for (const file of ['host-pulse.sh', 'lib/host-observability-common.sh']) assert.ok(fs.existsSync(path.join(host.env.INSTALL_PREFIX, file)), file);
   assert.match(fs.readFileSync(path.join(host.dir, 'systemctl.log'), 'utf8'), /enable --now host-pulse\.timer/);
+  assert.match(usersLog(host), /^useradd --system --user-group --no-create-home --home-dir \/nonexistent --shell \/usr\/sbin\/nologin .*host-pulse$/m);
+  assert.match(first.stdout, /Created the system user host-pulse/);
 
   fs.writeFileSync(envFile, 'ALERT_CHANNELS=webhook\n');
   fs.chmodSync(envFile, 0o644);
@@ -554,6 +607,7 @@ test('installer writes a hardened hourly timer, keeps one backup, and removes cl
   const backups = path.join(host.env.CONFIG_DIR, 'backup');
   assert.deepEqual(fs.readdirSync(backups), ['previous']);
   assert.deepEqual(fs.readdirSync(path.join(backups, 'previous')).sort(), ['host-observability-common.sh', 'host-pulse.sh', ...unitNames].sort());
+  assert.equal(usersLog(host).match(/^useradd/gm).length, 1, 'later installs reuse the system user');
 
   const removed = runInstaller(host, ['--remove']);
   assert.equal(removed.status, 0, removed.stderr);
@@ -563,24 +617,90 @@ test('installer writes a hardened hourly timer, keeps one backup, and removes cl
   assert.ok(fs.existsSync(envFile), 'remove keeps the env file');
   assert.match(removed.stdout, /For a full removal, also delete .*host-pulse\.env/);
   assert.match(removed.stdout, /pause or delete that check too/);
+  assert.match(removed.stdout, /Deleted the system user host-pulse/);
+  assert.equal(fs.existsSync(host.userFile), false, 'remove deletes the system user it created');
+  assert.deepEqual(fs.readdirSync(host.env.CONFIG_DIR).sort(), ['host-pulse.env']);
+});
+
+test('installer reuses a system user it did not create and never deletes it', { skip }, (t) => {
+  const host = installerHost(t, 0, { userExists: true });
+  const plan = runInstaller(host, []);
+  assert.match(plan.stdout, /Use the existing system user host-pulse for the service/);
+  assert.equal(runInstaller(host, ['--install']).status, 0);
+  assert.equal(runInstaller(host, ['--remove']).status, 0);
+  assert.equal(usersLog(host), '');
+  assert.ok(fs.existsSync(host.userFile), 'a user the installer did not create is kept');
+});
+
+test('Docker checks are opt-in, and the plan says plainly that they equal root', { skip }, (t) => {
+  const noGroup = installerHost(t, 0);
+  for (const args of [['--with-docker'], ['--install', '--with-docker']]) {
+    const refused = runInstaller(noGroup, args);
+    assert.equal(refused.status, 1);
+    assert.match(refused.stderr, /--with-docker needs a docker group on this host, and there is none; nothing was changed/);
+    assertNothingInstalled(noGroup);
+  }
+  const host = installerHost(t, 0, { dockerGroup: true });
+  const plan = runInstaller(host, ['--with-docker']);
+  assert.equal(plan.status, 0, plan.stderr);
+  assert.match(plan.stdout, /Docker checks ON: the service joins the docker group\. Docker socket access is full control of\n\s+Docker, which equals full root on this host: the sandbox does not limit what Docker can be\n\s+asked to do/);
+  const installed = runInstaller(host, ['--install', '--with-docker']);
+  assert.equal(installed.status, 0, installed.stderr);
+  assert.match(installed.stdout, /Docker checks are on\. Docker socket access equals root on this host/);
+  for (const name of ['host-pulse.service', 'host-pulse-test-alert.service', 'host-pulse-test-heartbeat.service']) {
+    const unit = fs.readFileSync(path.join(host.env.SYSTEMD_UNIT_DIR, name), 'utf8');
+    assert.match(unit, lineRegExp('SupplementaryGroups=docker'), name);
+    assert.match(unit, lineRegExp('Environment=DOCKER_ACCESS=yes'), name);
+    assert.match(unit, /^# Docker checks on .*equals root on this host\.$/m, name);
+    for (const line of sandboxLines) assert.match(unit, lineRegExp(line), `${name}: ${line}`);
+  }
+});
+
+test('installer refuses folder settings it does not own, before changing anything', { skip }, (t) => {
+  const host = installerHost(t, 0);
+  for (const [key, value] of [['CONFIG_DIR', '/etc'], ['CONFIG_DIR', '/'], ['INSTALL_PREFIX', '/usr/local/lib'], ['INSTALL_PREFIX', 'relative/host-observability'],
+    ['CONFIG_DIR', '/etc/../host-observability'], ['SYSTEMD_UNIT_DIR', 'units']]) {
+    for (const args of [[], ['--install'], ['--remove']]) {
+      const result = runInstaller(host, args, { [key]: value });
+      assert.equal(result.status, 2, `${key}=${value} ${args}`);
+      assert.match(result.stderr, /nothing was changed/);
+    }
+  }
+  assertNothingInstalled(host);
+  assert.equal(fs.existsSync(path.join(host.dir, 'systemctl.log')), false);
+});
+
+test('an interrupted install is refused until its saved files are dealt with', { skip }, (t) => {
+  const host = installerHost(t, 0);
+  assert.equal(runInstaller(host, ['--install']).status, 0);
+  const saved = path.join(host.env.CONFIG_DIR, 'backup', 'rollback');
+  fs.mkdirSync(saved, { recursive: true });
+  fs.writeFileSync(path.join(saved, 'host-pulse.service'), 'the only copy\n');
+  const again = runInstaller(host, ['--install']);
+  assert.equal(again.status, 1);
+  assert.match(again.stderr, /An earlier install was interrupted/);
+  assert.equal(fs.readFileSync(path.join(saved, 'host-pulse.service'), 'utf8'), 'the only copy\n', 'the saved copy is never deleted');
+  assert.match(fs.readFileSync(installScript, 'utf8'), /^\s*trap rollback ERR HUP INT TERM$/m, 'a hang-up or Ctrl-C rolls back too');
 });
 
 test('a failed install puts back the previous files and removes the new ones', { skip }, (t) => {
   const host = installerHost(t, 0);
   const fresh = runInstaller(host, ['--install'], { FAIL_SYSTEMCTL: 'enable' });
   assert.equal(fresh.status, 1);
-  assert.match(fresh.stderr, /Install failed; putting back what was there before/);
-  assert.deepEqual(fs.readdirSync(host.env.SYSTEMD_UNIT_DIR), []);
-  assert.ok(!fs.existsSync(host.env.INSTALL_PREFIX));
-  assert.ok(!fs.existsSync(path.join(host.env.CONFIG_DIR, 'host-pulse.env')), 'an env file created by the failed run is removed');
+  assert.match(fresh.stderr, /Install failed or was interrupted; putting back what was there before/);
+  assertNothingInstalled(host);
+  assert.match(fs.readFileSync(path.join(host.dir, 'systemctl.log'), 'utf8'), /^disable --now host-pulse\.timer$/m, 'the timer enablement is undone');
+  assert.match(usersLog(host), /^userdel host-pulse$/m, 'the system user this run created is deleted');
 
   assert.equal(runInstaller(host, ['--install']).status, 0);
   const service = path.join(host.env.SYSTEMD_UNIT_DIR, 'host-pulse.service');
   fs.writeFileSync(service, 'previous unit\n');
   const envFile = path.join(host.env.CONFIG_DIR, 'host-pulse.env');
   fs.writeFileSync(envFile, 'ALERT_CHANNELS=webhook\n');
+  fs.writeFileSync(path.join(host.dir, 'systemctl.log'), '');
   const failed = runInstaller(host, ['--install'], { FAIL_SYSTEMCTL: 'daemon-reload' });
   assert.equal(failed.status, 1);
+  assert.doesNotMatch(fs.readFileSync(path.join(host.dir, 'systemctl.log'), 'utf8'), /^disable/m, 'a timer that was already enabled stays enabled');
   assert.equal(fs.readFileSync(service, 'utf8'), 'previous unit\n');
   assert.equal(fs.readFileSync(envFile, 'utf8'), 'ALERT_CHANNELS=webhook\n', 'an env file the run did not create is kept');
   assert.ok(fs.existsSync(path.join(host.env.INSTALL_PREFIX, 'host-pulse.sh')));

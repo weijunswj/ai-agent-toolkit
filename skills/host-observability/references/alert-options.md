@@ -43,4 +43,6 @@ sudo systemctl start host-pulse-test-heartbeat.service; sudo journalctl -u host-
 
 Do not load the env file with a shell instead: a shell reads `$`, backticks, `&` and `;` differently from systemd, so a test could pass while the timer fails.
 
-Then confirm with the owner that the test alert arrived and the heartbeat service shows a ping. Only then report alerting as working.
+Then confirm with the owner that the test alert arrived and the heartbeat service shows a ping. Only then report alerting as working. A test unit that failed (for example before the env file was filled in) stays in systemd's failed list until `sudo systemctl reset-failed host-pulse-test-alert.service host-pulse-test-heartbeat.service`; the pulse leaves those two units out of its own checks.
+
+A failure heartbeat URL matters: when an alert fails to send, the pulse pings `HEARTBEAT_FAIL_URL`. With no failure URL it skips the ping instead, so the off-host monitor still raises its missed-ping alarm and the owner hears that something is wrong.
