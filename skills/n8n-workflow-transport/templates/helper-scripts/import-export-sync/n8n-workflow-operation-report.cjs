@@ -47,10 +47,10 @@ const EXPLANATIONS = Object.freeze({
   N8N_CANONICAL_TRANSACTION_MANUAL_APPLY_REQUIRED: 'The complete canonical candidate batch is preserved locally because this runtime cannot replace an existing target with exclusive single-target semantics.',
   N8N_POLICY_VALIDATION_FAILED: 'The canonical workflow or deployment policy failed validation.',
   N8N_IMPORT_NO_CHANGES: 'The effective prepared workflow already matches the target.',
-  N8N_IMPORT_SUCCESS: 'The prepared workflow imported and the inactive postcondition was verified.',
+  N8N_IMPORT_SUCCESS: 'The prepared workflow imported and the unpublished postcondition was verified.',
   N8N_EXPORT_NO_CHANGES: 'Canonical export completed without changing a workflow source file.',
   N8N_EXPORT_SUCCESS: 'Canonical workflow source and portable declarations were exported safely.',
-  N8N_POSTCONDITION_FAILED: 'The workflow import completed but the required inactive state could not be verified.',
+  N8N_POSTCONDITION_FAILED: 'The workflow import completed but the required unpublished state could not be verified.',
   N8N_INTERNAL_ERROR: 'The helper encountered an unexpected internal failure.',
 });
 
@@ -125,7 +125,7 @@ function nextActionForCode(code, context = {}) {
     },
     N8N_POSTCONDITION_FAILED: {
       code: 'STOP_AND_ESCALATE_POSTCONDITION',
-      message: 'Do not activate or execute the workflow; escalate the inactive-postcondition failure using the sanitized operation ID.',
+      message: 'Do not publish or execute the workflow; escalate the unpublished-postcondition failure using the sanitized operation ID.',
     },
     N8N_INTERNAL_ERROR: {
       code: 'ESCALATE_TOOLKIT_DEFECT',
