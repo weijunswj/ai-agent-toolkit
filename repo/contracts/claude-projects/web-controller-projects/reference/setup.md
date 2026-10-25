@@ -50,7 +50,7 @@ Reference for the `web-controller-projects` skill, opened when the coordinator r
    - Then list the pending work and what waits on the user.
 8. **Goal, check-in and nudge.**
    - Set the project goal to the parent programme (GitHub governance ENABLED), or to the user's stated goal.
-   - Pick a morning check-in time in the user's time zone and tell them. Set up the **Daily check-in** and the **Hourly nudge** (both in the skill) exactly as in **Recurring tasks** (`reference/recurring-tasks.md`), with prompts rendered from Toolkit, and write the `SCHEDULED TASKS:` memory line.
+   - Pick a morning check-in time in the user's time zone and tell them. Set up the **Daily check-in** and the **Hourly nudge** (both in the skill) exactly as in **Recurring tasks** (`reference/recurring-tasks.md`), with prompts rendered from Toolkit, and write the `SCHEDULED TASKS:` memory line. On a takeover, skip a task whose existing entry says `stopped by owner` and keep that entry.
 9. **Confirm it works.** Show the user each item as it passes:
    - one thread result relayed into the project chat with its link;
    - one decision card answered;

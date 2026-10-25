@@ -31,8 +31,8 @@ test('a realistic user file, the global block and root AGENTS.md fit the raised 
   // The last line of root AGENTS.md must fall inside the bytes Codex reads.
   const lastLine = ROOT_AGENTS.trimEnd().split('\n').pop();
   assert.ok(Buffer.from(combined.replace(/\n/g, '\r\n')).subarray(0, RAISED_LIMIT).toString('utf8').includes(lastLine));
-  // After the rules audit moved the gate mechanics out, the three files sit right at the 32 KiB
-  // default, so setup keeps offering the raise as headroom rather than relying on that margin.
+  // After the rules audit moved the gate mechanics out, the three files sit just over the 32 KiB
+  // default, so setup keeps offering the raise rather than relying on the default.
   assert.match(fs.readFileSync(path.join(ROOT, 'repo/scripts/toolkit-global-rules.cjs'), 'utf8'), /const DOC_LIMIT_TARGET = 65536;/);
 });
 

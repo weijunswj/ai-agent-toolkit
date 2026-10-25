@@ -251,18 +251,20 @@ test('only the project that runs the Toolkit repo watches other projects, and on
 
 test('the check-in carries every prefix in the fixed order and checks both Toolkit tasks; the nudge compares cheaply first', () => {
   const text = rendered('daily-check-in');
-  const order = ['SKILL UPDATE', 'SKILL DRIFT', 'SKILL BEHIND', 'BLOCK OUTDATED', 'BINDING STALE or BINDING UNKNOWN', 'TOOLKIT CHANGED', 'MEMORY FORMAT', 'TASKS OUTDATED', 'NUDGE NOT ARMED', 'PROJECT TASKS MISSING', 'PLUGIN BEHIND'];
+  const order = ['CONTEXT RESET DUE', 'SKILL UPDATE', 'SKILL DRIFT', 'SKILL BEHIND', 'BLOCK OUTDATED', 'BINDING STALE or BINDING UNKNOWN', 'TOOLKIT CHANGED', 'MEMORY FORMAT', 'TASKS OUTDATED', 'NUDGE NOT ARMED', 'PROJECT TASKS MISSING', 'PLUGIN BEHIND'];
   const line = text.split('\n').find(entry => entry.startsWith('- First line:'));
   const positions = order.map(prefix => line.indexOf(prefix));
   assert.ok(positions.every((at, index) => at > -1 && (index === 0 || at > positions[index - 1])), line);
   for (const required of ['"EXAMPLE: Daily check-in"', '"EXAMPLE: Hourly nudge"', '--check daily-check-in', '--check hourly-nudge',
-    '--check-memory', 'persist_session false', 'persist_session true', 'weekly-rebuild', 'unlisted', 'hearth_channel_id',
+    '--check-memory', 'both are bound to their own home threads (persist_session true)', 'CONTEXT RESET DUE, SKILL UPDATE', 'weekly-rebuild', 'unlisted', 'hearth_channel_id',
     'advice only', 'local, advice', 'Never suggest moving a local task to the cloud', '--declined-dedupe', 'overlaps',
     'remove the Toolkit plugin only', 'state done', 'older than 65 minutes', 'Never flag other memory lines',
     'git hash-object --stdin', 'matches no revision', '/skill-drift/', 'unless state.md already reported these hashes',
     'every run reaches the owner as one line', 'swaps each named Toolkit task from the template on main the same turn']) {
     assert.ok(text.includes(required), required);
   }
+  // Both Toolkit tasks are bound now, so a bound check-in is never its own gap.
+  assert.doesNotMatch(text, /the check-in runs a fresh session per run|bound-session/);
   const nudge = rendered('hourly-nudge');
   // The cheap check reads the last run's state first and skips the full sweep when nothing moved;
   // the binding check is daily only, so the nudge clones nothing.
@@ -278,6 +280,7 @@ test('the check-in carries every prefix in the fixed order and checks both Toolk
     'state done', '"EXAMPLE: Daily check-in"', 'CHECK-IN NOT ARMED', 'limit 10', 'list all of them every run']) {
     assert.ok(nudge.includes(required), required);
   }
+  assert.match(nudge, /not SUCCEEDED, or its home thread is resolved, start the first line with "CHECK-IN NOT ARMED/);
 });
 
 test('memory check reads only the BINDING and SCHEDULED TASKS lines', () => {
@@ -334,18 +337,27 @@ test('invalid arguments and unreadable input fail with one generic error', t => 
   assert.throws(() => parseArgs(['--refresh', 'daily-check-in', prompt, '--params', 'a', '--params', 'b']));
 });
 
-test('every path that rebuilds, swaps or recreates a Toolkit task, or reports one missing, honours a stopped by owner entry', () => {
+test('every line that re-arms, updates, swaps, rebuilds, recreates or sets up a Toolkit task honours a stopped by owner entry', () => {
+  // Scans by what a line does, not where it sits, so a new path that forgets the exception fails here.
+  // The named lines are not automatic paths: introductions, the project's own tasks, the tool route,
+  // the steps under the swap paragraph (which carries the exception), and runs of the task itself.
   const dir = path.join(ROOT, 'repo', 'contracts', 'claude-projects', 'web-controller-projects');
-  const read = rel => fs.readFileSync(path.join(dir, rel), 'utf8').replace(/\r\n/g, '\n').split('\n');
-  const checks = [
-    ['tasks/daily-check-in.md', /^8\. TASKS OUTDATED:/], ['tasks/daily-check-in.md', /^9\. NUDGE NOT ARMED:/],
-    ['tasks/daily-check-in.md', /OTHER PROJECTS:/], ['tasks/hourly-nudge.md', /^8\. Scheduled tasks:/],
-    ['SKILL.md', /^ {2}- `TASKS OUTDATED`:/], ['SKILL.md', /^ {2}- `NUDGE NOT ARMED`:/], ['SKILL.md', /^- `CHECK-IN NOT ARMED`/],
-    ['SKILL.md', /^- \*\*Both gone:\*\*/], ['SKILL.md', /CONTEXT RESET DUE/], ['reference/recurring-tasks.md', /^\*\*Change = recreate\.\*\*/],
+  const files = ['SKILL.md', 'project-instructions.md', ...['reference', 'tasks'].flatMap(sub => fs.readdirSync(path.join(dir, sub)).filter(name => name.endsWith('.md')).map(name => `${sub}/${name}`))];
+  const acts = /\b(?:re-?arm|rebuil[dt]|re-?creat|swap|set up the|update (?:those tasks'|its own task's) prompt)/i;
+  const notPaths = [
+    'Whenever the user asks for anything recurring', "**The project's own tasks**", 'Reference for the `web-controller-projects` skill',
+    'A cloud thread creates, recreates and deletes tasks', '4. Rewrite the `SCHEDULED TASKS:` line', '7. Weekly rebuild:',
+    'Hidden self-reminder (last resort)', 'Toolkit-made task swaps under their safeguards', 'so the coordinator rebuilds this home thread',
   ];
-  for (const [rel, pattern] of checks) {
-    const lines = read(rel).filter(line => pattern.test(line));
-    assert.equal(lines.length, 1, `${rel}: one line matches ${pattern}`);
-    assert.match(lines[0], /stopped by owner|owner stopped them/, `${rel}: ${pattern}`);
+  const unguarded = [];
+  for (const rel of files) {
+    fs.readFileSync(path.join(dir, rel), 'utf8').replace(/\r\n/g, '\n').split('\n').forEach((line, index) => {
+      if (acts.test(line) && !/stopped by owner|owner stopped them/.test(line) && !notPaths.some(text => line.includes(text))) unguarded.push(`${rel}:${index + 1}: ${line.slice(0, 120)}`);
+    });
   }
+  assert.deepEqual(unguarded, []);
+  const skill = fs.readFileSync(path.join(dir, 'SKILL.md'), 'utf8');
+  assert.match(skill, /\*\*Stopped by owner:\*\* a task whose `SCHEDULED TASKS:` entry says `stopped by owner` is outside every automatic path/);
+  assert.match(skill, /the restart removes the mark/);
+  assert.match(fs.readFileSync(path.join(dir, 'reference', 'recurring-tasks.md'), 'utf8'), /When the owner restarts it, remove the mark\./);
 });

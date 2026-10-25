@@ -183,7 +183,7 @@ test('global rules hold the generic floor: precedence, entry routing, safety gat
 test('gate rules hold the gate mechanics every gate session reads on demand', () => {
   const text = readText('repo/contracts/agent-rules/gate-rules.md');
   for (const rule of [
-    /G0 Discovery\*\* runs for every new task, repository or environment, whatever its risk tier/,
+    /G0 Discovery\*\* runs for every new task, repository or environment; only LIGHT edits/,
     /G1 Builder\*\* starts in a fresh session, with the G0 plan passed in its brief as the handoff/,
     /full G2 for RISKY, one independent review for NORMAL, the builder's own diff read for LIGHT/,
     /There are no handover packets/,
