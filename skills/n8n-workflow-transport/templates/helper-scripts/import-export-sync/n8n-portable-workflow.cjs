@@ -102,24 +102,47 @@ function portableCredentials(credentials) {
   return result;
 }
 
+// Top-level fields that describe one live instance (ids, history, folders, publish state, runtime data).
+const LIVE_ONLY_WORKFLOW_FIELDS = Object.freeze([
+  'id',
+  'createdAt',
+  'updatedAt',
+  'isArchived',
+  'shared',
+  'staticData',
+  'pinData',
+  'activeVersionId',
+  'activeVersion',
+  'versionId',
+  'versionCounter',
+  'triggerCount',
+  'versionMetadata',
+  'parentFolder',
+  'parentFolderId',
+  'sourceWorkflowId',
+]);
+
+// Workflow settings that belong to one live instance: `errorWorkflow` holds another workflow's id on
+// that instance, and `availableInMCP` is the instance's MCP exposure decision. Canonical Git and
+// prepared imports both drop them, so an import never sets MCP exposure or points at a foreign id.
+const LIVE_ONLY_SETTINGS = Object.freeze(['errorWorkflow', 'availableInMCP']);
+
+function stripLiveOnlySettings(workflow) {
+  const dropped = [];
+  if (!workflow || !workflow.settings || typeof workflow.settings !== 'object' || Array.isArray(workflow.settings)) return dropped;
+  for (const key of LIVE_ONLY_SETTINGS) {
+    if (Object.prototype.hasOwnProperty.call(workflow.settings, key)) {
+      delete workflow.settings[key];
+      dropped.push(key);
+    }
+  }
+  return dropped;
+}
+
 function canonicalWorkflowForGit(workflow, options = {}) {
   const clean = clone(workflow);
-  const liveOnlyFields = [
-    'id',
-    'createdAt',
-    'updatedAt',
-    'isArchived',
-    'shared',
-    'staticData',
-    'pinData',
-    'activeVersionId',
-    'versionId',
-    'versionCounter',
-    'triggerCount',
-    'versionMetadata',
-  ];
-
-  for (const field of liveOnlyFields) delete clean[field];
+  for (const field of LIVE_ONLY_WORKFLOW_FIELDS) delete clean[field];
+  stripLiveOnlySettings(clean);
   if (!options.preserveTags) {
     delete clean.tags;
     delete clean.tagIds;
@@ -782,7 +805,13 @@ function validatePreparedWorkflow(workflow) {
     throw new N8nPortableWorkflowError('N8N_POLICY_VALIDATION_FAILED', 'Prepared workflow must contain nodes and connections.');
   }
   if (workflow.active !== false) {
-    throw new N8nPortableWorkflowError('N8N_POLICY_VALIDATION_FAILED', 'Prepared workflow must remain inactive.');
+    throw new N8nPortableWorkflowError('N8N_POLICY_VALIDATION_FAILED', 'Prepared workflow must remain unpublished (inactive).');
+  }
+  if (workflow.activeVersionId !== undefined && workflow.activeVersionId !== null) {
+    throw new N8nPortableWorkflowError('N8N_POLICY_VALIDATION_FAILED', 'Prepared workflow must not carry a published version (activeVersionId).');
+  }
+  if (workflow.settings && typeof workflow.settings === 'object' && Object.prototype.hasOwnProperty.call(workflow.settings, 'availableInMCP')) {
+    throw new N8nPortableWorkflowError('N8N_POLICY_VALIDATION_FAILED', 'Prepared workflow must not set MCP exposure (settings.availableInMCP).');
   }
 }
 
@@ -862,6 +891,8 @@ function preparePortableWorkflow(options) {
   ];
 
   const strippedWebhookIds = stripDedicatedWebhookMetadata(prepared, allowedPaths);
+  const droppedSettings = stripLiveOnlySettings(prepared);
+  for (const key of droppedSettings) allowedPaths.add(`settings.${key}`);
   prepared.active = false;
   const liveWorkflowId = typeof options.liveWorkflow?.id === 'string' ? options.liveWorkflow.id : '';
   const requestedWorkflowId = typeof options.targetWorkflowId === 'string' ? options.targetWorkflowId : '';
@@ -938,6 +969,7 @@ function preparePortableWorkflow(options) {
     resourceBindingCount,
     restoredWebhookIds,
     strippedWebhookIds,
+    droppedSettings,
     invariant,
   };
 }
@@ -1030,6 +1062,8 @@ function canonicaliseExport(options) {
     );
   }
   const portable = canonicalWorkflowForGit(options.liveWorkflow, { preserveTags: options.preserveTags });
+  const droppedSettings = LIVE_ONLY_SETTINGS.filter((key) =>
+    options.liveWorkflow?.settings && Object.prototype.hasOwnProperty.call(options.liveWorkflow.settings, key));
   const previous = options.canonicalWorkflow ? clone(options.canonicalWorkflow) : null;
   const policyEntry = selectWorkflowEntry(
     options.deploymentPolicy,
@@ -1072,6 +1106,7 @@ function canonicaliseExport(options) {
 
   return {
     workflow: portable,
+    droppedSettings,
     protectedChanges,
     declaration: buildPortableCredentialDeclaration(portable, options.workflowFile, options.previousDeclaration),
   };
@@ -1157,6 +1192,9 @@ function mergeCredentialDeclarationDocument(document, declaration) {
 
 module.exports = {
   SCHEMA_VERSION,
+  LIVE_ONLY_SETTINGS,
+  LIVE_ONLY_WORKFLOW_FIELDS,
+  stripLiveOnlySettings,
   N8nPortableWorkflowError,
   readJson,
   normaliseWorkflow,

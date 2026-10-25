@@ -30,10 +30,25 @@ Live import/export helper entry points are not run from this toolkit repo during
 - `n8n-workflow-identity.cjs`
 - `compare-n8n-workflow-credentials.cjs`
 - `should-import-n8n-workflow.cjs`
+- `n8n-cli-workflow-json.cjs`
+- `n8n-risky-nodes.cjs`
+- `n8n-helper-set.cjs` and its stamp `n8n-helper-set.json`
+- `check-n8n-helper-machine.cjs`
 - `_export-n8n-workflows-live.cmd`
 - `_import-n8n-workflows-live.cmd`
 
-The live import/export PowerShell helpers support explicit Docker target overrides with `-Container`, `-ContainerName`, `-ContainerId`, `-ComposeProject`, and `-ComposeService`, plus the matching environment variables `N8N_CONTAINER_NAME`, `N8N_CONTAINER_ID`, `N8N_COMPOSE_PROJECT`, and `N8N_COMPOSE_SERVICE`. Without an explicit target, they detect running n8n containers from Docker Compose service output, Compose labels, and safe `n8nio/n8n` image fallback. Multiple detected instances require a valid numeric selection for the current run only and are not persisted.
+The live import/export PowerShell helpers support explicit Docker target overrides with `-Container`, `-ContainerName`, `-ContainerId`, `-ComposeProject`, and `-ComposeService`, plus the matching environment variables `N8N_CONTAINER_NAME`, `N8N_CONTAINER_ID`, `N8N_COMPOSE_PROJECT`, and `N8N_COMPOSE_SERVICE`. Without an explicit target, they detect running n8n containers from Docker Compose service output, Compose labels, and the official `n8nio/n8n` image from Docker Hub or `docker.n8n.io` under any tag or digest. Multiple detected instances require a valid numeric selection for the current run only and are not persisted.
+
+## Working On Any Machine
+
+- **One complete set:** `n8n-helper-set.json` stamps every helper file with a content hash (line endings ignored). The live helpers check the stamp before they do anything and stop with one plain error that names a missing or changed file. Files a repository adds itself are reported and kept. Set `N8N_HELPERS_ALLOW_LOCAL_CHANGES=1` for one run only when a local change to a stamped file is intended.
+- **Check this machine:** `node check-n8n-helper-machine.cjs` (or menu option 10) reports Node.js, PowerShell, the helper set, Docker, the n8n container, its n8n version and its log settings, then one next step. It is read-only and prints no environment values except the three n8n log settings. Without `--offline` it reads the local Docker host, so an agent runs it only with the same approval as any other Docker read there.
+- **Refresh a repository's copy:** `node n8n-helper-set.cjs refresh --from <Toolkit helper folder> --to n8n-workflows/scripts` previews every added and changed file; add `--write` to copy them. It never deletes: repository-local scripts are kept, and files an older set used that the new set does not are listed for the owner to remove.
+- **Reading n8n output:** n8n prints `export:workflow` through its own log, so a container set to a quieter log level, file-only logs or JSON log lines used to hide or wrap the list. The helpers pin the log settings for that one call and read the list with Node, tolerating warning lines around it. An empty list from a successful command is an error, never "no workflows".
+- **No PowerShell JSON rewrites:** workflow JSON is parsed and written only by `n8n-cli-workflow-json.cjs`. PowerShell 6 and later rewrote date-like strings in the machine's time zone, and every PowerShell edition refused keys that differ only by case, so the same export could differ or fail between machines.
+- **Requirements:** Node.js 18 or newer, PowerShell (Windows PowerShell 5.1 or PowerShell 7), Docker, and n8n running in a container on the same machine.
+- **Container restart:** the helpers never restart n8n. A restart prompt that older copies carried is not part of the set; restarting after an import that updates a previously published or scheduled workflow stays an operator action, as the import output says.
+- **Maintainers:** after changing any helper file here, run `node n8n-helper-set.cjs write-manifest`; a test fails while the stamp is stale.
 
 ## Wrapper Working Directory
 
@@ -41,9 +56,13 @@ The `.cmd` wrappers invoke their co-located PowerShell scripts with `%~dp0<name>
 
 ## Portable Import Contract
 
-Normal operator flow is export canonical workflow JSON and portable logical credential name/type declarations to Git, create matching credentials on the target when reported missing, then rerun the unchanged import command. The helper resolves target IDs internally, rebuilds from canonical Git, applies only dedicated webhook metadata and declared exact resource paths, validates the canonical invariant, imports inactive without a routine confirmation, and verifies the inactive postcondition.
+Normal operator flow is export canonical workflow JSON and portable logical credential name/type declarations to Git, create matching credentials on the target when reported missing, then rerun the unchanged import command. The helper resolves target IDs internally, rebuilds from canonical Git, applies only dedicated webhook metadata and declared exact resource paths, validates the canonical invariant, imports unpublished (inactive) without a routine confirmation, and verifies the unpublished postcondition.
 
 Canonical Git stores credential references as `{ "name": "logical-name" }` and omits `id` entirely. Only the prepared payload may contain an exact resolved target ID or the supported new-workflow unresolved `id: null` form. Preparation strips every canonical `webhookId`; new workflows restore none, while existing workflows restore only a uniquely matched live node identity.
+
+Canonical Git and prepared imports both leave out two instance-only settings: `settings.errorWorkflow` (a workflow id on one n8n instance) and `settings.availableInMCP` (that instance's MCP exposure decision). Every other setting is kept, the export reports what it left out, and an import never sets MCP exposure, so the target keeps whatever exposure it has. The validator warns about either setting in committed files and fails a prepared import that carries one.
+
+The validator also lists, per workflow, the nodes the n8n safety rules say to inspect before any test or run: Code, Execute Command, Read/Write Files, HTTP Request and credentialed nodes. It is a read-only report; `--fail-on-risky-nodes` makes it fail.
 
 Every present portable credential declaration, deployment policy, and resource binding must use schema version 1 and an exact supported container shape. Malformed present files, duplicate credential requirements, stable node-ID conflicts, or logical names that drift from canonical Git fail before any prepared workflow overlay. Name/type fallback is used only when the populated stable ID is absent and the specific helper contract permits that fallback.
 
@@ -57,7 +76,7 @@ The explicit phases remain `PREPARED`, `INSTALLING`, `PRECOMMIT_VERIFIED`, `COMM
 
 An explicitly supplied import deployment-policy path is validated as a safe readable regular file inside the repository before live discovery or preparation, and its validated snapshot is rechecked before use. Required credential misses drive the create-and-rerun action. Optional zero-match requirements remain informational and do not turn an unchanged workflow into `ACTION_REQUIRED`; ambiguous or otherwise unsafe matches still fail closed. Failure receipts map each stable code to one concrete remedy, and Explain last failure displays that remedy without a self-referential loop.
 
-The helper never activates, executes, test-runs, publishes, or restarts n8n. An already-active target is blocked because scheduled activity cannot be guaranteed inactive without a separate restart. `-RequireConfirmation` is compatibility-only menu behavior and is not the default.
+The helper never activates, executes, test-runs, publishes, or restarts n8n. An already-published (active) target is blocked because scheduled activity cannot be guaranteed to stop without a separate restart. n8n 2.x replaced activate/deactivate with publish/unpublish: a workflow counts as live when `active` is true or a published version (`activeVersionId`) is set, and the postcondition requires neither. `-RequireConfirmation` is compatibility-only menu behavior and is not the default.
 
 Operation receipts are written to `.n8n-local/reports/latest-n8n-workflow-operation.{json,txt}` and bounded 90-day history. The menu's read-only Explain last n8n failure action validates the latest report and states one supported next action.
 

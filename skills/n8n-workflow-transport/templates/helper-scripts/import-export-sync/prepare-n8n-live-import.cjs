@@ -267,7 +267,10 @@ function preparePortableImport(options) {
     });
     writeJson(options.output, result.preparedWorkflow);
     writeJson(options.result, { result: 'PASS', code: 'N8N_IMPORT_READY', ...safePortableResult(result) });
-    console.log(`Prepared inactive portable import payload: ${options.output}`);
+    console.log(`Prepared unpublished portable import payload: ${options.output}`);
+    if (result.droppedSettings.length > 0) {
+      console.log(`Left out instance-only setting(s): ${result.droppedSettings.join(', ')}. MCP exposure stays as the target n8n has it.`);
+    }
     console.log(`Credential resolution: ${result.credentialResult.resolvedCount} resolved, ${result.credentialResult.issues.length} unresolved.`);
     return result;
   } catch (error) {

@@ -509,7 +509,84 @@ function Resolve-WorkflowDirPath {
 }
 
 function Test-MissingLiveWorkflow($CommandResult) {
-  return (($CommandResult.Output -join "`n") -match "No workflows found with specified filters")
+  return (($CommandResult.Output -join "`n") -match "No workflows found with specified filters|No workflows with published versions found")
+}
+
+function Get-N8nCliLogArguments {
+  # n8n prints export:workflow output through its own log. Pin the log settings for this one call so a
+  # container set to a quieter level, file-only output or JSON log lines still prints a readable list.
+  return @("-e", "N8N_LOG_LEVEL=info", "-e", "N8N_LOG_OUTPUT=console", "-e", "N8N_LOG_FORMAT=text", "-e", "NO_COLOR=1")
+}
+
+function Invoke-CliWorkflowJson([string[]]$Arguments, $FailureMessage) {
+  # Workflow JSON is parsed and written by Node only. PowerShell 6+ rewrites date-like strings in the
+  # machine's time zone and every edition rejects keys that differ only by case, so a PowerShell
+  # round trip could change or break a workflow depending on the machine.
+  $result = Invoke-CapturedCommand "node" (@((Join-Path $HelperScriptDir "n8n-cli-workflow-json.cjs")) + $Arguments)
+  if ($result.ExitCode -ne 0) {
+    throw "$FailureMessage`n$($result.Output -join "`n")"
+  }
+}
+
+function Get-LiveWorkflowListDir {
+  $listDir = Join-Path (Join-Path $RepoRoot ".tmp") "n8n-live-workflow-list"
+  New-Item -ItemType Directory -Force -Path $listDir | Out-Null
+  return $listDir
+}
+
+function Read-LiveWorkflowList($CommandResult) {
+  $listDir = Get-LiveWorkflowListDir
+  $token = [guid]::NewGuid().ToString("N")
+  $rawPath = Join-Path $listDir "$token.n8n-output.txt"
+  $storePath = Join-Path $listDir "$token.workflows.json"
+  $summaryPath = Join-Path $listDir "$token.summary.json"
+  Write-Utf8NoBomText -Path $rawPath -Text (($CommandResult.StdOut -join "`n") + "`n")
+  try {
+    Invoke-CliWorkflowJson @("list", "--input", $rawPath, "--store", $storePath, "--summary", $summaryPath) "Could not read the live workflow list from container $Container."
+  } finally {
+    Remove-Item -LiteralPath $rawPath -Force -ErrorAction SilentlyContinue
+  }
+  if (-not [string]::IsNullOrWhiteSpace($script:LiveWorkflowStorePath) -and $script:LiveWorkflowStorePath -ne $storePath) {
+    Remove-Item -LiteralPath $script:LiveWorkflowStorePath -Force -ErrorAction SilentlyContinue
+  }
+  $script:LiveWorkflowStorePath = $storePath
+  try {
+    $summary = Get-Content -LiteralPath $summaryPath -Raw | ConvertFrom-Json
+  } finally {
+    Remove-Item -LiteralPath $summaryPath -Force -ErrorAction SilentlyContinue
+  }
+  return @($summary | Where-Object { $null -ne $_ })
+}
+
+function Write-LiveWorkflowJsonFile($Workflow, $Path) {
+  Invoke-CliWorkflowJson @("write", "--store", $script:LiveWorkflowStorePath, "--id", [string]$Workflow.id, "--output", $Path) "Could not write the live workflow file $Path."
+}
+
+function Read-WorkflowFileSummary($Path) {
+  $summaryPath = Join-Path (Get-LiveWorkflowListDir) ("{0}.file-summary.json" -f [guid]::NewGuid().ToString("N"))
+  try {
+    Invoke-CliWorkflowJson @("file-summary", "--input", $Path, "--summary", $summaryPath) "Workflow file $Path could not be read as one workflow JSON object."
+    return (Get-Content -LiteralPath $summaryPath -Raw | ConvertFrom-Json)
+  } finally {
+    Remove-Item -LiteralPath $summaryPath -Force -ErrorAction SilentlyContinue
+  }
+}
+
+function Assert-HelperSetReady {
+  if ($null -eq (Get-Command node -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1)) {
+    throw "N8N_HELPER_SET_INVALID: Node.js was not found on PATH. Install Node.js 18 or newer, then rerun."
+  }
+  $setCheck = Invoke-CapturedCommand "node" @((Join-Path $HelperScriptDir "n8n-helper-set.cjs"), "check", "--dir", $HelperScriptDir)
+  foreach ($line in $setCheck.Output) {
+    if ($line -match '^(FAIL|WARN|INFO|OK):\s*(.*)$') {
+      Write-Step $Matches[1] $Matches[2]
+    } else {
+      Write-Host $line
+    }
+  }
+  if ($setCheck.ExitCode -ne 0) {
+    throw "N8N_HELPER_SET_INVALID: this helper folder is not one complete, matching helper set. Run check-n8n-helper-machine.cjs for a full report."
+  }
 }
 
 function Assert-WorkflowIdentityStateReadable {
@@ -554,7 +631,7 @@ function Get-LocalWorkflowIdentity($WorkflowFile, $WorkflowName) {
 }
 
 function Read-RepoWorkflowInfo($WorkflowFile) {
-  $workflow = Get-Content -Raw -Path $WorkflowFile.FullName | ConvertFrom-Json
+  $workflow = Read-WorkflowFileSummary $WorkflowFile.FullName
   $canonicalWorkflowId = [string]$workflow.id
   $workflowName = [string]$workflow.name
   if ([string]::IsNullOrWhiteSpace($workflowName)) {
@@ -606,7 +683,7 @@ function Invoke-LivePreflight {
 }
 
 function Get-LiveWorkflows {
-  $arguments = @("exec", $Container, "n8n", "export:workflow", "--all", "--pretty")
+  $arguments = @("exec") + (Get-N8nCliLogArguments) + @($Container, "n8n", "export:workflow", "--all", "--pretty")
   if ($PublishedOnly) {
     $arguments += "--published"
   }
@@ -619,17 +696,7 @@ function Get-LiveWorkflows {
     throw "Failed to list live workflows from container $Container.`n$($result.Output -join "`n")"
   }
 
-  $exportText = ($result.StdOut -join "`n").Trim()
-  if ([string]::IsNullOrWhiteSpace($exportText)) {
-    return @()
-  }
-
-  $workflows = $exportText | ConvertFrom-Json
-  if ($workflows -isnot [array]) {
-    $workflows = @($workflows)
-  }
-
-  return @($workflows)
+  return @(Read-LiveWorkflowList $result)
 }
 
 function Get-RootWorkflowFiles($WorkflowDirPath, [bool]$RequireExisting) {
@@ -733,7 +800,7 @@ function Get-StableIdSuffix($Id) {
 }
 
 function Write-LiveWorkflowExportFile($Workflow, $ExportFile) {
-  Write-Utf8NoBomText -Path $ExportFile -Text (($Workflow | ConvertTo-Json -Depth 100) + "`n")
+  Write-LiveWorkflowJsonFile $Workflow $ExportFile
 }
 
 $WorkflowDirPath = Resolve-WorkflowDirPath
@@ -781,6 +848,7 @@ if ($Mode -eq "RepoTrackedOnly") {
   Write-Host "Missing live     : Not used in AllLive mode."
 }
 
+Assert-HelperSetReady
 Assert-WorkflowIdentityStateReadable
 $workflowFiles = Get-RootWorkflowFiles $WorkflowDirPath ($Mode -eq "RepoTrackedOnly")
 if ($Mode -eq "RepoTrackedOnly" -and -not $workflowFiles) {

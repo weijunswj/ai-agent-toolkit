@@ -3310,3 +3310,390 @@ test('should-import-n8n-workflow.cjs ignores tags by default consistently', () =
 
   assert.deepEqual(left, right);
 });
+
+// Cross-machine helper behaviour and current n8n 2.x export shapes. The 2.x fixture follows the n8n
+// workflow entity (active is deprecated in favour of activeVersionId) and the export:workflow command,
+// which merges the current draft from version history and adds versionMetadata.
+const cliWorkflowJsonScript = path.join(scriptDir, 'n8n-cli-workflow-json.cjs');
+const helperSetScript = path.join(scriptDir, 'n8n-helper-set.cjs');
+const cliWorkflowJson = require(cliWorkflowJsonScript);
+const helperSet = require(helperSetScript);
+const machineCheck = require(path.join(scriptDir, 'check-n8n-helper-machine.cjs'));
+const { riskyNodes, riskyNodeLines } = require(path.join(scriptDir, 'n8n-risky-nodes.cjs'));
+const portableWorkflow = require(path.join(scriptDir, 'n8n-portable-workflow.cjs'));
+const { isN8nImage } = require(path.join(scriptDir, 'resolve-n8n-docker-target.cjs'));
+const n8n2xExportPath = path.join(repoRoot, 'repo', 'tests', 'fixtures', 'n8n-cli', 'export-workflow-all-2x.json');
+
+function n8n2xExportText() {
+  return fs.readFileSync(n8n2xExportPath, 'utf8');
+}
+
+function n8n2xWorkflows() {
+  return JSON.parse(n8n2xExportText());
+}
+
+test('n8n CLI workflow lists are read from noisy, JSON-logged and plain output alike', () => {
+  const pretty = n8n2xExportText();
+  const noisy = [
+    'Permissions 0644 for n8n settings file /home/node/.n8n/config are too wide. This is ignored for now.',
+    'There are deprecations related to your environment variables. Please take the recommended actions to update your configuration:',
+    ' - N8N_RUNNERS_ENABLED -> Remove this environment variable; it is no longer needed.',
+    '[license SDK] Skipping renewal on init',
+    pretty.trimEnd(),
+    'Successfully exported 2 workflows.',
+  ].join('\r\n');
+  const jsonLogged = [
+    JSON.stringify({ level: 'warn', message: 'Some deprecation', metadata: {} }),
+    JSON.stringify({ level: 'info', message: JSON.stringify(n8n2xWorkflows()), metadata: { timestamp: 'now' } }),
+  ].join('\n');
+
+  for (const [label, text] of [['plain', pretty], ['noisy', noisy], ['json log lines', jsonLogged]]) {
+    const workflows = cliWorkflowJson.parseWorkflowList(text);
+    assert.deepEqual(workflows.map((workflow) => workflow.id), ['Wf2xDraftOnly01', 'Wf2xPublished01'], label);
+  }
+
+  assert.throws(() => cliWorkflowJson.parseWorkflowList('  \n'), (error) => error.code === 'N8N_CLI_OUTPUT_EMPTY');
+  assert.throws(() => cliWorkflowJson.parseWorkflowList('Error exporting workflows. See log messages for details.'), (error) => error.code === 'N8N_CLI_OUTPUT_UNREADABLE');
+  assert.throws(() => cliWorkflowJson.parseWorkflowList('[{"name":"no id"}]'), (error) => error.code === 'N8N_CLI_OUTPUT_UNREADABLE');
+});
+
+test('n8n 2.x publish state counts as live whether n8n reports active or a published version', () => {
+  const [draft, published] = n8n2xWorkflows();
+  assert.equal(cliWorkflowJson.isLive(draft), false);
+  assert.equal(cliWorkflowJson.isLive(published), true);
+  assert.equal(cliWorkflowJson.isLive({ ...published, active: false }), true, 'a published version is live even if the deprecated flag says otherwise');
+  assert.equal(cliWorkflowJson.isLive({ ...draft, activeVersionId: undefined, active: undefined }), false);
+
+  const summary = cliWorkflowJson.workflowSummary(draft);
+  assert.deepEqual(summary, {
+    id: 'Wf2xDraftOnly01',
+    name: 'Draft only intake',
+    isArchived: false,
+    active: false,
+    published: false,
+    nodes: [
+      { name: 'When clicking Test workflow', type: 'n8n-nodes-base.manualTrigger' },
+      { name: 'Fetch items', type: 'n8n-nodes-base.httpRequest', credentials: true },
+      { name: 'Shape items', type: 'n8n-nodes-base.code' },
+    ],
+  });
+  assert.equal(cliWorkflowJson.workflowSummary(published).published, true);
+});
+
+test('n8n CLI workflow JSON helper writes live workflows and prepared ids without rewriting values', () => {
+  const cwd = tempDir();
+  const rawPath = path.join(cwd, 'raw.txt');
+  const storePath = path.join(cwd, 'store.json');
+  const summaryPath = path.join(cwd, 'summary.json');
+  const outPath = path.join(cwd, 'out', 'draft.json');
+  fs.writeFileSync(rawPath, `warning line\n${n8n2xExportText()}`, 'utf8');
+
+  let result = runNode(cliWorkflowJsonScript, ['list', '--input', rawPath, '--store', storePath, '--summary', summaryPath]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(fs.readFileSync(summaryPath, 'utf8'))[1].active, true);
+
+  result = runNode(cliWorkflowJsonScript, ['write', '--store', storePath, '--id', 'Wf2xDraftOnly01', '--output', outPath]);
+  assert.equal(result.status, 0, result.stderr);
+  const written = fs.readFileSync(outPath, 'utf8');
+  assert.match(written, /"since": "2025-01-01T10:00:00\+02:00"/);
+  assert.match(written, /"updatedAt": "2026-10-20T09:15:00\.123Z"/);
+  assert.match(written, /"key": "lower",\s*"Key": "upper"/);
+  assert.deepEqual(JSON.parse(written), n8n2xWorkflows()[0]);
+
+  result = runNode(cliWorkflowJsonScript, ['set-id', '--file', outPath, '--id', 'TargetId123']);
+  assert.equal(result.status, 0, result.stderr);
+  const withId = JSON.parse(fs.readFileSync(outPath, 'utf8'));
+  assert.equal(withId.id, 'TargetId123');
+  assert.deepEqual({ ...withId, id: 'Wf2xDraftOnly01' }, n8n2xWorkflows()[0]);
+
+  result = runNode(cliWorkflowJsonScript, ['write', '--store', storePath, '--id', 'missing', '--output', outPath]);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /not uniquely present/);
+});
+
+test('PowerShell helpers read and write live workflow JSON through Node without changing dates or case-variant keys', { skip: findPowerShell() ? false : 'PowerShell not available' }, () => {
+  const shell = findPowerShell();
+  const root = tempDir();
+  const harnessPath = path.join(root, 'live-list-harness.ps1');
+  const outPath = path.join(root, 'draft.json');
+  const noisyOutput = `[license SDK] Skipping renewal on init\n${n8n2xExportText()}`;
+  fs.writeFileSync(path.join(root, 'noisy.txt'), noisyOutput, 'utf8');
+  fs.writeFileSync(harnessPath, `
+$ErrorActionPreference = "Stop"
+$tokens = $null
+$errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile(${psSingleQuoted(path.join(sourceScriptDir, 'export-n8n-workflows-live.ps1'))}, [ref]$tokens, [ref]$errors)
+if ($errors.Count -gt 0) { throw $errors[0].Message }
+$names = @("ConvertTo-NativeArgument", "Invoke-CapturedCommand", "Write-Utf8NoBomText", "Invoke-CliWorkflowJson", "Get-LiveWorkflowListDir", "Read-LiveWorkflowList", "Write-LiveWorkflowJsonFile", "Get-N8nCliLogArguments")
+foreach ($function in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $names -contains $node.Name }, $true)) {
+  Invoke-Expression $function.Extent.Text
+}
+$RepoRoot = ${psSingleQuoted(root)}
+$HelperScriptDir = ${psSingleQuoted(sourceScriptDir)}
+$Container = "test-container"
+$lines = @((Get-Content -LiteralPath (Join-Path $RepoRoot "noisy.txt")) | Where-Object { $_ -ne "" })
+$live = Read-LiveWorkflowList ([PSCustomObject]@{ StdOut = $lines })
+Write-Output ("COUNT=" + $live.Count)
+Write-Output ("PUBLISHED=" + (@($live | Where-Object { $_.active -eq $true }) | ForEach-Object { $_.id }))
+Write-LiveWorkflowJsonFile $live[0] ${psSingleQuoted(outPath)}
+Write-Output ("LOGARGS=" + ((Get-N8nCliLogArguments) -join " "))
+`, 'utf8');
+
+  const result = spawnSync(shell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', harnessPath], { cwd: root, encoding: 'utf8', env: { ...process.env, TZ: 'Asia/Singapore' } });
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  assert.match(result.stdout, /COUNT=2/);
+  assert.match(result.stdout, /PUBLISHED=Wf2xPublished01/);
+  assert.match(result.stdout, /LOGARGS=-e N8N_LOG_LEVEL=info -e N8N_LOG_OUTPUT=console -e N8N_LOG_FORMAT=text -e NO_COLOR=1/);
+  assert.deepEqual(JSON.parse(fs.readFileSync(outPath, 'utf8')), n8n2xWorkflows()[0]);
+});
+
+test('live import and export helpers keep workflow JSON out of PowerShell and pin n8n log settings', () => {
+  for (const name of ['export-n8n-workflows-live.ps1', 'import-n8n-workflows-live.ps1']) {
+    const text = readText(path.join(sourceScriptDir, name));
+    assert.doesNotMatch(text, /ConvertTo-Json -Depth 100/, name);
+    assert.doesNotMatch(text, /\$exportText \| ConvertFrom-Json/, name);
+    assert.doesNotMatch(text, /\$WorkflowFile\.FullName \| ConvertFrom-Json/, name);
+    assert.match(text, /@\("exec"\) \+ \(Get-N8nCliLogArguments\)/, name);
+    assert.match(text, /\nAssert-HelperSetReady\r?\n/, name);
+    assert.match(text, /No workflows with published versions found/, name);
+  }
+  const importText = readText(path.join(sourceScriptDir, 'import-n8n-workflows-live.ps1'));
+  assert.match(importText, /"set-id", "--file", \$PreparedFile/);
+  assert.match(importText, /postcondition is unpublished/);
+  assert.match(importText, /\$postconditionMatches\[0\]\.active -ne \$false/);
+});
+
+test('n8n container detection accepts the official image from either registry under any tag or digest', () => {
+  for (const image of [
+    'n8nio/n8n',
+    'n8nio/n8n:stable',
+    'n8nio/n8n:latest',
+    'n8nio/n8n:2.12.1',
+    'docker.n8n.io/n8nio/n8n',
+    'docker.n8n.io/n8nio/n8n:stable',
+    'docker.io/n8nio/n8n:1.123.4',
+    'n8nio/n8n@sha256:0000000000000000000000000000000000000000000000000000000000000000',
+    'docker.n8n.io/n8nio/n8n:stable@sha256:0000000000000000000000000000000000000000000000000000000000000000',
+  ]) {
+    assert.equal(isN8nImage(image), true, image);
+  }
+  for (const image of ['n8nio/runners', 'n8nio/n8n-custom', 'example/n8n', 'postgres:16', '']) {
+    assert.equal(isN8nImage(image), false, image);
+  }
+});
+
+test('canonical Git export drops instance-only settings and n8n 2.x live fields but keeps the rest', () => {
+  const [draft, published] = n8n2xWorkflows();
+  const canonical = portableWorkflow.canonicalWorkflowForGit(draft);
+  for (const field of ['id', 'activeVersionId', 'versionId', 'versionCounter', 'versionMetadata', 'sourceWorkflowId', 'shared', 'createdAt', 'updatedAt', 'staticData', 'pinData', 'triggerCount']) {
+    assert.equal(Object.prototype.hasOwnProperty.call(canonical, field), false, field);
+  }
+  assert.deepEqual(canonical.settings, { executionOrder: 'v1', timezone: 'Asia/Singapore' });
+  assert.deepEqual(canonical.nodeGroups, []);
+  assert.equal(canonical.active, false);
+  assert.deepEqual(canonical.nodes[1].credentials, { httpHeaderAuth: { name: 'Items API' } });
+  assert.equal(portableWorkflow.canonicalWorkflowForGit(published).active, false);
+
+  const exported = portableWorkflow.canonicaliseExport({
+    liveWorkflow: draft,
+    workflowFile: 'n8n-workflows/draft-only-intake.json',
+    deploymentPolicy: { schemaVersion: 1, workflows: [] },
+  });
+  assert.deepEqual(exported.droppedSettings, ['errorWorkflow', 'availableInMCP']);
+  assert.deepEqual(exported.workflow.settings, { executionOrder: 'v1', timezone: 'Asia/Singapore' });
+  assert.equal(draft.settings.availableInMCP, true, 'the live workflow object is not mutated');
+});
+
+test('prepared imports never set MCP exposure or a foreign error workflow, and never carry a published version', () => {
+  const canonical = portableWorkflow.canonicalWorkflowForGit(safeWorkflow());
+  canonical.settings = { executionOrder: 'v1', availableInMCP: true, errorWorkflow: 'OtherInstanceId' };
+  const result = portableWorkflow.preparePortableWorkflow({
+    canonicalWorkflow: canonical,
+    workflowFile: 'n8n-workflows/safe.json',
+    credentialDeclarations: { schemaVersion: 1, workflows: [] },
+    credentialMetadata: [],
+    deploymentPolicy: { schemaVersion: 1, workflows: [] },
+    resourceBindings: { schemaVersion: 1, workflows: [] },
+    liveWorkflow: null,
+  });
+  assert.deepEqual(result.droppedSettings, ['errorWorkflow', 'availableInMCP']);
+  assert.deepEqual(result.preparedWorkflow.settings, { executionOrder: 'v1' });
+  assert.equal(result.preparedWorkflow.active, false);
+
+  assert.throws(() => portableWorkflow.validatePreparedWorkflow({ ...result.preparedWorkflow, activeVersionId: 'v1' }), /published version/);
+  assert.throws(() => portableWorkflow.validatePreparedWorkflow({ ...result.preparedWorkflow, settings: { availableInMCP: false } }), /MCP exposure/);
+});
+
+test('validator reports risky nodes offline, flags instance-only settings and refuses published workflow files', () => {
+  const cwd = tempDir();
+  const workflowDir = path.join(cwd, 'n8n-workflows');
+  const [draft, published] = n8n2xWorkflows().map((workflow) => portableWorkflow.canonicalWorkflowForGit(workflow));
+  writeJson(path.join(workflowDir, 'draft.json'), { ...draft, settings: { ...draft.settings, errorWorkflow: 'Wf2xErrorHandler' } });
+  writeJson(path.join(workflowDir, 'digest.json'), published);
+
+  let result = runNode(validateScript, [], { cwd });
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  assert.match(result.stderr, /WARN: .*draft\.json sets settings\.errorWorkflow/);
+  assert.match(result.stdout, /Review before any test or run: .*digest\.json has 2 node\(s\) to inspect\./);
+  assert.match(result.stdout, /Execute Command: "Read clock" \(n8n-nodes-base\.executeCommand\)/);
+  assert.match(result.stdout, /Read\/Write Files: "Save digest" \(n8n-nodes-base\.readWriteFile\) \[disabled\]/);
+  assert.match(result.stdout, /HTTP Request, Credentialed: "Fetch items"/);
+  assert.match(result.stdout, /Code: "Shape items"/);
+
+  result = runNode(validateScript, ['--fail-on-risky-nodes'], { cwd });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /--fail-on-risky-nodes is set/);
+
+  writeJson(path.join(workflowDir, 'digest.json'), { ...published, activeVersionId: 'published-version' });
+  result = runNode(validateScript, [], { cwd });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /carries a published version/);
+
+  const preparedDir = path.join(cwd, '.tmp', 'n8n-live-import');
+  writeJson(path.join(preparedDir, 'draft.live-import.json'), { ...draft, settings: { availableInMCP: true } });
+  result = runNode(validateScript, ['--mode', 'prepared-import', preparedDir], { cwd });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /sets settings\.availableInMCP.*Prepared imports never set it/);
+});
+
+test('risky node report names each category the safety rules require', () => {
+  const [draft, published] = n8n2xWorkflows();
+  assert.deepEqual(riskyNodes(draft).map((node) => [node.name, node.reasons]), [
+    ['Fetch items', ['HTTP Request', 'Credentialed']],
+    ['Shape items', ['Code']],
+  ]);
+  assert.deepEqual(riskyNodes(published).map((node) => [node.name, node.reasons, node.disabled]), [
+    ['Read clock', ['Execute Command'], false],
+    ['Save digest', ['Read/Write Files'], true],
+  ]);
+  assert.deepEqual(riskyNodeLines('safe.json', riskyNodes(safeWorkflow())), []);
+});
+
+test('sanitiser strips n8n 2.x live-only fields', () => {
+  const [draft] = n8n2xWorkflows();
+  const { workflow: template } = stripTemplate({ ...draft, parentFolder: { id: 'folder' }, parentFolderId: 'folder', activeVersion: { versionId: 'v' }, sourceWorkflowId: 'src' }, {});
+  for (const field of ['activeVersionId', 'activeVersion', 'parentFolder', 'parentFolderId', 'sourceWorkflowId', 'versionMetadata', 'versionId']) {
+    assert.equal(Object.prototype.hasOwnProperty.call(template, field), false, field);
+  }
+  assert.equal(Object.prototype.hasOwnProperty.call(template.settings, 'availableInMCP'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(template.settings, 'errorWorkflow'), false);
+});
+
+test('helper set stamp is current and every file it lists ships in the helper folder', () => {
+  const committed = JSON.parse(fs.readFileSync(path.join(scriptDir, helperSet.MANIFEST_NAME), 'utf8'));
+  assert.deepEqual(committed, helperSet.buildManifest(scriptDir), 'run: node n8n-helper-set.cjs write-manifest');
+  assert.equal(Object.prototype.hasOwnProperty.call(committed.files, 'README.md'), false);
+  for (const name of ['n8n-cli-workflow-json.cjs', 'n8n-helper-set.cjs', 'check-n8n-helper-machine.cjs', 'n8n-risky-nodes.cjs', 'n8n-portable-workflow.cjs']) {
+    assert.ok(committed.files[name], name);
+  }
+  const result = runNode(helperSetScript, ['check', '--dir', scriptDir]);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /OK: Helper set [0-9a-f]{12} is complete and matches its stamp\./);
+});
+
+test('helper set check catches partial, mixed and old-Node copies but accepts either line ending', () => {
+  const copy = path.join(tempDir(), 'scripts');
+  fs.cpSync(scriptDir, copy, { recursive: true });
+  assert.equal(helperSet.checkSet(copy).status, 'OK');
+
+  const portablePath = path.join(copy, 'n8n-portable-workflow.cjs');
+  const original = fs.readFileSync(portablePath, 'utf8');
+  fs.writeFileSync(portablePath, original.replace(/\r?\n/g, '\r\n'));
+  assert.equal(helperSet.checkSet(copy).status, 'OK', 'CRLF checkout');
+
+  fs.writeFileSync(portablePath, `${original}\n// local edit\n`);
+  assert.equal(helperSet.checkSet(copy).status, 'FAIL');
+  assert.equal(helperSet.checkSet(copy, { allowLocalChanges: true }).status, 'CHANGED');
+  fs.writeFileSync(portablePath, original);
+
+  fs.writeFileSync(path.join(copy, 'import-member-forms-bounded.ps1'), 'Write-Host "repo-local"\n');
+  const withExtra = helperSet.checkSet(copy);
+  assert.equal(withExtra.status, 'OK');
+  assert.deepEqual(withExtra.extra, ['import-member-forms-bounded.ps1']);
+
+  fs.rmSync(path.join(copy, 'n8n-workflow-identity.cjs'));
+  const missing = helperSet.checkSet(copy);
+  assert.equal(missing.status, 'FAIL');
+  assert.deepEqual(missing.missing, ['n8n-workflow-identity.cjs']);
+  assert.match(helperSet.checkLines(missing).join('\n'), /Missing helper file\(s\): n8n-workflow-identity\.cjs/);
+
+  fs.rmSync(path.join(copy, helperSet.MANIFEST_NAME));
+  assert.match(helperSet.checkSet(copy).problems.join('\n'), /older or partial copy/);
+
+  assert.match(helperSet.checkSet(scriptDir, { nodeVersion: 'v16.20.2' }).problems.join('\n'), /Node\.js v16\.20\.2 is too old/);
+});
+
+test('helper refresh previews, copies only the stamped set and never deletes repository-local scripts', () => {
+  const consumer = path.join(tempDir(), 'n8n-workflows', 'scripts');
+  fs.mkdirSync(consumer, { recursive: true });
+  fs.writeFileSync(path.join(consumer, 'export-n8n-workflows-live.ps1'), 'old generation\n');
+  fs.writeFileSync(path.join(consumer, 'import-member-welcome-email-bounded.ps1'), 'repo-local\n');
+  fs.writeFileSync(path.join(consumer, helperSet.MANIFEST_NAME), JSON.stringify({
+    schemaVersion: 1,
+    kind: 'ai-agent-toolkit n8n import-export helpers',
+    setId: 'oldset',
+    files: { 'retired-helper.cjs': 'x' },
+  }));
+  fs.writeFileSync(path.join(consumer, 'retired-helper.cjs'), 'retired\n');
+
+  let result = runNode(helperSetScript, ['refresh', '--from', scriptDir, '--to', consumer]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /preview; rerun with --write/);
+  assert.match(result.stdout, /UPDATE: export-n8n-workflows-live\.ps1/);
+  assert.match(result.stdout, /ADD: n8n-portable-workflow\.cjs/);
+  assert.match(result.stdout, /KEEP: import-member-welcome-email-bounded\.ps1/);
+  assert.match(result.stdout, /UNUSED: retired-helper\.cjs/);
+  assert.equal(fs.readFileSync(path.join(consumer, 'export-n8n-workflows-live.ps1'), 'utf8'), 'old generation\n');
+
+  result = runNode(helperSetScript, ['refresh', '--from', scriptDir, '--to', consumer, '--write']);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(helperSet.checkSet(consumer).status, 'OK');
+  assert.equal(fs.readFileSync(path.join(consumer, 'import-member-welcome-email-bounded.ps1'), 'utf8'), 'repo-local\n');
+  assert.equal(fs.existsSync(path.join(consumer, 'retired-helper.cjs')), true);
+});
+
+test('machine check reports each readiness item, one next step and no environment values beyond log settings', async () => {
+  const offline = await machineCheck.runChecks({ offline: true, targetArgs: [] }, {
+    platform: 'win32',
+    nodeVersion: 'v16.20.2',
+    run: (command) => (command === 'powershell' ? { status: 0, stdout: '5.1.19041.1\n', stderr: '' } : { status: 1, stdout: '', stderr: '' }),
+  });
+  assert.equal(offline.ok, false);
+  assert.equal(offline.checks.find((check) => check.name === 'Node.js').status, 'FAIL');
+  assert.equal(offline.checks.find((check) => check.name === 'Windows PowerShell').detail, '5.1.19041.1');
+  assert.match(offline.next, /Install Node\.js 18 or newer/);
+
+  const container = n8nContainer({ id: 'abc123abc123abc123', name: 'n8n-main', image: 'docker.n8n.io/n8nio/n8n:stable', project: 'stack', service: 'n8n' });
+  container.Config.Env = ['N8N_LOG_LEVEL=warn', 'N8N_LOG_FORMAT=json', 'N8N_ENCRYPTION_KEY=do-not-print-this', 'DB_POSTGRESDB_PASSWORD=do-not-print-either'];
+  const calls = [];
+  const live = await machineCheck.runChecks({ offline: false, targetArgs: [] }, {
+    platform: 'linux',
+    nodeVersion: 'v22.1.0',
+    run: (command, args) => {
+      calls.push([command, ...args].join(' '));
+      if (command === 'pwsh') return { status: 0, stdout: '7.4.6\n', stderr: '' };
+      if (args[0] === 'version') return { status: 0, stdout: '27.3.1\n', stderr: '' };
+      if (args[0] === 'compose') return { status: 0, stdout: 'abc123abc123abc123\n', stderr: '' };
+      if (args[0] === 'ps') return { status: 0, stdout: 'abc123abc123abc123\n', stderr: '' };
+      if (args[0] === 'inspect') return { status: 0, stdout: JSON.stringify([container]), stderr: '' };
+      if (args[0] === 'exec') return { status: 0, stdout: '2.12.1\n', stderr: '' };
+      return { status: 1, stdout: '', stderr: 'unexpected' };
+    },
+  });
+  assert.equal(live.ok, true, JSON.stringify(live, null, 2));
+  assert.match(live.checks.find((check) => check.name === 'n8n container').detail, /stack\/n8n -> n8n-main/);
+  assert.equal(live.checks.find((check) => check.name === 'n8n version').detail, '2.12.1');
+  const logCheck = live.checks.find((check) => check.name === 'n8n log settings');
+  assert.equal(logCheck.status, 'INFO');
+  assert.match(logCheck.detail, /N8N_LOG_LEVEL=warn, N8N_LOG_OUTPUT=\(default\), N8N_LOG_FORMAT=json/);
+  assert.doesNotMatch(JSON.stringify(live), /do-not-print/);
+  assert.ok(calls.every((call) => !/\b(import|export|publish|unpublish|restart|rm|stop|start)\b/.test(call)), calls.join('\n'));
+
+  const noDocker = await machineCheck.runChecks({ offline: false, targetArgs: [] }, {
+    platform: 'linux',
+    nodeVersion: 'v22.1.0',
+    run: (command) => (command === 'pwsh' ? { status: 0, stdout: '7.4.6\n', stderr: '' } : { status: 1, stdout: '', stderr: 'Cannot connect to the Docker daemon' }),
+  });
+  assert.equal(noDocker.ok, false);
+  assert.equal(noDocker.next, 'Start Docker, then rerun this check.');
+});
