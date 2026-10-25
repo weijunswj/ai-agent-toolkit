@@ -577,6 +577,8 @@ test('LS-19: a history file over 5 MB that needs a full read is named in not_sca
   const report = JSON.parse((await scan(['--repo', repo, '--json'])).stdout);
   assert.deepEqual(report.not_scanned, [{ file: 'tests/big.pem', commit: rotated, reason: 'larger than 5 MB' }]);
   assert.equal(report.status, 'incomplete');
+  assert.equal(report.scanned.history_complete, false);
+  assert.match(result.stdout, /Scanned:\*\* working tree \(history incomplete/);
   assert.match(result.stdout, new RegExp(`Not scanned:\\*\\* tests/big\\.pem at commit ${rotated} \\(larger than 5 MB\\)`));
 });
 
@@ -610,4 +612,46 @@ test('SP-10: Blade @stop, Org #+END_SRC and LaTeX \\endverbatim are not reasons'
     assert.deepEqual(rules(`t = "${value}" secret-scan: allow ${closer}`), ['github-token'], closer);
   }
   assert.deepEqual(rules(`t = "${value}" # secret-scan: allow revoked, stop-gap fixture`), []);
+});
+
+test('SP-11: DEL, C1, line separators and bidi controls in a name are printed escaped', () => {
+  const names = ['a\u007fb.pem', 'a\u0085b.pem', 'a\u009b2Kb.pem', 'a\u2028b.pem', 'a\u202eb.pem', 'a\u2066b.pem'];
+  const report = {
+    status: 'release-blocker', scanned: { commit: null, dirty: false, history_complete: true }, mode: { history: true }, patterns: 29,
+    summary: { release_blocker: names.length, likely_false_positive: 0 }, not_scanned: [],
+    findings: names.map((file, index) => ({ class: 'release-blocker', id: String(index), label: 'private key', file, line: 1, commit: null })),
+  };
+  const text = scanner.markdown(report);
+  assert.doesNotMatch(text, /[\x7f-\x9f\u2028\u2029\u202a-\u202e\u2066-\u2069]/);
+  for (const escaped of ['a\\u007fb.pem', 'a\\u0085b.pem', 'a\\u009b2Kb.pem', 'a\\u2028b.pem', 'a\\u202eb.pem', 'a\\u2066b.pem']) assert.ok(text.includes(escaped), escaped);
+  assert.ok(scanner.markdown({ ...report, findings: [{ ...report.findings[0], file: 'plain.pem' }] }).includes(' in plain.pem:1'), 'a plain name is printed as it is');
+});
+
+test('LS-21: the history line splitter grows linearly with a very long line', async () => {
+  // The stream handler alone is timed, through a fake git log, so git's fixed cost cannot hide the growth.
+  const time = async (megabytes) => {
+    let best = Infinity;
+    for (let run = 0; run < 3; run += 1) {
+      const fakeSpawn = () => {
+        const { EventEmitter } = require('node:events');
+        const child = new EventEmitter();
+        child.stdout = new EventEmitter();
+        setImmediate(() => {
+          child.stdout.emit('data', Buffer.from(`commit ${'0'.repeat(40)}\ndiff --git a/x b/x\n+++ b/x\n@@ -0,0 +1 @@\n+`));
+          const chunk = Buffer.alloc(64 * 1024, 'a');
+          for (let sent = 0; sent < megabytes * 1024 * 1024; sent += chunk.length) child.stdout.emit('data', chunk);
+          child.stdout.emit('data', Buffer.from('\n'));
+          child.emit('close', 0);
+        });
+        return child;
+      };
+      const started = process.hrtime.bigint();
+      await scanner.scanHistory('git', os.tmpdir(), { spawn: fakeSpawn });
+      best = Math.min(best, Number(process.hrtime.bigint() - started) / 1e6);
+    }
+    return best;
+  };
+  const small = await time(2);
+  const large = await time(32);
+  assert.ok(large / Math.max(small, 1) < 48, `16x the data took ${(large / Math.max(small, 1)).toFixed(1)}x the time`);
 });

@@ -192,10 +192,11 @@ function historyFinding(findings, hit, file, commit) {
   findings.set(`${hit.rule}:${file}:${commit}:${hit.line}`, { id: findingId(key), kind: 'secret-in-history', class: classFor(file), rule: hit.rule, label: hit.label, file, line: hit.line, column: hit.column, commit: commit.slice(0, 12) });
 }
 
-function scanHistory(command, repo) {
+// `start` replaces spawn only in tests that time the stream handler.
+function scanHistory(command, repo, { spawn: start = spawn } = {}) {
   return new Promise((resolve) => {
     const args = gitArgs(repo, ['log', '--all', '--root', '--diff-merges=first-parent', '--format=commit %H', '-p', '-U0', '--inter-hunk-context=0', '--text', '--no-color', '--no-ext-diff', '--no-textconv', '--no-renames', '--src-prefix=a/', '--dst-prefix=b/']);
-    const child = spawn(command, args, { windowsHide: true, shell: false, stdio: ['ignore', 'pipe', 'ignore'] });
+    const child = start(command, args, { windowsHide: true, shell: false, stdio: ['ignore', 'pipe', 'ignore'] });
     const findings = new Map();
     let commit = null;
     let file = null;
@@ -253,6 +254,7 @@ function scanHistory(command, repo) {
         const shown = spawnSync(command, gitArgs(repo, ['show', '--no-textconv', `${at}:${name}`]), { maxBuffer: MAX_FILE_BYTES, windowsHide: true, shell: false });
         if (shown.error || shown.status !== 0) {
           notScanned.push({ file: name, commit: at.slice(0, 12), reason: shown.error && shown.error.code === 'ENOBUFS' ? 'larger than 5 MB' : 'unreadable' });
+          ok = false;
           continue;
         }
         for (const hit of patterns.scanText(shown.stdout.toString('utf8'))) if (hit.rule === 'private-key') historyFinding(findings, hit, name, at);
@@ -273,9 +275,14 @@ function recheck(previous, findings) {
   };
 }
 
-// A file name may hold control characters (a newline, an escape sequence); those are printed quoted so
-// they cannot add lines to the report or reach the terminal raw.
-function printable(name) { return /[\x00-\x1f\x7f]/.test(name) ? JSON.stringify(name) : name; }
+// A file name may hold control characters (a newline, an escape sequence, DEL, C1, line or paragraph
+// separators, bidi overrides); those names are printed quoted, with each such character escaped, so
+// they cannot add lines to the report, reach the terminal raw or reorder what is shown.
+const CONTROL = /[\x00-\x1f\x7f-\x9f\u2028\u2029\u202a-\u202e\u2066-\u2069]/;
+function printable(name) {
+  if (!CONTROL.test(name)) return name;
+  return JSON.stringify(name).replace(/[\x7f-\x9f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g, char => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`);
+}
 
 function markdown(report) {
   const lines = ['# Local security scan', '', `- **Status:** ${report.status}`, `- **Commit:** ${report.scanned.commit || 'none'}${report.scanned.dirty ? ' (with uncommitted changes)' : ''}`,
@@ -371,4 +378,4 @@ async function main(argv = process.argv.slice(2), { stdout = process.stdout, std
 
 if (require.main === module) main().then((code) => { process.exitCode = code; });
 
-module.exports = { SCHEMA, parseArgs, resolveGit, scan, markdown, recheck, exitCodeFor, main };
+module.exports = { SCHEMA, parseArgs, resolveGit, scan, scanHistory, markdown, recheck, exitCodeFor, main };
