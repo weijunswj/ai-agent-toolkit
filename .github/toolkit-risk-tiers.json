@@ -1,6 +1,6 @@
 {
   "schema": "toolkit-risk-tiers/v1",
-  "description": "How repo/scripts/toolkit-risk-tier.cjs tags a change in this repository. A changed path takes the first list it matches: risky, then normal, then light; anything else is NORMAL. Risky patterns ignore letter case. A file whose changed lines only bump the product version (a JSON \"version\" key, a version constant or a managed-block marker) is LIGHT. Editing this list is itself RISKY.",
+  "description": "How repo/scripts/toolkit-risk-tier.cjs tags a change in this repository. A changed path takes the first list it matches: risky, then normal, then light; anything else is NORMAL. Patterns ignore letter case; reading from git, a path also keeps the tier the list at the merge base gave it. A file whose changed lines only bump the product version (a JSON \"version\" key, a managed-block marker, or a version constant outside the risky paths) is LIGHT. Editing this list is itself RISKY.",
   "risky": [
     ".github/toolkit-risk-tiers.json",
     "repo/scripts/toolkit-risk-tier.cjs",
@@ -68,7 +68,16 @@
     "skills/secure-ci-cd/scripts/personal-data-guard.cjs",
     "skills/**/scripts/install*",
     "skills/n8n-environment-setup/templates/**",
-    "skills/n8n-workflow-transport/templates/helper-scripts/**"
+    "skills/n8n-workflow-transport/templates/helper-scripts/**",
+    "skills/codex-ssh-hostinger-coolify-setup-maintainer/scripts/**",
+    "skills/github-program-reconciler/scripts/resolve-executable.cjs",
+    "skills/github-program-reconciler/scripts/decision-t*.cjs",
+    "repo/scripts/claude-process-launch.cjs",
+    "repo/scripts/toolkit-canonical-path.cjs",
+    "repo/scripts/codex-app-server.cjs",
+    "repo/scripts/toolkit-version.cjs",
+    "repo/scripts/toolkit-projects-tasks.cjs",
+    "repo/scripts/update-source-watch-review-branch.sh"
   ],
   "normal": [
     "skills/**",

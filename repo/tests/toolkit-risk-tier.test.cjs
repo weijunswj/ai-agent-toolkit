@@ -44,6 +44,11 @@ test('the owner\'s RISKY categories are RISKY in this repository', () => {
     'repo/contracts/trusted-ci-repository-protection/templates/protected-ci-gate.workflow.yml', 'repo/scripts/codex-config-load-check.cjs',
     'skills/codex-ssh-hostinger-coolify-setup-maintainer/scripts/install-daily-security-check-systemd.sh',
     'skills/secure-ci-cd/scripts/install-personal-data-guard.cjs', 'skills/github-program-reconciler/scripts/programme-checkpoint.cjs',
+    // What those load or run: an unattended root script, executable and path resolution, the Codex server, versions and task templates.
+    'skills/codex-ssh-hostinger-coolify-setup-maintainer/scripts/daily-security-check.sh', 'repo/scripts/claude-process-launch.cjs',
+    'repo/scripts/toolkit-canonical-path.cjs', 'repo/scripts/codex-app-server.cjs', 'repo/scripts/toolkit-projects-tasks.cjs',
+    'repo/scripts/toolkit-version.cjs', 'skills/github-program-reconciler/scripts/resolve-executable.cjs',
+    'skills/github-program-reconciler/scripts/decision-tags.cjs', 'repo/scripts/update-source-watch-review-branch.sh',
   ]) {
     assert.ok(fs.existsSync(path.join(ROOT, rel)), `${rel} exists`);
     assert.equal(tierOf(rel), 'RISKY', rel);
@@ -60,6 +65,20 @@ test('tests and other scripts are NORMAL, docs are LIGHT, skills are NORMAL', ()
   for (const rel of ['README.md', 'repo/docs/CHANGELOG.md', 'repo/ARCHITECTURE.md', 'repo/docs/HOW-TO-USE.md']) assert.equal(tierOf(rel), 'LIGHT', rel);
 });
 
+test('every local module a RISKY script loads is RISKY too, so a family cannot be split', () => {
+  const tracked = spawnSync('git', ['-C', ROOT, 'ls-files'], { encoding: 'utf8' }).stdout.split('\n').filter(Boolean);
+  const scripts = tracked.filter(rel => /\.c?js$/.test(rel) && !rel.startsWith('repo/tests/') && !rel.includes('/third-party/') && tierOf(rel) === 'RISKY');
+  const missing = [];
+  for (const rel of scripts) {
+    for (const match of fs.readFileSync(path.join(ROOT, rel), 'utf8').matchAll(/require\(\s*['"](\.{1,2}\/[^'"]+)['"]\s*\)/g)) {
+      const base = path.posix.normalize(path.posix.join(path.posix.dirname(rel), match[1]));
+      const target = [base, `${base}.cjs`, `${base}.js`].find(candidate => tracked.includes(candidate));
+      if (target && tierOf(target) !== 'RISKY') missing.push(`${target} (loaded by ${rel})`);
+    }
+  }
+  assert.deepEqual([...new Set(missing)], []);
+});
+
 test('every RISKY pattern in this repository matches a tracked file, so the list cannot go stale unnoticed', () => {
   const tracked = spawnSync('git', ['-C', ROOT, 'ls-files'], { encoding: 'utf8' }).stdout.split('\n').filter(Boolean);
   const stale = TOOLKIT.risky.filter(glob => !tracked.some(rel => globToRegExp(glob).test(rel)));
@@ -67,13 +86,31 @@ test('every RISKY pattern in this repository matches a tracked file, so the list
 });
 
 test('a version-only edit is LIGHT even on a RISKY path; any other line keeps the path tier', () => {
-  assert.equal(tierOf('repo/scripts/toolkit-local-bridge.cjs', ["const VERSION = '3.10.0';", "const VERSION = '3.11.0';"]), 'LIGHT');
+  assert.equal(tierOf('repo/scripts/release-notes.cjs', ["const VERSION = '3.10.0';", "const VERSION = '3.11.0';"]), 'LIGHT', 'a code constant on a NORMAL path');
+  assert.equal(tierOf('repo/scripts/toolkit-local-bridge.cjs', ["const VERSION = '3.10.0';", "const VERSION = '3.11.0';"]), 'RISKY', 'a code constant never lowers a RISKY path');
+  assert.equal(tierOf('scripts/install-tool.js', ['const VERSION = "1.0.0";', 'const VERSION = "9.9.9";'], DEFAULT_CONFIG), 'RISKY', "an installer's VERSION picks what it downloads");
   assert.equal(tierOf('.claude-plugin/plugin.json', ['  "version": "3.10.0",', '  "version": "3.11.0",']), 'LIGHT');
   assert.equal(tierOf('repo/scripts/toolkit-local-bridge.cjs', ["const VERSION = '3.11.0';", 'process.exit(0);']), 'RISKY');
   assert.equal(tierOf('AGENTS.md', ['<!-- AI-AGENT-TOOLKIT:a.md:BEGIN X v2 toolkit=3.10.0 sha256=0123456789ab -->',
     '<!-- AI-AGENT-TOOLKIT:a.md:BEGIN X v2 toolkit=3.11.0 sha256=0123456789ab -->']), 'LIGHT', 'a managed-block marker bump');
   assert.equal(tierOf('AGENTS.md', ['<!-- AI-AGENT-TOOLKIT:a.md:BEGIN X v2 toolkit=3.11.0 sha256=0123456789ab -->', '- a new rule']), 'RISKY');
   assert.equal(tierOf('repo/scripts/toolkit-local-bridge.cjs', []), 'RISKY', 'a mode-only change is not a version bump');
+});
+
+test('every real managed-block marker in this repository counts as a version bump, and only the toolkit= version may differ', () => {
+  const grep = spawnSync('git', ['-C', ROOT, 'grep', '-h', '-E', '<!-- AI-AGENT-TOOLKIT:[^ ]+:BEGIN '], { encoding: 'utf8' }).stdout.split('\n').filter(Boolean);
+  const markers = [...new Set(grep.map(line => line.trim()).filter(line => / toolkit=\d+\.\d+\.\d+ sha256=[0-9a-f]{12} -->$/.test(line)))];
+  assert.ok(markers.some(line => line.includes('ANTIGRAVITY.BOOTSTRAP')), 'a marker name with a dot is among them');
+  for (const marker of markers) {
+    const bumped = marker.replace(/toolkit=\d+\.\d+\.\d+/, 'toolkit=99.0.0');
+    assert.equal(classify([{ path: '.agents/rules/00-agent-toolkit-bootstrap.md', removed: [marker], added: [bumped] }], TOOLKIT).tier, 'LIGHT', marker);
+    assert.equal(tierOf('AGENTS.md', [marker, bumped]), 'LIGHT', marker);
+    for (const changed of [bumped.replace(/sha256=[0-9a-f]{12}/, 'sha256=ffffffffffff'), bumped.replace(/ v2 /, ' v3 '), bumped.replace(/:BEGIN \S+/, ':BEGIN OTHER')]) {
+      assert.equal(classify([{ path: 'AGENTS.md', removed: [marker], added: [changed] }], TOOLKIT).tier, 'RISKY', changed);
+    }
+    assert.equal(classify([{ path: 'AGENTS.md', removed: [], added: [bumped] }], TOOLKIT).tier, 'RISKY', 'a lone added marker');
+    assert.equal(tierOf('AGENTS.md', [bumped]), 'RISKY', 'a lone marker line');
+  }
 });
 
 test('a version-like line that can change behaviour, or sits in the wrong kind of file, keeps the path tier', () => {
@@ -88,7 +125,9 @@ test('a version-like line that can change behaviour, or sits in the wrong kind o
   assert.equal(tierOf('pkg/__init__.py', ["__version__ = '1.0.0'", "__version__ = '1.1.0'"], DEFAULT_CONFIG), 'LIGHT');
 });
 
-test('RISKY patterns ignore letter case, so a hand-typed Windows path cannot drop the tier', () => {
+test('patterns ignore letter case, so a hand-typed Windows path cannot drop the tier', () => {
+  assert.equal(tierOf('Skills/secure-ci-cd/SKILL.md'), 'NORMAL');
+  assert.equal(tierOf('Repo/docs/agent-playbooks/INDEX.md'), 'NORMAL');
   for (const rel of ['REPO/controller.MD', 'Repo/Scripts/Setup-Toolkit.cjs', 'agents.md', 'docs/claude.md', 'skills/foo/agents.md', '.Agents/Rules/x.md', 'repo/scripts/TOOLKIT-GOVERNANCE-HOOK.cjs']) {
     assert.equal(tierOf(rel), 'RISKY', rel);
   }
@@ -143,6 +182,43 @@ test('the git reader sees committed, uncommitted and untracked changes since the
     const result = classify(files, DEFAULT_CONFIG);
     assert.deepEqual(result.files.map(f => f.tier), ['LIGHT', 'LIGHT', 'RISKY']);
     assert.equal(result.tier, 'RISKY');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('the git reader reads raw paths, counts only hunk lines, and keeps the tier the list had at the merge base', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'risk-tier-git2-'));
+  const write = (rel, text) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), text); };
+  const git = (...args) => {
+    const result = spawnSync('git', ['-C', dir, '-c', 'user.name=Test', '-c', 'user.email=test@example.com', ...args], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+  };
+  const marker = version => `<!-- AI-AGENT-TOOLKIT:src.md:BEGIN ANTIGRAVITY.BOOTSTRAP v2 toolkit=${version} sha256=0123456789ab -->`;
+  try {
+    git('init', '-q', '-b', 'main');
+    write('.github/toolkit-risk-tiers.json', JSON.stringify({ schema: 'toolkit-risk-tiers/v1', risky: ['.github/toolkit-risk-tiers.json', 'scripts/*-hook.cjs', '**/AGENTS.md'], normal: [], light: ['**/*.md'] }));
+    write('scripts/agent-hook.cjs', 'module.exports = 1;\n');
+    write('AGENTS.md', `${marker('1.0.0')}\n-- Never push to main.\n`);
+    write('docs/rules.md', `${marker('1.0.0')}\n`);
+    git('add', '.'); git('commit', '-q', '-m', 'base');
+    git('checkout', '-q', '-b', 'work');
+    write('.github/toolkit-risk-tiers.json', JSON.stringify({ schema: 'toolkit-risk-tiers/v1', risky: [], normal: [], light: ['**/*.md', '**/*.cjs', '**/*.json'] }));
+    write('scripts/agent-hook.cjs', 'module.exports = 2;\n');
+    write('AGENTS.md', `${marker('1.1.0')}\n++ Push to main is fine.\n`);
+    write('docs/rules.md', `${marker('1.1.0')}\n`);
+    write('docs/caf\u00e9/AGENTS.md', 'new rules\n');
+    git('add', '.'); git('commit', '-q', '-m', 'work');
+    const change = new GitChange(dir);
+    const files = change.files('main');
+    assert.ok(files.some(f => f.path === 'docs/caf\u00e9/AGENTS.md'), 'a non-ASCII path comes through unquoted');
+    const current = loadConfig(dir).config;
+    const result = classify(files, [current, change.baseConfig()]);
+    const tierFor = rel => result.files.find(f => f.path === rel).tier;
+    assert.equal(tierFor('scripts/agent-hook.cjs'), 'RISKY', 'editing the list cannot lower the same change');
+    assert.equal(tierFor('.github/toolkit-risk-tiers.json'), 'RISKY');
+    assert.equal(tierFor('AGENTS.md'), 'RISKY', 'content lines starting with -- or ++ are changes, not headers');
+    assert.equal(tierFor('docs/caf\u00e9/AGENTS.md'), 'RISKY');
+    assert.equal(tierFor('docs/rules.md'), 'LIGHT', 'a real marker bump read from git');
+    assert.equal(classify(files, current).files.find(f => f.path === 'scripts/agent-hook.cjs').tier, 'LIGHT', 'the current list alone would have lowered it');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 

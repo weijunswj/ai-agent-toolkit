@@ -4,9 +4,10 @@
 // Tags a change RISKY, NORMAL or LIGHT by the paths it touches, never by its size, so the tier is not
 // a model's guess. Each changed path takes the first list it matches in the repository's
 // .github/toolkit-risk-tiers.json (risky, then normal, then light), or NORMAL when it matches none.
-// RISKY patterns match regardless of letter case, so a path typed in another case on Windows still
-// counts. A file whose changed lines only bump the product version counts as LIGHT. A mixed change
-// takes its highest tier.
+// Patterns match regardless of letter case, so a path typed in another case on Windows still counts.
+// A file whose changed lines only bump the product version counts as LIGHT. A mixed change takes its
+// highest tier. Reading from git, each path also takes the tier the list at the merge base gives it,
+// so a change cannot lower its own tier by editing the list.
 // Without a repository list, a generic default list is used and the output says so.
 //
 // Usage: node repo/scripts/toolkit-risk-tier.cjs [--repo <dir>] [--base <ref>] [--json] [-- <path>...]
@@ -31,12 +32,15 @@ const DEFAULT_CONFIG = Object.freeze({
 });
 // A changed line that only bumps the product version: a "version" key in a JSON file, a version or
 // __version__ constant in a code file, or a Toolkit managed-block marker whose toolkit= version is the
-// only thing a bump changes. Other version-like names, such as MIN_VERSION, can change behaviour, so
-// they keep the path's tier.
+// only thing a bump changes. Every removed line must pair with an added line that differs only in that
+// version. Other version-like names, such as MIN_VERSION, can change behaviour, so they keep the
+// path's tier, and a code constant never lowers a RISKY path (an installer's VERSION picks what it
+// downloads).
+const SEMVER_VALUE = /v?\d+\.\d+\.\d+/;
 const VERSION_LINES = Object.freeze([
-  { files: /\.json$/i, line: /^\s*"version"\s*:\s*"v?\d+\.\d+\.\d+"\s*,?\s*$/ },
-  { files: /\.(?:[cm]?js|ts|py)$/i, line: /^\s*(?:(?:export\s+)?(?:const|let|var)\s+)?(?:version|__version__)\s*=\s*["'`]v?\d+\.\d+\.\d+["'`]\s*;?\s*$/i },
-  { files: /./, line: /^\s*<!-- AI-AGENT-TOOLKIT:[^\s]+:BEGIN [A-Z0-9-]+ v\d+ toolkit=\d+\.\d+\.\d+ sha256=[0-9a-f]{12} -->\s*$/ },
+  { files: /\.json$/i, line: /^\s*"version"\s*:\s*"v?\d+\.\d+\.\d+"\s*,?\s*$/, risky: true },
+  { files: /\.(?:[cm]?js|ts|py)$/i, line: /^\s*(?:(?:export\s+)?(?:const|let|var)\s+)?(?:version|__version__)\s*=\s*["'`]v?\d+\.\d+\.\d+["'`]\s*;?\s*$/i, risky: false },
+  { files: /./, line: /^\s*<!-- AI-AGENT-TOOLKIT:[^\s]+:BEGIN [A-Za-z0-9._-]+ v\d+ toolkit=\d+\.\d+\.\d+ sha256=[0-9a-f]{12} -->\s*$/, risky: true },
 ]);
 
 function fail(message) { throw Object.assign(new Error(message), { code: 'RISK_TIER_INPUT' }); }
@@ -56,36 +60,62 @@ function globToRegExp(glob, { ignoreCase = false } = {}) {
   return new RegExp(glob.includes('/') ? `^${source}$` : `(?:^|/)${source}$`, ignoreCase ? 'i' : '');
 }
 
+function parseConfig(text, where) {
+  let config;
+  try { config = JSON.parse(text); } catch (error) { fail(`${where} is not valid JSON: ${error.message}`); }
+  if (!config || config.schema !== SCHEMA) fail(`${where} must have schema ${SCHEMA}.`);
+  for (const [key] of LISTS) {
+    if (!Array.isArray(config[key]) || config[key].some(entry => typeof entry !== 'string' || !entry.trim())) fail(`${where} "${key}" must be a list of path patterns.`);
+  }
+  return config;
+}
+
 function loadConfig(repoRoot) {
   const file = path.join(repoRoot, CONFIG_REL);
   if (!fs.existsSync(file)) return { config: DEFAULT_CONFIG, source: 'built-in default list' };
-  let config;
-  try { config = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (error) { fail(`${CONFIG_REL} is not valid JSON: ${error.message}`); }
-  if (!config || config.schema !== SCHEMA) fail(`${CONFIG_REL} must have schema ${SCHEMA}.`);
-  for (const [key] of LISTS) {
-    if (!Array.isArray(config[key]) || config[key].some(entry => typeof entry !== 'string' || !entry.trim())) fail(`${CONFIG_REL} "${key}" must be a list of path patterns.`);
+  return { config: parseConfig(fs.readFileSync(file, 'utf8'), CONFIG_REL), source: CONFIG_REL };
+}
+
+// A version change is a removed line and an added line that differ only in the version. With the
+// signs known (removed and added), each removed line pairs with one added line; with bare changed
+// lines, every line needs a partner that differs only in the version.
+function versionOnly(rel, changes, { risky = false } = {}) {
+  const rules = VERSION_LINES.filter(rule => rule.files.test(rel) && (!risky || rule.risky));
+  const signed = !Array.isArray(changes);
+  const lines = signed ? [...changes.removed, ...changes.added] : changes;
+  if (!lines.length || !lines.every(line => rules.some(rule => rule.line.test(line)))) return false;
+  const key = line => line.replace(SEMVER_VALUE, '<version>');
+  const count = (list, sign) => list.reduce((map, line) => map.set(key(line), (map.get(key(line)) || 0) + sign), new Map());
+  if (signed) {
+    const balance = count(changes.added, 1);
+    for (const line of changes.removed) balance.set(key(line), (balance.get(key(line)) || 0) - 1);
+    return [...balance.values()].every(value => value === 0);
   }
-  return { config, source: CONFIG_REL };
+  return [...count(lines, 1).values()].every(value => value % 2 === 0);
 }
 
-function versionOnly(rel, changedLines) {
-  const rules = VERSION_LINES.filter(rule => rule.files.test(rel));
-  return changedLines.length > 0 && changedLines.every(line => rules.some(rule => rule.line.test(line)));
-}
-
-// One changed file: { path, changedLines } where changedLines is null when the content is unknown
-// (an added, deleted or binary file, or a path given on the command line).
-function classifyFile(file, config) {
-  if (file.changedLines && versionOnly(file.path, file.changedLines)) return { path: file.path, tier: 'LIGHT', rule: 'version-only change' };
+function pathTier(rel, config) {
   for (const [key, tier] of LISTS) {
-    const pattern = config[key].find(glob => globToRegExp(glob, { ignoreCase: key === 'risky' }).test(file.path));
-    if (pattern) return { path: file.path, tier, rule: `${key}: ${pattern}` };
+    const pattern = config[key].find(glob => globToRegExp(glob, { ignoreCase: true }).test(rel));
+    if (pattern) return { tier, rule: `${key}: ${pattern}` };
   }
-  return { path: file.path, tier: 'NORMAL', rule: 'no list matched' };
+  return { tier: 'NORMAL', rule: 'no list matched' };
 }
 
-function classify(files, config) {
-  const results = files.map(file => classifyFile(file, config));
+// One changed file: { path, changedLines } or { path, removed, added }; changedLines is null when the
+// content is unknown (an added, deleted or binary file, or a path given on the command line). With
+// several lists (the current one and the one at the merge base), the file takes the highest tier.
+function classifyFile(file, configs) {
+  const lists = Array.isArray(configs) ? configs : [configs];
+  const byPath = lists.map(config => pathTier(file.path, config))
+    .reduce((top, entry) => (TIERS.indexOf(entry.tier) > TIERS.indexOf(top.tier) ? entry : top));
+  const changes = file.removed && file.added ? { removed: file.removed, added: file.added } : file.changedLines;
+  if (changes && versionOnly(file.path, changes, { risky: byPath.tier === 'RISKY' })) return { path: file.path, tier: 'LIGHT', rule: 'version-only change' };
+  return { path: file.path, ...byPath };
+}
+
+function classify(files, configs) {
+  const results = files.map(file => classifyFile(file, configs));
   const tier = results.reduce((top, entry) => (TIERS.indexOf(entry.tier) > TIERS.indexOf(top) ? entry.tier : top), 'LIGHT');
   return { tier, files: results };
 }
@@ -108,21 +138,42 @@ class GitChange {
     return 'origin/main';
   }
 
+  // -z keeps every path raw (no quoting of non-ASCII names); a rename or copy lists both paths.
   files(base) {
     const mergeBase = this.git(['merge-base', base || this.defaultBase(), 'HEAD']).trim();
+    this.mergeBase = mergeBase;
     const changed = new Map();
-    for (const line of this.git(['diff', '--name-status', '-M', mergeBase]).split('\n').filter(Boolean)) {
-      const [status, ...paths] = line.split('\t');
-      for (const rel of paths) changed.set(rel, status.startsWith('M') && paths.length === 1 ? this.changedLines(mergeBase, rel) : null);
+    const fields = this.git(['diff', '--name-status', '-z', '-M', mergeBase]).split('\0').filter(Boolean);
+    for (let index = 0; index < fields.length;) {
+      const status = fields[index++];
+      const paths = fields.slice(index, index += /^[RC]/.test(status) ? 2 : 1);
+      for (const rel of paths) changed.set(rel, status.startsWith('M') && paths.length === 1 ? this.changes(mergeBase, rel) : null);
     }
-    for (const rel of this.git(['ls-files', '--others', '--exclude-standard']).split('\n').filter(Boolean)) changed.set(rel, null);
-    return [...changed].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([rel, changedLines]) => ({ path: rel, changedLines }));
+    for (const rel of this.git(['ls-files', '-z', '--others', '--exclude-standard']).split('\0').filter(Boolean)) changed.set(rel, null);
+    return [...changed].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([rel, changes]) => (changes ? { path: rel, changedLines: [...changes.removed, ...changes.added], ...changes } : { path: rel, changedLines: null }));
   }
 
-  changedLines(mergeBase, rel) {
+  // Only lines inside hunks count, so a content line that starts with "-- " or "++ " is never
+  // mistaken for a diff header.
+  changes(mergeBase, rel) {
     const diff = this.git(['diff', '-U0', '--no-color', mergeBase, '--', rel]);
     if (/^Binary files /m.test(diff)) return null;
-    return diff.split('\n').filter(line => /^[+-]/.test(line) && !/^(\+\+\+|---) /.test(line)).map(line => line.slice(1));
+    const removed = [];
+    const added = [];
+    let inHunk = false;
+    for (const line of diff.split('\n')) {
+      if (line.startsWith('@@')) inHunk = true;
+      else if (inHunk && line.startsWith('-')) removed.push(line.slice(1));
+      else if (inHunk && line.startsWith('+')) added.push(line.slice(1));
+    }
+    return { removed, added };
+  }
+
+  // The list as it was at the merge base, or null when there was none.
+  baseConfig() {
+    const result = this.run('git', ['-C', this.repoRoot, 'show', `${this.mergeBase}:${CONFIG_REL}`], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
+    return result.status === 0 ? parseConfig(result.stdout, `${CONFIG_REL} at ${this.mergeBase.slice(0, 7)}`) : null;
   }
 }
 
@@ -144,8 +195,16 @@ function main(argv = process.argv.slice(2)) {
   const args = parseArgs(argv);
   const repoRoot = path.resolve(args.repo);
   const { config, source } = loadConfig(repoRoot);
-  const files = args.paths ? args.paths.map(rel => ({ path: rel, changedLines: null })) : new GitChange(repoRoot).files(args.base);
-  const result = { ...classify(files, config), list: source };
+  const configs = [config];
+  let files;
+  if (args.paths) files = args.paths.map(rel => ({ path: rel, changedLines: null }));
+  else {
+    const change = new GitChange(repoRoot);
+    files = change.files(args.base);
+    const base = change.baseConfig();
+    if (base) configs.push(base);
+  }
+  const result = { ...classify(files, configs), list: source };
   if (args.json) process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   else {
     const lines = [`${result.tier}${files.length ? '' : ' (no changed files)'}`, `List: ${source}`];
@@ -162,4 +221,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { DEFAULT_CONFIG, GitChange, classify, classifyFile, globToRegExp, loadConfig, main, parseArgs, versionOnly };
+module.exports = { DEFAULT_CONFIG, GitChange, classify, classifyFile, globToRegExp, loadConfig, main, parseArgs, parseConfig, versionOnly };

@@ -331,3 +331,19 @@ test('invalid arguments and unreadable input fail with one generic error', t => 
   assert.equal(JSON.parse(result.stdout).project, 'EXAMPLE');
   assert.throws(() => parseArgs(['--refresh', 'daily-check-in', prompt, '--params', 'a', '--params', 'b']));
 });
+
+test('every path that rebuilds, swaps or recreates a Toolkit task, or reports one missing, honours a stopped by owner entry', () => {
+  const dir = path.join(ROOT, 'repo', 'contracts', 'claude-projects', 'web-controller-projects');
+  const read = rel => fs.readFileSync(path.join(dir, rel), 'utf8').replace(/\r\n/g, '\n').split('\n');
+  const checks = [
+    ['tasks/daily-check-in.md', /^8\. TASKS OUTDATED:/], ['tasks/daily-check-in.md', /^9\. NUDGE NOT ARMED:/],
+    ['tasks/daily-check-in.md', /OTHER PROJECTS:/], ['tasks/hourly-nudge.md', /^8\. Scheduled tasks:/],
+    ['SKILL.md', /^ {2}- `TASKS OUTDATED`:/], ['SKILL.md', /^ {2}- `NUDGE NOT ARMED`:/], ['SKILL.md', /^- `CHECK-IN NOT ARMED`/],
+    ['SKILL.md', /^- \*\*Both gone:\*\*/], ['SKILL.md', /CONTEXT RESET DUE/], ['reference/recurring-tasks.md', /^\*\*Change = recreate\.\*\*/],
+  ];
+  for (const [rel, pattern] of checks) {
+    const lines = read(rel).filter(line => pattern.test(line));
+    assert.equal(lines.length, 1, `${rel}: one line matches ${pattern}`);
+    assert.match(lines[0], /stopped by owner|owner stopped them/, `${rel}: ${pattern}`);
+  }
+});

@@ -105,7 +105,7 @@ Whenever the user asks for anything recurring (the daily check-in, a sweep, a re
   - `BINDING STALE` or `BINDING UNKNOWN`: rebind (**Binding**). When current, the report says `**Binding:** current` with the short blob, adding the newer short commit when only the commit moved.
   - `TOOLKIT CHANGED`: note the new version; the block and plugin checks follow from it.
   - `MEMORY FORMAT`: rewrite only the named Toolkit line.
-  - `TASKS OUTDATED`: swap each named Toolkit-made task (**Recurring tasks**); add an `unlisted` task to the line.
+  - `TASKS OUTDATED`: swap each named Toolkit-made task (**Recurring tasks**), never one whose entry says `stopped by owner`; add an `unlisted` task to the line.
   - `NUDGE NOT ARMED`: rebuild the hourly nudge and its home thread (**Hourly nudge**), without asking; a deleted nudge is rebuilt the same way, unless its `SCHEDULED TASKS:` entry says `stopped by owner`.
   - `PROJECT TASKS MISSING` (Toolkit project only): another project lost its check-in or nudge. Tell the owner once which; that project's coordinator recreates them on its next wake (**Both gone**), never this one.
   - `PLUGIN BEHIND`: the Toolkit plugin on the user's claude.ai account is more than a day behind `main`. Tell the owner once per version: remove the Toolkit plugin only in claude.ai Customize > Plugins and let it reinstall; if it is still behind, remove the marketplace and add it again with Sync automatically on. Also confirm the account copy after each release merge.
@@ -117,7 +117,7 @@ Whenever the user asks for anything recurring (the daily check-in, a sweep, a re
 - **It is bound to its own home thread,** because a fresh-session task posts a run card in project chat every run. Start a thread named `<PROJECT>: Hourly nudge`; that thread creates the task bound to itself (a task fires into the session that creates it), fires it once and reports the trigger id. Guards:
   - Never resolve the home thread or list it as a resolve candidate; the nudge never resolves it either.
   - Each run is self-contained (it re-reads memory and files) and replies in one line when nothing changed.
-  - The daily check-in reports NUDGE NOT ARMED when it missed its latest scheduled hour by over 65 minutes or its home thread is resolved, and TASKS OUTDATED `weekly-rebuild` once the home thread is a week old. A run that reports `CONTEXT RESET DUE` also asks for a rebuild: new home thread and task, test run, then delete the old task. Note each rebuild in memory.
+  - The daily check-in reports NUDGE NOT ARMED when it missed its latest scheduled hour by over 65 minutes or its home thread is resolved, and TASKS OUTDATED `weekly-rebuild` once the home thread is a week old. A run that reports `CONTEXT RESET DUE` also asks for a rebuild: new home thread and task, test run, then delete the old task. Note each rebuild in memory. None of this applies once its entry says `stopped by owner`.
   - For a template update, ask the home thread to update its own task's prompt, then read it back with `get_trigger` and `--check`; if that fails, rebuild.
   - If the bound nudge dies twice in 7 days, switch that project to a fresh-session nudge every 2 hours and tell the owner.
 - It fires hourly in the user's waking hours only, at a jittered minute (pick one at random, not :00 or :30, for example `CRON_TZ=<user zone> 23 8-23 * * *`), on a small model (for example Haiku), and it is read-only. It does the cheap checks first and stops there, in one line, when nothing changed since its last run.
