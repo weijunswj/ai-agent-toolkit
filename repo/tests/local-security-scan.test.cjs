@@ -286,3 +286,126 @@ test('LS-05: refuses to write inside the scanned repository, and refuses what it
   assert.equal((await scan(['--bogus'])).code, 2);
   assert.equal((await scan(['--out'])).code, 2);
 });
+
+// ---- review fixes: patterns ---------------------------------------------------------------------
+
+test('SP-07: longer token forms, armoured and encrypted private keys, and the allow marker edges', () => {
+  // A dot-free GitHub App token of any length from 36, and a routable GitLab token, match.
+  assert.deepEqual(rules(j('gh', 's_', filler(2100, ALNUM, 41))), ['github-installation-token']);
+  assert.deepEqual(rules(j('gl', 'pat-', filler(27, URLSAFE, 42), '.01.', filler(9, ALNUM, 43))), ['gitlab-token']);
+  // PGP blocks have armour headers and a blank line before the material; encrypted PEM has Proc-Type.
+  const pgp = j('-----BEGIN ', 'PGP PRIVATE', ' KEY BLOCK-----');
+  assert.deepEqual(rules(`${pgp}\nVersion: GnuPG v2\nComment: fixture\n\n${filler(64, B64, 44)}\n`), ['private-key']);
+  const rsa = j('-----BEGIN ', 'RSA PRIVATE', ' KEY-----');
+  assert.deepEqual(rules(`${rsa}\nProc-Type: 4,ENCRYPTED\nDEK-Info: AES-128-CBC,${filler(32, HEX, 45).toUpperCase()}\n\n${filler(64, B64, 46)}\n`), ['private-key']);
+  assert.deepEqual(rules(`${pgp}\nVersion: GnuPG v2\n\nno key material here\n`), [], 'headers with no material');
+  // A closer with letters is not a reason, and a credential after the marker is still found.
+  const value = SAMPLES['github-token'](47);
+  assert.deepEqual(rules(`t = "${value}" {# secret-scan: allow {% endcomment %}`), ['github-token']);
+  assert.deepEqual(rules(`t = "${value}" % secret-scan: allow \\end{comment}`), ['github-token']);
+  assert.deepEqual(rules(`# secret-scan: allow ${SAMPLES['npm-token'](48)}`), ['npm-token'], 'a value written as the reason is found');
+  assert.deepEqual(rules(`t = "${value}" # secret-scan: allow revoked, see rotation log`), []);
+});
+
+// ---- review fixes: the scan ---------------------------------------------------------------------
+
+test('LS-06: git is taken only from an absolute PATH folder', (t) => {
+  const root = scratch(t);
+  const bin = path.join(root, 'bin');
+  fs.mkdirSync(bin);
+  const name = process.platform === 'win32' ? 'git.exe' : 'git';
+  fs.writeFileSync(path.join(bin, name), '');
+  fs.chmodSync(path.join(bin, name), 0o755);
+  const sep = process.platform === 'win32' ? ';' : ':';
+  assert.equal(scanner.resolveGit({ env: { PATH: ['.', 'bin', '', bin].join(sep) } }), path.join(bin, name));
+  assert.throws(() => scanner.resolveGit({ env: { PATH: ['.', 'bin'].join(sep) } }), /not found/);
+  const text = fs.readFileSync(path.join(scripts, 'local-security-scan.cjs'), 'utf8');
+  assert.doesNotMatch(text, /spawn(?:Sync)?\('git'/, 'git is never started by a bare name');
+});
+
+test('LS-07: a git.exe planted in the scanned folder does not run', { skip: process.platform !== 'win32' }, (t) => {
+  const root = scratch(t);
+  const repo = repository(root, { 'a.js': 'one\n' });
+  // The planted git.exe is a copy of node.exe: if it ran, git commands would fail and the scan would exit 2.
+  try { fs.linkSync(process.execPath, path.join(repo, 'git.exe')); } catch { fs.copyFileSync(process.execPath, path.join(repo, 'git.exe')); }
+  fs.writeFileSync(path.join(repo, '.git', 'info', 'exclude'), 'git.exe\n');
+  const env = { ...process.env };
+  for (const key of Object.keys(env)) if (key.toLowerCase() === 'nodefaultcurrentdirectoryinexepath') delete env[key];
+  const result = childProcess.spawnSync(process.execPath, [path.join(scripts, 'local-security-scan.cjs'), '--json'], { cwd: repo, env, encoding: 'utf8', windowsHide: true });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).status, 'clean');
+});
+
+test('LS-08: history reads "++ " lines as content and finds private keys whose material is on later lines', async (t) => {
+  const root = scratch(t);
+  const hidden = SAMPLES['npm-token'](51);
+  const key = `${j('-----BEGIN ', 'RSA PRIVATE', ' KEY-----')}\n${filler(64, B64, 52)}\n${filler(64, B64, 53)}\n${j('-----END ', 'RSA PRIVATE', ' KEY-----')}\n`;
+  const repo = repository(root, { 'notes.txt': `++ ${hidden}\nk = "${SAMPLES['github-token'](54)}"\n`, 'deploy/id_rsa': key });
+  git(repo, ['rm', '--quiet', 'notes.txt', 'deploy/id_rsa']);
+  git(repo, ['commit', '--quiet', '-m', 'remove']);
+  const result = await scan(['--repo', repo, '--json']);
+  assert.equal(result.code, 1, result.stderr);
+  assert.equal(result.stdout.includes(hidden), false, 'no part of a value becomes a file name');
+  assert.equal(result.stdout.includes(hidden.slice(4, 20)), false);
+  const seen = JSON.parse(result.stdout).findings.map(item => [item.file, item.rule, item.line]).sort();
+  assert.deepEqual(seen, [['deploy/id_rsa', 'private-key', 1], ['notes.txt', 'github-token', 2], ['notes.txt', 'npm-token', 1]]);
+});
+
+test('LS-09: history has no blind spots: long lines, -diff files, merge-only lines and log.showRoot=false', async (t) => {
+  const root = scratch(t);
+  const long = SAMPLES['npm-token'](61);
+  const repo = repository(root, { 'first.js': `${SAMPLES['github-token'](62)}\n` });
+  git(repo, ['config', 'log.showRoot', 'false']);
+  write(repo, { 'long.txt': `${'a '.repeat(60002)}${long}\n`, '.gitattributes': 'secret.dat -diff\n', 'secret.dat': `${SAMPLES['stripe-secret-key'](63)}\n` });
+  git(repo, ['add', '-A']);
+  git(repo, ['commit', '--quiet', '-m', 'more']);
+  const base = git(repo, ['rev-parse', '--abbrev-ref', 'HEAD']);
+  git(repo, ['checkout', '--quiet', '-b', 'side']);
+  write(repo, { 'side.js': 'side\n' });
+  git(repo, ['add', '-A']);
+  git(repo, ['commit', '--quiet', '-m', 'side']);
+  git(repo, ['checkout', '--quiet', base]);
+  git(repo, ['merge', '--quiet', '--no-ff', '--no-commit', 'side']);
+  write(repo, { 'merge-only.js': `${SAMPLES['slack-token'](64)}\n` });
+  git(repo, ['add', '-A']);
+  git(repo, ['commit', '--quiet', '-m', 'merge']);
+  git(repo, ['rm', '--quiet', 'first.js', 'long.txt', 'secret.dat', 'merge-only.js']);
+  git(repo, ['commit', '--quiet', '-m', 'remove']);
+  const report = JSON.parse((await scan(['--repo', repo, '--json'])).stdout);
+  assert.equal(report.scanned.history_complete, true);
+  assert.deepEqual([...new Set(report.findings.map(item => `${item.file} ${item.rule}`))].sort(), ['first.js github-token', 'long.txt npm-token', 'merge-only.js slack-token', 'secret.dat stripe-secret-key']);
+});
+
+test('LS-10: an unscanned file is incomplete, an unwritable --out is exit 2, and --out through a link into the repository is refused', async (t) => {
+  const root = scratch(t);
+  const repo = repository(root, { 'a.js': 'one\n' });
+  write(repo, { 'big.txt': 'x'.repeat(5 * 1024 * 1024 + 1) });
+  const big = await scan(['--repo', repo, '--json', '--no-history']);
+  assert.equal(big.code, 3);
+  assert.equal(JSON.parse(big.stdout).status, 'incomplete');
+  fs.rmSync(path.join(repo, 'big.txt'));
+  const blocker = path.join(root, 'not-a-folder');
+  fs.writeFileSync(blocker, 'x');
+  const unwritable = await scan(['--repo', repo, '--out', path.join(blocker, 'reports'), '--no-history']);
+  assert.equal(unwritable.code, 2);
+  assert.match(unwritable.stderr, /could not be written/);
+  const link = path.join(root, 'link');
+  fs.symlinkSync(repo, link, process.platform === 'win32' ? 'junction' : 'dir');
+  const through = await scan(['--repo', repo, '--out', path.join(link, 'reports', 'deep'), '--no-history']);
+  assert.equal(through.code, 2);
+  assert.match(through.stderr, /inside the scanned repository/);
+  assert.equal(fs.existsSync(path.join(repo, 'reports')), false);
+});
+
+test('LS-11: a core.fsmonitor command in the scanned repository does not run', { skip: process.platform === 'win32' }, async (t) => {
+  const root = scratch(t);
+  const repo = repository(root, { 'a.js': 'one\n' });
+  const marker = path.join(root, 'fsmonitor-ran');
+  const hook = path.join(root, 'hook.sh');
+  fs.writeFileSync(hook, `#!/bin/sh\ntouch '${marker}'\n`);
+  fs.chmodSync(hook, 0o755);
+  git(repo, ['config', 'core.fsmonitor', hook]);
+  const result = await scan(['--repo', repo, '--json']);
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(fs.existsSync(marker), false);
+});

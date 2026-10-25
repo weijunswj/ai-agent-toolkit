@@ -29,10 +29,12 @@ const PATTERNS = Object.freeze([
   // GitHub: prefixes from GitHub's token format announcement; 36 letters or digits after the prefix today.
   rule('github-token', 'GitHub token', '(?:ghp|gho|ghu|ghr)_[A-Za-z0-9]{36}'),
   // GitHub App installation tokens are now a ghs_-prefixed JWT of about 520 characters; this is the
-  // pattern GitHub's changelog gives for them (bounded here), which also covers the older 36-character form.
-  rule('github-installation-token', 'GitHub App installation token', 'ghs_[A-Za-z0-9._\\-]{36,2048}'),
+  // pattern GitHub's changelog gives for them, which also covers the older 36-character form.
+  rule('github-installation-token', 'GitHub App installation token', 'ghs_[A-Za-z0-9._\\-]{36,}'),
   rule('github-fine-grained-token', 'GitHub fine-grained token', 'github_pat_[A-Za-z0-9]{22}_[A-Za-z0-9]{59}'),
-  rule('gitlab-token', 'GitLab personal access token', 'glpat-[A-Za-z0-9_\\-]{20}'),
+  // GitLab: the classic token is glpat- plus 20 characters; newer routable tokens are longer and may
+  // hold dots, so any length from 20 counts.
+  rule('gitlab-token', 'GitLab personal access token', 'glpat-[A-Za-z0-9_\\-.]{20,}'),
   rule('slack-token', 'Slack bot or user token', 'xox[bpae]-[0-9]{10,13}-[0-9]{10,13}(?:-[0-9]{10,13})?-[A-Za-z0-9]{24,32}'),
   rule('slack-app-token', 'Slack app-level token', 'xapp-[0-9]-[A-Z0-9]{9,11}-[0-9]{10,13}-[a-f0-9]{64}'),
   rule('slack-webhook', 'Slack incoming webhook URL', 'https://hooks\\.slack\\.com/services/T[A-Z0-9]{8,11}/B[A-Z0-9]{8,11}/[A-Za-z0-9]{24}'),
@@ -58,9 +60,10 @@ const PATTERNS = Object.freeze([
   rule('telegram-bot-token', 'Telegram bot token', '[0-9]{8,10}:AA[A-Za-z0-9_\\-]{33}'),
   rule('azure-storage-key', 'Azure storage account key', 'AccountKey=[A-Za-z0-9+/]{86}==', { bounded: false }),
   rule('age-secret-key', 'age secret key', 'AGE-SECRET-KEY-1[QPZRY9X8GF2TVDW0S3JN54KHCE6MUA7L]{58}'),
-  // A private key block counts only when key material follows the header (on the next line, or
-  // after a literal \n inside a JSON string), so a mention of the header in prose never matches.
-  rule('private-key', 'private key', '-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED |PGP )?PRIVATE KEY(?: BLOCK)?-----', { bounded: false, next: /^(?:\\n)?[A-Za-z0-9+/]{40,}={0,2}/ }),
+  // A private key block counts only when key material follows the header (on a later line, or after
+  // a literal \n inside a JSON string), so a mention of the header in prose never matches. Blank lines
+  // and armour headers such as "Version:" (PGP) or "Proc-Type:" (encrypted PEM) may come first.
+  rule('private-key', 'private key', '-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED |PGP )?PRIVATE KEY(?: BLOCK)?-----', { bounded: false, next: /^[A-Za-z0-9+/]{40,}={0,2}/ }),
 ]);
 
 const ALLOW_MARKER = /secret-scan:\s*allow\b\s*(.*)$/i;
@@ -72,11 +75,28 @@ function isPlaceholder(value) {
   return /(.)\1{7,}/.test(text);
 }
 
-// The reason must hold at least three letters or digits, so comment closers (`*/`, `-->`) and
-// punctuation alone never count as one.
-function allowed(line) {
+// Comment closers that contain letters, removed before a reason is measured.
+const CLOSERS = /\{%-?\s*end\w*\s*-?%\}|\\end\{comment\}/gi;
+// Where a reviewed exception starts on a line, or -1. The reason must hold at least three letters or
+// digits once comment closers are removed, so a closer or punctuation alone never counts as one. The
+// marker covers only matches before it: a credential written after it is still found.
+function allowedFrom(line) {
   const match = ALLOW_MARKER.exec(line);
-  return Boolean(match && match[1].replace(/[^A-Za-z0-9]/g, '').length >= 3);
+  if (!match || match[1].replace(CLOSERS, '').replace(/[^A-Za-z0-9]/g, '').length < 3) return -1;
+  return match.index;
+}
+
+// Whether key material follows a header: the rest of its line (split at literal \n, as inside a JSON
+// string) or the lines after it, skipping blank lines and "Name: value" armour headers.
+const ARMOUR_HEADER = /^[A-Za-z][A-Za-z0-9-]*:\s/;
+function materialFollows(next, rest, lines, index) {
+  const candidates = rest.trim() ? rest.split('\\n') : lines.slice(index + 1, index + 9).map(item => (typeof item.text === 'string' ? item.text : ''));
+  for (const candidate of candidates.slice(0, 8)) {
+    const text = candidate.trim();
+    if (!text || ARMOUR_HEADER.test(text)) continue;
+    return next.test(text);
+  }
+  return false;
 }
 
 // Findings for numbered lines ([{ line, text }], as a diff's added lines): [{ rule, label, line, column }].
@@ -84,17 +104,15 @@ function scanLines(lines) {
   const findings = [];
   for (let index = 0; index < lines.length; index += 1) {
     const { line, text } = lines[index];
-    if (typeof text !== 'string' || text.length === 0 || allowed(text)) continue;
+    if (typeof text !== 'string' || text.length === 0) continue;
+    const marker = allowedFrom(text);
     for (const pattern of PATTERNS) {
       pattern.regex.lastIndex = 0;
       let match;
       while ((match = pattern.regex.exec(text)) !== null) {
         const value = match[0];
-        if (pattern.next) {
-          const rest = text.slice(match.index + value.length);
-          const following = rest.trim().length ? rest.trim() : (lines[index + 1] && typeof lines[index + 1].text === 'string' ? lines[index + 1].text.trim() : '');
-          if (!pattern.next.test(following)) continue;
-        }
+        if (marker >= 0 && match.index < marker) continue;
+        if (pattern.next && !materialFollows(pattern.next, text.slice(match.index + value.length), lines, index)) continue;
         if (isPlaceholder(value)) continue;
         findings.push({ rule: pattern.id, label: pattern.label, line, column: match.index + 1 });
       }
