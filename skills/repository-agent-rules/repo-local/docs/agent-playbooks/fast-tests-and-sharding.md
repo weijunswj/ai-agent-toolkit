@@ -20,7 +20,7 @@ Use when tests or CI got slow, or when adding a test runner, test shards or CI t
 - One manifest lists named shards per system and one `rest` shard per system that takes every file no other shard names, so new files always run.
 - The runner refuses an unknown or empty shard and fails when a file does not load. CI and local runs read the same manifest.
 - One final job waits for every shard, runs even when one failed, and passes only when every shard succeeded and the shard summaries cover plain test discovery exactly once per system, with at least one test per file and no failure or cancellation. Make that job the required check.
-- A drift guard pins the exact test step text and matrix, and its own test shows it rejects narrowed paths, name filters, `if: false`, `; exit 0` or `|| true`, `continue-on-error`, matrix `include`/`exclude` edits and a runner that ignores its shard.
+- A drift guard pins the exact test step text and matrix, and its own test shows it rejects narrowed paths, name filters, `if: false`, `; exit 0` or `|| true`, `continue-on-error`, matrix `include`/`exclude` edits and a runner that ignores its shard. Compare the whole workflow file with the pinned text, not job by job, because a YAML comment, a quoted key or a workflow-wide default can sit outside what a job parser sees. Leave only the gate command list free and allow only plain script commands in it, so a custom `shell:`, `set +e` or `|| echo` cannot hide a failing check.
 
 ## Windows
 
