@@ -1,6 +1,6 @@
 {
   "name": "ai-agent-toolkit",
-  "version": "3.13.6",
+  "version": "3.13.8",
   "description": "Source-first AI-agent toolkit with native Codex plugin metadata, English setup routing, opt-in repo auto-update, and portable Antigravity skills copying.",
   "author": {
     "name": "weijunswj",

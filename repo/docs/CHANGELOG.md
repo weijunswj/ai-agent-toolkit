@@ -1,10 +1,35 @@
 # Toolkit Changelog
 
-## 3.13.6
+## 3.13.8
 
 ### Projects skill
 
 - **Running post and links enforced:** a new Toolkit hook runs before every Claude Projects post, in the coordinator and in work threads. It refuses a fresh post while the owner has not written since that session's newest post (unless that post nears 8 KB) and tells it to edit that post instead, and it refuses any post that names "PR <n>" without a link. It reads the session's own transcript, so the rule survives a context reset. Replies under a post are exempt from the fresh-post check but still need their links, decision cards are not checked, and sessions without the Claude Projects post tools never see it. Every PR in a list needs its own link. The skill now also has the coordinator keep its running post id as the first memory line, and links every PR, thread, file or artifact it names: a PR's changed files only once it is ready for the owner to check and merge, otherwise the chat thread that owns it. Briefs tell work threads to keep one running post with one-line updates. The hourly nudge flags back-to-back posts, a stale running post id and missing links. The Claude Projects controller skill is 2026-10-25.9 (re-upload it).
+
+## 3.13.7
+
+### Programme pages
+
+- **Generated parts first:** the parent page reads the CURRENT summary, then the Programme Graph directly under it, then the controller's hand-written notes and everything else, with the comment trace last. A task page reads its links, title and status block, then its direction note and everything else, with the comment trace last. PR pages are unchanged. A block found anywhere else, higher or lower, moves to its place once; hand-written text is never edited, only moved past, and a hand-kept index the graph replaces is removed in the same pass.
+- **Comment links open the comment:** every link the reconciler writes is the comment's full address. The old short links only worked when the comment was already on the page, so on a long issue, or in the GitHub mobile app, they opened the top of the issue instead.
+- **Shorter CURRENT summary:** it lists only the work in progress, each with its gate, PR, anything waiting on the owner and next step. Queued work shows in the graph.
+- **Graph columns and order:** the columns are Task, Task Description, Child #, PR #, Class and Status. The gate a task is in shows in CURRENT and on its own page. Inside each class, in-progress rows come before queued ones, then rows go by child number; native sub-issues follow the same order.
+- **The catalogue `order` no longer sets a position:** rows and native sub-issues sort by class, status and child number, so the first pass after updating may reorder sub-issues, including tasks still on the older CORE, HARDENING and LATER classes. The older-class migration patch still works and moves nothing itself.
+- **Older copies hold instead of flipping a page:** a copy of the reconciler that finds a page written by a newer Toolkit leaves it alone and says to update Toolkit on that computer, so two computers on different versions never swap a page between layouts.
+- **Joins keep your formatting:** when a block moves, only blank lines are trimmed where text is joined, so a two-space line break or an indented code line next to it is kept. A replaced hand-kept section now ends at the next managed block too, so it never takes the comment trace or the text after it with it. The comment trace is added at the end of a page once and then stays where it is.
+- **One line per topic:** the comment trace lists each topic on one line, every comment as a link named by its comment ID, with "(replaced by ...)" after a replaced record. A topic is the task's name as the graph shows it, or a short subject for a programme-wide comment, and may now contain spaces. On a task page, comments without a topic fall under the task's own name; on the parent they fall under "Other comments", as before. A task name containing `&` or another escaped character stays one topic. When a page fills up, a topic's links move into one index comment and the line shrinks to a link to it. The trace audit accepts "replaced by" or "superseded by" right after a link.
+
+## 3.13.6 (repository protection)
+
+### Default-branch protection
+
+- **`toolkit governance check` checks the default branch:** for an ENABLED github.com repository with a programme binding, it reports drift unless the default branch requires exactly the binding's `required_checks` (rulesets and classic branch protection together), each pinned to an app; exactly one workflow job produces each check; that job's workflow runs on every pull request to the default branch (no path filter, no branch filter that leaves it out); its job condition is absent or exactly `always()` or `!cancelled()`; a job that waits for others has a step whose result is the declared aggregate command's (plain node command lines ending with `node repo/scripts/run-tests.cjs --verify-ci`, `TEST_LEGS: ${{ toJSON(needs) }}`, no step condition, `continue-on-error`, custom shell or working directory); and only merge commits are allowed. The workflow reader is default-deny: a workflow with any line outside a plain YAML subset (printable ASCII on every line, comments included; block scalars only for `run`, `if`, `shell` and `continue-on-error`; no anchors, tags, explicit keys, flow mappings, continued values, misplaced indents, duplicate keys, tabs, control characters, Unicode line breaks, non-ASCII spaces, lone carriage returns or second documents) is unverified, and a job name written as a YAML null counts as no name. A waiting job without such a step, a job named by an expression that could produce the check, or anything GitHub would not show leaves protection unverified, never conformant, and the first line counts unverified items. `--offline` still checks the workflow files.
+- **`toolkit governance migrate` offers the fix:** after its own typed yes it creates or updates one ruleset named "Toolkit: protected default branch" (the default branch, a pull request for every change, the binding's checks pinned to GitHub Actions, merge commits only, no bypass; an update replaces that ruleset's rules) where a binding check is not required or squash or rebase merges are allowed. Workflow problems are shown before the question, and a repository where no job produces a binding check, or its workflow skips pull requests to the default branch, is not offered the ruleset, since it would block those merges. It never edits a ruleset or branch protection it did not create; what its own ruleset cannot fix is listed to change by hand, and a refused write is reported once, not retried.
+
+### Removed
+
+- **Old CI Gate machinery:** the unused trusted-CI repository protection scripts, contracts, templates, fixtures and tests are gone, and so is the rule that every edit to the Validate workflow had to rewrite a pinned blob.
+- **Control-plane kernel:** removed with its contracts and tests. The capability registry stays, because it is the per-computer governance store; the kernel's one used part, the remote-identity check, now lives in the registry under the same contract name, so identities already stored keep their keys.
 
 ## 3.13.5
 
