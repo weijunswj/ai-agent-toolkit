@@ -263,15 +263,9 @@ function topLevel(lines, key) {
   const base = (lines.find(line => line.text !== '---' && !line.text.startsWith('--- ')) || { indent: 0 }).indent;
   const start = lines.findIndex(line => line.indent === base && new RegExp(`^(?:${key}|"${key}"|'${key}'):(?:\\s|$)`).test(line.text));
   if (start < 0) return null;
-  const end = lines.findIndex((line, index) => index > start && line.indent <= base);
+  // A flow value's closing bracket may sit at the key's own column.
+  const end = lines.findIndex((line, index) => index > start && line.indent <= base && !/^[\]}]/.test(line.text));
   return { inline: lines[start].text.replace(/^[^:]+:\s*/, ''), children: lines.slice(start + 1, end < 0 ? lines.length : end) };
-}
-
-// Keys at the first indent of `children` (a mapping or a `- ` list).
-function childKeys(children) {
-  if (!children.length) return [];
-  const indent = children[0].indent;
-  return children.filter(line => line.indent === indent).map(line => (/^(?:-\s+)?["']?([A-Za-z_][\w-]*)["']?\s*(?::|$)/.exec(line.text) || [])[1]).filter(Boolean);
 }
 
 const CODEQL_EVENTS = Object.freeze(['push', 'pull_request', 'pull_request_target', 'merge_group', 'schedule', 'workflow_call']);
@@ -280,42 +274,112 @@ const FALSE_IF = /^(?:-\s+)?if:\s*(?:false|\$\{\{\s*false\s*\}\})$/;
 // A CodeQL analysis older than this no longer shows an advanced setup in use.
 const ANALYSIS_WINDOW_MS = 90 * 24 * 60 * 60 * 1000;
 
+// YAML this reader does not model: anchors and aliases, tags, complex and merge keys. Any of it
+// in a file means a "no" cannot be proved there.
+function outsideSubset(lines) {
+  return lines.some(({ text }) => /(?:^|[\s[{,])[&*][A-Za-z0-9_-]/.test(text)
+    || /(?:^|:\s+|-\s+|(?<![{$])[[{,]\s*)!/.test(text)
+    || /^(?:-\s+)?\?(?:\s|$)/.test(text)
+    || /^(?:-\s+)?<<\s*:/.test(text));
+}
+
+// The names in a flow collection's text (`[a, b]` or `{a: x, b: {}}`), or null when an entry is
+// not a plain name (a key with no value, an anchor, a tag, a quoted escape).
+function flowNames(value) {
+  const map = value.startsWith('{');
+  if (!/^[[{]/.test(value) || !value.endsWith(map ? '}' : ']')) return null;
+  let inner = value.slice(1, -1);
+  for (let before = ''; before !== inner;) { before = inner; inner = inner.replace(/\{[^{}]*\}|\[[^[\]]*\]/g, ''); }
+  const entries = inner.split(',').map(entry => entry.trim()).filter(Boolean);
+  const plain = map ? /^["']?([a-z_]+)["']?\s*:/ : /^["']?([a-z_]+)["']?$/;
+  const names = entries.map(entry => (plain.exec(entry) || [])[1]);
+  return names.length && names.every(Boolean) ? names : null;
+}
+
+// The `on:` triggers as plain names, or null when any entry cannot be read as one.
+function triggerNames(on) {
+  if (on.inline) {
+    let value = on.inline.trim();
+    if (/^[[{]/.test(value)) {
+      // A flow value may run over several lines.
+      if (on.children.length) value = [value, ...on.children.map(line => line.text)].join(' ');
+      return flowNames(value);
+    }
+    if (on.children.length) return null;
+    const name = /^["']?([a-z_]+)["']?$/.exec(value);
+    return name ? [name[1]] : null;
+  }
+  if (!on.children.length) return null;
+  const indent = on.children[0].indent;
+  const entries = on.children.filter(line => line.indent === indent);
+  const names = entries.map(line => (/^(?:-\s+)?["']?([a-z_]+)["']?\s*(?::(?:\s|$)|$)/.exec(line.text) || [])[1]);
+  return names.every(Boolean) ? names : null;
+}
+
+// The steps of a job block: [{ indent, items: [{ indent, text }] }], where `indent` is the column
+// of the step's own keys, or { flow: [text] } for flow-style steps. Only the `steps:` list counts.
+function jobSteps(block, keyIndent) {
+  const steps = [];
+  for (let index = 0; index < block.length; index += 1) {
+    const line = block[index];
+    if (line.indent !== keyIndent || line.text.startsWith('-')) continue;
+    const flow = /^steps:\s*(\[.*)$/.exec(line.text);
+    if (flow) {
+      const value = flow[1];
+      if (!value.endsWith(']')) return null;
+      return { flow: value.slice(1, -1).split(/\}\s*,\s*\{/).map(item => item.replace(/^\s*\{?|\}?\s*$/g, '')) };
+    }
+    if (!/^steps:\s*$/.test(line.text)) continue;
+    const first = block[index + 1];
+    if (!first || !/^-(?:\s|$)/.test(first.text)) return null;
+    const listIndent = first.indent;
+    for (let at = index + 1; at < block.length; at += 1) {
+      const item = block[at];
+      if (item.indent < listIndent || (item.indent === listIndent && !/^-(?:\s|$)/.test(item.text))) break;
+      if (item.indent === listIndent) {
+        const prefix = /^-\s*/.exec(item.text)[0];
+        const rest = item.text.slice(prefix.length);
+        const next = block[at + 1];
+        const indent = rest ? listIndent + prefix.length : (next && next.indent > listIndent ? next.indent : listIndent + 2);
+        steps.push({ indent, items: rest ? [{ indent, text: rest }] : [] });
+      } else steps[steps.length - 1].items.push(item);
+    }
+    return { list: steps };
+  }
+  return { list: [] };
+}
+
 // Triggers that start a workflow only by hand or from another workflow. A CodeQL workflow with only
 // these does not keep default setup off; GitHub's own record of uploads (see the reader) still does.
 const MANUAL_EVENTS = Object.freeze(['workflow_dispatch', 'repository_dispatch', 'workflow_run']);
 
 // Whether workflow `text` runs CodeQL itself (an advanced setup). GitHub refuses an advanced setup's
-// results once default setup is on, so default setup is never turned on over one. Every "no" needs
-// positive proof; anything this reader cannot prove either way is 'unsure', which the caller treats
-// as unreadable, so default setup stays off. Returns:
+// results once default setup is on, so default setup is never turned on over one. One rule holds
+// at every exit: "no" needs every input it rests on to have been read; anything not read, or read
+// outside the YAML subset this reader models, makes the answer 'unsure', which the caller treats as
+// unreadable, so default setup stays off. Returns:
 //   true      `on:` names push, pull_request, pull_request_target, merge_group, schedule or
 //             workflow_call (a reusable workflow runs when it is called), and one job that is not
 //             switched off with `if: false` has codeql-action init and analyze steps that are not
 //             switched off either;
 //   false     the file never names codeql-action, or names only its upload-sarif step (another
-//             scanner's results); or every trigger is a manual or workflow_run one; or every init and
-//             analyze step the file names was placed, none in a live job, and no YAML alias could
-//             copy one;
+//             scanner's results); or, with the whole file inside the subset, every trigger was read
+//             and is a manual or workflow_run one, or every init and analyze step the file names was
+//             placed as a step's own `uses:` key, none in a live job;
 //   'unsure'  anything else.
 function runsCodeql(text) {
-  const uncommented = String(text).replace(/^﻿/, '').split(/\r?\n/).filter(line => !/^\s*#/.test(line)).join('\n');
+  const uncommented = String(text).replace(/^\uFEFF/, '').split(/\r?\n/).filter(line => !/^\s*#/.test(line)).join('\n');
+  // An escape in a quoted value can spell a reference this test cannot see.
+  if (/["']?uses["']?\s*:[^\n]*\\/i.test(uncommented)) return 'unsure';
   const named = [...uncommented.matchAll(/codeql-action\/([\w-]*)/gi)].map(match => match[1].toLowerCase());
   if (named.every(step => step === 'upload-sarif')) return false;
   const mentions = action => (uncommented.match(new RegExp(`codeql-action\\/${action}\\b`, 'gi')) || []).length;
   const lines = workflowLines(text);
+  if (outsideSubset(lines)) return 'unsure';
   const on = topLevel(lines, 'on');
   if (!on) return 'unsure';
-  let events = childKeys(on.children);
-  if (on.inline) {
-    let value = on.inline.trim();
-    // A flow value may run over several lines.
-    if (/^[[{]/.test(value) && on.children.length) value = [value, ...on.children.map(line => line.text)].join(' ');
-    if (value.startsWith('[')) events = value.replace(/[[\]\s'"]/g, '').split(',');
-    else if (value.startsWith('{')) events = [...value.slice(1).matchAll(/(?:^|[{,])\s*["']?([A-Za-z_]+)["']?\s*:/g)].map(match => match[1]);
-    else events = [value.replace(/['"]/g, '')];
-  }
-  events = events.filter(Boolean);
-  if (!events.length || events.some(event => !/^[a-z_]+$/.test(event))) return 'unsure';
+  const events = triggerNames(on);
+  if (!events) return 'unsure';
   if (!events.some(event => CODEQL_EVENTS.includes(event))) return events.every(event => MANUAL_EVENTS.includes(event)) ? false : 'unsure';
   const jobs = topLevel(lines, 'jobs');
   if (!jobs || !jobs.children.length) return 'unsure';
@@ -325,37 +389,32 @@ function runsCodeql(text) {
     if (line.indent === jobIndent) blocks.push([]);
     else if (blocks.length) blocks[blocks.length - 1].push(line);
   }
-  // A step's `uses:` key, on its own line or as a key of a flow-style step.
-  const uses = action => new RegExp(`(?:^|[{,])\\s*["']?uses["']?\\s*:\\s*['"]?github\\/codeql-action\\/${action}@`, 'i');
-  const count = (step, action) => step.filter(item => uses(action).test(item)).length;
+  // A step's own `uses:` key, or a key of a flow-style step.
+  const uses = action => new RegExp(`(?:^|,)\\s*["']?uses["']?\\s*:\\s*['"]?github\\/codeql-action\\/${action}@`, 'i');
+  const off = /(?:^|,)\s*["']?if["']?\s*:\s*(?:false|\$\{\{\s*false\s*\}\})\s*(?:,|$)/;
   const placed = { init: 0, analyze: 0 };
   let live = false;
   for (const block of blocks) {
     if (!block.length) continue;
     const keyIndent = block[0].indent;
     const jobOff = block.some(line => line.indent === keyIndent && !line.text.startsWith('-') && FALSE_IF.test(line.text));
-    // Steps: each starts at a `- ` line (GitHub's starter workflows put these at the job's own key
-    // indent); flow-style steps are split on their items.
-    const steps = [];
-    for (const line of block) {
-      if (line.indent === keyIndent && !/^-\s/.test(line.text)) {
-        const flow = /^steps:\s*\[(.*)\]$/.exec(line.text);
-        if (flow) steps.push(...flow[1].split(/\}\s*,\s*\{/).map(item => [item]));
-        continue;
-      }
-      if (/^-\s/.test(line.text)) steps.push([line.text.replace(/^-\s+/, '')]);
-      else if (steps.length) steps[steps.length - 1].push(line.text);
-    }
-    for (const action of ['init', 'analyze']) placed[action] += steps.reduce((total, step) => total + count(step, action), 0);
+    const found = jobSteps(block, keyIndent);
+    if (!found) return 'unsure';
+    // Each step as its own keys: lines at its key column, or a flow step without nested groups.
+    const steps = found.flow
+      ? found.flow.map(item => {
+        let flat = item.replace(/\$\{\{[^}]*\}\}/g, expr => (/^\$\{\{\s*false\s*\}\}$/.test(expr) ? 'false' : 'expr'));
+        for (let before = ''; before !== flat;) { before = flat; flat = flat.replace(/\{[^{}]*\}|\[[^[\]]*\]/g, ''); }
+        return [flat];
+      })
+      : found.list.map(step => step.items.filter(item => item.indent === step.indent).map(item => item.text));
+    for (const action of ['init', 'analyze']) placed[action] += steps.filter(keys => keys.some(key => uses(action).test(key))).length;
     if (jobOff) continue;
-    const enabled = steps.filter(step => !step.some(item => FALSE_IF.test(item) || /(?:^|[{,]\s*)if:\s*(?:false|\$\{\{\s*false\s*\}\})\s*(?:[,}]|$)/.test(item)));
-    if (['init', 'analyze'].every(action => enabled.some(step => step.some(item => uses(action).test(item))))) live = true;
+    const enabled = steps.filter(keys => !keys.some(key => off.test(key)));
+    if (['init', 'analyze'].every(action => enabled.some(keys => keys.some(key => uses(action).test(key))))) live = true;
   }
   if (live) return true;
-  // Ruled out only when every init and analyze step the file names was placed in this reader's view
-  // of a job, and no alias could repeat one somewhere else.
-  const alias = /[\s[{,]\*[A-Za-z0-9_-]/.test(` ${lines.map(line => line.text).join(' ')}`);
-  return !alias && placed.init === mentions('init') && placed.analyze === mentions('analyze') ? false : 'unsure';
+  return placed.init === mentions('init') && placed.analyze === mentions('analyze') ? false : 'unsure';
 }
 
 // The binding's policy as committed on the default branch: { policy, required_checks, source } where
@@ -387,10 +446,10 @@ function ghRun(args, spawn, input = null) {
   if (result.status !== 0) {
     const text = String(result.stderr || '') + String(result.stdout || '');
     // A ref GitHub cannot resolve is not "no such file".
-    if (/HTTP 404/.test(text)) return { ok: false, reason: /no commit found/i.test(text) ? 'ref-not-found' : 'not-found' };
+    if (/HTTP 404/.test(text)) return { ok: false, reason: /no commit found/i.test(text) ? 'ref-not-found' : /no analysis found/i.test(text) ? 'no-analysis' : 'not-found' };
     if (/HTTP 40[39]|HTTP 422/.test(text)) {
       if (/SAML|OAuth App access restrictions|rate limit/i.test(text)) return { ok: false, reason: /HTTP 403/.test(text) ? 'forbidden' : 'gh-request-failed' };
-      if (/advanced security must be enabled|code security|secret protection|not available (?:on|for) (?:this|your) (?:plan|repository)|upgrade your plan|requires GitHub (?:Team|Enterprise)/i.test(text)) return { ok: false, reason: 'not-on-plan' };
+      if (/advanced security must be enabled|code scanning is not enabled|code security|secret protection|not available (?:on|for) (?:this|your) (?:plan|repository)|upgrade your plan|requires GitHub (?:Team|Enterprise)/i.test(text)) return { ok: false, reason: 'not-on-plan' };
       if (/(?:disabled|prohibited|not allowed|blocked) by (?:your |the )?(?:organi[sz]ation|enterprise)|(?:organi[sz]ation|enterprise) policy/i.test(text)) return { ok: false, reason: 'refused-by-policy' };
       return { ok: false, reason: /HTTP 403/.test(text) ? 'forbidden' : 'gh-request-failed' };
     }
@@ -436,9 +495,13 @@ function ghSecurityReader(slug, { spawn = childProcess.spawnSync, now = Date.now
     ? (fixes.value.enabled && fixes.value.paused !== true ? 'enabled' : 'disabled')
     : (statusOf(analysis && analysis.dependabot_security_updates) || 'unreadable');
   const codeRead = ghRun([`repos/${slug}/code-scanning/default-setup`], spawn);
+  // On a private repository with GitHub Code Security off, GitHub refuses every code scanning call
+  // as not enabled. CodeQL is then off, and can be turned on once Code Security is; no CodeQL results
+  // can have been uploaded meanwhile, so GitHub's record of them is not read.
+  const scanningWaitsForPaid = visibility !== 'public' && admin && !codeRead.ok && codeRead.reason === 'not-on-plan' && fromAnalysis('code_security') === 'disabled';
   const codeScanning = codeRead.ok && codeRead.value
     ? (codeRead.value.state === 'configured' ? 'enabled' : 'disabled')
-    : (visibility === 'public' || !admin ? 'unreadable' : 'not-on-plan');
+    : scanningWaitsForPaid ? 'disabled' : (visibility === 'public' || !admin ? 'unreadable' : 'not-on-plan');
   let privateReporting = 'not-on-plan';
   if (visibility === 'public') {
     const reporting = ghRun([`repos/${slug}/private-vulnerability-reporting`], spawn);
@@ -468,10 +531,12 @@ function ghSecurityReader(slug, { spawn = childProcess.spawnSync, now = Date.now
         if (file.status !== 'ok') { unreadable = true; continue; }
         const runs = runsCodeql(file.text);
         if (runs === true) { advancedCodeql = name; break; }
-        if (runs === 'unsure' && unplaced === null) unplaced = name;
+        if (runs === 'unsure') { if (unplaced === null) unplaced = name; else unreadable = true; }
       }
     }
-    if (advancedCodeql === null) {
+    if (advancedCodeql === null && scanningWaitsForPaid) {
+      if (unplaced !== null || unreadable) advancedCodeql = 'unreadable';
+    } else if (advancedCodeql === null) {
       // GitHub's own record also catches CodeQL run from outside a workflow file (a composite action,
       // another repository's reusable workflow): a recent CodeQL analysis on the default branch whose
       // key is not default setup's (`dynamic/...`). GitHub answers 404 when there is none.
@@ -480,10 +545,15 @@ function ghSecurityReader(slug, { spawn = childProcess.spawnSync, now = Date.now
         : { ok: false, reason: 'no-branch' };
       if (analyses.ok && Array.isArray(analyses.value)) {
         const since = now() - ANALYSIS_WINDOW_MS;
-        const other = analyses.value.find(entry => entry && typeof entry.analysis_key === 'string' && !entry.analysis_key.startsWith('dynamic/')
-          && !(Date.parse(entry.created_at) < since));
+        const recent = entry => !(Date.parse(entry.created_at) < since);
+        // An entry without a key cannot be told apart from default setup's.
+        if (analyses.value.some(entry => !entry || typeof entry.analysis_key !== 'string')) unreadable = true;
+        const other = analyses.value.find(entry => entry && typeof entry.analysis_key === 'string' && !entry.analysis_key.startsWith('dynamic/') && recent(entry));
         if (other) uploads = other.analysis_key;
-      } else if (!(analyses.ok === false && analyses.reason === 'not-found')) unreadable = true;
+        // A full page whose oldest entry is still recent may hide an older one on the next page.
+        const last = analyses.value[analyses.value.length - 1];
+        if (!other && analyses.value.length >= 100 && (!last || recent(last))) unreadable = true;
+      } else if (!(analyses.ok === false && analyses.reason === 'no-analysis')) unreadable = true;
       if (uploads !== null || unplaced !== null || unreadable) advancedCodeql = 'unreadable';
     }
   }

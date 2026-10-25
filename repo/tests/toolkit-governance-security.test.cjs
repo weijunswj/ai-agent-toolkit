@@ -448,6 +448,28 @@ test('SE-08: the reader only reads, hides nothing it could not see, and reads th
   assert.deepEqual([refused.advanced_codeql, refused.codeql_uploads, refused.codeql_unplaced], ['unreadable', undefined, undefined], 'unreadable analyses rule nothing out');
   const mixed = viaUploads('gh: no analysis found (HTTP 404)', { 'a.yml': 'on: push\nsteps:\n  - uses: github/codeql-action/init@v3\n', 'b.yml': 'gh: Not Found (HTTP 500)' });
   assert.deepEqual([mixed.advanced_codeql, mixed.codeql_unplaced], ['unreadable', undefined], 'S5 names one unplaced file only when nothing else was unreadable');
+  const twoUnplaced = viaUploads('gh: no analysis found (HTTP 404)', { 'a.yml': 'on: push\nsteps:\n  - uses: github/codeql-action/init@v3\n', 'b.yml': 'on: push\nsteps:\n  - uses: github/codeql-action/analyze@v3\n' });
+  assert.deepEqual([twoUnplaced.advanced_codeql, twoUnplaced.codeql_unplaced], ['unreadable', undefined], 'two unplaced files are not reported as one');
+  for (const entry of [{ created_at: '2026-10-20T00:00:00Z' }, { analysis_key: null }, { analysis_key: 7 }, null, 'x']) {
+    assert.equal(viaUploads([entry], composite).advanced_codeql, 'unreadable', `an analysis entry without a key rules nothing out: ${JSON.stringify(entry)}`);
+  }
+  const page = count => Array.from({ length: count }, () => ({ analysis_key: 'dynamic/github-code-scanning/codeql:analyze', created_at: '2026-10-20T00:00:00Z' }));
+  assert.equal(viaUploads(page(100), composite).advanced_codeql, 'unreadable', 'a full page of recent analyses may hide an older one');
+  assert.equal(viaUploads(page(99), composite).advanced_codeql, null);
+  assert.equal(viaUploads('gh: Not Found (HTTP 404)', composite).advanced_codeql, 'unreadable', 'a 404 that is not "no analysis found" rules nothing out');
+  // A private repository with Code Security off: GitHub refuses code scanning as not enabled, CodeQL
+  // is off until Code Security is on, and no results can have been uploaded.
+  const privateRead = { private: true, visibility: 'private', default_branch: 'main', permissions: { admin: true }, allow_auto_merge: true, security_and_analysis: { code_security: { status: 'disabled' } } };
+  const notEnabled = 'gh: Code scanning is not enabled for this repository. Please enable code scanning in the repository settings. (HTTP 403)';
+  const waits = security.ghSecurityReader('o/p', { spawn: fakeGh({
+    'repos/o/p': privateRead, 'repos/o/p/code-scanning/default-setup': notEnabled,
+    'repos/o/p/contents/.github/workflows?ref=main': [], 'repos/o/p/code-scanning/analyses?tool_name=CodeQL&ref=refs%2Fheads%2Fmain&per_page=100': notEnabled,
+  }, []) });
+  assert.deepEqual([waits.code_security, waits.code_scanning, waits.advanced_codeql], ['disabled', 'disabled', null], 'CodeQL waits for Code Security');
+  const noPlan = security.ghSecurityReader('o/p', { spawn: fakeGh({
+    'repos/o/p': { ...privateRead, security_and_analysis: {} }, 'repos/o/p/code-scanning/default-setup': notEnabled,
+  }, []) });
+  assert.deepEqual([noPlan.code_security, noPlan.code_scanning], ['not-on-plan', 'not-on-plan'], 'without Code Security on the plan, CodeQL is not on the plan either');
   assert.equal(codeql('codeql.yml', CODEQL_WORKFLOW.replace(/^on:\n {2}push:\n {4}branches: \[main\]/, 'on: workflow_call')), 'codeql.yml', 'a reusable CodeQL workflow is an advanced setup');
   const steps = 'jobs:\n  analyze:\n    steps:\n      - uses: github/codeql-action/init@v3\n      - uses: github/codeql-action/analyze@v3\n';
   const indentless = 'on:\n  push:\njobs:\n  analyze:\n    runs-on: ubuntu-latest\n    steps:\n    - name: Initialise\n      uses: github/codeql-action/init@v3\n    - uses: github/codeql-action/analyze@v3\n';
@@ -500,6 +522,23 @@ test('SE-08: the reader only reads, hides nothing it could not see, and reads th
     ['on: push\njobs:\n  off:\n    if: false\n    steps:\n      - &init\n        uses: github/codeql-action/init@v3\n      - &analyze\n        uses: github/codeql-action/analyze@v3\n  live:\n    steps:\n      - *init\n      - *analyze\n', 'unsure', 'a live job that reuses steps through aliases'],
     ['on: push\njobs:\n  off:\n    if: false\n    steps:\n      - uses: github/codeql-action/init@v3\n      - uses: github/codeql-action/analyze@v3\n  other:\n    steps:\n      - run: |\n          uses: github/codeql-action/init@v3\n', 'unsure', 'one ruled-out copy never hides a step the reader could not place'],
     ['on: push\njobs:\n  a:\n    steps:\n      - uses: ./.github/actions/codeql\n', false, 'a composite action: GitHub\'s record of uploads decides (see SE-08)'],
+    // Every "no" rests only on what was read (N10, N11).
+    [`name: &ev push\non:\n  - workflow_dispatch\n  - *ev\n${steps}`, 'unsure', 'a trigger given by an alias'],
+    [`on:\n  workflow_dispatch:\n  ? push\n${steps}`, 'unsure', 'a complex-key trigger'],
+    [`on:\n  workflow_dispatch:\n  &p push:\n${steps}`, 'unsure', 'an anchored trigger key'],
+    [`on:\n  workflow_dispatch:\n  !!str push:\n${steps}`, 'unsure', 'a tagged trigger key'],
+    [`on:\n  workflow_dispatch:\n  <<: *t\n${steps}`, 'unsure', 'a merge key in the triggers'],
+    [`on: {workflow_dispatch: {}, push}\n${steps}`, 'unsure', 'a flow-map trigger with no value'],
+    [`on: {workflow_dispatch: {}, &p push: {}}\n${steps}`, 'unsure', 'an anchored flow-map trigger'],
+    [`on: {workflow_dispatch: {inputs: {a: {type: string}}}}\n${steps}`, false, 'a nested flow map with dispatch only'],
+    ['on: workflow_dispatch\njobs:\n  a:\n    steps:\n      - uses: github/codeql-action/init@v3\n      - uses: github/codeql-action/analyze@v3\n', false, 'dispatch only, inline'],
+    ['on: push\njobs:\n  a:\n    steps:\n      - run: echo\n        if: false\n      -\n        uses: github/codeql-action/init@v3\n      - # analyse\n        uses: github/codeql-action/analyze@v3\n', true, 'bare and comment-only step lines start their own steps'],
+    ['on: push\njobs:\n  a:\n    steps:\n      - uses: github/codeql-action/init@v3\n        with:\n          if: false\n      - uses: github/codeql-action/analyze@v3\n        env:\n          if: false\n', true, 'an if: false under with or env does not switch a step off'],
+    ['on: push\njobs:\n  a:\n    steps: [{uses: github/codeql-action/init@v3, with: {if: false}}, {uses: github/codeql-action/analyze@v3}]\n', true, 'an if: false nested in a flow step does not switch it off'],
+    ['on: push\njobs:\n  a:\n    steps: [{if: false, uses: github/codeql-action/init@v3}, {uses: github/codeql-action/analyze@v3}]\n', false, 'a flow step switched off with if: false'],
+    ['on: push\njobs:\n  a:\n    steps: [{if: "${{ false }}", uses: github/codeql-action/init@v3}, {uses: github/codeql-action/analyze@v3}]\n', true, 'a quoted switch-off is not read, which only keeps default setup off'],
+    ['on: push\njobs:\n  a:\n    steps:\n      - uses: github/codeql-action/init@v3\n        with:\n          config: |\n            uses: github/codeql-action/analyze@v3\n      - uses: github/codeql-action/analyze@v3\n        if: false\n', 'unsure', 'a mention inside a with: script is never ruled out'],
+    ['on: push\njobs:\n  a:\n    steps:\n      - uses: "github/codeql-action\\/init@v3"\n      - uses: "github/codeql\\x2Daction/analyze@v3"\n', 'unsure', 'escapes in a quoted uses value (O1)'],
   ]) assert.equal(security.runsCodeql(text), runs, why);
   // A default ref GitHub cannot resolve is unreadable, never "not merged".
   const noRef = security.ghSecurityReader('o/r', { spawn: fakeGh({
