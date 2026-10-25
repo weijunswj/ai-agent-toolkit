@@ -360,7 +360,7 @@ function renderAdvisoryFinding(finding) {
     lines.push(`- Latest observed commit: \`${sanitizeGeneratedMarkdown(finding.latest_sha)}\``);
     lines.push(`- Why a new review is required: ${sanitizeGeneratedMarkdown(finding.review_reason)}`);
     if (finding.review_disposition) lines.push(`- Prior disposition: \`${sanitizeGeneratedMarkdown(finding.review_disposition)}\``);
-    if (finding.review_tracker) lines.push(`- Owning tracker: \`${sanitizeGeneratedMarkdown(finding.review_tracker)}\``);
+    if (finding.review_tracker) lines.push(`- Tracker at last review (history; find the current owner at triage): \`${sanitizeGeneratedMarkdown(finding.review_tracker)}\``);
   } else if (finding.type === 'periodic_review_due') {
     lines.push('- Status: `Periodic review due`');
     lines.push(`- Review cadence: \`${target.review_cadence_days} day(s)\``);
