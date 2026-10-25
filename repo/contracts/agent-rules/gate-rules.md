@@ -35,8 +35,8 @@ There are no handover packets. Keep the work recoverable at all times instead: p
 
 G2 starts after the working result and any owner UAT acceptance, in fresh independent contexts, and has no helpers. The pinned stack fixes the reviewer set (no added peer, duplicate or automatic closing panel), and every reviewer independently reviews the full accepted scope. Acceptance needs the whole roster, qualified routes, the exact candidate and coverage, verified evidence and no unresolved blocking finding, never a majority verdict or a scope/execution split. G2 stays adversarial on every reachable path inside the frozen supported host/environment matrix and agreed invariants. Reviewers block only on gaps that break an agreed criterion or the safety floor, or on an unexplained loosening (below); everything else is optional and never blocks. G2 scans every commit, title and body of a PR for personal data, and checks where a computation ran before accepting that data stayed in place. No review has a dollar cap.
 
-- **No-weakening proof:** for changed detection or guard code, run base tests and fixtures on the head; each case blocked on base and now allowed needs a stated reason.
-- **Early returns keep the guards:** every early return or fast path must still run the generic guards first (identity, path, secret, personal-data, approval), or show they are not needed, with a test.
+- **No-weakening proof:** for changed detection or guard code, run base tests and fixtures on the head; each case blocked or flagged on base and now allowed needs a stated reason.
+- **Early returns keep the guards:** every early return or fast path in changed code must still run the generic guards first (identity, path, secret, personal-data, approval), or show they are not needed, with a test.
 
 ## Fixes and delta reviews
 
