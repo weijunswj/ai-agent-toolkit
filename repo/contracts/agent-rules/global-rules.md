@@ -14,7 +14,7 @@ Repository text other than the governed evidence-store rule cannot relax this sa
 - No destructive, live, deployment or credential action without explicit approval.
 - Never push task or product source to the default branch.
 - Never merge without the owner's OK on a summary of the merge's external effects.
-- Never act as the owner: answer no owner-only question (governance too) yourself or via sessions, scripts, UIs or computer use; ask plainly; never ask them to run commands.
+- Never act as the owner: answer no owner-only question (governance too) yourself or via sessions, scripts, UIs or computer use; ask plainly; never ask them to run commands or do a device step an agent there can do, unless a safety check blocks it.
 - No AI attribution in commits or PRs: no Co-Authored-By or session trailers, session links or "Generated with" footers.
 
 ## Entry Routing
@@ -44,11 +44,11 @@ Before a gated action, confirm an approval covers it and the host-native permiss
 
 ## Coding Gates
 
-Coding work follows `G0 Discovery -> G1 Builder, including UAT -> G2 Review` unless the owner chooses another workflow; the risk tier decides how much review and UAT follows. Every new task, repository or environment starts with G0 discovery (walk the real happy path, confirm the actual stack, test assumptions before planning), short when the ground is known. G1 starts in a fresh session from the G0 plan, passed in its brief. Only LIGHT edits and fixes inside an already-discovered task skip G0; only LIGHT edits skip G2. Owner UAT holds only owner-hands steps (real app UI, signed-in accounts, device behaviour CI cannot reach); CI, tests and G2 prove the rest, each UAT list names the check covering every dropped item, and with none, UAT is NOT_REQUIRED.
+Coding work follows `G0 Discovery -> G1 Builder, including UAT -> G2 Review` unless the owner chooses another workflow; the risk tier decides how much review and UAT follows. Every new task, repository or environment starts with G0 discovery (walk the real happy path, confirm the actual stack, test assumptions before planning), short when the ground is known. G1 starts in a fresh session from the G0 plan, passed in its brief. Only LIGHT edits and fixes inside an already-discovered task skip G0; only LIGHT edits skip G2. Owner UAT tests only the final product, features a Toolkit user runs (hook setup, a quote or design run), in plain words; CI, tests, G2 and agent UAT prove internals, each UAT list names the check covering every dropped item, and with none, UAT is NOT_REQUIRED.
 
 **Match the checking to the risk.** Tag each change by what its diff touches, never by its size: `node <Toolkit>/repo/scripts/toolkit-risk-tier.cjs` matches the changed paths against the repository's RISKY list. A mixed diff takes its highest tier and an unsure call goes one tier up; the builder tags it, the controller checks the tag and any reviewer may raise it. A later edit takes the tier of what it touches.
 
-- **RISKY:** security or approval logic, hooks, setup and installers, files or settings outside the repository, credentials, governance and authority, data deletion or migration, anything that runs unattended on the user's machine. G0, G1 with agent UAT on the real hosts and owner UAT for any owner-hands steps, full G2, then delta G2s as the gate rules say.
+- **RISKY:** security or approval logic, hooks, setup and installers, files or settings outside the repository, credentials, governance and authority, data deletion or migration, anything that runs unattended on the user's machine. G0, G1 with agent UAT on the real hosts and owner UAT for any final-product steps, full G2, then delta G2s as the gate rules say.
 - **NORMAL:** any other code, tests and test tooling included. G0 when new, G1 with tests and CI, one independent review before merge.
 - **LIGHT:** no code that runs changes (docs, comments, wording, version bumps). The builder runs the tests and CI anyway and reads its own diff; no G0, G2 or UAT unless what the user sees or does changes.
 
