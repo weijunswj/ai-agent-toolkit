@@ -71,12 +71,12 @@ const ALLOW_MARKER = /secret-scan:\s*allow\b\s*(.*)$/i;
 // Obvious placeholders and documentation samples.
 function isPlaceholder(value) {
   const text = String(value);
-  if (/example|xxxx|placeholder|dummy|sample|redacted|your[_-]|changeme|<|>|\$\{|\{\{|\*\*\*/i.test(text)) return true;
+  if (/example|x{6,}|placeholder|dummy|sample|redacted|your[_-]|changeme|<|>|\$\{|\{\{|\*\*\*/i.test(text)) return true;
   return /(.)\1{7,}/.test(text);
 }
 
 // Comment closers that contain letters, removed before a reason is measured.
-const CLOSERS = /\{%-?\s*end\w*\s*-?%\}|\\end\{comment\}/gi;
+const CLOSERS = /\{%-?\s*end\w*\s*-?%\}|\\end\{comment\}|<\/\w+\s*>|<%-?\s*end\s*-?%>|\{\{~?\/\w+~?\}\}/gi;
 // Where a reviewed exception starts on a line, or -1. The reason must hold at least three letters or
 // digits once comment closers are removed, so a closer or punctuation alone never counts as one. The
 // marker covers only matches before it: a credential written after it is still found.
@@ -87,10 +87,10 @@ function allowedFrom(line) {
 }
 
 // Whether key material follows a header: the rest of its line (split at literal \n, as inside a JSON
-// string) or the lines after it, skipping blank lines and "Name: value" armour headers.
+// string, escaped LF or CRLF) or the lines after it, skipping blank lines and "Name: value" armour headers.
 const ARMOUR_HEADER = /^[A-Za-z][A-Za-z0-9-]*:\s/;
 function materialFollows(next, rest, lines, index) {
-  const candidates = rest.trim() ? rest.split('\\n') : lines.slice(index + 1, index + 9).map(item => (typeof item.text === 'string' ? item.text : ''));
+  const candidates = rest.trim() ? rest.split(/\\r\\n|\\n/) : lines.slice(index + 1, index + 9).map(item => (typeof item.text === 'string' ? item.text : ''));
   for (const candidate of candidates.slice(0, 8)) {
     const text = candidate.trim();
     if (!text || ARMOUR_HEADER.test(text)) continue;

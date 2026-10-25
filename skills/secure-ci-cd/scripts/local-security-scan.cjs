@@ -29,15 +29,17 @@
 // 3 no release blocker, but part of the repository could not be scanned (a shallow clone's history,
 // a file over 5 MB or unreadable), so the result is incomplete.
 //
-// git is run from an absolute PATH folder only (never the scanned folder, where a planted git could
-// sit), with the repository's fsmonitor hook and signature display switched off.
+// git is run from an absolute PATH folder outside the scanned repository (never by bare name, so a
+// planted git there never runs), with the repository's fsmonitor hook and signature display switched
+// off. A filter driver set in the repository's own local config can still run during the dirty-tree
+// check; a fresh clone carries no such config.
 //
 // This interface (flags, exit codes and the JSON schema) is stable: other Toolkit checks call it.
 
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
-const readline = require('node:readline');
+const { StringDecoder } = require('node:string_decoder');
 const { spawn, spawnSync } = require('node:child_process');
 
 const patterns = require('./secret-patterns.cjs');
@@ -66,9 +68,10 @@ function parseArgs(argv, cwd = process.cwd()) {
   return options;
 }
 
-// git from an absolute PATH folder: a bare name would let Windows run a git.exe from the current
-// folder first, and a relative PATH entry could point into the scanned repository.
-function resolveGit({ env = process.env, platform = process.platform } = {}) {
+// git from an absolute PATH folder outside `exclude` (the scanned repository): a bare name would let
+// Windows run a git.exe from the current folder first, and a relative PATH entry, or an absolute one
+// such as the repository's node_modules/.bin, could point into the scanned repository.
+function resolveGit({ env = process.env, platform = process.platform, exclude = null } = {}) {
   const pathKey = Object.keys(env).find(key => key.toUpperCase() === 'PATH');
   const name = platform === 'win32' ? 'git.exe' : 'git';
   const pathApi = platform === 'win32' ? path.win32 : path.posix;
@@ -77,14 +80,17 @@ function resolveGit({ env = process.env, platform = process.platform } = {}) {
     if (!dir || !pathApi.isAbsolute(dir)) continue;
     const candidate = pathApi.join(dir, name);
     try {
-      if (fs.statSync(candidate).isFile()) { fs.accessSync(candidate, platform === 'win32' ? fs.constants.F_OK : fs.constants.X_OK); return candidate; }
+      if (!fs.statSync(candidate).isFile()) continue;
+      fs.accessSync(candidate, platform === 'win32' ? fs.constants.F_OK : fs.constants.X_OK);
+      if (exclude && inside(fs.realpathSync(candidate), exclude)) continue;
+      return candidate;
     } catch { /* not here */ }
   }
   throw new ScanError('git was not found in an absolute PATH folder');
 }
 
 // --no-optional-locks: `git status` must not refresh the index, so the scanned repository stays
-// untouched. core.fsmonitor=false: a hook command in the repository's own config never runs.
+// untouched. core.fsmonitor=false: an fsmonitor hook in the repository's own config never runs.
 function gitArgs(repo, args) {
   return ['--no-optional-locks', '-c', 'core.fsmonitor=false', '-c', 'log.showSignature=false', '-C', repo, ...args];
 }
@@ -105,6 +111,14 @@ function realTarget(target) {
     existing = parent;
   }
   try { return path.join(fs.realpathSync(existing), ...rest); } catch { return path.resolve(target); }
+}
+
+// The folder holding `.git` at or above `start`, found without running git; `start` if none.
+function enclosingRepository(start) {
+  for (let dir = start; ; dir = path.dirname(dir)) {
+    if (fs.existsSync(path.join(dir, '.git'))) return dir;
+    if (path.dirname(dir) === dir) return start;
+  }
 }
 
 function inside(child, parent) {
@@ -129,7 +143,12 @@ function scanTree(command, repo) {
       if (!stat.isFile()) continue;
       if (stat.size > MAX_FILE_BYTES) { notScanned.push({ file, reason: 'larger than 5 MB' }); continue; }
       bytes = fs.readFileSync(full);
-    } catch { notScanned.push({ file, reason: 'unreadable' }); continue; }
+    } catch (error) {
+      // A tracked file deleted but not committed is not unscanned content: the dirty flag records it.
+      if (error && error.code === 'ENOENT') continue;
+      notScanned.push({ file, reason: 'unreadable' });
+      continue;
+    }
     if (bytes.includes(0)) continue; // binary
     for (const hit of patterns.scanText(bytes.toString('utf8'))) {
       findings.push({ id: findingId(`tree:${hit.rule}:${file}:${hit.line}`), kind: 'secret', class: classFor(file), rule: hit.rule, label: hit.label, file, line: hit.line, column: hit.column });
@@ -140,11 +159,22 @@ function scanTree(command, repo) {
 
 // Streams `git log -p` over every branch and tag and scans each run of added lines together (so a
 // private key's material on the lines after its header is seen), with file, line number and commit.
-// A file name is read only from the `+++ ` line between `diff --git` and the first `@@`; after that,
-// every `+` line is content, whatever it starts with.
+// Lines end only at LF, as git writes them (one trailing CR is dropped), so a lone CR inside a file
+// can never start a fake header. A file name is read only from the `+++ ` line between `diff --git`
+// and the first `@@`; after that, every `+` line is content, whatever it starts with. When a run adds
+// key material without its header (the header was already there, or the diff split the block), the
+// whole file at that commit is read (`git show`, read-only) and checked for private keys.
+const KEY_MATERIAL = patterns.PATTERNS.find(item => item.id === 'private-key').next;
+const KEY_HEADER = patterns.PATTERNS.find(item => item.id === 'private-key').regex;
+
+function historyFinding(findings, hit, file, commit) {
+  const key = `history:${hit.rule}:${file}:${hit.line}:${commit}`;
+  findings.set(`${hit.rule}:${file}:${commit}:${hit.line}`, { id: findingId(key), kind: 'secret-in-history', class: classFor(file), rule: hit.rule, label: hit.label, file, line: hit.line, column: hit.column, commit: commit.slice(0, 12) });
+}
+
 function scanHistory(command, repo) {
   return new Promise((resolve) => {
-    const args = gitArgs(repo, ['log', '--all', '--root', '--diff-merges=first-parent', '--format=commit %H', '-p', '-U0', '--text', '--no-color', '--no-ext-diff', '--no-textconv', '--no-renames', '--src-prefix=a/', '--dst-prefix=b/']);
+    const args = gitArgs(repo, ['log', '--all', '--root', '--diff-merges=first-parent', '--format=commit %H', '-p', '-U0', '--inter-hunk-context=0', '--text', '--no-color', '--no-ext-diff', '--no-textconv', '--no-renames', '--src-prefix=a/', '--dst-prefix=b/']);
     const child = spawn(command, args, { windowsHide: true, shell: false, stdio: ['ignore', 'pipe', 'ignore'] });
     const findings = new Map();
     let commit = null;
@@ -153,32 +183,52 @@ function scanHistory(command, repo) {
     let line = 0;
     let skipped = false;
     let block = [];
+    const recheckFiles = new Map(); // `${commit}\0${file}` -> { commit, file }
     const flush = () => {
       if (block.length && file && commit) {
-        for (const hit of patterns.scanLines(block)) {
-          const key = `history:${hit.rule}:${file}:${hit.line}:${commit}`;
-          findings.set(`${hit.rule}:${file}:${commit}:${hit.line}`, { id: findingId(key), kind: 'secret-in-history', class: classFor(file), rule: hit.rule, label: hit.label, file, line: hit.line, column: hit.column, commit: commit.slice(0, 12) });
-        }
+        for (const hit of patterns.scanLines(block)) historyFinding(findings, hit, file, commit);
+        const headerless = block.every((item) => { KEY_HEADER.lastIndex = 0; return !KEY_HEADER.test(item.text); });
+        if (headerless && block.some(item => KEY_MATERIAL.test(item.text.trim()))) recheckFiles.set(`${commit}\0${file}`, { commit, file });
       }
       block = [];
     };
-    const lines = readline.createInterface({ input: child.stdout, crlfDelay: Infinity });
-    lines.on('line', (text) => {
+    const onLine = (raw) => {
+      const text = raw.endsWith('\r') ? raw.slice(0, -1) : raw;
       // Content lines always start with "+", "-", " " or "\\", so these two never come from a file.
       if (/^commit [0-9a-f]{40,64}$/.test(text)) { flush(); commit = text.slice(7); file = null; header = false; return; }
       if (text.startsWith('diff --git ')) { flush(); file = null; header = true; return; }
       const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(text);
       if (header) {
         if (hunk) { header = false; line = Number(hunk[1]); return; }
-        if (text.startsWith('+++ ')) file = text === '+++ /dev/null' ? null : text.slice(4).replace(/^"?b\//, '').replace(/"$/, '');
+        // git adds a tab after a name that holds a space.
+        if (text.startsWith('+++ ')) file = text === '+++ /dev/null' ? null : text.slice(4).replace(/\t$/, '').replace(/^"?b\//, '').replace(/"$/, '');
         else if (text.startsWith('Binary files ')) skipped = true;
         return;
       }
       if (hunk) { flush(); line = Number(hunk[1]); return; }
       if (text.startsWith('+')) { block.push({ line, text: text.slice(1) }); line += 1; }
-    });
+    };
+    const decoder = new StringDecoder('utf8');
+    let pending = '';
+    const take = (chunk) => {
+      pending += chunk;
+      let at;
+      while ((at = pending.indexOf('\n')) !== -1) { onLine(pending.slice(0, at)); pending = pending.slice(at + 1); }
+    };
+    child.stdout.on('data', chunk => take(decoder.write(chunk)));
     child.on('error', () => resolve({ ok: false, findings: [] }));
-    child.on('close', (code) => { flush(); resolve({ ok: code === 0 && !skipped, findings: [...findings.values()] }); });
+    child.on('close', (code) => {
+      take(decoder.end());
+      if (pending) onLine(pending);
+      flush();
+      let ok = code === 0 && !skipped;
+      for (const { commit: at, file: name } of recheckFiles.values()) {
+        const shown = spawnSync(command, gitArgs(repo, ['show', '--no-textconv', `${at}:${name}`]), { maxBuffer: 256 * 1024 * 1024, windowsHide: true, shell: false });
+        if (shown.error || shown.status !== 0) { ok = false; continue; }
+        for (const hit of patterns.scanText(shown.stdout.toString('utf8'))) if (hit.rule === 'private-key') historyFinding(findings, hit, name, at);
+      }
+      resolve({ ok, findings: [...findings.values()] });
+    });
   });
 }
 
@@ -212,10 +262,11 @@ function markdown(report) {
 async function scan(options) {
   let repo;
   try { repo = fs.realpathSync(options.repo); } catch { throw new ScanError('the repository folder does not exist'); }
-  const command = resolveGit();
+  const command = resolveGit({ exclude: enclosingRepository(repo) });
   const top = git(command, repo, ['rev-parse', '--show-toplevel']);
   if (top.status !== 0) throw new ScanError('not inside a git repository');
   repo = fs.realpathSync(top.stdout.trim());
+  if (inside(fs.realpathSync(command), repo)) throw new ScanError('the only git on PATH is inside the scanned repository');
   if (options.out && inside(realTarget(options.out), repo)) throw new ScanError('--out is inside the scanned repository; reports never go there');
   let previous = null;
   if (options.recheck) {

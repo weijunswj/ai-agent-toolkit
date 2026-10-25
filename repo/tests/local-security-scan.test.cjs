@@ -409,3 +409,88 @@ test('LS-11: a core.fsmonitor command in the scanned repository does not run', {
   assert.equal(result.code, 0, result.stderr);
   assert.equal(fs.existsSync(marker), false);
 });
+
+// ---- review fixes, second round -----------------------------------------------------------------
+
+test('SP-08: closers with letters, x runs inside real tokens and keys in JSON with escaped CRLF', () => {
+  const value = SAMPLES['github-token'](71);
+  for (const closer of ['</script>', '<% end %>', '{{/each}}']) assert.deepEqual(rules(`t = "${value}" secret-scan: allow ${closer}`), ['github-token'], closer);
+  // Four x's inside a real token body are not a placeholder; a long run still is.
+  assert.deepEqual(rules(j('gh', 'p_', filler(14, ALNUM, 72), 'xXxx', filler(18, ALNUM, 73))), ['github-token']);
+  assert.deepEqual(rules(j('gh', 'p_', filler(14, ALNUM, 74), 'xxxxxxxx', filler(14, ALNUM, 75))), []);
+  assert.deepEqual(rules(`{"key": "${j('-----BEGIN ', 'PRIVATE', ' KEY-----')}\\r\\n${filler(64, B64, 76)}\\r\\n"}`), ['private-key']);
+});
+
+test('LS-12: git inside the scanned repository is never used, even from an absolute PATH entry', (t) => {
+  const root = scratch(t);
+  const repo = repository(root, { 'a.js': 'one\n' });
+  const name = process.platform === 'win32' ? 'git.exe' : 'git';
+  const planted = path.join(repo, 'node_modules', '.bin');
+  const outside = path.join(root, 'bin');
+  for (const dir of [planted, outside]) { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(path.join(dir, name), ''); fs.chmodSync(path.join(dir, name), 0o755); }
+  const sep = process.platform === 'win32' ? ';' : ':';
+  const real = fs.realpathSync(repo);
+  assert.equal(scanner.resolveGit({ env: { PATH: [planted, outside].join(sep) }, exclude: real }), path.join(outside, name));
+  assert.throws(() => scanner.resolveGit({ env: { PATH: planted }, exclude: real }), /not found/);
+});
+
+// Every file name a report gives must be a real path in history: a crafted line can never become one.
+function assertNamesReal(repo, report) {
+  const names = new Set(git(repo, ['log', '--all', '--name-only', '--format=']).split('\n').filter(Boolean));
+  for (const item of report.findings) assert.ok(names.has(item.file), `reported file ${JSON.stringify(item.file)} is not a path in history`);
+}
+
+test('LS-13: history ends lines only at LF, so a lone CR neither hides a key nor fakes a header', async (t) => {
+  const root = scratch(t);
+  const crOnly = SAMPLES['stripe-secret-key'](81);
+  const hidden = SAMPLES['npm-token'](82);
+  const crafted = ['x', 'diff --git a/q b/q', `+++ b/${hidden}`, '@@ -0,0 +1 @@'].join('\r');
+  const repo = repository(root, { 'export.csv': `name,key\rrow,${crOnly}\r`, 'crafted.txt': `${crafted}\nk = "${SAMPLES['github-token'](83)}"\n` });
+  git(repo, ['config', 'core.autocrlf', 'false']);
+  git(repo, ['rm', '--quiet', 'export.csv', 'crafted.txt']);
+  git(repo, ['commit', '--quiet', '-m', 'remove']);
+  const result = await scan(['--repo', repo, '--json']);
+  assert.equal(result.stdout.includes(hidden), false);
+  assert.equal(result.stdout.includes(hidden.slice(4, 20)), false);
+  const report = JSON.parse(result.stdout);
+  // The crafted value sits right after "b/", so the format's edge rule does not take it; what matters is
+  // that it never becomes a file name.
+  assert.deepEqual(report.findings.map(item => `${item.file} ${item.rule}`).sort(), ['crafted.txt github-token', 'export.csv stripe-secret-key']);
+  assertNamesReal(repo, report);
+  for (const hit of patterns.scanText(result.stdout)) assert.fail(`the report itself matches ${hit.rule}`);
+});
+
+test('LS-14: key material added without its header is still found in history', async (t) => {
+  const root = scratch(t);
+  const pgp = (seed) => [j('-----BEGIN ', 'PGP PRIVATE', ' KEY BLOCK-----'), '', filler(64, B64, seed), filler(64, B64, seed + 1), j('-----END ', 'PGP PRIVATE', ' KEY BLOCK-----')].join('\n');
+  const pem = (seed) => [j('-----BEGIN ', 'RSA PRIVATE', ' KEY-----'), filler(64, B64, seed), filler(64, B64, seed + 1), j('-----END ', 'RSA PRIVATE', ' KEY-----')].join('\n');
+  const template = [j('-----BEGIN ', 'RSA PRIVATE', ' KEY-----'), 'paste the key here', j('-----END ', 'RSA PRIVATE', ' KEY-----')].join('\n');
+  const repo = repository(root, { 'README.md': '# Notes\n\nSee below.\n', 'deploy/rotate.pem': `${pem(91)}\n`, 'deploy/template.pem': `${template}\n` });
+  // The PGP block's blank line lines up with the README's own, so git splits it into two sections.
+  write(repo, { 'README.md': `# Notes\n${pgp(93)}\n\nSee below.\n`, 'deploy/rotate.pem': `${pem(95)}\n`, 'deploy/template.pem': `${pem(97)}\n` });
+  git(repo, ['commit', '--quiet', '-am', 'keys']);
+  const keys = git(repo, ['rev-parse', 'HEAD']).slice(0, 12);
+  write(repo, { 'README.md': '# Notes\n\nSee below.\n', 'deploy/rotate.pem': 'moved\n', 'deploy/template.pem': 'moved\n' });
+  git(repo, ['commit', '--quiet', '-am', 'remove']);
+  const report = JSON.parse((await scan(['--repo', repo, '--json'])).stdout);
+  const atKeys = report.findings.filter(item => item.commit === keys).map(item => `${item.file} ${item.rule}`).sort();
+  assert.deepEqual(atKeys, ['README.md private-key', 'deploy/rotate.pem private-key', 'deploy/template.pem private-key']);
+  assertNamesReal(repo, report);
+});
+
+test('LS-15: hunk merging, names with spaces and uncommitted deletions', async (t) => {
+  const root = scratch(t);
+  const repo = repository(root, { 'my file.txt': 'a\nb\nc\nd\ne\nf\n', 'gone.js': 'x\n' });
+  git(repo, ['config', 'diff.interHunkContext', '3']);
+  write(repo, { 'my file.txt': `a\nchanged\nc\nk = "${SAMPLES['npm-token'](101)}"\ne\nf\n` });
+  git(repo, ['commit', '--quiet', '-am', 'edit']);
+  write(repo, { 'my file.txt': 'clean\n' });
+  git(repo, ['commit', '--quiet', '-am', 'clean']);
+  const report = JSON.parse((await scan(['--repo', repo, '--json'])).stdout);
+  assert.deepEqual(report.findings.map(item => [item.file, item.line]), [['my file.txt', 4]]);
+  fs.rmSync(path.join(repo, 'gone.js'));
+  const deleted = await scan(['--repo', repo, '--json', '--no-history']);
+  assert.equal(deleted.code, 0, deleted.stderr);
+  const after = JSON.parse(deleted.stdout);
+  assert.deepEqual([after.status, after.scanned.dirty, after.not_scanned.length], ['clean', true, 0]);
+});
