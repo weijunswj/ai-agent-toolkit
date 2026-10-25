@@ -200,8 +200,6 @@ class ToolkitGovernanceCli {
     // The registry keeps its own operation names: a first "no" is 'decline', turning off an enabled one is 'disable'.
     const operation = command === 'enable' ? 'enable' : current === 'enabled' ? 'disable' : 'decline';
     if ((command === 'enable' && current === 'enabled') || (command === 'disable' && current === 'disabled')) {
-      // The repository's own copy is still made to agree, so the hooks open.
-      new gate.GovernanceGate({ registryOptions: this.#registryOptions }).evaluate(this.#cwd);
       this.#print(json, { state: before.state, writes: 0 }, [`Already ${command === 'enable' ? 'enabled' : 'disabled'} for this repository; no new decision was written.`]);
       return 0;
     }
@@ -214,7 +212,7 @@ class ToolkitGovernanceCli {
       return 1;
     }
     // One writer for the CLI and the prompt hold: the registry decision, read back through the same
-    // gate every hook uses, which also writes the repository's own copy of the state.
+    // gate every hook uses.
     let after;
     try {
       after = gate.writeGovernanceDecision(this.#cwd, command, { registryOptions: this.#registryOptions }).state;
@@ -227,7 +225,6 @@ class ToolkitGovernanceCli {
   // A repository not on github.com: the user's own ok, at their terminal, records DISABLED.
   async #notGitHubOk(before, json) {
     if (before.rule === 'R8') {
-      new gate.GovernanceGate({ registryOptions: this.#registryOptions }).evaluate(this.#cwd);
       this.#print(json, { state: before.state, writes: 0 }, ['Already disabled for this repository; nothing new was written.']);
       return 0;
     }
@@ -258,7 +255,7 @@ function describe(state, registryOptions = {}) {
   const key = state.rule === 'R9' ? 'NOT_GITHUB' : state.state === 'ENABLED' && state.materials_complete === false ? 'ENABLED_INCOMPLETE' : state.state;
   const lines = [`State: ${label(state)}`, `Rules: ${RULES_TEXT[key]}`];
   if (state.root) lines.push(`Repository: ${state.root}`);
-  if (state.rule === 'R1') lines.push(`Folder: ${state.folder || 'no copy is kept here'} (not a git repository, so DISABLED automatically).`);
+  if (state.rule === 'R1') lines.push(`Folder: ${state.folder} (not a git repository, so DISABLED automatically).`);
   if (state.state === 'UNDECIDED' && state.rule === 'R6') lines.push('This repository carries the governed block but no programme binding yet.');
   if (state.state === 'UNDECIDED' && state.rule === 'R4') lines.push('This repository carries the governed block and programme binding; Toolkit still asks you, because files in a repository are not your answer.');
   if (state.rule === 'R8' || state.rule === 'R9') lines.push(`Not on github.com: ${state.host ? `this repository is on ${state.host}` : 'there is no single github.com origin remote'}. Toolkit asks about GitHub governance if the repository moves to github.com.`);
