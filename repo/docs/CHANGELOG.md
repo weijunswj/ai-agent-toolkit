@@ -1,11 +1,25 @@
 # Toolkit Changelog
 
-## 3.13.3
+## 3.13.5
 
 ### Projects skill
 
-- **Pending lists name every owner-hands step:** whenever the coordinator tells the owner what waits on them, it lists every step only the owner can do, optional ones and ones posted only inside a thread included, each with its link. The hourly nudge's **Waiting on owner:** list now carries those steps too, so its live task prompt is swapped after merge. The Claude Projects controller skill is 2026-10-25.8 (re-upload it).
-- **Running post and links enforced:** a new Toolkit hook runs before every Claude Projects post, in the coordinator and in work threads. It refuses a fresh post while the owner has not written since that session's newest post (unless that post nears 8 KB) and tells it to edit that post instead, and it refuses any post that names "PR <n>" without a link. It reads the session's own transcript, so the rule survives a context reset. Replies under a post and decision cards are not affected, and local or command-line sessions never see it. The skill now also has the coordinator keep its running post id as the first memory line, and links every PR, thread, file or artifact it names: a PR's changed files only once it is ready for the owner to check and merge, otherwise the chat thread that owns it. Briefs tell work threads to keep one running post with one-line updates. The hourly nudge flags back-to-back posts, a stale running post id and missing links.
+- **Running post and links enforced:** a new Toolkit hook runs before every Claude Projects post, in the coordinator and in work threads. It refuses a fresh post while the owner has not written since that session's newest post (unless that post nears 8 KB) and tells it to edit that post instead, and it refuses any post that names "PR <n>" without a link. It reads the session's own transcript, so the rule survives a context reset. Replies under a post and decision cards are not affected, and local or command-line sessions never see it. The skill now also has the coordinator keep its running post id as the first memory line, and links every PR, thread, file or artifact it names: a PR's changed files only once it is ready for the owner to check and merge, otherwise the chat thread that owns it. Briefs tell work threads to keep one running post with one-line updates. The hourly nudge flags back-to-back posts, a stale running post id and missing links. The Claude Projects controller skill is 2026-10-25.8 (re-upload it).
+
+## 3.13.4
+
+### Projects skill
+
+- **Pending lists name every owner-hands step:** whenever the coordinator tells the owner what waits on them, it lists every step only the owner can do, optional ones and ones posted only inside a thread included, each with its link. The hourly nudge's **Waiting on owner:** list now carries those steps too, so its live task prompt is swapped after merge. The Claude Projects controller skill is 2026-10-25.7 (re-upload it).
+
+## 3.13.3
+
+### Workspace and temp hygiene
+
+- **Test runs leave nothing behind:** every test file that left temp folders behind now removes them after its tests, also when they fail, and the test runner fails a run whose tests left anything in its temp folder, naming each item; anything a test leaves outside that folder is not checked. Before, the runner quietly removed dozens of leftovers per CI shard, and a test file run on its own with plain `node --test` wrote them into your real temp folder.
+- **The stale sweep deletes only its own folders:** each run folder now carries a marker file, and the next run removes a folder an interrupted run left only when it carries that marker and is more than a day old. A `run-*` folder without the marker, such as one you or another tool made in the same temp root, is reported and left alone, and a link is never followed.
+- **One place for worktrees:** worktrees an agent makes go in the repository's ignored `.tmp/worktrees/<lane>-<gate>-<sha>`, so two gates of one lane never share a path; worktrees Claude Code or Codex make stay where the host puts them. Gate sessions use the primary checkout unless they need their own worktree, which then starts at the exact admitted commit with its HEAD recorded. After a lane's PR merges, the controller removes the lane's worktree with `git worktree remove` and `git worktree prune`, and deletes its local branch with `git branch -d` only once the branch is in the default branch, never with `--force` or `-D`. A worktree that is dirty, locked, unmerged or holds ignored files (such as kept evidence in `.tmp/` or a `.env`, which `git worktree remove` would delete), and the branch of a PR closed unmerged, are reported and kept.
+- **Leftover report:** `node repo/scripts/workspace-residue-report.cjs [--repo <checkout>] [--base <ref>] [--json]` lists a checkout's extra worktrees and local branches as ready to remove or look first (uncommitted changes, ignored files, locked, folder gone, not merged, host-made, default branch), with the commands to run. Paths are shown relative to the checkout. It only reads git state, reads no file contents itself and changes nothing.
 
 ## 3.13.2
 
