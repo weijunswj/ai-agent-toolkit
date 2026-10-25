@@ -15,7 +15,7 @@ Fresh executor contexts are mandatory between G0 and G1, for initial G2, for a r
 
 ## Workspaces
 
-A gate works in the primary checkout unless another writer, a parallel lane, a fresh review or unrelated dirt needs a worktree; then it makes its own at the exact admitted commit, records its HEAD at start and removes it after the merge or close as the global rules say.
+A gate works in the primary checkout unless another writer, a parallel lane, a fresh review or unrelated dirt needs a worktree; then it makes its own in `.tmp/worktrees/<lane>` at the exact admitted commit and records its HEAD at start. When the lane's PR merges or closes, `git worktree remove` and `git worktree prune` its worktree and `git branch -d` its local branch (never `--force` or `-D`); report anything dirty, locked or unmerged and leave it.
 
 ## Recoverable work
 

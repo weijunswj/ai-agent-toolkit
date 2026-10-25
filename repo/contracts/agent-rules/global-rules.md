@@ -106,7 +106,7 @@ Use the repository's documented validation, else the smallest relevant check. Ke
 
 After requested edits in a git repository with a remote, unless the user asked for local-only work: validate, commit to a non-default branch, push, and open the PR with a body matching the full base-to-head diff (scope, safety, validation, generated output, user-facing behaviour). Update the body when scope or user-facing behaviour changes, and once before asking to merge. Check CI on the exact PR head (GitHub: `gh pr checks <PR> --watch --interval 60` or `gh run watch <run> --exit-status`), no keepalive loops or duplicate watchers, and never claim CI passed without every required check. On failure, read the logs and make one targeted fix; after two failed fixes, stop and report. If CI is inaccessible, say so and give the command. Never push failed validation, live or runtime files, or safety-blocked changes.
 
-After a merge, fast-forward the default-branch checkout only when it is on that branch and clean, else say why; never reset or force. When a lane's PR merges or closes, `git worktree remove` and `prune` its worktree and `git branch -d` its branch (never `--force` or `-D`); report any dirty, locked or unmerged. Then offer to delete branches of closed unmerged PRs (not default, protected or in use).
+After a merge, fast-forward the local default-branch checkout only when it is on that branch and clean; otherwise skip it and say why. Never reset or force. Then offer to delete branches of closed unmerged PRs (not default, protected or in use).
 
 Issue and PR tracking acts only on the current repository's own remote and never authorises merge, deployment, secrets or workflow changes; ENABLED repositories add the governed block's issue rules.
 

@@ -152,10 +152,9 @@ test('global rules hold the generic floor: precedence, entry routing, safety gat
     /\*\*Finish authorised work before stopping\.\*\*/,
     /\*\*Change-local hygiene:\*\*/,
     /no change, reuse, smallest root-cause fix, bounded simplification, new abstraction only if needed/,
-    /fast-forward the default-branch checkout only when it is on that branch and clean[^\n]*never reset or force/,
+    /fast-forward the local default-branch checkout only when it is on that branch and clean[^\n]*Never reset or force/,
     // Lane worktrees and branches once outlived their merge, and three rules named three worktree homes.
     /Make worktrees in the gitignored `\.tmp\/worktrees\/<lane>`; hosts keep their own\./,
-    /When a lane's PR merges or closes, `git worktree remove` and `prune` its worktree and `git branch -d` its branch \(never `--force` or `-D`\); report any dirty, locked or unmerged\./,
     /`gh pr checks <PR> --watch --interval 60`/,
     /never claim CI passed without every required check/,
     /after two failed fixes, stop and report/,
@@ -192,6 +191,9 @@ test('gate rules hold the gate mechanics every gate session reads on demand', ()
     /G1 Builder\*\* starts in a fresh session, with the G0 plan passed in its brief as the handoff/,
     /full G2 for RISKY, one independent review for NORMAL, the builder's own diff read for LIGHT/,
     /There are no handover packets/,
+    // Lane worktrees and branches once outlived their merge.
+    /makes its own in `\.tmp\/worktrees\/<lane>` at the exact admitted commit and records its HEAD at start/,
+    /When the lane's PR merges or closes, `git worktree remove` and `git worktree prune` its worktree and `git branch -d` its local branch \(never `--force` or `-D`\); report anything dirty, locked or unmerged and leave it\./,
     /Never rely on chat or host memory/,
     /Refactors keep public behaviour, approvals, independent readback, concurrency controls and recovery semantics/,
     /check the actual state and effect owners and their dependency contracts, not class counts/,
