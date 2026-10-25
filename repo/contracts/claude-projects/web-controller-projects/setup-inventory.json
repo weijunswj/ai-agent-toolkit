@@ -18,7 +18,8 @@
     { "id": "project-memory", "artefact": "Project memory turned on", "setup_steps": [2], "source": "SKILL.md setup step 2", "check": "MEMFILE", "resync": "report" },
     { "id": "repos", "artefact": "Repos and transport store attached", "setup_steps": [1], "source": "SKILL.md setup step 1", "check": "**PRs:**", "resync": "report" },
     { "id": "device", "artefact": "Device, folder, Toolkit on the device and keep-awake", "setup_steps": [3], "source": "SKILL.md setup step 3", "check": "**Setup:**", "resync": "report" },
-    { "id": "goal", "artefact": "Project goal", "setup_steps": [8], "source": "parent programme in memory", "check": "**Setup:**", "resync": "report" }
+    { "id": "goal", "artefact": "Project goal", "setup_steps": [8], "source": "parent programme in memory", "check": "**Setup:**", "resync": "report" },
+    { "id": "programme-sweep", "artefact": "Programme sweep task on the device (GitHub governance ENABLED and a device named)", "setup_steps": [8], "source": "repo/contracts/claude-projects/web-controller-projects/reference/recurring-tasks.md", "check": "local, advice", "resync": "report" }
   ],
   "steps_without_artefacts": {
     "6": "Takeover reads the outgoing controller's state and posts a one-line record; it leaves nothing in the project to keep current.",

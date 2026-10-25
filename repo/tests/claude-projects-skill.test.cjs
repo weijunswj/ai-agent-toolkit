@@ -210,3 +210,15 @@ test('Projects lists every owner-hands step when it reports what waits on the ow
   const nudge = read('repo/contracts/claude-projects/web-controller-projects/tasks/hourly-nudge.md');
   assert.match(nudge, /\*\*Waiting on owner:\*\* \([^\n]*plus every step only the owner can do that is not done yet, optional ones and ones posted only inside a thread included;/);
 });
+
+test('the device programme sweep needs both GitHub governance ENABLED and a named device', () => {
+  // Cloud-only projects have no device to run it on, so neither half alone may set it up or suggest it.
+  const at = rel => read(`repo/contracts/claude-projects/web-controller-projects/${rel}`);
+  assert.match(at('reference/setup.md'), /reports plain `ENABLED` \(not `ENABLED \(materials incomplete\)`; a failed read counts as not ENABLED\) and step 3 named a device: also set up the \*\*Programme sweep on a device\*\*/);
+  assert.match(at('reference/setup.md'), /With governance in any other state, or no device, do not create it or suggest it/);
+  assert.match(at('reference/recurring-tasks.md'), /Only for a repository whose GitHub governance is ENABLED, in a project whose memory names a device \(guided setup step 3\); in any other case, never create or suggest it\./);
+  assert.match(at('SKILL.md'), /only when ENABLED and a device is named\)/);
+  assert.match(at('tasks/hourly-nudge.md'), /when project memory names a device, "; no device programme sweep task armed", and with no device named "; no device named, so cloud writes wait for the next laptop session"/);
+  const sweep = JSON.parse(at('setup-inventory.json')).rows.find(row => row.id === 'programme-sweep');
+  assert.match(sweep.artefact, /GitHub governance ENABLED and a device named/);
+});
