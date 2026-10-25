@@ -13,13 +13,11 @@ The gate playbook: G0, G1 and G2 sessions, reviewers and the controllers that la
 
 Fresh executor contexts are mandatory between G0 and G1, for initial G2, for a required model, effort or harness switch, runtime or environment replacement, activated instruction or profile revision or executor replacement, and after genuine session loss or forced compaction at a safe boundary. Planned G1 segment completion alone checkpoints and continues in the same session. An ordinary commit, test, helper return, tool call, milestone or evidence upload never requires renewal. A checkpoint (work pushed, the PR or brief current) is not a terminal outcome: the executor continues its next dependency-ready authorised step. A failed checkpoint save is a recovery boundary, never an automatic successor launch: keep the source and evidence, hold dependent effects and repair recovery. When renewal is actually required, reconcile any existing successor or uncertain launch, verify custody, stop the old writer and launch exactly one successor; it continues the same approved assignment without another scope approval.
 
-## Workspaces
-
-A gate works in the primary checkout unless another writer, a parallel lane, a fresh review or unrelated dirt needs a worktree; then it makes its own in `.tmp/worktrees/<lane>-<gate>` at the exact admitted commit and records its HEAD at start (host-made worktrees stay where the host puts them). After the lane's PR merges, the merging session or the controller runs `git worktree remove` and `git worktree prune`, then `git branch -d` only once `git merge-base --is-ancestor` finds the branch in the default branch; never `--force` or `-D`. A worktree that is dirty, locked, unmerged or holds ignored files, and the branch of a PR closed unmerged, is reported and kept.
-
 ## Recoverable work
 
 There are no handover packets. Keep the work recoverable at all times instead: push work in progress to the branch, keep the PR (or the brief, before a PR exists) current at milestones, and post progress and decisions where every harness can read them: the PR, plus the programme issue comments when GitHub governance is ENABLED, otherwise the evidence store. Never rely on chat or host memory: a Projects controller may mirror state in project memory, never only there. Any new controller or executor starts from these, with no handover step, loading the current state and changed instructions rather than the full history.
+
+A gate works in the primary checkout unless it needs its own worktree, then uses `.tmp/worktrees/<lane>-<gate>` at the admitted commit and records HEAD; the controller removes it after merge.
 
 ## Building
 

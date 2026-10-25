@@ -184,6 +184,13 @@ test('global rules hold the generic floor: precedence, entry routing, safety gat
   for (const phrase of forbiddenDefaultPromptPhrases) assert.ok(!text.includes(phrase), phrase);
 });
 
+test('the controller removes a merged lane worktree and branch without --force or -D and keeps what it cannot prove', () => {
+  // Lane worktrees and branches once outlived their merge; git worktree remove deletes ignored files
+  // (kept evidence, .env) without --force, and git branch -d deletes a pushed unmerged branch.
+  const controller = readText('repo/CONTROLLER.md');
+  assert.match(controller, /after a lane's PR merges, remove its worktree with `git worktree remove`, then `git worktree prune`, and its branch with `git branch -d` once `git merge-base --is-ancestor` finds it in the default branch, never `--force` or `-D`; keep and report a worktree that is dirty, locked, unmerged or holds ignored files, and a closed-unmerged PR's branch;/);
+});
+
 test('gate rules hold the gate mechanics every gate session reads on demand', () => {
   const text = readText('repo/contracts/agent-rules/gate-rules.md');
   for (const rule of [
@@ -192,10 +199,7 @@ test('gate rules hold the gate mechanics every gate session reads on demand', ()
     /full G2 for RISKY, one independent review for NORMAL, the builder's own diff read for LIGHT/,
     /There are no handover packets/,
     // Lane worktrees and branches once outlived their merge.
-    /makes its own in `\.tmp\/worktrees\/<lane>-<gate>` at the exact admitted commit and records its HEAD at start/,
-    /the merging session or the controller runs `git worktree remove` and `git worktree prune`, then `git branch -d` only once `git merge-base --is-ancestor` finds the branch in the default branch; never `--force` or `-D`\./,
-    // git worktree remove deletes ignored files (kept evidence, .env) without --force.
-    /A worktree that is dirty, locked, unmerged or holds ignored files, and the branch of a PR closed unmerged, is reported and kept\./,
+    /unless it needs its own worktree, then uses `\.tmp\/worktrees\/<lane>-<gate>` at the admitted commit and records HEAD; the controller removes it after merge\./,
     /Never rely on chat or host memory/,
     /Refactors keep public behaviour, approvals, independent readback, concurrency controls and recovery semantics/,
     /check the actual state and effect owners and their dependency contracts, not class counts/,
