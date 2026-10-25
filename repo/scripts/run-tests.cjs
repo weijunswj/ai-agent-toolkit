@@ -240,6 +240,7 @@ function verifyCi(root, options, out, err) {
   catch { needs = null; }
   const summaries = fs.existsSync(options.verifyDir) ? readSummaries(options.verifyDir) : [];
   const { errors, totals } = shards.verifyCiSummaries({ manifest, discovered, summaries, needs });
+  errors.push(...shards.testFileErrors(root));
   errors.push(...shards.workflowErrors(fs.readFileSync(path.join(root, '.github', 'workflows', 'validate.yml'), 'utf8'), manifest));
   for (const system of Object.keys(totals)) {
     const total = totals[system];
@@ -294,6 +295,11 @@ function main(argv = process.argv.slice(2), { root = shards.ROOT, out = process.
     options = parseArgs(argv);
     if (options.mode === 'help') { out.write(`${USAGE}\n`); return 0; }
     if (options.mode === 'verify-ci') return verifyCi(root, options, out, err);
+    const fileErrors = shards.testFileErrors(root);
+    if (fileErrors.length) {
+      err.write(`Rename or remove these entries in repo/tests before running tests:\n- ${fileErrors.join('\n- ')}\n`);
+      return 1;
+    }
     if (options.mode === 'plan') return plan(root, out);
     const selection = selectFiles(root, options, out);
     if (!selection.files.length) {
