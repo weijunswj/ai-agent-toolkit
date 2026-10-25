@@ -61,7 +61,7 @@ A matching active `standing` entry is the fresh approval the approval rule above
 One plain-English card, one screen, with the recommended option marked. In Claude Projects use a decision card; elsewhere ask in the conversation.
 
 - **Stopped on:** the step in plain words.
-- **Why it stopped:** one line, for example "your laptop's safety check blocks changing scripts it didn't write".
+- **Why it stopped:** one line, for example "your computer's safety check blocks changing scripts it didn't write".
 - **What I'd do:** the exact machine, folder or script, and action.
 - **Checks first, told after:** what must pass before acting, and what the owner is told afterwards.
 - **Not covered:** one line naming what the grant does not allow.
@@ -97,7 +97,7 @@ After a grant, the same session or any session in scope does the step through it
 
 ### Worked example
 
-The owner answered a card with a standing OK: on one laptop, agents may replace the digest script and its test file in `~/digest`, only after the tests pass and a backup of the live script is kept, and tell the owner afterwards. Not covered: any other file, folder or action, or running the script. Review in 90 days.
+The owner answered a card with a standing OK: on one computer, agents may replace the digest script and its test file in `~/digest`, only after the tests pass and a backup of the live script is kept, and tell the owner afterwards. Not covered: any other file, folder or action, or running the script. Review in 90 days.
 
 ## Never Do By Default
 
