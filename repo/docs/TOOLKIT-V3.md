@@ -52,7 +52,7 @@ G0 is a strong reasoning lead. It walks the real happy path and checks the actua
 
 G1 receives the whole approved scope, builds and integrates it, runs meaningful tests, demonstrates it and resolves ordinary UAT feedback and defects without another admission. The user owns the outcome, material scope and acceptance; the builder owns the plan within them and never silently changes scope, trust boundaries, paid services, destructive effects or acceptance. Design follows the gate rules' building policy, every change follows the global change-local hygiene law, and work finishes before stopping as the global Shipping section says.
 
-G1 reaches the actual consumer boundary: mocks never prove an installation or operation they did not exercise, and it reports what ran, failed and was not exercised. UAT depth follows the tier and the gate rules' UAT section: RISKY work gets agent UAT plus owner UAT of the steps that need the owner's hands; otherwise owner UAT runs when the user's surface changes. Silence is not approval.
+G1 reaches the actual consumer boundary: mocks never prove an installation or operation they did not exercise, and it reports what ran, failed and was not exercised. UAT depth follows the tier and the gate rules' UAT section: RISKY work gets agent UAT plus owner UAT; otherwise owner UAT runs when the user's surface changes. User acceptance covers only what needs the owner's own hands: real desktop or app UI, signed-in accounts and device behaviour that CI (Windows runners included), automated tests and G2 review cannot reach. Everything those checks prove is accepted objectively and listed beside the owner steps with the passing check that covers it; when nothing needs the owner's hands, UAT is recorded as not required. Silence is not approval.
 
 ## 7. Context and fresh sessions
 
@@ -60,7 +60,7 @@ There is no handover packet: state lives in the pushed branch, the PR or brief, 
 
 ## 8. G2 Review and finding disposition
 
-Review depth follows the risk tier: RISKY work gets the full G2, NORMAL one independent review and LIGHT the builder's diff read. G2 uses fresh independent reviewer contexts, the actual candidate, the complete approved scope and its evidence. G2 does not spawn subagents. Every assigned reviewer independently reviews the complete approved scope and implementation, with execution, evidence, installation, authority, security, privacy and recovery; reviewers never split scope from execution. The selected stack fixes the set (section 10), and the gate rules hold launch ownership, delta reviews and rechecks.
+G2 starts after G1's working version and any required user UAT are accepted. Review depth follows the risk tier: RISKY work gets the full G2, NORMAL one independent review and LIGHT the builder's diff read. G2 uses fresh independent reviewer contexts, the actual candidate, the complete approved scope and its evidence. G2 does not spawn subagents. Every assigned reviewer independently reviews the complete approved scope and implementation, with execution, evidence, installation, authority, security, privacy and recovery; reviewers never split scope from execution. The selected stack fixes the set (section 10), and the gate rules hold launch ownership, delta reviews and rechecks.
 
 | Disposition | Required explanation and action |
 |---|---|

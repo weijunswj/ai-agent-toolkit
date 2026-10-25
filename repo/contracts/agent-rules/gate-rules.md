@@ -27,13 +27,13 @@ There are no handover packets. Keep the work recoverable at all times instead: p
 ## UAT
 
 - G1 checks the actual user or operator surface for clarity during validation and UAT, and G2 treats unsafe or misleading text as a real finding.
-- RISKY work gets agent UAT on the real installed hosts before the owner's UAT; on a delta, rerun only the affected rows. The owner's UAT checklist holds only the steps that need the owner's own hands.
+- RISKY work gets agent UAT on the real installed hosts before the owner's UAT; on a delta, rerun only the affected rows.
 - Run the full qualification matrix once on the release candidate. On a delta, run the rows whose code changed plus one smoke row per mode.
 - A new SHA alone does not invalidate UAT: supply impact evidence and record UAT_RETAINED, UAT_PARTIAL_REQUIRED or UAT_FULL_REQUIRED.
 
 ## G2 review
 
-G2 starts after the working result and the owner's actual UAT acceptance, in fresh independent contexts, and has no helpers. The pinned stack fixes the reviewer set (no added peer, duplicate or automatic closing panel), and every reviewer independently reviews the full accepted scope. Acceptance needs the whole roster, qualified routes, the exact candidate and coverage, verified evidence and no unresolved blocking finding, never a majority verdict or a scope/execution split. G2 stays adversarial on every reachable path inside the frozen supported host/environment matrix and agreed invariants. Reviewers block only on gaps that break an agreed criterion or the safety floor; everything else is optional and never blocks. G2 scans every commit, title and body of a PR for personal data, and checks where a computation ran before accepting that data stayed in place. No review has a dollar cap.
+G2 starts after the working result and any owner UAT acceptance, in fresh independent contexts, and has no helpers. The pinned stack fixes the reviewer set (no added peer, duplicate or automatic closing panel), and every reviewer independently reviews the full accepted scope. Acceptance needs the whole roster, qualified routes, the exact candidate and coverage, verified evidence and no unresolved blocking finding, never a majority verdict or a scope/execution split. G2 stays adversarial on every reachable path inside the frozen supported host/environment matrix and agreed invariants. Reviewers block only on gaps that break an agreed criterion or the safety floor; everything else is optional and never blocks. G2 scans every commit, title and body of a PR for personal data, and checks where a computation ran before accepting that data stayed in place. No review has a dollar cap.
 
 ## Fixes and delta reviews
 

@@ -413,3 +413,21 @@ test('a Toolkit marker that replaced a value without recording the line is held,
   assert.equal(rules(h, { harnesses: ['codex'] }).remove().doc_limit.action, 'held');
   assert.equal(read(config), text);
 });
+
+test('the Codex size line counts the working repository\'s own AGENTS.md, and 0 B when it has none', () => {
+  const h = home();
+  const repo = path.join(h.root, 'work', 'project');
+  fs.mkdirSync(path.join(repo, '.git'), { recursive: true });
+  fs.mkdirSync(path.join(repo, 'src'));
+  const check = workingFolder => rules(h, { harnesses: ['codex'], workingFolder, codexDocLimit: 'report' }).check().codex_budget;
+  // No AGENTS.md in the repository: never the Toolkit checkout's file in its place.
+  const none = check(path.join(repo, 'src'));
+  assert.equal(none.repo, 0);
+  assert.equal(none.repo_display, '~/work/project/AGENTS.md');
+  fs.writeFileSync(path.join(repo, 'AGENTS.md'), 'x'.repeat(1234));
+  assert.equal(check(path.join(repo, 'src')).repo, 1234);
+  // A folder outside any git repository counts its own AGENTS.md.
+  const plain = path.join(h.root, 'plain');
+  fs.mkdirSync(plain);
+  assert.equal(check(plain).repo_display, '~/plain/AGENTS.md');
+});
