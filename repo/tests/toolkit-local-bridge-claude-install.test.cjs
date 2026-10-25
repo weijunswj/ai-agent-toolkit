@@ -120,7 +120,7 @@ function fakeToolkit(dir, version) {
   writeJson(path.join(dir, 'repo', 'contracts', 'toolkit-local-bridge', 'version.json'), { version });
 }
 
-const STALE_LINE = /^Toolkit: this copy is (\S+), older than the (\S+) in the Toolkit repository at (.+), so safety hooks added since then \(for example the force-push guard\) do not run in this session\. Ask the owner to refresh the account's Toolkit plugin copy\.$/m;
+const STALE_LINE = /^Toolkit: this copy is (\S+), older than the (\S+) in the Toolkit repository at (.+), so safety hooks added since then do not run in this session\. Ask the owner to refresh the account's Toolkit plugin copy\.$/m;
 
 test('an uninstalled copy older than a Toolkit repository in the session folder says it is stale', (t) => {
   const root = tmpRoot(t);

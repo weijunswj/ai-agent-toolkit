@@ -76,8 +76,8 @@ async function decide(input, environment = process.env) {
 function mergeDecision(input) {
   try { return require('./toolkit-merge-hold.cjs').decide(input || {}); } catch {
     let mayMerge = true;
-    try { mayMerge = require('./toolkit-merge-hold.cjs').mayMerge(input || {}); } catch { mayMerge = /merge/i.test(JSON.stringify(input || {})); }
-    return mayMerge ? { deny: 'Toolkit: the merge check failed, so this merge is refused. Retry it; if this repeats, run `setup toolkit` to repair the Toolkit plugin.' } : null;
+    try { mayMerge = require('./toolkit-merge-hold.cjs').mayMerge(input || {}); } catch { mayMerge = /merge|push/i.test(JSON.stringify(input || {})); }
+    return mayMerge ? { deny: 'Toolkit: the merge check failed, so this merge or push is refused. Retry it; if this repeats, run `setup toolkit` to repair the Toolkit plugin.' } : null;
   }
 }
 

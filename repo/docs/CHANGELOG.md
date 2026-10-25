@@ -4,8 +4,8 @@
 
 ### Who may do what
 
-- **Merges wait for the user:** on Claude Code and Codex, an agent can merge a pull request, or turn on its auto-merge, only after the user typed "merge N" for it in their own chat. This covers `gh pr merge`, the GitHub API merge endpoint and the GitHub connector's merge tools. The merge must name the head commit it expects, so a push after the approval makes GitHub refuse it. Each approval is used once and lasts a day. Cloud sessions are not covered yet.
-- **Stale plugin copies speak up:** when a session runs an account-synced Toolkit copy that is older than a Toolkit repository in its folder, the session-start message says so and names the safety hooks it is missing, instead of staying silent.
+- **Merges wait for the user:** on Claude Code and Codex, an agent can merge a pull request, or turn on its auto-merge, only after the user typed "merge N" on its own line in their own session. This covers `gh pr merge`, the GitHub API merge endpoint and the GitHub connector's merge tools. One approval allows one merge of that pull request in that repository within a day, and the merge must name the head commit it expects. GraphQL merges, the merge queue, branch merges, ref writes and pushes to the default branch are always refused. Cloud sessions are not covered yet.
+- **Stale plugin copies speak up:** when a session runs an account-synced Toolkit copy that is older than a Toolkit repository in its folder, the session-start message says so and that newer safety hooks do not run, instead of staying silent.
 
 ## 3.13.2
 

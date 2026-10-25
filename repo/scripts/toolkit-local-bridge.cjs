@@ -3358,7 +3358,7 @@ class LocalBridgeRun {
     if (managedCheckout && samePath(root, managedCheckout) && new ClaudePluginRegistry().isRunningCopy(root)) return false;
     console.log(`Toolkit: this session runs an uninstalled Toolkit copy (${slash(root)}); session-start maintenance is skipped and nothing is recorded.`);
     const newer = newerWorkspaceToolkit(root);
-    if (newer) console.log(`Toolkit: this copy is ${BRIDGE_VERSION}, older than the ${newer.version} in the Toolkit repository at ${slash(newer.root)}, so safety hooks added since then (for example the force-push guard) do not run in this session. Ask the owner to refresh the account's Toolkit plugin copy.`);
+    if (newer) console.log(`Toolkit: this copy is ${BRIDGE_VERSION}, older than the ${newer.version} in the Toolkit repository at ${slash(newer.root)}, so safety hooks added since then do not run in this session. Ask the owner to refresh the account's Toolkit plugin copy.`);
     return true;
   }
 

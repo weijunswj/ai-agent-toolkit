@@ -50,6 +50,11 @@ function respond(event, input, options = {}) {
     try { inside = (options.gate || require('./toolkit-governance-gate.cjs')).insideRepository(input.cwd); } catch { inside = false; }
     return inside ? { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: CLOUD_LINE } } : {};
   }
+  // The merge hold runs first and on its own, so an error in the governance check never skips it.
+  if (event === 'PreToolUse') {
+    const merge = mergeDecision(input, options);
+    if (merge) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: merge.deny } };
+  }
   let gate;
   try {
     gate = options.gate || require('./toolkit-governance-gate.cjs');
@@ -61,7 +66,7 @@ function respond(event, input, options = {}) {
       return decision.context ? { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: decision.context } } : {};
     }
     if (event === 'PreToolUse') {
-      const decision = new gate.ToolGate(options).decide(input) || mergeDecision(input, options);
+      const decision = new gate.ToolGate(options).decide(input);
       return decision ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: decision.deny } } : {};
     }
     exportHostSession(input, options.environment || process.env, gate);
@@ -78,13 +83,13 @@ const mergeHold = () => require('./toolkit-merge-hold.cjs');
 // The merge hold's decision (toolkit-merge-hold.cjs), failing closed for a call that may merge
 // when the module cannot run.
 function mergeDecision(input, options = {}) {
-  try { return (options.mergeHold || mergeHold()).decide(input, { registryOptions: options.registryOptions, now: options.now }); } catch {
+  try { return (options.mergeHold || mergeHold()).decide(input, { registryOptions: options.registryOptions, now: options.now, environment: options.environment || process.env }); } catch {
     let mayMerge = true;
-    try { mayMerge = mergeHold().mayMerge(input); } catch { mayMerge = /merge/i.test(JSON.stringify(input || {})); }
+    try { mayMerge = mergeHold().mayMerge(input); } catch { mayMerge = /merge|push/i.test(JSON.stringify(input || {})); }
     return mayMerge ? { deny: MERGE_CHECK_FAILED } : null;
   }
 }
-const MERGE_CHECK_FAILED = 'Toolkit: the merge check failed, so this merge is refused. Retry it; if this repeats, run `setup toolkit` to repair the Toolkit plugin.';
+const MERGE_CHECK_FAILED = 'Toolkit: the merge check failed, so this merge or push is refused. Retry it; if this repeats, run `setup toolkit` to repair the Toolkit plugin.';
 
 // The gate's never-act line, spelled out here because the gate module may be what failed to load.
 const NEVER_OWNER = 'Never act as the user: do not answer the governance question yourself, start a session or script to answer it, or click a confirmation through a UI or computer use.';

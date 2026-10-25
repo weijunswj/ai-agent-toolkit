@@ -954,7 +954,10 @@ function insideRepository(cwd) {
 module.exports = Object.freeze({
   ANSWER,
   ASK,
+  HOST_COMMAND,
   HOST_SESSION_VARIABLE,
+  LAUNCHER_MARKERS,
+  SessionEpochs,
   NOT_NOW_BASENAME,
   NOT_GITHUB_BASENAME,
   OK_ANSWER,
