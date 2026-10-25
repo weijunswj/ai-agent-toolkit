@@ -75,7 +75,8 @@ test('both safety-gates playbooks carry the same procedure, every hard stop and 
     'so an allow rule never clears a matching ask rule, and a content-scoped ask rule still prompts in auto mode',
     '`~/.claude/settings.json`, which the owner edits by hand where `/permissions` is not available',
     "Record it in the entry's `native_rule`; leave it empty only when the host does not stop the step.",
-    'tell the owner which change to undo and in which file', '**Any other harness:**', 'a `--settings` file, never from project settings',
+    'tell the owner which change to undo and in which file',
+    'when the matching ask rule comes from project or managed settings, say that no user-settings change clears it', '**Any other harness:**', 'a `--settings` file, never from project settings',
   ]) assert.ok(toolkit.includes(text), text);
   for (const field of FIELDS) assert.ok(toolkit.includes(`\`${field}\``), field);
 });
