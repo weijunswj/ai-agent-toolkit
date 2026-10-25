@@ -1,0 +1,123 @@
+{
+  "schema": "toolkit-plain-text-config/v1",
+  "description": "Toolkit's own settings for the plain-text check (skills/secure-ci-cd/scripts/plain-text-check.cjs, run by repo/scripts/check-plain-references.cjs inside the required validate check). Banned terms are Toolkit's own shorthand codes; ordinary words are left to people and reviewers.",
+  "include": [
+    ".agents/",
+    ".claude-plugin/",
+    ".codex-plugin/",
+    "repo/",
+    "skills/"
+  ],
+  "exclude": [
+    "repo/docs/CHANGELOG.md",
+    "repo/docs/audits/",
+    "repo/contracts/third-party/",
+    "repo/source-watch/",
+    "repo/tests/"
+  ],
+  "text_extensions": [
+    ".md",
+    ".mdc"
+  ],
+  "field_extensions": [
+    ".json",
+    ".yaml",
+    ".yml"
+  ],
+  "rules": {
+    "github-link": true,
+    "number-reference": true,
+    "pr-number-label": true,
+    "codex-mode-name": true
+  },
+  "banned_terms": [
+    {
+      "term": "N#",
+      "reason": "a programme or release code",
+      "fix": "say what the work is, for example 'the programme reconciler'"
+    },
+    {
+      "term": "R#",
+      "reason": "a release or rule code",
+      "fix": "say what the release or rule does"
+    },
+    {
+      "term": "V#",
+      "reason": "a product version code",
+      "fix": "name the thing itself, for example 'the Toolkit delivery contract'"
+    },
+    {
+      "term": "A#",
+      "reason": "a test-row or design code",
+      "fix": "describe the rows or design in words and point to the file that lists them"
+    },
+    {
+      "term": "E#",
+      "reason": "a lane or work-item code",
+      "fix": "say what the work is"
+    },
+    {
+      "term": "H#",
+      "reason": "a hardening-item code",
+      "fix": "say what the fix is"
+    },
+    {
+      "term": "K#",
+      "reason": "a lane or work-item code",
+      "fix": "say what the work is"
+    },
+    {
+      "term": "M#",
+      "reason": "a lane or work-item code",
+      "fix": "say what the work is"
+    },
+    {
+      "term": "X#",
+      "reason": "a lane or work-item code",
+      "fix": "say what the work is"
+    },
+    {
+      "term": "TK#",
+      "reason": "a decision record or ticket code (for example in a record ID)",
+      "fix": "say what was decided, or point to the doc that records it"
+    }
+  ],
+  "explained_terms": [
+    {
+      "term": "V1",
+      "reason": "Codex's own name for its first multi-agent mode, written V1 (`multi_agent`)"
+    },
+    {
+      "term": "V2",
+      "reason": "Codex's own name for its second multi-agent mode, written V2 (`multi_agent_v2`)"
+    }
+  ],
+  "kept_terms": [
+    {
+      "file": "repo/contracts/agent-rules/n8n-safety-rules.md",
+      "text": "H1",
+      "reason": "Markdown's top heading level"
+    },
+    {
+      "file": "skills/n8n-safety-router/n8n-safety-rules.md",
+      "text": "H1",
+      "reason": "Markdown's top heading level"
+    },
+    {
+      "file": "skills/n8n-environment-setup/references/n8n-safety-rules.md",
+      "text": "H1",
+      "reason": "Markdown's top heading level"
+    },
+    {
+      "file": "skills/n8n-workflow-transport/references/n8n-safety-rules.md",
+      "text": "H1",
+      "reason": "Markdown's top heading level"
+    },
+    {
+      "file": "repo/contracts/trusted-ci-repository-protection/",
+      "text": "N6",
+      "reason": "stored workflow, job and ruleset names that repositories' required checks and the protection reader match exactly; renaming them would break those repositories"
+    }
+  ],
+  "baseline": "repo/contracts/plain-references/baseline.json"
+}

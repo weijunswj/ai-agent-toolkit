@@ -2435,6 +2435,27 @@ test('SessionStart notice is silent outside Toolkit-managed git roots and writes
   }
 });
 
+test('SessionStart notice names a vendored Toolkit check older than the running Toolkit, read-only', () => {
+  const root = tmpRoot();
+  fs.mkdirSync(path.join(root, '.git'), { recursive: true });
+  writeFile(path.join(root, 'AGENTS.md'), managedAgentsTemplate());
+  const installer = require('../../skills/secure-ci-cd/scripts/install-plain-text-check.cjs');
+  const copy = path.join(root, '.github', 'scripts', 'plain-text-check.cjs');
+  writeFile(copy, installer.vendoredText());
+  const options = { targetRoot: root, pluginRoot: repoRoot, state: {} };
+  assert.equal(runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, options).status, 'ok', 'a current copy is quiet');
+  const source = fs.readFileSync(path.join(repoRoot, 'skills', 'secure-ci-cd', 'scripts', 'plain-text-check.cjs'), 'utf8');
+  writeFile(copy, installer.vendoredText(`${source}// an older copy\n`));
+  const before = snapshotTree(root);
+  const result = runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, options);
+  assert.equal(result.status, 'needs-attention');
+  assert.deepEqual(result.findings.map((finding) => [finding.file, finding.kind]), [['.github/scripts/plain-text-check.cjs', 'repo-check']]);
+  const message = formatAgentRulesPreflight(result);
+  assert.match(message, /^Toolkit note: this repository's Toolkit checks \(\.github\/scripts\/plain-text-check\.cjs\) differ from the running Toolkit .*refresh them with repository-agent-rules when convenient\. No files were changed\.$/);
+  assert.doesNotMatch(message, NEVER_HALTING);
+  assert.deepEqual(snapshotTree(root), before);
+});
+
 test('SessionStart notice says repository rules from a newer Toolkit are authoritative, once, without writing', () => {
   // Hub state records a newer Toolkit than the running copy, and the repository block differs.
   const root = tmpRoot();

@@ -41,7 +41,7 @@ Last reviewed against `main` `9b7ffff3c30078c2290c809d20bc7c49e3f96e8d`.
 | Risk tier of a change | `repo/scripts/toolkit-risk-tier.cjs`, this repository's list `.github/toolkit-risk-tiers.json` |
 | Instruction sync | `repo/scripts/sync-agent-instruction-shims.cjs`, `repo/scripts/sync-repo-doc-contract.cjs` |
 | Full validation list | `repo/scripts/run-validation-gate.cjs` |
-| Plain-references check | `repo/scripts/check-plain-references.cjs` (run by `validate-toolkit.cjs`), baseline `repo/contracts/plain-references/baseline.json` |
+| Plain-text check | Portable check `skills/secure-ci-cd/scripts/plain-text-check.cjs` and installer `skills/secure-ci-cd/scripts/install-plain-text-check.cjs`; Toolkit runs it through `repo/scripts/check-plain-references.cjs` (run by `validate-toolkit.cjs`) with settings `repo/contracts/plain-references/config.json` and baseline `repo/contracts/plain-references/baseline.json` |
 | Projects instructions block | `repo/scripts/toolkit-projects-instructions.cjs`, source `repo/contracts/claude-projects/web-controller-projects/project-instructions.md` |
 | Projects scheduled task prompts | `repo/scripts/toolkit-projects-tasks.cjs`, templates `repo/contracts/claude-projects/web-controller-projects/tasks/`, setup inventory `repo/contracts/claude-projects/web-controller-projects/setup-inventory.json` |
 | Shared executable resolution | `skills/github-program-reconciler/scripts/resolve-executable.cjs` |
@@ -59,7 +59,7 @@ Host config writes reuse `repo/scripts/codex-app-server.cjs` and share `repo/scr
 | Subject | Source |
 |---|---|
 | Controller procedure | `repo/CONTROLLER.md` |
-| Programme direction | `repo/docs/TOOLKIT-V3.md` |
+| Programme direction | `repo/docs/TOOLKIT-DELIVERY.md` |
 | Global rules (every harness session) | `repo/contracts/agent-rules/global-rules.md` |
 | Gate rules (gate sessions and their controllers) | `repo/contracts/agent-rules/gate-rules.md` |
 | Governed-repository rules | `repo/contracts/agent-rules/toolkit-governed-rules.md` |
@@ -75,4 +75,4 @@ Host config writes reuse `repo/scripts/codex-app-server.cjs` and share `repo/scr
 
 ## Ownership
 
-The repository owner approves merges, releases and live effects. The appointed controller owns programme records and review routing ([programme #421](https://github.com/weijunswj/ai-agent-toolkit/issues/421)); builders own their admitted change through UAT readiness.
+The repository owner approves merges, releases and live effects. The appointed controller owns programme records and review routing (the programme parent issue named in `.github/toolkit-programme.json`); builders own their admitted change through UAT readiness.

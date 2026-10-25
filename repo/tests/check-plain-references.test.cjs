@@ -58,9 +58,9 @@ test('flags Codex mode class names but not the mode spellings', () => {
 
 test('scans docs, skills and instructions, and skips history, audits, third-party copies, provenance and tests', () => {
   for (const rel of ['README.md', 'AGENTS.md', 'repo/docs/HOW-TO-USE.md', 'repo/CONTROLLER.md', 'skills/x/SKILL.md', 'skills/x/agents/openai.yaml',
-    '.claude-plugin/plugin.json', '.agents/rules/a.md', 'repo/contracts/agent-rules/global-rules.md']) assert.equal(plain.inScope(rel), true, rel);
+    '.claude-plugin/plugin.json', '.agents/rules/a.md', 'repo/contracts/agent-rules/global-rules.md', 'repo/docs/a.json', 'repo/contracts/x/schema.json']) assert.equal(plain.inScope(rel), true, rel);
   for (const rel of ['repo/docs/CHANGELOG.md', 'repo/docs/audits/a.md', 'repo/contracts/third-party/n8n/SKILL.md', 'repo/source-watch/x.md',
-    'repo/tests/fixture.md', 'repo/scripts/a.cjs', 'repo/docs/a.json', '.github/pull_request_template.md', 'node_modules/x/README.md']) assert.equal(plain.inScope(rel), false, rel);
+    'repo/tests/fixture.md', 'repo/scripts/a.cjs', 'repo/tests/a.json', '.github/pull_request_template.md', 'node_modules/x/README.md']) assert.equal(plain.inScope(rel), false, rel);
 });
 
 test('a new reference fails with its line and a plain-English fix; a baselined one passes up to its count', t => {
@@ -104,6 +104,18 @@ test('the command line exits 1 with the fix list and 0 when clean', t => {
   fs.writeFileSync(path.join(root, 'skills/x/SKILL.md'), 'Follow the pull request that added the guard.\n');
   const passed = spawnSync(process.execPath, [SCRIPT, '--root', root], { encoding: 'utf8', timeout: 20000 });
   assert.equal(passed.status, 0, passed.stderr);
+});
+
+test('flags Toolkit shorthand codes in docs and in the readable fields of structured files only', t => {
+  const code = 'N' + '5';
+  const root = fixture(t, {
+    'repo/docs/A.md': `Ships with the ${code} work.\nCodex V1 (\`multi_agent\`) and V2 (\`multi_agent_v2\`) are fine.\n`,
+    'repo/contracts/x/a.json': `{\n  "title": "The ${code} contract",\n  "owned_by": "${code}"\n}\n`,
+    'repo/contracts/trusted-ci-repository-protection/a.json': '{ "name": "N' + '6 CI diagnostics" }\n'
+  });
+  const failures = plain.check(root).failures.map(finding => [finding.file, finding.line, finding.rule, finding.text]);
+  assert.deepEqual(failures, [['repo/contracts/x/a.json', 2, 'banned-term', code], ['repo/docs/A.md', 1, 'banned-term', code]]);
+  assert.match(plain.describeFailure(plain.check(root).failures[0]), /banned-term "N5": a programme or release code; say what the work is/);
 });
 
 test('this repository passes against its own baseline', () => {

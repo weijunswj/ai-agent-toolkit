@@ -1,6 +1,6 @@
 # AI Agent Toolkit Repo Rules
 
-<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/toolkit-governed-rules.md:BEGIN TOOLKIT-GOVERNED-RULES v2 toolkit=3.12.0 sha256=ac4141549cf3 -->
+<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/toolkit-governed-rules.md:BEGIN TOOLKIT-GOVERNED-RULES v2 toolkit=3.13.0 sha256=ac4141549cf3 -->
 # Toolkit-Governed Repository Rules
 
 With the user's yes, this block and `.github/toolkit-programme.json` turn on Toolkit's GitHub governance for this github.com repository: programme records, decision traces, evidence custody and the rules below. Nothing here applies until the user says yes, without both, or off github.com. The coding gates and delegation are in the Toolkit global rules in the harness's user-level file, with gate mechanics in the gate rules, and apply everywhere. If they are missing (for example in a cloud session), read https://github.com/weijunswj/ai-agent-toolkit/blob/main/repo/contracts/agent-rules/global-rules.md before planning, and load the `n8n-safety-router` skill before any n8n work; if it is unavailable, stop and report that. Repository rules outside this block win on conventions; nothing here relaxes the global safety floor except the evidence-store line, which the floor names.
@@ -32,7 +32,7 @@ With the user's yes, this block and `.github/toolkit-programme.json` turn on Too
 This repository is the canonical AI Agent Toolkit, and this file applies to it only: never copy it into another repository. Portable installs use [`skills/repository-agent-rules/repo-local/AGENTS.managed.template.md`](skills/repository-agent-rules/repo-local/AGENTS.managed.template.md). Keep this file short: it loads in every session here, so put detail in routed playbooks or source-of-truth docs and add nothing merely for completeness.
 
 - **Routing:** read the [Toolkit playbook index](repo/docs/agent-playbooks/INDEX.md) (it replaces the portable index), classify the task, and read only the smallest matching playbook set and the docs it names; with no match, continue baseline-only. If a required playbook is missing or conflicts with this file, stop and report.
-- **Programme:** for the programme, follow [Toolkit V3](repo/docs/TOOLKIT-V3.md) and load only the changed role instructions when continuing. Its preparation does not prove runtime implementation, installed qualification or native permission, and other repositories keep their own bindings.
+- **Programme:** for the programme, follow the [Toolkit delivery contract](repo/docs/TOOLKIT-DELIVERY.md) and load only the changed role instructions when continuing. Its preparation does not prove runtime implementation, installed qualification or native permission, and other repositories keep their own bindings.
 
 ## Safety
 

@@ -67,6 +67,12 @@ Before committing, pushing, creating a pull request, merging, or deploying, paus
 - [`scripts/install-personal-data-guard.cjs`](scripts/install-personal-data-guard.cjs) installs it into a repository on the owner's opt-in: a copy under `.github/scripts/`, the config `.github/personal-data-guard.json` (the owner chooses whether author and committer addresses are scanned), git hooks in the folder git really uses, and with `--workflow` the CI job from [`templates/github-actions/personal-data-guard.yml`](templates/github-actions/personal-data-guard.yml). `--check` reports drift.
 - Hooks can be skipped with `--no-verify`; the CI job is the backstop. Follow `docs/agent-playbooks/privacy-safe-checks.md` in the target repository (the repository-agent-rules playbook) for fixtures, allow markers and the pushed-by-mistake steps.
 
+## Plain-Text Check
+
+- [`scripts/plain-text-check.cjs`](scripts/plain-text-check.cjs) is a zero-dependency check that user-facing docs say what they mean: no GitHub issue, pull request, discussion, commit or compare links, no hash-number references or "PR" and "issue" number labels, and none of the repository's own shorthand codes listed as banned terms in `.github/plain-text.json` (each with a reason and the plain wording to use). Items already there sit in a baseline that only shrinks. It points; it never rewrites text. `--files` checks only named files, `--explain` lists the rules.
+- [`scripts/install-plain-text-check.cjs`](scripts/install-plain-text-check.cjs) installs it: a copy under `.github/scripts/`, the settings and starting baseline when missing (never overwritten), and with `--workflow` the CI job from [`templates/github-actions/plain-text.yml`](templates/github-actions/plain-text.yml). `--check` reports drift. Governed repositories get it with their governed materials; others on a yes.
+- Before writing user-facing text in a repository that has `.github/plain-text.json`, read its banned terms and write the plain wording first, so the check rarely fires.
+
 ## AI-Facing Surfaces
 
 - Reference: [references/secure-ci-cd.md](references/secure-ci-cd.md)

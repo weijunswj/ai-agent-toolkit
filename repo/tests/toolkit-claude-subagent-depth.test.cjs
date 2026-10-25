@@ -175,7 +175,7 @@ test('a record in a superseded schema is not read, so the value it named reads a
   assert.equal(fs.readFileSync(f.settingsPath, 'utf8'), text);
 });
 
-const ONE_LAYER_LABEL = 'Toolkit repos: main session + Toolkit G0/G1 helpers only. Elsewhere: one layer of subagents.';
+const ONE_LAYER_LABEL = 'Toolkit repos: main session + Toolkit planning and build helpers only. Elsewhere: one layer of subagents.';
 
 test('the topology question carries the one-layer depth: root-only sets it, broader-native removes only Toolkit\'s value, keep leaves it', t => {
   const claudeState = { ...baseState(), agentProfile: { supported: true, topology: 'root-only' }, claudeSubagentDepth: { state: STATES.DEFAULT } };

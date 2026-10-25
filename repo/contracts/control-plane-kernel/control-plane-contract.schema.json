@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "toolkit.control-plane.kernel.v1",
-  "title": "Toolkit A1-SOIR R1 Control-Plane Kernel Contract",
+  "title": "Toolkit control-plane kernel contract",
   "type": "object",
   "additionalProperties": false,
   "required": ["contract_version", "decision", "reason_code", "operation_type", "operation_class", "target_class", "secret_classification", "operation_digest", "target_digest", "ticket_status", "privacy_safe", "structural_impact_required"],

@@ -1,5 +1,17 @@
 # Toolkit Changelog
 
+## 3.13.0
+
+### Plain-text check
+
+- **One portable check for plain user-facing text:** `skills/secure-ci-cd/scripts/plain-text-check.cjs` fails when a user-facing doc carries a GitHub issue, pull request, discussion, commit or compare link, a hash-number reference or a "PR" or "issue" number label, or one of the repository's own shorthand codes listed as banned terms in `.github/plain-text.json`. Each banned term carries its reason and the plain wording to use, and a code that must stay (a stored job name, a heading level) is kept per file with a reason. Structured files are checked on their names, titles, descriptions and prompts only. Items already there sit in a baseline written once that only shrinks. It points; it never rewrites text. `--files` checks named files only.
+- **Installer and CI template:** `install-plain-text-check.cjs` copies the check into `.github/scripts/` with a version and hash header, writes the settings and starting baseline only when missing, adds `templates/github-actions/plain-text.yml` with `--workflow` (read-only permissions, pinned actions) and reports drift with `--check`.
+- **On in every governed repository:** `repository-agent-rules` installs the check with a governed repository's materials and offers it elsewhere next to the personal-data guard; a refresh re-checks it. `toolkit governance check` reports a governed repository without the check, or with an outdated or edited copy, as drift; a repository switches it off only with a recorded reason.
+- **Startup note for outdated checks:** the session-start rules check also compares a repository's vendored Toolkit checks (the plain-text check and the personal-data guard) with the running Toolkit and prints one read-only note when they differ.
+- **Toolkit runs the same check:** `repo/scripts/check-plain-references.cjs` now runs the portable check with Toolkit's settings in `repo/contracts/plain-references/config.json`, which bans Toolkit's own release, lane, record and test-row codes across skills, docs, contracts and the readable fields of JSON and YAML files.
+- **Whole-repository sweep:** the remaining issue references and codes in docs, skills, contracts, setup questions, helper titles and plugin blurbs were rewritten in plain words, so the baseline is empty. The delivery contract is now `repo/docs/TOOLKIT-DELIVERY.md`. The setup topology choice reads "Toolkit repos: main session + Toolkit planning and build helpers only. Elsewhere: one layer of subagents."
+- **Chat replies count:** the global plain-language rule now names chat replies among the human-facing work it covers.
+
 ## 3.12.0 (server operations)
 
 ### External operation preflight

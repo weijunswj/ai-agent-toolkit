@@ -1301,6 +1301,29 @@ function compareAgentRuleFile({ targetRoot, templateRoot, spec }) {
   return findings;
 }
 
+// Toolkit checks a repository carries as vendored copies (secure-ci-cd installers). A copy whose
+// recorded source hash differs from the running Toolkit's source is reported once, read-only.
+const VENDORED_REPO_CHECKS = Object.freeze(['plain-text-check', 'personal-data-guard']);
+const VENDORED_CHECK_MARKER = /^\/\/ AI-AGENT-TOOLKIT:secure-ci-cd:VENDORED (\S+) \w+=\d+ sha256=([0-9a-f]{12})$/m;
+
+function compareVendoredRepoChecks({ targetRoot, pluginRoot }) {
+  const findings = [];
+  for (const name of VENDORED_REPO_CHECKS) {
+    const rel = `.github/scripts/${name}.cjs`;
+    let copy;
+    let source;
+    try { copy = fs.readFileSync(path.join(targetRoot, '.github', 'scripts', `${name}.cjs`), 'utf8').replace(/\r\n/g, '\n'); }
+    catch { continue; }
+    try { source = fs.readFileSync(path.join(pluginRoot, 'skills', 'secure-ci-cd', 'scripts', `${name}.cjs`), 'utf8').replace(/\r\n/g, '\n'); }
+    catch { continue; }
+    const marker = VENDORED_CHECK_MARKER.exec(copy);
+    if (!marker || marker[1] !== name) continue;
+    const sourceHash = crypto.createHash('sha256').update(source, 'utf8').digest('hex').slice(0, 12);
+    if (marker[2] !== sourceHash) findings.push({ file: rel, kind: 'repo-check', detail: 'differs from the running Toolkit check' });
+  }
+  return findings;
+}
+
 // A Toolkit source checkout owns the canonical templates its managed blocks are
 // generated from; an installed plugin copy of them may be older.
 function toolkitSourceCheckoutVersion(targetRoot) {
@@ -1364,6 +1387,7 @@ function runAgentRulesPreflight(args, options = {}) {
   const templateRoot = path.join(sourceVersion ? targetRoot : pluginRoot, AGENT_RULES_TEMPLATE_DIR);
   const findings = [];
   for (const spec of specs) findings.push(...compareAgentRuleFile({ targetRoot, templateRoot, spec }));
+  if (!sourceVersion) findings.push(...compareVendoredRepoChecks({ targetRoot, pluginRoot }));
   const authorVersion = sourceVersion || newestKnownToolkitVersion(options.state);
   const newer = Boolean(authorVersion) && compareBridgeVersions(runningVersion, authorVersion) < 0;
   const result = { ...base, reference, templateRoot, authorVersion, findings };
@@ -1383,6 +1407,9 @@ function formatAgentRulesPreflight(result) {
   }
   if (result.direction === 'drift') {
     return `Toolkit note: this Toolkit checkout's managed instruction blocks (${files}) differ from its own templates; regenerate them with node repo/scripts/sync-agent-instruction-shims.cjs when convenient. No files were changed.`;
+  }
+  if ((result.findings || []).length && result.findings.every((finding) => finding.kind === 'repo-check')) {
+    return `Toolkit note: this repository's Toolkit checks (${files}) differ from the running Toolkit ${result.runningVersion}; refresh them with repository-agent-rules when convenient. No files were changed.`;
   }
   return `Toolkit note: this repository's Toolkit rules (${files}) differ from the running Toolkit ${result.runningVersion} templates; refresh them with repository-agent-rules when convenient. No files were changed.`;
 }
@@ -3396,6 +3423,7 @@ if (require.main === module) {
 
 module.exports = {
   BRIDGE_VERSION,
+  compareVendoredRepoChecks,
   acquireLock,
   lockOwnerLiveness,
   parseArgs,

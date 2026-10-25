@@ -45,9 +45,9 @@ The governed repository holds `.github/toolkit-programme.json` (no secrets):
 {
   "schema": "toolkit.programme-binding.v1",
   "repository": "owner/name",
-  "parent_issue": 421,
-  "record_prefix": "INT-TK421-",
-  "writer_prefix": "INT-TK421-",
+  "parent_issue": 12,
+  "record_prefix": "INT-PROG-",
+  "writer_prefix": "INT-PROG-",
   "store": { "kind": "github", "repository": "owner/private-store", "branch": "main", "path": "state/owner/name/" },
   "required_checks": ["validate"]
 }
@@ -132,7 +132,7 @@ Issue `PATCH` has no compare-and-swap, so the pass builds the new body from a fr
 
 The programme issue body is the canonical record, and the reconcile pass keeps its `TRACE` block current from the issue's comments, so every non-bot comment is one link away. Only decision comments (a tag on the first line, or a record ID) must be: an owner decision that changes scope, authority or the plan is recorded as one, and other comments need no index entry. Records that replace others carry `SUPERSEDES=<record ID>`; the trace marks the replaced record "superseded by".
 
-Audit with `node scripts/decision-trace-audit.cjs --repo <owner/name> --issue <n> --record-prefix <prefix>` (for Toolkit #421: `INT-TK421-`). It fails on any unlinked decision comment, unknown `SUPERSEDES=` target, a superseded record not marked "superseded by" (in its own comment or on an index line that links it), or a body at the threshold, and lists other unlinked comments and comments without a record ID without failing. The reconcile pass runs it on every issue whose trace it does not rewrite in that pass and reports `TRACE_UNLINKED` and `TRACE_SUPERSEDED_UNMARKED`. `--repair --out <file>` writes a proposed body with the missing index lines in the same shape, and `--ledger <file>` (a `toolkit.decision-ledger.v1` file) adds each comment's topic tag after its link; publishing it is a separately authorised write followed by readback and a clean re-audit.
+Audit with `node scripts/decision-trace-audit.cjs --repo <owner/name> --issue <n> --record-prefix <prefix>` (the `record_prefix` from the binding). It fails on any unlinked decision comment, unknown `SUPERSEDES=` target, a superseded record not marked "superseded by" (in its own comment or on an index line that links it), or a body at the threshold, and lists other unlinked comments and comments without a record ID without failing. The reconcile pass runs it on every issue whose trace it does not rewrite in that pass and reports `TRACE_UNLINKED` and `TRACE_SUPERSEDED_UNMARKED`. `--repair --out <file>` writes a proposed body with the missing index lines in the same shape, and `--ledger <file>` (a `toolkit.decision-ledger.v1` file) adds each comment's topic tag after its link; publishing it is a separately authorised write followed by readback and a clean re-audit.
 
 ## Review truth
 
