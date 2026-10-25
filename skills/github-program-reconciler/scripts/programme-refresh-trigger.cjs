@@ -35,7 +35,20 @@ const WRITE_TOOLS = new Set([
 const SHELL_TOOLS = new Set(['Bash', 'PowerShell', 'shell', 'local_shell', 'exec_command']);
 const GH_WRITE = /\bgh(?:\.exe)?\s+(?:issue|pr)\s+(?:create|edit|comment|close|reopen|merge|ready|review|delete|lock|unlock|transfer|pin|unpin|update-branch)\b/i;
 // git push, with any global options before it (-C <dir>, -c <name=value>, --no-pager and the like).
-const GIT_PUSH = /\bgit(?:\.exe)?(?:\s+(?:-[Cc]\s+\S+|--[\w-]+(?:=\S+)?|-\w))*\s+push\b/i;
+// Walked token by token rather than matched with one pattern, so no input can make it backtrack.
+function gitPushes(command) {
+  for (const found of command.matchAll(/\bgit(?:\.exe)?(?=\s)/gi)) {
+    const words = command.slice(found.index + found[0].length).split(/\s+/).filter(Boolean);
+    for (let index = 0; index < words.length; index += 1) {
+      const word = words[index];
+      if (word === '-C' || word === '-c') { index += 1; continue; }
+      if (word.startsWith('-')) continue;
+      if (/^push\b/i.test(word)) return true;
+      break;
+    }
+  }
+  return false;
+}
 const GH_API = /\bgh(?:\.exe)?\s+api\b[^\r\n]*/gi;
 
 // A `gh api` call writes when it names a write method, or sends fields without naming GET; a GraphQL
@@ -96,7 +109,7 @@ function githubWrite(input) {
   }
   if (!SHELL_TOOLS.has(name)) return null;
   const command = shellCommand(input);
-  return GH_WRITE.test(command) || GIT_PUSH.test(command) || ghApiWrites(command) ? { repository: null } : null;
+  return GH_WRITE.test(command) || gitPushes(command) || ghApiWrites(command) ? { repository: null } : null;
 }
 
 function sessionHashOf(input) {
