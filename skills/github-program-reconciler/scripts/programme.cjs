@@ -120,10 +120,12 @@ function toolkitVersion(file = VERSION_FILE) {
 // One reconcile pass with --apply at a time per repository on this computer. The lock file holds a
 // random token, the owner's process id and host; its modified time is the owner's heartbeat, renewed
 // before every GitHub request. Before every request the pass also checks that the lock still holds its
-// token, and stops (PASS_LOCK_LOST) if not, so a pass that loses its lock never writes again.
+// token, and stops (PASS_LOCK_LOST) if not, so a pass that loses its lock sends no further request
+// (one already sent still completes).
 //
 // The lock is taken over only when its owner is provably gone: on this host, its process has ended;
-// on another host (a shared profile), it has not beaten for LOCK_STALE_MS. A live process that has
+// its last beat is older than this computer's last start; on another host (a shared profile), it has
+// not beaten for LOCK_STALE_MS. A live process that has
 // not beaten for LOCK_ABANDONED_MS is taken to be an unrelated process that reused a dead owner's id
 // (a pass beats at least every few minutes while awake); if it is in fact a pass waking from a long
 // sleep, it finds its token gone and stops before its next request. Anything at the path that is not
@@ -159,13 +161,16 @@ function readLock(file) {
 }
 
 // held, free or stale, with what was seen so a replacement can check it moved the same lock.
-function lockState(file, nowMs, alive = pidAlive) {
+function lockState(file, nowMs, alive = pidAlive, bootMs = nowMs - os.uptime() * 1000) {
   const seen = readLock(file);
   if (seen.missing) return { free: true };
   if (seen.broken) return { stale: true, seen };
   const silent = nowMs - seen.mtimeMs;
+  // A beat from before this computer last started belongs to a pass that died with the old boot, even
+  // if its process id is in use again. (Windows Fast Startup can keep the uptime counter across a
+  // shutdown; the abandon limit covers that case.)
   const gone = seen.lock.host === os.hostname()
-    ? !alive(seen.lock.pid) || silent > LOCK_ABANDONED_MS
+    ? !alive(seen.lock.pid) || silent > LOCK_ABANDONED_MS || seen.mtimeMs < bootMs
     : silent > LOCK_STALE_MS || silent < -LOCK_STALE_MS;
   return gone ? { stale: true, seen } : { held: true, seen };
 }
@@ -197,7 +202,7 @@ function takeLock(file, deps = {}) {
     } finally {
       try { fs.unlinkSync(draft); } catch { /* gone */ }
     }
-    const seen = lockState(file, now(), deps.pidAlive);
+    const seen = lockState(file, now(), deps.pidAlive, deps.bootMs);
     if (seen.free) continue;
     if (seen.held) return null;
     // Stale: move it aside, then make sure what moved is what was judged stale.
@@ -612,14 +617,14 @@ function runPasses(args, deps, out) {
   const file = deps.lockFile !== undefined ? deps.lockFile : (deps.originUrl ? null : defaultLockFile(context.binding.repository));
   let lock = takeLock(file, deps);
   if (!lock && args.command !== 'refresh') {
-    throw new ProgrammeError('PASS_RUNNING', `Another reconcile or refresh pass for ${context.binding.repository} is running on this computer. Nothing changed; run again when it ends.`);
+    throw new ProgrammeError('PASS_RUNNING', `Another reconcile or refresh pass for ${context.binding.repository} is running on this computer (lock ${file}). Nothing changed; run again when it ends. A lock left by a pass that was killed is taken over once its process has ended, at the next start of this computer, or after 6 hours.`);
   }
   if (!lock) {
     setAgain(file);
     lock = takeLock(file, deps);
     if (!lock) {
       const minutes = lockMinutes(file, deps.nowMs);
-      const reason = `another pass for ${context.binding.repository} is running on this computer${minutes === null ? '' : ` (started ${minutes} min ago)`}; it runs once more when it ends, so this change reaches the pages then (if that pass fails or a long burst reaches the limit, the next refresh or the hourly sweep does)`;
+      const reason = `another pass for ${context.binding.repository} is running on this computer${minutes === null ? '' : ` (started ${minutes} min ago)`}, lock ${file}; it runs once more when it ends, so this change reaches the pages then (if that pass fails or a long burst reaches the limit, the next refresh or the hourly sweep does)`;
       out.write(args.json ? `${JSON.stringify({ outcome: 'QUEUED', reason }, null, 2)}\n` : `Refresh queued: ${reason}.\n`);
       return 0;
     }
@@ -634,6 +639,8 @@ function runPasses(args, deps, out) {
     };
     try {
       do {
+        // A pass that lost its lock before its first request must not clear a flag left for the new owner.
+        beat.fn();
         clearAgain(file);
         const passArgs = passes === 0 ? args : { command: 'refresh', json: args.json, 'repo-root': args['repo-root'] };
         // Later passes reuse the same store, which remembers its own writes through GitHub's read lag.

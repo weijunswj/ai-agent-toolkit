@@ -210,6 +210,30 @@ test('a pass that loses its lock stops before its next GitHub request', () => {
   }
 });
 
+test('a pass that loses its lock before its first request leaves the flag for the new owner', () => {
+  const fx = fixture();
+  const link = fs.linkSync;
+  let swapped = false;
+  fs.linkSync = (from, to) => {
+    link(from, to);
+    // Right after this pass links its lock, another pass's lock replaces it and a queued refresh flags it.
+    if (to === fx.lockFile && !swapped) {
+      swapped = true;
+      const lock = JSON.parse(fs.readFileSync(to, 'utf8'));
+      fs.unlinkSync(to);
+      fs.writeFileSync(to, JSON.stringify({ ...lock, token: 'pass-c' }));
+      fs.writeFileSync(cli.againFile(fx.lockFile), 'd');
+    }
+  };
+  let run;
+  const before = fx.github.calls.length;
+  try { run = own(fx); } finally { fs.linkSync = link; }
+  assert.equal(run.error?.code, 'PASS_LOCK_LOST');
+  assert.equal(writesAfter(fx, before), 0, 'no write');
+  assert.equal(JSON.parse(fs.readFileSync(fx.lockFile, 'utf8')).token, 'pass-c');
+  assert.equal(fs.existsSync(cli.againFile(fx.lockFile)), true, 'the flag left for the new owner is still there');
+});
+
 test('a takeover in the middle of a refresh stops it with STALE_WRITER and releases the lock', () => {
   const fx = fixture();
   firstWrite(fx, () => {
@@ -228,7 +252,7 @@ test('the lock is never broken while its owner is alive and beating, and release
   assert.equal(cli.takeLock(file), null, 'held by a live owner');
   const old = new Date(Date.now() - cli.LOCK_STALE_MS - 60000);
   fs.utimesSync(file, old, old);
-  assert.equal(cli.takeLock(file, { pidAlive: () => true, nowMs: Date.now() - cli.LOCK_STALE_MS }), null, 'beaten recently enough');
+  assert.equal(cli.takeLock(file, { pidAlive: () => true, bootMs: 0 }), null, 'a live owner on this computer is not taken over after a sleep');
   a.beat();
   assert.equal(cli.takeLock(file), null, 'a beat keeps it held');
   // Someone else's lock now sits at the path: A's release leaves it alone.
@@ -250,7 +274,8 @@ const LOCK_MATRIX = [
   { name: 'live process, silent past the abandon limit (a reused id)', setup: f => writeLock(f, { beatMs: -cli.LOCK_ABANDONED_MS - 60000 }), alive: true, taken: true },
   { name: 'dead owner, beat far in the future', setup: f => writeLock(f, { beatMs: cli.LOCK_STALE_MS + 60000 }), alive: false, taken: true },
   { name: 'owner on another host, beat far in the future', setup: f => writeLock(f, { host: 'elsewhere', beatMs: cli.LOCK_STALE_MS + 60000 }), alive: false, taken: true },
-  { name: 'a link to a lock file', setup: f => { writeLock(`${f}.target`, {}); fs.symlinkSync(`${f}.target`, f); }, alive: true, taken: true, leaves: ['pass.lock.target'] },
+  { name: 'a link to a lock file', setup: f => { writeLock(`${f}.target`, {}); fs.symlinkSync(`${f}.target`, f); }, alive: true, taken: true, leaves: ['pass.lock.target'], links: true },
+  { name: 'live process, beat from before this computer started (a reused id)', setup: f => writeLock(f, { beatMs: -120000 }), alive: true, taken: true, bootMs: Date.now() - 60000 },
   { name: 'owner on another host, fresh beat', setup: f => writeLock(f, { host: 'elsewhere' }), alive: false, taken: false },
   { name: 'owner on another host, silent past the limit', setup: f => writeLock(f, { host: 'elsewhere', beatMs: -cli.LOCK_STALE_MS - 60000 }), alive: false, taken: true },
   { name: 'unreadable file', setup: f => fs.writeFileSync(f, 'not json'), alive: true, taken: true },
@@ -262,10 +287,15 @@ function writeLock(file, { host = os.hostname(), beatMs = 0 }) {
   fs.utimesSync(file, at, at);
 }
 for (const row of LOCK_MATRIX) {
-  test(`lock matrix: ${row.name}`, () => {
+  test(`lock matrix: ${row.name}`, t => {
     const file = path.join(tmp(), 'pass.lock');
-    row.setup(file);
-    const handle = cli.takeLock(file, { pidAlive: () => row.alive });
+    try { row.setup(file); }
+    catch (error) {
+      // A file link needs Developer Mode or admin rights on Windows.
+      if (row.links && process.platform === 'win32' && error.code === 'EPERM') return t.skip('no symlink rights');
+      throw error;
+    }
+    const handle = cli.takeLock(file, { pidAlive: () => row.alive, bootMs: row.bootMs ?? 0 });
     assert.equal(Boolean(handle), row.taken);
     if (handle) {
       assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).token, handle.token);
@@ -349,6 +379,11 @@ test('GitHub writes are recognised; reads and other repositories are not', () =>
     post('Bash', { command: 'gh api repos/acme/app-Xtra/issues -f title=x' }),
     post('PowerShell', { command: '& git.exe -C $env:USERPROFILE\\repo push' }),
     post('Bash', { command: 'git status && git push' }),
+    post('Bash', { command: 'bash -lc "git push"' }),
+    post('Bash', { command: "sh -c 'git push origin main'" }),
+    post('PowerShell', { command: 'powershell -Command "git push origin feature"' }),
+    post('PowerShell', { command: 'pwsh -c "git -C repo push"' }),
+    post('Bash', { command: 'bash -lc "cd repo && git push"' }),
   ];
   for (const input of writes) assert.ok(trigger.githubWrite(input), `${input.tool_name} ${JSON.stringify(input.tool_input)}`);
   assert.equal(trigger.githubWrite(writes[0]).repository, 'acme/app');
@@ -387,7 +422,7 @@ test('a marked session starts one refresh per governed checkout at turn end, the
 });
 
 test('write detection stays fast on long commands', () => {
-  for (const command of ['git '.repeat(12000), `${'some prose about git and how to push it. '.repeat(5000)}`, `git${' -c -0'.repeat(50000)} x`]) {
+  for (const command of ['git '.repeat(12000), `git${' --a=/git'.repeat(24000)} x`, ` -C git`.repeat(24000), `${'some prose about git and how to push it. '.repeat(5000)}`, `git${' -c -0'.repeat(50000)} x`]) {
     const started = Date.now();
     trigger.githubWrite(post('Bash', { command }));
     assert.ok(Date.now() - started < 1000, `${command.length} characters took ${Date.now() - started} ms`);

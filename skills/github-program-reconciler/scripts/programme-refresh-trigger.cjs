@@ -35,18 +35,21 @@ const WRITE_TOOLS = new Set([
 const SHELL_TOOLS = new Set(['Bash', 'PowerShell', 'shell', 'local_shell', 'exec_command']);
 const GH_WRITE = /\bgh(?:\.exe)?\s+(?:issue|pr)\s+(?:create|edit|comment|close|reopen|merge|ready|review|delete|lock|unlock|transfer|pin|unpin|update-branch)\b/i;
 // git push, with any global options before it: -C <dir> and -c <name=value> with their value,
-// --name[=value], and single-letter flags. The command is split into words once and walked forward,
-// so the time grows only with its length. A word ending in a shell separator ends the git command.
-const GIT_WORD = /(?:^|[\\/&(])git(?:\.exe)?$/i;
+// --name[=value], and single-letter flags. A quote before `git` or after `push` is allowed, so a shell
+// wrapper such as `bash -lc "git push"` counts. The command is split into words once, and the walk
+// from each git word looks at most GIT_OPTIONS_MAX options ahead, so crafted input stays fast. A word
+// ending in a shell separator ends the git command.
+const GIT_WORD = /(?:^|[\\/&("'])git(?:\.exe)?$/i;
+const GIT_OPTIONS_MAX = 16;
 function gitPushes(command) {
   const words = command.split(/\s+/).filter(Boolean);
   for (let start = 0; start < words.length; start += 1) {
     if (!GIT_WORD.test(words[start])) continue;
-    for (let index = start + 1; index < words.length; index += 1) {
+    for (let index = start + 1; index < words.length && index - start <= GIT_OPTIONS_MAX; index += 1) {
       const word = words[index];
       if (word === '-C' || word === '-c') { index += 1; continue; }
       if (/^(?:--[\w-]+(?:=\S*)?|-\w)$/.test(word)) continue;
-      if (/^push(?:$|[;&|)])/i.test(word)) return true;
+      if (/^push(?:$|[;&|)"'])/i.test(word)) return true;
       break;
     }
   }
