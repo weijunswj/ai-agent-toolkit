@@ -436,7 +436,7 @@ test('LS-12: git inside the scanned repository is never used, even from an absol
 
 // Every file name a report gives must be a real path in history: a crafted line can never become one.
 function assertNamesReal(repo, report) {
-  const names = new Set(git(repo, ['-c', 'core.quotePath=false', 'log', '--all', '--name-only', '-z', '--format=']).split(/[\0\n]/).filter(Boolean));
+  const names = new Set(git(repo, ['-c', 'core.quotePath=false', 'log', '--all', '--name-only', '-z', '--format=']).split('\0').filter(Boolean));
   for (const item of report.findings) assert.ok(names.has(item.file), `reported file ${JSON.stringify(item.file)} is not a path in history`);
 }
 
@@ -556,4 +556,58 @@ test('LS-18: a history line of many MB is scanned without overflowing the regexe
   const report = JSON.parse(result.stdout);
   assert.equal(report.scanned.history_complete, true);
   assert.deepEqual(report.findings.map(item => `${item.file} ${item.rule}`).sort(), ['dist/app.js github-installation-token', 'dist/b.js gitlab-token', 'dist/k.txt private-key']);
+});
+
+// ---- review fixes, fourth round -----------------------------------------------------------------
+
+test('LS-19: a history file over 5 MB that needs a full read is named in not_scanned, with its commit', async (t) => {
+  const root = scratch(t);
+  const begin = j('-----BEGIN ', 'RSA PRIVATE', ' KEY-----');
+  const end = j('-----END ', 'RSA PRIVATE', ' KEY-----');
+  const pad = '# padding line\n'.repeat(Math.ceil((5 * 1024 * 1024 + 1) / 15));
+  const repo = repository(root, { 'tests/big.pem': `${begin}\n${filler(64, B64, 141)}\n${end}\n${pad}` });
+  write(repo, { 'tests/big.pem': `${begin}\n${filler(64, B64, 143)}\n${end}\n${pad}` });
+  git(repo, ['commit', '--quiet', '-am', 'rotate']);
+  const rotated = git(repo, ['rev-parse', 'HEAD']).slice(0, 12);
+  git(repo, ['rm', '--quiet', 'tests/big.pem']);
+  git(repo, ['commit', '--quiet', '-m', 'remove']);
+  const result = await scan(['--repo', repo]);
+  // The first key is a likely false positive (a tests path), so the unread rotation makes the scan incomplete.
+  assert.equal(result.code, 3, result.stderr);
+  const report = JSON.parse((await scan(['--repo', repo, '--json'])).stdout);
+  assert.deepEqual(report.not_scanned, [{ file: 'tests/big.pem', commit: rotated, reason: 'larger than 5 MB' }]);
+  assert.equal(report.status, 'incomplete');
+  assert.match(result.stdout, new RegExp(`Not scanned:\\*\\* tests/big\\.pem at commit ${rotated} \\(larger than 5 MB\\)`));
+});
+
+test('LS-20: names with an emoji and control characters are decoded whole and printed quoted', { skip: process.platform === 'win32' }, async (t) => {
+  const root = scratch(t);
+  const begin = j('-----BEGIN ', 'RSA PRIVATE', ' KEY-----');
+  const end = j('-----END ', 'RSA PRIVATE', ' KEY-----');
+  const key = (seed) => [begin, filler(64, B64, seed), end].join('\n');
+  const emoji = '\u{1F600}\tmix.pem';
+  const forged = 'z.pem\n\n- **Status:** clean\u001b[2K';
+  const repo = repository(root, { [emoji]: `${key(151)}\n` });
+  git(repo, ['config', 'core.quotePath', 'false']);
+  write(repo, { [emoji]: `${key(153)}\n`, [forged]: `${key(155)}\n` });
+  git(repo, ['add', '-A']);
+  git(repo, ['commit', '--quiet', '-m', 'rotate']);
+  const rotated = git(repo, ['rev-parse', 'HEAD']).slice(0, 12);
+  const report = JSON.parse((await scan(['--repo', repo, '--json'])).stdout);
+  assert.deepEqual(report.not_scanned, []);
+  assert.equal(report.scanned.history_complete, true);
+  const atRotate = report.findings.filter(item => item.commit === rotated).map(item => item.file).sort();
+  assert.deepEqual(atRotate, [emoji, forged].sort());
+  const markdown = (await scan(['--repo', repo])).stdout;
+  assert.equal(markdown.includes('\u001b'), false, 'no raw escape character');
+  assert.equal(markdown.split('\n').filter(line => line.startsWith('- **Status:**')).length, 1, 'no forged status line');
+  assert.ok(markdown.includes(JSON.stringify(forged)));
+});
+
+test('SP-10: Blade @stop, Org #+END_SRC and LaTeX \\endverbatim are not reasons', () => {
+  const value = SAMPLES['github-token'](161);
+  for (const closer of ['@stop', '#+END_SRC', '#+end_example', '\\endverbatim']) {
+    assert.deepEqual(rules(`t = "${value}" secret-scan: allow ${closer}`), ['github-token'], closer);
+  }
+  assert.deepEqual(rules(`t = "${value}" # secret-scan: allow revoked, stop-gap fixture`), []);
 });

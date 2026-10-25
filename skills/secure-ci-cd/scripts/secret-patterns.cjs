@@ -86,7 +86,7 @@ function isPlaceholder(value) {
 }
 
 // Comment closers that contain letters, removed before a reason is measured.
-const CLOSERS = /\{%-?\s*end\w*\s*-?%\}|\\end\{comment\}|<\/\s*\w+\s*>|<%-?\s*end\s*-?%>|\{\{[~-]?\s*(?:end|\/\s*\w+)\s*[~-]?\}\}|@end\w+|\bend\b/gi;
+const CLOSERS = /\{%-?\s*end\w*\s*-?%\}|\\end\{comment\}|<\/\s*\w+\s*>|<%-?\s*end\s*-?%>|\{\{[~-]?\s*(?:end|\/\s*\w+)\s*[~-]?\}\}|@end\w+|@stop\b|#\+end_\w+|\\end\w+|\bend\b/gi;
 // Where a reviewed exception starts on a line, or -1. The reason must hold at least three letters or
 // digits once comment closers are removed, so a closer or punctuation alone never counts as one. The
 // marker covers only matches before it: a credential written after it is still found.

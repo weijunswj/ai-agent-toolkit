@@ -133,14 +133,15 @@ function inside(child, parent) {
 const C_ESCAPES = { a: 7, b: 8, t: 9, n: 10, v: 11, f: 12, r: 13, '"': 34, '\\': 92 };
 function unquoteName(text) {
   if (!(text.length >= 2 && text.startsWith('"') && text.endsWith('"'))) return text;
+  // Walk bytes, not UTF-16 units, so a raw emoji (core.quotePath=false) stays whole.
   const bytes = [];
-  const body = text.slice(1, -1);
+  const body = Buffer.from(text.slice(1, -1), 'utf8');
   for (let index = 0; index < body.length; index += 1) {
-    const char = body[index];
-    if (char !== '\\') { bytes.push(...Buffer.from(char, 'utf8')); continue; }
-    const next = body[index + 1];
-    if (/[0-7]/.test(next || '') && /^[0-7]{3}$/.test(body.slice(index + 1, index + 4))) { bytes.push(parseInt(body.slice(index + 1, index + 4), 8)); index += 3; continue; }
-    if (next in C_ESCAPES) { bytes.push(C_ESCAPES[next]); index += 1; continue; }
+    if (body[index] !== 92) { bytes.push(body[index]); continue; }
+    const octal = body.toString('latin1', index + 1, index + 4);
+    if (/^[0-7]{3}$/.test(octal)) { bytes.push(parseInt(octal, 8)); index += 3; continue; }
+    const next = String.fromCharCode(body[index + 1]);
+    if (index + 1 < body.length && next in C_ESCAPES) { bytes.push(C_ESCAPES[next]); index += 1; continue; }
     bytes.push(92);
   }
   return Buffer.from(bytes).toString('utf8');
@@ -184,7 +185,6 @@ function scanTree(command, repo) {
 // and the first `@@`; after that, every `+` line is content, whatever it starts with. When a run adds
 // key material without its header (the header was already there, or the diff split the block), the
 // whole file at that commit is read (`git show`, read-only) and checked for private keys.
-const KEY_MATERIAL = patterns.PATTERNS.find(item => item.id === 'private-key').next;
 const KEY_HEADER = patterns.PATTERNS.find(item => item.id === 'private-key').regex;
 
 function historyFinding(findings, hit, file, commit) {
@@ -204,13 +204,14 @@ function scanHistory(command, repo) {
     let skipped = false;
     let block = [];
     const recheckFiles = new Map(); // `${commit}\0${file}` -> { commit, file }
+    const notScanned = [];
     const flush = () => {
       if (block.length && file && commit) {
         for (const hit of patterns.scanLines(block)) historyFinding(findings, hit, file, commit);
-        // Key material before the run's first header belongs to a header the run does not hold. Plain
-        // hex lines (commit ids and hashes) are never key material.
+        // Key material before the run's first header belongs to a header the run does not hold. Only a
+        // whole line of base64 counts, and plain hex lines (commit ids and hashes) never do.
         const firstHeader = block.findIndex((item) => { KEY_HEADER.lastIndex = 0; return KEY_HEADER.test(item.text); });
-        const firstMaterial = block.findIndex((item) => { const text = item.text.trim(); return KEY_MATERIAL.test(text) && /[^0-9a-fA-F]/.test(text); });
+        const firstMaterial = block.findIndex((item) => { const text = item.text.trim(); return text.length >= 40 && !/[^A-Za-z0-9+/=]/.test(text) && /[^0-9a-fA-F]/.test(text); });
         if (firstMaterial !== -1 && (firstHeader === -1 || firstMaterial < firstHeader)) recheckFiles.set(`${commit}\0${file}`, { commit, file });
       }
       block = [];
@@ -241,19 +242,22 @@ function scanHistory(command, repo) {
       pending += chunk.slice(from);
     };
     child.stdout.on('data', chunk => take(decoder.write(chunk)));
-    child.on('error', () => resolve({ ok: false, findings: [] }));
+    child.on('error', () => resolve({ ok: false, findings: [], notScanned: [] }));
     child.on('close', (code) => {
       take(decoder.end());
       if (pending) onLine(pending);
       flush();
       let ok = code === 0 && !skipped;
       for (const { commit: at, file: name } of recheckFiles.values()) {
-        // The same 5 MB limit as the tree: a larger file stops the read and leaves history incomplete.
+        // The same 5 MB limit as the tree: a file that cannot be read is listed, and the scan is incomplete.
         const shown = spawnSync(command, gitArgs(repo, ['show', '--no-textconv', `${at}:${name}`]), { maxBuffer: MAX_FILE_BYTES, windowsHide: true, shell: false });
-        if (shown.error || shown.status !== 0) { ok = false; continue; }
+        if (shown.error || shown.status !== 0) {
+          notScanned.push({ file: name, commit: at.slice(0, 12), reason: shown.error && shown.error.code === 'ENOBUFS' ? 'larger than 5 MB' : 'unreadable' });
+          continue;
+        }
         for (const hit of patterns.scanText(shown.stdout.toString('utf8'))) if (hit.rule === 'private-key') historyFinding(findings, hit, name, at);
       }
-      resolve({ ok, findings: [...findings.values()] });
+      resolve({ ok, findings: [...findings.values()], notScanned });
     });
   });
 }
@@ -269,16 +273,20 @@ function recheck(previous, findings) {
   };
 }
 
+// A file name may hold control characters (a newline, an escape sequence); those are printed quoted so
+// they cannot add lines to the report or reach the terminal raw.
+function printable(name) { return /[\x00-\x1f\x7f]/.test(name) ? JSON.stringify(name) : name; }
+
 function markdown(report) {
   const lines = ['# Local security scan', '', `- **Status:** ${report.status}`, `- **Commit:** ${report.scanned.commit || 'none'}${report.scanned.dirty ? ' (with uncommitted changes)' : ''}`,
-    `- **Scanned:** working tree${report.mode.history ? (report.scanned.history_complete ? ' and full history' : ' (history incomplete: shallow clone or unreadable)') : ' only (--no-history)'}, ${report.patterns} credential formats`,
+    `- **Scanned:** working tree${report.mode.history ? (report.scanned.history_complete ? ' and full history' : ' (history incomplete: a shallow clone, or history git could not read)') : ' only (--no-history)'}, ${report.patterns} credential formats`,
     `- **Findings:** ${report.summary.release_blocker} release blocker, ${report.summary.likely_false_positive} likely false positive`,
     '- **Dependencies:** not scanned here; Dependabot covers vulnerable packages'];
-  if (report.not_scanned.length) lines.push(`- **Not scanned:** ${report.not_scanned.map(item => `${item.file} (${item.reason})`).join(', ')}`);
+  if (report.not_scanned.length) lines.push(`- **Not scanned:** ${report.not_scanned.map(item => `${printable(item.file)}${item.commit ? ` at commit ${item.commit}` : ''} (${item.reason})`).join(', ')}`);
   if (report.findings.length) {
     lines.push('', '## Findings', '');
     for (const item of report.findings) {
-      lines.push(`- [${item.class}] ${item.id}: ${item.label} in ${item.file}:${item.line}${item.commit ? ` (commit ${item.commit}; rotate it even if it is gone from the tree)` : ''}`);
+      lines.push(`- [${item.class}] ${item.id}: ${item.label} in ${printable(item.file)}:${item.line}${item.commit ? ` (commit ${item.commit}; rotate it even if it is gone from the tree)` : ''}`);
     }
   }
   if (report.recheck) lines.push('', '## Re-check', '', `- Fixed: ${report.recheck.fixed.length}`, `- Still open: ${report.recheck.still_open.length}`, `- New: ${report.recheck.new.length}`);
@@ -304,17 +312,20 @@ async function scan(options) {
   const tree = scanTree(command, repo);
   let historyComplete = null;
   let history = [];
+  let historyNotScanned = [];
   if (options.history && head.status === 0) {
     const shallow = git(command, repo, ['rev-parse', '--is-shallow-repository']).stdout.trim() === 'true';
     const read = await scanHistory(command, repo);
     history = read.findings;
+    historyNotScanned = read.notScanned;
     historyComplete = read.ok && !shallow;
   }
   const findings = [...tree.findings, ...history].sort((a, b) => a.id.localeCompare(b.id));
   const count = cls => findings.filter(item => item.class === cls).length;
   const summary = { release_blocker: count('release-blocker'), likely_false_positive: count('likely-false-positive') };
   // A file left unscanned (over 5 MB or unreadable) makes the result incomplete, never clean.
-  const incomplete = historyComplete === false || tree.notScanned.length > 0;
+  const notScanned = [...tree.notScanned, ...historyNotScanned];
+  const incomplete = historyComplete === false || notScanned.length > 0;
   const report = {
     schema: SCHEMA,
     generated_at: new Date().toISOString(),
@@ -322,7 +333,7 @@ async function scan(options) {
     scanned: { commit: head.status === 0 ? head.stdout.trim() : null, dirty: status.status === 0 ? status.stdout.trim().length > 0 : null, history_complete: historyComplete },
     mode: { history: options.history },
     patterns: patterns.PATTERNS.length,
-    not_scanned: tree.notScanned,
+    not_scanned: notScanned,
     findings,
     summary,
     ...(previous ? { recheck: recheck(previous, findings) } : {}),
