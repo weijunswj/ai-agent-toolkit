@@ -3453,11 +3453,14 @@ $killed = Join-Path $staleDir "999999999-$hex.workflows.json"
 $killedRaw = Join-Path $staleDir "999999999-$hex.n8n-output.txt"
 $legacy = Join-Path $staleDir "$hex.workflows.json"
 $running = Join-Path $staleDir "$PID-$hex.workflows.json"
+$reused = Join-Path $staleDir "$PID-fedcba9876543210fedcba9876543210.workflows.json"
+$otherDigits = Join-Path $staleDir ((-join ([char]0x0661, [char]0x0662, [char]0x0663)) + "-$hex.workflows.json")
 $other = Join-Path $staleDir "notes.txt"
-foreach ($file in @($killed, $killedRaw, $legacy, $running, $other)) { Set-Content -LiteralPath $file -Value "[]" }
+foreach ($file in @($killed, $killedRaw, $legacy, $running, $reused, $otherDigits, $other)) { Set-Content -LiteralPath $file -Value "[]" }
+(Get-Item -LiteralPath $reused).LastWriteTime = (Get-Date).AddDays(-30)
 Clear-StaleLiveWorkflowList
-Write-Output ("KILLED=" + (Test-Path -LiteralPath $killed) + "," + (Test-Path -LiteralPath $killedRaw) + " LEGACY=" + (Test-Path -LiteralPath $legacy) + " RUNNING=" + (Test-Path -LiteralPath $running) + " OTHER=" + (Test-Path -LiteralPath $other))
-Remove-Item -LiteralPath $running, $other
+Write-Output ("KILLED=" + (Test-Path -LiteralPath $killed) + "," + (Test-Path -LiteralPath $killedRaw) + " LEGACY=" + (Test-Path -LiteralPath $legacy) + " RUNNING=" + (Test-Path -LiteralPath $running) + " REUSED=" + (Test-Path -LiteralPath $reused) + " OTHERDIGITS=" + (Test-Path -LiteralPath $otherDigits) + " OTHER=" + (Test-Path -LiteralPath $other))
+Remove-Item -LiteralPath $running, $otherDigits, $other
 $lines = @((Get-Content -LiteralPath (Join-Path $RepoRoot "noisy.txt")) | Where-Object { $_ -ne "" })
 $live = Read-LiveWorkflowList ([PSCustomObject]@{ StdOut = $lines })
 Write-Output ("COUNT=" + $live.Count)
@@ -3475,19 +3478,29 @@ Write-Output ("LEFT=" + (Test-Path -LiteralPath (Join-Path $RepoRoot ".tmp/n8n-l
   assert.match(result.stdout, /PUBLISHED=Wf2xPublished01/);
   assert.match(result.stdout, /LOGARGS=-e N8N_LOG_LEVEL=info -e N8N_LOG_OUTPUT=console -e N8N_LOG_FORMAT=text -e NO_COLOR=1/);
   assert.deepEqual(JSON.parse(fs.readFileSync(outPath, 'utf8')), n8n2xWorkflows()[0]);
-  assert.match(result.stdout, /KILLED=False,False LEGACY=False RUNNING=True OTHER=True/, 'a killed run\'s files go at once; a running run\'s files and other files stay');
+  assert.match(result.stdout, /KILLED=False,False LEGACY=False RUNNING=True REUSED=False OTHERDIGITS=True OTHER=True/, 'a killed run\'s files go at once, even when its process id now belongs to a later process; a running run\'s files and other files stay');
   assert.match(result.stdout, /STORED=1/);
   assert.match(result.stdout, /LEFT=False/, 'the stored live workflow list is removed when the run ends');
 });
 
-test('live workflow list clean-up never deletes or writes through a linked folder', { skip: findPowerShell() ? false : 'PowerShell not available' }, () => {
+for (const linked of ['list folder', '.tmp']) test(`live workflow list clean-up never deletes or writes through a linked ${linked}`, { skip: findPowerShell() ? false : 'PowerShell not available' }, () => {
   const shell = findPowerShell();
   const root = tempDir();
   const outside = tempDir();
   const killedName = '999999999-0123456789abcdef0123456789abcdef.workflows.json';
-  fs.writeFileSync(path.join(outside, killedName), '[]');
-  fs.mkdirSync(path.join(root, '.tmp'), { recursive: true });
-  fs.symlinkSync(outside, path.join(root, '.tmp', 'n8n-live-workflow-list'), 'junction');
+  // The planted file is two hours old, so neither an age rule nor a process check would keep it.
+  const killedDir = linked === '.tmp' ? path.join(outside, 'n8n-live-workflow-list') : outside;
+  fs.mkdirSync(killedDir, { recursive: true });
+  const killedPath = path.join(killedDir, killedName);
+  fs.writeFileSync(killedPath, '[]');
+  const old = Date.now() / 1000 - 7200;
+  fs.utimesSync(killedPath, old, old);
+  if (linked === '.tmp') {
+    fs.symlinkSync(outside, path.join(root, '.tmp'), 'junction');
+  } else {
+    fs.mkdirSync(path.join(root, '.tmp'), { recursive: true });
+    fs.symlinkSync(outside, path.join(root, '.tmp', 'n8n-live-workflow-list'), 'junction');
+  }
   const harnessPath = path.join(root, 'link-harness.ps1');
   fs.writeFileSync(harnessPath, `
 $ErrorActionPreference = "Stop"
@@ -3505,7 +3518,7 @@ foreach ($script in @(${psSingleQuoted(path.join(sourceScriptDir, 'export-n8n-wo
   Remove-LiveWorkflowList
   $refused = $false
   try { Get-LiveWorkflowListDir | Out-Null } catch { $refused = $_.Exception.Message -match "through a link" }
-  Write-Output ("KEPT=" + (Test-Path -LiteralPath ${psSingleQuoted(path.join(outside, killedName))}) + " REFUSED=" + $refused)
+  Write-Output ("KEPT=" + (Test-Path -LiteralPath ${psSingleQuoted(killedPath)}) + " REFUSED=" + $refused)
 }
 `, 'utf8');
 

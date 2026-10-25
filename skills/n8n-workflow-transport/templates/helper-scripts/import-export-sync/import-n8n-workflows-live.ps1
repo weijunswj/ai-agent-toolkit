@@ -657,9 +657,12 @@ function Invoke-CliWorkflowJson([string[]]$Arguments, $FailureMessage) {
 }
 
 function Get-LiveWorkflowListDir {
-  $listDir = Join-Path (Join-Path $RepoRoot ".tmp") "n8n-live-workflow-list"
-  if ((Test-Path -LiteralPath $listDir) -and (Test-PathItemIsUnsafeLink (Get-Item -LiteralPath $listDir -Force))) {
-    throw "Refusing to store the live workflow list through a link: $listDir. Remove the link and rerun."
+  $tmpDir = Join-Path $RepoRoot ".tmp"
+  $listDir = Join-Path $tmpDir "n8n-live-workflow-list"
+  foreach ($path in @($tmpDir, $listDir)) {
+    if ((Test-Path -LiteralPath $path) -and (Test-PathItemIsUnsafeLink (Get-Item -LiteralPath $path -Force))) {
+      throw "Refusing to store the live workflow list through a link: $path. Remove the link and rerun."
+    }
   }
   New-Item -ItemType Directory -Force -Path $listDir | Out-Null
   return $listDir
@@ -725,21 +728,27 @@ function Remove-LiveWorkflowList {
 
 function Clear-StaleLiveWorkflowList {
   # A killed run (window closed, task killed, power loss) never reaches its finally block. The next run
-  # removes the helper files of any run that is no longer running, and older files with no process id.
-  # It touches only the helpers' own file names, and nothing when the folder or .tmp is a link.
+  # removes a helper file unless a process with its id is running and started before the file was
+  # written, so a reused process id does not keep a killed run's list. Older files with no process id
+  # go too. It touches only the helpers' own file names, and nothing when the folder or .tmp is a link.
   $listDir = Get-SafeLiveWorkflowListDir
   if ($null -eq $listDir) {
     return
   }
-  $helperFile = '^(?:(\d{1,9})-)?[0-9a-f]{32}\.(?:workflows\.json|n8n-output\.txt|summary\.json|file-summary\.json)$'
+  $helperFile = '^(?:([0-9]{1,9})-)?[0-9a-f]{32}\.(?:workflows\.json|n8n-output\.txt|summary\.json|file-summary\.json)$'
   foreach ($file in @(Get-ChildItem -LiteralPath $listDir -File -Force)) {
     if ($file.Name -notmatch $helperFile) {
       continue
     }
     if ($Matches[1]) {
-      $ownerId = [int]$Matches[1]
-      if ($ownerId -eq $PID -or $null -ne (Get-Process -Id $ownerId -ErrorAction SilentlyContinue)) {
-        continue
+      $owner = Get-Process -Id ([int]$Matches[1]) -ErrorAction SilentlyContinue
+      if ($null -ne $owner) {
+        # A start time that cannot be read keeps the file, as the owner may still be using it.
+        $started = $null
+        try { $started = $owner.StartTime.ToUniversalTime() } catch { }
+        if ($null -eq $started -or $started -le $file.LastWriteTimeUtc) {
+          continue
+        }
       }
     }
     Remove-Item -LiteralPath $file.FullName -Force -ErrorAction SilentlyContinue

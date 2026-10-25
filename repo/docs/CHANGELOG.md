@@ -4,7 +4,7 @@
 
 - **One live rule everywhere:** the transport module's own postcondition check now uses the same fail-closed rule as the live helpers, so a published version or a missing state never passes as unpublished.
 - **Truthful messages:** preparing a new workflow says it gets no MCP exposure or error workflow, the prepared-import validator says preparation checked the setting against the target, and the helper README states the fail-closed rule and which machine check reads Docker.
-- **Killed runs:** every helper file name now starts with the process id of the run that wrote it. A run that is killed before its clean-up leaves its stored live workflow list behind until the next run starts, and that run deletes the helper files of any run that is no longer running. It touches only the helpers' own file names, and nothing when the list folder or `.tmp` is a link; the helpers also refuse to store the list through a linked folder.
+- **Killed runs:** every helper file name now starts with the process id of the run that wrote it. A run that is killed before its clean-up leaves its stored live workflow list behind until the next run starts, and that run deletes the helper files of any run that is no longer running. A file is kept only while a process with its id is running and started before the file was written, so a process id reused by a later process does not keep a killed run's list. The clean-up touches only the helpers' own file names, and nothing when the list folder or `.tmp` is a link; the helpers also refuse to store the list when either is a link.
 
 ## 3.12.0 (server operations)
 
