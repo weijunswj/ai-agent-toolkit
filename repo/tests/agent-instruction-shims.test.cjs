@@ -117,6 +117,8 @@ test('the n8n adapter template is generated from its source and stays compact an
 
 test('global rules hold the generic floor: precedence, entry routing, safety gates and delivery', () => {
   const text = readText(globalPath);
+  assert.equal(text.split('.tmp/worktrees/').length, 2, 'one home for agent-made worktrees');
+  assert.doesNotMatch(text, /_worktrees/, 'no rule names the retired sibling worktree folder');
   for (const rule of [
     /the repository wins on conventions and workflow/,
     // A host that did not load the repository's AGENTS.md must still read and follow it.
@@ -150,7 +152,10 @@ test('global rules hold the generic floor: precedence, entry routing, safety gat
     /\*\*Finish authorised work before stopping\.\*\*/,
     /\*\*Change-local hygiene:\*\*/,
     /no change, reuse, smallest root-cause fix, bounded simplification, new abstraction only if needed/,
-    /fast-forward the local default-branch checkout only when it is on that branch and clean[^\n]*Never reset or force/,
+    /fast-forward the default-branch checkout only when it is on that branch and clean[^\n]*never reset or force/,
+    // Lane worktrees and branches once outlived their merge, and three rules named three worktree homes.
+    /Make worktrees in the gitignored `\.tmp\/worktrees\/<lane>`; hosts keep their own\./,
+    /When a lane's PR merges or closes, `git worktree remove` and `prune` its worktree and `git branch -d` its branch \(never `--force` or `-D`\); report any dirty, locked or unmerged\./,
     /`gh pr checks <PR> --watch --interval 60`/,
     /never claim CI passed without every required check/,
     /after two failed fixes, stop and report/,

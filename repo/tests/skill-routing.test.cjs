@@ -7,6 +7,15 @@ const path = require('node:path');
 const test = require('node:test');
 const validator = require('../scripts/validate-toolkit.cjs');
 
+// Every temp folder a test makes is removed after the file's tests, also when they fail.
+const tempFolders = [];
+test.after(() => { for (const dir of tempFolders) fs.rmSync(dir, { recursive: true, force: true }); });
+function tempFolder(prefix) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  tempFolders.push(dir);
+  return dir;
+}
+
 const repoRoot = path.resolve(__dirname, '..', '..');
 const routingPartial = path.join(
   repoRoot,
@@ -440,8 +449,8 @@ test('markdown docs use markdown numbered steps instead of HTML or compressed st
 });
 
 test('markdown file walker skips symlinks and stays inside the selected root', (t) => {
-  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-md-walk-root-'));
-  const externalRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-md-walk-external-'));
+  const fixtureRoot = tempFolder('toolkit-md-walk-root-');
+  const externalRoot = tempFolder('toolkit-md-walk-external-');
 
   fs.writeFileSync(path.join(fixtureRoot, 'safe.md'), '# Safe\n', 'utf8');
   fs.writeFileSync(path.join(externalRoot, 'secret.md'), '# External secret marker\n', 'utf8');

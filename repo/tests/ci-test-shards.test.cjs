@@ -338,28 +338,96 @@ test('a run uses its own temp folder under the user profile, for every child, an
   assert.equal(fs.existsSync(fail.folder), false, 'the run folder is gone after a failing run');
 });
 
-test('the next run removes run folders an interrupted run left more than a day ago, and nothing else', (t) => {
+test('the next run removes marked run folders an interrupted run left more than a day ago, and nothing else', (t) => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-run-cleanup-'));
   t.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
+  const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-run-elsewhere-'));
+  t.after(() => fs.rmSync(elsewhere, { recursive: true, force: true }));
   const now = Date.UTC(2026, 9, 23);
   const day = 24 * 60 * 60 * 1000;
   const old = path.join(tempRoot, 'run-old-xxxx');
   const recent = path.join(tempRoot, 'run-new-xxxx');
   const boundary = path.join(tempRoot, 'run-day-xxxx');
+  const unmarked = path.join(tempRoot, 'run-someone-else');
+  const markerFolder = path.join(tempRoot, 'run-marker-is-a-folder');
   const keep = path.join(tempRoot, 'keep-me');
+  const review = path.join(tempRoot, 'g2-589-52b6318');
   const file = path.join(tempRoot, 'run-file.txt');
-  for (const folder of [old, recent, boundary, keep]) fs.mkdirSync(folder);
+  const link = path.join(tempRoot, 'run-link-xxxx');
+  for (const folder of [old, recent, boundary, unmarked, markerFolder, keep, review]) fs.mkdirSync(folder);
+  for (const folder of [old, recent, boundary, elsewhere]) fs.writeFileSync(path.join(folder, runner.RUN_MARKER), '{}\n');
+  fs.mkdirSync(path.join(markerFolder, runner.RUN_MARKER));
+  fs.writeFileSync(path.join(elsewhere, 'precious.txt'), 'keep');
+  fs.symlinkSync(elsewhere, link, process.platform === 'win32' ? 'junction' : 'dir');
   fs.writeFileSync(file, 'keep');
-  for (const item of [old, keep, file]) fs.utimesSync(item, new Date(now - day - 1000), new Date(now - day - 1000));
+  const aged = new Date(now - day - 1000);
+  for (const item of [old, unmarked, markerFolder, keep, review, file, elsewhere]) fs.utimesSync(item, aged, aged);
+  fs.lutimesSync(link, aged, aged);
   fs.utimesSync(recent, new Date(now), new Date(now));
   fs.utimesSync(boundary, new Date(now - day), new Date(now - day));
-  const run = new runner.TestRun({ root: ROOT, system: shards.platformSystem(), tempRoot, now: () => now, out: sink(), err: sink() });
+  const err = sink();
+  const run = new runner.TestRun({ root: ROOT, system: shards.platformSystem(), tempRoot, now: () => now, out: sink(), err });
   const folder = run.createFolder();
-  assert.equal(fs.existsSync(old), false);
-  for (const item of [recent, boundary, keep, file, folder]) assert.equal(fs.existsSync(item), true, item);
+  assert.equal(fs.existsSync(old), false, 'a marked folder more than a day old is removed');
+  const kept = [recent, boundary, unmarked, markerFolder, keep, review, file, link, path.join(elsewhere, 'precious.txt'), folder];
+  for (const item of kept) assert.equal(fs.existsSync(item), true, item);
+  assert.equal(fs.lstatSync(path.join(folder, runner.RUN_MARKER)).isFile(), true, 'the new run folder carries the marker');
+  const reported = err.text();
+  for (const item of [unmarked, markerFolder]) assert.ok(reported.includes(`Left ${item} alone: it has no test-runner marker`), reported);
+  for (const item of [keep, review, file, link, recent, boundary]) assert.ok(!reported.includes(item), `${item} is not reported`);
   assert.equal(run.removeFolder(), true);
+  assert.deepEqual(run.leftBehind, [], 'the marker and results file are not counted as left behind');
   assert.equal(fs.existsSync(folder), false);
-  for (const item of [recent, boundary, keep, file]) assert.equal(fs.existsSync(item), true, item);
+  for (const item of kept.slice(0, -1)) assert.equal(fs.existsSync(item), true, item);
+});
+
+test('a run fails and names what its tests left behind, also when the tests failed', (t) => {
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-run-leftovers-'));
+  t.after(() => fs.rmSync(work, { recursive: true, force: true }));
+  const leaky = path.join(work, 'leaky.test.cjs');
+  const leakyFail = path.join(work, 'leaky-fail.test.cjs');
+  const tidy = path.join(work, 'tidy.test.cjs');
+  const leak = (name, fail) => [
+    "const test = require('node:test');",
+    "const fs = require('node:fs');",
+    "const os = require('node:os');",
+    "const path = require('node:path');",
+    `test('leaves ${name}', () => { fs.mkdtempSync(path.join(os.tmpdir(), '${name}-'));${fail ? " throw new Error('expected failure');" : ''} });`,
+  ].join('\n');
+  fs.writeFileSync(leaky, leak('leaky-item', false));
+  fs.writeFileSync(leakyFail, leak('leaky-fail-item', true));
+  fs.writeFileSync(tidy, [
+    "const test = require('node:test');",
+    "const fs = require('node:fs');",
+    "const os = require('node:os');",
+    "const path = require('node:path');",
+    "test('cleans up', (t) => { const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tidy-')); t.after(() => fs.rmSync(dir, { recursive: true, force: true })); });",
+  ].join('\n'));
+  const env = { ...process.env };
+  delete env.NODE_TEST_CONTEXT;
+  const make = (err) => new runner.TestRun({ root: ROOT, system: shards.platformSystem(), tempRoot: path.join(work, 'temp'), env, stdio: 'ignore', out: sink(), err });
+
+  const clean = make(sink());
+  assert.equal(clean.run([tidy], { concurrency: 1 }).exitCode, 0, 'nothing left: the run passes');
+  assert.deepEqual(clean.leftBehind, []);
+
+  const passErr = sink();
+  const passing = make(passErr);
+  const passed = passing.run([leaky], { concurrency: 1 });
+  assert.equal(passed.summary.files[0].failed, 0, 'the test itself passed');
+  assert.equal(passed.exitCode, 1, 'a passing run that left temp behind fails');
+  assert.equal(passing.leftBehind.length, 1);
+  assert.match(passing.leftBehind[0], /^leaky-item-/);
+  assert.match(passErr.text(), /Tests left 1 temp item\(s\) behind: leaky-item-/);
+  assert.equal(fs.existsSync(passing.folder), false, 'the leftover goes with the run folder');
+
+  const failErr = sink();
+  const failing = make(failErr);
+  const failed = failing.run([leakyFail], { concurrency: 1 });
+  assert.notEqual(failed.exitCode, 0);
+  assert.equal(failed.summary.files[0].failed, 1, 'the test failure is still reported');
+  assert.match(failErr.text(), /Tests left 1 temp item\(s\) behind: leaky-fail-item-/);
+  assert.equal(fs.existsSync(failing.folder), false);
 });
 
 test('a run folder that cannot be removed is reported without throwing', (t) => {

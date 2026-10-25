@@ -12,7 +12,9 @@
 //
 // Every run gets its own scratch temp folder, <temp root>\<run id>, set as TEMP, TMP and TMPDIR for
 // the run and every child process. It is removed when the run finishes, also when tests fail.
-// The next run removes a folder an interrupted run left once it is more than a day old.
+// A run fails when its tests left anything behind in that folder, naming what they left.
+// Each run folder carries a marker file; the next run removes a marked folder an interrupted run
+// left once it is more than a day old, and only reports a run-* folder without the marker.
 // Write anything a run must keep with --summary or --report-durations to a path outside the run folder.
 // The temp root is %USERPROFILE%\t unless
 // --temp-root names another folder (CI passes the runner's temp folder); a folder directly under
@@ -31,6 +33,9 @@ const shards = require('./ci-test-shards.cjs');
 const REPORTER = path.join(__dirname, 'test-summary-reporter.cjs');
 const DEFAULT_CONCURRENCY = 3;
 const STALE_RUN_AGE_MS = 24 * 60 * 60 * 1000;
+// Written into every run folder this runner creates; the stale sweep removes only folders that carry it.
+const RUN_MARKER = '.toolkit-test-run';
+const RESULTS_FILE = 'test-results.jsonl';
 const USAGE = 'Usage: node repo/scripts/run-tests.cjs [--changed | --all | --shard <id> --os <linux|windows> | --plan | --verify-ci <dir> | <test file>...] [--temp-root <dir>] [--summary <file>] [--report-durations <file>] [--concurrency <n>] [--base <ref>]';
 
 class UsageError extends Error {}
@@ -93,6 +98,7 @@ class TestRun {
     this.out = out;
     this.err = err;
     this.folder = null;
+    this.leftBehind = [];
   }
 
   createFolder() {
@@ -102,11 +108,16 @@ class TestRun {
     // realpath.native gives the long form of every part, so tests never see an 8.3 short name.
     const longRoot = fs.realpathSync.native(this.tempRoot);
     const now = this.now();
+    // A link is not a directory entry here, so a run-* link is never followed or removed.
     for (const entry of fs.readdirSync(longRoot, { withFileTypes: true })) {
       if (!entry.isDirectory() || !entry.name.startsWith('run-')) continue;
       const folder = path.join(longRoot, entry.name);
       try {
         if (now - fs.statSync(folder).mtimeMs <= STALE_RUN_AGE_MS) continue;
+        if (!isMarker(path.join(folder, RUN_MARKER))) {
+          this.err.write(`Left ${folder} alone: it has no test-runner marker, so this runner did not make it. Delete it yourself if it is not needed.\n`);
+          continue;
+        }
         fs.rmSync(folder, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
         if (!fs.existsSync(folder)) continue;
       } catch {}
@@ -114,17 +125,18 @@ class TestRun {
     }
     const stamp = new Date(now).toISOString().replace(/[-:]/g, '').replace(/\..*$/, '').replace('T', '-');
     this.folder = fs.mkdtempSync(path.join(longRoot, `run-${stamp}-`));
+    fs.writeFileSync(path.join(this.folder, RUN_MARKER), `${JSON.stringify({ created: new Date(now).toISOString(), pid: process.pid })}\n`);
     return this.folder;
   }
 
   removeFolder() {
     if (!this.folder) return true;
-    // Tests should clean up after themselves; whatever they left goes with the run folder, also when tests fail.
+    // Tests clean up after themselves; whatever they left is named, fails the run and goes with the
+    // run folder, also when tests fail.
     try {
-      let left = [];
-      try { left = fs.readdirSync(this.folder).filter((name) => name !== 'test-results.jsonl'); }
+      try { this.leftBehind = fs.readdirSync(this.folder).filter((name) => name !== RESULTS_FILE && name !== RUN_MARKER).sort(); }
       catch (error) { if (error.code !== 'ENOENT') throw error; }
-      if (left.length) this.out.write(`Removing ${left.length} temp item(s) tests left behind (${left.slice(0, 3).join(', ')}${left.length > 3 ? ', ...' : ''}).\n`);
+      if (this.leftBehind.length) this.err.write(`Tests left ${this.leftBehind.length} temp item(s) behind: ${this.leftBehind.join(', ')}. Each test removes what it makes (t.after or finally with fs.rmSync), so this run fails.\n`);
       fs.rmSync(this.folder, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
       if (!fs.existsSync(this.folder)) return true;
     } catch {}
@@ -140,14 +152,15 @@ class TestRun {
     return env;
   }
 
-  // Runs the files and returns { exitCode, summary }. The run folder is removed in every case;
-  // a folder an interrupted run left is removed by the next run once it is a day old.
+  // Runs the files and returns { exitCode, summary }. The run folder is removed in every case and
+  // anything tests left in it fails the run; a marked folder an interrupted run left is removed by
+  // the next run once it is a day old.
   run(files, { concurrency = DEFAULT_CONCURRENCY, label = 'tests' } = {}) {
     this.createFolder();
     let exitCode = 1;
     let summary = null;
     try {
-      const results = path.join(this.folder, 'test-results.jsonl');
+      const results = path.join(this.folder, RESULTS_FILE);
       this.out.write(`Running ${files.length} test file(s) (${label}) in temp folder ${this.folder}, removed when the run finishes.\n`);
       const result = this.spawn(process.execPath, [
         '--test', `--test-concurrency=${concurrency}`,
@@ -161,9 +174,15 @@ class TestRun {
       if (exitCode === 0 && summary.missing.length) exitCode = 1;
     } finally {
       if (!this.removeFolder() && exitCode === 0) exitCode = 1;
+      if (this.leftBehind.length && exitCode === 0) exitCode = 1;
     }
     return { exitCode, summary };
   }
+}
+
+function isMarker(file) {
+  try { return fs.lstatSync(file).isFile(); }
+  catch { return false; }
 }
 
 function readResults(file) {
@@ -336,4 +355,4 @@ function main(argv = process.argv.slice(2), { root = shards.ROOT, out = process.
 
 if (require.main === module) process.exitCode = main();
 
-module.exports = Object.freeze({ TestRun, main, parseArgs, summarize, tempRootError });
+module.exports = Object.freeze({ RUN_MARKER, TestRun, main, parseArgs, summarize, tempRootError });

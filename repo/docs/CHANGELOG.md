@@ -1,5 +1,14 @@
 # Toolkit Changelog
 
+## 3.12.2
+
+### Workspace and temp hygiene
+
+- **Test runs leave nothing behind:** every test file that left temp folders behind now removes them after its tests, also when they fail, and the test runner fails a run whose tests left anything in its temp folder, naming each item. Before, the runner quietly removed dozens of leftovers per CI shard, and a test file run on its own with plain `node --test` wrote them into your real temp folder.
+- **The stale sweep deletes only its own folders:** each run folder now carries a marker file, and the next run removes a folder an interrupted run left only when it carries that marker and is more than a day old. A `run-*` folder without the marker, such as one you or another tool made in the same temp root, is reported and left alone, and a link is never followed.
+- **One place for worktrees:** worktrees an agent makes go in the repository's ignored `.tmp/worktrees/<lane>`; worktrees Claude Code or Codex make stay where the host puts them. Once a lane's PR merges or closes, the session removes that lane's worktree with `git worktree remove` and `git worktree prune` and its local branch with `git branch -d`, never `--force` or `-D`, and reports anything dirty, locked or unmerged instead. Gate sessions use the primary checkout unless they need their own worktree, which then starts at the exact admitted commit with its HEAD recorded.
+- **Leftover report:** `node repo/scripts/workspace-residue-report.cjs [--repo <checkout>] [--base <ref>] [--json]` lists a checkout's extra worktrees and local branches as ready to remove or look first (uncommitted changes, locked, folder gone, not merged, host-made), with the commands to run. It only reads git state, never file contents, and changes nothing.
+
 ## 3.12.0 (server operations)
 
 ### External operation preflight

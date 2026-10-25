@@ -27,10 +27,19 @@ const compareCredentialsScript = path.join(scriptDir, 'compare-n8n-workflow-cred
 const sourceLockAuditScript = path.join(repoRoot, 'repo', 'scripts', 'audit-project-source-locks.cjs');
 const sanitizerScript = path.join(sanitizerDir, 'prepare-n8n-template.js');
 const { stripTemplate, findSuspiciousValues } = require(sanitizerScript);
+
+// Every temp folder a test makes is removed after the file's tests, also when they fail.
+const tempFolders = [];
+test.after(() => { for (const dir of tempFolders) fs.rmSync(dir, { recursive: true, force: true }); });
+function tempFolder(prefix) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  tempFolders.push(dir);
+  return dir;
+}
 const sanitizerPs1 = path.join(sanitizerDir, 'sanitise-n8n-template.ps1');
 
 function tempDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-helper-test-'));
+  return tempFolder('n8n-helper-test-');
 }
 
 function writeJson(filePath, value) {
