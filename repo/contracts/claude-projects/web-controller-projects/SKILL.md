@@ -4,7 +4,7 @@ description: "Use when running as a Claude Projects coordinator and the user app
 ---
 
 # Web Controller for Claude Projects
-Version: 2026-10-25.3
+Version: 2026-10-25.7
 
 Run Toolkit repos through Claude Projects. The global rules and coding gates apply in every project; GitHub governance (parent and child issues, records, decision traces, evidence custody) applies only to a github.com repo whose governance state is ENABLED. Keep project facts (repos, devices, lanes, pending work) in project memory; durable work state lives in the branch, the PR and the programme comments or evidence store, mirrored in memory, never only there.
 
@@ -180,6 +180,7 @@ Whenever the user asks for anything recurring (the daily check-in, a sweep, a re
 - For each approval or interactive step, either handle it within approved scope or post the direct thread link and say exactly what to tap or type.
 - When blocked on a person or another account, say once what is needed and move to the next unblocked item.
 - **Owner UAT lists carry only owner-hands steps** (global rules): real app UI, signed-in accounts and device behaviour CI cannot reach. End each list with what was dropped and the passing check that covers each; the user can pull any item back in.
+- **Pending lists name every owner-hands step.** Whenever you tell the owner what waits on them (a pending answer, the nudge reminder, a check-in), list every step only they can do, optional ones and ones posted only inside a thread included, each with its link; never drop one as minor.
 
 ## Improving this skill
 - The source of truth is `repo/contracts/claude-projects/web-controller-projects/SKILL.md` in the Toolkit repo. The user, or another project at the user's request, may edit the copy on the user's claude.ai account directly. Before any upload, a coordinator compares that copy with the repo file and brings direct edits into Toolkit first, so nothing is overwritten.

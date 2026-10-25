@@ -347,8 +347,58 @@ test('P-17: the reader is default-deny: YAML outside its plain subset is unverif
       assert.match(result.P4.details.join('\n'), /other than printable ASCII/, `${JSON.stringify(space)} ${form}`);
     }
   }
-  // Non-ASCII text on a full-line comment is fine.
-  assert.equal(verdicts(`# Café — checks\n${aggregate()}`).P4.status, 'ok');
+  // Comments are held to printable ASCII too: YAML 1.1 parsers end a comment at NEL, LS or PS, so
+  // what follows would be read as a key (also on a comment-like line inside a block scalar).
+  assert.equal(verdicts(`# plain comment\n${aggregate()}`).P4.status, 'ok', 'ASCII comment');
+  for (const ch of ['\u0085', '\u2028', '\u2029', '\u0001', '\u007f', '\u00e9']) {
+    const forms = {
+      comment: aggregate([`        # note${ch}        continue-on-error: true`]),
+      'top comment': `# note${ch}x: y\n${aggregate()}`,
+      'comment-like run line': aggregate().replace('        run: node repo/scripts/run-tests.cjs --verify-ci s', `        run: |\n          # note${ch}        continue-on-error: true\n          node repo/scripts/run-tests.cjs --verify-ci s`),
+    };
+    for (const [form, text] of Object.entries(forms)) {
+      const result = verdicts(text);
+      assert.equal(result.P4.status, 'unverified', `${JSON.stringify(ch)} ${form}`);
+      assert.match(result.P4.details.join('\n'), /other than printable ASCII/, `${JSON.stringify(ch)} ${form}`);
+    }
+  }
+  // Every YAML null spelling of a job name is no name, never a literal one; a quoted "null" is a name.
+  const named = value => ['on: [pull_request]', 'jobs:', '  fast:', `    name: ${value}`, '    runs-on: ubuntu-latest', ''].join('\n');
+  const plainProducer = ['on: [pull_request]', 'jobs:', '  validate:', '    runs-on: ubuntu-latest', ''].join('\n');
+  const pair = (first, second) => protection.producerVerdict(['validate'], [{ file: 'a.yml', workflow: protection.readWorkflow(first) }, { file: 'b.yml', workflow: protection.readWorkflow(second) }], 'main');
+  for (const spelling of ['~', 'null', 'Null', 'NULL']) assert.equal(pair(plainProducer, named(spelling)).P3.status, 'unverified', `name: ${spelling}`);
+  assert.equal(pair(plainProducer, named('"null"')).P3.status, 'ok', 'quoted "null" is a real name');
+  // Shapes GitHub itself rejects are outside the subset.
+  for (const [name, text] of Object.entries({
+    'block first line deeper than a later line': aggregate().replace('        run: node repo/scripts/run-tests.cjs --verify-ci s', '        run: |\n            node a.cjs\n          node repo/scripts/run-tests.cjs --verify-ci s'),
+    'indented document then a column-0 key': `  on: [pull_request]\n  jobs:\n    validate:\n      runs-on: ubuntu-latest\nname: x\n`,
+    'lone ~ in a flow list': ['on: [pull_request]', 'jobs:', '  validate:', '    needs: [~]', '    runs-on: ubuntu-latest', ''].join('\n'),
+    'lone - in a flow list': ['on: [pull_request]', 'jobs:', '  validate:', '    needs: [-]', '    runs-on: ubuntu-latest', ''].join('\n'),
+  })) {
+    const result = verdicts(text);
+    assert.equal(result.P4.status, 'unverified', name);
+    assert.match(result.P4.details.join('\n'), /outside the YAML subset/, name);
+  }
+  // A plain or quoted `on` is the trigger; a `true` key, plain or quoted, is not.
+  for (const key of ['on', '"on"', "'on'"]) assert.equal(verdicts(aggregate().replace(/^on:/, `${key}:`)).P4.status, 'ok', `${key} is the trigger`);
+  for (const key of ['true', '"true"']) assert.notEqual(verdicts(aggregate().replace(/^on:/, `${key}:`)).P4.status, 'ok', `${key} is not on`);
+  // A leading `---` before an indented document hides nothing: a second producer there is seen.
+  const indentedDoc = text => text.replace(/^(?=.)/gm, '  ');
+  assert.equal(verdicts(`---\n${indentedDoc(aggregate())}`).P4.status, 'ok', '--- then an indented document');
+  assert.equal(pair(plainProducer, `---\n${indentedDoc(plainProducer)}`).P3.status, 'drift', '--- then an indented second producer');
+  // A YAML null in a flow list is not a job name; a whitespace-only line deeper than a block's first
+  // content line sets the block's indent for some parsers, so it is outside the subset.
+  for (const [name, text] of Object.entries({
+    'null in a flow list': ['on: [pull_request]', 'jobs:', '  validate:', '    needs: [tests, null]', '    runs-on: ubuntu-latest', ''].join('\n'),
+    'Null in a flow list': ['on: [pull_request]', 'jobs:', '  validate:', '    needs: [Null]', '    runs-on: ubuntu-latest', ''].join('\n'),
+    'NULL in a flow list': ['on: [pull_request]', 'jobs:', '  validate:', '    needs: [NULL]', '    runs-on: ubuntu-latest', ''].join('\n'),
+    'deep blank line opening a block': aggregate().replace('        run: node repo/scripts/run-tests.cjs --verify-ci s', '        run: |\n              \n          node repo/scripts/run-tests.cjs --verify-ci s'),
+  })) {
+    const result = verdicts(text);
+    assert.equal(result.P4.status, 'unverified', name);
+    assert.match(result.P4.details.join('\n'), /outside the YAML subset/, name);
+  }
+  assert.equal(verdicts(aggregate().replace('        run: node repo/scripts/run-tests.cjs --verify-ci s', '        run: |\n\n          node repo/scripts/run-tests.cjs --verify-ci s')).P4.status, 'ok', 'an empty line opening a block');
   // A byte order mark is removed before both checking and reading: a sole workflow reads in full,
   // and a second workflow that also produces the check is seen (two producers: drift).
   const bom = '﻿';
@@ -378,6 +428,15 @@ test('P-17: the reader is default-deny: YAML outside its plain subset is unverif
   assert.equal(verdicts(['on:', '  pull_request:', '    types: [labeled]', 'jobs:', '  validate:', '    runs-on: ubuntu-latest', ''].join('\n')).P4.status, 'unverified', 'types');
   // An indentless list of events is read, so a pull request trigger there is seen.
   assert.equal(verdicts(['on:', '- pull_request', 'jobs:', '  validate:', '    runs-on: ubuntu-latest', ''].join('\n')).P4.status, 'ok', 'indentless on');
+  // An indentless steps list (GitHub's starter style) is read, so its steps are checked like any others.
+  const indentless = text => text.replace(/\n {6}- name: Verify\n((?: {8}.*\n)*)/, (_, rest) => `\n    - name: Verify\n${rest.replace(/^ {2}/gm, '')}`);
+  assert.match(indentless(aggregate()), /\n    steps:\n    - name: Verify\n      env:/, 'indentless fixture');
+  assert.equal(verdicts(indentless(aggregate())).P4.status, 'ok', 'indentless steps');
+  assert.equal(protection.readWorkflow(indentless(aggregate())).jobs.find(job => job.key === 'validate').steps.length, 1, 'indentless steps are read');
+  assert.equal(verdicts(indentless(aggregate(['        continue-on-error: true']))).P4.status, 'unverified', 'indentless step continue-on-error');
+  assert.equal(verdicts(indentless(aggregate(['        shell: python']))).P4.status, 'unverified', 'indentless step shell');
+  const extraStep = indentless(aggregate()).replace('    - name: Verify', '    - run: echo NODE_OPTIONS=x >> $GITHUB_ENV\n    - name: Verify');
+  assert.equal(verdicts(extraStep).P4.status, 'unverified', 'indentless GITHUB_ENV step');
   // continue-on-error is off only as the plain false; a quoted or block false is a string, so set.
   assert.equal(verdicts(aggregate(['        continue-on-error: false'])).P4.status, 'ok', 'plain false');
   for (const lines of [["        continue-on-error: 'false'"], ['        continue-on-error: "false"'], ['        continue-on-error: |', '          false'], ['        continue-on-error: >-', '          false']]) {
