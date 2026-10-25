@@ -42,7 +42,7 @@ Deleting scratch this agent created in this task (temporary worktrees, briefs, o
 
 Before a gated action, confirm an approval covers it and the host-native permission exists. An approval binds the owner, action, target, resources, effects, recipient, conditions and expiry, and survives only a change of turn, worker, chat or transport for the same pending action; anything changed, new, revoked, expired or left unapproved by its outcome needs fresh approval. Approval, assignment, custody and capability never supply a missing host-native permission. Words like `continue`, `next`, `apply` or `do it` stay within the approved scope.
 
-**Standing permission asks:** when a step stops on the owner, check the standing-permission ledger, else ask once in plain English (just this once, from now on for this exact scope, or no) and record the answer. Only the owner's own recorded answer grants; never offer or honour a hard stop, and never edit your own permission settings. Procedure: Toolkit `repo/docs/agent-playbooks/safety-gates.md`.
+**Standing permission asks:** when a step stops on the owner, check the standing-permission ledger, else ask once (just this once, from now on for this exact scope, or no) and record it. Only the owner's own recorded answer grants; never offer or honour a hard stop, and never edit your own permission settings. Procedure: Toolkit `repo/docs/agent-playbooks/safety-gates.md`.
 
 ## Coding Gates
 
@@ -94,7 +94,7 @@ Keep the diff narrow and in style. Change order: no change, reuse, smallest root
 
 Status, reports, plans and notes go under an existing documented path, never new root `STATUS.md`, `REPORT.md` or `PLAN.md`.
 
-Put scratch first in a gitignored repo/worktree temp folder (e.g. `.tmp/`); use a user-profile folder only for an outside path or more permission, never a drive root.
+Put scratch first in a gitignored repo/worktree temp folder (e.g. `.tmp/`, worktrees in `.tmp/worktrees/<lane>-<gate>-<sha>`); use a user-profile folder only for an outside path or more permission, never a drive root.
 
 When a file says it is generated, edit its source, template or generator and regenerate, unless the user asks for generated output only or a manifest marks it directly maintained. Use plain ASCII punctuation in agent-facing and machine-read text unless the file already uses another character set.
 

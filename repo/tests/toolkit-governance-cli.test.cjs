@@ -48,7 +48,21 @@ function sink() {
 
 const PROTECTED = () => ({ ok: true, rulesets: [{ enforcement: 'active', target: 'branch', conditions: { ref_name: { include: ['~ALL'], exclude: [] } }, rules: [{ type: 'non_fast_forward' }], bypass_actors: [] }] });
 
-async function run(ctx, cwd, argv, { answer = 'yes', interactive = true, rulesetReader = PROTECTED } = {}) {
+// A default branch that requires the binding's one check, pinned, with merge commits only.
+const BRANCH_PROTECTED = () => ({
+  ok: true, default_branch: 'main', classic: null, toolkit_ruleset: null,
+  repository: { allow_merge_commit: true, allow_squash_merge: true, allow_rebase_merge: true },
+  rules: [
+    { type: 'pull_request', ruleset_id: 1, parameters: { allowed_merge_methods: ['merge'] } },
+    { type: 'required_status_checks', ruleset_id: 1, parameters: { required_status_checks: [{ context: 'validate', integration_id: 15368 }] } },
+  ],
+});
+const WORKFLOW = [
+  'on:', '  pull_request:', 'jobs:', '  tests:', '    runs-on: ubuntu-latest', '  validate:', '    needs: [tests]', '    if: ${{ always() }}',
+  '    runs-on: ubuntu-latest', '    steps:', '      - env:', '          TEST_LEGS: ${{ toJSON(needs) }}', '        run: node repo/scripts/run-tests.cjs --verify-ci s', '',
+].join('\n');
+
+async function run(ctx, cwd, argv, { answer = 'yes', interactive = true, rulesetReader = PROTECTED, protectionReader = BRANCH_PROTECTED } = {}) {
   const stdout = sink();
   const stderr = sink();
   const asked = [];
@@ -57,6 +71,7 @@ async function run(ctx, cwd, argv, { answer = 'yes', interactive = true, ruleset
     ask: async (question) => { asked.push(question); return answer; },
     registryOptions: { registryPath: ctx.registryPath, testOnly: true },
     rulesetReader,
+    protectionReader,
   });
   const code = await cli.main(argv);
   return { code, stdout: stdout.text(), stderr: stderr.text(), asked };
@@ -77,6 +92,8 @@ function writeGoverned(repo, { blockText = expectedBlockText(), binding = true, 
       store: { kind: 'github', repository: 'example-owner/example-store', branch: 'main', path: 'state/' },
       required_checks: ['validate'],
     }));
+    fs.mkdirSync(path.join(repo, '.github', 'workflows'), { recursive: true });
+    fs.writeFileSync(path.join(repo, '.github', 'workflows', 'ci.yml'), WORKFLOW);
   }
 }
 
@@ -248,6 +265,19 @@ test('K-01: check exit codes and read-only behaviour', async (t) => {
   assert.equal(called, false);
   assert.equal(JSON.parse(offline.stdout).no_force_push_ruleset.status, 'not-checked');
   assert.equal((await run(ctx, conformant, ['status', '--offline'])).code, 2, '--offline belongs to check only');
+  assert.equal(JSON.parse(offline.stdout).default_branch_protection.checks.P5.status, 'not-checked');
+  // The first line never says plain "conformant" while items are unverified.
+  assert.match((await run(ctx, conformant, ['check', '--offline'])).stdout, /^Conformance: conformant \(\d+ items? unverified\)$/m);
+
+  // Default-branch protection drift is drift; GitHub unreadable is unverified, never conformant.
+  const squash = () => { const read = BRANCH_PROTECTED(); read.rules[0].parameters.allowed_merge_methods = ['merge', 'squash']; return read; };
+  const loose = await run(ctx, conformant, ['check', '--json'], { protectionReader: squash });
+  assert.equal(loose.code, 1);
+  assert.deepEqual(JSON.parse(loose.stdout).findings.map(entry => entry.id), ['PROTECTION_MERGE_METHODS']);
+  const unread = JSON.parse((await run(ctx, conformant, ['check', '--json'], { protectionReader: () => ({ ok: false, reason: 'gh-unavailable' }) })).stdout);
+  assert.equal(unread.default_branch_protection.status, 'unverified');
+  assert.deepEqual(unread.findings.map(entry => entry.id), ['PROTECTION_CHECKS_MISMATCH_UNVERIFIED', 'PROTECTION_CHECK_UNPINNED_UNVERIFIED', 'PROTECTION_MERGE_METHODS_UNVERIFIED']);
+  assert.match((await run(ctx, conformant, ['check'])).stdout, /Default-branch protection: conformant/);
 
   // Enabled without the binding is incomplete; disabled with a block reports it ignored.
   await run(ctx, incomplete, ['enable']);
@@ -258,6 +288,13 @@ test('K-01: check exit codes and read-only behaviour', async (t) => {
   const ignored = await run(ctx, stale, ['check', '--json']);
   assert.equal(ignored.code, 0);
   assert.deepEqual(JSON.parse(ignored.stdout).findings.map(entry => entry.id), ['GOVERNED_BLOCK_IGNORED']);
+  // DISABLED and UNDECIDED repositories never ask GitHub about default-branch protection.
+  for (const repo of [stale, unasked]) {
+    let asked = false;
+    const result = JSON.parse((await run(ctx, repo, ['check', '--json'], { protectionReader: () => { asked = true; return BRANCH_PROTECTED(); } })).stdout);
+    assert.equal(asked, false, repo);
+    assert.equal(result.default_branch_protection, null, repo);
+  }
 });
 
 test('I-12: enforcement is reported as shipped, never as active, and Codex names its trust step', () => {
@@ -314,7 +351,7 @@ test('C-02: governed-only skills are offered only in a complete ENABLED reposito
 });
 
 test('S-10 (new modules): only the state module reads the decision file, AGENTS.md and the binding', () => {
-  for (const file of ['toolkit-governance.cjs', 'toolkit-governance-conformance.cjs', 'toolkit-governance-catalogue.cjs', 'toolkit-governance-ruleset.cjs', 'toolkit-governance-migration.cjs']) {
+  for (const file of ['toolkit-governance.cjs', 'toolkit-governance-conformance.cjs', 'toolkit-governance-catalogue.cjs', 'toolkit-governance-ruleset.cjs', 'toolkit-governance-protection.cjs', 'toolkit-governance-migration.cjs']) {
     const text = fs.readFileSync(path.join(scripts, file), 'utf8');
     assert.equal(/repository-governance\.v1\.json|['"]AGENTS\.md['"]|toolkit-programme\.json['"]|parseRegistryBytes/.test(text.replace(/^\s*\/\/.*$/gm, '')), false, file);
   }

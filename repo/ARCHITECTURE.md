@@ -39,6 +39,7 @@ Last reviewed against `main` `9b7ffff3c30078c2290c809d20bc7c49e3f96e8d`.
 | Claude helper agents | `repo/scripts/toolkit-claude-helper-agents.cjs`, `repo/scripts/toolkit-claude-helper-spec.cjs`, `repo/scripts/toolkit-claude-task-session.cjs` |
 | Version bump | `repo/scripts/bump-version.cjs` |
 | Risk tier of a change | `repo/scripts/toolkit-risk-tier.cjs`, this repository's list `.github/toolkit-risk-tiers.json` |
+| Leftover worktrees and merged branches (read-only list) | `repo/scripts/workspace-residue-report.cjs` |
 | Instruction sync | `repo/scripts/sync-agent-instruction-shims.cjs`, `repo/scripts/sync-repo-doc-contract.cjs` |
 | Full validation list | `repo/scripts/run-validation-gate.cjs` |
 | Plain-references check | `repo/scripts/check-plain-references.cjs` (run by `validate-toolkit.cjs`), baseline `repo/contracts/plain-references/baseline.json` |
@@ -48,7 +49,7 @@ Last reviewed against `main` `9b7ffff3c30078c2290c809d20bc7c49e3f96e8d`.
 | Decision-trace audit | `skills/github-program-reconciler/scripts/decision-trace-audit.cjs` |
 | Comment tags and G0 decision history | `skills/github-program-reconciler/scripts/decision-tags.cjs`, `skills/github-program-reconciler/scripts/decision-history.cjs` |
 | Personal-data guard and installer | `skills/secure-ci-cd/scripts/personal-data-guard.cjs`, `skills/secure-ci-cd/scripts/install-personal-data-guard.cjs` |
-| Governance state (`toolkit-governance.cjs`) | `repo/scripts/toolkit-governance-state.cjs` (the one state function), `repo/scripts/toolkit-governance.cjs` (CLI), `repo/scripts/toolkit-governance-conformance.cjs`, `repo/scripts/toolkit-governance-migration.cjs`, `repo/scripts/toolkit-governance-ruleset.cjs`, `repo/scripts/toolkit-governance-catalogue.cjs` |
+| Governance state (`toolkit-governance.cjs`) | `repo/scripts/toolkit-governance-state.cjs` (the one state function), `repo/scripts/toolkit-governance.cjs` (CLI), `repo/scripts/toolkit-governance-conformance.cjs`, `repo/scripts/toolkit-governance-migration.cjs`, `repo/scripts/toolkit-governance-ruleset.cjs`, `repo/scripts/toolkit-governance-protection.cjs` (default-branch protection), `repo/scripts/toolkit-governance-catalogue.cjs` |
 | Programme state and reconcile pass | `skills/github-program-reconciler/scripts/programme.cjs`, `skills/github-program-reconciler/scripts/programme-state.cjs` |
 | Executor checkpoint journals and turn-end hook | `skills/github-program-reconciler/scripts/programme-checkpoint.cjs`, `repo/scripts/toolkit-programme-checkpoint-hook.cjs`, `repo/scripts/toolkit-programme-checkpoint-hook.ps1` |
 

@@ -27,7 +27,7 @@
   "native_plugins": {
     "codex": {
       "name": "ai-agent-toolkit",
-      "version": "3.12.2",
+      "version": "3.13.8",
       "required_files": [
         {
           "path": ".codex-plugin/plugin.json",
@@ -49,7 +49,7 @@
     },
     "claude": {
       "name": "ai-agent-toolkit",
-      "version": "3.12.2",
+      "version": "3.13.8",
       "required_files": [
         {
           "path": ".claude-plugin/plugin.json",
