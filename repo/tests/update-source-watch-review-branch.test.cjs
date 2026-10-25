@@ -40,7 +40,13 @@ test('branch absent and stable is created from trusted main with a plain push', 
 function assertSinglePlainPush(wrapper) {
   const pushes = wrapper.pushes();
   assert.equal(pushes.length, 1, `exactly one push: ${pushes.join(' | ')}`);
-  assert.match(pushes[0], new RegExp(`^push origin [0-9a-f]{40}:refs/heads/${branchName.replace(/\//g, '\\/')}$`));
+  const [verb, remote, refspec, ...rest] = pushes[0].split(' ');
+  assert.deepEqual([verb, remote, rest.length], ['push', 'origin', 0], pushes[0]);
+  const parts = refspec.split(':');
+  assert.equal(parts.length, 2, pushes[0]);
+  const [source, destination] = parts;
+  assert.match(source, /^[0-9a-f]{40}$/, pushes[0]);
+  assert.equal(destination, `refs/heads/${branchName}`, pushes[0]);
 }
 
 test('branch absent with a competing unrelated creation is rejected without retry', (t) => {
