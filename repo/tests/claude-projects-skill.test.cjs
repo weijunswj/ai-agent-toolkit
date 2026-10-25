@@ -218,7 +218,7 @@ test('the device programme sweep needs both GitHub governance ENABLED and a name
   assert.match(at('reference/setup.md'), /With governance in any other state, or no device, do not create it or suggest it/);
   assert.match(at('reference/recurring-tasks.md'), /Only for a repository whose GitHub governance is ENABLED, in a project whose memory names a device \(guided setup step 3\); in any other case, never create or suggest it\./);
   assert.match(at('SKILL.md'), /only when ENABLED and a device is named\)/);
-  assert.match(at('tasks/hourly-nudge.md'), /when project memory names a device, "; no device programme sweep task armed", and with no device named "; no device named, so cloud writes wait for the next laptop session"/);
+  assert.match(at('tasks/hourly-nudge.md'), /when project memory names a device, "; no device programme sweep task armed", and with no device named "; no device named, so cloud writes wait for the next session on a computer with gh signed in"/);
   const sweep = JSON.parse(at('setup-inventory.json')).rows.find(row => row.id === 'programme-sweep');
   assert.match(sweep.artefact, /GitHub governance ENABLED and a device named/);
 });
