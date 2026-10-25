@@ -33,7 +33,7 @@
 // never held.
 //
 // Reads local files only: no network, no git or gh subprocess, no writes. Node built-ins plus the
-// existing registry, managed-block, remote-identity and programme-binding modules.
+// existing registry (with its remote-identity check), managed-block and programme-binding modules.
 
 const crypto = require('node:crypto');
 const fs = require('node:fs');
@@ -42,7 +42,7 @@ const path = require('node:path');
 
 const registry = require('./toolkit-capability-registry.cjs');
 const managedBlock = require('./toolkit-managed-block.cjs');
-const { validateRemoteIdentity } = require('./toolkit-control-plane/control-plane-kernel.cjs');
+const { validateRemoteIdentity } = registry;
 const programmeState = require('../../skills/github-program-reconciler/scripts/programme-state.cjs');
 
 const SCHEMA = 'toolkit.governance-state.v1';

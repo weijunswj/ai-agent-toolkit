@@ -118,9 +118,7 @@ const CORE_CACHE_FIXTURE_PATHS = Object.freeze([
   'repo/ARCHITECTURE.md',
 ]);
 const CORE_CACHE_FIXTURE_DIRS = Object.freeze([
-  'repo/contracts/control-plane-kernel',
   'repo/contracts/repository-capability-registry',
-  'repo/scripts/toolkit-control-plane',
   'repo/contracts/controller-kernel',
 ]);
 
