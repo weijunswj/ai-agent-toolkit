@@ -1,6 +1,6 @@
 ---
 name: secure-ci-cd
-description: Use when planning security-first CI/CD setup, GitHub Actions workflows, pipelines, pipeline hardening, required checks, security checks, deployment automation, build/test automation, automated validation, secret scanning, branch protection, release automation, installer prompt/status templates, or safe rollout planning.
+description: Use when planning security-first CI/CD setup, GitHub Actions workflows, pipelines, pipeline hardening, required checks, security checks, deployment automation, build/test automation, automated validation, secret scanning, branch protection, release automation, installer prompt/status templates, safe rollout planning, or a CI check-up (is CI still up to date with the code).
 ---
 
 
@@ -66,6 +66,11 @@ Before committing, pushing, creating a pull request, merging, or deploying, paus
 - [`scripts/personal-data-guard.cjs`](scripts/personal-data-guard.cjs) is a zero-dependency scanner for email addresses, phone numbers and WhatsApp number links in file content (including Word, Excel, PowerPoint and PDF text), file names, commit and tag messages, branch names and pull request text. It prints the place, class and rule only, never the value, and any error that stops a complete scan fails.
 - [`scripts/install-personal-data-guard.cjs`](scripts/install-personal-data-guard.cjs) installs it into a repository on the owner's opt-in: a copy under `.github/scripts/`, the config `.github/personal-data-guard.json` (the owner chooses whether author and committer addresses are scanned), git hooks in the folder git really uses, and with `--workflow` the CI job from [`templates/github-actions/personal-data-guard.yml`](templates/github-actions/personal-data-guard.yml). `--check` reports drift.
 - Hooks can be skipped with `--no-verify`; the CI job is the backstop. Follow `docs/agent-playbooks/privacy-safe-checks.md` in the target repository (the repository-agent-rules playbook) for fixtures, allow markers and the pushed-by-mistake steps.
+
+## CI Check-Up
+
+- [`scripts/ci-checkup.cjs`](scripts/ci-checkup.cjs) is a read-only, zero-dependency check that compares what a repository contains (packages, test files, scripts, Dockerfiles) with what its CI runs, plus job times, workflow hygiene and the CI status document. It lists `GAP` and `CHECK` items; the agent judges each and fixes the real ones. It never edits anything or fails a build.
+- Follow [`templates/cicd/ci-checkup.md`](templates/cicd/ci-checkup.md): run it at each release plan in a governed repository, while planning a change that touches CI or adds a package, language or test folder (with `--base`), in final readiness audits, and on request.
 
 ## AI-Facing Surfaces
 

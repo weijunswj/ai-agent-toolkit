@@ -27,6 +27,10 @@ gh api user --jq .login
 
 If the active account is not the intended user, stop and report it. If that route is unavailable or not permitted, hold the affected operation. Authentication and escalation do not grant task authority or automatic approval; preserve current permissions, explicit denials and mandatory confirmations.
 
+## CI Check-Up
+
+When a change touches CI or adds a package, language or test folder, run the `secure-ci-cd` CI check-up (`skills/secure-ci-cd/scripts/ci-checkup.cjs --base <ref>`) and fix the real gaps it lists in the same PR.
+
 ## CI Honesty
 
 Do not claim CI passed unless checked. If checks are pending, failed, or inaccessible, say so and provide the exact command or user action needed.

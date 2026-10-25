@@ -4,7 +4,7 @@ The gate playbook: G0, G1 and G2 sessions, reviewers and the controllers that la
 
 ## Gate order
 
-- **G0 Discovery** runs for every new task, repository or environment; only LIGHT edits and fixes inside an already-discovered task skip it. Walk the real happy path, find out what the stack really is (an app built in Flutter, for example, breaks browser automation such as Playwright) and test assumptions before planning. It can be short when the ground is already known. It returns the G0 plan: findings, chosen approach, acceptance, risks, and what was tried and failed.
+- **G0 Discovery** runs for every new task, repository or environment; only LIGHT edits and fixes inside an already-discovered task skip it. Walk the real happy path, find out what the stack really is (an app built in Flutter, for example, breaks browser automation such as Playwright) and test assumptions before planning. It can be short when the ground is already known. It returns the G0 plan: findings, chosen approach, acceptance, risks, and what was tried and failed. A release plan in a repository with GitHub governance on also runs the `secure-ci-cd` CI check-up and lists the real gaps it finds.
 - **G1 Builder** starts in a fresh session, with the G0 plan passed in its brief as the handoff. G0 and G1 share the same strong lead route. One builder owns the whole approved outcome across corrections, checkpoints and fresh sessions; in-scope fixes need no new admission. G1 includes UAT.
 - **Review** follows the tier: full G2 for RISKY, one independent review for NORMAL, the builder's own diff read for LIGHT. Only LIGHT edits and fixes inside an already-discovered task skip G0; only LIGHT edits skip G2.
 - Gate names `G0`, `G1` and `G2` are fine where the reader needs them.
