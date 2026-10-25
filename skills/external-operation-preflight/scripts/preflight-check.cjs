@@ -29,9 +29,16 @@ const AUTO_TRIGGERS = Object.freeze(['AUTO_ON_MERGE', 'AUTO_ON_BRANCH_UPDATE']);
 const DOWNSTREAM_FLAGS = Object.freeze(['deployment_approved', 'pause_read_back', 'evidence_freeze', 'freeze_end_approved']);
 const ACCESS = Object.freeze(['read', 'write']);
 const EFFECTS = Object.freeze(['allow', 'deny']);
-// Environments whose resources are always temporary: they need cleanup, whatever the plan says.
-const TEMPORARY_ENVIRONMENTS = Object.freeze(['test', 'preview', 'restore']);
-const PRODUCTION_ENVIRONMENTS = Object.freeze(['production', 'prod', 'live']);
+// Environment names are split into words (prod-eu is prod and eu). A name with any of these words is
+// always temporary: it needs cleanup, whatever the plan says.
+const TEMPORARY_WORDS = Object.freeze(['test', 'testing', 'preview', 'restore', 'drill']);
+// A name is non-production only when it has one of these words and no production word. Every other
+// name, including an unknown one such as main or prd, counts as production.
+const NON_PRODUCTION_WORDS = Object.freeze([
+  'alpha', 'beta', 'staging', 'stage', 'dev', 'development', 'test', 'testing', 'qa', 'uat', 'sandbox',
+  'preview', 'restore', 'drill', 'local'
+]);
+const PRODUCTION_WORDS = Object.freeze(['production', 'prod', 'prd', 'live']);
 // Production actions that cannot change stored data. Every other production action, including a
 // deploy or merge that may run migrations, needs backup evidence.
 const NO_DATA_ACTIONS = Object.freeze(['restart', 'pause_trigger', 'resume_trigger']);
@@ -140,8 +147,18 @@ function hold(reasons, code, detail) {
   reasons.push({ code, detail });
 }
 
+function environmentWords(environment) {
+  return envName(environment).split(/[^a-z0-9]+/).filter(Boolean);
+}
+
 function isProduction(environment) {
-  return PRODUCTION_ENVIRONMENTS.includes(envName(environment));
+  const words = environmentWords(environment);
+  if (words.some((word) => PRODUCTION_WORDS.includes(word))) return true;
+  return !words.some((word) => NON_PRODUCTION_WORDS.includes(word));
+}
+
+function isTemporaryEnvironment(environment) {
+  return environmentWords(environment).some((word) => TEMPORARY_WORDS.includes(word));
 }
 
 function validateShape(plan) {
@@ -216,7 +233,8 @@ function validateShape(plan) {
     }
   });
   (plan.exceptions || []).forEach((exception, index) => {
-    if (!isObject(exception) || !Array.isArray(exception.resources) || !Array.isArray(exception.environments)) {
+    const strings = (list) => Array.isArray(list) && list.length > 0 && list.every((item) => typeof item === 'string' && item.trim());
+    if (!isObject(exception) || !strings(exception.resources) || !strings(exception.environments)) {
       problems.push(`exception ${index + 1} needs resources and environments lists, a reason and an end date`);
     }
   });
@@ -321,7 +339,7 @@ function checkTemporary(plan, reasons, now) {
   for (const item of [...plan.targets, ...plan.resources]) {
     const environment = envName(item.provider_environment);
     if (item.temporary !== true) {
-      if (TEMPORARY_ENVIRONMENTS.includes(environment)) {
+      if (isTemporaryEnvironment(environment)) {
         hold(reasons, REASONS.TEMPORARY_RESOURCE_INCOMPLETE,
           `${item.id} is in the ${environment} environment, so it must be marked temporary with cleanup details`);
       }
@@ -394,12 +412,15 @@ function checkDownstream(plan, reasons, result) {
 function checkRecovery(plan, reasons, result) {
   const op = plan.operation;
   const coupledDeploy = AUTO_TRIGGERS.includes(plan.downstream.trigger) && plan.downstream.deployment_approved;
-  const touchesProduction = isProduction(op.environment) || plan.targets.some((target) => isProduction(target.environment));
+  // Any production target or resource in the plan counts, including one reached through an owner exception.
+  const touchesProduction = isProduction(op.environment) ||
+    plan.targets.some((target) => isProduction(target.environment) || isProduction(target.provider_environment)) ||
+    plan.resources.some((resource) => isProduction(resource.provider_environment) || isProduction(resource.name_environment));
   if (!touchesProduction) return;
   const rollback = op.rollback;
-  if (!rollback || !text(rollback.plan) || (rollback.cross_environment !== undefined && rollback.cross_environment !== false)) {
+  if (!rollback || !text(rollback.plan) || envName(rollback.environment) !== envName(op.environment)) {
     hold(reasons, REASONS.ROLLBACK_EVIDENCE_MISSING,
-      'a production change needs operation.rollback.plan (how to go back, inside the same environment)');
+      'a change that touches production needs operation.rollback with a plan and an environment equal to the operation\'s');
   }
   const actions = requestedActions(plan).map((request) => envName(request.action));
   const needsBackup = coupledDeploy || actions.some((action) => !NO_DATA_ACTIONS.includes(action));

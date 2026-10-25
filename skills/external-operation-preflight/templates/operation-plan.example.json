@@ -6,7 +6,8 @@
     "targets": ["app-alpha"],
     "summary": "Merge the reviewed branch into the alpha deploy branch",
     "rollback": {
-      "plan": "Redeploy the previous commit to alpha and read back its revision"
+      "plan": "Redeploy the previous commit to alpha and read back its revision",
+      "environment": "alpha"
     }
   },
   "targets": [

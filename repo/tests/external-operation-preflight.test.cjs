@@ -27,6 +27,7 @@ function resource(id, nameEnvironment, providerEnvironment = nameEnvironment, ex
 }
 
 const ROLLBACK = { plan: 'redeploy the previous revision in the same environment' };
+const PROD_ROLLBACK = { ...ROLLBACK, environment: 'production' };
 const BACKUP = { level: 'retrievable', reference: 'evidence store: restore check for this release' };
 
 function write(targetId, resourceId) {
@@ -41,7 +42,7 @@ function plan(overrides = {}) {
   const environment = overrides.environment || 'alpha';
   const base = {
     schema: PLAN_SCHEMA,
-    operation: { action: 'deploy', environment, targets: ['app'], rollback: ROLLBACK, backup_evidence: BACKUP },
+    operation: { action: 'deploy', environment, targets: ['app'], rollback: { ...ROLLBACK, environment }, backup_evidence: BACKUP },
     targets: [target('app', environment)],
     resources: [resource('db', environment), resource('bucket', environment)],
     bindings: [write('app', 'db'), write('app', 'bucket')],
@@ -302,7 +303,7 @@ const M1 = [
   {
     name: 'an extra action on a production resource under an alpha operation',
     plan: plan({
-      operation: { action: 'deploy', environment: 'alpha', targets: ['app'], actions: [{ resource: 'db-prod', action: 'migrate' }] },
+      operation: { action: 'deploy', environment: 'alpha', targets: ['app'], actions: [{ resource: 'db-prod', action: 'migrate' }], rollback: { ...ROLLBACK, environment: 'alpha' }, backup_evidence: BACKUP },
       resources: [resource('db', 'alpha'), resource('bucket', 'alpha'), resource('db-prod', 'production')],
       authority: [allow('app', 'deploy', 'alpha'), allow('db-prod', 'migrate', 'alpha')]
     }),
@@ -407,21 +408,21 @@ test('M2: downstream and its flags are required and must be true or false', asyn
 test('production changes need rollback and backup evidence', async (t) => {
   const prod = (operation) => plan({ environment: 'production', operation: { action: 'migrate', environment: 'production', targets: ['app'], ...operation }, authority: [allow('app', 'migrate', 'production')] });
   const rows = [
-    { name: 'migrate with rollback and retrievable backup evidence', plan: prod({ rollback: ROLLBACK, backup_evidence: BACKUP }), verdict: 'ALLOW', codes: [] },
+    { name: 'migrate with rollback and retrievable backup evidence', plan: prod({ rollback: PROD_ROLLBACK, backup_evidence: BACKUP }), verdict: 'ALLOW', codes: [] },
     { name: 'migrate with neither', plan: prod({}), verdict: 'HOLD', codes: [REASONS.BACKUP_EVIDENCE_MISSING, REASONS.ROLLBACK_EVIDENCE_MISSING] },
     { name: 'migrate with no rollback plan', plan: prod({ backup_evidence: BACKUP }), verdict: 'HOLD', codes: [REASONS.ROLLBACK_EVIDENCE_MISSING] },
-    { name: 'rollback that crosses environments', plan: prod({ rollback: { ...ROLLBACK, cross_environment: true }, backup_evidence: BACKUP }), verdict: 'HOLD', codes: [REASONS.ROLLBACK_EVIDENCE_MISSING] },
+    { name: 'rollback in another environment', plan: prod({ rollback: { ...ROLLBACK, environment: 'alpha' }, backup_evidence: BACKUP }), verdict: 'HOLD', codes: [REASONS.ROLLBACK_EVIDENCE_MISSING] },
     ...BACKUP_LEVELS.slice(0, BACKUP_LEVELS.indexOf('retrievable')).map((level) => ({
       name: `backup evidence only at level ${level}`,
-      plan: prod({ rollback: ROLLBACK, backup_evidence: { ...BACKUP, level } }),
+      plan: prod({ rollback: PROD_ROLLBACK, backup_evidence: { ...BACKUP, level } }),
       verdict: 'HOLD',
       codes: [REASONS.BACKUP_EVIDENCE_MISSING]
     })),
-    { name: 'backup evidence with no reference', plan: prod({ rollback: ROLLBACK, backup_evidence: { level: 'fully_recoverable' } }), verdict: 'HOLD', codes: [REASONS.BACKUP_EVIDENCE_MISSING] },
-    { name: 'backup evidence with an unknown level', plan: prod({ rollback: ROLLBACK, backup_evidence: { ...BACKUP, level: 'great' } }), verdict: 'HOLD', codes: [REASONS.BACKUP_EVIDENCE_MISSING] },
+    { name: 'backup evidence with no reference', plan: prod({ rollback: PROD_ROLLBACK, backup_evidence: { level: 'fully_recoverable' } }), verdict: 'HOLD', codes: [REASONS.BACKUP_EVIDENCE_MISSING] },
+    { name: 'backup evidence with an unknown level', plan: prod({ rollback: PROD_ROLLBACK, backup_evidence: { ...BACKUP, level: 'great' } }), verdict: 'HOLD', codes: [REASONS.BACKUP_EVIDENCE_MISSING] },
     {
       name: 'a production restart needs rollback but no backup evidence',
-      plan: plan({ environment: 'production', operation: { action: 'restart', environment: 'production', targets: ['app'], rollback: ROLLBACK }, authority: [allow('app', 'restart', 'production')] }),
+      plan: plan({ environment: 'production', operation: { action: 'restart', environment: 'production', targets: ['app'], rollback: PROD_ROLLBACK }, authority: [allow('app', 'restart', 'production')] }),
       verdict: 'ALLOW',
       codes: []
     },
@@ -429,7 +430,7 @@ test('production changes need rollback and backup evidence', async (t) => {
       name: 'a production restart with an auto-deploy coupled still needs backup evidence',
       plan: plan({
         environment: 'production',
-        operation: { action: 'restart', environment: 'production', targets: ['app'], rollback: ROLLBACK },
+        operation: { action: 'restart', environment: 'production', targets: ['app'], rollback: PROD_ROLLBACK },
         authority: [allow('app', 'restart', 'production')],
         downstream: { trigger: 'AUTO_ON_BRANCH_UPDATE', deployment_approved: true, pause_read_back: false, evidence_freeze: false, freeze_end_approved: false }
       }),
@@ -550,6 +551,92 @@ test('plan shape and secrets fail closed', async (t) => {
   });
 });
 
+function envPlan(environment, operation = {}) {
+  return plan({
+    environment,
+    operation: { action: 'migrate', environment, targets: ['app'], ...operation },
+    authority: [allow('app', 'migrate', environment)]
+  });
+}
+
+test('production is any environment that is not plainly non-production', async (t) => {
+  for (const environment of ['production', 'Production', 'prod', 'PROD', 'live', 'prd', 'prod-eu', 'production-eu', 'prod1', 'main', 'staging-prod']) {
+    await t.test(`${environment} needs rollback and backup evidence`, () => {
+      const result = checkPlan(envPlan(environment), { now: NOW });
+      assert.equal(result.verdict, 'HOLD');
+      assert.deepEqual(codes(result), [REASONS.BACKUP_EVIDENCE_MISSING, REASONS.ROLLBACK_EVIDENCE_MISSING]);
+      const covered = checkPlan(envPlan(environment, { rollback: { ...ROLLBACK, environment }, backup_evidence: BACKUP }), { now: NOW });
+      assert.equal(covered.verdict, 'ALLOW', JSON.stringify(covered.reasons));
+    });
+  }
+  for (const environment of ['alpha', 'alpha-eu', 'staging', 'dev', 'qa', 'uat', 'sandbox']) {
+    await t.test(`${environment} needs neither`, () => {
+      assert.equal(checkPlan(envPlan(environment), { now: NOW }).verdict, 'ALLOW');
+    });
+  }
+  for (const environment of ['dr-restore', 'restore-drill', 'preview-42', 'load-test']) {
+    await t.test(`${environment} resources must be temporary`, () => {
+      const result = checkPlan(envPlan(environment), { now: NOW });
+      assert.equal(result.verdict, 'HOLD');
+      assert.ok(codes(result).includes(REASONS.TEMPORARY_RESOURCE_INCOMPLETE), JSON.stringify(result.reasons));
+    });
+  }
+});
+
+test('a production store reached through an owner exception still needs rollback and backup evidence', () => {
+  const exceptionPlan = (operation) => plan({
+    operation: { action: 'deploy', environment: 'alpha', targets: ['app'], ...operation },
+    resources: [resource('db', 'alpha'), resource('bucket', 'alpha'), resource('db-prod', 'production')],
+    bindings: [write('app', 'db'), write('app', 'bucket'), write('app', 'db-prod')],
+    exceptions: [{ resources: ['db-prod'], environments: ['alpha'], reason: 'one-off data copy', end_date: FUTURE }]
+  });
+  const bare = checkPlan(exceptionPlan({}), { now: NOW });
+  assert.equal(bare.verdict, 'HOLD');
+  assert.deepEqual(codes(bare), [REASONS.BACKUP_EVIDENCE_MISSING, REASONS.ROLLBACK_EVIDENCE_MISSING]);
+  const covered = checkPlan(exceptionPlan({ rollback: { ...ROLLBACK, environment: 'alpha' }, backup_evidence: BACKUP }), { now: NOW });
+  assert.equal(covered.verdict, 'ALLOW_WITH_NOTICE', JSON.stringify(covered.reasons));
+});
+
+test('remaining refusal rules each have a row', async (t) => {
+  const crossBucket = (exception) => plan({
+    targets: [target('app', 'alpha'), target('app-prod', 'production')],
+    bindings: [write('app', 'db'), write('app', 'bucket'), write('app-prod', 'bucket')],
+    exceptions: [exception]
+  });
+  const first = { route: 'mcp', target: 'app', privilege: 'deploy', credential: 'PLATFORM_ALPHA_TOKEN', effect: 'deploy' };
+  const rows = [
+    { name: 'authority entry for another resource does not count', plan: plan({ authority: [allow('bucket', 'deploy', 'alpha')] }), codes: [REASONS.NOT_AUTHORISED] },
+    { name: 'owner exception with no end date', plan: crossBucket({ resources: ['bucket'], environments: ['production'], reason: 'shared media' }), codes: [REASONS.RESOURCE_IDENTITY_MISMATCH] },
+    { name: 'owner exception ending on 2026-02-30', plan: crossBucket({ resources: ['bucket'], environments: ['production'], reason: 'shared media', end_date: '2026-02-30' }), codes: [REASONS.RESOURCE_IDENTITY_MISMATCH] },
+    { name: 'owner exception whose resources is a string', plan: crossBucket({ resources: 'bucket', environments: ['production'], reason: 'shared media', end_date: FUTURE }), codes: [REASONS.PLAN_INVALID] },
+    { name: 'owner exception whose environments is empty', plan: crossBucket({ resources: ['bucket'], environments: [], reason: 'shared media', end_date: FUTURE }), codes: [REASONS.PLAN_INVALID] },
+    { name: 'production rollback with no environment', plan: envPlan('production', { rollback: ROLLBACK, backup_evidence: BACKUP }), codes: [REASONS.ROLLBACK_EVIDENCE_MISSING] },
+    { name: 'rollback that is not an object', plan: envPlan('production', { rollback: 'redeploy', backup_evidence: BACKUP }), codes: [REASONS.PLAN_INVALID] },
+    { name: 'backup evidence that is not an object', plan: envPlan('production', { rollback: PROD_ROLLBACK, backup_evidence: 'retrievable' }), codes: [REASONS.PLAN_INVALID] },
+    { name: 'two resources with one id', plan: plan({ resources: [resource('db', 'alpha'), resource('db', 'production'), resource('bucket', 'alpha')] }), codes: [REASONS.PLAN_INVALID] },
+    { name: 'target with no environment', plan: plan({ targets: [{ ...target('app', 'alpha'), environment: '' }] }), codes: [REASONS.PLAN_INVALID] },
+    { name: 'resource with no name environment', plan: plan({ resources: [{ ...resource('db', 'alpha'), name_environment: undefined }, resource('bucket', 'alpha')] }), codes: [REASONS.PLAN_INVALID] },
+    { name: 'binding to an undeclared resource', plan: plan({ bindings: [write('app', 'ghost')] }), codes: [REASONS.PLAN_INVALID] },
+    { name: 'authority entry with an unknown effect', plan: plan({ authority: [{ resource: 'app', action: 'deploy', scope: 'alpha', effect: 'maybe' }] }), codes: [REASONS.PLAN_INVALID] },
+    { name: 'route with an unknown outcome', plan: plan({ routes: [{ ...first, outcome: 'skipped' }, { ...first, route: 'api', outcome: 'selected', pre_approved: true }] }), codes: [REASONS.PLAN_INVALID] },
+    { name: 'two selected routes', plan: plan({ routes: [{ ...first, outcome: 'selected', pre_approved: true }, { ...first, route: 'api', outcome: 'selected', pre_approved: true }] }), codes: [REASONS.PLAN_INVALID] },
+    { name: 'selected route that is not last', plan: plan({ routes: [{ ...first, outcome: 'selected', pre_approved: true }, { ...first, route: 'api', outcome: 'failed_before_effect' }] }), codes: [REASONS.PLAN_INVALID] },
+    {
+      name: 'fallback with its fields left out on both routes',
+      plan: plan({ routes: [{ route: 'mcp', outcome: 'failed_before_effect' }, { route: 'api', outcome: 'selected', pre_approved: true }] }),
+      codes: [REASONS.ROUTE_FALLBACK_REFUSED]
+    },
+    { name: 'secret-shaped object key', plan: plan({ labels: { [`ghp_${'c'.repeat(36)}`]: 'x' } }), codes: [REASONS.SECRET_IN_PLAN] }
+  ];
+  for (const row of rows) {
+    await t.test(row.name, () => {
+      const result = checkPlan(row.plan, { now: NOW });
+      assert.equal(result.verdict, 'HOLD', JSON.stringify(result.reasons));
+      assert.deepEqual(codes(result), row.codes);
+    });
+  }
+});
+
 test('plan hash is stable across key order and changes with content', () => {
   const a = plan();
   const reordered = Object.fromEntries(Object.entries(a).reverse());
@@ -577,6 +664,7 @@ test('command line: example plan allows, a hold exits 2, usage errors exit 1', (
   assert.equal(run([examplePath, '--now', 'yesterday']).status, 1);
   assert.equal(run([examplePath, '--now', '2026-02-30']).status, 1);
   assert.equal(run([examplePath, '--now']).status, 1);
+  assert.equal(run([examplePath, '--verbose']).status, 1);
 });
 
 test('skill text stays within its budget and names every reason the checker can return', () => {

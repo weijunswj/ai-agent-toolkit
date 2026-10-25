@@ -21,10 +21,10 @@ Check one live change on an outside system before the owner approves it. The ski
 It fails closed: a missing, unknown or malformed field holds the plan.
 
 - **One environment.** Names and provider read-back must agree; every action and binding stays inside the operation's environment. A store writable from two environments is refused unless an owner exception names the resource, environment, reason and an end date.
-- **Temporary resources** (anything in test, preview or restore, and anything marked temporary) need a temporary name, data rule, cleanup owner, unexpired end date and a provider read-back on removal.
+- **Temporary resources** (any environment whose name has test, preview, restore or drill in it, and anything marked temporary) need a temporary name, data rule, cleanup owner, unexpired end date and a provider read-back on removal.
 - **Authority is a list** of resource, action, scope and allow or deny, checked for the operation's own action and every extra action. Unlisted means refused.
 - **An action counts with what it sets off.** A merge or push into an auto-deploying branch is a deployment: accept it, pause the trigger first with a read-back, or hold. An evidence freeze holds the deployment unless the approval ends it. An unknown trigger stops the action.
-- **Production** needs a rollback inside the same environment, and backup evidence at `retrievable` or higher for anything that can touch data (only restart and trigger pause or resume are exempt).
+- **Production** is any environment whose name is not plainly non-production (alpha, beta, staging, dev, qa, uat, sandbox, test, preview, restore); `main`, `prd` or `prod-eu` count. A plan that touches production anywhere, including a store reached through an owner exception, needs `rollback` with a plan and the operation's environment, and backup evidence at `retrievable` or higher for anything that can touch data (only restart and trigger pause or resume are exempt).
 - **Fallback routes** run only after a route failed before doing anything, and only when pre-approved with the same target, privilege, credential and effect. Tell the user about the failure.
 
 ## Reasons
