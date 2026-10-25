@@ -70,6 +70,8 @@ test('parts: a package test script no step runs is a gap; the twin that runs it 
   assert.match(hits(gap, 'parts.package-script', 'package.json')[0].fix, /npm run test/);
   assert.deepEqual(hits(gap, 'tests.unreached', 'a.test.js').map((e) => e.level), ['GAP']);
   const clean = report({ 'package.json': pkg, 'a.test.js': '', '.github/workflows/ci.yml': WORKFLOW('npm test') });
+  const hashed = report({ 'package.json': pkg, 'a.test.js': '', '.github/workflows/ci.yml': WORKFLOW('echo "build #1" && npm test') });
+  assert.deepEqual(hashed.filter((e) => e.level === 'GAP' && /^(parts|tests)\./.test(e.check)), [], 'a quoted # does not cut the real command');
   assert.deepEqual(hits(clean, 'parts.package-script'), []);
   assert.deepEqual(hits(clean, 'tests.unreached'), [], 'node --test in the package folder reaches its test files');
 });
@@ -346,6 +348,10 @@ test('git and gh resolve to absolute paths outside the repository and never star
   fs.mkdirSync(path.join(dir, '.tmp'));
   for (const key of ['TMPDIR', 'TEMP', 'TMP']) process.env[key] = path.join(dir, '.tmp');
   checkup.checkup(dir, { github: true });
+  // A folder in the repository whose name starts with two dots is still inside it.
+  fs.mkdirSync(path.join(dir, '..cache'));
+  for (const key of ['TMPDIR', 'TEMP', 'TMP']) process.env[key] = path.join(dir, '..cache');
+  checkup.checkup(dir, { github: true });
   assert.ok(seen.length > 0, 'git ran');
   const realDir = fs.realpathSync(dir).toLowerCase();
   for (const { command, cwd } of seen) {
@@ -424,6 +430,10 @@ test('scripts: a script CI only names (compiles or lints) is not counted as run'
   assert.deepEqual(hits(quiet, 'scripts.untested').map((e) => e.path), ['scripts/x.sh', 'scripts/y.js', 'smoke.py'], 'a comment, a syntax check and a pytest marker run nothing');
   const started = report({ ...named, '.github/workflows/ci.yml': WORKFLOW('|\n          bash -e scripts/x.sh\n          node scripts/y.js\n          python -m smoke') });
   assert.deepEqual(hits(started, 'scripts.untested'), []);
+  const text = report({ ...named, '.github/workflows/ci.yml': WORKFLOW('|\n          echo "run bash scripts/x.sh to fix"\n          echo \'node scripts/y.js\'') });
+  assert.deepEqual(hits(text, 'scripts.untested').map((e) => e.path).filter((rel) => rel.startsWith('scripts/')), ['scripts/x.sh', 'scripts/y.js'], 'an interpreter inside a quoted string runs nothing');
+  const afterHash = report({ ...named, '.github/workflows/ci.yml': WORKFLOW('|\n          echo "step #1" && bash scripts/x.sh\n          echo \'a # b\'; node "scripts/y.js"') });
+  assert.deepEqual(hits(afterHash, 'scripts.untested').map((e) => e.path).filter((rel) => rel.startsWith('scripts/')), [], 'a quoted # starts no comment');
 });
 
 test('--base leaves the git index untouched and refuses a ref that starts with -', () => {

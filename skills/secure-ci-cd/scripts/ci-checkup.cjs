@@ -350,13 +350,25 @@ function packageInvocations(command) {
   return calls;
 }
 
+// Cuts a shell line at its first `#` that starts a word outside single and double quotes.
+function stripComment(line) {
+  let quote = null;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (quote) { if (ch === quote) quote = null; continue; }
+    if (ch === '"' || ch === "'") quote = ch;
+    else if (ch === '#' && (i === 0 || /\s/.test(line[i - 1]))) return line.slice(0, i);
+  }
+  return line;
+}
+
 function commandLines(text, baseDir) {
   // Split on newlines and `&&`, following `cd <dir>` so later commands use that folder.
   const out = [];
   let dir = baseDir;
   for (const raw of text.split('\n')) {
     // A comment names a file without running it.
-    for (const part of raw.replace(/(^|\s)#.*$/, '').split(/&&|;/)) {
+    for (const part of stripComment(raw).split(/&&|;/)) {
       const cmd = part.trim();
       if (!cmd || cmd.startsWith('#')) continue;
       const cd = cmd.match(/^cd\s+(\S+)$/);
@@ -426,14 +438,22 @@ const SYNTAX_ONLY = { node: /^(--check|-c)$/, nodejs: /^(--check|-c)$/, bash: /^
 function startedFiles(files, cmd, dirs) {
   const out = new Set();
   const words = cmd.split(/\s+/).filter(Boolean);
-  const hash = words.findIndex((word) => word.startsWith('#'));
-  if (hash >= 0) words.length = hash;
+  // Words inside a quoted string that spans several words (`echo "run bash x.sh"`) are text, not
+  // a program or a file; a single quoted word (`bash "x.sh"`) is still an argument.
+  const quoted = [];
+  let open = null;
+  for (const word of words) {
+    const startsOpen = open !== null;
+    for (const ch of word) { if (open) { if (ch === open) open = null; } else if (ch === '"' || ch === "'") open = ch; }
+    quoted.push(startsOpen || open !== null);
+  }
   const program = (word) => unquote(word).replace(/^.*[\\/]/, '').replace(/\.exe$/i, '').toLowerCase();
   words.forEach((raw, i) => {
+    if (quoted[i]) return;
     const word = unquote(raw);
     let j = i - 1;
     while (j >= 0 && words[j].startsWith('-') && !INTERPRETER.test(words[j])) j--;
-    const interpreter = j >= 0 && INTERPRETER.test(program(words[j])) ? program(words[j]) : null;
+    const interpreter = j >= 0 && !quoted[j] && INTERPRETER.test(program(words[j])) ? program(words[j]) : null;
     if (interpreter && SYNTAX_ONLY[interpreter] && words.slice(j + 1, i).some((option) => SYNTAX_ONLY[interpreter].test(option))) return;
     // `-m pkg.mod` counts only straight after python.
     if (word === '-m' && interpreter && /^(python[0-9.]*|py)$/.test(interpreter) && words[i + 1]) {
@@ -892,7 +912,9 @@ function checkup(root, options = {}) {
   // The working folder for git and gh: the temp folder, or the folder above the repository when
   // the temp folder sits inside it.
   const temp = path.relative(realRoot(root), (() => { try { return fs.realpathSync(os.tmpdir()); } catch { return os.tmpdir(); } })());
-  const cwd = !temp.startsWith('..') && !path.isAbsolute(temp) ? path.dirname(realRoot(root)) : os.tmpdir();
+  const insideRoot = temp !== '..' && !temp.startsWith(`..${path.sep}`) && !path.isAbsolute(temp);
+  const above = path.dirname(realRoot(root));
+  const cwd = insideRoot && above !== realRoot(root) ? above : os.tmpdir();
   const tools = { cwd, git: resolveExecutable(opts.git || 'git', root), gh: opts.github ? resolveExecutable(opts.gh, root) : null };
   opts.tools = tools;
   if (opts.base !== null && opts.base !== undefined && (typeof opts.base !== 'string' || !opts.base || opts.base.startsWith('-'))) throw new UsageError('--base must be a ref that does not start with -');
