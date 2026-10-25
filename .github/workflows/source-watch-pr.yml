@@ -56,6 +56,64 @@ jobs:
             echo "pr_needed=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Close review notification PR when nothing is left to review
+        if: steps.source_updates.outputs.pr_needed == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: source-watch/review-active-third-party-updates
+          BASE_BRANCH: main
+          EXPECTED_OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          # Every item is recorded as reviewed on trusted main. Close the one exact notification PR
+          # the bot opened, unmerged. The branch is kept, never deleted.
+          query_exact_prs() {
+            gh pr list \
+              --repo "$GITHUB_REPOSITORY" \
+              --state open \
+              --base "$BASE_BRANCH" \
+              --head "$BRANCH" \
+              --limit 1000 \
+              --json number,state,headRefName,baseRefName,headRepositoryOwner,headRepository,isCrossRepository,author
+          }
+          plan_close() {
+            local metadata="$RUNNER_TEMP/source-watch-pr-close.json"
+            query_exact_prs > "$metadata"
+            node repo/scripts/plan-source-watch-pr-lifecycle.cjs "$@" \
+              --input "$metadata" \
+              --repository "$GITHUB_REPOSITORY" \
+              --owner "$EXPECTED_OWNER" \
+              --head "$BRANCH" \
+              --base "$BASE_BRANCH" \
+              --actionable false
+          }
+          PLAN_OUTPUT="$RUNNER_TEMP/source-watch-pr-close-plan.txt"
+          : > "$PLAN_OUTPUT"
+          plan_close --mode plan --github-output "$PLAN_OUTPUT"
+          ACTION="$(sed -n 's/^action=//p' "$PLAN_OUTPUT")"
+          PR_NUMBER="$(sed -n 's/^pr_number=//p' "$PLAN_OUTPUT")"
+          case "$ACTION" in
+            none)
+              echo "No open notification PR from the notifier; nothing to close."
+              ;;
+            close-open)
+              test -n "$PR_NUMBER"
+              plan_close --mode verify-plan --expected-action close-open --expected-number "$PR_NUMBER"
+              gh pr close "$PR_NUMBER" \
+                --repo "$GITHUB_REPOSITORY" \
+                --comment "Nothing is left to review: every watched source is recorded as reviewed on main. Closing this notification unmerged. The branch is kept for the next notice."
+              plan_close --mode verify-plan --expected-action none
+              ;;
+            fail-ambiguous-open)
+              echo "Refusing to close source-watch PRs: multiple exact matching open PRs." >&2
+              exit 1
+              ;;
+            *)
+              echo "Refusing unknown source-watch PR close action: $ACTION" >&2
+              exit 1
+              ;;
+          esac
+
       - name: Update review notification branch
         id: update_branch
         if: steps.source_updates.outputs.pr_needed == 'true'
@@ -87,7 +145,7 @@ jobs:
             --base "$BASE_BRANCH" \
             --head "$BRANCH" \
             --limit 1000 \
-            --json number,state,headRefName,baseRefName,headRepositoryOwner,headRepository,isCrossRepository \
+            --json number,state,headRefName,baseRefName,headRepositoryOwner,headRepository,isCrossRepository,author \
             > "$PR_METADATA"
           node repo/scripts/plan-source-watch-pr-lifecycle.cjs \
             --mode plan \
@@ -120,7 +178,7 @@ jobs:
               --base "$BASE_BRANCH" \
               --head "$BRANCH" \
               --limit 1000 \
-              --json number,state,headRefName,baseRefName,headRepositoryOwner,headRepository,isCrossRepository
+              --json number,state,headRefName,baseRefName,headRepositoryOwner,headRepository,isCrossRepository,author
           }
           verify_open() {
             local expected_number="${1:-}"

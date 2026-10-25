@@ -82,6 +82,8 @@ function makeFixture(t, reportText = 'review report\n') {
   git(bare, ['init', '--bare']);
   git(bare, ['config', 'receive.autogc', 'false']);
   git(bare, ['config', 'gc.auto', '0']);
+  // Mirrors the repository ruleset that blocks force-pushes on every branch.
+  git(bare, ['config', 'receive.denyNonFastForwards', 'true']);
   git(work, ['init', '--initial-branch=main']);
   configureGit(work);
   writeFile(path.join(work, 'README.md'), 'trusted main\n');
@@ -111,24 +113,31 @@ function cloneBranchSource(fixture, name) {
   return source;
 }
 
+// Creates the notification branch from trusted main. `content` may be an array, which makes one
+// report-only commit per entry, oldest first.
 function createRemoteReportBranch(fixture, content, mutate = null, options = {}) {
   const source = cloneBranchSource(fixture, 'branch-source');
   git(source, ['switch', '-c', branchName, 'origin/main']);
-  writeFile(path.join(source, reportPath), content);
-  if (mutate) mutate(source);
-  git(source, ['add', '--all']);
-  const staged = git(source, ['diff', '--cached', '--name-status']).trim();
-  if (!staged && !options.emptyCommit) {
-    throw new Error(`report fixture was not staged (${content}): ${git(source, ['status', '--short'])}`);
-  }
-  git(source, options.emptyCommit
-    ? ['commit', '--allow-empty', '-m', 'Create report-only notification branch']
-    : ['commit', '-m', 'Create report-only notification branch']);
+  const contents = Array.isArray(content) ? content : [content];
+  contents.forEach((entry, index) => {
+    const last = index === contents.length - 1;
+    writeFile(path.join(source, reportPath), entry);
+    if (last && mutate) mutate(source);
+    git(source, ['add', '--all']);
+    const staged = git(source, ['diff', '--cached', '--name-status']).trim();
+    if (!staged && !(last && options.emptyCommit)) {
+      throw new Error(`report fixture was not staged (${entry}): ${git(source, ['status', '--short'])}`);
+    }
+    git(source, last && options.emptyCommit
+      ? ['commit', '--allow-empty', '-m', 'Create report-only notification branch']
+      : ['commit', '-m', 'Create report-only notification branch']);
+  });
   if (options.executable) {
     const reportBlob = git(source, ['hash-object', '-w', reportPath]).trim();
     git(source, ['update-index', '--add', '--cacheinfo', `100755,${reportBlob},${reportPath}`]);
     git(source, ['commit', '--amend', '--no-edit']);
   }
+  if (options.extraCommit) options.extraCommit(source);
   git(source, ['push', 'origin', `HEAD:${branchName}`]);
   return gitSha(source, 'HEAD');
 }

@@ -17,8 +17,8 @@ Current scheduled notification flow:
 5. Query the GitHub API for the latest commit at the locked source ref.
 6. Read `repo/source-watch/advisory-targets.json` for separate advisory targets that are not yet normal SOURCE-LOCK-tracked source dependencies.
 7. Report advisory targets only when they are actionable: a reviewed-through cursor or compatibility baseline differs, a baseline is missing, or the target is explicitly marked `pending_action`.
-8. If no active third-party source changed and no advisory target is actionable, write a short summary and do not open a PR.
-9. If review is needed, write `repo/source-watch/reviews/active-third-party-updates.md` on the stable `source-watch/review-active-third-party-updates` branch and open or update `[source-watch] Review active source-watch updates`.
+8. If no active third-party source changed and no advisory target is actionable, write a short summary and do not open a PR. If the one notification PR the workflow opened is still open, close it unmerged with a short comment. The branch is kept, and a PR that anyone else opened is left alone.
+9. If review is needed, write `repo/source-watch/reviews/active-third-party-updates.md` on the stable `source-watch/review-active-third-party-updates` branch and open or update `[source-watch] Review active source-watch updates`. The branch only grows: a changed report becomes one new report-only commit on top of the branch, pushed without force, because the repository blocks force-pushes. A branch in any other shape is refused and nothing is pushed; close its PR and remove the branch with the owner's OK so the next run starts it fresh.
 10. The PR body and report must say that no source files, SOURCE-LOCK pins, advisory baselines, advisory tracking documents, review cursors, or upstream code were changed or executed, and that no auto-merge is allowed.
 
 Advisory target lifecycle:

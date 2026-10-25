@@ -76,68 +76,99 @@ fi
 readonly remote_state="$OBS_STATE"
 readonly remote_sha="$OBS_SHA"
 generated_report_blob="$(git hash-object -- "$REPORT_TEMP")"
-remote_no_op_verified=false
+
+refuse() {
+  echo "Refusing to update the Source Watch branch: $1" >&2
+  echo 'Nothing was pushed. Close the notification PR and remove the branch with the owner'"'"'s OK, then let the next run recreate it.' >&2
+  exit 1
+}
+
+# The branch only ever grows. Every commit after its merge-base with trusted main must be a
+# single-parent commit that changes the report path and nothing else, leaving a regular report
+# file. Any other shape is refused, never overwritten: the repository forbids force-pushes.
+readonly max_report_commits=1000
+report_tip_blob=''
+verify_report_only_branch() {
+  local tip="$1" base commit_lines line commit parent extra changed entry mode rest type blob path
+  if git cat-file -e "origin/main:$REPORT_PATH" 2>/dev/null; then
+    refuse 'trusted main already contains the report path.'
+  fi
+  if ! base="$(git merge-base origin/main "$tip" 2>/dev/null)" || [[ -z "$base" ]]; then
+    refuse 'the branch shares no history with trusted main.'
+  fi
+  if ! commit_lines="$(git rev-list --parents --reverse "$base..$tip" 2>/dev/null)" || [[ -z "$commit_lines" ]]; then
+    refuse 'the branch has no report commits after trusted main.'
+  fi
+  if (( $(printf '%s\n' "$commit_lines" | awk 'NF { count += 1 } END { print count + 0 }') > max_report_commits )); then
+    refuse "the branch has more than $max_report_commits report commits."
+  fi
+  local expected_parent="$base"
+  while IFS=' ' read -r commit parent extra; do
+    if [[ -z "$commit" || -z "$parent" || -n "$extra" || "$parent" != "$expected_parent" ]]; then
+      refuse "commit $commit is not a single-parent report commit on the branch line."
+    fi
+    changed="$(git diff-tree --no-commit-id --name-only --no-renames -r "$parent" "$commit" 2>/dev/null || true)"
+    if [[ "$changed" != "$REPORT_PATH" ]]; then
+      refuse "commit $commit changes paths other than the report."
+    fi
+    entry="$(git ls-tree "$commit" -- "$REPORT_PATH" 2>/dev/null || true)"
+    mode="${entry%% *}"
+    rest="${entry#* }"
+    type="${rest%% *}"
+    rest="${rest#* }"
+    blob="${rest%%$'\t'*}"
+    path=''
+    if [[ "$rest" == *$'\t'* ]]; then
+      path="${rest#*$'\t'}"
+    fi
+    if [[ "$mode" != '100644' || "$type" != 'blob' || "$path" != "$REPORT_PATH" ]] ||
+       ! [[ "$blob" =~ ^[0-9a-fA-F]{40}$ ]] ||
+       [[ "$(git cat-file -t "$blob" 2>/dev/null || true)" != 'blob' ]]; then
+      refuse "commit $commit does not leave the report as a regular file."
+    fi
+    report_tip_blob="$blob"
+    expected_parent="$commit"
+  done <<< "$commit_lines"
+  if [[ "$expected_parent" != "$tip" ]]; then
+    refuse 'the report commits do not end at the branch tip.'
+  fi
+}
 
 if [[ "$remote_state" == 'present' ]]; then
   inspection_ref="refs/source-watch/inspect/$remote_sha"
-  remote_object_verified=false
-  if git fetch --no-tags --force origin "refs/heads/$BRANCH:$inspection_ref"; then
-    fetched_sha="$(git rev-parse "$inspection_ref^{commit}" 2>/dev/null || true)"
-    remote_object_type="$(git cat-file -t "$remote_sha" 2>/dev/null || true)"
-    if [[ "$fetched_sha" == "$remote_sha" && "$remote_object_type" == 'commit' ]] &&
-       git cat-file -e "$remote_sha^{tree}" 2>/dev/null; then
-      remote_object_verified=true
-    fi
+  if ! git fetch --no-tags origin "refs/heads/$BRANCH:$inspection_ref"; then
+    refuse 'the remote branch could not be fetched for inspection.'
   fi
+  fetched_sha="$(git rev-parse "$inspection_ref^{commit}" 2>/dev/null || true)"
+  remote_object_type="$(git cat-file -t "$remote_sha" 2>/dev/null || true)"
+  if [[ "$fetched_sha" != "$remote_sha" || "$remote_object_type" != 'commit' ]] ||
+     ! git cat-file -e "$remote_sha^{tree}" 2>/dev/null; then
+    refuse 'the fetched branch does not match the observed commit.'
+  fi
+  verify_report_only_branch "$remote_sha"
 
-  if [[ "$remote_object_verified" == true ]]; then
-    remote_commit_line="$(git rev-list --parents -n 1 "$remote_sha" 2>/dev/null || true)"
-    remote_parent_count="$(printf '%s\n' "$remote_commit_line" | awk '{ print NF - 1 }')"
-    remote_parent="$(printf '%s\n' "$remote_commit_line" | awk 'NF == 2 { print $2 }')"
-    if [[ "${remote_commit_line%% *}" == "$remote_sha" && "$remote_parent_count" == '1' && -n "$remote_parent" ]] &&
-       git merge-base --is-ancestor "$remote_parent" origin/main; then
-      remote_changed_paths="$(git diff-tree --no-commit-id --name-only --no-renames -r "$remote_parent" "$remote_sha" 2>/dev/null || true)"
-      if [[ "$remote_changed_paths" == "$REPORT_PATH" ]]; then
-        remote_report_entry="$(git ls-tree "$remote_sha" -- "$REPORT_PATH" 2>/dev/null || true)"
-        if [[ -n "$remote_report_entry" ]]; then
-          remote_report_mode="${remote_report_entry%% *}"
-          remote_report_rest="${remote_report_entry#* }"
-          remote_report_type="${remote_report_rest%% *}"
-          remote_report_rest="${remote_report_rest#* }"
-          remote_report_blob="${remote_report_rest%%$'\t'*}"
-          remote_report_path=''
-          if [[ "$remote_report_rest" == *$'\t'* ]]; then
-            remote_report_path="${remote_report_rest#*$'\t'}"
-          fi
-          remote_report_blob_type="$(git cat-file -t "$remote_report_blob" 2>/dev/null || true)"
-          if [[ "$remote_report_mode" == '100644' && "$remote_report_type" == 'blob' &&
-                "$remote_report_path" == "$REPORT_PATH" ]] &&
-             [[ "$remote_report_blob" =~ ^[0-9a-fA-F]{40}$ ]] &&
-             [[ "$remote_report_blob_type" == 'blob' && "$generated_report_blob" == "$remote_report_blob" ]]; then
-            remote_no_op_verified=true
-          fi
-        fi
-      fi
+  if [[ "$generated_report_blob" == "$report_tip_blob" ]]; then
+    # Re-read the exact ref immediately before accepting the no-op. A move,
+    # deletion, malformed response, or ambiguous response is not authority.
+    observe_remote_branch
+    if [[ "$OBS_STATE" != 'present' || "$OBS_SHA" != "$remote_sha" ]]; then
+      echo 'Source Watch branch changed or became unverifiable during no-op verification.' >&2
+      exit 1
     fi
+    echo 'Generated source-watch report matches the verified report-only remote commit; no commit or push.'
+    write_output 'pushed=false'
+    exit 0
   fi
-fi
-
-if [[ "$remote_no_op_verified" == true ]]; then
-  # Re-read the exact ref immediately before accepting the no-op. A move,
-  # deletion, malformed response, or ambiguous response is not authority.
-  observe_remote_branch
-  if [[ "$OBS_STATE" != 'present' || "$OBS_SHA" != "$remote_sha" ]]; then
-    echo 'Source Watch branch changed or became unverifiable during no-op verification.' >&2
-    exit 1
-  fi
-  echo 'Generated source-watch report matches the verified report-only remote commit; no commit or push.'
-  write_output 'pushed=false'
-  exit 0
 fi
 
 git config user.name 'github-actions[bot]'
 git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-git switch -C "$BRANCH" origin/main
+if [[ "$remote_state" == 'present' ]]; then
+  # Add one commit on top of the verified remote tip, so the push is a fast-forward.
+  git switch -C "$BRANCH" "$remote_sha"
+else
+  git switch -C "$BRANCH" origin/main
+fi
 mkdir -p "$(dirname "$REPORT_PATH")"
 if [[ -L "$REPORT_PATH" ]]; then
   echo "Refusing to overwrite symlink report path: $REPORT_PATH" >&2
@@ -174,9 +205,7 @@ push_review_branch() {
     git push "$@"
   fi
 }
-if [[ "$remote_state" == 'present' ]]; then
-  push_review_branch --force-with-lease="refs/heads/$BRANCH:$remote_sha" origin "HEAD:$BRANCH"
-else
-  push_review_branch --force-with-lease="refs/heads/$BRANCH:" origin "HEAD:$BRANCH"
-fi
+# A plain push: the server accepts it only as a fast-forward of the current remote branch (or a
+# new branch), so a competing update makes it fail instead of being overwritten. No retry.
+push_review_branch origin "HEAD:refs/heads/$BRANCH"
 write_output 'pushed=true'
