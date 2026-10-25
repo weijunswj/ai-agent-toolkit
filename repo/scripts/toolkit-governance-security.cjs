@@ -277,22 +277,31 @@ function childKeys(children) {
 const CODEQL_EVENTS = Object.freeze(['push', 'pull_request', 'pull_request_target', 'merge_group', 'schedule', 'workflow_call']);
 const FALSE_IF = /^(?:-\s+)?if:\s*(?:false|\$\{\{\s*false\s*\}\})$/;
 
+// A CodeQL analysis older than this no longer shows an advanced setup in use.
+const ANALYSIS_WINDOW_MS = 90 * 24 * 60 * 60 * 1000;
+
+// Triggers that start a workflow only by hand or from another workflow. A CodeQL workflow with only
+// these does not keep default setup off; GitHub's own record of uploads (see the reader) still does.
+const MANUAL_EVENTS = Object.freeze(['workflow_dispatch', 'repository_dispatch', 'workflow_run']);
+
 // Whether workflow `text` runs CodeQL itself (an advanced setup). GitHub refuses an advanced setup's
-// results once default setup is on, so default setup is never turned on over one. Returns:
-//   true      placed: `on:` names push, pull_request, pull_request_target, merge_group, schedule or
+// results once default setup is on, so default setup is never turned on over one. Every "no" needs
+// positive proof; anything this reader cannot prove either way is 'unsure', which the caller treats
+// as unreadable, so default setup stays off. Returns:
+//   true      `on:` names push, pull_request, pull_request_target, merge_group, schedule or
 //             workflow_call (a reusable workflow runs when it is called), and one job that is not
-//             switched off with `if: false` has real codeql-action init and analyze steps that are not
+//             switched off with `if: false` has codeql-action init and analyze steps that are not
 //             switched off either;
-//   false     no init and analyze step text outside comments, or both placed and ruled out (another
-//             trigger only, switched off, or in different jobs); upload-sarif for another scanner
-//             does not count;
-//   'unsure'  init and analyze step text is there, but this reader cannot place it. The caller
-//             treats that as unreadable, so a shape this reader does not know never turns default
-//             setup on.
+//   false     the file never names codeql-action, or names only its upload-sarif step (another
+//             scanner's results); or every trigger is a manual or workflow_run one; or every init and
+//             analyze step the file names was placed, none in a live job, and no YAML alias could
+//             copy one;
+//   'unsure'  anything else.
 function runsCodeql(text) {
-  const uncommented = String(text).replace(/^\uFEFF/, '').split(/\r?\n/).filter(line => !/^\s*#/.test(line)).join('\n');
-  const mentions = action => new RegExp(`uses:\\s*['"]?github\\/codeql-action\\/${action}@`).test(uncommented);
-  if (!mentions('init') || !mentions('analyze')) return false;
+  const uncommented = String(text).replace(/^﻿/, '').split(/\r?\n/).filter(line => !/^\s*#/.test(line)).join('\n');
+  const named = [...uncommented.matchAll(/codeql-action\/([\w-]*)/gi)].map(match => match[1].toLowerCase());
+  if (named.every(step => step === 'upload-sarif')) return false;
+  const mentions = action => (uncommented.match(new RegExp(`codeql-action\\/${action}\\b`, 'gi')) || []).length;
   const lines = workflowLines(text);
   const on = topLevel(lines, 'on');
   if (!on) return 'unsure';
@@ -300,14 +309,14 @@ function runsCodeql(text) {
   if (on.inline) {
     let value = on.inline.trim();
     // A flow value may run over several lines.
-    if (/^[[{]/.test(value) && !/[\]}]$/.test(value)) value = [value, ...on.children.map(line => line.text)].join(' ');
+    if (/^[[{]/.test(value) && on.children.length) value = [value, ...on.children.map(line => line.text)].join(' ');
     if (value.startsWith('[')) events = value.replace(/[[\]\s'"]/g, '').split(',');
     else if (value.startsWith('{')) events = [...value.slice(1).matchAll(/(?:^|[{,])\s*["']?([A-Za-z_]+)["']?\s*:/g)].map(match => match[1]);
     else events = [value.replace(/['"]/g, '')];
   }
   events = events.filter(Boolean);
-  if (!events.length) return 'unsure';
-  if (!events.some(event => CODEQL_EVENTS.includes(event))) return false;
+  if (!events.length || events.some(event => !/^[a-z_]+$/.test(event))) return 'unsure';
+  if (!events.some(event => CODEQL_EVENTS.includes(event))) return events.every(event => MANUAL_EVENTS.includes(event)) ? false : 'unsure';
   const jobs = topLevel(lines, 'jobs');
   if (!jobs || !jobs.children.length) return 'unsure';
   const jobIndent = jobs.children[0].indent;
@@ -316,10 +325,13 @@ function runsCodeql(text) {
     if (line.indent === jobIndent) blocks.push([]);
     else if (blocks.length) blocks[blocks.length - 1].push(line);
   }
-  const uses = action => new RegExp(`(?:^|[\\s{,])uses:\\s*['"]?github\\/codeql-action\\/${action}@`);
-  const placed = { init: false, analyze: false };
-  const live = blocks.some(block => {
-    if (!block.length) return false;
+  // A step's `uses:` key, on its own line or as a key of a flow-style step.
+  const uses = action => new RegExp(`(?:^|[{,])\\s*["']?uses["']?\\s*:\\s*['"]?github\\/codeql-action\\/${action}@`, 'i');
+  const count = (step, action) => step.filter(item => uses(action).test(item)).length;
+  const placed = { init: 0, analyze: 0 };
+  let live = false;
+  for (const block of blocks) {
+    if (!block.length) continue;
     const keyIndent = block[0].indent;
     const jobOff = block.some(line => line.indent === keyIndent && !line.text.startsWith('-') && FALSE_IF.test(line.text));
     // Steps: each starts at a `- ` line (GitHub's starter workflows put these at the job's own key
@@ -334,14 +346,16 @@ function runsCodeql(text) {
       if (/^-\s/.test(line.text)) steps.push([line.text.replace(/^-\s+/, '')]);
       else if (steps.length) steps[steps.length - 1].push(line.text);
     }
-    for (const action of ['init', 'analyze']) if (steps.some(step => step.some(item => uses(action).test(item)))) placed[action] = true;
-    if (jobOff) return false;
+    for (const action of ['init', 'analyze']) placed[action] += steps.reduce((total, step) => total + count(step, action), 0);
+    if (jobOff) continue;
     const enabled = steps.filter(step => !step.some(item => FALSE_IF.test(item) || /(?:^|[{,]\s*)if:\s*(?:false|\$\{\{\s*false\s*\}\})\s*(?:[,}]|$)/.test(item)));
-    return ['init', 'analyze'].every(action => enabled.some(step => step.some(item => uses(action).test(item))));
-  });
+    if (['init', 'analyze'].every(action => enabled.some(step => step.some(item => uses(action).test(item))))) live = true;
+  }
   if (live) return true;
-  // Ruled out only when both steps were found where this reader understands them.
-  return placed.init && placed.analyze ? false : 'unsure';
+  // Ruled out only when every init and analyze step the file names was placed in this reader's view
+  // of a job, and no alias could repeat one somewhere else.
+  const alias = /[\s[{,]\*[A-Za-z0-9_-]/.test(` ${lines.map(line => line.text).join(' ')}`);
+  return !alias && placed.init === mentions('init') && placed.analyze === mentions('analyze') ? false : 'unsure';
 }
 
 // The binding's policy as committed on the default branch: { policy, required_checks, source } where
@@ -396,10 +410,11 @@ function statusOf(section) {
 // each setting is 'enabled' | 'disabled' | 'not-on-plan' | 'unreadable', `binding` is the programme
 // binding on the default branch ({ status: 'ok', text } | { status: 'missing' } |
 // { status: 'unreadable' }), and `advanced_codeql` names a default-branch workflow that runs CodeQL
-// itself (null for none, 'unreadable'; read only when default setup is off; `codeql_unplaced` names a
-// workflow whose CodeQL steps could not be placed, which reads unreadable); or { ok: false, reason }.
+// itself (null for none, 'unreadable'; read only when default setup is off; `codeql_uploads` names a
+// recent CodeQL analysis that did not come from default setup and `codeql_unplaced` a workflow whose
+// CodeQL steps could not be placed, both of which read unreadable); or { ok: false, reason }.
 // Without admin rights GitHub hides these settings, so they read unreadable.
-function ghSecurityReader(slug, { spawn = childProcess.spawnSync } = {}) {
+function ghSecurityReader(slug, { spawn = childProcess.spawnSync, now = Date.now } = {}) {
   const repository = ghRun([`repos/${slug}`], spawn);
   if (!repository.ok) return repository;
   const value = repository.value || {};
@@ -439,21 +454,37 @@ function ghSecurityReader(slug, { spawn = childProcess.spawnSync } = {}) {
   const binding = committed(governance.BINDING_FILE);
   let advancedCodeql = null;
   let unplaced = null;
+  let uploads = null;
+  let unreadable = false;
   if (codeScanning === 'disabled') {
     const listing = branch ? ghRun([`repos/${slug}/contents/.github/workflows?ref=${encodeURIComponent(branch)}`], spawn) : { ok: false, reason: 'no-branch' };
-    if (!listing.ok) advancedCodeql = listing.reason === 'not-found' ? null : 'unreadable';
-    else if (!Array.isArray(listing.value)) advancedCodeql = 'unreadable';
+    if (!listing.ok) unreadable = listing.reason !== 'not-found';
+    else if (!Array.isArray(listing.value)) unreadable = true;
     else {
       const names = listing.value.filter(entry => entry && entry.type === 'file' && /\.ya?ml$/i.test(entry.name)).map(entry => entry.name).sort();
+      if (names.length > 50) unreadable = true;
       for (const name of names.slice(0, 50)) {
         const file = committed(`.github/workflows/${name}`);
-        if (file.status !== 'ok') { advancedCodeql = 'unreadable'; break; }
+        if (file.status !== 'ok') { unreadable = true; continue; }
         const runs = runsCodeql(file.text);
         if (runs === true) { advancedCodeql = name; break; }
         if (runs === 'unsure' && unplaced === null) unplaced = name;
       }
-      if (unplaced !== null && advancedCodeql === null) advancedCodeql = 'unreadable';
-      if (names.length > 50 && advancedCodeql === null) advancedCodeql = 'unreadable';
+    }
+    if (advancedCodeql === null) {
+      // GitHub's own record also catches CodeQL run from outside a workflow file (a composite action,
+      // another repository's reusable workflow): a recent CodeQL analysis on the default branch whose
+      // key is not default setup's (`dynamic/...`). GitHub answers 404 when there is none.
+      const analyses = branch
+        ? ghRun([`repos/${slug}/code-scanning/analyses?tool_name=CodeQL&ref=${encodeURIComponent(`refs/heads/${branch}`)}&per_page=100`], spawn)
+        : { ok: false, reason: 'no-branch' };
+      if (analyses.ok && Array.isArray(analyses.value)) {
+        const since = now() - ANALYSIS_WINDOW_MS;
+        const other = analyses.value.find(entry => entry && typeof entry.analysis_key === 'string' && !entry.analysis_key.startsWith('dynamic/')
+          && !(Date.parse(entry.created_at) < since));
+        if (other) uploads = other.analysis_key;
+      } else if (!(analyses.ok === false && analyses.reason === 'not-found')) unreadable = true;
+      if (uploads !== null || unplaced !== null || unreadable) advancedCodeql = 'unreadable';
     }
   }
   return {
@@ -469,7 +500,8 @@ function ghSecurityReader(slug, { spawn = childProcess.spawnSync } = {}) {
     private_reporting: privateReporting,
     binding,
     advanced_codeql: advancedCodeql,
-    ...(unplaced !== null && advancedCodeql === 'unreadable' ? { codeql_unplaced: unplaced } : {}),
+    ...(uploads !== null && advancedCodeql === 'unreadable' ? { codeql_uploads: uploads } : {}),
+    ...(unplaced !== null && uploads === null && !unreadable && advancedCodeql === 'unreadable' ? { codeql_unplaced: unplaced } : {}),
   };
 }
 
@@ -598,7 +630,7 @@ function describeOutcome(slug, root, result, outcome) {
     const label = SETTING_LABELS[entry.setting] || entry.setting;
     if (entry.ok) lines.push(`- ${slug}: ${label} turned on.`);
     else if (UNAVAILABLE.includes(entry.reason) && (outcome.unavailable || []).includes(entry.setting)) lines.push(`- ${slug}: ${label} left alone: GitHub does not allow it here (${entry.reason === 'not-on-plan' ? 'not on this plan' : 'an organisation or enterprise policy'}).`);
-    else if (entry.setting === 'code_scanning' && entry.reason === 'not-on-plan') lines.push(`- ${slug}: ${label} not turned on yet: GitHub answered that it needs Code Security, which was just turned on; run this again shortly.`);
+    else if (entry.setting === 'code_scanning' && entry.reason === 'not-on-plan') lines.push(`- ${slug}: ${label} not turned on yet: GitHub answered that it needs Code Security, ${outcome.still_off.includes('code_security') ? 'which still reads back off' : 'which was just turned on; run this again shortly'}.`);
     else lines.push(`- ${slug}: ${label} not turned on (${entry.reason}).`);
   }
   for (const entry of outcome.files) lines.push(`- ${root}: ${entry.file} ${entry.result}${entry.result === 'written' ? '; commit it through a pull request' : ''}.`);
@@ -685,9 +717,11 @@ function dependencySecurity(root, { offline = false, reader = ghSecurityReader, 
   checks.S4 = off.length ? { status: 'drift', details: off.flatMap(item => item.details) }
     : [scanning, pushProtection].find(item => item.status !== 'ok') || scanning;
   checks.S5 = online && advanced === 'unreadable' && read.code_scanning === 'disabled'
-    ? { status: 'unverified', details: [read.codeql_unplaced
-      ? `.github/workflows/${read.codeql_unplaced} has CodeQL init and analyze steps Toolkit could not place, so an advanced CodeQL setup cannot be ruled out; default setup stays off, so check that workflow by hand`
-      : 'the default branch\'s workflows could not be read, so an advanced CodeQL setup cannot be ruled out; default setup stays off'] }
+    ? { status: 'unverified', details: [read.codeql_uploads
+      ? `GitHub has CodeQL results on the default branch from ${read.codeql_uploads} in the last 90 days, not from default setup, so an advanced CodeQL setup is in use somewhere; default setup stays off, so check it by hand`
+      : read.codeql_unplaced
+      ? `.github/workflows/${read.codeql_unplaced} names CodeQL steps Toolkit could not place or rule out, so an advanced CodeQL setup cannot be ruled out; default setup stays off, so check that workflow by hand`
+      : 'the default branch\'s workflows or GitHub\'s CodeQL results could not be read, so an advanced CodeQL setup cannot be ruled out; default setup stays off'] }
     : online && advanced && read.code_scanning === 'disabled'
       ? { status: 'ok', details: [`CodeQL runs from .github/workflows/${advanced} (advanced setup), so default setup stays off`] }
       : settingCheck(value('code_scanning'), 'CodeQL code scanning');

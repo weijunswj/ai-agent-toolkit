@@ -166,7 +166,9 @@ const MATRIX = [
   { id: 'M14c the default branch\'s workflows are unreadable: default setup stays off', read: { code_scanning: 'disabled', advanced_codeql: 'unreadable' },
     expect: { status: 'unverified', checks: { S5: 'unverified' }, fixes: { code_scanning: false } } },
   { id: 'M14d a workflow whose CodeQL steps cannot be placed: default setup stays off (I6)', read: { code_scanning: 'disabled', advanced_codeql: 'unreadable', codeql_unplaced: 'odd.yml' },
-    expect: { status: 'unverified', checks: { S5: 'unverified' }, details: { S5: [/odd\.yml has CodeQL init and analyze steps Toolkit could not place/] }, fixes: { code_scanning: false } } },
+    expect: { status: 'unverified', checks: { S5: 'unverified' }, details: { S5: [/odd\.yml names CodeQL steps Toolkit could not place or rule out/] }, fixes: { code_scanning: false } } },
+  { id: 'M14e GitHub has recent CodeQL results that default setup did not make: default setup stays off (I6)', read: { code_scanning: 'disabled', advanced_codeql: 'unreadable', codeql_uploads: '.github/workflows/ci.yml:scan' },
+    expect: { status: 'unverified', checks: { S5: 'unverified' }, details: { S5: [/CodeQL results on the default branch from \.github\/workflows\/ci\.yml:scan in the last 90 days, not from default setup/] }, fixes: { code_scanning: false } } },
   { id: 'M15 a dependabot.yaml counts (I6)', files: { 'package.json': '{}', '.github/dependabot.yaml': COVERED },
     expect: { checks: { S3: 'ok' }, files: { dependabot: false } } },
   { id: 'M16 merged patch-minor, nothing in place yet (I3)', read: { allow_auto_merge: false, binding: merged(PATCH_MINOR) }, protection: CONFORMANT,
@@ -302,6 +304,10 @@ const APPLY = [
     before: reader({ ...PRIVATE, ...PAID_OFF, code_security: 'disabled', binding: merged(null, 'on') }), writer: () => [ok('code_security'), refused('code_scanning', 'not-on-plan')],
     after: reader({ ...PRIVATE, ...PAID_OFF, code_security: 'enabled', binding: merged(null, 'on') }),
     expect: { result: 'unverified', writes: 1, unavailable: [], unconfirmed: ['code_scanning'], lines: [/CodeQL code scanning not turned on yet: GitHub answered that it needs Code Security, which was just turned on/], never: [/: read back\./, /could not read back/, /left alone/, /\(not-on-plan\)/] } },
+  { id: 'A19 Code Security still reads back off: the CodeQL line says so', binding: binding(null, 'on'),
+    before: reader({ ...PRIVATE, ...PAID_OFF, code_security: 'disabled', binding: merged(null, 'on') }), writer: () => [ok('code_security'), refused('code_scanning', 'not-on-plan')],
+    after: reader({ ...PRIVATE, ...PAID_OFF, code_security: 'disabled', binding: merged(null, 'on') }),
+    expect: { result: 'failed', writes: 1, lines: [/needs Code Security, which still reads back off\./, /reading back still shows off: GitHub Code Security/], never: [/which was just turned on/, /: read back\./] } },
   { id: 'A17 a written setting with no read-back is never "read back" (I4)', before: reader(ALERTS_OFF), writer: () => [ok('alerts'), ok('something_new')], after: reader(),
     expect: { result: 'unverified', writes: 1, unconfirmed: ['something_new'], never: [/: read back\./] } },
 ];
@@ -365,7 +371,8 @@ test('SE-07: the file writer never replaces a file Toolkit did not write (I6)', 
 function fakeGh(responses, log) {
   return (command, args) => {
     log.push(args.slice(1));
-    const response = responses[args[1]];
+    // Unless a test says otherwise, GitHub has no CodeQL analyses (its answer is a 404).
+    const response = responses[args[1]] !== undefined || !/\/code-scanning\/analyses\?/.test(args[1]) ? responses[args[1]] : 'gh: no analysis found (HTTP 404)';
     if (typeof response === 'string') return { status: 1, stdout: '', stderr: response };
     return { status: 0, stdout: response === undefined ? '' : JSON.stringify(response), stderr: '' };
   };
@@ -421,6 +428,26 @@ test('SE-08: the reader only reads, hides nothing it could not see, and reads th
     'repos/o/c/contents/.github/workflows/odd.yml?ref=main': { encoding: 'base64', content: Buffer.from('on: push\nsteps:\n  - uses: github/codeql-action/init@v3\n  - uses: github/codeql-action/analyze@v3\n').toString('base64') },
   }, []) });
   assert.deepEqual([odd.advanced_codeql, odd.codeql_unplaced], ['unreadable', 'odd.yml'], 'CodeQL steps the reader cannot place are never ruled out (I6)');
+  // GitHub's record of CodeQL analyses on the default branch catches CodeQL run from outside a
+  // workflow file. Only recent analyses that default setup did not make count.
+  const NOW = Date.parse('2026-10-25T00:00:00Z');
+  const analysesPath = 'repos/o/c/code-scanning/analyses?tool_name=CodeQL&ref=refs%2Fheads%2Fmain&per_page=100';
+  const viaUploads = (answer, files = {}) => security.ghSecurityReader('o/c', { now: () => NOW, spawn: fakeGh({
+    'repos/o/c': repoRead, 'repos/o/c/code-scanning/default-setup': { state: 'not-configured' },
+    'repos/o/c/contents/.github/workflows?ref=main': Object.keys(files).map(name => ({ type: 'file', name })),
+    ...Object.fromEntries(Object.entries(files).map(([name, text]) => [`repos/o/c/contents/.github/workflows/${name}?ref=main`, typeof text === 'string' && text.startsWith('gh:') ? text : { encoding: 'base64', content: Buffer.from(text).toString('base64') }])),
+    [analysesPath]: answer,
+  }, []) });
+  const composite = { 'ci.yml': 'on: push\njobs:\n  scan:\n    steps:\n      - uses: ./.github/actions/codeql\n' };
+  const uploaded = viaUploads([{ analysis_key: '.github/workflows/ci.yml:scan', created_at: '2026-10-20T00:00:00Z' }], composite);
+  assert.deepEqual([uploaded.advanced_codeql, uploaded.codeql_uploads, uploaded.codeql_unplaced], ['unreadable', '.github/workflows/ci.yml:scan', undefined], 'a composite action that uploaded is an advanced setup');
+  assert.equal(viaUploads([{ analysis_key: 'dynamic/github-code-scanning/codeql:analyze', created_at: '2026-10-20T00:00:00Z' }], composite).advanced_codeql, null, 'default setup\'s own earlier results do not count');
+  assert.equal(viaUploads([{ analysis_key: '.github/workflows/old.yml:scan', created_at: '2026-01-01T00:00:00Z' }], composite).advanced_codeql, null, 'results older than 90 days do not count');
+  assert.equal(viaUploads('gh: no analysis found (HTTP 404)', composite).advanced_codeql, null);
+  const refused = viaUploads('gh: Resource not accessible by integration (HTTP 403)', composite);
+  assert.deepEqual([refused.advanced_codeql, refused.codeql_uploads, refused.codeql_unplaced], ['unreadable', undefined, undefined], 'unreadable analyses rule nothing out');
+  const mixed = viaUploads('gh: no analysis found (HTTP 404)', { 'a.yml': 'on: push\nsteps:\n  - uses: github/codeql-action/init@v3\n', 'b.yml': 'gh: Not Found (HTTP 500)' });
+  assert.deepEqual([mixed.advanced_codeql, mixed.codeql_unplaced], ['unreadable', undefined], 'S5 names one unplaced file only when nothing else was unreadable');
   assert.equal(codeql('codeql.yml', CODEQL_WORKFLOW.replace(/^on:\n {2}push:\n {4}branches: \[main\]/, 'on: workflow_call')), 'codeql.yml', 'a reusable CodeQL workflow is an advanced setup');
   const steps = 'jobs:\n  analyze:\n    steps:\n      - uses: github/codeql-action/init@v3\n      - uses: github/codeql-action/analyze@v3\n';
   const indentless = 'on:\n  push:\njobs:\n  analyze:\n    runs-on: ubuntu-latest\n    steps:\n    - name: Initialise\n      uses: github/codeql-action/init@v3\n    - uses: github/codeql-action/analyze@v3\n';
@@ -459,6 +486,20 @@ test('SE-08: the reader only reads, hides nothing it could not see, and reads th
     [`on:\n${steps}`, 'unsure', 'an empty on: cannot be placed'],
     ['on: push\nsteps:\n  - uses: github/codeql-action/init@v3\n  - uses: github/codeql-action/analyze@v3\n', 'unsure', 'steps outside any job'],
     ['on: push\njobs:\n  a:\n    steps:\n      - uses: github/codeql-action/upload-sarif@v3\n', false, 'upload-sarif for another scanner'],
+    ['on: push\njobs:\n  a:\n    steps:\n      - uses: GitHub/CodeQL-Action/init@v3\n      - uses: GitHub/CodeQL-Action/analyze@v3\n', true, 'any capitalisation'],
+    [`on: push\njobs:\n  a:\n    steps:\n      - "uses": github/codeql-action/init@v3\n      - uses : github/codeql-action/analyze@v3\n`, true, 'a quoted key and a space before the colon'],
+    ['on: push\njobs:\n  a:\n    steps:\n      - uses: >-\n          github/codeql-action/init@v3\n      - uses: github/codeql-action/analyze@v3\n', 'unsure', 'a folded uses value'],
+    ['on: push\njobs:\n  a:\n    steps:\n      - uses: github/codeql-action/autobuild@v3\n', false, 'other CodeQL steps placed with no init or analyze'],
+    ['on: push\njobs:\n  a:\n    steps: [{name: Initialise, uses: github/codeql-action/init@v3}, {uses: github/codeql-action/analyze@v3}]\n', true, 'flow-style steps with names'],
+    [`on: >-\n  push\n${steps}`, 'unsure', 'a folded trigger'],
+    [`on: &t push\n${steps}`, 'unsure', 'an anchored trigger'],
+    [`on: !!str push\n${steps}`, 'unsure', 'a tagged trigger'],
+    [`on:\n  release:\n    types: [published]\n${steps}`, 'unsure', 'a trigger outside both lists is never ruled out'],
+    [`on: { workflow_dispatch: {}\n  , push: {} }\n${steps}`, true, 'a comma-first flow map'],
+    [`on: repository_dispatch\n${steps}`, false, 'repository_dispatch only'],
+    ['on: push\njobs:\n  off:\n    if: false\n    steps:\n      - &init\n        uses: github/codeql-action/init@v3\n      - &analyze\n        uses: github/codeql-action/analyze@v3\n  live:\n    steps:\n      - *init\n      - *analyze\n', 'unsure', 'a live job that reuses steps through aliases'],
+    ['on: push\njobs:\n  off:\n    if: false\n    steps:\n      - uses: github/codeql-action/init@v3\n      - uses: github/codeql-action/analyze@v3\n  other:\n    steps:\n      - run: |\n          uses: github/codeql-action/init@v3\n', 'unsure', 'one ruled-out copy never hides a step the reader could not place'],
+    ['on: push\njobs:\n  a:\n    steps:\n      - uses: ./.github/actions/codeql\n', false, 'a composite action: GitHub\'s record of uploads decides (see SE-08)'],
   ]) assert.equal(security.runsCodeql(text), runs, why);
   // A default ref GitHub cannot resolve is unreadable, never "not merged".
   const noRef = security.ghSecurityReader('o/r', { spawn: fakeGh({
