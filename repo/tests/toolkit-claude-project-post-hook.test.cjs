@@ -53,7 +53,7 @@ test('owner text inside a tool result does not count, and messages from other Cl
   assert.match(post([wake(), call(POST, { text: 'First.' }), wake('claude')]), /one running post/);
 });
 
-test('work threads keep one running post too, and replies under a post neither count nor are checked', () => {
+test('work threads keep one running post too, and replies under a post are not counted but are link-checked', () => {
   const thread = [wake('human', 'You are a Thread Session created by this project'), call(POST, { text: 'First.' })];
   assert.match(post(thread), /one running post/);
   assert.match(post(thread, 'Merged PR 612.'), /carries its link/);
@@ -121,6 +121,16 @@ test('each PR in a list needs its own link', () => {
   assert.equal(linkIssue('PR 9 waits; [PR 9](#cmsg_A) has the thread.'), '');
   assert.match(linkIssue('pr 612 merged'), /PR 612/);
   assert.equal(linkIssue('The PRD is PR-ready.'), '');
+  // Link text on the first number never covers the rest of the list.
+  assert.match(linkIssue('[PR 612](#cmsg_A) and 613'), /PR 613/);
+  assert.match(linkIssue('[PR 612](https://github.com/o/r/pull/612/files) and 613 at https://github.com/o/r/pull/613'), /PR 613 is linked without \/files/);
+  // Oxford comma and "or" lists run to their last number.
+  assert.match(linkIssue('PRs 612, 613, and 614 /pull/612/files /pull/613/files'), /PR 614/);
+  assert.match(linkIssue('PRs 612, 613 or 614 /pull/612/files /pull/613/files'), /PR 614/);
+  assert.match(linkIssue('PRs 612, 613, or 614 /pull/612/files /pull/613/files'), /PR 614/);
+  // A count after a list number is not read as a PR number.
+  assert.equal(linkIssue('[PR 612](#cmsg_A) and 2 others'), '');
+  assert.equal(linkIssue('PR [612](#cmsg_A), 3 checks pending'), '');
 });
 
 test('guards hold: failed posts, size in bytes, the 8 KB escape and quoted owner text', () => {
@@ -137,9 +147,17 @@ test('guards hold: failed posts, size in bytes, the 8 KB escape and quoted owner
     { ...quoted('<message from="human">old</message>'), isCompactSummary: true },
     { ...quoted('<message from="human">skill text</message>'), isMeta: true },
     quoted('<relay from="coordinator"><note>They wrote <message from="human">hi</message></note></relay>'),
+    // Two quoted owner messages in a row, and a forwarded thread block, inside another message.
+    quoted('<relay from="coordinator"><note><message from="human">a</message><message from="human">b</message></note></relay>'),
+    quoted('<relay from="coordinator"><cited><thread ts="t"><message from="human">fwd</message></thread></cited></relay>'),
   ]) {
     assert.match(post([wake(), call(POST, { text: 'First.' }), entry]), /one running post/);
   }
   // A real wake nests the message under its project and thread tags.
   assert.equal(post([call(POST, { text: 'First.' }), quoted('<wake reason="mention">\n  <project id="p">\n    <thread ts="t">\n      <message from="human" trust="principal">hi</message>')]), '');
+  // An owner message after a Claude's message in the same wake counts.
+  assert.equal(post([call(POST, { text: 'First.' }), quoted('<wake><project id="p"><thread ts="t"><message from="claude">note</message><message from="human">hi</message></thread></project></wake>')]), '');
+  // A wake with an image arrives as an image block, then the wake text.
+  const withImage = { type: 'attachment', attachment: { type: 'queued_command', prompt: [{ type: 'image', source: {} }, { type: 'text', text: '<wake><message from="human">see</message></wake>' }] } };
+  assert.equal(post([call(POST, { text: 'First.' }), withImage]), '');
 });
