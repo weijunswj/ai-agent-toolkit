@@ -167,10 +167,10 @@ test('context-dependent discussion may reuse G0 while G1 and final review stay f
 test('the contract keeps the three-role workflow current and leaves dated history to git', () => {
   assert.equal((directive.match(/^## \d+\. /gm) || []).length, 20);
   assert.match(section(directive, 1), /G0 Discuss\/Discovery.*G1 Builder, including UAT.*G2 Review/);
-  assert.match(section(directive, 1), /Every new task, repository or environment starts with G0; the risk tier of the changed paths .* sets only the depth of UAT and review/);
+  assert.match(section(directive, 1), /Every new task, repository or environment starts with G0; only LIGHT edits and fixes inside an already-discovered task skip it\. Otherwise the risk tier of the changed paths .* sets only the depth of UAT and review/);
   assert.match(section(directive, 18), /G0 consideration and discussion/);
   const history = section(directive, 20);
-  assert.match(history, /in git history at commit `[0-9a-f]{40}`/);
+  assert.match(history, /in git history at commit `[0-9a-f]{7}`/);
   assert.match(history, /History is evidence, never a competing current instruction/);
   // No dated amendments, deadlines or handover packets return to the current contract.
   assert.doesNotMatch(directive, /\b\d{1,2} (?:January|February|March|April|May|June|July|August|September|October|November|December) 20\d\d\b/);

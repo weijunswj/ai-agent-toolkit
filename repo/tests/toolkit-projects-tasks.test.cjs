@@ -183,7 +183,7 @@ test('params are strict: known keys, safe values, report folder in the shared fo
     { ...base, project: 'BAD;NAME' }, { ...base, repo: 'no-slash' }, { ...base, repo: 'a/b/c' },
     { ...base, parent_issue: '#12' }, { ...base, parent_issue: '0' }, { ...base, report_dir: '/mnt/project-files/../x' },
     { ...base, report_dir: '/mnt/project-files/x/' }, { ...base, report_dir: '/mnt/other' }, { ...base, effort: 'ultra' },
-    { ...base, effort: 2 }, { ...base, session: 'fresh' }, { ...base, extra: 'x' }, (({ effort, ...rest }) => rest)(base), [], null
+    { ...base, effort: 2 }, { ...base, session: 'sometimes' }, { ...base, extra: 'x' }, (({ effort, ...rest }) => rest)(base), [], null
   ]) assert.throws(() => validateParams('daily-check-in', bad), JSON.stringify(bad));
   assert.deepEqual(validateParams('daily-check-in', { ...base, repo: 'none' }).toolkit_repo, 'weijunswj/ai-agent-toolkit');
   assert.equal(validateParams('custom', { ...PARAMS.custom, session: 'bound' }).session, 'bound');
@@ -235,6 +235,17 @@ test('every Toolkit-made prompt carries the recurring-task requirements; fresh r
   const bound = tasks().render('custom', validateParams('custom', { ...PARAMS.custom, session: 'bound' }), OWN_TEXT);
   assert.match(bound, /Never resolve this home thread/);
   assert.doesNotMatch(bound, /set_thread_resolved/);
+  // The fresh-session fallback renders as a fresh run that resolves its own thread, keeps session in
+  // its params so a refresh or check keeps it, and a bound Toolkit task stores no session at all.
+  for (const kind of ['daily-check-in', 'hourly-nudge']) {
+    assert.equal(validateParams(kind, PARAMS[kind]).session, undefined, kind);
+    const params = validateParams(kind, { ...PARAMS[kind], session: 'fresh' });
+    assert.equal(params.session, 'fresh');
+    const fresh = tasks().render(kind, params, '');
+    assert.match(fresh, /set_thread_resolved/, kind);
+    assert.doesNotMatch(fresh, /Never resolve this home thread/, kind);
+    assert.equal(tasks().check(kind, fresh).state, 'current', kind);
+  }
 });
 
 test('only the project that runs the Toolkit repo watches other projects, and only reports', () => {
@@ -251,18 +262,21 @@ test('only the project that runs the Toolkit repo watches other projects, and on
 
 test('the check-in carries every prefix in the fixed order and checks both Toolkit tasks; the nudge compares cheaply first', () => {
   const text = rendered('daily-check-in');
-  const order = ['SKILL UPDATE', 'SKILL DRIFT', 'SKILL BEHIND', 'BLOCK OUTDATED', 'BINDING STALE or BINDING UNKNOWN', 'TOOLKIT CHANGED', 'MEMORY FORMAT', 'TASKS OUTDATED', 'NUDGE NOT ARMED', 'PROJECT TASKS MISSING', 'PLUGIN BEHIND'];
+  const order = ['CONTEXT RESET DUE', 'SKILL UPDATE', 'SKILL DRIFT', 'SKILL BEHIND', 'BLOCK OUTDATED', 'BINDING STALE or BINDING UNKNOWN', 'TOOLKIT CHANGED', 'MEMORY FORMAT', 'TASKS OUTDATED', 'NUDGE NOT ARMED', 'PROJECT TASKS MISSING', 'PLUGIN BEHIND'];
   const line = text.split('\n').find(entry => entry.startsWith('- First line:'));
   const positions = order.map(prefix => line.indexOf(prefix));
   assert.ok(positions.every((at, index) => at > -1 && (index === 0 || at > positions[index - 1])), line);
   for (const required of ['"EXAMPLE: Daily check-in"', '"EXAMPLE: Hourly nudge"', '--check daily-check-in', '--check hourly-nudge',
-    '--check-memory', 'persist_session false', 'persist_session true', 'weekly-rebuild', 'unlisted', 'hearth_channel_id',
+    '--check-memory', 'bound to its home thread (persist_session true), or a fresh session per run (persist_session false) only where the entry says fresh', 'CONTEXT RESET DUE, SKILL UPDATE', 'weekly-rebuild', 'unlisted', 'hearth_channel_id',
     'advice only', 'local, advice', 'Never suggest moving a local task to the cloud', '--declined-dedupe', 'overlaps',
     'remove the Toolkit plugin only', 'state done', 'older than 65 minutes', 'Never flag other memory lines',
     'git hash-object --stdin', 'matches no revision', '/skill-drift/', 'unless state.md already reported these hashes',
     'every run reaches the owner as one line', 'swaps each named Toolkit task from the template on main the same turn']) {
     assert.ok(text.includes(required), required);
   }
+  // Both Toolkit tasks are bound now, so a bound check-in is never its own gap.
+  assert.doesNotMatch(text, /the check-in runs a fresh session per run/);
+  assert.match(text, /bound-session or fresh-session when that differs from the entry/);
   const nudge = rendered('hourly-nudge');
   // The cheap check reads the last run's state first and skips the full sweep when nothing moved;
   // the binding check is daily only, so the nudge clones nothing.
@@ -278,18 +292,21 @@ test('the check-in carries every prefix in the fixed order and checks both Toolk
     'state done', '"EXAMPLE: Daily check-in"', 'CHECK-IN NOT ARMED', 'limit 10', 'list all of them every run']) {
     assert.ok(nudge.includes(required), required);
   }
+  assert.match(nudge, /not SUCCEEDED, or its home thread is resolved, start the first line with "CHECK-IN NOT ARMED/);
 });
 
 test('memory check reads only the BINDING and SCHEDULED TASKS lines', () => {
-  const binding = `- BINDING: example-owner/ai-agent-toolkit main commit ${'a'.repeat(40)} CONTROLLER.md blob ${'b'.repeat(40)} toolkit 3.10.0 skill 2026-10-24.3 bound 2026-10-24`;
+  const binding = `- BINDING: example-owner/ai-agent-toolkit main commit ${'a'.repeat(40)} CONTROLLER.md blob ${'b'.repeat(40)} toolkit 3.10.1 skill 2026-10-24.5 bound 2026-10-24`;
   const tasksLine = '- SCHEDULED TASKS: EXAMPLE: Daily check-in | trig_01abc | CRON_TZ=Asia/Singapore 47 8 * * * | fresh; EXAMPLE: Hourly nudge | trig_02def | CRON_TZ=Asia/Singapore 37 * * * * | bound home cmsg_03ghi since 2026-10-24; Sweep | trig_04jkl | CRON_TZ=Asia/Singapore 0 9 * * 1-5 | local | owner schedule';
   const rows = [
     [`# Memory\n${binding}\n${tasksLine}\n- Owner note: anything at all.\n`, ['current'], 0],
     [`${tasksLine}\n`, ['MEMORY FORMAT: BINDING missing'], 1],
-    [`${binding.replace(' toolkit 3.10.0', '')}\n${tasksLine}\n`, ['MEMORY FORMAT: BINDING old format'], 1],
+    [`${binding.replace(' toolkit 3.10.1', '')}\n${tasksLine}\n`, ['MEMORY FORMAT: BINDING old format'], 1],
     [`${binding}\n${binding}\n${tasksLine}\n`, ['MEMORY FORMAT: BINDING more than one line'], 1],
     [`${binding}\n`, ['MEMORY FORMAT: SCHEDULED TASKS missing'], 1],
     [`${binding}\n- SCHEDULED TASKS: EXAMPLE daily trig_01abc\n`, ['MEMORY FORMAT: SCHEDULED TASKS old format'], 1],
+    [`${binding}\n${tasksLine.replace('since 2026-10-24;', 'since 2026-10-24 | stopped by owner 2026-10-25;')}\n`, ['current'], 0],
+    [`${binding}\n${tasksLine.replace('since 2026-10-24;', 'since 2026-10-24 | stopped;')}\n`, ['MEMORY FORMAT: SCHEDULED TASKS old format'], 1],
     [`${binding}\n${tasksLine.replace('fresh;', 'sometimes;')}\n`, ['MEMORY FORMAT: SCHEDULED TASKS old format'], 1],
     ['', ['MEMORY FORMAT: BINDING missing', 'MEMORY FORMAT: SCHEDULED TASKS missing'], 1]
   ];
@@ -330,4 +347,33 @@ test('invalid arguments and unreadable input fail with one generic error', t => 
   assert.equal(result.status, 0);
   assert.equal(JSON.parse(result.stdout).project, 'EXAMPLE');
   assert.throws(() => parseArgs(['--refresh', 'daily-check-in', prompt, '--params', 'a', '--params', 'b']));
+});
+
+test('every line that re-arms, updates, swaps, rebuilds, recreates or sets up a Toolkit task honours a stopped by owner entry', () => {
+  // Scans by what a line does, not where it sits, so a new path that forgets the exception fails here.
+  // The named lines are not automatic paths: introductions, how a task is created or rendered (every
+  // path that uses them carries the exception), the project's own tasks, the tool route, the steps
+  // under the swap paragraph (which carries the exception), runs of the task itself, and thread
+  // resolving.
+  const dir = path.join(ROOT, 'repo', 'contracts', 'claude-projects', 'web-controller-projects');
+  const files = ['SKILL.md', 'project-instructions.md', ...['reference', 'tasks'].flatMap(sub => fs.readdirSync(path.join(dir, sub)).filter(name => name.endsWith('.md')).map(name => `${sub}/${name}`))];
+  const acts = /\b(?:re-?arm|rebuil[dt]|re-?creat|swap|set up the|re-?enabl|restor|refresh|replac|switch|re-?add|resum|fire (?:it |them )?again|update (?:the|those|its)\b[^.]*prompt|creat(?:e|es) (?:it|them|the|a)\b)/i;
+  const notPaths = [
+    'Whenever the user asks for anything recurring', "**The project's own tasks**", 'Reference for the `web-controller-projects` skill',
+    'A cloud thread creates, recreates and deletes tasks', '3. Create the replacement', '4. Rewrite the `SCHEDULED TASKS:` line', '7. Weekly rebuild:', '**It is bound to its own home thread,**',
+    'Every Toolkit scheduled task is bound to its own home thread (`<PROJECT>: <task name>`): start', '**Toolkit-made tasks** (the daily check-in and the hourly nudge) are rendered', 'Resolve candidates:',
+    'When a recurring task replaces an older one, delete the older one',
+    'Toolkit-made task swaps under their safeguards', 'so the coordinator rebuilds this home thread',
+  ];
+  const unguarded = [];
+  for (const rel of files) {
+    fs.readFileSync(path.join(dir, rel), 'utf8').replace(/\r\n/g, '\n').split('\n').forEach((line, index) => {
+      if (acts.test(line) && /\b(?:tasks?|check-ins?|nudges?|triggers?|routines?|reminders?)\b/i.test(line) && !/stopped by owner|owner stopped them/.test(line) && !notPaths.some(text => line.includes(text))) unguarded.push(`${rel}:${index + 1}: ${line.slice(0, 120)}`);
+    });
+  }
+  assert.deepEqual(unguarded, []);
+  const skill = fs.readFileSync(path.join(dir, 'SKILL.md'), 'utf8');
+  assert.match(skill, /\*\*Stopped by owner:\*\* a task whose `SCHEDULED TASKS:` entry says `stopped by owner` is outside every automatic path/);
+  assert.match(skill, /the restart removes the mark/);
+  assert.match(fs.readFileSync(path.join(dir, 'reference', 'recurring-tasks.md'), 'utf8'), /When the owner restarts it, remove the mark\./);
 });

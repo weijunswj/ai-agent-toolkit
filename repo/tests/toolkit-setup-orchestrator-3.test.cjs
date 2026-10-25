@@ -117,7 +117,7 @@ test('generated Codex and Claude instruction surfaces preserve the compact host-
   const claude = fs.readFileSync(path.join(repoRoot, 'skills/repository-agent-rules/repo-local/CLAUDE.shim.template.md'), 'utf8');
   const gate = fs.readFileSync(path.join(repoRoot, 'repo/contracts/agent-rules/gate-rules.md'), 'utf8');
   for (const pattern of [
-    /Delegate when it saves context or wall time; no note is needed when you don't/,
+    /By default G0 delegates suitable separable evidence gathering and G1 suitable independent implementation or validation/,
     /In gate work only a G0 or G1 lead launches helpers; helpers never launch or ask for another agent, and G2 has none/,
   ]) assert.match(global, pattern);
   // Prompt hygiene for gate launches is a gate mechanic, kept in the gate rules.

@@ -24,7 +24,7 @@ Reference for the `web-controller-projects` skill, opened when the coordinator r
 2. **Project memory and models.**
    - Have the user turn project memory on. Verify by saving one memory entry and reading it back.
    - Ask for one setting only: in the project's model settings, the **coordinator** gets the strongest available Opus model, effort **High** (the default Low is too weak for controller decisions). Ask the user to confirm what the settings page now shows.
-   - Thread effort is never a project setting: you set it on every thread you start (**Threads**), gates get their pinned route, and scheduled tasks set theirs in the prompt.
+   - Thread effort is never a project setting: you set it on every thread you start (**Threads** in the skill), gates get their pinned route, and scheduled tasks set theirs in the prompt.
 3. **Device and folder** (only when the project works locally).
    - Ask for the device to use for local Remote Control and the repo folder on it.
    - Start one read-only local Remote Control thread there to confirm the folder is the repo's checkout on its default branch.
@@ -32,12 +32,12 @@ Reference for the `web-controller-projects` skill, opened when the coordinator r
    - Have the user turn on the Claude desktop app's keep-awake setting for Remote Control (Settings > Claude Code), so local rc threads don't stall when the device idles. Closing the lid still sleeps it.
    - Save the device and folder to memory.
 4. **Bind.**
-   - Bind `CONTROLLER.md` (Binding above).
-   - Write the binding line (Binding above).
+   - Bind `CONTROLLER.md` (**Binding** in the skill).
+   - Write the binding line (**Binding** in the skill).
 5. **Project instructions.**
    - Have a cloud thread run `node repo/scripts/toolkit-projects-instructions.cjs --render` from bound Toolkit `main`, save the block to the shared folder and read it back. Every project on one Toolkit version gets the same block.
    - Draft the project lines from the setup answers: repos and transport store, device and folder, where work runs, owner-granted approvals, project-specific roles. Only facts that differ by project, nothing the block says.
-   - Write the instructions as the block first, one blank line, then the project lines; text a project already had goes below the block, deduped. Apply it with the safeguards in **Managed project-instructions sync**. Read the saved instructions back to verify them; record the block's toolkit version in project memory.
+   - Write the instructions as the block first, one blank line, then the project lines; text a project already had goes below the block, deduped. Apply it with the safeguards in **Managed project-instructions sync** (`reference/instructions-sync.md`). Read the saved instructions back to verify them; record the block's toolkit version in project memory.
 6. **Takeover** (mode b only).
    - There is no handover packet: ask where the outgoing controller's work lives (its branches and PRs, the programme issue comments when ENABLED, its evidence store and, for a Projects controller, its project memory).
    - Have a read-only thread read those in full.
@@ -50,7 +50,7 @@ Reference for the `web-controller-projects` skill, opened when the coordinator r
    - Then list the pending work and what waits on the user.
 8. **Goal, check-in and nudge.**
    - Set the project goal to the parent programme (GitHub governance ENABLED), or to the user's stated goal.
-   - Pick a morning check-in time in the user's time zone and tell them. Set up the **Daily check-in** and the **Hourly nudge** (below) exactly as in **Recurring tasks**, with prompts rendered from Toolkit, and write the `SCHEDULED TASKS:` memory line.
+   - Pick a morning check-in time in the user's time zone and tell them. Set up the **Daily check-in** and the **Hourly nudge** (both in the skill) exactly as in **Recurring tasks** (`reference/recurring-tasks.md`), with prompts rendered from Toolkit, and write the `SCHEDULED TASKS:` memory line. In every mode, skip a task whose existing entry says `stopped by owner` and keep that entry.
 9. **Confirm it works.** Show the user each item as it passes:
    - one thread result relayed into the project chat with its link;
    - one decision card answered;

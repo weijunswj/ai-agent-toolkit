@@ -72,8 +72,8 @@ test('the helper routes line reports the stored native result for this platform 
   assert.equal(linux.status, STATUS.PASSED, 'informational: nothing for the owner to fix');
   assert.match(linux.summary, /^Qualified on Claude Code 2\.1\.309 \(Linux, 2026-10-23\)\./);
   assert.match(linux.summary, /Known limit: A session started with --agents can redefine a Toolkit helper name/);
-  assert.match(byId(check('win32'), 'helper-routes').summary, /^Qualified on Claude Code 2\.1\.306 \(Windows, 2026-10-23\)\./);
-  assert.match(byId(check('darwin'), 'helper-routes').summary, /^Not yet qualified on macOS; last qualified on Claude Code 2\.1\.306 \(Windows, 2026-10-23\)\./);
+  assert.match(byId(check('win32'), 'helper-routes').summary, /^Qualified on Claude Code 2\.1\.310 \(Windows, 2026-10-25\)\./);
+  assert.match(byId(check('darwin'), 'helper-routes').summary, /^Not yet qualified on macOS; last qualified on Claude Code 2\.1\.310 \(Windows, 2026-10-25\)\./);
   const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-install-health-'));
   t.after(() => fs.rmSync(empty, { recursive: true, force: true }));
   assert.equal(byId(check('win32', empty), 'helper-routes').summary, 'Not yet qualified: no stored native result.');

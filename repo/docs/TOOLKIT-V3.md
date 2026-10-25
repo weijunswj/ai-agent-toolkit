@@ -6,7 +6,7 @@ This is the current V3 delivery contract for the Toolkit programme. It states th
 
 Toolkit is a portable delivery framework. A user gives a controller an outcome; executors discover the real environment, agree the scope, build a usable version, obtain acceptance, get it reviewed and finish the authorised delivery. Source, decisions, evidence and the next action survive any change of chat, model, harness, environment or controller.
 
-The normal coding workflow is **G0 Discuss/Discovery → G1 Builder, including UAT → G2 Review**. It is the default Shipping Law unless the user specifies another workflow. Every new task, repository or environment starts with G0; the risk tier of the changed paths (RISKY, NORMAL or LIGHT, from the risk-tier script in the global rules) sets only the depth of UAT and review. Routine, already-authorised work proceeds without repeated permission questions. Track builder readiness, UAT, review, custody, integration, installation, Core release and parent completion separately.
+The normal coding workflow is **G0 Discuss/Discovery → G1 Builder, including UAT → G2 Review**. It is the default Shipping Law unless the user specifies another workflow. Every new task, repository or environment starts with G0; only LIGHT edits and fixes inside an already-discovered task skip it. Otherwise the risk tier of the changed paths (RISKY, NORMAL or LIGHT, from the risk-tier script in the global rules) sets only the depth of UAT and review. Routine, already-authorised work proceeds without repeated permission questions. Track builder readiness, UAT, review, custody, integration, installation, Core release and parent completion separately.
 
 | Completion | Required result |
 |---|---|
@@ -52,7 +52,7 @@ G0 is a strong reasoning lead. It walks the real happy path and checks the actua
 
 G1 receives the whole approved scope, builds and integrates it, runs meaningful tests, demonstrates it and resolves ordinary UAT feedback and defects without another admission. The user owns the outcome, material scope and acceptance; the builder owns the plan within them and never silently changes scope, trust boundaries, paid services, destructive effects or acceptance. Design follows the gate rules' building policy, every change follows the global change-local hygiene law, and work finishes before stopping as the global Shipping section says.
 
-G1 reaches the actual consumer boundary: mocks never prove an installation or operation they did not exercise, and it reports what ran, failed and was not exercised. UAT depth follows the tier and the gate rules' UAT section: RISKY work gets agent UAT plus owner UAT; otherwise owner UAT runs when the user's surface changes. User acceptance covers only what needs the owner's own hands: real desktop or app UI, signed-in accounts and device behaviour that CI (Windows runners included), automated tests and G2 review cannot reach. Everything those checks prove is accepted objectively and listed beside the owner steps with the passing check that covers it; when nothing needs the owner's hands, UAT is recorded as not required. Silence is not approval.
+G1 reaches the actual consumer boundary: mocks never prove an installation or operation they did not exercise, and it reports what ran, failed and was not exercised. UAT depth follows the tier and the gate rules' UAT section: RISKY work gets agent UAT plus owner UAT for any owner-hands steps; otherwise owner UAT runs when the user's surface changes. User acceptance covers only what needs the owner's own hands: real desktop or app UI, signed-in accounts and device behaviour that CI (Windows runners included), automated tests and G2 review cannot reach. Everything those checks prove is accepted objectively and listed beside the owner steps with the passing check that covers it; when nothing needs the owner's hands, UAT is recorded as not required. Silence is not approval.
 
 ## 7. Context and fresh sessions
 
@@ -96,7 +96,7 @@ Before editing policy, find the layer that denied an operation: instructions, ho
 
 ## 13. Private evidence and cleanup
 
-Work in the assigned environment, secret-scan and upload the needed evidence to the **already-selected private store**, read it back, delete eligible scratch once its report is stored, and keep the PR, brief or programme comment current. When no store has been selected, discuss the choice once and recommend a private `TRANSPORT-*` Git repository by default. The user's selection of another supported private backend takes precedence over that recommendation, and a capability that backend lacks is a backend-specific HOLD, not a reason to switch.
+Work in the assigned environment, secret-scan and upload the needed evidence to the **already-selected private store**, read it back, delete eligible scratch once its report and kept evidence are stored and read back, and keep the PR, brief or programme comment current. When no store has been selected, discuss the choice once and recommend a private `TRANSPORT-*` Git repository by default. The user's selection of another supported private backend takes precedence over that recommendation, and a capability that backend lacks is a backend-specific HOLD, not a reason to switch.
 
 In a Git store the commit is the manifest, and a successful push plus one fetch is the read-back. Archive once, at gate end; keep run streams only for a FAIL or a disputed verdict. There is no expiry clock, pin or cleanup ledger. If transfer fails, report custody pending and keep the local material. Never delete the only copy, user data, active or UAT resources or unresolved evidence. Git cleanup is an ordinary non-force commit and never removes history; another backend uses its own supported capability or holds the cleanup.
 
@@ -105,6 +105,8 @@ In a Git store the commit is the manifest, and a successful push plus one fetch 
 Native plugins target Codex (`owner-gpt` routes) and Claude Code (`owner-claude` routes); Antigravity gets a portable skills copy only. Before inference by an automation-launched agent or helper, deterministically enforce the requested-helper permission, the selected profile and pinned revision, the effective provider, model and effort, and native inheritance and overrides; leaves and G2 cannot delegate. These checks never lock a human's manually selected first-layer model or effort (section 10). Use the host's blocking parent PreToolUse path; a child hook or SubagentStart alone is insufficient.
 
 Per host path, qualify the correct route and each wrong-route, guard-failure, missing-hook, malformed-config, post-check-change, resume, alternate-entry and delegation negative; a request that escapes the guard fails even when something downstream stops it. Installed proof checks effective instructions, hooks, route and caches, and a new session must receive the current instructions.
+
+A fail-open host requires an enforceable launcher or a disabled uncontrolled helper path. An unenforceable exact helper path is UNQUALIFIED and cannot be used uncontrolled; direct strong-lead work is the allowed exception. Host PASS requires correct-route execution, wrong-route prevention and failure-resilience proof; documentation, a copied plugin or unit tests alone do not qualify a host. Remove stale Toolkit-owned plugin, cache or staging copies only after the new active version is proved.
 
 ## 15. Security and operational commitments
 
@@ -153,4 +155,4 @@ Test the actual supported controller/launcher continuation path when section 7 r
 
 ## 20. History
 
-The dated owner decisions, launch reconciliation, the bounded evidence-integrity evaluation and the earlier retention clocks behind this contract are in git history at commit `1a64367e987bf3c7e7a96c521c0ef77db4d6f5be`, with a copy in the Toolkit evidence store. History is evidence, never a competing current instruction.
+The dated owner decisions, launch reconciliation, the bounded evidence-integrity evaluation and the earlier retention clocks behind this contract are in git history at commit `1a64367`, with a copy in the Toolkit evidence store. History is evidence, never a competing current instruction.

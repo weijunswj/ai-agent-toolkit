@@ -119,7 +119,7 @@ test('Projects re-checks the bound CONTROLLER.md blob before launches and on eve
   // Coordinator on a report: same-turn rebind, running gates checked, launches held; runs never write.
   assert.match(text, /re-reads and rebinds in the same turn, checks whether running gates need the changed instructions, and holds new launches until rebound/);
   assert.match(text, /Periodic runs and threads only report; only the coordinator writes the binding line/);
-  assert.match(text, /^   - Write the binding line \(Binding above\)\.$/m);
+  assert.match(text, /^   - Write the binding line \(\*\*Binding\*\* in the skill\)\.$/m);
   assert.doesNotMatch(text, /Record the commit SHA and the skill Version in memory|Re-check its revision before each launch/);
   // Both periodic runs carry the check.
   assert.match(text, /^  - `BINDING STALE` or `BINDING UNKNOWN`: rebind \(\*\*Binding\*\*\)\. When current, the report says `\*\*Binding:\*\* current` with the short blob, adding the newer short commit when only the commit moved\.$/m);

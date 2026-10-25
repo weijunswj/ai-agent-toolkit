@@ -6,7 +6,7 @@
     { "id": "instructions", "artefact": "Managed project-instructions block, at the top, with project lines deduped", "setup_steps": [5], "source": "repo/contracts/claude-projects/web-controller-projects/project-instructions.md", "check": "BLOCK OUTDATED", "resync": "auto" },
     { "id": "binding", "artefact": "BINDING line in project memory", "setup_steps": [4], "source": "repo/CONTROLLER.md", "check": "BINDING STALE", "resync": "auto" },
     { "id": "toolkit-version", "artefact": "Toolkit version on the BINDING line", "setup_steps": [4], "source": ".claude-plugin/plugin.json", "check": "TOOLKIT CHANGED", "resync": "auto" },
-    { "id": "toolkit-tasks", "artefact": "Daily check-in and hourly nudge, and the hourly nudge's home thread", "setup_steps": [8], "source": "repo/contracts/claude-projects/web-controller-projects/tasks/", "check": "TASKS OUTDATED", "resync": "auto" },
+    { "id": "toolkit-tasks", "artefact": "Daily check-in and hourly nudge, and their home threads", "setup_steps": [8], "source": "repo/contracts/claude-projects/web-controller-projects/tasks/", "check": "TASKS OUTDATED", "resync": "auto" },
     { "id": "nudge-armed", "artefact": "Hourly nudge armed with an unresolved home thread", "setup_steps": [8], "source": "repo/contracts/claude-projects/web-controller-projects/tasks/hourly-nudge.md", "check": "NUDGE NOT ARMED", "resync": "auto" },
     { "id": "project-tasks", "artefact": "The project's own cloud tasks", "setup_steps": [], "source": "shell blocks only, once the owner opts a task in", "check": "**Tasks:**", "resync": "report" },
     { "id": "local-tasks", "artefact": "Local, desktop or device-bound tasks", "setup_steps": [], "source": "none", "check": "local, advice", "resync": "report" },

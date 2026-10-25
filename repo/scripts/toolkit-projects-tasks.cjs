@@ -47,7 +47,9 @@ const PARAMS = Object.freeze({
   parent_issue: { fallback: 'none', test: v => v === 'none' || /^[1-9]\d{0,6}$/.test(v) },
   report_dir: { required: true, test: v => /^\/mnt\/project-files\/[A-Za-z0-9._/-]+$/.test(v) && !v.split('/').includes('..') && !v.endsWith('/') && !v.includes('//') },
   effort: { required: true, test: v => ['low', 'medium', 'high', 'xhigh', 'max'].includes(v) },
-  session: { customOnly: true, fallback: 'fresh', test: v => v === 'fresh' || v === 'bound' }
+  // A custom task defaults to a fresh session; the two Toolkit tasks default to bound and take
+  // session fresh only as the fallback, which is then kept in their params.
+  session: { fallback: 'fresh', test: v => v === 'fresh' || v === 'bound' }
 });
 
 class TaskInputError extends Error {}
@@ -68,9 +70,11 @@ function validateParams(kind, raw) {
   }
   for (const [key, rule] of Object.entries(PARAMS)) {
     if (rule.customOnly && kind !== 'custom') continue;
-    const value = raw[key] === undefined ? rule.fallback : raw[key];
+    const fallback = key === 'session' && KINDS[kind].session ? KINDS[kind].session : rule.fallback;
+    const value = raw[key] === undefined ? fallback : raw[key];
     if (value === undefined && rule.required) throw new TaskInputError('TASK_PARAMS');
     if (!rule.test(value)) throw new TaskInputError('TASK_PARAMS');
+    if (key === 'session' && KINDS[kind].session && value === KINDS[kind].session) continue;
     params[key] = value;
   }
   return params;
@@ -90,7 +94,7 @@ function taskName(kind, params) {
 // [toolkit] is the project whose repo is the Toolkit repo itself.
 // Placeholders are {{name}}; an unknown placeholder or tag is a broken source.
 function fill(template, kind, params) {
-  const session = KINDS[kind].session || params.session;
+  const session = params.session || KINDS[kind].session;
   const values = {
     ...params,
     task_name: KINDS[kind].title ? taskName(kind, params) : 'this task',
@@ -284,7 +288,7 @@ function inOrder(lf, own, fence, expected) {
 
 // The two memory lines Toolkit defines. Nothing else in memory is read.
 const BINDING_LINE = /^[-*\s]*BINDING: [A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+ \S+ commit [0-9a-f]{40} CONTROLLER\.md blob [0-9a-f]{40} toolkit \d+\.\d+\.\d+ skill \S+ bound \S+\s*$/;
-const TASK_ENTRY = /^(?<name>[^|;]+?) \| (?<id>trig_[A-Za-z0-9]+) \| (?<cron>[^|;]+?) \| (?<mode>fresh|local|device|bound home cmsg_[A-Za-z0-9]+ since \d{4}-\d{2}-\d{2})(?: \| owner schedule)?$/;
+const TASK_ENTRY = /^(?<name>[^|;]+?) \| (?<id>trig_[A-Za-z0-9]+) \| (?<cron>[^|;]+?) \| (?<mode>fresh|local|device|bound home cmsg_[A-Za-z0-9]+ since \d{4}-\d{2}-\d{2})(?: \| owner schedule)?(?: \| stopped by owner \d{4}-\d{2}-\d{2})?$/;
 
 function checkMemory(text) {
   const lines = lfText(text).split('\n');
