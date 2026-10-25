@@ -1,5 +1,12 @@
 # Toolkit Changelog
 
+## 3.13.8 (local secret scan)
+
+### Secure CI/CD skill
+
+- **Local secret scan:** `skills/secure-ci-cd/scripts/local-security-scan.cjs` checks one repository on the owner's computer for committed credentials, read-only, across every tracked or unignored file and every line ever added on any branch or tag. It needs only Node and git, installs nothing and sends nothing off the computer; vulnerable dependencies stay with Dependabot. The report (`--out`, outside the scanned repository) names places only (file, line, column, short commit, format), never any part of a match, an author or a commit message, and classes each finding as a release blocker or a likely false positive. `--recheck` shows what is fixed, still open or new. Exit codes: 0 clean, 1 release blocker, 2 could not scan, 3 incomplete.
+- **Shared secret formats:** `skills/secure-ci-cd/scripts/secret-patterns.cjs` holds providers' published token shapes (fixed prefix, exact length, fixed characters) with no entropy guessing, skips plain placeholders and honours a same-line `secret-scan: allow <reason>` marker. Other Toolkit secret checks reuse it.
+
 ## 3.13.6 (repository protection)
 
 ### Default-branch protection
