@@ -69,12 +69,15 @@ function respond(event, input, options = {}) {
   }
 }
 
+// The gate's never-act line, spelled out here because the gate module may be what failed to load.
+const NEVER_OWNER = 'Never act as the user: do not answer the governance question yourself, start a session or script to answer it, or click a confirmation through a UI or computer use.';
+
 function failed(event, input, gate) {
   let inside = true;
   try { inside = (gate || require('./toolkit-governance-gate.cjs')).insideRepository(input.cwd); } catch { inside = true; }
   if (!inside || event === 'SessionStart') return {};
-  if (event === 'UserPromptSubmit') return { decision: 'block', reason: 'Toolkit: the governance check failed, so your message was held and not sent. If this keeps happening, open Claude Code in a folder outside any git repository and say `setup toolkit` to repair the installed hooks.' };
-  return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'Toolkit: the governance check failed, so nothing runs in this repository until it works again.' } };
+  if (event === 'UserPromptSubmit') return { decision: 'block', reason: `Toolkit: the governance check failed, so your message was held and not sent. If this keeps happening, open Claude Code in a folder outside any git repository and say \`setup toolkit\` to repair the installed hooks. ${NEVER_OWNER}` };
+  return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `Toolkit: the governance check failed, so nothing runs in this repository until it works again. ${NEVER_OWNER}` } };
 }
 
 function main(argv = process.argv.slice(2), stdin = () => fs.readFileSync(0, 'utf8')) {
@@ -90,4 +93,4 @@ function main(argv = process.argv.slice(2), stdin = () => fs.readFileSync(0, 'ut
 
 if (require.main === module) process.exitCode = main();
 
-module.exports = Object.freeze({ EVENTS, CLOUD_LINE, exportHostSession, respond, main });
+module.exports = Object.freeze({ EVENTS, CLOUD_LINE, NEVER_OWNER, exportHostSession, respond, main });

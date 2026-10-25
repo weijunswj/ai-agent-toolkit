@@ -101,6 +101,33 @@ test('installed mode picks the local Toolkit install over a claude.ai account co
   assert.throws(() => pickInstalledPlugin([local, { ...local, id: 'ai-agent-toolkit@other', scope: 'project' }]), /ai-agent-toolkit@other \(project\)/);
 });
 
+test('live rows A14 and A16 pass only on a run that really ran, from stub run summaries', () => {
+  const { ROW_CHECKS, KNOWN_LIMITS } = require('./qualification/claude-helper-matrix.live.cjs');
+  const pin = { model: 'claude-opus-5-5', effort: 'high' };
+  const lead = [{ model: 'claude-opus-5-5', effort: 'high', per_turn_effort: 'high' }];
+  const run = fields => ({ exit: 0, result_subtype: 'success', records_found: true, lead_turns: lead, agent_calls: [], hook_decisions: [], helpers: [], ...fields });
+  // A16: a clean run with no helper passes; a held, signed-out or unrecorded run does not.
+  assert.equal(ROW_CHECKS.A16(run({})).pass, true);
+  for (const [name, fields] of [
+    ['held: Claude Code exited 0 but no turn ran', { result_subtype: null, lead_turns: [] }],
+    ['signed out', { exit: 1, result_subtype: null, lead_turns: [] }],
+    ['no run records where the runner reads them', { records_found: false, lead_turns: [] }],
+    ['lead off its route', { lead_turns: [{ model: 'claude-opus-5-5', effort: 'low' }] }],
+    ['a helper was asked for', { agent_calls: [{ subagent_type: 'toolkit-g0-helper' }] }],
+    ['a hook decided', { hook_decisions: [{ decision: 'deny' }] }],
+  ]) assert.equal(ROW_CHECKS.A16(run(fields)).pass, false, name);
+  // A14: a helper turn on the pin passes; off the pin is the known limit; nothing ran fails.
+  const helper = turns => [{ agent_type: 'toolkit-g0-helper', turns }];
+  assert.deepEqual(ROW_CHECKS.A14(run({ helpers: helper([{ model: pin.model, effort: pin.effort }]) }), pin, { refused: true }), { pass: true, limit: null });
+  assert.deepEqual(ROW_CHECKS.A14(run({ hook_decisions: [{ decision: 'deny' }] }), pin, { refused: true }), { pass: true, limit: null });
+  const off = run({ helpers: helper([{ model: pin.model, effort: 'low' }]) });
+  assert.deepEqual(ROW_CHECKS.A14(off, pin, { refused: true }), { pass: false, limit: KNOWN_LIMITS.A14 });
+  assert.match(ROW_CHECKS.A14(off, pin, { refused: false }).limit, /The launcher check did not refuse it either\.$/);
+  for (const [name, fields] of [['nothing ran', {}], ['the session failed', { exit: 1, helpers: helper([{ model: pin.model, effort: pin.effort }]) }]]) {
+    assert.deepEqual(ROW_CHECKS.A14(run(fields), pin, { refused: true }), { pass: false, limit: null }, name);
+  }
+});
+
 test('the live runner sets no dollar cap unless one is given', () => {
   const { parseArgs, sessionArgs } = require('./qualification/claude-helper-matrix.live.cjs');
   const definitions = { g0: { text: '---\nname: toolkit-g0-helper\ntools: Read, Glob, Grep\n---\n' } };
