@@ -151,7 +151,7 @@ test('S-01, S-02: no git root is DISABLED automatically; a git repository not on
   if (governance.findGitRoot(plain) === null) {
     assert.deepEqual([outside.state, outside.rule, outside.reason, outside.hold], ['DISABLED', 'R1', 'no-git', false]);
     assert.equal(outside.folder, plain);
-    assert.match(outside.repository_id, /^path:[0-9a-f]{64}$/);
+    assert.equal(outside.repository_id, null);
     assert.equal(outside.root, null);
   }
   for (const [name, remote, reason, host] of [
@@ -190,18 +190,6 @@ test('S-01, S-02: no git root is DISABLED automatically; a git repository not on
   // A damaged ok file counts as no ok: the repository asks again.
   fs.writeFileSync(okFile, '{ damaged');
   assert.equal(state(ctx, path.join(ctx.root, 'gitlab')).rule, 'R9');
-});
-
-test('R1 copies: plain folders record DISABLED, but never at a root, the home folder, Toolkit\'s own folder or the personal folders', (t) => {
-  const ctx = scratch(t);
-  const options = opts(ctx);
-  const home = path.dirname(path.dirname(path.dirname(ctx.registryPath)));
-  assert.equal(governance.recordFolderFor(path.join(home, 'projects', 'x-boundaries'), options), path.join(home, 'projects', 'x-boundaries'));
-  assert.equal(governance.recordFolderFor(path.join(home, 'Desktop', 'X-Boundaries'), options), path.join(home, 'Desktop', 'X-Boundaries'));
-  for (const folder of [path.parse(home).root, home, path.dirname(home), path.join(home, '.ai-agent-toolkit'), path.join(home, '.ai-agent-toolkit', 'user-state'),
-    path.resolve(os.tmpdir()), path.join(home, 'Desktop'), path.join(home, 'documents'), path.join(home, 'Downloads'), path.join(home, 'OneDrive - Work', 'Desktop')]) {
-    assert.equal(governance.recordFolderFor(folder, options), null, folder);
-  }
 });
 
 test('S-03, S-06, S-07: materials without a decision', (t) => {

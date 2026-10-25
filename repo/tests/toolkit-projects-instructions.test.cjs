@@ -216,7 +216,7 @@ test('owner reads only injected source/version dependencies and rejects malforme
   assert.throws(() => new ProjectsInstructions({ root: ROOT, readFile: () => '{}' }).render());
 });
 
-test('source body stays under 4000 CRLF bytes and contains no marker lines or front matter', () => {
+test('source body, measured without the two marker lines, stays under 4000 CRLF bytes and contains no marker lines or front matter', () => {
   const text = fs.readFileSync(BODY, 'utf8').replace(/\r\n/g, '\n');
   assert.ok(Buffer.byteLength(text.replace(/\n/g, '\r\n')) < 4000);
   assert.match(text, /^- Roles:/);

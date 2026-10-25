@@ -1,6 +1,6 @@
 ---
 name: n8n-environment-setup
-description: Set up or explain safe n8n environments, installation, local development stacks, hosting, tunnels, backups, launchers, or official n8n Skills setup. For workflow files, transport helpers, MCP operations, or live n8n work, first apply n8n-safety-router.
+description: Set up or explain safe n8n environments, installation, local development stacks, hosting, tunnels, backups, launchers, or official n8n Skills setup. For workflow files, workflow import/export helpers, the n8n MCP server, or live n8n work, first apply n8n-safety-router.
 ---
 
 

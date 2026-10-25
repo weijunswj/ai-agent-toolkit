@@ -17,7 +17,7 @@
 //
 // GitHub governance (programme records, decision traces, evidence custody, the governed block)
 // works only for github.com repositories. States, first matching rule wins:
-//   R1 no git root                                  DISABLED       automatically, never held; the folder gets a copy
+//   R1 no git root                                  DISABLED       automatically, never held
 //   R2 U declined or disabled                       DISABLED       global rules only; a governed block is ignored
 //   R8 not GitHub (no usable origin, or another host), K present
 //                                                   DISABLED       the user said ok; nothing to enable here
@@ -56,8 +56,6 @@ const STATES = Object.freeze(['ENABLED', 'DISABLED', 'UNDECIDED']);
 const NOT_GITHUB_BASENAME = 'governance-not-github.v1.json';
 const NOT_GITHUB_SCHEMA = 'toolkit.governance-not-github.v1';
 const NOT_GITHUB_READ_LIMIT = 256 * 1024;
-// Folders that never get a copy: they hold the user's own things, not a project.
-const PERSONAL_FOLDERS = Object.freeze(['desktop', 'documents', 'downloads']);
 const GOVERNANCE_CAPABILITY = 'repository.governance';
 const GOVERNED_BLOCK = 'TOOLKIT-GOVERNED-RULES';
 const LEGACY_GOVERNED_BLOCK = 'GLOBAL-AGENTS.MD-TEMPLATE';
@@ -325,25 +323,6 @@ function readNotGitHubOk(key, options = {}) {
   return Object.hasOwn(entries, key) && entries[key] !== null && typeof entries[key] === 'object';
 }
 
-// The folder a plain (non-git) working directory records its DISABLED copy in, or null where no copy
-// belongs: a drive or filesystem root, the user's home folder or anything above it, Toolkit's own
-// state folder, the system temporary folder itself, and the Desktop, Documents and Downloads folders
-// themselves.
-function recordFolderFor(cwd, options = {}) {
-  const folder = path.resolve(typeof cwd === 'string' && cwd ? cwd : process.cwd());
-  let home;
-  try { home = path.dirname(path.dirname(path.dirname(registryPathFor(options)))); } catch { return null; }
-  const same = (a, b) => (process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b);
-  const within = (child, parent) => { const rel = path.relative(parent, child); return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel)); };
-  if (path.parse(folder).root === folder) return null;
-  if (within(home, folder)) return null;
-  if (within(folder, path.join(home, '.ai-agent-toolkit'))) return null;
-  if (same(folder, path.resolve(os.tmpdir()))) return null;
-  const parent = path.dirname(folder);
-  if (PERSONAL_FOLDERS.includes(path.basename(folder).toLowerCase()) && (same(parent, home) || /^onedrive/i.test(path.basename(parent)))) return null;
-  return folder;
-}
-
 // ---- derivation -------------------------------------------------------------------------------
 
 function result(fields) {
@@ -378,7 +357,7 @@ function result(fields) {
 }
 
 class GovernanceState {
-  #readIdentity; #readMaterials; #readDecision; #readOk; #recordFolder;
+  #readIdentity; #readMaterials; #readDecision; #readOk;
 
   // Readers are injectable so the derivation can be tested on its own; the defaults read the
   // real repository and the real user-state files.
@@ -387,7 +366,6 @@ class GovernanceState {
     this.#readMaterials = materialsReader;
     this.#readDecision = (identity) => decisionReader(identity.repository_id, registryOptions, identity.legacy_repository_ids || []);
     this.#readOk = key => okReader(key, registryOptions);
-    this.#recordFolder = cwd => recordFolderFor(cwd, registryOptions);
   }
 
   // The pure rule table over already-read inputs. `ok` is whether the user said ok to GitHub
@@ -422,8 +400,7 @@ class GovernanceState {
       return result({ state: 'UNDECIDED', rule: 'ERROR', reason: 'identity-unreadable', error_code: codeOf(error), root: findGitRootQuietly(cwd) });
     }
     if (!identity.root) {
-      const folder = this.#recordFolder(cwd);
-      return result({ state: 'DISABLED', rule: 'R1', reason: 'no-git', folder, repository_id: folder ? localRepositoryId(folder) : null });
+      return result({ state: 'DISABLED', rule: 'R1', reason: 'no-git', folder: path.resolve(typeof cwd === 'string' && cwd ? cwd : process.cwd()) });
     }
     if (!identity.valid) {
       // No usable origin: the repository is known on this computer by its path, and never by a remote.
@@ -525,7 +502,6 @@ module.exports = Object.freeze({
   NOT_GITHUB_SCHEMA,
   localRepositoryId,
   readNotGitHubOk,
-  recordFolderFor,
   GOVERNANCE_CAPABILITY,
   GOVERNED_BLOCK,
   LEGACY_GOVERNED_BLOCK,
