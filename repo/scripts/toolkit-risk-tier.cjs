@@ -4,8 +4,8 @@
 // Tags a change RISKY, NORMAL or LIGHT by the paths it touches, never by its size, so the tier is not
 // a model's guess. Each changed path takes the first list it matches in the repository's
 // .github/toolkit-risk-tiers.json (risky, then normal, then light), or NORMAL when it matches none.
-// Inside a list a pattern starting with ! takes a path back out, and the last matching pattern wins,
-// as in .gitignore. Patterns match regardless of letter case, so a path typed in another case on
+// Inside a list a pattern starting with ! takes one file (its full path, no wildcards) back out, and
+// the last matching pattern wins, as in .gitignore. Patterns match regardless of letter case, so a path typed in another case on
 // Windows still counts, and a typed path is tidied first (separators, ./ and .. parts, a trailing
 // space or dot Windows would drop).
 // A file whose changed lines only bump the product version counts as LIGHT. A mixed change takes its
@@ -79,6 +79,9 @@ function parseConfig(text, where) {
   if (!config || config.schema !== SCHEMA) fail(`${where} must have schema ${SCHEMA}.`);
   for (const [key] of LISTS) {
     if (!Array.isArray(config[key]) || config[key].some(entry => typeof entry !== 'string' || !entry.replace(/^!/, '').trim())) fail(`${where} "${key}" must be a list of path patterns.`);
+    // An exception names one file by its full path, so it can never take a whole name or folder out.
+    const loose = config[key].find(entry => entry.startsWith('!') && (!entry.includes('/') || /[*?[\]]/.test(entry) || normalizePath(entry.slice(1)) !== entry.slice(1)));
+    if (loose) fail(`${where} "${key}" exception ${loose} must name one file by its full path, with no wildcards.`);
   }
   return config;
 }
