@@ -214,7 +214,6 @@ test('Toolkit text says computer or Remote Control session, not laptop', () => {
   // Work runs on whatever computer the user has. "laptop" stays only as a screen size or an icon
   // name in the frontend art direction skill, matched line by line.
   const allowedFolder = /^skills\/frontend-art-direction\//;
-  const allowedLine = /mobile, tablet, laptop, and wide|^81,Device,laptop,/i;
   const roots = ['skills', 'repo/contracts', 'repo/docs', 'repo/scripts', 'repo/tests/fixtures'];
   const hits = [];
   const walk = (rel) => {
@@ -223,7 +222,9 @@ test('Toolkit text says computer or Remote Control session, not laptop', () => {
       if (entry.isDirectory()) { if (entry.name !== 'node_modules') walk(child); continue; }
       if (/\.(png|jpe?g|gif|ico)$/i.test(entry.name)) continue;
       fs.readFileSync(path.join(repoRoot, child), 'utf8').split(/\r?\n/).forEach((line, index) => {
-        if (/laptop/i.test(line) && !(allowedFolder.test(child) && allowedLine.test(line))) hits.push(`${child}:${index + 1}`);
+        // Only the allowed phrase is exempt, so a banned use on the same line still fails.
+        const rest = !allowedFolder.test(child) ? line : /^81,Device,laptop,/.test(line) ? '' : line.replace(/mobile, tablet, laptop, and wide/gi, '');
+        if (/laptop/i.test(rest)) hits.push(`${child}:${index + 1}`);
       });
     }
   };
