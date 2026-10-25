@@ -1,6 +1,6 @@
 # Toolkit Changelog
 
-## 3.10.1 (one running post, and hardening after 3.10.0)
+## 3.10.1 (one running post, owner UAT only where the owner's hands are needed, and hardening after 3.10.0)
 
 ### Governance question
 
@@ -10,10 +10,10 @@
 
 ### Global rules
 
-- **Delivery no longer assumes GitHub.** Commit, push and open-a-PR now apply to a git repository with a remote; without git or a remote, the agent reports the changed files instead. `gh pr checks` and `gh run watch` are named as the GitHub way to check CI, and a full local test run is the gate where there is no CI.
+- **Delivery no longer assumes GitHub.** Commit, push and open-a-PR now apply to a git repository with a remote; elsewhere the agent just reports its changes. `gh pr checks` and `gh run watch` are named as the GitHub way to check CI, and a full local test run is the gate where there is no CI.
 - **Offer to clean up after a merge.** After a merge, the agent offers to delete the branches of closed unmerged PRs that are not default, protected or in use. Deleting still needs your yes.
-- **Run streams are evidence.** Deleting scratch needs no approval only once its report and evidence are stored and read back; run streams and logs are evidence too. `CONTROLLER.md` and the Projects instructions block say the same, so a stream is not deleted before its archive is read back.
-- Two repeated lines were folded into the rules they repeated, to stay within the size budget.
+- **Run streams are evidence.** Deleting scratch needs no approval only once its report and evidence, run streams and logs included, are stored and read back. `CONTROLLER.md` and the Projects instructions block say the same, so a stream is not deleted before its archive is read back.
+- Repeated lines were folded into the rules they repeated, to stay within the size budget.
 
 ### Helpers and hosts
 
@@ -26,9 +26,11 @@
 - **Rows A14 and A16 are unit-tested.** A16 now also requires a successful result, run records where the runner reads them, and the lead on its route, so a held, signed-out or unrecorded run no longer passes. Both row checks are tested with stub run summaries.
 - **The runner cleans up the config file it creates.** With `CLAUDE_CONFIG_DIR` set, Claude Code keeps its global config in `<config>/.claude.json`; a file the live runs created there is now removed at the end. The runner notes that macOS is not supported.
 
-### Projects
+### Projects and owner UAT
 
 - **The coordinator keeps one running post.** After your last message, the Projects coordinator keeps all its output in one post that it edits, appending each new result, PR or question and keeping every earlier detail. It starts a fresh post once you write again, or when the running post nears about 8 KB, and still answers a burst of your messages in one post. The Projects skill and the managed project instructions block say the same.
+- **Owner UAT is narrowed:** it holds only steps that need the owner's own hands, such as real app UI, signed-in accounts and device behaviour CI cannot reach. CI (Windows runners included), automated tests and G2 review prove everything else, and each UAT list names the passing check for every step it leaves out. When nothing needs the owner's hands, UAT is recorded as not required.
+- **Where it lives:** the Coding Gates in the global rules, the issue-closing rule there ("any owner UAT"), the controller's admission rule, the V3 direction and one Projects skill line for UAT lists. The Claude Projects controller skill is 2026-10-24.4 (re-upload it). Duplicated sentences in the global rules and the controller file were trimmed to keep both inside their size budgets.
 
 ## 3.10.0 (host support, governance states, decision history and the personal-data guard)
 
