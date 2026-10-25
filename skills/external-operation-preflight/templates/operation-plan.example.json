@@ -4,7 +4,10 @@
     "action": "merge",
     "environment": "alpha",
     "targets": ["app-alpha"],
-    "summary": "Merge the reviewed branch into the alpha deploy branch"
+    "summary": "Merge the reviewed branch into the alpha deploy branch",
+    "rollback": {
+      "plan": "Redeploy the previous commit to alpha and read back its revision"
+    }
   },
   "targets": [
     {
@@ -12,7 +15,8 @@
       "kind": "app",
       "provider": "<deployment platform>",
       "environment": "alpha",
-      "provider_environment": "alpha"
+      "provider_environment": "alpha",
+      "temporary": false
     }
   ],
   "resources": [
@@ -21,22 +25,37 @@
       "kind": "database",
       "provider": "<database provider>",
       "name_environment": "alpha",
-      "provider_environment": "alpha"
+      "provider_environment": "alpha",
+      "temporary": false
     },
     {
       "id": "bucket-alpha",
       "kind": "bucket",
       "provider": "<storage provider>",
       "name_environment": "alpha",
-      "provider_environment": "alpha"
+      "provider_environment": "alpha",
+      "temporary": false
     }
   ],
   "bindings": [
-    { "target": "app-alpha", "resource": "db-alpha", "access": "write" },
-    { "target": "app-alpha", "resource": "bucket-alpha", "access": "write" }
+    {
+      "target": "app-alpha",
+      "resource": "db-alpha",
+      "access": "write"
+    },
+    {
+      "target": "app-alpha",
+      "resource": "bucket-alpha",
+      "access": "write"
+    }
   ],
   "authority": [
-    { "resource": "app-alpha", "action": "merge", "scope": "alpha", "effect": "allow" }
+    {
+      "resource": "app-alpha",
+      "action": "merge",
+      "scope": "alpha",
+      "effect": "allow"
+    }
   ],
   "exceptions": [],
   "downstream": {
@@ -53,7 +72,8 @@
       "pre_approved": true,
       "target": "app-alpha",
       "privilege": "deploy",
-      "effect": "merge then deploy"
+      "effect": "merge then deploy",
+      "credential": "DEPLOY_PLATFORM_ALPHA_TOKEN"
     }
   ]
 }

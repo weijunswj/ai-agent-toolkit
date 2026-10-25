@@ -10,19 +10,24 @@ const repoRoot = path.resolve(__dirname, '..', '..');
 const skillRoot = path.join(repoRoot, 'skills', 'external-operation-preflight');
 const checkerPath = path.join(skillRoot, 'scripts', 'preflight-check.cjs');
 const examplePath = path.join(skillRoot, 'templates', 'operation-plan.example.json');
-const { PLAN_SCHEMA, REASONS, TRIGGERS, checkPlan, planHash } = require(checkerPath);
+const { BACKUP_LEVELS, PLAN_SCHEMA, REASONS, TRIGGERS, checkPlan, planHash } = require(checkerPath);
 
 const NOW = Date.parse('2026-10-25T00:00:00Z');
 const FUTURE = '2026-12-31';
 const PAST = '2026-10-01';
 
-function target(id, environment, providerEnvironment = environment) {
-  return { id, kind: 'app', provider: 'platform', environment, provider_environment: providerEnvironment };
+function target(id, environment, providerEnvironment = environment, extra = {}) {
+  return { id, kind: 'app', provider: 'platform', environment, provider_environment: providerEnvironment, temporary: false, ...extra };
 }
 
 function resource(id, nameEnvironment, providerEnvironment = nameEnvironment, extra = {}) {
-  return { id, kind: 'database', provider: 'store', name_environment: nameEnvironment, provider_environment: providerEnvironment, ...extra };
+  return {
+    id, kind: 'database', provider: 'store', name_environment: nameEnvironment, provider_environment: providerEnvironment, temporary: false, ...extra
+  };
 }
+
+const ROLLBACK = { plan: 'redeploy the previous revision in the same environment' };
+const BACKUP = { level: 'retrievable', reference: 'evidence store: restore check for this release' };
 
 function write(targetId, resourceId) {
   return { target: targetId, resource: resourceId, access: 'write' };
@@ -36,12 +41,13 @@ function plan(overrides = {}) {
   const environment = overrides.environment || 'alpha';
   const base = {
     schema: PLAN_SCHEMA,
-    operation: { action: 'deploy', environment, targets: ['app'] },
+    operation: { action: 'deploy', environment, targets: ['app'], rollback: ROLLBACK, backup_evidence: BACKUP },
     targets: [target('app', environment)],
     resources: [resource('db', environment), resource('bucket', environment)],
     bindings: [write('app', 'db'), write('app', 'bucket')],
     authority: [allow('app', 'deploy', environment)],
-    exceptions: []
+    exceptions: [],
+    downstream: { trigger: 'NONE' }
   };
   const result = { ...base, ...overrides };
   delete result.environment;
@@ -80,6 +86,7 @@ const M1 = [
     name: 'restore on temporary resources with cleanup owner and end date',
     plan: plan({
       environment: 'restore',
+      targets: [target('app', 'restore', 'restore', temporaryComplete)],
       resources: [resource('db', 'restore', 'restore', temporaryComplete), resource('bucket', 'restore', 'restore', temporaryComplete)]
     }),
     verdict: 'ALLOW',
@@ -145,14 +152,22 @@ const M1 = [
     delete partial[missing];
     return {
       name: `temporary resource missing ${missing}`,
-      plan: plan({ environment: 'restore', resources: [resource('db', 'restore', 'restore', partial), resource('bucket', 'restore')] }),
+      plan: plan({
+        environment: 'restore',
+        targets: [target('app', 'restore', 'restore', temporaryComplete)],
+        resources: [resource('db', 'restore', 'restore', partial), resource('bucket', 'restore', 'restore', temporaryComplete)]
+      }),
       verdict: 'HOLD',
       codes: [REASONS.TEMPORARY_RESOURCE_INCOMPLETE]
     };
   }),
   {
     name: 'temporary resource whose end date has passed',
-    plan: plan({ environment: 'restore', resources: [resource('db', 'restore', 'restore', { ...temporaryComplete, end_date: PAST }), resource('bucket', 'restore')] }),
+    plan: plan({
+      environment: 'restore',
+      targets: [target('app', 'restore', 'restore', temporaryComplete)],
+      resources: [resource('db', 'restore', 'restore', { ...temporaryComplete, end_date: PAST }), resource('bucket', 'restore', 'restore', temporaryComplete)]
+    }),
     verdict: 'HOLD',
     codes: [REASONS.TEMPORARY_RESOURCE_INCOMPLETE]
   },
@@ -205,10 +220,94 @@ const M1 = [
   {
     name: 'explicit action list needs authority for every action',
     plan: plan({
-      operation: { action: 'create', environment: 'alpha', targets: ['app'], actions: [{ resource: 'app', action: 'deploy' }, { resource: 'bucket', action: 'create' }] }
+      operation: { action: 'deploy', environment: 'alpha', targets: ['app'], actions: [{ resource: 'bucket', action: 'create' }] }
     }),
     verdict: 'HOLD',
     codes: [REASONS.NOT_AUTHORISED]
+  },
+  {
+    name: 'resource named production that the provider reports as alpha',
+    plan: plan({ resources: [resource('db', 'production', 'alpha'), resource('bucket', 'alpha')] }),
+    verdict: 'HOLD',
+    codes: [REASONS.RESOURCE_IDENTITY_MISMATCH]
+  },
+  {
+    name: 'alpha and production on one writable database, no exception',
+    plan: plan({
+      targets: [target('app', 'alpha'), target('app-prod', 'production')],
+      bindings: [write('app', 'db'), write('app', 'bucket'), write('app-prod', 'db')]
+    }),
+    verdict: 'HOLD',
+    codes: [REASONS.RESOURCE_IDENTITY_MISMATCH]
+  },
+  {
+    name: 'alpha and production on one writable database, with an owner exception',
+    plan: plan({
+      targets: [target('app', 'alpha'), target('app-prod', 'production')],
+      bindings: [write('app', 'db'), write('app', 'bucket'), write('app-prod', 'db')],
+      exceptions: [{ resources: ['db'], environments: ['production'], reason: 'one-off data copy', end_date: FUTURE }]
+    }),
+    verdict: 'ALLOW_WITH_NOTICE',
+    codes: []
+  },
+  {
+    name: 'owner exception that names another resource does not cover this one',
+    plan: plan({
+      targets: [target('app', 'alpha'), target('app-prod', 'production')],
+      bindings: [write('app', 'db'), write('app', 'bucket'), write('app-prod', 'bucket')],
+      exceptions: [{ resources: ['db'], environments: ['production'], reason: 'shared media during migration', end_date: FUTURE }]
+    }),
+    verdict: 'HOLD',
+    codes: [REASONS.RESOURCE_IDENTITY_MISMATCH]
+  },
+  {
+    name: 'owner exception that names another environment does not cover this one',
+    plan: plan({
+      targets: [target('app', 'alpha'), target('app-prod', 'production')],
+      bindings: [write('app', 'db'), write('app', 'bucket'), write('app-prod', 'bucket')],
+      exceptions: [{ resources: ['bucket'], environments: ['test'], reason: 'shared media during migration', end_date: FUTURE }]
+    }),
+    verdict: 'HOLD',
+    codes: [REASONS.RESOURCE_IDENTITY_MISMATCH]
+  },
+  {
+    name: 'a restore-environment resource not marked temporary',
+    plan: plan({
+      environment: 'restore',
+      targets: [target('app', 'restore', 'restore', temporaryComplete)],
+      resources: [resource('db', 'restore', 'restore', temporaryComplete), resource('bucket', 'restore')]
+    }),
+    verdict: 'HOLD',
+    codes: [REASONS.TEMPORARY_RESOURCE_INCOMPLETE]
+  },
+  {
+    name: 'a temporary target missing its cleanup owner',
+    plan: plan({
+      environment: 'restore',
+      targets: [target('app', 'restore', 'restore', { ...temporaryComplete, cleanup_owner: '' })],
+      resources: [resource('db', 'restore', 'restore', temporaryComplete), resource('bucket', 'restore', 'restore', temporaryComplete)]
+    }),
+    verdict: 'HOLD',
+    codes: [REASONS.TEMPORARY_RESOURCE_INCOMPLETE]
+  },
+  {
+    name: 'the operation\'s own action is checked even when extra actions are listed',
+    plan: plan({
+      operation: { action: 'delete', environment: 'alpha', targets: ['app'], actions: [{ resource: 'app', action: 'read' }] },
+      authority: [allow('app', 'read', 'alpha')]
+    }),
+    verdict: 'HOLD',
+    codes: [REASONS.NOT_AUTHORISED]
+  },
+  {
+    name: 'an extra action on a production resource under an alpha operation',
+    plan: plan({
+      operation: { action: 'deploy', environment: 'alpha', targets: ['app'], actions: [{ resource: 'db-prod', action: 'migrate' }] },
+      resources: [resource('db', 'alpha'), resource('bucket', 'alpha'), resource('db-prod', 'production')],
+      authority: [allow('app', 'deploy', 'alpha'), allow('db-prod', 'migrate', 'alpha')]
+    }),
+    verdict: 'HOLD',
+    codes: [REASONS.RESOURCE_IDENTITY_MISMATCH]
   }
 ];
 
@@ -280,14 +379,81 @@ test('M2: an approval that ends the freeze lets the coupled deployment run', () 
   assert.ok(result.required_read_back.some((line) => /freeze/.test(line)));
 });
 
-test('M2: a merge that does not say what it sets off is held', () => {
-  const result = checkPlan(mergePlan(undefined), { now: NOW });
-  assert.equal(result.verdict, 'HOLD');
-  assert.deepEqual(codes(result), [REASONS.DOWNSTREAM_EFFECT_COUPLING_UNRESOLVED]);
+test('M2: downstream and its flags are required and must be true or false', async (t) => {
+  const autoFlags = { trigger: 'AUTO_ON_MERGE', deployment_approved: true, pause_read_back: false, evidence_freeze: true, freeze_end_approved: false };
+  const rows = [
+    { name: 'a merge with no downstream section', plan: mergePlan(undefined) },
+    { name: 'a push with no downstream section', plan: plan({ operation: { action: 'push', environment: 'alpha', targets: ['app'] }, downstream: undefined }) },
+    ...['"yes"', '"true"', '1'].map((raw) => ({
+      name: `evidence_freeze written as ${raw}`,
+      plan: mergePlan({ ...autoFlags, evidence_freeze: JSON.parse(raw) })
+    })),
+    ...['deployment_approved', 'pause_read_back', 'evidence_freeze', 'freeze_end_approved'].map((flag) => {
+      const downstream = { ...autoFlags };
+      delete downstream[flag];
+      return { name: `automatic trigger with ${flag} left out`, plan: mergePlan(downstream) };
+    }),
+    { name: 'a flag that is not true or false on a manual trigger', plan: mergePlan({ trigger: 'MANUAL', deployment_approved: 'no' }) }
+  ];
+  for (const row of rows) {
+    await t.test(row.name, () => {
+      const result = checkPlan(row.plan, { now: NOW });
+      assert.equal(result.verdict, 'HOLD');
+      assert.deepEqual(codes(result), [REASONS.PLAN_INVALID]);
+    });
+  }
+});
+
+test('production changes need rollback and backup evidence', async (t) => {
+  const prod = (operation) => plan({ environment: 'production', operation: { action: 'migrate', environment: 'production', targets: ['app'], ...operation }, authority: [allow('app', 'migrate', 'production')] });
+  const rows = [
+    { name: 'migrate with rollback and retrievable backup evidence', plan: prod({ rollback: ROLLBACK, backup_evidence: BACKUP }), verdict: 'ALLOW', codes: [] },
+    { name: 'migrate with neither', plan: prod({}), verdict: 'HOLD', codes: [REASONS.BACKUP_EVIDENCE_MISSING, REASONS.ROLLBACK_EVIDENCE_MISSING] },
+    { name: 'migrate with no rollback plan', plan: prod({ backup_evidence: BACKUP }), verdict: 'HOLD', codes: [REASONS.ROLLBACK_EVIDENCE_MISSING] },
+    { name: 'rollback that crosses environments', plan: prod({ rollback: { ...ROLLBACK, cross_environment: true }, backup_evidence: BACKUP }), verdict: 'HOLD', codes: [REASONS.ROLLBACK_EVIDENCE_MISSING] },
+    ...BACKUP_LEVELS.slice(0, BACKUP_LEVELS.indexOf('retrievable')).map((level) => ({
+      name: `backup evidence only at level ${level}`,
+      plan: prod({ rollback: ROLLBACK, backup_evidence: { ...BACKUP, level } }),
+      verdict: 'HOLD',
+      codes: [REASONS.BACKUP_EVIDENCE_MISSING]
+    })),
+    { name: 'backup evidence with no reference', plan: prod({ rollback: ROLLBACK, backup_evidence: { level: 'fully_recoverable' } }), verdict: 'HOLD', codes: [REASONS.BACKUP_EVIDENCE_MISSING] },
+    { name: 'backup evidence with an unknown level', plan: prod({ rollback: ROLLBACK, backup_evidence: { ...BACKUP, level: 'great' } }), verdict: 'HOLD', codes: [REASONS.BACKUP_EVIDENCE_MISSING] },
+    {
+      name: 'a production restart needs rollback but no backup evidence',
+      plan: plan({ environment: 'production', operation: { action: 'restart', environment: 'production', targets: ['app'], rollback: ROLLBACK }, authority: [allow('app', 'restart', 'production')] }),
+      verdict: 'ALLOW',
+      codes: []
+    },
+    {
+      name: 'a production restart with an auto-deploy coupled still needs backup evidence',
+      plan: plan({
+        environment: 'production',
+        operation: { action: 'restart', environment: 'production', targets: ['app'], rollback: ROLLBACK },
+        authority: [allow('app', 'restart', 'production')],
+        downstream: { trigger: 'AUTO_ON_BRANCH_UPDATE', deployment_approved: true, pause_read_back: false, evidence_freeze: false, freeze_end_approved: false }
+      }),
+      verdict: 'HOLD',
+      codes: [REASONS.BACKUP_EVIDENCE_MISSING]
+    },
+    {
+      name: 'an alpha migrate needs neither',
+      plan: plan({ operation: { action: 'migrate', environment: 'alpha', targets: ['app'] }, authority: [allow('app', 'migrate', 'alpha')] }),
+      verdict: 'ALLOW',
+      codes: []
+    }
+  ];
+  for (const row of rows) {
+    await t.test(row.name, () => {
+      const result = checkPlan(row.plan, { now: NOW });
+      assert.equal(result.verdict, row.verdict, JSON.stringify(result.reasons));
+      assert.deepEqual(codes(result), [...row.codes].sort());
+    });
+  }
 });
 
 test('routes: fallback rules', async (t) => {
-  const first = { route: 'mcp', target: 'app', privilege: 'deploy', effect: 'deploy' };
+  const first = { route: 'mcp', target: 'app', privilege: 'deploy', credential: 'PLATFORM_ALPHA_TOKEN', effect: 'deploy' };
   const rows = [
     { name: 'one selected route', routes: [{ ...first, outcome: 'selected', pre_approved: true }], verdict: 'ALLOW', codes: [] },
     {
@@ -302,12 +468,24 @@ test('routes: fallback rules', async (t) => {
       verdict: 'HOLD',
       codes: [REASONS.ROUTE_FALLBACK_REFUSED]
     },
+    {
+      name: 'pre-approved written as "yes"',
+      routes: [{ ...first, outcome: 'failed_before_effect' }, { ...first, route: 'api', outcome: 'selected', pre_approved: 'yes' }],
+      verdict: 'HOLD',
+      codes: [REASONS.PLAN_INVALID]
+    },
     ...['target', 'privilege', 'effect'].map((key) => ({
       name: `fallback that changes ${key}`,
       routes: [{ ...first, outcome: 'failed_before_effect' }, { ...first, route: 'browser', [key]: 'other', outcome: 'selected', pre_approved: true }],
       verdict: 'HOLD',
       codes: [REASONS.ROUTE_FALLBACK_REFUSED]
     })),
+    {
+      name: 'fallback that changes the credential',
+      routes: [{ ...first, outcome: 'failed_before_effect' }, { ...first, route: 'api', credential: 'PLATFORM_ROOT_TOKEN', outcome: 'selected', pre_approved: true }],
+      verdict: 'HOLD',
+      codes: [REASONS.ROUTE_FALLBACK_REFUSED]
+    },
     ...['failed_after_effect', 'outcome_unknown'].map((outcome) => ({
       name: `earlier route ${outcome}`,
       routes: [{ ...first, outcome }, { ...first, route: 'api', outcome: 'selected', pre_approved: true }],
@@ -336,12 +514,23 @@ test('plan shape and secrets fail closed', async (t) => {
     { name: 'wrong schema', plan: plan({ schema: 'other' }), code: REASONS.PLAN_INVALID },
     { name: 'no environment', plan: plan({ operation: { action: 'deploy', targets: ['app'] } }), code: REASONS.PLAN_INVALID },
     { name: 'unknown target', plan: plan({ operation: { action: 'deploy', environment: 'alpha', targets: ['ghost'] } }), code: REASONS.PLAN_INVALID },
-    { name: 'resource with no provider read-back', plan: plan({ resources: [{ id: 'db', name_environment: 'alpha' }, resource('bucket', 'alpha')] }), code: REASONS.PLAN_INVALID },
+    { name: 'resource with no provider read-back', plan: plan({ resources: [{ id: 'db', name_environment: 'alpha', temporary: false }, resource('bucket', 'alpha')] }), code: REASONS.PLAN_INVALID },
+    { name: 'resource with temporary left out', plan: plan({ resources: [{ ...resource('db', 'alpha'), temporary: undefined }, resource('bucket', 'alpha')] }), code: REASONS.PLAN_INVALID },
+    { name: 'target with temporary written as "yes"', plan: plan({ targets: [target('app', 'alpha', 'alpha', { temporary: 'yes' })] }), code: REASONS.PLAN_INVALID },
     { name: 'unknown trigger', plan: plan({ downstream: { trigger: 'SOMETIMES' } }), code: REASONS.PLAN_INVALID },
     { name: 'bad binding access', plan: plan({ bindings: [{ target: 'app', resource: 'db', access: 'admin' }] }), code: REASONS.PLAN_INVALID },
+    { name: 'empty extra action list', plan: plan({ operation: { action: 'deploy', environment: 'alpha', targets: ['app'], actions: [] }, authority: [] }), code: REASONS.PLAN_INVALID },
+    {
+      name: 'extra action on an undeclared id',
+      plan: plan({ operation: { action: 'deploy', environment: 'alpha', targets: ['app'], actions: [{ resource: 'prod-dns-zone', action: 'delete' }] }, authority: [allow('app', 'deploy', 'alpha'), allow('prod-dns-zone', 'delete', 'alpha')] }),
+      code: REASONS.PLAN_INVALID
+    },
     { name: 'token-shaped value', plan: plan({ note: `ghp_${'a'.repeat(36)}` }), code: REASONS.SECRET_IN_PLAN },
     { name: 'URL with a password', plan: plan({ note: 'postgres://user:hunter2@db.example.test/app' }), code: REASONS.SECRET_IN_PLAN },
-    { name: 'value under a secret-named key', plan: plan({ api_token: 'plain-value-here' }), code: REASONS.SECRET_IN_PLAN }
+    { name: 'value under a secret-named key', plan: plan({ api_token: 'plain-value-here' }), code: REASONS.SECRET_IN_PLAN },
+    { name: 'value under a camel-case secret key', plan: plan({ clientSecret: 'plain-value-here' }), code: REASONS.SECRET_IN_PLAN },
+    { name: 'upper-case value that is not a key name', plan: plan({ accessToken: 'HUNTER2' }), code: REASONS.SECRET_IN_PLAN },
+    { name: 'numeric password', plan: plan({ db_password: 123456 }), code: REASONS.SECRET_IN_PLAN }
   ];
   for (const row of rows) {
     await t.test(row.name, () => {
@@ -352,6 +541,12 @@ test('plan shape and secrets fail closed', async (t) => {
   }
   await t.test('a key name under a secret-named key is a reference, not a value', () => {
     assert.equal(checkPlan(plan({ api_token: 'COOLIFY_ALPHA_TOKEN' }), { now: NOW }).verdict, 'ALLOW');
+  });
+  await t.test('a token used as an id is reported by place, never echoed', () => {
+    const token = `ghp_${'b'.repeat(36)}`;
+    const result = checkPlan(plan({ operation: { action: 'deploy', environment: 'alpha', targets: [token] } }), { now: NOW });
+    assert.deepEqual(codes(result), [REASONS.SECRET_IN_PLAN]);
+    assert.equal(JSON.stringify(result).includes(token), false);
   });
 });
 
@@ -367,15 +562,21 @@ test('command line: example plan allows, a hold exits 2, usage errors exit 1', (
   const run = (args, input) => spawnSync(process.execPath, [checkerPath, ...args], { encoding: 'utf8', input });
   const example = run([examplePath, '--now', '2026-10-25']);
   assert.equal(example.status, 0, example.stderr);
-  assert.equal(JSON.parse(example.stdout).verdict, 'ALLOW');
+  const output = JSON.parse(example.stdout);
+  assert.equal(output.verdict, 'ALLOW');
+  assert.equal(output.checked_at, '2026-10-25T00:00:00.000Z');
 
   const held = run(['--stdin', '--now', '2026-10-25'], JSON.stringify(plan({ authority: [] })));
   assert.equal(held.status, 2);
   assert.equal(JSON.parse(held.stdout).verdict, 'HOLD');
 
   assert.equal(run([]).status, 1);
-  assert.equal(run(['--stdin'], 'not json').status, 1);
+  const notJson = run(['--stdin'], 'COOLIFY_TOKEN=abc123 not json');
+  assert.equal(notJson.status, 1);
+  assert.equal(notJson.stderr.includes('COOLIFY'), false, 'a parse error must not echo the input');
   assert.equal(run([examplePath, '--now', 'yesterday']).status, 1);
+  assert.equal(run([examplePath, '--now', '2026-02-30']).status, 1);
+  assert.equal(run([examplePath, '--now']).status, 1);
 });
 
 test('skill text stays within its budget and names every reason the checker can return', () => {

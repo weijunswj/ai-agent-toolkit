@@ -19,8 +19,8 @@ The provider-neutral rules for backing up a live service and proving it can be r
 
 ## How many to keep
 
-- Keep seven local copies.
-- Leave an existing remote retention policy as it is. Where none exists, ask the owner for one; never invent it.
+- Keep seven local copies on a new schedule.
+- Leave an existing retention policy as it is, local or remote (for example an existing n8n server backup that keeps 30 days); never shorten one without the owner's yes. Where none exists, ask the owner for one; never invent it.
 - Read retention values with the provider's meaning: on some platforms, including Coolify, a value of `0` means unlimited, not none kept.
 
 ## Four kinds of evidence
@@ -38,6 +38,10 @@ Each claim needs its own evidence. Never report a higher level than the evidence
 | plus the encryption key is held and an isolated app check passed | "fully recoverable" |
 
 A database-only restore proves database recovery only. Full recovery also needs the encryption key and an app check on an isolated copy.
+
+## Before a production change
+
+The preflight checker holds a production change that can touch data until the plan carries `backup_evidence` at `retrievable` or higher (`configured`, `local_copy`, `uploaded`, `retrievable`, `database_recoverable`, `fully_recoverable`) with a reference to where the evidence is kept, plus a rollback plan inside the same environment.
 
 ## Restore drills
 

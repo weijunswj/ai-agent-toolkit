@@ -49,4 +49,4 @@ Return a compact Self-Hosted Service Safety Review with risk level, blocked acti
 
 Review-only by default. Docker, DNS/TLS, tunnels, firewall/public ports, VPS/cloud changes, credentials, production data, or deployment commands require explicit current-turn approval.
 
-Before an approved live change on an outside service (a deploy, a merge into an auto-deploying branch, a new or renamed resource, a restore), run `external-operation-preflight`; it also owns the backup and restore evidence rules.
+Before asking approval for a live change on an outside service (a deploy, a merge into an auto-deploying branch, a new or renamed resource, a restore), run `external-operation-preflight`; it also owns the backup and restore evidence rules.
