@@ -131,6 +131,17 @@ test('each PR in a list needs its own link', () => {
   // A count after a list number is not read as a PR number.
   assert.equal(linkIssue('[PR 612](#cmsg_A) and 2 others'), '');
   assert.equal(linkIssue('PR [612](#cmsg_A), 3 checks pending'), '');
+  // A real PR number (three or more digits) followed by a count word is still a PR.
+  for (const text of ['PR [612](#cmsg_A)/613 files', 'PRs [612](#cmsg_A) and 613 checks pass', 'PRs [612](#cmsg_A), 613 left to merge', 'PRs [612](#cmsg_A) and 613 more']) {
+    assert.match(linkIssue(text), /PR 613/, text);
+  }
+  // A colon or bracket after the PR word still starts a list.
+  assert.match(linkIssue('Ready PRs: 612 and 613'), /PR 612/);
+  assert.match(linkIssue('PRs (612, 613)'), /PR 612/);
+  // A long run of spaces after a comma stays fast.
+  const started = Date.now();
+  linkIssue(`PR 1,${' '.repeat(32000)}x`);
+  assert.ok(Date.now() - started < 500);
 });
 
 test('guards hold: failed posts, size in bytes, the 8 KB escape and quoted owner text', () => {
@@ -155,6 +166,9 @@ test('guards hold: failed posts, size in bytes, the 8 KB escape and quoted owner
   }
   // A real wake nests the message under its project and thread tags.
   assert.equal(post([call(POST, { text: 'First.' }), quoted('<wake reason="mention">\n  <project id="p">\n    <thread ts="t">\n      <message from="human" trust="principal">hi</message>')]), '');
+  // A self-closing tag and a stray "<" in earlier text do not hide the owner message.
+  assert.equal(post([call(POST, { text: 'First.' }), quoted('<wake><project id="p"><attachment name="a"/><message from="human">hi</message></project></wake>')]), '');
+  assert.equal(post([call(POST, { text: 'First.' }), quoted('<wake><message from="claude">a<b</message><message from="human">hi</message></wake>')]), '');
   // An owner message after a Claude's message in the same wake counts.
   assert.equal(post([call(POST, { text: 'First.' }), quoted('<wake><project id="p"><thread ts="t"><message from="claude">note</message><message from="human">hi</message></thread></project></wake>')]), '');
   // A wake with an image arrives as an image block, then the wake text.

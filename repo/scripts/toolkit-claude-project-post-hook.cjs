@@ -8,7 +8,7 @@
 //   reply under one of its posts (a post with a thread_id) is exempt from this rule and never becomes the running
 //   post; the link rule still applies to it.
 // - Links: every PR a post names, each number in a list included, must carry a link: link text on that number or a
-//   /pull/<n>/files link in the same text. A bare /pull/<n> link without /files is refused with the fix.
+//   /pull/<n>/files link in the same text. A bare /pull/<n> link outside link text, without /files, is refused with the fix.
 // Sessions without these tools (normal chats, Codex and sessions outside Projects) are never touched. Questions go
 // on decision cards, a separate tool this hook does not check. Input or a transcript it cannot read passes. The
 // hook is registered without `onFailure: "block"` so a hook that cannot start never silences every post.
@@ -24,7 +24,7 @@ const MESSAGE_ID = /\b(cmsg_[A-Za-z0-9]+)\b/;
 const WAKE_TAGS = new Set(['wake', 'project', 'thread']);
 function hasOwnerMessage(text) {
   const open = [];
-  for (const tag of text.matchAll(/<(\/?)([A-Za-z][\w-]*)\b([^>]*?)(\/?)>/g)) {
+  for (const tag of text.matchAll(/<(\/?)([A-Za-z][\w-]*)\b([^<>]*?)(\/?)>/g)) {
     const [, closing, name, attributes, selfClosing] = tag;
     if (closing) {
       const at = open.lastIndexOf(name);
@@ -110,7 +110,7 @@ function linkIssue(text) {
   // A mention names one PR or a list ("PRs 612, 613 and 614"); each number in it needs a link: link text on that
   // number in any mention, or a /pull/<n>/files link anywhere in the post.
   const mentions = [];
-  for (const match of scan.matchAll(/\b(?:PRs?|pull requests?)\s*#?(\d{1,6}(?:\s*(?:,\s*(?:and|or)?|&|\/|and|or)\s*#?\d{1,6}\b(?!\s+(?:others|more|left|checks|files|tests)\b))*)\b/gi)) {
+  for (const match of scan.matchAll(/\b(?:PRs?|pull requests?)\s*[:(]?\s*#?(\d{1,6}(?:\s*(?:,(?:\s*(?:and|or))?|&|\/|and|or)\s*#?\d{1,6}\b(?!(?<!\d{3})\s+(?:others|more|left|checks|files|tests)\b))*)\b/gi)) {
     const listStart = match.index + match[0].length - match[1].length;
     for (const number of match[1].matchAll(/\d{1,6}/g)) {
       mentions.push({ match, value: number[0], linked: insideLinkText(listStart + number.index) });
