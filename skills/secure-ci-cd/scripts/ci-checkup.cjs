@@ -13,7 +13,10 @@
 //   --runs       how many recent green default-branch runs to read job times from (default 5)
 //   --no-github  skip the GitHub run listing; speed rows say "not checked"
 //   --json       machine-readable report
-// Tests may pass `jobTimes` (a Map of "workflow / job" to seconds) to checkup() instead of gh.
+// Tests may pass `jobTimes` (a Map of "workflow / job" to seconds) and `requiredChecks` (a list, or
+// null for unknown) to checkup() instead of reading them through gh.
+// git and gh run by full path from PATH entries outside the target repository, never with the
+// target as the working folder, so nothing the repository holds can run.
 // Settings: <repo>/.github/ci-checkup.json (optional), schema ci-checkup/v1:
 //   { "schema": "ci-checkup/v1",
 //     "status_doc": "docs/ci-cd/CURRENT_CICD_STATUS.md",
@@ -21,9 +24,10 @@
 //     "ignore": [ { "check": "scripts.untested", "path": "tools/once.sh", "reason": "..." } ] }
 // Every ignore entry needs a reason; a path ending in "/" covers the whole folder.
 
+const childProcess = require('node:child_process');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
-const { spawnSync } = require('node:child_process');
 
 const SETTINGS_REL = '.github/ci-checkup.json';
 const SETTINGS_SCHEMA = 'ci-checkup/v1';
@@ -40,7 +44,7 @@ const SCRIPT_EXT = /\.(cjs|js|mjs|ts|py|sh|ps1)$/;
 const CODE_EXT = /\.(cjs|js|mjs|ts|tsx|jsx|py|go|rs|sh|ps1|rb|java|kt|php|cs)$/;
 const TEST_NAME = /(\.(test|spec)\.[A-Za-z0-9]+$)|(^test_[^/]*\.(py|[cm]?js|ts)$)|(_test\.(py|go|[cm]?js|ts)$)/;
 // Vendored, example and fixture code is not the repository's own to test.
-const NOT_OWN_CODE = /(^|\/)(third[-_]party|examples?|fixtures?|__fixtures__)\//;
+const NOT_OWN_CODE = /(^|\/)(third[-_]party|examples?|fixtures?|__fixtures__|\.devcontainer)\//;
 const TEST_DIR_NAMES = new Set(['test', 'tests', '__tests__', 'spec']);
 const CONFIG_NAME = /(^|\/)([^/]*\.config\.[cm]?[jt]s|\.eslintrc\.[cm]?js|\.prettierrc\.[cm]?js|\.?babel\.config\.[cm]?js|[^/]*\.d\.ts)$/;
 const RUNNERS = Object.freeze({
@@ -68,7 +72,7 @@ const CHECKS = Object.freeze({
   'scripts.untested': 'a script no test names or imports',
   'speed.budget': 'no declared time budget, or a budget not checked in CI',
   'speed.durations': 'test files with no measured time',
-  'speed.jobs': 'a CI job over its budget, or a long test job with no sharding',
+  'speed.jobs': 'a CI job over its budget, or a long test job with no sharding or matrix',
   'hygiene.unpinned': 'an action not pinned to a full commit SHA',
   'hygiene.permissions': 'a workflow with no permissions block',
   'hygiene.masked': 'a test step whose failure is masked',
@@ -85,25 +89,66 @@ function norm(rel) {
   return out === '.' ? '' : out;
 }
 function under(file, dir) { return dir === '' || file === dir || file.startsWith(`${dir}/`); }
+// A path counts only when its real location stays inside the repository's real location, so a
+// link that leads out of the repository is never read.
+const realRoots = new Map();
+function realRoot(root) {
+  if (!realRoots.has(root)) { try { realRoots.set(root, fs.realpathSync(root)); } catch { realRoots.set(root, path.resolve(root)); } }
+  return realRoots.get(root);
+}
+function inside(root, rel) {
+  try {
+    const real = fs.realpathSync(path.join(root, rel));
+    const base = realRoot(root);
+    return real === base || real.startsWith(base.endsWith(path.sep) ? base : base + path.sep);
+  } catch { return false; }
+}
 function readText(root, rel) {
+  if (!inside(root, rel)) return null;
   try { return fs.readFileSync(path.join(root, rel), 'utf8').replace(/\r\n/g, '\n'); } catch { return null; }
 }
-function run(cmd, args, cwd) {
+
+// A program's full path from absolute PATH entries outside the target repository (on Windows only
+// `.exe`). A bare name would be looked up in the working folder first on Windows, so a git.exe or
+// gh.exe planted in the repository could run. Null when none is found.
+function resolveExecutable(name, root, { environment = process.env, platform = process.platform, exists = fs.existsSync } = {}) {
+  const api = platform === 'win32' ? path.win32 : path.posix;
+  const fold = (value) => (platform === 'win32' ? value.toLowerCase() : value);
+  const roots = [api.resolve(root), platform === process.platform ? realRoot(root) : api.resolve(root)].map(fold);
+  const inRoot = (dir) => { const d = fold(api.resolve(dir)); return roots.some((r) => d === r || d.startsWith(r.endsWith(api.sep) ? r : r + api.sep)); };
+  if (api.isAbsolute(name)) return exists(name) && !inRoot(api.dirname(name)) ? name : null;
+  const file = platform === 'win32' ? `${name}.exe` : name;
+  const key = Object.keys(environment).find((k) => k.toLowerCase() === 'path');
+  for (const entry of String(key ? environment[key] : '').split(platform === 'win32' ? ';' : ':')) {
+    const dir = entry.trim().replace(/^"(.*)"$/, '$1');
+    if (!dir || !api.isAbsolute(dir) || inRoot(dir)) continue;
+    const candidate = api.join(dir, file);
+    if (exists(candidate)) return candidate;
+  }
+  return null;
+}
+
+// Runs a resolved program outside the repository, with no prompts and no optional git locks.
+function run(cmd, args) {
+  if (!cmd) return { ok: false, out: '' };
   try {
-    const result = spawnSync(cmd, args, { cwd, encoding: 'utf8', timeout: 60000, windowsHide: true, maxBuffer: 64 * 1024 * 1024 });
+    const env = { ...process.env, GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0', GH_PROMPT_DISABLED: '1' };
+    const result = childProcess.spawnSync(cmd, args, { cwd: os.tmpdir(), env, encoding: 'utf8', timeout: 60000, windowsHide: true, maxBuffer: 64 * 1024 * 1024 });
     return result.error ? { ok: false, out: '' } : { ok: result.status === 0, out: result.stdout || '' };
   } catch { return { ok: false, out: '' }; }
 }
+// git against the repository by -C, with the file-system monitor hook off so no configured program runs.
+function git(tools, root, args) { return run(tools.git, ['-C', root, '-c', 'core.fsmonitor=false', ...args]); }
 
 // ---------------------------------------------------------------------------------------------
 // Repository files.
 
-function listFiles(root) {
-  const git = run('git', ['ls-files', '-co', '--exclude-standard', '-z'], root);
-  if (git.ok && git.out) {
-    return git.out.split('\0').filter(Boolean).map(norm)
+function listFiles(root, tools) {
+  const listed = git(tools, root, ['ls-files', '-co', '--exclude-standard', '-z']);
+  if (listed.ok && listed.out) {
+    return listed.out.split('\0').filter(Boolean).map(norm)
       .filter((rel) => !rel.split('/').some((part) => SKIP_DIRS.has(part)))
-      .filter((rel) => { try { return fs.statSync(path.join(root, rel)).isFile(); } catch { return false; } })
+      .filter((rel) => { try { return fs.lstatSync(path.join(root, rel)).isFile() && inside(root, rel); } catch { return false; } })
       .sort();
   }
   const out = [];
@@ -114,7 +159,7 @@ function listFiles(root) {
       else if (entry.isFile()) out.push(rel);
     }
   };
-  walk('');
+  try { walk(''); } catch (error) { throw new UsageError(`cannot list the files of ${root}: ${error.code || error.message}`); }
   return out.sort();
 }
 
@@ -224,14 +269,25 @@ function parseWorkflow(rel, text) {
   const lines = text.split('\n');
   const top = mapKeys(lines, 0, lines.length, 0);
   const onKey = top.find((entry) => ['on', 'true'].includes(entry.key));
-  const onText = onKey ? lines.slice(onKey.line, blockEnd(lines, onKey.line, 0)).join('\n') : '';
-  const prBlock = onText.match(/\n\s+pull_request(?:_target)?:[\s\S]*?(?=\n\s{2}\w|$)/);
+  const onLines = onKey ? lines.slice(onKey.line, blockEnd(lines, onKey.line, 0)) : [];
+  // Path filters under a pull_request trigger: in its own block (any indentation) or flow style.
+  let prPathFilters = onLines.length > 0 && /pull_request(?:_target)?['"]?\s*:\s*\{[^}]*\bpaths(-ignore)?\b/.test(onLines[0]);
+  onLines.forEach((line, i) => {
+    const match = line.match(/^(\s*)(?:-\s+)?['"]?pull_request(?:_target)?['"]?\s*:(.*)$/);
+    if (!match) return;
+    if (/\bpaths(-ignore)?\b/.test(match[2])) prPathFilters = true;
+    for (let j = i + 1; j < onLines.length; j++) {
+      if (!onLines[j].trim() || onLines[j].trim().startsWith('#')) continue;
+      if (indentOf(onLines[j]) <= match[1].length) break;
+      if (/^\s*['"]?paths(-ignore)?['"]?\s*:/.test(onLines[j])) prPathFilters = true;
+    }
+  });
   const workflow = {
     rel,
     text,
     name: unquote((top.find((entry) => entry.key === 'name') || { value: '' }).value),
     permissions: top.some((entry) => entry.key === 'permissions'),
-    prPathFilters: Boolean(prBlock && /\n\s+paths(-ignore)?:/.test(prBlock[0])),
+    prPathFilters,
     dir: defaultsDir(lines, 0, lines.length, 0),
     jobs: [],
   };
@@ -361,6 +417,24 @@ function moduleRuns(files, text) {
   return out;
 }
 
+// Files a command starts: its first word, or a word after an interpreter (and that
+// interpreter's own options). A file a command only names (`py_compile x.py`, `ruff check x.py`)
+// is not started.
+const INTERPRETER = /^(node|nodejs|python[0-9.]*|py|bash|sh|zsh|pwsh|powershell|deno|bun|tsx|ts-node|ruby|perl|-file)$/i;
+function startedFiles(files, cmd, dirs) {
+  const out = new Set();
+  const words = cmd.split(/\s+/).map(unquote).filter(Boolean);
+  words.forEach((word, i) => {
+    let j = i - 1;
+    while (j >= 0 && words[j].startsWith('-') && !INTERPRETER.test(words[j])) j--;
+    const starts = i === 0 || (j >= 0 && INTERPRETER.test(words[j].replace(/^.*[\\/]/, '').replace(/\.exe$/i, '')));
+    if (!starts) return;
+    for (const dir of dirs) { const rel = norm(path.posix.join(dir, word.replace(/\\/g, '/'))); if (rel && files.has(rel)) out.add(rel); }
+  });
+  for (const rel of moduleRuns(files, cmd)) out.add(rel);
+  return out;
+}
+
 function fileTokens(files, text, dirs) {
   const out = new Set();
   for (const token of tokens(text)) {
@@ -388,6 +462,7 @@ function reachAnalysis(root, fileList, workflows) {
   const texts = []; // { text, dir } reached texts, used for folder and runner matches
   const invoked = new Set(); // `${pkgDir}\0${script}`
   const reached = new Set();
+  const started = new Set(); // files a CI command or invoked package script starts
   const queue = [];
   const addFile = (rel) => { if (!reached.has(rel)) { reached.add(rel); queue.push(rel); } };
   const pkgFor = (dir) => { for (let d = dir; ; d = norm(path.posix.dirname(d))) { if (packages.has(d)) return d; if (!d) return null; } };
@@ -395,6 +470,7 @@ function reachAnalysis(root, fileList, workflows) {
   const visitCommand = (cmd, dir, depth) => {
     texts.push({ text: cmd, dir, command: true });
     for (const rel of [...fileTokens(files, cmd, [dir, '']), ...moduleRuns(files, cmd)]) addFile(rel);
+    for (const rel of startedFiles(files, cmd, [dir, ''])) started.add(rel);
     if (depth > 6) return;
     for (const call of packageInvocations(cmd)) {
       const targets = call.all ? [...packages.keys()] : [call.dir !== null ? norm(path.posix.join(dir, call.dir)) : pkgFor(dir)].filter((d) => d !== null && packages.has(d));
@@ -430,7 +506,7 @@ function reachAnalysis(root, fileList, workflows) {
     for (const hit of importsOf(files, rel, text)) addFile(hit);
     for (const hit of fileTokens(files, text, ['', dir])) if (CODE_EXT.test(hit)) addFile(hit);
   }
-  return { files, packages, texts, invoked, reached };
+  return { files, packages, texts, invoked, reached, started };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -505,8 +581,8 @@ function checkParts(root, fileList, workflows, analysis, reachable) {
       const script = scripts[name];
       if (typeof script !== 'string' || /no test specified/.test(script)) continue;
       if (analysis.invoked.has(`${pkgDir}\0${name}`)) continue;
-      const targets = [...fileTokens(analysis.files, script, [pkgDir, ''])];
-      if (targets.length && targets.every((rel) => analysis.reached.has(rel))) continue;
+      const targets = commandLines(script, pkgDir).flatMap((line) => [...startedFiles(analysis.files, line.cmd, [line.dir, ''])]);
+      if (targets.length && targets.every((rel) => analysis.started.has(rel))) continue;
       if (ciText.includes(script.trim())) continue;
       items.push(item('GAP', 'parts.package-script', manifest, `the "${name}" script (${script.trim()}) is not run by any CI step`, `add a step that runs it (npm run ${name}${pkgDir ? ` with working-directory: ${pkgDir}` : ''}), or remove the script if it is dead`));
     }
@@ -518,7 +594,7 @@ function checkParts(root, fileList, workflows, analysis, reachable) {
     const hit = analysis.texts.some(({ text, dir: at }) => spec.tool.test(text) && (under(dir, at) || tokens(text).some((t) => norm(t) === dir && dir)));
     if (!hit) items.push(item('GAP', 'parts.manifest', rel, `no CI step builds or tests this ${spec.label}`, 'add a CI job that installs, lints and tests it, following the secure-ci-cd plan'));
   }
-  const dockerfiles = fileList.filter((rel) => /(^|\/)(Dockerfile(\.[\w-]+)?|[\w.-]+\.Dockerfile)$/.test(rel));
+  const dockerfiles = fileList.filter((rel) => /(^|\/)(Dockerfile(\.[\w-]+)?|[\w.-]+\.Dockerfile)$/.test(rel) && !NOT_OWN_CODE.test(rel));
   const dockerBuild = /\bdocker\s+(buildx\s+)?build\b|\bdocker[\s-]compose\s+(build|up)\b|docker\/build-push-action/.test(ciText);
   for (const rel of dockerfiles) {
     if (!dockerBuild) items.push(item('GAP', 'parts.docker', rel, 'no CI step builds this Dockerfile', 'add a build step (docker build or docker/build-push-action) so a broken image fails the PR'));
@@ -561,27 +637,36 @@ function checkScripts(root, fileList, analysis) {
   const tests = fileList.filter((rel) => isTestFile(rel) || (testDirOf(rel) && CODE_EXT.test(rel)));
   const testText = tests.map((rel) => readText(root, rel) || '').join('\n');
   const covered = new Set();
-  const testNames = tests.map((rel) => path.posix.basename(rel).toLowerCase().replace(/[-.]/g, '_'));
+  const stemOf = (rel) => path.posix.basename(rel).replace(/\.[^.]+$/, '').toLowerCase().replace(/[-.]/g, '_');
+  const stems = new Map(scripts.map((rel) => [rel, stemOf(rel).replace(/^(verify|validate|check|run)_/, '')]));
+  // A test named after a script (test_auth.py for auth.py, auth_test.go, or test_x_verifier.py
+  // for verify_x.py) covers it, matched on whole name parts; when several scripts match one test,
+  // only the longest name counts, so test_deploy_template.py covers deploy_template.py, not deploy.py.
+  for (const test of tests) {
+    const name = stemOf(test);
+    const matches = [...stems].filter(([, stem]) => stem.length >= 4 && stem !== 'main'
+      && (name === `test_${stem}` || name.startsWith(`test_${stem}_`) || name === `${stem}_test` || name.endsWith(`_${stem}_test`) || name === `${stem}_spec` || name === `${stem}_test_` ));
+    const longest = Math.max(0, ...matches.map(([, stem]) => stem.length));
+    for (const [rel, stem] of matches) if (stem.length === longest) covered.add(rel);
+  }
   for (const rel of scripts) {
     const base = path.posix.basename(rel);
     if (testText.includes(rel) || testText.includes(base)) covered.add(rel);
-    // A test named after the script (test_auth.py for auth.py, or test_x_verifier.py for
-    // verify_x.py) covers it.
-    const stem = base.replace(/\.[^.]+$/, '').toLowerCase().replace(/[-.]/g, '_').replace(/^(verify|validate|check|run)_/, '');
-    if (stem.length >= 6 && stem !== 'main' && testNames.some((name) => name.includes(stem))) covered.add(rel);
-    // A script CI runs directly, or a package script names, is a check or entry point in its own right.
-    if (analysis.reached.has(rel)) covered.add(rel);
+    // A script a CI command starts is a check or entry point in its own right; a script CI only
+    // names (compiles or lints) is not.
+    if (analysis.started.has(rel)) covered.add(rel);
     // A thin `python -m` entry point is covered through the package it calls.
     if (base === '__main__.py' && (readText(root, rel) || '').split('\n').filter((line) => line.trim() && !line.trim().startsWith('#')).length <= 30) covered.add(rel);
   }
-  for (const [pkgDir, pkgScripts] of analysis.packages) for (const script of Object.values(pkgScripts)) if (typeof script === 'string') for (const rel of fileTokens(files, script, [pkgDir, ''])) covered.add(rel);
+  // A package script that starts a file makes it a named entry point.
+  for (const [pkgDir, pkgScripts] of analysis.packages) for (const script of Object.values(pkgScripts)) if (typeof script === 'string') for (const line of commandLines(script, pkgDir)) for (const rel of startedFiles(files, line.cmd, [line.dir, ''])) covered.add(rel);
   for (const rel of moduleRuns(files, testText)) covered.add(rel);
   // Package scripts that tests call by name cover the files they run.
   for (const [pkgDir, pkgScripts] of analysis.packages) {
     for (const [name, script] of Object.entries(pkgScripts)) {
       if (typeof script !== 'string') continue;
       const named = new RegExp(`(?:run(?:-script)?\\s+|['"\`])${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:['"\`\\s]|$)`).test(testText);
-      if (named) for (const rel of fileTokens(files, script, [pkgDir, ''])) covered.add(rel);
+      if (named) for (const line of commandLines(script, pkgDir)) for (const rel of startedFiles(files, line.cmd, [line.dir, ''])) covered.add(rel);
     }
   }
   // Tests import scripts, and covered scripts cover what they import.
@@ -595,21 +680,35 @@ function checkScripts(root, fileList, analysis) {
   return scripts.filter((rel) => !covered.has(rel)).map((rel) => item('CHECK', 'scripts.untested', rel, 'no test names or imports this script', 'add a test if it holds logic worth keeping working; if it is a thin wrapper or one-off, add an ignore with the reason'));
 }
 
-function ghJson(root, args, gh = 'gh') {
-  const result = run(gh, args, root);
+function ghJson(tools, args) {
+  const result = run(tools.gh, args);
   if (!result.ok) return null;
   try { return JSON.parse(result.out); } catch { return null; }
 }
 
-function jobTimes(root, runs, gh) {
-  if (!run(gh, ['auth', 'status'], root).ok) return null;
-  const repo = ghJson(root, ['repo', 'view', '--json', 'defaultBranchRef'], gh);
-  if (!repo || !repo.defaultBranchRef) return null;
-  const list = ghJson(root, ['run', 'list', '--branch', repo.defaultBranchRef.name, '--status', 'success', '--limit', String(runs), '--json', 'databaseId,workflowName'], gh);
+// The repository's GitHub name from its origin remote, and its default branch, read through gh.
+// Null without gh, a login or a github.com origin.
+function githubRepo(root, tools) {
+  if (tools.githubRepo !== undefined) return tools.githubRepo;
+  tools.githubRepo = null;
+  if (!tools.gh || !run(tools.gh, ['auth', 'status']).ok) return null;
+  const origin = git(tools, root, ['remote', 'get-url', 'origin']).out.trim();
+  const match = origin.match(/github\.com[:/]([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/);
+  if (!match) return null;
+  const view = ghJson(tools, ['repo', 'view', match[1], '--json', 'nameWithOwner,defaultBranchRef']);
+  if (!view || !view.defaultBranchRef) return null;
+  tools.githubRepo = { slug: view.nameWithOwner, branch: view.defaultBranchRef.name };
+  return tools.githubRepo;
+}
+
+function jobTimes(root, runs, tools) {
+  const repo = githubRepo(root, tools);
+  if (!repo) return null;
+  const list = ghJson(tools, ['run', 'list', '-R', repo.slug, '--branch', repo.branch, '--status', 'success', '--limit', String(runs), '--json', 'databaseId,workflowName']);
   if (!list) return null;
   const jobs = new Map();
   for (const entry of list) {
-    const view = ghJson(root, ['run', 'view', String(entry.databaseId), '--json', 'jobs'], gh);
+    const view = ghJson(tools, ['run', 'view', String(entry.databaseId), '-R', repo.slug, '--json', 'jobs']);
     for (const job of (view && view.jobs) || []) {
       if (!job.startedAt || !job.completedAt) continue;
       const seconds = (Date.parse(job.completedAt) - Date.parse(job.startedAt)) / 1000;
@@ -620,18 +719,27 @@ function jobTimes(root, runs, gh) {
   return jobs;
 }
 
-// Required status checks on the default branch, read-only through gh; null when unknown.
-function requiredCheckNames(root, gh) {
-  if (!run(gh, ['auth', 'status'], root).ok) return null;
-  const repo = ghJson(root, ['repo', 'view', '--json', 'nameWithOwner,defaultBranchRef'], gh);
-  if (!repo || !repo.defaultBranchRef) return null;
-  const rules = ghJson(root, ['api', `repos/${repo.nameWithOwner}/rules/branches/${repo.defaultBranchRef.name}`], gh);
+// Required status checks on the default branch, read-only. `api(args)` returns the parsed answer
+// of `gh api <args>` or null. Null means unknown: any read that fails, including the classic
+// protection read on a protected branch (it needs admin), never reads as "nothing required".
+function requiredCheckNames(api, slug, branch) {
+  const info = api([`repos/${slug}/branches/${branch}`]);
+  if (!info || typeof info.protected !== 'boolean') return null;
+  const rules = api([`repos/${slug}/rules/branches/${branch}`]);
   if (!Array.isArray(rules)) return null;
   const names = [];
-  for (const rule of rules) if (rule.type === 'required_status_checks') for (const check of (rule.parameters && rule.parameters.required_status_checks) || []) names.push(check.context);
-  const protection = ghJson(root, ['api', `repos/${repo.nameWithOwner}/branches/${repo.defaultBranchRef.name}/protection/required_status_checks`], gh);
-  if (protection && Array.isArray(protection.contexts)) names.push(...protection.contexts);
+  for (const rule of rules) if (rule && rule.type === 'required_status_checks') for (const check of (rule.parameters && rule.parameters.required_status_checks) || []) names.push(check.context);
+  if (info.protected) {
+    const protection = api([`repos/${slug}/branches/${branch}/protection/required_status_checks`]);
+    if (!protection) return null;
+    names.push(...(protection.contexts || []), ...(protection.checks || []).map((check) => check.context));
+  }
   return names;
+}
+
+function requiredChecksFor(root, tools) {
+  const repo = githubRepo(root, tools);
+  return repo ? requiredCheckNames((args) => ghJson(tools, ['api', ...args]), repo.slug, repo.branch) : null;
 }
 
 function checkSpeed(root, fileList, workflows, analysis, settings, options) {
@@ -652,7 +760,7 @@ function checkSpeed(root, fileList, workflows, analysis, settings, options) {
   } else if (!budgets.job_seconds) {
     items.push(item('CHECK', 'speed.budget', SETTINGS_REL, 'no CI job-time budget is declared', `measure the job times, then set budgets.job_seconds in ${SETTINGS_REL}`));
   }
-  const times = options.jobTimes || (options.github ? jobTimes(root, options.runs, options.gh) : null);
+  const times = options.jobTimes || (options.github ? jobTimes(root, options.runs, options.tools) : null);
   if (!times) {
     items.push(item('CHECK', 'speed.jobs', '', 'job times not checked (no GitHub access)', 'run again with a working gh login to compare job times with budgets'));
     return items;
@@ -660,14 +768,16 @@ function checkSpeed(root, fileList, workflows, analysis, settings, options) {
   for (const [name, seconds] of times) {
     if (budgets.job_seconds && seconds > budgets.job_seconds) items.push(item('GAP', 'speed.jobs', '', `${name} took ${Math.round(seconds)} s, over the ${budgets.job_seconds} s budget`, 'make the slow files fast or shard the job (fast-tests-and-sharding playbook)'));
   }
-  // Long jobs come from the measured times, whatever command they run.
+  // Long test jobs come from the measured times, whatever command they run; a job counts as a test
+  // job when its name, a step name or a command says tests, a suite, a regression or a runner.
+  const testJob = (job) => [job.id, job.name, ...job.steps.flatMap((s) => [s.name, s.run])].some((text) => text && (/\btests?\b|regression|suite|\bspec\b|unittest|run[-_]tests/i.test(text) || Object.values(RUNNERS).some((re) => re.test(text))));
   for (const [name, seconds] of times) {
     if (seconds <= budgets.unsharded_test_job_seconds) continue;
     const [workflowName, jobName] = name.split(' / ');
     const plain = (jobName || '').replace(/\s+\(.*\)$/, '');
     for (const workflow of workflows.filter((w) => (w.name || path.posix.basename(w.rel)) === workflowName || w.rel === workflowName)) {
       const job = workflow.jobs.find((j) => j.id === plain || j.name === plain);
-      if (job && !job.matrix) items.push(item('CHECK', 'speed.jobs', workflow.rel, `job ${jobName} took up to ${Math.round(seconds)} s with no sharding or matrix`, 'measure its slowest files, make them fast, then shard it from one manifest (fast-tests-and-sharding playbook)'));
+      if (job && !job.matrix && testJob(job)) items.push(item('CHECK', 'speed.jobs', workflow.rel, `job ${jobName} took up to ${Math.round(seconds)} s with no sharding or matrix`, 'measure its slowest files, make them fast, then shard it from one manifest (fast-tests-and-sharding playbook)'));
     }
   }
   return items;
@@ -729,11 +839,17 @@ function checkStatusDoc(root, fileList, workflows, settings) {
 
 // ---------------------------------------------------------------------------------------------
 
-function changedPaths(root, base) {
-  const committed = run('git', ['diff', '--name-only', `${base}...HEAD`], root);
-  if (!committed.ok) throw new UsageError(`cannot diff against ${base} (is it a ref in this repository?)`);
-  const local = run('git', ['diff', '--name-only', 'HEAD'], root);
-  const untracked = run('git', ['ls-files', '--others', '--exclude-standard'], root);
+// Paths changed since base: commits since the merge base, the working tree against HEAD, and new
+// files. Plumbing commands only, so the index is never refreshed or rewritten.
+function changedPaths(root, base, tools) {
+  if (!tools.git) throw new UsageError('--base needs git, and no git was found on PATH outside the repository');
+  const commit = git(tools, root, ['rev-parse', '--verify', '--quiet', '--end-of-options', `${base}^{commit}`]);
+  if (!commit.ok) throw new UsageError(`cannot diff against ${base} (is it a ref in this repository?)`);
+  const mergeBase = git(tools, root, ['merge-base', commit.out.trim(), 'HEAD']);
+  if (!mergeBase.ok) throw new UsageError(`${base} shares no history with HEAD`);
+  const committed = git(tools, root, ['diff-tree', '-r', '--name-only', '--no-commit-id', mergeBase.out.trim(), 'HEAD']);
+  const local = git(tools, root, ['diff-index', '--name-only', 'HEAD']);
+  const untracked = git(tools, root, ['ls-files', '--others', '--exclude-standard']);
   return [...new Set([committed.out, local.out, untracked.out].join('\n').split('\n').map(norm).filter(Boolean))];
 }
 
@@ -750,8 +866,11 @@ function ignoredBy(entry, ignore) {
 
 function checkup(root, options = {}) {
   const opts = { github: true, gh: 'gh', runs: DEFAULTS.runs, base: null, ...options };
+  const tools = { git: resolveExecutable(opts.git || 'git', root), gh: opts.github ? resolveExecutable(opts.gh, root) : null };
+  opts.tools = tools;
+  if (opts.base !== null && opts.base !== undefined && (typeof opts.base !== 'string' || !opts.base || opts.base.startsWith('-'))) throw new UsageError('--base must be a ref that does not start with -');
   const settings = loadSettings(root);
-  const fileList = listFiles(root);
+  const fileList = listFiles(root, tools);
   const workflows = fileList.filter((rel) => /^\.github\/workflows\/[^/]+\.ya?ml$/.test(rel)).map((rel) => parseWorkflow(rel, readText(root, rel)));
   const analysis = reachAnalysis(root, fileList, workflows);
   const reachable = makeReachTest(analysis);
@@ -760,7 +879,7 @@ function checkup(root, options = {}) {
     ...checkTests(fileList, reachable),
     ...checkScripts(root, fileList, analysis),
     ...checkSpeed(root, fileList, workflows, analysis, settings, opts),
-    ...checkHygiene(fileList, workflows, root, opts.github ? requiredCheckNames(root, opts.gh) : null),
+    ...checkHygiene(fileList, workflows, root, opts.requiredChecks !== undefined ? opts.requiredChecks : (opts.github ? requiredChecksFor(root, tools) : null)),
     ...checkStatusDoc(root, fileList, workflows, settings),
   ];
   const ignored = items.filter((entry) => ignoredBy(entry, settings.ignore));
@@ -768,7 +887,7 @@ function checkup(root, options = {}) {
   const unusedIgnores = settings.ignore.filter((rule) => !ignored.some((entry) => ignoredBy(entry, [rule])));
   let changed = null;
   if (opts.base) {
-    changed = changedPaths(root, opts.base);
+    changed = changedPaths(root, opts.base, tools);
     items = items.filter((entry) => relevant(entry, changed));
   }
   const notes = [];
@@ -810,7 +929,7 @@ function parseArgs(argv) {
 function main(argv) {
   try {
     const options = parseArgs(argv);
-    if (options.help) { process.stdout.write(`${fs.readFileSync(__filename, 'utf8').split('\n').slice(3, 22).map((l) => l.replace(/^\/\/ ?/, '')).join('\n')}\n`); return 0; }
+    if (options.help) { process.stdout.write(`${fs.readFileSync(__filename, 'utf8').split('\n').slice(3, 24).map((l) => l.replace(/^\/\/ ?/, '')).join('\n')}\n`); return 0; }
     if (!fs.existsSync(options.repo) || !fs.statSync(options.repo).isDirectory()) throw new UsageError(`--repo ${options.repo} is not a folder`);
     const report = checkup(options.repo, options);
     process.stdout.write(options.json ? `${JSON.stringify(report, null, 2)}\n` : `${formatReport(report)}\n`);
@@ -824,4 +943,4 @@ function main(argv) {
 
 if (require.main === module) process.exitCode = main(process.argv.slice(2));
 
-module.exports = Object.freeze({ CHECKS, SETTINGS_REL, checkHygiene, checkup, formatReport, main, packageInvocations, parseWorkflow });
+module.exports = Object.freeze({ CHECKS, SETTINGS_REL, checkHygiene, checkup, formatReport, main, packageInvocations, parseWorkflow, requiredCheckNames, resolveExecutable });

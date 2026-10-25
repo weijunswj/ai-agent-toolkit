@@ -15,16 +15,16 @@ Use this to find out whether a repository's CI has fallen behind its code: new p
 node <toolkit>/skills/secure-ci-cd/scripts/ci-checkup.cjs --repo <path> [--base <ref>] [--runs <n>] [--no-github] [--json]
 ```
 
-Run it from the Toolkit copy; do not copy it into the repository, so it never goes stale there. It is read-only: it reads files, lists them with git, and with a working `gh` login reads the job times of the last few green runs on the default branch and the default branch's required checks. It writes nothing, runs no repository code and needs no install. Without a `gh` login the job-time rows say "not checked (no GitHub access)" instead of guessing.
+Run it from the Toolkit copy; do not copy it into the repository, so it never goes stale there. It is read-only: it reads files, lists them with git, and with a working `gh` login reads the job times of the last few green runs on the default branch and the default branch's required checks. It writes nothing, runs no repository code and needs no install. It starts `git` and `gh` only by full path from PATH folders outside the repository, from a working folder outside it, so a program planted in the repository never runs; it skips links that lead out of the repository; and `--base` never rewrites the git index and refuses a ref that starts with `-`. Without a `gh` login the job-time rows say "not checked (no GitHub access)" instead of guessing, and required checks it cannot read (classic branch protection needs admin) count as unknown, not as none.
 
 ## What It Compares
 
 | Area | It flags |
 |---|---|
-| Parts | A package `test`, `lint`, `build` or `typecheck` script no CI step runs; a Go, Rust, Maven, Gradle or Python project no step builds or tests; a Dockerfile no step builds |
+| Parts | A package `test`, `lint`, `build` or `typecheck` script no CI step runs; a Go, Rust, Maven, Gradle or Python project no step builds or tests; a Dockerfile no step builds (not under examples, fixtures or `.devcontainer`) |
 | Tests | A test file (`*.test.*`, `*.spec.*`, `test_*` and `*_test` Python, JavaScript or TypeScript files, `*_test.go`) or test folder no step reaches, directly, through a folder a reached script names, or through a test runner a CI command starts above it (only its targets, such as `discover -s tests`, when it names any) |
-| Scripts | A script no test names, imports (including a bare Python import of a script folder) or runs through `python -m` or a package script name, after following `require`/`import`; a script CI runs or a package script names, a test named after the script, and a thin `__main__.py` count as covered (always a CHECK) |
-| Speed | No declared time budget; a budget no CI step checks; test files with no measured time; a job over budget; a job with no matrix whose measured time is over the unsharded limit |
+| Scripts | A script no test names, imports (including a bare Python import of a script folder) or runs through `python -m` or a package script name, after following `require`/`import`; a script CI or a package script starts (not one it only compiles or lints), a test named after the script on whole name parts, and a thin `__main__.py` count as covered (always a CHECK) |
+| Speed | No declared time budget; a budget no CI step checks; test files with no measured time; a job over budget; a test job with no matrix whose measured time is over the unsharded limit |
 | Hygiene | An action not pinned to a full commit SHA; no `permissions:`; `continue-on-error`, `|| true`, `set +e`, or a custom shell template such as `bash {0}` without `-e` (plain `shell: bash` runs with `-e`); path filters on a pull request trigger when a job in that workflow is a required check, or when the required checks cannot be read (a required check that never runs stays "Pending"); no Dependabot `github-actions` entry |
 | Status document | No CI status document (the setting, else the default path, else the one Markdown file named like a CI/CD status document); a workflow it does not list; a workflow it lists that is gone |
 

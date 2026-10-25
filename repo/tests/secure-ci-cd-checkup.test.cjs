@@ -310,3 +310,156 @@ test('speed: a long job with no matrix is raised from measured times, whatever c
     assert.deepEqual(items.map((e) => e.message), ['job full-regression took up to 1491 s with no sharding or matrix']);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+// Fixes from the gate review: programs outside the repository, unknown required checks, started
+// versus named scripts, and one fixture per coverage rule.
+
+test('git and gh resolve to absolute paths outside the repository and never start inside it', (t) => {
+  const childProcess = require('node:child_process');
+  const real = childProcess.spawnSync;
+  const seen = [];
+  childProcess.spawnSync = (command, args, options) => { seen.push({ command, cwd: options && options.cwd }); return real(command, args, options); };
+  t.after(() => { childProcess.spawnSync = real; });
+  const dir = fixture({ 'tools/once.sh': '', '.github/workflows/ci.yml': WORKFLOW('echo ok'), 'docs/ci-cd/CURRENT_CICD_STATUS.md': STATUS('ci.yml') });
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const bin = path.join(dir, 'bin');
+  fs.mkdirSync(bin);
+  for (const name of ['git', 'gh', 'git.exe', 'gh.exe']) fs.writeFileSync(path.join(dir, name), '');
+  for (const name of ['git', 'gh', 'git.exe', 'gh.exe']) fs.writeFileSync(path.join(bin, name), '');
+  const saved = process.env.PATH;
+  process.env.PATH = [dir, bin, '.', saved].join(path.delimiter);
+  t.after(() => { process.env.PATH = saved; });
+  checkup.checkup(dir, { github: true });
+  assert.ok(seen.length > 0, 'git ran');
+  const realDir = fs.realpathSync(dir).toLowerCase();
+  for (const { command, cwd } of seen) {
+    assert.ok(path.isAbsolute(command), `absolute: ${command}`);
+    assert.ok(!path.resolve(command).toLowerCase().startsWith(path.resolve(dir).toLowerCase()) && !path.resolve(command).toLowerCase().startsWith(realDir), `outside the repository: ${command}`);
+    assert.ok(cwd && !path.resolve(cwd).toLowerCase().startsWith(path.resolve(dir).toLowerCase()) && !fs.realpathSync(cwd).toLowerCase().startsWith(realDir), `cwd outside the repository: ${cwd}`);
+  }
+});
+
+test('resolveExecutable skips the repository, folders inside it and relative entries', () => {
+  const exists = (file) => true;
+  const posix = { platform: 'linux', exists };
+  assert.equal(checkup.resolveExecutable('git', '/work/repo', { ...posix, environment: { PATH: '/work/repo:/work/repo/bin:.:bin:/usr/bin' } }), '/usr/bin/git');
+  assert.equal(checkup.resolveExecutable('git', '/work/repo', { ...posix, environment: { PATH: '/work/repo:/work/repo/bin' } }), null);
+  assert.equal(checkup.resolveExecutable('/work/repo/git', '/work/repo', posix), null, 'an absolute name inside the repository is refused');
+  assert.equal(checkup.resolveExecutable('/opt/git/bin/git', '/work/repo', posix), '/opt/git/bin/git');
+  const win = { platform: 'win32', exists };
+  assert.equal(checkup.resolveExecutable('gh', 'C:\\Work\\Repo', { ...win, environment: { Path: 'c:\\work\\repo;C:\\WORK\\REPO\\tools;"C:\\Program Files\\GitHub CLI"' } }), 'C:\\Program Files\\GitHub CLI\\gh.exe');
+});
+
+test('a git.exe and gh.exe planted in the repository do not run', { skip: process.platform !== 'win32' }, (t) => {
+  const dir = fixture({ '.github/workflows/ci.yml': WORKFLOW('echo ok'), 'docs/ci-cd/CURRENT_CICD_STATUS.md': STATUS('ci.yml') });
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  // The planted copies are node.exe, so they would run and answer instead of git or gh if started.
+  for (const name of ['git.exe', 'gh.exe']) { try { fs.linkSync(process.execPath, path.join(dir, name)); } catch { fs.copyFileSync(process.execPath, path.join(dir, name)); } }
+  const env = { ...process.env };
+  for (const key of Object.keys(env)) if (key.toLowerCase() === 'nodefaultcurrentdirectoryinexepath') delete env[key];
+  const probe = `const childProcess = require('node:child_process');
+const seen = [];
+const real = childProcess.spawnSync;
+childProcess.spawnSync = (command, ...rest) => { seen.push(String(command)); return real(command, ...rest); };
+require(${JSON.stringify(SCRIPT)}).checkup(process.cwd(), { github: true });
+console.log(JSON.stringify(seen));`;
+  const result = spawnSync(process.execPath, ['-e', probe], { cwd: dir, env, encoding: 'utf8', windowsHide: true });
+  assert.equal(result.status, 0, result.stderr);
+  const seen = JSON.parse(result.stdout.trim().split(/\r?\n/).pop());
+  assert.ok(seen.length > 0);
+  for (const command of seen) {
+    assert.match(command, /^[A-Za-z]:\\.*\\(git|gh)\.exe$/i, command);
+    assert.ok(!command.toLowerCase().startsWith(dir.toLowerCase()), command);
+  }
+});
+
+test('required checks: any read that fails is unknown, never "nothing required"', () => {
+  const api = (answers) => (args) => (Object.prototype.hasOwnProperty.call(answers, args[0]) ? answers[args[0]] : null);
+  const b = 'repos/o/r/branches/main';
+  const r = 'repos/o/r/rules/branches/main';
+  const p = 'repos/o/r/branches/main/protection/required_status_checks';
+  assert.equal(checkup.requiredCheckNames(api({}), 'o/r', 'main'), null, 'branch unreadable');
+  assert.equal(checkup.requiredCheckNames(api({ [b]: { protected: true } }), 'o/r', 'main'), null, 'rules unreadable');
+  assert.equal(checkup.requiredCheckNames(api({ [b]: { protected: true }, [r]: [] }), 'o/r', 'main'), null, 'protection needs admin');
+  assert.deepEqual(checkup.requiredCheckNames(api({ [b]: { protected: false }, [r]: [] }), 'o/r', 'main'), []);
+  assert.deepEqual(checkup.requiredCheckNames(api({ [b]: { protected: true }, [r]: [{ type: 'required_status_checks', parameters: { required_status_checks: [{ context: 'lint' }] } }], [p]: { contexts: ['test'], checks: [] } }), 'o/r', 'main'), ['lint', 'test']);
+  const workflow = WORKFLOW('pytest').replace('  pull_request:\n', "  pull_request:\n    paths: ['src/**']\n");
+  assert.equal(hits(report({ '.github/workflows/ci.yml': workflow }, { requiredChecks: null }), 'hygiene.paths').length, 1, 'unknown keeps the CHECK');
+});
+
+test('scripts: a script CI only names (compiles or lints) is not counted as run', () => {
+  const files = { 'scripts/x.py': '', 'scripts/y.py': '' };
+  const items = report({ ...files, '.github/workflows/ci.yml': WORKFLOW('|\n          python -m py_compile scripts/x.py\n          ruff check scripts/y.py') });
+  assert.deepEqual(hits(items, 'scripts.untested').map((e) => e.path), ['scripts/x.py', 'scripts/y.py']);
+  const run = report({ ...files, '.github/workflows/ci.yml': WORKFLOW('|\n          python -u scripts/x.py\n          ./scripts/y.py') });
+  assert.deepEqual(hits(run, 'scripts.untested'), []);
+});
+
+test('--base leaves the git index untouched and refuses a ref that starts with -', () => {
+  const dir = fixture({ 'tools/old.sh': '', '.github/workflows/ci.yml': WORKFLOW('echo ok'), 'docs/ci-cd/CURRENT_CICD_STATUS.md': STATUS('ci.yml') });
+  const git = (...args) => assert.equal(spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd: dir, encoding: 'utf8' }).status, 0);
+  try {
+    git('init', '-q');
+    git('add', '.');
+    git('commit', '-q', '-m', 'base');
+    // An old file time makes git want to refresh the index; the check-up must not.
+    const old = new Date(Date.now() - 86400000);
+    fs.utimesSync(path.join(dir, 'tools', 'old.sh'), old, old);
+    const index = path.join(dir, '.git', 'index');
+    const before = fs.readFileSync(index);
+    const beforeTime = fs.statSync(index).mtimeMs;
+    checkup.checkup(dir, { github: false, base: 'HEAD' });
+    assert.deepEqual(fs.readFileSync(index), before);
+    assert.equal(fs.statSync(index).mtimeMs, beforeTime);
+    const result = spawnSync(process.execPath, [SCRIPT, '--repo', dir, '--no-github', '--base', '--output=x'], { encoding: 'utf8' });
+    assert.equal(result.status, 2, result.stderr);
+    assert.equal(fs.existsSync(path.join(dir, 'x')), false);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('a link that leads out of the repository is not read', (t) => {
+  const outside = fixture({ 'secret.cjs': "require('./x');\n", 'a.test.js': '' });
+  const dir = fixture({ '.github/workflows/ci.yml': WORKFLOW('echo ok'), 'docs/ci-cd/CURRENT_CICD_STATUS.md': STATUS('ci.yml') });
+  t.after(() => { fs.rmSync(dir, { recursive: true, force: true }); fs.rmSync(outside, { recursive: true, force: true }); });
+  try {
+    fs.symlinkSync(path.join(outside, 'secret.cjs'), path.join(dir, 'linked.cjs'));
+    fs.symlinkSync(outside, path.join(dir, 'away'), 'dir');
+  } catch { t.skip('links are not allowed here'); return; }
+  const items = checkup.checkup(dir, { github: false }).items;
+  assert.deepEqual(items.filter((e) => /linked\.cjs|away\//.test(e.path)), []);
+});
+
+test('scripts: each coverage rule counts on its own', () => {
+  const lone = (files) => hits(report({ '.github/workflows/ci.yml': WORKFLOW('echo ok'), ...files }), 'scripts.untested').map((e) => e.path);
+  assert.deepEqual(lone({ 'pkg/app/__main__.py': 'from app.cli import main\nmain()\n' }), [], 'thin __main__.py');
+  assert.deepEqual(lone({ 'pkg/app/__main__.py': 'x = 1\n'.repeat(31) }), ['pkg/app/__main__.py'], 'a long __main__.py is not thin');
+  assert.deepEqual(lone({ 'package.json': JSON.stringify({ scripts: { gen: 'node tools/gen.cjs' } }), 'tools/gen.cjs': '' }), [], 'started by a package script');
+  assert.deepEqual(lone({ 'package.json': JSON.stringify({ scripts: { gen: 'eslint tools/gen.cjs' } }), 'tools/gen.cjs': '' }), ['tools/gen.cjs'], 'only named by a package script');
+  assert.deepEqual(lone({ 'deep/scripts/render_page.py': '', 'tests/test_x.py': 'import sys\nsys.path.insert(0, "deep/scripts")\nfrom render_page import go\n' }), [], 'bare import found anywhere');
+  assert.deepEqual(hits(report({ 'tools/report_job/__main__.py': 'x = 1\n'.repeat(40), '.github/workflows/ci.yml': WORKFLOW('python -m tools.report_job') }), 'scripts.untested'), [], 'python -m in a CI command');
+});
+
+test('speed and parts: a long non-test job is not raised, and a dev container Dockerfile is not a gap', () => {
+  const dir = fixture({
+    '.github/workflows/ci.yml': WORKFLOW('echo analyse').replace('  test:\n', '  analyze:\n').replace('name: Test', 'name: CodeQL analyse'),
+    '.devcontainer/Dockerfile': 'FROM scratch\n',
+    'docs/ci-cd/CURRENT_CICD_STATUS.md': STATUS('ci.yml'),
+  });
+  try {
+    const items = checkup.checkup(dir, { github: false, jobTimes: new Map([['CI / analyze', 1800]]) }).items;
+    assert.deepEqual(hits(items, 'speed.jobs'), []);
+    assert.deepEqual(hits(items, 'parts.docker'), []);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('scripts: a test named after a longer script does not cover the shorter one', () => {
+  const items = report({ 'scripts/deploy.py': '', 'scripts/deploy_template.py': '', 'tests/test_deploy_template.py': '', '.github/workflows/ci.yml': WORKFLOW('pytest tests') });
+  assert.deepEqual(hits(items, 'scripts.untested').map((e) => e.path), ['scripts/deploy.py']);
+});
+
+test('hygiene: path filters are found in flow style and at any indentation', () => {
+  const flow = WORKFLOW('pytest').replace("on:\n  pull_request:\n  push:\n    branches: [main]\n", "on:\n  pull_request: { paths: ['src/**'] }\n");
+  const deep = WORKFLOW('pytest').replace("on:\n  pull_request:\n  push:\n    branches: [main]\n", "on:\n    pull_request:\n        branches: [main]\n        paths-ignore:\n            - docs/**\n    push:\n        branches: [main]\n");
+  const pushOnly = WORKFLOW('pytest').replace("  push:\n    branches: [main]\n", "  push:\n    paths: ['src/**']\n");
+  for (const [text, want] of [[flow, true], [deep, true], [pushOnly, false]]) assert.equal(checkup.parseWorkflow('.github/workflows/ci.yml', text).prPathFilters, want, text);
+});
