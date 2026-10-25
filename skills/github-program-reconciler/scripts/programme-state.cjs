@@ -22,7 +22,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const { DEFAULT_THRESHOLD, INDEX_COMMENT_MARKER, auditDecisionTraces, traceEntries, indexLines, markLines, commentLink, issueUrl } = require('./decision-trace-audit.cjs');
+const { DEFAULT_THRESHOLD, INDEX_COMMENT_MARKER, auditDecisionTraces, traceEntries, commentLink, issueUrl } = require('./decision-trace-audit.cjs');
 const { OTHER_COMMENTS } = require('./decision-tags.cjs');
 const { ProgrammeError, resolveExecutable } = require('./resolve-executable.cjs');
 
@@ -84,8 +84,6 @@ const BLOCK_NAME = 'STATE';
 const TRACE_BLOCK_NAME = 'TRACE';
 const NAV_BLOCK_NAME = 'NAV';
 const CURRENT_BLOCK_NAME = 'CURRENT';
-// How many queued tasks the CURRENT summary names under "Queued".
-const NEXT_UP_LIMIT = 5;
 // Index comments are cut below this size (GitHub's comment limit is 65,536 characters).
 const INDEX_COMMENT_LIMIT = 60000;
 const TEXT_LIMIT = 200;
@@ -912,9 +910,11 @@ function revisionLine(parent, children) {
 // (an open or draft PR, or active, waiting on the owner or held), NEXT when it is queued with a
 // planned release, else LATER (OPTIONAL for an optional task).
 // A finished outcome (class COMPLETED or RETIRED, or a DONE or RETIRED lifecycle) shows as COMPLETED,
-// and a retired one says so in its status. Lane is the gate the work is in now.
+// and a retired one says so in its status. The gate a task is in shows on its own page, not here.
 const GRAPH_GROUPS = Object.freeze(['NOW', 'NEXT', 'LATER', 'OPTIONAL']);
-const GRAPH_HEADER = ['| Task | Child # | PR # | Class | Status | Lane | Task Description |', '|---|---|---|---|---|---|---|'];
+const GRAPH_HEADER = ['| Task | Task Description | Child # | PR # | Class | Status |', '|---|---|---|---|---|---|'];
+// Inside a class, in-progress rows come before queued ones.
+const STATUS_RANK = Object.freeze({ 'IN PROGRESS': 0, QUEUED: 1 });
 
 function graphClass(outcome, child) {
   if (!outcome || isFinished(outcome, child)) return '-';
@@ -960,14 +960,15 @@ function completedAt(child, issue) {
   return child?.completed_at || issue?.closed_at || null;
 }
 
-// Active rows by class (NOW, NEXT, LATER, OPTIONAL), each by catalogue order and issue; then every finished row,
+// Active rows by class (NOW, NEXT, LATER, OPTIONAL), each by status and then child issue number; then every finished row,
 // oldest completion first and the most recent last (unknown times last). Nested children sort like
 // any other row.
 function graphOrder(parent, children, issues) {
   const finished = parent.outcomes.filter(outcome => isFinished(outcome, children.get(outcome.issue)));
   const active = parent.outcomes.filter(outcome => !finished.includes(outcome));
-  const byOrder = (a, b) => legacyRank(a) - legacyRank(b) || a.order - b.order || a.issue - b.issue;
-  const groups = GRAPH_GROUPS.map(cls => active.filter(outcome => graphClass(outcome, children.get(outcome.issue)) === cls).sort(byOrder));
+  const rank = outcome => STATUS_RANK[statusText(outcome, children.get(outcome.issue))] ?? 2;
+  const byStatus = (a, b) => rank(a) - rank(b) || a.issue - b.issue;
+  const groups = GRAPH_GROUPS.map(cls => active.filter(outcome => graphClass(outcome, children.get(outcome.issue)) === cls).sort(byStatus));
   const when = outcome => completedAt(children.get(outcome.issue), issues.get(outcome.issue));
   const byCompletion = (a, b) => {
     const left = when(a);
@@ -987,53 +988,76 @@ function renderParentBlockBody(parent, children, issues = new Map()) {
     const child = children.get(outcome.issue);
     const cls = graphClass(outcome, child);
     const pr = child?.pr.number ? `#${child.pr.number}` : '-';
-    return `| ${taskName(outcome, issues.get(outcome.issue))} | #${outcome.issue} | ${pr} | ${cls} | ${statusText(outcome, child)} | ${laneText(outcome, child)} | ${descriptionText(outcome)} |`;
+    return `| ${taskName(outcome, issues.get(outcome.issue))} | ${descriptionText(outcome)} | #${outcome.issue} | ${pr} | ${cls} | ${statusText(outcome, child)} |`;
   });
   return [
     revisionLine(parent, children),
     '## Programme Graph',
     '',
-    `Generated from the programme state documents (state revision ${parent.revision}), so edit those rather than this table. Sorted NOW (in progress), NEXT (planned release), LATER, OPTIONAL, then COMPLETED with the most recent last.`,
+    `Generated from the programme state documents (state revision ${parent.revision}), so edit those rather than this table. Sorted NOW (in progress), NEXT (planned release), LATER, OPTIONAL, then COMPLETED with the most recent last; inside each, in progress before queued, then by child number.`,
     '',
     ...GRAPH_HEADER,
     ...rows,
   ].join('\n');
 }
 
-// The comment trace an issue body carries: links to its index comments, then one line per comment
-// none of them lists, then marks for superseded records an index comment left unmarked.
-// A trace's lists, one per tag in first-seen order and "Other comments" last. Tags never mix.
-function traceGroups(trace) {
+// A trace line's label when the comment carries no topic: a task page's own task name, else this.
+const NO_TOPIC = 'No topic';
+
+// The group a trace item belongs to: its topic, except that on a task page the task's own name and
+// no topic are one group (null).
+function topicKey(item, topic) {
+  const key = item.tag || null;
+  return key && topic && key === String(topic).replace(/\s+/g, ' ').trim().toUpperCase() ? null : key;
+}
+
+// A trace's groups, one per topic in first-seen order and the untopiced group last. Topics never mix.
+function traceGroups(trace, topic = null) {
   const groups = new Map();
-  const add = (tag, kind, item) => {
-    const key = tag || null;
-    if (!groups.has(key)) groups.set(key, { tag: key, indexes: [], entries: [], marks: [] });
-    groups.get(key)[kind].push(item);
+  const add = (item, kind) => {
+    const key = topicKey(item, topic);
+    if (!groups.has(key)) groups.set(key, { tag: key, label: null, indexes: [], entries: [], marks: [] });
+    const group = groups.get(key);
+    if (!group.label && key) group.label = item.tag_label || item.tag;
+    group[kind].push(item);
   };
-  for (const index of trace.indexes) add(index.tag, 'indexes', index);
-  for (const entry of trace.entries) add(entry.tag, 'entries', entry);
-  for (const mark of trace.marks) add(mark.tag, 'marks', mark);
+  for (const index of trace.indexes) add(index, 'indexes');
+  for (const entry of trace.entries) add(entry, 'entries');
+  for (const mark of trace.marks) add(mark, 'marks');
   const other = groups.get(null);
   groups.delete(null);
   return [...groups.values(), ...(other ? [other] : [])];
 }
 
-// The comment trace an issue body carries: for each tag, links to that tag's index comments, one
-// line per comment none of them lists, and marks for superseded records an index comment left
-// unmarked. With `repository`, every link is a full URL to the comment.
-function renderTraceBlockBody(number, trace, repository = '') {
+function groupLabel(group, topic) {
+  return publicText(group.tag ? group.label || group.tag : topic || NO_TOPIC);
+}
+
+// One link per comment with its comment ID as the text, followed by "(replaced by <ID>)" when a
+// later comment replaced its record. Index comments come first, as "list 1", "list 2" and so on.
+function traceTokens(group, base) {
+  const replaced = item => (item.superseded_by_id ? ` (replaced by [${item.superseded_by_id}](${commentLink(base, item.superseded_by_id)}))`
+    : item.superseded_by ? ` (replaced by ${publicText(item.superseded_by)})` : '');
+  return [
+    ...group.indexes.map((index, at) => `[list ${at + 1}](${commentLink(base, index.id)})`),
+    ...group.entries.map(entry => `[${entry.id}](${commentLink(base, entry.id)})${replaced(entry)}`),
+    ...group.marks.map(mark => `[${mark.id}](${commentLink(base, mark.id)})${replaced(mark)}`),
+  ];
+}
+
+// The comment trace an issue body carries: one line per topic, listing that topic's index comments
+// and then every comment none of them lists, each as a link that opens the comment. With
+// `repository`, every link is a full URL; `topic` is a task page's own task name.
+function renderTraceBlockBody(number, trace, repository = '', topic = null) {
   const base = issueUrl(repository, number);
   const lines = [
     `<!-- programme-trace issue=${number} -->`,
-    '**Comment trace** (generated from every comment on this issue). Read the body first. Each tag is its own list and tags are never combined; within a tag, where comments disagree, the latest one wins. Tag a comment by making its first line the tag and its second line `---`.',
+    '**Comment trace** (generated from every comment on this issue). One line per topic; each number is a comment and opens it. Read the body first; within a topic, where comments disagree, the latest one wins. To put a comment under a topic, make its first line the topic (the task\'s name, or a short subject for a programme-wide comment) and its second line `---`.',
+    '',
   ];
-  const groups = traceGroups(trace);
-  for (const group of groups) {
-    lines.push('', `**${group.tag ? publicText(group.tag) : OTHER_COMMENTS}**`, '',
-      ...group.indexes.map((index, at) => `- ${index.date || 'undated'} · index · [Earlier comments, part ${at + 1}](${commentLink(base, index.id)})`),
-      ...indexLines(group.entries, new Map(), base), ...markLines(group.marks, base));
-  }
-  if (!groups.length) lines.push('', '- No comments yet.');
+  const groups = traceGroups(trace, topic);
+  for (const group of groups) lines.push(`- **${groupLabel(group, topic)}:** ${traceTokens(group, base).join(' · ')}`);
+  if (!groups.length) lines.push('- No comments yet.');
   return lines.join('\n');
 }
 
@@ -1046,31 +1070,21 @@ function ownerWait(child) {
   return null;
 }
 
-// The generated CURRENT summary: what is in progress, what waits on the owner, and the next queued
-// tasks, from the same documents and order as the Programme Graph.
+// The generated CURRENT summary: the tasks in progress, in Programme Graph order, each with its gate,
+// PR, next step and anything waiting on the owner. Queued work shows in the graph below it.
 function renderCurrentBlockBody(parent, children, issues = new Map()) {
   const rows = graphOrder(parent, children, issues).map(outcome => ({ outcome, child: children.get(outcome.issue) }));
-  const name = ({ outcome }) => `${taskName(outcome, issues.get(outcome.issue))} (#${outcome.issue})`;
-  const active = rows.filter(row => statusText(row.outcome, row.child) === 'IN PROGRESS');
-  const waiting = active.filter(row => ownerWait(row.child));
-  const working = active.filter(row => !ownerWait(row.child)).map(row => {
+  const working = rows.filter(row => statusText(row.outcome, row.child) === 'IN PROGRESS').map(row => {
     const parts = [row.child.gate.role, row.child.pr.number ? `PR #${row.child.pr.number}` : null].filter(Boolean).join(', ');
-    return `- ${name(row)}${parts ? `: ${parts}` : ''}${row.child.next_action ? `; next: ${publicText(row.child.next_action)}` : ''}`;
+    const wait = ownerWait(row.child);
+    return `- ${taskName(row.outcome, issues.get(row.outcome.issue))} (#${row.outcome.issue})${parts ? `: ${parts}` : ''}${wait ? `; waiting on you: ${wait}` : ''}${row.child.next_action ? `; next: ${publicText(row.child.next_action)}` : ''}`;
   });
-  const queued = rows.filter(row => statusText(row.outcome, row.child) === 'QUEUED').slice(0, NEXT_UP_LIMIT).map(row => `- ${name(row)}`);
-  const list = items => (items.length ? items : ['- None.']);
   return [
     '<!-- programme-current -->',
     `_Generated from the programme state (revision ${parent.revision}). The Programme Graph follows; hand-written notes come after it._`,
     '',
     '**In progress**',
-    ...list(working),
-    '',
-    '**Waiting on you**',
-    ...list(waiting.map(row => `- ${name(row)}: ${ownerWait(row.child)}`)),
-    '',
-    '**Queued**',
-    ...list(queued),
+    ...(working.length ? working : ['- None.']),
   ].join('\n');
 }
 
@@ -1198,19 +1212,22 @@ function upsertNavBlock(text, rendered) {
   return `${block}${eol}${after ? `${eol}${after}` : ''}`;
 }
 
-// Index comment bodies for trace lines, each under the comment size limit.
-// A tagged list's index comment carries the tag on its first line, so it stays in that tag's list.
-function indexCommentBodies(number, lines, intent, tag = null) {
-  const head = (part, total) => [...(tag ? [tag, '---'] : []), INDEX_COMMENT_MARKER, `<!-- programme-trace intent=${intent} part=${part}/${total} -->`,
-    `## Comment trace for #${number}: ${tag || OTHER_COMMENTS}`, ''];
+// Index comment bodies for a topic's comment links, each under the comment size limit. The links
+// sit on one line, separated by " · ", as in the body's trace. A topic's index comment carries the
+// topic on its first line, so it stays in that topic's list; `label` is the topic as written (for
+// an untopiced list, the task page's own name, which names the comment without tagging it).
+function indexCommentBodies(number, links, intent, tag = null, label = null) {
+  const name = label || tag;
+  const head = (part, total) => [...(tag ? [name, '---'] : []), INDEX_COMMENT_MARKER, `<!-- programme-trace intent=${intent} part=${part}/${total} -->`,
+    `## Comment trace for #${number}: ${name || OTHER_COMMENTS}`, ''];
   const chunks = [[]];
   let size = 0;
-  for (const line of lines) {
-    if (size + line.length + 1 > INDEX_COMMENT_LIMIT && chunks.at(-1).length) { chunks.push([]); size = 0; }
-    chunks.at(-1).push(line);
-    size += line.length + 1;
+  for (const link of links) {
+    if (size + link.length + 3 > INDEX_COMMENT_LIMIT && chunks.at(-1).length) { chunks.push([]); size = 0; }
+    chunks.at(-1).push(link);
+    size += link.length + 3;
   }
-  return chunks.map((chunk, at) => [...head(at + 1, chunks.length), ...chunk, ''].join('\n'));
+  return chunks.map((chunk, at) => [...head(at + 1, chunks.length), chunk.join(' · '), ''].join('\n'));
 }
 
 // Headings outside fenced code, with their level, text and line offsets.
@@ -1292,7 +1309,9 @@ function upsertStateBlock(text, rendered, placement = {}) {
     return { body: source.slice(0, found.start) + block + source.slice(found.end), start: found.start, end: found.start + block.length, moved: false };
   }
   const head = trimEnd(cut.text.slice(0, target.start));
-  const tail = trimStart(cut.text.slice(target.end));
+  const rawTail = trimStart(cut.text.slice(target.end));
+  // A block moved up from the very end leaves the body's final line ending behind it; keep one.
+  const tail = rawTail && /\n$/.test(source) && !/\n$/.test(rawTail) ? `${rawTail}${eol}` : rawTail;
   const lead = head ? `${head}${eol}${eol}` : '';
   const body = `${lead}${block}${tail ? `${eol}${eol}${tail}` : eol}`;
   return { body, start: lead.length, end: lead.length + block.length, moved: Boolean(found) };
@@ -1741,7 +1760,7 @@ const EFFECT_TEXT = {
   reorder: effect => `Move #${effect.target.issue} ${effect.target.before !== undefined ? `before #${effect.target.before}` : `after #${effect.target.after}`} under #${effect.target.parent}`,
   replace_block: effect => (effect.state === false ? `Update the comment trace in #${effect.target.issue}'s body` : `${effect.insert ? 'Add' : effect.move ? 'Move' : 'Update'} the state block in #${effect.target.issue}'s body`),
   replace_pr_nav: effect => `Add the parent and task links at the top of PR #${effect.target.pr}`,
-  post_index_comment: effect => `Move #${effect.target.issue}'s "${effect.target.tag || OTHER_COMMENTS}" comment trace (${effect.lines.length} line(s)) into a new index comment`,
+  post_index_comment: effect => `Move #${effect.target.issue}'s "${effect.label || effect.target.tag || OTHER_COMMENTS}" comment trace (${effect.lines.length} link(s)) into a new index comment`,
 };
 
 function describeEffect(effect) { return EFFECT_TEXT[effect.kind](effect); }
@@ -1926,6 +1945,13 @@ class Reconciler {
     }
   }
 
+  // A task page's own task name, the topic its untopiced comments fall under (null for the parent).
+  topicFor(parent, number, issues = new Map()) {
+    if (number === parent.parent_issue) return null;
+    const outcome = parent.outcomes.find(entry => entry.issue === number);
+    return outcome ? taskName(outcome, issues.get(number)) : null;
+  }
+
   // The links block for a task page (null for the parent page).
   navFor(parent, number, docs) {
     if (number === parent.parent_issue) return null;
@@ -1970,10 +1996,10 @@ class Reconciler {
   // The body with the state block and the comment trace written. When it would reach the threshold,
   // the trace's own lines move to a new index comment: `overflow` lists them, and the body is
   // measured with a link to that comment in their place.
-  projectBody(number, source, stateBody, comments, version, navBody = null, currentBody = null) {
+  projectBody(number, source, stateBody, comments, version, navBody = null, currentBody = null, topic = null) {
     const trace = traceEntries(comments, this.binding.record_prefix);
     const build = entries => {
-      const traceBody = renderTraceBlockBody(number, entries, this.binding.repository);
+      const traceBody = renderTraceBlockBody(number, entries, this.binding.repository, topic);
       const withCurrent = currentBody ? upsertCurrentBlock(source, renderBlock(currentBody, version, CURRENT_BLOCK_NAME), this.placementFor(number).after_section) : source;
       const withState = upsertStateBlock(withCurrent, renderBlock(stateBody, version), this.placementFor(number));
       const withNav = navBody ? upsertNavBlock(withState.body, renderBlock(navBody, version, NAV_BLOCK_NAME)) : withState.body;
@@ -1984,18 +2010,19 @@ class Reconciler {
     // Tag by tag, largest list first, the whole list moves into its own new index comment until the
     // body fits; the body keeps a link in that tag's list. Tags are never combined.
     const base = issueUrl(this.binding.repository, number);
-    const size = group => [...indexLines(group.entries, new Map(), base), ...markLines(group.marks, base)].join('\n').length;
-    const movable = traceGroups(trace).filter(group => group.entries.length || group.marks.length).sort((a, b) => size(b) - size(a));
+    const links = group => traceTokens({ ...group, indexes: [] }, base);
+    const size = group => links(group).join(' · ').length;
+    const movable = traceGroups(trace, topic).filter(group => group.entries.length || group.marks.length).sort((a, b) => size(b) - size(a));
     let current = trace;
     let projected = full;
     const overflow = [];
     for (const group of movable) {
       current = {
         indexes: [...current.indexes, { id: '9'.repeat(19), tag: group.tag, date: '0000-00-00' }],
-        entries: current.entries.filter(entry => (entry.tag || null) !== group.tag),
-        marks: current.marks.filter(mark => (mark.tag || null) !== group.tag),
+        entries: current.entries.filter(entry => topicKey(entry, topic) !== group.tag),
+        marks: current.marks.filter(mark => topicKey(mark, topic) !== group.tag),
       };
-      overflow.push({ tag: group.tag, lines: [...indexLines(group.entries, new Map(), base), ...markLines(group.marks, base)] });
+      overflow.push({ tag: group.tag, label: group.tag ? group.label : topic, lines: links(group) });
       projected = build(current);
       if (projected.body.length < this.threshold) break;
     }
@@ -2037,7 +2064,8 @@ class Reconciler {
       const placement = this.placementFor(number);
       const current = block && normalizeBlockBody(block.body) === normalizeBlockBody(body) && !block.tampered;
       const move = Boolean(block) && upsertStateBlock(issue.body, renderBlock(block.body, block.version), placement).moved;
-      const traceBody = renderTraceBlockBody(number, traceEntries(comments, this.binding.record_prefix), this.binding.repository);
+      const topic = this.topicFor(parent, number, observed.issues);
+      const traceBody = renderTraceBlockBody(number, traceEntries(comments, this.binding.record_prefix), this.binding.repository, topic);
       const traceCurrent = Boolean(traced.block) && normalizeBlockBody(traced.block.body) === normalizeBlockBody(traceBody) && !traced.block.tampered;
       // A current body at or over the threshold still moves its largest tag lists out.
       if (current && !move && traceCurrent && navCurrent && currentCurrent && issue.body.length < this.threshold) continue;
@@ -2045,12 +2073,12 @@ class Reconciler {
       if (!traceCurrent) findings.push({ code: 'TRACE_STALE', issue: number, detail: !traced.block ? 'no comment trace yet' : traced.block.tampered ? 'the comment trace was edited by hand' : 'the comment trace differs from the comments' });
       if (!navCurrent) findings.push({ code: 'PROJECTION_STALE', issue: number, detail: nav.block ? 'the parent and task links differ from the state' : 'no parent and task links yet' });
       if (!currentCurrent) findings.push({ code: 'PROJECTION_STALE', issue: number, detail: summary.block ? 'the CURRENT summary differs from the state documents' : 'no CURRENT summary yet' });
-      const projected = this.projectBody(number, issue.body, body, comments, version, navBody, currentBody);
+      const projected = this.projectBody(number, issue.body, body, comments, version, navBody, currentBody, topic);
       if (projected.body.length >= this.threshold) {
         holds.push({ code: 'BODY_TOO_LARGE', target: `#${number}`, detail: `Controller: the body would reach ${projected.body.length} characters (threshold ${this.threshold}) even with its comment trace in an index comment; shorten it first`, scope: 'body' });
         continue;
       }
-      for (const part of projected.overflow) effects.push({ kind: 'post_index_comment', target: { issue: number, tag: part.tag, after: String(comments.at(-1)?.id || '') }, lines: part.lines });
+      for (const part of projected.overflow) effects.push({ kind: 'post_index_comment', target: { issue: number, tag: part.tag, after: String(comments.at(-1)?.id || '') }, label: part.label, lines: part.lines });
       effects.push({ kind: 'replace_block', target: { issue: number, digest: blockDigest(body), trace: blockDigest(projected.traceBody), ...(navBody ? { nav: blockDigest(navBody) } : {}), ...(currentBody ? { current: blockDigest(currentBody) } : {}) },
         insert: !block, move: current && move, state: !current || move, body, updated_at: issue.updated_at });
     }
@@ -2311,7 +2339,7 @@ class Reconciler {
           if (isHeld(`#${number}`, 'body')) break;
           withIntent(post, owner, number, () => {
             const intent = intentId(post.kind, post.target);
-            const bodies = indexCommentBodies(number, post.lines, intent, post.target.tag);
+            const bodies = indexCommentBodies(number, post.lines, intent, post.target.tag, post.label);
             guard();
             for (const text of bodies) this.mutator.postComment(number, text);
             const kept = this.reader.comments(number).filter(comment => String(comment.body || '').includes(`programme-trace intent=${intent} `)).length;
@@ -2327,7 +2355,7 @@ class Reconciler {
         let next;
         const navBody = this.navFor(parentDoc, number, docs);
         const currentBody = number === parentNumber ? renderCurrentBlockBody(parentDoc, docs, plan.observed.issues) : null;
-        try { next = this.projectBody(number, before.body, body, this.reader.comments(number), version, navBody, currentBody); }
+        try { next = this.projectBody(number, before.body, body, this.reader.comments(number), version, navBody, currentBody, this.topicFor(parentDoc, number, plan.observed.issues)); }
         catch (error) { record(effect, 'HELD', error.message); hold(effect, error.code, error.message); continue; }
         effect = { ...effect, target: { ...effect.target, trace: blockDigest(next.traceBody), ...(navBody ? { nav: blockDigest(navBody) } : {}), ...(currentBody ? { current: blockDigest(currentBody) } : {}) } };
         if (next.overflow.length || next.body.length >= this.threshold) {

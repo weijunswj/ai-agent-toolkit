@@ -6,8 +6,8 @@
 // either linked directly (<issue URL>#issuecomment-<id>, or the bare fragment) or listed in an index comment that
 // the body links (one hop). Other comments need no index entry: they are listed as unlinked, never
 // a failure. Fails on any unlinked decision comment, a SUPERSEDES= reference to an unknown record,
-// a superseded record that is not marked "superseded by" (in its own comment or on an index line
-// that links it), or a body at or over the threshold (default 60,000 characters; GitHub's limit is 65,536).
+// a superseded record that is not marked "superseded by" or "replaced by" (in its own comment, or
+// right after a link to it in the body or an index comment), or a body at or over the threshold (default 60,000 characters; GitHub's limit is 65,536).
 //
 // Read-only. --repair writes a proposed body (the missing lines added to the body's decision
 // index, in the shape "- <date> · <record> · [<summary>](<issue URL>#issuecomment-<id>)", plus
@@ -23,7 +23,7 @@
 const fs = require('node:fs');
 const { spawnSync } = require('node:child_process');
 const { resolveExecutable } = require('./resolve-executable.cjs');
-const { commentTag, splitTag } = require('./decision-tags.cjs');
+const { commentTag, commentTagLabel, splitTag } = require('./decision-tags.cjs');
 
 const DEFAULT_THRESHOLD = 60000;
 const INDEX_COMMENT_MARKER = '<!-- decision-trace-index -->';
@@ -33,6 +33,21 @@ const LINK = /#issuecomment-(\d+)/g;
 const SUPERSEDES = /SUPERSEDES=([A-Za-z0-9._-]+)/g;
 
 function linkedIds(text) { return new Set([...String(text || '').matchAll(LINK)].map(match => match[1])); }
+
+// Comment IDs whose link is marked as replaced: "superseded by" or "replaced by" between the link
+// and the next comment link on the same line (or the line's end).
+const REPLACED_MARK = /(?:superseded|replaced) by/i;
+function markedIds(text) {
+  const marked = new Set();
+  for (const line of String(text || '').split('\n')) {
+    const links = [...line.matchAll(LINK)];
+    links.forEach((match, at) => {
+      const stop = at + 1 < links.length ? links[at + 1].index : line.length;
+      if (REPLACED_MARK.test(line.slice(match.index + match[0].length, stop))) marked.add(match[1]);
+    });
+  }
+  return marked;
+}
 
 function isBot(comment) {
   const user = comment.user || {};
@@ -58,6 +73,7 @@ function recordFacts(people, recordPrefix) {
   const commentOf = new Map();
   for (const [id, record] of records) if (record && !commentOf.has(record)) commentOf.set(record, id);
   const supersededBy = new Map();
+  const supersededById = new Map();
   const supersedes = new Map();
   if (recordPrefix) {
     for (const comment of people) {
@@ -65,12 +81,12 @@ function recordFacts(people, recordPrefix) {
         const old = recordId(match[1], recordPrefix);
         if (!old || !commentOf.has(old)) continue;
         const by = records.get(String(comment.id)) || `comment ${comment.id}`;
-        if (!supersededBy.has(old)) supersededBy.set(old, by);
+        if (!supersededBy.has(old)) { supersededBy.set(old, by); supersededById.set(old, String(comment.id)); }
         supersedes.set(String(comment.id), [...(supersedes.get(String(comment.id)) || []), old]);
       }
     }
   }
-  return { records, commentOf, supersededBy, supersedes };
+  return { records, commentOf, supersededBy, supersededById, supersedes };
 }
 
 // The tag line and its `---` are not part of the summary.
@@ -78,9 +94,10 @@ function entryFor(comment, facts, index) {
   const record = facts.records.get(String(comment.id));
   const { tag, text } = splitTag(comment.body);
   return {
-    id: String(comment.id), record, index, tag,
+    id: String(comment.id), record, index, tag, tag_label: commentTagLabel(comment.body),
     date: String(comment.created_at || '').slice(0, 10) || null, summary: commentSummary(text),
     supersedes: facts.supersedes.get(String(comment.id)) || [], superseded_by: facts.supersededBy.get(record) || null,
+    superseded_by_id: facts.supersededById.get(record) || null,
   };
 }
 
@@ -91,15 +108,19 @@ function entryFor(comment, facts, index) {
 function traceEntries(comments, recordPrefix = null) {
   const people = comments.filter(comment => !isBot(comment));
   const indexes = people.filter(comment => String(comment.body || '').includes(INDEX_COMMENT_MARKER));
-  const covered = new Map();
-  for (const index of indexes) for (const line of String(index.body || '').split('\n')) for (const id of linkedIds(line)) covered.set(id, `${covered.get(id) || ''}\n${line}`);
+  const covered = new Set();
+  const markedInIndex = new Set();
+  for (const index of indexes) {
+    for (const id of linkedIds(index.body)) covered.add(id);
+    for (const id of markedIds(index.body)) markedInIndex.add(id);
+  }
   const facts = recordFacts(people, recordPrefix);
   const entries = people.filter(comment => !indexes.includes(comment) && !covered.has(String(comment.id))).map(comment => entryFor(comment, facts, false));
   const tagOf = id => commentTag(people.find(comment => String(comment.id) === id)?.body);
-  const marks = [...facts.supersededBy].map(([record, by]) => ({ id: facts.commentOf.get(record), record, superseded_by: by, tag: tagOf(facts.commentOf.get(record)) }))
-    .filter(entry => covered.has(entry.id) && !/superseded by/i.test(covered.get(entry.id))
+  const marks = [...facts.supersededBy].map(([record, by]) => ({ id: facts.commentOf.get(record), record, superseded_by: by, superseded_by_id: facts.supersededById.get(record) || null, tag: tagOf(facts.commentOf.get(record)) }))
+    .filter(entry => covered.has(entry.id) && !markedInIndex.has(entry.id)
       && !/superseded by/i.test(String(people.find(comment => String(comment.id) === entry.id)?.body || '')));
-  return { indexes: indexes.map(comment => ({ id: String(comment.id), tag: commentTag(comment.body), date: String(comment.created_at || '').slice(0, 10) || null })), entries, marks };
+  return { indexes: indexes.map(comment => ({ id: String(comment.id), tag: commentTag(comment.body), tag_label: commentTagLabel(comment.body), date: String(comment.created_at || '').slice(0, 10) || null })), entries, marks };
 }
 
 // body: the issue body. comments: GitHub issue comments ({ id, user, body }).
@@ -115,12 +136,12 @@ function auditDecisionTraces({ body, comments, recordPrefix = null, threshold = 
   const { records, commentOf, supersededBy } = facts;
   const knownIds = new Set([...records.values()].filter(Boolean));
 
-  const linkedText = [String(body || ''), ...linkedIndexes.map(index => String(index.body || ''))].join('\n').split('\n');
+  const marked = markedIds([String(body || ''), ...linkedIndexes.map(index => String(index.body || ''))].join('\n'));
   const supersededUnmarked = [...supersededBy].map(([record, by]) => ({ id: commentOf.get(record), record, superseded_by: by }))
     .filter(entry => {
       const own = people.find(comment => String(comment.id) === entry.id);
       if (/superseded by/i.test(String(own?.body || ''))) return false;
-      return !linkedText.some(line => line.includes(`#issuecomment-${entry.id}`) && /superseded by/i.test(line));
+      return !marked.has(entry.id);
     });
   const unlinked = people.filter(comment => !reachable.has(String(comment.id))).map(comment => entryFor(comment, facts, indexes.includes(comment)));
   const unlinkedDecisions = unlinked.filter(entry => entry.tag || entry.record);
@@ -261,4 +282,4 @@ if (require.main === module) {
   catch (error) { console.error(`FAIL: ${error.message}`); process.exitCode = 2; }
 }
 
-module.exports = Object.freeze({ DEFAULT_THRESHOLD, INDEX_COMMENT_MARKER, INDEX_BEGIN, INDEX_END, auditDecisionTraces, commentSummary, commentLink, issueUrl, indexLines, markLines, traceEntries, ledgerTopics, repairedBody, parseArgs });
+module.exports = Object.freeze({ DEFAULT_THRESHOLD, INDEX_COMMENT_MARKER, INDEX_BEGIN, INDEX_END, auditDecisionTraces, commentSummary, commentLink, markedIds, issueUrl, indexLines, markLines, traceEntries, ledgerTopics, repairedBody, parseArgs });
