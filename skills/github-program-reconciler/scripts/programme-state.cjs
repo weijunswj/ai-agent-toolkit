@@ -36,7 +36,14 @@ const BINDING_FILE = path.join('.github', 'toolkit-programme.json');
 const SHA40 = /^[0-9a-f]{40}$/;
 const REPO = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const PREFIX = /^[A-Za-z0-9._-]{1,40}$/;
-const CLASSES = ['CORE', 'HARDENING', 'LATER', 'OPTIONAL', 'COMPLETED', 'RETIRED'];
+const CLASSES = ['COMMITTED', 'OPTIONAL', 'COMPLETED', 'RETIRED'];
+// Classes from before Now, Next and Later, read as COMMITTED and sorted in their old CORE, HARDENING,
+// LATER sequence, since their `order` counted within one old class. Each pass reports CLASS_LEGACY
+// with a patch that migrates them in one step; a write never adds one. Remove these once no parent
+// document carries them.
+const LEGACY_CLASSES = ['CORE', 'HARDENING', 'LATER'];
+const LEGACY_RANK = Object.freeze({ CORE: 0, HARDENING: 1 });
+const legacyRank = outcome => LEGACY_RANK[outcome.class] ?? 2;
 const LIFECYCLES = ['PLANNED', 'ACTIVE', 'WAITING_OWNER', 'HOLD', 'DONE', 'RETIRED'];
 const GATE_ROLES = ['G0', 'G1', 'G2'];
 const GATE_STATES = ['ASSIGNED', 'ACTIVE', 'WAITING_OWNER', 'INTERRUPTED', 'SUBMITTED', 'RETIRED'];
@@ -77,7 +84,7 @@ const BLOCK_NAME = 'STATE';
 const TRACE_BLOCK_NAME = 'TRACE';
 const NAV_BLOCK_NAME = 'NAV';
 const CURRENT_BLOCK_NAME = 'CURRENT';
-// How many queued tasks the CURRENT summary names under "Next up".
+// How many queued tasks the CURRENT summary names under "Queued".
 const NEXT_UP_LIMIT = 5;
 // Index comments are cut below this size (GitHub's comment limit is 65,536 characters).
 const INDEX_COMMENT_LIMIT = 60000;
@@ -227,7 +234,7 @@ function validateParent(doc) {
       check(errors, !seen.has(outcome.issue), `${at}.issue ${outcome.issue} is listed twice`);
       seen.add(outcome.issue);
       check(errors, outcome.issue !== doc.parent_issue, `${at}.issue cannot be the parent itself`);
-      check(errors, CLASSES.includes(outcome.class), `${at}.class must be one of ${CLASSES.join(', ')}`);
+      check(errors, CLASSES.includes(outcome.class) || LEGACY_CLASSES.includes(outcome.class), `${at}.class must be one of ${CLASSES.join(', ')}`);
       check(errors, optional(outcome.parent, value => isInt(value, 1)), `${at}.parent must be an issue number or null`);
       check(errors, outcome.parent !== outcome.issue, `${at}.parent cannot be the outcome itself`);
       check(errors, isInt(outcome.order), `${at}.order must be a whole number`);
@@ -781,7 +788,27 @@ function applyPatch(kind, doc, patch, { writer = null, parentDoc = null } = {}) 
     if (Array.isArray(value) || !isObject(value)) next[key] = clone(value);
     else next[key] = mergePatch(next[key], value);
   }
+  if (kind === 'parent') refuseNewLegacy(doc, next);
   return next;
+}
+
+// A write never adds an older class: an entry may keep one it already had until it is migrated.
+function refuseNewLegacy(previous, next) {
+  const had = new Map((previous?.outcomes || []).map(outcome => [outcome.issue, outcome.class]));
+  const added = (Array.isArray(next?.outcomes) ? next.outcomes : []).filter(outcome => LEGACY_CLASSES.includes(outcome?.class) && had.get(outcome.issue) !== outcome.class);
+  if (added.length) throw new ProgrammeError('PATCH_REFUSED', `${added.map(outcome => `#${outcome.issue} ${outcome.class}`).join(', ')}: ${LEGACY_CLASSES.join(', ')} are older class names kept only for migration; use ${CLASSES.join(', ')}.`);
+}
+
+// The update-parent patch that migrates older classes in one step: each becomes COMMITTED and every
+// open entry's order is renumbered in its current sequence (old class, then order, then issue), so
+// CORE, then HARDENING, then LATER work keeps its place. Finished entries are unchanged.
+function legacyMigrationPatch(parent) {
+  const open = parent.outcomes.filter(outcome => !['COMPLETED', 'RETIRED'].includes(outcome.class))
+    .sort((a, b) => legacyRank(a) - legacyRank(b) || a.order - b.order || a.issue - b.issue);
+  const order = new Map(open.map((outcome, at) => [outcome.issue, at]));
+  return { outcomes: parent.outcomes.map(outcome => (order.has(outcome.issue)
+    ? { ...outcome, class: LEGACY_CLASSES.includes(outcome.class) ? 'COMMITTED' : outcome.class, order: order.get(outcome.issue) }
+    : clone(outcome))) };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -881,12 +908,20 @@ function revisionLine(parent, children) {
   return `<!-- programme-state parent=${parent.parent_issue}@${parent.revision} children=${revs} -->`;
 }
 
-// The Programme Graph shows three classes and three statuses. OPTIONAL shows as LATER; a finished
-// outcome (class COMPLETED or RETIRED, or a DONE or RETIRED lifecycle) shows as COMPLETED, and a
-// retired one says so in its description. Lane is the gate the work is in now.
-const GRAPH_CLASS = Object.freeze({ CORE: 'CORE', HARDENING: 'HARDENING', LATER: 'LATER', OPTIONAL: 'LATER' });
-const GRAPH_GROUPS = Object.freeze(['CORE', 'HARDENING', 'LATER']);
+// The Programme Graph's Class column is worked out, never stored: NOW when the task is in progress
+// (an open or draft PR, or active, waiting on the owner or held), NEXT when it is queued with a
+// planned release, else LATER (OPTIONAL for an optional task).
+// A finished outcome (class COMPLETED or RETIRED, or a DONE or RETIRED lifecycle) shows as COMPLETED,
+// and a retired one says so in its status. Lane is the gate the work is in now.
+const GRAPH_GROUPS = Object.freeze(['NOW', 'NEXT', 'LATER', 'OPTIONAL']);
 const GRAPH_HEADER = ['| Task | Child # | PR # | Class | Status | Lane | Task Description |', '|---|---|---|---|---|---|---|'];
+
+function graphClass(outcome, child) {
+  if (!outcome || isFinished(outcome, child)) return '-';
+  if (statusText(outcome, child) === 'IN PROGRESS') return 'NOW';
+  if (child?.release) return 'NEXT';
+  return outcome.class === 'OPTIONAL' ? 'OPTIONAL' : 'LATER';
+}
 
 function isFinished(outcome, child) {
   return outcome.class === 'COMPLETED' || outcome.class === 'RETIRED' || Boolean(child && TERMINAL_LIFECYCLES.includes(child.lifecycle));
@@ -925,14 +960,14 @@ function completedAt(child, issue) {
   return child?.completed_at || issue?.closed_at || null;
 }
 
-// Active rows by class (CORE, HARDENING, LATER), each by catalogue order and issue; then every finished row,
+// Active rows by class (NOW, NEXT, LATER, OPTIONAL), each by catalogue order and issue; then every finished row,
 // oldest completion first and the most recent last (unknown times last). Nested children sort like
 // any other row.
 function graphOrder(parent, children, issues) {
   const finished = parent.outcomes.filter(outcome => isFinished(outcome, children.get(outcome.issue)));
   const active = parent.outcomes.filter(outcome => !finished.includes(outcome));
-  const byOrder = (a, b) => a.order - b.order || a.issue - b.issue;
-  const groups = GRAPH_GROUPS.map(cls => active.filter(outcome => GRAPH_CLASS[outcome.class] === cls).sort(byOrder));
+  const byOrder = (a, b) => legacyRank(a) - legacyRank(b) || a.order - b.order || a.issue - b.issue;
+  const groups = GRAPH_GROUPS.map(cls => active.filter(outcome => graphClass(outcome, children.get(outcome.issue)) === cls).sort(byOrder));
   const when = outcome => completedAt(children.get(outcome.issue), issues.get(outcome.issue));
   const byCompletion = (a, b) => {
     const left = when(a);
@@ -950,7 +985,7 @@ function graphOrder(parent, children, issues) {
 function renderParentBlockBody(parent, children, issues = new Map()) {
   const rows = graphOrder(parent, children, issues).map(outcome => {
     const child = children.get(outcome.issue);
-    const cls = GRAPH_CLASS[outcome.class] || '-';
+    const cls = graphClass(outcome, child);
     const pr = child?.pr.number ? `#${child.pr.number}` : '-';
     return `| ${taskName(outcome, issues.get(outcome.issue))} | #${outcome.issue} | ${pr} | ${cls} | ${statusText(outcome, child)} | ${laneText(outcome, child)} | ${descriptionText(outcome)} |`;
   });
@@ -958,7 +993,7 @@ function renderParentBlockBody(parent, children, issues = new Map()) {
     revisionLine(parent, children),
     '## Programme Graph',
     '',
-    `Generated from the programme state documents (state revision ${parent.revision}), so edit those rather than this table. Sorted CORE, HARDENING, LATER, then COMPLETED with the most recent last.`,
+    `Generated from the programme state documents (state revision ${parent.revision}), so edit those rather than this table. Sorted NOW (in progress), NEXT (planned release), LATER, OPTIONAL, then COMPLETED with the most recent last.`,
     '',
     ...GRAPH_HEADER,
     ...rows,
@@ -1033,7 +1068,7 @@ function renderCurrentBlockBody(parent, children, issues = new Map()) {
     '**Waiting on you**',
     ...list(waiting.map(row => `- ${name(row)}: ${ownerWait(row.child)}`)),
     '',
-    '**Next up**',
+    '**Queued**',
     ...list(queued),
   ].join('\n');
 }
@@ -1049,7 +1084,7 @@ function renderChildBlockBody(child, outcome) {
     `<!-- programme-state child=${child.issue}@${child.revision} -->`,
     `**Status** (issue-${child.issue}.json revision ${child.revision}; generated, so edit the state document rather than this block)`,
     '',
-    `- Status: ${outcome ? statusText(outcome, child) : '-'}; class: ${GRAPH_CLASS[outcome?.class] || '-'}; lane: ${outcome ? laneText(outcome, child) : '-'}; release: ${publicText(child.release || '-')}`,
+    `- Status: ${outcome ? statusText(outcome, child) : '-'}; class: ${graphClass(outcome, child)}; lane: ${outcome ? laneText(outcome, child) : '-'}; release: ${publicText(child.release || '-')}`,
     `- Task: ${outcome ? descriptionText(outcome) : '-'}`,
     `- PR: ${prText(child)}; head ${shaLink(child.repository, child.pr.head)}; CI at head: ${checksText(child)}`,
     `- UAT: ${uatText(child)}; review: ${reviewText(child)}`,
@@ -1687,7 +1722,7 @@ function intentId(kind, target) {
 // Findings the reconciler reports but never fixes itself; each needs a controller decision.
 const ATTENTION = new Set(['ISSUE_MISSING', 'NATIVE_PARENT_UNEXPECTED', 'NATIVE_CHILD_UNKNOWN', 'DEPENDENCY_IMPLIES_PARENT',
   'PR_HEAD_MOVED', 'CHECKS_RED', 'READY_TO_CLOSE', 'CHILD_STATE_CONFLICT', 'MANAGED_BLOCK_BROKEN', 'TRACE_UNLINKED', 'TRACE_SUPERSEDED_UNMARKED', 'PR_UNTRACKED',
-  'RETURN_CAPTURED', 'STALE_ASSIGNMENT', 'JOURNAL_ERROR', 'JOURNAL_INVALID']);
+  'RETURN_CAPTURED', 'STALE_ASSIGNMENT', 'JOURNAL_ERROR', 'JOURNAL_INVALID', 'CLASS_LEGACY']);
 // Child fields the journal fold owns; apply re-folds them on the document it reads, never copies them.
 const FOLD_FIELDS = ['gate', 'journals_seen', 'next_action'];
 
@@ -2090,6 +2125,9 @@ class Reconciler {
     this.diffBlocks(parent, projected, observed, only, effects, findings, holds);
     this.auditTraces(parent, observed, only, findings, effects);
     this.diffUntracked(parent, desiredDocs, observed, only, findings);
+    const legacy = parent.outcomes.filter(outcome => LEGACY_CLASSES.includes(outcome.class) && (!only || outcome.issue === only));
+    if (legacy.length) findings.push({ code: 'CLASS_LEGACY', issue: parent.parent_issue, patch: legacyMigrationPatch(parent),
+      detail: `${legacy.map(outcome => `#${outcome.issue} ${outcome.class}`).join(', ')} read as COMMITTED, kept in their old CORE, HARDENING, LATER sequence; to migrate, save this finding's patch (reconcile --json) and apply it whole with update-parent, which sets COMMITTED and renumbers order so the sequence is kept` });
     for (const effect of effects) effect.text = describeEffect(effect);
     return { parent, parentSha: parentRead.sha, override: Boolean(parentRead.override), children, observed, findings, effects, holds, resolutions };
   }
@@ -2407,7 +2445,7 @@ module.exports = Object.freeze({
   ProgrammeError, GitHubTransport, StateStore, STORE_BACKENDS, ProgrammeGraphReader, GitHubMutator, Reconciler,
   canonical, canonicalText, contentDigest, sameState, validateParent, validateChild, validateBinding, assertValid, loadBinding,
   newParent, newChild, isHolder, isLaneHolder, parentRefusal, authoriseWrite, claimDocument, claimLane, assignGate, reopenGate, interruptGate,
-  recordReturn, consumeReturn, foldJournals, validateJournal, currentGateAccepted, completionAccepted, applyPatch,
+  recordReturn, consumeReturn, foldJournals, validateJournal, currentGateAccepted, completionAccepted, applyPatch, refuseNewLegacy, legacyMigrationPatch,
   evaluateChecks, renderParentBlockBody, renderChildBlockBody, renderTraceBlockBody, renderCurrentBlockBody, renderBlock, blockDigest, findStateBlock, upsertStateBlock, upsertTraceBlock,
   orderMoves, intentId, describeEffect, resolveExecutable, isGitHubHost, originSlug, bindRepository,
 });

@@ -12,16 +12,26 @@
       "enabled": true,
       "state": "watching",
       "review_cadence_days": 90,
-      "last_reviewed_at": null,
+      "last_reviewed_at": "2026-10-25",
       "review_template": "repo/source-watch/templates/host-harness-capability-drift-review.md",
       "evidence_sources": [
-        "OpenAI Codex changelog: https://developers.openai.com/codex/changelog",
-        "OpenAI Codex AGENTS.md docs: https://developers.openai.com/codex/guides/agents-md",
-        "OpenAI Codex hooks docs: https://developers.openai.com/codex/hooks",
-        "OpenAI Codex rules docs: https://developers.openai.com/codex/rules",
+        "OpenAI Codex changelog: https://learn.chatgpt.com/codex/changelog",
+        "OpenAI Codex AGENTS.md docs: https://learn.chatgpt.com/codex/agent-configuration/agents-md",
+        "OpenAI Codex hooks docs: https://learn.chatgpt.com/codex/hooks",
+        "OpenAI Codex rules docs: https://learn.chatgpt.com/codex/agent-configuration/rules",
+        "OpenAI Codex skills docs: https://learn.chatgpt.com/codex/build-skills",
+        "OpenAI Codex plugins docs: https://learn.chatgpt.com/codex/plugins",
+        "OpenAI Codex subagents docs: https://learn.chatgpt.com/codex/agent-configuration/subagents",
         "Claude Code overview docs: https://code.claude.com/docs/en/overview",
+        "Claude Code changelog: https://code.claude.com/docs/en/changelog",
+        "Claude Code changelog source: https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md",
+        "Claude Code CLAUDE.md docs: https://code.claude.com/docs/en/claude-md",
+        "Claude Code settings docs: https://code.claude.com/docs/en/settings",
+        "Claude Code permissions docs: https://code.claude.com/docs/en/permissions",
         "Claude Code hooks docs: https://code.claude.com/docs/en/hooks",
-        "Claude Code changelog: https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md"
+        "Claude Code plugins docs: https://code.claude.com/docs/en/plugins/overview",
+        "Claude Code subagents docs: https://code.claude.com/docs/en/sub-agents",
+        "Claude Code skills docs: https://code.claude.com/docs/en/skills"
       ],
       "toolkit_scope": [
         "skills/** and skill-routing guidance",
@@ -39,8 +49,8 @@
         "Needs benchmark/eval before decision"
       ],
       "recommendation": "Run the template on cadence. Keep safety rules unless official host behavior demonstrably covers the same risk; propose shrink, move, host-native migration, or deletion only in a separate evidence-backed PR.",
-      "action_taken": "Review lane added. No toolkit component has been changed by source-watch.",
-      "remaining_work": "Perform the next cadence review using the template. If no meaningful drift is found, update last_reviewed_at and this status record only. If meaningful drift is found, open a separate PR with evidence, rationale, exact proposed modifications, and validation.",
+      "action_taken": "Reviewed on 2026-10-25 against the official Claude Code changelog (releases 2.1.295 to 2.1.310) and Codex changelog (0.158.0 to 0.164.0) and current docs. No toolkit component was changed. Findings were routed to their current owners as notes: five need a benchmark or evaluation before any decision, and Codex managed worktrees are a host-native candidate for the workspace task.",
+      "remaining_work": "The official changelog pages did not show releases from late July to early October 2026, so that part of the window was not reviewed; the next cadence review starts from late July. Perform the next cadence review using the template. If no meaningful drift is found, update last_reviewed_at and this status record only. If meaningful drift is found, open a separate PR with evidence, rationale, exact proposed modifications, and validation.",
       "removal_condition": "Remove only if supported host harnesses stop changing relevant native capabilities or another maintained source-watch lane fully owns this review."
     }
   ]
