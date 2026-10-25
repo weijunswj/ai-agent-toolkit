@@ -115,11 +115,12 @@ collect_disk() {
   local path line pct ipct key prev level evidence
   for path in ${DISK_PATHS:-/}; do
     case "$path" in /*) ;; *) add_row OBSERVABILITY_DEGRADED "Disk $path" 'Rejected: use absolute paths only'; continue ;; esac
-    # The service sandbox (ProtectHome=yes) hides these folders, so df there would read an empty
-    # stand-in and report a false NORMAL. Say so instead, the same way in a dry run.
-    case "$path" in
+    case "$path" in *//*|*/./*|*/../*|*/.|*/..) add_row OBSERVABILITY_DEGRADED "Disk $path" 'Rejected: write the path without //, /./ or /../'; continue ;; esac
+    # The systemd service sandbox (ProtectHome=yes) hides these folders, so df there would read an
+    # empty stand-in and report a false NORMAL. Say so instead, the same way in a dry run.
+    case "${path%/}" in
       /home|/home/*|/root|/root/*|/run/user|/run/user/*)
-        add_row OBSERVABILITY_DEGRADED "Disk $path" 'Not checked: the pulse sandbox hides /home, /root and /run/user; remove this path from DISK_PATHS'
+        add_row OBSERVABILITY_DEGRADED "Disk $path" 'Not checked: the systemd service sandbox hides /home, /root and /run/user; remove this path from DISK_PATHS'
         continue ;;
     esac
     if line="$(df -P "$path" 2>/dev/null | awk 'NR == 2 { gsub(/%/, "", $5); print $5 }')" && is_uint "$line"; then

@@ -222,9 +222,10 @@ const stateMatrix = [
     expect: 'OBSERVABILITY_DEGRADED', report: [/Docker containers \| OBSERVABILITY_DEGRADED \| docker ps failed/] },
   { name: 'an env setting cannot switch Docker checks off', env: { DOCKER_ACCESS: 'no' }, host: { docker: 'fail' }, expect: 'OBSERVABILITY_DEGRADED',
     report: [/Docker containers \| OBSERVABILITY_DEGRADED \| docker ps failed/] },
-  { name: 'a disk path the sandbox hides is not checked, never a false NORMAL', env: { DISK_PATHS: '/ /home/data' }, expect: 'OBSERVABILITY_DEGRADED',
-    report: [/Disk \/home\/data \| OBSERVABILITY_DEGRADED \| Not checked: the pulse sandbox hides \/home, \/root and \/run\/user; remove this path from DISK_PATHS/,
-      /Disk \/ \| NORMAL/] },
+  { name: 'a disk path the sandbox hides is not checked, never a false NORMAL', env: { DISK_PATHS: '/ /home/data /root/ //home /./home' }, expect: 'OBSERVABILITY_DEGRADED',
+    report: [/Disk \/home\/data \| OBSERVABILITY_DEGRADED \| Not checked: the systemd service sandbox hides \/home, \/root and \/run\/user; remove this path from DISK_PATHS/,
+      /Disk \/root\/ \| OBSERVABILITY_DEGRADED \| Not checked/, /Disk \/\/home \| OBSERVABILITY_DEGRADED \| Rejected: write the path without \/\/, \/\.\/ or \/\.\.\//,
+      /Disk \/\.\/home \| OBSERVABILITY_DEGRADED \| Rejected/, /Disk \/ \| NORMAL/] },
   { name: 'the pulse leaves out its own failed test units', host: { failedUnits: 'host-pulse-test-alert.service loaded failed failed Test\n' }, expect: 'NORMAL',
     report: [/systemd units \| OK \| No failed units/, /^Services: OK$/m] },
   { name: 'kernel without an oom counter, swap over the upgrade threshold', host: { oom: null, swapFreeKb: 400000 }, expect: 'UPGRADE_OR_REBALANCE_REQUIRED',
@@ -511,12 +512,14 @@ function installerHost(t, uid, options = {}) {
   writeExec(path.join(stub, 'getent'), [
     'case "$1" in',
     `  group) ${options.dockerGroup ? 'echo "docker:x:999:"' : 'exit 2'} ;;`,
-    `  passwd) [ "$2" = host-pulse ] && [ -e "${userFile}" ] && echo "host-pulse:x:998:998::/nonexistent:${options.userShell || '/usr/sbin/nologin'}" ;;`,
+    `  passwd) [ "$2" = host-pulse ] && [ -e "${userFile}" ] && echo "host-pulse:x:${options.userUid ?? 998}:998::/nonexistent:${options.userShell || '/usr/sbin/nologin'}" ;;`,
     '  *) exit 2 ;;',
     'esac'
   ].join('\n'));
   writeExec(path.join(stub, 'useradd'), `echo "useradd $*" >> "${dir}/users.log"; touch "${userFile}"`);
-  writeExec(path.join(stub, 'userdel'), `echo "userdel $*" >> "${dir}/users.log"; rm -f "${userFile}"`);
+  writeExec(path.join(stub, 'userdel'), `echo "userdel $*" >> "${dir}/users.log"; [ -n "\${FAIL_USERDEL:-}" ] && exit 1; rm -f "${userFile}"`);
+  // A cp that can fail when it copies a saved file back out of the rollback folder.
+  writeExec(path.join(stub, 'cp'), `[ -n "\${FAIL_RESTORE:-}" ] && case "$2" in */backup/rollback/*) exit 1 ;; esac; exec "${tools}/cp" "$@"`);
   const env = {
     PATH: `${stub}:${tools}`,
     HOME: dir,
@@ -678,6 +681,40 @@ test('installer refuses an existing host-pulse account that can log in or is alr
   assert.equal(chosen.status, 0, chosen.stderr);
 });
 
+test('installer refuses a reused host-pulse account that is root or has other groups', { skip }, (t) => {
+  const root = installerHost(t, 0, { userExists: true, userUid: 0 });
+  for (const args of [[], ['--install'], ['--install', '--with-docker']]) {
+    const result = runInstaller(root, args);
+    assert.equal(result.status, 1, `${args}`);
+    assert.match(result.stderr, /The existing user host-pulse has uid 0, which is root.*Nothing was changed/);
+  }
+  assert.deepEqual(fs.readdirSync(root.env.SYSTEMD_UNIT_DIR), []);
+  for (const [groups, args] of [['host-pulse lxd', []], ['host-pulse sudo', ['--install']], ['host-pulse docker disk', ['--install', '--with-docker']], ['users', ['--install']]]) {
+    const host = installerHost(t, 0, { userExists: true, userGroups: groups, dockerGroup: true });
+    const result = runInstaller(host, args);
+    assert.equal(result.status, 1, `${groups} ${args}`);
+    assert.match(result.stderr, /The existing user host-pulse is in the groups '.*'; the service would get all of them, and some groups equal root\. It may have only its own group host-pulse.*Nothing was changed/, groups);
+    assert.deepEqual(fs.readdirSync(host.env.SYSTEMD_UNIT_DIR), [], groups);
+  }
+});
+
+test('rollback keeps the user marker when userdel fails, and the saved copies when a restore fails', { skip }, (t) => {
+  const host = installerHost(t, 0);
+  const failed = runInstaller(host, ['--install'], { FAIL_SYSTEMCTL: 'enable', FAIL_USERDEL: '1' });
+  assert.equal(failed.status, 1);
+  assert.match(usersLog(host), /^userdel host-pulse$/m);
+  assert.ok(fs.existsSync(path.join(host.env.CONFIG_DIR, '.created-service-user')), 'the marker stays, so a later --remove still deletes the user');
+
+  const fresh = installerHost(t, 0);
+  assert.equal(runInstaller(fresh, ['--install']).status, 0);
+  const service = path.join(fresh.env.SYSTEMD_UNIT_DIR, 'host-pulse.service');
+  fs.writeFileSync(service, 'previous unit\n');
+  const broken = runInstaller(fresh, ['--install'], { FAIL_SYSTEMCTL: 'daemon-reload', FAIL_RESTORE: '1' });
+  assert.equal(broken.status, 1);
+  assert.match(broken.stderr, /Some files could not be put back; the saved copies stay in .*backup\/rollback/);
+  assert.equal(fs.readFileSync(path.join(fresh.env.CONFIG_DIR, 'backup', 'rollback', 'host-pulse.service'), 'utf8'), 'previous unit\n', 'the only good copy is kept');
+});
+
 test('--remove hands the kept state folder to root before deleting the user it created', { skip }, (t) => {
   const host = installerHost(t, 0);
   assert.equal(runInstaller(host, ['--install']).status, 0);
@@ -702,6 +739,7 @@ test('Docker checks are opt-in, and the plan says plainly that they equal root',
   const plan = runInstaller(host, ['--with-docker']);
   assert.equal(plan.status, 0, plan.stderr);
   assert.match(plan.stdout, /Docker checks ON: the service joins the docker group\. Docker socket access is full control of\n\s+Docker, which equals full root on this host: the sandbox does not limit what Docker can be\n\s+asked to do/);
+  assert.doesNotMatch(plan.stdout, /cannot read/, 'with Docker on, the plan makes no claim about what the service cannot read');
   const installed = runInstaller(host, ['--install', '--with-docker']);
   assert.equal(installed.status, 0, installed.stderr);
   assert.match(installed.stdout, /Docker checks are on\. Docker socket access equals root on this host/);
@@ -717,7 +755,8 @@ test('Docker checks are opt-in, and the plan says plainly that they equal root',
 test('installer refuses folder settings it does not own, before changing anything', { skip }, (t) => {
   const host = installerHost(t, 0);
   for (const [key, value] of [['CONFIG_DIR', '/etc'], ['CONFIG_DIR', '/'], ['INSTALL_PREFIX', '/usr/local/lib'], ['INSTALL_PREFIX', 'relative/host-observability'],
-    ['CONFIG_DIR', '/etc/../host-observability'], ['SYSTEMD_UNIT_DIR', 'units']]) {
+    ['CONFIG_DIR', '/etc/../host-observability'], ['SYSTEMD_UNIT_DIR', 'units'], ['SYSTEMD_STATE_DIR', 'var/lib'], ['SYSTEMD_STATE_DIR', '/var//lib'],
+    ['SYSTEMD_STATE_DIR', '/var/lib/..']]) {
     for (const args of [[], ['--install'], ['--remove']]) {
       const result = runInstaller(host, args, { [key]: value });
       assert.equal(result.status, 2, `${key}=${value} ${args}`);

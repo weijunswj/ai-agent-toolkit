@@ -17,7 +17,7 @@ Usage: install-host-observability-systemd.sh [--install | --remove] [--with-dock
   --with-docker  let the pulse read Docker by joining the docker group. Docker socket access is full
                  control of Docker, which equals full root on this host. Off unless given.
 Settings (environment): INSTALL_PREFIX and CONFIG_DIR (absolute, ending in /host-observability),
-SYSTEMD_UNIT_DIR.
+SYSTEMD_UNIT_DIR, and SYSTEMD_STATE_DIR (absolute; systemd's state folder, /var/lib by default).
 USAGE
 }
 
@@ -67,6 +67,7 @@ check_paths() {
     esac
   done
   case "${SYSTEMD_STATE_DIR:-/var/lib}" in
+    *//*|*/./*|*/../*|*/.|*/..) echo "SYSTEMD_STATE_DIR must not contain //, /./ or /../; nothing was changed." >&2; exit 2 ;;
     /*) ;;
     *) echo "SYSTEMD_STATE_DIR must be an absolute path; nothing was changed." >&2; exit 2 ;;
   esac
@@ -101,21 +102,36 @@ require_docker_group() {
   fi
 }
 
-# An account that already exists is used only when it cannot log in and, without --with-docker, is
-# not in the docker group: systemd gives the service every group the account belongs to.
+# An account that already exists is used only when it cannot log in, is not root (uid 0), and
+# belongs to its own group alone (plus docker with --with-docker): systemd gives the service the
+# account's uid and every group it belongs to, and groups such as lxd, disk or sudo equal root.
 check_existing_user() {
-  local shell groups
-  shell="$(getent passwd "$SERVICE_USER" | awk -F: '{ print $7 }')"
+  local entry shell uid groups allowed
+  entry="$(getent passwd "$SERVICE_USER")"
+  uid="$(printf '%s\n' "$entry" | awk -F: '{ print $3 }')"
+  shell="$(printf '%s\n' "$entry" | awk -F: '{ print $7 }')"
   case "$shell" in
     /usr/sbin/nologin|/sbin/nologin|/bin/false|/usr/bin/false) ;;
     *) echo "The existing user $SERVICE_USER has the login shell '$shell'; the service needs an account that cannot log in. Nothing was changed." >&2; exit 1 ;;
   esac
-  groups="$(id -nG "$SERVICE_USER" 2>/dev/null)"
-  if [ "$WITH_DOCKER" -eq 0 ]; then
-    case " $groups " in
-      *' docker '*) echo "The existing user $SERVICE_USER is in the docker group, which equals root on this host. Remove it (gpasswd -d $SERVICE_USER docker) or install with --with-docker. Nothing was changed." >&2; exit 1 ;;
-    esac
+  if [ "$uid" = 0 ]; then
+    echo "The existing user $SERVICE_USER has uid 0, which is root. Remove it (userdel $SERVICE_USER) and run the installer again. Nothing was changed." >&2
+    exit 1
   fi
+  groups="$(id -nG "$SERVICE_USER" 2>/dev/null | tr ' ' '\n' | awk 'NF' | sort -u | paste -sd ' ' -)"
+  [ "$WITH_DOCKER" -eq 1 ] && [ "$groups" = "docker $SERVICE_USER" ] && return 0
+  [ "$groups" = "$SERVICE_USER" ] && return 0
+  allowed="only its own group $SERVICE_USER"
+  [ "$WITH_DOCKER" -eq 0 ] || allowed="$allowed, plus docker"
+  case " $groups " in
+    *' docker '*)
+      if [ "$WITH_DOCKER" -eq 0 ]; then
+        echo "The existing user $SERVICE_USER is in the docker group, which equals root on this host. Remove it (gpasswd -d $SERVICE_USER docker) or install with --with-docker. Nothing was changed." >&2
+        exit 1
+      fi ;;
+  esac
+  echo "The existing user $SERVICE_USER is in the groups '$groups'; the service would get all of them, and some groups equal root. It may have $allowed. Nothing was changed." >&2
+  exit 1
 }
 
 env_file_too_open() {
@@ -363,7 +379,10 @@ do_remove() {
       rm -f -- "$USER_MARKER"
     else
       # Hand the kept reports to root first, so a later account given the same uid cannot read them.
-      if [ -d "$STATE_PATH" ] && chown -R root:root -- "$STATE_PATH"; then echo "Handed $STATE_PATH to root."; fi
+      if [ -d "$STATE_PATH" ]; then
+        if chown -R root:root -- "$STATE_PATH"; then echo "Handed $STATE_PATH to root."
+        else echo "Could not hand $STATE_PATH to root; run chown -R root:root $STATE_PATH before another account takes uid $(id -u "$SERVICE_USER" 2>/dev/null)." >&2; fi
+      fi
       if have userdel && userdel "$SERVICE_USER"; then
         rm -f -- "$USER_MARKER"
         echo "Deleted the system user $SERVICE_USER."
