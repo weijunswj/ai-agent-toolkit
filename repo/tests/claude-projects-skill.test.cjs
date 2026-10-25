@@ -199,4 +199,6 @@ test('Projects lists every owner-hands step when it reports what waits on the ow
   const text = read(SKILL_REL);
   // An optional step posted only inside a thread was once left off a pending answer.
   assert.match(text, /\*\*Pending lists name every owner-hands step\.\*\* Whenever you tell the owner what waits on them \(a pending answer, the nudge reminder, a check-in\), list every step only they can do, optional ones and ones posted only inside a thread included, each with its link; never drop one as minor\./);
+  const nudge = read('repo/contracts/claude-projects/web-controller-projects/tasks/hourly-nudge.md');
+  assert.match(nudge, /\*\*Waiting on owner:\*\* \([^\n]*plus every step only the owner can do that is not done yet, optional ones and ones posted only inside a thread included;/);
 });
