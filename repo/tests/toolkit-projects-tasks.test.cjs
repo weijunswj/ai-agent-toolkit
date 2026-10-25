@@ -195,7 +195,8 @@ test('templates hold no ids, owner names, project-only tasks or old resolve rule
   for (const name of fs.readdirSync(TASKS)) {
     const text = fs.readFileSync(path.join(TASKS, name), 'utf8');
     assert.doesNotMatch(text, /trig_|chan_|cmsg_|session_01|weijunswj|xPass|WJ_Lappy|TOOLKIT:|SWOO/, name);
-    assert.doesNotMatch(text, /skill drift|drift watch|resolve window|idle window|default 2 days|IDLE-2D/i, name);
+    // The skill drift watch is part of the daily check-in now (SKILL DRIFT), never a separate task.
+    assert.doesNotMatch(text, /drift watch|resolve window|idle window|default 2 days|IDLE-2D/i, name);
     assert.doesNotMatch(text, /AI-AGENT-TOOLKIT:/, name);
     assert.doesNotMatch(text, /[^\x00-\x7f]/, name);
   }
@@ -236,14 +237,16 @@ test('every Toolkit-made prompt carries the recurring-task requirements; fresh r
 
 test('the check-in carries every prefix in the fixed order and checks both Toolkit tasks; the nudge compares cheaply first', () => {
   const text = rendered('daily-check-in');
-  const order = ['SKILL UPDATE', 'BLOCK OUTDATED', 'BINDING STALE or BINDING UNKNOWN', 'TOOLKIT CHANGED', 'MEMORY FORMAT', 'TASKS OUTDATED', 'NUDGE NOT ARMED', 'PLUGIN BEHIND'];
+  const order = ['SKILL UPDATE', 'SKILL DRIFT', 'SKILL BEHIND', 'BLOCK OUTDATED', 'BINDING STALE or BINDING UNKNOWN', 'TOOLKIT CHANGED', 'MEMORY FORMAT', 'TASKS OUTDATED', 'NUDGE NOT ARMED', 'PLUGIN BEHIND'];
   const line = text.split('\n').find(entry => entry.startsWith('- First line:'));
   const positions = order.map(prefix => line.indexOf(prefix));
   assert.ok(positions.every((at, index) => at > -1 && (index === 0 || at > positions[index - 1])), line);
   for (const required of ['"EXAMPLE: Daily check-in"', '"EXAMPLE: Hourly nudge"', '--check daily-check-in', '--check hourly-nudge',
     '--check-memory', 'persist_session false', 'persist_session true', 'weekly-rebuild', 'unlisted', 'hearth_channel_id',
     'advice only', 'local, advice', 'Never suggest moving a local task to the cloud', '--declined-dedupe', 'overlaps',
-    'remove the Toolkit plugin only', 'state done', 'older than 65 minutes', 'Never flag other memory lines']) {
+    'remove the Toolkit plugin only', 'state done', 'older than 65 minutes', 'Never flag other memory lines',
+    'git hash-object --stdin', 'matches no revision', '/skill-drift/', 'unless state.md already reported these hashes',
+    'every run reaches the owner as one line', 'swaps each named Toolkit task from the template on main the same turn']) {
     assert.ok(text.includes(required), required);
   }
   const nudge = rendered('hourly-nudge');
@@ -252,6 +255,11 @@ test('the check-in carries every prefix in the fixed order and checks both Toolk
   assert.ok(nudge.indexOf('nudge-state.md') > -1 && nudge.indexOf('nudge-state.md') < nudge.indexOf('list_threads'), 'cheap compare before the sweep');
   assert.match(nudge, /no change since <time>/);
   assert.doesNotMatch(nudge, /git ls-remote|git clone|BINDING/);
+  assert.match(nudge, /CONTEXT RESET DUE \(weekly\)/);
+  // Each task reports the other missing, so the coordinator recreates a deleted one.
+  assert.ok(nudge.includes('is missing (no such trigger in list_triggers'), 'nudge sees a deleted check-in');
+  assert.ok(rendered('daily-check-in').includes('is missing (no such trigger in list_triggers'), 'check-in sees a deleted nudge');
+  assert.match(nudge, /It runs silently: it never posts in its home thread except to report a failed delivery/);
   for (const required of ['all three hold', 'Idleness is never a reason', 'Never list a task home thread', 'Unrelayed', 'Hidden reply',
     'state done', '"EXAMPLE: Daily check-in"', 'CHECK-IN NOT ARMED', 'limit 10', 'list all of them every run']) {
     assert.ok(nudge.includes(required), required);

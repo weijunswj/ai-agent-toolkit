@@ -1,8 +1,8 @@
 HOURLY NUDGE ({{task_name}})
-The stalled-work and resolve sweep for the {{project}} project, and its only thread-resolve pass. It changes nothing itself: the coordinator acts on the report.
+The stalled-work and resolve sweep for the {{project}} project, and its only thread-resolve pass. It changes nothing itself: the coordinator acts on the report. It runs silently: it never posts in its home thread except to report a failed delivery, and the owner hears from it only through the coordinator.
 
 CHECKS
-1. Cheap check first: read {{report_dir}}/nudge-state.md (the last run's UTC time and the MEMORY.md hash). If it exists, no thread in list_threads has activity since that time, read_project_chat (limit 1) shows nothing newer, and MEMORY.md has the same hash, this run changed nothing: the report is "no change since <time>" plus step 7, and you skip steps 2 to 6. Otherwise run every check below.
+1. Cheap check first: read {{report_dir}}/nudge-state.md (the last run's UTC time and the MEMORY.md hash). If it exists, no thread in list_threads has activity since that time, read_project_chat (limit 1) shows nothing newer, and MEMORY.md has the same hash, this run changed nothing: the report is "no change since <time>" plus steps 7 and 8, and you skip steps 2 to 6. Otherwise run every check below.
 2. Threads: page through list_threads (follow next_cursor). Review every unresolved thread except task home threads (this one and any other the SCHEDULED TASKS line names). Read the latest messages (read_thread, limit 2) of each thread that is not working or has been idle 45 minutes or more.
    Stalled: (a) working with no activity for over 45 minutes; (b) blocked, failed or stopped while the thread still owes work; (c) its latest own message promises work ("I'll ...") with no activity for 45 minutes; (d) a promised result that never came.
    Mismatch: every open thread whose shown state differs from what is really pending (latest messages, memory, decisions made elsewhere), with the true state and the fix.
@@ -13,7 +13,8 @@ CHECKS
 [repo]5. PRs: every open PR on {{repo}} (GitHub MCP tools; load them with ToolSearch if needed): number, title, short head SHA, draft or ready, CI rolled up (pass, fail or pending, naming failing checks). If GitHub MCP is unavailable, say so.
 [no-repo]5. PRs: none (no repo).
 6. Memory and promises: open memory items that look waiting, overdue or stale. Read the promise list in memory: each promise whose trigger already happened (a merged PR, a PASS file, a shipped version) but which is not done goes under **Overdue promise:**.
-7. Scheduled tasks: get_trigger "{{checkin_name}}" from the SCHEDULED TASKS line: if it is disabled, has no future next run, or its last run is older than 26 hours or not SUCCEEDED, start the first line with "CHECK-IN NOT ARMED: <why> | ". List every other task on the line with enabled, next run and last status under **Tasks:**.
+7. Weekly rebuild: read the "since" date for "{{nudge_name}}" on the SCHEDULED TASKS line. Seven or more days ago: start the first line with "CONTEXT RESET DUE (weekly) | " so the coordinator rebuilds this task on a fresh home thread.
+8. Scheduled tasks: get_trigger "{{checkin_name}}" from the SCHEDULED TASKS line: if it is missing (no such trigger in list_triggers, or not found), disabled, has no future next run, or its last run is older than 26 hours or not SUCCEEDED, start the first line with "CHECK-IN NOT ARMED: <why> | ". List every other task on the line with enabled, next run and last status under **Tasks:**.
 
 REPORT
 - First line: any "CONTEXT RESET DUE | " and "CHECK-IN NOT ARMED: <why> | " prefixes, then exactly "all moving", "STALLED: <thread titles>" or, from step 1, "no change since <time>".

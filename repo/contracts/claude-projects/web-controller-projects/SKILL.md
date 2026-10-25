@@ -99,14 +99,16 @@ Whenever the user asks for anything recurring (the daily check-in, a sweep, a re
 - Threads and the user wake the coordinator, but outside activity doesn't: other controllers' comments, new issues, or people replying by email. So every project runs a daily check-in every day, at a morning time in the user's time zone that you pick and tell them. It is a fresh session per run and read-only; its steps live in its rendered prompt. It keeps the project's Toolkit base layer current: it finds what is out of date and you make the change.
 - Its report's first line carries these prefixes, in this order. Act on each the same turn:
   - `SKILL UPDATE`: the loaded skill is newer than memory's. Follow it now, save its Version and say so in one line; never wait for a restart. When the repo's Version is newer than the loaded one, the owner saves the new skill.
+  - `SKILL DRIFT`: the account copy has direct edits that match no Toolkit revision. Bring them into Toolkit from the saved copy (a Toolkit PR) before anyone re-uploads, so nothing is overwritten.
+  - `SKILL BEHIND`: the account copy is an older Toolkit revision. Tell the owner once per Version to re-upload the skill with its reference files.
   - `BLOCK OUTDATED` (including `misplaced` and `overlaps`): **Managed project-instructions sync**.
   - `BINDING STALE` or `BINDING UNKNOWN`: rebind (**Binding**). When current, the report says `**Binding:** current` with the short blob, adding the newer short commit when only the commit moved.
   - `TOOLKIT CHANGED`: note the new version; the block and plugin checks follow from it.
   - `MEMORY FORMAT`: rewrite only the named Toolkit line.
   - `TASKS OUTDATED`: swap each named Toolkit-made task (**Recurring tasks**); add an `unlisted` task to the line.
-  - `NUDGE NOT ARMED`: rebuild the hourly nudge and its home thread (**Hourly nudge**).
+  - `NUDGE NOT ARMED`: rebuild the hourly nudge and its home thread (**Hourly nudge**), without asking; a deleted nudge is rebuilt the same way.
   - `PLUGIN BEHIND`: the Toolkit plugin on the user's claude.ai account is more than a day behind `main`. Tell the owner once per version: remove the Toolkit plugin only in claude.ai Customize > Plugins and let it reinstall; if it is still behind, remove the marketplace and add it again with Sync automatically on. Also confirm the account copy after each release merge.
-- The report also lists the project's own and local tasks as advice, open PRs with their checks, outside activity on the parent issue, overdue promises, owner asks waiting over a day and setup advice. It always reaches you; post to the owner only for changes, stuck work or an answer waiting over a day.
+- The report also lists the project's own and local tasks as advice, open PRs with their checks, outside activity on the parent issue, overdue promises, owner asks waiting over a day and setup advice. It always reaches you. Post its first line to the owner every run, "nothing changed" included, so a missing day shows; give detail only for changes, stuck work or an answer waiting over a day. The hourly nudge stays silent: act on it without posting unless something needs the owner.
 - Stop it when the user asks.
 
 ## Hourly nudge
@@ -126,7 +128,9 @@ Whenever the user asks for anything recurring (the daily check-in, a sweep, a re
   5. open pull requests with their CI state;
   6. open project-memory items and ALL unanswered owner items with no reply or reaction, in project chat and threads, plus your answers in reply threads with no owner reply or reaction since, each with its link and ask date;
   7. `UNRELAYED`: threads resolved in the last day, or finished open ones, whose latest result never reached project chat; `HIDDEN REPLY`: an owner reply in a closed post thread with no answer, or your answer there with no top-level pointer;
-  8. whether the daily check-in is armed.
+  8. whether the daily check-in exists and is armed.
+- `CHECK-IN NOT ARMED` (including a deleted check-in): recreate it from the template the same turn, without asking, as in **Recurring tasks**.
+- **Both gone:** the two tasks watch each other, but if both are deleted nothing fires. So on the first owner message or wake of each day, call `list_triggers` once (a cheap read); if either Toolkit task is missing, start a cloud thread that recreates it from the template on `main`, fires it once and updates the `SCHEDULED TASKS:` line, and tell the owner once.
 - Report to the coordinator only. The coordinator posts all waiting owner items as ONE reminder each run until each is answered; act on the rest in the same turn: verify/resolve candidates, reopen and relay unrelayed threads, post missing pointers, end finished Remote Control sessions, correct stale labels, act on overdue promises, nudge/reroute stuck work.
 - This is the only resolve pass for coordinator-driven resolution; each fresh scheduled run resolves its own thread after report delivery. Stop the nudge only when the user asks; record that in project memory.
 

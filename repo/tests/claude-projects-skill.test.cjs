@@ -55,6 +55,10 @@ test('Projects wires managed instructions, promises and fresh scheduled sessions
   assert.match(text, /^Version: 2026-10-24\.4$/m);
   // Plugin lag: removing the plugin alone is the fix that worked; the marketplace re-add is the fallback.
   assert.match(text, /`PLUGIN BEHIND`: the Toolkit plugin on the user's claude\.ai account is more than a day behind `main`/);
+  // The skill drift watch lives in the daily check-in: direct account edits come back into Toolkit first.
+  assert.match(text, /`SKILL DRIFT`: the account copy has direct edits that match no Toolkit revision\. Bring them into Toolkit from the saved copy/);
+  assert.match(text, /Post its first line to the owner every run, "nothing changed" included/);
+  assert.match(text, /The hourly nudge stays silent/);
   assert.match(text, /remove the Toolkit plugin only in claude\.ai Customize > Plugins and let it reinstall; if it is still behind, remove the marketplace and add it again with Sync automatically on/);
   assert.doesNotMatch(text, /Thread effort follows the role|fires into that same thread|firing runs in the dedicated check-in thread/);
   assert.match(text, /toolkit-projects-instructions\.cjs --render/);
@@ -176,7 +180,8 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.match(text, /every project runs a daily check-in every day/);
   assert.match(text, /\*\*It is bound to its own home thread,\*\* because a fresh-session task posts a run card/);
   for (const required of ['Never resolve the home thread or list it as a resolve candidate', 'TASKS OUTDATED `weekly-rebuild`',
-    'If the bound nudge dies twice in 7 days', '`UNRELAYED`', '`HIDDEN REPLY`', 'whether the daily check-in is armed']) {
+    'If the bound nudge dies twice in 7 days', '`UNRELAYED`', '`HIDDEN REPLY`', 'whether the daily check-in exists and is armed',
+    '`CHECK-IN NOT ARMED` (including a deleted check-in)', '**Both gone:** the two tasks watch each other', 'call `list_triggers` once (a cheap read)']) {
     assert.ok(text.includes(required), required);
   }
   // The coordinator acts on every check-in prefix, in dependency order.
