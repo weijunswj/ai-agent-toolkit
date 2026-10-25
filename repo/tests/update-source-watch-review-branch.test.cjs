@@ -6,9 +6,11 @@
 // the -shapes and -observation files, so node --test runs the three in parallel.
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const {
+  branchName,
   reportPath,
   git,
   gitSha,
@@ -34,13 +36,23 @@ test('branch absent and stable is created from trusted main with a plain push', 
   assert.equal(git(fixture.work, ['rev-list', '--parents', '-n', '1', after]).trim().split(/\s+/)[1], remoteMain(fixture));
 });
 
+// A rejected push must be the only push: no delete, no force, no second attempt.
+function assertSinglePlainPush(wrapper) {
+  const pushes = wrapper.pushes();
+  assert.equal(pushes.length, 1, `exactly one push: ${pushes.join(' | ')}`);
+  assert.match(pushes[0], new RegExp(`^push origin [0-9a-f]{40}:refs/heads/${branchName.replace(/\//g, '\\/')}$`));
+}
+
 test('branch absent with a competing unrelated creation is rejected without retry', (t) => {
   const fixture = makeFixture(t);
   const competitorSha = createCompetitorCommit(fixture, 'competitor report\n', 'absent-competitor');
-  const result = runHelper(fixture, { wrapper: makeGitRaceWrapper(fixture, 'absent-competitor', competitorSha) });
+  const wrapper = makeGitRaceWrapper(fixture, 'absent-competitor', competitorSha);
+  const result = runHelper(fixture, { wrapper });
   assert.notEqual(result.status, 0);
   assert.equal(remoteRef(fixture), competitorSha);
   assert.doesNotMatch(result.output, /pushed=true/);
+  assert.match(result.stderr, /push was rejected\. The branch probably moved during this run/);
+  assertSinglePlainPush(wrapper);
 });
 
 test('branch absent with a competing creation at trusted main is only fast-forwarded', (t) => {
@@ -141,8 +153,37 @@ test('changed report and a competing branch movement are rejected as a non-fast-
   const fixture = makeFixture(t, 'new report\n');
   createRemoteReportBranch(fixture, 'old report\n');
   const competitorSha = createCompetitorCommit(fixture, 'competitor report\n', 'push-competitor');
-  const result = runHelper(fixture, { wrapper: makeGitRaceWrapper(fixture, 'push-competitor', competitorSha) });
+  const wrapper = makeGitRaceWrapper(fixture, 'push-competitor', competitorSha);
+  const result = runHelper(fixture, { wrapper });
   assert.notEqual(result.status, 0);
   assert.equal(remoteRef(fixture), competitorSha);
   assert.doesNotMatch(result.output, /pushed=true/);
+  assertSinglePlainPush(wrapper);
+});
+
+test('the checkout stays on trusted main after a push, so later steps run current code', (t) => {
+  const fixture = makeFixture(t, 'new report\n');
+  createRemoteReportBranch(fixture, 'old report\n');
+  writeFile(path.join(fixture.work, 'README.md'), 'planner fix on current main\n');
+  git(fixture.work, ['commit', '-am', 'Advance trusted main']);
+  git(fixture.work, ['push', 'origin', 'main']);
+  git(fixture.work, ['fetch', 'origin', 'refs/heads/main:refs/remotes/origin/main']);
+  const headBefore = gitSha(fixture.work, 'HEAD');
+  const result = runHelper(fixture);
+  assert.equal(result.status, 0, result.stderr || result.error);
+  assert.match(result.output, /^pushed=true$/m);
+  assert.equal(gitSha(fixture.work, 'HEAD'), headBefore);
+  assert.equal(gitSha(fixture.work, 'HEAD'), gitSha(fixture.work, 'refs/remotes/origin/main'));
+  assert.equal(git(fixture.work, ['symbolic-ref', '--short', 'HEAD']).trim(), 'main');
+  assert.equal(git(fixture.work, ['status', '--porcelain']), '');
+  assert.equal(fs.readFileSync(path.join(fixture.work, 'README.md'), 'utf8'), 'planner fix on current main\n');
+});
+
+test('the checkout stays on trusted main when the branch is created', (t) => {
+  const fixture = makeFixture(t);
+  const headBefore = gitSha(fixture.work, 'HEAD');
+  const result = runHelper(fixture);
+  assert.equal(result.status, 0, result.stderr || result.error);
+  assert.equal(gitSha(fixture.work, 'HEAD'), headBefore);
+  assert.equal(git(fixture.work, ['status', '--porcelain']), '');
 });

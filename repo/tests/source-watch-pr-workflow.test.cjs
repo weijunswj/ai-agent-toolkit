@@ -90,26 +90,47 @@ test('source-watch helper verifies the report-only commit before a no-op and rec
   assert.match(helper, /\[\[ "\$OBS_STATE" != 'present' \|\| "\$OBS_SHA" != "\$remote_sha" \]\]/);
 });
 
-test('source-watch helper stages only the report and pushes fast-forward only', () => {
-  assert.match(helper, /git switch -C "\$BRANCH" "\$remote_sha"/);
-  assert.match(helper, /git switch -C "\$BRANCH" origin\/main/);
-  assert.match(helper, /git add -- "\$REPORT_PATH"/);
-  assert.match(helper, /staged_files="\$\(git diff --cached --name-only\)"/);
-  assert.match(helper, /\[\[ "\$staged_files" != "\$REPORT_PATH" \]\]/);
-  assert.match(helper, /^push_review_branch origin "HEAD:refs\/heads\/\$BRANCH"$/m);
+test('source-watch helper builds the commit off the checkout and pushes fast-forward only', () => {
+  assert.match(helper, /GIT_INDEX_FILE="\$temp_index" git read-tree "\$parent_commit"/);
+  assert.match(helper, /git update-index --add --cacheinfo "100644,\$report_blob,\$REPORT_PATH"/);
+  assert.match(helper, /git commit-tree "\$new_tree" -p "\$parent_commit"/);
+  assert.match(helper, /changed_files="\$\(git diff-tree --no-commit-id --name-only --no-renames -r "\$parent_commit" "\$new_commit"\)"/);
+  assert.match(helper, /\[\[ "\$changed_files" != "\$REPORT_PATH" \]\]/);
+  // The checkout must stay on trusted main for the later workflow steps.
+  assert.doesNotMatch(helper, /git\s+(?:switch|checkout|reset|config|add|commit\s)/);
+  const pushes = helper.split('\n').filter((line) => /push_review_branch\s+origin/.test(line));
+  assert.deepEqual(pushes.map((line) => line.trim()), ['if ! push_review_branch origin "$new_commit:refs/heads/$BRANCH"; then']);
   assert.doesNotMatch(helper, /git\s+push[^\n]*HEAD:main\b/i);
   // The push token goes only to that one push, through git's environment configuration.
   assert.match(helper, /GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0='http\.https:\/\/github\.com\/\.extraheader' GIT_CONFIG_VALUE_0="\$header"/);
   assert.doesNotMatch(helper, /remote\s+set-url|x-access-token:\$\{GH_TOKEN\}@/);
 });
 
-test('the notifier never force-pushes, because the repository forbids it on every branch', () => {
+test('the notifier never force-pushes or deletes, because the repository forbids it on every branch', () => {
   for (const [name, text] of [['helper', helper], ['workflow', workflow]]) {
     assert.doesNotMatch(text, /--force\b/, `${name} has no --force`);
     assert.doesNotMatch(text, /force-with-lease|force-if-includes/, `${name} has no lease push`);
     assert.doesNotMatch(text, /(?:git push|push_review_branch)[^\n]*\s-f\b/, `${name} has no -f push flag`);
-    assert.doesNotMatch(text, /["'\s]\+(?:HEAD|refs\/)/, `${name} has no + refspec`);
-    assert.doesNotMatch(text, /--delete-branch|push[^\n]*--delete|push[^\n]*\s:refs\//, `${name} never deletes a branch`);
+    assert.doesNotMatch(text, /(?:git push|push_review_branch)[^\n]*\s-d\b/, `${name} has no -d push flag`);
+    assert.doesNotMatch(text, /--mirror|--prune|--delete/, `${name} has no mirror, prune or delete push`);
+    assert.doesNotMatch(text, /["'\s]\+(?:"|\$|HEAD|refs\/|[0-9a-f]{7})/, `${name} has no + refspec`);
+    assert.doesNotMatch(text, /["'\s]:refs\//, `${name} has no empty-source delete refspec`);
+    assert.doesNotMatch(text, /git\/refs|force=true|-X\s*DELETE|--method\s+DELETE/i, `${name} has no ref API write`);
+    assert.doesNotMatch(text, /--delete-branch|git\s+branch\s+-[dD]/, `${name} never deletes a branch`);
+  }
+});
+
+test('every step after the branch update re-checks that it runs trusted main code', () => {
+  for (const marker of [
+    '      - name: Plan exact review notification PR lifecycle',
+    '      - name: Apply exact review notification PR lifecycle',
+    '      - name: Close review notification PR when nothing is left to review'
+  ]) {
+    const start = workflow.indexOf(marker);
+    assert.notEqual(start, -1, marker);
+    const end = workflow.indexOf('\n      - name:', start + marker.length);
+    const step = workflow.slice(start, end === -1 ? undefined : end);
+    assert.match(step, /set -euo pipefail\n(?:\s*#[^\n]*\n)?\s*test "\$\(git rev-parse HEAD\)" = "\$\(git rev-parse origin\/main\)"/, marker);
   }
 });
 
@@ -130,7 +151,6 @@ test('the helper refuses any branch it cannot extend, instead of rebuilding it',
 
 test('source-watch helper rejects symlink reports and never sources notification content', () => {
   assert.match(helper, /-L "\$REPORT_TEMP"/);
-  assert.match(helper, /-L "\$REPORT_PATH"/);
   assert.doesNotMatch(helper, /git\s+show\s+"\$remote_sha:/);
   assert.doesNotMatch(helper, /(^|\n)\s*source\s+"/);
 });
@@ -301,6 +321,7 @@ function runCloseStep(t, openPullRequests) {
   const script = step.slice(runIndex + '        run: |\n'.length)
     .split('\n')
     .map((line) => line.replace(/^ {10}/, ''))
+    .filter((line) => !line.startsWith('test "$(git rev-parse HEAD)"'))
     .join('\n');
   const state = path.join(root, 'open.json');
   const log = path.join(root, 'gh.log');

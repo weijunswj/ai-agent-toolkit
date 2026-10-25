@@ -65,6 +65,8 @@ jobs:
           EXPECTED_OWNER: ${{ github.repository_owner }}
         run: |
           set -euo pipefail
+          # Later steps must run trusted main's code, never a checkout the branch update moved.
+          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
           # Every item is recorded as reviewed on trusted main. Close the one exact notification PR
           # the bot opened, unmerged. The branch is kept, never deleted.
           query_exact_prs() {
@@ -138,6 +140,8 @@ jobs:
           EXPECTED_OWNER: ${{ github.repository_owner }}
         run: |
           set -euo pipefail
+          # Later steps must run trusted main's code, never a checkout the branch update moved.
+          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
           PR_METADATA="$RUNNER_TEMP/source-watch-pr-metadata.json"
           gh pr list \
             --repo "$GITHUB_REPOSITORY" \
@@ -171,6 +175,8 @@ jobs:
           PR_BODY: ${{ runner.temp }}/source-watch-pr-body.md
         run: |
           set -euo pipefail
+          # Later steps must run trusted main's code, never a checkout the branch update moved.
+          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
           query_exact_prs() {
             gh pr list \
               --repo "$GITHUB_REPOSITORY" \

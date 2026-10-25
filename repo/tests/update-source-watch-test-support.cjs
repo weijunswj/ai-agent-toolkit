@@ -264,6 +264,7 @@ function makeGitRaceWrapper(fixture, mode, competitorSha = '') {
   const wrapperDir = path.join(fixture.root, `wrapper-${mode}`);
   fs.mkdirSync(wrapperDir, { recursive: true });
   const counter = path.join(wrapperDir, 'counter');
+  const pushLog = path.join(wrapperDir, 'pushes.log');
   const script = `#!/usr/bin/env bash
 set -euo pipefail
 real_git="${'${SOURCE_WATCH_REAL_GIT}'}"
@@ -271,6 +272,7 @@ counter="${'${SOURCE_WATCH_COUNTER}'}"
 mode="${'${SOURCE_WATCH_RACE_MODE}'}"
 remote_git_dir="${'${SOURCE_WATCH_REMOTE_GIT_DIR}'}"
 competitor_sha="${'${SOURCE_WATCH_COMPETITOR_SHA:-}'}"
+push_log="${'${SOURCE_WATCH_PUSH_LOG}'}"
 count=0
 if [[ "${'${1:-}'}" == 'ls-remote' ]]; then
   if [[ -f "$counter" ]]; then count="$(cat "$counter")"; fi
@@ -294,8 +296,14 @@ if [[ "${'${1:-}'}" == 'ls-remote' ]]; then
     "$real_git" --git-dir "$remote_git_dir" update-ref -d "refs/heads/${'${BRANCH}'}"
   fi
 fi
-if [[ "${'${1:-}'}" == 'push' && ("$mode" == 'absent-competitor' || "$mode" == 'push-competitor') ]]; then
-  "$real_git" --git-dir "$remote_git_dir" update-ref "refs/heads/${'${BRANCH}'}" "$competitor_sha"
+if [[ "${'${1:-}'}" == 'push' ]]; then
+  # Every push is logged. The competitor moves the branch only before the first push, so a
+  # fallback that deletes and re-pushes would leave a visible trace instead of being masked.
+  printf '%s\n' "$*" >> "$push_log"
+  if [[ ("$mode" == 'absent-competitor' || "$mode" == 'push-competitor') && ! -f "$push_log.moved" ]]; then
+    : > "$push_log.moved"
+    "$real_git" --git-dir "$remote_git_dir" update-ref "refs/heads/${'${BRANCH}'}" "$competitor_sha"
+  fi
 fi
 exec "$real_git" "$@"
 `;
@@ -304,7 +312,11 @@ exec "$real_git" "$@"
   fs.chmodSync(wrapperPath, 0o755);
   return {
     wrapperDir,
+    pushes() {
+      return fs.existsSync(pushLog) ? fs.readFileSync(pushLog, 'utf8').trim().split('\n').filter(Boolean) : [];
+    },
     env: {
+      SOURCE_WATCH_PUSH_LOG: bashPathValue(pushLog),
       SOURCE_WATCH_REAL_GIT: bashPathValue(realGitPath()),
       SOURCE_WATCH_COUNTER: bashPathValue(counter),
       SOURCE_WATCH_RACE_MODE: mode,
