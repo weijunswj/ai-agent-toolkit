@@ -4,7 +4,7 @@
 
 ### Projects skill
 
-- **Daily check-in posts the skill update card:** when the account copy of the Projects skill is an older Toolkit revision, the check-in posts the update card in its own thread, once per Version, so the owner only taps Save. It never posts one over direct account edits, and the coordinator lists the Save tap on the owner's pending list. When the card cannot be posted, the old re-upload note stays.
+- **Daily check-in posts the skill update card:** when the account copy of the Projects skill is an older Toolkit revision, the check-in posts the update card in its own thread, once per Version, so the owner only taps Save. It never posts one over direct account edits. The coordinator lists the Save tap on the owner's pending list and keeps the card's thread open until the owner saves, releasing older cards once a newer one is posted, the owner declines, or the copy drifts. When the card cannot be posted, the old re-upload note stays.
 
 ## 3.13.2
 

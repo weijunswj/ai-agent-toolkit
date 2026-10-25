@@ -297,7 +297,7 @@ test('the check-in carries every prefix in the fixed order and checks both Toolk
     'the account folder is under 26 hours old', 'every account reference/*.md is absent or equal to main', 'state.md records no "card <main Version>"',
     'Call propose_skills', 'skillMd main\'s SKILL.md byte for byte', 'even when state.md already reported this Version',
     ', card posted', 'fails or is skipped for any reason', ', card failed: <reason>', 'tap Save on the skill card',
-    'A reference file missing from the account is not drift', 'every "card <Version>" record (this run\'s and all earlier ones, carried forward)']) {
+    'A reference file missing from the account is not drift', 'straight after the call and read it back', 'SKILL BEHIND (carried forward while still seen)', 'every "card <Version>" record (this run\'s and all earlier ones, carried forward)']) {
     assert.ok(text.includes(required), required);
   }
   assert.doesNotMatch(text, /skip the resolve in DELIVERY/, 'bound runs never resolve, so no fresh-only card line');
