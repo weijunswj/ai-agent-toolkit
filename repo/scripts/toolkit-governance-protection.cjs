@@ -128,12 +128,8 @@ function blockList(lines, entry) {
   const inline = inlineList(entry.value);
   if (inline) return inline;
   if (entry.value && !['|', '>'].includes(entry.value.trim())) return [unquote(entry.value)];
-  const nested = lines.slice(entry.index + 1, entry.end).filter(line => line.text.startsWith('- ')).map(line => unquote(line.text.slice(2)));
-  if (nested.length) return nested;
-  // An indentless list: the items sit at the key's own indent.
-  const items = [];
-  for (let index = entry.end; index < lines.length && lines[index].indent === lines[entry.index].indent && lines[index].text.startsWith('- '); index += 1) items.push(unquote(lines[index].text.slice(2)));
-  return items;
+  // Nested and indentless items alike sit inside the key's range (see children).
+  return lines.slice(entry.index + 1, entry.end).filter(line => line.text.startsWith('- ')).map(line => unquote(line.text.slice(2)));
 }
 
 // A scalar field's value; a block scalar (`|` or `>`) is its lines joined by `joiner`. A plain or
@@ -407,8 +403,6 @@ function readWorkflow(input) {
       const childIndent = on.end > on.index + 1 ? lines[on.index + 1].indent : -1;
       const blockEvents = lines.slice(on.index + 1, on.end).filter(line => line.indent === childIndent && line.text.startsWith('- '));
       for (const line of blockEvents) triggers.set(unquote(line.text.slice(2)), { filters: {} });
-      // An indentless list of events sits at the `on:` key's own indent.
-      if (on.end === on.index + 1) for (const event of blockList(lines, on)) triggers.set(event, { filters: {} });
       for (const event of children(lines, on.index + 1, on.end)) {
         const filters = {};
         for (const filter of children(lines, event.index + 1, event.end)) {
