@@ -1,5 +1,17 @@
 # Toolkit Changelog
 
+## 3.13.0 (repository protection)
+
+### Default-branch protection
+
+- **`toolkit governance check` checks the default branch:** for an ENABLED github.com repository with a programme binding, it reports drift unless the default branch requires exactly the binding's `required_checks` (rulesets and classic branch protection together), each pinned to an app; exactly one workflow job produces each check; that job's workflow runs on every pull request to the default branch (no path filter, no branch filter that leaves it out); a job that waits for others runs with `if: always()` or `!cancelled()` and reads their results; and only merge commits are allowed. A waiting job that does not read its needed jobs' results, or anything GitHub would not show, is unverified, never conformant. `--offline` still checks the workflow files.
+- **`toolkit governance migrate` offers the fix:** after its own typed yes it creates or updates one ruleset named "Toolkit: protected default branch" (the default branch, the binding's checks pinned to GitHub Actions, merge commits only, no bypass) where a binding check is not required or squash or rebase merges are allowed. It never edits a ruleset or branch protection it did not create; what its own ruleset cannot fix is listed to change by hand, and a refused write is reported once, not retried.
+
+### Removed
+
+- **Old CI Gate machinery:** the unused trusted-CI repository protection scripts, contracts, templates, fixtures and tests are gone, and so is the rule that every edit to the Validate workflow had to rewrite a pinned blob.
+- **Control-plane kernel:** removed with its contracts and tests. The capability registry stays, because it is the per-computer governance store; the kernel's one used part, the remote-identity check, now lives in the registry under the same contract name, so identities already stored keep their keys.
+
 ## 3.12.0 (server operations)
 
 ### External operation preflight

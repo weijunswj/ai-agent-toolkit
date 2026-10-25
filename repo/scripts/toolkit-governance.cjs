@@ -13,12 +13,14 @@
 //   check       read-only conformance report; exit 0 conformant, 1 drift or pending, 2 error
 //   catalogue   the skills offered in this repository's state
 //   migrate     one pass over the repositories in --root folders (default: this folder): one
-//               list, one typed yes, then an offer to add missing no-force-push rulesets
+//               list, one typed yes, then offers to add missing no-force-push rulesets and
+//               Toolkit's default-branch ruleset, each after its own typed yes
 //   repair      when your governance decisions file cannot be read: moves it aside (kept next to
 //               it) after you type yes, so Toolkit can ask about each repository again
 //
-// `--json` prints the machine-readable result instead. `check --offline` skips the one network
-// read (the repository's no-force-push ruleset, asked of GitHub through `gh`). Only `enable`, `disable` and `repair` write, only
+// `--json` prints the machine-readable result instead. `check --offline` skips the network
+// reads (the no-force-push ruleset and the default branch's protection, asked of GitHub through
+// `gh`); the workflow files are still read. Only `enable`, `disable` and `repair` write, only
 // after you type yes in a terminal, and only to your own user-state file through
 // toolkit-capability-registry.cjs. An agent running this without a terminal cannot record a
 // decision. Enabling records consent only: the governed block and the programme binding still
@@ -60,12 +62,12 @@ class GovernanceCliError extends Error {
 }
 
 class ToolkitGovernanceCli {
-  #stdout; #stderr; #ask; #interactive; #cwd; #registryOptions; #rulesetReader; #rulesetCreator;
+  #stdout; #stderr; #ask; #interactive; #cwd; #registryOptions; #rulesetReader; #rulesetCreator; #protectionReader; #protectionWriter;
 
   // `ask(question)` resolves to the typed line; `interactive` says whether a person is at a
-  // terminal. `registryOptions` ({ registryPath, testOnly: true }), `rulesetReader` and
-  // `rulesetCreator` are only for tests.
-  constructor({ stdout = process.stdout, stderr = process.stderr, ask = terminalAsk, interactive = isInteractiveTerminal(), cwd = process.cwd(), registryOptions = {}, rulesetReader = null, rulesetCreator = null } = {}) {
+  // terminal. `registryOptions` ({ registryPath, testOnly: true }), `rulesetReader`,
+  // `rulesetCreator`, `protectionReader` and `protectionWriter` are only for tests.
+  constructor({ stdout = process.stdout, stderr = process.stderr, ask = terminalAsk, interactive = isInteractiveTerminal(), cwd = process.cwd(), registryOptions = {}, rulesetReader = null, rulesetCreator = null, protectionReader = null, protectionWriter = null } = {}) {
     this.#stdout = stdout;
     this.#stderr = stderr;
     this.#ask = ask;
@@ -74,6 +76,8 @@ class ToolkitGovernanceCli {
     this.#registryOptions = registryOptions;
     this.#rulesetReader = rulesetReader;
     this.#rulesetCreator = rulesetCreator;
+    this.#protectionReader = protectionReader;
+    this.#protectionWriter = protectionWriter;
   }
 
   async main(argv) {
@@ -98,6 +102,7 @@ class ToolkitGovernanceCli {
         return await new GovernanceMigration({
           stdout: this.#stdout, ask: this.#ask, interactive: this.#interactive, registryOptions: this.#registryOptions,
           rulesetReader: this.#rulesetReader, rulesetCreator: this.#rulesetCreator,
+          protectionReader: this.#protectionReader, protectionWriter: this.#protectionWriter,
         }).run(roots.length ? roots : [this.#cwd]);
       }
       if (command === 'status') return this.#status(json);
@@ -131,11 +136,13 @@ class ToolkitGovernanceCli {
   #check(json, offline) {
     const options = { ...this.#registryOptions, offline };
     if (this.#rulesetReader) options.rulesetReader = this.#rulesetReader;
+    if (this.#protectionReader) options.protectionReader = this.#protectionReader;
     const result = conformance.checkConformance(this.#cwd, options);
     const lines = [`Conformance: ${result.status}`];
     if (result.state) lines.push(`State: ${label(result.state)}`);
     for (const entry of result.findings) lines.push(`- ${entry.severity}: ${entry.message}`);
     if (result.no_force_push_ruleset) lines.push(`No-force-push ruleset: ${result.no_force_push_ruleset.status}`);
+    if (result.default_branch_protection) lines.push(`Default-branch protection: ${result.default_branch_protection.status}`);
     lines.push('Prompt-hold enforcement:');
     for (const [host, status] of Object.entries(result.enforcement)) lines.push(`- ${host}: ${status.status} (${status.reason})`);
     this.#print(json, result, lines);
