@@ -71,7 +71,11 @@ test('both safety-gates playbooks carry the same procedure, every hard stop and 
     'unique, `SP-` plus a number, never reused', 'An unknown id changes nothing; say so.', 'an entry is revoked when its `status` is `revoked`; `revoked_at` holds the date and is set exactly when `status` is `revoked`',
     'set `reviewed_at` to today, `review_by` to 90 days later', 'a neutral machine label',
     'otherwise ask before writing it, or offer only "just this once" or "no"',
-    'works the same in every harness', '**Codex:** `prefix_rule()`', '**Any other harness:**', 'a `--settings` file, never from project settings',
+    'works the same in every harness', '**Codex:** `prefix_rule()`',
+    'so an allow rule never clears a matching ask rule, and a content-scoped ask rule still prompts in auto mode',
+    '`~/.claude/settings.json`, which the owner edits by hand where `/permissions` is not available',
+    "Record it in the entry's `native_rule`; leave it empty only when the host does not stop the step.",
+    'tell the owner which change to undo and in which file', '**Any other harness:**', 'a `--settings` file, never from project settings',
   ]) assert.ok(toolkit.includes(text), text);
   for (const field of FIELDS) assert.ok(toolkit.includes(`\`${field}\``), field);
 });
@@ -85,6 +89,7 @@ test('the Projects skill uses a decision card, the same ledger and the playbook 
   assert.match(skill, /Only the user's own answer creates an entry/);
   assert.match(skill, /90-day review date/);
   assert.match(skill, /never retry another way/);
+  assert.match(skill, /the entry records it in `native_rule`/);
 });
 
 test('the sample ledger uses the documented fields, unique ids, fake data and 90-day reviews', () => {
