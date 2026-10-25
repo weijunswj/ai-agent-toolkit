@@ -245,7 +245,19 @@ test('every Toolkit-made prompt carries the recurring-task requirements; fresh r
     assert.match(fresh, /set_thread_resolved/, kind);
     assert.doesNotMatch(fresh, /Never resolve this home thread/, kind);
     assert.equal(tasks().check(kind, fresh).state, 'current', kind);
+    // A swap moves a task between the fallback and bound, keeping the project text.
+    const withText = tasks().render(kind, params, 'Project step kept.');
+    const moved = tasks().refresh(kind, withText, { session: 'bound' });
+    assert.match(moved, /Never resolve this home thread/, kind);
+    assert.doesNotMatch(moved, /set_thread_resolved|"session"/, kind);
+    assert.match(moved, /Project step kept\./, kind);
+    assert.equal(tasks().check(kind, moved).state, 'current', kind);
+    const back = tasks().refresh(kind, moved, { session: 'fresh' });
+    assert.match(back, /"session": "fresh"/, kind);
+    assert.match(back, /set_thread_resolved/, kind);
+    assert.throws(() => tasks().refresh(kind, moved, { session: 'sometimes' }), kind);
   }
+  assert.throws(() => tasks().refresh('custom', tasks().render('custom', validateParams('custom', PARAMS.custom), OWN_TEXT), { session: 'bound' }), 'a custom task keeps its own session');
 });
 
 test('only the project that runs the Toolkit repo watches other projects, and only reports', () => {
@@ -347,28 +359,39 @@ test('invalid arguments and unreadable input fail with one generic error', t => 
   assert.equal(result.status, 0);
   assert.equal(JSON.parse(result.stdout).project, 'EXAMPLE');
   assert.throws(() => parseArgs(['--refresh', 'daily-check-in', prompt, '--params', 'a', '--params', 'b']));
+  assert.equal(parseArgs(['--refresh', 'daily-check-in', prompt, '--session', 'bound']).session, 'bound');
+  assert.throws(() => parseArgs(['--check', 'daily-check-in', prompt, '--session', 'bound']));
 });
 
 test('every line that re-arms, updates, swaps, rebuilds, recreates or sets up a Toolkit task honours a stopped by owner entry', () => {
-  // Scans by what a line does, not where it sits, so a new path that forgets the exception fails here.
+  // Scans by what a line does, not where it sits, so a new path that forgets the exception fails
+  // here, whatever it calls the task (a job, a schedule, a home thread, both).
   // The named lines are not automatic paths: introductions, how a task is created or rendered (every
   // path that uses them carries the exception), the project's own tasks, the tool route, the steps
   // under the swap paragraph (which carries the exception), runs of the task itself, and thread
   // resolving.
   const dir = path.join(ROOT, 'repo', 'contracts', 'claude-projects', 'web-controller-projects');
   const files = ['SKILL.md', 'project-instructions.md', ...['reference', 'tasks'].flatMap(sub => fs.readdirSync(path.join(dir, sub)).filter(name => name.endsWith('.md')).map(name => `${sub}/${name}`))];
-  const acts = /\b(?:re-?arm|rebuil[dt]|re-?creat|swap|set up the|re-?enabl|restor|refresh|replac|switch|re-?add|resum|fire (?:it |them )?again|update (?:the|those|its)\b[^.]*prompt|creat(?:e|es) (?:it|them|the|a)\b)/i;
+  const acts = /\b(?:re-?arm|rebuil[dt]|re-?creat|swap|set up the|re-?enabl|restor|refresh|replac|switch|re-?add|resum|fire (?:it |them )?again|update (?:the|those|its)\b[^.]*prompt|creat(?:e|es) (?:it|them|the|a)\b|starts? (?:a )?new home thread)/i;
+  for (const line of ['Re-arm any recurring job that missed its run.', 'Rebuild the home thread when it is a week old.', 'Re-create the schedule when its cron drifts.',
+    'Swap both from the template on main.', 'Start a new home thread for it.', 'The coordinator creates it again from main.']) assert.match(line, acts, line);
   const notPaths = [
     'Whenever the user asks for anything recurring', "**The project's own tasks**", 'Reference for the `web-controller-projects` skill',
     'A cloud thread creates, recreates and deletes tasks', '3. Create the replacement', '4. Rewrite the `SCHEDULED TASKS:` line', '7. Weekly rebuild:', '**It is bound to its own home thread,**',
     'Every Toolkit scheduled task is bound to its own home thread (`<PROJECT>: <task name>`): start', '**Toolkit-made tasks** (the daily check-in and the hourly nudge) are rendered', 'Resolve candidates:',
     'When a recurring task replaces an older one, delete the older one',
-    'Toolkit-made task swaps under their safeguards', 'so the coordinator rebuilds this home thread',
+    'Toolkit-made task swaps under their safeguards', 'so the coordinator rebuilds this home thread', '2. Render the new prompt',
+    // Lines about other things that happen to use one of the verbs: repos, setup, GitHub reads,
+    // shared checkouts, Remote Control, the instructions sync and the repo map.
+    '- A project with no repo attached gets this coordinator contract', 'Before any other work as a newly appointed controller', '**Threads do GitHub reads.**',
+    '- Local sessions sharing one checkout must not clash', '**Remote Control wake.**', '4. Check the result: `--check` reads `current`', '5. Post one short note in project chat: block version',
+    '- On undo, restore the saved copy and record `declined project-instructions', '**Dedupe in the same change.**', '**Evidence before "done":**',
+    'start a bounded G0 to create or refresh it before you plan anything',
   ];
   const unguarded = [];
   for (const rel of files) {
     fs.readFileSync(path.join(dir, rel), 'utf8').replace(/\r\n/g, '\n').split('\n').forEach((line, index) => {
-      if (acts.test(line) && /\b(?:tasks?|check-ins?|nudges?|triggers?|routines?|reminders?)\b/i.test(line) && !/stopped by owner|owner stopped them/.test(line) && !notPaths.some(text => line.includes(text))) unguarded.push(`${rel}:${index + 1}: ${line.slice(0, 120)}`);
+      if (acts.test(line) && !/stopped by owner|owner stopped them/.test(line) && !notPaths.some(text => line.includes(text))) unguarded.push(`${rel}:${index + 1}: ${line.slice(0, 120)}`);
     });
   }
   assert.deepEqual(unguarded, []);

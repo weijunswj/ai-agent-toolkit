@@ -123,8 +123,10 @@ function pathTier(rel, config) {
   for (const [key, tier] of LISTS) {
     let pattern = null;
     for (const entry of config[key]) {
+      // An exception names one tracked file exactly, so it matches case-sensitively: a new file
+      // that differs only in case keeps the folder's tier.
       const negated = entry.startsWith('!');
-      if (globToRegExp(negated ? entry.slice(1) : entry, { ignoreCase: true }).test(clean)) pattern = negated ? null : entry;
+      if (globToRegExp(negated ? entry.slice(1) : entry, { ignoreCase: !negated }).test(clean)) pattern = negated ? null : entry;
     }
     if (pattern) return { tier, rule: `${key}: ${pattern}` };
   }
@@ -212,7 +214,7 @@ function parseArgs(argv) {
     if (arg === '--repo') args.repo = argv[++index] || fail('--repo needs a folder.');
     else if (arg === '--base') args.base = argv[++index] || fail('--base needs a git ref.');
     else if (arg === '--json') args.json = true;
-    else if (arg === '--') { args.paths = argv.slice(index + 1); break; }
+    else if (arg === '--') { args.paths = argv.slice(index + 1); args.typed = args.paths; break; }
     else fail(`Unknown argument: ${arg}`);
   }
   if (args.paths) args.paths = args.paths.map(normalizePath);
@@ -221,11 +223,15 @@ function parseArgs(argv) {
 
 function main(argv = process.argv.slice(2)) {
   const args = parseArgs(argv);
-  const repoRoot = path.resolve(args.repo);
+  // The list lives at the top of the checkout, so a --repo subfolder still finds it.
+  const top = spawnSync('git', ['-C', path.resolve(args.repo), 'rev-parse', '--show-toplevel'], { encoding: 'utf8' });
+  const repoRoot = top.status === 0 && top.stdout.trim() ? path.resolve(top.stdout.trim()) : path.resolve(args.repo);
   const { config, source } = loadConfig(repoRoot);
   const configs = [config];
+  // A typed absolute path inside the checkout is read relative to its top.
+  const inside = rel => path.isAbsolute(rel) && !path.relative(repoRoot, path.resolve(rel)).startsWith('..');
   let files;
-  if (args.paths) files = args.paths.map(rel => ({ path: rel, changedLines: null }));
+  if (args.paths) files = args.typed.map((rel, index) => ({ path: inside(rel) ? normalizePath(path.relative(repoRoot, path.resolve(rel))) : args.paths[index], changedLines: null }));
   else {
     const change = new GitChange(repoRoot);
     files = change.files(args.base);

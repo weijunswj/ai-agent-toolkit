@@ -13,7 +13,7 @@ This is a short safety wrapper, not the full runtime guide.
 - Scoped non-live approval permits validation and local preparation only for the named consumer repo and operation.
 - Move live workflow JSON through ignored scratch locations in the consumer repo.
 - Strip live-only fields, target credential IDs, webhook IDs, static data, tags unless intentionally preserved, and pin data; preserve portable logical credential names/types and approved canonical workflow logic.
-- Keep repo workflow JSON inactive.
+- Keep repo workflow JSON unpublished (inactive), and leave out the instance-only settings `errorWorkflow` and `availableInMCP`.
 - Store exact private resource bindings and sanitized reports only in ignored `.n8n-local/`; target IDs remain transient.
 - Rebuild import payloads from canonical Git, validate the canonical invariant, and compare the effective prepared payload before any live write.
 - Prepare live payloads in ignored `.tmp/`.
