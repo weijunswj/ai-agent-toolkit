@@ -25,7 +25,7 @@ A hard stop is never offered, never honoured from the ledger, and only explained
 - Merging without the owner's OK on a summary of its external effects (each merge stays its own OK).
 - Production, live-system, deployment, firewall or security-setting changes.
 - Turning off tests, validation, guardrails, attribution rules or any safety check.
-- Editing the agent's own permission settings, or adding allow rules, `autoMode` entries or Codex allow rules to any saved settings or rules file (user, project, local or managed settings, a Codex rules file, or a reusable `--settings` file). Per-launch options for a session the agent starts, such as `--allowedTools`, are not covered here, and they never clear a hard stop.
+- Editing the agent's own permission settings, or adding allow rules, `autoMode` entries or Codex allow rules to any saved settings or rules file (user, project, local or managed settings, a Codex rules file, or a reusable `--settings` file, meaning one kept for more than one launch rather than written for a single session and discarded). Per-launch options for a session the agent starts, such as `--allowedTools`, are not covered here, and they never clear a hard stop.
 - Anything the host hard-denies.
 - Anything that means acting as the owner.
 - Anything else in the global safety floor.
@@ -34,7 +34,7 @@ A hard stop is never offered, never honoured from the ledger, and only explained
 
 Read the standing-permission ledger before asking. An entry covers the step only when all of these hold:
 
-- its `decision` is `standing` and its `status` is `active`;
+- its `decision` is `standing`, its `status` is `active` and its `revoked_at` is empty (an entry with `revoked_at` set is never honoured, whatever its status);
 - today is not after its `review_by` date;
 - its machine, project or repository, folder or script, and action match the step exactly;
 - its `answer_ref` is not empty and leads to the owner's own answer (a decision card the owner answered, or a message the owner wrote), which you can open and which names the same scope;
