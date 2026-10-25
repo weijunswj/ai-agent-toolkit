@@ -3,6 +3,7 @@
   "skills": [
     "skills/codex-ssh-hostinger-coolify-setup-maintainer",
     "skills/controller-bootstrap",
+    "skills/external-operation-preflight",
     "skills/frontend-art-direction",
     "skills/github-program-reconciler",
     "skills/local-ai-safety",
@@ -19,13 +20,13 @@
     "skills/toolkit-setup",
     "skills/windows-local-dev-services"
   ],
-  "skill_count": 17,
+  "skill_count": 18,
   "pack_manifests": [],
   "project_tree_present": false,
   "native_plugins": {
     "codex": {
       "name": "ai-agent-toolkit",
-      "version": "3.11.1",
+      "version": "3.12.1",
       "required_files": [
         {
           "path": ".codex-plugin/plugin.json",
@@ -47,7 +48,7 @@
     },
     "claude": {
       "name": "ai-agent-toolkit",
-      "version": "3.11.1",
+      "version": "3.12.1",
       "required_files": [
         {
           "path": ".claude-plugin/plugin.json",
