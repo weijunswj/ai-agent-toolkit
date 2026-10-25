@@ -35,6 +35,7 @@ ${extra}`;
 function fixture(files) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ci-checkup-'));
   for (const [rel, text] of Object.entries(files)) {
+    if (text === undefined) continue;
     fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
     fs.writeFileSync(path.join(dir, rel), text);
   }
@@ -241,4 +242,71 @@ test('this repository: no gap in parts, tests or workflow hygiene', () => {
   const items = checkup.checkup(REPO_ROOT, { github: false }).items;
   const noisy = items.filter((entry) => entry.level === 'GAP' && /^(parts|tests|hygiene)\./.test(entry.check));
   assert.deepEqual(noisy, []);
+});
+
+// Rules tightened after measuring the check-up on two other governed repositories.
+
+test('hygiene: shell: bash runs with -e and is not masked; the shell test builtin is not a test step', () => {
+  const workflow = WORKFLOW('pytest').replace('      - name: Test', `      - name: Assert head
+        shell: bash
+        run: test "$A" = "$B"
+      - name: Quiet assert
+        shell: bash {0}
+        run: test "$A" = "$B"
+      - name: Test`);
+  const items = hits(report({ '.github/workflows/ci.yml': workflow }), 'hygiene.masked');
+  assert.deepEqual(items.map((e) => [e.level, e.path]), [['CHECK', '.github/workflows/ci.yml:16']]);
+});
+
+test('hygiene: path filters are not raised when the required checks are known and none is in that workflow', () => {
+  const workflow = checkup.parseWorkflow('.github/workflows/ci.yml', WORKFLOW('pytest').replace('  pull_request:\n', "  pull_request:\n    paths: ['src/**']\n"));
+  assert.equal(hits(checkup.checkHygiene([], [workflow], '.', null), 'hygiene.paths').length, 1, 'unknown required checks: raised');
+  assert.equal(hits(checkup.checkHygiene([], [workflow], '.', ['scan-pr-commits']), 'hygiene.paths').length, 0);
+  assert.equal(hits(checkup.checkHygiene([], [workflow], '.', ['test']), 'hygiene.paths').length, 1);
+});
+
+test('tests: test_*.js is a test file, and a runner given a target reaches only that target', () => {
+  const items = report({
+    'tests/test_core.py': '',
+    'monitor/test_monitor.py': '',
+    'monitor/test_code.js': '',
+    '.github/workflows/ci.yml': WORKFLOW('python -m unittest discover -s tests'),
+  });
+  assert.deepEqual(hits(items, 'tests.unreached').map((e) => e.path).sort(), ['monitor/test_code.js', 'monitor/test_monitor.py']);
+  assert.deepEqual(hits(items, 'scripts.untested'), [], 'a test file is never an untested script');
+});
+
+test('scripts: CI-run scripts, thin __main__ wrappers, bare imports and tests named after a script all count', () => {
+  const items = report({
+    'scripts/validate_rules.py': '',
+    'scripts/verify_hosted_validation.py': '',
+    'scripts/deploy_template.py': '',
+    'webapp/internal_auth.py': '',
+    'pkg/app/__main__.py': 'from app.cli import main\nraise SystemExit(main())\n',
+    'pkg/app/cli.py': '',
+    'scripts/lonely_helper.py': '',
+    'tests/test_hosted_validation_verifier.py': '',
+    'tests/test_internal_auth.py': '',
+    'tests/test_webapp.py': 'import sys\nsys.path.insert(0, "scripts")\nfrom deploy_template import render\n',
+    'tests/test_cli.py': 'subprocess.run([sys.executable, "-m", "app"])\nfrom app import cli\n',
+    '.github/workflows/ci.yml': WORKFLOW('|\n          pytest tests\n          python scripts/validate_rules.py'),
+  });
+  assert.deepEqual(hits(items, 'scripts.untested').map((e) => e.path), ['scripts/lonely_helper.py']);
+});
+
+test('status: a lone docs file named like a CI/CD status document is used when the default is missing', () => {
+  const items = report({ '.github/workflows/ci.yml': WORKFLOW('echo ok'), 'docs/ci-cd/CURRENT_CICD_STATUS.md': undefined, 'docs/current-cicd-status.md': STATUS('ci.yml') });
+  assert.deepEqual(hits(items, 'status.doc'), []);
+});
+
+test('speed: a long job with no matrix is raised from measured times, whatever command it runs', () => {
+  const dir = fixture({
+    '.github/workflows/ci.yml': WORKFLOW('python tests/_run_ci_full_suite.py').replace('  test:\n', '  full-regression:\n'),
+    'docs/ci-cd/CURRENT_CICD_STATUS.md': STATUS('ci.yml'),
+  });
+  try {
+    const times = new Map([['CI / full-regression', 1491], ['CI / other', 900]]);
+    const items = hits(checkup.checkup(dir, { github: false, jobTimes: times }).items, 'speed.jobs');
+    assert.deepEqual(items.map((e) => e.message), ['job full-regression took up to 1491 s with no sharding or matrix']);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

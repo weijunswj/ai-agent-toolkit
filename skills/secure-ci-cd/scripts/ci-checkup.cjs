@@ -13,6 +13,7 @@
 //   --runs       how many recent green default-branch runs to read job times from (default 5)
 //   --no-github  skip the GitHub run listing; speed rows say "not checked"
 //   --json       machine-readable report
+// Tests may pass `jobTimes` (a Map of "workflow / job" to seconds) to checkup() instead of gh.
 // Settings: <repo>/.github/ci-checkup.json (optional), schema ci-checkup/v1:
 //   { "schema": "ci-checkup/v1",
 //     "status_doc": "docs/ci-cd/CURRENT_CICD_STATUS.md",
@@ -37,7 +38,7 @@ const MIN_REASON = 12;
 const SKIP_DIRS = new Set(['.git', 'node_modules', '.tmp', 'dist', 'build', 'vendor', '.venv', 'venv', '__pycache__', 'target', 'coverage', '.next', '.cache']);
 const SCRIPT_EXT = /\.(cjs|js|mjs|ts|py|sh|ps1)$/;
 const CODE_EXT = /\.(cjs|js|mjs|ts|tsx|jsx|py|go|rs|sh|ps1|rb|java|kt|php|cs)$/;
-const TEST_NAME = /(\.(test|spec)\.[A-Za-z0-9]+$)|(^test_[^/]*\.py$)|(_test\.(py|go)$)/;
+const TEST_NAME = /(\.(test|spec)\.[A-Za-z0-9]+$)|(^test_[^/]*\.(py|[cm]?js|ts)$)|(_test\.(py|go|[cm]?js|ts)$)/;
 // Vendored, example and fixture code is not the repository's own to test.
 const NOT_OWN_CODE = /(^|\/)(third[-_]party|examples?|fixtures?|__fixtures__)\//;
 const TEST_DIR_NAMES = new Set(['test', 'tests', '__tests__', 'spec']);
@@ -228,6 +229,7 @@ function parseWorkflow(rel, text) {
   const workflow = {
     rel,
     text,
+    name: unquote((top.find((entry) => entry.key === 'name') || { value: '' }).value),
     permissions: top.some((entry) => entry.key === 'permissions'),
     prPathFilters: Boolean(prBlock && /\n\s+paths(-ignore)?:/.test(prBlock[0])),
     dir: defaultsDir(lines, 0, lines.length, 0),
@@ -244,6 +246,7 @@ function parseWorkflow(rel, text) {
     const body = lines.slice(job.line, end).join('\n');
     workflow.jobs.push({
       id: job.key,
+      name: unquote((keys.find((entry) => entry.key === 'name') || { value: '' }).value),
       line: job.line + 1,
       permissions: keys.some((entry) => entry.key === 'permissions'),
       continueOnError: keys.some((entry) => entry.key === 'continue-on-error' && !/^false$/i.test(unquote(entry.value))),
@@ -332,10 +335,28 @@ function importsOf(files, rel, text) {
       // `from pkg import a, b` may name modules pkg/a.py and pkg/b.py as well as names in pkg.
       const names = match[1] !== undefined ? match[2].split(',').map((n) => n.trim().split(/\s+/)[0]).filter(Boolean) : [];
       const mods = [mod, ...names.map((n) => (mod ? `${mod}/${n}` : n))].filter(Boolean);
-      for (const dir of [here, parent, `${parent}/src`, `${parent}/scripts`, `${parent}/lib`, '', 'src']) {
+      for (const dir of [here, parent, path.posix.join(parent, 'src'), path.posix.join(parent, 'scripts'), path.posix.join(parent, 'lib'), '', 'src']) {
         for (const m of mods) for (const cand of [`${m}.py`, `${m}/__init__.py`]) { const full = norm(path.posix.join(dir, cand)); if (files.has(full)) out.push(full); }
       }
+      // A bare top-level name (a test that puts a script folder on sys.path) matches that file
+      // anywhere, when only one file has the name.
+      if (mod && !mod.includes('/')) {
+        const hits = [...files].filter((file) => file.endsWith(`/${mod}.py`) || file === `${mod}.py`);
+        if (hits.length === 1) out.push(hits[0]);
+      }
     }
+  }
+  return out;
+}
+
+// `python -m pkg.mod` runs pkg/mod/__main__.py or pkg/mod.py, wherever the package sits.
+function moduleRuns(files, text) {
+  const out = [];
+  const re = /(?:-m\s+|['"]-m['"]\s*,\s*['"])([A-Za-z_][\w.]*)/g;
+  let match;
+  while ((match = re.exec(text))) {
+    const mod = match[1].replace(/\./g, '/');
+    for (const file of files) if (file === `${mod}.py` || file.endsWith(`/${mod}.py`) || file === `${mod}/__main__.py` || file.endsWith(`/${mod}/__main__.py`)) out.push(file);
   }
   return out;
 }
@@ -372,8 +393,8 @@ function reachAnalysis(root, fileList, workflows) {
   const pkgFor = (dir) => { for (let d = dir; ; d = norm(path.posix.dirname(d))) { if (packages.has(d)) return d; if (!d) return null; } };
 
   const visitCommand = (cmd, dir, depth) => {
-    texts.push({ text: cmd, dir });
-    for (const rel of fileTokens(files, cmd, [dir, ''])) addFile(rel);
+    texts.push({ text: cmd, dir, command: true });
+    for (const rel of [...fileTokens(files, cmd, [dir, '']), ...moduleRuns(files, cmd)]) addFile(rel);
     if (depth > 6) return;
     for (const call of packageInvocations(cmd)) {
       const targets = call.all ? [...packages.keys()] : [call.dir !== null ? norm(path.posix.join(dir, call.dir)) : pkgFor(dir)].filter((d) => d !== null && packages.has(d));
@@ -434,16 +455,37 @@ function langOf(rel) {
 // A path is reached when a reached text names it or one of its folders (relative to the repo or
 // to the folder the text runs in), or when a test runner for its language runs from a folder
 // above it.
+// The folders a test runner command covers: its targets (paths, `discover -s <dir>`, or dotted
+// module names) when it names any that exist, else the folder it runs in.
+function runnerDirs(files, cmd, dir) {
+  const dirs = new Set();
+  for (const file of files) for (let d = norm(path.posix.dirname(file)); d && !dirs.has(d); d = norm(path.posix.dirname(d))) dirs.add(d);
+  const targets = [];
+  const words = cmd.split(/\s+/).map(unquote).filter(Boolean);
+  for (let i = 0; i < words.length; i++) {
+    const word = words[i];
+    if (word.startsWith('-')) { if (['-s', '--start-directory', '-t', '--top-level-directory', '--rootdir'].includes(word) && words[i + 1]) targets.push(words[++i]); continue; }
+    for (const cand of [word, word.replace(/\./g, '/'), `${word.replace(/\./g, '/')}.py`]) {
+      const rel = norm(path.posix.join(dir, cand.replace(/\\/g, '/')));
+      if (rel && (files.has(rel) || dirs.has(rel))) { targets.push(cand); break; }
+    }
+  }
+  return targets.length ? targets.map((t) => norm(path.posix.join(dir, t.replace(/\\/g, '/')))) : [dir];
+}
+
 function makeReachTest(analysis) {
   const named = new Set();
   const runnersAt = { js: [], py: [], go: [], rs: [] };
-  for (const { text, dir } of analysis.texts) {
+  for (const { text, dir, command } of analysis.texts) {
     for (const token of tokens(text)) {
       const clean = token.replace(/\\/g, '/').replace(/\/\*\*?.*$/, '');
       named.add(norm(clean));
       named.add(norm(path.posix.join(dir, clean)));
     }
-    for (const [lang, re] of Object.entries(RUNNERS)) if (re.test(text)) runnersAt[lang].push(dir);
+    // A runner covers a whole folder only as a command (a workflow step or package script) with no
+    // explicit targets; a runner named inside a script file, or given targets, covers only what the
+    // targets and named paths reach.
+    if (command) for (const [lang, re] of Object.entries(RUNNERS)) if (re.test(text)) runnersAt[lang].push(...runnerDirs(analysis.files, text, dir));
   }
   named.delete('');
   return (rel) => {
@@ -519,10 +561,21 @@ function checkScripts(root, fileList, analysis) {
   const tests = fileList.filter((rel) => isTestFile(rel) || (testDirOf(rel) && CODE_EXT.test(rel)));
   const testText = tests.map((rel) => readText(root, rel) || '').join('\n');
   const covered = new Set();
+  const testNames = tests.map((rel) => path.posix.basename(rel).toLowerCase().replace(/[-.]/g, '_'));
   for (const rel of scripts) {
     const base = path.posix.basename(rel);
     if (testText.includes(rel) || testText.includes(base)) covered.add(rel);
+    // A test named after the script (test_auth.py for auth.py, or test_x_verifier.py for
+    // verify_x.py) covers it.
+    const stem = base.replace(/\.[^.]+$/, '').toLowerCase().replace(/[-.]/g, '_').replace(/^(verify|validate|check|run)_/, '');
+    if (stem.length >= 6 && stem !== 'main' && testNames.some((name) => name.includes(stem))) covered.add(rel);
+    // A script CI runs directly, or a package script names, is a check or entry point in its own right.
+    if (analysis.reached.has(rel)) covered.add(rel);
+    // A thin `python -m` entry point is covered through the package it calls.
+    if (base === '__main__.py' && (readText(root, rel) || '').split('\n').filter((line) => line.trim() && !line.trim().startsWith('#')).length <= 30) covered.add(rel);
   }
+  for (const [pkgDir, pkgScripts] of analysis.packages) for (const script of Object.values(pkgScripts)) if (typeof script === 'string') for (const rel of fileTokens(files, script, [pkgDir, ''])) covered.add(rel);
+  for (const rel of moduleRuns(files, testText)) covered.add(rel);
   // Package scripts that tests call by name cover the files they run.
   for (const [pkgDir, pkgScripts] of analysis.packages) {
     for (const [name, script] of Object.entries(pkgScripts)) {
@@ -567,6 +620,20 @@ function jobTimes(root, runs, gh) {
   return jobs;
 }
 
+// Required status checks on the default branch, read-only through gh; null when unknown.
+function requiredCheckNames(root, gh) {
+  if (!run(gh, ['auth', 'status'], root).ok) return null;
+  const repo = ghJson(root, ['repo', 'view', '--json', 'nameWithOwner,defaultBranchRef'], gh);
+  if (!repo || !repo.defaultBranchRef) return null;
+  const rules = ghJson(root, ['api', `repos/${repo.nameWithOwner}/rules/branches/${repo.defaultBranchRef.name}`], gh);
+  if (!Array.isArray(rules)) return null;
+  const names = [];
+  for (const rule of rules) if (rule.type === 'required_status_checks') for (const check of (rule.parameters && rule.parameters.required_status_checks) || []) names.push(check.context);
+  const protection = ghJson(root, ['api', `repos/${repo.nameWithOwner}/branches/${repo.defaultBranchRef.name}/protection/required_status_checks`], gh);
+  if (protection && Array.isArray(protection.contexts)) names.push(...protection.contexts);
+  return names;
+}
+
 function checkSpeed(root, fileList, workflows, analysis, settings, options) {
   const items = [];
   const ciText = analysis.texts.map((t) => t.text).join('\n');
@@ -585,12 +652,7 @@ function checkSpeed(root, fileList, workflows, analysis, settings, options) {
   } else if (!budgets.job_seconds) {
     items.push(item('CHECK', 'speed.budget', SETTINGS_REL, 'no CI job-time budget is declared', `measure the job times, then set budgets.job_seconds in ${SETTINGS_REL}`));
   }
-  const testJobs = [];
-  for (const workflow of workflows) for (const job of workflow.jobs) {
-    const text = job.steps.map((s) => s.run || '').join('\n');
-    if (Object.values(RUNNERS).some((re) => re.test(text)) || /\b(npm|pnpm|yarn|bun)\s+(run\s+)?t(est)?\b/.test(text) || /run-tests/.test(text)) testJobs.push({ workflow, job });
-  }
-  const times = options.github ? jobTimes(root, options.runs, options.gh) : null;
+  const times = options.jobTimes || (options.github ? jobTimes(root, options.runs, options.gh) : null);
   if (!times) {
     items.push(item('CHECK', 'speed.jobs', '', 'job times not checked (no GitHub access)', 'run again with a working gh login to compare job times with budgets'));
     return items;
@@ -598,16 +660,20 @@ function checkSpeed(root, fileList, workflows, analysis, settings, options) {
   for (const [name, seconds] of times) {
     if (budgets.job_seconds && seconds > budgets.job_seconds) items.push(item('GAP', 'speed.jobs', '', `${name} took ${Math.round(seconds)} s, over the ${budgets.job_seconds} s budget`, 'make the slow files fast or shard the job (fast-tests-and-sharding playbook)'));
   }
-  for (const { workflow, job } of testJobs) {
-    if (job.matrix) continue;
-    for (const [name, seconds] of times) {
-      if (name.endsWith(`/ ${job.id}`) && seconds > budgets.unsharded_test_job_seconds) items.push(item('CHECK', 'speed.jobs', workflow.rel, `test job ${job.id} took ${Math.round(seconds)} s with no sharding`, 'shard it from one manifest once measured (fast-tests-and-sharding playbook)'));
+  // Long jobs come from the measured times, whatever command they run.
+  for (const [name, seconds] of times) {
+    if (seconds <= budgets.unsharded_test_job_seconds) continue;
+    const [workflowName, jobName] = name.split(' / ');
+    const plain = (jobName || '').replace(/\s+\(.*\)$/, '');
+    for (const workflow of workflows.filter((w) => (w.name || path.posix.basename(w.rel)) === workflowName || w.rel === workflowName)) {
+      const job = workflow.jobs.find((j) => j.id === plain || j.name === plain);
+      if (job && !job.matrix) items.push(item('CHECK', 'speed.jobs', workflow.rel, `job ${jobName} took up to ${Math.round(seconds)} s with no sharding or matrix`, 'measure its slowest files, make them fast, then shard it from one manifest (fast-tests-and-sharding playbook)'));
     }
   }
   return items;
 }
 
-function checkHygiene(fileList, workflows, root) {
+function checkHygiene(fileList, workflows, root, requiredChecks = null) {
   const items = [];
   for (const workflow of workflows) {
     const lines = workflow.text.split('\n');
@@ -621,17 +687,21 @@ function checkHygiene(fileList, workflows, root) {
     });
     if (!workflow.permissions && workflow.jobs.some((job) => !job.permissions)) items.push(item('GAP', 'hygiene.permissions', workflow.rel, 'no top-level permissions block, so jobs get the repository default token scope', 'add permissions: contents: read at the top and widen per job only where needed'));
     for (const job of workflow.jobs) {
-      const testy = (text) => Object.values(RUNNERS).some((re) => re.test(text)) || /\b(npm|pnpm|yarn|bun)\s+(run\s+)?t(est)?\b|run-tests|\btest\b/i.test(text);
-      if (job.continueOnError) items.push(item(testy(job.steps.map((s) => `${s.name || ''} ${s.run || ''}`).join('\n')) ? 'GAP' : 'CHECK', 'hygiene.masked', `${workflow.rel}:${job.line}`, `job ${job.id} has continue-on-error, so its failure never fails the run`, 'remove continue-on-error, or move the job out of the required set with a recorded reason'));
+      // A step runs tests when its command starts a runner or a package test script, or its name
+      // says so; the shell `test` builtin alone does not count.
+      const testy = (run, name = '') => Object.values(RUNNERS).some((re) => re.test(run)) || /\b(npm|pnpm|yarn|bun)\s+(run\s+)?t(est)?\b|run[-_]tests|unittest/i.test(run) || /\btests?\b/i.test(name);
+      if (job.continueOnError) items.push(item(job.steps.some((s) => testy(s.run || '', s.name)) || testy('', job.name || job.id) ? 'GAP' : 'CHECK', 'hygiene.masked', `${workflow.rel}:${job.line}`, `job ${job.id} has continue-on-error, so its failure never fails the run`, 'remove continue-on-error, or move the job out of the required set with a recorded reason'));
       for (const step of job.steps) {
-        const label = `${step.name || ''} ${step.run || ''}`;
         const masked = (step['continue-on-error'] && !/^false$/i.test(unquote(step['continue-on-error'])))
           || /\|\|\s*(true|:|exit\s+0|echo\b)|\bset\s+\+e\b|;\s*exit\s+0\b/.test(step.run || '')
-          || (step.shell && !/-e\b|pwsh|powershell|python|cmd/.test(step.shell));
-        if (masked) items.push(item(testy(label) ? 'GAP' : 'CHECK', 'hygiene.masked', `${workflow.rel}:${step.line}`, `step "${(step.name || step.run || '').split('\n')[0].trim()}" can hide a failing command (continue-on-error, || true, set +e or a shell without -e)`, 'let the command fail the step; handle an expected failure explicitly instead'));
+          // `shell: bash` and `sh` get -e from GitHub; only a custom template such as `bash {0}`
+          // without -e drops it.
+          || (step.shell && /\{0\}/.test(step.shell) && /^\s*(ba)?sh\b/.test(step.shell) && !/\s-[a-z]*e/.test(step.shell));
+        if (masked) items.push(item(testy(step.run || '', step.name) ? 'GAP' : 'CHECK', 'hygiene.masked', `${workflow.rel}:${step.line}`, `step "${(step.name || step.run || '').split('\n')[0].trim()}" can hide a failing command (continue-on-error, || true, set +e or a shell without -e)`, 'let the command fail the step; handle an expected failure explicitly instead'));
       }
     }
-    if (workflow.prPathFilters) items.push(item('CHECK', 'hygiene.paths', workflow.rel, 'the pull request trigger has path filters; if any job here is a required check, PRs that skip it wait on "Pending" forever', 'drop the path filter from required workflows, or keep it only on workflows that are not required'));
+    const required = requiredChecks === null ? null : workflow.jobs.some((job) => requiredChecks.some((name) => [job.id, job.name].includes(name.replace(/\s+\(.*\)$/, ''))));
+    if (workflow.prPathFilters && required !== false) items.push(item('CHECK', 'hygiene.paths', workflow.rel, 'the pull request trigger has path filters; if any job here is a required check, PRs that skip it wait on "Pending" forever', 'drop the path filter from required workflows, or keep it only on workflows that are not required'));
   }
   if (workflows.some((w) => /^\s*(?:-\s+)?uses:\s*['"]?[\w.-]+\//m.test(w.text))) {
     const dependabot = fileList.find((rel) => /^\.github\/dependabot\.ya?ml$/.test(rel));
@@ -642,7 +712,9 @@ function checkHygiene(fileList, workflows, root) {
 
 function checkStatusDoc(root, fileList, workflows, settings) {
   if (!workflows.length) return [];
-  const rel = settings.status_doc || DEFAULT_STATUS_DOC;
+  // Without a setting, use the default path, else the one docs file named like a CI/CD status document.
+  const found = fileList.filter((file) => /(^|\/)[^/]*ci[-_]?cd[-_]?status[^/]*\.md$/i.test(file));
+  const rel = settings.status_doc || (fileList.includes(DEFAULT_STATUS_DOC) || found.length !== 1 ? DEFAULT_STATUS_DOC : found[0]);
   const text = readText(root, rel);
   if (text === null) return [item('GAP', 'status.doc', rel, 'no CI status document', `create it from the secure-ci-cd status template, or name the existing one as status_doc in ${SETTINGS_REL}`)];
   const items = [];
@@ -688,7 +760,7 @@ function checkup(root, options = {}) {
     ...checkTests(fileList, reachable),
     ...checkScripts(root, fileList, analysis),
     ...checkSpeed(root, fileList, workflows, analysis, settings, opts),
-    ...checkHygiene(fileList, workflows, root),
+    ...checkHygiene(fileList, workflows, root, opts.github ? requiredCheckNames(root, opts.gh) : null),
     ...checkStatusDoc(root, fileList, workflows, settings),
   ];
   const ignored = items.filter((entry) => ignoredBy(entry, settings.ignore));
@@ -738,7 +810,7 @@ function parseArgs(argv) {
 function main(argv) {
   try {
     const options = parseArgs(argv);
-    if (options.help) { process.stdout.write(`${fs.readFileSync(__filename, 'utf8').split('\n').slice(3, 21).map((l) => l.replace(/^\/\/ ?/, '')).join('\n')}\n`); return 0; }
+    if (options.help) { process.stdout.write(`${fs.readFileSync(__filename, 'utf8').split('\n').slice(3, 22).map((l) => l.replace(/^\/\/ ?/, '')).join('\n')}\n`); return 0; }
     if (!fs.existsSync(options.repo) || !fs.statSync(options.repo).isDirectory()) throw new UsageError(`--repo ${options.repo} is not a folder`);
     const report = checkup(options.repo, options);
     process.stdout.write(options.json ? `${JSON.stringify(report, null, 2)}\n` : `${formatReport(report)}\n`);
@@ -752,4 +824,4 @@ function main(argv) {
 
 if (require.main === module) process.exitCode = main(process.argv.slice(2));
 
-module.exports = Object.freeze({ CHECKS, SETTINGS_REL, checkup, formatReport, main, packageInvocations, parseWorkflow });
+module.exports = Object.freeze({ CHECKS, SETTINGS_REL, checkHygiene, checkup, formatReport, main, packageInvocations, parseWorkflow });
