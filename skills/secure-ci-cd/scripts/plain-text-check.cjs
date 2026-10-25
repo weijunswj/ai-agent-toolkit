@@ -14,9 +14,9 @@
 //
 // A repository may switch the check off only with a recorded reason (`off_reason` in its settings).
 // Narrower exemptions are reviewed in the diff: `kept_terms` (a text kept in one file or folder, with
-// a reason) and a line marker `plain-text: allow <reason>` for one line that is not a reference
-// (in Markdown, inside an HTML comment: `<!-- plain-text: allow a colour value -->`). Links to one
-// issue or pull request are reported even on a marked line.
+// a reason) and a line marker `plain-text: allow <reason>` for a `#number` on one line that is not a
+// reference (in Markdown, inside an HTML comment: `<!-- plain-text: allow a colour value -->`). The
+// marker hides nothing else: links, "PR 12" labels and banned terms are still reported on that line.
 //
 // Usage: node plain-text-check.cjs [--repo <dir>] [--config <file>] [--files <path>...]
 //          [--init-baseline] [--prune-baseline] [--explain]
@@ -62,8 +62,8 @@ const REFERENCE_RULES = Object.freeze([
   },
   {
     id: 'number-reference',
-    // Not a same-file link to a numbered heading such as (#1-install).
-    pattern: /(?<![\w&/#-])#\d{1,5}(?!\w|-[a-z])/g,
+    // Not a whole same-file link target to a numbered heading such as (#1-install).
+    pattern: /(?<![\w&/#-])#\d{1,5}(?!\w)(?!(?<=\(#\d{1,5})-[a-z][a-z0-9-]*\))/g,
     fix: 'replace the #number with what it refers to, in plain English (if it is not a reference, mark the line `plain-text: allow <reason>`)'
   },
   {
@@ -84,8 +84,8 @@ class CheckError extends Error {
 
 const slash = (value) => value.split(path.sep).join('/');
 const normalise = (text) => text.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
-// One line opted out, with a real reason (three words or ten characters): `plain-text: allow <reason>`.
-// A link to one issue or pull request is always a reference, so it is reported even on a marked line.
+// A `#number` on one line opted out, with a real reason (three words or ten characters):
+// `plain-text: allow <reason>`. Every other rule still applies on a marked line.
 const ALLOW_MARKER = /plain-text:\s*allow\s+(.*?)\s*(?:-->|$)/;
 function allowedLine(line) {
   const marker = ALLOW_MARKER.exec(line);
@@ -206,14 +206,13 @@ function findInText(text, file, config, scope = 'text') {
     if (scope === 'fields' && !FIELD_LINE.test(line)) return;
     const allowed = allowedLine(line);
     for (const rule of rules) {
-      if (allowed && rule.id !== 'github-link') continue;
+      if (allowed && rule.id === 'number-reference') continue;
       for (const match of line.matchAll(rule.pattern)) {
         if (kept.has(match[0])) continue;
         findings.push({ file, line: index + 1, rule: rule.id, text: match[0] });
       }
     }
     for (const { entry, pattern } of terms) {
-      if (allowed) continue;
       for (const match of line.matchAll(pattern)) {
         if (explained.has(match[0]) || kept.has(match[0])) continue;
         findings.push({ file, line: index + 1, rule: 'banned-term', text: match[0], term: entry.term });
@@ -332,7 +331,7 @@ function explain(config) {
   for (const entry of config.banned_terms) lines.push(`  ${entry.term}: ${entry.reason}. Instead: ${entry.fix}`);
   for (const entry of config.explained_terms) lines.push(`  allowed once explained in the same file: ${entry.term} (${entry.reason})`);
   for (const entry of config.kept_terms) lines.push(`  kept in ${entry.file}: ${entry.text} (${entry.reason})`);
-  lines.push('A single line is skipped, except for links to one issue or pull request, when it carries `plain-text: allow <reason>` (three words or ten characters).');
+  lines.push('A `#number` on one line passes when the line carries `plain-text: allow <reason>` (three words or ten characters); every other rule still applies there.');
   lines.push(`Checked: ${config.text_extensions.join(', ') || 'no'} files in full${config.field_extensions.length ? `; names, titles and descriptions in ${config.field_extensions.join(', ')} files` : ''}.`);
   lines.push(`Not checked: ${config.exclude.join(', ') || 'nothing excluded'}.`);
   return lines.join('\n');

@@ -7,6 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const plain = require('../scripts/check-plain-references.cjs');
+const check = require('../../skills/secure-ci-cd/scripts/plain-text-check.cjs');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const SCRIPT = path.join(ROOT, 'repo', 'scripts', 'check-plain-references.cjs');
@@ -51,7 +52,8 @@ test('flags number references and pull request labels, not entities, anchors or 
   assert.deepEqual(rules('Two issues to fix, PR checks, version 3.9.1.'), []);
   assert.deepEqual(rules(`See [setup](${HASH}1-install) and [the list](${HASH}12-steps).`), []);
   for (const line of [`Background: the design came from ${HASH}461.`, `Fill in the form described in ${HASH}613.`,
-    `The CSS refactor landed in ${HASH}1234.`, `Fixed in ${HASH}12-15.`, `Use colour ${HASH}333 for the border.`]) {
+    `The CSS refactor landed in ${HASH}1234.`, `Fixed in ${HASH}12-15.`, `Use colour ${HASH}333 for the border.`,
+    `Covers ${HASH}461-and-later.`, `The ${HASH}600-series fixes.`, `See ${HASH}461-era notes.`, `Old link (${HASH}461-era notes) here.`]) {
     assert.equal(rules(line).filter(([rule]) => rule === 'number-reference').length, 1, line);
   }
   assert.deepEqual(rules(`Use colour ${HASH}333 here <!-- plain-text: allow a colour value -->`), []);
@@ -59,8 +61,11 @@ test('flags number references and pull request labels, not entities, anchors or 
   for (const reason of ['', 'x', 'ok fine']) {
     assert.deepEqual(rules(`Odd ${HASH}42 here <!-- plain-text: allow ${reason} -->`), [['number-reference', `${HASH}42`]], `reason "${reason}" is too thin`);
   }
-  assert.deepEqual(rules(`Shipped in ${GITHUB}/pull/9 and ${HASH}461 <!-- plain-text: allow a score, not a reference -->`),
-    [['github-link', `${GITHUB}/pull/9`]], 'a link to one pull request is reported even on a marked line');
+  assert.deepEqual(rules(`Shipped in ${GITHUB}/pull/9 and PR 600 and ${HASH}461 <!-- plain-text: allow a score, not a reference -->`),
+    [['github-link', `${GITHUB}/pull/9`], ['pr-number-label', 'PR 600']], 'the marker hides only the #number');
+  const codes = check.resolveConfig({ banned_terms: [{ term: 'Q#', reason: 'a lane code', fix: 'say what the work is' }] });
+  assert.deepEqual(check.findInText('The Q5 lane <!-- plain-text: allow a score, not a reference -->', 'a.md', codes).map(f => f.text), ['Q5'],
+    'banned terms are still reported on a marked line');
 });
 
 test('allows links to open a new issue and to issue or pull request lists', () => {
