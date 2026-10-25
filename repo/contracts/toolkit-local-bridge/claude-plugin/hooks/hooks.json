@@ -57,6 +57,15 @@
             "onFailure": "block"
           }
         ]
+      },
+      {
+        "matcher": "^mcp__hearthbot__(?:post_message|edit_message)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-claude-project-post-hook.cjs\""
+          }
+        ]
       }
     ],
     "Stop": [

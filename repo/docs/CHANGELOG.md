@@ -1,10 +1,11 @@
 # Toolkit Changelog
 
-## Unreleased
+## 3.13.3
 
 ### Projects skill
 
-- **Pending lists name every owner-hands step:** whenever the coordinator tells the owner what waits on them, it lists every step only the owner can do, optional ones and ones posted only inside a thread included, each with its link. The hourly nudge's **Waiting on owner:** list now carries those steps too, so its live task prompt is swapped after merge. The Claude Projects controller skill is 2026-10-25.7 (re-upload it).
+- **Pending lists name every owner-hands step:** whenever the coordinator tells the owner what waits on them, it lists every step only the owner can do, optional ones and ones posted only inside a thread included, each with its link. The hourly nudge's **Waiting on owner:** list now carries those steps too, so its live task prompt is swapped after merge. The Claude Projects controller skill is 2026-10-25.8 (re-upload it).
+- **Running post and links enforced:** a new Toolkit hook runs before every Claude Projects post, in the coordinator and in work threads. It refuses a fresh post while the owner has not written since that session's newest post (unless that post nears 8 KB) and tells it to edit that post instead, and it refuses any post that names "PR <n>" without a link. It reads the session's own transcript, so the rule survives a context reset. Replies under a post and decision cards are not affected, and local or command-line sessions never see it. The skill now also has the coordinator keep its running post id as the first memory line, and links every PR, thread, file or artifact it names: a PR's changed files only once it is ready for the owner to check and merge, otherwise the chat thread that owns it. Briefs tell work threads to keep one running post with one-line updates. The hourly nudge flags back-to-back posts, a stale running post id and missing links.
 
 ## 3.13.2
 
