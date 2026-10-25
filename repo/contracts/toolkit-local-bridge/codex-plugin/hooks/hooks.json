@@ -43,7 +43,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "^(?:Bash|mcp__.*)$",
+        "matcher": "^(?:Bash|mcp__.*[Gg][Ii][Tt][Hh][Uu][Bb].*)$",
         "hooks": [
           {
             "type": "command",

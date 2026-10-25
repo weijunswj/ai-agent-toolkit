@@ -22,7 +22,9 @@ const temps = [];
 const tmp = () => { const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'programme-refresh-')); temps.push(dir); return dir; };
 test.after(() => { for (const dir of temps) fs.rmSync(dir, { recursive: true, force: true }); });
 
-function fixture({ held = true } = {}) {
+function fixture({ held = 'controller' } = {}) {
+  if (held === true) held = 'controller';
+  if (held === false) held = 'none';
   const repository = 'acme/app';
   const github = new FakeGitHub({ repository, store: 'acme/state-store' });
   const binding = {
@@ -34,8 +36,9 @@ function fixture({ held = true } = {}) {
   github.addIssue(423, { body: 'Body of 423' });
   const store = new state.StateStore({ transport: github, store: binding.store, now: () => new Date(github.clock).toISOString(), toolkitVersion: '3.9.0' });
   const parent = state.newParent({ repository, parentIssue: 421, outcomes });
-  store.write('parent', 421, held ? state.claimDocument(parent, controller, {}) : parent, { sha: null, previous: null });
-  const fx = { github, store, output: '', lockFile: path.join(tmp(), 'pass.lock') };
+  const holder = { controller, lane: { session: 'lane-session', prefix: 'LANE-X-' } }[held];
+  if (held !== 'missing') store.write('parent', 421, holder ? state.claimDocument(parent, holder, {}) : parent, { sha: null, previous: null });
+  const fx = { github, store, binding, output: '', lockFile: path.join(tmp(), 'pass.lock') };
   fx.run = (argv, extra = {}) => {
     fx.output = '';
     const deps = { transport: github, binding, originUrl: 'https://github.com/acme/app.git', repoRoot: tmp(), toolkitVersion: '3.9.0',
@@ -77,23 +80,139 @@ test('refresh refuses when no controller holds the parent', () => {
   assert.equal(fx.run(['refresh']).error.code, 'PARENT_UNHELD');
 });
 
-test('the pass lock: refresh skips and reconcile --apply refuses while another pass holds it; a stale lock is taken over', () => {
+// The output of one or more passes printed with --json, one JSON document each.
+const documents = text => text.split(/\n(?=\{)/).filter(Boolean).map(part => JSON.parse(part));
+
+test('while another live pass holds the lock, refresh queues one more pass and reconcile --apply refuses', () => {
   const fx = fixture();
-  const release = cli.takeLock(fx.lockFile);
-  assert.equal(typeof release, 'function');
-  const skipped = fx.run(['refresh']);
-  assert.deepEqual([skipped.code, skipped.result.outcome], [0, 'SKIPPED']);
+  const other = cli.takeLock(fx.lockFile);
+  assert.ok(other.token);
+  const queued = fx.run(['refresh']);
+  assert.deepEqual([queued.code, queued.result.outcome], [0, 'QUEUED']);
+  assert.match(queued.result.reason, /runs once more when it ends/);
+  assert.equal(fs.existsSync(cli.againFile(fx.lockFile)), true, 'the change is flagged for the running pass');
   assert.equal(fx.github.issues.get(423).body, 'Body of 423', 'nothing was written');
   assert.equal(fx.run(['reconcile', '--apply', '--controller', '--session', controller.session]).error.code, 'PASS_RUNNING');
   assert.equal(fx.run(['reconcile']).error, null, 'a dry run needs no lock');
-  release();
+  other.release();
   assert.equal(fs.existsSync(fx.lockFile), false);
-  assert.equal(fx.run(['refresh']).error, null);
-  assert.equal(fs.existsSync(fx.lockFile), false, 'released after the pass');
-  cli.takeLock(fx.lockFile);
-  assert.equal(cli.takeLock(fx.lockFile), null);
-  assert.equal(typeof cli.takeLock(fx.lockFile, Date.now() + cli.LOCK_STALE_MS + 1000), 'function', 'a lock from a dead pass is replaced');
 });
+
+test('a change that lands during a pass is picked up by one more pass before the lock is let go', () => {
+  const fx = fixture();
+  let injected = false;
+  // Mid-pass, after the pass has read #423: another session writes and its refresh finds the lock held.
+  fx.github.hooks.push(call => {
+    if (injected || call.method === 'GET' || !/issues\/423/.test(call.path)) return null;
+    injected = true;
+    fx.github.addComment(423, { body: 'A late comment' });
+    const late = fx.run(['refresh']);
+    assert.equal(late.result.outcome, 'QUEUED');
+    return null;
+  });
+  let output = '';
+  const deps = { transport: fx.github, binding: fx.binding, originUrl: 'https://github.com/acme/app.git', repoRoot: tmp(), toolkitVersion: '3.9.0', lockFile: fx.lockFile, environment: {}, stdout: { write: text => { output += text; } } };
+  assert.equal(cli.main(['refresh', '--json'], deps), 0);
+  assert.equal(injected, true);
+  const passes = documents(output);
+  assert.equal(passes.length, 2, 'the owner ran one more pass');
+  assert.equal(fs.existsSync(fx.lockFile), false, 'released');
+  assert.equal(fs.existsSync(cli.againFile(fx.lockFile)), false, 'flag cleared');
+  assert.equal(fx.run(['reconcile']).result.summary, 'No changes', 'the late write is on the pages');
+});
+
+test('a flag left between the last check and the release is still run', () => {
+  const fx = fixture();
+  fs.mkdirSync(path.dirname(fx.lockFile), { recursive: true });
+  fs.writeFileSync(cli.againFile(fx.lockFile), 'x');
+  fx.output = '';
+  const deps = { transport: fx.github, binding: fx.binding, originUrl: 'https://github.com/acme/app.git', repoRoot: tmp(), toolkitVersion: '3.9.0', lockFile: fx.lockFile, environment: {}, stdout: { write: text => { fx.output += text; } } };
+  assert.equal(cli.main(['refresh', '--json'], deps), 0);
+  assert.equal(documents(fx.output).length, 1, 'a flag set before the pass started is covered by that pass');
+  assert.equal(fs.existsSync(cli.againFile(fx.lockFile)), false);
+});
+
+test('the lock is never broken while its owner is alive and beating, and release removes only its own lock', () => {
+  const dir = tmp();
+  const file = path.join(dir, 'pass.lock');
+  const a = cli.takeLock(file);
+  assert.equal(cli.takeLock(file), null, 'held by a live owner');
+  const old = new Date(Date.now() - cli.LOCK_STALE_MS - 60000);
+  fs.utimesSync(file, old, old);
+  assert.equal(cli.takeLock(file, { pidAlive: () => true, nowMs: Date.now() - cli.LOCK_STALE_MS }), null, 'beaten recently enough');
+  a.beat();
+  assert.equal(cli.takeLock(file), null, 'a beat keeps it held');
+  // Someone else's lock now sits at the path: A's release leaves it alone.
+  const theirs = JSON.parse(fs.readFileSync(file, 'utf8'));
+  fs.writeFileSync(file, JSON.stringify({ ...theirs, token: 'someone-else' }));
+  a.release();
+  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).token, 'someone-else');
+  fs.unlinkSync(file);
+});
+
+// Closure matrix for the lock: what is at the path, its owner, its heartbeat, and the outcome.
+const LOCK_MATRIX = [
+  { name: 'nothing there', setup: () => {}, alive: true, taken: true },
+  { name: 'live owner, fresh beat', setup: f => writeLock(f, {}), alive: true, taken: false },
+  { name: 'live owner, beat a minute in the future', setup: f => writeLock(f, { beatMs: 60000 }), alive: true, taken: false },
+  { name: 'dead owner, fresh beat', setup: f => writeLock(f, {}), alive: false, taken: true },
+  { name: 'live owner, silent past the limit', setup: f => writeLock(f, { beatMs: -cli.LOCK_STALE_MS - 60000 }), alive: true, taken: true },
+  { name: 'live owner, beat far in the future (clock moved)', setup: f => writeLock(f, { beatMs: cli.LOCK_STALE_MS + 60000 }), alive: true, taken: true },
+  { name: 'owner on another host, fresh beat', setup: f => writeLock(f, { host: 'elsewhere' }), alive: false, taken: false },
+  { name: 'owner on another host, silent past the limit', setup: f => writeLock(f, { host: 'elsewhere', beatMs: -cli.LOCK_STALE_MS - 60000 }), alive: false, taken: true },
+  { name: 'unreadable file', setup: f => fs.writeFileSync(f, 'not json'), alive: true, taken: true },
+  { name: 'a directory', setup: f => fs.mkdirSync(f), alive: true, taken: true },
+];
+function writeLock(file, { host = os.hostname(), beatMs = 0 }) {
+  fs.writeFileSync(file, JSON.stringify({ schema: 'toolkit.programme-pass-lock.v1', token: 'other', pid: 424242, host, at: new Date().toISOString() }));
+  const at = new Date(Date.now() + beatMs);
+  fs.utimesSync(file, at, at);
+}
+for (const row of LOCK_MATRIX) {
+  test(`lock matrix: ${row.name}`, () => {
+    const file = path.join(tmp(), 'pass.lock');
+    row.setup(file);
+    const handle = cli.takeLock(file, { pidAlive: () => row.alive });
+    assert.equal(Boolean(handle), row.taken);
+    if (handle) {
+      assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).token, handle.token);
+      handle.release();
+      assert.deepEqual(fs.readdirSync(path.dirname(file)), [], 'nothing left beside the lock');
+    }
+  });
+}
+
+// Authority and closure matrix for the pass commands: who runs it, the parent's holder, and the lock.
+const PASS_MATRIX = [
+  { argv: ['refresh'], env: {}, held: 'controller', lock: 'free', expect: 'WROTE' },
+  { argv: ['refresh'], env: { TOOLKIT_GATE_ROLE: 'G1' }, held: 'controller', lock: 'free', expect: 'WROTE' },
+  { argv: ['refresh'], env: { TOOLKIT_NATIVE_HELPER_BINDING: 'h' }, held: 'controller', lock: 'free', expect: 'WROTE' },
+  { argv: ['refresh'], env: {}, held: 'lane', lock: 'free', expect: 'PARENT_UNHELD' },
+  { argv: ['refresh'], env: {}, held: 'none', lock: 'free', expect: 'PARENT_UNHELD' },
+  { argv: ['refresh'], env: {}, held: 'missing', lock: 'free', expect: 'PARENT_STATE_MISSING' },
+  { argv: ['refresh'], env: {}, held: 'controller', lock: 'live', expect: 'QUEUED' },
+  { argv: ['refresh'], env: {}, held: 'controller', lock: 'dead', expect: 'WROTE' },
+  { argv: ['reconcile', '--apply', '--controller', '--session', controller.session], env: {}, held: 'controller', lock: 'free', expect: 'WROTE' },
+  { argv: ['reconcile', '--apply', '--controller', '--session', controller.session], env: {}, held: 'controller', lock: 'live', expect: 'PASS_RUNNING' },
+  { argv: ['reconcile', '--apply', '--controller', '--session', controller.session], env: { TOOLKIT_GATE_ROLE: 'G2' }, held: 'controller', lock: 'free', expect: 'USAGE' },
+  { argv: ['reconcile', '--apply', '--controller', '--session', 'someone-else'], env: {}, held: 'controller', lock: 'free', expect: 'STALE_WRITER' },
+  { argv: ['reconcile'], env: { TOOLKIT_GATE_ROLE: 'G0' }, held: 'controller', lock: 'live', expect: 'DRY' },
+];
+for (const row of PASS_MATRIX) {
+  test(`pass matrix: ${row.argv.join(' ')} | ${Object.keys(row.env)[0] || 'plain session'} | parent ${row.held} | lock ${row.lock}`, () => {
+    const fx = fixture({ held: row.held });
+    if (row.lock === 'live') cli.takeLock(fx.lockFile);
+    if (row.lock === 'dead') {
+      fs.mkdirSync(path.dirname(fx.lockFile), { recursive: true });
+      writeLock(fx.lockFile, {});
+    }
+    const run = fx.run(row.argv, { environment: row.env, pidAlive: () => row.lock !== 'dead' });
+    const got = run.error ? run.error.code : run.result.outcome || (run.result.mode === 'apply' ? 'WROTE' : 'DRY');
+    assert.equal(got, row.expect, run.error?.message);
+    const written = /AI-AGENT-TOOLKIT:programme-state/.test(fx.github.issues.get(423).body);
+    assert.equal(written, row.expect === 'WROTE', 'pages written only by a pass that ran');
+  });
+}
 
 // --- Hook paths ---
 
@@ -122,6 +241,11 @@ test('GitHub writes are recognised; reads and other repositories are not', () =>
     post('Bash', { command: 'gh api graphql -f query="mutation { x }"' }),
     post('Bash', { command: 'git push -u origin feature' }),
     post('Bash', { command: ['bash', '-lc', 'git -C repo push'] }),
+    post('Bash', { command: 'git --no-pager -c push.default=current push' }),
+    post('Bash', { command: 'gh pr update-branch 12' }),
+    post('mcp__github__create_issue', { owner: 'acme', repo: 'app' }),
+    post('mcp__github__add_sub_issue', { owner: 'acme', repo: 'app' }),
+    post('mcp__github__submit_pending_pull_request_review', { owner: 'acme', repo: 'app' }),
   ];
   for (const input of writes) assert.ok(trigger.githubWrite(input), `${input.tool_name} ${JSON.stringify(input.tool_input)}`);
   assert.equal(trigger.githubWrite(writes[0]).repository, 'acme/app');
@@ -134,6 +258,8 @@ test('GitHub writes are recognised; reads and other repositories are not', () =>
     post('Bash', { command: 'gh pr view 12 --json state' }),
     post('Bash', { command: 'gh api repos/acme/app/issues/1' }),
     post('Bash', { command: 'git status && git log' }),
+    post('Bash', { command: 'gh api -X GET search/issues -f q=repo:acme/app' }),
+    post('Bash', { command: 'gh api graphql -f query="{ viewer { login } }"' }),
     post('Edit', { file_path: 'x' }),
   ];
   for (const input of reads) assert.equal(trigger.githubWrite(input), null, `${input.tool_name} ${JSON.stringify(input.tool_input)}`);
@@ -150,6 +276,34 @@ test('a marked session starts one refresh per governed checkout at turn end, the
   assert.deepEqual(deps.started, [root]);
   assert.deepEqual(fs.readdirSync(deps.refreshDir), [], 'mark cleared');
   assert.equal(trigger.onStop({ session_id: 's1', cwd: root }, deps).outcome, 'UNMARKED', 'the next turn end starts nothing');
+});
+
+test('two checkouts of one repository start one refresh; marks older than a day are pruned', () => {
+  const first = governedCheckout();
+  const second = governedCheckout();
+  const deps = { refreshDir: tmp(), governanceState: GOVERNED, started: [] };
+  deps.start = folder => deps.started.push(folder);
+  trigger.markWrite(post('Bash', { command: 'gh pr create' }, { cwd: first }), deps);
+  trigger.markWrite(post('Bash', { command: 'git push' }, { cwd: second }), deps);
+  const orphan = trigger.markFile('orphan', deps);
+  fs.writeFileSync(orphan, '{}');
+  const old = new Date(Date.now() - trigger.MARK_MAX_AGE_MS - 60000);
+  fs.utimesSync(orphan, old, old);
+  assert.equal(trigger.onStop({ session_id: 's1', cwd: first }, deps).outcome, 'STARTED');
+  assert.deepEqual(deps.started, [first]);
+  assert.deepEqual(fs.readdirSync(deps.refreshDir), [], 'the orphaned mark is gone too');
+});
+
+test('a background start that fails later never throws or prints, and each checkout keeps its own log', () => {
+  const dir = tmp();
+  const root = governedCheckout();
+  const script = `const t = require(${JSON.stringify(require.resolve('../../skills/github-program-reconciler/scripts/programme-refresh-trigger.cjs'))});
+    process.execPath = ${JSON.stringify(path.join(dir, 'no-such-node'))};
+    t.startRefresh(${JSON.stringify(root)}, { refreshDir: ${JSON.stringify(dir)} });`;
+  const result = spawnSync(process.execPath, ['-e', script], { encoding: 'utf8', timeout: 30000 });
+  assert.deepEqual([result.status, result.stdout, result.stderr], [0, '', '']);
+  assert.ok(fs.existsSync(trigger.lastRunFile({ refreshDir: dir }, root)));
+  assert.notEqual(trigger.lastRunFile({ refreshDir: dir }, root), trigger.lastRunFile({ refreshDir: dir }, governedCheckout()));
 });
 
 test('no refresh for unmarked sessions, other repositories, ungoverned folders or governance off', () => {

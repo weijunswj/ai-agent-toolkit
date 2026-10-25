@@ -61,7 +61,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "^(?:Bash|PowerShell|mcp__.*)$",
+        "matcher": "^(?:Bash|PowerShell|mcp__.*[Gg][Ii][Tt][Hh][Uu][Bb].*)$",
         "hooks": [
           {
             "type": "command",

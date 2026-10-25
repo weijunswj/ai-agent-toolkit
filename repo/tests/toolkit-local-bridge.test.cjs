@@ -3633,7 +3633,7 @@ test('native plugin manifests and hooks are valid and policy-light', () => {
     assert.deepEqual(hooks.hooks.Stop, [{ hooks: [{ type: 'command', command: `node "\${${root}}/repo/scripts/toolkit-programme-checkpoint-hook.cjs"`, timeout: 30 }] }]);
   }
   // The after-tool hook runs the same script, only to mark a GitHub write for the turn-end programme refresh.
-  for (const [hooks, root, matcher] of [[codexHooks, 'PLUGIN_ROOT', '^(?:Bash|mcp__.*)$'], [claudeHooks, 'CLAUDE_PLUGIN_ROOT', '^(?:Bash|PowerShell|mcp__.*)$']]) {
+  for (const [hooks, root, matcher] of [[codexHooks, 'PLUGIN_ROOT', '^(?:Bash|mcp__.*[Gg][Ii][Tt][Hh][Uu][Bb].*)$'], [claudeHooks, 'CLAUDE_PLUGIN_ROOT', '^(?:Bash|PowerShell|mcp__.*[Gg][Ii][Tt][Hh][Uu][Bb].*)$']]) {
     assert.deepEqual(hooks.hooks.PostToolUse, [{ matcher, hooks: [{ type: 'command', command: `node "\${${root}}/repo/scripts/toolkit-programme-checkpoint-hook.cjs"`, timeout: 10 }] }]);
   }
   assert.doesNotMatch(`${codexCommand}\n${claudeCommand}`, /--enable-target|--force-downgrade/);

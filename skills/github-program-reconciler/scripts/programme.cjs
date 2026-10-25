@@ -37,6 +37,7 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
 const state = require('./programme-state.cjs');
 const checkpoint = require('./programme-checkpoint.cjs');
@@ -116,33 +117,104 @@ function toolkitVersion(file = VERSION_FILE) {
   catch { return null; }
 }
 
-// One reconcile pass with --apply at a time on this computer: refresh skips while another holds the
-// lock, and reconcile --apply refuses. A lock older than LOCK_STALE_MS is from a pass that died.
+// One reconcile pass with --apply at a time per repository on this computer. The lock file holds a
+// random token, the owner's process id and host; its modified time is the owner's heartbeat, renewed
+// before every GitHub request (each one times out within two minutes) and between passes. A lock is
+// held while its owner is alive and has beaten within LOCK_STALE_MS, so a live pass is never broken.
+// A dead owner's lock, or anything at the path that is not a lock file, is moved aside and checked
+// before it is replaced, and an owner releases only a lock that still holds its own token.
+//
+// reconcile --apply refuses while the lock is held (PASS_RUNNING). refresh never drops a change: it
+// leaves an "again" flag and ends, and the owner runs one more refresh pass before it lets go, up to
+// MAX_PASSES in a row (a longer burst waits for the next refresh or the hourly sweep).
 const LOCK_STALE_MS = 15 * 60 * 1000;
+const MAX_PASSES = 5;
+const LOCK_SCHEMA = 'toolkit.programme-pass-lock.v1';
 
-function defaultLockFile() {
-  return path.join(os.homedir(), '.ai-agent-toolkit', 'user-state', 'programme-refresh', 'pass.lock');
+function defaultLockFile(repository = '') {
+  const key = crypto.createHash('sha256').update(String(repository).toLowerCase()).digest('hex').slice(0, 12);
+  return path.join(os.homedir(), '.ai-agent-toolkit', 'user-state', 'programme-refresh', `pass-${key}.lock`);
 }
 
-// Returns a release function, or null when another pass holds the lock. A null file means no lock.
-function takeLock(file, nowMs = Date.now()) {
-  if (!file) return () => {};
+function pidAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try { process.kill(pid, 0); return true; } catch (error) { return error.code === 'EPERM'; }
+}
+
+function readLock(file) {
+  let info;
+  try { info = fs.lstatSync(file); } catch { return { missing: true }; }
+  if (!info.isFile()) return { broken: true, mtimeMs: info.mtimeMs };
+  let lock = null;
+  try { lock = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* unreadable: broken */ }
+  if (!lock || lock.schema !== LOCK_SCHEMA || typeof lock.token !== 'string') return { broken: true, mtimeMs: info.mtimeMs };
+  return { lock, mtimeMs: info.mtimeMs };
+}
+
+// held, free or stale, with what was seen so a replacement can check it moved the same lock.
+function lockState(file, nowMs, alive = pidAlive) {
+  const seen = readLock(file);
+  if (seen.missing) return { free: true };
+  if (seen.broken) return { stale: true, seen };
+  const beat = nowMs - seen.mtimeMs;
+  const fresh = beat < LOCK_STALE_MS && beat > -LOCK_STALE_MS;
+  const owner = seen.lock.host === os.hostname() ? alive(seen.lock.pid) : true;
+  return owner && fresh ? { held: true, seen } : { stale: true, seen };
+}
+
+// Returns a handle { token, beat(), release() }, or null while another live pass holds the lock. A
+// null file means no lock (tests that bring their own GitHub).
+function takeLock(file, deps = {}) {
+  if (!file) return { token: null, beat() {}, release() {} };
+  const now = () => (deps.nowMs === undefined ? Date.now() : deps.nowMs);
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  const token = crypto.randomBytes(16).toString('hex');
+  const owns = () => readLock(file).lock?.token === token;
+  const handle = {
+    token,
+    beat() { try { if (owns()) { const at = new Date(); fs.utimesSync(file, at, at); } } catch { /* the next beat retries */ } },
+    release() { try { if (owns()) fs.unlinkSync(file); } catch { /* already gone */ } },
+  };
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    // Written whole first, then linked into place: the link fails while any lock is there, and a
+    // reader never sees a half-written lock.
+    const draft = `${file}.${token}.draft`;
+    fs.writeFileSync(draft, JSON.stringify({ schema: LOCK_SCHEMA, token, pid: process.pid, host: os.hostname(), at: new Date(now()).toISOString() }), { mode: 0o600 });
     try {
-      const fd = fs.openSync(file, 'wx');
-      fs.writeSync(fd, JSON.stringify({ pid: process.pid, at: new Date(nowMs).toISOString() }));
-      fs.closeSync(fd);
-      return () => { try { fs.unlinkSync(file); } catch { /* already gone */ } };
+      fs.linkSync(draft, file);
+      return handle;
     } catch (error) {
       if (error.code !== 'EEXIST') throw error;
-      let age = 0;
-      try { age = nowMs - fs.statSync(file).mtimeMs; } catch { continue; }
-      if (age < LOCK_STALE_MS) return null;
-      try { fs.unlinkSync(file); } catch { /* another pass removed it first */ }
+    } finally {
+      try { fs.unlinkSync(draft); } catch { /* gone */ }
     }
+    const seen = lockState(file, now(), deps.pidAlive);
+    if (seen.free) continue;
+    if (seen.held) return null;
+    // Stale: move it aside, then make sure what moved is what was judged stale.
+    const aside = `${file}.stale-${token}`;
+    try { fs.renameSync(file, aside); } catch { continue; }
+    const moved = readLock(aside);
+    const same = seen.seen.broken ? Boolean(moved.broken) : moved.lock?.token === seen.seen.lock.token;
+    if (!same) {
+      // A live pass took the lock in between: put its lock back and step aside.
+      try { fs.linkSync(aside, file); } catch { /* a third pass holds it */ }
+      try { fs.unlinkSync(aside); } catch { /* gone */ }
+      return null;
+    }
+    try { fs.rmSync(aside, { recursive: true, force: true }); } catch { /* left beside the lock */ }
   }
   return null;
+}
+
+const againFile = file => `${file}.again`;
+const flagged = file => Boolean(file) && fs.existsSync(againFile(file));
+function setAgain(file) { fs.writeFileSync(againFile(file), `${new Date().toISOString()}\n`, { mode: 0o600 }); }
+function clearAgain(file) { try { fs.unlinkSync(againFile(file)); } catch { /* not set */ } }
+
+function lockMinutes(file, nowMs = Date.now()) {
+  const at = Date.parse(readLock(file).lock?.at || '');
+  return Number.isFinite(at) ? Math.max(0, Math.round((nowMs - at) / 60000)) : null;
 }
 
 function readJsonFile(file, what) {
@@ -183,7 +255,9 @@ function openContext(args, deps = {}) {
   // never runs programme commands, whatever files it carries. Tests that supply the origin own the state.
   if (!deps.originUrl) requireGitHubGovernance(repoRoot);
   const binding = deps.binding || state.loadBinding(repoRoot);
-  const transport = deps.transport || new state.GitHubTransport({ ghPath: state.resolveExecutable('gh') });
+  const base = deps.transport || new state.GitHubTransport({ ghPath: state.resolveExecutable('gh') });
+  // A pass that holds the lock renews it before every GitHub request.
+  const transport = deps.heartbeat ? Object.assign(Object.create(base), { request: (...call) => { deps.heartbeat(); return base.request(...call); } }) : base;
   const repository = state.bindRepository({ transport, originUrl, binding });
   const version = deps.toolkitVersion === undefined ? toolkitVersion() : deps.toolkitVersion;
   const store = new state.STORE_BACKENDS[binding.store.kind]({ transport, store: binding.store, now: deps.now, toolkitVersion: version });
@@ -514,31 +588,61 @@ function main(argv = process.argv.slice(2), deps = {}) {
   if (marker && isWrite(args)) {
     throw usage(`This session was started by a Toolkit launcher (${marker}), so it is an executor: it never writes programme state, even with --controller. Run reconcile (a dry run) or show and report to the controller.`);
   }
-  // reconcile --apply and refresh take this computer's pass lock first.
-  let release = () => {};
-  if ((args.command === 'reconcile' && args.apply) || args.command === 'refresh') {
-    const lock = deps.lockFile !== undefined ? deps.lockFile : (deps.originUrl ? null : defaultLockFile());
-    const taken = takeLock(lock, deps.nowMs);
-    if (!taken && args.command === 'refresh') {
-      out.write(args.json ? `${JSON.stringify({ outcome: 'SKIPPED', reason: 'another pass is running on this computer' }, null, 2)}\n` : 'Refresh skipped: another pass is running on this computer. It brings the pages up to date.\n');
-      return 0;
-    }
-    if (!taken) throw new ProgrammeError('PASS_RUNNING', 'Another reconcile or refresh pass is running on this computer. Nothing changed; run again when it ends.');
-    release = taken;
-  }
-  try {
-    return finish(args, deps, out);
-  } finally {
-    release();
-  }
+  if ((args.command === 'reconcile' && args.apply) || args.command === 'refresh') return runPasses(args, deps, out);
+  return finish(args, deps, out);
 }
 
-function finish(args, deps, out) {
+// reconcile --apply and refresh hold the repository's pass lock. The owner runs one more refresh pass
+// for each change that came in while it ran, then lets go.
+function runPasses(args, deps, out) {
+  const beat = { fn: () => {} };
+  const passDeps = { ...deps, heartbeat: () => beat.fn() };
+  let context = openContext(args, passDeps);
+  const file = deps.lockFile !== undefined ? deps.lockFile : (deps.originUrl ? null : defaultLockFile(context.binding.repository));
+  let lock = takeLock(file, deps);
+  if (!lock && args.command !== 'refresh') {
+    throw new ProgrammeError('PASS_RUNNING', `Another reconcile or refresh pass for ${context.binding.repository} is running on this computer. Nothing changed; run again when it ends.`);
+  }
+  if (!lock) {
+    setAgain(file);
+    lock = takeLock(file, deps);
+    if (!lock) {
+      const minutes = lockMinutes(file, deps.nowMs);
+      const reason = `another pass for ${context.binding.repository} is running on this computer${minutes === null ? '' : ` (started ${minutes} min ago)`}; it runs once more when it ends, so this change reaches the pages then`;
+      out.write(args.json ? `${JSON.stringify({ outcome: 'QUEUED', reason }, null, 2)}\n` : `Refresh queued: ${reason}.\n`);
+      return 0;
+    }
+  }
+  let code = 0;
+  let passes = 0;
+  while (lock) {
+    beat.fn = lock.beat;
+    try {
+      do {
+        clearAgain(file);
+        const passArgs = passes === 0 ? args : { command: 'refresh', json: args.json, 'repo-root': args['repo-root'] };
+        if (passes > 0) {
+          if (!args.json) out.write('\nA change came in during that pass, so the pages are refreshed once more.\n');
+          context = openContext(passArgs, passDeps);
+        }
+        code = Math.max(code, finish(passArgs, deps, out, context));
+        passes += 1;
+      } while (flagged(file) && passes < MAX_PASSES);
+    } finally {
+      lock.release();
+    }
+    // A change can be flagged between the last check and the release: take the lock back for it.
+    lock = flagged(file) && passes < MAX_PASSES ? takeLock(file, deps) : null;
+  }
+  return code;
+}
+
+function finish(args, deps, out, opened = null) {
   let result;
   const local = args.command === 'checkpoint' || (args.command === 'show' && args.session && !args.parent && args.issue === undefined);
   if (local) result = localCommands[args.command](args, deps);
   else {
-    const context = openContext(args, deps);
+    const context = opened || openContext(args, deps);
     result = commands[args.command](args, context, deps);
   }
   const pass = args.command === 'reconcile' || args.command === 'refresh';
@@ -556,4 +660,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = Object.freeze({ parseArgs, toolkitVersion, takeLock, defaultLockFile, LOCK_STALE_MS, openContext, commands, localCommands, formatReport, main, verifyTakeoverRecord });
+module.exports = Object.freeze({ parseArgs, toolkitVersion, takeLock, lockState, defaultLockFile, againFile, LOCK_STALE_MS, MAX_PASSES, openContext, commands, localCommands, formatReport, main, verifyTakeoverRecord });

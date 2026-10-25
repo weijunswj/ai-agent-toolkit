@@ -6,7 +6,7 @@
 
 - **New `refresh` command in `programme.cjs`:** the full reconcile pass with `--apply`, which any session in a governed checkout may run, executors included. It writes under the controller that holds the parent now and takes no session, patch or verdict, so every decision stays the controller's. It refuses when nobody holds the parent (`PARENT_UNHELD`).
 - **After-write hook:** the plugins' after-tool hook marks a session that wrote to GitHub (connector write tools, `gh issue` or `gh pr` writes, `gh api` writes, `git push`), and the turn-end hook starts `refresh` in the background for each governed checkout it wrote for. It uses the computer's own `gh` sign-in. Codex users trust one more hook (`PostToolUse`) in `/hooks`.
-- **One pass at a time per computer:** `refresh` skips while another pass holds the lock, and `reconcile --apply` refuses (`PASS_RUNNING`).
+- **One pass at a time per repository on a computer:** while another pass holds the lock, `refresh` queues one more pass for it and ends, so no write is missed, and `reconcile --apply` refuses (`PASS_RUNNING`). A lock is never broken while its owner is alive, and an owner removes only its own lock.
 - **Hourly sweep:** the Projects hourly nudge gains a programme step that runs `refresh` where `gh` is signed in, and the recurring-tasks reference describes the one local task that covers projects whose nudge runs in the cloud. The sweep also catches edits made on the web.
 - **Removed the token-based programme reconcile workflow** and its secret and writer-variable setup. Nothing stores a GitHub token for the programme pages.
 
