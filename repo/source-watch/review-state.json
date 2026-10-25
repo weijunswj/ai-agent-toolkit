@@ -27,7 +27,7 @@
       "reviewed_through_sha": "27b6b9f429ac0be90cae764512dbc579d7107e95",
       "reviewed_at": "2026-10-23",
       "disposition": "NO_ACTION",
-      "owning_tracker": "#421"
+      "owning_tracker": "#473"
     },
     {
       "target_key": "source-lock:repo/source-watch/provenance/ui-ux-pro-max",
@@ -38,7 +38,7 @@
       "reviewed_through_sha": "d14efff8ed1faa4187f004f79926f428c8074ec7",
       "reviewed_at": "2026-10-23",
       "disposition": "NO_ACTION",
-      "owning_tracker": "#323"
+      "owning_tracker": "#473"
     }
   ]
 }

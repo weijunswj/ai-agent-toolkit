@@ -23,7 +23,7 @@ test('host harness drift advisory target declares evidence, scope, cadence, and 
   assert.equal(target.kind, 'manual');
   assert.equal(target.state, 'watching');
   assert.equal(target.review_cadence_days, 90);
-  assert.equal(target.last_reviewed_at, null);
+  assert.match(target.last_reviewed_at, /^\d{4}-\d{2}-\d{2}$/, 'last_reviewed_at is a reviewed date');
   assert.equal(target.review_template, 'repo/source-watch/templates/host-harness-capability-drift-review.md');
   assert.ok(target.evidence_sources.some((item) => /OpenAI Codex changelog/.test(item)));
   assert.ok(target.evidence_sources.some((item) => /OpenAI Codex AGENTS\.md docs/.test(item)));

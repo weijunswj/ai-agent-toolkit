@@ -12,7 +12,7 @@
       "enabled": true,
       "state": "watching",
       "review_cadence_days": 90,
-      "last_reviewed_at": null,
+      "last_reviewed_at": "2026-10-25",
       "review_template": "repo/source-watch/templates/host-harness-capability-drift-review.md",
       "evidence_sources": [
         "OpenAI Codex changelog: https://learn.chatgpt.com/codex/changelog",
@@ -49,8 +49,8 @@
         "Needs benchmark/eval before decision"
       ],
       "recommendation": "Run the template on cadence. Keep safety rules unless official host behavior demonstrably covers the same risk; propose shrink, move, host-native migration, or deletion only in a separate evidence-backed PR.",
-      "action_taken": "Review lane added. No toolkit component has been changed by source-watch.",
-      "remaining_work": "Perform the next cadence review using the template. If no meaningful drift is found, update last_reviewed_at and this status record only. If meaningful drift is found, open a separate PR with evidence, rationale, exact proposed modifications, and validation.",
+      "action_taken": "Reviewed on 2026-10-25 against the official Claude Code changelog (releases 2.1.295 to 2.1.310) and Codex changelog (0.158.0 to 0.164.0) and current docs. No toolkit component was changed. Findings were routed to their current owners as notes: five need a benchmark or evaluation before any decision, and Codex managed worktrees are a host-native candidate for the workspace task.",
+      "remaining_work": "The official changelog pages did not show releases from late July to early October 2026, so that part of the window was not reviewed; the next cadence review starts from late July. Perform the next cadence review using the template. If no meaningful drift is found, update last_reviewed_at and this status record only. If meaningful drift is found, open a separate PR with evidence, rationale, exact proposed modifications, and validation.",
       "removal_condition": "Remove only if supported host harnesses stop changing relevant native capabilities or another maintained source-watch lane fully owns this review."
     }
   ]
