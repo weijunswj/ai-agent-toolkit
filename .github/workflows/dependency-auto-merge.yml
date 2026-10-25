@@ -1,14 +1,17 @@
-# Toolkit dependency auto-merge v2. Toolkit governance copies this file into governed repositories;
+# Toolkit dependency auto-merge v3. Toolkit governance copies this file into governed repositories;
 # change the template in the Toolkit, not a copy.
 #
 # Turns on GitHub auto-merge, merge commit only, for Dependabot patch and minor updates. GitHub then
-# merges only after every required check passes. It does nothing unless the programme binding on the
-# base branch sets dependency_updates.auto_merge to "patch-minor" and an active ruleset on the base
-# branch requires at least one status check. These get one comment and stay open for the owner: major
-# updates, minor updates from a 0.x version and any update from a 0.0.x version, updates whose
-# maintainers changed, and GitHub Actions updates unless the binding sets github_actions to
-# "auto-merge" (the default keeps them for the owner). When anyone but Dependabot pushes to the pull
-# request, or its base branch changes, auto-merge is turned off again and the owner is told.
+# merges only after every required check passes. It does nothing unless the pull request targets the
+# default branch, the programme binding there sets dependency_updates.auto_merge to "patch-minor", an
+# active ruleset there requires at least one status check, and every commit on the pull request is
+# Dependabot's; auto-merge is pinned to the head commit it checked, and a re-run started by anyone
+# else never turns it on. These get one comment and stay open for the owner: major updates, minor
+# updates from a 0.x version and any update from a 0.0.x version, updates whose maintainers changed,
+# and GitHub Actions updates unless the binding sets github_actions to "auto-merge" (the default
+# keeps them for the owner). When anyone but Dependabot pushes to the pull request, re-runs it, or
+# changes its base branch, auto-merge is turned off again and the owner is told; if that cannot be
+# confirmed, the job fails instead of saying so.
 # It never checks out the pull request's code and uses only the built-in token. GitHub starts no
 # workflow for what the built-in token does, so a merge made this way does not run push workflows
 # on the base branch; they run on its next push.
@@ -18,20 +21,20 @@ on:
   pull_request:
     types: [opened, reopened, synchronize, edited]
 
-permissions:
-  contents: write
-  pull-requests: write
-
-concurrency:
-  group: dependency-auto-merge-${{ github.event.pull_request.number }}
-  cancel-in-progress: false
-
+# Each job sets its own permissions, which replace the defaults for that job.
 jobs:
   auto-merge:
     name: Dependency auto-merge
-    if: github.event.pull_request.user.login == 'dependabot[bot]' && github.actor == 'dependabot[bot]' && github.event.action != 'edited'
+    if: github.event.pull_request.user.login == 'dependabot[bot]' && github.actor == 'dependabot[bot]' && github.triggering_actor == 'dependabot[bot]' && github.event.action != 'edited'
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: write
+    # Only this job queues; the turn-off job below is never a waiting run that a newer one cancels.
+    concurrency:
+      group: dependency-auto-merge-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
     steps:
       - name: Read Dependabot metadata
         id: metadata
@@ -42,7 +45,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
           BASE: ${{ github.event.pull_request.base.ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           UPDATE_TYPE: ${{ steps.metadata.outputs.update-type }}
           ECOSYSTEM: ${{ steps.metadata.outputs.package-ecosystem }}
           MAINTAINER_CHANGES: ${{ steps.metadata.outputs.maintainer-changes }}
@@ -51,10 +57,12 @@ jobs:
           set -euo pipefail
           marker='<!-- toolkit-dependency-auto-merge -->'
           disarm() {
-            if [ "$(gh pr view "$PR_URL" --json autoMergeRequest --jq '.autoMergeRequest != null')" = "true" ]; then
-              gh pr merge --disable-auto "$PR_URL"
-              echo "Auto-merge turned off."
-            fi
+            armed="$(gh pr view "$PR_URL" --json autoMergeRequest --jq '.autoMergeRequest != null')"
+            if [ "$armed" = "false" ]; then return 0; fi
+            gh pr merge --disable-auto "$PR_URL"
+            armed="$(gh pr view "$PR_URL" --json autoMergeRequest --jq '.autoMergeRequest != null')"
+            if [ "$armed" != "false" ]; then echo "::error::Auto-merge could not be confirmed off."; exit 1; fi
+            echo "Auto-merge turned off."
           }
           flag() {
             disarm
@@ -65,18 +73,19 @@ jobs:
             fi
             echo "Flagged for the owner: $1"
           }
-          binding="$(gh api "repos/$REPOSITORY/contents/.github/toolkit-programme.json?ref=$BASE" --jq '.content' | base64 -d)" || binding='{}'
+          if [ -z "$DEFAULT_BRANCH" ] || [ "$BASE" != "$DEFAULT_BRANCH" ]; then flag "it targets $BASE, not the default branch"; exit 0; fi
+          binding="$(gh api "repos/$REPOSITORY/contents/.github/toolkit-programme.json?ref=$DEFAULT_BRANCH" --jq '.content' | base64 -d)" || binding='{}'
           policy="$(printf '%s' "$binding" | jq -r '.dependency_updates.auto_merge // "off"' 2>/dev/null)" || policy=off
           actions="$(printf '%s' "$binding" | jq -r '.dependency_updates.github_actions // "owner"' 2>/dev/null)" || actions=owner
           if [ "$policy" != "patch-minor" ]; then
             disarm
-            echo "Auto-merge is off in the programme binding on $BASE; leaving this pull request for the owner."
+            echo "Auto-merge is off in the programme binding on $DEFAULT_BRANCH; leaving this pull request for the owner."
             exit 0
           fi
-          required="$(gh api "repos/$REPOSITORY/rules/branches/$BASE" --jq '[.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[]] | length')" || required=0
+          required="$(gh api "repos/$REPOSITORY/rules/branches/$DEFAULT_BRANCH" --jq '[.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[]] | length')" || required=0
           if [ "${required:-0}" -lt 1 ]; then
             disarm
-            echo "No active ruleset on $BASE requires a status check, so auto-merge could merge untested code; leaving this pull request for the owner."
+            echo "No active ruleset on $DEFAULT_BRANCH requires a status check, so auto-merge could merge untested code; leaving this pull request for the owner."
             exit 0
           fi
           if [ "$MAINTAINER_CHANGES" = "true" ]; then flag "the package's maintainers changed"; exit 0; fi
@@ -88,18 +97,24 @@ jobs:
           early="$(printf '%s' "${UPDATED_DEPENDENCIES:-[]}" | jq -r '[.[] | (.prevVersion // "") as $from | select(($from | test("^v?0\\.0\\.")) or (($from | test("^v?0\\.")) and .updateType == "version-update:semver-minor"))] | length' 2>/dev/null)" || early=unknown
           if [ "$early" != "0" ]; then flag "an update from a 0.x version, or details that could not be read"; exit 0; fi
           case "$UPDATE_TYPE" in
-            version-update:semver-patch|version-update:semver-minor)
-              gh pr merge --auto --merge "$PR_URL"
-              echo "Auto-merge (merge commit) is on; GitHub merges once every required check passes." ;;
-            *)
-              flag "this is a ${UPDATE_TYPE:-unknown} update" ;;
+            version-update:semver-patch|version-update:semver-minor) ;;
+            *) flag "this is a ${UPDATE_TYPE:-unknown} update"; exit 0 ;;
           esac
+          # Every commit must be Dependabot's and signed, and the head must still be the one checked.
+          foreign="$(gh api "repos/$REPOSITORY/pulls/$PR_NUMBER/commits?per_page=100" --jq 'if length >= 100 then 1 else ([.[] | select(.author.login != "dependabot[bot]" or .commit.verification.verified != true)] | length) end')" || foreign=unknown
+          if [ "$foreign" != "0" ]; then flag "it has commits that are not Dependabot's, or they could not be read"; exit 0; fi
+          head="$(gh pr view "$PR_URL" --json headRefOid --jq '.headRefOid')" || head=unknown
+          if [ "$head" != "$HEAD_SHA" ]; then flag "it changed while this check ran"; exit 0; fi
+          gh pr merge --auto --merge --match-head-commit "$HEAD_SHA" "$PR_URL"
+          echo "Auto-merge (merge commit) is on for $HEAD_SHA; GitHub merges once every required check passes."
 
   disarm:
     name: Dependency auto-merge off after a change by someone else
-    if: github.event.pull_request.user.login == 'dependabot[bot]' && ((github.event.action != 'edited' && github.actor != 'dependabot[bot]') || (github.event.action == 'edited' && github.event.changes.base))
+    if: github.event.pull_request.user.login == 'dependabot[bot]' && ((github.event.action != 'edited' && (github.actor != 'dependabot[bot]' || github.triggering_actor != 'dependabot[bot]')) || (github.event.action == 'edited' && github.event.changes.base))
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      pull-requests: write
     steps:
       - name: Turn auto-merge off and tell the owner
         env:
@@ -109,9 +124,12 @@ jobs:
         run: |
           set -euo pipefail
           marker='<!-- toolkit-dependency-auto-merge-off -->'
-          if [ "$ACTION" = "edited" ]; then reason="its base branch changed"; else reason="someone other than Dependabot changed it"; fi
-          if [ "$(gh pr view "$PR_URL" --json autoMergeRequest --jq '.autoMergeRequest != null')" = "true" ]; then
+          if [ "$ACTION" = "edited" ]; then reason="its base branch changed"; else reason="someone other than Dependabot changed or re-ran it"; fi
+          armed="$(gh pr view "$PR_URL" --json autoMergeRequest --jq '.autoMergeRequest != null')"
+          if [ "$armed" != "false" ]; then
             gh pr merge --disable-auto "$PR_URL"
+            armed="$(gh pr view "$PR_URL" --json autoMergeRequest --jq '.autoMergeRequest != null')"
+            if [ "$armed" != "false" ]; then echo "::error::Auto-merge could not be confirmed off; the owner must turn it off."; exit 1; fi
             echo "Auto-merge turned off."
           fi
           already="$(gh pr view "$PR_URL" --json comments --jq "[.comments[].body | select(contains(\"$marker\"))] | length")"

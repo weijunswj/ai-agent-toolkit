@@ -229,25 +229,25 @@ function workflowState(root, toolkitRoot = ROOT) {
   return text.startsWith(WORKFLOW_MARKER) ? 'outdated' : 'foreign';
 }
 
-// A workflow in the checkout that runs CodeQL itself (an advanced setup), or null. GitHub refuses
-// that workflow's results once default setup is on, so default setup is never turned on over it.
-function advancedCodeqlWorkflow(root) {
-  const folder = path.join(root, '.github', 'workflows');
-  let names = [];
-  try { names = fs.readdirSync(folder).filter(name => /\.ya?ml$/i.test(name)).sort(); } catch { return null; }
-  return names.find(name => /uses:\s*['"]?github\/codeql-action\//.test(readSmall(path.join(folder, name)) || '')) || null;
+// True when workflow `text` runs CodeQL itself (an advanced setup): it uses codeql-action's init or
+// analyze step. Other codeql-action steps, such as upload-sarif for another scanner, do not count.
+// GitHub refuses an advanced setup's results once default setup is on, so default setup is never
+// turned on over one.
+function runsCodeql(text) {
+  return /uses:\s*['"]?github\/codeql-action\/(?:init|analyze)@/.test(String(text));
 }
 
-// The binding's policy as committed on the default branch: { policy, source } where source is
-// 'default-branch', 'not-merged' (no binding there yet), 'invalid' or 'unreadable'. Anything but
-// 'default-branch' has the safe defaults: no auto-merge, Actions kept for the owner, no paid answer.
+// The binding's policy as committed on the default branch: { policy, required_checks, source } where
+// source is 'default-branch', 'not-merged' (no binding there yet), 'invalid' or 'unreadable'.
+// Anything but 'default-branch' has the safe defaults: no auto-merge, Actions kept for the owner, no
+// paid answer, no required checks.
 function committedPolicy(read, identity) {
   const binding = read && read.ok === true && read.binding ? read.binding : { status: 'unreadable' };
   if (binding.status === 'ok') {
     const parsed = governance.committedBindingPolicy(binding.text, identity);
-    return { policy: parsed.policy, source: parsed.valid ? 'default-branch' : 'invalid' };
+    return { policy: parsed.policy, required_checks: parsed.required_checks, source: parsed.valid ? 'default-branch' : 'invalid' };
   }
-  return { policy: governance.committedBindingPolicy('null', identity).policy, source: binding.status === 'missing' ? 'not-merged' : 'unreadable' };
+  return { policy: governance.committedBindingPolicy('null', identity).policy, required_checks: null, source: binding.status === 'missing' ? 'not-merged' : 'unreadable' };
 }
 
 // ---- GitHub settings (S1, S2, S4-S7) ------------------------------------------------------------
@@ -265,10 +265,12 @@ function ghRun(args, spawn, input = null) {
   if (!result || result.error) return { ok: false, reason: 'gh-unavailable' };
   if (result.status !== 0) {
     const text = String(result.stderr || '') + String(result.stdout || '');
-    if (/HTTP 404/.test(text)) return { ok: false, reason: 'not-found' };
+    // A ref GitHub cannot resolve is not "no such file".
+    if (/HTTP 404/.test(text)) return { ok: false, reason: /no commit found/i.test(text) ? 'ref-not-found' : 'not-found' };
     if (/HTTP 40[39]|HTTP 422/.test(text)) {
-      if (/advanced security|code security|secret protection|not available|upgrade|plan/i.test(text)) return { ok: false, reason: 'not-on-plan' };
-      if (/organi[sz]ation|enterprise|policy|disabled by/i.test(text)) return { ok: false, reason: 'refused-by-policy' };
+      if (/SAML|OAuth App access restrictions|rate limit/i.test(text)) return { ok: false, reason: /HTTP 403/.test(text) ? 'forbidden' : 'gh-request-failed' };
+      if (/advanced security must be enabled|code security|secret protection|not available (?:on|for) (?:this|your) (?:plan|repository)|upgrade your plan|requires GitHub (?:Team|Enterprise)/i.test(text)) return { ok: false, reason: 'not-on-plan' };
+      if (/(?:disabled|prohibited|not allowed|blocked) by (?:your |the )?(?:organi[sz]ation|enterprise)|(?:organi[sz]ation|enterprise) policy/i.test(text)) return { ok: false, reason: 'refused-by-policy' };
       return { ok: false, reason: /HTTP 403/.test(text) ? 'forbidden' : 'gh-request-failed' };
     }
     return { ok: false, reason: 'gh-request-failed' };
@@ -284,9 +286,11 @@ function statusOf(section) {
 
 // What GitHub says about `slug`: { ok, visibility, allow_auto_merge, alerts, security_updates,
 // secret_scanning, push_protection, code_scanning, private_reporting, binding } where each setting is
-// 'enabled' | 'disabled' | 'not-on-plan' | 'unreadable', and `binding` is the programme binding on the
-// default branch ({ status: 'ok', text } | { status: 'missing' } | { status: 'unreadable' }); or
-// { ok: false, reason }. Without admin rights GitHub hides these settings, so they read unreadable.
+// 'enabled' | 'disabled' | 'not-on-plan' | 'unreadable', `binding` is the programme binding on the
+// default branch ({ status: 'ok', text } | { status: 'missing' } | { status: 'unreadable' }), and
+// `advanced_codeql` names a default-branch workflow that runs CodeQL itself (null for none,
+// 'unreadable'; read only when default setup is off); or { ok: false, reason }. Without admin rights
+// GitHub hides these settings, so they read unreadable.
 function ghSecurityReader(slug, { spawn = childProcess.spawnSync } = {}) {
   const repository = ghRun([`repos/${slug}`], spawn);
   if (!repository.ok) return repository;
@@ -317,17 +321,33 @@ function ghSecurityReader(slug, { spawn = childProcess.spawnSync } = {}) {
     const reporting = ghRun([`repos/${slug}/private-vulnerability-reporting`], spawn);
     privateReporting = reporting.ok && reporting.value && typeof reporting.value.enabled === 'boolean' ? (reporting.value.enabled ? 'enabled' : 'disabled') : 'unreadable';
   }
-  let binding = { status: 'unreadable' };
-  if (typeof value.default_branch === 'string' && value.default_branch) {
-    const file = ghRun([`repos/${slug}/contents/${governance.BINDING_FILE}?ref=${encodeURIComponent(value.default_branch)}`], spawn);
-    if (file.ok && file.value && file.value.encoding === 'base64' && typeof file.value.content === 'string') {
-      binding = { status: 'ok', text: Buffer.from(file.value.content, 'base64').toString('utf8') };
-    } else if (!file.ok && file.reason === 'not-found') binding = { status: 'missing' };
+  const branch = typeof value.default_branch === 'string' && value.default_branch ? value.default_branch : null;
+  const committed = rel => {
+    if (!branch) return { status: 'unreadable' };
+    const file = ghRun([`repos/${slug}/contents/${rel}?ref=${encodeURIComponent(branch)}`], spawn);
+    if (file.ok && file.value && file.value.encoding === 'base64' && typeof file.value.content === 'string') return { status: 'ok', text: Buffer.from(file.value.content, 'base64').toString('utf8') };
+    return { status: !file.ok && file.reason === 'not-found' ? 'missing' : 'unreadable' };
+  };
+  const binding = committed(governance.BINDING_FILE);
+  let advancedCodeql = null;
+  if (codeScanning === 'disabled') {
+    const listing = branch ? ghRun([`repos/${slug}/contents/.github/workflows?ref=${encodeURIComponent(branch)}`], spawn) : { ok: false, reason: 'no-branch' };
+    if (!listing.ok) advancedCodeql = listing.reason === 'not-found' ? null : 'unreadable';
+    else if (!Array.isArray(listing.value)) advancedCodeql = 'unreadable';
+    else {
+      const names = listing.value.filter(entry => entry && entry.type === 'file' && /\.ya?ml$/i.test(entry.name)).map(entry => entry.name).sort();
+      for (const name of names.slice(0, 50)) {
+        const file = committed(`.github/workflows/${name}`);
+        if (file.status !== 'ok') { advancedCodeql = 'unreadable'; break; }
+        if (runsCodeql(file.text)) { advancedCodeql = name; break; }
+      }
+      if (names.length > 50 && advancedCodeql === null) advancedCodeql = 'unreadable';
+    }
   }
   return {
     ok: true,
     visibility,
-    allow_auto_merge: value.allow_auto_merge === true,
+    allow_auto_merge: typeof value.allow_auto_merge === 'boolean' ? value.allow_auto_merge : 'unreadable',
     alerts,
     security_updates: securityUpdates,
     secret_scanning: fromAnalysis('secret_scanning'),
@@ -335,6 +355,7 @@ function ghSecurityReader(slug, { spawn = childProcess.spawnSync } = {}) {
     code_scanning: codeScanning,
     private_reporting: privateReporting,
     binding,
+    advanced_codeql: advancedCodeql,
   };
 }
 
@@ -386,18 +407,19 @@ function writeSecurityFiles(root, files, { toolkitRoot = ROOT } = {}) {
 }
 
 // Turns on what `result` (a dependencySecurity verdict) lists as fixes and writes its missing files,
-// then reads back through `reread()`. { prior, settings, files, unavailable, still_off, read_back,
-// result } with result:
+// then reads back through `reread()`. { prior, settings, files, unavailable, still_off, unconfirmed,
+// read_back, result } with result:
 //   'nothing'     nothing to do;
-//   'unverified'  GitHub could not be read first (nothing is written then), or the read-back failed;
+//   'unverified'  GitHub could not be read first (nothing is written then), or the read-back failed,
+//                 as a whole or for any one written setting (listed in `unconfirmed`);
 //   'failed'      a write failed, a file was not written, or the read-back still shows it off;
-//   'applied'     every write was read back on, or GitHub refused it as not available here.
+//   'applied'     every written setting was read back on, or GitHub refused it as not available here.
 // A write GitHub refuses because the plan or an organisation policy does not allow it is listed in
 // `unavailable` and left alone: it is not a failure. `prior` keeps what GitHub showed before, so a
 // change can be undone by hand.
 function applySecurity(root, result, { writer = ghSecurityWriter, fileWriter = writeSecurityFiles, reread = null } = {}) {
   const prior = result.settings || null;
-  const empty = { prior, settings: [], files: [], unavailable: [], still_off: [], read_back: false };
+  const empty = { prior, settings: [], files: [], unavailable: [], still_off: [], unconfirmed: [], read_back: false };
   if (!result.fixes) return { ...empty, result: 'unverified' };
   const fixes = result.fixes;
   const wantSettings = Object.entries(fixes).some(([key, on]) => key !== 'paid' && on);
@@ -416,13 +438,27 @@ function applySecurity(root, result, { writer = ghSecurityWriter, fileWriter = w
   if (wantSettings && reread) {
     try { after = reread(); } catch { after = null; }
   }
-  const readBack = Boolean(after && after.fixes);
-  const written = new Set(settings.filter(entry => entry.ok).map(entry => entry.setting));
-  const stillOff = readBack ? Object.entries(after.fixes).filter(([key, on]) => key !== 'paid' && on && written.has(key)).map(([key]) => key) : [];
+  // Each written setting must read back on by itself: off is still off, anything else unconfirmed.
+  const readBack = Boolean(after && after.settings);
+  const stillOff = [];
+  const unconfirmed = [];
+  for (const entry of settings.filter(item => item.ok && READ_BACK[item.setting])) {
+    const values = READ_BACK[entry.setting].map(key => (readBack ? after.settings[key] : undefined));
+    if (values.every(item => item === 'enabled' || item === true)) continue;
+    if (values.some(item => item === 'disabled' || item === false)) stillOff.push(entry.setting);
+    else unconfirmed.push(entry.setting);
+  }
   const failed = settings.some(entry => !entry.ok && !UNAVAILABLE.includes(entry.reason)) || files.some(entry => entry.result !== 'written') || stillOff.length > 0;
-  const status = failed ? 'failed' : wantSettings && !readBack ? 'unverified' : 'applied';
-  return { prior, settings, files, unavailable, still_off: stillOff, read_back: readBack, result: status };
+  const status = failed ? 'failed' : unconfirmed.length > 0 ? 'unverified' : 'applied';
+  return { prior, settings, files, unavailable, still_off: stillOff, unconfirmed, read_back: readBack, result: status };
 }
+
+// The read values that show each written setting on. GitHub Code Security has no read of its own: the
+// code scanning write that follows it is read back instead.
+const READ_BACK = Object.freeze({
+  alerts: ['alerts'], security_updates: ['security_updates'], secret_scanning: ['secret_scanning', 'push_protection'],
+  code_scanning: ['code_scanning'], private_reporting: ['private_reporting'], allow_auto_merge: ['allow_auto_merge'],
+});
 
 const SETTING_LABELS = Object.freeze({
   alerts: 'Dependabot alerts', security_updates: 'Dependabot security updates', secret_scanning: 'secret scanning and push protection',
@@ -443,9 +479,10 @@ function describeOutcome(slug, root, result, outcome) {
   }
   for (const entry of outcome.files) lines.push(`- ${root}: ${entry.file} ${entry.result}${entry.result === 'written' ? '; commit it through a pull request' : ''}.`);
   const wrote = outcome.settings.some(entry => entry.ok);
+  const unconfirmed = outcome.unconfirmed || [];
   if (outcome.still_off.length) lines.push(`- ${slug}: reading back still shows off: ${outcome.still_off.map(key => SETTING_LABELS[key] || key).join(', ')}.`);
-  else if (wrote && !outcome.read_back) lines.push(`- ${slug}: could not read the settings back, so the change is unverified; run the check again.`);
-  else if (wrote) lines.push(`- ${slug}: read back.`);
+  if (unconfirmed.length) lines.push(`- ${slug}: could not read back: ${unconfirmed.map(key => SETTING_LABELS[key] || key).join(', ')}; the change is unverified, so run the check again.`);
+  if (wrote && !outcome.still_off.length && !unconfirmed.length) lines.push(`- ${slug}: read back.`);
   for (const [id, check] of Object.entries(result.checks || {})) {
     if (check.status === 'unverified') lines.push(`- ${slug}: could not check ${id}: ${check.details.join('; ')}.`);
   }
@@ -498,11 +535,16 @@ function dependencySecurity(root, { offline = false, reader = ghSecurityReader, 
     try { read = reader(slug); } catch { read = { ok: false, reason: 'reader-failed' }; }
   }
   const online = read && read.ok === true;
-  const { policy, source } = offline ? { ...committedPolicy(null, identity), source: 'offline' } : committedPolicy(read, identity);
+  const { policy, source, required_checks: mergedChecks } = offline ? { ...committedPolicy(null, identity), source: 'offline' } : committedPolicy(read, identity);
   const known = source === 'default-branch' || source === 'not-merged';
   const working = governance.workingBindingPolicy(root);
   const pendingPolicy = working && known && !sameValues(working, policy) ? working : null;
-  const advanced = advancedCodeqlWorkflow(root);
+  const advanced = online ? read.advanced_codeql || null : null;
+  // Default-branch protection is checked against the working tree's required checks; it counts for
+  // auto-merge only when those are the merged binding's.
+  const workingChecks = governance.bindingRequiredChecks(root);
+  const checksMerged = Boolean(mergedChecks && workingChecks && [...mergedChecks].sort().join('\n') === [...workingChecks].sort().join('\n'));
+  const protectedForAutoMerge = Boolean(protectionResult && protectionResult.status === 'conformant' && checksMerged);
   const value = key => (offline ? 'not-checked' : online ? read[key] : 'unreadable');
   const checks = {
     S1: settingCheck(value('alerts'), 'Dependabot alerts'),
@@ -516,9 +558,11 @@ function dependencySecurity(root, { offline = false, reader = ghSecurityReader, 
   const off = [scanning, pushProtection].filter(item => item.status === 'drift');
   checks.S4 = off.length ? { status: 'drift', details: off.flatMap(item => item.details) }
     : [scanning, pushProtection].find(item => item.status !== 'ok') || scanning;
-  checks.S5 = online && advanced && read.code_scanning !== 'enabled'
-    ? { status: 'ok', details: [`CodeQL runs from .github/workflows/${advanced} (advanced setup), so default setup stays off`] }
-    : settingCheck(value('code_scanning'), 'CodeQL code scanning');
+  checks.S5 = online && advanced === 'unreadable' && read.code_scanning === 'disabled'
+    ? { status: 'unverified', details: ['the default branch\'s workflows could not be read, so an advanced CodeQL setup cannot be ruled out; default setup stays off'] }
+    : online && advanced && read.code_scanning === 'disabled'
+      ? { status: 'ok', details: [`CodeQL runs from .github/workflows/${advanced} (advanced setup), so default setup stays off`] }
+      : settingCheck(value('code_scanning'), 'CodeQL code scanning');
   const isPrivate = Boolean(online && read.visibility !== 'public');
   if (isPrivate) {
     const answer = !known ? 'answer on the default branch could not be read' : policy.paid_security === 'off' ? 'binding keeps it off' : 'binding has no answer yet';
@@ -545,22 +589,27 @@ function dependencySecurity(root, { offline = false, reader = ghSecurityReader, 
     : settingCheck(value('private_reporting'), 'Private vulnerability reporting');
   const s7 = [];
   let s7Status = 'ok';
+  let s7Unverified = null;
   if (offline) s7Status = 'not-checked';
   else if (!online) s7Status = 'unverified';
   else if (!known) s7Status = 'unverified';
   else if (policy.auto_merge === 'patch-minor') {
     if (workflow !== 'current') s7.push(workflow === 'missing' ? `${WORKFLOW_REL} is missing` : workflow === 'outdated' ? `${WORKFLOW_REL} is an older Toolkit copy` : `${WORKFLOW_REL} is not Toolkit's file`);
-    if (!read.allow_auto_merge) s7.push('the repository does not allow auto-merge');
+    if (read.allow_auto_merge === false) s7.push('the repository does not allow auto-merge');
     const branch = protectionResult ? protectionResult.status : 'unverified';
     if (protectionResult && protectionResult.reason === 'binding-has-no-required-checks') s7.push('the binding names no required checks, so auto-merge could merge untested code');
     else if (['drift', 'not-enforceable', 'not-applicable'].includes(branch)) s7.push('the default branch is not protected the way auto-merge needs (see the default-branch protection findings)');
-    else if (branch !== 'conformant') s7Status = 'unverified';
+    else if (branch !== 'conformant' || read.allow_auto_merge === 'unreadable') s7Status = 'unverified';
+    else if (!checksMerged) {
+      s7Status = 'unverified';
+      s7Unverified = 'the working tree\'s required checks differ from the merged binding\'s, so the protection check does not count for auto-merge until they are merged';
+    }
     if (s7.length) s7Status = 'drift';
   }
   checks.S7 = {
     status: s7Status,
     details: s7.length ? s7 : s7Status === 'not-checked' ? ['offline']
-      : s7Status === 'unverified' ? [online && !known ? 'the programme binding on the default branch could not be read, so the auto-merge policy is unknown and auto-merge stays off' : 'the repository settings or default-branch protection could not be read'] : [],
+      : s7Status === 'unverified' ? [online && !known ? 'the programme binding on the default branch could not be read, so the auto-merge policy is unknown and auto-merge stays off' : s7Unverified || 'the repository settings or default-branch protection could not be read'] : [],
   };
   const statuses = Object.values(checks).map(entry => entry.status);
   const status = statuses.includes('drift') ? 'drift'
@@ -572,9 +621,9 @@ function dependencySecurity(root, { offline = false, reader = ghSecurityReader, 
     alerts: read.alerts === 'disabled',
     security_updates: read.security_updates === 'disabled',
     secret_scanning: Boolean(wanted) && (read.secret_scanning === 'disabled' || read.push_protection === 'disabled'),
-    code_scanning: Boolean(wanted) && read.code_scanning === 'disabled' && !advanced,
+    code_scanning: Boolean(wanted) && read.code_scanning === 'disabled' && advanced === null,
     private_reporting: read.visibility === 'public' && read.private_reporting === 'disabled',
-    allow_auto_merge: policy.auto_merge === 'patch-minor' && !read.allow_auto_merge && Boolean(protectionResult && protectionResult.status === 'conformant'),
+    allow_auto_merge: policy.auto_merge === 'patch-minor' && read.allow_auto_merge === false && protectedForAutoMerge,
     paid: read.visibility !== 'public',
   } : null;
   const files = {
@@ -600,7 +649,7 @@ module.exports = Object.freeze({
   uncoveredEcosystems,
   renderDependabotConfig,
   workflowState,
-  advancedCodeqlWorkflow,
+  runsCodeql,
   committedPolicy,
   ghSecurityReader,
   ghSecurityWriter,

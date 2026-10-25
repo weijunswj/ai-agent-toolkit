@@ -16,23 +16,31 @@
 //      that is not merged, invalid or unreadable never turns them on.
 //   I3 "Allow auto-merge" and the workflow file follow only the merged binding's patch-minor, and
 //      the setting needs conformant default-branch protection with at least one required check.
-//   I4 Nothing is written when GitHub cannot be read; a read-back that fails is unverified, never
-//      "applied" or "read back"; every change keeps what GitHub showed before.
+//   I4 Nothing is written when GitHub cannot be read; a read-back that fails, as a whole or for any
+//      one written setting, is unverified (exit 2), never "applied" or "read back"; every change keeps
+//      what GitHub showed before.
 //   I5 A write GitHub refuses as not on the plan or against an organisation policy is left alone
 //      and is not a failure; any other refusal fails.
-//   I6 Default setup is never turned on over an advanced CodeQL workflow, and a dependabot config
-//      (.yml or .yaml) or workflow Toolkit did not write is never replaced.
-//   I7 The workflow turns auto-merge on only for a pull request Dependabot opened and last pushed,
-//      when the base branch's binding says patch-minor and a ruleset there requires a check, for a
-//      patch or minor update that is not from 0.x (0.0.x: none), with no maintainer change, and for
-//      GitHub Actions only with github_actions "auto-merge" (the default is "owner"). Anything else
-//      turns auto-merge off if it was on and leaves one comment. A push by anyone else, or a base
-//      branch change, turns it off and tells the owner.
+//   I6 Default setup is never turned on over an advanced CodeQL workflow (codeql-action init or
+//      analyze, on the default branch; unreadable workflows rule nothing out), and a dependabot config
+//      (.yml or .yaml) or workflow Toolkit did not write is never replaced. Protection counts for
+//      auto-merge only when it was checked against the merged binding's required checks.
+//   I7 The workflow turns auto-merge on only for a pull request Dependabot opened, last pushed and
+//      started this run for (a re-run by anyone else never does), that targets the default branch,
+//      whose every commit is Dependabot's and signed, when the binding there says patch-minor and a
+//      ruleset there requires a check, for a patch or minor update that is not from 0.x (0.0.x:
+//      none), with no maintainer change, and for GitHub Actions only with github_actions
+//      "auto-merge" (the default is "owner"); it pins auto-merge to the head commit it checked.
+//      Anything else turns auto-merge off if it was on and leaves one comment. A push or re-run by
+//      anyone else, or a base branch change, turns it off and tells the owner; the turn-off is never a
+//      cancellable waiting run, and when it cannot confirm auto-merge is off the job fails and says
+//      nothing.
 //
-// Closure matrix: MATRIX (verdict: visibility x merged binding x working tree x GitHub read x plan
-// x protection x files), APPLY (writes x read-back x refusals), WORKFLOW and DISARM (the
-// workflow's runtime branches), plus SE-01, SE-02, SE-07 to SE-10 for files, reader, writer and
-// binding schema. A path not in these tables is a gap in the model.
+// Closure matrix: MATRIX (verdict: visibility x merged binding x working tree x GitHub read x admin
+// x plan x protection x files), APPLY (writes x read-back per setting x refusals), CONDITIONS (which
+// job runs: event x actor x re-run), WORKFLOW and DISARM (the workflow's runtime branches, run in
+// bash), plus SE-01, SE-02 and SE-07 to SE-10, SE-13 for files, reader, writer, template and binding
+// schema. A path not in these tables is a gap in the model.
 
 const assert = require('node:assert/strict');
 const childProcess = require('node:child_process');
@@ -72,7 +80,7 @@ const merged = (policy, paid) => ({ status: 'ok', text: binding(policy, paid) })
 const ON = Object.freeze({
   ok: true, visibility: 'public', allow_auto_merge: true, alerts: 'enabled', security_updates: 'enabled',
   secret_scanning: 'enabled', push_protection: 'enabled', code_scanning: 'enabled', private_reporting: 'enabled',
-  binding: merged(),
+  binding: merged(), advanced_codeql: null,
 });
 const reader = (overrides = {}) => () => ({ ...ON, ...overrides });
 const CONFORMANT = Object.freeze({ status: 'conformant', reason: null });
@@ -149,8 +157,12 @@ const MATRIX = [
     expect: { status: 'drift', checks: { S4: 'drift', S5: 'drift' }, details: { S4: [/needs GitHub Team or Enterprise Cloud\); buy it or set paid_security to off/] }, fixes: { secret_scanning: false, code_scanning: false } } },
   { id: 'M13 internal is treated like private', read: { visibility: 'internal', private_reporting: 'not-on-plan', ...PAID_OFF },
     expect: { status: 'drift', checks: { S4: 'not-applicable', S6: 'not-applicable', S8: 'drift' }, fixes: { secret_scanning: false, paid: true } } },
-  { id: 'M14 an advanced CodeQL workflow is never replaced by default setup (I6)', files: { '.github/workflows/codeql.yml': 'jobs:\n  a:\n    steps:\n      - uses: github/codeql-action/init@v3\n' }, read: { code_scanning: 'disabled' },
+  { id: 'M14 an advanced CodeQL workflow on the default branch is never replaced by default setup (I6)', read: { code_scanning: 'disabled', advanced_codeql: 'codeql.yml' },
     expect: { checks: { S5: 'ok' }, details: { S5: [/codeql\.yml \(advanced setup\)/] }, fixes: { code_scanning: false } } },
+  { id: 'M14b a CodeQL workflow only in the working tree does not count', files: { '.github/workflows/codeql.yml': 'jobs:\n  a:\n    steps:\n      - uses: github/codeql-action/init@v3\n' }, read: { code_scanning: 'disabled' },
+    expect: { checks: { S5: 'drift' }, fixes: { code_scanning: true } } },
+  { id: 'M14c the default branch\'s workflows are unreadable: default setup stays off', read: { code_scanning: 'disabled', advanced_codeql: 'unreadable' },
+    expect: { status: 'unverified', checks: { S5: 'unverified' }, fixes: { code_scanning: false } } },
   { id: 'M15 a dependabot.yaml counts (I6)', files: { 'package.json': '{}', '.github/dependabot.yaml': COVERED },
     expect: { checks: { S3: 'ok' }, files: { dependabot: false } } },
   { id: 'M16 merged patch-minor, nothing in place yet (I3)', read: { allow_auto_merge: false, binding: merged(PATCH_MINOR) }, protection: CONFORMANT,
@@ -171,12 +183,44 @@ const MATRIX = [
     expect: { status: 'drift', policy_source: 'offline', checks: { S1: 'not-checked', S3: 'drift', S7: 'not-checked', S8: 'not-checked' }, fixes: null, files: { dependabot: true, workflow: false }, readerCalled: false } },
   { id: 'M24 GitHub unreadable (I4)', read: () => ({ ok: false, reason: 'gh-unavailable' }), protection: CONFORMANT,
     expect: { status: 'unverified', policy_source: 'unreadable', checks: { S1: 'unverified', S7: 'unverified', S8: 'unverified' }, fixes: null } },
+  { id: 'M25 private, free settings off: on by default (I1)', read: { ...PRIVATE, alerts: 'disabled', security_updates: 'disabled', binding: merged(null, 'off') },
+    expect: { status: 'drift', checks: { S1: 'drift', S2: 'drift' }, fixes: { alerts: true, security_updates: true, secret_scanning: false } } },
+  { id: 'M26 internal, free settings off: on by default (I1)', read: { visibility: 'internal', private_reporting: 'not-on-plan', alerts: 'disabled', binding: merged(null, 'off') },
+    expect: { checks: { S1: 'drift' }, fixes: { alerts: true, private_reporting: false } } },
+  { id: 'M27 private, unanswered, a plan without the paid features', read: { ...PRIVATE, ...NO_PLAN },
+    expect: { status: 'drift', checks: { S4: 'not-applicable', S5: 'not-applicable', S8: 'drift' }, fixes: { secret_scanning: false, code_scanning: false } } },
+  { id: 'M28 private, answered off, a plan without the paid features', read: { ...PRIVATE, ...NO_PLAN, binding: merged(null, 'off') },
+    expect: { status: 'conformant', checks: { S4: 'not-applicable', S5: 'not-applicable', S8: 'ok' } } },
+  { id: 'M29 internal, answered on, off on GitHub (I2)', read: { visibility: 'internal', private_reporting: 'not-on-plan', ...PAID_OFF, binding: merged(null, 'on') },
+    expect: { checks: { S4: 'drift', S5: 'drift', S8: 'ok' }, fixes: { secret_scanning: true, code_scanning: true, paid: true } } },
+  { id: 'M30 public, the merged binding is unreadable', read: { binding: { status: 'unreadable' } }, protection: CONFORMANT,
+    expect: { status: 'unverified', checks: { S7: 'unverified', S8: 'not-applicable' }, fixes: { allow_auto_merge: false } } },
+  { id: 'M31 public, the merged binding is invalid', read: { binding: { status: 'ok', text: 'not json' } },
+    expect: { status: 'unverified', policy_source: 'invalid', checks: { S7: 'unverified', S8: 'not-applicable' } } },
+  { id: 'M32 public, the binding is not merged yet', read: { binding: { status: 'missing' } },
+    expect: { status: 'conformant', policy_source: 'not-merged', checks: { S7: 'ok', S8: 'not-applicable' } } },
+  { id: 'M33 no admin rights: hidden settings are unverified, never off, and nothing is written', read: { alerts: 'unreadable', secret_scanning: 'unreadable', push_protection: 'unreadable', code_scanning: 'unreadable', allow_auto_merge: 'unreadable', binding: merged(PATCH_MINOR) }, protection: CONFORMANT, workflow: true,
+    expect: { checks: { S1: 'unverified', S4: 'unverified', S5: 'unverified', S7: 'unverified' }, fixes: { alerts: false, secret_scanning: false, code_scanning: false, allow_auto_merge: false } } },
+  { id: 'M34 the working tree\'s required checks differ from the merged binding\'s (protection does not count)', working: JSON.stringify({ ...JSON.parse(binding(PATCH_MINOR)), required_checks: ['something-else'] }), read: { allow_auto_merge: false, binding: merged(PATCH_MINOR) }, protection: CONFORMANT, workflow: true,
+    expect: { checks: { S7: 'drift' }, fixes: { allow_auto_merge: false } } },
+  { id: 'M35 the same, with the setting already on', working: JSON.stringify({ ...JSON.parse(binding(PATCH_MINOR)), required_checks: ['something-else'] }), read: { binding: merged(PATCH_MINOR) }, protection: CONFORMANT, workflow: true,
+    expect: { checks: { S7: 'unverified' }, details: { S7: [/required checks differ from the merged binding/] } } },
 ];
+
+// The working-tree binding a row runs with: the row's own, none (null), or else the merged one, as
+// in a checkout of the default branch.
+function workingBinding(row) {
+  if (row.working !== undefined) return row.working;
+  const read = typeof row.read === 'object' && row.read ? row.read : {};
+  const committed = read.binding || ON.binding;
+  return committed.status === 'ok' && committed.text.startsWith('{"schema":"toolkit') ? committed.text : binding();
+}
 
 test('SE-03 (MATRIX): the verdict for every row of the closure matrix', async (t) => {
   for (const row of MATRIX) {
     await t.test(row.id, (st) => {
-      const files = { ...(row.files || {}), ...(row.working ? { '.github/toolkit-programme.json': row.working } : {}) };
+      const working = workingBinding(row);
+      const files = { ...(row.files || {}), ...(working ? { '.github/toolkit-programme.json': working } : {}) };
       const root = repo(st, files);
       if (row.workflow) security.writeSecurityFiles(root, { workflow: true });
       let called = false;
@@ -215,7 +259,7 @@ const APPLY = [
   { id: 'A02 written and read back', before: reader(ALERTS_OFF), writer: () => [ok('alerts')], after: reader(),
     expect: { result: 'applied', writes: 1, prior: 'disabled', lines: [/Dependabot alerts turned on\./, /read back\./] } },
   { id: 'A03 written, the read-back fails (I4)', before: reader(ALERTS_OFF), writer: () => [ok('alerts')], after: () => ({ ok: false, reason: 'gh-unavailable' }),
-    expect: { result: 'unverified', writes: 1, lines: [/could not read the settings back/], never: [/: read back\./] } },
+    expect: { result: 'unverified', writes: 1, lines: [/could not read back: Dependabot alerts/], never: [/: read back\./] } },
   { id: 'A04 written, the read-back throws (I4)', before: reader(ALERTS_OFF), writer: () => [ok('alerts')], after: () => { throw new Error('boom'); },
     expect: { result: 'unverified', writes: 1, never: [/: read back\./] } },
   { id: 'A05 written, but still off', before: reader(ALERTS_OFF), writer: () => [ok('alerts')], after: reader(ALERTS_OFF),
@@ -228,12 +272,24 @@ const APPLY = [
     expect: { result: 'failed', writes: 1, lines: [/not turned on \(forbidden\)/] } },
   { id: 'A09 nothing to do', before: reader(), writer: () => [], after: reader(),
     expect: { result: 'nothing', writes: 0, never: [/turned on/] } },
+  { id: 'A10 written, but that setting alone reads back unreadable (I4)', before: reader(ALERTS_OFF), writer: () => [ok('alerts')], after: reader({ alerts: 'unreadable' }),
+    expect: { result: 'unverified', writes: 1, unconfirmed: ['alerts'], lines: [/could not read back: Dependabot alerts/], never: [/: read back\./] } },
+  { id: 'A11 secret scanning on, push protection unreadable on read-back (I4)', before: reader({ secret_scanning: 'disabled', push_protection: 'disabled' }), writer: () => [ok('secret_scanning')], after: reader({ push_protection: 'unreadable' }),
+    expect: { result: 'unverified', writes: 1, unconfirmed: ['secret_scanning'] } },
+  { id: 'A12 private patch-minor: allow auto-merge refused by the plan is left alone (I5)', binding: binding(PATCH_MINOR, 'off'),
+    before: reader({ ...PRIVATE, allow_auto_merge: false, binding: merged(PATCH_MINOR, 'off') }), writer: () => [refused('allow_auto_merge', 'not-on-plan')], after: reader({ ...PRIVATE, allow_auto_merge: false, binding: merged(PATCH_MINOR, 'off') }),
+    expect: { result: 'applied', writes: 1, unavailable: ['allow_auto_merge'], lines: [/allow auto-merge left alone/] } },
+  { id: 'A13 allow auto-merge written and read back', binding: binding(PATCH_MINOR),
+    before: reader({ allow_auto_merge: false, binding: merged(PATCH_MINOR) }), writer: () => [ok('allow_auto_merge')], after: reader({ binding: merged(PATCH_MINOR) }),
+    expect: { result: 'applied', writes: 1, lines: [/allow auto-merge turned on\./, /read back\./] } },
 ];
 
 test('SE-05 (APPLY): every write and read-back outcome, and what is said about it', async (t) => {
   for (const row of APPLY) {
     await t.test(row.id, (st) => {
-      const root = repo(st, { 'package.json': '{}', '.github/dependabot.yml': COVERED });
+      const root = repo(st, { 'package.json': '{}', '.github/dependabot.yml': COVERED, '.github/toolkit-programme.json': row.binding || binding() });
+      security.writeSecurityFiles(root, { workflow: true });
+      fs.writeFileSync(path.join(root, '.github', 'dependabot.yml'), security.renderDependabotConfig(security.detectEcosystems(root)));
       const before = security.dependencySecurity(root, { reader: row.before, protectionResult: CONFORMANT });
       let writes = 0;
       const outcome = security.applySecurity(root, before, {
@@ -246,6 +302,7 @@ test('SE-05 (APPLY): every write and read-back outcome, and what is said about i
       assert.equal(writes, want.writes);
       if (want.prior) assert.equal(outcome.prior.alerts, want.prior);
       if (want.unavailable) assert.deepEqual(outcome.unavailable, want.unavailable);
+      if (want.unconfirmed) assert.deepEqual(outcome.unconfirmed, want.unconfirmed);
       const text = security.describeOutcome(before.slug, root, before, outcome).join('\n');
       for (const line of want.lines || []) assert.match(text, line);
       for (const line of want.never || []) assert.doesNotMatch(text, line);
@@ -302,11 +359,14 @@ test('SE-08: the reader only reads, hides nothing it could not see, and reads th
     'repos/o/r/code-scanning/default-setup': { state: 'not-configured' },
     'repos/o/r/private-vulnerability-reporting': { enabled: false },
     'repos/o/r/contents/.github/toolkit-programme.json?ref=main': { encoding: 'base64', content },
+    'repos/o/r/contents/.github/workflows?ref=main': [{ type: 'file', name: 'scan.yml' }, { type: 'file', name: 'notes.txt' }],
+    'repos/o/r/contents/.github/workflows/scan.yml?ref=main': { encoding: 'base64', content: Buffer.from('steps:\n  - uses: github/codeql-action/upload-sarif@v3\n').toString('base64') },
   }, calls) });
   assert.deepEqual(read, {
     ok: true, visibility: 'public', allow_auto_merge: false, alerts: 'disabled', security_updates: 'enabled', secret_scanning: 'enabled',
     push_protection: 'disabled', code_scanning: 'disabled', private_reporting: 'disabled', binding: { status: 'ok', text: binding(PATCH_MINOR) },
-  });
+    advanced_codeql: null,
+  }, 'an upload-sarif step for another scanner is not an advanced CodeQL setup');
   assert.ok(calls.every(args => !args.includes('-X')), 'reads are GETs');
   // Without admin rights GitHub hides the settings: a 404 is unreadable, not off.
   const guest = security.ghSecurityReader('o/p', { spawn: fakeGh({
@@ -323,6 +383,22 @@ test('SE-08: the reader only reads, hides nothing it could not see, and reads th
     'repos/o/p/code-scanning/default-setup': 'gh: Advanced Security must be enabled for this repository (HTTP 403)',
   }, []) });
   assert.deepEqual([admin.alerts, admin.secret_scanning, admin.code_scanning, admin.private_reporting, admin.binding.status], ['enabled', 'not-on-plan', 'not-on-plan', 'not-on-plan', 'unreadable']);
+  // An advanced setup is found on the default branch; workflows that cannot be read rule nothing out.
+  const repoRead = { private: false, default_branch: 'main', permissions: { admin: true }, allow_auto_merge: true };
+  const codeql = name => security.ghSecurityReader('o/c', { spawn: fakeGh({
+    'repos/o/c': repoRead, 'repos/o/c/code-scanning/default-setup': { state: 'not-configured' },
+    'repos/o/c/contents/.github/workflows?ref=main': [{ type: 'file', name }],
+    'repos/o/c/contents/.github/workflows/codeql.yml?ref=main': { encoding: 'base64', content: Buffer.from('steps:\n  - uses: "github/codeql-action/init@abc"\n').toString('base64') },
+  }, []) }).advanced_codeql;
+  assert.equal(codeql('codeql.yml'), 'codeql.yml');
+  assert.equal(codeql('gone.yml'), 'unreadable');
+  for (const [text, runs] of [['uses: github/codeql-action/init@v3', true], ['uses: github/codeql-action/analyze@v3', true], ['uses: github/codeql-action/upload-sarif@v3', false], ['# github/codeql-action/init', false]]) assert.equal(security.runsCodeql(text), runs, text);
+  // A default ref GitHub cannot resolve is unreadable, never "not merged".
+  const noRef = security.ghSecurityReader('o/r', { spawn: fakeGh({
+    'repos/o/r': repoRead, 'repos/o/r/code-scanning/default-setup': { state: 'configured' },
+    'repos/o/r/contents/.github/toolkit-programme.json?ref=main': 'gh: No commit found for the ref main (HTTP 404)',
+  }, []) });
+  assert.equal(noRef.binding.status, 'unreadable');
   // No visibility: nothing is guessed.
   assert.deepEqual(security.ghSecurityReader('o/x', { spawn: fakeGh({ 'repos/o/x': { default_branch: 'main' } }, []) }), { ok: false, reason: 'visibility-unreadable' });
 });
@@ -345,28 +421,47 @@ test('SE-09: the writer calls only the endpoints for the fixes it is given, and 
   assert.equal(answer('gh: Secret Protection is not available on this plan (HTTP 403)'), 'not-on-plan');
   assert.equal(answer('gh: This setting is disabled by your organization (HTTP 422)'), 'refused-by-policy');
   assert.equal(answer('gh: Must have admin rights to Repository. (HTTP 403)'), 'forbidden');
+  assert.equal(answer('gh: Resource protected by organization SAML enforcement (HTTP 403)'), 'forbidden', 'SAML is not a policy refusal');
+  assert.equal(answer('gh: API rate limit exceeded for the explanation of the plan (HTTP 403)'), 'forbidden', 'a rate limit is not a plan refusal');
   assert.equal(answer('gh: Validation Failed (HTTP 422)'), 'gh-request-failed');
 });
 
 const TEMPLATE = fs.readFileSync(path.join(ROOT, ...security.WORKFLOW_TEMPLATE_REL.split('/')), 'utf8').replace(/\r\n/g, '\n');
 
 test('SE-10: the auto-merge workflow stays guarded, and this repository carries the current copy', () => {
-  assert.ok(TEMPLATE.startsWith('# Toolkit dependency auto-merge v2.'));
+  assert.ok(TEMPLATE.startsWith('# Toolkit dependency auto-merge v3.'));
   assert.match(TEMPLATE, /^on:\n {2}pull_request:\n {4}types: \[opened, reopened, synchronize, edited\]\n/m, 'never pull_request_target');
   assert.doesNotMatch(TEMPLATE, /pull_request_target|actions\/checkout|secrets\./, 'no PR code checkout and no secrets');
-  assert.match(TEMPLATE, /^permissions:\n {2}contents: write\n {2}pull-requests: write\n\n/m);
-  assert.match(TEMPLATE, /^ {2}auto-merge:\n[^\n]*\n {4}if: github\.event\.pull_request\.user\.login == 'dependabot\[bot\]' && github\.actor == 'dependabot\[bot\]' && github\.event\.action != 'edited'\n/m);
-  assert.match(TEMPLATE, /^ {2}disarm:\n[^\n]*\n {4}if: github\.event\.pull_request\.user\.login == 'dependabot\[bot\]' && \(\(github\.event\.action != 'edited' && github\.actor != 'dependabot\[bot\]'\) \|\| \(github\.event\.action == 'edited' && github\.event\.changes\.base\)\)\n/m,
-    'a push by anyone else, or a base change, turns auto-merge off (I7)');
+  assert.doesNotMatch(TEMPLATE.split('\njobs:\n')[0], /^permissions:/m, 'no workflow-wide permissions');
+  const jobs = jobBlocks(TEMPLATE);
+  for (const [name, text] of Object.entries(jobs)) assert.match(text, /^ {4}permissions:\n/m, `${name} sets its own permissions`);
+  assert.match(jobs['auto-merge'], /^ {4}permissions:\n {6}contents: write\n {6}pull-requests: write\n/m);
+  assert.match(jobs.disarm, /^ {4}permissions:\n {6}pull-requests: write\n {4}steps:/m, 'the turn-off job only needs pull requests');
+  assert.match(jobs['auto-merge'], /^ {4}concurrency:\n/m);
+  assert.doesNotMatch(jobs.disarm, /concurrency/, 'a turn-off run is never a waiting run a newer one cancels (I7)');
+  assert.doesNotMatch(TEMPLATE.split('\njobs:\n')[0], /concurrency/, 'no workflow-wide concurrency');
   for (const uses of TEMPLATE.match(/uses: \S+/g)) assert.match(uses, /@[0-9a-f]{40}$/, `${uses} is pinned to a full SHA`);
-  assert.match(TEMPLATE, /contents\/\.github\/toolkit-programme\.json\?ref=\$BASE/, 'the policy is read from the base branch');
+  assert.match(TEMPLATE, /contents\/\.github\/toolkit-programme\.json\?ref=\$DEFAULT_BRANCH/, 'the policy is read from the default branch');
   assert.match(TEMPLATE, /github_actions \/\/ "owner"/, 'GitHub Actions updates default to the owner');
-  assert.deepEqual([...new Set(TEMPLATE.match(/gh pr merge [^\n]*/g))].sort(), ['gh pr merge --auto --merge "$PR_URL"', 'gh pr merge --disable-auto "$PR_URL"'], 'merge commits only, always through auto-merge');
+  assert.deepEqual([...new Set(TEMPLATE.match(/gh pr merge [^\n]*/g))].sort(), ['gh pr merge --auto --merge --match-head-commit "$HEAD_SHA" "$PR_URL"', 'gh pr merge --disable-auto "$PR_URL"'], 'merge commits only, through auto-merge, pinned to the checked head');
   assert.equal(security.workflowState(ROOT), 'current');
   const own = security.dependencySecurity(ROOT, { offline: true });
   assert.equal(own.checks.S3.status, 'ok', 'this repository covers its own ecosystems');
   assert.equal(fs.readFileSync(path.join(ROOT, '.github', 'dependabot.yml'), 'utf8').replace(/\r\n/g, '\n'), security.renderDependabotConfig(security.detectEcosystems(ROOT)), 'this repository carries the config Toolkit writes');
 });
+
+// Each job's text, by name.
+function jobBlocks(text) {
+  const jobs = {};
+  const body = text.split('\njobs:\n')[1];
+  let name = null;
+  for (const line of body.split('\n')) {
+    const start = /^ {2}([\w-]+):$/.exec(line);
+    if (start) { name = start[1]; jobs[name] = ''; continue; }
+    if (name) jobs[name] += `${line}\n`;
+  }
+  return jobs;
+}
 
 // The shell of each `run: |` block in the workflow, by job.
 function runBlocks(text) {
@@ -386,13 +481,58 @@ function runBlocks(text) {
   return blocks;
 }
 
+// Evaluates a job's `if:` for one event the way GitHub does for these operators (==, !=, &&, ||,
+// parentheses, strings, and an object being truthy). Anything else in the expression throws.
+function evaluateIf(expression, context) {
+  const lookup = name => name.split('.').slice(1).reduce((value, key) => (value == null ? undefined : value[key]), context);
+  const code = expression
+    .replace(/github(?:\.[\w]+)+/g, name => JSON.stringify(lookup(name) === undefined ? null : lookup(name)))
+    .replace(/==/g, '===').replace(/!=(?!=)/g, '!==');
+  if (/[^\s()'"&|!=\w\[\]{}:,.-]/.test(code.replace(/'[^']*'|"[^"]*"/g, ''))) throw new Error(`unexpected expression: ${expression}`);
+  // eslint-disable-next-line no-new-func
+  return Boolean(Function(`"use strict"; return (${code});`)());
+}
+
+const DEPENDABOT = 'dependabot[bot]';
+const PERSON = 'someone';
+const event = (action, actor, triggering = actor, extra = {}) => ({ actor, triggering_actor: triggering, event: { action, pull_request: { user: { login: extra.author || DEPENDABOT } }, ...(extra.changes ? { changes: extra.changes } : {}) } });
+// Which job runs for each event x actor x first run or re-run (I7).
+const CONDITIONS = [
+  { id: 'C01 Dependabot opens it', context: event('opened', DEPENDABOT), runs: ['auto-merge'] },
+  { id: 'C02 Dependabot pushes (a rebase)', context: event('synchronize', DEPENDABOT), runs: ['auto-merge'] },
+  { id: 'C03 Dependabot reopens it', context: event('reopened', DEPENDABOT), runs: ['auto-merge'] },
+  { id: 'C04 someone else pushes to it', context: event('synchronize', PERSON), runs: ['disarm'] },
+  { id: 'C05 someone else reopens it', context: event('reopened', PERSON), runs: ['disarm'] },
+  { id: 'C06 someone re-runs a run Dependabot started', context: event('synchronize', DEPENDABOT, PERSON), runs: ['disarm'] },
+  { id: 'C07 someone re-runs the opening run', context: event('opened', DEPENDABOT, PERSON), runs: ['disarm'] },
+  { id: 'C08 a title edit', context: event('edited', PERSON, PERSON, { changes: { title: { from: 'x' } } }), runs: [] },
+  { id: 'C09 a base branch edit', context: event('edited', PERSON, PERSON, { changes: { base: { ref: { from: 'main' } } } }), runs: ['disarm'] },
+  { id: 'C10 a pull request someone else opened', context: event('opened', PERSON, PERSON, { author: PERSON }), runs: [] },
+  { id: 'C11 Dependabot pushes to someone else\'s pull request', context: event('synchronize', DEPENDABOT, DEPENDABOT, { author: PERSON }), runs: [] },
+];
+
+test('SE-11 (CONDITIONS): which job runs, by event, actor and re-run, evaluated', async (t) => {
+  const jobs = jobBlocks(TEMPLATE);
+  const conditions = Object.fromEntries(Object.entries(jobs).map(([name, text]) => [name, /^ {4}if: (.+)$/m.exec(text)[1]]));
+  assert.deepEqual(Object.keys(conditions).sort(), ['auto-merge', 'disarm']);
+  for (const row of CONDITIONS) {
+    await t.test(row.id, () => {
+      const runs = Object.keys(conditions).filter(name => evaluateIf(conditions[name], row.context)).sort();
+      assert.deepEqual(runs, row.runs);
+    });
+  }
+});
+
 const HAS_SHELL = process.platform !== 'win32' && ['bash', 'jq', 'base64'].every(tool => childProcess.spawnSync('sh', ['-c', `command -v ${tool}`]).status === 0);
 
-// Runs one job's shell with a fake `gh` that answers from the row and logs every call.
+// Runs one job's shell with a fake `gh` that answers from the row, keeps the auto-merge state in a
+// file, and logs every call.
 function runJob(t, job, env) {
   const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-auto-merge-'));
   t.after(() => fs.rmSync(folder, { recursive: true, force: true }));
   const log = path.join(folder, 'gh.log');
+  const state = path.join(folder, 'armed');
+  fs.writeFileSync(state, env.FAKE_ARMED || 'false');
   fs.writeFileSync(path.join(folder, 'gh'), [
     '#!/usr/bin/env bash',
     'echo "$*" >> "$GH_LOG"',
@@ -400,31 +540,46 @@ function runJob(t, job, env) {
     '  case "$2" in',
     '    */contents/*) if [ -n "${FAKE_BINDING_FAIL:-}" ]; then exit 1; fi; printf "%s" "$FAKE_BINDING" | base64; exit 0 ;;',
     '    */rules/branches/*) if [ -n "${FAKE_RULES_FAIL:-}" ]; then exit 1; fi; echo "$FAKE_REQUIRED"; exit 0 ;;',
+    '    */pulls/*/commits*) if [ -n "${FAKE_COMMITS_FAIL:-}" ]; then exit 1; fi; echo "$FAKE_FOREIGN"; exit 0 ;;',
     '  esac',
     'fi',
     'if [ "$1 $2" = "pr view" ]; then',
-    '  case "$*" in *autoMergeRequest*) echo "$FAKE_ARMED" ;; *comments*) echo "$FAKE_COMMENTS" ;; esac',
+    '  case "$*" in',
+    '    *autoMergeRequest*) if [ -n "${FAKE_VIEW_FAIL:-}" ]; then exit 1; fi; cat "$FAKE_STATE" ;;',
+    '    *headRefOid*) echo "$FAKE_HEAD" ;;',
+    '    *comments*) echo "$FAKE_COMMENTS" ;;',
+    '  esac',
+    '  exit 0',
+    'fi',
+    'if [ "$1 $2" = "pr merge" ]; then',
+    '  case "$*" in',
+    '    *--disable-auto*) if [ -z "${FAKE_STUCK:-}" ]; then echo false > "$FAKE_STATE"; fi ;;',
+    '    *--auto*) echo true > "$FAKE_STATE" ;;',
+    '  esac',
     'fi',
     'exit 0',
     '',
   ].join('\n'), { mode: 0o755 });
   const result = childProcess.spawnSync('bash', ['-c', runBlocks(TEMPLATE)[job]], {
-    encoding: 'utf8', env: { ...process.env, PATH: `${folder}${path.delimiter}${process.env.PATH}`, GH_LOG: log, ...env },
+    encoding: 'utf8', env: { ...process.env, PATH: `${folder}${path.delimiter}${process.env.PATH}`, GH_LOG: log, FAKE_STATE: state, ...env },
   });
-  assert.equal(result.status, 0, result.stderr);
   const calls = fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : '';
-  return { calls, armed: /pr merge --auto --merge/.test(calls), disarmed: /pr merge --disable-auto/.test(calls), commented: /pr comment/.test(calls), stdout: result.stdout };
+  return {
+    calls, code: result.status, stdout: result.stdout, armedAfter: fs.readFileSync(state, 'utf8').trim() === 'true',
+    armed: /pr merge --auto --merge --match-head-commit abc123 /.test(calls), disarmed: /pr merge --disable-auto/.test(calls), commented: /pr comment/.test(calls),
+  };
 }
 
 const patch = (prevVersion = '1.2.3', updateType = 'version-update:semver-patch') => JSON.stringify([{ dependencyName: 'x', prevVersion, newVersion: '', updateType }]);
 const BASE_ENV = Object.freeze({
-  REPOSITORY: 'o/r', BASE: 'main', PR_URL: 'https://github.com/o/r/pull/1', UPDATE_TYPE: 'version-update:semver-patch', ECOSYSTEM: 'npm_and_yarn',
-  MAINTAINER_CHANGES: 'false', UPDATED_DEPENDENCIES: patch(), FAKE_BINDING: binding(PATCH_MINOR), FAKE_REQUIRED: '1', FAKE_ARMED: 'false', FAKE_COMMENTS: '0',
+  REPOSITORY: 'o/r', BASE: 'main', DEFAULT_BRANCH: 'main', PR_URL: 'https://github.com/o/r/pull/1', PR_NUMBER: '1', HEAD_SHA: 'abc123',
+  UPDATE_TYPE: 'version-update:semver-patch', ECOSYSTEM: 'npm_and_yarn', MAINTAINER_CHANGES: 'false', UPDATED_DEPENDENCIES: patch(),
+  FAKE_BINDING: binding(PATCH_MINOR), FAKE_REQUIRED: '1', FAKE_ARMED: 'false', FAKE_COMMENTS: '0', FAKE_FOREIGN: '0', FAKE_HEAD: 'abc123',
 });
 const WORKFLOW = [
-  { id: 'W01 patch, everything allowed: auto-merge on', env: {}, expect: { armed: true, commented: false } },
+  { id: 'W01 patch, everything allowed: auto-merge on, pinned to the head', env: {}, expect: { armed: true, commented: false } },
   { id: 'W02 minor from 1.x: auto-merge on', env: { UPDATE_TYPE: 'version-update:semver-minor', UPDATED_DEPENDENCIES: patch('1.2.3', 'version-update:semver-minor') }, expect: { armed: true } },
-  { id: 'W03 binding off on the base branch, armed before: turned off', env: { FAKE_BINDING: binding(), FAKE_ARMED: 'true' }, expect: { armed: false, disarmed: true, commented: false } },
+  { id: 'W03 binding off on the default branch, armed before: turned off', env: { FAKE_BINDING: binding(), FAKE_ARMED: 'true' }, expect: { armed: false, disarmed: true, commented: false, armedAfter: false } },
   { id: 'W04 binding unreadable: treated as off', env: { FAKE_BINDING_FAIL: '1' }, expect: { armed: false, commented: false } },
   { id: 'W05 rules unreadable: no auto-merge', env: { FAKE_RULES_FAIL: '1' }, expect: { armed: false } },
   { id: 'W06 no required check: no auto-merge', env: { FAKE_REQUIRED: '0' }, expect: { armed: false } },
@@ -437,30 +592,40 @@ const WORKFLOW = [
   { id: 'W13 patch from 0.0.x: flagged', env: { UPDATED_DEPENDENCIES: patch('0.0.3') }, expect: { armed: false, commented: true } },
   { id: 'W14 patch from 0.x: allowed', env: { UPDATED_DEPENDENCIES: patch('0.4.1') }, expect: { armed: true } },
   { id: 'W15 update details unreadable: flagged', env: { UPDATED_DEPENDENCIES: 'not json' }, expect: { armed: false, commented: true } },
-  { id: 'W16 flagged while armed: turned off too', env: { UPDATE_TYPE: 'version-update:semver-major', FAKE_ARMED: 'true' }, expect: { armed: false, disarmed: true, commented: true } },
+  { id: 'W16 flagged while armed: turned off too', env: { UPDATE_TYPE: 'version-update:semver-major', FAKE_ARMED: 'true' }, expect: { armed: false, disarmed: true, commented: true, armedAfter: false } },
   { id: 'W17 flagged again: one comment only', env: { UPDATE_TYPE: 'version-update:semver-major', FAKE_COMMENTS: '1' }, expect: { armed: false, commented: false } },
+  { id: 'W18 a commit that is not Dependabot\'s: flagged', env: { FAKE_FOREIGN: '1' }, expect: { armed: false, commented: true } },
+  { id: 'W19 commits unreadable: flagged', env: { FAKE_COMMITS_FAIL: '1' }, expect: { armed: false, commented: true } },
+  { id: 'W20 the head moved while it ran (a newer push, or a re-run of an older run): flagged', env: { FAKE_HEAD: 'def456' }, expect: { armed: false, commented: true } },
+  { id: 'W21 the base is not the default branch: flagged, and the binding is never read there', env: { BASE: 'develop' }, expect: { armed: false, commented: true, never: /contents\/.*ref=develop/ } },
+  { id: 'W22 the auto-merge state cannot be read when turning it off: the job fails', env: { FAKE_BINDING: binding(), FAKE_VIEW_FAIL: '1' }, expect: { code: 1, commented: false } },
 ];
 const DISARM = [
-  { id: 'D01 a push by someone else while armed: off, owner told', env: { ACTION: 'synchronize', FAKE_ARMED: 'true' }, expect: { disarmed: true, commented: true, said: /someone other than Dependabot/ } },
+  { id: 'D01 a push by someone else while armed: off, owner told', env: { ACTION: 'synchronize', FAKE_ARMED: 'true' }, expect: { disarmed: true, commented: true, armedAfter: false, said: /someone other than Dependabot/ } },
   { id: 'D02 a push by someone else, not armed: owner told', env: { ACTION: 'synchronize' }, expect: { disarmed: false, commented: true } },
   { id: 'D03 the base branch changed', env: { ACTION: 'edited', FAKE_ARMED: 'true' }, expect: { disarmed: true, commented: true, said: /base branch changed/ } },
   { id: 'D04 told once only', env: { ACTION: 'synchronize', FAKE_COMMENTS: '1' }, expect: { commented: false } },
+  { id: 'D05 gh cannot read the state: the job fails and says nothing (I7)', env: { ACTION: 'synchronize', FAKE_VIEW_FAIL: '1' }, expect: { code: 1, commented: false } },
+  { id: 'D06 auto-merge will not turn off: the job fails and says nothing (I7)', env: { ACTION: 'synchronize', FAKE_ARMED: 'true', FAKE_STUCK: '1' }, expect: { code: 1, commented: false, armedAfter: true } },
 ];
 
-test('SE-11 (WORKFLOW, DISARM): the workflow\'s runtime branches, run with a fake gh', { skip: HAS_SHELL ? false : 'needs bash, jq and base64 (not on Windows)' }, async (t) => {
+test('SE-12 (WORKFLOW, DISARM): the workflow\'s runtime branches, run with a fake gh', { skip: HAS_SHELL ? false : 'needs bash, jq and base64 (not on Windows)' }, async (t) => {
   for (const [job, rows] of [['auto-merge', WORKFLOW], ['disarm', DISARM]]) {
     for (const row of rows) {
       await t.test(row.id, (st) => {
         const result = runJob(st, job, { ...BASE_ENV, ...row.env });
-        for (const key of ['armed', 'disarmed', 'commented']) if (key in row.expect) assert.equal(result[key], row.expect[key], `${key}\n${result.calls}`);
+        assert.equal(result.code, row.expect.code === undefined ? 0 : row.expect.code, `${result.stdout}\n${result.calls}`);
+        for (const key of ['armed', 'disarmed', 'commented', 'armedAfter']) if (key in row.expect) assert.equal(result[key], row.expect[key], `${key}\n${result.calls}`);
         if (row.expect.said) assert.match(result.stdout, row.expect.said);
-        assert.doesNotMatch(result.calls, /pr merge (?!--auto --merge|--disable-auto)/, 'no other merge');
+        if (row.expect.never) assert.doesNotMatch(result.calls, row.expect.never);
+        if (row.expect.code) assert.doesNotMatch(result.stdout, /Auto-merge stays off|Flagged for the owner/, 'nothing claimed after a failure');
+        assert.doesNotMatch(result.calls, /pr merge (?!--auto --merge --match-head-commit abc123 |--disable-auto)/, 'no other merge');
       });
     }
   }
 });
 
-test('SE-12: the binding accepts only the known dependency update values', () => {
+test('SE-13: the binding accepts only the known dependency update values', () => {
   const base = JSON.parse(binding());
   programmeState.validateBinding({ ...base, dependency_updates: { auto_merge: 'patch-minor', github_actions: 'owner' } });
   programmeState.validateBinding({ ...base, dependency_updates: {} });

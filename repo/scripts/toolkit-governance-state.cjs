@@ -288,13 +288,14 @@ function policyOf(binding) {
 
 // The policy of binding `text` as committed on the default branch (read from GitHub by the caller,
 // since this module never runs git or gh). Only a merged binding is the owner's answer: a working
-// tree any agent can edit is not. { valid, policy, problems }; an invalid binding has the safe
-// defaults.
+// tree any agent can edit is not. { valid, policy, required_checks, problems }; an invalid binding
+// has the safe defaults and no required checks.
 function committedBindingPolicy(text, identity) {
   let parsed;
-  try { parsed = JSON.parse(String(text).replace(/^\uFEFF/, '')); } catch { return { valid: false, policy: policyOf(null), problems: ['not valid JSON'] }; }
+  try { parsed = JSON.parse(String(text).replace(/^\uFEFF/, '')); } catch { return { valid: false, policy: policyOf(null), required_checks: null, problems: ['not valid JSON'] }; }
   const problems = bindingProblems(parsed, identity);
-  return problems.length ? { valid: false, policy: policyOf(null), problems } : { valid: true, policy: policyOf(parsed), problems: [] };
+  return problems.length ? { valid: false, policy: policyOf(null), required_checks: null, problems }
+    : { valid: true, policy: policyOf(parsed), required_checks: [...parsed.required_checks], problems: [] };
 }
 
 // The policy the working-tree binding asks for, or null when it is missing or invalid. Shown only

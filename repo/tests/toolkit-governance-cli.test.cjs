@@ -356,7 +356,13 @@ test('SC-02: security never says "already on" or "read back" when GitHub could n
   const flaky = () => (reads++ === 0 ? { ...SECURE(), alerts: 'disabled' } : { ok: false, reason: 'gh-unavailable' });
   const unverified = await run(ctx, governed, ['security'], { securityReader: flaky, securityWriter });
   assert.equal(unverified.code, 2);
-  assert.match(unverified.stdout, /could not read the settings back/);
+  assert.match(unverified.stdout, /could not read back: Dependabot alerts/);
+  // The read-back works, but the written setting alone reads unreadable: still unverified, exit 2.
+  let partReads = 0;
+  const partial = () => (partReads++ === 0 ? { ...SECURE(), alerts: 'disabled' } : { ...SECURE(), alerts: 'unreadable' });
+  const part = await run(ctx, governed, ['security'], { securityReader: partial, securityWriter });
+  assert.equal(part.code, 2, part.stdout);
+  assert.match(part.stdout, /could not read back: Dependabot alerts/);
   assert.doesNotMatch(unverified.stdout, /read back\./);
 });
 
