@@ -65,7 +65,7 @@ const BRANCH_PROTECTED = () => ({
 });
 const WORKFLOW = [
   'on:', '  pull_request:', 'jobs:', '  tests:', '    runs-on: ubuntu-latest', '  validate:', '    needs: [tests]', '    if: ${{ always() }}',
-  '    runs-on: ubuntu-latest', '    steps:', '      - env:', '          LEGS: ${{ toJSON(needs) }}', '        run: node verify.cjs', '',
+  '    runs-on: ubuntu-latest', '    steps:', '      - env:', '          TEST_LEGS: ${{ toJSON(needs) }}', '        run: node repo/scripts/run-tests.cjs --verify-ci s', '',
 ].join('\n');
 
 async function run(ctx, cwd, argv, { answer = 'yes', interactive = true, rulesetReader = PROTECTED, protectionReader = BRANCH_PROTECTED, securityReader = SECURE, securityWriter = null } = {}) {
@@ -275,6 +275,8 @@ test('K-01: check exit codes and read-only behaviour', async (t) => {
   assert.equal(JSON.parse(offline.stdout).no_force_push_ruleset.status, 'not-checked');
   assert.equal((await run(ctx, conformant, ['status', '--offline'])).code, 2, '--offline belongs to check only');
   assert.equal(JSON.parse(offline.stdout).default_branch_protection.checks.P5.status, 'not-checked');
+  // The first line never says plain "conformant" while items are unverified.
+  assert.match((await run(ctx, conformant, ['check', '--offline'])).stdout, /^Conformance: conformant \(\d+ items? unverified\)$/m);
 
   // Default-branch protection drift is drift; GitHub unreadable is unverified, never conformant.
   const squash = () => { const read = BRANCH_PROTECTED(); read.rules[0].parameters.allowed_merge_methods = ['merge', 'squash']; return read; };
@@ -295,6 +297,13 @@ test('K-01: check exit codes and read-only behaviour', async (t) => {
   const ignored = await run(ctx, stale, ['check', '--json']);
   assert.equal(ignored.code, 0);
   assert.deepEqual(JSON.parse(ignored.stdout).findings.map(entry => entry.id), ['GOVERNED_BLOCK_IGNORED']);
+  // DISABLED and UNDECIDED repositories never ask GitHub about default-branch protection.
+  for (const repo of [stale, unasked]) {
+    let asked = false;
+    const result = JSON.parse((await run(ctx, repo, ['check', '--json'], { protectionReader: () => { asked = true; return BRANCH_PROTECTED(); } })).stdout);
+    assert.equal(asked, false, repo);
+    assert.equal(result.default_branch_protection, null, repo);
+  }
 });
 
 test('SC-01: security turns on the free settings of a governed repository without a question, and only there', async (t) => {

@@ -9,17 +9,24 @@
 //      ruleset rule plus classic branch protection) are exactly the binding's `required_checks`.
 //   P2 pinned source: each required check is pinned to an app, so a job of the same name in any
 //      other workflow (or a commit status) cannot satisfy it.
-//   P3 one producer: exactly one job across .github/workflows yields each required name.
+//   P3 one producer: exactly one job across .github/workflows yields each required name. A job
+//      named by an expression that could produce the name leaves P3 unverified.
 //   P4 no masking: that job's workflow runs on every pull request to the default branch (no path
-//      filters, no branch filter that leaves the default branch out); a job with `needs` runs
-//      `if: always()` or `!cancelled()` and reads its needed jobs' results (`toJSON(needs)` or
-//      `needs.<job>.result`). A job that waits without reading them is reported unverified, never
-//      conformant.
+//      filters, no branch filter that leaves the default branch out), and its `if:` is absent or
+//      exactly `always()` or `!cancelled()` (GitHub reports a skipped job as success, so any other
+//      condition can pass the check without running it). A job with `needs` must run `always()` or
+//      `!cancelled()` and have a step whose exit code is the declared aggregate command's: no step
+//      `if`, `continue-on-error`, custom shell or working directory, `TEST_LEGS: ${{ toJSON(needs) }}`,
+//      and a script of plain `node <file>.cjs` lines ending with `node repo/scripts/run-tests.cjs
+//      --verify-ci`, which fails unless every needed job succeeded (see aggregateProblem). Without
+//      one, or with YAML this reader does not follow (anchors, flow mappings, folded scalars),
+//      P4 is unverified, never conformant.
 //   P5 merge commits only: the default branch allows only merge commits (ruleset
 //      `allowed_merge_methods`, the most restrictive across rulesets, else the repository settings).
 //
 // P1, P2 and P5 ask GitHub through the signed-in `gh` CLI (GET /repos/{slug}, the active rules for
-// the default branch, and classic branch protection, which needs admin); P3 and P4 read the
+// the default branch, classic branch protection, which needs admin, and the repository's rulesets,
+// to find the one Toolkit names); P3 and P4 read the
 // checked-out workflow files. `--offline` checks P3 and P4 only. Nothing here writes, except
 // `ghProtectionRulesetWriter`, which only `toolkit governance migrate` calls after the owner's typed
 // yes; it creates or updates the one ruleset Toolkit names and never touches any other.
@@ -41,6 +48,22 @@ const MAX_WORKFLOW_BYTES = 512 * 1024;
 const GITHUB_ACTIONS_APP_ID = 15368;
 const RULESET_NAME = 'Toolkit: protected default branch';
 const PR_EVENTS = Object.freeze(['pull_request', 'pull_request_target']);
+// The declared aggregate command: this repository's own check that fails unless every needed job
+// succeeded, reading the needs results from TEST_LEGS. Other repositories have none yet, so a job
+// with `needs` there is unverified.
+const AGGREGATE_LINE = /^node\s+repo\/scripts\/run-tests\.cjs\s+--verify-ci(?:\s+(?:[A-Za-z0-9_./:@%+,=-]+|"[A-Za-z0-9_./:@%+,=$ -]*"))?$/;
+const AGGREGATE_ENV = 'TEST_LEGS';
+const PASSES_NEEDS = /^\$\{\{\s*toJSON\(\s*needs\s*\)\s*\}\}$/;
+// A plain command line: `node <file>.cjs` and literal arguments, nothing a shell would treat
+// specially (no operators, redirections, substitutions, expressions or unquoted variables).
+const ARGUMENT = '(?:--?[A-Za-z0-9][A-Za-z0-9-]*(?:=[A-Za-z0-9_./:@%+,-]*)?|[A-Za-z0-9_./:@%+,=][A-Za-z0-9_./:@%+,=-]*|"[A-Za-z0-9_./:@%+,=$ -]*")';
+const PLAIN_LINE = new RegExp(`^node\\s+[A-Za-z0-9_][A-Za-z0-9_./-]*\\.c?js(?:\\s+${ARGUMENT})*$`);
+// Shells under which the script's last command decides the step's result.
+const PLAIN_SHELLS = Object.freeze(['bash', 'pwsh', 'sh']);
+// Environment that changes how node or the shell starts.
+const STARTUP_ENV = /^(?:PATH|BASH_ENV|ENV|NODE_[A-Z_]*)$/i;
+// The only job conditions that cannot skip the job on a pull request.
+const SAFE_IF = /^(?:\$\{\{\s*)?(?:always\(\)|!\s*cancelled\(\))(?:\s*\}\})?$/;
 
 // ---- workflow files (P3, P4) ------------------------------------------------------------------
 
@@ -99,7 +122,111 @@ function blockList(lines, entry) {
   const inline = inlineList(entry.value);
   if (inline) return inline;
   if (entry.value && !['|', '>'].includes(entry.value.trim())) return [unquote(entry.value)];
-  return lines.slice(entry.index + 1, entry.end).filter(line => line.text.startsWith('- ')).map(line => unquote(line.text.slice(2)));
+  const nested = lines.slice(entry.index + 1, entry.end).filter(line => line.text.startsWith('- ')).map(line => unquote(line.text.slice(2)));
+  if (nested.length) return nested;
+  // An indentless list: the items sit at the key's own indent.
+  const items = [];
+  for (let index = entry.end; index < lines.length && lines[index].indent === lines[entry.index].indent && lines[index].text.startsWith('- '); index += 1) items.push(unquote(lines[index].text.slice(2)));
+  return items;
+}
+
+// A scalar field's value; a block scalar (`|` or `>`) is its lines joined by `joiner`. A plain or
+// quoted scalar that continues on the next lines (YAML folds them into one) is null: unreadable.
+function scalarValue(lines, entry, joiner = ' ') {
+  if (/^[|>][+-]?$/.test(entry.value.trim())) return lines.slice(entry.index + 1, entry.end).map(line => line.text).join(joiner).trim();
+  if (entry.end > entry.index + 1) return null;
+  return unquote(entry.value);
+}
+
+// A mapping field's entries as { key: value } (values may be null), or null for a flow mapping.
+function mapping(lines, entry) {
+  if (!entry) return {};
+  if (entry.value.trim()) return null;
+  return Object.fromEntries(children(lines, entry.index + 1, entry.end).map(item => [item.key, scalarValue(lines, item)]));
+}
+
+// The steps of a job as [{ run, run_style, env, if, continue_on_error, shell, working_directory, uses }]
+// (comments stripped), or [] when it has none.
+function readSteps(lines, stepsEntry) {
+  if (!stepsEntry) return [];
+  const body = lines.slice(stepsEntry.index + 1, stepsEntry.end);
+  if (!body.length) return [];
+  const itemIndent = body[0].indent;
+  const steps = [];
+  for (let index = 0; index < body.length; index += 1) {
+    const line = body[index];
+    if (line.indent !== itemIndent || !line.text.startsWith('- ')) continue;
+    let stop = index + 1;
+    while (stop < body.length && !(body[stop].indent <= itemIndent)) stop += 1;
+    // Re-indent the item's first line so its keys line up with the rest of the item.
+    const item = [{ indent: itemIndent + 2, text: line.text.slice(2).trim(), raw: line.raw }, ...body.slice(index + 1, stop)];
+    const fields = children(item, 0, item.length);
+    const field = key => fields.find(entry => entry.key === key);
+    const run = field('run');
+    steps.push({
+      run: run ? scalarValue(item, run, '\n') : null,
+      run_style: run ? (/^\|[+-]?$/.test(run.value.trim()) ? 'literal' : /^[|>]/.test(run.value.trim()) ? 'other' : 'plain') : null,
+      env: mapping(item, field('env')),
+      if: field('if') ? field('if').value : null,
+      continue_on_error: field('continue-on-error') ? scalarValue(item, field('continue-on-error')) : null,
+      shell: field('shell') ? scalarValue(item, field('shell')) : null,
+      working_directory: Boolean(field('working-directory')),
+      uses: Boolean(field('uses')),
+    });
+    index = stop - 1;
+  }
+  return steps;
+}
+
+// `defaults.run` of a workflow or job: { shell, working_directory }, or null when unreadable.
+function runDefaults(lines, entry) {
+  if (!entry) return { shell: null, working_directory: false };
+  const defaults = children(lines, entry.index + 1, entry.end);
+  if (entry.value.trim()) return null;
+  const run = defaults.find(item => item.key === 'run');
+  if (!run) return { shell: null, working_directory: false };
+  const values = mapping(lines, run);
+  if (!values) return null;
+  return { shell: values.shell === undefined ? null : values.shell, working_directory: 'working-directory' in values };
+}
+
+const notFalse = value => value !== null && value !== undefined && value !== 'false';
+
+// Why `job` does not prove that it fails when a needed job did not succeed, or null when a step
+// does: that step has no `if`, `continue-on-error`, `uses` or `working-directory`, runs under a
+// plain shell, gets TEST_LEGS exactly `${{ toJSON(needs) }}`, and its script is plain command
+// lines ending with the aggregate command, so that command's exit code is the step's. Nothing in
+// the job or workflow may change how node or the shell starts.
+function aggregateProblem(job, workflowContext) {
+  if (notFalse(job.continue_on_error)) return 'the job has continue-on-error';
+  if (!workflowContext.defaults || !job.defaults) return 'its defaults could not be read';
+  if (workflowContext.defaults.working_directory || job.defaults.working_directory) return 'a working-directory default moves the command';
+  if (!workflowContext.env || !job.env) return 'its environment could not be read';
+  const startup = [...Object.keys(workflowContext.env), ...Object.keys(job.env), ...job.steps.flatMap(step => Object.keys(step.env || {}))].find(key => STARTUP_ENV.test(key));
+  if (startup) return `${startup} is set, which changes how node or the shell starts`;
+  if (job.steps.some(step => step.run === null ? false : /GITHUB_(?:ENV|PATH)/.test(step.run))) return 'a step writes GITHUB_ENV or GITHUB_PATH';
+  const reasons = [];
+  for (const step of job.steps) {
+    if (step.run === null || step.uses) continue;
+    if (!AGGREGATE_LINE.test(step.run.split('\n').filter(Boolean).at(-1) || '')) continue;
+    const shell = step.shell !== null ? step.shell : job.defaults.shell !== null ? job.defaults.shell : workflowContext.defaults.shell;
+    const legs = step.env && Object.prototype.hasOwnProperty.call(step.env, AGGREGATE_ENV) ? step.env[AGGREGATE_ENV] : job.env[AGGREGATE_ENV];
+    if (step.if !== null) reasons.push('the aggregate step has its own `if`');
+    else if (notFalse(step.continue_on_error)) reasons.push('the aggregate step has continue-on-error');
+    else if (step.working_directory) reasons.push('the aggregate step sets working-directory');
+    else if (!step.env) reasons.push('the aggregate step\'s env could not be read');
+    else if (shell !== null && !PLAIN_SHELLS.includes(shell)) reasons.push(`the aggregate step runs under shell "${shell}"`);
+    else if (step.run_style === 'other') reasons.push('the aggregate step\'s script is a folded block');
+    else if (!step.run.split('\n').filter(Boolean).every(line => PLAIN_LINE.test(line))) reasons.push('the aggregate step\'s script has a line that is not a plain node command');
+    else if (typeof legs !== 'string' || !PASSES_NEEDS.test(legs.trim())) reasons.push(`the aggregate step does not get ${AGGREGATE_ENV}: \${{ toJSON(needs) }}`);
+    else return null;
+  }
+  return reasons[0] || `no step ends with the declared aggregate command (node repo/scripts/run-tests.cjs --verify-ci with ${AGGREGATE_ENV}: \${{ toJSON(needs) }})`;
+}
+
+// YAML features the reader does not follow: anchors, aliases and merge keys.
+function unfollowedYaml(lines) {
+  return lines.some(line => /^<<\s*:/.test(line.text) || /(?::|^-)\s+[&*][A-Za-z0-9_-]+(?:\s|$)/.test(line.text));
 }
 
 // { triggers: Map(event -> { filters: { paths, paths-ignore, branches, branches-ignore } }), jobs: [...] }
@@ -127,9 +254,14 @@ function readWorkflow(text) {
     }
   }
   const jobs = [];
+  const problems = [];
+  if (unfollowedYaml(lines)) problems.push('it uses YAML anchors, aliases or merge keys, which this check does not follow');
+  const workflowContext = { defaults: runDefaults(lines, top.find(entry => entry.key === 'defaults')), env: mapping(lines, top.find(entry => entry.key === 'env')) };
   const jobsEntry = top.find(entry => entry.key === 'jobs');
+  if (jobsEntry && jobsEntry.value.trim()) problems.push('its jobs are written as a flow mapping');
   if (jobsEntry) {
     for (const job of children(lines, jobsEntry.index + 1, jobsEntry.end)) {
+      if (job.value.trim()) problems.push(`job ${job.key} is written on one line (a flow mapping)`);
       const fields = children(lines, job.index + 1, job.end);
       const field = key => fields.find(entry => entry.key === key);
       const nameField = field('name');
@@ -137,20 +269,32 @@ function readWorkflow(text) {
       const needsField = field('needs');
       const strategy = field('strategy');
       const matrix = strategy ? children(lines, strategy.index + 1, strategy.end).some(entry => entry.key === 'matrix') : false;
-      const body = lines.slice(job.index + 1, job.end).map(line => line.raw).join('\n');
-      jobs.push({
+      const ifField = field('if');
+      const needs = needsField ? blockList(lines, needsField) : [];
+      const unreadable = [];
+      if (job.value.trim()) unreadable.push('the job is a flow mapping');
+      if (needsField && needs.length === 0) unreadable.push('its needs could not be read');
+      const ifValue = ifField ? scalarValue(lines, ifField) : null;
+      if (ifField && ifValue === null) unreadable.push('its if could not be read');
+      const entry = {
         key: job.key,
         name,
         dynamic_name: name.includes('${{'),
         matrix,
         reusable: Boolean(field('uses')),
-        needs: needsField ? blockList(lines, needsField) : [],
-        if: field('if') ? unquote(field('if').value) : null,
-        reads_needs_results: /toJSON\(\s*needs\s*\)/.test(body) || /\bneeds\.[A-Za-z0-9_-]+\.result\b/.test(body) || /\bneeds\.\*\.result\b/.test(body),
-      });
+        needs,
+        if: ifValue,
+        unreadable,
+        continue_on_error: field('continue-on-error') ? scalarValue(lines, field('continue-on-error')) : null,
+        defaults: runDefaults(lines, field('defaults')),
+        env: mapping(lines, field('env')),
+        steps: readSteps(lines, field('steps')),
+      };
+      entry.aggregate_problem = needs.length ? aggregateProblem(entry, workflowContext) : null;
+      jobs.push(entry);
     }
   }
-  return { triggers, jobs };
+  return { triggers, jobs, problems };
 }
 
 // Every workflow under .github/workflows at `root`: [{ file, workflow }] or [{ file, error }].
@@ -173,33 +317,49 @@ function globMatches(pattern, value) {
   return new RegExp(`^${expression}$`).test(value);
 }
 
-// Why this workflow can skip a pull request to `defaultBranch`, or null when it cannot.
+// Why this workflow can skip a pull request to `defaultBranch` (null when unknown), or null when it
+// cannot; { unverified } when that depends on the unknown default branch.
 function maskingTrigger(workflow, defaultBranch) {
   const events = PR_EVENTS.filter(event => workflow.triggers.has(event));
   if (events.length === 0) return 'the workflow does not run on pull requests';
   for (const event of events) {
     const filters = workflow.triggers.get(event).filters;
     if (filters.paths || filters['paths-ignore']) return `its ${event} trigger has a path filter, which leaves the check pending`;
+    if ((filters.branches || filters['branches-ignore']) && defaultBranch === null) return { unverified: `its ${event} trigger has a branch filter and the default branch is unknown (no GitHub read and no origin/HEAD)` };
     if (filters.branches && !filters.branches.some(pattern => globMatches(pattern, defaultBranch))) return `its ${event} branch filter leaves out ${defaultBranch}`;
     if (filters['branches-ignore'] && filters['branches-ignore'].some(pattern => globMatches(pattern, defaultBranch))) return `its ${event} trigger ignores ${defaultBranch}`;
   }
   return null;
 }
 
+// Whether an expression-named job's name could come out as `check`.
+function couldProduce(name, check) {
+  const expression = String(name).split(/\$\{\{[\s\S]*?\}\}/).map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('[\\s\\S]*');
+  return new RegExp(`^${expression}$`).test(check);
+}
+
 // P3 and P4 for each required name over read workflows.
 function producerVerdict(requiredChecks, workflows, defaultBranch) {
   const p3 = [];
+  const p3Unverified = [];
+  const missing = [];
   const p4 = [];
   const p4Unverified = [];
-  const unreadable = workflows.filter(entry => entry.error).map(entry => entry.file);
+  const unreadable = [
+    ...workflows.filter(entry => entry.error).map(entry => `${entry.file} could not be read`),
+    ...workflows.filter(entry => entry.workflow && entry.workflow.problems && entry.workflow.problems.length).map(entry => `${entry.file}: ${entry.workflow.problems.join('; ')}`),
+  ];
+  const neverReports = [];
   for (const check of requiredChecks) {
     const producers = [];
     for (const entry of workflows) {
       if (!entry.workflow) continue;
       for (const job of entry.workflow.jobs) {
-        if (!job.dynamic_name && !job.matrix && !job.reusable && job.name === check) producers.push({ file: entry.file, workflow: entry.workflow, job });
+        if (job.dynamic_name && couldProduce(job.name, check)) p3Unverified.push(`${entry.file} ${job.key} is named by an expression that could produce "${check}"`);
+        else if (!job.dynamic_name && !job.matrix && !job.reusable && job.name === check) producers.push({ file: entry.file, workflow: entry.workflow, job });
       }
     }
+    if (producers.length === 0) missing.push(check);
     if (producers.length !== 1) {
       p3.push(producers.length === 0
         ? `no workflow job is named "${check}"`
@@ -208,18 +368,21 @@ function producerVerdict(requiredChecks, workflows, defaultBranch) {
     }
     const [{ file, workflow, job }] = producers;
     const trigger = maskingTrigger(workflow, defaultBranch);
-    if (trigger) p4.push(`"${check}" (${file}): ${trigger}`);
-    if (job.needs.length > 0) {
-      const runsAlways = job.if !== null && /\balways\(\)|!\s*cancelled\(\)/.test(job.if);
-      if (!runsAlways) p4.push(`"${check}" (${file}) waits for ${job.needs.join(', ')} without \`if: always()\`, so a failed one skips it and a skipped job reports success`);
-      else if (!job.reads_needs_results) p4Unverified.push(`"${check}" (${file}) runs after ${job.needs.join(', ')} but does not read their results`);
+    if (trigger && trigger.unverified) p4Unverified.push(`"${check}" (${file}): ${trigger.unverified}`);
+    else if (trigger) { p4.push(`"${check}" (${file}): ${trigger}`); neverReports.push(check); }
+    if (job.unreadable && job.unreadable.length) { p4Unverified.push(`"${check}" (${file}): ${job.unreadable.join('; ')}`); continue; }
+    const safeIf = job.if !== null && SAFE_IF.test(job.if.trim());
+    if (job.if !== null && !safeIf) p4.push(`"${check}" (${file}) has a job condition other than \`always()\` or \`!cancelled()\`, so it can be skipped, and a skipped job reports success`);
+    else if (job.needs.length > 0) {
+      if (!safeIf) p4.push(`"${check}" (${file}) waits for ${job.needs.join(', ')} without \`if: always()\`, so a failed one skips it and a skipped job reports success`);
+      else if (job.aggregate_problem) p4Unverified.push(`"${check}" (${file}) runs after ${job.needs.join(', ')}, but nothing proves it fails when one of them did not succeed: ${job.aggregate_problem}`);
     }
   }
-  const p3Status = p3.length ? 'drift' : unreadable.length ? 'unverified' : 'ok';
+  const p3Status = p3.length ? 'drift' : (p3Unverified.length || unreadable.length) ? 'unverified' : 'ok';
   const p4Status = p4.length ? 'drift' : (p4Unverified.length || unreadable.length) ? 'unverified' : 'ok';
   return {
-    P3: { status: p3Status, details: p3.length ? p3 : unreadable.map(file => `${file} could not be read`) },
-    P4: { status: p4Status, details: p4.length ? p4 : [...p4Unverified, ...unreadable.map(file => `${file} could not be read`)] },
+    P3: { status: p3Status, details: p3.length ? p3 : [...p3Unverified, ...unreadable], missing },
+    P4: { status: p4Status, details: p4.length ? p4 : [...p4Unverified, ...unreadable], never_reports: neverReports },
   };
 }
 
@@ -365,6 +528,13 @@ function verdict(status, reason, checks = {}, extra = {}) {
   return Object.freeze({ status, reason, checks: Object.freeze(checks), ...extra });
 }
 
+// The default branch as the local clone last saw it (origin/HEAD), or null when unknown.
+function localDefaultBranch(root) {
+  const result = childProcess.spawnSync('git', ['--no-optional-locks', '-C', root, 'symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'], { encoding: 'utf8', timeout: GH_TIMEOUT_MS, windowsHide: true, shell: false });
+  const ref = !result.error && result.status === 0 ? String(result.stdout).trim() : '';
+  return ref.startsWith('origin/') && ref.length > 'origin/'.length ? ref.slice('origin/'.length) : null;
+}
+
 // { status: conformant | drift | unverified | not-enforceable | not-applicable, reason, checks: { P1..P5 } }
 // for the repository at `root`. Options: `requiredChecks` (from the binding), `offline`, `reader(slug)`
 // (tests).
@@ -378,7 +548,7 @@ function defaultBranchProtection(root, { requiredChecks = [], offline = false, r
   if (!offline) {
     try { read = reader(slug); } catch { read = { ok: false, reason: 'reader-failed' }; }
   }
-  const defaultBranch = read && read.ok ? read.default_branch : 'main';
+  const defaultBranch = read && read.ok ? read.default_branch : localDefaultBranch(root);
   const checks = { ...producerVerdict(requiredChecks, readWorkflows(root), defaultBranch) };
   if (offline) {
     for (const id of ['P1', 'P2', 'P5']) checks[id] = { status: 'not-checked', details: ['offline'] };

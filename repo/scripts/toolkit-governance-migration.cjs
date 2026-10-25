@@ -282,15 +282,26 @@ class GovernanceMigration {
         const unread = ['P1', 'P2', 'P5'].map(id => result.checks[id]).find(check => check && check.status === 'unverified');
         if (unread) this.#say(`${row.root}: default-branch protection could not be checked on GitHub (${unread.details.join('; ')}).`);
       }
-      if (GovernanceMigration.#rulesetFixes(result)) candidates.push({ row, ...read });
-      else this.#byHand(row, result);
+      // A required check that no job produces would wait forever, and with no bypass that blocks
+      // every merge, so such a repository is not offered the ruleset until its workflow is fixed.
+      // The same goes for a check whose workflow does not report on every pull request.
+      const unproduced = result.checks.P3 && Array.isArray(result.checks.P3.missing) ? result.checks.P3.missing : [];
+      const silent = result.checks.P4 && Array.isArray(result.checks.P4.never_reports) ? result.checks.P4.never_reports.filter(check => !unproduced.includes(check)) : [];
+      if (GovernanceMigration.#rulesetFixes(result) && unproduced.length === 0 && silent.length === 0) candidates.push({ row, ...read });
+      else {
+        if (GovernanceMigration.#rulesetFixes(result) && unproduced.length) this.#say(`${row.slug}: Toolkit ruleset not offered: no workflow job produces ${unproduced.map(check => `"${check}"`).join(', ')}, so requiring it would block every merge. Add the job, then run migrate again.`);
+        if (GovernanceMigration.#rulesetFixes(result) && silent.length) this.#say(`${row.slug}: Toolkit ruleset not offered: ${silent.map(check => `"${check}"`).join(', ')} does not report on every pull request to the default branch, so requiring it would block those merges. Fix its workflow trigger, then run migrate again.`);
+        this.#byHand(row, result);
+      }
     }
     if (candidates.length === 0) return [];
     this.#say(['These governed GitHub repositories need default-branch protection:', ...candidates.flatMap(({ row, result }) => [
       `- ${row.slug} (${row.root})`,
       ...['P1', 'P2', 'P5'].flatMap(id => (result.checks[id] && result.checks[id].status === 'drift' ? result.checks[id].details : [])).map(detail => `  - ${detail}`),
+      // Workflow problems the ruleset does not fix, shown before the question.
+      ...['P3', 'P4'].flatMap(id => (result.checks[id] && ['drift', 'unverified'].includes(result.checks[id].status) ? result.checks[id].details.map(detail => `  - workflow (${result.checks[id].status}, fix by hand): ${detail}`) : [])),
     ])]);
-    const answer = String(await this.#ask(`Add or update a "${protection.RULESET_NAME}" ruleset (the default branch, the binding's required checks pinned to GitHub Actions, merge commits only, no bypass) on these ${candidates.length} repositories? Type yes to confirm: `) || '').trim().toLowerCase();
+    const answer = String(await this.#ask(`Add or update a "${protection.RULESET_NAME}" ruleset on these ${candidates.length} repositories? It covers the default branch: every change needs a pull request, the binding's required checks must pass (pinned to GitHub Actions), merge commits only, and nobody can bypass it. Updating it replaces any rules already in that ruleset. Type yes to confirm: `) || '').trim().toLowerCase();
     if (answer !== 'yes') {
       this.#say('Default-branch rulesets not added.');
       return [];
