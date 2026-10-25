@@ -275,10 +275,13 @@ class GovernanceMigration {
       }
       // A required check that no job produces would wait forever, and with no bypass that blocks
       // every merge, so such a repository is not offered the ruleset until its workflow is fixed.
+      // The same goes for a check whose workflow does not report on every pull request.
       const unproduced = result.checks.P3 && Array.isArray(result.checks.P3.missing) ? result.checks.P3.missing : [];
-      if (GovernanceMigration.#rulesetFixes(result) && unproduced.length === 0) candidates.push({ row, ...read });
+      const silent = result.checks.P4 && Array.isArray(result.checks.P4.never_reports) ? result.checks.P4.never_reports.filter(check => !unproduced.includes(check)) : [];
+      if (GovernanceMigration.#rulesetFixes(result) && unproduced.length === 0 && silent.length === 0) candidates.push({ row, ...read });
       else {
-        if (GovernanceMigration.#rulesetFixes(result)) this.#say(`${row.slug}: Toolkit ruleset not offered: no workflow job produces ${unproduced.map(check => `"${check}"`).join(', ')}, so requiring it would block every merge. Add the job, then run migrate again.`);
+        if (GovernanceMigration.#rulesetFixes(result) && unproduced.length) this.#say(`${row.slug}: Toolkit ruleset not offered: no workflow job produces ${unproduced.map(check => `"${check}"`).join(', ')}, so requiring it would block every merge. Add the job, then run migrate again.`);
+        if (GovernanceMigration.#rulesetFixes(result) && silent.length) this.#say(`${row.slug}: Toolkit ruleset not offered: ${silent.map(check => `"${check}"`).join(', ')} does not report on every pull request to the default branch, so requiring it would block those merges. Fix its workflow trigger, then run migrate again.`);
         this.#byHand(row, result);
       }
     }

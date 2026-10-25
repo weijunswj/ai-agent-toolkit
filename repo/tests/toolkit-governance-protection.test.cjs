@@ -35,7 +35,7 @@ const AGGREGATE = [
   '    steps:',
   '      - name: Verify',
   '        env:',
-  '          LEGS: ${{ toJSON(needs) }}',
+  '          TEST_LEGS: ${{ toJSON(needs) }}',
   '        run: node repo/scripts/run-tests.cjs --verify-ci summaries  # fails unless every leg passed',
   '',
 ].join('\n');
@@ -146,8 +146,8 @@ test('P-06: an aggregate is verified only when a step passes toJSON(needs) to a 
     assert.equal(result.status, 'unverified', text);
   }
   // Job-level env and a multi-line run script both count.
-  const jobEnv = AGGREGATE.replace("    runs-on: ubuntu-latest\n    steps:\n      - name: Verify\n        env:\n          LEGS: ${{ toJSON(needs) }}\n        run: node repo/scripts/run-tests.cjs --verify-ci summaries  # fails unless every leg passed",
-    "    runs-on: ubuntu-latest\n    env:\n      LEGS: ${{ toJSON(needs) }}\n    steps:\n      - run: |\n          node repo/scripts/validate-toolkit.cjs\n          node repo/scripts/run-tests.cjs --verify-ci \"$RUNNER_TEMP/s\"");
+  const jobEnv = AGGREGATE.replace("    runs-on: ubuntu-latest\n    steps:\n      - name: Verify\n        env:\n          TEST_LEGS: ${{ toJSON(needs) }}\n        run: node repo/scripts/run-tests.cjs --verify-ci summaries  # fails unless every leg passed",
+    "    runs-on: ubuntu-latest\n    env:\n      TEST_LEGS: ${{ toJSON(needs) }}\n    steps:\n      - run: |\n          node repo/scripts/validate-toolkit.cjs\n          node repo/scripts/run-tests.cjs --verify-ci \"$RUNNER_TEMP/s\"");
   assert.notEqual(jobEnv, AGGREGATE);
   assert.equal(check(repo(t, { 'ci.yml': jobEnv })).checks.P4.status, 'ok');
 });
@@ -169,7 +169,7 @@ test('P-13: a passing required check can never hide a failed, skipped or missing
     // E: the aggregate only named in a comment.
     ['E', two(['    needs: [tests]', '    if: always()', ...steps('echo done  # needs.tests.result')]), 'P4', 'unverified'],
     // F: a block-scalar condition is read, not mistaken for a missing always().
-    ['F', two(['    needs: [tests]', '    if: |', '      always()', '    env:', '      LEGS: ${{ toJSON(needs) }}', ...steps('node run-tests.cjs --verify-ci s')]), 'P4', 'ok'],
+    ['F', two(['    needs: [tests]', '    if: |', '      always()', '    env:', '      TEST_LEGS: ${{ toJSON(needs) }}', ...steps('node repo/scripts/run-tests.cjs --verify-ci s')]), 'P4', 'ok'],
     ['F2', two(['    if: >', `      github.event_name == ${Q}push${Q}`, ...steps('echo ok')]), 'P4', 'drift'],
   ];
   for (const [id, text, check, status] of cases) assert.equal(verdict(text)[check].status, status, id);
@@ -184,10 +184,88 @@ test('P-13: a passing required check can never hide a failed, skipped or missing
   assert.equal(protection.producerVerdict(['validate'], [{ file: 'a.yml', workflow: protection.readWorkflow(one) }, { file: 'c.yml', workflow: protection.readWorkflow(shard) }], 'main').P3.status, 'ok');
   // Positive: plain job, always() and !cancelled() in either spelling, with the aggregate.
   for (const condition of ['always()', '${{ always() }}', '!cancelled()', '${{ !cancelled() }}']) {
-    const text = two(['    needs: [tests]', `    if: ${condition}`, '    env:', '      LEGS: ${{ toJSON(needs) }}', ...steps('node repo/scripts/run-tests.cjs --verify-ci s')]);
+    const text = two(['    needs: [tests]', `    if: ${condition}`, '    env:', '      TEST_LEGS: ${{ toJSON(needs) }}', ...steps('node repo/scripts/run-tests.cjs --verify-ci s')]);
     assert.equal(verdict(text).P4.status, 'ok', condition);
   }
   assert.equal(verdict(one).P4.status, 'ok');
+});
+
+test('P-14: the aggregate step counts only when its exit code is the step result and it gets the needs results', () => {
+  const Q = "'";
+  const verdict = text => protection.producerVerdict(['validate'], [{ file: 'ci.yml', workflow: protection.readWorkflow(text) }], 'main').P4;
+  const job = ({ jobLines = [], stepLines = [], env = ['        env:', '          TEST_LEGS: ${{ toJSON(needs) }}'], run = ['        run: node repo/scripts/run-tests.cjs --verify-ci "$RUNNER_TEMP/s"'], top = [] } = {}) => [
+    ...top, 'on:', '  pull_request:', 'jobs:', '  tests:', '    runs-on: ubuntu-latest', '  validate:', '    needs: [tests]', '    if: ${{ always() }}', '    runs-on: ubuntu-latest', ...jobLines,
+    '    steps:', '      - uses: actions/checkout@v4', '      - name: Verify', ...stepLines, ...env, ...run, ''].join('\n');
+  // The real shape passes: several plain node lines, the aggregate last.
+  assert.equal(verdict(job({ run: ['        run: |', '          node repo/scripts/validate-toolkit.cjs', '          node repo/scripts/sync-repo-doc-contract.cjs --check', '          node repo/scripts/run-tests.cjs --verify-ci "$RUNNER_TEMP/s"'] })).status, 'ok');
+  assert.equal(verdict(job({ jobLines: ['    env:', '      TEST_LEGS: ${{ toJSON(needs) }}'], env: [] })).status, 'ok');
+  assert.equal(verdict(job({ stepLines: ['        shell: bash', '        continue-on-error: false'] })).status, 'ok');
+  // Every route below can let the step pass while a needed job failed, so none is verified.
+  const mustFail = {
+    'or true': job({ run: ['        run: node repo/scripts/run-tests.cjs --verify-ci s || true'] }),
+    'semicolon exit': job({ run: ['        run: node repo/scripts/run-tests.cjs --verify-ci s; exit 0'] }),
+    'not last': job({ run: ['        run: |', '          node repo/scripts/run-tests.cjs --verify-ci s', '          node repo/scripts/validate-toolkit.cjs'] }),
+    'exit after': job({ run: ['        run: |', '          node repo/scripts/run-tests.cjs --verify-ci s', '          exit 0'] }),
+    'heredoc': job({ run: ['        run: |', '          cat <<EOF', '          node repo/scripts/run-tests.cjs --verify-ci s'] }),
+    'set +e': job({ run: ['        run: |', '          set +e', '          node repo/scripts/run-tests.cjs --verify-ci s'] }),
+    'trap': job({ run: ['        run: |', `          trap ${Q}exit 0${Q} EXIT`, '          node repo/scripts/run-tests.cjs --verify-ci s'] }),
+    'function': job({ run: ['        run: |', '          node() { true; }', '          node repo/scripts/run-tests.cjs --verify-ci s'] }),
+    'path export': job({ run: ['        run: |', '          export PATH=/tmp/fake:$PATH', '          node repo/scripts/run-tests.cjs --verify-ci s'] }),
+    'continuation': job({ run: ['        run: |', '          true || \\', '          node repo/scripts/run-tests.cjs --verify-ci s'] }),
+    'folded block': job({ run: ['        run: >', '          node repo/scripts/run-tests.cjs --verify-ci s', '          || true'] }),
+    'folded plain scalar': job({ run: ['        run: node repo/scripts/run-tests.cjs --verify-ci s', '          || true'] }),
+    'expression in script': job({ run: ['        run: node repo/scripts/run-tests.cjs --verify-ci ${{ inputs.dir }}'] }),
+    'any path': job({ run: ['        run: node /tmp/run-tests.cjs --verify-ci s'] }),
+    'relative path': job({ run: ['        run: node ../repo/scripts/run-tests.cjs --verify-ci s'] }),
+    'echoed': job({ run: ['        run: echo node repo/scripts/run-tests.cjs --verify-ci s'] }),
+    'step if': job({ stepLines: [`        if: github.event_name == ${Q}push${Q}`] }),
+    'step if always': job({ stepLines: ['        if: always()'] }),
+    'step continue-on-error': job({ stepLines: ['        continue-on-error: true'] }),
+    'step continue-on-error expression': job({ stepLines: ['        continue-on-error: ${{ true }}'] }),
+    'job continue-on-error': job({ jobLines: ['    continue-on-error: true'] }),
+    'custom shell': job({ stepLines: ['        shell: bash {0}'] }),
+    'python shell': job({ stepLines: ['        shell: python {0}'] }),
+    'job default shell': job({ jobLines: ['    defaults:', '      run:', `        shell: sh -c ${Q}exit 0${Q} {0}`] }),
+    'workflow default shell': job({ top: ['defaults:', '  run:', '    shell: cmd'] }),
+    'working-directory': job({ stepLines: ['        working-directory: elsewhere'] }),
+    'default working-directory': job({ jobLines: ['    defaults:', '      run:', '        working-directory: elsewhere'] }),
+    'hard-coded legs': job({ env: ['        env:', `          TEST_LEGS: ${Q}{}${Q}`, '          OTHER: ${{ toJSON(needs) }}'] }),
+    'legs under another name': job({ env: ['        env:', '          LEGS: ${{ toJSON(needs) }}'] }),
+    'step overrides job legs': job({ jobLines: ['    env:', '      TEST_LEGS: ${{ toJSON(needs) }}'], env: ['        env:', '          TEST_LEGS: x'] }),
+    'legs in a longer expression': job({ env: ['        env:', `          TEST_LEGS: \${{ toJSON(needs) }}x`] }),
+    'no legs': job({ env: [] }),
+    'node options': job({ env: ['        env:', '          TEST_LEGS: ${{ toJSON(needs) }}', '          NODE_OPTIONS: --require ./x.cjs'] }),
+    'workflow path env': job({ top: ['env:', '  PATH: /tmp/fake'] }),
+    'bash env': job({ jobLines: ['    env:', '      BASH_ENV: ./x.sh'] }),
+    'github env write': job({ stepLines: [], run: ['        run: node repo/scripts/run-tests.cjs --verify-ci s'] }).replace('      - uses: actions/checkout@v4', '      - uses: actions/checkout@v4\n      - run: echo "NODE_OPTIONS=--require ./x.cjs" >> "$GITHUB_ENV"'),
+    'aggregate in a uses step': job({ stepLines: ['        uses: ./x'] }),
+    'flow env': job({ env: ['        env: {TEST_LEGS: "${{ toJSON(needs) }}"}'] }),
+  };
+  for (const [name, text] of Object.entries(mustFail)) assert.equal(verdict(text).status, 'unverified', name);
+});
+
+test('P-15: YAML the reader cannot follow is unverified, never ok', () => {
+  const Q = "'";
+  const verdicts = text => protection.producerVerdict(['validate'], [{ file: 'ci.yml', workflow: protection.readWorkflow(text) }], 'main');
+  // An indentless needs list is read, so the job is held to the aggregate rule (no aggregate here).
+  const indentless = ['on: [pull_request]', 'jobs:', '  tests:', '    runs-on: ubuntu-latest', '  validate:', '    needs:', '    - tests', '    if: always()', '    steps:', '      - run: echo ok', ''].join('\n');
+  assert.deepEqual(protection.readWorkflow(indentless).jobs[1].needs, ['tests']);
+  assert.equal(verdicts(indentless).P4.status, 'unverified');
+  const unread = {
+    'flow-style job': `on: [pull_request]\njobs:\n  tests:\n    runs-on: ubuntu-latest\n  validate: {needs: [tests], if: "github.event_name == ${Q}push${Q}", runs-on: ubuntu-latest}\n`,
+    'empty needs': 'on: [pull_request]\njobs:\n  validate:\n    needs:\n    runs-on: ubuntu-latest\n',
+    'folded if': 'on: [pull_request]\njobs:\n  validate:\n    if: always()\n      && false\n    runs-on: ubuntu-latest\n',
+    'anchor and merge key': `on: [pull_request]\nx: &base\n  if: github.event_name == ${Q}push${Q}\njobs:\n  validate:\n    <<: *base\n    runs-on: ubuntu-latest\n`,
+    'flow jobs': 'on: [pull_request]\njobs: {validate: {runs-on: ubuntu-latest}}\n',
+  };
+  for (const [name, text] of Object.entries(unread)) {
+    const result = verdicts(text);
+    assert.notEqual(result.P4.status, 'ok', name);
+    assert.notEqual(result.P3.status === 'ok' && result.P4.status === 'ok', true, name);
+  }
+  // A flow-style job anywhere could produce the check under another name: P3 is unverified.
+  const other = `on: [pull_request]\njobs:\n  validate:\n    runs-on: ubuntu-latest\n  post: {name: validate, runs-on: ubuntu-latest}\n`;
+  assert.equal(verdicts(other).P3.status, 'unverified');
 });
 
 test('P-07: P5 drifts when squash or rebase is allowed; rulesets intersect, else repository settings decide', (t) => {
@@ -272,6 +350,26 @@ test('P-11: the reader asks GitHub only with GETs and maps classic protection an
   const unprotected = (command, args) => (args[1].endsWith('/protection') ? { status: 1, stdout: '', stderr: 'gh: Branch not protected (HTTP 404)' } : spawn(command, args));
   assert.equal(protection.ghProtectionReader('o/r', { spawn: unprotected }).classic, null);
   assert.deepEqual(protection.ghProtectionReader('o/r', { spawn: () => { throw new Error('ENOENT'); } }), { ok: false, reason: 'gh-unavailable' });
+  // A private repository on GitHub Free answers 403 with an upgrade hint: not-enforceable, not unverified.
+  const free = (command, args) => (args[1].startsWith('repos/o/r/rules/') ? { status: 1, stdout: '', stderr: 'gh: Upgrade to GitHub Pro or make this repository public to enable this feature. (HTTP 403)' } : spawn(command, args));
+  assert.deepEqual(protection.ghProtectionReader('o/r', { spawn: free }), { ok: false, reason: 'plan-has-no-protection' });
+  const forbidden = (command, args) => (args[1].startsWith('repos/o/r/rules/') ? { status: 1, stdout: '', stderr: 'gh: Resource not accessible (HTTP 403)' } : spawn(command, args));
+  assert.deepEqual(protection.ghProtectionReader('o/r', { spawn: forbidden }), { ok: false, reason: 'gh-request-failed' });
+});
+
+test('P-16: nothing still points at the removed CI Gate machinery or control-plane kernel', () => {
+  const root = path.join(__dirname, '..', '..');
+  const removed = [
+    'repo/scripts/toolkit-trusted-ci-repository-protection.cjs', 'repo/scripts/toolkit-trusted-ci-repository-protection-workflow.cjs',
+    'repo/scripts/toolkit-control-plane', 'repo/contracts/trusted-ci-repository-protection', 'repo/contracts/control-plane-kernel',
+  ];
+  for (const entry of removed) assert.equal(fs.existsSync(path.join(root, entry)), false, entry);
+  const names = ['toolkit-trusted-ci-repository-protection', 'toolkit-control-plane/', 'control-plane-kernel', 'trusted-ci-repository-protection/'];
+  const listed = childProcess.execFileSync('git', ['-C', root, 'ls-files', '-z', 'repo', 'skills', '.github', 'package.json'], { encoding: 'utf8', windowsHide: true }).split('\0').filter(Boolean);
+  const self = path.relative(root, __filename).split(path.sep).join('/');
+  const hits = listed.filter(file => file !== self && file !== 'repo/docs/CHANGELOG.md' && fs.existsSync(path.join(root, file)))
+    .filter(file => { const text = fs.readFileSync(path.join(root, file), 'utf8'); return names.some(name => text.includes(name)); });
+  assert.deepEqual(hits, []);
 });
 
 test('P-12: the check writes nothing in the repository', (t) => {

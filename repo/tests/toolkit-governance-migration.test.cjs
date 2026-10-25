@@ -90,7 +90,7 @@ function protectionReader(protections) {
   };
 }
 
-async function migrate(ctx, { answers = ['yes'], interactive = true, rulesets = {}, created = [], argv = null, protections = {}, written = [], writer = null } = {}) {
+async function migrate(ctx, { answers = ['yes'], interactive = true, rulesets = {}, created = [], argv = null, protections = {}, written = [], writer = null, reader = null } = {}) {
   const stdout = sink();
   const stderr = sink();
   const asked = [];
@@ -101,7 +101,7 @@ async function migrate(ctx, { answers = ['yes'], interactive = true, rulesets = 
     registryOptions: { registryPath: ctx.registryPath, testOnly: true },
     rulesetReader: (slug) => ({ ok: true, rulesets: rulesets[slug] ? [ruleset.noForcePushRulesetBody()] : [] }),
     rulesetCreator: (slug) => { created.push(slug); rulesets[slug] = true; return { ok: true, id: 1 }; },
-    protectionReader: protectionReader(protections),
+    protectionReader: reader || protectionReader(protections),
     protectionWriter: writer || ((slug, checks, existing) => {
       written.push({ slug, checks, existing });
       protections[slug] = { checks, methods: ['merge'], own: existing || 9 };
@@ -222,6 +222,19 @@ test('PR-05: the Toolkit default-branch ruleset is offered after its own yes, wr
   assert.equal(unproduced.asked.length, 0);
   assert.deepEqual(written, []);
   assert.match(unproduced.stdout, /example-owner\/governed: Toolkit ruleset not offered: no workflow job produces "validate", so requiring it would block every merge/);
+  // A job whose workflow skips pull requests to the default branch would never report: no offer either.
+  fs.mkdirSync(path.join(governed, '.github', 'workflows'), { recursive: true });
+  fs.writeFileSync(path.join(governed, '.github', 'workflows', 'ci.yml'), 'on:\n  pull_request:\n    branches: [release]\njobs:\n  validate:\n    runs-on: ubuntu-latest\n');
+  const silent = await migrate(ctx, { answers: [], rulesets, written });
+  assert.equal(silent.asked.length, 0);
+  assert.match(silent.stdout, /Toolkit ruleset not offered: "validate" does not report on every pull request to the default branch, so requiring it would block those merges/);
+  // GitHub unreadable (signed out, or not an admin for classic protection): reported, nothing offered.
+  for (const reason of ['gh-unavailable', 'classic-protection-not-visible']) {
+    const unread = await migrate(ctx, { answers: [], rulesets, written, reader: () => ({ ok: false, reason }) });
+    assert.equal(unread.asked.length, 0, reason);
+    assert.match(unread.stdout, new RegExp(`default-branch protection could not be checked on GitHub \\(${reason}\\)`));
+  }
+  assert.deepEqual(written, []);
   // With the job (an aggregate that is not verified), the workflow problem is shown before the question.
   fs.mkdirSync(path.join(governed, '.github', 'workflows'), { recursive: true });
   fs.writeFileSync(path.join(governed, '.github', 'workflows', 'ci.yml'), 'on: [pull_request]\njobs:\n  tests:\n    runs-on: ubuntu-latest\n  validate:\n    needs: [tests]\n    if: always()\n    runs-on: ubuntu-latest\n');
