@@ -1,5 +1,11 @@
 # Toolkit Changelog
 
+## 3.12.1 (n8n helper review follow-ups)
+
+- **One live rule everywhere:** the transport module's own postcondition check now uses the same fail-closed rule as the live helpers, so a published version or a missing state never passes as unpublished.
+- **Truthful messages:** preparing a new workflow says it gets no MCP exposure or error workflow, the prepared-import validator says preparation checked the setting against the target, and the helper README states the fail-closed rule and which machine check reads Docker.
+- **Killed runs:** every helper file name now starts with the process id of the run that wrote it. A run that is killed before its clean-up leaves its stored live workflow list behind until the next run starts, and that run deletes the helper files of any run that is no longer running. A file is kept only while a process with its id is running and started before the file was written, so a process id reused by a later process does not keep a killed run's list. The clean-up touches only the helpers' own file names, and nothing when the list folder or `.tmp` is a link; the helpers also refuse to store the list when either is a link.
+
 ## 3.12.0 (server operations)
 
 ### External operation preflight
@@ -89,7 +95,7 @@
 
 ### n8n import and export helpers on any machine
 
-- **Reading n8n's output:** n8n prints `export:workflow` through its own log, so a container set to a quieter log level, file-only logs or JSON log lines hid or wrapped the workflow list, and an empty list was read as "no workflows". The helpers now pin the log settings for that one call, read the list with Node while tolerating warning lines around it, and treat an empty list from a successful command as an error. The stored copy of the list is deleted when the run ends.
+- **Reading n8n's output:** n8n prints `export:workflow` through its own log, so a container set to a quieter log level, file-only logs or JSON log lines hid or wrapped the workflow list, and an empty list was read as "no workflows". The helpers now pin the log settings for that one call, read the list with Node while tolerating warning lines around it, and treat an empty list from a successful command as an error. The stored copy of the list is deleted when the run finishes or fails.
 - **No PowerShell rewrites of workflow JSON:** PowerShell 6 and later turned date-like strings into dates and wrote them back in the machine's time zone, and every edition refused keys that differ only by case. Workflow JSON is now read and written only by Node (`n8n-cli-workflow-json.cjs`); PowerShell sees small summaries.
 - **Container detection:** the official image is found from Docker Hub or `docker.n8n.io` under any tag or digest, not only `n8nio/n8n` and `n8nio/n8n:stable`. Images from other registries still need an explicit target.
 - **One complete helper set:** `n8n-helper-set.json` stamps every helper file with a content hash that ignores line endings. The live helpers check it first and name any missing or changed file; repository-local scripts are reported and kept. `n8n-helper-set.cjs refresh` previews and then copies a new set into a repository without deleting anything, and keeps a repository's own edited helper README.
