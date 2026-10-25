@@ -5,6 +5,7 @@ const test = require('node:test');
 
 const {
   exactPullRequests,
+  isNotifierAuthored,
   planLifecycle,
   requireFreshPlan
 } = require('../scripts/plan-source-watch-pr-lifecycle.cjs');
@@ -112,7 +113,7 @@ test('merged PRs do not block creation', () => {
   assert.equal(plan([pullRequest({ state: 'MERGED' })]).action, 'create');
 });
 
-test('no actionable drift returns none even when matching PR metadata exists', () => {
+test('no actionable drift returns none for a matching PR that the notifier did not open', () => {
   assert.deepEqual(plan([pullRequest({ state: 'OPEN' })], false), {
     action: 'none',
     prNumber: null,
@@ -154,4 +155,57 @@ test('fresh ambiguity rejects the original single-open plan', () => {
     pullRequest({ number: 202, state: 'OPEN' })
   ]);
   assert.throws(() => requireFreshPlan(original, fresh), /fresh plan is fail-ambiguous-open/);
+});
+
+const notifierAuthor = { login: 'app/github-actions', is_bot: true };
+
+test('no actionable drift closes the single exact notification PR the bot opened', () => {
+  for (const author of [notifierAuthor, { login: 'github-actions[bot]', is_bot: true }]) {
+    assert.deepEqual(plan([pullRequest({ number: 579, state: 'OPEN', author })], false), {
+      action: 'close-open',
+      prNumber: 579,
+      conflictingPrNumbers: []
+    });
+  }
+});
+
+test('no actionable drift with no open PR does nothing', () => {
+  assert.equal(plan([], false).action, 'none');
+  assert.equal(plan([pullRequest({ author: notifierAuthor })], false).action, 'none');
+});
+
+test('no actionable drift never closes a PR from a person, another bot, a fork or another branch', () => {
+  const cases = [
+    pullRequest({ number: 1, state: 'OPEN', author: { login: 'weijunswj', is_bot: false } }),
+    pullRequest({ number: 2, state: 'OPEN', author: { login: 'app/github-actions', is_bot: false } }),
+    pullRequest({ number: 3, state: 'OPEN', author: { login: 'app/dependabot', is_bot: true } }),
+    pullRequest({ number: 4, state: 'OPEN', author: { login: 'App/github-actions', is_bot: true } }),
+    pullRequest({ number: 5, state: 'OPEN', author: notifierAuthor, isCrossRepository: true }),
+    pullRequest({ number: 6, state: 'OPEN', author: notifierAuthor, headRefName: 'source-watch/other' }),
+    pullRequest({ number: 7, state: 'OPEN', author: notifierAuthor, baseRefName: 'release' })
+  ];
+  for (const pr of cases) {
+    assert.equal(plan([pr], false).action, 'none', `PR #${pr.number}`);
+  }
+  assert.equal(isNotifierAuthored(pullRequest()), false);
+});
+
+test('no actionable drift with two exact open PRs fails closed and closes nothing', () => {
+  assert.deepEqual(plan([
+    pullRequest({ number: 205, state: 'OPEN', author: notifierAuthor }),
+    pullRequest({ number: 201, state: 'OPEN', author: notifierAuthor })
+  ], false), {
+    action: 'fail-ambiguous-open',
+    prNumber: null,
+    conflictingPrNumbers: [201, 205]
+  });
+});
+
+test('a close plan goes stale when the open PR changes before the close', () => {
+  const original = plan([pullRequest({ number: 579, state: 'OPEN', author: notifierAuthor })], false);
+  assert.throws(
+    () => requireFreshPlan(original, plan([pullRequest({ number: 580, state: 'OPEN', author: notifierAuthor })], false)),
+    /stale source-watch PR lifecycle plan/
+  );
+  assert.throws(() => requireFreshPlan(original, plan([], false)), /fresh plan is none/);
 });

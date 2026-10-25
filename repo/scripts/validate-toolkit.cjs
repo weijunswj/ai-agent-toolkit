@@ -96,7 +96,8 @@ const executablePrefixes = [
   'skills/n8n-workflow-transport/templates/helper-scripts/sanitizer/',
   'skills/n8n-safety-router/scripts/', 'skills/github-program-reconciler/scripts/', 'skills/n8n-environment-setup/templates/.n8n-local/',
   'skills/n8n-environment-setup/templates/.n8n-production-cloudflare/',
-  'skills/codex-ssh-hostinger-coolify-setup-maintainer/scripts/', 'skills/secure-ci-cd/scripts/'
+  'skills/codex-ssh-hostinger-coolify-setup-maintainer/scripts/', 'skills/secure-ci-cd/scripts/',
+  'skills/host-observability/scripts/'
 ];
 const executableExtensions = new Set(['.ps1', '.cmd', '.bat', '.cjs', '.mjs', '.js', '.ts', '.tsx', '.py', '.sh']);
 const allowedTrackedTemplatePrefixes = [

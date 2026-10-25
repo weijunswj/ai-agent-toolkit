@@ -145,7 +145,7 @@ function securityReviewContract(text) {
   assert.match(review, /A genuinely serious reachable issue found late still blocks, even when an earlier review missed it/);
   assert.match(review, /G1 inventories every material entrypoint for that invariant inside the frozen profile and fixes the family once, with positive and negative controls, rather than one bypass per cycle/);
   assert.match(review, /The fresh recheck covers the corrected families, cumulative diff, dependent invariants, new real host evidence and retained previously reviewed scope/);
-  assert.match(review, /It does not restart discovery, rescan the whole product by default, add reviewers or open unbounded hardening/);
+  assert.match(review, /It does not restart discovery, rescan the whole product by default, add reviewers or open unbounded follow-up work/);
   assert.match(review, /preserves any genuinely new security finding without manufacturing an extra gate/);
   assert.match(review, /G2 does not spawn subagents/);
   const acceptance = section(text, 18);
@@ -163,7 +163,7 @@ test('final review is adversarial within the frozen supported profile and rechec
     ['goes to the owner for classification before adoption', 'is adopted by the reviewer'],
     ['A genuinely serious reachable issue found late still blocks', 'An issue found late is deferred'],
     ['fixes the family once, with positive and negative controls, rather than one bypass per cycle', 'fixes one bypass per cycle'],
-    ['It does not restart discovery, rescan the whole product by default, add reviewers or open unbounded hardening', 'It restarts discovery and rescans the whole product'],
+    ['It does not restart discovery, rescan the whole product by default, add reviewers or open unbounded follow-up work', 'It restarts discovery and rescans the whole product'],
     ['without manufacturing an extra gate', 'by adding a security panel'],
     ['This is part of existing G0/G1 work, not a new gate', 'This is a new security gate'],
     ['only the owner can reduce supported hosts', 'the reviewer may reduce supported hosts'],

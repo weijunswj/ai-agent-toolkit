@@ -20,11 +20,11 @@ const successor = { session: 'controller-2', prefix: 'INT-TK421-' };
 const builder = { session: 'builder-1', prefix: 'INT-TK421-' };
 const green = name => ({ kind: 'CheckRun', name, status: 'COMPLETED', conclusion: 'SUCCESS', required: false });
 const CATALOGUE = [
-  { issue: 423, label: 'C2', class: 'CORE', parent: 421, order: 1 },
-  { issue: 467, label: 'Shared H', class: 'CORE', parent: 421, order: 2 },
-  { issue: 469, label: 'H1', class: 'CORE', parent: 467, order: 1 },
-  { issue: 470, label: 'H2', class: 'CORE', parent: 467, order: 2 },
-  { issue: 471, label: 'H3', class: 'CORE', parent: 467, order: 3 },
+  { issue: 423, label: 'C2', class: 'COMMITTED', parent: 421, order: 1 },
+  { issue: 467, label: 'Shared H', class: 'COMMITTED', parent: 421, order: 2 },
+  { issue: 469, label: 'H1', class: 'COMMITTED', parent: 467, order: 1 },
+  { issue: 470, label: 'H2', class: 'COMMITTED', parent: 467, order: 2 },
+  { issue: 471, label: 'H3', class: 'COMMITTED', parent: 467, order: 3 },
 ];
 
 function setup({ initialiseParent = true } = {}) {
@@ -448,7 +448,7 @@ test('runtime validation matches the schemas on unknown and missing nested field
   const parent = state.newParent({ repository: 'acme/app', parentIssue: 421, outcomes: [{ ...CATALOGUE[0], note: 'x' }] });
   assert.equal(validateParent(parent), false);
   assert.notDeepEqual(state.validateParent(parent), []);
-  const missingParentKey = state.newParent({ repository: 'acme/app', parentIssue: 421, outcomes: [{ issue: 423, class: 'CORE', order: 1 }] });
+  const missingParentKey = state.newParent({ repository: 'acme/app', parentIssue: 421, outcomes: [{ issue: 423, class: 'COMMITTED', order: 1 }] });
   assert.equal(validateParent(missingParentKey), false);
   assert.notDeepEqual(state.validateParent(missingParentKey), []);
 });

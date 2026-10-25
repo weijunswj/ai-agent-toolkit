@@ -1,6 +1,6 @@
 # Toolkit Changelog
 
-## 3.13.0
+## 3.13.3
 
 ### Plain-text check
 
@@ -12,11 +12,48 @@
 - **Whole-repository sweep:** the remaining issue references and codes in docs, skills, contracts, setup questions, helper titles and plugin blurbs were rewritten in plain words, so the baseline is empty. The delivery contract is now `repo/docs/TOOLKIT-DELIVERY.md`. The setup topology choice reads "Toolkit repos: main session + Toolkit planning and build helpers only. Elsewhere: one layer of subagents."
 - **Chat replies count:** the global plain-language rule now names chat replies among the human-facing work it covers.
 
+## 3.13.2
+
+### Source watch
+
+- **Notifier works under the no-force-push rule:** the notice branch only grows. A changed report becomes one new report-only commit on top of the branch, pushed without force, so the scheduled run no longer fails when the report changes. A branch in any other shape is refused and nothing is pushed, instead of being overwritten.
+- **Notice closes itself:** when nothing is left to review, the notifier closes the one notice pull request it opened, unmerged, with a short comment. It keeps the branch and never closes a pull request anyone else opened.
+- **Trackers shown as history:** reports call a cursor's tracker the tracker at last review, so a closed task is never shown as the current owner.
+- **Host drift review recorded:** the first Codex and Claude Code drift review is recorded, with findings routed to their owners and no Toolkit component changed. Its evidence links point at the current Codex and Claude Code docs.
+- **design.md upstream reviewed:** the latest upstream change lets design tokens also sit in YAML blocks inside each section. No Toolkit code reads or writes those tokens; the design.md reference is left for its separate refresh.
+
+## 3.13.1
+
+### Gate rules: no-weakening review checks
+
+- **No-weakening proof:** when a change touches detection or guard code, G2 compares head against base, runs the base tests and fixtures against the head, and requires a reason for every case that was blocked or flagged before and is now allowed.
+- **Early returns keep the guards:** every early return, skip or fast path in changed code must show that the generic guards still run first or are provably not needed, with a test for the return path.
+
+## 3.13.0
+
+### Now, Next and Later
+
+- **The roadmap groups come from the release:** the Programme Graph's Class column is worked out from each task, never set by hand: `NOW` when it is in progress (an open or draft PR, or an active gate, including merged work still waiting on UAT or review), `NEXT` when it is queued with a planned release (by convention a name, not a version number), `LATER` when it is committed with no release, and `OPTIONAL` for an optional task with no release. Rows and native sub-issues sort in that order, then completed and retired work as before, so a task moves up when its release is set or its PR opens. Finished rows show `-` in the Class column.
+- **The catalogue keeps only what the owner decides:** an outcome's class is `COMMITTED`, `OPTIONAL`, `COMPLETED` or `RETIRED`. The older `CORE`, `HARDENING` and `LATER` still read as `COMMITTED` and keep their old CORE, HARDENING, LATER sequence, so reconciling before the migration moves nothing. Each reconcile reports `CLASS_LEGACY` with a patch; applying it whole with `update-parent` sets `COMMITTED` and renumbers `order` in that sequence, so the migration moves nothing either. No write adds an older class, and `init-parent` refuses them. The CURRENT summary's queued list is now headed **Queued**.
+- **Hardening is gone:** the rules order work Now, then Next, then Later. A G2 finding that adds protection without breaking acceptance is a follow-up that joins an existing or new outcome, whose release makes it Next or Later; ship blocker, Later or optional, and unsupported or duplicate are unchanged.
+
+## 3.12.1 (n8n helper review follow-ups)
+
+- **One live rule everywhere:** the transport module's own postcondition check now uses the same fail-closed rule as the live helpers, so a published version or a missing state never passes as unpublished.
+- **Truthful messages:** preparing a new workflow says it gets no MCP exposure or error workflow, the prepared-import validator says preparation checked the setting against the target, and the helper README states the fail-closed rule and which machine check reads Docker.
+- **Killed runs:** every helper file name now starts with the process id of the run that wrote it. A run that is killed before its clean-up leaves its stored live workflow list behind until the next run starts, and that run deletes the helper files of any run that is no longer running. A file is kept only while a process with its id is running and started before the file was written, so a process id reused by a later process does not keep a killed run's list. The clean-up touches only the helpers' own file names, and nothing when the list folder or `.tmp` is a link; the helpers also refuse to store the list when either is a link.
+
 ## 3.12.0 (server operations)
 
 ### External operation preflight
 
 - **New skill `external-operation-preflight`:** it checks a live change on an outside system before the owner approves it. Its offline checker, `scripts/preflight-check.cjs`, reads one JSON operation plan and returns ALLOW, ALLOW_WITH_NOTICE or HOLD with typed reasons and a plan hash the approval covers. It holds when a name and the provider disagree about an environment, when a binding crosses environments or one store is writable from two, when a temporary resource lacks a cleanup owner or end date, when an action has no authority entry or contradictory ones, when a merge would auto-deploy without an approved deployment or a read-back trigger pause, when a fallback route changes target, privilege, credential or effect, and when a plan that touches production anywhere (including a store reached through an owner exception) has no rollback plan naming the operation's environment or no backup evidence at the retrievable level. Matching whole words in the name, any environment that is not plainly non-production (alpha, staging, dev, qa and similar) counts as production, so `main` or `prd` do too; names with the whole word test, testing, preview, restore or drill must be temporary. A missing or malformed field holds the plan rather than being read as no restriction. It never calls a provider or reads credentials. The skill also owns the backup and restore evidence contract: production only by default, seven local copies, and separate evidence for configured, uploaded, retrievable and restored. Plain owner-managed SSH stays the default; no SSH broker is built.
+
+### Host observability
+
+- **New skill `host-observability`:** one read-only monitor per Linux host, assuming the provider offers none. An hourly pulse reads CPU load, memory, swap, out-of-memory kills, disk and inodes, uptime and reboots, failed systemd units, Docker container state and optional health URLs, and gives the host one of five states: `NORMAL`, `REVIEW_CAPACITY`, `UPGRADE_OR_REBALANCE_REQUIRED`, `EMERGENCY_PRESSURE` or `OBSERVABILITY_DEGRADED`. Thresholds are per-host settings; load counts only when sustained, and fast disk growth needs a review. A pulse older than 60 minutes, a failed collector, a missing tool, a failed alert delivery, or missing alerting or heartbeat is degraded, never healthy.
+- **Off-host heartbeat and alerts, with no default:** the pulse pings an owner-chosen dead-man's-switch URL every run, so the host is never the only witness to its own uptime. The skill asks the owner how alerts and the heartbeat should reach them and suggests options (Slack, Discord, ntfy, Telegram, email, any webhook; a hosted or self-hosted heartbeat service). Alerts go out on a change, at once on emergency pressure, on a reboot, and again after a failed delivery, which is never recorded as sent.
+- **Installer:** installs the hourly timer only when run with `--install` (or removes it with `--remove`) and otherwise prints its plan; it refuses without Linux and systemd, puts back what was there if an install fails, keeps an existing env file (tightened to mode 600), and keeps one backup of replaced files. The service runs as `host-pulse`, an unprivileged system user with no login that the installer creates and `--remove` deletes, with no capabilities, a read-only view of the system and one writable state folder. Docker checks are opt-in with `--with-docker`, and the plan says plainly that Docker socket access equals root on the host. Two test units send a test alert and a test heartbeat with the same env file and sandbox. Explicit-only skill; installing it on a host needs the owner's approval for that host.
 
 ## 3.11.0
 
@@ -95,7 +132,7 @@
 
 ### n8n import and export helpers on any machine
 
-- **Reading n8n's output:** n8n prints `export:workflow` through its own log, so a container set to a quieter log level, file-only logs or JSON log lines hid or wrapped the workflow list, and an empty list was read as "no workflows". The helpers now pin the log settings for that one call, read the list with Node while tolerating warning lines around it, and treat an empty list from a successful command as an error. The stored copy of the list is deleted when the run ends.
+- **Reading n8n's output:** n8n prints `export:workflow` through its own log, so a container set to a quieter log level, file-only logs or JSON log lines hid or wrapped the workflow list, and an empty list was read as "no workflows". The helpers now pin the log settings for that one call, read the list with Node while tolerating warning lines around it, and treat an empty list from a successful command as an error. The stored copy of the list is deleted when the run finishes or fails.
 - **No PowerShell rewrites of workflow JSON:** PowerShell 6 and later turned date-like strings into dates and wrote them back in the machine's time zone, and every edition refused keys that differ only by case. Workflow JSON is now read and written only by Node (`n8n-cli-workflow-json.cjs`); PowerShell sees small summaries.
 - **Container detection:** the official image is found from Docker Hub or `docker.n8n.io` under any tag or digest, not only `n8nio/n8n` and `n8nio/n8n:stable`. Images from other registries still need an explicit target.
 - **One complete helper set:** `n8n-helper-set.json` stamps every helper file with a content hash that ignores line endings. The live helpers check it first and name any missing or changed file; repository-local scripts are reported and kept. `n8n-helper-set.cjs refresh` previews and then copies a new set into a repository without deleting anything, and keeps a repository's own edited helper README.
