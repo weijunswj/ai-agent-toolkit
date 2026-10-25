@@ -160,17 +160,31 @@ function readLock(file) {
   return { lock, mtimeMs: info.mtimeMs };
 }
 
+// This boot of the computer, read without the wall clock: Linux's boot id where it exists, and the
+// uptime counter, which only grows within one boot.
+function thisBoot() {
+  let bootId = null;
+  try { bootId = fs.readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim() || null; } catch { /* not Linux */ }
+  return { bootId, uptime: os.uptime() };
+}
+// The lock was written in an earlier boot when the boot ids differ, or when the uptime now is below
+// the uptime the lock recorded. A clock change moves neither.
+function earlierBoot(lock, boot) {
+  if (lock.boot_id && boot.bootId) return lock.boot_id !== boot.bootId;
+  return typeof lock.uptime === 'number' && boot.uptime < lock.uptime;
+}
+
 // held, free or stale, with what was seen so a replacement can check it moved the same lock.
-function lockState(file, nowMs, alive = pidAlive, bootMs = nowMs - os.uptime() * 1000) {
+function lockState(file, nowMs, alive = pidAlive, boot = thisBoot()) {
   const seen = readLock(file);
   if (seen.missing) return { free: true };
   if (seen.broken) return { stale: true, seen };
   const silent = nowMs - seen.mtimeMs;
-  // A beat from before this computer last started belongs to a pass that died with the old boot, even
-  // if its process id is in use again. (Windows Fast Startup can keep the uptime counter across a
-  // shutdown; the abandon limit covers that case.)
+  // A lock written in an earlier boot belongs to a pass that died with it, even if its process id is
+  // in use again. Windows Fast Startup keeps the uptime counter across a shutdown, so there only a
+  // restart counts as a new boot; the abandon limit covers the rest.
   const gone = seen.lock.host === os.hostname()
-    ? !alive(seen.lock.pid) || silent > LOCK_ABANDONED_MS || seen.mtimeMs < bootMs
+    ? !alive(seen.lock.pid) || silent > LOCK_ABANDONED_MS || earlierBoot(seen.lock, boot)
     : silent > LOCK_STALE_MS || silent < -LOCK_STALE_MS;
   return gone ? { stale: true, seen } : { held: true, seen };
 }
@@ -193,7 +207,7 @@ function takeLock(file, deps = {}) {
     // Written whole first, then linked into place: the link fails while any lock is there, and a
     // reader never sees a half-written lock.
     const draft = `${file}.${token}.draft`;
-    fs.writeFileSync(draft, JSON.stringify({ schema: LOCK_SCHEMA, token, pid: process.pid, host: os.hostname(), at: new Date(now()).toISOString() }), { mode: 0o600 });
+    fs.writeFileSync(draft, JSON.stringify({ schema: LOCK_SCHEMA, token, pid: process.pid, host: os.hostname(), boot_id: (deps.boot || thisBoot()).bootId, uptime: (deps.boot || thisBoot()).uptime, at: new Date(now()).toISOString() }), { mode: 0o600 });
     try {
       fs.linkSync(draft, file);
       return handle;
@@ -202,7 +216,7 @@ function takeLock(file, deps = {}) {
     } finally {
       try { fs.unlinkSync(draft); } catch { /* gone */ }
     }
-    const seen = lockState(file, now(), deps.pidAlive, deps.bootMs);
+    const seen = lockState(file, now(), deps.pidAlive, deps.boot || thisBoot());
     if (seen.free) continue;
     if (seen.held) return null;
     // Stale: move it aside, then make sure what moved is what was judged stale.
@@ -617,7 +631,7 @@ function runPasses(args, deps, out) {
   const file = deps.lockFile !== undefined ? deps.lockFile : (deps.originUrl ? null : defaultLockFile(context.binding.repository));
   let lock = takeLock(file, deps);
   if (!lock && args.command !== 'refresh') {
-    throw new ProgrammeError('PASS_RUNNING', `Another reconcile or refresh pass for ${context.binding.repository} is running on this computer (lock ${file}). Nothing changed; run again when it ends. A lock left by a pass that was killed is taken over once its process has ended, at the next start of this computer, or after 6 hours.`);
+    throw new ProgrammeError('PASS_RUNNING', `Another reconcile or refresh pass for ${context.binding.repository} is running on this computer (lock ${file}). Nothing changed; run again when it ends. A lock left by a pass that was killed is taken over once its process has ended, when this computer restarts (on Windows, a shutdown with Fast Startup does not count), or after 6 hours.`);
   }
   if (!lock) {
     setAgain(file);

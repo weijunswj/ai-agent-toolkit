@@ -252,7 +252,7 @@ test('the lock is never broken while its owner is alive and beating, and release
   assert.equal(cli.takeLock(file), null, 'held by a live owner');
   const old = new Date(Date.now() - cli.LOCK_STALE_MS - 60000);
   fs.utimesSync(file, old, old);
-  assert.equal(cli.takeLock(file, { pidAlive: () => true, bootMs: 0 }), null, 'a live owner on this computer is not taken over after a sleep');
+  assert.equal(cli.takeLock(file, { pidAlive: () => true }), null, 'a live owner on this computer is not taken over after a sleep');
   a.beat();
   assert.equal(cli.takeLock(file), null, 'a beat keeps it held');
   // Someone else's lock now sits at the path: A's release leaves it alone.
@@ -275,14 +275,17 @@ const LOCK_MATRIX = [
   { name: 'dead owner, beat far in the future', setup: f => writeLock(f, { beatMs: cli.LOCK_STALE_MS + 60000 }), alive: false, taken: true },
   { name: 'owner on another host, beat far in the future', setup: f => writeLock(f, { host: 'elsewhere', beatMs: cli.LOCK_STALE_MS + 60000 }), alive: false, taken: true },
   { name: 'a link to a lock file', setup: f => { writeLock(`${f}.target`, {}); fs.symlinkSync(`${f}.target`, f); }, alive: true, taken: true, leaves: ['pass.lock.target'], links: true },
-  { name: 'live process, beat from before this computer started (a reused id)', setup: f => writeLock(f, { beatMs: -120000 }), alive: true, taken: true, bootMs: Date.now() - 60000 },
+  { name: 'live process, lock from an earlier boot by uptime (a reused id)', setup: f => writeLock(f, { uptime: 7200 }), alive: true, taken: true, boot: { bootId: null, uptime: 60 } },
+  { name: 'live process, lock from an earlier boot by boot id', setup: f => writeLock(f, { bootId: 'old', uptime: 10 }), alive: true, taken: true, boot: { bootId: 'new', uptime: 7200 } },
+  { name: 'live process, same boot, soon after start, clock moved forward', setup: f => writeLock(f, { bootId: 'b', uptime: 120, beatMs: -3600000 }), alive: true, taken: false, boot: { bootId: 'b', uptime: 300 } },
+  { name: 'live process, same boot by uptime, clock moved forward', setup: f => writeLock(f, { uptime: 120, beatMs: -3600000 }), alive: true, taken: false, boot: { bootId: null, uptime: 300 } },
   { name: 'owner on another host, fresh beat', setup: f => writeLock(f, { host: 'elsewhere' }), alive: false, taken: false },
   { name: 'owner on another host, silent past the limit', setup: f => writeLock(f, { host: 'elsewhere', beatMs: -cli.LOCK_STALE_MS - 60000 }), alive: false, taken: true },
   { name: 'unreadable file', setup: f => fs.writeFileSync(f, 'not json'), alive: true, taken: true },
   { name: 'a directory', setup: f => fs.mkdirSync(f), alive: true, taken: true },
 ];
-function writeLock(file, { host = os.hostname(), beatMs = 0 }) {
-  fs.writeFileSync(file, JSON.stringify({ schema: 'toolkit.programme-pass-lock.v1', token: 'other', pid: 424242, host, at: new Date().toISOString() }));
+function writeLock(file, { host = os.hostname(), beatMs = 0, bootId = null, uptime = 0 }) {
+  fs.writeFileSync(file, JSON.stringify({ schema: 'toolkit.programme-pass-lock.v1', token: 'other', pid: 424242, host, boot_id: bootId, uptime, at: new Date().toISOString() }));
   const at = new Date(Date.now() + beatMs);
   fs.utimesSync(file, at, at);
 }
@@ -295,7 +298,7 @@ for (const row of LOCK_MATRIX) {
       if (row.links && process.platform === 'win32' && error.code === 'EPERM') return t.skip('no symlink rights');
       throw error;
     }
-    const handle = cli.takeLock(file, { pidAlive: () => row.alive, bootMs: row.bootMs ?? 0 });
+    const handle = cli.takeLock(file, { pidAlive: () => row.alive, boot: row.boot || { bootId: null, uptime: 1e9 } });
     assert.equal(Boolean(handle), row.taken);
     if (handle) {
       assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).token, handle.token);
@@ -383,6 +386,8 @@ test('GitHub writes are recognised; reads and other repositories are not', () =>
     post('Bash', { command: "sh -c 'git push origin main'" }),
     post('PowerShell', { command: 'powershell -Command "git push origin feature"' }),
     post('PowerShell', { command: 'pwsh -c "git -C repo push"' }),
+    post('PowerShell', { command: "pwsh -Command 'git push'" }),
+    post('Bash', { command: 'cmd /c "git push"' }),
     post('Bash', { command: 'bash -lc "cd repo && git push"' }),
   ];
   for (const input of writes) assert.ok(trigger.githubWrite(input), `${input.tool_name} ${JSON.stringify(input.tool_input)}`);
@@ -403,6 +408,11 @@ test('GitHub writes are recognised; reads and other repositories are not', () =>
     post('Bash', { command: 'git --version; push' }),
     post('Bash', { command: 'git -ab push' }),
     post('Bash', { command: 'git -- push' }),
+    post('Bash', { command: 'echo "git push"' }),
+    post('Bash', { command: 'git commit -m "git push"' }),
+    post('Bash', { command: "git commit -m 'git push'" }),
+    post('Bash', { command: 'printf "%s" "git push"' }),
+    post('Bash', { command: 'git log --grep "git push"' }),
     post('Edit', { file_path: 'x' }),
   ];
   for (const input of reads) assert.equal(trigger.githubWrite(input), null, `${input.tool_name} ${JSON.stringify(input.tool_input)}`);
