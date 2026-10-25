@@ -4,7 +4,7 @@ description: "Use when running as a Claude Projects coordinator and the user app
 ---
 
 # Web Controller for Claude Projects
-Version: 2026-10-25.3
+Version: 2026-10-25.8
 
 Run Toolkit repos through Claude Projects. The global rules and coding gates apply in every project; GitHub governance (parent and child issues, records, decision traces, evidence custody) applies only to a github.com repo whose governance state is ENABLED. Keep project facts (repos, devices, lanes, pending work) in project memory; durable work state lives in the branch, the PR and the programme comments or evidence store, mirrored in memory, never only there.
 
@@ -69,7 +69,7 @@ When the skill or Toolkit updates, or the daily check-in reports BLOCK OUTDATED,
 - **A task the user adds to an ENABLED repo goes into its issue tree** under `CONTROLLER.md`'s task-intake rule; elsewhere it goes into project memory's queue. Tell the user in one line where it landed, with the issue link.
 - **Can I do it myself? first.** Check coordinator/worker/thread capabilities before asking for owner action. Only approvals, credentials, typed local rc lines or unreachable settings need their hands.
 - **End finished local Remote Control sessions straight away:** once work is done/superseded and its result relayed, end sessions with nothing left to do.
-- **Resolve only in the hourly nudge.** Threads never resolve themselves; you resolve a thread or post in that pass as soon as all three hold: (a) its output is durably recorded (pushed, merged, in a report or file, or handed to a named thread); (b) its latest result was relayed to the owner in project chat, or the owner replied after it; (c) no owner question or decision is open. There is no waiting period, and idleness alone never closes anything. Fresh-session scheduled runs resolve their own run thread after delivery; a task's home thread is never resolved. Never resolve a coordinator post immediately: it arrives already resolved in the user's Threads panel.
+- **Resolve only in the hourly nudge.** Threads never resolve themselves; you resolve a thread or post in that pass as soon as all three hold: (a) its output is durably recorded (pushed, merged, in a report or file, or handed to a named thread); (b) its latest result was relayed to the owner in project chat, or the owner replied after it; (c) no owner question or decision is open. There is no waiting period, and idleness alone never closes anything. Fresh-session scheduled runs resolve their own run thread after delivery, except a check-in run that posted a skill card; a task's home thread is never resolved. Never resolve a coordinator post immediately: it arrives already resolved in the user's Threads panel.
 - Follow-up gate reviews use fresh sessions per `CONTROLLER.md`; send follow-up coordination to the existing topic thread. Rename an idle finished non-gate thread before reusing it for a new topic.
 
 ## Pull requests and CI
@@ -87,7 +87,7 @@ When the skill or Toolkit updates, or the daily check-in reports BLOCK OUTDATED,
 
 ## Recurring tasks
 Whenever the user asks for anything recurring (the daily check-in, a sweep, a reminder), follow `reference/recurring-tasks.md` beside this skill, and tell the user which kind you used and where they will see it. It holds how a cloud thread creates and tests a task, how Toolkit-made tasks are rendered from `main` and swapped by recreating them, the fallbacks, and the memory line formats.
-- Every Toolkit scheduled task is bound to its own home thread (`<PROJECT>: <task name>`), because that thread carries the task's model and effort and keeps run cards out of project chat. A fresh session per run is the fallback, only where a task can't be bound. Never resolve a home thread or list it as a resolve candidate; only a fresh-session run resolves its own run thread. Run every day by default unless the user picks another schedule; the hourly nudge runs in the user's waking hours only.
+- Every Toolkit scheduled task is bound to its own home thread (`<PROJECT>: <task name>`), because that thread carries the task's model and effort and keeps run cards out of project chat. A fresh session per run is the fallback, only where a task can't be bound. Never resolve a home thread or list it as a resolve candidate; only a fresh-session run resolves its own run thread; the coordinator resolves a check-in run thread that holds a skill card once `SKILL BEHIND` (**Daily check-in**) releases it. Run every day by default unless the user picks another schedule; the hourly nudge runs in the user's waking hours only.
 - **The project's own tasks** are never changed without the owner, and local, desktop and device-bound tasks are only listed, never recreated or moved to the cloud.
 - Only two project memory lines are Toolkit's to rewrite: `BINDING:` (**Binding**) and `SCHEDULED TASKS:`. Trigger ids live only on that line, never in a prompt.
 - **Stopped by owner:** a task whose `SCHEDULED TASKS:` entry says `stopped by owner` is outside every automatic path in this skill, its references and task prompts: never re-arm, update, swap, rebuild or recreate it, or report it missing. Only the owner restarts it, and the restart removes the mark.
@@ -102,7 +102,7 @@ Whenever the user asks for anything recurring (the daily check-in, a sweep, a re
   - `CONTEXT RESET DUE`: rebuild the check-in and its home thread as **Hourly nudge** describes, unless its entry says `stopped by owner`.
   - `SKILL UPDATE`: the loaded skill is newer than memory's. Follow it now, save its Version and say so in one line; never wait for a restart. When the repo's Version is newer than the loaded one, the owner saves the new skill.
   - `SKILL DRIFT`: the account copy has direct edits that match no Toolkit revision. Bring them into Toolkit from the saved copy (a Toolkit PR) before anyone re-uploads, so nothing is overwritten.
-  - `SKILL BEHIND`: the account copy is an older Toolkit revision. Tell the owner once per Version to re-upload the skill with its reference files.
+  - `SKILL BEHIND`: the account copy is an older Toolkit revision. With "card posted", the check-in posted the skill update card in its thread: put "tap Save on the skill card" with that thread link on the owner's pending list, and keep that thread open (never resolve it in the hourly pass, even after the check-in moves to a new home thread) until the owner saves. Once a check-in shows the account copy current, drop the pending item and resolve the thread unless it is a current home thread. Do the same for an older card when a newer card is posted, when the owner declines it, or when a check-in reports SKILL DRIFT or no account copy: its Save would install an older Version or overwrite direct edits. Name the Version in each Save item. With "card failed", or with neither, tell the owner once per Version to re-upload the skill with its reference files.
   - `BLOCK OUTDATED` (including `misplaced` and `overlaps`): **Managed project-instructions sync**.
   - `BINDING STALE` or `BINDING UNKNOWN`: rebind (**Binding**). When current, the report says `**Binding:** current` with the short blob, adding the newer short commit when only the commit moved.
   - `TOOLKIT CHANGED`: note the new version; the block and plugin checks follow from it.
@@ -135,7 +135,7 @@ Whenever the user asks for anything recurring (the daily check-in, a sweep, a re
 - `CHECK-IN NOT ARMED` (including a deleted check-in): recreate it from the template the same turn, without asking, as in **Recurring tasks**, unless its entry says `stopped by owner`.
 - **Both gone:** the two tasks watch each other, but if both are deleted nothing fires. So on the first owner message or wake of each day, call `list_triggers` once (a cheap read); if either Toolkit task is missing and its entry does not say `stopped by owner`, start a cloud thread that recreates it from the template on `main`, fires it once and updates the `SCHEDULED TASKS:` line, and tell the owner once.
 - Report to the coordinator only. The coordinator posts all waiting owner items as ONE reminder each run until each is answered; act on the rest in the same turn: verify/resolve candidates, reopen and relay unrelayed threads, post missing pointers, end finished Remote Control sessions, correct stale labels, act on overdue promises, nudge/reroute stuck work.
-- This is the only resolve pass for coordinator-driven resolution; each fresh scheduled run resolves its own thread after report delivery. Stop the nudge only when the user asks; mark its `SCHEDULED TASKS:` entry `stopped by owner`.
+- This is the only resolve pass for coordinator-driven resolution; each fresh scheduled run resolves its own thread after report delivery, except a check-in run that posted a skill card. Stop the nudge only when the user asks; mark its `SCHEDULED TASKS:` entry `stopped by owner`.
 
 ## Promises wiring
 - Keep the controller's promise list in project memory as a plain list, one line per "I'll ...": what, the event that triggers it (a merged PR, a PASS file, a shipped version) and its status. The hourly nudge reads it and lists each item whose trigger already happened under **Overdue promise:**, and you act on it. Remove a line only when it is done.
@@ -180,11 +180,12 @@ Whenever the user asks for anything recurring (the daily check-in, a sweep, a re
 - For each approval or interactive step, either handle it within approved scope or post the direct thread link and say exactly what to tap or type.
 - When blocked on a person or another account, say once what is needed and move to the next unblocked item.
 - **Owner UAT lists carry only owner-hands steps** (global rules): real app UI, signed-in accounts and device behaviour CI cannot reach. End each list with what was dropped and the passing check that covers each; the user can pull any item back in.
+- **Pending lists name every owner-hands step.** Whenever you tell the owner what waits on them (a pending answer, the nudge reminder, a check-in), list every step only they can do, optional ones and ones posted only inside a thread included, each with its link; never drop one as minor.
 
 ## Improving this skill
 - The source of truth is `repo/contracts/claude-projects/web-controller-projects/SKILL.md` in the Toolkit repo. The user, or another project at the user's request, may edit the copy on the user's claude.ai account directly. Before any upload, a coordinator compares that copy with the repo file and brings direct edits into Toolkit first, so nothing is overwritten.
 - Watch every Toolkit-enabled feature, especially this skill; suggest improvements or setting changes to the owner, never change them yourself. The managed block carries this rule to threads.
 - The skill is this SKILL.md plus the `reference/` files beside it; upload them together. When only SKILL.md is on the account, read a reference file from bound Toolkit `main` before the job it covers (a cloud thread returns it in full).
-- After a Toolkit release changes this skill or its block, the owner uploads the new skill and the coordinator runs **Managed project-instructions sync**. Compare the uploaded Version with the repo's after each release.
+- After a Toolkit release changes this skill or its block, the owner saves the new skill (the daily check-in posts the card) and the coordinator runs **Managed project-instructions sync**. Compare the uploaded Version with the repo's after each release.
 - Keep this skill generic. User-specific details go in project memory or the user's claude.ai preferences, never here. Rules Toolkit owns go to `CONTROLLER.md` or the governed rules, not here.
 - Every change bumps the Version line (date plus a counter for that day, e.g. 2026-10-21.2).

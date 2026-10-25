@@ -52,7 +52,15 @@ test('no plugin payload or skills folder reaches the Projects controller skill',
 
 test('Projects wires managed instructions, promises and fresh scheduled sessions to controller law', () => {
   const text = bundle();
-  assert.match(text, /^Version: 2026-10-25\.3$/m);
+  assert.match(text, /^Version: 2026-10-25\.8$/m);
+  // The check-in posts the skill card itself; the coordinator lists the Save tap, re-upload only when the card failed.
+  assert.match(text, /`SKILL BEHIND`: the account copy is an older Toolkit revision\. With "card posted", the check-in posted the skill update card in its thread: put "tap Save on the skill card"/);
+  assert.match(text, /keep that thread open \(never resolve it in the hourly pass, even after the check-in moves to a new home thread\) until the owner saves/);
+  assert.match(text, /Once a check-in shows the account copy current, drop the pending item and resolve the thread unless it is a current home thread\. Do the same for an older card when a newer card is posted, when the owner declines it, or when a check-in reports SKILL DRIFT or no account copy: its Save would install an older Version or overwrite direct edits\. Name the Version in each Save item\./);
+  assert.match(text, /the coordinator resolves a check-in run thread that holds a skill card once `SKILL BEHIND` \(\*\*Daily check-in\*\*\) releases it\./);
+  assert.match(text, /With "card failed", or with neither, tell the owner once per Version to re-upload the skill with its reference files\./);
+  assert.match(text, /Fresh-session scheduled runs resolve their own run thread after delivery, except a check-in run that posted a skill card;/);
+  assert.match(text, /each fresh scheduled run resolves its own thread after report delivery, except a check-in run that posted a skill card\./);
   // Plugin lag: removing the plugin alone is the fix that worked; the marketplace re-add is the fallback.
   assert.match(text, /`PLUGIN BEHIND`: the Toolkit plugin on the user's claude\.ai account is more than a day behind `main`/);
   // The skill drift watch lives in the daily check-in: direct account edits come back into Toolkit first.
@@ -193,4 +201,12 @@ test('Projects keeps its Toolkit base layer current without touching the project
   const section = text.slice(text.indexOf('## Daily check-in'), text.indexOf('## Hourly nudge'));
   const at = prefixes.map(prefix => section.indexOf(`  - ${prefix}`));
   assert.ok(at.every((position, index) => position > -1 && (index === 0 || position > at[index - 1])), at.join(','));
+});
+
+test('Projects lists every owner-hands step when it reports what waits on the owner', () => {
+  const text = read(SKILL_REL);
+  // An optional step posted only inside a thread was once left off a pending answer.
+  assert.match(text, /\*\*Pending lists name every owner-hands step\.\*\* Whenever you tell the owner what waits on them \(a pending answer, the nudge reminder, a check-in\), list every step only they can do, optional ones and ones posted only inside a thread included, each with its link; never drop one as minor\./);
+  const nudge = read('repo/contracts/claude-projects/web-controller-projects/tasks/hourly-nudge.md');
+  assert.match(nudge, /\*\*Waiting on owner:\*\* \([^\n]*plus every step only the owner can do that is not done yet, optional ones and ones posted only inside a thread included;/);
 });

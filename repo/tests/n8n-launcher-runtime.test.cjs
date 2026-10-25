@@ -8,6 +8,16 @@ const { spawnSync } = require('node:child_process');
 const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
+
+// PowerShell on Linux and macOS keeps its IPC pipes (CoreFxPipe_*, clr-debug-pipe-*,
+// dotnet-diagnostic-*) in TMPDIR and leaves them behind when a timeout kills it, so each
+// PowerShell child gets one temp folder that is removed after the file's tests.
+let powerShellTemp = null;
+test.after(() => { if (powerShellTemp) fs.rmSync(powerShellTemp, { recursive: true, force: true }); });
+function powerShellEnv() {
+  if (!powerShellTemp) powerShellTemp = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-launcher-powershell-'));
+  return { ...process.env, TMPDIR: powerShellTemp };
+}
 const dockerWindowsInstallUrl = 'https://docs.docker.com/desktop/setup/install/windows-install/';
 const launcherCases = [
   {
@@ -30,6 +40,7 @@ function findPowerShell() {
   const candidates = ['pwsh', 'powershell'];
   for (const candidate of candidates) {
     const result = spawnSync(candidate, ['-NoProfile', '-NonInteractive', '-Command', '$PSVersionTable.PSVersion.ToString()'], {
+      env: powerShellEnv(),
       encoding: 'utf8',
       timeout: 5000
     });
@@ -326,6 +337,7 @@ test('both menus fail closed until Docker CLI, Compose, and engine preflight suc
 
     const result = spawnSync(powerShell, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command], {
       cwd: repoRoot,
+      env: powerShellEnv(),
       encoding: 'utf8',
       timeout: 30000
     });
@@ -394,6 +406,7 @@ test('production readiness requires a stable streak and reports a redacted bound
 
   const result = spawnSync(powerShell, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command], {
     cwd: repoRoot,
+    env: powerShellEnv(),
     encoding: 'utf8',
     timeout: 30000
   });
@@ -478,6 +491,7 @@ test('production n8n recreate actions wait for readiness while stop and down act
 
   const result = spawnSync(powerShell, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command], {
     cwd: repoRoot,
+    env: powerShellEnv(),
     encoding: 'utf8',
     timeout: 30000
   });

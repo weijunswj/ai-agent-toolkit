@@ -52,15 +52,8 @@ const RETIRED_HELPERS = {
   "repo/scripts/source-watch-advisory-targets.cjs": [
     "optionalString"
   ],
-  "repo/scripts/toolkit-trusted-ci-repository-protection-workflow.cjs": [
-    "isSafeText",
-    "isSha"
-  ],
   "repo/scripts/toolkit-v3-helper-guard.cjs": [
     "defaultQualification"
-  ],
-  "repo/scripts/toolkit-control-plane/control-plane-kernel.cjs": [
-    "contextRootMatches"
   ]
 };
 test('removed unreferenced helpers do not return in current runtime modules', () => {
