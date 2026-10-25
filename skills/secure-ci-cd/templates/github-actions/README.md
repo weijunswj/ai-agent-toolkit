@@ -6,7 +6,7 @@ This toolkit's workflows are intentionally safe by default.
 
 - Use explicit permissions.
 - Default to `contents: read`.
-- Use `contents: write` only for a tightly scoped generated-template workflow that commits generated outputs back to a same-repo PR branch, and in `dependency-auto-merge.yml`, which needs it to turn on auto-merge.
+- Use `contents: write` only for a tightly scoped generated-template workflow that commits generated outputs back to a same-repo PR branch, and in `dependency-auto-merge.yml`, which needs it to turn auto-merge on and off.
 - Use `issues: write` only for issue-summary workflows.
 - Do not use `pull-requests: write`, except in `dependency-auto-merge.yml`, which needs it to turn auto-merge on and off and to comment.
 - Do not auto-commit except for generated template outputs on same-repo PR branches.

@@ -296,6 +296,10 @@ const APPLY = [
     before: reader({ ...PRIVATE, ...PAID_OFF, code_security: 'disabled', binding: merged(null, 'on') }), writer: () => [ok('code_security'), refused('code_scanning', 'refused-by-policy')],
     after: reader({ ...PRIVATE, ...PAID_OFF, code_security: 'enabled', binding: merged(null, 'on') }),
     expect: { result: 'applied', writes: 1, unavailable: ['code_scanning'], lines: [/GitHub Code Security turned on\./, /read back\./] } },
+  { id: 'A18 Code Security read back on, default setup then answered "not on the plan": unverified, never left alone (I4)', binding: binding(null, 'on'),
+    before: reader({ ...PRIVATE, ...PAID_OFF, code_security: 'disabled', binding: merged(null, 'on') }), writer: () => [ok('code_security'), refused('code_scanning', 'not-on-plan')],
+    after: reader({ ...PRIVATE, ...PAID_OFF, code_security: 'enabled', binding: merged(null, 'on') }),
+    expect: { result: 'unverified', writes: 1, unavailable: [], unconfirmed: ['code_scanning'], lines: [/could not read back: CodeQL code scanning/], never: [/: read back\./] } },
   { id: 'A17 a written setting with no read-back is never "read back" (I4)', before: reader(ALERTS_OFF), writer: () => [ok('alerts'), ok('something_new')], after: reader(),
     expect: { result: 'unverified', writes: 1, unconfirmed: ['something_new'], never: [/: read back\./] } },
 ];
@@ -401,24 +405,43 @@ test('SE-08: the reader only reads, hides nothing it could not see, and reads th
   assert.deepEqual([admin.alerts, admin.secret_scanning, admin.code_scanning, admin.private_reporting, admin.binding.status], ['enabled', 'not-on-plan', 'not-on-plan', 'not-on-plan', 'unreadable']);
   // An advanced setup is found on the default branch; workflows that cannot be read rule nothing out.
   const repoRead = { private: false, default_branch: 'main', permissions: { admin: true }, allow_auto_merge: true };
-  const codeql = name => security.ghSecurityReader('o/c', { spawn: fakeGh({
+  const codeql = (name, workflow = CODEQL_WORKFLOW) => security.ghSecurityReader('o/c', { spawn: fakeGh({
     'repos/o/c': repoRead, 'repos/o/c/code-scanning/default-setup': { state: 'not-configured' },
     'repos/o/c/contents/.github/workflows?ref=main': [{ type: 'file', name }],
-    'repos/o/c/contents/.github/workflows/codeql.yml?ref=main': { encoding: 'base64', content: Buffer.from(CODEQL_WORKFLOW).toString('base64') },
+    'repos/o/c/contents/.github/workflows/codeql.yml?ref=main': { encoding: 'base64', content: Buffer.from(workflow).toString('base64') },
   }, []) }).advanced_codeql;
   assert.equal(codeql('codeql.yml'), 'codeql.yml');
   assert.equal(codeql('gone.yml'), 'unreadable');
+  assert.equal(codeql('codeql.yml', CODEQL_WORKFLOW.replace('    steps:', '    if: false\n    steps:')), null, 'a switched-off job is not an advanced setup');
+  assert.equal(codeql('codeql.yml', CODEQL_WORKFLOW.replace(/^on:\n {2}push:\n {4}branches: \[main\]/, 'on: workflow_call')), 'codeql.yml', 'a reusable CodeQL workflow is an advanced setup');
   const steps = 'jobs:\n  analyze:\n    steps:\n      - uses: github/codeql-action/init@v3\n      - uses: github/codeql-action/analyze@v3\n';
+  const indentless = 'on:\n  push:\njobs:\n  analyze:\n    runs-on: ubuntu-latest\n    steps:\n    - name: Initialise\n      uses: github/codeql-action/init@v3\n    - uses: github/codeql-action/analyze@v3\n';
+  const job = extra => `on: push\njobs:\n  analyze:\n${extra}    steps:\n      - uses: github/codeql-action/init@v3\n      - uses: github/codeql-action/analyze@v3\n`;
   for (const [text, runs, why] of [
     [CODEQL_WORKFLOW, true, 'init and analyze on push'],
     [`'on':\n  schedule:\n    - cron: '0 0 * * 1'\n${steps}`, true, 'quoted on, schedule only'],
     [`on: [push, pull_request]\r\n${steps.replace(/\n/g, '\r\n')}`, true, 'flow-style trigger, CRLF'],
+    [`on: {push: {branches: [main]}}\n${steps}`, true, 'flow-style trigger map'],
+    [`on: workflow_call\n${steps}`, true, 'a reusable workflow runs when it is called'],
+    [`\uFEFFon: push\n${steps}`, true, 'a byte order mark'],
+    [indentless, true, "GitHub's starter style, steps at the job's key indent"],
+    ['on: push\njobs:\n  a:\n    steps: [{uses: github/codeql-action/init@v3}, {uses: github/codeql-action/analyze@v3}]\n', true, 'flow-style steps'],
     ['on: push\njobs:\n  a:\n    steps:\n      - uses: github/codeql-action/init@v3\n', false, 'init only'],
     ['on: push\njobs:\n  a:\n    steps:\n      - uses: github/codeql-action/analyze@v3\n', false, 'analyze only'],
+    ['on: push\njobs:\n  a:\n    steps:\n      - uses: github/codeql-action/init@v3\n  b:\n    steps:\n      - uses: github/codeql-action/analyze@v3\n', false, 'init and analyze in different jobs'],
     [steps, false, 'no on: key'],
     [`on:\n  workflow_dispatch:\n${steps}`, false, 'manual trigger only'],
+    [`on:\n  workflow_dispatch:\n  # push:\n${steps}`, false, 'a commented-out trigger'],
+    [`on: workflow_dispatch\n# push\n${steps}`, false, 'a column-0 comment naming push'],
+    [`on: workflow_dispatch # was push\n${steps}`, false, 'a trailing comment naming push'],
+    [`on:\n  workflow_dispatch:\n    inputs:\n      schedule:\n        type: string\n${steps}`, false, 'a dispatch input named schedule'],
+    [`on:\n  workflow_run:\n    workflows: ["push checks"]\n${steps}`, false, 'an event name inside a value'],
+    [job('    if: false\n'), false, 'a job switched off with if: false'],
+    [job('    if: ${{ false }}\n'), false, 'a job switched off with if: ${{ false }}'],
+    ['on: push\njobs:\n  a:\n    steps:\n      - uses: github/codeql-action/init@v3\n        if: false\n      - uses: github/codeql-action/analyze@v3\n', false, 'a step switched off with if: false'],
     ['on: push\njobs:\n  a:\n    steps:\n      # - uses: github/codeql-action/init@v3\n      # - uses: github/codeql-action/analyze@v3\n      - uses: github/codeql-action/upload-sarif@v3\n', false, 'commented-out steps'],
     ['on: push\njobs:\n  a:\n    steps:\n      - run: echo "uses: github/codeql-action/init@v3 uses: github/codeql-action/analyze@v3"\n', false, 'text inside a run step'],
+    ['on: push\njobs:\n  a:\n    steps:\n      - run: |\n          - uses: github/codeql-action/init@v3\n          - uses: github/codeql-action/analyze@v3\n', false, 'lines inside a run script'],
     ['on: push\njobs:\n  a:\n    steps:\n      - uses: github/codeql-action/upload-sarif@v3\n', false, 'upload-sarif for another scanner'],
   ]) assert.equal(security.runsCodeql(text), runs, why);
   // A default ref GitHub cannot resolve is unreadable, never "not merged".

@@ -229,16 +229,96 @@ function workflowState(root, toolkitRoot = ROOT) {
   return text.startsWith(WORKFLOW_MARKER) ? 'outdated' : 'foreign';
 }
 
-// True when workflow `text` runs CodeQL itself (an advanced setup): it has a trigger (`on:` with push,
-// pull_request, merge_group or schedule) and real codeql-action init and analyze steps. Commented-out
-// steps, text inside a run script and other codeql-action steps, such as upload-sarif for another
-// scanner, do not count. GitHub refuses an advanced setup's results once default setup is on, so
-// default setup is never turned on over one.
+// Workflow `text` as [{ indent, text }] lines a reader can match safely: no byte order mark, no blank
+// or comment lines, no trailing comments, and no lines inside a block scalar (a `run: |` script).
+function workflowLines(text) {
+  const lines = [];
+  let scalarIndent = -1;
+  for (const raw of String(text).replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n').split('\n')) {
+    const indent = raw.length - raw.trimStart().length;
+    if (scalarIndent >= 0) {
+      if (!raw.trim() || indent > scalarIndent) continue;
+      scalarIndent = -1;
+    }
+    let body = raw.trim();
+    if (!body || body.startsWith('#')) continue;
+    let quote = null;
+    for (let index = 0; index < body.length; index += 1) {
+      const char = body[index];
+      if (quote) { if (char === quote) quote = null; continue; }
+      if (char === '"' || char === "'") quote = char;
+      else if (char === '#' && /\s/.test(body[index - 1] || '')) { body = body.slice(0, index).trimEnd(); break; }
+    }
+    lines.push({ indent, text: body });
+    if (/:\s*[|>][+-]?\d*$/.test(body)) scalarIndent = indent;
+  }
+  return lines;
+}
+
+// The child lines of the top-level `key:` and its inline value: { inline, children } or null.
+function topLevel(lines, key) {
+  const start = lines.findIndex(line => line.indent === 0 && new RegExp(`^(?:${key}|"${key}"|'${key}'):(?:\\s|$)`).test(line.text));
+  if (start < 0) return null;
+  const end = lines.findIndex((line, index) => index > start && line.indent === 0);
+  return { inline: lines[start].text.replace(/^[^:]+:\s*/, ''), children: lines.slice(start + 1, end < 0 ? lines.length : end) };
+}
+
+// Keys at the first indent of `children` (a mapping or a `- ` list).
+function childKeys(children) {
+  if (!children.length) return [];
+  const indent = children[0].indent;
+  return children.filter(line => line.indent === indent).map(line => (/^(?:-\s+)?["']?([A-Za-z_][\w-]*)["']?\s*(?::|$)/.exec(line.text) || [])[1]).filter(Boolean);
+}
+
+const CODEQL_EVENTS = Object.freeze(['push', 'pull_request', 'pull_request_target', 'merge_group', 'schedule', 'workflow_call']);
+const FALSE_IF = /^(?:-\s+)?if:\s*(?:false|\$\{\{\s*false\s*\}\})$/;
+
+// True when workflow `text` runs CodeQL itself (an advanced setup): its `on:` names push,
+// pull_request, pull_request_target, merge_group, schedule or workflow_call (a reusable workflow runs
+// when it is called), and one job that is not switched off with `if: false` has real codeql-action
+// init and analyze steps that are not switched off either. Comments, text inside a run script and
+// other codeql-action steps, such as upload-sarif for another scanner, do not count. GitHub refuses
+// an advanced setup's results once default setup is on, so default setup is never turned on over one.
 function runsCodeql(text) {
-  const source = String(text).replace(/\r\n/g, '\n');
-  const step = action => new RegExp(`^\\s*(?:-\\s+)?uses:\\s*['"]?github\\/codeql-action\\/${action}@`, 'm').test(source);
-  const trigger = /^(?:on|"on"|'on'):(.*(?:\n(?:[ \t]+.*|[ \t]*#.*|[ \t]*))*)/m.exec(source);
-  return Boolean(trigger) && /\b(?:push|pull_request|pull_request_target|merge_group|schedule)\b/.test(trigger[1]) && step('init') && step('analyze');
+  const lines = workflowLines(text);
+  const on = topLevel(lines, 'on');
+  if (!on) return false;
+  let events = childKeys(on.children);
+  if (on.inline) {
+    const value = on.inline.trim();
+    if (value.startsWith('[')) events = value.replace(/[[\]\s'"]/g, '').split(',');
+    else if (value.startsWith('{')) events = [...value.slice(1).matchAll(/(?:^|[{,])\s*["']?([A-Za-z_]+)["']?\s*:/g)].map(match => match[1]);
+    else events = [value.replace(/['"]/g, '')];
+  }
+  if (!events.some(event => CODEQL_EVENTS.includes(event))) return false;
+  const jobs = topLevel(lines, 'jobs');
+  if (!jobs || !jobs.children.length) return false;
+  const jobIndent = jobs.children[0].indent;
+  const blocks = [];
+  for (const line of jobs.children) {
+    if (line.indent === jobIndent) blocks.push([]);
+    else if (blocks.length) blocks[blocks.length - 1].push(line);
+  }
+  const uses = action => new RegExp(`(?:^|[\\s{,])uses:\\s*['"]?github\\/codeql-action\\/${action}@`);
+  return blocks.some(block => {
+    if (!block.length) return false;
+    const keyIndent = block[0].indent;
+    if (block.some(line => line.indent === keyIndent && !line.text.startsWith('-') && FALSE_IF.test(line.text))) return false;
+    // Steps: each starts at a `- ` line (GitHub's starter workflows put these at the job's own key
+    // indent); flow-style steps are split on their items.
+    const steps = [];
+    for (const line of block) {
+      if (line.indent === keyIndent && !/^-\s/.test(line.text)) {
+        const flow = /^steps:\s*\[(.*)\]$/.exec(line.text);
+        if (flow) steps.push(...flow[1].split(/\}\s*,\s*\{/).map(item => [item]));
+        continue;
+      }
+      if (/^-\s/.test(line.text)) steps.push([line.text.replace(/^-\s+/, '')]);
+      else if (steps.length) steps[steps.length - 1].push(line.text);
+    }
+    const live = steps.filter(step => !step.some(item => FALSE_IF.test(item) || /(?:^|[{,]\s*)if:\s*(?:false|\$\{\{\s*false\s*\}\})\s*(?:[,}]|$)/.test(item)));
+    return ['init', 'analyze'].every(action => live.some(step => step.some(item => uses(action).test(item))));
+  });
 }
 
 // The binding's policy as committed on the default branch: { policy, required_checks, source } where
@@ -438,7 +518,7 @@ function applySecurity(root, result, { writer = ghSecurityWriter, fileWriter = w
   if (wantFiles) {
     try { files = fileWriter(root, result.files); } catch { files = [{ file: 'all', result: 'failed (writer-failed)' }]; }
   }
-  const unavailable = settings.filter(entry => !entry.ok && UNAVAILABLE.includes(entry.reason)).map(entry => entry.setting);
+  let unavailable = settings.filter(entry => !entry.ok && UNAVAILABLE.includes(entry.reason)).map(entry => entry.setting);
   let after = null;
   if (wantSettings && reread) {
     try { after = reread(); } catch { after = null; }
@@ -453,6 +533,14 @@ function applySecurity(root, result, { writer = ghSecurityWriter, fileWriter = w
     if (values.every(item => item === 'enabled' || item === true)) continue;
     if (values.some(item => item === 'disabled' || item === false)) stillOff.push(entry.setting);
     else unconfirmed.push(entry.setting);
+  }
+  // GitHub can answer "needs Code Security" for default setup just after Code Security went on, while
+  // the change takes effect. Once Code Security reads back on, that answer is not "not on this plan":
+  // CodeQL is still off, so the run is unverified and the next check looks again.
+  const paidOn = settings.some(entry => entry.ok && entry.setting === 'code_security') && !unconfirmed.includes('code_security') && !stillOff.includes('code_security');
+  if (paidOn && settings.some(entry => entry.setting === 'code_scanning' && entry.reason === 'not-on-plan')) {
+    unavailable = unavailable.filter(setting => setting !== 'code_scanning');
+    unconfirmed.push('code_scanning');
   }
   const failed = settings.some(entry => !entry.ok && !UNAVAILABLE.includes(entry.reason)) || files.some(entry => entry.result !== 'written') || stillOff.length > 0;
   const status = failed ? 'failed' : unconfirmed.length > 0 ? 'unverified' : 'applied';
@@ -480,7 +568,7 @@ function describeOutcome(slug, root, result, outcome) {
   for (const entry of outcome.settings) {
     const label = SETTING_LABELS[entry.setting] || entry.setting;
     if (entry.ok) lines.push(`- ${slug}: ${label} turned on.`);
-    else if (UNAVAILABLE.includes(entry.reason)) lines.push(`- ${slug}: ${label} left alone: GitHub does not allow it here (${entry.reason === 'not-on-plan' ? 'not on this plan' : 'an organisation or enterprise policy'}).`);
+    else if (UNAVAILABLE.includes(entry.reason) && (outcome.unavailable || []).includes(entry.setting)) lines.push(`- ${slug}: ${label} left alone: GitHub does not allow it here (${entry.reason === 'not-on-plan' ? 'not on this plan' : 'an organisation or enterprise policy'}).`);
     else lines.push(`- ${slug}: ${label} not turned on (${entry.reason}).`);
   }
   for (const entry of outcome.files) lines.push(`- ${root}: ${entry.file} ${entry.result}${entry.result === 'written' ? '; commit it through a pull request' : ''}.`);
