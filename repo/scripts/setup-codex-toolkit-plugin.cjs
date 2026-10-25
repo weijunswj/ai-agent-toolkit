@@ -174,6 +174,8 @@ function renderInstalledWindowsHooks(hooks, powershellPath) {
   rendered.hooks.SessionStart[0].hooks[0].commandWindows = windowsSessionStartCommand(powershellPath);
   for (const hook of helperScriptHooks(rendered)) hook.commandWindows = windowsHelperHookCommand(powershellPath);
   if (rendered.hooks.Stop?.[0]?.hooks?.[0]) rendered.hooks.Stop[0].hooks[0].commandWindows = windowsCheckpointHookCommand(powershellPath);
+  // The after-tool programme refresh mark runs the same script as the turn-end hook, so it shares its launcher.
+  if (rendered.hooks.PostToolUse?.[0]?.hooks?.[0]) rendered.hooks.PostToolUse[0].hooks[0].commandWindows = windowsCheckpointHookCommand(powershellPath);
   return rendered;
 }
 
@@ -347,10 +349,19 @@ function verifySessionStartHook(hooksPath, options = {}) {
     if (checkpointHook.timeout !== CHECKPOINT_HOOK_TIMEOUT_SECONDS) errors.push(`Stop checkpoint hook timeout must be ${CHECKPOINT_HOOK_TIMEOUT_SECONDS} seconds`);
     if (stop[0].matcher !== undefined) errors.push('Stop checkpoint hook takes no matcher');
   }
+  // The after-tool hook only marks a GitHub write for the turn-end programme refresh.
+  const postToolUse = hooks?.hooks?.PostToolUse;
+  const markHook = postToolUse?.[0]?.hooks?.[0];
+  if (!Array.isArray(postToolUse) || postToolUse.length !== 1 || postToolUse[0]?.hooks?.length !== 1 || markHook?.type !== 'command') {
+    errors.push('PostToolUse must include exactly one programme refresh command hook');
+  } else if (markHook.command !== sourceCheckpointHookCommand()) {
+    errors.push('PostToolUse programme refresh hook must use the exact portable Toolkit command');
+  }
   const sessionWindows = sessionStart[0]?.hooks?.[0]?.commandWindows;
   const helperWindows = helperHook?.commandWindows;
   const otherWindows = [promptHook?.commandWindows, governanceHook?.commandWindows];
   const checkpointWindows = checkpointHook?.commandWindows;
+  const markWindows = markHook?.commandWindows;
   if (options.windows) {
     let expectedSession = '';
     let expectedHelper = '';
@@ -366,7 +377,8 @@ function verifySessionStartHook(hooksPath, options = {}) {
     if (helperWindows !== expectedHelper) errors.push('PreToolUse helper hook commandWindows must use the exact installed Windows launcher shape');
     if (otherWindows.some(value => value !== expectedHelper)) errors.push('governance hook commandWindows must use the exact installed Windows launcher shape');
     if (checkpointWindows !== expectedCheckpoint) errors.push('Stop checkpoint hook commandWindows must use the exact installed Windows launcher shape');
-  } else if (sessionWindows !== undefined || helperWindows !== undefined || checkpointWindows !== undefined || otherWindows.some(value => value !== undefined)) {
+    if (markWindows !== expectedCheckpoint) errors.push('PostToolUse programme refresh hook commandWindows must use the exact installed Windows launcher shape');
+  } else if (sessionWindows !== undefined || helperWindows !== undefined || checkpointWindows !== undefined || markWindows !== undefined || otherWindows.some(value => value !== undefined)) {
     errors.push('the source hooks must not carry commandWindows; setup adds it to the installed copy only');
   }
   return errors;
@@ -687,7 +699,7 @@ function verifyLocalMarketplaceConfig(configText, repoRoot) {
 
 // The hook events the user must trust in Codex `/hooks`, read from the plugin's own hooks file so the
 // list cannot drift from what setup installs. Codex records trust per hook and skips an untrusted one.
-const FALLBACK_HOOK_EVENTS = Object.freeze(['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'Stop']);
+const FALLBACK_HOOK_EVENTS = Object.freeze(['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop']);
 function trustedHookEvents(pluginRoot = repoRootFromScript()) {
   try {
     const events = Object.keys(readJson(path.join(pluginRoot, '.codex-plugin', 'hooks', 'hooks.json')).hooks || {});

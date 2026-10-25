@@ -27,6 +27,9 @@ Only the appointed controller writes programme state (the parent and child docum
 | Failure | Recorded in the session's local errors file; the next checkpoint writes it to the journal and `show --session` lists it |
 | Windows | Claude Code runs the same command. Codex runs `commandWindows`: the full `powershell.exe` path with `-File repo/scripts/toolkit-programme-checkpoint-hook.ps1`, which setup adds to the installed copy only and which also always exits 0 |
 | Trust | Codex skips a plugin hook until it is reviewed and trusted in `/hooks`; setup says so after a hook change |
+| Programme refresh | After the checkpoint, a session the after-tool hook marked starts `programme.cjs refresh` detached, once for each governed checkout it wrote for, then clears the mark; output goes to `~/.ai-agent-toolkit/user-state/programme-refresh/last-run.log`. A write with no governed checkout on this computer, or governance not ENABLED there, starts nothing |
+
+The same script also runs on `PostToolUse` (one command hook, matcher `^(?:Bash|PowerShell|mcp__.*)$` in Claude Code and `^(?:Bash|mcp__.*)$` in Codex, 10-second timeout, the same Windows launcher in Codex). It reads only the hook input: after a GitHub write (a GitHub connector tool that writes an issue, comment, sub-issue link, pull request, review or branch files; `gh issue` or `gh pr` writes; `gh api` with a write method, fields or a mutation; `git push`) it writes one small mark file for the session. No git, gh or network call, exit 0, nothing on stdout.
 
 The return block the hook reads:
 

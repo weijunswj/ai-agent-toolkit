@@ -59,6 +59,18 @@
         ]
       }
     ],
+    "PostToolUse": [
+      {
+        "matcher": "^(?:Bash|PowerShell|mcp__.*)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-programme-checkpoint-hook.cjs\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [

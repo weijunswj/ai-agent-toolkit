@@ -24,18 +24,29 @@ Any session may run the dry-run `reconcile` (or `show`) at these significant eve
 
 Check for the binding first at each event; without it, do not run `programme.cjs`. Governed issue records are unchanged. The reconciler never closes, deletes or merges.
 
+## Refresh after every write (required)
+
+The programme pages stay current without any token: the session that changed GitHub brings them up to date with its own `gh` sign-in, and an hourly sweep catches everything else.
+
+- **After any write in a governed repository** (an issue or comment created, edited, closed or reopened, a sub-issue link, a PR opened, edited, reviewed or merged, or a push that moves a PR head), run `node scripts/programme.cjs refresh` from its checkout before ending the turn. Any session may, executors included: `refresh` is the full `reconcile --apply` pass written under the controller that holds the parent now, and it takes no session, patch or verdict, so it records nothing that is a decision.
+- **The plugin hook does this for you** in Claude Code and Codex: the after-tool hook marks the session after a GitHub write, and the turn-end hook starts `refresh` in the background for each governed checkout the session wrote for. Its output is in `~/.ai-agent-toolkit/user-state/programme-refresh/last-run.log`. Do not also run it by hand when the hook is installed.
+- **Where it cannot run** (no plugin hooks, `gh` not signed in, as in cloud containers and Projects threads, which write through the GitHub connector, or no checkout of the repository on that computer, or governance not yet decided there), do nothing extra: the hourly sweep brings the pages up to date within the hour. If the owner is waiting on the page, say it updates at the next sweep.
+- **The hourly sweep** runs `refresh` where `gh` is signed in: the Projects hourly nudge's programme step, or the programme sweep task on a computer that has the sign-in. It also catches the owner's own edits on the web, which reach no session.
+- One pass runs at a time on a computer: `refresh` skips while another holds the pass lock, and `reconcile --apply` refuses (`PASS_RUNNING`). `refresh` refuses when no controller holds the parent (`PARENT_UNHELD`).
+
 ## What ships
 
 - `scripts/programme.cjs`: the command line. Run it from a checkout of the governed repository.
 - `scripts/programme-state.cjs`: the owners it uses (`GitHubTransport`, `StateStore`, `ProgrammeGraphReader`, `Reconciler`, the renderer and the managed-block helpers).
 - `scripts/programme-checkpoint.cjs`: executor checkpoint journals, used by `bind`, `checkpoint` and the plugins' turn-end hook (`repo/scripts/toolkit-programme-checkpoint-hook.cjs`).
+- `scripts/programme-refresh-trigger.cjs`: the after-write refresh, run by the same hook script on the after-tool and turn-end events.
 - `scripts/decision-trace-audit.cjs`: the read-only decision-trace audit.
 - `scripts/decision-tags.cjs`: the one comment-tag parser (pure, no reads or writes).
 - `scripts/decision-history.cjs`: the read-only decision history G0 runs before planning a child.
 - `scripts/resolve-executable.cjs`: shared executable resolution and its error type; `programme-state.cjs` keeps the public exports.
 - The document and journal schemas live in the Toolkit repository under `repo/contracts/programme-state/`; `repo/docs/HOST-CONTRACT.md` says what each host provides.
 
-Everything runs through `gh` (resolved to a full `.exe` path, never from the working folder) as the signed-in account. A pass runs when someone asks for it, and from the repository's `programme-reconcile` workflow on a merge to main and on issue and comment changes by the owner or a collaborator, once its `TOOLKIT_PROGRAMME_TOKEN` secret and `TOOLKIT_PROGRAMME_WRITER` writer name are set. There is no other scheduler or background loop.
+Everything runs through `gh` (resolved to a full `.exe` path, never from the working folder) as the signed-in account; no token or secret is stored anywhere. A pass runs when someone asks for it, after each GitHub write (see "Refresh after every write") and from the hourly sweep. There is no other scheduler or background loop.
 
 ## Binding
 
@@ -69,7 +80,7 @@ One private JSON document per outcome (`issue-<n>.json`) and one for the parent 
 
 **Fence.** A document is held by one session and record prefix. Every write comes from the session that holds the parent document. `claim --takeover` increments the epoch in one compare-and-swap. A running pass re-reads the parent fence immediately before every state write and every GitHub change, so after a takeover the old pass stops at its next effect (`STALE_WRITER`); an intent it leaves `IN_FLIGHT` is settled by the successor's readback. The fence orders cooperating Toolkit writers under one account; it authenticates nobody and does not stop a person or another tool editing.
 
-**Who records what.** Only the appointed controller writes programme state. Give the controller a stable writer name (for example `toolkit-421-controller`) and pass it as `--session`: coordinator sessions are replaced from time to time, and a fence held by one session would need a takeover after every replacement. Every coordinator and the reconcile workflow then write under that one name; a different controller takes over on purpose with its own name. The controller creates the parent document (`init-parent --apply`) and holds it, and runs every writing command with `--controller`: `reconcile --apply`, `update-parent`, `claim`, `assign`, `reopen`, `interrupt`, `update` and `return`. It assigns each gate (`assign --issue <n> --role <gate> --assignment <id>`), records and consumes returns, records UAT and G2 review verdicts, and sets `DONE` or `RETIRED`. Without `--controller` a writing command is refused before it reads anything, and with it a session that does not hold the parent is refused by the fence. An executor the controller assigned (G0, G1 or G2) writes only its own checkpoint journal (see "Executor checkpoints"); helpers never write; every other session runs only the dry-run `reconcile` and `show` and reports to the controller. A lane controller the catalogue delegates a child to (`owner_prefix`) may hold that child with `claim --issue <n> --lane` and only `assign` and `interrupt` it. A controller stopped by a takeover stops and reports to the owner; only a controller appointed after that takeover verifies that the previous writer stopped, posts its takeover record on the parent issue, then runs `claim --parent --takeover --takeover-record <comment id> --controller`. The tool reads that comment back: on the parent issue, from the same account, with a decision ID carrying the writer prefix, naming the current epoch and posted after the last state write (`TAKEOVER_UNVERIFIED` otherwise). The replaced holder is refused from then on.
+**Who records what.** Only the appointed controller writes programme state. Give the controller a stable writer name (for example `toolkit-421-controller`) and pass it as `--session`: coordinator sessions are replaced from time to time, and a fence held by one session would need a takeover after every replacement. Every coordinator, and every `refresh`, then writes under that one name; a different controller takes over on purpose with its own name. The controller creates the parent document (`init-parent --apply`) and holds it, and runs every writing command with `--controller`: `reconcile --apply`, `update-parent`, `claim`, `assign`, `reopen`, `interrupt`, `update` and `return`. It assigns each gate (`assign --issue <n> --role <gate> --assignment <id>`), records and consumes returns, records UAT and G2 review verdicts, and sets `DONE` or `RETIRED`. Without `--controller` a writing command is refused before it reads anything, and with it a session that does not hold the parent is refused by the fence. An executor the controller assigned (G0, G1 or G2) writes only its own checkpoint journal (see "Executor checkpoints"); helpers never write; every other session runs only the dry-run `reconcile` and `show` and reports to the controller. The one exception for all of them is `refresh` after their own GitHub writes, which decides nothing (see "Refresh after every write"). A lane controller the catalogue delegates a child to (`owner_prefix`) may hold that child with `claim --issue <n> --lane` and only `assign` and `interrupt` it. A controller stopped by a takeover stops and reports to the owner; only a controller appointed after that takeover verifies that the previous writer stopped, posts its takeover record on the parent issue, then runs `claim --parent --takeover --takeover-record <comment id> --controller`. The tool reads that comment back: on the parent issue, from the same account, with a decision ID carrying the writer prefix, naming the current epoch and posted after the last state write (`TAKEOVER_UNVERIFIED` otherwise). The replaced holder is refused from then on.
 
 **Gates.** `NONE` → `ASSIGNED` (assigned, no journal yet) → `ACTIVE` (the assignment's journal seen) → `SUBMITTED` (a return captured) → `ACTIVE` again (`REOPEN`), `WAITING_OWNER`, or `RETIRED` (`ACCEPT`). `interrupt` marks a live gate `INTERRUPTED`. `assign` is refused while a gate is live (`ASSIGNMENT_LIVE`) unless `--supersede --reason`, and an assignment ID is never reused. `reopen --reason` puts `SUBMITTED` or `WAITING_OWNER` back to `ACTIVE`, and a `RETIRED` gate back to `ASSIGNED` under a new `--assignment`, which removes its acceptance.
 
@@ -85,6 +96,7 @@ One private JSON document per outcome (`issue-<n>.json`) and one for the parent 
 |---|---|
 | `reconcile [--issue <n>]` | Nothing: prints findings and the effect plan |
 | `reconcile --apply [--issue <n>]` | State documents and GitHub, as planned; controller only |
+| `refresh` | The same full pass, under the parent's current holder; any session in a governed checkout |
 | `show [--parent \| --issue <n>] [--include-private]` | Nothing; sessions and `private` are redacted unless asked |
 | `init-parent --catalogue <file> [--apply]` | Without `--apply`, nothing (validates the catalogue). Only the appointed controller runs `init-parent --apply`, which creates the parent document held by that controller |
 | `update-parent --patch <file>` | Catalogue, release plan or `private` (merge patch); controller only |
@@ -144,7 +156,7 @@ Audit with `node scripts/decision-trace-audit.cjs --repo <owner/name> --issue <n
 
 ## Safety
 
-- Dry runs and `show` write nothing. `--apply` and the other writing commands change only the bound repository's issue links and managed blocks and the bound store path.
+- Dry runs and `show` write nothing. `--apply`, `refresh` and the other writing commands change only the bound repository's issue links and managed blocks and the bound store path.
 - The reconciler may report a stale PR or issue but never closes, deletes, merges, detaches or removes branches; those stay controller steps with the owner's approval. Removing a sub-issue link by hand is the rollback for a wrong attach.
 - No labels, Projects boards, milestones or assignees are changed.
 - Never put secrets or tokens anywhere in a state document, `private` included (it lives in the store's git history); secret-shaped values are refused. Keep local paths and session details in `private`, never in public fields.

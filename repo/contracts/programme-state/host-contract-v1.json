@@ -11,12 +11,23 @@
     "stdout": "empty",
     "input_fields": ["session_id", "last_assistant_message"],
     "return_block": "toolkit-return",
-    "unbound_session": "returns before any git, gh or network call"
+    "unbound_session": "returns before any git, gh or network call",
+    "refresh": "a session the after-tool hook marked starts programme.cjs refresh in the background for each governed checkout it wrote for, then clears the mark"
+  },
+  "after_tool_hook": {
+    "event": "PostToolUse",
+    "script": "repo/scripts/toolkit-programme-checkpoint-hook.cjs",
+    "timeout_seconds": 10,
+    "exit_code": 0,
+    "stdout": "empty",
+    "input_fields": ["session_id", "cwd", "tool_name", "tool_input"],
+    "effect": "marks the session after a GitHub write (connector write tools, gh issue or pr writes, gh api writes, git push); no git, gh or network call"
   },
   "hosts": {
     "claude-code": {
       "hooks_file": ".claude-plugin/hooks/hooks.json",
       "plugin_root_variable": "CLAUDE_PLUGIN_ROOT",
+      "after_tool_matcher": "^(?:Bash|PowerShell|mcp__.*)$",
       "windows_command": "same command",
       "session_identity": {
         "hook_input": "session_id",
@@ -32,7 +43,8 @@
     "codex": {
       "hooks_file": ".codex-plugin/hooks/hooks.json",
       "plugin_root_variable": "PLUGIN_ROOT",
-      "windows_command": "commandWindows: full powershell.exe path, -File repo/scripts/toolkit-programme-checkpoint-hook.ps1 (setup adds it to the installed copy only)",
+      "after_tool_matcher": "^(?:Bash|mcp__.*)$",
+      "windows_command": "commandWindows: full powershell.exe path, -File repo/scripts/toolkit-programme-checkpoint-hook.ps1 for the turn-end and after-tool hooks (setup adds it to the installed copy only)",
       "hook_trust": "review and trust in /hooks; Codex skips an untrusted hook",
       "session_identity": {
         "hook_input": "session_id",

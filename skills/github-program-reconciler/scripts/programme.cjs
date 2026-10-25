@@ -9,6 +9,10 @@
 //   show [--parent | --issue <n>] [--include-private]; show --session <id> alone shows that session's local binding
 //   init-parent --catalogue <file>                     validate a catalogue
 //
+// Any session in a governed checkout, executors included, may bring the pages up to date:
+//   refresh                                            the full reconcile --apply pass, written under the
+//                                                      parent's current holder; it takes no decision input
+//
 // An executor session the controller assigned writes only its own checkpoint journal:
 //   bind --issue <n> --assignment <id> --session <id> [--model <m> --effort <e> [--route-read-back]]
 //   checkpoint --session <id> [--message-file <file>]  (the turn-end hook runs the same step)
@@ -31,6 +35,7 @@
 // The record prefix is the binding's writer prefix unless --prefix is given. --json prints JSON.
 
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const state = require('./programme-state.cjs');
@@ -38,7 +43,7 @@ const checkpoint = require('./programme-checkpoint.cjs');
 
 const { ProgrammeError } = state;
 const VERSION_FILE = path.resolve(__dirname, '..', '..', '..', 'repo', 'contracts', 'toolkit-local-bridge', 'version.json');
-const COMMANDS = ['reconcile', 'show', 'init-parent', 'update-parent', 'claim', 'assign', 'reopen', 'interrupt', 'update', 'return', 'bind', 'checkpoint'];
+const COMMANDS = ['reconcile', 'refresh', 'show', 'init-parent', 'update-parent', 'claim', 'assign', 'reopen', 'interrupt', 'update', 'return', 'bind', 'checkpoint'];
 const FLAGS = new Set(['--apply', '--parent', '--include-private', '--takeover', '--route-read-back', '--json', '--controller', '--supersede', '--lane']);
 const VALUES = new Set(['--issue', '--parent-file', '--catalogue', '--patch', '--role', '--model', '--effort', '--record', '--consume', '--verdict', '--session',
   '--prefix', '--repo-root', '--assignment', '--reason', '--at-head', '--takeover-record', '--message-file']);
@@ -63,6 +68,10 @@ function parseArgs(argv) {
   if (args.issue !== undefined) {
     args.issue = /^\d+$/.test(args.issue) ? Number(args.issue) : NaN;
     if (!Number.isSafeInteger(args.issue) || args.issue < 1) throw usage('--issue must be an issue number (1 or more).');
+  }
+  if (command === 'refresh') {
+    const extra = Object.keys(args).filter(key => !['command', 'json', 'repo-root'].includes(key));
+    if (extra.length) throw usage(`refresh takes no options but --json and --repo-root: it always runs the full pass as the parent's current holder (got --${extra[0]}).`);
   }
   if (EXECUTOR_COMMANDS.includes(command) && args.controller) throw usage(`${command} is an executor command; the controller does not bind or checkpoint.`);
   if (isWrite(args) && !args.controller) {
@@ -95,7 +104,8 @@ function parseArgs(argv) {
   return args;
 }
 
-// Commands that write programme state or GitHub. Each one is the controller's.
+// Commands that write programme state or GitHub. Each one is the controller's. `refresh` also writes,
+// but it is not listed: it carries no decision of its own (see commands.refresh).
 function isWrite(args) {
   if (args.command === 'reconcile' || args.command === 'init-parent') return Boolean(args.apply);
   return ['update-parent', 'claim', 'assign', 'reopen', 'interrupt', 'update', 'return'].includes(args.command);
@@ -104,6 +114,35 @@ function isWrite(args) {
 function toolkitVersion(file = VERSION_FILE) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')).version || null; }
   catch { return null; }
+}
+
+// One reconcile pass with --apply at a time on this computer: refresh skips while another holds the
+// lock, and reconcile --apply refuses. A lock older than LOCK_STALE_MS is from a pass that died.
+const LOCK_STALE_MS = 15 * 60 * 1000;
+
+function defaultLockFile() {
+  return path.join(os.homedir(), '.ai-agent-toolkit', 'user-state', 'programme-refresh', 'pass.lock');
+}
+
+// Returns a release function, or null when another pass holds the lock. A null file means no lock.
+function takeLock(file, nowMs = Date.now()) {
+  if (!file) return () => {};
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const fd = fs.openSync(file, 'wx');
+      fs.writeSync(fd, JSON.stringify({ pid: process.pid, at: new Date(nowMs).toISOString() }));
+      fs.closeSync(fd);
+      return () => { try { fs.unlinkSync(file); } catch { /* already gone */ } };
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+      let age = 0;
+      try { age = nowMs - fs.statSync(file).mtimeMs; } catch { continue; }
+      if (age < LOCK_STALE_MS) return null;
+      try { fs.unlinkSync(file); } catch { /* another pass removed it first */ }
+    }
+  }
+  return null;
 }
 
 function readJsonFile(file, what) {
@@ -258,6 +297,21 @@ const commands = {
     });
     const parentOverride = args['parent-file'] ? readJsonFile(args['parent-file'], 'parent') : null;
     return reconciler.run({ apply: Boolean(args.apply), issue: args.issue ?? null, parentOverride });
+  },
+
+  // The same full pass as `reconcile --apply`, for any session in a governed checkout. It takes no
+  // session, patch or verdict: it writes under the session that holds the parent now, so it can only
+  // bring the pages and documents in line with what is already recorded and observed. Every decision
+  // (assign, return, update, claim) stays the controller's. After a takeover the guard stops it at its
+  // next effect, as it stops the controller's own pass.
+  refresh(args, context) {
+    const parentDoc = readParent(context);
+    const { holder_session: session, holder_prefix: prefix } = parentDoc.fence;
+    if (!session || prefix !== context.binding.writer_prefix) {
+      throw new ProgrammeError('PARENT_UNHELD', `The parent document of #${context.binding.parent_issue} has no controller holding it, so there is no one to refresh for. Nothing changed; report this to the controller.`);
+    }
+    context.writer = { session, prefix };
+    return commands.reconcile({ ...args, apply: true }, context);
   },
 
   show(args, context) {
@@ -460,6 +514,26 @@ function main(argv = process.argv.slice(2), deps = {}) {
   if (marker && isWrite(args)) {
     throw usage(`This session was started by a Toolkit launcher (${marker}), so it is an executor: it never writes programme state, even with --controller. Run reconcile (a dry run) or show and report to the controller.`);
   }
+  // reconcile --apply and refresh take this computer's pass lock first.
+  let release = () => {};
+  if ((args.command === 'reconcile' && args.apply) || args.command === 'refresh') {
+    const lock = deps.lockFile !== undefined ? deps.lockFile : (deps.originUrl ? null : defaultLockFile());
+    const taken = takeLock(lock, deps.nowMs);
+    if (!taken && args.command === 'refresh') {
+      out.write(args.json ? `${JSON.stringify({ outcome: 'SKIPPED', reason: 'another pass is running on this computer' }, null, 2)}\n` : 'Refresh skipped: another pass is running on this computer. It brings the pages up to date.\n');
+      return 0;
+    }
+    if (!taken) throw new ProgrammeError('PASS_RUNNING', 'Another reconcile or refresh pass is running on this computer. Nothing changed; run again when it ends.');
+    release = taken;
+  }
+  try {
+    return finish(args, deps, out);
+  } finally {
+    release();
+  }
+}
+
+function finish(args, deps, out) {
   let result;
   const local = args.command === 'checkpoint' || (args.command === 'show' && args.session && !args.parent && args.issue === undefined);
   if (local) result = localCommands[args.command](args, deps);
@@ -467,9 +541,10 @@ function main(argv = process.argv.slice(2), deps = {}) {
     const context = openContext(args, deps);
     result = commands[args.command](args, context, deps);
   }
-  if (args.command === 'reconcile' && !args.json) out.write(formatReport(result));
+  const pass = args.command === 'reconcile' || args.command === 'refresh';
+  if (pass && !args.json) out.write(formatReport(result));
   else out.write(`${JSON.stringify(result, null, 2)}\n`);
-  if (args.command === 'reconcile') return result.holds.length ? 1 : 0;
+  if (pass) return result.holds.length ? 1 : 0;
   return 0;
 }
 
@@ -481,4 +556,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = Object.freeze({ parseArgs, toolkitVersion, openContext, commands, localCommands, formatReport, main, verifyTakeoverRecord });
+module.exports = Object.freeze({ parseArgs, toolkitVersion, takeLock, defaultLockFile, LOCK_STALE_MS, openContext, commands, localCommands, formatReport, main, verifyTakeoverRecord });

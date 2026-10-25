@@ -3611,14 +3611,14 @@ test('native plugin manifests and hooks are valid and policy-light', () => {
   assert.doesNotMatch(claudeCommand, /CODEX_PLUGIN_ROOT|CODEX_PLUGIN_DATA/);
   assert.match(claudeCommand, /--sync-enabled/);
   assert.match(claudeCommand, /--sync-source claude-plugin/);
-  assert.deepEqual(Object.keys(codexHooks.hooks).sort(), ['PreToolUse', 'SessionStart', 'Stop', 'UserPromptSubmit']);
+  assert.deepEqual(Object.keys(codexHooks.hooks).sort(), ['PostToolUse', 'PreToolUse', 'SessionStart', 'Stop', 'UserPromptSubmit']);
   // The Codex helper guard is the first PreToolUse entry; it guards spawn_agent, its Agent alias and the
   // flattened namespaced MultiAgentV2 spawn names such as collaborationspawn_agent, and checks shell
   // commands (Bash) for AI attribution in commits and pull requests. The second entry and the
   // UserPromptSubmit entry run the same script for the governance hold (#542).
   assert.deepEqual(codexHooks.hooks.PreToolUse.map(entry => entry.matcher), ['^(?:Agent|[A-Za-z0-9_-]*spawn_agent|Bash)$', '^(?:apply_patch|Edit|Write|mcp__.*)$']);
   for (const entry of [...codexHooks.hooks.PreToolUse, ...codexHooks.hooks.UserPromptSubmit]) assert.match(entry.hooks[0].command, /toolkit-codex-helper-hook.cjs/);
-  assert.deepEqual(Object.keys(claudeHooks.hooks).sort(), ['PreToolUse', 'SessionStart', 'Stop', 'UserPromptSubmit']);
+  assert.deepEqual(Object.keys(claudeHooks.hooks).sort(), ['PostToolUse', 'PreToolUse', 'SessionStart', 'Stop', 'UserPromptSubmit']);
   const claudeAgentHook = claudeHooks.hooks.PreToolUse[0];
   assert.equal(claudeAgentHook.matcher, 'Agent|Task');
   assert.match(claudeAgentHook.hooks[0].command, /\$\{CLAUDE_PLUGIN_ROOT\}\/repo\/scripts\/toolkit-claude-agent-hook\.cjs/);
@@ -3631,6 +3631,10 @@ test('native plugin manifests and hooks are valid and policy-light', () => {
   // The only turn-end hook is the programme checkpoint: one command, a 30-second timeout and no matcher.
   for (const [hooks, root] of [[codexHooks, 'PLUGIN_ROOT'], [claudeHooks, 'CLAUDE_PLUGIN_ROOT']]) {
     assert.deepEqual(hooks.hooks.Stop, [{ hooks: [{ type: 'command', command: `node "\${${root}}/repo/scripts/toolkit-programme-checkpoint-hook.cjs"`, timeout: 30 }] }]);
+  }
+  // The after-tool hook runs the same script, only to mark a GitHub write for the turn-end programme refresh.
+  for (const [hooks, root, matcher] of [[codexHooks, 'PLUGIN_ROOT', '^(?:Bash|mcp__.*)$'], [claudeHooks, 'CLAUDE_PLUGIN_ROOT', '^(?:Bash|PowerShell|mcp__.*)$']]) {
+    assert.deepEqual(hooks.hooks.PostToolUse, [{ matcher, hooks: [{ type: 'command', command: `node "\${${root}}/repo/scripts/toolkit-programme-checkpoint-hook.cjs"`, timeout: 10 }] }]);
   }
   assert.doesNotMatch(`${codexCommand}\n${claudeCommand}`, /--enable-target|--force-downgrade/);
   assert.doesNotMatch(`${codexCommand}\n${claudeCommand}`, /\.sh(?:$|[\s"'])/i);
