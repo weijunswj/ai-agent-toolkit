@@ -24,12 +24,29 @@ function platformSystem(platform = process.platform) {
   return null;
 }
 
+function testDirEntries(root) {
+  return fs.readdirSync(path.join(root, ...TEST_DIR_REL.split('/')), { withFileTypes: true })
+    .filter((entry) => entry.name.endsWith('.test.cjs'));
+}
+
 // Plain discovery: every repo/tests/*.test.cjs file, repo-relative with forward slashes, sorted.
 function discoverTestFiles(root = ROOT) {
-  return fs.readdirSync(path.join(root, ...TEST_DIR_REL.split('/')), { withFileTypes: true })
-    .filter((entry) => entry.isFile() && TEST_FILE.test(entry.name))
+  return testDirEntries(root)
+    .filter((entry) => entry.isFile())
     .map((entry) => `${TEST_DIR_REL}/${entry.name}`)
     .sort();
+}
+
+// Entries named like a test that must not pass quietly: a name outside TEST_FILE, or a symlink or
+// folder that discovery skips. Every runner mode refuses to run while one exists.
+function testFileErrors(root = ROOT) {
+  const errors = [];
+  for (const entry of testDirEntries(root)) {
+    const rel = `${TEST_DIR_REL}/${entry.name}`;
+    if (!entry.isFile()) errors.push(`${rel} is not a regular file, so it would never run`);
+    else if (!TEST_FILE.test(entry.name)) errors.push(`${rel} needs a name of letters, digits, dots, dashes and underscores that starts with a letter or digit`);
+  }
+  return errors.sort();
 }
 
 function loadManifest(root = ROOT) {
@@ -392,6 +409,7 @@ module.exports = Object.freeze({
   runOrder,
   shardIds,
   systemShards,
+  testFileErrors,
   testJobText,
   verifyCiSummaries,
   workflowErrors,

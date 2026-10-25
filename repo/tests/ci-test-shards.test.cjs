@@ -68,6 +68,52 @@ test('the manifest check refuses overlaps, unknown files, missing or extra rest 
   assert.throws(() => shards.resolveShard(base, 'macos', 'linux-1', files), /Unknown system/);
 });
 
+test('discovery finds every *.test.cjs entry and every runner mode refuses one that would not run', (t) => {
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-test-names-'));
+  t.after(() => fs.rmSync(work, { recursive: true, force: true }));
+  const tests = path.join(work, 'repo', 'tests');
+  fs.mkdirSync(tests, { recursive: true });
+  fs.writeFileSync(path.join(tests, 'good.test.cjs'), '');
+  fs.writeFileSync(path.join(tests, 'helper.cjs'), '');
+  assert.deepEqual(shards.discoverTestFiles(work), ['repo/tests/good.test.cjs']);
+  assert.deepEqual(shards.testFileErrors(work), []);
+
+  fs.writeFileSync(path.join(tests, '_x.test.cjs'), '');
+  fs.writeFileSync(path.join(tests, 'a b.test.cjs'), '');
+  fs.mkdirSync(path.join(tests, 'folder.test.cjs'));
+  // A junction on Windows (no admin right needed), a directory symlink elsewhere.
+  fs.symlinkSync(path.join(work, 'repo'), path.join(tests, 'link.test.cjs'), 'junction');
+  assert.deepEqual(shards.discoverTestFiles(work), ['repo/tests/_x.test.cjs', 'repo/tests/a b.test.cjs', 'repo/tests/good.test.cjs']);
+  const errors = shards.testFileErrors(work);
+  assert.equal(errors.length, 4);
+  assert.match(errors.join('\n'), /repo\/tests\/_x\.test\.cjs needs a name/);
+  assert.match(errors.join('\n'), /repo\/tests\/a b\.test\.cjs needs a name/);
+  assert.match(errors.join('\n'), /repo\/tests\/folder\.test\.cjs is not a regular file/);
+  assert.match(errors.join('\n'), /repo\/tests\/link\.test\.cjs is not a regular file/);
+
+  for (const args of [['--plan'], ['--all'], ['--changed'], ['--shard', 'linux-1', '--os', 'linux'], ['repo/tests/good.test.cjs']]) {
+    const out = sink();
+    const err = sink();
+    assert.equal(runner.main(args, { root: work, out, err }), 1, args.join(' '));
+    assert.match(err.text(), /Rename or remove these entries in repo\/tests[\s\S]*_x\.test\.cjs/, args.join(' '));
+  }
+  // The CI aggregate check reports them too, next to its other errors.
+  const err = sink();
+  const previous = process.env.TEST_LEGS;
+  fs.mkdirSync(path.join(work, 'repo', 'contracts', 'ci'), { recursive: true });
+  fs.mkdirSync(path.join(work, '.github', 'workflows'), { recursive: true });
+  fs.writeFileSync(path.join(work, 'repo', 'contracts', 'ci', 'test-shards.json'), JSON.stringify(MANIFEST));
+  fs.writeFileSync(path.join(work, '.github', 'workflows', 'validate.yml'), WORKFLOW);
+  try {
+    process.env.TEST_LEGS = '{}';
+    assert.equal(runner.main(['--verify-ci', path.join(work, 'none')], { root: work, out: sink(), err }), 1);
+  } finally {
+    if (previous === undefined) delete process.env.TEST_LEGS;
+    else process.env.TEST_LEGS = previous;
+  }
+  assert.match(err.text(), /link\.test\.cjs is not a regular file/);
+});
+
 // A tiny manifest and passing leg summaries for it, to mutate one fault at a time.
 function ciFixture() {
   const files = ['repo/tests/a.test.cjs', 'repo/tests/b.test.cjs', 'repo/tests/c.test.cjs'];

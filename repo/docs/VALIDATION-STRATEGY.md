@@ -16,7 +16,7 @@ The gate has one list: the `Run validation` step of the `validate` job in `.gith
 
 ## Test Shards
 
-`repo/contracts/ci/test-shards.json` splits `repo/tests/*.test.cjs` into named shards per system. Each named shard lists its files; one `rest` shard per system runs every file no other shard names, so a new test file always runs. `durations_seconds` holds the last measured time per file, which orders files longest first inside a shard and lets `node repo/scripts/run-tests.cjs --plan` estimate each shard. Refresh it from a CI or local run with `--report-durations <file>`, and rebalance the named shards when one shard sets the critical path.
+`repo/contracts/ci/test-shards.json` splits `repo/tests/*.test.cjs` into named shards per system. Each named shard lists its files; one `rest` shard per system runs every file no other shard names, so a new test file always runs. A `.test.cjs` entry there that would not run fails every runner mode instead of being skipped: a name that does not start with a letter or digit or has characters other than letters, digits, dots, dashes and underscores, or a folder or link with a test name. `durations_seconds` holds the last measured time per file, which orders files longest first inside a shard and lets `node repo/scripts/run-tests.cjs --plan` estimate each shard. Refresh it from a CI or local run with `--report-durations <file>`, and rebalance the named shards when one shard sets the critical path.
 
 `repo/scripts/check-test-durations.cjs <report.json>...` checks per-file times from a `--summary` or `--report-durations` file against the manifest's `budgets` field. A raised budget needs a recorded reason. Without a budget, the check only reports the slowest files. This repository has not set a budget yet.
 
