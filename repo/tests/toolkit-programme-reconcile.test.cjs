@@ -305,29 +305,32 @@ test('reclassifying an outcome keeps its identity, document and native link', ()
   assert.match(state.findStateBlock(github.issues.get(423).body).block.body, /class: OPTIONAL/);
 });
 
-test('older classes keep their CORE, HARDENING, LATER order, are reported as CLASS_LEGACY, and migrate in one patch without moving a task', () => {
-  // Written by 3.12.0: `order` counted within each old class.
+test('older classes read as COMMITTED and sort by child number like any task, are reported as CLASS_LEGACY, and migrate in one patch', () => {
+  // Written by 3.12.0: `order` counted within each old class. The issue numbers do not follow the
+  // old CORE, HARDENING, LATER sequence, so the graph's child-number sort reorders them.
   const outcomes = [
-    { issue: 8, class: 'CORE', parent: 7, order: 2 },
-    { issue: 9, class: 'CORE', parent: 7, order: 3 },
-    { issue: 10, class: 'HARDENING', parent: 7, order: 1 },
+    { issue: 12, class: 'CORE', parent: 7, order: 0 },
+    { issue: 9, class: 'CORE', parent: 7, order: 1 },
+    { issue: 8, class: 'HARDENING', parent: 7, order: 0 },
     { issue: 11, class: 'LATER', parent: 7, order: 0 },
-    { issue: 12, class: 'COMPLETED', parent: 7, order: 0 },
+    { issue: 10, class: 'COMPLETED', parent: 7, order: 0 },
   ];
   const { github, store, reconciler } = setup({
     repository: 'other/tool', parentIssue: 7, outcomes,
     issues: gh => { for (const outcome of outcomes) gh.addIssue(outcome.issue, { parent: outcome.parent, state: outcome.class === 'COMPLETED' ? 'closed' : 'open' }); },
   });
+  assert.deepEqual(github.issues.get(7).subs, [12, 9, 8, 11, 10]);
   const legacy = reconciler().run({ apply: true });
   assert.deepEqual(legacy.holds, []);
-  assert.deepEqual(github.issues.get(7).subs, [8, 9, 10, 11, 12], 'the old sequence is kept, so nothing is reordered before the migration');
-  assert.equal(kinds(legacy).some(kind => kind.startsWith('reorder')), false);
+  assert.equal(kinds(legacy).some(kind => kind.startsWith('reorder')), true, 'the catalogue order no longer sets position, so the pass reorders');
+  assert.deepEqual(github.issues.get(7).subs, [8, 9, 11, 12, 10], 'open tasks by child number, then the finished one');
   const finding = legacy.findings.find(entry => entry.code === 'CLASS_LEGACY');
   assert.ok(finding, 'CLASS_LEGACY is reported');
-  assert.match(finding.detail, /#8 CORE, #9 CORE, #10 HARDENING, #11 LATER read as COMMITTED, kept in their old CORE, HARDENING, LATER sequence/);
+  assert.match(finding.detail, /#12 CORE, #9 CORE, #8 HARDENING, #11 LATER read as COMMITTED and sort like any other task/);
+  assert.doesNotMatch(finding.detail, /kept in their old|moves no task/);
   assert.match(finding.detail, /apply it whole with update-parent/);
   assert.deepEqual(finding.patch.outcomes.map(entry => [entry.issue, entry.class, entry.order]),
-    [[8, 'COMMITTED', 0], [9, 'COMMITTED', 1], [10, 'COMMITTED', 2], [11, 'COMMITTED', 3], [12, 'COMPLETED', 0]]);
+    [[12, 'COMMITTED', 0], [9, 'COMMITTED', 1], [8, 'COMMITTED', 2], [11, 'COMMITTED', 3], [10, 'COMPLETED', 0]]);
 
   // A write never adds an older class, even to an entry that had another one.
   assert.throws(() => store.mutate('parent', 7, { writer, change: doc => state.applyPatch('parent', doc, { outcomes: doc.outcomes.map(entry => (entry.issue === 11 ? { ...entry, class: 'HARDENING' } : entry)) }) }), /PATCH_REFUSED|older class names/);
@@ -336,8 +339,8 @@ test('older classes keep their CORE, HARDENING, LATER order, are reported as CLA
   store.mutate('parent', 7, { writer, change: doc => state.applyPatch('parent', doc, finding.patch) });
   const migrated = reconciler().run({ apply: true });
   assert.equal(codes(migrated).includes('CLASS_LEGACY #7'), false);
-  assert.equal(kinds(migrated).some(kind => kind.startsWith('reorder')), false, 'the migration moves no task');
-  assert.deepEqual(github.issues.get(7).subs, [8, 9, 10, 11, 12]);
+  assert.equal(kinds(migrated).some(kind => kind.startsWith('reorder')), false, 'the migration itself moves nothing');
+  assert.deepEqual(github.issues.get(7).subs, [8, 9, 11, 12, 10]);
 });
 
 test('a moved PR head marks evidence STALE_HEAD and updates both projections together', () => {
@@ -734,4 +737,37 @@ test('the command line binds identity, refuses writes without the controller fla
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('a task name with & is one topic on its task page, escaped once; untopiced parent comments are "Other comments"', () => {
+  const outcomes = CATALOGUE.map(outcome => (outcome.issue === 423 ? { ...outcome, name: 'Setup & install' } : outcome));
+  const { github, reconciler } = setup({ outcomes });
+  comment(github, 423, 'Setup & install\n---\nINT-TK421-070 agreed');
+  comment(github, 423, 'A note with no topic');
+  comment(github, 421, 'A parent note with no topic');
+  reconciler().run({ apply: true });
+  const traceLines = number => state.findStateBlock(github.issues.get(number).body, state.TRACE_BLOCK_NAME).block.body.split('\n').filter(line => line.startsWith('- **'));
+  const task = traceLines(423);
+  assert.equal(task.length, 1, 'the tagged and untopiced comments share the task name line');
+  assert.match(task[0], /^- \*\*Setup &amp; install:\*\* /);
+  assert.doesNotMatch(github.issues.get(423).body, /&amp;amp;/);
+  assert.match(traceLines(421).at(-1), /^- \*\*Other comments:\*\* /);
+});
+
+test('a page written by a newer Toolkit is held, not rewritten, so two versions never flip a page', () => {
+  const { github, store, binding, reconciler, repository } = setup();
+  reconciler().run({ apply: true });
+  comment(github, 421, 'A newer note');
+  const before = github.issues.get(421).body;
+  const older = new state.Reconciler({
+    store, reader: new state.ProgrammeGraphReader({ transport: github, repository }),
+    mutator: new state.GitHubMutator({ transport: github, repository }), binding, writer, toolkitVersion: '3.9.0',
+  });
+  const report = older.run({ apply: true });
+  const held = report.holds.find(entry => entry.code === 'BLOCK_NEWER_TOOLKIT' && entry.target === '#421');
+  assert.ok(held, 'the older copy holds the page');
+  assert.match(held.detail, /Toolkit 3\.9\.1, newer than this copy \(3\.9\.0\)/);
+  assert.equal(github.issues.get(421).body, before, 'the page is left as the newer copy wrote it');
+  reconciler().run({ apply: true });
+  assert.notEqual(github.issues.get(421).body, before, 'the same version still writes it');
 });

@@ -37,10 +37,11 @@ const SHA40 = /^[0-9a-f]{40}$/;
 const REPO = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const PREFIX = /^[A-Za-z0-9._-]{1,40}$/;
 const CLASSES = ['COMMITTED', 'OPTIONAL', 'COMPLETED', 'RETIRED'];
-// Classes from before Now, Next and Later, read as COMMITTED and sorted in their old CORE, HARDENING,
-// LATER sequence, since their `order` counted within one old class. Each pass reports CLASS_LEGACY
-// with a patch that migrates them in one step; a write never adds one. Remove these once no parent
-// document carries them.
+// Classes from before Now, Next and Later, read as COMMITTED and sorted like any other task (the
+// graph sorts by class, status and child number; `order` no longer sets a position). Each pass
+// reports CLASS_LEGACY with a patch that migrates them in one step, renumbering `order` in the old
+// CORE, HARDENING, LATER sequence; a write never adds one. Remove these once no parent document
+// carries them.
 const LEGACY_CLASSES = ['CORE', 'HARDENING', 'LATER'];
 const LEGACY_RANK = Object.freeze({ CORE: 0, HARDENING: 1 });
 const legacyRank = outcome => LEGACY_RANK[outcome.class] ?? 2;
@@ -945,10 +946,15 @@ function laneText(outcome, child) {
 
 // The task's name: the catalogue name, else the issue title without a leading short code and dash
 // or a leading "Toolkit <version>:".
-function taskName(outcome, issue) {
-  if (outcome.name) return publicText(outcome.name);
+// The task's name as written (not escaped); taskName is the same name escaped for a table cell.
+function taskTitle(outcome, issue) {
+  if (outcome.name) return String(outcome.name);
   const title = String(issue?.title || '').replace(/^Toolkit \d+\.\d+(?:\.\d+)?\s*[:—–-]\s*/, '').replace(/^[A-Z][A-Za-z0-9]*(?:-[A-Z0-9]+)?\s+[—–-]\s+/, '');
-  return publicText(title || outcome.label || `#${outcome.issue}`);
+  return title || outcome.label || `#${outcome.issue}`;
+}
+
+function taskName(outcome, issue) {
+  return publicText(taskTitle(outcome, issue));
 }
 
 function descriptionText(outcome) {
@@ -1001,11 +1007,8 @@ function renderParentBlockBody(parent, children, issues = new Map()) {
   ].join('\n');
 }
 
-// A trace line's label when the comment carries no topic: a task page's own task name, else this.
-const NO_TOPIC = 'No topic';
-
 // The group a trace item belongs to: its topic, except that on a task page the task's own name and
-// no topic are one group (null).
+// no topic are one group (null). `topic` is the task's name as written, not escaped.
 function topicKey(item, topic) {
   const key = item.tag || null;
   return key && topic && key === String(topic).replace(/\s+/g, ' ').trim().toUpperCase() ? null : key;
@@ -1029,8 +1032,10 @@ function traceGroups(trace, topic = null) {
   return [...groups.values(), ...(other ? [other] : [])];
 }
 
+// A line's label, escaped once: its topic as written; for the untopiced line, a task page's own
+// task name, else "Other comments".
 function groupLabel(group, topic) {
-  return publicText(group.tag ? group.label || group.tag : topic || NO_TOPIC);
+  return publicText(group.tag ? group.label || group.tag : topic || OTHER_COMMENTS);
 }
 
 // One link per comment with its comment ID as the text, followed by "(replaced by <ID>)" when a
@@ -1047,7 +1052,7 @@ function traceTokens(group, base) {
 
 // The comment trace an issue body carries: one line per topic, listing that topic's index comments
 // and then every comment none of them lists, each as a link that opens the comment. With
-// `repository`, every link is a full URL; `topic` is a task page's own task name.
+// `repository`, every link is a full URL; `topic` is a task page's own task name, as written.
 function renderTraceBlockBody(number, trace, repository = '', topic = null) {
   const base = issueUrl(repository, number);
   const lines = [
@@ -1171,6 +1176,24 @@ function findStateBlock(text, name = BLOCK_NAME) {
   return { block: found };
 }
 
+// True when Toolkit version `a` (x.y.z) is newer than `b`.
+function versionNewer(a, b) {
+  const parts = value => String(value || '').split('.').map(part => Number(part) || 0);
+  const [left, right] = [parts(a), parts(b)];
+  for (let at = 0; at < 3; at += 1) if (left[at] !== right[at]) return left[at] > right[at];
+  return false;
+}
+
+// The newest Toolkit version among a body's managed blocks, or null when it has none.
+function newestBlockVersion(text) {
+  let newest = null;
+  for (const name of [BLOCK_NAME, CURRENT_BLOCK_NAME, NAV_BLOCK_NAME, TRACE_BLOCK_NAME]) {
+    const version = findStateBlock(text, name).block?.version;
+    if (version && (!newest || versionNewer(version, newest))) newest = version;
+  }
+  return newest;
+}
+
 // The body with the trace block written: replaced in place, else added at the end of the body.
 function upsertTraceBlock(text, rendered) {
   const source = String(text || '');
@@ -1219,7 +1242,7 @@ function upsertNavBlock(text, rendered) {
 function indexCommentBodies(number, links, intent, tag = null, label = null) {
   const name = label || tag;
   const head = (part, total) => [...(tag ? [name, '---'] : []), INDEX_COMMENT_MARKER, `<!-- programme-trace intent=${intent} part=${part}/${total} -->`,
-    `## Comment trace for #${number}: ${name || OTHER_COMMENTS}`, ''];
+    `## Comment trace for #${number}: ${publicText(name || OTHER_COMMENTS)}`, ''];
   const chunks = [[]];
   let size = 0;
   for (const link of links) {
@@ -1255,9 +1278,13 @@ function blockTarget(text, placement = {}) {
   const anchor = placement.after_block ? findStateBlock(text, placement.after_block).block : null;
   if (anchor) return { start: anchor.end, end: anchor.end, replaces: false };
   const all = headings(text);
+  // A section ends at the next heading of its level or higher, or at the next managed block, so a
+  // last section never runs into the comment trace or the text after it.
+  const markers = [...text.matchAll(/^<!-- AI-AGENT-TOOLKIT:/gm)].map(match => match.index);
   const sectionEnd = heading => {
     const next = all.find(entry => entry.start > heading.start && entry.level <= heading.level);
-    return next ? next.start : text.length;
+    const marker = markers.find(at => at > heading.start);
+    return Math.min(next ? next.start : text.length, marker ?? text.length);
   };
   const named = name => name && all.find(entry => entry.text.toLowerCase() === String(name).trim().toLowerCase());
   const replaced = named(placement.replace_section);
@@ -1282,8 +1309,11 @@ function withoutReplacedSection(text, placement = {}) {
   return { text: before && after ? `${before}${eol}${eol}${after}` : before || after, dropped: true };
 }
 
-const trimEnd = text => text.replace(/\s+$/, '');
-const trimStart = text => text.replace(/^\s+/, '');
+// Only blank lines are trimmed at a join: a line's own trailing spaces (a Markdown line break) and
+// the indent of the next line (an indented code line) are kept.
+const blankOnly = text => (/\S/.test(text) ? text : '');
+const trimEnd = text => blankOnly(text.replace(/(?:\r?\n[ \t]*)+$/, ''));
+const trimStart = text => blankOnly(text.replace(/^(?:[ \t]*\r?\n)+/, ''));
 
 // The body with the state block written. An existing block in its place is replaced in place, byte
 // for byte around it; one anywhere else (higher or lower) moves to its place, as does one whose
@@ -1949,7 +1979,7 @@ class Reconciler {
   topicFor(parent, number, issues = new Map()) {
     if (number === parent.parent_issue) return null;
     const outcome = parent.outcomes.find(entry => entry.issue === number);
-    return outcome ? taskName(outcome, issues.get(number)) : null;
+    return outcome ? taskTitle(outcome, issues.get(number)) : null;
   }
 
   // The links block for a task page (null for the parent page).
@@ -2057,6 +2087,13 @@ class Reconciler {
       const currentBody = number === parent.parent_issue ? renderCurrentBlockBody(parent, children, observed.issues) : null;
       const summary = currentBody ? findStateBlock(issue.body, CURRENT_BLOCK_NAME) : { block: null, error: null };
       if (summary.error) { findings.push({ code: 'MANAGED_BLOCK_BROKEN', issue: number, detail: summary.error }); continue; }
+      // A page written by a newer Toolkit is left alone, so computers on different versions never
+      // flip it between two layouts.
+      const newest = newestBlockVersion(issue.body);
+      if (this.toolkitVersion && newest && versionNewer(newest, this.toolkitVersion)) {
+        holds.push({ code: 'BLOCK_NEWER_TOOLKIT', target: `#${number}`, detail: `#${number} was written by Toolkit ${newest}, newer than this copy (${this.toolkitVersion}); update Toolkit on this computer, then run again`, scope: 'body' });
+        continue;
+      }
       const currentCurrent = !currentBody || (Boolean(summary.block) && normalizeBlockBody(summary.block.body) === normalizeBlockBody(currentBody) && !summary.block.tampered);
       const navCurrent = !navBody || (Boolean(nav.block) && normalizeBlockBody(nav.block.body) === normalizeBlockBody(navBody) && !nav.block.tampered);
       this.diffPrNav(number, children.get(number), navBody, observed, effects, version);
@@ -2164,7 +2201,7 @@ class Reconciler {
     this.diffUntracked(parent, desiredDocs, observed, only, findings);
     const legacy = parent.outcomes.filter(outcome => LEGACY_CLASSES.includes(outcome.class) && (!only || outcome.issue === only));
     if (legacy.length) findings.push({ code: 'CLASS_LEGACY', issue: parent.parent_issue, patch: legacyMigrationPatch(parent),
-      detail: `${legacy.map(outcome => `#${outcome.issue} ${outcome.class}`).join(', ')} read as COMMITTED, kept in their old CORE, HARDENING, LATER sequence; to migrate, save this finding's patch (reconcile --json) and apply it whole with update-parent, which sets COMMITTED and renumbers order so the sequence is kept` });
+      detail: `${legacy.map(outcome => `#${outcome.issue} ${outcome.class}`).join(', ')} read as COMMITTED and sort like any other task, by class, status and child number; to migrate, save this finding's patch (reconcile --json) and apply it whole with update-parent, which sets COMMITTED and renumbers order in the old CORE, HARDENING, LATER sequence` });
     for (const effect of effects) effect.text = describeEffect(effect);
     return { parent, parentSha: parentRead.sha, override: Boolean(parentRead.override), children, observed, findings, effects, holds, resolutions };
   }
@@ -2352,6 +2389,8 @@ class Reconciler {
         // writing an intent when the block is broken or the body would grow past the threshold.
         const before = this.reader.issue(number);
         if (!before) { record(effect, 'HELD', 'the issue could not be read'); hold(effect, 'ISSUE_MISSING', 'the issue could not be read'); continue; }
+        const newest = newestBlockVersion(before.body);
+        if (newest && versionNewer(newest, version)) { record(effect, 'HELD', `written by Toolkit ${newest}`); hold(effect, 'BLOCK_NEWER_TOOLKIT', `#${number} was written by Toolkit ${newest}, newer than this copy (${version}); update Toolkit on this computer, then run again`); continue; }
         let next;
         const navBody = this.navFor(parentDoc, number, docs);
         const currentBody = number === parentNumber ? renderCurrentBlockBody(parentDoc, docs, plan.observed.issues) : null;

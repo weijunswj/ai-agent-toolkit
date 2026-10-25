@@ -116,8 +116,9 @@ function traceEntries(comments, recordPrefix = null) {
   }
   const facts = recordFacts(people, recordPrefix);
   const entries = people.filter(comment => !indexes.includes(comment) && !covered.has(String(comment.id))).map(comment => entryFor(comment, facts, false));
-  const tagOf = id => commentTag(people.find(comment => String(comment.id) === id)?.body);
-  const marks = [...facts.supersededBy].map(([record, by]) => ({ id: facts.commentOf.get(record), record, superseded_by: by, superseded_by_id: facts.supersededById.get(record) || null, tag: tagOf(facts.commentOf.get(record)) }))
+  const bodyOf = id => people.find(comment => String(comment.id) === id)?.body;
+  const marks = [...facts.supersededBy].map(([record, by]) => ({ id: facts.commentOf.get(record), record, superseded_by: by, superseded_by_id: facts.supersededById.get(record) || null,
+    tag: commentTag(bodyOf(facts.commentOf.get(record))), tag_label: commentTagLabel(bodyOf(facts.commentOf.get(record))) }))
     .filter(entry => covered.has(entry.id) && !markedInIndex.has(entry.id)
       && !/superseded by/i.test(String(people.find(comment => String(comment.id) === entry.id)?.body || '')));
   return { indexes: indexes.map(comment => ({ id: String(comment.id), tag: commentTag(comment.body), tag_label: commentTagLabel(comment.body), date: String(comment.created_at || '').slice(0, 10) || null })), entries, marks };

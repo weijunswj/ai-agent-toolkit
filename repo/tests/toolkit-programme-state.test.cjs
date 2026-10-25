@@ -514,3 +514,17 @@ test('repository identity comes from origin and GitHub; the binding cannot overr
     ['https://github.example-corp.invalid/acme/app.git', null], ['git@github.example-corp.invalid:acme/app.git', null], ['https://gitlab.com/acme/app.git', null],
   ]) assert.equal(state.originSlug(url), slug, url);
 });
+
+test('a moved block trims only blank lines, keeping a line break and an indent at the join', () => {
+  const page = `# Title\n\nline with a break  \n\n${state.renderBlock('x', '3.9.1')}\n\n    indented code\n`;
+  const { body, moved } = state.upsertStateBlock(page, state.renderBlock('x', '3.9.1'));
+  assert.equal(moved, true);
+  assert.equal(body, `# Title\n\n${state.renderBlock('x', '3.9.1')}\n\nline with a break  \n\n    indented code\n`);
+});
+
+test('a replaced last section ends at the next managed block, keeping the trace and the text after it', () => {
+  const trace = state.renderBlock('trace', '3.9.1', state.TRACE_BLOCK_NAME);
+  const page = `# Title\n\n## Programme index\nold list\n\n${trace}\n\n[i1]: https://example.com/\n`;
+  const { body } = state.upsertStateBlock(page, state.renderBlock('graph', '3.9.1'), { replace_section: 'Programme index' });
+  assert.equal(body, `# Title\n\n${state.renderBlock('graph', '3.9.1')}\n\n${trace}\n\n[i1]: https://example.com/\n`);
+});
