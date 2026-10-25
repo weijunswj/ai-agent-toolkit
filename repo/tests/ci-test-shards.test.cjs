@@ -206,8 +206,8 @@ test('the workflow drift guard accepts validate.yml and rejects each way to narr
     assert.notEqual(mutated, WORKFLOW, `${label} must change the workflow`);
     assert.notDeepEqual(shards.workflowErrors(mutated, MANIFEST), [], `the drift guard must reject ${label}`);
   }
-  // The validate job is pinned too. Each of these is refused by the pinned job text or the plain
-  // command check on its own, not only by the forbidden-pattern list that covers the whole file.
+  // The whole file is pinned, with only the gate command list read from it. Each of these is refused
+  // by the whole-file comparison or the plain command check, not only by the forbidden-pattern list.
   const gateStep = '      - name: Run validation\n';
   const firstCommand = '        run: |\n          node repo/scripts/sync-repo-doc-contract.cjs --check\n';
   const validateMutations = [
@@ -226,18 +226,30 @@ test('the workflow drift guard accepts validate.yml and rejects each way to narr
     ['the diff base removed', WORKFLOW.replace('          DIFF_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}\n', '')],
     ['a shallow checkout in validate', WORKFLOW.replace(/(\n  validate:\n[\s\S]*?)fetch-depth: 0/, '$1fetch-depth: 1')],
     ['an extra env value on the gate step', WORKFLOW.replace('          TEST_LEGS: ${{ toJSON(needs) }}\n', '          TEST_LEGS: ${{ toJSON(needs) }}\n          NODE_OPTIONS: --require ./x.cjs\n')],
+    // A column-0 comment does not end a job in YAML, so lines after it still belong to the step or job.
+    ['a comment, then a condition that skips the gate step', `${WORKFLOW}#\n        if: github.run_attempt == 0\n`],
+    ['a comment, then a quoted shell key', `${WORKFLOW}#\n        "shell": bash {0}\n`],
+    ['a comment, then an escaped shell key', `${WORKFLOW}#\n        "\\x73hell": bash {0}\n`],
+    ['a comment, then a job-level env value', `${WORKFLOW}#\n    env:\n      NODE_OPTIONS: --require ./x.cjs\n`],
+    ['a comment line between gate commands', WORKFLOW.replace('          node repo/scripts/validate-toolkit.cjs\n', '          node repo/scripts/validate-toolkit.cjs\n# note\n')],
+    ['a flow-style workflow default shell', WORKFLOW.replace('\njobs:\n', '\ndefaults: { run: { shell: "bash {0}" } }\njobs:\n')],
+    ['a block-style workflow default shell with a quoted key', WORKFLOW.replace('\njobs:\n', '\ndefaults:\n  run:\n    "shell": bash {0}\njobs:\n')],
+    ['a block-style workflow default shell', WORKFLOW.replace('\njobs:\n', '\ndefaults:\n  run:\n    shell: bash {0}\n\njobs:\n')],
+    ['a workflow-wide env value', WORKFLOW.replace('\njobs:\n', '\nenv:\n  NODE_OPTIONS: --require ./x.cjs\njobs:\n')],
+    ['wider permissions', WORKFLOW.replace('  contents: read\n', '  contents: write\n')],
+    ['another trigger', WORKFLOW.replace('  pull_request:\n', '  pull_request:\n  workflow_dispatch:\n')],
   ];
   for (const [label, mutated] of validateMutations) {
     assert.notEqual(mutated, WORKFLOW, `${label} must change the workflow`);
     const errors = shards.workflowErrors(mutated, MANIFEST);
-    assert.ok(errors.some((error) => !error.startsWith('validate.yml must not contain')), `the validate job pin must reject ${label} (got: ${errors.join('; ') || 'nothing'})`);
+    assert.ok(errors.some((error) => !error.startsWith('validate.yml must not contain')), `the whole-file pin or the plain command check must reject ${label} (got: ${errors.join('; ') || 'nothing'})`);
   }
-  // A workflow-wide default shell sits outside every job, so the forbidden-pattern list catches it.
-  const defaults = WORKFLOW.replace('\njobs:\n', '\ndefaults:\n  run:\n    shell: bash {0}\n\njobs:\n');
-  assert.notEqual(defaults, WORKFLOW);
-  assert.match(shards.workflowErrors(defaults, MANIFEST).join('\n'), /must not contain a shell: setting/);
+  // The forbidden-pattern list is a second line of defence and catches the usual spellings by itself.
+  for (const text of ['shell: bash {0}', '"shell": bash {0}', "{ 'shell': bash }"]) {
+    assert.match(shards.workflowErrors(`${WORKFLOW}# ${text}\n`, MANIFEST).join('\n'), /must not contain a shell: setting/, text);
+  }
   for (const [label, text] of [['set +e', 'set +e'], ['|| echo', 'x || echo ok']]) {
-    assert.match(shards.workflowErrors(`${WORKFLOW}\n# ${text}\n`, MANIFEST).join('\n'), /must not contain/, label);
+    assert.match(shards.workflowErrors(`${WORKFLOW}# ${text}\n`, MANIFEST).join('\n'), /must not contain/, label);
   }
   // A new gate check is one plain line in validate.yml and needs no change to the guard.
   const added = WORKFLOW.replace('          node repo/scripts/check-diff-whitespace.cjs\n', '          node repo/scripts/check-diff-whitespace.cjs\n          node repo/scripts/new-check.cjs --check --root=repo/docs\n');

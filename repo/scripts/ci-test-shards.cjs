@@ -254,7 +254,7 @@ const FORBIDDEN = [
   [/continue-on-error/, 'continue-on-error'],
   [/\|\|\s*(true|exit|:|echo\b)/, 'a command that hides a failure with ||'],
   [/\bset\s+\+e\b/, 'set +e'],
-  [/^\s*shell:/m, 'a shell: setting (a custom shell can drop bash -e)'],
+  [/shell["']?\s*:/, 'a shell: setting (a custom shell can drop bash -e)'],
   [/(^|[;&|]\s*|\s)exit\s+0\b/m, 'exit 0'],
   [/--test-(name|skip)-pattern|--test-only|--test-shard/, 'a node --test filter'],
   [/^\s*if:\s*(false|\$\{\{\s*false\s*\}\})\s*$/m, 'if: false'],
@@ -387,6 +387,46 @@ function gateCommands(source, stepName = GATE_STEP) {
   return commands;
 }
 
+// Everything before the jobs: the triggers, permissions and the comment that explains the jobs.
+const WORKFLOW_HEADER = [
+  'name: Validate',
+  '',
+  'on:',
+  '  pull_request:',
+  '  push:',
+  '    branches:',
+  '      - main',
+  '',
+  'permissions:',
+  '  contents: read',
+  '',
+  '# The test files run in shards on Linux and Windows (repo/contracts/ci/test-shards.json). The',
+  '# validate job runs after every shard, also when one failed: its "Run validation" step runs the',
+  '# repository checks and then proves from the shard summaries that each system ran every test file',
+  '# once with no failure. A failed, cancelled or skipped shard fails it. The personal-data job checks',
+  '# every commit of the pull request or push, the commit messages, the branch name and the pull',
+  '# request title and body for email addresses, phone numbers and WhatsApp links (values are never',
+  '# printed); validate waits for it too, so a hit or a scan error fails the required check.',
+  'jobs:',
+].join('\n');
+
+// The exact text of the whole of validate.yml for a manifest and a gate command list. Comparing the
+// file against it leaves no room for a line the job parser or a pattern does not see: a comment that
+// ends a job early, a quoted or flow-style key, a workflow-wide default or env value.
+function workflowText(manifest, commands) {
+  return [
+    WORKFLOW_HEADER,
+    testJobText('linux', shardIds(manifest, 'linux')),
+    '',
+    testJobText('windows', shardIds(manifest, 'windows')),
+    '',
+    PERSONAL_DATA_JOB,
+    '',
+    validateJobText(commands),
+    '',
+  ].join('\n');
+}
+
 // The jobs of a workflow, keyed by id, each with its text (trailing blank lines dropped).
 function workflowJobs(source) {
   const lines = source.replace(/\r\n/g, '\n').split('\n');
@@ -406,10 +446,10 @@ function workflowJobs(source) {
   }));
 }
 
-// Drift guard for .github/workflows/validate.yml: the test jobs match the manifest exactly, the
-// validate job matches its pinned text, waits for every leg, always runs, runs only plain repository
-// scripts and ends its gate step with the summary check, and no step anywhere can turn a failure
-// into a pass.
+// Drift guard for .github/workflows/validate.yml: the whole file matches its pinned text, with only
+// the gate command list taken from the file; each command but the last is a plain repository script
+// and the last is the summary check. The per-job checks before the whole-file comparison say what
+// moved when they can.
 function workflowErrors(source, manifest) {
   const errors = [];
   const text = source.replace(/\r\n/g, '\n');
@@ -425,7 +465,6 @@ function workflowErrors(source, manifest) {
   if (personalData !== undefined && personalData !== PERSONAL_DATA_JOB) errors.push('the personal-data job differs from its pinned text');
   const aggregate = jobs.get('validate');
   if (aggregate !== undefined) {
-    const before = errors.length;
     const lines = aggregate.split('\n');
     if (lines.slice(0, AGGREGATE_HEADER.length).join('\n') !== AGGREGATE_HEADER.join('\n')) errors.push('the validate job must start with needs: [tests-linux, tests-windows, personal-data], if: ${{ always() }}, runs-on: ubuntu-latest and timeout-minutes: 15');
     const names = lines.filter((line) => /^ {6}- name: /.test(line)).map((line) => line.replace(/^ {6}- name: /, ''));
@@ -433,15 +472,15 @@ function workflowErrors(source, manifest) {
     if (lines.filter((line) => /^ {8}if:/.test(line)).length) errors.push('no step in the validate job may have a condition');
     if (lines[lines.length - 1].trim() !== VERIFY_COMMAND) errors.push(`the Run validation step must end with ${VERIFY_COMMAND}`);
     if (!/^ {10}TEST_LEGS: \$\{\{ toJSON\(needs\) \}\}$/m.test(aggregate)) errors.push('the Run validation step must pass TEST_LEGS: ${{ toJSON(needs) }}');
-    let commands = null;
-    try { commands = gateCommands(aggregate); }
-    catch (error) { errors.push(error.message); }
-    if (commands) {
-      for (const command of commands.slice(0, -1)) {
-        if (!PLAIN_GATE_COMMAND.test(command)) errors.push(`the Run validation command "${command}" must be a plain node repo/scripts/<name>.cjs line with no shell syntax`);
-      }
-      if (aggregate !== validateJobText(commands) && errors.length === before) errors.push('the validate job differs from its pinned text');
+  }
+  let commands = null;
+  try { commands = gateCommands(text); }
+  catch (error) { errors.push(error.message); }
+  if (commands) {
+    for (const command of commands.slice(0, -1)) {
+      if (!PLAIN_GATE_COMMAND.test(command)) errors.push(`the Run validation command "${command}" must be a plain node repo/scripts/<name>.cjs line with no shell syntax`);
     }
+    if (text !== workflowText(manifest, commands)) errors.push('validate.yml differs from its pinned text (repo/scripts/ci-test-shards.cjs workflowText); only the Run validation command list may change');
   }
   return errors;
 }
@@ -487,6 +526,7 @@ module.exports = Object.freeze({
   testFileErrors,
   testJobText,
   validateJobText,
+  workflowText,
   verifyCiSummaries,
   workflowErrors,
   workflowJobs,
