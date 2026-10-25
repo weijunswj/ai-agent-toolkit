@@ -305,7 +305,7 @@ test('the check-in carries every prefix in the fixed order and checks both Toolk
   for (const required of ['`git -C TK fetch --unshallow` once and hash every revision again', 'If that fetch fails, report no SKILL DRIFT and post no card',
     '"drift unverified: unshallow failed: <error>"', 'When memory has the line "skill cards: coordinator", do not call propose_skills: write ", card due"',
     'Equal: "**Plugin:** current (<version>)"', 'take the newest commit whose plugin.json has the account version; main moved past it at the next newer commit',
-    'use the oldest commit whose version is above the account\'s', 'age unverified: unshallow failed: <error>', 'Under 24 hours ago: name both versions and that commit under **Plugin:**',
+    'use the oldest commit whose version is above the account\'s', 'age unverified: unshallow failed: <error>" and no prefix, and name it on the first line as stuck', 'Under 24 hours ago: name both versions and that commit under **Plugin:**',
     'unless state.md has "plugin behind <main version>"', 'its "plugin behind <version>" record', 'No agent can update the plugin',
     'remove the Toolkit plugin only and let it reinstall; if it is still behind, select Check for updates on its marketplace',
     '"plugin behind <main version>" for the version reported as PLUGIN BEHIND (carried forward while the account copy is still behind)',
