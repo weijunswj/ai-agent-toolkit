@@ -53,10 +53,14 @@ state_rank() {
 }
 
 ROW_AREA=(); ROW_STATE=(); ROW_EVIDENCE=()
-SERVICE_AREA=(); SERVICE_STATUS=(); SERVICE_EVIDENCE=()
-NOTICES=()
+SERVICE_AREA=(); SERVICE_STATUS=(); SERVICE_EVIDENCE=(); FAILING_KEYS=()
+NOTICES=(); STATE_EXTRA=()
 add_row() { ROW_STATE+=("$1"); ROW_AREA+=("$2"); ROW_EVIDENCE+=("$3"); }
-add_service() { SERVICE_STATUS+=("$1"); SERVICE_AREA+=("$2"); SERVICE_EVIDENCE+=("$3"); }
+# The optional fourth argument names what is failing, so a different failure re-alerts.
+add_service() {
+  SERVICE_STATUS+=("$1"); SERVICE_AREA+=("$2"); SERVICE_EVIDENCE+=("$3")
+  [ "$1" != FAILING ] || FAILING_KEYS+=("${4:-$2}")
+}
 
 # Thresholds: per-host settings with defaults. A value that is not a whole number falls back to the
 # default and the config row reports it, so a typo never silently disables a check.
@@ -77,10 +81,12 @@ load_thresholds() {
     MEM_REVIEW_PCT:75 MEM_UPGRADE_PCT:85 MEM_EMERGENCY_PCT:95 \
     SWAP_REVIEW_PCT:25 SWAP_UPGRADE_PCT:50 SWAP_EMERGENCY_PCT:90 \
     LOAD_REVIEW_PCT:80 LOAD_UPGRADE_PCT:150 LOAD_EMERGENCY_PCT:300 \
+    LOAD_SUSTAIN_PULSES:2 DISK_GROWTH_REVIEW_POINTS:5 \
     OOM_REVIEW_KILLS:1 OOM_UPGRADE_KILLS:2 RESTART_REVIEW_COUNT:1 RESTART_UPGRADE_COUNT:3 \
-    PULSE_STALE_MINUTES:70 REPORT_KEEP:72; do
+    PULSE_STALE_MINUTES:60 REPORT_KEEP:72; do
     set_threshold "${pair%%:*}" "${pair##*:}"
   done
+  [ "$LOAD_SUSTAIN_PULSES" -ge 1 ] || LOAD_SUSTAIN_PULSES=1
 }
 
 classify_pct() {
@@ -101,12 +107,22 @@ classify_count() {
 meminfo_kb() { awk -v k="$1:" '$1 == k { print $2; exit }' "$PROC_ROOT/meminfo" 2>/dev/null; }
 
 collect_disk() {
-  local path line pct ipct
+  local path line pct ipct key prev level evidence
   for path in ${DISK_PATHS:-/}; do
     case "$path" in /*) ;; *) add_row OBSERVABILITY_DEGRADED "Disk $path" 'Rejected: use absolute paths only'; continue ;; esac
     if line="$(df -P "$path" 2>/dev/null | awk 'NR == 2 { gsub(/%/, "", $5); print $5 }')" && is_uint "$line"; then
       pct="$line"
-      add_row "$(classify_pct "$pct" "$DISK_REVIEW_PCT" "$DISK_UPGRADE_PCT" "$DISK_EMERGENCY_PCT")" "Disk $path" "${pct}% used (review ${DISK_REVIEW_PCT}, upgrade ${DISK_UPGRADE_PCT}, emergency ${DISK_EMERGENCY_PCT})"
+      key="disk_pct_$(printf '%s' "$path" | tr -c 'A-Za-z0-9' '_')"
+      prev="$(state_get "$STATE_FILE" "$key")"
+      STATE_EXTRA+=("$key=$pct")
+      level="$(classify_pct "$pct" "$DISK_REVIEW_PCT" "$DISK_UPGRADE_PCT" "$DISK_EMERGENCY_PCT")"
+      evidence="${pct}% used (review ${DISK_REVIEW_PCT}, upgrade ${DISK_UPGRADE_PCT}, emergency ${DISK_EMERGENCY_PCT})"
+      # Growth: a fast rise since the last pulse needs a review even while under the review threshold.
+      if is_uint "$prev" && [ "$pct" -gt "$prev" ] && [ "$DISK_GROWTH_REVIEW_POINTS" -gt 0 ] && [ $(( pct - prev )) -ge "$DISK_GROWTH_REVIEW_POINTS" ]; then
+        evidence="$evidence; grew $(( pct - prev )) points since the last pulse (review at ${DISK_GROWTH_REVIEW_POINTS})"
+        [ "$level" != NORMAL ] || level=REVIEW_CAPACITY
+      fi
+      add_row "$level" "Disk $path" "$evidence"
     else
       add_row OBSERVABILITY_DEGRADED "Disk $path" 'df could not read this path'
     fi
@@ -143,14 +159,26 @@ collect_memory() {
   fi
 }
 
+# Load counts only when it stays over the review threshold for LOAD_SUSTAIN_PULSES pulses in a row,
+# so one busy hour (a backup, a build) is not capacity pressure. Emergency load counts at once.
 collect_load() {
-  local load15 cpus pct
+  local load15 cpus pct level streak prev evidence
   load15="$(awk '{ print $3 }' "$PROC_ROOT/loadavg" 2>/dev/null)"
   cpus="$(grep -c '^processor' "$PROC_ROOT/cpuinfo" 2>/dev/null || true)"
   is_uint "$cpus" && [ "$cpus" -gt 0 ] || cpus="$(nproc 2>/dev/null || true)"
   if printf '%s' "$load15" | grep -Eq '^[0-9]+(\.[0-9]+)?$' && is_uint "$cpus" && [ "$cpus" -gt 0 ]; then
     pct="$(awk -v l="$load15" -v c="$cpus" 'BEGIN { printf "%d", (l / c) * 100 }')"
-    add_row "$(classify_pct "$pct" "$LOAD_REVIEW_PCT" "$LOAD_UPGRADE_PCT" "$LOAD_EMERGENCY_PCT")" 'CPU load' "15-minute load $load15 on $cpus CPUs (${pct}% of capacity)"
+    level="$(classify_pct "$pct" "$LOAD_REVIEW_PCT" "$LOAD_UPGRADE_PCT" "$LOAD_EMERGENCY_PCT")"
+    evidence="15-minute load $load15 on $cpus CPUs (${pct}% of capacity)"
+    prev="$(state_get "$STATE_FILE" load_over_review)"
+    is_uint "$prev" || prev=0
+    if [ "$level" = NORMAL ]; then streak=0; else streak=$(( prev + 1 )); fi
+    STATE_EXTRA+=("load_over_review=$streak")
+    if [ "$level" != NORMAL ] && [ "$level" != EMERGENCY_PRESSURE ]; then
+      evidence="$evidence; over the review threshold for $streak of $LOAD_SUSTAIN_PULSES pulses in a row"
+      [ "$streak" -ge "$LOAD_SUSTAIN_PULSES" ] || level=NORMAL
+    fi
+    add_row "$level" 'CPU load' "$evidence"
   else
     add_row OBSERVABILITY_DEGRADED 'CPU load' 'Could not read load average or CPU count'
   fi
@@ -214,7 +242,7 @@ collect_systemd() {
   fi
   count="$(printf '%s\n' "$failed" | awk 'NF { n++ } END { print n + 0 }')"
   names="$(printf '%s\n' "$failed" | awk 'NF { print $1 }' | head -n 10 | paste -sd ',' -)"
-  if [ "$count" -gt 0 ]; then add_service FAILING 'systemd units' "$count failed: $names"
+  if [ "$count" -gt 0 ]; then add_service FAILING 'systemd units' "$count failed: $names" "systemd:$names"
   else add_service OK 'systemd units' 'No failed units'; fi
 }
 
@@ -229,9 +257,19 @@ collect_docker() {
     add_row OBSERVABILITY_DEGRADED 'Docker containers' 'docker ps failed (daemon down or no access)'
     return
   fi
-  bad="$(printf '%s\n' "$listing" | awk -F'|' 'NF >= 3 && ($2 == "restarting" || $3 ~ /\(unhealthy\)/) { print $1 }' | head -n 10 | paste -sd ',' -)"
-  if [ -n "$bad" ]; then add_service FAILING 'Docker containers' "Unhealthy or restarting: $bad"
-  else add_service OK 'Docker containers' "$(printf '%s\n' "$listing" | awk 'NF { n++ } END { print n + 0 }') containers, none unhealthy or restarting"; fi
+  # Failing: restarting, unhealthy, or stopped with a non-zero exit code (a crash that stayed down).
+  # Containers named in DOCKER_EXITED_OK_CONTAINERS may stay exited, such as one-off jobs.
+  bad="$(printf '%s\n' "$listing" | awk -F'|' -v ok=" ${DOCKER_EXITED_OK_CONTAINERS:-} " '
+    NF >= 3 {
+      if ($2 == "restarting") reason = "restarting"
+      else if ($3 ~ /\(unhealthy\)/) reason = "unhealthy"
+      else if ($2 == "exited" && $3 ~ /^Exited \([1-9][0-9]*\)/ && index(ok, " " $1 " ") == 0) {
+        reason = $3; sub(/^Exited \(/, "exited with code ", reason); sub(/\).*/, "", reason)
+      } else next
+      print $1 " (" reason ")"
+    }' | head -n 10 | paste -sd ',' - | sed 's/,/, /g')"
+  if [ -n "$bad" ]; then add_service FAILING 'Docker containers' "Failing: $bad" "docker:$(printf '%s' "$bad" | sed -E 's/ \([^)]*\)//g; s/, /,/g')"
+  else add_service OK 'Docker containers' "$(printf '%s\n' "$listing" | awk 'NF { n++ } END { print n + 0 }') containers, none failing"; fi
 
   ids="$(docker ps -aq 2>/dev/null)"
   if [ -z "$ids" ]; then
@@ -249,6 +287,10 @@ collect_docker() {
 collect_health_urls() {
   local url label code
   [ -n "${HEALTHCHECK_URLS:-}" ] || return 0
+  if ! have curl; then
+    add_row OBSERVABILITY_DEGRADED 'Health URLs' 'Not checked: curl is not installed'
+    return 0
+  fi
   for url in $HEALTHCHECK_URLS; do
     label="$(printf '%s' "$url" | redact_text)"
     if secret_like_url "$url" || ! safe_transport_url "$url"; then
@@ -258,7 +300,7 @@ collect_health_urls() {
     code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 "$url" 2>/dev/null || true)"
     case "$code" in
       2??|3??) add_service OK "Health $label" "HTTP $code" ;;
-      *) add_service FAILING "Health $label" "HTTP ${code:-no response}" ;;
+      *) add_service FAILING "Health $label" "HTTP ${code:-no response}" "health:$label" ;;
     esac
   done
 }
@@ -266,7 +308,7 @@ collect_health_urls() {
 collect_alerting_config() {
   local problem
   if problem="$(alert_config_problem)"; then
-    add_row NORMAL Alerting "Channels: $(alert_channels | xargs | tr ' ' ',')"
+    add_row NORMAL Alerting "Channels: $(alert_channel_list)"
     ALERTING_READY=1
   else
     add_row OBSERVABILITY_DEGRADED Alerting "Not set up: $problem; reports stay on this host only"
@@ -295,8 +337,12 @@ ping_heartbeat() {
     add_row OBSERVABILITY_DEGRADED 'Off-host heartbeat' 'Not set up: nothing outside this host notices if it goes quiet'
     return
   fi
-  if ! safe_transport_url "$HEARTBEAT_URL" || { [ -n "${HEARTBEAT_FAIL_URL:-}" ] && ! safe_transport_url "$HEARTBEAT_FAIL_URL"; }; then
-    add_row OBSERVABILITY_DEGRADED 'Off-host heartbeat' 'Heartbeat URL must be http or https with no spaces or quotes'
+  if ! secret_transport_url "$HEARTBEAT_URL" || { [ -n "${HEARTBEAT_FAIL_URL:-}" ] && ! secret_transport_url "$HEARTBEAT_FAIL_URL"; }; then
+    add_row OBSERVABILITY_DEGRADED 'Off-host heartbeat' 'Heartbeat URL must be https (plain http only to this host) with no spaces or quotes'
+    return
+  fi
+  if ! have curl; then
+    add_row OBSERVABILITY_DEGRADED 'Off-host heartbeat' 'Ping not sent: curl is not installed'
     return
   fi
   if [ "$MODE" = dry-run ]; then
@@ -356,8 +402,20 @@ prepare_dirs() {
 }
 
 # --status: the last pulse as recorded, judged by its age. Never reports a missing or old pulse as fine.
+state_unreadable() {
+  [ -e "$HOST_PULSE_ROOT" ] || return 1
+  [ -r "$HOST_PULSE_ROOT" ] && [ -x "$HOST_PULSE_ROOT" ] || return 0
+  [ ! -e "$STATE_DIR" ] || { [ -r "$STATE_DIR" ] && [ -x "$STATE_DIR" ]; } || return 0
+  [ ! -e "$STATE_FILE" ] || [ -r "$STATE_FILE" ] || return 0
+  return 1
+}
+
 if [ "$MODE" = status ]; then
   load_thresholds
+  if state_unreadable; then
+    printf 'State: UNKNOWN\nReason: this user cannot read %s; run --status as root, for example with sudo\n' "$STATE_DIR"
+    exit 1
+  fi
   last="$(state_get "$STATE_FILE" last_pulse_epoch)"
   if ! is_uint "$last"; then
     printf 'State: OBSERVABILITY_DEGRADED\nReason: no pulse has been recorded on this host\n'
@@ -369,6 +427,7 @@ if [ "$MODE" = status ]; then
   else
     printf 'State: %s\nServices: %s\nLast pulse: %s minutes ago\n' "$(state_get "$STATE_FILE" last_state)" "$(state_get "$STATE_FILE" last_services)" "$age"
   fi
+  [ "$(state_get "$STATE_FILE" alert_pending)" != 1 ] || printf 'Alert delivery: the last alert failed to send; the next pulse retries\n'
   exit 0
 fi
 
@@ -376,15 +435,17 @@ if [ "$MODE" = test-alert ] || [ "$MODE" = test-heartbeat ]; then
   prepare_dirs
   if [ "$MODE" = test-heartbeat ]; then
     [ -n "${HEARTBEAT_URL:-}" ] || { printf 'No HEARTBEAT_URL set.\n'; exit 1; }
-    if curl_private "$HEARTBEAT_URL" -o /dev/null; then printf 'Heartbeat ping: sent\n'; exit 0; fi
-    printf 'Heartbeat ping: failed\n'; exit 1
+    secret_transport_url "$HEARTBEAT_URL" || { printf 'Heartbeat ping: not sent; HEARTBEAT_URL must be https (plain http only to this host)\n'; exit 1; }
+    curl_private "$HEARTBEAT_URL" -o /dev/null; rc=$?
+    printf 'Heartbeat ping: %s\n' "$(delivery_result heartbeat "$rc")"
+    [ "$rc" -eq 0 ]; exit $?
   fi
   if ! problem="$(alert_config_problem)"; then printf 'Alerting not set up: %s\n' "$problem"; exit 1; fi
   body="$(mktemp "$STATE_DIR/.test-alert.XXXXXX")"
   printf 'Test alert from host-observability on %s. If you can read this, alerts reach you.\n' "$HOST_LABEL" > "$body"
   outcome="$(send_alert "host-observability $HOST_LABEL: test alert" "$body")"; result=$?
   rm -f "$body"
-  printf 'Test alert: %s\n' "${outcome% }"
+  printf 'Test alert: %s\n' "$outcome"
   exit "$result"
 fi
 
@@ -410,43 +471,51 @@ collect_systemd
 collect_docker
 collect_health_urls
 collect_alerting_config
-ping_heartbeat "$(worst_state)"
-OVERALL="$(worst_state)"
-SERVICES="$(services_summary)"
 
 if [ "$MODE" = dry-run ]; then
-  write_report "$PRIVATE_TMP_DIR/report.md" "$OVERALL" "$SERVICES"
+  ping_heartbeat "$(worst_state)"
+  write_report "$PRIVATE_TMP_DIR/report.md" "$(worst_state)" "$(services_summary)"
   cat "$PRIVATE_TMP_DIR/report.md"
   printf '\nDry run: no report file, heartbeat, alert or state change.\n'
   exit 0
 fi
 
-STAMP="$(date -u -d "@$NOW_EPOCH" +%Y%m%dT%H%M%SZ 2>/dev/null || date -u +%Y%m%dT%H%M%SZ)"
-REPORT="$REPORT_DIR/pulse-$STAMP.md"
-TMP_REPORT="$(mktemp "$REPORT_DIR/.pulse.XXXXXX")"
-write_report "$TMP_REPORT" "$OVERALL" "$SERVICES"
-
-# Alert when the state or services change, at once on emergency pressure, on a notice such as a
-# reboot, and again after a failed delivery. A failed delivery is never recorded as sent.
-SIGNATURE="$OVERALL|$SERVICES"
+# Alert when the state or the failing services change, at once on emergency pressure, on a notice
+# such as a reboot, and again after a failed delivery. A failed delivery is never recorded as sent,
+# and it makes this pulse degraded, so the failure heartbeat URL tells the off-host monitor too.
+PRE_STATE="$(worst_state)"
+SERVICES="$(services_summary)"
+SIGNATURE="$PRE_STATE|$SERVICES"
+if [ "${#FAILING_KEYS[@]}" -gt 0 ]; then
+  SIGNATURE="$SIGNATURE|$(printf '%s;' "${FAILING_KEYS[@]}" | sed 's/;$//')"
+fi
 LAST_SENT="$(state_get "$STATE_FILE" last_sent_signature)"
 PENDING="$(state_get "$STATE_FILE" alert_pending)"
 DELIVERY='not needed (no change since the last alert)'
 NEW_SENT="$LAST_SENT"; NEW_PENDING=0
 if [ "$ALERTING_READY" -ne 1 ]; then
   DELIVERY='not attempted: no alert channel set up'
-elif [ "$OVERALL" = EMERGENCY_PRESSURE ] || [ "$SIGNATURE" != "$LAST_SENT" ] || [ "${PENDING:-0}" = 1 ] || [ "${#NOTICES[@]}" -gt 0 ]; then
+elif [ "$PRE_STATE" = EMERGENCY_PRESSURE ] || [ "$SIGNATURE" != "$LAST_SENT" ] || [ "${PENDING:-0}" = 1 ] || [ "${#NOTICES[@]}" -gt 0 ]; then
   BODY="$(mktemp "$STATE_DIR/.alert.XXXXXX")"
-  alert_body "$OVERALL" "$SERVICES" > "$BODY"
-  SUBJECT="host-observability $HOST_LABEL: $OVERALL"
+  alert_body "$PRE_STATE" "$SERVICES" > "$BODY"
+  SUBJECT="host-observability $HOST_LABEL: $PRE_STATE"
   [ "$SERVICES" = OK ] || SUBJECT="$SUBJECT, services $SERVICES"
   if outcome="$(send_alert "$SUBJECT" "$BODY")"; then
-    DELIVERY="sent (${outcome% })"; NEW_SENT="$SIGNATURE"
+    DELIVERY="sent ($outcome)"; NEW_SENT="$SIGNATURE"
   else
-    DELIVERY="FAILED (${outcome% }); the next pulse retries"; NEW_PENDING=1
+    DELIVERY="FAILED ($outcome); the next pulse retries"; NEW_PENDING=1
+    add_row OBSERVABILITY_DEGRADED 'Alert delivery' "Failed ($outcome); the owner is not hearing about this host"
   fi
   rm -f "$BODY"
 fi
+
+ping_heartbeat "$(worst_state)"
+OVERALL="$(worst_state)"
+
+STAMP="$(date -u -d "@$NOW_EPOCH" +%Y%m%dT%H%M%SZ 2>/dev/null || date -u +%Y%m%dT%H%M%SZ)"
+REPORT="$REPORT_DIR/pulse-$STAMP.md"
+TMP_REPORT="$(mktemp "$REPORT_DIR/.pulse.XXXXXX")"
+write_report "$TMP_REPORT" "$OVERALL" "$SERVICES"
 printf '\n## Alert delivery\n\n%s\n' "$DELIVERY" | redact_secrets >> "$TMP_REPORT"
 
 mv "$TMP_REPORT" "$REPORT"
@@ -461,7 +530,8 @@ state_write "$STATE_FILE" \
   "oom_kill=$CURRENT_OOM" \
   "docker_restarts=$CURRENT_RESTARTS" \
   "last_sent_signature=$NEW_SENT" \
-  "alert_pending=$NEW_PENDING"
+  "alert_pending=$NEW_PENDING" \
+  ${STATE_EXTRA[@]+"${STATE_EXTRA[@]}"}
 
 printf 'State: %s\nServices: %s\nReport: %s\nAlert: %s\n' "$OVERALL" "$SERVICES" "$REPORT" "$DELIVERY" | redact_secrets
 exit 0

@@ -7,7 +7,7 @@ Toolkit picks no alert channel and no heartbeat service. At set-up, ask the owne
 1. "Where do you want server alerts to reach you?" Offer the alert options. More than one is fine.
 2. "Which outside service should notice if this server goes quiet?" Offer the heartbeat options. It must run somewhere other than this host.
 
-Never ask the owner to paste a token, chat ID, webhook URL or heartbeat URL into chat. They put the values into the env file on the host themselves.
+Never ask the owner to paste a token, chat ID, webhook URL or heartbeat URL into chat. They put the values into the env file on the host themselves. Webhook and heartbeat URLs carry secrets, so they must be `https`; plain `http` is accepted only to the host itself (`127.0.0.1`, `localhost` or `[::1]`).
 
 ## Alert Channels
 
@@ -17,7 +17,7 @@ Never ask the owner to paste a token, chat ID, webhook URL or heartbeat URL into
 | Webhook to Discord | `ALERT_WEBHOOK_FORMAT=discord` | personal or small-team servers | messages are cut to fit Discord's size limit |
 | ntfy push (hosted or self-hosted) | `ALERT_WEBHOOK_FORMAT=ntfy`, the topic URL | phone push without a chat app | a public topic name is readable by anyone who guesses it; use a long random topic or access control |
 | Telegram bot | `ALERT_CHANNELS=telegram`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | owners who already use Telegram | the bot token is a secret |
-| Email | `ALERT_CHANNELS=email`, `ALERT_EMAIL_TO` | inbox-based owners | needs a working local mailer on the host; many VPS providers block outbound mail |
+| Email | `ALERT_CHANNELS=email`, `ALERT_EMAIL_TO` | inbox-based owners | needs `mail` or `sendmail` on the host; the pulse's sandbox has no write access to a local mail queue, so use a mailer that relays straight out (for example msmtp); many VPS providers block outbound mail |
 | Any other webhook | `ALERT_WEBHOOK_FORMAT=json` (or `text`) | your own automation or incident tool | it receives `source`, `host`, `subject` and `text` fields |
 
 ## Off-Host Heartbeat
@@ -34,11 +34,13 @@ Check the chosen service's own docs for the ping URL and its free-tier limits be
 
 ## After Set-Up
 
-Run the tests with the host's env file loaded, as root:
+Run the tests through the two installed test units, so systemd reads the env file and applies the same sandbox as the hourly timer:
 
 ```bash
-sudo bash -c 'set -a; . /etc/host-observability/host-pulse.env; set +a; /usr/local/lib/host-observability/host-pulse.sh --test-alert'
-sudo bash -c 'set -a; . /etc/host-observability/host-pulse.env; set +a; /usr/local/lib/host-observability/host-pulse.sh --test-heartbeat'
+sudo systemctl start host-pulse-test-alert.service; sudo journalctl -u host-pulse-test-alert.service -n 5 --no-pager
+sudo systemctl start host-pulse-test-heartbeat.service; sudo journalctl -u host-pulse-test-heartbeat.service -n 5 --no-pager
 ```
+
+Do not load the env file with a shell instead: a shell reads `$`, backticks, `&` and `;` differently from systemd, so a test could pass while the timer fails.
 
 Then confirm with the owner that the test alert arrived and the heartbeat service shows a ping. Only then report alerting as working.

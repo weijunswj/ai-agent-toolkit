@@ -18,9 +18,10 @@ const skillDir = path.join(repoRoot, 'skills', 'host-observability');
 const pulseScript = path.join(skillDir, 'scripts', 'host-pulse.sh');
 const installScript = path.join(skillDir, 'scripts', 'install-host-observability-systemd.sh');
 const skip = process.platform === 'win32' ? 'host scripts target Linux servers' : false;
-const realTools = ['bash', 'sh', 'awk', 'sed', 'grep', 'date', 'mktemp', 'cat', 'head', 'tail', 'sort', 'find', 'stat', 'cp', 'mv',
-  'rm', 'mkdir', 'rmdir', 'chmod', 'tr', 'paste', 'xargs', 'hostname', 'curl', 'cksum', 'basename', 'dirname', 'wc', 'flock',
-  'timeout', 'touch', 'ls', 'install', 'uname', 'env', 'cut'];
+const realTools = ['bash', 'sh', 'awk', 'sed', 'grep', 'date', 'mktemp', 'cat', 'head', 'tail', 'sort', 'find', 'cp', 'mv',
+  'rm', 'mkdir', 'rmdir', 'chmod', 'tr', 'paste', 'hostname', 'curl', 'dirname', 'wc', 'flock', 'touch', 'ls', 'install',
+  'uname', 'env', 'cut'];
+const nowSec = () => Math.floor(Date.now() / 1000);
 
 const SECRET_HOOK = 'hooksecretvalue0123456789';
 const SECRET_BEAT = 'beatsecretuuid0123456789';
@@ -66,7 +67,7 @@ function makeHost(t, options = {}) {
   fs.writeFileSync(path.join(proc, 'vmstat'), o.oom === null ? 'pgfault 1\n' : `pgfault 1\noom_kill ${o.oom}\n`);
   fs.writeFileSync(path.join(proc, 'uptime'), `${o.uptime}.00 100.00\n`);
   fs.writeFileSync(path.join(proc, 'sys', 'kernel', 'random', 'boot_id'), `${o.bootId}\n`);
-  linkRealTools(tools);
+  linkRealTools(tools, o.noCurl ? ['curl'] : []);
   writeExec(path.join(stub, 'df'), `case " $* " in *" -Pi "*) printf 'Filesystem Inodes IUsed IFree IUse%% Mounted\\nfake 100 10 90 ${o.inodePct}%% /\\n' ;; *) printf 'Filesystem 1024-blocks Used Available Capacity Mounted\\nfake 100 40 60 ${o.diskPct}%% /\\n' ;; esac`);
   writeExec(path.join(stub, 'nproc'), `echo ${o.cpus}`);
   if (o.docker !== 'absent') {
@@ -77,7 +78,6 @@ function makeHost(t, options = {}) {
       `  "ps -a") if [ "$3" = "--format" ]; then cat "${dir}/docker-ps.txt"; else echo abc123; fi ;;`,
       '  "ps -aq") echo abc123 ;;',
       `  inspect*) echo ${o.restarts} ;;`,
-      `  version*) echo "${o.dockerVersion || '27.3.1'}" ;;`,
       'esac'
     ].join('\n'));
   }
@@ -114,6 +114,7 @@ function run(script, args, host, env = {}) {
     HOST_PULSE_ROOT: host.root,
     PROC_ROOT: host.proc,
     SYSTEMD_RUN_DIR: host.systemdDir,
+    SENDMAIL: path.join(host.dir, 'no-sendmail'),
     ...env
   };
   return new Promise((resolve, reject) => {
@@ -161,32 +162,94 @@ const beats = (rx) => rx.requests.filter((r) => r.url.startsWith('/hb'));
 const stateLine = (stdout) => (stdout.match(/^State: (\S+)/m) || [])[1];
 const latestReport = (host) => fs.readFileSync(path.join(host.root, 'reports', 'latest-pulse.md'), 'utf8');
 
-// M3: host states. Each row is one fake host and the state the pulse must give it.
+// M3: host states. Each row is one fake host, optionally with an earlier pulse already recorded,
+// and the state the pulse must give it. `prior` returns state lines; `runs` repeats the pulse.
+const fresh = (extra = []) => (now) => [`last_pulse_epoch=${now - 600}`, 'boot_id=boot-a', ...extra];
+const failURL = (rx) => ({ HEARTBEAT_FAIL_URL: `${rx.base}/hb-fail/${SECRET_BEAT}` });
+const pinged = (rx) => beats(rx).map((r) => r.url.split('/')[1]);
 const stateMatrix = [
-  { name: 'all signals low, pulse fresh', host: {}, expect: 'NORMAL' },
+  // Row 1: healthy.
+  { name: 'all signals low, pulse fresh', expect: 'NORMAL', report: [/Alerting \| NORMAL \| Channels: webhook \|/] },
+  // Row 2: sustained pressure or growth over the review threshold.
   { name: 'memory over the review threshold', host: { memAvailKb: 800000 }, expect: 'REVIEW_CAPACITY' },
-  { name: 'load over the review threshold', host: { load15: '1.80' }, expect: 'REVIEW_CAPACITY' },
+  { name: 'load over the review threshold for one pulse only', host: { load15: '1.80' }, prior: fresh(), expect: 'NORMAL',
+    report: [/CPU load \| NORMAL \| .*over the review threshold for 1 of 2 pulses in a row/] },
+  { name: 'load over the review threshold for two pulses in a row', host: { load15: '1.80' }, prior: fresh(['load_over_review=1']),
+    expect: 'REVIEW_CAPACITY', report: [/CPU load \| REVIEW_CAPACITY \| .*for 2 of 2 pulses/] },
+  { name: 'disk growing fast while under the review threshold', host: { diskPct: 50 }, prior: fresh(['disk_pct__=40']),
+    expect: 'REVIEW_CAPACITY', report: [/Disk \/ \| REVIEW_CAPACITY \| 50% used .*grew 10 points since the last pulse/] },
+  { name: 'disk growing slowly', host: { diskPct: 42 }, prior: fresh(['disk_pct__=40']), expect: 'NORMAL' },
+  // Row 3: over the upgrade threshold, or repeated out-of-memory kills or restarts.
   { name: 'disk over the upgrade threshold', host: { diskPct: 90 }, expect: 'UPGRADE_OR_REBALANCE_REQUIRED' },
   { name: 'swap over the upgrade threshold', host: { swapFreeKb: 400000 }, expect: 'UPGRADE_OR_REBALANCE_REQUIRED' },
-  { name: 'disk reserve breached now', host: { diskPct: 97 }, expect: 'EMERGENCY_PRESSURE' },
-  { name: 'memory reserve breached now', host: { memAvailKb: 100000 }, expect: 'EMERGENCY_PRESSURE' },
+  { name: 'repeated out-of-memory kills within one boot', host: { oom: 6 }, prior: fresh(['oom_kill=3']),
+    expect: 'UPGRADE_OR_REBALANCE_REQUIRED', report: [/Out-of-memory kills \| UPGRADE_OR_REBALANCE_REQUIRED \| 3 new since the last pulse/] },
+  { name: 'one out-of-memory kill', host: { oom: 4 }, prior: fresh(['oom_kill=3']), expect: 'REVIEW_CAPACITY' },
+  { name: 'a new boot starts the out-of-memory count again', host: { oom: 1, bootId: 'boot-b' }, prior: fresh(['oom_kill=9']),
+    expect: 'REVIEW_CAPACITY', report: [/Rebooted since the last pulse/, /## Notices/] },
+  { name: 'repeated container restarts', host: { restarts: 5 }, prior: fresh(['docker_restarts=1']), expect: 'UPGRADE_OR_REBALANCE_REQUIRED' },
+  // Row 4: host reserve breached now, alert at once and on every run while it lasts.
+  { name: 'disk reserve breached now', host: { diskPct: 97 }, runs: 2, expect: 'EMERGENCY_PRESSURE',
+    check: ({ rx }) => { assert.equal(hooks(rx).length, 2); assert.match(JSON.parse(hooks(rx)[1].body).text, /Disk \/: EMERGENCY_PRESSURE/); } },
+  { name: 'memory reserve breached now', host: { memAvailKb: 100000 }, expect: 'EMERGENCY_PRESSURE', check: ({ rx }) => assert.equal(hooks(rx).length, 1) },
   { name: 'inodes reserve breached now', host: { inodePct: 99 }, expect: 'EMERGENCY_PRESSURE' },
+  { name: 'emergency load counts on the first pulse', host: { load15: '7.00' }, expect: 'EMERGENCY_PRESSURE' },
+  // Row 5: pulse older than 60 minutes, or a collector failed; never NORMAL.
+  { name: 'pulse exactly 60 minutes old', prior: (now) => [`last_pulse_epoch=${now - 3630}`, 'boot_id=boot-a'], env: failURL, expect: 'NORMAL',
+    report: [/Pulse continuity \| NORMAL \| 60 minutes since the last pulse/], check: ({ rx }) => assert.deepEqual(pinged(rx), ['hb']) },
+  { name: 'pulse 61 minutes old', prior: (now) => [`last_pulse_epoch=${now - 3660}`, 'boot_id=boot-a'], env: failURL, expect: 'OBSERVABILITY_DEGRADED',
+    report: [/Pulse continuity \| OBSERVABILITY_DEGRADED \| Gap of 61 minutes .*limit 60/], check: ({ rx }) => assert.deepEqual(pinged(rx), ['hb-fail']) },
   { name: 'docker present but failing', host: { docker: 'fail' }, expect: 'OBSERVABILITY_DEGRADED' },
-  { name: 'docker and systemd absent', host: { docker: 'absent', systemd: false }, expect: 'NORMAL' },
-  { name: 'kernel without an oom counter', host: { oom: null }, expect: 'NORMAL' },
-  { name: 'invalid threshold setting', host: {}, env: { DISK_REVIEW_PCT: 'eighty' }, expect: 'OBSERVABILITY_DEGRADED' }
+  { name: 'invalid threshold setting', env: { DISK_REVIEW_PCT: 'eighty' }, expect: 'OBSERVABILITY_DEGRADED',
+    report: [/Settings \| OBSERVABILITY_DEGRADED \| DISK_REVIEW_PCT is not a whole number/] },
+  { name: 'curl missing is named, and health URLs are not marked failing', host: { noCurl: true },
+    env: (rx) => ({ HEALTHCHECK_URLS: `${rx.base}/up` }), expect: 'OBSERVABILITY_DEGRADED',
+    report: [/Health URLs \| OBSERVABILITY_DEGRADED \| Not checked: curl is not installed/, /Off-host heartbeat \| OBSERVABILITY_DEGRADED \| Ping not sent: curl is not installed/,
+      /Alerting \| OBSERVABILITY_DEGRADED \| Not set up: webhook chosen but curl is not installed/, /^Services: OK$/m],
+    check: ({ rx, report }) => { assert.equal(rx.requests.length, 0); assert.doesNotMatch(report, /FAILING/); } },
+  // Row 6: Docker absent or systemd absent: those rows not applicable, other rows still classified.
+  { name: 'docker absent, disk over the upgrade threshold', host: { docker: 'absent', diskPct: 90 }, expect: 'UPGRADE_OR_REBALANCE_REQUIRED',
+    report: [/Docker containers \| N\/A \| Not applicable: Docker is not installed/, /Container restarts \| NORMAL \| Not applicable/, /systemd units \| OK/] },
+  { name: 'systemd absent, memory over the review threshold', host: { systemd: false, memAvailKb: 800000 }, expect: 'REVIEW_CAPACITY',
+    report: [/systemd units \| N\/A \| Not applicable: systemd is not running/, /Docker containers \| OK/] },
+  { name: 'kernel without an oom counter, swap over the upgrade threshold', host: { oom: null, swapFreeKb: 400000 }, expect: 'UPGRADE_OR_REBALANCE_REQUIRED',
+    report: [/Out-of-memory kills \| NORMAL \| Not applicable: this kernel has no oom_kill counter/] },
+  // Row 7: alert transport fails: the report keeps it, it is never marked sent, and the pulse is degraded.
+  { name: 'alert transport fails', responses: { '/hook': 500 }, env: failURL, expect: 'OBSERVABILITY_DEGRADED',
+    report: [/Alert delivery \| OBSERVABILITY_DEGRADED \| Failed \(webhook=failed\)/, /## Alert delivery\n\nFAILED \(webhook=failed\); the next pulse retries/],
+    check: ({ host, rx }) => { assert.equal(readState(host).alert_pending, '1'); assert.equal(readState(host).last_sent_signature, ''); assert.deepEqual(pinged(rx), ['hb-fail']); } },
+  { name: 'unsupported webhook format', env: { ALERT_WEBHOOK_FORMAT: 'xml' }, expect: 'OBSERVABILITY_DEGRADED',
+    report: [/Alerting \| OBSERVABILITY_DEGRADED \| Not set up: unknown ALERT_WEBHOOK_FORMAT xml/], check: ({ rx }) => assert.equal(hooks(rx).length, 0) },
+  { name: 'plain http webhook to another host', env: { ALERT_WEBHOOK_URL: `http://alerts.example.com/hook/${SECRET_HOOK}` }, expect: 'OBSERVABILITY_DEGRADED',
+    report: [/Not set up: ALERT_WEBHOOK_URL must be an https URL/] },
+  // Row 8: no alert channel chosen: reports kept locally, alerting degraded, never NORMAL.
+  { name: 'no alert channel chosen', env: { ALERT_CHANNELS: '' }, expect: 'OBSERVABILITY_DEGRADED',
+    report: [/Alerting \| OBSERVABILITY_DEGRADED \| Not set up: no alert channel chosen/, /not attempted: no alert channel set up/],
+    check: ({ rx }) => assert.equal(hooks(rx).length, 0) },
+  { name: 'alert channel set to none', env: { ALERT_CHANNELS: 'none' }, expect: 'OBSERVABILITY_DEGRADED', report: [/Not set up: alert channel set to none/] },
+  { name: 'telegram chosen without its settings', env: { ALERT_CHANNELS: 'telegram' }, expect: 'OBSERVABILITY_DEGRADED', report: [/TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is empty/] },
+  { name: 'email chosen with no mailer on the host', env: { ALERT_CHANNELS: 'email', ALERT_EMAIL_TO: 'owner' }, expect: 'OBSERVABILITY_DEGRADED',
+    report: [/email chosen but neither mail nor sendmail is installed/] },
+  { name: 'unknown alert channel', env: { ALERT_CHANNELS: 'pigeon' }, expect: 'OBSERVABILITY_DEGRADED', report: [/unknown alert channel pigeon/] },
+  { name: 'no off-host heartbeat', env: { HEARTBEAT_URL: '' }, expect: 'OBSERVABILITY_DEGRADED', report: [/Off-host heartbeat \| OBSERVABILITY_DEGRADED \| Not set up/] }
 ];
 
 for (const row of stateMatrix) {
   test(`pulse state matrix: ${row.name} gives ${row.expect}`, { skip }, async (t) => {
     const host = makeHost(t, row.host);
-    const rx = await receiver(t);
-    const result = await run(pulseScript, [], host, alertEnv(rx, row.env));
-    assert.equal(result.code, 0, result.stderr);
-    assert.equal(stateLine(result.stdout), row.expect, result.stdout + latestReport(host));
-    assert.match(latestReport(host), new RegExp(`^State: ${row.expect}$`, 'm'));
-    if (row.host.docker === 'absent') assert.match(latestReport(host), /Docker containers \| N\/A \| Not applicable: Docker is not installed/);
-    if (row.host.systemd === false) assert.match(latestReport(host), /systemd units \| N\/A \| Not applicable/);
+    const rx = await receiver(t, { ...row.responses });
+    if (row.prior) writeState(host, row.prior(nowSec()));
+    const env = alertEnv(rx, typeof row.env === 'function' ? row.env(rx) : row.env);
+    const results = [];
+    for (let i = 0; i < (row.runs || 1); i += 1) results.push(await run(pulseScript, [], host, env));
+    const last = results[results.length - 1];
+    assert.equal(last.code, 0, last.stderr);
+    const report = latestReport(host);
+    assert.equal(stateLine(last.stdout), row.expect, last.stdout + report);
+    assert.match(report, new RegExp(`^State: ${row.expect}$`, 'm'));
+    assert.equal(readState(host).last_state, row.expect);
+    for (const pattern of row.report || []) assert.match(report, pattern);
+    if (row.check) row.check({ host, rx, results, report });
   });
 }
 
@@ -207,55 +270,17 @@ test('a first pulse alerts once, pings the heartbeat, and a repeat with no chang
   assert.equal(beats(rx).length, 2, 'the heartbeat is pinged on every run');
 });
 
-test('emergency pressure alerts at once and on every run while it lasts', { skip }, async (t) => {
-  const host = makeHost(t, { diskPct: 97 });
-  const rx = await receiver(t);
-  await run(pulseScript, [], host, alertEnv(rx));
-  await run(pulseScript, [], host, alertEnv(rx));
-  assert.equal(hooks(rx).length, 2);
-  assert.match(JSON.parse(hooks(rx)[1].body).text, /Disk \/: EMERGENCY_PRESSURE/);
-});
-
-test('repeated out-of-memory kills within one boot need an upgrade; a new boot starts the count again', { skip }, async (t) => {
-  const host = makeHost(t, { oom: 6 });
-  const rx = await receiver(t);
-  writeState(host, ['last_pulse_epoch=' + Math.floor(Date.now() / 1000), 'boot_id=boot-a', 'oom_kill=3']);
-  const same = await run(pulseScript, [], host, alertEnv(rx));
-  assert.equal(stateLine(same.stdout), 'UPGRADE_OR_REBALANCE_REQUIRED', same.stdout);
-  assert.match(latestReport(host), /Out-of-memory kills \| UPGRADE_OR_REBALANCE_REQUIRED \| 3 new since the last pulse/);
-
-  const rebooted = makeHost(t, { oom: 1, bootId: 'boot-b' });
-  writeState(rebooted, ['last_pulse_epoch=' + Math.floor(Date.now() / 1000), 'boot_id=boot-a', 'oom_kill=9']);
-  const after = await run(pulseScript, [], rebooted, alertEnv(rx));
-  assert.equal(stateLine(after.stdout), 'REVIEW_CAPACITY', after.stdout);
-  assert.match(latestReport(rebooted), /Rebooted since the last pulse/);
-  assert.match(latestReport(rebooted), /## Notices/);
-});
-
-test('repeated container restarts need an upgrade', { skip }, async (t) => {
-  const host = makeHost(t, { restarts: 5 });
-  const rx = await receiver(t);
-  writeState(host, ['last_pulse_epoch=' + Math.floor(Date.now() / 1000), 'boot_id=boot-a', 'docker_restarts=1']);
-  const result = await run(pulseScript, [], host, alertEnv(rx));
-  assert.equal(stateLine(result.stdout), 'UPGRADE_OR_REBALANCE_REQUIRED', result.stdout);
-});
-
-test('a pulse gap is degraded, uses the failure heartbeat URL, and --status never calls an old pulse fine', { skip }, async (t) => {
-  const host = makeHost(t);
-  const rx = await receiver(t);
-  const threeHoursAgo = Math.floor(Date.now() / 1000) - 3 * 3600;
-  writeState(host, [`last_pulse_epoch=${threeHoursAgo}`, 'last_state=NORMAL', 'last_services=OK', 'boot_id=boot-a']);
-  const status = await run(pulseScript, ['--status'], host);
-  assert.match(status.stdout, /^State: OBSERVABILITY_DEGRADED$/m);
-  assert.match(status.stdout, /180 minutes old/);
-  const result = await run(pulseScript, [], host, alertEnv(rx, { HEARTBEAT_FAIL_URL: `${rx.base}/hb-fail/${SECRET_BEAT}` }));
-  assert.equal(stateLine(result.stdout), 'OBSERVABILITY_DEGRADED', result.stdout);
-  assert.match(latestReport(host), /Pulse continuity \| OBSERVABILITY_DEGRADED \| Gap of 180 minutes/);
-  assert.deepEqual(beats(rx).map((r) => r.url.split('/')[1]), ['hb-fail']);
-  const fresh = await run(pulseScript, ['--status'], host);
-  assert.match(fresh.stdout, /^State: OBSERVABILITY_DEGRADED$/m);
-  assert.match(fresh.stdout, /Last pulse: 0 minutes ago/);
-});
+// --status at the stale limit: just under, at and just over 60 minutes.
+for (const [ageSeconds, expect] of [[59 * 60, 'NORMAL'], [3630, 'NORMAL'], [3660, 'OBSERVABILITY_DEGRADED'], [3 * 3600, 'OBSERVABILITY_DEGRADED']]) {
+  test(`--status with a pulse ${ageSeconds} seconds old gives ${expect}`, { skip }, async (t) => {
+    const host = makeHost(t);
+    writeState(host, [`last_pulse_epoch=${nowSec() - ageSeconds}`, 'last_state=NORMAL', 'last_services=OK', 'boot_id=boot-a']);
+    const status = await run(pulseScript, ['--status'], host);
+    assert.equal(status.code, 0);
+    assert.match(status.stdout, new RegExp(`^State: ${expect}$`, 'm'));
+    if (expect !== 'NORMAL') assert.match(status.stdout, new RegExp(`${Math.floor(ageSeconds / 60)} minutes old \\(limit 60\\)`));
+  });
+}
 
 test('--status with no pulse recorded is degraded', { skip }, async (t) => {
   const host = makeHost(t);
@@ -264,45 +289,64 @@ test('--status with no pulse recorded is degraded', { skip }, async (t) => {
   assert.match(status.stdout, /^State: OBSERVABILITY_DEGRADED\nReason: no pulse has been recorded/m);
 });
 
-test('a failed alert delivery stays in the report, is never marked sent, and the next pulse retries', { skip }, async (t) => {
+test('--status says when it needs root to read the state folder', { skip: skip || (process.getuid && process.getuid() === 0 ? 'root reads any folder' : false) }, async (t) => {
+  const host = makeHost(t);
+  writeState(host, [`last_pulse_epoch=${nowSec()}`, 'last_state=NORMAL', 'last_services=OK']);
+  fs.chmodSync(path.join(host.root, 'state'), 0o000);
+  let status;
+  try {
+    status = await run(pulseScript, ['--status'], host);
+  } finally {
+    fs.chmodSync(path.join(host.root, 'state'), 0o700);
+  }
+  assert.equal(status.code, 1);
+  assert.match(status.stdout, /^State: UNKNOWN\nReason: this user cannot read .*; run --status as root/m);
+});
+
+test('a failed alert delivery retries on the next pulse, and --status shows it meanwhile', { skip }, async (t) => {
   const host = makeHost(t);
   const rx = await receiver(t, { '/hook': 500 });
   const failed = await run(pulseScript, [], host, alertEnv(rx));
   assert.match(failed.stdout, /Alert: FAILED \(webhook=failed\); the next pulse retries/);
-  assert.match(latestReport(host), /## Alert delivery\n\nFAILED/);
-  assert.equal(readState(host).alert_pending, '1');
-  assert.equal(readState(host).last_sent_signature, '');
+  const status = await run(pulseScript, ['--status'], host);
+  assert.match(status.stdout, /^State: OBSERVABILITY_DEGRADED$/m);
+  assert.match(status.stdout, /Alert delivery: the last alert failed to send/);
   rx.set('/hook', 200);
   const retried = await run(pulseScript, [], host, alertEnv(rx));
   assert.match(retried.stdout, /Alert: sent \(webhook=sent\)/);
+  assert.equal(stateLine(retried.stdout), 'NORMAL');
   assert.equal(readState(host).alert_pending, '0');
   assert.equal(readState(host).last_sent_signature, 'NORMAL|OK');
-});
-
-test('no alert channel or no heartbeat keeps reports local and is degraded, never NORMAL', { skip }, async (t) => {
-  const host = makeHost(t);
-  const rx = await receiver(t);
-  const noChannel = await run(pulseScript, [], host, { HEARTBEAT_URL: `${rx.base}/hb/x` });
-  assert.equal(stateLine(noChannel.stdout), 'OBSERVABILITY_DEGRADED');
-  assert.match(noChannel.stdout, /Alert: not attempted: no alert channel set up/);
-  assert.match(latestReport(host), /Alerting \| OBSERVABILITY_DEGRADED \| Not set up: no alert channel chosen/);
-  for (const channels of ['none', 'telegram', 'pigeon']) {
-    const result = await run(pulseScript, ['--dry-run'], host, { ALERT_CHANNELS: channels, HEARTBEAT_URL: `${rx.base}/hb/x` });
-    assert.match(result.stdout, /^State: OBSERVABILITY_DEGRADED$/m, channels);
-  }
-  const noBeat = await run(pulseScript, [], makeHost(t), { ...alertEnv(rx), HEARTBEAT_URL: '' });
-  assert.equal(stateLine(noBeat.stdout), 'OBSERVABILITY_DEGRADED');
+  const after = await run(pulseScript, ['--status'], host);
+  assert.doesNotMatch(after.stdout, /Alert delivery/);
 });
 
 test('failing services alert without changing the capacity state', { skip }, async (t) => {
-  const host = makeHost(t, { dockerPs: 'web|running|Up 1 hour (unhealthy)\ndb|restarting|Restarting (1)', failedUnits: 'backup.service loaded failed failed Backup\n' });
+  const host = makeHost(t, {
+    dockerPs: ['web|running|Up 1 hour (unhealthy)', 'db|restarting|Restarting (1) 5 seconds ago', 'worker|exited|Exited (137) 2 hours ago',
+      'migrate|exited|Exited (0) 3 hours ago', 'cron-job|exited|Exited (1) 1 hour ago'].join('\n'),
+    failedUnits: 'backup.service loaded failed failed Backup\n'
+  });
   const rx = await receiver(t);
-  const result = await run(pulseScript, [], host, alertEnv(rx));
+  const result = await run(pulseScript, [], host, alertEnv(rx, { DOCKER_EXITED_OK_CONTAINERS: 'cron-job other' }));
   assert.equal(stateLine(result.stdout), 'NORMAL');
   assert.match(result.stdout, /^Services: FAILING \(2\)$/m);
-  assert.match(latestReport(host), /Unhealthy or restarting: web,db/);
+  assert.match(latestReport(host), /Failing: web \(unhealthy\), db \(restarting\), worker \(exited with code 137\) \|/);
   assert.match(latestReport(host), /1 failed: backup\.service/);
   assert.match(JSON.parse(hooks(rx)[0].body).subject, /services FAILING \(2\)/);
+  assert.equal(readState(host).last_sent_signature, 'NORMAL|FAILING (2)|systemd:backup.service;docker:web,db,worker');
+});
+
+test('a different service failing with the same count alerts again', { skip }, async (t) => {
+  const host = makeHost(t, { failedUnits: 'backup.service loaded failed failed Backup\n' });
+  const rx = await receiver(t);
+  await run(pulseScript, [], host, alertEnv(rx));
+  await run(pulseScript, [], host, alertEnv(rx));
+  assert.equal(hooks(rx).length, 1, 'the same failure alerts once');
+  fs.writeFileSync(path.join(host.dir, 'failed-units.txt'), 'certbot.service loaded failed failed Renew\n');
+  await run(pulseScript, [], host, alertEnv(rx));
+  assert.equal(hooks(rx).length, 2);
+  assert.match(JSON.parse(hooks(rx)[1].body).text, /certbot\.service/);
 });
 
 test('health URLs: a plain URL is checked and a secret-looking one is skipped and redacted', { skip }, async (t) => {
@@ -363,6 +407,20 @@ test('test alerts use the chosen webhook format', { skip }, async (t) => {
   const unset = await run(pulseScript, ['--test-alert'], host, {});
   assert.equal(unset.code, 1);
   assert.match(unset.stdout, /Alerting not set up: no alert channel chosen/);
+  const plainBeat = await run(pulseScript, ['--test-heartbeat'], host, { HEARTBEAT_URL: 'http://beats.example.com/ping' });
+  assert.equal(plainBeat.code, 1);
+  assert.match(plainBeat.stdout, /must be https/);
+});
+
+test('test commands name a missing curl', { skip }, async (t) => {
+  const host = makeHost(t, { noCurl: true });
+  const rx = await receiver(t);
+  const alert = await run(pulseScript, ['--test-alert'], host, alertEnv(rx));
+  assert.equal(alert.code, 1);
+  assert.match(alert.stdout, /Alerting not set up: webhook chosen but curl is not installed/);
+  const beat = await run(pulseScript, ['--test-heartbeat'], host, alertEnv(rx));
+  assert.equal(beat.code, 1);
+  assert.match(beat.stdout, /Heartbeat ping: failed \(curl is not installed\)/);
 });
 
 test('reports stay bounded: old pulse reports are pruned to REPORT_KEEP', { skip }, async (t) => {
@@ -379,22 +437,31 @@ test('reports stay bounded: old pulse reports are pruned to REPORT_KEEP', { skip
 });
 
 // Installer.
-function installerHost(t, uid) {
+function installerHost(t, uid, options = {}) {
   const dir = tempDir(t, 'host-obs-install-');
   const stub = path.join(dir, 'stub');
   const tools = path.join(dir, 'tools');
-  linkRealTools(tools);
+  linkRealTools(tools, options.uname ? ['uname'] : []);
   writeExec(path.join(stub, 'id'), `echo ${uid}`);
-  writeExec(path.join(stub, 'systemctl'), `echo "$*" >> "${dir}/systemctl.log"`);
+  if (options.uname) writeExec(path.join(stub, 'uname'), `echo ${options.uname}`);
+  if (options.systemctl !== false) {
+    writeExec(path.join(stub, 'systemctl'), [
+      `echo "$*" >> "${dir}/systemctl.log"`,
+      `[ -n "\${FAIL_SYSTEMCTL:-}" ] && [ "$1" = "$FAIL_SYSTEMCTL" ] && exit 1`,
+      'exit 0'
+    ].join('\n'));
+  }
   const env = {
     PATH: `${stub}:${tools}`,
     HOME: dir,
     INSTALL_PREFIX: path.join(dir, 'prefix'),
     CONFIG_DIR: path.join(dir, 'etc'),
     HOST_PULSE_ROOT: path.join(dir, 'var'),
-    SYSTEMD_UNIT_DIR: path.join(dir, 'units')
+    SYSTEMD_UNIT_DIR: path.join(dir, 'units'),
+    SYSTEMD_RUN_DIR: path.join(dir, 'run-systemd')
   };
   fs.mkdirSync(env.SYSTEMD_UNIT_DIR);
+  if (options.systemdRunning !== false) fs.mkdirSync(env.SYSTEMD_RUN_DIR);
   return { dir, tools, env };
 }
 
@@ -402,53 +469,133 @@ function runInstaller(host, args, extra = {}) {
   return spawnSync(path.join(host.tools, 'bash'), [installScript, ...args], { encoding: 'utf8', env: { ...host.env, ...extra } });
 }
 
+function assertNothingInstalled(host) {
+  assert.deepEqual(fs.readdirSync(host.env.SYSTEMD_UNIT_DIR), []);
+  for (const key of ['INSTALL_PREFIX', 'CONFIG_DIR', 'HOST_PULSE_ROOT']) assert.equal(fs.existsSync(host.env[key]), false, key);
+}
+
 test('installer prints its plan and changes nothing without --install', { skip }, (t) => {
   const host = installerHost(t, 0);
   const result = runInstaller(host, []);
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /^Plan \(nothing has been changed\):/);
+  assert.match(result.stdout, /runs as root with no capabilities/);
   assert.match(result.stdout, /Run again with --install/);
-  assert.deepEqual(fs.readdirSync(host.env.SYSTEMD_UNIT_DIR), []);
-  for (const key of ['INSTALL_PREFIX', 'CONFIG_DIR', 'HOST_PULSE_ROOT']) assert.equal(fs.existsSync(host.env[key]), false, key);
+  assertNothingInstalled(host);
   assert.equal(fs.existsSync(path.join(host.dir, 'systemctl.log')), false);
 });
+
+for (const [name, options] of [
+  ['systemd is not running', { systemdRunning: false }],
+  ['systemctl is missing', { systemctl: false }],
+  ['the host is not Linux', { uname: 'Darwin' }]
+]) {
+  test(`installer refuses the plan and the install when ${name}, and changes nothing`, { skip }, (t) => {
+    const host = installerHost(t, 0, options);
+    for (const args of [[], ['--install']]) {
+      const result = runInstaller(host, args);
+      assert.equal(result.status, 1, result.stdout);
+      assert.match(result.stderr, /systemd is not running on this host; nothing was changed/);
+      assert.doesNotMatch(result.stdout, /Start host-pulse\.timer/);
+      assertNothingInstalled(host);
+    }
+  });
+}
 
 test('installer refuses to install without root', { skip }, (t) => {
   const host = installerHost(t, 1000);
   const result = runInstaller(host, ['--install']);
   assert.equal(result.status, 1);
   assert.match(result.stderr, /Run as root on the target host/);
-  assert.deepEqual(fs.readdirSync(host.env.SYSTEMD_UNIT_DIR), []);
+  assertNothingInstalled(host);
 });
 
-test('installer installs the hourly timer, keeps an existing env file, backs up units, and removes cleanly', { skip }, (t) => {
+test('installer writes a hardened hourly timer, keeps one backup, and removes cleanly', { skip }, (t) => {
   const host = installerHost(t, 0);
   const first = runInstaller(host, ['--install']);
   assert.equal(first.status, 0, first.stderr);
   const units = host.env.SYSTEMD_UNIT_DIR;
+  const unitNames = ['host-pulse-test-alert.service', 'host-pulse-test-heartbeat.service', 'host-pulse.service', 'host-pulse.timer'];
+  assert.deepEqual(fs.readdirSync(units).sort(), unitNames);
   const pulseService = fs.readFileSync(path.join(units, 'host-pulse.service'), 'utf8');
-  assert.match(pulseService, new RegExp(`ExecStart=${host.env.INSTALL_PREFIX}/host-pulse\\.sh`));
-  assert.match(pulseService, new RegExp(`EnvironmentFile=-${host.env.CONFIG_DIR}/host-pulse\\.env`));
-  assert.match(pulseService, /NoNewPrivileges=yes/);
-  assert.match(fs.readFileSync(path.join(units, 'host-pulse.timer'), 'utf8'), /OnCalendar=hourly/);
-  assert.deepEqual(fs.readdirSync(units).sort(), ['host-pulse.service', 'host-pulse.timer']);
+  assert.match(pulseService, new RegExp(`^ExecStart=${host.env.INSTALL_PREFIX}/host-pulse\\.sh$`, 'm'));
+  assert.match(pulseService, new RegExp(`^EnvironmentFile=-${host.env.CONFIG_DIR}/host-pulse\\.env$`, 'm'));
+  assert.match(pulseService, new RegExp(`^ReadWritePaths=${host.env.HOST_PULSE_ROOT}$`, 'm'));
+  assert.match(pulseService, /^# Root for the Docker socket/m);
+  for (const line of ['NoNewPrivileges=yes', 'CapabilityBoundingSet=', 'AmbientCapabilities=', 'PrivateTmp=yes', 'PrivateDevices=yes',
+    'ProtectSystem=strict', 'ProtectHome=read-only', 'ProtectKernelTunables=yes', 'ProtectKernelModules=yes', 'ProtectControlGroups=yes',
+    'RestrictSUIDSGID=yes', 'RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6', 'UMask=0077']) {
+    assert.match(pulseService, new RegExp(`^${line.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'), line);
+  }
+  assert.doesNotMatch(pulseService, /^User=|^ProtectSystem=full/m);
+  for (const name of ['alert', 'heartbeat']) {
+    const testUnit = fs.readFileSync(path.join(units, `host-pulse-test-${name}.service`), 'utf8');
+    assert.match(testUnit, new RegExp(`^ExecStart=${host.env.INSTALL_PREFIX}/host-pulse\\.sh --test-${name}$`, 'm'));
+    assert.equal(testUnit.split('\n[Service]\n')[1], pulseService.split('\n[Service]\n')[1].replace(/host-pulse\.sh$/m, `host-pulse.sh --test-${name}`), 'test runs share the sandbox');
+    assert.doesNotMatch(testUnit, /^\[Install\]/m, 'test units are never enabled');
+  }
+  const timer = fs.readFileSync(path.join(units, 'host-pulse.timer'), 'utf8');
+  assert.match(timer, /^OnCalendar=hourly$/m);
+  assert.match(timer, /^AccuracySec=1s$/m);
   const envFile = path.join(host.env.CONFIG_DIR, 'host-pulse.env');
   assert.equal(fs.statSync(envFile).mode & 0o777, 0o600);
   for (const file of ['host-pulse.sh', 'lib/host-observability-common.sh']) assert.ok(fs.existsSync(path.join(host.env.INSTALL_PREFIX, file)), file);
   assert.match(fs.readFileSync(path.join(host.dir, 'systemctl.log'), 'utf8'), /enable --now host-pulse\.timer/);
 
   fs.writeFileSync(envFile, 'ALERT_CHANNELS=webhook\n');
-  const second = runInstaller(host, ['--install']);
-  assert.equal(second.status, 0, second.stderr);
+  fs.chmodSync(envFile, 0o644);
+  for (let i = 0; i < 2; i += 1) {
+    const again = runInstaller(host, ['--install']);
+    assert.equal(again.status, 0, again.stderr);
+  }
   assert.equal(fs.readFileSync(envFile, 'utf8'), 'ALERT_CHANNELS=webhook\n', 'an existing env file is never overwritten');
-  assert.ok(fs.readdirSync(units).some((name) => name.startsWith('host-pulse.service.bak.')));
+  assert.equal(fs.statSync(envFile).mode & 0o777, 0o600, 'an existing env file is tightened to mode 600');
+  assert.deepEqual(fs.readdirSync(units).sort(), unitNames, 'no backups pile up beside the units');
+  const backups = path.join(host.env.CONFIG_DIR, 'backup');
+  assert.deepEqual(fs.readdirSync(backups), ['previous']);
+  assert.deepEqual(fs.readdirSync(path.join(backups, 'previous')).sort(), ['host-observability-common.sh', 'host-pulse.sh', ...unitNames].sort());
 
   const removed = runInstaller(host, ['--remove']);
   assert.equal(removed.status, 0, removed.stderr);
-  assert.ok(!fs.existsSync(path.join(units, 'host-pulse.service')));
-  assert.ok(!fs.existsSync(path.join(host.env.INSTALL_PREFIX, 'host-pulse.sh')));
+  assert.deepEqual(fs.readdirSync(units), []);
+  assert.ok(!fs.existsSync(host.env.INSTALL_PREFIX));
+  assert.ok(!fs.existsSync(backups));
   assert.ok(fs.existsSync(envFile), 'remove keeps the env file');
+  assert.match(removed.stdout, /For a full removal, also delete .*host-pulse\.env/);
   assert.match(removed.stdout, /pause or delete that check too/);
+});
+
+test('a failed install puts back the previous files and removes the new ones', { skip }, (t) => {
+  const host = installerHost(t, 0);
+  const fresh = runInstaller(host, ['--install'], { FAIL_SYSTEMCTL: 'enable' });
+  assert.equal(fresh.status, 1);
+  assert.match(fresh.stderr, /Install failed; putting back what was there before/);
+  assert.deepEqual(fs.readdirSync(host.env.SYSTEMD_UNIT_DIR), []);
+  assert.ok(!fs.existsSync(host.env.INSTALL_PREFIX));
+  assert.ok(!fs.existsSync(path.join(host.env.CONFIG_DIR, 'host-pulse.env')), 'an env file created by the failed run is removed');
+
+  assert.equal(runInstaller(host, ['--install']).status, 0);
+  const service = path.join(host.env.SYSTEMD_UNIT_DIR, 'host-pulse.service');
+  fs.writeFileSync(service, 'previous unit\n');
+  const envFile = path.join(host.env.CONFIG_DIR, 'host-pulse.env');
+  fs.writeFileSync(envFile, 'ALERT_CHANNELS=webhook\n');
+  const failed = runInstaller(host, ['--install'], { FAIL_SYSTEMCTL: 'daemon-reload' });
+  assert.equal(failed.status, 1);
+  assert.equal(fs.readFileSync(service, 'utf8'), 'previous unit\n');
+  assert.equal(fs.readFileSync(envFile, 'utf8'), 'ALERT_CHANNELS=webhook\n', 'an env file the run did not create is kept');
+  assert.ok(fs.existsSync(path.join(host.env.INSTALL_PREFIX, 'host-pulse.sh')));
+  assert.ok(!fs.existsSync(path.join(host.env.CONFIG_DIR, 'backup', 'rollback')));
+});
+
+test('--remove carries on when systemctl is missing', { skip }, (t) => {
+  const host = installerHost(t, 0);
+  assert.equal(runInstaller(host, ['--install']).status, 0);
+  fs.rmSync(path.join(host.dir, 'stub', 'systemctl'));
+  const removed = runInstaller(host, ['--remove']);
+  assert.equal(removed.status, 0, removed.stderr);
+  assert.match(removed.stdout, /systemctl not found; removing the files only/);
+  assert.deepEqual(fs.readdirSync(host.env.SYSTEMD_UNIT_DIR), []);
+  assert.ok(!fs.existsSync(host.env.INSTALL_PREFIX));
 });
 
 // Static safety checks.

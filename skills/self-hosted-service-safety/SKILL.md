@@ -16,12 +16,12 @@ Keep this skill lightweight. Do not use it as general advice when the task has n
 - A user asks to review a Docker Compose, VPS, reverse proxy, tunnel, DNS/TLS, or public-port setup for a self-hosted service.
 - A setup guide includes admin panels, default credentials, webhooks, persistent volumes, backups, or production-like data.
 - The user wants a safer first-run plan before exposing a service beyond localhost.
-- For ongoing monitoring of the host itself (hourly pulse, off-host heartbeat, alerts), use `host-observability`; this skill stays the exposure and hardening review.
 
 ## Do Not Use When
 
 - Do not use for ordinary feature work or local dev servers without self-hosting/deployment exposure.
 - Do not use for n8n tasks; apply n8n-safety-router and n8n-environment-setup for n8n.
+- Do not use for ongoing monitoring of the host itself (hourly pulse, off-host heartbeat, alerts); use `host-observability`. This skill stays the exposure and hardening review.
 - Do not deploy, run Docker, open firewall ports, create DNS records, configure tunnels, edit credentials, or mutate a VPS/cloud service without explicit current-turn approval naming the target operation.
 
 ## Review Checklist

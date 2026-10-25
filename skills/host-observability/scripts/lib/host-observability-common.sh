@@ -44,6 +44,18 @@ safe_transport_url() {
   return 0
 }
 
+# A URL that carries a secret (webhook or heartbeat): https, or plain http only to this host itself.
+secret_transport_url() {
+  safe_transport_url "$1" || return 1
+  case "$1" in
+    https://*) return 0 ;;
+    'http://127.0.0.1' | 'http://127.0.0.1:'* | 'http://127.0.0.1/'*) return 0 ;;
+    'http://localhost' | 'http://localhost:'* | 'http://localhost/'*) return 0 ;;
+    'http://[::1]' | 'http://[::1]:'* | 'http://[::1]/'*) return 0 ;;
+  esac
+  return 1
+}
+
 is_uint() { case "$1" in ''|*[!0-9]*) return 1 ;; *) return 0 ;; esac; }
 
 json_escape() {
@@ -76,6 +88,16 @@ alert_channels() {
   printf '%s' "${ALERT_CHANNELS:-}" | tr ',' ' ' | tr '[:upper:]' '[:lower:]'
 }
 
+# The chosen channels as one comma-separated list.
+alert_channel_list() {
+  local channel list=''
+  for channel in $(alert_channels); do list="${list:+$list,}$channel"; done
+  printf '%s' "$list"
+}
+
+SENDMAIL="${SENDMAIL:-/usr/sbin/sendmail}"
+have_mailer() { have mail || [ -x "$SENDMAIL" ]; }
+
 # Prints a reason and returns 1 when the chosen channels are missing their settings.
 alert_config_problem() {
   local channel found=0
@@ -83,12 +105,19 @@ alert_config_problem() {
     found=1
     case "$channel" in
       telegram)
-        [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && [ -n "${TELEGRAM_CHAT_ID:-}" ] || { printf 'telegram chosen but TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is empty'; return 1; } ;;
+        [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && [ -n "${TELEGRAM_CHAT_ID:-}" ] || { printf 'telegram chosen but TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is empty'; return 1; }
+        have curl || { printf 'telegram chosen but curl is not installed'; return 1; } ;;
       email)
-        [ -n "${ALERT_EMAIL_TO:-}" ] || { printf 'email chosen but ALERT_EMAIL_TO is empty'; return 1; } ;;
+        [ -n "${ALERT_EMAIL_TO:-}" ] || { printf 'email chosen but ALERT_EMAIL_TO is empty'; return 1; }
+        have_mailer || { printf 'email chosen but neither mail nor sendmail is installed'; return 1; } ;;
       webhook)
         [ -n "${ALERT_WEBHOOK_URL:-}" ] || { printf 'webhook chosen but ALERT_WEBHOOK_URL is empty'; return 1; }
-        safe_transport_url "$ALERT_WEBHOOK_URL" || { printf 'ALERT_WEBHOOK_URL must be an http or https URL with no spaces or quotes'; return 1; } ;;
+        secret_transport_url "$ALERT_WEBHOOK_URL" || { printf 'ALERT_WEBHOOK_URL must be an https URL (plain http only to this host) with no spaces or quotes'; return 1; }
+        case "${ALERT_WEBHOOK_FORMAT:-json}" in
+          json|slack|discord|ntfy|text) ;;
+          *) printf 'unknown ALERT_WEBHOOK_FORMAT %s (use json, slack, discord, ntfy or text)' "$ALERT_WEBHOOK_FORMAT"; return 1 ;;
+        esac
+        have curl || { printf 'webhook chosen but curl is not installed'; return 1; } ;;
       none|'') ;;
       *) printf 'unknown alert channel %s' "$channel"; return 1 ;;
     esac
@@ -136,11 +165,11 @@ send_email() {
   subject="${ALERT_EMAIL_SUBJECT_PREFIX:-[host-observability]} $subject"
   if have mail; then
     mail -s "$subject" "$ALERT_EMAIL_TO" < "$body_file"
-  elif [ -x /usr/sbin/sendmail ]; then
+  elif [ -x "$SENDMAIL" ]; then
     {
       printf 'To: %s\nSubject: %s\nContent-Type: text/plain; charset=UTF-8\n\n' "$ALERT_EMAIL_TO" "$subject"
       cat "$body_file"
-    } | /usr/sbin/sendmail -t
+    } | "$SENDMAIL" -t
   else
     return 3
   fi
@@ -171,20 +200,34 @@ send_webhook() {
   return "$result"
 }
 
-# Sends one alert through every chosen channel. Prints one "channel=sent|failed" word per channel.
-# Returns 0 only when every chosen channel accepted the message.
+# One word for a channel's delivery result, with the reason when the cause is known.
+delivery_result() {
+  local channel="$1" rc="$2"
+  case "$rc" in
+    0) printf 'sent' ;;
+    2) printf 'failed (URL rejected)' ;;
+    3) if [ "$channel" = email ]; then printf 'failed (neither mail nor sendmail is installed)'; else printf 'failed (curl is not installed)'; fi ;;
+    4) printf 'failed (no private temp file)' ;;
+    5) printf 'failed (unknown webhook format)' ;;
+    *) printf 'failed' ;;
+  esac
+}
+
+# Sends one alert through every chosen channel. Prints "channel=sent" or "channel=failed (reason)"
+# per channel, comma separated. Returns 0 only when every chosen channel accepted the message.
 send_alert() {
-  local subject="$1" body_file="$2" channel failed=0 outcome
+  local subject="$1" body_file="$2" channel failed=0 rc list=''
   for channel in $(alert_channels); do
     case "$channel" in
-      telegram) send_telegram "$subject" "$body_file" && outcome=sent || outcome=failed ;;
-      email) send_email "$subject" "$body_file" && outcome=sent || outcome=failed ;;
-      webhook) send_webhook "$subject" "$body_file" && outcome=sent || outcome=failed ;;
+      telegram) send_telegram "$subject" "$body_file"; rc=$? ;;
+      email) send_email "$subject" "$body_file"; rc=$? ;;
+      webhook) send_webhook "$subject" "$body_file"; rc=$? ;;
       *) continue ;;
     esac
-    [ "$outcome" = sent ] || failed=1
-    printf '%s=%s ' "$channel" "$outcome"
+    [ "$rc" -eq 0 ] || failed=1
+    list="${list:+$list, }$channel=$(delivery_result "$channel" "$rc")"
   done
+  printf '%s' "$list"
   return "$failed"
 }
 
