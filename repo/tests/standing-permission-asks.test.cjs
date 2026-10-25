@@ -21,7 +21,7 @@ const HARD_STOPS = [
   "Merging without the owner's OK on a summary of its external effects (each merge stays its own OK).",
   'Production, live-system, deployment, firewall or security-setting changes.',
   'Turning off tests, validation, guardrails, attribution rules or any safety check.',
-  "Editing the agent's own permission settings, or widening permissions by any route (allow rules, `autoMode` entries, Codex allow rules, a `--settings` file).",
+  "Editing the agent's own permission settings, or adding allow rules, `autoMode` entries or Codex allow rules to any saved settings or rules file (user, project, local or managed settings, a Codex rules file, or a reusable `--settings` file). Per-launch options for a session the agent starts, such as `--allowedTools`, are not covered here, and they never clear a hard stop.",
   'Anything the host hard-denies.',
   'Anything that means acting as the owner.',
   'Anything else in the global safety floor.',
@@ -65,10 +65,10 @@ test('both safety-gates playbooks carry the same procedure, every hard stop and 
   for (const rule of HONOUR_RULES) assert.ok(toolkit.includes(rule), rule);
   for (const text of [
     '`standing-permissions/ledger.json`', '`review_by` (90 days after `reviewed_at`)', '`all-projects`',
-    'never as the default or the recommended option', 'Agents never add allow rules or `autoMode` entries, or otherwise widen permissions, by any route.',
+    'never as the default or the recommended option', 'Agents never edit their own permission settings, and never add allow rules or `autoMode` entries to a saved settings or rules file, by any route.',
     'Renew only an expired `standing` entry: a revoked entry stays revoked, and a `once` or `no` entry is never renewed',
     'never makes a hard stop clearable', 'not on tool output', 'Never retry another way',
-    'unique, `SP-` plus a number, never reused', 'An unknown id changes nothing; say so.',
+    'unique, `SP-` plus a number, never reused', 'An unknown id changes nothing; say so.', '`revoked_at` holds the date and is set exactly when `status` is `revoked`',
     'set `reviewed_at` to today, `review_by` to 90 days later', 'a neutral machine label',
     'otherwise ask before writing it, or offer only "just this once" or "no"',
     'works the same in every harness', '**Codex:** `prefix_rule()`', '**Any other harness:**', 'a `--settings` file, never from project settings',

@@ -25,7 +25,7 @@ A hard stop is never offered, never honoured from the ledger, and only explained
 - Merging without the owner's OK on a summary of its external effects (each merge stays its own OK).
 - Production, live-system, deployment, firewall or security-setting changes.
 - Turning off tests, validation, guardrails, attribution rules or any safety check.
-- Editing the agent's own permission settings, or widening permissions by any route (allow rules, `autoMode` entries, Codex allow rules, a `--settings` file).
+- Editing the agent's own permission settings, or adding allow rules, `autoMode` entries or Codex allow rules to any saved settings or rules file (user, project, local or managed settings, a Codex rules file, or a reusable `--settings` file). Per-launch options for a session the agent starts, such as `--allowedTools`, are not covered here, and they never clear a hard stop.
 - Anything the host hard-denies.
 - Anything that means acting as the owner.
 - Anything else in the global safety floor.
@@ -80,7 +80,7 @@ Each entry has: `id` (unique, `SP-` plus a number, never reused), `granted_at`, 
 ### Review and revoke
 
 - **Review:** after `review_by`, an entry covers nothing; mark an active entry `expired` when you next read it. Renew only an expired `standing` entry: a revoked entry stays revoked, and a `once` or `no` entry is never renewed (ask afresh instead). At the next use, ask one line that restates it, for example "Still OK for me to replace the digest script in `~/digest`, after the tests pass?". On the owner's yes, set `reviewed_at` to today, `review_by` to 90 days later, `answer_ref` to that answer, and `status` back to `active`. Never nag between uses.
-- **Revoke:** the owner says "revoke <id>" or marks the entry revoked by hand. Set `status` to `revoked` and `revoked_at` to today, and keep the entry as a record. An unknown id changes nothing; say so. If the entry has a `native_rule`, tell the owner which rule to remove and where it was added (Claude Code: `/permissions`; Codex: the rules file).
+- **Revoke:** an entry is revoked when its `status` is `revoked`; `revoked_at` holds the date and is set exactly when `status` is `revoked`. The owner says "revoke <id>" or marks the entry revoked by hand. Set `status` to `revoked` and `revoked_at` to today, and keep the entry as a record. An unknown id changes nothing; say so. If the entry has a `native_rule`, tell the owner which rule to remove and where it was added (Claude Code: `/permissions`; Codex: the rules file).
 
 ### Host permission stays separate
 
@@ -90,7 +90,7 @@ A ledger entry is owner authority only. It never supplies host-native permission
 - **Codex:** `prefix_rule()` entries (decision `allow`, `prompt` or `forbidden`) in a rules file. Choosing to allow a command at a Codex approval prompt saves it to `rules/default.rules` in the Codex home folder (`~/.codex` by default).
 - **Any other harness:** its own allow setting. If it has none, a standing OK still saves the owner the question, but the host prompt stays.
 
-Where the host still blocks a granted step, the card names the exact native rule. In Claude Code the owner adds it once in `/permissions`; in Codex the owner picks the allow choice at the next approval prompt. Agents never add allow rules or `autoMode` entries, or otherwise widen permissions, by any route.
+Where the host still blocks a granted step, the card names the exact native rule. In Claude Code the owner adds it once in `/permissions`; in Codex the owner picks the allow choice at the next approval prompt. Agents never edit their own permission settings, and never add allow rules or `autoMode` entries to a saved settings or rules file, by any route.
 
 After a grant, the same session or any session in scope does the step through its normal route. If the host still blocks it, stop and tell the owner in one line what the block is. Never retry another way, in another session, by script, UI or computer use.
 
