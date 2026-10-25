@@ -51,8 +51,7 @@
     {
       "term": "A#",
       "reason": "a test-row or design code",
-      "fix": "describe the rows or design in words and point to the file that lists them",
-      "letter_suffix": true
+      "fix": "describe the rows or design in words and point to the file that lists them"
     },
     {
       "term": "E#",
@@ -69,8 +68,7 @@
     {
       "term": "K#",
       "reason": "a lane or work-item code",
-      "fix": "say what the work is",
-      "letter_suffix": true
+      "fix": "say what the work is"
     },
     {
       "term": "M#",

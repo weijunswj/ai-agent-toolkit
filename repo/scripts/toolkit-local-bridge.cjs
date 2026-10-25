@@ -1314,10 +1314,19 @@ function governanceEnabledAt(targetRoot) {
   catch { return false; }
 }
 
+// A repository that switched the plain-text check off with a recorded reason is not reported.
+function plainTextSwitchedOff(targetRoot) {
+  let settings;
+  try { settings = readJsonIfExists(path.join(targetRoot, '.github', 'plain-text.json')); }
+  catch { return false; }
+  return Boolean(settings && typeof settings.off_reason === 'string' && settings.off_reason.trim());
+}
+
 function compareVendoredRepoChecks({ targetRoot, pluginRoot, governanceEnabled = governanceEnabledAt }) {
   const findings = [];
   if (!governanceEnabled(targetRoot)) return findings;
   for (const name of VENDORED_REPO_CHECKS) {
+    if (name === 'plain-text-check' && plainTextSwitchedOff(targetRoot)) continue;
     const rel = `.github/scripts/${name}.cjs`;
     let copy;
     let source;

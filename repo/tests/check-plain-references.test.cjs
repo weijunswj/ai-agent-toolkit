@@ -49,10 +49,18 @@ test('flags number references and pull request labels, not entities, anchors or 
     ['pr-number-label', 'PR 237'], ['pr-number-label', 'pull request 9'], ['pr-number-label', 'issue 4']]);
   assert.deepEqual(rules(`a&${HASH}64;b, page${HASH}1, ${HASH}${HASH}2 heading, colour "${HASH}334155", ${HASH}12abc, ${HASH}L10`), []);
   assert.deepEqual(rules('Two issues to fix, PR checks, version 3.9.1.'), []);
-  assert.deepEqual(rules(`See [setup](${HASH}1-install). Use colour ${HASH}000 or ${HASH}333 for the border.`), []);
-  assert.deepEqual(rules(`Issue ${HASH}333 broke the colour picker.`), [['number-reference', `${HASH}333`]]);
+  assert.deepEqual(rules(`See [setup](${HASH}1-install) and [the list](${HASH}12-steps).`), []);
+  for (const line of [`Background: the design came from ${HASH}461.`, `Fill in the form described in ${HASH}613.`,
+    `The CSS refactor landed in ${HASH}1234.`, `Fixed in ${HASH}12-15.`, `Use colour ${HASH}333 for the border.`]) {
+    assert.equal(rules(line).filter(([rule]) => rule === 'number-reference').length, 1, line);
+  }
+  assert.deepEqual(rules(`Use colour ${HASH}333 here <!-- plain-text: allow a colour value -->`), []);
   assert.deepEqual(rules(`Odd ${HASH}42 here <!-- plain-text: allow a score, not a reference -->`), []);
-  assert.deepEqual(rules(`Odd ${HASH}42 here <!-- plain-text: allow -->`), [['number-reference', `${HASH}42`]], 'the marker needs a reason');
+  for (const reason of ['', 'x', 'ok fine']) {
+    assert.deepEqual(rules(`Odd ${HASH}42 here <!-- plain-text: allow ${reason} -->`), [['number-reference', `${HASH}42`]], `reason "${reason}" is too thin`);
+  }
+  assert.deepEqual(rules(`Shipped in ${GITHUB}/pull/9 and ${HASH}461 <!-- plain-text: allow a score, not a reference -->`),
+    [['github-link', `${GITHUB}/pull/9`]], 'a link to one pull request is reported even on a marked line');
 });
 
 test('allows links to open a new issue and to issue or pull request lists', () => {

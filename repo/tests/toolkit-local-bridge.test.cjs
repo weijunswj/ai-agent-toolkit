@@ -2461,6 +2461,8 @@ test('SessionStart notice names a vendored Toolkit check that is older or missin
   assert.deepEqual(missing.findings.map((finding) => [finding.file, finding.detail]), [['.github/scripts/plain-text-check.cjs', 'missing']]);
   assert.match(formatAgentRulesPreflight(missing), /Toolkit checks \(\.github\/scripts\/plain-text-check\.cjs\) are missing or differ from the running Toolkit /);
   assert.equal(runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, { ...options, governanceEnabled: () => false }).status, 'ok', 'a missing copy is not noted outside an ENABLED repository');
+  writeFile(path.join(root, '.github', 'plain-text.json'), JSON.stringify({ off_reason: 'the owner switched it off for this repository' }));
+  assert.equal(runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, options).status, 'ok', 'a check switched off with a recorded reason is not noted as missing');
 });
 
 test('SessionStart notice says repository rules from a newer Toolkit are authoritative, once, without writing', () => {

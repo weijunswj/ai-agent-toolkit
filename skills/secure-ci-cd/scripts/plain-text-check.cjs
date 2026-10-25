@@ -15,7 +15,8 @@
 // A repository may switch the check off only with a recorded reason (`off_reason` in its settings).
 // Narrower exemptions are reviewed in the diff: `kept_terms` (a text kept in one file or folder, with
 // a reason) and a line marker `plain-text: allow <reason>` for one line that is not a reference
-// (in Markdown, inside an HTML comment: `<!-- plain-text: allow colour value -->`).
+// (in Markdown, inside an HTML comment: `<!-- plain-text: allow a colour value -->`). Links to one
+// issue or pull request are reported even on a marked line.
 //
 // Usage: node plain-text-check.cjs [--repo <dir>] [--config <file>] [--files <path>...]
 //          [--init-baseline] [--prune-baseline] [--explain]
@@ -62,7 +63,7 @@ const REFERENCE_RULES = Object.freeze([
   {
     id: 'number-reference',
     // Not a same-file link to a numbered heading such as (#1-install).
-    pattern: /(?<![\w&/#-])#\d{1,5}(?!\w|-\w)/g,
+    pattern: /(?<![\w&/#-])#\d{1,5}(?!\w|-[a-z])/g,
     fix: 'replace the #number with what it refers to, in plain English (if it is not a reference, mark the line `plain-text: allow <reason>`)'
   },
   {
@@ -83,12 +84,15 @@ class CheckError extends Error {
 
 const slash = (value) => value.split(path.sep).join('/');
 const normalise = (text) => text.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
-// One line opted out, with a reason: `plain-text: allow <reason>`.
-const ALLOW_MARKER = /plain-text:\s*allow\s+[A-Za-z]/;
-// A three- or four-digit `#000` on a line about colours is a colour value, not an issue number.
-const COLOUR_CONTEXT = /\b(?:colou?rs?|background|foreground|fill|stroke|border|hex|css)\b/i;
-const ISSUE_CONTEXT = /\b(?:issues?|PRs?|pull requests?|fix(?:es|ed)?|closes?|resolves?)\b/i;
-const isColour = (line, text) => (text.length === 4 || text.length === 5) && COLOUR_CONTEXT.test(line) && !ISSUE_CONTEXT.test(line);
+// One line opted out, with a real reason (three words or ten characters): `plain-text: allow <reason>`.
+// A link to one issue or pull request is always a reference, so it is reported even on a marked line.
+const ALLOW_MARKER = /plain-text:\s*allow\s+(.*?)\s*(?:-->|$)/;
+function allowedLine(line) {
+  const marker = ALLOW_MARKER.exec(line);
+  if (!marker) return false;
+  const reason = marker[1].trim();
+  return reason.length >= 10 || reason.split(/\s+/).filter(Boolean).length >= 3;
+}
 const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 // A banned term is literal text in which `#` stands for one or more digits ("N#" matches N5 and N12).
@@ -200,14 +204,16 @@ function findInText(text, file, config, scope = 'text') {
   const terms = config.banned_terms.map((entry) => ({ entry, pattern: termPattern(entry.term, entry.case_sensitive !== false, entry.letter_suffix === true) }));
   body.split('\n').forEach((line, index) => {
     if (scope === 'fields' && !FIELD_LINE.test(line)) return;
-    if (ALLOW_MARKER.test(line)) return;
+    const allowed = allowedLine(line);
     for (const rule of rules) {
+      if (allowed && rule.id !== 'github-link') continue;
       for (const match of line.matchAll(rule.pattern)) {
-        if (kept.has(match[0]) || (rule.id === 'number-reference' && isColour(line, match[0]))) continue;
+        if (kept.has(match[0])) continue;
         findings.push({ file, line: index + 1, rule: rule.id, text: match[0] });
       }
     }
     for (const { entry, pattern } of terms) {
+      if (allowed) continue;
       for (const match of line.matchAll(pattern)) {
         if (explained.has(match[0]) || kept.has(match[0])) continue;
         findings.push({ file, line: index + 1, rule: 'banned-term', text: match[0], term: entry.term });
@@ -326,7 +332,7 @@ function explain(config) {
   for (const entry of config.banned_terms) lines.push(`  ${entry.term}: ${entry.reason}. Instead: ${entry.fix}`);
   for (const entry of config.explained_terms) lines.push(`  allowed once explained in the same file: ${entry.term} (${entry.reason})`);
   for (const entry of config.kept_terms) lines.push(`  kept in ${entry.file}: ${entry.text} (${entry.reason})`);
-  lines.push('A single line is skipped when it carries `plain-text: allow <reason>`.');
+  lines.push('A single line is skipped, except for links to one issue or pull request, when it carries `plain-text: allow <reason>` (three words or ten characters).');
   lines.push(`Checked: ${config.text_extensions.join(', ') || 'no'} files in full${config.field_extensions.length ? `; names, titles and descriptions in ${config.field_extensions.join(', ')} files` : ''}.`);
   lines.push(`Not checked: ${config.exclude.join(', ') || 'nothing excluded'}.`);
   return lines.join('\n');
