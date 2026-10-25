@@ -1,5 +1,14 @@
 # Toolkit Changelog
 
+## 3.12.2
+
+### Source watch
+
+- **Notifier works under the no-force-push rule:** the notice branch only grows. A changed report becomes one new report-only commit on top of the branch, pushed without force, so the scheduled run no longer fails when the report changes. A branch in any other shape is refused and nothing is pushed, instead of being overwritten.
+- **Notice closes itself:** when nothing is left to review, the notifier closes the one notice pull request it opened, unmerged, with a short comment. It keeps the branch and never touches a pull request anyone else opened.
+- **Trackers shown as history:** reports call a cursor's tracker the tracker at last review, so a closed task is never shown as the current owner.
+- **Host drift review recorded:** the first Codex and Claude Code drift review is recorded, with findings routed to their owners and no Toolkit component changed. Its evidence links point at the current Codex and Claude Code docs.
+
 ## 3.12.0 (server operations)
 
 ### External operation preflight
