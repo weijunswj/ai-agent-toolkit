@@ -264,12 +264,16 @@ test('a priority tie is named only among queued rows of one group', () => {
     { issue: 5, class: 'OPTIONAL', parent: 7, order: 1 },
     { issue: 6, class: 'COMPLETED', parent: 7, order: 1 },
     { issue: 8, class: 'COMMITTED', parent: 7, order: 2 },
+    { issue: 10, class: 'COMMITTED', parent: 7, order: 1 },
   ];
   const parent = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes });
   const pr = { number: 9, state: 'OPEN', head: null, checks: { state: 'UNKNOWN', required_total: 0, required_passed: 0, at_head: null } };
-  const children = new Map([[4, { ...state.newChild({ repository: 'acme/app', outcome: outcomes[2] }), pr }]]);
-  assert.deepEqual(state.orderTies(parent, children).map(tie => tie.map(outcome => outcome.issue)), [[2, 3]], 'NOW, optional and finished rows do not tie with Later');
-  assert.deepEqual(state.orderTies(parent, new Map()).map(tie => tie.map(outcome => outcome.issue)), [[2, 3, 4]]);
+  const children = new Map([
+    [4, { ...state.newChild({ repository: 'acme/app', outcome: outcomes[2] }), pr }],
+    [10, { ...state.newChild({ repository: 'acme/app', outcome: outcomes[6] }), lifecycle: 'ACTIVE' }],
+  ]);
+  assert.deepEqual(state.orderTies(parent, children).map(tie => tie.map(outcome => outcome.issue)), [[2, 3]], 'two NOW rows sharing an order, optional and finished rows do not tie');
+  assert.deepEqual(state.orderTies(parent, new Map()).map(tie => tie.map(outcome => outcome.issue)), [[2, 3, 4, 10]]);
 });
 
 test('older class names are read as COMMITTED and anything else is refused', () => {
@@ -319,6 +323,10 @@ test('the generated CURRENT summary lists work in progress, saying what waits on
     { issue: 4, class: 'COMMITTED', parent: 7, order: 1, name: 'Top' },
   ] });
   assert.match(state.renderCurrentBlockBody(later, new Map(), new Map()), /\*\*Start next:\*\* Top \(#4\)$/);
+  const merged = { number: 5, state: 'MERGED', head: null, checks: { state: 'UNKNOWN', required_total: 0, required_passed: 0, at_head: null } };
+  const top = { ...state.newChild({ repository: 'acme/app', outcome: later.outcomes[2] }), pr: merged };
+  assert.match(state.renderCurrentBlockBody(later, new Map([[4, top]]), new Map()), /\*\*Start next:\*\* Low \(#3\)$/, 'a merged PR is not picked before its state catches up');
+  assert.match(state.renderCurrentBlockBody(later, new Map(), new Map([[4, { closed_at: '2026-10-25T00:00:00Z' }]])), /\*\*Start next:\*\* Low \(#3\)$/, 'a closed issue is not picked');
   const onlyOptional = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes: [{ issue: 2, class: 'OPTIONAL', parent: 7, order: 0 }] });
   assert.match(state.renderCurrentBlockBody(onlyOptional, new Map(), new Map()), /\*\*Start next:\*\* None\.$/);
 });

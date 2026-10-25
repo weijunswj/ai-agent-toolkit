@@ -123,7 +123,7 @@ test('parent and child blocks are rendered from the same state revision', () => 
   assert.match(childBlock.body, new RegExp(`child=423@${doc.revision} -->`));
   assert.ok(github.issues.get(421).body.includes('## CURRENT\nHand-written controller prose.\n'), 'hand-written text outside the blocks is kept');
   const rows = parentBlock.body.split('\n').filter(line => /^\| [^|]+ \| [^|]+ \| #\d+ \|/.test(line)).map(line => line.split(' | ')[2]);
-  assert.deepEqual(rows, ['#423', '#467', '#469', '#470', '#499', '#425', '#459', '#422'], 'active rows by class, status and child number, then finished work by close time');
+  assert.deepEqual(rows, ['#423', '#467', '#469', '#470', '#499', '#425', '#459', '#422'], 'active rows by class, priority order and child number, then finished work by close time');
 });
 
 test('the graph replaces the hand-kept index once, sits right under the CURRENT summary ahead of hand-written notes, and then settles', () => {
@@ -503,7 +503,10 @@ test('a second repository orders native sub-issues like the Programme Graph, inc
   assert.deepEqual(report.holds, []);
   assert.deepEqual(github.issues.get(7).subs, [13, 9, 14, 15, 8, 12, 11, 10], 'LATER by priority order and then child number, OPTIONAL, COMPLETED, then RETIRED');
   assert.deepEqual(github.issues.get(8).subs, [17, 16]);
-  assert.equal(reconciler().run().summary, 'No changes');
+  const settled = reconciler().run();
+  assert.equal(settled.summary, 'No changes');
+  assert.match(settled.next_action, /^Controller: decide on 3 finding\(s\) the reconciler does not change/, 'both priority ties wait on the controller');
+  assert.deepEqual(settled.findings.filter(finding => finding.code === 'ORDER_TIE').map(finding => finding.detail.split(' share')[0]), ['#12, #16', '#9, #14, #15']);
 });
 
 test('merged PRs with green checks list open issues for the controller without closing them', () => {
