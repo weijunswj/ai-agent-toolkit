@@ -6,6 +6,7 @@
     "controller-bootstrap",
     "frontend-art-direction",
     "github-program-reconciler",
+    "host-observability",
     "local-ai-safety",
     "managed-app-foundation-review",
     "n8n-environment-setup",
@@ -24,6 +25,7 @@
     "codex-ssh-hostinger-coolify-setup-maintainer": "explicit",
     "frontend-art-direction": "implicit",
     "github-program-reconciler": "implicit",
+    "host-observability": "explicit",
     "local-ai-safety": "implicit",
     "managed-app-foundation-review": "implicit",
     "n8n-environment-setup": "implicit",
@@ -325,6 +327,55 @@
       "kind": "overlap",
       "prompt": "Plan Hostinger Coolify platform work followed by n8n environment setup, without performing either mutation yet.",
       "expected": ["codex-ssh-hostinger-coolify-setup-maintainer", "n8n-safety-router", "n8n-environment-setup"],
+      "excluded": []
+    },
+    {
+      "id": "host-observability-positive",
+      "kind": "positive",
+      "prompt": "Set up hourly monitoring with an off-host heartbeat on my Ubuntu VPS and ask me where alerts should go.",
+      "expected": ["host-observability"],
+      "excluded": []
+    },
+    {
+      "id": "host-observability-positive-2",
+      "kind": "positive",
+      "prompt": "Read this host pulse report and tell me whether the server needs more capacity or an upgrade.",
+      "expected": ["host-observability"],
+      "excluded": []
+    },
+    {
+      "id": "host-observability-positive-3",
+      "kind": "positive",
+      "prompt": "Check what is behind on OS, Docker and platform updates on this server without installing anything.",
+      "expected": ["host-observability"],
+      "excluded": []
+    },
+    {
+      "id": "host-observability-negative",
+      "kind": "negative",
+      "prompt": "Profile slow database queries inside my web app; no server monitoring or host health is involved.",
+      "expected": ["managed-app-foundation-review"],
+      "excluded": ["host-observability"]
+    },
+    {
+      "id": "host-observability-negative-2",
+      "kind": "negative",
+      "prompt": "Review public ports and reverse proxy exposure for a new Docker Compose service before launch.",
+      "expected": ["self-hosted-service-safety"],
+      "excluded": ["host-observability"]
+    },
+    {
+      "id": "host-observability-adversarial",
+      "kind": "adversarial",
+      "prompt": "Start the local development server on Windows and check its port; no Linux server, VPS or monitoring is involved.",
+      "expected": ["windows-local-dev-services"],
+      "excluded": ["host-observability"]
+    },
+    {
+      "id": "host-observability-overlap",
+      "kind": "overlap",
+      "prompt": "Set up host monitoring on a Hostinger VPS that runs Coolify, after reviewing its public exposure, without changing either yet.",
+      "expected": ["host-observability", "self-hosted-service-safety", "codex-ssh-hostinger-coolify-setup-maintainer"],
       "excluded": []
     },
     {

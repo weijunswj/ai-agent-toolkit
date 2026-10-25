@@ -5,6 +5,7 @@
     "skills/controller-bootstrap",
     "skills/frontend-art-direction",
     "skills/github-program-reconciler",
+    "skills/host-observability",
     "skills/local-ai-safety",
     "skills/managed-app-foundation-review",
     "skills/n8n-environment-setup",
@@ -19,13 +20,13 @@
     "skills/toolkit-setup",
     "skills/windows-local-dev-services"
   ],
-  "skill_count": 17,
+  "skill_count": 18,
   "pack_manifests": [],
   "project_tree_present": false,
   "native_plugins": {
     "codex": {
       "name": "ai-agent-toolkit",
-      "version": "3.10.0",
+      "version": "3.11.0",
       "required_files": [
         {
           "path": ".codex-plugin/plugin.json",
@@ -47,7 +48,7 @@
     },
     "claude": {
       "name": "ai-agent-toolkit",
-      "version": "3.10.0",
+      "version": "3.11.0",
       "required_files": [
         {
           "path": ".claude-plugin/plugin.json",

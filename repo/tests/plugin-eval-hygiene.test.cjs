@@ -70,6 +70,7 @@ test('OpenAI invocation policy matches the behaviourally admitted 14-product imp
   assert.deepEqual(actualImplicit, intendedImplicitSkills);
   for (const skillName of [
     'codex-ssh-hostinger-coolify-setup-maintainer',
+    'host-observability',
     'release-readiness-audit'
   ]) {
     assert.equal(allowImplicit(skillName), false, `${skillName} must remain explicit-only`);

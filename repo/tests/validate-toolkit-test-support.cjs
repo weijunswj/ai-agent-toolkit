@@ -20,6 +20,7 @@ const currentSkillIds = [
   'controller-bootstrap',
   'frontend-art-direction',
   'github-program-reconciler',
+  'host-observability',
   'local-ai-safety',
   'managed-app-foundation-review',
   'n8n-environment-setup',

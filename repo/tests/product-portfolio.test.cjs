@@ -10,6 +10,7 @@ const expectedProducts = [
   'codex-ssh-hostinger-coolify-setup-maintainer',
   'frontend-art-direction',
   'github-program-reconciler',
+  'host-observability',
   'local-ai-safety',
   'managed-app-foundation-review',
   'n8n-environment-setup',

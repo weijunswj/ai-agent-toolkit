@@ -16,6 +16,7 @@ Keep this skill lightweight. Do not use it as general advice when the task has n
 - A user asks to review a Docker Compose, VPS, reverse proxy, tunnel, DNS/TLS, or public-port setup for a self-hosted service.
 - A setup guide includes admin panels, default credentials, webhooks, persistent volumes, backups, or production-like data.
 - The user wants a safer first-run plan before exposing a service beyond localhost.
+- For ongoing monitoring of the host itself (hourly pulse, off-host heartbeat, alerts, update watch), use `host-observability`; this skill stays the exposure and hardening review.
 
 ## Do Not Use When
 
