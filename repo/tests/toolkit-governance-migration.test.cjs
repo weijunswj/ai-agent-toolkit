@@ -279,43 +279,44 @@ test('NF-06: the ruleset Toolkit adds is the one the check accepts', () => {
   assert.deepEqual(ruleset.ghRulesetCreator('a/b', { spawn: plan }), { ok: false, reason: 'plan-has-no-rulesets' });
 });
 
-test('SEC-01: missing dependency and security settings are offered per repository, written after its own yes, and read back', async (t) => {
+test('SEC-01: free dependency and security settings are turned on by default, without a question, and read back', async (t) => {
   const ctx = scratch(t);
   const { governed } = fixture(ctx);
   fs.writeFileSync(path.join(governed, 'package.json'), '{}');
-  await migrate(ctx, { answers: ['yes', 'no', 'no'] });
+  // The decision run already writes the missing Dependabot file, asking nothing more about it.
+  const first = await migrate(ctx, { answers: ['yes', 'no', 'no'] });
+  assert.match(first.stdout, /\.github\/dependabot\.yml written; commit it through a pull request/);
   const rulesets = { 'example-owner/governed': true, 'example-owner/block-only': true };
   const protections = { 'example-owner/governed': { checks: ['validate'], methods: ['merge'], own: null } };
   const settings = { 'example-owner/governed': { alerts: 'disabled', code_scanning: 'disabled' } };
   const calls = [];
   const securityWriter = (slug, plan) => {
-    calls.push({ slug, plan: Object.keys(plan).filter(key => plan[key]) });
+    const keys = Object.keys(plan).filter(key => key !== 'paid' && plan[key]);
+    calls.push({ slug, plan: keys });
     settings[slug] = {};
-    return Object.keys(plan).filter(key => plan[key]).map(setting => ({ setting, ok: true, reason: null }));
+    return keys.map(setting => ({ setting, ok: true, reason: null }));
   };
-  // No yes: nothing written, nothing called.
-  const declined = await migrate(ctx, { answers: ['no'], rulesets, protections, security: settings, securityWriter });
-  assert.deepEqual(calls, []);
-  assert.equal(fs.existsSync(path.join(governed, '.github', 'dependabot.yml')), false);
-  assert.match(declined.stdout, /example-owner\/governed \(.*\) would change:\n  - turn on Dependabot alerts\n  - set up CodeQL code scanning/);
-  assert.match(declined.stdout, /example-owner\/governed: nothing changed/);
-  // Yes for that repository: the settings it lists and the missing file, then read back.
-  const accepted = await migrate(ctx, { answers: ['yes'], rulesets, protections, security: settings, securityWriter });
-  assert.equal(accepted.code, 0, accepted.stdout);
-  assert.equal(accepted.asked.length, 1);
-  assert.match(accepted.asked[0], /Make these changes to example-owner\/governed\?/);
+  const applied = await migrate(ctx, { answers: [], rulesets, protections, security: settings, securityWriter });
+  assert.equal(applied.code, 0, applied.stdout);
+  assert.equal(applied.asked.length, 0, 'on by default: no question');
   assert.deepEqual(calls, [{ slug: 'example-owner/governed', plan: ['alerts', 'code_scanning'] }]);
   assert.match(fs.readFileSync(path.join(governed, '.github', 'dependabot.yml'), 'utf8'), /package-ecosystem: "npm"/);
-  assert.match(accepted.stdout, /\.github\/dependabot\.yml written; commit it through a pull request/);
-  assert.match(accepted.stdout, /example-owner\/governed: read back/);
-  // Nothing left: no question. A refused write is reported once and fails the run.
-  assert.equal((await migrate(ctx, { answers: [], rulesets, protections, security: settings, securityWriter })).asked.length, 0);
+  assert.match(applied.stdout, /example-owner\/governed: Dependabot alerts turned on\.\n- example-owner\/governed: CodeQL code scanning turned on/);
+  assert.match(applied.stdout, /example-owner\/governed: read back/);
+  // Nothing left: nothing called. A refused write is reported once and fails the run.
+  await migrate(ctx, { answers: [], rulesets, protections, security: settings, securityWriter });
+  assert.equal(calls.length, 1);
   settings['example-owner/governed'] = { private_reporting: 'disabled' };
   let refusedCalls = 0;
-  const refused = await migrate(ctx, { answers: ['yes'], rulesets, protections, security: settings, securityWriter: () => { refusedCalls += 1; return [{ setting: 'private_reporting', ok: false, reason: 'forbidden' }]; } });
+  const refused = await migrate(ctx, { answers: [], rulesets, protections, security: settings, securityWriter: () => { refusedCalls += 1; return [{ setting: 'private_reporting', ok: false, reason: 'forbidden' }]; } });
   assert.equal(refusedCalls, 1);
   assert.equal(refused.code, 2);
-  assert.match(refused.stdout, /private_reporting not turned on \(forbidden\)/);
+  assert.match(refused.stdout, /private vulnerability reporting not turned on \(forbidden\)/);
+  // A private repository: paid features are never turned on without the binding's answer.
+  settings['example-owner/governed'] = { visibility: 'private', secret_scanning: 'disabled', push_protection: 'disabled', code_scanning: 'disabled', private_reporting: 'not-on-plan' };
+  const privateRun = await migrate(ctx, { answers: [], rulesets, protections, security: settings, securityWriter });
+  assert.equal(calls.length, 1, 'nothing paid was written');
+  assert.match(privateRun.stdout, /no paid_security answer/);
 });
 
 test('T-01: the binding template is not a valid binding until it is filled in', () => {

@@ -68,7 +68,7 @@ const WORKFLOW = [
   '    runs-on: ubuntu-latest', '    steps:', '      - env:', '          LEGS: ${{ toJSON(needs) }}', '        run: node verify.cjs', '',
 ].join('\n');
 
-async function run(ctx, cwd, argv, { answer = 'yes', interactive = true, rulesetReader = PROTECTED, protectionReader = BRANCH_PROTECTED, securityReader = SECURE } = {}) {
+async function run(ctx, cwd, argv, { answer = 'yes', interactive = true, rulesetReader = PROTECTED, protectionReader = BRANCH_PROTECTED, securityReader = SECURE, securityWriter = null } = {}) {
   const stdout = sink();
   const stderr = sink();
   const asked = [];
@@ -79,6 +79,7 @@ async function run(ctx, cwd, argv, { answer = 'yes', interactive = true, ruleset
     rulesetReader,
     protectionReader,
     securityReader,
+    ...(securityWriter ? { securityWriter } : {}),
   });
   const code = await cli.main(argv);
   return { code, stdout: stdout.text(), stderr: stderr.text(), asked };
@@ -294,6 +295,31 @@ test('K-01: check exit codes and read-only behaviour', async (t) => {
   const ignored = await run(ctx, stale, ['check', '--json']);
   assert.equal(ignored.code, 0);
   assert.deepEqual(JSON.parse(ignored.stdout).findings.map(entry => entry.id), ['GOVERNED_BLOCK_IGNORED']);
+});
+
+test('SC-01: security turns on the free settings of a governed repository without a question, and only there', async (t) => {
+  const ctx = scratch(t);
+  const governed = gitRepo(ctx, 'governed');
+  writeGoverned(governed);
+  const undecided = gitRepo(ctx, 'undecided', 'https://github.com/example-owner/undecided.git');
+  writeGoverned(undecided, { repository: 'example-owner/undecided' });
+  enable(ctx, governed);
+  let on = false;
+  const writes = [];
+  const securityReader = () => ({ ...SECURE(), alerts: on ? 'enabled' : 'disabled' });
+  const securityWriter = (slug, plan) => { writes.push(slug); on = true; return plan.alerts ? [{ setting: 'alerts', ok: true, reason: null }] : []; };
+  const refused = await run(ctx, undecided, ['security'], { securityReader, securityWriter });
+  assert.equal(refused.code, 1);
+  assert.match(refused.stdout, /only in a governed repository/);
+  assert.deepEqual(writes, []);
+  const applied = await run(ctx, governed, ['security'], { securityReader, securityWriter, interactive: false });
+  assert.equal(applied.code, 0, applied.stdout);
+  assert.equal(applied.asked.length, 0);
+  assert.deepEqual(writes, ['example-owner/example-repo']);
+  assert.match(applied.stdout, /Dependabot alerts turned on\.\n- example-owner\/example-repo: read back\./);
+  const again = await run(ctx, governed, ['security'], { securityReader, securityWriter });
+  assert.match(again.stdout, /already on/);
+  assert.equal(writes.length, 1);
 });
 
 test('I-12: enforcement is reported as shipped, never as active, and Codex names its trust step', () => {

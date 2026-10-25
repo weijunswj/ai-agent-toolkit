@@ -28,6 +28,10 @@
       "description": "Check names that count as required at the PR head, in addition to the checks GitHub marks required. With none of either, checks are never GREEN.",
       "items": { "type": "string", "minLength": 1 }
     },
+    "paid_security": {
+      "enum": ["off", "on"],
+      "description": "The owner's answer, for a private repository, on GitHub's paid Secret Protection and Code Security (billed per active committer; need GitHub Team or Enterprise Cloud). off keeps them off; on lets Toolkit turn them on. The governance check reports a private repository without an answer. Public repositories get these features free and on by default."
+    },
     "dependency_updates": {
       "type": "object",
       "additionalProperties": false,

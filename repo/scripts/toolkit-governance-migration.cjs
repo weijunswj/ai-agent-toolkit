@@ -19,10 +19,11 @@
 // created or updated only after a third typed yes. Toolkit never edits a ruleset or branch
 // protection it did not create: what its own ruleset cannot fix (an extra or unpinned check in
 // someone else's rule, a workflow that can mask its check) is reported to change by hand, and a
-// refused write is reported once, never retried. Last, each ENABLED GitHub repository missing
-// dependency or security settings (toolkit-governance-security.cjs) is shown with what would change,
-// and that one repository's settings are turned on and its missing files written only after a typed
-// yes for that repository. Files land in the working tree for a normal pull request. Nothing is pushed to any
+// refused write is reported once, never retried. Last, each ENABLED GitHub repository gets its free
+// dependency and security settings turned on and its missing Dependabot files written
+// (toolkit-governance-security.cjs) without another question, because they are on by default under
+// governance; paid ones only where the binding records the owner's "on". Files land in the working
+// tree for a normal pull request. Nothing is pushed to any
 // repository and no pull request is opened: missing bindings and legacy markers are reported
 // with what to do.
 
@@ -161,7 +162,7 @@ class GovernanceMigration {
     this.#reportMaterials(after);
     const rulesets = await this.#offerRulesets(after);
     const protections = await this.#offerProtection(after);
-    const securities = await this.#offerSecurity(after);
+    const securities = await this.#applySecurity(after);
     if (written.length || rulesets.length || protections.length || securities.length) this.#writeRecord(written, rulesets, protections, securities);
     const failed = written.some(entry => entry.result !== 'written') || [...rulesets, ...protections, ...securities].some(entry => entry.result === 'failed');
     return failed ? 2 : 0;
@@ -321,56 +322,19 @@ class GovernanceMigration {
     });
   }
 
-  static #securityChanges(result) {
-    const labels = {
-      alerts: 'turn on Dependabot alerts',
-      security_updates: 'turn on Dependabot security updates',
-      secret_scanning: 'turn on secret scanning and push protection',
-      code_scanning: 'set up CodeQL code scanning (default setup)',
-      private_reporting: 'turn on private vulnerability reporting',
-      allow_auto_merge: 'allow auto-merge in the repository settings',
-    };
-    const changes = Object.entries(result.fixes || {}).filter(([, on]) => on).map(([key]) => labels[key]);
-    if (result.files && result.files.dependabot) changes.push(`write ${security.DEPENDABOT_REL} (weekly version updates for every ecosystem found, with a cooldown)`);
-    if (result.files && result.files.workflow) changes.push(`write ${security.WORKFLOW_REL} (auto-merge for Dependabot patch and minor updates, as the binding allows)`);
-    return changes;
-  }
-
-  #securityByHand(row, result) {
-    const notes = [];
-    if (result.checks.S3 && result.checks.S3.status === 'drift' && !(result.files && result.files.dependabot)) notes.push(...result.checks.S3.details);
-    if (result.checks.S7 && result.checks.S7.status === 'drift') notes.push(...result.checks.S7.details.filter(detail => !detail.includes(security.WORKFLOW_REL) || result.workflow === 'foreign'));
-    if (notes.length) this.#say([`${row.slug}: change by hand (Toolkit never edits a file it did not write):`, ...notes.map(note => `  - ${note}`)]);
-  }
-
-  async #offerSecurity(rows) {
+  // The free dependency and security settings are on by default for every governed repository, so
+  // they are turned on without another question (the owner's yes to governance covers them); paid
+  // ones only where the binding records the owner's "on". Nothing here asks.
+  async #applySecurity(rows) {
     const results = [];
     for (const row of rows.filter(entry => entry.state.state === 'ENABLED' && entry.slug && entry.state.materials && entry.state.materials.binding)) {
       const result = this.#securityFor(row);
       if (result.status === 'not-applicable') continue;
-      const unread = Object.values(result.checks).find(check => check.status === 'unverified');
-      if (unread) this.#say(`${row.root}: some dependency and security settings could not be read on GitHub (${unread.details.join('; ')}).`);
-      const changes = GovernanceMigration.#securityChanges(result);
-      this.#securityByHand(row, result);
-      if (changes.length === 0) continue;
-      this.#say([`${row.slug} (${row.root}) would change:`, ...changes.map(change => `  - ${change}`)]);
-      const answer = String(await this.#ask(`Make these changes to ${row.slug}? Type yes to confirm: `) || '').trim().toLowerCase();
-      if (answer !== 'yes') {
-        this.#say(`- ${row.slug}: nothing changed.`);
-        continue;
-      }
-      let settings = [];
-      try { settings = this.#securityWriter(row.slug, result.fixes || {}); } catch { settings = [{ setting: 'all', ok: false, reason: 'writer-failed' }]; }
-      let files = [];
-      try { files = this.#securityFileWriter(row.root, result.files || {}); } catch { files = [{ file: 'all', result: 'failed (writer-failed)' }]; }
-      const after = this.#securityFor(row);
-      const stillOff = Object.entries(after.fixes || {}).filter(([key, on]) => on && result.fixes && result.fixes[key]).map(([key]) => key);
-      const failed = settings.some(entry => !entry.ok) || files.some(entry => entry.result !== 'written') || stillOff.length > 0;
-      for (const entry of settings) this.#say(`- ${row.slug}: ${entry.setting} ${entry.ok ? 'turned on' : `not turned on (${entry.reason})`}.`);
-      for (const entry of files) this.#say(`- ${row.root}: ${entry.file} ${entry.result}${entry.result === 'written' ? '; commit it through a pull request' : ''}.`);
-      if (stillOff.length) this.#say(`- ${row.slug}: reading back still shows off: ${stillOff.join(', ')}.`);
-      else if (!failed) this.#say(`- ${row.slug}: read back.`);
-      results.push({ repository_id: row.state.repository_id, settings, files, result: failed ? 'failed' : 'applied' });
+      const outcome = security.applySecurity(row.root, result, {
+        writer: this.#securityWriter, fileWriter: this.#securityFileWriter, reread: () => this.#securityFor(row),
+      });
+      for (const line of security.describeOutcome(row.slug, row.root, result, outcome)) this.#say(line);
+      if (outcome.result !== 'nothing') results.push({ repository_id: row.state.repository_id, settings: outcome.settings, files: outcome.files, result: outcome.result });
     }
     return results;
   }

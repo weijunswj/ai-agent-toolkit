@@ -29,13 +29,14 @@ function repo(t, files = {}, remote = 'https://github.com/example-owner/example-
   return root;
 }
 
-function binding(policy) {
+function binding(policy, paid = null) {
   return JSON.stringify({
     schema: 'toolkit.programme-binding.v1', repository: 'example-owner/example-repo', parent_issue: 1,
     record_prefix: 'INT-EX-', writer_prefix: 'INT-EX-',
     store: { kind: 'github', repository: 'example-owner/example-store', branch: 'main', path: 'state/' },
     required_checks: ['validate'],
     ...(policy ? { dependency_updates: policy } : {}),
+    ...(paid ? { paid_security: paid } : {}),
   });
 }
 
@@ -82,20 +83,32 @@ test('SE-03: every setting on is conformant; settings that are off drift and bec
   assert.equal(security.dependencySecurity(root, { reader: reader(), protectionResult: CONFORMANT }).status, 'conformant');
   const off = security.dependencySecurity(root, { reader: reader({ alerts: 'disabled', push_protection: 'disabled', code_scanning: 'disabled', private_reporting: 'disabled', allow_auto_merge: false }) });
   assert.equal(off.status, 'drift');
-  assert.deepEqual(Object.fromEntries(Object.entries(off.checks).map(([id, check]) => [id, check.status])), { S1: 'drift', S2: 'ok', S3: 'ok', S4: 'drift', S5: 'drift', S6: 'drift', S7: 'ok' });
+  assert.deepEqual(Object.fromEntries(Object.entries(off.checks).map(([id, check]) => [id, check.status])), { S1: 'drift', S2: 'ok', S3: 'ok', S4: 'drift', S5: 'drift', S6: 'drift', S7: 'ok', S8: 'not-applicable' });
   assert.deepEqual(off.checks.S4.details, ['Push protection is off']);
-  assert.deepEqual(off.fixes, { alerts: true, security_updates: false, secret_scanning: true, code_scanning: true, private_reporting: true, allow_auto_merge: false });
+  assert.deepEqual(off.fixes, { alerts: true, security_updates: false, secret_scanning: true, code_scanning: true, private_reporting: true, allow_auto_merge: false, paid: false });
   assert.deepEqual(off.files, { dependabot: false, workflow: false });
 });
 
-test('SE-04: on a private repository the paid features are not on this plan, never drift', (t) => {
-  const root = repo(t, { '.github/toolkit-programme.json': binding() });
-  const result = security.dependencySecurity(root, { reader: reader({ visibility: 'private', secret_scanning: 'not-on-plan', push_protection: 'not-on-plan', code_scanning: 'not-on-plan', private_reporting: 'not-on-plan' }) });
-  assert.equal(result.status, 'conformant');
-  assert.equal(result.checks.S4.status, 'not-on-plan');
-  assert.equal(result.checks.S5.status, 'not-on-plan');
-  assert.equal(result.checks.S6.status, 'not-applicable');
-  assert.deepEqual(Object.values(result.fixes).filter(Boolean), []);
+test('SE-04: on a private repository the paid features need the owner\'s recorded answer, and stay off unless it is on', (t) => {
+  const privateRead = { visibility: 'private', secret_scanning: 'not-on-plan', push_protection: 'not-on-plan', code_scanning: 'not-on-plan', private_reporting: 'not-on-plan' };
+  // No answer yet: the paid question is drift (it is never skipped), the paid features are not.
+  const unanswered = security.dependencySecurity(repo(t, { '.github/toolkit-programme.json': binding() }), { reader: reader(privateRead) });
+  assert.equal(unanswered.status, 'drift');
+  assert.match(unanswered.checks.S8.details[0], /paid Secret Protection and Code Security[^]*billed per active committer; default off/);
+  assert.deepEqual([unanswered.checks.S4.status, unanswered.checks.S5.status, unanswered.checks.S6.status], ['not-applicable', 'not-applicable', 'not-applicable']);
+  // Off: conformant, and nothing paid is ever turned on, even where the plan offers it.
+  const offRoot = repo(t, { '.github/toolkit-programme.json': binding(null, 'off') });
+  const declined = security.dependencySecurity(offRoot, { reader: reader({ ...privateRead, secret_scanning: 'disabled', push_protection: 'disabled', code_scanning: 'disabled' }) });
+  assert.equal(declined.status, 'conformant');
+  assert.deepEqual([declined.fixes.secret_scanning, declined.fixes.code_scanning, declined.fixes.private_reporting], [false, false, false]);
+  // On: required, and turned on as paid; on a plan without them it is drift, with what to do.
+  const onRoot = repo(t, { '.github/toolkit-programme.json': binding(null, 'on') });
+  const chosen = security.dependencySecurity(onRoot, { reader: reader({ ...privateRead, secret_scanning: 'disabled', push_protection: 'disabled', code_scanning: 'disabled' }) });
+  assert.equal(chosen.checks.S4.status, 'drift');
+  assert.deepEqual([chosen.fixes.secret_scanning, chosen.fixes.code_scanning, chosen.fixes.paid], [true, true, true]);
+  const noPlan = security.dependencySecurity(onRoot, { reader: reader(privateRead) });
+  assert.match(noPlan.checks.S4.details[0], /needs GitHub Team or Enterprise Cloud\); buy it or set paid_security to off/);
+  assert.equal(noPlan.fixes.secret_scanning, false);
 });
 
 test('SE-05: auto-merge needs the binding, the workflow, the repository setting and a protected branch', (t) => {
@@ -118,7 +131,7 @@ test('SE-05: auto-merge needs the binding, the workflow, the repository setting 
   const offRoot = repo(t, { '.github/toolkit-programme.json': binding() });
   const off = security.dependencySecurity(offRoot, { reader: reader({ allow_auto_merge: false }) });
   assert.equal(off.checks.S7.status, 'ok');
-  assert.deepEqual(off.policy, { auto_merge: 'off', github_actions: 'auto-merge' });
+  assert.deepEqual(off.policy, { auto_merge: 'off', github_actions: 'auto-merge', paid_security: null });
 });
 
 test('SE-06: offline checks the files only; unreadable GitHub is unverified; another host is not-applicable', (t) => {
@@ -168,6 +181,13 @@ test('SE-08: the reader only reads; the writer calls only the endpoints for the 
   assert.deepEqual(results.map(entry => [entry.setting, entry.ok]), [['alerts', true], ['secret_scanning', true], ['private_reporting', true]]);
   assert.deepEqual(writes.map(entry => entry.args.slice(0, 2)), [['-X', 'PUT'], ['-X', 'PATCH'], ['-X', 'PUT']]);
   assert.deepEqual(JSON.parse(writes[1].input), { security_and_analysis: { secret_scanning: { status: 'enabled' }, secret_scanning_push_protection: { status: 'enabled' } } });
+  writes.length = 0;
+  security.ghSecurityWriter('o/p', { secret_scanning: true, code_scanning: true, paid: true }, { spawn: writer });
+  assert.deepEqual(writes.map(entry => JSON.parse(entry.input)), [
+    { security_and_analysis: { secret_protection: { status: 'enabled' }, secret_scanning: { status: 'enabled' }, secret_scanning_push_protection: { status: 'enabled' } } },
+    { security_and_analysis: { code_security: { status: 'enabled' } } },
+    { state: 'configured' },
+  ], 'on a private repository the paid product goes on first');
   const privateRead = security.ghSecurityReader('o/p', { spawn: (command, args) => (args[1] === 'repos/o/p'
     ? { status: 0, stdout: JSON.stringify({ private: true, security_and_analysis: null }), stderr: '' }
     : args[1] === 'repos/o/p/vulnerability-alerts' ? { status: 0, stdout: '', stderr: '' }
@@ -196,6 +216,8 @@ test('SE-10: the binding accepts only the known dependency update values', () =>
   const base = JSON.parse(binding());
   programmeState.validateBinding({ ...base, dependency_updates: { auto_merge: 'patch-minor', github_actions: 'owner' } });
   programmeState.validateBinding({ ...base, dependency_updates: {} });
+  programmeState.validateBinding({ ...base, paid_security: 'off' });
+  assert.throws(() => programmeState.validateBinding({ ...base, paid_security: 'yes' }), /paid_security must be off or on/);
   for (const bad of [{ auto_merge: 'all' }, { github_actions: 'yes' }, { auto_merge: 'off', extra: true }, 'patch-minor']) {
     assert.throws(() => programmeState.validateBinding({ ...base, dependency_updates: bad }), /dependency_updates/);
   }
