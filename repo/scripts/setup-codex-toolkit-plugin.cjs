@@ -77,9 +77,7 @@ const CACHE_FINGERPRINT_PATHS = [
   'repo/scripts/toolkit-programme-checkpoint-hook.ps1',
 ];
 const CACHE_FINGERPRINT_DIRS = [
-  "repo/contracts/control-plane-kernel",
   "repo/contracts/repository-capability-registry",
-  "repo/scripts/toolkit-control-plane",
   "repo/contracts/controller-kernel",
   '.codex-plugin/assets',
   'skills'

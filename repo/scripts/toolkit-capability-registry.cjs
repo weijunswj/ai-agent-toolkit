@@ -6,10 +6,12 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const a1 = require('./toolkit-control-plane/control-plane-kernel.cjs');
 const { resolvePathExecutable } = require('./claude-process-launch.cjs');
 
 const REGISTRY_SCHEMA = 'toolkit.repository-capability-registry.v2';
+// Kept as written: repository identities already stored on this computer are digests over it.
+const REMOTE_IDENTITY_CONTRACT_VERSION = 'toolkit.control-plane.remote-identity.v1';
+const MAX_REMOTE_LENGTH = 4096;
 const IDENTITY_CONTRACT = 'toolkit.repository-identity.v1';
 const CAPABILITY_CONTRACT = 'toolkit.repository-capability.v2';
 const SCHEMA_VERSION = 2;
@@ -1054,7 +1056,7 @@ function resolveRepositoryIdentity(options = {}) {
   if (originOutput.length === 0 || originOutput.trim().length === 0) fail('ORIGIN_IDENTITY_MISSING');
   const origins = originOutput.trim().split(/\r?\n/);
   if (origins.length !== 1 || origins[0].length === 0) fail('ORIGIN_IDENTITY_AMBIGUOUS');
-  const remote = a1.validateRemoteIdentity(origins[0]);
+  const remote = validateRemoteIdentity(origins[0]);
   if (!remote.valid) fail('REMOTE_IDENTITY_INVALID');
   const repositoryId = repositoryIdForCanonicalRemote(remote.canonical);
   return {
@@ -1063,21 +1065,55 @@ function resolveRepositoryIdentity(options = {}) {
     legacy_repository_ids: legacyRepositoryIdsForCanonicalRemote(remote.canonical),
     canonical_remote: remote.canonical,
     identity_contract: IDENTITY_CONTRACT,
-    remote_contract: a1.REMOTE_IDENTITY_CONTRACT_VERSION,
+    remote_contract: REMOTE_IDENTITY_CONTRACT_VERSION,
     persisted_fields: ['repository_id'],
   };
+}
+
+// One git remote (git@host:path, https:// or ssh://) as { valid, canonical, host, path, ... }, or
+// { valid: false, reason_code }. Queries, fragments, passwords and https user names are refused.
+function validateRemoteIdentity(value) {
+  if (typeof value !== 'string' || value.length === 0 || value.length > MAX_REMOTE_LENGTH) return { valid: false, reason_code: 'REMOTE_IDENTITY_INVALID' };
+  if (value.startsWith('git@')) {
+    const separator = value.indexOf(':', 4);
+    const hostValue = separator > 4 ? value.slice(4, separator) : '';
+    const scpPath = separator > 4 ? value.slice(separator + 1) : '';
+    if (!scpPath || scpPath.startsWith('/') || scpPath.includes('?') || scpPath.includes('#') || !/^[A-Za-z0-9.-]+$/.test(hostValue) || !/^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$/.test(hostValue) || hostValue.includes('..')) return { valid: false, reason_code: 'REMOTE_IDENTITY_INVALID' };
+    const host = hostValue.toLowerCase();
+    const pathValue = `/${scpPath}`;
+    return { valid: true, contract_version: REMOTE_IDENTITY_CONTRACT_VERSION, kind: 'scp', scheme: 'scp', host, port: null, path: pathValue, user: 'git', canonical: `scp://git@${host}${pathValue}` };
+  }
+  if (!value.startsWith('https://') && !value.startsWith('ssh://')) return { valid: false, reason_code: 'REMOTE_IDENTITY_INVALID' };
+  let parsed;
+  try { parsed = new URL(value); } catch (_error) { return { valid: false, reason_code: 'REMOTE_IDENTITY_INVALID' }; }
+  if (!['https:', 'ssh:'].includes(parsed.protocol) || parsed.search || parsed.hash || parsed.password || !parsed.hostname || parsed.hostname.includes(':') || parsed.pathname === '/' || parsed.pathname.length < 2) return { valid: false, reason_code: 'REMOTE_IDENTITY_INVALID' };
+  const port = parsed.port ? Number(parsed.port) : null;
+  if (port !== null && (!Number.isInteger(port) || port < 1 || port > 65535)) return { valid: false, reason_code: 'REMOTE_IDENTITY_INVALID' };
+  const host = parsed.hostname.toLowerCase();
+  if (host.includes('..') || host.startsWith('.') || host.endsWith('.')) return { valid: false, reason_code: 'REMOTE_IDENTITY_INVALID' };
+  const scheme = parsed.protocol.slice(0, -1);
+  const user = parsed.username || null;
+  if (scheme === 'https' && user) return { valid: false, reason_code: 'REMOTE_IDENTITY_INVALID' };
+  let decodedUser = null;
+  try { decodedUser = user ? decodeURIComponent(user) : null; } catch (_error) { return { valid: false, reason_code: 'REMOTE_IDENTITY_INVALID' }; }
+  const userPart = decodedUser ? decodedUser + '@' : '';
+  const canonicalPort = port === null || (scheme === 'ssh' && port === 22) || (scheme === 'https' && port === 443) ? '' : ':' + port;
+  const canonical = scheme + '://' + userPart + host + canonicalPort + parsed.pathname;
+  const result = { valid: true, contract_version: REMOTE_IDENTITY_CONTRACT_VERSION, kind: 'url', scheme, host, port, path: parsed.pathname, canonical };
+  if (decodedUser) result.user = decodedUser;
+  return result;
 }
 
 // The validated remote for a canonical remote string, accepting the scp:// form that
 // validateRemoteIdentity itself produces for git@host:path remotes.
 function validatedCanonicalRemote(remoteValue) {
-  let remote = a1.validateRemoteIdentity(remoteValue);
+  let remote = validateRemoteIdentity(remoteValue);
   if (!remote.valid && typeof remoteValue === 'string' && remoteValue.startsWith('scp://git@')) {
     const separator = remoteValue.indexOf('/', 'scp://git@'.length);
     if (separator > 'scp://git@'.length) {
       const host = remoteValue.slice('scp://git@'.length, separator);
       const scpPath = remoteValue.slice(separator + 1);
-      remote = a1.validateRemoteIdentity('git@' + host + ':' + scpPath);
+      remote = validateRemoteIdentity('git@' + host + ':' + scpPath);
       if (remote.valid && remote.canonical !== remoteValue) remote = { valid: false };
     }
   }
@@ -1099,7 +1135,7 @@ function normalizedRemote(remote) {
 function digestForRemote(canonical) {
   return digestValue({
     identity_contract: IDENTITY_CONTRACT,
-    remote_contract: a1.REMOTE_IDENTITY_CONTRACT_VERSION,
+    remote_contract: REMOTE_IDENTITY_CONTRACT_VERSION,
     remote: canonical,
   });
 }
@@ -2017,7 +2053,8 @@ function reopenCapability(options = {}) {
 
 module.exports = {
   REGISTRY_SCHEMA,
-  REMOTE_IDENTITY_CONTRACT_VERSION: a1.REMOTE_IDENTITY_CONTRACT_VERSION,
+  REMOTE_IDENTITY_CONTRACT_VERSION,
+  validateRemoteIdentity,
   IDENTITY_CONTRACT,
   CAPABILITY_CONTRACT,
   SCHEMA_VERSION,
