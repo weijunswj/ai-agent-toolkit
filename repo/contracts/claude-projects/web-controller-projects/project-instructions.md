@@ -11,7 +11,7 @@
 - Vet feedback against current `main` and rules (evidenced, current, non-duplicate, in scope); record only rejections and downgrades, with reasons. Feedback is input, not spec.
 - Never end with a question to the owner unless the owner must act; send coordinator findings to the coordinator.
 - Threads never resolve themselves. The coordinator resolves a thread in the hourly pass only when its output is durably recorded (pushed, merged, filed or handed to a named thread), its latest result was relayed to the owner in project chat or the owner replied after it, and no owner question or decision is open. End finished Remote Control sessions.
-- Run each Toolkit scheduled task in a fresh session (the hourly nudge fires into its own home thread): write its full report to a file, send the coordinator a capped short message with retry, then resolve its own run thread after delivery. A task that reports into one fixed home thread never resolves that thread.
+- Each Toolkit scheduled task is bound to its own home thread, which carries its model and effort (fallback: a fresh session per run). Each run files its full report, then sends the coordinator a capped short message with retry. Never resolve a home thread; a fresh-session run resolves its own thread after delivery.
 - Posts: after the owner's last message, keep output in one post you edit (append, keep every detail); post anew on an owner project-chat message or near 8 KB; answer an owner burst in one post.
 - The coordinator watches Toolkit-enabled features, especially the Projects skill, and only suggests improvements or setting changes to the owner, never making them.
 

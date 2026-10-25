@@ -223,8 +223,10 @@ test('every Toolkit-made prompt carries the recurring-task requirements; fresh r
       assert.ok(text.includes(required), `${kind}: ${required}`);
     }
   }
-  assert.match(rendered('daily-check-in'), /Fresh session per run/);
-  assert.match(rendered('daily-check-in'), /resolve this run's own thread with mcp__hearthbot__set_thread_resolved/);
+  const checkIn = rendered('daily-check-in');
+  assert.match(checkIn, /fires into its own home thread/);
+  assert.match(checkIn, /Never resolve this home thread/);
+  assert.doesNotMatch(checkIn, /set_thread_resolved|Fresh session per run/);
   const nudge = rendered('hourly-nudge');
   assert.match(nudge, /fires into its own home thread/);
   assert.match(nudge, /Never resolve this home thread/);

@@ -27,7 +27,7 @@ const FENCE_OPEN = /^```toolkit-task-params[ \t]*$/;
 const FENCE_CLOSE = /^```[ \t]*$/;
 
 const KINDS = Object.freeze({
-  'daily-check-in': { checks: { name: 'DAILY-CHECK-IN-CHECKS', file: 'daily-check-in.md' }, session: 'fresh', title: 'Daily check-in' },
+  'daily-check-in': { checks: { name: 'DAILY-CHECK-IN-CHECKS', file: 'daily-check-in.md' }, session: 'bound', title: 'Daily check-in' },
   'hourly-nudge': { checks: { name: 'HOURLY-NUDGE-CHECKS', file: 'hourly-nudge.md' }, session: 'bound', title: 'Hourly nudge' },
   custom: { checks: null, session: null, title: null }
 });
