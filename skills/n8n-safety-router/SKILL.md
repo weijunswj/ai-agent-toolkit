@@ -24,6 +24,8 @@ When this skill is selected for an n8n task, automatically check the current tar
 
 Root `AGENTS.md` is the only repo-local target for the n8n adapter. `CLAUDE.md` (the one-line `@AGENTS.md` shim) and `.agents/rules/00-agent-toolkit-bootstrap.md` are platform shims owned by `repository-agent-rules`; do not append the n8n adapter to those shim files, or to a `GEMINI.md`, which belongs to the repository.
 
+In the canonical Toolkit source repository the installer reports that no adapter is needed; accept that and continue.
+
 If `AGENTS.md` exists and the adapter is missing or stale, run [scripts/install-n8n-agent-adapter.cjs](scripts/install-n8n-agent-adapter.cjs) in `--dry-run` mode with `--target auto` or `--target agents`. Show the dry-run result to the user. Ask for explicit current-turn approval naming `AGENTS.md` before running `--write`. If approved, run the installer with `--write`.
 
 The installer writes the canonical managed n8n adapter block sourced from `repo/contracts/agent-rules/n8n-safety-router-adapter.md`. It must not write a separate Claude, Gemini, or platform-specific n8n adapter variant.

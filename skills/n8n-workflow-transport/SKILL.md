@@ -31,9 +31,10 @@ Apply `n8n-safety-router` first for the full n8n operating contract. A generated
 - Do not run live n8n import/export from this toolkit repo.
 - Do not run live n8n import/export in CI.
 - Do not commit `.tmp/**`, `.n8n-local/**`, `.to-sanitise/**`, `.sanitised/**`, live import/export JSON, credentials, credential bindings, private keys, or `.env` files.
-- Keep consumer-repo workflow JSON inactive unless the user explicitly confirms activation in the target live instance.
+- Keep consumer-repo workflow JSON unpublished (inactive) unless the user explicitly confirms publishing in the target live instance. In n8n 2.x a workflow counts as unpublished only when `active` is false and no published version (`activeVersionId`) is set; anything else, including a missing state, counts as live.
 - Committed n8n workflow export JSON belongs under the consumer repo root `n8n-workflows/`; if that folder exists, keep `n8n-workflows/README.md` beside it.
-- When creating or managing root `n8n-workflows/`, copy or sync the approved import/export helper scripts from `templates/helper-scripts/import-export-sync/` into `n8n-workflows/scripts/`. Do not create duplicate helper families elsewhere.
+- When creating or managing root `n8n-workflows/`, copy or sync the approved import/export helper scripts from `templates/helper-scripts/import-export-sync/` into `n8n-workflows/scripts/` with `n8n-helper-set.cjs refresh` (preview first, then `--write` after approval); it keeps repository-local scripts. Do not create duplicate helper families elsewhere.
+- When the helpers fail on a machine, run `check-n8n-helper-machine.cjs --offline` there first; it names the one next step. Drop `--offline` only with current-turn approval for Docker reads on that machine, because the full check reads Docker and the n8n container.
 - Review workflow diffs before committing `n8n-workflows/*.json` in a consumer repo.
 
 ## Approval Boundary

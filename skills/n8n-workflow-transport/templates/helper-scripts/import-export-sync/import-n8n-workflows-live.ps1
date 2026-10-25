@@ -637,7 +637,96 @@ function Resolve-WorkflowDirPath {
 }
 
 function Test-MissingLiveWorkflow($CommandResult) {
-  return (($CommandResult.Output -join "`n") -match "No workflows found with specified filters")
+  return (($CommandResult.Output -join "`n") -match "No workflows found with specified filters|No workflows with published versions found")
+}
+
+function Get-N8nCliLogArguments {
+  # n8n prints export:workflow output through its own log. Pin the log settings for this one call so a
+  # container set to a quieter level, file-only output or JSON log lines still prints a readable list.
+  return @("-e", "N8N_LOG_LEVEL=info", "-e", "N8N_LOG_OUTPUT=console", "-e", "N8N_LOG_FORMAT=text", "-e", "NO_COLOR=1")
+}
+
+function Invoke-CliWorkflowJson([string[]]$Arguments, $FailureMessage) {
+  # Workflow JSON is parsed and written by Node only. PowerShell 6+ rewrites date-like strings in the
+  # machine's time zone and every edition rejects keys that differ only by case, so a PowerShell
+  # round trip could change or break a workflow depending on the machine.
+  $result = Invoke-CapturedCommand "node" (@((Join-Path $HelperScriptDir "n8n-cli-workflow-json.cjs")) + $Arguments)
+  if ($result.ExitCode -ne 0) {
+    throw "$FailureMessage`n$($result.Output -join "`n")"
+  }
+}
+
+function Get-LiveWorkflowListDir {
+  $listDir = Join-Path (Join-Path $RepoRoot ".tmp") "n8n-live-workflow-list"
+  New-Item -ItemType Directory -Force -Path $listDir | Out-Null
+  return $listDir
+}
+
+function Read-LiveWorkflowList($CommandResult) {
+  $listDir = Get-LiveWorkflowListDir
+  $token = [guid]::NewGuid().ToString("N")
+  $rawPath = Join-Path $listDir "$token.n8n-output.txt"
+  $storePath = Join-Path $listDir "$token.workflows.json"
+  $summaryPath = Join-Path $listDir "$token.summary.json"
+  Write-Utf8NoBomText -Path $rawPath -Text (($CommandResult.StdOut -join "`n") + "`n")
+  try {
+    Invoke-CliWorkflowJson @("list", "--input", $rawPath, "--store", $storePath, "--summary", $summaryPath) "Could not read the live workflow list from container $Container."
+  } finally {
+    Remove-Item -LiteralPath $rawPath -Force -ErrorAction SilentlyContinue
+  }
+  if (-not [string]::IsNullOrWhiteSpace($script:LiveWorkflowStorePath) -and $script:LiveWorkflowStorePath -ne $storePath) {
+    Remove-Item -LiteralPath $script:LiveWorkflowStorePath -Force -ErrorAction SilentlyContinue
+  }
+  $script:LiveWorkflowStorePath = $storePath
+  try {
+    $summary = Get-Content -LiteralPath $summaryPath -Raw | ConvertFrom-Json
+  } finally {
+    Remove-Item -LiteralPath $summaryPath -Force -ErrorAction SilentlyContinue
+  }
+  return @($summary | Where-Object { $null -ne $_ })
+}
+
+function Remove-LiveWorkflowList {
+  # The stored list holds every live workflow, so it never outlives the run that read it.
+  if (-not [string]::IsNullOrWhiteSpace($script:LiveWorkflowStorePath)) {
+    Remove-Item -LiteralPath $script:LiveWorkflowStorePath -Force -ErrorAction SilentlyContinue
+    $script:LiveWorkflowStorePath = $null
+  }
+  $listDir = Join-Path (Join-Path $RepoRoot ".tmp") "n8n-live-workflow-list"
+  if ((Test-Path -LiteralPath $listDir -PathType Container) -and -not (Get-ChildItem -LiteralPath $listDir -Force | Select-Object -First 1)) {
+    Remove-Item -LiteralPath $listDir -Force -ErrorAction SilentlyContinue
+  }
+}
+
+function Write-LiveWorkflowJsonFile($Workflow, $Path) {
+  Invoke-CliWorkflowJson @("write", "--store", $script:LiveWorkflowStorePath, "--id", [string]$Workflow.id, "--output", $Path) "Could not write the live workflow file $Path."
+}
+
+function Read-WorkflowFileSummary($Path) {
+  $summaryPath = Join-Path (Get-LiveWorkflowListDir) ("{0}.file-summary.json" -f [guid]::NewGuid().ToString("N"))
+  try {
+    Invoke-CliWorkflowJson @("file-summary", "--input", $Path, "--summary", $summaryPath) "Workflow file $Path could not be read as one workflow JSON object."
+    return (Get-Content -LiteralPath $summaryPath -Raw | ConvertFrom-Json)
+  } finally {
+    Remove-Item -LiteralPath $summaryPath -Force -ErrorAction SilentlyContinue
+  }
+}
+
+function Assert-HelperSetReady {
+  if ($null -eq (Get-Command node -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1)) {
+    throw "N8N_HELPER_SET_INVALID: Node.js was not found on PATH. Install Node.js 18 or newer, then rerun."
+  }
+  $setCheck = Invoke-CapturedCommand "node" @((Join-Path $HelperScriptDir "n8n-helper-set.cjs"), "check", "--dir", $HelperScriptDir)
+  foreach ($line in $setCheck.Output) {
+    if ($line -match '^(FAIL|WARN|INFO|OK):\s*(.*)$') {
+      Write-Step $Matches[1] $Matches[2]
+    } else {
+      Write-Host $line
+    }
+  }
+  if ($setCheck.ExitCode -ne 0) {
+    throw "N8N_HELPER_SET_INVALID: this helper folder is not one complete, matching helper set. Run check-n8n-helper-machine.cjs for a full report."
+  }
 }
 
 function Get-FirstOutputLine($CommandResult) {
@@ -650,7 +739,7 @@ function Get-FirstOutputLine($CommandResult) {
 }
 
 function Read-RepoWorkflowInfo($WorkflowFile) {
-  $workflow = Get-Content -Raw -Path $WorkflowFile.FullName | ConvertFrom-Json
+  $workflow = Read-WorkflowFileSummary $WorkflowFile.FullName
   $workflowId = [string]$workflow.id
   $workflowName = [string]$workflow.name
   if ([string]::IsNullOrWhiteSpace($workflowName)) {
@@ -689,7 +778,7 @@ function Invoke-LivePreflight {
 }
 
 function Get-LiveWorkflows {
-  $result = Invoke-CapturedCommand "docker" @("exec", $Container, "n8n", "export:workflow", "--all", "--pretty")
+  $result = Invoke-CapturedCommand "docker" (@("exec") + (Get-N8nCliLogArguments) + @($Container, "n8n", "export:workflow", "--all", "--pretty"))
   if ($result.ExitCode -ne 0) {
     if (Test-MissingLiveWorkflow $result) {
       return @()
@@ -697,17 +786,7 @@ function Get-LiveWorkflows {
     throw "Failed to list live workflows from container $Container.`n$($result.Output -join "`n")"
   }
 
-  $exportText = ($result.StdOut -join "`n").Trim()
-  if ([string]::IsNullOrWhiteSpace($exportText)) {
-    return @()
-  }
-
-  $workflows = $exportText | ConvertFrom-Json
-  if ($workflows -isnot [array]) {
-    $workflows = @($workflows)
-  }
-
-  return @($workflows)
+  return @(Read-LiveWorkflowList $result)
 }
 
 function Test-NoCredentialsExportResult($CommandResult) {
@@ -833,7 +912,7 @@ function Save-LocalWorkflowIdentity($PlannedImport) {
     "--target-workflow-id", $PlannedImport.TargetId
   )
   if ($result.ExitCode -ne 0) {
-    throw "N8N_POSTCONDITION_FAILED: inactive import succeeded but dedicated local target workflow identity could not be recorded safely."
+    throw "N8N_POSTCONDITION_FAILED: unpublished import succeeded but dedicated local target workflow identity could not be recorded safely."
   }
   Write-Step "IDENTITY" "$($PlannedImport.File) target identity was recorded locally without printing its ID."
 }
@@ -872,7 +951,7 @@ function Test-PortableTargetResolution($WorkflowFiles, $LiveWorkflows) {
       }
     }
     if ($null -ne $target -and $target.active -eq $true) {
-      $blocked += [PSCustomObject]@{ File = $workflowFile.Name; WorkflowName = $workflowName; Reason = "N8N_POLICY_VALIDATION_FAILED: target workflow is active, so inactive import cannot guarantee that no scheduled execution persists."; Kind = "N8N_POLICY_VALIDATION_FAILED" }
+      $blocked += [PSCustomObject]@{ File = $workflowFile.Name; WorkflowName = $workflowName; Reason = "N8N_POLICY_VALIDATION_FAILED: target workflow is published (active), so an unpublished import cannot guarantee that no scheduled execution persists. Unpublish it in n8n first."; Kind = "N8N_POLICY_VALIDATION_FAILED" }
     } elseif ($null -ne $target -and $target.isArchived -eq $true -and -not $matchedByCanonicalId -and $ArchivedByNameMode -eq "Block") {
       $blocked += [PSCustomObject]@{ File = $workflowFile.Name; WorkflowName = $workflowName; Reason = "N8N_POLICY_VALIDATION_FAILED: archived target workflow is blocked by ArchivedByNameMode."; Kind = "N8N_POLICY_VALIDATION_FAILED" }
     }
@@ -926,7 +1005,7 @@ function Resolve-LiveWorkflowByName($WorkflowName, $WorkflowFileName, $LiveWorkf
 
   if ($archivedMatches.Count -eq 1) {
     if ($ArchivedByNameMode -eq "CreateNew") {
-      Write-Step "ARCHIVE" "$WorkflowFileName only matched archived live workflow '$WorkflowName' as $($archivedMatches[0].id). CreateNew mode will create a new inactive workflow instead."
+      Write-Step "ARCHIVE" "$WorkflowFileName only matched archived live workflow '$WorkflowName' as $($archivedMatches[0].id). CreateNew mode will create a new unpublished workflow instead."
       return [PSCustomObject]@{ Status = "ArchivedCreateNew"; Workflow = $archivedMatches[0]; Reason = "Only archived workflow matched by name; creating new by mode." }
     }
     if ($ArchivedByNameMode -eq "UpdateArchived") {
@@ -937,7 +1016,7 @@ function Resolve-LiveWorkflowByName($WorkflowName, $WorkflowFileName, $LiveWorkf
   }
 
   if ($ArchivedByNameMode -eq "CreateNew") {
-    Write-Step "ARCHIVE" "$WorkflowFileName matched $($archivedMatches.Count) archived same-name workflows and no non-archived workflow. CreateNew mode will create a new inactive workflow."
+    Write-Step "ARCHIVE" "$WorkflowFileName matched $($archivedMatches.Count) archived same-name workflows and no non-archived workflow. CreateNew mode will create a new unpublished workflow."
     return [PSCustomObject]@{ Status = "ArchivedCreateNew"; Workflow = $null; Reason = "Multiple archived workflows matched by name; creating new by mode." }
   }
 
@@ -949,7 +1028,7 @@ function Resolve-LiveWorkflowByName($WorkflowName, $WorkflowFileName, $LiveWorkf
 }
 
 function Write-WorkflowJson($Workflow, $Path) {
-  Write-Utf8NoBomText -Path $Path -Text (($Workflow | ConvertTo-Json -Depth 100) + "`n")
+  Write-LiveWorkflowJsonFile $Workflow $Path
 }
 
 function Set-PreparedWorkflowId($PreparedFile, $WorkflowId) {
@@ -957,13 +1036,7 @@ function Set-PreparedWorkflowId($PreparedFile, $WorkflowId) {
     return
   }
 
-  $preparedWorkflow = Get-Content -Raw -Path $PreparedFile | ConvertFrom-Json
-  if ($preparedWorkflow.PSObject.Properties.Name -contains "id") {
-    $preparedWorkflow.id = $WorkflowId
-  } else {
-    $preparedWorkflow | Add-Member -MemberType NoteProperty -Name "id" -Value $WorkflowId
-  }
-  Write-Utf8NoBomText -Path $PreparedFile -Text (($preparedWorkflow | ConvertTo-Json -Depth 100) + "`n")
+  Invoke-CliWorkflowJson @("set-id", "--file", $PreparedFile, "--id", $WorkflowId) "Could not set the target workflow id in $PreparedFile."
 }
 
 function Test-WorkflowHasScheduleTrigger($Workflow) {
@@ -1134,10 +1207,10 @@ function Invoke-WorkflowPreflight($WorkflowFiles, [bool]$BindingsFileExists, $Li
         if ($liveWorkflowByName.Status -eq "ArchivedCreateNew" -or -not $hasWorkflowId) {
           $generatedWorkflowIdForImport = New-WorkflowId
           $targetLiveId = $generatedWorkflowIdForImport
-          Write-Step "CREATE" "$(Get-WorkflowCheckLabel $workflowFile $workflowId) will be imported as a new inactive workflow with generated id $generatedWorkflowIdForImport."
+          Write-Step "CREATE" "$(Get-WorkflowCheckLabel $workflowFile $workflowId) will be imported as a new unpublished workflow with generated id $generatedWorkflowIdForImport."
         } else {
           $targetLiveId = $workflowId
-          Write-Step "CREATE" "$(Get-WorkflowCheckLabel $workflowFile $workflowId) does not exist in live n8n; it will be imported as a new inactive workflow."
+          Write-Step "CREATE" "$(Get-WorkflowCheckLabel $workflowFile $workflowId) does not exist in live n8n; it will be imported as a new unpublished workflow."
         }
 
         if (-not $BindingsFileExists) {
@@ -1151,9 +1224,9 @@ function Invoke-WorkflowPreflight($WorkflowFiles, [bool]$BindingsFileExists, $Li
       if ($liveWorkflowForCredentialCheck.active -eq $true -or (Test-WorkflowHasScheduleTrigger $repoWorkflow) -or (Test-WorkflowHasScheduleTrigger $liveWorkflowForCredentialCheck)) {
         $requiresRestartWarning = $true
         $restartWarningCount += 1
-        Write-Step "WARN" "This import updates a previously active or scheduled workflow."
+        Write-Step "WARN" "This import updates a previously published or scheduled workflow."
         Write-Step "WARN" "On non multi-main n8n instances, cron triggers may keep running until n8n is restarted."
-        Write-Step "WARN" "Restart the n8n container after import before trusting activation state."
+        Write-Step "WARN" "Restart the n8n container after import before trusting the published state."
       }
     }
 
@@ -1359,7 +1432,7 @@ function Invoke-PortableWorkflowPreflight($WorkflowFiles, $LiveWorkflows, $Crede
     if ($null -ne $targetWorkflow) {
       $updatesArchivedWorkflow = $targetWorkflow.isArchived -eq $true
       if ($targetWorkflow.active -eq $true) {
-        $blockedWorkflows += [PSCustomObject]@{ File = $workflowFile.Name; Reason = "N8N_POLICY_VALIDATION_FAILED: target workflow is active, so inactive import cannot guarantee that no scheduled execution persists."; Kind = "N8N_POLICY_VALIDATION_FAILED" }
+        $blockedWorkflows += [PSCustomObject]@{ File = $workflowFile.Name; Reason = "N8N_POLICY_VALIDATION_FAILED: target workflow is published (active), so an unpublished import cannot guarantee that no scheduled execution persists. Unpublish it in n8n first."; Kind = "N8N_POLICY_VALIDATION_FAILED" }
         continue
       }
       if ($updatesArchivedWorkflow -and -not $matchedByCanonicalId -and $ArchivedByNameMode -eq "Block") {
@@ -1633,12 +1706,16 @@ Write-Host ("Mode             : {0}" -f ($(if ($DryRun) { "Dry run" } else { "Im
 Write-Host ("Archived by name : {0}" -f $ArchivedByNameMode)
 Write-Host ("ProjectId        : {0}" -f ($(if ([string]::IsNullOrWhiteSpace($ProjectId)) { "(not set)" } else { $ProjectId })))
 Write-Host ("UserId           : {0}" -f ($(if ([string]::IsNullOrWhiteSpace($UserId)) { "(not set)" } else { $UserId })))
-Write-Host "Inactive import  : Required; activation, execution, and container restart are out of scope"
+Write-Host "Unpublished      : Required; publishing, execution, and container restart are out of scope"
 Write-Host ("Force import     : {0}" -f ($(if ($ForceImport) { "Yes" } else { "No" })))
 
 if ($RestartContainerAfterImport) {
   throw "N8N_POLICY_VALIDATION_FAILED: -RestartContainerAfterImport is no longer supported. This helper never restarts n8n."
 }
+
+# Every exit path, including errors, removes the stored live workflow list in the finally block below.
+try {
+Assert-HelperSetReady
 
 if (-not $DryRun) {
   Invoke-ProjectWorkflowHook "before-import-validation" @{
@@ -1749,7 +1826,7 @@ if ($preflight.PlannedImports.Count -eq 0) {
   if ($preflight.RequiredCredentialMisses.Count -gt 0) {
     Write-N8nOperationReport "ACTION_REQUIRED" "N8N_CREDENTIAL_MISSING" "credential-resolution" $false $false @() $preflight.RequiredCredentialMisses "CREATE_CREDENTIALS_AND_RERUN" "Create each reported logical credential name and type, then rerun this unchanged command." "inactive"
   } else {
-    Write-N8nOperationReport "SUCCESS" "N8N_IMPORT_NO_CHANGES" "effective-comparison" $false $false @() $preflight.OptionalCredentialMisses "NONE" "No action is required; the effective inactive payload is unchanged." "inactive"
+    Write-N8nOperationReport "SUCCESS" "N8N_IMPORT_NO_CHANGES" "effective-comparison" $false $false @() $preflight.OptionalCredentialMisses "NONE" "No action is required; the effective unpublished payload is unchanged." "inactive"
   }
 
   Write-Section "Next Action Steps"
@@ -1808,7 +1885,7 @@ foreach ($plannedImport in $preflight.PlannedImports) {
 
   $importedCount += 1
   $script:MutationPerformed = $true
-  Write-Step "IMPORT" "$($plannedImport.File) imported inactive."
+  Write-Step "IMPORT" "$($plannedImport.File) imported unpublished."
   if ($plannedImport.UpdatesArchivedWorkflow) {
     Write-Step "ARCHIVE" "$($plannedImport.File) updated an archived live workflow. Unarchive it in n8n if you want it active/usable."
   }
@@ -1816,10 +1893,10 @@ foreach ($plannedImport in $preflight.PlannedImports) {
   $postImportWorkflows = Get-LiveWorkflows
   $postconditionMatches = @($postImportWorkflows | Where-Object { [string]$_.id -eq [string]$plannedImport.TargetId })
   if ($postconditionMatches.Count -ne 1 -or $postconditionMatches[0].active -ne $false) {
-    Write-N8nOperationReport "FAILED" "N8N_POSTCONDITION_FAILED" "verify-postcondition" $true $true @($plannedImport) $preflight.ReportCredentials "STOP_AND_ESCALATE" "Do not activate or execute the workflow; inspect the sanitized report and escalate the Toolkit defect." "unknown"
-    throw "N8N_POSTCONDITION_FAILED: imported workflow was not uniquely observable as inactive."
+    Write-N8nOperationReport "FAILED" "N8N_POSTCONDITION_FAILED" "verify-postcondition" $true $true @($plannedImport) $preflight.ReportCredentials "STOP_AND_ESCALATE" "Do not publish or execute the workflow; inspect the sanitized report and escalate the Toolkit defect." "unknown"
+    throw "N8N_POSTCONDITION_FAILED: imported workflow was not uniquely observable as unpublished."
   }
-  Write-Step "VERIFY" "$($plannedImport.File) postcondition is inactive; no workflow was executed."
+  Write-Step "VERIFY" "$($plannedImport.File) postcondition is unpublished; no workflow was executed."
   Save-LocalWorkflowIdentity $plannedImport
 }
 
@@ -1828,7 +1905,7 @@ Write-Host ("Imported          : {0}" -f $importedCount)
 Write-Host ("Skipped           : {0}" -f $preflight.SkippedCount)
 Write-Host ("Name matched      : {0}" -f $preflight.NameMatchedWorkflowCount)
 Write-Host ("New live          : {0}" -f $preflight.MissingLiveWorkflowCount)
-Write-Host "Postcondition     : every imported workflow is inactive"
+Write-Host "Postcondition     : every imported workflow is unpublished"
 
 Write-WorkflowActionSummary $preflight.PlannedImports "Done"
 
@@ -1841,9 +1918,12 @@ if ($importedCount -gt 0) {
     }
     Write-N8nOperationReport "ACTION_REQUIRED" "N8N_CREDENTIAL_MISSING" "postcondition" $true $true $preflight.PlannedImports $preflight.RequiredCredentialMisses "CREATE_CREDENTIALS_AND_RERUN" "Create each reported logical credential name and type, then rerun this unchanged command." "inactive"
   } else {
-    Write-Host "No further import action is required. Activation remains a separate operator decision outside this helper."
+    Write-Host "No further import action is required. Publishing remains a separate operator decision outside this helper."
     Write-N8nOperationReport "SUCCESS" "N8N_IMPORT_SUCCESS" "receipt" $true $true $preflight.PlannedImports $preflight.OptionalCredentialMisses "NONE" "No further import action is required." "inactive"
   }
 } else {
   Write-Host "1. No live workflow changes were imported."
+}
+} finally {
+  Remove-LiveWorkflowList
 }

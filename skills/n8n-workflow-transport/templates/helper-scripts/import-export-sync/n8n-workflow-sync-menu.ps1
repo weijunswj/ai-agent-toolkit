@@ -66,6 +66,7 @@ $ExportHelperScript = Join-Path $HelperScriptDir "export-n8n-workflows-live.ps1"
 $ImportHelperScript = Join-Path $HelperScriptDir "import-n8n-workflows-live.ps1"
 $ValidateHelperScript = Join-Path $HelperScriptDir "validate-n8n-workflows.cjs"
 $ReportHelperScript = Join-Path $HelperScriptDir "n8n-workflow-operation-report.cjs"
+$MachineCheckScript = Join-Path $HelperScriptDir "check-n8n-helper-machine.cjs"
 
 function Resolve-TrustedHelperPath($Path, $Description) {
   try {
@@ -708,6 +709,17 @@ function Invoke-ExplainLastFailure {
   }
 }
 
+function Invoke-MachineCheck {
+  Write-Section "Check This Machine"
+  Write-Step "INFO" "Read-only: checks Node.js, PowerShell, the helper set, Docker and the n8n container. Nothing is imported, exported or changed."
+  $nodePath = Resolve-NodeCommandPath
+  $trustedMachineCheckScript = Resolve-TrustedHelperPath $MachineCheckScript "machine check helper"
+  & $nodePath $trustedMachineCheckScript
+  if ($LASTEXITCODE -ne 0) {
+    Write-Step "FAIL" "This machine is not ready for the n8n helpers; follow the next step above."
+  }
+}
+
 function Build-ValidateCommand {
   Show-CommonSettingExplanations
   $workflowDir = Read-Default "WorkflowDir" $DefaultWorkflowDir
@@ -764,6 +776,7 @@ while ($true) {
   Write-Host "7. Show previous command."
   Write-Host "8. Clear previous command."
   Write-Host "9. Explain last n8n failure (read-only)."
+  Write-Host "10. Check this machine (read-only)."
   Write-Host "0. Exit."
 
   $choice = Read-Host "Choose an option"
@@ -799,6 +812,9 @@ while ($true) {
     }
     "9" {
       Invoke-ExplainLastFailure
+    }
+    "10" {
+      Invoke-MachineCheck
     }
     "0" {
       exit 0

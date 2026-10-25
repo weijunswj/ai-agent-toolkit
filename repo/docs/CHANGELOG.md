@@ -5,6 +5,24 @@
 - **The CI drift guard pins the whole of `validate.yml`:** the file must match its pinned text everywhere except the gate command list, including the final `validate` job, comments and anything before the jobs. Each gate command must be a plain repository script line with no shell syntax, and the usual spellings of `set +e`, `|| echo` and a `shell:` key are refused as a second check.
 - **No test file is skipped silently:** a `.test.cjs` entry in `repo/tests` with a name outside the allowed pattern, or a folder or link named like a test, now fails every runner mode instead of never running.
 
+## 3.10.2 (n8n helpers that work on any machine, and n8n 2.x publish state)
+
+### n8n import and export helpers on any machine
+
+- **Reading n8n's output:** n8n prints `export:workflow` through its own log, so a container set to a quieter log level, file-only logs or JSON log lines hid or wrapped the workflow list, and an empty list was read as "no workflows". The helpers now pin the log settings for that one call, read the list with Node while tolerating warning lines around it, and treat an empty list from a successful command as an error. The stored copy of the list is deleted when the run ends.
+- **No PowerShell rewrites of workflow JSON:** PowerShell 6 and later turned date-like strings into dates and wrote them back in the machine's time zone, and every edition refused keys that differ only by case. Workflow JSON is now read and written only by Node (`n8n-cli-workflow-json.cjs`); PowerShell sees small summaries.
+- **Container detection:** the official image is found from Docker Hub or `docker.n8n.io` under any tag or digest, not only `n8nio/n8n` and `n8nio/n8n:stable`. Images from other registries still need an explicit target.
+- **One complete helper set:** `n8n-helper-set.json` stamps every helper file with a content hash that ignores line endings. The live helpers check it first and name any missing or changed file; repository-local scripts are reported and kept. `n8n-helper-set.cjs refresh` previews and then copies a new set into a repository without deleting anything, and keeps a repository's own edited helper README.
+- **Check this machine:** `check-n8n-helper-machine.cjs` (menu option 10) reports Node.js, PowerShell, the helper set, Docker, the n8n container, its version and its log settings, with one next step. It is read-only, and `--offline` skips Docker.
+- **No restart:** the helpers still never restart n8n; a restart prompt from older copies stays out of the set.
+
+### n8n 2.x publish state and instance-only settings
+
+- **Live unless clearly unpublished:** a workflow counts as unpublished only when `active` is false and no published version (`activeVersionId`) is set; a missing or unexpected state counts as live. The import postcondition, the published-target block and the validator all use this, and helper output says "unpublished" and "publish".
+- **Instance-only settings:** canonical Git leaves out `settings.errorWorkflow` and `settings.availableInMCP` and says so. An import replaces the whole workflow, so a prepared import carries the target's own values for both (none for a new workflow), keeping its MCP exposure and error workflow as they were; preparation refuses any other value. The validator warns about either in committed files. Newer live-only fields (`activeVersion`, `parentFolder`, `parentFolderId`, `sourceWorkflowId`) are stripped too.
+- **Risky-node report:** the validator lists Code, Execute Command, Read/Write Files, HTTP Request and credentialed nodes per workflow before any test or run, including their AI-agent tool variants; `--fail-on-risky-nodes` makes it fail.
+- **Adapter installer:** in the canonical Toolkit source repository it reports that no n8n adapter is needed and writes nothing.
+
 ## 3.10.0 (host support, governance states, decision history and the personal-data guard)
 
 ### Decision history before planning
