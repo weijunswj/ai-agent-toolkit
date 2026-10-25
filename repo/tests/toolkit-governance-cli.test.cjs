@@ -59,7 +59,7 @@ const BRANCH_PROTECTED = () => ({
 });
 const WORKFLOW = [
   'on:', '  pull_request:', 'jobs:', '  tests:', '    runs-on: ubuntu-latest', '  validate:', '    needs: [tests]', '    if: ${{ always() }}',
-  '    runs-on: ubuntu-latest', '    steps:', '      - env:', '          LEGS: ${{ toJSON(needs) }}', '        run: node verify.cjs', '',
+  '    runs-on: ubuntu-latest', '    steps:', '      - env:', '          LEGS: ${{ toJSON(needs) }}', '        run: node repo/scripts/run-tests.cjs --verify-ci s', '',
 ].join('\n');
 
 async function run(ctx, cwd, argv, { answer = 'yes', interactive = true, rulesetReader = PROTECTED, protectionReader = BRANCH_PROTECTED } = {}) {

@@ -36,7 +36,7 @@ const AGGREGATE = [
   '      - name: Verify',
   '        env:',
   '          LEGS: ${{ toJSON(needs) }}',
-  '        run: node verify.cjs',
+  '        run: node repo/scripts/run-tests.cjs --verify-ci summaries  # fails unless every leg passed',
   '',
 ].join('\n');
 
@@ -114,7 +114,7 @@ test('P-05: P4 drifts on path filters, a branch filter leaving out the default b
     [AGGREGATE.replace('  pull_request:', '  pull_request:\n    branches-ignore: [main]'), /ignores main/],
     [AGGREGATE.replace('  pull_request:\n', ''), /does not run on pull requests/],
     [AGGREGATE.replace("    if: ${{ always() }}\n", ''), /without `if: always\(\)`/],
-    [AGGREGATE.replace("    if: ${{ always() }}", "    if: success()"), /without `if: always\(\)`/],
+    [AGGREGATE.replace("    if: ${{ always() }}", "    if: success()"), /job condition other than/],
   ];
   for (const [text, pattern] of cases) {
     const result = check(repo(t, { 'ci.yml': text }));
@@ -130,12 +130,64 @@ test('P-05: P4 drifts on path filters, a branch filter leaving out the default b
   ]) assert.equal(check(repo(t, { 'ci.yml': text })).checks.P4.status, 'ok', text);
 });
 
-test('P-06: an aggregate that waits but never reads its needs results is unverified, never conformant', (t) => {
-  const result = check(repo(t, { 'ci.yml': AGGREGATE.replace('${{ toJSON(needs) }}', 'fixed') }));
-  assert.equal(result.checks.P4.status, 'unverified');
-  assert.equal(result.status, 'unverified');
-  const results = check(repo(t, { 'ci.yml': AGGREGATE.replace('${{ toJSON(needs) }}', "${{ needs.tests.result }}") }));
-  assert.equal(results.checks.P4.status, 'ok');
+test('P-06: an aggregate is verified only when a step passes toJSON(needs) to a declared aggregate command', (t) => {
+  const unverified = [
+    AGGREGATE.replace('${{ toJSON(needs) }}', 'fixed'),
+    // Reading one result is not proof that the job fails on it.
+    AGGREGATE.replace('${{ toJSON(needs) }}', '${{ needs.tests.result }}'),
+    // Another command, or the aggregate command only echoed or in a comment.
+    AGGREGATE.replace('node repo/scripts/run-tests.cjs --verify-ci summaries  # fails unless every leg passed', 'node verify.cjs'),
+    AGGREGATE.replace('node repo/scripts/run-tests.cjs --verify-ci summaries', 'echo node run-tests.cjs --verify-ci'),
+    AGGREGATE.replace('node repo/scripts/run-tests.cjs --verify-ci summaries  # fails unless every leg passed', 'echo ok  # node run-tests.cjs --verify-ci'),
+  ];
+  for (const text of unverified) {
+    const result = check(repo(t, { 'ci.yml': text }));
+    assert.equal(result.checks.P4.status, 'unverified', text);
+    assert.equal(result.status, 'unverified', text);
+  }
+  // Job-level env and a multi-line run script both count.
+  const jobEnv = AGGREGATE.replace("    runs-on: ubuntu-latest\n    steps:\n      - name: Verify\n        env:\n          LEGS: ${{ toJSON(needs) }}\n        run: node repo/scripts/run-tests.cjs --verify-ci summaries  # fails unless every leg passed",
+    "    runs-on: ubuntu-latest\n    env:\n      LEGS: ${{ toJSON(needs) }}\n    steps:\n      - run: |\n          node repo/scripts/validate-toolkit.cjs\n          node repo/scripts/run-tests.cjs --verify-ci \"$RUNNER_TEMP/s\"");
+  assert.notEqual(jobEnv, AGGREGATE);
+  assert.equal(check(repo(t, { 'ci.yml': jobEnv })).checks.P4.status, 'ok');
+});
+
+test('P-13: a passing required check can never hide a failed, skipped or missing job', (t) => {
+  const Q = "'";
+  const two = (validate) => ['on:', '  pull_request:', 'jobs:', '  tests:', '    runs-on: ubuntu-latest', '  validate:', ...validate, '    runs-on: ubuntu-latest', ''].join('\n');
+  const steps = (run) => ['    steps:', `      - run: ${run}`];
+  const verdict = text => protection.producerVerdict(['validate'], [{ file: 'ci.yml', workflow: protection.readWorkflow(text) }], 'main');
+  const cases = [
+    // A: needs plus a longer condition: a failed test leg skips validate, which reports success.
+    ['A', two(['    needs: [tests]', `    if: always() && needs.tests.result == ${Q}success${Q}`, ...steps('echo ok')]), 'P4', 'drift'],
+    // B: always() and reads the needs, but nothing fails on them.
+    ['B', two(['    needs: [tests]', '    if: ${{ always() }}', ...steps('echo "${{ toJSON(needs) }}"')]), 'P4', 'unverified'],
+    // C: no needs, but skipped on every pull request.
+    ['C', two([`    if: github.event_name == ${Q}push${Q}`, ...steps('echo ok')]), 'P4', 'drift'],
+    // D: always() inside a longer condition that skips pull requests.
+    ['D', two(['    needs: [tests]', `    if: always() && github.event_name == ${Q}push${Q}`, ...steps('node run-tests.cjs --verify-ci')]), 'P4', 'drift'],
+    // E: the aggregate only named in a comment.
+    ['E', two(['    needs: [tests]', '    if: always()', ...steps('echo done  # needs.tests.result')]), 'P4', 'unverified'],
+    // F: a block-scalar condition is read, not mistaken for a missing always().
+    ['F', two(['    needs: [tests]', '    if: |', '      always()', '    env:', '      LEGS: ${{ toJSON(needs) }}', ...steps('node run-tests.cjs --verify-ci s')]), 'P4', 'ok'],
+    ['F2', two(['    if: >', `      github.event_name == ${Q}push${Q}`, ...steps('echo ok')]), 'P4', 'drift'],
+  ];
+  for (const [id, text, check, status] of cases) assert.equal(verdict(text)[check].status, status, id);
+  // G: a job named by an expression elsewhere could post the same check: P3 unverified, never ok.
+  const one = 'on: [pull_request]\njobs:\n  validate:\n    runs-on: ubuntu-latest\n';
+  const dispatch = 'on:\n  workflow_dispatch:\n    inputs:\n      check:\n        type: string\njobs:\n  post:\n    name: ${{ inputs.check }}\n    runs-on: ubuntu-latest\n';
+  const g = protection.producerVerdict(['validate'], [{ file: 'a.yml', workflow: protection.readWorkflow(one) }, { file: 'b.yml', workflow: protection.readWorkflow(dispatch) }], 'main');
+  assert.equal(g.P3.status, 'unverified');
+  assert.match(g.P3.details[0], /b\.yml post is named by an expression that could produce "validate"/);
+  // An expression name that cannot produce the check is not counted.
+  const shard = 'on: [pull_request]\njobs:\n  t:\n    name: tests-linux (${{ matrix.shard }})\n    strategy:\n      matrix:\n        shard: [1]\n';
+  assert.equal(protection.producerVerdict(['validate'], [{ file: 'a.yml', workflow: protection.readWorkflow(one) }, { file: 'c.yml', workflow: protection.readWorkflow(shard) }], 'main').P3.status, 'ok');
+  // Positive: plain job, always() and !cancelled() in either spelling, with the aggregate.
+  for (const condition of ['always()', '${{ always() }}', '!cancelled()', '${{ !cancelled() }}']) {
+    const text = two(['    needs: [tests]', `    if: ${condition}`, '    env:', '      LEGS: ${{ toJSON(needs) }}', ...steps('node repo/scripts/run-tests.cjs --verify-ci s')]);
+    assert.equal(verdict(text).P4.status, 'ok', condition);
+  }
+  assert.equal(verdict(one).P4.status, 'ok');
 });
 
 test('P-07: P5 drifts when squash or rebase is allowed; rulesets intersect, else repository settings decide', (t) => {
@@ -165,6 +217,13 @@ test('P-08: GitHub unreadable is unverified, a Free private repository is not-en
   assert.equal(called, false);
   assert.deepEqual(statuses(offline), { P1: 'not-checked', P2: 'not-checked', P3: 'ok', P4: 'ok', P5: 'not-checked' });
   assert.equal(offline.status, 'unverified');
+  // Offline with a branch filter: the default branch comes from origin/HEAD, else the filter is unverified.
+  const filtered = repo(t, { 'ci.yml': AGGREGATE.replace('  pull_request:', '  pull_request:\n    branches: [trunk]') });
+  const unknown = check(filtered, github(), { offline: true });
+  assert.equal(unknown.checks.P4.status, 'unverified');
+  assert.match(unknown.checks.P4.details[0], /default branch is unknown/);
+  childProcess.execFileSync('git', ['-C', filtered, 'symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/trunk'], { windowsHide: true });
+  assert.equal(check(filtered, github(), { offline: true }).checks.P4.status, 'ok');
 });
 
 test('P-09: another host or no origin is not-applicable; a binding without checks is unverified', (t) => {

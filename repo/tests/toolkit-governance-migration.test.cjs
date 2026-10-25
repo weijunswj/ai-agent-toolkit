@@ -216,22 +216,30 @@ test('PR-05: the Toolkit default-branch ruleset is offered after its own yes, wr
   const { governed } = fixture(ctx);
   await migrate(ctx, { answers: ['yes', 'no', 'no'] });
   const rulesets = { 'example-owner/governed': true, 'example-owner/block-only': true };
-  // No yes: nothing written.
   const written = [];
+  // No job produces the binding's check yet: requiring it would block every merge, so no offer.
+  const unproduced = await migrate(ctx, { answers: [], rulesets, written });
+  assert.equal(unproduced.asked.length, 0);
+  assert.deepEqual(written, []);
+  assert.match(unproduced.stdout, /example-owner\/governed: Toolkit ruleset not offered: no workflow job produces "validate", so requiring it would block every merge/);
+  // With the job (an aggregate that is not verified), the workflow problem is shown before the question.
+  fs.mkdirSync(path.join(governed, '.github', 'workflows'), { recursive: true });
+  fs.writeFileSync(path.join(governed, '.github', 'workflows', 'ci.yml'), 'on: [pull_request]\njobs:\n  tests:\n    runs-on: ubuntu-latest\n  validate:\n    needs: [tests]\n    if: always()\n    runs-on: ubuntu-latest\n');
+  // No yes: nothing written.
   const declined = await migrate(ctx, { answers: ['no'], rulesets, written });
   assert.deepEqual(written, []);
   assert.match(declined.stdout, /example-owner\/governed \(/);
+  assert.match(declined.stdout, /workflow \(unverified, fix by hand\): "validate" \(\.github\/workflows\/ci\.yml\) runs after tests/);
+  assert.match(declined.asked.at(-1), /every change needs a pull request.*nobody can bypass it\. Updating it replaces any rules already in that ruleset/);
   assert.match(declined.stdout, /"validate" is in the binding but not required/);
   assert.match(declined.stdout, /main allows merge, squash, rebase \(rulesets\)/);
   assert.match(declined.stdout, /Default-branch rulesets not added/);
-  // Yes: only the repository with a binding gets the ruleset, then it reads back clean (the
-  // missing workflow is still reported, to fix by hand).
+  // Yes: only the repository with a binding gets the ruleset, then it reads back clean.
   const protections = {};
   const accepted = await migrate(ctx, { answers: ['yes'], rulesets, written, protections });
   assert.equal(accepted.code, 0, accepted.stdout);
   assert.deepEqual(written, [{ slug: 'example-owner/governed', checks: ['validate'], existing: null }]);
   assert.match(accepted.stdout, /example-owner\/governed: ruleset added and read back/);
-  assert.match(accepted.stdout, /change by hand \(Toolkit edits only its own ruleset\):\n  - no workflow job is named "validate"/);
   // A second run with nothing Toolkit's ruleset can fix asks nothing and writes nothing.
   const again = await migrate(ctx, { answers: [], rulesets, written, protections });
   assert.equal(again.asked.length, 0);

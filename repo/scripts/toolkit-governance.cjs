@@ -138,7 +138,8 @@ class ToolkitGovernanceCli {
     if (this.#rulesetReader) options.rulesetReader = this.#rulesetReader;
     if (this.#protectionReader) options.protectionReader = this.#protectionReader;
     const result = conformance.checkConformance(this.#cwd, options);
-    const lines = [`Conformance: ${result.status}`];
+    const unverified = result.findings.filter(entry => entry.severity === 'unverified').length;
+    const lines = [`Conformance: ${result.status}${unverified ? ` (${unverified} item${unverified === 1 ? '' : 's'} unverified)` : ''}`];
     if (result.state) lines.push(`State: ${label(result.state)}`);
     for (const entry of result.findings) lines.push(`- ${entry.severity}: ${entry.message}`);
     if (result.no_force_push_ruleset) lines.push(`No-force-push ruleset: ${result.no_force_push_ruleset.status}`);
