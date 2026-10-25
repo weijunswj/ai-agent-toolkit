@@ -13,32 +13,12 @@ const { spawnSync } = require('node:child_process');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const WORKFLOW = path.join(ROOT, '.github', 'workflows', 'validate.yml');
-const STEP_NAME = 'Run validation';
-const { VERIFY_COMMAND } = require('./ci-test-shards.cjs');
+const { VERIFY_COMMAND, gateCommands } = require('./ci-test-shards.cjs');
 const LOCAL_TESTS = 'node repo/scripts/run-tests.cjs --all';
 
 // The gate as a local run executes it.
 function localCommands(commands) {
   return commands.map((command) => (command === VERIFY_COMMAND ? LOCAL_TESTS : command));
-}
-
-// The commands of the named step's `run: |` block, one per line.
-function gateCommands(source, stepName = STEP_NAME) {
-  const lines = source.replace(/\r\n/g, '\n').split('\n');
-  const start = lines.findIndex((line) => line === `      - name: ${stepName}`);
-  if (start === -1) throw new Error(`validate.yml has no "${stepName}" step.`);
-  const run = lines.findIndex((line, index) => index > start && /^ {8}run: \|\s*$/.test(line));
-  const nextStep = lines.findIndex((line, index) => index > start && /^ {6}- /.test(line));
-  if (run === -1 || (nextStep !== -1 && run > nextStep)) throw new Error(`The "${stepName}" step has no multi-line run block.`);
-  const commands = [];
-  for (let index = run + 1; index < lines.length; index += 1) {
-    const line = lines[index];
-    if (line.trim() === '') continue;
-    if (!/^ {10}\S/.test(line)) break;
-    commands.push(line.trim());
-  }
-  if (!commands.length) throw new Error(`The "${stepName}" step lists no commands.`);
-  return commands;
 }
 
 function main() {
