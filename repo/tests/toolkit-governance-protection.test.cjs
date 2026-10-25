@@ -347,8 +347,41 @@ test('P-17: the reader is default-deny: YAML outside its plain subset is unverif
       assert.match(result.P4.details.join('\n'), /other than printable ASCII/, `${JSON.stringify(space)} ${form}`);
     }
   }
-  // Non-ASCII text on a full-line comment is fine.
-  assert.equal(verdicts(`# Café — checks\n${aggregate()}`).P4.status, 'ok');
+  // Comments are held to printable ASCII too: YAML 1.1 parsers end a comment at NEL, LS or PS, so
+  // what follows would be read as a key (also on a comment-like line inside a block scalar).
+  assert.equal(verdicts(`# plain comment\n${aggregate()}`).P4.status, 'ok', 'ASCII comment');
+  for (const ch of ['\u0085', '\u2028', '\u2029', '\u0001', '\u007f', '\u00e9']) {
+    const forms = {
+      comment: aggregate([`        # note${ch}        continue-on-error: true`]),
+      'top comment': `# note${ch}x: y\n${aggregate()}`,
+      'comment-like run line': aggregate().replace('        run: node repo/scripts/run-tests.cjs --verify-ci s', `        run: |\n          # note${ch}        continue-on-error: true\n          node repo/scripts/run-tests.cjs --verify-ci s`),
+    };
+    for (const [form, text] of Object.entries(forms)) {
+      const result = verdicts(text);
+      assert.equal(result.P4.status, 'unverified', `${JSON.stringify(ch)} ${form}`);
+      assert.match(result.P4.details.join('\n'), /other than printable ASCII/, `${JSON.stringify(ch)} ${form}`);
+    }
+  }
+  // Every YAML null spelling of a job name is no name, never a literal one; a quoted "null" is a name.
+  const named = value => ['on: [pull_request]', 'jobs:', '  fast:', `    name: ${value}`, '    runs-on: ubuntu-latest', ''].join('\n');
+  const plainProducer = ['on: [pull_request]', 'jobs:', '  validate:', '    runs-on: ubuntu-latest', ''].join('\n');
+  const pair = (first, second) => protection.producerVerdict(['validate'], [{ file: 'a.yml', workflow: protection.readWorkflow(first) }, { file: 'b.yml', workflow: protection.readWorkflow(second) }], 'main');
+  for (const spelling of ['~', 'null', 'Null', 'NULL']) assert.equal(pair(plainProducer, named(spelling)).P3.status, 'unverified', `name: ${spelling}`);
+  assert.equal(pair(plainProducer, named('"null"')).P3.status, 'ok', 'quoted "null" is a real name');
+  // Shapes GitHub itself rejects are outside the subset.
+  for (const [name, text] of Object.entries({
+    'block first line deeper than a later line': aggregate().replace('        run: node repo/scripts/run-tests.cjs --verify-ci s', '        run: |\n            node a.cjs\n          node repo/scripts/run-tests.cjs --verify-ci s'),
+    'indented document then a column-0 key': `  on: [pull_request]\n  jobs:\n    validate:\n      runs-on: ubuntu-latest\nname: x\n`,
+    'lone ~ in a flow list': ['on: [pull_request]', 'jobs:', '  validate:', '    needs: [~]', '    runs-on: ubuntu-latest', ''].join('\n'),
+    'lone - in a flow list': ['on: [pull_request]', 'jobs:', '  validate:', '    needs: [-]', '    runs-on: ubuntu-latest', ''].join('\n'),
+  })) {
+    const result = verdicts(text);
+    assert.equal(result.P4.status, 'unverified', name);
+    assert.match(result.P4.details.join('\n'), /outside the YAML subset/, name);
+  }
+  // Only a plain `on` key is the trigger: a quoted "true" (YAML 1.1's reading of on) is not.
+  const quotedTrue = ['"true":', '  pull_request:', 'jobs:', '  validate:', '    runs-on: ubuntu-latest', ''].join('\n');
+  assert.notEqual(verdicts(quotedTrue).P4.status, 'ok', 'quoted "true" is not on');
   // A byte order mark is removed before both checking and reading: a sole workflow reads in full,
   // and a second workflow that also produces the check is seen (two producers: drift).
   const bom = '﻿';

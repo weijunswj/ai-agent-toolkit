@@ -240,9 +240,10 @@ function aggregateProblem(job, workflowContext) {
 // The reader follows only a small, plain subset of YAML, and any line outside it makes the whole
 // workflow unverified, so YAML it cannot follow can never hide a condition, a shell or a producer:
 //
-//   - printable ASCII with LF or CRLF line ends, except on full-line comments (so no tab, lone
-//     CR, non-ASCII space, zero-width or look-alike character can change how a line splits); a
-//     single leading byte order mark is removed before both checking and reading;
+//   - printable ASCII with LF or CRLF line ends on every line, comments included (so no tab, lone
+//     CR, control character, Unicode line break, non-ASCII space, zero-width or look-alike
+//     character can change how a line splits); a single leading byte order mark is removed before
+//     both checking and reading;
 //   - one document (a single leading `---` is allowed; no later `---` or `...`, no `%` directives);
 //   - every line outside a block scalar is `key:`, `key: value`, `- key:`, `- key: value` or
 //     `- value`, with exactly one space after `-`, a plain or simply quoted key, and no duplicate
@@ -258,7 +259,9 @@ function aggregateProblem(job, workflowContext) {
 // A key line: a plain or simply quoted key, spaces, a colon, then nothing or spaces and the value.
 // Each part's characters exclude the next part's, so matching stays linear in the line length.
 const KEY_LINE = /^(?:([A-Za-z0-9_][A-Za-z0-9_.-]*)|"([A-Za-z0-9_.-][A-Za-z0-9_ .-]*)"|'([A-Za-z0-9_.-][A-Za-z0-9_ .-]*)') *:(?: +(.*))?$/;
-const FLOW_ITEM = /^(?:(?:[A-Za-z0-9_./$+=~]|-(?! ))[^,\[\]{}"'#:]*|"[^"\\]*"|'(?:[^']|'')*')$/;
+const FLOW_ITEM = /^(?!~$|-$)(?:(?:[A-Za-z0-9_./$+=~]|-(?! ))[^,\[\]{}"'#:]*|"[^"\\]*"|'(?:[^']|'')*')$/;
+// The YAML spellings of null: a field written this way is empty, not a value.
+const YAML_NULL = /^(?:~|null|Null|NULL)$/;
 const BLOCK_KEYS = Object.freeze(['run', 'if', 'shell', 'continue-on-error']);
 
 function plainValueProblem(value) {
@@ -287,6 +290,8 @@ function strictSubsetProblem(source) {
   if (/\r(?!\n)/.test(source)) return 'it has a lone carriage return';
   const raw = source.replace(/\r\n/g, '\n').split('\n');
   let block = null; // the content indent of the key that opened a block scalar
+  let blockContent = null; // the indent of that block's first content line
+  let rootOpened = false; // a new root mapping may open only before the first key
   let expectDeeper = null; // the content indent after `key:`, until the next line
   let noDeeper = null; // the content indent after a scalar value
   let seenContent = false;
@@ -294,12 +299,19 @@ function strictSubsetProblem(source) {
   for (let index = 0; index < raw.length; index += 1) {
     const line = raw[index];
     const number = index + 1;
-    // Only printable ASCII, except on a full-line comment.
-    if (/[^\x20-\x7e]/.test(line) && !/^ *#/.test(line)) return `line ${number} has a character other than printable ASCII (a tab, a non-ASCII space or another character)`;
+    // Only printable ASCII on every line, comments included: some YAML parsers end a comment at
+    // NEL, LS or PS, so no character outside the plain set is safe anywhere.
+    if (/[^\x20-\x7e]/.test(line)) return `line ${number} has a character other than printable ASCII (a tab, a control character, a non-ASCII space, a Unicode line break or another character)`;
     const indent = line.length - line.replace(/^ +/, '').length;
     const trimmed = line.trim();
     if (block !== null) {
-      if (!trimmed || indent > block) continue;
+      if (!trimmed) continue;
+      if (indent > block) {
+        // The first content line sets the block's indent; a later line may not sit shallower.
+        if (blockContent === null) blockContent = indent;
+        else if (indent < blockContent) return `line ${number} sits shallower than the first line of its block scalar`;
+        continue;
+      }
       block = null;
     }
     if (!trimmed || trimmed.startsWith('#')) continue;
@@ -343,7 +355,10 @@ function strictSubsetProblem(source) {
       if (top && top.type === 'map' && top.indent === indent) {
         if (top.keys.has(key)) return `line ${number} repeats the key "${key}"`;
         top.keys.add(key);
-      } else if ((pending !== null && indent > pending) || containers.length === 0) containers.push({ type: 'map', indent, keys: new Set([key]) });
+      } else if ((pending !== null && indent > pending) || (containers.length === 0 && !rootOpened)) {
+        rootOpened = true;
+        containers.push({ type: 'map', indent, keys: new Set([key]) });
+      }
       else return `line ${number} has a key at an indent that belongs to no mapping`;
     }
     if (value === '') { expectDeeper = contentIndent; continue; }
@@ -352,6 +367,7 @@ function strictSubsetProblem(source) {
     if (/^[|>][+-]?$/.test(value)) {
       if (!BLOCK_KEYS.includes(key)) return `line ${number} gives "${key}" a block scalar, which this check reads only for ${BLOCK_KEYS.join(', ')}`;
       block = contentIndent;
+      blockContent = null;
       continue;
     }
     noDeeper = contentIndent;
@@ -367,7 +383,7 @@ function readWorkflow(input) {
   const lines = significantLines(text);
   const top = children(lines, 0, lines.length);
   const triggers = new Map();
-  const on = top.find(entry => entry.key === 'on' || entry.key === 'true');
+  const on = top.find(entry => entry.key === 'on' && lines[entry.index].text.startsWith('on'));
   if (on) {
     const scalar = on.value.trim();
     const listed = inlineList(scalar);
@@ -400,7 +416,8 @@ function readWorkflow(input) {
       const field = key => fields.find(entry => entry.key === key);
       const nameField = field('name');
       const nameValue = nameField ? scalarValue(lines, nameField) : job.key;
-      const name = typeof nameValue === 'string' ? nameValue : '';
+      // An empty name and every plain YAML null spelling are the same value: never a guess.
+      const name = typeof nameValue === 'string' && !(nameField && YAML_NULL.test(nameField.value.trim())) ? nameValue : '';
       const needsField = field('needs');
       const strategy = field('strategy');
       const matrix = strategy ? children(lines, strategy.index + 1, strategy.end).some(entry => entry.key === 'matrix') : false;
