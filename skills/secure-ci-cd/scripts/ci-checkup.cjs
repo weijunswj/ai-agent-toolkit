@@ -15,8 +15,8 @@
 //   --json       machine-readable report
 // Tests may pass `jobTimes` (a Map of "workflow / job" to seconds) and `requiredChecks` (a list, or
 // null for unknown) to checkup() instead of reading them through gh.
-// git and gh run by full path from PATH entries outside the target repository, never with the
-// target as the working folder, so nothing the repository holds can run.
+// git and gh run by full path from PATH entries outside the target repository, from a working
+// folder outside it, so nothing the repository holds can run.
 // Settings: <repo>/.github/ci-checkup.json (optional), schema ci-checkup/v1:
 //   { "schema": "ci-checkup/v1",
 //     "status_doc": "docs/ci-cd/CURRENT_CICD_STATUS.md",
@@ -129,16 +129,16 @@ function resolveExecutable(name, root, { environment = process.env, platform = p
 }
 
 // Runs a resolved program outside the repository, with no prompts and no optional git locks.
-function run(cmd, args) {
+function run(cmd, args, cwd = os.tmpdir()) {
   if (!cmd) return { ok: false, out: '' };
   try {
     const env = { ...process.env, GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0', GH_PROMPT_DISABLED: '1' };
-    const result = childProcess.spawnSync(cmd, args, { cwd: os.tmpdir(), env, encoding: 'utf8', timeout: 60000, windowsHide: true, maxBuffer: 64 * 1024 * 1024 });
+    const result = childProcess.spawnSync(cmd, args, { cwd, env, encoding: 'utf8', timeout: 60000, windowsHide: true, maxBuffer: 64 * 1024 * 1024 });
     return result.error ? { ok: false, out: '' } : { ok: result.status === 0, out: result.stdout || '' };
   } catch { return { ok: false, out: '' }; }
 }
 // git against the repository by -C, with the file-system monitor hook off so no configured program runs.
-function git(tools, root, args) { return run(tools.git, ['-C', root, '-c', 'core.fsmonitor=false', ...args]); }
+function git(tools, root, args) { return run(tools.git, ['-C', root, '-c', 'core.fsmonitor=false', ...args], tools.cwd); }
 
 // ---------------------------------------------------------------------------------------------
 // Repository files.
@@ -355,7 +355,8 @@ function commandLines(text, baseDir) {
   const out = [];
   let dir = baseDir;
   for (const raw of text.split('\n')) {
-    for (const part of raw.split(/&&|;/)) {
+    // A comment names a file without running it.
+    for (const part of raw.replace(/(^|\s)#.*$/, '').split(/&&|;/)) {
       const cmd = part.trim();
       if (!cmd || cmd.startsWith('#')) continue;
       const cd = cmd.match(/^cd\s+(\S+)$/);
@@ -419,19 +420,29 @@ function moduleRuns(files, text) {
 
 // Files a command starts: its first word, or a word after an interpreter (and that
 // interpreter's own options). A file a command only names (`py_compile x.py`, `ruff check x.py`)
-// is not started.
+// or only syntax-checks (`bash -n`, `node --check`) is not started.
 const INTERPRETER = /^(node|nodejs|python[0-9.]*|py|bash|sh|zsh|pwsh|powershell|deno|bun|tsx|ts-node|ruby|perl|-file)$/i;
+const SYNTAX_ONLY = { node: /^(--check|-c)$/, nodejs: /^(--check|-c)$/, bash: /^-[a-z]*n[a-z]*$/, sh: /^-[a-z]*n[a-z]*$/, zsh: /^-[a-z]*n[a-z]*$/ };
 function startedFiles(files, cmd, dirs) {
   const out = new Set();
-  const words = cmd.split(/\s+/).map(unquote).filter(Boolean);
-  words.forEach((word, i) => {
+  const words = cmd.split(/\s+/).filter(Boolean);
+  const hash = words.findIndex((word) => word.startsWith('#'));
+  if (hash >= 0) words.length = hash;
+  const program = (word) => unquote(word).replace(/^.*[\\/]/, '').replace(/\.exe$/i, '').toLowerCase();
+  words.forEach((raw, i) => {
+    const word = unquote(raw);
     let j = i - 1;
     while (j >= 0 && words[j].startsWith('-') && !INTERPRETER.test(words[j])) j--;
-    const starts = i === 0 || (j >= 0 && INTERPRETER.test(words[j].replace(/^.*[\\/]/, '').replace(/\.exe$/i, '')));
-    if (!starts) return;
+    const interpreter = j >= 0 && INTERPRETER.test(program(words[j])) ? program(words[j]) : null;
+    if (interpreter && SYNTAX_ONLY[interpreter] && words.slice(j + 1, i).some((option) => SYNTAX_ONLY[interpreter].test(option))) return;
+    // `-m pkg.mod` counts only straight after python.
+    if (word === '-m' && interpreter && /^(python[0-9.]*|py)$/.test(interpreter) && words[i + 1]) {
+      for (const rel of moduleRuns(files, `-m ${unquote(words[i + 1])}`)) out.add(rel);
+      return;
+    }
+    if (i !== 0 && !interpreter) return;
     for (const dir of dirs) { const rel = norm(path.posix.join(dir, word.replace(/\\/g, '/'))); if (rel && files.has(rel)) out.add(rel); }
   });
-  for (const rel of moduleRuns(files, cmd)) out.add(rel);
   return out;
 }
 
@@ -681,7 +692,7 @@ function checkScripts(root, fileList, analysis) {
 }
 
 function ghJson(tools, args) {
-  const result = run(tools.gh, args);
+  const result = run(tools.gh, args, tools.cwd);
   if (!result.ok) return null;
   try { return JSON.parse(result.out); } catch { return null; }
 }
@@ -691,7 +702,7 @@ function ghJson(tools, args) {
 function githubRepo(root, tools) {
   if (tools.githubRepo !== undefined) return tools.githubRepo;
   tools.githubRepo = null;
-  if (!tools.gh || !run(tools.gh, ['auth', 'status']).ok) return null;
+  if (!tools.gh || !run(tools.gh, ['auth', 'status'], tools.cwd).ok) return null;
   const origin = git(tools, root, ['remote', 'get-url', 'origin']).out.trim();
   const match = origin.match(/github\.com[:/]([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/);
   if (!match) return null;
@@ -783,7 +794,18 @@ function checkSpeed(root, fileList, workflows, analysis, settings, options) {
   return items;
 }
 
+// A required check names a job by its id or name, with a matrix suffix ` (a, b)`, or as
+// `<caller job> / <job>` when the job calls a reusable workflow.
+function namesJob(job, name) {
+  const bare = name.replace(/\s+\(.*\)$/, '');
+  return [job.id, job.name].filter(Boolean).some((jobName) => bare === jobName || name.startsWith(`${jobName} / `));
+}
+
 function checkHygiene(fileList, workflows, root, requiredChecks = null) {
+  // A job name built from an expression (`Node ${{ matrix.node }}`) reports under a name the file
+  // does not hold; when a required check then matches no job, whether this workflow holds it is unknown.
+  const unmatched = (requiredChecks || []).filter((name) => !workflows.some((w) => w.jobs.some((job) => namesJob(job, name))));
+  const unsureNames = (workflow) => unmatched.length > 0 && workflow.jobs.some((job) => /\$\{\{/.test(job.name || '') || job.uses);
   const items = [];
   for (const workflow of workflows) {
     const lines = workflow.text.split('\n');
@@ -810,7 +832,7 @@ function checkHygiene(fileList, workflows, root, requiredChecks = null) {
         if (masked) items.push(item(testy(step.run || '', step.name) ? 'GAP' : 'CHECK', 'hygiene.masked', `${workflow.rel}:${step.line}`, `step "${(step.name || step.run || '').split('\n')[0].trim()}" can hide a failing command (continue-on-error, || true, set +e or a shell without -e)`, 'let the command fail the step; handle an expected failure explicitly instead'));
       }
     }
-    const required = requiredChecks === null ? null : workflow.jobs.some((job) => requiredChecks.some((name) => [job.id, job.name].includes(name.replace(/\s+\(.*\)$/, ''))));
+    const required = requiredChecks === null || unsureNames(workflow) ? null : workflow.jobs.some((job) => requiredChecks.some((name) => namesJob(job, name)));
     if (workflow.prPathFilters && required !== false) items.push(item('CHECK', 'hygiene.paths', workflow.rel, 'the pull request trigger has path filters; if any job here is a required check, PRs that skip it wait on "Pending" forever', 'drop the path filter from required workflows, or keep it only on workflows that are not required'));
   }
   if (workflows.some((w) => /^\s*(?:-\s+)?uses:\s*['"]?[\w.-]+\//m.test(w.text))) {
@@ -865,8 +887,13 @@ function ignoredBy(entry, ignore) {
 }
 
 function checkup(root, options = {}) {
+  root = path.resolve(root);
   const opts = { github: true, gh: 'gh', runs: DEFAULTS.runs, base: null, ...options };
-  const tools = { git: resolveExecutable(opts.git || 'git', root), gh: opts.github ? resolveExecutable(opts.gh, root) : null };
+  // The working folder for git and gh: the temp folder, or the folder above the repository when
+  // the temp folder sits inside it.
+  const temp = path.relative(realRoot(root), (() => { try { return fs.realpathSync(os.tmpdir()); } catch { return os.tmpdir(); } })());
+  const cwd = !temp.startsWith('..') && !path.isAbsolute(temp) ? path.dirname(realRoot(root)) : os.tmpdir();
+  const tools = { cwd, git: resolveExecutable(opts.git || 'git', root), gh: opts.github ? resolveExecutable(opts.gh, root) : null };
   opts.tools = tools;
   if (opts.base !== null && opts.base !== undefined && (typeof opts.base !== 'string' || !opts.base || opts.base.startsWith('-'))) throw new UsageError('--base must be a ref that does not start with -');
   const settings = loadSettings(root);

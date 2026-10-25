@@ -48,6 +48,17 @@ function report(files, options = {}) {
   finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
 
+// Tests that let the check-up look for gh point it at an empty config folder with no token, so a
+// logged-in machine makes no GitHub call.
+function offlineGh(t) {
+  const saved = { ...process.env };
+  const config = fs.mkdtempSync(path.join(os.tmpdir(), 'ci-checkup-gh-'));
+  process.env.GH_CONFIG_DIR = config;
+  for (const key of ['GH_TOKEN', 'GITHUB_TOKEN', 'GH_ENTERPRISE_TOKEN', 'GITHUB_ENTERPRISE_TOKEN']) delete process.env[key];
+  t.after(() => { for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key]; Object.assign(process.env, saved); fs.rmSync(config, { recursive: true, force: true }); });
+  return process.env;
+}
+
 function hits(items, check, rel) {
   return items.filter((entry) => entry.check === check && (rel === undefined || entry.path.replace(/:\d+$/, '') === rel));
 }
@@ -320,6 +331,7 @@ test('git and gh resolve to absolute paths outside the repository and never star
   const seen = [];
   childProcess.spawnSync = (command, args, options) => { seen.push({ command, cwd: options && options.cwd }); return real(command, args, options); };
   t.after(() => { childProcess.spawnSync = real; });
+  offlineGh(t);
   const dir = fixture({ 'tools/once.sh': '', '.github/workflows/ci.yml': WORKFLOW('echo ok'), 'docs/ci-cd/CURRENT_CICD_STATUS.md': STATUS('ci.yml') });
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const bin = path.join(dir, 'bin');
@@ -329,6 +341,10 @@ test('git and gh resolve to absolute paths outside the repository and never star
   const saved = process.env.PATH;
   process.env.PATH = [dir, bin, '.', saved].join(path.delimiter);
   t.after(() => { process.env.PATH = saved; });
+  checkup.checkup(dir, { github: true });
+  // Again with the temp folder inside the repository.
+  fs.mkdirSync(path.join(dir, '.tmp'));
+  for (const key of ['TMPDIR', 'TEMP', 'TMP']) process.env[key] = path.join(dir, '.tmp');
   checkup.checkup(dir, { github: true });
   assert.ok(seen.length > 0, 'git ran');
   const realDir = fs.realpathSync(dir).toLowerCase();
@@ -355,7 +371,7 @@ test('a git.exe and gh.exe planted in the repository do not run', { skip: proces
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   // The planted copies are node.exe, so they would run and answer instead of git or gh if started.
   for (const name of ['git.exe', 'gh.exe']) { try { fs.linkSync(process.execPath, path.join(dir, name)); } catch { fs.copyFileSync(process.execPath, path.join(dir, name)); } }
-  const env = { ...process.env };
+  const env = { ...offlineGh(t) };
   for (const key of Object.keys(env)) if (key.toLowerCase() === 'nodefaultcurrentdirectoryinexepath') delete env[key];
   const probe = `const childProcess = require('node:child_process');
 const seen = [];
@@ -385,6 +401,16 @@ test('required checks: any read that fails is unknown, never "nothing required"'
   assert.deepEqual(checkup.requiredCheckNames(api({ [b]: { protected: true }, [r]: [{ type: 'required_status_checks', parameters: { required_status_checks: [{ context: 'lint' }] } }], [p]: { contexts: ['test'], checks: [] } }), 'o/r', 'main'), ['lint', 'test']);
   const workflow = WORKFLOW('pytest').replace('  pull_request:\n', "  pull_request:\n    paths: ['src/**']\n");
   assert.equal(hits(report({ '.github/workflows/ci.yml': workflow }, { requiredChecks: null }), 'hygiene.paths').length, 1, 'unknown keeps the CHECK');
+  const on = "name: CI\non:\n  pull_request:\n    paths: ['src/**']\npermissions: {}\njobs:\n";
+  const paths = (jobs, required) => hits(checkup.checkHygiene([], [checkup.parseWorkflow('.github/workflows/ci.yml', on + jobs)], '.', required), 'hygiene.paths').length;
+  assert.equal(paths('  call:\n    uses: ./.github/workflows/reusable.yml\n', ['call / test']), 1, 'a reusable workflow job reports as <caller> / <job>');
+  assert.equal(paths('  test:\n    name: Node ${{ matrix.node }}\n    runs-on: ubuntu-latest\n    steps:\n      - run: npm test\n', ['Node 20']), 1, 'an expression name is unknown');
+  assert.equal(paths('  test:\n    name: Node ${{ matrix.node }}\n    runs-on: ubuntu-latest\n    steps:\n      - run: npm test\n', []), 0, 'nothing required');
+  assert.equal(paths('  call:\n    uses: ./.github/workflows/reusable.yml\n', ['lint']), 1, 'a reusable workflow may hold the unmatched check');
+  assert.equal(paths('  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: npm test\n', ['lint']), 0, 'the required check is elsewhere');
+  const caller = checkup.parseWorkflow('.github/workflows/call.yml', 'name: Call\non: push\njobs:\n  call:\n    uses: ./.github/workflows/reusable.yml\n');
+  const matrix = checkup.parseWorkflow('.github/workflows/ci.yml', on + '  build:\n    name: Node ${{ matrix.node }}\n    runs-on: ubuntu-latest\n    steps:\n      - run: npm run build\n');
+  assert.equal(hits(checkup.checkHygiene([], [caller, matrix], '.', ['call / test']), 'hygiene.paths').length, 0, 'the check matched its reusable caller, so the other workflow holds none');
 });
 
 test('scripts: a script CI only names (compiles or lints) is not counted as run', () => {
@@ -393,6 +419,11 @@ test('scripts: a script CI only names (compiles or lints) is not counted as run'
   assert.deepEqual(hits(items, 'scripts.untested').map((e) => e.path), ['scripts/x.py', 'scripts/y.py']);
   const run = report({ ...files, '.github/workflows/ci.yml': WORKFLOW('|\n          python -u scripts/x.py\n          ./scripts/y.py') });
   assert.deepEqual(hits(run, 'scripts.untested'), []);
+  const named = { 'scripts/x.sh': '', 'scripts/y.js': '', 'tests/smoke.py': '', 'smoke.py': '' };
+  const quiet = report({ ...named, '.github/workflows/ci.yml': WORKFLOW('|\n          echo ok # bash scripts/x.sh\n          bash -n scripts/x.sh\n          node --check scripts/y.js\n          pytest -m smoke') });
+  assert.deepEqual(hits(quiet, 'scripts.untested').map((e) => e.path), ['scripts/x.sh', 'scripts/y.js', 'smoke.py'], 'a comment, a syntax check and a pytest marker run nothing');
+  const started = report({ ...named, '.github/workflows/ci.yml': WORKFLOW('|\n          bash -e scripts/x.sh\n          node scripts/y.js\n          python -m smoke') });
+  assert.deepEqual(hits(started, 'scripts.untested'), []);
 });
 
 test('--base leaves the git index untouched and refuses a ref that starts with -', () => {
@@ -411,22 +442,35 @@ test('--base leaves the git index untouched and refuses a ref that starts with -
     checkup.checkup(dir, { github: false, base: 'HEAD' });
     assert.deepEqual(fs.readFileSync(index), before);
     assert.equal(fs.statSync(index).mtimeMs, beforeTime);
+    const saved = process.cwd();
+    process.chdir(dir);
+    // Without an index refresh a touched file counts as changed; that only widens the report.
+    try { assert.deepEqual(checkup.checkup('.', { github: false, base: 'HEAD' }).items.map((e) => e.path), ['tools/old.sh'], 'a relative root works with git'); }
+    finally { process.chdir(saved); }
     const result = spawnSync(process.execPath, [SCRIPT, '--repo', dir, '--no-github', '--base', '--output=x'], { encoding: 'utf8' });
     assert.equal(result.status, 2, result.stderr);
     assert.equal(fs.existsSync(path.join(dir, 'x')), false);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('a link that leads out of the repository is not read', (t) => {
-  const outside = fixture({ 'secret.cjs': "require('./x');\n", 'a.test.js': '' });
-  const dir = fixture({ '.github/workflows/ci.yml': WORKFLOW('echo ok'), 'docs/ci-cd/CURRENT_CICD_STATUS.md': STATUS('ci.yml') });
+test('a file whose real location is outside the repository is not read', (t) => {
+  const outside = fixture({ 'STATUS.md': STATUS('ci.yml'), 'tests/a.test.js': '', 'secret.cjs': '' });
+  const dir = fixture({ '.github/workflows/ci.yml': WORKFLOW('echo ok') });
   t.after(() => { fs.rmSync(dir, { recursive: true, force: true }); fs.rmSync(outside, { recursive: true, force: true }); });
-  try {
-    fs.symlinkSync(path.join(outside, 'secret.cjs'), path.join(dir, 'linked.cjs'));
-    fs.symlinkSync(outside, path.join(dir, 'away'), 'dir');
-  } catch { t.skip('links are not allowed here'); return; }
-  const items = checkup.checkup(dir, { github: false }).items;
-  assert.deepEqual(items.filter((e) => /linked\.cjs|away\//.test(e.path)), []);
+  // A status document named by a path that climbs out of the repository is not read.
+  fs.mkdirSync(path.join(dir, '.github'), { recursive: true });
+  fs.writeFileSync(path.join(dir, '.github', 'ci-checkup.json'), JSON.stringify({ schema: 'ci-checkup/v1', status_doc: `../${path.basename(outside)}/STATUS.md` }));
+  assert.deepEqual(hits(checkup.checkup(dir, { github: false }).items, 'status.doc').map((e) => e.message), ['no CI status document']);
+  // A folder link (a junction on Windows, which needs no privilege): git lists the files under a
+  // junction, so only the real-location test keeps them out.
+  try { fs.symlinkSync(path.join(outside, 'tests'), path.join(dir, 'away'), process.platform === 'win32' ? 'junction' : 'dir'); }
+  catch { t.skip('folder links are not allowed here'); return; }
+  try { fs.symlinkSync(path.join(outside, 'secret.cjs'), path.join(dir, 'linked.cjs')); } catch { /* file links need privilege on Windows */ }
+  for (const useGit of [false, true]) {
+    if (useGit) assert.equal(spawnSync('git', ['init', '-q'], { cwd: dir }).status, 0);
+    const items = checkup.checkup(dir, { github: false }).items;
+    assert.deepEqual(items.filter((e) => /linked\.cjs|away\//.test(e.path)), [], useGit ? 'with git' : 'folder walk');
+  }
 });
 
 test('scripts: each coverage rule counts on its own', () => {
@@ -460,6 +504,8 @@ test('scripts: a test named after a longer script does not cover the shorter one
 test('hygiene: path filters are found in flow style and at any indentation', () => {
   const flow = WORKFLOW('pytest').replace("on:\n  pull_request:\n  push:\n    branches: [main]\n", "on:\n  pull_request: { paths: ['src/**'] }\n");
   const deep = WORKFLOW('pytest').replace("on:\n  pull_request:\n  push:\n    branches: [main]\n", "on:\n    pull_request:\n        branches: [main]\n        paths-ignore:\n            - docs/**\n    push:\n        branches: [main]\n");
+  const fullyFlow = "name: CI\non: { pull_request: { paths: ['src/**'] }, push: {} }\njobs: {}\n";
+  const fullyFlowPush = "name: CI\non: { pull_request: {}, push: { paths: ['src/**'] } }\njobs: {}\n";
   const pushOnly = WORKFLOW('pytest').replace("  push:\n    branches: [main]\n", "  push:\n    paths: ['src/**']\n");
-  for (const [text, want] of [[flow, true], [deep, true], [pushOnly, false]]) assert.equal(checkup.parseWorkflow('.github/workflows/ci.yml', text).prPathFilters, want, text);
+  for (const [text, want] of [[flow, true], [deep, true], [fullyFlow, true], [fullyFlowPush, false], [pushOnly, false]]) assert.equal(checkup.parseWorkflow('.github/workflows/ci.yml', text).prPathFilters, want, text);
 });
