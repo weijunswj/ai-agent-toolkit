@@ -238,6 +238,7 @@ function verifyCiSummaries({ manifest, discovered, summaries, needs }) {
 
 const RUNNER = { linux: 'ubuntu-latest', windows: 'windows-latest' };
 const VERIFY_COMMAND = 'node repo/scripts/run-tests.cjs --verify-ci "$RUNNER_TEMP/test-summaries"';
+const GATE_STEP = 'Run validation';
 const AGGREGATE_HEADER = [
   '  validate:',
   '    needs: [tests-linux, tests-windows, personal-data]',
@@ -246,10 +247,14 @@ const AGGREGATE_HEADER = [
   '    timeout-minutes: 15',
   '    steps:',
 ];
+// A gate command other than the last: one repository script with plain arguments and no shell syntax.
+const PLAIN_GATE_COMMAND = /^node repo\/scripts\/[A-Za-z0-9._-]+\.cjs( [A-Za-z0-9._=\/-]+)*$/;
 // Ways to make a test step pass without running the tests; none may appear anywhere in the workflow.
 const FORBIDDEN = [
   [/continue-on-error/, 'continue-on-error'],
-  [/\|\|\s*(true|exit|:)/, 'a command that hides a failure with ||'],
+  [/\|\|\s*(true|exit|:|echo\b)/, 'a command that hides a failure with ||'],
+  [/\bset\s+\+e\b/, 'set +e'],
+  [/^\s*shell:/m, 'a shell: setting (a custom shell can drop bash -e)'],
   [/(^|[;&|]\s*|\s)exit\s+0\b/m, 'exit 0'],
   [/--test-(name|skip)-pattern|--test-only|--test-shard/, 'a node --test filter'],
   [/^\s*if:\s*(false|\$\{\{\s*false\s*\}\})\s*$/m, 'if: false'],
@@ -324,6 +329,64 @@ const PERSONAL_DATA_JOB = [
   '        run: node skills/secure-ci-cd/scripts/personal-data-guard.cjs ci',
 ].join('\n');
 
+// The exact text of the validate job around its gate commands. The commands stay listed only in
+// validate.yml, the one gate list; each is checked on its own (PLAIN_GATE_COMMAND, VERIFY_COMMAND last).
+function validateJobText(commands) {
+  return [
+    ...AGGREGATE_HEADER,
+    '      - name: Checkout',
+    '        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1',
+    '        with:',
+    '          fetch-depth: 0',
+    '          persist-credentials: false',
+    '',
+    '      - name: Set up Node',
+    '        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0',
+    '        with:',
+    '          node-version: 22',
+    '',
+    '      - name: Download test summaries',
+    '        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1',
+    '        with:',
+    '          pattern: test-summary-*',
+    '          path: ${{ runner.temp }}/test-summaries',
+    '          merge-multiple: true',
+    '',
+    '      - name: Set up Python',
+    '        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0',
+    '        with:',
+    "          python-version: '3.12'",
+    '',
+    '      # The one gate list: `npm run validate:all` runs these same commands (repo/scripts/run-validation-gate.cjs),',
+    '      # except that locally the last command runs every test file instead of checking the shard summaries.',
+    '      - name: Run validation',
+    '        env:',
+    '          DIFF_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}',
+    '          TEST_LEGS: ${{ toJSON(needs) }}',
+    '        run: |',
+    ...commands.map((command) => `          ${command}`),
+  ].join('\n');
+}
+
+// The commands of the named step's `run: |` block, one per line.
+function gateCommands(source, stepName = GATE_STEP) {
+  const lines = source.replace(/\r\n/g, '\n').split('\n');
+  const start = lines.findIndex((line) => line === `      - name: ${stepName}`);
+  if (start === -1) throw new Error(`validate.yml has no "${stepName}" step.`);
+  const run = lines.findIndex((line, index) => index > start && /^ {8}run: \|\s*$/.test(line));
+  const nextStep = lines.findIndex((line, index) => index > start && /^ {6}- /.test(line));
+  if (run === -1 || (nextStep !== -1 && run > nextStep)) throw new Error(`The "${stepName}" step has no multi-line run block.`);
+  const commands = [];
+  for (let index = run + 1; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (line.trim() === '') continue;
+    if (!/^ {10}\S/.test(line)) break;
+    commands.push(line.trim());
+  }
+  if (!commands.length) throw new Error(`The "${stepName}" step lists no commands.`);
+  return commands;
+}
+
 // The jobs of a workflow, keyed by id, each with its text (trailing blank lines dropped).
 function workflowJobs(source) {
   const lines = source.replace(/\r\n/g, '\n').split('\n');
@@ -344,8 +407,9 @@ function workflowJobs(source) {
 }
 
 // Drift guard for .github/workflows/validate.yml: the test jobs match the manifest exactly, the
-// validate job waits for both, always runs and ends its gate step with the summary check, and no
-// step anywhere can turn a failure into a pass.
+// validate job matches its pinned text, waits for every leg, always runs, runs only plain repository
+// scripts and ends its gate step with the summary check, and no step anywhere can turn a failure
+// into a pass.
 function workflowErrors(source, manifest) {
   const errors = [];
   const text = source.replace(/\r\n/g, '\n');
@@ -361,6 +425,7 @@ function workflowErrors(source, manifest) {
   if (personalData !== undefined && personalData !== PERSONAL_DATA_JOB) errors.push('the personal-data job differs from its pinned text');
   const aggregate = jobs.get('validate');
   if (aggregate !== undefined) {
+    const before = errors.length;
     const lines = aggregate.split('\n');
     if (lines.slice(0, AGGREGATE_HEADER.length).join('\n') !== AGGREGATE_HEADER.join('\n')) errors.push('the validate job must start with needs: [tests-linux, tests-windows, personal-data], if: ${{ always() }}, runs-on: ubuntu-latest and timeout-minutes: 15');
     const names = lines.filter((line) => /^ {6}- name: /.test(line)).map((line) => line.replace(/^ {6}- name: /, ''));
@@ -368,6 +433,15 @@ function workflowErrors(source, manifest) {
     if (lines.filter((line) => /^ {8}if:/.test(line)).length) errors.push('no step in the validate job may have a condition');
     if (lines[lines.length - 1].trim() !== VERIFY_COMMAND) errors.push(`the Run validation step must end with ${VERIFY_COMMAND}`);
     if (!/^ {10}TEST_LEGS: \$\{\{ toJSON\(needs\) \}\}$/m.test(aggregate)) errors.push('the Run validation step must pass TEST_LEGS: ${{ toJSON(needs) }}');
+    let commands = null;
+    try { commands = gateCommands(aggregate); }
+    catch (error) { errors.push(error.message); }
+    if (commands) {
+      for (const command of commands.slice(0, -1)) {
+        if (!PLAIN_GATE_COMMAND.test(command)) errors.push(`the Run validation command "${command}" must be a plain node repo/scripts/<name>.cjs line with no shell syntax`);
+      }
+      if (aggregate !== validateJobText(commands) && errors.length === before) errors.push('the validate job differs from its pinned text');
+    }
   }
   return errors;
 }
@@ -401,6 +475,7 @@ module.exports = Object.freeze({
   assertManifest,
   discoverTestFiles,
   estimateShardSeconds,
+  gateCommands,
   loadManifest,
   manifestErrors,
   platformSystem,
@@ -411,6 +486,7 @@ module.exports = Object.freeze({
   systemShards,
   testFileErrors,
   testJobText,
+  validateJobText,
   verifyCiSummaries,
   workflowErrors,
   workflowJobs,

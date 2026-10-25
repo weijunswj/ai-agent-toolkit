@@ -1,5 +1,10 @@
 # Toolkit Changelog
 
+## Unreleased
+
+- **The CI drift guard pins the final `validate` job too:** every step except the gate command list must match its pinned text, each gate command must be a plain repository script line with no shell syntax, and `set +e`, `|| echo` and custom `shell:` settings are refused anywhere in `validate.yml`.
+- **No test file is skipped silently:** a `.test.cjs` entry in `repo/tests` with a name outside the allowed pattern, or a folder or link named like a test, now fails every runner mode instead of never running.
+
 ## 3.10.0 (host support, governance states, decision history and the personal-data guard)
 
 ### Decision history before planning

@@ -206,6 +206,44 @@ test('the workflow drift guard accepts validate.yml and rejects each way to narr
     assert.notEqual(mutated, WORKFLOW, `${label} must change the workflow`);
     assert.notDeepEqual(shards.workflowErrors(mutated, MANIFEST), [], `the drift guard must reject ${label}`);
   }
+  // The validate job is pinned too. Each of these is refused by the pinned job text or the plain
+  // command check on its own, not only by the forbidden-pattern list that covers the whole file.
+  const gateStep = '      - name: Run validation\n';
+  const firstCommand = '        run: |\n          node repo/scripts/sync-repo-doc-contract.cjs --check\n';
+  const validateMutations = [
+    ['a custom shell that drops bash -e', WORKFLOW.replace(gateStep, `${gateStep}        shell: bash {0}\n`)],
+    ['set +e before the gate commands', WORKFLOW.replace(firstCommand, firstCommand.replace('run: |\n', 'run: |\n          set +e\n'))],
+    ['|| echo on a gate command', WORKFLOW.replace('          node repo/scripts/validate-toolkit.cjs\n', '          node repo/scripts/validate-toolkit.cjs || echo skipped\n')],
+    ['; : after a gate command', WORKFLOW.replace('          node repo/scripts/audit-fallback-risk.cjs\n', '          node repo/scripts/audit-fallback-risk.cjs; :\n')],
+    ['two commands on one line', WORKFLOW.replace('          node repo/scripts/audit-fallback-risk.cjs\n', '          node repo/scripts/audit-fallback-risk.cjs; node repo/scripts/validate-toolkit.cjs\n')],
+    ['a gate command that is not a repository script', WORKFLOW.replace('          node repo/scripts/audit-fallback-risk.cjs\n', '          npx some-tool\n')],
+    ['a gate command with a shell expansion', WORKFLOW.replace('          node repo/scripts/audit-fallback-risk.cjs\n', '          node repo/scripts/audit-fallback-risk.cjs $(echo --skip)\n')],
+    ['the summary check run earlier as well', WORKFLOW.replace('          node repo/scripts/validate-toolkit.cjs\n', `          node repo/scripts/validate-toolkit.cjs\n${verify}\n`)],
+    ['an unnamed step before Run validation', WORKFLOW.replace(`      # The one gate list`, '      - run: echo hi\n\n      # The one gate list')],
+    ['the summaries not merged', WORKFLOW.replace('          merge-multiple: true', '          merge-multiple: false')],
+    ['the summaries downloaded elsewhere', WORKFLOW.replace('          path: ${{ runner.temp }}/test-summaries', '          path: ${{ runner.temp }}/other')],
+    ['a different download action', WORKFLOW.replace('actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1', 'actions/download-artifact@v8')],
+    ['the diff base removed', WORKFLOW.replace('          DIFF_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}\n', '')],
+    ['a shallow checkout in validate', WORKFLOW.replace(/(\n  validate:\n[\s\S]*?)fetch-depth: 0/, '$1fetch-depth: 1')],
+    ['an extra env value on the gate step', WORKFLOW.replace('          TEST_LEGS: ${{ toJSON(needs) }}\n', '          TEST_LEGS: ${{ toJSON(needs) }}\n          NODE_OPTIONS: --require ./x.cjs\n')],
+  ];
+  for (const [label, mutated] of validateMutations) {
+    assert.notEqual(mutated, WORKFLOW, `${label} must change the workflow`);
+    const errors = shards.workflowErrors(mutated, MANIFEST);
+    assert.ok(errors.some((error) => !error.startsWith('validate.yml must not contain')), `the validate job pin must reject ${label} (got: ${errors.join('; ') || 'nothing'})`);
+  }
+  // A workflow-wide default shell sits outside every job, so the forbidden-pattern list catches it.
+  const defaults = WORKFLOW.replace('\njobs:\n', '\ndefaults:\n  run:\n    shell: bash {0}\n\njobs:\n');
+  assert.notEqual(defaults, WORKFLOW);
+  assert.match(shards.workflowErrors(defaults, MANIFEST).join('\n'), /must not contain a shell: setting/);
+  for (const [label, text] of [['set +e', 'set +e'], ['|| echo', 'x || echo ok']]) {
+    assert.match(shards.workflowErrors(`${WORKFLOW}\n# ${text}\n`, MANIFEST).join('\n'), /must not contain/, label);
+  }
+  // A new gate check is one plain line in validate.yml and needs no change to the guard.
+  const added = WORKFLOW.replace('          node repo/scripts/check-diff-whitespace.cjs\n', '          node repo/scripts/check-diff-whitespace.cjs\n          node repo/scripts/new-check.cjs --check --root=repo/docs\n');
+  assert.notEqual(added, WORKFLOW);
+  assert.deepEqual(shards.workflowErrors(added, MANIFEST), []);
+  assert.deepEqual(shards.workflowErrors(WORKFLOW.replace(/\n/g, '\r\n'), MANIFEST), [], 'a CRLF checkout still matches');
   // A manifest shard that the workflow matrix does not run is drift too.
   const manifest = clone(MANIFEST);
   manifest.systems.linux.shards.splice(1, 0, { id: 'linux-9', files: [manifest.systems.linux.shards[0].files.pop()] });
