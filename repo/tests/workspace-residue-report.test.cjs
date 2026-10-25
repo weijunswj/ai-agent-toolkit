@@ -98,6 +98,9 @@ test('the report sorts worktrees and branches into ready to remove and look firs
   const branches = new Map(result.branches.map((item) => [item.name, item]));
   assert.equal(branches.has('lane/active'), false, 'the current branch is not listed');
   assert.deepEqual(branches.get('main').reasons, ['default branch, keep']);
+  // A base given as a commit names no branch and this checkout has no remote HEAD: main is still kept.
+  const byCommit = report.collect(f.repo, git(f.repo, ['rev-parse', 'main']));
+  assert.deepEqual(byCommit.branches.find((item) => item.name === 'main').reasons, ['default branch, keep']);
   assert.equal(branches.get('main').ready, false);
   assert.equal(branches.get('old/merged').ready, true);
   assert.deepEqual(branches.get('old/unmerged').reasons, ['not merged into main']);
@@ -132,7 +135,7 @@ test('the text report names what to run and never suggests --force or -D as an a
   const text = out.text();
   assert.match(text, /Nothing was changed\./);
   assert.match(text, /ready to remove: \.tmp\/worktrees\/merged \[lane\/merged, repo \.tmp\/worktrees\]/);
-  assert.ok(!text.includes(path.dirname(f.repo)), 'no absolute path is printed');
+  for (const form of [path.dirname(f.repo), path.dirname(f.repo).replace(/\\/g, '/')]) assert.ok(!text.includes(form), 'no absolute path is printed');
   assert.match(text, /look first: .*dirty .*\(1 uncommitted change\(s\)\)/);
   assert.match(text, /git worktree remove <path>, then git worktree prune\. A ready branch: git branch -d <name>\. Never --force or -D\./);
   const json = sink();

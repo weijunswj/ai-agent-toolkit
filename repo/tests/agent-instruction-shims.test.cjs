@@ -154,7 +154,7 @@ test('global rules hold the generic floor: precedence, entry routing, safety gat
     /no change, reuse, smallest root-cause fix, bounded simplification, new abstraction only if needed/,
     /fast-forward the local default-branch checkout only when it is on that branch and clean[^\n]*Never reset or force/,
     // Lane worktrees and branches once outlived their merge, and three rules named three worktree homes.
-    /\(e\.g\. `\.tmp\/`, worktrees in `\.tmp\/worktrees\/<lane>-<gate>`\)/,
+    /\(e\.g\. `\.tmp\/`, worktrees in `\.tmp\/worktrees\/<lane>-<gate>-<sha>`\)/,
     /`gh pr checks <PR> --watch --interval 60`/,
     /never claim CI passed without every required check/,
     /after two failed fixes, stop and report/,
@@ -188,7 +188,7 @@ test('the controller removes a merged lane worktree and branch without --force o
   // Lane worktrees and branches once outlived their merge; git worktree remove deletes ignored files
   // (kept evidence, .env) without --force, and git branch -d deletes a pushed unmerged branch.
   const controller = readText('repo/CONTROLLER.md');
-  assert.match(controller, /after a lane's PR merges, remove its worktree with `git worktree remove`, then `git worktree prune`, and its branch with `git branch -d` once `git merge-base --is-ancestor` finds it in the default branch, never `--force` or `-D`; keep and report a worktree that is dirty, locked, unmerged or holds ignored files, and a closed-unmerged PR's branch;/);
+  assert.match(controller, /after a lane's PR merges, remove its worktree with `git worktree remove`, then `git worktree prune`, and its branch with `git branch -d` once `git merge-base --is-ancestor` finds it in the default branch, never `--force` or `-D`; keep and report a worktree that is dirty, locked, unmerged or holds ignored files \(check `git status --ignored` first: `git worktree remove` deletes them\), and a closed-unmerged PR's branch;/);
 });
 
 test('gate rules hold the gate mechanics every gate session reads on demand', () => {
@@ -199,7 +199,7 @@ test('gate rules hold the gate mechanics every gate session reads on demand', ()
     /full G2 for RISKY, one independent review for NORMAL, the builder's own diff read for LIGHT/,
     /There are no handover packets/,
     // Lane worktrees and branches once outlived their merge.
-    /unless it needs its own worktree, then uses `\.tmp\/worktrees\/<lane>-<gate>` at the admitted commit and records HEAD; the controller removes it after merge\./,
+    /unless it needs its own worktree, then uses `\.tmp\/worktrees\/<lane>-<gate>-<sha>` at the admitted commit and records HEAD; the controller removes it after merge\./,
     /Never rely on chat or host memory/,
     /Refactors keep public behaviour, approvals, independent readback, concurrency controls and recovery semantics/,
     /check the actual state and effect owners and their dependency contracts, not class counts/,

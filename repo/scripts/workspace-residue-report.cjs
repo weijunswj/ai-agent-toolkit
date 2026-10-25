@@ -14,6 +14,7 @@
 // .claude/worktrees, Codex's worktrees folder) are listed but left to the host's own clean-up.
 
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
@@ -78,6 +79,12 @@ function defaultBranches(repo, base) {
   const short = base.replace(/^refs\/(heads|remotes)\//, '');
   const owner = remotes.find((remote) => short.startsWith(`${remote}/`));
   const names = new Set([owner ? short.slice(owner.length + 1) : short]);
+  // A base given as a commit or tag names no branch, and a remote added by hand has no HEAD, so the
+  // usual default names are always kept too.
+  names.add('main');
+  names.add('master');
+  const configured = git(repo, ['config', '--get', 'init.defaultBranch']).stdout.trim();
+  if (configured) names.add(configured);
   for (const remote of remotes) {
     const head = git(repo, ['symbolic-ref', '--quiet', '--short', `refs/remotes/${remote}/HEAD`]);
     if (head.ok) names.add(head.stdout.trim().slice(remote.length + 1));
@@ -85,9 +92,13 @@ function defaultBranches(repo, base) {
   return names;
 }
 
-// A path relative to the primary checkout, with forward slashes, so no home folder is printed.
+// A path relative to the primary checkout, with forward slashes, so no home folder is printed. A
+// worktree on another drive stays absolute, with the home folder shown as ~.
 function shown(primary, target) {
-  return path.relative(primary, path.resolve(target)).replace(/\\/g, '/') || '.';
+  let shownPath = path.relative(primary, path.resolve(target));
+  const home = os.homedir();
+  if (path.isAbsolute(shownPath) && shownPath.toLowerCase().startsWith(home.toLowerCase())) shownPath = `~${shownPath.slice(home.length)}`;
+  return shownPath.replace(/\\/g, '/') || '.';
 }
 
 function inBase(repo, commit, base) {
