@@ -877,8 +877,9 @@ function checkHygiene(fileList, workflows, root, requiredChecks = null) {
 
 function checkStatusDoc(root, fileList, workflows, settings) {
   if (!workflows.length) return [];
-  // Without a setting, use the default path, else the one docs file named like a CI/CD status document.
-  const found = fileList.filter((file) => /(^|\/)[^/]*ci[-_]?cd[-_]?status[^/]*\.md$/i.test(file));
+  // Without a setting, use the default path, else the one docs file named like a CI/CD status
+  // document; a template (`*.template.md` or under a templates folder) is never the document.
+  const found = fileList.filter((file) => /(^|\/)[^/]*ci[-_]?cd[-_]?status[^/]*\.md$/i.test(file) && !/\.template\.md$/i.test(file) && !/(^|\/)templates\//i.test(file));
   const rel = settings.status_doc || (fileList.includes(DEFAULT_STATUS_DOC) || found.length !== 1 ? DEFAULT_STATUS_DOC : found[0]);
   const text = readText(root, rel);
   if (text === null) return [item('GAP', 'status.doc', rel, 'no CI status document', `create it from the secure-ci-cd status template, or name the existing one as status_doc in ${SETTINGS_REL}`)];

@@ -316,6 +316,13 @@ test('status: a lone docs file named like a CI/CD status document is used when t
   assert.deepEqual(hits(items, 'status.doc'), []);
 });
 
+test('status: a status document template is never taken for the document', () => {
+  for (const rel of ['skills/secure-ci-cd/templates/cicd/CURRENT_CICD_STATUS.template.md', 'templates/cicd-status.md']) {
+    const items = report({ '.github/workflows/ci.yml': WORKFLOW('echo ok'), 'docs/ci-cd/CURRENT_CICD_STATUS.md': undefined, [rel]: STATUS() });
+    assert.deepEqual(hits(items, 'status.doc').map((e) => [e.path, e.message]), [['docs/ci-cd/CURRENT_CICD_STATUS.md', 'no CI status document']], rel);
+  }
+});
+
 test('speed: a long job with no matrix is raised from measured times, whatever command it runs', () => {
   const dir = fixture({
     '.github/workflows/ci.yml': WORKFLOW('python tests/_run_ci_full_suite.py').replace('  test:\n', '  full-regression:\n'),
