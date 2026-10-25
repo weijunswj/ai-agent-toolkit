@@ -26,11 +26,11 @@ Every open outcome is committed or optional, with one stable child issue per coh
 
 | Group | Meaning | Admission |
 |---|---|---|
-| NOW | In an open release PR: the complete usable release currently approved, with its necessary security, privacy, integrity and recovery floor. | The user agrees the outcome; routine means are delegated. |
-| NEXT | Assigned to a named planned release that has no open PR yet. A release has a name, not a version number; the version is taken when it merges. | The user agrees the release plan. |
+| NOW | In progress: an open release PR or an active gate, including work merged but still waiting on its UAT or review. The complete usable release currently approved, with its necessary security, privacy, integrity and recovery floor. | The user agrees the outcome; routine means are delegated. |
+| NEXT | Queued for a named planned release. By convention a release has a name, not a version number; the version is taken when it merges. | The user agrees the release plan. |
 | LATER | Committed, with no release yet. | New material capabilities need user agreement first. |
 
-Committed Later work is not optional: anything uncommitted is closed with its reason or kept as optional by the user. Ship the Now release with its safety floor, then the Next release; real defects come first by impact. When a release closes, G0 proposes the next one from Next and related Later work and the same open children are updated. A clarification may join the current release; a material addition is proposed with its effect on the finish line.
+Optional work the user keeps sorts after Later as OPTIONAL. Committed Later work is not optional: anything uncommitted is closed with its reason or kept as optional by the user. Ship the Now release with its safety floor, then the Next release; real defects come first by impact. When a release closes, G0 proposes the next one from Next and related Later work and the same open children are updated. A clarification may join the current release; a material addition is proposed with its effect on the finish line.
 
 ## 4. Where the plan and milestones live
 
@@ -65,11 +65,11 @@ G2 starts after G1's working version and any required user UAT are accepted. Rev
 | Disposition | Required explanation and action |
 |---|---|
 | Current ship blocker | The criterion or safety invariant broken, the concrete failure or absent proof, and the smallest fix. |
-| Follow-up | The added protection and why acceptance still holds; kept out of the current release and given a planned release (Next) or none (Later). |
+| Follow-up | The added protection and why acceptance still holds; kept out of the current release. It joins an existing or new outcome child (section 4), whose planned release or lack of one makes it Next or Later. |
 | Later or optional | The new outcome and its queue; never silently added to the Core. |
 | Unsupported or duplicate | The evidence problem or the existing finding. |
 
-**Bounded adversarial security review.** G2 reviews against the section 5 frozen supported profile and the agreed invariants, and stays adversarial on every reachable path inside it. A security finding blocks Core when a plausible supported-path trace violates an existing acceptance or safety invariant, or proves critical required evidence absent; record the concrete setup, attacker capability, reproduction or trace, consequence and minimum correction. An unsupported arbitrary layout or extra execution surface does not by itself create Core scope, and a newly proposed environment, feature or threat goes to the owner for classification before adoption. A genuinely serious reachable issue found late still blocks, even when an earlier review missed it. When a finding demonstrates a family of related reachable bypasses, G1 inventories every material entrypoint for that invariant inside the frozen profile and fixes the family once, with positive and negative controls, rather than one bypass per cycle. The fresh recheck covers the corrected families, cumulative diff, dependent invariants, new real host evidence and retained previously reviewed scope. It does not restart discovery, rescan the whole product by default, add reviewers or open unbounded hardening, and it preserves any genuinely new security finding without manufacturing an extra gate.
+**Bounded adversarial security review.** G2 reviews against the section 5 frozen supported profile and the agreed invariants, and stays adversarial on every reachable path inside it. A security finding blocks Core when a plausible supported-path trace violates an existing acceptance or safety invariant, or proves critical required evidence absent; record the concrete setup, attacker capability, reproduction or trace, consequence and minimum correction. An unsupported arbitrary layout or extra execution surface does not by itself create Core scope, and a newly proposed environment, feature or threat goes to the owner for classification before adoption. A genuinely serious reachable issue found late still blocks, even when an earlier review missed it. When a finding demonstrates a family of related reachable bypasses, G1 inventories every material entrypoint for that invariant inside the frozen profile and fixes the family once, with positive and negative controls, rather than one bypass per cycle. The fresh recheck covers the corrected families, cumulative diff, dependent invariants, new real host evidence and retained previously reviewed scope. It does not restart discovery, rescan the whole product by default, add reviewers or open unbounded follow-up work, and it preserves any genuinely new security finding without manufacturing an extra gate.
 
 ## 9. Consequential boundaries
 

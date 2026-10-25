@@ -305,16 +305,39 @@ test('reclassifying an outcome keeps its identity, document and native link', ()
   assert.match(state.findStateBlock(github.issues.get(423).body).block.body, /class: OPTIONAL/);
 });
 
-test('older class names are reported as CLASS_LEGACY until the controller patches the catalogue', () => {
-  const { store, reconciler } = setup();
-  reconciler().run({ apply: true });
-  store.mutate('parent', 421, { writer, change: doc => state.applyPatch('parent', doc, { outcomes: doc.outcomes.map(entry => (entry.issue === 423 ? { ...entry, class: 'HARDENING' } : entry)) }) });
-  const legacy = reconciler().run();
-  assert.ok(codes(legacy).includes('CLASS_LEGACY #421'));
-  assert.match(legacy.findings.find(finding => finding.code === 'CLASS_LEGACY').detail, /#423 HARDENING read as COMMITTED/);
-  assert.deepEqual(kinds(legacy), ['replace_block #421'], 'read as COMMITTED: only the parent revision line moves, no task is reordered');
-  store.mutate('parent', 421, { writer, change: doc => state.applyPatch('parent', doc, { outcomes: doc.outcomes.map(entry => (entry.issue === 423 ? { ...entry, class: 'COMMITTED' } : entry)) }) });
-  assert.equal(codes(reconciler().run()).includes('CLASS_LEGACY #421'), false);
+test('older classes keep their CORE, HARDENING, LATER order, are reported as CLASS_LEGACY, and migrate in one patch without moving a task', () => {
+  // Written by 3.12.0: `order` counted within each old class.
+  const outcomes = [
+    { issue: 8, class: 'CORE', parent: 7, order: 2 },
+    { issue: 9, class: 'CORE', parent: 7, order: 3 },
+    { issue: 10, class: 'HARDENING', parent: 7, order: 1 },
+    { issue: 11, class: 'LATER', parent: 7, order: 0 },
+    { issue: 12, class: 'COMPLETED', parent: 7, order: 0 },
+  ];
+  const { github, store, reconciler } = setup({
+    repository: 'other/tool', parentIssue: 7, outcomes,
+    issues: gh => { for (const outcome of outcomes) gh.addIssue(outcome.issue, { parent: outcome.parent, state: outcome.class === 'COMPLETED' ? 'closed' : 'open' }); },
+  });
+  const legacy = reconciler().run({ apply: true });
+  assert.deepEqual(legacy.holds, []);
+  assert.deepEqual(github.issues.get(7).subs, [8, 9, 10, 11, 12], 'the old sequence is kept, so nothing is reordered before the migration');
+  assert.equal(kinds(legacy).some(kind => kind.startsWith('reorder')), false);
+  const finding = legacy.findings.find(entry => entry.code === 'CLASS_LEGACY');
+  assert.ok(finding, 'CLASS_LEGACY is reported');
+  assert.match(finding.detail, /#8 CORE, #9 CORE, #10 HARDENING, #11 LATER read as COMMITTED, kept in their old CORE, HARDENING, LATER sequence/);
+  assert.match(finding.detail, /apply it whole with update-parent/);
+  assert.deepEqual(finding.patch.outcomes.map(entry => [entry.issue, entry.class, entry.order]),
+    [[8, 'COMMITTED', 0], [9, 'COMMITTED', 1], [10, 'COMMITTED', 2], [11, 'COMMITTED', 3], [12, 'COMPLETED', 0]]);
+
+  // A write never adds an older class, even to an entry that had another one.
+  assert.throws(() => store.mutate('parent', 7, { writer, change: doc => state.applyPatch('parent', doc, { outcomes: doc.outcomes.map(entry => (entry.issue === 11 ? { ...entry, class: 'HARDENING' } : entry)) }) }), /PATCH_REFUSED|older class names/);
+  assert.throws(() => state.refuseNewLegacy(null, state.newParent({ repository: 'other/tool', parentIssue: 7, outcomes: [{ issue: 8, class: 'CORE', parent: 7, order: 0 }] })), /older class names/, 'init-parent refuses them too');
+
+  store.mutate('parent', 7, { writer, change: doc => state.applyPatch('parent', doc, finding.patch) });
+  const migrated = reconciler().run({ apply: true });
+  assert.equal(codes(migrated).includes('CLASS_LEGACY #7'), false);
+  assert.equal(kinds(migrated).some(kind => kind.startsWith('reorder')), false, 'the migration moves no task');
+  assert.deepEqual(github.issues.get(7).subs, [8, 9, 10, 11, 12]);
 });
 
 test('a moved PR head marks evidence STALE_HEAD and updates both projections together', () => {

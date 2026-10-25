@@ -231,13 +231,13 @@ test('the Programme Graph has the seven columns, works out NOW, NEXT, LATER and 
   assert.ok(lines.includes('| Task | Child # | PR # | Class | Status | Lane | Task Description |'));
   assert.equal(/CORE|HARDENING/.test(body), false, 'the old classes never show');
   const rows = lines.filter(line => /^\| [^|]+ \| #\d+ \|/.test(line)).map(line => line.split(' | ').map(cell => cell.replace(/^\| | \|$/g, '')));
-  assert.deepEqual(rows.map(row => Number(row[1].slice(1))), [11, 8, 10, 19, 17, 21, 14, 15, 13, 18, 12, 16, 9], 'NOW, NEXT, LATER, OPTIONAL by order and issue; finished oldest first');
+  assert.deepEqual(rows.map(row => Number(row[1].slice(1))), [11, 8, 17, 10, 19, 21, 14, 15, 13, 18, 12, 16, 9], 'NOW, NEXT, LATER, OPTIONAL by order and issue; finished oldest first');
   const classOf = Object.fromEntries(rows.map(row => [row[1], row[3]]));
   for (const [issue, expected, why] of [
     ['#11', 'NOW', 'an open PR'],
     ['#8', 'NOW', 'a draft PR wins over a release'],
     ['#10', 'NEXT', 'a planned release and no open PR'],
-    ['#17', 'NEXT', 'a release while waiting on the owner'],
+    ['#17', 'NOW', 'waiting on the owner with no PR is still in progress'],
     ['#19', 'NEXT', 'an optional task with a release is planned'],
     ['#21', 'LATER', 'committed, no release'],
     ['#14', 'LATER', 'a closed PR is not current work'],
@@ -248,7 +248,7 @@ test('the Programme Graph has the seven columns, works out NOW, NEXT, LATER and 
   assert.deepEqual(rows[1], ['Shared host contract', '#8', '#549', 'NOW', 'IN PROGRESS', 'G1', 'One contract for both hosts']);
   assert.deepEqual(rows[6].slice(0, 2), ['per-repository governance states', '#14'], 'a release prefix is not part of the name');
   assert.deepEqual(rows[7].slice(0, 2), ['Toolkit temporary-resource hygiene', '#15'], 'a code prefix is not part of the name');
-  assert.deepEqual(rows[4].slice(3, 6), ['NEXT', 'IN PROGRESS', '-'], 'no gate, no lane');
+  assert.deepEqual(rows[2].slice(3, 6), ['NOW', 'IN PROGRESS', '-'], 'no gate, no lane');
   assert.deepEqual(rows[12].slice(3), ['-', 'RETIRED', '-', 'Old predecessor'], 'retired is its own group below COMPLETED');
   assert.deepEqual(rows[11].slice(3, 6), ['-', 'COMPLETED', '-'], 'a finished nested child goes down to COMPLETED');
   assert.equal(rows[10][0], 'External Operation Authority');
@@ -293,7 +293,7 @@ test('the generated CURRENT summary names work in progress, what waits on the ow
     '- Task 3 (#3): your decision',
     '- Task 4 (#4): blocked: needs the key',
     '',
-    '**Next up**',
+    '**Queued**',
     '- Task 5 (#5)',
     '- Task 6 (#6)',
     '- Task 7 (#7)',
@@ -301,7 +301,7 @@ test('the generated CURRENT summary names work in progress, what waits on the ow
     '- Task 9 (#9)',
   ].join('\n'));
   const idle = state.renderCurrentBlockBody(state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes: [] }), new Map());
-  assert.match(idle, /\*\*In progress\*\*\n- None\.\n\n\*\*Waiting on you\*\*\n- None\.\n\n\*\*Next up\*\*\n- None\.$/);
+  assert.match(idle, /\*\*In progress\*\*\n- None\.\n\n\*\*Waiting on you\*\*\n- None\.\n\n\*\*Queued\*\*\n- None\.$/);
 });
 
 test('a finished outcome takes the issue close time once, and the controller may set it', () => {
