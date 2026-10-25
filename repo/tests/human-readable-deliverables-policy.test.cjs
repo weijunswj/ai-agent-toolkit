@@ -35,17 +35,7 @@ const EXCEPTION_FIELDS = Object.freeze(['consumer', 'owner', 'necessity', 'remov
 
 // Retained exceptions follow the shared rule: current consumer, owner, present necessity and
 // removal condition. A stale entry fails the suite so it is removed with its last use.
-const LABEL_EXCEPTIONS = Object.freeze([
-  {
-    file: 'skills/controller-bootstrap/SKILL.md',
-    field: 'description',
-    token: 'N5',
-    consumer: 'Host skill discovery reads this description; its negative clause steers N5 programme reconciliation away from Controller Bootstrap.',
-    owner: 'Issue #499 whole-tree product-language cleanup (queued next Core).',
-    necessity: 'Rewording installed discovery text changes host routing and belongs to the #499 retrofit, not to this policy change.',
-    removal: 'Delete this entry in the #499 change that rewrites the description; the stale-exception test fails once N5 is gone.'
-  }
-]);
+const LABEL_EXCEPTIONS = Object.freeze([]);
 
 // Internal programme/version codes such as N5 or V3 are unexplained unless a parenthetical of
 // at least two words follows them. Toolkit gate names G0/G1/G2 are deliberately not matched.

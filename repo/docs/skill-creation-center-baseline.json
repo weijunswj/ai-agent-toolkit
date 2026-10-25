@@ -15,7 +15,7 @@
       "negative_routing_examples": [
         "Implement an ordinary application feature with no controller re-entry, authority recovery, or handover request.",
         "Install generic AGENTS.md rules for a new repository.",
-        "Inspect or reconcile an N5 programme parent and direct children."
+        "Inspect or reconcile a programme's parent issue and its direct child issues."
       ],
       "overlap_boundary": "Use repository-agent-rules for instruction-file installation, github-program-reconciler for bound programme state reconciliation, and toolkit-setup for host package infrastructure; this product only guides an already-assigned repository controller through exact source/CURRENT re-entry.",
       "invocation_mode": "explicit",
@@ -26,7 +26,7 @@
       "runtime_footprint": "Instruction-first single skill with one qualification reference and native explicit-only metadata; no runtime adapter, token family, scheduler, installer, or authority store.",
       "local_assets": "Canonical skill, explicit-only metadata, source/CURRENT/host qualification guidance, bounded routing examples, and focused contract tests.",
       "output_contract": "Return a concise read-only bootstrap or recovery result bound to repository, owner, RUN/Lock, CURRENT, exact sources, approval, host limits, unresolved outcomes, and the next permitted action; otherwise HOLD with the exact missing evidence.",
-      "anti_bloat_review": "Excludes ordinary executor work, generic instruction installation, N5 reconciliation, arbitrary governance providers, embedded policy fallback, cross-host inference, autonomous timer work, and controller self-admission.",
+      "anti_bloat_review": "Excludes ordinary executor work, generic instruction installation, programme issue reconciliation, arbitrary governance providers, embedded policy fallback, cross-host inference, autonomous timer work, and controller self-admission.",
       "safety_boundary": "No skill text, packet, receipt, link, installation, or invocation supplies authority or native permission. External effects require an existing exact owner approval and independently proven host capability; ambiguous identity, CURRENT, source, handover, permission, or outcome remains zero-effect HOLD.",
       "canonical_ownership": "Direct-canonical maintenance: skills/controller-bootstrap/ owns the portable product; coupled policy, catalog, contract, validation, and tests are maintained under canonical repo/** paths.",
       "source_provenance": "first_party",

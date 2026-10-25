@@ -4,7 +4,7 @@ Source: skills/skill-product-review/README.md
 -->
 # Skill Product Review
 
-Review third-party AI agent skills before import or adaptation, then publish only approved material with source identity, licence, attribution, source locks, and direct canonical ownership preserved.
+Review third-party AI agent skills before import or adaptation, then publish only approved material that keeps its source, licence and credit to its authors, a pin on the exact upstream version, and one owned copy in this repository.
 
 Use this skill to turn "strip the unsafe stuff out" into a repeatable decision:
 

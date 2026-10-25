@@ -1,6 +1,6 @@
 ---
 name: n8n-workflow-transport
-description: Prepare n8n workflow files safely through offline sanitisation, validation, comparison, and manual import/export preparation. Apply n8n-safety-router first. This product does not grant live n8n authority or implement API-first live transport.
+description: Prepare n8n workflow files safely offline: remove secrets and IDs, validate, compare, and get them ready for manual import or export. Apply n8n-safety-router first. It never changes a live n8n instance.
 ---
 
 # n8n Workflow Transport

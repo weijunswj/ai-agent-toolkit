@@ -56,6 +56,11 @@
 - **Owner UAT is narrowed:** it holds only steps that need the owner's own hands, such as real app UI, signed-in accounts and device behaviour CI cannot reach. CI (Windows runners included), automated tests and G2 review prove everything else, and each UAT list names the passing check for every step it leaves out. When nothing needs the owner's hands, UAT is recorded as not required.
 - **Where it lives:** the Coding Gates in the global rules, the issue-closing rule in the governed block ("any owner UAT"), the controller's admission rule, the V3 direction and one Projects skill line for UAT lists. The Claude Projects controller skill is 2026-10-24.4 (re-upload it). Duplicated sentences in the global rules and the controller file were trimmed to keep both inside their size budgets.
 
+### Plain-English skill text
+
+- **Skill descriptions and Codex cards in plain words:** `controller-bootstrap`, `github-program-reconciler`, `skill-product-review`, `n8n-workflow-transport` and `n8n-environment-setup` no longer show internal programme codes or Toolkit shorthand in the text hosts show in skill lists. Gate names stay, explained in brackets, for example "a planning, build or review session (G0, G1 or G2)". The controller-bootstrap and reconciler READMEs follow.
+- **No more label exception:** the readable-text test no longer allows an unexplained programme code in any skill description.
+
 ## 3.10.0 (host support, governance states, decision history and the personal-data guard)
 
 ### Decision history before planning
