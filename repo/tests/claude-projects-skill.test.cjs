@@ -52,7 +52,7 @@ test('no plugin payload or skills folder reaches the Projects controller skill',
 
 test('Projects wires managed instructions, promises and fresh scheduled sessions to controller law', () => {
   const text = bundle();
-  assert.match(text, /^Version: 2026-10-25\.3$/m);
+  assert.match(text, /^Version: 2026-10-25\.7$/m);
   // Plugin lag: removing the plugin alone is the fix that worked; the marketplace re-add is the fallback.
   assert.match(text, /`PLUGIN BEHIND`: the Toolkit plugin on the user's claude\.ai account is more than a day behind `main`/);
   // The skill drift watch lives in the daily check-in: direct account edits come back into Toolkit first.
@@ -193,4 +193,10 @@ test('Projects keeps its Toolkit base layer current without touching the project
   const section = text.slice(text.indexOf('## Daily check-in'), text.indexOf('## Hourly nudge'));
   const at = prefixes.map(prefix => section.indexOf(`  - ${prefix}`));
   assert.ok(at.every((position, index) => position > -1 && (index === 0 || position > at[index - 1])), at.join(','));
+});
+
+test('Projects lists every owner-hands step when it reports what waits on the owner', () => {
+  const text = read(SKILL_REL);
+  // An optional step posted only inside a thread was once left off a pending answer.
+  assert.match(text, /\*\*Pending lists name every owner-hands step\.\*\* Whenever you tell the owner what waits on them \(a pending answer, the nudge reminder, a check-in\), list every step only they can do, optional ones and ones posted only inside a thread included, each with its link; never drop one as minor\./);
 });
