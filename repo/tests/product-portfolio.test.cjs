@@ -7,6 +7,7 @@ const test = require('node:test');
 
 const root = path.resolve(__dirname, '..', '..');
 const expectedProducts = [
+  'agent-cost-control',
   'codex-ssh-hostinger-coolify-setup-maintainer',
   'external-operation-preflight',
   'frontend-art-direction',

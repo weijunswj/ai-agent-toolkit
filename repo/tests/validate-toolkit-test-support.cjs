@@ -16,6 +16,7 @@ const legacyProjectToken = '_' + 'projects';
 const legacyCuratedToken = 'curated_' + 'output_for_ai';
 const publisherReferencePaths = [];
 const currentSkillIds = [
+  'agent-cost-control',
   'codex-ssh-hostinger-coolify-setup-maintainer',
   'controller-bootstrap',
   'external-operation-preflight',

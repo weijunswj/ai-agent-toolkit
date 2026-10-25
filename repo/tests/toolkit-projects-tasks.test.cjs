@@ -23,7 +23,7 @@ const tasks = () => new ProjectsTasks({ root: ROOT });
 const PARAMS = {
   'daily-check-in': { project: 'EXAMPLE', repo: 'example-owner/example-repo', parent_issue: '12', report_dir: '/mnt/project-files/daily-check-in', effort: 'medium' },
   'hourly-nudge': { project: 'EXAMPLE', repo: 'example-owner/example-repo', report_dir: '/mnt/project-files/hourly-nudge', effort: 'medium' },
-  custom: { project: 'EXAMPLE', repo: 'none', report_dir: '/mnt/project-files/sweep', effort: 'low' }
+  custom: { project: 'EXAMPLE', repo: 'none', report_dir: '/mnt/project-files/sweep', effort: 'medium' }
 };
 const OWN_TEXT = 'Task: check the example folder and list what changed.\n1. List the folder.\n2. Compare with the last report.';
 const params = kind => validateParams(kind, PARAMS[kind]);
@@ -91,7 +91,9 @@ test('closure matrix: each prompt state gets its check result', t => {
   const rows = [
     ['rendered from current main, untouched', 'daily-check-in', checkIn, 'current', 0],
     ['template changed on main, params same', 'daily-check-in', laterMain({ template: true }).check('daily-check-in', checkIn).state, null],
-    ['params block changed by the project', 'daily-check-in', checkIn.replace('"effort": "medium"', '"effort": "high"'), 'outdated', 1],
+    ['params block changed by the project', 'daily-check-in', checkIn.replace('"effort": "medium"', '"effort": "high", "raise_reason": "misses checks at medium"'), 'outdated', 1],
+    ['a raise without its reason', 'daily-check-in', checkIn.replace('"effort": "medium"', '"effort": "high"'), 'malformed', 2],
+    ['effort below the medium floor', 'daily-check-in', checkIn.replace('"effort": "medium"', '"effort": "low"'), 'malformed', 2],
     ['text inside markers hand-edited', 'daily-check-in', replaceBlockBody(checkIn, 'DAILY-CHECK-IN-CHECKS', '\nCHECKS\n', '\nCHECKS (edited)\n'), 'edited', 1],
     ['a Toolkit block deleted', 'daily-check-in', checkIn.replace(/<!-- AI-AGENT-TOOLKIT:claude-projects:BEGIN DAILY-CHECK-IN-CHECKS[\s\S]*?END DAILY-CHECK-IN-CHECKS -->\n/, ''), 'edited', 1],
     ['owner lines in the additions section changed', 'daily-check-in', checkIn.replace('- none', '- Also list the example sweep.'), 'current', 0],
@@ -190,6 +192,42 @@ test('params are strict: known keys, safe values, report folder in the shared fo
   assert.equal(validateParams('custom', { ...PARAMS.custom, session: 'bound' }).session, 'bound');
   assert.throws(() => validateParams('custom', { ...PARAMS.custom, session: 'sometimes' }));
   assert.throws(() => validateParams('weekly', base));
+});
+
+test('model tier and effort: cheapest by default, medium floor, every raise carries its reason', () => {
+  // Left out, each kind takes its default tier: the nudge and custom tasks small, the check-in mid.
+  assert.equal(params('hourly-nudge').model, 'small');
+  assert.equal(params('daily-check-in').model, 'mid');
+  assert.equal(params('custom').model, 'small');
+  const base = PARAMS['hourly-nudge'];
+  for (const bad of [
+    { ...base, effort: 'low' }, { ...base, effort: 'minimal' }, { ...base, model: 'haiku' }, { ...base, model: 'mid' },
+    { ...base, effort: 'high' }, { ...base, model: 'top', raise_reason: '' }, { ...base, model: 'top', raise_reason: 'no' },
+    { ...base, model: 'top', raise_reason: 'a | b' }, { ...base, model: 'top', raise_reason: 'line\nbreak' },
+    { ...base, model: 'top', raise_reason: ' padded ' }, { ...base, model: 'top', raise_reason: '{{project}} leak' }
+  ]) assert.throws(() => validateParams('hourly-nudge', bad), JSON.stringify(bad));
+  // A step down below the default needs no reason; a raise with one renders it.
+  assert.equal(validateParams('daily-check-in', { ...PARAMS['daily-check-in'], model: 'small' }).model, 'small');
+  const raised = validateParams('hourly-nudge', { ...base, model: 'top', effort: 'high', raise_reason: 'missed checks at small' });
+  const prompt = tasks().render('hourly-nudge', raised);
+  assert.match(prompt, /Model tier for this task: top \(agent-cost-control ladder; on Claude, small is Haiku, mid Sonnet, top Opus\), effort high\./);
+  assert.match(prompt, /Raised above the cheapest fitting step because: missed checks at small/);
+  assert.match(prompt, /TIER GAP: served <model>\/<effort>, want top\/high/);
+  assert.doesNotMatch(rendered('hourly-nudge'), /Raised above/);
+  assert.match(rendered('daily-check-in'), /Model tier for this task: mid /);
+  // A live prompt rendered before tiers existed still parses: its params take the default tier.
+  const legacy = rendered('hourly-nudge').replace(/,\n {2}"model": "small"/, '');
+  assert.doesNotMatch(legacy, /"model"/);
+  assert.equal(tasks().check('hourly-nudge', legacy).state, 'current');
+  // The check-in reports model and effort gaps, and a recorded raise excuses them.
+  const checkIn = fs.readFileSync(path.join(TASKS, 'daily-check-in.md'), 'utf8');
+  assert.match(checkIn, /weekdays-only, no-effort, model, effort, name/);
+  assert.match(checkIn, /neither applies when the served settings match a `raised <tier>\/<effort>` field/);
+  // The nudge closes quiet chat reply threads and lists threads due for rotation.
+  const nudge = fs.readFileSync(path.join(TASKS, 'hourly-nudge.md'), 'utf8');
+  assert.match(nudge, /reason QUIET-6H, unresolved post reply threads with no new message for 6 hours or more/);
+  assert.match(nudge, /Rotate: long-lived worker threads/);
+  assert.match(nudge, /\*\*Rotate:\*\*/);
 });
 
 test('templates hold no ids, owner names, project-only tasks or old resolve rules, and fill every placeholder', () => {
@@ -326,6 +364,11 @@ test('memory check reads only the BINDING and SCHEDULED TASKS lines', () => {
     [`${binding}\n${tasksLine.replace('since 2026-10-24;', 'since 2026-10-24 | stopped by owner 2026-10-25;')}\n`, ['current'], 0],
     [`${binding}\n${tasksLine.replace('since 2026-10-24;', 'since 2026-10-24 | stopped;')}\n`, ['MEMORY FORMAT: SCHEDULED TASKS old format'], 1],
     [`${binding}\n${tasksLine.replace('fresh;', 'sometimes;')}\n`, ['MEMORY FORMAT: SCHEDULED TASKS old format'], 1],
+    // A recorded raise survives swaps; it names tier, effort, date and reason.
+    [`${binding}\n${tasksLine.replace('since 2026-10-24;', 'since 2026-10-24 | raised top/high 2026-10-25: licence calls the owner acts on;')}\n`, ['current'], 0],
+    [`${binding}\n${tasksLine.replace('since 2026-10-24;', 'since 2026-10-24 | raised top/high 2026-10-25: licence calls | stopped by owner 2026-10-26;')}\n`, ['current'], 0],
+    [`${binding}\n${tasksLine.replace('since 2026-10-24;', 'since 2026-10-24 | raised top/low 2026-10-25: below the floor;')}\n`, ['MEMORY FORMAT: SCHEDULED TASKS old format'], 1],
+    [`${binding}\n${tasksLine.replace('since 2026-10-24;', 'since 2026-10-24 | raised top/high 2026-10-25;')}\n`, ['MEMORY FORMAT: SCHEDULED TASKS old format'], 1],
     ['', ['MEMORY FORMAT: BINDING missing', 'MEMORY FORMAT: SCHEDULED TASKS missing'], 1]
   ];
   for (const [text, lines, exitCode] of rows) assert.deepEqual(checkMemory(text), { lines, exitCode }, text);

@@ -567,6 +567,41 @@
         "node --test repo/tests/windows-local-dev-services.test.cjs repo/tests/skill-routing.test.cjs"
       ]
     },
+    "agent-cost-control": {
+      "public_id": "agent-cost-control",
+      "public_name": "Agent Cost Control",
+      "existing_skill_review": "Reviewed agent-cost-control against web-controller-projects, secure-ci-cd, n8n-safety-router, toolkit-setup and managed-app-foundation-review; none holds a host-neutral model and effort ladder for automations, helpers and spawned threads, and the Projects skill only covers Claude Projects tasks.",
+      "native_capability_review": "Hosts offer model and effort settings for routines, automations, subagents and workflow nodes, but leave them on defaults unless someone sets them, and nothing records why a setting sits above the cheapest tier.",
+      "trigger": "Use when setting up or reviewing a scheduled task, routine, loop, automation, helper agent, subagent, spawned thread or workflow step that calls a model, when choosing its model or effort, or when agent usage costs too much.",
+      "positive_routing_examples": [
+        "Set up a daily scheduled task and pick the model and effort it should run on.",
+        "Our helper subagents and automations burn too much usage; which can move to a smaller model?",
+        "Rotate this long-running review runner thread to a fresh thread with a handoff file."
+      ],
+      "negative_routing_examples": [
+        "Refactor the invoice total calculation and add unit tests.",
+        "Explain how a transformer language model works.",
+        "Add a cost column to the shop's product table."
+      ],
+      "overlap_boundary": "Use web-controller-projects for how Claude Projects tasks are rendered, swapped and closed, secure-ci-cd for pipeline hardening and n8n-safety-router first for n8n work; agent-cost-control owns only the choice of model tier and effort, the raise record and thread rotation. Coding gates keep the routes their gate rules pin.",
+      "invocation_mode": "implicit",
+      "invocation_mode_reason": "Packaged metadata permits implicit discovery after the behavioural routing corpus proves positive, negative, and adversarial discrimination; the skill is guidance only and grants no mutation authority.",
+      "decision": "new_product",
+      "decision_reason": "The ladder spans Claude, Codex, other harnesses, n8n and CI, and its model names change often; one small skill keeps them in one place instead of lines scattered across five skills and size-capped rule files.",
+      "unique_value": "One host-neutral small, mid and top ladder with a medium effort floor, a written-reason rule for raises that survives rebuilds, and one thread rotation procedure.",
+      "runtime_footprint": "Instructions only: no scripts, templates or network access.",
+      "local_assets": "Canonical README, SKILL.md and host metadata.",
+      "output_contract": "Report each automation's step, tier, model and effort as set, the raise reason above its fitting step, and any gap such as an inherited default or effort below medium.",
+      "anti_bloat_review": "No scripts; enforcement for Toolkit-made tasks stays in the existing Projects task renderer and its tests, and the always-on rule is one global line.",
+      "safety_boundary": "Guidance only. Never lowers a gate's model, effort or route, never removes a recorded raise by itself, and changing a live task, routine or workflow still follows the host's approval rules.",
+      "canonical_ownership": "Direct-canonical maintenance: skills/agent-cost-control/ owns the portable product; its routing cases live under canonical repo/** paths.",
+      "source_provenance": "first_party",
+      "third_party_audit": "Not applicable first-party product; no third-party package, executable or credential is bundled.",
+      "validation": [
+        "node repo/scripts/validate-toolkit.cjs",
+        "node --test repo/tests/skill-routing.test.cjs repo/tests/product-portfolio.test.cjs"
+      ]
+    },
     "external-operation-preflight": {
       "public_id": "external-operation-preflight",
       "public_name": "External Operation Preflight",

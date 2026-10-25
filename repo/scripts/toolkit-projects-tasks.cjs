@@ -29,9 +29,9 @@ const FENCE_OPEN = /^```toolkit-task-params[ \t]*$/;
 const FENCE_CLOSE = /^```[ \t]*$/;
 
 const KINDS = Object.freeze({
-  'daily-check-in': { checks: { name: 'DAILY-CHECK-IN-CHECKS', file: 'daily-check-in.md' }, session: 'bound', title: 'Daily check-in' },
-  'hourly-nudge': { checks: { name: 'HOURLY-NUDGE-CHECKS', file: 'hourly-nudge.md' }, session: 'bound', title: 'Hourly nudge' },
-  custom: { checks: null, session: null, title: null }
+  'daily-check-in': { checks: { name: 'DAILY-CHECK-IN-CHECKS', file: 'daily-check-in.md' }, session: 'bound', title: 'Daily check-in', tier: 'mid' },
+  'hourly-nudge': { checks: { name: 'HOURLY-NUDGE-CHECKS', file: 'hourly-nudge.md' }, session: 'bound', title: 'Hourly nudge', tier: 'small' },
+  custom: { checks: null, session: null, title: null, tier: 'small' }
 });
 const SHELL = Object.freeze({
   setup: { name: 'TASK-RUN-SETUP', file: 'run-setup.md' },
@@ -41,6 +41,8 @@ const OWN_NAMES = new Set([SHELL.setup.name, SHELL.delivery.name, ...Object.valu
 const PROJECT_HEADING = 'Project additions (kept on every refresh; they override the Toolkit base where they differ):';
 const KEPT_LABEL = '(kept from an edit inside the block)';
 
+const TIERS = Object.freeze(['small', 'mid', 'top']);
+const EFFORTS = Object.freeze(['medium', 'high', 'xhigh', 'max']);
 const REPO = /^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/;
 const PARAMS = Object.freeze({
   project: { required: true, test: v => /^[A-Z0-9][A-Z0-9 _-]{0,39}$/.test(v) && !/ $/.test(v) },
@@ -48,7 +50,11 @@ const PARAMS = Object.freeze({
   toolkit_repo: { fallback: 'weijunswj/ai-agent-toolkit', test: v => REPO.test(v) },
   parent_issue: { fallback: 'none', test: v => v === 'none' || /^[1-9]\d{0,6}$/.test(v) },
   report_dir: { required: true, test: v => /^\/mnt\/project-files\/[A-Za-z0-9._/-]+$/.test(v) && !v.split('/').includes('..') && !v.endsWith('/') && !v.includes('//') },
-  effort: { required: true, test: v => ['low', 'medium', 'high', 'xhigh', 'max'].includes(v) },
+  // Medium is the effort floor (agent-cost-control); anything above medium needs raise_reason.
+  effort: { required: true, test: v => EFFORTS.includes(v) },
+  // The model tier; left out, it is the kind's default tier.
+  model: { test: v => TIERS.includes(v) },
+  raise_reason: { test: v => /^[^\n\r|;{}`]{3,200}$/.test(v) && v.trim() === v },
   // A custom task defaults to a fresh session; the two Toolkit tasks default to bound and take
   // session fresh only as the fallback, which is then kept in their params.
   session: { fallback: 'fresh', test: v => v === 'fresh' || v === 'bound' }
@@ -72,13 +78,18 @@ function validateParams(kind, raw) {
   }
   for (const [key, rule] of Object.entries(PARAMS)) {
     if (rule.customOnly && kind !== 'custom') continue;
-    const fallback = key === 'session' && KINDS[kind].session ? KINDS[kind].session : rule.fallback;
+    let fallback = key === 'session' && KINDS[kind].session ? KINDS[kind].session : rule.fallback;
+    if (key === 'model') fallback = KINDS[kind].tier;
     const value = raw[key] === undefined ? fallback : raw[key];
     if (value === undefined && rule.required) throw new TaskInputError('TASK_PARAMS');
+    if (value === undefined) continue;
     if (!rule.test(value)) throw new TaskInputError('TASK_PARAMS');
     if (key === 'session' && KINDS[kind].session && value === KINDS[kind].session) continue;
     params[key] = value;
   }
+  // A step above the kind's default tier, or effort above medium, carries its written reason.
+  const raised = TIERS.indexOf(params.model) > TIERS.indexOf(KINDS[kind].tier) || params.effort !== EFFORTS[0];
+  if (raised && !params.raise_reason) throw new TaskInputError('TASK_PARAMS');
   return params;
 }
 
@@ -92,7 +103,7 @@ function taskName(kind, params) {
   return `${params.project}: ${title}`;
 }
 
-// Template lines may start with a condition tag: [repo], [no-repo], [parent], [toolkit], [fresh], [bound].
+// Template lines may start with a condition tag: [repo], [no-repo], [parent], [toolkit], [fresh], [bound], [raised].
 // [toolkit] is the project whose repo is the Toolkit repo itself.
 // Placeholders are {{name}}; an unknown placeholder or tag is a broken source.
 function fill(template, kind, params) {
@@ -106,7 +117,7 @@ function fill(template, kind, params) {
   const conditions = {
     repo: params.repo !== 'none', 'no-repo': params.repo === 'none', parent: params.parent_issue !== 'none',
     toolkit: params.repo === params.toolkit_repo,
-    fresh: session === 'fresh', bound: session === 'bound'
+    fresh: session === 'fresh', bound: session === 'bound', raised: Boolean(params.raise_reason)
   };
   const lines = [];
   for (const line of normalizeBody(template).split('\n')) {
@@ -294,7 +305,7 @@ function inOrder(lf, own, fence, expected) {
 
 // The two memory lines Toolkit defines. Nothing else in memory is read.
 const BINDING_LINE = /^[-*\s]*BINDING: [A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+ \S+ commit [0-9a-f]{40} CONTROLLER\.md blob [0-9a-f]{40} toolkit \d+\.\d+\.\d+ skill \S+ bound \S+\s*$/;
-const TASK_ENTRY = /^(?<name>[^|;]+?) \| (?<id>trig_[A-Za-z0-9]+) \| (?<cron>[^|;]+?) \| (?<mode>fresh|local|device|bound home cmsg_[A-Za-z0-9]+ since \d{4}-\d{2}-\d{2})(?: \| owner schedule)?(?: \| stopped by owner \d{4}-\d{2}-\d{2})?$/;
+const TASK_ENTRY = /^(?<name>[^|;]+?) \| (?<id>trig_[A-Za-z0-9]+) \| (?<cron>[^|;]+?) \| (?<mode>fresh|local|device|bound home cmsg_[A-Za-z0-9]+ since \d{4}-\d{2}-\d{2})(?: \| owner schedule)?(?: \| raised (?:small|mid|top)\/(?:medium|high|xhigh|max) \d{4}-\d{2}-\d{2}: [^|;]+?)?(?: \| stopped by owner \d{4}-\d{2}-\d{2})?$/;
 
 function checkMemory(text) {
   const lines = lfText(text).split('\n');
