@@ -15,10 +15,19 @@ const {
   reconcileOwnedStaging
 } = require('../scripts/toolkit-staging-generations.cjs');
 
+// Every temp folder a test makes is removed after the file's tests, also when they fail.
+const tempFolders = [];
+test.after(() => { for (const dir of tempFolders) fs.rmSync(dir, { recursive: true, force: true }); });
+function tempFolder(prefix) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  tempFolders.push(dir);
+  return dir;
+}
+
 const bridgeVersion = '2.6.0';
 
 function fixtureRoot(label = '') {
-  const created = fs.mkdtempSync(path.join(os.tmpdir(), `toolkit owned staging ${label}-`));
+  const created = tempFolder(`toolkit owned staging ${label}-`);
   return fs.realpathSync.native(created);
 }
 

@@ -117,6 +117,8 @@ test('the n8n adapter template is generated from its source and stays compact an
 
 test('global rules hold the generic floor: precedence, entry routing, safety gates and delivery', () => {
   const text = readText(globalPath);
+  assert.equal(text.split('.tmp/worktrees/').length, 2, 'one home for agent-made worktrees');
+  assert.doesNotMatch(text, /_worktrees/, 'no rule names the retired sibling worktree folder');
   for (const rule of [
     /the repository wins on conventions and workflow/,
     // A host that did not load the repository's AGENTS.md must still read and follow it.
@@ -151,6 +153,8 @@ test('global rules hold the generic floor: precedence, entry routing, safety gat
     /\*\*Change-local hygiene:\*\*/,
     /no change, reuse, smallest root-cause fix, bounded simplification, new abstraction only if needed/,
     /fast-forward the local default-branch checkout only when it is on that branch and clean[^\n]*Never reset or force/,
+    // Lane worktrees and branches once outlived their merge, and three rules named three worktree homes.
+    /\(e\.g\. `\.tmp\/`, worktrees in `\.tmp\/worktrees\/<lane>-<gate>-<sha>`\)/,
     /`gh pr checks <PR> --watch --interval 60`/,
     /never claim CI passed without every required check/,
     /after two failed fixes, stop and report/,
@@ -180,6 +184,13 @@ test('global rules hold the generic floor: precedence, entry routing, safety gat
   for (const phrase of forbiddenDefaultPromptPhrases) assert.ok(!text.includes(phrase), phrase);
 });
 
+test('the controller removes a merged lane worktree and branch without --force or -D and keeps what it cannot prove', () => {
+  // Lane worktrees and branches once outlived their merge; git worktree remove deletes ignored files
+  // (kept evidence, .env) without --force, and git branch -d deletes a pushed unmerged branch.
+  const controller = readText('repo/CONTROLLER.md');
+  assert.match(controller, /after a lane's PR merges, remove its worktree \(`git worktree remove`, then `git worktree prune`\) and its branch \(`git branch -d` once `git merge-base --is-ancestor` shows it merged\), never `--force` or `-D`; keep and report a dirty, locked or unmerged worktree, one with ignored files \(`git status --ignored`: removal deletes them\) and a closed-unmerged PR's branch;/);
+});
+
 test('gate rules hold the gate mechanics every gate session reads on demand', () => {
   const text = readText('repo/contracts/agent-rules/gate-rules.md');
   for (const rule of [
@@ -187,6 +198,8 @@ test('gate rules hold the gate mechanics every gate session reads on demand', ()
     /G1 Builder\*\* starts in a fresh session, with the G0 plan passed in its brief as the handoff/,
     /full G2 for RISKY, one independent review for NORMAL, the builder's own diff read for LIGHT/,
     /There are no handover packets/,
+    // Lane worktrees and branches once outlived their merge.
+    /unless it needs its own worktree, then uses `\.tmp\/worktrees\/<lane>-<gate>-<sha>` at the admitted commit and records HEAD; the controller removes it after merge\./,
     /Never rely on chat or host memory/,
     /Refactors keep public behaviour, approvals, independent readback, concurrency controls and recovery semantics/,
     /check the actual state and effect owners and their dependency contracts, not class counts/,

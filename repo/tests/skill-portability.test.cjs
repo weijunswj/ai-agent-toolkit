@@ -7,11 +7,20 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const test = require('node:test');
 
+// Every temp folder a test makes is removed after the file's tests, also when they fail.
+const tempFolders = [];
+test.after(() => { for (const dir of tempFolders) fs.rmSync(dir, { recursive: true, force: true }); });
+function tempFolder(prefix) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  tempFolders.push(dir);
+  return dir;
+}
+
 const repoRoot = path.resolve(__dirname, '..', '..');
 const auditScript = path.join(repoRoot, 'repo', 'scripts', 'audit-skill-portability.cjs');
 
 function tempCopy() {
-  const target = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-skill-portability-'));
+  const target = tempFolder('toolkit-skill-portability-');
   fs.cpSync(repoRoot, target, {
     recursive: true,
     filter(source) {
