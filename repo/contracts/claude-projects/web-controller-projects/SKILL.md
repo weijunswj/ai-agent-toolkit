@@ -4,7 +4,7 @@ description: "Use when running as a Claude Projects coordinator and the user app
 ---
 
 # Web Controller for Claude Projects
-Version: 2026-10-24.5
+Version: 2026-10-25.1
 
 Run Toolkit repos through Claude Projects. The global rules and coding gates apply in every project; GitHub governance (parent and child issues, records, decision traces, evidence custody) applies only to a github.com repo whose governance state is ENABLED. Keep project facts (repos, devices, lanes, pending work) in project memory; durable work state lives in the branch, the PR and the programme comments or evidence store, mirrored in memory, never only there.
 
@@ -87,7 +87,7 @@ When the skill or Toolkit updates, or the daily check-in reports BLOCK OUTDATED,
 
 ## Recurring tasks
 Whenever the user asks for anything recurring (the daily check-in, a sweep, a reminder), follow `reference/recurring-tasks.md` beside this skill, and tell the user which kind you used and where they will see it. It holds how a cloud thread creates and tests a task, how Toolkit-made tasks are rendered from `main` and swapped by recreating them, the fallbacks, and the memory line formats.
-- Every scheduled task runs as a fresh session per run, with no bound thread, except the hourly nudge (bound to its own home thread, **Hourly nudge**). Run every day by default unless the user picks another schedule; the hourly nudge runs in the user's waking hours only.
+- Every Toolkit scheduled task is bound to its own home thread (`<PROJECT>: <task name>`), because that thread carries the task's model and effort and keeps run cards out of project chat. A fresh session per run is the fallback, only where a task can't be bound. Never resolve a home thread or list it as a resolve candidate; only a fresh-session run resolves its own run thread. Run every day by default unless the user picks another schedule; the hourly nudge runs in the user's waking hours only.
 - **The project's own tasks** are never changed without the owner, and local, desktop and device-bound tasks are only listed, never recreated or moved to the cloud.
 - Only two project memory lines are Toolkit's to rewrite: `BINDING:` (**Binding**) and `SCHEDULED TASKS:`. Trigger ids live only on that line, never in a prompt.
 - When a recurring task replaces an older one, delete the older one so the user isn't sent two.
@@ -96,7 +96,7 @@ Whenever the user asks for anything recurring (the daily check-in, a sweep, a re
 
 
 ## Daily check-in
-- Threads and the user wake the coordinator, but outside activity doesn't: other controllers' comments, new issues, or people replying by email. So every project runs a daily check-in every day, at a morning time in the user's time zone that you pick and tell them. It is a fresh session per run and read-only; its steps live in its rendered prompt. It keeps the project's Toolkit base layer current: it finds what is out of date and you make the change.
+- Threads and the user wake the coordinator, but outside activity doesn't: other controllers' comments, new issues, or people replying by email. So every project runs a daily check-in every day, at a morning time in the user's time zone that you pick and tell them. It is bound to its own home thread (`<PROJECT>: Daily check-in`), set up like the hourly nudge's, and read-only; its steps live in its rendered prompt. It keeps the project's Toolkit base layer current: it finds what is out of date and you make the change.
 - Its report's first line carries these prefixes, in this order. Act on each the same turn:
   - `SKILL UPDATE`: the loaded skill is newer than memory's. Follow it now, save its Version and say so in one line; never wait for a restart. When the repo's Version is newer than the loaded one, the owner saves the new skill.
   - `SKILL DRIFT`: the account copy has direct edits that match no Toolkit revision. Bring them into Toolkit from the saved copy (a Toolkit PR) before anyone re-uploads, so nothing is overwritten.
