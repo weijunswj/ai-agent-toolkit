@@ -52,7 +52,7 @@ test('no plugin payload or skills folder reaches the Projects controller skill',
 
 test('Projects wires managed instructions, promises and fresh scheduled sessions to controller law', () => {
   const text = bundle();
-  assert.match(text, /^Version: 2026-10-25\.8$/m);
+  assert.match(text, /^Version: 2026-10-25\.9$/m);
   // The check-in posts the skill card itself; the coordinator lists the Save tap, re-upload only when the card failed.
   assert.match(text, /`SKILL BEHIND`: the account copy is an older Toolkit revision\. With "card posted", the check-in posted the skill update card in its thread: put "tap Save on the skill card"/);
   assert.match(text, /keep that thread open \(never resolve it in the hourly pass, even after the check-in moves to a new home thread\) until the owner saves/);
@@ -63,6 +63,11 @@ test('Projects wires managed instructions, promises and fresh scheduled sessions
   assert.match(text, /each fresh scheduled run resolves its own thread after report delivery, except a check-in run that posted a skill card\./);
   // Plugin lag: removing the plugin alone is the fix that worked; the marketplace re-add is the fallback.
   assert.match(text, /`PLUGIN BEHIND`: the Toolkit plugin on the user's claude\.ai account is more than a day behind `main`/);
+  // One tap each where the owner reads: the skill card in the project chat, and one plugin card with the one click.
+  assert.match(text, /When propose_skills is among your tools, also post that card once per Version in the project chat \(kind improvement, target and name web-controller-projects, skillMd main's SKILL\.md read from the file byte for byte\)/);
+  assert.match(text, /Tell the owner once per version, as one plugin card in the project chat beside any skill card/);
+  assert.match(text, /Keep it on the pending list until a check-in shows the plugin current\./);
+  assert.match(text, /only the account skill and plugin need the owner, because no agent can write them: the skill takes one Save tap on its card, and the plugin card is one link and one click\./);
   // The skill drift watch lives in the daily check-in: direct account edits come back into Toolkit first.
   assert.match(text, /`SKILL DRIFT`: the account copy has direct edits that match no Toolkit revision\. Bring them into Toolkit from the saved copy/);
   assert.match(text, /Post its first line to the owner every run, "nothing changed" included/);

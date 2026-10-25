@@ -1,5 +1,13 @@
 # Toolkit Changelog
 
+## 3.13.8
+
+### Claude Projects
+
+- **One tap each when the account copies fall behind:** Claude Projects controller skill 2026-10-25.9 (tap Save on its card). When the daily check-in finds the account skill behind `main`, the coordinator posts the skill update card in the project chat too, when its tools allow, so the owner saves with one tap where they read. When the Toolkit plugin is more than a day behind, the coordinator posts one plugin card there: no agent can update a claude.ai plugin, so the card holds the claude.ai link and the one click (remove the Toolkit plugin only and let it reinstall), with Check for updates and a marketplace re-add as fallbacks.
+- **Plugin lag is reported once per version:** the check-in names the commit and time `main` moved past the account version, and puts `PLUGIN BEHIND` on its first line once per `main` version instead of every run.
+- **No false skill drift from a short clone:** before the check-in calls an account file a direct edit, it fetches the full history of its shallow Toolkit clone and checks every revision again, so an old but unedited account copy is reported as behind, not edited.
+
 ## 3.13.7
 
 ### Programme pages

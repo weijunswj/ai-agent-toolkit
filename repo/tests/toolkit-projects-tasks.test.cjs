@@ -300,6 +300,12 @@ test('the check-in carries every prefix in the fixed order and checks both Toolk
     'A reference file missing from the account is not drift', 'straight after the call and read it back', 'SKILL BEHIND (carried forward while still seen)', 'every "card <Version>" record (this run\'s and all earlier ones, carried forward)']) {
     assert.ok(text.includes(required), required);
   }
+  // Drift needs the full history, plugin lag is reported once per main version, and the plugin fix is the owner's one click.
+  for (const required of ['`git -C TK fetch --unshallow` once and hash every revision again', 'the oldest commit newer than the last one whose plugin.json has the account version',
+    'unless state.md already reported this main version', 'No agent can update the plugin', 'open ai-agent-toolkit and select Remove',
+    'select Check for updates on its marketplace', 'the main version reported as PLUGIN BEHIND (carried forward while the account copy is still behind)']) {
+    assert.ok(text.includes(required), required);
+  }
   assert.doesNotMatch(text, /skip the resolve in DELIVERY/, 'bound runs never resolve, so no fresh-only card line');
   const freshCheckIn = tasks().render('daily-check-in', validateParams('daily-check-in', { ...PARAMS['daily-check-in'], session: 'fresh' }));
   assert.match(freshCheckIn, /When this run posted a card, skip the resolve in DELIVERY: a resolved thread hides the card\./);
