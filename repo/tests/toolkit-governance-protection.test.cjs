@@ -411,6 +411,15 @@ test('P-17: the reader is default-deny: YAML outside its plain subset is unverif
   assert.equal(verdicts(['on:', '  pull_request:', '    types: [labeled]', 'jobs:', '  validate:', '    runs-on: ubuntu-latest', ''].join('\n')).P4.status, 'unverified', 'types');
   // An indentless list of events is read, so a pull request trigger there is seen.
   assert.equal(verdicts(['on:', '- pull_request', 'jobs:', '  validate:', '    runs-on: ubuntu-latest', ''].join('\n')).P4.status, 'ok', 'indentless on');
+  // An indentless steps list (GitHub's starter style) is read, so its steps are checked like any others.
+  const indentless = text => text.replace(/\n {6}- name: Verify\n((?: {8}.*\n)*)/, (_, rest) => `\n    - name: Verify\n${rest.replace(/^ {2}/gm, '')}`);
+  assert.match(indentless(aggregate()), /\n    steps:\n    - name: Verify\n      env:/, 'indentless fixture');
+  assert.equal(verdicts(indentless(aggregate())).P4.status, 'ok', 'indentless steps');
+  assert.equal(protection.readWorkflow(indentless(aggregate())).jobs.find(job => job.key === 'validate').steps.length, 1, 'indentless steps are read');
+  assert.equal(verdicts(indentless(aggregate(['        continue-on-error: true']))).P4.status, 'unverified', 'indentless step continue-on-error');
+  assert.equal(verdicts(indentless(aggregate(['        shell: python']))).P4.status, 'unverified', 'indentless step shell');
+  const extraStep = indentless(aggregate()).replace('    - name: Verify', '    - run: echo NODE_OPTIONS=x >> $GITHUB_ENV\n    - name: Verify');
+  assert.equal(verdicts(extraStep).P4.status, 'unverified', 'indentless GITHUB_ENV step');
   // continue-on-error is off only as the plain false; a quoted or block false is a string, so set.
   assert.equal(verdicts(aggregate(['        continue-on-error: false'])).P4.status, 'ok', 'plain false');
   for (const lines of [["        continue-on-error: 'false'"], ['        continue-on-error: "false"'], ['        continue-on-error: |', '          false'], ['        continue-on-error: >-', '          false']]) {

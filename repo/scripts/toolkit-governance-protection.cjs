@@ -112,9 +112,14 @@ function children(lines, start, end) {
     if (line.indent !== indent || line.text.startsWith('- ')) continue;
     const match = KEY_LINE.exec(line.text);
     if (!match) continue;
+    const value = match[4] === undefined ? '' : match[4];
     let stop = index + 1;
     while (stop < end && lines[stop].indent > indent) stop += 1;
-    out.push({ key: match[1] || match[2] || match[3], value: match[4] === undefined ? '' : match[4], index, end: stop });
+    // An indentless list after `key:`: its items sit at the key's own indent and belong to the key.
+    if (!value.trim() && stop === index + 1) {
+      while (stop < end && (lines[stop].indent > indent || (lines[stop].indent === indent && lines[stop].text.startsWith('- ')))) stop += 1;
+    }
+    out.push({ key: match[1] || match[2] || match[3], value, index, end: stop });
   }
   return out;
 }
