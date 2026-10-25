@@ -10,7 +10,9 @@
 //   --render <kind> --params <file> [--project-text <file>]   the full prompt
 //   --name <kind> --params <file>                              the task name
 //   --check <kind> <prompt-file>        current | outdated | edited | missing | misplaced | malformed
-//   --refresh <kind> <prompt-file> [--params <file>] [--project-text <file>]   the refreshed prompt
+//   --refresh <kind> <prompt-file> [--params <file>] [--project-text <file>] [--session <bound|fresh>]
+//                                       the refreshed prompt; --session moves a Toolkit task between
+//                                       bound and the fresh-session fallback
 //   --params-from <prompt-file>         the params block found in a prompt
 //   --check-memory <memory-file>        current, or one MEMORY FORMAT line per faulty Toolkit line
 //
@@ -188,16 +190,18 @@ class ProjectsTasks {
     return checkTask(kind, text, params => this.expectedBlocks(kind, params));
   }
 
-  refresh(kind, text, { params: override, projectText } = {}) {
+  refresh(kind, text, { params: override, projectText, session } = {}) {
     const result = this.check(kind, text);
     if (result.state === 'malformed') throw new TaskInputError('TASK_MALFORMED');
+    if (session !== undefined && (!KINDS[kind].session || !PARAMS.session.test(session))) throw new TaskInputError('TASK_ARGUMENTS');
+    const withSession = params => (session === undefined ? params : validateParams(kind, { ...params, session }));
     if (result.state === 'missing') {
       if (!override) throw new TaskInputError('TASK_PARAMS');
-      return this.render(kind, override, projectText);
+      return this.render(kind, withSession(override), projectText);
     }
     if (override || projectText !== undefined) throw new TaskInputError('TASK_ARGUMENTS');
     const lf = lfText(text);
-    const params = parseParams(kind, lf);
+    const params = withSession(parseParams(kind, lf));
     const expected = this.expectedBlocks(kind, params);
     const { blocks } = findBlocks(lf);
     const own = blocks.filter(block => block.source === SOURCE);
@@ -211,7 +215,8 @@ class ProjectsTasks {
     const fence = findParams(lf);
     let project = projectSegments(lf, own, fence).join('\n\n');
     if (kept.length) project = [project, KEPT_LABEL, ...kept].filter(Boolean).join('\n');
-    const fenceText = lf.split('\n').slice(fence.startLine, fence.endLine + 1).join('\n');
+    // A session change rewrites the params block; otherwise it is kept byte for byte.
+    const fenceText = session === undefined ? lf.split('\n').slice(fence.startLine, fence.endLine + 1).join('\n') : paramsFence(params);
     return this.render(kind, params, project, fenceText);
   }
 }
@@ -328,9 +333,9 @@ function parseArgs(args) {
     return { mode: mode.slice(2), kind: kindArg(positional[0]), params: options['--params'], projectText: options['--project-text'] };
   }
   if (mode === '--check' || mode === '--refresh') {
-    const positional = take(mode === '--refresh' ? ['--params', '--project-text'] : []);
+    const positional = take(mode === '--refresh' ? ['--params', '--project-text', '--session'] : []);
     if (positional.length !== 2) throw new TaskInputError('TASK_ARGUMENTS');
-    return { mode: mode.slice(2), kind: kindArg(positional[0]), file: positional[1], params: options['--params'], projectText: options['--project-text'] };
+    return { mode: mode.slice(2), kind: kindArg(positional[0]), file: positional[1], params: options['--params'], projectText: options['--project-text'], session: options['--session'] };
   }
   if (mode === '--params-from' || mode === '--check-memory') {
     const positional = take([]);
@@ -362,7 +367,8 @@ function main(args = process.argv.slice(2)) {
     } else if (options.mode === 'refresh') {
       output = tasks.refresh(options.kind, read(options.file), {
         params: options.params === undefined ? undefined : readParamsFile(options.kind, options.params),
-        projectText: read(options.projectText)
+        projectText: read(options.projectText),
+        session: options.session
       });
     } else if (options.mode === 'params-from') {
       const fence = findParams(read(options.file));

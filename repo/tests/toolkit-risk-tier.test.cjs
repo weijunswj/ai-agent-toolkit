@@ -74,32 +74,43 @@ test('tests and other scripts are NORMAL, docs are LIGHT, skills are NORMAL', ()
   for (const rel of ['README.md', 'repo/docs/CHANGELOG.md', 'repo/ARCHITECTURE.md', 'repo/docs/HOW-TO-USE.md']) assert.equal(tierOf(rel), 'LIGHT', rel);
 });
 
-// Every way a RISKY file reaches another file by a path written in it: require, path.join or
-// path.resolve with literal parts, and any other repository path written as a whole word in code,
-// a plugin hook command, a shell script (from its own folder) or a workflow that holds a write
-// permission or a secret (comments and generated headers skipped). Only code, JSON, YAML and
-// templates count as reached; a doc a script reads to check it does not. A path built only at run
-// time, or a folder a script lists, is not followed: that is why script folders default to RISKY.
+// Every way a RISKY file reaches another file by a path written in it: require, path.join,
+// path.resolve, path.posix.join or a destructured join with literal parts, and any other repository
+// path written as a whole word in code, a plugin or settings hook command, a shell script (from its
+// own folder, or one a line cds into), PowerShell from $PSScriptRoot, or a workflow that holds a
+// write permission or a secret, or has no permissions key (comments and generated headers skipped).
+// Only code, JSON, YAML and templates count as reached; a doc a script reads to check it does not.
+// A path built only at run time, a folder a script lists, or a command named inside a data file is
+// not followed: that is why script folders default to RISKY.
 function riskyReach(tracked) {
   const known = new Set(tracked);
   const code = /\.(?:c?js|mjs|ps1|sh|py)$/i;
-  const counts = rel => code.test(rel) || /\.(?:json|ya?ml)$/i.test(rel) || rel.includes('/templates/');
+  const data = /\.(?:json|ya?ml)$/i;
+  const counts = rel => code.test(rel) || data.test(rel) || rel.includes('/templates/');
   const resolve = base => [base, `${base}.cjs`, `${base}.js`, `${base}/index.cjs`, `${base}/index.js`].find(candidate => known.has(candidate));
   const literal = arg => (/^\s*(['"`])([^'"`$]*)\1\s*$/.exec(arg) || [])[2];
-  // A repository path written in code: relative to the file, or to the repository root, after any
-  // leading $VAR/ (shell) or ${VAR}/ (template string) is dropped.
+  // A repository path written in code: relative to the file (or the folder a shell line cds into),
+  // or to the repository root, after any leading $VAR/ (shell) or ${VAR}/ (template string) is
+  // dropped. A name without its extension finds the .cjs or .js file.
   const candidates = (dir, written) => {
-    const bare = written.replace(/^\$\w+\//, '').replace(/^\/+/, '');
-    return /^\.{1,2}\//.test(written.replace(/^\$\w+\//, '')) ? [path.posix.join(dir, bare)] : [path.posix.normalize(bare), path.posix.join(dir, bare)];
+    const unvar = written.replace(/^\$\w+\//, '');
+    const bare = unvar.replace(/^\/+/, '').replace(/\/+$/, '');
+    const bases = /^\.{1,2}\//.test(unvar) ? [path.posix.join(dir, bare)] : [path.posix.normalize(bare), path.posix.join(dir, bare)];
+    return bases.map(base => resolve(base) || base);
   };
-  const links = rel => {
-    const text = fs.readFileSync(path.join(ROOT, rel), 'utf8');
-    if (rel.startsWith('.github/workflows/') && !/:\s*write\b/.test(text) && !/\$\{\{\s*secrets\.(?!GITHUB_TOKEN)/.test(text)) return [];
-    const dir = path.posix.dirname(rel);
+  const links = (rel, text = fs.readFileSync(path.join(ROOT, rel), 'utf8')) => {
+    const workflow = rel.startsWith('.github/workflows/');
+    // A workflow with no permissions key gets the default token, which may write.
+    if (workflow && /^permissions:/m.test(text) && !/:\s*write\b/.test(text) && !/\$\{\{\s*secrets\.(?!GITHUB_TOKEN)/.test(text)) return [];
+    // A workflow step runs from the repository root, so its ./ paths start there.
+    const dir = workflow ? '.' : path.posix.dirname(rel);
+    // A PowerShell path from the script's folder uses backslashes.
+    text = text.replace(/\$PSScriptRoot((?:\\[\w.-]+)+)/g, (match, rest) => `$PSScriptRoot${rest.replace(/\\/g, '/')}`);
     const found = [];
     for (const match of text.matchAll(/require\(\s*['"](\.{1,2}\/[^'"]+)['"]\s*\)/g)) found.push(resolve(path.posix.join(dir, match[1])));
-    // path.join or path.resolve with literal parts, whatever comes first: __dirname, a root variable or a string.
-    for (const match of text.matchAll(/path\.(?:join|resolve)\(([^()]*)\)/g)) {
+    // path.join, path.resolve, path.posix.join or a destructured join or resolve with literal parts,
+    // whatever comes first: __dirname, a root variable or call, or a string.
+    for (const match of text.matchAll(/(?<![\w.])(?:path(?:\.posix)?\.)?(?:join|resolve)\(((?:[^()]|\([^()]*\))*)\)/g)) {
       const [first, ...rest] = match[1].split(',');
       const parts = [];
       for (const arg of [first, ...rest].slice(literal(first) === undefined ? 1 : 0)) {
@@ -107,19 +118,25 @@ function riskyReach(tracked) {
         parts.push(literal(arg));
       }
       if (!parts.length) continue;
-      if (first.trim() === '__dirname') found.push(path.posix.join(dir, ...parts));
+      if (first.trim() === '__dirname') found.push(resolve(path.posix.join(dir, ...parts)) || path.posix.join(dir, ...parts));
       else found.push(...candidates(dir, parts.join('/')));
     }
     // Every other path written in code or a command, read as whole words so no extension or
-    // boundary can cut it short. Comment lines and generated headers are skipped.
-    const named = text.split('\n').filter(line => !/^\s*(?:\/\/|\*|\/\*|#)/.test(line) && !line.includes('Generated by')).join('\n');
-    for (const word of named.split(/[\s'"`(),;=[\]{}<>|&\\]+/)) {
-      if (word.includes('/') && word.length < 300) found.push(...candidates(dir, word));
+    // boundary can cut it short. Comment lines and generated headers are skipped. A shell line
+    // that cds into a folder also reads its file names from there.
+    const lines = text.split('\n').filter(line => !/^\s*(?:\/\/|\*|\/\*|#)/.test(line) && !line.includes('Generated by'));
+    for (const line of lines) {
+      const cd = (/\bcd\s+['"]?([\w.$/{}-]+)['"]?\s*(?:&&|;)/.exec(line) || [])[1];
+      for (const word of line.split(/[\s'"`(),;=[\]{}<>|&\\]+/)) {
+        if (word.length >= 300) continue;
+        if (word.includes('/')) found.push(...candidates(dir, word));
+        if (cd && /\.\w+$/.test(word) && !word.includes('/')) found.push(...candidates(dir, `${cd.replace(/^\$\{?\w+\}?\//, '')}/${word}`));
+      }
     }
     return found.filter(target => target && known.has(target) && counts(target));
   };
   const roots = tracked.filter(rel => tierOf(rel) === 'RISKY' && !rel.includes('/third-party/')
-    && (code.test(rel) || /hooks\/[^/]+\.json$/.test(rel) || rel.startsWith('.github/workflows/')));
+    && (code.test(rel) || /hooks\/[^/]+\.json$/.test(rel) || rel === '.claude/settings.json' || rel.startsWith('.github/workflows/')));
   const reached = new Map(roots.map(rel => [rel, 'a RISKY root']));
   for (const queue = [...roots]; queue.length;) {
     const rel = queue.shift();
@@ -146,6 +163,7 @@ test('everything RISKY code loads, starts, copies out or runs with a write token
     assert.ok(!reached.has(glob.slice(1)), `${glob} is an exception, so nothing RISKY may reach it`);
     assert.ok(tracked.includes(glob.slice(1)), `${glob} names a tracked file`);
   }
+  assert.deepEqual(exceptionFaults(TOOLKIT), []);
   // Each link kind on a real file: a JSON path in a string, a join that starts with a string, a hook
   // command, a shell path from the script's folder, and a write-token workflow step.
   const linked = (from, to) => assert.ok(reached.links(from).includes(to), `${from} links to ${to}`);
@@ -155,6 +173,33 @@ test('everything RISKY code loads, starts, copies out or runs with a write token
   linked('skills/codex-ssh-hostinger-coolify-setup-maintainer/scripts/install-daily-security-check-systemd.sh', 'skills/codex-ssh-hostinger-coolify-setup-maintainer/templates/daily-security-check.env.example');
   linked('.github/workflows/source-watch-pr.yml', 'repo/scripts/check-project-source-updates.cjs');
   assert.deepEqual(reached.links('.github/workflows/validate.yml'), [], 'a read-only workflow starts nothing RISKY');
+  // The other common spellings of a path, each pointing at one real script.
+  const target = 'repo/scripts/watch-project-sources.cjs';
+  for (const [from, text] of [
+    ['.github/workflows/new.yml', 'jobs:\n  a:\n    steps:\n      - run: node ./repo/scripts/watch-project-sources.cjs\n'],
+    ['skills/any/scripts/run.sh', 'cd repo/scripts && node watch-project-sources.cjs\n'],
+    ['repo/scripts/run.ps1', 'node "$PSScriptRoot\\watch-project-sources.cjs"\n'],
+    ['repo/scripts/run.cjs', "const { join } = require('node:path');\nspawn(join(__dirname, 'watch-project-sources.cjs'));\n"],
+    ['repo/scripts/run.cjs', "spawn(path.join(root(), 'repo', 'scripts', 'watch-project-sources.cjs'));\n"],
+    ['repo/scripts/run.cjs', "spawn(path.posix.join(ROOT, 'repo/scripts/watch-project-sources.cjs'));\n"],
+    ['repo/scripts/run.cjs', "run('node', ['repo/scripts/watch-project-sources']);\n"]
+  ]) assert.ok(reached.links(from, text).includes(target), `${from}: ${text.trim()}`);
+});
+
+// Being unreached only proves something for code: workflows, instructions and data are RISKY by
+// what they are, not by being reached. So an exception may only take a script out of a script folder.
+function exceptionFaults(config) {
+  return config.risky.filter(entry => entry.startsWith('!') && !/^!(?:repo\/scripts|skills\/[^/]+\/scripts)\/[^/]+\.(?:c?js|mjs)$/.test(entry));
+}
+
+test('an exception can only take a script out of a script folder, never a workflow, instruction or data file', () => {
+  for (const entry of ['!.github/workflows/programme-reconcile.yml', '!repo/docs/TOOLKIT-V3.md', '!AGENTS.md', '!repo/contracts/topology-scope-policy.json', '!repo/scripts/lib/x.cjs']) {
+    const config = { ...TOOLKIT, risky: [...TOOLKIT.risky, entry] };
+    assert.deepEqual(exceptionFaults(config), [entry], entry);
+  }
+  assert.equal(tierOf('.github/workflows/programme-reconcile.yml'), 'RISKY');
+  assert.equal(tierOf('repo/docs/TOOLKIT-V3.md'), 'RISKY');
+  assert.equal(tierOf('repo/scripts/Bump-Version.cjs'), 'RISKY', 'a new script differing only in case from an exception stays RISKY');
 });
 
 test('every RISKY pattern in this repository matches a tracked file, so the list cannot go stale unnoticed', () => {
@@ -306,7 +351,7 @@ test('a ! pattern takes a path back out of its list, and the last match wins', (
   assert.equal(tierOf('tools/dev-tidy.cjs', null, config), 'RISKY', 'a later pattern puts it back');
   const out = { ...config, risky: ['tools/**', '!tools/dev-lint.cjs'] };
   assert.equal(tierOf('tools/dev-lint.cjs', null, out), 'NORMAL');
-  assert.equal(tierOf('Tools/Dev-Lint.cjs', null, out), 'NORMAL', 'exceptions ignore case too');
+  assert.equal(tierOf('Tools/Dev-Lint.cjs', null, out), 'RISKY', 'an exception names its file exactly, so a new file differing in case keeps the folder tier');
   assert.equal(tierOf('tools/notes.md', null, out), 'RISKY', 'an exception never reaches past its own file');
   assert.throws(() => loadConfigText({ risky: ['!'] }), /"risky" must be a list of path patterns/);
   // An exception names one file by its full path: no bare names, wildcards or untidy paths.
@@ -331,6 +376,12 @@ test('a hand-typed path is tidied before matching, so ./, .., doubled slashes or
     assert.equal(tierOf(parseArgs(['--', typed]).paths[0]), 'RISKY', JSON.stringify(typed));
   }
   assert.equal(normalizePath('repo/./scripts//x.cjs '), 'repo/scripts/x.cjs');
+  // A typed absolute path inside the checkout, run from a subfolder, still reads this repository's list.
+  const out = spawnSync(process.execPath, [path.join(ROOT, 'repo', 'scripts', 'toolkit-risk-tier.cjs'), '--repo', path.join(ROOT, 'repo', 'docs'), '--json', '--',
+    path.join(ROOT, 'repo', 'scripts', 'setup-toolkit.cjs'), path.join(ROOT, 'repo', 'CONTROLLER.md')], { encoding: 'utf8' });
+  const result = JSON.parse(out.stdout);
+  assert.equal(result.list, '.github/toolkit-risk-tiers.json');
+  assert.deepEqual(result.files.map(file => [file.path, file.tier]), [['repo/scripts/setup-toolkit.cjs', 'RISKY'], ['repo/CONTROLLER.md', 'RISKY']]);
 });
 
 test('a moved marker or an unchanged line is not a version bump, and only the marker\'s toolkit= value may change', () => {
