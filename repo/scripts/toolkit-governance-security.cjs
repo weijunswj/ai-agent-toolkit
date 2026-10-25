@@ -351,12 +351,13 @@ function jobSteps(block, keyIndent) {
 
 // Whether workflow `text` provably names no CodeQL step but upload-sarif (another scanner's results).
 // This is a plain text search, so no YAML shape can hide a step from it: the text is searched raw and
-// decoded the way any YAML scalar could spell it (escaped line breaks joined, every \x, \u and \U
-// escape decoded, every other backslash dropped), comments included, and every `codeql` in either
-// copy must belong to `github/codeql-action/upload-sarif@` with nothing before `github/` that could
-// make it another action's path. Text that may not decode as written (a NUL, a decoding error, a
-// line break other than LF or CRLF, a %TAG directive, a verbatim, escaped or binary tag) is never
-// ruled out.
+// decoded (escaped line breaks joined, every \x, \u and \U escape decoded, every other backslash
+// dropped), comments included, and every `codeql` in either copy must belong to
+// `github/codeql-action/upload-sarif@` with nothing before `github/` that could make it another
+// action's path. A quoted value that YAML decodes to a CodeQL action path, with no backslash left in
+// it, spells `codeql` in the decoded copy. Text that may not decode as written (a NUL, a decoding
+// error, a line break other than LF or CRLF, a %TAG directive, a verbatim tag, a `!!` or named tag
+// with a % escape, a binary tag) is never ruled out.
 function codeqlRuledOut(text) {
   const raw = String(text);
   // A line break other than LF or CRLF (a lone CR, NEL, LS, PS) could hide an escaped line break.
