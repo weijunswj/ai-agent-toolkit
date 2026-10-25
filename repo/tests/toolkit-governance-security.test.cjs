@@ -348,7 +348,7 @@ test('SE-09: the writer calls only the endpoints for the fixes it is given, and 
   assert.equal(answer('gh: Validation Failed (HTTP 422)'), 'gh-request-failed');
 });
 
-const TEMPLATE = fs.readFileSync(path.join(ROOT, ...security.WORKFLOW_TEMPLATE_REL.split('/')), 'utf8');
+const TEMPLATE = fs.readFileSync(path.join(ROOT, ...security.WORKFLOW_TEMPLATE_REL.split('/')), 'utf8').replace(/\r\n/g, '\n');
 
 test('SE-10: the auto-merge workflow stays guarded, and this repository carries the current copy', () => {
   assert.ok(TEMPLATE.startsWith('# Toolkit dependency auto-merge v2.'));
@@ -365,7 +365,7 @@ test('SE-10: the auto-merge workflow stays guarded, and this repository carries 
   assert.equal(security.workflowState(ROOT), 'current');
   const own = security.dependencySecurity(ROOT, { offline: true });
   assert.equal(own.checks.S3.status, 'ok', 'this repository covers its own ecosystems');
-  assert.equal(fs.readFileSync(path.join(ROOT, '.github', 'dependabot.yml'), 'utf8'), security.renderDependabotConfig(security.detectEcosystems(ROOT)), 'this repository carries the config Toolkit writes');
+  assert.equal(fs.readFileSync(path.join(ROOT, '.github', 'dependabot.yml'), 'utf8').replace(/\r\n/g, '\n'), security.renderDependabotConfig(security.detectEcosystems(ROOT)), 'this repository carries the config Toolkit writes');
 });
 
 // The shell of each `run: |` block in the workflow, by job.
