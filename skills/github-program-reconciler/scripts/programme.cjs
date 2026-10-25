@@ -119,15 +119,22 @@ function toolkitVersion(file = VERSION_FILE) {
 
 // One reconcile pass with --apply at a time per repository on this computer. The lock file holds a
 // random token, the owner's process id and host; its modified time is the owner's heartbeat, renewed
-// before every GitHub request (each one times out within two minutes) and between passes. A lock is
-// held while its owner is alive and has beaten within LOCK_STALE_MS, so a live pass is never broken.
-// A dead owner's lock, or anything at the path that is not a lock file, is moved aside and checked
-// before it is replaced, and an owner releases only a lock that still holds its own token.
+// before every GitHub request. Before every request the pass also checks that the lock still holds its
+// token, and stops (PASS_LOCK_LOST) if not, so a pass that loses its lock never writes again.
 //
-// reconcile --apply refuses while the lock is held (PASS_RUNNING). refresh never drops a change: it
-// leaves an "again" flag and ends, and the owner runs one more refresh pass before it lets go, up to
-// MAX_PASSES in a row (a longer burst waits for the next refresh or the hourly sweep).
+// The lock is taken over only when its owner is provably gone: on this host, its process has ended;
+// on another host (a shared profile), it has not beaten for LOCK_STALE_MS. A live process that has
+// not beaten for LOCK_ABANDONED_MS is taken to be an unrelated process that reused a dead owner's id
+// (a pass beats at least every few minutes while awake); if it is in fact a pass waking from a long
+// sleep, it finds its token gone and stops before its next request. Anything at the path that is not
+// a lock file is replaced. A lock is moved aside and checked before it is replaced, and an owner
+// releases only a lock that still holds its own token.
+//
+// reconcile --apply refuses while the lock is held (PASS_RUNNING). refresh leaves an "again" flag and
+// ends, and the owner runs one more refresh pass on the same store before it lets go, up to MAX_PASSES
+// in a row. If the owner fails or reaches the limit, the flag stays for the next refresh or sweep.
 const LOCK_STALE_MS = 15 * 60 * 1000;
+const LOCK_ABANDONED_MS = 6 * 60 * 60 * 1000;
 const MAX_PASSES = 5;
 const LOCK_SCHEMA = 'toolkit.programme-pass-lock.v1';
 
@@ -156,22 +163,24 @@ function lockState(file, nowMs, alive = pidAlive) {
   const seen = readLock(file);
   if (seen.missing) return { free: true };
   if (seen.broken) return { stale: true, seen };
-  const beat = nowMs - seen.mtimeMs;
-  const fresh = beat < LOCK_STALE_MS && beat > -LOCK_STALE_MS;
-  const owner = seen.lock.host === os.hostname() ? alive(seen.lock.pid) : true;
-  return owner && fresh ? { held: true, seen } : { stale: true, seen };
+  const silent = nowMs - seen.mtimeMs;
+  const gone = seen.lock.host === os.hostname()
+    ? !alive(seen.lock.pid) || silent > LOCK_ABANDONED_MS
+    : silent > LOCK_STALE_MS || silent < -LOCK_STALE_MS;
+  return gone ? { stale: true, seen } : { held: true, seen };
 }
 
-// Returns a handle { token, beat(), release() }, or null while another live pass holds the lock. A
-// null file means no lock (tests that bring their own GitHub).
+// Returns a handle { token, owns(), beat(), release() }, or null while another live pass holds the
+// lock. A null file means no lock (tests that bring their own GitHub).
 function takeLock(file, deps = {}) {
-  if (!file) return { token: null, beat() {}, release() {} };
+  if (!file) return { token: null, owns: () => true, beat() {}, release() {} };
   const now = () => (deps.nowMs === undefined ? Date.now() : deps.nowMs);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const token = crypto.randomBytes(16).toString('hex');
   const owns = () => readLock(file).lock?.token === token;
   const handle = {
     token,
+    owns,
     beat() { try { if (owns()) { const at = new Date(); fs.utimesSync(file, at, at); } } catch { /* the next beat retries */ } },
     release() { try { if (owns()) fs.unlinkSync(file); } catch { /* already gone */ } },
   };
@@ -256,7 +265,7 @@ function openContext(args, deps = {}) {
   if (!deps.originUrl) requireGitHubGovernance(repoRoot);
   const binding = deps.binding || state.loadBinding(repoRoot);
   const base = deps.transport || new state.GitHubTransport({ ghPath: state.resolveExecutable('gh') });
-  // A pass that holds the lock renews it before every GitHub request.
+  // A pass that holds the lock checks it still does, and renews it, before every GitHub request.
   const transport = deps.heartbeat ? Object.assign(Object.create(base), { request: (...call) => { deps.heartbeat(); return base.request(...call); } }) : base;
   const repository = state.bindRepository({ transport, originUrl, binding });
   const version = deps.toolkitVersion === undefined ? toolkitVersion() : deps.toolkitVersion;
@@ -597,7 +606,7 @@ function main(argv = process.argv.slice(2), deps = {}) {
 function runPasses(args, deps, out) {
   const beat = { fn: () => {} };
   const passDeps = { ...deps, heartbeat: () => beat.fn() };
-  let context = openContext(args, passDeps);
+  const context = openContext(args, passDeps);
   const file = deps.lockFile !== undefined ? deps.lockFile : (deps.originUrl ? null : defaultLockFile(context.binding.repository));
   let lock = takeLock(file, deps);
   if (!lock && args.command !== 'refresh') {
@@ -608,7 +617,7 @@ function runPasses(args, deps, out) {
     lock = takeLock(file, deps);
     if (!lock) {
       const minutes = lockMinutes(file, deps.nowMs);
-      const reason = `another pass for ${context.binding.repository} is running on this computer${minutes === null ? '' : ` (started ${minutes} min ago)`}; it runs once more when it ends, so this change reaches the pages then`;
+      const reason = `another pass for ${context.binding.repository} is running on this computer${minutes === null ? '' : ` (started ${minutes} min ago)`}; it runs once more when it ends, so this change reaches the pages then (if that pass fails or a long burst reaches the limit, the next refresh or the hourly sweep does)`;
       out.write(args.json ? `${JSON.stringify({ outcome: 'QUEUED', reason }, null, 2)}\n` : `Refresh queued: ${reason}.\n`);
       return 0;
     }
@@ -616,15 +625,17 @@ function runPasses(args, deps, out) {
   let code = 0;
   let passes = 0;
   while (lock) {
-    beat.fn = lock.beat;
+    const held = lock;
+    beat.fn = () => {
+      if (!held.owns()) throw new ProgrammeError('PASS_LOCK_LOST', `Another pass took over the lock for ${context.binding.repository} while this one ran, so this pass stopped before its next GitHub request. The next refresh or the hourly sweep finishes the work.`);
+      held.beat();
+    };
     try {
       do {
         clearAgain(file);
         const passArgs = passes === 0 ? args : { command: 'refresh', json: args.json, 'repo-root': args['repo-root'] };
-        if (passes > 0) {
-          if (!args.json) out.write('\nA change came in during that pass, so the pages are refreshed once more.\n');
-          context = openContext(passArgs, passDeps);
-        }
+        // Later passes reuse the same store, which remembers its own writes through GitHub's read lag.
+        if (passes > 0 && !args.json) out.write('\nA change came in during that pass, so the pages are refreshed once more.\n');
         code = Math.max(code, finish(passArgs, deps, out, context));
         passes += 1;
       } while (flagged(file) && passes < MAX_PASSES);
@@ -660,4 +671,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = Object.freeze({ parseArgs, toolkitVersion, takeLock, lockState, defaultLockFile, againFile, LOCK_STALE_MS, MAX_PASSES, openContext, commands, localCommands, formatReport, main, verifyTakeoverRecord });
+module.exports = Object.freeze({ parseArgs, toolkitVersion, takeLock, lockState, defaultLockFile, againFile, LOCK_STALE_MS, LOCK_ABANDONED_MS, MAX_PASSES, openContext, commands, localCommands, formatReport, main, verifyTakeoverRecord });

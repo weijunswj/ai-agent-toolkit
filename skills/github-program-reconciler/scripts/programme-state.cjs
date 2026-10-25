@@ -1260,6 +1260,10 @@ function upsertStateBlock(text, rendered, placement = {}) {
 // Owners with effects
 
 // The only place that runs `gh api`. Returns status and parsed JSON; never retries.
+// A takeover (STALE_WRITER) or the loss of the pass lock (PASS_LOCK_LOST) stops the whole pass at
+// once; an intent it leaves IN_FLIGHT is recovered by the next pass.
+const STOPS_PASS = new Set(['STALE_WRITER', 'PASS_LOCK_LOST']);
+
 class GitHubTransport {
   constructor({ ghPath, run = spawnSync, timeoutMs = 120000 }) {
     if (!ghPath) throw new ProgrammeError('EXECUTABLE_NOT_FOUND', 'GitHubTransport needs the full path to gh.');
@@ -2153,7 +2157,7 @@ class Reconciler {
       let code = null;
       try { ({ outcome, detail = null, code = null } = run()); }
       catch (error) {
-        if (error.code === 'STALE_WRITER') throw error;
+        if (STOPS_PASS.has(error.code)) throw error;
         outcome = 'UNKNOWN';
         detail = error.message;
       }
@@ -2198,7 +2202,7 @@ class Reconciler {
         });
         record(effect, result.outcome === 'NOOP' ? 'NOOP' : 'DONE');
       } catch (error) {
-        if (error.code === 'STALE_WRITER') throw error;
+        if (STOPS_PASS.has(error.code)) throw error;
         record(effect, 'HELD', error.message);
         hold(effect, error.code || 'STATE_WRITE_FAILED', error.message);
       }

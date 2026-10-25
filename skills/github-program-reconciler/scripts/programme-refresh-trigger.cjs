@@ -34,22 +34,25 @@ const WRITE_TOOLS = new Set([
 ]);
 const SHELL_TOOLS = new Set(['Bash', 'PowerShell', 'shell', 'local_shell', 'exec_command']);
 const GH_WRITE = /\bgh(?:\.exe)?\s+(?:issue|pr)\s+(?:create|edit|comment|close|reopen|merge|ready|review|delete|lock|unlock|transfer|pin|unpin|update-branch)\b/i;
-// git push, with any global options before it (-C <dir>, -c <name=value>, --no-pager and the like).
-// Walked token by token rather than matched with one pattern, so no input can make it backtrack.
+// git push, with any global options before it: -C <dir> and -c <name=value> with their value,
+// --name[=value], and single-letter flags. The command is split into words once and walked forward,
+// so the time grows only with its length. A word ending in a shell separator ends the git command.
+const GIT_WORD = /(?:^|[\\/&(])git(?:\.exe)?$/i;
 function gitPushes(command) {
-  for (const found of command.matchAll(/\bgit(?:\.exe)?(?=\s)/gi)) {
-    const words = command.slice(found.index + found[0].length).split(/\s+/).filter(Boolean);
-    for (let index = 0; index < words.length; index += 1) {
+  const words = command.split(/\s+/).filter(Boolean);
+  for (let start = 0; start < words.length; start += 1) {
+    if (!GIT_WORD.test(words[start])) continue;
+    for (let index = start + 1; index < words.length; index += 1) {
       const word = words[index];
       if (word === '-C' || word === '-c') { index += 1; continue; }
-      if (word.startsWith('-')) continue;
-      if (/^push\b/i.test(word)) return true;
+      if (/^(?:--[\w-]+(?:=\S*)?|-\w)$/.test(word)) continue;
+      if (/^push(?:$|[;&|)])/i.test(word)) return true;
       break;
     }
   }
   return false;
 }
-const GH_API = /\bgh(?:\.exe)?\s+api\b[^\r\n]*/gi;
+const GH_API = /\bgh(?:\.exe)?\s+api\b[^\r\n;&|]*/gi;
 
 // A `gh api` call writes when it names a write method, or sends fields without naming GET; a GraphQL
 // call writes only when it is a mutation.
@@ -59,7 +62,7 @@ function ghApiWrites(command) {
       if (/\bmutation\b/i.test(call)) return true;
       continue;
     }
-    const method = /(?:-X|--method)[\s=]*['"]?([A-Z]+)/i.exec(call)?.[1]?.toUpperCase();
+    const method = /\s(?:-X|--method)[\s=]*['"]?([A-Z]+)\b/i.exec(call)?.[1]?.toUpperCase();
     if (method) {
       if (['POST', 'PATCH', 'PUT', 'DELETE'].includes(method)) return true;
       continue;
@@ -160,7 +163,7 @@ function boundRepository(root) {
   catch { return ''; }
 }
 
-// Turn-end hook: for a marked session, start one refresh per governed checkout it wrote for, in the
+// Turn-end hook: for a marked session, start one refresh per governed repository it wrote for, in the
 // background, then clear the mark. A write to a repository with no local governed checkout here is left
 // to the hourly sweep.
 function onStop(input, deps = {}) {
