@@ -19,9 +19,11 @@ const EDIT_TOOL = 'mcp__hearthbot__edit_message';
 const NEAR_LIMIT_BYTES = 7000;
 const MESSAGE_ID = /\b(cmsg_[A-Za-z0-9]+)\b/;
 
-// An owner message counts only where every tag still open around it is a wake, project or thread tag, so an owner
-// tag quoted inside another message, a note or a forwarded block never counts.
-const WAKE_TAGS = new Set(['wake', 'project', 'thread']);
+// An owner message counts unless it sits inside a message, note, citation or relay, so an owner tag quoted or
+// forwarded by another session never counts. The runtime also escapes "<" in message text, so a quoted tag usually
+// arrives as plain text; this is the second line of defence. Any wake wrapper (wake, project, thread or a newer one)
+// is accepted, so a change in the wake's outer shape cannot silently stop owner messages from counting.
+const QUOTE_TAGS = new Set(['message', 'note', 'cited', 'relay', 'coordinator-relay']);
 function hasOwnerMessage(text) {
   const open = [];
   for (const tag of text.matchAll(/<(\/?)([A-Za-z][\w-]*)\b([^<>]*?)(\/?)>/g)) {
@@ -31,7 +33,7 @@ function hasOwnerMessage(text) {
       if (at !== -1) open.length = at;
       continue;
     }
-    if (name === 'message' && /\bfrom=["']human["']/.test(attributes) && open.every(item => WAKE_TAGS.has(item))) return true;
+    if (name === 'message' && /\bfrom=["']human["']/.test(attributes) && !open.some(item => QUOTE_TAGS.has(item))) return true;
     if (!selfClosing) open.push(name);
   }
   return false;
@@ -109,8 +111,10 @@ function linkIssue(text) {
   const insideLinkText = index => linkTexts.some(([start, end]) => index > start && index < end);
   // A mention names one PR or a list ("PRs 612, 613 and 614"); each number in it needs a link: link text on that
   // number in any mention, or a /pull/<n>/files link anywhere in the post.
+  // A one- or two-digit number later in a list, followed by others, more, left, checks, files or tests, is read as a
+  // count and not checked; any number right after the PR word (as in "a PR (3 files)") is read as a PR and refused.
   const mentions = [];
-  for (const match of scan.matchAll(/\b(?:PRs?|pull requests?)\s*[:(]?\s*#?(\d{1,6}(?:\s*(?:,(?:\s*(?:and|or))?|&|\/|and|or)\s*#?\d{1,6}\b(?!(?<!\d{3})\s+(?:others|more|left|checks|files|tests)\b))*)\b/gi)) {
+  for (const match of scan.matchAll(/\b(?:PRs?|pull requests?)\s*(?:[:(]\s*)?#?(\d{1,6}(?:\s*(?:,(?:\s*(?:and|or))?|&|\/|and|or)\s*#?\d{1,6}\b(?!(?<!\d{3})\s+(?:others|more|left|checks|files|tests)\b))*)\b/gi)) {
     const listStart = match.index + match[0].length - match[1].length;
     for (const number of match[1].matchAll(/\d{1,6}/g)) {
       mentions.push({ match, value: number[0], linked: insideLinkText(listStart + number.index) });

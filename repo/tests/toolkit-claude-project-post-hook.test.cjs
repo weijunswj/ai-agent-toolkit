@@ -141,6 +141,8 @@ test('each PR in a list needs its own link', () => {
   // A long run of spaces after a comma stays fast.
   const started = Date.now();
   linkIssue(`PR 1,${' '.repeat(32000)}x`);
+  linkIssue(`PR${' '.repeat(32000)}x`);
+  linkIssue(`PR(${' '.repeat(32000)}x`);
   assert.ok(Date.now() - started < 500);
 });
 
@@ -169,6 +171,8 @@ test('guards hold: failed posts, size in bytes, the 8 KB escape and quoted owner
   // A self-closing tag and a stray "<" in earlier text do not hide the owner message.
   assert.equal(post([call(POST, { text: 'First.' }), quoted('<wake><project id="p"><attachment name="a"/><message from="human">hi</message></project></wake>')]), '');
   assert.equal(post([call(POST, { text: 'First.' }), quoted('<wake><message from="claude">a<b</message><message from="human">hi</message></wake>')]), '');
+  // An unfamiliar wake wrapper still counts, so a new wake shape cannot block every fresh post.
+  assert.equal(post([call(POST, { text: 'First.' }), quoted('<wake><channel id="c"><message from="human">hi</message></channel></wake>')]), '');
   // An owner message after a Claude's message in the same wake counts.
   assert.equal(post([call(POST, { text: 'First.' }), quoted('<wake><project id="p"><thread ts="t"><message from="claude">note</message><message from="human">hi</message></thread></project></wake>')]), '');
   // A wake with an image arrives as an image block, then the wake text.
