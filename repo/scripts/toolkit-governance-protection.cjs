@@ -19,8 +19,10 @@
 //      `if`, `continue-on-error`, custom shell or working directory, `TEST_LEGS: ${{ toJSON(needs) }}`,
 //      and a script of plain `node <file>.cjs` lines ending with `node repo/scripts/run-tests.cjs
 //      --verify-ci`, which fails unless every needed job succeeded (see aggregateProblem). Without
-//      one, or with YAML this reader does not follow (anchors, flow mappings, folded scalars),
-//      P4 is unverified, never conformant.
+//      one, P4 is unverified, never conformant.
+//
+// The workflow reader is default-deny: it follows only a plain subset of YAML (see
+// strictSubsetProblem), and a workflow with any line outside it makes P3 and P4 unverified.
 //   P5 merge commits only: the default branch allows only merge commits (ruleset
 //      `allowed_merge_methods`, the most restrictive across rulesets, else the repository settings).
 //
@@ -31,9 +33,8 @@
 // `ghProtectionRulesetWriter`, which only `toolkit governance migrate` calls after the owner's typed
 // yes; it creates or updates the one ruleset Toolkit names and never touches any other.
 //
-// The workflow reader understands the YAML GitHub workflows use in practice (block mappings, block
-// and inline lists, quoted scalars); a job named by an expression, a matrix job and a reusable
-// workflow call produce names it does not try to predict.
+// Within that subset, a job named by an expression, a matrix job and a reusable workflow call
+// produce names the reader does not try to predict.
 
 const childProcess = require('node:child_process');
 const fs = require('node:fs');
@@ -168,8 +169,8 @@ function readSteps(lines, stepsEntry) {
       run_style: run ? (/^\|[+-]?$/.test(run.value.trim()) ? 'literal' : /^[|>]/.test(run.value.trim()) ? 'other' : 'plain') : null,
       env: mapping(item, field('env')),
       if: field('if') ? field('if').value : null,
-      continue_on_error: field('continue-on-error') ? scalarValue(item, field('continue-on-error')) : null,
-      shell: field('shell') ? scalarValue(item, field('shell')) : null,
+      continue_on_error: field('continue-on-error') ? scalarValue(item, field('continue-on-error')) : undefined,
+      shell: field('shell') ? scalarValue(item, field('shell')) : undefined,
       working_directory: Boolean(field('working-directory')),
       uses: Boolean(field('uses')),
     });
@@ -180,17 +181,20 @@ function readSteps(lines, stepsEntry) {
 
 // `defaults.run` of a workflow or job: { shell, working_directory }, or null when unreadable.
 function runDefaults(lines, entry) {
-  if (!entry) return { shell: null, working_directory: false };
+  if (!entry) return { shell: undefined, working_directory: false };
   const defaults = children(lines, entry.index + 1, entry.end);
   if (entry.value.trim()) return null;
   const run = defaults.find(item => item.key === 'run');
-  if (!run) return { shell: null, working_directory: false };
+  if (!run) return { shell: undefined, working_directory: false };
   const values = mapping(lines, run);
   if (!values) return null;
-  return { shell: values.shell === undefined ? null : values.shell, working_directory: 'working-directory' in values };
+  // A shell that is present but unreadable is not "no shell".
+  if ('shell' in values && values.shell === null) return null;
+  return { shell: values.shell, working_directory: 'working-directory' in values };
 }
 
-const notFalse = value => value !== null && value !== undefined && value !== 'false';
+// Absent is undefined; present but unreadable is null, and counts as set.
+const notFalse = value => value !== undefined && value !== 'false';
 
 // Why `job` does not prove that it fails when a needed job did not succeed, or null when a step
 // does: that step has no `if`, `continue-on-error`, `uses` or `working-directory`, runs under a
@@ -209,13 +213,13 @@ function aggregateProblem(job, workflowContext) {
   for (const step of job.steps) {
     if (step.run === null || step.uses) continue;
     if (!AGGREGATE_LINE.test(step.run.split('\n').filter(Boolean).at(-1) || '')) continue;
-    const shell = step.shell !== null ? step.shell : job.defaults.shell !== null ? job.defaults.shell : workflowContext.defaults.shell;
+    const shell = step.shell !== undefined ? step.shell : job.defaults.shell !== undefined ? job.defaults.shell : workflowContext.defaults.shell;
     const legs = step.env && Object.prototype.hasOwnProperty.call(step.env, AGGREGATE_ENV) ? step.env[AGGREGATE_ENV] : job.env[AGGREGATE_ENV];
     if (step.if !== null) reasons.push('the aggregate step has its own `if`');
     else if (notFalse(step.continue_on_error)) reasons.push('the aggregate step has continue-on-error');
     else if (step.working_directory) reasons.push('the aggregate step sets working-directory');
     else if (!step.env) reasons.push('the aggregate step\'s env could not be read');
-    else if (shell !== null && !PLAIN_SHELLS.includes(shell)) reasons.push(`the aggregate step runs under shell "${shell}"`);
+    else if (shell !== undefined && !PLAIN_SHELLS.includes(shell)) reasons.push(`the aggregate step runs under shell "${shell === null ? 'unreadable' : shell}"`);
     else if (step.run_style === 'other') reasons.push('the aggregate step\'s script is a folded block');
     else if (!step.run.split('\n').filter(Boolean).every(line => PLAIN_LINE.test(line))) reasons.push('the aggregate step\'s script has a line that is not a plain node command');
     else if (typeof legs !== 'string' || !PASSES_NEEDS.test(legs.trim())) reasons.push(`the aggregate step does not get ${AGGREGATE_ENV}: \${{ toJSON(needs) }}`);
@@ -224,13 +228,115 @@ function aggregateProblem(job, workflowContext) {
   return reasons[0] || `no step ends with the declared aggregate command (node repo/scripts/run-tests.cjs --verify-ci with ${AGGREGATE_ENV}: \${{ toJSON(needs) }})`;
 }
 
-// YAML features the reader does not follow: anchors, aliases and merge keys.
-function unfollowedYaml(lines) {
-  return lines.some(line => /^<<\s*:/.test(line.text) || /(?::|^-)\s+[&*][A-Za-z0-9_-]+(?:\s|$)/.test(line.text));
+// ---- the strict subset (default deny) ------------------------------------------------------------
+//
+// The reader follows only a small, plain subset of YAML, and any line outside it makes the whole
+// workflow unverified, so YAML it cannot follow can never hide a condition, a shell or a producer:
+//
+//   - LF or CRLF line ends only (no lone CR, no tab anywhere, no other Unicode line breaks);
+//   - one document (a single leading `---` is allowed; no later `---` or `...`, no `%` directives);
+//   - every line outside a block scalar is `key:`, `key: value`, `- key:`, `- key: value` or
+//     `- value`, with exactly one space after `-`, a plain or simply quoted key, and no duplicate
+//     key in a mapping;
+//   - a value is a plain scalar that starts with no YAML indicator (no tag, anchor, alias, flow
+//     mapping, explicit key or reserved character) and holds no `: `, a quoted scalar closed on
+//     the same line, a one-line flow list of such scalars, or a block scalar header (`|`, `>`,
+//     optionally `-` or `+`);
+//   - a value never continues on the next line: after `key: value` the next line is not deeper,
+//     and after `key:` the next line is deeper, an indentless `- ` item, or the field is null.
+const KEY = /^(?:[A-Za-z0-9_][A-Za-z0-9_.-]*|"[A-Za-z0-9_ .-]+"|'[A-Za-z0-9_ .-]+')$/;
+const FLOW_ITEM = /^(?:[A-Za-z0-9_./*@$+=-][^,\[\]{}"'#:]*|"[^"\\]*"|'(?:[^']|'')*')$/;
+
+function plainValueProblem(value) {
+  if (/^[|>][+-]?$/.test(value)) return null;
+  if (value.startsWith('"')) return /^"[^"\\]*"$/.test(value) ? null : 'a double-quoted value that does not close on its line or uses escapes';
+  if (value.startsWith("'")) return /^'(?:[^']|'')*'$/.test(value) ? null : 'a single-quoted value that does not close on its line';
+  if (value.startsWith('[')) {
+    if (!value.endsWith(']')) return 'a flow list that does not close on its line';
+    const inner = value.slice(1, -1).trim();
+    if (!inner) return null;
+    return inner.split(',').map(item => item.trim()).filter((item, index, all) => item || index !== all.length - 1).every(item => FLOW_ITEM.test(item)) ? null : 'a flow list holding something other than plain or quoted scalars';
+  }
+  if (/^[!&*{}\]?|>%@`,#-]/.test(value) && !/^-[^\s]/.test(value)) return `a value starting with "${value[0]}" (a YAML indicator)`;
+  if (/:\s|:$/.test(value)) return 'a plain value holding ": "';
+  return null;
+}
+
+// Why `text` is outside the strict subset, or null when the reader can follow all of it.
+function strictSubsetProblem(text) {
+  let source = String(text);
+  if (source.charCodeAt(0) === 0xfeff) source = source.slice(1);
+  if (/\r(?!\n)/.test(source)) return 'it has a lone carriage return';
+  if (source.includes('\t')) return 'it has a tab';
+  if (/[\u0085\u2028\u2029]/.test(source)) return 'it has a Unicode line break';
+  const raw = source.replace(/\r\n/g, '\n').split('\n');
+  let block = null; // { indent } of the key that opened a block scalar
+  let expectDeeper = null; // { indent, line } after `key:`
+  let noDeeper = null; // content indent after a scalar value
+  let seenContent = false;
+  const scopes = []; // [{ indent, keys: Set }]
+  for (let index = 0; index < raw.length; index += 1) {
+    const line = raw[index];
+    const indent = line.length - line.trimStart().length;
+    const trimmed = line.trim();
+    if (block) {
+      if (!trimmed || indent > block.indent) continue;
+      block = null;
+    }
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const number = index + 1;
+    if (trimmed === '---' && !seenContent) { seenContent = true; continue; }
+    seenContent = true;
+    if (/^(?:---|\.\.\.)(?:\s|$)/.test(trimmed) || trimmed.startsWith('%')) return `line ${number} starts another document or a directive`;
+    if (noDeeper !== null && indent > noDeeper) return `line ${number} continues the value above it`;
+    if (expectDeeper && indent <= expectDeeper.indent && !(indent === expectDeeper.indent && trimmed.startsWith('- '))) expectDeeper = null; // a null field
+    const clean = stripComment(line).replace(/\s+$/, '').trimStart();
+    let body = clean;
+    let contentIndent = indent;
+    let item = false;
+    if (body === '-') return `line ${number} is a list item with no value`;
+    if (body.startsWith('- ')) {
+      if (body.startsWith('-  ')) return `line ${number} has more than one space after "-"`;
+      item = true;
+      body = body.slice(2);
+      contentIndent = indent + 2;
+    }
+    // Close mapping scopes this line has left, then find this line's own scope.
+    const keyMatch = /^("[^"]*"|'[^']*'|[^\s"'][^:]*?)\s*:(?:\s+(.*))?$/.exec(body);
+    if (!keyMatch || !KEY.test(keyMatch[1])) {
+      if (!item) return `line ${number} is not a plain "key: value" or "- " item`;
+      const problem = plainValueProblem(body);
+      if (problem) return `line ${number} has ${problem}`;
+      if (/^[|>]/.test(body)) return `line ${number} is a block scalar list item`;
+      while (scopes.length && scopes.at(-1).indent >= contentIndent) scopes.pop();
+      noDeeper = indent;
+      expectDeeper = null;
+      continue;
+    }
+    const key = keyMatch[1].replace(/^["']|["']$/g, '');
+    const value = keyMatch[2] === undefined ? '' : keyMatch[2].trim();
+    while (scopes.length && (scopes.at(-1).indent > contentIndent || (item && scopes.at(-1).indent >= contentIndent))) scopes.pop();
+    if (!scopes.length || scopes.at(-1).indent !== contentIndent) scopes.push({ indent: contentIndent, keys: new Set() });
+    if (scopes.at(-1).keys.has(key)) return `line ${number} repeats the key "${key}"`;
+    scopes.at(-1).keys.add(key);
+    if (value === '') {
+      expectDeeper = { indent: contentIndent };
+      noDeeper = null;
+      continue;
+    }
+    const problem = plainValueProblem(value);
+    if (problem) return `line ${number} has ${problem}`;
+    expectDeeper = null;
+    if (/^[|>][+-]?$/.test(value)) { block = { indent: contentIndent }; noDeeper = null; continue; }
+    noDeeper = contentIndent;
+  }
+  return null;
 }
 
 // { triggers: Map(event -> { filters: { paths, paths-ignore, branches, branches-ignore } }), jobs: [...] }
 function readWorkflow(text) {
+  const outside = strictSubsetProblem(text);
+  if (outside) return { triggers: new Map(), jobs: [], problems: [`it is outside the YAML subset this check follows (${outside})`] };
   const lines = significantLines(text);
   const top = children(lines, 0, lines.length);
   const triggers = new Map();
@@ -255,7 +361,6 @@ function readWorkflow(text) {
   }
   const jobs = [];
   const problems = [];
-  if (unfollowedYaml(lines)) problems.push('it uses YAML anchors, aliases or merge keys, which this check does not follow');
   const workflowContext = { defaults: runDefaults(lines, top.find(entry => entry.key === 'defaults')), env: mapping(lines, top.find(entry => entry.key === 'env')) };
   const jobsEntry = top.find(entry => entry.key === 'jobs');
   if (jobsEntry && jobsEntry.value.trim()) problems.push('its jobs are written as a flow mapping');
@@ -285,7 +390,7 @@ function readWorkflow(text) {
         needs,
         if: ifValue,
         unreadable,
-        continue_on_error: field('continue-on-error') ? scalarValue(lines, field('continue-on-error')) : null,
+        continue_on_error: field('continue-on-error') ? scalarValue(lines, field('continue-on-error')) : undefined,
         defaults: runDefaults(lines, field('defaults')),
         env: mapping(lines, field('env')),
         steps: readSteps(lines, field('steps')),
@@ -325,6 +430,7 @@ function maskingTrigger(workflow, defaultBranch) {
   for (const event of events) {
     const filters = workflow.triggers.get(event).filters;
     if (filters.paths || filters['paths-ignore']) return `its ${event} trigger has a path filter, which leaves the check pending`;
+    if ([...(filters.branches || []), ...(filters['branches-ignore'] || [])].some(pattern => String(pattern).startsWith('!'))) return { unverified: `its ${event} branch filter has a "!" pattern, which this check does not evaluate` };
     if ((filters.branches || filters['branches-ignore']) && defaultBranch === null) return { unverified: `its ${event} trigger has a branch filter and the default branch is unknown (no GitHub read and no origin/HEAD)` };
     if (filters.branches && !filters.branches.some(pattern => globMatches(pattern, defaultBranch))) return `its ${event} branch filter leaves out ${defaultBranch}`;
     if (filters['branches-ignore'] && filters['branches-ignore'].some(pattern => globMatches(pattern, defaultBranch))) return `its ${event} trigger ignores ${defaultBranch}`;
@@ -360,6 +466,8 @@ function producerVerdict(requiredChecks, workflows, defaultBranch) {
       }
     }
     if (producers.length === 0) missing.push(check);
+    // No producer among the workflows read is drift only when every workflow could be read.
+    if (producers.length === 0 && unreadable.length) { p3Unverified.push(`no readable workflow job is named "${check}"`); continue; }
     if (producers.length !== 1) {
       p3.push(producers.length === 0
         ? `no workflow job is named "${check}"`
