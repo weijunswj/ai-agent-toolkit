@@ -183,10 +183,12 @@ test('P-13: a passing required check can never hide a failed, skipped or missing
   const shard = 'on: [pull_request]\njobs:\n  t:\n    name: tests-linux (${{ matrix.shard }})\n    strategy:\n      matrix:\n        shard: [1]\n';
   assert.equal(protection.producerVerdict(['validate'], [{ file: 'a.yml', workflow: protection.readWorkflow(one) }, { file: 'c.yml', workflow: protection.readWorkflow(shard) }], 'main').P3.status, 'ok');
   // Positive: plain job, always() and !cancelled() in either spelling, with the aggregate.
-  for (const condition of ['always()', '${{ always() }}', '!cancelled()', '${{ !cancelled() }}']) {
+  for (const condition of ['always()', '${{ always() }}', '${{ !cancelled() }}', '"!cancelled()"']) {
     const text = two(['    needs: [tests]', `    if: ${condition}`, '    env:', '      TEST_LEGS: ${{ toJSON(needs) }}', ...steps('node repo/scripts/run-tests.cjs --verify-ci s')]);
     assert.equal(verdict(text).P4.status, 'ok', condition);
   }
+  // Unquoted `!cancelled()` is a YAML tag, not the expression: outside the subset, so unverified.
+  assert.equal(verdict(two(['    needs: [tests]', '    if: !cancelled()', '    env:', '      TEST_LEGS: ${{ toJSON(needs) }}', ...steps('node repo/scripts/run-tests.cjs --verify-ci s')])).P4.status, 'unverified');
   assert.equal(verdict(one).P4.status, 'ok');
 });
 
@@ -241,7 +243,100 @@ test('P-14: the aggregate step counts only when its exit code is the step result
     'aggregate in a uses step': job({ stepLines: ['        uses: ./x'] }),
     'flow env': job({ env: ['        env: {TEST_LEGS: "${{ toJSON(needs) }}"}'] }),
   };
-  for (const [name, text] of Object.entries(mustFail)) assert.equal(verdict(text).status, 'unverified', name);
+  // Each route fails for its own reason, not by accident.
+  const reasons = {
+    'or true': /no step ends with/, 'semicolon exit': /no step ends with/, 'not last': /no step ends with/, 'exit after': /no step ends with/,
+    'heredoc': /not a plain node command/, 'set +e': /not a plain node command/, 'trap': /not a plain node command/, 'function': /not a plain node command/,
+    'path export': /not a plain node command/, 'continuation': /not a plain node command/, 'folded block': /no step ends with/,
+    'folded plain scalar': /continues the value above it/, 'expression in script': /no step ends with/, 'any path': /no step ends with/,
+    'relative path': /no step ends with/, 'echoed': /no step ends with/, 'step if': /has its own `if`/, 'step if always': /has its own `if`/,
+    'step continue-on-error': /aggregate step has continue-on-error/, 'step continue-on-error expression': /aggregate step has continue-on-error/,
+    'job continue-on-error': /job has continue-on-error/, 'custom shell': /shell "bash \{0\}"/, 'python shell': /shell "python \{0\}"/,
+    'job default shell': /shell "sh -c/, 'workflow default shell': /shell "cmd"/, 'working-directory': /sets working-directory/,
+    'default working-directory': /working-directory default/, 'hard-coded legs': /does not get TEST_LEGS/, 'legs under another name': /does not get TEST_LEGS/,
+    'step overrides job legs': /does not get TEST_LEGS/, 'legs in a longer expression': /does not get TEST_LEGS/, 'no legs': /does not get TEST_LEGS/,
+    'node options': /NODE_OPTIONS is set/, 'workflow path env': /PATH is set/, 'bash env': /BASH_ENV is set/, 'github env write': /writes GITHUB_ENV/,
+    'aggregate in a uses step': /no step ends with/, 'flow env': /outside the YAML subset/,
+  };
+  assert.deepEqual(Object.keys(reasons).sort(), Object.keys(mustFail).sort());
+  for (const [name, text] of Object.entries(mustFail)) {
+    const result = verdict(text);
+    assert.equal(result.status, 'unverified', name);
+    assert.match(result.details.join('\n'), reasons[name], name);
+  }
+});
+
+test('P-17: the reader is default-deny: YAML outside its plain subset is unverified, and present-but-unreadable fields count as set', () => {
+  const Q = "'";
+  const verdicts = text => protection.producerVerdict(['validate'], [{ file: 'ci.yml', workflow: protection.readWorkflow(text) }], 'main');
+  const head = ['on:', '  pull_request:', 'jobs:', '  tests:', '    runs-on: ubuntu-latest', '  validate:', '    needs: [tests]', '    if: ${{ always() }}', '    runs-on: ubuntu-latest'];
+  const aggregate = (stepLines = [], jobLines = []) => [...head, ...jobLines, '    steps:', '      - name: Verify', ...stepLines, '        env:', '          TEST_LEGS: ${{ toJSON(needs) }}', '        run: node repo/scripts/run-tests.cjs --verify-ci s', ''].join('\n');
+  assert.equal(verdicts(aggregate()).P4.status, 'ok');
+  assert.equal(verdicts(`---\n${aggregate()}`).P4.status, 'ok', 'a single leading document marker');
+  assert.equal(verdicts(aggregate().replace(/\n/g, '\r\n')).P4.status, 'ok', 'CRLF line ends');
+  const outside = {
+    // s1-s5: the value on the next line, or folded onto it.
+    s1: aggregate(['        continue-on-error:', '          true']),
+    s2: aggregate(['        shell: sh -c', '          true {0}']),
+    s3: aggregate(['        continue-on-error:', '          ${{ true }}']),
+    s4: aggregate([], ['    defaults:', '      run:', '        shell: sh -c', '          true {0}']),
+    s5: aggregate([], ['    continue-on-error:', '      true']),
+    // Anchors, tags and explicit keys.
+    k1: aggregate([`        &a if: github.event_name == ${Q}push${Q}`]),
+    k2: aggregate(['        &a continue-on-error: true']),
+    k3: aggregate([`        !!str if: github.event_name == ${Q}push${Q}`]),
+    k4: aggregate(['        !!str continue-on-error: true']),
+    k5: aggregate(['        ? if', `        : github.event_name == ${Q}push${Q}`]),
+    k6: aggregate(['        ? continue-on-error', '        : true']),
+    k8: aggregate([], ['    &a continue-on-error: true']),
+    k9: aggregate([`        &s shell: sh -c ${Q}exit 0${Q} {0}`]),
+    alias: [...head.slice(0, 7), '    if: *cond', '    runs-on: ubuntu-latest', ''].join('\n'),
+    'dotted anchor': ['x: &f.1', '  paths: [docs/**]', 'on:', '  pull_request: *f.1', 'jobs:', '  validate:', '    runs-on: ubuntu-latest', ''].join('\n'),
+    'merge key': aggregate(['        <<: *base']),
+    // A lone CR joins a line onto the one before it.
+    c1: aggregate(['        name: x\r        continue-on-error: true']),
+    c2: aggregate([`        name: x\r        if: github.event_name == ${Q}push${Q}`]),
+    // Flow style.
+    fl1: ['on:', '  pull_request: {paths: [src/**]}', 'jobs:', '  validate:', '    runs-on: ubuntu-latest', ''].join('\n'),
+    fl2: aggregate().replace('      - name: Verify', '      - {run: "echo NODE_OPTIONS=--require ./x.cjs >> $GITHUB_ENV"}\n      - name: Verify'),
+    // Duplicate keys and more than one document.
+    d1: aggregate([], [`    if: github.event_name == ${Q}push${Q}`]),
+    d2: aggregate(['        run: echo ok']),
+    d3: aggregate(['        continue-on-error: false', '        continue-on-error: true']),
+    d6: `${aggregate()}jobs:\n  other:\n    runs-on: ubuntu-latest\n`,
+    m1: `${aggregate()}---\non: [push]\n`,
+    // Lines the old reader skipped.
+    o1: aggregate().replace('      - name: Verify', '      -   name: Verify'),
+    o3: aggregate().replace('      - name: Verify', '      -\n        name: Verify'),
+    n9b: aggregate().replace('--verify-ci s', '--verify-ci s\t|| true'),
+    n9c: aggregate(['        \tcontinue-on-error: true']),
+    'multi-line quoted': aggregate(['        shell: "sh -c', '          true {0}"']),
+    'flow list with a mapping': ['on: [pull_request]', 'jobs:', '  validate:', '    needs: [{a: b}]', '    runs-on: ubuntu-latest', ''].join('\n'),
+    'directive': `%YAML 1.2\n${aggregate()}`,
+    'unicode line break': aggregate(['        name: x\u2028        continue-on-error: true']),
+  };
+  for (const [name, text] of Object.entries(outside)) {
+    const result = verdicts(text);
+    assert.notEqual(result.P4.status, 'ok', name);
+    assert.notEqual(result.P3.status, 'ok', name);
+    assert.match([...result.P3.details, ...result.P4.details].join('\n'), /outside the YAML subset/, name);
+  }
+  // p3: a hidden second producer through an explicit key leaves P3 unverified, never ok.
+  const hidden = ['on: [pull_request]', 'jobs:', '  validate:', '    runs-on: ubuntu-latest', '  other:', '    ? name', '    : validate', ''].join('\n');
+  assert.equal(verdicts(hidden).P3.status, 'unverified');
+  // An unreadable workflow never turns "no producer" into drift: it is unverified.
+  assert.equal(verdicts('on: [pull_request]\njobs:\n  validate: {runs-on: x}\n').P3.status, 'unverified');
+  // A field present with no value counts as set.
+  assert.equal(verdicts(aggregate(['        continue-on-error:'])).P4.status, 'unverified', 'null step continue-on-error');
+  assert.equal(verdicts(aggregate([], ['    continue-on-error:'])).P4.status, 'unverified', 'null job continue-on-error');
+  assert.equal(verdicts(aggregate(['        shell:'])).P4.status, 'unverified', 'null shell');
+  assert.equal(verdicts(aggregate([], ['    defaults:', '      run:', '        shell:'])).P4.status, 'unverified', 'null default shell');
+  // b1: a "!" branch pattern is not evaluated, so the trigger is unverified.
+  const negated = ['on:', '  pull_request:', '    branches: ["**", "!main"]', 'jobs:', '  validate:', '    runs-on: ubuntu-latest', ''].join('\n');
+  assert.equal(verdicts(negated).P4.status, 'unverified');
+  // This repository's own workflows are inside the subset.
+  const root = path.join(__dirname, '..', '..', '.github', 'workflows');
+  for (const name of fs.readdirSync(root).filter(file => /\.ya?ml$/.test(file))) assert.deepEqual(protection.readWorkflow(fs.readFileSync(path.join(root, name), 'utf8')).problems, [], name);
 });
 
 test('P-15: YAML the reader cannot follow is unverified, never ok', () => {

@@ -1,3 +1,5 @@
+const { isLive } = require('./n8n-cli-workflow-json.cjs');
+
 const REQUIRED_OPERATIONS = Object.freeze([
   'listWorkflows',
   'readWorkflow',
@@ -65,9 +67,11 @@ function getTransport(id = 'docker-server-cli') {
   throw new Error(`Unsupported n8n workflow transport: ${id}`);
 }
 
+// Same fail-closed rule as the live helpers: unpublished only when `active` is false and no
+// published version (`activeVersionId`) is set.
 function verifyInactivePostcondition(workflows, targetWorkflowId) {
   const matches = (workflows || []).filter((workflow) => workflow && workflow.id === targetWorkflowId);
-  if (matches.length !== 1 || matches[0].active !== false) {
+  if (matches.length !== 1 || isLive(matches[0])) {
     const error = new Error('Imported workflow was not uniquely observable as unpublished.');
     error.code = 'N8N_POSTCONDITION_FAILED';
     throw error;
