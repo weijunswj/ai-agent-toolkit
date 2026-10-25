@@ -22,8 +22,15 @@ function sink() {
   return { write: (chunk) => { text += chunk; return true; }, text: () => text };
 }
 
-// A checkout with one worktree in each state the report tells apart.
+// One checkout with a worktree in each state the report tells apart, built once for the file; the
+// report only reads it.
+let built = null;
 function fixture() {
+  if (!built) built = buildFixture();
+  return built;
+}
+
+function buildFixture() {
   const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-residue-')));
   tempFolders.push(root);
   const repo = path.join(root, 'repo');
@@ -33,6 +40,7 @@ function fixture() {
   git(repo, ['config', 'user.name', 'Test']);
   git(repo, ['config', 'commit.gpgsign', 'false']);
   fs.writeFileSync(path.join(repo, 'a.txt'), 'a\n');
+  fs.writeFileSync(path.join(repo, '.gitignore'), '.tmp/\n.env\n');
   git(repo, ['add', '.']);
   git(repo, ['commit', '-q', '-m', 'base']);
   const lanes = path.join(repo, '.tmp', 'worktrees');
@@ -50,13 +58,19 @@ function fixture() {
   fs.writeFileSync(path.join(unmerged, 'b.txt'), 'b\n');
   git(unmerged, ['add', '.']);
   git(unmerged, ['-c', 'user.email=test@example.invalid', '-c', 'user.name=Test', 'commit', '-q', '-m', 'lane work']);
+  const ignored = add('ignored', 'lane/ignored');
+  fs.mkdirSync(path.join(ignored, '.tmp'));
+  fs.writeFileSync(path.join(ignored, '.tmp', 'run-stream.jsonl'), '{}\n');
+  fs.writeFileSync(path.join(ignored, '.env'), 'KEY=do-not-read\n');
   const gone = add('gone', 'lane/gone');
   fs.rmSync(gone, { recursive: true, force: true });
   const host = path.join(repo, '.claude', 'worktrees', 'host-lane');
   git(repo, ['worktree', 'add', '-q', '-b', 'host/lane', host]);
   git(repo, ['branch', 'old/merged']);
   git(repo, ['branch', 'old/unmerged', 'lane/unmerged']);
-  return { repo, merged, dirty, locked, unmerged, gone, host };
+  // The primary checkout sits on a lane branch, so the default branch is listed and must be kept.
+  git(repo, ['switch', '-q', '-c', 'lane/active']);
+  return { repo, merged, dirty, ignored, locked, unmerged, gone, host };
 }
 
 test('the report sorts worktrees and branches into ready to remove and look first, and changes nothing', () => {
@@ -65,10 +79,15 @@ test('the report sorts worktrees and branches into ready to remove and look firs
   const branchesBefore = git(f.repo, ['branch', '--list']);
   const result = report.collect(f.repo, 'main');
   const byPath = new Map(result.worktrees.map((item) => [path.basename(item.path), item]));
-  assert.equal(result.worktrees.length, 6);
+  assert.equal(result.worktrees.length, 7);
   assert.equal(byPath.get('merged').ready, true);
   assert.equal(byPath.get('merged').place, 'repo .tmp/worktrees');
+  assert.equal(byPath.get('merged').path, '.tmp/worktrees/merged', 'paths are relative to the checkout');
+  assert.equal(result.repo, 'repo', 'no home folder is printed');
   assert.deepEqual(byPath.get('dirty').reasons, ['1 uncommitted change(s)']);
+  // git worktree remove deletes ignored files without --force, so kept evidence and .env stop removal.
+  assert.deepEqual(byPath.get('ignored').reasons, ['2 ignored item(s) that git worktree remove deletes']);
+  assert.equal(byPath.get('ignored').ready, false);
   assert.deepEqual(byPath.get('locked').reasons, ['locked']);
   assert.deepEqual(byPath.get('unmerged').reasons, ['commit not in main']);
   assert.equal(byPath.get('gone').exists, false);
@@ -77,7 +96,9 @@ test('the report sorts worktrees and branches into ready to remove and look firs
   assert.deepEqual(byPath.get('host-lane').reasons, ['host-made, left to the host']);
 
   const branches = new Map(result.branches.map((item) => [item.name, item]));
-  assert.equal(branches.has('main'), false, 'the current branch is not listed');
+  assert.equal(branches.has('lane/active'), false, 'the current branch is not listed');
+  assert.deepEqual(branches.get('main').reasons, ['default branch, keep']);
+  assert.equal(branches.get('main').ready, false);
   assert.equal(branches.get('old/merged').ready, true);
   assert.deepEqual(branches.get('old/unmerged').reasons, ['not merged into main']);
   assert.deepEqual(branches.get('lane/merged').reasons, ['checked out in a worktree']);
@@ -86,6 +107,7 @@ test('the report sorts worktrees and branches into ready to remove and look firs
   assert.equal(git(f.repo, ['branch', '--list']), branchesBefore, 'no branch changed');
   assert.equal(fs.existsSync(f.dirty), true);
   assert.equal(fs.readFileSync(path.join(f.dirty, 'secret-looking.txt'), 'utf8'), 'TOKEN=do-not-read\n');
+  assert.equal(fs.existsSync(path.join(f.ignored, '.env')), true);
 });
 
 test('the report reads no file contents inside the worktrees', () => {
@@ -109,7 +131,8 @@ test('the text report names what to run and never suggests --force or -D as an a
   assert.equal(report.main(['--repo', f.repo, '--base', 'main'], { out, err: sink() }), 0);
   const text = out.text();
   assert.match(text, /Nothing was changed\./);
-  assert.match(text, /ready to remove: .*merged \[lane\/merged, repo \.tmp\/worktrees\]/);
+  assert.match(text, /ready to remove: \.tmp\/worktrees\/merged \[lane\/merged, repo \.tmp\/worktrees\]/);
+  assert.ok(!text.includes(path.dirname(f.repo)), 'no absolute path is printed');
   assert.match(text, /look first: .*dirty .*\(1 uncommitted change\(s\)\)/);
   assert.match(text, /git worktree remove <path>, then git worktree prune\. A ready branch: git branch -d <name>\. Never --force or -D\./);
   const json = sink();

@@ -176,6 +176,8 @@ class TestRun {
       if (!this.removeFolder() && exitCode === 0) exitCode = 1;
       if (this.leftBehind.length && exitCode === 0) exitCode = 1;
     }
+    // The summary records the run's final result, leftovers and removal failures included.
+    if (summary) summary.exit_code = exitCode;
     return { exitCode, summary };
   }
 }

@@ -154,7 +154,7 @@ test('global rules hold the generic floor: precedence, entry routing, safety gat
     /no change, reuse, smallest root-cause fix, bounded simplification, new abstraction only if needed/,
     /fast-forward the local default-branch checkout only when it is on that branch and clean[^\n]*Never reset or force/,
     // Lane worktrees and branches once outlived their merge, and three rules named three worktree homes.
-    /Make worktrees in the gitignored `\.tmp\/worktrees\/<lane>`; hosts keep their own\./,
+    /\(e\.g\. `\.tmp\/`, worktrees in `\.tmp\/worktrees\/<lane>-<gate>`\)/,
     /`gh pr checks <PR> --watch --interval 60`/,
     /never claim CI passed without every required check/,
     /after two failed fixes, stop and report/,
@@ -192,8 +192,10 @@ test('gate rules hold the gate mechanics every gate session reads on demand', ()
     /full G2 for RISKY, one independent review for NORMAL, the builder's own diff read for LIGHT/,
     /There are no handover packets/,
     // Lane worktrees and branches once outlived their merge.
-    /makes its own in `\.tmp\/worktrees\/<lane>` at the exact admitted commit and records its HEAD at start/,
-    /When the lane's PR merges or closes, `git worktree remove` and `git worktree prune` its worktree and `git branch -d` its local branch \(never `--force` or `-D`\); report anything dirty, locked or unmerged and leave it\./,
+    /makes its own in `\.tmp\/worktrees\/<lane>-<gate>` at the exact admitted commit and records its HEAD at start/,
+    /the merging session or the controller runs `git worktree remove` and `git worktree prune`, then `git branch -d` only once `git merge-base --is-ancestor` finds the branch in the default branch; never `--force` or `-D`\./,
+    // git worktree remove deletes ignored files (kept evidence, .env) without --force.
+    /A worktree that is dirty, locked, unmerged or holds ignored files, and the branch of a PR closed unmerged, is reported and kept\./,
     /Never rely on chat or host memory/,
     /Refactors keep public behaviour, approvals, independent readback, concurrency controls and recovery semantics/,
     /check the actual state and effect owners and their dependency contracts, not class counts/,

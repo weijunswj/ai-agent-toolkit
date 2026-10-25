@@ -3,13 +3,14 @@
 
 // Lists the worktrees and local branches a checkout still holds after their work merged, so the
 // owner can see what is left and decide what to remove. Read only: it runs git queries, reads no
-// file contents and deletes nothing.
+// file contents itself and deletes nothing. Paths are shown relative to the primary checkout.
 //
 //   node repo/scripts/workspace-residue-report.cjs [--repo <checkout>] [--base <ref>] [--json]
 //
 // --repo defaults to the current folder, --base to origin/main (fetch first for a current answer).
-// A worktree or branch is "ready to remove" when it is clean, unlocked and its commit is already in
-// the base; everything else says why it needs a look first. Worktrees a host made (Claude Code's
+// A worktree or branch is "ready to remove" when it is clean, unlocked, holds no ignored files (git
+// worktree remove deletes those too) and its commit is already in the base; everything else says why
+// it needs a look first. The default branch is never offered. Worktrees a host made (Claude Code's
 // .claude/worktrees, Codex's worktrees folder) are listed but left to the host's own clean-up.
 
 const fs = require('node:fs');
@@ -71,6 +72,24 @@ function placeOf(worktreePath, primary) {
   return 'outside the checkout';
 }
 
+// The base's own branch name and the remote's default branch, never offered for removal.
+function defaultBranches(repo, base) {
+  const remotes = git(repo, ['remote']).stdout.split('\n').filter(Boolean);
+  const short = base.replace(/^refs\/(heads|remotes)\//, '');
+  const owner = remotes.find((remote) => short.startsWith(`${remote}/`));
+  const names = new Set([owner ? short.slice(owner.length + 1) : short]);
+  for (const remote of remotes) {
+    const head = git(repo, ['symbolic-ref', '--quiet', '--short', `refs/remotes/${remote}/HEAD`]);
+    if (head.ok) names.add(head.stdout.trim().slice(remote.length + 1));
+  }
+  return names;
+}
+
+// A path relative to the primary checkout, with forward slashes, so no home folder is printed.
+function shown(primary, target) {
+  return path.relative(primary, path.resolve(target)).replace(/\\/g, '/') || '.';
+}
+
 function inBase(repo, commit, base) {
   return git(repo, ['merge-base', '--is-ancestor', commit, base]).ok;
 }
@@ -86,30 +105,35 @@ function collect(repo, base) {
     const exists = fs.existsSync(item.path);
     const place = placeOf(item.path, primary);
     const host = place === 'Claude Code' || place === 'Codex';
-    // Names of changed files are counted, never read.
-    const status = exists ? git(item.path, ['status', '--porcelain', '--untracked-files=normal']) : null;
-    const changes = status && status.ok ? status.stdout.split('\n').filter(Boolean).length : null;
+    // Names of changed and ignored files are counted, never read.
+    const status = exists ? git(item.path, ['status', '--porcelain', '--untracked-files=normal', '--ignored=matching']) : null;
+    const lines = status && status.ok ? status.stdout.split('\n').filter(Boolean) : null;
+    const changes = lines ? lines.filter((line) => !line.startsWith('!! ')).length : null;
+    const ignored = lines ? lines.length - changes : null;
     const merged = item.head ? inBase(repo, item.head, base) : false;
     const reasons = [];
     if (!exists) reasons.push('folder is gone (git worktree prune clears the record)');
     if (item.locked) reasons.push('locked');
     if (exists && changes === null) reasons.push('status unreadable');
     if (changes) reasons.push(`${changes} uncommitted change(s)`);
+    if (ignored) reasons.push(`${ignored} ignored item(s) that git worktree remove deletes`);
     if (!merged) reasons.push(`commit not in ${base}`);
     if (host) reasons.push('host-made, left to the host');
-    return { ...item, place, exists, changes, merged, ready: reasons.length === 0, reasons };
+    return { ...item, path: shown(primary, item.path), place, exists, changes, ignored, merged, ready: reasons.length === 0, reasons };
   });
   const inUse = new Set(listed.map((item) => item.branch).filter(Boolean));
   const current = git(repo, ['branch', '--show-current']).stdout.trim();
   const names = git(repo, ['for-each-ref', '--format=%(refname:short)', 'refs/heads']).stdout.split('\n').filter(Boolean);
+  const defaults = defaultBranches(repo, base);
   const branches = names.filter((name) => name !== current).map((name) => {
     const merged = inBase(repo, `refs/heads/${name}`, base);
     const reasons = [];
+    if (defaults.has(name)) reasons.push('default branch, keep');
     if (inUse.has(name)) reasons.push('checked out in a worktree');
     if (!merged) reasons.push(`not merged into ${base}`);
     return { name, merged, ready: reasons.length === 0, reasons };
   });
-  return { schema: 'toolkit-workspace-residue/v1', repo: primary, base, worktrees, branches };
+  return { schema: 'toolkit-workspace-residue/v1', repo: path.basename(primary), base, worktrees, branches };
 }
 
 function render(report) {

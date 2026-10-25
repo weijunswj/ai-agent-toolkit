@@ -416,6 +416,7 @@ test('a run fails and names what its tests left behind, also when the tests fail
   const passed = passing.run([leaky], { concurrency: 1 });
   assert.equal(passed.summary.files[0].failed, 0, 'the test itself passed');
   assert.equal(passed.exitCode, 1, 'a passing run that left temp behind fails');
+  assert.equal(passed.summary.exit_code, 1, 'the summary records the failed result');
   assert.equal(passing.leftBehind.length, 1);
   assert.match(passing.leftBehind[0], /^leaky-item-/);
   assert.match(passErr.text(), /Tests left 1 temp item\(s\) behind: leaky-item-/);
