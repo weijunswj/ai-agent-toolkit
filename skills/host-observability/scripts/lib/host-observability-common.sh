@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Shared helpers for host-pulse.sh and update-watch.sh. Sourced, never run on its own.
+# Shared helpers for host-pulse.sh. Sourced, never run on its own.
 # Read-only on the host: nothing here installs, restarts, deletes outside its own state folder, or
 # changes packages, Docker, firewall or services. The only outbound traffic is the alert channel and
 # heartbeat URL the owner chose at set-up.

@@ -51,7 +51,7 @@ Each skill is a folder under [skills/](skills/). Copy the whole folder, not just
 | [GitHub Program Reconciler](skills/github-program-reconciler/) | Keep a GitHub programme issue and its children in step with the real PR and review state. |
 | [Release Readiness Audit](skills/release-readiness-audit/) | Run a guarded release-readiness audit and fix batches. |
 | [Codex SSH Hostinger Coolify Setup Maintainer](skills/codex-ssh-hostinger-coolify-setup-maintainer/) | Set up and maintain a Hostinger VPS with Coolify, with owner approval gates. |
-| [Host Observability](skills/host-observability/) | Watch one Linux server: hourly health pulse, off-host heartbeat, alerts where you choose, and an update report. |
+| [Host Observability](skills/host-observability/) | Watch one Linux server: hourly health pulse, off-host heartbeat and alerts where you choose. |
 | [Self-Hosted Service Safety](skills/self-hosted-service-safety/) | Review Docker, VPS, tunnel and public-port safety for self-hosted services. |
 | [Frontend Art Direction](skills/frontend-art-direction/) | Give a frontend a deliberate visual direction, or review one against an approved design. |
 | [Windows Local Dev Services](skills/windows-local-dev-services/) | Start, check and troubleshoot local dev servers on Windows. |

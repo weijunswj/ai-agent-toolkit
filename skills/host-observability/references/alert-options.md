@@ -6,7 +6,6 @@ Toolkit picks no alert channel and no heartbeat service. At set-up, ask the owne
 
 1. "Where do you want server alerts to reach you?" Offer the alert options. More than one is fine.
 2. "Which outside service should notice if this server goes quiet?" Offer the heartbeat options. It must run somewhere other than this host.
-3. "How often do you want the update report?" Daily is the default.
 
 Never ask the owner to paste a token, chat ID, webhook URL or heartbeat URL into chat. They put the values into the env file on the host themselves.
 

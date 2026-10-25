@@ -346,7 +346,7 @@
     {
       "id": "host-observability-positive-3",
       "kind": "positive",
-      "prompt": "Check what is behind on OS, Docker and platform updates on this server without installing anything.",
+      "prompt": "Tell me whether this server's CPU, memory and disk are under pressure and whether its heartbeat is still reaching me.",
       "expected": ["host-observability"],
       "excluded": []
     },

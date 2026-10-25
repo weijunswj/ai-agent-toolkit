@@ -1,6 +1,6 @@
 'use strict';
 
-// The host-observability scripts run against fake /proc files, fake df, docker, systemctl and apt
+// The host-observability scripts run against fake /proc files, fake df, docker and systemctl
 // commands, and a local fake alert and heartbeat receiver. Each case gets its own temp folder and a
 // PATH that holds only the stubs and the basic tools the scripts need, so a real Docker or systemd on
 // the test machine never leaks in. The scripts target Linux servers, so the cases skip on Windows.
@@ -16,7 +16,6 @@ const test = require('node:test');
 const repoRoot = path.resolve(__dirname, '..', '..');
 const skillDir = path.join(repoRoot, 'skills', 'host-observability');
 const pulseScript = path.join(skillDir, 'scripts', 'host-pulse.sh');
-const watchScript = path.join(skillDir, 'scripts', 'update-watch.sh');
 const installScript = path.join(skillDir, 'scripts', 'install-host-observability-systemd.sh');
 const skip = process.platform === 'win32' ? 'host scripts target Linux servers' : false;
 const realTools = ['bash', 'sh', 'awk', 'sed', 'grep', 'date', 'mktemp', 'cat', 'head', 'tail', 'sort', 'find', 'stat', 'cp', 'mv',
@@ -88,8 +87,6 @@ function makeHost(t, options = {}) {
   writeExec(path.join(stub, 'systemctl'), [
     'case "$1" in',
     `  list-units) cat "${dir}/failed-units.txt" ;;`,
-    `  is-enabled) echo "${o.unattendedEnabled || 'enabled'}" ;;`,
-    `  is-active) echo "${o.unattendedActive || 'active'}" ;;`,
     '  *) exit 0 ;;',
     'esac'
   ].join('\n'));
@@ -381,115 +378,6 @@ test('reports stay bounded: old pulse reports are pruned to REPORT_KEEP', { skip
   assert.ok(names.includes('latest-pulse.md'));
 });
 
-// Update watch.
-function makeAptHost(t, options = {}) {
-  const host = makeHost(t, options);
-  const apt = path.join(host.dir, 'apt');
-  fs.mkdirSync(path.join(apt, 'periodic'), { recursive: true });
-  fs.writeFileSync(path.join(apt, 'periodic', 'update-success-stamp'), '');
-  if (options.indexAgeDays) {
-    const when = new Date(Date.now() - options.indexAgeDays * 86400000);
-    fs.utimesSync(path.join(apt, 'periodic', 'update-success-stamp'), when, when);
-  }
-  fs.writeFileSync(path.join(host.dir, 'apt-sim.txt'), options.aptSim ?? '');
-  writeExec(path.join(host.stub, 'apt-get'), `case " $* " in *" -s "*) cat "${host.dir}/apt-sim.txt" ;; *) echo "apt-get stub refuses non-simulation calls" >&2; exit 99 ;; esac`);
-  writeExec(path.join(host.stub, 'apt-cache'), `[ "$1" = policy ] || exit 1; f="${host.dir}/policy-$2.txt"; [ -f "$f" ] && cat "$f"; exit 0`);
-  if (options.dockerPolicy) fs.writeFileSync(path.join(host.dir, 'policy-docker-ce.txt'), options.dockerPolicy);
-  const plugins = path.join(host.dir, 'plugins');
-  fs.mkdirSync(plugins, { mode: 0o700 });
-  fs.chmodSync(plugins, 0o700);
-  return { ...host, apt, plugins };
-}
-
-function watchEnv(host, rx, extra = {}) {
-  return { APT_STATE_DIR: host.apt, REBOOT_MARKER: path.join(host.dir, 'reboot-required'), UPDATE_WATCH_PLUGIN_DIR: host.plugins, ...(rx ? alertEnv(rx) : {}), ...extra };
-}
-
-const aptSim = [
-  'Inst openssl [3.0.13-0ubuntu3.4] (3.0.13-0ubuntu3.5 Ubuntu:24.04/noble-security [amd64])',
-  'Inst curl [8.5.0-2ubuntu10.5] (8.5.0-2ubuntu10.6 Ubuntu:24.04/noble-updates [amd64])',
-  'Inst tzdata [2024a] (2024b Ubuntu:24.04/noble-updates [all])',
-  'Conf openssl (3.0.13-0ubuntu3.5 Ubuntu:24.04/noble-security [amd64])'
-].join('\n');
-
-test('update watch: pending security updates, a reboot marker and an old Docker engine warn with counts and versions', { skip }, async (t) => {
-  const host = makeAptHost(t, {
-    aptSim,
-    dockerPolicy: 'docker-ce:\n  Installed: 5:27.3.1-1~ubuntu.24.04~noble\n  Candidate: 5:28.0.1-1~ubuntu.24.04~noble\n'
-  });
-  fs.writeFileSync(path.join(host.dir, 'reboot-required'), '*** System restart required ***\n');
-  fs.writeFileSync(path.join(host.dir, 'reboot-required.pkgs'), 'linux-image-6.8.0-50-generic\n');
-  const rx = await receiver(t);
-  const result = await run(watchScript, [], host, watchEnv(host, rx));
-  assert.equal(result.code, 0, result.stderr);
-  assert.match(result.stdout, /^Update watch: WARN$/m);
-  const report = fs.readFileSync(path.join(host.root, 'reports', 'latest-update-watch.md'), 'utf8');
-  assert.match(report, /\| Security updates \| WARN \| - \| 1 pending \| 1 of 3 pending package updates/);
-  assert.match(report, /\| OS packages \| OK \| - \| 3 pending \|/);
-  assert.match(report, /\| Reboot needed \| WARN \| - \| - \| The reboot-needed marker is set by linux-image-6\.8\.0-50-generic/);
-  assert.match(report, /\| Docker engine \| WARN \| 27\.3\.1 \(5:27\.3\.1-1~ubuntu\.24\.04~noble\) \| 5:28\.0\.1-1~ubuntu\.24\.04~noble \|/);
-  assert.match(report, /\| Automatic security updates \| OK \|/);
-  assert.match(report, /Nothing was installed, upgraded, refreshed or restarted/);
-  assert.equal(hooks(rx).length, 1);
-  assert.match(JSON.parse(hooks(rx)[0].body).subject, /updates WARN/);
-  const again = await run(watchScript, [], host, watchEnv(host, rx));
-  assert.match(again.stdout, /Alert: not needed/);
-  assert.equal(hooks(rx).length, 1);
-});
-
-test('update watch: a version it cannot check is UNKNOWN, never up to date', { skip }, async (t) => {
-  const host = makeAptHost(t, { aptSim: '' });
-  const result = await run(watchScript, ['--dry-run'], host, watchEnv(host, null));
-  assert.match(result.stdout, /^Overall: UNKNOWN$/m);
-  assert.match(result.stdout, /\| Docker engine \| UNKNOWN \| 27\.3\.1 \| unknown \|/);
-  assert.equal(fs.existsSync(host.root), false, 'a dry run writes nothing');
-
-  const noApt = makeHost(t, { docker: 'absent' });
-  const plain = await run(watchScript, ['--dry-run'], noApt, { REBOOT_MARKER: path.join(noApt.dir, 'none'), UPDATE_WATCH_PLUGIN_DIR: path.join(noApt.dir, 'none') });
-  assert.match(plain.stdout, /\| OS packages \| UNKNOWN \|/);
-  assert.match(plain.stdout, /\| Docker engine \| N\/A \|/);
-});
-
-test('update watch: an old package index warns that counts may be low', { skip }, async (t) => {
-  const host = makeAptHost(t, { indexAgeDays: 10 });
-  const result = await run(watchScript, ['--dry-run'], host, watchEnv(host, null));
-  assert.match(result.stdout, /\| Package index age \| WARN \| - \| - \| Last refreshed 10 days ago/);
-});
-
-test('update watch: plug-ins add rows only when safe and well formed', { skip }, async (t) => {
-  const host = makeAptHost(t);
-  writeExec(path.join(host.plugins, 'platform.sh'), "echo 'Platform core|4.4.0|4.5.0|WARN|Behind the latest release'\necho 'Platform proxy|3.1|unknown|UNKNOWN|Latest not readable'");
-  fs.chmodSync(path.join(host.plugins, 'platform.sh'), 0o700);
-  writeExec(path.join(host.plugins, 'open.sh'), "echo 'Open|1|1|OK|should not run'");
-  fs.chmodSync(path.join(host.plugins, 'open.sh'), 0o777);
-  writeExec(path.join(host.plugins, 'bad.sh'), "echo 'garbage line'");
-  fs.chmodSync(path.join(host.plugins, 'bad.sh'), 0o700);
-  writeExec(path.join(host.plugins, 'broken.sh'), 'exit 3');
-  fs.chmodSync(path.join(host.plugins, 'broken.sh'), 0o700);
-  const result = await run(watchScript, ['--dry-run'], host, watchEnv(host, null));
-  assert.match(result.stdout, /\| Platform core \| WARN \| 4\.4\.0 \| 4\.5\.0 \| Behind the latest release \|/);
-  assert.match(result.stdout, /\| Platform proxy \| UNKNOWN \|/);
-  assert.match(result.stdout, /\| Plug-in open \| UNKNOWN \| - \| - \| Skipped: not executable, others can write it/);
-  assert.ok(!result.stdout.includes('should not run'));
-  assert.match(result.stdout, /\| Plug-in bad \| UNKNOWN \| - \| - \| A line did not match/);
-  assert.match(result.stdout, /\| Plug-in broken \| UNKNOWN \| - \| - \| The plug-in failed or timed out/);
-
-  fs.chmodSync(host.plugins, 0o777);
-  const openDir = await run(watchScript, ['--dry-run'], host, watchEnv(host, null));
-  assert.match(openDir.stdout, /\| Plug-ins \| UNKNOWN \| - \| - \| Plug-in folder skipped/);
-  assert.ok(!openDir.stdout.includes('Platform core'));
-});
-
-test('update watch alert settings: never sends nothing, always sends every run', { skip }, async (t) => {
-  const host = makeAptHost(t, { aptSim });
-  const rx = await receiver(t);
-  await run(watchScript, [], host, watchEnv(host, rx, { UPDATE_WATCH_ALERT: 'never' }));
-  assert.equal(hooks(rx).length, 0);
-  await run(watchScript, [], host, watchEnv(host, rx, { UPDATE_WATCH_ALERT: 'always' }));
-  await run(watchScript, [], host, watchEnv(host, rx, { UPDATE_WATCH_ALERT: 'always' }));
-  assert.equal(hooks(rx).length, 2);
-});
-
 // Installer.
 function installerHost(t, uid) {
   const dir = tempDir(t, 'host-obs-install-');
@@ -525,17 +413,15 @@ test('installer prints its plan and changes nothing without --install', { skip }
   assert.equal(fs.existsSync(path.join(host.dir, 'systemctl.log')), false);
 });
 
-test('installer refuses to install without root and rejects odd calendar values', { skip }, (t) => {
+test('installer refuses to install without root', { skip }, (t) => {
   const host = installerHost(t, 1000);
   const result = runInstaller(host, ['--install']);
   assert.equal(result.status, 1);
   assert.match(result.stderr, /Run as root on the target host/);
   assert.deepEqual(fs.readdirSync(host.env.SYSTEMD_UNIT_DIR), []);
-  const odd = runInstaller(installerHost(t, 0), ['--install'], { UPDATE_WATCH_CALENDAR: 'daily; rm -rf /' });
-  assert.equal(odd.status, 2);
 });
 
-test('installer installs hourly and daily timers, keeps an existing env file, backs up units, and removes cleanly', { skip }, (t) => {
+test('installer installs the hourly timer, keeps an existing env file, backs up units, and removes cleanly', { skip }, (t) => {
   const host = installerHost(t, 0);
   const first = runInstaller(host, ['--install']);
   assert.equal(first.status, 0, first.stderr);
@@ -545,19 +431,17 @@ test('installer installs hourly and daily timers, keeps an existing env file, ba
   assert.match(pulseService, new RegExp(`EnvironmentFile=-${host.env.CONFIG_DIR}/host-pulse\\.env`));
   assert.match(pulseService, /NoNewPrivileges=yes/);
   assert.match(fs.readFileSync(path.join(units, 'host-pulse.timer'), 'utf8'), /OnCalendar=hourly/);
-  assert.match(fs.readFileSync(path.join(units, 'host-update-watch.timer'), 'utf8'), /OnCalendar=daily/);
+  assert.deepEqual(fs.readdirSync(units).sort(), ['host-pulse.service', 'host-pulse.timer']);
   const envFile = path.join(host.env.CONFIG_DIR, 'host-pulse.env');
   assert.equal(fs.statSync(envFile).mode & 0o777, 0o600);
-  assert.equal(fs.statSync(path.join(host.env.CONFIG_DIR, 'update-watch.d')).mode & 0o777, 0o700);
-  for (const file of ['host-pulse.sh', 'update-watch.sh', 'lib/host-observability-common.sh']) assert.ok(fs.existsSync(path.join(host.env.INSTALL_PREFIX, file)), file);
-  assert.match(fs.readFileSync(path.join(host.dir, 'systemctl.log'), 'utf8'), /enable --now host-pulse\.timer host-update-watch\.timer/);
+  for (const file of ['host-pulse.sh', 'lib/host-observability-common.sh']) assert.ok(fs.existsSync(path.join(host.env.INSTALL_PREFIX, file)), file);
+  assert.match(fs.readFileSync(path.join(host.dir, 'systemctl.log'), 'utf8'), /enable --now host-pulse\.timer/);
 
   fs.writeFileSync(envFile, 'ALERT_CHANNELS=webhook\n');
-  const second = runInstaller(host, ['--install'], { UPDATE_WATCH_CALENDAR: 'Mon *-*-* 03:00:00' });
+  const second = runInstaller(host, ['--install']);
   assert.equal(second.status, 0, second.stderr);
   assert.equal(fs.readFileSync(envFile, 'utf8'), 'ALERT_CHANNELS=webhook\n', 'an existing env file is never overwritten');
   assert.ok(fs.readdirSync(units).some((name) => name.startsWith('host-pulse.service.bak.')));
-  assert.match(fs.readFileSync(path.join(units, 'host-update-watch.timer'), 'utf8'), /OnCalendar=Mon \*-\*-\* 03:00:00/);
 
   const removed = runInstaller(host, ['--remove']);
   assert.equal(removed.status, 0, removed.stderr);
@@ -579,8 +463,8 @@ test('the env template holds placeholders only, every value commented out', () =
   for (const line of text.split('\n').filter((l) => /^# [A-Z_]+=/.test(l))) assert.doesNotMatch(line, /=\S*\s+#/, `systemd reads no comment after a value: ${line}`);
 });
 
-test('the pulse and update watch contain no command that changes the host', () => {
-  for (const file of [pulseScript, watchScript, path.join(skillDir, 'scripts', 'lib', 'host-observability-common.sh')]) {
+test('the pulse contains no command that changes the host', () => {
+  for (const file of [pulseScript, path.join(skillDir, 'scripts', 'lib', 'host-observability-common.sh')]) {
     // Comments and plain message strings are dropped; strings holding a command substitution stay.
     const code = fs.readFileSync(file, 'utf8').split('\n').filter((line) => !/^\s*#/.test(line)).join('\n')
       .replace(/"(?:[^"\\\n]|\\.)*"|'[^'\n]*'/g, (literal) => (literal.includes('$(') ? literal : '""'));
@@ -588,7 +472,6 @@ test('the pulse and update watch contain no command that changes the host', () =
     assert.doesNotMatch(code, /\bsystemctl\s+(start|stop|restart|enable|disable|reload|daemon-reload)\b/, file);
     assert.doesNotMatch(code, /\bdocker\s+(rm|stop|start|restart|kill|pull|run|update|system\s+prune)\b/, file);
     assert.doesNotMatch(code, /(^|[;&|(]\s*|\$\(\s*|then\s+|else\s+)(sudo\s+)?(reboot|shutdown|ufw|iptables|kill|pkill|rm\s+-rf\s+\/)\b/m, file);
-    for (const line of code.split('\n').filter((l) => /(?<!have )\bapt-get\s/.test(l))) assert.match(line, / -s /, `apt-get call without -s: ${line}`);
   }
 });
 

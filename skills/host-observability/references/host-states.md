@@ -30,8 +30,3 @@ Thresholds are per-host settings in the env file. Defaults suit a small single-p
 
 An alert goes out when the state or the services change, at once on `EMERGENCY_PRESSURE` (every run while it lasts), on a notice such as a reboot, and again on the next run after a failed delivery. A failed delivery stays in the report and is never recorded as sent.
 
-## Update Watch
-
-The update watch has its own report and statuses: `OK`, `WARN` (security updates pending, a reboot needed, automatic security updates off, the package index old, or a component behind the latest available version), `UNKNOWN` (the latest version cannot be checked, which is never reported as up to date) and `N/A`. Its overall result is `WARN` if any row warns, else `UNKNOWN` if any row is unknown, else `OK`.
-
-Platform skills add rows through plug-ins: executable `*.sh` files in `/etc/host-observability/update-watch.d/`, owned by root, writable by nobody else, each printing lines of `area|installed|latest|status|evidence`. A plug-in must be a read-only check.
