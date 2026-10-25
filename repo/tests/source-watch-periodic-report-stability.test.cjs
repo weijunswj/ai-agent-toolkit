@@ -11,13 +11,22 @@ const {
   renderAdvisorySection
 } = require('../scripts/source-watch-advisory-targets.cjs');
 
+// Every temp folder a test makes is removed after the file's tests, also when they fail.
+const tempFolders = [];
+test.after(() => { for (const dir of tempFolders) fs.rmSync(dir, { recursive: true, force: true }); });
+function tempFolder(prefix) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  tempFolders.push(dir);
+  return dir;
+}
+
 function writeJson(filePath, value) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
 }
 
 function workspaceWithOverdueTarget() {
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'source-watch-stability-'));
+  const workspace = tempFolder('source-watch-stability-');
   writeJson(path.join(workspace, 'repo/source-watch/advisory-targets.json'), {
     schema_version: 1,
     policy: {},
