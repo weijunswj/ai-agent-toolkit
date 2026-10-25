@@ -11,8 +11,17 @@ const repoRoot = path.resolve(__dirname, '..', '..');
 const auditScript = path.join(repoRoot, 'repo', 'scripts', 'audit-fallback-risk.cjs');
 const { auditFallbackRisk } = require(auditScript);
 
+// Every temp folder a test makes is removed after the file's tests, also when they fail.
+const tempFolders = [];
+test.after(() => { for (const dir of tempFolders) fs.rmSync(dir, { recursive: true, force: true }); });
+function tempFolder(prefix) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  tempFolders.push(dir);
+  return dir;
+}
+
 function tempFixture() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-fallback-risk-'));
+  return tempFolder('toolkit-fallback-risk-');
 }
 
 function writeFixture(root, relPath, text) {
