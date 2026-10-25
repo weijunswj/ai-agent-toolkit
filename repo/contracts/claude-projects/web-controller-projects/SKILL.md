@@ -4,7 +4,7 @@ description: "Use when running as a Claude Projects coordinator and the user app
 ---
 
 # Web Controller for Claude Projects
-Version: 2026-10-25.3
+Version: 2026-10-25.8
 
 Run Toolkit repos through Claude Projects. The global rules and coding gates apply in every project; GitHub governance (parent and child issues, records, decision traces, evidence custody) applies only to a github.com repo whose governance state is ENABLED. Keep project facts (repos, devices, lanes, pending work) in project memory; durable work state lives in the branch, the PR and the programme comments or evidence store, mirrored in memory, never only there.
 
@@ -102,7 +102,7 @@ Whenever the user asks for anything recurring (the daily check-in, a sweep, a re
   - `CONTEXT RESET DUE`: rebuild the check-in and its home thread as **Hourly nudge** describes, unless its entry says `stopped by owner`.
   - `SKILL UPDATE`: the loaded skill is newer than memory's. Follow it now, save its Version and say so in one line; never wait for a restart. When the repo's Version is newer than the loaded one, the owner saves the new skill.
   - `SKILL DRIFT`: the account copy has direct edits that match no Toolkit revision. Bring them into Toolkit from the saved copy (a Toolkit PR) before anyone re-uploads, so nothing is overwritten.
-  - `SKILL BEHIND`: the account copy is an older Toolkit revision. Tell the owner once per Version to re-upload the skill with its reference files.
+  - `SKILL BEHIND`: the account copy is an older Toolkit revision. With "card posted", the check-in posted the skill update card in its thread: put "tap Save on the skill card" with that thread link on the owner's pending list. With "card failed", tell the owner once per Version to re-upload the skill.
   - `BLOCK OUTDATED` (including `misplaced` and `overlaps`): **Managed project-instructions sync**.
   - `BINDING STALE` or `BINDING UNKNOWN`: rebind (**Binding**). When current, the report says `**Binding:** current` with the short blob, adding the newer short commit when only the commit moved.
   - `TOOLKIT CHANGED`: note the new version; the block and plugin checks follow from it.
@@ -185,6 +185,6 @@ Whenever the user asks for anything recurring (the daily check-in, a sweep, a re
 - The source of truth is `repo/contracts/claude-projects/web-controller-projects/SKILL.md` in the Toolkit repo. The user, or another project at the user's request, may edit the copy on the user's claude.ai account directly. Before any upload, a coordinator compares that copy with the repo file and brings direct edits into Toolkit first, so nothing is overwritten.
 - Watch every Toolkit-enabled feature, especially this skill; suggest improvements or setting changes to the owner, never change them yourself. The managed block carries this rule to threads.
 - The skill is this SKILL.md plus the `reference/` files beside it; upload them together. When only SKILL.md is on the account, read a reference file from bound Toolkit `main` before the job it covers (a cloud thread returns it in full).
-- After a Toolkit release changes this skill or its block, the owner uploads the new skill and the coordinator runs **Managed project-instructions sync**. Compare the uploaded Version with the repo's after each release.
+- After a Toolkit release changes this skill or its block, the owner saves the new skill (the daily check-in posts the card) and the coordinator runs **Managed project-instructions sync**. Compare the uploaded Version with the repo's after each release.
 - Keep this skill generic. User-specific details go in project memory or the user's claude.ai preferences, never here. Rules Toolkit owns go to `CONTROLLER.md` or the governed rules, not here.
 - Every change bumps the Version line (date plus a counter for that day, e.g. 2026-10-21.2).

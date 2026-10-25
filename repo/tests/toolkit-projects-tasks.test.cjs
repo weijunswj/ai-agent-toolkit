@@ -292,6 +292,15 @@ test('the check-in carries every prefix in the fixed order and checks both Toolk
     'every run reaches the owner as one line', 'swaps each named Toolkit task from the template on main the same turn']) {
     assert.ok(text.includes(required), required);
   }
+  // The check-in posts the skill update card itself, once per main Version, and never over direct account edits.
+  for (const required of ['SKILL CARD: when the account SKILL.md is behind main', 'never SKILL DRIFT: a card would overwrite direct edits',
+    'state.md records no card for this main Version', 'post one skill update card with propose_skills', 'skillMd main\'s SKILL.md byte for byte',
+    ', card posted', ', card failed: <reason>', 'tap Save on the skill card']) {
+    assert.ok(text.includes(required), required);
+  }
+  assert.doesNotMatch(text, /skip the resolve in DELIVERY/, 'bound runs never resolve, so no fresh-only card line');
+  const freshCheckIn = tasks().render('daily-check-in', validateParams('daily-check-in', { ...PARAMS['daily-check-in'], session: 'fresh' }));
+  assert.match(freshCheckIn, /When this run posted a card, skip the resolve in DELIVERY: a resolved thread hides the card\./);
   // Both Toolkit tasks are bound now, so a bound check-in is never its own gap.
   assert.doesNotMatch(text, /the check-in runs a fresh session per run/);
   assert.match(text, /bound-session or fresh-session when that differs from the entry/);
