@@ -264,7 +264,7 @@ function aggregateProblem(job, workflowContext) {
 // A key line: a plain or simply quoted key, spaces, a colon, then nothing or spaces and the value.
 // Each part's characters exclude the next part's, so matching stays linear in the line length.
 const KEY_LINE = /^(?:([A-Za-z0-9_][A-Za-z0-9_.-]*)|"([A-Za-z0-9_.-][A-Za-z0-9_ .-]*)"|'([A-Za-z0-9_.-][A-Za-z0-9_ .-]*)') *:(?: +(.*))?$/;
-const FLOW_ITEM = /^(?!~$|-$)(?:(?:[A-Za-z0-9_./$+=~]|-(?! ))[^,\[\]{}"'#:]*|"[^"\\]*"|'(?:[^']|'')*')$/;
+const FLOW_ITEM = /^(?!(?:~|null|Null|NULL|-)$)(?:(?:[A-Za-z0-9_./$+=~]|-(?! ))[^,\[\]{}"'#:]*|"[^"\\]*"|'(?:[^']|'')*')$/;
 // The YAML spellings of null: a field written this way is empty, not a value.
 const YAML_NULL = /^(?:~|null|Null|NULL)$/;
 const BLOCK_KEYS = Object.freeze(['run', 'if', 'shell', 'continue-on-error']);
@@ -296,6 +296,7 @@ function strictSubsetProblem(source) {
   const raw = source.replace(/\r\n/g, '\n').split('\n');
   let block = null; // the content indent of the key that opened a block scalar
   let blockContent = null; // the indent of that block's first content line
+  let blankIndent = 0; // the deepest whitespace-only line before that first content line
   let rootOpened = false; // a new root mapping may open only before the first key
   let expectDeeper = null; // the content indent after `key:`, until the next line
   let noDeeper = null; // the content indent after a scalar value
@@ -310,8 +311,13 @@ function strictSubsetProblem(source) {
     const indent = line.length - line.replace(/^ +/, '').length;
     const trimmed = line.trim();
     if (block !== null) {
-      if (!trimmed) continue;
+      if (!trimmed) {
+        // A blank line before the first content line still sets the indent some parsers use.
+        if (blockContent === null) blankIndent = Math.max(blankIndent, indent);
+        continue;
+      }
       if (indent > block) {
+        if (blockContent === null && indent < blankIndent) return `line ${number} sits shallower than a blank line that opens its block scalar`;
         // The first content line sets the block's indent; a later line may not sit shallower.
         if (blockContent === null) blockContent = indent;
         else if (indent < blockContent) return `line ${number} sits shallower than the first line of its block scalar`;
@@ -373,6 +379,7 @@ function strictSubsetProblem(source) {
       if (!BLOCK_KEYS.includes(key)) return `line ${number} gives "${key}" a block scalar, which this check reads only for ${BLOCK_KEYS.join(', ')}`;
       block = contentIndent;
       blockContent = null;
+      blankIndent = 0;
       continue;
     }
     noDeeper = contentIndent;
@@ -385,10 +392,12 @@ function readWorkflow(input) {
   const text = withoutBom(input);
   const outside = strictSubsetProblem(text);
   if (outside) return { triggers: new Map(), jobs: [], problems: [`it is outside the YAML subset this check follows (${outside})`] };
-  const lines = significantLines(text);
+  // A leading `---` is dropped so the document's own indent is its root's, even when indented.
+  const lines = significantLines(text).filter((line, index) => !(index === 0 && line.indent === 0 && line.text === '---'));
   const top = children(lines, 0, lines.length);
   const triggers = new Map();
-  const on = top.find(entry => entry.key === 'on' && lines[entry.index].text.startsWith('on'));
+  // Plain or quoted `on`; a `true` key (YAML 1.1's reading of a plain on) is not the trigger.
+  const on = top.find(entry => entry.key === 'on');
   if (on) {
     const scalar = on.value.trim();
     const listed = inlineList(scalar);

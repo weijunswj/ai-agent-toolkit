@@ -379,9 +379,26 @@ test('P-17: the reader is default-deny: YAML outside its plain subset is unverif
     assert.equal(result.P4.status, 'unverified', name);
     assert.match(result.P4.details.join('\n'), /outside the YAML subset/, name);
   }
-  // Only a plain `on` key is the trigger: a quoted "true" (YAML 1.1's reading of on) is not.
-  const quotedTrue = ['"true":', '  pull_request:', 'jobs:', '  validate:', '    runs-on: ubuntu-latest', ''].join('\n');
-  assert.notEqual(verdicts(quotedTrue).P4.status, 'ok', 'quoted "true" is not on');
+  // A plain or quoted `on` is the trigger; a `true` key, plain or quoted, is not.
+  for (const key of ['on', '"on"', "'on'"]) assert.equal(verdicts(aggregate().replace(/^on:/, `${key}:`)).P4.status, 'ok', `${key} is the trigger`);
+  for (const key of ['true', '"true"']) assert.notEqual(verdicts(aggregate().replace(/^on:/, `${key}:`)).P4.status, 'ok', `${key} is not on`);
+  // A leading `---` before an indented document hides nothing: a second producer there is seen.
+  const indentedDoc = text => text.replace(/^(?=.)/gm, '  ');
+  assert.equal(verdicts(`---\n${indentedDoc(aggregate())}`).P4.status, 'ok', '--- then an indented document');
+  assert.equal(pair(plainProducer, `---\n${indentedDoc(plainProducer)}`).P3.status, 'drift', '--- then an indented second producer');
+  // A YAML null in a flow list is not a job name; a whitespace-only line deeper than a block's first
+  // content line sets the block's indent for some parsers, so it is outside the subset.
+  for (const [name, text] of Object.entries({
+    'null in a flow list': ['on: [pull_request]', 'jobs:', '  validate:', '    needs: [tests, null]', '    runs-on: ubuntu-latest', ''].join('\n'),
+    'Null in a flow list': ['on: [pull_request]', 'jobs:', '  validate:', '    needs: [Null]', '    runs-on: ubuntu-latest', ''].join('\n'),
+    'NULL in a flow list': ['on: [pull_request]', 'jobs:', '  validate:', '    needs: [NULL]', '    runs-on: ubuntu-latest', ''].join('\n'),
+    'deep blank line opening a block': aggregate().replace('        run: node repo/scripts/run-tests.cjs --verify-ci s', '        run: |\n              \n          node repo/scripts/run-tests.cjs --verify-ci s'),
+  })) {
+    const result = verdicts(text);
+    assert.equal(result.P4.status, 'unverified', name);
+    assert.match(result.P4.details.join('\n'), /outside the YAML subset/, name);
+  }
+  assert.equal(verdicts(aggregate().replace('        run: node repo/scripts/run-tests.cjs --verify-ci s', '        run: |\n\n          node repo/scripts/run-tests.cjs --verify-ci s')).P4.status, 'ok', 'an empty line opening a block');
   // A byte order mark is removed before both checking and reading: a sole workflow reads in full,
   // and a second workflow that also produces the check is seen (two producers: drift).
   const bom = '﻿';
