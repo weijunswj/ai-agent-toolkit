@@ -349,38 +349,50 @@ function jobSteps(block, keyIndent) {
   return { list: [] };
 }
 
-// Triggers that start a workflow only by hand or from another workflow. A CodeQL workflow with only
-// these does not keep default setup off; GitHub's own record of uploads (see the reader) still does.
-const MANUAL_EVENTS = Object.freeze(['workflow_dispatch', 'repository_dispatch', 'workflow_run']);
+// Whether workflow `text` provably names no CodeQL step but upload-sarif (another scanner's results).
+// This is a plain text search, so no YAML shape can hide a step from it: the text is searched raw and
+// decoded the way any YAML scalar could spell it (escaped line breaks joined, every \x, \u and \U
+// escape decoded, every other backslash dropped), comments included, and every `codeql` in either
+// copy must belong to `github/codeql-action/upload-sarif@`. Text that may not decode as written (a
+// NUL, a decoding error, a %TAG directive, a binary tag) is never ruled out.
+function codeqlRuledOut(text) {
+  const raw = String(text);
+  if (/[\u0000\uFFFD]/.test(raw) || /^[ \t]*%TAG\b/m.test(raw) || /!!binary|tag:yaml\.org,2002:binary/i.test(raw)) return false;
+  const decoded = raw.replace(/\\\r?\n[ \t]*/g, '')
+    .replace(/\\x([0-9A-Fa-f]{2})|\\u([0-9A-Fa-f]{4})|\\U([0-9A-Fa-f]{8})/g, (all, a, b, c) => {
+      try { return String.fromCodePoint(parseInt(a || b || c, 16)); } catch { return ''; }
+    })
+    .replace(/\\/g, '');
+  const safe = 'github/codeql-action/upload-sarif@';
+  return [raw, decoded].every(copy => {
+    const lower = copy.toLowerCase();
+    for (let at = lower.indexOf('codeql'); at >= 0; at = lower.indexOf('codeql', at + 1)) {
+      if (at < 7 || lower.slice(at - 7, at - 7 + safe.length) !== safe) return false;
+    }
+    return true;
+  });
+}
 
 // Whether workflow `text` runs CodeQL itself (an advanced setup). GitHub refuses an advanced setup's
-// results once default setup is on, so default setup is never turned on over one. One rule holds
-// at every exit: "no" needs every input it rests on to have been read; anything not read, or read
-// outside the YAML subset this reader models, makes the answer 'unsure', which the caller treats as
-// unreadable, so default setup stays off. Returns:
+// results once default setup is on, so default setup is never turned on over one. "No" rests only on
+// `codeqlRuledOut`, which reads every byte; the YAML reader below only finds a live CodeQL job, and
+// whatever it cannot show live is 'unsure', which the caller treats as unreadable, so default setup
+// stays off. Returns:
 //   true      `on:` names push, pull_request, pull_request_target, merge_group, schedule or
 //             workflow_call (a reusable workflow runs when it is called), and one job that is not
 //             switched off with `if: false` has codeql-action init and analyze steps that are not
 //             switched off either;
-//   false     the file never names codeql-action, or names only its upload-sarif step (another
-//             scanner's results); or, with the whole file inside the subset, every trigger was read
-//             and is a manual or workflow_run one, or every init and analyze step the file names was
-//             placed as a step's own `uses:` key, none in a live job;
+//   false     the file names no CodeQL step but upload-sarif;
 //   'unsure'  anything else.
 function runsCodeql(text) {
-  const uncommented = String(text).replace(/^\uFEFF/, '').split(/\r?\n/).filter(line => !/^\s*#/.test(line)).join('\n');
-  // An escape in a quoted value can spell a reference this test cannot see.
-  if (/["']?uses["']?\s*:[^\n]*\\/i.test(uncommented)) return 'unsure';
-  const named = [...uncommented.matchAll(/codeql-action\/([\w-]*)/gi)].map(match => match[1].toLowerCase());
-  if (named.every(step => step === 'upload-sarif')) return false;
-  const mentions = action => (uncommented.match(new RegExp(`codeql-action\\/${action}\\b`, 'gi')) || []).length;
+  if (codeqlRuledOut(text)) return false;
   const lines = workflowLines(text);
   if (outsideSubset(lines)) return 'unsure';
   const on = topLevel(lines, 'on');
   if (!on) return 'unsure';
   const events = triggerNames(on);
   if (!events) return 'unsure';
-  if (!events.some(event => CODEQL_EVENTS.includes(event))) return events.every(event => MANUAL_EVENTS.includes(event)) ? false : 'unsure';
+  if (!events.some(event => CODEQL_EVENTS.includes(event))) return 'unsure';
   const jobs = topLevel(lines, 'jobs');
   if (!jobs || !jobs.children.length) return 'unsure';
   const jobIndent = jobs.children[0].indent;
@@ -392,7 +404,6 @@ function runsCodeql(text) {
   // A step's own `uses:` key, or a key of a flow-style step.
   const uses = action => new RegExp(`(?:^|,)\\s*["']?uses["']?\\s*:\\s*['"]?github\\/codeql-action\\/${action}@`, 'i');
   const off = /(?:^|,)\s*["']?if["']?\s*:\s*(?:false|\$\{\{\s*false\s*\}\})\s*(?:,|$)/;
-  const placed = { init: 0, analyze: 0 };
   let live = false;
   for (const block of blocks) {
     if (!block.length) continue;
@@ -408,13 +419,11 @@ function runsCodeql(text) {
         return [flat];
       })
       : found.list.map(step => step.items.filter(item => item.indent === step.indent).map(item => item.text));
-    for (const action of ['init', 'analyze']) placed[action] += steps.filter(keys => keys.some(key => uses(action).test(key))).length;
     if (jobOff) continue;
     const enabled = steps.filter(keys => !keys.some(key => off.test(key)));
     if (['init', 'analyze'].every(action => enabled.some(keys => keys.some(key => uses(action).test(key))))) live = true;
   }
-  if (live) return true;
-  return placed.init === mentions('init') && placed.analyze === mentions('analyze') ? false : 'unsure';
+  return live ? true : 'unsure';
 }
 
 // The binding's policy as committed on the default branch: { policy, required_checks, source } where
@@ -466,7 +475,8 @@ function statusOf(section) {
 
 // What GitHub says about `slug`: { ok, visibility, allow_auto_merge, alerts, security_updates,
 // secret_scanning, push_protection, code_security, code_scanning, private_reporting, binding } where
-// each setting is 'enabled' | 'disabled' | 'not-on-plan' | 'unreadable', `binding` is the programme
+// each setting is 'enabled' | 'disabled' | 'not-on-plan' | 'unreadable' (code_scanning can also be
+// 'waiting' or 'starting' for GitHub Code Security, see below), `binding` is the programme
 // binding on the default branch ({ status: 'ok', text } | { status: 'missing' } |
 // { status: 'unreadable' }), and `advanced_codeql` names a default-branch workflow that runs CodeQL
 // itself (null for none, 'unreadable'; read only when default setup is off; `codeql_uploads` names a
@@ -496,12 +506,14 @@ function ghSecurityReader(slug, { spawn = childProcess.spawnSync, now = Date.now
     : (statusOf(analysis && analysis.dependabot_security_updates) || 'unreadable');
   const codeRead = ghRun([`repos/${slug}/code-scanning/default-setup`], spawn);
   // On a private repository with GitHub Code Security off, GitHub refuses every code scanning call
-  // as not enabled. CodeQL is then off, and can be turned on once Code Security is; no CodeQL results
-  // can have been uploaded meanwhile, so GitHub's record of them is not read.
-  const scanningWaitsForPaid = visibility !== 'public' && admin && !codeRead.ok && codeRead.reason === 'not-on-plan' && fromAnalysis('code_security') === 'disabled';
+  // as not enabled: CodeQL is then 'waiting' for Code Security, and nothing about it can be read.
+  // Just after Code Security is turned on, GitHub can still refuse for a while: 'starting'.
+  const refusedForPaid = visibility !== 'public' && admin && !codeRead.ok && codeRead.reason === 'not-on-plan';
   const codeScanning = codeRead.ok && codeRead.value
     ? (codeRead.value.state === 'configured' ? 'enabled' : 'disabled')
-    : scanningWaitsForPaid ? 'disabled' : (visibility === 'public' || !admin ? 'unreadable' : 'not-on-plan');
+    : refusedForPaid && fromAnalysis('code_security') === 'disabled' ? 'waiting'
+      : refusedForPaid && fromAnalysis('code_security') === 'enabled' ? 'starting'
+        : (visibility === 'public' || !admin ? 'unreadable' : 'not-on-plan');
   let privateReporting = 'not-on-plan';
   if (visibility === 'public') {
     const reporting = ghRun([`repos/${slug}/private-vulnerability-reporting`], spawn);
@@ -534,9 +546,7 @@ function ghSecurityReader(slug, { spawn = childProcess.spawnSync, now = Date.now
         if (runs === 'unsure') { if (unplaced === null) unplaced = name; else unreadable = true; }
       }
     }
-    if (advancedCodeql === null && scanningWaitsForPaid) {
-      if (unplaced !== null || unreadable) advancedCodeql = 'unreadable';
-    } else if (advancedCodeql === null) {
+    if (advancedCodeql === null) {
       // GitHub's own record also catches CodeQL run from outside a workflow file (a composite action,
       // another repository's reusable workflow): a recent CodeQL analysis on the default branch whose
       // key is not default setup's (`dynamic/...`). GitHub answers 404 when there is none.
@@ -576,9 +586,9 @@ function ghSecurityReader(slug, { spawn = childProcess.spawnSync, now = Date.now
 }
 
 // The settings writes for the fixes `plan` lists ({ alerts, security_updates, secret_scanning,
-// code_scanning, private_reporting, allow_auto_merge }: true for each to turn on; `paid: true` on a
-// private repository, where secret scanning needs GitHub Secret Protection and code scanning GitHub
-// Code Security turned on first). Returns [{ setting, ok, reason }]; each write is tried once, never
+// code_security, code_scanning, private_reporting, allow_auto_merge }: true for each to turn on;
+// `paid: true` on a private repository, where secret scanning needs GitHub Secret Protection turned
+// on with it). GitHub Code Security is only ever turned on in a run that leaves default setup alone. Returns [{ setting, ok, reason }]; each write is tried once, never
 // retried.
 function ghSecurityWriter(slug, plan, { spawn = childProcess.spawnSync } = {}) {
   const results = [];
@@ -595,7 +605,7 @@ function ghSecurityWriter(slug, plan, { spawn = childProcess.spawnSync } = {}) {
     } };
     write('secret_scanning', ['-X', 'PATCH', `repos/${slug}`, '--input', '-'], JSON.stringify(body));
   }
-  if (plan.code_scanning && plan.paid) write('code_security', ['-X', 'PATCH', `repos/${slug}`, '--input', '-'], JSON.stringify({ security_and_analysis: { code_security: { status: 'enabled' } } }));
+  if (plan.code_security) write('code_security', ['-X', 'PATCH', `repos/${slug}`, '--input', '-'], JSON.stringify({ security_and_analysis: { code_security: { status: 'enabled' } } }));
   if (plan.allow_auto_merge) write('allow_auto_merge', ['-X', 'PATCH', `repos/${slug}`, '--input', '-'], JSON.stringify({ allow_auto_merge: true }));
   if (plan.code_scanning) write('code_scanning', ['-X', 'PATCH', `repos/${slug}/code-scanning/default-setup`, '--input', '-'], JSON.stringify({ state: 'configured' }));
   if (plan.private_reporting) write('private_reporting', ['-X', 'PUT', `repos/${slug}/private-vulnerability-reporting`, '--silent']);
@@ -649,7 +659,7 @@ function applySecurity(root, result, { writer = ghSecurityWriter, fileWriter = w
   if (wantFiles) {
     try { files = fileWriter(root, result.files); } catch { files = [{ file: 'all', result: 'failed (writer-failed)' }]; }
   }
-  let unavailable = settings.filter(entry => !entry.ok && UNAVAILABLE.includes(entry.reason)).map(entry => entry.setting);
+  const unavailable = settings.filter(entry => !entry.ok && UNAVAILABLE.includes(entry.reason)).map(entry => entry.setting);
   let after = null;
   if (wantSettings && reread) {
     try { after = reread(); } catch { after = null; }
@@ -664,14 +674,6 @@ function applySecurity(root, result, { writer = ghSecurityWriter, fileWriter = w
     if (values.every(item => item === 'enabled' || item === true)) continue;
     if (values.some(item => item === 'disabled' || item === false)) stillOff.push(entry.setting);
     else unconfirmed.push(entry.setting);
-  }
-  // GitHub can answer "needs Code Security" for default setup just after Code Security was turned on,
-  // while the change takes effect. That answer is then not "not on this plan": CodeQL is still off,
-  // so the run is unverified and the next check looks again.
-  const paidOn = settings.some(entry => entry.ok && entry.setting === 'code_security');
-  if (paidOn && settings.some(entry => entry.setting === 'code_scanning' && entry.reason === 'not-on-plan')) {
-    unavailable = unavailable.filter(setting => setting !== 'code_scanning');
-    unconfirmed.push('code_scanning');
   }
   const failed = settings.some(entry => !entry.ok && !UNAVAILABLE.includes(entry.reason)) || files.some(entry => entry.result !== 'written') || stillOff.length > 0;
   const status = failed ? 'failed' : unconfirmed.length > 0 ? 'unverified' : 'applied';
@@ -700,9 +702,9 @@ function describeOutcome(slug, root, result, outcome) {
     const label = SETTING_LABELS[entry.setting] || entry.setting;
     if (entry.ok) lines.push(`- ${slug}: ${label} turned on.`);
     else if (UNAVAILABLE.includes(entry.reason) && (outcome.unavailable || []).includes(entry.setting)) lines.push(`- ${slug}: ${label} left alone: GitHub does not allow it here (${entry.reason === 'not-on-plan' ? 'not on this plan' : 'an organisation or enterprise policy'}).`);
-    else if (entry.setting === 'code_scanning' && entry.reason === 'not-on-plan') lines.push(`- ${slug}: ${label} not turned on yet: GitHub answered that it needs Code Security, ${outcome.still_off.includes('code_security') ? 'which still reads back off' : 'which was just turned on; run this again shortly'}.`);
     else lines.push(`- ${slug}: ${label} not turned on (${entry.reason}).`);
   }
+  if (outcome.settings.some(entry => entry.ok && entry.setting === 'code_security')) lines.push(`- ${slug}: CodeQL default setup waits for the next run, which first checks for an advanced CodeQL setup.`);
   for (const entry of outcome.files) lines.push(`- ${root}: ${entry.file} ${entry.result}${entry.result === 'written' ? '; commit it through a pull request' : ''}.`);
   const wrote = outcome.settings.some(entry => entry.ok);
   // Only settings that were written can fail to read back.
@@ -719,7 +721,7 @@ function describeOutcome(slug, root, result, outcome) {
   if (result.checks.S3 && result.checks.S3.status === 'drift' && !(result.files && result.files.dependabot)) byHand.push(...result.checks.S3.details);
   if (result.checks.S7 && result.checks.S7.status === 'drift') byHand.push(...result.checks.S7.details.filter(detail => !detail.includes(WORKFLOW_REL) || result.workflow === 'foreign'));
   if (result.checks.S8 && result.checks.S8.status === 'drift') byHand.push(...result.checks.S8.details);
-  for (const id of ['S4', 'S5']) if (result.checks[id] && result.checks[id].status === 'drift' && !(result.fixes && result.fixes[id === 'S4' ? 'secret_scanning' : 'code_scanning'])) byHand.push(...result.checks[id].details);
+  for (const id of ['S4', 'S5']) if (result.checks[id] && result.checks[id].status === 'drift' && !(result.fixes && (id === 'S4' ? result.fixes.secret_scanning : result.fixes.code_scanning || result.fixes.code_security))) byHand.push(...result.checks[id].details);
   if (byHand.length) lines.push(`${slug}: still to do (Toolkit never edits a file it did not write, and asks the owner about paid features):`, ...byHand.map(note => `  - ${note}`));
   return lines;
 }
@@ -786,7 +788,11 @@ function dependencySecurity(root, { offline = false, reader = ghSecurityReader, 
   const off = [scanning, pushProtection].filter(item => item.status === 'drift');
   checks.S4 = off.length ? { status: 'drift', details: off.flatMap(item => item.details) }
     : [scanning, pushProtection].find(item => item.status !== 'ok') || scanning;
-  checks.S5 = online && advanced === 'unreadable' && read.code_scanning === 'disabled'
+  checks.S5 = online && read.code_scanning === 'waiting'
+    ? { status: 'drift', details: ['CodeQL code scanning waits for GitHub Code Security, which is off; once Code Security is on, the next run checks for an advanced CodeQL setup before turning default setup on'] }
+    : online && read.code_scanning === 'starting'
+    ? { status: 'unverified', details: ['GitHub Code Security reads on, but GitHub does not offer CodeQL code scanning here yet; run this again shortly'] }
+    : online && advanced === 'unreadable' && read.code_scanning === 'disabled'
     ? { status: 'unverified', details: [read.codeql_uploads
       ? `GitHub has CodeQL results on the default branch from ${read.codeql_uploads} in the last 90 days, not from default setup, so an advanced CodeQL setup is in use somewhere; default setup stays off, so check it by hand`
       : read.codeql_unplaced
@@ -800,7 +806,7 @@ function dependencySecurity(root, { offline = false, reader = ghSecurityReader, 
     const answer = !known ? 'answer on the default branch could not be read' : policy.paid_security === 'off' ? 'binding keeps it off' : 'binding has no answer yet';
     for (const id of ['S4', 'S5']) {
       if (policy.paid_security !== 'on') {
-        if (checks[id].status === 'drift' || checks[id].status === 'not-on-plan') checks[id] = { status: 'not-applicable', details: [`a paid GitHub feature on a ${read.visibility} repository; the ${answer}`] };
+        if (checks[id].status === 'drift' || checks[id].status === 'not-on-plan' || (id === 'S5' && read.code_scanning === 'starting')) checks[id] = { status: 'not-applicable', details: [`a paid GitHub feature on a ${read.visibility} repository; the ${answer}`] };
       } else if (checks[id].status === 'not-on-plan') {
         checks[id] = { status: 'drift', details: [`the binding turns GitHub's paid ${id === 'S4' ? 'Secret Protection' : 'Code Security'} on, but this account's plan does not offer it (it needs GitHub Team or Enterprise Cloud); buy it or set paid_security to off`] };
       }
@@ -853,6 +859,7 @@ function dependencySecurity(root, { offline = false, reader = ghSecurityReader, 
     alerts: read.alerts === 'disabled',
     security_updates: read.security_updates === 'disabled',
     secret_scanning: Boolean(wanted) && (read.secret_scanning === 'disabled' || read.push_protection === 'disabled'),
+    code_security: Boolean(wanted) && read.visibility !== 'public' && read.code_scanning === 'waiting',
     code_scanning: Boolean(wanted) && read.code_scanning === 'disabled' && advanced === null,
     private_reporting: read.visibility === 'public' && read.private_reporting === 'disabled',
     allow_auto_merge: policy.auto_merge === 'patch-minor' && read.allow_auto_merge === false && protectedForAutoMerge,
