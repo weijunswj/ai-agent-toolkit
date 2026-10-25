@@ -1,0 +1,59 @@
+{
+  "schema": "toolkit.external-operation-plan.v1",
+  "operation": {
+    "action": "merge",
+    "environment": "alpha",
+    "targets": ["app-alpha"],
+    "summary": "Merge the reviewed branch into the alpha deploy branch"
+  },
+  "targets": [
+    {
+      "id": "app-alpha",
+      "kind": "app",
+      "provider": "<deployment platform>",
+      "environment": "alpha",
+      "provider_environment": "alpha"
+    }
+  ],
+  "resources": [
+    {
+      "id": "db-alpha",
+      "kind": "database",
+      "provider": "<database provider>",
+      "name_environment": "alpha",
+      "provider_environment": "alpha"
+    },
+    {
+      "id": "bucket-alpha",
+      "kind": "bucket",
+      "provider": "<storage provider>",
+      "name_environment": "alpha",
+      "provider_environment": "alpha"
+    }
+  ],
+  "bindings": [
+    { "target": "app-alpha", "resource": "db-alpha", "access": "write" },
+    { "target": "app-alpha", "resource": "bucket-alpha", "access": "write" }
+  ],
+  "authority": [
+    { "resource": "app-alpha", "action": "merge", "scope": "alpha", "effect": "allow" }
+  ],
+  "exceptions": [],
+  "downstream": {
+    "trigger": "AUTO_ON_MERGE",
+    "deployment_approved": true,
+    "pause_read_back": false,
+    "evidence_freeze": false,
+    "freeze_end_approved": false
+  },
+  "routes": [
+    {
+      "route": "mcp",
+      "outcome": "selected",
+      "pre_approved": true,
+      "target": "app-alpha",
+      "privilege": "deploy",
+      "effect": "merge then deploy"
+    }
+  ]
+}

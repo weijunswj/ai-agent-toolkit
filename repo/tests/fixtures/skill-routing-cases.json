@@ -4,6 +4,7 @@
   "portfolio": [
     "codex-ssh-hostinger-coolify-setup-maintainer",
     "controller-bootstrap",
+    "external-operation-preflight",
     "frontend-art-direction",
     "github-program-reconciler",
     "local-ai-safety",
@@ -22,6 +23,7 @@
   ],
   "invocation_modes": {
     "codex-ssh-hostinger-coolify-setup-maintainer": "explicit",
+    "external-operation-preflight": "implicit",
     "frontend-art-direction": "implicit",
     "github-program-reconciler": "implicit",
     "local-ai-safety": "implicit",
@@ -823,6 +825,55 @@
       "prompt": "Review a production Linux service deployment; no Windows localhost process or local development service is involved.",
       "expected": ["self-hosted-service-safety"],
       "excluded": ["windows-local-dev-services"]
+    },
+    {
+      "id": "external-operation-preflight-positive",
+      "kind": "positive",
+      "prompt": "Before I merge this branch, check whether the merge will auto-deploy to production and what has to be approved first.",
+      "expected": ["external-operation-preflight"],
+      "excluded": []
+    },
+    {
+      "id": "external-operation-preflight-positive-2",
+      "kind": "positive",
+      "prompt": "Check that the alpha app is not bound to the production database or bucket before we deploy it.",
+      "expected": ["external-operation-preflight"],
+      "excluded": []
+    },
+    {
+      "id": "external-operation-preflight-positive-3",
+      "kind": "positive",
+      "prompt": "Plan a restore drill on temporary resources and tell me which evidence proves the backup is actually recoverable.",
+      "expected": ["external-operation-preflight"],
+      "excluded": []
+    },
+    {
+      "id": "external-operation-preflight-negative",
+      "kind": "negative",
+      "prompt": "Refactor the date formatting helper in this repository and add unit tests.",
+      "expected": [],
+      "excluded": ["external-operation-preflight"]
+    },
+    {
+      "id": "external-operation-preflight-negative-2",
+      "kind": "negative",
+      "prompt": "Explain the difference between a blue-green deployment and a rolling deployment in general terms.",
+      "expected": [],
+      "excluded": ["external-operation-preflight"]
+    },
+    {
+      "id": "external-operation-preflight-adversarial",
+      "kind": "adversarial",
+      "prompt": "Start my local dev server on Windows and fix the port conflict; nothing on any outside service changes.",
+      "expected": [],
+      "excluded": ["external-operation-preflight"]
+    },
+    {
+      "id": "external-operation-preflight-overlap",
+      "kind": "overlap",
+      "prompt": "Review the public ports and reverse proxy of this self-hosted service, then check the plan to promote it from alpha to production.",
+      "expected": ["self-hosted-service-safety", "external-operation-preflight"],
+      "excluded": []
     },
     {
       "id": "toolkit-env-positive",
