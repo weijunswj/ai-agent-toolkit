@@ -48,6 +48,12 @@ function sink() {
 
 const PROTECTED = () => ({ ok: true, rulesets: [{ enforcement: 'active', target: 'branch', conditions: { ref_name: { include: ['~ALL'], exclude: [] } }, rules: [{ type: 'non_fast_forward' }], bypass_actors: [] }] });
 
+// Every dependency and security setting on, on a public repository.
+const SECURE = () => ({
+  ok: true, visibility: 'public', allow_auto_merge: false, alerts: 'enabled', security_updates: 'enabled',
+  secret_scanning: 'enabled', push_protection: 'enabled', code_scanning: 'enabled', private_reporting: 'enabled',
+});
+
 // A default branch that requires the binding's one check, pinned, with merge commits only.
 const BRANCH_PROTECTED = () => ({
   ok: true, default_branch: 'main', classic: null, toolkit_ruleset: null,
@@ -62,7 +68,7 @@ const WORKFLOW = [
   '    runs-on: ubuntu-latest', '    steps:', '      - env:', '          LEGS: ${{ toJSON(needs) }}', '        run: node verify.cjs', '',
 ].join('\n');
 
-async function run(ctx, cwd, argv, { answer = 'yes', interactive = true, rulesetReader = PROTECTED, protectionReader = BRANCH_PROTECTED } = {}) {
+async function run(ctx, cwd, argv, { answer = 'yes', interactive = true, rulesetReader = PROTECTED, protectionReader = BRANCH_PROTECTED, securityReader = SECURE } = {}) {
   const stdout = sink();
   const stderr = sink();
   const asked = [];
@@ -72,6 +78,7 @@ async function run(ctx, cwd, argv, { answer = 'yes', interactive = true, ruleset
     registryOptions: { registryPath: ctx.registryPath, testOnly: true },
     rulesetReader,
     protectionReader,
+    securityReader,
   });
   const code = await cli.main(argv);
   return { code, stdout: stdout.text(), stderr: stderr.text(), asked };
@@ -94,6 +101,7 @@ function writeGoverned(repo, { blockText = expectedBlockText(), binding = true, 
     }));
     fs.mkdirSync(path.join(repo, '.github', 'workflows'), { recursive: true });
     fs.writeFileSync(path.join(repo, '.github', 'workflows', 'ci.yml'), WORKFLOW);
+    fs.writeFileSync(path.join(repo, '.github', 'dependabot.yml'), 'version: 2\nupdates:\n  - package-ecosystem: "github-actions"\n    directory: "/"\n');
   }
 }
 

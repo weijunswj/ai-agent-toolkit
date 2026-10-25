@@ -10,7 +10,10 @@
 // unreachable GitHub reports it unverified, which never counts as present or as drift), the
 // default-branch protection the binding's required checks need (toolkit-governance-protection.cjs:
 // required checks match and are pinned, one job produces each and cannot be masked, merge commits
-// only), and whether prompt-hold enforcement is
+// only), the dependency and security settings (toolkit-governance-security.cjs: Dependabot alerts,
+// security and version updates, secret scanning, push protection, CodeQL, private vulnerability
+// reporting, and auto-merge only where the binding allows it and the default branch is protected),
+// and whether prompt-hold enforcement is
 // active on each host. Enforcement never counts as active unless a host really runs the hook:
 // hosts without plugin hooks (cloud sessions, Claude Projects threads) and OpenCode are
 // `unsupported`.
@@ -23,6 +26,7 @@ const governance = require('./toolkit-governance-state.cjs');
 const catalogue = require('./toolkit-governance-catalogue.cjs');
 const ruleset = require('./toolkit-governance-ruleset.cjs');
 const protection = require('./toolkit-governance-protection.cjs');
+const security = require('./toolkit-governance-security.cjs');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const GOVERNED_SOURCE_REL = 'repo/contracts/agent-rules/toolkit-governed-rules.md';
@@ -67,7 +71,7 @@ function finding(id, severity, message) { return Object.freeze({ id, severity, m
 
 // Reads only. Options pass through to the state reader (registry location in tests) and may set
 // `toolkitRoot` for the source comparison, `offline: true` to skip the GitHub reads, and
-// `rulesetReader` and `protectionReader` (tests).
+// `rulesetReader`, `protectionReader` and `securityReader` (tests).
 function checkConformance(cwd, options = {}) {
   const toolkitRoot = options.toolkitRoot || ROOT;
   let state;
@@ -126,8 +130,18 @@ function checkConformance(cwd, options = {}) {
     });
     findings.push(...protectionFindings(protectionResult));
   }
+  let securityResult = null;
+  if (state.state === 'ENABLED' && state.materials.binding) {
+    securityResult = security.dependencySecurity(state.root, {
+      offline: options.offline === true,
+      protectionResult,
+      toolkitRoot,
+      ...(options.securityReader ? { reader: options.securityReader } : {}),
+    });
+    findings.push(...securityFindings(securityResult));
+  }
   const drift = findings.some(entry => entry.severity === 'drift');
-  return report(drift ? 1 : 0, state, findings, toolkitRoot, rulesetResult, protectionResult);
+  return report(drift ? 1 : 0, state, findings, toolkitRoot, rulesetResult, protectionResult, securityResult);
 }
 
 function rulesetFindings(result) {
@@ -170,6 +184,39 @@ function protectionFindings(result) {
   return out;
 }
 
+const SECURITY_FINDINGS = Object.freeze({
+  S1: ['SECURITY_DEPENDABOT_ALERTS', 'Dependabot alerts must be on'],
+  S2: ['SECURITY_DEPENDABOT_UPDATES', 'Dependabot security updates must be on'],
+  S3: ['SECURITY_VERSION_UPDATES', 'Dependabot version updates must cover every package ecosystem in the repository'],
+  S4: ['SECURITY_SECRET_SCANNING', 'Secret scanning and push protection must be on'],
+  S5: ['SECURITY_CODE_SCANNING', 'CodeQL code scanning must be set up'],
+  S6: ['SECURITY_PRIVATE_REPORTING', 'Private vulnerability reporting must be on'],
+  S7: ['SECURITY_AUTO_MERGE', 'Dependabot auto-merge needs the workflow, the repository setting and a protected default branch'],
+});
+
+function securityFindings(result) {
+  if (result.status === 'not-applicable') return [];
+  if (result.reason === 'identity-unreadable') return [finding('SECURITY_UNVERIFIED', 'unverified', 'Dependency and security settings could not be checked (the repository identity is unreadable).')];
+  const out = [];
+  for (const [id, [code, rule]] of Object.entries(SECURITY_FINDINGS)) {
+    const check = result.checks[id];
+    if (!check || check.status === 'ok' || check.status === 'not-applicable') continue;
+    if (check.status === 'drift') {
+      const fix = id === 'S3' && result.files && !result.files.dependabot ? ' Add the missing entries to the existing file through a pull request.'
+        : id === 'S7' ? ' The one-time migration offers what it can fix, with your approval; the binding change goes through a pull request.'
+          : ' The one-time migration offers to turn it on, with your approval.';
+      out.push(finding(code, 'drift', `${rule}: ${check.details.join('; ')}.${fix}`));
+    } else if (check.status === 'not-on-plan') {
+      out.push(finding(`${code}_NOT_ON_PLAN`, 'info', `${rule}: ${check.details.join('; ')}, so it is not required here.`));
+    } else if (check.status === 'not-checked') {
+      out.push(finding(`${code}_NOT_CHECKED`, 'unverified', `${rule}: not checked (offline).`));
+    } else {
+      out.push(finding(`${code}_UNVERIFIED`, 'unverified', `${rule}: could not be confirmed (${check.details.join('; ')}). Sign in with \`gh auth login\` as a repository admin and run the check again.`));
+    }
+  }
+  return out;
+}
+
 function governedBlockFindings(repoRoot, toolkitRoot) {
   const materials = governance.readGovernedBlock(repoRoot);
   if (!materials.present) return [];
@@ -188,7 +235,7 @@ function governedBlockFindings(repoRoot, toolkitRoot) {
   return out;
 }
 
-function report(exitCode, state, findings, toolkitRoot, rulesetResult = null, protectionResult = null) {
+function report(exitCode, state, findings, toolkitRoot, rulesetResult = null, protectionResult = null, securityResult = null) {
   let catalogueProblems = [];
   try { catalogueProblems = catalogue.catalogueProblems(toolkitRoot); } catch { catalogueProblems = ['the skill catalogue could not be checked']; }
   const all = [...findings, ...catalogueProblems.map(message => finding('CATALOGUE_DRIFT', 'drift', message))];
@@ -201,6 +248,7 @@ function report(exitCode, state, findings, toolkitRoot, rulesetResult = null, pr
     findings: Object.freeze(all),
     no_force_push_ruleset: rulesetResult,
     default_branch_protection: protectionResult,
+    dependency_security: securityResult,
     enforcement: enforcementStatus(toolkitRoot),
   });
 }

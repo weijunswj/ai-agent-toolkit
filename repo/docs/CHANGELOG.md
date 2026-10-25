@@ -1,5 +1,14 @@
 # Toolkit Changelog
 
+## 3.14.0 (dependency updates)
+
+### Dependency and security settings
+
+- **`toolkit governance check` checks dependency and security settings:** for an ENABLED github.com repository with a programme binding it reports drift when Dependabot alerts or security updates are off, `.github/dependabot.yml` misses a package ecosystem found in the repository, or, on a public repository, secret scanning, push protection, CodeQL default setup or private vulnerability reporting is off. On a private repository the paid features are reported as not on this plan, never as drift.
+- **Safe Dependabot auto-merge:** the programme binding takes an optional `dependency_updates` (`auto_merge`: `off`, the default, or `patch-minor`; `github_actions`: `auto-merge` or `owner`). With `patch-minor`, a new workflow template turns on GitHub auto-merge, merge commit only, for Dependabot patch and minor updates, so GitHub merges once every required check passes. It uses only the built-in token, never checks out the pull request's code, reads the policy from the base branch and does nothing unless a ruleset requires at least one check. Major updates and updates whose maintainers changed get one comment for the owner and stay open.
+- **`toolkit governance migrate` offers the fix per repository:** it lists what would change for each repository and acts only after a typed yes for that repository: it turns the settings on, writes a `dependabot.yml` (weekly, cooldown, patch and minor grouped) and the workflow only where none exists, and reads everything back. It never edits a file it did not write.
+- **This repository:** Dependabot now also covers npm, with a cooldown and grouping, and carries the auto-merge workflow; auto-merge stays off in the binding until the owner turns it on.
+
 ## 3.13.0 (repository protection)
 
 ### Default-branch protection

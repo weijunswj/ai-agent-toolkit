@@ -19,7 +19,10 @@
 // created or updated only after a third typed yes. Toolkit never edits a ruleset or branch
 // protection it did not create: what its own ruleset cannot fix (an extra or unpinned check in
 // someone else's rule, a workflow that can mask its check) is reported to change by hand, and a
-// refused write is reported once, never retried. Nothing is pushed to any
+// refused write is reported once, never retried. Last, each ENABLED GitHub repository missing
+// dependency or security settings (toolkit-governance-security.cjs) is shown with what would change,
+// and that one repository's settings are turned on and its missing files written only after a typed
+// yes for that repository. Files land in the working tree for a normal pull request. Nothing is pushed to any
 // repository and no pull request is opened: missing bindings and legacy markers are reported
 // with what to do.
 
@@ -30,6 +33,7 @@ const registry = require('./toolkit-capability-registry.cjs');
 const governance = require('./toolkit-governance-state.cjs');
 const ruleset = require('./toolkit-governance-ruleset.cjs');
 const protection = require('./toolkit-governance-protection.cjs');
+const security = require('./toolkit-governance-security.cjs');
 
 const CAPABILITY = governance.GOVERNANCE_CAPABILITY;
 const RECORD_SCHEMA = 'toolkit.governance-migration.v1';
@@ -103,9 +107,9 @@ function parseAnswer(answer, rows) {
 }
 
 class GovernanceMigration {
-  #stdout; #ask; #interactive; #registryOptions; #rulesetReader; #rulesetCreator; #protectionReader; #protectionWriter; #now;
+  #stdout; #ask; #interactive; #registryOptions; #rulesetReader; #rulesetCreator; #protectionReader; #protectionWriter; #securityReader; #securityWriter; #securityFileWriter; #now;
 
-  constructor({ stdout, ask, interactive, registryOptions = {}, rulesetReader = null, rulesetCreator = null, protectionReader = null, protectionWriter = null, now = () => new Date() }) {
+  constructor({ stdout, ask, interactive, registryOptions = {}, rulesetReader = null, rulesetCreator = null, protectionReader = null, protectionWriter = null, securityReader = null, securityWriter = null, securityFileWriter = null, now = () => new Date() }) {
     this.#stdout = stdout;
     this.#ask = ask;
     this.#interactive = interactive === true;
@@ -114,6 +118,9 @@ class GovernanceMigration {
     this.#rulesetCreator = rulesetCreator || ruleset.ghRulesetCreator;
     this.#protectionReader = protectionReader;
     this.#protectionWriter = protectionWriter || protection.ghProtectionRulesetWriter;
+    this.#securityReader = securityReader;
+    this.#securityWriter = securityWriter || security.ghSecurityWriter;
+    this.#securityFileWriter = securityFileWriter || security.writeSecurityFiles;
     this.#now = now;
   }
 
@@ -154,8 +161,9 @@ class GovernanceMigration {
     this.#reportMaterials(after);
     const rulesets = await this.#offerRulesets(after);
     const protections = await this.#offerProtection(after);
-    if (written.length || rulesets.length || protections.length) this.#writeRecord(written, rulesets, protections);
-    const failed = written.some(entry => entry.result !== 'written') || [...rulesets, ...protections].some(entry => entry.result === 'failed');
+    const securities = await this.#offerSecurity(after);
+    if (written.length || rulesets.length || protections.length || securities.length) this.#writeRecord(written, rulesets, protections, securities);
+    const failed = written.some(entry => entry.result !== 'written') || [...rulesets, ...protections, ...securities].some(entry => entry.result === 'failed');
     return failed ? 2 : 0;
   }
 
@@ -305,8 +313,70 @@ class GovernanceMigration {
     return results;
   }
 
+  #securityFor(row) {
+    const read = this.#protectionFor(row);
+    return security.dependencySecurity(row.root, {
+      protectionResult: read ? read.result : null,
+      ...(this.#securityReader ? { reader: this.#securityReader } : {}),
+    });
+  }
+
+  static #securityChanges(result) {
+    const labels = {
+      alerts: 'turn on Dependabot alerts',
+      security_updates: 'turn on Dependabot security updates',
+      secret_scanning: 'turn on secret scanning and push protection',
+      code_scanning: 'set up CodeQL code scanning (default setup)',
+      private_reporting: 'turn on private vulnerability reporting',
+      allow_auto_merge: 'allow auto-merge in the repository settings',
+    };
+    const changes = Object.entries(result.fixes || {}).filter(([, on]) => on).map(([key]) => labels[key]);
+    if (result.files && result.files.dependabot) changes.push(`write ${security.DEPENDABOT_REL} (weekly version updates for every ecosystem found, with a cooldown)`);
+    if (result.files && result.files.workflow) changes.push(`write ${security.WORKFLOW_REL} (auto-merge for Dependabot patch and minor updates, as the binding allows)`);
+    return changes;
+  }
+
+  #securityByHand(row, result) {
+    const notes = [];
+    if (result.checks.S3 && result.checks.S3.status === 'drift' && !(result.files && result.files.dependabot)) notes.push(...result.checks.S3.details);
+    if (result.checks.S7 && result.checks.S7.status === 'drift') notes.push(...result.checks.S7.details.filter(detail => !detail.includes(security.WORKFLOW_REL) || result.workflow === 'foreign'));
+    if (notes.length) this.#say([`${row.slug}: change by hand (Toolkit never edits a file it did not write):`, ...notes.map(note => `  - ${note}`)]);
+  }
+
+  async #offerSecurity(rows) {
+    const results = [];
+    for (const row of rows.filter(entry => entry.state.state === 'ENABLED' && entry.slug && entry.state.materials && entry.state.materials.binding)) {
+      const result = this.#securityFor(row);
+      if (result.status === 'not-applicable') continue;
+      const unread = Object.values(result.checks).find(check => check.status === 'unverified');
+      if (unread) this.#say(`${row.root}: some dependency and security settings could not be read on GitHub (${unread.details.join('; ')}).`);
+      const changes = GovernanceMigration.#securityChanges(result);
+      this.#securityByHand(row, result);
+      if (changes.length === 0) continue;
+      this.#say([`${row.slug} (${row.root}) would change:`, ...changes.map(change => `  - ${change}`)]);
+      const answer = String(await this.#ask(`Make these changes to ${row.slug}? Type yes to confirm: `) || '').trim().toLowerCase();
+      if (answer !== 'yes') {
+        this.#say(`- ${row.slug}: nothing changed.`);
+        continue;
+      }
+      let settings = [];
+      try { settings = this.#securityWriter(row.slug, result.fixes || {}); } catch { settings = [{ setting: 'all', ok: false, reason: 'writer-failed' }]; }
+      let files = [];
+      try { files = this.#securityFileWriter(row.root, result.files || {}); } catch { files = [{ file: 'all', result: 'failed (writer-failed)' }]; }
+      const after = this.#securityFor(row);
+      const stillOff = Object.entries(after.fixes || {}).filter(([key, on]) => on && result.fixes && result.fixes[key]).map(([key]) => key);
+      const failed = settings.some(entry => !entry.ok) || files.some(entry => entry.result !== 'written') || stillOff.length > 0;
+      for (const entry of settings) this.#say(`- ${row.slug}: ${entry.setting} ${entry.ok ? 'turned on' : `not turned on (${entry.reason})`}.`);
+      for (const entry of files) this.#say(`- ${row.root}: ${entry.file} ${entry.result}${entry.result === 'written' ? '; commit it through a pull request' : ''}.`);
+      if (stillOff.length) this.#say(`- ${row.slug}: reading back still shows off: ${stillOff.join(', ')}.`);
+      else if (!failed) this.#say(`- ${row.slug}: read back.`);
+      results.push({ repository_id: row.state.repository_id, settings, files, result: failed ? 'failed' : 'applied' });
+    }
+    return results;
+  }
+
   // One private record per run that changed something, next to the decision file.
-  #writeRecord(decisions, rulesets, protections = []) {
+  #writeRecord(decisions, rulesets, protections = [], securities = []) {
     const directory = path.dirname(governance.registryPathFor(this.#registryOptions));
     const file = path.join(directory, RECORD_BASENAME);
     let previous = [];
@@ -314,7 +384,7 @@ class GovernanceMigration {
       const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
       if (parsed && parsed.schema === RECORD_SCHEMA && Array.isArray(parsed.runs)) previous = parsed.runs;
     } catch { previous = []; }
-    const record = { schema: RECORD_SCHEMA, runs: [...previous, { at: this.#now().toISOString(), decisions, rulesets, protections }].slice(-20) };
+    const record = { schema: RECORD_SCHEMA, runs: [...previous, { at: this.#now().toISOString(), decisions, rulesets, protections, securities }].slice(-20) };
     fs.mkdirSync(directory, { recursive: true });
     const temporary = `${file}.${process.pid}.tmp`;
     fs.writeFileSync(temporary, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 });

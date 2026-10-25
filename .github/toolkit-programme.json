@@ -11,6 +11,10 @@
     "path": "state/weijunswj/ai-agent-toolkit/"
   },
   "required_checks": ["validate"],
+  "dependency_updates": {
+    "auto_merge": "off",
+    "github_actions": "auto-merge"
+  },
   "projection": {
     "after_section": "CURRENT",
     "replace_section": "Programme index"

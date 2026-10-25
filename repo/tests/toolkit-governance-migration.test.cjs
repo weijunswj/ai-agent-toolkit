@@ -90,7 +90,16 @@ function protectionReader(protections) {
   };
 }
 
-async function migrate(ctx, { answers = ['yes'], interactive = true, rulesets = {}, created = [], argv = null, protections = {}, written = [], writer = null } = {}) {
+// Every dependency and security setting on, unless `settings` says otherwise for that slug.
+function securityReader(settings = {}) {
+  return (slug) => ({
+    ok: true, visibility: 'public', allow_auto_merge: false, alerts: 'enabled', security_updates: 'enabled',
+    secret_scanning: 'enabled', push_protection: 'enabled', code_scanning: 'enabled', private_reporting: 'enabled',
+    ...(settings[slug] || {}),
+  });
+}
+
+async function migrate(ctx, { answers = ['yes'], interactive = true, rulesets = {}, created = [], argv = null, protections = {}, written = [], writer = null, security = {}, securityWriter = null, securityFileWriter = null } = {}) {
   const stdout = sink();
   const stderr = sink();
   const asked = [];
@@ -107,6 +116,9 @@ async function migrate(ctx, { answers = ['yes'], interactive = true, rulesets = 
       protections[slug] = { checks, methods: ['merge'], own: existing || 9 };
       return { ok: true, id: existing || 9 };
     }),
+    securityReader: securityReader(security),
+    ...(securityWriter ? { securityWriter } : {}),
+    ...(securityFileWriter ? { securityFileWriter } : {}),
   });
   const code = await cli.main(argv || ['migrate', '--root', ctx.projects]);
   return { code, stdout: stdout.text(), stderr: stderr.text(), asked };
@@ -265,6 +277,45 @@ test('NF-06: the ruleset Toolkit adds is the one the check accepts', () => {
   assert.deepEqual(JSON.parse(calls[0].input), body);
   const plan = () => ({ status: 1, stdout: '', stderr: 'gh: Upgrade to GitHub Pro or make this repository public to enable this feature. (HTTP 403)' });
   assert.deepEqual(ruleset.ghRulesetCreator('a/b', { spawn: plan }), { ok: false, reason: 'plan-has-no-rulesets' });
+});
+
+test('SEC-01: missing dependency and security settings are offered per repository, written after its own yes, and read back', async (t) => {
+  const ctx = scratch(t);
+  const { governed } = fixture(ctx);
+  fs.writeFileSync(path.join(governed, 'package.json'), '{}');
+  await migrate(ctx, { answers: ['yes', 'no', 'no'] });
+  const rulesets = { 'example-owner/governed': true, 'example-owner/block-only': true };
+  const protections = { 'example-owner/governed': { checks: ['validate'], methods: ['merge'], own: null } };
+  const settings = { 'example-owner/governed': { alerts: 'disabled', code_scanning: 'disabled' } };
+  const calls = [];
+  const securityWriter = (slug, plan) => {
+    calls.push({ slug, plan: Object.keys(plan).filter(key => plan[key]) });
+    settings[slug] = {};
+    return Object.keys(plan).filter(key => plan[key]).map(setting => ({ setting, ok: true, reason: null }));
+  };
+  // No yes: nothing written, nothing called.
+  const declined = await migrate(ctx, { answers: ['no'], rulesets, protections, security: settings, securityWriter });
+  assert.deepEqual(calls, []);
+  assert.equal(fs.existsSync(path.join(governed, '.github', 'dependabot.yml')), false);
+  assert.match(declined.stdout, /example-owner\/governed \(.*\) would change:\n  - turn on Dependabot alerts\n  - set up CodeQL code scanning/);
+  assert.match(declined.stdout, /example-owner\/governed: nothing changed/);
+  // Yes for that repository: the settings it lists and the missing file, then read back.
+  const accepted = await migrate(ctx, { answers: ['yes'], rulesets, protections, security: settings, securityWriter });
+  assert.equal(accepted.code, 0, accepted.stdout);
+  assert.equal(accepted.asked.length, 1);
+  assert.match(accepted.asked[0], /Make these changes to example-owner\/governed\?/);
+  assert.deepEqual(calls, [{ slug: 'example-owner/governed', plan: ['alerts', 'code_scanning'] }]);
+  assert.match(fs.readFileSync(path.join(governed, '.github', 'dependabot.yml'), 'utf8'), /package-ecosystem: "npm"/);
+  assert.match(accepted.stdout, /\.github\/dependabot\.yml written; commit it through a pull request/);
+  assert.match(accepted.stdout, /example-owner\/governed: read back/);
+  // Nothing left: no question. A refused write is reported once and fails the run.
+  assert.equal((await migrate(ctx, { answers: [], rulesets, protections, security: settings, securityWriter })).asked.length, 0);
+  settings['example-owner/governed'] = { private_reporting: 'disabled' };
+  let refusedCalls = 0;
+  const refused = await migrate(ctx, { answers: ['yes'], rulesets, protections, security: settings, securityWriter: () => { refusedCalls += 1; return [{ setting: 'private_reporting', ok: false, reason: 'forbidden' }]; } });
+  assert.equal(refusedCalls, 1);
+  assert.equal(refused.code, 2);
+  assert.match(refused.stdout, /private_reporting not turned on \(forbidden\)/);
 });
 
 test('T-01: the binding template is not a valid binding until it is filled in', () => {

@@ -1,0 +1,78 @@
+# Toolkit dependency auto-merge v1. Toolkit governance copies this file into governed repositories;
+# change the template in the Toolkit, not a copy.
+#
+# Turns on GitHub auto-merge, merge commit only, for Dependabot patch and minor updates. GitHub then
+# merges only after every required check passes. It does nothing unless the programme binding on the
+# base branch sets dependency_updates.auto_merge to "patch-minor" and an active ruleset on the base
+# branch requires at least one status check. Major updates, updates whose maintainers changed, and
+# GitHub Actions updates when the binding keeps them for the owner, get one comment and stay open.
+# It never checks out the pull request's code and uses only the built-in token.
+name: Dependency auto-merge
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: dependency-auto-merge-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  auto-merge:
+    name: Dependency auto-merge
+    if: github.event.pull_request.user.login == 'dependabot[bot]' && github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Read Dependabot metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
+
+      - name: Turn on auto-merge or flag for the owner
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          BASE: ${{ github.event.pull_request.base.ref }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          UPDATE_TYPE: ${{ steps.metadata.outputs.update-type }}
+          ECOSYSTEM: ${{ steps.metadata.outputs.package-ecosystem }}
+          MAINTAINER_CHANGES: ${{ steps.metadata.outputs.maintainer-changes }}
+        run: |
+          set -euo pipefail
+          marker='<!-- toolkit-dependency-auto-merge -->'
+          flag() {
+            already="$(gh pr view "$PR_URL" --json comments --jq "[.comments[].body | select(contains(\"$marker\"))] | length")"
+            if [ "$already" = "0" ]; then
+              gh pr comment "$PR_URL" --body "$marker
+          Needs the owner's review: $1. Auto-merge was not turned on."
+            fi
+            echo "Flagged for the owner: $1"
+          }
+          binding="$(gh api "repos/$REPOSITORY/contents/.github/toolkit-programme.json?ref=$BASE" --jq '.content' | base64 -d)" || binding='{}'
+          policy="$(printf '%s' "$binding" | jq -r '.dependency_updates.auto_merge // "off"' 2>/dev/null)" || policy=off
+          actions="$(printf '%s' "$binding" | jq -r '.dependency_updates.github_actions // "auto-merge"' 2>/dev/null)" || actions=owner
+          if [ "$policy" != "patch-minor" ]; then
+            echo "Auto-merge is off in the programme binding on $BASE; leaving this pull request for the owner."
+            exit 0
+          fi
+          required="$(gh api "repos/$REPOSITORY/rules/branches/$BASE" --jq '[.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[]] | length')" || required=0
+          if [ "${required:-0}" -lt 1 ]; then
+            echo "No active ruleset on $BASE requires a status check, so auto-merge could merge untested code; leaving this pull request for the owner."
+            exit 0
+          fi
+          if [ "$MAINTAINER_CHANGES" = "true" ]; then flag "the package's maintainers changed"; exit 0; fi
+          case "$ECOSYSTEM" in
+            github_actions|github-actions)
+              if [ "$actions" != "auto-merge" ]; then flag "GitHub Actions updates are kept for the owner"; exit 0; fi ;;
+          esac
+          case "$UPDATE_TYPE" in
+            version-update:semver-patch|version-update:semver-minor)
+              gh pr merge --auto --merge "$PR_URL"
+              echo "Auto-merge (merge commit) is on; GitHub merges once every required check passes." ;;
+            *)
+              flag "this is a ${UPDATE_TYPE:-unknown} update" ;;
+          esac

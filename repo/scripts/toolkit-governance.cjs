@@ -62,12 +62,13 @@ class GovernanceCliError extends Error {
 }
 
 class ToolkitGovernanceCli {
-  #stdout; #stderr; #ask; #interactive; #cwd; #registryOptions; #rulesetReader; #rulesetCreator; #protectionReader; #protectionWriter;
+  #stdout; #stderr; #ask; #interactive; #cwd; #registryOptions; #rulesetReader; #rulesetCreator; #protectionReader; #protectionWriter; #securityReader; #securityWriter; #securityFileWriter;
 
   // `ask(question)` resolves to the typed line; `interactive` says whether a person is at a
   // terminal. `registryOptions` ({ registryPath, testOnly: true }), `rulesetReader`,
-  // `rulesetCreator`, `protectionReader` and `protectionWriter` are only for tests.
-  constructor({ stdout = process.stdout, stderr = process.stderr, ask = terminalAsk, interactive = isInteractiveTerminal(), cwd = process.cwd(), registryOptions = {}, rulesetReader = null, rulesetCreator = null, protectionReader = null, protectionWriter = null } = {}) {
+  // `rulesetCreator`, `protectionReader`, `protectionWriter`, `securityReader`, `securityWriter` and
+  // `securityFileWriter` are only for tests.
+  constructor({ stdout = process.stdout, stderr = process.stderr, ask = terminalAsk, interactive = isInteractiveTerminal(), cwd = process.cwd(), registryOptions = {}, rulesetReader = null, rulesetCreator = null, protectionReader = null, protectionWriter = null, securityReader = null, securityWriter = null, securityFileWriter = null } = {}) {
     this.#stdout = stdout;
     this.#stderr = stderr;
     this.#ask = ask;
@@ -78,6 +79,9 @@ class ToolkitGovernanceCli {
     this.#rulesetCreator = rulesetCreator;
     this.#protectionReader = protectionReader;
     this.#protectionWriter = protectionWriter;
+    this.#securityReader = securityReader;
+    this.#securityWriter = securityWriter;
+    this.#securityFileWriter = securityFileWriter;
   }
 
   async main(argv) {
@@ -103,6 +107,7 @@ class ToolkitGovernanceCli {
           stdout: this.#stdout, ask: this.#ask, interactive: this.#interactive, registryOptions: this.#registryOptions,
           rulesetReader: this.#rulesetReader, rulesetCreator: this.#rulesetCreator,
           protectionReader: this.#protectionReader, protectionWriter: this.#protectionWriter,
+          securityReader: this.#securityReader, securityWriter: this.#securityWriter, securityFileWriter: this.#securityFileWriter,
         }).run(roots.length ? roots : [this.#cwd]);
       }
       if (command === 'status') return this.#status(json);
@@ -137,12 +142,14 @@ class ToolkitGovernanceCli {
     const options = { ...this.#registryOptions, offline };
     if (this.#rulesetReader) options.rulesetReader = this.#rulesetReader;
     if (this.#protectionReader) options.protectionReader = this.#protectionReader;
+    if (this.#securityReader) options.securityReader = this.#securityReader;
     const result = conformance.checkConformance(this.#cwd, options);
     const lines = [`Conformance: ${result.status}`];
     if (result.state) lines.push(`State: ${label(result.state)}`);
     for (const entry of result.findings) lines.push(`- ${entry.severity}: ${entry.message}`);
     if (result.no_force_push_ruleset) lines.push(`No-force-push ruleset: ${result.no_force_push_ruleset.status}`);
     if (result.default_branch_protection) lines.push(`Default-branch protection: ${result.default_branch_protection.status}`);
+    if (result.dependency_security) lines.push(`Dependency and security settings: ${result.dependency_security.status}`);
     lines.push('Prompt-hold enforcement:');
     for (const [host, status] of Object.entries(result.enforcement)) lines.push(`- ${host}: ${status.status} (${status.reason})`);
     this.#print(json, result, lines);

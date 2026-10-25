@@ -28,6 +28,15 @@
       "description": "Check names that count as required at the PR head, in addition to the checks GitHub marks required. With none of either, checks are never GREEN.",
       "items": { "type": "string", "minLength": 1 }
     },
+    "dependency_updates": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "How Dependabot updates are merged. Setting auto_merge to patch-minor is the owner's standing permission for this repository: Dependabot patch and minor updates merge (merge commit) once every required check passes, and only while the default branch requires at least one check. Major updates always wait for the owner.",
+      "properties": {
+        "auto_merge": { "enum": ["off", "patch-minor"], "description": "off (the default): every update waits for the owner. patch-minor: patch and minor updates merge on green." },
+        "github_actions": { "enum": ["auto-merge", "owner"], "description": "With auto_merge patch-minor: auto-merge (the default) treats GitHub Actions updates like the rest; owner keeps them for the owner." }
+      }
+    },
     "projection": {
       "type": "object",
       "additionalProperties": false,
