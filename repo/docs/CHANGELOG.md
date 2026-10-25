@@ -1,10 +1,16 @@
 # Toolkit Changelog
 
-## 3.11.1 (n8n helper review follow-ups)
+## 3.12.3 (n8n helper review follow-ups)
 
 - **One live rule everywhere:** the transport module's own postcondition check now uses the same fail-closed rule as the live helpers, so a published version or a missing state never passes as unpublished.
 - **Truthful messages:** preparing a new workflow says it gets no MCP exposure or error workflow, the prepared-import validator says preparation checked the setting against the target, and the helper README states the fail-closed rule and which machine check reads Docker.
 - **Killed runs:** every helper file name now starts with the process id of the run that wrote it. A run that is killed before its clean-up leaves its stored live workflow list behind until the next run starts, and that run deletes the helper files of any run that is no longer running. It touches only the helpers' own file names, and nothing when the list folder or `.tmp` is a link; the helpers also refuse to store the list through a linked folder.
+
+## 3.12.0 (server operations)
+
+### External operation preflight
+
+- **New skill `external-operation-preflight`:** it checks a live change on an outside system before the owner approves it. Its offline checker, `scripts/preflight-check.cjs`, reads one JSON operation plan and returns ALLOW, ALLOW_WITH_NOTICE or HOLD with typed reasons and a plan hash the approval covers. It holds when a name and the provider disagree about an environment, when a binding crosses environments or one store is writable from two, when a temporary resource lacks a cleanup owner or end date, when an action has no authority entry or contradictory ones, when a merge would auto-deploy without an approved deployment or a read-back trigger pause, when a fallback route changes target, privilege, credential or effect, and when a plan that touches production anywhere (including a store reached through an owner exception) has no rollback plan naming the operation's environment or no backup evidence at the retrievable level. Matching whole words in the name, any environment that is not plainly non-production (alpha, staging, dev, qa and similar) counts as production, so `main` or `prd` do too; names with the whole word test, testing, preview, restore or drill must be temporary. A missing or malformed field holds the plan rather than being read as no restriction. It never calls a provider or reads credentials. The skill also owns the backup and restore evidence contract: production only by default, seven local copies, and separate evidence for configured, uploaded, retrievable and restored. Plain owner-managed SSH stays the default; no SSH broker is built.
 
 ## 3.11.0
 

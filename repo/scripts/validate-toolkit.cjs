@@ -91,6 +91,7 @@ const executablePrefixes = [
   'repo/scripts/', 'repo/tests/', '.github/workflows/',
   'skills/frontend-art-direction/tools/design-system-generator/scripts/',
   'skills/frontend-art-direction/tools/design-system-generator/tests/',
+  'skills/external-operation-preflight/scripts/',
   'skills/n8n-workflow-transport/templates/helper-scripts/import-export-sync/',
   'skills/n8n-workflow-transport/templates/helper-scripts/sanitizer/',
   'skills/n8n-safety-router/scripts/', 'skills/github-program-reconciler/scripts/', 'skills/n8n-environment-setup/templates/.n8n-local/',

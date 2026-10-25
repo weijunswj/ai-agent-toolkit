@@ -567,6 +567,41 @@
         "node --test repo/tests/windows-local-dev-services.test.cjs repo/tests/skill-routing.test.cjs"
       ]
     },
+    "external-operation-preflight": {
+      "public_id": "external-operation-preflight",
+      "public_name": "External Operation Preflight",
+      "existing_skill_review": "Reviewed external-operation-preflight against self-hosted-service-safety, the Hostinger and Coolify maintainer, managed-app-foundation-review, secure-ci-cd and toolkit-env; none checks a live change's environment binding, resource identity, authority list or downstream effects with a runnable checker, and none owns provider-neutral backup and restore evidence levels.",
+      "native_capability_review": "Coding agents can call provider connectors, MCP servers, APIs and CLIs, but none refuses a cross-environment binding, a merge that silently deploys, or an unlisted action before the owner approves.",
+      "trigger": "Use before any live change on an outside system: creating, binding, renaming, migrating, promoting or deploying resources, merging into a branch that auto-deploys, pausing a trigger, or running a restore.",
+      "positive_routing_examples": [
+        "Before I merge this branch, check whether the merge will auto-deploy to production.",
+        "Check that the alpha app is not bound to the production database before we deploy it.",
+        "Plan a restore drill on temporary resources and say which evidence proves the backup is recoverable."
+      ],
+      "negative_routing_examples": [
+        "Refactor the date formatting helper and add unit tests.",
+        "Explain blue-green versus rolling deployments in general terms.",
+        "Start my local dev server on Windows and fix the port conflict."
+      ],
+      "overlap_boundary": "Use self-hosted-service-safety for exposure and hardening review, toolkit-env for the user's local coding-app keys, and n8n-safety-router first for n8n live work; external-operation-preflight owns the go or hold check before a live change and the backup evidence levels.",
+      "invocation_mode": "implicit",
+      "invocation_mode_reason": "Packaged metadata permits implicit discovery after the behavioural routing corpus proves positive, negative, and adversarial discrimination; discovery never grants mutation authority, and the checker is offline and read-only.",
+      "decision": "new_product",
+      "decision_reason": "Live changes on outside services need their own trigger and safety boundary (one environment per operation, provider read-back, coupled effects) and a runnable checker with its own tests, which would bloat any review-only skill.",
+      "unique_value": "One offline checker that returns ALLOW, ALLOW_WITH_NOTICE or HOLD with typed reasons and a plan hash the approval binds to, plus one provider-neutral backup and restore evidence contract that platform skills reuse.",
+      "runtime_footprint": "Instructions, a JSON plan example, a reference contract and one Node script with no packages, no network and no writes.",
+      "local_assets": "Canonical README, SKILL.md, host metadata, scripts/preflight-check.cjs, templates/operation-plan.example.json, references/backup-and-recovery.md and focused tests.",
+      "output_contract": "Report the checker's verdict, every typed reason or notice, the outcome for a merge, the required read-backs and the plan hash; never claim a live change happened.",
+      "anti_bloat_review": "One skill and one checker for every outside service; provider-specific steps stay in platform skills, and no SSH broker or provider adapter is built.",
+      "safety_boundary": "Planning and checking only. Never runs the change, calls a provider or reads credentials; never auto-renames, deletes or moves a live resource; every live change still needs the owner's approval naming the target and operation on an allowed plan.",
+      "canonical_ownership": "Direct-canonical maintenance: skills/external-operation-preflight/ owns the portable product, including its checker; its tests live under canonical repo/** paths.",
+      "source_provenance": "first_party",
+      "third_party_audit": "Not applicable first-party product; no third-party package, executable or credential is bundled.",
+      "validation": [
+        "node repo/scripts/validate-toolkit.cjs",
+        "node --test repo/tests/external-operation-preflight.test.cjs repo/tests/skill-routing.test.cjs"
+      ]
+    },
     "toolkit-env": {
       "public_id": "toolkit-env",
       "public_name": "Toolkit Env",

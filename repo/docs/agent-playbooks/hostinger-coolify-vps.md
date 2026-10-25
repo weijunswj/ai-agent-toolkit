@@ -6,6 +6,8 @@ Use this for Hostinger, Coolify, VPS, SSH, production deployment, reverse proxy,
 
 Use `codex-ssh-hostinger-coolify-setup-maintainer` when the user asks for Hostinger VPS plus Coolify deployment setup, SSH preflight, daily security checks, maintenance alerts, or incident-response guidance.
 
+Use `external-operation-preflight` before any live change on the server, the platform or an outside service it uses (deploys, merges into auto-deploying branches, new or renamed resources, restores, trigger pauses), and for the backup and restore evidence rules.
+
 Use `self-hosted-service-safety` for broader non-n8n self-hosted service exposure or first-run hardening review.
 
 ## Approval Gates

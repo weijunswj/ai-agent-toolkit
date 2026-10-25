@@ -5,6 +5,7 @@
   "skills": {
     "codex-ssh-hostinger-coolify-setup-maintainer": "portable",
     "controller-bootstrap": "portable",
+    "external-operation-preflight": "portable",
     "frontend-art-direction": "portable",
     "github-program-reconciler": "governed",
     "local-ai-safety": "portable",
