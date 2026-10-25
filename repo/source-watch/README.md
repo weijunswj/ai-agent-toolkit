@@ -14,13 +14,19 @@ Source-watch is review-notification-only. It may open or refresh a stable PR wit
 
 ## Host Harness Capability Drift Review
 
-Use this lane to check whether Codex, Claude Code, OpenCode, Antigravity 2, or another supported host gained native behavior that duplicates, supersedes, or conflicts with toolkit instructions, skills, hooks, repo-map guidance, or documentation-cleanup guidance.
+Use this lane to check whether a supported host (Codex or Claude Code) gained native behavior that duplicates, supersedes, or conflicts with toolkit instructions, skills, hooks, repo-map guidance, or documentation-cleanup guidance.
 
 Required evidence sources:
 
 - OpenAI Codex docs and changelog, including AGENTS.md, hooks, and rules.
+- OpenAI Codex skills, plugins and subagents docs.
 - Claude Code docs and changelog, including CLAUDE.md, rules, hooks, and scheduled/automation behavior.
+- Claude Code settings, permissions, plugins, subagents and skills docs.
 - Toolkit-owned `skills/**`, root instructions, hook/plugin metadata, repo-map guidance, and documentation-cleanup guidance.
+
+Antigravity receives a portable skills copy only, so the review covers it only where that copy depends on host behaviour. Add another host to the review once Toolkit qualifies it as supported.
+
+The reviewed-through cursors in `review-state.json` keep the tracker that was current when each review happened. That is history, not ownership: reports label it as the tracker at last review, and triage finds the current owner before acting.
 
 Allowed classifications are `Keep`, `Shrink`, `Move to hook`, `Move to host-native feature`, `Delete`, and `Needs benchmark/eval before decision`.
 

@@ -7,8 +7,23 @@ const ACTIONS = new Set([
   'none',
   'update-open',
   'create',
+  'close-open',
   'fail-ambiguous-open'
 ]);
+
+// The notification PR is opened with the workflow token, so GitHub records the Actions bot as its
+// author. The CLI reports bots as `app/<slug>`; the REST form is `<slug>[bot]`.
+const NOTIFIER_AUTHOR_LOGINS = new Set(['app/github-actions', 'github-actions[bot]']);
+
+function isNotifierAuthored(pr) {
+  return Boolean(
+    pr &&
+    pr.author &&
+    typeof pr.author === 'object' &&
+    pr.author.is_bot === true &&
+    NOTIFIER_AUTHOR_LOGINS.has(pr.author.login)
+  );
+}
 
 function requireExactString(value, name) {
   if (typeof value !== 'string' || value.length === 0 || value !== value.trim() || /[\r\n]/.test(value)) {
@@ -83,7 +98,7 @@ function assertPlan(plan) {
   for (const number of plan.conflictingPrNumbers) {
     requirePullRequestNumber(number, 'conflicting pull request number');
   }
-  const expectsNumber = plan.action === 'update-open';
+  const expectsNumber = plan.action === 'update-open' || plan.action === 'close-open';
   if (hasNumber !== expectsNumber) {
     throw new Error(`${plan.action} has an invalid pull request number`);
   }
@@ -112,10 +127,6 @@ function planLifecycle(input) {
   if (typeof input.actionable !== 'boolean') {
     throw new Error('actionable must be a boolean');
   }
-  if (!input.actionable) {
-    return assertPlan({ action: 'none', prNumber: null, conflictingPrNumbers: [] });
-  }
-
   const { pullRequests } = exactPullRequests(input);
   const open = pullRequests.filter((pr) => pr.state === 'OPEN');
   if (open.length > 1) {
@@ -124,6 +135,18 @@ function planLifecycle(input) {
       prNumber: null,
       conflictingPrNumbers: sortedNumbers(open)
     });
+  }
+  if (!input.actionable) {
+    // Nothing is left to review. Close only the one exact notification PR the bot opened; a PR
+    // opened by anyone else is left alone. The branch is never deleted.
+    if (open.length === 1 && isNotifierAuthored(open[0])) {
+      return assertPlan({
+        action: 'close-open',
+        prNumber: requirePullRequestNumber(open[0].number),
+        conflictingPrNumbers: []
+      });
+    }
+    return assertPlan({ action: 'none', prNumber: null, conflictingPrNumbers: [] });
   }
   if (open.length === 1) {
     return assertPlan({
@@ -216,7 +239,9 @@ function runCli(argv) {
   }
 
   if (mode === 'verify-plan') {
-    input.actionable = true;
+    if (args.actionable !== 'true' && args.actionable !== 'false') {
+      throw new Error('--actionable must be true or false');
+    }
     const action = requireExactString(args['expected-action'], 'expected-action');
     const number = args['expected-number'] === undefined ? null : Number(args['expected-number']);
     const expectedPlan = assertPlan({
@@ -243,6 +268,7 @@ if (require.main === module) {
 
 module.exports = {
   exactPullRequests,
+  isNotifierAuthored,
   planLifecycle,
   requireFreshPlan
 };

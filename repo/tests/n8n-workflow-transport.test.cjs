@@ -3449,13 +3449,27 @@ $tokens = $null
 $errors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile(${psSingleQuoted(path.join(sourceScriptDir, 'export-n8n-workflows-live.ps1'))}, [ref]$tokens, [ref]$errors)
 if ($errors.Count -gt 0) { throw $errors[0].Message }
-$names = @("ConvertTo-NativeArgument", "Invoke-CapturedCommand", "Write-Utf8NoBomText", "Invoke-CliWorkflowJson", "Get-LiveWorkflowListDir", "Read-LiveWorkflowList", "Write-LiveWorkflowJsonFile", "Get-N8nCliLogArguments", "Remove-LiveWorkflowList")
+$names = @("ConvertTo-NativeArgument", "Invoke-CapturedCommand", "Write-Utf8NoBomText", "Invoke-CliWorkflowJson", "Get-LiveWorkflowListDir", "Read-LiveWorkflowList", "Write-LiveWorkflowJsonFile", "Get-N8nCliLogArguments", "Remove-LiveWorkflowList", "Clear-StaleLiveWorkflowList", "Get-SafeLiveWorkflowListDir", "New-LiveWorkflowListToken", "Test-PathItemIsUnsafeLink")
 foreach ($function in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $names -contains $node.Name }, $true)) {
   Invoke-Expression $function.Extent.Text
 }
 $RepoRoot = ${psSingleQuoted(root)}
 $HelperScriptDir = ${psSingleQuoted(sourceScriptDir)}
 $Container = "test-container"
+$staleDir = Get-LiveWorkflowListDir
+$hex = "0123456789abcdef0123456789abcdef"
+$killed = Join-Path $staleDir "999999999-$hex.workflows.json"
+$killedRaw = Join-Path $staleDir "999999999-$hex.n8n-output.txt"
+$legacy = Join-Path $staleDir "$hex.workflows.json"
+$running = Join-Path $staleDir "$PID-$hex.workflows.json"
+$reused = Join-Path $staleDir "$PID-fedcba9876543210fedcba9876543210.workflows.json"
+$otherDigits = Join-Path $staleDir ((-join ([char]0x0661, [char]0x0662, [char]0x0663)) + "-$hex.workflows.json")
+$other = Join-Path $staleDir "notes.txt"
+foreach ($file in @($killed, $killedRaw, $legacy, $running, $reused, $otherDigits, $other)) { Set-Content -LiteralPath $file -Value "[]" }
+(Get-Item -LiteralPath $reused).LastWriteTime = (Get-Date).AddDays(-30)
+Clear-StaleLiveWorkflowList
+Write-Output ("KILLED=" + (Test-Path -LiteralPath $killed) + "," + (Test-Path -LiteralPath $killedRaw) + " LEGACY=" + (Test-Path -LiteralPath $legacy) + " RUNNING=" + (Test-Path -LiteralPath $running) + " REUSED=" + (Test-Path -LiteralPath $reused) + " OTHERDIGITS=" + (Test-Path -LiteralPath $otherDigits) + " OTHER=" + (Test-Path -LiteralPath $other))
+Remove-Item -LiteralPath $running, $otherDigits, $other
 $lines = @((Get-Content -LiteralPath (Join-Path $RepoRoot "noisy.txt")) | Where-Object { $_ -ne "" })
 $live = Read-LiveWorkflowList ([PSCustomObject]@{ StdOut = $lines })
 Write-Output ("COUNT=" + $live.Count)
@@ -3473,8 +3487,53 @@ Write-Output ("LEFT=" + (Test-Path -LiteralPath (Join-Path $RepoRoot ".tmp/n8n-l
   assert.match(result.stdout, /PUBLISHED=Wf2xPublished01/);
   assert.match(result.stdout, /LOGARGS=-e N8N_LOG_LEVEL=info -e N8N_LOG_OUTPUT=console -e N8N_LOG_FORMAT=text -e NO_COLOR=1/);
   assert.deepEqual(JSON.parse(fs.readFileSync(outPath, 'utf8')), n8n2xWorkflows()[0]);
+  assert.match(result.stdout, /KILLED=False,False LEGACY=False RUNNING=True REUSED=False OTHERDIGITS=True OTHER=True/, 'a killed run\'s files go at once, even when its process id now belongs to a later process; a running run\'s files and other files stay');
   assert.match(result.stdout, /STORED=1/);
   assert.match(result.stdout, /LEFT=False/, 'the stored live workflow list is removed when the run ends');
+});
+
+for (const linked of ['list folder', '.tmp']) test(`live workflow list clean-up never deletes or writes through a linked ${linked}`, { skip: findPowerShell() ? false : 'PowerShell not available' }, () => {
+  const shell = findPowerShell();
+  const root = tempDir();
+  const outside = tempDir();
+  const killedName = '999999999-0123456789abcdef0123456789abcdef.workflows.json';
+  // The planted file is two hours old, so neither an age rule nor a process check would keep it.
+  const killedDir = linked === '.tmp' ? path.join(outside, 'n8n-live-workflow-list') : outside;
+  fs.mkdirSync(killedDir, { recursive: true });
+  const killedPath = path.join(killedDir, killedName);
+  fs.writeFileSync(killedPath, '[]');
+  const old = Date.now() / 1000 - 7200;
+  fs.utimesSync(killedPath, old, old);
+  if (linked === '.tmp') {
+    fs.symlinkSync(outside, path.join(root, '.tmp'), 'junction');
+  } else {
+    fs.mkdirSync(path.join(root, '.tmp'), { recursive: true });
+    fs.symlinkSync(outside, path.join(root, '.tmp', 'n8n-live-workflow-list'), 'junction');
+  }
+  const harnessPath = path.join(root, 'link-harness.ps1');
+  fs.writeFileSync(harnessPath, `
+$ErrorActionPreference = "Stop"
+$tokens = $null
+$errors = $null
+foreach ($script in @(${psSingleQuoted(path.join(sourceScriptDir, 'export-n8n-workflows-live.ps1'))}, ${psSingleQuoted(path.join(sourceScriptDir, 'import-n8n-workflows-live.ps1'))})) {
+  $ast = [System.Management.Automation.Language.Parser]::ParseFile($script, [ref]$tokens, [ref]$errors)
+  if ($errors.Count -gt 0) { throw $errors[0].Message }
+  $names = @("Get-LiveWorkflowListDir", "Remove-LiveWorkflowList", "Clear-StaleLiveWorkflowList", "Get-SafeLiveWorkflowListDir", "Test-PathItemIsUnsafeLink")
+  foreach ($function in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $names -contains $node.Name }, $true)) {
+    Invoke-Expression $function.Extent.Text
+  }
+  $RepoRoot = ${psSingleQuoted(root)}
+  Clear-StaleLiveWorkflowList
+  Remove-LiveWorkflowList
+  $refused = $false
+  try { Get-LiveWorkflowListDir | Out-Null } catch { $refused = $_.Exception.Message -match "through a link" }
+  Write-Output ("KEPT=" + (Test-Path -LiteralPath ${psSingleQuoted(killedPath)}) + " REFUSED=" + $refused)
+}
+`, 'utf8');
+
+  const result = spawnSync(shell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', harnessPath], { cwd: root, encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  assert.equal((result.stdout.match(/KEPT=True REFUSED=True/g) || []).length, 2, result.stdout);
 });
 
 test('live import and export helpers keep workflow JSON out of PowerShell and pin n8n log settings', () => {
@@ -3486,7 +3545,7 @@ test('live import and export helpers keep workflow JSON out of PowerShell and pi
     assert.match(text, /@\("exec"\) \+ \(Get-N8nCliLogArguments\)/, name);
     assert.match(text, /\nAssert-HelperSetReady\r?\n/, name);
     assert.match(text, /No workflows with published versions found/, name);
-    assert.match(text, /\ntry \{\r?\nAssert-HelperSetReady\r?\n/, name);
+    assert.match(text, /\ntry \{\r?\nClear-StaleLiveWorkflowList\r?\nAssert-HelperSetReady\r?\n/, name);
     assert.match(text, /\n\} finally \{\r?\n  Remove-LiveWorkflowList\r?\n\}\r?\n$/, name);
   }
   const importText = readText(path.join(sourceScriptDir, 'import-n8n-workflows-live.ps1'));
@@ -3592,11 +3651,12 @@ test('legacy prepared imports keep the target\'s own instance-only settings too'
   let result = runNode(prepareScript, [repoFile, path.join(cwd, 'missing-bindings.json'), outFile, liveFile], { cwd });
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(JSON.parse(fs.readFileSync(outFile, 'utf8')).settings, { executionOrder: 'v1', availableInMCP: false });
-  assert.match(result.stdout, /kept the target's own availableInMCP; left out Git's errorWorkflow/);
+  assert.match(result.stdout, /kept the target's own availableInMCP; left out Git's errorWorkflow\. MCP exposure and the error workflow end up exactly as the target has them\./);
 
   result = runNode(prepareScript, [repoFile, path.join(cwd, 'missing-bindings.json'), outFile], { cwd });
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(JSON.parse(fs.readFileSync(outFile, 'utf8')).settings, { executionOrder: 'v1' });
+  assert.match(result.stdout, /left out Git's errorWorkflow, availableInMCP\. The new workflow gets no MCP exposure or error workflow\./);
 });
 
 test('validator reports risky nodes offline, flags instance-only settings and refuses published workflow files', () => {
@@ -3628,7 +3688,7 @@ test('validator reports risky nodes offline, flags instance-only settings and re
   writeJson(path.join(preparedDir, 'safe.live-import.json'), { ...portableWorkflow.canonicalWorkflowForGit(safeWorkflow()), settings: { availableInMCP: true } });
   result = runNode(validateScript, ['--mode', 'prepared-import', preparedDir], { cwd });
   assert.equal(result.status, 0, result.stderr + result.stdout);
-  assert.match(result.stdout, /keeps the target's own settings\.availableInMCP/);
+  assert.match(result.stdout, /carries settings\.availableInMCP; preparation checked it against the target/);
 });
 
 test('risky node report names each category the safety rules require', () => {

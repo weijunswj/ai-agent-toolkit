@@ -52,6 +52,7 @@ Each skill is a folder under [skills/](skills/). Copy the whole folder, not just
 | [Release Readiness Audit](skills/release-readiness-audit/) | Run a guarded release-readiness audit and fix batches. |
 | [Codex SSH Hostinger Coolify Setup Maintainer](skills/codex-ssh-hostinger-coolify-setup-maintainer/) | Set up and maintain a Hostinger VPS with Coolify, with owner approval gates. |
 | [External Operation Preflight](skills/external-operation-preflight/) | Check a live change on an outside service (deploys, auto-deploying merges, new resources, restores) before approval, and prove backups by evidence level. |
+| [Host Observability](skills/host-observability/) | Watch one Linux server: hourly health pulse, off-host heartbeat and alerts where you choose. |
 | [Self-Hosted Service Safety](skills/self-hosted-service-safety/) | Review Docker, VPS, tunnel and public-port safety for self-hosted services. |
 | [Frontend Art Direction](skills/frontend-art-direction/) | Give a frontend a deliberate visual direction, or review one against an approved design. |
 | [Windows Local Dev Services](skills/windows-local-dev-services/) | Start, check and troubleshoot local dev servers on Windows. |
@@ -73,7 +74,7 @@ Maintainers start with [AGENTS.md](AGENTS.md). There is no repo-wide MCP server;
 
 ## Appendix: Source-of-Truth Contract
 
-<!-- AI-AGENT-TOOLKIT:repo/contracts/source-of-truth-contract.md:BEGIN SOURCE-OF-TRUTH-CONTRACT v2 toolkit=3.12.2 sha256=24ee07475127 -->
+<!-- AI-AGENT-TOOLKIT:repo/contracts/source-of-truth-contract.md:BEGIN SOURCE-OF-TRUTH-CONTRACT v2 toolkit=3.13.3 sha256=24ee07475127 -->
 ## Source-of-Truth Contract
 
 - `skills/**` is the canonical copyable product surface; each skill folder is the install unit and is edited directly. `skills/controller-bootstrap/` is an explicit-only re-entry procedure for an assigned Toolkit controller; it depends on the live `repo/CONTROLLER.md` and `repo/contracts/controller-kernel/stack-registry-v3.json` and is not a policy copy, role assignment or permission.

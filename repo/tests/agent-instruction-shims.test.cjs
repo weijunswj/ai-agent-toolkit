@@ -188,7 +188,7 @@ test('the controller removes a merged lane worktree and branch without --force o
   // Lane worktrees and branches once outlived their merge; git worktree remove deletes ignored files
   // (kept evidence, .env) without --force, and git branch -d deletes a pushed unmerged branch.
   const controller = readText('repo/CONTROLLER.md');
-  assert.match(controller, /after a lane's PR merges, remove its worktree with `git worktree remove`, then `git worktree prune`, and its branch with `git branch -d` once `git merge-base --is-ancestor` finds it in the default branch, never `--force` or `-D`; keep and report a worktree that is dirty, locked, unmerged or holds ignored files \(check `git status --ignored` first: `git worktree remove` deletes them\), and a closed-unmerged PR's branch;/);
+  assert.match(controller, /after a lane's PR merges, remove its worktree \(`git worktree remove`, then `git worktree prune`\) and its branch \(`git branch -d` once `git merge-base --is-ancestor` shows it merged\), never `--force` or `-D`; keep and report a dirty, locked or unmerged worktree, one with ignored files \(`git status --ignored`: removal deletes them\) and a closed-unmerged PR's branch;/);
 });
 
 test('gate rules hold the gate mechanics every gate session reads on demand', () => {
@@ -233,7 +233,7 @@ test('governed rules hold only the GitHub governance parts: release lanes, recor
     /read https:\/\/github\.com\/weijunswj\/ai-agent-toolkit\/blob\/main\/repo\/contracts\/agent-rules\/global-rules\.md before planning/,
     /load the `n8n-safety-router` skill before any n8n work/,
     /Keep one open release PR per lane/,
-    /order work Core, then Hardening, then Later/,
+    /order work Now, then Next, then Later/,
     /Decision traces:[^\n]*Record each owner decision that changes scope, authority or the plan as one tagged comment[^\n]*other comments need no index entry[^\n]*`SUPERSEDES=<record ID>`/,
     /7-character short SHA[^\n]*Write the full 40-character SHA only in review verdicts, UAT results and merge summaries/,
     /Issues: to add a task, search the parent's sub-issues and open or recently closed issues; extend or reopen an owner, else create a child and attach it as a native sub-issue/,

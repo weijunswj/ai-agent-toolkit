@@ -657,14 +657,42 @@ function Invoke-CliWorkflowJson([string[]]$Arguments, $FailureMessage) {
 }
 
 function Get-LiveWorkflowListDir {
-  $listDir = Join-Path (Join-Path $RepoRoot ".tmp") "n8n-live-workflow-list"
+  $tmpDir = Join-Path $RepoRoot ".tmp"
+  $listDir = Join-Path $tmpDir "n8n-live-workflow-list"
+  foreach ($path in @($tmpDir, $listDir)) {
+    if ((Test-Path -LiteralPath $path) -and (Test-PathItemIsUnsafeLink (Get-Item -LiteralPath $path -Force))) {
+      throw "Refusing to store the live workflow list through a link: $path. Remove the link and rerun."
+    }
+  }
   New-Item -ItemType Directory -Force -Path $listDir | Out-Null
   return $listDir
 }
 
+function Get-SafeLiveWorkflowListDir {
+  # Returns the list folder only when it exists and neither it nor .tmp is a link, so clean-up never
+  # deletes anything outside the repository's own folder.
+  $tmpDir = Join-Path $RepoRoot ".tmp"
+  $listDir = Join-Path $tmpDir "n8n-live-workflow-list"
+  if (-not (Test-Path -LiteralPath $listDir -PathType Container)) {
+    return $null
+  }
+  foreach ($path in @($tmpDir, $listDir)) {
+    if (Test-PathItemIsUnsafeLink (Get-Item -LiteralPath $path -Force)) {
+      return $null
+    }
+  }
+  return $listDir
+}
+
+function New-LiveWorkflowListToken {
+  # Each helper file name starts with this run's process id, so a later run can tell which files a
+  # killed run left behind.
+  return ("{0}-{1}" -f $PID, [guid]::NewGuid().ToString("N"))
+}
+
 function Read-LiveWorkflowList($CommandResult) {
   $listDir = Get-LiveWorkflowListDir
-  $token = [guid]::NewGuid().ToString("N")
+  $token = New-LiveWorkflowListToken
   $rawPath = Join-Path $listDir "$token.n8n-output.txt"
   $storePath = Join-Path $listDir "$token.workflows.json"
   $summaryPath = Join-Path $listDir "$token.summary.json"
@@ -687,14 +715,43 @@ function Read-LiveWorkflowList($CommandResult) {
 }
 
 function Remove-LiveWorkflowList {
-  # The stored list holds every live workflow, so it never outlives the run that read it.
+  # The stored list holds every live workflow, so this run removes it when it finishes or fails.
   if (-not [string]::IsNullOrWhiteSpace($script:LiveWorkflowStorePath)) {
     Remove-Item -LiteralPath $script:LiveWorkflowStorePath -Force -ErrorAction SilentlyContinue
     $script:LiveWorkflowStorePath = $null
   }
-  $listDir = Join-Path (Join-Path $RepoRoot ".tmp") "n8n-live-workflow-list"
-  if ((Test-Path -LiteralPath $listDir -PathType Container) -and -not (Get-ChildItem -LiteralPath $listDir -Force | Select-Object -First 1)) {
+  $listDir = Get-SafeLiveWorkflowListDir
+  if ($null -ne $listDir -and -not (Get-ChildItem -LiteralPath $listDir -Force | Select-Object -First 1)) {
     Remove-Item -LiteralPath $listDir -Force -ErrorAction SilentlyContinue
+  }
+}
+
+function Clear-StaleLiveWorkflowList {
+  # A killed run (window closed, task killed, power loss) never reaches its finally block. The next run
+  # removes a helper file unless a process with its id is running and started before the file was
+  # written, so a reused process id does not keep a killed run's list. Older files with no process id
+  # go too. It touches only the helpers' own file names, and nothing when the folder or .tmp is a link.
+  $listDir = Get-SafeLiveWorkflowListDir
+  if ($null -eq $listDir) {
+    return
+  }
+  $helperFile = '^(?:([0-9]{1,9})-)?[0-9a-f]{32}\.(?:workflows\.json|n8n-output\.txt|summary\.json|file-summary\.json)$'
+  foreach ($file in @(Get-ChildItem -LiteralPath $listDir -File -Force)) {
+    if ($file.Name -notmatch $helperFile) {
+      continue
+    }
+    if ($Matches[1]) {
+      $owner = Get-Process -Id ([int]$Matches[1]) -ErrorAction SilentlyContinue
+      if ($null -ne $owner) {
+        # A start time that cannot be read keeps the file, as the owner may still be using it.
+        $started = $null
+        try { $started = $owner.StartTime.ToUniversalTime() } catch { }
+        if ($null -eq $started -or $started -le $file.LastWriteTimeUtc) {
+          continue
+        }
+      }
+    }
+    Remove-Item -LiteralPath $file.FullName -Force -ErrorAction SilentlyContinue
   }
 }
 
@@ -703,7 +760,7 @@ function Write-LiveWorkflowJsonFile($Workflow, $Path) {
 }
 
 function Read-WorkflowFileSummary($Path) {
-  $summaryPath = Join-Path (Get-LiveWorkflowListDir) ("{0}.file-summary.json" -f [guid]::NewGuid().ToString("N"))
+  $summaryPath = Join-Path (Get-LiveWorkflowListDir) ("{0}.file-summary.json" -f (New-LiveWorkflowListToken))
   try {
     Invoke-CliWorkflowJson @("file-summary", "--input", $Path, "--summary", $summaryPath) "Workflow file $Path could not be read as one workflow JSON object."
     return (Get-Content -LiteralPath $summaryPath -Raw | ConvertFrom-Json)
@@ -1713,8 +1770,10 @@ if ($RestartContainerAfterImport) {
   throw "N8N_POLICY_VALIDATION_FAILED: -RestartContainerAfterImport is no longer supported. This helper never restarts n8n."
 }
 
-# Every exit path, including errors, removes the stored live workflow list in the finally block below.
+# A run that finishes or fails, including on an error, removes its stored live workflow list in the
+# finally block below; a killed run's leftovers are removed by the next run's first step.
 try {
+Clear-StaleLiveWorkflowList
 Assert-HelperSetReady
 
 if (-not $DryRun) {
