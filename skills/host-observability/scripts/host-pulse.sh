@@ -115,6 +115,13 @@ collect_disk() {
   local path line pct ipct key prev level evidence
   for path in ${DISK_PATHS:-/}; do
     case "$path" in /*) ;; *) add_row OBSERVABILITY_DEGRADED "Disk $path" 'Rejected: use absolute paths only'; continue ;; esac
+    # The service sandbox (ProtectHome=yes) hides these folders, so df there would read an empty
+    # stand-in and report a false NORMAL. Say so instead, the same way in a dry run.
+    case "$path" in
+      /home|/home/*|/root|/root/*|/run/user|/run/user/*)
+        add_row OBSERVABILITY_DEGRADED "Disk $path" 'Not checked: the pulse sandbox hides /home, /root and /run/user; remove this path from DISK_PATHS'
+        continue ;;
+    esac
     if line="$(df -P "$path" 2>/dev/null | awk 'NR == 2 { gsub(/%/, "", $5); print $5 }')" && is_uint "$line"; then
       pct="$line"
       key="disk_pct_$(printf '%s' "$path" | tr -c 'A-Za-z0-9' '_')"
@@ -253,16 +260,24 @@ collect_systemd() {
   else add_service OK 'systemd units' 'No failed units'; fi
 }
 
+# Docker access comes from who the pulse really runs as, never from a setting: root, or a member of
+# the docker group (the installer adds that only with --with-docker, because it equals root).
+has_docker_access() {
+  [ "$(id -u 2>/dev/null)" = 0 ] && return 0
+  case " $(id -nG 2>/dev/null) " in *' docker '*) return 0 ;; esac
+  return 1
+}
+
 collect_docker() {
   local listing bad restarts prev delta ids
-  if [ "${DOCKER_ACCESS:-}" = no ]; then
-    add_service N/A 'Docker containers' 'Not checked: Docker access is off (owner choice; it equals root on this host)'
-    add_row NORMAL 'Container restarts' 'Not checked: Docker access is off (owner choice)'
-    return
-  fi
   if ! have docker; then
     add_service N/A 'Docker containers' 'Not applicable: Docker is not installed'
     add_row NORMAL 'Container restarts' 'Not applicable: Docker is not installed'
+    return
+  fi
+  if ! has_docker_access; then
+    add_service N/A 'Docker containers' 'Not checked: Docker access is off (not root and not in the docker group; --with-docker turns it on and equals root on this host)'
+    add_row NORMAL 'Container restarts' 'Not checked: Docker access is off (owner choice)'
     return
   fi
   if ! listing="$(docker ps -a --format '{{.Names}}|{{.State}}|{{.Status}}' 2>/dev/null)"; then
@@ -414,6 +429,13 @@ alert_body() {
 }
 
 prepare_dirs() {
+  # A run by hand as root in the service user's folder would leave root-owned files there that the
+  # service can no longer open.
+  if [ -e "$HOST_PULSE_ROOT" ] && [ ! -O "$HOST_PULSE_ROOT" ]; then
+    printf '%s belongs to another user, and this run would leave files there that its service cannot open.\n' "$HOST_PULSE_ROOT" >&2
+    printf 'Run it through systemd (systemctl start host-pulse.service or a test unit); by hand, use only --dry-run or --status.\n' >&2
+    exit 1
+  fi
   mkdir -p "$REPORT_DIR" "$STATE_DIR" || { printf 'Cannot create %s\n' "$HOST_PULSE_ROOT" >&2; exit 1; }
   chmod 700 "$HOST_PULSE_ROOT" "$REPORT_DIR" "$STATE_DIR" 2>/dev/null || true
   PRIVATE_TMP_DIR="$STATE_DIR"

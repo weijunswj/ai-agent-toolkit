@@ -17,7 +17,7 @@ Never ask the owner to paste a token, chat ID, webhook URL or heartbeat URL into
 | Webhook to Discord | `ALERT_WEBHOOK_FORMAT=discord` | personal or small-team servers | messages are cut to fit Discord's size limit |
 | ntfy push (hosted or self-hosted) | `ALERT_WEBHOOK_FORMAT=ntfy`, the topic URL | phone push without a chat app | a public topic name is readable by anyone who guesses it; use a long random topic or access control |
 | Telegram bot | `ALERT_CHANNELS=telegram`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | owners who already use Telegram | the bot token is a secret |
-| Email | `ALERT_CHANNELS=email`, `ALERT_EMAIL_TO` | inbox-based owners | needs `mail` or `sendmail` on the host; the pulse's sandbox has no write access to a local mail queue, so use a mailer that relays straight out (for example msmtp); many VPS providers block outbound mail |
+| Email | `ALERT_CHANNELS=email`, `ALERT_EMAIL_TO` | inbox-based owners | needs `mail` or `sendmail` on the host; the pulse's sandbox has no write access to a local mail queue, so use a mailer that relays straight out (for example msmtp). The mailer config holds the SMTP password and must be readable by `host-pulse` and nobody else, for example owner root, group `host-pulse`, mode 640; never make it world-readable. Many VPS providers block outbound mail |
 | Any other webhook | `ALERT_WEBHOOK_FORMAT=json` (or `text`) | your own automation or incident tool | it receives `source`, `host`, `subject` and `text` fields |
 
 ## Off-Host Heartbeat

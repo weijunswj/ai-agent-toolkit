@@ -21,7 +21,8 @@ Services (failed systemd units, unhealthy or restarting containers, containers t
 - **Out-of-memory kills:** new kills since the last pulse, from the kernel counter, compared within one boot.
 - **Uptime and reboots:** a reboot since the last pulse is a notice and sends an alert.
 - **Pulse continuity:** a gap of more than `PULSE_STALE_MINUTES` whole minutes (default 60, for the hourly timer) means the host or timer was down. `--status` uses the same limit.
-- **systemd and Docker:** reported as not applicable, with the reason, when missing, and every other row is still classified; a command that fails is a degraded row. Containers listed in `DOCKER_EXITED_OK_CONTAINERS` may stay exited. When Docker checks are off (installed without `--with-docker`), the Docker rows read "Not checked" and are not degraded: that is the owner's choice. The pulse leaves its own test units out of the failed-unit list.
+- **systemd and Docker:** reported as not applicable, with the reason, when missing, and every other row is still classified; a command that fails is a degraded row. Containers listed in `DOCKER_EXITED_OK_CONTAINERS` may stay exited. Docker checks follow who the pulse really runs as: root or a member of the docker group (installed with `--with-docker`). Otherwise the Docker rows read "Not checked" and are not degraded: that is the owner's choice. No env setting can change this. The pulse leaves its own test units out of the failed-unit list.
+- **Disks under `/home`, `/root` or `/run/user`:** the service sandbox hides them, so they are degraded "Not checked" rows, never a false `NORMAL`; leave them out of `DISK_PATHS`.
 - **Health URLs:** plain URLs only; a URL with credentials or token-like values is skipped and reported. Without `curl` they are reported as not checked, never as failing.
 
 Thresholds are per-host settings in the env file. Defaults suit a small single-purpose VPS; tune them to the host and record why.

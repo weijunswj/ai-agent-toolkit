@@ -59,7 +59,7 @@ function makeHost(t, options = {}) {
   const o = {
     memTotalKb: 4000000, memAvailKb: 3000000, swapTotalKb: 1000000, swapFreeKb: 1000000, load15: '0.40', cpus: 2,
     oom: 0, uptime: 7200, bootId: 'boot-a', diskPct: 40, inodePct: 10, docker: 'ok', dockerPs: 'web|running|Up 2 hours (healthy)',
-    restarts: 0, systemd: true, failedUnits: '', ...options
+    restarts: 0, systemd: true, failedUnits: '', uid: 0, groups: 'root', ...options
   };
   fs.writeFileSync(path.join(proc, 'meminfo'), `MemTotal: ${o.memTotalKb} kB\nMemFree: 100 kB\nMemAvailable: ${o.memAvailKb} kB\nSwapTotal: ${o.swapTotalKb} kB\nSwapFree: ${o.swapFreeKb} kB\n`);
   fs.writeFileSync(path.join(proc, 'loadavg'), `0.10 0.20 ${o.load15} 1/100 12345\n`);
@@ -70,6 +70,8 @@ function makeHost(t, options = {}) {
   linkRealTools(tools, o.noCurl ? ['curl'] : []);
   writeExec(path.join(stub, 'df'), `case " $* " in *" -Pi "*) printf 'Filesystem Inodes IUsed IFree IUse%% Mounted\\nfake 100 10 90 ${o.inodePct}%% /\\n' ;; *) printf 'Filesystem 1024-blocks Used Available Capacity Mounted\\nfake 100 40 60 ${o.diskPct}%% /\\n' ;; esac`);
   writeExec(path.join(stub, 'nproc'), `echo ${o.cpus}`);
+  // Who the pulse runs as: root by default, or the service user with or without the docker group.
+  writeExec(path.join(stub, 'id'), `case "$1" in -u) echo ${o.uid} ;; -nG) echo '${o.groups}' ;; *) exit 1 ;; esac`);
   if (o.docker !== 'absent') {
     fs.writeFileSync(path.join(dir, 'docker-ps.txt'), `${o.dockerPs}\n`);
     writeExec(path.join(stub, 'docker'), [
@@ -212,9 +214,17 @@ const stateMatrix = [
     report: [/Docker containers \| N\/A \| Not applicable: Docker is not installed/, /Container restarts \| NORMAL \| Not applicable/, /systemd units \| OK/] },
   { name: 'systemd absent, memory over the review threshold', host: { systemd: false, memAvailKb: 800000 }, expect: 'REVIEW_CAPACITY',
     report: [/systemd units \| N\/A \| Not applicable: systemd is not running/, /Docker containers \| OK/] },
-  { name: 'Docker access turned off by the owner, disk over the upgrade threshold', env: { DOCKER_ACCESS: 'no' }, expect: 'UPGRADE_OR_REBALANCE_REQUIRED',
-    report: [/Docker containers \| N\/A \| Not checked: Docker access is off \(owner choice; it equals root on this host\)/, /Container restarts \| NORMAL \| Not checked/],
-    host: { diskPct: 90, docker: 'fail' } },
+  { name: 'Docker access off (service user outside the docker group), disk over the upgrade threshold', expect: 'UPGRADE_OR_REBALANCE_REQUIRED',
+    report: [/Docker containers \| N\/A \| Not checked: Docker access is off \(not root and not in the docker group; --with-docker turns it on and equals root on this host\)/,
+      /Container restarts \| NORMAL \| Not checked/],
+    host: { diskPct: 90, docker: 'fail', uid: 997, groups: 'host-pulse' } },
+  { name: 'Docker access on (service user in the docker group): Docker is really checked', host: { docker: 'fail', uid: 997, groups: 'host-pulse docker' },
+    expect: 'OBSERVABILITY_DEGRADED', report: [/Docker containers \| OBSERVABILITY_DEGRADED \| docker ps failed/] },
+  { name: 'an env setting cannot switch Docker checks off', env: { DOCKER_ACCESS: 'no' }, host: { docker: 'fail' }, expect: 'OBSERVABILITY_DEGRADED',
+    report: [/Docker containers \| OBSERVABILITY_DEGRADED \| docker ps failed/] },
+  { name: 'a disk path the sandbox hides is not checked, never a false NORMAL', env: { DISK_PATHS: '/ /home/data' }, expect: 'OBSERVABILITY_DEGRADED',
+    report: [/Disk \/home\/data \| OBSERVABILITY_DEGRADED \| Not checked: the pulse sandbox hides \/home, \/root and \/run\/user; remove this path from DISK_PATHS/,
+      /Disk \/ \| NORMAL/] },
   { name: 'the pulse leaves out its own failed test units', host: { failedUnits: 'host-pulse-test-alert.service loaded failed failed Test\n' }, expect: 'NORMAL',
     report: [/systemd units \| OK \| No failed units/, /^Services: OK$/m] },
   { name: 'kernel without an oom counter, swap over the upgrade threshold', host: { oom: null, swapFreeKb: 400000 }, expect: 'UPGRADE_OR_REBALANCE_REQUIRED',
@@ -303,6 +313,21 @@ test('the pulse refuses a state folder that is not its own', { skip }, async (t)
       assert.match(result.stderr, /HOST_PULSE_ROOT must be an absolute path ending in \/host-observability/);
     }
   }
+});
+
+test('a run by hand in a state folder owned by another user is refused before it writes anything', { skip }, async (t) => {
+  const host = makeHost(t);
+  // As root, hand the folder to another user; otherwise point it at a folder this user does not own.
+  if (process.getuid() === 0) { fs.mkdirSync(host.root); fs.chownSync(host.root, 65534, 65534); } else fs.symlinkSync('/', host.root);
+  for (const args of [[], ['--test-alert'], ['--test-heartbeat']]) {
+    const result = await run(pulseScript, args, host, { ALERT_CHANNELS: 'webhook', ALERT_WEBHOOK_URL: 'https://alerts.example.com/hook', HEARTBEAT_URL: 'https://beat.example.com/x' });
+    assert.equal(result.code, 1, `${args}: ${result.stdout}`);
+    assert.match(result.stderr, /belongs to another user, and this run would leave files there that its service cannot open/);
+    assert.match(result.stderr, /by hand, use only --dry-run or --status/);
+  }
+  if (process.getuid() === 0) assert.deepEqual(fs.readdirSync(host.root), [], 'nothing was written');
+  const dry = await run(pulseScript, ['--dry-run'], host);
+  assert.equal(dry.code, 0, dry.stderr);
 });
 
 test('--status with no pulse recorded is degraded', { skip }, async (t) => {
@@ -465,7 +490,8 @@ function installerHost(t, uid, options = {}) {
   const stub = path.join(dir, 'stub');
   const tools = path.join(dir, 'tools');
   linkRealTools(tools, options.uname ? ['uname'] : []);
-  writeExec(path.join(stub, 'id'), `echo ${uid}`);
+  writeExec(path.join(stub, 'id'), `case "$1" in -nG) echo '${options.userGroups || 'host-pulse'}' ;; *) echo ${uid} ;; esac`);
+  writeExec(path.join(stub, 'chown'), `echo "chown $*" >> "${dir}/chown.log"`);
   if (options.uname) writeExec(path.join(stub, 'uname'), `echo ${options.uname}`);
   // A fake systemctl that logs each call and remembers whether the timer is enabled, like the real one.
   if (options.systemctl !== false) {
@@ -485,7 +511,7 @@ function installerHost(t, uid, options = {}) {
   writeExec(path.join(stub, 'getent'), [
     'case "$1" in',
     `  group) ${options.dockerGroup ? 'echo "docker:x:999:"' : 'exit 2'} ;;`,
-    `  passwd) [ "$2" = host-pulse ] && [ -e "${userFile}" ] && echo "host-pulse:x:998:998::/nonexistent:/usr/sbin/nologin" ;;`,
+    `  passwd) [ "$2" = host-pulse ] && [ -e "${userFile}" ] && echo "host-pulse:x:998:998::/nonexistent:${options.userShell || '/usr/sbin/nologin'}" ;;`,
     '  *) exit 2 ;;',
     'esac'
   ].join('\n'));
@@ -497,9 +523,10 @@ function installerHost(t, uid, options = {}) {
     INSTALL_PREFIX: path.join(dir, 'lib', 'host-observability'),
     CONFIG_DIR: path.join(dir, 'etc', 'host-observability'),
     SYSTEMD_UNIT_DIR: path.join(dir, 'units'),
-    SYSTEMD_RUN_DIR: path.join(dir, 'run-systemd')
+    SYSTEMD_RUN_DIR: path.join(dir, 'run-systemd'),
+    SYSTEMD_STATE_DIR: path.join(dir, 'var-lib')
   };
-  for (const parent of ['lib', 'etc']) fs.mkdirSync(path.join(dir, parent));
+  for (const parent of ['lib', 'etc', 'var-lib']) fs.mkdirSync(path.join(dir, parent));
   fs.mkdirSync(env.SYSTEMD_UNIT_DIR);
   if (options.systemdRunning !== false) fs.mkdirSync(env.SYSTEMD_RUN_DIR);
   return { dir, tools, env, userFile };
@@ -526,7 +553,8 @@ test('installer prints its plan and changes nothing without --install', { skip }
   assert.match(result.stdout, /^Plan \(nothing has been changed\):/);
   assert.match(result.stdout, /Create the system user host-pulse \(no login, no home folder\) for the service; --remove deletes it/);
   assert.match(result.stdout, /The service runs as the unprivileged user host-pulse, with no\n\s+capabilities, a read-only view of the system/);
-  assert.match(result.stdout, /Docker checks OFF: the service cannot reach the Docker socket/);
+  assert.match(result.stdout, /Docker checks OFF: the service cannot reach the Docker socket, and it cannot read root-only\n\s+files such as this env file or SSH keys/);
+  assert.doesNotMatch(result.stdout, /cannot read other secrets/);
   assert.doesNotMatch(result.stdout, /runs as root|only to read the Docker socket/);
   assert.match(result.stdout, /Run again with --install/);
   assertNothingInstalled(host);
@@ -576,7 +604,7 @@ test('installer writes a hardened hourly timer, keeps one backup, and removes cl
   assert.match(pulseService, new RegExp(`^ExecStart=${host.env.INSTALL_PREFIX}/host-pulse\\.sh$`, 'm'));
   assert.match(pulseService, new RegExp(`^EnvironmentFile=-${host.env.CONFIG_DIR}/host-pulse\\.env$`, 'm'));
   for (const line of sandboxLines) assert.match(pulseService, lineRegExp(line), line);
-  assert.match(pulseService, lineRegExp('Environment=DOCKER_ACCESS=no'));
+  assert.doesNotMatch(pulseService, /DOCKER_ACCESS/, 'Docker access comes from the service groups, not a setting the env file could override');
   assert.doesNotMatch(pulseService, /^DynamicUser=|^ProtectSystem=full|^ReadWritePaths=|^SupplementaryGroups=/m);
   assert.doesNotMatch(pulseService, /^# Root/m);
   for (const name of ['alert', 'heartbeat']) {
@@ -615,9 +643,10 @@ test('installer writes a hardened hourly timer, keeps one backup, and removes cl
   assert.ok(!fs.existsSync(host.env.INSTALL_PREFIX));
   assert.ok(!fs.existsSync(backups));
   assert.ok(fs.existsSync(envFile), 'remove keeps the env file');
-  assert.match(removed.stdout, /For a full removal, also delete .*host-pulse\.env/);
+  assert.match(removed.stdout, /For a full removal, also delete .*etc\/host-observability \(its env file holds the alert secrets\)/);
   assert.match(removed.stdout, /pause or delete that check too/);
   assert.match(removed.stdout, /Deleted the system user host-pulse/);
+  assert.equal(fs.existsSync(path.join(host.dir, 'chown.log')), false, 'no state folder, nothing to hand over');
   assert.equal(fs.existsSync(host.userFile), false, 'remove deletes the system user it created');
   assert.deepEqual(fs.readdirSync(host.env.CONFIG_DIR).sort(), ['host-pulse.env']);
 });
@@ -630,6 +659,35 @@ test('installer reuses a system user it did not create and never deletes it', { 
   assert.equal(runInstaller(host, ['--remove']).status, 0);
   assert.equal(usersLog(host), '');
   assert.ok(fs.existsSync(host.userFile), 'a user the installer did not create is kept');
+});
+
+test('installer refuses an existing host-pulse account that can log in or is already in the docker group', { skip }, (t) => {
+  const login = installerHost(t, 0, { userExists: true, userShell: '/bin/bash' });
+  for (const args of [[], ['--install']]) {
+    const result = runInstaller(login, args);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /The existing user host-pulse has the login shell '\/bin\/bash'.*Nothing was changed/);
+  }
+  assert.deepEqual(fs.readdirSync(login.env.SYSTEMD_UNIT_DIR), []);
+  const docker = installerHost(t, 0, { userExists: true, userGroups: 'host-pulse docker', dockerGroup: true });
+  const refused = runInstaller(docker, ['--install']);
+  assert.equal(refused.status, 1);
+  assert.match(refused.stderr, /The existing user host-pulse is in the docker group, which equals root on this host.*Nothing was changed/);
+  assert.deepEqual(fs.readdirSync(docker.env.SYSTEMD_UNIT_DIR), []);
+  const chosen = runInstaller(docker, ['--install', '--with-docker']);
+  assert.equal(chosen.status, 0, chosen.stderr);
+});
+
+test('--remove hands the kept state folder to root before deleting the user it created', { skip }, (t) => {
+  const host = installerHost(t, 0);
+  assert.equal(runInstaller(host, ['--install']).status, 0);
+  const state = path.join(host.env.SYSTEMD_STATE_DIR, 'host-observability');
+  fs.mkdirSync(state);
+  const removed = runInstaller(host, ['--remove']);
+  assert.equal(removed.status, 0, removed.stderr);
+  assert.equal(fs.readFileSync(path.join(host.dir, 'chown.log'), 'utf8'), `chown -R root:root -- ${state}\n`);
+  assert.match(removed.stdout, /Handed .*host-observability to root\.\n(.|\n)*Deleted the system user host-pulse/);
+  assert.ok(fs.existsSync(state), 'the reports are kept');
 });
 
 test('Docker checks are opt-in, and the plan says plainly that they equal root', { skip }, (t) => {
@@ -650,7 +708,7 @@ test('Docker checks are opt-in, and the plan says plainly that they equal root',
   for (const name of ['host-pulse.service', 'host-pulse-test-alert.service', 'host-pulse-test-heartbeat.service']) {
     const unit = fs.readFileSync(path.join(host.env.SYSTEMD_UNIT_DIR, name), 'utf8');
     assert.match(unit, lineRegExp('SupplementaryGroups=docker'), name);
-    assert.match(unit, lineRegExp('Environment=DOCKER_ACCESS=yes'), name);
+    assert.doesNotMatch(unit, /DOCKER_ACCESS/, name);
     assert.match(unit, /^# Docker checks on .*equals root on this host\.$/m, name);
     for (const line of sandboxLines) assert.match(unit, lineRegExp(line), `${name}: ${line}`);
   }

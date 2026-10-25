@@ -39,8 +39,8 @@ INSTALL_PREFIX="${INSTALL_PREFIX:-/usr/local/lib/host-observability}"
 CONFIG_DIR="${CONFIG_DIR:-/etc/host-observability}"
 ENV_FILE="$CONFIG_DIR/host-pulse.env"
 BACKUP_DIR="$CONFIG_DIR/backup"
-# systemd creates this folder for the service user (StateDirectory=host-observability).
-STATE_PATH=/var/lib/host-observability
+# systemd creates this folder for the service user (StateDirectory=host-observability, under %S).
+STATE_PATH="${SYSTEMD_STATE_DIR:-/var/lib}/host-observability"
 # A dedicated system user, not DynamicUser=: on Ubuntu a dynamic user cannot reach the system bus
 # through dbus-daemon, and systemctl needs it to list failed units.
 SERVICE_USER=host-pulse
@@ -66,6 +66,10 @@ check_paths() {
       *//*|*/./*|*/../*) echo "$name must not contain //, /./ or /../ (got: $value); nothing was changed." >&2; exit 2 ;;
     esac
   done
+  case "${SYSTEMD_STATE_DIR:-/var/lib}" in
+    /*) ;;
+    *) echo "SYSTEMD_STATE_DIR must be an absolute path; nothing was changed." >&2; exit 2 ;;
+  esac
   case "$SYSTEMD_UNIT_DIR" in
     /*) ;;
     *) echo "SYSTEMD_UNIT_DIR must be an absolute path; nothing was changed." >&2; exit 2 ;;
@@ -82,7 +86,7 @@ require_systemd() {
 }
 
 require_useradd() {
-  getent passwd "$SERVICE_USER" >/dev/null 2>&1 && return 0
+  if getent passwd "$SERVICE_USER" >/dev/null 2>&1; then check_existing_user; return 0; fi
   if ! have useradd; then
     echo "useradd is not available to create the $SERVICE_USER system user; nothing was changed." >&2
     exit 1
@@ -94,6 +98,23 @@ require_docker_group() {
   if ! getent group docker >/dev/null 2>&1; then
     echo '--with-docker needs a docker group on this host, and there is none; nothing was changed.' >&2
     exit 1
+  fi
+}
+
+# An account that already exists is used only when it cannot log in and, without --with-docker, is
+# not in the docker group: systemd gives the service every group the account belongs to.
+check_existing_user() {
+  local shell groups
+  shell="$(getent passwd "$SERVICE_USER" | awk -F: '{ print $7 }')"
+  case "$shell" in
+    /usr/sbin/nologin|/sbin/nologin|/bin/false|/usr/bin/false) ;;
+    *) echo "The existing user $SERVICE_USER has the login shell '$shell'; the service needs an account that cannot log in. Nothing was changed." >&2; exit 1 ;;
+  esac
+  groups="$(id -nG "$SERVICE_USER" 2>/dev/null)"
+  if [ "$WITH_DOCKER" -eq 0 ]; then
+    case " $groups " in
+      *' docker '*) echo "The existing user $SERVICE_USER is in the docker group, which equals root on this host. Remove it (gpasswd -d $SERVICE_USER docker) or install with --with-docker. Nothing was changed." >&2; exit 1 ;;
+    esac
   fi
 }
 
@@ -112,14 +133,15 @@ print_plan() {
   echo "- Write ${UNITS[*]} to $SYSTEMD_UNIT_DIR, keeping one backup of any existing copy in $BACKUP_DIR"
   echo "- Start host-pulse.timer (hourly). The service runs as the unprivileged user $SERVICE_USER, with no"
   echo "  capabilities, a read-only view of the system and write access only to $STATE_PATH."
-  echo '  systemd reads the env file for it, so the service cannot read other secrets.'
+  echo '  systemd reads the env file for it.'
   if [ "$WITH_DOCKER" -eq 1 ]; then
     echo '- Docker checks ON: the service joins the docker group. Docker socket access is full control of'
     echo '  Docker, which equals full root on this host: the sandbox does not limit what Docker can be'
     echo '  asked to do. The pulse itself only lists and inspects containers.'
   else
-    echo '- Docker checks OFF: the service cannot reach the Docker socket. Add --with-docker to turn them'
-    echo '  on; that gives the service the equivalent of root on this host.'
+    echo '- Docker checks OFF: the service cannot reach the Docker socket, and it cannot read root-only'
+    echo '  files such as this env file or SSH keys. Add --with-docker to turn Docker checks on; that'
+    echo '  gives the service the equivalent of root on this host.'
   fi
   echo 'Then: choose an alert channel and heartbeat in the env file (see references/alert-options.md),'
   echo 'run systemctl start host-pulse-test-alert.service and host-pulse-test-heartbeat.service,'
@@ -152,12 +174,10 @@ UNIT
     cat <<'UNIT'
 # Docker checks on (installed with --with-docker): Docker socket access equals root on this host.
 SupplementaryGroups=docker
-Environment=DOCKER_ACCESS=yes
 UNIT
   else
     cat <<'UNIT'
 # Docker checks off: no Docker socket access. Reinstall with --with-docker to turn them on.
-Environment=DOCKER_ACCESS=no
 UNIT
   fi
   cat <<UNIT
@@ -243,10 +263,12 @@ rollback() {
   set +e
   echo 'Install failed or was interrupted; putting back what was there before.' >&2
   if [ "$TIMER_WAS_ENABLED" -eq 0 ]; then systemctl disable --now host-pulse.timer >/dev/null 2>&1; fi
-  for entry in ${REPLACED[@]+"${REPLACED[@]}"}; do cp -a "$BACKUP_DIR/rollback/${entry#*|}" "${entry%%|*}"; done
+  local restored=1
+  for entry in ${REPLACED[@]+"${REPLACED[@]}"}; do cp -a "$BACKUP_DIR/rollback/${entry#*|}" "${entry%%|*}" || restored=0; done
   for entry in ${CREATED[@]+"${CREATED[@]}"}; do rm -f -- "$entry"; done
-  rm -rf -- "${BACKUP_DIR:?}/rollback"
-  if [ "$USER_CREATED" -eq 1 ]; then userdel "$SERVICE_USER" 2>/dev/null; rm -f -- "$USER_MARKER"; fi
+  if [ "$restored" -eq 1 ]; then rm -rf -- "${BACKUP_DIR:?}/rollback"
+  else echo "Some files could not be put back; the saved copies stay in $BACKUP_DIR/rollback." >&2; fi
+  if [ "$USER_CREATED" -eq 1 ] && userdel "$SERVICE_USER" 2>/dev/null; then rm -f -- "$USER_MARKER"; fi
   for entry in ${CREATED_DIRS[@]+"${CREATED_DIRS[@]}"}; do rmdir -- "$entry" 2>/dev/null; done
   systemctl daemon-reload 2>/dev/null
   echo 'Rolled back. Check systemctl status host-pulse.timer before trying again.' >&2
@@ -339,15 +361,19 @@ do_remove() {
   if [ -e "$USER_MARKER" ]; then
     if ! getent passwd "$SERVICE_USER" >/dev/null 2>&1; then
       rm -f -- "$USER_MARKER"
-    elif have userdel && userdel "$SERVICE_USER"; then
-      rm -f -- "$USER_MARKER"
-      echo "Deleted the system user $SERVICE_USER."
     else
-      echo "Could not delete the system user $SERVICE_USER; run userdel $SERVICE_USER once nothing runs as it." >&2
+      # Hand the kept reports to root first, so a later account given the same uid cannot read them.
+      if [ -d "$STATE_PATH" ] && chown -R root:root -- "$STATE_PATH"; then echo "Handed $STATE_PATH to root."; fi
+      if have userdel && userdel "$SERVICE_USER"; then
+        rm -f -- "$USER_MARKER"
+        echo "Deleted the system user $SERVICE_USER."
+      else
+        echo "Could not delete the system user $SERVICE_USER; run userdel $SERVICE_USER once nothing runs as it." >&2
+      fi
     fi
   fi
   echo "Removed the timer, units, scripts and unit backups. Kept $ENV_FILE and the reports in $STATE_PATH."
-  echo "For a full removal, also delete $ENV_FILE (it holds the alert secrets) and $STATE_PATH."
+  echo "For a full removal, also delete $CONFIG_DIR (its env file holds the alert secrets) and $STATE_PATH."
   echo 'If an off-host heartbeat is set up, pause or delete that check too, or it will raise a missed-pulse alarm.'
 }
 
