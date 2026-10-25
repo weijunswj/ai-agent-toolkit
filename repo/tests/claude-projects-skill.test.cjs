@@ -52,7 +52,7 @@ test('no plugin payload or skills folder reaches the Projects controller skill',
 
 test('Projects wires managed instructions, promises and fresh scheduled sessions to controller law', () => {
   const text = bundle();
-  assert.match(text, /^Version: 2026-10-24\.5$/m);
+  assert.match(text, /^Version: 2026-10-25\.1$/m);
   // Plugin lag: removing the plugin alone is the fix that worked; the marketplace re-add is the fallback.
   assert.match(text, /`PLUGIN BEHIND`: the Toolkit plugin on the user's claude\.ai account is more than a day behind `main`/);
   // The skill drift watch lives in the daily check-in: direct account edits come back into Toolkit first.
@@ -75,12 +75,13 @@ test('Projects wires managed instructions, promises and fresh scheduled sessions
   assert.match(text, /\*\*Dedupe in the same change\.\*\*[^\n]*Trim lines that partly repeat it \(for example an approvals line restating the block's merge and force-push rules[^\n]*cut only the repeated part, keep the rest and label it "\(adds to the block\)"/);
   assert.match(text, /Keep project-specific text and anything that differs in substance[^\n]*Never add text beyond that label, and never change other lines outside the markers/);
   assert.match(text, /\*\*Briefs name sibling PRs\.\*\*[^\n]*Every G1 brief carries that list and requires a re-check/);
-  assert.match(text, /Every scheduled task runs as a fresh session per run, with no bound thread, except the hourly nudge \(bound to its own home thread/);
+  assert.match(text, /Every Toolkit scheduled task is bound to its own home thread \(`<PROJECT>: <task name>`\)[^\n]*A fresh session per run is the fallback, only where a task can't be bound/);
+  assert.doesNotMatch(text, /with no bound thread, except the hourly nudge|It is a fresh session per run and read-only/);
   assert.match(text, /Fresh-session routines cannot be created from a device-linked/);
   assert.match(text, /cheapest that does the task well, starting one notch higher and stepping down after clean runs/);
   assert.match(text, /Write these requirements into every task prompt/);
   for (const required of ['capped short message to the coordinator with retry', 'full report to a file',
-    'resolve its own thread after the report is delivered', 'ALL unresolved threads and project-chat posts',
+    'only a fresh-session run resolves its own run thread after delivery', 'ALL unresolved threads and project-chat posts',
     'small page limits', 'ALL unanswered owner items with no reply or reaction', 'link and ask date',
     'ONE reminder each run', 'stale thread labels', '**Overdue promise:**', 'promise list in project memory as a plain list',
     'Pre-wire follow-ups into briefs', 'never take over a gate\'s verdict',
@@ -148,7 +149,8 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.match(text, /resolving threads or posts that meet the resolve conditions are reversible housekeeping/);
   // Block wording: narrow attribution ban, home threads never resolved, post-edit rule.
   assert.match(body, /no "Generated with" footer, Co-Authored-By or Claude-Session trailers, or session links in footers\. Keep any attribution header the platform requires on PRs/);
-  assert.match(body, /A task that reports into one fixed home thread never resolves that thread/);
+  assert.match(body, /Each Toolkit scheduled task is bound to its own home thread, which carries its model and effort \(fallback: a fresh session per run\)/);
+  assert.match(body, /Never resolve a home thread; a fresh-session run resolves its own thread after delivery/);
   assert.match(body, /- Posts: after the owner's last message, keep output in one post you edit \(append, keep every detail\); post anew on an owner project-chat message or near 8 KB; answer an owner burst in one post\./);
   // Coordinator posts, in the main project chat and reply threads alike.
   assert.match(text, /\*\*Posts, everywhere you post\*\* \(the main project chat and reply threads alike\): after the owner's last message, keep all your output in one running post and edit it, appending each new result, PR or question and keeping every earlier detail\. Start a fresh post only when the owner writes in the main project chat, or when the running post nears about 8 KB; an owner message inside a thread does not start one, and the reply to it is appended to the running post\. Answer a burst of owner messages in one post\. When the owner replies under one of your earlier posts in the main project chat, answer in the main project chat \(you cannot post under your own posts there\) and start with "Re: your reply on <short topic>"\./);
@@ -177,8 +179,9 @@ test('Projects keeps its Toolkit base layer current without touching the project
     'Fresh-session routines cannot be created from a device-linked', 'Run every day by default']) {
     assert.ok(text.includes(required), required);
   }
-  // The daily check-in stays fresh; the hourly nudge is bound to a guarded home thread.
+  // The daily check-in and the hourly nudge are both bound to guarded home threads.
   assert.match(text, /every project runs a daily check-in every day/);
+  assert.match(text, /It is bound to its own home thread \(`<PROJECT>: Daily check-in`\)/);
   assert.match(text, /\*\*It is bound to its own home thread,\*\* because a fresh-session task posts a run card/);
   for (const required of ['Never resolve the home thread or list it as a resolve candidate', 'TASKS OUTDATED `weekly-rebuild`',
     'If the bound nudge dies twice in 7 days', '`UNRELAYED`', '`HIDDEN REPLY`', 'whether the daily check-in exists and is armed',
