@@ -74,6 +74,11 @@ test('a plain yes with "merge" and a number is an approval; a no, a doubt or a q
     ['can merge 622', [[null, 622, null]]],
     ['proceed to merge #622', [[null, 622, null]]],
     ['merge https://github.com/owner/a/pull/618/files', [['owner/a', 618, null]]],
+    ['merge github.com/other/repo/pull/622', [['other/repo', 622, null]]],
+    ['merge https://www.github.com/other/repo/issues/622', [['other/repo', 622, null]]],
+    ['merge 622 (3 commits)', [[null, 622, null]]],
+    ['merge 622, 3 files', [[null, 622, null]]],
+    ["fine, merge 622's branch now", [[null, 622, null]]],
   ];
   for (const [text, expected] of approvals) assert.deepEqual(hold.approvalsIn(text).map(({ repository, pr, sha }) => [repository, pr, sha]), expected, text);
   const refusals = [
@@ -85,6 +90,22 @@ test('a plain yes with "merge" and a number is an approval; a no, a doubt or a q
     'ok to merge', 'can merge', 'proceed to merge', 'I merged 618', 'merge 618 maybe', 'probably merge 618',
     'I think merge 618', 'not sure, merge 618', 'merge 618 or 619', 'merge 618 in 5 minutes', 'is it ok to merge 618',
     'merge 618 at 62405eb or 7a1b2c3d',
+    // quotes
+    '> merge 618', "'merge 618'", '‘merge 618’', '"merge 618"', '`merge 618`',
+    // unclear: two SHAs, an over-long line
+    'merge 618 62405eb 7a1b2c3', `merge 618 ${'x'.repeat(200)}`,
+    // another kind of merge
+    'merge main into 622', 'merge origin/main into #622', 'resolve the merge conflicts in 622', '622 has merge conflicts',
+    "fix 622's merge conflicts", 'the merge of 622 broke main',
+    // refusal verbs
+    'revert merge 622', 'reject merge 622', 'refuse to merge 622', 'block merge 622', 'skip merge 622',
+    'abort the merge of 622', 'merge 622 is denied',
+    // delays and conditions
+    'merge 622 in a bit', 'merge 622 soon', 'merge 622 next week', 'merge 622 on Monday', 'merge 622 tmrw',
+    'merge 622 by Friday', 'merge 622 EOD', 'merge 622 provided CI passes', 'merge 622 as long as CI is green',
+    'merge 622 pending review', 'merge 622 assuming checks pass', 'dunno, merge 622', 'merge 622 on 27 Oct',
+    // reports
+    'Claude wants to merge 622', 'PR 622 is ready to merge', 'Next step: merge 622', 'merge 622, then close 619',
   ];
   for (const text of refusals) assert.deepEqual(hold.approvalsIn(text), [], text);
 });
@@ -163,13 +184,44 @@ test('line continuations and multi-line GraphQL do not get a merge past the hold
   for (const command of always) assert.match(decide(ctx, bash(ctx.repo, command))?.deny || '', /merges or moves a branch/, command);
 });
 
-test('a SHA-pinned approval refuses auto-merge, and a folder with two remotes needs the repository named', (t) => {
+test('connector auto-merge is refused even with an approval; gh auto-merge with a head commit is not', (t) => {
   const ctx = context(t);
-  typed(ctx, 'merge 618 at 62405eb');
-  assert.match(decide(ctx, connector('enable_pr_auto_merge', { pullNumber: 618 })).deny, /auto-merge cannot pin a commit/);
+  typed(ctx, 'merge 618');
+  assert.match(decide(ctx, connector('enable_pr_auto_merge', { pullNumber: 618 })).deny, /auto-merge cannot name the head commit.*gh pr merge 618 --auto --match-head-commit/);
+  assert.match(decide(ctx, connector('enable_pr_auto_merge', { pullNumber: 618, expectedHeadSha: 'a'.repeat(40) })).deny, /auto-merge cannot name/);
+  assert.equal(decide(ctx, bash(ctx.repo, `gh pr merge 618 --auto --merge --match-head-commit ${SHA}`)), null);
+});
+
+test('two remotes or a gh default repository other than its own need the repository named', (t) => {
+  const ctx = context(t);
+  typed(ctx, 'merge 618');
+  typed(ctx, 'merge 618', { cwd: ctx.other });
   git(ctx.repo, ['remote', 'add', 'upstream', 'https://github.com/owner/up.git']);
   assert.match(decide(ctx, bash(ctx.repo, `gh pr merge 618 --match-head-commit ${SHA}`)).deny, /cannot tell which repository/);
   assert.equal(decide(ctx, bash(ctx.repo, `gh pr merge 618 --repo owner/a --match-head-commit ${SHA}`)), null);
+  git(ctx.other, ['config', 'remote.origin.gh-resolved', 'owner/up']);
+  assert.match(decide(ctx, bash(ctx.other, `gh pr merge 618 --match-head-commit ${SHA}`)).deny, /cannot tell which repository/);
+  git(ctx.other, ['config', 'remote.origin.gh-resolved', 'base']);
+  assert.equal(decide(ctx, bash(ctx.other, `gh pr merge 618 --match-head-commit ${SHA}`)), null);
+});
+
+test('a REST merge path after a quoted value with a newline, ; & or | is still held, and Codex cmd forms are read', (t) => {
+  const ctx = context(t);
+  const held = [
+    `gh api -X PUT -f "commit_title=Fix A & B" repos/owner/a/pulls/618/merge -f sha=${SHA}`,
+    `gh api -X PUT -f "commit_title=a;b" repos/owner/a/pulls/618/merge -f sha=${SHA}`,
+    `gh api -X PUT -f "commit_title=a|b" repos/owner/a/pulls/618/merge -f sha=${SHA}`,
+    `gh api -X PUT -f "commit_title=a\nb" repos/owner/a/pulls/618/merge -f sha=${SHA}`,
+    `gh pr ^\r\nmerge 618 --match-head-commit ${SHA}`,
+  ];
+  for (const command of held) assert.match(decide(ctx, bash(ctx.repo, command))?.deny || '', /has not approved a merge of owner\/a#618/, command);
+  const cmd = { cwd: ctx.repo, tool_name: 'exec_command', tool_input: { cmd: `gh pr merge 618 --match-head-commit ${SHA}` } };
+  assert.match(decide(ctx, cmd).deny, /has not approved/);
+  const list = { cwd: ctx.repo, tool_name: 'shell', tool_input: { command: ['bash', '-lc', `gh pr merge 618 --match-head-commit ${SHA}`] } };
+  assert.match(decide(ctx, list).deny, /has not approved/);
+  assert.equal(hold.mayMerge(cmd), true);
+  typed(ctx, 'merge 618');
+  assert.equal(decide(ctx, bash(ctx.repo, held[0])), null, 'with an approval, the sha= field is read across the command');
 });
 
 test('one approval allows one merge of that pull request in that repository, naming a head commit', (t) => {

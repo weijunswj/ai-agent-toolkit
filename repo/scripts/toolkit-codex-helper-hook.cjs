@@ -52,7 +52,7 @@ async function decide(input, environment = process.env) {
     governanceDenial = insideRepository(input?.cwd) ? { deny: `Toolkit: the governance check failed, so nothing runs in this repository until it works again. ${NEVER_OWNER}` } : null;
   }
   if (governanceDenial) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: governanceDenial.deny } };
-  // Merges: only after the user typed "merge N" (toolkit-merge-hold.cjs), in every folder.
+  // Merges: the merge hold, a tripwire that waits for the user's own "merge N" (toolkit-merge-hold.cjs), in every folder.
   const mergeDenial = mergeDecision(input);
   if (mergeDenial) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: mergeDenial.deny } };
   // Shell commands: refuse AI attribution in commits and pull requests, in every folder.

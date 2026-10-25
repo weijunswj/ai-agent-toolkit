@@ -180,8 +180,8 @@ test('Windows launcher without Node blocks helper launches and unreadable input 
   }
 });
 
-test('Windows launcher without Node blocks only commit and pull request shell commands; other shell commands run', { skip: process.platform !== 'win32' }, t => {
-  for (const command of ['git commit -m "x"', 'git -C repo commit --amend', 'echo a && git commit -F msg.txt', 'gh pr create --body-file b.md', 'gh pr edit 5 --body x', 'GH PR MERGE 5']) {
+test('Windows launcher without Node blocks commit, pull request, merge, push and host-launch shell commands; other shell commands run', { skip: process.platform !== 'win32' }, t => {
+  for (const command of ['git commit -m "x"', 'git -C repo commit --amend', 'echo a && git commit -F msg.txt', 'gh pr create --body-file b.md', 'gh pr edit 5 --body x', 'GH PR MERGE 5', 'git push origin main', 'gh api -X PUT repos/o/r/pulls/5/merge', 'gh repo sync o/r', 'claude -p hi', 'cat merge-approvals.v1.json']) {
     const r = runBrokenWindowsLauncher(t, { tool_name: 'Bash', cwd: ROOT, tool_input: { command } });
     assert.equal(r.status, 2, command);
     assert.equal(JSON.parse(r.stdout.trim()).hookSpecificOutput.permissionDecision, 'deny', command);
