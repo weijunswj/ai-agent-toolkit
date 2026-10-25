@@ -61,7 +61,7 @@ function env(root, extra = {}) {
 
 function hook(root, hub, pluginRoot) {
   return spawnSync(process.execPath, [script, '--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'claude-plugin'], {
-    cwd: root, encoding: 'utf8', timeout: 120000, env: env(root, { CLAUDE_PLUGIN_ROOT: pluginRoot }),
+    cwd: root, encoding: 'utf8', timeout: 120000, env: env(root, { CLAUDE_PLUGIN_ROOT: pluginRoot, CLAUDE_PROJECT_DIR: root }),
   });
 }
 
@@ -113,6 +113,44 @@ function managedCheckout(root) {
   git(seed, ['push', 'origin', 'main']);
   return managed;
 }
+
+// A fake Toolkit source checkout at `dir` carrying `version`.
+function fakeToolkit(dir, version) {
+  writeJson(path.join(dir, '.claude-plugin', 'plugin.json'), { name: 'ai-agent-toolkit', version });
+  writeJson(path.join(dir, 'repo', 'contracts', 'toolkit-local-bridge', 'version.json'), { version });
+}
+
+const STALE_LINE = /^Toolkit: this copy is (\S+), older than the (\S+) in the Toolkit repository at (.+), so safety hooks added since then \(for example the force-push guard\) do not run in this session\. Ask the owner to refresh the account's Toolkit plugin copy\.$/m;
+
+test('an uninstalled copy older than a Toolkit repository in the session folder says it is stale', (t) => {
+  const root = tmpRoot(t);
+  const hub = path.join(root, '.ai-agent-toolkit', 'current');
+  const [major] = BRIDGE_VERSION.split('.');
+  const newer = `${Number(major) + 1}.0.0`;
+  // A cloud session starts in the folder its repositories are cloned into.
+  fakeToolkit(path.join(root, 'ai-agent-toolkit'), newer);
+  const result = hook(root, hub, repoRoot);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, UNINSTALLED_LINE);
+  const match = result.stdout.match(STALE_LINE);
+  assert.ok(match, result.stdout);
+  assert.equal(match[1], BRIDGE_VERSION);
+  assert.equal(match[2], newer);
+  assert.ok(match[3].endsWith('/ai-agent-toolkit'), match[3]);
+});
+
+test('an uninstalled copy says nothing more when the repository in the session folder is not newer', (t) => {
+  const root = tmpRoot(t);
+  const hub = path.join(root, '.ai-agent-toolkit', 'current');
+  fakeToolkit(path.join(root, 'same'), BRIDGE_VERSION);
+  fakeToolkit(path.join(root, 'older'), '0.0.1');
+  writeJson(path.join(root, 'other', '.claude-plugin', 'plugin.json'), { name: 'another-plugin', version: '999.0.0' });
+  writeJson(path.join(root, 'other', 'repo', 'contracts', 'toolkit-local-bridge', 'version.json'), { version: '999.0.0' });
+  const result = hook(root, hub, repoRoot);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, UNINSTALLED_LINE);
+  assert.doesNotMatch(result.stdout, STALE_LINE);
+});
 
 test('a session started from an uninstalled Toolkit copy writes no update state and leaves the managed checkout alone', (t) => {
   const root = tmpRoot(t);

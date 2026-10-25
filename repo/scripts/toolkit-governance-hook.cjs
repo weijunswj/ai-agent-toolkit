@@ -3,7 +3,9 @@
 
 // Claude Code's governance hook: one script for three events, named by --event.
 //   UserPromptSubmit  holds every prompt in an undecided repository (toolkit-governance-gate.cjs).
-//   PreToolUse        refuses state-changing tools there, and agent answers everywhere.
+//   PreToolUse        refuses state-changing tools there, and agent answers everywhere; and in every
+//                     folder refuses a merge the user has not typed "merge N" for (toolkit-merge-hold.cjs).
+//   UserPromptSubmit  also keeps each "merge N" the user types, for that merge hold.
 //   SessionStart      adds one line stating the effective governance state, exports the session's
 //                     id to its shell commands (CLAUDE_ENV_FILE), so a session an agent starts from
 //                     one of them is known not to be the user typing, and records the run's session
@@ -52,12 +54,14 @@ function respond(event, input, options = {}) {
   try {
     gate = options.gate || require('./toolkit-governance-gate.cjs');
     if (event === 'UserPromptSubmit') {
+      // A "merge N" the user types is kept for the merge hold; a failure only means a later merge is refused.
+      try { (options.mergeHold || mergeHold()).recordPrompt(input, { environment: options.environment || process.env, registryOptions: options.registryOptions, now: options.now }); } catch { /* fail closed later */ }
       const decision = new gate.PromptHold(options).decide({ cwd: input.cwd, prompt: input.prompt, sessionId: gate.sessionIdOf(input) });
       if (decision.action === 'block') return { decision: 'block', reason: decision.reason };
       return decision.context ? { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: decision.context } } : {};
     }
     if (event === 'PreToolUse') {
-      const decision = new gate.ToolGate(options).decide(input);
+      const decision = new gate.ToolGate(options).decide(input) || mergeDecision(input, options);
       return decision ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: decision.deny } } : {};
     }
     exportHostSession(input, options.environment || process.env, gate);
@@ -68,6 +72,19 @@ function respond(event, input, options = {}) {
     return failed(event, input, gate);
   }
 }
+
+const mergeHold = () => require('./toolkit-merge-hold.cjs');
+
+// The merge hold's decision (toolkit-merge-hold.cjs), failing closed for a call that may merge
+// when the module cannot run.
+function mergeDecision(input, options = {}) {
+  try { return (options.mergeHold || mergeHold()).decide(input, { registryOptions: options.registryOptions, now: options.now }); } catch {
+    let mayMerge = true;
+    try { mayMerge = mergeHold().mayMerge(input); } catch { mayMerge = /merge/i.test(JSON.stringify(input || {})); }
+    return mayMerge ? { deny: MERGE_CHECK_FAILED } : null;
+  }
+}
+const MERGE_CHECK_FAILED = 'Toolkit: the merge check failed, so this merge is refused. Retry it; if this repeats, run `setup toolkit` to repair the Toolkit plugin.';
 
 // The gate's never-act line, spelled out here because the gate module may be what failed to load.
 const NEVER_OWNER = 'Never act as the user: do not answer the governance question yourself, start a session or script to answer it, or click a confirmation through a UI or computer use.';

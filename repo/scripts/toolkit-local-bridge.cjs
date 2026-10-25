@@ -2809,6 +2809,40 @@ function runtimeClaudePluginRoot() {
   return path.resolve(process.env.CLAUDE_PLUGIN_ROOT || process.env.PLUGIN_ROOT || path.resolve(__dirname, '..', '..'));
 }
 
+// A Toolkit source checkout newer than the running copy, found from the session's folder: the
+// folder itself and its parents, or one of its direct subfolders (a cloud session starts in the
+// folder its repositories are cloned into). Used only to warn that an account-synced copy is stale,
+// since its older hooks lack guards the repository already ships. Null when none is found.
+const MAX_WORKSPACE_CHILDREN = 32;
+function newerWorkspaceToolkit(runningRoot, start = process.env.CLAUDE_PROJECT_DIR || process.cwd()) {
+  const versionOf = (dir) => {
+    try {
+      const manifest = JSON.parse(fs.readFileSync(path.join(dir, '.claude-plugin', 'plugin.json'), 'utf8'));
+      if (manifest?.name !== 'ai-agent-toolkit') return null;
+      const { version } = JSON.parse(fs.readFileSync(path.join(dir, 'repo', 'contracts', 'toolkit-local-bridge', 'version.json'), 'utf8'));
+      return isValidBridgeVersion(version) ? version : null;
+    } catch { return null; }
+  };
+  const candidates = [];
+  let current = path.resolve(start);
+  for (;;) {
+    candidates.push(current);
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  try {
+    const children = fs.readdirSync(path.resolve(start), { withFileTypes: true }).filter((entry) => entry.isDirectory()).slice(0, MAX_WORKSPACE_CHILDREN);
+    candidates.push(...children.map((entry) => path.join(path.resolve(start), entry.name)));
+  } catch { /* an unreadable folder has no candidates */ }
+  for (const dir of candidates) {
+    if (samePath(dir, runningRoot)) continue;
+    const version = versionOf(dir);
+    if (version && compareBridgeVersions(BRIDGE_VERSION, version) < 0) return { root: dir, version };
+  }
+  return null;
+}
+
 function codexNativePluginCacheStatus(args, state) {
   if (!args.hook || args.syncSource !== 'codex-plugin') return { status: '' };
   if (!state.repo_path) return { status: '' };
@@ -3323,6 +3357,8 @@ class LocalBridgeRun {
     const managedCheckout = normalizedState(readJsonIfExists(path.join(args.hub || defaultHubPath(), 'state.json'))).repo_path;
     if (managedCheckout && samePath(root, managedCheckout) && new ClaudePluginRegistry().isRunningCopy(root)) return false;
     console.log(`Toolkit: this session runs an uninstalled Toolkit copy (${slash(root)}); session-start maintenance is skipped and nothing is recorded.`);
+    const newer = newerWorkspaceToolkit(root);
+    if (newer) console.log(`Toolkit: this copy is ${BRIDGE_VERSION}, older than the ${newer.version} in the Toolkit repository at ${slash(newer.root)}, so safety hooks added since then (for example the force-push guard) do not run in this session. Ask the owner to refresh the account's Toolkit plugin copy.`);
     return true;
   }
 
