@@ -1,6 +1,6 @@
 # Toolkit Changelog
 
-## 3.10.1
+## 3.11.0
 
 ### Rules audit: leaner always-loaded rules
 
