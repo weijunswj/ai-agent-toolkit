@@ -6,8 +6,7 @@
 //
 //   - GovernanceGate decides whether a working directory is held. UNDECIDED (including an unreadable
 //     state) is held; a plain folder (no git) never is, and neither is a decided repository. The
-//     gate keeps the copy (`.ai-agent-toolkit/governance.json`, in the repository or plain folder) in
-//     step with the state, and a copy it cannot write never holds.
+//     state lives only in the user-state files: nothing is written into the repository or folder.
 //   - PromptHold is the UserPromptSubmit core. In a held repository every prompt is blocked and kept
 //     on this computer. On github.com the block asks a plain question: enable Toolkit's GitHub
 //     governance, yes, no or later ("not now" also works). In a git repository that is not on
@@ -33,7 +32,6 @@ const os = require('node:os');
 const path = require('node:path');
 
 const governance = require('./toolkit-governance-state.cjs');
-const repoState = require('./toolkit-governance-repo-state.cjs');
 
 const CAPABILITY = governance.GOVERNANCE_CAPABILITY;
 const HELD_BASENAME = 'held-prompts.v1.json';
@@ -120,44 +118,33 @@ function terminalCommand(subcommand) {
 // ---- gate -------------------------------------------------------------------------------------
 
 class GovernanceGate {
-  #stateReader; #now; #notNow; #epochs;
+  #stateReader; #notNow; #epochs;
 
   constructor({ registryOptions = {}, stateReader = null, now = () => new Date() } = {}) {
     this.#stateReader = stateReader || (cwd => governance.governanceState(cwd, registryOptions));
-    this.#now = now;
     this.#notNow = new NotNow({ registryOptions, now });
     this.#epochs = new SessionEpochs({ registryOptions, now });
   }
 
-  // { hold, reason, state, file } where reason is one of 'no-git' (a plain folder, DISABLED
+  // { hold, reason, state } where reason is one of 'no-git' (a plain folder, DISABLED
   // automatically), 'decided', 'undecided' (the github.com question), 'not-github' (a git repository
   // not on github.com, waiting for the user's ok), 'not-now' (the user said later in this run of the session)
-  // or 'state-unreadable'. Only the user-state files decide whether a repository holds: a decided
-  // repository never holds over its copy, and a copy that cannot be written is reported as file
-  // 'unwritable' with its error_code. With write: false the copy is only checked. "Not now" lasts for
-// the run of the session that said it (its session mark).
-  evaluate(cwd, { write = true, sessionId = null } = {}) {
+  // or 'state-unreadable'. Only the user-state files decide, and nothing is written into the repository or folder. "Not now"
+  // lasts for the run of the session that said it (its session mark).
+  evaluate(cwd, { sessionId = null } = {}) {
     const state = this.#stateReader(cwd);
-    const verdict = (hold, reason, extra = {}) => Object.freeze({ hold, reason, state, file: null, ...extra });
+    const verdict = (hold, reason) => Object.freeze({ hold, reason, state });
     if (state.state === 'UNDECIDED' && state.rule === 'ERROR') return verdict(true, 'state-unreadable');
     if (state.state === 'UNDECIDED' && state.rule === 'R9') return verdict(true, 'not-github');
     if (state.state === 'UNDECIDED') return this.#notNow.has(state.repository_id, sessionId, this.#epochs.get(sessionId)) ? verdict(false, 'not-now') : verdict(true, 'undecided');
-    const reason = state.rule === 'R1' ? 'no-git' : 'decided';
-    if (!repoState.expectedRecord(state)) return verdict(false, reason, { file: 'not-applicable' });
-    if (!write) return verdict(false, reason, { file: repoState.recordStatus(state) });
-    try {
-      const synced = repoState.syncRecord(state, { now: this.#now });
-      return verdict(false, reason, { file: synced.written ? 'written' : 'agrees' });
-    } catch (error) {
-      return verdict(false, reason, { file: 'unwritable', error_code: codeOf(error) });
-    }
+    return verdict(false, state.rule === 'R1' ? 'no-git' : 'decided');
   }
 }
 
 // ---- decision ---------------------------------------------------------------------------------
 
 // Records the user's decision through the registry's owner-action path, then reads it back through
-// the gate (which also writes the in-repository copy). Throws GovernanceGateError when the result
+// the gate. Throws GovernanceGateError when the result
 // is not the decided state.
 function writeGovernanceDecision(cwd, command, { registryOptions = {}, registry = require('./toolkit-capability-registry.cjs'), now } = {}) {
   if (!['enable', 'disable', 'decline'].includes(command)) throw new GovernanceGateError('UNKNOWN_COMMAND');
@@ -574,10 +561,10 @@ class NotGitHubOk {
 }
 
 // Records the user's ok for a repository that is not on github.com and reads it back through the
-// gate (which also writes the copy). Throws GovernanceGateError unless the result is DISABLED (R8).
+// gate. Throws GovernanceGateError unless the result is DISABLED (R8).
 function writeNotGitHubOk(cwd, { registryOptions = {}, now } = {}) {
   const gate = new GovernanceGate({ registryOptions, now });
-  const before = gate.evaluate(cwd, { write: false });
+  const before = gate.evaluate(cwd);
   if (before.state.state === 'DISABLED' && ['R2', 'R8'].includes(before.state.rule)) return before;
   if (before.state.rule !== 'R9' || !before.state.repository_id) throw new GovernanceGateError('NOT_WAITING_FOR_OK');
   new NotGitHubOk({ registryOptions, now }).set(before.state.repository_id);
@@ -923,7 +910,7 @@ class ToolGate {
 
   // The gate's verdict for a folder a command names, or null when it cannot be told.
   #verdict(target, sessionId) {
-    try { return this.#gate.evaluate(target, { write: false, sessionId }); } catch { return null; }
+    try { return this.#gate.evaluate(target, { sessionId }); } catch { return null; }
   }
 
   // Whether a message is held for a repository that is still waiting for its answer (one decided
@@ -946,9 +933,7 @@ function sessionLine(cwd, { registryOptions = {}, stateReader = null, now, sessi
     if (verdict.reason === 'not-github') return `Toolkit governance: this repository ${whereText(state)}, so GitHub governance will be DISABLED here once the user says ok. Every user message is held until then. If you need to raise it, ask the user to reply ok; Toolkit records their own reply, so never ask them to run a command, and do not try to work around it. ${NEVER_OWNER}`;
     return `Toolkit governance: this repository has no GitHub governance decision yet. Every user message is held until the user answers Toolkit's question. If you need to raise it, ask "${ASK}"; Toolkit records their own reply, so never ask them to run a command, and do not try to work around it. ${NEVER_OWNER}`;
   }
-  return decidedLine(state) + (verdict.file === 'unwritable'
-    ? ` (Toolkit could not save its copy in the ${repoState.FOLDER} folder (${verdict.error_code}); nothing is held because of that.)`
-    : '');
+  return decidedLine(state);
 }
 
 function decidedLine(state) {
