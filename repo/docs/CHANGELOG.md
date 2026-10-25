@@ -4,7 +4,7 @@
 
 ### Governance question
 
-- **A locked session mark now fails safe.** The 3.10.0 notes said a mark that cannot be replaced fails safe, but a mark that could be neither replaced nor removed (a file another process held open, or a read-only folder) still let a resumed or continued run answer. Now the repository's mark is handled even when the session's cannot be, and when an old mark stays in place, the held messages and "later" answers that carry it lose their marks, so the question is asked again. Only if the held-messages file is locked too can the old run still answer, which is part of the speed-bump limit.
+- **A locked session mark now fails safe.** The 3.10.0 notes said a mark that cannot be replaced fails safe, but a mark that could be neither replaced nor removed (a file another process held open, or a read-only folder) still let a resumed or continued run answer. Now the repository's mark is handled even when the session's cannot be, and when an old mark stays in place, the held messages and "later" answers that carry it lose their marks, so the question is asked again. Only if the held-messages file is locked too can the old run still answer, which is part of the speed-bump limit. This touches only a question still waiting for your answer: once you answer yes or no, that repository is not asked again on that computer, in any session.
 - **Replayed messages from a resumed run are flagged.** The session mark now records whether a run was a resume or a fork. When any held message came from such a run, the messages handed over after your answer carry the "confirm with the user first" wording, whatever order they came in.
 - **Every hold says never to act as the user.** The question, the not-on-github.com notice, the no-mark and resumed notices, and both hosts' "governance check failed" texts now end with the never-act line, so an agent that started the run itself and reads the hold is told not to answer it.
 
@@ -18,7 +18,7 @@
 ### Helpers and hosts
 
 - **The bridge doc no longer says the hooks decide the same way in and outside gate work:** a G2 session launches no helper, and a launcher-bound session is checked against its binding. A Codex test now pins the full "only the main session launches helpers" refusal, as the Claude Code test does. `CONTROLLER.md` now says subagents are helpers, never gates, without limiting helpers to gate work.
-- **Known limit in Codex Desktop on Windows:** a helper's shell commands can fail with "Requested registry access is not allowed", from Codex Desktop's sandbox for subagents. The helper still starts on its route; the main session can run the command instead. The suggested hand check is "Launch a toolkit-g0-helper to list the top-level folders of this checkout. Stay on the current branch.", since naming another branch makes agents try to switch first.
+- **Helper hand check:** the bridge doc suggests "Launch a toolkit-g0-helper to list the top-level folders of this checkout. Stay on the current branch.", since naming another branch makes agents try to switch first.
 - **Codex size line:** setup's "Codex instructions" line now counts the `AGENTS.md` of the repository you are in, and 0 bytes when it has none, instead of falling back to the Toolkit checkout's own file.
 
 ### Claude Code qualification runner
