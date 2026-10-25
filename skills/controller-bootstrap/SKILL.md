@@ -1,6 +1,6 @@
 ---
 name: controller-bootstrap
-description: Use only when explicitly asked to bootstrap or recover the assigned controller for one Toolkit-managed repository after context loss, handover, or an agreed bootstrap event. Do not route ordinary coding, generic repository setup, or N5 programme reconciliation.
+description: Use only when explicitly asked to bootstrap or recover the assigned controller for one Toolkit-managed repository after context loss, handover, or an agreed bootstrap event. Do not use for ordinary coding, generic repository setup, or keeping a programme's parent and child issues in step (github-program-reconciler does that).
 ---
 
 # Controller Bootstrap

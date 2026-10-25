@@ -17,8 +17,8 @@
 
 ### Claude Projects
 
-- **One running post:** after your last message, the Projects coordinator keeps all its output in one post that it edits, appending each new result, PR or question and keeping every earlier detail. It starts a fresh post once you write again, or when the running post nears about 8 KB, and still answers a burst of your messages in one post. The Projects skill and the managed project instructions block say the same.
-- **Skill split:** guided setup, the instructions sync and the recurring-task procedures moved into `reference/` files beside the Projects skill, which is now 2026-10-24.4. Upload the skill together with its reference files.
+- **One running post:** after your last message, the Projects coordinator keeps all its output in one post that it edits, appending each new result, PR or question and keeping every earlier detail. It starts a fresh post only when you write in the main project chat, or when the running post nears about 8 KB; its reply to a message you write inside a thread is appended to the running post. When you reply under one of its earlier posts, it answers in the main project chat, starting with "Re: your reply on" and a short topic. It still answers a burst of your messages in one post. The Projects skill and the managed project instructions block say the same.
+- **Skill split:** guided setup, the instructions sync and the recurring-task procedures moved into `reference/` files beside the Projects skill, which is now 2026-10-24.5. Upload the skill together with its reference files.
 - **Cheaper nudge:** the hourly nudge checks first whether anything moved since its last run and stops early when nothing did; it runs in waking hours on a small model. The binding check runs only in the daily check-in.
 - **Feedback intake:** record only rejections and downgrades, one line each with the reason.
 - **Skill drift in the daily check-in:** the check-in now compares the account copy of the Projects skill and its reference files with every Toolkit revision. A copy that matches an older revision reports `SKILL BEHIND`; one that matches none is saved and reports `SKILL DRIFT`, so direct edits come into Toolkit before anyone re-uploads. A separate drift task is no longer needed.
@@ -55,6 +55,11 @@
 
 - **Owner UAT is narrowed:** it holds only steps that need the owner's own hands, such as real app UI, signed-in accounts and device behaviour CI cannot reach. CI (Windows runners included), automated tests and G2 review prove everything else, and each UAT list names the passing check for every step it leaves out. When nothing needs the owner's hands, UAT is recorded as not required.
 - **Where it lives:** the Coding Gates in the global rules, the issue-closing rule in the governed block ("any owner UAT"), the controller's admission rule, the V3 direction and one Projects skill line for UAT lists. The Claude Projects controller skill is 2026-10-24.4 (re-upload it). Duplicated sentences in the global rules and the controller file were trimmed to keep both inside their size budgets.
+
+### Plain-English skill text
+
+- **Skill descriptions and Codex cards in plain words:** `controller-bootstrap`, `github-program-reconciler`, `skill-product-review`, `n8n-workflow-transport` and `n8n-environment-setup` no longer show internal programme codes or Toolkit shorthand in the text hosts show in skill lists. Gate names stay, explained in brackets, for example "a planning, build or review session (G0, G1 or G2)". The controller-bootstrap and reconciler READMEs follow.
+- **No more label exception:** the readable-text test no longer allows an unexplained programme code in any skill description.
 
 ## 3.10.0 (host support, governance states, decision history and the personal-data guard)
 
