@@ -6,6 +6,7 @@
     "skills/external-operation-preflight",
     "skills/frontend-art-direction",
     "skills/github-program-reconciler",
+    "skills/host-observability",
     "skills/local-ai-safety",
     "skills/managed-app-foundation-review",
     "skills/n8n-environment-setup",
@@ -20,7 +21,7 @@
     "skills/toolkit-setup",
     "skills/windows-local-dev-services"
   ],
-  "skill_count": 18,
+  "skill_count": 19,
   "pack_manifests": [],
   "project_tree_present": false,
   "native_plugins": {
