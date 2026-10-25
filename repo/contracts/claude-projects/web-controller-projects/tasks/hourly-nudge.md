@@ -14,7 +14,7 @@ CHECKS
 [no-repo]5. PRs: none (no repo).
 6. Memory and promises: open memory items that look waiting, overdue or stale. Read the promise list in memory: each promise whose trigger already happened (a merged PR, a PASS file, a shipped version) but which is not done goes under **Overdue promise:**.
 7. Weekly rebuild: read the "since" date for "{{nudge_name}}" on the SCHEDULED TASKS line. Seven or more days ago: start the first line with "CONTEXT RESET DUE (weekly) | " so the coordinator rebuilds this task on a fresh home thread.
-8. Scheduled tasks: get_trigger "{{checkin_name}}" from the SCHEDULED TASKS line: if it is missing (no such trigger in list_triggers, or not found), disabled, has no future next run, or its last run is older than 26 hours or not SUCCEEDED, start the first line with "CHECK-IN NOT ARMED: <why> | ". List every other task on the line with enabled, next run and last status under **Tasks:**.
+8. Scheduled tasks: get_trigger "{{checkin_name}}" from the SCHEDULED TASKS line: if it is missing (no such trigger in list_triggers, or not found), disabled, has no future next run, or its last run is older than 26 hours or not SUCCEEDED, start the first line with "CHECK-IN NOT ARMED: <why> | ", unless its entry on the line ends "stopped by owner <date>" (then list it under **Tasks:** as stopped by the owner). List every other task on the line with enabled, next run and last status under **Tasks:**.
 
 REPORT
 - First line: any "CONTEXT RESET DUE | " and "CHECK-IN NOT ARMED: <why> | " prefixes, then exactly "all moving", "STALLED: <thread titles>" or, from step 1, "no change since <time>".

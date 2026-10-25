@@ -126,7 +126,7 @@ test('global rules hold the generic floor: precedence, entry routing, safety gat
     /No AI attribution in commits or PRs: no Co-Authored-By or session trailers, session links or "Generated with" footers/,
     /Put scratch first in a gitignored repo\/worktree temp folder[^\n]*use a user-profile folder only for an outside path or more permission, never a drive root/,
     // Run streams were once deleted before their archive was read back.
-    /needs no approval once its report and evidence \(run streams and logs too\) are stored and read back/,
+    /needs no approval once its report and any evidence kept \(a run stream or log kept for a FAIL or disputed verdict\) are stored and read back; delete it then/,
     // Delivery assumes neither GitHub nor a remote.
     /After requested edits in a git repository with a remote, unless the user asked for local-only work/,
     /Then offer to delete branches of closed unmerged PRs \(not default, protected or in use\)\./,
@@ -164,7 +164,7 @@ test('global rules hold the generic floor: precedence, entry routing, safety gat
     /toolkit-risk-tier\.cjs/,
     /Failure budgets count attempts, never dollars: no dollar cap on any review or run/,
     /repo\/contracts\/agent-rules\/gate-rules\.md/,
-    /Delegate when it saves context or wall time; no note is needed when you don't/,
+    /By default G0 delegates suitable separable evidence gathering and G1 suitable independent implementation or validation/,
     /In gate work only a G0 or G1 lead launches helpers; helpers never launch or ask for another agent, and G2 has none/,
     /Outside gate work the main session may start subagents, including Toolkit helpers on their installed route; subagents never start another/,
     /Gate models, effort and route proof are in the gate rules/,

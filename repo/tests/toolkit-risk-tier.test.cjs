@@ -37,6 +37,13 @@ test('the owner\'s RISKY categories are RISKY in this repository', () => {
     'repo/scripts/toolkit-env-store.cjs', 'repo/scripts/repo-local-backup.cjs', 'repo/scripts/toolkit-governance-ruleset.cjs',
     'repo/scripts/toolkit-attribution-guard.cjs', 'repo/contracts/claude-projects/web-controller-projects/SKILL.md',
     '.github/workflows/validate.yml', '.github/toolkit-risk-tiers.json', 'repo/scripts/toolkit-risk-tier.cjs',
+    // Authority, custody and home-folder writers: the governance decision store, helper profiles, task sessions and routes.
+    'repo/scripts/toolkit-capability-registry.cjs', 'repo/contracts/repository-capability-registry/repository-capability-policy.json',
+    'repo/scripts/toolkit-agent-control.cjs', 'repo/scripts/toolkit-claude-task-session.cjs', 'repo/scripts/toolkit-stack-selection.cjs',
+    'repo/scripts/toolkit-gate-contract-compiler.cjs', 'repo/scripts/toolkit-control-plane/control-plane-kernel.cjs',
+    'repo/contracts/trusted-ci-repository-protection/templates/protected-ci-gate.workflow.yml', 'repo/scripts/codex-config-load-check.cjs',
+    'skills/codex-ssh-hostinger-coolify-setup-maintainer/scripts/install-daily-security-check-systemd.sh',
+    'skills/secure-ci-cd/scripts/install-personal-data-guard.cjs', 'skills/github-program-reconciler/scripts/programme-checkpoint.cjs',
   ]) {
     assert.ok(fs.existsSync(path.join(ROOT, rel)), `${rel} exists`);
     assert.equal(tierOf(rel), 'RISKY', rel);
@@ -46,7 +53,8 @@ test('the owner\'s RISKY categories are RISKY in this repository', () => {
 test('tests and other scripts are NORMAL, docs are LIGHT, skills are NORMAL', () => {
   assert.equal(tierOf('repo/tests/toolkit-risk-tier.test.cjs'), 'NORMAL');
   assert.equal(tierOf('repo/tests/qualification/claude-helper-matrix.live.cjs'), 'NORMAL');
-  assert.equal(tierOf('skills/github-program-reconciler/scripts/programme-state.cjs'), 'NORMAL');
+  assert.equal(tierOf('skills/github-program-reconciler/scripts/decision-history.cjs'), 'NORMAL');
+  assert.equal(tierOf('skills/github-program-reconciler/scripts/programme-state.cjs'), 'RISKY', 'programme state is authority');
   assert.equal(tierOf('skills/secure-ci-cd/SKILL.md'), 'NORMAL');
   assert.equal(tierOf('repo/docs/agent-playbooks/INDEX.md'), 'NORMAL');
   for (const rel of ['README.md', 'repo/docs/CHANGELOG.md', 'repo/ARCHITECTURE.md', 'repo/docs/HOW-TO-USE.md']) assert.equal(tierOf(rel), 'LIGHT', rel);
@@ -81,7 +89,7 @@ test('a version-like line that can change behaviour, or sits in the wrong kind o
 });
 
 test('RISKY patterns ignore letter case, so a hand-typed Windows path cannot drop the tier', () => {
-  for (const rel of ['REPO/controller.MD', 'Repo/Scripts/Setup-Toolkit.cjs', 'agents.md', '.Agents/Rules/x.md', 'repo/scripts/TOOLKIT-GOVERNANCE-HOOK.cjs']) {
+  for (const rel of ['REPO/controller.MD', 'Repo/Scripts/Setup-Toolkit.cjs', 'agents.md', 'docs/claude.md', 'skills/foo/agents.md', '.Agents/Rules/x.md', 'repo/scripts/TOOLKIT-GOVERNANCE-HOOK.cjs']) {
     assert.equal(tierOf(rel), 'RISKY', rel);
   }
   assert.equal(tierOf(parseArgs(['--', 'Repo\\Scripts\\Setup-Toolkit.cjs']).paths[0]), 'RISKY');

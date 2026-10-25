@@ -54,7 +54,7 @@ function currentOperatingContract(texts) {
   const controller = texts['repo/CONTROLLER.md'];
   // The audit dropped the expiry clock, pins and cleanup ledger: delete scratch once its report is stored.
   assert.doesNotMatch(controller, /expires 21 days|21-day/);
-  assert.match(controller, /Delete scratch once its report is stored; never delete the only copy/);
+  assert.match(controller, /Delete scratch once its report and kept evidence are stored and read back; never delete the only copy/);
   assert.match(controller, /in a Git evidence store the commit is the manifest, and a successful push plus one fetch is the read-back/);
   assert.match(controller, /fresh-context, family-closure and delta-review rules are in the gate rules/);
   assert.match(controller, /G2 stays adversarial on every reachable path inside the release brief's frozen supported host\/environment matrix/);
@@ -82,7 +82,7 @@ test('current procedure is one wording across CONTROLLER, the governed block and
   const mutations = [
     ['repo/contracts/agent-rules/gate-rules.md', 'Planned G1 segment completion alone checkpoints and continues in the same session.',
       'Mandatory fresh executor contexts follow each planned G1 segment.'],
-    ['repo/CONTROLLER.md', 'Delete scratch once its report is stored; never delete the only copy',
+    ['repo/CONTROLLER.md', 'Delete scratch once its report and kept evidence are stored and read back; never delete the only copy',
       'Stored temporary owned bulk expires 21 days after its immutable verified transfer'],
     ['repo/contracts/agent-rules/gate-rules.md', 'Correction rechecks use fresh contexts for the same selected reviewers',
       'Reuse independent G2 reviewers for corrections'],

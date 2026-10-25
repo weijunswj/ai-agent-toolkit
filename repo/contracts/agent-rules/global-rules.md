@@ -38,7 +38,7 @@ Get explicit approval bound to the exact action before anything that may:
 - remove validation, tests, safety checks or guardrails;
 - rewrite git history.
 
-Deleting scratch this agent created in this task (temporary worktrees, briefs, outputs, test runs/repositories) needs no approval once its report and evidence (run streams and logs too) are stored and read back. Never delete sole evidence, user data or anything the agent did not create under this exception.
+Deleting scratch this agent created in this task (temporary worktrees, briefs, outputs, test runs/repositories) needs no approval once its report and any evidence kept (a run stream or log kept for a FAIL or disputed verdict) are stored and read back; delete it then. Never delete sole evidence, user data or anything the agent did not create under this exception.
 
 Before a gated action, confirm an approval covers it and the host-native permission exists. An approval binds the owner, action, target, resources, effects, recipient, conditions and expiry, and survives only a change of turn, worker, chat or transport for the same pending action; anything changed, new, revoked, expired or left unapproved by its outcome needs fresh approval. Approval, assignment, custody and capability never supply a missing host-native permission. Words like `continue`, `next`, `apply` or `do it` stay within the approved scope.
 
@@ -48,7 +48,7 @@ Coding work follows `G0 Discovery -> G1 Builder, including UAT -> G2 Review` unl
 
 **Match the checking to the risk.** Tag each change by what its diff touches, never by its size: `node <Toolkit>/repo/scripts/toolkit-risk-tier.cjs` matches the changed paths against the repository's RISKY list. A mixed diff takes its highest tier and an unsure call goes one tier up; the builder tags it, the controller checks the tag and any reviewer may raise it. A later edit takes the tier of what it touches.
 
-- **RISKY:** security or approval logic, hooks, setup and installers, files or settings outside the repository, credentials, governance and authority, data deletion or migration, anything that runs unattended on the user's machine. G0, G1 with agent and owner UAT on the real hosts, full G2, then delta G2s as the gate rules say.
+- **RISKY:** security or approval logic, hooks, setup and installers, files or settings outside the repository, credentials, governance and authority, data deletion or migration, anything that runs unattended on the user's machine. G0, G1 with agent UAT on the real hosts and owner UAT for any owner-hands steps, full G2, then delta G2s as the gate rules say.
 - **NORMAL:** any other code, tests and test tooling included. G0 when new, G1 with tests and CI, one independent review before merge.
 - **LIGHT:** no code that runs changes (docs, comments, wording, version bumps). The builder runs the tests and CI anyway and reads its own diff; no G0, G2 or UAT unless what the user sees or does changes.
 
@@ -58,7 +58,7 @@ Gate sessions (G0, G1, G2 and reviewers) and the controllers that launch them fi
 
 ## Delegation
 
-The root session owns integration, validation, conflict resolution and final judgement, and validates every returned result. Give each helper an isolated context and one minimal self-contained task. Delegate when it saves context or wall time; no note is needed when you don't. In gate work only a G0 or G1 lead launches helpers; helpers never launch or ask for another agent, and G2 has none. Outside gate work the main session may start subagents, including Toolkit helpers on their installed route; subagents never start another. Mutating siblings need disjoint files and scope; read-only siblings may investigate separable questions in parallel. Gate models, effort and route proof are in the gate rules.
+The root session owns integration, validation, conflict resolution and final judgement, and validates every returned result. Give each helper an isolated context and one minimal self-contained task. By default G0 delegates suitable separable evidence gathering and G1 suitable independent implementation or validation; the lead keeps reasoning, architecture, decisive proof, integration, UAT readiness and final quality. Skip delegation for trivial or inseparable work or when overhead exceeds the benefit; no note is needed. Outside gates, delegate when it saves context or wall time. In gate work only a G0 or G1 lead launches helpers; helpers never launch or ask for another agent, and G2 has none. Outside gate work the main session may start subagents, including Toolkit helpers on their installed route; subagents never start another. Mutating siblings need disjoint files and scope; read-only siblings may investigate separable questions in parallel. Gate models, effort and route proof are in the gate rules.
 
 ## Tool Preference
 

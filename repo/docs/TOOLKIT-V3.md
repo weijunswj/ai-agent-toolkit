@@ -6,7 +6,7 @@ This is the current V3 delivery contract for the Toolkit programme. It states th
 
 Toolkit is a portable delivery framework. A user gives a controller an outcome; executors discover the real environment, agree the scope, build a usable version, obtain acceptance, get it reviewed and finish the authorised delivery. Source, decisions, evidence and the next action survive any change of chat, model, harness, environment or controller.
 
-The normal coding workflow is **G0 Discuss/Discovery → G1 Builder, including UAT → G2 Review**. It is the default Shipping Law unless the user specifies another workflow. Every new task, repository or environment starts with G0; the risk tier of the changed paths (RISKY, NORMAL or LIGHT, from the risk-tier script in the global rules) sets only the depth of UAT and review. Routine, already-authorised work proceeds without repeated permission questions. Track builder readiness, UAT, review, custody, integration, installation, Core release and parent completion separately.
+The normal coding workflow is **G0 Discuss/Discovery → G1 Builder, including UAT → G2 Review**. It is the default Shipping Law unless the user specifies another workflow. Every new task, repository or environment starts with G0, whatever its tier; only LIGHT edits and fixes inside an already-discovered task skip it. Otherwise the risk tier of the changed paths (RISKY, NORMAL or LIGHT, from the risk-tier script in the global rules) sets only the depth of UAT and review. Routine, already-authorised work proceeds without repeated permission questions. Track builder readiness, UAT, review, custody, integration, installation, Core release and parent completion separately.
 
 | Completion | Required result |
 |---|---|
@@ -106,6 +106,8 @@ Native plugins target Codex (`owner-gpt` routes) and Claude Code (`owner-claude`
 
 Per host path, qualify the correct route and each wrong-route, guard-failure, missing-hook, malformed-config, post-check-change, resume, alternate-entry and delegation negative; a request that escapes the guard fails even when something downstream stops it. Installed proof checks effective instructions, hooks, route and caches, and a new session must receive the current instructions.
 
+A fail-open host requires an enforceable launcher or a disabled uncontrolled helper path. An unenforceable exact helper path is UNQUALIFIED and cannot be used uncontrolled; direct strong-lead work is the allowed exception. Host PASS requires correct-route execution, wrong-route prevention and failure-resilience proof; documentation, a copied plugin or unit tests alone do not qualify a host. Remove stale Toolkit-owned plugin, cache or staging copies only after the new active version is proved.
+
 ## 15. Security and operational commitments
 
 Every Core includes the security, privacy, integrity and recovery its effects need, checked locally with evidence-backed findings. Security scanning, secret references, external-operation authority, backup and restore, deployment and rollback, and host-service capabilities remain programme outcomes in the parent catalogue.
@@ -153,4 +155,4 @@ Test the actual supported controller/launcher continuation path when section 7 r
 
 ## 20. History
 
-The dated owner decisions, launch reconciliation, the bounded evidence-integrity evaluation and the earlier retention clocks behind this contract are in git history at commit `1a64367e987bf3c7e7a96c521c0ef77db4d6f5be`, with a copy in the Toolkit evidence store. History is evidence, never a competing current instruction.
+The dated owner decisions, launch reconciliation, the bounded evidence-integrity evaluation and the earlier retention clocks behind this contract are in git history at commit `1a64367`, with a copy in the Toolkit evidence store. History is evidence, never a competing current instruction.

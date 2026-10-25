@@ -87,7 +87,7 @@ function promptFailure(input) {
   if (insideRepository(input?.cwd)) holdPrompt(PROMPT_FAILED);
 }
 
-const HELD = 'Toolkit helper guard failed';
+const HELD = `Toolkit helper guard failed. ${NEVER_OWNER}`;
 function deny(reason) {
   process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } }) + '\n');
   // Blocking exit status, with the reason on stderr, for hosts that honour exit 2.

@@ -4,7 +4,7 @@ The gate playbook: G0, G1 and G2 sessions, reviewers and the controllers that la
 
 ## Gate order
 
-- **G0 Discovery** runs for every new task, repository or environment, whatever its risk tier: walk the real happy path, find out what the stack really is (an app built in Flutter, for example, breaks browser automation such as Playwright) and test assumptions before planning. It can be short when the ground is already known. It returns the G0 plan: findings, chosen approach, acceptance, risks, and what was tried and failed.
+- **G0 Discovery** runs for every new task, repository or environment, whatever its risk tier; only LIGHT edits and fixes inside an already-discovered task skip it. Walk the real happy path, find out what the stack really is (an app built in Flutter, for example, breaks browser automation such as Playwright) and test assumptions before planning. It can be short when the ground is already known. It returns the G0 plan: findings, chosen approach, acceptance, risks, and what was tried and failed.
 - **G1 Builder** starts in a fresh session, with the G0 plan passed in its brief as the handoff. G0 and G1 share the same strong lead route. One builder owns the whole approved outcome across corrections, checkpoints and fresh sessions; in-scope fixes need no new admission. G1 includes UAT.
 - **Review** follows the tier: full G2 for RISKY, one independent review for NORMAL, the builder's own diff read for LIGHT. Only LIGHT edits and fixes inside an already-discovered task skip G0 and G2.
 - Gate names `G0`, `G1` and `G2` are fine where the reader needs them.
@@ -27,7 +27,7 @@ There are no handover packets. Keep the work recoverable at all times instead: p
 ## UAT
 
 - G1 checks the actual user or operator surface for clarity during validation and UAT, and G2 treats unsafe or misleading text as a real finding.
-- RISKY work gets agent UAT on the real installed hosts before the owner's UAT; on a delta, rerun only the affected rows.
+- RISKY work gets agent UAT on the real installed hosts before any owner UAT; on a delta, rerun only the affected rows.
 - Run the full qualification matrix once on the release candidate. On a delta, run the rows whose code changed plus one smoke row per mode.
 - A new SHA alone does not invalidate UAT: supply impact evidence and record UAT_RETAINED, UAT_PARTIAL_REQUIRED or UAT_FULL_REQUIRED.
 
