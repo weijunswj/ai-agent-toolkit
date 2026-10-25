@@ -16,7 +16,8 @@ const fs = require('node:fs');
 const POST_TOOL = 'mcp__hearthbot__post_message';
 const EDIT_TOOL = 'mcp__hearthbot__edit_message';
 const NEAR_LIMIT_BYTES = 7000;
-const OWNER_MESSAGE = /<message\b[^>]*\bfrom=["']human["']/;
+// An owner message opens a wake: it follows the wake, project or thread tag or an earlier message, never quoted text.
+const OWNER_MESSAGE = /(?:^|<(?:wake|project|thread)\b[^>]*>|<\/message>)\s*<message\b[^>]*\bfrom=["']human["']/;
 const MESSAGE_ID = /\b(cmsg_[A-Za-z0-9]+)\b/;
 
 function bytes(text) {
@@ -25,6 +26,7 @@ function bytes(text) {
 
 // Text the user side of the transcript carries: prompts and wakes, never tool results.
 function userText(entry) {
+  if (entry?.isMeta || entry?.isCompactSummary) return '';
   if (entry?.type === 'attachment' && entry.attachment?.type === 'queued_command') {
     return typeof entry.attachment.prompt === 'string' ? entry.attachment.prompt : '';
   }
@@ -81,16 +83,30 @@ function withoutCode(text) {
 function linkIssue(text) {
   if (typeof text !== 'string' || !text) return '';
   const plain = withoutCode(text);
+  // Link markup is blanked for the scan (same offsets), so "PRs [612](...) and 613" reads as one list.
   const linkTexts = [];
-  for (const match of plain.matchAll(/\[([^\]]*)\]\(([^)\s]+)\)/g)) linkTexts.push([match.index, match.index + match[1].length + 1]);
-  for (const match of plain.matchAll(/\b(?:PRs?|pull request)\s*#?(\d{1,6})\b/gi)) {
-    const number = match[1];
-    if (linkTexts.some(([start, end]) => match.index > start && match.index < end)) continue;
-    if (new RegExp(`/pull/${number}/files\\b`).test(plain)) continue;
-    if (new RegExp(`/pull/${number}\\b`).test(plain)) {
-      return `PR ${number} is linked without /files. Link it as https://github.com/<owner>/<repo>/pull/${number}/files when it is ready for the owner to check and merge, otherwise link the chat thread that owns the work.`;
+  const scan = plain.replace(/\[([^\]]*)\]\(([^)\s]+)\)/g, (whole, label, url, offset) => {
+    linkTexts.push([offset, offset + label.length + 1]);
+    return ` ${label} ${' '.repeat(url.length + 2)}`;
+  });
+  const insideLinkText = index => linkTexts.some(([start, end]) => index > start && index < end);
+  // A mention names one PR or a list ("PRs 612, 613 and 614"); each number in it needs a link: link text on that
+  // number in any mention, or a /pull/<n>/files link anywhere in the post.
+  const mentions = [];
+  for (const match of scan.matchAll(/\b(?:PRs?|pull requests?)\s*#?(\d{1,6}(?:\s*(?:,|&|\/|and)\s*#?\d{1,6})*)\b/gi)) {
+    const listStart = match.index + match[0].length - match[1].length;
+    for (const number of match[1].matchAll(/\d{1,6}/g)) {
+      mentions.push({ match, value: number[0], linked: insideLinkText(match.index) || insideLinkText(listStart + number.index) });
     }
-    return `"${match[0].trim()}" has no link. Put the link on it: [PR ${number}](https://github.com/<owner>/<repo>/pull/${number}/files) when it is ready for the owner to check and merge, otherwise [PR ${number}](#<thread id>) to the chat thread that owns the work.`;
+  }
+  const linkedNumbers = new Set(mentions.filter(mention => mention.linked).map(mention => mention.value));
+  for (const { match, value } of mentions) {
+    if (linkedNumbers.has(value)) continue;
+    if (new RegExp(`/pull/${value}/files\\b`).test(plain)) continue;
+    if (new RegExp(`/pull/${value}\\b`).test(plain)) {
+      return `PR ${value} is linked without /files. Link it as https://github.com/<owner>/<repo>/pull/${value}/files when it is ready for the owner to check and merge, otherwise link the chat thread that owns the work.`;
+    }
+    return `PR ${value} in "${match[0].replace(/\s+/g, ' ').trim()}" has no link. Put the link on it: [PR ${value}](https://github.com/<owner>/<repo>/pull/${value}/files) when it is ready for the owner to check and merge, otherwise [PR ${value}](#<thread id>) to the chat thread that owns the work.`;
   }
   return '';
 }

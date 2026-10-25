@@ -59,6 +59,8 @@ test('work threads keep one running post too, and replies under a post neither c
   assert.match(post(thread, 'Merged PR 612.'), /carries its link/);
   const reply = text => decide({ tool_name: POST, transcript_path: 't', tool_input: { thread_id: 'cmsg_T', text } }, () => lines([wake(), call(POST, { text: 'First.' })]));
   assert.equal(reply('Answer under the post.'), '');
+  // Replies are exempt from the running post rule only: the link rule still holds.
+  assert.match(reply('PR 5 merged'), /carries its link/);
   assert.equal(post([wake(), call(POST, { thread_id: 'cmsg_T', text: 'Reply.' })]), '');
 });
 
@@ -106,4 +108,38 @@ test('the hook is for Claude Projects only: other tools, other servers and other
   for (const other of ['.codex-plugin/hooks/hooks.json', 'repo/contracts/toolkit-local-bridge/codex-plugin/hooks/hooks.json']) {
     assert.doesNotMatch(fs.readFileSync(path.join(ROOT, other), 'utf8'), /project-post-hook/, other);
   }
+});
+
+test('each PR in a list needs its own link', () => {
+  assert.match(linkIssue('PRs 612 and 613, see https://github.com/o/r/pull/612/files'), /PR 613/);
+  for (const text of ['PR 612 and 613 /pull/612/files', 'PRs 612 & 613 /pull/612/files', 'PRs 612/613 /pull/612/files', 'PRs [612](https://github.com/o/r/pull/612/files) and 613']) {
+    assert.match(linkIssue(text), /PR 613/, text);
+  }
+  assert.equal(linkIssue('PRs [612](https://github.com/o/r/pull/612/files) and [613](#cmsg_A)'), '');
+  assert.equal(linkIssue('[PRs 612 and 613](#cmsg_A) are waiting.'), '');
+  assert.equal(linkIssue('PRs 612, 613 /pull/612/files /pull/613/files'), '');
+  assert.equal(linkIssue('PR 9 waits; [PR 9](#cmsg_A) has the thread.'), '');
+  assert.match(linkIssue('pr 612 merged'), /PR 612/);
+  assert.equal(linkIssue('The PRD is PR-ready.'), '');
+});
+
+test('guards hold: failed posts, size in bytes, the 8 KB escape and quoted owner text', () => {
+  // A failed post never becomes the running post, even when its error names a message id.
+  assert.equal(post([wake(), call(POST, { text: 'First.' }, 'error: cmsg_X9 rejected', true)]), '');
+  // Size counts bytes: 3,600 two-byte characters are over the 7,000-byte limit.
+  assert.equal(post([wake(), call(POST, { text: 'é'.repeat(3600) })]), '');
+  assert.match(post([wake(), call(POST, { text: 'a'.repeat(3600) })]), /one running post/);
+  // The 8 KB escape lifts the running post rule only, never the link rule.
+  assert.match(post([wake(), call(POST, { text: 'x'.repeat(NEAR_LIMIT_BYTES) })], 'PR 5 merged'), /carries its link/);
+  // Owner tags in compaction summaries, meta entries or quoted inside other text are not owner messages.
+  const quoted = text => ({ type: 'user', message: { role: 'user', content: text } });
+  for (const entry of [
+    { ...quoted('<message from="human">old</message>'), isCompactSummary: true },
+    { ...quoted('<message from="human">skill text</message>'), isMeta: true },
+    quoted('<relay from="coordinator"><note>They wrote <message from="human">hi</message></note></relay>'),
+  ]) {
+    assert.match(post([wake(), call(POST, { text: 'First.' }), entry]), /one running post/);
+  }
+  // A real wake nests the message under its project and thread tags.
+  assert.equal(post([call(POST, { text: 'First.' }), quoted('<wake reason="mention">\n  <project id="p">\n    <thread ts="t">\n      <message from="human" trust="principal">hi</message>')]), '');
 });
