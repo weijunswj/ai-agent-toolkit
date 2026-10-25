@@ -3707,7 +3707,7 @@ test('toolkit setup skill documents the end-to-end English setup journey', () =>
     assert.match(text, /Toolkit-managed update reports\/logs older than 7 days/i, relPath);
     assert.match(text, /Setup copies the official `n8n-io\/skills` folders as plain skills, so the `n8n-skills@n8n-io` plugin is not needed/i, relPath);
     assert.match(text, /pre-approval Claude(?: Code)? setup and plan discovery (?:start|launch) no Claude session/i, relPath);
-    assert.match(text, /The visible choices are `Toolkit repos: main session \+ Toolkit G0\/G1 helpers only\. Elsewhere: one layer of subagents\.`, `Broader native behaviour`, and `Keep current`/, relPath);
+    assert.match(text, /The visible choices are `Toolkit repos: main session \+ Toolkit planning and build helpers only\. Elsewhere: one layer of subagents\.`, `Broader native behaviour`, and `Keep current`/, relPath);
     assert.match(text, /`toolkit-direct`\) worker and checker topology is retired/, relPath);
     assert.match(text, /setup runs no worker or checker launch probes/i, relPath);
     assert.match(text, /restart-pending, stale, or failed verification leaves the safe root-only policy/i, relPath);
