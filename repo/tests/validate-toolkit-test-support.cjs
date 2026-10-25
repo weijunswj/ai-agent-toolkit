@@ -18,6 +18,7 @@ const publisherReferencePaths = [];
 const currentSkillIds = [
   'codex-ssh-hostinger-coolify-setup-maintainer',
   'controller-bootstrap',
+  'external-operation-preflight',
   'frontend-art-direction',
   'github-program-reconciler',
   'host-observability',

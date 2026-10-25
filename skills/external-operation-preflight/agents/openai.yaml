@@ -1,0 +1,10 @@
+interface:
+  display_name: External Operation Preflight
+  short_description: Check a live change on an outside service before approval.
+  primary_color: '#B45309'
+policy:
+  products:
+    - chatgpt
+    - codex
+    - atlas
+  allow_implicit_invocation: true

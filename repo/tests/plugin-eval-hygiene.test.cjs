@@ -7,6 +7,7 @@ const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const intendedImplicitSkills = [
+  'external-operation-preflight',
   'frontend-art-direction',
   'github-program-reconciler',
   'local-ai-safety',
