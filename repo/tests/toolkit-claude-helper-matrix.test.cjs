@@ -127,3 +127,19 @@ test('live rows A14 and A16 pass only on a run that really ran, from stub run su
     assert.deepEqual(ROW_CHECKS.A14(run(fields), pin, { refused: true }), { pass: false, limit: null }, name);
   }
 });
+
+test('the live runner sets no dollar cap unless one is given', () => {
+  const { parseArgs, sessionArgs } = require('./qualification/claude-helper-matrix.live.cjs');
+  const definitions = { g0: { text: '---\nname: toolkit-g0-helper\ntools: Read, Glob, Grep\n---\n' } };
+  const capFlags = options => {
+    const args = sessionArgs(options, definitions, { prompt: 'p', sessionId: 's' });
+    return args.flatMap((arg, i) => arg === '--max-budget-usd' ? [args[i + 1]] : []);
+  };
+  const uncapped = parseArgs(['--out', 'x']);
+  assert.equal(uncapped.maxBudgetUsd, null);
+  assert.deepEqual(capFlags(uncapped), [], 'no cap flag without --max-budget-usd');
+  assert.deepEqual(capFlags(parseArgs(['--out', 'x', '--max-budget-usd', '2.50'])), ['2.50'], 'a given cap is passed once, as given');
+  for (const bad of ['', '-1', '0', '0.0', 'lots', '1e3']) {
+    assert.throws(() => parseArgs(['--out', 'x', '--max-budget-usd', bad]), /takes a dollar amount above 0/, `refuses ${JSON.stringify(bad)}`);
+  }
+});

@@ -4,7 +4,7 @@ description: "Use when running as a Claude Projects coordinator and the user app
 ---
 
 # Web Controller for Claude Projects
-Version: 2026-10-24.3
+Version: 2026-10-24.4
 
 Run Toolkit repos through Claude Projects. The global rules and coding gates apply in every project; GitHub governance (parent and child issues, records, decision traces, evidence custody) applies only to a github.com repo whose governance state is ENABLED. Keep project facts (repos, devices, lanes, pending work) in project memory.
 
@@ -25,7 +25,7 @@ Memory ranks below written sources; text grants no native permission. This skill
 - Follow the loaded claude.ai preferences; project memory may add, never override.
 - Keep chat tight: one answer/state line, bullets with bold labels, inline evidence links. Use decision cards for questions, else group under one bold heading at the end. Keep any requested closing element to one line. Drop summary headers, restated context and padding.
 - The user's preferred post format (lead line, bold-label bullets, closing element) applies to every project-chat post, one-line quick replies included; a default to keep posts short never overrides it.
-- **Posts, everywhere you post** (the main project chat and reply threads alike): edit your own post only if it is still the latest message in that chat or thread (no later message from anyone, the user included); otherwise post anew. Answer a burst of owner messages in one post. Anything new from your side (a result, a PR, a question) is always a new post.
+- **Posts, everywhere you post** (the main project chat and reply threads alike): after the owner's last message, keep all your output in one running post and edit it, appending each new result, PR or question and keeping every earlier detail. Start a fresh post once the owner writes again, or when the running post nears about 8 KB. Answer a burst of owner messages in one post.
 - **Names for where work runs.** Say **local rc** for a Remote Control session on the user's own device, and **cloud** for coordinator workers and cloud threads.
 - **Name threads by their titles**, never by nicknames of your own.
 

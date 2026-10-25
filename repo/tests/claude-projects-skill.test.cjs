@@ -46,7 +46,7 @@ test('no plugin payload or skills folder reaches the Projects controller skill',
 
 test('Projects wires managed instructions, promises and fresh scheduled sessions to controller law', () => {
   const text = read(SKILL_REL);
-  assert.match(text, /^Version: 2026-10-24\.3$/m);
+  assert.match(text, /^Version: 2026-10-24\.4$/m);
   // Plugin lag: removing the plugin alone is the fix that worked; the marketplace re-add is the fallback.
   assert.match(text, /`PLUGIN BEHIND`: the Toolkit plugin on the user's claude\.ai account is more than a day behind `main`/);
   assert.match(text, /remove the Toolkit plugin only in claude\.ai Customize > Plugins and let it reinstall; if it is still behind, remove the marketplace and add it again with Sync automatically on/);
@@ -135,9 +135,10 @@ test('Projects keeps its Toolkit base layer current without touching the project
   // Block wording: narrow attribution ban, home threads never resolved, post-edit rule.
   assert.match(body, /no "Generated with" footer, Co-Authored-By or Claude-Session trailers, or session links in footers\. Keep any attribution header the platform requires on PRs/);
   assert.match(body, /A task that reports into one fixed home thread never resolves that thread/);
-  assert.match(body, /- Posts: edit your own post only while it is the latest message in its chat or thread, else post anew; answer a burst of owner messages in one post; a new result, PR or question is always a new post\./);
+  assert.match(body, /- Posts: after the owner's last message, keep all output in one post you edit \(append, keep every detail\); post anew once the owner writes again or it nears 8 KB; answer an owner burst in one post\./);
   // Coordinator posts, in the main project chat and reply threads alike.
-  assert.match(text, /\*\*Posts, everywhere you post\*\* \(the main project chat and reply threads alike\): edit your own post only if it is still the latest message in that chat or thread[^\n]*otherwise post anew\. Answer a burst of owner messages in one post\. Anything new from your side \(a result, a PR, a question\) is always a new post\./);
+  assert.match(text, /\*\*Posts, everywhere you post\*\* \(the main project chat and reply threads alike\): after the owner's last message, keep all your output in one running post and edit it, appending each new result, PR or question and keeping every earlier detail\. Start a fresh post once the owner writes again, or when the running post nears about 8 KB\. Answer a burst of owner messages in one post\./);
+  assert.doesNotMatch(text + body, /is always a new post|edit your own post only/);
   assert.match(text, /also post a one-line pointer to it in top-level project chat/);
   // Base layer and project layer.
   assert.match(text, /Project instructions start with the managed block \(only blank lines before it\)/);

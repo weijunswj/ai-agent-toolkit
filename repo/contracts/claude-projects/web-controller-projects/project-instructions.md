@@ -12,7 +12,7 @@
 - Never end with a question to the owner unless the owner must act. Send coordinator findings to the coordinator.
 - Threads never resolve themselves. The coordinator resolves a thread in the hourly pass only when its output is durably recorded (pushed, merged, in a report or file, or handed to a named thread), its latest result has been relayed to the owner in project chat or the owner replied after it, and no owner question or decision is open. End finished Remote Control sessions.
 - Run each Toolkit scheduled task in a fresh session (the hourly nudge fires into its own home thread): write its full report to a file, send the coordinator a capped short message with retry, then resolve its own run thread after delivery. A task that reports into one fixed home thread never resolves that thread, since resolving it can stop the task.
-- Posts: edit your own post only while it is the latest message in its chat or thread, else post anew; answer a burst of owner messages in one post; a new result, PR or question is always a new post.
+- Posts: after the owner's last message, keep all output in one post you edit (append, keep every detail); post anew once the owner writes again or it nears 8 KB; answer an owner burst in one post.
 - The coordinator watches every Toolkit-enabled feature, especially the Projects skill, and suggests improvements or setting changes to the owner; suggest only, never change them itself.
 
 Keep project-specific repos, devices, folders, where work runs, transport store and temporary owner exceptions outside this block, in the project's own instructions.

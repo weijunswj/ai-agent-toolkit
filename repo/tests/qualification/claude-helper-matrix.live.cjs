@@ -32,6 +32,8 @@
 //
 // Usage: node repo/tests/qualification/claude-helper-matrix.live.cjs --out <dir> [--host]
 //          [--mode plugin|installed] [--plugin-root <dir>] [--max-budget-usd <n>] [--only <row,...>]
+//   --max-budget-usd  optional per-session dollar cap above 0 passed to `claude -p`; no cap unless
+//                     given. verdicts.json records it (null for none).
 
 const fs = require('node:fs');
 const os = require('node:os');
@@ -50,7 +52,7 @@ const KNOWN_LIMITS = Object.freeze({
 const sha256 = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 
 function parseArgs(argv) {
-  const options = { host: false, mode: 'plugin', pluginRoot: ROOT, maxBudgetUsd: '1', only: null, out: null };
+  const options = { host: false, mode: 'plugin', pluginRoot: ROOT, maxBudgetUsd: null, only: null, out: null };
   for (let i = 0; i < argv.length; i += 1) {
     const flag = argv[i], value = () => { if (i + 1 >= argv.length) throw new Error(`${flag} needs a value`); return argv[++i]; };
     if (flag === '--host') options.host = true;
@@ -63,7 +65,9 @@ function parseArgs(argv) {
   }
   if (!options.out) throw new Error('--out <dir> is required');
   if (!['plugin', 'installed'].includes(options.mode)) throw new Error('--mode is plugin or installed');
-  if (!/^\d+(\.\d+)?$/.test(options.maxBudgetUsd)) throw new Error('--max-budget-usd takes a number');
+  if (options.maxBudgetUsd !== null && !(/^\d+(\.\d+)?$/.test(options.maxBudgetUsd) && Number(options.maxBudgetUsd) > 0)) {
+    throw new Error('--max-budget-usd takes a dollar amount above 0, such as 2 or 0.5; leave it out for no cap');
+  }
   return options;
 }
 
@@ -85,6 +89,16 @@ function sessionTools(definitions) {
     for (const tool of (/^tools: (.+)$/m.exec(text)?.[1] || '').split(',')) if (tool.trim()) tools.add(tool.trim());
   }
   return [...tools].join(',');
+}
+
+// The `claude -p` arguments for one live session. A dollar cap is passed only when one was given.
+function sessionArgs(options, definitions, { prompt, sessionId, agentsFile = null }) {
+  const args = ['-p', prompt, '--session-id', sessionId, '--model', 'claude-opus-5-5', '--effort', 'high', '--output-format', 'stream-json',
+    '--verbose', '--strict-mcp-config', '--tools', sessionTools(definitions), '--allowedTools', 'Agent'];
+  if (options.maxBudgetUsd !== null) args.push('--max-budget-usd', options.maxBudgetUsd);
+  if (options.mode === 'plugin') args.push('--setting-sources', 'project,local', '--plugin-dir', options.pluginRoot);
+  if (agentsFile) args.push('--agents', agentsFile);
+  return args;
 }
 
 // The installed Toolkit plugin Claude Code runs. A claude.ai account copy (scope "synced") loses
@@ -174,10 +188,9 @@ class LiveRun {
     fs.mkdirSync(dir, { recursive: true });
     const sessionId = crypto.randomUUID();
     const decisions = path.join(dir, 'hook-decisions.ndjson');
-    const args = ['-p', prompt, '--session-id', sessionId, '--model', 'claude-opus-5-5', '--effort', 'high', '--output-format', 'stream-json',
-      '--verbose', '--strict-mcp-config', '--tools', sessionTools(this.context.definitions), '--allowedTools', 'Agent', '--max-budget-usd', this.options.maxBudgetUsd];
-    if (this.options.mode === 'plugin') args.push('--setting-sources', 'project,local', '--plugin-dir', this.options.pluginRoot);
-    if (agents) { const file = path.join(dir, 'agents.json'); fs.writeFileSync(file, JSON.stringify(agents)); args.push('--agents', file); }
+    let agentsFile = null;
+    if (agents) { agentsFile = path.join(dir, 'agents.json'); fs.writeFileSync(agentsFile, JSON.stringify(agents)); }
+    const args = sessionArgs(this.options, this.context.definitions, { prompt, sessionId, agentsFile });
     const environment = liveEnvironment(this.options.mode, this.context, { decisions });
     const started = Date.now();
     const r = spawnSync(CLAUDE, args, { cwd: this.context.repo, env: environment, encoding: 'utf8', timeout: 600000, maxBuffer: 64 * 1024 * 1024 });
@@ -303,7 +316,7 @@ function main() {
     }
     const sorted = [...timings].sort((a, b) => a - b);
     const report = { schema: 'toolkit.qualification.claude-helper-matrix.v1', host: 'claude-code', host_version: hostVersion(), mode: options.mode,
-      host_runs: options.host, plugin_root: options.pluginRoot, installed_plugin: installed ? { id: installed.id, version: installed.version } : null, hook_sha256: sha256(hook), registry_sha256: sha256(REGISTRY),
+      host_runs: options.host, max_budget_usd: options.maxBudgetUsd, plugin_root: options.pluginRoot, installed_plugin: installed ? { id: installed.id, version: installed.version } : null, hook_sha256: sha256(hook), registry_sha256: sha256(REGISTRY),
       candidate_head: git(['rev-parse', 'HEAD']), candidate_dirty: (git(['status', '--porcelain']) || '') !== '', at: new Date().toISOString(),
       hook_process_ms: sorted.length ? { median: sorted[Math.floor(sorted.length / 2)], max: sorted[sorted.length - 1] } : null,
       not_run_here: Object.fromEntries(Object.entries(matrix.OTHER_ROWS).filter(([, e]) => e.proof !== 'live')),
@@ -326,4 +339,4 @@ if (require.main === module) {
   try { main(); } catch (error) { console.error(error.message); process.exitCode = 1; }
 }
 
-module.exports = Object.freeze({ liveEnvironment, parseArgs, pinnedRoute, sessionTools, pickInstalledPlugin, turnSummary, runRecords, servedOnPin, leadOnRoute, ROW_CHECKS, KNOWN_LIMITS });
+module.exports = Object.freeze({ liveEnvironment, parseArgs, pinnedRoute, sessionTools, sessionArgs, pickInstalledPlugin, turnSummary, runRecords, servedOnPin, leadOnRoute, ROW_CHECKS, KNOWN_LIMITS });
