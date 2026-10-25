@@ -413,7 +413,7 @@ class GlobalRules {
   // at all. --remove always puts the previous value back.
   constructor({ environment = process.env, toolkitRoot = TOOLKIT_ROOT, harnesses = ['claude-code', 'codex'],
     backupRoot, ledgerFile, retentionDays = 7, now = () => new Date(), respectRemoval = false, repoAgentsFile = null,
-    codexDocLimit = 'report', loadCheckOptions } = {}) {
+    codexDocLimit = 'report', loadCheckOptions, workingFolder = process.cwd() } = {}) {
     this.#respectRemoval = respectRemoval === true;
     if (!DOC_LIMIT_MODES.includes(codexDocLimit)) fail('GLOBAL_RULES_ARGUMENT', 'Unknown Codex limit mode: ' + codexDocLimit);
     this.#docLimitMode = codexDocLimit;
@@ -431,9 +431,9 @@ class GlobalRules {
     this.#files = [...new Set(harnesses)].map(harness => new GlobalRulesFile({ harness, file: harnessFile(harness, env), expected, backupDir: this.#backupDir, ledger }));
     if (harnesses.includes('codex')) {
       this.#docLimit = new CodexDocLimit({ file: path.join(path.dirname(harnessFile('codex', env)), 'config.toml'), backupDir: this.#backupDir, loadCheckOptions: loadCheckOptions || { environment: { ...process.env, ...env } } });
-      // The repository whose rules share Codex's budget: the git root of the working folder, else this Toolkit checkout.
-      const gitRoot = nearestGitRoot(process.cwd());
-      this.#repoAgents = repoAgentsFile || (gitRoot && fs.existsSync(path.join(gitRoot, 'AGENTS.md')) ? path.join(gitRoot, 'AGENTS.md') : path.join(toolkitRoot, 'AGENTS.md'));
+      // The rules that share Codex's budget: the AGENTS.md at the git root of the working folder, else in
+      // the folder itself; a repository without one counts 0 bytes, never another repository's file.
+      this.#repoAgents = repoAgentsFile || path.join(nearestGitRoot(workingFolder) || path.resolve(workingFolder), 'AGENTS.md');
     }
   }
 

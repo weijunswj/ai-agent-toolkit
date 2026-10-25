@@ -22,4 +22,4 @@ Use this only when the task is broad, ambiguous, high-blast-radius, explicitly a
 
 ## Final Report
 
-Report files changed, what changed, validation results, generated-output status when applicable, and remaining risks. Keep instruction-source provenance in operational packets, not in user-facing reports.
+Report files changed, what changed, validation results, generated-output status when applicable, and remaining risks. Keep instruction-source provenance in operational records, not in user-facing reports.

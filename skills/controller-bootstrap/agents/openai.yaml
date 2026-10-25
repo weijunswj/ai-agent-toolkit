@@ -2,7 +2,7 @@ interface:
   display_name: Controller Bootstrap
   short_description: Re-enter an explicitly assigned Toolkit repository controller safely.
   primary_color: '#334155'
-  default_prompt: Use $controller-bootstrap only when explicitly asked to bootstrap or recover an already-assigned controller for one Toolkit-managed repository; establish identity, exact governance sources, CURRENT, approval, and host limits before any effect.
+  default_prompt: Use $controller-bootstrap only when explicitly asked to bootstrap or recover an already-assigned controller for one Toolkit-managed repository; confirm who the controller is, which governance files apply, the current programme record, the owner's approval and what this app can do, before changing anything.
 policy:
   products:
     - chatgpt
