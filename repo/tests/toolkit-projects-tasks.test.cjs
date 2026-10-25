@@ -143,7 +143,8 @@ test('refresh replaces only Toolkit text and keeps the params block and project 
   assert.ok(refreshed.includes(`\n${project}\n`), 'project text kept byte for byte');
   // CLI agrees, and a refresh of a current prompt changes nothing.
   const target = file(t, 'live.md', live);
-  assert.equal(run(['--refresh', 'daily-check-in', target]).stdout, refreshed);
+  assert.equal(run(['--refresh', 'daily-check-in', target, '--session', 'bound']).stdout, refreshed);
+  assert.equal(run(['--refresh', 'daily-check-in', target]).status, 2, 'a Toolkit task refresh names the session its replacement runs in');
   assert.equal(tasks().refresh('daily-check-in', refreshed), refreshed);
   // Misplaced project text (after delivery) moves into the project section, words unchanged.
   const misplaced = tasks().refresh('daily-check-in', `${refreshed}Late owner line.\n`);
@@ -158,7 +159,7 @@ test('refresh of an edited block keeps the added lines, labelled, and malformed 
   assert.equal(tasks().check('hourly-nudge', refreshed).state, 'current');
   assert.ok(refreshed.includes(`${PROJECT_HEADING}\n- none\n${KEPT_LABEL}\n- Project step typed inside the block.\n`));
   assert.throws(() => tasks().refresh('hourly-nudge', `${edited}\n${edited}`));
-  assert.equal(run(['--refresh', 'hourly-nudge', file(t, 'bad.md', edited.replace(':END TASK-DELIVERY', ':END X'))]).status, 2);
+  assert.equal(run(['--refresh', 'hourly-nudge', file(t, 'bad.md', edited.replace(':END TASK-DELIVERY', ':END X')), '--session', 'bound']).status, 2);
 });
 
 test('a legacy prompt migrates only with params and moved project text; custom needs its own steps', t => {
@@ -171,7 +172,7 @@ test('a legacy prompt migrates only with params and moved project text; custom n
   assert.throws(() => tasks().render('custom', params('custom')), 'custom has no default section');
   assert.throws(() => tasks().render('daily-check-in', params('daily-check-in'), rendered('hourly-nudge')), 'no markers in project text');
   const paramsFile = file(t, 'p.json', JSON.stringify(PARAMS['hourly-nudge']));
-  const result = run(['--refresh', 'hourly-nudge', file(t, 'legacy.md', legacy), '--params', paramsFile]);
+  const result = run(['--refresh', 'hourly-nudge', file(t, 'legacy.md', legacy), '--params', paramsFile, '--session', 'bound']);
   assert.equal(result.status, 0, result.stderr);
   assert.equal(tasks().check('hourly-nudge', result.stdout).state, 'current');
 });
@@ -256,6 +257,11 @@ test('every Toolkit-made prompt carries the recurring-task requirements; fresh r
     assert.match(back, /"session": "fresh"/, kind);
     assert.match(back, /set_thread_resolved/, kind);
     assert.throws(() => tasks().refresh(kind, moved, { session: 'sometimes' }), kind);
+    // The session-mismatch loop: a bound entry whose stored prompt was rendered fresh. The swap
+    // always names the replacement's session, so the result is bound and the check stays current.
+    const repaired = tasks().refresh(kind, tasks().render(kind, params, ''), { session: 'bound' });
+    assert.doesNotMatch(repaired, /"session"|set_thread_resolved/, kind);
+    assert.equal(tasks().refresh(kind, repaired, { session: 'bound' }), repaired, `${kind}: a second swap changes nothing`);
   }
   assert.throws(() => tasks().refresh('custom', tasks().render('custom', validateParams('custom', PARAMS.custom), OWN_TEXT), { session: 'bound' }), 'a custom task keeps its own session');
 });
@@ -399,4 +405,5 @@ test('every line that re-arms, updates, swaps, rebuilds, recreates or sets up a 
   assert.match(skill, /\*\*Stopped by owner:\*\* a task whose `SCHEDULED TASKS:` entry says `stopped by owner` is outside every automatic path/);
   assert.match(skill, /the restart removes the mark/);
   assert.match(fs.readFileSync(path.join(dir, 'reference', 'recurring-tasks.md'), 'utf8'), /When the owner restarts it, remove the mark\./);
+  assert.match(fs.readFileSync(path.join(dir, 'reference', 'recurring-tasks.md'), 'utf8'), /--refresh <kind> <old prompt file> --session <bound\|fresh>` keeps the params and project text and always names the session the replacement runs in/);
 });
