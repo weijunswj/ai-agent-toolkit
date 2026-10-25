@@ -21,7 +21,7 @@ const HARD_STOPS = [
   "Merging without the owner's OK on a summary of its external effects (each merge stays its own OK).",
   'Production, live-system, deployment, firewall or security-setting changes.',
   'Turning off tests, validation, guardrails, attribution rules or any safety check.',
-  "Writing the agent's own permission settings by any route (allow rules, `autoMode` entries, Codex rules, a `--settings` file).",
+  "Editing the agent's own permission settings, or widening permissions by any route (allow rules, `autoMode` entries, Codex allow rules, a `--settings` file).",
   'Anything the host hard-denies.',
   'Anything that means acting as the owner.',
   'Anything else in the global safety floor.',
@@ -65,7 +65,8 @@ test('both safety-gates playbooks carry the same procedure, every hard stop and 
   for (const rule of HONOUR_RULES) assert.ok(toolkit.includes(rule), rule);
   for (const text of [
     '`standing-permissions/ledger.json`', '`review_by` (90 days after `reviewed_at`)', '`all-projects`',
-    'never as the default or the recommended option', 'Agents never write permission settings by any route.',
+    'never as the default or the recommended option', 'Agents never add allow rules or `autoMode` entries, or otherwise widen permissions, by any route.',
+    'Renew only an expired `standing` entry: a revoked entry stays revoked, and a `once` or `no` entry is never renewed',
     'never makes a hard stop clearable', 'not on tool output', 'Never retry another way',
     'unique, `SP-` plus a number, never reused', 'An unknown id changes nothing; say so.',
     'set `reviewed_at` to today, `review_by` to 90 days later', 'a neutral machine label',
