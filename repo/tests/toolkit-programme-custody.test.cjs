@@ -27,8 +27,8 @@ const controller = { session: 'controller-1', prefix: 'INT-TK421-' };
 const GOVERNED = () => ({ state: 'ENABLED', governed_rules_bind: true });
 const green = name => ({ kind: 'CheckRun', name, status: 'COMPLETED', conclusion: 'SUCCESS', required: false });
 const CATALOGUE = [
-  { issue: 423, label: 'C2', class: 'CORE', parent: 421, order: 1 },
-  { issue: 467, label: 'Shared H', class: 'CORE', parent: 421, order: 2 },
+  { issue: 423, label: 'C2', class: 'COMMITTED', parent: 421, order: 1 },
+  { issue: 467, label: 'Shared H', class: 'COMMITTED', parent: 421, order: 2 },
 ];
 const LANE_PREFIX = 'CDX-TK469-';
 const temps = [];
