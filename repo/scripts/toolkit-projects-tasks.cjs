@@ -10,7 +10,9 @@
 //   --render <kind> --params <file> [--project-text <file>]   the full prompt
 //   --name <kind> --params <file>                              the task name
 //   --check <kind> <prompt-file>        current | outdated | edited | missing | misplaced | malformed
-//   --refresh <kind> <prompt-file> [--params <file>] [--project-text <file>]   the refreshed prompt
+//   --refresh <kind> <prompt-file> [--params <file>] [--project-text <file>] [--session <bound|fresh>]
+//                                       the refreshed prompt; a Toolkit task needs --session, the
+//                                       session its replacement runs in, so a swap always sets it
 //   --params-from <prompt-file>         the params block found in a prompt
 //   --check-memory <memory-file>        current, or one MEMORY FORMAT line per faulty Toolkit line
 //
@@ -27,7 +29,7 @@ const FENCE_OPEN = /^```toolkit-task-params[ \t]*$/;
 const FENCE_CLOSE = /^```[ \t]*$/;
 
 const KINDS = Object.freeze({
-  'daily-check-in': { checks: { name: 'DAILY-CHECK-IN-CHECKS', file: 'daily-check-in.md' }, session: 'fresh', title: 'Daily check-in' },
+  'daily-check-in': { checks: { name: 'DAILY-CHECK-IN-CHECKS', file: 'daily-check-in.md' }, session: 'bound', title: 'Daily check-in' },
   'hourly-nudge': { checks: { name: 'HOURLY-NUDGE-CHECKS', file: 'hourly-nudge.md' }, session: 'bound', title: 'Hourly nudge' },
   custom: { checks: null, session: null, title: null }
 });
@@ -47,7 +49,9 @@ const PARAMS = Object.freeze({
   parent_issue: { fallback: 'none', test: v => v === 'none' || /^[1-9]\d{0,6}$/.test(v) },
   report_dir: { required: true, test: v => /^\/mnt\/project-files\/[A-Za-z0-9._/-]+$/.test(v) && !v.split('/').includes('..') && !v.endsWith('/') && !v.includes('//') },
   effort: { required: true, test: v => ['low', 'medium', 'high', 'xhigh', 'max'].includes(v) },
-  session: { customOnly: true, fallback: 'fresh', test: v => v === 'fresh' || v === 'bound' }
+  // A custom task defaults to a fresh session; the two Toolkit tasks default to bound and take
+  // session fresh only as the fallback, which is then kept in their params.
+  session: { fallback: 'fresh', test: v => v === 'fresh' || v === 'bound' }
 });
 
 class TaskInputError extends Error {}
@@ -68,9 +72,11 @@ function validateParams(kind, raw) {
   }
   for (const [key, rule] of Object.entries(PARAMS)) {
     if (rule.customOnly && kind !== 'custom') continue;
-    const value = raw[key] === undefined ? rule.fallback : raw[key];
+    const fallback = key === 'session' && KINDS[kind].session ? KINDS[kind].session : rule.fallback;
+    const value = raw[key] === undefined ? fallback : raw[key];
     if (value === undefined && rule.required) throw new TaskInputError('TASK_PARAMS');
     if (!rule.test(value)) throw new TaskInputError('TASK_PARAMS');
+    if (key === 'session' && KINDS[kind].session && value === KINDS[kind].session) continue;
     params[key] = value;
   }
   return params;
@@ -86,10 +92,11 @@ function taskName(kind, params) {
   return `${params.project}: ${title}`;
 }
 
-// Template lines may start with a condition tag: [repo], [no-repo], [parent], [fresh], [bound].
+// Template lines may start with a condition tag: [repo], [no-repo], [parent], [toolkit], [fresh], [bound].
+// [toolkit] is the project whose repo is the Toolkit repo itself.
 // Placeholders are {{name}}; an unknown placeholder or tag is a broken source.
 function fill(template, kind, params) {
-  const session = KINDS[kind].session || params.session;
+  const session = params.session || KINDS[kind].session;
   const values = {
     ...params,
     task_name: KINDS[kind].title ? taskName(kind, params) : 'this task',
@@ -98,6 +105,7 @@ function fill(template, kind, params) {
   };
   const conditions = {
     repo: params.repo !== 'none', 'no-repo': params.repo === 'none', parent: params.parent_issue !== 'none',
+    toolkit: params.repo === params.toolkit_repo,
     fresh: session === 'fresh', bound: session === 'bound'
   };
   const lines = [];
@@ -182,16 +190,19 @@ class ProjectsTasks {
     return checkTask(kind, text, params => this.expectedBlocks(kind, params));
   }
 
-  refresh(kind, text, { params: override, projectText } = {}) {
+  refresh(kind, text, { params: override, projectText, session } = {}) {
     const result = this.check(kind, text);
     if (result.state === 'malformed') throw new TaskInputError('TASK_MALFORMED');
+    if (session !== undefined && (!KINDS[kind].session || !PARAMS.session.test(session))) throw new TaskInputError('TASK_ARGUMENTS');
+    const withSession = params => (session === undefined ? params : validateParams(kind, { ...params, session }));
     if (result.state === 'missing') {
       if (!override) throw new TaskInputError('TASK_PARAMS');
-      return this.render(kind, override, projectText);
+      return this.render(kind, withSession(override), projectText);
     }
     if (override || projectText !== undefined) throw new TaskInputError('TASK_ARGUMENTS');
     const lf = lfText(text);
-    const params = parseParams(kind, lf);
+    const stored = parseParams(kind, lf);
+    const params = withSession(stored);
     const expected = this.expectedBlocks(kind, params);
     const { blocks } = findBlocks(lf);
     const own = blocks.filter(block => block.source === SOURCE);
@@ -205,7 +216,8 @@ class ProjectsTasks {
     const fence = findParams(lf);
     let project = projectSegments(lf, own, fence).join('\n\n');
     if (kept.length) project = [project, KEPT_LABEL, ...kept].filter(Boolean).join('\n');
-    const fenceText = lf.split('\n').slice(fence.startLine, fence.endLine + 1).join('\n');
+    // A session change rewrites the params block; otherwise it is kept byte for byte.
+    const fenceText = params.session === stored.session ? lf.split('\n').slice(fence.startLine, fence.endLine + 1).join('\n') : paramsFence(params);
     return this.render(kind, params, project, fenceText);
   }
 }
@@ -282,7 +294,7 @@ function inOrder(lf, own, fence, expected) {
 
 // The two memory lines Toolkit defines. Nothing else in memory is read.
 const BINDING_LINE = /^[-*\s]*BINDING: [A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+ \S+ commit [0-9a-f]{40} CONTROLLER\.md blob [0-9a-f]{40} toolkit \d+\.\d+\.\d+ skill \S+ bound \S+\s*$/;
-const TASK_ENTRY = /^(?<name>[^|;]+?) \| (?<id>trig_[A-Za-z0-9]+) \| (?<cron>[^|;]+?) \| (?<mode>fresh|local|device|bound home cmsg_[A-Za-z0-9]+ since \d{4}-\d{2}-\d{2})(?: \| owner schedule)?$/;
+const TASK_ENTRY = /^(?<name>[^|;]+?) \| (?<id>trig_[A-Za-z0-9]+) \| (?<cron>[^|;]+?) \| (?<mode>fresh|local|device|bound home cmsg_[A-Za-z0-9]+ since \d{4}-\d{2}-\d{2})(?: \| owner schedule)?(?: \| stopped by owner \d{4}-\d{2}-\d{2})?$/;
 
 function checkMemory(text) {
   const lines = lfText(text).split('\n');
@@ -322,9 +334,11 @@ function parseArgs(args) {
     return { mode: mode.slice(2), kind: kindArg(positional[0]), params: options['--params'], projectText: options['--project-text'] };
   }
   if (mode === '--check' || mode === '--refresh') {
-    const positional = take(mode === '--refresh' ? ['--params', '--project-text'] : []);
+    const positional = take(mode === '--refresh' ? ['--params', '--project-text', '--session'] : []);
     if (positional.length !== 2) throw new TaskInputError('TASK_ARGUMENTS');
-    return { mode: mode.slice(2), kind: kindArg(positional[0]), file: positional[1], params: options['--params'], projectText: options['--project-text'] };
+    const kind = kindArg(positional[0]);
+    if (mode === '--refresh' && KINDS[kind].session && !options['--session']) throw new TaskInputError('TASK_ARGUMENTS');
+    return { mode: mode.slice(2), kind, file: positional[1], params: options['--params'], projectText: options['--project-text'], session: options['--session'] };
   }
   if (mode === '--params-from' || mode === '--check-memory') {
     const positional = take([]);
@@ -356,7 +370,8 @@ function main(args = process.argv.slice(2)) {
     } else if (options.mode === 'refresh') {
       output = tasks.refresh(options.kind, read(options.file), {
         params: options.params === undefined ? undefined : readParamsFile(options.kind, options.params),
-        projectText: read(options.projectText)
+        projectText: read(options.projectText),
+        session: options.session
       });
     } else if (options.mode === 'params-from') {
       const fence = findParams(read(options.file));

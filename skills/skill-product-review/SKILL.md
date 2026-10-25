@@ -1,6 +1,6 @@
 ---
 name: skill-product-review
-description: Review untrusted third-party agent skills before import or adaptation, then publish approved AI-facing skill material with preserved provenance, attribution, source locks, direct canonical ownership, and source traceability. Do not use for ordinary code publishing or unrelated repository maintenance.
+description: Review untrusted third-party agent skills before import or adaptation, then publish approved skill material that keeps a record of where it came from, credit to its authors, a pin on the exact upstream version, and one owned copy. Do not use for ordinary code publishing or unrelated repository maintenance.
 ---
 
 <!--
