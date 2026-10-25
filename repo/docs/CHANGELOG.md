@@ -1,6 +1,6 @@
 # Toolkit Changelog
 
-## 3.13.7 (final-product UAT)
+## 3.13.9 (final-product UAT)
 
 ### Coding gates
 
@@ -10,6 +10,19 @@
 ### Projects skill
 
 - Owner UAT lists and the hybrid work list follow the two rules above; Toolkit text says "computer" or "Remote Control session" rather than naming one kind of device. The Claude Projects controller skill is 2026-10-25.9 (re-upload it).
+
+## 3.13.7
+
+### Programme pages
+
+- **Generated parts first:** the parent page reads the CURRENT summary, then the Programme Graph directly under it, then the controller's hand-written notes and everything else, with the comment trace last. A task page reads its links, title and status block, then its direction note and everything else, with the comment trace last. PR pages are unchanged. A block found anywhere else, higher or lower, moves to its place once; hand-written text is never edited, only moved past, and a hand-kept index the graph replaces is removed in the same pass.
+- **Comment links open the comment:** every link the reconciler writes is the comment's full address. The old short links only worked when the comment was already on the page, so on a long issue, or in the GitHub mobile app, they opened the top of the issue instead.
+- **Shorter CURRENT summary:** it lists only the work in progress, each with its gate, PR, anything waiting on the owner and next step. Queued work shows in the graph.
+- **Graph columns and order:** the columns are Task, Task Description, Child #, PR #, Class and Status. The gate a task is in shows in CURRENT and on its own page. Inside each class, in-progress rows come before queued ones, then rows go by child number; native sub-issues follow the same order.
+- **The catalogue `order` no longer sets a position:** rows and native sub-issues sort by class, status and child number, so the first pass after updating may reorder sub-issues, including tasks still on the older CORE, HARDENING and LATER classes. The older-class migration patch still works and moves nothing itself.
+- **Older copies hold instead of flipping a page:** a copy of the reconciler that finds a page written by a newer Toolkit leaves it alone and says to update Toolkit on that computer, so two computers on different versions never swap a page between layouts.
+- **Joins keep your formatting:** when a block moves, only blank lines are trimmed where text is joined, so a two-space line break or an indented code line next to it is kept. A replaced hand-kept section now ends at the next managed block too, so it never takes the comment trace or the text after it with it. The comment trace is added at the end of a page once and then stays where it is.
+- **One line per topic:** the comment trace lists each topic on one line, every comment as a link named by its comment ID, with "(replaced by ...)" after a replaced record. A topic is the task's name as the graph shows it, or a short subject for a programme-wide comment, and may now contain spaces. On a task page, comments without a topic fall under the task's own name; on the parent they fall under "Other comments", as before. A task name containing `&` or another escaped character stays one topic. When a page fills up, a topic's links move into one index comment and the line shrinks to a link to it. The trace audit accepts "replaced by" or "superseded by" right after a link.
 
 ## 3.13.6 (repository protection)
 

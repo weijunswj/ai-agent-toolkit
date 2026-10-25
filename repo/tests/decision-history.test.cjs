@@ -7,7 +7,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const SCRIPTS = path.resolve(__dirname, '../../skills/github-program-reconciler/scripts');
-const { OTHER_COMMENTS, commentTag, splitTag, groupByTag } = require(path.join(SCRIPTS, 'decision-tags.cjs'));
+const { OTHER_COMMENTS, commentTag, commentTagLabel, splitTag, groupByTag } = require(path.join(SCRIPTS, 'decision-tags.cjs'));
 const { CONFIRMATION_TAG, entriesFromComments, entriesFromLedger, analyseTrace, childHistory, renderSummary, renderProgramme, summaryOf, parseArgs } = require(path.join(SCRIPTS, 'decision-history.cjs'));
 
 const PREFIX = 'INT-TK421-';
@@ -23,7 +23,9 @@ test('a tag is the first line followed by a --- line, in upper case', () => {
   assert.equal(commentTag('table-creation\r\n---\r\nBody'), 'TABLE-CREATION');
   assert.equal(commentTag('\n\n  SCOPE.V2_x  \n---  \nBody'), 'SCOPE.V2_X');
   assert.equal(commentTag('DATA-LEAK-FIX\n---'), 'DATA-LEAK-FIX');
-  for (const body of ['', null, 'DATA-LEAK-FIX', 'DATA-LEAK-FIX\nBody\n---', 'Two words\n---\nBody', '-LEADING\n---\n', '## HEADING\n---\nBody', 'TAG\n----\nBody', `${'A'.repeat(81)}\n---\n`]) {
+  assert.equal(commentTag('Codex host  support\n---\nBody'), 'CODEX HOST SUPPORT', 'a task name is a topic, with runs of spaces as one');
+  assert.equal(commentTagLabel('Codex host  support\n---\nBody'), 'Codex host support', 'the label keeps the case as written');
+  for (const body of ['', null, 'DATA-LEAK-FIX', 'DATA-LEAK-FIX\nBody\n---', 'Two words!\n---\nBody', '-LEADING\n---\n', '## HEADING\n---\nBody', 'TAG\n----\nBody', `${'A'.repeat(81)}\n---\n`]) {
     assert.equal(commentTag(body), null, JSON.stringify(body));
   }
   assert.deepEqual(splitTag('TAG\r\n---\r\nline one\r\nline two'), { tag: 'TAG', text: 'line one\nline two' });
