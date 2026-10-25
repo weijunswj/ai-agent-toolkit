@@ -11,8 +11,8 @@
 //   --name <kind> --params <file>                              the task name
 //   --check <kind> <prompt-file>        current | outdated | edited | missing | misplaced | malformed
 //   --refresh <kind> <prompt-file> [--params <file>] [--project-text <file>] [--session <bound|fresh>]
-//                                       the refreshed prompt; --session moves a Toolkit task between
-//                                       bound and the fresh-session fallback
+//                                       the refreshed prompt; a Toolkit task needs --session, the
+//                                       session its replacement runs in, so a swap always sets it
 //   --params-from <prompt-file>         the params block found in a prompt
 //   --check-memory <memory-file>        current, or one MEMORY FORMAT line per faulty Toolkit line
 //
@@ -201,7 +201,8 @@ class ProjectsTasks {
     }
     if (override || projectText !== undefined) throw new TaskInputError('TASK_ARGUMENTS');
     const lf = lfText(text);
-    const params = withSession(parseParams(kind, lf));
+    const stored = parseParams(kind, lf);
+    const params = withSession(stored);
     const expected = this.expectedBlocks(kind, params);
     const { blocks } = findBlocks(lf);
     const own = blocks.filter(block => block.source === SOURCE);
@@ -216,7 +217,7 @@ class ProjectsTasks {
     let project = projectSegments(lf, own, fence).join('\n\n');
     if (kept.length) project = [project, KEPT_LABEL, ...kept].filter(Boolean).join('\n');
     // A session change rewrites the params block; otherwise it is kept byte for byte.
-    const fenceText = session === undefined ? lf.split('\n').slice(fence.startLine, fence.endLine + 1).join('\n') : paramsFence(params);
+    const fenceText = params.session === stored.session ? lf.split('\n').slice(fence.startLine, fence.endLine + 1).join('\n') : paramsFence(params);
     return this.render(kind, params, project, fenceText);
   }
 }
@@ -335,7 +336,9 @@ function parseArgs(args) {
   if (mode === '--check' || mode === '--refresh') {
     const positional = take(mode === '--refresh' ? ['--params', '--project-text', '--session'] : []);
     if (positional.length !== 2) throw new TaskInputError('TASK_ARGUMENTS');
-    return { mode: mode.slice(2), kind: kindArg(positional[0]), file: positional[1], params: options['--params'], projectText: options['--project-text'], session: options['--session'] };
+    const kind = kindArg(positional[0]);
+    if (mode === '--refresh' && KINDS[kind].session && !options['--session']) throw new TaskInputError('TASK_ARGUMENTS');
+    return { mode: mode.slice(2), kind, file: positional[1], params: options['--params'], projectText: options['--project-text'], session: options['--session'] };
   }
   if (mode === '--params-from' || mode === '--check-memory') {
     const positional = take([]);
