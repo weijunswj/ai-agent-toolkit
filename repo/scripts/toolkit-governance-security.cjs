@@ -5,26 +5,33 @@
 //
 //   S1 Dependabot alerts on.
 //   S2 Dependabot security updates on.
-//   S3 .github/dependabot.yml has a version-update entry for every package ecosystem found in the
-//      repository (npm, pip, GitHub Actions, Docker, Go, Cargo, Bundler, Composer).
-//   S4 secret scanning and push protection on (public repositories; on a private repository they
-//      need a paid GitHub plan, so they are reported as not on this plan, never as drift).
-//   S5 CodeQL code scanning default setup configured (public repositories; private as S4).
+//   S3 .github/dependabot.yml (or .yaml) has a version-update entry for every package ecosystem
+//      found in the repository (npm, pip, GitHub Actions, Docker, Go, Cargo, Bundler, Composer).
+//   S4 secret scanning and push protection on (public repositories; on a private or internal
+//      repository they are paid, so they are required only when the binding says paid_security "on").
+//   S5 CodeQL code scanning on: default setup configured, or an advanced setup in a workflow
+//      (public repositories; private as S4).
 //   S6 private vulnerability reporting on (public repositories only).
-//   S8 on a private repository, the programme binding records the owner's answer on GitHub's paid
-//      security features (`paid_security`: "off" or "on"). With "on", S4 and S5 are required there.
-//   S7 auto-merge matches the programme binding's `dependency_updates.auto_merge`. With
-//      "patch-minor": the auto-merge workflow is present and current, the repository allows
-//      auto-merge, and default-branch protection (toolkit-governance-protection.cjs) is conformant
-//      with at least one required check. With "off" (the default) nothing more is needed: the
-//      workflow, if present, does nothing.
+//   S8 on a private or internal repository, the programme binding on the default branch records the
+//      owner's answer on GitHub's paid security features (`paid_security`: "off" or "on").
+//   S7 auto-merge matches the binding's `dependency_updates.auto_merge`. With "patch-minor": the
+//      auto-merge workflow is present and current, the repository allows auto-merge, and
+//      default-branch protection (toolkit-governance-protection.cjs) is conformant with at least one
+//      required check. With "off" (the default) nothing more is needed: the workflow, if present,
+//      does nothing.
 //
-// S1, S2, S4-S7 ask GitHub through the signed-in `gh` CLI; S3 and the workflow file are read from the
+// The policy (paid_security and dependency_updates) is read from the binding committed on the
+// default branch, through GitHub, never from the working tree: an agent can edit a working tree, and
+// only a merged binding is the owner's answer. Unreadable counts as unanswered: nothing paid and no
+// auto-merge. The invariant model and closure matrix are in toolkit-governance-security.test.cjs.
+//
+// S1, S2, S4-S8 ask GitHub through the signed-in `gh` CLI; S3 and the workflow file are read from the
 // checkout. `--offline` checks only those files. Nothing here writes, except `applySecurity` (through
 // `ghSecurityWriter` and `writeSecurityFiles`), which `toolkit governance security` and `migrate` call
-// for an ENABLED repository: the owner's yes to governance covers the free settings, and the
-// binding's `paid_security: "on"` covers the paid ones. Toolkit never edits a dependabot.yml or
-// workflow it did not write: when one exists and differs, it reports what to change by hand.
+// for an ENABLED repository: the owner's yes to governance covers the free settings, and the merged
+// binding's `paid_security: "on"` covers the paid ones. Nothing is written when GitHub cannot be read.
+// Toolkit never edits a dependabot.yml or workflow it did not write: when one exists and differs, it
+// reports what to change by hand.
 
 const childProcess = require('node:child_process');
 const crypto = require('node:crypto');
@@ -41,10 +48,14 @@ const ROOT = path.resolve(__dirname, '..', '..');
 const WORKFLOW_TEMPLATE_REL = 'skills/secure-ci-cd/templates/github-actions/dependency-auto-merge.yml';
 const WORKFLOW_REL = '.github/workflows/dependency-auto-merge.yml';
 const DEPENDABOT_REL = '.github/dependabot.yml';
+// GitHub reads either name; Toolkit writes the first.
+const DEPENDABOT_NAMES = Object.freeze([DEPENDABOT_REL, '.github/dependabot.yaml']);
 const WORKFLOW_MARKER = '# Toolkit dependency auto-merge v';
-const AUTO_MERGE_VALUES = Object.freeze(['off', 'patch-minor']);
-const ACTIONS_VALUES = Object.freeze(['auto-merge', 'owner']);
-const PAID_VALUES = Object.freeze(['off', 'on']);
+// The auto-merge workflow's own action pin moves with Toolkit's template, never through Dependabot,
+// so a bump there cannot make the copy differ from the template.
+const TEMPLATE_ACTION = 'dependabot/fetch-metadata';
+// GitHub refusals that mean "not available here" (plan or organisation policy), not a failure.
+const UNAVAILABLE = Object.freeze(['not-on-plan', 'refused-by-policy']);
 // Version updates wait this many days after a release (security updates never wait). GitHub
 // Actions wait longer: an action runs with the workflow's token, so a bad release costs more.
 const COOLDOWN_DAYS = Object.freeze({ default: 3, 'github-actions': 7 });
@@ -107,10 +118,16 @@ function unquote(value) {
   return text;
 }
 
-// Map(ecosystem -> [directories]) from a dependabot.yml, or null when it is missing or unreadable.
-// It reads the plain block style GitHub's examples use; inline lists are understood too.
+// The dependabot config file present in `root` (relative path), or null.
+function dependabotFile(root) {
+  return DEPENDABOT_NAMES.find(rel => isFile(path.join(root, ...rel.split('/')))) || null;
+}
+
+// Map(ecosystem -> [directories]) from a dependabot.yml or .yaml, or null when it is missing or
+// unreadable. It reads the plain block style GitHub's examples use; inline lists are understood too.
 function readDependabotConfig(root) {
-  const text = readSmall(path.join(root, ...DEPENDABOT_REL.split('/')));
+  const rel = dependabotFile(root);
+  const text = rel === null ? null : readSmall(path.join(root, ...rel.split('/')));
   if (text === null) return null;
   const entries = new Map();
   let current = null;
@@ -189,6 +206,7 @@ function renderDependabotConfig(detected) {
       `      ${ecosystem}-patch-and-minor:`,
       '        update-types: ["patch", "minor"]',
     );
+    if (ecosystem === 'github-actions') lines.push('    ignore:', `      - dependency-name: "${TEMPLATE_ACTION}"  # pinned by Toolkit's auto-merge template`);
   }
   return `${lines.join('\n')}\n`;
 }
@@ -211,21 +229,25 @@ function workflowState(root, toolkitRoot = ROOT) {
   return text.startsWith(WORKFLOW_MARKER) ? 'outdated' : 'foreign';
 }
 
-// The binding's policy: { auto_merge, github_actions, paid_security }; defaults off, auto-merge and
-// null (the owner has not answered the paid-features question yet).
-function bindingPolicy(root) {
-  const fallback = { auto_merge: 'off', github_actions: 'auto-merge', paid_security: null };
-  const text = readSmall(path.join(root, '.github', 'toolkit-programme.json'));
-  if (text === null) return fallback;
-  try {
-    const parsed = JSON.parse(text.replace(/^\uFEFF/, ''));
-    const value = parsed && parsed.dependency_updates && typeof parsed.dependency_updates === 'object' ? parsed.dependency_updates : {};
-    return {
-      auto_merge: AUTO_MERGE_VALUES.includes(value.auto_merge) ? value.auto_merge : 'off',
-      github_actions: ACTIONS_VALUES.includes(value.github_actions) ? value.github_actions : 'auto-merge',
-      paid_security: parsed && PAID_VALUES.includes(parsed.paid_security) ? parsed.paid_security : null,
-    };
-  } catch { return fallback; }
+// A workflow in the checkout that runs CodeQL itself (an advanced setup), or null. GitHub refuses
+// that workflow's results once default setup is on, so default setup is never turned on over it.
+function advancedCodeqlWorkflow(root) {
+  const folder = path.join(root, '.github', 'workflows');
+  let names = [];
+  try { names = fs.readdirSync(folder).filter(name => /\.ya?ml$/i.test(name)).sort(); } catch { return null; }
+  return names.find(name => /uses:\s*['"]?github\/codeql-action\//.test(readSmall(path.join(folder, name)) || '')) || null;
+}
+
+// The binding's policy as committed on the default branch: { policy, source } where source is
+// 'default-branch', 'not-merged' (no binding there yet), 'invalid' or 'unreadable'. Anything but
+// 'default-branch' has the safe defaults: no auto-merge, Actions kept for the owner, no paid answer.
+function committedPolicy(read, identity) {
+  const binding = read && read.ok === true && read.binding ? read.binding : { status: 'unreadable' };
+  if (binding.status === 'ok') {
+    const parsed = governance.committedBindingPolicy(binding.text, identity);
+    return { policy: parsed.policy, source: parsed.valid ? 'default-branch' : 'invalid' };
+  }
+  return { policy: governance.committedBindingPolicy('null', identity).policy, source: binding.status === 'missing' ? 'not-merged' : 'unreadable' };
 }
 
 // ---- GitHub settings (S1, S2, S4-S7) ------------------------------------------------------------
@@ -244,7 +266,11 @@ function ghRun(args, spawn, input = null) {
   if (result.status !== 0) {
     const text = String(result.stderr || '') + String(result.stdout || '');
     if (/HTTP 404/.test(text)) return { ok: false, reason: 'not-found' };
-    if (/HTTP 403/.test(text)) return { ok: false, reason: /advanced security|code security|secret protection|not available|upgrade/i.test(text) ? 'not-on-plan' : 'forbidden' };
+    if (/HTTP 40[39]|HTTP 422/.test(text)) {
+      if (/advanced security|code security|secret protection|not available|upgrade|plan/i.test(text)) return { ok: false, reason: 'not-on-plan' };
+      if (/organi[sz]ation|enterprise|policy|disabled by/i.test(text)) return { ok: false, reason: 'refused-by-policy' };
+      return { ok: false, reason: /HTTP 403/.test(text) ? 'forbidden' : 'gh-request-failed' };
+    }
     return { ok: false, reason: 'gh-request-failed' };
   }
   const stdout = String(result.stdout || '').trim();
@@ -257,21 +283,27 @@ function statusOf(section) {
 }
 
 // What GitHub says about `slug`: { ok, visibility, allow_auto_merge, alerts, security_updates,
-// secret_scanning, push_protection, code_scanning, private_reporting } where each setting is
-// 'enabled' | 'disabled' | 'not-on-plan' | 'unreadable', or { ok: false, reason }.
+// secret_scanning, push_protection, code_scanning, private_reporting, binding } where each setting is
+// 'enabled' | 'disabled' | 'not-on-plan' | 'unreadable', and `binding` is the programme binding on the
+// default branch ({ status: 'ok', text } | { status: 'missing' } | { status: 'unreadable' }); or
+// { ok: false, reason }. Without admin rights GitHub hides these settings, so they read unreadable.
 function ghSecurityReader(slug, { spawn = childProcess.spawnSync } = {}) {
   const repository = ghRun([`repos/${slug}`], spawn);
   if (!repository.ok) return repository;
   const value = repository.value || {};
-  const visibility = value.private === true ? 'private' : value.visibility === 'internal' ? 'internal' : 'public';
+  const visibility = typeof value.private !== 'boolean' ? null
+    : value.private === false ? 'public' : value.visibility === 'internal' ? 'internal' : 'private';
+  if (visibility === null) return { ok: false, reason: 'visibility-unreadable' };
+  const admin = Boolean(value.permissions && value.permissions.admin === true);
   const analysis = value.security_and_analysis && typeof value.security_and_analysis === 'object' ? value.security_and_analysis : null;
   const fromAnalysis = key => {
     const status = analysis ? statusOf(analysis[key]) : null;
     if (status === 'enabled' || status === 'disabled') return status;
-    return visibility === 'public' ? 'unreadable' : 'not-on-plan';
+    return visibility === 'public' || !admin ? 'unreadable' : 'not-on-plan';
   };
+  // GitHub answers 404 both for "alerts off" and for "you may not see this".
   const alertsRead = ghRun([`repos/${slug}/vulnerability-alerts`, '--silent'], spawn);
-  const alerts = alertsRead.ok ? 'enabled' : alertsRead.reason === 'not-found' ? 'disabled' : 'unreadable';
+  const alerts = alertsRead.ok ? 'enabled' : alertsRead.reason === 'not-found' && admin ? 'disabled' : 'unreadable';
   const fixes = ghRun([`repos/${slug}/automated-security-fixes`], spawn);
   const securityUpdates = fixes.ok && fixes.value && typeof fixes.value.enabled === 'boolean'
     ? (fixes.value.enabled && fixes.value.paused !== true ? 'enabled' : 'disabled')
@@ -279,11 +311,18 @@ function ghSecurityReader(slug, { spawn = childProcess.spawnSync } = {}) {
   const codeRead = ghRun([`repos/${slug}/code-scanning/default-setup`], spawn);
   const codeScanning = codeRead.ok && codeRead.value
     ? (codeRead.value.state === 'configured' ? 'enabled' : 'disabled')
-    : (visibility === 'public' ? 'unreadable' : 'not-on-plan');
+    : (visibility === 'public' || !admin ? 'unreadable' : 'not-on-plan');
   let privateReporting = 'not-on-plan';
   if (visibility === 'public') {
     const reporting = ghRun([`repos/${slug}/private-vulnerability-reporting`], spawn);
     privateReporting = reporting.ok && reporting.value && typeof reporting.value.enabled === 'boolean' ? (reporting.value.enabled ? 'enabled' : 'disabled') : 'unreadable';
+  }
+  let binding = { status: 'unreadable' };
+  if (typeof value.default_branch === 'string' && value.default_branch) {
+    const file = ghRun([`repos/${slug}/contents/${governance.BINDING_FILE}?ref=${encodeURIComponent(value.default_branch)}`], spawn);
+    if (file.ok && file.value && file.value.encoding === 'base64' && typeof file.value.content === 'string') {
+      binding = { status: 'ok', text: Buffer.from(file.value.content, 'base64').toString('utf8') };
+    } else if (!file.ok && file.reason === 'not-found') binding = { status: 'missing' };
   }
   return {
     ok: true,
@@ -295,6 +334,7 @@ function ghSecurityReader(slug, { spawn = childProcess.spawnSync } = {}) {
     push_protection: fromAnalysis('secret_scanning_push_protection'),
     code_scanning: codeScanning,
     private_reporting: privateReporting,
+    binding,
   };
 }
 
@@ -326,7 +366,8 @@ function ghSecurityWriter(slug, plan, { spawn = childProcess.spawnSync } = {}) {
 }
 
 // Writes the files in `files` ({ dependabot: true, workflow: true }) only where nothing is at that
-// path yet, or the workflow is Toolkit's own older copy. Returns [{ file, result }].
+// path yet (a dependabot.yaml counts), or the workflow is Toolkit's own older copy. Returns
+// [{ file, result }].
 function writeSecurityFiles(root, files, { toolkitRoot = ROOT } = {}) {
   const results = [];
   const put = (rel, text) => {
@@ -339,19 +380,29 @@ function writeSecurityFiles(root, files, { toolkitRoot = ROOT } = {}) {
       results.push({ file: rel, result: `failed (${error && error.code ? error.code : 'unexpected error'})` });
     }
   };
-  if (files.dependabot && !isFile(path.join(root, ...DEPENDABOT_REL.split('/')))) put(DEPENDABOT_REL, renderDependabotConfig(detectEcosystems(root)));
+  if (files.dependabot && dependabotFile(root) === null) put(DEPENDABOT_REL, renderDependabotConfig(detectEcosystems(root)));
   if (files.workflow && ['missing', 'outdated'].includes(workflowState(root, toolkitRoot))) put(WORKFLOW_REL, workflowTemplate(toolkitRoot));
   return results;
 }
 
 // Turns on what `result` (a dependencySecurity verdict) lists as fixes and writes its missing files,
-// then reads back through `reread()`. { settings, files, still_off, result: 'applied' | 'nothing' |
-// 'failed' }.
+// then reads back through `reread()`. { prior, settings, files, unavailable, still_off, read_back,
+// result } with result:
+//   'nothing'     nothing to do;
+//   'unverified'  GitHub could not be read first (nothing is written then), or the read-back failed;
+//   'failed'      a write failed, a file was not written, or the read-back still shows it off;
+//   'applied'     every write was read back on, or GitHub refused it as not available here.
+// A write GitHub refuses because the plan or an organisation policy does not allow it is listed in
+// `unavailable` and left alone: it is not a failure. `prior` keeps what GitHub showed before, so a
+// change can be undone by hand.
 function applySecurity(root, result, { writer = ghSecurityWriter, fileWriter = writeSecurityFiles, reread = null } = {}) {
-  const fixes = result.fixes || {};
+  const prior = result.settings || null;
+  const empty = { prior, settings: [], files: [], unavailable: [], still_off: [], read_back: false };
+  if (!result.fixes) return { ...empty, result: 'unverified' };
+  const fixes = result.fixes;
   const wantSettings = Object.entries(fixes).some(([key, on]) => key !== 'paid' && on);
   const wantFiles = Boolean(result.files && (result.files.dependabot || result.files.workflow));
-  if (!wantSettings && !wantFiles) return { settings: [], files: [], still_off: [], result: 'nothing' };
+  if (!wantSettings && !wantFiles) return { ...empty, result: 'nothing' };
   let settings = [];
   if (wantSettings) {
     try { settings = writer(result.slug, fixes); } catch { settings = [{ setting: 'all', ok: false, reason: 'writer-failed' }]; }
@@ -360,10 +411,17 @@ function applySecurity(root, result, { writer = ghSecurityWriter, fileWriter = w
   if (wantFiles) {
     try { files = fileWriter(root, result.files); } catch { files = [{ file: 'all', result: 'failed (writer-failed)' }]; }
   }
-  const after = reread ? reread() : null;
-  const stillOff = after && after.fixes ? Object.entries(after.fixes).filter(([key, on]) => key !== 'paid' && on && fixes[key]).map(([key]) => key) : [];
-  const failed = settings.some(entry => !entry.ok) || files.some(entry => entry.result !== 'written') || stillOff.length > 0;
-  return { settings, files, still_off: stillOff, result: failed ? 'failed' : 'applied' };
+  const unavailable = settings.filter(entry => !entry.ok && UNAVAILABLE.includes(entry.reason)).map(entry => entry.setting);
+  let after = null;
+  if (wantSettings && reread) {
+    try { after = reread(); } catch { after = null; }
+  }
+  const readBack = Boolean(after && after.fixes);
+  const written = new Set(settings.filter(entry => entry.ok).map(entry => entry.setting));
+  const stillOff = readBack ? Object.entries(after.fixes).filter(([key, on]) => key !== 'paid' && on && written.has(key)).map(([key]) => key) : [];
+  const failed = settings.some(entry => !entry.ok && !UNAVAILABLE.includes(entry.reason)) || files.some(entry => entry.result !== 'written') || stillOff.length > 0;
+  const status = failed ? 'failed' : wantSettings && !readBack ? 'unverified' : 'applied';
+  return { prior, settings, files, unavailable, still_off: stillOff, read_back: readBack, result: status };
 }
 
 const SETTING_LABELS = Object.freeze({
@@ -372,13 +430,26 @@ const SETTING_LABELS = Object.freeze({
   allow_auto_merge: 'allow auto-merge', all: 'the settings',
 });
 
-// Plain lines saying what `applySecurity` did, and what is left to do by hand.
+// Plain lines saying what `applySecurity` did, what could not be checked, and what is left to do by
+// hand.
 function describeOutcome(slug, root, result, outcome) {
   const lines = [];
-  for (const entry of outcome.settings) lines.push(`- ${slug}: ${SETTING_LABELS[entry.setting] || entry.setting} ${entry.ok ? 'turned on' : `not turned on (${entry.reason})`}.`);
+  if (!result.fixes) lines.push(`- ${slug}: nothing changed: GitHub could not be read, so nothing was checked or turned on.`);
+  for (const entry of outcome.settings) {
+    const label = SETTING_LABELS[entry.setting] || entry.setting;
+    if (entry.ok) lines.push(`- ${slug}: ${label} turned on.`);
+    else if (UNAVAILABLE.includes(entry.reason)) lines.push(`- ${slug}: ${label} left alone: GitHub does not allow it here (${entry.reason === 'not-on-plan' ? 'not on this plan' : 'an organisation or enterprise policy'}).`);
+    else lines.push(`- ${slug}: ${label} not turned on (${entry.reason}).`);
+  }
   for (const entry of outcome.files) lines.push(`- ${root}: ${entry.file} ${entry.result}${entry.result === 'written' ? '; commit it through a pull request' : ''}.`);
+  const wrote = outcome.settings.some(entry => entry.ok);
   if (outcome.still_off.length) lines.push(`- ${slug}: reading back still shows off: ${outcome.still_off.map(key => SETTING_LABELS[key] || key).join(', ')}.`);
-  else if (outcome.result === 'applied') lines.push(`- ${slug}: read back.`);
+  else if (wrote && !outcome.read_back) lines.push(`- ${slug}: could not read the settings back, so the change is unverified; run the check again.`);
+  else if (wrote) lines.push(`- ${slug}: read back.`);
+  for (const [id, check] of Object.entries(result.checks || {})) {
+    if (check.status === 'unverified') lines.push(`- ${slug}: could not check ${id}: ${check.details.join('; ')}.`);
+  }
+  if (result.pending_policy) lines.push(`- ${slug}: the working-tree binding asks for ${JSON.stringify(result.pending_policy)}; it counts only once merged into the default branch.`);
   const byHand = [];
   if (result.checks.S3 && result.checks.S3.status === 'drift' && !(result.files && result.files.dependabot)) byHand.push(...result.checks.S3.details);
   if (result.checks.S7 && result.checks.S7.status === 'drift') byHand.push(...result.checks.S7.details.filter(detail => !detail.includes(WORKFLOW_REL) || result.workflow === 'foreign'));
@@ -402,15 +473,22 @@ function verdict(status, reason, checks = {}, extra = {}) {
   return Object.freeze({ status, reason, checks: Object.freeze(checks), ...extra });
 }
 
+const SNAPSHOT_KEYS = Object.freeze(['visibility', 'allow_auto_merge', 'alerts', 'security_updates', 'secret_scanning', 'push_protection', 'code_scanning', 'private_reporting']);
+const PAID_QUESTION = 'ask the owner whether to turn on GitHub\'s paid Secret Protection and Code Security for this repository (billed per active committer; default off), and record only the owner\'s own answer, "off" or "on", as paid_security in the binding through a merged pull request';
+
+function sameValues(a, b) {
+  return Object.keys(a).every(key => a[key] === b[key]);
+}
+
 // { status: conformant | drift | unverified | not-applicable, reason, checks: { S1..S8 }, policy,
-// missing_ecosystems, fixes } for the repository at `root`. Options: `offline`, `reader(slug)`
-// (tests), `protectionResult` (the default-branch verdict, for S7), `toolkitRoot`.
+// policy_source, pending_policy, settings, missing_ecosystems, fixes, files } for the repository at
+// `root`. Options: `offline`, `reader(slug)` (tests), `protectionResult` (the default-branch
+// verdict, for S7), `toolkitRoot`.
 function dependencySecurity(root, { offline = false, reader = ghSecurityReader, protectionResult = null, toolkitRoot = ROOT } = {}) {
   let identity;
   try { identity = governance.readIdentity(root); } catch { return verdict('unverified', 'identity-unreadable'); }
   const slug = identity.valid ? governance.remoteSlug(identity.remote) : null;
   if (!identity.valid || identity.remote.host !== 'github.com' || !slug) return verdict('not-applicable', 'not-a-github-repository');
-  const policy = bindingPolicy(root);
   const detected = detectEcosystems(root);
   const config = readDependabotConfig(root);
   const missingEcosystems = uncoveredEcosystems(detected, config);
@@ -420,86 +498,110 @@ function dependencySecurity(root, { offline = false, reader = ghSecurityReader, 
     try { read = reader(slug); } catch { read = { ok: false, reason: 'reader-failed' }; }
   }
   const online = read && read.ok === true;
+  const { policy, source } = offline ? { ...committedPolicy(null, identity), source: 'offline' } : committedPolicy(read, identity);
+  const known = source === 'default-branch' || source === 'not-merged';
+  const working = governance.workingBindingPolicy(root);
+  const pendingPolicy = working && known && !sameValues(working, policy) ? working : null;
+  const advanced = advancedCodeqlWorkflow(root);
   const value = key => (offline ? 'not-checked' : online ? read[key] : 'unreadable');
   const checks = {
     S1: settingCheck(value('alerts'), 'Dependabot alerts'),
     S2: settingCheck(value('security_updates'), 'Dependabot security updates'),
     S3: missingEcosystems.length === 0
       ? { status: 'ok', details: [] }
-      : { status: 'drift', details: missingEcosystems.map(item => `${DEPENDABOT_REL} has no "${item.ecosystem}" entry for ${item.directory}`) },
+      : { status: 'drift', details: missingEcosystems.map(item => `${dependabotFile(root) || DEPENDABOT_REL} has no "${item.ecosystem}" entry for ${item.directory}`) },
   };
   const scanning = settingCheck(value('secret_scanning'), 'Secret scanning');
   const pushProtection = settingCheck(value('push_protection'), 'Push protection');
   const off = [scanning, pushProtection].filter(item => item.status === 'drift');
   checks.S4 = off.length ? { status: 'drift', details: off.flatMap(item => item.details) }
     : [scanning, pushProtection].find(item => item.status !== 'ok') || scanning;
-  checks.S5 = settingCheck(value('code_scanning'), 'CodeQL code scanning');
+  checks.S5 = online && advanced && read.code_scanning !== 'enabled'
+    ? { status: 'ok', details: [`CodeQL runs from .github/workflows/${advanced} (advanced setup), so default setup stays off`] }
+    : settingCheck(value('code_scanning'), 'CodeQL code scanning');
   const isPrivate = Boolean(online && read.visibility !== 'public');
   if (isPrivate) {
+    const answer = !known ? 'answer on the default branch could not be read' : policy.paid_security === 'off' ? 'binding keeps it off' : 'binding has no answer yet';
     for (const id of ['S4', 'S5']) {
       if (policy.paid_security !== 'on') {
-        if (checks[id].status === 'drift' || checks[id].status === 'not-on-plan') checks[id] = { status: 'not-applicable', details: [`a paid GitHub feature on a private repository; the binding ${policy.paid_security === 'off' ? 'keeps it off' : 'has no answer yet'}`] };
+        if (checks[id].status === 'drift' || checks[id].status === 'not-on-plan') checks[id] = { status: 'not-applicable', details: [`a paid GitHub feature on a ${read.visibility} repository; the ${answer}`] };
       } else if (checks[id].status === 'not-on-plan') {
         checks[id] = { status: 'drift', details: [`the binding turns GitHub's paid ${id === 'S4' ? 'Secret Protection' : 'Code Security'} on, but this account's plan does not offer it (it needs GitHub Team or Enterprise Cloud); buy it or set paid_security to off`] };
       }
     }
   }
-  checks.S8 = isPrivate
-    ? (policy.paid_security === null
-      ? { status: 'drift', details: ['the programme binding has no paid_security answer: ask the owner whether to turn on GitHub\'s paid Secret Protection and Code Security for this private repository (billed per active committer; default off) and record "off" or "on"'] }
-      : { status: 'ok', details: [] })
-    : offline ? { status: 'not-checked', details: ['offline'] }
+  if (isPrivate) {
+    checks.S8 = source === 'unreadable' ? { status: 'unverified', details: ['the programme binding on the default branch could not be read, so the paid-features answer is unknown'] }
+      : source === 'invalid' ? { status: 'drift', details: ['the programme binding on the default branch is not valid, so it records no paid-features answer'] }
+        : source === 'not-merged' ? { status: 'drift', details: [`the programme binding is not on the default branch yet: ${PAID_QUESTION}`] }
+          : policy.paid_security === null ? { status: 'drift', details: [`the programme binding has no paid_security answer: ${PAID_QUESTION}`] }
+            : { status: 'ok', details: [] };
+  } else {
+    checks.S8 = offline ? { status: 'not-checked', details: ['offline'] }
       : online ? { status: 'not-applicable', details: [] } : { status: 'unverified', details: ['the repository visibility could not be read'] };
+  }
   checks.S6 = online && read.visibility !== 'public'
     ? { status: 'not-applicable', details: ['private vulnerability reporting is for public repositories'] }
     : settingCheck(value('private_reporting'), 'Private vulnerability reporting');
   const s7 = [];
   let s7Status = 'ok';
-  if (policy.auto_merge === 'patch-minor') {
+  if (offline) s7Status = 'not-checked';
+  else if (!online) s7Status = 'unverified';
+  else if (!known) s7Status = 'unverified';
+  else if (policy.auto_merge === 'patch-minor') {
     if (workflow !== 'current') s7.push(workflow === 'missing' ? `${WORKFLOW_REL} is missing` : workflow === 'outdated' ? `${WORKFLOW_REL} is an older Toolkit copy` : `${WORKFLOW_REL} is not Toolkit's file`);
-    if (offline) s7Status = 'not-checked';
-    else if (!online) s7Status = 'unverified';
-    else if (!read.allow_auto_merge) s7.push('the repository does not allow auto-merge');
+    if (!read.allow_auto_merge) s7.push('the repository does not allow auto-merge');
     const branch = protectionResult ? protectionResult.status : 'unverified';
     if (protectionResult && protectionResult.reason === 'binding-has-no-required-checks') s7.push('the binding names no required checks, so auto-merge could merge untested code');
     else if (['drift', 'not-enforceable', 'not-applicable'].includes(branch)) s7.push('the default branch is not protected the way auto-merge needs (see the default-branch protection findings)');
-    else if (branch !== 'conformant' && s7Status === 'ok') s7Status = 'unverified';
+    else if (branch !== 'conformant') s7Status = 'unverified';
     if (s7.length) s7Status = 'drift';
   }
-  checks.S7 = { status: s7Status, details: s7.length ? s7 : s7Status === 'not-checked' ? ['offline'] : s7Status === 'unverified' ? ['the repository settings or default-branch protection could not be read'] : [] };
+  checks.S7 = {
+    status: s7Status,
+    details: s7.length ? s7 : s7Status === 'not-checked' ? ['offline']
+      : s7Status === 'unverified' ? [online && !known ? 'the programme binding on the default branch could not be read, so the auto-merge policy is unknown and auto-merge stays off' : 'the repository settings or default-branch protection could not be read'] : [],
+  };
   const statuses = Object.values(checks).map(entry => entry.status);
   const status = statuses.includes('drift') ? 'drift'
     : statuses.every(item => ['ok', 'not-on-plan', 'not-applicable'].includes(item)) ? 'conformant' : 'unverified';
-  // Free features always; on a private repository the paid ones only when the binding says on and
-  // GitHub shows the setting (a plan without it has nothing to turn on).
+  // Free features always; on a private or internal repository the paid ones only when the merged
+  // binding says on and GitHub shows the setting (a plan without it has nothing to turn on).
   const wanted = online && (read.visibility === 'public' || policy.paid_security === 'on');
   const fixes = online ? {
     alerts: read.alerts === 'disabled',
     security_updates: read.security_updates === 'disabled',
     secret_scanning: Boolean(wanted) && (read.secret_scanning === 'disabled' || read.push_protection === 'disabled'),
-    code_scanning: Boolean(wanted) && read.code_scanning === 'disabled',
+    code_scanning: Boolean(wanted) && read.code_scanning === 'disabled' && !advanced,
     private_reporting: read.visibility === 'public' && read.private_reporting === 'disabled',
     allow_auto_merge: policy.auto_merge === 'patch-minor' && !read.allow_auto_merge && Boolean(protectionResult && protectionResult.status === 'conformant'),
     paid: read.visibility !== 'public',
   } : null;
   const files = {
-    dependabot: config === null && detected.size > 0,
+    dependabot: dependabotFile(root) === null && detected.size > 0,
     workflow: policy.auto_merge === 'patch-minor' && ['missing', 'outdated'].includes(workflow),
   };
-  return verdict(status, null, checks, { slug, policy, visibility: online ? read.visibility : null, missing_ecosystems: missingEcosystems, workflow, fixes, files });
+  const settings = online ? Object.fromEntries(SNAPSHOT_KEYS.map(key => [key, read[key]])) : null;
+  return verdict(status, null, checks, {
+    slug, policy, policy_source: source, pending_policy: pendingPolicy, visibility: online ? read.visibility : null,
+    settings, missing_ecosystems: missingEcosystems, workflow, fixes, files,
+  });
 }
 
 module.exports = Object.freeze({
   WORKFLOW_REL,
   WORKFLOW_TEMPLATE_REL,
   DEPENDABOT_REL,
+  DEPENDABOT_NAMES,
   COOLDOWN_DAYS,
   detectEcosystems,
+  dependabotFile,
   readDependabotConfig,
   uncoveredEcosystems,
   renderDependabotConfig,
   workflowState,
-  bindingPolicy,
+  advancedCodeqlWorkflow,
+  committedPolicy,
   ghSecurityReader,
   ghSecurityWriter,
   writeSecurityFiles,

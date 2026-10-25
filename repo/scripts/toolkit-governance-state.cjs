@@ -274,6 +274,40 @@ function bindingRequiredChecks(root) {
   } catch { return null; }
 }
 
+// The dependency and security policy of a parsed binding: { auto_merge, github_actions, paid_security }.
+// Missing keys take the safe defaults: auto-merge off, GitHub Actions updates kept for the owner, and
+// no paid-features answer (null).
+function policyOf(binding) {
+  const updates = binding && typeof binding.dependency_updates === 'object' && binding.dependency_updates ? binding.dependency_updates : {};
+  return {
+    auto_merge: updates.auto_merge === 'patch-minor' ? 'patch-minor' : 'off',
+    github_actions: updates.github_actions === 'auto-merge' ? 'auto-merge' : 'owner',
+    paid_security: binding && ['off', 'on'].includes(binding.paid_security) ? binding.paid_security : null,
+  };
+}
+
+// The policy of binding `text` as committed on the default branch (read from GitHub by the caller,
+// since this module never runs git or gh). Only a merged binding is the owner's answer: a working
+// tree any agent can edit is not. { valid, policy, problems }; an invalid binding has the safe
+// defaults.
+function committedBindingPolicy(text, identity) {
+  let parsed;
+  try { parsed = JSON.parse(String(text).replace(/^\uFEFF/, '')); } catch { return { valid: false, policy: policyOf(null), problems: ['not valid JSON'] }; }
+  const problems = bindingProblems(parsed, identity);
+  return problems.length ? { valid: false, policy: policyOf(null), problems } : { valid: true, policy: policyOf(parsed), problems: [] };
+}
+
+// The policy the working-tree binding asks for, or null when it is missing or invalid. Shown only
+// to say what still has to be merged; it never turns anything on.
+function workingBindingPolicy(root) {
+  try {
+    const bytes = readSmallFile(path.join(root, ...BINDING_FILE), BINDING_READ_LIMIT, 'BINDING_TOO_LARGE');
+    if (!bytes) return null;
+    const result = committedBindingPolicy(bytes.toString('utf8'), readIdentity(root));
+    return result.valid ? result.policy : null;
+  } catch { return null; }
+}
+
 function readMaterials(root, identity) {
   let legacyBinding = false;
   try { legacyBinding = fs.lstatSync(path.join(root, ...LEGACY_BINDING_FILE)).isFile(); } catch { legacyBinding = false; }
@@ -529,6 +563,8 @@ module.exports = Object.freeze({
   readGovernedBlock,
   bindingStoreRepository,
   bindingRequiredChecks,
+  committedBindingPolicy,
+  workingBindingPolicy,
   readDecision,
   registryPathFor,
   bindingProblems,

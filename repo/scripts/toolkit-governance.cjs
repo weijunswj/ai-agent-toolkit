@@ -14,7 +14,8 @@
 //   catalogue   the skills offered in this repository's state
 //   security    turns on this governed repository's free Dependabot and security settings and
 //               writes its missing Dependabot files (on by default under governance, so it asks
-//               nothing), plus the paid ones where the binding records the owner's "on"
+//               nothing), plus the paid ones where the binding merged on the default branch
+//               records the owner's "on"; exit 0 done, 1 not governed, 2 failed or unverified
 //   migrate     one pass over the repositories in --root folders (default: this folder): one
 //               list, one typed yes, then offers to add missing no-force-push rulesets and
 //               Toolkit's default-branch ruleset, each after its own typed yes, and turns on
@@ -41,7 +42,7 @@ const catalogue = require('./toolkit-governance-catalogue.cjs');
 const gate = require('./toolkit-governance-gate.cjs');
 const protection = require('./toolkit-governance-protection.cjs');
 const security = require('./toolkit-governance-security.cjs');
-const { GovernanceMigration, MigrationError } = require('./toolkit-governance-migration.cjs');
+const { GovernanceMigration, MigrationError, appendRunRecord } = require('./toolkit-governance-migration.cjs');
 
 const CMD = subcommand => `\`${governance.governanceCommand(subcommand)}\``;
 
@@ -176,7 +177,9 @@ class ToolkitGovernanceCli {
   }
 
   // The free settings are on by default for a governed repository, so this asks nothing; the paid
-  // ones follow the binding's paid_security answer.
+  // ones and auto-merge follow the binding merged on the default branch, never the working tree.
+  // GitHub unreadable, before or after, is exit 2, never "already on" or "read back". Every change
+  // is recorded with what GitHub showed before.
   #security(json) {
     const state = this.#state();
     if (state.rule === 'ERROR') throw new GovernanceCliError(`The governance state could not be read (${state.error_code}). ${governance.repairHint(state, this.#registryOptions)}`.trim());
@@ -201,9 +204,12 @@ class ToolkitGovernanceCli {
       reread: read,
     });
     const lines = security.describeOutcome(before.slug, state.root, before, outcome);
-    if (outcome.result === 'nothing' && lines.length === 0) lines.push(`${before.slug}: every dependency and security setting Toolkit manages is already on.`);
+    if (outcome.result === 'nothing' && before.status === 'conformant') lines.push(`${before.slug}: every dependency and security setting Toolkit manages is already on.`);
+    if (outcome.result !== 'nothing') {
+      appendRunRecord(this.#registryOptions, { at: new Date().toISOString(), command: 'security', securities: [{ repository_id: state.repository_id, prior: outcome.prior, settings: outcome.settings, files: outcome.files, result: outcome.result }] });
+    }
     this.#print(json, { status: before.status, outcome }, lines);
-    return outcome.result === 'failed' ? 2 : 0;
+    return ['failed', 'unverified'].includes(outcome.result) || before.status === 'unverified' ? 2 : 0;
   }
 
   #reopen(json) {
@@ -258,7 +264,7 @@ class ToolkitGovernanceCli {
       return 0;
     }
     const question = command === 'enable'
-      ? `Enable Toolkit's GitHub governance for ${before.root}?\nIt starts once the repository also carries the governed block and the programme binding, which arrive only through a pull request you approve.\nGitHub's free security settings (Dependabot alerts and updates, and on a public repository secret scanning, push protection, code scanning and private vulnerability reporting) are then turned on by default. On a private repository Toolkit also asks whether to turn on GitHub's paid Secret Protection and Code Security (billed per active committer; off unless you say on).\nType yes to confirm: `
+      ? `Enable Toolkit's GitHub governance for ${before.root}?\nIt starts once the repository also carries the governed block and the programme binding, which arrive only through a pull request you approve.\nGitHub's free security settings (Dependabot alerts and updates, and on a public repository secret scanning, push protection, code scanning and private vulnerability reporting) are then turned on by default (on a private repository the update pull requests they open use your Actions minutes). On a private repository Toolkit also asks whether to turn on GitHub's paid Secret Protection and Code Security (billed per active committer; off unless you say on).\nType yes to confirm: `
       : `Turn off Toolkit's GitHub governance for ${before.root}?\nThe global rules and coding gates still apply here, and Toolkit will not ask again unless you run ${CMD('enable')}.\nType yes to confirm: `;
     const answer = String(await this.#ask(question) || '').trim().toLowerCase();
     if (answer !== 'yes') {

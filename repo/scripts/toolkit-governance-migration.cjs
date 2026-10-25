@@ -164,7 +164,7 @@ class GovernanceMigration {
     const protections = await this.#offerProtection(after);
     const securities = await this.#applySecurity(after);
     if (written.length || rulesets.length || protections.length || securities.length) this.#writeRecord(written, rulesets, protections, securities);
-    const failed = written.some(entry => entry.result !== 'written') || [...rulesets, ...protections, ...securities].some(entry => entry.result === 'failed');
+    const failed = written.some(entry => entry.result !== 'written') || [...rulesets, ...protections, ...securities].some(entry => ['failed', 'unverified'].includes(entry.result));
     return failed ? 2 : 0;
   }
 
@@ -345,26 +345,34 @@ class GovernanceMigration {
         writer: this.#securityWriter, fileWriter: this.#securityFileWriter, reread: () => this.#securityFor(row),
       });
       for (const line of security.describeOutcome(row.slug, row.root, result, outcome)) this.#say(line);
-      if (outcome.result !== 'nothing') results.push({ repository_id: row.state.repository_id, settings: outcome.settings, files: outcome.files, result: outcome.result });
+      if (outcome.result !== 'nothing') results.push({ repository_id: row.state.repository_id, prior: outcome.prior, settings: outcome.settings, files: outcome.files, result: outcome.result });
     }
     return results;
   }
 
   // One private record per run that changed something, next to the decision file.
   #writeRecord(decisions, rulesets, protections = [], securities = []) {
-    const directory = path.dirname(governance.registryPathFor(this.#registryOptions));
-    const file = path.join(directory, RECORD_BASENAME);
-    let previous = [];
-    try {
-      const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
-      if (parsed && parsed.schema === RECORD_SCHEMA && Array.isArray(parsed.runs)) previous = parsed.runs;
-    } catch { previous = []; }
-    const record = { schema: RECORD_SCHEMA, runs: [...previous, { at: this.#now().toISOString(), decisions, rulesets, protections, securities }].slice(-20) };
-    fs.mkdirSync(directory, { recursive: true });
-    const temporary = `${file}.${process.pid}.tmp`;
-    fs.writeFileSync(temporary, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 });
-    fs.renameSync(temporary, file);
+    appendRunRecord(this.#registryOptions, { at: this.#now().toISOString(), decisions, rulesets, protections, securities });
   }
 }
 
-module.exports = Object.freeze({ GovernanceMigration, MigrationError, discoverRepositories, proposalFor, parseAnswer, RECORD_BASENAME, BINDING_TEMPLATE });
+// Appends `run` to the private record next to the decision file (the last 20 runs are kept). Used by
+// migrate and by `toolkit governance security`, so every settings change has a record of what GitHub
+// showed before.
+function appendRunRecord(registryOptions, run) {
+  const directory = path.dirname(governance.registryPathFor(registryOptions));
+  const file = path.join(directory, RECORD_BASENAME);
+  let previous = [];
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (parsed && parsed.schema === RECORD_SCHEMA && Array.isArray(parsed.runs)) previous = parsed.runs;
+  } catch { previous = []; }
+  const record = { schema: RECORD_SCHEMA, runs: [...previous, run].slice(-20) };
+  fs.mkdirSync(directory, { recursive: true });
+  const temporary = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(temporary, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 });
+  fs.renameSync(temporary, file);
+  return file;
+}
+
+module.exports = Object.freeze({ GovernanceMigration, MigrationError, discoverRepositories, proposalFor, parseAnswer, appendRunRecord, RECORD_BASENAME, BINDING_TEMPLATE });

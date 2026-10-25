@@ -12,6 +12,8 @@ updates:
     groups:
       github-actions-patch-and-minor:
         update-types: ["patch", "minor"]
+    ignore:
+      - dependency-name: "dependabot/fetch-metadata"  # pinned by Toolkit's auto-merge template
   - package-ecosystem: "npm"
     directory: "/"
     schedule:

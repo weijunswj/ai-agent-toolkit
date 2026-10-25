@@ -13,6 +13,6 @@
   "required_checks": ["validate"],
   "dependency_updates": {
     "auto_merge": "off",
-    "github_actions": "auto-merge"
+    "github_actions": "owner"
   }
 }

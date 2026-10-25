@@ -20,6 +20,7 @@ const conformance = require(path.join(scripts, 'toolkit-governance-conformance.c
 const catalogue = require(path.join(scripts, 'toolkit-governance-catalogue.cjs'));
 const managedBlock = require(path.join(scripts, 'toolkit-managed-block.cjs'));
 const governance = require(path.join(scripts, 'toolkit-governance-state.cjs'));
+const migration = require(path.join(scripts, 'toolkit-governance-migration.cjs'));
 
 const REMOTE = 'https://github.com/example-owner/example-repo.git';
 
@@ -52,6 +53,7 @@ const PROTECTED = () => ({ ok: true, rulesets: [{ enforcement: 'active', target:
 const SECURE = () => ({
   ok: true, visibility: 'public', allow_auto_merge: false, alerts: 'enabled', security_updates: 'enabled',
   secret_scanning: 'enabled', push_protection: 'enabled', code_scanning: 'enabled', private_reporting: 'enabled',
+  binding: { status: 'missing' },
 });
 
 // A default branch that requires the binding's one check, pinned, with merge commits only.
@@ -329,6 +331,33 @@ test('SC-01: security turns on the free settings of a governed repository withou
   const again = await run(ctx, governed, ['security'], { securityReader, securityWriter });
   assert.match(again.stdout, /already on/);
   assert.equal(writes.length, 1);
+  // The change is recorded with what GitHub showed before.
+  const record = JSON.parse(fs.readFileSync(path.join(path.dirname(ctx.registryPath), migration.RECORD_BASENAME), 'utf8'));
+  const last = record.runs.at(-1);
+  assert.equal(last.command, 'security');
+  assert.equal(last.securities[0].prior.alerts, 'disabled');
+  assert.deepEqual(last.securities[0].settings, [{ setting: 'alerts', ok: true, reason: null }]);
+});
+
+test('SC-02: security never says "already on" or "read back" when GitHub could not be read, and exits 2', async (t) => {
+  const ctx = scratch(t);
+  const governed = gitRepo(ctx, 'governed');
+  writeGoverned(governed);
+  enable(ctx, governed);
+  const writes = [];
+  const securityWriter = (slug, plan) => { writes.push(plan); return [{ setting: 'alerts', ok: true, reason: null }]; };
+  const unread = await run(ctx, governed, ['security'], { securityReader: () => ({ ok: false, reason: 'gh-unavailable' }), securityWriter });
+  assert.equal(unread.code, 2);
+  assert.deepEqual(writes, [], 'nothing is written when GitHub cannot be read');
+  assert.match(unread.stdout, /nothing changed: GitHub could not be read/);
+  assert.doesNotMatch(unread.stdout, /already on|read back\./);
+  // The write works but the read-back does not: unverified, exit 2.
+  let reads = 0;
+  const flaky = () => (reads++ === 0 ? { ...SECURE(), alerts: 'disabled' } : { ok: false, reason: 'gh-unavailable' });
+  const unverified = await run(ctx, governed, ['security'], { securityReader: flaky, securityWriter });
+  assert.equal(unverified.code, 2);
+  assert.match(unverified.stdout, /could not read the settings back/);
+  assert.doesNotMatch(unverified.stdout, /read back\./);
 });
 
 test('I-12: enforcement is reported as shipped, never as active, and Codex names its trust step', () => {
@@ -385,7 +414,7 @@ test('C-02: governed-only skills are offered only in a complete ENABLED reposito
 });
 
 test('S-10 (new modules): only the state module reads the decision file, AGENTS.md and the binding', () => {
-  for (const file of ['toolkit-governance.cjs', 'toolkit-governance-conformance.cjs', 'toolkit-governance-catalogue.cjs', 'toolkit-governance-ruleset.cjs', 'toolkit-governance-protection.cjs', 'toolkit-governance-migration.cjs']) {
+  for (const file of ['toolkit-governance.cjs', 'toolkit-governance-conformance.cjs', 'toolkit-governance-catalogue.cjs', 'toolkit-governance-ruleset.cjs', 'toolkit-governance-protection.cjs', 'toolkit-governance-migration.cjs', 'toolkit-governance-security.cjs']) {
     const text = fs.readFileSync(path.join(scripts, file), 'utf8');
     assert.equal(/repository-governance\.v1\.json|['"]AGENTS\.md['"]|toolkit-programme\.json['"]|parseRegistryBytes/.test(text.replace(/^\s*\/\/.*$/gm, '')), false, file);
   }
