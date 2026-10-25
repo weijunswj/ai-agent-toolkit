@@ -350,16 +350,25 @@ function packageInvocations(command) {
   return calls;
 }
 
-// Cuts a shell line at its first `#` that starts a word outside single and double quotes.
-function stripComment(line) {
+// Splits a shell line into commands at `&&` and `;`, and cuts it at the first `#` that starts a
+// word, all outside quotes; a backslash outside single quotes escapes the next character. A line
+// that ends inside an open quote falls back to a plain cut and split.
+function shellParts(line) {
+  const parts = [];
   let quote = null;
-  for (let i = 0; i < line.length; i++) {
+  let start = 0;
+  let i = 0;
+  for (; i < line.length; i++) {
     const ch = line[i];
+    if (ch === '\\' && quote !== "'") { i++; continue; }
     if (quote) { if (ch === quote) quote = null; continue; }
     if (ch === '"' || ch === "'") quote = ch;
-    else if (ch === '#' && (i === 0 || /\s/.test(line[i - 1]))) return line.slice(0, i);
+    else if (ch === '#' && (i === 0 || /\s/.test(line[i - 1]))) break;
+    else if (ch === ';' || (ch === '&' && line[i + 1] === '&')) { parts.push(line.slice(start, i)); if (ch === '&') i++; start = i + 1; }
   }
-  return line;
+  if (quote) return line.replace(/(^|\s)#.*$/, '').split(/&&|;/);
+  parts.push(line.slice(start, i));
+  return parts;
 }
 
 function commandLines(text, baseDir) {
@@ -368,7 +377,7 @@ function commandLines(text, baseDir) {
   let dir = baseDir;
   for (const raw of text.split('\n')) {
     // A comment names a file without running it.
-    for (const part of stripComment(raw).split(/&&|;/)) {
+    for (const part of shellParts(raw)) {
       const cmd = part.trim();
       if (!cmd || cmd.startsWith('#')) continue;
       const cd = cmd.match(/^cd\s+(\S+)$/);
@@ -444,7 +453,11 @@ function startedFiles(files, cmd, dirs) {
   let open = null;
   for (const word of words) {
     const startsOpen = open !== null;
-    for (const ch of word) { if (open) { if (ch === open) open = null; } else if (ch === '"' || ch === "'") open = ch; }
+    for (let k = 0; k < word.length; k++) {
+      const ch = word[k];
+      if (ch === '\\' && open !== "'") { k++; continue; }
+      if (open) { if (ch === open) open = null; } else if (ch === '"' || ch === "'") open = ch;
+    }
     quoted.push(startsOpen || open !== null);
   }
   const program = (word) => unquote(word).replace(/^.*[\\/]/, '').replace(/\.exe$/i, '').toLowerCase();

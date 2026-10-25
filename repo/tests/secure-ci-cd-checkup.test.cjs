@@ -72,6 +72,10 @@ test('parts: a package test script no step runs is a gap; the twin that runs it 
   const clean = report({ 'package.json': pkg, 'a.test.js': '', '.github/workflows/ci.yml': WORKFLOW('npm test') });
   const hashed = report({ 'package.json': pkg, 'a.test.js': '', '.github/workflows/ci.yml': WORKFLOW('echo "build #1" && npm test') });
   assert.deepEqual(hashed.filter((e) => e.level === 'GAP' && /^(parts|tests)\./.test(e.check)), [], 'a quoted # does not cut the real command');
+  const escaped = report({ 'package.json': pkg, 'a.test.js': '', '.github/workflows/ci.yml': WORKFLOW("echo don\\'t # npm test") });
+  assert.equal(hits(escaped, 'parts.package-script', 'package.json').length, 1, 'an escaped quote does not hide a comment');
+  const unclosed = report({ 'package.json': pkg, 'a.test.js': '', '.github/workflows/ci.yml': WORKFLOW('echo "open # npm test') });
+  assert.equal(hits(unclosed, 'parts.package-script', 'package.json').length, 1, 'a quote left open still lets the comment be cut');
   assert.deepEqual(hits(clean, 'parts.package-script'), []);
   assert.deepEqual(hits(clean, 'tests.unreached'), [], 'node --test in the package folder reaches its test files');
 });
@@ -434,6 +438,10 @@ test('scripts: a script CI only names (compiles or lints) is not counted as run'
   assert.deepEqual(hits(text, 'scripts.untested').map((e) => e.path).filter((rel) => rel.startsWith('scripts/')), ['scripts/x.sh', 'scripts/y.js'], 'an interpreter inside a quoted string runs nothing');
   const afterHash = report({ ...named, '.github/workflows/ci.yml': WORKFLOW('|\n          echo "step #1" && bash scripts/x.sh\n          echo \'a # b\'; node "scripts/y.js"') });
   assert.deepEqual(hits(afterHash, 'scripts.untested').map((e) => e.path).filter((rel) => rel.startsWith('scripts/')), [], 'a quoted # starts no comment');
+  const joined = report({ ...named, '.github/workflows/ci.yml': WORKFLOW('|\n          echo "a && bash scripts/x.sh now"\n          echo "b; node scripts/y.js now"') });
+  assert.deepEqual(hits(joined, 'scripts.untested').map((e) => e.path).filter((rel) => rel.startsWith('scripts/')), ['scripts/x.sh', 'scripts/y.js'], 'a quoted && or ; does not start a command');
+  const escapes = report({ ...named, '.github/workflows/ci.yml': WORKFLOW('|\n          echo \\" ; bash scripts/x.sh # \\"\n          echo "say \\"hi\\" " && node scripts/y.js') });
+  assert.deepEqual(hits(escapes, 'scripts.untested').map((e) => e.path).filter((rel) => rel.startsWith('scripts/')), [], 'an escaped quote opens no string');
 });
 
 test('--base leaves the git index untouched and refuses a ref that starts with -', () => {
