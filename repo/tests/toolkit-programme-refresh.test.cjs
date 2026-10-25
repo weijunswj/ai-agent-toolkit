@@ -388,6 +388,12 @@ test('GitHub writes are recognised; reads and other repositories are not', () =>
     post('PowerShell', { command: 'pwsh -c "git -C repo push"' }),
     post('PowerShell', { command: "pwsh -Command 'git push'" }),
     post('Bash', { command: 'cmd /c "git push"' }),
+    post('PowerShell', { command: 'powershell -NoProfile -Command "git push"' }),
+    post('PowerShell', { command: 'powershell -NoProfile -ExecutionPolicy Bypass -Command "git push"' }),
+    post('Bash', { command: 'cmd.exe /d /c "git push"' }),
+    post('Bash', { command: 'bash -e -c "git push"' }),
+    post('Bash', { command: 'bash --norc -c "git push"' }),
+    post('Bash', { command: '"C:/Program Files/Git/bin/bash.exe" -c "git push"' }),
     post('Bash', { command: 'bash -lc "cd repo && git push"' }),
   ];
   for (const input of writes) assert.ok(trigger.githubWrite(input), `${input.tool_name} ${JSON.stringify(input.tool_input)}`);
@@ -414,6 +420,11 @@ test('GitHub writes are recognised; reads and other repositories are not', () =>
     post('Bash', { command: 'printf "%s" "git push"' }),
     post('Bash', { command: 'git log --grep "git push"' }),
     post('Bash', { command: 'grep -c "git push" notes.md' }),
+    post('Bash', { command: 'echo "run git push"' }),
+    post('Bash', { command: 'git commit -m "then git push"' }),
+    post('Bash', { command: `bash -c "echo 'run git push'"` }),
+    post('Bash', { command: 'echo "cd repo && git push"' }),
+    post('Bash', { command: 'bash x.sh; grep -c "git push" f' }),
     post('Edit', { file_path: 'x' }),
   ];
   for (const input of reads) assert.equal(trigger.githubWrite(input), null, `${input.tool_name} ${JSON.stringify(input.tool_input)}`);

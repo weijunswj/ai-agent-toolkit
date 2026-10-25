@@ -35,20 +35,37 @@ const WRITE_TOOLS = new Set([
 const SHELL_TOOLS = new Set(['Bash', 'PowerShell', 'shell', 'local_shell', 'exec_command']);
 const GH_WRITE = /\bgh(?:\.exe)?\s+(?:issue|pr)\s+(?:create|edit|comment|close|reopen|merge|ready|review|delete|lock|unlock|transfer|pin|unpin|update-branch)\b/i;
 // git push, with any global options before it: -C <dir> and -c <name=value> with their value,
-// --name[=value], and single-letter flags. A quote before `git` counts only right after a shell
-// wrapper's command flag (`bash -lc "git push"`, `pwsh -Command '...'`, `cmd /c "..."`), so quoted text
-// such as `echo "git push"` or a commit message does not. The command is split into words once, and the walk
+// --name[=value], and single-letter flags. A quoted command counts only right after a shell wrapper's
+// command flag, with any options between the shell and the flag (`bash -lc "git push"`,
+// `powershell -NoProfile -Command '...'`, `cmd.exe /d /c "..."`). Any other quoted text, such as
+// `echo "run git push"` or a commit message, is skipped until its quote closes. The command is split into words once, and the walk
 // from each git word looks at most GIT_OPTIONS_MAX options ahead, so crafted input stays fast. A word
 // ending in a shell separator ends the git command.
 const GIT_WORD = /(?:^|[\\/&("'])git(?:\.exe)?$/i;
 const GIT_OPTIONS_MAX = 16;
 const WRAPPER_FLAG = /^(?:-\w*c|-Command|\/c)$/i;
-const SHELL_WORD = /(?:^|[\\/&("'])(?:bash|sh|zsh|dash|pwsh|powershell|cmd)(?:\.exe)?$/i;
+const SHELL_WORD = /(?:^|[\\/&("'])(?:bash|sh|zsh|dash|pwsh|powershell|cmd)(?:\.exe)?["']?$/i;
+const SEPARATOR_END = /[;&|]$/;
+// Whether a shell word comes within GIT_OPTIONS_MAX words before `at`, with no shell separator between.
+function shellBefore(words, at) {
+  for (let back = 0; back < GIT_OPTIONS_MAX; back += 1) {
+    const word = words[at - back];
+    if (word === undefined) return false;
+    if (SHELL_WORD.test(word)) return true;
+    if (SEPARATOR_END.test(word)) return false;
+  }
+  return false;
+}
+
 function gitPushes(command) {
   const words = command.split(/\s+/).filter(Boolean);
+  let quote = null; // an open quote of plain text, not a wrapper's command
   for (let start = 0; start < words.length; start += 1) {
-    if (!GIT_WORD.test(words[start])) continue;
-    if (/^["']/.test(words[start]) && !(WRAPPER_FLAG.test(words[start - 1] || '') && SHELL_WORD.test(words[start - 2] || ''))) continue;
+    const current = words[start];
+    if (quote) { if (current.includes(quote)) quote = null; continue; }
+    const wrapped = WRAPPER_FLAG.test(words[start - 1] || '') && shellBefore(words, start - 2);
+    if (/^["']/.test(current) && !wrapped) { if (!current.slice(1).includes(current[0])) quote = current[0]; continue; }
+    if (!GIT_WORD.test(current)) continue;
     for (let index = start + 1; index < words.length && index - start <= GIT_OPTIONS_MAX; index += 1) {
       const word = words[index];
       if (word === '-C' || word === '-c') { index += 1; continue; }
