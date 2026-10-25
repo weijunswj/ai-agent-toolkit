@@ -80,7 +80,7 @@ function stripComment(line) {
     const char = line[index];
     if (quote) { if (char === quote) quote = null; continue; }
     if (char === '"' || char === "'") quote = char;
-    else if (char === '#' && (index === 0 || /\s/.test(line[index - 1]))) return line.slice(0, index);
+    else if (char === '#' && (index === 0 || line[index - 1] === ' ' || line[index - 1] === '\t')) return line.slice(0, index);
   }
   return line;
 }
@@ -94,7 +94,7 @@ function inlineList(value) {
 // The lines of `text` as { indent, text, raw }, blank and comment-only lines dropped.
 function significantLines(text) {
   return String(text).replace(/\r\n/g, '\n').split('\n').map(raw => {
-    const clean = stripComment(raw).replace(/\s+$/, '');
+    const clean = stripComment(raw).trimEnd();
     return { indent: clean.length - clean.trimStart().length, text: clean.trim(), raw };
   }).filter(line => line.text.length > 0);
 }
@@ -110,11 +110,11 @@ function children(lines, start, end) {
     const line = lines[index];
     if (line.indent < indent) break;
     if (line.indent !== indent || line.text.startsWith('- ')) continue;
-    const match = /^("[^"]*"|'[^']*'|[^:]+?)\s*:(?:\s+(.*))?$/.exec(line.text);
+    const match = KEY_LINE.exec(line.text);
     if (!match) continue;
     let stop = index + 1;
     while (stop < end && lines[stop].indent > indent) stop += 1;
-    out.push({ key: unquote(match[1]), value: match[2] === undefined ? '' : match[2], index, end: stop });
+    out.push({ key: match[1] || match[2] || match[3], value: match[4] === undefined ? '' : match[4], index, end: stop });
   }
   return out;
 }
@@ -150,6 +150,7 @@ function mapping(lines, entry) {
 // (comments stripped), or [] when it has none.
 function readSteps(lines, stepsEntry) {
   if (!stepsEntry) return [];
+  if (stepsEntry.value.trim()) return null;
   const body = lines.slice(stepsEntry.index + 1, stepsEntry.end);
   if (!body.length) return [];
   const itemIndent = body[0].indent;
@@ -169,7 +170,7 @@ function readSteps(lines, stepsEntry) {
       run_style: run ? (/^\|[+-]?$/.test(run.value.trim()) ? 'literal' : /^[|>]/.test(run.value.trim()) ? 'other' : 'plain') : null,
       env: mapping(item, field('env')),
       if: field('if') ? field('if').value : null,
-      continue_on_error: field('continue-on-error') ? scalarValue(item, field('continue-on-error')) : undefined,
+      continue_on_error: field('continue-on-error') ? continueOnError(field('continue-on-error')) : undefined,
       shell: field('shell') ? scalarValue(item, field('shell')) : undefined,
       working_directory: Boolean(field('working-directory')),
       uses: Boolean(field('uses')),
@@ -191,6 +192,12 @@ function runDefaults(lines, entry) {
   // A shell that is present but unreadable is not "no shell".
   if ('shell' in values && values.shell === null) return null;
   return { shell: values.shell, working_directory: 'working-directory' in values };
+}
+
+// `continue-on-error` is off only when written as the plain `false`; a quoted or block `false` is a
+// string, so it counts as set, like any other value.
+function continueOnError(entry) {
+  return entry.value.trim() === 'false' && entry.end === entry.index + 1 ? 'false' : 'set';
 }
 
 // Absent is undefined; present but unreadable is null, and counts as set.
@@ -233,19 +240,26 @@ function aggregateProblem(job, workflowContext) {
 // The reader follows only a small, plain subset of YAML, and any line outside it makes the whole
 // workflow unverified, so YAML it cannot follow can never hide a condition, a shell or a producer:
 //
-//   - LF or CRLF line ends only (no lone CR, no tab anywhere, no other Unicode line breaks);
+//   - printable ASCII with LF or CRLF line ends, except on full-line comments (so no tab, lone
+//     CR, non-ASCII space, zero-width or look-alike character can change how a line splits); a
+//     single leading byte order mark is removed before both checking and reading;
 //   - one document (a single leading `---` is allowed; no later `---` or `...`, no `%` directives);
 //   - every line outside a block scalar is `key:`, `key: value`, `- key:`, `- key: value` or
 //     `- value`, with exactly one space after `-`, a plain or simply quoted key, and no duplicate
 //     key in a mapping;
 //   - a value is a plain scalar that starts with no YAML indicator (no tag, anchor, alias, flow
 //     mapping, explicit key or reserved character) and holds no `: `, a quoted scalar closed on
-//     the same line, a one-line flow list of such scalars, or a block scalar header (`|`, `>`,
-//     optionally `-` or `+`);
+//     the same line, a one-line flow list of such scalars, or, only for `run`, `if`, `shell` and
+//     `continue-on-error`, a block scalar header (`|`, `>`, optionally `-` or `+`);
+//   - every key sits at the indent of the mapping it belongs to, and every list item at the
+//     indent of its list;
 //   - a value never continues on the next line: after `key: value` the next line is not deeper,
 //     and after `key:` the next line is deeper, an indentless `- ` item, or the field is null.
-const KEY = /^(?:[A-Za-z0-9_][A-Za-z0-9_.-]*|"[A-Za-z0-9_ .-]+"|'[A-Za-z0-9_ .-]+')$/;
-const FLOW_ITEM = /^(?:[A-Za-z0-9_./*@$+=-][^,\[\]{}"'#:]*|"[^"\\]*"|'(?:[^']|'')*')$/;
+// A key line: a plain or simply quoted key, spaces, a colon, then nothing or spaces and the value.
+// Each part's characters exclude the next part's, so matching stays linear in the line length.
+const KEY_LINE = /^(?:([A-Za-z0-9_][A-Za-z0-9_.-]*)|"([A-Za-z0-9_.-][A-Za-z0-9_ .-]*)"|'([A-Za-z0-9_.-][A-Za-z0-9_ .-]*)') *:(?: +(.*))?$/;
+const FLOW_ITEM = /^(?:(?:[A-Za-z0-9_./$+=~]|-(?! ))[^,\[\]{}"'#:]*|"[^"\\]*"|'(?:[^']|'')*')$/;
+const BLOCK_KEYS = Object.freeze(['run', 'if', 'shell', 'continue-on-error']);
 
 function plainValueProblem(value) {
   if (/^[|>][+-]?$/.test(value)) return null;
@@ -258,83 +272,96 @@ function plainValueProblem(value) {
     return inner.split(',').map(item => item.trim()).filter((item, index, all) => item || index !== all.length - 1).every(item => FLOW_ITEM.test(item)) ? null : 'a flow list holding something other than plain or quoted scalars';
   }
   if (/^[!&*{}\]?|>%@`,#-]/.test(value) && !/^-[^\s]/.test(value)) return `a value starting with "${value[0]}" (a YAML indicator)`;
-  if (/:\s|:$/.test(value)) return 'a plain value holding ": "';
+  if (/: |:$/.test(value)) return 'a plain value holding ": "';
   return null;
 }
 
-// Why `text` is outside the strict subset, or null when the reader can follow all of it.
-function strictSubsetProblem(text) {
-  let source = String(text);
-  if (source.charCodeAt(0) === 0xfeff) source = source.slice(1);
+function withoutBom(text) {
+  const source = String(text);
+  return source.charCodeAt(0) === 0xfeff ? source.slice(1) : source;
+}
+
+// Why `text` (without a leading byte order mark) is outside the strict subset, or null when the
+// reader can follow all of it.
+function strictSubsetProblem(source) {
   if (/\r(?!\n)/.test(source)) return 'it has a lone carriage return';
-  if (source.includes('\t')) return 'it has a tab';
-  if (/[\u0085\u2028\u2029]/.test(source)) return 'it has a Unicode line break';
   const raw = source.replace(/\r\n/g, '\n').split('\n');
-  let block = null; // { indent } of the key that opened a block scalar
-  let expectDeeper = null; // { indent, line } after `key:`
-  let noDeeper = null; // content indent after a scalar value
+  let block = null; // the content indent of the key that opened a block scalar
+  let expectDeeper = null; // the content indent after `key:`, until the next line
+  let noDeeper = null; // the content indent after a scalar value
   let seenContent = false;
-  const scopes = []; // [{ indent, keys: Set }]
+  const containers = []; // [{ type: 'map' | 'list', indent, keys }]
   for (let index = 0; index < raw.length; index += 1) {
     const line = raw[index];
-    const indent = line.length - line.trimStart().length;
+    const number = index + 1;
+    // Only printable ASCII, except on a full-line comment.
+    if (/[^\x20-\x7e]/.test(line) && !/^ *#/.test(line)) return `line ${number} has a character other than printable ASCII (a tab, a non-ASCII space or another character)`;
+    const indent = line.length - line.replace(/^ +/, '').length;
     const trimmed = line.trim();
-    if (block) {
-      if (!trimmed || indent > block.indent) continue;
+    if (block !== null) {
+      if (!trimmed || indent > block) continue;
       block = null;
     }
     if (!trimmed || trimmed.startsWith('#')) continue;
-    const number = index + 1;
-    if (trimmed === '---' && !seenContent) { seenContent = true; continue; }
+    if (trimmed === '---' && !seenContent && indent === 0) { seenContent = true; continue; }
     seenContent = true;
-    if (/^(?:---|\.\.\.)(?:\s|$)/.test(trimmed) || trimmed.startsWith('%')) return `line ${number} starts another document or a directive`;
+    if (/^(?:---|\.\.\.)(?: |$)/.test(trimmed) || trimmed.startsWith('%')) return `line ${number} starts another document or a directive`;
     if (noDeeper !== null && indent > noDeeper) return `line ${number} continues the value above it`;
-    if (expectDeeper && indent <= expectDeeper.indent && !(indent === expectDeeper.indent && trimmed.startsWith('- '))) expectDeeper = null; // a null field
-    const clean = stripComment(line).replace(/\s+$/, '').trimStart();
-    let body = clean;
-    let contentIndent = indent;
-    let item = false;
+    const pending = expectDeeper;
+    expectDeeper = null;
+    noDeeper = null;
+    let body = stripComment(line).trimEnd().slice(indent);
     if (body === '-') return `line ${number} is a list item with no value`;
-    if (body.startsWith('- ')) {
+    const item = body.startsWith('- ');
+    if (item) {
       if (body.startsWith('-  ')) return `line ${number} has more than one space after "-"`;
-      item = true;
       body = body.slice(2);
-      contentIndent = indent + 2;
+      // A list item: a sibling in the open list at this indent, or a new list right after `key:`.
+      while (containers.length && containers.at(-1).indent > indent) containers.pop();
+      const top = containers.at(-1);
+      if (!(top && top.type === 'list' && top.indent === indent)) {
+        if (pending === null || indent < pending) return `line ${number} is a list item at an indent that belongs to no list`;
+        containers.push({ type: 'list', indent });
+      }
     }
-    // Close mapping scopes this line has left, then find this line's own scope.
-    const keyMatch = /^("[^"]*"|'[^']*'|[^\s"'][^:]*?)\s*:(?:\s+(.*))?$/.exec(body);
-    if (!keyMatch || !KEY.test(keyMatch[1])) {
+    const contentIndent = item ? indent + 2 : indent;
+    const keyMatch = KEY_LINE.exec(body);
+    if (!keyMatch) {
       if (!item) return `line ${number} is not a plain "key: value" or "- " item`;
+      if (/^[|>]/.test(body)) return `line ${number} is a block scalar list item`;
       const problem = plainValueProblem(body);
       if (problem) return `line ${number} has ${problem}`;
-      if (/^[|>]/.test(body)) return `line ${number} is a block scalar list item`;
-      while (scopes.length && scopes.at(-1).indent >= contentIndent) scopes.pop();
       noDeeper = indent;
-      expectDeeper = null;
       continue;
     }
-    const key = keyMatch[1].replace(/^["']|["']$/g, '');
-    const value = keyMatch[2] === undefined ? '' : keyMatch[2].trim();
-    while (scopes.length && (scopes.at(-1).indent > contentIndent || (item && scopes.at(-1).indent >= contentIndent))) scopes.pop();
-    if (!scopes.length || scopes.at(-1).indent !== contentIndent) scopes.push({ indent: contentIndent, keys: new Set() });
-    if (scopes.at(-1).keys.has(key)) return `line ${number} repeats the key "${key}"`;
-    scopes.at(-1).keys.add(key);
-    if (value === '') {
-      expectDeeper = { indent: contentIndent };
-      noDeeper = null;
-      continue;
+    const key = keyMatch[1] || keyMatch[2] || keyMatch[3];
+    const value = keyMatch[4] === undefined ? '' : keyMatch[4].trim();
+    if (item) containers.push({ type: 'map', indent: contentIndent, keys: new Set([key]) });
+    else {
+      while (containers.length && (containers.at(-1).indent > indent || (containers.at(-1).type === 'list' && containers.at(-1).indent >= indent))) containers.pop();
+      const top = containers.at(-1);
+      if (top && top.type === 'map' && top.indent === indent) {
+        if (top.keys.has(key)) return `line ${number} repeats the key "${key}"`;
+        top.keys.add(key);
+      } else if ((pending !== null && indent > pending) || containers.length === 0) containers.push({ type: 'map', indent, keys: new Set([key]) });
+      else return `line ${number} has a key at an indent that belongs to no mapping`;
     }
+    if (value === '') { expectDeeper = contentIndent; continue; }
     const problem = plainValueProblem(value);
     if (problem) return `line ${number} has ${problem}`;
-    expectDeeper = null;
-    if (/^[|>][+-]?$/.test(value)) { block = { indent: contentIndent }; noDeeper = null; continue; }
+    if (/^[|>][+-]?$/.test(value)) {
+      if (!BLOCK_KEYS.includes(key)) return `line ${number} gives "${key}" a block scalar, which this check reads only for ${BLOCK_KEYS.join(', ')}`;
+      block = contentIndent;
+      continue;
+    }
     noDeeper = contentIndent;
   }
   return null;
 }
 
 // { triggers: Map(event -> { filters: { paths, paths-ignore, branches, branches-ignore } }), jobs: [...] }
-function readWorkflow(text) {
+function readWorkflow(input) {
+  const text = withoutBom(input);
   const outside = strictSubsetProblem(text);
   if (outside) return { triggers: new Map(), jobs: [], problems: [`it is outside the YAML subset this check follows (${outside})`] };
   const lines = significantLines(text);
@@ -350,10 +377,12 @@ function readWorkflow(text) {
       const childIndent = on.end > on.index + 1 ? lines[on.index + 1].indent : -1;
       const blockEvents = lines.slice(on.index + 1, on.end).filter(line => line.indent === childIndent && line.text.startsWith('- '));
       for (const line of blockEvents) triggers.set(unquote(line.text.slice(2)), { filters: {} });
+      // An indentless list of events sits at the `on:` key's own indent.
+      if (on.end === on.index + 1) for (const event of blockList(lines, on)) triggers.set(event, { filters: {} });
       for (const event of children(lines, on.index + 1, on.end)) {
         const filters = {};
         for (const filter of children(lines, event.index + 1, event.end)) {
-          if (['paths', 'paths-ignore', 'branches', 'branches-ignore'].includes(filter.key)) filters[filter.key] = blockList(lines, filter);
+          if (['paths', 'paths-ignore', 'branches', 'branches-ignore', 'types'].includes(filter.key)) filters[filter.key] = blockList(lines, filter);
         }
         triggers.set(event.key, { filters });
       }
@@ -370,7 +399,8 @@ function readWorkflow(text) {
       const fields = children(lines, job.index + 1, job.end);
       const field = key => fields.find(entry => entry.key === key);
       const nameField = field('name');
-      const name = nameField ? unquote(nameField.value) : job.key;
+      const nameValue = nameField ? scalarValue(lines, nameField) : job.key;
+      const name = typeof nameValue === 'string' ? nameValue : '';
       const needsField = field('needs');
       const strategy = field('strategy');
       const matrix = strategy ? children(lines, strategy.index + 1, strategy.end).some(entry => entry.key === 'matrix') : false;
@@ -381,6 +411,8 @@ function readWorkflow(text) {
       if (needsField && needs.length === 0) unreadable.push('its needs could not be read');
       const ifValue = ifField ? scalarValue(lines, ifField) : null;
       if (ifField && ifValue === null) unreadable.push('its if could not be read');
+      const steps = readSteps(lines, field('steps'));
+      if (steps === null) unreadable.push('its steps are not a list');
       const entry = {
         key: job.key,
         name,
@@ -390,10 +422,11 @@ function readWorkflow(text) {
         needs,
         if: ifValue,
         unreadable,
-        continue_on_error: field('continue-on-error') ? scalarValue(lines, field('continue-on-error')) : undefined,
+        continue_on_error: field('continue-on-error') ? continueOnError(field('continue-on-error')) : undefined,
         defaults: runDefaults(lines, field('defaults')),
         env: mapping(lines, field('env')),
-        steps: readSteps(lines, field('steps')),
+        steps: steps || [],
+        name_unreadable: !name.trim(),
       };
       entry.aggregate_problem = needs.length ? aggregateProblem(entry, workflowContext) : null;
       jobs.push(entry);
@@ -430,6 +463,7 @@ function maskingTrigger(workflow, defaultBranch) {
   for (const event of events) {
     const filters = workflow.triggers.get(event).filters;
     if (filters.paths || filters['paths-ignore']) return `its ${event} trigger has a path filter, which leaves the check pending`;
+    if (filters.types) return { unverified: `its ${event} trigger lists activity types, which this check does not evaluate` };
     if ([...(filters.branches || []), ...(filters['branches-ignore'] || [])].some(pattern => String(pattern).startsWith('!'))) return { unverified: `its ${event} branch filter has a "!" pattern, which this check does not evaluate` };
     if ((filters.branches || filters['branches-ignore']) && defaultBranch === null) return { unverified: `its ${event} trigger has a branch filter and the default branch is unknown (no GitHub read and no origin/HEAD)` };
     if (filters.branches && !filters.branches.some(pattern => globMatches(pattern, defaultBranch))) return `its ${event} branch filter leaves out ${defaultBranch}`;
@@ -461,7 +495,8 @@ function producerVerdict(requiredChecks, workflows, defaultBranch) {
     for (const entry of workflows) {
       if (!entry.workflow) continue;
       for (const job of entry.workflow.jobs) {
-        if (job.dynamic_name && couldProduce(job.name, check)) p3Unverified.push(`${entry.file} ${job.key} is named by an expression that could produce "${check}"`);
+        if (job.name_unreadable) p3Unverified.push(`${entry.file} ${job.key} has an empty or unreadable name, so it could produce "${check}"`);
+        else if (job.dynamic_name && couldProduce(job.name, check)) p3Unverified.push(`${entry.file} ${job.key} is named by an expression that could produce "${check}"`);
         else if (!job.dynamic_name && !job.matrix && !job.reusable && job.name === check) producers.push({ file: entry.file, workflow: entry.workflow, job });
       }
     }

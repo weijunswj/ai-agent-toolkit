@@ -334,9 +334,69 @@ test('P-17: the reader is default-deny: YAML outside its plain subset is unverif
   // b1: a "!" branch pattern is not evaluated, so the trigger is unverified.
   const negated = ['on:', '  pull_request:', '    branches: ["**", "!main"]', 'jobs:', '  validate:', '    runs-on: ubuntu-latest', ''].join('\n');
   assert.equal(verdicts(negated).P4.status, 'unverified');
+  // A space other than ASCII space before "#" is not a comment in YAML, so bash runs what follows.
+  for (const space of [' ', '　', '﻿', ' ', ' ', '​', '\v']) {
+    const forms = {
+      plain: aggregate().replace('--verify-ci s', `--verify-ci s${space}#|| true`),
+      literal: aggregate().replace('        run: node repo/scripts/run-tests.cjs --verify-ci s', `        run: |\n          node repo/scripts/run-tests.cjs --verify-ci s${space}#|| true`),
+      name: aggregate().replace('      - name: Verify', `      - name: Verify${space}#x`),
+    };
+    for (const [form, text] of Object.entries(forms)) {
+      const result = verdicts(text);
+      assert.equal(result.P4.status, 'unverified', `${JSON.stringify(space)} ${form}`);
+      assert.match(result.P4.details.join('\n'), /other than printable ASCII/, `${JSON.stringify(space)} ${form}`);
+    }
+  }
+  // Non-ASCII text on a full-line comment is fine.
+  assert.equal(verdicts(`# Café — checks\n${aggregate()}`).P4.status, 'ok');
+  // A byte order mark is removed before both checking and reading: a sole workflow reads in full,
+  // and a second workflow that also produces the check is seen (two producers: drift).
+  const bom = '﻿';
+  assert.equal(verdicts(`${bom}${aggregate()}`).P4.status, 'ok', 'BOM, sole workflow');
+  const two = (first, second) => protection.producerVerdict(['validate'], [{ file: 'a.yml', workflow: protection.readWorkflow(first) }, { file: 'b.yml', workflow: protection.readWorkflow(second) }], 'main');
+  const plain = ['on: [pull_request]', 'jobs:', '  validate:', '    runs-on: ubuntu-latest', ''].join('\n');
+  assert.equal(two(plain, `${bom}name: Fast\n${plain}`).P3.status, 'drift', 'BOM, second producer');
+  // Block scalars are read only for run, if, shell and continue-on-error; a block or empty job name is never a guess.
+  const blockName = ['on: [pull_request]', 'jobs:', '  fast:', '    name: >-', '      validate', '    runs-on: ubuntu-latest', ''].join('\n');
+  assert.equal(two(plain, blockName).P3.status, 'unverified', 'block-scalar name');
+  assert.match(two(plain, blockName).P3.details.join('\n'), /gives "name" a block scalar/);
+  const emptyName = ['on: [pull_request]', 'jobs:', '  fast:', '    name: ""', '    runs-on: ubuntu-latest', ''].join('\n');
+  assert.equal(two(plain, emptyName).P3.status, 'unverified', 'empty name');
+  for (const [name, text] of Object.entries({
+    'steps as a block scalar': aggregate().replace('    steps:\n', '    steps: |\n'),
+    'branch filter as a block scalar': ['on:', '  pull_request:', '    branches-ignore: >-', '      main', 'jobs:', '  validate:', '    runs-on: ubuntu-latest', ''].join('\n'),
+    'key between indents': aggregate().replace('          TEST_LEGS: ${{ toJSON(needs) }}', '          TEST_LEGS: ${{ toJSON(needs) }}\n       continue-on-error: true'),
+    'key deeper than its mapping': aggregate(['          continue-on-error: true']),
+    'item outside a list': aggregate().replace('    runs-on: ubuntu-latest\n    steps:', '    runs-on: ubuntu-latest\n      - x\n    steps:'),
+    'alias in a flow list': ['on: [pull_request]', 'jobs:', '  validate:', '    needs: [*x]', '    runs-on: ubuntu-latest', ''].join('\n'),
+    'reserved character in a flow list': ['on: [pull_request]', 'jobs:', '  validate:', '    needs: [@x]', '    runs-on: ubuntu-latest', ''].join('\n'),
+    'dash item in a flow list': ['on: [pull_request]', 'jobs:', '  validate:', '    needs: [- tests]', '    runs-on: ubuntu-latest', ''].join('\n'),
+  })) assert.notEqual(verdicts(text).P4.status, 'ok', name);
+  // A plain scalar steps value is not a list.
+  assert.equal(verdicts(aggregate().replace(/    steps:\n[\s\S]*$/, '    steps: none\n')).P4.status, 'unverified', 'steps as a scalar');
+  // Activity types can leave ordinary pull requests out: unverified.
+  assert.equal(verdicts(['on:', '  pull_request:', '    types: [labeled]', 'jobs:', '  validate:', '    runs-on: ubuntu-latest', ''].join('\n')).P4.status, 'unverified', 'types');
+  // An indentless list of events is read, so a pull request trigger there is seen.
+  assert.equal(verdicts(['on:', '- pull_request', 'jobs:', '  validate:', '    runs-on: ubuntu-latest', ''].join('\n')).P4.status, 'ok', 'indentless on');
+  // continue-on-error is off only as the plain false; a quoted or block false is a string, so set.
+  assert.equal(verdicts(aggregate(['        continue-on-error: false'])).P4.status, 'ok', 'plain false');
+  for (const lines of [["        continue-on-error: 'false'"], ['        continue-on-error: "false"'], ['        continue-on-error: |', '          false'], ['        continue-on-error: >-', '          false']]) {
+    assert.equal(verdicts(aggregate(lines)).P4.status, 'unverified', lines.join(' '));
+  }
+  assert.equal(verdicts(aggregate([], ["    continue-on-error: 'false'"])).P4.status, 'unverified', 'quoted false on the job');
+  // Long runs of spaces are read in linear time.
+  const spaces = ' '.repeat(200000);
+  const started = Date.now();
+  verdicts(`on: [pull_request]${spaces}\njobs:\n  validate:\n    name: a${spaces}b\n    runs-on: x${spaces}#${spaces}\n`);
+  verdicts(aggregate().replace('--verify-ci s', `--verify-ci${spaces}s${spaces}!`));
+  assert.ok(Date.now() - started < 2000, `long lines took ${Date.now() - started} ms`);
   // This repository's own workflows are inside the subset.
   const root = path.join(__dirname, '..', '..', '.github', 'workflows');
   for (const name of fs.readdirSync(root).filter(file => /\.ya?ml$/.test(file))) assert.deepEqual(protection.readWorkflow(fs.readFileSync(path.join(root, name), 'utf8')).problems, [], name);
+  // So are the workflow templates the skills ship.
+  for (const file of ['skills/secure-ci-cd/templates/github-actions/personal-data-guard.yml', 'skills/skill-product-review/templates/ci/generated-surface-check.template.yml', 'skills/skill-product-review/templates/ci/read-only-publication-validation.template.yml']) {
+    assert.deepEqual(protection.readWorkflow(fs.readFileSync(path.join(__dirname, '..', '..', file), 'utf8')).problems, [], file);
+  }
 });
 
 test('P-15: YAML the reader cannot follow is unverified, never ok', () => {
