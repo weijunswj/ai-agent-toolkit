@@ -27,6 +27,7 @@ const PARAMS = {
 };
 const OWN_TEXT = 'Task: check the example folder and list what changed.\n1. List the folder.\n2. Compare with the last report.';
 const params = kind => validateParams(kind, PARAMS[kind]);
+const nudge0 = () => fs.readFileSync(path.join(TASKS, 'hourly-nudge.md'), 'utf8');
 const rendered = kind => tasks().render(kind, params(kind), kind === 'custom' ? OWN_TEXT : undefined);
 
 function tempDir(t) {
@@ -222,7 +223,7 @@ test('model tier and effort: cheapest by default, medium floor, every raise carr
   // A prompt rendered before tiers (no model key) with any old effort still checks and refreshes.
   const projectText = 'Project additions:\n- Keep this owner line.';
   for (const kind of ['daily-check-in', 'hourly-nudge', 'custom']) {
-    for (const [effort, want, reason] of [['low', 'medium', undefined], ['medium', 'medium', undefined], ['high', 'high', LEGACY_RAISE], ['max', 'max', LEGACY_RAISE]]) {
+    for (const [effort, want, reason] of [['low', 'medium', undefined], ['medium', 'medium', undefined], ['high', 'high', LEGACY_RAISE], ['xhigh', 'xhigh', LEGACY_RAISE], ['max', 'max', LEGACY_RAISE]]) {
       const old = laterMain({ version: '1.0.0' }).render(kind, params(kind), kind === 'custom' ? OWN_TEXT : projectText);
       const legacyPrompt = old.replace(/,\n {2}"model": "[a-z]+"/, '').replace('"effort": "medium"', `"effort": "${effort}"`);
       assert.doesNotMatch(legacyPrompt, /"model"/);
@@ -244,7 +245,10 @@ test('model tier and effort: cheapest by default, medium floor, every raise carr
   assert.match(checkIn, /unless the served settings match a `raised <tier>\/<effort>` field/);
   // A gap a swap cannot fix never causes a daily swap: fresh entries and repeats are advice only.
   assert.match(checkIn, /Report each model or effort gap in the prefix only once: when the entry says fresh[^\n]*list it under \*\*Tasks:\*\* as "tier gap still open" instead, so it never causes a daily swap/);
-  assert.match(checkIn, /each model or effort gap reported \(task, served, wanted\)/);
+  assert.match(checkIn, /each model or effort gap reported or still open \(task, served, wanted\)/);
+  assert.match(checkIn, /listed under \*\*Tasks:\*\* as "effort kept from before tiers: confirm or lower"/);
+  assert.ok(checkIn.includes(`reads "${LEGACY_RAISE}"`), 'the check-in names the exact migration reason');
+  assert.match(nudge0(), /the earliest future time an open post reply thread without an unanswered owner question reaches 6 hours/);
   // The nudge closes quiet chat reply threads and lists threads due for rotation.
   const nudge = fs.readFileSync(path.join(TASKS, 'hourly-nudge.md'), 'utf8');
   assert.match(nudge, /reason QUIET-6H, unresolved post reply threads with no new message for 6 hours or more/);
