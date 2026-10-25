@@ -12,7 +12,7 @@
   },
   "required_checks": ["validate"],
   "dependency_updates": {
-    "auto_merge": "off",
+    "auto_merge": "patch-minor",
     "github_actions": "owner"
   },
   "projection": {
