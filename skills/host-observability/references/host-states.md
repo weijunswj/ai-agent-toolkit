@@ -29,4 +29,3 @@ Thresholds are per-host settings in the env file. Defaults suit a small single-p
 ## Alerts
 
 An alert goes out when the state or the services change, at once on `EMERGENCY_PRESSURE` (every run while it lasts), on a notice such as a reboot, and again on the next run after a failed delivery. A failed delivery stays in the report and is never recorded as sent.
-
