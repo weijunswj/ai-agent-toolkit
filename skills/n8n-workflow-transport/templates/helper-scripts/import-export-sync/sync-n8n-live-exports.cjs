@@ -1101,7 +1101,7 @@ function main() {
       validateContent(candidateContent) {
         const raw = JSON.parse(candidateContent.toString('utf8'));
         const verification = Array.isArray(raw) ? raw[0] : raw.workflow || raw;
-        if (verification.active !== false) throw transactionError('Staged canonical workflow must remain inactive.');
+        if (verification.active !== false) throw transactionError('Staged canonical workflow must remain unpublished.');
         if (verification.activeVersionId !== undefined && verification.activeVersionId !== null) {
           throw transactionError('Staged canonical workflow must not carry a published version.');
         }

@@ -113,13 +113,15 @@ function parseWorkflowList(rawText) {
 }
 
 // n8n 2.x replaced activate/deactivate with publish/unpublish. `active` is deprecated in favour of
-// `activeVersionId` being set, so a workflow counts as live when either says so.
+// `activeVersionId` being set, so a workflow counts as live when either says so. Both checks fail
+// closed: only `active: false` with no published version counts as unpublished, the same rule the
+// validator applies, so a missing or unexpected state never passes the not-live checks.
 function isPublished(workflow) {
-  return typeof workflow?.activeVersionId === 'string' && workflow.activeVersionId.length > 0;
+  return workflow?.activeVersionId !== undefined && workflow?.activeVersionId !== null;
 }
 
 function isLive(workflow) {
-  return workflow?.active === true || isPublished(workflow);
+  return workflow?.active !== false || isPublished(workflow);
 }
 
 function nodeSummary(node) {

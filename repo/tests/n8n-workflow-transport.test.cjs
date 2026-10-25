@@ -3362,7 +3362,23 @@ test('n8n 2.x publish state counts as live whether n8n reports active or a publi
   assert.equal(cliWorkflowJson.isLive(draft), false);
   assert.equal(cliWorkflowJson.isLive(published), true);
   assert.equal(cliWorkflowJson.isLive({ ...published, active: false }), true, 'a published version is live even if the deprecated flag says otherwise');
-  assert.equal(cliWorkflowJson.isLive({ ...draft, activeVersionId: undefined, active: undefined }), false);
+
+  // Fail closed: only `active: false` with no published version counts as unpublished.
+  const MISSING = Symbol('missing');
+  for (const active of [true, false, MISSING, 'true', 'false', null]) {
+    for (const activeVersionId of [MISSING, null, 'v1', '', 42]) {
+      const workflow = { id: 'Wf1', name: 'Imported' };
+      if (active !== MISSING) workflow.active = active;
+      if (activeVersionId !== MISSING) workflow.activeVersionId = activeVersionId;
+      const published = activeVersionId !== MISSING && activeVersionId !== null;
+      const expectedLive = active !== false || published;
+      const label = `active=${String(active)} activeVersionId=${String(activeVersionId)}`;
+      assert.equal(cliWorkflowJson.isPublished(workflow), published, label);
+      assert.equal(cliWorkflowJson.isLive(workflow), expectedLive, label);
+      assert.equal(cliWorkflowJson.workflowSummary(workflow).active, expectedLive, label);
+    }
+  }
+  assert.equal(cliWorkflowJson.isLive({ id: 'Wf1', name: 'Imported' }), true, 'a workflow with no readable state is treated as live');
 
   const summary = cliWorkflowJson.workflowSummary(draft);
   assert.deepEqual(summary, {
@@ -3424,7 +3440,7 @@ $tokens = $null
 $errors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile(${psSingleQuoted(path.join(sourceScriptDir, 'export-n8n-workflows-live.ps1'))}, [ref]$tokens, [ref]$errors)
 if ($errors.Count -gt 0) { throw $errors[0].Message }
-$names = @("ConvertTo-NativeArgument", "Invoke-CapturedCommand", "Write-Utf8NoBomText", "Invoke-CliWorkflowJson", "Get-LiveWorkflowListDir", "Read-LiveWorkflowList", "Write-LiveWorkflowJsonFile", "Get-N8nCliLogArguments")
+$names = @("ConvertTo-NativeArgument", "Invoke-CapturedCommand", "Write-Utf8NoBomText", "Invoke-CliWorkflowJson", "Get-LiveWorkflowListDir", "Read-LiveWorkflowList", "Write-LiveWorkflowJsonFile", "Get-N8nCliLogArguments", "Remove-LiveWorkflowList")
 foreach ($function in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $names -contains $node.Name }, $true)) {
   Invoke-Expression $function.Extent.Text
 }
@@ -3437,6 +3453,9 @@ Write-Output ("COUNT=" + $live.Count)
 Write-Output ("PUBLISHED=" + (@($live | Where-Object { $_.active -eq $true }) | ForEach-Object { $_.id }))
 Write-LiveWorkflowJsonFile $live[0] ${psSingleQuoted(outPath)}
 Write-Output ("LOGARGS=" + ((Get-N8nCliLogArguments) -join " "))
+Write-Output ("STORED=" + @(Get-ChildItem -LiteralPath (Get-LiveWorkflowListDir) -Filter "*.workflows.json").Count)
+Remove-LiveWorkflowList
+Write-Output ("LEFT=" + (Test-Path -LiteralPath (Join-Path $RepoRoot ".tmp/n8n-live-workflow-list")))
 `, 'utf8');
 
   const result = spawnSync(shell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', harnessPath], { cwd: root, encoding: 'utf8', env: { ...process.env, TZ: 'Asia/Singapore' } });
@@ -3445,6 +3464,8 @@ Write-Output ("LOGARGS=" + ((Get-N8nCliLogArguments) -join " "))
   assert.match(result.stdout, /PUBLISHED=Wf2xPublished01/);
   assert.match(result.stdout, /LOGARGS=-e N8N_LOG_LEVEL=info -e N8N_LOG_OUTPUT=console -e N8N_LOG_FORMAT=text -e NO_COLOR=1/);
   assert.deepEqual(JSON.parse(fs.readFileSync(outPath, 'utf8')), n8n2xWorkflows()[0]);
+  assert.match(result.stdout, /STORED=1/);
+  assert.match(result.stdout, /LEFT=False/, 'the stored live workflow list is removed when the run ends');
 });
 
 test('live import and export helpers keep workflow JSON out of PowerShell and pin n8n log settings', () => {
@@ -3456,6 +3477,8 @@ test('live import and export helpers keep workflow JSON out of PowerShell and pi
     assert.match(text, /@\("exec"\) \+ \(Get-N8nCliLogArguments\)/, name);
     assert.match(text, /\nAssert-HelperSetReady\r?\n/, name);
     assert.match(text, /No workflows with published versions found/, name);
+    assert.match(text, /\ntry \{\r?\nAssert-HelperSetReady\r?\n/, name);
+    assert.match(text, /\n\} finally \{\r?\n  Remove-LiveWorkflowList\r?\n\}\r?\n$/, name);
   }
   const importText = readText(path.join(sourceScriptDir, 'import-n8n-workflows-live.ps1'));
   assert.match(importText, /"set-id", "--file", \$PreparedFile/);
@@ -3477,7 +3500,7 @@ test('n8n container detection accepts the official image from either registry un
   ]) {
     assert.equal(isN8nImage(image), true, image);
   }
-  for (const image of ['n8nio/runners', 'n8nio/n8n-custom', 'example/n8n', 'postgres:16', '']) {
+  for (const image of ['n8nio/runners', 'n8nio/n8n-custom', 'example/n8n', 'postgres:16', '', 'ghcr.io/n8nio/n8n', 'evil.example.test/n8nio/n8n:stable', 'localhost:5000/n8nio/n8n']) {
     assert.equal(isN8nImage(image), false, image);
   }
 });
@@ -3504,24 +3527,67 @@ test('canonical Git export drops instance-only settings and n8n 2.x live fields 
   assert.equal(draft.settings.availableInMCP, true, 'the live workflow object is not mutated');
 });
 
-test('prepared imports never set MCP exposure or a foreign error workflow, and never carry a published version', () => {
+test('prepared imports keep the target\'s own MCP exposure and error workflow, and never carry a published version', () => {
   const canonical = portableWorkflow.canonicalWorkflowForGit(safeWorkflow());
   canonical.settings = { executionOrder: 'v1', availableInMCP: true, errorWorkflow: 'OtherInstanceId' };
-  const result = portableWorkflow.preparePortableWorkflow({
+  const prepare = (liveWorkflow) => portableWorkflow.preparePortableWorkflow({
     canonicalWorkflow: canonical,
     workflowFile: 'n8n-workflows/safe.json',
     credentialDeclarations: { schemaVersion: 1, workflows: [] },
     credentialMetadata: [],
     deploymentPolicy: { schemaVersion: 1, workflows: [] },
     resourceBindings: { schemaVersion: 1, workflows: [] },
-    liveWorkflow: null,
+    liveWorkflow,
+    targetWorkflowId: liveWorkflow ? liveWorkflow.id : undefined,
   });
+
+  // New workflow: Git's values are left out and nothing is set.
+  let result = prepare(null);
   assert.deepEqual(result.droppedSettings, ['errorWorkflow', 'availableInMCP']);
+  assert.deepEqual(result.keptTargetSettings, []);
   assert.deepEqual(result.preparedWorkflow.settings, { executionOrder: 'v1' });
   assert.equal(result.preparedWorkflow.active, false);
 
-  assert.throws(() => portableWorkflow.validatePreparedWorkflow({ ...result.preparedWorkflow, activeVersionId: 'v1' }), /published version/);
-  assert.throws(() => portableWorkflow.validatePreparedWorkflow({ ...result.preparedWorkflow, settings: { availableInMCP: false } }), /MCP exposure/);
+  // Existing target: an import replaces the whole workflow, so the target's own values are carried.
+  const target = safeWorkflow({ id: 'wf_target', settings: { executionOrder: 'v1', availableInMCP: false, errorWorkflow: 'TargetErrorHandler' } });
+  result = prepare(target);
+  assert.deepEqual(result.droppedSettings, []);
+  assert.deepEqual(result.keptTargetSettings, ['errorWorkflow', 'availableInMCP']);
+  assert.deepEqual(result.preparedWorkflow.settings, { executionOrder: 'v1', availableInMCP: false, errorWorkflow: 'TargetErrorHandler' });
+
+  // Target with only one of them, and a target with no settings object at all.
+  result = prepare(safeWorkflow({ id: 'wf_target', settings: { availableInMCP: true } }));
+  assert.deepEqual(result.droppedSettings, ['errorWorkflow']);
+  assert.deepEqual(result.preparedWorkflow.settings, { executionOrder: 'v1', availableInMCP: true });
+  const noSettings = safeWorkflow({ id: 'wf_target' });
+  delete noSettings.settings;
+  result = prepare(noSettings);
+  assert.deepEqual(result.preparedWorkflow.settings, { executionOrder: 'v1' });
+
+  const prepared = prepare(target).preparedWorkflow;
+  portableWorkflow.validatePreparedWorkflow(prepared, { liveWorkflow: target });
+  assert.throws(() => portableWorkflow.validatePreparedWorkflow({ ...prepared, activeVersionId: 'v1' }, { liveWorkflow: target }), /published version/);
+  assert.throws(() => portableWorkflow.validatePreparedWorkflow({ ...prepared, settings: { ...prepared.settings, availableInMCP: true } }, { liveWorkflow: target }), /target's own MCP exposure/);
+  assert.throws(() => portableWorkflow.validatePreparedWorkflow({ ...prepared, settings: { executionOrder: 'v1', availableInMCP: false } }, { liveWorkflow: target }), /target's own error workflow/);
+  assert.throws(() => portableWorkflow.validatePreparedWorkflow({ ...prepared, settings: { availableInMCP: false } }), /target's own MCP exposure/, 'a new workflow never sets MCP exposure');
+});
+
+test('legacy prepared imports keep the target\'s own instance-only settings too', () => {
+  const cwd = tempDir();
+  const repoFile = path.join(cwd, 'n8n-workflows', 'safe.json');
+  const liveFile = path.join(cwd, '.tmp', 'live.json');
+  const outFile = path.join(cwd, '.tmp', 'safe.live-import.json');
+  writeJson(repoFile, safeWorkflow({ settings: { executionOrder: 'v1', availableInMCP: true, errorWorkflow: 'OtherInstanceId' } }));
+  writeJson(liveFile, safeWorkflow({ settings: { executionOrder: 'v1', availableInMCP: false } }));
+
+  let result = runNode(prepareScript, [repoFile, path.join(cwd, 'missing-bindings.json'), outFile, liveFile], { cwd });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(fs.readFileSync(outFile, 'utf8')).settings, { executionOrder: 'v1', availableInMCP: false });
+  assert.match(result.stdout, /kept the target's own availableInMCP; left out Git's errorWorkflow/);
+
+  result = runNode(prepareScript, [repoFile, path.join(cwd, 'missing-bindings.json'), outFile], { cwd });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(fs.readFileSync(outFile, 'utf8')).settings, { executionOrder: 'v1' });
 });
 
 test('validator reports risky nodes offline, flags instance-only settings and refuses published workflow files', () => {
@@ -3550,10 +3616,10 @@ test('validator reports risky nodes offline, flags instance-only settings and re
   assert.match(result.stderr, /carries a published version/);
 
   const preparedDir = path.join(cwd, '.tmp', 'n8n-live-import');
-  writeJson(path.join(preparedDir, 'draft.live-import.json'), { ...draft, settings: { availableInMCP: true } });
+  writeJson(path.join(preparedDir, 'safe.live-import.json'), { ...portableWorkflow.canonicalWorkflowForGit(safeWorkflow()), settings: { availableInMCP: true } });
   result = runNode(validateScript, ['--mode', 'prepared-import', preparedDir], { cwd });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /sets settings\.availableInMCP.*Prepared imports never set it/);
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  assert.match(result.stdout, /keeps the target's own settings\.availableInMCP/);
 });
 
 test('risky node report names each category the safety rules require', () => {
@@ -3567,6 +3633,16 @@ test('risky node report names each category the safety rules require', () => {
     ['Save digest', ['Read/Write Files'], true],
   ]);
   assert.deepEqual(riskyNodeLines('safe.json', riskyNodes(safeWorkflow())), []);
+
+  const agentTools = { nodes: [
+    { name: 'Call API tool', type: 'n8n-nodes-base.httpRequestTool' },
+    { name: 'Run code tool', type: '@n8n/n8n-nodes-langchain.toolCode' },
+    { name: 'Calculator', type: '@n8n/n8n-nodes-langchain.toolCalculator' },
+  ] };
+  assert.deepEqual(riskyNodes(agentTools).map((node) => [node.name, node.reasons]), [
+    ['Call API tool', ['HTTP Request']],
+    ['Run code tool', ['Code']],
+  ]);
 });
 
 test('sanitiser strips n8n 2.x live-only fields', () => {
@@ -3635,6 +3711,7 @@ test('helper refresh previews, copies only the stamped set and never deletes rep
     files: { 'retired-helper.cjs': 'x' },
   }));
   fs.writeFileSync(path.join(consumer, 'retired-helper.cjs'), 'retired\n');
+  fs.writeFileSync(path.join(consumer, 'README.md'), 'Our own notes for these helpers.\n');
 
   let result = runNode(helperSetScript, ['refresh', '--from', scriptDir, '--to', consumer]);
   assert.equal(result.status, 0, result.stderr);
@@ -3643,6 +3720,7 @@ test('helper refresh previews, copies only the stamped set and never deletes rep
   assert.match(result.stdout, /ADD: n8n-portable-workflow\.cjs/);
   assert.match(result.stdout, /KEEP: import-member-welcome-email-bounded\.ps1/);
   assert.match(result.stdout, /UNUSED: retired-helper\.cjs/);
+  assert.match(result.stdout, /KEEP: README\.md \(repository copy kept/);
   assert.equal(fs.readFileSync(path.join(consumer, 'export-n8n-workflows-live.ps1'), 'utf8'), 'old generation\n');
 
   result = runNode(helperSetScript, ['refresh', '--from', scriptDir, '--to', consumer, '--write']);
@@ -3650,6 +3728,17 @@ test('helper refresh previews, copies only the stamped set and never deletes rep
   assert.equal(helperSet.checkSet(consumer).status, 'OK');
   assert.equal(fs.readFileSync(path.join(consumer, 'import-member-welcome-email-bounded.ps1'), 'utf8'), 'repo-local\n');
   assert.equal(fs.existsSync(path.join(consumer, 'retired-helper.cjs')), true);
+  assert.equal(fs.readFileSync(path.join(consumer, 'README.md'), 'utf8'), 'Our own notes for these helpers.\n');
+
+  // A stamp that names files outside its folder, or lists files the folder does not have, is refused.
+  const source = path.join(tempDir(), 'toolkit-helpers');
+  fs.cpSync(scriptDir, source, { recursive: true });
+  const stamp = JSON.parse(fs.readFileSync(path.join(source, helperSet.MANIFEST_NAME), 'utf8'));
+  fs.writeFileSync(path.join(source, helperSet.MANIFEST_NAME), JSON.stringify({ ...stamp, files: { ...stamp.files, '../outside.cjs': 'x' } }));
+  assert.throws(() => helperSet.planRefresh(source, consumer), /no valid n8n-helper-set\.json/);
+  assert.equal(helperSet.checkSet(source).status, 'FAIL');
+  fs.writeFileSync(path.join(source, helperSet.MANIFEST_NAME), JSON.stringify({ ...stamp, files: { ...stamp.files, 'extra-helper.cjs': stamp.files['n8n-helper-set.cjs'] } }));
+  assert.throws(() => helperSet.planRefresh(source, consumer), /does not match its own stamp/);
 });
 
 test('machine check reports each readiness item, one next step and no environment values beyond log settings', async () => {

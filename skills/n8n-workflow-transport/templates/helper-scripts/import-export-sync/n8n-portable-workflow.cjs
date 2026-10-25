@@ -123,8 +123,10 @@ const LIVE_ONLY_WORKFLOW_FIELDS = Object.freeze([
 ]);
 
 // Workflow settings that belong to one live instance: `errorWorkflow` holds another workflow's id on
-// that instance, and `availableInMCP` is the instance's MCP exposure decision. Canonical Git and
-// prepared imports both drop them, so an import never sets MCP exposure or points at a foreign id.
+// that instance, and `availableInMCP` is the instance's MCP exposure decision. Canonical Git drops
+// them. An import replaces the whole workflow, settings included, so a prepared import carries the
+// target's own values instead (none for a new workflow): the target keeps its MCP exposure and error
+// workflow, and Git's copy never sets either.
 const LIVE_ONLY_SETTINGS = Object.freeze(['errorWorkflow', 'availableInMCP']);
 
 function stripLiveOnlySettings(workflow) {
@@ -137,6 +139,45 @@ function stripLiveOnlySettings(workflow) {
     }
   }
   return dropped;
+}
+
+function liveSettingsOf(liveWorkflow) {
+  const settings = liveWorkflow?.settings;
+  return settings && typeof settings === 'object' && !Array.isArray(settings) ? settings : null;
+}
+
+// Replaces Git's instance-only settings with the target's own values. Returns the keys taken out of
+// Git's copy (`dropped`) and the keys carried over from the target (`kept`).
+function keepTargetInstanceSettings(workflow, liveWorkflow) {
+  const dropped = stripLiveOnlySettings(workflow);
+  const kept = [];
+  const liveSettings = liveSettingsOf(liveWorkflow);
+  if (!liveSettings) return { dropped, kept, createdSettings: false };
+  let createdSettings = false;
+  for (const key of LIVE_ONLY_SETTINGS) {
+    if (!Object.prototype.hasOwnProperty.call(liveSettings, key)) continue;
+    if (!workflow.settings || typeof workflow.settings !== 'object' || Array.isArray(workflow.settings)) {
+      workflow.settings = {};
+      createdSettings = true;
+    }
+    workflow.settings[key] = clone(liveSettings[key]);
+    kept.push(key);
+  }
+  return { dropped, kept, createdSettings };
+}
+
+function assertTargetInstanceSettings(workflow, liveWorkflow) {
+  const settings = workflow?.settings && typeof workflow.settings === 'object' && !Array.isArray(workflow.settings) ? workflow.settings : {};
+  const liveSettings = liveSettingsOf(liveWorkflow) || {};
+  for (const key of LIVE_ONLY_SETTINGS) {
+    const inPrepared = Object.prototype.hasOwnProperty.call(settings, key);
+    const inTarget = Object.prototype.hasOwnProperty.call(liveSettings, key);
+    if (!inPrepared && !inTarget) continue;
+    if (inPrepared !== inTarget || JSON.stringify(settings[key]) !== JSON.stringify(liveSettings[key])) {
+      const label = key === 'availableInMCP' ? 'MCP exposure (settings.availableInMCP)' : 'error workflow (settings.errorWorkflow)';
+      throw new N8nPortableWorkflowError('N8N_POLICY_VALIDATION_FAILED', `Prepared workflow must keep the target's own ${label}.`);
+    }
+  }
 }
 
 function canonicalWorkflowForGit(workflow, options = {}) {
@@ -800,7 +841,7 @@ function assertCanonicalInvariant(canonical, prepared, allowedPaths) {
   return { differenceCount: differences.length, allowedPaths: [...allowedPaths].sort() };
 }
 
-function validatePreparedWorkflow(workflow) {
+function validatePreparedWorkflow(workflow, options = {}) {
   if (!workflow || typeof workflow !== 'object' || !Array.isArray(workflow.nodes) || !workflow.connections || typeof workflow.connections !== 'object') {
     throw new N8nPortableWorkflowError('N8N_POLICY_VALIDATION_FAILED', 'Prepared workflow must contain nodes and connections.');
   }
@@ -810,9 +851,7 @@ function validatePreparedWorkflow(workflow) {
   if (workflow.activeVersionId !== undefined && workflow.activeVersionId !== null) {
     throw new N8nPortableWorkflowError('N8N_POLICY_VALIDATION_FAILED', 'Prepared workflow must not carry a published version (activeVersionId).');
   }
-  if (workflow.settings && typeof workflow.settings === 'object' && Object.prototype.hasOwnProperty.call(workflow.settings, 'availableInMCP')) {
-    throw new N8nPortableWorkflowError('N8N_POLICY_VALIDATION_FAILED', 'Prepared workflow must not set MCP exposure (settings.availableInMCP).');
-  }
+  assertTargetInstanceSettings(workflow, options.liveWorkflow);
 }
 
 function assertCredentialDeclarationCoverage(canonicalWorkflow, liveWorkflow, requirements) {
@@ -891,8 +930,11 @@ function preparePortableWorkflow(options) {
   ];
 
   const strippedWebhookIds = stripDedicatedWebhookMetadata(prepared, allowedPaths);
-  const droppedSettings = stripLiveOnlySettings(prepared);
-  for (const key of droppedSettings) allowedPaths.add(`settings.${key}`);
+  const instanceSettings = keepTargetInstanceSettings(prepared, options.liveWorkflow);
+  const droppedSettings = instanceSettings.dropped.filter((key) => !instanceSettings.kept.includes(key));
+  const keptTargetSettings = instanceSettings.kept;
+  for (const key of [...instanceSettings.dropped, ...instanceSettings.kept]) allowedPaths.add(`settings.${key}`);
+  if (instanceSettings.createdSettings) allowedPaths.add('settings');
   prepared.active = false;
   const liveWorkflowId = typeof options.liveWorkflow?.id === 'string' ? options.liveWorkflow.id : '';
   const requestedWorkflowId = typeof options.targetWorkflowId === 'string' ? options.targetWorkflowId : '';
@@ -957,7 +999,7 @@ function preparePortableWorkflow(options) {
   const resourceBindingCount = applyExactResourceBindings(prepared, policyEntry, bindingEntry, allowedPaths);
   phases.push('apply-exact-resource-bindings');
 
-  validatePreparedWorkflow(prepared);
+  validatePreparedWorkflow(prepared, { liveWorkflow: options.liveWorkflow });
   phases.push('validate-prepared-workflow');
   const invariant = assertCanonicalInvariant(canonical, prepared, allowedPaths);
   phases.push('validate-canonical-invariant');
@@ -970,6 +1012,7 @@ function preparePortableWorkflow(options) {
     restoredWebhookIds,
     strippedWebhookIds,
     droppedSettings,
+    keptTargetSettings,
     invariant,
   };
 }
@@ -1195,6 +1238,8 @@ module.exports = {
   LIVE_ONLY_SETTINGS,
   LIVE_ONLY_WORKFLOW_FIELDS,
   stripLiveOnlySettings,
+  keepTargetInstanceSettings,
+  assertTargetInstanceSettings,
   N8nPortableWorkflowError,
   readJson,
   normaliseWorkflow,

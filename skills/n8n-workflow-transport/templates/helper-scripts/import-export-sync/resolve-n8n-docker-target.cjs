@@ -172,7 +172,15 @@ function findByComposeLabels(allRunning, options) {
 }
 
 // The official image is published as n8nio/n8n on Docker Hub and as docker.n8n.io/n8nio/n8n, under
-// any tag (stable, latest, a version) or digest. Match the repository path, not one exact reference.
+// any tag (stable, latest, a version) or digest. Match those registries and the repository path, not
+// one exact reference; an image from any other registry needs an explicit target.
+const N8N_IMAGE_REGISTRIES = Object.freeze(['', 'docker.io', 'index.docker.io', 'registry-1.docker.io', 'docker.n8n.io']);
+
+function imageRegistry(image) {
+  const parts = String(image || '').trim().toLowerCase().split('@')[0].split('/');
+  return parts.length > 1 && (parts[0].includes('.') || parts[0].includes(':') || parts[0] === 'localhost') ? parts[0] : '';
+}
+
 function imageRepository(image) {
   let reference = String(image || '').trim().toLowerCase();
   const digestAt = reference.indexOf('@');
@@ -187,7 +195,7 @@ function imageRepository(image) {
 }
 
 function isN8nImage(image) {
-  return imageRepository(image) === N8N_IMAGE_REPOSITORY;
+  return N8N_IMAGE_REGISTRIES.includes(imageRegistry(image)) && imageRepository(image) === N8N_IMAGE_REPOSITORY;
 }
 
 function findByImageFallback(allRunning) {

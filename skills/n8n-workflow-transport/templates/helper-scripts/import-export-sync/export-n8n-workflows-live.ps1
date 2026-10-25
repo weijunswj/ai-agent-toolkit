@@ -558,6 +558,18 @@ function Read-LiveWorkflowList($CommandResult) {
   return @($summary | Where-Object { $null -ne $_ })
 }
 
+function Remove-LiveWorkflowList {
+  # The stored list holds every live workflow, so it never outlives the run that read it.
+  if (-not [string]::IsNullOrWhiteSpace($script:LiveWorkflowStorePath)) {
+    Remove-Item -LiteralPath $script:LiveWorkflowStorePath -Force -ErrorAction SilentlyContinue
+    $script:LiveWorkflowStorePath = $null
+  }
+  $listDir = Join-Path (Join-Path $RepoRoot ".tmp") "n8n-live-workflow-list"
+  if ((Test-Path -LiteralPath $listDir -PathType Container) -and -not (Get-ChildItem -LiteralPath $listDir -Force | Select-Object -First 1)) {
+    Remove-Item -LiteralPath $listDir -Force -ErrorAction SilentlyContinue
+  }
+}
+
 function Write-LiveWorkflowJsonFile($Workflow, $Path) {
   Invoke-CliWorkflowJson @("write", "--store", $script:LiveWorkflowStorePath, "--id", [string]$Workflow.id, "--output", $Path) "Could not write the live workflow file $Path."
 }
@@ -848,6 +860,8 @@ if ($Mode -eq "RepoTrackedOnly") {
   Write-Host "Missing live     : Not used in AllLive mode."
 }
 
+# Every exit path, including errors, removes the stored live workflow list in the finally block below.
+try {
 Assert-HelperSetReady
 Assert-WorkflowIdentityStateReadable
 $workflowFiles = Get-RootWorkflowFiles $WorkflowDirPath ($Mode -eq "RepoTrackedOnly")
@@ -1135,3 +1149,6 @@ Write-Section "Next Action Steps"
 Write-Host "1. Review all workflow JSON changes before committing."
 Write-Host "2. Keep .n8n-local and .tmp uncommitted."
 Write-Host "3. Historical version export is intentionally unsupported by this helper."
+} finally {
+  Remove-LiveWorkflowList
+}

@@ -30,11 +30,19 @@ const RISK_CATEGORIES = Object.freeze([
   },
   {
     label: 'HTTP Request',
-    types: ['n8n-nodes-base.httpRequest', '@n8n/n8n-nodes-langchain.toolHttpRequest'],
+    types: ['n8n-nodes-base.httpRequest', 'n8n-nodes-base.httpRequestTool', '@n8n/n8n-nodes-langchain.toolHttpRequest'],
   },
 ]);
 
 const CATEGORY_BY_TYPE = new Map(RISK_CATEGORIES.flatMap((category) => category.types.map((type) => [type, category.label])));
+
+// n8n exposes many nodes to AI agents as a tool variant named `<type>Tool` (for example
+// `n8n-nodes-base.httpRequestTool`); a tool variant carries the same risk as its base node.
+function categoryOf(type) {
+  if (typeof type !== 'string') return undefined;
+  if (CATEGORY_BY_TYPE.has(type)) return CATEGORY_BY_TYPE.get(type);
+  return type.endsWith('Tool') ? CATEGORY_BY_TYPE.get(type.slice(0, -'Tool'.length)) : undefined;
+}
 
 function hasCredentials(node) {
   return Boolean(node && node.credentials && typeof node.credentials === 'object' && Object.keys(node.credentials).length > 0);
@@ -45,7 +53,7 @@ function riskyNodes(workflow) {
   const result = [];
   for (const node of Array.isArray(workflow?.nodes) ? workflow.nodes : []) {
     const reasons = [];
-    const category = CATEGORY_BY_TYPE.get(node?.type);
+    const category = categoryOf(node?.type);
     if (category) reasons.push(category);
     if (hasCredentials(node)) reasons.push('Credentialed');
     if (reasons.length === 0) continue;

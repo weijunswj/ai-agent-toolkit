@@ -2310,7 +2310,7 @@ test('no-change reports retain optional credential metadata without required act
       nodeName: 'Optional append',
       nodeType: 'n8n-nodes-base.googleSheets',
     }],
-    nextAction: { code: 'NONE', message: 'No action is required; the effective inactive payload is unchanged.' },
+    nextAction: { code: 'NONE', message: 'No action is required; the effective unpublished payload is unchanged.' },
   });
   assert.equal(report.result, 'SUCCESS');
   assert.equal(report.nextAction.code, 'NONE');

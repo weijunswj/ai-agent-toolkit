@@ -57,6 +57,17 @@ function buildManifest(dir) {
   return { schemaVersion: 1, kind: MANIFEST_KIND, setId: setIdFor(files), files: files };
 }
 
+function isPlainFileName(name) {
+  return /^[A-Za-z0-9_][A-Za-z0-9._-]*$/.test(name) && name.indexOf('..') < 0;
+}
+
+function sameFiles(left, right) {
+  var leftNames = Object.keys(left).sort();
+  var rightNames = Object.keys(right).sort();
+  if (leftNames.join('\n') !== rightNames.join('\n')) return false;
+  return leftNames.every(function (name) { return left[name] === right[name]; });
+}
+
 function readManifest(dir) {
   var manifestPath = path.join(dir, MANIFEST_NAME);
   if (!fs.existsSync(manifestPath)) return null;
@@ -69,6 +80,8 @@ function readManifest(dir) {
   if (!manifest || manifest.schemaVersion !== 1 || manifest.kind !== MANIFEST_KIND || !manifest.files || typeof manifest.files !== 'object') {
     return { invalid: true };
   }
+  // File names are plain names in this folder; anything with a path in it is not a valid stamp.
+  if (!Object.keys(manifest.files).every(isPlainFileName)) return { invalid: true };
   return manifest;
 }
 
@@ -129,7 +142,9 @@ function planRefresh(fromDir, toDir) {
   var source = readManifest(fromDir);
   if (!source || source.invalid) throw new Error('The Toolkit helper folder has no valid ' + MANIFEST_NAME + '.');
   var current = buildManifest(fromDir);
-  if (current.setId !== source.setId) throw new Error('The Toolkit helper folder does not match its own stamp; refresh Toolkit first.');
+  if (current.setId !== source.setId || !sameFiles(current.files, source.files)) {
+    throw new Error('The Toolkit helper folder does not match its own stamp; refresh Toolkit first.');
+  }
   var previous = fs.existsSync(toDir) ? readManifest(toDir) : null;
   var actions = [];
   Object.keys(source.files).sort().forEach(function (name) {
@@ -141,8 +156,14 @@ function planRefresh(fromDir, toDir) {
   ['README.md', MANIFEST_NAME].forEach(function (name) {
     if (!fs.existsSync(path.join(fromDir, name))) return;
     var target = path.join(toDir, name);
-    var same = fs.existsSync(target) && hashFile(target) === hashFile(path.join(fromDir, name));
-    actions.push({ action: fs.existsSync(target) ? (same ? 'SAME' : 'UPDATE') : 'ADD', name: name });
+    if (!fs.existsSync(target)) {
+      actions.push({ action: 'ADD', name: name });
+      return;
+    }
+    var same = hashFile(target) === hashFile(path.join(fromDir, name));
+    // A repository may edit its helper README, so an existing one is kept as it is.
+    if (UNSTAMPED_FILES[name]) actions.push(same ? { action: 'SAME', name: name } : { action: 'KEEP', name: name, note: 'repository copy kept; compare it with the Toolkit README yourself' });
+    else actions.push({ action: same ? 'SAME' : 'UPDATE', name: name });
   });
   if (fs.existsSync(toDir)) {
     stampedFileNames(toDir).forEach(function (name) {
@@ -173,7 +194,7 @@ function refreshLines(plan, write) {
   var lines = ['Helper set ' + (plan.previousSetId || '(none)') + ' -> ' + plan.setId + (write ? '' : ' (preview; rerun with --write to apply)')];
   plan.actions.forEach(function (entry) {
     if (entry.action === 'SAME') return;
-    lines.push(entry.action + ': ' + entry.name + ' (' + notes[entry.action] + ')');
+    lines.push(entry.action + ': ' + entry.name + ' (' + (entry.note || notes[entry.action]) + ')');
   });
   if (lines.length === 1) lines.push('No changes.');
   return lines;

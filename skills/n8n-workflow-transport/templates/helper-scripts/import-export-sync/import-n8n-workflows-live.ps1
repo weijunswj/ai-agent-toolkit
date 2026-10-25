@@ -686,6 +686,18 @@ function Read-LiveWorkflowList($CommandResult) {
   return @($summary | Where-Object { $null -ne $_ })
 }
 
+function Remove-LiveWorkflowList {
+  # The stored list holds every live workflow, so it never outlives the run that read it.
+  if (-not [string]::IsNullOrWhiteSpace($script:LiveWorkflowStorePath)) {
+    Remove-Item -LiteralPath $script:LiveWorkflowStorePath -Force -ErrorAction SilentlyContinue
+    $script:LiveWorkflowStorePath = $null
+  }
+  $listDir = Join-Path (Join-Path $RepoRoot ".tmp") "n8n-live-workflow-list"
+  if ((Test-Path -LiteralPath $listDir -PathType Container) -and -not (Get-ChildItem -LiteralPath $listDir -Force | Select-Object -First 1)) {
+    Remove-Item -LiteralPath $listDir -Force -ErrorAction SilentlyContinue
+  }
+}
+
 function Write-LiveWorkflowJsonFile($Workflow, $Path) {
   Invoke-CliWorkflowJson @("write", "--store", $script:LiveWorkflowStorePath, "--id", [string]$Workflow.id, "--output", $Path) "Could not write the live workflow file $Path."
 }
@@ -1701,6 +1713,8 @@ if ($RestartContainerAfterImport) {
   throw "N8N_POLICY_VALIDATION_FAILED: -RestartContainerAfterImport is no longer supported. This helper never restarts n8n."
 }
 
+# Every exit path, including errors, removes the stored live workflow list in the finally block below.
+try {
 Assert-HelperSetReady
 
 if (-not $DryRun) {
@@ -1812,7 +1826,7 @@ if ($preflight.PlannedImports.Count -eq 0) {
   if ($preflight.RequiredCredentialMisses.Count -gt 0) {
     Write-N8nOperationReport "ACTION_REQUIRED" "N8N_CREDENTIAL_MISSING" "credential-resolution" $false $false @() $preflight.RequiredCredentialMisses "CREATE_CREDENTIALS_AND_RERUN" "Create each reported logical credential name and type, then rerun this unchanged command." "inactive"
   } else {
-    Write-N8nOperationReport "SUCCESS" "N8N_IMPORT_NO_CHANGES" "effective-comparison" $false $false @() $preflight.OptionalCredentialMisses "NONE" "No action is required; the effective inactive payload is unchanged." "inactive"
+    Write-N8nOperationReport "SUCCESS" "N8N_IMPORT_NO_CHANGES" "effective-comparison" $false $false @() $preflight.OptionalCredentialMisses "NONE" "No action is required; the effective unpublished payload is unchanged." "inactive"
   }
 
   Write-Section "Next Action Steps"
@@ -1909,4 +1923,7 @@ if ($importedCount -gt 0) {
   }
 } else {
   Write-Host "1. No live workflow changes were imported."
+}
+} finally {
+  Remove-LiveWorkflowList
 }
