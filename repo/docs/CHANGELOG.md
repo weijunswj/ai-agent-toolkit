@@ -24,6 +24,7 @@
 - **Skill drift in the daily check-in:** the check-in now compares the account copy of the Projects skill and its reference files with every Toolkit revision. A copy that matches an older revision reports `SKILL BEHIND`; one that matches none is saved and reports `SKILL DRIFT`, so direct edits come into Toolkit before anyone re-uploads. A separate drift task is no longer needed.
 - **Loud check-in, silent nudge:** the coordinator posts the check-in's first line to the owner every run, so a missing day shows. The hourly nudge never posts in its home thread except to report a failed delivery, and asks for its own rebuild once a week.
 - **Deleted tasks come back:** the check-in and the nudge each report the other as missing, and the coordinator recreates it from the template on `main` the same turn. If both are gone, the coordinator's once-a-day `list_triggers` check starts a cloud thread that recreates them and tells the owner once. Task runs stay read-only.
+- **The Toolkit project watches the others:** its daily check-in reuses the same `list_triggers` read to spot any other Claude project missing its check-in or nudge, and reports it as one `PROJECT TASKS MISSING` line. It never recreates another project's tasks; that project's coordinator does on its next wake.
 
 ## 3.10.0 (host support, governance states, decision history and the personal-data guard)
 

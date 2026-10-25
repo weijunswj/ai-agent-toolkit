@@ -107,6 +107,7 @@ Whenever the user asks for anything recurring (the daily check-in, a sweep, a re
   - `MEMORY FORMAT`: rewrite only the named Toolkit line.
   - `TASKS OUTDATED`: swap each named Toolkit-made task (**Recurring tasks**); add an `unlisted` task to the line.
   - `NUDGE NOT ARMED`: rebuild the hourly nudge and its home thread (**Hourly nudge**), without asking; a deleted nudge is rebuilt the same way.
+  - `PROJECT TASKS MISSING` (Toolkit project only): another project lost its check-in or nudge. Tell the owner once which; that project's coordinator recreates them on its next wake (**Both gone**), never this one.
   - `PLUGIN BEHIND`: the Toolkit plugin on the user's claude.ai account is more than a day behind `main`. Tell the owner once per version: remove the Toolkit plugin only in claude.ai Customize > Plugins and let it reinstall; if it is still behind, remove the marketplace and add it again with Sync automatically on. Also confirm the account copy after each release merge.
 - The report also lists the project's own and local tasks as advice, open PRs with their checks, outside activity on the parent issue, overdue promises, owner asks waiting over a day and setup advice. It always reaches you. Post its first line to the owner every run, "nothing changed" included, so a missing day shows; give detail only for changes, stuck work or an answer waiting over a day. The hourly nudge stays silent: act on it without posting unless something needs the owner.
 - Stop it when the user asks.

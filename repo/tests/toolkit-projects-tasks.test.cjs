@@ -235,9 +235,21 @@ test('every Toolkit-made prompt carries the recurring-task requirements; fresh r
   assert.doesNotMatch(bound, /set_thread_resolved/);
 });
 
+test('only the project that runs the Toolkit repo watches other projects, and only reports', () => {
+  const other = rendered('daily-check-in');
+  assert.doesNotMatch(other, /OTHER PROJECTS:/);
+  const own = tasks().render('daily-check-in', validateParams('daily-check-in', { ...PARAMS['daily-check-in'], repo: 'weijunswj/ai-agent-toolkit' }));
+  assert.match(own, /OTHER PROJECTS: this project runs the Toolkit repo/);
+  for (const required of ['reusing the same list_triggers result (no extra calls)', 'Group the cloud tasks by hearth_channel_id',
+    '"PROJECT TASKS MISSING: <PROJECT>=<task>[+<task>], ... | "', 'unless state.md already reported the same set',
+    'Report only: that project\'s own coordinator recreates its tasks on its next wake']) {
+    assert.ok(own.includes(required), required);
+  }
+});
+
 test('the check-in carries every prefix in the fixed order and checks both Toolkit tasks; the nudge compares cheaply first', () => {
   const text = rendered('daily-check-in');
-  const order = ['SKILL UPDATE', 'SKILL DRIFT', 'SKILL BEHIND', 'BLOCK OUTDATED', 'BINDING STALE or BINDING UNKNOWN', 'TOOLKIT CHANGED', 'MEMORY FORMAT', 'TASKS OUTDATED', 'NUDGE NOT ARMED', 'PLUGIN BEHIND'];
+  const order = ['SKILL UPDATE', 'SKILL DRIFT', 'SKILL BEHIND', 'BLOCK OUTDATED', 'BINDING STALE or BINDING UNKNOWN', 'TOOLKIT CHANGED', 'MEMORY FORMAT', 'TASKS OUTDATED', 'NUDGE NOT ARMED', 'PROJECT TASKS MISSING', 'PLUGIN BEHIND'];
   const line = text.split('\n').find(entry => entry.startsWith('- First line:'));
   const positions = order.map(prefix => line.indexOf(prefix));
   assert.ok(positions.every((at, index) => at > -1 && (index === 0 || at > positions[index - 1])), line);
