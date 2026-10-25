@@ -42,7 +42,7 @@ Deleting scratch this agent created in this task (temporary worktrees, briefs, o
 
 Before a gated action, confirm an approval covers it and the host-native permission exists. An approval binds the owner, action, target, resources, effects, recipient, conditions and expiry, and survives only a change of turn, worker, chat or transport for the same pending action; anything changed, new, revoked, expired or left unapproved by its outcome needs fresh approval. Approval, assignment, custody and capability never supply a missing host-native permission. Words like `continue`, `next`, `apply` or `do it` stay within the approved scope.
 
-**Standing permission asks:** when a step stops on the owner, check the standing-permission ledger, else ask once in plain English (just this once, from now on for this exact scope, or no) and record the answer. Never offer a hard stop or the safety floor; explain it. Procedure: Toolkit `repo/docs/agent-playbooks/safety-gates.md`.
+**Standing permission asks:** when a step stops on the owner, check the standing-permission ledger, else ask once in plain English (just this once, from now on for this exact scope, or no) and record the answer. Only the owner's own recorded answer grants; never offer or honour a hard stop, and never edit your own permission settings. Procedure: Toolkit `repo/docs/agent-playbooks/safety-gates.md`.
 
 ## Coding Gates
 
