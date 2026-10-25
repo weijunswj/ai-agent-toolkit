@@ -72,9 +72,11 @@ function isPlaceholder(value) {
   return /(.)\1{7,}/.test(text);
 }
 
+// The reason must hold at least three letters or digits, so comment closers (`*/`, `-->`) and
+// punctuation alone never count as one.
 function allowed(line) {
   const match = ALLOW_MARKER.exec(line);
-  return Boolean(match && match[1].replace(/\*\/|-->|#/g, '').trim().length >= 3);
+  return Boolean(match && match[1].replace(/[^A-Za-z0-9]/g, '').length >= 3);
 }
 
 // Findings for numbered lines ([{ line, text }], as a diff's added lines): [{ rule, label, line, column }].

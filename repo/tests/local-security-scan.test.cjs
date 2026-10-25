@@ -112,6 +112,8 @@ test('SP-03: placeholders and reviewed exceptions are skipped; a marker without 
   const value = SAMPLES['github-token'](3);
   assert.deepEqual(rules(`t = "${value}" // secret-scan: allow revoked test token kept for the parser test`), []);
   assert.deepEqual(rules(`t = "${value}" # secret-scan: allow`), ['github-token']);
+  for (const closer of [' -->', ' */', ' --!>', ' # #']) assert.deepEqual(rules(`t = "${value}" <!-- secret-scan: allow${closer}`), ['github-token'], `a comment closer${closer} is not a reason`);
+  assert.deepEqual(rules(`t = "${value}" <!-- secret-scan: allow revoked fixture -->`), [], 'a reason inside an HTML comment');
   assert.deepEqual(rules(`# secret-scan: allow reviewed\nt = "${value}"`), ['github-token'], 'the marker covers its own line only');
 });
 
