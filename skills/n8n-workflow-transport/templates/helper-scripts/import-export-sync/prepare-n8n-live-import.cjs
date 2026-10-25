@@ -218,12 +218,15 @@ function parsePortableArgs(argv) {
 
 // An import replaces the whole workflow, settings included, so say exactly what the payload carries
 // for the two instance-only settings.
-function instanceSettingsLine(dropped, kept) {
+function instanceSettingsLine(dropped, kept, hasTarget) {
   const parts = [];
   if (kept.length > 0) parts.push(`kept the target's own ${kept.join(', ')}`);
   if (dropped.length > 0) parts.push(`left out Git's ${dropped.join(', ')}`);
-  if (parts.length === 0) return 'Instance-only settings: none on the target or in Git; the import sets no MCP exposure or error workflow.';
-  return `Instance-only settings: ${parts.join('; ')}. MCP exposure and the error workflow end up exactly as the target has them.`;
+  const outcome = hasTarget
+    ? 'MCP exposure and the error workflow end up exactly as the target has them.'
+    : 'The new workflow gets no MCP exposure or error workflow.';
+  if (parts.length === 0) return `Instance-only settings: none on the target or in Git. ${outcome}`;
+  return `Instance-only settings: ${parts.join('; ')}. ${outcome}`;
 }
 
 function safePortableResult(result) {
@@ -280,7 +283,7 @@ function preparePortableImport(options) {
     writeJson(options.output, result.preparedWorkflow);
     writeJson(options.result, { result: 'PASS', code: 'N8N_IMPORT_READY', ...safePortableResult(result) });
     console.log(`Prepared unpublished portable import payload: ${options.output}`);
-    console.log(instanceSettingsLine(result.droppedSettings, result.keptTargetSettings));
+    console.log(instanceSettingsLine(result.droppedSettings, result.keptTargetSettings, Boolean(liveWorkflow)));
     console.log(`Credential resolution: ${result.credentialResult.resolvedCount} resolved, ${result.credentialResult.issues.length} unresolved.`);
     return result;
   } catch (error) {
@@ -497,7 +500,7 @@ function main() {
   fs.writeFileSync(outputPath, JSON.stringify(workflow, null, 2) + '\n');
 
   console.log(`Prepared ${outputPath} with ${restored} credential binding(s) and ${restoredWebhookIds} live webhookId(s) restored.`);
-  console.log(instanceSettingsLine(instanceSettings.dropped.filter((key) => !instanceSettings.kept.includes(key)), instanceSettings.kept));
+  console.log(instanceSettingsLine(instanceSettings.dropped.filter((key) => !instanceSettings.kept.includes(key)), instanceSettings.kept, Boolean(liveWorkflow)));
   if (missed.length) {
     console.warn(`Skipped ${missed.length} binding(s) with no matching node: ${missed.join(', ')}`);
   }
