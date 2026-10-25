@@ -16,6 +16,7 @@ User-facing docs say what a reference means in plain English, not as a GitHub is
 
 - When the repository has `.github/plain-text.json`, read its banned terms before writing user-facing text and use the plain wording each one gives.
 - `.github/scripts/plain-text-check.cjs` enforces it in CI. Items already there sit in `.github/plain-text-baseline.json`, which only shrinks: rewrite one, then run the check with `--prune-baseline`.
+- Text that only looks like a reference (a score, a colour value, a product name like a chip model) can keep its form: list it in the settings' `kept_terms` for that file with a reason, or end the line with `plain-text: allow <reason>`.
 
 ## Suggested Structure
 

@@ -34,12 +34,14 @@
     {
       "term": "N#",
       "reason": "a programme or release code",
-      "fix": "say what the work is, for example 'the programme reconciler'"
+      "fix": "say what the work is, for example 'the programme reconciler'",
+      "letter_suffix": true
     },
     {
       "term": "R#",
       "reason": "a release or rule code",
-      "fix": "say what the release or rule does"
+      "fix": "say what the release or rule does",
+      "letter_suffix": true
     },
     {
       "term": "V#",
@@ -49,32 +51,48 @@
     {
       "term": "A#",
       "reason": "a test-row or design code",
-      "fix": "describe the rows or design in words and point to the file that lists them"
+      "fix": "describe the rows or design in words and point to the file that lists them",
+      "letter_suffix": true
     },
     {
       "term": "E#",
       "reason": "a lane or work-item code",
-      "fix": "say what the work is"
+      "fix": "say what the work is",
+      "letter_suffix": true
     },
     {
       "term": "H#",
       "reason": "a hardening-item code",
-      "fix": "say what the fix is"
+      "fix": "say what the fix is",
+      "letter_suffix": true
     },
     {
       "term": "K#",
       "reason": "a lane or work-item code",
-      "fix": "say what the work is"
+      "fix": "say what the work is",
+      "letter_suffix": true
     },
     {
       "term": "M#",
       "reason": "a lane or work-item code",
-      "fix": "say what the work is"
+      "fix": "say what the work is",
+      "letter_suffix": true
     },
     {
       "term": "X#",
       "reason": "a lane or work-item code",
-      "fix": "say what the work is"
+      "fix": "say what the work is",
+      "letter_suffix": true
+    },
+    {
+      "term": "G3",
+      "reason": "a retired gate code",
+      "fix": "name the review step, for example 'an independent review'"
+    },
+    {
+      "term": "G4",
+      "reason": "a retired gate code",
+      "fix": "name the review step, for example 'an independent review'"
     },
     {
       "term": "TK#",
@@ -116,7 +134,7 @@
     {
       "file": "repo/contracts/trusted-ci-repository-protection/",
       "text": "N6",
-      "reason": "stored workflow, job and ruleset names that repositories' required checks and the protection reader match exactly; renaming them would break those repositories"
+      "reason": "stored workflow, job, ruleset and schema names that repositories' required checks and the protection reader match exactly; renaming them would break those repositories"
     }
   ],
   "baseline": "repo/contracts/plain-references/baseline.json"

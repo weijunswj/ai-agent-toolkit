@@ -63,6 +63,18 @@ test('an explained term passes once the same file explains it; a kept term passe
   assert.deepEqual(texts('The V9 job.', 'docs/other.md'), ['V9']);
 });
 
+test('a kept text also exempts reference rules in its file, and letter_suffix catches suffixed codes', () => {
+  const config = check.resolveConfig({
+    banned_terms: [{ term: 'Q#', reason: 'a lane code', fix: 'say what the work is', letter_suffix: true }],
+    kept_terms: [{ file: 'docs/scores.md', text: `${HASH}42`, reason: 'a score, not a reference' }]
+  });
+  const texts = (text, file = 'a.md') => check.findInText(text, file, config).map((finding) => finding.text);
+  assert.deepEqual(texts(`Top score ${HASH}42.`, 'docs/scores.md'), []);
+  assert.deepEqual(texts(`Top score ${HASH}42.`), [`${HASH}42`]);
+  assert.deepEqual(texts('The Q4a lane and Q12 and Q4ab and Q4A.'), ['Q4a', 'Q12']);
+  assert.throws(() => check.resolveConfig({ banned_terms: [{ term: 'Q#', reason: 'r', fix: 'f', letter_suffix: 'yes' }] }), /letter_suffix/);
+});
+
 test('structured files are checked on their readable fields only', () => {
   const config = check.resolveConfig(banned({ field_extensions: ['.json', '.yml'] }));
   assert.equal(check.scopeOf('x/a.json', config), 'fields');
@@ -178,6 +190,20 @@ test('--check reports a missing, edited or outdated copy and missing settings, a
   const source = fs.readFileSync(path.join(ROOT, 'skills', 'secure-ci-cd', 'scripts', 'plain-text-check.cjs'), 'utf8');
   fs.writeFileSync(copy, installer.vendoredText(`${source}// an older copy\n`));
   assert.equal(installer.vendoredState(fs.readFileSync(copy, 'utf8')).state, 'outdated');
+});
+
+test('the installer refuses to replace a repository\'s own file at the copy path, and says when local edits were replaced', (t) => {
+  const root = tempRepo(t, { '.github/scripts/plain-text-check.cjs': '// the repository\'s own script\n' });
+  const refused = run([INSTALLER, '--repo', root], root);
+  assert.equal(refused.status, 2);
+  assert.match(refused.stderr, /is not a Toolkit copy, so nothing was installed/);
+  assert.equal(fs.existsSync(path.join(root, '.github', 'plain-text.json')), false, 'nothing was written');
+  fs.rmSync(path.join(root, '.github', 'scripts', 'plain-text-check.cjs'));
+  const first = run([INSTALLER, '--repo', root], root);
+  assert.equal(first.status, 0, first.stderr);
+  assert.match(first.stdout, /the baseline and the check copy through a pull request\. Add the CI job with --workflow/);
+  fs.appendFileSync(path.join(root, '.github', 'scripts', 'plain-text-check.cjs'), '// local edit\n');
+  assert.match(run([INSTALLER, '--repo', root], root).stdout, /local edits to the copy were replaced/);
 });
 
 test('the installer refuses a folder that is not a git working tree', (t) => {

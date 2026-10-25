@@ -1301,19 +1301,31 @@ function compareAgentRuleFile({ targetRoot, templateRoot, spec }) {
   return findings;
 }
 
-// Toolkit checks a repository carries as vendored copies (secure-ci-cd installers). A copy whose
-// recorded source hash differs from the running Toolkit's source is reported once, read-only.
+// Toolkit checks a repository carries as vendored copies (secure-ci-cd installers). Only in a
+// repository whose Toolkit GitHub governance is ENABLED: a copy whose recorded source hash differs
+// from the running Toolkit's source, or a missing plain-text check (governed repositories carry
+// one), is reported once, read-only.
 const VENDORED_REPO_CHECKS = Object.freeze(['plain-text-check', 'personal-data-guard']);
+const REQUIRED_REPO_CHECKS = Object.freeze(['plain-text-check']);
 const VENDORED_CHECK_MARKER = /^\/\/ AI-AGENT-TOOLKIT:secure-ci-cd:VENDORED (\S+) \w+=\d+ sha256=([0-9a-f]{12})$/m;
 
-function compareVendoredRepoChecks({ targetRoot, pluginRoot }) {
+function governanceEnabledAt(targetRoot) {
+  try { return require('./toolkit-governance-state.cjs').governanceState(targetRoot).state === 'ENABLED'; }
+  catch { return false; }
+}
+
+function compareVendoredRepoChecks({ targetRoot, pluginRoot, governanceEnabled = governanceEnabledAt }) {
   const findings = [];
+  if (!governanceEnabled(targetRoot)) return findings;
   for (const name of VENDORED_REPO_CHECKS) {
     const rel = `.github/scripts/${name}.cjs`;
     let copy;
     let source;
     try { copy = fs.readFileSync(path.join(targetRoot, '.github', 'scripts', `${name}.cjs`), 'utf8').replace(/\r\n/g, '\n'); }
-    catch { continue; }
+    catch (error) {
+      if (error.code === 'ENOENT' && REQUIRED_REPO_CHECKS.includes(name)) findings.push({ file: rel, kind: 'repo-check', detail: 'missing' });
+      continue;
+    }
     try { source = fs.readFileSync(path.join(pluginRoot, 'skills', 'secure-ci-cd', 'scripts', `${name}.cjs`), 'utf8').replace(/\r\n/g, '\n'); }
     catch { continue; }
     const marker = VENDORED_CHECK_MARKER.exec(copy);
@@ -1387,7 +1399,7 @@ function runAgentRulesPreflight(args, options = {}) {
   const templateRoot = path.join(sourceVersion ? targetRoot : pluginRoot, AGENT_RULES_TEMPLATE_DIR);
   const findings = [];
   for (const spec of specs) findings.push(...compareAgentRuleFile({ targetRoot, templateRoot, spec }));
-  if (!sourceVersion) findings.push(...compareVendoredRepoChecks({ targetRoot, pluginRoot }));
+  if (!sourceVersion) findings.push(...compareVendoredRepoChecks({ targetRoot, pluginRoot, governanceEnabled: options.governanceEnabled }));
   const authorVersion = sourceVersion || newestKnownToolkitVersion(options.state);
   const newer = Boolean(authorVersion) && compareBridgeVersions(runningVersion, authorVersion) < 0;
   const result = { ...base, reference, templateRoot, authorVersion, findings };
@@ -1409,7 +1421,8 @@ function formatAgentRulesPreflight(result) {
     return `Toolkit note: this Toolkit checkout's managed instruction blocks (${files}) differ from its own templates; regenerate them with node repo/scripts/sync-agent-instruction-shims.cjs when convenient. No files were changed.`;
   }
   if ((result.findings || []).length && result.findings.every((finding) => finding.kind === 'repo-check')) {
-    return `Toolkit note: this repository's Toolkit checks (${files}) differ from the running Toolkit ${result.runningVersion}; refresh them with repository-agent-rules when convenient. No files were changed.`;
+    const state = result.findings.some((finding) => finding.detail === 'missing') ? 'are missing or differ from' : 'differ from';
+    return `Toolkit note: this repository's Toolkit checks (${files}) ${state} the running Toolkit ${result.runningVersion}; refresh them with repository-agent-rules when convenient. No files were changed.`;
   }
   return `Toolkit note: this repository's Toolkit rules (${files}) differ from the running Toolkit ${result.runningVersion} templates; refresh them with repository-agent-rules when convenient. No files were changed.`;
 }

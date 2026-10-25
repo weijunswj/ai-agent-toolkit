@@ -2435,14 +2435,14 @@ test('SessionStart notice is silent outside Toolkit-managed git roots and writes
   }
 });
 
-test('SessionStart notice names a vendored Toolkit check older than the running Toolkit, read-only', () => {
+test('SessionStart notice names a vendored Toolkit check that is older or missing in an ENABLED repository, read-only', () => {
   const root = tmpRoot();
   fs.mkdirSync(path.join(root, '.git'), { recursive: true });
   writeFile(path.join(root, 'AGENTS.md'), managedAgentsTemplate());
   const installer = require('../../skills/secure-ci-cd/scripts/install-plain-text-check.cjs');
   const copy = path.join(root, '.github', 'scripts', 'plain-text-check.cjs');
   writeFile(copy, installer.vendoredText());
-  const options = { targetRoot: root, pluginRoot: repoRoot, state: {} };
+  const options = { targetRoot: root, pluginRoot: repoRoot, state: {}, governanceEnabled: () => true };
   assert.equal(runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, options).status, 'ok', 'a current copy is quiet');
   const source = fs.readFileSync(path.join(repoRoot, 'skills', 'secure-ci-cd', 'scripts', 'plain-text-check.cjs'), 'utf8');
   writeFile(copy, installer.vendoredText(`${source}// an older copy\n`));
@@ -2454,6 +2454,13 @@ test('SessionStart notice names a vendored Toolkit check older than the running 
   assert.match(message, /^Toolkit note: this repository's Toolkit checks \(\.github\/scripts\/plain-text-check\.cjs\) differ from the running Toolkit .*refresh them with repository-agent-rules when convenient\. No files were changed\.$/);
   assert.doesNotMatch(message, NEVER_HALTING);
   assert.deepEqual(snapshotTree(root), before);
+  const notGoverned = runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, { ...options, governanceEnabled: () => false });
+  assert.equal(notGoverned.status, 'ok', 'outside an ENABLED repository the vendored checks are not compared');
+  fs.rmSync(copy);
+  const missing = runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, options);
+  assert.deepEqual(missing.findings.map((finding) => [finding.file, finding.detail]), [['.github/scripts/plain-text-check.cjs', 'missing']]);
+  assert.match(formatAgentRulesPreflight(missing), /Toolkit checks \(\.github\/scripts\/plain-text-check\.cjs\) are missing or differ from the running Toolkit /);
+  assert.equal(runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, { ...options, governanceEnabled: () => false }).status, 'ok', 'a missing copy is not noted outside an ENABLED repository');
 });
 
 test('SessionStart notice says repository rules from a newer Toolkit are authoritative, once, without writing', () => {

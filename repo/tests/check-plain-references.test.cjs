@@ -49,6 +49,14 @@ test('flags number references and pull request labels, not entities, anchors or 
     ['pr-number-label', 'PR 237'], ['pr-number-label', 'pull request 9'], ['pr-number-label', 'issue 4']]);
   assert.deepEqual(rules(`a&${HASH}64;b, page${HASH}1, ${HASH}${HASH}2 heading, colour "${HASH}334155", ${HASH}12abc, ${HASH}L10`), []);
   assert.deepEqual(rules('Two issues to fix, PR checks, version 3.9.1.'), []);
+  assert.deepEqual(rules(`See [setup](${HASH}1-install). Use colour ${HASH}000 or ${HASH}333 for the border.`), []);
+  assert.deepEqual(rules(`Issue ${HASH}333 broke the colour picker.`), [['number-reference', `${HASH}333`]]);
+  assert.deepEqual(rules(`Odd ${HASH}42 here <!-- plain-text: allow a score, not a reference -->`), []);
+  assert.deepEqual(rules(`Odd ${HASH}42 here <!-- plain-text: allow -->`), [['number-reference', `${HASH}42`]], 'the marker needs a reason');
+});
+
+test('allows links to open a new issue and to issue or pull request lists', () => {
+  assert.deepEqual(rules(`Report bugs at ${GITHUB}/issues/new, browse ${GITHUB}/issues or ${GITHUB}/pulls.`), []);
 });
 
 test('flags Codex mode class names but not the mode spellings', () => {
@@ -68,7 +76,7 @@ test('a new reference fails with its line and a plain-English fix; a baselined o
     [{ file: 'repo/docs/A.md', rule: 'number-reference', text: `${HASH}7`, count: 1 }]);
   const result = plain.check(root);
   assert.deepEqual(result.failures.map(finding => finding.line), [2, 3], 'every occurrence is listed once the count is exceeded');
-  assert.match(plain.describeFailure(result.failures[0]), /^repo\/docs\/A\.md:2: number-reference "#7": replace the #number with what it refers to, in plain English$/);
+  assert.match(plain.describeFailure(result.failures[0]), /^repo\/docs\/A\.md:2: number-reference "#7": replace the #number with what it refers to, in plain English \(if it is not a reference, mark the line `plain-text: allow <reason>`\)$/);
   fs.writeFileSync(path.join(root, 'repo/docs/A.md'), `See ${HASH}7.\n`);
   assert.deepEqual(plain.check(root).failures, []);
 });

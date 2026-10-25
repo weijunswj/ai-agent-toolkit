@@ -97,6 +97,10 @@ class PlainTextInstaller {
 
   install({ workflow = false } = {}) {
     const top = this.locate();
+    const existingCopy = vendoredState(readOrNull(path.join(top, VENDORED_PATH)));
+    if (existingCopy.state === 'unmanaged') {
+      throw new InstallError(`${slash(VENDORED_PATH)} exists and is not a Toolkit copy, so nothing was installed. Move or rename it, then run the installer again.`);
+    }
     const configFile = path.join(top, CONFIG_PATH);
     if (readOrNull(configFile) === null) {
       writeFile(configFile, `${JSON.stringify(STARTING_CONFIG, null, 2)}\n`);
@@ -108,7 +112,7 @@ class PlainTextInstaller {
     try { config = check.readConfigFile(configFile); }
     catch (error) { throw new InstallError(`${slash(CONFIG_PATH)} is not usable: ${error.message}. Fix it, then run the installer again.`); }
     writeFile(path.join(top, VENDORED_PATH), vendoredText());
-    this.#say(`Check copied: ${slash(VENDORED_PATH)} (check v${check.CHECK_VERSION}).`);
+    this.#say(`Check copied: ${slash(VENDORED_PATH)} (check v${check.CHECK_VERSION})${existingCopy.state === 'edited' ? '; local edits to the copy were replaced' : ''}.`);
     if (fs.existsSync(path.join(top, config.baseline))) this.#say(`Baseline kept: ${config.baseline}.`);
     else {
       let result;
@@ -116,15 +120,16 @@ class PlainTextInstaller {
       catch (error) { throw new InstallError(`the starting baseline could not be written: ${error.message}.`); }
       this.#say(`Baseline written: ${config.baseline} (${result.entries} existing item(s) allowed until rewritten).`);
     }
+    let workflowWritten = false;
     if (workflow) {
       const target = path.join(top, WORKFLOW_PATH);
       const template = fs.readFileSync(WORKFLOW_TEMPLATE, 'utf8');
       const current = readOrNull(target);
-      if (current === null) { writeFile(target, template); this.#say(`CI workflow added: ${slash(WORKFLOW_PATH)}.`); }
+      if (current === null) { writeFile(target, template); workflowWritten = true; this.#say(`CI workflow added: ${slash(WORKFLOW_PATH)}.`); }
       else if (current.replace(/\r\n/g, '\n') === template.replace(/\r\n/g, '\n')) this.#say(`CI workflow already current: ${slash(WORKFLOW_PATH)}.`);
       else this.#say(`CI workflow kept as it is (it differs from the template): ${slash(WORKFLOW_PATH)}.`);
     }
-    this.#say('Next: commit the settings, the baseline, the check copy and the workflow through a pull request.');
+    this.#say(`Next: commit the settings, the baseline${workflowWritten ? ', the check copy and the workflow' : ' and the check copy'} through a pull request.${workflow ? '' : ' Add the CI job with --workflow, or run the copy from an existing workflow.'}`);
   }
 
   // Drift report; changes nothing.

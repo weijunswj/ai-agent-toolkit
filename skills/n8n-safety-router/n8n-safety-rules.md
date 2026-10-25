@@ -193,7 +193,7 @@ Prefer simple built-in n8n nodes over Code nodes.
 
 Prefer readable workflow structure over clever compactness.
 
-**Human-readable workflow presentation is mandatory** when creating or materially changing a workflow for an operator. Give the workflow a concise business-purpose name describing its outcome. Name major nodes by meaningful action or condition and object, not default labels such as "HTTP Request 1", "If2", or unexplained internal release or programme codes. Keep real gate names G0, G1 and G2 when they actually describe a Toolkit gate.
+**Human-readable workflow presentation is mandatory** when creating or materially changing a workflow for an operator. Give the workflow a concise business-purpose name describing its outcome. Name major nodes by meaningful action or condition and object, not default labels such as "HTTP Request 1", "If2", or internal release or programme codes. Keep real gate names G0, G1 and G2 when they actually describe a Toolkit gate.
 
 Provide an operator-facing explanation on the canvas using supported sticky notes, or in an explicit maintained companion description/README when canvas notes are unsuitable. It must state: when the workflow starts; input/source and scope; what the main stages/decisions do; where results are sent or written; expected side effects; how duplicates, retries and errors are handled; and the manual recovery/owner action where applicable. Keep notes concise and place explanations near the relevant stages. A workflow or node without a description field gets none invented: put the explanation in a sticky note or the companion description instead. A maintainer should understand the business flow without opening every node or reading historical project tickets.
 

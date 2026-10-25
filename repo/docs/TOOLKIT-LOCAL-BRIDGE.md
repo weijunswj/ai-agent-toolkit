@@ -572,7 +572,7 @@ The current official [Codex hooks documentation](https://developers.openai.com/c
 - Plugin hooks use the normal hook trust flow. Installing or enabling a plugin does not trust its hooks; new or changed hook definitions are skipped until reviewed and trusted through `/hooks`.
 - Only command handlers run today. Async command hooks and prompt/agent handlers are parsed but skipped, and `suppressOutput` is parsed but not implemented.
 
-The Toolkit bridge already emits concise bridge status text on hook `stdout`, so its passive agent-rules preflight uses documented plain-text `stdout` rather than trying to combine status text with a JSON response. The preflight runs before bridge no-op handling, resolves the nearest Git root from the documented session working directory, and never creates, repairs, backs up, or writes repo-local instruction files.
+The Toolkit bridge already emits concise bridge status text on hook `stdout`, so its passive agent-rules preflight uses documented plain-text `stdout` rather than trying to combine status text with a JSON response. The preflight runs before bridge no-op handling, resolves the nearest Git root from the documented session working directory, and never creates, repairs, backs up, or writes repo-local instruction files. In a repository whose Toolkit GitHub governance is ENABLED it also compares the vendored Toolkit checks under `.github/scripts/` (plain-text check, personal-data guard) with the running Toolkit's sources, and notes a missing plain-text check; it only reports, once per finding.
 
 ## Real Codex Host UAT
 

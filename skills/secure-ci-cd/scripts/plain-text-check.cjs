@@ -13,6 +13,9 @@
 // was already there when the check was added. It never rewrites text: it points, a person rewrites.
 //
 // A repository may switch the check off only with a recorded reason (`off_reason` in its settings).
+// Narrower exemptions are reviewed in the diff: `kept_terms` (a text kept in one file or folder, with
+// a reason) and a line marker `plain-text: allow <reason>` for one line that is not a reference
+// (in Markdown, inside an HTML comment: `<!-- plain-text: allow colour value -->`).
 //
 // Usage: node plain-text-check.cjs [--repo <dir>] [--config <file>] [--files <path>...]
 //          [--init-baseline] [--prune-baseline] [--explain]
@@ -51,13 +54,16 @@ const IGNORED_DIRS = new Set(['.git', 'node_modules', '.tmp', '.n8n-local', '.cl
 const REFERENCE_RULES = Object.freeze([
   {
     id: 'github-link',
-    pattern: /https?:\/\/(?:www\.)?github\.com\/[^/\s)]+\/[^/\s)]+\/(?:issues|pulls?|discussions|commits?|compare)\/[^\s)>\]`"']*/gi,
+    // Only links to one issue, pull request, discussion, commit or comparison; `issues/new` and list
+    // pages are fine.
+    pattern: /https?:\/\/(?:www\.)?github\.com\/[^/\s)]+\/[^/\s)]+\/(?:(?:issues|pulls?|discussions)\/\d+|commits?\/[0-9a-f]{7,40}\b|compare\/[^\s)>\]`"']+)[^\s)>\]`"']*/gi,
     fix: 'replace the GitHub link with a plain-English description; link a repository file instead if one helps'
   },
   {
     id: 'number-reference',
-    pattern: /(?<![\w&/#-])#\d{1,5}(?!\w)/g,
-    fix: 'replace the #number with what it refers to, in plain English'
+    // Not a same-file link to a numbered heading such as (#1-install).
+    pattern: /(?<![\w&/#-])#\d{1,5}(?!\w|-\w)/g,
+    fix: 'replace the #number with what it refers to, in plain English (if it is not a reference, mark the line `plain-text: allow <reason>`)'
   },
   {
     id: 'pr-number-label',
@@ -76,13 +82,20 @@ class CheckError extends Error {
 }
 
 const slash = (value) => value.split(path.sep).join('/');
-const normalise = (text) => text.replace(/^﻿/, '').replace(/\r\n?/g, '\n');
+const normalise = (text) => text.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
+// One line opted out, with a reason: `plain-text: allow <reason>`.
+const ALLOW_MARKER = /plain-text:\s*allow\s+[A-Za-z]/;
+// A three- or four-digit `#000` on a line about colours is a colour value, not an issue number.
+const COLOUR_CONTEXT = /\b(?:colou?rs?|background|foreground|fill|stroke|border|hex|css)\b/i;
+const ISSUE_CONTEXT = /\b(?:issues?|PRs?|pull requests?|fix(?:es|ed)?|closes?|resolves?)\b/i;
+const isColour = (line, text) => (text.length === 4 || text.length === 5) && COLOUR_CONTEXT.test(line) && !ISSUE_CONTEXT.test(line);
 const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 // A banned term is literal text in which `#` stands for one or more digits ("N#" matches N5 and N12).
-// It matches only as a whole token: "N5" in "N5," but not in "N5x" or "AN5".
-function termPattern(term, caseSensitive = true) {
-  const body = term.split('#').map(escapeRegExp).join('\\d+');
+// It matches only as a whole token: "N5" in "N5," but not in "N5x" or "AN5". With `letter_suffix`,
+// one lowercase letter may follow the digits ("N5b").
+function termPattern(term, caseSensitive = true, letterSuffix = false) {
+  const body = term.split('#').map(escapeRegExp).join(letterSuffix ? '\\d+[a-z]?' : '\\d+');
   return new RegExp(`(?<![A-Za-z0-9_])${body}(?![A-Za-z0-9_])`, caseSensitive ? 'g' : 'gi');
 }
 
@@ -106,6 +119,7 @@ function resolveConfig(raw = {}, where = 'settings') {
       throw new CheckError(`${where}: each banned term needs a term (with a letter in it), a reason and a fix`);
     }
     if (entry.case_sensitive !== undefined && typeof entry.case_sensitive !== 'boolean') throw new CheckError(`${where}: case_sensitive must be true or false (${entry.term})`);
+    if (entry.letter_suffix !== undefined && typeof entry.letter_suffix !== 'boolean') throw new CheckError(`${where}: letter_suffix must be true or false (${entry.term})`);
   }
   for (const [key, fields] of [['explained_terms', ['term', 'reason']], ['kept_terms', ['file', 'text', 'reason']]]) {
     if (!Array.isArray(config[key])) throw new CheckError(`${where}: ${key} must be a list`);
@@ -183,11 +197,15 @@ function findInText(text, file, config, scope = 'text') {
   const explained = explainedIn(body, config);
   const kept = keptFor(file, config);
   const rules = REFERENCE_RULES.filter((rule) => config.rules[rule.id]);
-  const terms = config.banned_terms.map((entry) => ({ entry, pattern: termPattern(entry.term, entry.case_sensitive !== false) }));
+  const terms = config.banned_terms.map((entry) => ({ entry, pattern: termPattern(entry.term, entry.case_sensitive !== false, entry.letter_suffix === true) }));
   body.split('\n').forEach((line, index) => {
     if (scope === 'fields' && !FIELD_LINE.test(line)) return;
+    if (ALLOW_MARKER.test(line)) return;
     for (const rule of rules) {
-      for (const match of line.matchAll(rule.pattern)) findings.push({ file, line: index + 1, rule: rule.id, text: match[0] });
+      for (const match of line.matchAll(rule.pattern)) {
+        if (kept.has(match[0]) || (rule.id === 'number-reference' && isColour(line, match[0]))) continue;
+        findings.push({ file, line: index + 1, rule: rule.id, text: match[0] });
+      }
     }
     for (const { entry, pattern } of terms) {
       for (const match of line.matchAll(pattern)) {
@@ -308,6 +326,7 @@ function explain(config) {
   for (const entry of config.banned_terms) lines.push(`  ${entry.term}: ${entry.reason}. Instead: ${entry.fix}`);
   for (const entry of config.explained_terms) lines.push(`  allowed once explained in the same file: ${entry.term} (${entry.reason})`);
   for (const entry of config.kept_terms) lines.push(`  kept in ${entry.file}: ${entry.text} (${entry.reason})`);
+  lines.push('A single line is skipped when it carries `plain-text: allow <reason>`.');
   lines.push(`Checked: ${config.text_extensions.join(', ') || 'no'} files in full${config.field_extensions.length ? `; names, titles and descriptions in ${config.field_extensions.join(', ')} files` : ''}.`);
   lines.push(`Not checked: ${config.exclude.join(', ') || 'nothing excluded'}.`);
   return lines.join('\n');
@@ -370,7 +389,7 @@ function main(argv = process.argv.slice(2), { out = process.stdout, err = proces
 module.exports = Object.freeze({
   CHECK_VERSION, CONFIG_SCHEMA, BASELINE_SCHEMA, DEFAULT_CONFIG, DEFAULTS, REFERENCE_RULES, CheckError,
   termPattern, resolveConfig, readConfigFile, scopeOf, listFiles, listScopedFiles, findInText, scanFiles,
-  check, describeFailure, pruneBaseline, initBaseline, explain, report, main
+  ALLOW_MARKER, check, describeFailure, pruneBaseline, initBaseline, explain, report, main
 });
 
 if (require.main === module) process.exitCode = main();
