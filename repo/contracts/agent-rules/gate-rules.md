@@ -6,7 +6,7 @@ The gate playbook: G0, G1 and G2 sessions, reviewers and the controllers that la
 
 - **G0 Discovery** runs for every new task, repository or environment; only LIGHT edits and fixes inside an already-discovered task skip it. Walk the real happy path, find out what the stack really is (an app built in Flutter, for example, breaks browser automation such as Playwright) and test assumptions before planning. It can be short when the ground is already known. It returns the G0 plan: findings, chosen approach, acceptance, risks, and what was tried and failed.
 - **G1 Builder** starts in a fresh session, with the G0 plan passed in its brief as the handoff. G0 and G1 share the same strong lead route. One builder owns the whole approved outcome across corrections, checkpoints and fresh sessions; in-scope fixes need no new admission. G1 includes UAT.
-- **Review** follows the tier: full G2 for RISKY, one independent review for NORMAL, the builder's own diff read for LIGHT. Only LIGHT edits and fixes inside an already-discovered task skip G0; only LIGHT edits skip G2.
+- **Review** follows the tier: full G2 for RISKY, one independent review for NORMAL, the builder's own diff read for LIGHT.
 - Gate names `G0`, `G1` and `G2` are fine where the reader needs them.
 
 ## Fresh contexts
@@ -23,6 +23,7 @@ A gate works in the primary checkout unless it needs its own worktree, then uses
 
 - **Design policy:** give stateful or effectful behaviour (application, runtime, resource, persistence, workflow) a cohesive owner object with explicit constructor dependencies and methods that enforce its invariants and effect order, composed through narrow interfaces. Pure transformations, data definitions, predicates and stateless adapters may stay functions. No mutable state in module globals and no classes that only forward. Refactors keep public behaviour, approvals, independent readback, concurrency controls and recovery semantics. Record the boundary and reason for a consequential exception, and have planning, validation and every review check the actual state and effect owners and their dependency contracts, not class counts. Never refactor generated or third-party code as canonical source; keep its licences and provenance.
 - **Invariant models:** RISKY authority, custody, state-machine or host-config features start in G0 from a written model of who may do what in which state and a closure matrix (command x state x role, or config key x cited host limit). G1 implements it as table-driven tests and G2 reviews against it; a path missing from the matrix returns it to G0-level revision, not a one-line patch.
+- **Input readers:** a safety decision read from YAML, shell or free text uses a default-deny reader over a subset its G0 states; G1 tests it with `repo/tests/support/hostile-inputs.cjs`.
 - **Deployment branches:** unless the repository has its own convention, a deployment or release-preparation branch for a named environment is `deployment/<environment>` (lowercase, e.g. `deployment/staging`); never `deploy/`, `release-deploy/`, bare `prod/` or `staging/`. A branch name grants no deployment, merge or live authority.
 - **Shipping floor:** before shipping, complete the applicable minimum: core functionality and critical workflows; consequential correctness; authentication, authorisation and tenant isolation; security boundaries; data integrity, persistence, migration and destructive-operation safety; privacy and secrets; required validation and truthful readiness evidence; deployment, health and rollback prerequisites when release is in scope; every explicit acceptance criterion. Classify remaining work as `SHIP_BLOCKER` or `POST_SHIP`. Known material defects in the floor block. Polish, speculative refactors, future-proofing, optional abstraction, non-critical cleanup and low-confidence risks are `POST_SHIP` unless concrete evidence makes them blockers.
 
@@ -42,8 +43,8 @@ G2 starts after the working result and any owner UAT acceptance, in fresh indepe
 
 ## Fixes and delta reviews
 
-- Before the first fix of a security finding, list every route to the same invariant and fix them together, with positive and negative controls. Two failed fixes of the same thing: stop and rethink.
-- After a G2 PASS, a delta G2 runs when a new edit touches a RISKY path or changes behaviour the review relied on. Each delta G2 covers the whole diff since the last PASS, and rechecks target corrected boundary families rather than restarting discovery. Before merge to the default branch, any RISKY change no G2 has seen gets one. Tests and CI run on every edit.
+- Before the first fix of a security finding, list every route to the same invariant and fix them together, with positive and negative controls.
+- After a G2 PASS, a delta G2 runs when a new edit touches a RISKY path or changes behaviour the review relied on. Each delta G2 covers the whole diff since the last PASS, and rechecks target corrected boundary families rather than restarting discovery. Before merge to the default branch, any RISKY change no G2 has seen gets one.
 - Correction rechecks use fresh contexts for the same selected reviewers unless a specific reviewer must be replaced. A same-family recheck is readmitted only on a closed family-closure record evaluated against the exact corrected candidate; a passing latest reproducer is not enough, and after two NOT PASSED rechecks of one family a consolidated root-cause reassessment comes first.
 - Keep functional, UAT, review, custody, integration, publication, Core and parent states distinct.
 
