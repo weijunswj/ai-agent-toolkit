@@ -71,9 +71,9 @@ function currentOperatingContract(texts) {
     assert.doesNotMatch(text, /complementary peers?/, rel);
     assert.doesNotMatch(text, /agreed private TRANSPORT store/, rel);
   }
-  assert.match(read('repo/docs/TOOLKIT-V3.md'), /selection of another supported private backend takes precedence over that recommendation/);
-  assert.match(read('repo/docs/TOOLKIT-V3.md'), /Git cleanup is an ordinary non-force commit and never removes history; another backend uses its own supported capability or holds the cleanup/);
-  assert.doesNotMatch(read('repo/docs/TOOLKIT-V3.md'), /TRANSPORT repo retaining the small index/);
+  assert.match(read('repo/docs/TOOLKIT-DELIVERY.md'), /selection of another supported private backend takes precedence over that recommendation/);
+  assert.match(read('repo/docs/TOOLKIT-DELIVERY.md'), /Git cleanup is an ordinary non-force commit and never removes history; another backend uses its own supported capability or holds the cleanup/);
+  assert.doesNotMatch(read('repo/docs/TOOLKIT-DELIVERY.md'), /TRANSPORT repo retaining the small index/);
 }
 
 test('current procedure is one wording across CONTROLLER, the governed block and its projections', () => {
@@ -118,7 +118,7 @@ test('documented reviewer cardinalities are derived from the pinned registry', (
 
 test('neither the directive nor CONTROLLER keeps a retention clock', () => {
   // The rules audit dropped the expiry clock, pins and cleanup ledger: scratch goes once its report is stored.
-  const v3 = section(read('repo/docs/TOOLKIT-V3.md'), 13);
+  const v3 = section(read('repo/docs/TOOLKIT-DELIVERY.md'), 13);
   assert.match(v3, /There is no expiry clock, pin or cleanup ledger/);
   assert.match(v3, /In a Git store the commit is the manifest, and a successful push plus one fetch is the read-back/);
   assert.doesNotMatch(v3, /21 days|30-day|restart the clock/);
@@ -155,7 +155,7 @@ function securityReviewContract(text) {
 }
 
 test('final review is adversarial within the frozen supported profile and rechecks corrected families', () => {
-  const directive = read('repo/docs/TOOLKIT-V3.md');
+  const directive = read('repo/docs/TOOLKIT-DELIVERY.md');
   securityReviewContract(directive);
   for (const [before, after] of [
     ['and stays adversarial on every reachable path inside it', 'and reviews only the files G1 lists'],
@@ -221,7 +221,7 @@ test('present surfaces document only the portable Antigravity route that the bri
 // Owner records 08 (launch ownership) and 10 (finish before stopping), 17 October 2026, as compressed
 // in 3.4.0: each keeps its meaning on every current surface, in the sections that govern it.
 const FINISH_BEFORE_STOP = '**Finish authorised work before stopping.** For admitted, already-authorised work, carry every dependency-ready safe step through to the actual deliverable in one sustained run where practical: implementation, targeted tests, relevant CI or status, authorised publication with conflict controls, custody and readback, then one complete return instead of asking whether to continue. A plan, green focused test, commit, PR draft, helper return, checkpoint, evidence upload, CI watcher start or progress note is not a terminal outcome. A genuine owner UAT or decision, new scope, trust or spend, host-native permission, missing credential or route, unknown external effect, incomplete CI or independent G2 holds only its dependent steps; continue independent authorised work and report the exact HOLD and next action. This never authorises working around a denial, an unsafe retry, a duplicate writer, an unapproved model launch, claimed background execution or self-launching G2.';
-const V3_DOC = 'repo/docs/TOOLKIT-V3.md';
+const V3_DOC = 'repo/docs/TOOLKIT-DELIVERY.md';
 const GLOBAL = 'repo/contracts/agent-rules/global-rules.md';
 const LAUNCH_OWNERSHIP_V3 = "Model and effort follow launch ownership. A human's direct model/effort choice for the first manually launched agent, including a directly opened G2 chat, is advisory relative to the stack and is not itself a blocker; record the actual route where observable and never label it as the recommended one. Every automation-launched G0/G1/G2 worker or successor, even when it is root of its own session, and every G0/G1 helper receives the exact pinned-stack route for its role and member, without fallback or weaker effort. A root label is not a human override, and no root-level model lock is installed into a human-run entrypoint. Native permissions, independence, reviewer obligations and delegation limits still apply.";
 const LAUNCH_CLAUSES = [/Model and effort follow launch ownership/, /advisory, not a blocker/, /never labelled the recommended one/,

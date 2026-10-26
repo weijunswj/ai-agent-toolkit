@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "toolkit.controller.stack-registry.v3",
-  "title": "Toolkit V3 controller role stack registry",
+  "title": "Toolkit controller stack registry",
   "type": "object",
   "additionalProperties": false,
   "required": [
