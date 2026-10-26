@@ -22,7 +22,7 @@
 // refused write is reported once, never retried. Last, each ENABLED GitHub repository gets its free
 // dependency and security settings turned on and its missing Dependabot files written
 // (toolkit-governance-security.cjs) without another question, because they are on by default under
-// governance; paid ones only where the binding records the owner's "on". Files land in the working
+// governance; nothing that needs billing is turned on. Files land in the working
 // tree for a normal pull request. Nothing is pushed to any
 // repository and no pull request is opened: missing bindings and legacy markers are reported
 // with what to do.
@@ -334,8 +334,8 @@ class GovernanceMigration {
   }
 
   // The free dependency and security settings are on by default for every governed repository, so
-  // they are turned on without another question (the owner's yes to governance covers them); paid
-  // ones only where the binding records the owner's "on". Nothing here asks.
+  // they are turned on without another question (the owner's yes to governance covers them); nothing
+  // that needs billing is turned on. Nothing here asks.
   async #applySecurity(rows) {
     const results = [];
     for (const row of rows.filter(entry => entry.state.state === 'ENABLED' && entry.slug && entry.state.materials && entry.state.materials.binding)) {

@@ -30,7 +30,8 @@
     },
     "paid_security": {
       "enum": ["off", "on"],
-      "description": "The owner's answer, for a private repository, on GitHub's paid Secret Protection and Code Security (billed per active committer; need GitHub Team or Enterprise Cloud). off keeps them off; on lets Toolkit turn them on. Only the user's own answer is recorded, and only the binding merged on the default branch counts. The governance check reports a private repository without an answer. Public repositories get these features free and on by default."
+      "deprecated": true,
+      "description": "Deprecated and ignored. Toolkit never turns on a GitHub feature that needs billing, so this key changes nothing; it is still accepted so older bindings stay valid."
     },
     "dependency_updates": {
       "type": "object",

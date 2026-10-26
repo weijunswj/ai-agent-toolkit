@@ -11,9 +11,10 @@
 //   I1 Free settings (S1, S2; S4-S6 on a public repository) are turned on by `security` and
 //      `migrate` in an ENABLED repository with a binding, with no question: the owner's governance
 //      yes covers them.
-//   I2 Paid settings (S4, S5 on a private or internal repository) are turned on only when the
-//      binding merged on the default branch says paid_security "on". The working tree, a binding
-//      that is not merged, invalid or unreadable never turns them on.
+//   I2 Nothing that needs billing is ever asked about, written or reported as drift: on a private
+//      or internal repository S4 and S5 are not applicable, and GitHub Secret Protection and Code
+//      Security are never written. A binding's deprecated paid_security key, merged or in the
+//      working tree, "on" or "off", still validates and changes nothing.
 //   I3 "Allow auto-merge" and the workflow file follow only the merged binding's patch-minor, and
 //      the setting needs conformant default-branch protection with at least one required check.
 //   I4 Nothing is written when GitHub cannot be read; a read-back that fails, as a whole or for any
@@ -66,6 +67,7 @@ function repo(t, files = {}, remote = 'https://github.com/example-owner/example-
   return root;
 }
 
+// `paid` writes the deprecated paid_security key, which must change nothing.
 function binding(policy, paid = null) {
   return JSON.stringify({
     schema: 'toolkit.programme-binding.v1', repository: 'example-owner/example-repo', parent_issue: 1,
@@ -80,7 +82,7 @@ function binding(policy, paid = null) {
 const merged = (policy, paid) => ({ status: 'ok', text: binding(policy, paid) });
 const ON = Object.freeze({
   ok: true, visibility: 'public', allow_auto_merge: true, alerts: 'enabled', security_updates: 'enabled',
-  secret_scanning: 'enabled', push_protection: 'enabled', code_security: 'enabled', code_scanning: 'enabled', private_reporting: 'enabled',
+  secret_scanning: 'enabled', push_protection: 'enabled', code_scanning: 'enabled', private_reporting: 'enabled',
   binding: merged(), advanced_codeql: null,
 });
 const reader = (overrides = {}) => () => ({ ...ON, ...overrides });
@@ -135,30 +137,30 @@ const MATRIX = [
   { id: 'M01 public, everything on, binding merged', files: { 'package.json': '{}', '.github/dependabot.yml': COVERED }, protection: CONFORMANT,
     expect: { status: 'conformant', policy_source: 'default-branch', fixes: { alerts: false, secret_scanning: false, code_scanning: false, private_reporting: false, allow_auto_merge: false } } },
   { id: 'M02 public, free settings off (I1)', read: { alerts: 'disabled', push_protection: 'disabled', code_scanning: 'disabled', private_reporting: 'disabled', allow_auto_merge: false },
-    expect: { status: 'drift', checks: { S1: 'drift', S2: 'ok', S4: 'drift', S5: 'drift', S6: 'drift', S7: 'ok', S8: 'not-applicable' }, details: { S4: ['Push protection is off'] },
-      fixes: { alerts: true, security_updates: false, secret_scanning: true, code_scanning: true, private_reporting: true, allow_auto_merge: false, paid: false } } },
+    expect: { status: 'drift', checks: { S1: 'drift', S2: 'ok', S4: 'drift', S5: 'drift', S6: 'drift', S7: 'ok' }, details: { S4: ['Push protection is off'] },
+      fixes: { alerts: true, security_updates: false, secret_scanning: true, code_scanning: true, private_reporting: true, allow_auto_merge: false } } },
   { id: 'M03 public, the working tree asks for auto-merge, the default branch does not (I3)', working: binding(PATCH_MINOR, 'on'), read: { allow_auto_merge: false }, protection: CONFORMANT,
-    expect: { checks: { S7: 'ok' }, fixes: { allow_auto_merge: false }, files: { workflow: false }, pending: { auto_merge: 'patch-minor', github_actions: 'owner', paid_security: 'on' } } },
-  { id: 'M04 private, the working tree says paid on, the default branch has no answer (I2)', working: binding(null, 'on'), read: { ...PRIVATE, ...PAID_OFF },
-    expect: { status: 'drift', checks: { S4: 'not-applicable', S5: 'not-applicable', S6: 'not-applicable', S8: 'drift' }, fixes: { secret_scanning: false, code_scanning: false, paid: true }, pending: { paid_security: 'on' } } },
+    expect: { checks: { S7: 'ok' }, fixes: { allow_auto_merge: false }, files: { workflow: false }, pending: { auto_merge: 'patch-minor', github_actions: 'owner' } } },
+  { id: 'M04 private, the working tree says paid_security on: nothing is pending and nothing paid (I2)', working: binding(null, 'on'), read: { ...PRIVATE, ...PAID_OFF },
+    expect: { status: 'conformant', checks: { S4: 'not-applicable', S5: 'not-applicable', S6: 'not-applicable' }, fixes: { secret_scanning: false, code_scanning: false } } },
   { id: 'M05 private, the binding on the default branch is unreadable (I2, I3)', read: { ...PRIVATE, ...PAID_OFF, binding: { status: 'unreadable' } }, protection: CONFORMANT,
-    expect: { status: 'unverified', policy_source: 'unreadable', checks: { S7: 'unverified', S8: 'unverified', S4: 'not-applicable' }, fixes: { secret_scanning: false, code_scanning: false, allow_auto_merge: false } } },
-  { id: 'M06 private, the binding is not merged yet', read: { ...PRIVATE, binding: { status: 'missing' } },
-    expect: { status: 'drift', policy_source: 'not-merged', checks: { S8: 'drift' }, details: { S8: [/not on the default branch yet: ask the owner[^]*record only the owner's own answer/] } } },
+    expect: { status: 'unverified', policy_source: 'unreadable', checks: { S7: 'unverified', S4: 'not-applicable' }, fixes: { secret_scanning: false, code_scanning: false, allow_auto_merge: false } } },
+  { id: 'M06 private, the binding is not merged yet: nothing is asked', read: { ...PRIVATE, binding: { status: 'missing' } },
+    expect: { status: 'conformant', policy_source: 'not-merged', checks: { S4: 'not-applicable', S5: 'not-applicable' }, details: { S4: [/not applicable \(private repository\): GitHub offers it free only on public repositories/] } } },
   { id: 'M07 private, the merged binding is invalid', read: { ...PRIVATE, binding: { status: 'ok', text: '{"schema":"x"}' } },
-    expect: { status: 'drift', policy_source: 'invalid', checks: { S7: 'unverified', S8: 'drift' }, details: { S8: [/not valid/] } } },
-  { id: 'M08 private, unanswered, the plan offers the paid features', read: { ...PRIVATE, ...PAID_OFF },
-    expect: { status: 'drift', checks: { S4: 'not-applicable', S5: 'not-applicable', S8: 'drift' }, details: { S8: [/paid Secret Protection and Code Security[^]*billed per active committer; default off/] }, fixes: { secret_scanning: false, code_scanning: false } } },
-  { id: 'M09 private, answered off, the plan offers them', read: { ...PRIVATE, ...PAID_OFF, binding: merged(null, 'off') },
-    expect: { status: 'conformant', checks: { S8: 'ok' }, fixes: { secret_scanning: false, code_scanning: false, private_reporting: false } } },
-  { id: 'M10 private, answered on, off on GitHub (I2)', read: { ...PRIVATE, ...PAID_OFF, binding: merged(null, 'on') },
-    expect: { status: 'drift', checks: { S4: 'drift', S5: 'drift', S8: 'ok' }, fixes: { secret_scanning: true, code_scanning: true, paid: true } } },
-  { id: 'M11 private, answered on, already on', read: { ...PRIVATE, binding: merged(null, 'on') },
-    expect: { status: 'conformant', fixes: { secret_scanning: false, code_scanning: false } } },
-  { id: 'M12 private, answered on, the plan does not offer them', read: { ...PRIVATE, ...NO_PLAN, binding: merged(null, 'on') },
-    expect: { status: 'drift', checks: { S4: 'drift', S5: 'drift' }, details: { S4: [/needs GitHub Team or Enterprise Cloud\); buy it or set paid_security to off/] }, fixes: { secret_scanning: false, code_scanning: false } } },
+    expect: { status: 'unverified', policy_source: 'invalid', checks: { S7: 'unverified', S4: 'not-applicable' } } },
+  { id: 'M08 private, no paid_security key, the settings are off (I2)', read: { ...PRIVATE, ...PAID_OFF },
+    expect: { status: 'conformant', checks: { S4: 'not-applicable', S5: 'not-applicable' }, details: { S4: [/not applicable \(private repository\): GitHub offers it free only on public repositories/], S5: [/not applicable \(private repository\): GitHub offers it free only on public repositories/] }, fixes: { secret_scanning: false, code_scanning: false } } },
+  { id: 'M09 private, paid_security off, the settings are off', read: { ...PRIVATE, ...PAID_OFF, binding: merged(null, 'off') },
+    expect: { status: 'conformant', checks: { S4: 'not-applicable', S5: 'not-applicable' }, fixes: { secret_scanning: false, code_scanning: false, private_reporting: false } } },
+  { id: 'M10 private, a deprecated paid_security on changes nothing (I2)', read: { ...PRIVATE, ...PAID_OFF, binding: merged(null, 'on') },
+    expect: { status: 'conformant', policy_source: 'default-branch', checks: { S4: 'not-applicable', S5: 'not-applicable' }, fixes: { secret_scanning: false, code_scanning: false } } },
+  { id: 'M11 private, the settings already on: still not applicable, never drift', read: { ...PRIVATE, binding: merged(null, 'on') },
+    expect: { status: 'conformant', checks: { S4: 'not-applicable', S5: 'not-applicable' }, fixes: { secret_scanning: false, code_scanning: false } } },
+  { id: 'M12 private, the plan does not offer them', read: { ...PRIVATE, ...NO_PLAN, binding: merged(null, 'on') },
+    expect: { status: 'conformant', checks: { S4: 'not-applicable', S5: 'not-applicable' }, fixes: { secret_scanning: false, code_scanning: false } } },
   { id: 'M13 internal is treated like private', read: { visibility: 'internal', private_reporting: 'not-on-plan', ...PAID_OFF },
-    expect: { status: 'drift', checks: { S4: 'not-applicable', S6: 'not-applicable', S8: 'drift' }, fixes: { secret_scanning: false, paid: true } } },
+    expect: { status: 'conformant', checks: { S4: 'not-applicable', S5: 'not-applicable', S6: 'not-applicable' }, details: { S4: [/not applicable \(internal repository\)/] }, fixes: { secret_scanning: false, code_scanning: false } } },
   { id: 'M14 an advanced CodeQL workflow on the default branch is never replaced by default setup (I6)', read: { code_scanning: 'disabled', advanced_codeql: 'codeql.yml' },
     expect: { checks: { S5: 'ok' }, details: { S5: [/codeql\.yml \(advanced setup\)/] }, fixes: { code_scanning: false } } },
   { id: 'M14b a CodeQL workflow only in the working tree does not count', files: { '.github/workflows/codeql.yml': 'jobs:\n  a:\n    steps:\n      - uses: github/codeql-action/init@v3\n' }, read: { code_scanning: 'disabled' },
@@ -169,14 +171,10 @@ const MATRIX = [
     expect: { status: 'unverified', checks: { S5: 'unverified' }, details: { S5: [/odd\.yml names CodeQL steps Toolkit could not place or rule out/] }, fixes: { code_scanning: false } } },
   { id: 'M14e GitHub has recent CodeQL results that default setup did not make: default setup stays off (I6)', read: { code_scanning: 'disabled', advanced_codeql: 'unreadable', codeql_uploads: '.github/workflows/ci.yml:scan' },
     expect: { status: 'unverified', checks: { S5: 'unverified' }, details: { S5: [/CodeQL results on the default branch from \.github\/workflows\/ci\.yml:scan in the last 90 days, not from default setup/] }, fixes: { code_scanning: false } } },
-  { id: 'M14f private, paid on, CodeQL waits for Code Security: only Code Security is written (I6)', read: { ...PRIVATE, secret_scanning: 'enabled', push_protection: 'enabled', code_security: 'disabled', code_scanning: 'waiting', binding: merged(null, 'on') },
-    expect: { status: 'drift', checks: { S5: 'drift' }, details: { S5: [/waits for GitHub Code Security, which is off; once Code Security is on, the next run checks for an advanced CodeQL setup/] }, fixes: { code_security: true, code_scanning: false, paid: true } } },
-  { id: 'M14g private, paid off, CodeQL waits for Code Security: nothing to do', read: { ...PRIVATE, code_security: 'disabled', code_scanning: 'waiting', binding: merged(null, 'off') },
-    expect: { status: 'conformant', checks: { S5: 'not-applicable' }, fixes: { code_security: false, code_scanning: false } } },
-  { id: 'M14h private, paid on, Code Security on but CodeQL not offered yet: run again, never "not on the plan"', read: { ...PRIVATE, code_security: 'enabled', code_scanning: 'starting', binding: merged(null, 'on') },
-    expect: { status: 'unverified', checks: { S5: 'unverified' }, details: { S5: [/GitHub Code Security reads on, but GitHub does not offer CodeQL code scanning here yet; run this again shortly/] }, fixes: { code_security: false, code_scanning: false } } },
-  { id: 'M14i private, paid off, Code Security on but CodeQL not offered yet', read: { ...PRIVATE, code_security: 'enabled', code_scanning: 'starting', binding: merged(null, 'off') },
-    expect: { status: 'conformant', checks: { S5: 'not-applicable' }, fixes: { code_security: false, code_scanning: false } } },
+  { id: 'M14f private, CodeQL readable and off: default setup is never written (I2)', read: { ...PRIVATE, code_scanning: 'disabled', binding: merged(null, 'on') },
+    expect: { status: 'conformant', checks: { S5: 'not-applicable' }, fixes: { code_scanning: false } } },
+  { id: 'M14g private, CodeQL workflows unreadable: still not applicable, never unverified', read: { ...PRIVATE, code_scanning: 'disabled', advanced_codeql: 'unreadable' },
+    expect: { status: 'conformant', checks: { S5: 'not-applicable' }, fixes: { code_scanning: false } } },
   { id: 'M15 a dependabot.yaml counts (I6)', files: { 'package.json': '{}', '.github/dependabot.yaml': COVERED },
     expect: { checks: { S3: 'ok' }, files: { dependabot: false } } },
   { id: 'M16 merged patch-minor, nothing in place yet (I3)', read: { allow_auto_merge: false, binding: merged(PATCH_MINOR) }, protection: CONFORMANT,
@@ -192,27 +190,31 @@ const MATRIX = [
   { id: 'M21 merged patch-minor, everything in place', read: { binding: merged(PATCH_MINOR) }, protection: CONFORMANT, workflow: true,
     expect: { checks: { S7: 'ok' }, fixes: { allow_auto_merge: false }, files: { workflow: false } } },
   { id: 'M22 merged binding: GitHub Actions default to the owner', read: { binding: merged(PATCH_MINOR) },
-    expect: { policy: { auto_merge: 'patch-minor', github_actions: 'owner', paid_security: null } } },
+    expect: { policy: { auto_merge: 'patch-minor', github_actions: 'owner' } } },
   { id: 'M23 offline checks only the files', files: { 'package.json': '{}' }, offline: true,
-    expect: { status: 'drift', policy_source: 'offline', checks: { S1: 'not-checked', S3: 'drift', S7: 'not-checked', S8: 'not-checked' }, fixes: null, files: { dependabot: true, workflow: false }, readerCalled: false } },
+    expect: { status: 'drift', policy_source: 'offline', checks: { S1: 'not-checked', S3: 'drift', S7: 'not-checked' }, fixes: null, files: { dependabot: true, workflow: false }, readerCalled: false } },
   { id: 'M24 GitHub unreadable (I4)', read: () => ({ ok: false, reason: 'gh-unavailable' }), protection: CONFORMANT,
-    expect: { status: 'unverified', policy_source: 'unreadable', checks: { S1: 'unverified', S7: 'unverified', S8: 'unverified' }, fixes: null } },
+    expect: { status: 'unverified', policy_source: 'unreadable', checks: { S1: 'unverified', S7: 'unverified' }, fixes: null } },
   { id: 'M25 private, free settings off: on by default (I1)', read: { ...PRIVATE, alerts: 'disabled', security_updates: 'disabled', binding: merged(null, 'off') },
     expect: { status: 'drift', checks: { S1: 'drift', S2: 'drift' }, fixes: { alerts: true, security_updates: true, secret_scanning: false } } },
   { id: 'M26 internal, free settings off: on by default (I1)', read: { visibility: 'internal', private_reporting: 'not-on-plan', alerts: 'disabled', binding: merged(null, 'off') },
     expect: { checks: { S1: 'drift' }, fixes: { alerts: true, private_reporting: false } } },
-  { id: 'M27 private, unanswered, a plan without the paid features', read: { ...PRIVATE, ...NO_PLAN },
-    expect: { status: 'drift', checks: { S4: 'not-applicable', S5: 'not-applicable', S8: 'drift' }, fixes: { secret_scanning: false, code_scanning: false } } },
-  { id: 'M28 private, answered off, a plan without the paid features', read: { ...PRIVATE, ...NO_PLAN, binding: merged(null, 'off') },
-    expect: { status: 'conformant', checks: { S4: 'not-applicable', S5: 'not-applicable', S8: 'ok' } } },
-  { id: 'M29 internal, answered on, off on GitHub (I2)', read: { visibility: 'internal', private_reporting: 'not-on-plan', ...PAID_OFF, binding: merged(null, 'on') },
-    expect: { checks: { S4: 'drift', S5: 'drift', S8: 'ok' }, fixes: { secret_scanning: true, code_scanning: true, paid: true } } },
+  { id: 'M27 private, no paid_security key, a plan without the paid features', read: { ...PRIVATE, ...NO_PLAN },
+    expect: { status: 'conformant', checks: { S4: 'not-applicable', S5: 'not-applicable' }, fixes: { secret_scanning: false, code_scanning: false } } },
+  { id: 'M28 private, paid_security off, a plan without the paid features', read: { ...PRIVATE, ...NO_PLAN, binding: merged(null, 'off') },
+    expect: { status: 'conformant', checks: { S4: 'not-applicable', S5: 'not-applicable' } } },
+  { id: 'M29 internal, a deprecated paid_security on changes nothing (I2)', read: { visibility: 'internal', private_reporting: 'not-on-plan', ...PAID_OFF, binding: merged(null, 'on') },
+    expect: { status: 'conformant', checks: { S4: 'not-applicable', S5: 'not-applicable' }, fixes: { secret_scanning: false, code_scanning: false } } },
   { id: 'M30 public, the merged binding is unreadable', read: { binding: { status: 'unreadable' } }, protection: CONFORMANT,
-    expect: { status: 'unverified', checks: { S7: 'unverified', S8: 'not-applicable' }, fixes: { allow_auto_merge: false } } },
+    expect: { status: 'unverified', checks: { S7: 'unverified' }, fixes: { allow_auto_merge: false } } },
   { id: 'M31 public, the merged binding is invalid', read: { binding: { status: 'ok', text: 'not json' } },
-    expect: { status: 'unverified', policy_source: 'invalid', checks: { S7: 'unverified', S8: 'not-applicable' } } },
+    expect: { status: 'unverified', policy_source: 'invalid', checks: { S7: 'unverified' } } },
   { id: 'M32 public, the binding is not merged yet', read: { binding: { status: 'missing' } },
-    expect: { status: 'conformant', policy_source: 'not-merged', checks: { S7: 'ok', S8: 'not-applicable' } } },
+    expect: { status: 'conformant', policy_source: 'not-merged', checks: { S7: 'ok' } } },
+  { id: 'M32b public, a deprecated paid_security on validates and changes nothing', read: { binding: merged(null, 'on') },
+    expect: { status: 'conformant', policy_source: 'default-branch', policy: { auto_merge: 'off', github_actions: 'owner' }, fixes: { secret_scanning: false, code_scanning: false } } },
+  { id: 'M32c public, paid_security on, the settings off: only the free settings are planned', read: { ...PAID_OFF, binding: merged(null, 'on') },
+    expect: { status: 'drift', checks: { S4: 'drift', S5: 'drift' }, fixes: { secret_scanning: true, code_scanning: true } } },
   { id: 'M33 no admin rights: hidden settings are unverified, never off, and nothing is written', read: { alerts: 'unreadable', secret_scanning: 'unreadable', push_protection: 'unreadable', code_scanning: 'unreadable', allow_auto_merge: 'unreadable', binding: merged(PATCH_MINOR) }, protection: CONFORMANT, workflow: true,
     expect: { checks: { S1: 'unverified', S4: 'unverified', S5: 'unverified', S7: 'unverified' }, fixes: { alerts: false, secret_scanning: false, code_scanning: false, allow_auto_merge: false } } },
   { id: 'M34 the working tree\'s required checks differ from the merged binding\'s (protection does not count)', working: JSON.stringify({ ...JSON.parse(binding(PATCH_MINOR)), required_checks: ['something-else'] }), read: { allow_auto_merge: false, binding: merged(PATCH_MINOR) }, protection: CONFORMANT, workflow: true,
@@ -255,6 +257,14 @@ test('SE-03 (MATRIX): the verdict for every row of the closure matrix', async (t
       if (want.pending) for (const [key, value] of Object.entries(want.pending)) assert.equal(result.pending_policy[key], value, `pending.${key}`);
       else assert.equal(result.pending_policy, null);
       if (want.readerCalled === false) assert.equal(called, false);
+      // I2 on every row: no paid-features check or fix exists, and a private or internal repository
+      // never plans secret scanning or CodeQL.
+      assert.equal(result.checks.S8, undefined, 'no paid-features check');
+      if (result.fixes) assert.ok(!('code_security' in result.fixes) && !('paid' in result.fixes), 'no paid fix');
+      if (result.visibility && result.visibility !== 'public') {
+        for (const id of ['S4', 'S5']) assert.equal(result.checks[id].status, 'not-applicable', id);
+        assert.equal(result.fixes.secret_scanning || result.fixes.code_scanning, false);
+      }
     });
   }
 });
@@ -296,20 +306,6 @@ const APPLY = [
   { id: 'A13 allow auto-merge written and read back', binding: binding(PATCH_MINOR),
     before: reader({ allow_auto_merge: false, binding: merged(PATCH_MINOR) }), writer: () => [ok('allow_auto_merge')], after: reader({ binding: merged(PATCH_MINOR) }),
     expect: { result: 'applied', writes: 1, lines: [/allow auto-merge turned on\./, /read back\./] } },
-  { id: 'A14 Code Security written and read back on: default setup waits for the next run (I6)', binding: binding(null, 'on'),
-    before: reader({ ...PRIVATE, secret_scanning: 'enabled', push_protection: 'enabled', code_security: 'disabled', code_scanning: 'waiting', binding: merged(null, 'on') }), writer: () => [ok('code_security')],
-    after: reader({ ...PRIVATE, secret_scanning: 'enabled', push_protection: 'enabled', code_security: 'enabled', code_scanning: 'starting', binding: merged(null, 'on') }),
-    expect: { result: 'applied', writes: 1, plan: { code_security: true, code_scanning: false }, lines: [/GitHub Code Security turned on\./, /CodeQL default setup waits for the next run, which first checks for an advanced CodeQL setup\./, /: read back\./], never: [/CodeQL code scanning turned on/] } },
-  { id: 'A15 Code Security write refused: failed, and default setup is never written (I5)', binding: binding(null, 'on'),
-    before: reader({ ...PRIVATE, secret_scanning: 'enabled', push_protection: 'enabled', code_security: 'disabled', code_scanning: 'waiting', binding: merged(null, 'on') }), writer: () => [refused('code_security', 'forbidden')],
-    expect: { result: 'failed', writes: 1, plan: { code_security: true, code_scanning: false }, lines: [/GitHub Code Security not turned on \(forbidden\)/], never: [/: read back\./, /waits for the next run/] } },
-  { id: 'A16 Code Security written, unreadable after: unverified (I4)', binding: binding(null, 'on'),
-    before: reader({ ...PRIVATE, secret_scanning: 'enabled', push_protection: 'enabled', code_security: 'disabled', code_scanning: 'waiting', binding: merged(null, 'on') }), writer: () => [ok('code_security')],
-    after: reader({ ...{ ...PRIVATE, secret_scanning: 'enabled', push_protection: 'enabled', code_security: 'disabled', code_scanning: 'waiting', binding: merged(null, 'on') }, code_security: 'unreadable', code_scanning: 'unreadable' }),
-    expect: { result: 'unverified', writes: 1, unconfirmed: ['code_security'], lines: [/could not read back: GitHub Code Security;/], never: [/: read back\./] } },
-  { id: 'A18 Code Security written, still reads back off: failed', binding: binding(null, 'on'),
-    before: reader({ ...PRIVATE, secret_scanning: 'enabled', push_protection: 'enabled', code_security: 'disabled', code_scanning: 'waiting', binding: merged(null, 'on') }), writer: () => [ok('code_security')],
-    expect: { result: 'failed', writes: 1, lines: [/reading back still shows off: GitHub Code Security/], never: [/: read back\./] } },
   { id: 'A17 a written setting with no read-back is never "read back" (I4)', before: reader(ALERTS_OFF), writer: () => [ok('alerts'), ok('something_new')], after: reader(),
     expect: { result: 'unverified', writes: 1, unconfirmed: ['something_new'], never: [/: read back\./] } },
 ];
@@ -346,12 +342,13 @@ test('SE-06: the policy comes from the committed binding through the state modul
   const root = repo(t, { '.github/toolkit-programme.json': binding(PATCH_MINOR, 'on') });
   const own = security.committedPolicy({ ok: true, binding: merged() }, identity);
   assert.equal(own.source, 'default-branch');
-  assert.deepEqual(own.policy, { auto_merge: 'off', github_actions: 'owner', paid_security: null });
+  assert.deepEqual(own.policy, { auto_merge: 'off', github_actions: 'owner' });
   for (const read of [null, { ok: false }, { ok: true }, { ok: true, binding: { status: 'unreadable' } }]) {
-    assert.deepEqual(security.committedPolicy(read, identity).policy, { auto_merge: 'off', github_actions: 'owner', paid_security: null });
+    assert.deepEqual(security.committedPolicy(read, identity).policy, { auto_merge: 'off', github_actions: 'owner' });
   }
   const other = JSON.stringify({ ...JSON.parse(binding(PATCH_MINOR, 'on')), repository: 'someone/else' });
   assert.equal(security.committedPolicy({ ok: true, binding: { status: 'ok', text: other } }, identity).source, 'invalid', 'a binding for another repository is not an answer');
+  for (const paid of ['on', 'off']) assert.deepEqual(security.committedPolicy({ ok: true, binding: merged(null, paid) }, identity), { policy: { auto_merge: 'off', github_actions: 'owner' }, required_checks: ['validate'], source: 'default-branch' }, `paid_security "${paid}" still validates and changes nothing`);
   const text = fs.readFileSync(path.join(ROOT, 'repo', 'scripts', 'toolkit-governance-security.cjs'), 'utf8');
   assert.doesNotMatch(text, /readFileSync\([^)]*programme|toolkit-programme\.json['"]/, 'the module never reads the working-tree binding itself');
   assert.ok(root);
@@ -396,7 +393,7 @@ test('SE-08: the reader only reads, hides nothing it could not see, and reads th
   }, calls) });
   assert.deepEqual(read, {
     ok: true, visibility: 'public', allow_auto_merge: false, alerts: 'disabled', security_updates: 'enabled', secret_scanning: 'enabled',
-    push_protection: 'disabled', code_security: 'unreadable', code_scanning: 'disabled', private_reporting: 'disabled', binding: { status: 'ok', text: binding(PATCH_MINOR) },
+    push_protection: 'disabled', code_scanning: 'disabled', private_reporting: 'disabled', binding: { status: 'ok', text: binding(PATCH_MINOR) },
     advanced_codeql: null,
   }, 'an upload-sarif step for another scanner is not an advanced CodeQL setup');
   assert.ok(calls.every(args => !args.includes('-X')), 'reads are GETs');
@@ -460,24 +457,16 @@ test('SE-08: the reader only reads, hides nothing it could not see, and reads th
   assert.equal(viaUploads(page(100), composite).advanced_codeql, 'unreadable', 'a full page of recent analyses may hide an older one');
   assert.equal(viaUploads(page(99), composite).advanced_codeql, null);
   assert.equal(viaUploads('gh: Not Found (HTTP 404)', composite).advanced_codeql, 'unreadable', 'a 404 that is not "no analysis found" rules nothing out');
-  // A private repository with Code Security off: GitHub refuses code scanning as not enabled, so
-  // CodeQL waits for Code Security and nothing about it is read.
-  const privateRead = { private: true, visibility: 'private', default_branch: 'main', permissions: { admin: true }, allow_auto_merge: true, security_and_analysis: { code_security: { status: 'disabled' } } };
+  // A private repository where GitHub refuses code scanning as not enabled: not on this plan, and
+  // nothing about CodeQL is read.
+  const privateRead = { private: true, visibility: 'private', default_branch: 'main', permissions: { admin: true }, allow_auto_merge: true, security_and_analysis: {} };
   const notEnabled = 'gh: Code scanning is not enabled for this repository. Please enable code scanning in the repository settings. (HTTP 403)';
   const privateCalls = [];
-  const waits = security.ghSecurityReader('o/p', { spawn: fakeGh({
+  const refusedPrivate = security.ghSecurityReader('o/p', { spawn: fakeGh({
     'repos/o/p': privateRead, 'repos/o/p/code-scanning/default-setup': notEnabled,
   }, privateCalls) });
-  assert.deepEqual([waits.code_security, waits.code_scanning, waits.advanced_codeql], ['disabled', 'waiting', null], 'CodeQL waits for Code Security');
-  assert.ok(!privateCalls.some(args => args.some(arg => /workflows|analyses/.test(arg))), 'nothing about CodeQL is read while it waits');
-  const starting = security.ghSecurityReader('o/p', { spawn: fakeGh({
-    'repos/o/p': { ...privateRead, security_and_analysis: { code_security: { status: 'enabled' } } }, 'repos/o/p/code-scanning/default-setup': notEnabled,
-  }, []) });
-  assert.deepEqual([starting.code_security, starting.code_scanning], ['enabled', 'starting'], 'Code Security on and CodeQL still refused is not "not on the plan"');
-  const noPlan = security.ghSecurityReader('o/p', { spawn: fakeGh({
-    'repos/o/p': { ...privateRead, security_and_analysis: {} }, 'repos/o/p/code-scanning/default-setup': notEnabled,
-  }, []) });
-  assert.deepEqual([noPlan.code_security, noPlan.code_scanning], ['not-on-plan', 'not-on-plan'], 'without Code Security on the plan, CodeQL is not on the plan either');
+  assert.deepEqual([refusedPrivate.code_scanning, refusedPrivate.advanced_codeql, 'code_security' in refusedPrivate], ['not-on-plan', null, false]);
+  assert.ok(!privateCalls.some(args => args.some(arg => /workflows|analyses/.test(arg))), 'nothing about CodeQL is read when GitHub refuses it');
   assert.equal(codeql('codeql.yml', CODEQL_WORKFLOW.replace(/^on:\n {2}push:\n {4}branches: \[main\]/, 'on: workflow_call')), 'codeql.yml', 'a reusable CodeQL workflow is an advanced setup');
   const steps = 'jobs:\n  analyze:\n    steps:\n      - uses: github/codeql-action/init@v3\n      - uses: github/codeql-action/analyze@v3\n';
   const indentless = 'on:\n  push:\njobs:\n  analyze:\n    runs-on: ubuntu-latest\n    steps:\n    - name: Initialise\n      uses: github/codeql-action/init@v3\n    - uses: github/codeql-action/analyze@v3\n';
@@ -592,12 +581,9 @@ test('SE-09: the writer calls only the endpoints for the fixes it is given, and 
   writes.length = 0;
   security.ghSecurityWriter('o/p', { secret_scanning: true, code_security: true, paid: true }, { spawn: writer });
   assert.deepEqual(writes.map(entry => JSON.parse(entry.input)), [
-    { security_and_analysis: { secret_protection: { status: 'enabled' }, secret_scanning: { status: 'enabled' }, secret_scanning_push_protection: { status: 'enabled' } } },
-    { security_and_analysis: { code_security: { status: 'enabled' } } },
-  ], 'on a private repository the paid products go on');
+    { security_and_analysis: { secret_scanning: { status: 'enabled' }, secret_scanning_push_protection: { status: 'enabled' } } },
+  ], 'old paid plan keys are ignored: never Secret Protection or Code Security');
   writes.length = 0;
-  security.ghSecurityWriter('o/p', { code_scanning: true, paid: true }, { spawn: writer });
-  assert.deepEqual(writes.map(entry => JSON.parse(entry.input)), [{ state: 'configured' }], 'default setup alone never writes Code Security');
   const answer = stderr => security.ghSecurityWriter('o/r', { alerts: true }, { spawn: () => ({ status: 1, stdout: '', stderr }) })[0].reason;
   assert.equal(answer('gh: Secret Protection is not available on this plan (HTTP 403)'), 'not-on-plan');
   assert.equal(answer('gh: This setting is disabled by your organization (HTTP 422)'), 'refused-by-policy');
@@ -605,6 +591,27 @@ test('SE-09: the writer calls only the endpoints for the fixes it is given, and 
   assert.equal(answer('gh: Resource protected by organization SAML enforcement (HTTP 403)'), 'forbidden', 'SAML is not a policy refusal');
   assert.equal(answer('gh: API rate limit exceeded for the explanation of the plan (HTTP 403)'), 'forbidden', 'a rate limit is not a plan refusal');
   assert.equal(answer('gh: Validation Failed (HTTP 422)'), 'gh-request-failed');
+});
+
+test('SE-09b: no run ever writes GitHub Secret Protection or Code Security (I2)', async (t) => {
+  for (const visibility of ['public', 'private', 'internal']) {
+    for (const paid of [null, 'off', 'on']) {
+      await t.test(`${visibility}, paid_security ${paid}`, (st) => {
+        const root = repo(st, { '.github/toolkit-programme.json': binding(null, paid) });
+        const before = security.dependencySecurity(root, { reader: reader({
+          ...(visibility === 'public' ? {} : { visibility, private_reporting: 'not-on-plan' }),
+          alerts: 'disabled', security_updates: 'disabled', ...PAID_OFF, binding: merged(null, paid),
+        }) });
+        const sent = [];
+        const spawn = (command, args, options) => { sent.push({ args, input: options.input || '' }); return { status: 0, stdout: '', stderr: '' }; };
+        security.applySecurity(root, before, { writer: (slug, plan) => security.ghSecurityWriter(slug, plan, { spawn }), fileWriter: () => [], reread: () => before });
+        assert.ok(sent.length >= 2, 'the free Dependabot settings are still written');
+        for (const call of sent) assert.doesNotMatch(call.input, /secret_protection|code_security/, JSON.stringify(call));
+        const settingsWrites = sent.filter(call => call.input.includes('security_and_analysis') || call.args.some(arg => /code-scanning/.test(arg)));
+        assert.equal(settingsWrites.length, visibility === 'public' ? 2 : 0, 'secret scanning and CodeQL only on a public repository');
+      });
+    }
+  }
 });
 
 const TEMPLATE = fs.readFileSync(path.join(ROOT, ...security.WORKFLOW_TEMPLATE_REL.split('/')), 'utf8').replace(/\r\n/g, '\n');
@@ -810,7 +817,9 @@ test('SE-13: the binding accepts only the known dependency update values', () =>
   const base = JSON.parse(binding());
   programmeState.validateBinding({ ...base, dependency_updates: { auto_merge: 'patch-minor', github_actions: 'owner' } });
   programmeState.validateBinding({ ...base, dependency_updates: {} });
+  // paid_security is deprecated and ignored, but older bindings that carry it stay valid.
   programmeState.validateBinding({ ...base, paid_security: 'off' });
+  programmeState.validateBinding({ ...base, paid_security: 'on' });
   assert.throws(() => programmeState.validateBinding({ ...base, paid_security: 'yes' }), /paid_security must be off or on/);
   for (const bad of [{ auto_merge: 'all' }, { github_actions: 'yes' }, { auto_merge: 'off', extra: true }, 'patch-minor']) {
     assert.throws(() => programmeState.validateBinding({ ...base, dependency_updates: bad }), /dependency_updates/);
