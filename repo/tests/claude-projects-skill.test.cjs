@@ -52,7 +52,7 @@ test('no plugin payload or skills folder reaches the Projects controller skill',
 
 test('Projects wires managed instructions, promises and fresh scheduled sessions to controller law', () => {
   const text = bundle();
-  assert.match(text, /^Version: 2026-10-26\.6$/m);
+  assert.match(text, /^Version: 2026-10-26\.7$/m);
   // The check-in posts the skill card itself; the coordinator lists the Save tap, re-upload only when the card failed.
   assert.match(text, /`SKILL BEHIND`: the account copy is an older Toolkit revision\. With "card posted", the check-in posted the skill update card in its thread: put "tap Save on the skill card"/);
   assert.match(text, /keep that thread open \(never resolve it in the hourly pass, even after the check-in moves to a new home thread\) until the owner saves/);
@@ -176,6 +176,12 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.ok(text.includes('save its message id as the first line of project memory, `RUNNING POST: <message id>`'));
   assert.ok(text.includes('it refuses a fresh post while the owner has not written since your newest post, unless that post nears 8 KB'));
   assert.ok(text.includes('only when it is ready for the owner to check and merge; until then, link the chat thread that owns the work'));
+  // The post layout and the merge summary, also enforced by the post hook.
+  assert.ok(text.includes('**Post layout.** A running post has four parts, in order: a **Now:** line'));
+  assert.ok(text.includes('one **ELI5:** line, matched to the Now line, as the very last line with nothing after it'));
+  assert.ok(text.includes('an edit keeps every earlier Update line word for word and adds at least one new one'));
+  assert.ok(text.includes('the post hook refuses a PR merge (`gh pr merge`, a `gh api` merge call or a merge tool) until a line in one of that session\'s own posts or edits says "external effects" and names the PR'));
+  assert.ok(text.includes('It reads only the command text, so it is a tripwire, not a guarantee'));
   assert.match(text, /also post a one-line pointer to it in top-level project chat/);
   // Base layer and project layer.
   assert.match(text, /Project instructions start with the managed block \(only blank lines before it\)/);
