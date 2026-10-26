@@ -396,3 +396,228 @@ test('N3: an ENABLED repository is protected even before its governed block land
     assert.equal(bypassRefusal('git commit --no-verify -m x', root, 0, registryOptions), refused ? BYPASS_MESSAGE : '', path.basename(root));
   }
 });
+
+// The push check: what a git push or gh pr create would send. Fake credentials are built from
+// pieces at run time, so no credential-shaped text sits in the repository.
+const pushCheck = require('../scripts/toolkit-push-check.cjs');
+const { outgoingChanges, outgoingRefusal } = require('../scripts/toolkit-attribution-guard.cjs');
+const join = (...parts) => parts.join('');
+const fakeToken = () => join('gh', 'p_', 'A1b2C3d4E5f6G7h8'.repeat(2), 'Q9r0');
+const numberReference = () => join('#', '123');
+// Room for a busy test machine; the real budget is 3 seconds.
+const roomy = { budgetMs: 60000 };
+const quiet = { err: { write() {} }, ...roomy };
+
+function fixtureGit(cwd, args, hooks) {
+  return childProcess.execFileSync('git', ['-c', 'user.name=Fixture Author', '-c', 'user.email=fixture@example.test', '-c', 'commit.gpgsign=false', '-c', `core.hooksPath=${hooks}`, '-c', 'init.defaultBranch=main', '-c', 'core.fsmonitor=false', ...args], { cwd, encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+}
+
+function writeFiles(root, files) {
+  for (const [name, text] of Object.entries(files)) {
+    fs.mkdirSync(path.dirname(path.join(root, name)), { recursive: true });
+    fs.writeFileSync(path.join(root, name), text);
+  }
+}
+
+// A clone whose main is pushed to a local bare origin, with origin/HEAD set; each scenario is a copy
+// with one more commit on a new branch that has no upstream. Built once for every push check test;
+// each test that changes a repository has its own.
+let fixtures = null;
+test.after(() => { if (fixtures) fs.rmSync(fixtures.dir, { recursive: true, force: true }); });
+function pushFixtures() {
+  if (fixtures) return fixtures;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-push-check-'));
+  const hooks = path.join(dir, 'no-hooks');
+  fs.mkdirSync(hooks);
+  const git = (cwd, ...args) => fixtureGit(cwd, args, hooks);
+  const base = (name, files) => {
+    const origin = path.join(dir, `${name}-origin.git`);
+    const work = path.join(dir, `${name}-base`);
+    git(dir, 'init', '--quiet', '--bare', origin);
+    git(dir, 'init', '--quiet', work);
+    writeFiles(work, { 'README.md': 'A fixture.\n', ...files });
+    git(work, 'add', '-A');
+    git(work, 'commit', '--quiet', '-m', 'base');
+    git(work, 'remote', 'add', 'origin', origin);
+    git(work, 'push', '--quiet', '-u', 'origin', 'main');
+    git(work, 'remote', 'set-head', 'origin', 'main');
+    return work;
+  };
+  const scenario = (from, name, files) => {
+    const work = path.join(dir, name);
+    fs.cpSync(from, work, { recursive: true });
+    git(work, 'checkout', '--quiet', '-b', 'feature');
+    writeFiles(work, files);
+    git(work, 'add', '-A');
+    git(work, 'commit', '--quiet', '-m', 'change');
+    return work;
+  };
+  const withSettings = base('settings', { '.github/plain-text.json': '{}\n' });
+  const without = base('plain', {});
+  const changes = {
+    secret: { 'src/config.js': `const token = "${fakeToken()}";\n` },
+    plain: { 'docs/guide.md': `See ${numberReference()} for details.\n` },
+    clean: { 'docs/guide.md': 'Plain words only.\n' },
+  };
+  const repos = {};
+  for (const [kind, files] of Object.entries(changes)) {
+    repos[`settings-${kind}`] = scenario(withSettings, `settings-${kind}`, files);
+    repos[`plain-${kind}`] = scenario(without, `plain-${kind}`, files);
+  }
+  repos.exceptions = scenario(withSettings, 'exceptions', changes.clean);
+  repos['toolkit-plain'] = scenario(without, 'toolkit-plain', {
+    'repo/contracts/plain-references/config.json': '{}\n', 'repo/scripts/check-plain-references.cjs': '\'use strict\';\n', ...changes.plain
+  });
+  repos.notRepo = path.join(dir, 'not-a-repo');
+  fs.mkdirSync(repos.notRepo);
+  fixtures = { dir, git, repos, withSettings };
+  return fixtures;
+}
+
+function assertNoMatchText(text, label) {
+  const token = fakeToken();
+  for (let start = 0; start + 8 <= token.length; start += 4) assert.ok(!String(text).includes(token.slice(start, start + 8)), `${label} shows part of the credential`);
+}
+
+test('push check: credentials are refused everywhere, plain-text findings only where the check runs, clean changes pass', (t) => {
+  const { repos } = pushFixtures();
+  const expected = {
+    'settings-secret': 'secret', 'settings-plain': 'plain', 'settings-clean': '',
+    'plain-secret': 'secret', 'plain-plain': '', 'plain-clean': '', 'toolkit-plain': 'plain', notRepo: '',
+  };
+  for (const [name, kind] of Object.entries(expected)) {
+    const notes = [];
+    const reason = outgoingRefusal('git push', repos[name], { err: { write: (line) => notes.push(line) }, ...roomy });
+    assert.deepEqual(notes, [], `${name}: no note`);
+    if (!kind) { assert.equal(reason, '', name); continue; }
+    assert.match(reason, /^Toolkit checked what this push would send and found 1 item\(s\) to fix first:/, name);
+    if (kind === 'secret') {
+      assert.match(reason, /src\/config\.js:1: GitHub token/, name);
+      assert.match(reason, /secret-scan: allow <reason>/, name);
+      assertNoMatchText(reason, name);
+    } else assert.match(reason, /docs\/guide\.md:1: number-reference/, name);
+  }
+});
+
+test('push check: every command form finds the folder the push or pull request runs in', (t) => {
+  const { dir, repos } = pushFixtures();
+  const repo = repos['settings-secret'];
+  const name = path.basename(repo);
+  const forms = [
+    ['git push', repo], ['git push -u origin feature', repo], [`git -C ${name} push`, dir], [`cd ${name} && git push`, dir],
+    [`Set-Location ${name}; git push origin feature`, dir], [`git -C ${name} \`\n  push`, dir], [`bash -c "cd ${name} && git push"`, dir],
+    [`pwsh -Command "git -C ${name} push"`, dir], ['gh pr create --title x --body y', repo], [`cd ${name}; gh pr create --fill`, dir],
+  ];
+  for (const [command, cwd] of forms) {
+    assert.match(outgoingRefusal(command, cwd, quiet), /GitHub token/, command);
+    const decision = attributionDecision({ tool_input: { command }, cwd }, quiet);
+    assert.equal(decision.hookSpecificOutput?.permissionDecision, 'deny', command);
+  }
+  assert.match(outgoingRefusal('gh pr create --title x', repo, quiet), /^Toolkit checked what this pull request would send/);
+  for (const command of ['git status', 'git push --delete origin feature', 'git push origin -d feature', 'gh pr view', 'git fetch && git log']) {
+    assert.equal(outgoingRefusal(command, repo, quiet), '', command);
+  }
+  assert.deepEqual(outgoingChanges('gh pr create --base release --title x', dir), [{ folder: dir, pullRequestBase: 'release' }]);
+  assert.deepEqual(outgoingChanges('gh pr create -Bnext', dir).map((item) => item.pullRequestBase), ['next']);
+  assert.deepEqual(outgoingChanges('gh pr create --base=next', dir).map((item) => item.pullRequestBase), ['next']);
+  assert.deepEqual(outgoingChanges('git push', dir), [{ folder: dir }]);
+});
+
+test('push check: the range is the tracked branch, else origin\'s default branch, else nothing', (t) => {
+  const { git, repos, withSettings } = pushFixtures();
+  // On main, which tracks origin/main: only the commit not yet pushed counts.
+  writeFiles(withSettings, { 'src/config.js': `const token = "${fakeToken()}";\n` });
+  git(withSettings, 'add', '-A');
+  git(withSettings, 'commit', '--quiet', '-m', 'ahead');
+  assert.match(outgoingRefusal('git push', withSettings, quiet), /GitHub token/);
+  git(withSettings, 'push', '--quiet', 'origin', 'main');
+  assert.equal(outgoingRefusal('git push', withSettings, quiet), '', 'nothing left to send');
+  // No upstream and no origin/HEAD: not checked, and no note.
+  const repo = repos['plain-secret'];
+  git(repo, 'remote', 'set-head', 'origin', '--delete');
+  const notes = [];
+  assert.equal(outgoingRefusal('git push', repo, { err: { write: (line) => notes.push(line) }, ...roomy }), '');
+  assert.deepEqual(notes, []);
+  // A pull request base that origin has is used; a missing one falls back to origin's default branch.
+  const pr = repos['settings-secret'];
+  assert.match(pushCheck.checkOutgoing({ folder: pr, pullRequestBase: 'main' }, roomy).refusal, /GitHub token/);
+  assert.match(pushCheck.checkOutgoing({ folder: pr, pullRequestBase: 'no-such-branch' }, roomy).refusal, /GitHub token/);
+});
+
+test('push check: a reviewed exception, a placeholder and a long list are handled', (t) => {
+  const { git, repos } = pushFixtures();
+  const repo = repos.exceptions;
+  writeFiles(repo, {
+    'src/allowed.js': `const token = "${fakeToken()}"; // secret-scan: allow fixture for the parser test\n`,
+    'src/placeholder.js': `const token = "${join('gh', 'p_', 'x'.repeat(36))}";\n`,
+  });
+  git(repo, 'add', '-A');
+  git(repo, 'commit', '--quiet', '-m', 'exceptions');
+  assert.equal(outgoingRefusal('git push', repo, quiet), '');
+  writeFiles(repo, { 'src/many.js': Array.from({ length: 12 }, () => `"${fakeToken()}"`).join('\n') });
+  git(repo, 'add', '-A');
+  git(repo, 'commit', '--quiet', '-m', 'many');
+  const reason = outgoingRefusal('git push', repo, quiet);
+  assert.match(reason, /found 12 item\(s\)/);
+  assert.match(reason, /src\/many\.js:10: GitHub token\n {2}\.\.\.and 2 more\./);
+  assert.ok(!reason.includes('src/many.js:11:'));
+  assertNoMatchText(reason, 'long list');
+});
+
+test('push check: it fails open with one note when git is missing, slow or the check breaks', () => {
+  const folder = os.tmpdir();
+  const missing = pushCheck.checkOutgoing({ folder }, { spawn: () => ({ error: Object.assign(new Error('x'), { code: 'ENOENT' }) }) });
+  assert.equal(missing.refusal, undefined);
+  assert.match(missing.note, /did not check this push.*git could not run \(ENOENT\)\. CI still checks it\./);
+  const slow = pushCheck.checkOutgoing({ folder }, { spawn: () => ({ error: Object.assign(new Error('x'), { code: 'ETIMEDOUT' }), status: null, signal: 'SIGTERM' }) });
+  assert.match(slow.note, /longer than 3 seconds/);
+  assert.match(pushCheck.checkOutgoing({ folder }, { budgetMs: -1 }).note, /longer than 3 seconds/);
+  const broken = pushCheck.checkOutgoing({ folder }, { spawn: () => { throw new TypeError('boom'); } });
+  assert.match(broken.note, /the check failed \(TypeError\)/);
+  const notes = [];
+  assert.equal(outgoingRefusal('git push', folder, { err: { write: (line) => notes.push(line) }, check: () => { throw new Error('gone'); } }), '');
+  assert.equal(notes.length, 1);
+  assert.match(notes[0], /could not load\. CI still checks it\.\n$/);
+  // The same folder and kind is checked once per command.
+  let calls = 0;
+  outgoingRefusal('git push && git push origin feature', folder, { err: { write() {} }, check: () => { calls += 1; return {}; } });
+  assert.equal(calls, 1);
+});
+
+test('push check: added lines follow hunk sizes, quoted paths and CRLF', () => {
+  const patch = [
+    'diff --git a/one.txt b/one.txt', '--- a/one.txt', '+++ b/one.txt', '@@ -1,2 +1,3 @@', '-old', '-old two', '+++ looks like a header', '+second\r', '+third',
+    'diff --git "a/sp ace.txt" "b/sp ace.txt"', '--- /dev/null', '+++ "b/sp ace.txt"', '@@ -0,0 +5 @@', '+only',
+    'diff --git a/gone.txt b/gone.txt', '--- a/gone.txt', '+++ /dev/null', '@@ -1 +0,0 @@', '-bye',
+  ].join('\n');
+  const lines = pushCheck.addedLines(patch);
+  assert.deepEqual([...lines.keys()], ['one.txt', 'sp ace.txt']);
+  assert.deepEqual(lines.get('one.txt'), [{ line: 1, text: '++ looks like a header' }, { line: 2, text: 'second' }, { line: 3, text: 'third' }]);
+  assert.deepEqual(lines.get('sp ace.txt'), [{ line: 5, text: 'only' }]);
+});
+
+test('push check: the Claude Code hook (Bash and PowerShell) and the Codex helper hook refuse a credential without showing it', (t) => {
+  const { repos } = pushFixtures();
+  const repo = repos['settings-secret'];
+  // The hooks run with the real 3-second budget; on a machine too busy for it they pass with a note.
+  const tooSlow = (result) => {
+    if (result.status !== 0 || !/longer than 3 seconds/.test(result.stderr)) return false;
+    t.diagnostic('this machine was too slow for the 3-second budget, so the hook passed with a note');
+    return true;
+  };
+  for (const [tool, command] of [['Bash', 'git push'], ['PowerShell', `Set-Location '${repo}'; git push origin feature`]]) {
+    const result = spawnSync(process.execPath, [path.join(repoRoot, 'repo', 'scripts', 'toolkit-claude-attribution-hook.cjs')], { input: JSON.stringify({ tool_name: tool, cwd: repo, tool_input: { command } }), encoding: 'utf8' });
+    assertNoMatchText(result.stdout + result.stderr, tool);
+    if (tooSlow(result)) continue;
+    assert.equal(result.status, 2, tool);
+    assert.match(JSON.parse(result.stdout).hookSpecificOutput.permissionDecisionReason, /src\/config\.js:1: GitHub token/);
+    assertNoMatchText(result.stdout + result.stderr, tool);
+  }
+  const helper = spawnSync(process.execPath, [path.join(repoRoot, 'repo', 'scripts', 'toolkit-codex-helper-hook.cjs')], { input: JSON.stringify({ tool_name: 'Bash', cwd: repo, tool_input: { command: 'git push' } }), encoding: 'utf8' });
+  assertNoMatchText(helper.stdout + helper.stderr, 'Codex helper');
+  if (!/longer than 3 seconds/.test(helper.stderr)) assert.equal(JSON.parse(helper.stdout.trim().split('\n').pop()).hookSpecificOutput.permissionDecision, 'deny');
+  const clean = spawnSync(process.execPath, [path.join(repoRoot, 'repo', 'scripts', 'toolkit-claude-attribution-hook.cjs')], { input: JSON.stringify({ tool_name: 'Bash', cwd: repos['settings-clean'], tool_input: { command: 'git push' } }), encoding: 'utf8' });
+  assert.equal(clean.status, 0);
+  assert.equal(clean.stdout, '');
+  if (!tooSlow(clean)) assert.equal(clean.stderr, '');
+});

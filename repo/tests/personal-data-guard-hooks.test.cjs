@@ -63,6 +63,28 @@ test('installer: default hooks folder; real commits and pushes are blocked; --no
   assert.equal(repo.git(['push', '-q', '--no-verify', 'origin', 'main'], { allowFailure: true }).status, 0);
 });
 
+test('pre-push: with the plain-text check installed too, a hand push of a changed file with a finding is blocked', (t) => {
+  const repo = new TestRepo(t);
+  repo.commit('base', { 'README.md': 'base\n' });
+  assert.equal(repo.installer([]).status, 0);
+  const plainInstaller = path.resolve(__dirname, '..', '..', 'skills', 'secure-ci-cd', 'scripts', 'install-plain-text-check.cjs');
+  const installed = require('node:child_process').spawnSync(process.execPath, [plainInstaller, '--repo', repo.root], { cwd: repo.root, env: repo.env, encoding: 'utf8', windowsHide: true });
+  assert.equal(installed.status, 0, `${installed.stdout}${installed.stderr}`);
+  repo.git(['add', '-A']);
+  repo.git(['commit', '-q', '--no-verify', '-m', 'plain-text check']);
+  const remote = new TestRepo(t, { config: null, bare: true });
+  repo.git(['remote', 'add', 'origin', remote.root]);
+  repo.git(['push', '-q', '-u', 'origin', 'main']);
+  // Built from pieces so this file carries no reference itself.
+  repo.commit('guide', { 'docs/guide.md': `See ${['#', '42'].join('')} for details.\n` });
+  const push = repo.git(['push', '-q', 'origin', 'main'], { allowFailure: true });
+  assert.notEqual(push.status, 0, 'pre-push blocks the plain-text finding');
+  assert.match(push.stderr, /docs\/guide\.md:1: number-reference/);
+  repo.commit('plain guide', { 'docs/guide.md': 'See the install steps for details.\n' });
+  const clean = repo.git(['push', '-q', 'origin', 'main'], { allowFailure: true });
+  assert.equal(clean.status, 0, clean.stderr);
+});
+
 test('installer: core.hooksPath is followed, and the default folder is left alone', (t) => {
   const repo = new TestRepo(t);
   repo.commit('base', { 'README.md': 'base\n' });

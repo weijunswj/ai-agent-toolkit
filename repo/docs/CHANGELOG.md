@@ -1,5 +1,11 @@
 # Toolkit Changelog
 
+## Unreleased
+
+### Check before a push
+
+- **Credentials and plain-text findings are refused before they leave the computer:** the shell hook in Claude Code and Codex now reads what a `git push` or `gh pr create` would send and refuses it in the same turn when an added line carries a credential (the shared formats in `skills/secure-ci-cd/scripts/secret-patterns.cjs`) or, in a repository that runs the plain-text check, a changed file has a plain-text finding. It names up to 10 items as `file:line: kind` and never shows any part of a credential. It reads the same command forms as the force-push check (`git -C`, a `cd` earlier in the line, PowerShell, nested shells). A broken or slow check (over 3 seconds) lets the command run with one note; CI and GitHub push protection stay the checks nothing gets around.
+
 ## 3.15.5
 
 ### Plain-text check

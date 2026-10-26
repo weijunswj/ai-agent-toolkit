@@ -84,6 +84,15 @@ function hookText(name) {
   } else {
     lines.push('input=$(cat)');
     lines.push('printf \'%s\\n\' "$input" | node "$guard" pre-push "$1" --repo "$root" || exit $?');
+    // A repository that also runs the plain-text check gets it on the files the current branch changes
+    // since the branch it tracks, else origin's default branch; with neither it is left to CI.
+    lines.push(
+      'plain="$root/.github/scripts/plain-text-check.cjs"',
+      'if [ -f "$plain" ] && [ -f "$root/.github/plain-text.json" ]; then',
+      '  base=$(git rev-parse --verify -q \'@{upstream}\' || git rev-parse --verify -q refs/remotes/origin/HEAD)',
+      '  if [ -n "$base" ]; then git diff -z --name-only --diff-filter=d "$base...HEAD" | xargs -0 node "$plain" --repo "$root" --files || exit 1; fi',
+      'fi'
+    );
     lines.push('if [ -f "$chained" ]; then printf \'%s\\n\' "$input" | "$chained" "$@"; exit $?; fi');
   }
   lines.push('exit 0', '');
