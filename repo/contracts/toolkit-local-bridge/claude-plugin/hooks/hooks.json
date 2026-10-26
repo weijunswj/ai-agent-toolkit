@@ -48,13 +48,23 @@
         ]
       },
       {
-        "matcher": "^(?:Bash|PowerShell|Monitor|Edit|Write|MultiEdit|NotebookEdit|Agent|Task|mcp__.*)$",
+        "matcher": "^(?:Bash|PowerShell|Monitor|Edit|Write|MultiEdit|NotebookEdit|Agent|Task|TaskStop|EnterWorktree|CronCreate|CronDelete|RemoteTrigger|SendMessage|Workflow|mcp__.*)$",
         "hooks": [
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-governance-hook.cjs\" --event PreToolUse",
             "timeout": 10,
             "onFailure": "block"
+          }
+        ]
+      },
+      {
+        "matcher": "^(?!(?:Bash|PowerShell|Monitor|Edit|Write|MultiEdit|NotebookEdit|Agent|Task|TaskStop|EnterWorktree|CronCreate|CronDelete|RemoteTrigger|SendMessage|Workflow|mcp__.*)$)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-governance-hook.cjs\" --event PreToolUse",
+            "timeout": 10
           }
         ]
       },
@@ -69,6 +79,16 @@
       }
     ],
     "PostToolUse": [
+      {
+        "matcher": "^AskUserQuestion$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-governance-hook.cjs\" --event PostToolUse",
+            "timeout": 10
+          }
+        ]
+      },
       {
         "matcher": "^(?:Bash|PowerShell|mcp__.*[Gg][Ii][Tt][Hh][Uu][Bb].*)$",
         "hooks": [
