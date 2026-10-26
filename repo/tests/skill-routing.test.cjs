@@ -506,7 +506,7 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
   assert.match(howToUse, /For normal human setup, keep the journey short/);
   assert.match(howToUse, /In Codex or Claude Code, open the repo and say `setup toolkit`, `refresh toolkit`, or plain `refresh`/);
   assert.match(howToUse, /manually approve the startup hook when Codex prompts/);
-  assert.match(howToUse, /The agent sets its shell's working folder to the managed checkout and runs `node repo\/scripts\/setup-toolkit\.cjs --execute --profile auto-main`, with no quotes or environment variables/);
+  assert.match(howToUse, /The agent runs the managed script by its resolved full path, `node "<home folder>\/\.ai-agent-toolkit\/source\/ai-agent-toolkit\/repo\/scripts\/setup-toolkit\.cjs" --execute --profile auto-main`, with the real home folder written in forward slashes and no environment variables/);
   assert.match(howToUse, /Claude Code appends `--host claude-code`/);
   assert.match(howToUse, /active repo only as bootstrap\/fallback|active repo.*bootstrap\/fallback/i);
   assert.match(howToUse, /Keep native plugin installs host-local: Codex must not install\/update Claude Code, and Claude Code must not install\/update Codex/);

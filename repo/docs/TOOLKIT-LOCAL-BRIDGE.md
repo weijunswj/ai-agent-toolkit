@@ -203,13 +203,13 @@ codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json
 
 The local marketplace wrapper lives at `.agents/plugins/marketplace.json` and exposes this repo root as `ai-agent-toolkit@ai-agent-toolkit-local`. The plugin package manifest remains `.codex-plugin/plugin.json`. The wrapper must use `policy.authentication: "ON_USE"`, not `ON_INSTALL`, so a no-auth local Toolkit plugin can install headlessly before any hook trust prompt.
 
-For `setup toolkit`, `refresh toolkit`, or plain `refresh` in a Toolkit setup/update context, agents must run the full script-backed journey even when Toolkit is already installed. The agent sets its shell tool's working folder to the managed checkout (`<home folder>/.ai-agent-toolkit/source/ai-agent-toolkit` as a full path) and runs:
+For `setup toolkit`, `refresh toolkit`, or plain `refresh` in a Toolkit setup/update context, agents must run the full script-backed journey even when Toolkit is already installed. The agent runs the managed script by its resolved full path:
 
 ```text
-node repo/scripts/setup-toolkit.cjs --execute --profile auto-main
+node "<home folder>/.ai-agent-toolkit/source/ai-agent-toolkit/repo/scripts/setup-toolkit.cjs" --execute --profile auto-main
 ```
 
-The command has no quotes and no `$env:` or `%...%` variables, so it works whether the host launches it through PowerShell, `cmd.exe` or WSL. Append `--host claude-code` for Claude Code. Run the same command with the working folder set to the active repo only as bootstrap/fallback when the managed checkout script is missing. If fallback/bootstrap is used, say it is bootstrap-only and hand off to the managed checkout script after the managed checkout exists.
+Write `<home folder>` as the resolved home folder path in forward slashes inside the double quotes (a space in it is fine), never put `$env:` or `%...%` in the command, never `cd` first, and leave the working folder as the chat's own folder, which setup uses to fast-forward the user's own Toolkit clone and to measure the project's instructions. The line starts the same way whether the host launches it through PowerShell or `cmd.exe`. Append `--host claude-code` for Claude Code. Use `node repo/scripts/setup-toolkit.cjs --execute --profile auto-main` from the active repo only as bootstrap/fallback when the managed checkout script is missing. If fallback/bootstrap is used, say it is bootstrap-only and hand off to the managed checkout script after the managed checkout exists.
 
 The orchestrator discovers current state, renders one compact semantic setup wizard before preference or target writes, then runs to completion unless a real safety blocker appears. The same model drives chat text, terminal prompts, piped answers, flags, plans, JSON, summaries, and execution. It uses a managed clean `main` checkout as the default source for setup, not the active Codex or Claude Code conversation worktree. This routine is root-agent work: agents must not spawn subagents to inspect setup instructions, docs, state, choices, or validation output.
 
@@ -357,13 +357,13 @@ To qualify marketplace-source binding against a real CLI, set `CODEX_TOOLKIT_REA
 
 Repo auto-update uses the configured local Toolkit Git repo as source of truth. The default setup configures the managed clean `main` checkout under the user-local `.ai-agent-toolkit/source/ai-agent-toolkit` path. Native Codex and Claude Code plugin hooks remain launchers only; they do not become source of truth and do not update each other.
 
-Enable or refresh the managed-main setup yourself in PowerShell with:
+Enable or refresh the managed-main setup yourself, typing it in PowerShell:
 
 ```powershell
 node "$env:USERPROFILE\.ai-agent-toolkit\source\ai-agent-toolkit\repo\scripts\setup-toolkit.cjs" --execute --profile auto-main
 ```
 
-Advanced bridge-only configuration can still point at an explicit trusted checkout (PowerShell):
+Advanced bridge-only configuration can still point at an explicit trusted checkout (PowerShell, for a person to type):
 
 ```powershell
 node repo/scripts/toolkit-local-bridge.cjs --enable-repo-auto-update --repo-path "$env:USERPROFILE\.ai-agent-toolkit\source\ai-agent-toolkit" --repo-branch main --enable-auto-sync --write
