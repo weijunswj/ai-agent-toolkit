@@ -44,6 +44,40 @@ function topChangelogVersion(text) {
   return heading ? heading[1] : '';
 }
 
+const UNRELEASED_HEADING = '## Unreleased';
+
+// Every "## " heading line of a CHANGELOG text, in order.
+function changelogHeadings(text) {
+  return String(text || '').replace(/\r\n/g, '\n').split('\n').filter((line) => line.startsWith('## ')).map((line) => line.trimEnd());
+}
+
+// The CHANGELOG as a commit records it, or null when the commit has none.
+function changelogAt(workspace, commit) {
+  const shown = git(workspace, ['show', `${commit}:${CHANGELOG_REL_PATH}`]);
+  return shown.status === 0 ? shown.stdout : null;
+}
+
+// An open branch's CHANGELOG headings are the base's, with at most one "## Unreleased" section on
+// top (the older way to hold notes, folded at merge like a fragment). Returns the problem, or ''.
+function heldHeadingsProblem(head, base) {
+  const extra = head[0] === UNRELEASED_HEADING ? head.slice(1) : head;
+  if (JSON.stringify(extra) === JSON.stringify(base)) return '';
+  const added = extra.filter((heading) => !base.includes(heading));
+  const detail = added.length ? `it adds ${added.map((heading) => `"${heading}"`).join(', ')}` : 'its headings are not in the base\'s order';
+  return `the CHANGELOG headings differ from the base's (${detail}); keep this branch's notes in a fragment in ${FRAGMENT_DIR_REL_PATH}/ (or one "${UNRELEASED_HEADING}" section on top) and leave the version headings to bump-version.cjs --next`;
+}
+
+// The "## Unreleased" section on top of a CHANGELOG, taken out: its notes and the text without it.
+function takeUnreleased(text) {
+  const lf = String(text || '').replace(/\r\n/g, '\n');
+  const start = lf.search(/^## Unreleased[ \t]*$/m);
+  if (start === -1 || start !== lf.search(/^## /m)) return { notes: '', text: lf };
+  const rest = lf.slice(start).replace(/^[^\n]*\n?/, '');
+  const next = rest.search(/^## /m);
+  const notes = (next === -1 ? rest : rest.slice(0, next)).trim();
+  return { notes, text: lf.slice(0, start) + (next === -1 ? '' : rest.slice(next)) };
+}
+
 function fragmentFiles(workspace) {
   const dir = path.join(workspace, ...FRAGMENT_DIR_REL_PATH.split('/'));
   if (!fs.existsSync(dir)) return [];
@@ -54,15 +88,20 @@ function fragmentFiles(workspace) {
 // A fragment holds "### Section" headings and bullets, as a CHANGELOG version entry does, with an
 // optional first line "Title: <words>" for the version heading. Returns its problems, if any.
 function fragmentProblems(rel, text) {
-  const body = String(text || '').replace(/\r\n/g, '\n');
+  const lines = String(text || '').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').split('\n');
   const problems = [];
-  if (!body.replace(/^Title:.*$/m, '').trim()) problems.push(`${rel} has no notes`);
-  if (/^#{1,2} /m.test(body)) problems.push(`${rel} must use "###" section headings only; the version heading is added at merge`);
+  if (/^Title:/.test(lines[0] || '') && !/^Title:\s*\S/.test(lines[0])) problems.push(`${rel} has an empty Title: line`);
+  const body = /^Title:/.test(lines[0] || '') ? lines.slice(1) : lines;
+  if (body.some((line) => /^Title:/.test(line))) problems.push(`${rel} has a Title: line that is not its first line`);
+  if (body.some((line) => /^#{1,2} /.test(line))) problems.push(`${rel} must use "###" section headings only; the version heading is added at merge`);
+  const first = body.findIndex((line) => line.startsWith('### '));
+  if (first === -1) problems.push(`${rel} has no "###" section heading`);
+  else if (body.slice(0, first).some((line) => line.trim())) problems.push(`${rel} has text before its first "###" section heading`);
   return problems;
 }
 
 function parseFragment(text) {
-  const lines = String(text || '').replace(/\r\n/g, '\n').split('\n');
+  const lines = String(text || '').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').split('\n');
   const title = /^Title:\s*(.*\S)\s*$/.exec(lines[0] || '');
   return { title: title ? title[1] : '', body: (title ? lines.slice(1) : lines).join('\n').trim() };
 }
@@ -96,14 +135,20 @@ function skillVersionOf(text) {
   return /^Version: (\d{4}-\d{2}-\d{2}\.\d+)\s*$/m.exec(String(text || ''))?.[1] || '';
 }
 
-// The CI guard. Without a base (a local run) only the fragments are checked.
+// The CI guard. Without a base (a local run) only the fragments are checked; a base that does not
+// resolve is a problem, never a skip.
 function versionProblems({ workspace, base }) {
   const problems = [];
   for (const rel of fragmentFiles(workspace)) {
     problems.push(...fragmentProblems(rel, fs.readFileSync(path.join(workspace, ...rel.split('/')), 'utf8')));
   }
-  const baseVersion = base ? versionAt(workspace, base) : '';
-  if (!baseVersion) return problems;
+  if (!base) return problems;
+  const baseVersion = versionAt(workspace, base);
+  const baseChangelog = changelogAt(workspace, base);
+  if (!baseVersion || baseChangelog === null) {
+    problems.push(`the base ${base} has no readable ${VERSION_REL_PATH} or ${CHANGELOG_REL_PATH}, so the version cannot be checked; fetch full history`);
+    return problems;
+  }
   const shownSkill = git(workspace, ['show', `${base}:${PROJECTS_SKILL_REL_PATH}`]);
   const skillPath = path.join(workspace, ...PROJECTS_SKILL_REL_PATH.split('/'));
   const baseSkill = shownSkill.status === 0 ? skillVersionOf(shownSkill.stdout) : '';
@@ -112,21 +157,31 @@ function versionProblems({ workspace, base }) {
     problems.push(`the Projects skill Version ${headSkill} is older than the base's ${baseSkill}; keep the base's until merge time`);
   }
   const current = readToolkitVersion(path.join(workspace, ...VERSION_REL_PATH.split('/')));
-  if (current === baseVersion) return problems;
+  const headHeadings = changelogHeadings(fs.readFileSync(path.join(workspace, ...CHANGELOG_REL_PATH.split('/')), 'utf8'));
+  const baseHeadings = changelogHeadings(baseChangelog);
+  if (current === baseVersion) {
+    const problem = heldHeadingsProblem(headHeadings, baseHeadings);
+    if (problem) problems.push(problem);
+    return problems;
+  }
   const allowed = LEVELS.map((level) => nextVersion(baseVersion, level));
   if (!allowed.includes(current)) {
     problems.push(`version ${current} is not the next version after the base's ${baseVersion} (${allowed.join(' or ')}); keep ${baseVersion} until merge time, then run bump-version.cjs --next`);
     return problems;
   }
-  const top = topChangelogVersion(fs.readFileSync(path.join(workspace, ...CHANGELOG_REL_PATH.split('/')), 'utf8'));
-  if (top !== current) problems.push(`version ${current} needs its CHANGELOG heading first, found ${top || 'none'}`);
+  if (topChangelogVersion(headHeadings[0] || '') !== current) {
+    problems.push(`version ${current} needs its CHANGELOG heading first, found ${headHeadings[0] ? `"${headHeadings[0]}"` : 'none'}`);
+  } else if (JSON.stringify(headHeadings.slice(1)) !== JSON.stringify(baseHeadings)) {
+    problems.push(`below the ${current} heading the CHANGELOG headings must be the base's exactly; ${heldHeadingsProblem(headHeadings.slice(1), baseHeadings).replace(/^the CHANGELOG headings differ from the base's /, '')}`);
+  }
   const left = fragmentFiles(workspace);
   if (left.length) problems.push(`version ${current} is set but ${left.join(', ')} is not folded into the CHANGELOG`);
   return problems;
 }
 
 module.exports = {
-  CHANGELOG_REL_PATH, FRAGMENT_DIR_REL_PATH, LEVELS, PROJECTS_SKILL_DIR_REL_PATH, PROJECTS_SKILL_REL_PATH,
-  foldFragments, fragmentFiles, fragmentProblems, git, nextSkillVersion, nextVersion, parseFragment,
-  skillVersionOf, topChangelogVersion, versionAt, versionProblems,
+  CHANGELOG_REL_PATH, FRAGMENT_DIR_REL_PATH, LEVELS, PROJECTS_SKILL_DIR_REL_PATH, PROJECTS_SKILL_REL_PATH, UNRELEASED_HEADING,
+  changelogAt, changelogHeadings, foldFragments, fragmentFiles, fragmentProblems, git, heldHeadingsProblem,
+  nextSkillVersion, nextVersion, parseFragment, skillVersionOf, takeUnreleased, topChangelogVersion, versionAt,
+  versionProblems,
 };

@@ -16,9 +16,9 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { SEMVER, VERSION_REL_PATH, readToolkitVersion } = require('./toolkit-version.cjs');
 const {
-  CHANGELOG_REL_PATH, FRAGMENT_DIR_REL_PATH, LEVELS, PROJECTS_SKILL_DIR_REL_PATH, PROJECTS_SKILL_REL_PATH,
-  foldFragments, fragmentFiles, fragmentProblems, git, nextSkillVersion, nextVersion, parseFragment,
-  skillVersionOf, topChangelogVersion, versionAt,
+  CHANGELOG_REL_PATH, FRAGMENT_DIR_REL_PATH, LEVELS, PROJECTS_SKILL_DIR_REL_PATH, PROJECTS_SKILL_REL_PATH, UNRELEASED_HEADING,
+  changelogAt, changelogHeadings, foldFragments, fragmentFiles, fragmentProblems, git, heldHeadingsProblem,
+  nextSkillVersion, nextVersion, parseFragment, skillVersionOf, takeUnreleased, topChangelogVersion, versionAt,
 } = require('./toolkit-version-at-merge.cjs');
 
 // Hosts read these literal versions, so they stay literal and the validator checks them against version.json.
@@ -92,19 +92,26 @@ function bumpNext({ level, base, workspace, today = new Date().toISOString().sli
   const baseVersion = versionAt(workspace, baseSha);
   if (!baseVersion) throw new Error(`${base} has no readable ${VERSION_REL_PATH}`);
   const current = readToolkitVersion(path.join(workspace, ...VERSION_REL_PATH.split('/')));
-  if (current !== baseVersion) {
-    throw new Error(`this branch sets ${current} but ${base} is at ${baseVersion}; keep ${base}'s version lines until merge time`);
-  }
   const changelogFile = path.join(workspace, ...CHANGELOG_REL_PATH.split('/'));
   const changelog = fs.readFileSync(changelogFile, 'utf8');
-  const top = topChangelogVersion(changelog);
-  if (top !== baseVersion) {
-    throw new Error(`the CHANGELOG starts at ${top || 'no version'} but ${base} is at ${baseVersion}; move this branch's notes into a fragment in ${FRAGMENT_DIR_REL_PATH}/`);
+  if (current !== baseVersion) {
+    if (LEVELS.some((next) => nextVersion(baseVersion, next) === current) && topChangelogVersion(changelog) === current) {
+      throw new Error(`this branch is already bumped to ${current}; if ${base} moved since, revert that bump commit, merge ${base} and run --next again`);
+    }
+    throw new Error(`this branch sets ${current} but ${base} is at ${baseVersion}; take ${base}'s version lines and run --next again`);
   }
+  const baseChangelog = changelogAt(workspace, baseSha);
+  if (baseChangelog === null) throw new Error(`${base} has no readable ${CHANGELOG_REL_PATH}`);
+  const headingProblem = heldHeadingsProblem(changelogHeadings(changelog), changelogHeadings(baseChangelog));
+  if (headingProblem) throw new Error(headingProblem);
+  const unreleased = takeUnreleased(changelog);
   const fragmentRels = fragmentFiles(workspace);
-  if (!fragmentRels.length) throw new Error(`no changelog fragment in ${FRAGMENT_DIR_REL_PATH}/; write this branch's notes there first`);
+  if (!fragmentRels.length && !unreleased.notes) {
+    throw new Error(`no changelog fragment in ${FRAGMENT_DIR_REL_PATH}/ and no "${UNRELEASED_HEADING}" notes; write this branch's notes in a fragment first`);
+  }
   const texts = fragmentRels.map((rel) => fs.readFileSync(path.join(workspace, ...rel.split('/')), 'utf8'));
   const problems = fragmentRels.flatMap((rel, index) => fragmentProblems(rel, texts[index]));
+  if (unreleased.notes) problems.push(...fragmentProblems(`the "${UNRELEASED_HEADING}" section`, unreleased.notes));
   if (problems.length) throw new Error(problems.join('; '));
 
   const version = nextVersion(baseVersion, level);
@@ -123,10 +130,11 @@ function bumpNext({ level, base, workspace, today = new Date().toISOString().sli
     fs.writeFileSync(skillFile, skillText.replace(/^Version: \d{4}-\d{2}-\d{2}\.\d+(\s*)$/m, `Version: ${skillVersion}$1`));
   }
 
-  fs.writeFileSync(changelogFile, foldFragments(changelog, version, texts.map(parseFragment)));
+  const notes = [...texts.map(parseFragment), ...(unreleased.notes ? [{ title: '', body: unreleased.notes }] : [])];
+  fs.writeFileSync(changelogFile, foldFragments(unreleased.text, version, notes));
   for (const rel of fragmentRels) fs.rmSync(path.join(workspace, ...rel.split('/')));
   const result = bumpVersion(version, workspace);
-  return { ...result, baseVersion, folded: fragmentRels, skillVersion };
+  return { ...result, baseVersion, folded: [...fragmentRels, ...(unreleased.notes ? [`the "${UNRELEASED_HEADING}" section`] : [])], skillVersion };
 }
 
 function main() {

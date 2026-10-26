@@ -693,11 +693,16 @@ function validatePluginVersions(errors) {
 
 // A branch keeps its base's version until merge time, then sets exactly the next one with its notes
 // folded (bump-version.cjs --next). CI passes the pull request base, or the previous main tip, as
-// DIFF_BASE; without one (a local run) only the changelog fragments are checked.
+// DIFF_BASE; without one (a local run) only the changelog fragments are checked. A DIFF_BASE that is
+// not a commit here fails, as the whitespace check does, so the version check is never skipped.
 function validateVersionAgainstBase(errors) {
   const base = String(process.env.DIFF_BASE || '').trim();
   const verified = base && spawnSync('git', ['rev-parse', '--verify', '--quiet', `${base}^{commit}`], { cwd: root, encoding: 'utf8', windowsHide: true });
-  const commit = verified && verified.status === 0 ? verified.stdout.trim() : '';
+  if (verified && verified.status !== 0) {
+    fail(errors, `DIFF_BASE ${base} is not a commit in this checkout, so the version check cannot run; fetch full history`);
+    return;
+  }
+  const commit = verified ? verified.stdout.trim() : '';
   for (const problem of versionAtMerge.versionProblems({ workspace: root, base: commit })) fail(errors, problem);
 }
 

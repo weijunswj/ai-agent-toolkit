@@ -213,10 +213,32 @@ test('--next refuses without writing when the lane is not ready', (t) => {
   lane.write(FRAGMENT, NOTES);
   lane.commit('good fragment');
 
-  lane.write(CHANGELOG_REL_PATH, lane.read(CHANGELOG_REL_PATH).replace(/\r\n/g, '\n').replace('# Toolkit Changelog\n\n', '# Toolkit Changelog\n\n## 9.9.9\n\n- Old style.\n\n'));
-  lane.commit('old-style heading');
-  refuse(/move this branch's notes into a fragment/, 'an old-style CHANGELOG heading');
-  lane.run('revert', '--no-edit', 'HEAD');
+  for (const [bad, pattern, message] of [
+    ['Title:\n\n### Lane\n\n- A change.\n', /empty Title: line/, 'an empty title'],
+    ['### Lane\n\nTitle: late\n\n- A change.\n', /Title: line that is not its first line/, 'a late title'],
+    ['Some words first.\n\n### Lane\n\n- A change.\n', /text before its first "###"/, 'stray text before the first section'],
+    ['- A change with no section.\n', /no "###" section heading/, 'no section heading'],
+  ]) {
+    lane.write(FRAGMENT, bad);
+    lane.commit(message);
+    refuse(pattern, message);
+  }
+  lane.write(FRAGMENT, NOTES);
+  lane.commit('good fragment again');
+
+  const changelog = () => lane.read(CHANGELOG_REL_PATH).replace(/\r\n/g, '\n');
+  const top = changelog().match(/^## .*$/m)[0];
+  for (const [edit, pattern, message] of [
+    [(text) => text.replace('# Toolkit Changelog\n\n', '# Toolkit Changelog\n\n## 9.9.9\n\n- Old style.\n\n'), /it adds "## 9\.9\.9"/, 'an old-style heading on top'],
+    [(text) => text.replace('# Toolkit Changelog\n\n', `# Toolkit Changelog\n\n${top}\n\n- Reused number.\n\n`), /headings differ from the base's/, "a heading that reuses main's number"],
+    [(text) => text.replace(/(^## [^\n]*\n[\s\S]*?)\n## /m, '$1\n## 9.9.9\n\n- Below the top.\n\n## '), /it adds "## 9\.9\.9"/, "a heading below main's top one"],
+    [(text) => text.replace('# Toolkit Changelog\n\n', '# Toolkit Changelog\n\n## Unreleased\n\n- Notes.\n\n## Unreleased\n\n- More.\n\n'), /headings differ from the base's/, 'two Unreleased sections'],
+  ]) {
+    lane.write(CHANGELOG_REL_PATH, edit(changelog()));
+    lane.commit(message);
+    refuse(pattern, message);
+    lane.run('revert', '--no-edit', 'HEAD');
+  }
 
   const setOwn = lane.bump('9.9.9');
   assert.equal(setOwn.status, 0, setOwn.stderr);
@@ -224,13 +246,45 @@ test('--next refuses without writing when the lane is not ready', (t) => {
   refuse(/this branch sets 9\.9\.9/, 'a lane that set its own version', '9.9.9');
   lane.run('reset', '-q', '--hard', 'HEAD~1');
 
+  const bumped = lane.bump('--next', 'patch', '--base', 'base');
+  assert.equal(bumped.status, 0, bumped.stderr);
+  lane.commit('bump');
+  refuse(/already bumped to .*revert that bump commit, merge base and run --next again/, 'a second --next', nextVersion(TOOLKIT_VERSION, 'patch'));
+  lane.run('reset', '-q', '--hard', 'HEAD~1');
+
   lane.run('checkout', '-q', 'main');
-  lane.write('repo/docs/changelog.d/README.md', `${lane.read('repo/docs/changelog.d/README.md')}\nMore.\n`);
+  const next = nextVersion(TOOLKIT_VERSION, 'patch');
+  lane.write(CHANGELOG_REL_PATH, `${lane.read(CHANGELOG_REL_PATH).replace(/\r\n/g, '\n').trimEnd()}\n\n## ${next}\n\n- An old entry that took the number.\n`);
   lane.commit('main moved');
   lane.run('checkout', '-q', 'lane');
   const behind = lane.bump('--next', 'patch', '--base', 'main');
   assert.equal(behind.status, 1);
   assert.match(behind.stderr, /does not contain main yet; merge it in first/);
+  lane.run('merge', '-q', '--no-edit', 'main');
+  const taken = lane.bump('--next', 'patch', '--base', 'main');
+  assert.equal(taken.status, 1);
+  assert.ok(taken.stderr.includes(`the CHANGELOG already has a ${next} heading`), taken.stderr);
+});
+
+test('--next folds an older "## Unreleased" section with the fragments', (t) => {
+  const lane = gitCopy(t);
+  lane.write(CHANGELOG_REL_PATH, lane.read(CHANGELOG_REL_PATH).replace(/\r\n/g, '\n').replace('# Toolkit Changelog\n\n', '# Toolkit Changelog\n\n## Unreleased\n\n### Older lane\n\n- **Old way:** a note.\n\n'));
+  lane.commit('unreleased notes');
+  assert.deepEqual(versionProblems({ workspace: lane.copy, base: 'base' }), [], 'one Unreleased section on top is allowed while open');
+  const alone = lane.bump('--next', 'minor', '--base', 'base');
+  assert.equal(alone.status, 0, alone.stderr || alone.stdout);
+  assert.ok(lane.read(CHANGELOG_REL_PATH).includes(`## ${nextVersion(TOOLKIT_VERSION, 'minor')}\n\n### Older lane`), 'an Unreleased section alone is enough notes');
+  lane.run('checkout', '-q', '--', '.');
+  lane.write(FRAGMENT, NOTES);
+  lane.commit('and a fragment');
+  const result = lane.bump('--next', 'patch', '--base', 'base');
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const next = nextVersion(TOOLKIT_VERSION, 'patch');
+  const folded = lane.read(CHANGELOG_REL_PATH);
+  assert.ok(folded.includes(`## ${next} (lane work)\n\n### Lane\n\n- **A change:** what it does.\n\n### Older lane\n\n- **Old way:** a note.\n\n## ${TOOLKIT_VERSION}`), folded.slice(0, 600));
+  assert.equal(folded.includes('## Unreleased'), false);
+  lane.commit('bump');
+  assert.deepEqual(versionProblems({ workspace: lane.copy, base: 'base' }), []);
 });
 
 test('the CI guard fails stale, skipped and half-done versions', (t) => {
@@ -254,4 +308,38 @@ test('the CI guard fails stale, skipped and half-done versions', (t) => {
   lane.write(SKILL, lane.read(SKILL).replace(/^Version: .*$/m, 'Version: 2000-01-01.1'));
   assert.match(check(), /Projects skill Version 2000-01-01\.1 is older than the base's/);
   assert.equal(versionProblems({ workspace: lane.copy, base: '' }).length, 0, 'without a base only fragments are checked');
+  assert.match(versionProblems({ workspace: lane.copy, base: 'no-such-commit' }).join('\n'), /cannot be checked; fetch full history/);
+  lane.run('checkout', '-q', '--', '.');
+
+  const text = lane.read(CHANGELOG_REL_PATH).replace(/\r\n/g, '\n');
+  lane.write(CHANGELOG_REL_PATH, text.replace('# Toolkit Changelog\n\n', '# Toolkit Changelog\n\n## 9.9.9\n\n- Old style.\n\n'));
+  assert.match(check(), /it adds "## 9\.9\.9"/, 'an open branch with its own numbered heading');
+  lane.run('checkout', '-q', '--', '.');
+
+  const bumped = lane.bump('--next', 'patch', '--base', 'base');
+  assert.equal(bumped.status, 0, bumped.stderr);
+  assert.equal(check(), '');
+  const folded = lane.read(CHANGELOG_REL_PATH).replace(/\r\n/g, '\n');
+  lane.write(CHANGELOG_REL_PATH, folded.replace(/(^## [^\n]*\n[\s\S]*?)\n## /m, '$1\n## Unreleased\n\n- Left behind.\n\n## '));
+  assert.match(check(), /below the .* heading the CHANGELOG headings must be the base's exactly/, 'a stale section left under the new heading');
+});
+
+test('the validator runs the CI guard against DIFF_BASE and fails closed', (t) => {
+  const lane = gitCopy(t);
+  lane.write(FRAGMENT, NOTES);
+  lane.commit('lane work');
+  const validate = (base) => spawnSync(process.execPath, [path.join(lane.copy, 'repo', 'scripts', 'validate-toolkit.cjs')], {
+    cwd: lane.copy, encoding: 'utf8', env: { ...process.env, DIFF_BASE: base },
+  });
+  const held = validate('base');
+  assert.equal(held.status, 0, held.stderr || held.stdout);
+  const skipped = nextVersion(nextVersion(TOOLKIT_VERSION, 'patch'), 'patch');
+  assert.equal(lane.bump(skipped).status, 0);
+  const stale = validate('base');
+  assert.equal(stale.status, 1);
+  assert.ok(`${stale.stdout}${stale.stderr}`.includes(`version ${skipped} is not the next version`), stale.stderr);
+  lane.run('checkout', '-q', '--', '.');
+  const unknown = validate('no-such-commit');
+  assert.equal(unknown.status, 1);
+  assert.match(`${unknown.stdout}${unknown.stderr}`, /DIFF_BASE no-such-commit is not a commit in this checkout/);
 });
