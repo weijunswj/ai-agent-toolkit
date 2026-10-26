@@ -1,6 +1,6 @@
 # Toolkit Changelog
 
-## Unreleased
+## 3.15.15 (agent cost control)
 
 ### Agent cost control
 
@@ -8,6 +8,12 @@
 - **Global rules:** the Delegation paragraph now says to run each non-gate automation, thread and helper cheapest first at medium effort or above, pointing to the skill for the detail. Gate sessions and the helpers a G0 or G1 lead launches keep their pinned routes. A few nearby sentences are reworded more tightly, and the skipping-delegation sentence drops its "no note is needed" clause, which contradicted the gate contract's exception record for substantial gate work done without delegation; this keeps the global block inside its size budget.
 - **Claude Projects skill (2026-10-26.7):** non-gate threads no longer start on High; they start on the cheapest fitting step, and the brief names the step and any reason. One job per thread, with automatic rotation of long-lived workers. A chat reply thread under a coordinator post now closes after 6 quiet hours (`QUIET-6H`); work threads still close only once their output is saved and relayed, and home threads never. The scheduled-task reference drops "start one notch higher" for the ladder, and the `SCHEDULED TASKS:` memory line takes an optional `raised <tier>/<effort> <date>: <reason>` field that swaps keep.
 - **Task prompts:** `toolkit-projects-tasks.cjs` takes a `model` tier (default small for the hourly nudge and custom tasks, mid for the daily check-in) and an optional `raise_reason`, required above the default tier or above medium effort; `low` effort is refused. RUN SETUP states the tier and effort, and each run flags a `TIER GAP` when it was served something else. The daily check-in reports `model` and `effort` gaps, and the hourly nudge lists `QUIET-6H` resolve candidates and threads due for rotation under **Rotate:**. Prompts rendered before this release still check and refresh: they take their kind's default tier, `low` effort rises to medium, and effort above medium is kept with a reason asking the coordinator to confirm or lower it. A model or effort gap on a fresh-session task is listed as advice only, and a gap the last swap left is reported once, so neither causes a daily swap. Rotation applies to non-gate work only; gate sessions keep the gate rules. Every swap and rebuild first makes the saved params match the task's entry (a recorded raise, or the template's tier at medium effort once a raise is removed), so the prompt sets the right effort itself. A raise reason, in params and in memory alike, is 3 to 200 printable ASCII characters on one line and cannot read as the owner's stop or schedule mark in any case or spacing.
+
+## 3.15.14 (no paid GitHub features)
+
+### GitHub governance
+
+- **No paid GitHub features:** Toolkit never asks about, turns on or reports as drift a GitHub feature that needs billing. Governance setup no longer asks about GitHub Secret Protection or Code Security, `toolkit governance security` and `migrate` never write them, and the check no longer wants a paid-features answer in a private repository's binding. On a private or internal repository secret scanning, push protection and CodeQL show as not applicable (private repository); on a public repository they still turn on by default, as do Dependabot alerts and security updates everywhere. A binding's `paid_security` key is deprecated and ignored: older bindings that carry off or on stay valid and nothing changes, and any other value makes the binding invalid.
 
 ## 3.15.13 (post layout)
 

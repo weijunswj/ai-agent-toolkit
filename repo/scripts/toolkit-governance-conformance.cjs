@@ -216,7 +216,6 @@ const SECURITY_FINDINGS = Object.freeze({
   S4: ['SECURITY_SECRET_SCANNING', 'Secret scanning and push protection must be on'],
   S5: ['SECURITY_CODE_SCANNING', 'CodeQL code scanning must be set up'],
   S6: ['SECURITY_PRIVATE_REPORTING', 'Private vulnerability reporting must be on'],
-  S8: ['SECURITY_PAID_DECISION', 'A private repository\'s binding must record the owner\'s answer on GitHub\'s paid security features'],
   S7: ['SECURITY_AUTO_MERGE', 'Dependabot auto-merge needs the workflow, the repository setting and a protected default branch'],
 });
 
@@ -230,7 +229,6 @@ function securityFindings(result) {
     if (check.status === 'drift') {
       const fix = id === 'S3' && result.files && !result.files.dependabot ? ' Add the missing entries to the existing file through a pull request.'
         : id === 'S7' ? ' `toolkit governance security` fixes the settings and the workflow; a binding change goes through a pull request.'
-          : id === 'S8' ? ' Ask the owner (default off) and add the answer to the binding through a pull request.'
             : ' On by default under governance: `toolkit governance security` turns on what the GitHub plan allows.';
       out.push(finding(code, 'drift', `${rule}: ${check.details.join('; ')}.${fix}`));
     } else if (check.status === 'not-on-plan') {
