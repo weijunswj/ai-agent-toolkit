@@ -336,7 +336,7 @@ test('P-17: the reader is default-deny: YAML outside its plain subset is unverif
   const negated = ['on:', '  pull_request:', '    branches: ["**", "!main"]', 'jobs:', '  validate:', '    runs-on: ubuntu-latest', ''].join('\n');
   assert.equal(verdicts(negated).P4.status, 'unverified');
   // A space other than ASCII space before "#" is not a comment in YAML, so bash runs what follows.
-  for (const space of [' ', '　', '﻿', ' ', ' ', '​', '\v']) {
+  for (const space of ['\u00a0', '\u3000', '\ufeff', '\u2003', '\u202f', '\u200b', '\v']) {
     const forms = {
       plain: aggregate().replace('--verify-ci s', `--verify-ci s${space}#|| true`),
       literal: aggregate().replace('        run: node repo/scripts/run-tests.cjs --verify-ci s', `        run: |\n          node repo/scripts/run-tests.cjs --verify-ci s${space}#|| true`),
@@ -402,7 +402,7 @@ test('P-17: the reader is default-deny: YAML outside its plain subset is unverif
   assert.equal(verdicts(aggregate().replace('        run: node repo/scripts/run-tests.cjs --verify-ci s', '        run: |\n\n          node repo/scripts/run-tests.cjs --verify-ci s')).P4.status, 'ok', 'an empty line opening a block');
   // A byte order mark is removed before both checking and reading: a sole workflow reads in full,
   // and a second workflow that also produces the check is seen (two producers: drift).
-  const bom = '﻿';
+  const bom = '\ufeff';
   assert.equal(verdicts(`${bom}${aggregate()}`).P4.status, 'ok', 'BOM, sole workflow');
   const two = (first, second) => protection.producerVerdict(['validate'], [{ file: 'a.yml', workflow: protection.readWorkflow(first) }, { file: 'b.yml', workflow: protection.readWorkflow(second) }], 'main');
   const plain = ['on: [pull_request]', 'jobs:', '  validate:', '    runs-on: ubuntu-latest', ''].join('\n');
@@ -459,22 +459,38 @@ test('P-17: the reader is default-deny: YAML outside its plain subset is unverif
   }
 });
 
-test('P-18: the shared hostile inputs are unverified, except the shapes the reader reads as GitHub does', () => {
+test('P-18: the shared hostile inputs are unverified, except the shapes the reader decodes exactly as YAML does', () => {
   const verdicts = text => protection.producerVerdict(['validate'], [{ file: 'ci.yml', workflow: protection.readWorkflow(text) }], 'main');
   const accepts = text => verdicts(text).P4.status === 'ok';
   assert.equal(accepts(AGGREGATE), true, 'the base workflow is conformant');
   // A case goes into the aggregate step's mapping, or at the start or the end of the document.
   const place = shape => shape.place === 'start' ? `${shape.text}${AGGREGATE}` : shape.place === 'end' ? `${AGGREGATE}${shape.text}` : AGGREGATE.replace('        env:\n', `${hostile.indent(shape.text, 8)}\n        env:\n`);
   hostile.expectDefaultDeny(assert, (text, shape) => accepts(place(shape)), hostile.cases(['line-breaks', 'continued-lines', 'quoting', 'yaml-structure', 'indents', 'invisible'], ['yaml']), {
-    // Read the same way GitHub reads them: a CRLF line end, a quoted key that is not a hidden
-    // condition, a doubled single quote, a consistent odd indent and one leading byte order mark.
-    allow: ['crlf-line-end', 'quoted-on-key', 'doubled-single-quote', 'odd-indent', 'bom-at-start'],
+    // Decoded exactly as YAML decodes them: a CRLF line end, a quoted key with no escapes, a
+    // consistent odd indent and one leading byte order mark.
+    allow: ['crlf-line-end', 'quoted-on-key', 'odd-indent', 'bom-at-start'],
   });
   // The base workflow with every line-break shape, a byte order mark and tab indents.
   const forms = Object.fromEntries(hostile.variants(AGGREGATE).map(item => [item.id, accepts(item.text)]));
   assert.deepEqual(forms, { crlf: true, cr: false, nel: false, ls: false, ps: false, bom: true, tabs: false });
+  // A doubled single quote is outside the subset: the reader would read 'x''y' as x''y, while
+  // GitHub reads x'y, so a second job of the same name could hide behind it.
+  const Q = "'";
+  const twoJobs = ['on: [pull_request]', 'jobs:', '  a:', `    name: "x${Q}y"`, '    runs-on: x', '  b:', `    name: ${Q}x${Q}${Q}y${Q}`, `    if: github.event_name == ${Q}push${Q}`, '    runs-on: x', ''].join('\n');
+  const twoJobsVerdict = protection.producerVerdict([`x${Q}y`], [{ file: 'ci.yml', workflow: protection.readWorkflow(twoJobs) }], 'main');
+  assert.equal(twoJobsVerdict.P3.status, 'unverified', 'two jobs named x\'y');
+  assert.match(protection.readWorkflow(`on: [pull_request]\njobs:\n  a:\n    name: ${Q}x${Q}${Q}y${Q}\n`).problems[0], /doubles a quote/);
+  for (const text of [`on: [${Q}pull_request${Q}${Q}${Q}]\n`, `on:\n  - ${Q}it${Q}${Q}s${Q}\n`]) assert.notDeepEqual(protection.readWorkflow(text).problems, [], text);
+  // A plain single-quoted name still reads.
+  const single = ['on: [pull_request]', 'jobs:', '  a:', `    name: ${Q}x y${Q}`, '    runs-on: x', ''].join('\n');
+  const singleVerdict = protection.producerVerdict(['x y'], [{ file: 'ci.yml', workflow: protection.readWorkflow(single) }], 'main');
+  assert.deepEqual([singleVerdict.P3.status, singleVerdict.P4.status], ['ok', 'ok']);
+  // Large inputs: the case goes into a step, every built input is inside the subset, and the
+  // reader's time grows linearly.
+  const inStep = text => `on: [pull_request]\njobs:\n  validate:\n    runs-on: x\n    steps:\n      - id: t\n${hostile.indent(text.replace(/\n$/, ''), 8)}\n`;
   for (const shape of hostile.cases(['large-input'])) {
-    const result = hostile.timing(text => protection.readWorkflow(`on: [pull_request]\njobs:\n  validate:\n    runs-on: x\n    steps:\n      - ${text}`), shape.build, { maxSize: 1 << 19 });
+    assert.deepEqual(protection.readWorkflow(inStep(shape.build(4096))).problems, [], shape.id);
+    const result = hostile.timing(text => protection.readWorkflow(inStep(text)), shape.build, { maxSize: 1 << 19 });
     assert.ok(result.ok, `${shape.id}: ${result.message}`);
   }
 });

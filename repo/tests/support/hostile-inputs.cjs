@@ -174,15 +174,19 @@ const largeInput = [
   ['long-line', size => `name: ${'a'.repeat(size)}\n`],
   ['space-run', size => `name: a${' '.repeat(size)}b\n`],
   ['space-run-before-comment', size => `name: a${' '.repeat(size)}#${' '.repeat(size)}\n`],
-  ['many-short-lines', size => 'a: b\n'.repeat(Math.max(1, Math.floor(size / 5)))],
+  ['many-short-lines', size => Array.from({ length: Math.max(1, Math.floor(size / 11)) }, (_, index) => `k${String(index).padStart(6, '0')}: b\n`).join('')],
 ].map(([id, build]) => yaml('large-input', id, build(64), { build }));
 
 const shapes = Object.freeze([...lineBreaks, ...continuedLines, ...quoting, ...structure, ...indents, ...invisible, ...freeText, ...largeInput]);
 
-// The cases of the given families (and, optionally, syntaxes).
+const SYNTAXES = Object.freeze(['yaml', 'shell', 'text']);
+
+// The cases of the given families (and, optionally, syntaxes). An unknown name throws, so a typo
+// never yields an empty list that every reader passes.
 function cases(families, syntaxes = null) {
   const wanted = new Set(families);
   for (const family of wanted) if (!FAMILIES.includes(family)) throw new Error(`unknown family ${family}`);
+  for (const syntax of syntaxes || []) if (!SYNTAXES.includes(syntax)) throw new Error(`unknown syntax ${syntax}`);
   return shapes.filter(shape => wanted.has(shape.family) && (!syntaxes || syntaxes.includes(shape.syntax)));
 }
 
@@ -210,7 +214,7 @@ function indent(text, spaces) {
 // by more than maxRatio (linear work grows about fourfold, quadratic about sixteenfold).
 // The larger size stops repeating once a run is within the limit, so a linear reader is timed
 // once there. Returns { ok, ratio, size, times, message }.
-function timing(fn, build, { startSize = 1024, maxSize = 1 << 20, minMs = 8, maxRatio = 10, runs = 3 } = {}) {
+function timing(fn, build, { startSize = 1024, maxSize = 1 << 20, minMs = 20, maxRatio = 10, runs = 3 } = {}) {
   const time = (size, count, enough = -1) => {
     const input = build(size);
     let best = Infinity;
@@ -235,8 +239,10 @@ function timing(fn, build, { startSize = 1024, maxSize = 1 << 20, minMs = 8, max
 }
 
 // Asserts that `accepts(text, shape)` is false for every case except the ids in `allow`, and that
-// every allowed id is a real case the reader does accept, so the exception list stays honest.
+// every allowed id is a real case the reader does accept, so the exception list stays honest. An
+// empty list fails: it would prove nothing.
 function expectDefaultDeny(assert, accepts, list, { allow = [] } = {}) {
+  assert.ok(Array.isArray(list) && list.length > 0, 'no hostile inputs to check');
   const ids = new Set(list.map(shape => shape.id));
   const unknown = allow.filter(id => !ids.has(id));
   assert.deepEqual(unknown, [], 'allowed exceptions that are not cases in this run');
@@ -247,6 +253,7 @@ function expectDefaultDeny(assert, accepts, list, { allow = [] } = {}) {
 
 module.exports = Object.freeze({
   FAMILIES,
+  SYNTAXES,
   BREAKS,
   shapes,
   cases,

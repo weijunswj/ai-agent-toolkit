@@ -12,6 +12,49 @@ const test = require('node:test');
 
 const hostile = require('./support/hostile-inputs.cjs');
 
+// Every case that holds a code point other than printable ASCII and LF, with those code points,
+// written out by hand from the case names so the check does not rest on the set's own counting.
+const EXPECTED_POINTS = Object.freeze({
+  'cr-splits-a-line': [0x0d],
+  'nel-splits-a-line': [0x85],
+  'ls-splits-a-line': [0x2028],
+  'ps-splits-a-line': [0x2029],
+  'cr-ends-a-comment': [0x0d],
+  'nel-ends-a-comment': [0x85],
+  'ls-ends-a-comment': [0x2028],
+  'ps-ends-a-comment': [0x2029],
+  'cr-after-value-comment': [0x0d],
+  'crlf-line-end': [0x0d],
+  'crlf-then-lone-cr': [0x0d],
+  'shell-backslash-crlf': [0x0d],
+  'yaml-escaped-crlf': [0x0d],
+  'yaml-escaped-cr': [0x0d],
+  'yaml-escaped-nel': [0x85],
+  'yaml-escaped-ls': [0x2028],
+  'yaml-escaped-ps': [0x2029],
+  'tab-indent': [0x09],
+  'tab-after-colon': [0x09],
+  'nbsp-before-comment': [0xa0],
+  'em-space-before-comment': [0x2003],
+  'nbsp-after-colon': [0xa0],
+  'ideographic-space-after-colon': [0x3000],
+  'nbsp-between-words': [0xa0],
+  'bom-at-start': [0xfeff],
+  'two-boms-at-start': [0xfeff],
+  'bom-before-tag-directive': [0xfeff],
+  'zero-width-space-in-key': [0x200b],
+  'bom-inside-word': [0xfeff],
+  'cyrillic-look-alike': [0x0441],
+  'non-breaking-hyphen': [0x2011],
+  // UTF-16 and UTF-32 read as UTF-8: the byte order mark decodes as replacement characters and
+  // every ASCII character carries NUL bytes.
+  'utf16-file': [0x00, 0xfffd],
+  'utf32-file': [0x00, 0xfffd],
+  'bad-utf8-bytes': [0xfffd],
+  'guillemet-quote': [0xab, 0xbb],
+  'fullwidth-quote-marker': [0xff1e],
+});
+
 test('H-01: every family has cases, ids are unique, and each case holds exactly the code points it names', () => {
   for (const family of hostile.FAMILIES) assert.ok(hostile.cases([family]).length > 0, family);
   const ids = hostile.shapes.map(shape => shape.id);
@@ -20,7 +63,8 @@ test('H-01: every family has cases, ids are unique, and each case holds exactly 
     assert.ok(hostile.FAMILIES.includes(shape.family), shape.id);
     assert.ok(['yaml', 'shell', 'text'].includes(shape.syntax), shape.id);
     assert.ok(['line', 'start', 'end'].includes(shape.place), shape.id);
-    assert.deepEqual(hostile.pointsOf(shape.text), [...shape.points], shape.id);
+    assert.deepEqual(hostile.pointsOf(shape.text), EXPECTED_POINTS[shape.id] || [], shape.id);
+    assert.deepEqual([...shape.points], EXPECTED_POINTS[shape.id] || [], shape.id);
     assert.ok(Object.isFrozen(shape), shape.id);
     if (shape.bytes) assert.equal(shape.bytes.toString('utf8'), shape.text, shape.id);
   }
@@ -43,7 +87,9 @@ test('H-01: every family has cases, ids are unique, and each case holds exactly 
   has('bad-utf8-bytes', [0xfffd]);
   has('merge-key', []);
   assert.ok(hostile.shapes.find(shape => shape.id === 'utf16-file').points.includes(0x00));
+  for (const id of Object.keys(EXPECTED_POINTS)) assert.ok(ids.includes(id), `${id} is a case`);
   assert.throws(() => hostile.cases(['no-such-family']), /unknown family/);
+  assert.throws(() => hostile.cases(['line-breaks'], ['YAML']), /unknown syntax/);
 });
 
 test('H-02: the source holds only printable ASCII and line ends (LF, or CRLF in a Windows checkout)', () => {
@@ -71,7 +117,12 @@ test('H-04: timing fails on quadratic work and passes on linear work', () => {
   assert.equal(slow.ok, false, slow.message);
   const fast = hostile.timing(linear, build, { maxSize: 1 << 22 });
   assert.equal(fast.ok, true, fast.message);
-  for (const shape of hostile.cases(['large-input'])) assert.ok(shape.build(1000).length >= 1000, shape.id);
+  for (const shape of hostile.cases(['large-input'])) {
+    const text = shape.build(1000);
+    assert.ok(text.length >= 900, shape.id);
+    const keys = text.split('\n').filter(Boolean).map(line => line.split(':')[0]);
+    assert.equal(new Set(keys).size, keys.length, `${shape.id} repeats no key`);
+  }
   assert.ok(Date.now() - started < 2000, `timing self-test took ${Date.now() - started} ms`);
 });
 
@@ -82,4 +133,5 @@ test('H-05: expectDefaultDeny reports accepted cases and stale or unknown except
   assert.throws(() => hostile.expectDefaultDeny(assert, acceptsCrlf, list), /accepted/);
   assert.throws(() => hostile.expectDefaultDeny(assert, () => false, list, { allow: ['crlf-line-end'] }), /now refuses/);
   assert.throws(() => hostile.expectDefaultDeny(assert, () => false, list, { allow: ['no-such-case'] }), /not cases/);
+  assert.throws(() => hostile.expectDefaultDeny(assert, () => true, []), /no hostile inputs/);
 });

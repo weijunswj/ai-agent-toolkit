@@ -1,15 +1,14 @@
 # Toolkit Changelog
 
-<<<<<<< HEAD
 ## Unreleased
 
 ### Input readers
 
-- **Gate rules name the reader design:** a safety decision read from YAML, shell or free text now uses a default-deny reader over a subset its G0 states, and G1 runs the shared hostile-input set before G2, whose brief names it. Three gate-rules sentences that repeated the global rules or the G0 bullet were removed to make room; their meaning is unchanged.
+- **Gate rules name the reader design:** a safety decision read from YAML, shell or free text now uses a default-deny reader over a subset its G0 states, and G1 runs the shared hostile-input set before G2, whose brief names it. To make room, four gate-rules sentences that are said elsewhere were removed: the G0 and G2 skip rules (in the G0 Discovery bullet and the global rules), "tests and CI run on every edit" (the global rules) and "two failed fixes of the same thing: stop and rethink" (the global rules now carry the stop after two failed fixes).
 - **Shared hostile-input set:** `repo/tests/support/hostile-inputs.cjs` holds the input shapes past reviews found readers getting wrong (line breaks, continued lines, quoting and escapes, YAML structure, indents and spaces, invisible and look-alike characters, free-text lists and labels, large inputs), each built from code points so the source holds no raw invisible characters. It adds `variants` (every line-break and byte-order-mark form of an input), `timing` (a growth-ratio check for quadratic work) and `expectDefaultDeny` (every case refused unless a test names it as an allowed exception). It holds data and assertions only and never decides whether an input is safe.
-- **First adopter:** the default-branch protection check's tests run the YAML, line-break, indent and invisible families and the large-input check; every case comes back unverified except a CRLF line end, a quoted `on` key, a doubled single quote, a consistent odd indent and one leading byte order mark, which it reads as GitHub does.
+- **First adopter:** the default-branch protection check's tests run the YAML, line-break, indent and invisible families and the large-input check. Every case comes back unverified except four the reader decodes exactly as YAML does: a CRLF line end, a quoted `on` key with no escapes, a consistent odd indent and one leading byte order mark.
+- **Protection check fix:** the workflow reader no longer accepts a doubled single quote (`'it''s'`) in a value, a list item or a flow list. It read `'x''y'` as `x''y` while GitHub reads `x'y`, so two jobs named `"x'y"` and `'x''y'` (one skipped on pull requests) passed the one-producer check. A workflow that doubles a quote is now outside the subset, so unverified.
 
-=======
 ## 3.15.5
 
 ### Plain-text check
@@ -21,7 +20,6 @@
 - **Toolkit runs the same check:** `repo/scripts/check-plain-references.cjs` now runs the portable check with Toolkit's settings in `repo/contracts/plain-references/config.json`, which bans Toolkit's own release, lane, record and test-row codes across skills, docs, contracts and the readable fields of JSON and YAML files.
 - **Whole-repository sweep:** the remaining issue references and codes in docs, skills, contracts, setup questions, helper titles and plugin blurbs were rewritten in plain words, so the baseline is empty. The delivery contract is now `repo/docs/TOOLKIT-DELIVERY.md`. The setup topology choice reads "Toolkit repos: main session + Toolkit planning and build helpers only. Elsewhere: one layer of subagents."
 - **Chat replies count:** the global plain-language rule now names chat replies among the human-facing work it covers.
->>>>>>> origin/main
 
 ## 3.15.4 (final-product UAT)
 

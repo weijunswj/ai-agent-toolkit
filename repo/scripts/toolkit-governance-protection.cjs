@@ -251,7 +251,7 @@ function aggregateProblem(job, workflowContext) {
 //     key in a mapping;
 //   - a value is a plain scalar that starts with no YAML indicator (no tag, anchor, alias, flow
 //     mapping, explicit key or reserved character) and holds no `: `, a quoted scalar closed on
-//     the same line, a one-line flow list of such scalars, or, only for `run`, `if`, `shell` and
+//     the same line with no escape or doubled quote (so it reads as its plain text), a one-line flow list of such scalars, or, only for `run`, `if`, `shell` and
 //     `continue-on-error`, a block scalar header (`|`, `>`, optionally `-` or `+`);
 //   - every key sits at the indent of the mapping it belongs to, and every list item at the
 //     indent of its list;
@@ -260,7 +260,7 @@ function aggregateProblem(job, workflowContext) {
 // A key line: a plain or simply quoted key, spaces, a colon, then nothing or spaces and the value.
 // Each part's characters exclude the next part's, so matching stays linear in the line length.
 const KEY_LINE = /^(?:([A-Za-z0-9_][A-Za-z0-9_.-]*)|"([A-Za-z0-9_.-][A-Za-z0-9_ .-]*)"|'([A-Za-z0-9_.-][A-Za-z0-9_ .-]*)') *:(?: +(.*))?$/;
-const FLOW_ITEM = /^(?!(?:~|null|Null|NULL|-)$)(?:(?:[A-Za-z0-9_./$+=~]|-(?! ))[^,\[\]{}"'#:]*|"[^"\\]*"|'(?:[^']|'')*')$/;
+const FLOW_ITEM = /^(?!(?:~|null|Null|NULL|-)$)(?:(?:[A-Za-z0-9_./$+=~]|-(?! ))[^,\[\]{}"'#:]*|"[^"\\]*"|'[^']*')$/;
 // The YAML spellings of null: a field written this way is empty, not a value.
 const YAML_NULL = /^(?:~|null|Null|NULL)$/;
 const BLOCK_KEYS = Object.freeze(['run', 'if', 'shell', 'continue-on-error']);
@@ -268,7 +268,7 @@ const BLOCK_KEYS = Object.freeze(['run', 'if', 'shell', 'continue-on-error']);
 function plainValueProblem(value) {
   if (/^[|>][+-]?$/.test(value)) return null;
   if (value.startsWith('"')) return /^"[^"\\]*"$/.test(value) ? null : 'a double-quoted value that does not close on its line or uses escapes';
-  if (value.startsWith("'")) return /^'(?:[^']|'')*'$/.test(value) ? null : 'a single-quoted value that does not close on its line';
+  if (value.startsWith("'")) return /^'[^']*'$/.test(value) ? null : 'a single-quoted value that does not close on its line or doubles a quote';
   if (value.startsWith('[')) {
     if (!value.endsWith(']')) return 'a flow list that does not close on its line';
     const inner = value.slice(1, -1).trim();
