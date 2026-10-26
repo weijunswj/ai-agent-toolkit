@@ -237,5 +237,5 @@ function runHook(input, deps = {}) {
 
 module.exports = Object.freeze({
   BINDING_SCHEMA, HOOK_DEADLINE_MS, sessionHash, sessionsDir, bindingFile, errorsFile, readLocalBinding, writeLocalBinding,
-  readErrors, recordError, collectFacts, parseReturnBlock, newJournal, nextJournal, runCheckpoint, runHook,
+  readErrors, recordError, collectFacts, parseReturnBlock, newJournal, nextJournal, runCheckpoint, runHook, githubGovernanceOn,
 });
