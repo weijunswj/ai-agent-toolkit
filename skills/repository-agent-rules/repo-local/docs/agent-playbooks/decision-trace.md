@@ -8,16 +8,17 @@ Decisions pile up in issue comments, and old ones get replaced without anyone sa
 
 ## Writing a decision comment
 
-- Start the comment with its tag on the first line, then a line with only `---`, then the comment:
+- Start the comment with its topic on the first line, then a line with only `---`, then the comment:
 
   ```text
-  DATA-LEAK-FIX
+  Codex host support
   ---
-  The export drops the email column.
+  The installer now writes the helper agents itself.
   ```
 
-- A tag is letters, digits, dots, underscores or hyphens, compared in upper case. Reuse the tag already used for the same question on that issue, so the new comment replaces the old one.
-- Within one tag the latest comment wins. To replace a record under another tag, add `SUPERSEDES=<record ID>`.
+- The topic is the task's name exactly as the Programme Graph shows it. A comment about the whole programme, such as a rule for every repository, gets a short subject instead, for example `Plain-text check`. Never use a category such as `RELEASE` or `BACKLOG`: comments about different things would then land on one line and seem to replace each other.
+- A topic is up to 80 letters, digits, spaces and simple punctuation, compared in upper case. Reuse the exact topic already on that issue, so the new comment joins its line. On a task page, a comment without a topic already falls under the task's name.
+- Within one topic the latest comment wins where comments disagree. To replace a record, add `SUPERSEDES=<record ID>`; the trace marks the old one "replaced by".
 - A comment without a tag goes under "Other comments". It still counts, but nothing infers what it replaces.
 - Post on the issue the decision belongs to: programme-wide on the parent, task-level on the child. The parent's and a child's traces never mix.
 
@@ -44,5 +45,5 @@ Then run the decision history once for the whole programme, `--programme` instea
 ## Never
 
 - Treat an inferred replacement or a backfill result as the spec before the owner confirms it.
-- Edit or delete someone else's comment to change the trace. Post a new tagged comment instead.
+- Edit or delete someone else's comment to change the trace. Post a new tagged comment instead. Changing only the topic line of your own comment is fine.
 - Combine two tags into one list, or mix the parent's trace with a child's.

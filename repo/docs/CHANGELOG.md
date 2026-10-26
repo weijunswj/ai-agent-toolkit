@@ -7,6 +7,30 @@
 - **Merges wait for the user (a tripwire, not a lock):** on Claude Code and Codex, the hooks hold an agent's merge until the user typed a line with "merge" next to the pull request number in their own session, such as "merge 618", "618 merge" or "ok to merge 618". A line with a quote, a question, or one of a fixed list of words for a no, a doubt, a condition, a delay, a report or another kind of merge ("merge main into 618") does not count. This covers `gh pr merge`, the GitHub API merge endpoint and the GitHub connector's merge tool. One approval allows one merge of that pull request in that repository within a day, and the merge must name the head commit it expects. Connector auto-merge, GraphQL merges, the merge queue, branch merges, ref writes and pushes to the default branch are refused when written directly. It reads command text, so it catches mistakes, not a determined agent: wrapped or nested sessions, scripts, files, other HTTP clients and direct commits through the API or the connector's file tools get past it. Agents act as the user on GitHub, so GitHub cannot tell their merges apart; the hard limit is the repository's own rules where it has them (a pull request for the default branch, no force-push, no deletion). Cloud sessions are not covered yet.
 - **Stale plugin copies speak up:** when a session runs an account-synced Toolkit copy that is older than a Toolkit repository in its folder, the session-start message says so and that newer safety hooks do not run, instead of staying silent.
 
+## 3.13.8
+
+### Now and Later
+
+- **Two roadmap groups:** the Programme Graph's Class column shows `NOW` for work in progress (an open or draft PR, or an active, owner-waiting or held gate) and `LATER` for every other committed, unfinished task. Optional work still sorts last as `OPTIONAL`. There is no `NEXT` group: a planned release still shows on the task page but no longer moves a task.
+- **Later is in priority order:** the catalogue `order` is the priority again. Inside each group rows sort by `order`, lowest first, then by child number, and native sub-issues follow. The top Later task is what starts next.
+- **Start next:** the CURRENT summary ends with one **Start next** line naming the top Later task, or None. A task whose PR merged or whose issue closed is skipped, even before its state catches up.
+- **Ties are named:** a reconcile finding `ORDER_TIE` lists queued tasks in one group that share an `order`, so the controller can set a distinct priority with `update-parent`. While older classes are still reported, migrate first, or set COMMITTED and the priority in one patch.
+- **Older classes:** the CORE, HARDENING and LATER migration patch renumbers `order` in the old sequence, which becomes the priority. Before migration their old per-class numbers tie, so a pass may reorder them.
+- **Rules text:** the governed rules order work Now, then Later by priority; Toolkit V3, CONTROLLER.md and the reconciler skill say the same.
+
+## 3.13.7
+
+### Programme pages
+
+- **Generated parts first:** the parent page reads the CURRENT summary, then the Programme Graph directly under it, then the controller's hand-written notes and everything else, with the comment trace last. A task page reads its links, title and status block, then its direction note and everything else, with the comment trace last. PR pages are unchanged. A block found anywhere else, higher or lower, moves to its place once; hand-written text is never edited, only moved past, and a hand-kept index the graph replaces is removed in the same pass.
+- **Comment links open the comment:** every link the reconciler writes is the comment's full address. The old short links only worked when the comment was already on the page, so on a long issue, or in the GitHub mobile app, they opened the top of the issue instead.
+- **Shorter CURRENT summary:** it lists only the work in progress, each with its gate, PR, anything waiting on the owner and next step. Queued work shows in the graph.
+- **Graph columns and order:** the columns are Task, Task Description, Child #, PR #, Class and Status. The gate a task is in shows in CURRENT and on its own page. Inside each class, in-progress rows come before queued ones, then rows go by child number; native sub-issues follow the same order.
+- **The catalogue `order` no longer sets a position:** rows and native sub-issues sort by class, status and child number, so the first pass after updating may reorder sub-issues, including tasks still on the older CORE, HARDENING and LATER classes. The older-class migration patch still works and moves nothing itself.
+- **Older copies hold instead of flipping a page:** a copy of the reconciler that finds a page written by a newer Toolkit leaves it alone and says to update Toolkit on that computer, so two computers on different versions never swap a page between layouts.
+- **Joins keep your formatting:** when a block moves, only blank lines are trimmed where text is joined, so a two-space line break or an indented code line next to it is kept. A replaced hand-kept section now ends at the next managed block too, so it never takes the comment trace or the text after it with it. The comment trace is added at the end of a page once and then stays where it is.
+- **One line per topic:** the comment trace lists each topic on one line, every comment as a link named by its comment ID, with "(replaced by ...)" after a replaced record. A topic is the task's name as the graph shows it, or a short subject for a programme-wide comment, and may now contain spaces. On a task page, comments without a topic fall under the task's own name; on the parent they fall under "Other comments", as before. A task name containing `&` or another escaped character stays one topic. When a page fills up, a topic's links move into one index comment and the line shrinks to a link to it. The trace audit accepts "replaced by" or "superseded by" right after a link.
+
 ## 3.13.6 (repository protection)
 
 ### Default-branch protection
