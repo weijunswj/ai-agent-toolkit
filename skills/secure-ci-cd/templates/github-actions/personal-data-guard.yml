@@ -23,7 +23,7 @@ permissions:
 # A newer run for the same pull request cancels the older one; every push keeps its own run,
 # because each push run checks only the commits that push added.
 concurrency:
-  group: personal-data-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  group: personal-data-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: true
 
 jobs:

@@ -403,7 +403,7 @@ const WORKFLOW_HEADER = [
   '',
   '# A newer run for the same pull request cancels the older one; every push keeps its own run.',
   'concurrency:',
-  "  group: validate-${{ github.event_name == 'pull_request' && github.ref || github.sha }}",
+  "  group: validate-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}",
   '  cancel-in-progress: true',
   '',
   '# The test files run in shards on Linux and Windows (repo/contracts/ci/test-shards.json). The',
