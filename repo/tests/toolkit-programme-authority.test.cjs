@@ -22,9 +22,9 @@ const green = name => ({ kind: 'CheckRun', name, status: 'COMPLETED', conclusion
 const CATALOGUE = [
   { issue: 423, label: 'C2', class: 'COMMITTED', parent: 421, order: 1 },
   { issue: 467, label: 'Shared H', class: 'COMMITTED', parent: 421, order: 2 },
-  { issue: 469, label: 'H1', class: 'COMMITTED', parent: 467, order: 1 },
-  { issue: 470, label: 'H2', class: 'COMMITTED', parent: 467, order: 2 },
-  { issue: 471, label: 'H3', class: 'COMMITTED', parent: 467, order: 3 },
+  { issue: 469, label: 'H1', class: 'COMMITTED', parent: 467, order: 3 },
+  { issue: 470, label: 'H2', class: 'COMMITTED', parent: 467, order: 4 },
+  { issue: 471, label: 'H3', class: 'COMMITTED', parent: 467, order: 5 },
 ];
 
 function setup({ initialiseParent = true } = {}) {
