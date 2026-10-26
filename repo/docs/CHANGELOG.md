@@ -8,6 +8,15 @@
 - **Merge summary before merge:** in a Projects session, a PR merge (`gh pr merge`, a `gh api` merge call or a merge tool) is refused until a line in one of that session's own posts or edits says "external effects" and names the PR. It reads only the command text, so it reads the command word by word with bash or PowerShell quoting rules (quotes, escapes, heredocs, here-strings, redirections and option values never hide or replace the PR number; a command it cannot finish reading counts as a merge with no number) and checks every merge in one command; curl, GraphQL, wrapper shells, prefixes, aliases, scripts, direct pushes and a command inside a double-quoted `$(...)` or backticks are not seen, and an unreadable transcript lets the merge pass. Sessions outside Projects never see it.
 - The skill describes the layout in a new **Post layout** rule.
 
+## 3.15.9 (setup launch on Windows)
+
+### Setup launch on Windows
+
+- **One setup line for PowerShell and cmd.exe:** agents now run the managed checkout's setup script by its resolved full path, written with forward slashes inside double quotes and with no `$env:` or `%...%` variables: `node "<home folder>/.ai-agent-toolkit/source/ai-agent-toolkit/repo/scripts/setup-toolkit.cjs" --execute --profile auto-main`. The old PowerShell-only line failed when Codex ran it through `cmd.exe`, because `cmd.exe` does not expand `$env:`, so "refresh toolkit" never started setup. The shell keeps the chat's own folder, so setup still fast-forwards your own Toolkit clone and measures that project's instructions.
+- **Same form for toolkit env, the setup help and `--codex-cli`:** the `toolkit-env` skill, `setup-toolkit.cjs --help` and the `--codex-cli` hint all use a resolved full path in quotes.
+- **PowerShell blocks for people:** commands people type themselves in the README, the bridge guide, How to use and the toolkit env guide keep their PowerShell form and are labelled as PowerShell for a person to type.
+- **Windows launch test:** a new test launches setup from a different folder whose path has a space, with a home folder that has a space, through both `cmd.exe` and PowerShell, and shows the old line failing through `cmd.exe`.
+
 ## 3.15.8 (pull request text checks)
 
 ### Pull request text is checked before review
