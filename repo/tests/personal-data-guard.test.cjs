@@ -176,7 +176,7 @@ test('B: pull request text rules match each variant, and placeholders and near-m
     ['Linux home', `cd ${prText.linuxHome()}`, 'PDG-HOME-PATH', `cd ${prText.linuxHome('runner')} ${prText.linuxHome('user')} ${prText.linuxHome('$USER')} ~/repo`],
     ['macOS home', `open ${prText.macHome()}`, 'PDG-HOME-PATH', `open ${prText.macHome('Shared')} https://api.github.com/users/octo/repos`],
     ['file URL', `file://${prText.macHome()}`, 'PDG-HOME-PATH', `file://${prText.macHome('yourname')}`],
-    ['percent-encoded path', prText.windowsHome().replace(/\\/g, '%5C').replace(':', '%3A'), 'PDG-HOME-PATH', '100%5C done'],
+    ['percent-encoded path', prText.windowsHome().replace(/\\/g, '%5C').replace(/:/g, '%3A'), 'PDG-HOME-PATH', '100%5C done'],
     ['entity-encoded path', prText.linuxHome().replace(/\//g, '&sol;'), 'PDG-HOME-PATH', '&sol;home&sol;example'],
     ['session link', `See ${prText.sessionLink()}`, 'PDG-AI-SESSION-LINK', `See https://${['claude', 'ai'].join('.')}/code/artifact/0b1c and claude.aix/session`],
     ['project-thread link', `[thread](${prText.projectLink()})`, 'PDG-AI-SESSION-LINK', `https://example.org/${['claude', 'ai'].join('.')}x/project`],
