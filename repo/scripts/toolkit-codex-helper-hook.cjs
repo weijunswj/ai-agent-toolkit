@@ -83,10 +83,11 @@ function mergeDecision(input) {
 
 // The UserPromptSubmit decision: { block: reason } or { context } or {}.
 function decidePrompt(input, environment = process.env) {
-  // A "merge N" the user types is kept for the merge hold; a failure only means a later merge is refused.
-  try { require('./toolkit-merge-hold.cjs').recordPrompt(input || {}, { environment }); } catch { /* fail closed later */ }
   const decision = new (gate().PromptHold)({ environment }).decide({ cwd: input?.cwd, prompt: input?.prompt, sessionId: gate().sessionIdOf(input) });
   if (decision.action === 'block') return { block: decision.reason };
+  // A "merge N" the user types is kept for the merge hold, but not while the governance question holds
+  // the message: the user types it again after answering. A failure only means a later merge is refused.
+  try { require('./toolkit-merge-hold.cjs').recordPrompt(input || {}, { environment }); } catch { /* fail closed later */ }
   return decision.context ? { context: decision.context } : {};
 }
 

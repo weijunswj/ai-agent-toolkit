@@ -187,7 +187,7 @@ function normalise(text) {
 // The approvals in one typed message: [{ repository|null, pr, sha|null }].
 function approvalsIn(prompt) {
   const found = [];
-  for (const raw of normalise(prompt).slice(0, MAX_PROMPT_CHARS).split(/\r?\n/)) {
+  for (const raw of normalise(prompt).slice(0, MAX_PROMPT_CHARS).split(/\r\n|[\n\r\u0085\u2028\u2029]/)) {
     let line = raw;
     for (let strip = 0; strip < 5 && LIST_MARKER.test(line); strip += 1) line = line.replace(LIST_MARKER, '');
     // More nested markers than that make the line unclear.

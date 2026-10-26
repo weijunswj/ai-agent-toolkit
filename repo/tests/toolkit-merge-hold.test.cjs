@@ -138,6 +138,8 @@ test('a plain yes with "merge" and a number is an approval; a no, a doubt or a q
     ...["please merge main → #622","merge main -> #622","merge main to #622","merge main to PR #622","merge main in #622","merge main onto #622","merge main with #622","merge main for #622","merge main on #622","merge main on top of #622","merge main, #622","merge main w/ #622","merge main back to #622","merge-main #622","merge main@#622","merge latest main to #622","merge upstream main in #622","merge from main in #622","merge in main for #622","git merge main on #622","622 merge main","#622 merge main","#622: merge main","PR 622 merge main","PR #622: merge main","for #622, merge main","update #622: merge main","bring #622 up to date: merge main","merge master to #622","merge develop to #622","merge the default branch to #622","merge main to weijunswj/ai-agent-toolkit#622","merge main to https://github.com/weijunswj/ai-agent-toolkit/pull/622","fix 3 merge issues in 622","there are 2 merge commits in 622","merge 2 branches","merge 2 PRs: 622 and 623","5 merge commits","merge 622 cancelled","merge 622 is canceled","holding merge 622","merge 622, still waiting on CI","pause merge 622","postpone merge 622","delay merge 622","defer merge 622","halt merge 622","veto merge 622","undo merge 622","nobody merge 622","neither merge 622 nor 623","merge 622 in 2 days","merge 622 at 5pm","merge 622 at 17:00","merge 622 by end of day","merge 622 by COB","merge 622 this afternoon","eventually merge 622","sometime merge 622","merge 622 given CI passes","merge 622 providing CI passes","merge 622 presuming CI passes","merge 622 should CI pass","merge 622 on green","merge 622 subject to review","merge 622 contingent on review","merge 622 iff green","merge 622 barring failures","can we merge 622","may we merge 622","the agent will merge 622","Plan: merge 622","TODO: merge 622","Option A: merge 622","- > merge 622","1. > merge 622","«merge 622»","＞ merge 622"],
   ];
   for (const text of refusals) assert.deepEqual(hold.approvalsIn(text), [], text);
+  // A question or quote after any kind of line break is still read as a line of its own.
+  for (const brk of ['\r', '\u0085', '\u2028', '\u2029']) for (const text of ['Did you merge 618', '- 1. why merge 622', '[x] did you merge 622', '> merge 622']) assert.deepEqual(hold.approvalsIn(`looks good${brk}${text}`), [], JSON.stringify(brk + text));
   assert.deepEqual(hold.approvalsIn('1700 merge https://github.com/o/r/pull/622'), [{ repository: 'o/r', pr: 622, sha: null }]);
   // A SHA is kept only when the line names one pull request.
   assert.deepEqual(hold.approvalsIn('merge 601 and 605 at 62405eb').map(item => item.sha), [null, null]);
@@ -322,10 +324,28 @@ test('an unreadable approvals store refuses the merge, and a governance error ne
   assert.equal(outside.hookSpecificOutput?.permissionDecision, 'deny');
 });
 
+test('a broken merge hold refuses state-changing tools that mention merge or push, never read-only ones', (t) => {
+  const ctx = context(t);
+  const broken = { environment: {}, ...ctx.options, mergeHold: { decide() { throw new Error('boom'); }, mayMerge() { throw new Error('boom'); } } };
+  for (const input of [{ cwd: ctx.root, tool_name: 'Read', tool_input: { file_path: path.join(ctx.root, 'merge-notes.md') } }, { cwd: ctx.root, tool_name: 'Grep', tool_input: { pattern: 'push' } }]) {
+    assert.notEqual(claudeHook.respond('PreToolUse', input, broken).hookSpecificOutput?.permissionDecision, 'deny', input.tool_name);
+  }
+  for (const input of [bash(ctx.root, 'git push origin main'), connector('merge_pull_request', { pullNumber: 618, expectedHeadSha: SHA })]) {
+    assert.match(claudeHook.respond('PreToolUse', input, broken).hookSpecificOutput.permissionDecisionReason, /merge check failed/, input.tool_name);
+  }
+});
+
 test('the Claude Code hook records the typed approval and enforces it; cloud sessions are not covered', (t) => {
   const ctx = context(t);
   const merge = connector('merge_pull_request', { pullNumber: 618, expectedHeadSha: SHA });
   assert.equal(claudeHook.respond('PreToolUse', merge, { environment: {}, ...ctx.options }).hookSpecificOutput.permissionDecision, 'deny');
+  // While the governance question holds the message, a typed approval is not kept.
+  const held = claudeHook.respond('UserPromptSubmit', { cwd: ctx.repo, prompt: 'merge 618', session_id: userSession(ctx) }, { environment: {}, ...ctx.options });
+  assert.ok(held.systemMessage || held.decision === 'block', JSON.stringify(held));
+  assert.equal(fs.existsSync(ctx.file), false);
+  assert.equal(claudeHook.respond('PreToolUse', merge, { environment: {}, ...ctx.options }).hookSpecificOutput.permissionDecision, 'deny');
+  // Once the repository is decided, the user types it again and it is kept.
+  gate.writeGovernanceDecision(ctx.repo, 'disable', ctx.options);
   claudeHook.respond('UserPromptSubmit', { cwd: ctx.repo, prompt: 'merge 618', session_id: userSession(ctx) }, { environment: {}, ...ctx.options });
   assert.equal(claudeHook.respond('PreToolUse', merge, { environment: {}, ...ctx.options }).hookSpecificOutput?.permissionDecision, undefined);
   assert.deepEqual(claudeHook.respond('PreToolUse', merge, { environment: { CLAUDE_CODE_REMOTE: 'true' }, ...ctx.options }), {});
@@ -341,6 +361,10 @@ test('the Codex hook refuses, records the user\'s approval, allows one merge and
   const refusedFirst = run(merge);
   assert.equal(refusedFirst.status, 2, refusedFirst.stdout + refusedFirst.stderr);
   gate.startSession({ session_id: 'codex-user', source: 'startup', cwd: ctx.root }, { registryOptions: { registryPath: path.join(home, '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json'), testOnly: true } });
+  // Typed in a repository whose governance question is still open, the message is held and nothing is kept.
+  run({ hook_event_name: 'UserPromptSubmit', cwd: ctx.repo, session_id: 'codex-user', prompt: 'merge owner/a#618' });
+  assert.equal(fs.existsSync(path.join(home, '.ai-agent-toolkit', 'user-state', hold.APPROVALS_BASENAME)), false);
+  assert.equal(run(merge).status, 2, 'held prompt kept nothing');
   const prompt = run({ hook_event_name: 'UserPromptSubmit', cwd: ctx.root, session_id: 'codex-user', prompt: 'merge owner/a#618' });
   assert.equal(prompt.status, 0, prompt.stdout + prompt.stderr);
   const allowed = run(merge);

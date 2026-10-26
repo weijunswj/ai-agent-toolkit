@@ -62,10 +62,14 @@ function respond(event, input, options = {}) {
   try {
     gate = options.gate || require('./toolkit-governance-gate.cjs');
     if (event === 'UserPromptSubmit') {
-      // A "merge N" the user types is kept for the merge hold; a failure only means a later merge is refused.
-      try { (options.mergeHold || mergeHold()).recordPrompt(input, { environment: options.environment || process.env, registryOptions: options.registryOptions, now: options.now }); } catch { /* fail closed later */ }
       const decision = new gate.PromptHold({ ...options, picker: true }).decide({ cwd: input.cwd, prompt: input.prompt, sessionId: gate.sessionIdOf(input) });
       if (decision.action === 'block') return { decision: 'block', reason: decision.reason };
+      // A "merge N" the user types is kept for the merge hold, but not while the governance question
+      // holds the message: the user types it again after answering. A failure only means a later
+      // merge is refused.
+      if (!decision.notice) {
+        try { (options.mergeHold || mergeHold()).recordPrompt(input, { environment: options.environment || process.env, registryOptions: options.registryOptions, now: options.now }); } catch { /* fail closed later */ }
+      }
       const context = decision.context ? { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: decision.context } } : {};
       return decision.notice ? { systemMessage: decision.notice, ...context } : context;
     }
@@ -94,7 +98,7 @@ const mergeHold = () => require('./toolkit-merge-hold.cjs');
 function mergeDecision(input, options = {}) {
   try { return (options.mergeHold || mergeHold()).decide(input, { registryOptions: options.registryOptions, now: options.now, environment: options.environment || process.env }); } catch {
     let mayMerge = true;
-    try { mayMerge = mergeHold().mayMerge(input); } catch { mayMerge = /merge|push/i.test(JSON.stringify(input || {})); }
+    try { mayMerge = (options.mergeHold || mergeHold()).mayMerge(input); } catch { mayMerge = STATE_CHANGING_TOOLS.test(String(input && input.tool_name || '')) && /merge|push/i.test(JSON.stringify(input || {})); }
     return mayMerge ? { deny: MERGE_CHECK_FAILED } : null;
   }
 }
