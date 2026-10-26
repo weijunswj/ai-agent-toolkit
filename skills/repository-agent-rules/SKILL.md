@@ -28,7 +28,7 @@ Works for any git host, local git repositories and plain folders.
 3. For each required file, check that it exists. `CLAUDE.md` is current when it has the line `@AGENTS.md` on its own and no old Toolkit `CLAUDE.SHIM` block. For every other file, check that its `AI-AGENT-TOOLKIT` markers are structurally valid: at least one complete pair; every BEGIN has exactly one matching END with the same source and block name, in order; nothing missing, duplicated, nested or unmatched. Bare `AI-AGENT-TOOLKIT` text or zero blocks is not current.
 4. If every file is structurally current and the user did not ask to install, check, repair, refresh or bootstrap, stop here without reading templates or rewriting anything, and continue the original task.
 
-Native Toolkit startup hooks run a passive preflight: they compare only the expected managed blocks with the bundled templates (and `CLAUDE.md` by its `@AGENTS.md` line), never write, back up or read unrelated content, stay silent outside Toolkit-managed git roots, and print at most one neutral note per finding. The note never pauses the current task; run this skill only when the user asks.
+Native Toolkit startup hooks run a passive preflight: they compare only the expected managed blocks with the bundled templates (and `CLAUDE.md` by its `@AGENTS.md` line) and, where governance is ENABLED, the vendored Toolkit checks under `.github/scripts/` with the running Toolkit's sources, never write, back up or read unrelated content, stay silent outside Toolkit-managed git roots, and print at most one neutral note per finding. The note never pauses the current task; run this skill only when the user asks.
 
 ## Markers
 
@@ -69,6 +69,10 @@ New backups always use `_agent-toolkit-backups/`. Recognise legacy `.agent-toolk
 
 On an install, offer the personal-data guard once; never install it without the owner's yes. On yes, ask whether commit author and committer addresses are scanned, then run `node <toolkit>/skills/secure-ci-cd/scripts/install-personal-data-guard.cjs --repo <repo> --identity <excluded|included> [--identity-reason <text>] --workflow` and report its output, including the hooks folder it used. On a refresh where `.github/personal-data-guard.json` exists, run it with `--check` and, when it reports drift, rerun the install (it keeps the config and any existing hooks). Details: `docs/agent-playbooks/privacy-safe-checks.md`.
 
+### Plain-text check
+
+In a repository whose Toolkit GitHub governance is ENABLED, install the plain-text check on any install or refresh where `.github/plain-text.json` is missing: the user's yes to governance covers it. In other repositories it is optional: offer it in the same question as the personal-data guard and install it only on a yes (it writes CI files, not instruction files). Run `node <toolkit>/skills/secure-ci-cd/scripts/install-plain-text-check.cjs --repo <repo> --workflow` and report its output: it writes `.github/plain-text.json` (issue and pull request reference rules on, no banned terms), a starting baseline of what is already there, the check copy under `.github/scripts/` and the CI workflow. Ask whether the repository has its own shorthand codes to add as banned terms; add only ones the user names, each with a reason and the plain wording to use. On a refresh where `.github/plain-text.json` exists, run it with `--check` and, on drift, rerun the install (it keeps the settings and baseline). A governed repository switches it off only with a reason the user gives, recorded as `off_reason` in its settings.
+
 ## After a refresh
 
 **Inside an unfinished, already-authorised task or gate** (the refresh is part of that work or its standing authority): read the changed instruction files now and continue the task in this session without asking whether to restart. Show this notice once, in bold, only after the refresh actually succeeded:
@@ -79,7 +83,7 @@ Reading files does not reload native hooks, tools or permissions; when one of th
 
 **Carry the refresh to a pull request.** When the refresh wrote files in a Git repository that has a GitHub remote, and no in-flight task already carries those files on its own authorised branch, do not leave them uncommitted:
 
-1. Create a new non-main branch from the current base. Stage only the files this refresh wrote (the instruction files and shims it created, repaired or refreshed, and any personal-data guard files it installed); never stage dirty, unrelated or backup files.
+1. Create a new non-main branch from the current base. Stage only the files this refresh wrote (the instruction files and shims it created, repaired or refreshed, and any personal-data guard or plain-text check files it installed); never stage dirty, unrelated or backup files.
 2. Run the sync check where it exists, commit, push the branch, and open a pull request that lists the refreshed files.
 3. Watch every check on the pull request's exact head, then stop at the open pull request: report its link, head and check results for the owner to merge. This skill never merges.
 
@@ -99,4 +103,4 @@ Keep the full reset message and question bolded exactly as shown. Do not continu
 
 ## Boundaries
 
-This skill touches only repo-local instruction files, their backups and the playbook folder, plus, on the owner's opt-in, the personal-data guard files (`.github/scripts/personal-data-guard.cjs`, `.github/personal-data-guard.json`, `.github/workflows/personal-data-guard.yml`) and the local git hooks the guard installer writes. Apart from the refresh pull request above, it must not push, open or update a PR, or touch live n8n, Docker, credentials, `.env`, `.tmp`, `.n8n-local`, deployments, product code, workflow JSON, imports, exports or runtime actions. After install, the repository's own files are the source of truth for its governed rules.
+This skill touches only repo-local instruction files, their backups and the playbook folder, plus, on the owner's opt-in, the personal-data guard files (`.github/scripts/personal-data-guard.cjs`, `.github/personal-data-guard.json`, `.github/workflows/personal-data-guard.yml`) and the local git hooks the guard installer writes, and the plain-text check files (`.github/scripts/plain-text-check.cjs`, `.github/plain-text.json`, `.github/plain-text-baseline.json`, `.github/workflows/plain-text.yml`). Apart from the refresh pull request above, it must not push, open or update a PR, or touch live n8n, Docker, credentials, `.env`, `.tmp`, `.n8n-local`, deployments, product code, workflow JSON, imports, exports or runtime actions. After install, the repository's own files are the source of truth for its governed rules.

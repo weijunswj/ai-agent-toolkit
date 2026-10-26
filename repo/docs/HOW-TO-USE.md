@@ -226,7 +226,7 @@ Refreshing one host never mutates the other host's cache.
 
 Claude strict root-only enforcement is applied only when native plugin installation freshness, enabled state, host-reported trust, and active hook execution all verify for proof schema 3: exact plugin version, cache identity, hooks configuration, controller bytes, process-launch bytes, and executed native-agent hook-script bytes. Every bound installed path must be a non-symlink regular file. Schema-2 proof is stale and unsupported. Setup does not approve trust or manufacture activation proof, and an install/update or restart instruction is not proof that the current session executes the hook. The verified setup CLI is persisted, with explicit and current environment overrides taking precedence without rewriting the profile. Relative path-like commands are rejected. Bare commands resolve only from absolute PATH entries and execute that exact candidate, so project-local shims cannot shadow the trusted launcher. Missing or lost proof leaves strict state root-only/unapplied; broader-native remains available explicitly outside Toolkit control.
 
-The Toolkit direct (`toolkit-direct`) Claude worker and checker topology is retired. Setup offers root-only, broader-native and keep, runs no launch-capability probes, and resolves a stored direct profile to root-only. Governed workers use the registry-pinned V3 launchers.
+The Toolkit direct (`toolkit-direct`) Claude worker and checker topology is retired. Setup offers root-only, broader-native and keep, runs no launch-capability probes, and resolves a stored direct profile to root-only. Governed workers use the Toolkit worker launchers pinned in the stack registry.
 
 Policy layering stays portable:
 

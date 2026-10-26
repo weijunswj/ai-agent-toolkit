@@ -9,6 +9,10 @@
 //   show [--parent | --issue <n>] [--include-private]; show --session <id> alone shows that session's local binding
 //   init-parent --catalogue <file>                     validate a catalogue
 //
+// Any session in a governed checkout, executors included, may bring the pages up to date:
+//   refresh                                            the full reconcile --apply pass, written under the
+//                                                      parent's current holder; it takes no decision input
+//
 // An executor session the controller assigned writes only its own checkpoint journal:
 //   bind --issue <n> --assignment <id> --session <id> [--model <m> --effort <e> [--route-read-back]]
 //   checkpoint --session <id> [--message-file <file>]  (the turn-end hook runs the same step)
@@ -31,14 +35,16 @@
 // The record prefix is the binding's writer prefix unless --prefix is given. --json prints JSON.
 
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
 const state = require('./programme-state.cjs');
 const checkpoint = require('./programme-checkpoint.cjs');
 
 const { ProgrammeError } = state;
 const VERSION_FILE = path.resolve(__dirname, '..', '..', '..', 'repo', 'contracts', 'toolkit-local-bridge', 'version.json');
-const COMMANDS = ['reconcile', 'show', 'init-parent', 'update-parent', 'claim', 'assign', 'reopen', 'interrupt', 'update', 'return', 'bind', 'checkpoint'];
+const COMMANDS = ['reconcile', 'refresh', 'show', 'init-parent', 'update-parent', 'claim', 'assign', 'reopen', 'interrupt', 'update', 'return', 'bind', 'checkpoint'];
 const FLAGS = new Set(['--apply', '--parent', '--include-private', '--takeover', '--route-read-back', '--json', '--controller', '--supersede', '--lane']);
 const VALUES = new Set(['--issue', '--parent-file', '--catalogue', '--patch', '--role', '--model', '--effort', '--record', '--consume', '--verdict', '--session',
   '--prefix', '--repo-root', '--assignment', '--reason', '--at-head', '--takeover-record', '--message-file']);
@@ -63,6 +69,10 @@ function parseArgs(argv) {
   if (args.issue !== undefined) {
     args.issue = /^\d+$/.test(args.issue) ? Number(args.issue) : NaN;
     if (!Number.isSafeInteger(args.issue) || args.issue < 1) throw usage('--issue must be an issue number (1 or more).');
+  }
+  if (command === 'refresh') {
+    const extra = Object.keys(args).filter(key => !['command', 'json', 'repo-root'].includes(key));
+    if (extra.length) throw usage(`refresh takes no options but --json and --repo-root: it always runs the full pass as the parent's current holder (got --${extra[0]}).`);
   }
   if (EXECUTOR_COMMANDS.includes(command) && args.controller) throw usage(`${command} is an executor command; the controller does not bind or checkpoint.`);
   if (isWrite(args) && !args.controller) {
@@ -95,7 +105,8 @@ function parseArgs(argv) {
   return args;
 }
 
-// Commands that write programme state or GitHub. Each one is the controller's.
+// Commands that write programme state or GitHub. Each one is the controller's. `refresh` also writes,
+// but it is not listed: it carries no decision of its own (see commands.refresh).
 function isWrite(args) {
   if (args.command === 'reconcile' || args.command === 'init-parent') return Boolean(args.apply);
   return ['update-parent', 'claim', 'assign', 'reopen', 'interrupt', 'update', 'return'].includes(args.command);
@@ -104,6 +115,137 @@ function isWrite(args) {
 function toolkitVersion(file = VERSION_FILE) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')).version || null; }
   catch { return null; }
+}
+
+// One reconcile pass with --apply at a time per repository on this computer. The lock file holds a
+// random token, the owner's process id and host; its modified time is the owner's heartbeat, renewed
+// before every GitHub request. Before every request the pass also checks that the lock still holds its
+// token, and stops (PASS_LOCK_LOST) if not, so a pass that loses its lock sends no further request
+// (one already sent still completes).
+//
+// The lock is taken over only when its owner is provably gone: on this host, its process has ended;
+// its last beat is older than this computer's last start; on another host (a shared profile), it has
+// not beaten for LOCK_STALE_MS. A live process that has
+// not beaten for LOCK_ABANDONED_MS is taken to be an unrelated process that reused a dead owner's id
+// (a pass beats at least every few minutes while awake); if it is in fact a pass waking from a long
+// sleep, it finds its token gone and stops before its next request. Anything at the path that is not
+// a lock file is replaced. A lock is moved aside and checked before it is replaced, and an owner
+// releases only a lock that still holds its own token.
+//
+// reconcile --apply refuses while the lock is held (PASS_RUNNING). refresh leaves an "again" flag and
+// ends, and the owner runs one more refresh pass on the same store before it lets go, up to MAX_PASSES
+// in a row. If the owner fails or reaches the limit, the flag stays for the next refresh or sweep.
+const LOCK_STALE_MS = 15 * 60 * 1000;
+const LOCK_ABANDONED_MS = 6 * 60 * 60 * 1000;
+const MAX_PASSES = 5;
+const LOCK_SCHEMA = 'toolkit.programme-pass-lock.v1';
+
+function defaultLockFile(repository = '') {
+  const key = crypto.createHash('sha256').update(String(repository).toLowerCase()).digest('hex').slice(0, 12);
+  return path.join(os.homedir(), '.ai-agent-toolkit', 'user-state', 'programme-refresh', `pass-${key}.lock`);
+}
+
+function pidAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try { process.kill(pid, 0); return true; } catch (error) { return error.code === 'EPERM'; }
+}
+
+function readLock(file) {
+  let info;
+  try { info = fs.lstatSync(file); } catch { return { missing: true }; }
+  if (!info.isFile()) return { broken: true, mtimeMs: info.mtimeMs };
+  let lock = null;
+  try { lock = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* unreadable: broken */ }
+  if (!lock || lock.schema !== LOCK_SCHEMA || typeof lock.token !== 'string') return { broken: true, mtimeMs: info.mtimeMs };
+  return { lock, mtimeMs: info.mtimeMs };
+}
+
+// This boot of the computer, read without the wall clock: Linux's boot id where it exists, and the
+// uptime counter, which only grows within one boot.
+function thisBoot() {
+  let bootId = null;
+  // Only on Linux: elsewhere the same path can name a file anyone may create.
+  if (process.platform === 'linux') {
+    try { bootId = fs.readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim() || null; } catch { /* unavailable */ }
+  }
+  return { bootId, uptime: os.uptime() };
+}
+// The lock was written in an earlier boot when the boot ids differ, or when the uptime now is below
+// the uptime the lock recorded. A clock change moves neither.
+function earlierBoot(lock, boot) {
+  if (lock.boot_id && boot.bootId) return lock.boot_id !== boot.bootId;
+  return typeof lock.uptime === 'number' && boot.uptime < lock.uptime;
+}
+
+// held, free or stale, with what was seen so a replacement can check it moved the same lock.
+function lockState(file, nowMs, alive = pidAlive, boot = thisBoot()) {
+  const seen = readLock(file);
+  if (seen.missing) return { free: true };
+  if (seen.broken) return { stale: true, seen };
+  const silent = nowMs - seen.mtimeMs;
+  // A lock written in an earlier boot belongs to a pass that died with it, even if its process id is
+  // in use again. Windows Fast Startup keeps the uptime counter across a shutdown, so there only a
+  // restart counts as a new boot; the abandon limit covers the rest.
+  const gone = seen.lock.host === os.hostname()
+    ? !alive(seen.lock.pid) || silent > LOCK_ABANDONED_MS || earlierBoot(seen.lock, boot)
+    : silent > LOCK_STALE_MS || silent < -LOCK_STALE_MS;
+  return gone ? { stale: true, seen } : { held: true, seen };
+}
+
+// Returns a handle { token, owns(), beat(), release() }, or null while another live pass holds the
+// lock. A null file means no lock (tests that bring their own GitHub).
+function takeLock(file, deps = {}) {
+  if (!file) return { token: null, owns: () => true, beat() {}, release() {} };
+  const now = () => (deps.nowMs === undefined ? Date.now() : deps.nowMs);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const token = crypto.randomBytes(16).toString('hex');
+  const owns = () => readLock(file).lock?.token === token;
+  const handle = {
+    token,
+    owns,
+    beat() { try { if (owns()) { const at = new Date(); fs.utimesSync(file, at, at); } } catch { /* the next beat retries */ } },
+    release() { try { if (owns()) fs.unlinkSync(file); } catch { /* already gone */ } },
+  };
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    // Written whole first, then linked into place: the link fails while any lock is there, and a
+    // reader never sees a half-written lock.
+    const draft = `${file}.${token}.draft`;
+    fs.writeFileSync(draft, JSON.stringify({ schema: LOCK_SCHEMA, token, pid: process.pid, host: os.hostname(), boot_id: (deps.boot || thisBoot()).bootId, uptime: (deps.boot || thisBoot()).uptime, at: new Date(now()).toISOString() }), { mode: 0o600 });
+    try {
+      fs.linkSync(draft, file);
+      return handle;
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+    } finally {
+      try { fs.unlinkSync(draft); } catch { /* gone */ }
+    }
+    const seen = lockState(file, now(), deps.pidAlive, deps.boot || thisBoot());
+    if (seen.free) continue;
+    if (seen.held) return null;
+    // Stale: move it aside, then make sure what moved is what was judged stale.
+    const aside = `${file}.stale-${token}`;
+    try { fs.renameSync(file, aside); } catch { continue; }
+    const moved = readLock(aside);
+    const same = seen.seen.broken ? Boolean(moved.broken) : moved.lock?.token === seen.seen.lock.token;
+    if (!same) {
+      // A live pass took the lock in between: put its lock back and step aside.
+      try { fs.linkSync(aside, file); } catch { /* a third pass holds it */ }
+      try { fs.unlinkSync(aside); } catch { /* gone */ }
+      return null;
+    }
+    try { fs.rmSync(aside, { recursive: true, force: true }); } catch { /* left beside the lock */ }
+  }
+  return null;
+}
+
+const againFile = file => `${file}.again`;
+const flagged = file => Boolean(file) && fs.existsSync(againFile(file));
+function setAgain(file) { fs.writeFileSync(againFile(file), `${new Date().toISOString()}\n`, { mode: 0o600 }); }
+function clearAgain(file) { try { fs.unlinkSync(againFile(file)); } catch { /* not set */ } }
+
+function lockMinutes(file, nowMs = Date.now()) {
+  const at = Date.parse(readLock(file).lock?.at || '');
+  return Number.isFinite(at) ? Math.max(0, Math.round((nowMs - at) / 60000)) : null;
 }
 
 function readJsonFile(file, what) {
@@ -144,7 +286,9 @@ function openContext(args, deps = {}) {
   // never runs programme commands, whatever files it carries. Tests that supply the origin own the state.
   if (!deps.originUrl) requireGitHubGovernance(repoRoot);
   const binding = deps.binding || state.loadBinding(repoRoot);
-  const transport = deps.transport || new state.GitHubTransport({ ghPath: state.resolveExecutable('gh') });
+  const base = deps.transport || new state.GitHubTransport({ ghPath: state.resolveExecutable('gh') });
+  // A pass that holds the lock checks it still does, and renews it, before every GitHub request.
+  const transport = deps.heartbeat ? Object.assign(Object.create(base), { request: (...call) => { deps.heartbeat(); return base.request(...call); } }) : base;
   const repository = state.bindRepository({ transport, originUrl, binding });
   const version = deps.toolkitVersion === undefined ? toolkitVersion() : deps.toolkitVersion;
   const store = new state.STORE_BACKENDS[binding.store.kind]({ transport, store: binding.store, now: deps.now, toolkitVersion: version });
@@ -260,6 +404,21 @@ const commands = {
     return reconciler.run({ apply: Boolean(args.apply), issue: args.issue ?? null, parentOverride });
   },
 
+  // The same full pass as `reconcile --apply`, for any session in a governed checkout. It takes no
+  // session, patch or verdict: it writes under the session that holds the parent now, so it can only
+  // bring the pages and documents in line with what is already recorded and observed. Every decision
+  // (assign, return, update, claim) stays the controller's. After a takeover the guard stops it at its
+  // next effect, as it stops the controller's own pass.
+  refresh(args, context) {
+    const parentDoc = readParent(context);
+    const { holder_session: session, holder_prefix: prefix } = parentDoc.fence;
+    if (!session || prefix !== context.binding.writer_prefix) {
+      throw new ProgrammeError('PARENT_UNHELD', `The parent document of #${context.binding.parent_issue} has no controller holding it, so there is no one to refresh for. Nothing changed; report this to the controller.`);
+    }
+    context.writer = { session, prefix };
+    return commands.reconcile({ ...args, apply: true }, context);
+  },
+
   show(args, context) {
     const kind = args.issue ? 'child' : 'parent';
     const { doc, sha } = context.store.read(kind, args.issue || context.binding.parent_issue);
@@ -273,8 +432,10 @@ const commands = {
     const doc = state.newParent({ repository: context.repository, parentIssue: context.binding.parent_issue, outcomes: catalogue.outcomes || [], releasePlan: catalogue.release_plan || null });
     if (!args.apply) {
       const errors = state.validateParent(doc);
+      try { state.refuseNewLegacy(null, doc); } catch (error) { errors.push(error.message); }
       return { mode: 'dry-run', valid: !errors.length, errors, document: doc };
     }
+    state.refuseNewLegacy(null, doc);
     const writer = requireWriter(context);
     if (context.store.read('parent', context.binding.parent_issue).doc) throw new ProgrammeError('STATE_EXISTS', 'The parent state document already exists. Only its holder, the appointed controller, changes it.');
     doc.fence = { epoch: 1, holder_prefix: writer.prefix, holder_session: writer.session };
@@ -460,16 +621,71 @@ function main(argv = process.argv.slice(2), deps = {}) {
   if (marker && isWrite(args)) {
     throw usage(`This session was started by a Toolkit launcher (${marker}), so it is an executor: it never writes programme state, even with --controller. Run reconcile (a dry run) or show and report to the controller.`);
   }
+  if ((args.command === 'reconcile' && args.apply) || args.command === 'refresh') return runPasses(args, deps, out);
+  return finish(args, deps, out);
+}
+
+// reconcile --apply and refresh hold the repository's pass lock. The owner runs one more refresh pass
+// for each change that came in while it ran, then lets go.
+function runPasses(args, deps, out) {
+  const beat = { fn: () => {} };
+  const passDeps = { ...deps, heartbeat: () => beat.fn() };
+  const context = openContext(args, passDeps);
+  const file = deps.lockFile !== undefined ? deps.lockFile : (deps.originUrl ? null : defaultLockFile(context.binding.repository));
+  let lock = takeLock(file, deps);
+  if (!lock && args.command !== 'refresh') {
+    throw new ProgrammeError('PASS_RUNNING', `Another reconcile or refresh pass for ${context.binding.repository} is running on this computer (lock ${file}). Nothing changed; run again when it ends. A lock left by a pass that was killed is taken over once its process has ended, after a restart that this computer can tell from the boot id (Linux) or a lower uptime than the lock recorded (on Windows, a shutdown with Fast Startup is not a restart), or after 6 hours.`);
+  }
+  if (!lock) {
+    setAgain(file);
+    lock = takeLock(file, deps);
+    if (!lock) {
+      const minutes = lockMinutes(file, deps.nowMs);
+      const reason = `another pass for ${context.binding.repository} is running on this computer${minutes === null ? '' : ` (started ${minutes} min ago)`}, lock ${file}; it runs once more when it ends, so this change reaches the pages then (if that pass fails or a long burst reaches the limit, the next refresh or the hourly sweep does)`;
+      out.write(args.json ? `${JSON.stringify({ outcome: 'QUEUED', reason }, null, 2)}\n` : `Refresh queued: ${reason}.\n`);
+      return 0;
+    }
+  }
+  let code = 0;
+  let passes = 0;
+  while (lock) {
+    const held = lock;
+    beat.fn = () => {
+      if (!held.owns()) throw new ProgrammeError('PASS_LOCK_LOST', `Another pass took over the lock for ${context.binding.repository} while this one ran, so this pass stopped before its next GitHub request. The next refresh or the hourly sweep finishes the work.`);
+      held.beat();
+    };
+    try {
+      do {
+        // A pass that lost its lock before its first request must not clear a flag left for the new owner.
+        beat.fn();
+        clearAgain(file);
+        const passArgs = passes === 0 ? args : { command: 'refresh', json: args.json, 'repo-root': args['repo-root'] };
+        // Later passes reuse the same store, which remembers its own writes through GitHub's read lag.
+        if (passes > 0 && !args.json) out.write('\nA change came in during that pass, so the pages are refreshed once more.\n');
+        code = Math.max(code, finish(passArgs, deps, out, context));
+        passes += 1;
+      } while (flagged(file) && passes < MAX_PASSES);
+    } finally {
+      lock.release();
+    }
+    // A change can be flagged between the last check and the release: take the lock back for it.
+    lock = flagged(file) && passes < MAX_PASSES ? takeLock(file, deps) : null;
+  }
+  return code;
+}
+
+function finish(args, deps, out, opened = null) {
   let result;
   const local = args.command === 'checkpoint' || (args.command === 'show' && args.session && !args.parent && args.issue === undefined);
   if (local) result = localCommands[args.command](args, deps);
   else {
-    const context = openContext(args, deps);
+    const context = opened || openContext(args, deps);
     result = commands[args.command](args, context, deps);
   }
-  if (args.command === 'reconcile' && !args.json) out.write(formatReport(result));
+  const pass = args.command === 'reconcile' || args.command === 'refresh';
+  if (pass && !args.json) out.write(formatReport(result));
   else out.write(`${JSON.stringify(result, null, 2)}\n`);
-  if (args.command === 'reconcile') return result.holds.length ? 1 : 0;
+  if (pass) return result.holds.length ? 1 : 0;
   return 0;
 }
 
@@ -481,4 +697,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = Object.freeze({ parseArgs, toolkitVersion, openContext, commands, localCommands, formatReport, main, verifyTakeoverRecord });
+module.exports = Object.freeze({ parseArgs, toolkitVersion, takeLock, lockState, defaultLockFile, againFile, LOCK_STALE_MS, LOCK_ABANDONED_MS, MAX_PASSES, openContext, commands, localCommands, formatReport, main, verifyTakeoverRecord });

@@ -37,9 +37,6 @@ test('npm run validate:all runs exactly the CI gate list from validate.yml', () 
   assert.deepEqual(local.slice(0, -1), commands.slice(0, -1));
   assert.equal(local.at(-1), LOCAL_TESTS);
   assert.equal(LOCAL_TESTS, 'node repo/scripts/run-tests.cjs --all');
-  // The trusted-CI producer map names commands of this step; each must still be in it.
-  const producerMap = JSON.parse(read('repo/contracts/trusted-ci-repository-protection/candidate-producer-map.n6.json'));
-  for (const { command } of producerMap.commands) assert.ok(commands.includes(command), `producer map command ${command} is in the gate step`);
   const scripts = JSON.parse(read('package.json')).scripts;
   assert.equal(scripts['validate:all'], 'node repo/scripts/run-validation-gate.cjs');
   assert.equal(scripts.test, 'node repo/scripts/run-tests.cjs --all');

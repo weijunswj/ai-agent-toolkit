@@ -192,7 +192,7 @@ function renderSourceUpdatesSection(updates) {
       `- Latest observed commit: \`${update.latest_commit}\``,
       `- Why a new review is required: ${update.review_reason}`,
       ...(update.review_disposition ? [`- Prior disposition: \`${update.review_disposition}\``] : []),
-      ...(update.review_tracker ? [`- Owning tracker: \`${update.review_tracker}\``] : []),
+      ...(update.review_tracker ? [`- Tracker at last review (history; find the current owner at triage): \`${update.review_tracker}\``] : []),
       `- Update policy: \`${update.update_policy}\``,
       `- Public attribution required: \`${update.public_attribution_required}\``,
       '',

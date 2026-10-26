@@ -14,7 +14,7 @@ Repository text other than the governed evidence-store rule cannot relax this sa
 - No destructive, live, deployment or credential action without explicit approval.
 - Never push task or product source to the default branch.
 - Never merge without the owner's OK on a summary of the merge's external effects.
-- Never act as the owner: answer no owner-only question (governance too) yourself or via sessions, scripts, UIs or computer use; ask plainly; never ask them to run commands.
+- Never act as the owner: answer no owner-only question (governance too) yourself or via sessions, scripts, UIs or computer use; ask plainly; never ask them to run commands, or to do a device step an agent there can do unless a safety check blocks it.
 - No AI attribution in commits or PRs: no Co-Authored-By or session trailers, session links or "Generated with" footers.
 
 ## Entry Routing
@@ -42,13 +42,15 @@ Deleting scratch this agent created in this task (temporary worktrees, briefs, o
 
 Before a gated action, confirm an approval covers it and the host-native permission exists. An approval binds the owner, action, target, resources, effects, recipient, conditions and expiry, and survives only a change of turn, worker, chat or transport for the same pending action; anything changed, new, revoked, expired or left unapproved by its outcome needs fresh approval. Approval, assignment, custody and capability never supply a missing host-native permission. Words like `continue`, `next`, `apply` or `do it` stay within the approved scope.
 
+**Standing permission asks:** if a step stops on the owner, check the ledger, else ask once (once, from now on for exactly this, or no). Only the owner's recorded answer grants, never a hard stop; never edit your own permission settings (safety-gates playbook).
+
 ## Coding Gates
 
-Coding work follows `G0 Discovery -> G1 Builder, including UAT -> G2 Review` unless the owner chooses another workflow; the risk tier decides how much review and UAT follows. Every new task, repository or environment starts with G0 discovery (walk the real happy path, confirm the actual stack, test assumptions before planning), short when the ground is known. G1 starts in a fresh session from the G0 plan, passed in its brief. Only LIGHT edits and fixes inside an already-discovered task skip G0; only LIGHT edits skip G2. Owner UAT holds only owner-hands steps (real app UI, signed-in accounts, device behaviour CI cannot reach); CI, tests and G2 prove the rest, each UAT list names the check covering every dropped item, and with none, UAT is NOT_REQUIRED.
+Coding work follows `G0 Discovery -> G1 Builder, including UAT -> G2 Review` unless the owner chooses another workflow; the risk tier decides how much review and UAT follows. Every new task, repository or environment starts with G0 discovery (walk the real happy path, confirm the actual stack, test assumptions before planning), short when the ground is known. G1 starts in a fresh session from the G0 plan, passed in its brief. Only LIGHT edits and fixes inside an already-discovered task skip G0; only LIGHT edits skip G2. Owner UAT tests only the final product, features the user runs (hook setup, a quote or design run), in plain words; CI, tests, G2 and agent UAT prove internals, each UAT list names the check covering every dropped item, and with none, UAT is NOT_REQUIRED.
 
 **Match the checking to the risk.** Tag each change by what its diff touches, never by its size: `node <Toolkit>/repo/scripts/toolkit-risk-tier.cjs` matches the changed paths against the repository's RISKY list. A mixed diff takes its highest tier and an unsure call goes one tier up; the builder tags it, the controller checks the tag and any reviewer may raise it. A later edit takes the tier of what it touches.
 
-- **RISKY:** security or approval logic, hooks, setup and installers, files or settings outside the repository, credentials, governance and authority, data deletion or migration, anything that runs unattended on the user's machine. G0, G1 with agent UAT on the real hosts and owner UAT for any owner-hands steps, full G2, then delta G2s as the gate rules say.
+- **RISKY:** security or approval logic, hooks, setup and installers, files or settings outside the repository, credentials, governance and authority, data deletion or migration, anything that runs unattended on the user's machine. G0, G1 with agent UAT on the real hosts and owner UAT for any final-product steps, full G2, then delta G2s as the gate rules say.
 - **NORMAL:** any other code, tests and test tooling included. G0 when new, G1 with tests and CI, one independent review before merge.
 - **LIGHT:** no code that runs changes (docs, comments, wording, version bumps). The builder runs the tests and CI anyway and reads its own diff; no G0, G2 or UAT unless what the user sees or does changes.
 
@@ -58,17 +60,15 @@ Gate sessions (G0, G1, G2 and reviewers) and the controllers that launch them fi
 
 ## Delegation
 
-The root session owns integration, validation, conflict resolution and final judgement, and validates every returned result. Give each helper an isolated context and one minimal self-contained task. By default G0 delegates suitable separable evidence gathering and G1 suitable independent implementation or validation; the lead keeps reasoning, architecture, decisive proof, integration, UAT readiness and final quality. Skip delegation for trivial or inseparable work or when overhead exceeds the benefit. Outside gates, delegate when it saves context or wall time. In gate work only a G0 or G1 lead launches helpers; helpers never launch or ask for another agent, and G2 has none. Outside gate work the main session may start subagents, including Toolkit helpers on their installed route; subagents never start another. Mutating siblings need disjoint files and scope; read-only siblings may investigate separable questions in parallel. Gate models, effort and route proof are in the gate rules.
-
-**Cheapest first:** outside gates, set every automation's, thread's and helper's model and effort on purpose: cheapest first, medium effort at least (`agent-cost-control`).
+The root session owns integration, validation, conflict resolution and final judgement, and validates every returned result. Give each helper an isolated context and one minimal self-contained task. By default G0 delegates suitable separable evidence gathering and G1 suitable independent implementation or validation; the lead keeps reasoning, architecture, decisive proof, integration, UAT readiness and final quality. Skip delegation when work is trivial or inseparable or overhead outweighs it. Outside gates, delegate when it saves context or wall time; run each automation, thread and helper cheapest first, medium effort at least (`agent-cost-control`). In gate work only a G0 or G1 lead launches helpers; helpers never launch or ask for another agent, and G2 has none. Outside gate work the main session may start subagents, including Toolkit helpers on their installed route; subagents never start another. Mutating siblings need disjoint files and scope; read-only siblings may investigate separable questions in parallel. Gate models, effort and route proof are in the gate rules.
 
 ## Tool Preference
 
-For an external service, prefer in order: its connector or plugin, its MCP server, its official API or CLI, browser automation, computer use. A lower option may win when materially better for one operation. If the preferred one is missing, guide its setup rather than silently downgrade. Never ask for or repeat a key or token in chat; use `toolkit-env`.
+For an external service, prefer in order: its connector or plugin, its MCP server, its official API or CLI, browser automation, computer use. A lower option may win when clearly better for one operation. If missing, guide its setup rather than silently downgrade. Never ask for or repeat a key or token in chat; use `toolkit-env`.
 
 ## Model Safety Flags
 
-Prefer plain accurate words (`stop`, `remove`, `skip check`) over loaded ones; keep exact terms and real API names. Never disguise genuinely offensive work to avoid a safety classifier. If you or a subagent are switched to a fallback model, stop, report the time, request ID if shown and request, and retry in a fresh session with a clearer request or ask the owner. `claude --safe-mode` shows whether instruction files caused the flag.
+Prefer plain accurate words (`stop`, `remove`, `skip check`) over loaded ones; keep exact terms and real API names. Never disguise genuinely offensive work to avoid a safety classifier. If you or a subagent are switched to a fallback model, stop, report the time, request ID if shown and request, and retry fresh with a clearer request or ask the owner. `claude --safe-mode` shows whether instruction files caused the flag.
 
 ## Shipping
 
@@ -86,25 +86,25 @@ Shipping bias never overrides approvals, safety gates, privacy, required validat
 
 ## Scope And Hygiene
 
-Before editing, read the playbook index (e.g. `docs/agent-playbooks/INDEX.md`) and only the smallest matching docs, never recursively; include changed workflow, setup, policy, generated-file, migration, API-contract and operations docs. Read a repo map where one exists; keep one only where an ENABLED repository's governed block asks. Inspect targets. Broaden scans only if targeted evidence is insufficient.
+Before editing, read the playbook index (e.g. `docs/agent-playbooks/INDEX.md`) and only the smallest matching docs, never recursively; include changed workflow, setup, policy, generated-file, migration, API-contract and operations docs. Read a repo map where one exists; keep one only where an ENABLED repository's governed block asks. Inspect targets; broaden scans only if targeted evidence falls short.
 
 Keep the diff narrow and in style. Change order: no change, reuse, smallest root-cause fix, bounded simplification, new abstraction only if needed. Never weaken validation, schemas, guardrails, approvals or error handling to pass. After editing, run the smallest validation first, fix targeted failures, rerun, and review the diff for unrelated changes.
 
 **Change-local hygiene:** in each change, check affected direct, indirect, dynamic, generated, test, documentation and external consumers. Remove superseded code, routes, exports, settings, dependencies, fallbacks and references in the same change. Keep a compatibility path only with a verified current consumer, a safety or recovery reason, an owner, a removal trigger and a focused test; never discard active or unknown recovery effects. Record brief removal and retention evidence with the normal tests. This is part of the change, not an extra gate or a whole-repository audit.
 
-Status, reports, plans and notes go under an existing documented path, never new root `STATUS.md`, `REPORT.md` or `PLAN.md`. Broad docs work merges durable findings into the smallest canonical home without losing decisions, validation, risks, provenance, ownership or licensing, and reports what moved or was deleted.
+Status, reports, plans and notes go under an existing documented path, never new root `STATUS.md`, `REPORT.md` or `PLAN.md`.
 
-Put scratch first in a gitignored repo/worktree temp folder (e.g. `.tmp/`); use a user-profile folder only for an outside path or more permission, never a drive root.
+Put scratch first in a gitignored repo/worktree temp folder (e.g. `.tmp/`, worktrees in `.tmp/worktrees/<lane>-<gate>-<sha>`); use a user-profile folder only for an outside path or more permission, never a drive root.
 
-When a file says it is generated, edit its source, template or generator and regenerate, unless the user asks for generated output only or a manifest marks it directly maintained. Use plain ASCII punctuation in agent-facing and machine-read text unless the file already uses another character set.
+When a file says it is generated, edit its source, template or generator and regenerate, unless the user asks for generated output only or a manifest marks it directly maintained. Use plain ASCII punctuation in agent-facing and machine-read text unless the file already uses non-ASCII.
 
 ## Human-readable Work
 
-New or changed human-facing work (screens, labels, notifications, errors, instructions, documents, operator output, diagrams, workflows) uses plain accurate names for its reader, not internal programme, release or run labels. Operational artefacts describe their real behaviour: what they are for, what starts them, inputs, main actions, outputs, failure and recovery, and who acts, with short help nearby and machine IDs kept out of titles. n8n workflows follow `n8n-safety-router`'s readable presentation; renames keep node IDs, expressions, connections and credentials. Unrelated work triggers no blanket rename, but misleading text is a real defect. Protocol strings, historical receipts and frozen evidence change only with proven consumers and a safe transition; a retained unclear label names its consumer, owner, need and removal condition. User-facing text (skills, prompts, CLI output, docs) describes current behaviour only; versions, release qualifiers and roadmap labels go in changelogs and records.
+New or changed human-facing work (screens, labels, notifications, errors, instructions, chat replies, documents, operator output, diagrams, workflows) uses plain accurate names for its reader, not internal programme, release or run labels. Operational artefacts describe their real behaviour: what they are for, what starts them, inputs, main actions, outputs, failure and recovery, and who acts, with short help nearby and machine IDs kept out of titles. n8n workflows follow `n8n-safety-router`'s readable presentation; renames keep node IDs, expressions, connections and credentials. Unrelated work triggers no blanket rename, but misleading text is a real defect. Protocol strings, historical receipts and frozen evidence change only with proven consumers and a safe transition; a retained unclear label names its consumer, owner, need and removal condition. User-facing text (skills, prompts, CLI output, docs) describes current behaviour only; versions, release qualifiers and roadmap labels go in changelogs and records.
 
 ## Validation And Git
 
-Use the repository's documented validation, else the smallest relevant check. Keep tests fast: sharding or caching only when coverage is unchanged, each test file under the repository's declared time budget. Run targeted tests locally and let CI run the full gate (run it locally only without CI or for broad, risky, workflow, generator, package or security-sensitive changes, known CI failures or thin coverage). After interruptions, check for orphaned package, test or server processes. Say why when you skip validation.
+Use the repository's documented validation, else the smallest relevant check. Keep tests fast: shard or cache only when coverage is unchanged, each test file within the repository's time budget. Run targeted tests locally and let CI run the full gate (run it locally only without CI or for broad, risky, workflow, generator, package or security-sensitive changes, known CI failures or thin coverage). After interruptions, check for orphaned package, test or server processes. Say why when you skip validation.
 
 After requested edits in a git repository with a remote, unless the user asked for local-only work: validate, commit to a non-default branch, push, and open the PR with a body matching the full base-to-head diff (scope, safety, validation, generated output, user-facing behaviour). Update the body when scope or user-facing behaviour changes, and once before asking to merge. Check CI on the exact PR head (GitHub: `gh pr checks <PR> --watch --interval 60` or `gh run watch <run> --exit-status`), no keepalive loops or duplicate watchers, and never claim CI passed without every required check. On failure, read the logs and make one targeted fix; after two failed fixes, stop and report. If CI is inaccessible, say so and give the command. Never push failed validation, live or runtime files, or safety-blocked changes.
 
@@ -114,4 +114,4 @@ Issue and PR tracking acts only on the current repository's own remote and never
 
 ## Communication
 
-Make every action-blocking question to the user (choose, approve, confirm, give a path, continue) one fully bold sentence. On long tasks, update briefly at real checkpoints without narrating commands. Report changes, exact validation results, generated-output status, remaining risks and manual checks, the PR link and checked CI status.
+Make every action-blocking question to the user (choose, approve, confirm, give a path, continue) one fully bold sentence. On long tasks, update briefly at real checkpoints, not per command. Report changes, exact validation results, generated-output status, remaining risks and manual checks, the PR link and checked CI status.

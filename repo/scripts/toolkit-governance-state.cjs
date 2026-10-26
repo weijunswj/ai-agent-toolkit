@@ -33,7 +33,7 @@
 // never held.
 //
 // Reads local files only: no network, no git or gh subprocess, no writes. Node built-ins plus the
-// existing registry, managed-block, remote-identity and programme-binding modules.
+// existing registry (with its remote-identity check), managed-block and programme-binding modules.
 
 const crypto = require('node:crypto');
 const fs = require('node:fs');
@@ -42,7 +42,7 @@ const path = require('node:path');
 
 const registry = require('./toolkit-capability-registry.cjs');
 const managedBlock = require('./toolkit-managed-block.cjs');
-const { validateRemoteIdentity } = require('./toolkit-control-plane/control-plane-kernel.cjs');
+const { validateRemoteIdentity } = registry;
 const programmeState = require('../../skills/github-program-reconciler/scripts/programme-state.cjs');
 
 const SCHEMA = 'toolkit.governance-state.v1';
@@ -253,7 +253,8 @@ function readBinding(root, identity) {
   let parsed;
   try { parsed = JSON.parse(bytes.toString('utf8').replace(/^﻿/, '')); } catch { return { present: true, valid: false, problems: ['not valid JSON'] }; }
   const problems = bindingProblems(parsed, identity);
-  return { present: true, valid: problems.length === 0, problems, store_repository: problems.length === 0 ? parsed.store.repository : null };
+  const valid = problems.length === 0;
+  return { present: true, valid, problems, store_repository: valid ? parsed.store.repository : null, required_checks: valid ? [...parsed.required_checks] : null };
 }
 
 // The evidence store a valid binding names ("owner/name"), or null. Kept out of the state result,
@@ -262,6 +263,49 @@ function bindingStoreRepository(root) {
   try {
     const binding = readBinding(root, readIdentity(root));
     return binding.valid ? binding.store_repository : null;
+  } catch { return null; }
+}
+
+// The check names a valid binding requires at the head ("CI green"), or null.
+function bindingRequiredChecks(root) {
+  try {
+    const binding = readBinding(root, readIdentity(root));
+    return binding.valid ? binding.required_checks : null;
+  } catch { return null; }
+}
+
+// The dependency and security policy of a parsed binding: { auto_merge, github_actions, paid_security }.
+// Missing keys take the safe defaults: auto-merge off, GitHub Actions updates kept for the owner, and
+// no paid-features answer (null).
+function policyOf(binding) {
+  const updates = binding && typeof binding.dependency_updates === 'object' && binding.dependency_updates ? binding.dependency_updates : {};
+  return {
+    auto_merge: updates.auto_merge === 'patch-minor' ? 'patch-minor' : 'off',
+    github_actions: updates.github_actions === 'auto-merge' ? 'auto-merge' : 'owner',
+    paid_security: binding && ['off', 'on'].includes(binding.paid_security) ? binding.paid_security : null,
+  };
+}
+
+// The policy of binding `text` as committed on the default branch (read from GitHub by the caller,
+// since this module never runs git or gh). Only a merged binding is the owner's answer: a working
+// tree any agent can edit is not. { valid, policy, required_checks, problems }; an invalid binding
+// has the safe defaults and no required checks.
+function committedBindingPolicy(text, identity) {
+  let parsed;
+  try { parsed = JSON.parse(String(text).replace(/^\uFEFF/, '')); } catch { return { valid: false, policy: policyOf(null), required_checks: null, problems: ['not valid JSON'] }; }
+  const problems = bindingProblems(parsed, identity);
+  return problems.length ? { valid: false, policy: policyOf(null), required_checks: null, problems }
+    : { valid: true, policy: policyOf(parsed), required_checks: [...parsed.required_checks], problems: [] };
+}
+
+// The policy the working-tree binding asks for, or null when it is missing or invalid. Shown only
+// to say what still has to be merged; it never turns anything on.
+function workingBindingPolicy(root) {
+  try {
+    const bytes = readSmallFile(path.join(root, ...BINDING_FILE), BINDING_READ_LIMIT, 'BINDING_TOO_LARGE');
+    if (!bytes) return null;
+    const result = committedBindingPolicy(bytes.toString('utf8'), readIdentity(root));
+    return result.valid ? result.policy : null;
   } catch { return null; }
 }
 
@@ -519,6 +563,9 @@ module.exports = Object.freeze({
   readMaterials,
   readGovernedBlock,
   bindingStoreRepository,
+  bindingRequiredChecks,
+  committedBindingPolicy,
+  workingBindingPolicy,
   readDecision,
   registryPathFor,
   bindingProblems,

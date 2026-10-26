@@ -51,8 +51,10 @@ Reference for the `web-controller-projects` skill, opened when the coordinator r
 8. **Goal, check-in and nudge.**
    - Set the project goal to the parent programme (GitHub governance ENABLED), or to the user's stated goal.
    - Pick a morning check-in time in the user's time zone and tell them. Set up the **Daily check-in** and the **Hourly nudge** (both in the skill) exactly as in **Recurring tasks** (`reference/recurring-tasks.md`), with prompts rendered from Toolkit, and write the `SCHEDULED TASKS:` memory line. In every mode, skip a task whose existing entry says `stopped by owner` and keep that entry.
+   - Only when `node repo/scripts/toolkit-governance.cjs status`, run from the repo in step 3's local Remote Control thread, reports plain `ENABLED` (not `ENABLED (materials incomplete)`; a failed read counts as not ENABLED) and step 3 named a device: also set up the **Programme sweep on a device** (`reference/recurring-tasks.md`). Cloud threads cannot refresh the programme pages, so this hourly task is what keeps them current. With governance in any other state, or no device, do not create it or suggest it, and skip it when its entry says `stopped by owner`.
 9. **Confirm it works.** Show the user each item as it passes:
    - one thread result relayed into the project chat with its link;
    - one decision card answered;
-   - a test check-in and test nudge: each runs once now and reports to you, and the user confirms both tasks in the project's Scheduled tasks panel. Setup does not wait for the next run.
-10. **Done.** Post one line: setup complete, skill Version, bound commit and `CONTROLLER.md` blob, device and folder, check-in time, that the hourly nudge is on, where the recurring tasks live, and the next work item.
+   - a test check-in and test nudge: each runs once now and reports to you, and the user confirms both tasks in the project's Scheduled tasks panel. Setup does not wait for the next run;
+   - when step 8 armed the programme sweep, one run of it now, with its result line read back.
+10. **Done.** Post one line: setup complete, skill Version, bound commit and `CONTROLLER.md` blob, device and folder, check-in time, that the hourly nudge is on (and the programme sweep, when armed), where the recurring tasks live, and the next work item.

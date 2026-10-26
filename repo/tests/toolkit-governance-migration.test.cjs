@@ -74,7 +74,33 @@ function sink() {
   return { write: (text) => { chunks.push(String(text)); return true; }, text: () => chunks.join('') };
 }
 
-async function migrate(ctx, { answers = ['yes'], interactive = true, rulesets = {}, created = [], argv = null } = {}) {
+// The default-branch protection each repository has on the fake GitHub: slug -> null (none) or the
+// required checks and merge methods of its rules, and whether Toolkit's own ruleset is there.
+function protectionReader(protections) {
+  return (slug) => {
+    const entry = protections[slug] || { checks: [], methods: ['merge', 'squash', 'rebase'], own: null };
+    return {
+      ok: true, default_branch: 'main', classic: null, toolkit_ruleset: entry.own ? { id: entry.own } : null,
+      repository: { allow_merge_commit: true, allow_squash_merge: true, allow_rebase_merge: true },
+      rules: [
+        { type: 'pull_request', ruleset_id: 5, parameters: { allowed_merge_methods: entry.methods } },
+        { type: 'required_status_checks', ruleset_id: 5, parameters: { required_status_checks: entry.checks.map(context => ({ context, integration_id: 15368 })) } },
+      ],
+    };
+  };
+}
+
+// Every dependency and security setting on, unless `settings` says otherwise for that slug.
+function securityReader(settings = {}) {
+  return (slug) => ({
+    ok: true, visibility: 'public', allow_auto_merge: false, alerts: 'enabled', security_updates: 'enabled',
+    secret_scanning: 'enabled', push_protection: 'enabled', code_scanning: 'enabled', private_reporting: 'enabled',
+    binding: { status: 'missing' },
+    ...(settings[slug] || {}),
+  });
+}
+
+async function migrate(ctx, { answers = ['yes'], interactive = true, rulesets = {}, created = [], argv = null, protections = {}, written = [], writer = null, reader = null, security = {}, securityWriter = null, securityFileWriter = null } = {}) {
   const stdout = sink();
   const stderr = sink();
   const asked = [];
@@ -85,6 +111,15 @@ async function migrate(ctx, { answers = ['yes'], interactive = true, rulesets = 
     registryOptions: { registryPath: ctx.registryPath, testOnly: true },
     rulesetReader: (slug) => ({ ok: true, rulesets: rulesets[slug] ? [ruleset.noForcePushRulesetBody()] : [] }),
     rulesetCreator: (slug) => { created.push(slug); rulesets[slug] = true; return { ok: true, id: 1 }; },
+    protectionReader: reader || protectionReader(protections),
+    protectionWriter: writer || ((slug, checks, existing) => {
+      written.push({ slug, checks, existing });
+      protections[slug] = { checks, methods: ['merge'], own: existing || 9 };
+      return { ok: true, id: existing || 9 };
+    }),
+    securityReader: securityReader(security),
+    ...(securityWriter ? { securityWriter } : {}),
+    ...(securityFileWriter ? { securityFileWriter } : {}),
   });
   const code = await cli.main(argv || ['migrate', '--root', ctx.projects]);
   return { code, stdout: stdout.text(), stderr: stderr.text(), asked };
@@ -181,11 +216,76 @@ test('NF-05: missing no-force-push rulesets are added only after a second yes, a
   assert.deepEqual(created, []);
   assert.match(declined.stdout, /Rulesets not added/);
   const rulesets = { 'example-owner/governed': true };
-  const accepted = await migrate(ctx, { answers: ['yes'], rulesets, created });
+  const protections = { 'example-owner/governed': { checks: ['validate'], methods: ['merge'], own: null } };
+  const accepted = await migrate(ctx, { answers: ['yes'], rulesets, created, protections });
   assert.equal(accepted.code, 0, accepted.stdout);
   assert.deepEqual(created, ['example-owner/block-only'], 'only the ENABLED repository without one');
   assert.match(accepted.stdout, /example-owner\/block-only: ruleset added and read back/);
   assert.equal(accepted.asked.length, 1, 'decisions were already done, so only the ruleset question is asked');
+});
+
+test('PR-05: the Toolkit default-branch ruleset is offered after its own yes, written once, and read back', async (t) => {
+  const ctx = scratch(t);
+  const { governed } = fixture(ctx);
+  await migrate(ctx, { answers: ['yes', 'no', 'no'] });
+  const rulesets = { 'example-owner/governed': true, 'example-owner/block-only': true };
+  const written = [];
+  // No job produces the binding's check yet: requiring it would block every merge, so no offer.
+  const unproduced = await migrate(ctx, { answers: [], rulesets, written });
+  assert.equal(unproduced.asked.length, 0);
+  assert.deepEqual(written, []);
+  assert.match(unproduced.stdout, /example-owner\/governed: Toolkit ruleset not offered: no workflow job produces "validate", so requiring it would block every merge/);
+  // A job whose workflow skips pull requests to the default branch would never report: no offer either.
+  fs.mkdirSync(path.join(governed, '.github', 'workflows'), { recursive: true });
+  fs.writeFileSync(path.join(governed, '.github', 'workflows', 'ci.yml'), 'on:\n  pull_request:\n    branches: [release]\njobs:\n  validate:\n    runs-on: ubuntu-latest\n');
+  const silent = await migrate(ctx, { answers: [], rulesets, written });
+  assert.equal(silent.asked.length, 0);
+  assert.match(silent.stdout, /Toolkit ruleset not offered: "validate" does not report on every pull request to the default branch, so requiring it would block those merges/);
+  // GitHub unreadable (signed out, or not an admin for classic protection): reported, nothing offered.
+  for (const reason of ['gh-unavailable', 'classic-protection-not-visible']) {
+    const unread = await migrate(ctx, { answers: [], rulesets, written, reader: () => ({ ok: false, reason }) });
+    assert.equal(unread.asked.length, 0, reason);
+    assert.match(unread.stdout, new RegExp(`default-branch protection could not be checked on GitHub \\(${reason}\\)`));
+  }
+  assert.deepEqual(written, []);
+  // With the job (an aggregate that is not verified), the workflow problem is shown before the question.
+  fs.mkdirSync(path.join(governed, '.github', 'workflows'), { recursive: true });
+  fs.writeFileSync(path.join(governed, '.github', 'workflows', 'ci.yml'), 'on: [pull_request]\njobs:\n  tests:\n    runs-on: ubuntu-latest\n  validate:\n    needs: [tests]\n    if: always()\n    runs-on: ubuntu-latest\n');
+  // No yes: nothing written.
+  const declined = await migrate(ctx, { answers: ['no'], rulesets, written });
+  assert.deepEqual(written, []);
+  assert.match(declined.stdout, /example-owner\/governed \(/);
+  assert.match(declined.stdout, /workflow \(unverified, fix by hand\): "validate" \(\.github\/workflows\/ci\.yml\) runs after tests/);
+  assert.match(declined.asked.at(-1), /every change needs a pull request.*nobody can bypass it\. Updating it replaces any rules already in that ruleset/);
+  assert.match(declined.stdout, /"validate" is in the binding but not required/);
+  assert.match(declined.stdout, /main allows merge, squash, rebase \(rulesets\)/);
+  assert.match(declined.stdout, /Default-branch rulesets not added/);
+  // Yes: only the repository with a binding gets the ruleset, then it reads back clean.
+  const protections = {};
+  const accepted = await migrate(ctx, { answers: ['yes'], rulesets, written, protections });
+  assert.equal(accepted.code, 0, accepted.stdout);
+  assert.deepEqual(written, [{ slug: 'example-owner/governed', checks: ['validate'], existing: null }]);
+  assert.match(accepted.stdout, /example-owner\/governed: ruleset added and read back/);
+  // A second run with nothing Toolkit's ruleset can fix asks nothing and writes nothing.
+  const again = await migrate(ctx, { answers: [], rulesets, written, protections });
+  assert.equal(again.asked.length, 0);
+  assert.equal(written.length, 1);
+  // Drift in Toolkit's own ruleset is an update of that ruleset, never a second one.
+  protections['example-owner/governed'] = { checks: ['validate'], methods: ['merge', 'squash'], own: 9 };
+  await migrate(ctx, { answers: ['yes'], rulesets, written, protections });
+  assert.deepEqual(written.at(-1), { slug: 'example-owner/governed', checks: ['validate'], existing: 9 });
+  // A refused write is reported once and not retried; an extra check in another ruleset is by hand.
+  delete protections['example-owner/governed'];
+  let calls = 0;
+  const refused = await migrate(ctx, { answers: ['yes'], rulesets, protections, writer: () => { calls += 1; return { ok: false, reason: 'gh-request-failed' }; } });
+  assert.equal(calls, 1);
+  assert.equal(refused.code, 2);
+  assert.match(refused.stdout, /example-owner\/governed: not added \(gh-request-failed\)/);
+  protections['example-owner/governed'] = { checks: ['validate', 'lint'], methods: ['merge'], own: null };
+  const extra = await migrate(ctx, { answers: [], rulesets, written, protections });
+  assert.equal(extra.asked.length, 0);
+  assert.match(extra.stdout, /"lint" is required but not in the binding/);
+  assert.ok(governed);
 });
 
 test('NF-06: the ruleset Toolkit adds is the one the check accepts', () => {
@@ -199,6 +299,52 @@ test('NF-06: the ruleset Toolkit adds is the one the check accepts', () => {
   assert.deepEqual(JSON.parse(calls[0].input), body);
   const plan = () => ({ status: 1, stdout: '', stderr: 'gh: Upgrade to GitHub Pro or make this repository public to enable this feature. (HTTP 403)' });
   assert.deepEqual(ruleset.ghRulesetCreator('a/b', { spawn: plan }), { ok: false, reason: 'plan-has-no-rulesets' });
+});
+
+test('SEC-01: free dependency and security settings are turned on by default, without a question, and read back', async (t) => {
+  const ctx = scratch(t);
+  const { governed } = fixture(ctx);
+  fs.writeFileSync(path.join(governed, 'package.json'), '{}');
+  // The decision run already writes the missing Dependabot file, asking nothing more about it.
+  const first = await migrate(ctx, { answers: ['yes', 'no', 'no'] });
+  assert.match(first.stdout, /\.github\/dependabot\.yml written; commit it through a pull request/);
+  const rulesets = { 'example-owner/governed': true, 'example-owner/block-only': true };
+  const protections = { 'example-owner/governed': { checks: ['validate'], methods: ['merge'], own: null } };
+  const settings = { 'example-owner/governed': { alerts: 'disabled', code_scanning: 'disabled' } };
+  const calls = [];
+  const securityWriter = (slug, plan) => {
+    const keys = Object.keys(plan).filter(key => key !== 'paid' && plan[key]);
+    calls.push({ slug, plan: keys });
+    settings[slug] = {};
+    return keys.map(setting => ({ setting, ok: true, reason: null }));
+  };
+  const applied = await migrate(ctx, { answers: [], rulesets, protections, security: settings, securityWriter });
+  assert.equal(applied.code, 0, applied.stdout);
+  assert.equal(applied.asked.length, 0, 'on by default: no question');
+  assert.deepEqual(calls, [{ slug: 'example-owner/governed', plan: ['alerts', 'code_scanning'] }]);
+  assert.match(fs.readFileSync(path.join(governed, '.github', 'dependabot.yml'), 'utf8'), /package-ecosystem: "npm"/);
+  assert.match(applied.stdout, /example-owner\/governed: Dependabot alerts turned on\.\n- example-owner\/governed: CodeQL code scanning turned on/);
+  assert.match(applied.stdout, /example-owner\/governed: read back/);
+  // Nothing left: nothing called. A refused write is reported once and fails the run (only a refusal for the plan or a policy is left alone).
+  await migrate(ctx, { answers: [], rulesets, protections, security: settings, securityWriter });
+  assert.equal(calls.length, 1);
+  settings['example-owner/governed'] = { private_reporting: 'disabled' };
+  let refusedCalls = 0;
+  const refused = await migrate(ctx, { answers: [], rulesets, protections, security: settings, securityWriter: () => { refusedCalls += 1; return [{ setting: 'private_reporting', ok: false, reason: 'forbidden' }]; } });
+  assert.equal(refusedCalls, 1);
+  assert.equal(refused.code, 2);
+  assert.match(refused.stdout, /private vulnerability reporting not turned on \(forbidden\)/);
+  // A private repository: paid features are never turned on without the binding's answer.
+  // A private repository: paid features are never turned on without the merged binding's answer,
+  // whatever the working tree says.
+  const merged = { status: 'ok', text: fs.readFileSync(path.join(governed, '.github', 'toolkit-programme.json'), 'utf8') };
+  const working = JSON.parse(merged.text);
+  fs.writeFileSync(path.join(governed, '.github', 'toolkit-programme.json'), JSON.stringify({ ...working, paid_security: 'on' }));
+  settings['example-owner/governed'] = { visibility: 'private', secret_scanning: 'disabled', push_protection: 'disabled', code_scanning: 'disabled', private_reporting: 'not-on-plan', binding: merged };
+  const privateRun = await migrate(ctx, { answers: [], rulesets, protections, security: settings, securityWriter });
+  assert.equal(calls.length, 1, 'nothing paid was written');
+  assert.match(privateRun.stdout, /no paid_security answer/);
+  assert.match(privateRun.stdout, /the working-tree binding asks for [^\n]*"paid_security":"on"[^\n]*counts only once merged/);
 });
 
 test('T-01: the binding template is not a valid binding until it is filled in', () => {

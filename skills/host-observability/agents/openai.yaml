@@ -1,0 +1,10 @@
+interface:
+  display_name: Host Observability
+  short_description: Monitor one Linux host with a read-only pulse.
+  primary_color: '#0F766E'
+policy:
+  products:
+    - chatgpt
+    - codex
+    - atlas
+  allow_implicit_invocation: false

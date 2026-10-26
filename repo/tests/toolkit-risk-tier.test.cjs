@@ -40,8 +40,7 @@ test('the owner\'s RISKY categories are RISKY in this repository', () => {
     // Authority, custody and home-folder writers: the governance decision store, helper profiles, task sessions and routes.
     'repo/scripts/toolkit-capability-registry.cjs', 'repo/contracts/repository-capability-registry/repository-capability-policy.json',
     'repo/scripts/toolkit-agent-control.cjs', 'repo/scripts/toolkit-claude-task-session.cjs', 'repo/scripts/toolkit-stack-selection.cjs',
-    'repo/scripts/toolkit-gate-contract-compiler.cjs', 'repo/scripts/toolkit-control-plane/control-plane-kernel.cjs',
-    'repo/contracts/trusted-ci-repository-protection/templates/protected-ci-gate.workflow.yml', 'repo/scripts/codex-config-load-check.cjs',
+    'repo/scripts/toolkit-gate-contract-compiler.cjs', 'repo/scripts/codex-config-load-check.cjs',
     'skills/codex-ssh-hostinger-coolify-setup-maintainer/scripts/install-daily-security-check-systemd.sh',
     'skills/secure-ci-cd/scripts/install-personal-data-guard.cjs', 'skills/github-program-reconciler/scripts/programme-checkpoint.cjs',
     // What those load or run: an unattended root script, executable and path resolution, the Codex server, versions and task templates.
@@ -194,12 +193,12 @@ function exceptionFaults(config) {
 }
 
 test('an exception can only take a script out of a script folder, never a workflow, instruction or data file', () => {
-  for (const entry of ['!.github/workflows/programme-reconcile.yml', '!repo/docs/TOOLKIT-V3.md', '!AGENTS.md', '!repo/contracts/topology-scope-policy.json', '!repo/scripts/lib/x.cjs']) {
+  for (const entry of ['!.github/workflows/source-watch-plan.yml', '!repo/docs/TOOLKIT-DELIVERY.md', '!AGENTS.md', '!repo/contracts/topology-scope-policy.json', '!repo/scripts/lib/x.cjs']) {
     const config = { ...TOOLKIT, risky: [...TOOLKIT.risky, entry] };
     assert.deepEqual(exceptionFaults(config), [entry], entry);
   }
-  assert.equal(tierOf('.github/workflows/programme-reconcile.yml'), 'RISKY');
-  assert.equal(tierOf('repo/docs/TOOLKIT-V3.md'), 'RISKY');
+  assert.equal(tierOf('.github/workflows/source-watch-plan.yml'), 'RISKY');
+  assert.equal(tierOf('repo/docs/TOOLKIT-DELIVERY.md'), 'RISKY');
   assert.equal(tierOf('repo/scripts/Bump-Version.cjs'), 'RISKY', 'a new script differing only in case from an exception stays RISKY');
 });
 

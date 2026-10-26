@@ -8,6 +8,15 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const control = require('../scripts/toolkit-agent-control.cjs');
 const hook = require('../scripts/toolkit-claude-agent-hook.cjs');
+
+// Every temp folder a test makes is removed after the file's tests, also when they fail.
+const tempFolders = [];
+test.after(() => { for (const dir of tempFolders) fs.rmSync(dir, { recursive: true, force: true }); });
+function tempFolder(prefix) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  tempFolders.push(dir);
+  return dir;
+}
 // The Toolkit checkout counts as governed work here through the user's recorded yes, kept in a
 // scratch home this test process and its hooks use (the governed block and binding alone are not an answer).
 require('./toolkit-governed-fixture-support.cjs').recordEnabled(path.resolve(__dirname, '..', '..'));
@@ -16,7 +25,7 @@ const SCRIPT = path.join(__dirname, '..', 'scripts', 'toolkit-agent-control.cjs'
 // The wire value of the retired Toolkit direct topology, as an older Toolkit stored it.
 const RETIRED_DIRECT = 'claude-toolkit-direct';
 
-function root() { return fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-agent-control-')); }
+function root() { return tempFolder('toolkit-agent-control-'); }
 function activationProof(overrides = {}) {
   return { schema: 3, source: 'claude-plugin-list', plugin_version: control.CONTROL_VERSION,
     cache_identity: 'a'.repeat(64), hook_sha256: 'b'.repeat(64), controller_sha256: 'c'.repeat(64), process_launch_sha256: 'e'.repeat(64), agent_hook_sha256: 'd'.repeat(64), ...overrides };

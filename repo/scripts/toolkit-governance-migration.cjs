@@ -13,7 +13,17 @@
 // origin remote are skipped.
 //
 // Afterwards, ENABLED GitHub repositories without the no-force-push ruleset are listed and the
-// ruleset is added only after a second typed yes in the same run. Nothing is pushed to any
+// ruleset is added only after a second typed yes in the same run. Then ENABLED GitHub repositories
+// whose default branch does not require the binding's checks, or allows squash or rebase merges,
+// are listed, and Toolkit's own default-branch ruleset (toolkit-governance-protection.cjs) is
+// created or updated only after a third typed yes. Toolkit never edits a ruleset or branch
+// protection it did not create: what its own ruleset cannot fix (an extra or unpinned check in
+// someone else's rule, a workflow that can mask its check) is reported to change by hand, and a
+// refused write is reported once, never retried. Last, each ENABLED GitHub repository gets its free
+// dependency and security settings turned on and its missing Dependabot files written
+// (toolkit-governance-security.cjs) without another question, because they are on by default under
+// governance; paid ones only where the binding records the owner's "on". Files land in the working
+// tree for a normal pull request. Nothing is pushed to any
 // repository and no pull request is opened: missing bindings and legacy markers are reported
 // with what to do.
 
@@ -23,6 +33,8 @@ const path = require('node:path');
 const registry = require('./toolkit-capability-registry.cjs');
 const governance = require('./toolkit-governance-state.cjs');
 const ruleset = require('./toolkit-governance-ruleset.cjs');
+const protection = require('./toolkit-governance-protection.cjs');
+const security = require('./toolkit-governance-security.cjs');
 
 const CAPABILITY = governance.GOVERNANCE_CAPABILITY;
 const RECORD_SCHEMA = 'toolkit.governance-migration.v1';
@@ -96,15 +108,20 @@ function parseAnswer(answer, rows) {
 }
 
 class GovernanceMigration {
-  #stdout; #ask; #interactive; #registryOptions; #rulesetReader; #rulesetCreator; #now;
+  #stdout; #ask; #interactive; #registryOptions; #rulesetReader; #rulesetCreator; #protectionReader; #protectionWriter; #securityReader; #securityWriter; #securityFileWriter; #now;
 
-  constructor({ stdout, ask, interactive, registryOptions = {}, rulesetReader = null, rulesetCreator = null, now = () => new Date() }) {
+  constructor({ stdout, ask, interactive, registryOptions = {}, rulesetReader = null, rulesetCreator = null, protectionReader = null, protectionWriter = null, securityReader = null, securityWriter = null, securityFileWriter = null, now = () => new Date() }) {
     this.#stdout = stdout;
     this.#ask = ask;
     this.#interactive = interactive === true;
     this.#registryOptions = registryOptions;
     this.#rulesetReader = rulesetReader;
     this.#rulesetCreator = rulesetCreator || ruleset.ghRulesetCreator;
+    this.#protectionReader = protectionReader;
+    this.#protectionWriter = protectionWriter || protection.ghProtectionRulesetWriter;
+    this.#securityReader = securityReader;
+    this.#securityWriter = securityWriter || security.ghSecurityWriter;
+    this.#securityFileWriter = securityFileWriter || security.writeSecurityFiles;
     this.#now = now;
   }
 
@@ -144,8 +161,10 @@ class GovernanceMigration {
     const after = rows.map(row => ({ ...row, state: governance.governanceState(row.root, this.#registryOptions) }));
     this.#reportMaterials(after);
     const rulesets = await this.#offerRulesets(after);
-    if (written.length || rulesets.length) this.#writeRecord(written, rulesets);
-    const failed = written.some(entry => entry.result !== 'written') || rulesets.some(entry => entry.result === 'failed');
+    const protections = await this.#offerProtection(after);
+    const securities = await this.#applySecurity(after);
+    if (written.length || rulesets.length || protections.length || securities.length) this.#writeRecord(written, rulesets, protections, securities);
+    const failed = written.some(entry => entry.result !== 'written') || [...rulesets, ...protections, ...securities].some(entry => ['failed', 'unverified'].includes(entry.result));
     return failed ? 2 : 0;
   }
 
@@ -227,21 +246,133 @@ class GovernanceMigration {
     return results;
   }
 
+  #protectionFor(row) {
+    const requiredChecks = governance.bindingRequiredChecks(row.root);
+    if (!requiredChecks) return null;
+    return { requiredChecks, result: protection.defaultBranchProtection(row.root, { requiredChecks, ...(this.#protectionReader ? { reader: this.#protectionReader } : {}) }) };
+  }
+
+  // What Toolkit's own ruleset fixes: a binding check that is not required, squash or rebase
+  // allowed, or an unpinned check in Toolkit's own ruleset.
+  static #rulesetFixes(result) {
+    if (result.status !== 'drift') return false;
+    const { P1, P2, P5 } = result.checks;
+    const own = result.toolkit_ruleset ? `ruleset ${result.toolkit_ruleset.id}` : null;
+    return (P1 && P1.status === 'drift' && P1.missing.length > 0) || (P5 && P5.status === 'drift')
+      || Boolean(own && P2 && P2.status === 'drift' && P2.details.some(detail => detail.includes(own)));
+  }
+
+  #byHand(row, result) {
+    const notes = [];
+    for (const id of ['P1', 'P2', 'P3', 'P4', 'P5']) {
+      const check = result.checks[id];
+      if (check && check.status === 'drift') notes.push(...check.details);
+    }
+    if (notes.length) this.#say([`${row.slug}: change by hand (Toolkit edits only its own ruleset):`, ...notes.map(note => `  - ${note}`)]);
+  }
+
+  async #offerProtection(rows) {
+    const candidates = [];
+    for (const row of rows.filter(entry => entry.state.state === 'ENABLED' && entry.slug)) {
+      const read = this.#protectionFor(row);
+      if (!read) continue;
+      const { result } = read;
+      if (result.status === 'not-enforceable') this.#say(`${row.root}: GitHub cannot protect the default branch here (private repository on GitHub Free).`);
+      else {
+        const unread = ['P1', 'P2', 'P5'].map(id => result.checks[id]).find(check => check && check.status === 'unverified');
+        if (unread) this.#say(`${row.root}: default-branch protection could not be checked on GitHub (${unread.details.join('; ')}).`);
+      }
+      // A required check that no job produces would wait forever, and with no bypass that blocks
+      // every merge, so such a repository is not offered the ruleset until its workflow is fixed.
+      // The same goes for a check whose workflow does not report on every pull request.
+      const unproduced = result.checks.P3 && Array.isArray(result.checks.P3.missing) ? result.checks.P3.missing : [];
+      const silent = result.checks.P4 && Array.isArray(result.checks.P4.never_reports) ? result.checks.P4.never_reports.filter(check => !unproduced.includes(check)) : [];
+      if (GovernanceMigration.#rulesetFixes(result) && unproduced.length === 0 && silent.length === 0) candidates.push({ row, ...read });
+      else {
+        if (GovernanceMigration.#rulesetFixes(result) && unproduced.length) this.#say(`${row.slug}: Toolkit ruleset not offered: no workflow job produces ${unproduced.map(check => `"${check}"`).join(', ')}, so requiring it would block every merge. Add the job, then run migrate again.`);
+        if (GovernanceMigration.#rulesetFixes(result) && silent.length) this.#say(`${row.slug}: Toolkit ruleset not offered: ${silent.map(check => `"${check}"`).join(', ')} does not report on every pull request to the default branch, so requiring it would block those merges. Fix its workflow trigger, then run migrate again.`);
+        this.#byHand(row, result);
+      }
+    }
+    if (candidates.length === 0) return [];
+    this.#say(['These governed GitHub repositories need default-branch protection:', ...candidates.flatMap(({ row, result }) => [
+      `- ${row.slug} (${row.root})`,
+      ...['P1', 'P2', 'P5'].flatMap(id => (result.checks[id] && result.checks[id].status === 'drift' ? result.checks[id].details : [])).map(detail => `  - ${detail}`),
+      // Workflow problems the ruleset does not fix, shown before the question.
+      ...['P3', 'P4'].flatMap(id => (result.checks[id] && ['drift', 'unverified'].includes(result.checks[id].status) ? result.checks[id].details.map(detail => `  - workflow (${result.checks[id].status}, fix by hand): ${detail}`) : [])),
+    ])]);
+    const answer = String(await this.#ask(`Add or update a "${protection.RULESET_NAME}" ruleset on these ${candidates.length} repositories? It covers the default branch: every change needs a pull request, the binding's required checks must pass (pinned to GitHub Actions), merge commits only, and nobody can bypass it. Updating it replaces any rules already in that ruleset. Type yes to confirm: `) || '').trim().toLowerCase();
+    if (answer !== 'yes') {
+      this.#say('Default-branch rulesets not added.');
+      return [];
+    }
+    const results = [];
+    for (const { row, requiredChecks, result } of candidates) {
+      const existing = result.toolkit_ruleset ? result.toolkit_ruleset.id : null;
+      let written;
+      try { written = this.#protectionWriter(row.slug, requiredChecks, existing); } catch { written = { ok: false, reason: 'writer-failed' }; }
+      if (!written || !written.ok) {
+        this.#say(`- ${row.slug}: not ${existing ? 'updated' : 'added'} (${written && written.reason ? written.reason : 'unknown'}).`);
+        results.push({ repository_id: row.state.repository_id, result: 'failed' });
+        continue;
+      }
+      const after = this.#protectionFor(row).result;
+      const fixed = !GovernanceMigration.#rulesetFixes(after) && ['P1', 'P5'].every(id => after.checks[id] && after.checks[id].status !== 'unverified');
+      this.#say(`- ${row.slug}: ruleset ${existing ? 'updated' : 'added'}${fixed ? ' and read back' : ', but reading it back still shows drift'}.`);
+      if (after.status === 'drift') this.#byHand(row, after);
+      results.push({ repository_id: row.state.repository_id, result: fixed ? (existing ? 'updated' : 'added') : 'failed' });
+    }
+    return results;
+  }
+
+  #securityFor(row) {
+    const read = this.#protectionFor(row);
+    return security.dependencySecurity(row.root, {
+      protectionResult: read ? read.result : null,
+      ...(this.#securityReader ? { reader: this.#securityReader } : {}),
+    });
+  }
+
+  // The free dependency and security settings are on by default for every governed repository, so
+  // they are turned on without another question (the owner's yes to governance covers them); paid
+  // ones only where the binding records the owner's "on". Nothing here asks.
+  async #applySecurity(rows) {
+    const results = [];
+    for (const row of rows.filter(entry => entry.state.state === 'ENABLED' && entry.slug && entry.state.materials && entry.state.materials.binding)) {
+      const result = this.#securityFor(row);
+      if (result.status === 'not-applicable') continue;
+      const outcome = security.applySecurity(row.root, result, {
+        writer: this.#securityWriter, fileWriter: this.#securityFileWriter, reread: () => this.#securityFor(row),
+      });
+      for (const line of security.describeOutcome(row.slug, row.root, result, outcome)) this.#say(line);
+      if (outcome.result !== 'nothing') results.push({ repository_id: row.state.repository_id, prior: outcome.prior, settings: outcome.settings, files: outcome.files, result: outcome.result });
+    }
+    return results;
+  }
+
   // One private record per run that changed something, next to the decision file.
-  #writeRecord(decisions, rulesets) {
-    const directory = path.dirname(governance.registryPathFor(this.#registryOptions));
-    const file = path.join(directory, RECORD_BASENAME);
-    let previous = [];
-    try {
-      const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
-      if (parsed && parsed.schema === RECORD_SCHEMA && Array.isArray(parsed.runs)) previous = parsed.runs;
-    } catch { previous = []; }
-    const record = { schema: RECORD_SCHEMA, runs: [...previous, { at: this.#now().toISOString(), decisions, rulesets }].slice(-20) };
-    fs.mkdirSync(directory, { recursive: true });
-    const temporary = `${file}.${process.pid}.tmp`;
-    fs.writeFileSync(temporary, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 });
-    fs.renameSync(temporary, file);
+  #writeRecord(decisions, rulesets, protections = [], securities = []) {
+    appendRunRecord(this.#registryOptions, { at: this.#now().toISOString(), decisions, rulesets, protections, securities });
   }
 }
 
-module.exports = Object.freeze({ GovernanceMigration, MigrationError, discoverRepositories, proposalFor, parseAnswer, RECORD_BASENAME, BINDING_TEMPLATE });
+// Appends `run` to the private record next to the decision file (the last 20 runs are kept). Used by
+// migrate and by `toolkit governance security`, so every settings change has a record of what GitHub
+// showed before.
+function appendRunRecord(registryOptions, run) {
+  const directory = path.dirname(governance.registryPathFor(registryOptions));
+  const file = path.join(directory, RECORD_BASENAME);
+  let previous = [];
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (parsed && parsed.schema === RECORD_SCHEMA && Array.isArray(parsed.runs)) previous = parsed.runs;
+  } catch { previous = []; }
+  const record = { schema: RECORD_SCHEMA, runs: [...previous, run].slice(-20) };
+  fs.mkdirSync(directory, { recursive: true });
+  const temporary = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(temporary, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 });
+  fs.renameSync(temporary, file);
+  return file;
+}
+
+module.exports = Object.freeze({ GovernanceMigration, MigrationError, discoverRepositories, proposalFor, parseAnswer, appendRunRecord, RECORD_BASENAME, BINDING_TEMPLATE });

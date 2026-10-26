@@ -16,8 +16,8 @@ const schema = name => JSON.parse(fs.readFileSync(path.join(ROOT, 'repo', 'contr
 const writer = { session: 'session-one', prefix: 'INT-TK421-' };
 const other = { session: 'session-two', prefix: 'INT-TK421-' };
 const controller = { session: 'controller-1', prefix: 'INT-TK421-' };
-const heldParent = () => state.claimDocument(state.newParent({ repository: 'acme/app', parentIssue: 421, outcomes: [{ issue: 423, class: 'CORE', parent: 421, order: 1, lane: 'integration' }] }), controller, {});
-const outcome = { issue: 423, class: 'CORE', parent: 421, order: 1, lane: 'integration' };
+const heldParent = () => state.claimDocument(state.newParent({ repository: 'acme/app', parentIssue: 421, outcomes: [{ issue: 423, class: 'COMMITTED', parent: 421, order: 1, lane: 'integration' }] }), controller, {});
+const outcome = { issue: 423, class: 'COMMITTED', parent: 421, order: 1, lane: 'integration' };
 
 function child(overrides = {}) {
   return { ...state.newChild({ repository: 'acme/app', outcome }), ...overrides };
@@ -51,9 +51,9 @@ test('the JSON schemas and the runtime validator agree on valid and invalid docu
     assert.equal(validateChild(doc), false, `schema accepts ${JSON.stringify(doc).slice(0, 80)}`);
     assert.notDeepEqual(state.validateChild(doc), [], 'runtime accepts a document the schema refuses');
   }
-  const looped = state.newParent({ repository: 'acme/app', parentIssue: 1, outcomes: [{ issue: 2, class: 'CORE', parent: 3, order: 0 }, { issue: 3, class: 'CORE', parent: 2, order: 0 }] });
+  const looped = state.newParent({ repository: 'acme/app', parentIssue: 1, outcomes: [{ issue: 2, class: 'COMMITTED', parent: 3, order: 0 }, { issue: 3, class: 'COMMITTED', parent: 2, order: 0 }] });
   assert.match(state.validateParent(looped).join('\n'), /loop/);
-  const stranger = state.newParent({ repository: 'acme/app', parentIssue: 1, outcomes: [{ issue: 2, class: 'CORE', parent: 99, order: 0 }] });
+  const stranger = state.newParent({ repository: 'acme/app', parentIssue: 1, outcomes: [{ issue: 2, class: 'COMMITTED', parent: 99, order: 0 }] });
   assert.match(state.validateParent(stranger).join('\n'), /not the programme parent/);
   assert.throws(() => state.validateBinding({ ...binding, store: { ...binding.store, repository: binding.repository } }), /separate repository/);
   assert.throws(() => state.validateBinding({ ...binding, store: { ...binding.store, path: '../escape/' } }), /store.path/);
@@ -190,29 +190,35 @@ test('rendered blocks never contain private values and use the Toolkit marker fo
   assert.equal(managedBlock.blockState(blocks[0], { source: state.BLOCK_SOURCE, name: state.BLOCK_NAME, version: '3.9.1', body: childBody }), 'current');
 });
 
-test('the Programme Graph has the seven columns, sorts CORE, HARDENING, LATER, COMPLETED by completion, then RETIRED, and flattens nesting', () => {
+test('the Programme Graph has six columns, works out NOW, LATER and OPTIONAL, sorts each by priority order then child number, then COMPLETED by completion, then RETIRED, and flattens nesting', () => {
   const outcomes = [
-    { issue: 8, class: 'CORE', parent: 7, order: 9, name: 'Shared host contract', description: 'One contract for both hosts' },
+    { issue: 8, class: 'COMMITTED', parent: 7, order: 9, name: 'Shared host contract', description: 'One contract for both hosts' },
     { issue: 9, class: 'RETIRED', parent: 7, order: 0, description: 'Old predecessor' },
-    { issue: 10, class: 'LATER', parent: 7, order: 0 },
-    { issue: 11, class: 'HARDENING', parent: 7, order: 0 },
+    { issue: 10, class: 'COMMITTED', parent: 7, order: 0 },
+    { issue: 11, class: 'COMMITTED', parent: 7, order: 0 },
     { issue: 12, class: 'COMPLETED', parent: 7, order: 0 },
     { issue: 13, class: 'OPTIONAL', parent: 7, order: 0 },
-    { issue: 15, class: 'CORE', parent: 7, order: 1 },
-    { issue: 14, class: 'CORE', parent: 7, order: 1 },
-    { issue: 16, class: 'CORE', parent: 8, order: 0 },
-    { issue: 17, class: 'CORE', parent: 8, order: 99 },
+    { issue: 15, class: 'COMMITTED', parent: 7, order: 1 },
+    { issue: 14, class: 'COMMITTED', parent: 7, order: 1 },
+    { issue: 16, class: 'COMMITTED', parent: 8, order: 0 },
+    { issue: 17, class: 'COMMITTED', parent: 8, order: 99 },
     { issue: 18, class: 'OPTIONAL', parent: null, order: 0 },
-    { issue: 21, class: 'CORE', parent: null, order: 0 },
+    { issue: 19, class: 'OPTIONAL', parent: 7, order: 0 },
+    { issue: 21, class: 'COMMITTED', parent: null, order: 0 },
   ];
   const parent = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes });
   const doc = (issue, changes = {}) => ({ ...state.newChild({ repository: 'acme/app', outcome: outcomes.find(entry => entry.issue === issue) }), ...changes });
+  const pr = (number, prState) => ({ number, state: prState, head: null, checks: { state: 'UNKNOWN', required_total: 0, required_passed: 0, at_head: null } });
   const children = new Map([
-    [8, doc(8, { lifecycle: 'ACTIVE', gate: { role: 'G1', state: 'ACTIVE', session_id: null, route: null, returns: [] }, pr: { number: 549, state: 'DRAFT', head: null, checks: { state: 'UNKNOWN', required_total: 0, required_passed: 0, at_head: null } } })],
+    [8, doc(8, { lifecycle: 'ACTIVE', release: 'Lane B', gate: { role: 'G1', state: 'ACTIVE', session_id: null, route: null, returns: [] }, pr: pr(549, 'DRAFT') })],
     [9, doc(9, { completed_at: '2026-10-01T00:00:00Z' })],
+    [10, doc(10, { release: 'Lane B' })],
+    [11, doc(11, { pr: pr(550, 'OPEN') })],
     [12, doc(12)],
-    [16, doc(16, { lifecycle: 'DONE', completed_at: '2026-10-20T00:00:00Z' })],
-    [17, doc(17, { lifecycle: 'WAITING_OWNER' })],
+    [14, doc(14, { pr: pr(551, 'CLOSED') })],
+    [16, doc(16, { lifecycle: 'DONE', completed_at: '2026-10-20T00:00:00Z', pr: pr(552, 'MERGED') })],
+    [17, doc(17, { lifecycle: 'WAITING_OWNER', release: 'Lane C' })],
+    [19, doc(19, { release: 'Lane C' })],
   ]);
   const issues = new Map([
     [12, { title: 'X3 — External Operation Authority', closed_at: '2026-10-05T00:00:00Z' }],
@@ -222,22 +228,67 @@ test('the Programme Graph has the seven columns, sorts CORE, HARDENING, LATER, C
   const body = state.renderParentBlockBody(parent, children, issues);
   const lines = body.split('\n');
   assert.equal(lines[1], '## Programme Graph');
-  assert.ok(lines.includes('| Task | Child # | PR # | Class | Status | Lane | Task Description |'));
-  const rows = lines.filter(line => /^\| [^|]+ \| #\d+ \|/.test(line)).map(line => line.split(' | ').map(cell => cell.replace(/^\| | \|$/g, '')));
-  assert.deepEqual(rows.map(row => Number(row[1].slice(1))), [21, 14, 15, 8, 17, 11, 10, 13, 18, 12, 16, 9], 'active by class, then order and issue; finished oldest first');
-  assert.deepEqual(rows[3], ['Shared host contract', '#8', '#549', 'CORE', 'IN PROGRESS', 'G1', 'One contract for both hosts']);
-  assert.deepEqual(rows[1].slice(0, 2), ['per-repository governance states', '#14'], 'a release prefix is not part of the name');
-  assert.deepEqual(rows[2].slice(0, 2), ['Toolkit temporary-resource hygiene', '#15'], 'a code prefix is not part of the name');
-  assert.deepEqual(rows[4].slice(3, 6), ['CORE', 'IN PROGRESS', '-'], 'no gate, no lane');
-  assert.deepEqual(rows[7].slice(3, 6), ['LATER', 'QUEUED', '-'], 'OPTIONAL shows as LATER');
-  assert.deepEqual(rows[11].slice(3), ['-', 'RETIRED', '-', 'Old predecessor'], 'retired is its own group below COMPLETED');
-  assert.deepEqual(rows[10].slice(3, 6), ['CORE', 'COMPLETED', '-'], 'a finished nested child goes down to COMPLETED');
-  assert.equal(rows[9][0], 'External Operation Authority');
+  assert.ok(lines.includes('| Task | Task Description | Child # | PR # | Class | Status |'));
+  assert.equal(/CORE|HARDENING/.test(body), false, 'the old classes never show');
+  const rows = lines.filter(line => /^\| [^|]+ \| [^|]+ \| #\d+ \|/.test(line)).map(line => line.split(' | ').map(cell => cell.replace(/^\| | \|$/g, '')));
+  assert.deepEqual(rows.map(row => Number(row[2].slice(1))), [11, 8, 17, 10, 21, 14, 15, 13, 18, 19, 12, 16, 9], 'NOW, LATER, OPTIONAL by priority order and child number; finished oldest first');
+  assert.equal(/\bNEXT\b/.test(body), false, 'there is no Next group');
+  const classOf = Object.fromEntries(rows.map(row => [row[2], row[4]]));
+  for (const [issue, expected, why] of [
+    ['#11', 'NOW', 'an open PR'],
+    ['#8', 'NOW', 'a draft PR wins over a release'],
+    ['#10', 'LATER', 'a planned release does not change the group'],
+    ['#17', 'NOW', 'waiting on the owner with no PR is still in progress'],
+    ['#19', 'OPTIONAL', 'an optional task with a release stays optional'],
+    ['#21', 'LATER', 'committed, no release'],
+    ['#14', 'LATER', 'a closed PR is not current work'],
+    ['#13', 'OPTIONAL', 'optional, no release'],
+    ['#12', '-', 'finished rows carry no class'],
+    ['#9', '-', 'retired rows carry no class'],
+  ]) assert.equal(classOf[issue], expected, `${issue}: ${why}`);
+  assert.deepEqual(rows[1], ['Shared host contract', 'One contract for both hosts', '#8', '#549', 'NOW', 'IN PROGRESS'], 'the description follows the task, and the gate is not a column');
+  assert.deepEqual([rows[5][0], rows[5][2]], ['per-repository governance states', '#14'], 'a release prefix is not part of the name');
+  assert.deepEqual([rows[6][0], rows[6][2]], ['Toolkit temporary-resource hygiene', '#15'], 'a code prefix is not part of the name');
+  assert.deepEqual(rows[2].slice(4), ['NOW', 'IN PROGRESS']);
+  assert.deepEqual([rows[12][1], ...rows[12].slice(4)], ['Old predecessor', '-', 'RETIRED'], 'retired is its own group below COMPLETED');
+  assert.deepEqual(rows[11].slice(4), ['-', 'COMPLETED'], 'a finished nested child goes down to COMPLETED');
+  assert.equal(rows[10][0], 'External Operation Authority');
   assert.equal(body.includes('Roadmap') || body.includes('<details>'), false, 'one table, nothing else');
 });
 
-test('the generated CURRENT summary names work in progress, what waits on the owner and the next queued tasks', () => {
-  const outcomes = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(issue => ({ issue, class: issue === 10 ? 'HARDENING' : 'CORE', parent: 7, order: issue, name: `Task ${issue}` }));
+test('a priority tie is named only among queued rows of one group', () => {
+  const outcomes = [
+    { issue: 2, class: 'COMMITTED', parent: 7, order: 1 },
+    { issue: 3, class: 'COMMITTED', parent: 7, order: 1 },
+    { issue: 4, class: 'COMMITTED', parent: 7, order: 1 },
+    { issue: 5, class: 'OPTIONAL', parent: 7, order: 1 },
+    { issue: 6, class: 'COMPLETED', parent: 7, order: 1 },
+    { issue: 8, class: 'COMMITTED', parent: 7, order: 2 },
+    { issue: 10, class: 'COMMITTED', parent: 7, order: 1 },
+  ];
+  const parent = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes });
+  const pr = { number: 9, state: 'OPEN', head: null, checks: { state: 'UNKNOWN', required_total: 0, required_passed: 0, at_head: null } };
+  const children = new Map([
+    [4, { ...state.newChild({ repository: 'acme/app', outcome: outcomes[2] }), pr }],
+    [10, { ...state.newChild({ repository: 'acme/app', outcome: outcomes[6] }), lifecycle: 'ACTIVE' }],
+  ]);
+  assert.deepEqual(state.orderTies(parent, children).map(tie => tie.map(outcome => outcome.issue)), [[2, 3]], 'two NOW rows sharing an order, optional and finished rows do not tie');
+  assert.deepEqual(state.orderTies(parent, new Map()).map(tie => tie.map(outcome => outcome.issue)), [[2, 3, 4, 10]]);
+});
+
+test('older class names are read as COMMITTED and anything else is refused', () => {
+  for (const cls of ['CORE', 'HARDENING', 'LATER']) {
+    const parent = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes: [{ issue: 8, class: cls, parent: 7, order: 0 }] });
+    assert.deepEqual(state.validateParent(parent), [], `${cls} still reads`);
+    const body = state.renderParentBlockBody(parent, new Map(), new Map());
+    assert.match(body, /^\| #8 \| - \| #8 \| - \| LATER \| QUEUED \|$/m, `${cls} shows as LATER with no release`);
+  }
+  const bad = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes: [{ issue: 8, class: 'NOW', parent: 7, order: 0 }] });
+  assert.match(state.validateParent(bad).join('\n'), /class must be one of COMMITTED, OPTIONAL, COMPLETED, RETIRED/, 'the bucket is never stored');
+});
+
+test('the generated CURRENT summary lists work in progress, saying what waits on the owner, then the Later task to start next', () => {
+  const outcomes = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(issue => ({ issue, class: 'COMMITTED', parent: 7, order: issue, name: `Task ${issue}` }));
   outcomes.push({ issue: 11, class: 'COMPLETED', parent: 7, order: 0, name: 'Done task' });
   const parent = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes });
   const doc = (issue, changes = {}) => ({ ...state.newChild({ repository: 'acme/app', outcome: outcomes.find(entry => entry.issue === issue) }), ...changes });
@@ -253,25 +304,31 @@ test('the generated CURRENT summary names work in progress, what waits on the ow
   const body = state.renderCurrentBlockBody(parent, children, new Map());
   assert.equal(body, [
     '<!-- programme-current -->',
-    '_Generated from the programme state (revision 0); hand-written notes follow this summary._',
+    '_Generated from the programme state (revision 0). The Programme Graph follows; hand-written notes come after it._',
     '',
     '**In progress**',
     '- Task 1 (#1): G1, PR #541; next: Finish the sweep',
+    '- Task 2 (#2): G1, PR #543; waiting on you: your UAT on PR #543; next: Controller: admit and plan this outcome',
+    '- Task 3 (#3); waiting on you: your decision; next: Controller: admit and plan this outcome',
+    '- Task 4 (#4); waiting on you: blocked: needs the key; next: Controller: admit and plan this outcome',
     '',
-    '**Waiting on you**',
-    '- Task 2 (#2): your UAT on PR #543',
-    '- Task 3 (#3): your decision',
-    '- Task 4 (#4): blocked: needs the key',
-    '',
-    '**Next up**',
-    '- Task 5 (#5)',
-    '- Task 6 (#6)',
-    '- Task 7 (#7)',
-    '- Task 8 (#8)',
-    '- Task 9 (#9)',
-  ].join('\n'));
+    '**Start next:** Task 5 (#5)',
+  ].join('\n'), 'queued work shows in the graph, with only the top Later task named here');
   const idle = state.renderCurrentBlockBody(state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes: [] }), new Map());
-  assert.match(idle, /\*\*In progress\*\*\n- None\.\n\n\*\*Waiting on you\*\*\n- None\.\n\n\*\*Next up\*\*\n- None\.$/);
+  assert.match(idle, /\*\*In progress\*\*\n- None\.\n\n\*\*Start next:\*\* None\.$/);
+  // The top LATER task by priority order starts next; optional work is never named.
+  const later = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes: [
+    { issue: 2, class: 'OPTIONAL', parent: 7, order: 0, name: 'Optional' },
+    { issue: 3, class: 'COMMITTED', parent: 7, order: 4, name: 'Low' },
+    { issue: 4, class: 'COMMITTED', parent: 7, order: 1, name: 'Top' },
+  ] });
+  assert.match(state.renderCurrentBlockBody(later, new Map(), new Map()), /\*\*Start next:\*\* Top \(#4\)$/);
+  const merged = { number: 5, state: 'MERGED', head: null, checks: { state: 'UNKNOWN', required_total: 0, required_passed: 0, at_head: null } };
+  const top = { ...state.newChild({ repository: 'acme/app', outcome: later.outcomes[2] }), pr: merged };
+  assert.match(state.renderCurrentBlockBody(later, new Map([[4, top]]), new Map()), /\*\*Start next:\*\* Low \(#3\)$/, 'a merged PR is not picked before its state catches up');
+  assert.match(state.renderCurrentBlockBody(later, new Map(), new Map([[4, { closed_at: '2026-10-25T00:00:00Z' }]])), /\*\*Start next:\*\* Low \(#3\)$/, 'a closed issue is not picked');
+  const onlyOptional = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes: [{ issue: 2, class: 'OPTIONAL', parent: 7, order: 0 }] });
+  assert.match(state.renderCurrentBlockBody(onlyOptional, new Map(), new Map()), /\*\*Start next:\*\* None\.$/);
 });
 
 test('a finished outcome takes the issue close time once, and the controller may set it', () => {
@@ -283,7 +340,7 @@ test('a finished outcome takes the issue close time once, and the controller may
 });
 
 test('a state block is replaced without touching the bytes around it', () => {
-  const before = 'Intro line\r\nwith CRLF\r\n\r\n';
+  const before = '# Title line\r\n\r\n';
   const after = '\r\n\r\n## Notes\r\nkept as is\r\n';
   const original = `${before}${state.renderBlock('old body', '3.8.0').split('\n').join('\r\n')}${after}`;
   const { body } = state.upsertStateBlock(original, state.renderBlock('new body', '3.9.1'));
@@ -294,6 +351,9 @@ test('a state block is replaced without touching the bytes around it', () => {
   assert.equal(found.tampered, false);
   const inserted = state.upsertStateBlock('Hand text', state.renderBlock('x', '3.9.1')).body;
   assert.ok(inserted.endsWith('\n\nHand text'));
+  const lowered = state.upsertStateBlock(`Hand text\n\n${state.renderBlock('x', '3.9.1')}\n`, state.renderBlock('x', '3.9.1'));
+  assert.equal(lowered.moved, true, 'with no title, a block below hand-written text moves to the top');
+  assert.equal(lowered.body, `${inserted}\n`);
   const twice = `${state.renderBlock('a', '3.9.1')}\n${state.renderBlock('b', '3.9.1')}`;
   assert.match(state.findStateBlock(twice).error, /duplicate/);
   assert.throws(() => state.upsertStateBlock(twice, state.renderBlock('c', '3.9.1')), { code: 'MANAGED_BLOCK_BROKEN' });
@@ -301,13 +361,13 @@ test('a state block is replaced without touching the bytes around it', () => {
   assert.equal(state.findStateBlock(edited).block.tampered, true);
 });
 
-test('the block goes in place of the named section, after the status section, or under the title and its note, and moves once', () => {
+test('the block goes right after the CURRENT summary, else in place of the named section, after the status section, or under the title above its note, and moves to its place', () => {
   const block = state.renderBlock('graph', '3.9.1');
   const page = '# Programme\n\nIntro.\n\n## CURRENT\n\nLive now.\n\n## Delivery model\n\nText.\n\n## Programme index\n\n| old | table |\n\n## Parent completion\n\nDone when.\n';
   const placement = { after_section: 'CURRENT', replace_section: 'Programme index' };
   const replaced = state.upsertStateBlock(page, block, placement).body;
   assert.equal(replaced, `# Programme\n\nIntro.\n\n## CURRENT\n\nLive now.\n\n## Delivery model\n\nText.\n\n${block}\n\n## Parent completion\n\nDone when.\n`);
-  assert.equal(state.upsertStateBlock(replaced, block, placement).body, replaced, 'once the section is gone the block stays where it is');
+  assert.ok(state.upsertStateBlock(replaced, block, placement).body.includes(`Live now.\n\n${block}\n\n## Delivery model`), 'once the section is gone the block moves to its place under the status section');
 
   const noIndex = page.replace('## Programme index\n\n| old | table |\n\n', '');
   const afterCurrent = state.upsertStateBlock(noIndex, block, placement).body;
@@ -320,10 +380,26 @@ test('the block goes in place of the named section, after the status section, or
   assert.equal(state.upsertStateBlock(moved.body, block, placement).moved, false, 'and stays there');
 
   const lower = noIndex.replace('Done when.\n', `Done when.\n\n${block}\n`);
-  assert.equal(state.upsertStateBlock(lower, block, placement).body, lower, 'a block placed lower by hand is left there');
+  const raised = state.upsertStateBlock(lower, block, placement);
+  assert.equal(raised.moved, true, 'a block placed lower by hand moves up to its place');
+  assert.equal(raised.body, afterCurrent);
+
+  // On the parent the graph sits right under the generated CURRENT summary, ahead of hand-written notes,
+  // and a hand-kept index it replaces is removed in the same pass.
+  const current = state.renderBlock('summary', '3.9.1', 'CURRENT');
+  const withSummary = `# Programme\n\n## CURRENT\n\n${current}\n\nLive now.\n\n## Programme index\n\n| old | table |\n\n## Parent completion\n\nDone when.\n`;
+  const parentPlacement = { ...placement, after_block: 'CURRENT' };
+  const graphed = state.upsertStateBlock(withSummary, block, parentPlacement).body;
+  assert.equal(graphed, `# Programme\n\n## CURRENT\n\n${current}\n\n${block}\n\nLive now.\n\n## Parent completion\n\nDone when.\n`);
+  assert.equal(state.upsertStateBlock(graphed, block, parentPlacement).moved, false, 'and settles');
+  const notesFirst = `# Programme\n\n## CURRENT\n\n${current}\n\nLive now.\n\n${block}\n\n## Parent completion\n\nDone when.\n`;
+  assert.equal(state.upsertStateBlock(notesFirst, block, parentPlacement).body, graphed, 'hand-written notes move below the graph, unchanged');
 
   const child = '# Child title\n\n<!-- INT-X:CURRENT-DIRECTION:BEGIN -->\n> Direction note.\n<!-- INT-X:CURRENT-DIRECTION:END -->\n\nParent: #421\n\n## Status\n\nText.\n';
-  assert.equal(state.upsertStateBlock(`${block}\n\n${child}`, block).body, child.replace('END -->\n\n', `END -->\n\n${block}\n\n`));
+  const childPlaced = child.replace('# Child title\n\n', `# Child title\n\n${block}\n\n`);
+  assert.equal(state.upsertStateBlock(`${block}\n\n${child}`, block).body, childPlaced, 'a task page puts its status right under the title, above the direction note');
+  const belowNote = child.replace('END -->\n\n', `END -->\n\n${block}\n\n`);
+  assert.equal(state.upsertStateBlock(belowNote, block).body, childPlaced, 'a status block below the note moves up');
   assert.equal(state.upsertStateBlock('No title here.\n', block).body, `${block}\n\nNo title here.\n`);
   const fenced = '```\n# not a title\n```\n# Real title\nBody.\n';
   assert.ok(state.upsertStateBlock(fenced, block).body.includes(`# Real title\n\n${block}\n\nBody.`));
@@ -473,4 +549,18 @@ test('repository identity comes from origin and GitHub; the binding cannot overr
     ['ssh://git@ssh.github.com:443/acme/app.git', 'acme/app'], ['https://token@github.com/acme/app', 'acme/app'],
     ['https://github.example-corp.invalid/acme/app.git', null], ['git@github.example-corp.invalid:acme/app.git', null], ['https://gitlab.com/acme/app.git', null],
   ]) assert.equal(state.originSlug(url), slug, url);
+});
+
+test('a moved block trims only blank lines, keeping a line break and an indent at the join', () => {
+  const page = `# Title\n\nline with a break  \n\n${state.renderBlock('x', '3.9.1')}\n\n    indented code\n`;
+  const { body, moved } = state.upsertStateBlock(page, state.renderBlock('x', '3.9.1'));
+  assert.equal(moved, true);
+  assert.equal(body, `# Title\n\n${state.renderBlock('x', '3.9.1')}\n\nline with a break  \n\n    indented code\n`);
+});
+
+test('a replaced last section ends at the next managed block, keeping the trace and the text after it', () => {
+  const trace = state.renderBlock('trace', '3.9.1', state.TRACE_BLOCK_NAME);
+  const page = `# Title\n\n## Programme index\nold list\n\n${trace}\n\n[i1]: https://example.com/\n`;
+  const { body } = state.upsertStateBlock(page, state.renderBlock('graph', '3.9.1'), { replace_section: 'Programme index' });
+  assert.equal(body, `# Title\n\n${state.renderBlock('graph', '3.9.1')}\n\n${trace}\n\n[i1]: https://example.com/\n`);
 });

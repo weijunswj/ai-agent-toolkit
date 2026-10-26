@@ -9,6 +9,7 @@ const os = require('node:os');
 const path = require('node:path');
 const assert = require('node:assert/strict');
 const { spawn, spawnSync } = require('node:child_process');
+const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const validateScript = path.join(repoRoot, 'repo', 'scripts', 'validate-toolkit.cjs');
@@ -22,6 +23,7 @@ const currentSkillIds = [
   'external-operation-preflight',
   'frontend-art-direction',
   'github-program-reconciler',
+  'host-observability',
   'local-ai-safety',
   'managed-app-foundation-review',
   'n8n-environment-setup',
@@ -77,8 +79,13 @@ function copyFilter(source) {
   );
 }
 
+// Copies that a case does not remove itself go after the test file's tests, also when they fail.
+const copiedRepos = [];
+test.after(() => { for (const dir of copiedRepos) fs.rmSync(dir, { recursive: true, force: true }); });
+
 function copyRepo() {
   const target = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-validate-'));
+  copiedRepos.push(target);
   fs.cpSync(repoRoot, target, { recursive: true, filter: copyFilter });
   return target;
 }

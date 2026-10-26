@@ -3,19 +3,22 @@
 // Comment tags for decision traces. A comment carries a tag when its first line is the tag and its
 // second line is exactly `---`, for example:
 //
-//   DATA-LEAK-FIX-122
+//   Codex host support
 //   ---
 //   <the comment>
 //
-// A tag is 1-80 letters, digits, dots, underscores or hyphens, starting with a letter or digit, and
-// is compared in upper case so `data-leak-fix` and `DATA-LEAK-FIX` are one tag. Leading blank
-// lines and CRLF line endings are accepted. A comment without a tag belongs to "Other comments".
+// The tag is the topic: the task's name as the Programme Graph shows it, or a short subject for a
+// programme-wide comment. It is 1-80 letters, digits, spaces, dots, underscores, hyphens, commas,
+// apostrophes, ampersands, slashes or brackets, starting with a letter or digit, and is compared in
+// upper case with runs of spaces as one, so `codex host support` and `Codex Host Support` are one
+// tag. Leading blank lines and CRLF line endings are accepted. A comment without a tag belongs to
+// "Other comments".
 // Each tag is its own list: tags are never combined, and within one tag the latest comment wins.
 //
 // Pure functions only: no reads, no writes.
 
 const OTHER_COMMENTS = 'Other comments';
-const TAG = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/;
+const TAG = /^[A-Za-z0-9][A-Za-z0-9 ._,'&/()-]{0,79}$/;
 
 function lines(body) {
   const all = String(body || '').replace(/\r\n?/g, '\n').split('\n');
@@ -24,12 +27,18 @@ function lines(body) {
   return all.slice(first);
 }
 
-// The comment's tag in upper case, or null when it has none.
-function commentTag(body) {
+// The tag as written (spaces collapsed), or null when the comment has none.
+function commentTagLabel(body) {
   const [head, rule] = lines(body);
   if (rule === undefined || rule.trim() !== '---') return null;
-  const tag = head.trim();
-  return TAG.test(tag) ? tag.toUpperCase() : null;
+  const tag = head.trim().replace(/\s+/g, ' ');
+  return TAG.test(tag) ? tag : null;
+}
+
+// The comment's tag in upper case, or null when it has none.
+function commentTag(body) {
+  const label = commentTagLabel(body);
+  return label ? label.toUpperCase() : null;
 }
 
 // The tag and the comment text after the `---` line; untagged comments keep their whole text.
@@ -61,4 +70,4 @@ function groupByTag(entries) {
   return { tags, other };
 }
 
-module.exports = Object.freeze({ OTHER_COMMENTS, commentTag, splitTag, byTime, groupByTag });
+module.exports = Object.freeze({ OTHER_COMMENTS, commentTag, commentTagLabel, splitTag, byTime, groupByTag });

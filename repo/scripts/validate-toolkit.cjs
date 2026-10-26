@@ -96,7 +96,8 @@ const executablePrefixes = [
   'skills/n8n-workflow-transport/templates/helper-scripts/sanitizer/',
   'skills/n8n-safety-router/scripts/', 'skills/github-program-reconciler/scripts/', 'skills/n8n-environment-setup/templates/.n8n-local/',
   'skills/n8n-environment-setup/templates/.n8n-production-cloudflare/',
-  'skills/codex-ssh-hostinger-coolify-setup-maintainer/scripts/', 'skills/secure-ci-cd/scripts/'
+  'skills/codex-ssh-hostinger-coolify-setup-maintainer/scripts/', 'skills/secure-ci-cd/scripts/',
+  'skills/host-observability/scripts/'
 ];
 const executableExtensions = new Set(['.ps1', '.cmd', '.bat', '.cjs', '.mjs', '.js', '.ts', '.tsx', '.py', '.sh']);
 const allowedTrackedTemplatePrefixes = [
@@ -728,7 +729,6 @@ function validateLegacyReferences(errors) {
   for (const entry of listFiles()) {
     if (excluded.has(entry.relPath)) continue;
     if (!/\.(md|json|ya?ml|txt|cjs|mjs|js|ps1|cmd|sh|py)$/i.test(entry.relPath)) continue;
-    if (entry.relPath.endsWith('.n6.json')) continue;
     if (surfaceAudit.legacyReferenceAllowed(entry.relPath, scopePolicy)) continue;
     const text = fs.readFileSync(entry.fullPath, 'utf8').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
     if (text.includes(`${legacyProjectToken}/`) || text.includes(legacyPublisherToken)) fail(errors, `${entry.relPath} references the retired project/publisher topology`);

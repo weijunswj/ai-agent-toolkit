@@ -13,7 +13,6 @@ const runtimePath = path.join(repoRoot, 'repo', 'scripts', 'toolkit-capability-r
 const policyPath = path.join(repoRoot, 'repo', 'contracts', 'repository-capability-registry', 'repository-capability-policy.json');
 const schemaPath = path.join(repoRoot, 'repo', 'contracts', 'repository-capability-registry', 'repository-capability-contract.schema.json');
 const runtime = require(runtimePath);
-const a1 = require(path.join(repoRoot, 'repo', 'scripts', 'toolkit-control-plane', 'control-plane-kernel.cjs'));
 
 const DEFAULT_REMOTE = 'https://github.com/weijunswj/ai-agent-toolkit.git';
 const SECRET = 'secret-fixture-value-must-not-persist';
@@ -96,7 +95,8 @@ test('A2 source/runtime contracts are closed and reuse the accepted A1 remote co
   const policy = JSON.parse(fs.readFileSync(policyPath, 'utf8'));
   const schema = JSON.parse(fs.readFileSync(schemaPath, 'utf8'));
 
-  assert.equal(runtime.REMOTE_IDENTITY_CONTRACT_VERSION, a1.REMOTE_IDENTITY_CONTRACT_VERSION);
+  // Stored repository identities are digests over this name, so it never changes.
+  assert.equal(runtime.REMOTE_IDENTITY_CONTRACT_VERSION, 'toolkit.control-plane.remote-identity.v1');
   assert.deepEqual(runtime.CAPABILITIES, ['repository.governance', 'execution_loop', 'repository.protection']);
   assert.deepEqual(policy.capabilities.map((entry) => entry.id), runtime.CAPABILITIES);
   for (const policyCapability of policy.capabilities) {
@@ -388,13 +388,13 @@ test('explicit status/setup/reopen/enable/disable operations are deterministic a
   assert.equal(runtime.status(callOptions(ctx)).capabilities['repository.governance'].state, 'unresolved');
 });
 
-test('A1 remote validation is the only canonicalisation path for durable identity', (t) => {
+test('the registry remote validation is the only canonicalisation path for durable identity', (t) => {
   const ctx = sandbox('git@github.com:weijunswj/ai-agent-toolkit.git');
   t.after(() => cleanup(ctx));
   const identity = runtime.resolveRepositoryIdentity(callOptions(ctx));
-  const a1Remote = a1.validateRemoteIdentity('git@github.com:weijunswj/ai-agent-toolkit.git');
+  const a1Remote = runtime.validateRemoteIdentity('git@github.com:weijunswj/ai-agent-toolkit.git');
   assert.equal(a1Remote.valid, true);
-  assert.equal(identity.remote_contract, a1.REMOTE_IDENTITY_CONTRACT_VERSION);
+  assert.equal(identity.remote_contract, runtime.REMOTE_IDENTITY_CONTRACT_VERSION);
   assert.equal(identity.repository_id, runtime.repositoryIdForCanonicalRemote(a1Remote.canonical));
   assert.match(identity.repository_id, /^[a-f0-9]{64}$/);
   assert.equal(identity.persisted_fields.includes('remote'), false);

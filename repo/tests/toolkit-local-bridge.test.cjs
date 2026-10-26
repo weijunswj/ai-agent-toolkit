@@ -2435,6 +2435,36 @@ test('SessionStart notice is silent outside Toolkit-managed git roots and writes
   }
 });
 
+test('SessionStart notice names a vendored Toolkit check that is older or missing in an ENABLED repository, read-only', () => {
+  const root = tmpRoot();
+  fs.mkdirSync(path.join(root, '.git'), { recursive: true });
+  writeFile(path.join(root, 'AGENTS.md'), managedAgentsTemplate());
+  const installer = require('../../skills/secure-ci-cd/scripts/install-plain-text-check.cjs');
+  const copy = path.join(root, '.github', 'scripts', 'plain-text-check.cjs');
+  writeFile(copy, installer.vendoredText());
+  const options = { targetRoot: root, pluginRoot: repoRoot, state: {}, governanceEnabled: () => true };
+  assert.equal(runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, options).status, 'ok', 'a current copy is quiet');
+  const source = fs.readFileSync(path.join(repoRoot, 'skills', 'secure-ci-cd', 'scripts', 'plain-text-check.cjs'), 'utf8');
+  writeFile(copy, installer.vendoredText(`${source}// an older copy\n`));
+  const before = snapshotTree(root);
+  const result = runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, options);
+  assert.equal(result.status, 'needs-attention');
+  assert.deepEqual(result.findings.map((finding) => [finding.file, finding.kind]), [['.github/scripts/plain-text-check.cjs', 'repo-check']]);
+  const message = formatAgentRulesPreflight(result);
+  assert.match(message, /^Toolkit note: this repository's Toolkit checks \(\.github\/scripts\/plain-text-check\.cjs\) differ from the running Toolkit .*refresh them with repository-agent-rules when convenient\. No files were changed\.$/);
+  assert.doesNotMatch(message, NEVER_HALTING);
+  assert.deepEqual(snapshotTree(root), before);
+  const notGoverned = runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, { ...options, governanceEnabled: () => false });
+  assert.equal(notGoverned.status, 'ok', 'outside an ENABLED repository the vendored checks are not compared');
+  fs.rmSync(copy);
+  const missing = runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, options);
+  assert.deepEqual(missing.findings.map((finding) => [finding.file, finding.detail]), [['.github/scripts/plain-text-check.cjs', 'missing']]);
+  assert.match(formatAgentRulesPreflight(missing), /Toolkit checks \(\.github\/scripts\/plain-text-check\.cjs\) are missing or differ from the running Toolkit /);
+  assert.equal(runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, { ...options, governanceEnabled: () => false }).status, 'ok', 'a missing copy is not noted outside an ENABLED repository');
+  writeFile(path.join(root, '.github', 'plain-text.json'), JSON.stringify({ off_reason: 'the owner switched it off for this repository' }));
+  assert.equal(runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, options).status, 'ok', 'a check switched off with a recorded reason is not noted as missing');
+});
+
 test('SessionStart notice says repository rules from a newer Toolkit are authoritative, once, without writing', () => {
   // Hub state records a newer Toolkit than the running copy, and the repository block differs.
   const root = tmpRoot();
@@ -3611,26 +3641,31 @@ test('native plugin manifests and hooks are valid and policy-light', () => {
   assert.doesNotMatch(claudeCommand, /CODEX_PLUGIN_ROOT|CODEX_PLUGIN_DATA/);
   assert.match(claudeCommand, /--sync-enabled/);
   assert.match(claudeCommand, /--sync-source claude-plugin/);
-  assert.deepEqual(Object.keys(codexHooks.hooks).sort(), ['PreToolUse', 'SessionStart', 'Stop', 'UserPromptSubmit']);
+  assert.deepEqual(Object.keys(codexHooks.hooks).sort(), ['PostToolUse', 'PreToolUse', 'SessionStart', 'Stop', 'UserPromptSubmit']);
   // The Codex helper guard is the first PreToolUse entry; it guards spawn_agent, its Agent alias and the
   // flattened namespaced MultiAgentV2 spawn names such as collaborationspawn_agent, and checks shell
   // commands (Bash) for AI attribution in commits and pull requests. The second entry and the
   // UserPromptSubmit entry run the same script for the governance hold (#542).
   assert.deepEqual(codexHooks.hooks.PreToolUse.map(entry => entry.matcher), ['^(?:Agent|[A-Za-z0-9_-]*spawn_agent|Bash)$', '^(?:apply_patch|Edit|Write|mcp__.*)$']);
   for (const entry of [...codexHooks.hooks.PreToolUse, ...codexHooks.hooks.UserPromptSubmit]) assert.match(entry.hooks[0].command, /toolkit-codex-helper-hook.cjs/);
-  assert.deepEqual(Object.keys(claudeHooks.hooks).sort(), ['PreToolUse', 'SessionStart', 'Stop', 'UserPromptSubmit']);
+  assert.deepEqual(Object.keys(claudeHooks.hooks).sort(), ['PostToolUse', 'PreToolUse', 'SessionStart', 'Stop', 'UserPromptSubmit']);
   const claudeAgentHook = claudeHooks.hooks.PreToolUse[0];
   assert.equal(claudeAgentHook.matcher, 'Agent|Task');
   assert.match(claudeAgentHook.hooks[0].command, /\$\{CLAUDE_PLUGIN_ROOT\}\/repo\/scripts\/toolkit-claude-agent-hook\.cjs/);
-  assert.deepEqual(claudeHooks.hooks.PreToolUse.map(entry => entry.matcher), ['Agent|Task', 'Bash|PowerShell', '^(?:Bash|PowerShell|Monitor|Edit|Write|MultiEdit|NotebookEdit|Agent|Task|mcp__.*)$']);
+  assert.deepEqual(claudeHooks.hooks.PreToolUse.map(entry => entry.matcher), ['Agent|Task', 'Bash|PowerShell', '^(?:Bash|PowerShell|Monitor|Edit|Write|MultiEdit|NotebookEdit|Agent|Task|mcp__.*)$', '^mcp__hearthbot__(?:post_message|edit_message)$']);
   assert.match(claudeHooks.hooks.PreToolUse[1].hooks[0].command, /toolkit-claude-attribution-hook\.cjs/);
   assert.match(claudeHooks.hooks.PreToolUse[2].hooks[0].command, /toolkit-governance-hook\.cjs" --event PreToolUse$/);
+  assert.match(claudeHooks.hooks.PreToolUse[3].hooks[0].command, /toolkit-claude-project-post-hook\.cjs"$/);
   assert.match(claudeHooks.hooks.UserPromptSubmit[0].hooks[0].command, /toolkit-governance-hook\.cjs" --event UserPromptSubmit$/);
   assert.equal(codexHooks.hooks.SessionEnd, undefined);
   assert.equal(claudeHooks.hooks.SessionEnd, undefined);
   // The only turn-end hook is the programme checkpoint: one command, a 30-second timeout and no matcher.
   for (const [hooks, root] of [[codexHooks, 'PLUGIN_ROOT'], [claudeHooks, 'CLAUDE_PLUGIN_ROOT']]) {
     assert.deepEqual(hooks.hooks.Stop, [{ hooks: [{ type: 'command', command: `node "\${${root}}/repo/scripts/toolkit-programme-checkpoint-hook.cjs"`, timeout: 30 }] }]);
+  }
+  // The after-tool hook runs the same script, only to mark a GitHub write for the turn-end programme refresh.
+  for (const [hooks, root, matcher] of [[codexHooks, 'PLUGIN_ROOT', '^(?:Bash|mcp__.*[Gg][Ii][Tt][Hh][Uu][Bb].*)$'], [claudeHooks, 'CLAUDE_PLUGIN_ROOT', '^(?:Bash|PowerShell|mcp__.*[Gg][Ii][Tt][Hh][Uu][Bb].*)$']]) {
+    assert.deepEqual(hooks.hooks.PostToolUse, [{ matcher, hooks: [{ type: 'command', command: `node "\${${root}}/repo/scripts/toolkit-programme-checkpoint-hook.cjs"`, timeout: 10 }] }]);
   }
   assert.doesNotMatch(`${codexCommand}\n${claudeCommand}`, /--enable-target|--force-downgrade/);
   assert.doesNotMatch(`${codexCommand}\n${claudeCommand}`, /\.sh(?:$|[\s"'])/i);
@@ -3686,7 +3721,7 @@ test('toolkit setup skill documents the end-to-end English setup journey', () =>
     assert.match(text, /Toolkit-managed update reports\/logs older than 7 days/i, relPath);
     assert.match(text, /Setup copies the official `n8n-io\/skills` folders as plain skills, so the `n8n-skills@n8n-io` plugin is not needed/i, relPath);
     assert.match(text, /pre-approval Claude(?: Code)? setup and plan discovery (?:start|launch) no Claude session/i, relPath);
-    assert.match(text, /The visible choices are `Toolkit repos: main session \+ Toolkit G0\/G1 helpers only\. Elsewhere: one layer of subagents\.`, `Broader native behaviour`, and `Keep current`/, relPath);
+    assert.match(text, /The visible choices are `Toolkit repos: main session \+ Toolkit planning and build helpers only\. Elsewhere: one layer of subagents\.`, `Broader native behaviour`, and `Keep current`/, relPath);
     assert.match(text, /`toolkit-direct`\) worker and checker topology is retired/, relPath);
     assert.match(text, /setup runs no worker or checker launch probes/i, relPath);
     assert.match(text, /restart-pending, stale, or failed verification leaves the safe root-only policy/i, relPath);

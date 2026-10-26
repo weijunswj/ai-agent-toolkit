@@ -7,9 +7,9 @@
 
 const ROLES = Object.freeze({
   G0: Object.freeze({
-    name: 'toolkit-g0-helper', registryRole: 'DISCOVERY_HELPER', title: 'Toolkit V3 G0 evidence helper',
+    name: 'toolkit-g0-helper', registryRole: 'DISCOVERY_HELPER', title: 'Toolkit planning helper (G0)',
     tools: ['Read', 'Glob', 'Grep'], disallowed: ['Agent', 'Task', 'Bash', 'PowerShell', 'Write', 'Edit', 'NotebookEdit'], maxTurns: 50,
-    description: 'Leaf read-only evidence helper for the Toolkit V3 G0.Subagent role. Use for bounded, separable evidence gathering (source or dependency inventories, bounded file and configuration inspection, or factual answers with exact provenance) when a G0 or G1 lead assigns it in gate work, or when the main session asks outside gate work, where no admission is needed. Never for implementation, tests, decisions or delegation.',
+    description: 'Leaf read-only evidence helper for the Toolkit planning (G0) subagent role. Use for bounded, separable evidence gathering (source or dependency inventories, bounded file and configuration inspection, or factual answers with exact provenance) when a G0 or G1 lead assigns it in gate work, or when the main session asks outside gate work, where no admission is needed. Never for implementation, tests, decisions or delegation.',
     scope: [
       'Permitted: the assigned, bounded, read-only evidence question, within the named read scope.',
       'Forbidden: edits, commands or any effect; architecture, scope, authority, UAT or release decisions; publication, acceptance or finality; delegation of any kind; credential, permission or security changes.',
@@ -19,9 +19,9 @@ const ROLES = Object.freeze({
     output: ['status: complete, blocked or limit-reached', 'observations: one claim each, with path and line range or the pattern and root that produced it', 'unknowns: what could not be determined, and why', 'limits_used: turns and reads consumed', 'blocker: the exact fact, if any'],
   }),
   G1: Object.freeze({
-    name: 'toolkit-g1-helper', registryRole: 'BUILDER_HELPER', title: 'Toolkit V3 G1 bounded helper',
+    name: 'toolkit-g1-helper', registryRole: 'BUILDER_HELPER', title: 'Toolkit build helper (G1)',
     tools: ['Read', 'Glob', 'Grep', 'Bash', 'Edit', 'Write'], disallowed: ['Agent', 'Task'], maxTurns: 60,
-    description: 'Leaf bounded implementation or validation helper for the Toolkit V3 G1.Subagent role. Use for independent, separable implementation or testing within explicitly named files and commands when the G1 lead assigns it in gate work, or when the main session asks outside gate work, where no admission is needed. The caller integrates and validates; this helper never owns the Core, publishes or declares acceptance.',
+    description: 'Leaf bounded implementation or validation helper for the Toolkit build (G1) subagent role. Use for independent, separable implementation or testing within explicitly named files and commands when the G1 lead assigns it in gate work, or when the main session asks outside gate work, where no admission is needed. The caller integrates and validates; this helper never owns the Core, publishes or declares acceptance.',
     scope: [
       'Permitted: the assigned implementation or test work, inside the named write scope and command allowlist.',
       'Follow the Toolkit engineering default: cohesive responsibilities, encapsulated state, clear interfaces and composition. Keep configuration as data, and record a concrete reason for any functional or data-only boundary. Do not wrap functions in cosmetic classes.',
