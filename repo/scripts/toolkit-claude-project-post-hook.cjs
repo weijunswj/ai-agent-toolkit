@@ -17,8 +17,10 @@
 //   every one of its Update lines word for word and adds at least one new one.
 // - Merge summary: in a Projects session (one that has used the Projects tools), a PR merge (the gh merge command, a
 //   gh api PUT to .../pulls/<n>/merge or a merge_pull_request tool) is refused until a line of one of its own posts
-//   says "external effects" and names that PR. It is a tripwire on the command text only: curl, GraphQL, wrapper
-//   shells, prefixes, aliases, scripts and direct pushes are not seen, and quoted text and heredocs are ignored.
+//   says "external effects" and names that PR; every merge in a command is checked. It is a tripwire on the command
+//   text only: heredoc bodies and quoted strings are removed (a quoted single word is kept), and curl, GraphQL,
+//   wrapper shells, prefixes, aliases, scripts, direct pushes, a variable PR number, $'...' quoting, and a merge on a
+//   line after a quoted <<word or $((x<<y)) are not seen.
 // Sessions without these tools (normal chats, Codex and sessions outside Projects) are never touched. Questions go
 // on decision cards, a separate tool this hook does not check. Input or a transcript it cannot read passes. The
 // hook is registered without `onFailure: "block"` so a hook that cannot start never silences every post.
@@ -240,28 +242,39 @@ function editIssue(previous, text) {
 // run in linear time.
 function unquoted(command) {
   return command
-    .replace(/(?<!<)<<(?!<)-?\s*(['"]?)([A-Za-z_]\w*)\1([^\n]*)\n[\s\S]*?(?:\n[ \t]*\2\b|$)/g, (match, quote, tag, rest) => ` ${rest} `)
+    .replace(/(?<!<)<<(?!<)-?\s*(['"]?)([A-Za-z_]\w*)\1([^\n]*)(?:\n|$)[\s\S]*?(?:\n[ \t]*\2\b|$)/g, (match, quote, tag, rest) => ` ${rest} `)
     .replace(/\\[\s\S]|"([^"\s;&|()<>\\]*)"|'([^'\s;&|()<>]*)'|"(?:[^"\\]|\\[\s\S])*"|'[^']*'/g, (match, a, b) => ` ${a ?? b ?? ''} `);
 }
 
-// The PR a shell command or merge tool merges, as { number } (null when the call names none), or null when the call
-// merges no PR. Only a command at the start of a shell segment counts.
-function mergeTarget(tool, toolInput) {
+// Options of the merge command whose value is text, a file or a repository, never the PR to merge.
+const VALUE_OPTIONS = /(?:^|\s)(?:--(?:body|body-file|subject|author-email|match-head-commit|repo)|-[bFtAR])(?:=|\s+)\S*/g;
+
+// Every PR a shell command or merge tool merges, as a list of { number } (null when a merge names none), or null when
+// the call merges no PR. Only a command at the start of a shell segment counts.
+function mergeTargets(tool, toolInput) {
   if (MERGE_TOOL.test(tool)) {
     const number = String(toolInput?.pull_number ?? toolInput?.pullNumber ?? '');
-    return { number: /^\d+$/.test(number) ? number : null };
+    return [{ number: /^\d+$/.test(number) ? number : null }];
   }
   if (!SHELL_TOOL.test(tool)) return null;
+  const targets = [];
   for (const part of unquoted(textOf(toolInput?.command)).split(/[;&|\r\n()]+/)) {
     const merge = part.match(/^\s*gh\s+pr\s+merge\b(.*)$/);
     if (merge) {
-      const number = merge[1].match(/\/pull\/(\d+)\b/) || merge[1].match(/(?:^|\s)#?(\d+)(?=\s|$)/);
-      return { number: number ? number[1] : null };
+      const args = merge[1].replace(VALUE_OPTIONS, ' ');
+      const number = args.match(/\/pull\/(\d+)\b/) || args.match(/(?:^|\s)#?(\d+)(?=\s|$)/);
+      targets.push({ number: number ? number[1] : null });
+      continue;
     }
     const api = part.match(/^\s*gh\s+api\b.*?\/pulls\/(\d+)\/merge\b/);
-    if (api && /(?:^|\s)(?:-X\s*|--method[=\s]+)PUT\b/i.test(part)) return { number: api[1] };
+    if (api && /(?:^|\s)(?:-X\s*|--method[=\s]+)PUT\b/i.test(part)) targets.push({ number: api[1] });
   }
-  return null;
+  return targets.length ? targets : null;
+}
+
+// The first PR a call merges, or null.
+function mergeTarget(tool, toolInput) {
+  return mergeTargets(tool, toolInput)?.[0] ?? null;
 }
 
 // The PR word, then the number alone or in a list ("PR 628", "PRs 627 and 628"), or a /pull/<n> link. A bare #<n> is
@@ -287,13 +300,13 @@ function mergeIssue(target, posts) {
 function decide(input, readLines = file => fs.readFileSync(file, 'utf8').split('\n')) {
   const tool = String(input?.tool_name || '');
   const post = tool === POST_TOOL || tool === EDIT_TOOL;
-  const merge = post ? null : mergeTarget(tool, input?.tool_input);
+  const merge = post ? null : mergeTargets(tool, input?.tool_input);
   if (!post && !merge) return '';
   if (typeof input.transcript_path !== 'string' || !input.transcript_path) return '';
   let lines;
   try { lines = readLines(input.transcript_path); } catch { return ''; }
   const { running, projects, posts } = readTranscript(lines);
-  if (merge) return projects ? mergeIssue(merge, posts) : '';
+  if (merge) return projects ? merge.map(target => mergeIssue(target, posts)).find(Boolean) || '' : '';
   const text = input?.tool_input?.text;
   const issue = linkIssue(text);
   if (issue) return `Toolkit Projects rule: every PR, thread, file or artifact you mention to the owner carries its link. ${issue}`;
@@ -326,4 +339,4 @@ function main() {
 
 if (require.main === module) process.exitCode = main();
 
-module.exports = { decide, linkIssue, wordingIssue, layoutIssue, editIssue, mergeTarget, readTranscript, NEAR_LIMIT_BYTES };
+module.exports = { decide, linkIssue, wordingIssue, layoutIssue, editIssue, mergeTarget, mergeTargets, readTranscript, NEAR_LIMIT_BYTES };

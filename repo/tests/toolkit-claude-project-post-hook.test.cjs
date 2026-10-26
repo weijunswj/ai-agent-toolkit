@@ -9,7 +9,7 @@ const { spawnSync } = require('node:child_process');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const HOOK = path.join(ROOT, 'repo', 'scripts', 'toolkit-claude-project-post-hook.cjs');
-const { decide, linkIssue, wordingIssue, layoutIssue, editIssue, mergeTarget, NEAR_LIMIT_BYTES } = require('../scripts/toolkit-claude-project-post-hook.cjs');
+const { decide, linkIssue, wordingIssue, layoutIssue, editIssue, mergeTarget, mergeTargets, NEAR_LIMIT_BYTES } = require('../scripts/toolkit-claude-project-post-hook.cjs');
 
 const POST = 'mcp__hearthbot__post_message';
 const EDIT = 'mcp__hearthbot__edit_message';
@@ -286,6 +286,13 @@ test('merges in a Projects session need an earlier post with the PR\'s external 
   // A --body text never supplies the number.
   assert.deepEqual(mergeTarget('Bash', { command: 'gh pr merge --merge --body "closes 12"' }), { number: null });
   assert.deepEqual(mergeTarget('Bash', { command: 'gh pr merge 628 --merge --body "see 12"' }), { number: '628' });
+  // Option values (text, a file or a repository) never supply the number, even as one quoted word.
+  for (const command of ['gh pr merge 628 --body "https://github.com/o/r/pull/5"', 'gh pr merge --subject "5" 628', 'gh pr merge -R "o/r" 628', 'gh pr merge --repo=o/r 628']) {
+    assert.deepEqual(mergeTarget('Bash', { command }), { number: '628' }, command);
+  }
+  // Every merge in a command is a target.
+  assert.deepEqual(mergeTargets('Bash', { command: 'gh pr merge 627 && gh pr merge 628' }), [{ number: '627' }, { number: '628' }]);
+  assert.equal(mergeTargets('Bash', { command: 'npm test' }), null);
   for (const command of [
     'git merge origin/main', 'git commit -m "then gh pr merge 5"', 'gh pr view 5', 'echo gh pr merge 5',
     'git commit -m "fix; gh pr merge 5"', 'grep -E "foo|gh pr merge" x', 'echo "a && gh pr merge 5"',
@@ -298,13 +305,13 @@ test('merges in a Projects session need an earlier post with the PR\'s external 
     ['gh pr merge "628"', '628'], ["gh pr merge 'https://github.com/o/r/pull/628'", '628'],
     ['gh api -X PUT "repos/o/r/pulls/628/merge"', '628'], ['gh api -X "PUT" repos/o/r/pulls/628/merge', '628'],
     ['cat <<EOF > f; gh pr merge 628\nbody\nEOF', '628'], ['cat <<< y\ngh pr merge 628', '628'],
-    ['echo $((1<<2))\ngh pr merge 628', '628'], ["echo it\\'s; gh pr merge 628", '628'],
+    ['echo $((1<<2))\ngh pr merge 628', '628'], ["echo it\\'s; gh pr merge 628; echo 'x'", '628'],
     ['git commit -m "$(cat <<\'EOF\'\nmerge 627\nEOF\n)" && gh pr merge 628', '628'],
   ]) {
     assert.deepEqual(mergeTarget('Bash', { command }), { number }, command);
   }
   // Stripping stays fast on long hostile input.
-  for (const command of ['\\"'.repeat(40000), `cat <<EOF\n${'\n'.repeat(50000)}`, `"${'\\"'.repeat(40000)}`]) {
+  for (const command of ['\\"'.repeat(40000), `cat <<EOF\n${'\n'.repeat(50000)}`, `"${'\\"'.repeat(40000)}`, '<<A '.repeat(20000)]) {
     const started = Date.now();
     mergeTarget('Bash', { command });
     assert.ok(Date.now() - started < 500, command.slice(0, 10));
@@ -329,6 +336,13 @@ test('merges in a Projects session need an earlier post with the PR\'s external 
   assert.match(summary('~~~\nexternal effects of PR 628\n~~~'), /PR 628/);
   assert.equal(summary('External effects of PR #628: none.'), '');
   assert.equal(summary('External effects of PRs 627 and 628: none.'), '');
+  // Each merge in one command needs its own summary, and an option value never stands in for the PR.
+  const both = 'gh pr merge 627 && gh pr merge 628';
+  assert.match(merge([wake(), call(POST, { text: 'External effects of PR 627: none.' })], both), /external effects of PR 628/);
+  assert.equal(merge([wake(), call(POST, { text: 'External effects of PRs 627 and 628: none.' })], both), '');
+  for (const command of ['gh pr merge 628 --body "https://github.com/o/r/pull/5"', 'gh pr merge --subject "5" 628']) {
+    assert.match(merge([wake(), call(POST, { text: 'External effects of PR 5: none.' })], command), /PR 628/, command);
+  }
   assert.match(merge([wake(), call(POST, { text: 'External effects of PR 622: none.' })], 'gh pr merge 22'), /PR 22/);
   // Outside Projects (no Projects tool in the transcript), and for other commands, nothing is checked or read.
   assert.equal(merge([wake()]), '');
