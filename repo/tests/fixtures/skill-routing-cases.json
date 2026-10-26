@@ -2,6 +2,7 @@
   "schema_version": 2,
   "implicit_discovery_authorizes_mutation": false,
   "portfolio": [
+    "agent-cost-control",
     "codex-ssh-hostinger-coolify-setup-maintainer",
     "controller-bootstrap",
     "external-operation-preflight",
@@ -23,6 +24,7 @@
     "windows-local-dev-services"
   ],
   "invocation_modes": {
+    "agent-cost-control": "implicit",
     "codex-ssh-hostinger-coolify-setup-maintainer": "explicit",
     "external-operation-preflight": "implicit",
     "frontend-art-direction": "implicit",
@@ -924,6 +926,55 @@
       "kind": "overlap",
       "prompt": "Review the public ports and reverse proxy of this self-hosted service, then check the plan to promote it from alpha to production.",
       "expected": ["self-hosted-service-safety", "external-operation-preflight"],
+      "excluded": []
+    },
+    {
+      "id": "agent-cost-control-positive",
+      "kind": "positive",
+      "prompt": "Set up a daily scheduled task that checks the open pull requests, and pick the model and effort it should run on.",
+      "expected": ["agent-cost-control"],
+      "excluded": []
+    },
+    {
+      "id": "agent-cost-control-positive-2",
+      "kind": "positive",
+      "prompt": "Our helper subagents and automations burn too much usage; which ones can move to a smaller model?",
+      "expected": ["agent-cost-control"],
+      "excluded": []
+    },
+    {
+      "id": "agent-cost-control-positive-3",
+      "kind": "positive",
+      "prompt": "This long-running review runner thread has grown huge; rotate it to a fresh thread with a handoff file.",
+      "expected": ["agent-cost-control"],
+      "excluded": []
+    },
+    {
+      "id": "agent-cost-control-negative",
+      "kind": "negative",
+      "prompt": "Refactor the invoice total calculation and add unit tests for rounding.",
+      "expected": [],
+      "excluded": ["agent-cost-control"]
+    },
+    {
+      "id": "agent-cost-control-negative-2",
+      "kind": "negative",
+      "prompt": "Explain how a transformer language model works in general terms.",
+      "expected": [],
+      "excluded": ["agent-cost-control"]
+    },
+    {
+      "id": "agent-cost-control-adversarial",
+      "kind": "adversarial",
+      "prompt": "Add a cost column to the shop's product table and show the price per item; nothing here runs on a schedule or calls a model.",
+      "expected": [],
+      "excluded": ["agent-cost-control"]
+    },
+    {
+      "id": "agent-cost-control-overlap",
+      "kind": "overlap",
+      "prompt": "Harden this GitHub Actions pipeline and choose the model and effort for the step that calls a model to summarise test failures.",
+      "expected": ["secure-ci-cd", "agent-cost-control"],
       "excluded": []
     },
     {
