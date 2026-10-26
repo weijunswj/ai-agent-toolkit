@@ -42,7 +42,8 @@
 //
 // Not covered: wrapped or nested host launches (bash -lc, timeout, Start-Process and the like), a
 // prompt file fed to a hook script, pasted text that has a plain approval line, scripts or programs
-// that call git or the GitHub API themselves, curl and other HTTP clients, git and shell aliases,
+// that call git or the GitHub API themselves, curl and other HTTP clients, a sha= field put in a
+// comment or an echo on purpose, git and shell aliases,
 // commands inside files, pushes through a second remote or a wrapper, GH_REPO set outside the command
 // (an env file, a profile or a long-lived shell), direct commits to the default branch through the
 // Contents API, GraphQL createCommitOnBranch or the connector's file-write tools (push_files,
@@ -69,14 +70,16 @@ const SLUG = '[A-Za-z0-9._-]+\\/[A-Za-z0-9._-]+';
 const MAX_APPROVAL_LINE = 200;
 // A no, a doubt, a condition, a delay, a hand-off, a report or another kind of merge (a branch name
 // such as "main" means merging a branch, not the pull request): the line is not an approval.
-const HOLD_WORDS = /n't\b|\b(?:not|no|nope|never|dont|wont|cant|cannot|wait\w*|hold\w*|paus\w*|postpon\w*|delay\w*|defer\w*|halt\w*|veto\w*|undo|nobody|none|neither|nor|later|until|till|unless|if|after|before|once|when|whenever|cancel\w*|stop\w*|without|given|providing|presum\w*|should|subject|contingent|barring|iff|green|days?|cob|end|eventually|sometime|morning|afternoon|evening|tomorrow|tonight|minutes?|mins?|hours?|hrs?|maybe|perhaps|probably|possibly|might|guess|think|unsure|idk|dunno|hmm+|or|myself|into|conflicts?|revert\w*|reject\w*|refus\w*|block\w*|skip\w*|abort\w*|den(?:y|ied)|declin\w*|provided|assuming|pending|long|soon|bit|while|moment|secs?|seconds?|next|then|eod|tmrw?|week|weekend|month|mon(?:day)?|tue(?:s|sday)?|wed(?:nesday)?|thu(?:rs|rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec|wants?|ready|step|will|plan|todo|option|agent|main|master|trunk|develop|default|upstream|origin|base|broke|broken|close|closed|i'll|we'll|you'll|says?|said|reply|type|wrote|summary|merged|merging)\b|\d\s*(?:am|pm)\b|\b\d{1,2}:\d{2}\b/i;
-// A question: a question mark, or a line that opens like one.
-const QUESTION = /\?|^(?:should|shall|could|would|why|what|how|is|are|did|does|(?:do|can|may)\s+(?:we|you|i)|will|have|has|was|were)\b/i;
-const LIST_MARKER = /^\s*(?:[-*\u2022]|\d{1,3}[.):])\s*/;
+const HOLD_WORDS = /n't\b|\b(?:not|no|nope|never|dont|wont|cant|cannot|wait\w*|hold\w*|paus\w*|postpon\w*|delay\w*|defer\w*|halt\w*|veto\w*|undo\w*|nobody|none|neither|nor|later|until|till|unless|if|after|before|once|when|whenever|cancel\w*|stop\w*|without|given|providing|presum\w*|should|subject|contingent|barring|iff|days?|noon|midnight|cob|end|eventually|sometime|morning|afternoon|evening|tomorrow|tonight|minutes?|mins?|hours?|hrs?|maybe|perhaps|probably|possibly|might|guess|think|unsure|idk|dunno|hmm+|or|myself|into|conflicts?|revert\w*|reject\w*|refus\w*|block\w*|skip\w*|abort\w*|den(?:y|ied)|declin\w*|provided|assuming|pending|long|soon|bit|while|moment|secs?|seconds?|next|then|eod|tmrw?|weeks?|weekends?|months?|mon(?:day)?|tue(?:s|sday)?|wed(?:nesday)?|thu(?:rs|rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec|wants?|ready|step|will|plan|todo|option|agent|main|mainline|master|trunk|develop|dev|staging|release|prod|default|upstream|origin|base|broke|broken|clos\w*|fix\w*|resolv\w*|i'll|we'll|you'll|says?|said|reply|type|wrote|summary|merged|merging)\b|\d\s*(?:am|pm)\b|\b\d{1,2}:\d{2}\b|\bon\s+green\b/i;
+// A question: a question mark, "can we" or "may I" anywhere, or a line that opens like one.
+const QUESTION = /\?|\b(?:can|may|could|shall)\s+(?:we|i)\b|^(?:should|shall|could|would|why|what|how|is|are|did|does|do\s+(?:we|you|i)|will|have|has|was|were)\b/i;
+const LIST_MARKER = /^\s*(?:[-*+\u2022]|\d{1,3}[.):]|[a-z][.)])\s+|^\s*[-*+\u2022]\s*/i;
 const APPROVAL_URL = /(?:https?:\/\/)?(?:www\.)?github\.com\/([A-Za-z0-9._-]+\/[A-Za-z0-9._-]+)\/(?:pull|issues)\/(\d{1,6})\S*/gi;
-// A quote: a line opened with ">", double quotes, backticks, or a single quote at a word edge
-// (apostrophes inside words, as in "622's", are fine).
-const QUOTED = /^>|["`]|(?:^|\s)'|'(?=\s|$|[.,!;:])/;
+// The link itself, without the rest of its word, so a hold word glued to it ("…/622,later") is read.
+const APPROVAL_LINK = new RegExp(APPROVAL_URL.source.slice(0, -3), 'gi');
+// A quote: a line opened with ">", double quotes, backticks, angle or corner brackets, an ellipsis,
+// or a single quote at a word edge (apostrophes inside words, as in "622's", are fine).
+const QUOTED = /^>|["`<「」『』…]|\.\.\.|(?:^|\s)'|'(?=\s|$|[.,!;:])/;
 const APPROVAL_SHA = /\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b/gi;
 // Named pull requests: owner/name#N or #N anywhere, and bare numbers right before or after "merge"
 // (a list such as "601, 605 and 609" included). Other numbers on the line are not read as pull
@@ -184,7 +187,7 @@ function approvalsIn(prompt) {
   for (const raw of normalise(prompt).slice(0, MAX_PROMPT_CHARS).split(/\r?\n/)) {
     const line = raw.replace(LIST_MARKER, '').trim();
     // Words in a link or a repository name ("ai-agent-toolkit") are not read as hold words.
-    const words = line.replace(APPROVAL_URL, ' ').replace(SLUG_NAME, ' ');
+    const words = line.replace(APPROVAL_LINK, ' ').replace(SLUG_NAME, ' ');
     if (line.length > MAX_APPROVAL_LINE || !/\bmerge\b/i.test(words) || HOLD_WORDS.test(words) || QUESTION.test(line) || QUOTED.test(raw.trim()) || QUOTED.test(line)) continue;
     const items = [...line.matchAll(APPROVAL_URL)].map(match => ({ repository: match[1], pr: Number(match[2]) }));
     let rest = line.replace(APPROVAL_URL, ' ');
@@ -479,6 +482,6 @@ function mayMerge(input) {
 const CHECK_FAILED = 'Toolkit: the merge check failed, so this merge or push is refused. Retry it; if this repeats, run `setup toolkit` to repair the Toolkit plugin.';
 
 module.exports = Object.freeze({
-  APPROVALS_BASENAME, APPROVALS_SCHEMA, CHECK_FAILED, MAX_AGE_MS, MergeApprovals, MergeHoldError,
+  APPROVALS_BASENAME, APPROVALS_SCHEMA, CHECK_FAILED, MAX_AGE_MS, MAX_COMMAND_CHARS, MergeApprovals, MergeHoldError,
   approvalsIn, decide, mayMerge, recordPrompt, shellMerges,
 });

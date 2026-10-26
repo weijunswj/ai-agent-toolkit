@@ -85,7 +85,7 @@ test('a plain yes with "merge" and a number is an approval; a no, a doubt or a q
     ['merge 622 & 623', [[null, 622, null], [null, 623, null]]],
   ];
   // Natural wordings that must count.
-  for (const text of ["merge 622","yes, merge 622","merge #622","Merge #622.","merge 622!","merge PR 622","merge PR #622","merge pull request 622","merge 622 at ee067e1","merge 622 (head ee067e1)","merge #622 at ee067e1","OK to merge 622 at ee067e1","merge https://github.com/weijunswj/ai-agent-toolkit/pull/622","merge weijunswj/ai-agent-toolkit#622","ok merge 622 now","go ahead and merge 622","LGTM, merge 622","please merge 622","squash and merge 622","it's fine, merge 622","- merge 622","merge 622 and 623","merge 622 & 623"]) assert.notDeepEqual(hold.approvalsIn(text), [], text);
+  for (const text of ["can you merge 622","CI is green, merge 622","merge https://github.com/o/r/pull/622/files","merge 622","yes, merge 622","merge #622","Merge #622.","merge 622!","merge PR 622","merge PR #622","merge pull request 622","merge 622 at ee067e1","merge 622 (head ee067e1)","merge #622 at ee067e1","OK to merge 622 at ee067e1","merge https://github.com/weijunswj/ai-agent-toolkit/pull/622","merge weijunswj/ai-agent-toolkit#622","ok merge 622 now","go ahead and merge 622","LGTM, merge 622","please merge 622","squash and merge 622","it's fine, merge 622","- merge 622","merge 622 and 623","merge 622 & 623"]) assert.notDeepEqual(hold.approvalsIn(text), [], text);
   for (const [text, expected] of approvals) assert.deepEqual(hold.approvalsIn(text).map(({ repository, pr, sha }) => [repository, pr, sha]), expected, text);
   const refusals = [
     "don't merge 618", 'Don’t merge 618', 'please DON’T merge 618', 'do not merge 618 yet',
@@ -112,6 +112,10 @@ test('a plain yes with "merge" and a number is an approval; a no, a doubt or a q
     'merge 622 pending review', 'merge 622 assuming checks pass', 'dunno, merge 622', 'merge 622 on 27 Oct',
     // reports
     'Claude wants to merge 622', 'PR 622 is ready to merge', 'Next step: merge 622', 'merge 622, then close 619',
+    // a hold word glued to a link, more branch names, delays, a closing reference, a question mid-line, more quote forms
+    'merge https://github.com/o/r/pull/622,later', 'merge https://github.com/o/r/pull/622—not yet', 'merge 622 in 2 weeks', 'merge 622 at noon',
+    'merge 622 undone', 'merge 622, closes #10', 'ok can we merge 622', '<merge 622>', '+ > merge 622', 'a. > merge 622', '…merge 622', 'merge 622...',
+    '「merge 622」', 'merge dev to #622', 'merge staging to #622', 'merge release to #622', 'merge prod to #622', 'merge mainline to #622',
     // merging a branch into the pull request, counts, other forms of the listed words, quotes after a list marker
     ...["please merge main → #622","merge main -> #622","merge main to #622","merge main to PR #622","merge main in #622","merge main onto #622","merge main with #622","merge main for #622","merge main on #622","merge main on top of #622","merge main, #622","merge main w/ #622","merge main back to #622","merge-main #622","merge main@#622","merge latest main to #622","merge upstream main in #622","merge from main in #622","merge in main for #622","git merge main on #622","622 merge main","#622 merge main","#622: merge main","PR 622 merge main","PR #622: merge main","for #622, merge main","update #622: merge main","bring #622 up to date: merge main","merge master to #622","merge develop to #622","merge the default branch to #622","merge main to weijunswj/ai-agent-toolkit#622","merge main to https://github.com/weijunswj/ai-agent-toolkit/pull/622","fix 3 merge issues in 622","there are 2 merge commits in 622","merge 2 branches","merge 2 PRs: 622 and 623","5 merge commits","merge 622 cancelled","merge 622 is canceled","holding merge 622","merge 622, still waiting on CI","pause merge 622","postpone merge 622","delay merge 622","defer merge 622","halt merge 622","veto merge 622","undo merge 622","nobody merge 622","neither merge 622 nor 623","merge 622 in 2 days","merge 622 at 5pm","merge 622 at 17:00","merge 622 by end of day","merge 622 by COB","merge 622 this afternoon","eventually merge 622","sometime merge 622","merge 622 given CI passes","merge 622 providing CI passes","merge 622 presuming CI passes","merge 622 should CI pass","merge 622 on green","merge 622 subject to review","merge 622 contingent on review","merge 622 iff green","merge 622 barring failures","can we merge 622","may we merge 622","the agent will merge 622","Plan: merge 622","TODO: merge 622","Option A: merge 622","- > merge 622","1. > merge 622","«merge 622»","＞ merge 622"],
   ];
@@ -230,7 +234,7 @@ test('a REST merge path after a quoted value with a newline, ; & or | is still h
   assert.equal(hold.mayMerge(cmd), true);
   const words = { cwd: ctx.repo, tool_name: 'shell', tool_input: { command: ['gh', 'pr', 'merge', '618', '--match-head-commit', SHA] } };
   assert.match(decide(ctx, words).deny, /has not approved/, 'a Codex word list is joined');
-  const long = bash(ctx.repo, `echo ${'x'.repeat(hold.MAX_COMMAND_CHARS || 1024 * 1024)} && gh pr merge 618`);
+  const long = bash(ctx.repo, `echo ${'x'.repeat(hold.MAX_COMMAND_CHARS)} && gh pr merge 618`);
   assert.match(decide(ctx, long).deny, /too long to check/, 'merge after the first megabyte');
   assert.equal(decide(ctx, bash(ctx.repo, `echo ${'x'.repeat(1024 * 1024)}`)), null, 'a long command with no merge or push');
   typed(ctx, 'merge 618');
