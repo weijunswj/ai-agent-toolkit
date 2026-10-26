@@ -1,5 +1,14 @@
 # Toolkit Changelog
 
+## Unreleased
+
+### Setup launch on Windows
+
+- **One setup command for every shell:** agents now set the shell tool's working folder to the managed checkout and run `node repo/scripts/setup-toolkit.cjs --execute --profile auto-main`, with no quotes and no `$env:` or `%...%` variables. The old PowerShell-only line failed when Codex ran it through `cmd.exe`, so "refresh toolkit" never started setup. Hosts without a working-folder setting pass the full script path in forward slashes and stop if it contains a space.
+- **Same form for toolkit env and the setup help:** the `toolkit-env` skill and `setup-toolkit.cjs --help` give the working-folder form; the `--codex-cli` hint asks for a resolved full path.
+- **PowerShell blocks for people:** commands people type themselves in the README, the bridge guide and the toolkit env guide keep their PowerShell form and are labelled PowerShell.
+- **Windows launch test:** a new test runs the agent command through both `cmd.exe` and PowerShell, and shows the old line failing through `cmd.exe`.
+
 ## 3.15.5
 
 ### Plain-text check

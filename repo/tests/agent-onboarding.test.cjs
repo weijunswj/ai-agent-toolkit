@@ -56,9 +56,9 @@ test('agent onboarding path keeps source-of-truth and validation anchors visible
   assert.match(readText('repo/docs/FOR_AI_AGENTS.md'), /Persistent status, report, implementation plan, handoff, operations, setup, CI\/CD, deployment, safety, and troubleshooting notes belong under an existing `docs\/` path/);
   assert.match(readText('repo/docs/FOR_AI_AGENTS.md'), /read the relevant docs and treat them as active context/i);
   assert.match(readText('repo/docs/FOR_AI_AGENTS.md'), /run the host-aware orchestrator from the managed checkout when that checkout exists/);
-  assert.match(readText('repo/docs/FOR_AI_AGENTS.md'), /\$env:USERPROFILE\\\.ai-agent-toolkit\\source\\ai-agent-toolkit\\repo\\scripts\\setup-toolkit\.cjs/);
+  assert.match(readText('repo/docs/FOR_AI_AGENTS.md'), /Set the shell tool's working folder to the managed checkout \(`<home folder>\/\.ai-agent-toolkit\/source\/ai-agent-toolkit` as a full path\) and run `node repo\/scripts\/setup-toolkit\.cjs --execute --profile auto-main`/);
   assert.doesNotMatch(readText('repo/docs/FOR_AI_AGENTS.md'), /POSIX|\$HOME\/\.ai-agent-toolkit/);
-  assert.match(readText('repo/docs/FOR_AI_AGENTS.md'), /Use `node repo\/scripts\/setup-toolkit\.cjs --execute --profile auto-main` from the active repo only as bootstrap\/fallback/);
+  assert.match(readText('repo/docs/FOR_AI_AGENTS.md'), /Run the same command with the working folder set to the active repo only as bootstrap\/fallback/);
   assert.match(readText('repo/docs/FOR_AI_AGENTS.md'), /Verification after managed setup must use the managed checkout verifier/);
   assert.match(readText('repo/docs/FOR_AI_AGENTS.md'), /Even when Toolkit is already installed, complete the full setup journey so stale pieces are detected and patched in order/);
   assert.match(readText('repo/docs/FOR_AI_AGENTS.md'), /routine setup uses `repo\/tests\/toolkit-local-bridge-hook-light\.test\.cjs`/);

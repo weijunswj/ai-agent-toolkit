@@ -26,15 +26,19 @@ Bridge setup, repo auto-update, sync, audit, disable, and troubleshooting are To
 1. Inspect the local repo context and read `repo/docs/TOOLKIT-LOCAL-BRIDGE.md` before changing bridge behavior or running write commands.
 2. For English prompts such as `setup toolkit`, `refresh toolkit`, or plain `refresh` in a Toolkit setup/update context, use the host-aware setup orchestrator from the managed checkout whenever it exists. Do not use the active repo worktree command as the canonical route.
 
-```powershell
-node "$env:USERPROFILE\.ai-agent-toolkit\source\ai-agent-toolkit\repo\scripts\setup-toolkit.cjs" --execute --profile auto-main
+Set the shell tool's working folder (its `workdir` or `cwd` setting) to the managed checkout, `<home folder>/.ai-agent-toolkit/source/ai-agent-toolkit` written as a full path, and run:
+
+```text
+node repo/scripts/setup-toolkit.cjs --execute --profile auto-main
 ```
+
+The command has no quotes and no environment variables, so the same text works whether the host runs it through PowerShell, `cmd.exe` or WSL. Never put `$env:...` or `%...%` in a command you run, and never `cd` first: hosts can launch commands through a shell other than the one you expect, and a PowerShell-only line fails in `cmd.exe`. If the shell tool has no working-folder setting, resolve the home folder yourself and run `node <home folder>/.ai-agent-toolkit/source/ai-agent-toolkit/repo/scripts/setup-toolkit.cjs --execute --profile auto-main` with the full path in forward slashes and no variables; if that path contains a space, report it and stop instead of guessing quotes.
 
 On Codex, setup writes outside the chat's folder (the managed checkout, `~/.codex` and `~/.ai-agent-toolkit`), so the workspace sandbox blocks it. Run the setup command with escalated permissions (outside the sandbox) from the first call and ask for that one approval up front; never retry it inside the sandbox.
 
 The orchestrator discovers current state, shows one consolidated upfront setup question bank, pauses before preference or target writes, then runs to completion unless a real safety blocker appears.
 
-Treat exit code `23` as an intentional pause only after the managed child emits exactly one complete bank on stdout and the delegating parent acknowledges that it forwarded the bank visibly. In a chat host, emit the complete compact bank (one table per section) as ordinary visible text, followed only by its one reply line, then stop: no execution summary, checkout report or closing element until setup has finished. When the user says `explain 1.2`, run the same setup command with `--execute` replaced by `--plan --explain 1.2`, keeping `--host`, `--profile` and `--repo-root`, and show its output: the full text of that question under the same bank reference. Hidden tool output, an internal summary, or a statement that the bank exists does not count. A blanket recommended-default action is allowed only in the same visible response as every consequential current outcome, recommendation, effect, and choice. Never say `shown above` or equivalent unless the complete bank is in that same payload. Missing, partial, duplicate, misordered, wrong-stream, timed-out, signalled, failed, recursive, or invalid-identity managed output fails closed in one execution without retry, fallback, approval, or writes. Do not rerun with `--yes-recommended` unless the user explicitly asked to use the displayed recommended choices in the current turn.
+Treat exit code `23` as an intentional pause only after the managed child emits exactly one complete bank on stdout and the delegating parent acknowledges that it forwarded the bank visibly. In a chat host, emit the complete compact bank (one table per section) as ordinary visible text, followed only by its one reply line, then stop: no execution summary, checkout report or closing element until setup has finished. When the user says `explain 1.2`, run the same setup command with `--execute` replaced by `--plan --explain 1.2`, keeping `--host`, `--profile`, `--repo-root` and the same working folder, and show its output: the full text of that question under the same bank reference. Hidden tool output, an internal summary, or a statement that the bank exists does not count. A blanket recommended-default action is allowed only in the same visible response as every consequential current outcome, recommendation, effect, and choice. Never say `shown above` or equivalent unless the complete bank is in that same payload. Missing, partial, duplicate, misordered, wrong-stream, timed-out, signalled, failed, recursive, or invalid-identity managed output fails closed in one execution without retry, fallback, approval, or writes. Do not rerun with `--yes-recommended` unless the user explicitly asked to use the displayed recommended choices in the current turn.
 
 On Claude Code, setup ends with an `## Install check` section: `passed`, `new session needed` (start a new Claude Code session and close sessions opened before the update, so it loads the new version) or `action required` with numbered steps. Exit code `24` means setup finished its steps but the install check needs a person: show the numbered steps to the user exactly and do not report setup as successful. On either host, exit code `24` with `## Setup updated itself` means setup updated its own scripts and stopped before any other step: run the same setup command again straight away and handle that run as a fresh setup.
 
@@ -50,9 +54,9 @@ Default managed source checkout: `%USERPROFILE%\.ai-agent-toolkit\source\ai-agen
 
 The managed checkout is separate from the active Codex or Claude Code worktree, plugin caches, `.tmp` directories, and temporary marketplace checkouts. If the active Toolkit worktree is on a PR branch, setup should warn that this is okay and continue using the managed clean `main` checkout.
 
-If the managed checkout path does not yet exist or does not contain `repo/scripts/setup-toolkit.cjs`, the active repo command is bootstrap/fallback only:
+If the managed checkout path does not yet exist or does not contain `repo/scripts/setup-toolkit.cjs`, the same command run with the working folder set to the active repo is bootstrap/fallback only:
 
-```powershell
+```text
 node repo/scripts/setup-toolkit.cjs --execute --profile auto-main
 ```
 
@@ -94,7 +98,7 @@ Historical unmarked, malformed, mismatched, live, indeterminate, escaped, symlin
 
 G1 UAT for every host-config write includes setup with **all recommended**, a full Codex Desktop or Claude Code restart, and one successful turn; G2 checks this evidence. See [host config writes](../../repo/docs/agent-playbooks/host-config-writes.md).
 
-On Windows, do **not** rely on bare `codex`; it can resolve to a non-runnable WindowsApps alias. Use `setup-codex-toolkit-plugin.cjs --codex-cli "$env:USERPROFILE\.codex\plugins\.plugin-appserver\codex.exe"` when an explicit CLI path is needed.
+On Windows, do **not** rely on bare `codex`; it can resolve to a non-runnable WindowsApps alias. When an explicit CLI path is needed, resolve the home folder yourself and pass `setup-codex-toolkit-plugin.cjs --codex-cli <home folder>/.codex/plugins/.plugin-appserver/codex.exe` as a full path in forward slashes, with no `$env:` or `%...%` variables.
 
 6. Before final response after setup, report the active worktree path and commit if inspected, managed checkout path and commit, exact setup script path executed, whether the question bank appeared, and the exact Codex delegation state. Before final response after repo changes, run the relevant validators or tests for the touched surface.
 
