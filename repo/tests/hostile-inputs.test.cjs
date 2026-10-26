@@ -46,8 +46,8 @@ test('H-01: every family has cases, ids are unique, and each case holds exactly 
   assert.throws(() => hostile.cases(['no-such-family']), /unknown family/);
 });
 
-test('H-02: the source holds only printable ASCII and LF', () => {
-  const source = fs.readFileSync(path.join(__dirname, 'support', 'hostile-inputs.cjs'), 'utf8');
+test('H-02: the source holds only printable ASCII and line ends (LF, or CRLF in a Windows checkout)', () => {
+  const source = fs.readFileSync(path.join(__dirname, 'support', 'hostile-inputs.cjs'), 'utf8').replace(/\r\n/g, '\n');
   assert.deepEqual(hostile.pointsOf(source), []);
 });
 
@@ -67,7 +67,7 @@ test('H-04: timing fails on quadratic work and passes on linear work', () => {
   const linear = text => { let count = 0; for (let index = 0; index < text.length; index += 1) if (text.charCodeAt(index) === 120) count += 1; return count; };
   const quadratic = text => { let count = 0; for (let index = 0; index < text.length; index += 1) count += text.indexOf('x', index); return count; };
   const build = size => 'a'.repeat(size);
-  const slow = hostile.timing(quadratic, build);
+  const slow = hostile.timing(quadratic, build, { minMs: 2 });
   assert.equal(slow.ok, false, slow.message);
   const fast = hostile.timing(linear, build, { maxSize: 1 << 22 });
   assert.equal(fast.ok, true, fast.message);

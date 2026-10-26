@@ -208,12 +208,13 @@ function indent(text, spaces) {
 // A large-input check: times fn(build(size)) and fn(build(size * 4)), growing size until the
 // smaller run takes at least minMs or the larger would pass maxSize, and fails when the time grows
 // by more than maxRatio (linear work grows about fourfold, quadratic about sixteenfold).
-// Returns { ok, ratio, size, times, message }.
+// The larger size stops repeating once a run is within the limit, so a linear reader is timed
+// once there. Returns { ok, ratio, size, times, message }.
 function timing(fn, build, { startSize = 1024, maxSize = 1 << 20, minMs = 8, maxRatio = 10, runs = 3 } = {}) {
-  const time = (size, count) => {
+  const time = (size, count, enough = -1) => {
     const input = build(size);
     let best = Infinity;
-    for (let run = 0; run < count; run += 1) {
+    for (let run = 0; run < count && best > enough; run += 1) {
       const started = process.hrtime.bigint();
       fn(input);
       best = Math.min(best, Number(process.hrtime.bigint() - started) / 1e6);
@@ -227,7 +228,7 @@ function timing(fn, build, { startSize = 1024, maxSize = 1 << 20, minMs = 8, max
     size *= 4;
     small = time(size, runs);
   }
-  const large = time(size * 4, small * maxRatio * 4 > 2000 ? 1 : runs);
+  const large = time(size * 4, runs, Math.max(small, 0.5) * maxRatio);
   const ratio = large / Math.max(small, 0.5);
   const ok = large < minMs || ratio <= maxRatio;
   return { ok, ratio, size, times: [small, large], message: `size ${size} took ${small.toFixed(1)} ms, size ${size * 4} took ${large.toFixed(1)} ms (growth ${ratio.toFixed(1)}x, limit ${maxRatio}x)` };
