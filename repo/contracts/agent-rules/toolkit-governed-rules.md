@@ -5,7 +5,7 @@ With the user's yes, this block and `.github/toolkit-programme.json` turn on Too
 ## Delivery
 
 - Agree a release plan up front: releases, lanes and order. Keep one open release PR per lane; work outside the plan states its reason.
-- Finish fast: ship the biggest coherent batch that stays reviewable, reconcile records before the next task, and order work Now, then Next, then Later.
+- Finish fast: ship the biggest coherent batch that stays reviewable, reconcile records before the next task, and order work Now, then Later by priority.
 - Repository-wide CI, test sharding and time budgets are set here, measured before and after a change.
 - Every governed repository keeps a current compact repo map (parts, entry points, sources of truth, ownership, recorded commit), updated in the change that moves what it describes.
 

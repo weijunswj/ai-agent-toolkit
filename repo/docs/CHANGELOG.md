@@ -11,6 +11,17 @@
 
 - Owner UAT lists and the hybrid work list follow the two rules above; Toolkit text says "computer" or "Remote Control session" rather than naming one kind of device. The Claude Projects controller skill is 2026-10-25.9 (re-upload it).
 
+## 3.13.8
+
+### Now and Later
+
+- **Two roadmap groups:** the Programme Graph's Class column shows `NOW` for work in progress (an open or draft PR, or an active, owner-waiting or held gate) and `LATER` for every other committed, unfinished task. Optional work still sorts last as `OPTIONAL`. There is no `NEXT` group: a planned release still shows on the task page but no longer moves a task.
+- **Later is in priority order:** the catalogue `order` is the priority again. Inside each group rows sort by `order`, lowest first, then by child number, and native sub-issues follow. The top Later task is what starts next.
+- **Start next:** the CURRENT summary ends with one **Start next** line naming the top Later task, or None. A task whose PR merged or whose issue closed is skipped, even before its state catches up.
+- **Ties are named:** a reconcile finding `ORDER_TIE` lists queued tasks in one group that share an `order`, so the controller can set a distinct priority with `update-parent`. While older classes are still reported, migrate first, or set COMMITTED and the priority in one patch.
+- **Older classes:** the CORE, HARDENING and LATER migration patch renumbers `order` in the old sequence, which becomes the priority. Before migration their old per-class numbers tie, so a pass may reorder them.
+- **Rules text:** the governed rules order work Now, then Later by priority; Toolkit V3, CONTROLLER.md and the reconciler skill say the same.
+
 ## 3.13.7
 
 ### Programme pages
