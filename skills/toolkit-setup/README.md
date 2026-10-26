@@ -7,7 +7,7 @@ This README is only an install/identity note. Runtime guidance lives in `SKILL.m
 
 Routine setup routes through the host-aware orchestrator in the managed checkout when it exists:
 
-- Codex: `node "$env:USERPROFILE\.ai-agent-toolkit\source\ai-agent-toolkit\repo\scripts\setup-toolkit.cjs" --execute --profile auto-main`
+- Codex: `node "<home folder>/.ai-agent-toolkit/source/ai-agent-toolkit/repo/scripts/setup-toolkit.cjs" --execute --profile auto-main`, with `<home folder>` written as the resolved path in forward slashes and no `$env:` or `%...%` variables, so the line starts the same way in PowerShell and `cmd.exe`. Run it from the chat's own folder; never `cd` first.
 - Claude Code: append `--host claude-code` to the managed checkout command.
 
 Use `node repo/scripts/setup-toolkit.cjs --execute --profile auto-main` from the active repo only as bootstrap/fallback when the managed checkout script is missing. After bootstrap creates the managed checkout, hand off to the managed checkout script.

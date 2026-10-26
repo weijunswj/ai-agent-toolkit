@@ -237,10 +237,10 @@ Quick index
 
 ---
 
-Reply with the displayed bank reference and either:
+Reply with either:
 
-- `X21A-EH91-FXWP-XYJB: all recommended`
-- only your changes, for example: `X21A-EH91-FXWP-XYJB: 1.2=B, 1.3=B`
+- `all recommended`
+- only your changes, for example: `1.2=B, 1.3=B`
 
 Anything you do not list takes its recommendation.
 

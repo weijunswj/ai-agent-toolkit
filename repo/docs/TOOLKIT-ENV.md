@@ -2,7 +2,7 @@
 
 `toolkit env` keeps the API keys and tokens your coding apps use in this computer's own credential store, and feeds them to Claude Code and Codex when they need them. There is no plain-text key file, and no value ever goes through a chat, a log or a report.
 
-You can ask any agent in words ("edit my env", "what keys do I have", "remove the Coolify token"); the `toolkit-env` skill turns that into the commands below. The commands run from the managed Toolkit checkout:
+You can ask any agent in words ("edit my env", "what keys do I have", "remove the Coolify token"); the `toolkit-env` skill turns that into the commands below. The commands run from the managed Toolkit checkout. To run one yourself in PowerShell:
 
 ```powershell
 node "$env:USERPROFILE\.ai-agent-toolkit\source\ai-agent-toolkit\repo\scripts\toolkit-env.cjs" status

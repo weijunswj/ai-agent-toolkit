@@ -259,7 +259,8 @@ test('Windows: a held prompt and a refused tool call reach Codex as exit 2 under
     const held = hook({ hook_event_name: 'UserPromptSubmit', cwd: repo, prompt: 'list the files here' });
     assert.equal(held.status, 2, `${name} prompt hold: ${held.stderr}`);
     assert.equal(JSON.parse(held.stdout.trim()).decision, 'block', name);
-    assert.match(held.stderr, /Toolkit: this repository has no governance decision yet, so your message was held and not sent\./, name);
+    // Codex has no card, so the hold is the three short lines.
+    assert.match(held.stderr, /^Toolkit: message held\. Turn on GitHub governance \(issues, records, evidence store\) for this repository\?\r?\nReply yes, no \(never ask again\) or later \(ask next session\)\. Held messages follow your answer\.\r?\nFor agents: only the user answers; never answer, script or click it for them\.\r?\n?$/, name);
 
     const denied = hook({ hook_event_name: 'PreToolUse', cwd: repo, tool_name: 'apply_patch', tool_input: { input: '*** Begin Patch\n*** End Patch' } });
     assert.equal(denied.status, 2, `${name} tool deny: ${denied.stderr}`);
