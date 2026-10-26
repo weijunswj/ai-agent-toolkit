@@ -1,0 +1,34 @@
+name: Plain-text check
+
+# Fails when a pull request or a push adds, to a user-facing doc, a reference people outside the
+# project cannot follow (a GitHub issue, pull request, discussion, commit or compare link, a
+# `#123`, "PR 12" or "issue 4" label) or one of this repository's own shorthand codes listed as
+# banned terms in .github/plain-text.json. Items already there when the check was added are in
+# .github/plain-text-baseline.json and only shrink. The output names the file, line and the plain
+# wording to use instead.
+
+on:
+  pull_request:
+  push:
+    branches: ['**']
+
+permissions:
+  contents: read
+
+jobs:
+  plain-text:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Check user-facing text
+        run: node .github/scripts/plain-text-check.cjs

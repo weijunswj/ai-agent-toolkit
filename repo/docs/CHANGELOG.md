@@ -1,5 +1,28 @@
 # Toolkit Changelog
 
+## 3.15.5
+
+### Plain-text check
+
+- **One portable check for plain user-facing text:** `skills/secure-ci-cd/scripts/plain-text-check.cjs` fails when a user-facing doc carries a link to one GitHub issue, pull request, discussion, commit or comparison, a hash-number reference or a "PR" or "issue" number label, or one of the repository's own shorthand codes listed as banned terms in `.github/plain-text.json`. Each banned term carries its reason and the plain wording to use, and a banned term can also catch a lowercase letter after its digits. Reviewed exemptions show in the diff: text kept per file with a reason (a stored job name, a heading level, a score), and a line marker `plain-text: allow <reason>` with a real reason, which covers only a `#number` on that line. Whole same-file links to numbered headings and `issues/new` links pass. Structured files are checked on their names, titles, descriptions and prompts only. Items already there sit in a baseline written once that only shrinks. It points; it never rewrites text. `--files` checks named files only.
+- **Installer and CI template:** `install-plain-text-check.cjs` copies the check into `.github/scripts/` with a version and hash header, writes the settings and starting baseline only when missing, adds `templates/github-actions/plain-text.yml` with `--workflow` (read-only permissions, pinned actions) and reports drift with `--check`. It refuses to replace a repository's own file at the copy path.
+- **On in every governed repository:** `repository-agent-rules` installs the check with a governed repository's materials and offers it elsewhere next to the personal-data guard; a refresh re-checks it. `toolkit governance check` reports a governed repository without the check, or with an outdated or edited copy, as drift; a repository switches it off only with a recorded reason.
+- **Startup note for outdated checks:** in a repository whose Toolkit GitHub governance is on, the session-start rules check also compares its vendored Toolkit checks (the plain-text check and the personal-data guard) with the running Toolkit, notes a missing plain-text check unless it was switched off with a reason, and prints one read-only note per finding.
+- **Toolkit runs the same check:** `repo/scripts/check-plain-references.cjs` now runs the portable check with Toolkit's settings in `repo/contracts/plain-references/config.json`, which bans Toolkit's own release, lane, record and test-row codes across skills, docs, contracts and the readable fields of JSON and YAML files.
+- **Whole-repository sweep:** the remaining issue references and codes in docs, skills, contracts, setup questions, helper titles and plugin blurbs were rewritten in plain words, so the baseline is empty. The delivery contract is now `repo/docs/TOOLKIT-DELIVERY.md`. The setup topology choice reads "Toolkit repos: main session + Toolkit planning and build helpers only. Elsewhere: one layer of subagents."
+- **Chat replies count:** the global plain-language rule now names chat replies among the human-facing work it covers.
+
+## 3.15.4 (final-product UAT)
+
+### Coding gates
+
+- **Owner UAT tests only the final product:** the owner is asked to try only features the user runs and sees, such as hook setup in Codex or Claude Code, a quote run or a design run. Internals (governance, programme state, gate plumbing) are proven by CI, tests, G2 and agent UAT; with no final-product step, UAT is not required. Each ask says in plain words what the feature does, the one thing to try and what the owner should see.
+- **Device steps stay with the agent:** a step on the user's computer that an agent there can do, such as creating a local scheduled task, is done by the Remote Control session itself; the user is asked only when a safety check blocks it.
+
+### Projects skill
+
+- Owner UAT lists and the hybrid work list follow the two rules above; Toolkit text says "computer" or "Remote Control session" rather than naming one kind of device. The Claude Projects controller skill is 2026-10-26.3 (save the new skill card).
+
 ## 3.15.3
 
 ### Projects skill

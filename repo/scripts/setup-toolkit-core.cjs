@@ -565,7 +565,7 @@ function printHelp() {
     '  --keep-codex-plugin-auto-refresh',
     '                               preserve Codex plugin cache auto-refresh preference',
     '  --claude-topology root-only|broader-native|keep',
-    '                               Claude-only topology; root-only admits only the Toolkit G0/G1 helpers in Toolkit repos and sets the one-layer CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1 elsewhere',
+    '                               Claude-only topology; root-only admits only the Toolkit planning (G0) and build (G1) helpers in Toolkit repos and sets the one-layer CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1 elsewhere',
     '  --claude-plugin-behavior keep|instructions|install',
     '                               Claude Code only; verify/report, show native refresh instructions, or install/enable via claude plugin marketplace add + install --scope user',
     '  --explain <ref>              print the full text of one setup question, for example --explain 1.2',
@@ -1710,7 +1710,7 @@ function setupQuestionSpecs(args, current) {
       title: 'Codex helper capacity', prompt: 'Codex helper capacity choice',
       whatThisControls: 'How many helpers the main Codex session can open; helpers cannot start helpers under Toolkit rules. ' + (v1 ? 'Codex cannot limit helpers to zero; choose one helper or a custom number.' : 'Root-only is an explicit opt-out.'),
       choices: [
-        wizardChoice('one-helper', 'One helper', 'Allow one helper for G0/G1 evidence gathering and validation.'),
+        wizardChoice('one-helper', 'One helper', 'Allow one helper for planning (G0) and build (G1) evidence gathering and validation.'),
         ...(!v1 ? [wizardChoice('root-only', 'No helpers', 'Explicitly opt out of helpers.')] : []),
         wizardChoice('custom', 'Choose a number', v1 ? 'Choose a whole helper count of at least 1; more than one needs RAM-risk approval.' : 'Choose a non-negative helper count; more than one needs RAM-risk approval.'),
         wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${current.delegation?.detail || 'Helper capacity has not been verified.'}`),
@@ -1755,16 +1755,16 @@ function setupQuestionSpecs(args, current) {
       section: 'Computer performance',
       title: 'How should Claude Code use agents?',
       prompt: 'Claude Code agent topology choice',
-      whatThisControls: 'How Claude Code may use agents. In Toolkit-governed repositories the installed Toolkit hook admits only the main session and the Toolkit G0/G1 leaf helpers. Elsewhere the limit is one layer: the main session may start subagents; subagents never start another. For this Toolkit sets `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1` in your Claude Code user settings (read by Claude Code 2.1.217 or later; project, local or managed settings can override it in a folder) and records that it owns that value. Broader native behaviour permits native agent behavior outside Toolkit control. Governed V3 workers use only the registry-pinned launcher.',
+      whatThisControls: 'How Claude Code may use agents. In Toolkit-governed repositories the installed Toolkit hook admits only the main session and the Toolkit planning (G0) and build (G1) leaf helpers. Elsewhere the limit is one layer: the main session may start subagents; subagents never start another. For this Toolkit sets `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1` in your Claude Code user settings (read by Claude Code 2.1.217 or later; project, local or managed settings can override it in a folder) and records that it owns that value. Broader native behaviour permits native agent behavior outside Toolkit control. Governed workers use only the Toolkit worker launcher pinned in the stack registry.',
       choices: [
-        wizardChoice('root-only', 'Toolkit repos: main session + Toolkit G0/G1 helpers only. Elsewhere: one layer of subagents.', 'In Toolkit-governed repositories admit only the Toolkit G0/G1 leaf helpers. Also set the Toolkit-owned `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1` in the Claude Code user settings, which holds Claude Code 2.1.217 or later to one layer of subagents unless project, local or managed Claude settings override it in a folder; a value you set yourself is kept as it is.'),
+        wizardChoice('root-only', 'Toolkit repos: main session + Toolkit planning and build helpers only. Elsewhere: one layer of subagents.', 'In Toolkit-governed repositories admit only the Toolkit planning (G0) and build (G1) leaf helpers. Also set the Toolkit-owned `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1` in the Claude Code user settings, which holds Claude Code 2.1.217 or later to one layer of subagents unless project, local or managed Claude settings override it in a folder; a value you set yourself is kept as it is.'),
         wizardChoice('broader-native', 'Broader native behaviour', 'Permit native Claude agent behavior outside Toolkit control and its resource guarantees. Outside Toolkit repos Claude Code\'s own defaults apply: a Toolkit-set `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` is removed (a value you set yourself is kept), and the Toolkit hook no longer refuses a subagent that starts another.'),
         wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${topologyCurrent} Stale, unverifiable or retired topology state falls back safely to root-only, and the subagent depth setting is left as it is.`),
       ],
       recommendation: {
         value: recommendedChoice('claudeTopology', current, args),
-        outcome: 'Toolkit repos: main session + Toolkit G0/G1 helpers only. Elsewhere: one layer of subagents.',
-        reason: 'Root-only is the verified default: outside Toolkit repos the Claude Code user setting CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1 holds Claude Code 2.1.217 or later to one layer, the Toolkit hook refuses the same nested launches as a backstop, and governed workers use the registry-pinned V3 launcher.',
+        outcome: 'Toolkit repos: main session + Toolkit planning and build helpers only. Elsewhere: one layer of subagents.',
+        reason: 'Root-only is the verified default: outside Toolkit repos the Claude Code user setting CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1 holds Claude Code 2.1.217 or later to one layer, the Toolkit hook refuses the same nested launches as a backstop, and governed workers use the Toolkit worker launcher pinned in the stack registry.',
       },
       selected: args.setupChoices.claudeTopology,
       current: topologyCurrent,
@@ -1797,7 +1797,7 @@ function setupQuestionSpecs(args, current) {
         wizardChoice('disable', 'Turn off', 'Remove only the values Toolkit set and still match what it recorded. Values you set yourself stay as they are.'),
         wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${claudeSettingsOutcome(current.claudeSettings)}`),
       ],
-      recommendation: { value: recommendedChoice('claudeSettings', current, args), outcome: claudeSettingsAllSet(current) ? 'Keep them: all four are already set.' : 'Set the recommended values that are not set yet; values you set yourself stay as they are.', reason: 'They keep AI attribution out of your commits and pull requests, let a Projects coordinator wake laptop threads, keep a flagged request on the model you chose, and make Claude Code read the repository\'s AGENTS.md.' },
+      recommendation: { value: recommendedChoice('claudeSettings', current, args), outcome: claudeSettingsAllSet(current) ? 'Keep them: all four are already set.' : 'Set the recommended values that are not set yet; values you set yourself stay as they are.', reason: 'They keep AI attribution out of your commits and pull requests, let a Projects coordinator wake Remote Control sessions on your computer, keep a flagged request on the model you chose, and make Claude Code read the repository\'s AGENTS.md.' },
       selected: args.setupChoices.claudeSettings,
       current: claudeSettingsOutcome(current.claudeSettings),
       currentVerification: Array.isArray(current.claudeSettings) && current.claudeSettings.length && current.claudeSettings.every((entry) => entry.state !== CLAUDE_SETTINGS_STATES.UNREADABLE) ? 'state-derived' : 'unverified',
@@ -3387,8 +3387,8 @@ function printFinalSummary({ args, current, managed, localClone, nativeCache, de
   } else {
     console.log('## Claude Code agent topology');
     console.log(`Selected topology: ${unknown(delegation.topology)}`);
-    console.log('Governed V3 workers: launched only by the registry-pinned V3 launcher under an authorised controller');
-    console.log('Native, built-in, team, plugin, user-created, and third-party workers: blocked at the installed hook in Toolkit-governed repositories when root-only (only the Toolkit G0/G1 leaf helpers are admitted); outside Toolkit control when broader-native');
+    console.log('Governed workers: launched only by the Toolkit worker launcher pinned in the stack registry, under an authorised controller');
+    console.log('Native, built-in, team, plugin, user-created, and third-party workers: blocked at the installed hook in Toolkit-governed repositories when root-only (only the Toolkit planning (G0) and build (G1) leaf helpers are admitted); outside Toolkit control when broader-native');
     console.log(`Profile outcome this run: ${profileOutcomeSummary(delegation)}`);
     console.log(`One-layer subagent setting this run: ${subagentDepthOutcomeSummary(subagentDepth)}`);
     if (claudeSettings) console.log(`Claude Code settings this run: ${claudeSettingsOutcome(claudeSettings)}${claudeSettings.some((entry) => entry.changed) ? ' Start a new Claude Code session to use them.' : ''}`);
