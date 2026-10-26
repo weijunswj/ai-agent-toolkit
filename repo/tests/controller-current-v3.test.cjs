@@ -6,7 +6,7 @@ const root=path.resolve(__dirname,'../..'),document=fs.readFileSync(path.join(ro
 function current(text){assert.equal(text.includes('## Historical compatibility reference'),false,'the pre-V3 history is removed');return text;}
 
 test('current procedure resolves all concrete routes solely from captured registry and CURRENT',()=>{
- const body=current(document);assert.match(body,/canonical \[V3 stack registry\]\(contracts\/controller-kernel\/stack-registry-v3\.json\)/);assert.match(body,/exact captured registry revision and pinned CURRENT selection/);assert.match(body,/sole source of concrete model, effort and required reviewer choices/);
+ const body=current(document);assert.match(body,/canonical \[stack registry\]\(contracts\/controller-kernel\/stack-registry-v3\.json\)/);assert.match(body,/exact captured registry revision and pinned CURRENT selection/);assert.match(body,/sole source of concrete model, effort and required reviewer choices/);
  for(const role of ['DISCOVERY','DISCOVERY_HELPER','BUILDER','BUILDER_HELPER','DESIGN_CHALLENGE'])assert.ok(body.includes(role),role);
  const registry=JSON.parse(fs.readFileSync(path.join(root,'repo/contracts/controller-kernel/stack-registry-v3.json')));
  for(const p of Object.values(registry.profiles))for(const r of [...Object.values(p.routes),...p.reviewers])if(r)assert.equal(body.includes(r.model),false,'current Controller cannot duplicate '+r.model);

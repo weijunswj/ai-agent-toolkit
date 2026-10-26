@@ -17,6 +17,7 @@ const repoRoot = path.resolve(__dirname, '..', '..');
 const scripts = path.join(repoRoot, 'repo', 'scripts');
 const { ToolkitGovernanceCli } = require(path.join(scripts, 'toolkit-governance.cjs'));
 const conformance = require(path.join(scripts, 'toolkit-governance-conformance.cjs'));
+const plainTextInstaller = require(path.join(scripts, '..', '..', 'skills', 'secure-ci-cd', 'scripts', 'install-plain-text-check.cjs'));
 const catalogue = require(path.join(scripts, 'toolkit-governance-catalogue.cjs'));
 const managedBlock = require(path.join(scripts, 'toolkit-managed-block.cjs'));
 const governance = require(path.join(scripts, 'toolkit-governance-state.cjs'));
@@ -92,8 +93,16 @@ function expectedBlockText(version) {
   return managedBlock.renderBlock({ ...expected, version: version || expected.version });
 }
 
-function writeGoverned(repo, { blockText = expectedBlockText(), binding = true, repository = 'example-owner/example-repo' } = {}) {
+// The plain-text check a governed repository carries: the copy and the settings the installer writes.
+function writePlainTextCheck(repo, settings = { schema: 'toolkit-plain-text-config/v1' }) {
+  fs.mkdirSync(path.join(repo, '.github', 'scripts'), { recursive: true });
+  fs.writeFileSync(path.join(repo, '.github', 'scripts', 'plain-text-check.cjs'), plainTextInstaller.vendoredText());
+  fs.writeFileSync(path.join(repo, '.github', 'plain-text.json'), JSON.stringify(settings));
+}
+
+function writeGoverned(repo, { blockText = expectedBlockText(), binding = true, repository = 'example-owner/example-repo', plainText = true } = {}) {
   fs.writeFileSync(path.join(repo, 'AGENTS.md'), `# Repo\n\n${blockText}\n`);
+  if (plainText) writePlainTextCheck(repo);
   if (binding) {
     fs.mkdirSync(path.join(repo, '.github'), { recursive: true });
     fs.writeFileSync(path.join(repo, '.github', 'toolkit-programme.json'), JSON.stringify({
@@ -289,6 +298,21 @@ test('K-01: check exit codes and read-only behaviour', async (t) => {
   assert.equal(unread.default_branch_protection.status, 'unverified');
   assert.deepEqual(unread.findings.map(entry => entry.id), ['PROTECTION_CHECKS_MISMATCH_UNVERIFIED', 'PROTECTION_CHECK_UNPINNED_UNVERIFIED', 'PROTECTION_MERGE_METHODS_UNVERIFIED']);
   assert.match((await run(ctx, conformant, ['check'])).stdout, /Default-branch protection: conformant/);
+
+  // An ENABLED repository needs a current plain-text check, unless its settings record why it is off.
+  const PROTECTED_RUN = { rulesetReader: PROTECTED };
+  const checkIds = async () => JSON.parse((await run(ctx, conformant, ['check', '--json'], PROTECTED_RUN)).stdout).findings.map(entry => entry.id);
+  const copy = path.join(conformant, '.github', 'scripts', 'plain-text-check.cjs');
+  const settingsFile = path.join(conformant, '.github', 'plain-text.json');
+  fs.rmSync(settingsFile);
+  assert.deepEqual(await checkIds(), ['PLAIN_TEXT_CHECK_MISSING']);
+  fs.writeFileSync(settingsFile, JSON.stringify({ schema: 'toolkit-plain-text-config/v1', off_reason: 'issue numbers are published here on purpose' }));
+  assert.deepEqual(await checkIds(), ['PLAIN_TEXT_CHECK_OFF']);
+  fs.writeFileSync(settingsFile, JSON.stringify({ schema: 'toolkit-plain-text-config/v1' }));
+  fs.appendFileSync(copy, '// local edit\n');
+  assert.deepEqual(await checkIds(), ['PLAIN_TEXT_CHECK_DRIFT']);
+  writePlainTextCheck(conformant);
+  assert.deepEqual(await checkIds(), []);
 
   // Enabled without the binding is incomplete; disabled with a block reports it ignored.
   await run(ctx, incomplete, ['enable']);

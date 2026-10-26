@@ -1,6 +1,6 @@
 {
   "name": "ai-agent-toolkit",
-  "version": "3.15.5",
+  "version": "3.15.6",
   "description": "Source-first AI-agent toolkit with native Codex plugin metadata, English setup routing, opt-in repo auto-update, and portable Antigravity skills copying.",
   "author": {
     "name": "weijunswj",
@@ -20,8 +20,8 @@
   "hooks": "./.codex-plugin/hooks/hooks.json",
   "interface": {
     "displayName": "AI Agent Toolkit",
-    "shortDescription": "Source-first reusable agent skills with opt-in repo auto-update",
-    "longDescription": "Use AI Agent Toolkit for reusable source-traceable skills, repo-local agent rules, validation guidance, English setup routing, opt-in repo-backed updates, and portable Antigravity skills copying. Codex updates this package natively and never installs or updates Claude Code.",
+    "shortDescription": "Agent skills and working rules, kept up to date",
+    "longDescription": "Use AI Agent Toolkit for reusable skills that record where they came from, working rules for each repository, validation guidance, guided setup, opt-in updates from GitHub and a portable skills copy for Antigravity. Codex updates this package natively and never installs or updates Claude Code.",
     "composerIcon": "./.codex-plugin/assets/composer-icon.png",
     "logo": "./.codex-plugin/assets/logo.png",
     "developerName": "weijunswj",

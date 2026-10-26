@@ -18,8 +18,10 @@ User-facing docs, skills and AI-facing instructions say what a reference means i
 - No GitHub issue, pull request, discussion, commit or compare links, no hash-number references and no "PR" or "issue" number labels.
 - Links to repository files are fine, and so are plain links to a project's GitHub page.
 - Write Codex modes as V1 (`multi_agent`) and V2 (`multi_agent_v2`).
+- No Toolkit shorthand codes (release, lane, record or test-row codes such as a letter and a number). Say what the thing is. Before writing, read the banned terms in `repo/contracts/plain-references/config.json`; each carries the plain wording to use. Machine identifiers that must keep their form (file, schema and stored names) are listed there with a reason. A real product name that looks like a code (a chip, a storage service or a paper size) goes in `kept_terms` for that file, with a reason.
+- Text that only looks like a reference (a score, a colour value) can keep its form: add it to `kept_terms` for that file, or end the line with `plain-text: allow <reason>` (three words or ten characters; it covers only the `#number`, so links, "PR" labels and banned codes on that line still fail). Both show up in review.
 - The changelog, frozen audits, vendored third-party copies, provenance and tests keep references where they are needed.
-- `repo/scripts/check-plain-references.cjs` enforces this in the required `validate` check. Older references sit in `repo/contracts/plain-references/baseline.json`; that list only shrinks: rewrite one, then run the check with `--prune-baseline`.
+- `repo/scripts/check-plain-references.cjs` runs the portable plain-text check (`skills/secure-ci-cd/scripts/plain-text-check.cjs`) with those settings, in the required `validate` check. Older references sit in `repo/contracts/plain-references/baseline.json`; that list only shrinks: rewrite one, then run the check with `--prune-baseline`.
 
 ## Recommended Structure
 
