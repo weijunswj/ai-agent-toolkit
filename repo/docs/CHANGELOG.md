@@ -7,6 +7,43 @@
 - **Merges wait for the user (a tripwire, not a lock):** on Claude Code and Codex, the hooks hold an agent's merge until the user typed a line with "merge" next to the pull request number in their own session, such as "merge 618", "618 merge" or "ok to merge 618". A line with a quote, a question, or one of a fixed list of words for a no, a doubt, a condition, a delay, a report or another kind of merge ("merge main into 618") does not count. This covers `gh pr merge`, the GitHub API merge endpoint and the GitHub connector's merge tool. One approval allows one merge of that pull request in that repository within a day, and the merge must name the head commit it expects. Connector auto-merge, GraphQL merges, the merge queue, branch merges, ref writes and pushes to the default branch are refused when written directly. It reads command text, so it catches mistakes, not a determined agent: wrapped or nested sessions, scripts, files, other HTTP clients and direct commits through the API or the connector's file tools get past it. Agents act as the user on GitHub, so GitHub cannot tell their merges apart; the hard limit is the repository's own rules where it has them (a pull request for the default branch, no force-push, no deletion). Cloud sessions are not covered yet.
 - **Stale plugin copies speak up:** when a session runs an account-synced Toolkit copy that is older than a Toolkit repository in its folder, the session-start message says so and that newer safety hooks do not run, instead of staying silent.
 
+## 3.15.5
+
+### Plain-text check
+
+- **One portable check for plain user-facing text:** `skills/secure-ci-cd/scripts/plain-text-check.cjs` fails when a user-facing doc carries a link to one GitHub issue, pull request, discussion, commit or comparison, a hash-number reference or a "PR" or "issue" number label, or one of the repository's own shorthand codes listed as banned terms in `.github/plain-text.json`. Each banned term carries its reason and the plain wording to use, and a banned term can also catch a lowercase letter after its digits. Reviewed exemptions show in the diff: text kept per file with a reason (a stored job name, a heading level, a score), and a line marker `plain-text: allow <reason>` with a real reason, which covers only a `#number` on that line. Whole same-file links to numbered headings and `issues/new` links pass. Structured files are checked on their names, titles, descriptions and prompts only. Items already there sit in a baseline written once that only shrinks. It points; it never rewrites text. `--files` checks named files only.
+- **Installer and CI template:** `install-plain-text-check.cjs` copies the check into `.github/scripts/` with a version and hash header, writes the settings and starting baseline only when missing, adds `templates/github-actions/plain-text.yml` with `--workflow` (read-only permissions, pinned actions) and reports drift with `--check`. It refuses to replace a repository's own file at the copy path.
+- **On in every governed repository:** `repository-agent-rules` installs the check with a governed repository's materials and offers it elsewhere next to the personal-data guard; a refresh re-checks it. `toolkit governance check` reports a governed repository without the check, or with an outdated or edited copy, as drift; a repository switches it off only with a recorded reason.
+- **Startup note for outdated checks:** in a repository whose Toolkit GitHub governance is on, the session-start rules check also compares its vendored Toolkit checks (the plain-text check and the personal-data guard) with the running Toolkit, notes a missing plain-text check unless it was switched off with a reason, and prints one read-only note per finding.
+- **Toolkit runs the same check:** `repo/scripts/check-plain-references.cjs` now runs the portable check with Toolkit's settings in `repo/contracts/plain-references/config.json`, which bans Toolkit's own release, lane, record and test-row codes across skills, docs, contracts and the readable fields of JSON and YAML files.
+- **Whole-repository sweep:** the remaining issue references and codes in docs, skills, contracts, setup questions, helper titles and plugin blurbs were rewritten in plain words, so the baseline is empty. The delivery contract is now `repo/docs/TOOLKIT-DELIVERY.md`. The setup topology choice reads "Toolkit repos: main session + Toolkit planning and build helpers only. Elsewhere: one layer of subagents."
+- **Chat replies count:** the global plain-language rule now names chat replies among the human-facing work it covers.
+
+## 3.15.4 (final-product UAT)
+
+### Coding gates
+
+- **Owner UAT tests only the final product:** the owner is asked to try only features the user runs and sees, such as hook setup in Codex or Claude Code, a quote run or a design run. Internals (governance, programme state, gate plumbing) are proven by CI, tests, G2 and agent UAT; with no final-product step, UAT is not required. Each ask says in plain words what the feature does, the one thing to try and what the owner should see.
+- **Device steps stay with the agent:** a step on the user's computer that an agent there can do, such as creating a local scheduled task, is done by the Remote Control session itself; the user is asked only when a safety check blocks it.
+
+### Projects skill
+
+- Owner UAT lists and the hybrid work list follow the two rules above; Toolkit text says "computer" or "Remote Control session" rather than naming one kind of device. The Claude Projects controller skill is 2026-10-26.3 (save the new skill card).
+
+## 3.15.3
+
+### Projects skill
+
+- **Running post and links enforced:** a new Toolkit hook runs before every Claude Projects post, in the coordinator and in work threads. It refuses a fresh post while the owner has not written since that session's newest post (unless that post nears 8 KB) and tells it to edit that post instead, and it refuses any post that names "PR <n>" without a link. It reads the session's own transcript, so the rule survives a context reset. Replies under a post are exempt from the fresh-post check but still need their links, decision cards are not checked, and sessions without the Claude Projects post tools never see it. Every PR in a list needs its own link. The skill now also has the coordinator keep its running post id as the first memory line, and links every PR, thread, file or artifact it names: a PR's changed files only once it is ready for the owner to check and merge, otherwise the chat thread that owns it. Briefs tell work threads to keep one running post with one-line updates. The hourly nudge flags back-to-back posts, a stale running post id and missing links. The Claude Projects controller skill is 2026-10-26.2 (save the new skill card).
+
+## 3.15.2
+
+### Claude Projects
+
+- **A card each when the account copies fall behind:** Claude Projects controller skill 2026-10-26.1 (tap Save on its card). The skill card is one Save tap. After the first card, a coordinator that can post skill cards adds the memory line `skill cards: coordinator`; from then on the check-in writes "card due" instead of posting its own card, and the coordinator posts it in the project chat, so the owner gets one card where they read. On "card failed" the coordinator posts it too when it can. No agent can update a claude.ai plugin, so when the Toolkit plugin is more than a day behind, the coordinator posts one plugin card in the project chat with two clicks in Customize > Plugins (remove the Toolkit plugin only and let it reinstall), with Check for updates and a marketplace re-add as fallbacks. A retired skill card in the chat gets a "don't save" line.
+- **Plugin line on every run:** the check-in shows `**Plugin:** current` or how far behind it is, names the commit where `main` moved past the account version, and puts `PLUGIN BEHIND` on its first line once per `main` version (the "plugin behind" record in its state file).
+- **No false skill drift from a short clone:** before the check-in calls an account file a direct edit, it fetches the full history of its shallow Toolkit clone and checks every revision again, so an old but unedited account copy is reported as behind, not edited. If that fetch fails, it reports drift as unverified and posts no card.
+
 ## 3.15.1 (local secret scan)
 
 ### Secure CI/CD skill

@@ -1,6 +1,6 @@
-# Toolkit V3: delivery contract
+# Toolkit delivery contract
 
-This is the current V3 delivery contract for the Toolkit programme. It states the law that applies now; the dated decisions, launch reconciliation and one-off evaluations that produced it are in git history (section 20). The [global rules](../contracts/agent-rules/global-rules.md) hold the risk tiers and the safety floor, the [gate rules](../contracts/agent-rules/gate-rules.md) hold gate mechanics, and [CONTROLLER.md](../CONTROLLER.md) holds controller duties. Publishing this document does not establish implementation, installation, UAT, review or programme completion.
+This is the current delivery contract for the Toolkit programme. It states the law that applies now; the dated decisions, launch reconciliation and one-off evaluations that produced it are in git history (section 20). The [global rules](../contracts/agent-rules/global-rules.md) hold the risk tiers and the safety floor, the [gate rules](../contracts/agent-rules/gate-rules.md) hold gate mechanics, and [CONTROLLER.md](../CONTROLLER.md) holds controller duties. Publishing this document does not establish implementation, installation, UAT, review or programme completion.
 
 ## 1. The product and the finish line
 
@@ -51,7 +51,7 @@ G0 is a strong reasoning lead. It walks the real happy path and checks the actua
 
 G1 receives the whole approved scope, builds and integrates it, runs meaningful tests, demonstrates it and resolves ordinary UAT feedback and defects without another admission. The user owns the outcome, material scope and acceptance; the builder owns the plan within them and never silently changes scope, trust boundaries, paid services, destructive effects or acceptance. Design follows the gate rules' building policy, every change follows the global change-local hygiene law, and work finishes before stopping as the global Shipping section says.
 
-G1 reaches the actual consumer boundary: mocks never prove an installation or operation they did not exercise, and it reports what ran, failed and was not exercised. UAT depth follows the tier and the gate rules' UAT section: RISKY work gets agent UAT plus owner UAT for any owner-hands steps; otherwise owner UAT runs when the user's surface changes. User acceptance covers only what needs the owner's own hands: real desktop or app UI, signed-in accounts and device behaviour that CI (Windows runners included), automated tests and G2 review cannot reach. Everything those checks prove is accepted objectively and listed beside the owner steps with the passing check that covers it; when nothing needs the owner's hands, UAT is recorded as not required. Silence is not approval.
+G1 reaches the actual consumer boundary: mocks never prove an installation or operation they did not exercise, and it reports what ran, failed and was not exercised. UAT depth follows the tier and the gate rules' UAT section: RISKY work gets agent UAT plus owner UAT for any final-product steps; otherwise owner UAT runs when the user's surface changes. User acceptance covers only the final product: features the user runs and sees, such as hook setup in Codex or Claude Code, a quote run or a design run. Internals (governance, programme state, gate plumbing) and everything CI (Windows runners included), automated tests, G2 review and agent UAT prove are accepted objectively and listed beside the owner steps with the passing check that covers it; when no final-product step changed, UAT is recorded as not required. Silence is not approval.
 
 ## 7. Context and fresh sessions
 
@@ -119,13 +119,13 @@ Switching needs no handover step. A new controller binds current main and its CO
 
 The controller procedure and repo map, the agent rules, the stack registry and resolver, the control plane and reconciler, setup and hooks, and tests with generated payloads each own their part, as the repo map lists. Never hand-edit a generated block; edit its source and run its sync.
 
-## 18. V3 Core acceptance matrix
+## 18. Core acceptance matrix
 
 The release brief binds each row to exact sources, environments and evidence.
 
 | Criterion | Demonstration required |
 |---|---|
-| Complete scoped outcome | One usable V3 workflow with its approved host coverage, from real discovery of the actual stack. |
+| Complete scoped outcome | One usable governed workflow with its approved host coverage, from real discovery of the actual stack. |
 | G0 consideration and discussion | Section 5's discussion and continuation rules hold in a real run: a material question returns to the controller, a clear scope proceeds without an extra turn, and approved direction continues into a fresh G1. |
 | Strong roles | Pinned launcher routes from the selected stack, leaf helpers, G2 with no subagents, no silent fallback, and a missing selection that asks once and holds dependent launch. |
 | Continuous delivery | Planned G1 segment completion alone checkpoints and continues the approved whole-phase Core in the same session; actual required renewal and fresh independent review remain binding, and a genuine HOLD blocks only its dependent steps. |
