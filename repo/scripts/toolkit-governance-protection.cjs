@@ -39,6 +39,10 @@
 // call, and a skipped one reports under its bare name) leaves P3 unverified. So does a job whose
 // name differs from a required check only in letter case, or a quoted name with spaces at either
 // end, since this check does not rely on how GitHub compares or trims names.
+//
+// Known limits: P3 counts the jobs in workflow files only. Checks that GitHub-managed workflows
+// report without a file (CodeQL default setup's `Analyze (<language>)`), and check runs or
+// statuses a step posts with a token that can write them, are not counted.
 
 const childProcess = require('node:child_process');
 const fs = require('node:fs');
@@ -443,7 +447,8 @@ function readWorkflow(input) {
       const name = typeof nameValue === 'string' && !notText && nameValue === nameValue.trim() ? nameValue : '';
       const needsField = field('needs');
       const strategy = field('strategy');
-      const matrix = strategy ? children(lines, strategy.index + 1, strategy.end).some(entry => entry.key === 'matrix') : false;
+      // Any strategy counts as a matrix: one written as an expression can still expand into one.
+      const matrix = Boolean(strategy);
       const ifField = field('if');
       const needs = needsField ? blockList(lines, needsField) : [];
       const unreadable = [];
@@ -560,14 +565,13 @@ function couldProduce(name, check) {
 // Why `job` could report as `check` without being its one plain producer, or null: an expression
 // name, a matrix job (GitHub adds " (values)", and a skipped one reports its bare name) or a
 // reusable call (GitHub adds " / <called job>").
+// The matrix form is an open prefix, so a reusable call with a matrix (`a (x) / b`) matches too.
 function derivedNameProblem(job, check) {
-  const forms = [job.name];
-  if (job.matrix) forms.push(`${job.name} (\${{ matrix }})`);
-  if (job.reusable) forms.push(`${job.name} / \${{ called job }}`);
-  if (!forms.some(form => couldProduce(form, check))) return null;
-  if (job.dynamic_name) return `is named by an expression that could produce "${check}"`;
-  if (job.matrix) return `is a matrix job, which GitHub names "${job.name} (<values>)", so it could produce "${check}"`;
-  return `calls a reusable workflow, whose jobs GitHub names "${job.name} / <job>", so it could produce "${check}"`;
+  const forms = [{ form: job.name, says: job.dynamic_name ? 'is named by an expression that' : 'reports under its bare name when skipped, so it' }];
+  if (job.matrix) forms.push({ form: `${job.name} (\${{ matrix }}`, says: `is a matrix job, which GitHub names "${job.name} (<values>)", so it` });
+  if (job.reusable) forms.push({ form: `${job.name} / \${{ called job }}`, says: `calls a reusable workflow, whose jobs GitHub names "${job.name} / <job>", so it` });
+  const match = forms.find(item => couldProduce(item.form, check));
+  return match ? `${match.says} could produce "${check}"` : null;
 }
 
 // P3 and P4 for each required name over read workflows.

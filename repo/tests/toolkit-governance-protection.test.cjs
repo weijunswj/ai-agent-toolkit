@@ -516,6 +516,16 @@ test('P-18: the shared hostile inputs are unverified, except the shapes the read
   const reusable = ['    name: a', '    uses: ./.github/workflows/called.yml'];
   assert.equal(p3('a / b', ['on: [pull_request]', 'jobs:', '  lit:', '    name: a / b', '    runs-on: x', '  b:', ...reusable, ''].join('\n')).status, 'unverified', 'a reusable call adds the called job');
   assert.equal(p3('a', ['on: [pull_request]', 'jobs:', '  lit:', '    name: a', '    runs-on: x', '  b:', ...reusable, ''].join('\n')).status, 'unverified', 'a skipped reusable call reports its bare name');
+  // A reusable call with a matrix: GitHub names its jobs "a (x) / b".
+  const both = ['on: [pull_request]', 'jobs:', '  lit:', '    name: a (x) / b', '    runs-on: x', '  b:', '    name: a', '    strategy:', '      matrix:', '        os: [x]', '    uses: ./.github/workflows/called.yml', ''].join('\n');
+  assert.equal(p3('a (x) / b', both).status, 'unverified', 'a reusable call with a matrix');
+  assert.match(p3('a (x) / b', both).details[0], /matrix job/);
+  assert.match(p3('a / b', ['on: [pull_request]', 'jobs:', '  lit:', '    name: a / b', '    runs-on: x', '  b:', ...reusable, ''].join('\n')).details[0], /calls a reusable workflow/);
+  assert.match(p3('ci', derived('ci', matrix)).details[0], /bare name when skipped/);
+  // A strategy written as an expression can still expand into a matrix.
+  assert.equal(p3('ci (x)', derived('ci (x)', ['    name: ci', '    strategy: ${{ fromJSON(needs.s.outputs.strategy) }}'])).status, 'unverified', 'an expression strategy');
+  // An expression that never closes could produce any name.
+  assert.equal(p3('ci', derived('ci', ['    name: x${{ y'])).status, 'unverified', 'an unclosed expression');
   // A matrix job or reusable call that cannot report the check, and an expression name that
   // cannot produce it, leave P3 ok.
   assert.equal(p3('validate', derived('validate', ['    name: tests', '    strategy:', '      matrix:', '        os: [x]'])).status, 'ok');
