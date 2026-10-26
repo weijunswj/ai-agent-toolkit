@@ -1,8 +1,19 @@
 # Toolkit Changelog
 
-## 3.13.8 (standing permission asks)
+## 3.13.9 (standing permission asks)
 
 - **Standing permission asks:** when a step stops on the owner, an agent checks the standing-permission ledger and, if nothing covers it, asks once in plain English: just this once, from now on for this exact scope, or no. The ledger is `standing-permissions/ledger.json` in the owner's evidence store, so every project and computer reads the same list. An entry covers a step only when it is an active standing grant, in date, an exact match, traceable to the owner's own answer, and not a hard stop; only the owner's answer creates one, a "just this once" answer never covers a later step, and a standing grant counts as the fresh approval for that one step but never as current-turn approval. Hard stops (keys and credentials, force-pushes, deleting the only copy of evidence, pushes to the default branch, merges without the owner's OK, live and security changes, turning off checks, editing their own permission settings or adding allow rules to saved settings, host hard-denies, acting as the owner, and the rest of the safety floor) are one list in the safety-gates playbooks and are never offered or honoured. Each entry has a 90-day review, unique ids, revoke by id with a revoke date, and an all-projects scope the owner can pick but is never the default or the recommendation. A grant is owner authority only: where the host still blocks, the card names the one native change the owner makes and the entry records it in `native_rule` (in Claude Code an allow rule or `autoMode.allow` entry in user settings, or narrowing the owner's own ask rule, which an allow rule never clears; in Codex the allow choice at an approval prompt), and agents never write their own permission settings by any route. The rule is in the global rules, the procedure in both safety-gates playbooks, and the Projects skill (2026-10-25.9; the owner saves it from the skill update card) uses a decision card; the project instructions block is unchanged, since it has no room and threads already read the global rules. To make room, one docs-cleanup sentence moved from the global rules into the docs-governance playbooks.
+
+## 3.13.8
+
+### Now and Later
+
+- **Two roadmap groups:** the Programme Graph's Class column shows `NOW` for work in progress (an open or draft PR, or an active, owner-waiting or held gate) and `LATER` for every other committed, unfinished task. Optional work still sorts last as `OPTIONAL`. There is no `NEXT` group: a planned release still shows on the task page but no longer moves a task.
+- **Later is in priority order:** the catalogue `order` is the priority again. Inside each group rows sort by `order`, lowest first, then by child number, and native sub-issues follow. The top Later task is what starts next.
+- **Start next:** the CURRENT summary ends with one **Start next** line naming the top Later task, or None. A task whose PR merged or whose issue closed is skipped, even before its state catches up.
+- **Ties are named:** a reconcile finding `ORDER_TIE` lists queued tasks in one group that share an `order`, so the controller can set a distinct priority with `update-parent`. While older classes are still reported, migrate first, or set COMMITTED and the priority in one patch.
+- **Older classes:** the CORE, HARDENING and LATER migration patch renumbers `order` in the old sequence, which becomes the priority. Before migration their old per-class numbers tie, so a pass may reorder them.
+- **Rules text:** the governed rules order work Now, then Later by priority; Toolkit V3, CONTROLLER.md and the reconciler skill say the same.
 
 ## 3.13.7
 
