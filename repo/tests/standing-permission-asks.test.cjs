@@ -50,10 +50,9 @@ function section(text) {
 
 test('the global rule names the options, the owner-only grant, the hard-stop limit and the playbook', () => {
   const rules = read('repo/contracts/agent-rules/global-rules.md');
-  assert.match(rules, /\*\*Standing permission asks:\*\* when a step stops on the owner, check the standing-permission ledger/);
-  assert.match(rules, /just this once, from now on for this exact scope, or no/);
-  assert.match(rules, /Only the owner's own recorded answer grants; never offer or honour a hard stop, and never edit your own permission settings\./);
-  assert.match(rules, /`repo\/docs\/agent-playbooks\/safety-gates\.md`/);
+  assert.match(rules, /\*\*Standing permission asks:\*\* if a step stops on the owner, check the ledger, else ask once/);
+  assert.match(rules, /\(once, from now on for exactly this, or no\)/);
+  assert.match(rules, /Only the owner's recorded answer grants, never for a hard stop; never edit your own permission settings \(Toolkit safety-gates playbook\)\./);
 });
 
 test('both safety-gates playbooks carry the same procedure, every hard stop and every honour rule', () => {
