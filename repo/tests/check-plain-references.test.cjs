@@ -131,8 +131,7 @@ test('flags Toolkit shorthand codes in docs and in the readable fields of struct
   const code = 'N' + '5';
   const root = fixture(t, {
     'repo/docs/A.md': `Ships with the ${code} work.\nCodex V1 (\`multi_agent\`) and V2 (\`multi_agent_v2\`) are fine.\n`,
-    'repo/contracts/x/a.json': `{\n  "title": "The ${code} contract",\n  "owned_by": "${code}"\n}\n`,
-    'repo/contracts/trusted-ci-repository-protection/a.json': '{ "name": "N' + '6 CI diagnostics" }\n'
+    'repo/contracts/x/a.json': `{\n  "title": "The ${code} contract",\n  "owned_by": "${code}"\n}\n`
   });
   const failures = plain.check(root).failures.map(finding => [finding.file, finding.line, finding.rule, finding.text]);
   assert.deepEqual(failures, [['repo/contracts/x/a.json', 2, 'banned-term', code], ['repo/docs/A.md', 1, 'banned-term', code]]);

@@ -128,11 +128,6 @@
       "file": "skills/n8n-workflow-transport/references/n8n-safety-rules.md",
       "text": "H1",
       "reason": "Markdown's top heading level"
-    },
-    {
-      "file": "repo/contracts/trusted-ci-repository-protection/",
-      "text": "N6",
-      "reason": "stored workflow, job, ruleset and schema names that repositories' required checks and the protection reader match exactly; renaming them would break those repositories"
     }
   ],
   "baseline": "repo/contracts/plain-references/baseline.json"

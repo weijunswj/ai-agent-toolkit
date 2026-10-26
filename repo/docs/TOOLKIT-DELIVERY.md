@@ -12,7 +12,7 @@ The normal coding workflow is **G0 Discuss/Discovery → G1 Builder, including U
 |---|---|
 | A milestone | Its agreed observable outcome, with evidence. A checkpoint is not completion. |
 | A Core release | The approved Core works in the agreed environment, is accepted, passes the review its tier requires, and is integrated and installed with custody and recovery working. |
-| The programme parent | Every committed Now, Next and Later obligation is done or disposed of by the user. |
+| The programme parent | Every committed Now and Later obligation is done or disposed of by the user. |
 
 Neither record neatness nor an optional idea is a hidden prerequisite for shipping, and no paper contract, synthetic replay or green CI substitutes for the usable result.
 
@@ -20,21 +20,20 @@ Neither record neatness nor an optional idea is a hidden prerequisite for shippi
 
 This contract replaces conflicting user-owned Toolkit process requirements for this programme, preserving higher-priority instructions, native permissions, secret handling and controls on consequential effects. A repository document never manufactures an owner approval a host recognises. Other repositories keep their own bindings. Old gate names describe historical work; never relabel an old review as the final G2, reset exhausted unsafe operations or erase a denial.
 
-## 3. Now, Next and Later
+## 3. Now and Later
 
-Every open outcome is committed or optional, with one stable child issue per coherent outcome. Do not create container issues for the groups. Where an outcome sits is worked out from its release, never set by hand:
+Every open outcome is committed or optional, with one stable child issue per coherent outcome. Do not create container issues for the groups. Where an outcome sits is worked out from its progress, never set by hand, and Later is kept in priority order:
 
 | Group | Meaning | Admission |
 |---|---|---|
 | NOW | In progress: an open release PR or an active gate, including work merged but still waiting on its UAT or review. The complete usable release currently approved, with its necessary security, privacy, integrity and recovery floor. | The user agrees the outcome; routine means are delegated. |
-| NEXT | Queued for a named planned release. By convention a release has a name, not a version number; the version is taken when it merges. | The user agrees the release plan. |
-| LATER | Committed, with no release yet. | New material capabilities need user agreement first. |
+| LATER | Committed and not in progress, in the user's priority order; the top one starts next. A planned release has a name, not a version number; the version is taken when it merges, and it does not change the group. | The user agrees new material capabilities and the priority order. |
 
-Optional work the user keeps sorts after Later as OPTIONAL. Committed Later work is not optional: anything uncommitted is closed with its reason or kept as optional by the user. Ship the Now release with its safety floor, then the Next release; real defects come first by impact. When a release closes, G0 proposes the next one from Next and related Later work and the same open children are updated. A clarification may join the current release; a material addition is proposed with its effect on the finish line.
+Optional work the user keeps sorts after Later as OPTIONAL. Committed Later work is not optional: anything uncommitted is closed with its reason or kept as optional by the user. Ship the Now release with its safety floor, then work down Later from the top; real defects come first by impact. When a release closes, G0 proposes the next one from the top of Later and related work and the same open children are updated. A clarification may join the current release; a material addition is proposed with its effect on the finish line.
 
 ## 4. Where the plan and milestones live
 
-The programme parent is the current index: the Core outcome, children, milestone order, acceptance, position, decisions and the sorted catalogue. Each child holds its acceptance, checklist, evidence, checkpoint, blockers and next action. Roles, milestones, commits and sessions create no issues; the default milestone is one coherent outcome child. After a material change, regenerate the parent in Now, Next, Later order, preserving concurrent edits or reporting a precise conflict.
+The programme parent is the current index: the Core outcome, children, milestone order, acceptance, position, decisions and the sorted catalogue. Each child holds its acceptance, checklist, evidence, checkpoint, blockers and next action. Roles, milestones, commits and sessions create no issues; the default milestone is one coherent outcome child. After a material change, regenerate the parent in Now, then Later priority order, preserving concurrent edits or reporting a precise conflict.
 
 The programme reconciler owns state, hierarchy, projections and CURRENT. Its acceptance: native relations match canonical state; dependencies never reparent; reclassification keeps identity and scope; graph and roadmap share one revision; child and PR data agree; stale projections are detected; history stays accurate; and G1 continuation creates no gate, duplicate child or false finality.
 
@@ -65,7 +64,7 @@ G2 starts after G1's working version and any required user UAT are accepted. Rev
 | Disposition | Required explanation and action |
 |---|---|
 | Current ship blocker | The criterion or safety invariant broken, the concrete failure or absent proof, and the smallest fix. |
-| Follow-up | The added protection and why acceptance still holds; kept out of the current release. It joins an existing or new outcome child (section 4), whose planned release or lack of one makes it Next or Later. |
+| Follow-up | The added protection and why acceptance still holds; kept out of the current release. It joins an existing or new outcome child (section 4), placed in Later by its priority. |
 | Later or optional | The new outcome and its queue; never silently added to the Core. |
 | Unsupported or duplicate | The evidence problem or the existing finding. |
 

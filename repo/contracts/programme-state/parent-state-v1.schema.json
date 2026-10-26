@@ -38,9 +38,9 @@
         "properties": {
           "issue": { "type": "integer", "minimum": 1 },
           "label": { "type": "string", "minLength": 1 },
-          "class": { "enum": ["COMMITTED", "OPTIONAL", "COMPLETED", "RETIRED", "CORE", "HARDENING", "LATER"], "description": "What the owner decided: committed, optional, completed or retired. Now, Next and Later are worked out from the task's PR and release, never stored. CORE, HARDENING and LATER are older names kept only for migration: read as COMMITTED in their old sequence, reported as CLASS_LEGACY with a migration patch, and never added by a write." },
+          "class": { "enum": ["COMMITTED", "OPTIONAL", "COMPLETED", "RETIRED", "CORE", "HARDENING", "LATER"], "description": "What the owner decided: committed, optional, completed or retired. Now and Later are worked out from the task's PR and gate, never stored. CORE, HARDENING and LATER are older names kept only for migration: read as COMMITTED and sorted like any other task, reported as CLASS_LEGACY with a migration patch, and never added by a write." },
           "parent": { "type": ["integer", "null"], "minimum": 1, "description": "Expected native parent: the programme parent or another outcome. Null means no native parent is expected." },
-          "order": { "type": "integer", "minimum": 0, "description": "Position among the open outcomes in the same Programme Graph group and in native sub-issue order, lowest first; ties use issue number. Finished outcomes sort by completion time instead." },
+          "order": { "type": "integer", "minimum": 0, "description": "The priority: the Programme Graph and native sub-issue order sort open outcomes by group (Now, Later, Optional), then order, lowest first, then issue number, so the top Later outcome starts next. Finished outcomes sort by completion time." },
           "lane": { "type": "string", "minLength": 1 },
           "owner_prefix": { "type": "string", "pattern": "^[A-Za-z0-9._-]{1,40}$" },
           "name": { "type": "string", "minLength": 1, "description": "The task name shown in the Task column. Without it, the issue title is shown without a leading code or release." },

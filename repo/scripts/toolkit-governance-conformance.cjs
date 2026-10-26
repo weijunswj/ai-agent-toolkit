@@ -7,8 +7,10 @@
 // It reports the governance state, the governed block (missing, legacy, edited by hand or older
 // than this Toolkit's source), the programme binding, the no-force-push branch ruleset an ENABLED
 // GitHub repository must carry (asked of GitHub through `gh`; `--offline` skips it and an
-// unreachable GitHub reports it unverified, which never counts as present or as drift), and
-// whether the repository carries a current plain-text check, and whether prompt-hold enforcement is
+// unreachable GitHub reports it unverified, which never counts as present or as drift), the
+// default-branch protection the binding's required checks need (toolkit-governance-protection.cjs:
+// required checks match and are pinned, one job produces each and cannot be masked, merge commits
+// only), whether the repository carries a current plain-text check, and whether prompt-hold enforcement is
 // active on each host. Enforcement never counts as active unless a host really runs the hook:
 // hosts without plugin hooks (cloud sessions, Claude Projects threads) and OpenCode are
 // `unsupported`.
@@ -20,6 +22,7 @@ const managedBlock = require('./toolkit-managed-block.cjs');
 const governance = require('./toolkit-governance-state.cjs');
 const catalogue = require('./toolkit-governance-catalogue.cjs');
 const ruleset = require('./toolkit-governance-ruleset.cjs');
+const protection = require('./toolkit-governance-protection.cjs');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const GOVERNED_SOURCE_REL = 'repo/contracts/agent-rules/toolkit-governed-rules.md';
@@ -63,8 +66,8 @@ function enforcementStatus(root = ROOT) {
 function finding(id, severity, message) { return Object.freeze({ id, severity, message }); }
 
 // Reads only. Options pass through to the state reader (registry location in tests) and may set
-// `toolkitRoot` for the source comparison, `offline: true` to skip the GitHub ruleset read, and
-// `rulesetReader` (tests).
+// `toolkitRoot` for the source comparison, `offline: true` to skip the GitHub reads, and
+// `rulesetReader` and `protectionReader` (tests).
 function checkConformance(cwd, options = {}) {
   const toolkitRoot = options.toolkitRoot || ROOT;
   let state;
@@ -114,8 +117,18 @@ function checkConformance(cwd, options = {}) {
       : ruleset.noForcePushRuleset(state.root, options.rulesetReader ? { reader: options.rulesetReader } : {});
     findings.push(...rulesetFindings(rulesetResult));
   }
+  let protectionResult = null;
+  const requiredChecks = state.state === 'ENABLED' && state.materials.binding ? governance.bindingRequiredChecks(state.root) : null;
+  if (requiredChecks) {
+    protectionResult = protection.defaultBranchProtection(state.root, {
+      requiredChecks,
+      offline: options.offline === true,
+      ...(options.protectionReader ? { reader: options.protectionReader } : {}),
+    });
+    findings.push(...protectionFindings(protectionResult));
+  }
   const drift = findings.some(entry => entry.severity === 'drift');
-  return report(drift ? 1 : 0, state, findings, toolkitRoot, rulesetResult);
+  return report(drift ? 1 : 0, state, findings, toolkitRoot, rulesetResult, protectionResult);
 }
 
 function rulesetFindings(result) {
@@ -153,6 +166,35 @@ function plainTextFindings(repoRoot, toolkitRoot) {
     : [];
 }
 
+const PROTECTION_FINDINGS = Object.freeze({
+  P1: ['PROTECTION_CHECKS_MISMATCH', 'The default branch must require exactly the checks in the programme binding'],
+  P2: ['PROTECTION_CHECK_UNPINNED', 'Each required check must be pinned to an app, or any job or status of that name can satisfy it'],
+  P3: ['PROTECTION_PRODUCER', 'Exactly one workflow job must produce each required check'],
+  P4: ['PROTECTION_MASKING', 'A required check must run on every pull request and must not pass while a job it waits for failed'],
+  P5: ['PROTECTION_MERGE_METHODS', 'The default branch must allow merge commits only'],
+});
+
+function protectionFindings(result) {
+  if (result.status === 'not-applicable') return [];
+  if (result.status === 'not-enforceable') return [finding('PROTECTION_NOT_ENFORCEABLE', 'info', 'GitHub cannot protect the default branch here (a private repository on GitHub Free has no rulesets or branch protection).')];
+  if (result.reason === 'binding-has-no-required-checks') return [finding('PROTECTION_UNVERIFIED', 'unverified', 'The programme binding names no required checks, so default-branch protection was not checked.')];
+  if (result.reason === 'identity-unreadable') return [finding('PROTECTION_UNVERIFIED', 'unverified', 'Default-branch protection could not be checked (the repository identity is unreadable).')];
+  const out = [];
+  for (const [id, [code, rule]] of Object.entries(PROTECTION_FINDINGS)) {
+    const check = result.checks[id];
+    if (!check || check.status === 'ok') continue;
+    if (check.status === 'drift') {
+      const fix = ['P1', 'P2', 'P5'].includes(id) ? ' The one-time migration offers a Toolkit ruleset for this, with your approval; a rule in another ruleset is changed by hand.' : ' Fix the workflow through a pull request.';
+      out.push(finding(code, 'drift', `${rule}: ${check.details.join('; ')}.${fix}`));
+    } else if (check.status === 'not-checked') {
+      out.push(finding(`${code}_NOT_CHECKED`, 'unverified', `${rule}: not checked (offline).`));
+    } else if (check.status === 'unverified') {
+      out.push(finding(`${code}_UNVERIFIED`, 'unverified', `${rule}: could not be confirmed (${check.details.join('; ')}).${['P1', 'P2', 'P5'].includes(id) ? ' Sign in with `gh auth login` as a repository admin and run the check again.' : ''}`));
+    }
+  }
+  return out;
+}
+
 function governedBlockFindings(repoRoot, toolkitRoot) {
   const materials = governance.readGovernedBlock(repoRoot);
   if (!materials.present) return [];
@@ -171,7 +213,7 @@ function governedBlockFindings(repoRoot, toolkitRoot) {
   return out;
 }
 
-function report(exitCode, state, findings, toolkitRoot, rulesetResult = null) {
+function report(exitCode, state, findings, toolkitRoot, rulesetResult = null, protectionResult = null) {
   let catalogueProblems = [];
   try { catalogueProblems = catalogue.catalogueProblems(toolkitRoot); } catch { catalogueProblems = ['the skill catalogue could not be checked']; }
   const all = [...findings, ...catalogueProblems.map(message => finding('CATALOGUE_DRIFT', 'drift', message))];
@@ -183,6 +225,7 @@ function report(exitCode, state, findings, toolkitRoot, rulesetResult = null) {
     state,
     findings: Object.freeze(all),
     no_force_push_ruleset: rulesetResult,
+    default_branch_protection: protectionResult,
     enforcement: enforcementStatus(toolkitRoot),
   });
 }

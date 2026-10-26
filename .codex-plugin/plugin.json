@@ -1,6 +1,6 @@
 {
   "name": "ai-agent-toolkit",
-  "version": "3.13.3",
+  "version": "3.13.9",
   "description": "Skills and working rules for AI coding agents in Codex, with guided setup, opt-in updates from GitHub and a portable skills copy for Antigravity.",
   "author": {
     "name": "weijunswj",

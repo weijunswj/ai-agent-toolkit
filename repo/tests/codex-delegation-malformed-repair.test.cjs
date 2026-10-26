@@ -7,11 +7,20 @@ const path = require('node:path');
 const test = require('node:test');
 const config = require('../scripts/codex-delegation-config.cjs');
 
+// Every temp folder a test makes is removed after the file's tests, also when they fail.
+const tempFolders = [];
+test.after(() => { for (const dir of tempFolders) fs.rmSync(dir, { recursive: true, force: true }); });
+function tempFolder(prefix) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  tempFolders.push(dir);
+  return dir;
+}
+
 const V1 = config.RUNTIMES.V1;
 const V2 = config.RUNTIMES.V2;
 
 function tempConfig(label = 'repair case') {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), `toolkit-${label.replace(/\s+/g, '-')}-`));
+  const root = tempFolder(`toolkit-${label.replace(/\s+/g, '-')}-`);
   const codexHome = path.join(root, 'Codex Home With Spaces');
   const filePath = path.join(codexHome, 'config.toml');
   fs.mkdirSync(codexHome, { recursive: true });
