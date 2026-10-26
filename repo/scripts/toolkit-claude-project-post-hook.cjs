@@ -18,9 +18,10 @@
 // - Merge summary: in a Projects session (one that has used the Projects tools), a PR merge (the gh merge command, a
 //   gh api PUT to .../pulls/<n>/merge or a merge_pull_request tool) is refused until a line of one of its own posts
 //   says "external effects" and names that PR; every merge in a command is checked. The command is read word by word
-//   the way the shell reads it (see shellSegments), so quotes, escapes and option values never hide or replace the PR.
-//   It is a tripwire on the command text only: curl, GraphQL, wrapper shells, prefixes, aliases, scripts, direct
-//   pushes, a variable PR number and a command inside a double-quoted $(...) or backticks are not seen.
+//   with bash or PowerShell quoting rules (see shellSegments), so quotes, escapes, redirections and option values never
+//   hide or replace the PR, and a command it cannot finish reading counts as a merge with no number. It is a tripwire
+//   on the command text only: curl, GraphQL, wrapper shells, prefixes such as VAR= or sudo, aliases, scripts, direct
+//   pushes and a command inside a double-quoted $(...) or backticks are not seen.
 // Sessions without these tools (normal chats, Codex and sessions outside Projects) are never touched. Questions go
 // on decision cards, a separate tool this hook does not check. Input or a transcript it cannot read passes. The
 // hook is registered without `onFailure: "block"` so a hook that cannot start never silences every post.
@@ -42,7 +43,14 @@ const REPLY_LINE = /^\s*Re: your reply on\b/i;
 const ELI5_LINE = /^\s*(?:[-*]\s+)?\*\*ELI5:\*\*/;
 const LINK = /\[[^\]]+\]\([^)\s]+\)|https?:\/\/\S+/;
 // Numbered options: a 1 and a 2 in the same style ("1. ... 2.", "1) ... 2)" or "(1) ... (2)").
-const OPTION_LISTS = [/(?:^|\s)1\.\s+\S.*\s2\.\s+\S/, /(?:^|\s)1\)\s+\S.*\s2\)\s+\S/, /\(1\)\s+\S.*\(2\)\s+\S/];
+const OPTION_LISTS = [[/(?:^|\s)1\.\s+\S/, /\s2\.\s+\S/], [/(?:^|\s)1\)\s+\S/, /\s2\)\s+\S/], [/\(1\)\s+\S/, /\(2\)\s+\S/]];
+// Finds the 1 marker first, then a 2 marker after it, so a long line stays linear.
+function hasOptionList(body) {
+  return OPTION_LISTS.some(([one, two]) => {
+    const first = one.exec(body);
+    return first !== null && two.test(body.slice(first.index + first[0].length));
+  });
+}
 
 // An owner message counts unless it sits inside one of the quoting tags below (a message, note, citation, relay,
 // task notification or another session's output), so an owner tag quoted or forwarded inside one of them never counts.
@@ -204,7 +212,7 @@ function layoutIssue(text) {
   if (!first || !NOW_LINE.test(first)) return 'its first line must start with **Now:** (where things stand now, rewritten on each edit). A "Re: your reply on <topic>" line may come before it.';
   for (const line of updates) {
     const body = line.replace(UPDATE_LINE, '');
-    if (/Question:/i.test(body) || OPTION_LISTS.some(list => list.test(body))) {
+    if (/Question:/i.test(body) || hasOptionList(body)) {
       return `the Update line "${line.trim().slice(0, 80)}" has a question or numbered options in it. An Update line is one short status sentence; put the question on a decision card and list it under **Waiting on you**.`;
     }
   }
@@ -236,34 +244,44 @@ function editIssue(previous, text) {
   return '';
 }
 
-// Shell reading. The merge check reads a command as the shell does, word by word, rather than rewriting its text:
-// quotes and escapes are removed and their pieces join into one word (so an empty quote touching a word adds
-// nothing, and a quoted option value stays that option's one value), separators inside quotes are text, comments,
-// heredoc bodies and $((...)) are skipped, and a $(...) or backtick command inside double quotes is skipped as text.
-// Every pass moves forward only, so it runs in linear time.
+// Shell reading. The merge check reads a command word by word, following bash quoting rules for the Bash tool and
+// PowerShell quoting rules for the PowerShell tool, rather than rewriting its text: quotes and escapes are removed and
+// their pieces join into one word (so an empty quote touching a word adds nothing, and a quoted option value stays
+// that option's one value), separators inside quotes are text, and comments, heredoc or here-string bodies,
+// $((...)), redirections and their targets are skipped. A backtick or $(...) command inside double quotes, and an
+// unquoted backtick command in bash, is skipped as text. Input the reader cannot finish (an open quote, heredoc or
+// bracket, or nesting too deep) is marked open, and an open read that mentions a gh merge counts as a merge with no
+// number, so a misread fails toward checking. Every pass moves forward only, so it runs in linear time.
 const SEPARATORS = new Set([';', '&', '|', '(', ')', '\n', '\r']);
 const BLANKS = new Set([' ', '\t']);
+// Set by a reader that runs out of input before its closer.
+let readOpen = false;
 
 function skipSingle(text, i) {
   const end = text.indexOf("'", i);
+  if (end === -1) readOpen = true;
   return end === -1 ? text.length : end + 1;
 }
 
 function skipAnsi(text, i) {
   while (i < text.length && text[i] !== "'") i += text[i] === '\\' ? 2 : 1;
+  if (i >= text.length) readOpen = true;
   return Math.min(i + 1, text.length);
 }
 
 function skipBacktick(text, i) {
   while (i < text.length && text[i] !== '`') i += text[i] === '\\' ? 2 : 1;
+  if (i >= text.length) readOpen = true;
   return Math.min(i + 1, text.length);
 }
 
 function skipArith(text, i) {
-  for (let depth = 2; i < text.length && depth > 0; i += 1) {
+  let depth = 2;
+  for (; i < text.length && depth > 0; i += 1) {
     if (text[i] === '(') depth += 1;
     else if (text[i] === ')') depth -= 1;
   }
+  if (depth > 0) readOpen = true;
   return i;
 }
 
@@ -276,6 +294,7 @@ function readDelimiter(text, i) {
   while (i < text.length && !BLANKS.has(text[i]) && !SEPARATORS.has(text[i]) && text[i] !== '<' && text[i] !== '>') {
     if (text[i] === "'" || text[i] === '"') {
       const end = text.indexOf(text[i], i + 1);
+      if (end === -1) readOpen = true;
       const stop = end === -1 ? text.length : end;
       tag += text.slice(i + 1, stop);
       i = stop + 1;
@@ -293,13 +312,15 @@ function readDelimiter(text, i) {
 // Skips the bodies of the heredocs waiting on this line; i is just after its newline.
 function skipHeredocs(text, i, pending) {
   for (const { tag, strip } of pending.splice(0)) {
-    while (i < text.length) {
+    let closed = false;
+    while (i < text.length && !closed) {
       const newline = text.indexOf('\n', i);
       const end = newline === -1 ? text.length : newline;
       const line = text.slice(i, end).replace(/\r$/, '');
       i = end + 1;
-      if ((strip ? line.replace(/^\t+/, '') : line) === tag) break;
+      closed = (strip ? line.replace(/^\t+/, '') : line) === tag;
     }
+    if (!closed) readOpen = true;
   }
   return Math.min(i, text.length);
 }
@@ -312,6 +333,7 @@ function skipDouble(text, i) {
     else if (text[i] === '`') i = skipBacktick(text, i + 1);
     else i += 1;
   }
+  if (i >= text.length) readOpen = true;
   return Math.min(i + 1, text.length);
 }
 
@@ -339,34 +361,56 @@ function skipCommand(text, i) {
       if (!depth) return i;
     } else i += 1;
   }
+  readOpen = true;
   return i;
 }
 
-// The command's segments (split at ; & | ( ) and newlines outside quotes), each a list of words.
-function shellSegments(text) {
+// Word building shared by the bash and PowerShell readers. A redirection target is read and then dropped.
+function wordReader() {
   const segments = [];
-  const pending = [];
   let words = [];
   let word = null;
-  const endWord = () => {
-    if (word !== null) words.push(word);
-    word = null;
+  let dropNext = false;
+  const reader = {
+    segments,
+    add(part) { word = (word ?? '') + part; },
+    endWord() {
+      if (word !== null) {
+        if (dropNext) dropNext = false;
+        else words.push(word);
+      }
+      word = null;
+    },
+    endSegment() {
+      reader.endWord();
+      dropNext = false;
+      if (words.length) segments.push(words);
+      words = [];
+    },
+    wordStarted: () => word !== null,
+    // A redirection operator: an all-digit word (or PowerShell's *) right before it is its stream, not an argument.
+    redirect(fd) {
+      if (word !== null && fd.test(word)) word = null;
+      else reader.endWord();
+    },
+    dropTarget() { dropNext = true; },
   };
-  const endSegment = () => {
-    endWord();
-    if (words.length) segments.push(words);
-    words = [];
-  };
-  const add = part => { word = (word ?? '') + part; };
+  return reader;
+}
+
+// Bash: the command's segments (split at ; & | ( ) and newlines outside quotes), each a list of words.
+function bashSegments(text) {
+  const pending = [];
+  const read = wordReader();
   for (let i = 0; i < text.length;) {
     const c = text[i];
-    if (BLANKS.has(c)) { endWord(); i += 1; }
+    if (BLANKS.has(c)) { read.endWord(); i += 1; }
     else if (c === '\\') {
-      if (text[i + 1] !== '\n') add(text[i + 1] || '');
+      if (text[i + 1] !== '\n') read.add(text[i + 1] || '');
       i += 2;
     } else if (c === "'") {
       const end = skipSingle(text, i + 1);
-      add(text.slice(i + 1, text[end - 1] === "'" ? end - 1 : end));
+      read.add(text.slice(i + 1, text[end - 1] === "'" ? end - 1 : end));
       i = end;
     } else if (c === '"') {
       let part = '';
@@ -377,38 +421,161 @@ function shellSegments(text) {
         else if (text[i] === '`') { part += '_'; i = skipBacktick(text, i + 1); }
         else { part += text[i]; i += 1; }
       }
-      add(part);
+      if (i >= text.length) readOpen = true;
+      read.add(part);
       i += 1;
     } else if (text.startsWith("$'", i)) {
       const end = skipAnsi(text, i + 2);
-      add(text.slice(i + 2, text[end - 1] === "'" ? end - 1 : end).replace(/\\([\s\S])/g, '$1'));
+      read.add(text.slice(i + 2, text[end - 1] === "'" ? end - 1 : end).replace(/\\([\s\S])/g, '$1'));
       i = end;
-    } else if (text.startsWith('$((', i)) { add('_'); i = skipArith(text, i + 3); }
-    else if (c === '`') { add('_'); i = skipBacktick(text, i + 1); }
-    else if (c === '#' && word === null) {
+    } else if (text.startsWith('$((', i)) { read.add('_'); i = skipArith(text, i + 3); }
+    else if (text.startsWith('((', i) && !read.wordStarted()) { read.endSegment(); i = skipArith(text, i + 2); }
+    else if (c === '`') { read.add('_'); i = skipBacktick(text, i + 1); }
+    else if (c === '#' && !read.wordStarted()) {
       const newline = text.indexOf('\n', i);
       i = newline === -1 ? text.length : newline;
-    } else if (text.startsWith('<<<', i)) { endWord(); i += 3; }
+    } else if (text.startsWith('<<<', i)) { read.endWord(); read.dropTarget(); i += 3; }
     else if (text.startsWith('<<', i)) {
-      endWord();
-      const read = readDelimiter(text, i + 2);
-      if (read.heredoc) pending.push(read.heredoc);
-      i = read.i;
+      read.endWord();
+      const delimiter = readDelimiter(text, i + 2);
+      if (delimiter.heredoc) pending.push(delimiter.heredoc);
+      i = delimiter.i;
     } else if (c === '\n') {
-      endSegment();
+      read.endSegment();
       i = skipHeredocs(text, i + 1, pending);
-    } else if (c === '$' && text[i + 1] === '(') { endSegment(); i += 2; }
-    else if (SEPARATORS.has(c)) { endSegment(); i += 1; }
-    else if (c === '<' || c === '>') { endWord(); i += 1; }
-    else { add(c); i += 1; }
+    } else if (c === '$' && text[i + 1] === '(') { read.endSegment(); i += 2; }
+    else if (c === '&' && text[i + 1] === '>') {
+      read.endWord();
+      i += text[i + 2] === '>' ? 3 : 2;
+      read.dropTarget();
+    } else if (c === '<' || c === '>') {
+      read.redirect(/^\d+$/);
+      i += 1;
+      if ((c === '>' && '>|'.includes(text[i])) || (c === '<' && text[i] === '>')) i += 1;
+      if (text[i] === '&') {
+        i += 1;
+        const fd = text.slice(i).match(/^(?:\d+|-)/);
+        if (fd) i += fd[0].length;
+        else read.dropTarget();
+      } else read.dropTarget();
+    } else if (SEPARATORS.has(c)) { read.endSegment(); i += 1; }
+    else { read.add(c); i += 1; }
   }
-  endSegment();
-  return segments;
+  read.endSegment();
+  if (pending.length) readOpen = true;
+  return read.segments;
+}
+
+// PowerShell: a $(...) subexpression found to its closing bracket, with its own quotes, never read.
+function skipPowerShellSub(text, i) {
+  for (let depth = 1; i < text.length;) {
+    const c = text[i];
+    if (c === '`') i += 2;
+    else if (c === "'") i = skipPowerShellSingle(text, i + 1).i;
+    else if (c === '"') i = skipPowerShellDouble(text, i + 1).i;
+    else if (c === '(') { depth += 1; i += 1; }
+    else if (c === ')') {
+      depth -= 1;
+      i += 1;
+      if (!depth) return i;
+    } else i += 1;
+  }
+  readOpen = true;
+  return i;
+}
+
+// A single-quoted PowerShell string ('' is one quote).
+function skipPowerShellSingle(text, i) {
+  let part = '';
+  while (i < text.length) {
+    if (text[i] === "'" && text[i + 1] === "'") { part += "'"; i += 2; }
+    else if (text[i] === "'") return { i: i + 1, part };
+    else { part += text[i]; i += 1; }
+  }
+  readOpen = true;
+  return { i, part };
+}
+
+// A double-quoted PowerShell string: a backtick escapes the next character, "" is one quote, $(...) is skipped.
+function skipPowerShellDouble(text, i) {
+  let part = '';
+  while (i < text.length) {
+    if (text[i] === '`') { part += text[i + 1] || ''; i += 2; }
+    else if (text[i] === '"' && text[i + 1] === '"') { part += '"'; i += 2; }
+    else if (text[i] === '"') return { i: i + 1, part };
+    else if (text.startsWith('$(', i)) { part += '_'; i = skipPowerShellSub(text, i + 2); }
+    else { part += text[i]; i += 1; }
+  }
+  readOpen = true;
+  return { i, part };
+}
+
+// PowerShell: the command's segments (split at ; & | ( ) { } and newlines outside quotes), each a list of words.
+function powerShellSegments(text) {
+  const read = wordReader();
+  const separators = new Set([...SEPARATORS, '{', '}']);
+  for (let i = 0; i < text.length;) {
+    const c = text[i];
+    const hereString = (c === '@' && (text[i + 1] === "'" || text[i + 1] === '"')) ? text.slice(i + 2).match(/^[ \t]*\r?\n/) : null;
+    if (BLANKS.has(c)) { read.endWord(); i += 1; }
+    else if (hereString) {
+      // A here-string runs to a line that starts with its closing quote and @.
+      const close = new RegExp(`\\n${text[i + 1]}@`).exec(text.slice(i));
+      read.add('_');
+      if (close) i += close.index + 3;
+      else { readOpen = true; i = text.length; }
+    } else if (c === '`') {
+      const next = text[i + 1];
+      if (next === '\r' && text[i + 2] === '\n') i += 3;
+      else {
+        if (next !== '\n') read.add(next || '');
+        i += 2;
+      }
+    } else if (c === "'") {
+      const single = skipPowerShellSingle(text, i + 1);
+      read.add(single.part);
+      i = single.i;
+    } else if (c === '"') {
+      const double = skipPowerShellDouble(text, i + 1);
+      read.add(double.part);
+      i = double.i;
+    } else if (text.startsWith('<#', i)) {
+      const end = text.indexOf('#>', i + 2);
+      if (end === -1) readOpen = true;
+      i = end === -1 ? text.length : end + 2;
+    } else if (c === '#' && !read.wordStarted()) {
+      const newline = text.indexOf('\n', i);
+      i = newline === -1 ? text.length : newline;
+    } else if (c === '>') {
+      read.redirect(/^(?:\d+|\*)$/);
+      i += text[i + 1] === '>' ? 2 : 1;
+      if (text[i] === '&' && /\d/.test(text[i + 1] || '')) i += 2;
+      else read.dropTarget();
+    } else if (c === '$' && text[i + 1] === '(') { read.endSegment(); i += 2; }
+    else if (separators.has(c)) { read.endSegment(); i += 1; }
+    else { read.add(c); i += 1; }
+  }
+  read.endSegment();
+  return read.segments;
+}
+
+// The segments of a command for the given shell tool, and whether the reader ran out of input before a closer.
+function shellSegments(text, tool = 'Bash') {
+  readOpen = false;
+  try {
+    const segments = tool === 'PowerShell' ? powerShellSegments(text) : bashSegments(text);
+    return { segments, open: readOpen };
+  } catch {
+    // Nesting too deep for the reader: treated as open.
+    return { segments: [], open: true };
+  }
 }
 
 // Options of the merge command that take a value (text, a file or a repository), never the PR to merge.
 const MERGE_VALUE_LONG = new Set(['--body', '--body-file', '--subject', '--author-email', '--match-head-commit', '--repo']);
 const MERGE_VALUE_SHORT = 'bFtAR';
+// Words that may come before a command in bash: compound command keywords, a group and timing.
+const COMMAND_PREFIXES = new Set(['{', '!', 'if', 'then', 'else', 'elif', 'do', 'while', 'until', 'time']);
 
 // The PR a selector names (628, #628 or a pull URL), or null for a branch name or nothing.
 function selectorNumber(selector) {
@@ -439,36 +606,43 @@ function prMergeNumber(args) {
   return null;
 }
 
-// The PR a gh api call merges: a PUT to .../pulls/<n>/merge, or null.
-function apiMergeNumber(args) {
+// A gh api PUT to .../pulls/<n>/merge, as { number } (null when the PR is not a plain number, such as $PR), or null.
+function apiMerge(args) {
   let method = '';
-  let number = null;
+  let pull = null;
   for (let k = 0; k < args.length; k += 1) {
     const arg = args[k];
     if (arg === '-X' || arg === '--method') method = args[(k += 1)] || '';
     else if (/^(?:-X=?|--method=)./.test(arg)) method = arg.replace(/^(?:-X=?|--method=)/, '');
-    else number = number ?? arg.match(/(?:^|\/)pulls\/(\d+)\/merge\/?(?:\?|$)/)?.[1] ?? null;
+    else pull = pull ?? arg.match(/(?:^|\/)pulls\/([^/\s]+)\/merge\/?(?:\?|$)/)?.[1] ?? null;
   }
-  return /^put$/i.test(method) && number ? number : null;
+  if (!/^put$/i.test(method) || pull === null) return null;
+  return { number: /^\d+$/.test(pull) ? pull : null };
 }
 
 // Every PR a shell command or merge tool merges, as a list of { number } (null when a merge names none), or null when
-// the call merges no PR. Only a command at the start of a shell segment counts.
+// the call merges no PR. Only a command at the start of a shell segment (after compound keywords) counts.
 function mergeTargets(tool, toolInput) {
   if (MERGE_TOOL.test(tool)) {
     const number = String(toolInput?.pull_number ?? toolInput?.pullNumber ?? '');
     return [{ number: /^\d+$/.test(number) ? number : null }];
   }
   if (!SHELL_TOOL.test(tool)) return null;
+  const command = textOf(toolInput?.command);
+  const { segments, open } = shellSegments(command, tool);
   const targets = [];
-  for (const words of shellSegments(textOf(toolInput?.command))) {
-    if (words[0] !== 'gh') continue;
-    if (words[1] === 'pr' && words[2] === 'merge') targets.push({ number: prMergeNumber(words.slice(3)) });
-    else if (words[1] === 'api') {
-      const number = apiMergeNumber(words.slice(2));
-      if (number) targets.push({ number });
+  for (const words of segments) {
+    let start = 0;
+    while (COMMAND_PREFIXES.has(words[start])) start += 1;
+    if (words[start] !== 'gh') continue;
+    if (words[start + 1] === 'pr' && words[start + 2] === 'merge') targets.push({ number: prMergeNumber(words.slice(start + 3)) });
+    else if (words[start + 1] === 'api') {
+      const target = apiMerge(words.slice(start + 2));
+      if (target) targets.push(target);
     }
   }
+  // A read that could not finish fails toward checking when the text mentions a gh merge.
+  if (open && /\bgh\b[\s\S]*\bmerge/.test(command) && !targets.some(target => target.number === null)) targets.push({ number: null });
   return targets.length ? targets : null;
 }
 
