@@ -281,18 +281,18 @@ const GOVERNED = 'repo/contracts/agent-rules/toolkit-governed-rules.md';
 
 function ownerUatScopeContract(texts) {
   assert.match(texts[GATE_RULES], /G2 starts after the working result and any owner UAT acceptance/);
-  assert.match(texts[GLOBAL], /Owner UAT tests only the final product, features a Toolkit user runs \(hook setup, a quote or design run\), in plain words; CI, tests, G2 and agent UAT prove internals, each UAT list names the check covering every dropped item, and with none, UAT is NOT_REQUIRED\./);
+  assert.match(texts[GLOBAL], /Owner UAT tests only the final product, features the user runs \(hook setup, a quote or design run\), in plain words; CI, tests, G2 and agent UAT prove internals, each UAT list names the check covering every dropped item, and with none, UAT is NOT_REQUIRED\./);
   // The issue rules live in the governed block; closing waits for any owner UAT.
   assert.match(texts[GOVERNED], /`Closes`\/`Fixes`, and closing, only once the merge completes every criterion and any owner UAT passed/);
   assert.match(texts['repo/CONTROLLER.md'], /At admission split acceptance: owner UAT only for final-product steps \(global rules\), objective acceptance \(CI, G2\) for the rest; with no such step record NOT_REQUIRED\. Missing authority never waives a needed UAT\./);
   assert.match(texts['repo/CONTROLLER.md'], /G2 begins after builder readiness and any owner UAT acceptance/);
-  assert.match(texts[V3_DOC], /User acceptance covers only the final product: features a Toolkit user runs and sees/);
+  assert.match(texts[V3_DOC], /User acceptance covers only the final product: features the user runs and sees/);
   assert.match(texts[GLOBAL], /G0, G1 with agent UAT on the real hosts and owner UAT for any final-product steps, full G2/);
   assert.match(texts[V3_DOC], /RISKY work gets agent UAT plus owner UAT for any final-product steps;/);
   assert.match(texts[V3_DOC], /listed beside the owner steps with the passing check that covers it; when no final-product step changed, UAT is recorded as not required/);
   assert.match(texts[GLOBAL], /Source-only checks, fixtures and CI do not prove user acceptance or an installed result: before acceptance, check the real installed or deployed result where one exists\./);
   assert.match(texts[V3_DOC], /G2 starts after G1's working version and any required user UAT are accepted/);
-  assert.match(texts[PROJECTS_SKILL], /\*\*Owner UAT lists carry only final-product steps\*\* \(global rules\): features a Toolkit user runs themselves, never internals\. Phrase each step in plain words, without jargon such as UAT or G2: what the feature does, then the one thing to try and what they should see\. End each list with what was dropped and the passing check that covers each/);
+  assert.match(texts[PROJECTS_SKILL], /\*\*Owner UAT lists carry only final-product steps\*\* \(global rules\): features the user runs themselves, never internals\. Phrase each step in plain words, without jargon such as UAT or G2: what the feature does, then the one thing to try and what they should see\. End each list with what was dropped and the passing check that covers each/);
 }
 
 test('owner UAT is limited to final-product steps on every current surface', () => {

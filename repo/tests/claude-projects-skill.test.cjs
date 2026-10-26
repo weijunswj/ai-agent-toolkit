@@ -207,7 +207,7 @@ test('device steps go to the Remote Control session, not the owner', () => {
   const text = read(SKILL_REL);
   // The owner was once asked to create a local scheduled task that a Remote Control session could create.
   assert.match(text, /installs, setup checks and device tasks \(such as a local scheduled task\), which the Remote Control session on the user's computer does itself; hand the user a step on their computer only when its safety check blocks the session;/);
-  assert.match(read('repo/contracts/agent-rules/global-rules.md'), /never ask them to run commands or do a device step an agent there can do, unless a safety check blocks it\./);
+  assert.match(read('repo/contracts/agent-rules/global-rules.md'), /never ask them to run commands, or to do a device step an agent there can do unless a safety check blocks it\./);
 });
 
 test('Toolkit text says computer or Remote Control session, not laptop', () => {

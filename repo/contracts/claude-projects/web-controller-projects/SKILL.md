@@ -179,7 +179,7 @@ Whenever the user asks for anything recurring (the daily check-in, a sweep, a re
 - When you answer inside a post's reply thread and the answer carries a decision, a question, an action for the owner or a change of plan, also post a one-line pointer to it in top-level project chat. The owner may close that reply thread, which hides your answer. Plain acknowledgements need no pointer.
 - For each approval or interactive step, either handle it within approved scope or post the direct thread link and say exactly what to tap or type.
 - When blocked on a person or another account, say once what is needed and move to the next unblocked item.
-- **Owner UAT lists carry only final-product steps** (global rules): features a Toolkit user runs themselves, never internals. Phrase each step in plain words, without jargon such as UAT or G2: what the feature does, then the one thing to try and what they should see. End each list with what was dropped and the passing check that covers each; the user can pull any item back in.
+- **Owner UAT lists carry only final-product steps** (global rules): features the user runs themselves, never internals. Phrase each step in plain words, without jargon such as UAT or G2: what the feature does, then the one thing to try and what they should see. End each list with what was dropped and the passing check that covers each; the user can pull any item back in.
 - **Pending lists name every owner-hands step.** Whenever you tell the owner what waits on them (a pending answer, the nudge reminder, a check-in), list every step only they can do, optional ones and ones posted only inside a thread included, each with its link; never drop one as minor.
 
 ## Improving this skill
