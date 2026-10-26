@@ -404,6 +404,8 @@ test('every line that re-arms, updates, swaps, rebuilds, recreates or sets up a 
     '- Local sessions sharing one checkout must not clash', '**Remote Control wake.**', '4. Check the result: `--check` reads `current`', '5. Post one short note in project chat: block version',
     '- On undo, restore the saved copy and record `declined project-instructions', '**Dedupe in the same change.**', '**Evidence before "done":**',
     'start a bounded G0 to create or refresh it before you plan anything',
+    // The reconciler's `refresh` command brings programme pages up to date; it touches no task.
+    '**Programme pages refresh themselves, without tokens.**', '5b. Programme sweep',
   ];
   const unguarded = [];
   for (const rel of files) {

@@ -52,7 +52,7 @@ test('no plugin payload or skills folder reaches the Projects controller skill',
 
 test('Projects wires managed instructions, promises and fresh scheduled sessions to controller law', () => {
   const text = bundle();
-  assert.match(text, /^Version: 2026-10-25\.10$/m);
+  assert.match(text, /^Version: 2026-10-25\.11$/m);
   // The check-in posts the skill card itself; the coordinator lists the Save tap, re-upload only when the card failed.
   assert.match(text, /`SKILL BEHIND`: the account copy is an older Toolkit revision\. With "card posted", the check-in posted the skill update card in its thread: put "tap Save on the skill card"/);
   assert.match(text, /keep that thread open \(never resolve it in the hourly pass, even after the check-in moves to a new home thread\) until the owner saves/);
@@ -209,4 +209,16 @@ test('Projects lists every owner-hands step when it reports what waits on the ow
   assert.match(text, /\*\*Pending lists name every owner-hands step\.\*\* Whenever you tell the owner what waits on them \(a pending answer, the nudge reminder, a check-in\), list every step only they can do, optional ones and ones posted only inside a thread included, each with its link; never drop one as minor\./);
   const nudge = read('repo/contracts/claude-projects/web-controller-projects/tasks/hourly-nudge.md');
   assert.match(nudge, /\*\*Waiting on owner:\*\* \([^\n]*plus every step only the owner can do that is not done yet, optional ones and ones posted only inside a thread included;/);
+});
+
+test('the device programme sweep needs both GitHub governance ENABLED and a named device', () => {
+  // Cloud-only projects have no device to run it on, so neither half alone may set it up or suggest it.
+  const at = rel => read(`repo/contracts/claude-projects/web-controller-projects/${rel}`);
+  assert.match(at('reference/setup.md'), /reports plain `ENABLED` \(not `ENABLED \(materials incomplete\)`; a failed read counts as not ENABLED\) and step 3 named a device: also set up the \*\*Programme sweep on a device\*\*/);
+  assert.match(at('reference/setup.md'), /With governance in any other state, or no device, do not create it or suggest it/);
+  assert.match(at('reference/recurring-tasks.md'), /Only for a repository whose GitHub governance is ENABLED, in a project whose memory names a device \(guided setup step 3\); in any other case, never create or suggest it\./);
+  assert.match(at('SKILL.md'), /only when ENABLED and a device is named\)/);
+  assert.match(at('tasks/hourly-nudge.md'), /when project memory names a device, "; no device programme sweep task armed", and with no device named "; no device named, so cloud writes wait for the next session on a computer with gh signed in"/);
+  const sweep = JSON.parse(at('setup-inventory.json')).rows.find(row => row.id === 'programme-sweep');
+  assert.match(sweep.artefact, /GitHub governance ENABLED and a device named/);
 });
