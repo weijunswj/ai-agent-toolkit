@@ -1,10 +1,10 @@
 # Toolkit Gate Rules
 
-The gate playbook: G0, G1 and G2 sessions, reviewers and the controllers that launch them read it before starting. The global rules hold the risk tiers, the safety floor and everything every session needs; this file holds the gate mechanics. Repository rules still win on conventions, and nothing here relaxes the safety floor.
+The gate playbook: G0, G1 and G2 sessions, reviewers and their controllers read it first. The global rules hold the risk tiers, the safety floor and everything every session needs; this file holds the gate mechanics. Repository rules still win on conventions, and nothing here relaxes the safety floor.
 
 ## Gate order
 
-- **G0 Discovery** runs for every new task, repository or environment; only LIGHT edits and fixes inside an already-discovered task skip it. Walk the real happy path, find out what the stack really is (an app built in Flutter, for example, breaks browser automation such as Playwright) and test assumptions before planning. It can be short when the ground is already known. It returns the G0 plan: findings, chosen approach, acceptance, risks, and what was tried and failed. A release plan in a repository with GitHub governance on also runs the `secure-ci-cd` CI check-up and lists the real gaps it finds.
+- **G0 Discovery** runs for every new task, repository or environment; only LIGHT edits and fixes inside an already-discovered task skip it. Walk the real happy path, find out what the stack really is (a Flutter app breaks browser automation such as Playwright) and test assumptions before planning. It can be short on known ground. It returns the G0 plan: findings, chosen approach, acceptance, risks, and what was tried and failed. A governed release plan also runs the `secure-ci-cd` CI check-up and lists its real gaps.
 - **G1 Builder** starts in a fresh session, with the G0 plan passed in its brief as the handoff. G0 and G1 share the same strong lead route. One builder owns the whole approved outcome across corrections, checkpoints and fresh sessions; in-scope fixes need no new admission. G1 includes UAT.
 - **Review** follows the tier: full G2 for RISKY, one independent review for NORMAL, the builder's own diff read for LIGHT. Only LIGHT edits and fixes inside an already-discovered task skip G0; only LIGHT edits skip G2.
 - Gate names `G0`, `G1` and `G2` are fine where the reader needs them.
@@ -16,6 +16,8 @@ Fresh executor contexts are mandatory between G0 and G1, for initial G2, for a r
 ## Recoverable work
 
 There are no handover packets. Keep the work recoverable at all times instead: push work in progress to the branch, keep the PR (or the brief, before a PR exists) current at milestones, and post progress and decisions where every harness can read them: the PR, plus the programme issue comments when GitHub governance is ENABLED, otherwise the evidence store. Never rely on chat or host memory: a Projects controller may mirror state in project memory, never only there. Any new controller or executor starts from these, with no handover step, loading the current state and changed instructions rather than the full history.
+
+A gate works in the primary checkout unless it needs its own worktree, then uses `.tmp/worktrees/<lane>-<gate>-<sha>` at the admitted commit and records HEAD; the controller removes it after merge.
 
 ## Building
 
@@ -49,5 +51,5 @@ G2 starts after the working result and any owner UAT acceptance, in fresh indepe
 
 - Gate models and effort come only from an explicitly selected stack registry revision pinned in the controller decision and admission, never inferred from the host, provider, alias or newest bundled registry; a newer registry needs explicit adoption and never changes an active run. Keep qualification overrides separate from production selection, and each stack's lead and helper bindings independent.
 - Model and effort follow launch ownership: a human's own choice for an agent they open directly (including a G2 chat) is advisory, not a blocker, and is recorded as the actual route, never labelled the recommended one; a model or effort difference alone is not a G2 failure. Every automation-launched G0/G1/G2 worker or successor, even as root of its own session, and every G0/G1 helper gets the exact pinned route for its role and member, with no fallback or weaker effort. A root label is not a human override, and no model lock goes into a human-run entrypoint. Native permissions, independence, reviewer obligations and delegation limits still apply.
-- **Route proof:** pin model and effort in the launch command or config for every gate session. Where the host records the route it ran (the Claude init event or session metadata, a Codex run record), read that record once before consequential work and stop with a report when either is inherited, missing or different. Never ask the model which model it is: models misname themselves, so a self-report proves nothing. Where the host keeps no record, record "not checkable on this host" and carry on.
+- **Route proof:** pin model and effort in the launch command or config for every gate session. Where the host records the route it ran (the Claude init event or session metadata, a Codex run record), read that record once before consequential work and stop with a report when either is inherited, missing or different. Never ask the model which model it is: a self-report proves nothing. Where the host keeps no record, record "not checkable on this host" and carry on.
 - Keep model, effort, tier and route out of portable task prompts unless a runtime requires them. Run parallel builders only on disjoint files with no dependency on work still in review.

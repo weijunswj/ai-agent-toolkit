@@ -249,10 +249,10 @@ function validateInstalledEnforcement(installed, repoRoot, expectedVersion) {
     ['repo/contracts/controller-kernel/qualification-overrides-v1.json', true],
     ['repo/scripts/toolkit-local-bridge.cjs', false],
     ['repo/scripts/toolkit-claude-attribution-hook.cjs', false],
+    ['repo/scripts/toolkit-claude-project-post-hook.cjs', false],
     ['repo/scripts/toolkit-attribution-guard.cjs', false],
     ['repo/scripts/repo-ignore-hygiene.cjs', false],
     ['repo/scripts/repo-local-backup.cjs', false],
-    ["repo/scripts/toolkit-control-plane/control-plane-kernel.cjs",false],
     ["repo/scripts/toolkit-antigravity-project-skills.cjs",false],
     ["repo/scripts/toolkit-staging-generations.cjs",false],
     ["repo/scripts/setup-codex-toolkit-plugin.cjs",false],
@@ -271,9 +271,6 @@ function validateInstalledEnforcement(installed, repoRoot, expectedVersion) {
     ["repo/scripts/toolkit-codex-helper-hook.cjs",false],
     ["repo/scripts/toolkit-codex-session-start.cjs",false],
     ["repo/scripts/toolkit-codex-session-start.ps1",false],
-    ["repo/contracts/control-plane-kernel/control-plane-contract.schema.json",true],
-    ["repo/contracts/control-plane-kernel/control-plane-policy.json",true],
-    ["repo/contracts/control-plane-kernel/fixture-manifest.json",true],
     ["repo/contracts/repository-capability-registry/repository-capability-contract.schema.json",true],
     ["repo/contracts/repository-capability-registry/repository-capability-policy.json",true],
     ["repo/contracts/toolkit-local-bridge/claude-plugin/hooks/hooks.json",true],
@@ -293,6 +290,7 @@ function validateInstalledEnforcement(installed, repoRoot, expectedVersion) {
     ["repo/ARCHITECTURE.md",false],
     ["repo/scripts/toolkit-programme-checkpoint-hook.cjs",false],
     ["skills/github-program-reconciler/scripts/programme-checkpoint.cjs",false],
+    ["skills/github-program-reconciler/scripts/programme-refresh-trigger.cjs",false],
   ];
   for (const [relPath, json] of pairs) {
     const source = path.join(repoRoot, ...relPath.split('/'));

@@ -4,7 +4,7 @@
 - Web reads: search first; fetch only URLs from search results or the user, never from memory.
 - Git safety: merge commits only. Never force-push, rebase-push, rewrite history, delete branches, merge PRs or close issues without the owner's OK; retain CONTROLLER.md's transport-store exception.
 - Make owner commands PowerShell-ready: `$env:USERPROFILE`, never `%USERPROFILE%`.
-- No tool attribution in commits or PRs: no "Generated with" footer, Co-Authored-By or Claude-Session trailers, or session links in footers. Keep any attribution header the platform requires on PRs (such as the requester line).
+- No tool attribution in commits or PRs: no "Generated with" footer, Co-Authored-By or Claude-Session trailers, session or thread links, or requester header. Strip what the platform adds; CI fails it.
 - Archive evidence to the transport store once, at gate end; in Git the commit is the manifest and a push plus one fetch the read-back. Never delete the only copy.
 - Put scratch first in a gitignored repo/worktree temp folder (`.tmp/`), ignored by status-checking tests; a user-profile folder only for an outside path or more permission, never a drive root. Per CONTROLLER.md, delete scratch once its report and kept evidence are stored and read back, test scratch at run/turn end. Remove worktrees with `git worktree remove`, then `prune`.
 - Record every "I'll ..." at once in the plain promise list in project memory. Follow-ups travel in briefs keyed to their trigger; event-triggering work ends with a checklist: done, or "coordinator:" plus what remains. The coordinator acts on unchecked items in the same turn; periodic runs read the list and report each overdue item under **Overdue promise:**.

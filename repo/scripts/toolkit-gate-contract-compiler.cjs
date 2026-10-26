@@ -308,7 +308,7 @@ function planV3Delegation(input, decisionInput) {
   const value = trustedJsonCopy(input);
   checkKeys(value, ['stage', 'substantial', 'tasks', 'exception'], [], 'delegation');
   if (!['G0', 'G1', 'G2'].includes(value.stage) || typeof value.substantial !== 'boolean'
-    || !Array.isArray(value.tasks)) fail('invalid V3 delegation decision');
+    || !Array.isArray(value.tasks)) fail('invalid delegation decision');
   const decision = validateControllerDecision(decisionInput);
   if (value.stage === 'G2') {
     if (value.tasks.length || value.exception !== null) fail('G2 cannot delegate');

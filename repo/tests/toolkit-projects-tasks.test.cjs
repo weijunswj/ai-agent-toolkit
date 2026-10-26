@@ -292,6 +292,29 @@ test('the check-in carries every prefix in the fixed order and checks both Toolk
     'every run reaches the owner as one line', 'swaps each named Toolkit task from the template on main the same turn']) {
     assert.ok(text.includes(required), required);
   }
+  // The check-in posts the skill update card itself, once per main Version, and never over direct account edits.
+  for (const required of ['SKILL CARD: post one skill update card only when all of these hold', 'never on SKILL DRIFT: a card would overwrite direct edits',
+    'the account folder is under 26 hours old', 'every account reference/*.md is absent or equal to main', 'state.md records no "card <main Version>"',
+    'Otherwise call propose_skills', 'skillMd main\'s SKILL.md byte for byte', 'even when state.md already reported this Version',
+    ', card posted', 'fails or is skipped for any other reason', ', card failed: <reason>', 'tap Save on the skill card',
+    'A reference file missing from the account is not drift', 'straight after the call and read it back', 'SKILL BEHIND (carried forward while still seen)', 'every "card <Version>" record (this run\'s and all earlier ones, carried forward)']) {
+    assert.ok(text.includes(required), required);
+  }
+  // Drift needs the full history (and a failed fetch never reports drift), plugin lag shows every run and is reported once per main version,
+  // and a coordinator that posts skill cards itself gets "card due" instead of a second card.
+  for (const required of ['`git -C TK fetch --unshallow` once and hash every revision again', 'If that fetch fails, report no SKILL DRIFT and post no card',
+    '"drift unverified: unshallow failed: <error>"', 'When memory has the line "skill cards: coordinator", do not call propose_skills: write ", card due"',
+    'Equal: "**Plugin:** current (<version>)"', 'take the newest commit whose plugin.json has the account version; main moved past it at the next newer commit',
+    'use the oldest commit whose version is above the account\'s', 'age unverified: unshallow failed: <error>" and no prefix, and name it on the first line as stuck', 'Under 24 hours ago: name both versions and that commit under **Plugin:**',
+    'unless state.md has "plugin behind <main version>"', 'its "plugin behind <version>" record', 'No agent can update the plugin',
+    'remove the Toolkit plugin only and let it reinstall; if it is still behind, select Check for updates on its marketplace',
+    '"plugin behind <main version>" for the version reported as PLUGIN BEHIND (carried forward while the account copy is still behind)',
+    'Omit empty bullets except Skill, Block, Binding, Tasks, Nudge, Plugin and Run.']) {
+    assert.ok(text.includes(required), required);
+  }
+  assert.doesNotMatch(text, /skip the resolve in DELIVERY/, 'bound runs never resolve, so no fresh-only card line');
+  const freshCheckIn = tasks().render('daily-check-in', validateParams('daily-check-in', { ...PARAMS['daily-check-in'], session: 'fresh' }));
+  assert.match(freshCheckIn, /When this run posted a card, skip the resolve in DELIVERY: a resolved thread hides the card\./);
   // Both Toolkit tasks are bound now, so a bound check-in is never its own gap.
   assert.doesNotMatch(text, /the check-in runs a fresh session per run/);
   assert.match(text, /bound-session or fresh-session when that differs from the entry/);
@@ -378,7 +401,7 @@ test('every line that re-arms, updates, swaps, rebuilds, recreates or sets up a 
   // resolving.
   const dir = path.join(ROOT, 'repo', 'contracts', 'claude-projects', 'web-controller-projects');
   const files = ['SKILL.md', 'project-instructions.md', ...['reference', 'tasks'].flatMap(sub => fs.readdirSync(path.join(dir, sub)).filter(name => name.endsWith('.md')).map(name => `${sub}/${name}`))];
-  const acts = /\b(?:re-?arm|rebuil[dt]|re-?creat|swap|set up the|re-?enabl|restor|refresh|replac|switch|re-?add|resum|fire (?:it |them )?again|update (?:the|those|its)\b[^.]*prompt|creat(?:e|es) (?:it|them|the|a)\b|starts? (?:a )?new home thread)/i;
+  const acts = /\b(?:re-?arm|rebuil[dt]|re-?creat|swap|catch(?:es)? (?:it )?up|set up the|re-?enabl|restor|refresh|replac|switch|re-?add|resum|fire (?:it |them )?again|update (?:the|those|its)\b[^.]*prompt|creat(?:e|es) (?:it|them|the|a)\b|starts? (?:a )?new home thread)/i;
   for (const line of ['Re-arm any recurring job that missed its run.', 'Rebuild the home thread when it is a week old.', 'Re-create the schedule when its cron drifts.',
     'Swap both from the template on main.', 'Start a new home thread for it.', 'The coordinator creates it again from main.']) assert.match(line, acts, line);
   const notPaths = [
@@ -393,6 +416,8 @@ test('every line that re-arms, updates, swaps, rebuilds, recreates or sets up a 
     '- Local sessions sharing one checkout must not clash', '**Remote Control wake.**', '4. Check the result: `--check` reads `current`', '5. Post one short note in project chat: block version',
     '- On undo, restore the saved copy and record `declined project-instructions', '**Dedupe in the same change.**', '**Evidence before "done":**',
     'start a bounded G0 to create or refresh it before you plan anything',
+    // The reconciler's `refresh` command brings programme pages up to date; it touches no task.
+    '**Programme pages refresh themselves, without tokens.**', '5b. Programme sweep',
   ];
   const unguarded = [];
   for (const rel of files) {
@@ -406,4 +431,27 @@ test('every line that re-arms, updates, swaps, rebuilds, recreates or sets up a 
   assert.match(skill, /the restart removes the mark/);
   assert.match(fs.readFileSync(path.join(dir, 'reference', 'recurring-tasks.md'), 'utf8'), /When the owner restarts it, remove the mark\./);
   assert.match(fs.readFileSync(path.join(dir, 'reference', 'recurring-tasks.md'), 'utf8'), /--refresh <kind> <old prompt file> --session <bound\|fresh>` keeps the params and project text and always names the session the replacement runs in/);
+});
+
+// A run that starts outside its home thread (for example fire_trigger from another thread) has no
+// project tools or files: its first RUN SETUP step stops it with one line, in every kind and session.
+test('every rendered task stops first when it started outside its home thread', () => {
+  const guard = '- First check, before anything else: if this turn has no mcp__hearthbot__ tools (listed directly or as deferred tools) or cannot read /mnt/project-files/, it started outside its home thread or project. Make no other tool call (no effort call, message, file write, resolve or retry) and skip every later step, DELIVERY included: end the turn with the single line "skipped: started outside its home thread".';
+  for (const kind of Object.keys(PARAMS)) {
+    for (const session of ['bound', 'fresh']) {
+      const text = tasks().render(kind, validateParams(kind, { ...PARAMS[kind], session }), kind === 'custom' ? OWN_TEXT : undefined);
+      const lines = text.split('\n');
+      const heading = lines.findIndex(line => line.startsWith('RUN SETUP ('));
+      assert.ok(heading > -1, `${kind} ${session}`);
+      assert.equal(lines[heading + 1], guard, `${kind} ${session}`);
+    }
+  }
+});
+
+// The nudge's due time comes from its own cron, so waking-hours gaps and slower nudges are not late.
+test('the check-in reads the nudge due time from its own cron', () => {
+  const text = rendered('daily-check-in');
+  for (const required of ['the newest time at or before now when the cron fires', 'hours outside its waking window never count', 'use its interval plus 5 minutes instead of 65 minutes', 'a nudge with no run yet, as after a swap, counts as armed while its next run is within one interval of now']) {
+    assert.ok(text.includes(required), required);
+  }
 });

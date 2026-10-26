@@ -71,7 +71,7 @@ test('every decision comment must be reachable from the body, directly or throug
   const body = 'Index: [one](#issuecomment-1) [older](#issuecomment-2)';
   const result = auditDecisionTraces({ body, comments, recordPrefix: PREFIX });
   assert.equal(result.ok, false);
-  assert.deepEqual(result.unlinked, [{ id: '4', record: 'INT-TK421-004', index: false, tag: null, date: null, summary: 'INT-TK421-004 SUPERSEDES=INT-TK421-001', supersedes: ['INT-TK421-001'], superseded_by: null }]);
+  assert.deepEqual(result.unlinked, [{ id: '4', record: 'INT-TK421-004', index: false, tag: null, tag_label: null, date: null, summary: 'INT-TK421-004 SUPERSEDES=INT-TK421-001', supersedes: ['INT-TK421-001'], superseded_by: null, superseded_by_id: null }]);
   assert.deepEqual(result.superseded_unmarked, [{ id: '1', record: 'INT-TK421-001', superseded_by: 'INT-TK421-004' }], 'the replaced record is not marked yet');
   assert.deepEqual(result.index_comments, ['2']);
   assert.equal(result.comments, 4, 'bots are ignored');

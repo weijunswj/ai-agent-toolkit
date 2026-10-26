@@ -8,6 +8,15 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const launch = require('../scripts/claude-process-launch.cjs');
 
+// Every temp folder a test makes is removed after the file's tests, also when they fail.
+const tempFolders = [];
+test.after(() => { for (const dir of tempFolders) fs.rmSync(dir, { recursive: true, force: true }); });
+function tempFolder(prefix) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  tempFolders.push(dir);
+  return dir;
+}
+
 function run(parts, options = {}) {
   // The production resolver validated this executable, and execFileSync keeps argv shell-free.
   // codeql[js/shell-command-injection-from-environment]
@@ -21,7 +30,7 @@ function run(parts, options = {}) {
 }
 
 test('JavaScript Claude CLI paths remain shell-free and preserve argument boundaries', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'Claude CLI '));
+  const root = tempFolder('Claude CLI ');
   const executable = path.join(root, 'fake.cjs');
   fs.writeFileSync(executable, 'process.exit(0);\n');
   const parts = launch.claudeSpawnParts(executable, ['a b', 'x&y']);
@@ -31,7 +40,7 @@ test('JavaScript Claude CLI paths remain shell-free and preserve argument bounda
 });
 
 test('explicit Windows exe path in a directory with spaces executes directly', { skip: process.platform !== 'win32' }, () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'Claude CLI exe '));
+  const root = tempFolder('Claude CLI exe ');
   const executable = path.join(root, 'node.exe');
   fs.copyFileSync(process.execPath, executable);
   const parts = launch.claudeSpawnParts(executable, ['--version']);
@@ -44,7 +53,7 @@ test('explicit Windows exe path in a directory with spaces executes directly', {
 
 for (const extension of ['cmd', 'bat']) {
   test(`explicit Windows ${extension} path preserves metacharacter arguments without injection`, { skip: process.platform !== 'win32' }, () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), `Claude CLI ${extension} `));
+    const root = tempFolder(`Claude CLI ${extension} `);
     const capture = path.join(root, 'capture.cjs');
     const output = path.join(root, 'args.json');
     const marker = path.join(root, 'injected.txt');
@@ -73,7 +82,7 @@ test('relative path-like Claude commands are rejected on every platform', () => 
 });
 
 test('known missing explicit and bare Claude executables fail availability preflight', () => {
-  const missing = fs.mkdtempSync(path.join(os.tmpdir(), 'missing-claude-parent-'));
+  const missing = tempFolder('missing-claude-parent-');
   fs.rmSync(missing, { recursive: true, force: true });
   for (const extension of ['cjs', 'exe', 'cmd', 'bat']) {
     assert.throws(() => launch.assertExecutableAvailable(`${missing}.${extension}`), /not available/i);
@@ -95,7 +104,7 @@ function createSymlinkOrSkip(t, target, link, type = 'file') {
 }
 
 test('official-style bare Claude symlink uses its stable launcher path and follows safe target changes', { skip: process.platform === 'win32' }, (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'official-claude-symlink-'));
+  const root = tempFolder('official-claude-symlink-');
   const bin = path.join(root, '.local', 'bin');
   const versions = path.join(root, '.local', 'share', 'claude', 'versions');
   const version = path.join(versions, '2.1.207');
@@ -144,7 +153,7 @@ test('canonical Claude command precedence includes every supported override', ()
 
 for (const pathPrefix of ['', '.', 'relative-bin']) {
   test(`POSIX bare Claude ignores ${pathPrefix || 'an empty'} PATH component and executes the verified absolute candidate`, { skip: process.platform === 'win32' }, () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-posix-shadow-'));
+    const root = tempFolder('claude-posix-shadow-');
     const trusted = path.join(root, 'trusted');
     const cwd = path.join(root, 'project');
     const relative = path.join(cwd, 'relative-bin');
@@ -171,7 +180,7 @@ for (const pathPrefix of ['', '.', 'relative-bin']) {
 }
 
 test('a verified launcher candidate fails closed if it disappears or becomes non-executable', { skip: process.platform === 'win32' }, () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-replaced-candidate-'));
+  const root = tempFolder('claude-replaced-candidate-');
   const candidate = path.join(root, 'claude');
   fs.copyFileSync(process.execPath, candidate);
   fs.chmodSync(candidate, 0o755);
@@ -184,7 +193,7 @@ test('a verified launcher candidate fails closed if it disappears or becomes non
 });
 
 test('explicit valid executable symlink passes while preserving its original path', (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'explicit-claude-symlink-'));
+  const root = tempFolder('explicit-claude-symlink-');
   const target = path.join(root, process.platform === 'win32' ? 'claude-target.exe' : 'claude-target');
   const link = path.join(root, process.platform === 'win32' ? 'claude.exe' : 'claude');
   fs.copyFileSync(process.execPath, target);
@@ -195,7 +204,7 @@ test('explicit valid executable symlink passes while preserving its original pat
 });
 
 test('broken, cyclic, directory and non-executable symlink targets refuse availability', { skip: process.platform === 'win32' }, (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'invalid-claude-symlink-'));
+  const root = tempFolder('invalid-claude-symlink-');
   const broken = path.join(root, 'broken');
   if (!createSymlinkOrSkip(t, path.join(root, 'missing'), broken)) return;
   assert.throws(() => launch.assertExecutableAvailable(broken), /not available/i);
@@ -221,7 +230,7 @@ test('broken, cyclic, directory and non-executable symlink targets refuse availa
 });
 
 test('valid JavaScript executable paths remain available through the Node launcher', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-js-launchers-'));
+  const root = tempFolder('claude-js-launchers-');
   for (const extension of ['js', 'cjs', 'mjs']) {
     const executable = path.join(root, `claude.${extension}`);
     fs.writeFileSync(executable, 'process.exit(0);\n');
@@ -231,7 +240,7 @@ test('valid JavaScript executable paths remain available through the Node launch
 });
 
 test('Windows bare Claude resolves only from PATH and cannot be shadowed by cwd', { skip: process.platform !== 'win32' }, () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-path-shadow-'));
+  const root = tempFolder('claude-path-shadow-');
   const trusted = path.join(root, 'trusted');
   const cwd = path.join(root, 'project');
   fs.mkdirSync(trusted);
@@ -251,7 +260,7 @@ test('Windows bare Claude resolves only from PATH and cannot be shadowed by cwd'
 });
 
 test('Windows cwd shadow cannot satisfy an empty PATH', { skip: process.platform !== 'win32' }, () => {
-  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-empty-path-shadow-'));
+  const cwd = tempFolder('claude-empty-path-shadow-');
   fs.writeFileSync(path.join(cwd, 'claude.cmd'), '@echo off\r\nexit /b 0\r\n');
   assert.throws(() => launch.assertExecutableAvailable('claude', { env: { PATH: '', Path: '', PATHEXT: '.CMD' }, cwd }), /not available/i);
 });

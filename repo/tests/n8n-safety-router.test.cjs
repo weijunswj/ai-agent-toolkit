@@ -7,6 +7,15 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const test = require('node:test');
 
+// Every temp folder a test makes is removed after the file's tests, also when they fail.
+const tempFolders = [];
+test.after(() => { for (const dir of tempFolders) fs.rmSync(dir, { recursive: true, force: true }); });
+function tempFolder(prefix) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  tempFolders.push(dir);
+  return dir;
+}
+
 const repoRoot = path.resolve(__dirname, '..', '..');
 const syncScriptPath = path.join(repoRoot, 'repo', 'scripts', 'sync-agent-instruction-shims.cjs');
 // The installer copies the versioned, hashed block from its generated template; a v1 block in a
@@ -93,14 +102,14 @@ function runInstaller(workspace, args = []) {
 }
 
 function makeN8nWorkspace(prefix = 'n8n-agent-adapter-') {
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  const workspace = tempFolder(prefix);
   fs.mkdirSync(path.join(workspace, 'n8n-workflows'), { recursive: true });
   fs.writeFileSync(path.join(workspace, 'n8n-workflows', 'sample.workflow.json'), JSON.stringify({ nodes: [], connections: {} }, null, 2));
   return workspace;
 }
 
 function copyToolkitWorkspace(prefix = 'n8n-shim-sync-') {
-  const target = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  const target = tempFolder(prefix);
   fs.cpSync(repoRoot, target, {
     recursive: true,
     filter(source) {
@@ -473,7 +482,7 @@ test('adapter installer target auto only patches existing active instruction fil
 
 test('adapter installer refuses symlinked active instruction files without modifying the target', (t) => {
   const workspace = makeN8nWorkspace('n8n-agent-adapter-symlink-');
-  const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-agent-adapter-outside-'));
+  const outsideDir = tempFolder('n8n-agent-adapter-outside-');
   const outsideTarget = path.join(outsideDir, 'outside-AGENTS.md');
   const originalOutside = '# Outside target\n';
   fs.writeFileSync(outsideTarget, originalOutside);

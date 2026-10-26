@@ -18,12 +18,12 @@ const green = name => ({ kind: 'CheckRun', name, status: 'COMPLETED', conclusion
 const CATALOGUE = [
   { issue: 423, label: 'C2', class: 'COMMITTED', parent: 421, order: 1, lane: 'integration' },
   { issue: 467, label: 'Shared H', class: 'COMMITTED', parent: 421, order: 2, lane: 'integration' },
-  { issue: 469, label: 'H1 Codex', class: 'COMMITTED', parent: 467, order: 1, lane: 'codex', owner_prefix: 'CDX-TK469-' },
-  { issue: 470, label: 'H2 Claude', class: 'COMMITTED', parent: 467, order: 2, lane: 'claude' },
+  { issue: 469, label: 'H1 Codex', class: 'COMMITTED', parent: 467, order: 3, lane: 'codex', owner_prefix: 'CDX-TK469-' },
+  { issue: 470, label: 'H2 Claude', class: 'COMMITTED', parent: 467, order: 4, lane: 'claude' },
   { issue: 459, label: 'S1-A', class: 'COMPLETED', parent: 421, order: 3 },
   { issue: 422, label: 'C1 predecessor', class: 'RETIRED', parent: 421, order: 4 },
   { issue: 425, label: 'Q', class: 'OPTIONAL', parent: null, order: 0 },
-  { issue: 499, label: 'R1', class: 'COMMITTED', parent: null, order: 0 },
+  { issue: 499, label: 'R1', class: 'COMMITTED', parent: null, order: 5 },
 ];
 
 function setup({ repository = 'acme/app', parentIssue = 421, outcomes = CATALOGUE, issues = null, version = '3.9.1', controller = writer, initialiseParent = true } = {}) {
@@ -122,11 +122,11 @@ test('parent and child blocks are rendered from the same state revision', () => 
   assert.match(parentBlock.body, new RegExp(`children=[^ ]*423:${doc.revision}\\b`));
   assert.match(childBlock.body, new RegExp(`child=423@${doc.revision} -->`));
   assert.ok(github.issues.get(421).body.includes('## CURRENT\nHand-written controller prose.\n'), 'hand-written text outside the blocks is kept');
-  const rows = parentBlock.body.split('\n').filter(line => /^\| [^|]+ \| #\d+ \|/.test(line)).map(line => line.split(' | ')[1]);
-  assert.deepEqual(rows, ['#499', '#423', '#469', '#467', '#470', '#425', '#459', '#422'], 'active rows by class, order and issue, then finished work by close time');
+  const rows = parentBlock.body.split('\n').filter(line => /^\| [^|]+ \| [^|]+ \| #\d+ \|/.test(line)).map(line => line.split(' | ')[2]);
+  assert.deepEqual(rows, ['#423', '#467', '#469', '#470', '#499', '#425', '#459', '#422'], 'active rows by class, priority order and child number, then finished work by close time');
 });
 
-test('the graph replaces the hand-kept index once, moves a top block below the status, and then settles', () => {
+test('the graph replaces the hand-kept index once, sits right under the CURRENT summary ahead of hand-written notes, and then settles', () => {
   const { github, binding, reconciler } = setup();
   binding.projection = { after_section: 'CURRENT', replace_section: 'Programme index' };
   github.issues.get(421).body = '# Programme\n\n## CURRENT\n\nLive now.\n\n## Programme index\n\n| old | table |\n\n## Parent completion\n\nDone when.\n';
@@ -135,8 +135,8 @@ test('the graph replaces the hand-kept index once, moves a top block below the s
   const page = github.issues.get(421).body;
   assert.equal(page.includes('Programme index'), false, 'the hand-kept index is replaced');
   assert.ok(page.startsWith('# Programme\n\n## CURRENT\n\n<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN CURRENT'), 'the generated summary opens the status section');
-  assert.ok(page.includes('<!-- AI-AGENT-TOOLKIT:programme-state:END CURRENT -->\n\nLive now.\n\n<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN STATE'), 'hand-written notes follow it, then the graph');
-  assert.ok(page.includes('<!-- AI-AGENT-TOOLKIT:programme-state:END STATE -->\n\n## Parent completion\n\nDone when.\n\n<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN TRACE'), 'the comment trace closes the page');
+  assert.ok(page.includes('<!-- AI-AGENT-TOOLKIT:programme-state:END CURRENT -->\n\n<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN STATE'), 'the graph follows the summary directly');
+  assert.ok(page.includes('<!-- AI-AGENT-TOOLKIT:programme-state:END STATE -->\n\nLive now.\n\n## Parent completion\n\nDone when.\n\n<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN TRACE'), 'hand-written notes come after the graph, and the comment trace closes the page');
   assert.ok(page.endsWith('<!-- AI-AGENT-TOOLKIT:programme-state:END TRACE -->\n'));
   assert.match(github.issues.get(423).body, /^<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN NAV [^\n]*\n<!-- programme-nav -->\n\*\*Path:\*\* #421 > #423\n<!-- AI-AGENT-TOOLKIT:programme-state:END NAV -->\n\n# C2 title\n\n<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN STATE/, 'a task page opens with its links, then the title, then its status block');
   assert.equal(reconciler().run().summary, 'No changes');
@@ -163,12 +163,11 @@ test('every body lists every comment on its issue, with supersession marked and 
   assert.deepEqual(dry.effects.map(effect => effect.text), ["Update the comment trace in #423's body"]);
   reconciler().run({ apply: true });
   const trace = state.findStateBlock(github.issues.get(423).body, state.TRACE_BLOCK_NAME).block.body.split('\n');
-  assert.match(trace[1], /Read the body first\. Each tag is its own list and tags are never combined; within a tag, where comments disagree, the latest one wins\./);
-  assert.equal(trace[3], '**Other comments**');
-  assert.deepEqual(trace.slice(5), [
-    `- ${first.created_at.slice(0, 10)} · INT-TK421-010 · [INT-TK421-010 - First call](#issuecomment-${first.id}) · superseded by INT-TK421-011`,
-    `- ${second.created_at.slice(0, 10)} · INT-TK421-011 · [INT-TK421-011 new call](#issuecomment-${second.id}) · SUPERSEDES=INT-TK421-010`,
-  ], 'bots are left out');
+  assert.match(trace[1], /One line per topic; each number is a comment and opens it\. Read the body first; within a topic, where comments disagree, the latest one wins\./);
+  const url = id => `https://github.com/acme/app/issues/423#issuecomment-${id}`;
+  assert.deepEqual(trace.slice(3), [
+    `- **Issue 423:** [${first.id}](${url(first.id)}) (replaced by [${second.id}](${url(second.id)})) · [${second.id}](${url(second.id)})`,
+  ], 'one line under the task name, each comment by its ID with a full link; bots are left out');
   const audit = require('../../skills/github-program-reconciler/scripts/decision-trace-audit.cjs');
   assert.equal(audit.auditDecisionTraces({ body: github.issues.get(423).body, comments: github.commentsOf(423), recordPrefix: 'INT-TK421-' }).ok, true);
   assert.equal(reconciler().run().summary, 'No changes');
@@ -182,24 +181,25 @@ test('a trace that would overflow the body moves whole into one index comment, t
   const run = apply => { const pass = reconciler(); pass.threshold = limit; return pass.run({ apply }); };
   const early = Array.from({ length: 16 }, (unused, n) => comment(github, 423, `INT-TK421-2${String(n).padStart(2, '0')} a decision with a summary long enough to fill the body quickly ${'x'.repeat(40)}`));
   const dry = run(false);
-  assert.ok(dry.effects.some(effect => effect.text === "Move #423's \"Other comments\" comment trace (16 line(s)) into a new index comment"));
+  assert.ok(dry.effects.some(effect => effect.text === "Move #423's \"Issue 423\" comment trace (16 link(s)) into a new index comment"));
   const applied = run(true);
   assert.deepEqual(applied.holds, []);
   const comments = github.commentsOf(423);
   const index = comments.at(-1);
-  assert.ok(index.body.startsWith('<!-- decision-trace-index -->'));
-  for (const comment of early) assert.ok(index.body.includes(`(#issuecomment-${comment.id})`), 'the whole list moved');
+  assert.ok(index.body.startsWith('<!-- decision-trace-index -->'), 'an untopiced list carries no topic line');
+  assert.ok(index.body.includes('## Comment trace for #423: Issue 423'));
+  for (const comment of early) assert.ok(index.body.includes(`[${comment.id}](https://github.com/acme/app/issues/423#issuecomment-${comment.id})`), 'the whole list moved');
   const body = github.issues.get(423).body;
   assert.ok(body.length < limit);
-  const lines = state.findStateBlock(body, state.TRACE_BLOCK_NAME).block.body.split('\n').slice(5);
-  assert.deepEqual(lines, [`- ${index.created_at.slice(0, 10)} · index · [Earlier comments, part 1](#issuecomment-${index.id})`], 'the body keeps one link in place of the list');
+  const lines = state.findStateBlock(body, state.TRACE_BLOCK_NAME).block.body.split('\n').slice(3);
+  assert.deepEqual(lines, [`- **Issue 423:** [list 1](https://github.com/acme/app/issues/423#issuecomment-${index.id})`], 'the body keeps one link in place of the list');
   assert.equal(run(false).summary, 'No changes');
 
   const later = comment(github, 423, 'INT-TK421-030 later');
   run(true);
-  const again = state.findStateBlock(github.issues.get(423).body, state.TRACE_BLOCK_NAME).block.body.split('\n').slice(5);
-  assert.equal(again.length, 2);
-  assert.match(again[1], new RegExp(`\\(#issuecomment-${later.id}\\)$`), 'a newer comment is listed directly again');
+  const again = state.findStateBlock(github.issues.get(423).body, state.TRACE_BLOCK_NAME).block.body.split('\n').slice(3);
+  assert.equal(again.length, 1);
+  assert.match(again[0], new RegExp(`\\[list 1\\][^ ]+ · \\[${later.id}\\]\\([^)]*#issuecomment-${later.id}\\)$`), 'a newer comment is listed directly again, after the index');
   const audit = require('../../skills/github-program-reconciler/scripts/decision-trace-audit.cjs');
   assert.equal(audit.auditDecisionTraces({ body: github.issues.get(423).body, comments: github.commentsOf(423), recordPrefix: 'INT-TK421-', threshold: limit }).ok, true);
 });
@@ -207,16 +207,16 @@ test('a trace that would overflow the body moves whole into one index comment, t
 test('each tag keeps its own list and overflows into its own index comment; tags are never combined', () => {
   const { github, reconciler } = setup();
   reconciler().run({ apply: true });
-  const fix = [1, 2, 3, 4, 5, 6].map(n => comment(github, 423, `data-leak-fix-122\r\n---\r\nINT-TK421-05${n} fix step ${'z'.repeat(60)}`));
+  const fix = Array.from({ length: 24 }, (unused, n) => n + 1).map(n => comment(github, 423, `data-leak-fix-122\r\n---\r\nINT-TK421-05${n} fix step ${'z'.repeat(60)}`));
   const table = comment(github, 423, 'TABLE-CREATION\n---\nINT-TK421-060 columns agreed');
   const loose = comment(github, 423, 'A note with no tag');
   reconciler().run({ apply: true });
-  const sections = body => state.findStateBlock(body, state.TRACE_BLOCK_NAME).block.body.split('\n').filter(line => line.startsWith('**') && line.endsWith('**') && !line.startsWith('**Comment trace'));
-  assert.deepEqual(sections(github.issues.get(423).body), ['**DATA-LEAK-FIX-122**', '**TABLE-CREATION**', '**Other comments**'], 'tags in first-seen order, untagged last');
+  const sections = body => state.findStateBlock(body, state.TRACE_BLOCK_NAME).block.body.split('\n').map(line => /^- \*\*(.+?):\*\* /.exec(line)?.[1]).filter(Boolean);
+  assert.deepEqual(sections(github.issues.get(423).body), ['data-leak-fix-122', 'TABLE-CREATION', 'Issue 423'], 'topics as first written, in first-seen order, then the task name for untopiced comments');
   const trace = state.findStateBlock(github.issues.get(423).body, state.TRACE_BLOCK_NAME).block.body;
-  assert.match(trace, new RegExp(`\\[INT-TK421-051 fix step z+\\]\\(#issuecomment-${fix[0].id}\\)`), 'the tag line is not part of the summary');
-  assert.match(trace, new RegExp(`\\(#issuecomment-${table.id}\\)`));
-  assert.match(trace, new RegExp(`\\(#issuecomment-${loose.id}\\)`));
+  assert.match(trace, new RegExp(`\\*\\*data-leak-fix-122:\\*\\* \\[${fix[0].id}\\]`));
+  assert.match(trace, new RegExp(`\\*\\*TABLE-CREATION:\\*\\* \\[${table.id}\\]\\(https://github.com/acme/app/issues/423#issuecomment-${table.id}\\)$`, 'm'));
+  assert.match(trace, new RegExp(`\\*\\*Issue 423:\\*\\* \\[${loose.id}\\]`));
 
   // Only the largest tag's list moves out, into its own tagged index comment.
   const limit = github.issues.get(423).body.length - 200;
@@ -225,12 +225,12 @@ test('each tag keeps its own list and overflows into its own index comment; tags
   const report = pass.run({ apply: true });
   assert.deepEqual(report.holds, []);
   const index = github.commentsOf(423).at(-1);
-  assert.ok(index.body.startsWith('DATA-LEAK-FIX-122\n---\n<!-- decision-trace-index -->'), 'the index comment carries its tag');
-  for (const entry of fix) assert.ok(index.body.includes(`(#issuecomment-${entry.id})`));
+  assert.ok(index.body.startsWith('data-leak-fix-122\n---\n<!-- decision-trace-index -->'), 'the index comment carries its topic');
+  for (const entry of fix) assert.ok(index.body.includes(`#issuecomment-${entry.id})`));
   assert.equal(index.body.includes(`#issuecomment-${table.id})`), false, 'another tag never joins it');
   const after = state.findStateBlock(github.issues.get(423).body, state.TRACE_BLOCK_NAME).block.body;
-  assert.match(after, new RegExp(`\\*\\*DATA-LEAK-FIX-122\\*\\*\\n\\n- [0-9-]+ · index · \\[Earlier comments, part 1\\]\\(#issuecomment-${index.id}\\)\\n\\n\\*\\*TABLE-CREATION\\*\\*`));
-  assert.match(after, new RegExp(`\\(#issuecomment-${table.id}\\)`), 'the smaller tag stays listed in the body');
+  assert.match(after, new RegExp(`- \\*\\*data-leak-fix-122:\\*\\* \\[list 1\\]\\(https://github.com/acme/app/issues/423#issuecomment-${index.id}\\)\\n- \\*\\*TABLE-CREATION:\\*\\*`));
+  assert.match(after, new RegExp(`#issuecomment-${table.id}\\)`), 'the smaller tag stays listed in the body');
   const audit = require('../../skills/github-program-reconciler/scripts/decision-trace-audit.cjs');
   assert.equal(audit.auditDecisionTraces({ body: github.issues.get(423).body, comments: github.commentsOf(423), recordPrefix: 'INT-TK421-', threshold: limit }).ok, true);
   const again = reconciler();
@@ -305,29 +305,33 @@ test('reclassifying an outcome keeps its identity, document and native link', ()
   assert.match(state.findStateBlock(github.issues.get(423).body).block.body, /class: OPTIONAL/);
 });
 
-test('older classes keep their CORE, HARDENING, LATER order, are reported as CLASS_LEGACY, and migrate in one patch without moving a task', () => {
-  // Written by 3.12.0: `order` counted within each old class.
+test('older classes read as COMMITTED and sort by priority like any task, are reported as CLASS_LEGACY, and migrate in one patch', () => {
+  // Written by 3.12.0: `order` counted within each old class, so the old numbers tie across classes
+  // and child number breaks the ties until the migration patch renumbers them.
   const outcomes = [
-    { issue: 8, class: 'CORE', parent: 7, order: 2 },
-    { issue: 9, class: 'CORE', parent: 7, order: 3 },
-    { issue: 10, class: 'HARDENING', parent: 7, order: 1 },
+    { issue: 12, class: 'CORE', parent: 7, order: 0 },
+    { issue: 9, class: 'CORE', parent: 7, order: 1 },
+    { issue: 8, class: 'HARDENING', parent: 7, order: 0 },
     { issue: 11, class: 'LATER', parent: 7, order: 0 },
-    { issue: 12, class: 'COMPLETED', parent: 7, order: 0 },
+    { issue: 10, class: 'COMPLETED', parent: 7, order: 0 },
   ];
   const { github, store, reconciler } = setup({
     repository: 'other/tool', parentIssue: 7, outcomes,
     issues: gh => { for (const outcome of outcomes) gh.addIssue(outcome.issue, { parent: outcome.parent, state: outcome.class === 'COMPLETED' ? 'closed' : 'open' }); },
   });
+  assert.deepEqual(github.issues.get(7).subs, [12, 9, 8, 11, 10]);
   const legacy = reconciler().run({ apply: true });
   assert.deepEqual(legacy.holds, []);
-  assert.deepEqual(github.issues.get(7).subs, [8, 9, 10, 11, 12], 'the old sequence is kept, so nothing is reordered before the migration');
-  assert.equal(kinds(legacy).some(kind => kind.startsWith('reorder')), false);
+  assert.equal(kinds(legacy).some(kind => kind.startsWith('reorder')), true, 'the old per-class numbers tie, so the pass reorders');
+  assert.deepEqual(github.issues.get(7).subs, [8, 11, 12, 9, 10], 'open tasks by order, then child number, then the finished one');
+  assert.match(legacy.findings.find(entry => entry.code === 'ORDER_TIE').detail, /#8, #11, #12 share priority order 0, so child number decides\. Controller: set a distinct order/);
   const finding = legacy.findings.find(entry => entry.code === 'CLASS_LEGACY');
   assert.ok(finding, 'CLASS_LEGACY is reported');
-  assert.match(finding.detail, /#8 CORE, #9 CORE, #10 HARDENING, #11 LATER read as COMMITTED, kept in their old CORE, HARDENING, LATER sequence/);
+  assert.match(finding.detail, /#12 CORE, #9 CORE, #8 HARDENING, #11 LATER read as COMMITTED and sort like any other task, by group, priority \(order\) and child number/);
+  assert.doesNotMatch(finding.detail, /kept in their old|moves no task/);
   assert.match(finding.detail, /apply it whole with update-parent/);
   assert.deepEqual(finding.patch.outcomes.map(entry => [entry.issue, entry.class, entry.order]),
-    [[8, 'COMMITTED', 0], [9, 'COMMITTED', 1], [10, 'COMMITTED', 2], [11, 'COMMITTED', 3], [12, 'COMPLETED', 0]]);
+    [[12, 'COMMITTED', 0], [9, 'COMMITTED', 1], [8, 'COMMITTED', 2], [11, 'COMMITTED', 3], [10, 'COMPLETED', 0]]);
 
   // A write never adds an older class, even to an entry that had another one.
   assert.throws(() => store.mutate('parent', 7, { writer, change: doc => state.applyPatch('parent', doc, { outcomes: doc.outcomes.map(entry => (entry.issue === 11 ? { ...entry, class: 'HARDENING' } : entry)) }) }), /PATCH_REFUSED|older class names/);
@@ -336,8 +340,9 @@ test('older classes keep their CORE, HARDENING, LATER order, are reported as CLA
   store.mutate('parent', 7, { writer, change: doc => state.applyPatch('parent', doc, finding.patch) });
   const migrated = reconciler().run({ apply: true });
   assert.equal(codes(migrated).includes('CLASS_LEGACY #7'), false);
-  assert.equal(kinds(migrated).some(kind => kind.startsWith('reorder')), false, 'the migration moves no task');
-  assert.deepEqual(github.issues.get(7).subs, [8, 9, 10, 11, 12]);
+  assert.equal(codes(migrated).some(code => code.startsWith('ORDER_TIE')), false, 'the renumbered order has no ties');
+  assert.deepEqual(github.issues.get(7).subs, [12, 9, 8, 11, 10], 'the old CORE, HARDENING, LATER sequence becomes the priority');
+  assert.equal(kinds(reconciler().run({ apply: true })).some(kind => kind.startsWith('reorder')), false, 'a later pass moves nothing');
 });
 
 test('a moved PR head marks evidence STALE_HEAD and updates both projections together', () => {
@@ -367,7 +372,7 @@ test('a moved PR head marks evidence STALE_HEAD and updates both projections tog
   assert.match(parentBlock, new RegExp(`423:${doc.revision}\\b`));
   assert.match(childBlock, new RegExp(`child=423@${doc.revision} -->`));
   assert.match(childBlock, new RegExp(`\\[bbbbbbb\\]\\(https://github.com/acme/app/commit/${SHA_B}\\) \`${SHA_B}\``), 'short link plus full SHA as text');
-  assert.match(parentBlock, /^\| Issue 423 \| #423 \| #540 \| NOW \| IN PROGRESS \| - \| - \|$/m, 'an open PR means the work is in progress');
+  assert.match(parentBlock, /^\| Issue 423 \| - \| #423 \| #540 \| NOW \| IN PROGRESS \|$/m, 'an open PR means the work is in progress');
 });
 
 test('a body edited between read and write is held, then completed on the next pass with the edit kept', () => {
@@ -496,9 +501,12 @@ test('a second repository orders native sub-issues like the Programme Graph, inc
   assert.equal(github.mutations(), 0);
   const report = reconciler().run({ apply: true });
   assert.deepEqual(report.holds, []);
-  assert.deepEqual(github.issues.get(7).subs, [13, 9, 14, 15, 8, 12, 11, 10], 'LATER by order and issue, OPTIONAL, COMPLETED, then RETIRED');
+  assert.deepEqual(github.issues.get(7).subs, [13, 9, 14, 15, 8, 12, 11, 10], 'LATER by priority order and then child number, OPTIONAL, COMPLETED, then RETIRED');
   assert.deepEqual(github.issues.get(8).subs, [17, 16]);
-  assert.equal(reconciler().run().summary, 'No changes');
+  const settled = reconciler().run();
+  assert.equal(settled.summary, 'No changes');
+  assert.match(settled.next_action, /^Controller: decide on 3 finding\(s\) the reconciler does not change/, 'both priority ties wait on the controller');
+  assert.deepEqual(settled.findings.filter(finding => finding.code === 'ORDER_TIE').map(finding => finding.detail.split(' share')[0]), ['#12, #16', '#9, #14, #15']);
 });
 
 test('merged PRs with green checks list open issues for the controller without closing them', () => {
@@ -734,4 +742,37 @@ test('the command line binds identity, refuses writes without the controller fla
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('a task name with & is one topic on its task page, escaped once; untopiced parent comments are "Other comments"', () => {
+  const outcomes = CATALOGUE.map(outcome => (outcome.issue === 423 ? { ...outcome, name: 'Setup & install' } : outcome));
+  const { github, reconciler } = setup({ outcomes });
+  comment(github, 423, 'Setup & install\n---\nINT-TK421-070 agreed');
+  comment(github, 423, 'A note with no topic');
+  comment(github, 421, 'A parent note with no topic');
+  reconciler().run({ apply: true });
+  const traceLines = number => state.findStateBlock(github.issues.get(number).body, state.TRACE_BLOCK_NAME).block.body.split('\n').filter(line => line.startsWith('- **'));
+  const task = traceLines(423);
+  assert.equal(task.length, 1, 'the tagged and untopiced comments share the task name line');
+  assert.match(task[0], /^- \*\*Setup &amp; install:\*\* /);
+  assert.doesNotMatch(github.issues.get(423).body, /&amp;amp;/);
+  assert.match(traceLines(421).at(-1), /^- \*\*Other comments:\*\* /);
+});
+
+test('a page written by a newer Toolkit is held, not rewritten, so two versions never flip a page', () => {
+  const { github, store, binding, reconciler, repository } = setup();
+  reconciler().run({ apply: true });
+  comment(github, 421, 'A newer note');
+  const before = github.issues.get(421).body;
+  const older = new state.Reconciler({
+    store, reader: new state.ProgrammeGraphReader({ transport: github, repository }),
+    mutator: new state.GitHubMutator({ transport: github, repository }), binding, writer, toolkitVersion: '3.9.0',
+  });
+  const report = older.run({ apply: true });
+  const held = report.holds.find(entry => entry.code === 'BLOCK_NEWER_TOOLKIT' && entry.target === '#421');
+  assert.ok(held, 'the older copy holds the page');
+  assert.match(held.detail, /Toolkit 3\.9\.1, newer than this copy \(3\.9\.0\)/);
+  assert.equal(github.issues.get(421).body, before, 'the page is left as the newer copy wrote it');
+  reconciler().run({ apply: true });
+  assert.notEqual(github.issues.get(421).body, before, 'the same version still writes it');
 });
