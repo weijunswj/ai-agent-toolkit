@@ -463,9 +463,14 @@ test('P-18: the shared hostile inputs are unverified, except the shapes the read
   const verdicts = text => protection.producerVerdict(['validate'], [{ file: 'ci.yml', workflow: protection.readWorkflow(text) }], 'main');
   const accepts = text => verdicts(text).P4.status === 'ok';
   assert.equal(accepts(AGGREGATE), true, 'the base workflow is conformant');
-  // A case goes into the aggregate step's mapping, or at the start or the end of the document.
+  // A case goes into the aggregate step's mapping, or at the start or the end of the document. A
+  // name case names a second, push-only job beside a job that has the name GitHub reports for it:
+  // accepting the pair means one producer was seen where GitHub has two.
+  const quoted = text => text.includes('"') ? `'${text}'` : `"${text}"`;
+  const pair = shape => ['on: [pull_request]', 'jobs:', '  a:', `    name: ${quoted(shape.github)}`, '    runs-on: x', '  b:', `    name: ${shape.text}`, "    if: github.event_name == 'push'", '    runs-on: x', ''].join('\n');
   const place = shape => shape.place === 'start' ? `${shape.text}${AGGREGATE}` : shape.place === 'end' ? `${AGGREGATE}${shape.text}` : AGGREGATE.replace('        env:\n', `${hostile.indent(shape.text, 8)}\n        env:\n`);
-  hostile.expectDefaultDeny(assert, (text, shape) => accepts(place(shape)), hostile.cases(['line-breaks', 'continued-lines', 'quoting', 'yaml-structure', 'indents', 'invisible'], ['yaml']), {
+  const acceptsShape = shape => shape.place === 'name' ? protection.producerVerdict([shape.github], [{ file: 'ci.yml', workflow: protection.readWorkflow(pair(shape)) }], 'main').P3.status === 'ok' : accepts(place(shape));
+  hostile.expectDefaultDeny(assert, (text, shape) => acceptsShape(shape), hostile.cases(['line-breaks', 'continued-lines', 'quoting', 'yaml-structure', 'indents', 'invisible', 'check-names'], ['yaml']), {
     // Decoded exactly as YAML decodes them: a CRLF line end, a quoted key with no escapes, a
     // consistent odd indent and one leading byte order mark.
     allow: ['crlf-line-end', 'quoted-on-key', 'odd-indent', 'bom-at-start'],
@@ -499,6 +504,28 @@ test('P-18: the shared hostile inputs are unverified, except the shapes the read
   }
   const quotedNumber = ['on: [pull_request]', 'jobs:', '  a:', `    name: "1.10"`, '    runs-on: x', ''].join('\n');
   assert.deepEqual(Object.values(statuses({ checks: protection.producerVerdict(['1.10'], [{ file: 'ci.yml', workflow: protection.readWorkflow(quotedNumber) }], 'main') })), ['ok', 'ok'], 'a quoted number is text');
+  // Matrix jobs and reusable calls: GitHub adds " (values)" or " / <called job>", and a skipped
+  // one reports its bare name, so any that could report a required check leaves P3 unverified.
+  const derived = (literal, job) => ['on: [pull_request]', 'jobs:', '  a:', `    name: ${quoted(literal)}`, '    runs-on: x', '  b:', ...job, '    runs-on: x', ''].join('\n');
+  const p3 = (requiredCheck, text) => protection.producerVerdict([requiredCheck], [{ file: 'ci.yml', workflow: protection.readWorkflow(text) }], 'main').P3;
+  const matrix = ['    name: ci', '    strategy:', '      matrix:', '        os: [x]'];
+  assert.equal(p3('ci (x)', derived('ci (x)', matrix)).status, 'unverified', 'a matrix job adds its values');
+  assert.match(p3('ci (x)', derived('ci (x)', matrix)).details[0], /matrix job/);
+  assert.equal(p3('ci', derived('ci', matrix)).status, 'unverified', 'a skipped matrix job reports its bare name');
+  assert.equal(p3('CI (X)', derived('CI (X)', matrix)).status, 'unverified', 'in any letter case');
+  const reusable = ['    name: a', '    uses: ./.github/workflows/called.yml'];
+  assert.equal(p3('a / b', ['on: [pull_request]', 'jobs:', '  lit:', '    name: a / b', '    runs-on: x', '  b:', ...reusable, ''].join('\n')).status, 'unverified', 'a reusable call adds the called job');
+  assert.equal(p3('a', ['on: [pull_request]', 'jobs:', '  lit:', '    name: a', '    runs-on: x', '  b:', ...reusable, ''].join('\n')).status, 'unverified', 'a skipped reusable call reports its bare name');
+  // A matrix job or reusable call that cannot report the check, and an expression name that
+  // cannot produce it, leave P3 ok.
+  assert.equal(p3('validate', derived('validate', ['    name: tests', '    strategy:', '      matrix:', '        os: [x]'])).status, 'ok');
+  assert.equal(p3('ci', derived('ci', ['    name: x-${{ github.ref }}'])).status, 'ok');
+  assert.equal(p3('ci', derived('ci', ['    name: ${{ github.ref }}'])).status, 'unverified');
+  // Expression names are read in one pass, even when none of them closes.
+  for (const [id, unit] of [['unclosed', '${{ x '], ['quoted braces', "${{ '}}' }}"]]) {
+    const result = hostile.timing(text => p3('ci', text), size => derived('ci', [`    name: ${unit.repeat(Math.ceil(size / unit.length))}`]), { maxSize: 1 << 18 });
+    assert.ok(result.ok, `${id}: ${result.message}`);
+  }
   // A plain single-quoted name still reads.
   const single = ['on: [pull_request]', 'jobs:', '  a:', `    name: ${Q}x y${Q}`, '    runs-on: x', ''].join('\n');
   const singleVerdict = protection.producerVerdict(['x y'], [{ file: 'ci.yml', workflow: protection.readWorkflow(single) }], 'main');

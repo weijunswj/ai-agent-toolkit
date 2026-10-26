@@ -62,7 +62,8 @@ test('H-01: every family has cases, ids are unique, and each case holds exactly 
   for (const shape of hostile.shapes) {
     assert.ok(hostile.FAMILIES.includes(shape.family), shape.id);
     assert.ok(['yaml', 'shell', 'text'].includes(shape.syntax), shape.id);
-    assert.ok(['line', 'start', 'end'].includes(shape.place), shape.id);
+    assert.ok(['line', 'start', 'end', 'name'].includes(shape.place), shape.id);
+    assert.equal(shape.place === 'name', typeof shape.github === 'string' && shape.github.length > 0, `${shape.id} names its GitHub check name exactly when it is a name case`);
     assert.deepEqual(hostile.pointsOf(shape.text), EXPECTED_POINTS[shape.id] || [], shape.id);
     assert.deepEqual([...shape.points], EXPECTED_POINTS[shape.id] || [], shape.id);
     assert.ok(Object.isFrozen(shape), shape.id);

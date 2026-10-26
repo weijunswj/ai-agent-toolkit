@@ -12,8 +12,11 @@
 // A case is { id, family, syntax, text, points, place }:
 //   family  one of FAMILIES;
 //   syntax  the language the text is written in: 'yaml', 'shell' or 'text' (free text);
-//   text    the input; YAML cases are entries of a mapping at indent 0 (place 'line'), or go at
-//           the start or the end of a whole document (place 'start' or 'end');
+//   text    the input; YAML cases are entries of a mapping at indent 0 (place 'line'), go at
+//           the start or the end of a whole document (place 'start' or 'end'), or are the
+//           value of a job's `name` (place 'name');
+//   github  for place 'name', the check name GitHub reports for that job, so a reader can put a
+//           second job of that name beside it and must refuse the pair;
 //   points  every code point in the text other than printable ASCII and LF, sorted and unique,
 //           so a test can prove each case holds exactly the characters it names;
 //   bytes   for byte-level cases, the raw bytes; text is how a UTF-8 read sees them.
@@ -50,6 +53,7 @@ const FAMILIES = Object.freeze([
   'indents',
   'invisible',
   'free-text',
+  'check-names',
   'large-input',
 ]);
 
@@ -101,8 +105,6 @@ const quoting = [
   ...[['N', 'N'], ['underscore', '_'], ['L', 'L'], ['P', 'P'], ['slash', '/'], ['backslash', BS]].map(([name, code]) => yaml('quoting', `escape-${name}-in-value`, `id: "a${BS}${code}b"`)),
   yaml('quoting', 'single-quote-in-plain-before-comment', `id: x' #'`),
   yaml('quoting', 'double-quote-in-plain-before-comment', 'id: a "b #c"'),
-  yaml('quoting', 'yaml-number-name', 'name: 1.10'),
-  yaml('quoting', 'yaml-boolean-name', 'name: True'),
   prose('quoting', 'git-quoted-path', `"docs/${BS}303${BS}251.md"`),
 ];
 
@@ -181,7 +183,22 @@ const largeInput = [
   ['many-short-lines', size => Array.from({ length: Math.max(1, Math.ceil(size / 11)) }, (_, index) => `k${String(index).padStart(6, '0')}: b\n`).join('')],
 ].map(([id, build]) => yaml('large-input', id, build(64), { build }));
 
-const shapes = Object.freeze([...lineBreaks, ...continuedLines, ...quoting, ...structure, ...indents, ...invisible, ...freeText, ...largeInput]);
+// Job names that GitHub reports as another check name than the text a simple reader sees. The
+// last two depend on GitHub trimming names or matching check names in any letter case, which a
+// default-deny reader must not rely on either way.
+const checkNames = [
+  ['name-yaml-number', '1.10', '1.1'],
+  ['name-yaml-boolean', 'True', 'true'],
+  ['name-doubled-single-quote', "'x''y'", "x'y"],
+  ['name-single-quote-before-comment', "x' #'", "x'"],
+  ['name-double-quote-before-comment', 'x" #"', 'x"'],
+  ['name-expression-braces-in-string', "${{ 'ci' || '}}' }}", 'ci'],
+  ['name-expression-then-literal-expression', "${{ '}}' }}${{ 'ci' }}", '}}ci'],
+  ['name-quoted-with-spaces', '" ci "', 'ci'],
+  ['name-letter-case', 'CI', 'ci'],
+].map(([id, text, github]) => yaml('check-names', id, text, { place: 'name', github }));
+
+const shapes = Object.freeze([...lineBreaks, ...continuedLines, ...quoting, ...structure, ...indents, ...invisible, ...freeText, ...checkNames, ...largeInput]);
 
 const SYNTAXES = Object.freeze(['yaml', 'shell', 'text']);
 

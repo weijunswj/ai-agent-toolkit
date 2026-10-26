@@ -34,7 +34,11 @@
 // yes; it creates or updates the one ruleset Toolkit names and never touches any other.
 //
 // Within that subset, a job named by an expression, a matrix job and a reusable workflow call
-// produce names the reader does not try to predict.
+// produce names the reader does not try to predict: any of them whose name could come out as a
+// required check (GitHub adds " (values)" to a matrix job and " / <called job>" to a reusable
+// call, and a skipped one reports under its bare name) leaves P3 unverified. So does a job whose
+// name differs from a required check only in letter case, or a quoted name with spaces at either
+// end, since this check does not rely on how GitHub compares or trims names.
 
 const childProcess = require('node:child_process');
 const fs = require('node:fs');
@@ -435,7 +439,8 @@ function readWorkflow(input) {
       // as the job key it falls back to) are unreadable: never a guess.
       const plainName = nameField ? nameField.value.trim() : job.key;
       const notText = YAML_NULL.test(plainName) || YAML_NOT_TEXT.test(plainName);
-      const name = typeof nameValue === 'string' && !notText ? nameValue : '';
+      // A quoted name with spaces at either end is unreadable: GitHub may trim it.
+      const name = typeof nameValue === 'string' && !notText && nameValue === nameValue.trim() ? nameValue : '';
       const needsField = field('needs');
       const strategy = field('strategy');
       const matrix = strategy ? children(lines, strategy.index + 1, strategy.end).some(entry => entry.key === 'matrix') : false;
@@ -507,10 +512,62 @@ function maskingTrigger(workflow, defaultBranch) {
   return null;
 }
 
-// Whether an expression-named job's name could come out as `check`.
+// The literal parts of a name around its `${{ }}` expressions, read in one pass as GitHub reads
+// them: a `}}` inside a single-quoted string does not end an expression. null when an expression
+// never closes, so the name could be anything.
+function literalParts(name) {
+  const text = String(name);
+  const parts = [];
+  let start = 0;
+  let index = text.indexOf('${{');
+  while (index !== -1) {
+    parts.push(text.slice(start, index));
+    let quote = false;
+    let end = -1;
+    for (let at = index + 3; at < text.length; at += 1) {
+      if (text[at] === "'") quote = !quote;
+      else if (!quote && text[at] === '}' && text[at + 1] === '}') { end = at + 2; break; }
+    }
+    if (end === -1) return null;
+    start = end;
+    index = text.indexOf('${{', start);
+  }
+  parts.push(text.slice(start));
+  return parts;
+}
+
+// Whether an expression-named job's name could come out as `check`, in any letter case.
 function couldProduce(name, check) {
-  const expression = String(name).split(/\$\{\{[\s\S]*?\}\}/).map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('[\\s\\S]*');
-  return new RegExp(`^${expression}$`).test(check);
+  const parts = literalParts(name);
+  if (!parts) return true;
+  // Each expression may produce any text, so the literal parts must appear in order: the first at
+  // the start, the last at the end. Finding each middle part at its earliest place is enough.
+  const target = String(check).toLowerCase();
+  const pieces = parts.map(part => part.toLowerCase());
+  if (pieces.length === 1) return target === pieces[0];
+  const first = pieces[0];
+  const last = pieces.at(-1);
+  if (!target.startsWith(first) || target.length < first.length + last.length) return false;
+  let at = first.length;
+  for (const piece of pieces.slice(1, -1)) {
+    const found = target.indexOf(piece, at);
+    if (found === -1) return false;
+    at = found + piece.length;
+  }
+  return target.length - last.length >= at && target.endsWith(last);
+}
+
+// Why `job` could report as `check` without being its one plain producer, or null: an expression
+// name, a matrix job (GitHub adds " (values)", and a skipped one reports its bare name) or a
+// reusable call (GitHub adds " / <called job>").
+function derivedNameProblem(job, check) {
+  const forms = [job.name];
+  if (job.matrix) forms.push(`${job.name} (\${{ matrix }})`);
+  if (job.reusable) forms.push(`${job.name} / \${{ called job }}`);
+  if (!forms.some(form => couldProduce(form, check))) return null;
+  if (job.dynamic_name) return `is named by an expression that could produce "${check}"`;
+  if (job.matrix) return `is a matrix job, which GitHub names "${job.name} (<values>)", so it could produce "${check}"`;
+  return `calls a reusable workflow, whose jobs GitHub names "${job.name} / <job>", so it could produce "${check}"`;
 }
 
 // P3 and P4 for each required name over read workflows.
@@ -531,8 +588,11 @@ function producerVerdict(requiredChecks, workflows, defaultBranch) {
       if (!entry.workflow) continue;
       for (const job of entry.workflow.jobs) {
         if (job.name_unreadable) p3Unverified.push(`${entry.file} ${job.key} has an empty or unreadable name, so it could produce "${check}"`);
-        else if (job.dynamic_name && couldProduce(job.name, check)) p3Unverified.push(`${entry.file} ${job.key} is named by an expression that could produce "${check}"`);
-        else if (!job.dynamic_name && !job.matrix && !job.reusable && job.name === check) producers.push({ file: entry.file, workflow: entry.workflow, job });
+        else if (job.dynamic_name || job.matrix || job.reusable) {
+          const problem = derivedNameProblem(job, check);
+          if (problem) p3Unverified.push(`${entry.file} ${job.key} ${problem}`);
+        } else if (job.name === check) producers.push({ file: entry.file, workflow: entry.workflow, job });
+        else if (job.name.toLowerCase() === check.toLowerCase()) p3Unverified.push(`${entry.file} ${job.key} is named "${job.name}", which differs from "${check}" only in letter case`);
       }
     }
     if (producers.length === 0) missing.push(check);
