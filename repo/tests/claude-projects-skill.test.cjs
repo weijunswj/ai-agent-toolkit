@@ -52,7 +52,7 @@ test('no plugin payload or skills folder reaches the Projects controller skill',
 
 test('Projects wires managed instructions, promises and fresh scheduled sessions to controller law', () => {
   const text = bundle();
-  assert.match(text, /^Version: 2026-10-26\.4$/m);
+  assert.match(text, /^Version: 2026-10-26\.5$/m);
   // The check-in posts the skill card itself; the coordinator lists the Save tap, re-upload only when the card failed.
   assert.match(text, /`SKILL BEHIND`: the account copy is an older Toolkit revision\. With "card posted", the check-in posted the skill update card in its thread: put "tap Save on the skill card"/);
   assert.match(text, /keep that thread open \(never resolve it in the hourly pass, even after the check-in moves to a new home thread\) until the owner saves/);
@@ -161,8 +161,9 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.match(text, /\*\*Resolve only in the hourly nudge\.\*\* Threads never resolve themselves[^\n]*\(a\) its output is durably recorded[^\n]*\(b\) its latest result was relayed to the owner in project chat, or the owner replied after it; \(c\) no owner question or decision is open\. There is no waiting period/);
   assert.match(body, /Threads never resolve themselves\. The coordinator resolves a thread in the hourly pass only when its output is durably recorded[^\n]*relayed to the owner in project chat or the owner replied after it, and no owner question or decision is open/);
   assert.match(text, /resolving threads or posts that meet the resolve conditions are reversible housekeeping/);
-  // Block wording: narrow attribution ban, home threads never resolved, post-edit rule.
-  assert.match(body, /no "Generated with" footer, Co-Authored-By or Claude-Session trailers, or session links in footers\. Keep any attribution header the platform requires on PRs/);
+  // Block wording: attribution ban (the personal-data guard enforces it on PR text), home threads never resolved, post-edit rule.
+  assert.match(body, /no "Generated with" footer, Co-Authored-By or Claude-Session trailers, session or thread links, or requester header\. Strip what the platform adds; CI fails it\./);
+  assert.doesNotMatch(body, /Keep any attribution header/);
   assert.match(body, /Each Toolkit scheduled task is bound to its own home thread, which carries its model and effort \(fallback: a fresh session per run\)/);
   assert.match(body, /Never resolve a home thread; a fresh-session run resolves its own thread after delivery/);
   assert.match(body, /- Posts: after the owner's last message, keep output in one post you edit \(append, keep every detail\); post anew on an owner project-chat message or near 8 KB; answer an owner burst in one post\./);
@@ -260,4 +261,20 @@ test('the device programme sweep needs both GitHub governance ENABLED and a name
   assert.match(at('tasks/hourly-nudge.md'), /when project memory names a device, "; no device programme sweep task armed", and with no device named "; no device named, so cloud writes wait for the next session on a computer with gh signed in"/);
   const sweep = JSON.parse(at('setup-inventory.json')).rows.find(row => row.id === 'programme-sweep');
   assert.match(sweep.artefact, /GitHub governance ENABLED and a device named/);
+});
+
+// Moving a task can skip today's run, and fire_trigger on a bound task runs it unwired.
+test('Projects catches up a moved task through its home thread and never fire_triggers a bound task', () => {
+  const text = bundle();
+  const reference = read(`${REFERENCE_DIR}/recurring-tasks.md`);
+  assert.match(reference, /\*\*Moving a task or catching up a run\.\*\* A schedule change, or a recreate, whose new time has already passed today skips today's run if it has not already run today \(a swap's test run counts as today's run\): say which run will be skipped before the move, and catch it up the same turn\./);
+  assert.match(reference, /To catch up a bound task, or to test-fire one during a swap, message its home thread to run its prompt there now/);
+  assert.match(reference, /Never fire_trigger a bound task from another thread: that run starts in a new session with no project tools, files or memory/);
+  assert.match(reference, /Confirm the catch-up's report reached the coordinator\. Never run a bound task's prompt in another thread or in the coordinator\./);
+  assert.match(text, /\*\*Moving a task or catching up:\*\* a move to a time already passed today skips today's run unless it already ran today, so catch it up the same turn/);
+  assert.match(text, /when its last run is over 65 minutes older than the latest time its own cron should have fired \(hours outside its waking window never count; a nudge that fires less often uses its interval plus 5 minutes\)/);
+  assert.doesNotMatch(text, /missed its latest scheduled hour by over 65 minutes/);
+  const setup = read('repo/contracts/claude-projects/web-controller-projects/tasks/run-setup.md');
+  assert.match(setup, /^RUN SETUP \(\{\{project\}\} project, Toolkit base layer\)\n- First check, before anything else: [^\n]*Make no other tool call \(no effort call, message, file write, resolve or retry\) and skip every later step, DELIVERY included: end the turn with the single line "skipped: started outside its home thread"\.\n/);
+  assert.match(text, /Never catch up a task whose entry says `stopped by owner`\./);
 });

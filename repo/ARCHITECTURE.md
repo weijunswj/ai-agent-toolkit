@@ -20,7 +20,7 @@ Last reviewed against `main` `9b7ffff3c30078c2290c809d20bc7c49e3f96e8d`.
 | Docs | `repo/docs/` | Human and agent docs, routed by `repo/docs/agent-playbooks/INDEX.md` |
 | Provenance | `repo/source-watch/` | Third-party source locks and the notification-only source watch |
 | Native plugins | `.claude-plugin/`, `.codex-plugin/` | Claude Code and Codex plugin metadata and hooks |
-| CI | `.github/workflows/` | `validate.yml` is the full gate: test shards on Linux and Windows and the `personal-data` check (config `.github/personal-data-guard.json`), then the `validate` job checks and verifies them (the Windows shards include the env store tests on the real Credential Manager) |
+| CI | `.github/workflows/` | `validate.yml` is the full gate: test shards on Linux and Windows and the `personal-data` check (config `.github/personal-data-guard.json`), then the `validate` job checks and verifies them (the Windows shards include the env store tests on the real Credential Manager); it runs again when a pull request's title or body is edited |
 
 ## Entry points
 
