@@ -344,7 +344,7 @@ test('a base that already holds "## Unreleased" folds with the lane at merge', (
   lane.commit('lane work');
   assert.deepEqual(versionProblems({ workspace: lane.copy, base: 'main' }), [], 'the held lane passes');
 
-  const withUnreleased = lane.read(CHANGELOG_REL_PATH);
+  const withUnreleased = lane.read(CHANGELOG_REL_PATH).replace(/\r\n/g, '\n');
   lane.write(CHANGELOG_REL_PATH, withUnreleased.split('## Unreleased (older lane)\n\n### Lane\n\n- **Old way:** a note.\n\n').join(''));
   lane.commit('drop main notes');
   assert.match(versionProblems({ workspace: lane.copy, base: 'main' }).join('\n'), /base's "## Unreleased" section is missing from this branch/);
