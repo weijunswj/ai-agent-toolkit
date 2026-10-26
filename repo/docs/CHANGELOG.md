@@ -1,6 +1,6 @@
 # Toolkit Changelog
 
-## 3.14.0 (dependency updates)
+## 3.15.0 (dependency updates)
 
 ### Dependency and security settings
 
@@ -9,6 +9,27 @@
 - **Free settings on by default:** GitHub's free dependency and security settings are on by default for a governed repository, covered by the owner's yes to governance. The new `toolkit governance security` (agents may run it) and `toolkit governance migrate` turn them on without another question, write a `dependabot.yml` (weekly, cooldown, patch and minor grouped) and the workflow only where none exists, and read everything back. They never edit a file they did not write, never turn on CodeQL default setup over an advanced setup, write nothing when GitHub cannot be read, report a read-back that fails for any written setting as unverified (exit 2), count CodeQL as an advanced setup when a default-branch workflow that runs on its own or as a reusable workflow has init and analyze steps in one job that is not switched off, or GitHub received CodeQL results on the default branch in the last 90 days from anything but default setup (any other workflow whose text names CodeQL, other than its upload-sarif step, keeps default setup off and is reported for a hand check), leave alone a setting GitHub does not allow on the plan or under an organisation policy, and record every change with what GitHub showed before. On a private repository the update pull requests use the owner's Actions minutes.
 - **Paid features are always asked, default off:** on a private repository, secret scanning, push protection and CodeQL need GitHub's paid Secret Protection and Code Security. Governance setup now asks about them every time, says they are paid, and records only the owner's own answer as `paid_security` (`off` or `on`) in the programme binding; the check reports a private repository without an answer, and nothing paid is turned on without "on". The paid answer and auto-merge are read from the binding merged on the default branch, never from the working tree, so an unmerged edit turns nothing on. The terminal `enable` question says the same.
 - **This repository:** Dependabot now also covers npm, with a cooldown and grouping, and carries the auto-merge workflow; the owner gave standing permission for Dependabot patch and minor updates to merge on green (`auto_merge: patch-minor`, effective once this binding is merged), and GitHub Actions updates stay with the owner. Dependabot does not bump the auto-merge workflow's own pinned action: it moves with Toolkit's template.
+
+## 3.14.0 (programme pages)
+
+### Programme pages refresh without a token
+
+- **New `refresh` command in `programme.cjs`:** the full reconcile pass with `--apply`, which any session in a governed checkout may run, executors included. It writes under the controller that holds the parent now and takes no session, patch or verdict, so every decision stays the controller's. It refuses when nobody holds the parent (`PARENT_UNHELD`).
+- **After-write hook:** the plugins' after-tool hook marks a session that wrote to GitHub (connector write tools, `gh issue` or `gh pr` writes, `gh api` writes, `git push`), and the turn-end hook starts `refresh` in the background once for each governed repository it wrote for. It uses the computer's own `gh` sign-in. Codex users trust one more hook (`PostToolUse`) in `/hooks`.
+- **One pass at a time per repository on a computer:** while another pass holds the lock, `refresh` queues one more pass for it and ends (a failed pass or a long burst leaves it to the next refresh or the hourly sweep), and `reconcile --apply` refuses (`PASS_RUNNING`). The lock is taken over only from an owner whose process has ended, whose lock was written before a restart the computer can tell (by its boot id on Linux, or elsewhere by an uptime lower than the lock recorded; on Windows a Fast Startup shutdown is not a restart), or who has been silent for 6 hours (a killed pass whose process id was reused). A pass that loses its lock stops before its next GitHub request, and an owner removes only its own lock.
+- **Hourly sweep:** the Projects hourly nudge gains a programme step that runs `refresh` where `gh` is signed in, and Projects setup now has a local Remote Control thread create the one local sweep task on the device when the repository's GitHub governance is ENABLED and a device is named (never otherwise), because cloud threads cannot refresh the pages themselves. The sweep also catches edits made on the web.
+- **Removed the token-based programme reconcile workflow** and its secret and writer-variable setup. Nothing stores a GitHub token for the programme pages.
+
+## 3.13.8
+
+### Now and Later
+
+- **Two roadmap groups:** the Programme Graph's Class column shows `NOW` for work in progress (an open or draft PR, or an active, owner-waiting or held gate) and `LATER` for every other committed, unfinished task. Optional work still sorts last as `OPTIONAL`. There is no `NEXT` group: a planned release still shows on the task page but no longer moves a task.
+- **Later is in priority order:** the catalogue `order` is the priority again. Inside each group rows sort by `order`, lowest first, then by child number, and native sub-issues follow. The top Later task is what starts next.
+- **Start next:** the CURRENT summary ends with one **Start next** line naming the top Later task, or None. A task whose PR merged or whose issue closed is skipped, even before its state catches up.
+- **Ties are named:** a reconcile finding `ORDER_TIE` lists queued tasks in one group that share an `order`, so the controller can set a distinct priority with `update-parent`. While older classes are still reported, migrate first, or set COMMITTED and the priority in one patch.
+- **Older classes:** the CORE, HARDENING and LATER migration patch renumbers `order` in the old sequence, which becomes the priority. Before migration their old per-class numbers tie, so a pass may reorder them.
+- **Rules text:** the governed rules order work Now, then Later by priority; Toolkit V3, CONTROLLER.md and the reconciler skill say the same.
 
 ## 3.13.7
 
