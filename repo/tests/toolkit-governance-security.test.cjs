@@ -307,9 +307,9 @@ const APPLY = [
   { id: 'A13 allow auto-merge written and read back', binding: binding(PATCH_MINOR),
     before: reader({ allow_auto_merge: false, binding: merged(PATCH_MINOR) }), writer: () => [ok('allow_auto_merge')], after: reader({ binding: merged(PATCH_MINOR) }),
     expect: { result: 'applied', writes: 1, lines: [/allow auto-merge turned on\./, /read back\./] } },
-  { id: 'A14 the working tree asks for auto-merge the default branch does not have: said, nothing written', working: binding(PATCH_MINOR),
+  { id: 'A14 the working tree asks for auto-merge the default branch does not have: said, auto-merge not written', working: binding(PATCH_MINOR),
     before: reader(ALERTS_OFF), writer: () => [ok('alerts')], after: reader(),
-    expect: { result: 'applied', writes: 1, lines: [/the working-tree binding asks for \{"auto_merge":"patch-minor","github_actions":"owner"\}; it counts only once merged into the default branch\./] } },
+    expect: { result: 'applied', writes: 1, plan: { allow_auto_merge: false }, lines: [/the working-tree binding asks for \{"auto_merge":"patch-minor","github_actions":"owner"\}; it counts only once merged into the default branch\./] } },
   { id: 'A17 a written setting with no read-back is never "read back" (I4)', before: reader(ALERTS_OFF), writer: () => [ok('alerts'), ok('something_new')], after: reader(),
     expect: { result: 'unverified', writes: 1, unconfirmed: ['something_new'], never: [/: read back\./] } },
 ];

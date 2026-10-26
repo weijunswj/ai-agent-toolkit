@@ -4,7 +4,7 @@
 
 ### GitHub governance
 
-- **No paid GitHub features:** Toolkit never asks about, turns on or reports as drift a GitHub feature that needs billing. Governance setup no longer asks about GitHub Secret Protection or Code Security, `toolkit governance security` and `migrate` never write them, and the check no longer wants a paid-features answer in a private repository's binding. On a private or internal repository secret scanning, push protection and CodeQL show as not applicable (private repository); on a public repository they still turn on by default, as do Dependabot alerts and security updates everywhere. A binding's `paid_security` key is deprecated and ignored: older bindings that carry it stay valid and nothing changes.
+- **No paid GitHub features:** Toolkit never asks about, turns on or reports as drift a GitHub feature that needs billing. Governance setup no longer asks about GitHub Secret Protection or Code Security, `toolkit governance security` and `migrate` never write them, and the check no longer wants a paid-features answer in a private repository's binding. On a private or internal repository secret scanning, push protection and CodeQL show as not applicable (private repository); on a public repository they still turn on by default, as do Dependabot alerts and security updates everywhere. A binding's `paid_security` key is deprecated and ignored: older bindings that carry off or on stay valid and nothing changes, and any other value makes the binding invalid.
 
 ## 3.15.12 (governance tap card)
 

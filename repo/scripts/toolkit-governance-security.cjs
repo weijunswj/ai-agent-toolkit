@@ -722,7 +722,7 @@ function describeOutcome(slug, root, result, outcome) {
 function settingCheck(value, label) {
   if (value === 'enabled') return { status: 'ok', details: [] };
   if (value === 'disabled') return { status: 'drift', details: [`${label} is off`] };
-  if (value === 'not-on-plan') return { status: 'not-on-plan', details: [`GitHub does not offer ${label} on this repository`] };
+  if (value === 'not-on-plan') return { status: 'not-on-plan', details: [`${label} is not offered by GitHub on this repository`] };
   if (value === 'not-checked') return { status: 'not-checked', details: ['offline'] };
   return { status: 'unverified', details: [`${label} could not be read`] };
 }
