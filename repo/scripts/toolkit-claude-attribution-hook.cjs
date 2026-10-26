@@ -31,7 +31,8 @@ function main(guard = () => require('./toolkit-attribution-guard.cjs')) {
   try { input = JSON.parse(fs.readFileSync(0, 'utf8') || '{}'); }
   catch { return 0; }
   let decision;
-  try { decision = guard().attributionDecision(input); }
+  const notes = [];
+  try { decision = guard().attributionDecision(input, { notes }); }
   catch {
     const command = input?.tool_input?.command;
     return typeof command === 'string' && mayCarryAttribution(command) ? refuse(CHECK_FAILED_REASON) : 0;
@@ -40,6 +41,11 @@ function main(guard = () => require('./toolkit-attribution-guard.cjs')) {
     process.stdout.write(`${JSON.stringify(decision)}\n`);
     process.stderr.write(`${decision.hookSpecificOutput.permissionDecisionReason}\n`);
     return 2;
+  }
+  // A push the check could not read still runs; Claude Code shows `systemMessage` to the user.
+  if (notes.length) {
+    process.stdout.write(`${JSON.stringify({ systemMessage: notes.join('\n') })}\n`);
+    process.stderr.write(`${notes.join('\n')}\n`);
   }
   return 0;
 }

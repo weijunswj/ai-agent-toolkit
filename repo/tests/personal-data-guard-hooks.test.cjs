@@ -80,9 +80,31 @@ test('pre-push: with the plain-text check installed too, a hand push of a change
   const push = repo.git(['push', '-q', 'origin', 'main'], { allowFailure: true });
   assert.notEqual(push.status, 0, 'pre-push blocks the plain-text finding');
   assert.match(push.stderr, /docs\/guide\.md:1: number-reference/);
+  // Uncommitted changes: the working folder is not what is pushed, so the step is skipped with a note.
+  repo.write('docs/guide.md', 'Being rewritten.\n');
+  const dirty = repo.git(['push', '-q', 'origin', 'main'], { allowFailure: true });
+  assert.equal(dirty.status, 0, dirty.stderr);
+  assert.match(dirty.stderr, /plain-text check: skipped, because the working folder has uncommitted changes/);
   repo.commit('plain guide', { 'docs/guide.md': 'See the install steps for details.\n' });
   const clean = repo.git(['push', '-q', 'origin', 'main'], { allowFailure: true });
   assert.equal(clean.status, 0, clean.stderr);
+  // Broken settings: the check cannot run, so the push goes on with a note.
+  repo.commit('broken settings', { '.github/plain-text.json': '{ not json\n' });
+  const broken = repo.git(['push', '-q', 'origin', 'main'], { allowFailure: true });
+  assert.equal(broken.status, 0, broken.stderr);
+  assert.match(broken.stderr, /plain-text check: could not run; the push goes on/);
+});
+
+test('installer --check: a guard hook from an older template is reported as outdated', (t) => {
+  const repo = new TestRepo(t);
+  repo.commit('base', { 'README.md': 'base\n' });
+  assert.equal(repo.installer([]).status, 0);
+  assert.equal(repo.installer(['--check']).status, 0);
+  const hook = path.join(repo.root, '.git', 'hooks', 'pre-push');
+  fs.writeFileSync(hook, fs.readFileSync(hook, 'utf8').replace(/^plain=.*\n/m, ''));
+  const check = repo.installer(['--check']);
+  assert.equal(check.status, 1);
+  assert.match(check.all, /Drift: hook pre-push: outdated/);
 });
 
 test('installer: core.hooksPath is followed, and the default folder is left alone', (t) => {

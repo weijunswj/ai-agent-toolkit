@@ -85,12 +85,26 @@ function hookText(name) {
     lines.push('input=$(cat)');
     lines.push('printf \'%s\\n\' "$input" | node "$guard" pre-push "$1" --repo "$root" || exit $?');
     // A repository that also runs the plain-text check gets it on the files the current branch changes
-    // since the branch it tracks, else origin's default branch; with neither it is left to CI.
+    // since the branch it tracks, else origin's default branch. The check reads the working folder, so
+    // it runs only when that matches the commit being pushed. It blocks only on findings (exit 1); a
+    // check that cannot run (exit 2, such as broken settings) prints a note and the push goes on.
     lines.push(
       'plain="$root/.github/scripts/plain-text-check.cjs"',
       'if [ -f "$plain" ] && [ -f "$root/.github/plain-text.json" ]; then',
       '  base=$(git rev-parse --verify -q \'@{upstream}\' || git rev-parse --verify -q refs/remotes/origin/HEAD)',
-      '  if [ -n "$base" ]; then git diff -z --name-only --diff-filter=d "$base...HEAD" | xargs -0 node "$plain" --repo "$root" --files || exit 1; fi',
+      '  if [ -z "$base" ]; then :',
+      '  elif ! git diff --quiet HEAD --; then',
+      '    echo "plain-text check: skipped, because the working folder has uncommitted changes; CI checks the pushed files." >&2',
+      '  else',
+      '    changed=$(git -c core.quotePath=false diff --name-only --diff-filter=d "$base...HEAD")',
+      '    (set --; while IFS= read -r file; do [ -n "$file" ] && set -- "$@" "$file"; done <<EOF',
+      '$changed',
+      'EOF',
+      '    node "$plain" --repo "$root" --files "$@")',
+      '    status=$?',
+      '    if [ "$status" -eq 1 ]; then exit 1; fi',
+      '    if [ "$status" -ne 0 ]; then echo "plain-text check: could not run; the push goes on and CI checks the files." >&2; fi',
+      '  fi',
       'fi'
     );
     lines.push('if [ -f "$chained" ]; then printf \'%s\\n\' "$input" | "$chained" "$@"; exit $?; fi');
@@ -199,7 +213,8 @@ class GuardInstaller {
       const text = readOrNull(path.join(hooks, name));
       if (text === null) problems.push(`hook ${name}: missing from ${hooks}`);
       else if (!text.includes(HOOK_MARKER)) problems.push(`hook ${name}: not the guard's hook`);
-      else if (!text.includes(`guard=${GUARD_VERSION} `)) problems.push(`hook ${name}: outdated`);
+      // Any difference from the current hook text, so a hook from before a template change is found too.
+      else if (text.replace(/\r\n/g, '\n') !== hookText(name)) problems.push(`hook ${name}: outdated`);
     }
     if (problems.length) {
       for (const problem of problems) this.#say(`Drift: ${problem}`);
