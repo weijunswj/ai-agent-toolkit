@@ -1,5 +1,13 @@
 # Toolkit Changelog
 
+## Unreleased
+
+### Input readers
+
+- **Gate rules name the reader design:** a safety decision read from YAML, shell or free text now uses a default-deny reader over a subset its G0 states, and G1 runs the shared hostile-input set before G2, whose brief names it. Three gate-rules sentences that repeated the global rules or the G0 bullet were removed to make room; their meaning is unchanged.
+- **Shared hostile-input set:** `repo/tests/support/hostile-inputs.cjs` holds the input shapes past reviews found readers getting wrong (line breaks, continued lines, quoting and escapes, YAML structure, indents and spaces, invisible and look-alike characters, free-text lists and labels, large inputs), each built from code points so the source holds no raw invisible characters. It adds `variants` (every line-break and byte-order-mark form of an input), `timing` (a growth-ratio check for quadratic work) and `expectDefaultDeny` (every case refused unless a test names it as an allowed exception). It holds data and assertions only and never decides whether an input is safe.
+- **First adopter:** the default-branch protection check's tests run the YAML, line-break, indent and invisible families and the large-input check; every case comes back unverified except a CRLF line end, a quoted `on` key, a doubled single quote, a consistent odd indent and one leading byte order mark, which it reads as GitHub does.
+
 ## 3.15.0 (dependency updates)
 
 ### Dependency and security settings

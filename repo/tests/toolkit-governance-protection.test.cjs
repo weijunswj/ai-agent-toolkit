@@ -14,6 +14,7 @@ const test = require('node:test');
 
 const scripts = path.join(__dirname, '..', 'scripts');
 const protection = require(path.join(scripts, 'toolkit-governance-protection.cjs'));
+const hostile = require('./support/hostile-inputs.cjs');
 
 const AGGREGATE = [
   'name: CI',
@@ -455,6 +456,26 @@ test('P-17: the reader is default-deny: YAML outside its plain subset is unverif
   // So are the workflow templates the skills ship.
   for (const file of ['skills/secure-ci-cd/templates/github-actions/personal-data-guard.yml', 'skills/skill-product-review/templates/ci/generated-surface-check.template.yml', 'skills/skill-product-review/templates/ci/read-only-publication-validation.template.yml']) {
     assert.deepEqual(protection.readWorkflow(fs.readFileSync(path.join(__dirname, '..', '..', file), 'utf8')).problems, [], file);
+  }
+});
+
+test('P-18: the shared hostile inputs are unverified, except the shapes the reader reads as GitHub does', () => {
+  const verdicts = text => protection.producerVerdict(['validate'], [{ file: 'ci.yml', workflow: protection.readWorkflow(text) }], 'main');
+  const accepts = text => verdicts(text).P4.status === 'ok';
+  assert.equal(accepts(AGGREGATE), true, 'the base workflow is conformant');
+  // A case goes into the aggregate step's mapping, or at the start or the end of the document.
+  const place = shape => shape.place === 'start' ? `${shape.text}${AGGREGATE}` : shape.place === 'end' ? `${AGGREGATE}${shape.text}` : AGGREGATE.replace('        env:\n', `${hostile.indent(shape.text, 8)}\n        env:\n`);
+  hostile.expectDefaultDeny(assert, (text, shape) => accepts(place(shape)), hostile.cases(['line-breaks', 'continued-lines', 'quoting', 'yaml-structure', 'indents', 'invisible'], ['yaml']), {
+    // Read the same way GitHub reads them: a CRLF line end, a quoted key that is not a hidden
+    // condition, a doubled single quote, a consistent odd indent and one leading byte order mark.
+    allow: ['crlf-line-end', 'quoted-on-key', 'doubled-single-quote', 'odd-indent', 'bom-at-start'],
+  });
+  // The base workflow with every line-break shape, a byte order mark and tab indents.
+  const forms = Object.fromEntries(hostile.variants(AGGREGATE).map(item => [item.id, accepts(item.text)]));
+  assert.deepEqual(forms, { crlf: true, cr: false, nel: false, ls: false, ps: false, bom: true, tabs: false });
+  for (const shape of hostile.cases(['large-input'])) {
+    const result = hostile.timing(text => protection.readWorkflow(`on: [pull_request]\njobs:\n  validate:\n    runs-on: x\n    steps:\n      - ${text}`), shape.build, { maxSize: 1 << 19 });
+    assert.ok(result.ok, `${shape.id}: ${result.message}`);
   }
 });
 
