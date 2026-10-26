@@ -70,16 +70,18 @@ const SLUG = '[A-Za-z0-9._-]+\\/[A-Za-z0-9._-]+';
 const MAX_APPROVAL_LINE = 200;
 // A no, a doubt, a condition, a delay, a hand-off, a report or another kind of merge (a branch name
 // such as "main" means merging a branch, not the pull request): the line is not an approval.
-const HOLD_WORDS = /n't\b|\b(?:not|no|nope|never|dont|wont|cant|cannot|wait\w*|hold\w*|paus\w*|postpon\w*|delay\w*|defer\w*|halt\w*|veto\w*|undo\w*|nobody|none|neither|nor|later|until|till|unless|if|after|before|once|when|whenever|cancel\w*|stop\w*|without|given|providing|presum\w*|should|subject|contingent|barring|iff|days?|noon|midnight|cob|end|eventually|sometime|morning|afternoon|evening|tomorrow|tonight|minutes?|mins?|hours?|hrs?|maybe|perhaps|probably|possibly|might|guess|think|unsure|idk|dunno|hmm+|or|myself|into|conflicts?|revert\w*|reject\w*|refus\w*|block\w*|skip\w*|abort\w*|den(?:y|ied)|declin\w*|provided|assuming|pending|long|soon|bit|while|moment|secs?|seconds?|next|then|eod|tmrw?|weeks?|weekends?|months?|mon(?:day)?|tue(?:s|sday)?|wed(?:nesday)?|thu(?:rs|rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec|wants?|ready|step|will|plan|todo|option|agent|main|mainline|master|trunk|develop|development|dev|staging|release|prod|production|stable|default|upstream|origin|base|broke|broken|clos\w*|fix\w*|resolv\w*|i'll|we'll|you'll|says?|said|reply|type|wrote|summary|merged|merging)\b|\d\s*(?:am|pm)\b|\b\d{1,2}:\d{2}\b|\b(?:on|upon|at)\s+(?:\w+\s+)?green\b|\bgreen\s*[.!]?\s*$|\bat\s+\d{1,4}\b/i;
+const HOLD_WORDS = /n't\b|\b(?:not|no|nope|never|dont|wont|cant|cannot|wait\w*|hold\w*|paus\w*|postpon\w*|delay\w*|defer\w*|halt\w*|veto\w*|undo\w*|nobody|none|neither|nor|later|until|till|unless|if|after|before|once|when|whenever|cancel\w*|stop\w*|without|given|providing|presum\w*|should|subject|contingent|barring|iff|days?|noon|midnight|cob|end|eventually|sometime|morning|afternoon|evening|tomorrow|tonight|minutes?|mins?|hours?|hrs?|maybe|perhaps|probably|possibly|might|guess|think|unsure|idk|dunno|hmm+|or|myself|into|conflicts?|revert\w*|reject\w*|refus\w*|block\w*|skip\w*|abort\w*|den(?:y|ied)|declin\w*|provided|assuming|pending|long|soon|bit|while|moment|secs?|seconds?|next|then|eod|tmrw?|weeks?|weekends?|months?|mon(?:day)?|tue(?:s|sday)?|wed(?:nesday)?|thu(?:rs|rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec|wants?|ready|step|will|plan|todo|option|agent|main|mainline|master|trunk|develop|development|dev|staging|release|prod|production|stable|default|upstream|origin|base|broke|broken|clos\w*|fix\w*|resolv\w*|i'll|we'll|you'll|says?|said|reply|type|wrote|summary|merged|merging)\b|\d\s*(?:am|pm)\b|\b\d{1,2}:\d{2}\b|\b(?:on|upon|at)\s+(?:\w+\s+)?green\b|\d\s+green\s*[.!]?\s*$|\bat\s+\d{1,4}\b|\b\d{1,4}[.,]\d{1,4}\b/i;
 // A question: a question mark, "can we" or "may I" anywhere, or a line that opens like one.
 const QUESTION = /\?|\b(?:can|may|could|shall)\s+(?:we|i)\b|^(?:should|shall|could(?!\s+you\b)|would(?!\s+you\b)|why|what|how|is|are|did|does|do\s+(?:we|you|i)|will|have|has|was|were)\b/i;
-const LIST_MARKER = /^\s*(?:[-*+\u2022]|\d{1,3}[.):]|[a-z][.)])\s+|^\s*(?:[-*+\u2022]|\d{1,3}[.):])\s*/i;
+// One list marker: a bullet, a checkbox, (1), 1. 1) 1: (not the start of a time such as 17:00), or a
+// letter marker followed by a space. Nested markers ("- 1. [x]") are stripped one at a time.
+const LIST_MARKER = /^\s*(?:[-*+\u2022]|\[[ x]?\]|\(\d{1,4}\)|\d{1,4}[.):](?!\d)|[a-z][.)](?=\s))\s*/i;
 const APPROVAL_URL = /(?:https?:\/\/)?(?:www\.)?github\.com\/([A-Za-z0-9._-]+\/[A-Za-z0-9._-]+)\/(?:pull|issues)\/(\d{1,6})\S*/gi;
 // The link itself, without the rest of its word, so a hold word glued to it ("…/622,later") is read.
 const APPROVAL_LINK = new RegExp(APPROVAL_URL.source.slice(0, -3), 'gi');
 // A quote: a line opened with ">", double quotes, backticks, angle or corner brackets, an ellipsis,
 // or a single quote at a word edge (apostrophes inside words, as in "622's", are fine).
-const QUOTED = /^>|["`<「」『』…]|\.\.\.|(?:^|\s)'|'(?=\s|$|[.,!;:])/;
+const QUOTED = /^>|["`<>「」『』…]|\.\.\.|(?:^|\s)'|'(?=\s|$|[.,!;:])/;
 const APPROVAL_SHA = /\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b/gi;
 // Named pull requests: owner/name#N or #N anywhere, and bare numbers right before or after "merge"
 // (a list such as "601, 605 and 609" included). Other numbers on the line are not read as pull
@@ -91,7 +93,7 @@ const NAMED = new RegExp(`(?:(${SLUG})#|#)(\\d{1,6})\\b`, 'g');
 const LIST_TAIL = '(?:(?:\\s*(?:,|&|\\band\\b)\\s*|\\s+)\\d{1,6}\\b(?!\\s*(?!and\\b|at\\b)[A-Za-z]))*';
 const COUNT_WORD = '(?!\\s*(?:commits?|branch(?:es)?|prs?|pull requests?|files?|issues?|changes?|conflicts?|lines?|times?|ways?|steps?)\\b)';
 const AFTER_MERGE = new RegExp(`\\bmerge\\s+(?:pr\\s+|pull request\\s+)?(\\d{1,6}\\b${COUNT_WORD}${LIST_TAIL})`, 'gi');
-const BEFORE_MERGE = new RegExp(`\\b(\\d{1,6})\\s+merge\\b(?!\\s*[A-Za-z])`, 'gi');
+const BEFORE_MERGE = new RegExp(`(?<![.:])\\b(\\d{1,6})\\s+merge\\b(?!\\s*[A-Za-z])`, 'gi');
 
 const GH_PR_MERGE = /\bgh(?:\.exe)?\s+pr\s+((?:(?:-R|--repo)(?:=|\s+)\S+\s+)*)merge\b([^\n;&|]*)/gi;
 const GH_API = /\bgh(?:\.exe)?\s+api\b([^\n;&|]*)/gi;
@@ -185,9 +187,12 @@ function normalise(text) {
 function approvalsIn(prompt) {
   const found = [];
   for (const raw of normalise(prompt).slice(0, MAX_PROMPT_CHARS).split(/\r?\n/)) {
-    const line = raw.replace(LIST_MARKER, '').trim();
+    let line = raw;
+    for (let strip = 0; strip < 5 && LIST_MARKER.test(line); strip += 1) line = line.replace(LIST_MARKER, '');
+    line = line.trim();
     // Words in a link or a repository name ("ai-agent-toolkit") are not read as hold words.
-    const words = line.replace(APPROVAL_LINK, ' ').replace(SLUG_NAME, ' ');
+    // Hold words are read on the whole line, list marker included, so "17:00 merge 618" is a delay.
+    const words = raw.replace(APPROVAL_LINK, ' ').replace(SLUG_NAME, ' ');
     if (line.length > MAX_APPROVAL_LINE || !/\bmerge\b/i.test(words) || HOLD_WORDS.test(words) || QUESTION.test(line) || QUOTED.test(raw.trim()) || QUOTED.test(line)) continue;
     const items = [...line.matchAll(APPROVAL_URL)].map(match => ({ repository: match[1], pr: Number(match[2]) }));
     let rest = line.replace(APPROVAL_URL, ' ');
