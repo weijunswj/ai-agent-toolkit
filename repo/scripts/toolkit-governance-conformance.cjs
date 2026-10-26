@@ -13,7 +13,7 @@
 // only), the dependency and security settings (toolkit-governance-security.cjs: Dependabot alerts,
 // security and version updates, secret scanning, push protection, CodeQL, private vulnerability
 // reporting, and auto-merge only where the binding allows it and the default branch is protected),
-// and whether prompt-hold enforcement is
+// whether the repository carries a current plain-text check, and whether prompt-hold enforcement is
 // active on each host. Enforcement never counts as active unless a host really runs the hook:
 // hosts without plugin hooks (cloud sessions, Claude Projects threads) and OpenCode are
 // `unsupported`.
@@ -113,6 +113,7 @@ function checkConformance(cwd, options = {}) {
     findings.push(finding('BINDING_INVALID', 'drift', `The programme binding is invalid: ${state.materials.binding_problems.join(', ')}.`));
   }
   if (state.materials.governed_block) findings.push(...governedBlockFindings(state.root, toolkitRoot));
+  if (state.state === 'ENABLED') findings.push(...plainTextFindings(state.root, toolkitRoot));
   let rulesetResult = null;
   if (state.state === 'ENABLED') {
     rulesetResult = options.offline === true
@@ -153,6 +154,30 @@ function rulesetFindings(result) {
   if (result.status === 'not-applicable') return [finding('RULESET_NOT_APPLICABLE', 'info', 'The no-force-push ruleset applies to GitHub repositories only; this one is hosted elsewhere.')];
   if (result.status === 'not-checked') return [finding('RULESET_NOT_CHECKED', 'unverified', 'The no-force-push ruleset was not checked (offline).')];
   return [];
+}
+
+// Every governed repository carries the plain-text check (secure-ci-cd), installed with the governed
+// materials through a pull request. The Toolkit source checkout runs it from source instead. A
+// repository may switch it off only with a recorded reason (`off_reason` in its settings).
+function plainTextFindings(repoRoot, toolkitRoot) {
+  if (fs.existsSync(path.join(repoRoot, 'skills', 'secure-ci-cd', 'scripts', 'plain-text-check.cjs'))
+    && fs.existsSync(path.join(repoRoot, 'repo', 'contracts', 'plain-references', 'config.json'))) return [];
+  let installer;
+  try { installer = require(path.join(toolkitRoot, 'skills', 'secure-ci-cd', 'scripts', 'install-plain-text-check.cjs')); }
+  catch { return [finding('PLAIN_TEXT_CHECK_NOT_CHECKED', 'info', 'This Toolkit copy has no plain-text check to compare with.')]; }
+  let settings = null;
+  try { settings = JSON.parse(fs.readFileSync(path.join(repoRoot, installer.CONFIG_PATH), 'utf8').replace(/^\uFEFF/, '')); }
+  catch (error) {
+    if (error && error.code === 'ENOENT') return [finding('PLAIN_TEXT_CHECK_MISSING', 'drift', 'This governed repository has no plain-text check (.github/plain-text.json). A rules refresh installs it through a pull request.')];
+    return [finding('PLAIN_TEXT_CHECK_DRIFT', 'drift', 'The plain-text check settings (.github/plain-text.json) could not be read; fix the file through a pull request.')];
+  }
+  if (settings && typeof settings.off_reason === 'string' && settings.off_reason.trim()) {
+    return [finding('PLAIN_TEXT_CHECK_OFF', 'info', `The plain-text check is switched off here, with a recorded reason: ${settings.off_reason.trim()}`)];
+  }
+  const problems = installer.drift(repoRoot);
+  return problems.length
+    ? [finding('PLAIN_TEXT_CHECK_DRIFT', 'drift', `The plain-text check is out of date (${problems.join('; ')}); a rules refresh updates it through a pull request.`)]
+    : [];
 }
 
 const PROTECTION_FINDINGS = Object.freeze({
