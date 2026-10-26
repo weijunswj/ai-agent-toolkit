@@ -11,7 +11,8 @@
 //                     one of them is known not to be the user typing, and records the run's session
 //                     mark, so a later process that resumes the session cannot answer.
 // The gate module loads inside the guarded path, so a missing or broken module still holds in a
-// repository instead of crashing; hooks.json also sets onFailure: "block" for the two blocking events.
+// repository instead of crashing; hooks.json also sets onFailure: "block" for prompts and for the
+// state-changing tools (STATE_CHANGING_TOOLS below).
 //
 // A cloud session (CLAUDE_CODE_REMOTE=true) is not enforced: its container has no lasting user
 // registry, so an answer there would be lost, and a write into the clone would show up in the
@@ -80,11 +81,19 @@ function respond(event, input, options = {}) {
 // The gate's never-act line, spelled out here because the gate module may be what failed to load.
 const NEVER_OWNER = 'Never act as the user: do not answer the governance question yourself, start a session or script to answer it, or click a confirmation through a UI or computer use.';
 
+// The tools that change something. A failed check holds them inside a repository; every other tool
+// (read-only ones, and the card, whose answer then counts for nothing without the tool gate's note)
+// is let through, as it was before the hook saw it. hooks.json matches the same split, with
+// onFailure: "block" only on this list, so a hook that cannot even start holds only these too.
+const STATE_CHANGING_TOOLS = /^(?:Bash|PowerShell|Monitor|Edit|Write|MultiEdit|NotebookEdit|Agent|Task|mcp__.*)$/;
+
 function failed(event, input, gate) {
+  // A failed PostToolUse records nothing, which leaves the repository waiting.
+  if (event === 'SessionStart' || event === 'PostToolUse') return {};
+  if (event === 'PreToolUse' && !STATE_CHANGING_TOOLS.test(String(input && input.tool_name || ''))) return {};
   let inside = true;
   try { inside = (gate || require('./toolkit-governance-gate.cjs')).insideRepository(input.cwd); } catch { inside = true; }
-  // A failed PostToolUse records nothing, which leaves the repository waiting.
-  if (!inside || event === 'SessionStart' || event === 'PostToolUse') return {};
+  if (!inside) return {};
   if (event === 'UserPromptSubmit') return { decision: 'block', reason: `Toolkit: the governance check failed, so your message was held and not sent. If this keeps happening, open Claude Code in a folder outside any git repository and say \`setup toolkit\` to repair the installed hooks. ${NEVER_OWNER}` };
   return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `Toolkit: the governance check failed, so nothing runs in this repository until it works again. ${NEVER_OWNER}` } };
 }
@@ -102,4 +111,4 @@ function main(argv = process.argv.slice(2), stdin = () => fs.readFileSync(0, 'ut
 
 if (require.main === module) process.exitCode = main();
 
-module.exports = Object.freeze({ EVENTS, CLOUD_LINE, NEVER_OWNER, exportHostSession, respond, main });
+module.exports = Object.freeze({ EVENTS, CLOUD_LINE, NEVER_OWNER, STATE_CHANGING_TOOLS, exportHostSession, respond, main });

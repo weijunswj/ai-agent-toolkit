@@ -697,7 +697,7 @@ function noMarkText(commands) {
 const RESUMED_LINE = 'Toolkit: this session was resumed, or another session started in this repository, so Toolkit asks again and your reply was held.';
 const MOVED_LINE = 'Toolkit: another session started in this repository since you said "later", so Toolkit asks again and your reply was held.';
 const LAUNCHED_HOLD_TEXT = `Toolkit: this repository is waiting for the user's governance answer, and this session was started by another session or a Toolkit launcher, so its message was not sent and not kept. The user answers in their own chat; start this again after that. ${NEVER_OWNER}`;
-const PICKER_UNCOUNTED = 'Toolkit governance: no answer was recorded from that card, and the repository is still waiting. End your turn now without using any other tool; the user can reply yes, no or later as a message.';
+const PICKER_UNCOUNTED = `Toolkit governance: no answer was recorded from that card, and the repository is still waiting. End your turn now without using any other tool; the user can reply yes, no or later as a message. ${NEVER_OWNER}`;
 
 function withAgentLine(text) { return `${text}\nFor agents: ${NEVER_OWNER_SHORT}`; }
 
@@ -798,6 +798,9 @@ class PromptHold {
     const questions = toolResponse && Array.isArray(toolResponse.questions) ? toolResponse.questions : [];
     if (!questions.some(question => question && question.question === PICKER_QUESTION)) return null;
     const noted = this.#notes.take(toolUseId);
+    // The card shown must still be exactly Toolkit's: options changed after the tool gate's check
+    // (relabelled, reordered) make the answer mean something else, so it counts for nothing.
+    if (!pickerInput({ questions })) return { context: PICKER_UNCOUNTED };
     const verdict = this.#gate.evaluate(cwd, { sessionId });
     if (!verdict.hold || verdict.reason !== 'undecided') return null;
     const marks = this.#marks(verdict, sessionId);
@@ -807,7 +810,7 @@ class PromptHold {
     const command = typeof label === 'string' && Object.hasOwn(PICKER_COMMANDS, label) ? PICKER_COMMANDS[label] : null;
     if (!counts || command === null) return { context: PICKER_UNCOUNTED };
     const result = this.#answer(cwd, command, verdict, sessionId, marks);
-    return { context: result.action === 'pass' ? result.context : `Tell the user this, word for word, then end your turn: ${result.reason}` };
+    return { context: result.action === 'pass' ? result.context : `Tell the user this, word for word, then end your turn: ${result.reason}${result.reason.endsWith(NEVER_OWNER) ? '' : `\n${NEVER_OWNER}`}` };
   }
 
   // The notice for a held message: the card where the host can show it to this run, else the text.

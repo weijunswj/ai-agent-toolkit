@@ -655,10 +655,27 @@ test('every governance refusal and hold an agent can see tells it never to act a
   texts['Codex hook failure, prompt'] = codexHook.PROMPT_FAILED;
   texts['tool with unreadable state'] = shell(repo, 'ls')?.deny;
   texts['session line, unreadable state'] = gate.sessionLine(repo, { registryOptions: ctx.options });
+  // The card's texts: a tap that does not count, and an answer that could not be recorded.
+  const cardRepo = gitRepo(ctx, 'card-texts', { remote: 'https://github.com/example-owner/card-texts.git' });
+  fs.rmSync(ctx.registryPath, { force: true });
+  const picker = new gate.PromptHold({ registryOptions: ctx.options, environment: {}, picker: true });
+  gate.startSession({ session_id: 'card', source: 'startup' }, { registryOptions: ctx.options });
+  picker.decide({ cwd: cardRepo, prompt: 'hello', sessionId: 'card' });
+  const tap = (id, label) => picker.picked({ cwd: cardRepo, sessionId: 'card', toolUseId: id, toolResponse: { questions: gate.PICKER_INPUT.questions, answers: { [gate.PICKER_QUESTION]: label } } }).context;
+  texts['card tap not counted'] = tap('never-noted', 'Yes');
+  const noted = tools(ctx).decide({ tool_name: 'AskUserQuestion', cwd: cardRepo, session_id: 'card', tool_use_id: 'noted', tool_input: gate.PICKER_INPUT });
+  assert.equal(noted, null);
+  const notNowPath = path.join(path.dirname(ctx.registryPath), gate.NOT_NOW_BASENAME);
+  fs.mkdirSync(notNowPath, { recursive: true });
+  texts['card answer not recorded'] = tap('noted', 'Later');
+  fs.rmSync(notNowPath, { recursive: true, force: true });
+  assert.match(texts['card answer not recorded'], /could not be saved/);
+  // Held-message notices end with the short line for agents; every other text with the whole line.
+  const notices = ['question', 'question, count', 'not-on-github.com notice', 'no mark', 'resumed'];
   for (const [name, text] of Object.entries(texts)) {
     assert.equal(typeof text, 'string', name);
-    // A held-message notice ends with the short form, everything else with the whole line.
-    assert.ok(text.endsWith(gate.NEVER_OWNER) || text.endsWith(`\n${AGENT_LINE}`), `${name}: ${text}`);
+    if (notices.includes(name)) assert.ok(text.endsWith(`\n${AGENT_LINE}`), `${name}: ${text}`);
+    else assert.ok(text.endsWith(gate.NEVER_OWNER), `${name}: ${text}`);
   }
 });
 
@@ -1442,10 +1459,23 @@ test('hook wiring: both Claude copies hold prompts and tools with onFailure bloc
     const prompt = hooks.UserPromptSubmit[0].hooks[0];
     assert.equal(prompt.command, 'node "${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-governance-hook.cjs" --event UserPromptSubmit', file);
     assert.equal(prompt.onFailure, 'block');
-    const tool = hooks.PreToolUse.find(entry => entry.hooks[0].command.includes('toolkit-governance-hook.cjs'));
+    const [tool, rest, ...others] = hooks.PreToolUse.filter(entry => entry.hooks[0].command.includes('toolkit-governance-hook.cjs'));
+    assert.deepEqual(others, [], file);
+    for (const entry of [tool, rest]) assert.equal(entry.hooks[0].command, 'node "${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-governance-hook.cjs" --event PreToolUse', file);
+    // Every tool goes to the hook: a held repository runs none but the card, read-only ones included.
+    // A hook that cannot start holds only the state-changing tools (onFailure block); the rest pass.
     assert.equal(tool.hooks[0].onFailure, 'block');
-    // Every tool: a held repository runs none but the card, read-only ones included.
-    assert.equal(tool.matcher, '*', file);
+    assert.equal(rest.hooks[0].onFailure, undefined);
+    assert.equal(tool.matcher, `^${claudeHook.STATE_CHANGING_TOOLS.source.slice(1, -1)}$`, file);
+    // Claude Code tests a matcher with these characters as an unanchored regex, so each carries its own anchors.
+    for (const name of ['Bash', 'PowerShell', 'Monitor', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'Agent', 'Task', 'mcp__github__create_pull_request']) {
+      assert.match(name, new RegExp(tool.matcher), name);
+      assert.doesNotMatch(name, new RegExp(rest.matcher), name);
+    }
+    for (const name of ['Read', 'Grep', 'Glob', 'WebFetch', 'TodoWrite', 'ToolSearch', 'AskUserQuestion', 'BashOutput', 'Skill', 'TaskCreate']) {
+      assert.doesNotMatch(name, new RegExp(tool.matcher), name);
+      assert.match(name, new RegExp(rest.matcher), name);
+    }
     // The answer tapped on the card is read after the tool runs.
     const picked = hooks.PostToolUse.find(entry => entry.hooks[0].command.includes('toolkit-governance-hook.cjs'));
     assert.equal(picked.matcher, '^AskUserQuestion$', file);
@@ -1544,6 +1574,15 @@ test('card: only the exact card, with no answer filled in by the caller, runs in
   assert.ok(c.ask(repo, undefined, 'tu-x')?.deny);
   assert.ok(c.ask(repo, 'unnoted', 'tu-y')?.deny);
   assert.ok(c.ask(repo, 's1', undefined)?.deny);
+  // The card is only for the github.com question: not on github.com, or an unreadable state, refuses it.
+  const gitlab = gitRepo(ctx, 'gitlab', { remote: 'https://gitlab.com/example-owner/example-repo.git' });
+  c.send(gitlab, 'go', 's1');
+  assert.match(c.ask(gitlab, 's1', 'tu-gitlab')?.deny || '', /runs only as Toolkit's own card/);
+  fs.mkdirSync(path.dirname(ctx.registryPath), { recursive: true });
+  fs.writeFileSync(ctx.registryPath, '{ not json');
+  assert.match(c.ask(repo, 's1', 'tu-unreadable')?.deny || '', /runs only as Toolkit's own card/);
+  fs.rmSync(ctx.registryPath, { force: true });
+  for (const id of ['tu-gitlab', 'tu-unreadable']) assert.match(c.tap(repo, 's1', id, 'Yes').context, /no answer was recorded/, id);
   // Outside a held repository the tool is not Toolkit's business.
   const decided = gitRepo(ctx, 'decided', { remote: 'https://github.com/example-owner/decided.git' });
   gate.writeGovernanceDecision(decided, 'enable', { registryOptions: ctx.options });
@@ -1597,6 +1636,15 @@ test('card: an answer counts only from the card the gate noted, once, in the run
   c.start('s1', 'resume', repo);
   assert.match(c.tap(repo, 's1', 'tu-resumed', 'Yes').context, /no answer was recorded/);
   assert.equal(stateOf(ctx, repo).state, 'UNDECIDED');
+  // Options changed after the tool gate's check (relabelled or reordered) count for nothing.
+  const changed = new gate.PromptHold({ registryOptions: ctx.options, environment: {}, picker: true });
+  for (const [id, edit] of [['tu-relabelled', q => { q.options[1].label = 'Yes'; q.options[0].label = 'No'; }], ['tu-reordered', q => q.options.reverse()], ['tu-extra', q => { q.options[0].preview = 'x'; }]]) {
+    assert.equal(c.ask(repo, 's1', id), null);
+    const questions = clone(gate.PICKER_INPUT.questions);
+    edit(questions[0]);
+    assert.match(changed.picked({ cwd: repo, sessionId: 's1', toolUseId: id, toolResponse: { questions, answers: { [gate.PICKER_QUESTION]: 'Yes' } } }).context, /no answer was recorded/, id);
+  }
+  assert.equal(stateOf(ctx, repo).state, 'UNDECIDED');
   // A card that is not Toolkit's is left alone.
   assert.equal(new gate.PromptHold({ registryOptions: ctx.options, environment: {}, picker: true }).picked({ cwd: repo, sessionId: 's1', toolUseId: 'tu-q', toolResponse: { questions: [{ question: 'Pick a colour?' }], answers: { 'Pick a colour?': 'Red' } } }), null);
   // The resumed run is asked again, and its typed answer (or its own card) then counts.
@@ -1632,6 +1680,36 @@ test('card: a typed answer still works after the card was shown, and the Claude 
   assert.match(tapped.hookSpecificOutput.additionalContext, /now DISABLED[\s\S]*1\. fix it/);
   assert.equal(governance.governanceState(repo, { registryPath: path.join(home, '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json'), testOnly: true }).state, 'DISABLED');
   assert.deepEqual(run('PostToolUse', { cwd: repo, session_id: 'h1', tool_name: 'Bash', tool_response: {} }), {});
+});
+
+test('a hook that fails holds only state-changing tools inside a repository; read-only tools and the card pass everywhere', (t) => {
+  const ctx = scratch(t);
+  const repo = gitRepo(ctx, 'repo');
+  const outside = path.join(ctx.root, 'outside');
+  fs.mkdirSync(outside);
+  const environment = {};
+  const thrower = class { constructor() { throw new Error('broken'); } };
+  for (const gateModule of [
+    { PromptHold: thrower, ToolGate: thrower, sessionLine() { throw new Error('broken'); }, insideRepository: gate.insideRepository },
+    { PromptHold: thrower, ToolGate: thrower, insideRepository() { throw new Error('broken'); } },
+  ]) {
+    const respond = (cwd, tool_name) => claudeHook.respond('PreToolUse', { cwd, tool_name, tool_input: {} }, { gate: gateModule, environment });
+    for (const tool_name of ['Bash', 'Edit', 'Agent', 'mcp__github__create_pull_request']) {
+      assert.equal(respond(repo, tool_name).hookSpecificOutput.permissionDecision, 'deny', tool_name);
+    }
+    for (const tool_name of ['Read', 'Grep', 'Glob', 'WebFetch', 'AskUserQuestion', 'ToolSearch']) {
+      assert.deepEqual(respond(repo, tool_name), {}, tool_name);
+      assert.deepEqual(respond(outside, tool_name), {}, `${tool_name} outside`);
+    }
+    assert.deepEqual(claudeHook.respond('PostToolUse', { cwd: repo, tool_name: 'AskUserQuestion' }, { gate: gateModule, environment }), {});
+  }
+  // A failed check never answers: a card let through without the tool gate's note records nothing.
+  const c = card(ctx);
+  c.start('s1');
+  c.send(repo, 'go', 's1');
+  assert.match(c.tap(repo, 's1', 'tu-unchecked', 'Yes').context, /no answer was recorded/);
+  assert.equal(stateOf(ctx, repo).state, 'UNDECIDED');
+  assert.ok(claudeHook.STATE_CHANGING_TOOLS.test('Bash') && !claudeHook.STATE_CHANGING_TOOLS.test('Read'));
 });
 
 test('H-16: decided and no-repository folders add only local reads', (t) => {
