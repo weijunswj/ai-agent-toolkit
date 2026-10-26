@@ -168,6 +168,10 @@ test('Projects keeps its Toolkit base layer current without touching the project
   // Coordinator posts, in the main project chat and reply threads alike.
   assert.match(text, /\*\*Posts, everywhere you post\*\* \(the main project chat and reply threads alike\): after the owner's last message, keep all your output in one running post and edit it, appending each new result, PR or question and keeping every earlier detail\. The running post is always your newest top-level post, the acknowledgement posted with a new thread included\. Before every edit, check whether the owner has written in the main project chat since that post; if so, post fresh instead\. Start each appended update with its local time, for example \*\*\[16:41\] Update:\*\*\. Also start a fresh post when the running post nears about 8 KB; an owner message inside a thread does not start one, and the reply to it is appended to the running post\. Answer a burst of owner messages in one post\. When the owner replies under one of your earlier posts in the main project chat, answer in the main project chat \(you cannot post under your own posts there\) with a fresh post starting "Re: your reply on <short topic>", and never edit the older post\./);
   assert.doesNotMatch(text + body, /is always a new post|edit your own post only/);
+  // Running post id in memory, links on everything named, both enforced by the post hook.
+  assert.ok(text.includes('save its message id as the first line of project memory, `RUNNING POST: <message id>`'));
+  assert.ok(text.includes('it refuses a fresh post while the owner has not written since your newest post, unless that post nears 8 KB'));
+  assert.ok(text.includes('only when it is ready for the owner to check and merge; until then, link the chat thread that owns the work'));
   assert.match(text, /also post a one-line pointer to it in top-level project chat/);
   // Base layer and project layer.
   assert.match(text, /Project instructions start with the managed block \(only blank lines before it\)/);

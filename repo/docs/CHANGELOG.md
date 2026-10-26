@@ -1,5 +1,11 @@
 # Toolkit Changelog
 
+## 3.15.3
+
+### Projects skill
+
+- **Running post and links enforced:** a new Toolkit hook runs before every Claude Projects post, in the coordinator and in work threads. It refuses a fresh post while the owner has not written since that session's newest post (unless that post nears 8 KB) and tells it to edit that post instead, and it refuses any post that names "PR <n>" without a link. It reads the session's own transcript, so the rule survives a context reset. Replies under a post are exempt from the fresh-post check but still need their links, decision cards are not checked, and sessions without the Claude Projects post tools never see it. Every PR in a list needs its own link. The skill now also has the coordinator keep its running post id as the first memory line, and links every PR, thread, file or artifact it names: a PR's changed files only once it is ready for the owner to check and merge, otherwise the chat thread that owns it. Briefs tell work threads to keep one running post with one-line updates. The hourly nudge flags back-to-back posts, a stale running post id and missing links. The Claude Projects controller skill is 2026-10-26.2 (save the new skill card).
+
 ## 3.15.2
 
 ### Claude Projects
