@@ -4,7 +4,7 @@ description: "Use when running as a Claude Projects coordinator and the user app
 ---
 
 # Web Controller for Claude Projects
-Version: 2026-10-25.9
+Version: 2026-10-26.1
 
 Run Toolkit repos through Claude Projects. The global rules and coding gates apply in every project; GitHub governance (parent and child issues, records, decision traces, evidence custody) applies only to a github.com repo whose governance state is ENABLED. Keep project facts (repos, devices, lanes, pending work) in project memory; durable work state lives in the branch, the PR and the programme comments or evidence store, mirrored in memory, never only there.
 
@@ -92,6 +92,7 @@ Whenever the user asks for anything recurring (the daily check-in, a sweep, a re
 - Only two project memory lines are Toolkit's to rewrite: `BINDING:` (**Binding**) and `SCHEDULED TASKS:`. Trigger ids live only on that line, never in a prompt.
 - **Stopped by owner:** a task whose `SCHEDULED TASKS:` entry says `stopped by owner` is outside every automatic path in this skill, its references and task prompts: never re-arm, update, swap, rebuild or recreate it, or report it missing. Only the owner restarts it, and the restart removes the mark.
 - When a recurring task replaces an older one, delete the older one so the user isn't sent two.
+- **Moving a task or catching up:** a move to a time already passed today skips today's run, so catch it up the same turn by messaging its home thread to run its prompt; never fire_trigger a bound task from another thread (it runs with no project tools, files or memory). Details in `reference/recurring-tasks.md`.
 - On every coordinator turn, check that each recurring task is still armed with a future next run; re-arm a missed one before ending the turn, unless its entry says `stopped by owner`.
 - When a skill update changes what the daily check-in or hourly nudge does, update those tasks' prompts in the same turn (the swap above) and confirm each next run is armed, skipping a task whose entry says `stopped by owner`.
 
@@ -119,7 +120,7 @@ Whenever the user asks for anything recurring (the daily check-in, a sweep, a re
 - **It is bound to its own home thread,** because a fresh-session task posts a run card in project chat every run. Start a thread named `<PROJECT>: Hourly nudge`; that thread creates the task bound to itself (a task fires into the session that creates it), fires it once and reports the trigger id. Guards:
   - Never resolve the home thread or list it as a resolve candidate; the nudge never resolves it either.
   - Each run is self-contained (it re-reads memory and files) and replies in one line when nothing changed.
-  - The daily check-in reports NUDGE NOT ARMED when it missed its latest scheduled hour by over 65 minutes or its home thread is resolved, and TASKS OUTDATED `weekly-rebuild` once the home thread is a week old. A run of either bound task (the nudge or the check-in) that reports `CONTEXT RESET DUE` asks for a rebuild of that task: new home thread and task, test run, then delete the old task. Note each rebuild in memory. None of this applies once its entry says `stopped by owner`.
+  - The daily check-in reports NUDGE NOT ARMED when its last run is over 65 minutes older than the latest time its own cron fired (hours outside its waking window never count; a nudge that fires less often uses its interval plus 5 minutes) or its home thread is resolved, and TASKS OUTDATED `weekly-rebuild` once the home thread is a week old. A run of either bound task (the nudge or the check-in) that reports `CONTEXT RESET DUE` asks for a rebuild of that task: new home thread and task, test run, then delete the old task. Note each rebuild in memory. None of this applies once its entry says `stopped by owner`.
   - For a template update (never for a nudge marked `stopped by owner`), ask the home thread to update its own task's prompt, then read it back with `get_trigger` and `--check`; if that fails, rebuild.
   - If the bound nudge dies twice in 7 days, switch that project to a fresh-session nudge every 2 hours (rendered with `session` `fresh`, its entry saying fresh) and tell the owner; never for a nudge marked `stopped by owner`.
 - It fires hourly in the user's waking hours only, at a jittered minute (pick one at random, not :00 or :30, for example `CRON_TZ=<user zone> 23 8-23 * * *`), on a small model (for example Haiku), and it is read-only apart from its programme sweep step, which brings the programme pages up to date. It does the cheap checks first and stops there, in one line, when nothing changed since its last run.

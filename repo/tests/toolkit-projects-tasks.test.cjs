@@ -420,3 +420,26 @@ test('every line that re-arms, updates, swaps, rebuilds, recreates or sets up a 
   assert.match(fs.readFileSync(path.join(dir, 'reference', 'recurring-tasks.md'), 'utf8'), /When the owner restarts it, remove the mark\./);
   assert.match(fs.readFileSync(path.join(dir, 'reference', 'recurring-tasks.md'), 'utf8'), /--refresh <kind> <old prompt file> --session <bound\|fresh>` keeps the params and project text and always names the session the replacement runs in/);
 });
+
+// A run that starts outside its home thread (for example fire_trigger from another thread) has no
+// project tools or files: its first RUN SETUP step stops it with one line, in every kind and session.
+test('every rendered task stops first when it started outside its home thread', () => {
+  const guard = '- First check, before anything else: if this turn has no mcp__hearthbot__ tools or cannot read /mnt/project-files/, it started outside its home thread or project. Reply with one line, "skipped: started outside its home thread", write nothing and stop.';
+  for (const kind of Object.keys(PARAMS)) {
+    for (const session of [undefined, 'fresh']) {
+      const text = tasks().render(kind, validateParams(kind, { ...PARAMS[kind], ...(session ? { session } : {}) }), kind === 'custom' ? OWN_TEXT : undefined);
+      const lines = text.split('\n');
+      const heading = lines.findIndex(line => line.startsWith('RUN SETUP ('));
+      assert.ok(heading > -1, `${kind} ${session || 'bound'}`);
+      assert.equal(lines[heading + 1], guard, `${kind} ${session || 'bound'}`);
+    }
+  }
+});
+
+// The nudge's due time comes from its own cron, so waking-hours gaps and slower nudges are not late.
+test('the check-in reads the nudge due time from its own cron', () => {
+  const text = rendered('daily-check-in');
+  for (const required of ['the newest time at or before now when the cron fires', 'hours outside its waking window never count', 'use its interval plus 5 minutes instead of 65 minutes']) {
+    assert.ok(text.includes(required), required);
+  }
+});
