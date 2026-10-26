@@ -55,18 +55,24 @@ test('Projects wires managed instructions, promises and fresh scheduled sessions
   // The check-in posts the skill card itself; the coordinator lists the Save tap, re-upload only when the card failed.
   assert.match(text, /`SKILL BEHIND`: the account copy is an older Toolkit revision\. With "card posted", the check-in posted the skill update card in its thread: put "tap Save on the skill card"/);
   assert.match(text, /keep that thread open \(never resolve it in the hourly pass, even after the check-in moves to a new home thread\) until the owner saves/);
-  assert.match(text, /Once a check-in shows the account copy current, drop the pending item and resolve the thread unless it is a current home thread\. Do the same for an older card when a newer card is posted, when the owner declines it, or when a check-in reports SKILL DRIFT or no account copy: its Save would install an older Version or overwrite direct edits\. Name the Version in each Save item\./);
+  assert.match(text, /Once a check-in shows the account copy current, drop the pending item and resolve the thread unless it is a current home thread\. Do the same for an older card when a newer card is posted, when the owner declines it, or when a check-in reports SKILL DRIFT or no account copy: its Save would install an older Version or overwrite direct edits; for a chat card, post "Don't save the <Version> card above\." Name the Version in each Save item\./);
   assert.match(text, /the coordinator resolves a check-in run thread that holds a skill card once `SKILL BEHIND` \(\*\*Daily check-in\*\*\) releases it\./);
-  assert.match(text, /With "card failed", or with neither, tell the owner once per Version to re-upload the skill with its reference files\./);
+  assert.match(text, /If you could not post a due card, or with neither marker and no "drift unverified", tell the owner once per Version to re-upload the skill with its reference files\./);
   assert.match(text, /Fresh-session scheduled runs resolve their own run thread after delivery, except a check-in run that posted a skill card;/);
   assert.match(text, /each fresh scheduled run resolves its own thread after report delivery, except a check-in run that posted a skill card\./);
   // Plugin lag: removing the plugin alone is the fix that worked; the marketplace re-add is the fallback.
   assert.match(text, /`PLUGIN BEHIND`: the Toolkit plugin on the user's claude\.ai account is more than a day behind `main`/);
+  // One card each where the owner reads: the coordinator posts a due or failed skill card in the project chat, and one plugin card.
+  assert.match(text, /With "card due" or "card failed", load propose_skills \(ToolSearch\) and post the card yourself in the project chat \(kind improvement, target and name web-controller-projects, description from main's frontmatter; skillMd main's SKILL\.md read byte for byte\), never with SKILL DRIFT, and link it in the pending item\./);
+  assert.match(text, /On "card posted", if propose_skills loads for you, add memory line `skill cards: coordinator` so the check-in writes "card due" next time; remove it if a post fails\./);
+  assert.match(text, /No agent can update it: once per version, post one plugin card in the project chat with the check-in's steps/);
+  assert.match(text, /Keep it pending until a check-in shows `\*\*Plugin:\*\* current`\./);
+  assert.match(text, /Only the account skill \(one Save tap\) and plugin \(two clicks\) need the owner: no agent can write them\./);
   // The skill drift watch lives in the daily check-in: direct account edits come back into Toolkit first.
   assert.match(text, /`SKILL DRIFT`: the account copy has direct edits that match no Toolkit revision\. Bring them into Toolkit from the saved copy/);
   assert.match(text, /Post its first line to the owner every run, "nothing changed" included/);
   assert.match(text, /The hourly nudge stays silent/);
-  assert.match(text, /remove the Toolkit plugin only in claude\.ai Customize > Plugins and let it reinstall; if it is still behind, remove the marketplace and add it again with Sync automatically on/);
+  assert.match(text, /in claude\.ai Customize > Plugins, remove the Toolkit plugin only and let it reinstall; if it is still behind, select Check for updates on its marketplace; last, remove the marketplace and add it again with Sync automatically on/);
   assert.doesNotMatch(text, /Thread effort follows the role|fires into that same thread|firing runs in the dedicated check-in thread/);
   assert.match(text, /toolkit-projects-instructions\.cjs --render/);
   assert.match(text, /toolkit-projects-instructions\.cjs --check <file>/);
