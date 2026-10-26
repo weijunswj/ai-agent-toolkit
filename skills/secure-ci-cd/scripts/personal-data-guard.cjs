@@ -1096,7 +1096,8 @@ class PersonalDataGuard {
         const at = finding.line ? `:${finding.line}:${finding.column}` : '';
         lines.push(`  ${finding.place}${at}  ${finding.class}  ${finding.rule}`);
       }
-      lines.push(...remedy(where));
+      const textOnly = this.#findings.every((finding) => /^pull request (?:title|body)$/.test(finding.place));
+      lines.push(...remedy(textOnly && where === 'remote' ? 'pr-text' : where));
       lines.push('Result: BLOCKED');
     } else {
       lines.push('Result: PASS');
@@ -1111,6 +1112,14 @@ function remedy(where) {
       'Next: remove the value (or replace it with a reserved fake such as name@example.com) and try again.',
       'A synthetic test value can be built at runtime instead of written literally. A public role address can',
       'go in the config allow list; anything else needs an inline "personal-data-guard: allow <reason>" marker.',
+    ];
+  }
+  if (where === 'pr-text') {
+    return [
+      'These are in the pull request title or body, not in a commit. Next: edit the title or body to remove them;',
+      'the check runs again on the edit. GitHub keeps earlier body versions in the edit history, which the owner',
+      'can delete: tell the owner if one held personal data. Text that has to quote a shape needs an inline',
+      '"personal-data-guard: allow <reason>" marker on that line.',
     ];
   }
   if (where === 'tree') {

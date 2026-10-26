@@ -511,6 +511,8 @@ test('A pr: home paths and AI attribution in the title or body block, without ec
   result = pr(`Fix ${prText.windowsHome(account)}`, 'Body');
   assert.equal(result.status, 1, result.all);
   assert.match(result.all, /pull request title:1:5 {2}home-path {2}PDG-HOME-PATH/);
+  assert.match(result.all, /not in a commit\. Next: edit the title or body/);
+  assert.doesNotMatch(result.all, /These commits are already on GitHub/);
   assertNoAccountEcho(result.all, account, 'title path');
 
   for (const [label, eol] of [['LF', '\n'], ['CRLF', '\r\n'], ['CR', '\r']]) {
