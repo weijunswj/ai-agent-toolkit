@@ -9,7 +9,7 @@ const { spawnSync } = require('node:child_process');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const HOOK = path.join(ROOT, 'repo', 'scripts', 'toolkit-claude-project-post-hook.cjs');
-const { decide, linkIssue, NEAR_LIMIT_BYTES } = require('../scripts/toolkit-claude-project-post-hook.cjs');
+const { decide, linkIssue, wordingIssue, layoutIssue, editIssue, mergeTarget, NEAR_LIMIT_BYTES } = require('../scripts/toolkit-claude-project-post-hook.cjs');
 
 const POST = 'mcp__hearthbot__post_message';
 const EDIT = 'mcp__hearthbot__edit_message';
@@ -101,10 +101,10 @@ test('the hook is for Claude Projects only: other tools, other servers and other
   for (const tool of ['Bash', 'Write', 'mcp__slack__post_message', 'mcp__github__add_issue_comment', 'post_message', 'mcp__hearthbot__request_decision', 'mcp__hearthbot__update_progress_checklist']) {
     assert.equal(decide({ tool_name: tool, transcript_path: 't', tool_input: { text: 'PR 5 merged', command: 'PR 5' } }, transcript), '', tool);
   }
-  // Only the Claude Code plugin registers it, and only on the Projects post tools; Codex hooks never name it.
+  // Only the Claude Code plugin registers it, on the Projects post tools and the merge commands; Codex hooks never name it.
   const claudeHooks = JSON.parse(fs.readFileSync(path.join(ROOT, '.claude-plugin', 'hooks', 'hooks.json'), 'utf8'));
   const entries = claudeHooks.hooks.PreToolUse.filter(entry => entry.hooks.some(hook => /toolkit-claude-project-post-hook/.test(hook.command)));
-  assert.deepEqual(entries.map(entry => entry.matcher), ['^mcp__hearthbot__(?:post_message|edit_message)$']);
+  assert.deepEqual(entries.map(entry => entry.matcher), ['^(?:mcp__hearthbot__(?:post_message|edit_message)|Bash|PowerShell|mcp__.*merge_pull_request)$']);
   for (const other of ['.codex-plugin/hooks/hooks.json', 'repo/contracts/toolkit-local-bridge/codex-plugin/hooks/hooks.json']) {
     assert.doesNotMatch(fs.readFileSync(path.join(ROOT, other), 'utf8'), /project-post-hook/, other);
   }
@@ -187,4 +187,88 @@ test('guards hold: failed posts, size in bytes, the 8 KB escape and quoted owner
   // A wake with an image arrives as an image block, then the wake text.
   const withImage = { type: 'attachment', attachment: { type: 'queued_command', prompt: [{ type: 'image', source: {} }, { type: 'text', text: '<wake><message from="human">see</message></wake>' }] } };
   assert.equal(post([call(POST, { text: 'First.' }), withImage]), '');
+});
+
+// A post in the approved layout, long enough that the layout applies.
+const LAID_OUT = [
+  '**Now:** the hook build is in review and CI is green on the branch head.',
+  '- **[09:41] Update:** built the layout checks and their tests.',
+  '- **[09:52] Update:** opened the pull request and CI passed.',
+  '**Waiting on you (1):**',
+  '1. Merge OK for the hook: [card](#cmsg_CARD)',
+  '**ELI5:** The rule checker is built and waiting for your OK.',
+].join('\n');
+
+test('wording: no em-dashes or arrows outside code, and one Question per post, replies included', () => {
+  assert.match(wordingIssue('Done — next.'), /em-dash/);
+  assert.match(wordingIssue('Build -> review.'), /arrow/);
+  assert.match(wordingIssue('Build → review.'), /arrow/);
+  assert.equal(wordingIssue('Run `a -> b` and\n```\nx — y\n```\n<!-- note -->'), '');
+  assert.equal(wordingIssue('Build, then review. A short-lived branch.'), '');
+  assert.match(wordingIssue('**Question:** a?\n**Question:** b?'), /more than one/);
+  assert.equal(wordingIssue('**Question:** merge it?'), '');
+  const reply = decide({ tool_name: POST, transcript_path: 't', tool_input: { thread_id: 'cmsg_T', text: 'Yes — done.' } }, () => lines([wake()]));
+  assert.match(reply, /post wording/);
+  assert.match(post([wake()], 'Done — next.'), /post wording/);
+});
+
+test('layout: Now first, ELI5 last and alone, Update lines without questions, Waiting items linked', () => {
+  assert.equal(layoutIssue(LAID_OUT), '');
+  assert.equal(post([wake()], LAID_OUT), '');
+  // Short posts are exempt; a long one without the layout is refused.
+  assert.equal(layoutIssue('Got it, on it now.'), '');
+  const long = 'The plan is approved and a fresh session builds the hook next, so this thread is finished and you will get a merge card from that session.';
+  assert.match(layoutIssue(long), /\*\*Now:\*\*/);
+  assert.match(post([wake()], long), /post layout/);
+  assert.equal(layoutIssue(`Re: your reply on the hook\n${LAID_OUT}`), '');
+  assert.match(layoutIssue(`${LAID_OUT}\nOne more thing.`), /ELI5/);
+  assert.match(layoutIssue(`${LAID_OUT}\n**ELI5:** again.`), /exactly one/);
+  assert.match(layoutIssue(LAID_OUT.replace('**ELI5:** The rule checker is built and waiting for your OK.', '')), /ELI5/);
+  // Even a short post with an Update line uses the layout.
+  assert.match(layoutIssue('- **[09:41] Update:** built it.'), /\*\*Now:\*\*/);
+  assert.match(layoutIssue(LAID_OUT.replace('CI passed.', 'CI passed. Question: merge it? 1. merge 2. hold')), /question or numbered options/);
+  assert.match(layoutIssue(LAID_OUT.replace('CI passed.', 'CI passed, merge it? 1. merge 2. hold')), /numbered options/);
+  assert.match(layoutIssue(LAID_OUT.replace('[card](#cmsg_CARD)', 'the card')), /Waiting on you item .* has no link/);
+  assert.equal(layoutIssue(LAID_OUT.replace('[card](#cmsg_CARD)', 'https://github.com/o/r/pull/7/files')), '');
+  // Replies under a post keep only the wording and link rules.
+  const reply = decide({ tool_name: POST, transcript_path: 't', tool_input: { thread_id: 'cmsg_T', text: long } }, () => lines([wake()]));
+  assert.equal(reply, '');
+});
+
+test('edits keep every earlier Update line word for word and add a new one', () => {
+  const earlier = LAID_OUT.split('\n').filter(line => !line.includes('09:52')).join('\n');
+  assert.equal(editIssue(earlier, LAID_OUT), '');
+  assert.match(editIssue(LAID_OUT, LAID_OUT), /no new/);
+  assert.match(editIssue(LAID_OUT, LAID_OUT.replace('built the layout', 'wrote the layout')), /drops or changes .*built the layout/);
+  // Through the hook: the edited post's text comes from the transcript; replies and unknown posts are not checked.
+  const edit = (entries, text) => decide({ tool_name: EDIT, transcript_path: 't', tool_input: { message_id: 'cmsg_A1', text } }, () => lines(entries));
+  assert.equal(edit([wake(), call(POST, { text: earlier })], LAID_OUT), '');
+  assert.match(edit([wake(), call(POST, { text: LAID_OUT })], LAID_OUT), /post layout.*no new/);
+  assert.match(edit([wake(), call(POST, { text: 'On it.' })], 'Done.'), /no new/);
+  // A later edit is compared with the newest text, not the first.
+  assert.match(edit([wake(), call(POST, { text: earlier }), call(EDIT, { message_id: 'cmsg_A1', text: LAID_OUT }, 'ok')], LAID_OUT), /no new/);
+  assert.equal(edit([wake(), call(POST, { thread_id: 'cmsg_T', text: 'Reply.' })], 'Reply, fixed.'), '');
+  assert.equal(edit([wake()], 'Fixed.'), '');
+});
+
+test('merges in a Projects session need an earlier post with the PR\'s external effects', () => {
+  assert.deepEqual(mergeTarget('Bash', { command: 'gh pr merge 628 --merge' }), { number: '628' });
+  assert.deepEqual(mergeTarget('PowerShell', { command: 'cd x; gh pr merge https://github.com/o/r/pull/9 --merge' }), { number: '9' });
+  assert.deepEqual(mergeTarget('Bash', { command: 'gh pr merge --merge' }), { number: null });
+  assert.deepEqual(mergeTarget('Bash', { command: 'gh api -X PUT repos/o/r/pulls/12/merge' }), { number: '12' });
+  assert.deepEqual(mergeTarget('mcp__github__merge_pull_request', { owner: 'o', repo: 'r', pull_number: 5 }), { number: '5' });
+  for (const command of ['git merge origin/main', 'git commit -m "then gh pr merge 5"', 'gh pr view 5', 'echo gh pr merge 5']) {
+    assert.equal(mergeTarget('Bash', { command }), null, command);
+  }
+  const merge = (entries, command = 'gh pr merge 628 --merge') => decide({ tool_name: 'Bash', transcript_path: 't', tool_input: { command } }, () => lines(entries));
+  assert.match(merge([wake(), call(POST, { text: 'On it.' })]), /external effects of PR 628/);
+  assert.equal(merge([wake(), call(POST, { text: 'External effects of [PR 628](https://github.com/o/r/pull/628/files): a new hook.' })]), '');
+  // The summary may arrive in an edit of the running post, and must name the PR being merged.
+  assert.equal(merge([wake(), call(POST, { text: 'On it.' }), call(EDIT, { message_id: 'cmsg_A1', text: 'PR 628 external effects: none.' }, 'ok')]), '');
+  assert.match(merge([wake(), call(POST, { text: 'External effects of PR 627: none.' })]), /PR 628/);
+  assert.match(merge([wake(), call(POST, { text: 'External effects of PR 628: none.' }, 'error', true)]), /PR 628/);
+  assert.equal(merge([wake(), call(POST, { text: 'External effects: a new hook.' })], 'gh pr merge --merge'), '');
+  // Outside Projects (no Projects tool in the transcript), and for other commands, nothing is checked or read.
+  assert.equal(merge([wake()]), '');
+  assert.equal(decide({ tool_name: 'Bash', transcript_path: 't', tool_input: { command: 'npm test' } }, () => { throw new Error('read'); }), '');
 });

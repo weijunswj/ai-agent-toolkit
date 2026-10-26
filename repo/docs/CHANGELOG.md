@@ -1,5 +1,13 @@
 # Toolkit Changelog
 
+## Unreleased (post layout)
+
+### Projects skill
+
+- **Post layout enforced:** the Claude Projects post hook now also checks the approved post layout on top-level posts of about 25 words or more: a **Now:** line first, **[HH:MM] Update:** one-liners with no question or numbered options inside, every **Waiting on you** item linked to its card or thread, and one **ELI5:** line as the very last line. An edit of an earlier post must keep every Update line word for word and add at least one new one. Every post and reply is refused if it has an em-dash or an arrow outside code, or more than one **Question:**. Replies under a post keep only the wording and link checks.
+- **Merge summary before merge:** in a Projects session, a PR merge (`gh pr merge`, a `gh api` merge call or a merge tool) is refused until one of that session's own posts or edits says "external effects" and names the PR. Sessions outside Projects never see it.
+- The skill describes the layout in a new **Post layout** rule.
+
 ## 3.15.4 (final-product UAT)
 
 ### Coding gates

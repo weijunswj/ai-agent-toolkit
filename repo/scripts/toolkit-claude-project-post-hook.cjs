@@ -1,14 +1,23 @@
 #!/usr/bin/env node
 'use strict';
 
-// Claude Code PreToolUse hook for the Claude Projects post tools (post_message and edit_message). It enforces two
-// rules of the Projects skill from the session's own transcript, so they hold after the context is compacted:
+// Claude Code PreToolUse hook for the Claude Projects post tools (post_message and edit_message) and for PR merges. It
+// enforces these rules of the Projects skill from the session's own transcript, so they hold after the context is
+// compacted:
 // - One running post: the coordinator or a work thread may not start a fresh post while its newest post has no
 //   owner message after it, unless that post nears the 8 KB size limit. It must edit the running post instead. A
 //   reply under one of its posts (a post with a thread_id) is exempt from this rule and never becomes the running
 //   post; the link rule still applies to it.
 // - Links: every PR a post names, each number in a list included, must carry a link: link text on that number or a
 //   /pull/<n>/files link in the same text. A bare /pull/<n> link outside link text, without /files, is refused with the fix.
+// - Wording, on every post and reply: no em-dashes or arrows outside code, and at most one **Question:** block.
+// - Layout, on top-level posts of 25 words or more: a **Now:** line first (after an optional "Re: your reply on"
+//   line), **[HH:MM] Update:** one-liners with no question or numbered options inside, every item under
+//   **Waiting on you** carrying a link, and one **ELI5:** line as the very last line. An edit of an earlier post keeps
+//   every one of its Update lines word for word and adds at least one new one.
+// - Merge summary: in a Projects session (one that has used the Projects tools), a PR merge (gh pr merge, gh api
+//   .../pulls/<n>/merge or a merge_pull_request tool) is refused until one of its own posts named that PR's external
+//   effects.
 // Sessions without these tools (normal chats, Codex and sessions outside Projects) are never touched. Questions go
 // on decision cards, a separate tool this hook does not check. Input or a transcript it cannot read passes. The
 // hook is registered without `onFailure: "block"` so a hook that cannot start never silences every post.
@@ -16,8 +25,19 @@ const fs = require('node:fs');
 
 const POST_TOOL = 'mcp__hearthbot__post_message';
 const EDIT_TOOL = 'mcp__hearthbot__edit_message';
+const PROJECTS_TOOL = /^mcp__hearthbot__/;
+const SHELL_TOOL = /^(?:Bash|PowerShell)$/;
+const MERGE_TOOL = /^mcp__.*merge_pull_request$/i;
 const NEAR_LIMIT_BYTES = 7000;
+const SHORT_POST_WORDS = 25;
 const MESSAGE_ID = /\b(cmsg_[A-Za-z0-9]+)\b/;
+const UPDATE_LINE = /^\s*(?:[-*]\s+)?\*\*\[\d{1,2}:\d{2}\] Update:\*\*/;
+const WAITING_LINE = /^\s*(?:[-*]\s+)?\*\*Waiting on you\b/i;
+const ITEM_LINE = /^\s*(?:\d+[.)]|[-*])\s+/;
+const NOW_LINE = /^\s*\*\*Now:\*\*/;
+const REPLY_LINE = /^\s*Re: your reply on\b/i;
+const ELI5_LINE = /^\s*\*\*ELI5:\*\*/;
+const LINK = /\[[^\]]+\]\([^)\s]+\)|https?:\/\/\S+/;
 
 // An owner message counts unless it sits inside one of the quoting tags below (a message, note, citation, relay,
 // task notification or another session's output), so an owner tag quoted or forwarded inside one of them never counts.
@@ -43,8 +63,12 @@ function hasOwnerMessage(text) {
   return false;
 }
 
+function textOf(text) {
+  return typeof text === 'string' ? text : '';
+}
+
 function bytes(text) {
-  return Buffer.byteLength(typeof text === 'string' ? text : '', 'utf8');
+  return Buffer.byteLength(textOf(text), 'utf8');
 }
 
 // Text the user side of the transcript carries: prompts and wakes, never tool results.
@@ -67,10 +91,13 @@ function resultText(block) {
 }
 
 // Walks the transcript and returns the running post (the newest successful top-level post with no owner message
-// after it), with its current size.
+// after it) with its current size, the latest text of each successful own post (and whether it is a reply under a
+// post; null when only an edit of it is known), and whether the session has used the Projects tools.
 function readTranscript(lines) {
   let running = null;
+  let projects = false;
   const pending = new Map();
+  const posts = new Map();
   for (const line of lines) {
     if (!line.trim()) continue;
     let entry;
@@ -80,6 +107,7 @@ function readTranscript(lines) {
     const content = entry?.message?.content;
     if (!Array.isArray(content)) continue;
     for (const block of content) {
+      if (entry.type === 'assistant' && block?.type === 'tool_use' && PROJECTS_TOOL.test(String(block.name))) projects = true;
       if (entry.type === 'assistant' && block?.type === 'tool_use' && (block.name === POST_TOOL || block.name === EDIT_TOOL)) {
         pending.set(block.id, { name: block.name, input: block.input || {} });
       } else if (entry.type === 'user' && block?.type === 'tool_result' && pending.has(block.tool_use_id)) {
@@ -88,14 +116,17 @@ function readTranscript(lines) {
         if (block.is_error) continue;
         if (call.name === POST_TOOL) {
           const id = resultText(block).match(MESSAGE_ID)?.[1];
+          if (id) posts.set(id, { text: textOf(call.input.text), reply: Boolean(call.input.thread_id) });
           if (id && !call.input.thread_id) running = { id, size: bytes(call.input.text) };
-        } else if (running && call.input.message_id === running.id) {
-          running.size = bytes(call.input.text);
+        } else if (typeof call.input.message_id === 'string') {
+          const known = posts.get(call.input.message_id);
+          posts.set(call.input.message_id, { text: textOf(call.input.text), reply: known ? known.reply : null });
+          if (running && call.input.message_id === running.id) running.size = bytes(call.input.text);
         }
       }
     }
   }
-  return { running };
+  return { running, projects, posts };
 }
 
 // Blanks code spans so a PR number inside backticks is not read as a mention.
@@ -136,15 +167,112 @@ function linkIssue(text) {
   return '';
 }
 
+// Em-dashes, arrows and more than one Question block, outside code and HTML comments.
+function wordingIssue(text) {
+  const plain = withoutCode(textOf(text)).replace(/<!--[\s\S]*?-->/g, ' ');
+  if (plain.includes('—')) return 'it has an em-dash. Use a comma, a colon or a full stop instead.';
+  if (/->|→/.test(plain)) return 'it has an arrow. Say it in words ("then", "so", "leads to") instead.';
+  if ((plain.match(/\*\*Question:\*\*/g) || []).length > 1) return 'it has more than one **Question:**. Ask one question per post, and put the others on decision cards in the threads that own them.';
+  return '';
+}
+
+function lineList(text) {
+  return withoutCode(textOf(text)).split(/\r?\n/).filter(line => line.trim());
+}
+
+function updateLines(text) {
+  return lineList(text).filter(line => UPDATE_LINE.test(line)).map(line => line.trim().replace(/^[-*]\s+/, ''));
+}
+
+// The approved post layout. Short posts (under 25 words, with no Update or Waiting on you line) are exempt.
+function layoutIssue(text) {
+  const lines = lineList(text);
+  const words = lines.join(' ').split(/\s+/).filter(Boolean).length;
+  const updates = lines.filter(line => UPDATE_LINE.test(line));
+  const waiting = lines.findIndex(line => WAITING_LINE.test(line));
+  if (words < SHORT_POST_WORDS && !updates.length && waiting === -1) return '';
+  const first = REPLY_LINE.test(lines[0]) ? lines[1] : lines[0];
+  if (!first || !NOW_LINE.test(first)) return 'its first line must start with **Now:** (where things stand now, rewritten on each edit). A "Re: your reply on <topic>" line may come before it.';
+  for (const line of updates) {
+    const body = line.replace(UPDATE_LINE, '');
+    if (/Question:/i.test(body) || /(?:^|\s)\(?[1-9][.)]\s+\S/.test(body)) {
+      return `the Update line "${line.trim().slice(0, 80)}" has a question or numbered options in it. An Update line is one short status sentence; put the question on a decision card and list it under **Waiting on you**.`;
+    }
+  }
+  if (waiting !== -1) {
+    for (const line of lines.slice(waiting + 1)) {
+      if (!ITEM_LINE.test(line) || UPDATE_LINE.test(line)) break;
+      if (!LINK.test(line)) return `the Waiting on you item "${line.trim().slice(0, 80)}" has no link. Link each item to the card or thread where the owner acts, so it is one tap away.`;
+    }
+  }
+  const eli5 = lines.filter(line => ELI5_LINE.test(line)).length;
+  if (eli5 !== 1 || !ELI5_LINE.test(lines[lines.length - 1])) return 'it must end with exactly one **ELI5:** line, with nothing after it.';
+  return '';
+}
+
+// An edit keeps every earlier Update line word for word and adds at least one new one.
+function editIssue(previous, text) {
+  const before = updateLines(previous);
+  const after = updateLines(text);
+  const missing = before.find(line => !after.includes(line));
+  if (missing) return `it drops or changes the earlier line "${missing.slice(0, 80)}". Keep every Update line word for word.`;
+  if (!after.some(line => !before.includes(line))) return 'it adds no new **[HH:MM] Update:** line. Append one short line in the owner\'s local time for what changed.';
+  return '';
+}
+
+// The PR a shell command or merge tool merges, as { number } (null when the command names none), or null when the
+// call merges no PR. Only a command at the start of a shell segment counts, so text that quotes it does not.
+function mergeTarget(tool, toolInput) {
+  if (MERGE_TOOL.test(tool)) {
+    const number = String(toolInput?.pull_number ?? toolInput?.pullNumber ?? '');
+    return { number: /^\d+$/.test(number) ? number : null };
+  }
+  if (!SHELL_TOOL.test(tool)) return null;
+  for (const part of textOf(toolInput?.command).split(/[;&|\r\n(]+/)) {
+    const merge = part.match(/^\s*gh\s+pr\s+merge\b(.*)$/);
+    if (merge) {
+      const number = merge[1].match(/\/pull\/(\d+)\b/) || merge[1].match(/(?:^|\s)#?(\d+)(?=\s|$)/);
+      return { number: number ? number[1] : null };
+    }
+    const api = part.match(/^\s*gh\s+api\b.*?\/pulls\/(\d+)\/merge\b/);
+    if (api) return { number: api[1] };
+  }
+  return null;
+}
+
+function namesPr(text, number) {
+  if (number === null) return true;
+  return new RegExp(`(?:\\b(?:PRs?|pull requests?)\\b[^\\n]{0,40}?|/pull/|#)${number}\\b`, 'i').test(text);
+}
+
+function mergeIssue(target, posts) {
+  if ([...posts.values()].some(({ text }) => /\bexternal effects?\b/i.test(text) && namesPr(text, target.number))) return '';
+  const pr = target.number === null ? 'this PR' : `PR ${target.number}`;
+  return `Toolkit Projects rule: before every merge, post a short summary of the merge's external effects (what changes on the user's machines, hooks, rules, setup defaults and other repos) with the diff link, and merge only after the user's OK. None of your posts names the external effects of ${pr} yet: add them to your running post in a line that says "external effects" and names ${pr}, then merge.`;
+}
+
 function decide(input, readLines = file => fs.readFileSync(file, 'utf8').split('\n')) {
-  const tool = input?.tool_name;
-  if (tool !== POST_TOOL && tool !== EDIT_TOOL) return '';
+  const tool = String(input?.tool_name || '');
+  const post = tool === POST_TOOL || tool === EDIT_TOOL;
+  const merge = post ? null : mergeTarget(tool, input?.tool_input);
+  if (!post && !merge) return '';
   if (typeof input.transcript_path !== 'string' || !input.transcript_path) return '';
   let lines;
   try { lines = readLines(input.transcript_path); } catch { return ''; }
-  const { running } = readTranscript(lines);
-  const issue = linkIssue(input?.tool_input?.text);
+  const { running, projects, posts } = readTranscript(lines);
+  if (merge) return projects ? mergeIssue(merge, posts) : '';
+  const text = input?.tool_input?.text;
+  const issue = linkIssue(text);
   if (issue) return `Toolkit Projects rule: every PR, thread, file or artifact you mention to the owner carries its link. ${issue}`;
+  const wording = wordingIssue(text);
+  if (wording) return `Toolkit Projects rule: post wording. Rewrite the post: ${wording}`;
+  // Replies under a post, and edits of a post this transcript never shows, keep only the wording and link rules.
+  const known = tool === EDIT_TOOL ? posts.get(input.tool_input?.message_id) : null;
+  const topLevel = tool === POST_TOOL ? !input.tool_input?.thread_id : known?.reply === false;
+  if (topLevel) {
+    const layout = layoutIssue(text) || (known ? editIssue(known.text, text) : '');
+    if (layout) return `Toolkit Projects rule: post layout (a **Now:** line, **[HH:MM] Update:** one-liners, linked **Waiting on you** items, the **ELI5:** line last). Rewrite the post: ${layout}`;
+  }
   if (tool !== POST_TOOL || input.tool_input?.thread_id || !running || running.size >= NEAR_LIMIT_BYTES) return '';
   return `Toolkit Projects rule: one running post. The owner has not written since your post ${running.id}, so edit it with edit_message instead: keep its full text and append a line starting **[HH:MM] Update:** in the owner's local time. Post fresh only after the owner writes, or once the running post nears 8 KB.`;
 }
@@ -165,4 +293,4 @@ function main() {
 
 if (require.main === module) process.exitCode = main();
 
-module.exports = { decide, linkIssue, readTranscript, NEAR_LIMIT_BYTES };
+module.exports = { decide, linkIssue, wordingIssue, layoutIssue, editIssue, mergeTarget, readTranscript, NEAR_LIMIT_BYTES };
