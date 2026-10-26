@@ -9,7 +9,7 @@ const { spawnSync } = require('node:child_process');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const HOOK = path.join(ROOT, 'repo', 'scripts', 'toolkit-claude-project-post-hook.cjs');
-const { decide, linkIssue, NEAR_LIMIT_BYTES } = require('../scripts/toolkit-claude-project-post-hook.cjs');
+const { decide, linkIssue, wordingIssue, layoutIssue, editIssue, mergeTarget, mergeTargets, NEAR_LIMIT_BYTES } = require('../scripts/toolkit-claude-project-post-hook.cjs');
 
 const POST = 'mcp__hearthbot__post_message';
 const EDIT = 'mcp__hearthbot__edit_message';
@@ -101,10 +101,10 @@ test('the hook is for Claude Projects only: other tools, other servers and other
   for (const tool of ['Bash', 'Write', 'mcp__slack__post_message', 'mcp__github__add_issue_comment', 'post_message', 'mcp__hearthbot__request_decision', 'mcp__hearthbot__update_progress_checklist']) {
     assert.equal(decide({ tool_name: tool, transcript_path: 't', tool_input: { text: 'PR 5 merged', command: 'PR 5' } }, transcript), '', tool);
   }
-  // Only the Claude Code plugin registers it, and only on the Projects post tools; Codex hooks never name it.
+  // Only the Claude Code plugin registers it, on the Projects post tools and the merge commands; Codex hooks never name it.
   const claudeHooks = JSON.parse(fs.readFileSync(path.join(ROOT, '.claude-plugin', 'hooks', 'hooks.json'), 'utf8'));
   const entries = claudeHooks.hooks.PreToolUse.filter(entry => entry.hooks.some(hook => /toolkit-claude-project-post-hook/.test(hook.command)));
-  assert.deepEqual(entries.map(entry => entry.matcher), ['^mcp__hearthbot__(?:post_message|edit_message)$']);
+  assert.deepEqual(entries.map(entry => entry.matcher), ['^(?:mcp__hearthbot__(?:post_message|edit_message)|Bash|PowerShell|mcp__.*merge_pull_request)$']);
   for (const other of ['.codex-plugin/hooks/hooks.json', 'repo/contracts/toolkit-local-bridge/codex-plugin/hooks/hooks.json']) {
     assert.doesNotMatch(fs.readFileSync(path.join(ROOT, other), 'utf8'), /project-post-hook/, other);
   }
@@ -187,4 +187,300 @@ test('guards hold: failed posts, size in bytes, the 8 KB escape and quoted owner
   // A wake with an image arrives as an image block, then the wake text.
   const withImage = { type: 'attachment', attachment: { type: 'queued_command', prompt: [{ type: 'image', source: {} }, { type: 'text', text: '<wake><message from="human">see</message></wake>' }] } };
   assert.equal(post([call(POST, { text: 'First.' }), withImage]), '');
+});
+
+// A post in the approved layout, long enough that the layout applies.
+const LAID_OUT = [
+  '**Now:** the hook build is in review and CI is green on the branch head.',
+  '- **[09:41] Update:** built the layout checks and their tests.',
+  '- **[09:52] Update:** opened the pull request and CI passed.',
+  '**Waiting on you (1):**',
+  '1. Merge OK for the hook: [card](#cmsg_CARD)',
+  '**ELI5:** The rule checker is built and waiting for your OK.',
+].join('\n');
+
+test('wording: no em-dashes or arrows outside code, and one Question per post, replies included', () => {
+  assert.match(wordingIssue('Done — next.'), /em-dash/);
+  assert.match(wordingIssue('Build -> review.'), /arrow/);
+  assert.match(wordingIssue('Build → review.'), /arrow/);
+  assert.equal(wordingIssue('Run `a -> b` and\n```\nx — y\n```\n<!-- note -->'), '');
+  assert.equal(wordingIssue('Build, then review. A short-lived branch.'), '');
+  assert.equal(wordingIssue('Log:\n~~~\na -> b\n~~~'), '');
+  assert.equal(wordingIssue('Log:\n```\na -> b'), '');
+  // A fence counts only at the start of a line, so a lone ``` in prose hides nothing after it.
+  assert.match(wordingIssue('Type ``` to start a block, then -> done.'), /arrow/);
+  assert.match(wordingIssue('**Question:** a?\n**Question:** b?'), /more than one/);
+  assert.equal(wordingIssue('**Question:** merge it?'), '');
+  const reply = decide({ tool_name: POST, transcript_path: 't', tool_input: { thread_id: 'cmsg_T', text: 'Yes — done.' } }, () => lines([wake()]));
+  assert.match(reply, /post wording/);
+  assert.match(post([wake()], 'Done — next.'), /post wording/);
+});
+
+test('layout: Now first, ELI5 last and alone, Update lines without questions, Waiting items linked', () => {
+  assert.equal(layoutIssue(LAID_OUT), '');
+  assert.equal(post([wake()], LAID_OUT), '');
+  // Short posts are exempt; a long one without the layout is refused.
+  assert.equal(layoutIssue('Got it, on it now.'), '');
+  const long = 'The plan is approved and a fresh session builds the hook next, so this thread is finished and you will get a merge card from that session.';
+  assert.match(layoutIssue(long), /\*\*Now:\*\*/);
+  assert.match(post([wake()], long), /post layout/);
+  assert.equal(layoutIssue(`Re: your reply on the hook\n${LAID_OUT}`), '');
+  assert.match(layoutIssue(`${LAID_OUT}\nOne more thing.`), /ELI5/);
+  assert.match(layoutIssue(`${LAID_OUT}\n**ELI5:** again.`), /exactly one/);
+  assert.match(layoutIssue(LAID_OUT.replace('**ELI5:** The rule checker is built and waiting for your OK.', '')), /ELI5/);
+  // Even a short post with an Update line uses the layout.
+  assert.match(layoutIssue('- **[09:41] Update:** built it.'), /\*\*Now:\*\*/);
+  assert.match(layoutIssue(LAID_OUT.replace('CI passed.', 'CI passed. Question: merge it? 1. merge 2. hold')), /question or numbered options/);
+  assert.match(layoutIssue(LAID_OUT.replace('CI passed.', 'CI passed, merge it? 1. merge 2. hold')), /numbered options/);
+  assert.match(layoutIssue(LAID_OUT.replace('[card](#cmsg_CARD)', 'the card')), /Waiting on you item .* has no link/);
+  assert.equal(layoutIssue(LAID_OUT.replace('[card](#cmsg_CARD)', 'https://github.com/o/r/pull/7/files')), '');
+  // A question in an Update line is refused on its own; one numbered item alone is not an option list.
+  assert.match(layoutIssue(LAID_OUT.replace('CI passed.', 'CI passed. Question: merge it?')), /question or numbered options/);
+  assert.equal(layoutIssue(LAID_OUT.replace('CI passed.', 'G2 (round 1) passed. Phase 2. Review starts.')), '');
+  for (const options of ['pick (1) merge (2) hold', 'pick 1) merge 2) hold']) {
+    assert.match(layoutIssue(LAID_OUT.replace('CI passed.', options)), /numbered options/, options);
+  }
+  // A short post with a Waiting on you line uses the layout too.
+  assert.match(layoutIssue('**Waiting on you (1):**\n1. Merge OK: [card](#cmsg_C)'), /\*\*Now:\*\*/);
+  // Bulleted Now and ELI5 lines are fine, and the Waiting list stops at the ELI5 line.
+  assert.equal(layoutIssue(LAID_OUT.replace('**Now:**', '- **Now:**').replace('**ELI5:**', '- **ELI5:**')), '');
+  // Code after the ELI5 line still counts as text after it.
+  assert.match(layoutIssue(`${LAID_OUT}\n~~~\nlog\n~~~`), /ELI5/);
+  // Replies under a post keep only the wording and link rules.
+  const reply = decide({ tool_name: POST, transcript_path: 't', tool_input: { thread_id: 'cmsg_T', text: long } }, () => lines([wake()]));
+  assert.equal(reply, '');
+});
+
+test('edits keep every earlier Update line word for word and add a new one', () => {
+  const earlier = LAID_OUT.split('\n').filter(line => !line.includes('09:52')).join('\n');
+  assert.equal(editIssue(earlier, LAID_OUT), '');
+  assert.match(editIssue(LAID_OUT, LAID_OUT), /no new/);
+  assert.match(editIssue(LAID_OUT, LAID_OUT.replace('built the layout', 'wrote the layout')), /drops or changes .*built the layout/);
+  const swapped = LAID_OUT.split('\n');
+  [swapped[1], swapped[2]] = [swapped[2], swapped[1]];
+  assert.match(editIssue(LAID_OUT, [...swapped.slice(0, 3), '- **[10:00] Update:** new.', ...swapped.slice(3)].join('\n')), /reorders/);
+  const base = LAID_OUT.split('\n');
+  const withLine = (index, line) => [...base.slice(0, index), line, ...base.slice(index)].join('\n');
+  assert.match(editIssue(LAID_OUT, withLine(3, base[1])), /repeats the earlier line .*built the layout/);
+  assert.match(editIssue(LAID_OUT, withLine(2, '- **[10:00] Update:** new.')), /above an earlier one/);
+  assert.equal(editIssue(LAID_OUT, withLine(3, '- **[10:00] Update:** new.')), '');
+  // Through the hook: the edited post's text comes from the transcript; replies and unknown posts are not checked.
+  const edit = (entries, text) => decide({ tool_name: EDIT, transcript_path: 't', tool_input: { message_id: 'cmsg_A1', text } }, () => lines(entries));
+  assert.equal(edit([wake(), call(POST, { text: earlier })], LAID_OUT), '');
+  assert.match(edit([wake(), call(POST, { text: LAID_OUT })], LAID_OUT), /post layout.*no new/);
+  assert.match(edit([wake(), call(POST, { text: 'On it.' })], 'Done.'), /no new/);
+  // A later edit is compared with the newest text, not the first.
+  assert.match(edit([wake(), call(POST, { text: earlier }), call(EDIT, { message_id: 'cmsg_A1', text: LAID_OUT }, 'ok')], LAID_OUT), /no new/);
+  assert.equal(edit([wake(), call(POST, { thread_id: 'cmsg_T', text: 'Reply.' })], 'Reply, fixed.'), '');
+  assert.equal(edit([wake()], 'Fixed.'), '');
+});
+
+test('merges in a Projects session need an earlier post with the PR\'s external effects', () => {
+  assert.deepEqual(mergeTarget('Bash', { command: 'gh pr merge 628 --merge' }), { number: '628' });
+  assert.deepEqual(mergeTarget('PowerShell', { command: 'cd x; gh pr merge https://github.com/o/r/pull/9 --merge' }), { number: '9' });
+  assert.deepEqual(mergeTarget('Bash', { command: 'gh pr merge --merge' }), { number: null });
+  assert.deepEqual(mergeTarget('Bash', { command: 'gh api -X PUT repos/o/r/pulls/12/merge' }), { number: '12' });
+  assert.deepEqual(mergeTarget('mcp__github__merge_pull_request', { owner: 'o', repo: 'r', pull_number: 5 }), { number: '5' });
+  assert.deepEqual(mergeTarget('Bash', { command: 'gh api --method PUT repos/o/r/pulls/12/merge' }), { number: '12' });
+  assert.deepEqual(mergeTarget('Bash', { command: 'x=$(gh pr merge 7)' }), { number: '7' });
+  // A --body text never supplies the number.
+  assert.deepEqual(mergeTarget('Bash', { command: 'gh pr merge --merge --body "closes 12"' }), { number: null });
+  assert.deepEqual(mergeTarget('Bash', { command: 'gh pr merge 628 --merge --body "see 12"' }), { number: '628' });
+  // Option values (text, a file or a repository) never supply the number, even as one quoted word.
+  for (const command of ['gh pr merge 628 --body "https://github.com/o/r/pull/5"', 'gh pr merge --subject "5" 628', 'gh pr merge -R "o/r" 628', 'gh pr merge --repo=o/r 628']) {
+    assert.deepEqual(mergeTarget('Bash', { command }), { number: '628' }, command);
+  }
+  // Every merge in a command is a target.
+  assert.deepEqual(mergeTargets('Bash', { command: 'gh pr merge 627 && gh pr merge 628' }), [{ number: '627' }, { number: '628' }]);
+  assert.equal(mergeTargets('Bash', { command: 'npm test' }), null);
+  for (const command of [
+    'git merge origin/main', 'git commit -m "then gh pr merge 5"', 'gh pr view 5', 'echo gh pr merge 5',
+    'git commit -m "fix; gh pr merge 5"', 'grep -E "foo|gh pr merge" x', 'echo "a && gh pr merge 5"',
+    "git commit -F- <<'EOF'\nsubject\ngh pr merge 5\nEOF", 'gh api repos/o/r/pulls/12/merge',
+  ]) {
+    assert.equal(mergeTarget('Bash', { command }), null, command);
+  }
+  // Quoted single tokens are unwrapped, not removed, and the heredoc operator's own line still counts.
+  for (const [command, number] of [
+    ['gh pr merge "628"', '628'], ["gh pr merge 'https://github.com/o/r/pull/628'", '628'],
+    ['gh api -X PUT "repos/o/r/pulls/628/merge"', '628'], ['gh api -X "PUT" repos/o/r/pulls/628/merge', '628'],
+    ['cat <<EOF > f; gh pr merge 628\nbody\nEOF', '628'], ['cat <<< y\ngh pr merge 628', '628'],
+    ['echo $((1<<2))\ngh pr merge 628', '628'], ["echo it\\'s; gh pr merge 628; echo 'x'", '628'],
+    ['git commit -m "$(cat <<\'EOF\'\nmerge 627\nEOF\n)" && gh pr merge 628', '628'],
+  ]) {
+    assert.deepEqual(mergeTarget('Bash', { command }), { number }, command);
+  }
+  // Stripping stays fast on long hostile input.
+  for (const command of ['\\"'.repeat(40000), `cat <<EOF\n${'\n'.repeat(50000)}`, `"${'\\"'.repeat(40000)}`, '<<A '.repeat(20000)]) {
+    const started = Date.now();
+    mergeTarget('Bash', { command });
+    assert.ok(Date.now() - started < 500, command.slice(0, 10));
+  }
+  const merge = (entries, command = 'gh pr merge 628 --merge') => decide({ tool_name: 'Bash', transcript_path: 't', tool_input: { command } }, () => lines(entries));
+  assert.match(merge([wake(), call(POST, { text: 'On it.' })]), /external effects of PR 628/);
+  assert.equal(merge([wake(), call(POST, { text: 'External effects of [PR 628](https://github.com/o/r/pull/628/files): a new hook.' })]), '');
+  // The summary may arrive in an edit of the running post, and must name the PR being merged.
+  assert.equal(merge([wake(), call(POST, { text: 'On it.' }), call(EDIT, { message_id: 'cmsg_A1', text: 'PR 628 external effects: none.' }, 'ok')]), '');
+  assert.match(merge([wake(), call(POST, { text: 'External effects of PR 627: none.' })]), /PR 628/);
+  assert.match(merge([wake(), call(POST, { text: 'External effects of PR 628: none.' }, 'error', true)]), /PR 628/);
+  assert.equal(merge([wake(), call(POST, { text: 'External effects: a new hook.' })], 'gh pr merge --merge'), '');
+  // The phrase and the PR sit on one line, outside code; a longer number, a bare #N or the phrase alone does not count.
+  const summary = text => merge([wake(), call(POST, { text })]);
+  assert.match(summary('- **[09:00] Update:** external effects of PR 627: none.\n**Now:** [PR 628](https://github.com/o/r/pull/628/files) waits.'), /PR 628/);
+  assert.match(summary('External effects of PR 1628: none.'), /PR 628/);
+  assert.match(summary('External effects of PR 6280: none.'), /PR 628/);
+  assert.match(summary('External effects of https://github.com/o/r/pull/6280/files: none.'), /PR 628/);
+  assert.equal(summary('External effects of https://github.com/o/r/pull/628/files: none.'), '');
+  assert.match(summary('External effects of PR 627 (see #628): none.'), /PR 628/);
+  assert.match(summary('PR 628 effects: none.'), /PR 628/);
+  assert.match(summary('~~~\nexternal effects of PR 628\n~~~'), /PR 628/);
+  assert.equal(summary('External effects of PR #628: none.'), '');
+  assert.equal(summary('External effects of PRs 627 and 628: none.'), '');
+  // Each merge in one command needs its own summary, and an option value never stands in for the PR.
+  const both = 'gh pr merge 627 && gh pr merge 628';
+  assert.match(merge([wake(), call(POST, { text: 'External effects of PR 627: none.' })], both), /external effects of PR 628/);
+  assert.equal(merge([wake(), call(POST, { text: 'External effects of PRs 627 and 628: none.' })], both), '');
+  for (const command of ['gh pr merge 628 --body "https://github.com/o/r/pull/5"', 'gh pr merge --subject "5" 628', 'gh pr merge --subject="5" 628', 'gh pr merge -b"https://github.com/o/r/pull/5" 628', 'gh pr merge -sb "https://github.com/o/r/pull/5" 628']) {
+    assert.match(merge([wake(), call(POST, { text: 'External effects of PR 5: none.' })], command), /external effects of PR 628/, command);
+  }
+  // A quoted value with spaces, or an empty one, stays one option value and never hides the PR number.
+  for (const command of ['gh pr merge --subject "Fix the hook" 628', 'gh pr merge --body "" 628', "gh pr merge -t 'a b' 628", 'gh pr merge"" 628', 'gh pr merge 628""']) {
+    assert.deepEqual(mergeTarget('Bash', { command }), { number: '628' }, command);
+    assert.match(merge([wake(), call(POST, { text: 'External effects of PR 627: none.' })], command), /external effects of PR 628/, command);
+  }
+  assert.match(merge([wake(), call(POST, { text: 'External effects of PR 622: none.' })], 'gh pr merge 22'), /PR 22/);
+  // Outside Projects (no Projects tool in the transcript), and for other commands, nothing is checked or read.
+  assert.equal(merge([wake()]), '');
+  let read = false;
+  const reader = () => { read = true; return lines([wake(), call(POST, { text: 'On it.' })]); };
+  assert.equal(decide({ tool_name: 'Bash', transcript_path: 't', tool_input: { command: 'npm test' } }, reader), '');
+  assert.equal(read, false);
+});
+
+// Every command shape the reviews raised: [command, the first PR it merges, null for a merge with no number, or false
+// for no merge]. The reader follows the shell, so quotes, escapes, empty quotes and option values never hide or
+// replace the PR number.
+test('the merge reader reads commands the way the shell does', () => {
+  const rows = [
+    ['gh api -X PUT "repos/o/r/pulls/628/merge"', '628'], ['gh api -X "PUT" repos/o/r/pulls/628/merge', '628'],
+    ['cat <<EOF > f; gh pr merge 628\nbody\nEOF', '628'], ["gh pr merge 'https://github.com/o/r/pull/628'", '628'],
+    ['gh pr merge "628"', '628'], ["gh pr merge '#628'", '628'], ['"gh" pr merge 628', '628'],
+    ['cat <<< y\ngh pr merge 628', '628'], ['echo $((1<<2))\ngh pr merge 628', '628'],
+    ["echo it\\'s; gh pr merge 628", '628'], ["echo it\\'s; gh pr merge 628; echo 'x'", '628'],
+    ['gh pr merge \\\n628', '628'], ['gh pr \\\nmerge 628', '628'],
+    ['gh pr merge 628 --body "fixes 627"', '628'], ["gh pr merge 628 --subject 'x 627'", '628'],
+    ['(gh pr merge 628)', '628'], ['x=$(gh pr merge 628)', '628'],
+    ["cat <<'EOF'\ngh pr merge 627\nEOF", false], ['gh pr merge 628 --body-file - <<EOF\ngh pr merge 627\nEOF', '628'],
+    ['git commit -m "$(cat <<\'EOF\'\nfix "quoted" (paren)\ngh pr merge 627\nEOF\n)" && gh pr merge 628', '628'],
+    ['git commit -m "fix; gh pr merge 5"', false], ['echo "a && gh pr merge 5"', false], ['grep -E "foo|gh pr merge" x', false],
+    ['gh api repos/o/r/pulls/628/merge', false], ['gh api --method=put repos/o/r/pulls/628/merge', '628'], ['gh api -XPUT repos/o/r/pulls/628/merge', '628'],
+    ['gh pr merge --squash', null], ['gh pr merge --body "closes 12"', null],
+    ["echo 'gh pr merge 5'", false], ['printf "%s\\n" "gh pr merge 5"', false],
+    ['gh pr merge 628 --body "oops', '628'], ['echo "oops; gh pr merge 628', null], ['cat <<EOF\ngh pr merge 628', null],
+    ['echo "a \'b\' c"; gh pr merge 628', '628'], ['echo \'a "b" c\'; gh pr merge 628', '628'], ['echo "a \'gh pr merge 5\' c"', false],
+    ['cat <<-EOF\n\tgh pr merge 5\n\tEOF\ngh pr merge 628', '628'], ['cat <<"EOF"\ngh pr merge 5\nEOF\ngh pr merge 628', '628'],
+    ['echo a\\; gh pr merge 5', false], ["echo $'a\\'b'; gh pr merge 628", '628'], ["echo $'a\\'b'; gh pr merge 628; echo 'done'", '628'],
+    ['gh pr merge 627 && gh pr merge 628', '627'], ['gh pr merge --squash; gh pr merge 628', null],
+    ['gh pr merge --subject "5" 628', '628'], ['gh pr merge -t "5" 628', '628'], ['gh pr merge -b "https://github.com/o/r/pull/5" 628', '628'],
+    ['gh pr merge -t 5 628', '628'], ['gh pr merge --subject=5 628', '628'], ['gh pr merge 628 --body=https://github.com/o/r/pull/5', '628'],
+    ['gh pr merge -R "o/r" 628', '628'], ['gh pr merge --repo o/r 628', '628'], ['gh pr merge -R=o/r 628', '628'], ['gh pr merge -A "a@example.com" 628', '628'],
+    ['gh pr merge --match-head-commit abc123 628', '628'], ['gh pr merge -F - 628', '628'], ['gh pr merge --body-file=x.md 628', '628'],
+    ['gh pr merge -t5 628', '628'], ['gh pr merge -d 628', '628'], ['gh pr merge --admin --auto -s -r -m 628', '628'],
+    ['gh pr merge --squash --delete-branch 628', '628'], ['gh pr merge --subject="Fix the hook" 628', '628'],
+    ['git commit -m "use a<<b"\ngh pr merge 628', '628'], ['echo $((x<<y))\ngh pr merge 628', '628'],
+    ['cat <<\\EOF\ngh pr merge 5\nEOF', false],
+    ['gh pr merge --subject="5" 628', '628'], ['gh pr merge --body "fixes a bug" 628', '628'], ['gh pr merge --body "" 628', '628'],
+    ["gh pr merge --body '' 628", '628'], ['gh pr merge --body "$(cat notes.md)" 628', '628'],
+    ["gh pr merge -b \"$(cat <<'EOF'\nbody \"x\" )\nEOF\n)\" 628", '628'], ["gh pr merge -t 'Fix x (#628)' 628", '628'],
+    ['gh pr merge -R o/r --subject "a b" https://github.com/o/r/pull/628', '628'],
+    ['gh pr merge --squash --subject "Fix x" 627 && gh pr merge 628', '627'],
+    ['gh pr merge "62"8', '628'], ["gh pr merge '62'8", '628'], ['gh pr merge 6"2"8', '628'],
+    ['gh" "pr merge 628', false], ["'gh'pr merge 628", false], ['gh pr merge"x" 628', false],
+    ['g"h" pr merge 628', '628'], ['gh pr "merge" 628', '628'], ['gh pr me"rge" 628', '628'], ['"gh" "pr" "merge" "628"', '628'],
+    ['echo "x";gh pr merge 628', '628'], ['echo "a b"&&gh pr merge 628', '628'], ['echo ""&&gh pr merge 628', '628'],
+    ['gh pr merge 628;""', '628'], ['(gh pr merge 628)""', '628'],
+    ['echo "x;gh pr merge 5"', false], ['echo x"&&"gh pr merge 5', false], ['"gh pr merge 5"', false], ['"gh"" pr merge 5"', false],
+    ['gh pr merge "" 628', '628'], ['gh pr merge --body """" 628', '628'], ['gh pr merge --subject="" 628', '628'],
+    ['gh pr merge -t"a b" 628', '628'], ['gh pr merge --subject"=5" 628', '628'], ['gh pr merge "#"628', '628'],
+    ['gh pr merge -b"see https://github.com/o/r/pull/5 now" 628', '628'],
+    ['gh pr merge --subject "5"628', null], ['gh \\\npr \\\nmerge \\\n628', '628'],
+    ['gh pr merge"" 628', '628'], ["gh pr merge'' 628", '628'], ['gh pr merge 628""', '628'], ["gh pr merge 628''", '628'],
+    ['gh pr merge ""628', '628'], ['gh pr merge "https://github.com/o/r/pull/628"""', '628'], ['gh pr merge 628"";echo', '628'],
+    ['gh pr merge 627"" && gh pr merge 628', '627'], ['gh pr merge --body"" 5 628', '628'],
+    ['gh pr merge -b"https://github.com/o/r/pull/5" 628', '628'], ["gh pr merge -b'https://github.com/o/r/pull/5' 628", '628'],
+    ['gh pr merge 628 -b"https://github.com/o/r/pull/5"', '628'], ['gh pr merge -bhttps://github.com/o/r/pull/5 628', '628'],
+    ['gh pr merge -sb "https://github.com/o/r/pull/5" 628', '628'], ['gh pr merge -dt "5" 628', '628'], ['gh pr merge -st 5 628', '628'],
+    ['gh pr merge 6\\28', '628'], ['gh pr merge \\628', '628'], ['echo # gh pr merge 5', false], ['npm test', false],
+  ];
+
+  for (const [command, expected] of rows) {
+    const targets = mergeTargets('Bash', { command });
+    assert.equal(targets ? targets[0].number : false, expected, command);
+  }
+  // Every pass moves forward only: a megabyte of hostile input stays fast.
+  for (const command of ['\\"'.repeat(500000), '""'.repeat(500000), `cat <<EOF\n${'\n'.repeat(1000000)}`, '<<A '.repeat(250000), `"${'$('.repeat(300000)}`]) {
+    const started = Date.now();
+    mergeTargets('Bash', { command });
+    assert.ok(Date.now() - started < 1500, command.slice(0, 8));
+  }
+});
+
+// The closure matrix: bash and PowerShell across quotes, escapes, expansions, heredocs and here-strings, redirections,
+// comments, compound commands and input the reader cannot finish. [tool, command, the first PR it merges, null for a
+// merge with no number (an open or unreadable command that mentions a gh merge counts here), or false for no merge].
+test('the merge reader closure matrix for bash and PowerShell', () => {
+  const deep = `x="${'$('.repeat(6000)}"; gh pr merge 628`;
+  const rows = [
+    // Bash quotes and escapes.
+    ['Bash', 'gh pr merge --subject "a; b" 628', '628'], ['Bash', "gh pr merge --subject 'it''s' 628", '628'], ['Bash', 'gh pr merge 6\\28', '628'],
+    // Bash expansions: a variable or command in the PR's place is a merge with no number.
+    ['Bash', 'gh pr merge $PR', null], ['Bash', 'gh pr merge "$(cat n)"', null], ['Bash', 'gh pr merge `cat n`', null],
+    ['Bash', 'gh api -X PUT repos/o/r/pulls/$PR/merge', null], ['Bash', 'echo "$(gh pr merge 5)"', false],
+    // Bash heredocs and arithmetic.
+    ['Bash', '((x<<2))\ngh pr merge 628', '628'], ['Bash', 'cat <<EOF\nbody\nEOF\ngh pr merge 628', '628'],
+    // (( is arithmetic only when its inner bracket closes straight into the outer one; otherwise two subshells.
+    ['Bash', '((gh pr merge 628) && echo ok)', '628'], ['Bash', '((cd r && gh pr merge 628) || echo f)', '628'], ['Bash', '((gh pr merge 628))', false],
+    // Bash redirections: the stream number and target are never the PR.
+    ['Bash', 'gh pr merge 2>/dev/null 628', '628'], ['Bash', 'gh pr merge 2>&1 628', '628'], ['Bash', 'gh pr merge >out.txt 628', '628'],
+    ['Bash', 'gh pr merge <in 628', '628'], ['Bash', 'gh pr merge &>log 628', '628'], ['Bash', 'gh pr merge <<< y 628', '628'],
+    ['Bash', 'gh pr merge 628 >/dev/null 2>&1', '628'], ['Bash', 'gh pr merge >>log 2>|err 628', '628'],
+    // Bash comments.
+    ['Bash', '# gh pr merge 5', false], ['Bash', 'gh pr merge 628 # merge 5', '628'],
+    // Bash compound commands.
+    ['Bash', 'if gh pr checks 628; then gh pr merge 628; fi', '628'], ['Bash', '{ gh pr merge 628; }', '628'],
+    ['Bash', '! gh pr merge 628', '628'], ['Bash', 'time gh pr merge 628', '628'], ['Bash', 'time -p gh pr merge 628', '628'], ['Bash', 'while true; do gh pr merge 628; done', '628'],
+    // Bash input the reader cannot finish fails toward checking.
+    ['Bash', "echo 'oops; gh pr merge 628", null], ['Bash', 'echo `oops; gh pr merge 628', null], ['Bash', "echo $'oops; gh pr merge 628", null],
+    ['Bash', 'echo $((1 + gh pr merge 628', null], ['Bash', 'x="$(gh pr merge 628"', null], ['Bash', deep, null],
+    // Closed nesting too deep for the reader takes the error path and still fails toward checking.
+    ['Bash', `${'echo "$('.repeat(5000)}${')"'.repeat(5000)}; gh pr merge 628`, null],
+    ['Bash', "echo 'oops; npm test", false],
+    // PowerShell quotes, here-strings and escapes.
+    ['PowerShell', 'gh pr merge 628', '628'], ['PowerShell', "echo 'it''s'; gh pr merge 628", '628'],
+    ['PowerShell', "$b = @'\nIt's done\n'@\ngh pr merge 628", '628'], ['PowerShell', '$b = @"\nsay "hi" `$x\n"@\ngh pr merge 628', '628'],
+    ['PowerShell', "$b = @'\ngh pr merge 5\n'@", false], ['PowerShell', 'gh pr merge 6`28', '628'], ['PowerShell', 'gh pr merge `\n628', '628'],
+    ['PowerShell', 'echo `"a`"; gh pr merge 628', '628'], ['PowerShell', 'gh pr merge --body "C:\\temp\\" 628', '628'],
+    ['PowerShell', 'gh pr merge "628"', '628'], ['PowerShell', 'gh pr merge --subject "a; b" 628', '628'],
+    ['PowerShell', 'gh api -X PUT repos/o/r/pulls/628/merge', '628'],
+    // PowerShell comments, redirections and blocks.
+    ['PowerShell', '# gh pr merge 5', false], ['PowerShell', '<# gh pr merge 5 #> gh pr merge 628', '628'],
+    ['PowerShell', 'gh pr merge 628 2>&1', '628'], ['PowerShell', 'gh pr merge 2>$null 628', '628'], ['PowerShell', 'gh pr merge *> log 628', '628'],
+    // PowerShell streams are 1 to 6 and *, so a longer number before > is the PR.
+    ['PowerShell', 'gh pr merge 628>out', '628'],
+    ['PowerShell', 'if ($ok) { gh pr merge 628 }', '628'], ['PowerShell', '& gh pr merge 628', '628'], ['PowerShell', 'echo "$(gh pr merge 5)"', false],
+    // PowerShell input the reader cannot finish fails toward checking.
+    ['PowerShell', "echo 'oops; gh pr merge 628", null], ['PowerShell', "$b = @'\noops gh pr merge 628", null], ['PowerShell', 'echo "oops gh pr merge 628', null],
+  ];
+  for (const [tool, command, expected] of rows) {
+    const targets = mergeTargets(tool, { command });
+    assert.equal(targets ? targets[0].number : false, expected, `${tool}: ${command.slice(0, 60)}`);
+  }
+  // An open read with many gh words and no merge stays linear, in both shells.
+  for (const tool of ['Bash', 'PowerShell']) {
+    for (const command of [`'${'gh '.repeat(330000)}`, `"${'gh x '.repeat(200000)}`, `${'(('.repeat(250000)}gh pr merge 628`]) {
+      const started = Date.now();
+      mergeTargets(tool, { command });
+      assert.ok(Date.now() - started < 1500, `${tool}: ${command.slice(0, 8)}`);
+    }
+  }
 });
