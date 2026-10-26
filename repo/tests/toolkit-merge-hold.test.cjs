@@ -85,7 +85,7 @@ test('a plain yes with "merge" and a number is an approval; a no, a doubt or a q
     ['merge 622 & 623', [[null, 622, null], [null, 623, null]]],
   ];
   // Natural wordings that must count.
-  for (const text of ["- [ ] merge 622", "(1) merge 622", "- 1. merge 622", "1234. merge 622", "CI green, merge 622", "could you merge 622", "would you merge 622", "1.merge 612", "1. merge 612", "can you merge 622","CI is green, merge 622","merge https://github.com/o/r/pull/622/files","merge 622","yes, merge 622","merge #622","Merge #622.","merge 622!","merge PR 622","merge PR #622","merge pull request 622","merge 622 at ee067e1","merge 622 (head ee067e1)","merge #622 at ee067e1","OK to merge 622 at ee067e1","merge https://github.com/weijunswj/ai-agent-toolkit/pull/622","merge weijunswj/ai-agent-toolkit#622","ok merge 622 now","go ahead and merge 622","LGTM, merge 622","please merge 622","squash and merge 622","it's fine, merge 622","- merge 622","merge 622 and 623","merge 622 & 623"]) assert.notDeepEqual(hold.approvalsIn(text), [], text);
+  for (const text of ["merge 622 since CI is green", "merge 622, all green", "a.merge 622", "a) merge 622", "- - - - - merge 622", "- [ ] merge 622", "(1) merge 622", "- 1. merge 622", "1234. merge 622", "CI green, merge 622", "could you merge 622", "would you merge 622", "1.merge 612", "1. merge 612", "can you merge 622","CI is green, merge 622","merge https://github.com/o/r/pull/622/files","merge 622","yes, merge 622","merge #622","Merge #622.","merge 622!","merge PR 622","merge PR #622","merge pull request 622","merge 622 at ee067e1","merge 622 (head ee067e1)","merge #622 at ee067e1","OK to merge 622 at ee067e1","merge https://github.com/weijunswj/ai-agent-toolkit/pull/622","merge weijunswj/ai-agent-toolkit#622","ok merge 622 now","go ahead and merge 622","LGTM, merge 622","please merge 622","squash and merge 622","it's fine, merge 622","- merge 622","merge 622 and 623","merge 622 & 623"]) assert.notDeepEqual(hold.approvalsIn(text), [], text);
   for (const [text, expected] of approvals) assert.deepEqual(hold.approvalsIn(text).map(({ repository, pr, sha }) => [repository, pr, sha]), expected, text);
   const refusals = [
     "don't merge 618", 'Don’t merge 618', 'please DON’T merge 618', 'do not merge 618 yet',
@@ -116,6 +116,11 @@ test('a plain yes with "merge" and a number is an approval; a no, a doubt or a q
     '17:00 merge 622', '10:30 merge 622', '1.5 merge 622 now', '27.10 merge 622 now', '<merge 622', 'merge 622 >', 'merge 622 at CI green',
     'ok shall we merge 622', '- 1. > merge 622', '(1) > merge 622', '[x] > merge 622', '1234. > merge 622', 'a) did you merge 622',
     '- a) did you merge 622', '- 1. why merge 622', '[x] did you merge 622', '(1) why merge 622',
+    // a link before green, letter markers with no space, too many nested markers, comma-joined digits, untested guards
+    'merge https://github.com/o/r/pull/622 green', 'merge github.com/o/r/pull/622 green', 'merge https://github.com/o/r/pull/622 now green',
+    'merge 622 CI green', 'merge 622 now green', 'merge 622 all green',
+    'a)did you merge 622', 'b.did you merge 622', '- - - - - - did you merge 622', '- - - - - - merge 622', '1,5 merge 622', 'merge 622,623',
+    '‹merge 622', '›merge 622', '1234.did you merge 622', '- - - why merge 622', '17：00 merge 622', '1.23456 merge',
     // numbered markers with no space, more branch names and quote forms, untested guards, green and clock forms
     '1.> merge 622', '1.did you merge 622', '12.is it ok to merge 622', 'merge development to #622', 'merge production to #622',
     'merge stable to #622', 'merge feature/x into #622', '‹merge 622›', '＂merge 622＂', 'merge 622 in 3 months', 'merge 622 at midnight',
@@ -130,7 +135,7 @@ test('a plain yes with "merge" and a number is an approval; a no, a doubt or a q
   ];
   for (const text of refusals) assert.deepEqual(hold.approvalsIn(text), [], text);
   // A digit after a list marker or a colon is not a pull request number.
-  for (const text of ['1:5 merge 622', 'item:5 merge 622']) assert.deepEqual(hold.approvalsIn(text), [{ repository: null, pr: 622, sha: null }], text);
+  for (const text of ['1:5 merge 622', 'item:5 merge 622', '1.23456 merge 622', '+1 merge 622', '1 merge 622', '1700 merge 622']) assert.deepEqual(hold.approvalsIn(text), [{ repository: null, pr: 622, sha: null }], text);
 });
 
 test('an approval is recorded only in a session the user started', (t) => {
