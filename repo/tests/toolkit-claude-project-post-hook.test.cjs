@@ -412,7 +412,7 @@ test('the merge reader reads commands the way the shell does', () => {
     ['gh pr merge -sb "https://github.com/o/r/pull/5" 628', '628'], ['gh pr merge -dt "5" 628', '628'], ['gh pr merge -st 5 628', '628'],
     ['gh pr merge 6\\28', '628'], ['gh pr merge \\628', '628'], ['echo # gh pr merge 5', false], ['npm test', false],
   ];
-  
+
   for (const [command, expected] of rows) {
     const targets = mergeTargets('Bash', { command });
     assert.equal(targets ? targets[0].number : false, expected, command);
