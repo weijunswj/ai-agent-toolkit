@@ -112,6 +112,12 @@ test('agent setup routes use the quoted full-path line, keep the chat folder and
   for (const relPath of ['skills/toolkit-setup/SKILL.md', 'skills/toolkit-setup/README.md', 'repo/docs/FOR_AI_AGENTS.md', 'skills/toolkit-env/SKILL.md']) {
     assert.doesNotMatch(fs.readFileSync(path.join(repoRoot, relPath), 'utf8'), SHELL_VARIABLE_COMMAND, relPath);
   }
+  // Setup reads the user's own clone and project instructions from the folder it starts in.
+  for (const relPath of ['skills/toolkit-setup/SKILL.md', 'skills/toolkit-setup/README.md', 'repo/docs/FOR_AI_AGENTS.md']) {
+    const text = fs.readFileSync(path.join(repoRoot, relPath), 'utf8');
+    assert.match(text, /never `cd` first/, relPath);
+    assert.match(text, /the chat's own folder/, relPath);
+  }
   const howToUseStep = fs.readFileSync(path.join(repoRoot, 'repo/docs/HOW-TO-USE.md'), 'utf8').split(/\r?\n/).find((line) => line.includes('say `setup toolkit`'));
   assert.ok(howToUseStep);
   assert.doesNotMatch(howToUseStep, /\$env:|%USERPROFILE%/);

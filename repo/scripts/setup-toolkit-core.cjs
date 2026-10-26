@@ -3472,7 +3472,8 @@ function printInstallCheck(result) {
 // Codex's instruction limit follows the owner's answer to the setup question.
 function setupGlobalRules(args) {
   return new GlobalRules({ toolkitRoot: args.repoRoot, retentionDays: args.updateReportRetentionDays,
-    harnesses: GlobalRules.setupHarnesses({ antigravity: args.antigravityGlobalRules }), codexDocLimit: args.codexDocLimitMode || 'report' });
+    harnesses: GlobalRules.setupHarnesses({ antigravity: args.antigravityGlobalRules }), codexDocLimit: args.codexDocLimitMode || 'report',
+    workingFolder: process.env[SETUP_START_FOLDER_ENV] || process.cwd() });
 }
 
 // Codex setup refreshes installed Toolkit helper agents to the stack each names and reports them.
