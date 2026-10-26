@@ -2339,7 +2339,8 @@ function splitConciseEnvelope(text) {
 }
 
 function changedOnlyItems(value) {
-  const tokens = String(value || '').trim().replace(/\s*=\s*/g, '=').split(/\s*[,;]\s*|\s+/);
+  // Collapse whitespace first so no pattern below can backtrack over a long run of spaces.
+  const tokens = String(value || '').trim().replace(/\s+/g, ' ').replace(/ ?= ?/g, '=').split(/ ?[,;] ?| /);
   if (!tokens.length || tokens.some((token) => !CHANGED_ONLY_ITEM.test(token))) return null;
   return tokens.map((token) => token.match(CHANGED_ONLY_ITEM).slice(1));
 }
@@ -2366,7 +2367,9 @@ function parseConciseQuestionBankAnswer(input, specs, options = {}) {
   if (requireBankReference) {
     const envelope = splitConciseEnvelope(text);
     if (!envelope) {
-      if (looksLikeConciseQuestionBankAnswer(text)) {
+      // Only the first line can start a concise answer; later lines of a line-by-line reply,
+      // such as a custom path containing "all-recommended", are never read as one.
+      if (looksLikeConciseQuestionBankAnswer(text.split(/\r?\n/, 1)[0])) {
         throw new Error(`Concise setup answers require the displayed bank reference. Reply with ${expectedReference}: followed by all recommended or indexed changes.`);
       }
       return null;
