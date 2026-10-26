@@ -1056,6 +1056,10 @@ test('answer guard: a host counts only where a shell starts it, so scratch files
     ['Bash', 'git commit -F - <<EOF\nclaude hook: answer no prompts\nEOF'],
     ['Bash', 'tee notes.md <<EOF\nclaude said yes\nEOF'],
     ['Bash', 'command -v claude >/dev/null && echo ok'],
+    // A setup run names a host and takes its answers on standard input; it starts no session.
+    ['Bash', "printf '1.1: all recommended\\n' | node ~/.ai-agent-toolkit/source/repo/scripts/setup-toolkit.cjs --host codex --execute"],
+    ['PowerShell', "'1.5: no' | node C:\\Users\\me\\.ai-agent-toolkit\\source\\repo\\scripts\\setup-toolkit.cjs --host claude; echo ok"],
+    ['Bash', 'node repo/scripts/setup-toolkit.cjs --host codex --execute <<EOF\n1.1: all recommended\nyes\nEOF'],
     // A worktree clean-up whose paths end in `claude` was once refused as answering the question.
     ['PowerShell', "git worktree remove --force C:\\Users\\me\\t\\wt\\claude; git worktree prune; Remove-Item -Recurse -Force C:\\Users\\me\\t\\claude -ErrorAction SilentlyContinue; Write-Output 'ok'"],
   ];
