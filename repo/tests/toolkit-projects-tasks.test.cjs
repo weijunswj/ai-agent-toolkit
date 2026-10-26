@@ -240,7 +240,7 @@ test('model tier and effort: cheapest by default, medium floor, every raise carr
   }
   // Built-in object property names are unknown keys, in new and pre-tier params alike.
   for (const key of ['constructor', 'toString', '__proto__']) {
-    assert.throws(() => validateParams('hourly-nudge', JSON.parse(JSON.stringify(PARAMS['hourly-nudge']).replace('{', `{"${key}": "x", `))), key);
+    assert.throws(() => validateParams('hourly-nudge', Object.assign(JSON.parse(`{"${key}": "x"}`), PARAMS['hourly-nudge'])), key);
     const withKey = rendered('hourly-nudge').replace(/,\n {2}"model": "small"/, '').replace('"effort": "medium"', `"effort": "high",\n  "${key}": "x"`);
     assert.equal(tasks().check('hourly-nudge', withKey).state, 'malformed', key);
   }
