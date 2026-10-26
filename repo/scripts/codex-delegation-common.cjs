@@ -8,7 +8,7 @@ const { spawnSync } = require('node:child_process');
 
 const CODEX_AGENT_MAX_THREADS = 1;
 // agents.max_depth is not in OpenAI's Codex config reference or subagents page (read 2026-10-23);
-// Codex CLI 0.164 accepts max_depth = 1 and runs one helper under it (laptop check, 2026-10-23).
+// Codex CLI 0.164 accepts max_depth = 1 and runs one helper under it (device check, 2026-10-23).
 // Depth 1 lets the root start helpers and stops helpers from starting their own (third-party
 // sources; not verified on a host).
 const CODEX_AGENT_MAX_DEPTH = 1;

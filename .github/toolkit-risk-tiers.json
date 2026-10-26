@@ -5,6 +5,7 @@
     ".github/toolkit-risk-tiers.json",
     ".github/workflows/**",
     ".github/toolkit-programme.json",
+    ".github/dependabot.yml",
     ".github/personal-data-guard.json",
     ".claude/settings.json",
     ".claude-plugin/**",

@@ -1797,7 +1797,7 @@ function setupQuestionSpecs(args, current) {
         wizardChoice('disable', 'Turn off', 'Remove only the values Toolkit set and still match what it recorded. Values you set yourself stay as they are.'),
         wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${claudeSettingsOutcome(current.claudeSettings)}`),
       ],
-      recommendation: { value: recommendedChoice('claudeSettings', current, args), outcome: claudeSettingsAllSet(current) ? 'Keep them: all four are already set.' : 'Set the recommended values that are not set yet; values you set yourself stay as they are.', reason: 'They keep AI attribution out of your commits and pull requests, let a Projects coordinator wake laptop threads, keep a flagged request on the model you chose, and make Claude Code read the repository\'s AGENTS.md.' },
+      recommendation: { value: recommendedChoice('claudeSettings', current, args), outcome: claudeSettingsAllSet(current) ? 'Keep them: all four are already set.' : 'Set the recommended values that are not set yet; values you set yourself stay as they are.', reason: 'They keep AI attribution out of your commits and pull requests, let a Projects coordinator wake Remote Control sessions on your computer, keep a flagged request on the model you chose, and make Claude Code read the repository\'s AGENTS.md.' },
       selected: args.setupChoices.claudeSettings,
       current: claudeSettingsOutcome(current.claudeSettings),
       currentVerification: Array.isArray(current.claudeSettings) && current.claudeSettings.length && current.claudeSettings.every((entry) => entry.state !== CLAUDE_SETTINGS_STATES.UNREADABLE) ? 'state-derived' : 'unverified',

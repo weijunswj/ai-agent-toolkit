@@ -28,6 +28,19 @@
       "description": "Check names that count as required at the PR head, in addition to the checks GitHub marks required. With none of either, checks are never GREEN.",
       "items": { "type": "string", "minLength": 1 }
     },
+    "paid_security": {
+      "enum": ["off", "on"],
+      "description": "The owner's answer, for a private repository, on GitHub's paid Secret Protection and Code Security (billed per active committer; need GitHub Team or Enterprise Cloud). off keeps them off; on lets Toolkit turn them on. Only the user's own answer is recorded, and only the binding merged on the default branch counts. The governance check reports a private repository without an answer. Public repositories get these features free and on by default."
+    },
+    "dependency_updates": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "How Dependabot updates are merged. Setting auto_merge to patch-minor is the owner's standing permission for this repository: Dependabot patch and minor updates merge (merge commit) once every required check passes, and only while the default branch requires at least one check. Major updates, updates to a 0.x version, and updates someone else pushed to always wait for the owner. Only the binding merged on the default branch counts.",
+      "properties": {
+        "auto_merge": { "enum": ["off", "patch-minor"], "description": "off (the default): every update waits for the owner. patch-minor: patch and minor updates merge on green." },
+        "github_actions": { "enum": ["auto-merge", "owner"], "description": "With auto_merge patch-minor: owner (the default) keeps GitHub Actions updates, which change workflow files, for the owner; auto-merge treats them like the rest." }
+      }
+    },
     "projection": {
       "type": "object",
       "additionalProperties": false,

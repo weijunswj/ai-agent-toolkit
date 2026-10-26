@@ -21,6 +21,7 @@ const plainTextInstaller = require(path.join(scripts, '..', '..', 'skills', 'sec
 const catalogue = require(path.join(scripts, 'toolkit-governance-catalogue.cjs'));
 const managedBlock = require(path.join(scripts, 'toolkit-managed-block.cjs'));
 const governance = require(path.join(scripts, 'toolkit-governance-state.cjs'));
+const migration = require(path.join(scripts, 'toolkit-governance-migration.cjs'));
 
 const REMOTE = 'https://github.com/example-owner/example-repo.git';
 
@@ -49,6 +50,13 @@ function sink() {
 
 const PROTECTED = () => ({ ok: true, rulesets: [{ enforcement: 'active', target: 'branch', conditions: { ref_name: { include: ['~ALL'], exclude: [] } }, rules: [{ type: 'non_fast_forward' }], bypass_actors: [] }] });
 
+// Every dependency and security setting on, on a public repository.
+const SECURE = () => ({
+  ok: true, visibility: 'public', allow_auto_merge: false, alerts: 'enabled', security_updates: 'enabled',
+  secret_scanning: 'enabled', push_protection: 'enabled', code_scanning: 'enabled', private_reporting: 'enabled',
+  binding: { status: 'missing' },
+});
+
 // A default branch that requires the binding's one check, pinned, with merge commits only.
 const BRANCH_PROTECTED = () => ({
   ok: true, default_branch: 'main', classic: null, toolkit_ruleset: null,
@@ -63,7 +71,7 @@ const WORKFLOW = [
   '    runs-on: ubuntu-latest', '    steps:', '      - env:', '          TEST_LEGS: ${{ toJSON(needs) }}', '        run: node repo/scripts/run-tests.cjs --verify-ci s', '',
 ].join('\n');
 
-async function run(ctx, cwd, argv, { answer = 'yes', interactive = true, rulesetReader = PROTECTED, protectionReader = BRANCH_PROTECTED } = {}) {
+async function run(ctx, cwd, argv, { answer = 'yes', interactive = true, rulesetReader = PROTECTED, protectionReader = BRANCH_PROTECTED, securityReader = SECURE, securityWriter = null } = {}) {
   const stdout = sink();
   const stderr = sink();
   const asked = [];
@@ -73,6 +81,8 @@ async function run(ctx, cwd, argv, { answer = 'yes', interactive = true, ruleset
     registryOptions: { registryPath: ctx.registryPath, testOnly: true },
     rulesetReader,
     protectionReader,
+    securityReader,
+    ...(securityWriter ? { securityWriter } : {}),
   });
   const code = await cli.main(argv);
   return { code, stdout: stdout.text(), stderr: stderr.text(), asked };
@@ -103,6 +113,7 @@ function writeGoverned(repo, { blockText = expectedBlockText(), binding = true, 
     }));
     fs.mkdirSync(path.join(repo, '.github', 'workflows'), { recursive: true });
     fs.writeFileSync(path.join(repo, '.github', 'workflows', 'ci.yml'), WORKFLOW);
+    fs.writeFileSync(path.join(repo, '.github', 'dependabot.yml'), 'version: 2\nupdates:\n  - package-ecosystem: "github-actions"\n    directory: "/"\n');
   }
 }
 
@@ -321,6 +332,64 @@ test('K-01: check exit codes and read-only behaviour', async (t) => {
   }
 });
 
+test('SC-01: security turns on the free settings of a governed repository without a question, and only there', async (t) => {
+  const ctx = scratch(t);
+  const governed = gitRepo(ctx, 'governed');
+  writeGoverned(governed);
+  const undecided = gitRepo(ctx, 'undecided', 'https://github.com/example-owner/undecided.git');
+  writeGoverned(undecided, { repository: 'example-owner/undecided' });
+  enable(ctx, governed);
+  let on = false;
+  const writes = [];
+  const securityReader = () => ({ ...SECURE(), alerts: on ? 'enabled' : 'disabled' });
+  const securityWriter = (slug, plan) => { writes.push(slug); on = true; return plan.alerts ? [{ setting: 'alerts', ok: true, reason: null }] : []; };
+  const refused = await run(ctx, undecided, ['security'], { securityReader, securityWriter });
+  assert.equal(refused.code, 1);
+  assert.match(refused.stdout, /only in a governed repository/);
+  assert.deepEqual(writes, []);
+  const applied = await run(ctx, governed, ['security'], { securityReader, securityWriter, interactive: false });
+  assert.equal(applied.code, 0, applied.stdout);
+  assert.equal(applied.asked.length, 0);
+  assert.deepEqual(writes, ['example-owner/example-repo']);
+  assert.match(applied.stdout, /Dependabot alerts turned on\.\n- example-owner\/example-repo: read back\./);
+  const again = await run(ctx, governed, ['security'], { securityReader, securityWriter });
+  assert.match(again.stdout, /already on/);
+  assert.equal(writes.length, 1);
+  // The change is recorded with what GitHub showed before.
+  const record = JSON.parse(fs.readFileSync(path.join(path.dirname(ctx.registryPath), migration.RECORD_BASENAME), 'utf8'));
+  const last = record.runs.at(-1);
+  assert.equal(last.command, 'security');
+  assert.equal(last.securities[0].prior.alerts, 'disabled');
+  assert.deepEqual(last.securities[0].settings, [{ setting: 'alerts', ok: true, reason: null }]);
+});
+
+test('SC-02: security never says "already on" or "read back" when GitHub could not be read, and exits 2', async (t) => {
+  const ctx = scratch(t);
+  const governed = gitRepo(ctx, 'governed');
+  writeGoverned(governed);
+  enable(ctx, governed);
+  const writes = [];
+  const securityWriter = (slug, plan) => { writes.push(plan); return [{ setting: 'alerts', ok: true, reason: null }]; };
+  const unread = await run(ctx, governed, ['security'], { securityReader: () => ({ ok: false, reason: 'gh-unavailable' }), securityWriter });
+  assert.equal(unread.code, 2);
+  assert.deepEqual(writes, [], 'nothing is written when GitHub cannot be read');
+  assert.match(unread.stdout, /nothing changed: GitHub could not be read/);
+  assert.doesNotMatch(unread.stdout, /already on|read back\./);
+  // The write works but the read-back does not: unverified, exit 2.
+  let reads = 0;
+  const flaky = () => (reads++ === 0 ? { ...SECURE(), alerts: 'disabled' } : { ok: false, reason: 'gh-unavailable' });
+  const unverified = await run(ctx, governed, ['security'], { securityReader: flaky, securityWriter });
+  assert.equal(unverified.code, 2);
+  assert.match(unverified.stdout, /could not read back: Dependabot alerts/);
+  // The read-back works, but the written setting alone reads unreadable: still unverified, exit 2.
+  let partReads = 0;
+  const partial = () => (partReads++ === 0 ? { ...SECURE(), alerts: 'disabled' } : { ...SECURE(), alerts: 'unreadable' });
+  const part = await run(ctx, governed, ['security'], { securityReader: partial, securityWriter });
+  assert.equal(part.code, 2, part.stdout);
+  assert.match(part.stdout, /could not read back: Dependabot alerts/);
+  assert.doesNotMatch(unverified.stdout, /read back\./);
+});
+
 test('I-12: enforcement is reported as shipped, never as active, and Codex names its trust step', () => {
   const status = conformance.enforcementStatus();
   assert.deepEqual(status.claude_code, { status: 'shipped', reason: 'installed-state-not-checked' });
@@ -375,7 +444,7 @@ test('C-02: governed-only skills are offered only in a complete ENABLED reposito
 });
 
 test('S-10 (new modules): only the state module reads the decision file, AGENTS.md and the binding', () => {
-  for (const file of ['toolkit-governance.cjs', 'toolkit-governance-conformance.cjs', 'toolkit-governance-catalogue.cjs', 'toolkit-governance-ruleset.cjs', 'toolkit-governance-protection.cjs', 'toolkit-governance-migration.cjs']) {
+  for (const file of ['toolkit-governance.cjs', 'toolkit-governance-conformance.cjs', 'toolkit-governance-catalogue.cjs', 'toolkit-governance-ruleset.cjs', 'toolkit-governance-protection.cjs', 'toolkit-governance-migration.cjs', 'toolkit-governance-security.cjs']) {
     const text = fs.readFileSync(path.join(scripts, file), 'utf8');
     assert.equal(/repository-governance\.v1\.json|['"]AGENTS\.md['"]|toolkit-programme\.json['"]|parseRegistryBytes/.test(text.replace(/^\s*\/\/.*$/gm, '')), false, file);
   }

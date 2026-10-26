@@ -51,7 +51,7 @@ Last reviewed against `main` `9b7ffff3c30078c2290c809d20bc7c49e3f96e8d`.
 | Personal-data guard and installer | `skills/secure-ci-cd/scripts/personal-data-guard.cjs`, `skills/secure-ci-cd/scripts/install-personal-data-guard.cjs` |
 | Governance state (`toolkit-governance.cjs`) | `repo/scripts/toolkit-governance-state.cjs` (the one state function), `repo/scripts/toolkit-governance.cjs` (CLI), `repo/scripts/toolkit-governance-conformance.cjs`, `repo/scripts/toolkit-governance-migration.cjs`, `repo/scripts/toolkit-governance-ruleset.cjs`, `repo/scripts/toolkit-governance-protection.cjs` (default-branch protection), `repo/scripts/toolkit-governance-catalogue.cjs` |
 | Programme state and reconcile pass | `skills/github-program-reconciler/scripts/programme.cjs`, `skills/github-program-reconciler/scripts/programme-state.cjs` |
-| Executor checkpoint journals and turn-end hook | `skills/github-program-reconciler/scripts/programme-checkpoint.cjs`, `repo/scripts/toolkit-programme-checkpoint-hook.cjs`, `repo/scripts/toolkit-programme-checkpoint-hook.ps1` |
+| Executor checkpoint journals, after-write programme refresh, and the turn-end and after-tool hook | `skills/github-program-reconciler/scripts/programme-checkpoint.cjs`, `skills/github-program-reconciler/scripts/programme-refresh-trigger.cjs`, `repo/scripts/toolkit-programme-checkpoint-hook.cjs`, `repo/scripts/toolkit-programme-checkpoint-hook.ps1` |
 
 Host config writes reuse `repo/scripts/codex-app-server.cjs` and share `repo/scripts/codex-config-load-check.cjs` (Codex effective-load check and rollback) and `repo/scripts/host-json-config-write.cjs` (Claude JSON read-back and rollback); see [host config writes](docs/agent-playbooks/host-config-writes.md).
 

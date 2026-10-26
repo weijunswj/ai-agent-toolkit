@@ -193,11 +193,11 @@ function exceptionFaults(config) {
 }
 
 test('an exception can only take a script out of a script folder, never a workflow, instruction or data file', () => {
-  for (const entry of ['!.github/workflows/programme-reconcile.yml', '!repo/docs/TOOLKIT-DELIVERY.md', '!AGENTS.md', '!repo/contracts/topology-scope-policy.json', '!repo/scripts/lib/x.cjs']) {
+  for (const entry of ['!.github/workflows/source-watch-plan.yml', '!repo/docs/TOOLKIT-DELIVERY.md', '!AGENTS.md', '!repo/contracts/topology-scope-policy.json', '!repo/scripts/lib/x.cjs']) {
     const config = { ...TOOLKIT, risky: [...TOOLKIT.risky, entry] };
     assert.deepEqual(exceptionFaults(config), [entry], entry);
   }
-  assert.equal(tierOf('.github/workflows/programme-reconcile.yml'), 'RISKY');
+  assert.equal(tierOf('.github/workflows/source-watch-plan.yml'), 'RISKY');
   assert.equal(tierOf('repo/docs/TOOLKIT-DELIVERY.md'), 'RISKY');
   assert.equal(tierOf('repo/scripts/Bump-Version.cjs'), 'RISKY', 'a new script differing only in case from an exception stays RISKY');
 });

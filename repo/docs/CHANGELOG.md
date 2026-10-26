@@ -1,6 +1,6 @@
 # Toolkit Changelog
 
-## 3.13.9
+## 3.15.5
 
 ### Plain-text check
 
@@ -11,6 +11,58 @@
 - **Toolkit runs the same check:** `repo/scripts/check-plain-references.cjs` now runs the portable check with Toolkit's settings in `repo/contracts/plain-references/config.json`, which bans Toolkit's own release, lane, record and test-row codes across skills, docs, contracts and the readable fields of JSON and YAML files.
 - **Whole-repository sweep:** the remaining issue references and codes in docs, skills, contracts, setup questions, helper titles and plugin blurbs were rewritten in plain words, so the baseline is empty. The delivery contract is now `repo/docs/TOOLKIT-DELIVERY.md`. The setup topology choice reads "Toolkit repos: main session + Toolkit planning and build helpers only. Elsewhere: one layer of subagents."
 - **Chat replies count:** the global plain-language rule now names chat replies among the human-facing work it covers.
+
+## 3.15.4 (final-product UAT)
+
+### Coding gates
+
+- **Owner UAT tests only the final product:** the owner is asked to try only features the user runs and sees, such as hook setup in Codex or Claude Code, a quote run or a design run. Internals (governance, programme state, gate plumbing) are proven by CI, tests, G2 and agent UAT; with no final-product step, UAT is not required. Each ask says in plain words what the feature does, the one thing to try and what the owner should see.
+- **Device steps stay with the agent:** a step on the user's computer that an agent there can do, such as creating a local scheduled task, is done by the Remote Control session itself; the user is asked only when a safety check blocks it.
+
+### Projects skill
+
+- Owner UAT lists and the hybrid work list follow the two rules above; Toolkit text says "computer" or "Remote Control session" rather than naming one kind of device. The Claude Projects controller skill is 2026-10-26.3 (save the new skill card).
+
+## 3.15.3
+
+### Projects skill
+
+- **Running post and links enforced:** a new Toolkit hook runs before every Claude Projects post, in the coordinator and in work threads. It refuses a fresh post while the owner has not written since that session's newest post (unless that post nears 8 KB) and tells it to edit that post instead, and it refuses any post that names "PR <n>" without a link. It reads the session's own transcript, so the rule survives a context reset. Replies under a post are exempt from the fresh-post check but still need their links, decision cards are not checked, and sessions without the Claude Projects post tools never see it. Every PR in a list needs its own link. The skill now also has the coordinator keep its running post id as the first memory line, and links every PR, thread, file or artifact it names: a PR's changed files only once it is ready for the owner to check and merge, otherwise the chat thread that owns it. Briefs tell work threads to keep one running post with one-line updates. The hourly nudge flags back-to-back posts, a stale running post id and missing links. The Claude Projects controller skill is 2026-10-26.2 (save the new skill card).
+
+## 3.15.2
+
+### Claude Projects
+
+- **A card each when the account copies fall behind:** Claude Projects controller skill 2026-10-26.1 (tap Save on its card). The skill card is one Save tap. After the first card, a coordinator that can post skill cards adds the memory line `skill cards: coordinator`; from then on the check-in writes "card due" instead of posting its own card, and the coordinator posts it in the project chat, so the owner gets one card where they read. On "card failed" the coordinator posts it too when it can. No agent can update a claude.ai plugin, so when the Toolkit plugin is more than a day behind, the coordinator posts one plugin card in the project chat with two clicks in Customize > Plugins (remove the Toolkit plugin only and let it reinstall), with Check for updates and a marketplace re-add as fallbacks. A retired skill card in the chat gets a "don't save" line.
+- **Plugin line on every run:** the check-in shows `**Plugin:** current` or how far behind it is, names the commit where `main` moved past the account version, and puts `PLUGIN BEHIND` on its first line once per `main` version (the "plugin behind" record in its state file).
+- **No false skill drift from a short clone:** before the check-in calls an account file a direct edit, it fetches the full history of its shallow Toolkit clone and checks every revision again, so an old but unedited account copy is reported as behind, not edited. If that fetch fails, it reports drift as unverified and posts no card.
+
+## 3.15.1 (local secret scan)
+
+### Secure CI/CD skill
+
+- **Local secret scan:** `skills/secure-ci-cd/scripts/local-security-scan.cjs` checks one repository on the owner's computer for committed credentials, read-only, across every tracked or unignored file and every line ever added on any branch or tag (merges against their first parent, every file as text, no line too long). It needs only Node and git, taken from an absolute PATH folder outside the scanned repository, installs nothing and sends nothing off the computer; vulnerable dependencies stay with Dependabot. The report (`--out`, outside the scanned repository) names places only (file, line, column, short commit, format), never any part of a match, an author or a commit message, and classes each finding as a release blocker or a likely false positive. `--recheck` shows what is fixed, still open or new. Exit codes: 0 clean, 1 release blocker, 2 could not scan (including a report that cannot be written), 3 incomplete (a shallow clone, or a file over 5 MB or unreadable).
+- **Shared secret formats:** `skills/secure-ci-cd/scripts/secret-patterns.cjs` holds providers' published token shapes (fixed prefix, exact length, fixed characters) with no entropy guessing, finds armoured PGP and encrypted PEM private keys, skips plain placeholders and honours a same-line `secret-scan: allow <reason>` marker for matches before it. Other Toolkit secret checks reuse it.
+
+## 3.15.0 (dependency updates)
+
+### Dependency and security settings
+
+- **`toolkit governance check` checks dependency and security settings:** for an ENABLED github.com repository with a programme binding it reports drift when Dependabot alerts or security updates are off, `.github/dependabot.yml` (or `.yaml`) misses a package ecosystem found in the repository, or, on a public repository, secret scanning, push protection, CodeQL (default setup, or an advanced setup in a workflow) or private vulnerability reporting is off. On a private or internal repository the paid features are required only when the owner answered on; without an answer the check reports the missing answer.
+- **Safe Dependabot auto-merge:** the programme binding takes an optional `dependency_updates` (`auto_merge`: `off`, the default, or `patch-minor`; `github_actions`: `owner`, the default, or `auto-merge`). With `patch-minor`, a new workflow template turns on GitHub auto-merge, merge commit only, for Dependabot patch and minor updates, so GitHub merges once every required check passes. It uses only the built-in token, never checks out the pull request's code, acts only on pull requests to the default branch whose every commit is Dependabot's, reads the policy from the default branch, does nothing unless a ruleset requires at least one check, pins auto-merge to the head commit it checked, and never turns it on for a re-run someone else started. Major updates, minor updates from a 0.x version, updates whose maintainers changed and, by default, GitHub Actions updates get one comment for the owner and stay open. When anyone but Dependabot pushes to or re-runs the pull request, or its base branch changes, auto-merge is turned off again; when that cannot be confirmed the job fails rather than saying so. A merge made with the built-in token starts no push workflows on the base branch; they run on its next push.
+- **Free settings on by default:** GitHub's free dependency and security settings are on by default for a governed repository, covered by the owner's yes to governance. The new `toolkit governance security` (agents may run it) and `toolkit governance migrate` turn them on without another question, write a `dependabot.yml` (weekly, cooldown, patch and minor grouped) and the workflow only where none exists, and read everything back. They never edit a file they did not write, never turn on CodeQL default setup over an advanced setup, write nothing when GitHub cannot be read, report a read-back that fails for any written setting as unverified (exit 2), count CodeQL as an advanced setup when a default-branch workflow that runs on its own or as a reusable workflow has init and analyze steps in one job that is not switched off, or GitHub received CodeQL results on the default branch in the last 90 days from anything but default setup (any other workflow whose text names CodeQL, other than its upload-sarif step, keeps default setup off and is reported for a hand check), leave alone a setting GitHub does not allow on the plan or under an organisation policy, and record every change with what GitHub showed before. On a private repository the update pull requests use the owner's Actions minutes.
+- **Paid features are always asked, default off:** on a private repository, secret scanning, push protection and CodeQL need GitHub's paid Secret Protection and Code Security. Governance setup now asks about them every time, says they are paid, and records only the owner's own answer as `paid_security` (`off` or `on`) in the programme binding; the check reports a private repository without an answer, and nothing paid is turned on without "on". The paid answer and auto-merge are read from the binding merged on the default branch, never from the working tree, so an unmerged edit turns nothing on. The terminal `enable` question says the same.
+- **This repository:** Dependabot now also covers npm, with a cooldown and grouping, and carries the auto-merge workflow; the owner gave standing permission for Dependabot patch and minor updates to merge on green (`auto_merge: patch-minor`, effective once this binding is merged), and GitHub Actions updates stay with the owner. Dependabot does not bump the auto-merge workflow's own pinned action: it moves with Toolkit's template.
+
+## 3.14.0 (programme pages)
+
+### Programme pages refresh without a token
+
+- **New `refresh` command in `programme.cjs`:** the full reconcile pass with `--apply`, which any session in a governed checkout may run, executors included. It writes under the controller that holds the parent now and takes no session, patch or verdict, so every decision stays the controller's. It refuses when nobody holds the parent (`PARENT_UNHELD`).
+- **After-write hook:** the plugins' after-tool hook marks a session that wrote to GitHub (connector write tools, `gh issue` or `gh pr` writes, `gh api` writes, `git push`), and the turn-end hook starts `refresh` in the background once for each governed repository it wrote for. It uses the computer's own `gh` sign-in. Codex users trust one more hook (`PostToolUse`) in `/hooks`.
+- **One pass at a time per repository on a computer:** while another pass holds the lock, `refresh` queues one more pass for it and ends (a failed pass or a long burst leaves it to the next refresh or the hourly sweep), and `reconcile --apply` refuses (`PASS_RUNNING`). The lock is taken over only from an owner whose process has ended, whose lock was written before a restart the computer can tell (by its boot id on Linux, or elsewhere by an uptime lower than the lock recorded; on Windows a Fast Startup shutdown is not a restart), or who has been silent for 6 hours (a killed pass whose process id was reused). A pass that loses its lock stops before its next GitHub request, and an owner removes only its own lock.
+- **Hourly sweep:** the Projects hourly nudge gains a programme step that runs `refresh` where `gh` is signed in, and Projects setup now has a local Remote Control thread create the one local sweep task on the device when the repository's GitHub governance is ENABLED and a device is named (never otherwise), because cloud threads cannot refresh the pages themselves. The sweep also catches edits made on the web.
+- **Removed the token-based programme reconcile workflow** and its secret and writer-variable setup. Nothing stores a GitHub token for the programme pages.
 
 ## 3.13.8
 

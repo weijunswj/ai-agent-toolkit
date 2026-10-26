@@ -52,22 +52,28 @@ test('no plugin payload or skills folder reaches the Projects controller skill',
 
 test('Projects wires managed instructions, promises and fresh scheduled sessions to controller law', () => {
   const text = bundle();
-  assert.match(text, /^Version: 2026-10-25\.8$/m);
+  assert.match(text, /^Version: 2026-10-26\.3$/m);
   // The check-in posts the skill card itself; the coordinator lists the Save tap, re-upload only when the card failed.
   assert.match(text, /`SKILL BEHIND`: the account copy is an older Toolkit revision\. With "card posted", the check-in posted the skill update card in its thread: put "tap Save on the skill card"/);
   assert.match(text, /keep that thread open \(never resolve it in the hourly pass, even after the check-in moves to a new home thread\) until the owner saves/);
-  assert.match(text, /Once a check-in shows the account copy current, drop the pending item and resolve the thread unless it is a current home thread\. Do the same for an older card when a newer card is posted, when the owner declines it, or when a check-in reports SKILL DRIFT or no account copy: its Save would install an older Version or overwrite direct edits\. Name the Version in each Save item\./);
+  assert.match(text, /Once a check-in shows the account copy current, drop the pending item and resolve the thread unless it is a current home thread\. Do the same for an older card when a newer card is posted, when the owner declines it, or when a check-in reports SKILL DRIFT or no account copy: its Save would install an older Version or overwrite direct edits; for a chat card, post "Don't save the <Version> card above\." Name the Version in each Save item\./);
   assert.match(text, /the coordinator resolves a check-in run thread that holds a skill card once `SKILL BEHIND` \(\*\*Daily check-in\*\*\) releases it\./);
-  assert.match(text, /With "card failed", or with neither, tell the owner once per Version to re-upload the skill with its reference files\./);
+  assert.match(text, /If you could not post a due card, or with neither marker and no "drift unverified", tell the owner once per Version to re-upload the skill with its reference files\./);
   assert.match(text, /Fresh-session scheduled runs resolve their own run thread after delivery, except a check-in run that posted a skill card;/);
   assert.match(text, /each fresh scheduled run resolves its own thread after report delivery, except a check-in run that posted a skill card\./);
   // Plugin lag: removing the plugin alone is the fix that worked; the marketplace re-add is the fallback.
   assert.match(text, /`PLUGIN BEHIND`: the Toolkit plugin on the user's claude\.ai account is more than a day behind `main`/);
+  // One card each where the owner reads: the coordinator posts a due or failed skill card in the project chat, and one plugin card.
+  assert.match(text, /With "card due" or "card failed", load propose_skills \(ToolSearch\) and post the card yourself in the project chat \(kind improvement, target and name web-controller-projects, description from main's frontmatter; skillMd main's SKILL\.md read byte for byte\), never with SKILL DRIFT, and link it in the pending item\./);
+  assert.match(text, /On "card posted", if propose_skills loads for you, add memory line `skill cards: coordinator` so the check-in writes "card due" next time; remove it if a post fails\./);
+  assert.match(text, /No agent can update it: once per version, post one plugin card in the project chat with the check-in's steps/);
+  assert.match(text, /Keep it pending until a check-in shows `\*\*Plugin:\*\* current`\./);
+  assert.match(text, /Only the account skill \(one Save tap\) and plugin \(two clicks\) need the owner: no agent can write them\./);
   // The skill drift watch lives in the daily check-in: direct account edits come back into Toolkit first.
   assert.match(text, /`SKILL DRIFT`: the account copy has direct edits that match no Toolkit revision\. Bring them into Toolkit from the saved copy/);
   assert.match(text, /Post its first line to the owner every run, "nothing changed" included/);
   assert.match(text, /The hourly nudge stays silent/);
-  assert.match(text, /remove the Toolkit plugin only in claude\.ai Customize > Plugins and let it reinstall; if it is still behind, remove the marketplace and add it again with Sync automatically on/);
+  assert.match(text, /in claude\.ai Customize > Plugins, remove the Toolkit plugin only and let it reinstall; if it is still behind, select Check for updates on its marketplace; last, remove the marketplace and add it again with Sync automatically on/);
   assert.doesNotMatch(text, /Thread effort follows the role|fires into that same thread|firing runs in the dedicated check-in thread/);
   assert.match(text, /toolkit-projects-instructions\.cjs --render/);
   assert.match(text, /toolkit-projects-instructions\.cjs --check <file>/);
@@ -163,6 +169,10 @@ test('Projects keeps its Toolkit base layer current without touching the project
   // Coordinator posts, in the main project chat and reply threads alike.
   assert.match(text, /\*\*Posts, everywhere you post\*\* \(the main project chat and reply threads alike\): after the owner's last message, keep all your output in one running post and edit it, appending each new result, PR or question and keeping every earlier detail\. The running post is always your newest top-level post, the acknowledgement posted with a new thread included\. Before every edit, check whether the owner has written in the main project chat since that post; if so, post fresh instead\. Start each appended update with its local time, for example \*\*\[16:41\] Update:\*\*\. Also start a fresh post when the running post nears about 8 KB; an owner message inside a thread does not start one, and the reply to it is appended to the running post\. Answer a burst of owner messages in one post\. When the owner replies under one of your earlier posts in the main project chat, answer in the main project chat \(you cannot post under your own posts there\) with a fresh post starting "Re: your reply on <short topic>", and never edit the older post\./);
   assert.doesNotMatch(text + body, /is always a new post|edit your own post only/);
+  // Running post id in memory, links on everything named, both enforced by the post hook.
+  assert.ok(text.includes('save its message id as the first line of project memory, `RUNNING POST: <message id>`'));
+  assert.ok(text.includes('it refuses a fresh post while the owner has not written since your newest post, unless that post nears 8 KB'));
+  assert.ok(text.includes('only when it is ready for the owner to check and merge; until then, link the chat thread that owns the work'));
   assert.match(text, /also post a one-line pointer to it in top-level project chat/);
   // Base layer and project layer.
   assert.match(text, /Project instructions start with the managed block \(only blank lines before it\)/);
@@ -203,10 +213,51 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.ok(at.every((position, index) => position > -1 && (index === 0 || position > at[index - 1])), at.join(','));
 });
 
+test('device steps go to the Remote Control session, not the owner', () => {
+  const text = read(SKILL_REL);
+  // The owner was once asked to create a local scheduled task that a Remote Control session could create.
+  assert.match(text, /installs, setup checks and device tasks \(such as a local scheduled task\), which the Remote Control session on the user's computer does itself; hand the user a step on their computer only when its safety check blocks the session;/);
+  assert.match(read('repo/contracts/agent-rules/global-rules.md'), /never ask them to run commands, or to do a device step an agent there can do unless a safety check blocks it\./);
+});
+
+test('Toolkit text says computer or Remote Control session, not laptop', () => {
+  // Work runs on whatever computer the user has. "laptop" stays only as a screen size or an icon
+  // name in the frontend art direction skill, matched line by line.
+  const allowedFolder = /^skills\/frontend-art-direction\//;
+  const roots = ['skills', 'repo/contracts', 'repo/docs', 'repo/scripts', 'repo/tests/fixtures'];
+  const hits = [];
+  const walk = (rel) => {
+    for (const entry of fs.readdirSync(path.join(repoRoot, rel), { withFileTypes: true })) {
+      const child = `${rel}/${entry.name}`;
+      if (entry.isDirectory()) { if (entry.name !== 'node_modules') walk(child); continue; }
+      if (/\.(png|jpe?g|gif|ico)$/i.test(entry.name)) continue;
+      fs.readFileSync(path.join(repoRoot, child), 'utf8').split(/\r?\n/).forEach((line, index) => {
+        // Only the allowed phrase is exempt, so a banned use on the same line still fails.
+        const rest = !allowedFolder.test(child) ? line : /^81,Device,laptop,/.test(line) ? '' : line.replace(/mobile, tablet, laptop, and wide/gi, '');
+        if (/laptop/i.test(rest)) hits.push(`${child}:${index + 1}`);
+      });
+    }
+  };
+  roots.forEach(walk);
+  assert.deepEqual(hits, []);
+});
+
 test('Projects lists every owner-hands step when it reports what waits on the owner', () => {
   const text = read(SKILL_REL);
   // An optional step posted only inside a thread was once left off a pending answer.
   assert.match(text, /\*\*Pending lists name every owner-hands step\.\*\* Whenever you tell the owner what waits on them \(a pending answer, the nudge reminder, a check-in\), list every step only they can do, optional ones and ones posted only inside a thread included, each with its link; never drop one as minor\./);
   const nudge = read('repo/contracts/claude-projects/web-controller-projects/tasks/hourly-nudge.md');
   assert.match(nudge, /\*\*Waiting on owner:\*\* \([^\n]*plus every step only the owner can do that is not done yet, optional ones and ones posted only inside a thread included;/);
+});
+
+test('the device programme sweep needs both GitHub governance ENABLED and a named device', () => {
+  // Cloud-only projects have no device to run it on, so neither half alone may set it up or suggest it.
+  const at = rel => read(`repo/contracts/claude-projects/web-controller-projects/${rel}`);
+  assert.match(at('reference/setup.md'), /reports plain `ENABLED` \(not `ENABLED \(materials incomplete\)`; a failed read counts as not ENABLED\) and step 3 named a device: also set up the \*\*Programme sweep on a device\*\*/);
+  assert.match(at('reference/setup.md'), /With governance in any other state, or no device, do not create it or suggest it/);
+  assert.match(at('reference/recurring-tasks.md'), /Only for a repository whose GitHub governance is ENABLED, in a project whose memory names a device \(guided setup step 3\); in any other case, never create or suggest it\./);
+  assert.match(at('SKILL.md'), /only when ENABLED and a device is named\)/);
+  assert.match(at('tasks/hourly-nudge.md'), /when project memory names a device, "; no device programme sweep task armed", and with no device named "; no device named, so cloud writes wait for the next session on a computer with gh signed in"/);
+  const sweep = JSON.parse(at('setup-inventory.json')).rows.find(row => row.id === 'programme-sweep');
+  assert.match(sweep.artefact, /GitHub governance ENABLED and a device named/);
 });

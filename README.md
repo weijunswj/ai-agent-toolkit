@@ -44,7 +44,7 @@ Each skill is a folder under [skills/](skills/). Copy the whole folder, not just
 | [n8n Safety Router](skills/n8n-safety-router/) | The safety rules to load before any n8n work. |
 | [n8n Environment Setup](skills/n8n-environment-setup/) | Set up n8n locally or on a server, with backups and the official n8n skills. |
 | [n8n Workflow Transport](skills/n8n-workflow-transport/) | Clean, check and compare n8n workflow files before an approved import or export. |
-| [Secure CI/CD](skills/secure-ci-cd/) | Plan security-first CI/CD and GitHub Actions; block personal data in commits and pull requests. |
+| [Secure CI/CD](skills/secure-ci-cd/) | Plan security-first CI/CD and GitHub Actions; block personal data in commits and pull requests; scan a repository for committed credentials. |
 | [Skill Product Review](skills/skill-product-review/) | Review third-party agent skills before using or adapting them. |
 | [Local AI Safety](skills/local-ai-safety/) | Review local AI runtimes, model downloads and exposed endpoints. |
 | [Managed App Foundation Review](skills/managed-app-foundation-review/) | Compare managed services before building auth, databases or other foundations yourself. |
@@ -74,7 +74,7 @@ Maintainers start with [AGENTS.md](AGENTS.md). There is no repo-wide MCP server;
 
 ## Appendix: Source-of-Truth Contract
 
-<!-- AI-AGENT-TOOLKIT:repo/contracts/source-of-truth-contract.md:BEGIN SOURCE-OF-TRUTH-CONTRACT v2 toolkit=3.13.9 sha256=24ee07475127 -->
+<!-- AI-AGENT-TOOLKIT:repo/contracts/source-of-truth-contract.md:BEGIN SOURCE-OF-TRUTH-CONTRACT v2 toolkit=3.15.5 sha256=24ee07475127 -->
 ## Source-of-Truth Contract
 
 - `skills/**` is the canonical copyable product surface; each skill folder is the install unit and is edited directly. `skills/controller-bootstrap/` is an explicit-only re-entry procedure for an assigned Toolkit controller; it depends on the live `repo/CONTROLLER.md` and `repo/contracts/controller-kernel/stack-registry-v3.json` and is not a policy copy, role assignment or permission.

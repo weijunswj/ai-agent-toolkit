@@ -250,7 +250,7 @@ Setup run with `--host claude-code` shows this bank instead, for the same repres
 
 Toolkit setup choices - 8 questions across 3 sections
 
-Bank reference: R6ZJ-JXS0-Q1JZ-ZGNF
+Bank reference: 4884-3YP2-8F7X-0W4Q
 
 Quick index
 
@@ -440,7 +440,7 @@ Quick index
 
 **Recommended outcome:** Set the recommended values that are not set yet; values you set yourself stay as they are.
 
-**Why:** They keep AI attribution out of your commits and pull requests, let a Projects coordinator wake laptop threads, keep a flagged request on the model you chose, and make Claude Code read the repository's AGENTS.md.
+**Why:** They keep AI attribution out of your commits and pull requests, let a Projects coordinator wake Remote Control sessions on your computer, keep a flagged request on the model you chose, and make Claude Code read the repository's AGENTS.md.
 
 **Choices:**
 
