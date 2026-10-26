@@ -85,7 +85,7 @@ const NEVER_OWNER = 'Never act as the user: do not answer the governance questio
 // (read-only ones, and the card, whose answer then counts for nothing without the tool gate's note)
 // is let through, as it was before the hook saw it. hooks.json matches the same split, with
 // onFailure: "block" only on this list, so a hook that cannot even start holds only these too.
-const STATE_CHANGING_TOOLS = /^(?:Bash|PowerShell|Monitor|Edit|Write|MultiEdit|NotebookEdit|Agent|Task|mcp__.*)$/;
+const STATE_CHANGING_TOOLS = /^(?:Bash|PowerShell|Monitor|Edit|Write|MultiEdit|NotebookEdit|Agent|Task|TaskStop|EnterWorktree|CronCreate|CronDelete|RemoteTrigger|SendMessage|Workflow|mcp__.*)$/;
 
 function failed(event, input, gate) {
   // A failed PostToolUse records nothing, which leaves the repository waiting.

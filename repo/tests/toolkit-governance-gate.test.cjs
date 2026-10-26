@@ -1468,7 +1468,7 @@ test('hook wiring: both Claude copies hold prompts and tools with onFailure bloc
     assert.equal(rest.hooks[0].onFailure, undefined);
     assert.equal(tool.matcher, `^${claudeHook.STATE_CHANGING_TOOLS.source.slice(1, -1)}$`, file);
     // Claude Code tests a matcher with these characters as an unanchored regex, so each carries its own anchors.
-    for (const name of ['Bash', 'PowerShell', 'Monitor', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'Agent', 'Task', 'mcp__github__create_pull_request']) {
+    for (const name of ['Bash', 'PowerShell', 'Monitor', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'Agent', 'Task', 'TaskStop', 'EnterWorktree', 'CronCreate', 'CronDelete', 'RemoteTrigger', 'SendMessage', 'Workflow', 'mcp__github__create_pull_request']) {
       assert.match(name, new RegExp(tool.matcher), name);
       assert.doesNotMatch(name, new RegExp(rest.matcher), name);
     }
@@ -1694,7 +1694,7 @@ test('a hook that fails holds only state-changing tools inside a repository; rea
     { PromptHold: thrower, ToolGate: thrower, insideRepository() { throw new Error('broken'); } },
   ]) {
     const respond = (cwd, tool_name) => claudeHook.respond('PreToolUse', { cwd, tool_name, tool_input: {} }, { gate: gateModule, environment });
-    for (const tool_name of ['Bash', 'Edit', 'Agent', 'mcp__github__create_pull_request']) {
+    for (const tool_name of ['Bash', 'Edit', 'Agent', 'TaskStop', 'EnterWorktree', 'CronCreate', 'CronDelete', 'RemoteTrigger', 'SendMessage', 'Workflow', 'mcp__github__create_pull_request']) {
       assert.equal(respond(repo, tool_name).hookSpecificOutput.permissionDecision, 'deny', tool_name);
     }
     for (const tool_name of ['Read', 'Grep', 'Glob', 'WebFetch', 'AskUserQuestion', 'ToolSearch']) {

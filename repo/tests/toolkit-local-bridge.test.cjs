@@ -3652,7 +3652,7 @@ test('native plugin manifests and hooks are valid and policy-light', () => {
   const claudeAgentHook = claudeHooks.hooks.PreToolUse[0];
   assert.equal(claudeAgentHook.matcher, 'Agent|Task');
   assert.match(claudeAgentHook.hooks[0].command, /\$\{CLAUDE_PLUGIN_ROOT\}\/repo\/scripts\/toolkit-claude-agent-hook\.cjs/);
-  assert.deepEqual(claudeHooks.hooks.PreToolUse.map(entry => entry.matcher), ['Agent|Task', 'Bash|PowerShell', '^(?:Bash|PowerShell|Monitor|Edit|Write|MultiEdit|NotebookEdit|Agent|Task|mcp__.*)$', '^(?!(?:Bash|PowerShell|Monitor|Edit|Write|MultiEdit|NotebookEdit|Agent|Task|mcp__.*)$)', '^mcp__hearthbot__(?:post_message|edit_message)$']);
+  assert.deepEqual(claudeHooks.hooks.PreToolUse.map(entry => entry.matcher), ['Agent|Task', 'Bash|PowerShell', '^(?:Bash|PowerShell|Monitor|Edit|Write|MultiEdit|NotebookEdit|Agent|Task|TaskStop|EnterWorktree|CronCreate|CronDelete|RemoteTrigger|SendMessage|Workflow|mcp__.*)$', '^(?!(?:Bash|PowerShell|Monitor|Edit|Write|MultiEdit|NotebookEdit|Agent|Task|TaskStop|EnterWorktree|CronCreate|CronDelete|RemoteTrigger|SendMessage|Workflow|mcp__.*)$)', '^mcp__hearthbot__(?:post_message|edit_message)$']);
   assert.match(claudeHooks.hooks.PreToolUse[1].hooks[0].command, /toolkit-claude-attribution-hook\.cjs/);
   // The governance hook in two entries: state-changing tools (held if the hook cannot start) and the rest.
   for (const index of [2, 3]) assert.match(claudeHooks.hooks.PreToolUse[index].hooks[0].command, /toolkit-governance-hook\.cjs" --event PreToolUse$/);
@@ -3686,10 +3686,11 @@ test('toolkit setup skill documents the end-to-end English setup journey', () =>
   for (const relPath of paths) {
     const text = fs.readFileSync(path.join(repoRoot, relPath), 'utf8');
     assert.match(text, /setup toolkit/i, relPath);
-    assert.match(text, /node "\$env:USERPROFILE\\\.ai-agent-toolkit\\source\\ai-agent-toolkit\\repo\\scripts\\setup-toolkit\.cjs"/, relPath);
+    assert.match(text, /Resolve the home folder yourself and run the managed script by its full path, in forward slashes inside double quotes/, relPath);
+    assert.match(text, /```text\r?\nnode "<home folder>\/\.ai-agent-toolkit\/source\/ai-agent-toolkit\/repo\/scripts\/setup-toolkit\.cjs" --execute --profile auto-main\r?\n```/, relPath);
     assert.doesNotMatch(text, /"%USERPROFILE%/, relPath);
     assert.doesNotMatch(text, /\$HOME\/\.ai-agent-toolkit/, relPath);
-    assert.match(text, /active repo command is bootstrap\/fallback only|active `repo\/scripts\/setup-toolkit\.cjs --execute --profile auto-main` as bootstrap\/fallback only|active repo only as bootstrap\/fallback/i, relPath);
+    assert.match(text, /active repo command is bootstrap\/fallback only/, relPath);
     assert.match(text, /append `--host claude-code`|with `--host claude-code`/i, relPath);
     assert.match(text, /Do not run an active stale verifier after managed setup|Verification after managed setup must use the managed checkout verifier/i, relPath);
     assert.match(text, /active worktree path and commit|active worktree path\/commit/i, relPath);
@@ -3711,7 +3712,7 @@ test('toolkit setup skill documents the end-to-end English setup journey', () =>
     assert.match(text, /Codex native plugin/i, relPath);
     assert.match(text, /setup-codex-toolkit-plugin\.cjs/, relPath);
     assert.match(text, /\.claude-plugin\/plugin\.json/, relPath);
-    assert.match(text, /\$env:USERPROFILE\\\.codex\\plugins\\\.plugin-appserver\\codex\.exe/, relPath);
+    assert.match(text, /--codex-cli "<home folder>\/\.codex\/plugins\/\.plugin-appserver\/codex\.exe"` as a full path in forward slashes inside double quotes/, relPath);
     assert.match(text, /Do not use Codex to update Claude Code or Claude Code to update Codex/i, relPath);
     assert.match(text, /repo-backed auto-update/i, relPath);
     assert.match(text, /OpenCode is not a Toolkit target/i, relPath);

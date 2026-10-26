@@ -7,6 +7,21 @@
 - **Tap to answer in Claude Code:** in a github.com repository with no governance decision, Claude Code shows a Yes, No, Later card with the question as three short lines of text above it, so the question is seen in the mobile app and Remote Control too, where a hook's hold message is not shown. The held message is kept and handed back after the answer, as before; on the turn that shows the card nothing else runs, read-only tools included. Only the user answers: a card with an answer already filled in is refused, and a tap counts only on the card Toolkit let through, once, in the session that was asked. Typing yes, no or later still works.
 - **Shorter notices:** the held-message notice is three lines in both hosts (Codex shows it as text), and the follow-up and not-on-github.com notices are one or two lines. What each answer does is in the bridge guide.
 
+## 3.15.10 (flexible setup answers)
+
+- **You answer setup in your own words:** after the setup question bank, reply `all recommended`, `allrecommended`, `use all the recommended ones` or `change 3.1 to D, rest recommended`. The agent turns a clear reply into the exact answer, adds the bank reference itself and shows one line saying what it sent; it never asks you to type the reference. It asks one short question when the reply is unclear, never treats a bare `yes` or `ok` as an answer, and uses only your reply to the newest bank.
+- **Setup accepts sloppy spelling:** `all recommended` in any case, with spaces, hyphens, underscores or nothing between the words and one optional full stop; the bank reference in any case, with or without hyphens, with O read as 0 and I or L as 1, followed by a colon or spaces; and changes separated by commas, semicolons or spaces. A missing, wrong or old reference, duplicates, unknown questions or choices, and mixed answers still stop before any change. A live terminal accepts the same spellings.
+- The reply guide under the bank now reads "Reply with either: `all recommended` or only your changes", and still prints the bank reference above it.
+
+## 3.15.9 (setup launch on Windows)
+
+### Setup launch on Windows
+
+- **One setup line for PowerShell and cmd.exe:** agents now run the managed checkout's setup script by its resolved full path, written with forward slashes inside double quotes and with no `$env:` or `%...%` variables: `node "<home folder>/.ai-agent-toolkit/source/ai-agent-toolkit/repo/scripts/setup-toolkit.cjs" --execute --profile auto-main`. The old PowerShell-only line failed when Codex ran it through `cmd.exe`, because `cmd.exe` does not expand `$env:`, so "refresh toolkit" never started setup. The shell keeps the chat's own folder, so setup still fast-forwards your own Toolkit clone and measures that project's instructions.
+- **Same form for toolkit env, the setup help and `--codex-cli`:** the `toolkit-env` skill, `setup-toolkit.cjs --help` and the `--codex-cli` hint all use a resolved full path in quotes.
+- **PowerShell blocks for people:** commands people type themselves in the README, the bridge guide, How to use and the toolkit env guide keep their PowerShell form and are labelled as PowerShell for a person to type.
+- **Windows launch test:** a new test launches setup from a different folder whose path has a space, with a home folder that has a space, through both `cmd.exe` and PowerShell, and shows the old line failing through `cmd.exe`.
+
 ## 3.15.8 (pull request text checks)
 
 ### Pull request text is checked before review
