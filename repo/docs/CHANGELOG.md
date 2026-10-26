@@ -1,5 +1,13 @@
 # Toolkit Changelog
 
+## 3.15.13 (post layout)
+
+### Projects skill
+
+- **Post layout enforced:** the Claude Projects post hook now also checks the approved post layout on top-level posts of about 25 words or more: a **Now:** line first, **[HH:MM] Update:** one-liners with no question or numbered options inside, every **Waiting on you** item linked to its card or thread, and one **ELI5:** line as the very last line. An edit of an earlier post must keep every Update line word for word and add at least one new one. Every post and reply is refused if it has an em-dash or an arrow outside code, or more than one **Question:**. Replies under a post keep only the wording and link checks.
+- **Merge summary before merge:** in a Projects session, a PR merge (`gh pr merge`, a `gh api` merge call or a merge tool) is refused until a line in one of that session's own posts or edits says "external effects" and names the PR. It reads only the command text: it reads the command word by word with bash or PowerShell quoting rules (quotes, escapes, heredocs, here-strings and option values never hide or replace the PR number, and a redirection's stream number or target is never read as it; a command it cannot finish reading counts as a merge with no number) and checks every merge in one command; curl, GraphQL, wrapper shells, prefixes, aliases, scripts, direct pushes and a command inside a double-quoted `$(...)` or backticks are not seen, and an unreadable transcript lets the merge pass. Sessions outside Projects never see it.
+- The skill describes the layout in a new **Post layout** rule. The Claude Projects controller skill is 2026-10-26.6 (save the new skill card).
+
 ## 3.15.12 (governance tap card)
 
 ### Governance question
