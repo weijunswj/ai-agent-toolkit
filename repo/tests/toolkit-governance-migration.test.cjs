@@ -90,7 +90,17 @@ function protectionReader(protections) {
   };
 }
 
-async function migrate(ctx, { answers = ['yes'], interactive = true, rulesets = {}, created = [], argv = null, protections = {}, written = [], writer = null, reader = null } = {}) {
+// Every dependency and security setting on, unless `settings` says otherwise for that slug.
+function securityReader(settings = {}) {
+  return (slug) => ({
+    ok: true, visibility: 'public', allow_auto_merge: false, alerts: 'enabled', security_updates: 'enabled',
+    secret_scanning: 'enabled', push_protection: 'enabled', code_scanning: 'enabled', private_reporting: 'enabled',
+    binding: { status: 'missing' },
+    ...(settings[slug] || {}),
+  });
+}
+
+async function migrate(ctx, { answers = ['yes'], interactive = true, rulesets = {}, created = [], argv = null, protections = {}, written = [], writer = null, reader = null, security = {}, securityWriter = null, securityFileWriter = null } = {}) {
   const stdout = sink();
   const stderr = sink();
   const asked = [];
@@ -107,6 +117,9 @@ async function migrate(ctx, { answers = ['yes'], interactive = true, rulesets = 
       protections[slug] = { checks, methods: ['merge'], own: existing || 9 };
       return { ok: true, id: existing || 9 };
     }),
+    securityReader: securityReader(security),
+    ...(securityWriter ? { securityWriter } : {}),
+    ...(securityFileWriter ? { securityFileWriter } : {}),
   });
   const code = await cli.main(argv || ['migrate', '--root', ctx.projects]);
   return { code, stdout: stdout.text(), stderr: stderr.text(), asked };
@@ -286,6 +299,52 @@ test('NF-06: the ruleset Toolkit adds is the one the check accepts', () => {
   assert.deepEqual(JSON.parse(calls[0].input), body);
   const plan = () => ({ status: 1, stdout: '', stderr: 'gh: Upgrade to GitHub Pro or make this repository public to enable this feature. (HTTP 403)' });
   assert.deepEqual(ruleset.ghRulesetCreator('a/b', { spawn: plan }), { ok: false, reason: 'plan-has-no-rulesets' });
+});
+
+test('SEC-01: free dependency and security settings are turned on by default, without a question, and read back', async (t) => {
+  const ctx = scratch(t);
+  const { governed } = fixture(ctx);
+  fs.writeFileSync(path.join(governed, 'package.json'), '{}');
+  // The decision run already writes the missing Dependabot file, asking nothing more about it.
+  const first = await migrate(ctx, { answers: ['yes', 'no', 'no'] });
+  assert.match(first.stdout, /\.github\/dependabot\.yml written; commit it through a pull request/);
+  const rulesets = { 'example-owner/governed': true, 'example-owner/block-only': true };
+  const protections = { 'example-owner/governed': { checks: ['validate'], methods: ['merge'], own: null } };
+  const settings = { 'example-owner/governed': { alerts: 'disabled', code_scanning: 'disabled' } };
+  const calls = [];
+  const securityWriter = (slug, plan) => {
+    const keys = Object.keys(plan).filter(key => key !== 'paid' && plan[key]);
+    calls.push({ slug, plan: keys });
+    settings[slug] = {};
+    return keys.map(setting => ({ setting, ok: true, reason: null }));
+  };
+  const applied = await migrate(ctx, { answers: [], rulesets, protections, security: settings, securityWriter });
+  assert.equal(applied.code, 0, applied.stdout);
+  assert.equal(applied.asked.length, 0, 'on by default: no question');
+  assert.deepEqual(calls, [{ slug: 'example-owner/governed', plan: ['alerts', 'code_scanning'] }]);
+  assert.match(fs.readFileSync(path.join(governed, '.github', 'dependabot.yml'), 'utf8'), /package-ecosystem: "npm"/);
+  assert.match(applied.stdout, /example-owner\/governed: Dependabot alerts turned on\.\n- example-owner\/governed: CodeQL code scanning turned on/);
+  assert.match(applied.stdout, /example-owner\/governed: read back/);
+  // Nothing left: nothing called. A refused write is reported once and fails the run (only a refusal for the plan or a policy is left alone).
+  await migrate(ctx, { answers: [], rulesets, protections, security: settings, securityWriter });
+  assert.equal(calls.length, 1);
+  settings['example-owner/governed'] = { private_reporting: 'disabled' };
+  let refusedCalls = 0;
+  const refused = await migrate(ctx, { answers: [], rulesets, protections, security: settings, securityWriter: () => { refusedCalls += 1; return [{ setting: 'private_reporting', ok: false, reason: 'forbidden' }]; } });
+  assert.equal(refusedCalls, 1);
+  assert.equal(refused.code, 2);
+  assert.match(refused.stdout, /private vulnerability reporting not turned on \(forbidden\)/);
+  // A private repository: paid features are never turned on without the binding's answer.
+  // A private repository: paid features are never turned on without the merged binding's answer,
+  // whatever the working tree says.
+  const merged = { status: 'ok', text: fs.readFileSync(path.join(governed, '.github', 'toolkit-programme.json'), 'utf8') };
+  const working = JSON.parse(merged.text);
+  fs.writeFileSync(path.join(governed, '.github', 'toolkit-programme.json'), JSON.stringify({ ...working, paid_security: 'on' }));
+  settings['example-owner/governed'] = { visibility: 'private', secret_scanning: 'disabled', push_protection: 'disabled', code_scanning: 'disabled', private_reporting: 'not-on-plan', binding: merged };
+  const privateRun = await migrate(ctx, { answers: [], rulesets, protections, security: settings, securityWriter });
+  assert.equal(calls.length, 1, 'nothing paid was written');
+  assert.match(privateRun.stdout, /no paid_security answer/);
+  assert.match(privateRun.stdout, /the working-tree binding asks for [^\n]*"paid_security":"on"[^\n]*counts only once merged/);
 });
 
 test('T-01: the binding template is not a valid binding until it is filled in', () => {

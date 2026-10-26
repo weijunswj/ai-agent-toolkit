@@ -10,5 +10,9 @@
     "branch": "main",
     "path": "state/OWNER/REPOSITORY/"
   },
-  "required_checks": ["validate"]
+  "required_checks": ["validate"],
+  "dependency_updates": {
+    "auto_merge": "off",
+    "github_actions": "owner"
+  }
 }
