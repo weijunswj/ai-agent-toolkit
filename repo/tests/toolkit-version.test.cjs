@@ -14,7 +14,7 @@ const { TOOLKIT_VERSION, VERSION_REL_PATH, readToolkitVersion } = require('../sc
 const { MANIFEST_REL_PATHS, parseArgs } = require('../scripts/bump-version.cjs');
 const {
   CHANGELOG_REL_PATH, headingOf, heldHeadingsProblem, mergeSections, nextSkillVersion, nextVersion, topChangelogVersion,
-  versionProblems,
+  unreleasedProblems, versionProblems,
 } = require('../scripts/toolkit-version-at-merge.cjs');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -255,7 +255,7 @@ test('--next refuses without writing when the lane is not ready', (t) => {
 
   lane.run('checkout', '-q', 'main');
   const next = nextVersion(TOOLKIT_VERSION, 'patch');
-  lane.write(CHANGELOG_REL_PATH, `${lane.read(CHANGELOG_REL_PATH).replace(/\r\n/g, '\n').trimEnd()}\n\n## ${next}\n\n- An old entry that took the number.\n`);
+  lane.write(CHANGELOG_REL_PATH, `${lane.read(CHANGELOG_REL_PATH).replace(/\r\n/g, '\n').trimEnd()}\n\n##\t${next}\n\n- An old entry that took the number.\n`);
   lane.commit('main moved');
   lane.run('checkout', '-q', 'lane');
   const behind = lane.bump('--next', 'patch', '--base', 'main');
@@ -303,6 +303,7 @@ test('headings are read as GitHub shows them and every difference is named', () 
   assert.equal(heldHeadingsProblem(['## Unreleased', ...base], ['## Unreleased', ...base]), '');
   assert.match(heldHeadingsProblem(['## 1.0.1', '## 1.0.0'], base), /it drops "## 0\.9\.0"/);
   assert.match(heldHeadingsProblem(['## 1.0.1', ...base], base), /it repeats "## 1\.0\.1"/);
+  assert.match(heldHeadingsProblem(['## 1.0.0'], ['## 1.0.0', '## 1.0.0']), /it drops "## 1\.0\.0"/, 'one fewer of a repeated heading');
   assert.match(heldHeadingsProblem(['## 1.0.0', '## 1.0.1', '## 0.9.0'], base), /in a different order/);
   assert.match(heldHeadingsProblem(['## Unreleased', '## Unreleased', ...base], base), /it adds "## Unreleased"/);
 
@@ -327,6 +328,8 @@ test('the guard and --next check the format of "## Unreleased" notes', (t) => {
   assert.equal(result.status, 1);
   assert.match(result.stderr, /the "## Unreleased" section has no "###" section heading/);
   assert.equal(readToolkitVersion(path.join(lane.copy, ...VERSION_REL_PATH.split('/'))), TOOLKIT_VERSION);
+  assert.match(unreleasedProblems('Title: words\n\n### Lane\n\n- A note.').join('\n'), /cannot start with a Title: line/, 'a title belongs in the heading');
+  assert.deepEqual(unreleasedProblems('### Lane\n\n- A note.'), []);
 });
 
 test('a base that already holds "## Unreleased" folds with the lane at merge', (t) => {
@@ -341,6 +344,15 @@ test('a base that already holds "## Unreleased" folds with the lane at merge', (
   lane.commit('lane work');
   assert.deepEqual(versionProblems({ workspace: lane.copy, base: 'main' }), [], 'the held lane passes');
 
+  const withUnreleased = lane.read(CHANGELOG_REL_PATH);
+  lane.write(CHANGELOG_REL_PATH, withUnreleased.split('## Unreleased (older lane)\n\n### Lane\n\n- **Old way:** a note.\n\n').join(''));
+  lane.commit('drop main notes');
+  assert.match(versionProblems({ workspace: lane.copy, base: 'main' }).join('\n'), /base's "## Unreleased" section is missing from this branch/);
+  const dropped = lane.bump('--next', 'patch', '--base', 'main');
+  assert.equal(dropped.status, 1, 'notes main holds are never dropped');
+  assert.match(dropped.stderr, /base's "## Unreleased" section is missing from this branch/);
+  lane.run('revert', '--no-edit', 'HEAD');
+
   const result = lane.bump('--next', 'patch', '--base', 'main');
   assert.equal(result.status, 0, result.stderr || result.stdout);
   const next = nextVersion(TOOLKIT_VERSION, 'patch');
@@ -350,6 +362,8 @@ test('a base that already holds "## Unreleased" folds with the lane at merge', (
   assert.equal(folded.includes('\uFEFF'), false, 'the byte order mark is dropped');
   lane.commit('bump');
   assert.deepEqual(versionProblems({ workspace: lane.copy, base: 'main' }), [], 'the bumped lane passes against a base with Unreleased');
+  lane.write(CHANGELOG_REL_PATH, folded.replace('- **Old way:** a note.\n', ''));
+  assert.match(versionProblems({ workspace: lane.copy, base: 'main' }).join('\n'), /notes are not all under the new heading \(missing "- \*\*Old way:\*\* a note\."\)/, 'a bump that drops main\'s notes');
 });
 
 test('the CI guard fails stale, skipped and half-done versions', (t) => {

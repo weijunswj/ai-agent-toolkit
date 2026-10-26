@@ -109,6 +109,28 @@ function takeUnreleased(text) {
   };
 }
 
+// The "## Unreleased" notes are checked as a fragment, except that a title belongs in the heading.
+function unreleasedProblems(notes) {
+  const label = `the "${UNRELEASED_HEADING}" section`;
+  const problems = fragmentProblems(label, notes);
+  if (/^\uFEFF?Title:/.test(notes)) problems.push(`${label} cannot start with a Title: line; write "${UNRELEASED_HEADING} (<words>)" instead`);
+  return problems;
+}
+
+// Notes the base holds under "## Unreleased" must reach the fold: an open branch keeps that section
+// on top, and a bumped branch carries every line of it. Returns the problem, or ''.
+function droppedUnreleasedProblem(headText, baseText, bumped) {
+  const notes = takeUnreleased(baseText).notes;
+  if (!notes) return '';
+  if (!bumped) {
+    if (UNRELEASED.test(changelogHeadings(headText)[0] || '')) return '';
+    return `the base's "${UNRELEASED_HEADING}" section is missing from this branch; take it back from the base so its notes are folded at merge`;
+  }
+  const have = new Set(String(headText).replace(/\r\n/g, '\n').split('\n').map((line) => line.trim()));
+  const lost = notes.split('\n').map((line) => line.trim()).filter((line) => line && !have.has(line));
+  return lost.length ? `the base's "${UNRELEASED_HEADING}" notes are not all under the new heading (missing "${lost[0]}")` : '';
+}
+
 function fragmentFiles(workspace) {
   const dir = path.join(workspace, ...FRAGMENT_DIR_REL_PATH.split('/'));
   if (!fs.existsSync(dir)) return [];
@@ -218,7 +240,9 @@ function versionProblems({ workspace, base }) {
     const problem = heldHeadingsProblem(headHeadings, baseHeadings);
     if (problem) problems.push(problem);
     const unreleased = takeUnreleased(headText).notes;
-    if (unreleased) problems.push(...fragmentProblems(`the "${UNRELEASED_HEADING}" section`, unreleased));
+    if (unreleased) problems.push(...unreleasedProblems(unreleased));
+    const dropped = droppedUnreleasedProblem(headText, baseChangelog, false);
+    if (dropped) problems.push(dropped);
     return problems;
   }
   const allowed = LEVELS.map((level) => nextVersion(baseVersion, level));
@@ -231,6 +255,8 @@ function versionProblems({ workspace, base }) {
   } else if (JSON.stringify(headHeadings.slice(1)) !== JSON.stringify(withoutUnreleased(baseHeadings))) {
     problems.push(`below the ${current} heading the CHANGELOG headings must be the base's, with any "${UNRELEASED_HEADING}" folded in (${headingDifference(headHeadings.slice(1), withoutUnreleased(baseHeadings))})`);
   }
+  const dropped = droppedUnreleasedProblem(headText, baseChangelog, true);
+  if (dropped) problems.push(dropped);
   const left = fragmentFiles(workspace);
   if (left.length) problems.push(`version ${current} is set but ${left.join(', ')} is not folded into the CHANGELOG`);
   return problems;
@@ -238,7 +264,7 @@ function versionProblems({ workspace, base }) {
 
 module.exports = {
   CHANGELOG_REL_PATH, FRAGMENT_DIR_REL_PATH, LEVELS, PROJECTS_SKILL_DIR_REL_PATH, PROJECTS_SKILL_REL_PATH, UNRELEASED_HEADING,
-  changelogAt, changelogHeadings, headingOf, mergeSections, foldFragments, fragmentFiles, fragmentProblems, git, heldHeadingsProblem,
-  nextSkillVersion, nextVersion, parseFragment, skillVersionOf, takeUnreleased, topChangelogVersion, versionAt,
+  changelogAt, changelogHeadings, droppedUnreleasedProblem, headingOf, mergeSections, foldFragments, fragmentFiles, fragmentProblems, git, heldHeadingsProblem,
+  nextSkillVersion, nextVersion, parseFragment, skillVersionOf, takeUnreleased, topChangelogVersion, unreleasedProblems, versionAt,
   versionProblems,
 };

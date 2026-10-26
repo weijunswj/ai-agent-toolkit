@@ -4,7 +4,7 @@ An open branch keeps `main`'s Toolkit version and writes its notes here, in one 
 
 A fragment holds what a version entry in [CHANGELOG.md](../CHANGELOG.md) holds: `###` section headings and bullets, starting with the first `###` heading. An optional first line `Title: <words>` adds words to the version heading, such as `## 3.16.0 (repository protection)`. Leave the `##` version heading out; it is added at merge time.
 
-A branch that already keeps its notes in one `## Unreleased` section at the top of the CHANGELOG may keep it there, written like a fragment (`###` sections and bullets); `## Unreleased (<words>)` adds those words to the version heading. The merge step folds it in like a fragment. New branches use a fragment, which never conflicts. Any other change to the CHANGELOG's `##` headings, such as a branch's own version heading, is refused.
+A branch that already keeps its notes in one `## Unreleased` section at the top of the CHANGELOG may keep it there, written like a fragment (`###` sections and bullets); `## Unreleased (<words>)` adds those words to the version heading. A `Title:` line is refused there, and a branch keeps any `## Unreleased` section `main` already holds, so its notes are folded too. The merge step folds it in like a fragment. New branches use a fragment, which never conflicts. Any other change to the CHANGELOG's `##` headings, such as a branch's own version heading, is refused.
 
 ## At merge time
 

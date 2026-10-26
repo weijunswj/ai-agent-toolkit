@@ -17,8 +17,8 @@ const { spawnSync } = require('node:child_process');
 const { SEMVER, VERSION_REL_PATH, readToolkitVersion } = require('./toolkit-version.cjs');
 const {
   CHANGELOG_REL_PATH, FRAGMENT_DIR_REL_PATH, LEVELS, PROJECTS_SKILL_DIR_REL_PATH, PROJECTS_SKILL_REL_PATH, UNRELEASED_HEADING,
-  changelogAt, changelogHeadings, foldFragments, fragmentFiles, fragmentProblems, git, heldHeadingsProblem,
-  nextSkillVersion, nextVersion, parseFragment, skillVersionOf, takeUnreleased, topChangelogVersion, versionAt,
+  changelogAt, changelogHeadings, droppedUnreleasedProblem, foldFragments, fragmentFiles, fragmentProblems, git, heldHeadingsProblem,
+  nextSkillVersion, nextVersion, parseFragment, skillVersionOf, takeUnreleased, topChangelogVersion, unreleasedProblems, versionAt,
 } = require('./toolkit-version-at-merge.cjs');
 
 // Hosts read these literal versions, so they stay literal and the validator checks them against version.json.
@@ -104,6 +104,8 @@ function bumpNext({ level, base, workspace, today = new Date().toISOString().sli
   if (baseChangelog === null) throw new Error(`${base} has no readable ${CHANGELOG_REL_PATH}`);
   const headingProblem = heldHeadingsProblem(changelogHeadings(changelog), changelogHeadings(baseChangelog));
   if (headingProblem) throw new Error(headingProblem);
+  const droppedProblem = droppedUnreleasedProblem(changelog, baseChangelog, false);
+  if (droppedProblem) throw new Error(droppedProblem);
   const unreleased = takeUnreleased(changelog);
   const fragmentRels = fragmentFiles(workspace);
   if (!fragmentRels.length && !unreleased.notes) {
@@ -111,11 +113,11 @@ function bumpNext({ level, base, workspace, today = new Date().toISOString().sli
   }
   const texts = fragmentRels.map((rel) => fs.readFileSync(path.join(workspace, ...rel.split('/')), 'utf8'));
   const problems = fragmentRels.flatMap((rel, index) => fragmentProblems(rel, texts[index]));
-  if (unreleased.notes) problems.push(...fragmentProblems(`the "${UNRELEASED_HEADING}" section`, unreleased.notes));
+  if (unreleased.notes) problems.push(...unreleasedProblems(unreleased.notes));
   if (problems.length) throw new Error(problems.join('; '));
 
   const version = nextVersion(baseVersion, level);
-  if (changelog.replace(/\r\n/g, '\n').split('\n').some((line) => line === `## ${version}` || line.startsWith(`## ${version} `))) {
+  if (changelogHeadings(changelog).some((heading) => topChangelogVersion(heading) === version)) {
     throw new Error(`the CHANGELOG already has a ${version} heading`);
   }
 
