@@ -396,6 +396,12 @@ function validateBinding(binding) {
     check(errors, isObject(store) && /^(?:[A-Za-z0-9_.-]+\/)+$/.test(String(store.path || '')) && !String(store.path).split('/').includes('..'), 'store.path must be a relative folder ending in /');
     check(errors, isObject(store) && String(store.repository || '').toLowerCase() !== String(binding.repository || '').toLowerCase(), 'store.repository must be a separate repository');
     check(errors, Array.isArray(binding.required_checks) && binding.required_checks.every(isText), 'required_checks must be a list of check names');
+    check(errors, optional(binding.paid_security, value => ['off', 'on'].includes(value)), 'paid_security must be off or on');
+    const updates = binding.dependency_updates;
+    if (updates !== undefined) {
+      check(errors, isObject(updates) && Object.keys(updates).every(key => ['auto_merge', 'github_actions'].includes(key)), 'dependency_updates may hold only auto_merge and github_actions');
+      check(errors, isObject(updates) && optional(updates.auto_merge, value => ['off', 'patch-minor'].includes(value)) && optional(updates.github_actions, value => ['auto-merge', 'owner'].includes(value)), 'dependency_updates.auto_merge must be off or patch-minor, and github_actions auto-merge or owner');
+    }
     const projection = binding.projection;
     if (projection !== undefined) {
       check(errors, isObject(projection) && Object.keys(projection).every(key => ['after_section', 'replace_section'].includes(key)), 'projection may hold only after_section and replace_section');

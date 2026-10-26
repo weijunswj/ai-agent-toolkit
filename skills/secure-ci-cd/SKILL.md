@@ -67,6 +67,11 @@ Before committing, pushing, creating a pull request, merging, or deploying, paus
 - [`scripts/install-personal-data-guard.cjs`](scripts/install-personal-data-guard.cjs) installs it into a repository on the owner's opt-in: a copy under `.github/scripts/`, the config `.github/personal-data-guard.json` (the owner chooses whether author and committer addresses are scanned), git hooks in the folder git really uses, and with `--workflow` the CI job from [`templates/github-actions/personal-data-guard.yml`](templates/github-actions/personal-data-guard.yml). `--check` reports drift.
 - Hooks can be skipped with `--no-verify`; the CI job is the backstop. Follow `docs/agent-playbooks/privacy-safe-checks.md` in the target repository (the repository-agent-rules playbook) for fixtures, allow markers and the pushed-by-mistake steps.
 
+## Dependency Auto-Merge
+
+- [`templates/github-actions/dependency-auto-merge.yml`](templates/github-actions/dependency-auto-merge.yml) turns on GitHub auto-merge, merge commit only, for Dependabot patch and minor updates, so GitHub merges only after every required check passes. It uses only the built-in token, never checks out the pull request's code, reads the policy from the default branch's programme binding (`dependency_updates.auto_merge: patch-minor` is the owner's standing permission) and refuses when no ruleset requires a check. Majors, minor updates from 0.x, maintainer changes and, unless the binding says `github_actions: auto-merge`, GitHub Actions updates get one comment for the owner. It acts only on pull requests to the default branch whose every commit is Dependabot's, and pins auto-merge to the head it checked. A push or re-run by anyone but Dependabot, or a base branch change, turns auto-merge off again, and the job fails if that cannot be confirmed.
+- In a Toolkit-governed repository, `toolkit governance check` reports it with the other dependency and security settings, and `toolkit governance security` installs it once the binding allows auto-merge. Elsewhere, install it only on the owner's explicit approval, after required checks exist.
+
 ## AI-Facing Surfaces
 
 - Reference: [references/secure-ci-cd.md](references/secure-ci-cd.md)
