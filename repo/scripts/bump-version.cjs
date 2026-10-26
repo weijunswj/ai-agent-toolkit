@@ -130,7 +130,7 @@ function bumpNext({ level, base, workspace, today = new Date().toISOString().sli
     fs.writeFileSync(skillFile, skillText.replace(/^Version: \d{4}-\d{2}-\d{2}\.\d+(\s*)$/m, `Version: ${skillVersion}$1`));
   }
 
-  const notes = [...texts.map(parseFragment), ...(unreleased.notes ? [{ title: '', body: unreleased.notes }] : [])];
+  const notes = [...texts.map(parseFragment), ...(unreleased.notes ? [{ title: unreleased.title, body: unreleased.notes }] : [])];
   fs.writeFileSync(changelogFile, foldFragments(unreleased.text, version, notes));
   for (const rel of fragmentRels) fs.rmSync(path.join(workspace, ...rel.split('/')));
   const result = bumpVersion(version, workspace);

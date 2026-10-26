@@ -13,7 +13,8 @@ const test = require('node:test');
 const { TOOLKIT_VERSION, VERSION_REL_PATH, readToolkitVersion } = require('../scripts/toolkit-version.cjs');
 const { MANIFEST_REL_PATHS, parseArgs } = require('../scripts/bump-version.cjs');
 const {
-  CHANGELOG_REL_PATH, nextSkillVersion, nextVersion, topChangelogVersion, versionProblems,
+  CHANGELOG_REL_PATH, headingOf, heldHeadingsProblem, mergeSections, nextSkillVersion, nextVersion, topChangelogVersion,
+  versionProblems,
 } = require('../scripts/toolkit-version-at-merge.cjs');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -287,6 +288,70 @@ test('--next folds an older "## Unreleased" section with the fragments', (t) => 
   assert.deepEqual(versionProblems({ workspace: lane.copy, base: 'base' }), []);
 });
 
+test('headings are read as GitHub shows them and every difference is named', () => {
+  assert.equal(headingOf('##\t3.1.0'), '## 3.1.0', 'a tab after ##');
+  assert.equal(headingOf('   ## 3.1.0  '), '## 3.1.0', 'up to three spaces before ##');
+  assert.equal(headingOf('    ## 3.1.0'), '', 'four spaces is a code block');
+  assert.equal(headingOf('##3.1.0'), '');
+  assert.equal(headingOf('### Lane'), '');
+  assert.equal(topChangelogVersion('## 3.1.0 (words)'), '3.1.0');
+
+  const base = ['## 1.0.1', '## 1.0.0', '## 0.9.0'];
+  assert.equal(heldHeadingsProblem(base, base), '');
+  assert.equal(heldHeadingsProblem(['## Unreleased (older lane)', ...base], base), '', 'a titled Unreleased on top');
+  assert.equal(heldHeadingsProblem(base, ['## Unreleased', ...base]), '', 'the base already has Unreleased');
+  assert.equal(heldHeadingsProblem(['## Unreleased', ...base], ['## Unreleased', ...base]), '');
+  assert.match(heldHeadingsProblem(['## 1.0.1', '## 1.0.0'], base), /it drops "## 0\.9\.0"/);
+  assert.match(heldHeadingsProblem(['## 1.0.1', ...base], base), /it repeats "## 1\.0\.1"/);
+  assert.match(heldHeadingsProblem(['## 1.0.0', '## 1.0.1', '## 0.9.0'], base), /in a different order/);
+  assert.match(heldHeadingsProblem(['## Unreleased', '## Unreleased', ...base], base), /it adds "## Unreleased"/);
+
+  assert.deepEqual(mergeSections(['### A\n\n- one\n\n### B\n\n- two\n', '### A\n\n- three\n']), ['### A\n\n- one\n- three', '### B\n\n- two'], 'one section per name');
+});
+
+test('the CI guard reads indented and tab headings', (t) => {
+  const lane = gitCopy(t);
+  const text = lane.read(CHANGELOG_REL_PATH).replace(/\r\n/g, '\n');
+  for (const heading of ['##\t9.9.9', '  ## 9.9.9']) {
+    lane.write(CHANGELOG_REL_PATH, text.replace('# Toolkit Changelog\n\n', `# Toolkit Changelog\n\n${heading}\n\n- Old style.\n\n`));
+    assert.match(versionProblems({ workspace: lane.copy, base: 'base' }).join('\n'), /it adds "## 9\.9\.9"/, JSON.stringify(heading));
+  }
+});
+
+test('the guard and --next check the format of "## Unreleased" notes', (t) => {
+  const lane = gitCopy(t);
+  lane.write(CHANGELOG_REL_PATH, lane.read(CHANGELOG_REL_PATH).replace(/\r\n/g, '\n').replace('# Toolkit Changelog\n\n', '# Toolkit Changelog\n\n## Unreleased\n\n- A bullet with no section.\n\n'));
+  lane.commit('bare unreleased');
+  assert.match(versionProblems({ workspace: lane.copy, base: 'base' }).join('\n'), /the "## Unreleased" section has no "###" section heading/);
+  const result = lane.bump('--next', 'patch', '--base', 'base');
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /the "## Unreleased" section has no "###" section heading/);
+  assert.equal(readToolkitVersion(path.join(lane.copy, ...VERSION_REL_PATH.split('/'))), TOOLKIT_VERSION);
+});
+
+test('a base that already holds "## Unreleased" folds with the lane at merge', (t) => {
+  const lane = gitCopy(t);
+  lane.run('checkout', '-q', 'main');
+  lane.write(CHANGELOG_REL_PATH, lane.read(CHANGELOG_REL_PATH).replace(/\r\n/g, '\n').replace('# Toolkit Changelog\n\n', '# Toolkit Changelog\n\n## Unreleased (older lane)\n\n### Lane\n\n- **Old way:** a note.\n\n'));
+  lane.commit('main holds unreleased notes');
+  lane.run('checkout', '-q', 'lane');
+  lane.run('merge', '-q', '--no-edit', 'main');
+  lane.write(FRAGMENT, NOTES);
+  lane.write('repo/docs/changelog.d/other.md', '\uFEFFTitle: other work\r\n\r\n### Lane\r\n\r\n- **Other:** more.\r\n');
+  lane.commit('lane work');
+  assert.deepEqual(versionProblems({ workspace: lane.copy, base: 'main' }), [], 'the held lane passes');
+
+  const result = lane.bump('--next', 'patch', '--base', 'main');
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const next = nextVersion(TOOLKIT_VERSION, 'patch');
+  const folded = lane.read(CHANGELOG_REL_PATH);
+  assert.ok(folded.includes(`## ${next} (lane work; other work; older lane)\n\n### Lane\n\n- **A change:** what it does.\n- **Other:** more.\n- **Old way:** a note.\n\n## ${TOOLKIT_VERSION}`), folded.slice(0, 600));
+  assert.equal(folded.includes('Unreleased'), false);
+  assert.equal(folded.includes('\uFEFF'), false, 'the byte order mark is dropped');
+  lane.commit('bump');
+  assert.deepEqual(versionProblems({ workspace: lane.copy, base: 'main' }), [], 'the bumped lane passes against a base with Unreleased');
+});
+
 test('the CI guard fails stale, skipped and half-done versions', (t) => {
   const lane = gitCopy(t);
   const check = () => versionProblems({ workspace: lane.copy, base: 'base' }).join('\n');
@@ -321,7 +386,7 @@ test('the CI guard fails stale, skipped and half-done versions', (t) => {
   assert.equal(check(), '');
   const folded = lane.read(CHANGELOG_REL_PATH).replace(/\r\n/g, '\n');
   lane.write(CHANGELOG_REL_PATH, folded.replace(/(^## [^\n]*\n[\s\S]*?)\n## /m, '$1\n## Unreleased\n\n- Left behind.\n\n## '));
-  assert.match(check(), /below the .* heading the CHANGELOG headings must be the base's exactly/, 'a stale section left under the new heading');
+  assert.match(check(), /below the .* heading the CHANGELOG headings must be the base's, with any "## Unreleased" folded in \(it adds "## Unreleased"\)/, 'a stale section left under the new heading');
 });
 
 test('the validator runs the CI guard against DIFF_BASE and fails closed', (t) => {

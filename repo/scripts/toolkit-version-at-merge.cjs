@@ -38,18 +38,29 @@ function versionAt(workspace, commit) {
   }
 }
 
-// The version in the first "## " heading of a CHANGELOG text, or '' when there is none.
+// A "## " heading as GitHub shows it: up to three spaces before "##", then a space or a tab.
+// Returns the heading in one form ("## <words>") or '' for any other line.
+function headingOf(line) {
+  const match = /^ {0,3}##(?:[ \t]+(.*?))?[ \t]*$/.exec(String(line).replace(/\r$/, ''));
+  return match ? `## ${(match[1] || '').replace(/[ \t]+#*$/, '').trim()}`.trimEnd() : '';
+}
+
+// Every "## " heading of a CHANGELOG text, in order, in one form.
+function changelogHeadings(text) {
+  return String(text || '').replace(/\r\n/g, '\n').split('\n').map(headingOf).filter(Boolean);
+}
+
+// The version in the first "## " heading of a CHANGELOG text (or of one heading line), or '' when it has none.
 function topChangelogVersion(text) {
-  const heading = /^## (\d+\.\d+\.\d+)(?:\s.*)?$/m.exec(String(text || '').replace(/\r\n/g, '\n'));
+  const heading = /^## (\d+\.\d+\.\d+)(?:\s.*)?$/.exec(changelogHeadings(text)[0] || '');
   return heading ? heading[1] : '';
 }
 
 const UNRELEASED_HEADING = '## Unreleased';
+// "## Unreleased", or "## Unreleased (<words>)" whose words join the version heading's title.
+const UNRELEASED = /^## Unreleased(?: \((.*\S)\))?$/;
 
-// Every "## " heading line of a CHANGELOG text, in order.
-function changelogHeadings(text) {
-  return String(text || '').replace(/\r\n/g, '\n').split('\n').filter((line) => line.startsWith('## ')).map((line) => line.trimEnd());
-}
+const withoutUnreleased = (headings) => (UNRELEASED.test(headings[0] || '') ? headings.slice(1) : headings);
 
 // The CHANGELOG as a commit records it, or null when the commit has none.
 function changelogAt(workspace, commit) {
@@ -57,25 +68,45 @@ function changelogAt(workspace, commit) {
   return shown.status === 0 ? shown.stdout : null;
 }
 
-// An open branch's CHANGELOG headings are the base's, with at most one "## Unreleased" section on
-// top (the older way to hold notes, folded at merge like a fragment). Returns the problem, or ''.
-function heldHeadingsProblem(head, base) {
-  const extra = head[0] === UNRELEASED_HEADING ? head.slice(1) : head;
-  if (JSON.stringify(extra) === JSON.stringify(base)) return '';
-  const added = extra.filter((heading) => !base.includes(heading));
-  const detail = added.length ? `it adds ${added.map((heading) => `"${heading}"`).join(', ')}` : 'its headings are not in the base\'s order';
-  return `the CHANGELOG headings differ from the base's (${detail}); keep this branch's notes in a fragment in ${FRAGMENT_DIR_REL_PATH}/ (or one "${UNRELEASED_HEADING}" section on top) and leave the version headings to bump-version.cjs --next`;
+// What differs between two heading lists, named: headings added, dropped or repeated.
+function headingDifference(head, base) {
+  const count = (list) => list.reduce((map, heading) => map.set(heading, (map.get(heading) || 0) + 1), new Map());
+  const [have, want] = [count(head), count(base)];
+  const named = (list) => list.map((heading) => `"${heading}"`).join(', ');
+  const added = [...have].filter(([heading]) => !want.has(heading)).map(([heading]) => heading);
+  const dropped = [...want].filter(([heading]) => !have.has(heading)).map(([heading]) => heading);
+  const repeated = [...have].filter(([heading, n]) => want.has(heading) && n > want.get(heading)).map(([heading]) => heading);
+  const missing = [...want].filter(([heading, n]) => have.has(heading) && n > have.get(heading)).map(([heading]) => heading);
+  const parts = [];
+  if (added.length) parts.push(`it adds ${named(added)}`);
+  if (repeated.length) parts.push(`it repeats ${named(repeated)}`);
+  if (dropped.length || missing.length) parts.push(`it drops ${named([...dropped, ...missing])}`);
+  return parts.join('; ') || 'its headings are in a different order from the base\'s';
 }
 
-// The "## Unreleased" section on top of a CHANGELOG, taken out: its notes and the text without it.
+// An open branch's CHANGELOG headings are the base's, with at most one "## Unreleased" section on
+// top (the older way to hold notes, folded at merge like a fragment); a base that already carries
+// one counts the same. Returns the problem, or ''.
+function heldHeadingsProblem(head, base) {
+  const [mine, theirs] = [withoutUnreleased(head), withoutUnreleased(base)];
+  if (JSON.stringify(mine) === JSON.stringify(theirs)) return '';
+  return `the CHANGELOG headings differ from the base's (${headingDifference(mine, theirs)}); keep this branch's notes in a fragment in ${FRAGMENT_DIR_REL_PATH}/ (or one "${UNRELEASED_HEADING}" section on top) and leave the version headings to bump-version.cjs --next`;
+}
+
+// The "## Unreleased" section on top of a CHANGELOG, taken out: its notes, its title words and the
+// text without it.
 function takeUnreleased(text) {
-  const lf = String(text || '').replace(/\r\n/g, '\n');
-  const start = lf.search(/^## Unreleased[ \t]*$/m);
-  if (start === -1 || start !== lf.search(/^## /m)) return { notes: '', text: lf };
-  const rest = lf.slice(start).replace(/^[^\n]*\n?/, '');
-  const next = rest.search(/^## /m);
-  const notes = (next === -1 ? rest : rest.slice(0, next)).trim();
-  return { notes, text: lf.slice(0, start) + (next === -1 ? '' : rest.slice(next)) };
+  const lines = String(text || '').replace(/\r\n/g, '\n').split('\n');
+  const start = lines.findIndex((line) => headingOf(line));
+  const match = start === -1 ? null : UNRELEASED.exec(headingOf(lines[start]));
+  if (!match) return { notes: '', title: '', text: lines.join('\n') };
+  let end = lines.findIndex((line, index) => index > start && headingOf(line));
+  if (end === -1) end = lines.length;
+  return {
+    notes: lines.slice(start + 1, end).join('\n').trim(),
+    title: match[1] || '',
+    text: [...lines.slice(0, start), ...lines.slice(end)].join('\n'),
+  };
 }
 
 function fragmentFiles(workspace) {
@@ -106,14 +137,37 @@ function parseFragment(text) {
   return { title: title ? title[1] : '', body: (title ? lines.slice(1) : lines).join('\n').trim() };
 }
 
+// The notes as "### " sections; sections that share a name across fragments become one, in the
+// order each name first appears, each fragment's part of a section kept together.
+function mergeSections(bodies) {
+  const sections = new Map();
+  for (const body of bodies) {
+    const parts = new Map();
+    let name = '';
+    for (const line of body.split('\n')) {
+      if (line.startsWith('### ')) {
+        name = line.trimEnd();
+        if (!parts.has(name)) parts.set(name, []);
+      } else if (name) parts.get(name).push(line);
+    }
+    for (const [section, lines] of parts) {
+      const text = lines.join('\n').trim();
+      if (!sections.has(section)) sections.set(section, []);
+      if (text) sections.get(section).push(text);
+    }
+  }
+  return [...sections].map(([name, parts]) => [name, parts.join('\n')].filter(Boolean).join('\n\n'));
+}
+
 function foldFragments(changelog, version, fragments) {
   const text = changelog.replace(/\r\n/g, '\n');
   const titles = fragments.map((fragment) => fragment.title).filter(Boolean);
   const heading = `## ${version}${titles.length ? ` (${titles.join('; ')})` : ''}`;
-  const entry = [heading, ...fragments.map((fragment) => fragment.body)].join('\n\n');
-  const first = text.search(/^## /m);
+  const entry = [heading, ...mergeSections(fragments.map((fragment) => fragment.body))].join('\n\n');
+  const lines = text.split('\n');
+  const first = lines.findIndex((line) => headingOf(line));
   if (first === -1) return `${text.trimEnd()}\n\n${entry}\n`;
-  return `${text.slice(0, first)}${entry}\n\n${text.slice(first)}`;
+  return [...lines.slice(0, first), entry, '', ...lines.slice(first)].join('\n');
 }
 
 // Versions look like 2026-10-23.6: the date, then a counter for that day. The next one is today's
@@ -157,11 +211,14 @@ function versionProblems({ workspace, base }) {
     problems.push(`the Projects skill Version ${headSkill} is older than the base's ${baseSkill}; keep the base's until merge time`);
   }
   const current = readToolkitVersion(path.join(workspace, ...VERSION_REL_PATH.split('/')));
-  const headHeadings = changelogHeadings(fs.readFileSync(path.join(workspace, ...CHANGELOG_REL_PATH.split('/')), 'utf8'));
+  const headText = fs.readFileSync(path.join(workspace, ...CHANGELOG_REL_PATH.split('/')), 'utf8');
+  const headHeadings = changelogHeadings(headText);
   const baseHeadings = changelogHeadings(baseChangelog);
   if (current === baseVersion) {
     const problem = heldHeadingsProblem(headHeadings, baseHeadings);
     if (problem) problems.push(problem);
+    const unreleased = takeUnreleased(headText).notes;
+    if (unreleased) problems.push(...fragmentProblems(`the "${UNRELEASED_HEADING}" section`, unreleased));
     return problems;
   }
   const allowed = LEVELS.map((level) => nextVersion(baseVersion, level));
@@ -171,8 +228,8 @@ function versionProblems({ workspace, base }) {
   }
   if (topChangelogVersion(headHeadings[0] || '') !== current) {
     problems.push(`version ${current} needs its CHANGELOG heading first, found ${headHeadings[0] ? `"${headHeadings[0]}"` : 'none'}`);
-  } else if (JSON.stringify(headHeadings.slice(1)) !== JSON.stringify(baseHeadings)) {
-    problems.push(`below the ${current} heading the CHANGELOG headings must be the base's exactly; ${heldHeadingsProblem(headHeadings.slice(1), baseHeadings).replace(/^the CHANGELOG headings differ from the base's /, '')}`);
+  } else if (JSON.stringify(headHeadings.slice(1)) !== JSON.stringify(withoutUnreleased(baseHeadings))) {
+    problems.push(`below the ${current} heading the CHANGELOG headings must be the base's, with any "${UNRELEASED_HEADING}" folded in (${headingDifference(headHeadings.slice(1), withoutUnreleased(baseHeadings))})`);
   }
   const left = fragmentFiles(workspace);
   if (left.length) problems.push(`version ${current} is set but ${left.join(', ')} is not folded into the CHANGELOG`);
@@ -181,7 +238,7 @@ function versionProblems({ workspace, base }) {
 
 module.exports = {
   CHANGELOG_REL_PATH, FRAGMENT_DIR_REL_PATH, LEVELS, PROJECTS_SKILL_DIR_REL_PATH, PROJECTS_SKILL_REL_PATH, UNRELEASED_HEADING,
-  changelogAt, changelogHeadings, foldFragments, fragmentFiles, fragmentProblems, git, heldHeadingsProblem,
+  changelogAt, changelogHeadings, headingOf, mergeSections, foldFragments, fragmentFiles, fragmentProblems, git, heldHeadingsProblem,
   nextSkillVersion, nextVersion, parseFragment, skillVersionOf, takeUnreleased, topChangelogVersion, versionAt,
   versionProblems,
 };
