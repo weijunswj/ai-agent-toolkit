@@ -1,5 +1,26 @@
 # Toolkit Changelog
 
+## 3.15.3
+
+### Projects skill
+
+- **Running post and links enforced:** a new Toolkit hook runs before every Claude Projects post, in the coordinator and in work threads. It refuses a fresh post while the owner has not written since that session's newest post (unless that post nears 8 KB) and tells it to edit that post instead, and it refuses any post that names "PR <n>" without a link. It reads the session's own transcript, so the rule survives a context reset. Replies under a post are exempt from the fresh-post check but still need their links, decision cards are not checked, and sessions without the Claude Projects post tools never see it. Every PR in a list needs its own link. The skill now also has the coordinator keep its running post id as the first memory line, and links every PR, thread, file or artifact it names: a PR's changed files only once it is ready for the owner to check and merge, otherwise the chat thread that owns it. Briefs tell work threads to keep one running post with one-line updates. The hourly nudge flags back-to-back posts, a stale running post id and missing links. The Claude Projects controller skill is 2026-10-26.2 (save the new skill card).
+
+## 3.15.2
+
+### Claude Projects
+
+- **A card each when the account copies fall behind:** Claude Projects controller skill 2026-10-26.1 (tap Save on its card). The skill card is one Save tap. After the first card, a coordinator that can post skill cards adds the memory line `skill cards: coordinator`; from then on the check-in writes "card due" instead of posting its own card, and the coordinator posts it in the project chat, so the owner gets one card where they read. On "card failed" the coordinator posts it too when it can. No agent can update a claude.ai plugin, so when the Toolkit plugin is more than a day behind, the coordinator posts one plugin card in the project chat with two clicks in Customize > Plugins (remove the Toolkit plugin only and let it reinstall), with Check for updates and a marketplace re-add as fallbacks. A retired skill card in the chat gets a "don't save" line.
+- **Plugin line on every run:** the check-in shows `**Plugin:** current` or how far behind it is, names the commit where `main` moved past the account version, and puts `PLUGIN BEHIND` on its first line once per `main` version (the "plugin behind" record in its state file).
+- **No false skill drift from a short clone:** before the check-in calls an account file a direct edit, it fetches the full history of its shallow Toolkit clone and checks every revision again, so an old but unedited account copy is reported as behind, not edited. If that fetch fails, it reports drift as unverified and posts no card.
+
+## 3.15.1 (local secret scan)
+
+### Secure CI/CD skill
+
+- **Local secret scan:** `skills/secure-ci-cd/scripts/local-security-scan.cjs` checks one repository on the owner's computer for committed credentials, read-only, across every tracked or unignored file and every line ever added on any branch or tag (merges against their first parent, every file as text, no line too long). It needs only Node and git, taken from an absolute PATH folder outside the scanned repository, installs nothing and sends nothing off the computer; vulnerable dependencies stay with Dependabot. The report (`--out`, outside the scanned repository) names places only (file, line, column, short commit, format), never any part of a match, an author or a commit message, and classes each finding as a release blocker or a likely false positive. `--recheck` shows what is fixed, still open or new. Exit codes: 0 clean, 1 release blocker, 2 could not scan (including a report that cannot be written), 3 incomplete (a shallow clone, or a file over 5 MB or unreadable).
+- **Shared secret formats:** `skills/secure-ci-cd/scripts/secret-patterns.cjs` holds providers' published token shapes (fixed prefix, exact length, fixed characters) with no entropy guessing, finds armoured PGP and encrypted PEM private keys, skips plain placeholders and honours a same-line `secret-scan: allow <reason>` marker for matches before it. Other Toolkit secret checks reuse it.
+
 ## 3.15.0 (dependency updates)
 
 ### Dependency and security settings
