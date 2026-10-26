@@ -2,6 +2,7 @@ name: Validate
 
 on:
   pull_request:
+    types: [opened, edited, reopened, synchronize]
   push:
     branches:
       - main
@@ -14,8 +15,10 @@ permissions:
 # repository checks and then proves from the shard summaries that each system ran every test file
 # once with no failure. A failed, cancelled or skipped shard fails it. The personal-data job checks
 # every commit of the pull request or push, the commit messages, the branch name and the pull
-# request title and body for email addresses, phone numbers and WhatsApp links (values are never
-# printed); validate waits for it too, so a hit or a scan error fails the required check.
+# request title and body for email addresses, phone numbers and WhatsApp links, and the title and
+# body for home-folder paths and AI attribution (values are never printed); validate waits for it
+# too, so a hit or a scan error fails the required check. An edit to the title or body runs the
+# whole workflow again, so a fixed body clears the required check without a new commit.
 jobs:
   tests-linux:
     runs-on: ubuntu-latest
