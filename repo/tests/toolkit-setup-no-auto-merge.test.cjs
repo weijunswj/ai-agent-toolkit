@@ -55,6 +55,8 @@ test('no script, skill or plugin hook runs a pull request merge', () => {
       if (!/\.(?:cjs|js|mjs|ps1|sh|cmd|json|md)$/.test(entry.name)) continue;
       // The attribution guard names gh pr merge only to check its message for AI attribution.
       if (entry.name === 'toolkit-attribution-guard.cjs') continue;
+      // The Projects post hook names gh pr merge only to refuse a merge that has no external-effects post.
+      if (entry.name === 'toolkit-claude-project-post-hook.cjs') continue;
       const text = fs.readFileSync(full, 'utf8');
       if (/gh\s+pr\s+merge|enablePullRequestAutoMerge|merge\s+--auto\b|--auto-merge\b/i.test(text)) hits.push(path.relative(root, full));
     }
