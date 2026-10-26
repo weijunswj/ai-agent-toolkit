@@ -253,7 +253,20 @@ test('model tier and effort: cheapest by default, medium floor, every raise carr
   assert.match(carried, /call mcp__hearthbot__set_effort_level with high;/);
   assert.match(carried, /Raised above the cheapest fitting step because: missed checks at medium/);
   const swap = fs.readFileSync(path.join(path.dirname(SETUP), 'recurring-tasks.md'), 'utf8');
-  assert.match(swap, /When the task's entry records a raise above the saved prompt's params, first set `model`, `effort` and `raise_reason` in the saved params block to the raised values/);
+  assert.match(swap, /First make the saved params block match the task's entry: with a recorded raise, set `model`, `effort` and `raise_reason` to the higher of the template's and the raised values and the entry's reason; with none, set the template's tier, `medium` effort and no `raise_reason`/);
+  assert.match(swap, /with its home thread started on the tier and effort in the rendered params/);
+  // A removed raise is removed from the params too, so the prompt drops back to medium.
+  const lowered = tasks().refresh('hourly-nudge', saved, { session: 'bound' });
+  assert.match(lowered, /call mcp__hearthbot__set_effort_level with medium;/);
+  assert.doesNotMatch(lowered, /Raised above/);
+  // Every rebuild renders the prompt the way the swap does, so a raise is carried.
+  const skill = fs.readFileSync(SKILL, 'utf8');
+  assert.match(skill, /new home thread and task, with the prompt rendered as in the swap \(\*\*Recurring tasks\*\* step 2, so a recorded raise is carried\)/);
+  assert.match(skill, /recreates it from the template on `main` \(rendered as in the swap, \*\*Recurring tasks\*\* step 2\)/);
+  // A params reason follows the same rules as the memory reason.
+  for (const reason of ['x stopped by the owner today', 'kept for Owner-Schedule', 'caf\u00e9 reason', 'a`b`c']) {
+    assert.throws(() => validateParams('hourly-nudge', { ...base, model: 'top', raise_reason: reason }), reason);
+  }
   // New-format params stay strict: no migration once a model key is present.
   assert.equal(tasks().check('hourly-nudge', rendered('hourly-nudge').replace('"effort": "medium"', '"effort": "low"')).state, 'malformed');
   // The check-in reports model and effort gaps, and a recorded raise excuses them.
@@ -440,6 +453,11 @@ test('memory check reads only the BINDING and SCHEDULED TASKS lines', () => {
     // A reason can never pass for the owner's stop or schedule marks.
     [`${binding}\n${tasksLine.replace('since 2026-10-24;', 'since 2026-10-24 | raised top/high 2026-10-25: x stopped by owner 2026-10-26;')}\n`, ['MEMORY FORMAT: SCHEDULED TASKS old format'], 1],
     [`${binding}\n${tasksLine.replace('since 2026-10-24;', 'since 2026-10-24 | raised top/high 2026-10-25: kept for the owner schedule;')}\n`, ['MEMORY FORMAT: SCHEDULED TASKS old format'], 1],
+    ...['x Stopped By Owner 2026-10-26', 'x stopped  by owner 2026-10-26', 'kept for owner-schedule', 'x stopped by the owner 2026-10-26',
+      // The same characters and length as the raise_reason param.
+      'a{b}c', 'a`b', 'ab', 'x'.repeat(201)
+    ].map(reason => [`${binding}\n${tasksLine.replace('since 2026-10-24;', `since 2026-10-24 | raised top/high 2026-10-25: ${reason};`)}\n`, ['MEMORY FORMAT: SCHEDULED TASKS old format'], 1]),
+    [`${binding}\n${tasksLine.replace('since 2026-10-24;', `since 2026-10-24 | raised top/high 2026-10-25: ${'x'.repeat(200)};`)}\n`, ['current'], 0],
     ['', ['MEMORY FORMAT: BINDING missing', 'MEMORY FORMAT: SCHEDULED TASKS missing'], 1]
   ];
   for (const [text, lines, exitCode] of rows) assert.deepEqual(checkMemory(text), { lines, exitCode }, text);
@@ -527,7 +545,7 @@ test('every line that re-arms, updates, swaps, rebuilds, recreates or sets up a 
   assert.match(skill, /\*\*Stopped by owner:\*\* a task whose `SCHEDULED TASKS:` entry says `stopped by owner` is outside every automatic path/);
   assert.match(skill, /the restart removes the mark/);
   assert.match(fs.readFileSync(path.join(dir, 'reference', 'recurring-tasks.md'), 'utf8'), /When the owner restarts it, remove the mark\./);
-  assert.match(fs.readFileSync(path.join(dir, 'reference', 'recurring-tasks.md'), 'utf8'), /--refresh <kind> <old prompt file> --session <bound\|fresh>` keeps the params and project text and always names the session the replacement runs in/);
+  assert.match(fs.readFileSync(path.join(dir, 'reference', 'recurring-tasks.md'), 'utf8'), /--refresh <kind> <old prompt file> --session <bound\|fresh>`; it keeps the params and project text and always names the session the replacement runs in/);
 });
 
 // A run that starts outside its home thread (for example fire_trigger from another thread) has no

@@ -1,6 +1,6 @@
 ---
 name: agent-cost-control
-description: Use when setting up or reviewing any scheduled task, routine, loop, automation, helper agent, subagent, spawned thread or workflow step that calls a model, when choosing its model or effort, or when agent usage costs too much. Picks the cheapest model tier and effort that can do the job, records every raise with its reason, and keeps long-running threads short by rotating them with handoff files. Coding gates keep their pinned routes.
+description: Use when setting up or reviewing any scheduled task, routine, loop, automation, helper agent, subagent, spawned thread or workflow step that calls a model, when choosing its model or effort, or when agent usage costs too much. Picks the cheapest model tier and effort that can do the job, records every raise with its reason, and keeps long-running threads short by rotating them with handoff files. Coding gates and their helpers keep their pinned routes.
 ---
 
 # Agent Cost Control
@@ -22,7 +22,7 @@ Every automation and every non-gate worker starts on the cheapest model and effo
 ## Raising and lowering
 
 - A step up needs one written reason, kept where the setting lives (the task prompt, the brief, the agent file or the workflow notes): it missed a check or got a fact wrong at the lower step (name the run); its output is a verdict people act on without rechecking; it carries security, licence, money or irreversible effects; or its input is too large or ambiguous for the smaller model (say what).
-- **Raise straight away when output falls short.** When a controller sees a missed check, a wrong fact or a shallow review, it proposes the next step up at once, naming the task or thread, the run that fell short and the new model or effort. A task changes at its next rebuild; a thread is restarted on the new step.
+- **Raise straight away when output falls short.** When a controller sees a missed check, a wrong fact or a shallow review, it proposes the next step up at once, naming the task or thread, the run that fell short and the new model or effort. A task changes at its next rebuild; a non-gate thread is restarted on the new step.
 - **Raises survive rebuilds.** Record each raise beside the task's record (`raised <tier>/<effort> <YYYY-MM-DD>: <reason>`). A rebuild or template update uses the higher of the template and the recorded raise, for model and effort separately, and never lowers it; only the owner or the controller removes a raise.
 - **Step down** after about a week of clean runs at a raised step with no reason left: try one step lower.
 

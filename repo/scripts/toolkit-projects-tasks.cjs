@@ -44,6 +44,14 @@ const KEPT_LABEL = '(kept from an edit inside the block)';
 const TIERS = Object.freeze(['small', 'mid', 'top']);
 const EFFORTS = Object.freeze(['medium', 'high', 'xhigh', 'max']);
 const REPO = /^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/;
+// A raise reason, in params and in memory alike: 3 to 200 printable ASCII characters with no
+// | ; { } or backtick, no leading or trailing space, and nothing that reads as the owner's stop or
+// schedule mark in any case or spacing.
+const OWNER_MARK = /stopped\W*by\W*(?:the\W*)?owner|owner\W*schedule/i;
+function isReason(value) {
+  return /^[\x20-\x3a\x3c-\x5f\x61-\x7a\x7e]{3,200}$/.test(value) && value.trim() === value && !OWNER_MARK.test(value);
+}
+
 const PARAMS = Object.freeze({
   project: { required: true, test: v => /^[A-Z0-9][A-Z0-9 _-]{0,39}$/.test(v) && !/ $/.test(v) },
   repo: { required: true, test: v => v === 'none' || REPO.test(v) },
@@ -54,7 +62,7 @@ const PARAMS = Object.freeze({
   effort: { required: true, test: v => EFFORTS.includes(v) },
   // The model tier; left out, it is the kind's default tier.
   model: { test: v => TIERS.includes(v) },
-  raise_reason: { test: v => /^[^\n\r|;{}`]{3,200}$/.test(v) && v.trim() === v },
+  raise_reason: { test: v => isReason(v) },
   // A custom task defaults to a fresh session; the two Toolkit tasks default to bound and take
   // session fresh only as the fallback, which is then kept in their params.
   session: { fallback: 'fresh', test: v => v === 'fresh' || v === 'bound' }
@@ -324,7 +332,12 @@ function inOrder(lf, own, fence, expected) {
 
 // The two memory lines Toolkit defines. Nothing else in memory is read.
 const BINDING_LINE = /^[-*\s]*BINDING: [A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+ \S+ commit [0-9a-f]{40} CONTROLLER\.md blob [0-9a-f]{40} toolkit \d+\.\d+\.\d+ skill \S+ bound \S+\s*$/;
-const TASK_ENTRY = /^(?<name>[^|;]+?) \| (?<id>trig_[A-Za-z0-9]+) \| (?<cron>[^|;]+?) \| (?<mode>fresh|local|device|bound home cmsg_[A-Za-z0-9]+ since \d{4}-\d{2}-\d{2})(?: \| owner schedule)?(?: \| raised (?:small|mid|top)\/(?:medium|high|xhigh|max) \d{4}-\d{2}-\d{2}: (?:(?!stopped by owner|owner schedule)[\x20-\x3a\x3c-\x7b\x7d\x7e])+?)?(?: \| stopped by owner \d{4}-\d{2}-\d{2})?$/;
+const TASK_ENTRY = /^(?<name>[^|;]+?) \| (?<id>trig_[A-Za-z0-9]+) \| (?<cron>[^|;]+?) \| (?<mode>fresh|local|device|bound home cmsg_[A-Za-z0-9]+ since \d{4}-\d{2}-\d{2})(?: \| owner schedule)?(?: \| raised (?:small|mid|top)\/(?:medium|high|xhigh|max) \d{4}-\d{2}-\d{2}: (?<reason>[\x20-\x3a\x3c-\x5f\x61-\x7a\x7e]+?))?(?: \| stopped by owner \d{4}-\d{2}-\d{2})?$/;
+
+function validEntry(entry) {
+  const match = TASK_ENTRY.exec(entry);
+  return Boolean(match) && (match.groups.reason === undefined || isReason(match.groups.reason));
+}
 
 function checkMemory(text) {
   // Only LF and CRLF end a line: a lone CR or a Unicode line break stays inside its line and fails it.
@@ -338,8 +351,8 @@ function checkMemory(text) {
   if (!tasks.length) faults.push('MEMORY FORMAT: SCHEDULED TASKS missing');
   else if (tasks.length > 1) faults.push('MEMORY FORMAT: SCHEDULED TASKS more than one line');
   else {
-    const entries = tasks[0].replace(/^[-*\s]*SCHEDULED TASKS:\s*/, '').trim().split(/\s*;\s*/).filter(Boolean);
-    if (!entries.length || /[\r\u0085\u2028\u2029]/.test(tasks[0]) || entries.some(entry => !TASK_ENTRY.test(entry))) faults.push('MEMORY FORMAT: SCHEDULED TASKS old format');
+    const entries = tasks[0].replace(/^[-*\s]*SCHEDULED TASKS:\s*/, '').trim().split(';').map(entry => entry.trim()).filter(Boolean);
+    if (!entries.length || /[\r\u0085\u2028\u2029]/.test(tasks[0]) || entries.some(entry => !validEntry(entry))) faults.push('MEMORY FORMAT: SCHEDULED TASKS old format');
   }
   return faults.length ? { lines: faults, exitCode: 1 } : { lines: ['current'], exitCode: 0 };
 }

@@ -173,6 +173,8 @@ test('global rules hold the generic floor: precedence, entry routing, safety gat
     /Outside gate work the main session may start subagents, including Toolkit helpers on their installed route; subagents never start another/,
     /Outside gates, delegate when it saves context or wall time and run each automation, thread and helper cheapest first, medium effort at least \(`agent-cost-control`\)/,
     /Gate models, effort and route proof are in the gate rules/,
+    /retry in a fresh session with a clearer request/,
+    /A lower option may win when much better for one operation/,
     /switches only GitHub governance/,
     /No git: DISABLED automatically\. Git not on github\.com: DISABLED once the user says ok\./,
     /"Enable Toolkit's automated GitHub tracking governance for this repository\?" \(yes, no, later\)/,

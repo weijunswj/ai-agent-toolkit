@@ -200,6 +200,9 @@ test('Projects keeps its Toolkit base layer current without touching the project
   const costSkill = fs.readFileSync(path.join(__dirname, '../../skills/agent-cost-control/SKILL.md'), 'utf8');
   assert.match(costSkill, /\*\*Gates are outside the ladder\.\*\* G0, G1, G2, reviewers and the helpers a G0 or G1 lead launches keep the models, effort and routes their gate rules pin\./);
   assert.match(costSkill, /Gate sessions \(G0, G1, G2, reviewers\) and the helpers a G0 or G1 lead launches follow their gate rules'/);
+  assert.match(costSkill, /A task changes at its next rebuild; a non-gate thread is restarted on the new step\./);
+  // Only host settings that are confirmed are named.
+  assert.doesNotMatch(costSkill, /default_subagent_reasoning_effort/);
   // One job per thread, automatic rotation with a handoff file, never the coordinator's own thread.
   assert.match(text, /\*\*One job per non-gate thread; rotate long-lived ones\.\*\* A finished non-gate thread is never reused for new work/);
   // Gate sessions keep the gate rules' fresh-context rules; the old reuse-after-rename sentence is gone.
