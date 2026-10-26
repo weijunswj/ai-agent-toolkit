@@ -124,7 +124,7 @@ test('a plain yes with "merge" and a number is an approval; a no, a doubt or a q
     // green after a link path, a digit after a letter marker, untested guards, more clock forms
     'merge https://github.com/o/r/pull/622/files green', 'merge https://github.com/o/r/pull/622#top green', 'merge https://github.com/o/r/pull/622/files now green',
     'a.618 merge', 'item:5 merge', 'ok to merge 622?', '\u2022 did you merge 622', 'looks good, #622', 'merge 622 green.',
-    'merge 622 until CI passes', 'the agent can merge 622', 'merged 621, merge 622', '17h00 merge 622', 'merge 622 at 17h00', 'T17:00 merge 622', '9 a.m. merge 622',
+    'a.1. did you merge 622', 'ok.17:00 merge 622', 'merge 622 until CI passes', 'the agent can merge 622', 'merged 621, merge 622', '17h00 merge 622', 'merge 622 at 17h00', 'T17:00 merge 622', '9 a.m. merge 622',
     // numbered markers with no space, more branch names and quote forms, untested guards, green and clock forms
     '1.> merge 622', '1.did you merge 622', '12.is it ok to merge 622', 'merge development to #622', 'merge production to #622',
     'merge stable to #622', 'merge feature/x into #622', '‹merge 622›', '＂merge 622＂', 'merge 622 in 3 months', 'merge 622 at midnight',
