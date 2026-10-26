@@ -438,6 +438,8 @@ test('the merge reader closure matrix for bash and PowerShell', () => {
     ['Bash', 'gh api -X PUT repos/o/r/pulls/$PR/merge', null], ['Bash', 'echo "$(gh pr merge 5)"', false],
     // Bash heredocs and arithmetic.
     ['Bash', '((x<<2))\ngh pr merge 628', '628'], ['Bash', 'cat <<EOF\nbody\nEOF\ngh pr merge 628', '628'],
+    // (( is arithmetic only when its inner bracket closes straight into the outer one; otherwise two subshells.
+    ['Bash', '((gh pr merge 628) && echo ok)', '628'], ['Bash', '((cd r && gh pr merge 628) || echo f)', '628'], ['Bash', '((gh pr merge 628))', false],
     // Bash redirections: the stream number and target are never the PR.
     ['Bash', 'gh pr merge 2>/dev/null 628', '628'], ['Bash', 'gh pr merge 2>&1 628', '628'], ['Bash', 'gh pr merge >out.txt 628', '628'],
     ['Bash', 'gh pr merge <in 628', '628'], ['Bash', 'gh pr merge &>log 628', '628'], ['Bash', 'gh pr merge <<< y 628', '628'],
@@ -446,10 +448,12 @@ test('the merge reader closure matrix for bash and PowerShell', () => {
     ['Bash', '# gh pr merge 5', false], ['Bash', 'gh pr merge 628 # merge 5', '628'],
     // Bash compound commands.
     ['Bash', 'if gh pr checks 628; then gh pr merge 628; fi', '628'], ['Bash', '{ gh pr merge 628; }', '628'],
-    ['Bash', '! gh pr merge 628', '628'], ['Bash', 'time gh pr merge 628', '628'], ['Bash', 'while true; do gh pr merge 628; done', '628'],
+    ['Bash', '! gh pr merge 628', '628'], ['Bash', 'time gh pr merge 628', '628'], ['Bash', 'time -p gh pr merge 628', '628'], ['Bash', 'while true; do gh pr merge 628; done', '628'],
     // Bash input the reader cannot finish fails toward checking.
     ['Bash', "echo 'oops; gh pr merge 628", null], ['Bash', 'echo `oops; gh pr merge 628', null], ['Bash', "echo $'oops; gh pr merge 628", null],
     ['Bash', 'echo $((1 + gh pr merge 628', null], ['Bash', 'x="$(gh pr merge 628"', null], ['Bash', deep, null],
+    // Closed nesting too deep for the reader takes the error path and still fails toward checking.
+    ['Bash', `${'echo "$('.repeat(5000)}${')"'.repeat(5000)}; gh pr merge 628`, null],
     ['Bash', "echo 'oops; npm test", false],
     // PowerShell quotes, here-strings and escapes.
     ['PowerShell', 'gh pr merge 628', '628'], ['PowerShell', "echo 'it''s'; gh pr merge 628", '628'],
@@ -461,6 +465,8 @@ test('the merge reader closure matrix for bash and PowerShell', () => {
     // PowerShell comments, redirections and blocks.
     ['PowerShell', '# gh pr merge 5', false], ['PowerShell', '<# gh pr merge 5 #> gh pr merge 628', '628'],
     ['PowerShell', 'gh pr merge 628 2>&1', '628'], ['PowerShell', 'gh pr merge 2>$null 628', '628'], ['PowerShell', 'gh pr merge *> log 628', '628'],
+    // PowerShell streams are 1 to 6 and *, so a longer number before > is the PR.
+    ['PowerShell', 'gh pr merge 628>out', '628'],
     ['PowerShell', 'if ($ok) { gh pr merge 628 }', '628'], ['PowerShell', '& gh pr merge 628', '628'], ['PowerShell', 'echo "$(gh pr merge 5)"', false],
     // PowerShell input the reader cannot finish fails toward checking.
     ['PowerShell', "echo 'oops; gh pr merge 628", null], ['PowerShell', "$b = @'\noops gh pr merge 628", null], ['PowerShell', 'echo "oops gh pr merge 628', null],
@@ -468,5 +474,13 @@ test('the merge reader closure matrix for bash and PowerShell', () => {
   for (const [tool, command, expected] of rows) {
     const targets = mergeTargets(tool, { command });
     assert.equal(targets ? targets[0].number : false, expected, `${tool}: ${command.slice(0, 60)}`);
+  }
+  // An open read with many gh words and no merge stays linear, in both shells.
+  for (const tool of ['Bash', 'PowerShell']) {
+    for (const command of [`'${'gh '.repeat(330000)}`, `"${'gh x '.repeat(200000)}`, `${'(('.repeat(250000)}gh pr merge 628`]) {
+      const started = Date.now();
+      mergeTargets(tool, { command });
+      assert.ok(Date.now() - started < 1500, `${tool}: ${command.slice(0, 8)}`);
+    }
   }
 });

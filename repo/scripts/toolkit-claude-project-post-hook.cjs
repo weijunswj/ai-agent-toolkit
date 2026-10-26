@@ -18,9 +18,9 @@
 // - Merge summary: in a Projects session (one that has used the Projects tools), a PR merge (the gh merge command, a
 //   gh api PUT to .../pulls/<n>/merge or a merge_pull_request tool) is refused until a line of one of its own posts
 //   says "external effects" and names that PR; every merge in a command is checked. The command is read word by word
-//   with bash or PowerShell quoting rules (see shellSegments), so quotes, escapes, redirections and option values never
-//   hide or replace the PR, and a command it cannot finish reading counts as a merge with no number. It is a tripwire
-//   on the command text only: curl, GraphQL, wrapper shells, prefixes such as VAR= or sudo, aliases, scripts, direct
+//   with bash or PowerShell quoting rules (see shellSegments), so quotes, escapes and option values never hide or
+//   replace the PR, a redirection's stream number and target are never read as it, and a command it cannot finish
+//   reading counts as a merge with no number. It is a tripwire on the command text only: curl, GraphQL, wrapper shells, prefixes such as VAR= or sudo, aliases, scripts, direct
 //   pushes and a command inside a double-quoted $(...) or backticks are not seen.
 // Sessions without these tools (normal chats, Codex and sessions outside Projects) are never touched. Questions go
 // on decision cards, a separate tool this hook does not check. Input or a transcript it cannot read passes. The
@@ -398,10 +398,25 @@ function wordReader() {
   return reader;
 }
 
+// The closing bracket for each opening bracket in the raw text (-1 when it never closes), in one pass.
+function bracketPairs(text) {
+  const pairs = new Int32Array(text.length).fill(-1);
+  const open = [];
+  for (let i = 0; i < text.length; i += 1) {
+    if (text[i] === '(') open.push(i);
+    else if (text[i] === ')' && open.length) pairs[open.pop()] = i;
+  }
+  return pairs;
+}
+
 // Bash: the command's segments (split at ; & | ( ) and newlines outside quotes), each a list of words.
 function bashSegments(text) {
   const pending = [];
   const read = wordReader();
+  const pairs = text.includes('((') ? bracketPairs(text) : null;
+  // (( starts arithmetic only when its inner bracket closes straight into the outer one, as in ((x<<2)), or never
+  // closes; ((cmd) && cmd) is two subshells.
+  const arithmetic = i => pairs[i + 1] === -1 || pairs[i] === pairs[i + 1] + 1;
   for (let i = 0; i < text.length;) {
     const c = text[i];
     if (BLANKS.has(c)) { read.endWord(); i += 1; }
@@ -429,7 +444,7 @@ function bashSegments(text) {
       read.add(text.slice(i + 2, text[end - 1] === "'" ? end - 1 : end).replace(/\\([\s\S])/g, '$1'));
       i = end;
     } else if (text.startsWith('$((', i)) { read.add('_'); i = skipArith(text, i + 3); }
-    else if (text.startsWith('((', i) && !read.wordStarted()) { read.endSegment(); i = skipArith(text, i + 2); }
+    else if (text.startsWith('((', i) && !read.wordStarted() && arithmetic(i)) { read.endSegment(); i = skipArith(text, i + 2); }
     else if (c === '`') { read.add('_'); i = skipBacktick(text, i + 1); }
     else if (c === '#' && !read.wordStarted()) {
       const newline = text.indexOf('\n', i);
@@ -547,7 +562,7 @@ function powerShellSegments(text) {
       const newline = text.indexOf('\n', i);
       i = newline === -1 ? text.length : newline;
     } else if (c === '>') {
-      read.redirect(/^(?:\d+|\*)$/);
+      read.redirect(/^[1-6*]$/);
       i += text[i + 1] === '>' ? 2 : 1;
       if (text[i] === '&' && /\d/.test(text[i + 1] || '')) i += 2;
       else read.dropTarget();
@@ -633,7 +648,7 @@ function mergeTargets(tool, toolInput) {
   const targets = [];
   for (const words of segments) {
     let start = 0;
-    while (COMMAND_PREFIXES.has(words[start])) start += 1;
+    while (COMMAND_PREFIXES.has(words[start])) start += words[start] === 'time' && words[start + 1] === '-p' ? 2 : 1;
     if (words[start] !== 'gh') continue;
     if (words[start + 1] === 'pr' && words[start + 2] === 'merge') targets.push({ number: prMergeNumber(words.slice(start + 3)) });
     else if (words[start + 1] === 'api') {
@@ -642,7 +657,8 @@ function mergeTargets(tool, toolInput) {
     }
   }
   // A read that could not finish fails toward checking when the text mentions a gh merge.
-  if (open && /\bgh\b[\s\S]*\bmerge/.test(command) && !targets.some(target => target.number === null)) targets.push({ number: null });
+  const gh = open ? command.search(/\bgh\b/) : -1;
+  if (gh !== -1 && /\bmerge/.test(command.slice(gh)) && !targets.some(target => target.number === null)) targets.push({ number: null });
   return targets.length ? targets : null;
 }
 
