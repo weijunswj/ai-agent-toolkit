@@ -289,6 +289,7 @@ function validateInstalledEnforcement(installed, repoRoot, expectedVersion) {
     ["repo/ARCHITECTURE.md",false],
     ["repo/scripts/toolkit-programme-checkpoint-hook.cjs",false],
     ["skills/github-program-reconciler/scripts/programme-checkpoint.cjs",false],
+    ["skills/github-program-reconciler/scripts/programme-refresh-trigger.cjs",false],
   ];
   for (const [relPath, json] of pairs) {
     const source = path.join(repoRoot, ...relPath.split('/'));

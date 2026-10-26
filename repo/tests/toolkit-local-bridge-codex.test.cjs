@@ -77,6 +77,7 @@ function writeCodexPluginRefreshFixture(repoPath) {
     `    for (const hook of group.hooks) if (hook.command === ${JSON.stringify(sourceHelperHookCommand())}) hook.commandWindows = ${JSON.stringify(windowsHelperHookCommand())};`,
     "  }",
     `  hooks.hooks.Stop[0].hooks[0].commandWindows = ${JSON.stringify(windowsCheckpointHookCommand())};`,
+    `  hooks.hooks.PostToolUse[0].hooks[0].commandWindows = ${JSON.stringify(windowsCheckpointHookCommand())};`,
     "  fs.writeFileSync(hooksPath, JSON.stringify(hooks, null, 2) + '\\n');",
     "  const runtimePath = path.join(target, '.codex-plugin', 'session-start-runtime.json');",
     "  fs.writeFileSync(runtimePath, JSON.stringify({ schema: 1, node_path: process.execPath }, null, 2) + '\\n');",
