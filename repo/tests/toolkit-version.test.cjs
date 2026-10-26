@@ -102,7 +102,7 @@ test('bump-version refuses a non-semver version without writing', () => {
 // A git copy of the repository with one "base" commit, as main would be at merge time.
 function gitCopy(t) {
   const copy = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-next-'));
-  t.after(() => fs.rmSync(copy, { recursive: true, force: true }));
+  t.after(() => fs.rmSync(copy, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
   for (const rel of trackedFiles()) {
     const target = path.join(copy, rel);
     fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -121,6 +121,9 @@ function gitCopy(t) {
   run('config', 'user.email', 'test@example.invalid');
   run('config', 'user.name', 'Test');
   run('config', 'core.autocrlf', 'false');
+  // No background gc or maintenance after a commit, which could still be writing objects at cleanup.
+  run('config', 'gc.auto', '0');
+  run('config', 'maintenance.auto', 'false');
   run('add', '-A');
   run('commit', '-q', '-m', 'base');
   run('tag', 'base');
