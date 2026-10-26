@@ -131,7 +131,7 @@ test('H-04: the answer is recorded in the user-state files only, nothing is writ
   assert.match(answered.context, /now ENABLED \(materials incomplete\)/);
   // A yes leads straight into the setup questions, asked before the held messages are handled.
   assert.match(answered.context, /GitHub governance setup is not finished here\. Before other work, ask the user in one message: \(1\) the private evidence store/);
-  assert.match(answered.context, /\(2\) the parent issue[^\n]*\(3\) confirm the defaults[^\n]*If the user says not now, carry on under the global rules and ask again next session\./);
+  assert.match(answered.context, /\(2\) the parent issue[^\n]*\(3\) confirm the defaults[^\n]*\(4\) only if the repository is private, and never skipped then: whether to turn on GitHub's paid Secret Protection[^\n]*stay off unless the user says on \(record only the user's own answer[^\n]*never write "off" for them\)[^\n]*If the user says not now, carry on under the global rules and ask again next session\. Never act as the user/);
   assert.ok(answered.context.indexOf('Before other work') < answered.context.indexOf('1. first request'));
   assert.ok(answered.context.indexOf('1. first request') < answered.context.indexOf('2. second request'));
   // Until the block and binding land, every new session is reminded, and nothing is held.

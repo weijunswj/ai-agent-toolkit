@@ -1,6 +1,25 @@
+# Written by Toolkit governance: weekly Dependabot version updates for every package ecosystem
+# found in this repository. Security updates are separate, turned on in the repository settings,
+# and never wait for the cooldown.
 version: 2
 updates:
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 7
+    groups:
+      github-actions-patch-and-minor:
+        update-types: ["patch", "minor"]
+    ignore:
+      - dependency-name: "dependabot/fetch-metadata"  # pinned by Toolkit's auto-merge template
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 3
+    groups:
+      npm-patch-and-minor:
+        update-types: ["patch", "minor"]

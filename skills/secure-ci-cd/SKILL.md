@@ -1,6 +1,6 @@
 ---
 name: secure-ci-cd
-description: Use when planning security-first CI/CD setup, GitHub Actions workflows, pipelines, pipeline hardening, required checks, security checks, deployment automation, build/test automation, automated validation, secret scanning, branch protection, release automation, installer prompt/status templates, or safe rollout planning.
+description: Use when planning security-first CI/CD setup, GitHub Actions workflows, pipelines, pipeline hardening, required checks, security checks, deployment automation, build/test automation, automated validation, secret scanning, local secret scans of a repository, branch protection, release automation, installer prompt/status templates, or safe rollout planning.
 ---
 
 
@@ -66,6 +66,19 @@ Before committing, pushing, creating a pull request, merging, or deploying, paus
 - [`scripts/personal-data-guard.cjs`](scripts/personal-data-guard.cjs) is a zero-dependency scanner for email addresses, phone numbers and WhatsApp number links in file content (including Word, Excel, PowerPoint and PDF text), file names, commit and tag messages, branch names and pull request text. It prints the place, class and rule only, never the value, and any error that stops a complete scan fails.
 - [`scripts/install-personal-data-guard.cjs`](scripts/install-personal-data-guard.cjs) installs it into a repository on the owner's opt-in: a copy under `.github/scripts/`, the config `.github/personal-data-guard.json` (the owner chooses whether author and committer addresses are scanned), git hooks in the folder git really uses, and with `--workflow` the CI job from [`templates/github-actions/personal-data-guard.yml`](templates/github-actions/personal-data-guard.yml). `--check` reports drift.
 - Hooks can be skipped with `--no-verify`; the CI job is the backstop. Follow `docs/agent-playbooks/privacy-safe-checks.md` in the target repository (the repository-agent-rules playbook) for fixtures, allow markers and the pushed-by-mistake steps.
+
+## Local Security Scan
+
+- [`scripts/local-security-scan.cjs`](scripts/local-security-scan.cjs) checks one repository on the owner's computer for committed credentials, read-only: every tracked or unignored file and every line ever added on any branch or tag (merges read against their first parent, every file read as text). Use it when the owner asks for a security check or a secret scan of a repository, or before a release. It needs only Node and git (taken from the first absolute PATH folder whose real path is outside the scanned repository), installs nothing and sends nothing off the computer. Vulnerable dependencies are left to Dependabot.
+- The formats live in [`scripts/secret-patterns.cjs`](scripts/secret-patterns.cjs), one list for every Toolkit secret check to reuse: each is a provider's published token shape (fixed prefix, exact length, fixed characters), with no entropy guessing, so hashes, IDs and prose never match. Obvious placeholders are skipped, and a reviewed exception is a same-line `secret-scan: allow <reason>` marker (the reason needs at least three letters or digits, and it covers only matches before it on that line). Its interface (`PATTERNS`, `scanText`, `scanLines`, `isPlaceholder`, `ALLOW_MARKER`) is stable. Tests build key-shaped samples at run time from pieces, never as literals in a file.
+- The report (`--out <dir>`: JSON and Markdown) gives the scanned commit, whether the tree was dirty, what could not be scanned, and findings classed release blocker or likely false positive (a test, fixture, example or docs path) by place only: file, line, column, short commit and format. It never holds any part of a match, an author or a commit message, and `--out` may not be inside the scanned repository.
+- After fixing, run it again with `--recheck <previous report>` to see which findings are fixed, still open or new. A credential found in history stays in every report while history holds it: rotate it at the provider straight away; removing it from history is the owner's call.
+- Exit codes: 0 clean, 1 release blocker, 2 could not scan, 3 incomplete (a shallow clone's history, or a file over 5 MB or unreadable). The flags, exit codes and report schema are stable for other checks to call.
+
+## Dependency Auto-Merge
+
+- [`templates/github-actions/dependency-auto-merge.yml`](templates/github-actions/dependency-auto-merge.yml) turns on GitHub auto-merge, merge commit only, for Dependabot patch and minor updates, so GitHub merges only after every required check passes. It uses only the built-in token, never checks out the pull request's code, reads the policy from the default branch's programme binding (`dependency_updates.auto_merge: patch-minor` is the owner's standing permission) and refuses when no ruleset requires a check. Majors, minor updates from 0.x, maintainer changes and, unless the binding says `github_actions: auto-merge`, GitHub Actions updates get one comment for the owner. It acts only on pull requests to the default branch whose every commit is Dependabot's, and pins auto-merge to the head it checked. A push or re-run by anyone but Dependabot, or a base branch change, turns auto-merge off again, and the job fails if that cannot be confirmed.
+- In a Toolkit-governed repository, `toolkit governance check` reports it with the other dependency and security settings, and `toolkit governance security` installs it once the binding allows auto-merge. Elsewhere, install it only on the owner's explicit approval, after required checks exist.
 
 ## AI-Facing Surfaces
 
