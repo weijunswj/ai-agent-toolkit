@@ -190,7 +190,7 @@ test('rendered blocks never contain private values and use the Toolkit marker fo
   assert.equal(managedBlock.blockState(blocks[0], { source: state.BLOCK_SOURCE, name: state.BLOCK_NAME, version: '3.9.1', body: childBody }), 'current');
 });
 
-test('the Programme Graph has six columns, works out NOW, NEXT, LATER and OPTIONAL, sorts each by status then child number, then COMPLETED by completion, then RETIRED, and flattens nesting', () => {
+test('the Programme Graph has six columns, works out NOW, LATER and OPTIONAL, sorts each by priority order then child number, then COMPLETED by completion, then RETIRED, and flattens nesting', () => {
   const outcomes = [
     { issue: 8, class: 'COMMITTED', parent: 7, order: 9, name: 'Shared host contract', description: 'One contract for both hosts' },
     { issue: 9, class: 'RETIRED', parent: 7, order: 0, description: 'Old predecessor' },
@@ -231,21 +231,22 @@ test('the Programme Graph has six columns, works out NOW, NEXT, LATER and OPTION
   assert.ok(lines.includes('| Task | Task Description | Child # | PR # | Class | Status |'));
   assert.equal(/CORE|HARDENING/.test(body), false, 'the old classes never show');
   const rows = lines.filter(line => /^\| [^|]+ \| [^|]+ \| #\d+ \|/.test(line)).map(line => line.split(' | ').map(cell => cell.replace(/^\| | \|$/g, '')));
-  assert.deepEqual(rows.map(row => Number(row[2].slice(1))), [8, 11, 17, 10, 19, 14, 15, 21, 13, 18, 12, 16, 9], 'NOW, NEXT, LATER, OPTIONAL by status and child number; finished oldest first');
+  assert.deepEqual(rows.map(row => Number(row[2].slice(1))), [11, 8, 17, 10, 21, 14, 15, 13, 18, 19, 12, 16, 9], 'NOW, LATER, OPTIONAL by priority order and child number; finished oldest first');
+  assert.equal(/\bNEXT\b/.test(body), false, 'there is no Next group');
   const classOf = Object.fromEntries(rows.map(row => [row[2], row[4]]));
   for (const [issue, expected, why] of [
     ['#11', 'NOW', 'an open PR'],
     ['#8', 'NOW', 'a draft PR wins over a release'],
-    ['#10', 'NEXT', 'a planned release and no open PR'],
+    ['#10', 'LATER', 'a planned release does not change the group'],
     ['#17', 'NOW', 'waiting on the owner with no PR is still in progress'],
-    ['#19', 'NEXT', 'an optional task with a release is planned'],
+    ['#19', 'OPTIONAL', 'an optional task with a release stays optional'],
     ['#21', 'LATER', 'committed, no release'],
     ['#14', 'LATER', 'a closed PR is not current work'],
     ['#13', 'OPTIONAL', 'optional, no release'],
     ['#12', '-', 'finished rows carry no class'],
     ['#9', '-', 'retired rows carry no class'],
   ]) assert.equal(classOf[issue], expected, `${issue}: ${why}`);
-  assert.deepEqual(rows[0], ['Shared host contract', 'One contract for both hosts', '#8', '#549', 'NOW', 'IN PROGRESS'], 'the description follows the task, and the gate is not a column');
+  assert.deepEqual(rows[1], ['Shared host contract', 'One contract for both hosts', '#8', '#549', 'NOW', 'IN PROGRESS'], 'the description follows the task, and the gate is not a column');
   assert.deepEqual([rows[5][0], rows[5][2]], ['per-repository governance states', '#14'], 'a release prefix is not part of the name');
   assert.deepEqual([rows[6][0], rows[6][2]], ['Toolkit temporary-resource hygiene', '#15'], 'a code prefix is not part of the name');
   assert.deepEqual(rows[2].slice(4), ['NOW', 'IN PROGRESS']);
@@ -253,6 +254,26 @@ test('the Programme Graph has six columns, works out NOW, NEXT, LATER and OPTION
   assert.deepEqual(rows[11].slice(4), ['-', 'COMPLETED'], 'a finished nested child goes down to COMPLETED');
   assert.equal(rows[10][0], 'External Operation Authority');
   assert.equal(body.includes('Roadmap') || body.includes('<details>'), false, 'one table, nothing else');
+});
+
+test('a priority tie is named only among queued rows of one group', () => {
+  const outcomes = [
+    { issue: 2, class: 'COMMITTED', parent: 7, order: 1 },
+    { issue: 3, class: 'COMMITTED', parent: 7, order: 1 },
+    { issue: 4, class: 'COMMITTED', parent: 7, order: 1 },
+    { issue: 5, class: 'OPTIONAL', parent: 7, order: 1 },
+    { issue: 6, class: 'COMPLETED', parent: 7, order: 1 },
+    { issue: 8, class: 'COMMITTED', parent: 7, order: 2 },
+    { issue: 10, class: 'COMMITTED', parent: 7, order: 1 },
+  ];
+  const parent = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes });
+  const pr = { number: 9, state: 'OPEN', head: null, checks: { state: 'UNKNOWN', required_total: 0, required_passed: 0, at_head: null } };
+  const children = new Map([
+    [4, { ...state.newChild({ repository: 'acme/app', outcome: outcomes[2] }), pr }],
+    [10, { ...state.newChild({ repository: 'acme/app', outcome: outcomes[6] }), lifecycle: 'ACTIVE' }],
+  ]);
+  assert.deepEqual(state.orderTies(parent, children).map(tie => tie.map(outcome => outcome.issue)), [[2, 3]], 'two NOW rows sharing an order, optional and finished rows do not tie');
+  assert.deepEqual(state.orderTies(parent, new Map()).map(tie => tie.map(outcome => outcome.issue)), [[2, 3, 4, 10]]);
 });
 
 test('older class names are read as COMMITTED and anything else is refused', () => {
@@ -266,7 +287,7 @@ test('older class names are read as COMMITTED and anything else is refused', () 
   assert.match(state.validateParent(bad).join('\n'), /class must be one of COMMITTED, OPTIONAL, COMPLETED, RETIRED/, 'the bucket is never stored');
 });
 
-test('the generated CURRENT summary lists only work in progress, saying what waits on the owner', () => {
+test('the generated CURRENT summary lists work in progress, saying what waits on the owner, then the Later task to start next', () => {
   const outcomes = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(issue => ({ issue, class: 'COMMITTED', parent: 7, order: issue, name: `Task ${issue}` }));
   outcomes.push({ issue: 11, class: 'COMPLETED', parent: 7, order: 0, name: 'Done task' });
   const parent = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes });
@@ -290,9 +311,24 @@ test('the generated CURRENT summary lists only work in progress, saying what wai
     '- Task 2 (#2): G1, PR #543; waiting on you: your UAT on PR #543; next: Controller: admit and plan this outcome',
     '- Task 3 (#3); waiting on you: your decision; next: Controller: admit and plan this outcome',
     '- Task 4 (#4); waiting on you: blocked: needs the key; next: Controller: admit and plan this outcome',
-  ].join('\n'), 'queued work shows only in the graph');
+    '',
+    '**Start next:** Task 5 (#5)',
+  ].join('\n'), 'queued work shows in the graph, with only the top Later task named here');
   const idle = state.renderCurrentBlockBody(state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes: [] }), new Map());
-  assert.match(idle, /\*\*In progress\*\*\n- None\.$/);
+  assert.match(idle, /\*\*In progress\*\*\n- None\.\n\n\*\*Start next:\*\* None\.$/);
+  // The top LATER task by priority order starts next; optional work is never named.
+  const later = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes: [
+    { issue: 2, class: 'OPTIONAL', parent: 7, order: 0, name: 'Optional' },
+    { issue: 3, class: 'COMMITTED', parent: 7, order: 4, name: 'Low' },
+    { issue: 4, class: 'COMMITTED', parent: 7, order: 1, name: 'Top' },
+  ] });
+  assert.match(state.renderCurrentBlockBody(later, new Map(), new Map()), /\*\*Start next:\*\* Top \(#4\)$/);
+  const merged = { number: 5, state: 'MERGED', head: null, checks: { state: 'UNKNOWN', required_total: 0, required_passed: 0, at_head: null } };
+  const top = { ...state.newChild({ repository: 'acme/app', outcome: later.outcomes[2] }), pr: merged };
+  assert.match(state.renderCurrentBlockBody(later, new Map([[4, top]]), new Map()), /\*\*Start next:\*\* Low \(#3\)$/, 'a merged PR is not picked before its state catches up');
+  assert.match(state.renderCurrentBlockBody(later, new Map(), new Map([[4, { closed_at: '2026-10-25T00:00:00Z' }]])), /\*\*Start next:\*\* Low \(#3\)$/, 'a closed issue is not picked');
+  const onlyOptional = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes: [{ issue: 2, class: 'OPTIONAL', parent: 7, order: 0 }] });
+  assert.match(state.renderCurrentBlockBody(onlyOptional, new Map(), new Map()), /\*\*Start next:\*\* None\.$/);
 });
 
 test('a finished outcome takes the issue close time once, and the controller may set it', () => {

@@ -1,12 +1,23 @@
 # Toolkit Changelog
 
-## 3.13.8
+## 3.13.9
 
 ### Claude Projects
 
 - **A card each when the account copies fall behind:** Claude Projects controller skill 2026-10-25.9 (tap Save on its card). The skill card is one Save tap. After the first card, a coordinator that can post skill cards adds the memory line `skill cards: coordinator`; from then on the check-in writes "card due" instead of posting its own card, and the coordinator posts it in the project chat, so the owner gets one card where they read. On "card failed" the coordinator posts it too when it can. No agent can update a claude.ai plugin, so when the Toolkit plugin is more than a day behind, the coordinator posts one plugin card in the project chat with two clicks in Customize > Plugins (remove the Toolkit plugin only and let it reinstall), with Check for updates and a marketplace re-add as fallbacks. A retired skill card in the chat gets a "don't save" line.
 - **Plugin line on every run:** the check-in shows `**Plugin:** current` or how far behind it is, names the commit where `main` moved past the account version, and puts `PLUGIN BEHIND` on its first line once per `main` version (the "plugin behind" record in its state file).
 - **No false skill drift from a short clone:** before the check-in calls an account file a direct edit, it fetches the full history of its shallow Toolkit clone and checks every revision again, so an old but unedited account copy is reported as behind, not edited. If that fetch fails, it reports drift as unverified and posts no card.
+
+## 3.13.8
+
+### Now and Later
+
+- **Two roadmap groups:** the Programme Graph's Class column shows `NOW` for work in progress (an open or draft PR, or an active, owner-waiting or held gate) and `LATER` for every other committed, unfinished task. Optional work still sorts last as `OPTIONAL`. There is no `NEXT` group: a planned release still shows on the task page but no longer moves a task.
+- **Later is in priority order:** the catalogue `order` is the priority again. Inside each group rows sort by `order`, lowest first, then by child number, and native sub-issues follow. The top Later task is what starts next.
+- **Start next:** the CURRENT summary ends with one **Start next** line naming the top Later task, or None. A task whose PR merged or whose issue closed is skipped, even before its state catches up.
+- **Ties are named:** a reconcile finding `ORDER_TIE` lists queued tasks in one group that share an `order`, so the controller can set a distinct priority with `update-parent`. While older classes are still reported, migrate first, or set COMMITTED and the priority in one patch.
+- **Older classes:** the CORE, HARDENING and LATER migration patch renumbers `order` in the old sequence, which becomes the priority. Before migration their old per-class numbers tie, so a pass may reorder them.
+- **Rules text:** the governed rules order work Now, then Later by priority; Toolkit V3, CONTROLLER.md and the reconciler skill say the same.
 
 ## 3.13.7
 

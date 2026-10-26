@@ -37,11 +37,10 @@ const SHA40 = /^[0-9a-f]{40}$/;
 const REPO = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const PREFIX = /^[A-Za-z0-9._-]{1,40}$/;
 const CLASSES = ['COMMITTED', 'OPTIONAL', 'COMPLETED', 'RETIRED'];
-// Classes from before Now, Next and Later, read as COMMITTED and sorted like any other task (the
-// graph sorts by class, status and child number; `order` no longer sets a position). Each pass
-// reports CLASS_LEGACY with a patch that migrates them in one step, renumbering `order` in the old
-// CORE, HARDENING, LATER sequence; a write never adds one. Remove these once no parent document
-// carries them.
+// Classes from before Now and Later, read as COMMITTED and sorted like any other task (the graph
+// sorts by group, then `order`, the priority, then child number). Each pass reports CLASS_LEGACY
+// with a patch that migrates them in one step, renumbering `order` in the old CORE, HARDENING,
+// LATER sequence; a write never adds one. Remove these once no parent document carries them.
 const LEGACY_CLASSES = ['CORE', 'HARDENING', 'LATER'];
 const LEGACY_RANK = Object.freeze({ CORE: 0, HARDENING: 1 });
 const legacyRank = outcome => LEGACY_RANK[outcome.class] ?? 2;
@@ -908,19 +907,16 @@ function revisionLine(parent, children) {
 }
 
 // The Programme Graph's Class column is worked out, never stored: NOW when the task is in progress
-// (an open or draft PR, or active, waiting on the owner or held), NEXT when it is queued with a
-// planned release, else LATER (OPTIONAL for an optional task).
+// (an open or draft PR, or active, waiting on the owner or held), else LATER (OPTIONAL for an
+// optional task). A planned release names where the work merges; it does not change the group.
 // A finished outcome (class COMPLETED or RETIRED, or a DONE or RETIRED lifecycle) shows as COMPLETED,
 // and a retired one says so in its status. The gate a task is in shows on its own page, not here.
-const GRAPH_GROUPS = Object.freeze(['NOW', 'NEXT', 'LATER', 'OPTIONAL']);
+const GRAPH_GROUPS = Object.freeze(['NOW', 'LATER', 'OPTIONAL']);
 const GRAPH_HEADER = ['| Task | Task Description | Child # | PR # | Class | Status |', '|---|---|---|---|---|---|'];
-// Inside a class, in-progress rows come before queued ones.
-const STATUS_RANK = Object.freeze({ 'IN PROGRESS': 0, QUEUED: 1 });
 
 function graphClass(outcome, child) {
   if (!outcome || isFinished(outcome, child)) return '-';
   if (statusText(outcome, child) === 'IN PROGRESS') return 'NOW';
-  if (child?.release) return 'NEXT';
   return outcome.class === 'OPTIONAL' ? 'OPTIONAL' : 'LATER';
 }
 
@@ -966,15 +962,14 @@ function completedAt(child, issue) {
   return child?.completed_at || issue?.closed_at || null;
 }
 
-// Active rows by class (NOW, NEXT, LATER, OPTIONAL), each by status and then child issue number; then every finished row,
-// oldest completion first and the most recent last (unknown times last). Nested children sort like
-// any other row.
+// Active rows by class (NOW, LATER, OPTIONAL), each by priority (`order`, lowest first) and then
+// child issue number, so the top LATER row starts next; then every finished row, oldest completion
+// first and the most recent last (unknown times last). Nested children sort like any other row.
 function graphOrder(parent, children, issues) {
   const finished = parent.outcomes.filter(outcome => isFinished(outcome, children.get(outcome.issue)));
   const active = parent.outcomes.filter(outcome => !finished.includes(outcome));
-  const rank = outcome => STATUS_RANK[statusText(outcome, children.get(outcome.issue))] ?? 2;
-  const byStatus = (a, b) => rank(a) - rank(b) || a.issue - b.issue;
-  const groups = GRAPH_GROUPS.map(cls => active.filter(outcome => graphClass(outcome, children.get(outcome.issue)) === cls).sort(byStatus));
+  const byPriority = (a, b) => a.order - b.order || a.issue - b.issue;
+  const groups = GRAPH_GROUPS.map(cls => active.filter(outcome => graphClass(outcome, children.get(outcome.issue)) === cls).sort(byPriority));
   const when = outcome => completedAt(children.get(outcome.issue), issues.get(outcome.issue));
   const byCompletion = (a, b) => {
     const left = when(a);
@@ -986,6 +981,20 @@ function graphOrder(parent, children, issues) {
   const retired = finished.filter(outcome => isRetired(outcome, children.get(outcome.issue)));
   const completed = finished.filter(outcome => !retired.includes(outcome));
   return [...groups.flat(), ...completed.sort(byCompletion), ...retired.sort(byCompletion)];
+}
+
+// Queued rows (LATER or OPTIONAL) in the same group that share an `order`, the priority: each list
+// is one tie, lowest order first. Work in progress is left out, since NOW is not picked by priority.
+function orderTies(parent, children) {
+  const ties = new Map();
+  for (const outcome of parent.outcomes) {
+    const cls = graphClass(outcome, children.get(outcome.issue));
+    if (cls !== 'LATER' && cls !== 'OPTIONAL') continue;
+    const key = `${cls} ${outcome.order}`;
+    ties.set(key, [...(ties.get(key) || []), outcome]);
+  }
+  return [...ties.values()].filter(list => list.length > 1).map(list => list.sort((a, b) => a.issue - b.issue))
+    .sort((a, b) => a[0].order - b[0].order || a[0].issue - b[0].issue);
 }
 
 // `issues` maps an issue number to what GitHub shows for it (title, close time).
@@ -1000,7 +1009,7 @@ function renderParentBlockBody(parent, children, issues = new Map()) {
     revisionLine(parent, children),
     '## Programme Graph',
     '',
-    `Generated from the programme state documents (state revision ${parent.revision}), so edit those rather than this table. Sorted NOW (in progress), NEXT (planned release), LATER, OPTIONAL, then COMPLETED with the most recent last; inside each, in progress before queued, then by child number.`,
+    `Generated from the programme state documents (state revision ${parent.revision}), so edit those rather than this table. Sorted NOW (in progress), then LATER in priority order (the top one starts next), then OPTIONAL, then COMPLETED with the most recent last.`,
     '',
     ...GRAPH_HEADER,
     ...rows,
@@ -1076,7 +1085,8 @@ function ownerWait(child) {
 }
 
 // The generated CURRENT summary: the tasks in progress, in Programme Graph order, each with its gate,
-// PR, next step and anything waiting on the owner. Queued work shows in the graph below it.
+// PR, next step and anything waiting on the owner, then the top LATER task to start next. Queued
+// work shows in the graph below it.
 function renderCurrentBlockBody(parent, children, issues = new Map()) {
   const rows = graphOrder(parent, children, issues).map(outcome => ({ outcome, child: children.get(outcome.issue) }));
   const working = rows.filter(row => statusText(row.outcome, row.child) === 'IN PROGRESS').map(row => {
@@ -1084,12 +1094,16 @@ function renderCurrentBlockBody(parent, children, issues = new Map()) {
     const wait = ownerWait(row.child);
     return `- ${taskName(row.outcome, issues.get(row.outcome.issue))} (#${row.outcome.issue})${parts ? `: ${parts}` : ''}${wait ? `; waiting on you: ${wait}` : ''}${row.child.next_action ? `; next: ${publicText(row.child.next_action)}` : ''}`;
   });
+  // A task whose PR merged or whose issue closed is not picked, even before its state catches up.
+  const next = rows.find(row => graphClass(row.outcome, row.child) === 'LATER' && row.child?.pr.state !== 'MERGED' && !issues.get(row.outcome.issue)?.closed_at);
   return [
     '<!-- programme-current -->',
     `_Generated from the programme state (revision ${parent.revision}). The Programme Graph follows; hand-written notes come after it._`,
     '',
     '**In progress**',
     ...(working.length ? working : ['- None.']),
+    '',
+    `**Start next:** ${next ? `${taskName(next.outcome, issues.get(next.outcome.issue))} (#${next.outcome.issue})` : 'None.'}`,
   ].join('\n');
 }
 
@@ -1778,7 +1792,7 @@ function intentId(kind, target) {
 // Findings the reconciler reports but never fixes itself; each needs a controller decision.
 const ATTENTION = new Set(['ISSUE_MISSING', 'NATIVE_PARENT_UNEXPECTED', 'NATIVE_CHILD_UNKNOWN', 'DEPENDENCY_IMPLIES_PARENT',
   'PR_HEAD_MOVED', 'CHECKS_RED', 'READY_TO_CLOSE', 'CHILD_STATE_CONFLICT', 'MANAGED_BLOCK_BROKEN', 'TRACE_UNLINKED', 'TRACE_SUPERSEDED_UNMARKED', 'PR_UNTRACKED',
-  'RETURN_CAPTURED', 'STALE_ASSIGNMENT', 'JOURNAL_ERROR', 'JOURNAL_INVALID', 'CLASS_LEGACY']);
+  'RETURN_CAPTURED', 'STALE_ASSIGNMENT', 'JOURNAL_ERROR', 'JOURNAL_INVALID', 'CLASS_LEGACY', 'ORDER_TIE']);
 // Child fields the journal fold owns; apply re-folds them on the document it reads, never copies them.
 const FOLD_FIELDS = ['gate', 'journals_seen', 'next_action'];
 
@@ -2201,7 +2215,8 @@ class Reconciler {
     this.diffUntracked(parent, desiredDocs, observed, only, findings);
     const legacy = parent.outcomes.filter(outcome => LEGACY_CLASSES.includes(outcome.class) && (!only || outcome.issue === only));
     if (legacy.length) findings.push({ code: 'CLASS_LEGACY', issue: parent.parent_issue, patch: legacyMigrationPatch(parent),
-      detail: `${legacy.map(outcome => `#${outcome.issue} ${outcome.class}`).join(', ')} read as COMMITTED and sort like any other task, by class, status and child number; to migrate, save this finding's patch (reconcile --json) and apply it whole with update-parent, which sets COMMITTED and renumbers order in the old CORE, HARDENING, LATER sequence` });
+      detail: `${legacy.map(outcome => `#${outcome.issue} ${outcome.class}`).join(', ')} read as COMMITTED and sort like any other task, by group, priority (order) and child number; to migrate, save this finding's patch (reconcile --json) and apply it whole with update-parent, which sets COMMITTED and renumbers order in the old CORE, HARDENING, LATER sequence` });
+    if (!only) for (const tie of orderTies(parent, desiredDocs)) findings.push({ code: 'ORDER_TIE', issue: parent.parent_issue, detail: `${tie.map(outcome => `#${outcome.issue}`).join(', ')} share priority order ${tie[0].order}, so child number decides. Controller: set a distinct order with update-parent; if CLASS_LEGACY is reported too, migrate first, or set COMMITTED and the priority in one update-parent patch` });
     for (const effect of effects) effect.text = describeEffect(effect);
     return { parent, parentSha: parentRead.sha, override: Boolean(parentRead.override), children, observed, findings, effects, holds, resolutions };
   }
@@ -2521,7 +2536,7 @@ module.exports = Object.freeze({
   ProgrammeError, GitHubTransport, StateStore, STORE_BACKENDS, ProgrammeGraphReader, GitHubMutator, Reconciler,
   canonical, canonicalText, contentDigest, sameState, validateParent, validateChild, validateBinding, assertValid, loadBinding,
   newParent, newChild, isHolder, isLaneHolder, parentRefusal, authoriseWrite, claimDocument, claimLane, assignGate, reopenGate, interruptGate,
-  recordReturn, consumeReturn, foldJournals, validateJournal, currentGateAccepted, completionAccepted, applyPatch, refuseNewLegacy, legacyMigrationPatch,
+  recordReturn, consumeReturn, foldJournals, validateJournal, currentGateAccepted, completionAccepted, applyPatch, refuseNewLegacy, legacyMigrationPatch, orderTies,
   evaluateChecks, renderParentBlockBody, renderChildBlockBody, renderTraceBlockBody, renderCurrentBlockBody, renderBlock, blockDigest, findStateBlock, upsertStateBlock, upsertTraceBlock,
   orderMoves, intentId, describeEffect, resolveExecutable, isGitHubHost, originSlug, bindRepository,
 });
