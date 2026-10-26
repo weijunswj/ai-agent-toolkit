@@ -9,6 +9,7 @@
 - **Edits are re-checked:** the `Validate` workflow also runs when a pull request's title or body is edited, so a footer a tool adds after the last push fails the required check, and removing it clears the check without a new commit. The personal-data CI template also runs on edits, and both workflows cancel an older run for the same pull request.
 - **Repositories that already have the guard workflow:** the installer keeps an existing `.github/workflows/personal-data-guard.yml`, so add `types: [opened, edited, reopened, synchronize]` under its `pull_request:` trigger by hand to get the re-check on edits.
 - **Open pull requests:** after this change, an open pull request whose body still has an AI attribution footer or session link fails the personal-data check on its next push or edit. Remove those lines from the body.
+- **Projects instructions:** the attribution line now says to strip the platform's requester header and project-thread links too, and to remove anything the platform adds, because the guard fails a PR that keeps them.
 - **Protection check reads activity types:** the governance protection check now treats a pull request `types:` list that keeps `opened`, `synchronize` and `reopened` as running on every push, so adding `edited` keeps a required check verified. Any other list, or one it cannot read, stays unverified.
 
 ## 3.15.7 (task moves and catch-ups)
