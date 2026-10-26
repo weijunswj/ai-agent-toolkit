@@ -8,6 +8,12 @@
 - **Merge summary before merge:** in a Projects session, a PR merge (`gh pr merge`, a `gh api` merge call or a merge tool) is refused until a line in one of that session's own posts or edits says "external effects" and names the PR. It reads only the command text, so it reads the command word by word with bash or PowerShell quoting rules (quotes, escapes, heredocs, here-strings and option values never hide or replace the PR number, and a redirection's stream number or target is never read as it; a command it cannot finish reading counts as a merge with no number) and checks every merge in one command; curl, GraphQL, wrapper shells, prefixes, aliases, scripts, direct pushes and a command inside a double-quoted `$(...)` or backticks are not seen, and an unreadable transcript lets the merge pass. Sessions outside Projects never see it.
 - The skill describes the layout in a new **Post layout** rule.
 
+## 3.15.10 (flexible setup answers)
+
+- **You answer setup in your own words:** after the setup question bank, reply `all recommended`, `allrecommended`, `use all the recommended ones` or `change 3.1 to D, rest recommended`. The agent turns a clear reply into the exact answer, adds the bank reference itself and shows one line saying what it sent; it never asks you to type the reference. It asks one short question when the reply is unclear, never treats a bare `yes` or `ok` as an answer, and uses only your reply to the newest bank.
+- **Setup accepts sloppy spelling:** `all recommended` in any case, with spaces, hyphens, underscores or nothing between the words and one optional full stop; the bank reference in any case, with or without hyphens, with O read as 0 and I or L as 1, followed by a colon or spaces; and changes separated by commas, semicolons or spaces. A missing, wrong or old reference, duplicates, unknown questions or choices, and mixed answers still stop before any change. A live terminal accepts the same spellings.
+- The reply guide under the bank now reads "Reply with either: `all recommended` or only your changes", and still prints the bank reference above it.
+
 ## 3.15.9 (setup launch on Windows)
 
 ### Setup launch on Windows
