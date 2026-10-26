@@ -34,7 +34,15 @@
 // yes; it creates or updates the one ruleset Toolkit names and never touches any other.
 //
 // Within that subset, a job named by an expression, a matrix job and a reusable workflow call
-// produce names the reader does not try to predict.
+// produce names the reader does not try to predict: any of them whose name could come out as a
+// required check (GitHub adds " (values)" to a matrix job and " / <called job>" to a reusable
+// call, and a skipped one reports under its bare name) leaves P3 unverified. So does a job whose
+// name differs from a required check only in letter case, or a quoted name with spaces at either
+// end, since this check does not rely on how GitHub compares or trims names.
+//
+// Known limits: P3 counts the jobs in workflow files only. Checks that GitHub-managed workflows
+// report without a file (CodeQL default setup's `Analyze (<language>)`), and check runs or
+// statuses a step posts with a token that can write them, are not counted.
 
 const childProcess = require('node:child_process');
 const fs = require('node:fs');
@@ -250,9 +258,11 @@ function aggregateProblem(job, workflowContext) {
 //     `- value`, with exactly one space after `-`, a plain or simply quoted key, and no duplicate
 //     key in a mapping;
 //   - a value is a plain scalar that starts with no YAML indicator (no tag, anchor, alias, flow
-//     mapping, explicit key or reserved character) and holds no `: `, a quoted scalar closed on
-//     the same line, a one-line flow list of such scalars, or, only for `run`, `if`, `shell` and
-//     `continue-on-error`, a block scalar header (`|`, `>`, optionally `-` or `+`);
+//     mapping, explicit key or reserved character) and holds no `: ` or ` #` (a quote inside a
+//     plain value must never stop a comment from starting), a quoted scalar closed on the same
+//     line with no escape or doubled quote (so it reads as its plain text), a one-line flow list
+//     of such scalars, or, only for `run`, `if`, `shell` and `continue-on-error`, a block scalar
+//     header (`|`, `>`, optionally `-` or `+`);
 //   - every key sits at the indent of the mapping it belongs to, and every list item at the
 //     indent of its list;
 //   - a value never continues on the next line: after `key: value` the next line is not deeper,
@@ -260,21 +270,26 @@ function aggregateProblem(job, workflowContext) {
 // A key line: a plain or simply quoted key, spaces, a colon, then nothing or spaces and the value.
 // Each part's characters exclude the next part's, so matching stays linear in the line length.
 const KEY_LINE = /^(?:([A-Za-z0-9_][A-Za-z0-9_.-]*)|"([A-Za-z0-9_.-][A-Za-z0-9_ .-]*)"|'([A-Za-z0-9_.-][A-Za-z0-9_ .-]*)') *:(?: +(.*))?$/;
-const FLOW_ITEM = /^(?!(?:~|null|Null|NULL|-)$)(?:(?:[A-Za-z0-9_./$+=~]|-(?! ))[^,\[\]{}"'#:]*|"[^"\\]*"|'(?:[^']|'')*')$/;
+const FLOW_ITEM = /^(?!(?:~|null|Null|NULL|-)$)(?:(?:[A-Za-z0-9_./$+=~]|-(?! ))[^,\[\]{}"'#:]*|"[^"\\]*"|'[^']*')$/;
 // The YAML spellings of null: a field written this way is empty, not a value.
 const YAML_NULL = /^(?:~|null|Null|NULL)$/;
+// The plain spellings YAML's core schema reads as a boolean or a number, not as the text written:
+// a job name written this way is not the name GitHub shows (`1.10` is 1.1, `True` is true).
+const YAML_NOT_TEXT = /^(?:true|True|TRUE|false|False|FALSE|[-+]?[0-9]+|0o[0-7]+|0x[0-9a-fA-F]+|[-+]?(?:\.[0-9]+|[0-9]+(?:\.[0-9]*)?)(?:[eE][-+]?[0-9]+)?|[-+]?\.(?:inf|Inf|INF)|\.(?:nan|NaN|NAN))$/;
 const BLOCK_KEYS = Object.freeze(['run', 'if', 'shell', 'continue-on-error']);
 
 function plainValueProblem(value) {
   if (/^[|>][+-]?$/.test(value)) return null;
   if (value.startsWith('"')) return /^"[^"\\]*"$/.test(value) ? null : 'a double-quoted value that does not close on its line or uses escapes';
-  if (value.startsWith("'")) return /^'(?:[^']|'')*'$/.test(value) ? null : 'a single-quoted value that does not close on its line';
+  if (value.startsWith("'")) return /^'[^']*'$/.test(value) ? null : 'a single-quoted value that does not close on its line or doubles a quote';
   if (value.startsWith('[')) {
     if (!value.endsWith(']')) return 'a flow list that does not close on its line';
     const inner = value.slice(1, -1).trim();
     if (!inner) return null;
     return inner.split(',').map(item => item.trim()).filter((item, index, all) => item || index !== all.length - 1).every(item => FLOW_ITEM.test(item)) ? null : 'a flow list holding something other than plain or quoted scalars';
   }
+  // Any comment left in a plain value was kept by a quote inside it, which YAML ignores there.
+  if (/ #/.test(value)) return 'a plain value holding " #"';
   if (/^[!&*{}\]?|>%@`,#-]/.test(value) && !/^-[^\s]/.test(value)) return `a value starting with "${value[0]}" (a YAML indicator)`;
   if (/: |:$/.test(value)) return 'a plain value holding ": "';
   return null;
@@ -424,11 +439,17 @@ function readWorkflow(input) {
       const field = key => fields.find(entry => entry.key === key);
       const nameField = field('name');
       const nameValue = nameField ? scalarValue(lines, nameField) : job.key;
-      // An empty name and every plain YAML null spelling are the same value: never a guess.
-      const name = typeof nameValue === 'string' && !(nameField && YAML_NULL.test(nameField.value.trim())) ? nameValue : '';
+      // An empty name, every plain YAML null spelling and a plain boolean or number (as a name or
+      // as the job key it falls back to) are unreadable: never a guess.
+      const plainName = nameField ? nameField.value.trim() : job.key;
+      const notText = YAML_NULL.test(plainName) || YAML_NOT_TEXT.test(plainName);
+      // A quoted name with spaces at either end is unreadable: GitHub may trim it.
+      const name = typeof nameValue === 'string' && !notText && nameValue === nameValue.trim() ? nameValue : '';
       const needsField = field('needs');
       const strategy = field('strategy');
-      const matrix = strategy ? children(lines, strategy.index + 1, strategy.end).some(entry => entry.key === 'matrix') : false;
+      // A strategy written as an expression can still expand into a matrix; one that only sets
+      // fail-fast or max-parallel is not one.
+      const matrix = Boolean(strategy) && (Boolean(strategy.value.trim()) || children(lines, strategy.index + 1, strategy.end).some(entry => entry.key === 'matrix'));
       const ifField = field('if');
       const needs = needsField ? blockList(lines, needsField) : [];
       const unreadable = [];
@@ -480,6 +501,15 @@ function globMatches(pattern, value) {
   return new RegExp(`^${expression}$`).test(value);
 }
 
+// A `types:` list runs on every push to a pull request only when it keeps all three default
+// activity types; extra types (such as edited) add runs and never skip one. Any item that is not a
+// plain activity name (an expression, an odd spelling) leaves the list unverified.
+const DEFAULT_PR_TYPES = Object.freeze(['opened', 'synchronize', 'reopened']);
+function coversDefaultTypes(types) {
+  if (!Array.isArray(types) || !types.every(type => typeof type === 'string' && /^[a-z_]+$/.test(type))) return false;
+  return DEFAULT_PR_TYPES.every(type => types.includes(type));
+}
+
 // Why this workflow can skip a pull request to `defaultBranch` (null when unknown), or null when it
 // cannot; { unverified } when that depends on the unknown default branch.
 function maskingTrigger(workflow, defaultBranch) {
@@ -488,7 +518,7 @@ function maskingTrigger(workflow, defaultBranch) {
   for (const event of events) {
     const filters = workflow.triggers.get(event).filters;
     if (filters.paths || filters['paths-ignore']) return `its ${event} trigger has a path filter, which leaves the check pending`;
-    if (filters.types) return { unverified: `its ${event} trigger lists activity types, which this check does not evaluate` };
+    if (filters.types && !coversDefaultTypes(filters.types)) return { unverified: `its ${event} trigger lists activity types that this check cannot confirm include ${DEFAULT_PR_TYPES.join(', ')}` };
     if ([...(filters.branches || []), ...(filters['branches-ignore'] || [])].some(pattern => String(pattern).startsWith('!'))) return { unverified: `its ${event} branch filter has a "!" pattern, which this check does not evaluate` };
     if ((filters.branches || filters['branches-ignore']) && defaultBranch === null) return { unverified: `its ${event} trigger has a branch filter and the default branch is unknown (no GitHub read and no origin/HEAD)` };
     if (filters.branches && !filters.branches.some(pattern => globMatches(pattern, defaultBranch))) return `its ${event} branch filter leaves out ${defaultBranch}`;
@@ -497,10 +527,61 @@ function maskingTrigger(workflow, defaultBranch) {
   return null;
 }
 
-// Whether an expression-named job's name could come out as `check`.
+// The literal parts of a name around its `${{ }}` expressions, read in one pass as GitHub reads
+// them: a `}}` inside a single-quoted string does not end an expression. null when an expression
+// never closes, so the name could be anything.
+function literalParts(name) {
+  const text = String(name);
+  const parts = [];
+  let start = 0;
+  let index = text.indexOf('${{');
+  while (index !== -1) {
+    parts.push(text.slice(start, index));
+    let quote = false;
+    let end = -1;
+    for (let at = index + 3; at < text.length; at += 1) {
+      if (text[at] === "'") quote = !quote;
+      else if (!quote && text[at] === '}' && text[at + 1] === '}') { end = at + 2; break; }
+    }
+    if (end === -1) return null;
+    start = end;
+    index = text.indexOf('${{', start);
+  }
+  parts.push(text.slice(start));
+  return parts;
+}
+
+// Whether an expression-named job's name could come out as `check`, in any letter case.
 function couldProduce(name, check) {
-  const expression = String(name).split(/\$\{\{[\s\S]*?\}\}/).map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('[\\s\\S]*');
-  return new RegExp(`^${expression}$`).test(check);
+  const parts = literalParts(name);
+  if (!parts) return true;
+  // Each expression may produce any text, so the literal parts must appear in order: the first at
+  // the start, the last at the end. Finding each middle part at its earliest place is enough.
+  const target = String(check).toLowerCase();
+  const pieces = parts.map(part => part.toLowerCase());
+  if (pieces.length === 1) return target === pieces[0];
+  const first = pieces[0];
+  const last = pieces.at(-1);
+  if (!target.startsWith(first) || target.length < first.length + last.length) return false;
+  let at = first.length;
+  for (const piece of pieces.slice(1, -1)) {
+    const found = target.indexOf(piece, at);
+    if (found === -1) return false;
+    at = found + piece.length;
+  }
+  return target.length - last.length >= at && target.endsWith(last);
+}
+
+// Why `job` could report as `check` without being its one plain producer, or null: an expression
+// name, a matrix job (GitHub adds " (values)", and a skipped one reports its bare name) or a
+// reusable call (GitHub adds " / <called job>").
+// The matrix form is an open prefix, so a reusable call with a matrix (`a (x) / b`) matches too.
+function derivedNameProblem(job, check) {
+  const forms = [{ form: job.name, says: job.dynamic_name ? 'is named by an expression that' : 'reports under its bare name when skipped, so it' }];
+  if (job.matrix) forms.push({ form: `${job.name} (\${{ matrix }}`, says: `is a matrix job, which GitHub names "${job.name} (<values>)", so it` });
+  if (job.reusable) forms.push({ form: `${job.name} / \${{ called job }}`, says: `calls a reusable workflow, whose jobs GitHub names "${job.name} / <job>", so it` });
+  const match = forms.find(item => couldProduce(item.form, check));
+  return match ? `${match.says} could produce "${check}"` : null;
 }
 
 // P3 and P4 for each required name over read workflows.
@@ -521,8 +602,11 @@ function producerVerdict(requiredChecks, workflows, defaultBranch) {
       if (!entry.workflow) continue;
       for (const job of entry.workflow.jobs) {
         if (job.name_unreadable) p3Unverified.push(`${entry.file} ${job.key} has an empty or unreadable name, so it could produce "${check}"`);
-        else if (job.dynamic_name && couldProduce(job.name, check)) p3Unverified.push(`${entry.file} ${job.key} is named by an expression that could produce "${check}"`);
-        else if (!job.dynamic_name && !job.matrix && !job.reusable && job.name === check) producers.push({ file: entry.file, workflow: entry.workflow, job });
+        else if (job.dynamic_name || job.matrix || job.reusable) {
+          const problem = derivedNameProblem(job, check);
+          if (problem) p3Unverified.push(`${entry.file} ${job.key} ${problem}`);
+        } else if (job.name === check) producers.push({ file: entry.file, workflow: entry.workflow, job });
+        else if (job.name.toLowerCase() === check.toLowerCase()) p3Unverified.push(`${entry.file} ${job.key} is named "${job.name}", which differs from "${check}" only in letter case`);
       }
     }
     if (producers.length === 0) missing.push(check);

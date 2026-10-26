@@ -1,17 +1,20 @@
 #!/usr/bin/env node
 'use strict';
 
-// Claude Code's governance hook: one script for three events, named by --event.
-//   UserPromptSubmit  holds every prompt in an undecided repository (toolkit-governance-gate.cjs).
-//   PreToolUse        refuses state-changing tools there, and agent answers everywhere; and in every
+// Claude Code's governance hook: one script for four events, named by --event.
+//   UserPromptSubmit  holds every prompt in an undecided repository (toolkit-governance-gate.cjs);
+//                     in a github.com one the turn runs only to show the tap-to-answer card. It also
+//                     keeps each "merge N" the user types, for the merge hold.
+//   PreToolUse        refuses every tool there but the card, and agent answers everywhere; and in every
 //                     folder refuses a merge the user has not typed "merge N" for (toolkit-merge-hold.cjs).
-//   UserPromptSubmit  also keeps each "merge N" the user types, for that merge hold.
+//   PostToolUse       records the answer tapped on the card (AskUserQuestion).
 //   SessionStart      adds one line stating the effective governance state, exports the session's
 //                     id to its shell commands (CLAUDE_ENV_FILE), so a session an agent starts from
 //                     one of them is known not to be the user typing, and records the run's session
 //                     mark, so a later process that resumes the session cannot answer.
 // The gate module loads inside the guarded path, so a missing or broken module still holds in a
-// repository instead of crashing; hooks.json also sets onFailure: "block" for the two blocking events.
+// repository instead of crashing; hooks.json also sets onFailure: "block" for prompts and for the
+// state-changing tools (STATE_CHANGING_TOOLS below).
 //
 // A cloud session (CLAUDE_CODE_REMOTE=true) is not enforced: its container has no lasting user
 // registry, so an answer there would be lost, and a write into the clone would show up in the
@@ -19,7 +22,7 @@
 
 const fs = require('node:fs');
 
-const EVENTS = Object.freeze(['UserPromptSubmit', 'PreToolUse', 'SessionStart']);
+const EVENTS = Object.freeze(['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'SessionStart']);
 
 function readInput(text) {
   try {
@@ -61,13 +64,19 @@ function respond(event, input, options = {}) {
     if (event === 'UserPromptSubmit') {
       // A "merge N" the user types is kept for the merge hold; a failure only means a later merge is refused.
       try { (options.mergeHold || mergeHold()).recordPrompt(input, { environment: options.environment || process.env, registryOptions: options.registryOptions, now: options.now }); } catch { /* fail closed later */ }
-      const decision = new gate.PromptHold(options).decide({ cwd: input.cwd, prompt: input.prompt, sessionId: gate.sessionIdOf(input) });
+      const decision = new gate.PromptHold({ ...options, picker: true }).decide({ cwd: input.cwd, prompt: input.prompt, sessionId: gate.sessionIdOf(input) });
       if (decision.action === 'block') return { decision: 'block', reason: decision.reason };
-      return decision.context ? { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: decision.context } } : {};
+      const context = decision.context ? { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: decision.context } } : {};
+      return decision.notice ? { systemMessage: decision.notice, ...context } : context;
     }
     if (event === 'PreToolUse') {
       const decision = new gate.ToolGate(options).decide(input);
       return decision ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: decision.deny } } : {};
+    }
+    if (event === 'PostToolUse') {
+      if (input.tool_name !== 'AskUserQuestion') return {};
+      const picked = new gate.PromptHold(options).picked({ cwd: input.cwd, sessionId: gate.sessionIdOf(input), toolUseId: input.tool_use_id, toolResponse: input.tool_response });
+      return picked ? { hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: picked.context } } : {};
     }
     exportHostSession(input, options.environment || process.env, gate);
     gate.startSession(input, options);
@@ -94,10 +103,19 @@ const MERGE_CHECK_FAILED = 'Toolkit: the merge check failed, so this merge or pu
 // The gate's never-act line, spelled out here because the gate module may be what failed to load.
 const NEVER_OWNER = 'Never act as the user: do not answer the governance question yourself, start a session or script to answer it, or click a confirmation through a UI or computer use.';
 
+// The tools that change something. A failed check holds them inside a repository; every other tool
+// (read-only ones, and the card, whose answer then counts for nothing without the tool gate's note)
+// is let through, as it was before the hook saw it. hooks.json matches the same split, with
+// onFailure: "block" only on this list, so a hook that cannot even start holds only these too.
+const STATE_CHANGING_TOOLS = /^(?:Bash|PowerShell|Monitor|Edit|Write|MultiEdit|NotebookEdit|Agent|Task|TaskStop|EnterWorktree|CronCreate|CronDelete|RemoteTrigger|SendMessage|Workflow|mcp__.*)$/;
+
 function failed(event, input, gate) {
+  // A failed PostToolUse records nothing, which leaves the repository waiting.
+  if (event === 'SessionStart' || event === 'PostToolUse') return {};
+  if (event === 'PreToolUse' && !STATE_CHANGING_TOOLS.test(String(input && input.tool_name || ''))) return {};
   let inside = true;
   try { inside = (gate || require('./toolkit-governance-gate.cjs')).insideRepository(input.cwd); } catch { inside = true; }
-  if (!inside || event === 'SessionStart') return {};
+  if (!inside) return {};
   if (event === 'UserPromptSubmit') return { decision: 'block', reason: `Toolkit: the governance check failed, so your message was held and not sent. If this keeps happening, open Claude Code in a folder outside any git repository and say \`setup toolkit\` to repair the installed hooks. ${NEVER_OWNER}` };
   return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `Toolkit: the governance check failed, so nothing runs in this repository until it works again. ${NEVER_OWNER}` } };
 }
@@ -115,4 +133,4 @@ function main(argv = process.argv.slice(2), stdin = () => fs.readFileSync(0, 'ut
 
 if (require.main === module) process.exitCode = main();
 
-module.exports = Object.freeze({ EVENTS, CLOUD_LINE, NEVER_OWNER, exportHostSession, respond, main });
+module.exports = Object.freeze({ EVENTS, CLOUD_LINE, NEVER_OWNER, STATE_CHANGING_TOOLS, exportHostSession, respond, main });
