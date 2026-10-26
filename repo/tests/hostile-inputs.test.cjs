@@ -119,7 +119,7 @@ test('H-04: timing fails on quadratic work and passes on linear work', () => {
   assert.equal(fast.ok, true, fast.message);
   for (const shape of hostile.cases(['large-input'])) {
     const text = shape.build(1000);
-    assert.ok(text.length >= 900, shape.id);
+    assert.ok(text.length >= 1000, shape.id);
     const keys = text.split('\n').filter(Boolean).map(line => line.split(':')[0]);
     assert.equal(new Set(keys).size, keys.length, `${shape.id} repeats no key`);
   }

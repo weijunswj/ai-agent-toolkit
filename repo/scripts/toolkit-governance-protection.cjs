@@ -250,9 +250,11 @@ function aggregateProblem(job, workflowContext) {
 //     `- value`, with exactly one space after `-`, a plain or simply quoted key, and no duplicate
 //     key in a mapping;
 //   - a value is a plain scalar that starts with no YAML indicator (no tag, anchor, alias, flow
-//     mapping, explicit key or reserved character) and holds no `: `, a quoted scalar closed on
-//     the same line with no escape or doubled quote (so it reads as its plain text), a one-line flow list of such scalars, or, only for `run`, `if`, `shell` and
-//     `continue-on-error`, a block scalar header (`|`, `>`, optionally `-` or `+`);
+//     mapping, explicit key or reserved character) and holds no `: ` or ` #` (a quote inside a
+//     plain value must never stop a comment from starting), a quoted scalar closed on the same
+//     line with no escape or doubled quote (so it reads as its plain text), a one-line flow list
+//     of such scalars, or, only for `run`, `if`, `shell` and `continue-on-error`, a block scalar
+//     header (`|`, `>`, optionally `-` or `+`);
 //   - every key sits at the indent of the mapping it belongs to, and every list item at the
 //     indent of its list;
 //   - a value never continues on the next line: after `key: value` the next line is not deeper,
@@ -263,6 +265,9 @@ const KEY_LINE = /^(?:([A-Za-z0-9_][A-Za-z0-9_.-]*)|"([A-Za-z0-9_.-][A-Za-z0-9_ 
 const FLOW_ITEM = /^(?!(?:~|null|Null|NULL|-)$)(?:(?:[A-Za-z0-9_./$+=~]|-(?! ))[^,\[\]{}"'#:]*|"[^"\\]*"|'[^']*')$/;
 // The YAML spellings of null: a field written this way is empty, not a value.
 const YAML_NULL = /^(?:~|null|Null|NULL)$/;
+// The plain spellings YAML's core schema reads as a boolean or a number, not as the text written:
+// a job name written this way is not the name GitHub shows (`1.10` is 1.1, `True` is true).
+const YAML_NOT_TEXT = /^(?:true|True|TRUE|false|False|FALSE|[-+]?[0-9]+|0o[0-7]+|0x[0-9a-fA-F]+|[-+]?(?:\.[0-9]+|[0-9]+(?:\.[0-9]*)?)(?:[eE][-+]?[0-9]+)?|[-+]?\.(?:inf|Inf|INF)|\.(?:nan|NaN|NAN))$/;
 const BLOCK_KEYS = Object.freeze(['run', 'if', 'shell', 'continue-on-error']);
 
 function plainValueProblem(value) {
@@ -275,6 +280,8 @@ function plainValueProblem(value) {
     if (!inner) return null;
     return inner.split(',').map(item => item.trim()).filter((item, index, all) => item || index !== all.length - 1).every(item => FLOW_ITEM.test(item)) ? null : 'a flow list holding something other than plain or quoted scalars';
   }
+  // Any comment left in a plain value was kept by a quote inside it, which YAML ignores there.
+  if (/ #/.test(value)) return 'a plain value holding " #"';
   if (/^[!&*{}\]?|>%@`,#-]/.test(value) && !/^-[^\s]/.test(value)) return `a value starting with "${value[0]}" (a YAML indicator)`;
   if (/: |:$/.test(value)) return 'a plain value holding ": "';
   return null;
@@ -424,8 +431,11 @@ function readWorkflow(input) {
       const field = key => fields.find(entry => entry.key === key);
       const nameField = field('name');
       const nameValue = nameField ? scalarValue(lines, nameField) : job.key;
-      // An empty name and every plain YAML null spelling are the same value: never a guess.
-      const name = typeof nameValue === 'string' && !(nameField && YAML_NULL.test(nameField.value.trim())) ? nameValue : '';
+      // An empty name, every plain YAML null spelling and a plain boolean or number (as a name or
+      // as the job key it falls back to) are unreadable: never a guess.
+      const plainName = nameField ? nameField.value.trim() : job.key;
+      const notText = YAML_NULL.test(plainName) || YAML_NOT_TEXT.test(plainName);
+      const name = typeof nameValue === 'string' && !notText ? nameValue : '';
       const needsField = field('needs');
       const strategy = field('strategy');
       const matrix = strategy ? children(lines, strategy.index + 1, strategy.end).some(entry => entry.key === 'matrix') : false;

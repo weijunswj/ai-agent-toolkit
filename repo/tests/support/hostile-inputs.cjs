@@ -99,6 +99,10 @@ const quoting = [
   yaml('quoting', 'doubled-single-quote', `id: 'it''s'`),
   ...[['x', 'x63'], ['u', 'u0063'], ['U', 'U00000063']].map(([name, code]) => yaml('quoting', `escape-${name}-in-key`, `"${BS}${code}ontinue-on-error": true`)),
   ...[['N', 'N'], ['underscore', '_'], ['L', 'L'], ['P', 'P'], ['slash', '/'], ['backslash', BS]].map(([name, code]) => yaml('quoting', `escape-${name}-in-value`, `id: "a${BS}${code}b"`)),
+  yaml('quoting', 'single-quote-in-plain-before-comment', `id: x' #'`),
+  yaml('quoting', 'double-quote-in-plain-before-comment', 'id: a "b #c"'),
+  yaml('quoting', 'yaml-number-name', 'name: 1.10'),
+  yaml('quoting', 'yaml-boolean-name', 'name: True'),
   prose('quoting', 'git-quoted-path', `"docs/${BS}303${BS}251.md"`),
 ];
 
@@ -174,7 +178,7 @@ const largeInput = [
   ['long-line', size => `name: ${'a'.repeat(size)}\n`],
   ['space-run', size => `name: a${' '.repeat(size)}b\n`],
   ['space-run-before-comment', size => `name: a${' '.repeat(size)}#${' '.repeat(size)}\n`],
-  ['many-short-lines', size => Array.from({ length: Math.max(1, Math.floor(size / 11)) }, (_, index) => `k${String(index).padStart(6, '0')}: b\n`).join('')],
+  ['many-short-lines', size => Array.from({ length: Math.max(1, Math.ceil(size / 11)) }, (_, index) => `k${String(index).padStart(6, '0')}: b\n`).join('')],
 ].map(([id, build]) => yaml('large-input', id, build(64), { build }));
 
 const shapes = Object.freeze([...lineBreaks, ...continuedLines, ...quoting, ...structure, ...indents, ...invisible, ...freeText, ...largeInput]);

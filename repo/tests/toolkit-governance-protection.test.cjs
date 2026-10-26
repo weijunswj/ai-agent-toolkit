@@ -481,6 +481,24 @@ test('P-18: the shared hostile inputs are unverified, except the shapes the read
   assert.equal(twoJobsVerdict.P3.status, 'unverified', 'two jobs named x\'y');
   assert.match(protection.readWorkflow(`on: [pull_request]\njobs:\n  a:\n    name: ${Q}x${Q}${Q}y${Q}\n`).problems[0], /doubles a quote/);
   for (const text of [`on: [${Q}pull_request${Q}${Q}${Q}]\n`, `on:\n  - ${Q}it${Q}${Q}s${Q}\n`]) assert.notDeepEqual(protection.readWorkflow(text).problems, [], text);
+  // A quote inside a plain value must not keep a comment: x' #' is x' to YAML and GitHub.
+  for (const [first, second] of [[`"x${Q}"`, `x${Q} #${Q}`], ['\'x"\'', 'x" #"'], ['\'a "b\'', 'a "b #c"']]) {
+    const hidden = ['on: [pull_request]', 'jobs:', '  a:', `    name: ${first}`, '    runs-on: x', '  b:', `    name: ${second}`, `    if: github.event_name == ${Q}push${Q}`, '    runs-on: x', ''].join('\n');
+    const required = protection.readWorkflow(`on: [pull_request]\njobs:\n  a:\n    name: ${first}\n`).jobs[0].name;
+    assert.equal(protection.producerVerdict([required], [{ file: 'ci.yml', workflow: protection.readWorkflow(hidden) }], 'main').P3.status, 'unverified', second);
+  }
+  assert.match(protection.readWorkflow(`on: [pull_request]\njobs:\n  a:\n    name: x${Q} #${Q}\n`).problems[0], /holding " #"/);
+  assert.match(protection.readWorkflow(`on: [pull_request]\njobs:\n  a:\n    needs:\n      - b${Q} #${Q}\n`).problems[0], /holding " #"/);
+  // A real comment after a quoted or plain value still reads.
+  const commented = protection.readWorkflow(`on: [pull_request]\njobs:\n  a:\n    name: ${Q}x #y${Q} # c\n    runs-on: x # c\n`);
+  assert.deepEqual([commented.problems, commented.jobs[0].name], [[], 'x #y']);
+  // A job name YAML reads as a number or a boolean is unreadable, so it could be any check.
+  for (const spelling of ['1.10', '0x1F', '1e3', 'True', 'FALSE', '.inf']) {
+    const numbered = ['on: [pull_request]', 'jobs:', '  a:', '    name: "1.1"', '    runs-on: x', '  b:', `    name: ${spelling}`, `    if: github.event_name == ${Q}push${Q}`, '    runs-on: x', ''].join('\n');
+    assert.equal(protection.producerVerdict(['1.1'], [{ file: 'ci.yml', workflow: protection.readWorkflow(numbered) }], 'main').P3.status, 'unverified', spelling);
+  }
+  const quotedNumber = ['on: [pull_request]', 'jobs:', '  a:', `    name: "1.10"`, '    runs-on: x', ''].join('\n');
+  assert.deepEqual(Object.values(statuses({ checks: protection.producerVerdict(['1.10'], [{ file: 'ci.yml', workflow: protection.readWorkflow(quotedNumber) }], 'main') })), ['ok', 'ok'], 'a quoted number is text');
   // A plain single-quoted name still reads.
   const single = ['on: [pull_request]', 'jobs:', '  a:', `    name: ${Q}x y${Q}`, '    runs-on: x', ''].join('\n');
   const singleVerdict = protection.producerVerdict(['x y'], [{ file: 'ci.yml', workflow: protection.readWorkflow(single) }], 'main');
