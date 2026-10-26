@@ -1,5 +1,12 @@
 # Toolkit Changelog
 
+## Unreleased
+
+### Governance question
+
+- **Tap to answer in Claude Code:** in a github.com repository with no governance decision, Claude Code shows a Yes, No, Later card with the question as three short lines of text above it, so the question is seen in the mobile app and Remote Control too, where a hook's hold message is not shown. The held message is kept and handed back after the answer, as before; on the turn that shows the card nothing else runs, read-only tools included. Only the user answers: a card with an answer already filled in is refused, and a tap counts only on the card Toolkit let through, once, in the session that was asked. Typing yes, no or later still works.
+- **Shorter notices:** the held-message notice is three lines in both hosts (Codex shows it as text), and the follow-up and not-on-github.com notices are one or two lines. What each answer does is in the bridge guide.
+
 ## 3.15.4 (final-product UAT)
 
 ### Coding gates

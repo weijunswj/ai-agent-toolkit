@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 'use strict';
 
-// Claude Code's governance hook: one script for three events, named by --event.
-//   UserPromptSubmit  holds every prompt in an undecided repository (toolkit-governance-gate.cjs).
-//   PreToolUse        refuses state-changing tools there, and agent answers everywhere.
+// Claude Code's governance hook: one script for four events, named by --event.
+//   UserPromptSubmit  holds every prompt in an undecided repository (toolkit-governance-gate.cjs);
+//                     in a github.com one the turn runs only to show the tap-to-answer card.
+//   PreToolUse        refuses every tool there but the card, and agent answers everywhere.
+//   PostToolUse       records the answer tapped on the card (AskUserQuestion).
 //   SessionStart      adds one line stating the effective governance state, exports the session's
 //                     id to its shell commands (CLAUDE_ENV_FILE), so a session an agent starts from
 //                     one of them is known not to be the user typing, and records the run's session
@@ -17,7 +19,7 @@
 
 const fs = require('node:fs');
 
-const EVENTS = Object.freeze(['UserPromptSubmit', 'PreToolUse', 'SessionStart']);
+const EVENTS = Object.freeze(['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'SessionStart']);
 
 function readInput(text) {
   try {
@@ -52,13 +54,19 @@ function respond(event, input, options = {}) {
   try {
     gate = options.gate || require('./toolkit-governance-gate.cjs');
     if (event === 'UserPromptSubmit') {
-      const decision = new gate.PromptHold(options).decide({ cwd: input.cwd, prompt: input.prompt, sessionId: gate.sessionIdOf(input) });
+      const decision = new gate.PromptHold({ ...options, picker: true }).decide({ cwd: input.cwd, prompt: input.prompt, sessionId: gate.sessionIdOf(input) });
       if (decision.action === 'block') return { decision: 'block', reason: decision.reason };
-      return decision.context ? { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: decision.context } } : {};
+      const context = decision.context ? { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: decision.context } } : {};
+      return decision.notice ? { systemMessage: decision.notice, ...context } : context;
     }
     if (event === 'PreToolUse') {
       const decision = new gate.ToolGate(options).decide(input);
       return decision ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: decision.deny } } : {};
+    }
+    if (event === 'PostToolUse') {
+      if (input.tool_name !== 'AskUserQuestion') return {};
+      const picked = new gate.PromptHold(options).picked({ cwd: input.cwd, sessionId: gate.sessionIdOf(input), toolUseId: input.tool_use_id, toolResponse: input.tool_response });
+      return picked ? { hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: picked.context } } : {};
     }
     exportHostSession(input, options.environment || process.env, gate);
     gate.startSession(input, options);
@@ -75,7 +83,8 @@ const NEVER_OWNER = 'Never act as the user: do not answer the governance questio
 function failed(event, input, gate) {
   let inside = true;
   try { inside = (gate || require('./toolkit-governance-gate.cjs')).insideRepository(input.cwd); } catch { inside = true; }
-  if (!inside || event === 'SessionStart') return {};
+  // A failed PostToolUse records nothing, which leaves the repository waiting.
+  if (!inside || event === 'SessionStart' || event === 'PostToolUse') return {};
   if (event === 'UserPromptSubmit') return { decision: 'block', reason: `Toolkit: the governance check failed, so your message was held and not sent. If this keeps happening, open Claude Code in a folder outside any git repository and say \`setup toolkit\` to repair the installed hooks. ${NEVER_OWNER}` };
   return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `Toolkit: the governance check failed, so nothing runs in this repository until it works again. ${NEVER_OWNER}` } };
 }

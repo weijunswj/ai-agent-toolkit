@@ -48,7 +48,7 @@
         ]
       },
       {
-        "matcher": "^(?:Bash|PowerShell|Monitor|Edit|Write|MultiEdit|NotebookEdit|Agent|Task|mcp__.*)$",
+        "matcher": "*",
         "hooks": [
           {
             "type": "command",
@@ -69,6 +69,16 @@
       }
     ],
     "PostToolUse": [
+      {
+        "matcher": "^AskUserQuestion$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-governance-hook.cjs\" --event PostToolUse",
+            "timeout": 10
+          }
+        ]
+      },
       {
         "matcher": "^(?:Bash|PowerShell|mcp__.*[Gg][Ii][Tt][Hh][Uu][Bb].*)$",
         "hooks": [

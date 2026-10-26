@@ -3622,7 +3622,7 @@ test('native plugin manifests and hooks are valid and policy-light', () => {
   const claudeAgentHook = claudeHooks.hooks.PreToolUse[0];
   assert.equal(claudeAgentHook.matcher, 'Agent|Task');
   assert.match(claudeAgentHook.hooks[0].command, /\$\{CLAUDE_PLUGIN_ROOT\}\/repo\/scripts\/toolkit-claude-agent-hook\.cjs/);
-  assert.deepEqual(claudeHooks.hooks.PreToolUse.map(entry => entry.matcher), ['Agent|Task', 'Bash|PowerShell', '^(?:Bash|PowerShell|Monitor|Edit|Write|MultiEdit|NotebookEdit|Agent|Task|mcp__.*)$', '^mcp__hearthbot__(?:post_message|edit_message)$']);
+  assert.deepEqual(claudeHooks.hooks.PreToolUse.map(entry => entry.matcher), ['Agent|Task', 'Bash|PowerShell', '*', '^mcp__hearthbot__(?:post_message|edit_message)$']);
   assert.match(claudeHooks.hooks.PreToolUse[1].hooks[0].command, /toolkit-claude-attribution-hook\.cjs/);
   assert.match(claudeHooks.hooks.PreToolUse[2].hooks[0].command, /toolkit-governance-hook\.cjs" --event PreToolUse$/);
   assert.match(claudeHooks.hooks.PreToolUse[3].hooks[0].command, /toolkit-claude-project-post-hook\.cjs"$/);
@@ -3633,9 +3633,12 @@ test('native plugin manifests and hooks are valid and policy-light', () => {
   for (const [hooks, root] of [[codexHooks, 'PLUGIN_ROOT'], [claudeHooks, 'CLAUDE_PLUGIN_ROOT']]) {
     assert.deepEqual(hooks.hooks.Stop, [{ hooks: [{ type: 'command', command: `node "\${${root}}/repo/scripts/toolkit-programme-checkpoint-hook.cjs"`, timeout: 30 }] }]);
   }
-  // The after-tool hook runs the same script, only to mark a GitHub write for the turn-end programme refresh.
+  // The after-tool checkpoint hook runs the same script, only to mark a GitHub write for the turn-end
+  // programme refresh. Claude Code also reads the answer tapped on the governance card after the tool runs.
   for (const [hooks, root, matcher] of [[codexHooks, 'PLUGIN_ROOT', '^(?:Bash|mcp__.*[Gg][Ii][Tt][Hh][Uu][Bb].*)$'], [claudeHooks, 'CLAUDE_PLUGIN_ROOT', '^(?:Bash|PowerShell|mcp__.*[Gg][Ii][Tt][Hh][Uu][Bb].*)$']]) {
-    assert.deepEqual(hooks.hooks.PostToolUse, [{ matcher, hooks: [{ type: 'command', command: `node "\${${root}}/repo/scripts/toolkit-programme-checkpoint-hook.cjs"`, timeout: 10 }] }]);
+    const checkpoint = { matcher, hooks: [{ type: 'command', command: `node "\${${root}}/repo/scripts/toolkit-programme-checkpoint-hook.cjs"`, timeout: 10 }] };
+    const card = { matcher: '^AskUserQuestion$', hooks: [{ type: 'command', command: `node "\${${root}}/repo/scripts/toolkit-governance-hook.cjs" --event PostToolUse`, timeout: 10 }] };
+    assert.deepEqual(hooks.hooks.PostToolUse, hooks === claudeHooks ? [card, checkpoint] : [checkpoint]);
   }
   assert.doesNotMatch(`${codexCommand}\n${claudeCommand}`, /--enable-target|--force-downgrade/);
   assert.doesNotMatch(`${codexCommand}\n${claudeCommand}`, /\.sh(?:$|[\s"'])/i);
