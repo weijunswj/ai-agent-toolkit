@@ -101,6 +101,6 @@ Cleanup first validates the cleanup ID, then revalidates the metadata, payloads,
 
 ## Native UAT And Later Consumers
 
-After merge, #247 Batch D owns native Windows UAT. Use disposable repositories covering absent/present canonical and legacy folders, tracked and local-only choices, approval/decline/warning, LF/CRLF, no-final-newline, paths with spaces and shell metacharacters, exact restore, originally missing files, injected partial failure, idempotency, no migration/deletion, and clean `git status` for local exclude.
+After merge, the last batch of the repo-local backup work owns native Windows UAT. Use disposable repositories covering absent/present canonical and legacy folders, tracked and local-only choices, approval/decline/warning, LF/CRLF, no-final-newline, paths with spaces and shell metacharacters, exact restore, originally missing files, injected partial failure, idempotency, no migration/deletion, and clean `git status` for local exclude.
 
-Later #243 repo-local refresh and other managed-block repairs must import these shared modules rather than create another folder name, ignore parser, backup schema, or restore format. They must retain their own exact active-operation approval and rollback boundaries. Do not begin #243 or native UAT merely by updating this playbook.
+A later repo-local refresh and other managed-block repairs must import these shared modules rather than create another folder name, ignore parser, backup schema, or restore format. They must retain their own exact active-operation approval and rollback boundaries. Do not begin that refresh or native UAT merely by updating this playbook.

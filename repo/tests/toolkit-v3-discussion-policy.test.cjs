@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 
-const directive = fs.readFileSync(path.join(__dirname, '..', 'docs', 'TOOLKIT-V3.md'), 'utf8');
+const directive = fs.readFileSync(path.join(__dirname, '..', 'docs', 'TOOLKIT-DELIVERY.md'), 'utf8');
 // Checkpoints and successor launch have one home: the gate rules (V3 points there).
 // Windows checkouts may convert text files to CRLF; the contracts are about the words, not line ends.
 const gateRules = fs.readFileSync(path.join(__dirname, '..', 'contracts', 'agent-rules', 'gate-rules.md'), 'utf8').replace(/\r\n/g, '\n');

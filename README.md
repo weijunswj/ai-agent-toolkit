@@ -4,7 +4,7 @@ Skills and working rules for AI coding agents. Toolkit installs them into Codex 
 
 **Supported OS:** Windows 10 and 11. macOS and Linux computers are not supported. (Linux is still used for CI, cloud agent sessions and the remote servers some skills manage.)
 
-**Programme reconciler:** the reconciler, its state documents, managed blocks and sub-issue links act only where the owner adds `.github/toolkit-programme.json` and GitHub governance is ENABLED; every `programme.cjs` command refuses otherwise. It supports github.com only, with `kind: github` as its only state store backend. The binding does not change the Toolkit-governed rules (the `TOOLKIT-GOVERNED-RULES` block in `AGENTS.md`) or their issue records. Plain folders, repositories not on github.com and repositories without that block get no governed issue writes, only the coding gates, subagents and portable skills; global rules still apply, including PRs after requested edits and task issues when the user asks to add one.
+**Programme reconciler:** the reconciler, its state documents, managed blocks and sub-issue links act only where the owner adds `.github/toolkit-programme.json` and the user has turned Toolkit's GitHub governance on; every `programme.cjs` command refuses otherwise. It supports github.com only, with `kind: github` as its only state store backend. That file does not change the Toolkit-governed rules (the `TOOLKIT-GOVERNED-RULES` block in `AGENTS.md`) or their issue records. Plain folders, repositories not on github.com and repositories without that block get no governed issue writes, only the coding gates, subagents and portable skills; global rules still apply, including PRs after requested edits and task issues when the user asks to add one.
 
 **Evidence custody:** the private evidence (transport) store can be any backend. It is separate from the reconciler's state store.
 
@@ -74,7 +74,7 @@ Maintainers start with [AGENTS.md](AGENTS.md). There is no repo-wide MCP server;
 
 ## Appendix: Source-of-Truth Contract
 
-<!-- AI-AGENT-TOOLKIT:repo/contracts/source-of-truth-contract.md:BEGIN SOURCE-OF-TRUTH-CONTRACT v2 toolkit=3.15.4 sha256=24ee07475127 -->
+<!-- AI-AGENT-TOOLKIT:repo/contracts/source-of-truth-contract.md:BEGIN SOURCE-OF-TRUTH-CONTRACT v2 toolkit=3.15.5 sha256=24ee07475127 -->
 ## Source-of-Truth Contract
 
 - `skills/**` is the canonical copyable product surface; each skill folder is the install unit and is edited directly. `skills/controller-bootstrap/` is an explicit-only re-entry procedure for an assigned Toolkit controller; it depends on the live `repo/CONTROLLER.md` and `repo/contracts/controller-kernel/stack-registry-v3.json` and is not a policy copy, role assignment or permission.
