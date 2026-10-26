@@ -85,16 +85,22 @@ function hookText(name) {
     lines.push('input=$(cat)');
     lines.push('printf \'%s\\n\' "$input" | node "$guard" pre-push "$1" --repo "$root" || exit $?');
     // A repository that also runs the plain-text check gets it on the files the current branch changes
-    // since the branch it tracks, else origin's default branch. The check reads the working folder, so
-    // it runs only when that matches the commit being pushed. It blocks only on findings (exit 1); a
-    // check that cannot run (exit 2, such as broken settings) prints a note and the push goes on.
+    // since the branch it tracks, else origin's default branch, main or master. The check reads the
+    // working folder, so it runs only when this push sends the current commit and the folder has no
+    // uncommitted changes; otherwise it is skipped with a note. It blocks only on findings (exit 1);
+    // a check that cannot run (exit 2, such as broken settings) prints a note and the push goes on.
     lines.push(
       'plain="$root/.github/scripts/plain-text-check.cjs"',
       'if [ -f "$plain" ] && [ -f "$root/.github/plain-text.json" ]; then',
-      '  base=$(git rev-parse --verify -q \'@{upstream}\' || git rev-parse --verify -q refs/remotes/origin/HEAD)',
-      '  if [ -z "$base" ]; then :',
+      '  head=$(git rev-parse -q --verify HEAD)',
+      '  base=$(git rev-parse -q --verify \'@{upstream}\' || git rev-parse -q --verify refs/remotes/origin/HEAD || git rev-parse -q --verify refs/remotes/origin/main || git rev-parse -q --verify refs/remotes/origin/master)',
+      '  case " $(printf \'%s\\n\' "$input" | tr \'\\n\' \' \') " in *" $head "*) sends_head=yes ;; *) sends_head= ;; esac',
+      '  if [ -z "$head" ] || [ -z "$sends_head" ]; then',
+      '    echo "plain-text check: skipped, because this push does not send the current commit; the pushed files were not checked here." >&2',
+      '  elif [ -z "$base" ]; then',
+      '    echo "plain-text check: skipped, because no upstream or origin branch was found to compare with; the pushed files were not checked here." >&2',
       '  elif ! git diff --quiet HEAD --; then',
-      '    echo "plain-text check: skipped, because the working folder has uncommitted changes; CI checks the pushed files." >&2',
+      '    echo "plain-text check: skipped, because the working folder has uncommitted changes; the pushed files were not checked here." >&2',
       '  else',
       '    changed=$(git -c core.quotePath=false diff --name-only --diff-filter=d "$base...HEAD")',
       '    (set --; while IFS= read -r file; do [ -n "$file" ] && set -- "$@" "$file"; done <<EOF',
@@ -103,7 +109,7 @@ function hookText(name) {
       '    node "$plain" --repo "$root" --files "$@")',
       '    status=$?',
       '    if [ "$status" -eq 1 ]; then exit 1; fi',
-      '    if [ "$status" -ne 0 ]; then echo "plain-text check: could not run; the push goes on and CI checks the files." >&2; fi',
+      '    if [ "$status" -ne 0 ]; then echo "plain-text check: could not run, so the push goes on unchecked." >&2; fi',
       '  fi',
       'fi'
     );

@@ -80,6 +80,19 @@ test('pre-push: with the plain-text check installed too, a hand push of a change
   const push = repo.git(['push', '-q', 'origin', 'main'], { allowFailure: true });
   assert.notEqual(push.status, 0, 'pre-push blocks the plain-text finding');
   assert.match(push.stderr, /docs\/guide\.md:1: number-reference/);
+  // A token inside a link is never printed: the item names the file, line and rule only.
+  const token = ['gh', 'p_', 'A1b2C3d4E5f6G7h8'.repeat(2), 'Q9r0'].join('');
+  repo.commit('links', { 'docs/links.md': `Issue: https://github.com/owner/repo/issues/12?access=${token}\nCompare: https://github.com/owner/repo/compare/main...${token}\n` });
+  const leak = repo.git(['push', '-q', 'origin', 'main'], { allowFailure: true });
+  assert.notEqual(leak.status, 0);
+  assert.match(leak.stderr, /docs\/links\.md:1: github-link: /);
+  for (let start = 0; start + 8 <= token.length; start += 4) assert.ok(!`${leak.stdout}${leak.stderr}`.includes(token.slice(start, start + 8)), 'no part of the token is printed');
+  // A push that does not send the current commit is not checked here, with a note.
+  repo.git(['branch', 'other', 'origin/main']);
+  const other = repo.git(['push', '-q', 'origin', 'other'], { allowFailure: true });
+  assert.equal(other.status, 0, other.stderr);
+  assert.match(other.stderr, /plain-text check: skipped, because this push does not send the current commit/);
+  repo.git(['reset', '-q', '--hard', 'HEAD~1']);
   // Uncommitted changes: the working folder is not what is pushed, so the step is skipped with a note.
   repo.write('docs/guide.md', 'Being rewritten.\n');
   const dirty = repo.git(['push', '-q', 'origin', 'main'], { allowFailure: true });
@@ -92,7 +105,14 @@ test('pre-push: with the plain-text check installed too, a hand push of a change
   repo.commit('broken settings', { '.github/plain-text.json': '{ not json\n' });
   const broken = repo.git(['push', '-q', 'origin', 'main'], { allowFailure: true });
   assert.equal(broken.status, 0, broken.stderr);
-  assert.match(broken.stderr, /plain-text check: could not run; the push goes on/);
+  assert.match(broken.stderr, /plain-text check: could not run, so the push goes on unchecked/);
+  // Nothing to compare with: no upstream and no origin branch.
+  repo.commit('more', { 'docs/more.md': 'More.\n' });
+  repo.git(['branch', '--unset-upstream']);
+  repo.git(['update-ref', '-d', 'refs/remotes/origin/main']);
+  const nobase = repo.git(['push', '-q', remote.root, 'main'], { allowFailure: true });
+  assert.equal(nobase.status, 0, nobase.stderr);
+  assert.match(nobase.stderr, /plain-text check: skipped, because no upstream or origin branch was found/);
 });
 
 test('installer --check: a guard hook from an older template is reported as outdated', (t) => {

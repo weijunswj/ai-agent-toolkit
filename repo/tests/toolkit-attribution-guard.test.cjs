@@ -463,7 +463,7 @@ function pushFixtures() {
     repos[`settings-${kind}`] = scenario(withSettings, `settings-${kind}`, files);
     repos[`plain-${kind}`] = scenario(without, `plain-${kind}`, files);
   }
-  for (const name of ['exceptions', 'range', 'targets', 'content', 'links']) repos[name] = scenario(withSettings, name, changes.clean);
+  for (const name of ['exceptions', 'range', 'targets', 'content', 'links', 'more']) repos[name] = scenario(withSettings, name, changes.clean);
   repos['toolkit-plain'] = scenario(without, 'toolkit-plain', {
     'repo/contracts/plain-references/config.json': '{}\n', 'repo/scripts/check-plain-references.cjs': '\'use strict\';\n', ...changes.plain
   });
@@ -590,7 +590,9 @@ test('push check: the pushed branch and the pull request head are read, not the 
   assert.match(outgoingRefusal('git push origin leaky:main', repo, quiet()), /src\/leak\.js:1 /);
   assert.match(outgoingRefusal('gh pr create --head leaky --base main', repo, quiet()), /src\/leak\.js:1 /);
   assert.equal(outgoingRefusal('gh pr create --head no-such-branch', repo, quiet()), '');
+  const before = fs.readdirSync(repo).sort();
   assert.deepEqual(pushCheck.checkOutgoing({ folder: repo, sources: ['--output=x'] }), {}, 'a source that reads as an option is never passed to git');
+  assert.deepEqual(fs.readdirSync(repo).sort(), before, 'and git wrote no file for it');
 });
 
 test('push check: plain-text items come from the pushed files, not the working folder', () => {
@@ -643,8 +645,8 @@ test('push check: it fails open with one note when git is missing, slow or the c
   assert.equal(missing.refusal, undefined);
   assert.equal(missing.note, 'Toolkit could not check this push for credentials and plain-text findings, so it was let through: git could not run (ENOENT).');
   const slow = pushCheck.checkOutgoing({ folder }, { spawn: () => ({ error: Object.assign(new Error('x'), { code: 'ETIMEDOUT' }), status: null, signal: 'SIGTERM' }) });
-  assert.match(slow.note, /longer than 10 seconds/);
-  assert.match(pushCheck.checkOutgoing({ folder }, { budgetMs: -1 }).note, /longer than 10 seconds/);
+  assert.match(slow.note, /longer than 30 seconds/);
+  assert.match(pushCheck.checkOutgoing({ folder }, { budgetMs: -1 }).note, /longer than 30 seconds/);
   const broken = pushCheck.checkOutgoing({ folder }, { spawn: () => { throw new TypeError('boom'); } });
   assert.match(broken.note, /the check failed \(TypeError\)/);
   // Each git call gets only the time left.
@@ -652,7 +654,7 @@ test('push check: it fails open with one note when git is missing, slow or the c
   pushCheck.checkOutgoing({ folder }, { budgetMs: 5000, spawn: (command, args, options) => { timeouts.push(options.timeout); return { status: 128, stdout: '', stderr: '' }; } });
   assert.equal(timeouts.length, 1);
   assert.ok(timeouts[0] > 0 && timeouts[0] <= 5000);
-  assert.equal(pushCheck.BUDGET_MS, 10000);
+  assert.equal(pushCheck.BUDGET_MS, 30000);
   const options = quiet();
   assert.equal(outgoingRefusal('git push', folder, { ...options, check: () => { throw new Error('gone'); } }), '');
   assert.deepEqual(options.notes, ['Toolkit could not check this push for credentials and plain-text findings, so it was let through: the check could not load.']);
@@ -703,4 +705,71 @@ test('push check: when it cannot check, the Claude Code hook lets the push run a
   assert.equal(result.status, 0);
   assert.equal(JSON.parse(result.stdout).systemMessage, 'Toolkit could not check this push for credentials and plain-text findings, so it was let through: git could not run (ENOENT).');
   assert.match(result.stderr, /could not run \(ENOENT\)/);
+});
+
+test('push check: a URL remote, --all, the baseline, the plain-text scope and a path that became a folder', () => {
+  const { git, commitAll, repos } = pushFixtures();
+  const repo = repos.more;
+  const branch = (name) => git(repo, 'checkout', '--quiet', '-b', name, 'origin/main');
+  // A remote given as a path or URL is compared with what any remote has.
+  branch('by-url');
+  writeFiles(repo, { 'src/url.js': `"${fakeToken()}"\n` });
+  commitAll(repo, 'url');
+  const url = git(repo, 'remote', 'get-url', 'origin').trim();
+  assert.match(outgoingRefusal(`git push "${url}" by-url`, repo, quiet()), /src\/url\.js:1 /);
+  // --all reads every branch; the plain-text step is skipped there.
+  branch('all-plain');
+  writeFiles(repo, { 'docs/all.md': `See ${numberReference()}.\n` });
+  commitAll(repo, 'all');
+  const all = outgoingRefusal('git push --all origin', repo, quiet());
+  assert.match(all, /src\/url\.js:1 /);
+  assert.ok(!all.includes('number-reference'));
+  // The baseline allows what was already there, up to its count.
+  branch('baseline');
+  writeFiles(repo, { '.github/plain-text-baseline.json': JSON.stringify({ schema: 'toolkit-plain-references-baseline/v1', allowed: [{ file: 'docs/old.md', rule: 'number-reference', text: numberReference(), count: 1 }] }) });
+  writeFiles(repo, { 'docs/old.md': `See ${numberReference()}.\n` });
+  commitAll(repo, 'one');
+  assert.equal(outgoingRefusal('git push origin baseline', repo, quiet()), '');
+  writeFiles(repo, { 'docs/old.md': `See ${numberReference()}.\nAnd ${numberReference()}.\n` });
+  commitAll(repo, 'two');
+  assert.match(outgoingRefusal('git push origin baseline', repo, quiet()), /docs\/old\.md:1: number-reference/);
+  // Files outside the check's scope (here a .txt file) are not read for plain text.
+  branch('scope');
+  writeFiles(repo, { 'src/notes.txt': `See ${numberReference()}.\n` });
+  commitAll(repo, 'scope');
+  assert.equal(outgoingRefusal('git push origin scope', repo, quiet()), '');
+  // A changed path that is a folder at the pushed commit does not shift the files read after it.
+  branch('folder');
+  writeFiles(repo, { 'docs/a.md': 'Plain.\n', 'docs/z.md': `See ${numberReference()}.\n` });
+  commitAll(repo, 'files');
+  fs.rmSync(path.join(repo, 'docs', 'a.md'));
+  writeFiles(repo, { 'docs/a.md/inner.md': 'Plain.\n' });
+  commitAll(repo, 'folder');
+  assert.match(outgoingRefusal('git push origin folder', repo, quiet()), /docs\/z\.md:1: number-reference/);
+});
+
+test('push check: a pull request falls back to origin/main, then gives a note when origin has no base', () => {
+  const { git, commitAll, repos } = pushFixtures();
+  const repo = repos.more;
+  git(repo, 'checkout', '--quiet', '-b', 'pr-base', 'origin/main');
+  writeFiles(repo, { 'src/pr.js': `"${fakeToken()}"\n` });
+  commitAll(repo, 'pr');
+  git(repo, 'remote', 'set-head', 'origin', '--delete');
+  assert.match(outgoingRefusal('gh pr create --fill', repo, quiet()), /src\/pr\.js:1 /, 'origin/main without origin/HEAD');
+  assert.match(outgoingRefusal('gh pr create --base no-such-branch', repo, quiet()), /src\/pr\.js:1 /, 'a missing --base falls back');
+  git(repo, 'update-ref', '-d', 'refs/remotes/origin/main');
+  const options = quiet();
+  assert.equal(outgoingRefusal('gh pr create --fill', repo, options), '');
+  assert.deepEqual(options.notes, ['Toolkit could not check this push for credentials and plain-text findings, so it was let through: no base branch was found on origin.']);
+});
+
+test('push check: the Claude Code hook keeps a note when it also refuses, and big output has its own note', () => {
+  const { repos } = pushFixtures();
+  const result = runHook(claudeHook, 'Bash', repos['broken-settings'], 'git push');
+  assert.equal(result.status, 2);
+  const reason = JSON.parse(result.stdout).hookSpecificOutput.permissionDecisionReason;
+  assert.match(reason, /GitHub token/);
+  assert.match(reason, /could not check this push for plain-text findings/);
+  const big = pushCheck.checkOutgoing({ folder: os.tmpdir() }, { spawn: () => ({ error: Object.assign(new Error('x'), { code: 'ENOBUFS' }), status: null, signal: 'SIGTERM' }) });
+  assert.match(big.note, /git wrote more than 64 MB, more than the check reads/);
 });

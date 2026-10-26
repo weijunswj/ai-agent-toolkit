@@ -38,6 +38,8 @@ function main(guard = () => require('./toolkit-attribution-guard.cjs')) {
     return typeof command === 'string' && mayCarryAttribution(command) ? refuse(CHECK_FAILED_REASON) : 0;
   }
   if (decision?.hookSpecificOutput) {
+    // Notes from a step that could not run go with the refusal, so they are not lost.
+    if (notes.length) decision.hookSpecificOutput.permissionDecisionReason += `\n${notes.join('\n')}`;
     process.stdout.write(`${JSON.stringify(decision)}\n`);
     process.stderr.write(`${decision.hookSpecificOutput.permissionDecisionReason}\n`);
     return 2;

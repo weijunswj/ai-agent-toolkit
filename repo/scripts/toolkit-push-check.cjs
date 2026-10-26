@@ -16,7 +16,7 @@
 // base branch (--base, else origin's default branch, else origin/main or origin/master). A folder that
 // is not a repository is not checked.
 //
-// It fails open: when git cannot run, the check takes longer than 10 seconds for one push, or a
+// It fails open: when git cannot run, the check takes longer than 30 seconds for one push, or a
 // setting cannot be read, the command runs and one note is returned for the user. A broken check must
 // never stop every push; it moves feedback earlier and does not replace CI or GitHub push protection.
 
@@ -24,7 +24,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
-const BUDGET_MS = 10000;
+const BUDGET_MS = 30000;
 const MAX_LISTED = 10;
 const MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
 const NOTE = 'Toolkit could not check this push for credentials and plain-text findings, so it was let through';
@@ -34,9 +34,11 @@ class CheckSkipped extends Error {}
 
 function runGit(folder, args, deadline, spawn, { input, encoding = 'utf8' } = {}) {
   const left = deadline - Date.now();
-  if (left <= 0) throw new CheckSkipped('it took longer than 10 seconds');
+  if (left <= 0) throw new CheckSkipped('it took longer than 30 seconds');
   const result = spawn('git', ['--no-optional-locks', '-c', 'core.quotePath=false', '-c', 'core.fsmonitor=false', ...args], { cwd: folder, encoding, windowsHide: true, timeout: left, maxBuffer: MAX_OUTPUT_BYTES, input });
-  if (result.error?.code === 'ETIMEDOUT' || (result.signal && result.status === null)) throw new CheckSkipped('it took longer than 10 seconds');
+  // Output over the limit also ends with a signal and no status, so it is told apart first.
+  if (result.error?.code === 'ENOBUFS') throw new CheckSkipped('git wrote more than 64 MB, more than the check reads');
+  if (result.error?.code === 'ETIMEDOUT' || (result.signal && result.status === null)) throw new CheckSkipped('it took longer than 30 seconds');
   if (result.error) throw new CheckSkipped(`git could not run (${result.error.code || 'error'})`);
   return result;
 }
@@ -116,22 +118,15 @@ function sentFiles(root, tip, files, deadline, spawn) {
     if (end === -1) break;
     const header = out.subarray(offset, end).toString('utf8');
     offset = end + 1;
-    const size = /^[0-9a-f]+ blob (\d+)$/.exec(header);
-    if (!size) continue;
-    texts.set(file, out.subarray(offset, offset + Number(size[1])).toString('utf8'));
-    offset += Number(size[1]) + 1;
+    // "<name> missing" has no content; any other object ("<sha> <type> <size>") is skipped whole, so a
+    // path that became a folder never shifts the files after it.
+    const object = /^[0-9a-f]+ (\w+) (\d+)$/.exec(header);
+    if (!object) continue;
+    const size = Number(object[2]);
+    if (object[1] === 'blob') texts.set(file, out.subarray(offset, offset + size).toString('utf8'));
+    offset += size + 1;
   }
   return texts;
-}
-
-// One plain-text item without the matched text, which can hold anything (a link with a token in it).
-function describePlainText(finding, config, portable) {
-  if (finding.rule === 'banned-term') {
-    const entry = config.banned_terms.find((item) => item.term === finding.term) || { term: finding.term, reason: 'a banned term', fix: 'say what it means in plain English' };
-    return `${finding.file}:${finding.line}: banned-term "${entry.term}": ${entry.reason}; ${entry.fix}`;
-  }
-  const rule = portable.REFERENCE_RULES.find((item) => item.id === finding.rule);
-  return `${finding.file}:${finding.line}: ${finding.rule}: ${rule ? rule.fix : 'rewrite it in plain English'}`;
 }
 
 // Plain-text findings in the sent version of each changed file, beyond the repository's baseline,
@@ -153,7 +148,7 @@ function plainTextFindings(root, tip, files, deadline, spawn, portable) {
   }
   const failures = [];
   for (const [id, group] of groups) if (group.length > (allowed.get(id) || 0)) failures.push(...group);
-  return failures.map((finding) => describePlainText(finding, config, portable));
+  return failures.map((finding) => portable.describeFailure(finding, config));
 }
 
 function refusalText(secrets, plain, action) {
