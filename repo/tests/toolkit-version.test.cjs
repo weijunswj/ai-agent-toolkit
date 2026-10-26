@@ -330,6 +330,13 @@ test('the guard and --next check the format of "## Unreleased" notes', (t) => {
   assert.equal(readToolkitVersion(path.join(lane.copy, ...VERSION_REL_PATH.split('/'))), TOOLKIT_VERSION);
   assert.match(unreleasedProblems('Title: words\n\n### Lane\n\n- A note.').join('\n'), /cannot start with a Title: line/, 'a title belongs in the heading');
   assert.deepEqual(unreleasedProblems('### Lane\n\n- A note.'), []);
+  lane.run('checkout', '-q', '--', '.');
+  lane.write(CHANGELOG_REL_PATH, lane.read(CHANGELOG_REL_PATH).replace('- A bullet with no section.\n', 'Title: words\n\n### Lane\n\n- A note.\n'));
+  lane.commit('titled unreleased notes');
+  assert.match(versionProblems({ workspace: lane.copy, base: 'base' }).join('\n'), /the "## Unreleased" section cannot start with a Title: line/);
+  const titled = lane.bump('--next', 'patch', '--base', 'base');
+  assert.equal(titled.status, 1);
+  assert.match(titled.stderr, /cannot start with a Title: line/);
 });
 
 test('a base that already holds "## Unreleased" folds with the lane at merge', (t) => {
@@ -351,6 +358,13 @@ test('a base that already holds "## Unreleased" folds with the lane at merge', (
   const dropped = lane.bump('--next', 'patch', '--base', 'main');
   assert.equal(dropped.status, 1, 'notes main holds are never dropped');
   assert.match(dropped.stderr, /base's "## Unreleased" section is missing from this branch/);
+  lane.run('revert', '--no-edit', 'HEAD');
+  lane.write(CHANGELOG_REL_PATH, withUnreleased.replace('- **Old way:** a note.\n', '- **New way:** another note.\n'));
+  lane.commit('rewrite main notes');
+  assert.match(versionProblems({ workspace: lane.copy, base: 'main' }).join('\n'), /drops notes the base holds there \(missing "- \*\*Old way:\*\* a note\."\)/);
+  const rewritten = lane.bump('--next', 'patch', '--base', 'main');
+  assert.equal(rewritten.status, 1, 'notes main holds are never rewritten away');
+  assert.match(rewritten.stderr, /drops notes the base holds there/);
   lane.run('revert', '--no-edit', 'HEAD');
 
   const result = lane.bump('--next', 'patch', '--base', 'main');

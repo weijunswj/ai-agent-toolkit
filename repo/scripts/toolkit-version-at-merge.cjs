@@ -117,18 +117,22 @@ function unreleasedProblems(notes) {
   return problems;
 }
 
-// Notes the base holds under "## Unreleased" must reach the fold: an open branch keeps that section
-// on top, and a bumped branch carries every line of it. Returns the problem, or ''.
+// Notes the base holds under "## Unreleased" must reach the fold: an open branch keeps every line of
+// them in its own "## Unreleased" section on top, and a bumped branch keeps every line in the
+// CHANGELOG. Returns the problem, or ''.
 function droppedUnreleasedProblem(headText, baseText, bumped) {
   const notes = takeUnreleased(baseText).notes;
   if (!notes) return '';
-  if (!bumped) {
-    if (UNRELEASED.test(changelogHeadings(headText)[0] || '')) return '';
+  if (!bumped && !UNRELEASED.test(changelogHeadings(headText)[0] || '')) {
     return `the base's "${UNRELEASED_HEADING}" section is missing from this branch; take it back from the base so its notes are folded at merge`;
   }
-  const have = new Set(String(headText).replace(/\r\n/g, '\n').split('\n').map((line) => line.trim()));
+  const kept = bumped ? String(headText) : takeUnreleased(headText).notes;
+  const have = new Set(kept.replace(/\r\n/g, '\n').split('\n').map((line) => line.trim()));
   const lost = notes.split('\n').map((line) => line.trim()).filter((line) => line && !have.has(line));
-  return lost.length ? `the base's "${UNRELEASED_HEADING}" notes are not all under the new heading (missing "${lost[0]}")` : '';
+  if (!lost.length) return '';
+  return bumped
+    ? `the base's "${UNRELEASED_HEADING}" notes are not all under the new heading (missing "${lost[0]}")`
+    : `this branch's "${UNRELEASED_HEADING}" section drops notes the base holds there (missing "${lost[0]}"); add to that section, never remove from it`;
 }
 
 function fragmentFiles(workspace) {
