@@ -340,11 +340,11 @@ test('merges in a Projects session need an earlier post with the PR\'s external 
   const both = 'gh pr merge 627 && gh pr merge 628';
   assert.match(merge([wake(), call(POST, { text: 'External effects of PR 627: none.' })], both), /external effects of PR 628/);
   assert.equal(merge([wake(), call(POST, { text: 'External effects of PRs 627 and 628: none.' })], both), '');
-  for (const command of ['gh pr merge 628 --body "https://github.com/o/r/pull/5"', 'gh pr merge --subject "5" 628', 'gh pr merge --subject="5" 628']) {
+  for (const command of ['gh pr merge 628 --body "https://github.com/o/r/pull/5"', 'gh pr merge --subject "5" 628', 'gh pr merge --subject="5" 628', 'gh pr merge -b"https://github.com/o/r/pull/5" 628', 'gh pr merge -sb "https://github.com/o/r/pull/5" 628']) {
     assert.match(merge([wake(), call(POST, { text: 'External effects of PR 5: none.' })], command), /external effects of PR 628/, command);
   }
   // A quoted value with spaces, or an empty one, stays one option value and never hides the PR number.
-  for (const command of ['gh pr merge --subject "Fix the hook" 628', 'gh pr merge --body "" 628', "gh pr merge -t 'a b' 628"]) {
+  for (const command of ['gh pr merge --subject "Fix the hook" 628', 'gh pr merge --body "" 628', "gh pr merge -t 'a b' 628", 'gh pr merge"" 628', 'gh pr merge 628""']) {
     assert.deepEqual(mergeTarget('Bash', { command }), { number: '628' }, command);
     assert.match(merge([wake(), call(POST, { text: 'External effects of PR 627: none.' })], command), /external effects of PR 628/, command);
   }
@@ -355,4 +355,72 @@ test('merges in a Projects session need an earlier post with the PR\'s external 
   const reader = () => { read = true; return lines([wake(), call(POST, { text: 'On it.' })]); };
   assert.equal(decide({ tool_name: 'Bash', transcript_path: 't', tool_input: { command: 'npm test' } }, reader), '');
   assert.equal(read, false);
+});
+
+// Every command shape the reviews raised: [command, the first PR it merges, null for a merge with no number, or false
+// for no merge]. The reader follows the shell, so quotes, escapes, empty quotes and option values never hide or
+// replace the PR number.
+test('the merge reader reads commands the way the shell does', () => {
+  const rows = [
+    ['gh api -X PUT "repos/o/r/pulls/628/merge"', '628'], ['gh api -X "PUT" repos/o/r/pulls/628/merge', '628'],
+    ['cat <<EOF > f; gh pr merge 628\nbody\nEOF', '628'], ["gh pr merge 'https://github.com/o/r/pull/628'", '628'],
+    ['gh pr merge "628"', '628'], ["gh pr merge '#628'", '628'], ['"gh" pr merge 628', '628'],
+    ['cat <<< y\ngh pr merge 628', '628'], ['echo $((1<<2))\ngh pr merge 628', '628'],
+    ["echo it\\'s; gh pr merge 628", '628'], ["echo it\\'s; gh pr merge 628; echo 'x'", '628'],
+    ['gh pr merge \\\n628', '628'], ['gh pr \\\nmerge 628', '628'],
+    ['gh pr merge 628 --body "fixes 627"', '628'], ["gh pr merge 628 --subject 'x 627'", '628'],
+    ['(gh pr merge 628)', '628'], ['x=$(gh pr merge 628)', '628'],
+    ["cat <<'EOF'\ngh pr merge 627\nEOF", false], ['gh pr merge 628 --body-file - <<EOF\ngh pr merge 627\nEOF', '628'],
+    ['git commit -m "$(cat <<\'EOF\'\nfix "quoted" (paren)\ngh pr merge 627\nEOF\n)" && gh pr merge 628', '628'],
+    ['git commit -m "fix; gh pr merge 5"', false], ['echo "a && gh pr merge 5"', false], ['grep -E "foo|gh pr merge" x', false],
+    ['gh api repos/o/r/pulls/628/merge', false], ['gh api --method=put repos/o/r/pulls/628/merge', '628'], ['gh api -XPUT repos/o/r/pulls/628/merge', '628'],
+    ['gh pr merge --squash', null], ['gh pr merge --body "closes 12"', null],
+    ["echo 'gh pr merge 5'", false], ['printf "%s\\n" "gh pr merge 5"', false],
+    ['gh pr merge 628 --body "oops', '628'], ['echo "oops; gh pr merge 628', false], ['cat <<EOF\ngh pr merge 628', false],
+    ['echo "a \'b\' c"; gh pr merge 628', '628'], ['echo \'a "b" c\'; gh pr merge 628', '628'], ['echo "a \'gh pr merge 5\' c"', false],
+    ['cat <<-EOF\n\tgh pr merge 5\n\tEOF\ngh pr merge 628', '628'], ['cat <<"EOF"\ngh pr merge 5\nEOF\ngh pr merge 628', '628'],
+    ['echo a\\; gh pr merge 5', false], ["echo $'a\\'b'; gh pr merge 628", '628'], ["echo $'a\\'b'; gh pr merge 628; echo 'done'", '628'],
+    ['gh pr merge 627 && gh pr merge 628', '627'], ['gh pr merge --squash; gh pr merge 628', null],
+    ['gh pr merge --subject "5" 628', '628'], ['gh pr merge -t "5" 628', '628'], ['gh pr merge -b "https://github.com/o/r/pull/5" 628', '628'],
+    ['gh pr merge -t 5 628', '628'], ['gh pr merge --subject=5 628', '628'], ['gh pr merge 628 --body=https://github.com/o/r/pull/5', '628'],
+    ['gh pr merge -R "o/r" 628', '628'], ['gh pr merge --repo o/r 628', '628'], ['gh pr merge -R=o/r 628', '628'], ['gh pr merge -A "a@example.com" 628', '628'],
+    ['gh pr merge --match-head-commit abc123 628', '628'], ['gh pr merge -F - 628', '628'], ['gh pr merge --body-file=x.md 628', '628'],
+    ['gh pr merge -t5 628', '628'], ['gh pr merge -d 628', '628'], ['gh pr merge --admin --auto -s -r -m 628', '628'],
+    ['gh pr merge --squash --delete-branch 628', '628'], ['gh pr merge --subject="Fix the hook" 628', '628'],
+    ['git commit -m "use a<<b"\ngh pr merge 628', '628'], ['echo $((x<<y))\ngh pr merge 628', '628'],
+    ['cat <<\\EOF\ngh pr merge 5\nEOF', false],
+    ['gh pr merge --subject="5" 628', '628'], ['gh pr merge --body "fixes a bug" 628', '628'], ['gh pr merge --body "" 628', '628'],
+    ["gh pr merge --body '' 628", '628'], ['gh pr merge --body "$(cat notes.md)" 628', '628'],
+    ["gh pr merge -b \"$(cat <<'EOF'\nbody \"x\" )\nEOF\n)\" 628", '628'], ["gh pr merge -t 'Fix x (#628)' 628", '628'],
+    ['gh pr merge -R o/r --subject "a b" https://github.com/o/r/pull/628', '628'],
+    ['gh pr merge --squash --subject "Fix x" 627 && gh pr merge 628', '627'],
+    ['gh pr merge "62"8', '628'], ["gh pr merge '62'8", '628'], ['gh pr merge 6"2"8', '628'],
+    ['gh" "pr merge 628', false], ["'gh'pr merge 628", false], ['gh pr merge"x" 628', false],
+    ['g"h" pr merge 628', '628'], ['gh pr "merge" 628', '628'], ['gh pr me"rge" 628', '628'], ['"gh" "pr" "merge" "628"', '628'],
+    ['echo "x";gh pr merge 628', '628'], ['echo "a b"&&gh pr merge 628', '628'], ['echo ""&&gh pr merge 628', '628'],
+    ['gh pr merge 628;""', '628'], ['(gh pr merge 628)""', '628'],
+    ['echo "x;gh pr merge 5"', false], ['echo x"&&"gh pr merge 5', false], ['"gh pr merge 5"', false], ['"gh"" pr merge 5"', false],
+    ['gh pr merge "" 628', '628'], ['gh pr merge --body """" 628', '628'], ['gh pr merge --subject="" 628', '628'],
+    ['gh pr merge -t"a b" 628', '628'], ['gh pr merge --subject"=5" 628', '628'], ['gh pr merge "#"628', '628'],
+    ['gh pr merge -b"see https://github.com/o/r/pull/5 now" 628', '628'],
+    ['gh pr merge --subject "5"628', null], ['gh \\\npr \\\nmerge \\\n628', '628'],
+    ['gh pr merge"" 628', '628'], ["gh pr merge'' 628", '628'], ['gh pr merge 628""', '628'], ["gh pr merge 628''", '628'],
+    ['gh pr merge ""628', '628'], ['gh pr merge "https://github.com/o/r/pull/628"""', '628'], ['gh pr merge 628"";echo', '628'],
+    ['gh pr merge 627"" && gh pr merge 628', '627'], ['gh pr merge --body"" 5 628', '628'],
+    ['gh pr merge -b"https://github.com/o/r/pull/5" 628', '628'], ["gh pr merge -b'https://github.com/o/r/pull/5' 628", '628'],
+    ['gh pr merge 628 -b"https://github.com/o/r/pull/5"', '628'], ['gh pr merge -bhttps://github.com/o/r/pull/5 628', '628'],
+    ['gh pr merge -sb "https://github.com/o/r/pull/5" 628', '628'], ['gh pr merge -dt "5" 628', '628'], ['gh pr merge -st 5 628', '628'],
+    ['gh pr merge 6\\28', '628'], ['gh pr merge \\628', '628'], ['echo # gh pr merge 5', false], ['npm test', false],
+  ];
+  
+  for (const [command, expected] of rows) {
+    const targets = mergeTargets('Bash', { command });
+    assert.equal(targets ? targets[0].number : false, expected, command);
+  }
+  // Every pass moves forward only: a megabyte of hostile input stays fast.
+  for (const command of ['\\"'.repeat(500000), '""'.repeat(500000), `cat <<EOF\n${'\n'.repeat(1000000)}`, '<<A '.repeat(250000), `"${'$('.repeat(300000)}`]) {
+    const started = Date.now();
+    mergeTargets('Bash', { command });
+    assert.ok(Date.now() - started < 1500, command.slice(0, 8));
+  }
 });
