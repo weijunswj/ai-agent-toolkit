@@ -132,10 +132,10 @@ function readTranscript(lines) {
   return { running, projects, posts };
 }
 
-// Blanks code (fenced with ``` or ~~~, an unclosed fence running to the end, and inline spans) so a PR number or an
-// arrow inside it is not read.
+// Blanks code (a fence of ``` or ~~~ at the start of a line, running to its closing fence or the end, and inline spans)
+// so a PR number or an arrow inside it is not read.
 function withoutCode(text) {
-  return text.replace(/(```|~~~)[\s\S]*?(?:\1|$)|`[^`\n]*`/g, match => match.replace(/[^\n]/g, ' '));
+  return text.replace(/(^|\n)[ \t]{0,3}(```|~~~)[\s\S]*?(?:\n[ \t]{0,3}\2[^\n]*|$)|`[^`\n]*`/g, match => match.replace(/[^\n]/g, ' '));
 }
 
 function linkIssue(text) {
@@ -218,23 +218,30 @@ function layoutIssue(text) {
   return '';
 }
 
-// An edit keeps every earlier Update line word for word and adds at least one new one.
+// An edit keeps every earlier Update line word for word, once and in order, and appends at least one new one.
 function editIssue(previous, text) {
   const before = updateLines(previous);
   const after = updateLines(text);
+  const count = (lines, line) => lines.filter(item => item === line).length;
   const missing = before.find(line => !after.includes(line));
   if (missing) return `it drops or changes the earlier line "${missing.slice(0, 80)}". Keep every Update line word for word.`;
+  const repeated = before.find(line => count(after, line) > count(before, line));
+  if (repeated) return `it repeats the earlier line "${repeated.slice(0, 80)}". Keep each Update line once.`;
   if (after.filter(line => before.includes(line)).join('\n') !== before.join('\n')) return 'it reorders the earlier Update lines. Keep them in their order and append new ones.';
+  const lastKept = before.length ? after.lastIndexOf(before[before.length - 1]) : -1;
+  if (after.some((line, index) => index < lastKept && !before.includes(line))) return 'it adds a new Update line above an earlier one. Append new lines after the last earlier line.';
   if (!after.some(line => !before.includes(line))) return 'it adds no new **[HH:MM] Update:** line. Append one short line in the owner\'s local time for what changed.';
   return '';
 }
 
 // Shell text with heredoc bodies and quoted strings removed, so a commit message, grep pattern or echo that quotes a
-// merge command is not read as one.
+// merge command is not read as one. The heredoc operator's own line is kept, a quoted single token (a PR number, URL,
+// API path or method) is unwrapped rather than removed, and a backslash escape outside quotes is one unit. Both passes
+// run in linear time.
 function unquoted(command) {
   return command
-    .replace(/<<-?\s*(['"]?)(\w+)\1[^\n]*\n[\s\S]*?(?:\n\s*\2\b|$)/g, ' ')
-    .replace(/"(?:[^"\\]|\\[\s\S])*"|'[^']*'/g, ' ');
+    .replace(/(?<!<)<<(?!<)-?\s*(['"]?)([A-Za-z_]\w*)\1([^\n]*)\n[\s\S]*?(?:\n[ \t]*\2\b|$)/g, (match, quote, tag, rest) => ` ${rest} `)
+    .replace(/\\[\s\S]|"([^"\s;&|()<>\\]*)"|'([^'\s;&|()<>]*)'|"(?:[^"\\]|\\[\s\S])*"|'[^']*'/g, (match, a, b) => ` ${a ?? b ?? ''} `);
 }
 
 // The PR a shell command or merge tool merges, as { number } (null when the call names none), or null when the call

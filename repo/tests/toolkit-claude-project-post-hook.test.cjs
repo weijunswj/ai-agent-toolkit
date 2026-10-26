@@ -207,6 +207,8 @@ test('wording: no em-dashes or arrows outside code, and one Question per post, r
   assert.equal(wordingIssue('Build, then review. A short-lived branch.'), '');
   assert.equal(wordingIssue('Log:\n~~~\na -> b\n~~~'), '');
   assert.equal(wordingIssue('Log:\n```\na -> b'), '');
+  // A fence counts only at the start of a line, so a lone ``` in prose hides nothing after it.
+  assert.match(wordingIssue('Type ``` to start a block, then -> done.'), /arrow/);
   assert.match(wordingIssue('**Question:** a?\n**Question:** b?'), /more than one/);
   assert.equal(wordingIssue('**Question:** merge it?'), '');
   const reply = decide({ tool_name: POST, transcript_path: 't', tool_input: { thread_id: 'cmsg_T', text: 'Yes — done.' } }, () => lines([wake()]));
@@ -257,6 +259,11 @@ test('edits keep every earlier Update line word for word and add a new one', () 
   const swapped = LAID_OUT.split('\n');
   [swapped[1], swapped[2]] = [swapped[2], swapped[1]];
   assert.match(editIssue(LAID_OUT, [...swapped.slice(0, 3), '- **[10:00] Update:** new.', ...swapped.slice(3)].join('\n')), /reorders/);
+  const base = LAID_OUT.split('\n');
+  const withLine = (index, line) => [...base.slice(0, index), line, ...base.slice(index)].join('\n');
+  assert.match(editIssue(LAID_OUT, withLine(3, base[1])), /repeats the earlier line .*built the layout/);
+  assert.match(editIssue(LAID_OUT, withLine(2, '- **[10:00] Update:** new.')), /above an earlier one/);
+  assert.equal(editIssue(LAID_OUT, withLine(3, '- **[10:00] Update:** new.')), '');
   // Through the hook: the edited post's text comes from the transcript; replies and unknown posts are not checked.
   const edit = (entries, text) => decide({ tool_name: EDIT, transcript_path: 't', tool_input: { message_id: 'cmsg_A1', text } }, () => lines(entries));
   assert.equal(edit([wake(), call(POST, { text: earlier })], LAID_OUT), '');
@@ -286,6 +293,22 @@ test('merges in a Projects session need an earlier post with the PR\'s external 
   ]) {
     assert.equal(mergeTarget('Bash', { command }), null, command);
   }
+  // Quoted single tokens are unwrapped, not removed, and the heredoc operator's own line still counts.
+  for (const [command, number] of [
+    ['gh pr merge "628"', '628'], ["gh pr merge 'https://github.com/o/r/pull/628'", '628'],
+    ['gh api -X PUT "repos/o/r/pulls/628/merge"', '628'], ['gh api -X "PUT" repos/o/r/pulls/628/merge', '628'],
+    ['cat <<EOF > f; gh pr merge 628\nbody\nEOF', '628'], ['cat <<< y\ngh pr merge 628', '628'],
+    ['echo $((1<<2))\ngh pr merge 628', '628'], ["echo it\\'s; gh pr merge 628", '628'],
+    ['git commit -m "$(cat <<\'EOF\'\nmerge 627\nEOF\n)" && gh pr merge 628', '628'],
+  ]) {
+    assert.deepEqual(mergeTarget('Bash', { command }), { number }, command);
+  }
+  // Stripping stays fast on long hostile input.
+  for (const command of ['\\"'.repeat(40000), `cat <<EOF\n${'\n'.repeat(50000)}`, `"${'\\"'.repeat(40000)}`]) {
+    const started = Date.now();
+    mergeTarget('Bash', { command });
+    assert.ok(Date.now() - started < 500, command.slice(0, 10));
+  }
   const merge = (entries, command = 'gh pr merge 628 --merge') => decide({ tool_name: 'Bash', transcript_path: 't', tool_input: { command } }, () => lines(entries));
   assert.match(merge([wake(), call(POST, { text: 'On it.' })]), /external effects of PR 628/);
   assert.equal(merge([wake(), call(POST, { text: 'External effects of [PR 628](https://github.com/o/r/pull/628/files): a new hook.' })]), '');
@@ -299,6 +322,8 @@ test('merges in a Projects session need an earlier post with the PR\'s external 
   assert.match(summary('- **[09:00] Update:** external effects of PR 627: none.\n**Now:** [PR 628](https://github.com/o/r/pull/628/files) waits.'), /PR 628/);
   assert.match(summary('External effects of PR 1628: none.'), /PR 628/);
   assert.match(summary('External effects of PR 6280: none.'), /PR 628/);
+  assert.match(summary('External effects of https://github.com/o/r/pull/6280/files: none.'), /PR 628/);
+  assert.equal(summary('External effects of https://github.com/o/r/pull/628/files: none.'), '');
   assert.match(summary('External effects of PR 627 (see #628): none.'), /PR 628/);
   assert.match(summary('PR 628 effects: none.'), /PR 628/);
   assert.match(summary('~~~\nexternal effects of PR 628\n~~~'), /PR 628/);
