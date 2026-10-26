@@ -14,7 +14,7 @@
 //   I2 Nothing that needs billing is ever asked about, written or reported as drift: on a private
 //      or internal repository S4 and S5 are not applicable, and GitHub Secret Protection and Code
 //      Security are never written. A binding's deprecated paid_security key, merged or in the
-//      working tree, "on" or "off", still validates and changes nothing.
+//      working tree, "off" or "on", is accepted and ignored; any other value is invalid (SE-13).
 //   I3 "Allow auto-merge" and the workflow file follow only the merged binding's patch-minor, and
 //      the setting needs conformant default-branch protection with at least one required check.
 //   I4 Nothing is written when GitHub cannot be read; a read-back that fails, as a whole or for any
@@ -67,7 +67,7 @@ function repo(t, files = {}, remote = 'https://github.com/example-owner/example-
   return root;
 }
 
-// `paid` writes the deprecated paid_security key, which must change nothing.
+// `paid` writes the deprecated paid_security key: "off" or "on" is accepted and ignored.
 function binding(policy, paid = null) {
   return JSON.stringify({
     schema: 'toolkit.programme-binding.v1', repository: 'example-owner/example-repo', parent_issue: 1,
@@ -260,6 +260,7 @@ test('SE-03 (MATRIX): the verdict for every row of the closure matrix', async (t
       // I2 on every row: no paid-features check or fix exists, and a private or internal repository
       // never plans secret scanning or CodeQL.
       assert.equal(result.checks.S8, undefined, 'no paid-features check');
+      assert.doesNotMatch(JSON.stringify(result.checks), /buy|paid|billed|billing|Secret Protection|Code Security/i, 'no paid wording in any check');
       if (result.fixes) assert.ok(!('code_security' in result.fixes) && !('paid' in result.fixes), 'no paid fix');
       if (result.visibility && result.visibility !== 'public') {
         for (const id of ['S4', 'S5']) assert.equal(result.checks[id].status, 'not-applicable', id);
@@ -306,6 +307,9 @@ const APPLY = [
   { id: 'A13 allow auto-merge written and read back', binding: binding(PATCH_MINOR),
     before: reader({ allow_auto_merge: false, binding: merged(PATCH_MINOR) }), writer: () => [ok('allow_auto_merge')], after: reader({ binding: merged(PATCH_MINOR) }),
     expect: { result: 'applied', writes: 1, lines: [/allow auto-merge turned on\./, /read back\./] } },
+  { id: 'A14 the working tree asks for auto-merge the default branch does not have: said, nothing written', working: binding(PATCH_MINOR),
+    before: reader(ALERTS_OFF), writer: () => [ok('alerts')], after: reader(),
+    expect: { result: 'applied', writes: 1, lines: [/the working-tree binding asks for \{"auto_merge":"patch-minor","github_actions":"owner"\}; it counts only once merged into the default branch\./] } },
   { id: 'A17 a written setting with no read-back is never "read back" (I4)', before: reader(ALERTS_OFF), writer: () => [ok('alerts'), ok('something_new')], after: reader(),
     expect: { result: 'unverified', writes: 1, unconfirmed: ['something_new'], never: [/: read back\./] } },
 ];
@@ -313,7 +317,7 @@ const APPLY = [
 test('SE-05 (APPLY): every write and read-back outcome, and what is said about it', async (t) => {
   for (const row of APPLY) {
     await t.test(row.id, (st) => {
-      const root = repo(st, { 'package.json': '{}', '.github/dependabot.yml': COVERED, '.github/toolkit-programme.json': row.binding || binding() });
+      const root = repo(st, { 'package.json': '{}', '.github/dependabot.yml': COVERED, '.github/toolkit-programme.json': row.working || row.binding || binding() });
       security.writeSecurityFiles(root, { workflow: true });
       fs.writeFileSync(path.join(root, '.github', 'dependabot.yml'), security.renderDependabotConfig(security.detectEcosystems(root)));
       const before = security.dependencySecurity(root, { reader: row.before, protectionResult: CONFORMANT });
@@ -584,6 +588,9 @@ test('SE-09: the writer calls only the endpoints for the fixes it is given, and 
     { security_and_analysis: { secret_scanning: { status: 'enabled' }, secret_scanning_push_protection: { status: 'enabled' } } },
   ], 'old paid plan keys are ignored: never Secret Protection or Code Security');
   writes.length = 0;
+  security.ghSecurityWriter('o/p', { code_scanning: true }, { spawn: writer });
+  assert.deepEqual(writes.map(entry => [entry.args[2], JSON.parse(entry.input)]), [['repos/o/p/code-scanning/default-setup', { state: 'configured' }]], 'CodeQL default setup is turned on, never off');
+  writes.length = 0;
   const answer = stderr => security.ghSecurityWriter('o/r', { alerts: true }, { spawn: () => ({ status: 1, stdout: '', stderr }) })[0].reason;
   assert.equal(answer('gh: Secret Protection is not available on this plan (HTTP 403)'), 'not-on-plan');
   assert.equal(answer('gh: This setting is disabled by your organization (HTTP 422)'), 'refused-by-policy');
@@ -817,7 +824,7 @@ test('SE-13: the binding accepts only the known dependency update values', () =>
   const base = JSON.parse(binding());
   programmeState.validateBinding({ ...base, dependency_updates: { auto_merge: 'patch-minor', github_actions: 'owner' } });
   programmeState.validateBinding({ ...base, dependency_updates: {} });
-  // paid_security is deprecated and ignored, but older bindings that carry it stay valid.
+  // paid_security is deprecated: off or on is accepted and ignored; any other value is invalid.
   programmeState.validateBinding({ ...base, paid_security: 'off' });
   programmeState.validateBinding({ ...base, paid_security: 'on' });
   assert.throws(() => programmeState.validateBinding({ ...base, paid_security: 'yes' }), /paid_security must be off or on/);

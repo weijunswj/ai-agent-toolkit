@@ -183,6 +183,8 @@ test('enable and disable: confirmed, written, read back; repeats write nothing; 
 
   const enabled = await run(ctx, repo, ['enable', '--json']);
   assert.equal(enabled.code, 0, enabled.stderr);
+  assert.match(enabled.asked[0], /^Enable Toolkit's GitHub governance for /);
+  assert.doesNotMatch(enabled.asked[0], /paid|Secret Protection|Code Security|billed/, 'the enable question asks nothing about paid features');
   const enabledState = JSON.parse(enabled.stdout);
   assert.deepEqual([enabledState.state, enabledState.rule, enabledState.materials_complete], ['ENABLED', 'R5', false]);
   // The older word still works: declining an enabled repository records a disable.

@@ -19,7 +19,8 @@
 //      does nothing.
 //
 // Toolkit never asks about, turns on or reports as drift a GitHub feature that needs billing. A
-// binding's `paid_security` key is deprecated and ignored.
+// binding's deprecated `paid_security` key is accepted and ignored when it is "off" or "on"; any
+// other value makes the binding invalid.
 //
 // The policy (dependency_updates) is read from the binding committed on the default branch, through
 // GitHub, never from the working tree: an agent can edit a working tree, and only a merged binding is
@@ -721,7 +722,7 @@ function describeOutcome(slug, root, result, outcome) {
 function settingCheck(value, label) {
   if (value === 'enabled') return { status: 'ok', details: [] };
   if (value === 'disabled') return { status: 'drift', details: [`${label} is off`] };
-  if (value === 'not-on-plan') return { status: 'not-on-plan', details: [`GitHub does not offer ${label.toLowerCase()} on this repository`] };
+  if (value === 'not-on-plan') return { status: 'not-on-plan', details: [`GitHub does not offer ${label} on this repository`] };
   if (value === 'not-checked') return { status: 'not-checked', details: ['offline'] };
   return { status: 'unverified', details: [`${label} could not be read`] };
 }

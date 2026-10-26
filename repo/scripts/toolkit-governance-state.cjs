@@ -276,7 +276,8 @@ function bindingRequiredChecks(root) {
 
 // The dependency policy of a parsed binding: { auto_merge, github_actions }. Missing keys take the
 // safe defaults: auto-merge off and GitHub Actions updates kept for the owner. A binding's
-// `paid_security` key is deprecated: it still validates, and it changes nothing.
+// deprecated `paid_security` key is accepted and ignored when it is "off" or "on"; any other value
+// makes the binding invalid.
 function policyOf(binding) {
   const updates = binding && typeof binding.dependency_updates === 'object' && binding.dependency_updates ? binding.dependency_updates : {};
   return {

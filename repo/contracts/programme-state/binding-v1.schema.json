@@ -31,7 +31,7 @@
     "paid_security": {
       "enum": ["off", "on"],
       "deprecated": true,
-      "description": "Deprecated and ignored. Toolkit never turns on a GitHub feature that needs billing, so this key changes nothing; it is still accepted so older bindings stay valid."
+      "description": "Deprecated. Toolkit never turns on a GitHub feature that needs billing: off or on is accepted and ignored, so older bindings stay valid; any other value is invalid."
     },
     "dependency_updates": {
       "type": "object",
