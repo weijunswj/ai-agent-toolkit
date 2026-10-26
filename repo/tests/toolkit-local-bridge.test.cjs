@@ -2435,6 +2435,36 @@ test('SessionStart notice is silent outside Toolkit-managed git roots and writes
   }
 });
 
+test('SessionStart notice names a vendored Toolkit check that is older or missing in an ENABLED repository, read-only', () => {
+  const root = tmpRoot();
+  fs.mkdirSync(path.join(root, '.git'), { recursive: true });
+  writeFile(path.join(root, 'AGENTS.md'), managedAgentsTemplate());
+  const installer = require('../../skills/secure-ci-cd/scripts/install-plain-text-check.cjs');
+  const copy = path.join(root, '.github', 'scripts', 'plain-text-check.cjs');
+  writeFile(copy, installer.vendoredText());
+  const options = { targetRoot: root, pluginRoot: repoRoot, state: {}, governanceEnabled: () => true };
+  assert.equal(runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, options).status, 'ok', 'a current copy is quiet');
+  const source = fs.readFileSync(path.join(repoRoot, 'skills', 'secure-ci-cd', 'scripts', 'plain-text-check.cjs'), 'utf8');
+  writeFile(copy, installer.vendoredText(`${source}// an older copy\n`));
+  const before = snapshotTree(root);
+  const result = runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, options);
+  assert.equal(result.status, 'needs-attention');
+  assert.deepEqual(result.findings.map((finding) => [finding.file, finding.kind]), [['.github/scripts/plain-text-check.cjs', 'repo-check']]);
+  const message = formatAgentRulesPreflight(result);
+  assert.match(message, /^Toolkit note: this repository's Toolkit checks \(\.github\/scripts\/plain-text-check\.cjs\) differ from the running Toolkit .*refresh them with repository-agent-rules when convenient\. No files were changed\.$/);
+  assert.doesNotMatch(message, NEVER_HALTING);
+  assert.deepEqual(snapshotTree(root), before);
+  const notGoverned = runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, { ...options, governanceEnabled: () => false });
+  assert.equal(notGoverned.status, 'ok', 'outside an ENABLED repository the vendored checks are not compared');
+  fs.rmSync(copy);
+  const missing = runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, options);
+  assert.deepEqual(missing.findings.map((finding) => [finding.file, finding.detail]), [['.github/scripts/plain-text-check.cjs', 'missing']]);
+  assert.match(formatAgentRulesPreflight(missing), /Toolkit checks \(\.github\/scripts\/plain-text-check\.cjs\) are missing or differ from the running Toolkit /);
+  assert.equal(runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, { ...options, governanceEnabled: () => false }).status, 'ok', 'a missing copy is not noted outside an ENABLED repository');
+  writeFile(path.join(root, '.github', 'plain-text.json'), JSON.stringify({ off_reason: 'the owner switched it off for this repository' }));
+  assert.equal(runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, options).status, 'ok', 'a check switched off with a recorded reason is not noted as missing');
+});
+
 test('SessionStart notice says repository rules from a newer Toolkit are authoritative, once, without writing', () => {
   // Hub state records a newer Toolkit than the running copy, and the repository block differs.
   const root = tmpRoot();
@@ -3694,7 +3724,7 @@ test('toolkit setup skill documents the end-to-end English setup journey', () =>
     assert.match(text, /Toolkit-managed update reports\/logs older than 7 days/i, relPath);
     assert.match(text, /Setup copies the official `n8n-io\/skills` folders as plain skills, so the `n8n-skills@n8n-io` plugin is not needed/i, relPath);
     assert.match(text, /pre-approval Claude(?: Code)? setup and plan discovery (?:start|launch) no Claude session/i, relPath);
-    assert.match(text, /The visible choices are `Toolkit repos: main session \+ Toolkit G0\/G1 helpers only\. Elsewhere: one layer of subagents\.`, `Broader native behaviour`, and `Keep current`/, relPath);
+    assert.match(text, /The visible choices are `Toolkit repos: main session \+ Toolkit planning and build helpers only\. Elsewhere: one layer of subagents\.`, `Broader native behaviour`, and `Keep current`/, relPath);
     assert.match(text, /`toolkit-direct`\) worker and checker topology is retired/, relPath);
     assert.match(text, /setup runs no worker or checker launch probes/i, relPath);
     assert.match(text, /restart-pending, stale, or failed verification leaves the safe root-only policy/i, relPath);

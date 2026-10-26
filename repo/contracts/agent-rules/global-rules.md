@@ -42,6 +42,8 @@ Deleting scratch this agent created in this task (temporary worktrees, briefs, o
 
 Before a gated action, confirm an approval covers it and the host-native permission exists. An approval binds the owner, action, target, resources, effects, recipient, conditions and expiry, and survives only a change of turn, worker, chat or transport for the same pending action; anything changed, new, revoked, expired or left unapproved by its outcome needs fresh approval. Approval, assignment, custody and capability never supply a missing host-native permission. Words like `continue`, `next`, `apply` or `do it` stay within the approved scope.
 
+**Standing permission asks:** if a step stops on the owner, check the ledger, else ask once (once, from now on for exactly this, or no). Only the owner's recorded answer grants, never a hard stop; never edit your own permission settings (safety-gates playbook).
+
 ## Coding Gates
 
 Coding work follows `G0 Discovery -> G1 Builder, including UAT -> G2 Review` unless the owner chooses another workflow; the risk tier decides how much review and UAT follows. Every new task, repository or environment starts with G0 discovery (walk the real happy path, confirm the actual stack, test assumptions before planning), short when the ground is known. G1 starts in a fresh session from the G0 plan, passed in its brief. Only LIGHT edits and fixes inside an already-discovered task skip G0; only LIGHT edits skip G2. Owner UAT tests only the final product, features the user runs (hook setup, a quote or design run), in plain words; CI, tests, G2 and agent UAT prove internals, each UAT list names the check covering every dropped item, and with none, UAT is NOT_REQUIRED.
@@ -90,7 +92,7 @@ Keep the diff narrow and in style. Change order: no change, reuse, smallest root
 
 **Change-local hygiene:** in each change, check affected direct, indirect, dynamic, generated, test, documentation and external consumers. Remove superseded code, routes, exports, settings, dependencies, fallbacks and references in the same change. Keep a compatibility path only with a verified current consumer, a safety or recovery reason, an owner, a removal trigger and a focused test; never discard active or unknown recovery effects. Record brief removal and retention evidence with the normal tests. This is part of the change, not an extra gate or a whole-repository audit.
 
-Status, reports, plans and notes go under an existing documented path, never new root `STATUS.md`, `REPORT.md` or `PLAN.md`. Broad docs work merges durable findings into the smallest canonical home without losing decisions, validation, risks, provenance, ownership or licensing, and reports what moved or was deleted.
+Status, reports, plans and notes go under an existing documented path, never new root `STATUS.md`, `REPORT.md` or `PLAN.md`.
 
 Put scratch first in a gitignored repo/worktree temp folder (e.g. `.tmp/`, worktrees in `.tmp/worktrees/<lane>-<gate>-<sha>`); use a user-profile folder only for an outside path or more permission, never a drive root.
 
@@ -98,7 +100,7 @@ When a file says it is generated, edit its source, template or generator and reg
 
 ## Human-readable Work
 
-New or changed human-facing work (screens, labels, notifications, errors, instructions, documents, operator output, diagrams, workflows) uses plain accurate names for its reader, not internal programme, release or run labels. Operational artefacts describe their real behaviour: what they are for, what starts them, inputs, main actions, outputs, failure and recovery, and who acts, with short help nearby and machine IDs kept out of titles. n8n workflows follow `n8n-safety-router`'s readable presentation; renames keep node IDs, expressions, connections and credentials. Unrelated work triggers no blanket rename, but misleading text is a real defect. Protocol strings, historical receipts and frozen evidence change only with proven consumers and a safe transition; a retained unclear label names its consumer, owner, need and removal condition. User-facing text (skills, prompts, CLI output, docs) describes current behaviour only; versions, release qualifiers and roadmap labels go in changelogs and records.
+New or changed human-facing work (screens, labels, notifications, errors, instructions, chat replies, documents, operator output, diagrams, workflows) uses plain accurate names for its reader, not internal programme, release or run labels. Operational artefacts describe their real behaviour: what they are for, what starts them, inputs, main actions, outputs, failure and recovery, and who acts, with short help nearby and machine IDs kept out of titles. n8n workflows follow `n8n-safety-router`'s readable presentation; renames keep node IDs, expressions, connections and credentials. Unrelated work triggers no blanket rename, but misleading text is a real defect. Protocol strings, historical receipts and frozen evidence change only with proven consumers and a safe transition; a retained unclear label names its consumer, owner, need and removal condition. User-facing text (skills, prompts, CLI output, docs) describes current behaviour only; versions, release qualifiers and roadmap labels go in changelogs and records.
 
 ## Validation And Git
 
