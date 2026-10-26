@@ -389,7 +389,7 @@ test('every line that re-arms, updates, swaps, rebuilds, recreates or sets up a 
   // resolving.
   const dir = path.join(ROOT, 'repo', 'contracts', 'claude-projects', 'web-controller-projects');
   const files = ['SKILL.md', 'project-instructions.md', ...['reference', 'tasks'].flatMap(sub => fs.readdirSync(path.join(dir, sub)).filter(name => name.endsWith('.md')).map(name => `${sub}/${name}`))];
-  const acts = /\b(?:re-?arm|rebuil[dt]|re-?creat|swap|set up the|re-?enabl|restor|refresh|replac|switch|re-?add|resum|fire (?:it |them )?again|update (?:the|those|its)\b[^.]*prompt|creat(?:e|es) (?:it|them|the|a)\b|starts? (?:a )?new home thread)/i;
+  const acts = /\b(?:re-?arm|rebuil[dt]|re-?creat|swap|catch(?:es)? (?:it )?up|set up the|re-?enabl|restor|refresh|replac|switch|re-?add|resum|fire (?:it |them )?again|update (?:the|those|its)\b[^.]*prompt|creat(?:e|es) (?:it|them|the|a)\b|starts? (?:a )?new home thread)/i;
   for (const line of ['Re-arm any recurring job that missed its run.', 'Rebuild the home thread when it is a week old.', 'Re-create the schedule when its cron drifts.',
     'Swap both from the template on main.', 'Start a new home thread for it.', 'The coordinator creates it again from main.']) assert.match(line, acts, line);
   const notPaths = [
@@ -424,14 +424,14 @@ test('every line that re-arms, updates, swaps, rebuilds, recreates or sets up a 
 // A run that starts outside its home thread (for example fire_trigger from another thread) has no
 // project tools or files: its first RUN SETUP step stops it with one line, in every kind and session.
 test('every rendered task stops first when it started outside its home thread', () => {
-  const guard = '- First check, before anything else: if this turn has no mcp__hearthbot__ tools or cannot read /mnt/project-files/, it started outside its home thread or project. Reply with one line, "skipped: started outside its home thread", write nothing and stop.';
+  const guard = '- First check, before anything else: if this turn has no mcp__hearthbot__ tools (listed directly or as deferred tools) or cannot read /mnt/project-files/, it started outside its home thread or project. Make no other tool call (no effort call, message, file write, resolve or retry) and skip every later step, DELIVERY included: end the turn with the single line "skipped: started outside its home thread".';
   for (const kind of Object.keys(PARAMS)) {
-    for (const session of [undefined, 'fresh']) {
-      const text = tasks().render(kind, validateParams(kind, { ...PARAMS[kind], ...(session ? { session } : {}) }), kind === 'custom' ? OWN_TEXT : undefined);
+    for (const session of ['bound', 'fresh']) {
+      const text = tasks().render(kind, validateParams(kind, { ...PARAMS[kind], session }), kind === 'custom' ? OWN_TEXT : undefined);
       const lines = text.split('\n');
       const heading = lines.findIndex(line => line.startsWith('RUN SETUP ('));
-      assert.ok(heading > -1, `${kind} ${session || 'bound'}`);
-      assert.equal(lines[heading + 1], guard, `${kind} ${session || 'bound'}`);
+      assert.ok(heading > -1, `${kind} ${session}`);
+      assert.equal(lines[heading + 1], guard, `${kind} ${session}`);
     }
   }
 });

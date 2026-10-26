@@ -1,5 +1,5 @@
 RUN SETUP ({{project}} project, Toolkit base layer)
-- First check, before anything else: if this turn has no mcp__hearthbot__ tools or cannot read /mnt/project-files/, it started outside its home thread or project. Reply with one line, "skipped: started outside its home thread", write nothing and stop.
+- First check, before anything else: if this turn has no mcp__hearthbot__ tools (listed directly or as deferred tools) or cannot read /mnt/project-files/, it started outside its home thread or project. Make no other tool call (no effort call, message, file write, resolve or retry) and skip every later step, DELIVERY included: end the turn with the single line "skipped: started outside its home thread".
 - This prompt has a Toolkit base (the text inside the Toolkit markers) and a project layer (the params block and everything outside the markers). Project additions in this prompt override the Toolkit base where they differ.
 [fresh]- Fresh session per run: this firing starts from nothing. Never rely on earlier runs or threads.
 [bound]- This task fires into its own home thread. Every firing is self-contained: re-read project memory and files each time and never rely on earlier turns in this thread.

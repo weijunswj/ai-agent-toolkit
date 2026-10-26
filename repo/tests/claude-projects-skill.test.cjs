@@ -227,12 +227,14 @@ test('the device programme sweep needs both GitHub governance ENABLED and a name
 test('Projects catches up a moved task through its home thread and never fire_triggers a bound task', () => {
   const text = bundle();
   const reference = read(`${REFERENCE_DIR}/recurring-tasks.md`);
-  assert.match(reference, /\*\*Moving a task or catching up a run\.\*\* A schedule change, or a recreate, whose new time has already passed today skips today's run: say which run will be skipped before the move, and catch it up the same turn\./);
+  assert.match(reference, /\*\*Moving a task or catching up a run\.\*\* A schedule change, or a recreate, whose new time has already passed today skips today's run if it has not already run today \(a swap's test run counts as today's run\): say which run will be skipped before the move, and catch it up the same turn\./);
   assert.match(reference, /To catch up a bound task, or to test-fire one during a swap, message its home thread to run its prompt there now/);
   assert.match(reference, /Never fire_trigger a bound task from another thread: that run starts in a new session with no project tools, files or memory/);
+  assert.match(reference, /Confirm the catch-up's report reached the coordinator\. Never run a bound task's prompt in another thread or in the coordinator\./);
   assert.match(text, /\*\*Moving a task or catching up:\*\* a move to a time already passed today skips today's run/);
-  assert.match(text, /when its last run is over 65 minutes older than the latest time its own cron fired \(hours outside its waking window never count; a nudge that fires less often uses its interval plus 5 minutes\)/);
+  assert.match(text, /when its last run is over 65 minutes older than the latest time its own cron should have fired \(hours outside its waking window never count; a nudge that fires less often uses its interval plus 5 minutes\)/);
   assert.doesNotMatch(text, /missed its latest scheduled hour by over 65 minutes/);
   const setup = read('repo/contracts/claude-projects/web-controller-projects/tasks/run-setup.md');
-  assert.match(setup, /^RUN SETUP \(\{\{project\}\} project, Toolkit base layer\)\n- First check, before anything else: [^\n]*"skipped: started outside its home thread", write nothing and stop\.\n/);
+  assert.match(setup, /^RUN SETUP \(\{\{project\}\} project, Toolkit base layer\)\n- First check, before anything else: [^\n]*Make no other tool call \(no effort call, message, file write, resolve or retry\) and skip every later step, DELIVERY included: end the turn with the single line "skipped: started outside its home thread"\.\n/);
+  assert.match(text, /Never catch up a task whose entry says `stopped by owner`\./);
 });
