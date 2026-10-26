@@ -205,6 +205,8 @@ test('wording: no em-dashes or arrows outside code, and one Question per post, r
   assert.match(wordingIssue('Build → review.'), /arrow/);
   assert.equal(wordingIssue('Run `a -> b` and\n```\nx — y\n```\n<!-- note -->'), '');
   assert.equal(wordingIssue('Build, then review. A short-lived branch.'), '');
+  assert.equal(wordingIssue('Log:\n~~~\na -> b\n~~~'), '');
+  assert.equal(wordingIssue('Log:\n```\na -> b'), '');
   assert.match(wordingIssue('**Question:** a?\n**Question:** b?'), /more than one/);
   assert.equal(wordingIssue('**Question:** merge it?'), '');
   const reply = decide({ tool_name: POST, transcript_path: 't', tool_input: { thread_id: 'cmsg_T', text: 'Yes — done.' } }, () => lines([wake()]));
@@ -230,6 +232,18 @@ test('layout: Now first, ELI5 last and alone, Update lines without questions, Wa
   assert.match(layoutIssue(LAID_OUT.replace('CI passed.', 'CI passed, merge it? 1. merge 2. hold')), /numbered options/);
   assert.match(layoutIssue(LAID_OUT.replace('[card](#cmsg_CARD)', 'the card')), /Waiting on you item .* has no link/);
   assert.equal(layoutIssue(LAID_OUT.replace('[card](#cmsg_CARD)', 'https://github.com/o/r/pull/7/files')), '');
+  // A question in an Update line is refused on its own; one numbered item alone is not an option list.
+  assert.match(layoutIssue(LAID_OUT.replace('CI passed.', 'CI passed. Question: merge it?')), /question or numbered options/);
+  assert.equal(layoutIssue(LAID_OUT.replace('CI passed.', 'G2 (round 1) passed. Phase 2. Review starts.')), '');
+  for (const options of ['pick (1) merge (2) hold', 'pick 1) merge 2) hold']) {
+    assert.match(layoutIssue(LAID_OUT.replace('CI passed.', options)), /numbered options/, options);
+  }
+  // A short post with a Waiting on you line uses the layout too.
+  assert.match(layoutIssue('**Waiting on you (1):**\n1. Merge OK: [card](#cmsg_C)'), /\*\*Now:\*\*/);
+  // Bulleted Now and ELI5 lines are fine, and the Waiting list stops at the ELI5 line.
+  assert.equal(layoutIssue(LAID_OUT.replace('**Now:**', '- **Now:**').replace('**ELI5:**', '- **ELI5:**')), '');
+  // Code after the ELI5 line still counts as text after it.
+  assert.match(layoutIssue(`${LAID_OUT}\n~~~\nlog\n~~~`), /ELI5/);
   // Replies under a post keep only the wording and link rules.
   const reply = decide({ tool_name: POST, transcript_path: 't', tool_input: { thread_id: 'cmsg_T', text: long } }, () => lines([wake()]));
   assert.equal(reply, '');
@@ -240,6 +254,9 @@ test('edits keep every earlier Update line word for word and add a new one', () 
   assert.equal(editIssue(earlier, LAID_OUT), '');
   assert.match(editIssue(LAID_OUT, LAID_OUT), /no new/);
   assert.match(editIssue(LAID_OUT, LAID_OUT.replace('built the layout', 'wrote the layout')), /drops or changes .*built the layout/);
+  const swapped = LAID_OUT.split('\n');
+  [swapped[1], swapped[2]] = [swapped[2], swapped[1]];
+  assert.match(editIssue(LAID_OUT, [...swapped.slice(0, 3), '- **[10:00] Update:** new.', ...swapped.slice(3)].join('\n')), /reorders/);
   // Through the hook: the edited post's text comes from the transcript; replies and unknown posts are not checked.
   const edit = (entries, text) => decide({ tool_name: EDIT, transcript_path: 't', tool_input: { message_id: 'cmsg_A1', text } }, () => lines(entries));
   assert.equal(edit([wake(), call(POST, { text: earlier })], LAID_OUT), '');
@@ -257,7 +274,16 @@ test('merges in a Projects session need an earlier post with the PR\'s external 
   assert.deepEqual(mergeTarget('Bash', { command: 'gh pr merge --merge' }), { number: null });
   assert.deepEqual(mergeTarget('Bash', { command: 'gh api -X PUT repos/o/r/pulls/12/merge' }), { number: '12' });
   assert.deepEqual(mergeTarget('mcp__github__merge_pull_request', { owner: 'o', repo: 'r', pull_number: 5 }), { number: '5' });
-  for (const command of ['git merge origin/main', 'git commit -m "then gh pr merge 5"', 'gh pr view 5', 'echo gh pr merge 5']) {
+  assert.deepEqual(mergeTarget('Bash', { command: 'gh api --method PUT repos/o/r/pulls/12/merge' }), { number: '12' });
+  assert.deepEqual(mergeTarget('Bash', { command: 'x=$(gh pr merge 7)' }), { number: '7' });
+  // A --body text never supplies the number.
+  assert.deepEqual(mergeTarget('Bash', { command: 'gh pr merge --merge --body "closes 12"' }), { number: null });
+  assert.deepEqual(mergeTarget('Bash', { command: 'gh pr merge 628 --merge --body "see 12"' }), { number: '628' });
+  for (const command of [
+    'git merge origin/main', 'git commit -m "then gh pr merge 5"', 'gh pr view 5', 'echo gh pr merge 5',
+    'git commit -m "fix; gh pr merge 5"', 'grep -E "foo|gh pr merge" x', 'echo "a && gh pr merge 5"',
+    "git commit -F- <<'EOF'\nsubject\ngh pr merge 5\nEOF", 'gh api repos/o/r/pulls/12/merge',
+  ]) {
     assert.equal(mergeTarget('Bash', { command }), null, command);
   }
   const merge = (entries, command = 'gh pr merge 628 --merge') => decide({ tool_name: 'Bash', transcript_path: 't', tool_input: { command } }, () => lines(entries));
@@ -268,7 +294,21 @@ test('merges in a Projects session need an earlier post with the PR\'s external 
   assert.match(merge([wake(), call(POST, { text: 'External effects of PR 627: none.' })]), /PR 628/);
   assert.match(merge([wake(), call(POST, { text: 'External effects of PR 628: none.' }, 'error', true)]), /PR 628/);
   assert.equal(merge([wake(), call(POST, { text: 'External effects: a new hook.' })], 'gh pr merge --merge'), '');
+  // The phrase and the PR sit on one line, outside code; a longer number, a bare #N or the phrase alone does not count.
+  const summary = text => merge([wake(), call(POST, { text })]);
+  assert.match(summary('- **[09:00] Update:** external effects of PR 627: none.\n**Now:** [PR 628](https://github.com/o/r/pull/628/files) waits.'), /PR 628/);
+  assert.match(summary('External effects of PR 1628: none.'), /PR 628/);
+  assert.match(summary('External effects of PR 6280: none.'), /PR 628/);
+  assert.match(summary('External effects of PR 627 (see #628): none.'), /PR 628/);
+  assert.match(summary('PR 628 effects: none.'), /PR 628/);
+  assert.match(summary('~~~\nexternal effects of PR 628\n~~~'), /PR 628/);
+  assert.equal(summary('External effects of PR #628: none.'), '');
+  assert.equal(summary('External effects of PRs 627 and 628: none.'), '');
+  assert.match(merge([wake(), call(POST, { text: 'External effects of PR 622: none.' })], 'gh pr merge 22'), /PR 22/);
   // Outside Projects (no Projects tool in the transcript), and for other commands, nothing is checked or read.
   assert.equal(merge([wake()]), '');
-  assert.equal(decide({ tool_name: 'Bash', transcript_path: 't', tool_input: { command: 'npm test' } }, () => { throw new Error('read'); }), '');
+  let read = false;
+  const reader = () => { read = true; return lines([wake(), call(POST, { text: 'On it.' })]); };
+  assert.equal(decide({ tool_name: 'Bash', transcript_path: 't', tool_input: { command: 'npm test' } }, reader), '');
+  assert.equal(read, false);
 });

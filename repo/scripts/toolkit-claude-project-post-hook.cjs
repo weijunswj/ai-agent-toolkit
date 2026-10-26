@@ -15,9 +15,10 @@
 //   line), **[HH:MM] Update:** one-liners with no question or numbered options inside, every item under
 //   **Waiting on you** carrying a link, and one **ELI5:** line as the very last line. An edit of an earlier post keeps
 //   every one of its Update lines word for word and adds at least one new one.
-// - Merge summary: in a Projects session (one that has used the Projects tools), a PR merge (gh pr merge, gh api
-//   .../pulls/<n>/merge or a merge_pull_request tool) is refused until one of its own posts named that PR's external
-//   effects.
+// - Merge summary: in a Projects session (one that has used the Projects tools), a PR merge (the gh merge command, a
+//   gh api PUT to .../pulls/<n>/merge or a merge_pull_request tool) is refused until a line of one of its own posts
+//   says "external effects" and names that PR. It is a tripwire on the command text only: curl, GraphQL, wrapper
+//   shells, prefixes, aliases, scripts and direct pushes are not seen, and quoted text and heredocs are ignored.
 // Sessions without these tools (normal chats, Codex and sessions outside Projects) are never touched. Questions go
 // on decision cards, a separate tool this hook does not check. Input or a transcript it cannot read passes. The
 // hook is registered without `onFailure: "block"` so a hook that cannot start never silences every post.
@@ -34,10 +35,12 @@ const MESSAGE_ID = /\b(cmsg_[A-Za-z0-9]+)\b/;
 const UPDATE_LINE = /^\s*(?:[-*]\s+)?\*\*\[\d{1,2}:\d{2}\] Update:\*\*/;
 const WAITING_LINE = /^\s*(?:[-*]\s+)?\*\*Waiting on you\b/i;
 const ITEM_LINE = /^\s*(?:\d+[.)]|[-*])\s+/;
-const NOW_LINE = /^\s*\*\*Now:\*\*/;
+const NOW_LINE = /^\s*(?:[-*]\s+)?\*\*Now:\*\*/;
 const REPLY_LINE = /^\s*Re: your reply on\b/i;
-const ELI5_LINE = /^\s*\*\*ELI5:\*\*/;
+const ELI5_LINE = /^\s*(?:[-*]\s+)?\*\*ELI5:\*\*/;
 const LINK = /\[[^\]]+\]\([^)\s]+\)|https?:\/\/\S+/;
+// Numbered options: a 1 and a 2 in the same style ("1. ... 2.", "1) ... 2)" or "(1) ... (2)").
+const OPTION_LISTS = [/(?:^|\s)1\.\s+\S.*\s2\.\s+\S/, /(?:^|\s)1\)\s+\S.*\s2\)\s+\S/, /\(1\)\s+\S.*\(2\)\s+\S/];
 
 // An owner message counts unless it sits inside one of the quoting tags below (a message, note, citation, relay,
 // task notification or another session's output), so an owner tag quoted or forwarded inside one of them never counts.
@@ -129,9 +132,10 @@ function readTranscript(lines) {
   return { running, projects, posts };
 }
 
-// Blanks code spans so a PR number inside backticks is not read as a mention.
+// Blanks code (fenced with ``` or ~~~, an unclosed fence running to the end, and inline spans) so a PR number or an
+// arrow inside it is not read.
 function withoutCode(text) {
-  return text.replace(/```[\s\S]*?```|`[^`\n]*`/g, match => ' '.repeat(match.length));
+  return text.replace(/(```|~~~)[\s\S]*?(?:\1|$)|`[^`\n]*`/g, match => match.replace(/[^\n]/g, ' '));
 }
 
 function linkIssue(text) {
@@ -167,11 +171,14 @@ function linkIssue(text) {
   return '';
 }
 
+const EM_DASH = String.fromCharCode(0x2014);
+const ARROW = String.fromCharCode(0x2192);
+
 // Em-dashes, arrows and more than one Question block, outside code and HTML comments.
 function wordingIssue(text) {
   const plain = withoutCode(textOf(text)).replace(/<!--[\s\S]*?-->/g, ' ');
-  if (plain.includes('—')) return 'it has an em-dash. Use a comma, a colon or a full stop instead.';
-  if (/->|→/.test(plain)) return 'it has an arrow. Say it in words ("then", "so", "leads to") instead.';
+  if (plain.includes(EM_DASH)) return 'it has an em-dash. Use a comma, a colon or a full stop instead.';
+  if (plain.includes('->') || plain.includes(ARROW)) return 'it has an arrow. Say it in words ("then", "so", "leads to") instead.';
   if ((plain.match(/\*\*Question:\*\*/g) || []).length > 1) return 'it has more than one **Question:**. Ask one question per post, and put the others on decision cards in the threads that own them.';
   return '';
 }
@@ -195,18 +202,19 @@ function layoutIssue(text) {
   if (!first || !NOW_LINE.test(first)) return 'its first line must start with **Now:** (where things stand now, rewritten on each edit). A "Re: your reply on <topic>" line may come before it.';
   for (const line of updates) {
     const body = line.replace(UPDATE_LINE, '');
-    if (/Question:/i.test(body) || /(?:^|\s)\(?[1-9][.)]\s+\S/.test(body)) {
+    if (/Question:/i.test(body) || OPTION_LISTS.some(list => list.test(body))) {
       return `the Update line "${line.trim().slice(0, 80)}" has a question or numbered options in it. An Update line is one short status sentence; put the question on a decision card and list it under **Waiting on you**.`;
     }
   }
   if (waiting !== -1) {
     for (const line of lines.slice(waiting + 1)) {
-      if (!ITEM_LINE.test(line) || UPDATE_LINE.test(line)) break;
+      if (!ITEM_LINE.test(line) || UPDATE_LINE.test(line) || ELI5_LINE.test(line)) break;
       if (!LINK.test(line)) return `the Waiting on you item "${line.trim().slice(0, 80)}" has no link. Link each item to the card or thread where the owner acts, so it is one tap away.`;
     }
   }
   const eli5 = lines.filter(line => ELI5_LINE.test(line)).length;
-  if (eli5 !== 1 || !ELI5_LINE.test(lines[lines.length - 1])) return 'it must end with exactly one **ELI5:** line, with nothing after it.';
+  const last = textOf(text).split(/\r?\n/).filter(line => line.trim()).pop();
+  if (eli5 !== 1 || !ELI5_LINE.test(last)) return 'it must end with exactly one **ELI5:** line, with nothing after it.';
   return '';
 }
 
@@ -216,39 +224,57 @@ function editIssue(previous, text) {
   const after = updateLines(text);
   const missing = before.find(line => !after.includes(line));
   if (missing) return `it drops or changes the earlier line "${missing.slice(0, 80)}". Keep every Update line word for word.`;
+  if (after.filter(line => before.includes(line)).join('\n') !== before.join('\n')) return 'it reorders the earlier Update lines. Keep them in their order and append new ones.';
   if (!after.some(line => !before.includes(line))) return 'it adds no new **[HH:MM] Update:** line. Append one short line in the owner\'s local time for what changed.';
   return '';
 }
 
-// The PR a shell command or merge tool merges, as { number } (null when the command names none), or null when the
-// call merges no PR. Only a command at the start of a shell segment counts, so text that quotes it does not.
+// Shell text with heredoc bodies and quoted strings removed, so a commit message, grep pattern or echo that quotes a
+// merge command is not read as one.
+function unquoted(command) {
+  return command
+    .replace(/<<-?\s*(['"]?)(\w+)\1[^\n]*\n[\s\S]*?(?:\n\s*\2\b|$)/g, ' ')
+    .replace(/"(?:[^"\\]|\\[\s\S])*"|'[^']*'/g, ' ');
+}
+
+// The PR a shell command or merge tool merges, as { number } (null when the call names none), or null when the call
+// merges no PR. Only a command at the start of a shell segment counts.
 function mergeTarget(tool, toolInput) {
   if (MERGE_TOOL.test(tool)) {
     const number = String(toolInput?.pull_number ?? toolInput?.pullNumber ?? '');
     return { number: /^\d+$/.test(number) ? number : null };
   }
   if (!SHELL_TOOL.test(tool)) return null;
-  for (const part of textOf(toolInput?.command).split(/[;&|\r\n(]+/)) {
+  for (const part of unquoted(textOf(toolInput?.command)).split(/[;&|\r\n()]+/)) {
     const merge = part.match(/^\s*gh\s+pr\s+merge\b(.*)$/);
     if (merge) {
       const number = merge[1].match(/\/pull\/(\d+)\b/) || merge[1].match(/(?:^|\s)#?(\d+)(?=\s|$)/);
       return { number: number ? number[1] : null };
     }
     const api = part.match(/^\s*gh\s+api\b.*?\/pulls\/(\d+)\/merge\b/);
-    if (api) return { number: api[1] };
+    if (api && /(?:^|\s)(?:-X\s*|--method[=\s]+)PUT\b/i.test(part)) return { number: api[1] };
   }
   return null;
 }
 
-function namesPr(text, number) {
+// The PR word, then the number alone or in a list ("PR 628", "PRs 627 and 628"), or a /pull/<n> link. A bare #<n> is
+// not read as a PR, since it may be an issue, and the number never matches inside a longer one.
+function namesPr(line, number) {
   if (number === null) return true;
-  return new RegExp(`(?:\\b(?:PRs?|pull requests?)\\b[^\\n]{0,40}?|/pull/|#)${number}\\b`, 'i').test(text);
+  const list = String.raw`(?:\d+\s*(?:,(?:\s*(?:and|or))?|&|\/|and|or)\s*#?)*`;
+  return new RegExp(String.raw`\b(?:PRs?|pull requests?)\s*(?:[:(]\s*)?#?${list}${number}(?!\d)|/pull/${number}(?!\d)`, 'i').test(line);
+}
+
+// One line of an own post, outside code, says "external effects" and names the PR.
+function summarised(target, posts) {
+  return [...posts.values()].some(({ text }) => withoutCode(text).split(/\r?\n/)
+    .some(line => /\bexternal effects?\b/i.test(line) && namesPr(line, target.number)));
 }
 
 function mergeIssue(target, posts) {
-  if ([...posts.values()].some(({ text }) => /\bexternal effects?\b/i.test(text) && namesPr(text, target.number))) return '';
+  if (summarised(target, posts)) return '';
   const pr = target.number === null ? 'this PR' : `PR ${target.number}`;
-  return `Toolkit Projects rule: before every merge, post a short summary of the merge's external effects (what changes on the user's machines, hooks, rules, setup defaults and other repos) with the diff link, and merge only after the user's OK. None of your posts names the external effects of ${pr} yet: add them to your running post in a line that says "external effects" and names ${pr}, then merge.`;
+  return `Toolkit Projects rule: before every merge, post a short summary of the merge's external effects (what changes on the user's machines, hooks, rules, setup defaults and other repos) with the diff link, and merge only after the user's OK. None of your posts names the external effects of ${pr} yet: add them to your running post on one line that says "external effects" and names ${pr}, then merge.`;
 }
 
 function decide(input, readLines = file => fs.readFileSync(file, 'utf8').split('\n')) {

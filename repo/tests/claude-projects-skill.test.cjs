@@ -177,7 +177,8 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.ok(text.includes('**Post layout.** A running post has four parts, in order: a **Now:** line'));
   assert.ok(text.includes('one **ELI5:** line, matched to the Now line, as the very last line with nothing after it'));
   assert.ok(text.includes('an edit keeps every earlier Update line word for word and adds at least one new one'));
-  assert.ok(text.includes('the post hook refuses a PR merge (`gh pr merge`, a `gh api` merge call or a merge tool) until one of that session\'s own posts or edits says "external effects" and names the PR'));
+  assert.ok(text.includes('the post hook refuses a PR merge (`gh pr merge`, a `gh api` merge call or a merge tool) until a line in one of that session\'s own posts or edits says "external effects" and names the PR'));
+  assert.ok(text.includes('It reads only the command text, so it is a tripwire, not a guarantee'));
   assert.match(text, /also post a one-line pointer to it in top-level project chat/);
   // Base layer and project layer.
   assert.match(text, /Project instructions start with the managed block \(only blank lines before it\)/);
