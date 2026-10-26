@@ -473,7 +473,7 @@ test('P-17: the reader is default-deny: YAML outside its plain subset is unverif
   }
 });
 
-test('P-18: the shared hostile inputs are unverified, except the shapes the reader decodes exactly as YAML does', () => {
+test('P-19: the shared hostile inputs are unverified, except the shapes the reader decodes exactly as YAML does', () => {
   const verdicts = text => protection.producerVerdict(['validate'], [{ file: 'ci.yml', workflow: protection.readWorkflow(text) }], 'main');
   const accepts = text => verdicts(text).P4.status === 'ok';
   assert.equal(accepts(AGGREGATE), true, 'the base workflow is conformant');
@@ -534,10 +534,14 @@ test('P-18: the shared hostile inputs are unverified, except the shapes the read
   const both = ['on: [pull_request]', 'jobs:', '  lit:', '    name: a (x) / b', '    runs-on: x', '  b:', '    name: a', '    strategy:', '      matrix:', '        os: [x]', '    uses: ./.github/workflows/called.yml', ''].join('\n');
   assert.equal(p3('a (x) / b', both).status, 'unverified', 'a reusable call with a matrix');
   assert.match(p3('a (x) / b', both).details[0], /matrix job/);
+  assert.match(p3('a / b', both.replace('    name: a (x) / b', '    name: a / b')).details[0], /calls a reusable workflow/);
   assert.match(p3('a / b', ['on: [pull_request]', 'jobs:', '  lit:', '    name: a / b', '    runs-on: x', '  b:', ...reusable, ''].join('\n')).details[0], /calls a reusable workflow/);
   assert.match(p3('ci', derived('ci', matrix)).details[0], /bare name when skipped/);
   // A strategy written as an expression can still expand into a matrix.
   assert.equal(p3('ci (x)', derived('ci (x)', ['    name: ci', '    strategy: ${{ fromJSON(needs.s.outputs.strategy) }}'])).status, 'unverified', 'an expression strategy');
+  // A strategy that only sets fail-fast is not a matrix: the job is still the one producer.
+  const failFast = ['on: [pull_request]', 'jobs:', '  validate:', '    strategy:', '      fail-fast: false', '    runs-on: x', ''].join('\n');
+  assert.deepEqual(Object.values(statuses({ checks: protection.producerVerdict(['validate'], [{ file: 'ci.yml', workflow: protection.readWorkflow(failFast) }], 'main') })), ['ok', 'ok'], 'fail-fast only');
   // An expression that never closes could produce any name.
   assert.equal(p3('ci', derived('ci', ['    name: x${{ y'])).status, 'unverified', 'an unclosed expression');
   // A matrix job or reusable call that cannot report the check, and an expression name that

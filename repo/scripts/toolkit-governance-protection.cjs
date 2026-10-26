@@ -447,8 +447,9 @@ function readWorkflow(input) {
       const name = typeof nameValue === 'string' && !notText && nameValue === nameValue.trim() ? nameValue : '';
       const needsField = field('needs');
       const strategy = field('strategy');
-      // Any strategy counts as a matrix: one written as an expression can still expand into one.
-      const matrix = Boolean(strategy);
+      // A strategy written as an expression can still expand into a matrix; one that only sets
+      // fail-fast or max-parallel is not one.
+      const matrix = Boolean(strategy) && (Boolean(strategy.value.trim()) || children(lines, strategy.index + 1, strategy.end).some(entry => entry.key === 'matrix'));
       const ifField = field('if');
       const needs = needsField ? blockList(lines, needsField) : [];
       const unreadable = [];
