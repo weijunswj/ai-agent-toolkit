@@ -192,6 +192,20 @@ test('P-13: a passing required check can never hide a failed, skipped or missing
   assert.equal(verdict(one).P4.status, 'ok');
 });
 
+test('P-18: a types list masks nothing only when it keeps opened, synchronize and reopened', () => {
+  const verdict = types => protection.producerVerdict(['validate'], [{ file: 'ci.yml', workflow: protection.readWorkflow(['on:', '  pull_request:', ...types, 'jobs:', '  validate:', '    runs-on: ubuntu-latest', '    steps:', '      - run: echo ok', ''].join('\n')) }], 'main').P4.status;
+  assert.equal(verdict(['    types: [opened, edited, reopened, synchronize]']), 'ok');
+  assert.equal(verdict(['    types:', '      - opened', '      - synchronize', '      - reopened']), 'ok');
+  for (const types of [['    types: [opened, edited]'], ['    types: opened'], ['    types: [opened, synchronize]'], ['    types: [opened, reopened]'], ['    types: [synchronize, reopened, edited]'], ['    types: [opened, synchronize, reopened, "${{ inputs.t }}"]'], ['    types: [Opened, Synchronize, Reopened]']]) {
+    assert.equal(verdict(types), 'unverified', types.join(' '));
+  }
+  // This repository's own required check and the personal-data template.
+  for (const [file, check] of [['.github/workflows/validate.yml', 'validate'], ['skills/secure-ci-cd/templates/github-actions/personal-data-guard.yml', 'personal-data']]) {
+    const workflow = protection.readWorkflow(fs.readFileSync(path.join(__dirname, '..', '..', file), 'utf8'));
+    assert.equal(protection.producerVerdict([check], [{ file, workflow }], 'main').P4.status, 'ok', file);
+  }
+});
+
 test('P-14: the aggregate step counts only when its exit code is the step result and it gets the needs results', () => {
   const Q = "'";
   const verdict = text => protection.producerVerdict(['validate'], [{ file: 'ci.yml', workflow: protection.readWorkflow(text) }], 'main').P4;

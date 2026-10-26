@@ -161,8 +161,9 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.match(text, /\*\*Resolve only in the hourly nudge\.\*\* Threads never resolve themselves[^\n]*\(a\) its output is durably recorded[^\n]*\(b\) its latest result was relayed to the owner in project chat, or the owner replied after it; \(c\) no owner question or decision is open\. There is no waiting period/);
   assert.match(body, /Threads never resolve themselves\. The coordinator resolves a thread in the hourly pass only when its output is durably recorded[^\n]*relayed to the owner in project chat or the owner replied after it, and no owner question or decision is open/);
   assert.match(text, /resolving threads or posts that meet the resolve conditions are reversible housekeeping/);
-  // Block wording: narrow attribution ban, home threads never resolved, post-edit rule.
-  assert.match(body, /no "Generated with" footer, Co-Authored-By or Claude-Session trailers, or session links in footers\. Keep any attribution header the platform requires on PRs/);
+  // Block wording: attribution ban (the personal-data guard enforces it on PR text), home threads never resolved, post-edit rule.
+  assert.match(body, /no "Generated with" footer, Co-Authored-By or Claude-Session trailers, session or thread links, or requester header\. Strip what the platform adds; CI fails it\./);
+  assert.doesNotMatch(body, /Keep any attribution header/);
   assert.match(body, /Each Toolkit scheduled task is bound to its own home thread, which carries its model and effort \(fallback: a fresh session per run\)/);
   assert.match(body, /Never resolve a home thread; a fresh-session run resolves its own thread after delivery/);
   assert.match(body, /- Posts: after the owner's last message, keep output in one post you edit \(append, keep every detail\); post anew on an owner project-chat message or near 8 KB; answer an owner burst in one post\./);
