@@ -1033,6 +1033,68 @@ test('H-07: an agent cannot answer for the user, in any folder, while ordinary c
     'a copy in the repository is not protected: nothing reads it');
 });
 
+test('answer guard: a host counts only where a shell starts it, so scratch files, paths and messages that mention it still run', (t) => {
+  const ctx = scratch(t);
+  const decided = gitRepo(ctx, 'decided');
+  gate.writeGovernanceDecision(decided, 'enable', { registryOptions: ctx.options });
+  const plain = path.join(ctx.root, 'plain');
+  fs.mkdirSync(plain);
+  const allowed = [
+    ['Bash', "cat > t.cjs <<'EOF'\nconst host = 'claude';\nassert.equal(r, 'ok');\nEOF"],
+    ['Bash', 'cat > f.js <<EOF\nclaude -p yes\nEOF'],
+    ['Bash', 'cat > notes.md <<EOF\nclaude -p "toolkit governance enable"\nEOF'],
+    ['Bash', 'cd /tmp/claude && echo ok'],
+    ['Bash', 'ls C:\\tools\\claude; echo ok'],
+    ['Bash', 'echo "claude" > f; echo ok'],
+    ['Bash', 'git commit -m "fix claude hook" && echo ok'],
+    ['Bash', 'grep -rn "claude" . | grep -c yes'],
+    ['Bash', 'echo "toolkit governance enable" > notes.md; git log --grep claude'],
+    ['Bash', 'node /tmp/claude-0/x/scratchpad/a.js && echo ok'],
+    ['Bash', 'cat ~/.claude/settings.json; echo ok'],
+    ['PowerShell', 'Get-Content C:\\Users\\me\\.claude\\x; echo ok'],
+    ['Bash', 'cd /home/user/claude && echo ok'],
+    ['Bash', 'git commit -F - <<EOF\nclaude hook: answer no prompts\nEOF'],
+    ['Bash', 'tee notes.md <<EOF\nclaude said yes\nEOF'],
+    ['Bash', 'command -v claude >/dev/null && echo ok'],
+    // A worktree clean-up whose paths end in `claude` was once refused as answering the question.
+    ['PowerShell', "git worktree remove --force C:\\Users\\me\\t\\wt\\claude; git worktree prune; Remove-Item -Recurse -Force C:\\Users\\me\\t\\claude -ErrorAction SilentlyContinue; Write-Output 'ok'"],
+  ];
+  const refused = [
+    'bash <<EOF\nclaude -p yes\nEOF',
+    "sh -c 'claude -p ok'",
+    'eval "claude -p yes"',
+    'x=$(claude -p yes)',
+    '`codex exec no`',
+    'cat > f <<EOF\n$(claude -p yes)\nEOF',
+    'sudo -E claude -p yes',
+    'env A=1 claude -p y',
+    'xargs claude -p <<< yes',
+    '& "C:\\npm\\claude.cmd" -p yes',
+    'Start-Process claude -ArgumentList "-p", "yes"',
+    'cmd /c "codex exec no"',
+    'if true; then claude -p yes; fi',
+    '(cd /tmp && claude -p yes)',
+    "node -e \"spawn('claude',['-p','yes'])\"",
+    'claude -p "yes',
+  ];
+  for (const cwd of [decided, plain]) {
+    for (const [tool_name, command] of allowed) assert.equal(tools(ctx).decide({ tool_name, cwd, tool_input: { command } }), null, command);
+    for (const command of refused) {
+      const decision = tools(ctx).decide({ tool_name: 'Bash', cwd, tool_input: { command } });
+      assert.ok(decision?.deny?.includes(gate.ASK), command);
+    }
+  }
+  const hosts = command => gate.readHostLaunches(command)?.hosts;
+  assert.deepEqual(hosts('echo claude; FOO=1 sudo -E /usr/bin/claude -p x | tee claude.log'), ['/usr/bin/claude']);
+  assert.deepEqual(hosts('npx -y @anthropic-ai/claude-code -p x && codex --version'), ['@anthropic-ai/claude-code']);
+  assert.deepEqual(hosts('bash -c "env -S \'codex exec x\'"'), ['codex']);
+  assert.deepEqual(hosts("cat > a.sh <<'EOF'\nclaude -p x\nEOF\ngit add a.sh"), []);
+  assert.deepEqual(gate.readHostLaunches('python3 - <<EOF\nprint(1)\nEOF').scripts, ['print(1)\n']);
+  for (const unfinished of ['claude -p "x', 'echo $(claude', 'cat <<EOF\nno end', 'x'.repeat(64 * 1024 + 1)]) {
+    assert.equal(gate.readHostLaunches(unfinished), null, unfinished.slice(0, 40));
+  }
+});
+
 test('held messages: every answer hands back only the answering session\'s own messages; other sessions keep theirs', (t) => {
   const ctx = scratch(t);
   const github = slug => gitRepo(ctx, slug, { remote: `https://github.com/example-owner/${slug}.git` });

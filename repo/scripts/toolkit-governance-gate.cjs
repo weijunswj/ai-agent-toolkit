@@ -69,12 +69,8 @@ const SHORT_COMMANDS = Object.freeze({ yes: 'enable', y: 'enable', no: 'disable'
 // The replies that say ok to GitHub governance being off in a repository that is not on github.com.
 // Every one of them has the same effect, so a plain "yes" or "no" works too.
 const OK_ANSWER = /^\s*(ok|okay|yes|y|no|n|not now|later)[.!]?\s*$/i;
-// An agent's command that would answer for the user: the CLI script with a decision, or a host
-// session started, resumed or fed on stdin with an answer (long or short) as its prompt. A host's
-// own subcommands (`claude config`, `codex login` and the like) start no session and are not read.
-// This reads the command's text, so it is best effort. What stops a fresh nested session is the
-// same-run rule above (it has nothing held, so nothing it sends answers) together with the refusal
-// of sessions another session started; a resumed session is a new run (SessionEpochs).
+// A host's name where a shell would read it as a command: a session launch for the held-repository
+// message, and the wide reading answerCommand falls back to.
 const HOST_COMMAND = /(?:^|[\s;&|()`'"\\/])(?:claude|codex)(?:-code)?(?:\.exe|\.cmd|\.ps1)?(?=$|[\s;&|()`'"])/im;
 const SHELL_WORD = /"((?:[^"\\]|\\.)*)"|'([^']*)'|([^\s;&|()<>"'=`]+)/g;
 function shortAnswerWord(text) {
@@ -83,10 +79,361 @@ function shortAnswerWord(text) {
     .some(word => OK_ANSWER.test(word.replace(/^\$/, '').replace(/(?:\\[nr])+$/, '')));
 }
 const HOST_SUBCOMMAND = /^\s*(?:\S*[\\/])?(?:claude|codex)(?:-code)?(?:\.exe|\.cmd|\.ps1)?\s+(?:config|mcp|plugin|plugins|update|upgrade|doctor|install|migrate-installer|setup-token|login|logout|auth|completion|features|sandbox|debug|apply|help|--version|-v|--help|-h)(?=$|\s)/i;
-function answerCommand(text) {
-  return /toolkit-governance\.cjs["']?\s+(?:enable|disable|decline|reopen|migrate|repair)\b/i.test(text)
-    || (/\b(?:claude|codex)\b/i.test(text) && /toolkit governance (?:enable|disable|decline)\b/i.test(text))
+
+// Reads a shell command (Bash or PowerShell) for the host sessions it starts: the words in command
+// position, after `;`, `&&`, `|`, `&`, a newline, a bracket, `$(...)` or a backtick, leading
+// `NAME=value` words and wrappers such as `sudo`, `env`, `xargs`, `npx`, `Start-Process` or
+// `cmd /c`. Text a shell runs (`bash -c`, `eval`, a heredoc fed to a shell) is read the same way.
+// Heredoc bodies and quoted arguments of any other command are data. Code an interpreter runs
+// (`node -e`, `python -c`, a heredoc fed to one) is returned in `scripts`, since a script can start a
+// host in ways this cannot see, and the text a shell was given to run in `runs`. Returns null when it
+// cannot finish reading.
+const MAX_COMMAND_CHARS = 64 * 1024;
+const MAX_COMMAND_DEPTH = 8;
+const HOST_NAME = /^(?:claude|claude-code|codex)(?:\.exe|\.cmd|\.ps1)?$/;
+const SHELL_NAME = /^(?:bash|sh|zsh|dash|ksh)$/;
+const POWERSHELL_NAME = /^(?:pwsh|powershell)$/;
+const INTERPRETER_NAME = /^(?:node|nodejs|python|python3|py|deno|bun|ruby|perl)$/;
+const INLINE_CODE = /^-[a-zA-Z]*[ecpE]$|^--(?:eval|print)$/;
+const COMMAND_KEYWORDS = new Set(['!', 'if', 'then', 'else', 'elif', 'do', 'while', 'until', 'time', 'coproc', 'builtin', 'nohup']);
+const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*(?:\[[^\]]*\])?\+?=/;
+class UnreadableCommand extends Error {}
+
+function readHostLaunches(text, depth = 0) {
+  if (typeof text !== 'string' || text.length > MAX_COMMAND_CHARS || depth > MAX_COMMAND_DEPTH) return null;
+  try {
+    const commands = parseShell(text);
+    const found = { hosts: [], scripts: [], runs: [] };
+    for (const command of commands) if (command.words.length) launchesOf(command, text, depth, found);
+    return found;
+  } catch (error) {
+    if (error instanceof UnreadableCommand) return null;
+    throw error;
+  }
+}
+
+function parseShell(text) {
+  const commands = [];
+  const pending = [];
+  let i = 0;
+  let closer = null;
+  const fail = () => { throw new UnreadableCommand(); };
+  const start = piped => { const command = { words: [], stdin: [], stdinRedirect: false, piped }; commands.push(command); return command; };
+
+  function nested(end) {
+    const outer = closer;
+    closer = end;
+    list(end);
+    closer = outer;
+  }
+
+  function doubleQuoted() {
+    let value = '';
+    for (;;) {
+      if (i >= text.length) fail();
+      const c = text[i];
+      if (c === '"') { i++; return value; }
+      if (c === '\\' && '"\\$`\n'.includes(text[i + 1])) { value += text[i + 1] === '\n' ? '' : text[i + 1]; i += 2; continue; }
+      if (c === '$' && text[i + 1] === '(') { i += 2; nested(')'); continue; }
+      if (c === '`') { i++; nested('`'); continue; }
+      value += c;
+      i++;
+    }
+  }
+
+  // One word; backslashes are kept so a Windows path keeps its last part.
+  function word() {
+    let value = '';
+    let quoted = false;
+    let any = false;
+    while (i < text.length) {
+      const c = text[i];
+      if (/[\s;&|()<>]/.test(c) || c === closer) break;
+      any = true;
+      if (c === '\\') {
+        if (text[i + 1] === '\n') { i += 2; continue; }
+        value += text.slice(i, i + 2);
+        i += 2;
+      } else if (c === "'") {
+        const close = text.indexOf("'", i + 1);
+        if (close < 0) fail();
+        value += text.slice(i + 1, close);
+        quoted = true;
+        i = close + 1;
+      } else if (c === '$' && text[i + 1] === "'") {
+        let j = i + 2;
+        while (j < text.length && text[j] !== "'") j += text[j] === '\\' ? 2 : 1;
+        if (j >= text.length) fail();
+        value += text.slice(i + 2, j);
+        quoted = true;
+        i = j + 1;
+      } else if (c === '"') {
+        i++;
+        value += doubleQuoted();
+        quoted = true;
+      } else if ((c === '$' || c === '@') && text[i + 1] === '(') {
+        i += 2;
+        nested(')');
+        quoted = true;
+      } else if (c === '`') {
+        i++;
+        nested('`');
+        quoted = true;
+      } else if (c === '$' && text[i + 1] === '{') {
+        const close = text.indexOf('}', i + 2);
+        if (close < 0) fail();
+        value += text.slice(i, close + 1);
+        i = close + 1;
+      } else {
+        value += c;
+        i++;
+      }
+    }
+    return any ? { value, quoted } : null;
+  }
+
+  function skipBlanks() { while (i < text.length && /[ \t\r]/.test(text[i])) i++; }
+
+  // Heredoc bodies start on the line after their command. An unquoted delimiter still expands
+  // `$(...)` and backticks in the body, so those are read as commands.
+  function bodies() {
+    const due = pending.splice(0);
+    for (const heredoc of due) {
+      const startAt = i;
+      let at = i;
+      for (;;) {
+        const newline = text.indexOf('\n', at);
+        const line = text.slice(at, newline < 0 ? text.length : newline).replace(/\r$/, '');
+        if ((heredoc.dash ? line.replace(/^\t+/, '') : line) === heredoc.delimiter) {
+          heredoc.command.stdin.push(text.slice(startAt, at));
+          if (!heredoc.quoted) {
+            for (i = startAt; i < at; i++) {
+              if (text[i] === '\\') i++;
+              else if (text[i] === '$' && text[i + 1] === '(') { i += 2; nested(')'); i--; }
+              else if (text[i] === '`') { i++; nested('`'); i--; }
+            }
+          }
+          i = newline < 0 ? text.length : newline + 1;
+          break;
+        }
+        if (newline < 0) fail();
+        at = newline + 1;
+      }
+    }
+  }
+
+  function list(end) {
+    let command = start(false);
+    const next = piped => { command = start(piped); };
+    for (;;) {
+      if (i >= text.length) {
+        if (end || pending.length) fail();
+        return;
+      }
+      const c = text[i];
+      if (end && c === end) { i++; return; }
+      if (c === '\n') { i++; next(false); bodies(); continue; }
+      if (/[ \t\r]/.test(c)) { i++; continue; }
+      if (c === '#') { while (i < text.length && text[i] !== '\n') i++; continue; }
+      if (c === '<' && text[i + 1] === '#') {
+        const close = text.indexOf('#>', i + 2);
+        if (close < 0) fail();
+        i = close + 2;
+        continue;
+      }
+      if (c === '|') { const or = text[i + 1] === '|'; i += or || text[i + 1] === '&' ? 2 : 1; next(!or); continue; }
+      if (c === '&' && text[i + 1] === '&') { i += 2; next(false); continue; }
+      if (c === '&' && text[i + 1] !== '>') { i++; next(false); continue; }
+      if (c === ';' || c === '(' || c === ')' || c === '{' || c === '}') { i++; next(false); continue; }
+      if (c === '<' || c === '>' || c === '&') {
+        if ((c === '<' || c === '>') && text[i + 1] === '(') { i += 2; nested(')'); continue; }
+        if (text.startsWith('<<<', i)) {
+          i += 3;
+          skipBlanks();
+          const target = word();
+          if (!target) fail();
+          command.stdin.push(target.value);
+          continue;
+        }
+        if (text.startsWith('<<', i)) {
+          i += 2;
+          const dash = text[i] === '-';
+          if (dash) i++;
+          skipBlanks();
+          const target = word();
+          if (!target) fail();
+          pending.push({ command, delimiter: target.value.replace(/\\(.)/g, '$1'), quoted: target.quoted || target.value.includes('\\'), dash });
+          continue;
+        }
+        if (c === '<') command.stdinRedirect = true;
+        i += c === '&' ? 2 : 1;
+        if (/[>&|]/.test(text[i] || '')) i++;
+        skipBlanks();
+        word();
+        continue;
+      }
+      const read = word();
+      if (!read) { i++; continue; }
+      // A file-descriptor number written against its redirect (`2>&1`) is not a word.
+      if (/^\d+$/.test(read.value) && !read.quoted && /[<>]/.test(text[i] || '')) continue;
+      command.words.push(read.value);
+    }
+  }
+
+  list(null);
+  return commands;
+}
+
+function commandName(word) {
+  return word.split(/[\\/]/).pop().replace(/(.)@.*$/, '$1').toLowerCase();
+}
+
+function skipOptions(words, k, takesValue = /^$/) {
+  while (k < words.length && /^-./.test(words[k])) {
+    if (words[k] === '--') return k + 1;
+    k += takesValue.test(words[k]) ? 2 : 1;
+  }
+  return k;
+}
+
+function launchesOf(command, text, depth, found) {
+  const { words } = command;
+  const read = more => {
+    const inner = readHostLaunches(more, depth + 1);
+    if (!inner) throw new UnreadableCommand();
+    found.hosts.push(...inner.hosts);
+    found.scripts.push(...inner.scripts);
+    found.runs.push(more, ...inner.runs);
+  };
+  // A shell or interpreter reading its standard input: a heredoc is read, piped input is unseen.
+  const fromStdin = run => {
+    for (const body of command.stdin) run(body);
+    if (!command.stdin.length && (command.piped || command.stdinRedirect)) found.scripts.push(text);
+  };
+  let k = 0;
+  for (;;) {
+    while (k < words.length && (COMMAND_KEYWORDS.has(words[k]) || ASSIGNMENT.test(words[k]))) k++;
+    // PowerShell assignment: `$answer = claude -p yes`.
+    if (/^\$\w+$/.test(words[k] || '') && /^[+\-*/]?=$/.test(words[k + 1] || '')) { k += 2; continue; }
+    const word = words[k];
+    if (word === undefined) return;
+    const name = commandName(word);
+    const plain = name.replace(/\.(?:exe|cmd|bat|ps1)$/, '');
+    if (HOST_NAME.test(name)) {
+      if (!HOST_SUBCOMMAND.test(`${plain} ${words[k + 1] || ''}`)) found.hosts.push(word);
+      return;
+    }
+    if (plain === 'sudo' || plain === 'doas') { k = skipOptions(words, k + 1, /^-[ughpCDUTrRt]$/); continue; }
+    if (plain === 'env') {
+      k++;
+      while (k < words.length && (/^-/.test(words[k]) || ASSIGNMENT.test(words[k]))) {
+        if (words[k] === '-S' || words[k] === '--split-string') return read(words.slice(k + 1).join(' '));
+        if (words[k].startsWith('--split-string=')) return read([words[k].slice(15), ...words.slice(k + 1)].join(' '));
+        if (words[k] === '--') { k++; break; }
+        k += /^(?:-u|-C|--unset|--chdir)$/.test(words[k]) ? 2 : 1;
+      }
+      continue;
+    }
+    if (plain === 'exec') { k = skipOptions(words, k + 1, /^-a$/); continue; }
+    if (plain === 'command') {
+      if (/^-[vV]$/.test(words[k + 1] || '')) return;
+      k = skipOptions(words, k + 1);
+      continue;
+    }
+    if (plain === 'nice') { k = skipOptions(words, k + 1, /^-n$/); continue; }
+    if (plain === 'timeout') { k = skipOptions(words, k + 1, /^-[sk]$/) + 1; continue; }
+    if (plain === 'xargs') { k = skipOptions(words, k + 1, /^-[ILnPdEsa]$/); continue; }
+    if (plain === 'stdbuf') { k = skipOptions(words, k + 1); continue; }
+    if (plain === 'wsl') { k = skipOptions(words, k + 1, /^(?:-d|-u|--cd|--distribution|--user)$/); continue; }
+    if (plain === 'ssh') {
+      k = skipOptions(words, k + 1, /^-[bcDeEFIiJLlmOopQRSWw]$/) + 1;
+      return read(words.slice(k).join(' '));
+    }
+    const runner = plain === 'npx' || plain === 'bunx' ? k + 1
+      : (plain === 'pnpm' || plain === 'yarn') && /^(?:dlx|exec)$/.test(words[k + 1] || '') ? k + 2
+        : plain === 'npm' && /^(?:exec|x)$/.test(words[k + 1] || '') ? k + 2
+          : -1;
+    if (runner >= 0) {
+      k = runner;
+      while (k < words.length && /^-./.test(words[k])) {
+        if (words[k] === '-c' || words[k] === '--call') return read(words[k + 1] || '');
+        if (words[k] === '--') { k++; break; }
+        k += /^(?:-p|--package)$/.test(words[k]) ? 2 : 1;
+      }
+      continue;
+    }
+    if (plain === 'start-process' || plain === 'saps' || plain === 'start') {
+      k++;
+      while (k < words.length && /^-./.test(words[k])) k++;
+      continue;
+    }
+    if (plain === 'cmd') {
+      const run = words.findIndex((w, j) => j > k && /^\/[ck]$/i.test(w));
+      return run < 0 ? undefined : read(words.slice(run + 1).join(' '));
+    }
+    if (plain === 'eval' || plain === 'iex' || plain === 'invoke-expression') return read(words.slice(k + 1).join(' '));
+    if (POWERSHELL_NAME.test(plain)) {
+      for (let j = k + 1; j < words.length; j++) {
+        const w = words[j];
+        if (/^-(?:c|co|com|comm|comma|comman|command)$/i.test(w)) return words[j + 1] === '-' ? fromStdin(read) : read(words.slice(j + 1).join(' '));
+        if (/^-(?:e|ec|en|enc|encodedcommand)$/i.test(w)) { found.scripts.push(text); return; }
+        if (/^-(?:f|file)$/i.test(w)) return;
+        if (/^-(?:executionpolicy|ex|ep|workingdirectory|wd|windowstyle|w|configurationname|outputformat|o|of|inputformat|if|version|settingsfile)$/i.test(w)) { j++; continue; }
+        if (w === '-') break;
+        if (w.startsWith('-')) continue;
+        return read(words.slice(j).join(' '));
+      }
+      return fromStdin(read);
+    }
+    if (SHELL_NAME.test(plain)) {
+      let inline = false;
+      for (let j = k + 1; j < words.length; j++) {
+        const w = words[j];
+        if (/^-[a-zA-Z]*c[a-zA-Z]*$/.test(w)) { inline = true; continue; }
+        if (/^[-+][oO]$/.test(w)) { j++; continue; }
+        if (/^[-+]./.test(w)) continue;
+        if (inline) return read(w);
+        if (w !== '-') return;
+        break;
+      }
+      return inline ? undefined : fromStdin(read);
+    }
+    if (INTERPRETER_NAME.test(plain)) {
+      let inline = false;
+      for (let j = k + 1; j < words.length; j++) {
+        const w = words[j];
+        if (INLINE_CODE.test(w) || (plain === 'deno' && w === 'eval')) { found.scripts.push(words[j + 1] || ''); inline = true; j++; continue; }
+        if (w.startsWith('-') && w !== '-') continue;
+        if (inline || w !== '-') return;
+        break;
+      }
+      return inline ? undefined : fromStdin(body => found.scripts.push(body));
+    }
+    return;
+  }
+}
+
+// An agent's command that would answer for the user: the CLI script with a decision, or a host
+// session started (or fed on stdin) with an answer, long or short, anywhere in the command. A host
+// counts only where a shell runs it, so `claude` in a path, a quoted argument, a commit message or a
+// heredoc written to a file is not a launch; a host's own subcommands (`claude config`, `codex
+// login` and the like) start no session either. Code an interpreter runs, and a command that cannot
+// be read to the end, keep the wide reading of the whole text. This is best effort and safe to
+// narrow: what stops a fresh nested session is the same-run rule above (it has nothing held, so
+// nothing it sends answers) together with the refusal of sessions another session started; a
+// resumed session is a new run (SessionEpochs).
+const GOVERNANCE_PHRASE = /toolkit governance (?:enable|disable|decline)\b/i;
+const QUOTED_REPLY = /(["'`])\s*(?:ok|okay|yes|y|no|n|not now|later)[.!]?\s*\1/i;
+function wideAnswer(text) {
+  return (/\b(?:claude|codex)\b/i.test(text) && GOVERNANCE_PHRASE.test(text))
     || (text.split(/[;&|\r\n]+/).some(part => HOST_COMMAND.test(part) && !HOST_SUBCOMMAND.test(part)) && shortAnswerWord(text));
+}
+function answerCommand(text) {
+  if (/toolkit-governance\.cjs["']?\s+(?:enable|disable|decline|reopen|migrate|repair)\b/i.test(text)) return true;
+  const read = readHostLaunches(text);
+  if (!read) return wideAnswer(text);
+  if (read.scripts.length && (wideAnswer(text) || read.scripts.some(code => HOST_COMMAND.test(code) && QUOTED_REPLY.test(code)))) return true;
+  return read.hosts.length > 0 && (GOVERNANCE_PHRASE.test(text) || [text, ...read.runs].some(shortAnswerWord));
 }
 // A command that resumes, continues or forks a host session (Claude Code `--resume`, `-r`,
 // `--continue`, `-c`, `--session-id`; Codex `resume` or `fork`). While any message is held an agent
@@ -963,6 +1310,7 @@ module.exports = Object.freeze({
   startSession,
   SESSIONS_FOLDER,
   answerCommand,
+  readHostLaunches,
   commandTargets,
   HELD_BASENAME,
   MAX_HELD,

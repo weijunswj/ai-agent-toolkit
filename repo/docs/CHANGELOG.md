@@ -1,5 +1,11 @@
 # Toolkit Changelog
 
+## Unreleased
+
+### Governance
+
+- **Fewer false refusals of ordinary commands:** the check that stops an agent answering the governance question for the user now reads a shell command for the Claude or Codex sessions it really starts, including through `bash -c`, `eval`, `$(...)`, `sudo`, `env`, `npx`, `Start-Process` and `cmd /c`. A `claude` in a path, a quoted argument, a commit message or a heredoc written to a file no longer gets an ordinary command refused. Inline interpreter code and any command the reader cannot finish keep the wider check. Only the user's own reply in the session that was asked still counts.
+
 ## 3.15.5
 
 ### Plain-text check
