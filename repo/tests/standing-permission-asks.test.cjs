@@ -76,6 +76,8 @@ test('both safety-gates playbooks carry the same procedure, every hard stop and 
     '`~/.claude/settings.json`, which the owner edits by hand where `/permissions` is not available',
     "Record it in the entry's `native_rule`; leave it empty only when the host does not stop the step.",
     'tell the owner which change to undo and in which file',
+    'save a copy of the card and the owner\'s answer, word for word with its id and time, at `standing-permissions/answers/<id>.md` beside the ledger',
+    'when a step meets a revoked entry that has a `native_rule`, name that change and its file too',
     'when the matching ask rule comes from project or managed settings, say that no user-settings change clears it', '**Any other harness:**', 'a `--settings` file, never from project settings',
   ]) assert.ok(toolkit.includes(text), text);
   for (const field of FIELDS) assert.ok(toolkit.includes(`\`${field}\``), field);
@@ -91,6 +93,7 @@ test('the Projects skill uses a decision card, the same ledger and the playbook 
   assert.match(skill, /90-day review date/);
   assert.match(skill, /never retry another way/);
   assert.match(skill, /the entry records it in `native_rule`/);
+  assert.match(skill, /save a copy of the card and answer beside the ledger/);
 });
 
 test('the sample ledger uses the documented fields, unique ids, fake data and 90-day reviews', () => {
