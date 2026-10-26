@@ -241,7 +241,7 @@ test('Projects catches up a moved task through its home thread and never fire_tr
   assert.match(reference, /To catch up a bound task, or to test-fire one during a swap, message its home thread to run its prompt there now/);
   assert.match(reference, /Never fire_trigger a bound task from another thread: that run starts in a new session with no project tools, files or memory/);
   assert.match(reference, /Confirm the catch-up's report reached the coordinator\. Never run a bound task's prompt in another thread or in the coordinator\./);
-  assert.match(text, /\*\*Moving a task or catching up:\*\* a move to a time already passed today skips today's run/);
+  assert.match(text, /\*\*Moving a task or catching up:\*\* a move to a time already passed today skips today's run unless it already ran today, so catch it up the same turn/);
   assert.match(text, /when its last run is over 65 minutes older than the latest time its own cron should have fired \(hours outside its waking window never count; a nudge that fires less often uses its interval plus 5 minutes\)/);
   assert.doesNotMatch(text, /missed its latest scheduled hour by over 65 minutes/);
   const setup = read('repo/contracts/claude-projects/web-controller-projects/tasks/run-setup.md');

@@ -451,7 +451,7 @@ test('every rendered task stops first when it started outside its home thread', 
 // The nudge's due time comes from its own cron, so waking-hours gaps and slower nudges are not late.
 test('the check-in reads the nudge due time from its own cron', () => {
   const text = rendered('daily-check-in');
-  for (const required of ['the newest time at or before now when the cron fires', 'hours outside its waking window never count', 'use its interval plus 5 minutes instead of 65 minutes']) {
+  for (const required of ['the newest time at or before now when the cron fires', 'hours outside its waking window never count', 'use its interval plus 5 minutes instead of 65 minutes', 'a nudge with no run yet, as after a swap, counts as armed while its next run is within one interval of now']) {
     assert.ok(text.includes(required), required);
   }
 });
