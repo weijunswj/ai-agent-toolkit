@@ -40,7 +40,7 @@ Retired internal sources are provenance-only, not active update targets. Third-p
 For normal human setup, keep the journey short:
 
 1. Pull or update this Toolkit repo from `weijunswj/ai-agent-toolkit`.
-2. In Codex or Claude Code, open the repo and say `setup toolkit`, `refresh toolkit`, or plain `refresh` while the conversation is clearly about Toolkit setup/update state. Agents must run the one-question-bank setup journey from the managed checkout instead of stopping after plugin verification or using the active repo worktree as the canonical source. Codex uses `node "$env:USERPROFILE\.ai-agent-toolkit\source\ai-agent-toolkit\repo\scripts\setup-toolkit.cjs" --execute --profile auto-main`; Claude Code appends `--host claude-code`.
+2. In Codex or Claude Code, open the repo and say `setup toolkit`, `refresh toolkit`, or plain `refresh` while the conversation is clearly about Toolkit setup/update state. Agents must run the one-question-bank setup journey from the managed checkout instead of stopping after plugin verification or using the active repo worktree as the canonical source. The agent runs the managed script by its resolved full path, `node "<home folder>/.ai-agent-toolkit/source/ai-agent-toolkit/repo/scripts/setup-toolkit.cjs" --execute --profile auto-main`, with the real home folder written in forward slashes and no environment variables, so the line starts the same way in PowerShell and `cmd.exe`; Claude Code appends `--host claude-code`.
 3. Setup is handled by the root agent alone and must not spawn subagents for instructions, state, choices, or validation. In chat, the complete compact bank must be visible in the same response as any recommended-default shortcut; hidden command output or a summary does not count. Managed delegation uses one execution with an explicit child/parent visibility acknowledgement; missing, partial, duplicate, misordered, or wrong-stream bank output blocks approval and writes without retry. Do not rerun with `--yes-recommended` unless the user explicitly accepts the displayed recommendations.
 4. **Toolkit will use a dedicated clean `main` checkout as the single update source. Active Codex or Claude Code sessions may remain on PR branches, but plugin updates will not depend on those branches.**
 5. The default managed checkout path is `%USERPROFILE%\.ai-agent-toolkit\source\ai-agent-toolkit`. Use `node repo/scripts/setup-toolkit.cjs --execute --profile auto-main` from the active repo only as bootstrap/fallback when the managed checkout script is missing, then hand off to the managed checkout script after it exists.
@@ -190,7 +190,7 @@ Sync already-enabled targets after approval:
 node repo/scripts/toolkit-local-bridge.cjs --sync-enabled --write
 ```
 
-Enable opt-in repo-backed auto-update from the managed clean Toolkit checkout:
+Enable opt-in repo-backed auto-update from the managed clean Toolkit checkout (PowerShell, for a person to type):
 
 ```powershell
 node repo/scripts/toolkit-local-bridge.cjs --enable-repo-auto-update --repo-path "$env:USERPROFILE\.ai-agent-toolkit\source\ai-agent-toolkit" --repo-branch main --enable-auto-sync --write
