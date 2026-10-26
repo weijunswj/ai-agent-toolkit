@@ -274,15 +274,15 @@ function bindingRequiredChecks(root) {
   } catch { return null; }
 }
 
-// The dependency and security policy of a parsed binding: { auto_merge, github_actions, paid_security }.
-// Missing keys take the safe defaults: auto-merge off, GitHub Actions updates kept for the owner, and
-// no paid-features answer (null).
+// The dependency policy of a parsed binding: { auto_merge, github_actions }. Missing keys take the
+// safe defaults: auto-merge off and GitHub Actions updates kept for the owner. A binding's
+// deprecated `paid_security` key is accepted and ignored when it is "off" or "on"; any other value
+// makes the binding invalid.
 function policyOf(binding) {
   const updates = binding && typeof binding.dependency_updates === 'object' && binding.dependency_updates ? binding.dependency_updates : {};
   return {
     auto_merge: updates.auto_merge === 'patch-minor' ? 'patch-minor' : 'off',
     github_actions: updates.github_actions === 'auto-merge' ? 'auto-merge' : 'owner',
-    paid_security: binding && ['off', 'on'].includes(binding.paid_security) ? binding.paid_security : null,
   };
 }
 
