@@ -40,8 +40,8 @@ test('recommended Claude execution writes a root-only profile and launches no Cl
     '--yes-recommended', '--claude-cli', fake.command, '--claude-plugin-behavior', 'instructions', '--claude-settings', 'keep',
   ], { env: isolatedHomeEnv(root), timeout: 300000 });
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /\| 2\.1 \| How should Claude Code use agents\? \|[^\n]*\| A\. Toolkit repos: main session \+ Toolkit G0\/G1 helpers only\. Elsewhere: one layer of subagents\.: /);
-  assert.match(result.stdout, /\| 2\.1 \|[^\n]*Selected: A\. Toolkit repos: main session \+ Toolkit G0\/G1 helpers only\. Elsewhere: one layer of subagents\./);
+  assert.match(result.stdout, /\| 2\.1 \| How should Claude Code use agents\? \|[^\n]*\| A\. Toolkit repos: main session \+ Toolkit planning and build helpers only\. Elsewhere: one layer of subagents\.: /);
+  assert.match(result.stdout, /\| 2\.1 \|[^\n]*Selected: A\. Toolkit repos: main session \+ Toolkit planning and build helpers only\. Elsewhere: one layer of subagents\./);
   assert.doesNotMatch(result.stdout, /Direct Toolkit-managed|toolkit-direct|agent capacity choice|Manual maximum|Capacity mode/i);
   assert.match(result.stdout, /Helper-agent capacity questions shown: no/);
   assert.match(result.stdout, /Selected topology: root-only/);
