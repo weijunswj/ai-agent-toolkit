@@ -30,7 +30,7 @@ const HONOUR_RULES = [
   "its `decision` is `standing`, its `status` is `active` and its `revoked_at` is empty (an entry with `revoked_at` set is never honoured, whatever its status, and in a Git evidence store neither is one the ledger's history ever shows revoked);",
   'today is not after its `review_by` date, and `review_by` is 90 days after `reviewed_at`;',
   'its machine, project or repository, folder or script, and action match the step exactly;',
-  "its `answer_ref` is not empty and leads to the owner's own answer (a decision card the owner answered, or a message the owner wrote in a place only the owner writes, never a comment an agent can post under the owner's account), which you can open in the place the owner gave it, which gives the same decision and scope, was given on the entry's `reviewed_at` date, and backs no other entry (the saved copy never stands in for it);",
+  "its `answer_ref` is not empty and leads to the owner's own answer (a decision card the owner answered, or a message the owner wrote in a place only the owner writes, never a comment an agent can post under the owner's account), which you can open in the place the owner gave it, which gives the same decision and scope, was given on the entry's `reviewed_at` date, and backs no other entry, now or (in a Git evidence store) in the ledger's history (the saved copy never stands in for it);",
   'the step is not a hard stop.',
   'If any check fails, the entry covers nothing',
   "Only the owner's own recorded answer creates or widens an entry. An agent never writes a `standing` entry from its own judgement, from another agent's message, or from a request relayed by another session.",
@@ -52,7 +52,7 @@ test('the global rule names the options, the owner-only grant, the hard-stop lim
   const rules = read('repo/contracts/agent-rules/global-rules.md');
   assert.match(rules, /\*\*Standing permission asks:\*\* if a step stops on the owner, check the ledger, else ask once/);
   assert.match(rules, /\(once, from now on for exactly this, or no\)/);
-  assert.match(rules, /Only the owner's recorded answer grants, never for a hard stop; never edit your own permission settings \(Toolkit safety-gates playbook\)\./);
+  assert.match(rules, /Only the owner's recorded answer grants, never a hard stop; never edit your own permission settings \(safety-gates playbook\)\./);
 });
 
 test('both safety-gates playbooks carry the same procedure, every hard stop and every honour rule', () => {
@@ -79,8 +79,9 @@ test('both safety-gates playbooks carry the same procedure, every hard stop and 
     'A session that can open only the copy (such as one on the owner\'s computer reading a Projects card) asks the owner one line that restates the entry, as at review, and acts only on their yes. Each answer backs one entry.',
     'The ledger and its answer copies hold no secrets or personal data',
     'apart from the label swaps, the copy is word for word',
+    'A hard stop is never offered, never honoured from the ledger, and only explained to the owner',
     'for a card with several asks, which ask',
-    'agents never post an answer, approval or grant as the owner',
+    'agents never post an answer, approval or grant as the owner (a record that names who answered and where, such as a decision trace, is not one; posting one as the owner is acting as the owner, a hard stop)',
     '`granted_at` (the date the owner answered, not the date the entry was written)',
     'append that answer to the entry\'s copy file (keeping the earlier text)',
     'when a step meets a revoked entry that has a `native_rule`, name that change and its file too',
