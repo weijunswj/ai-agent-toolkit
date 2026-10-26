@@ -19,7 +19,11 @@
 // created or updated only after a third typed yes. Toolkit never edits a ruleset or branch
 // protection it did not create: what its own ruleset cannot fix (an extra or unpinned check in
 // someone else's rule, a workflow that can mask its check) is reported to change by hand, and a
-// refused write is reported once, never retried. Nothing is pushed to any
+// refused write is reported once, never retried. Last, each ENABLED GitHub repository gets its free
+// dependency and security settings turned on and its missing Dependabot files written
+// (toolkit-governance-security.cjs) without another question, because they are on by default under
+// governance; paid ones only where the binding records the owner's "on". Files land in the working
+// tree for a normal pull request. Nothing is pushed to any
 // repository and no pull request is opened: missing bindings and legacy markers are reported
 // with what to do.
 
@@ -30,6 +34,7 @@ const registry = require('./toolkit-capability-registry.cjs');
 const governance = require('./toolkit-governance-state.cjs');
 const ruleset = require('./toolkit-governance-ruleset.cjs');
 const protection = require('./toolkit-governance-protection.cjs');
+const security = require('./toolkit-governance-security.cjs');
 
 const CAPABILITY = governance.GOVERNANCE_CAPABILITY;
 const RECORD_SCHEMA = 'toolkit.governance-migration.v1';
@@ -103,9 +108,9 @@ function parseAnswer(answer, rows) {
 }
 
 class GovernanceMigration {
-  #stdout; #ask; #interactive; #registryOptions; #rulesetReader; #rulesetCreator; #protectionReader; #protectionWriter; #now;
+  #stdout; #ask; #interactive; #registryOptions; #rulesetReader; #rulesetCreator; #protectionReader; #protectionWriter; #securityReader; #securityWriter; #securityFileWriter; #now;
 
-  constructor({ stdout, ask, interactive, registryOptions = {}, rulesetReader = null, rulesetCreator = null, protectionReader = null, protectionWriter = null, now = () => new Date() }) {
+  constructor({ stdout, ask, interactive, registryOptions = {}, rulesetReader = null, rulesetCreator = null, protectionReader = null, protectionWriter = null, securityReader = null, securityWriter = null, securityFileWriter = null, now = () => new Date() }) {
     this.#stdout = stdout;
     this.#ask = ask;
     this.#interactive = interactive === true;
@@ -114,6 +119,9 @@ class GovernanceMigration {
     this.#rulesetCreator = rulesetCreator || ruleset.ghRulesetCreator;
     this.#protectionReader = protectionReader;
     this.#protectionWriter = protectionWriter || protection.ghProtectionRulesetWriter;
+    this.#securityReader = securityReader;
+    this.#securityWriter = securityWriter || security.ghSecurityWriter;
+    this.#securityFileWriter = securityFileWriter || security.writeSecurityFiles;
     this.#now = now;
   }
 
@@ -154,8 +162,9 @@ class GovernanceMigration {
     this.#reportMaterials(after);
     const rulesets = await this.#offerRulesets(after);
     const protections = await this.#offerProtection(after);
-    if (written.length || rulesets.length || protections.length) this.#writeRecord(written, rulesets, protections);
-    const failed = written.some(entry => entry.result !== 'written') || [...rulesets, ...protections].some(entry => entry.result === 'failed');
+    const securities = await this.#applySecurity(after);
+    if (written.length || rulesets.length || protections.length || securities.length) this.#writeRecord(written, rulesets, protections, securities);
+    const failed = written.some(entry => entry.result !== 'written') || [...rulesets, ...protections, ...securities].some(entry => ['failed', 'unverified'].includes(entry.result));
     return failed ? 2 : 0;
   }
 
@@ -316,21 +325,54 @@ class GovernanceMigration {
     return results;
   }
 
+  #securityFor(row) {
+    const read = this.#protectionFor(row);
+    return security.dependencySecurity(row.root, {
+      protectionResult: read ? read.result : null,
+      ...(this.#securityReader ? { reader: this.#securityReader } : {}),
+    });
+  }
+
+  // The free dependency and security settings are on by default for every governed repository, so
+  // they are turned on without another question (the owner's yes to governance covers them); paid
+  // ones only where the binding records the owner's "on". Nothing here asks.
+  async #applySecurity(rows) {
+    const results = [];
+    for (const row of rows.filter(entry => entry.state.state === 'ENABLED' && entry.slug && entry.state.materials && entry.state.materials.binding)) {
+      const result = this.#securityFor(row);
+      if (result.status === 'not-applicable') continue;
+      const outcome = security.applySecurity(row.root, result, {
+        writer: this.#securityWriter, fileWriter: this.#securityFileWriter, reread: () => this.#securityFor(row),
+      });
+      for (const line of security.describeOutcome(row.slug, row.root, result, outcome)) this.#say(line);
+      if (outcome.result !== 'nothing') results.push({ repository_id: row.state.repository_id, prior: outcome.prior, settings: outcome.settings, files: outcome.files, result: outcome.result });
+    }
+    return results;
+  }
+
   // One private record per run that changed something, next to the decision file.
-  #writeRecord(decisions, rulesets, protections = []) {
-    const directory = path.dirname(governance.registryPathFor(this.#registryOptions));
-    const file = path.join(directory, RECORD_BASENAME);
-    let previous = [];
-    try {
-      const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
-      if (parsed && parsed.schema === RECORD_SCHEMA && Array.isArray(parsed.runs)) previous = parsed.runs;
-    } catch { previous = []; }
-    const record = { schema: RECORD_SCHEMA, runs: [...previous, { at: this.#now().toISOString(), decisions, rulesets, protections }].slice(-20) };
-    fs.mkdirSync(directory, { recursive: true });
-    const temporary = `${file}.${process.pid}.tmp`;
-    fs.writeFileSync(temporary, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 });
-    fs.renameSync(temporary, file);
+  #writeRecord(decisions, rulesets, protections = [], securities = []) {
+    appendRunRecord(this.#registryOptions, { at: this.#now().toISOString(), decisions, rulesets, protections, securities });
   }
 }
 
-module.exports = Object.freeze({ GovernanceMigration, MigrationError, discoverRepositories, proposalFor, parseAnswer, RECORD_BASENAME, BINDING_TEMPLATE });
+// Appends `run` to the private record next to the decision file (the last 20 runs are kept). Used by
+// migrate and by `toolkit governance security`, so every settings change has a record of what GitHub
+// showed before.
+function appendRunRecord(registryOptions, run) {
+  const directory = path.dirname(governance.registryPathFor(registryOptions));
+  const file = path.join(directory, RECORD_BASENAME);
+  let previous = [];
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (parsed && parsed.schema === RECORD_SCHEMA && Array.isArray(parsed.runs)) previous = parsed.runs;
+  } catch { previous = []; }
+  const record = { schema: RECORD_SCHEMA, runs: [...previous, run].slice(-20) };
+  fs.mkdirSync(directory, { recursive: true });
+  const temporary = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(temporary, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 });
+  fs.renameSync(temporary, file);
+  return file;
+}
+
+module.exports = Object.freeze({ GovernanceMigration, MigrationError, discoverRepositories, proposalFor, parseAnswer, appendRunRecord, RECORD_BASENAME, BINDING_TEMPLATE });
