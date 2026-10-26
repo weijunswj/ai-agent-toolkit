@@ -188,12 +188,18 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.doesNotMatch(text, /Non-gate threads get High|one notch higher/);
   assert.match(text, /\*\*Set model and effort explicitly on every thread you start\.\*\* Gates get the pinned stack route/);
   assert.match(text, /cheapest step of the `agent-cost-control` ladder that fits its brief \(small, mid or top tier; medium effort at least\)/);
+  // Restarting on the next step up is for non-gate threads; gates keep their pinned routes.
+  assert.match(text, /When a non-gate thread's output falls short \(a missed check, a wrong fact, a shallow review\), restart that work on the next step up/);
+  // The skill itself keeps gate sessions and the helpers a G0 or G1 lead launches off the ladder.
+  const costSkill = fs.readFileSync(path.join(__dirname, '../../skills/agent-cost-control/SKILL.md'), 'utf8');
+  assert.match(costSkill, /\*\*Gates are outside the ladder\.\*\* G0, G1, G2, reviewers and the helpers a G0 or G1 lead launches keep the models, effort and routes their gate rules pin\./);
+  assert.match(costSkill, /Gate sessions \(G0, G1, G2, reviewers\) and the helpers a G0 or G1 lead launches follow their gate rules'/);
   // One job per thread, automatic rotation with a handoff file, never the coordinator's own thread.
   assert.match(text, /\*\*One job per non-gate thread; rotate long-lived ones\.\*\* A finished non-gate thread is never reused for new work/);
   // Gate sessions keep the gate rules' fresh-context rules; the old reuse-after-rename sentence is gone.
   assert.match(text, /Gate sessions follow the gate rules' fresh-context and recoverable-work rules, never this one/);
   assert.doesNotMatch(text, /Rename an idle finished non-gate thread before reusing it/);
-  assert.match(text, /scheduled tasks take theirs from their home thread's start settings/);
+  assert.match(text, /scheduled tasks start their home thread on the tier and effort in their prompt's params, which carry any recorded raise/);
   assert.match(text, /never swap again for the same gap/);
   assert.match(text, /it writes a handoff file in the shared folder/);
   assert.match(text, /Never rotate your own coordinator thread/);

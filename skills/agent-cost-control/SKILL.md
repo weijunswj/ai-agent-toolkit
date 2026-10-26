@@ -12,12 +12,12 @@ Every automation and every non-gate worker starts on the cheapest model and effo
 | Step | Tier | Effort | Fits |
 | --- | --- | --- | --- |
 | 1 | Small | medium | Checks, sweeps, reminders, status reads, record keeping, anything someone verifies before acting on it |
-| 2 | Mid | medium | Summaries across many sources, triage, drafting, routine helper work, tasks that drive automatic changes elsewhere |
+| 2 | Mid | medium | Summaries across many sources, triage, drafting, routine non-gate helper work, tasks that drive automatic changes elsewhere |
 | 3 | Top | high | Verdicts people act on without rechecking: vets, reviews, licence or security calls, controller decisions |
 
 - **Medium is the floor.** Never pick the lowest effort a host offers; it skips checks on multi-step work. Where "medium" does not exist, use the closest setting above the lowest.
 - **Set both, every time:** the model tier and the effort, in the place the host reads them (table below). A host with no effort setting gets the model alone and a note in the task saying "effort: not settable here".
-- **Gates are outside the ladder.** G0, G1, G2 and reviewers keep the models, effort and routes their gate rules pin.
+- **Gates are outside the ladder.** G0, G1, G2, reviewers and the helpers a G0 or G1 lead launches keep the models, effort and routes their gate rules pin.
 
 ## Raising and lowering
 
@@ -33,7 +33,7 @@ Model names change often: confirm the current names in the host before using the
 | Host | Small / Mid / Top | Model | Effort |
 | --- | --- | --- | --- |
 | Claude (Projects threads and tasks, Claude Code, routines) | Haiku / Sonnet / Opus | The thread or session model; a routine's model selector; a subagent file's `model` field | `/effort` or the session effort; a subagent file's `effort` field (levels depend on the model) |
-| Codex | the account's small, standard and top models | `model` in config, or the automation's model menu | `model_reasoning_effort`; `[agents] default_subagent_reasoning_effort` for spawned agents (levels depend on the model) |
+| Codex | the account's small, standard and top models | `model` in config, or the automation's model menu | `model_reasoning_effort` (levels depend on the model) |
 | OpenCode and other multi-vendor harnesses | the vendor's small, mid and top models | the agent's `model` (`provider/model`) | the model variant where the vendor offers one (`provider/model#variant`) |
 | n8n nodes, CI steps and other workflow model calls | the vendor's small, mid and top models | the node or step setting | the node or step setting; the reason for a raise goes in its notes or a comment beside it |
 
@@ -41,7 +41,7 @@ A task that fires into a thread or session it is bound to runs on that thread's 
 
 ## Threads and sessions
 
-These apply to non-gate work. Gate sessions (G0, G1, G2, reviewers) follow their gate rules' fresh-context and recoverable-work rules instead.
+These apply to non-gate work. Gate sessions (G0, G1, G2, reviewers) and the helpers a G0 or G1 lead launches follow their gate rules' fresh-context and recoverable-work rules instead.
 
 - **One job per thread or session.** A finished thread is never reused for new work, even on the same topic: start a new one and link the old one.
 - **Rotate long-lived workers automatically** (integrators, review runners, record keepers): after each milestone (a merge, a release, a finished review round), when the thread shows its context was summarised, or, where the host reports context use, when it passes about 40% of the window. The old thread writes a short handoff file (state, open items, ids, next step, under about 2 KB) where the next one can read it, the controller starts a fresh thread on the same tier with a brief that points to that file, and the old one closes once its output is saved and relayed.

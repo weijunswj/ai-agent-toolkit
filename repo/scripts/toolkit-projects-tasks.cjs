@@ -73,7 +73,7 @@ function validateParams(kind, raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new TaskInputError('TASK_PARAMS');
   const params = {};
   for (const key of Object.keys(raw)) {
-    const rule = PARAMS[key];
+    const rule = Object.hasOwn(PARAMS, key) ? PARAMS[key] : undefined;
     if (!rule || (rule.customOnly && kind !== 'custom') || typeof raw[key] !== 'string') throw new TaskInputError('TASK_PARAMS');
   }
   for (const [key, rule] of Object.entries(PARAMS)) {
@@ -160,7 +160,7 @@ function findParams(text) {
 const LEGACY_RAISE = 'kept from the setting before tiers, confirm or lower it';
 
 function migrateLegacy(raw) {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw) || 'model' in raw) return { raw, legacy: false };
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw) || Object.hasOwn(raw, 'model')) return { raw, legacy: false };
   const next = { ...raw };
   if (next.effort === 'low') next.effort = EFFORTS[0];
   if (EFFORTS.slice(1).includes(next.effort) && next.raise_reason === undefined) next.raise_reason = LEGACY_RAISE;
@@ -324,10 +324,11 @@ function inOrder(lf, own, fence, expected) {
 
 // The two memory lines Toolkit defines. Nothing else in memory is read.
 const BINDING_LINE = /^[-*\s]*BINDING: [A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+ \S+ commit [0-9a-f]{40} CONTROLLER\.md blob [0-9a-f]{40} toolkit \d+\.\d+\.\d+ skill \S+ bound \S+\s*$/;
-const TASK_ENTRY = /^(?<name>[^|;]+?) \| (?<id>trig_[A-Za-z0-9]+) \| (?<cron>[^|;]+?) \| (?<mode>fresh|local|device|bound home cmsg_[A-Za-z0-9]+ since \d{4}-\d{2}-\d{2})(?: \| owner schedule)?(?: \| raised (?:small|mid|top)\/(?:medium|high|xhigh|max) \d{4}-\d{2}-\d{2}: [^|;]+?)?(?: \| stopped by owner \d{4}-\d{2}-\d{2})?$/;
+const TASK_ENTRY = /^(?<name>[^|;]+?) \| (?<id>trig_[A-Za-z0-9]+) \| (?<cron>[^|;]+?) \| (?<mode>fresh|local|device|bound home cmsg_[A-Za-z0-9]+ since \d{4}-\d{2}-\d{2})(?: \| owner schedule)?(?: \| raised (?:small|mid|top)\/(?:medium|high|xhigh|max) \d{4}-\d{2}-\d{2}: (?:(?!stopped by owner|owner schedule)[\x20-\x3a\x3c-\x7b\x7d\x7e])+?)?(?: \| stopped by owner \d{4}-\d{2}-\d{2})?$/;
 
 function checkMemory(text) {
-  const lines = lfText(text).split('\n');
+  // Only LF and CRLF end a line: a lone CR or a Unicode line break stays inside its line and fails it.
+  const lines = String(text).replace(/^\uFEFF/, '').split('\n').map(line => line.replace(/\r$/, ''));
   const faults = [];
   const binding = lines.filter(line => /^[-*\s]*BINDING:/.test(line));
   if (!binding.length) faults.push('MEMORY FORMAT: BINDING missing');
@@ -338,7 +339,7 @@ function checkMemory(text) {
   else if (tasks.length > 1) faults.push('MEMORY FORMAT: SCHEDULED TASKS more than one line');
   else {
     const entries = tasks[0].replace(/^[-*\s]*SCHEDULED TASKS:\s*/, '').trim().split(/\s*;\s*/).filter(Boolean);
-    if (!entries.length || entries.some(entry => !TASK_ENTRY.test(entry))) faults.push('MEMORY FORMAT: SCHEDULED TASKS old format');
+    if (!entries.length || /[\r\u0085\u2028\u2029]/.test(tasks[0]) || entries.some(entry => !TASK_ENTRY.test(entry))) faults.push('MEMORY FORMAT: SCHEDULED TASKS old format');
   }
   return faults.length ? { lines: faults, exitCode: 1 } : { lines: ['current'], exitCode: 0 };
 }

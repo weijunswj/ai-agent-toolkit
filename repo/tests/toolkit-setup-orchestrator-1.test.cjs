@@ -130,7 +130,7 @@ test('canonical wizard renderer is compact, aligned, and free of implementation 
   assert.doesNotMatch(text, /\*\*Choices:\*\*[^\n]*(?:\/|\|)/);
   assert.doesNotMatch(terminal, /Codex helper agents|One helper at most|Use a custom number/i);
   assert.doesNotMatch(terminal, /Choices:[^\n]*(?:\/|,)/);
-  assert.match(text, /Reply with the displayed bank reference[\s\S]*: all recommended`[\s\S]*setup-toolkit-question-bank:complete/);
+  assert.match(text, /Bank reference: [\s\S]*Reply with either:[\s\S]*- `all recommended`[\s\S]*setup-toolkit-question-bank:complete/);
   for (const spec of planned.specs) assert.ok(spec.description.split(/(?<=[.!?])\s+/).filter(Boolean).length <= 2, spec.key);
 
   current.delegation.helper_count = 4;
@@ -226,7 +226,7 @@ test('distinct piped answers follow the canonical question order without shifts'
   const bank = result.stdout.split('<!-- setup-toolkit-question-bank:complete -->')[0];
   assert.match(bank, /Some visible questions are already resolved by explicit setup flags/);
   assert.match(bank, /Reply with one line for each unresolved question in this exact order:[\s\S]*\*\*1\.2\*\* Automatic updates[\s\S]*\*\*1\.3\*\* Update reports[\s\S]*\*\*1\.4\*\* Report retention[\s\S]*\*\*2\.2\*\* Codex Toolkit maintenance/);
-  assert.doesNotMatch(bank, /Reply with the displayed bank reference and either|: all recommended/);
+  assert.doesNotMatch(bank, /Reply with either:|: all recommended/);
   assert.match(result.stdout, /Setup choices confirmed before writes:[\s\S]*2\.2 Codex Toolkit maintenance: C - Keep current \(canonical: keep; effective: disable\)/);
   assert.doesNotMatch(result.stdout, /Codex helper agents:/);
   assert.match(result.stdout, /Question answers initially required: yes/);
@@ -249,7 +249,7 @@ test('partial explicit flags reject concise input before writes and accept only 
   const preview = run(args, { env, input: '' });
   const reference = displayedBankReference(preview.stdout);
   assert.match(preview.stdout, /Some visible questions are already resolved by explicit setup flags/);
-  assert.doesNotMatch(preview.stdout, /Reply with the displayed bank reference and either/);
+  assert.doesNotMatch(preview.stdout, /Reply with either:/);
 
   const rejected = run(args, { env, input: `${reference}: all recommended\n` });
   assert.notEqual(rejected.status, 0);

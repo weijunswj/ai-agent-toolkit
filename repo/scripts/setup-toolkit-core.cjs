@@ -509,14 +509,16 @@ function printHelp() {
     'AI Agent Toolkit setup orchestrator',
     '',
     'Default mode is --plan. The recommended setup entrypoint is:',
-    '  node "$env:USERPROFILE\\.ai-agent-toolkit\\source\\ai-agent-toolkit\\repo\\scripts\\setup-toolkit.cjs" --execute --profile auto-main',
+    '  node "<home folder>/.ai-agent-toolkit/source/ai-agent-toolkit/repo/scripts/setup-toolkit.cjs" --execute --profile auto-main',
+    'Write <home folder> as the resolved path in forward slashes, with no environment variables and no cd,',
+    'so the line starts the same way in PowerShell and cmd.exe. Run it from the folder you are working in.',
     '  node repo/scripts/setup-toolkit.cjs --execute --profile auto-main  # bootstrap/fallback only when managed script is missing',
     '',
     'Common commands:',
     '  node repo/scripts/setup-toolkit.cjs --plan --json',
     '  node repo/scripts/setup-toolkit.cjs --execute --auto-main',
     '  node repo/scripts/setup-toolkit.cjs --execute --profile auto-main --yes-recommended',
-    '  node "$env:USERPROFILE\\.ai-agent-toolkit\\source\\ai-agent-toolkit\\repo\\scripts\\setup-toolkit.cjs" --execute --profile auto-main --host claude-code',
+    '  node "<home folder>/.ai-agent-toolkit/source/ai-agent-toolkit/repo/scripts/setup-toolkit.cjs" --execute --profile auto-main --host claude-code',
     '',
     'Options:',
     '  --repo-root <path>           advanced override for managed Toolkit checkout source',
@@ -1350,8 +1352,13 @@ function bankReferenceFromIdentity(identity) {
   return compact.match(/.{4}/g).join('-');
 }
 
+// Accepts any case, optional hyphens and the look-alike letters the alphabet leaves out
+// (O for 0, I or L for 1). The result must still equal the displayed reference exactly.
 function normalizeBankReference(value) {
-  const normalized = String(value || '').trim().toUpperCase();
+  const compact = String(value || '').trim().toUpperCase().replace(/-/g, '')
+    .replace(/O/g, '0').replace(/[IL]/g, '1');
+  if (compact.length !== 16) return '';
+  const normalized = compact.match(/.{4}/g).join('-');
   return BANK_REFERENCE_PATTERN.test(normalized) ? normalized : '';
 }
 
@@ -2051,7 +2058,6 @@ function approvedDetailSummary(entry, args) {
 
 function renderAnswerGuide(specs, markdown = true, mode = 'non-tty', options = {}) {
   const example = changedOnlyExample(specs);
-  const bankReference = specs[0]?.presentation.bank_reference || '';
   if (mode === 'tty') {
     return [
       'After this complete bank, enter either:',
@@ -2104,15 +2110,14 @@ function renderAnswerGuide(specs, markdown = true, mode = 'non-tty', options = {
       'No setup-question stdin is required or read before setup continues to the approval summary.',
     ];
   }
-  const lines = [
-    'Reply with the displayed bank reference and either:',
+  return [
+    'Reply with either:',
     '',
-    markdown ? `- \`${bankReference}: all recommended\`` : `  - ${bankReference}: all recommended`,
-    markdown ? `- only your changes, for example: \`${bankReference}: ${example}\`` : `  - only your changes, for example: ${bankReference}: ${example}`,
+    markdown ? '- `all recommended`' : '  - all recommended',
+    markdown ? `- only your changes, for example: \`${example}\`` : `  - only your changes, for example: ${example}`,
     '',
     'Anything you do not list takes its recommendation.',
   ];
-  return lines;
 }
 
 function renderSetupQuestionBankTerminal(specs, options = {}) {
@@ -2309,17 +2314,49 @@ async function readNonInteractiveStdin() {
   return Buffer.concat(chunks, total).toString('utf8');
 }
 
+// One shared reading of concise answers: "all recommended" in any case, with spaces, hyphens,
+// underscores or nothing between the words and one optional final full stop; changed-only items
+// separated by commas, semicolons or spaces; and a reference followed by a colon or spaces.
+const ALL_RECOMMENDED_ANSWER = /^all[\s_-]*recommended\.?$/i;
+const ALL_RECOMMENDED_MENTION = /\ball[\s_-]*recommended/i;
+const CHANGED_ONLY_ITEM = /^(\d+\.\d+)=([A-Za-z]{1,2})$/;
+
+function isAllRecommendedAnswer(value) {
+  return ALL_RECOMMENDED_ANSWER.test(String(value || '').trim());
+}
+
+function startsLikeConciseAnswer(value) {
+  const text = String(value || '').trim();
+  return /^all[\s_-]*recommended\.?(?:\s*$|\s*[,;])/i.test(text) || /^\d+\.\d+\s*=/.test(text);
+}
+
+function splitConciseEnvelope(text) {
+  const colon = text.match(/^([^:\s]+)\s*:\s*([\s\S]+)$/);
+  if (colon) return { reference: colon[1], payload: colon[2].trim() };
+  // A space separator counts only when the first word reads as a complete reference,
+  // so "all recommended" and "1.2=B 3.1=D" are never split into a reference.
+  const spaced = text.match(/^(\S+)\s+([\s\S]+)$/);
+  if (spaced && normalizeBankReference(spaced[1])) return { reference: spaced[1], payload: spaced[2].trim() };
+  return null;
+}
+
+function changedOnlyItems(value) {
+  // Collapse whitespace first so no pattern below can backtrack over a long run of spaces.
+  const tokens = String(value || '').trim().replace(/\s+/g, ' ').replace(/ ?= ?/g, '=').split(/ ?[,;] ?| /);
+  if (!tokens.length || tokens.some((token) => !CHANGED_ONLY_ITEM.test(token))) return null;
+  return tokens.map((token) => token.match(CHANGED_ONLY_ITEM).slice(1));
+}
+
 function looksLikeConciseQuestionBankAnswer(value) {
   const text = String(value || '').trim();
-  return /all\s+recommended/i.test(text) || /^\d+\.\d+\s*=/.test(text);
+  return ALL_RECOMMENDED_MENTION.test(text) || /^\d+\.\d+\s*=/.test(text);
 }
 
 function looksLikeConciseSubmission(value) {
   const text = String(value || '').trim();
-  if (/^all\s+recommended(?:\s*$|\s*,)/i.test(text) || /^\d+\.\d+\s*=/.test(text)) return true;
-  const envelope = text.match(/^[^:\s]+\s*:\s*([\s\S]+)$/);
-  return Boolean(envelope && (/^all\s+recommended(?:\s*$|\s*,)/i.test(envelope[1].trim())
-    || /^\d+\.\d+\s*=/.test(envelope[1].trim())));
+  if (startsLikeConciseAnswer(text)) return true;
+  const envelope = splitConciseEnvelope(text);
+  return Boolean(envelope && startsLikeConciseAnswer(envelope.payload));
 }
 
 function parseConciseQuestionBankAnswer(input, specs, options = {}) {
@@ -2330,9 +2367,11 @@ function parseConciseQuestionBankAnswer(input, specs, options = {}) {
   let suppliedReference = expectedReference;
   let answerText = text;
   if (requireBankReference) {
-    const envelope = text.match(/^([^:\s]+)\s*:\s*([\s\S]+)$/);
+    const envelope = splitConciseEnvelope(text);
     if (!envelope) {
-      if (looksLikeConciseQuestionBankAnswer(text)) {
+      // Only the first line can start a concise answer; later lines of a line-by-line reply,
+      // such as a custom path containing "all-recommended", are never read as one.
+      if (looksLikeConciseQuestionBankAnswer(text.split(/\r?\n/, 1)[0])) {
         throw new Error(`Concise setup answers require the displayed bank reference. Reply with ${expectedReference}: followed by all recommended or indexed changes.`);
       }
       return null;
@@ -2340,23 +2379,23 @@ function parseConciseQuestionBankAnswer(input, specs, options = {}) {
     // A drive-letter path or another canonical line-by-line value may contain
     // a colon. Treat it as an approval envelope only when the payload is
     // recognizably one of the bounded concise answer modes.
-    if (!looksLikeConciseQuestionBankAnswer(envelope[2])) return null;
-    suppliedReference = normalizeBankReference(envelope[1]);
+    if (!looksLikeConciseQuestionBankAnswer(envelope.payload)) return null;
+    suppliedReference = normalizeBankReference(envelope.reference);
     if (!suppliedReference) throw new Error('Setup question bank reference is malformed or truncated; copy the complete displayed reference and retry before any setup write.');
     if (suppliedReference !== expectedReference) throw new Error('Setup question bank reference is stale or belongs to a different rendered bank; review the current bank and answer with its displayed reference.');
-    answerText = envelope[2].trim();
+    answerText = envelope.payload;
   } else {
-    const optionalEnvelope = text.match(/^([^:\s]+)\s*:\s*([\s\S]+)$/);
+    const optionalEnvelope = splitConciseEnvelope(text);
     if (optionalEnvelope) {
-      const normalized = normalizeBankReference(optionalEnvelope[1]);
+      const normalized = normalizeBankReference(optionalEnvelope.reference);
       if (!normalized || normalized !== expectedReference) {
         throw new Error('Setup question bank reference does not match this live rendered bank.');
       }
       suppliedReference = normalized;
-      answerText = optionalEnvelope[2].trim();
+      answerText = optionalEnvelope.payload;
     }
   }
-  if (/^all\s+recommended$/i.test(answerText)) {
+  if (isAllRecommendedAnswer(answerText)) {
     return {
       mode: 'all-recommended',
       binding_mode: requireBankReference ? 'displayed-reference' : 'same-process',
@@ -2370,10 +2409,11 @@ function parseConciseQuestionBankAnswer(input, specs, options = {}) {
       })),
     };
   }
-  if (/all\s+recommended/i.test(answerText)) {
+  if (ALL_RECOMMENDED_MENTION.test(answerText)) {
     throw new Error('Setup question bank answer mixes or malforms the all recommended mode.');
   }
-  if (!/^\d+\.\d+\s*=\s*[A-Za-z]{1,2}(?:\s*,\s*\d+\.\d+\s*=\s*[A-Za-z]{1,2})*$/.test(answerText)) {
+  const items = changedOnlyItems(answerText);
+  if (!items) {
     if (/\d+\.\d+\s*=/.test(answerText)) {
       throw new Error('Setup question bank changed-only answer has malformed separators or mixed answer modes.');
     }
@@ -2382,10 +2422,7 @@ function parseConciseQuestionBankAnswer(input, specs, options = {}) {
   const byReference = new Map(specs.map((spec) => [spec.presentation.question_ref, spec]));
   const seen = new Set();
   const overrides = [];
-  for (const token of answerText.split(',')) {
-    const match = token.trim().match(/^(\d+\.\d+)\s*=\s*([A-Za-z]{1,2})$/);
-    if (!match) throw new Error('Setup question bank changed-only answer has malformed separators.');
-    const [, questionRef, rawChoiceRef] = match;
+  for (const [questionRef, rawChoiceRef] of items) {
     if (seen.has(questionRef)) throw new Error(`Setup question bank answer repeats question reference ${questionRef}.`);
     seen.add(questionRef);
     const spec = byReference.get(questionRef);
@@ -2457,7 +2494,7 @@ async function promptForChoice(spec, lines, rl) {
   for (;;) {
     const range = `${spec.choices[0].presentation_ref}-${spec.choices.at(-1).presentation_ref}`;
     const answer = await rl.question(`${spec.presentation.question_ref} ${spec.title} [${range}] (letter or canonical value; Enter=${spec.presentation.recommended_choice_ref}; "all recommended" for the rest): `);
-    if (/^all\s+recommended$/i.test(String(answer).trim())) return ALL_RECOMMENDED_REST;
+    if (isAllRecommendedAnswer(answer)) return ALL_RECOMMENDED_REST;
     const resolved = resolveDisplayedChoiceAnswer(spec, answer);
     if (choiceValues(spec).includes(resolved)) return resolved;
     console.log(`${spec.title} must be one of: ${choiceValues(spec).join(', ')}. Enter a displayed letter or canonical value.`);
@@ -2471,7 +2508,7 @@ async function promptForTTYCommand(specs, rl) {
     try {
       const parsed = parseConciseQuestionBankAnswer(answer, specs, { requireBankReference: false });
       if (parsed) return parsed;
-      console.log('Enter exactly "all recommended", indexed changes such as 1.2=B, or press Enter for one-at-a-time questions.');
+      console.log('Enter "all recommended", indexed changes such as 1.2=B, 3.1=D, or press Enter for one-at-a-time questions.');
     } catch (error) {
       console.log(`${error.message} Correct the concise answer or press Enter for one-at-a-time questions.`);
     }
@@ -3470,7 +3507,8 @@ function printInstallCheck(result) {
 // Codex's instruction limit follows the owner's answer to the setup question.
 function setupGlobalRules(args) {
   return new GlobalRules({ toolkitRoot: args.repoRoot, retentionDays: args.updateReportRetentionDays,
-    harnesses: GlobalRules.setupHarnesses({ antigravity: args.antigravityGlobalRules }), codexDocLimit: args.codexDocLimitMode || 'report' });
+    harnesses: GlobalRules.setupHarnesses({ antigravity: args.antigravityGlobalRules }), codexDocLimit: args.codexDocLimitMode || 'report',
+    workingFolder: process.env[SETUP_START_FOLDER_ENV] || process.cwd() });
 }
 
 // Codex setup refreshes installed Toolkit helper agents to the stack each names and reports them.

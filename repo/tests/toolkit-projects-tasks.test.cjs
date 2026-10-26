@@ -8,6 +8,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const test = require('node:test');
 const { renderBlock, findBlocks } = require('../scripts/toolkit-managed-block.cjs');
+const hostile = require('./support/hostile-inputs.cjs');
 const { ProjectsTasks, KEPT_LABEL, PROJECT_HEADING, LEGACY_RAISE, validateParams, checkMemory, parseArgs } = require('../scripts/toolkit-projects-tasks.cjs');
 
 const ROOT = path.resolve(__dirname, '../..');
@@ -237,6 +238,22 @@ test('model tier and effort: cheapest by default, medium floor, every raise carr
       assert.ok(refreshed.includes(kind === 'custom' ? 'List the folder.' : 'Keep this owner line.'), 'project text kept');
     }
   }
+  // Built-in object property names are unknown keys, in new and pre-tier params alike.
+  for (const key of ['constructor', 'toString', '__proto__']) {
+    assert.throws(() => validateParams('hourly-nudge', JSON.parse(JSON.stringify(PARAMS['hourly-nudge']).replace('{', `{"${key}": "x", `))), key);
+    const withKey = rendered('hourly-nudge').replace(/,\n {2}"model": "small"/, '').replace('"effort": "medium"', `"effort": "high",\n  "${key}": "x"`);
+    assert.equal(tasks().check('hourly-nudge', withKey).state, 'malformed', key);
+  }
+  // A swap carries a recorded raise by writing it into the saved params before the refresh,
+  // so the prompt itself sets the raised effort and checks current.
+  const saved = laterMain({ version: '1.0.0' }).render('hourly-nudge', params('hourly-nudge'), projectText);
+  const withRaise = saved.replace('"effort": "medium"', '"effort": "high",\n  "raise_reason": "missed checks at medium"');
+  const carried = tasks().refresh('hourly-nudge', withRaise, { session: 'bound' });
+  assert.equal(tasks().check('hourly-nudge', carried).state, 'current');
+  assert.match(carried, /call mcp__hearthbot__set_effort_level with high;/);
+  assert.match(carried, /Raised above the cheapest fitting step because: missed checks at medium/);
+  const swap = fs.readFileSync(path.join(path.dirname(SETUP), 'recurring-tasks.md'), 'utf8');
+  assert.match(swap, /When the task's entry records a raise above the saved prompt's params, first set `model`, `effort` and `raise_reason` in the saved params block to the raised values/);
   // New-format params stay strict: no migration once a model key is present.
   assert.equal(tasks().check('hourly-nudge', rendered('hourly-nudge').replace('"effort": "medium"', '"effort": "low"')).state, 'malformed');
   // The check-in reports model and effort gaps, and a recorded raise excuses them.
@@ -248,7 +265,7 @@ test('model tier and effort: cheapest by default, medium floor, every raise carr
   assert.match(checkIn, /each model or effort gap reported or still open \(task, served, wanted\)/);
   assert.match(checkIn, /listed under \*\*Tasks:\*\* as "effort kept from before tiers: confirm or lower"/);
   assert.ok(checkIn.includes(`reads "${LEGACY_RAISE}"`), 'the check-in names the exact migration reason');
-  assert.match(nudge0(), /the earliest future time an open post reply thread without an unanswered owner question reaches 6 hours/);
+  assert.match(nudge0(), /the earliest future time an open post reply thread without an unanswered owner question or decision reaches 6 hours with no new message; this run's next scheduled time while a QUIET-6H candidate listed by this run is still unresolved/);
   // The nudge closes quiet chat reply threads and lists threads due for rotation.
   const nudge = fs.readFileSync(path.join(TASKS, 'hourly-nudge.md'), 'utf8');
   assert.match(nudge, /reason QUIET-6H, unresolved post reply threads with no new message for 6 hours or more/);
@@ -420,9 +437,18 @@ test('memory check reads only the BINDING and SCHEDULED TASKS lines', () => {
     [`${binding}\n${tasksLine.replace('since 2026-10-24;', 'since 2026-10-24 | raised top/high 2026-10-25: licence calls | stopped by owner 2026-10-26;')}\n`, ['current'], 0],
     [`${binding}\n${tasksLine.replace('since 2026-10-24;', 'since 2026-10-24 | raised top/low 2026-10-25: below the floor;')}\n`, ['MEMORY FORMAT: SCHEDULED TASKS old format'], 1],
     [`${binding}\n${tasksLine.replace('since 2026-10-24;', 'since 2026-10-24 | raised top/high 2026-10-25;')}\n`, ['MEMORY FORMAT: SCHEDULED TASKS old format'], 1],
+    // A reason can never pass for the owner's stop or schedule marks.
+    [`${binding}\n${tasksLine.replace('since 2026-10-24;', 'since 2026-10-24 | raised top/high 2026-10-25: x stopped by owner 2026-10-26;')}\n`, ['MEMORY FORMAT: SCHEDULED TASKS old format'], 1],
+    [`${binding}\n${tasksLine.replace('since 2026-10-24;', 'since 2026-10-24 | raised top/high 2026-10-25: kept for the owner schedule;')}\n`, ['MEMORY FORMAT: SCHEDULED TASKS old format'], 1],
     ['', ['MEMORY FORMAT: BINDING missing', 'MEMORY FORMAT: SCHEDULED TASKS missing'], 1]
   ];
   for (const [text, lines, exitCode] of rows) assert.deepEqual(checkMemory(text), { lines, exitCode }, text);
+  // The raise reason is printable ASCII on one line: a line break or invisible character inside it is
+  // refused, so no reader sees a stop or schedule mark the check does not. CRLF is a real line end.
+  const withReason = reason => `${binding}\n${tasksLine.replace('since 2026-10-24;', `since 2026-10-24 | raised top/high 2026-10-25: reason ${reason} end;`)}\n`;
+  hostile.expectDefaultDeny(assert, text => checkMemory(withReason(text)).exitCode === 0, hostile.cases(['line-breaks', 'invisible']), {
+    allow: ['crlf-line-end', 'crlf-then-lone-cr']
+  });
 });
 
 test('every setup step that creates something has an inventory row, and every row is checked by the daily check-in', () => {

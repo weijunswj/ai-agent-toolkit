@@ -27,8 +27,8 @@ With automatic updates on (setup recommends it), Toolkit checks for a newer `mai
 
 - **Claude Code:** `claude plugin uninstall ai-agent-toolkit@ai-agent-toolkit-local`
 - **Codex:** `codex plugin remove ai-agent-toolkit@ai-agent-toolkit-local`
-- **Global rules:** `node "$env:USERPROFILE\.ai-agent-toolkit\source\ai-agent-toolkit\repo\scripts\toolkit-global-rules.cjs" --remove` takes Toolkit's block out of `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md` and leaves the rest of each file alone.
-- **Automatic updates:** `node "$env:USERPROFILE\.ai-agent-toolkit\source\ai-agent-toolkit\repo\scripts\toolkit-local-bridge.cjs" --disable-auto-sync --disable-repo-auto-update --write`
+- **Global rules** (PowerShell): `node "$env:USERPROFILE\.ai-agent-toolkit\source\ai-agent-toolkit\repo\scripts\toolkit-global-rules.cjs" --remove` takes Toolkit's block out of `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md` and leaves the rest of each file alone.
+- **Automatic updates** (PowerShell): `node "$env:USERPROFILE\.ai-agent-toolkit\source\ai-agent-toolkit\repo\scripts\toolkit-local-bridge.cjs" --disable-auto-sync --disable-repo-auto-update --write`
 - **Settings and files left behind:** before uninstalling, run `setup toolkit` in Claude Code and choose "Broader native behaviour" so Toolkit removes the subagent limit it set in your Claude Code settings, and in Codex answer "Leave it" for the instruction limit so Toolkit takes its `project_doc_max_bytes` line out of `~/.codex/config.toml`. Afterwards you can delete the `toolkit-*.md` helper files in `%USERPROFILE%\.claude\agents` and the `%USERPROFILE%\.ai-agent-toolkit` folder.
 
 ## Skills
@@ -75,7 +75,7 @@ Maintainers start with [AGENTS.md](AGENTS.md). There is no repo-wide MCP server;
 
 ## Appendix: Source-of-Truth Contract
 
-<!-- AI-AGENT-TOOLKIT:repo/contracts/source-of-truth-contract.md:BEGIN SOURCE-OF-TRUTH-CONTRACT v2 toolkit=3.15.8 sha256=24ee07475127 -->
+<!-- AI-AGENT-TOOLKIT:repo/contracts/source-of-truth-contract.md:BEGIN SOURCE-OF-TRUTH-CONTRACT v2 toolkit=3.15.12 sha256=24ee07475127 -->
 ## Source-of-Truth Contract
 
 - `skills/**` is the canonical copyable product surface; each skill folder is the install unit and is edited directly. `skills/controller-bootstrap/` is an explicit-only re-entry procedure for an assigned Toolkit controller; it depends on the live `repo/CONTROLLER.md` and `repo/contracts/controller-kernel/stack-registry-v3.json` and is not a policy copy, role assignment or permission.

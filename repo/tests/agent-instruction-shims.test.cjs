@@ -171,6 +171,7 @@ test('global rules hold the generic floor: precedence, entry routing, safety gat
     /By default G0 delegates suitable separable evidence gathering and G1 suitable independent implementation or validation/,
     /In gate work only a G0 or G1 lead launches helpers; helpers never launch or ask for another agent, and G2 has none/,
     /Outside gate work the main session may start subagents, including Toolkit helpers on their installed route; subagents never start another/,
+    /Outside gates, delegate when it saves context or wall time and run each automation, thread and helper cheapest first, medium effort at least \(`agent-cost-control`\)/,
     /Gate models, effort and route proof are in the gate rules/,
     /switches only GitHub governance/,
     /No git: DISABLED automatically\. Git not on github\.com: DISABLED once the user says ok\./,
