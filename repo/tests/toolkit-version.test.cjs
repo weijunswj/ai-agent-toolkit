@@ -1,7 +1,7 @@
 'use strict';
 
 // The one version source: every runtime constant reads version.json, and bump-version.cjs changes
-// the version everywhere it appears and nowhere else.
+// the version everywhere it appears and nowhere else, either explicitly or as the next version at merge time.
 
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
@@ -11,7 +11,10 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const test = require('node:test');
 const { TOOLKIT_VERSION, VERSION_REL_PATH, readToolkitVersion } = require('../scripts/toolkit-version.cjs');
-const { MANIFEST_REL_PATHS } = require('../scripts/bump-version.cjs');
+const { MANIFEST_REL_PATHS, parseArgs } = require('../scripts/bump-version.cjs');
+const {
+  CHANGELOG_REL_PATH, nextSkillVersion, nextVersion, topChangelogVersion, versionProblems,
+} = require('../scripts/toolkit-version-at-merge.cjs');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 
@@ -94,4 +97,158 @@ test('bump-version refuses a non-semver version without writing', () => {
   assert.equal(result.status, 1);
   assert.match(result.stderr, /usage: node repo\/scripts\/bump-version\.cjs <x\.y\.z>/);
   assert.equal(readToolkitVersion(), TOOLKIT_VERSION);
+});
+
+// A git copy of the repository with one "base" commit, as main would be at merge time.
+function gitCopy(t) {
+  const copy = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-next-'));
+  t.after(() => fs.rmSync(copy, { recursive: true, force: true }));
+  for (const rel of trackedFiles()) {
+    const target = path.join(copy, rel);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.copyFileSync(path.join(repoRoot, rel), target);
+  }
+  // Start from no fragments, as main has after every merge.
+  for (const name of fs.readdirSync(path.join(copy, 'repo', 'docs', 'changelog.d'))) {
+    if (name !== 'README.md') fs.rmSync(path.join(copy, 'repo', 'docs', 'changelog.d', name));
+  }
+  const run = (...args) => {
+    const result = spawnSync('git', args, { cwd: copy, encoding: 'utf8' });
+    assert.equal(result.status, 0, `git ${args.join(' ')}: ${result.stderr}`);
+    return result.stdout.trim();
+  };
+  run('init', '-q', '-b', 'main');
+  run('config', 'user.email', 'test@example.invalid');
+  run('config', 'user.name', 'Test');
+  run('config', 'core.autocrlf', 'false');
+  run('add', '-A');
+  run('commit', '-q', '-m', 'base');
+  run('tag', 'base');
+  run('checkout', '-q', '-b', 'lane');
+  const write = (rel, text) => {
+    fs.mkdirSync(path.dirname(path.join(copy, rel)), { recursive: true });
+    fs.writeFileSync(path.join(copy, rel), text);
+  };
+  const read = (rel) => fs.readFileSync(path.join(copy, rel), 'utf8');
+  const commit = (message) => { run('add', '-A'); run('commit', '-q', '-m', message); };
+  const bump = (...args) => spawnSync(process.execPath, [path.join(copy, 'repo', 'scripts', 'bump-version.cjs'), ...args], { cwd: copy, encoding: 'utf8' });
+  return { copy, run, write, read, commit, bump };
+}
+
+const FRAGMENT = 'repo/docs/changelog.d/lane.md';
+const SKILL = 'repo/contracts/claude-projects/web-controller-projects/SKILL.md';
+const NOTES = 'Title: lane work\n\n### Lane\n\n- **A change:** what it does.\n';
+
+test('next versions count from the base', () => {
+  assert.equal(nextVersion('3.15.0', 'patch'), '3.15.1');
+  assert.equal(nextVersion('3.15.4', 'minor'), '3.16.0');
+  assert.equal(nextSkillVersion('2026-10-25.9', '2026-10-26'), '2026-10-26.1');
+  assert.equal(nextSkillVersion('2026-10-26.2', '2026-10-26'), '2026-10-26.3');
+  assert.equal(nextSkillVersion('2026-10-27.1', '2026-10-26'), '2026-10-27.2', 'never older than the base');
+  assert.throws(() => parseArgs(['--next', 'major']), /--next takes patch or minor/);
+  assert.throws(() => parseArgs(['--next', 'patch', '1.2.3']), /not both/);
+});
+
+test('--next sets the base version plus one, folds the fragment and bumps a changed Projects skill', (t) => {
+  const lane = gitCopy(t);
+  lane.write(FRAGMENT, NOTES);
+  lane.write(SKILL, `${lane.read(SKILL)}\n- A lane rule.\n`);
+  lane.commit('lane work');
+  assert.deepEqual(versionProblems({ workspace: lane.copy, base: 'base' }), [], 'a lane holding the base version passes CI');
+
+  const result = lane.bump('--next', 'minor', '--base', 'base');
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const expected = nextVersion(TOOLKIT_VERSION, 'minor');
+  assert.match(result.stdout, new RegExp(`Toolkit version is now ${expected.replace(/\./g, '\\.')}`));
+  assert.equal(readToolkitVersion(path.join(lane.copy, ...VERSION_REL_PATH.split('/'))), expected);
+  for (const rel of MANIFEST_REL_PATHS) assert.equal(JSON.parse(lane.read(rel)).version, expected, rel);
+  assert.match(lane.read('AGENTS.md'), new RegExp(`toolkit=${expected.replace(/\./g, '\\.')} `), 'markers carry the new version');
+  const changelog = lane.read(CHANGELOG_REL_PATH);
+  assert.equal(topChangelogVersion(changelog), expected);
+  assert.ok(changelog.includes(`## ${expected} (lane work)\n\n### Lane\n\n- **A change:** what it does.\n\n## ${TOOLKIT_VERSION}`), 'the notes sit under the new heading, above the base entry');
+  assert.equal(fs.existsSync(path.join(lane.copy, FRAGMENT)), false, 'the fragment is folded away');
+  assert.ok(fs.existsSync(path.join(lane.copy, 'repo/docs/changelog.d/README.md')), 'the folder guide stays');
+  assert.match(lane.read(SKILL), /^Version: \d{4}-\d{2}-\d{2}\.\d+$/m);
+  assert.notEqual(/^Version: (.*)$/m.exec(lane.read(SKILL))[1], /^Version: (.*)$/m.exec(fs.readFileSync(path.join(repoRoot, SKILL), 'utf8'))[1]);
+
+  lane.commit('bump');
+  assert.deepEqual(versionProblems({ workspace: lane.copy, base: 'base' }), [], 'the bumped head passes CI');
+  const validation = spawnSync(process.execPath, [path.join(lane.copy, 'repo', 'scripts', 'validate-toolkit.cjs')], { cwd: lane.copy, encoding: 'utf8', env: { ...process.env, DIFF_BASE: 'base' } });
+  assert.equal(validation.status, 0, validation.stderr || validation.stdout);
+});
+
+test('--next leaves an unchanged Projects skill alone', (t) => {
+  const lane = gitCopy(t);
+  const skill = lane.read(SKILL);
+  lane.write(FRAGMENT, '### Lane\n\n- **A change:** what it does.\n');
+  lane.commit('lane work');
+  const result = lane.bump('--next', 'patch', '--base', 'base');
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.equal(lane.read(SKILL), skill);
+  assert.ok(lane.read(CHANGELOG_REL_PATH).includes(`## ${nextVersion(TOOLKIT_VERSION, 'patch')}\n\n### Lane`), 'no title, plain heading');
+});
+
+test('--next refuses without writing when the lane is not ready', (t) => {
+  const lane = gitCopy(t);
+  const refuse = (pattern, message, version = TOOLKIT_VERSION) => {
+    const before = lane.run('status', '--porcelain');
+    const result = lane.bump('--next', 'patch', '--base', 'base');
+    assert.equal(result.status, 1, message);
+    assert.match(result.stderr, pattern, message);
+    assert.equal(lane.run('status', '--porcelain'), before, `${message}: nothing written`);
+    assert.equal(readToolkitVersion(path.join(lane.copy, ...VERSION_REL_PATH.split('/'))), version, message);
+  };
+  refuse(/no changelog fragment/, 'no fragment');
+
+  lane.write(FRAGMENT, NOTES);
+  refuse(/uncommitted changes/, 'dirty tree');
+  lane.commit('lane work');
+
+  lane.write(FRAGMENT, '## 9.9.9\n\n- **A change:** what it does.\n');
+  lane.commit('bad fragment');
+  refuse(/"###" section headings only/, 'a fragment with its own version heading');
+  lane.write(FRAGMENT, NOTES);
+  lane.commit('good fragment');
+
+  lane.write(CHANGELOG_REL_PATH, lane.read(CHANGELOG_REL_PATH).replace('# Toolkit Changelog\n\n', '# Toolkit Changelog\n\n## 9.9.9\n\n- Old style.\n\n'));
+  lane.commit('old-style heading');
+  refuse(/move this branch's notes into a fragment/, 'an old-style CHANGELOG heading');
+  lane.run('revert', '--no-edit', 'HEAD');
+
+  const setOwn = lane.bump('9.9.9');
+  assert.equal(setOwn.status, 0, setOwn.stderr);
+  lane.commit('own version');
+  refuse(/this branch sets 9\.9\.9/, 'a lane that set its own version', '9.9.9');
+  lane.run('reset', '-q', '--hard', 'HEAD~1');
+
+  lane.run('checkout', '-q', 'main');
+  lane.write('repo/docs/changelog.d/README.md', `${lane.read('repo/docs/changelog.d/README.md')}\nMore.\n`);
+  lane.commit('main moved');
+  lane.run('checkout', '-q', 'lane');
+  const behind = lane.bump('--next', 'patch', '--base', 'main');
+  assert.equal(behind.status, 1);
+  assert.match(behind.stderr, /does not contain main yet; merge it in first/);
+});
+
+test('the CI guard fails stale, skipped and half-done versions', (t) => {
+  const lane = gitCopy(t);
+  const check = () => versionProblems({ workspace: lane.copy, base: 'base' }).join('\n');
+  lane.write(FRAGMENT, NOTES);
+  lane.commit('lane work');
+  assert.equal(check(), '');
+
+  const skipped = nextVersion(nextVersion(TOOLKIT_VERSION, 'patch'), 'patch');
+  assert.equal(lane.bump(skipped).status, 0);
+  assert.match(check(), new RegExp(`version ${skipped.replace(/\./g, '\\.')} is not the next version after the base's`));
+
+  const next = nextVersion(TOOLKIT_VERSION, 'patch');
+  assert.equal(lane.bump(next).status, 0);
+  const problems = check();
+  assert.match(problems, /needs its CHANGELOG heading first/);
+  assert.match(problems, /is not folded into the CHANGELOG/);
+
+  lane.run('checkout', '-q', '--', '.');
+  lane.write(SKILL, lane.read(SKILL).replace(/^Version: .*$/m, 'Version: 2000-01-01.1'));
+  assert.match(check(), /Projects skill Version 2000-01-01\.1 is older than the base's/);
+  assert.equal(versionProblems({ workspace: lane.copy, base: '' }).length, 0, 'without a base only fragments are checked');
 });
