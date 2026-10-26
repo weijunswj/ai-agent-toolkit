@@ -4,7 +4,7 @@
 
 ### Governance
 
-- **Fewer false refusals of ordinary commands:** the check that stops an agent answering the governance question for the user now reads a shell command for the Claude or Codex sessions it really starts, including through `bash -c`, `eval`, `$(...)`, `sudo`, `env`, `npx`, `Start-Process` and `cmd /c`. A `claude` in a path, a quoted argument, a commit message or a heredoc written to a file no longer gets an ordinary command refused. Inline interpreter code and any command the reader cannot finish keep the wider check. Only the user's own reply in the session that was asked still counts.
+- **Fewer false refusals of ordinary commands:** the check that stops an agent answering the governance question for the user now reads a shell command for the Claude or Codex sessions it really starts, including through `bash -c`, `eval`, `$(...)`, `sudo`, `env`, `npx`, `Start-Process`, `cmd /c` and other commands that run what they name. A `claude` in a path, a quoted argument, a commit message, a file or process tool's arguments, or a heredoc written to a file no longer gets an ordinary command refused. Inline interpreter code, whose string literals are also read as commands, and any command the reader cannot finish keep the wider check. Only the user's own reply in the session that was asked still counts.
 
 ## 3.15.7 (task moves and catch-ups)
 

@@ -1062,6 +1062,14 @@ test('answer guard: a host counts only where a shell starts it, so scratch files
     ['Bash', 'node repo/scripts/setup-toolkit.cjs --host codex --execute <<EOF\n1.1: all recommended\nyes\nEOF'],
     // A worktree clean-up whose paths end in `claude` was once refused as answering the question.
     ['PowerShell', "git worktree remove --force C:\\Users\\me\\t\\wt\\claude; git worktree prune; Remove-Item -Recurse -Force C:\\Users\\me\\t\\claude -ErrorAction SilentlyContinue; Write-Output 'ok'"],
+    // Comments, a redirect's file-descriptor number and a quoted heredoc delimiter hide nothing that runs.
+    ['Bash', 'echo ok # notes; claude -p x'],
+    ['PowerShell', '<# claude -p yes #> echo ok'],
+    ['Bash', '2>/dev/null cat claude; echo ok'],
+    ['Bash', "cat > a.sh <<'EOF'\nx=$(claude -p yes)\nEOF"],
+    // A reply word in other text a shell runs does not belong to a session started elsewhere.
+    ['Bash', 'bash -c "echo ok" && claude -p "summarise"'],
+    ['Bash', 'npm install -g @anthropic-ai/claude-code && echo ok'],
   ];
   const refused = [
     'bash <<EOF\nclaude -p yes\nEOF',
@@ -1079,7 +1087,50 @@ test('answer guard: a host counts only where a shell starts it, so scratch files
     'if true; then claude -p yes; fi',
     '(cd /tmp && claude -p yes)',
     "node -e \"spawn('claude',['-p','yes'])\"",
+    "node -e \"require('child_process').execSync('claude -p yes')\"",
+    // The wide reading still covers what inline code passes on.
+    'node -e "run(process.argv[1])" claude yes',
     'claude -p "yes',
+    // Too deep to read, and a `${...}` whose quotes hide its end: both keep the wide reading.
+    `${'echo $('.repeat(8000)}claude -p yes${')'.repeat(8000)}`,
+    "echo ${x:-'}'}; claude -p yes; echo \\'",
+    // Wrappers with their options; a quoted host is not caught by the unknown-command rule below.
+    'exec "claude" -p yes',
+    'command "claude" -p yes',
+    'nice -n 5 "claude" -p yes',
+    'time -p "claude" -p yes',
+    '/usr/bin/time -v "claude" -p yes',
+    'nohup -- "claude" -p yes',
+    'sudo --user root "claude" -p yes',
+    'sudo -iu root "claude" -p yes',
+    'timeout 5 "claude" -p yes',
+    'timeout --signal KILL 5 "claude" -p yes',
+    'timeout --kill-after 2 5 "claude" -p yes',
+    'xargs --max-args 1 "claude" -p <<< yes',
+    'stdbuf -oL "claude" -p yes',
+    'stdbuf -o L "claude" -p yes',
+    'wsl -d Ubuntu "claude" -p yes',
+    'ssh -i key host -- "claude -p yes"',
+    "npx -c 'claude -p yes'",
+    'npx @anthropic-ai/claude-code@latest -p yes',
+    'start "" "claude" -p yes',
+    'start /b "claude" -p yes',
+    'cmd /c start /b "claude" -p yes',
+    'Start-Process -ArgumentList yes -FilePath "claude"',
+    'iex "claude -p yes"',
+    'pwsh -Command "claude -p yes"',
+    '$r = claude -p yes',
+    'echo "$(claude -p yes)"',
+    'Write-Output (claude -p yes)',
+    'echo claude -p yes | sh',
+    // A host named by a substitution or a variable, and one started by an unknown wrapper.
+    '$(which claude) -p yes',
+    '"$(which claude)" -p yes',
+    '`which claude` -p yes',
+    'h=$(which claude); $h -p yes',
+    'setsid claude -p yes',
+    'find . -exec codex exec yes \\;',
+    'docker exec box claude -p yes',
   ];
   for (const cwd of [decided, plain]) {
     for (const [tool_name, command] of allowed) {
@@ -1097,8 +1148,11 @@ test('answer guard: a host counts only where a shell starts it, so scratch files
   assert.deepEqual(hosts('npx -y @anthropic-ai/claude-code -p x && codex --version'), ['@anthropic-ai/claude-code']);
   assert.deepEqual(hosts('bash -c "env -S \'codex exec x\'"'), ['codex']);
   assert.deepEqual(hosts("cat > a.sh <<'EOF'\nclaude -p x\nEOF\ngit add a.sh"), []);
+  assert.deepEqual(hosts('echo ok; if ($a) {claude -p x}'), ['claude']);
+  assert.deepEqual(hosts(`${'eval '.repeat(3)}claude -p x`), ['claude']);
   assert.deepEqual(gate.readHostLaunches('python3 - <<EOF\nprint(1)\nEOF').scripts, ['print(1)\n']);
-  for (const unfinished of ['claude -p "x', 'echo $(claude', 'cat <<EOF\nno end', 'x'.repeat(64 * 1024 + 1)]) {
+  for (const unfinished of ['claude -p "x', 'echo $(claude', 'cat <<EOF\nno end', 'x'.repeat(64 * 1024 + 1),
+    `${'eval '.repeat(10)}claude -p x`, `${'$('.repeat(65)}claude${')'.repeat(65)}`, `${'$('.repeat(8000)}x${')'.repeat(8000)}`, 'echo ${x:-"}"}']) {
     assert.equal(gate.readHostLaunches(unfinished), null, unfinished.slice(0, 40));
   }
 });
