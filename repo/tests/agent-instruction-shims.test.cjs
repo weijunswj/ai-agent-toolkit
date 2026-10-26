@@ -233,7 +233,7 @@ test('governed rules hold only the GitHub governance parts: release lanes, recor
     /read https:\/\/github\.com\/weijunswj\/ai-agent-toolkit\/blob\/main\/repo\/contracts\/agent-rules\/global-rules\.md before planning/,
     /load the `n8n-safety-router` skill before any n8n work/,
     /Keep one open release PR per lane/,
-    /order work Now, then Next, then Later/,
+    /order work Now, then Later by priority/,
     /Decision traces:[^\n]*Record each owner decision that changes scope, authority or the plan as one tagged comment[^\n]*other comments need no index entry[^\n]*`SUPERSEDES=<record ID>`/,
     /7-character short SHA[^\n]*Write the full 40-character SHA only in review verdicts, UAT results and merge summaries/,
     /Issues: to add a task, search the parent's sub-issues and open or recently closed issues; extend or reopen an owner, else create a child and attach it as a native sub-issue/,
