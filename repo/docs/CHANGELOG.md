@@ -8,6 +8,18 @@
 - **Shared hostile-input set:** `repo/tests/support/hostile-inputs.cjs` holds the input shapes past reviews found readers getting wrong (line breaks, continued lines, quoting and escapes, YAML structure, indents and spaces, invisible and look-alike characters, free-text lists and labels, large inputs), each built from code points so the source holds no raw invisible characters. It adds `variants` (every line-break and byte-order-mark form of an input), `timing` (a growth-ratio check for quadratic work) and `expectDefaultDeny` (every case refused unless a test names it as an allowed exception). It holds data and assertions only and never decides whether an input is safe.
 - **First adopter:** the default-branch protection check's tests run the YAML, line-break, indent and invisible families and the large-input check; every case comes back unverified except a CRLF line end, a quoted `on` key, a doubled single quote, a consistent odd indent and one leading byte order mark, which it reads as GitHub does.
 
+
+## 3.15.4 (final-product UAT)
+
+### Coding gates
+
+- **Owner UAT tests only the final product:** the owner is asked to try only features the user runs and sees, such as hook setup in Codex or Claude Code, a quote run or a design run. Internals (governance, programme state, gate plumbing) are proven by CI, tests, G2 and agent UAT; with no final-product step, UAT is not required. Each ask says in plain words what the feature does, the one thing to try and what the owner should see.
+- **Device steps stay with the agent:** a step on the user's computer that an agent there can do, such as creating a local scheduled task, is done by the Remote Control session itself; the user is asked only when a safety check blocks it.
+
+### Projects skill
+
+- Owner UAT lists and the hybrid work list follow the two rules above; Toolkit text says "computer" or "Remote Control session" rather than naming one kind of device. The Claude Projects controller skill is 2026-10-26.3 (save the new skill card).
+
 ## 3.15.3
 
 ### Projects skill
