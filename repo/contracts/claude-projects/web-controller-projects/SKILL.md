@@ -4,7 +4,7 @@ description: "Use when running as a Claude Projects coordinator and the user app
 ---
 
 # Web Controller for Claude Projects
-Version: 2026-10-26.2
+Version: 2026-10-26.3
 
 Run Toolkit repos through Claude Projects. The global rules and coding gates apply in every project; GitHub governance (parent and child issues, records, decision traces, evidence custody) applies only to a github.com repo whose governance state is ENABLED. Keep project facts (repos, devices, lanes, pending work) in project memory; durable work state lives in the branch, the PR and the programme comments or evidence store, mirrored in memory, never only there.
 
@@ -147,7 +147,7 @@ Whenever the user asks for anything recurring (the daily check-in, a sweep, a re
 ## Where work runs
 - **Hybrid by default.** Use local Remote Control on the user's device only for work that needs it:
   - gate work that requires a qualified device route under `CONTROLLER.md`'s run standard;
-  - the user's UAT, installs and setup checks;
+  - the user's final-product UAT, plus installs, setup checks and device tasks (such as a local scheduled task), which the Remote Control session on the user's computer does itself; hand the user a step on their computer only when its safety check blocks the session;
   - files that exist only on the device.
   Run everything else in the cloud, through cloud threads (or coordinator workers where they have access): transport-store uploads, parent-issue records and issue comments, read-only checks and reconciliation, research, and the daily check-in. Cloud work counts against the same plan limits as local work, with no separate VM charge. It keeps running while the device sleeps, and it avoids Allow cards and relayed-approval blocks. Record the split in project instructions.
 - **Read back outward text written from the cloud.** A cloud write path may alter what it sends, for example by appending a footer or changing link formatting. Diff PR bodies, comments and commit messages against what was sent; evidence files pushed to a Git store need no diff. If it was altered, repair it once through another path. If that is altered too, route that kind of write through local rc and record the limit in project memory.
@@ -183,7 +183,7 @@ Whenever the user asks for anything recurring (the daily check-in, a sweep, a re
 - When you answer inside a post's reply thread and the answer carries a decision, a question, an action for the owner or a change of plan, also post a one-line pointer to it in top-level project chat. The owner may close that reply thread, which hides your answer. Plain acknowledgements need no pointer.
 - For each approval or interactive step, either handle it within approved scope or post the direct thread link and say exactly what to tap or type.
 - When blocked on a person or another account, say once what is needed and move to the next unblocked item.
-- **Owner UAT lists carry only owner-hands steps** (global rules): real app UI, signed-in accounts and device behaviour CI cannot reach. End each list with what was dropped and the passing check that covers each; the user can pull any item back in.
+- **Owner UAT lists carry only final-product steps** (global rules): features the user runs themselves, never internals. Phrase each step in plain words, without jargon such as UAT or G2: what the feature does, then the one thing to try and what they should see. End each list with what was dropped and the passing check that covers each; the user can pull any item back in.
 - **Pending lists name every owner-hands step.** Whenever you tell the owner what waits on them (a pending answer, the nudge reminder, a check-in), list every step only they can do, optional ones and ones posted only inside a thread included, each with its link; never drop one as minor.
 
 ## Improving this skill

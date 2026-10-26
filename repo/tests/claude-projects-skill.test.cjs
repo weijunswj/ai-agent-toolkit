@@ -212,6 +212,35 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.ok(at.every((position, index) => position > -1 && (index === 0 || position > at[index - 1])), at.join(','));
 });
 
+test('device steps go to the Remote Control session, not the owner', () => {
+  const text = read(SKILL_REL);
+  // The owner was once asked to create a local scheduled task that a Remote Control session could create.
+  assert.match(text, /installs, setup checks and device tasks \(such as a local scheduled task\), which the Remote Control session on the user's computer does itself; hand the user a step on their computer only when its safety check blocks the session;/);
+  assert.match(read('repo/contracts/agent-rules/global-rules.md'), /never ask them to run commands, or to do a device step an agent there can do unless a safety check blocks it\./);
+});
+
+test('Toolkit text says computer or Remote Control session, not laptop', () => {
+  // Work runs on whatever computer the user has. "laptop" stays only as a screen size or an icon
+  // name in the frontend art direction skill, matched line by line.
+  const allowedFolder = /^skills\/frontend-art-direction\//;
+  const roots = ['skills', 'repo/contracts', 'repo/docs', 'repo/scripts', 'repo/tests/fixtures'];
+  const hits = [];
+  const walk = (rel) => {
+    for (const entry of fs.readdirSync(path.join(repoRoot, rel), { withFileTypes: true })) {
+      const child = `${rel}/${entry.name}`;
+      if (entry.isDirectory()) { if (entry.name !== 'node_modules') walk(child); continue; }
+      if (/\.(png|jpe?g|gif|ico)$/i.test(entry.name)) continue;
+      fs.readFileSync(path.join(repoRoot, child), 'utf8').split(/\r?\n/).forEach((line, index) => {
+        // Only the allowed phrase is exempt, so a banned use on the same line still fails.
+        const rest = !allowedFolder.test(child) ? line : /^81,Device,laptop,/.test(line) ? '' : line.replace(/mobile, tablet, laptop, and wide/gi, '');
+        if (/laptop/i.test(rest)) hits.push(`${child}:${index + 1}`);
+      });
+    }
+  };
+  roots.forEach(walk);
+  assert.deepEqual(hits, []);
+});
+
 test('Projects lists every owner-hands step when it reports what waits on the owner', () => {
   const text = read(SKILL_REL);
   // An optional step posted only inside a thread was once left off a pending answer.
