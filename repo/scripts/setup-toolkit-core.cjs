@@ -509,14 +509,16 @@ function printHelp() {
     'AI Agent Toolkit setup orchestrator',
     '',
     'Default mode is --plan. The recommended setup entrypoint is:',
-    '  node "$env:USERPROFILE\\.ai-agent-toolkit\\source\\ai-agent-toolkit\\repo\\scripts\\setup-toolkit.cjs" --execute --profile auto-main',
+    '  node "<home folder>/.ai-agent-toolkit/source/ai-agent-toolkit/repo/scripts/setup-toolkit.cjs" --execute --profile auto-main',
+    'Write <home folder> as the resolved path in forward slashes, with no environment variables and no cd,',
+    'so the line starts the same way in PowerShell and cmd.exe. Run it from the folder you are working in.',
     '  node repo/scripts/setup-toolkit.cjs --execute --profile auto-main  # bootstrap/fallback only when managed script is missing',
     '',
     'Common commands:',
     '  node repo/scripts/setup-toolkit.cjs --plan --json',
     '  node repo/scripts/setup-toolkit.cjs --execute --auto-main',
     '  node repo/scripts/setup-toolkit.cjs --execute --profile auto-main --yes-recommended',
-    '  node "$env:USERPROFILE\\.ai-agent-toolkit\\source\\ai-agent-toolkit\\repo\\scripts\\setup-toolkit.cjs" --execute --profile auto-main --host claude-code',
+    '  node "<home folder>/.ai-agent-toolkit/source/ai-agent-toolkit/repo/scripts/setup-toolkit.cjs" --execute --profile auto-main --host claude-code',
     '',
     'Options:',
     '  --repo-root <path>           advanced override for managed Toolkit checkout source',
@@ -3505,7 +3507,8 @@ function printInstallCheck(result) {
 // Codex's instruction limit follows the owner's answer to the setup question.
 function setupGlobalRules(args) {
   return new GlobalRules({ toolkitRoot: args.repoRoot, retentionDays: args.updateReportRetentionDays,
-    harnesses: GlobalRules.setupHarnesses({ antigravity: args.antigravityGlobalRules }), codexDocLimit: args.codexDocLimitMode || 'report' });
+    harnesses: GlobalRules.setupHarnesses({ antigravity: args.antigravityGlobalRules }), codexDocLimit: args.codexDocLimitMode || 'report',
+    workingFolder: process.env[SETUP_START_FOLDER_ENV] || process.cwd() });
 }
 
 // Codex setup refreshes installed Toolkit helper agents to the stack each names and reports them.

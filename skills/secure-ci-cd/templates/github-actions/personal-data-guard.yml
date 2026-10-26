@@ -2,7 +2,9 @@ name: Personal data guard
 
 # Fails when a pull request or a push adds an email address, a phone number or a WhatsApp number
 # link: in file content, file names, commit and tag messages, branch names, or the pull request
-# title and body. Every commit is checked, not only the last one. The output names the place and
+# title and body. The pull request title and body are also checked for real home-folder paths and
+# AI attribution, and the check runs again when they are edited. Every commit is checked, not only
+# the last one. The output names the place and
 # class only, never the value. Local hooks can be skipped with --no-verify; this check cannot.
 #
 # The pull request title and body are read from the event file by the guard, never written into
@@ -10,12 +12,19 @@ name: Personal data guard
 
 on:
   pull_request:
+    types: [opened, edited, reopened, synchronize]
   push:
     branches: ['**']
     tags: ['**']
 
 permissions:
   contents: read
+
+# A newer run for the same pull request cancels the older one; every push keeps its own run,
+# because each push run checks only the commits that push added.
+concurrency:
+  group: personal-data-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: true
 
 jobs:
   personal-data:
