@@ -210,7 +210,7 @@ test('--next refuses without writing when the lane is not ready', (t) => {
   lane.write(FRAGMENT, NOTES);
   lane.commit('good fragment');
 
-  lane.write(CHANGELOG_REL_PATH, lane.read(CHANGELOG_REL_PATH).replace('# Toolkit Changelog\n\n', '# Toolkit Changelog\n\n## 9.9.9\n\n- Old style.\n\n'));
+  lane.write(CHANGELOG_REL_PATH, lane.read(CHANGELOG_REL_PATH).replace(/\r\n/g, '\n').replace('# Toolkit Changelog\n\n', '# Toolkit Changelog\n\n## 9.9.9\n\n- Old style.\n\n'));
   lane.commit('old-style heading');
   refuse(/move this branch's notes into a fragment/, 'an old-style CHANGELOG heading');
   lane.run('revert', '--no-edit', 'HEAD');
