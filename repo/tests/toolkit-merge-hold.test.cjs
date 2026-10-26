@@ -85,7 +85,7 @@ test('a plain yes with "merge" and a number is an approval; a no, a doubt or a q
     ['merge 622 & 623', [[null, 622, null], [null, 623, null]]],
   ];
   // Natural wordings that must count.
-  for (const text of ["can you merge 622","CI is green, merge 622","merge https://github.com/o/r/pull/622/files","merge 622","yes, merge 622","merge #622","Merge #622.","merge 622!","merge PR 622","merge PR #622","merge pull request 622","merge 622 at ee067e1","merge 622 (head ee067e1)","merge #622 at ee067e1","OK to merge 622 at ee067e1","merge https://github.com/weijunswj/ai-agent-toolkit/pull/622","merge weijunswj/ai-agent-toolkit#622","ok merge 622 now","go ahead and merge 622","LGTM, merge 622","please merge 622","squash and merge 622","it's fine, merge 622","- merge 622","merge 622 and 623","merge 622 & 623"]) assert.notDeepEqual(hold.approvalsIn(text), [], text);
+  for (const text of ["could you merge 622", "would you merge 622", "1.merge 612", "1. merge 612", "can you merge 622","CI is green, merge 622","merge https://github.com/o/r/pull/622/files","merge 622","yes, merge 622","merge #622","Merge #622.","merge 622!","merge PR 622","merge PR #622","merge pull request 622","merge 622 at ee067e1","merge 622 (head ee067e1)","merge #622 at ee067e1","OK to merge 622 at ee067e1","merge https://github.com/weijunswj/ai-agent-toolkit/pull/622","merge weijunswj/ai-agent-toolkit#622","ok merge 622 now","go ahead and merge 622","LGTM, merge 622","please merge 622","squash and merge 622","it's fine, merge 622","- merge 622","merge 622 and 623","merge 622 & 623"]) assert.notDeepEqual(hold.approvalsIn(text), [], text);
   for (const [text, expected] of approvals) assert.deepEqual(hold.approvalsIn(text).map(({ repository, pr, sha }) => [repository, pr, sha]), expected, text);
   const refusals = [
     "don't merge 618", 'Don’t merge 618', 'please DON’T merge 618', 'do not merge 618 yet',
@@ -112,6 +112,11 @@ test('a plain yes with "merge" and a number is an approval; a no, a doubt or a q
     'merge 622 pending review', 'merge 622 assuming checks pass', 'dunno, merge 622', 'merge 622 on 27 Oct',
     // reports
     'Claude wants to merge 622', 'PR 622 is ready to merge', 'Next step: merge 622', 'merge 622, then close 619',
+    // numbered markers with no space, more branch names and quote forms, untested guards, green and clock forms
+    '1.> merge 622', '1.did you merge 622', '12.is it ok to merge 622', 'merge development to #622', 'merge production to #622',
+    'merge stable to #622', 'merge feature/x into #622', '‹merge 622›', '＂merge 622＂', 'merge 622 in 3 months', 'merge 622 at midnight',
+    'merge 622 (fixes #10)', 'merge 622, resolves #10', 'merge 622, could we also tidy the branch', '『merge 622』', 'merge 622 this weekend',
+    'merge 622 on CI green', 'merge 622 on green CI', 'merge 622 upon CI green today', 'merge 622 upon green', 'merge 622 at green', 'merge 622 green', 'merge 622 at 1700',
     // a hold word glued to a link, more branch names, delays, a closing reference, a question mid-line, more quote forms
     'merge https://github.com/o/r/pull/622,later', 'merge https://github.com/o/r/pull/622—not yet', 'merge 622 in 2 weeks', 'merge 622 at noon',
     'merge 622 undone', 'merge 622, closes #10', 'ok can we merge 622', '<merge 622>', '+ > merge 622', 'a. > merge 622', '…merge 622', 'merge 622...',
