@@ -500,6 +500,15 @@ function globMatches(pattern, value) {
   return new RegExp(`^${expression}$`).test(value);
 }
 
+// A `types:` list runs on every push to a pull request only when it keeps all three default
+// activity types; extra types (such as edited) add runs and never skip one. Any item that is not a
+// plain activity name (an expression, an odd spelling) leaves the list unverified.
+const DEFAULT_PR_TYPES = Object.freeze(['opened', 'synchronize', 'reopened']);
+function coversDefaultTypes(types) {
+  if (!Array.isArray(types) || !types.every(type => typeof type === 'string' && /^[a-z_]+$/.test(type))) return false;
+  return DEFAULT_PR_TYPES.every(type => types.includes(type));
+}
+
 // Why this workflow can skip a pull request to `defaultBranch` (null when unknown), or null when it
 // cannot; { unverified } when that depends on the unknown default branch.
 function maskingTrigger(workflow, defaultBranch) {
@@ -508,7 +517,7 @@ function maskingTrigger(workflow, defaultBranch) {
   for (const event of events) {
     const filters = workflow.triggers.get(event).filters;
     if (filters.paths || filters['paths-ignore']) return `its ${event} trigger has a path filter, which leaves the check pending`;
-    if (filters.types) return { unverified: `its ${event} trigger lists activity types, which this check does not evaluate` };
+    if (filters.types && !coversDefaultTypes(filters.types)) return { unverified: `its ${event} trigger lists activity types that this check cannot confirm include ${DEFAULT_PR_TYPES.join(', ')}` };
     if ([...(filters.branches || []), ...(filters['branches-ignore'] || [])].some(pattern => String(pattern).startsWith('!'))) return { unverified: `its ${event} branch filter has a "!" pattern, which this check does not evaluate` };
     if ((filters.branches || filters['branches-ignore']) && defaultBranch === null) return { unverified: `its ${event} trigger has a branch filter and the default branch is unknown (no GitHub read and no origin/HEAD)` };
     if (filters.branches && !filters.branches.some(pattern => globMatches(pattern, defaultBranch))) return `its ${event} branch filter leaves out ${defaultBranch}`;

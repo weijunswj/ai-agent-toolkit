@@ -25,6 +25,8 @@ This is a short reviewed operating overview and safety wrapper. It is not the fu
 
 Run security checks before lint, tests, build, package, or deploy. Deployment should be disabled unless the user approves a deployment plan.
 
+The personal-data guard's CI job also checks pull request titles and bodies for real home-folder paths and AI attribution. Keep `opened`, `synchronize` and `reopened` in any `types:` list for a required check, and add `edited` so a fixed title or body clears the check without a new commit.
+
 ## Toolkit Materials
 
 - [Secure CI/CD prompt](../templates/cicd/secure-cicd-prompt.md)
