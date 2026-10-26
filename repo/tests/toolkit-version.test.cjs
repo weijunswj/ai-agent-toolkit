@@ -159,10 +159,10 @@ test('--next sets the base version plus one, folds the fragment and bumps a chan
   const result = lane.bump('--next', 'minor', '--base', 'base');
   assert.equal(result.status, 0, result.stderr || result.stdout);
   const expected = nextVersion(TOOLKIT_VERSION, 'minor');
-  assert.match(result.stdout, new RegExp(`Toolkit version is now ${expected.replace(/\./g, '\\.')}`));
+  assert.ok(result.stdout.includes(`Toolkit version is now ${expected} `), result.stdout);
   assert.equal(readToolkitVersion(path.join(lane.copy, ...VERSION_REL_PATH.split('/'))), expected);
   for (const rel of MANIFEST_REL_PATHS) assert.equal(JSON.parse(lane.read(rel)).version, expected, rel);
-  assert.match(lane.read('AGENTS.md'), new RegExp(`toolkit=${expected.replace(/\./g, '\\.')} `), 'markers carry the new version');
+  assert.ok(lane.read('AGENTS.md').includes(`toolkit=${expected} `), 'markers carry the new version');
   const changelog = lane.read(CHANGELOG_REL_PATH);
   assert.equal(topChangelogVersion(changelog), expected);
   assert.ok(changelog.includes(`## ${expected} (lane work)\n\n### Lane\n\n- **A change:** what it does.\n\n## ${TOOLKIT_VERSION}`), 'the notes sit under the new heading, above the base entry');
@@ -239,7 +239,7 @@ test('the CI guard fails stale, skipped and half-done versions', (t) => {
 
   const skipped = nextVersion(nextVersion(TOOLKIT_VERSION, 'patch'), 'patch');
   assert.equal(lane.bump(skipped).status, 0);
-  assert.match(check(), new RegExp(`version ${skipped.replace(/\./g, '\\.')} is not the next version after the base's`));
+  assert.ok(check().includes(`version ${skipped} is not the next version after the base's`), check());
 
   const next = nextVersion(TOOLKIT_VERSION, 'patch');
   assert.equal(lane.bump(next).status, 0);

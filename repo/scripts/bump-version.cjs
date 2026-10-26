@@ -108,7 +108,7 @@ function bumpNext({ level, base, workspace, today = new Date().toISOString().sli
   if (problems.length) throw new Error(problems.join('; '));
 
   const version = nextVersion(baseVersion, level);
-  if (new RegExp(`^## ${version.replace(/\./g, '\\.')}(?:\\s|$)`, 'm').test(changelog)) {
+  if (changelog.replace(/\r\n/g, '\n').split('\n').some((line) => line === `## ${version}` || line.startsWith(`## ${version} `))) {
     throw new Error(`the CHANGELOG already has a ${version} heading`);
   }
 
