@@ -9,6 +9,7 @@ Use this for docs maps, repo maps, documentation indexes, changelogs, decision l
 - Add a new doc only when an existing canonical doc cannot hold the durable information cleanly.
 - Put detailed examples and checklists in routed docs, not always-loaded instructions.
 - Preserve provenance, source-of-truth links, validation commands, unresolved risks, and maintenance-critical context when compressing old docs.
+- Broad docs work merges durable findings into the smallest canonical home without losing decisions, validation, risks, provenance, ownership or licensing, and reports what moved or was deleted.
 
 ## Plain References
 
