@@ -340,8 +340,13 @@ test('merges in a Projects session need an earlier post with the PR\'s external 
   const both = 'gh pr merge 627 && gh pr merge 628';
   assert.match(merge([wake(), call(POST, { text: 'External effects of PR 627: none.' })], both), /external effects of PR 628/);
   assert.equal(merge([wake(), call(POST, { text: 'External effects of PRs 627 and 628: none.' })], both), '');
-  for (const command of ['gh pr merge 628 --body "https://github.com/o/r/pull/5"', 'gh pr merge --subject "5" 628']) {
-    assert.match(merge([wake(), call(POST, { text: 'External effects of PR 5: none.' })], command), /PR 628/, command);
+  for (const command of ['gh pr merge 628 --body "https://github.com/o/r/pull/5"', 'gh pr merge --subject "5" 628', 'gh pr merge --subject="5" 628']) {
+    assert.match(merge([wake(), call(POST, { text: 'External effects of PR 5: none.' })], command), /external effects of PR 628/, command);
+  }
+  // A quoted value with spaces, or an empty one, stays one option value and never hides the PR number.
+  for (const command of ['gh pr merge --subject "Fix the hook" 628', 'gh pr merge --body "" 628', "gh pr merge -t 'a b' 628"]) {
+    assert.deepEqual(mergeTarget('Bash', { command }), { number: '628' }, command);
+    assert.match(merge([wake(), call(POST, { text: 'External effects of PR 627: none.' })], command), /external effects of PR 628/, command);
   }
   assert.match(merge([wake(), call(POST, { text: 'External effects of PR 622: none.' })], 'gh pr merge 22'), /PR 22/);
   // Outside Projects (no Projects tool in the transcript), and for other commands, nothing is checked or read.

@@ -18,7 +18,7 @@
 // - Merge summary: in a Projects session (one that has used the Projects tools), a PR merge (the gh merge command, a
 //   gh api PUT to .../pulls/<n>/merge or a merge_pull_request tool) is refused until a line of one of its own posts
 //   says "external effects" and names that PR; every merge in a command is checked. It is a tripwire on the command
-//   text only: heredoc bodies and quoted strings are removed (a quoted single word is kept), and curl, GraphQL,
+//   text only: heredoc bodies are removed and a quoted string is read as one word (a quoted single word as itself), and curl, GraphQL,
 //   wrapper shells, prefixes, aliases, scripts, direct pushes, a variable PR number, $'...' quoting, and a merge on a
 //   line after a quoted <<word or $((x<<y)) are not seen.
 // Sessions without these tools (normal chats, Codex and sessions outside Projects) are never touched. Questions go
@@ -238,12 +238,13 @@ function editIssue(previous, text) {
 
 // Shell text with heredoc bodies and quoted strings removed, so a commit message, grep pattern or echo that quotes a
 // merge command is not read as one. The heredoc operator's own line is kept, a quoted single token (a PR number, URL,
-// API path or method) is unwrapped rather than removed, and a backslash escape outside quotes is one unit. Both passes
+// API path or method) is unwrapped in place, any other quoted string (with spaces, or empty) becomes one placeholder
+// word in place, so an option keeps exactly one value, and a backslash escape outside quotes is one unit. Both passes
 // run in linear time.
 function unquoted(command) {
   return command
     .replace(/(?<!<)<<(?!<)-?\s*(['"]?)([A-Za-z_]\w*)\1([^\n]*)(?:\n|$)[\s\S]*?(?:\n[ \t]*\2\b|$)/g, (match, quote, tag, rest) => ` ${rest} `)
-    .replace(/\\[\s\S]|"([^"\s;&|()<>\\]*)"|'([^'\s;&|()<>]*)'|"(?:[^"\\]|\\[\s\S])*"|'[^']*'/g, (match, a, b) => ` ${a ?? b ?? ''} `);
+    .replace(/\\[\s\S]|"([^"\s;&|()<>\\]*)"|'([^'\s;&|()<>]*)'|"(?:[^"\\]|\\[\s\S])*"|'[^']*'/g, (match, a, b) => (match[0] === '\\' ? ' ' : a || b || '_'));
 }
 
 // Options of the merge command whose value is text, a file or a repository, never the PR to merge.
@@ -306,7 +307,14 @@ function decide(input, readLines = file => fs.readFileSync(file, 'utf8').split('
   let lines;
   try { lines = readLines(input.transcript_path); } catch { return ''; }
   const { running, projects, posts } = readTranscript(lines);
-  if (merge) return projects ? merge.map(target => mergeIssue(target, posts)).find(Boolean) || '' : '';
+  if (merge) {
+    if (!projects) return '';
+    for (const target of merge) {
+      const issue = mergeIssue(target, posts);
+      if (issue) return issue;
+    }
+    return '';
+  }
   const text = input?.tool_input?.text;
   const issue = linkIssue(text);
   if (issue) return `Toolkit Projects rule: every PR, thread, file or artifact you mention to the owner carries its link. ${issue}`;
