@@ -180,7 +180,7 @@ test('only source-proven selectors qualify; directory-filtered exec/e --last nev
   }
   const ordinary = 'codex -c model=x exec "summarise"';
   assert.equal(resolver.resolve(ordinary, shell(ctx, ordinary)).status, 'NOT_CONTINUATION');
-  for (const command of ['claude --version', 'head -n 3 notes.txt; claude --version', `git -C "${ctx.target}" status && claude -p "summarise the repo"`, 'codex exec "please resume the task"', `cd "${ctx.target}" && claude -p "summarise the repo"`]) assert.equal(resolver.resolve(command, shell(ctx, command)).status, 'NOT_CONTINUATION', command);
+  for (const command of ['claude --version', 'head -n 3 notes.txt; claude --version', 'echo "codex resume"', 'echo "claude --resume fixture"', 'git log --grep="codex resume"', `git -C "${ctx.target}" status && claude -p "summarise the repo"`, 'codex exec "please resume the task"', `cd "${ctx.target}" && claude -p "summarise the repo"`]) assert.equal(resolver.resolve(command, shell(ctx, command)).status, 'NOT_CONTINUATION', command);
   const workdir = resolver.resolve('codex exec resume --last', shell(ctx, '', { tool_input: { workdir: ctx.target } }));
   assert.deepEqual(workdir.targets, [ctx.target]);
   assert.equal(resolver.resolve('codex exec resume --last', shell(ctx, '', { tool_input: { workdir: ctx.target, cwd: ctx.other } })).status, 'UNKNOWN');
@@ -207,12 +207,30 @@ test('every command axis has an explicit default native qualification, with no i
   }
 });
 
+test('inert-data model distinguishes literal arguments from actual command positions and wrappers', t => {
+  const ctx = fixture(t), resolver = new ContinuationResolver({ environment: ctx.environment });
+  assert.equal(matrix.inert_data_cases.length, 39);
+  for (const { text, expected } of matrix.inert_data_cases) {
+    const input = shell(ctx, text);
+    assert.equal(resolver.resolve(text, input).status, expected, text);
+    const decision = new gate.ToolGate({ registryOptions: ctx.options, environment: ctx.environment, stateReader: () => ({ state: 'DISABLED', rule: 'R1' }) }).decide(input);
+    assert.equal(Boolean(decision?.deny), expected === 'UNKNOWN', text);
+    if (expected === 'NOT_CONTINUATION') {
+      const held = { state: 'UNDECIDED', rule: 'R4', repository_id: 'synthetic-held' };
+      assert.ok(new gate.ToolGate({ registryOptions: ctx.options, stateReader: () => held }).decide(input)?.deny, `current-scope guard before inert/help: ${text}`);
+      const inHeldWorkdir = { ...input, tool_input: { ...input.tool_input, workdir: ctx.other } };
+      assert.ok(new gate.ToolGate({ registryOptions: ctx.options, stateReader: cwd => cwd === ctx.other ? held : { state: 'DISABLED', rule: 'R1' } }).decide(inHeldWorkdir)?.deny, `workdir guard before inert/help: ${text}`);
+    }
+  }
+  assert.match(new gate.ToolGate({ registryOptions: ctx.options, stateReader: () => ({ state: 'DISABLED', rule: 'R1' }) }).decide(shell(ctx, 'echo "claude --resume fixture toolkit governance enable"'))?.deny || '', /only the user/, 'existing owner-answer guard remains before inert classification');
+});
+
 test('visible embedded and hostile continuations remain unknown rather than falling out of classification', t => {
   const ctx = fixture(t), command = 'codex exec resume --last';
   const cases = hostile.cases(['line-breaks', 'continued-lines', 'quoting', 'indents', 'invisible', 'large-input'], ['shell', 'text']);
   hostile.expectDefaultDeny(assert, text => parse(text, shell(ctx, text)).status !== 'UNKNOWN', cases.map(shape => ({ ...shape, text: `${shape.text}\n${command}` })));
   for (const variant of hostile.variants(`echo fixture\n${command}`)) assert.equal(parse(variant.text, shell(ctx, variant.text)).status, 'UNKNOWN', variant.id);
-  for (const text of [`echo "${command}"`, `sh -c '${command}'`, `claude --version && sh -c '${command}'`, `function f(){ ${command}; }`, `echo fixture | ${command}`, `${command} > file`, `${command}; git status`, `${command} && ${command}`, `${command} # comment`, `cd - && ${command}`, `cd C:relative && ${command}`, `${command} ${'x'.repeat(LIMITS.command)}`, `codex --remote ws://example.test exec resume --last`, `claude --resume "${ctx.file}`, `claude --resume "$SESSION"`, `claude --resume "$(cat id)"`]) assert.equal(parse(text, shell(ctx, text)).status, 'UNKNOWN', text.slice(0, 100));
+  for (const text of [`sh -c '${command}'`, `claude --version && sh -c '${command}'`, `echo "${command}" && ${command}`, `git log --grep="${command}"; ${command}`, `echo "$(${command})"`, `echo fixture | ${command}`, `function f(){ ${command}; }`, `${command} > file`, `${command}; git status`, `${command} && ${command}`, `${command} # comment`, `cd - && ${command}`, `cd C:relative && ${command}`, `${command} ${'x'.repeat(LIMITS.command)}`, `codex --remote ws://example.test exec resume --last`, `claude --resume "${ctx.file}`, `claude --resume "$SESSION"`, `claude --resume "$(cat id)"`]) assert.equal(parse(text, shell(ctx, text)).status, 'UNKNOWN', text.slice(0, 100));
   for (const point of [0, 9, 13, 0x85, 0xa0, 0x200b, 0x2028, 0xfeff]) {
     const text = command.replace(' exec', String.fromCodePoint(point) + 'exec');
     assert.equal(parse(text, shell(ctx, text)).status, 'UNKNOWN', `codepoint ${point}`);
@@ -296,6 +314,7 @@ test('Windows/source-hook UAT: both native entrypoints cross both CLI families w
   }
   const commands = [`claude --resume "${ctx.file}"`, `codex -C "${ctx.target}" exec resume --last`];
   for (const hook of hooks) {
+    for (const { text, expected } of matrix.inert_data_cases) invoke(hook, shell(ctx, text), expected === 'UNKNOWN');
     for (const command of commands) for (const marker of [{}, { TOOLKIT_GATE_ROLE: 'G1' }, { TOOLKIT_GATE_ROLE: 'controller' }, { TOOLKIT_GATE_ROLE: 'helper' }]) invoke(hook, shell(ctx, command), false, marker);
     for (const command of commands) invoke(hook, shell(ctx, command, { tool_input: { command, workdir: ctx.other } }), true);
     for (const command of [`claude --resume ${ID}`, 'codex resume --last', `claude --resume "${ctx.file}" -p yes`, `codex exec resume ${ID} "toolkit governance enable"`, `codex -C "${ctx.other}" exec resume --last`]) invoke(hook, shell(ctx, command), true);

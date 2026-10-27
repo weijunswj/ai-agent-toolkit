@@ -12,6 +12,12 @@ const LIMITS = Object.freeze({ command: 32768, bytes: 8 * 1024 * 1024, record: 2
 const UNKNOWN = Object.freeze({ status: 'UNKNOWN', reason: 'TARGET_UNVERIFIED' });
 const NONE = Object.freeze({ status: 'NOT_CONTINUATION' });
 const HOST = /^(claude(?:-code)?|codex)(?:\.exe|\.cmd|\.ps1)?$/i;
+// Exact help-only forms verified on the frozen native CLIs in isolated homes. Do not infer
+// that a help-looking prompt after --, or a wrapped/compound command, exits before a session.
+const HELP_FORMS = Object.freeze({
+  codex: Object.freeze([['resume', '--help'], ['resume', '-h'], ['exec', 'resume', '--help'], ['e', 'resume', '--help'], ['fork', '--help'], ['help', 'resume'], ['help', 'exec', 'resume']].map(Object.freeze)),
+  claude: Object.freeze([['--resume', '--help'], ['--resume', '-h'], ['-r', '--help'], ['--resume', '--version']].map(Object.freeze)),
+});
 function hostOf(word) { return HOST.exec(word.split(/[\\/]/).pop())?.[1].toLowerCase().replace('claude-code', 'claude'); }
 
 // Classification is intentionally broader than admission. An embedded/wrapped or malformed
@@ -23,8 +29,15 @@ function broadVisible(text) {
 }
 function visible(text) {
   if (!broadVisible(text)) return false;
-  const words = tokens(text);
-  if (!words) return true;
+  const lexed = tokens(text, { literalData: true });
+  if (!lexed) return true;
+  const { words, operators } = lexed;
+  // Literal data in these exact command forms cannot launch a host. Keep this exception
+  // narrower than a shell parser: no control operators, substitutions, wrappers or git
+  // options other than the sole grep operand. All existing generic path/owner guards run first.
+  if (operators.size === 0 && (words[0] === 'echo'
+    || (words.length === 3 && words[0] === 'git' && words[1] === 'log' && words[2].startsWith('--grep=')))) return false;
+  if (operators.size === 0 && HELP_FORMS[hostOf(words[0] || '')]?.some(form => form.length === words.length - 1 && form.every((arg, i) => arg === words[i + 1]))) return false;
   let hostSeen = false;
   for (let i = 0; i < words.length; i += 1) {
     const host = hostOf(words[i]);
@@ -34,7 +47,7 @@ function visible(text) {
       continue;
     }
     hostSeen = true;
-    const end = words.findIndex((word, index) => index > i && [';', '&&', '&'].includes(word));
+    const end = words.findIndex((word, index) => index > i && operators.has(index));
     const args = words.slice(i + 1, end < 0 ? undefined : end);
     if (host === 'claude' && args.some(word => /^(?:--(?:resume|continue|session-id|fork-session)(?:=|$)|-(?!-)[a-z]*[rc][a-z]*(?:=|$))/i.test(word))) return true;
     if (host === 'codex' && args.some(word => word === 'resume' || word === 'fork')) return true;
@@ -42,18 +55,26 @@ function visible(text) {
   return !hostSeen;
 }
 
-function tokens(text) {
-  if (!text || text.length > LIMITS.command || /[^\x20-\x7e]|[$`%!?*#<>|^{}\[\]]/.test(text)) return null;
-  const result = [];
+function tokens(text, { literalData = false } = {}) {
+  if (!text || text.length > LIMITS.command || /[^\x20-\x7e]/.test(text)
+    || (!literalData && /[$`%!?*#<>|^{}\[\]]/.test(text))) return null;
+  const result = [], operators = new Set();
   let word = '', quote = null, started = false;
   const flush = () => { if (started) result.push(word); word = ''; started = false; };
   for (let i = 0; i < text.length; i += 1) {
     const c = text[i];
-    if (quote) { if (c === quote) quote = null; else word += c; started = true; continue; }
+    if (quote) {
+      if (literalData && quote === '"' && (/[$`%!]/.test(c) || (c === '\\' && /["\\]/.test(text[i + 1] || '')))) return null;
+      if (c === quote) quote = null; else word += c;
+      started = true; continue;
+    }
     if (c === '"' || c === "'") { quote = c; started = true; continue; }
+    if (literalData && c === '\\' && /[\\\s"';&|<>]/.test(text[i + 1] || '')) return null;
+    if (literalData && /[$`%!?*#<>|^{}\[\]]/.test(c)) return null;
     if (c === ' ') { flush(); continue; }
     if (c === ';' || c === '&') {
       flush();
+      operators.add(result.length);
       if (c === '&' && text[i + 1] === '&') { result.push('&&'); i += 1; }
       else result.push(c);
       continue;
@@ -62,7 +83,7 @@ function tokens(text) {
   }
   if (quote) return null;
   flush();
-  return result;
+  return { words: result, operators };
 }
 
 function absolute(value) {
@@ -103,8 +124,9 @@ function executionDirectory(input) {
 
 function parse(text, input) {
   if (!visible(text)) return NONE;
-  const words = tokens(text);
-  if (!words) return UNKNOWN;
+  const lexed = tokens(text);
+  if (!lexed) return UNKNOWN;
+  const { words, operators } = lexed;
   try {
     let cwd = executionDirectory(input);
     const targets = [cwd];
@@ -113,14 +135,14 @@ function parse(text, input) {
       i += 1;
       if (/^(?:\/d|-literalpath|-path)$/i.test(words[i] || '')) i += 1;
       cwd = directory(words[i++], cwd); targets.push(cwd);
-      if (!['&&', ';'].includes(words[i++])) return UNKNOWN;
+      if (!operators.has(i) || !['&&', ';'].includes(words[i++])) return UNKNOWN;
     }
-    if (words[i] === '&') i += 1;
+    if (operators.has(i) && words[i] === '&') i += 1;
     const executable = words[i++];
     const host = executable && hostOf(executable);
     if (!host || (/[\\/]/.test(executable) && !absolute(executable))) return UNKNOWN;
     const rest = words.slice(i);
-    if (rest.some(word => ['&&', ';', '&'].includes(word))) return UNKNOWN;
+    if (rest.some((word, index) => operators.has(i + index))) return UNKNOWN;
     if (host === 'claude') {
       let selector = null, fork = false, print = false;
       const prompts = [];
