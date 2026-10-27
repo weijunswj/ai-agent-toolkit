@@ -1,5 +1,15 @@
 # Toolkit Changelog
 
+## 3.15.16 (continuation target isolation)
+
+### Governance continuations
+
+- Both native tool hooks check verified continuation targets without consulting or repairing the account-wide held-message queue. Unrelated, rootless, malformed and unreadable held groups no longer block a proven decided target. Held targets, unreadable target state, owner answers, user-state edits, card/epoch controls and native helper transition restrictions retain their protections.
+- The bounded reader admits exact native Claude transcript-path resumes and directory-filtered Codex `exec`/`e resume --last`. Unknown UUID/name/picker selectors, Claude implicit continue, interactive Codex worktree selection and unsupported shell syntax are refused independently of queue contents. Transcript acquisition returns only directories across a child-process boundary and detects incomplete records, excessive input, path links and file drift.
+- Added the complete compact target-authority model, default-reader and hostile-input tests, plus both source-hook processes crossed with both CLI families in synthetic homes. Source-process results do not qualify installed hooks or desktop dispatch; no installation, real continuation or user-state migration is part of this repair.
+- Plain literal output/grep data and verified native help/version forms retain ordinary-command behaviour. Balanced double quotes protect literal operators; single-quoted operators, shell evaluation/expansion and ambiguous quote forms are refused on both data and selector paths. Help-only exits were checked in disposable native CLI homes without starting sessions.
+- Computed host or selector spellings remain unverified when unsupported syntax leaves recognisable continuation evidence, including addition, arrays, format and join inside data or help-looking commands. Whole-atom prefix recognition preserves evidence across irrelevant quoted arguments, casts, methods and edge whitespace, including mixed fixed-letter format holes. Detection does not evaluate expressions or expand arbitrary-script enforcement.
+
 ## 3.15.15 (agent cost control)
 
 ### Agent cost control

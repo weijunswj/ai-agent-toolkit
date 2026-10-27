@@ -87,3 +87,11 @@ The integration controller alone writes the parent, the version files and the in
 - The fence orders cooperating Toolkit writers under one GitHub account; it authenticates nobody.
 - The tool cannot see whether another host session has stopped. A takeover record must carry that evidence (session archived, remote control ended).
 - A journal is evidence, not state, until the controller's reconcile reads it.
+
+## Continuation admission
+
+Claude Code's governance `PreToolUse` hook and Codex's helper hook use the same `ToolGate` continuation decision. Both envelopes can contain shell commands for either CLI. The hook's `cwd` remains the current-repository guard; a shell's explicit `workdir` or `cwd` is also checked as its execution directory. Neither a caller's `session_id` nor a claimed target field proves another session's repository.
+
+The [Bridge's hook policy](TOOLKIT-LOCAL-BRIDGE.md#hook-policy) describes the supported literal selectors and deliberate refusals. A successful source check returns no permission decision: Claude emits an empty object, Codex emits no stdout and exits zero. A denial retains Claude's deny JSON and Codex's deny JSON with exit two. Owner-answer, card, epoch, attribution and native helper transition controls remain independent.
+
+Synthetic stdin tests exercise both source entrypoints with disposable homes, repositories and metadata, without executing a continuation or touching an installed plugin. These tests establish source behaviour and non-mutation only. Native dispatcher, hook trust, installed cache, desktop entrypoints and installed qualification remain separate host obligations; a source result does not replace them. Portable-only hosts gain no native continuation support.
