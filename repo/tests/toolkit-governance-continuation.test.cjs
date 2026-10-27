@@ -404,6 +404,9 @@ test('Windows/source-hook UAT: both native entrypoints cross both CLI families w
     for (const row of matrix.literal_role_cases.filter(row => row.id.startsWith('sqag/') || ['segments/native/before', 'segments/native/after', 'segments/script/before', 'segments/script/after', 'segments/reader-path'].includes(row.id))) {
       for (const tool_name of ['Bash', 'PowerShell']) invoke(hook, { ...shell(ctx, row.text), tool_name, tool_input: { command: row.text, ...(row.shell === undefined ? {} : { shell: row.shell }) } }, row.expected === 'UNKNOWN');
     }
+    for (const row of matrix.literal_role_cases.filter(row => ['composition/basename/absent', 'composition/runtime/absent', 'composition/basename/powershell.exe', 'composition/runtime/powershell.exe', 'composition/basename/native-before', 'composition/runtime/native-after', 'composition/runtime/computed-after', 'composition/runtime/unsafe', 'composition/runtime/-Unknown', 'composition/runtime/outer-native'].includes(row.id))) {
+      for (const tool_name of ['Bash', 'PowerShell']) invoke(hook, { ...shell(ctx, row.text), tool_name, tool_input: { command: row.text, ...(row.shell === undefined ? {} : { shell: row.shell }) } }, row.expected === 'UNKNOWN');
+    }
     const literal = matrix.literal_role_cases.find(row => row.id === 'original-read');
     for (const tool_input of [{ cmd: literal.text }, { command: literal.text.split(' ') }]) invoke(hook, { ...shell(ctx, literal.text), tool_input: { ...tool_input, shell: literal.shell } }, false);
     invoke(hook, { ...shell(ctx, literal.text), cwd: ctx.other }, true);
@@ -446,6 +449,7 @@ test('Windows/source-hook UAT: both native entrypoints cross both CLI families w
       for (const command of ['codex resume --last', 'claude --resume fixture', matrix.ordered_atom_cases[0].text, 'pwsh -Command "& (\'co\'+\'dex\') (\'res\'+\'ume\')"']) invoke(hook, { ...shell(ctx, command), tool_name }, true);
       invoke(hook, { ...shell(ctx, 'rg -e "codex resume" repo\\notes.txt'), tool_name }, false);
       invoke(hook, { ...shell(ctx, matrix.literal_role_cases.find(row => row.id === 'sqag/compound/absent').text), tool_name }, false);
+      invoke(hook, { ...shell(ctx, matrix.literal_role_cases.find(row => row.id === 'composition/runtime/absent').text), tool_name }, false);
     }
   }
   t.diagnostic(JSON.stringify({ sourceCalls, productionDefault: true, byteAndDirectoryEquality: true, nativeDispatchExercised: false }));
@@ -489,6 +493,7 @@ test('complete data proofs retain consumed spans and unknown wrappers retain raw
       assert.ok(result.segments?.proofs.length, row.id + ': complete reader segment proof');
       assert.equal(result.candidate.length, row.text.length);
       const dataSpans = result.segments.proofs.flatMap(proof => proof.roles.filter(word => word.role.startsWith('literal ') || word.role === 'attached literal pattern' || (word.role === 'reader executable' && /[\\/]/.test(word.value))));
+      if (result.excludedExecutable) dataSpans.push(result.excludedExecutable);
       for (let i = 0; i < row.text.length; i += 1) {
         if (result.candidate[i] !== row.text[i]) {
           assert.equal(result.candidate[i], ' ');
@@ -536,6 +541,13 @@ test('complete data proofs retain consumed spans and unknown wrappers retain raw
     const before = roleVisits(); commandRoles(text, { tool_input: {} });
     assert.ok(roleVisits() - before <= 4 * text.length, 'bounded single-layer lexical acquisition');
   }
+  const wrapperPrefix = 'pwsh -Command "git status; rg -e codex ';
+  const composed = wrapperPrefix + 'x'.repeat(LIMITS.command - wrapperPrefix.length - 1) + '"';
+  const beforeComposed = roleVisits(), composedRoles = commandRoles(composed, { tool_input: {} });
+  assert.ok(composedRoles.segments?.proofs.length);
+  assert.equal(composedRoles.candidate.length, composed.length);
+  assert.ok(roleVisits() - beforeComposed <= 4 * composed.length, 'bounded composed lexical acquisition');
+  assert.equal(parse(composed, { tool_input: {} }).status, 'NOT_CONTINUATION');
   for (const { word } of evidenceProjection().CANDIDATE_MACHINES) for (let cut = 1; cut < word.length; cut += 1) {
     for (const body of [`& ('${word.slice(0, cut)}'.ToString()+'${word.slice(cut)}')`, `& (' ${word.slice(0, cut)}'.Trim()+'${word.slice(cut)}')`, `& ('${word.slice(0, cut)}{0}' -f '${word.slice(cut)}')`]) {
       for (const prefix of ['pwsh', '"C:/example.test/codex-runtimes/pwsh.exe"']) {
@@ -657,7 +669,7 @@ test('ordered-atom closure table is UNKNOWN before target proof across placement
   try {
     assert.equal(new gate.ToolGate({ registryOptions: ctx.options, stateReader }).decide(shell(ctx, 'codex exec resume --last')), null);
     assert.ok(new gate.ToolGate({ registryOptions: ctx.options, stateReader }).decide(shell(ctx, matrix.ordered_atom_cases[0].text))?.deny);
-    for (const id of ['original-read', 'sqag/single/absent', 'sqag/compound/absent', 'wrapper/runtime/assignment', 'wrapper/runtime/concat']) {
+    for (const id of ['original-read', 'sqag/single/absent', 'sqag/compound/absent', 'wrapper/runtime/assignment', 'wrapper/runtime/concat', 'composition/runtime/absent', 'composition/runtime/native-after', 'composition/runtime/computed-after']) {
       const row = matrix.literal_role_cases.find(row => row.id === id);
       assert.equal(Boolean(new gate.ToolGate({ registryOptions: ctx.options, stateReader }).decide({ ...shell(ctx, row.text), tool_input: { command: row.text, ...(row.shell === undefined ? {} : { shell: row.shell }) } })?.deny), row.expected === 'UNKNOWN', id);
     }

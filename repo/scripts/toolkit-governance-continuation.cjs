@@ -374,14 +374,26 @@ function commandRoles(text, input) {
   }
   // One transparent PowerShell layer may prove a complete literal reader. Expansion in
   // either layer defeats that proof; scripts themselves are never recursively admitted.
-  const inner = wrapper.fixed && wrapper.powershell && literalWord(wrapper.script, shell)
-    ? readerProof(roleWords(wrapper.script.value), 'powershell') : null;
+  const transparent = wrapper.fixed && wrapper.powershell && literalWord(wrapper.script, shell);
+  const inner = transparent ? readerProof(roleWords(wrapper.script.value), 'powershell') : null;
+  const scriptSegments = transparent && !inner ? readerSegments(wrapper.script.value, 'powershell') : null;
+  const script = scriptSegments?.candidate ?? wrapper.script.value;
+  const scriptStart = wrapper.script.start + (wrapper.script.quote ? 1 : 0);
+  // Compose the same proved operand view into both the outer source and the executable
+  // script. Otherwise an outer raw scan would reintroduce data excluded by the inner proof.
   const candidate = wrapper.fixed ? text.slice(0, wrapper.executable.start)
-    + ' '.repeat(wrapper.executable.end - wrapper.executable.start) + text.slice(wrapper.executable.end) : text;
+    + ' '.repeat(wrapper.executable.end - wrapper.executable.start)
+    + text.slice(wrapper.executable.end, scriptStart) + script
+    + text.slice(scriptStart + wrapper.script.value.length) : text;
+  const segments = scriptSegments ? { ...scriptSegments, candidate, proofs: scriptSegments.proofs.map(proof => ({ ...proof,
+    start: proof.start + scriptStart, end: proof.end + scriptStart,
+    roles: proof.roles.map(word => ({ ...word, start: word.start + scriptStart, end: word.end + scriptStart })),
+  })) } : null;
   return { data: inner ? { schema: 'powershell reader wrapper', shell, roles: words.map(word => ({ ...word,
     role: word === wrapper.executable ? 'shell executable' : word === wrapper.script ? 'literal reader script'
       : word.value === '&' ? 'call operator' : /^-(?:command|c)$/i.test(word.value) ? 'script selector' : 'fixed shell switch',
-  })), inner, consumed: words.at(-1).end } : null, candidate, script: wrapper.script.value };
+  })), inner, consumed: words.at(-1).end } : null, candidate, script, segments,
+  excludedExecutable: wrapper.fixed ? { ...wrapper.executable, role: 'shell executable' } : null };
 }
 
 function visible(text, input) {
