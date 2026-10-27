@@ -53,6 +53,29 @@ function snapshot(dir) {
   walk(dir); return result;
 }
 
+test('literal reader roles and executable script operands follow the closed data boundary', t => {
+  const ctx = fixture(t), before = snapshot(ctx.dir);
+  const held = { state: 'UNDECIDED', rule: 'R4', repository_id: 'synthetic-held' };
+  for (const row of matrix.literal_role_cases) {
+    const input = shell(ctx, row.text);
+    if (row.shell !== undefined) input.tool_input.shell = row.shell;
+    assert.equal(parse(row.text, input).status, row.expected, row.id);
+    for (const actor of matrix.actors) {
+      const decide = stateReader => new gate.ToolGate({ registryOptions: ctx.options, environment: ctx.environment, stateReader }).decide({ ...input, actor });
+      assert.equal(Boolean(decide(() => ({ state: 'DISABLED', rule: 'R1' }))?.deny), row.expected === 'UNKNOWN', row.id + '/' + actor);
+      assert.ok(decide(() => held)?.deny, row.id + ': current guard before data proof');
+      const workdir = { ...input, actor, tool_input: { ...input.tool_input, workdir: ctx.other } };
+      assert.ok(new gate.ToolGate({ registryOptions: ctx.options, stateReader: cwd => cwd === ctx.other ? held : { state: 'DISABLED', rule: 'R1' } }).decide(workdir)?.deny, row.id + ': workdir guard');
+    }
+  }
+  const currentGate = new gate.ToolGate({ registryOptions: ctx.options, stateReader: () => ({ state: 'DISABLED', rule: 'R1' }) });
+  assert.ok(currentGate.decide(shell(ctx, 'rg -e "codex resume toolkit governance enable" fixture.txt'))?.deny, 'owner answer guard precedes reader roles');
+  assert.ok(currentGate.decide({ tool_name: 'Write', cwd: ctx.caller, tool_input: { file_path: ctx.options.registryPath } })?.deny, 'user-state edit guard remains independent');
+  const absoluteHeld = `rg -e "codex resume" "${ctx.other}/fixture.txt"`;
+  assert.ok(new gate.ToolGate({ registryOptions: ctx.options, stateReader: cwd => cwd === ctx.other || cwd.startsWith(ctx.other + path.sep) ? held : { state: 'DISABLED', rule: 'R1' } }).decide(shell(ctx, absoluteHeld))?.deny, 'known absolute path guard precedes reader roles');
+  assert.deepEqual(snapshot(ctx.dir), before);
+});
+
 test('the complete 7,140-row target-authority model runs through ToolGate, independent of actor and held queue', t => {
   const ctx = fixture(t);
   const codes = new Set(Object.values(matrix.codes));
@@ -375,6 +398,21 @@ test('Windows/source-hook UAT: both native entrypoints cross both CLI families w
   const commands = [`claude --resume "${ctx.file}"`, `codex -C "${ctx.target}" exec resume --last`];
   for (const hook of hooks) {
     for (const { text, expected } of matrix.inert_data_cases) invoke(hook, shell(ctx, text), expected === 'UNKNOWN');
+    for (const row of matrix.literal_role_cases.filter(row => ['original-read', 'powershell.exe/pattern', 'get-content', 'findstr', 'pre', 'hostname', 'wrapper/runtime/read', 'wrapper/runtime/location', 'wrapper/runtime/assignment', 'wrapper/runtime/concat', 'wrapper/runtime/method', 'wrapper/cmd', 'cmd-single-control'].includes(row.id))) {
+      for (const tool_name of ['Bash', 'PowerShell']) invoke(hook, { ...shell(ctx, row.text), tool_name, tool_input: { command: row.text, shell: row.shell } }, row.expected === 'UNKNOWN');
+    }
+    for (const row of matrix.literal_role_cases.filter(row => row.id.startsWith('sqag/') || ['segments/native/before', 'segments/native/after', 'segments/script/before', 'segments/script/after', 'segments/reader-path'].includes(row.id))) {
+      for (const tool_name of ['Bash', 'PowerShell']) invoke(hook, { ...shell(ctx, row.text), tool_name, tool_input: { command: row.text, ...(row.shell === undefined ? {} : { shell: row.shell }) } }, row.expected === 'UNKNOWN');
+    }
+    for (const row of matrix.literal_role_cases.filter(row => ['composition/basename/absent', 'composition/runtime/absent', 'composition/basename/powershell.exe', 'composition/runtime/powershell.exe', 'composition/basename/native-before', 'composition/runtime/native-after', 'composition/runtime/computed-after', 'composition/runtime/unsafe', 'composition/runtime/-Unknown', 'composition/runtime/outer-native'].includes(row.id))) {
+      for (const tool_name of ['Bash', 'PowerShell']) invoke(hook, { ...shell(ctx, row.text), tool_name, tool_input: { command: row.text, ...(row.shell === undefined ? {} : { shell: row.shell }) } }, row.expected === 'UNKNOWN');
+    }
+    const literal = matrix.literal_role_cases.find(row => row.id === 'original-read');
+    for (const tool_input of [{ cmd: literal.text }, { command: literal.text.split(' ') }]) invoke(hook, { ...shell(ctx, literal.text), tool_input: { ...tool_input, shell: literal.shell } }, false);
+    invoke(hook, { ...shell(ctx, literal.text), cwd: ctx.other }, true);
+    invoke(hook, shell(ctx, literal.text, { tool_input: { command: literal.text, workdir: ctx.other } }), true);
+    invoke(hook, shell(ctx, `rg -e "codex resume" "${ctx.other}/fixture.txt"`), true);
+    invoke(hook, shell(ctx, 'rg -e "codex resume toolkit governance enable" fixture.txt'), true);
     for (const row of matrix.shell_family_cases.filter(row => row.source)) {
       const text = row.text.replaceAll('{TARGET}', ctx.target).replaceAll('{TRANSCRIPT}', ctx.file);
       const input = shell(ctx, text, { tool_name: hook.name === 'claude' ? 'PowerShell' : 'Bash' });
@@ -408,7 +446,10 @@ test('Windows/source-hook UAT: both native entrypoints cross both CLI families w
     }
     for (const hook of hooks) for (const tool_name of ['Bash', 'PowerShell']) {
       for (const command of commands) invoke(hook, { ...shell(ctx, command), tool_name }, false);
-      for (const command of ['codex resume --last', 'claude --resume fixture', matrix.ordered_atom_cases[0].text]) invoke(hook, { ...shell(ctx, command), tool_name }, true);
+      for (const command of ['codex resume --last', 'claude --resume fixture', matrix.ordered_atom_cases[0].text, 'pwsh -Command "& (\'co\'+\'dex\') (\'res\'+\'ume\')"']) invoke(hook, { ...shell(ctx, command), tool_name }, true);
+      invoke(hook, { ...shell(ctx, 'rg -e "codex resume" repo\\notes.txt'), tool_name }, false);
+      invoke(hook, { ...shell(ctx, matrix.literal_role_cases.find(row => row.id === 'sqag/compound/absent').text), tool_name }, false);
+      invoke(hook, { ...shell(ctx, matrix.literal_role_cases.find(row => row.id === 'composition/runtime/absent').text), tool_name }, false);
     }
   }
   t.diagnostic(JSON.stringify({ sourceCalls, productionDefault: true, byteAndDirectoryEquality: true, nativeDispatchExercised: false }));
@@ -425,9 +466,98 @@ function evidenceProjection() {
   loaded.filename = filename; loaded.paths = Module._nodeModulePaths(path.dirname(filename));
   let source = fs.readFileSync(filename, 'utf8');
   source = source.replace('for (const step of pattern.steps) {', 'for (const step of pattern.steps) { evidenceOperations += 1;');
-  loaded._compile(source + '\nlet evidenceOperations = 0; module.exports = { CANDIDATE_MACHINES, atomPattern, advancePrefixes, quoteAtoms, orderedEvidence, operations: () => evidenceOperations };', filename);
+  const start = source.indexOf('function roleWords('), end = source.indexOf('\nfunction literalWord(', start);
+  const lexer = source.slice(start, end).replace('for (let i = 0; i < text.length;) {', 'for (let i = 0; i < text.length;) { roleVisits += 1;')
+    .replace('value += text[i++];', 'roleVisits += 1; value += text[i++];')
+    .replace('while (i < text.length && text[i] !== quote) i += 1;', 'while (i < text.length && text[i] !== quote) { roleVisits += 1; i += 1; }');
+  source = source.slice(0, start) + lexer + source.slice(end);
+  loaded._compile(source + '\nlet evidenceOperations = 0, roleVisits = 0; module.exports = { CANDIDATE_MACHINES, atomPattern, advancePrefixes, quoteAtoms, orderedEvidence, commandRoles, roleWords, roleVisits: () => roleVisits, operations: () => evidenceOperations };', filename);
   return loaded.exports;
 }
+
+test('complete data proofs retain consumed spans and unknown wrappers retain raw executable evidence', t => {
+  const { commandRoles, roleWords, roleVisits } = evidenceProjection();
+  for (const row of matrix.literal_role_cases) {
+    const input = { tool_input: { ...(row.shell === undefined ? {} : { shell: row.shell }) } };
+    const result = commandRoles(row.text, input);
+    assert.equal(Boolean(result.data), row.proof, row.id);
+    if (result.data) {
+      assert.equal(result.data.consumed, row.text.trimEnd().length, row.id);
+      for (const word of result.data.roles) {
+        assert.ok(word.end > word.start && word.start >= 0 && word.end <= row.text.length);
+        assert.ok(row.text.slice(word.start, word.end).includes(word.quote || word.value));
+      }
+      for (const word of result.data.inner?.roles || result.data.roles) assert.ok(word.role, row.id + ': every word has a role');
+    }
+    if (row.mask) {
+      assert.ok(result.segments?.proofs.length, row.id + ': complete reader segment proof');
+      assert.equal(result.candidate.length, row.text.length);
+      const dataSpans = result.segments.proofs.flatMap(proof => proof.roles.filter(word => word.role.startsWith('literal ') || word.role === 'attached literal pattern' || (word.role === 'reader executable' && /[\\/]/.test(word.value))));
+      if (result.excludedExecutable) dataSpans.push(result.excludedExecutable);
+      for (let i = 0; i < row.text.length; i += 1) {
+        if (result.candidate[i] !== row.text[i]) {
+          assert.equal(result.candidate[i], ' ');
+          assert.ok(dataSpans.some(span => i >= span.start && i < span.end), 'only proved data/executable spans excluded');
+        }
+      }
+      for (const segment of result.segments.unproved) assert.ok(result.candidate.includes(segment), 'all unproved source retained');
+    }
+    if (row.noMask) assert.equal(result.candidate, row.text, row.id + ': unsupported list has no mask');
+    if (['wrapper/unknown-flag', 'wrapper/encoded', 'wrapper/file', 'wrapper/config'].includes(row.id)) assert.equal(result.candidate, row.text, row.id + ': no path masking');
+    if (row.id.startsWith('wrapper/runtime/')) {
+      const span = roleWords(row.text)[1];
+      assert.equal(result.candidate.length, row.text.length);
+      assert.equal(result.candidate.slice(span.start, span.end), ' '.repeat(span.end - span.start));
+      assert.equal(result.candidate.slice(span.end), row.text.slice(span.end), 'all options and script bytes retained');
+    }
+  }
+  const shells = [undefined, 'cmd.exe', 'powershell.exe', 'bash', 'C:/example.test/codex-runtimes/pwsh.exe'];
+  let count = 0;
+  for (const selected of shells) for (const native of ['codex', 'claude', 'resume', 'fork']) {
+    for (const file of [`repo/${native}/notes.txt`, `repo\\${native}\\notes.txt`, `C:/example.test/${native}/notes.txt`, `C:\\example.test\\${native}\\notes.txt`, `//server.example.test/share/${native}/notes.txt`]) {
+      for (const quote of ['', '"']) for (const prefix of ['rg -n -e "codex resume"', 'rg --regexp=claude --regexp=resume --']) {
+        const text = prefix + ' ' + quote + file + quote;
+        const input = { tool_input: { ...(selected === undefined ? {} : { shell: selected }) } };
+        assert.ok(commandRoles(text, input).data, text);
+        assert.equal(parse(text, input).status, 'NOT_CONTINUATION', text); count += 1;
+      }
+    }
+  }
+  for (const ending of ['\\', '\\"', '\\ ', '\\&', '\\$', '\\`']) {
+    const text = 'rg -e "codex resume" repo' + ending;
+    assert.equal(commandRoles(text, { tool_input: {} }).data, null, 'ambiguous escape has no proof');
+  }
+  for (const flag of ['--pre', '--hostname-bin', '--unknown', '-ni', '-ecodex']) {
+    assert.equal(commandRoles('rg ' + flag + ' "codex resume" fixture.txt', { tool_input: {} }).data, null);
+  }
+  for (const name of ['-n', '--line-number', '-i', '--ignore-case', '-F', '--fixed-strings', '-l', '--files-with-matches', '--hidden', '--no-ignore', '--no-config', '--help']) {
+    assert.ok(commandRoles('rg ' + name + ' -e "codex resume" fixture.txt', { tool_input: {} }).data, name);
+  }
+  for (const text of ['rg -e "codex resume" ' + 'x'.repeat(LIMITS.command), 'pwsh -Command "' + 'x'.repeat(LIMITS.command) + '"']) {
+    assert.equal(commandRoles(text, { tool_input: {} }).data, null, 'no over-limit proof or truncation');
+  }
+  for (const prefix of ['rg -e "codex resume" ', 'rg -e "', 'pwsh -Command "', 'rg ']) {
+    const text = (prefix + 'x'.repeat(LIMITS.command)).slice(0, LIMITS.command - 1) + (prefix.endsWith('"') ? '"' : 'x');
+    const before = roleVisits(); commandRoles(text, { tool_input: {} });
+    assert.ok(roleVisits() - before <= 4 * text.length, 'bounded single-layer lexical acquisition');
+  }
+  const wrapperPrefix = 'pwsh -Command "git status; rg -e codex ';
+  const composed = wrapperPrefix + 'x'.repeat(LIMITS.command - wrapperPrefix.length - 1) + '"';
+  const beforeComposed = roleVisits(), composedRoles = commandRoles(composed, { tool_input: {} });
+  assert.ok(composedRoles.segments?.proofs.length);
+  assert.equal(composedRoles.candidate.length, composed.length);
+  assert.ok(roleVisits() - beforeComposed <= 4 * composed.length, 'bounded composed lexical acquisition');
+  assert.equal(parse(composed, { tool_input: {} }).status, 'NOT_CONTINUATION');
+  for (const { word } of evidenceProjection().CANDIDATE_MACHINES) for (let cut = 1; cut < word.length; cut += 1) {
+    for (const body of [`& ('${word.slice(0, cut)}'.ToString()+'${word.slice(cut)}')`, `& (' ${word.slice(0, cut)}'.Trim()+'${word.slice(cut)}')`, `& ('${word.slice(0, cut)}{0}' -f '${word.slice(cut)}')`]) {
+      for (const prefix of ['pwsh', '"C:/example.test/codex-runtimes/pwsh.exe"']) {
+        const text = prefix + ' -Command "' + body + '"';
+        assert.equal(parse(text, { tool_input: {} }).status, 'UNKNOWN', 'quoted script role retains every fixed spelling split');
+      }
+    }
+  }
+  t.diagnostic(JSON.stringify({ pathRoleProperties: count, wrapperLayers: 1, nativeAdmissionGrammarChanged: false }));
+});
 
 test('ordered evidence retains every partition and arbitrary prefix state under inserted atoms', t => {
   const { CANDIDATE_MACHINES, atomPattern, advancePrefixes } = evidenceProjection();
@@ -539,6 +669,10 @@ test('ordered-atom closure table is UNKNOWN before target proof across placement
   try {
     assert.equal(new gate.ToolGate({ registryOptions: ctx.options, stateReader }).decide(shell(ctx, 'codex exec resume --last')), null);
     assert.ok(new gate.ToolGate({ registryOptions: ctx.options, stateReader }).decide(shell(ctx, matrix.ordered_atom_cases[0].text))?.deny);
+    for (const id of ['original-read', 'sqag/single/absent', 'sqag/compound/absent', 'wrapper/runtime/assignment', 'wrapper/runtime/concat', 'composition/runtime/absent', 'composition/runtime/native-after', 'composition/runtime/computed-after']) {
+      const row = matrix.literal_role_cases.find(row => row.id === id);
+      assert.equal(Boolean(new gate.ToolGate({ registryOptions: ctx.options, stateReader }).decide({ ...shell(ctx, row.text), tool_input: { command: row.text, ...(row.shell === undefined ? {} : { shell: row.shell }) } })?.deny), row.expected === 'UNKNOWN', id);
+    }
   } finally { fs.readFileSync = originalRead; }
   assert.equal(queueReads, 0, 'no held-queue read on verified or computed paths');
   assert.deepEqual(snapshot(ctx.dir), before);

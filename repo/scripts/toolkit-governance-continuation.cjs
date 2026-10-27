@@ -134,7 +134,7 @@ function legacyTemplateEvidence(text) {
 
 // Classification is intentionally broader than admission. An embedded/wrapped or malformed
 // invocation must not fall out of enforcement merely because the literal reader cannot parse it.
-function broadVisible(text) {
+function broadVisible(text, executableScript = false) {
   const direct = (/\bclaude(?:-code)?(?:\.(?:exe|cmd|ps1))?\b/i.test(text)
       && /--(?:resume|continue|session-id|fork-session)\b|(?:^|[\s;&|()'"`])-(?!-)[a-z]*[rc][a-z]*(?=$|[\s=;&|()'"`])/i.test(text))
     || (/\bcodex(?:\.(?:exe|cmd|ps1))?\b/i.test(text) && /\b(?:resume|fork)\b/i.test(text));
@@ -151,7 +151,7 @@ function broadVisible(text) {
   // Reuse the reader's boundary rather than maintaining a second syntax allowlist.
   // Pipeline/redirection punctuation alone does not build a spelling. Whole visible
   // continuations still use the unmodified text and strict reader below.
-  if (!tokens(text.replace(/[|<>]/g, ' '), { literalData: true })) {
+  if (executableScript || !tokens(text.replace(/[|<>]/g, ' '), { literalData: true })) {
     // Detection only: join visible literal fragments across expression punctuation,
     // format placeholders and format/join operators. Never evaluate the expression
     // or pass this over-inclusive spelling to the target reader. Fully opaque runtime
@@ -179,7 +179,234 @@ function knownShell(input) {
   return shell === undefined || (typeof shell === 'string'
     && /^(?:cmd|powershell|pwsh|bash|sh)(?:\.exe)?$/i.test(shell.split(/[\\/]/).pop()));
 }
+
+function roleShell(input) {
+  const shell = input?.tool_input?.shell;
+  if (shell === undefined) return 'common';
+  if (!knownShell(input)) return null;
+  const name = shell.split(/[\\/]/).pop().toLowerCase().replace(/\.exe$/, '');
+  return /^(?:powershell|pwsh)$/.test(name) ? 'powershell' : name === 'cmd' ? 'cmd' : 'posix';
+}
+
+// This separate lexer proves operand roles, never native argv. Offsets and quote ownership
+// stay with every word. No operators, concatenation, escaped quotes or partial consumption.
+function roleWords(text) {
+  if (!text || text.length > LIMITS.command || /[^\x20-\x7e]/.test(text)) return null;
+  const words = [];
+  for (let i = 0; i < text.length;) {
+    if (text[i] === ' ') { i += 1; continue; }
+    const start = i; let prefix = '', quote = null, value = '';
+    if (text[i] === '&' && words.length === 0 && text[i + 1] === ' ') { words.push({ start, end: ++i, value: '&', quote, prefix }); continue; }
+    while (i < text.length && text[i] !== ' ' && text[i] !== '"' && text[i] !== "'") {
+      if (!/[a-z0-9_./:\\=+\-]/i.test(text[i])) return null;
+      value += text[i++];
+    }
+    if (text[i] === '"' || text[i] === "'") {
+      if (value && !/^(?:--regexp=|\/c:)$/i.test(value)) return null;
+      prefix = value; quote = text[i++]; const opening = i;
+      while (i < text.length && text[i] !== quote) i += 1;
+      if (i === text.length) return null;
+      value += text.slice(opening, i++);
+      if (i < text.length && text[i] !== ' ') return null;
+    }
+    if (i === start) return null;
+    words.push({ start, end: i, value, quote, prefix });
+  }
+  return words.length ? words : null;
+}
+
+function literalWord(word, shell) {
+  if (!word || !shell || /[$`%!^]/.test(word.value)) return false;
+  // cmd does not protect controls with single quotes. The common subset can still
+  // prove a simple, unspaced pathname whose quote characters cannot introduce code.
+  if (word.quote === "'" && !['powershell', 'posix'].includes(shell)
+    && !/^[a-z0-9_./:\\-]+$/i.test(word.value)) return false;
+  // POSIX backslashes may remove ordinary path characters but cannot introduce code.
+  // A slash next to a quote, whitespace, operator or expansion earns no data proof.
+  for (let i = 0; i < word.value.length; i += 1) {
+    if (word.value[i] === '\\' && !/[a-z0-9_./:\\-]/i.test(word.value[i + 1] || '')) return false;
+  }
+  return true;
+}
+
+// Exact rg help entries: -e/--regexp (patterns), -n/--line-number, -i/--ignore-case,
+// -F/--fixed-strings, -l/--files-with-matches, --files, --hidden, --no-ignore,
+// --help and --no-config. --pre and --hostname-bin execute programs and are absent.
+const RG_DATA_SWITCHES = Object.freeze(['-n', '--line-number', '-i', '--ignore-case', '-F', '--fixed-strings', '-l', '--files-with-matches', '--files', '--hidden', '--no-ignore', '--help', '--no-config']);
+// Fixed schemas from Microsoft's findstr, type and Get-Content command references.
+const FINDSTR_DATA_SWITCHES = Object.freeze(['/n', '/i', '/l', '/r', '/s', '/m']);
+function readerProof(words, shell) {
+  if (!shell || !words?.length || words.some(word => !literalWord(word, shell))) return null;
+  let offset = 0;
+  if (words[0].value === '&') {
+    if (!['powershell', 'common'].includes(shell) || !words[1]?.quote) return null;
+    offset = 1;
+  }
+  const executable = words[offset], name = executable?.value.split(/[\\/]/).pop().toLowerCase();
+  const args = words.slice(offset + 1), roles = words.map(word => ({ ...word, role: word === executable ? 'reader executable' : 'call operator' }));
+  const mark = (n, role) => { roles[offset + 1 + n].role = role; };
+  if (/^rg(?:\.exe)?$/.test(name || '')) {
+    let pattern = false, mode = false, ended = false;
+    for (let n = 0; n < args.length; n += 1) {
+      const value = args[n].value;
+      if (!ended && value === '--') { ended = true; mark(n, 'option delimiter'); continue; }
+      if (!ended && RG_DATA_SWITCHES.includes(value)) { if (['--files', '--help'].includes(value)) mode = true; mark(n, 'search switch'); continue; }
+      if (!ended && ['-e', '--regexp'].includes(value)) {
+        mark(n, 'pattern option'); if (!args[++n] || !args[n].value) return null;
+        pattern = true; mark(n, 'literal pattern'); continue;
+      }
+      if (!ended && value.startsWith('--regexp=')) {
+        if (!value.slice(9)) return null;
+        pattern = true; mark(n, 'attached literal pattern'); continue;
+      }
+      if (!ended && value.startsWith('-')) return null;
+      mark(n, pattern || mode ? 'literal path' : 'literal pattern'); pattern = true;
+    }
+    if (!pattern && !mode) return null;
+  } else if (/^findstr(?:\.exe)?$/.test(name || '')) {
+    let pattern = false, paths = false;
+    for (let n = 0; n < args.length; n += 1) {
+      const value = args[n].value, lower = value.toLowerCase();
+      if (!pattern && FINDSTR_DATA_SWITCHES.includes(lower)) { mark(n, 'search switch'); continue; }
+      if (!paths && lower.startsWith('/c:') && value.length > 3) { pattern = true; mark(n, 'attached literal pattern'); continue; }
+      if (value.startsWith('/')) return null;
+      mark(n, pattern ? 'literal path' : 'literal pattern'); if (pattern) paths = true; pattern = true;
+    }
+    if (!pattern) return null;
+  } else if (name === 'get-content' || (shell === 'powershell' && ['cat', 'type'].includes(name))) {
+    let paths = 0;
+    const seen = new Set();
+    for (let n = 0; n < args.length; n += 1) {
+      const value = args[n].value, lower = value.toLowerCase();
+      if (['-raw', '-literalpath', '-path', '-totalcount', '-tail'].includes(lower)) {
+        if (seen.has(lower)) return null; seen.add(lower); mark(n, 'content option');
+        if (lower === '-raw') continue;
+        if (!args[++n]) return null;
+        if (['-totalcount', '-tail'].includes(lower)) {
+          if (!/^\d+$/.test(args[n].value)) return null;
+          mark(n, 'literal count'); continue;
+        }
+        paths += 1;
+      } else if (value.startsWith('-')) return null;
+      else paths += 1;
+      // Custom providers and expression/array binding are outside this filesystem subset.
+      if (!args[n].value || /[\[\],]/.test(args[n].value)
+        || (args[n].value.includes(':') && !/^[a-z]:[\\/][^:]*$/i.test(args[n].value))) return null;
+      mark(n, 'literal filesystem path');
+    }
+    if (paths !== 1) return null;
+  } else if (name === 'type' && shell === 'cmd') {
+    if (!args.length || args.some(word => !word.value || /^[/-]/.test(word.value))) return null;
+    args.forEach((_, n) => mark(n, 'literal path'));
+  } else return null;
+  return { schema: name, shell, roles, consumed: words.at(-1).end };
+}
+
+// Recognise a fixed wrapper shape, not arbitrary scripts or native admission. Unknown
+// flags may still expose a script for refusal, but never exclude executable-path evidence.
+function wrapperRoles(words, shell) {
+  if (!words?.length) return null;
+  const offset = words[0].value === '&' ? 1 : 0, executable = words[offset];
+  if (!executable) return null;
+  const name = executable.value.split(/[\\/]/).pop().toLowerCase().replace(/\.exe$/, '');
+  if (!['powershell', 'pwsh', 'cmd', 'bash', 'sh'].includes(name)) return null;
+  const powershell = ['powershell', 'pwsh'].includes(name);
+  const selector = value => powershell ? /^-(?:command|c)$/i.test(value) : name === 'cmd' ? /^\/c$/i.test(value) : /^-(?:c|lc)$/.test(value);
+  const index = words.findIndex((word, n) => n > offset && selector(word.value));
+  if (index < 0 || !words[index + 1]) return null;
+  const script = words[index + 1], flags = words.slice(offset + 1, index);
+  const fixed = Boolean(index === words.length - 2 && shell && literalWord(executable, shell)
+    && (!offset || (['common', 'powershell'].includes(shell) && executable.quote))
+    && flags.every(word => powershell && !word.quote && /^-(?:noprofile|noninteractive)$/i.test(word.value))
+    && new Set(flags.map(word => word.value.toLowerCase())).size === flags.length
+    && !words[index].quote && !script.prefix);
+  return { executable, script, fixed, powershell };
+}
+
+// Complete top-level semicolon lists only. Every segment must share the literal
+// lexical boundary; no masking inside groups, expansions, pipes or redirections.
+function readerSegments(text, shell) {
+  if (!shell || !text || text.length > LIMITS.command || /[^\x20-\x7e]/.test(text)) return null;
+  const segments = []; let start = 0, quote = null;
+  for (let i = 0; i < text.length; i += 1) {
+    const c = text[i];
+    if (quote) {
+      if (c === '\\' && text[i + 1] === quote) return null;
+      if (c === quote) { quote = null; if (i + 1 < text.length && !/[ ;]/.test(text[i + 1])) return null; }
+      continue;
+    }
+    if (c === '"' || c === "'") { quote = c; continue; }
+    if (c === ';') { segments.push({ start, end: i }); start = i + 1; continue; }
+    if (!/[a-z0-9_./:\\=+ \-]/i.test(c)) return null;
+  }
+  if (quote || !segments.length) return null;
+  segments.push({ start, end: text.length });
+  const spans = [], unproved = [], proofs = [];
+  for (const segment of segments) {
+    const source = text.slice(segment.start, segment.end), words = roleWords(source);
+    if (!words || words.some(word => !literalWord(word, shell))) return null;
+    const proof = readerProof(words, shell);
+    if (!proof) { unproved.push(source); continue; }
+    const roles = proof.roles.map(word => ({ ...word, start: word.start + segment.start, end: word.end + segment.start }));
+    proofs.push({ ...proof, roles, start: segment.start, end: segment.end });
+    for (const word of roles) {
+      // A qualified reader's exact non-native executable span has the same evidence
+      // role as a qualified wrapper path. All options and separators remain intact.
+      if (word.role.startsWith('literal ') || word.role === 'attached literal pattern'
+        || (word.role === 'reader executable' && /[\\/]/.test(word.value))) spans.push(word);
+    }
+  }
+  if (!proofs.length) return null;
+  const parts = []; let at = 0;
+  for (const span of spans) { parts.push(text.slice(at, span.start), ' '.repeat(span.end - span.start)); at = span.end; }
+  parts.push(text.slice(at));
+  return { candidate: parts.join(''), proofs, unproved };
+}
+
+function commandRoles(text, input) {
+  const shell = roleShell(input), words = roleWords(text);
+  const data = readerProof(words, shell);
+  if (data) return { data, candidate: text, script: null };
+  const wrapper = wrapperRoles(words, shell);
+  if (!wrapper) {
+    const segments = readerSegments(text, shell);
+    return { data: null, candidate: segments?.candidate ?? text, script: null, segments };
+  }
+  // One transparent PowerShell layer may prove a complete literal reader. Expansion in
+  // either layer defeats that proof; scripts themselves are never recursively admitted.
+  const transparent = wrapper.fixed && wrapper.powershell && literalWord(wrapper.script, shell);
+  const inner = transparent ? readerProof(roleWords(wrapper.script.value), 'powershell') : null;
+  const scriptSegments = transparent && !inner ? readerSegments(wrapper.script.value, 'powershell') : null;
+  const script = scriptSegments?.candidate ?? wrapper.script.value;
+  const scriptStart = wrapper.script.start + (wrapper.script.quote ? 1 : 0);
+  // Compose the same proved operand view into both the outer source and the executable
+  // script. Otherwise an outer raw scan would reintroduce data excluded by the inner proof.
+  const candidate = wrapper.fixed ? text.slice(0, wrapper.executable.start)
+    + ' '.repeat(wrapper.executable.end - wrapper.executable.start)
+    + text.slice(wrapper.executable.end, scriptStart) + script
+    + text.slice(scriptStart + wrapper.script.value.length) : text;
+  const segments = scriptSegments ? { ...scriptSegments, candidate, proofs: scriptSegments.proofs.map(proof => ({ ...proof,
+    start: proof.start + scriptStart, end: proof.end + scriptStart,
+    roles: proof.roles.map(word => ({ ...word, start: word.start + scriptStart, end: word.end + scriptStart })),
+  })) } : null;
+  return { data: inner ? { schema: 'powershell reader wrapper', shell, roles: words.map(word => ({ ...word,
+    role: word === wrapper.executable ? 'shell executable' : word === wrapper.script ? 'literal reader script'
+      : word.value === '&' ? 'call operator' : /^-(?:command|c)$/i.test(word.value) ? 'script selector' : 'fixed shell switch',
+  })), inner, consumed: words.at(-1).end } : null, candidate, script, segments,
+  excludedExecutable: wrapper.fixed ? { ...wrapper.executable, role: 'shell executable' } : null };
+}
+
 function visible(text, input) {
+  const roles = commandRoles(text, input);
+  if (roles.data) return false;
+  // Only the proved non-native executable span is excluded. Never OR the raw path
+  // back into evidence; keep the complete executable script, even inside outer quotes.
+  text = roles.candidate;
+  if (roles.script && broadVisible(roles.script, true)) return true;
+  for (const segment of roles.segments?.unproved || []) {
+    const wrapper = wrapperRoles(roleWords(segment), roleShell(input));
+    if (broadVisible(segment) || (wrapper && broadVisible(wrapper.script.value, true))) return true;
+  }
   if (!broadVisible(text)) return false;
   if (!knownShell(input)) return true;
   const lexed = tokens(text, { literalData: true });

@@ -1,5 +1,12 @@
 # Toolkit Changelog
 
+## 3.15.17 (literal reads and shell script operands)
+
+- Fixed ordinary literal reader patterns and Windows file paths being mistaken for continuation commands. Only complete fixed reader schemas receive the data proof; subprocess options, unknown flags and executable syntax remain conservative.
+- Proved reader operands also remain data inside bounded top-level semicolon lists, including Git metadata reads followed by a public Toolkit file read, both directly and inside one qualified PowerShell command wrapper. Every separator and unproved executable segment retains independent detection.
+- Recognised shell command operands are inspected as executable source even when quoted. Proved non-native wrapper executable paths no longer contribute false host evidence; native target verification and every generic guard retain their existing rules.
+- Added operand-role, wrapper, escape and source-hook regressions with synthetic non-mutation checks. Installed interception and ordinary-read replay remain separate acceptance steps.
+
 ## 3.15.16 (continuation target isolation)
 
 ### Governance continuations
