@@ -497,7 +497,7 @@ function evidenceProjection() {
     .replace('value += text[i++];', 'roleVisits += 1; value += text[i++];')
     .replace('while (i < text.length && text[i] !== quote) i += 1;', 'while (i < text.length && text[i] !== quote) { roleVisits += 1; i += 1; }');
   source = source.slice(0, start) + lexer + source.slice(end);
-  loaded._compile(source + '\nlet evidenceOperations = 0, roleVisits = 0; module.exports = { CANDIDATE_MACHINES, atomPattern, advancePrefixes, quoteAtoms, orderedEvidence, commandRoles, roleWords, roleVisits: () => roleVisits, operations: () => evidenceOperations };', filename);
+  loaded._compile(source + '\nlet evidenceOperations = 0, roleVisits = 0; module.exports = { CANDIDATE_MACHINES, atomPattern, advancePrefixes, quoteAtoms, orderedEvidence, commandRoles, roleWords, pythonBindingBarriers, constructionFragments, roleVisits: () => roleVisits, operations: () => evidenceOperations };', filename);
   return loaded.exports;
 }
 
@@ -819,7 +819,7 @@ test('acquisition schema and structural reader resources stay within the closed 
 
 
 // These anonymous equivalents exercise evidence roles only; no payload is dispatched.
-test('evidence boundary model keeps separate source words and complete Git operands distinct', t => {
+test('evidence boundary model proves only owned binding separators and complete Git operands', t => {
   const model = matrix.evidence_boundary_model, api = evidenceProjection();
   const input = selected => ({ tool_input: selected === null ? {} : { shell: selected } });
   let rows = 0, masks = 0;
@@ -843,9 +843,8 @@ test('evidence boundary model keeps separate source words and complete Git opera
       for (const role of proof.roles) assert.ok(role.role);
     }
   }
-  for (const [id, body] of model.bodies) for (const selected of model.shells) {
-    for (const text of [body, "@'\n" + body + "\n'@ | python -", '@"\n' + body + '\n"@ | python -',
-      'python -c "' + body + '"', "python - <<'PY'\n" + body + '\nPY']) check('foreign/' + id, text, 'NOT_CONTINUATION', selected);
+  for (const [id, text, expected] of model.foreign_ingress_cases) for (const [n, selected] of model.shells.entries()) {
+    check('foreign/' + id, text, expected[n], selected);
   }
   for (const operation of model.native) for (const selected of model.shells) {
     const body = "@'\nfor key in items:\n    pass\n'@ | python -";
@@ -903,25 +902,191 @@ test('evidence boundary model keeps separate source words and complete Git opera
   const long = 'git push origin HEAD:refs/heads/codex/' + 'x'.repeat(LIMITS.command);
   assert.equal(api.commandRoles(long, input(null)).segments, null); assert.equal(parse(long, input(null)).status, 'UNKNOWN');
   const witness = "@'\nv={'example':1}\nfor key,value in v.items():\n    print(key,value)\n'@ | python -";
-  for (const selected of model.shells) check('restart-witness-equivalent', witness, 'NOT_CONTINUATION', selected);
+  for (const selected of model.shells) check('restart-witness-equivalent', witness,
+    [null, 'powershell.exe', 'pwsh'].includes(selected) ? 'NOT_CONTINUATION' : 'UNKNOWN', selected);
   t.diagnostic(JSON.stringify({ rows, masks, payloadsDispatched: false }));
 });
 
-test('contiguous evidence keeps whitespace barriers while punctuation and marked constructions stay conservative', t => {
+test('contiguous evidence restores conservative collapse for every unproved primitive separator', t => {
   const { CANDIDATE_MACHINES } = evidenceProjection(); let rows = 0;
   for (const { word } of CANDIDATE_MACHINES) for (let cut = 1; cut < word.length; cut += 1) {
     for (const separator of [' ', '\t', '\n', '\r\n', ';', '|', '(', ')', '[', ']', ',', ':', '+', '.', '/']) {
       const text = '(' + word.slice(0, cut) + separator + word.slice(cut) + ')';
       // Independent finite reference, including the inherited fixed format/join step.
-      const reference = [...text.replace(/-(?:f|join)\b/gi, '')].map(c => /[a-z0-9-]/i.test(c) ? c : /[ \x09-\x0d]/.test(c) ? ' ' : '').join('');
+      const reference = text.replace(/-(?:f|join)\b/gi, '').replace(/[^a-z0-9-]/gi, '');
       const expected = /claude|codex|resume|fork|--(?:continue|session-id)/i.test(reference) ? 'UNKNOWN' : 'NOT_CONTINUATION';
       assert.equal(parse(text, { tool_input: {} }).status, expected, word + '/' + cut + '/' + JSON.stringify(separator)); rows += 1;
     }
   }
-  // VT/FF remain barriers in the broad projection even though they cannot gain operand proof.
-  for (const separator of ['\v', '\f']) assert.equal(parse('(for' + separator + 'key)', { tool_input: {} }).status, 'NOT_CONTINUATION');
+  for (const separator of ['\v', '\f']) assert.equal(parse('(for' + separator + 'key)', { tool_input: {} }).status, 'UNKNOWN');
   assert.equal(rows, 2400);
   t.diagnostic(JSON.stringify({ primitiveRows: rows }));
+});
+
+test('construction closure restores explicit, implicit and pipeline evidence on both envelopes', t => {
+  const ctx = fixture(t), before = snapshot(ctx.dir), model = matrix.evidence_boundary_model;
+  let rows = 0, confirmed = 0, spawns = 0;
+  const resolver = new ContinuationResolver({ environment: ctx.environment,
+    spawn() { spawns += 1; assert.fail('construction evidence must not acquire native metadata'); } });
+  const guard = new gate.ToolGate({ registryOptions: ctx.options, environment: ctx.environment,
+    stateReader: () => ({ state: 'DISABLED', rule: 'R1' }), continuationResolver: resolver });
+  for (const [kind, cases] of [['confirmed', model.confirmed_constructions], ['sibling', model.construction_siblings]]) {
+    for (const [id, text] of cases) for (const selected of model.shells) for (const tool_name of ['Bash', 'PowerShell']) {
+      const input = { ...shell(ctx, text), tool_name };
+      if (selected !== null) input.tool_input.shell = selected;
+      assert.equal(parse(text, input).status, 'UNKNOWN', kind + '/' + id + '/' + selected);
+      assert.ok(guard.decide(input)?.deny, kind + '/' + id + ': ToolGate denial');
+      rows += 1; if (kind === 'confirmed') confirmed += 1;
+    }
+  }
+  assert.equal(confirmed, 48); assert.equal(rows, 324); assert.equal(spawns, 0);
+  assert.deepEqual(snapshot(ctx.dir), before);
+  t.diagnostic(JSON.stringify({ constructionRows: rows, confirmed, metadataSpawns: spawns, payloadsDispatched: false }));
+});
+
+test('binding closure changes only proved horizontal offsets and never hides source or native neighbours', t => {
+  const model = matrix.evidence_boundary_model, api = evidenceProjection();
+  const stdin = body => "@'\n" + body + "\n'@ | python -";
+  const profile = selected => selected === null ? 'common' : ['powershell.exe', 'pwsh'].includes(selected) ? 'powershell'
+    : selected === 'cmd.exe' ? 'cmd' : 'posix';
+  let positive = 0, unproved = 0, neighbours = 0;
+  for (const [id, body, count] of model.binding_cases) for (const selected of [null, 'powershell.exe', 'pwsh']) {
+    const text = stdin(body), spans = api.pythonBindingBarriers(text, profile(selected));
+    assert.equal(spans.length, count, id);
+    for (const span of spans) {
+      assert.match(text.slice(span.start, span.end), /^[ \t]+$/);
+      assert.equal(text.slice(span.start - 3, span.start), 'for');
+      assert.match(text.slice(span.end), /^[a-z_]/i);
+    }
+    assert.equal(parse(text, { tool_input: selected === null ? {} : { shell: selected } }).status, 'NOT_CONTINUATION', id);
+    assert.equal((api.constructionFragments(text, profile(selected)).match(/\0/g) || []).length,
+      spans.reduce((total, span) => total + span.end - span.start, 0), id + ': only proved separators become barriers');
+    positive += 1;
+  }
+  for (const [id, source, expected, padding] of model.unproved_binding_cases) for (const [n, selected] of model.shells.entries()) {
+    const text = padding ? source.replace("\n'@", '\n' + 'x'.repeat(padding) + "\n'@") : source;
+    assert.deepEqual(api.pythonBindingBarriers(text, profile(selected)), [], id);
+    assert.equal(parse(text, { tool_input: selected === null ? {} : { shell: selected } }).status, expected[n], id);
+    unproved += 1;
+  }
+  for (const [id, body] of model.embedded_neighbours) for (const selected of model.shells) {
+    assert.equal(parse(stdin(body), { tool_input: selected === null ? {} : { shell: selected } }).status, 'UNKNOWN', id);
+    neighbours += 1;
+  }
+  for (const [id, text] of model.confirmed_constructions) for (const selected of model.shells) {
+    const ordinary = stdin('for k in items:\n    pass');
+    for (const command of [text + '; ' + ordinary, ordinary + '; ' + text, ordinary + ' | ' + text]) {
+      assert.equal(parse(command, { tool_input: selected === null ? {} : { shell: selected } }).status, 'UNKNOWN', id);
+      neighbours += 1;
+    }
+  }
+  // Lexical proof is deliberately narrower than Python or PowerShell acceptance.
+  for (const prefix of ['r', 'u', 'b', 'br', 'rb', 'R', 'BR']) {
+    assert.equal(api.pythonBindingBarriers(stdin('x=' + prefix + '"unrelated"\nfor k in items:\n    pass'), 'common').length, 1, prefix);
+  }
+  for (const prefix of ['f', 't', 'fr', 'rf', 'tr', 'rt', 'unknown']) {
+    assert.deepEqual(api.pythonBindingBarriers(stdin('x=' + prefix + '"unrelated"\nfor k in items:\n    pass'), 'common'), [], prefix);
+  }
+  for (const body of ['x="for k in items"', "x='for k in items'", 'x="""for k in items"""', '# for k in items',
+    'for True in items:pass', 'for k, in items:pass', 'for k[0] in items:pass', 'for k.x in items:pass',
+    'for (k) in items:pass', 'for k\nin items:pass', 'for k # comment\nin items:pass',
+    '# first\n# coding=unicode_escape\nfor k in items:pass', 'for k in items:\r    pass',
+    ...['\0', '\v', '\f', '\x01', '\x7f', '\u2603', '$', '%', '!', '`', '^', '&'].map(c => 'for k in items:\n    x="' + c + '"')]) {
+    assert.deepEqual(api.pythonBindingBarriers(stdin(body), 'common'), [], JSON.stringify(body));
+  }
+  const ordinary = stdin('for k in items:\n    pass');
+  for (const text of ['prefix ' + ordinary, ordinary + ' suffix', ordinary + ' | python -',
+    ordinary.replace('python -', 'python -u -'), ordinary.replace('python -', 'python3 -x -'),
+    ordinary.replace('python -', 'C:/example.test/python.exe -'), ordinary.replace('python -', 'node -')]) {
+    assert.deepEqual(api.pythonBindingBarriers(text, 'common'), [], 'complete exact consumer required');
+  }
+  for (const consumer of ['python -', 'python3 -', 'python.exe -', 'python3.exe -', 'PYTHON3.EXE -']) {
+    assert.equal(api.pythonBindingBarriers(ordinary.replace('python -', consumer), 'common').length, 1, consumer);
+  }
+  assert.equal(api.constructionFragments('(co\0dex) (res\0ume)', 'common').includes('\0'), false, 'original NUL cannot impersonate an internal barrier');
+  assert.equal(positive, 21); assert.equal(unproved, 120); assert.equal(neighbours, 114);
+  t.diagnostic(JSON.stringify({ bindingRows: positive, unprovedRows: unproved, nativeNeighbours: neighbours, payloadsDispatched: false }));
+});
+
+test('source-hook construction delta uses production defaults and preserves every queue mode', t => {
+  const model = matrix.evidence_boundary_model, trace = fixture(t);
+  const preload = path.join(trace.dir, 'queue-trap.cjs'), traceFile = path.join(trace.dir, 'queue-trace.json');
+  fs.writeFileSync(preload, `'use strict';
+const fs = require('node:fs'); let accesses = 0;
+for (const name of ['readFileSync', 'readdirSync', 'statSync', 'lstatSync', 'existsSync']) {
+  const original = fs[name]; fs[name] = function(file, ...args) {
+    if (String(file).includes('held-prompts.v1.json')) { accesses += 1; throw Error('SYNTHETIC_QUEUE_ACCESS'); }
+    return original.call(this, file, ...args);
+  };
+}
+process.on('exit', () => fs.writeFileSync(process.env.SYNTHETIC_QUEUE_TRACE, JSON.stringify({ accesses })));
+`);
+  const hooks = [
+    { name: 'claude', file: 'toolkit-governance-hook.cjs', args: ['--event', 'PreToolUse'], deniedExit: 0 },
+    { name: 'codex', file: 'toolkit-codex-helper-hook.cjs', args: [], deniedExit: 2 },
+  ];
+  const stdin = body => "@'\n" + body + "\n'@ | python -";
+  let sourceCalls = 0, deltaCalls = 0, smokeCalls = 0;
+  for (const mode of ['absent', 'unrelated', 'rootless', 'sessionless', 'stale', 'malformed', 'unreadable']) {
+    const ctx = fixture(t), env = { ...process.env, ...ctx.environment, GIT_CONFIG_NOSYSTEM: '1',
+      GIT_CONFIG_GLOBAL: path.join(ctx.home, 'absent-gitconfig'), SYNTHETIC_QUEUE_TRACE: traceFile };
+    for (const key of Object.keys(env)) if (/^(?:TOOLKIT_|CLAUDE_CODE_REMOTE|CLAUDE_ENV_FILE|NODE_OPTIONS)/.test(key)) delete env[key];
+    for (const [cwd, name] of [[ctx.caller, 'caller'], [ctx.other, 'held']]) {
+      for (const args of [['init', '--quiet'], ['remote', 'add', 'origin', 'https://github.com/example-owner/' + name + '.git']]) {
+        const result = spawnSync('git', ['-c', 'core.fsmonitor=false', '-C', cwd, ...args], { env, encoding: 'utf8', windowsHide: true, timeout: 10000 });
+        assert.equal(result.status, 0, 'synthetic fixture git: ' + result.stderr);
+      }
+    }
+    gate.writeGovernanceDecision(ctx.caller, 'enable', { registryOptions: ctx.options });
+    const heldFile = path.join(path.dirname(ctx.options.registryPath), gate.HELD_BASENAME);
+    if (mode === 'malformed') fs.writeFileSync(heldFile, '{broken');
+    else if (mode === 'unreadable') fs.mkdirSync(heldFile);
+    else if (mode !== 'absent') new gate.HeldPrompts({ registryOptions: ctx.options,
+      ...(mode === 'stale' ? { now: () => new Date('2020-01-01T00:00:00Z') } : {}) })
+      .add('synthetic-queue', 'synthetic held fixture', ['rootless', 'sessionless'].includes(mode) ? null : 'synthetic-session', {}, mode === 'rootless' ? null : ctx.other);
+    function invoke(hook, tool_name, id, command, selected, expected) {
+      const before = snapshot(ctx.dir), input = { ...shell(ctx, command), tool_name,
+        tool_input: { command, ...(selected === null ? {} : { shell: selected }) } };
+      const result = spawnSync(process.execPath, ['--require', preload, path.join(root, 'repo/scripts', hook.file), ...hook.args], {
+        input: JSON.stringify(input), env, cwd: ctx.caller, encoding: 'utf8', windowsHide: true, timeout: 10000, maxBuffer: 256 * 1024,
+      });
+      const denied = expected === 'UNKNOWN', label = hook.name + '/' + mode + '/' + id + '/' + selected;
+      assert.equal(result.status, denied ? hook.deniedExit : 0, label + ': exit');
+      const output = result.stdout.trim() ? JSON.parse(result.stdout) : {};
+      assert.equal(output.hookSpecificOutput?.permissionDecision === 'deny', denied, label);
+      assert.equal(result.stdout, denied ? JSON.stringify(output) + '\n' : hook.name === 'codex' ? '' : '{}\n', label + ': exact stdout');
+      assert.equal(result.stderr, denied && hook.name === 'codex' ? output.hookSpecificOutput.permissionDecisionReason + '\n' : '', label + ': exact stderr');
+      assert.doesNotMatch(result.stdout + result.stderr, /synthetic held fixture|synthetic fixture/);
+      assert.equal(JSON.parse(fs.readFileSync(traceFile)).accesses, 0, label + ': queue trap');
+      assert.deepEqual(snapshot(ctx.dir), before, label + ': bytes and directories unchanged');
+      sourceCalls += 1;
+    }
+    for (const hook of hooks) for (const tool_name of ['Bash', 'PowerShell']) {
+      for (const [id, command, expected] of [
+        ['binding', stdin('for key,value in items:\n    print(key,value)'), 'NOT_CONTINUATION'],
+        ['git', 'git push origin HEAD:refs/heads/codex/example; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; git fetch origin codex/example', 'NOT_CONTINUATION'],
+        ['explicit', model.confirmed_constructions[0][1], 'UNKNOWN'],
+        ['implicit', model.construction_siblings.find(row => row[0] === 'awk-valid-one-argument')[1], 'UNKNOWN'],
+      ]) { invoke(hook, tool_name, id, command, null, expected); smokeCalls += 1; }
+      if (mode !== 'absent') continue;
+      for (const [id, text] of model.confirmed_constructions) for (const selected of model.shells) {
+        invoke(hook, tool_name, id, text, selected, 'UNKNOWN'); deltaCalls += 1;
+      }
+      for (const [id, body] of model.binding_cases) for (const selected of [null, 'powershell.exe', 'pwsh']) {
+        invoke(hook, tool_name, id, stdin(body), selected, 'NOT_CONTINUATION'); deltaCalls += 1;
+      }
+      for (const [id, source, expected, padding] of model.unproved_binding_cases) for (const n of [0, 1]) {
+        const text = padding ? source.replace("\n'@", '\n' + 'x'.repeat(padding) + "\n'@") : source;
+        invoke(hook, tool_name, id, text, model.shells[n], expected[n]); deltaCalls += 1;
+      }
+      for (const [id, body] of model.embedded_neighbours) for (const selected of [null, 'powershell.exe']) {
+        invoke(hook, tool_name, id, stdin(body), selected, 'UNKNOWN'); deltaCalls += 1;
+      }
+    }
+  }
+  assert.equal(deltaCalls, 396); assert.equal(smokeCalls, 112); assert.equal(sourceCalls, 508);
+  t.diagnostic(JSON.stringify({ sourceCalls, deltaCalls, smokeCalls, queueModes: 7, productionDefault: true,
+    stateReaderInjected: false, resolverInjected: false, queueAccesses: 0, byteAndDirectoryEquality: true, nativeDispatchExercised: false }));
 });
 
 

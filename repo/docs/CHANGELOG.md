@@ -1,8 +1,8 @@
 # Toolkit Changelog
 
-## 3.15.19 (source separators and literal Git operands)
+## 3.15.19 (proved binding separators and literal Git operands)
 
-- Preserved whitespace in contiguous continuation evidence so separate source words no longer invent native spellings. Existing punctuation, quoted/template/ordered signals and refusal-only dynamic construction detection remain independent.
+- Restored conservative collapsed continuation evidence for every unproved source byte, including implicit concatenation and joining pipelines. Only a bounded Python for-binding separator in a complete literal PowerShell here-string/stdin transport interrupts the projection; every source word, string, comment and executable neighbour remains inspected. Direct, quoted, template and ordered signals stay independent.
 - Added complete fixed Git operand proofs for add, commit, push, fetch, rev-parse and status. Only proved literal data spans are excluded; executable neighbours, options, operators, exit guards and unsupported stages remain visible.
 - Added anonymous boundary, schema, construction, raw-guard and source-hook tests with exact span and non-mutation checks. Native parsing, target authority and held-queue independence retain their boundaries; installed and actual-operation acceptance remain separate.
 
