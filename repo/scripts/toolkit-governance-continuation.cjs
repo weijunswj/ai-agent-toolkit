@@ -134,7 +134,67 @@ function legacyTemplateEvidence(text) {
 
 // Classification is intentionally broader than admission. An embedded/wrapped or malformed
 // invocation must not fall out of enforcement merely because the literal reader cannot parse it.
-function broadVisible(text, executableScript = false) {
+function pythonBindingBarriers(text, shell) {
+  if (!['common','powershell'].includes(shell) || /[$%!\x60^&]/.test(text)) return [];
+  if (text.length>32768 || /[^\x09\x0a\x0d\x20-\x7e]/.test(text)) return [];
+  // This is source ownership for lexical proof only, never shell admission.
+  // Single-quoted PowerShell here-string, exact stdin consumer, no prefix/suffix.
+  const transport=/^[ \t]*@'\r?\n([\s\S]*?)\r?\n'@[ \t]*\|[ \t]*python(?:3)?(?:\.exe)?[ \t]+-[ \t]*$/i.exec(text);
+  if(!transport)return [];
+  const source=transport[1],offset=transport[0].indexOf('\n')+1;
+  if (/\r(?!\n)/.test(source) || source.split(/\r?\n/).slice(0,2).some(line=>/^[ \t]*#.*coding[=:]/.test(line))) return [];
+  // A here-string closing delimiter cannot be embedded before the final close.
+  if(/(?:^|\n)'@/.test(source))return [];
+  const tokens=[];
+  for(let i=0;i<source.length;) {
+    const c=source[i];
+    if(/[ \t\r\n]/.test(c)){i++;continue;}
+    if(c==='#'){while(i<source.length&&source[i]!=='\n')i++;continue;}
+    const start=i;
+    if(c==='"'||c==="'") {
+      const prefix=tokens.at(-1);
+      if(prefix?.end===start && /^[a-z_]/i.test(prefix.value||'') && !/^(?:r|u|b|br|rb)$/i.test(prefix.value))return [];
+      const triple=source.slice(i,i+3)===c.repeat(3),width=triple?3:1;i+=width;let closed=false;
+      while(i<source.length){
+        if(source[i]==='\\'){i+=2;continue;}
+        if(source.slice(i,i+width)===c.repeat(width)){i+=width;closed=true;break;}
+        if(!triple&&/[\r\n]/.test(source[i]))return [];
+        i++;
+      }
+      if(!closed)return [];
+      tokens.push({value:null,start,end:i});continue;
+    }
+    if(/[a-z_]/i.test(c)){i++;while(i<source.length&&/[a-z0-9_]/i.test(source[i]))i++;tokens.push({value:source.slice(start,i),start,end:i});continue;}
+    tokens.push({value:c,start,end:++i});
+  }
+  const name=t=>t&&/^[a-z_]\w*$/i.test(t.value||'')&&!new Set(['False','None','True','and','as','assert','async','await','break','class','continue','def','del','elif','else','except','finally','for','from','global','if','import','in','is','lambda','nonlocal','not','or','pass','raise','return','try','while','with','yield']).has(t.value);
+  const barriers=[];
+  for(let n=0;n<tokens.length;n++) {
+    if(tokens[n].value!=='for'||!name(tokens[n+1]))continue;
+    const whitespace=source.slice(tokens[n].end,tokens[n+1].start);
+    if(!/^[ \t]+$/.test(whitespace))continue;
+    let at=n+2;
+    while(tokens[at]?.value===','&&name(tokens[at+1]))at+=2;
+    if(tokens[at]?.value!=='in'||!name(tokens[n+1]))continue;
+    // Every header gap must be horizontal trivia. No continuation/comment/newline
+    // or expression may impersonate this deliberately small binding grammar.
+    if(tokens.slice(n+1,at+1).some((t,j)=>j>0&&!/^[ \t]*$/.test(source.slice(tokens[n+j].end,t.start))))continue;
+    barriers.push({start:offset+tokens[n].end,end:offset+tokens[n+1].start,role:'Python for binding separator'});
+  }
+  return barriers;
+}
+function constructionFragments(text, shell) {
+  const barriers=pythonBindingBarriers(text, shell),chars=text.split('');
+  // Proof excludes source NUL; otherwise preserve every original code unit until
+  // the legacy consuming transforms finish, then discard controls as before.
+  for(const span of barriers)for(let i=span.start;i<span.end;i++)chars[i]='\0';
+  const shadow=chars.join('').replace(/[\\\x60^]\r?\n/g,'')
+    .replace(/%[^%\r\n]*%|![^!\r\n]*!|\$\{[^}$\r\n]*\}/g,'')
+    .replace(/["'\\\x60^]/g,'');
+  return formatParts(shadow).filter(part=>part!==null).join('').replace(/-(?:f|join)\b/gi,'')
+    .replace(barriers.length ? /[^a-z0-9\x00-]/gi : /[^a-z0-9-]/gi,'');
+}
+function broadVisible(text, executableScript = false, shell = null) {
   const direct = (/\bclaude(?:-code)?(?:\.(?:exe|cmd|ps1))?\b/i.test(text)
       && /--(?:resume|continue|session-id|fork-session)\b|(?:^|[\s;&|()'"`])-(?!-)[a-z]*[rc][a-z]*(?=$|[\s=;&|()'"`])/i.test(text))
     || (/\bcodex(?:\.(?:exe|cmd|ps1))?\b/i.test(text) && /\b(?:resume|fork)\b/i.test(text));
@@ -156,8 +216,7 @@ function broadVisible(text, executableScript = false) {
     // format placeholders and format/join operators. Never evaluate the expression
     // or pass this over-inclusive spelling to the target reader. Fully opaque runtime
     // scripts with no recognisable host/selector remain outside this guard's scope.
-    const fragments = formatParts(shadow).filter(part => part !== null).join('').replace(/-(?:f|join)\b/gi, '')
-      .replace(/[^a-z0-9-]/gi, '');
+    const fragments = constructionFragments(text, shell);
     // Casts, methods and other syntax between quoted fragments must not hide their
     // visible spelling. Inspect potential spelling atoms at every quote, including
     // inner wrapper quotes, without claiming to parse shell quote nesting. Only the
@@ -332,6 +391,64 @@ function wrapperRoles(words, shell) {
 // This is not a gh-wide exemption or a subprocess/format-expression schema.
 const GH_RUN_FIELDS = Object.freeze(['attempt', 'conclusion', 'createdAt', 'databaseId', 'displayTitle', 'event', 'headBranch',
   'headSha', 'name', 'number', 'startedAt', 'status', 'updatedAt', 'url', 'workflowDatabaseId', 'workflowName']);
+// Complete fixed built-ins only. This proves literal operand roles, never Git
+// validity, transport safety, external-operation approval or native target authority.
+function gitProof(text, shell) {
+  const words = roleWords(text);
+  if (!shell || !words?.length || words.some(word => !literalWord(word, shell))) return null;
+  const offset = words[0].value === '&' ? 1 : 0, executable = words[offset];
+  if (offset && (!['powershell', 'common'].includes(shell) || !executable?.quote)) return null;
+  if (!/^git(?:\.exe)?$/.test(executable?.value.split(/[\\/]/).pop().toLowerCase() || '')) return null;
+  const command = words[offset + 1];
+  if (!command || command.quote || !['add', 'commit', 'push', 'fetch', 'rev-parse', 'status'].includes(command.value)) return null;
+  const roles = words.map(word => ({ ...word, role: word === executable ? 'reader executable' : word === command ? 'fixed git command' : 'git option' }));
+  const args = words.slice(offset + 2);
+  const mark = (n, role) => { roles[offset + 2 + n].role = role; };
+  const ref = value => /^[a-z0-9_][a-z0-9_./-]*(?::[a-z0-9_][a-z0-9_./-]*)?$/i.test(value);
+  const remote = value => /^[a-z0-9_][a-z0-9_.-]*$/i.test(value);
+  if (command.value === 'add') {
+    if (args[0]?.value !== '--' || args[0].quote || args.length < 2) return null;
+    for (let n = 1; n < args.length; n += 1) {
+      if (!args[n].value) return null;
+      mark(n, 'literal git path');
+    }
+  } else if (command.value === 'commit') {
+    if (!args.length) return null;
+    for (let n = 0; n < args.length; n += 2) {
+      if (args[n].quote || !['-m', '--message'].includes(args[n].value) || !args[n + 1]?.value) return null;
+      mark(n + 1, 'literal git message');
+    }
+  } else if (command.value === 'push' || command.value === 'fetch') {
+    let at = 0;
+    if (args[at]?.value === '--' && !args[at].quote) at += 1;
+    if (!remote(args[at]?.value || '') || args.length < at + 2) return null;
+    mark(at++, 'literal git remote');
+    for (; at < args.length; at += 1) {
+      if (!ref(args[at].value)) return null;
+      mark(at, 'literal git refspec');
+    }
+  } else if (command.value === 'rev-parse') {
+    if (!args.length) return null;
+    for (let n = 0; n < args.length; n += 1) {
+      if (!ref(args[n].value) || args[n].value.includes(':')) return null;
+      mark(n, 'literal git revision');
+    }
+  } else {
+    let at = 0;
+    for (; at < args.length && args[at].value !== '--'; at += 1) {
+      if (args[at].quote || !['--short', '--branch', '--porcelain'].includes(args[at].value)) return null;
+    }
+    if (at < args.length) {
+      if (args[at].quote || ++at === args.length) return null;
+      for (; at < args.length; at += 1) {
+        if (!args[at].value) return null;
+        mark(at, 'literal git path');
+      }
+    }
+  }
+  return { schema: 'git ' + command.value + ' literal operands', shell, roles, consumed: words.at(-1).end };
+}
+
 function acquisitionProof(text, shell) {
   const ws = roleWords(text, { fieldComma: true });
   if (!shell || !ws?.length || ws.some(w => !literalWord(w, shell))) return null;
@@ -398,7 +515,7 @@ function readerSegments(text, shell) {
   const spans = [], proofs = [], unproved = [];
   for (const r of ranges) {
     const chunk = text.slice(r.start, r.end); if (!chunk.trim()) continue;
-    const proof = readerProof(roleWords(chunk), shell) || acquisitionProof(chunk, shell);
+    const proof = readerProof(roleWords(chunk), shell) || acquisitionProof(chunk, shell) || gitProof(chunk, shell);
     if (!proof) { unproved.push(chunk); continue; }
     const roles = proof.roles.map(w => ({ ...w, start: w.start + r.start, end: w.end + r.start }));
     proofs.push({ ...proof, ...r, roles });
@@ -457,17 +574,17 @@ function commandRoles(text, input) {
 }
 
 function visible(text, input) {
-  const roles = commandRoles(text, input);
+  const shell = roleShell(input), roles = commandRoles(text, input);
   if (roles.data) return false;
   // Only the proved non-native executable span is excluded. Never OR the raw path
   // back into evidence; keep the complete executable script, even inside outer quotes.
   text = roles.candidate;
-  if (roles.script && broadVisible(roles.script, true)) return true;
+  if (roles.script && broadVisible(roles.script, true, shell)) return true;
   for (const segment of roles.segments?.unproved || []) {
     const wrapper = wrapperRoles(roleWords(segment, { scriptWord: true }), roleShell(input));
-    if (broadVisible(segment) || (wrapper && broadVisible(wrapper.script.value, true))) return true;
+    if (broadVisible(segment, false, shell) || (wrapper && broadVisible(wrapper.script.value, true, shell))) return true;
   }
-  if (!broadVisible(text)) return false;
+  if (!broadVisible(text, false, shell)) return false;
   if (!knownShell(input)) return true;
   const lexed = tokens(text, { literalData: true });
   if (!lexed) return true;
@@ -486,7 +603,7 @@ function visible(text, input) {
     const host = hostOf(words[i]);
     if (!host) {
       // A wrapped command remains visible, even beside another ordinary host invocation.
-      if (broadVisible(words[i])) return true;
+      if (broadVisible(words[i], false, shell)) return true;
       continue;
     }
     hostSeen = true;

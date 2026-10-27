@@ -25,7 +25,10 @@ const OTHER_ID = '33333333-3333-4333-8333-333333333333';
 const root = path.resolve(__dirname, '../..');
 
 function fixture(t) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'continuation-'));
+  // Windows app temp redirection may alias a newly created child even when the
+  // temp parent itself resolves unchanged. Fixtures use native identity; the
+  // separate junction/alias cases still prove that production refuses aliases.
+  const dir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'continuation-')));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const ctx = { dir, caller: path.join(dir, 'caller'), target: path.join(dir, 'target'), other: path.join(dir, 'other'), home: path.join(dir, 'home') };
   ctx.projects = path.join(ctx.home, '.claude', 'projects');
@@ -385,6 +388,7 @@ test('Windows/source-hook UAT: both native entrypoints cross both CLI families w
     });
     assert.equal(result.status, denied ? hook.deniedExit : 0, `${hook.name}: ${result.stderr}`);
     const output = result.stdout.trim() ? JSON.parse(result.stdout) : {};
+    if (result.stdout) assert.equal(result.stdout, JSON.stringify(output) + '\n', 'exact adapter JSON stdout');
     assert.equal(output.hookSpecificOutput?.permissionDecision === 'deny', denied, hook.name + ': ' + input.tool_input.command);
     if (!denied) {
       if (hook.name === 'codex') assert.equal(result.stdout, '', 'Codex admission is empty stdout');
@@ -413,6 +417,15 @@ test('Windows/source-hook UAT: both native entrypoints cross both CLI families w
     invoke(hook, shell(ctx, literal.text, { tool_input: { command: literal.text, workdir: ctx.other } }), true);
     invoke(hook, shell(ctx, `rg -e "codex resume" "${ctx.other}/fixture.txt"`), true);
     invoke(hook, shell(ctx, 'rg -e "codex resume toolkit governance enable" fixture.txt'), true);
+    for (const actor of matrix.actors) for (const tool_name of ['Bash', 'PowerShell']) {
+      const command = 'git push origin HEAD:refs/heads/codex/example; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }';
+      const input = { ...shell(ctx, command), actor, tool_name };
+      invoke(hook, { ...input, cwd: ctx.other }, true);
+      invoke(hook, { ...input, tool_input: { command, workdir: ctx.other } }, true);
+      invoke(hook, { ...input, tool_input: { command: command + '; Get-Content -LiteralPath "' + ctx.other + '/fixture.txt"' } }, true);
+      invoke(hook, { ...input, tool_input: { command: command + '; node toolkit-governance.cjs enable' } }, true);
+      invoke(hook, { ...input, tool_name: 'Write', tool_input: { file_path: ctx.options.registryPath } }, true);
+    }
     for (const row of matrix.shell_family_cases.filter(row => row.source)) {
       const text = row.text.replaceAll('{TARGET}', ctx.target).replaceAll('{TRANSCRIPT}', ctx.file);
       const input = shell(ctx, text, { tool_name: hook.name === 'claude' ? 'PowerShell' : 'Bash' });
@@ -448,6 +461,13 @@ test('Windows/source-hook UAT: both native entrypoints cross both CLI families w
       queue.add('synthetic-queue', 'synthetic held fixture', ['sessionless', 'rootless'].includes(mode) ? null : 'synthetic-session', {}, mode === 'rootless' ? null : ctx.other);
     }
     for (const hook of hooks) for (const tool_name of ['Bash', 'PowerShell']) {
+      for (const actor of matrix.actors) {
+        const ordinary = ["@'\nfor key,value in items:\n    print(key,value)\n'@ | python -",
+          'git push origin HEAD:refs/heads/codex/example; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; git fetch origin codex/example',
+          'git commit -m "codex resume; claude --resume"', 'git add -- "codex/resume.md"'];
+        for (const command of ordinary) invoke(hook, { ...shell(ctx, command), tool_name, actor }, false);
+        for (const command of ['codex resume --last', 'claude --resume fixture']) invoke(hook, { ...shell(ctx, command), tool_name, actor }, true);
+      }
       for (const command of commands) invoke(hook, { ...shell(ctx, command), tool_name }, false);
       for (const command of ['codex resume --last', 'claude --resume fixture', matrix.ordered_atom_cases[0].text, 'pwsh -Command "& (\'co\'+\'dex\') (\'res\'+\'ume\')"']) invoke(hook, { ...shell(ctx, command), tool_name }, true);
       invoke(hook, { ...shell(ctx, 'rg -e "codex resume" repo\\notes.txt'), tool_name }, false);
@@ -465,19 +485,19 @@ test('Windows/source-hook UAT: both native entrypoints cross both CLI families w
 
 
 // Exercise the private pure projection without adding a product export or entrypoint.
-function evidenceProjection() {
+function evidenceProjection(transform = source => source) {
   const Module = require('node:module');
   const filename = path.join(root, 'repo/scripts/toolkit-governance-continuation.cjs');
   const loaded = new Module(filename, module);
   loaded.filename = filename; loaded.paths = Module._nodeModulePaths(path.dirname(filename));
-  let source = fs.readFileSync(filename, 'utf8');
+  let source = transform(fs.readFileSync(filename, 'utf8'));
   source = source.replace('for (const step of pattern.steps) {', 'for (const step of pattern.steps) { evidenceOperations += 1;');
   const start = source.indexOf('function roleWords('), end = source.indexOf('\nfunction literalWord(', start);
   const lexer = source.slice(start, end).replace('for (let i = 0; i < text.length;) {', 'for (let i = 0; i < text.length;) { roleVisits += 1;')
     .replace('value += text[i++];', 'roleVisits += 1; value += text[i++];')
     .replace('while (i < text.length && text[i] !== quote) i += 1;', 'while (i < text.length && text[i] !== quote) { roleVisits += 1; i += 1; }');
   source = source.slice(0, start) + lexer + source.slice(end);
-  loaded._compile(source + '\nlet evidenceOperations = 0, roleVisits = 0; module.exports = { CANDIDATE_MACHINES, atomPattern, advancePrefixes, quoteAtoms, orderedEvidence, commandRoles, roleWords, roleVisits: () => roleVisits, operations: () => evidenceOperations };', filename);
+  loaded._compile(source + '\nlet evidenceOperations = 0, roleVisits = 0; module.exports = { CANDIDATE_MACHINES, atomPattern, advancePrefixes, quoteAtoms, orderedEvidence, commandRoles, roleWords, pythonBindingBarriers, constructionFragments, parse, roleVisits: () => roleVisits, operations: () => evidenceOperations };', filename);
   return loaded.exports;
 }
 
@@ -795,4 +815,488 @@ test('acquisition schema and structural reader resources stay within the closed 
     if (text.includes('codex resume') || text.includes('claude --continue')) assert.equal(parse(text, input).status, 'UNKNOWN');
   }
   assert.equal(api.roleWords('rg -e codex status,headSha'), null, 'comma belongs only to acquisition JSON fields');
+});
+
+
+// These anonymous equivalents exercise evidence roles only; no payload is dispatched.
+test('evidence boundary model proves only owned binding separators and complete Git operands', t => {
+  const model = matrix.evidence_boundary_model, api = evidenceProjection();
+  const input = selected => ({ tool_input: selected === null ? {} : { shell: selected } });
+  let rows = 0, masks = 0;
+  function check(id, text, expected, selected) {
+    const envelope = input(selected), roles = api.commandRoles(text, envelope);
+    assert.equal(parse(text, envelope).status, expected, id + '/' + selected); rows += 1;
+    if (!roles.segments) return;
+    const spans = [...roles.segments.spans, ...(roles.excludedExecutable ? [roles.excludedExecutable] : [])].sort((a, b) => a.start - b.start);
+    let at = 0;
+    for (const span of spans) {
+      assert.ok(span.start >= at && span.end <= text.length, id + ': non-overlapping original offsets');
+      assert.equal(roles.candidate.slice(at, span.start), text.slice(at, span.start), id + ': executable bytes retained');
+      assert.equal(roles.candidate.slice(span.start, span.end), ' '.repeat(span.end - span.start));
+      at = span.end; masks += 1;
+    }
+    assert.equal(roles.candidate.slice(at), text.slice(at));
+    assert.equal(roles.candidate.length, text.length);
+    for (const unproved of roles.segments.unproved) assert.ok(roles.candidate.includes(unproved));
+    for (const proof of roles.segments.proofs) {
+      assert.equal(proof.consumed, text.slice(proof.start, proof.end).trimEnd().length, id + ': complete stage consumption');
+      for (const role of proof.roles) assert.ok(role.role);
+    }
+  }
+  for (const [id, text, expected] of model.foreign_ingress_cases) for (const [n, selected] of model.shells.entries()) {
+    check('foreign/' + id, text, expected[n], selected);
+  }
+  for (const operation of model.native) for (const selected of model.shells) {
+    const body = "@'\nfor key in items:\n    pass\n'@ | python -";
+    for (const text of [operation + '; ' + body, body + '; ' + operation, body + ' | ' + operation,
+      "@'\nfor key in items:\n    pass\n" + operation + "\n'@ | python -",
+      "@'\nimport subprocess\nsubprocess.run([\"codex\",\"resume\"])\n'@ | python -",
+      "pwsh -Command '" + operation + "'"]) check('executable-neighbour', text, 'UNKNOWN', selected);
+  }
+  for (const [id, command] of model.git) for (const selected of model.shells) {
+    for (const text of [command, 'git status --short\n' + command,
+      'git status --short; ' + command + '; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }', command + ' | ConvertTo-Json']) {
+      check('git/' + id, text, 'NOT_CONTINUATION', selected);
+    }
+    for (const text of ['codex resume --last; ' + command, command + '; claude --resume fixture',
+      command + ' | codex resume --last', command.replace('codex/example', '$(codex resume)') + '; & ("co"+"dex") ("res"+"ume")']) {
+      check('git-executable/' + id, text, 'UNKNOWN', selected);
+    }
+  }
+  for (const [n, command] of model.unsupported.entries()) for (const selected of model.shells) {
+    assert.equal(api.commandRoles(command, input(selected)).segments, null, 'no partial proof for unsupported schema');
+    // An unsupported form without candidate evidence retains the ordinary boundary.
+    check('unsupported/' + n, command, n === 8 ? 'NOT_CONTINUATION' : 'UNKNOWN', selected);
+    check('unsupported-native/' + n, command + '; & ("co"+"dex") ("res"+"ume")', 'UNKNOWN', selected);
+  }
+  for (const [command, proved, expected] of model.schema) for (const selected of model.shells) {
+    assert.equal(Boolean(api.commandRoles(command, input(selected)).segments?.proofs.some(p => p.schema.startsWith('git '))), proved, command);
+    check('schema', command, expected, selected);
+  }
+  for (const [id, text] of model.construction) for (const selected of model.shells) check('construction/' + id, text, 'UNKNOWN', selected);
+  for (const selected of [null, '', 5, 'unknown.exe']) {
+    const text = 'git push origin HEAD:refs/heads/codex/example; if ($x) { Write-Output $x }';
+    const envelope = { tool_input: { shell: selected } };
+    assert.equal(api.commandRoles(text, envelope).segments, null); assert.equal(parse(text, envelope).status, 'UNKNOWN');
+  }
+  for (const selected of model.shells) for (const [id, body] of [
+    ['ref', 'git push origin HEAD:refs/heads/codex/example; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }'],
+    ['message', 'git commit -m "codex resume"'],
+  ]) {
+    const text = "pwsh -NoProfile -Command '" + body + "'";
+    const ordinary = ['powershell.exe', 'pwsh'].includes(selected) || (id === 'message' && ['bash', 'sh'].includes(selected));
+    check('wrapper/' + id, text, ordinary ? 'NOT_CONTINUATION' : 'UNKNOWN', selected);
+    check('wrapper-neighbour', text + '; & ("co"+"dex") ("res"+"ume")', 'UNKNOWN', selected);
+  }
+  // Frozen G0 structural rows: unsupported syntax gets no role proof; it does
+  // not invent a continuation when neither native family has visible evidence.
+  for (const [ending, expected] of [[';', 'NOT_CONTINUATION'], [' |', 'NOT_CONTINUATION'],
+    [' && git status', 'NOT_CONTINUATION'], [' || git status', 'NOT_CONTINUATION'],
+    [' # comment', 'UNKNOWN'], [' ' + String.fromCharCode(0), 'UNKNOWN'], [' ' + String.fromCharCode(0x2603), 'UNKNOWN']]) {
+    const text = 'git push origin HEAD:refs/heads/codex/example' + ending;
+    const roles = api.commandRoles(text, input(null));
+    assert.equal(roles.segments, null); assert.equal(roles.candidate, text);
+    assert.equal(parse(text, input(null)).status, expected, JSON.stringify(ending));
+    assert.equal(parse(text + '; codex resume --last', input(null)).status, 'UNKNOWN', 'executable neighbour still refused');
+  }
+  const long = 'git push origin HEAD:refs/heads/codex/' + 'x'.repeat(LIMITS.command);
+  assert.equal(api.commandRoles(long, input(null)).segments, null); assert.equal(parse(long, input(null)).status, 'UNKNOWN');
+  const witness = "@'\nv={'example':1}\nfor key,value in v.items():\n    print(key,value)\n'@ | python -";
+  for (const selected of model.shells) check('restart-witness-equivalent', witness,
+    [null, 'powershell.exe', 'pwsh'].includes(selected) ? 'NOT_CONTINUATION' : 'UNKNOWN', selected);
+  t.diagnostic(JSON.stringify({ rows, masks, payloadsDispatched: false }));
+});
+
+test('contiguous evidence restores conservative collapse for every unproved primitive separator', t => {
+  const { CANDIDATE_MACHINES } = evidenceProjection(); let rows = 0;
+  for (const { word } of CANDIDATE_MACHINES) for (let cut = 1; cut < word.length; cut += 1) {
+    for (const separator of [' ', '\t', '\n', '\r\n', ';', '|', '(', ')', '[', ']', ',', ':', '+', '.', '/']) {
+      const text = '(' + word.slice(0, cut) + separator + word.slice(cut) + ')';
+      // Independent finite reference, including the inherited fixed format/join step.
+      const reference = text.replace(/-(?:f|join)\b/gi, '').replace(/[^a-z0-9-]/gi, '');
+      const expected = /claude|codex|resume|fork|--(?:continue|session-id)/i.test(reference) ? 'UNKNOWN' : 'NOT_CONTINUATION';
+      assert.equal(parse(text, { tool_input: {} }).status, expected, word + '/' + cut + '/' + JSON.stringify(separator)); rows += 1;
+    }
+  }
+  for (const separator of ['\v', '\f']) assert.equal(parse('(for' + separator + 'key)', { tool_input: {} }).status, 'UNKNOWN');
+  assert.equal(rows, 2400);
+  t.diagnostic(JSON.stringify({ primitiveRows: rows }));
+});
+
+test('construction closure restores explicit, implicit and pipeline evidence on both envelopes', t => {
+  const ctx = fixture(t), before = snapshot(ctx.dir), model = matrix.evidence_boundary_model;
+  let rows = 0, confirmed = 0, spawns = 0;
+  const resolver = new ContinuationResolver({ environment: ctx.environment,
+    spawn() { spawns += 1; assert.fail('construction evidence must not acquire native metadata'); } });
+  const guard = new gate.ToolGate({ registryOptions: ctx.options, environment: ctx.environment,
+    stateReader: () => ({ state: 'DISABLED', rule: 'R1' }), continuationResolver: resolver });
+  for (const [kind, cases] of [['confirmed', model.confirmed_constructions], ['sibling', model.construction_siblings]]) {
+    for (const [id, text] of cases) for (const selected of model.shells) for (const tool_name of ['Bash', 'PowerShell']) {
+      const input = { ...shell(ctx, text), tool_name };
+      if (selected !== null) input.tool_input.shell = selected;
+      assert.equal(parse(text, input).status, 'UNKNOWN', kind + '/' + id + '/' + selected);
+      assert.ok(guard.decide(input)?.deny, kind + '/' + id + ': ToolGate denial');
+      rows += 1; if (kind === 'confirmed') confirmed += 1;
+    }
+  }
+  assert.equal(confirmed, 48); assert.equal(rows, 324); assert.equal(spawns, 0);
+  assert.deepEqual(snapshot(ctx.dir), before);
+  t.diagnostic(JSON.stringify({ constructionRows: rows, confirmed, metadataSpawns: spawns, payloadsDispatched: false }));
+});
+
+test('binding closure changes only proved horizontal offsets and never hides source or native neighbours', t => {
+  const model = matrix.evidence_boundary_model, api = evidenceProjection();
+  const stdin = body => "@'\n" + body + "\n'@ | python -";
+  const profile = selected => selected === null ? 'common' : ['powershell.exe', 'pwsh'].includes(selected) ? 'powershell'
+    : selected === 'cmd.exe' ? 'cmd' : 'posix';
+  let positive = 0, unproved = 0, neighbours = 0;
+  for (const [id, body, count] of model.binding_cases) for (const selected of [null, 'powershell.exe', 'pwsh']) {
+    const text = stdin(body), spans = api.pythonBindingBarriers(text, profile(selected));
+    assert.equal(spans.length, count, id);
+    for (const span of spans) {
+      assert.match(text.slice(span.start, span.end), /^[ \t]+$/);
+      assert.equal(text.slice(span.start - 3, span.start), 'for');
+      assert.match(text.slice(span.end), /^[a-z_]/i);
+    }
+    assert.equal(parse(text, { tool_input: selected === null ? {} : { shell: selected } }).status, 'NOT_CONTINUATION', id);
+    assert.equal((api.constructionFragments(text, profile(selected)).match(/\0/g) || []).length,
+      spans.reduce((total, span) => total + span.end - span.start, 0), id + ': only proved separators become barriers');
+    positive += 1;
+  }
+  for (const [id, source, expected, padding] of model.unproved_binding_cases) for (const [n, selected] of model.shells.entries()) {
+    const text = padding ? source.replace("\n'@", '\n' + 'x'.repeat(padding) + "\n'@") : source;
+    assert.deepEqual(api.pythonBindingBarriers(text, profile(selected)), [], id);
+    assert.equal(parse(text, { tool_input: selected === null ? {} : { shell: selected } }).status, expected[n], id);
+    unproved += 1;
+  }
+  for (const [id, body] of model.embedded_neighbours) for (const selected of model.shells) {
+    assert.equal(parse(stdin(body), { tool_input: selected === null ? {} : { shell: selected } }).status, 'UNKNOWN', id);
+    neighbours += 1;
+  }
+  for (const [id, text] of model.confirmed_constructions) for (const selected of model.shells) {
+    const ordinary = stdin('for k in items:\n    pass');
+    for (const command of [text + '; ' + ordinary, ordinary + '; ' + text, ordinary + ' | ' + text]) {
+      assert.equal(parse(command, { tool_input: selected === null ? {} : { shell: selected } }).status, 'UNKNOWN', id);
+      neighbours += 1;
+    }
+  }
+  // Lexical proof is deliberately narrower than Python or PowerShell acceptance.
+  for (const prefix of ['r', 'u', 'b', 'br', 'rb', 'R', 'BR']) {
+    assert.equal(api.pythonBindingBarriers(stdin('x=' + prefix + '"unrelated"\nfor k in items:\n    pass'), 'common').length, 1, prefix);
+  }
+  for (const prefix of ['f', 't', 'fr', 'rf', 'tr', 'rt', 'unknown']) {
+    assert.deepEqual(api.pythonBindingBarriers(stdin('x=' + prefix + '"unrelated"\nfor k in items:\n    pass'), 'common'), [], prefix);
+  }
+  for (const body of ['x="for k in items"', "x='for k in items'", 'x="""for k in items"""', '# for k in items',
+    'for True in items:pass', 'for k, in items:pass', 'for k[0] in items:pass', 'for k.x in items:pass',
+    'for (k) in items:pass', 'for k\nin items:pass', 'for k # comment\nin items:pass',
+    '# first\n# coding=unicode_escape\nfor k in items:pass', 'for k in items:\r    pass',
+    ...['\0', '\v', '\f', '\x01', '\x7f', '\u2603', '$', '%', '!', '`', '^', '&'].map(c => 'for k in items:\n    x="' + c + '"')]) {
+    assert.deepEqual(api.pythonBindingBarriers(stdin(body), 'common'), [], JSON.stringify(body));
+  }
+  const ordinary = stdin('for k in items:\n    pass');
+  for (const text of ['prefix ' + ordinary, ordinary + ' suffix', ordinary + ' | python -',
+    ordinary.replace('python -', 'python -u -'), ordinary.replace('python -', 'python3 -x -'),
+    ordinary.replace('python -', 'C:/example.test/python.exe -'), ordinary.replace('python -', 'node -')]) {
+    assert.deepEqual(api.pythonBindingBarriers(text, 'common'), [], 'complete exact consumer required');
+  }
+  for (const consumer of ['python -', 'python3 -', 'python.exe -', 'python3.exe -', 'PYTHON3.EXE -']) {
+    assert.equal(api.pythonBindingBarriers(ordinary.replace('python -', consumer), 'common').length, 1, consumer);
+  }
+  assert.equal(api.constructionFragments('(co\0dex) (res\0ume)', 'common').includes('\0'), false, 'original NUL cannot impersonate an internal barrier');
+  assert.equal(positive, 21); assert.equal(unproved, 120); assert.equal(neighbours, 114);
+  t.diagnostic(JSON.stringify({ bindingRows: positive, unprovedRows: unproved, nativeNeighbours: neighbours, payloadsDispatched: false }));
+});
+
+// Frozen legacy projection: independent numeric-hole reference, original stage order.
+function legacyConstructionProjection(text) {
+  return text.replace(/[\\\x60^]\r?\n/g, '')
+    .replace(/%[^%\r\n]*%|![^!\r\n]*!|\$\{[^}$\r\n]*\}/g, '')
+    .replace(/["'\\\x60^]/g, '').replace(/\{[0-9][^{}]*\}/g, '')
+    .replace(/-(?:f|join)\b/gi, '').replace(/[^a-z0-9-]/gi, '');
+}
+function sentinelText(template, word, control) {
+  const values = { word, head: word.slice(0, 2), tail: word.slice(2), nul: control };
+  return template.replace(/\{(word|head|tail|nul)\}/g, (_, key) => values[key]);
+}
+
+test('source sentinels preserve the closed legacy classification and ToolGate family', t => {
+  const ctx = fixture(t), before = snapshot(ctx.dir), api = evidenceProjection();
+  const model = matrix.evidence_boundary_model, closed = model.sentinel_transforms, counts = closed.expected_rows;
+  assert.deepEqual(api.CANDIDATE_MACHINES.map(row => row.word), closed.words);
+  let rows = 0, reviewRows = 0, spawns = 0, queueAccesses = 0;
+  const failures = [], originals = {};
+  const resolver = new ContinuationResolver({ environment: ctx.environment,
+    spawn() { spawns += 1; assert.fail('sentinel source cannot acquire native metadata'); } });
+  const guard = new gate.ToolGate({ registryOptions: ctx.options, environment: ctx.environment,
+    stateReader: () => ({ state: 'DISABLED', rule: 'R1' }), continuationResolver: resolver });
+  for (const name of ['readFileSync', 'readdirSync', 'statSync', 'lstatSync', 'existsSync']) {
+    originals[name] = fs[name]; fs[name] = function(file, ...args) {
+      if (String(file).includes(gate.HELD_BASENAME)) { queueAccesses += 1; throw Error('SYNTHETIC_QUEUE_ACCESS'); }
+      return originals[name].call(this, file, ...args);
+    };
+  }
+  try {
+    for (const [wordIndex, word] of closed.words.entries()) for (const count of closed.nul_counts)
+      for (const shape of closed.shapes) for (const selected of model.shells) for (const tool_name of ['Bash', 'PowerShell']) {
+        const text = sentinelText(shape.template, word, String.fromCharCode(0).repeat(count));
+        const input = { ...shell(ctx, text), tool_name, tool_input: { command: text, ...(selected === null ? {} : { shell: selected }) } };
+        const expected = shape.expected[wordIndex], status = parse(text, input).status, denied = Boolean(guard.decide(input)?.deny);
+        if (status !== expected || denied !== (expected === 'UNKNOWN')) failures.push({ shape: shape.id, word, count, selected, tool_name, expected, status, denied });
+        rows += 1; if (!shape.id.endsWith('-join-reversal')) reviewRows += 1;
+      }
+  } finally { for (const name of Object.keys(originals)) fs[name] = originals[name]; }
+  assert.equal(rows, counts.sentinel); assert.equal(reviewRows, counts.original_review);
+  assert.equal(spawns, 0); assert.equal(queueAccesses, 0); assert.deepEqual(snapshot(ctx.dir), before);
+  t.diagnostic(JSON.stringify({ sentinelRows: rows, originalReviewRows: reviewRows, failures: failures.length,
+    lostRefusals: failures.filter(row => row.expected === 'UNKNOWN').length,
+    extraRefusals: failures.filter(row => row.expected === 'NOT_CONTINUATION').length, spawns, queueAccesses }));
+  assert.deepEqual(failures, [], 'original source controls must not create consuming syntax');
+});
+
+test('source sentinel projection preserves every consuming stage and UTF-16 code unit', t => {
+  const api = evidenceProjection(), closed = matrix.evidence_boundary_model.sentinel_transforms, counts = closed.expected_rows;
+  const controls = closed.control_code_points.map(point => String.fromCodePoint(point));
+  const neighbours = [...closed.shapes.map(row => [row.id, row.template]), ...closed.neighbours];
+  let unproved = 0, codeUnits = 0, qualified = 0, withdrawn = 0;
+  for (const word of closed.words) for (const control of controls) for (const [id, template] of neighbours)
+    for (const profile of ['common', 'powershell']) {
+      const text = sentinelText(template, word, control);
+      assert.deepEqual(api.pythonBindingBarriers(text, profile), [], id);
+      assert.equal(api.constructionFragments(text, profile), legacyConstructionProjection(text), id); unproved += 1;
+    }
+  for (let code = 0; code <= 65535; code += 1) for (const shape of closed.shapes.slice(0, 2)) {
+    const control = String.fromCharCode(code), text = sentinelText(shape.template, 'codex', control);
+    assert.equal(text.split('').join(''), text, 'identity includes lone surrogates');
+    assert.equal(api.constructionFragments(text, 'common'), legacyConstructionProjection(text), shape.id); codeUnits += 1;
+  }
+  const stdin = body => "@'\n" + body + "\n'@ | python -";
+  const placements = [(body, word) => body + '\ntext="' + word + '"', (body, word) => body + '\n# ' + word,
+    (body, word) => body + '\ntext="{0' + word + '}"', (body, word) => body + '\ntext="{ ' + word + '}"'];
+  for (const body of closed.qualified_bodies) for (const word of closed.words) for (const place of placements)
+    for (const profile of ['common', 'powershell']) {
+      const text = stdin(place(body, word)), spans = api.pythonBindingBarriers(text, profile);
+      assert.ok(spans.length); assert.equal(api.constructionFragments(text, profile).replace(/\0/g, ''), legacyConstructionProjection(text));
+      qualified += 1;
+    }
+  for (const control of controls.filter(c => !['\t', '\n', '\r'].includes(c)))
+    for (const place of ['before', 'after', 'header', 'string', 'comment']) for (const profile of ['common', 'powershell']) {
+      const body = place === 'before' ? control + '\nfor k in items:\n    pass' : place === 'after' ? 'for k in items:\n    pass' + control
+        : place === 'header' ? 'for ' + control + 'k in items:\n    pass' : place === 'string' ? 'for k in items:\n    text="' + control + '"'
+          : 'for k in items:\n    # ' + control;
+      const text = stdin(body); assert.deepEqual(api.pythonBindingBarriers(text, profile), []);
+      assert.equal(api.constructionFragments(text, profile), legacyConstructionProjection(text)); withdrawn += 1;
+    }
+  // Reuse the hostile-input set. CRLF and horizontal tabs remain permitted proof;
+  // every source string still equals the legacy letters after generated barriers.
+  let hostileRows = 0;
+  for (const shape of [...hostile.cases(['continued-lines', 'invisible', 'indents', 'large-input'], ['shell', 'text']),
+    ...hostile.variants('for k in items:\n    pass')]) {
+    const text = stdin(shape.text), projection = api.constructionFragments(text, 'common');
+    assert.equal(projection.replace(/\0/g, ''), legacyConstructionProjection(text), shape.id); hostileRows += 1;
+  }
+  assert.equal(unproved, counts.unproved_projection); assert.equal(codeUnits, counts.code_units);
+  assert.equal(qualified, counts.qualified_projection); assert.equal(withdrawn, counts.proof_withdrawal);
+  t.diagnostic(JSON.stringify({ unproved, codeUnits, qualified, withdrawn, hostileRows }));
+});
+
+test('source sentinel ablations expose early deletion, unowned barriers and missing proof', t => {
+  const closed = matrix.evidence_boundary_model.sentinel_transforms, counts = closed.expected_rows;
+  const api = evidenceProjection(), input = { tool_input: {} }; let lost = 0, extra = 0;
+  const replace = (source, before, after) => { assert.ok(source.includes(before), 'ablation anchor'); return source.replace(before, after); };
+  const retainNul = source => replace(source,
+    '.replace(barriers.length ? /[^a-z0-9\\x00-]/gi : /[^a-z0-9-]/gi,\'\');', '.replace(/[^a-z0-9\\x00-]/gi,\'\');');
+  const early = evidenceProjection(source => retainNul(replace(source,
+    "chars=text.split('')", "chars=[...text].map(c=>c==='\\0'?'':c)")));
+  // No-proof partition only: this freezes the rejected early-source-NUL deletion.
+  for (const [wordIndex, word] of closed.words.entries()) for (const count of closed.nul_counts) for (const shape of closed.shapes) {
+    const text = sentinelText(shape.template, word, String.fromCharCode(0).repeat(count));
+    const ablated = early.parse(text, input).status, expected = shape.expected[wordIndex];
+    if (expected === 'UNKNOWN' && ablated === 'NOT_CONTINUATION') lost += 12;
+    if (expected === 'NOT_CONTINUATION' && ablated === 'UNKNOWN') extra += 12;
+  }
+  assert.equal(lost, counts.early_deletion_lost_refusals); assert.equal(extra, counts.early_deletion_extra_refusals);
+  const unowned = evidenceProjection(retainNul);
+  const split = '(co' + String.fromCharCode(0) + 'dex)';
+  assert.equal(api.parse(split, input).status, 'UNKNOWN'); assert.equal(unowned.parse(split, input).status, 'NOT_CONTINUATION');
+  const noProof = evidenceProjection(source => replace(source, 'const barriers=pythonBindingBarriers(text, shell),chars=', 'const barriers=[],chars='));
+  const binding = "@'\nfor key in items:\n    pass\n'@ | python -";
+  assert.equal(api.parse(binding, input).status, 'NOT_CONTINUATION'); assert.equal(noProof.parse(binding, input).status, 'UNKNOWN');
+  t.diagnostic(JSON.stringify({ ablations: 3, lostRefusals: lost, extraRefusals: extra,
+    withdrawalReason: 'Restore exact legacy classification after early deletion invented consuming syntax' }));
+});
+
+test('source-hook construction delta uses production defaults and preserves every queue mode', t => {
+  const model = matrix.evidence_boundary_model, trace = fixture(t);
+  const preload = path.join(trace.dir, 'queue-trap.cjs'), traceFile = path.join(trace.dir, 'queue-trace.json');
+  fs.writeFileSync(preload, `'use strict';
+const fs = require('node:fs'); let accesses = 0;
+for (const name of ['readFileSync', 'readdirSync', 'statSync', 'lstatSync', 'existsSync']) {
+  const original = fs[name]; fs[name] = function(file, ...args) {
+    if (String(file).includes('held-prompts.v1.json')) { accesses += 1; throw Error('SYNTHETIC_QUEUE_ACCESS'); }
+    return original.call(this, file, ...args);
+  };
+}
+process.on('exit', () => fs.writeFileSync(process.env.SYNTHETIC_QUEUE_TRACE, JSON.stringify({ accesses })));
+`);
+  const hooks = [
+    { name: 'claude', file: 'toolkit-governance-hook.cjs', args: ['--event', 'PreToolUse'], deniedExit: 0 },
+    { name: 'codex', file: 'toolkit-codex-helper-hook.cjs', args: [], deniedExit: 2 },
+  ];
+  const stdin = body => "@'\n" + body + "\n'@ | python -";
+  let sourceCalls = 0, deltaCalls = 0, smokeCalls = 0;
+  for (const mode of ['absent', 'unrelated', 'rootless', 'sessionless', 'stale', 'malformed', 'unreadable']) {
+    const ctx = fixture(t), env = { ...process.env, ...ctx.environment, GIT_CONFIG_NOSYSTEM: '1',
+      GIT_CONFIG_GLOBAL: path.join(ctx.home, 'absent-gitconfig'), SYNTHETIC_QUEUE_TRACE: traceFile };
+    for (const key of Object.keys(env)) if (/^(?:TOOLKIT_|CLAUDE_CODE_REMOTE|CLAUDE_ENV_FILE|NODE_OPTIONS)/.test(key)) delete env[key];
+    for (const [cwd, name] of [[ctx.caller, 'caller'], [ctx.other, 'held']]) {
+      for (const args of [['init', '--quiet'], ['remote', 'add', 'origin', 'https://github.com/example-owner/' + name + '.git']]) {
+        const result = spawnSync('git', ['-c', 'core.fsmonitor=false', '-C', cwd, ...args], { env, encoding: 'utf8', windowsHide: true, timeout: 10000 });
+        assert.equal(result.status, 0, 'synthetic fixture git: ' + result.stderr);
+      }
+    }
+    gate.writeGovernanceDecision(ctx.caller, 'enable', { registryOptions: ctx.options });
+    const heldFile = path.join(path.dirname(ctx.options.registryPath), gate.HELD_BASENAME);
+    if (mode === 'malformed') fs.writeFileSync(heldFile, '{broken');
+    else if (mode === 'unreadable') fs.mkdirSync(heldFile);
+    else if (mode !== 'absent') new gate.HeldPrompts({ registryOptions: ctx.options,
+      ...(mode === 'stale' ? { now: () => new Date('2020-01-01T00:00:00Z') } : {}) })
+      .add('synthetic-queue', 'synthetic held fixture', ['rootless', 'sessionless'].includes(mode) ? null : 'synthetic-session', {}, mode === 'rootless' ? null : ctx.other);
+    function invoke(hook, tool_name, id, command, selected, expected) {
+      const before = snapshot(ctx.dir), input = { ...shell(ctx, command), tool_name,
+        tool_input: { command, ...(selected === null ? {} : { shell: selected }) } };
+      const result = spawnSync(process.execPath, ['--require', preload, path.join(root, 'repo/scripts', hook.file), ...hook.args], {
+        input: JSON.stringify(input), env, cwd: ctx.caller, encoding: 'utf8', windowsHide: true, timeout: 10000, maxBuffer: 256 * 1024,
+      });
+      const denied = expected === 'UNKNOWN', label = hook.name + '/' + mode + '/' + id + '/' + selected;
+      assert.equal(result.status, denied ? hook.deniedExit : 0, label + ': exit');
+      const output = result.stdout.trim() ? JSON.parse(result.stdout) : {};
+      assert.equal(output.hookSpecificOutput?.permissionDecision === 'deny', denied, label);
+      assert.equal(result.stdout, denied ? JSON.stringify(output) + '\n' : hook.name === 'codex' ? '' : '{}\n', label + ': exact stdout');
+      assert.equal(result.stderr, denied && hook.name === 'codex' ? output.hookSpecificOutput.permissionDecisionReason + '\n' : '', label + ': exact stderr');
+      assert.doesNotMatch(result.stdout + result.stderr, /synthetic held fixture|synthetic fixture/);
+      assert.equal(JSON.parse(fs.readFileSync(traceFile)).accesses, 0, label + ': queue trap');
+      assert.deepEqual(snapshot(ctx.dir), before, label + ': bytes and directories unchanged');
+      sourceCalls += 1;
+    }
+    for (const hook of hooks) for (const tool_name of ['Bash', 'PowerShell']) {
+      for (const [id, command, expected] of [
+        ['binding', stdin('for key,value in items:\n    print(key,value)'), 'NOT_CONTINUATION'],
+        ['git', 'git push origin HEAD:refs/heads/codex/example; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; git fetch origin codex/example', 'NOT_CONTINUATION'],
+        ['explicit', model.confirmed_constructions[0][1], 'UNKNOWN'],
+        ['implicit', model.construction_siblings.find(row => row[0] === 'awk-valid-one-argument')[1], 'UNKNOWN'],
+      ]) { invoke(hook, tool_name, id, command, null, expected); smokeCalls += 1; }
+      if (mode !== 'absent') continue;
+      for (const [id, text] of model.confirmed_constructions) for (const selected of model.shells) {
+        invoke(hook, tool_name, id, text, selected, 'UNKNOWN'); deltaCalls += 1;
+      }
+      for (const [id, body] of model.binding_cases) for (const selected of [null, 'powershell.exe', 'pwsh']) {
+        invoke(hook, tool_name, id, stdin(body), selected, 'NOT_CONTINUATION'); deltaCalls += 1;
+      }
+      for (const [id, source, expected, padding] of model.unproved_binding_cases) for (const n of [0, 1]) {
+        const text = padding ? source.replace("\n'@", '\n' + 'x'.repeat(padding) + "\n'@") : source;
+        invoke(hook, tool_name, id, text, model.shells[n], expected[n]); deltaCalls += 1;
+      }
+      for (const [id, body] of model.embedded_neighbours) for (const selected of [null, 'powershell.exe']) {
+        invoke(hook, tool_name, id, stdin(body), selected, 'UNKNOWN'); deltaCalls += 1;
+      }
+    }
+  }
+  assert.equal(deltaCalls, 396); assert.equal(smokeCalls, 112); assert.equal(sourceCalls, 508);
+  t.diagnostic(JSON.stringify({ sourceCalls, deltaCalls, smokeCalls, queueModes: 7, productionDefault: true,
+    stateReaderInjected: false, resolverInjected: false, queueAccesses: 0, byteAndDirectoryEquality: true, nativeDispatchExercised: false }));
+});
+
+
+test('source-hook sentinel delta uses both production defaults with exact non-mutation', t => {
+  const model = matrix.evidence_boundary_model, trace = fixture(t), ctx = fixture(t);
+  const preload = path.join(trace.dir, 'sentinel-queue-trap.cjs'), traceFile = path.join(trace.dir, 'sentinel-queue-trace.json');
+  fs.writeFileSync(preload, String.raw`'use strict';
+const fs = require('node:fs'); let accesses = 0;
+for (const name of ['readFileSync', 'readdirSync', 'statSync', 'lstatSync', 'existsSync']) {
+  const original = fs[name]; fs[name] = function(file, ...args) {
+    if (String(file).includes('held-prompts.v1.json')) { accesses += 1; throw Error('SYNTHETIC_QUEUE_ACCESS'); }
+    return original.call(this, file, ...args);
+  };
+}
+process.on('exit', () => fs.writeFileSync(process.env.SYNTHETIC_QUEUE_TRACE, JSON.stringify({ accesses })));
+`);
+  const env = { ...process.env, ...ctx.environment, GIT_CONFIG_NOSYSTEM: '1',
+    GIT_CONFIG_GLOBAL: path.join(ctx.home, 'absent-gitconfig'), SYNTHETIC_QUEUE_TRACE: traceFile };
+  for (const key of Object.keys(env)) if (/^(?:TOOLKIT_|CLAUDE_CODE_REMOTE|CLAUDE_ENV_FILE|NODE_OPTIONS)/.test(key)) delete env[key];
+  for (const [cwd, name] of [[ctx.caller, 'caller'], [ctx.other, 'held']]) {
+    for (const args of [['init', '--quiet'], ['remote', 'add', 'origin', 'https://github.com/example-owner/' + name + '.git']]) {
+      const result = spawnSync('git', ['-c', 'core.fsmonitor=false', '-C', cwd, ...args], { env, encoding: 'utf8', windowsHide: true, timeout: 10000 });
+      assert.equal(result.status, 0, 'synthetic fixture git: ' + result.stderr);
+    }
+  }
+  gate.writeGovernanceDecision(ctx.caller, 'enable', { registryOptions: ctx.options });
+  const hooks = [
+    { name: 'claude', file: 'toolkit-governance-hook.cjs', args: ['--event', 'PreToolUse'], deniedExit: 0 },
+    { name: 'codex', file: 'toolkit-codex-helper-hook.cjs', args: [], deniedExit: 2 },
+  ];
+  let calls = 0, restoredRefusals = 0, withdrawnExtraRefusals = 0;
+  for (const hook of hooks) for (const tool_name of ['Bash', 'PowerShell']) for (const selected of model.shells)
+    for (const [id, template, expected] of model.sentinel_transforms.adapter_cases) {
+      const command = sentinelText(template, 'codex', String.fromCharCode(0));
+      const before = snapshot(ctx.dir), input = { ...shell(ctx, command), tool_name,
+        tool_input: { command, ...(selected === null ? {} : { shell: selected }) } };
+      const result = spawnSync(process.execPath, ['--require', preload, path.join(root, 'repo/scripts', hook.file), ...hook.args], {
+        input: JSON.stringify(input), env, cwd: ctx.caller, encoding: 'utf8', windowsHide: true, timeout: 10000, maxBuffer: 256 * 1024,
+      });
+      const denied = expected === 'UNKNOWN', label = hook.name + '/' + id + '/' + selected + '/' + tool_name;
+      assert.equal(result.status, denied ? hook.deniedExit : 0, label + ': exit');
+      const output = result.stdout.trim() ? JSON.parse(result.stdout) : {};
+      assert.equal(output.hookSpecificOutput?.permissionDecision === 'deny', denied, label);
+      assert.equal(result.stdout, denied ? JSON.stringify(output) + '\n' : hook.name === 'codex' ? '' : '{}\n', label + ': exact stdout');
+      assert.equal(result.stderr, denied && hook.name === 'codex' ? output.hookSpecificOutput.permissionDecisionReason + '\n' : '', label + ': exact stderr');
+      assert.doesNotMatch(result.stdout + result.stderr, /synthetic held fixture|synthetic fixture/);
+      assert.equal(JSON.parse(fs.readFileSync(traceFile)).accesses, 0, label + ': queue trap');
+      assert.deepEqual(snapshot(ctx.dir), before, label + ': bytes and directories unchanged');
+      calls += 1; if (id === 'numeric-opener' || id === 'expansion-opener') restoredRefusals += 1;
+      if (id.endsWith('-join-reversal')) withdrawnExtraRefusals += 1;
+    }
+  assert.equal(calls, 168); assert.equal(restoredRefusals, 48); assert.equal(withdrawnExtraRefusals, 48);
+  t.diagnostic(JSON.stringify({ calls, restoredRefusals, withdrawnExtraRefusals, productionDefault: true,
+    stateReaderInjected: false, resolverInjected: false, candidateModulePreloaded: false,
+    queueAccesses: 0, byteAndDirectoryEquality: true, nativeDispatchExercised: false }));
+});
+
+test('new evidence allowances retain every raw guard without reading a held queue or acquiring metadata', t => {
+  const ctx = fixture(t), before = snapshot(ctx.dir);
+  const held = { state: 'UNDECIDED', rule: 'R4', repository_id: 'synthetic-held' }, safe = { state: 'DISABLED', rule: 'R1' };
+  const positives = ["@'\nfor key,value in items:\n    print(key,value)\n'@ | python -",
+    'git push origin HEAD:refs/heads/codex/example; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; git fetch origin codex/example',
+    'git commit -m "codex resume; claude --resume"', 'git add -- "codex/resume.md"', 'rg -e "codex resume" fixture.txt'];
+  const originals = {}; let queueReads = 0, spawns = 0, checks = 0;
+  // Throw on queue reads, metadata probes or directory scans, rather than inferring
+  // zero access solely from equal bytes after the call.
+  for (const name of ['readFileSync', 'readdirSync', 'statSync', 'lstatSync', 'existsSync']) {
+    originals[name] = fs[name];
+    fs[name] = (file, ...args) => {
+      if (String(file).includes(gate.HELD_BASENAME)) { queueReads += 1; throw new Error('SYNTHETIC_QUEUE_ACCESS'); }
+      return originals[name](file, ...args);
+    };
+  }
+  try {
+    for (const command of positives) for (const actor of matrix.actors) for (const tool_name of ['Bash', 'PowerShell']) for (const selected of [undefined, 'powershell.exe']) {
+      const input = { ...shell(ctx, command), actor, tool_name, tool_input: { cmd: command, ...(selected === undefined ? {} : { shell: selected }) } };
+      const make = stateReader => new gate.ToolGate({ registryOptions: ctx.options, environment: ctx.environment, stateReader,
+        continuationResolver: new ContinuationResolver({ environment: ctx.environment, spawn() { spawns += 1; throw new Error('UNEXPECTED_METADATA'); } }) });
+      const check = (stateReader, value, denied, reason) => {
+        assert.equal(Boolean(make(stateReader).decide(value)?.deny), denied, reason); checks += 1;
+      };
+      check(() => safe, input, false, 'ordinary');
+      check(() => held, input, true, 'held current');
+      check(() => ({ ...held, rule: 'ERROR', error_code: 'SYNTHETIC' }), input, true, 'unreadable current');
+      check(cwd => path.resolve(cwd) === ctx.other ? held : safe, { ...input, tool_input: { ...input.tool_input, workdir: ctx.other } }, true, 'held workdir');
+      check(cwd => path.resolve(cwd).startsWith(ctx.other) ? held : safe,
+        { ...input, tool_input: { ...input.tool_input, cmd: command + '; Get-Content -LiteralPath "' + ctx.other + '/fixture.txt"' } }, true, 'held raw path');
+      check(() => safe, { ...input, tool_input: { ...input.tool_input, cmd: command + '; node toolkit-governance.cjs enable' } }, true, 'owner answer');
+      check(() => safe, { ...input, tool_name: 'Write', tool_input: { file_path: ctx.options.registryPath } }, true, 'user-state edit');
+    }
+  } finally { for (const name of Object.keys(originals)) fs[name] = originals[name]; }
+  assert.equal(checks, 560); assert.equal(queueReads, 0); assert.equal(spawns, 0);
+  assert.deepEqual(snapshot(ctx.dir), before);
+  t.diagnostic(JSON.stringify({ rawGuardChecks: checks, queueReads, metadataSpawns: spawns, bytesAndDirectoriesUnchanged: true }));
 });

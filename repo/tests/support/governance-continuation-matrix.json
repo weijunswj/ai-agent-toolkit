@@ -1623,5 +1623,340 @@
     {"id":"unsafe-reader/before/293","text":"Get-Content -LiteralPath \"$codex/resume\"\nGet-Content -LiteralPath 'C:/example.test/.codex/plugins/cache/toolkit/3.15.17/repo/contracts/agent-rules/gate-rules.md'","expected":"UNKNOWN","shell":"powershell.exe","why":"separate valid reader must not erase an unsafe reader stage"},
     {"id":"unsafe-reader/after/294","text":"Get-Content -LiteralPath 'C:/example.test/.codex/plugins/cache/toolkit/3.15.17/repo/contracts/agent-rules/gate-rules.md'\nGet-Content -LiteralPath \"$codex/resume\"","expected":"UNKNOWN","shell":"powershell.exe","why":"unsafe reader argv and expansion remain executable evidence"},
     {"id":"limit/over","text":"Get-Content -LiteralPath 'C:/example.test/.codex/plugins/cache/toolkit/3.15.17/repo/contracts/agent-rules/gate-rules.md'\n                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                codex resume","expected":"UNKNOWN","shell":"powershell.exe","why":"no proof over the unchanged command bound; never truncate"}
-  ]
+  ],
+  "evidence_boundary_model": {
+    "invariant": "Conservative collapsed spelling evidence applies to every unproved byte. Only horizontal separators after Python for before a simple binding target and in in the complete literal stdin transport interrupt construction evidence. Fully consumed fixed Git stages independently prove literal operands. No source view supplies native authority.",
+    "shells": [
+      null,
+      "powershell.exe",
+      "pwsh",
+      "cmd.exe",
+      "bash",
+      "sh"
+    ],
+    "native": [
+      "codex resume --last",
+      "claude --resume fixture",
+      "& (\"co\"+\"dex\") (\"res\"+\"ume\")",
+      "& (\"co\".Replace(\"z\",\"\")+\"dex\") (\"re\".Trim()+\"sume\")",
+      "& (\"c{0}d\" -f \"o\" + \"ex\") (\"r{0}s\" -f \"e\" + \"ume\")",
+      "co\\dex resume",
+      "codex resu$(echo me)",
+      "claude (\"-\"+\"c\")",
+      "& $runtime --continue"
+    ],
+    "git": [
+      [
+        "push",
+        "git push origin HEAD:refs/heads/codex/example"
+      ],
+      [
+        "fetch",
+        "git fetch origin codex/example"
+      ],
+      [
+        "message",
+        "git commit -m \"codex resume; claude --resume\""
+      ],
+      [
+        "path",
+        "git add -- \"codex/resume.md\""
+      ],
+      [
+        "revision",
+        "git rev-parse refs/heads/codex/example"
+      ],
+      [
+        "status",
+        "git status --short -- \"codex/resume.md\""
+      ]
+    ],
+    "unsupported": [
+      "git -c core.sshCommand=\"codex resume\" push origin HEAD:refs/heads/codex/example",
+      "git -C \"C:/example.test/codex/resume\" push origin HEAD:refs/heads/codex/example",
+      "git -c alias.x=\"!codex resume\" x",
+      "git push --receive-pack=\"codex resume\" origin HEAD:refs/heads/codex/example",
+      "git fetch --upload-pack=\"codex resume\" origin codex/example",
+      "git push ext::codex resume",
+      "git commit --unknown \"codex resume\"",
+      "git add --intent-to-add \"codex resume\"",
+      "git push origin HEAD:refs/heads/codex/example extra --unknown",
+      "git fetch origin \"$(codex resume)\""
+    ],
+    "schema": [
+      [
+        "git push",
+        false,
+        "NOT_CONTINUATION"
+      ],
+      [
+        "git push origin",
+        false,
+        "NOT_CONTINUATION"
+      ],
+      [
+        "git push -- origin HEAD:refs/heads/codex/example",
+        true,
+        "NOT_CONTINUATION"
+      ],
+      [
+        "git fetch -- origin codex/example",
+        true,
+        "NOT_CONTINUATION"
+      ],
+      [
+        "git commit -m",
+        false,
+        "NOT_CONTINUATION"
+      ],
+      [
+        "git commit -m \"codex resume\" --unknown",
+        false,
+        "UNKNOWN"
+      ],
+      [
+        "git commit -m \"codex resume\" -m \"more\"",
+        true,
+        "NOT_CONTINUATION"
+      ],
+      [
+        "git commit --message \"codex resume\"",
+        true,
+        "NOT_CONTINUATION"
+      ],
+      [
+        "git add codex/resume.md",
+        false,
+        "UNKNOWN"
+      ],
+      [
+        "git add -- codex/resume.md",
+        true,
+        "NOT_CONTINUATION"
+      ],
+      [
+        "git rev-parse refs/heads/codex/example",
+        true,
+        "NOT_CONTINUATION"
+      ],
+      [
+        "git status --short -- codex/resume.md",
+        true,
+        "NOT_CONTINUATION"
+      ],
+      [
+        "git status --unknown codex/resume.md",
+        false,
+        "UNKNOWN"
+      ],
+      [
+        "git push origin \"HEAD:refs/heads/codex/$branch\"",
+        false,
+        "UNKNOWN"
+      ],
+      [
+        "git commit -m \"$(codex resume)\"",
+        false,
+        "UNKNOWN"
+      ],
+      [
+        "git fetch --upload-pack codex origin codex/example",
+        false,
+        "NOT_CONTINUATION"
+      ],
+      [
+        "git push --receive-pack codex origin codex/example",
+        false,
+        "NOT_CONTINUATION"
+      ],
+      [
+        "git -c core.sshCommand=codex push origin codex/example",
+        false,
+        "NOT_CONTINUATION"
+      ],
+      [
+        "git push origin :refs/heads/codex/example",
+        false,
+        "NOT_CONTINUATION"
+      ],
+      [
+        "git push origin +HEAD:refs/heads/codex/example",
+        false,
+        "NOT_CONTINUATION"
+      ],
+      [
+        "git fetch origin \"refs/heads/codex/*:refs/heads/codex/*\"",
+        false,
+        "NOT_CONTINUATION"
+      ]
+    ],
+    "construction": [
+      [
+        "substitution-no-space",
+        "d(){ printf d; }; ume(){ printf ume; }; co$(d)ex res$(ume)"
+      ],
+      [
+        "substitution-space",
+        "de(){ printf dex; }; u(){ printf ume; }; co$(de x) res$(u me)"
+      ],
+      [
+        "call-operator",
+        "& (co dex) (res ume)"
+      ],
+      [
+        "parameter-array",
+        "a=(co dex); IFS=; ${a[*]} resume"
+      ]
+    ],
+    "sentinel_transforms": {
+      "invariant": "Preserve every original UTF-16 code unit through the legacy consuming transforms. Only a nonempty unchanged whole-input proof retains generated NUL barriers; no-proof inputs use the exact legacy final alphabet.",
+      "words": ["codex","codex.exe","codex.cmd","codex.ps1","claude","claude.exe","claude.cmd","claude.ps1","claude-code","claude-code.exe","claude-code.cmd","claude-code.ps1","resume","fork","--resume","--continue","--session-id","--fork-session"],
+      "nul_counts": [1,2],
+      "shapes": [
+        {"id":"numeric-opener","template":"({{nul}0{word}})","expected":["UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN"]},
+        {"id":"expansion-opener","template":"(${nul}{{word}})","expected":["UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN"]},
+        {"id":"inside-numeric-control","template":"({0{nul}{word}})","expected":["NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION"]},
+        {"id":"nonnumeric-control","template":"({{nul}x{word}})","expected":["UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN"]},
+        {"id":"spelling-control","template":"({head}{nul}{tail})","expected":["UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN"]},
+        {"id":"numeric-join-reversal","template":"({head}{{nul}0noise}{tail})","expected":["NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","UNKNOWN","NOT_CONTINUATION","NOT_CONTINUATION","UNKNOWN"]},
+        {"id":"expansion-join-reversal","template":"({head}${nul}{noise}{tail})","expected":["NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","UNKNOWN","NOT_CONTINUATION","NOT_CONTINUATION","UNKNOWN"]}
+      ],
+      "control_code_points": [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,127,160,8232,8233,65279,55296,57343,128512],
+      "neighbours": [
+        ["percent-opener","(%{nul}{word}%)"],
+        ["percent-close","(%{word}{nul}%)"],
+        ["bang-opener","(!{nul}{word}!)"],
+        ["bang-close","(!{word}{nul}!)"],
+        ["dollar-close","(${{word}{nul}})"],
+        ["brace-close","({0{word}{nul}})"],
+        ["slash-newline","(\\{nul}\n{word})"],
+        ["tick-newline","(`{nul}\r\n{word})"],
+        ["caret-newline","(^{nul}\n{word})"],
+        ["quote-gap","(\"{head}\"{nul}\"{tail}\")"],
+        ["format-operator","(-f{nul}{word})"],
+        ["join-operator","(-join{nul}{word})"]
+      ],
+      "qualified_bodies": [
+        "for k in items:\n    pass",
+        "for\tkey,value in items:\n    pass",
+        "values={k:v for k,v in items}",
+        "for key in items:\n    text=\"{0} for k in items\"",
+        "for key in items:\n    # for k in items\n    pass",
+        "for k in items:\n    text=\"\\n\""
+      ],
+      "expected_rows": {"sentinel":3024,"original_review":2160,"early_deletion_lost_refusals":864,"early_deletion_extra_refusals":768,"unproved_projection":27360,"code_units":131072,"qualified_projection":864,"proof_withdrawal":370},
+      "adapter_cases": [
+        ["numeric-opener","({{nul}0codex})","UNKNOWN"],
+        ["expansion-opener","(${nul}{codex})","UNKNOWN"],
+        ["inside-numeric-control","({0{nul}codex})","NOT_CONTINUATION"],
+        ["nonnumeric-control","({{nul}xcodex})","UNKNOWN"],
+        ["spelling-control","(co{nul}dex)","UNKNOWN"],
+        ["numeric-join-reversal","(co{{nul}0noise}dex)","NOT_CONTINUATION"],
+        ["expansion-join-reversal","(co${nul}{noise}dex)","NOT_CONTINUATION"]
+      ]
+    },
+    "binding_cases": [
+      ["simple","for key in items:\n    pass",1],
+      ["target-list","for key,value in items:\n    pass",1],
+      ["comprehension","values={k:x for k,x in items}",1],
+      ["tabs","for\tk\tin items:\n    pass",1],
+      ["crlf","for key in items:\r\n    pass",1],
+      ["both","for key in items:\n    values={k:x for k,x in items}",2],
+      ["strings-and-comments","x=\"unrelated\"\n# unrelated\nfor key in items:\n    pass",1]
+    ],
+    "unproved_binding_cases": [
+      ["double-here","@\"\nfor k in items:\n    pass\n\"@ | python -",["UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN"]],
+      ["raw-source","for k in items:\n    pass",["UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN"]],
+      ["inline","python -c \"for k in items:pass\"",["NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION"]],
+      ["extra-consumer","@'\nfor k in items:\n    pass\n'@ | python - extra",["UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN"]],
+      ["different-consumer","@'\nfor k in items:\n    pass\n'@ | awk -",["UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN"]],
+      ["wrapper","pwsh -Command \"@'\nfor k in items:\n    pass\n'@ | python -\"",["UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN"]],
+      ["missing-in","@'\nfor k of items:\n    pass\n'@ | python -",["UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN"]],
+      ["attribute-target","@'\nfor k.x in items:\n    pass\n'@ | python -",["UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN"]],
+      ["parenthesised-target","@'\nfor (k) in items:\n    pass\n'@ | python -",["UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN"]],
+      ["header-comment","@'\nfor # trivia\nk in items:\n    pass\n'@ | python -",["NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION"]],
+      ["header-newline","@'\nfor\nk in items:\n    pass\n'@ | python -",["UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN"]],
+      ["encoding","@'\n# coding: unicode_escape\nfor k in items:\n    pass\n'@ | python -",["UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN"]],
+      ["f-string","@'\nx=f\"unrelated\"\nfor k in items:\n    pass\n'@ | python -",["UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN"]],
+      ["unterminated","@'\nfor k in items:\n    x=\"unterminated\n'@ | python -",["UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN"]],
+      ["delimiter-in-body","@'\nfor k in items:\n    pass\n'@\n# extra\n'@ | python -",["UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN"]],
+      ["dollar","@'\nfor k in items:\n    x=\"$name\"\n'@ | python -",["UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN"]],
+      ["percent","@'\nfor k in items:\n    x=3%2\n'@ | python -",["UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN"]],
+      ["nul","@'\nfor k in items:\n    pass\u0000\n'@ | python -",["UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN"]],
+      ["unicode","@'\nfor k in items:\n    x=\"☃\"\n'@ | python -",["UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN"]],
+      ["over-limit","@'\nfor k in items:\n    pass\n'@ | python -",["UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN"],32768]
+    ],
+    "confirmed_constructions": [
+      ["codex-system","perl -e 'system(co . dex, res . ume)'"],
+      ["codex-exec","perl -e 'exec(co . dex, res . ume)'"],
+      ["claude-system","perl -e 'system(cl . aude, q{--res} . ume, fixture)'"],
+      ["stdin-codex","@'\nsystem(co . dex, res . ume)\n'@ | perl -"]
+    ],
+    "construction_siblings": [
+      ["perl-tab","perl -e 'system(co\t.\tdex,res\t.\tume)'"],
+      ["perl-newline","perl -e 'system(co\n.\ndex,res\n.\nume)'"],
+      ["perl-comment","perl -e 'system(co . # trivia\n dex,res . ume)'"],
+      ["perl-mixed","perl -e 'system(\"co\" . dex, res . \"ume\")'"],
+      ["awk-implicit","awk -v co=co -v dex=dex -v res=res -v ume=ume 'BEGIN{system(co dex, res ume)}'"],
+      ["awk-valid-one-argument","awk -v co=co -v dex=dex -v res=res -v ume=ume 'BEGIN{system(co dex \" \" res ume)}'"],
+      ["awk-implicit-bare","awk 'BEGIN{system(co dex, res ume)}'"],
+      ["awk-trivia","awk 'BEGIN{system(co\tdex, res\nume)}'"],
+      ["awk-stdin","@'\nBEGIN{system(co dex, res ume)}\n'@ | awk -"],
+      ["joining-pipeline","(echo co dex; echo res ume) | tr -d ' ' | xargs -n2"],
+      ["joining-wrapper","sh -c '(echo co dex; echo res ume) | tr -d \" \" | xargs -n2'"],
+      ["joining-printf","printf '%s' co dex | xargs"],
+      ["bare-join","perl -e 'system(join(q{},co,dex),join(q{},res,ume))'"],
+      ["lua-dots","lua -e 'os.execute(co .. dex .. res .. ume)'"],
+      ["php-dot","php -r 'system(co . dex . res . ume);'"],
+      ["powershell-plus","& (co + dex) (res + ume)"],
+      ["powershell-format","& ('c{0}d' -f 'o' + 'ex') ('r{0}s' -f 'e' + 'ume')"],
+      ["powershell-join","& ((co,dex) -join '') ((res,ume) -join '')"],
+      ["substitution","co$(de x) res$(u me)"],
+      ["shell-adjacency","co\"de\"x res\"u\"me"],
+      ["unrecognised-runtime","fixture-runtime '(co dex) (res ume)'"],
+      ["nonword-trivia","fixture-runtime '(co / ** / dex) (res ume)'"],
+      ["raw-nul","fixture-runtime '(co\u0000dex) (res\u0000ume)'"]
+    ],
+    "embedded_neighbours": [
+      ["literal-call","import subprocess\nfor k in items:\n    pass\nsubprocess.run([\"codex\",\"resume\"])"],
+      ["computed-call","import os\nfor k in items:\n    pass\nos.system(\"co\"+\"dex\"+\" res\"+\"ume\")"],
+      ["string-lookalike","x=\"for k in items\""],
+      ["comment-lookalike","# for k in items"],
+      ["triple-lookalike","x=\"\"\"for k in items\"\"\""],
+      ["implicit-in-foreign-body","for k in items:\n    pass\nco dex res ume"],
+      ["dynamic-body","for k in items:\n    pass\nx=\"for k\".replace(\" \",\"\")"]
+    ],
+    "foreign_ingress_cases": [
+      ["loop/raw","for key,value in items:\n    if key:continue",["UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN"]],
+      ["loop/owned","@'\nfor key,value in items:\n    if key:continue\n'@ | python -",["NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","UNKNOWN","UNKNOWN","UNKNOWN"]],
+      ["loop/expanded","@\"\nfor key,value in items:\n    if key:continue\n\"@ | python -",["UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN"]],
+      ["loop/inline","python -c \"for key,value in items:\n    if key:continue\"",["UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN"]],
+      ["loop/posix","python - <<'PY'\nfor key,value in items:\n    if key:continue\nPY",["UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN"]],
+      ["comprehension/raw","value = {k:x for k,x in items}",["UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN"]],
+      ["comprehension/owned","@'\nvalue = {k:x for k,x in items}\n'@ | python -",["NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","UNKNOWN","UNKNOWN","UNKNOWN"]],
+      ["comprehension/expanded","@\"\nvalue = {k:x for k,x in items}\n\"@ | python -",["UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN"]],
+      ["comprehension/inline","python -c \"value = {k:x for k,x in items}\"",["NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION"]],
+      ["comprehension/posix","python - <<'PY'\nvalue = {k:x for k,x in items}\nPY",["UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN"]],
+      ["both/raw","for key,value in items:\n    print({k:x for k,x in items})",["UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN"]],
+      ["both/owned","@'\nfor key,value in items:\n    print({k:x for k,x in items})\n'@ | python -",["NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","UNKNOWN","UNKNOWN","UNKNOWN"]],
+      ["both/expanded","@\"\nfor key,value in items:\n    print({k:x for k,x in items})\n\"@ | python -",["UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN"]],
+      ["both/inline","python -c \"for key,value in items:\n    print({k:x for k,x in items})\"",["UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN"]],
+      ["both/posix","python - <<'PY'\nfor key,value in items:\n    print({k:x for k,x in items})\nPY",["UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN"]],
+      ["tab/raw","for\tkey in items:\n    pass",["UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN"]],
+      ["tab/owned","@'\nfor\tkey in items:\n    pass\n'@ | python -",["NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","UNKNOWN","UNKNOWN","UNKNOWN"]],
+      ["tab/expanded","@\"\nfor\tkey in items:\n    pass\n\"@ | python -",["UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN"]],
+      ["tab/inline","python -c \"for\tkey in items:\n    pass\"",["UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN"]],
+      ["tab/posix","python - <<'PY'\nfor\tkey in items:\n    pass\nPY",["UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN"]],
+      ["crlf/raw","for key in items:\r\n    pass",["UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN"]],
+      ["crlf/owned","@'\nfor key in items:\r\n    pass\n'@ | python -",["NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","UNKNOWN","UNKNOWN","UNKNOWN"]],
+      ["crlf/expanded","@\"\nfor key in items:\r\n    pass\n\"@ | python -",["UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN"]],
+      ["crlf/inline","python -c \"for key in items:\r\n    pass\"",["UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN"]],
+      ["crlf/posix","python - <<'PY'\nfor key in items:\r\n    pass\nPY",["UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN"]],
+      ["prefix-suffix/raw","before = 1\nfor key in items:\n    pass\nafter = 2",["UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN"]],
+      ["prefix-suffix/owned","@'\nbefore = 1\nfor key in items:\n    pass\nafter = 2\n'@ | python -",["NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","UNKNOWN","UNKNOWN","UNKNOWN"]],
+      ["prefix-suffix/expanded","@\"\nbefore = 1\nfor key in items:\n    pass\nafter = 2\n\"@ | python -",["UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN"]],
+      ["prefix-suffix/inline","python -c \"before = 1\nfor key in items:\n    pass\nafter = 2\"",["UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN"]],
+      ["prefix-suffix/posix","python - <<'PY'\nbefore = 1\nfor key in items:\n    pass\nafter = 2\nPY",["UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN"]]
+    ]
+  }
 }
