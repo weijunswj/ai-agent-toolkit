@@ -426,6 +426,9 @@ test('Windows/source-hook UAT: both native entrypoints cross both CLI families w
     for (const command of [
       'claude -r "' + ctx.file + '" --fork-session', 'codex -C "' + ctx.target + '" e resume --last',
     ]) for (const tool_name of ['Bash', 'PowerShell']) invoke(hook, { ...shell(ctx, command), tool_name }, false);
+    for (const row of matrix.script_reader_cases.filter(row => ['caller/absent/lf', 'route/absent/lf', 'newline/absent/lf', 'wrapper/route-literal-single', 'wrapper/caller-literal-single', 'gh-negative/unknown-option', 'gh-negative/expanded-branch', 'codex-direct/block/absent', 'claude-direct/after/absent', 'computed/pipe/absent'].includes(row.id))) {
+      for (const tool_name of ['Bash', 'PowerShell']) invoke(hook, { ...shell(ctx, row.text), tool_name, tool_input: { command: row.text, ...(row.shell === undefined ? {} : { shell: row.shell }) } }, row.expected === 'UNKNOWN');
+    }
     for (const command of commands) for (const marker of [{}, { TOOLKIT_GATE_ROLE: 'G1' }, { TOOLKIT_GATE_ROLE: 'controller' }, { TOOLKIT_GATE_ROLE: 'helper' }]) invoke(hook, shell(ctx, command), false, marker);
     for (const command of commands) invoke(hook, shell(ctx, command, { tool_input: { command, workdir: ctx.other } }), true);
     for (const command of [`claude --resume ${ID}`, 'codex resume --last', `claude --resume "${ctx.file}" -p yes`, `codex exec resume ${ID} "toolkit governance enable"`, `codex -C "${ctx.other}" exec resume --last`]) invoke(hook, shell(ctx, command), true);
@@ -450,6 +453,9 @@ test('Windows/source-hook UAT: both native entrypoints cross both CLI families w
       invoke(hook, { ...shell(ctx, 'rg -e "codex resume" repo\\notes.txt'), tool_name }, false);
       invoke(hook, { ...shell(ctx, matrix.literal_role_cases.find(row => row.id === 'sqag/compound/absent').text), tool_name }, false);
       invoke(hook, { ...shell(ctx, matrix.literal_role_cases.find(row => row.id === 'composition/runtime/absent').text), tool_name }, false);
+      for (const row of matrix.script_reader_cases.filter(row => ['caller/absent/lf', 'route/absent/lf', 'newline/absent/lf', 'wrapper/caller-literal-single', 'codex-direct/block/absent', 'claude-direct/after/absent'].includes(row.id))) {
+        invoke(hook, { ...shell(ctx, row.text), tool_name, tool_input: { command: row.text, ...(row.shell === undefined ? {} : { shell: row.shell }) } }, row.expected === 'UNKNOWN');
+      }
     }
   }
   t.diagnostic(JSON.stringify({ sourceCalls, productionDefault: true, byteAndDirectoryEquality: true, nativeDispatchExercised: false }));
@@ -676,4 +682,117 @@ test('ordered-atom closure table is UNKNOWN before target proof across placement
   } finally { fs.readFileSync = originalRead; }
   assert.equal(queueReads, 0, 'no held-queue read on verified or computed paths');
   assert.deepEqual(snapshot(ctx.dir), before);
+});
+
+
+test('multiline pipeline reader model keeps literal data separate from all executable source', t => {
+  const ctx = fixture(t), api = evidenceProjection(), before = snapshot(ctx.dir);
+  const heldFile = path.join(path.dirname(ctx.options.registryPath), gate.HELD_BASENAME);
+  const originalRead = fs.readFileSync; let queueReads = 0;
+  fs.readFileSync = (file, ...args) => { if (file === heldFile) queueReads += 1; return originalRead(file, ...args); };
+  t.after(() => { fs.readFileSync = originalRead; });
+  const held = { state: 'UNDECIDED', rule: 'R4', repository_id: 'synthetic-held' };
+  let positive = 0;
+  for (const row of matrix.script_reader_cases) {
+    const input = shell(ctx, row.text);
+    if (Object.hasOwn(row, 'shell')) input.tool_input.shell = row.shell;
+    assert.equal(parse(row.text, input).status, row.expected, row.id);
+    const roles = api.commandRoles(row.text, input);
+    if (roles.segments) {
+      assert.equal(roles.candidate.length, row.text.length, row.id);
+      const spans = roles.segments.proofs.flatMap(proof => proof.roles.filter(word => word.role.startsWith('literal ')
+        || word.role === 'attached literal pattern' || (word.role === 'reader executable' && /[\\/]/.test(word.value))));
+      if (roles.excludedExecutable) spans.push(roles.excludedExecutable);
+      for (let i = 0; i < row.text.length; i += 1) if (roles.candidate[i] !== row.text[i]) {
+        assert.equal(roles.candidate[i], ' ', row.id + ': equal-length mask');
+        assert.ok(spans.some(span => i >= span.start && i < span.end), row.id + ': only consumed roles masked');
+      }
+      for (const separator of roles.segments.separators || []) {
+        assert.equal(roles.candidate.slice(separator.start, separator.end), row.text.slice(separator.start, separator.end), row.id + ': exact separator offsets');
+      }
+      for (const proof of roles.segments.proofs) for (const word of proof.roles) {
+        assert.ok(word.start >= proof.start && word.end <= proof.end && word.end > word.start, row.id + ': exact source extent');
+        assert.ok(row.text.slice(word.start, word.end).includes(word.quote || word.value), row.id + ': original word bytes');
+      }
+      for (const text of roles.segments.unproved) assert.ok(roles.candidate.includes(text), row.id + ': unproved code retained');
+    }
+    if (['unknown-option', 'trailing-pipe', 'empty-semi', 'bare-cr', 'comment', 'here-string', 'doubled-quote'].includes(row.id)
+      || row.id.startsWith('bad-shell/')) assert.equal(roles.candidate, row.text, row.id + ': no unsupported projection');
+    for (const actor of matrix.actors) {
+      const decide = stateReader => new gate.ToolGate({ registryOptions: ctx.options, environment: ctx.environment, stateReader }).decide({ ...input, actor });
+      assert.equal(Boolean(decide(() => ({ state: 'DISABLED', rule: 'R1' }))?.deny), row.expected === 'UNKNOWN', row.id + '/' + actor);
+      if (row.expected !== 'NOT_CONTINUATION') continue;
+      positive += 1;
+      const ordinary = new gate.ToolGate({ registryOptions: ctx.options, environment: ctx.environment, stateReader: () => ({ state: 'DISABLED', rule: 'R1' }) });
+      assert.match(ordinary.decide({ ...input, actor, tool_input: { ...input.tool_input, command: row.text + '\nnode toolkit-governance.cjs enable' } })?.deny || '', /only the user/, row.id + ': raw owner-answer guard');
+      assert.match(ordinary.decide({ ...input, actor, tool_name: 'Write', tool_input: { command: row.text, file_path: ctx.options.registryPath } })?.deny || '', /user-state files/, row.id + ': user-state edit guard');
+      const reached = new gate.ToolGate({ registryOptions: ctx.options, stateReader: cwd => cwd === ctx.other || cwd.startsWith(ctx.other + path.sep) ? held : { state: 'DISABLED', rule: 'R1' } });
+      assert.ok(reached.decide({ ...input, actor, tool_input: { ...input.tool_input, command: row.text + '\nGet-Content -LiteralPath "' + ctx.other + '/fixture.txt"' } })?.deny, row.id + ': raw known absolute-path guard');
+      assert.ok(decide(() => held)?.deny, row.id + ': current guard');
+      assert.ok(decide(() => ({ state: 'UNDECIDED', rule: 'ERROR', error_code: 'SYNTHETIC' }))?.deny, row.id + ': unreadable current guard');
+      assert.ok(new gate.ToolGate({ registryOptions: ctx.options, stateReader: cwd => cwd === ctx.other ? held : { state: 'DISABLED', rule: 'R1' } })
+        .decide({ ...input, actor, tool_input: { ...input.tool_input, workdir: ctx.other } })?.deny, row.id + ': workdir guard');
+    }
+  }
+  const legacy = matrix.literal_role_cases.find(row => row.id === 'segments/pipeline');
+  assert.equal(legacy.baseline_expected, 'UNKNOWN'); assert.ok(legacy.allowance);
+  for (const text of [
+    'Get-Content -Unknown "codex resume" | git status',
+    'Get-Content -LiteralPath "$codex/resume" | git status',
+    legacy.text + '; codex resume --last', legacy.text + '; claude --continue',
+  ]) assert.equal(parse(text, { tool_input: { shell: 'powershell.exe' } }).status, 'UNKNOWN', 'historical pipeline unsafe siblings');
+  assert.equal(queueReads, 0, 'role proof and all actor decisions never read the held queue');
+  fs.readFileSync = originalRead;
+  assert.deepEqual(snapshot(ctx.dir), before);
+  t.diagnostic(JSON.stringify({ modelRows: matrix.script_reader_cases.length, positiveActorChecks: positive, zeroQueueReads: true }));
+});
+
+
+test('acquisition schema and structural reader resources stay within the closed lexical subset', () => {
+  const api = evidenceProjection(), input = { tool_input: { shell: 'powershell.exe' } };
+  const branch = 'gh run list --branch codex/resume';
+  const fields = ['attempt', 'conclusion', 'createdAt', 'databaseId', 'displayTitle', 'event', 'headBranch', 'headSha',
+    'name', 'number', 'startedAt', 'status', 'updatedAt', 'url', 'workflowDatabaseId', 'workflowName'];
+  for (const tail of ['', ' --repo example-org/example-repo', ' --repo github.example.test/example-org/example-repo',
+    ' --commit ' + 'a'.repeat(40), ' --limit 8', ...fields.map(field => ' --json ' + field), ' --json ' + fields.join(',')]) {
+    const text = branch + tail;
+    assert.equal(parse(text, input).status, 'NOT_CONTINUATION', tail);
+    const proof = api.commandRoles(text, input).segments.proofs[0];
+    assert.equal(proof.consumed, text.length);
+    assert.equal(proof.schema, 'gh run list literal filters');
+  }
+  for (const tail of [' --unknown value', ' -R example-org/example-repo', ' --repo=example-org/example-repo',
+    ' --repo', ' --limit', ' --json', ' --commit bad', ' --commit ' + 'a'.repeat(39), ' --limit 1+1',
+    ' --json status,', ' --json ,status', ' --json status,,headSha', ' --json Status', ' --json codex,resume',
+    ' --jq .status', ' --template "codex resume"', ' --branch other', ' --repo example-org', ' --repo github.example.test/example-org/example-repo/extra',
+    ...['--repo example-org/example-repo', '--commit ' + 'a'.repeat(40), '--limit 8', '--json status'].map(option => ' ' + option + ' ' + option)]) {
+    const text = branch + tail;
+    assert.equal(parse(text, input).status, 'UNKNOWN', tail);
+    assert.equal(api.commandRoles(text, input).candidate, text, 'whole malformed acquisition stage is retained');
+  }
+  for (const text of ['gh run list --branch --codex', 'gh run list --branch -codex/resume',
+    'gh run list --branch=codex/example-branch', 'gh run list -b codex/example-branch',
+    'gh run watch --branch codex/example-branch', 'gh workflow list --branch codex/example-branch',
+    'gh "run" list --branch codex/example-branch', 'gh run "list" --branch codex/example-branch']) {
+    assert.equal(api.commandRoles(text, input).candidate, text, 'no alias, option-like value or alternate command proof');
+  }
+  for (const text of ['rg --regexp="codex resume" fixture.txt | ConvertFrom-Json', 'findstr /c:"codex resume" fixture.txt | ConvertFrom-Json']) {
+    const roles = api.commandRoles(text, input);
+    assert.equal(parse(text, input).status, 'NOT_CONTINUATION');
+    assert.ok(roles.candidate.includes(text.startsWith('rg') ? '--regexp=' : '/c:'), 'attached option prefix retained');
+  }
+  const reader = 'Get-Content -LiteralPath C:/example.test/.codex/notes.md';
+  for (const shape of hostile.cases(['line-breaks', 'continued-lines', 'quoting', 'indents', 'invisible', 'large-input'], ['shell', 'text'])) {
+    const text = reader + '\n' + shape.text + '\ncodex resume --last';
+    assert.equal(parse(text, input).status, 'UNKNOWN', shape.id);
+  }
+  for (const text of [reader + '\n' + '('.repeat(12000) + 'codex resume' + ')'.repeat(12000),
+    (reader + '\n').repeat(500), reader + '\n' + ' '.repeat(LIMITS.command),
+    (reader + '\n').repeat(500) + 'claude --continue']) {
+    const roles = api.commandRoles(text, input);
+    assert.equal(roles.candidate.length, text.length, 'no truncation or recursive stack growth');
+    if (text.length > LIMITS.command) assert.equal(roles.candidate, text, 'over-limit source receives no projection');
+    if (text.includes('codex resume') || text.includes('claude --continue')) assert.equal(parse(text, input).status, 'UNKNOWN');
+  }
+  assert.equal(api.roleWords('rg -e codex status,headSha'), null, 'comma belongs only to acquisition JSON fields');
 });

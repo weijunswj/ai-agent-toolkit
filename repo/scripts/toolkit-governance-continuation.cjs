@@ -190,26 +190,31 @@ function roleShell(input) {
 
 // This separate lexer proves operand roles, never native argv. Offsets and quote ownership
 // stay with every word. No operators, concatenation, escaped quotes or partial consumption.
-function roleWords(text) {
-  if (!text || text.length > LIMITS.command || /[^\x20-\x7e]/.test(text)) return null;
+const horizontalSpace = c => c === ' ' || c === '\t';
+function roleWords(text, { scriptWord = false, fieldComma = false } = {}) {
+  if (!text || text.length > LIMITS.command || /[^\x09\x20-\x7e\r\n]/.test(text)) return null;
   const words = [];
   for (let i = 0; i < text.length;) {
-    if (text[i] === ' ') { i += 1; continue; }
-    const start = i; let prefix = '', quote = null, value = '';
-    if (text[i] === '&' && words.length === 0 && text[i + 1] === ' ') { words.push({ start, end: ++i, value: '&', quote, prefix }); continue; }
-    while (i < text.length && text[i] !== ' ' && text[i] !== '"' && text[i] !== "'") {
-      if (!/[a-z0-9_./:\\=+\-]/i.test(text[i])) return null;
+    if (horizontalSpace(text[i])) { i += 1; continue; }
+    const start = i; let value = '', quote = null, prefix = '';
+    if (text[i] === '&' && !words.length && horizontalSpace(text[i + 1])) { words.push({ start, end: ++i, value: '&', quote, prefix }); continue; }
+    while (i < text.length && !horizontalSpace(text[i]) && !['"', "'"].includes(text[i])) {
+      if (!/[a-z0-9_./:\\=+\-]/i.test(text[i]) && !(fieldComma && text[i] === ',')) return null;
       value += text[i++];
     }
-    if (text[i] === '"' || text[i] === "'") {
+    if (['"', "'"].includes(text[i])) {
       if (value && !/^(?:--regexp=|\/c:)$/i.test(value)) return null;
       prefix = value; quote = text[i++]; const opening = i;
-      while (i < text.length && text[i] !== quote) i += 1;
+      while (i < text.length && text[i] !== quote) {
+        if (text[i] === '`' || (text[i] === '\\' && text[i + 1] === quote)) return null;
+        if (!scriptWord && /[\r\n]/.test(text[i])) return null;
+        i += 1;
+      }
       if (i === text.length) return null;
       value += text.slice(opening, i++);
-      if (i < text.length && text[i] !== ' ') return null;
+      if (i < text.length && !horizontalSpace(text[i])) return null;
     }
-    if (i === start) return null;
+    if (start === i) return null;
     words.push({ start, end: i, value, quote, prefix });
   }
   return words.length ? words : null;
@@ -323,51 +328,99 @@ function wrapperRoles(words, shell) {
   return { executable, script, fixed, powershell };
 }
 
-// Complete top-level semicolon lists only. Every segment must share the literal
-// lexical boundary; no masking inside groups, expansions, pipes or redirections.
+// The actual caller needs these five literal acquisition-option roles only.
+// This is not a gh-wide exemption or a subprocess/format-expression schema.
+const GH_RUN_FIELDS = Object.freeze(['attempt', 'conclusion', 'createdAt', 'databaseId', 'displayTitle', 'event', 'headBranch',
+  'headSha', 'name', 'number', 'startedAt', 'status', 'updatedAt', 'url', 'workflowDatabaseId', 'workflowName']);
+function acquisitionProof(text, shell) {
+  const ws = roleWords(text, { fieldComma: true });
+  if (!shell || !ws?.length || ws.some(w => !literalWord(w, shell))) return null;
+  const offset = ws[0].value === '&' ? 1 : 0, exe = ws[offset];
+  if (offset && (!['powershell', 'common'].includes(shell) || !exe?.quote)) return null;
+  if (!/^gh(?:\.exe)?$/i.test(exe?.value.split(/[\\/]/).pop() || '') || ws[offset + 1]?.quote || ws[offset + 2]?.quote
+    || ws[offset + 1]?.value !== 'run' || ws[offset + 2]?.value !== 'list') return null;
+  const rs = ws.map((w, n) => ({ ...w, role: n === offset ? 'reader executable' : n <= offset + 2 ? 'fixed acquisition command' : 'acquisition option' }));
+  const seen = new Set();
+  for (let n = offset + 3; n < ws.length; n += 2) {
+    const option = ws[n], value = ws[n + 1];
+    if (!['--repo', '--branch', '--commit', '--limit', '--json'].includes(option.value) || option.quote || !value || value.value.startsWith('-') || seen.has(option.value)) return null;
+    seen.add(option.value);
+    if (option.value === '--repo' && !/^(?:[a-z0-9.-]+\/)?[a-z0-9_.-]+\/[a-z0-9_.-]+$/i.test(value.value)) return null;
+    if (option.value === '--branch' && !/^[a-z0-9_./-]+$/i.test(value.value)) return null;
+    if (option.value === '--commit' && !/^[a-f0-9]{40}$/i.test(value.value)) return null;
+    if (option.value === '--limit' && !/^\d+$/.test(value.value)) return null;
+    if (option.value === '--json' && (!value.value || value.value.split(',').some(f => !GH_RUN_FIELDS.includes(f)))) return null;
+    rs[n + 1].role = 'literal acquisition ' + option.value.slice(2);
+  }
+  return { schema: 'gh run list literal filters', shell, roles: rs, consumed: ws.at(-1).end };
+}
+
+// Complete structural scan. Only top-level statement/pipeline stages can earn data
+// roles. All groups, blocks, arrays and their contents remain executable evidence.
 function readerSegments(text, shell) {
-  if (!shell || !text || text.length > LIMITS.command || /[^\x20-\x7e]/.test(text)) return null;
-  const segments = []; let start = 0, quote = null;
-  for (let i = 0; i < text.length; i += 1) {
+  if (!shell || !text || text.length > LIMITS.command || /[^\x09\x0a\x0d\x20-\x7e]/.test(text)) return null;
+  const ranges = [], separators = [], stack = []; let quote = null, start = 0;
+  for (let i = 0; i < text.length; i++) {
     const c = text[i];
+    if (c === '\r' && text[i + 1] !== '\n') return null;
     if (quote) {
-      if (c === '\\' && text[i + 1] === quote) return null;
-      if (c === quote) { quote = null; if (i + 1 < text.length && !/[ ;]/.test(text[i + 1])) return null; }
+      if (c === '`' || (c === '\\' && text[i + 1] === quote)) return null;
+      if (quote === '"' && c === '$') return null; // No interpolated-string ownership claim.
+      if (c === quote) {
+        if (text[i + 1] === quote) return null;
+        quote = null;
+      }
       continue;
     }
-    if (c === '"' || c === "'") { quote = c; continue; }
-    if (c === ';') { segments.push({ start, end: i }); start = i + 1; continue; }
-    if (!/[a-z0-9_./:\\=+ \-]/i.test(c)) return null;
+    if (c === '#' || c === '`' || c === '^' || (c === '@' && ['"', "'"].includes(text[i + 1]))) return null;
+    if (c === '\\' && /[\s'";&|<>]/.test(text[i + 1] || '')) return null;
+    if (['"', "'"].includes(c)) { quote = c; continue; }
+    if ('({['.includes(c)) { stack.push(c); continue; }
+    if (')}]'.includes(c)) { if (stack.pop() !== { ')': '(', '}': '{', ']': '[' }[c]) return null; continue; }
+    if (!stack.length && (c === ';' || c === '\n' || c === '\r' || c === '|')) {
+      if (c === '|' && (text[i + 1] === '|' || text[i - 1] === '|')) return null;
+      ranges.push({ start, end: i });
+      const end = c === '\r' ? ++i + 1 : i + 1;
+      separators.push({ start: ranges.at(-1).end, end, value: text.slice(ranges.at(-1).end, end) }); start = end;
+    }
+    if (!stack.length && (text.slice(i, i + 2) === '&&' || c === '<' || c === '>')) return null;
   }
-  if (quote || !segments.length) return null;
-  segments.push({ start, end: text.length });
-  const spans = [], unproved = [], proofs = [];
-  for (const segment of segments) {
-    const source = text.slice(segment.start, segment.end), words = roleWords(source);
-    if (!words || words.some(word => !literalWord(word, shell))) return null;
-    const proof = readerProof(words, shell);
-    if (!proof) { unproved.push(source); continue; }
-    const roles = proof.roles.map(word => ({ ...word, start: word.start + segment.start, end: word.end + segment.start }));
-    proofs.push({ ...proof, roles, start: segment.start, end: segment.end });
-    for (const word of roles) {
-      // A qualified reader's exact non-native executable span has the same evidence
-      // role as a qualified wrapper path. All options and separators remain intact.
-      if (word.role.startsWith('literal ') || word.role === 'attached literal pattern'
-        || (word.role === 'reader executable' && /[\\/]/.test(word.value))) spans.push(word);
+  if (quote || stack.length) return null;
+  ranges.push({ start, end: text.length });
+  const nonemptyAfter = new Array(ranges.length + 1).fill(false);
+  for (let n = ranges.length - 1; n >= 0; n--) nonemptyAfter[n] = nonemptyAfter[n + 1] || Boolean(text.slice(ranges[n].start, ranges[n].end).trim());
+  // Blank lines are inert. Missing semicolon/pipe stages are deliberately unqualified.
+  for (let n = 0; n < ranges.length; n++) if (!text.slice(ranges[n].start, ranges[n].end).trim()) {
+    if (separators[n - 1]?.value === ';' || separators[n]?.value === ';') return null;
+    if (separators[n]?.value === '|') return null;
+    if (separators[n - 1]?.value === '|' && !nonemptyAfter[n + 1]) return null;
+  }
+  const spans = [], proofs = [], unproved = [];
+  for (const r of ranges) {
+    const chunk = text.slice(r.start, r.end); if (!chunk.trim()) continue;
+    const proof = readerProof(roleWords(chunk), shell) || acquisitionProof(chunk, shell);
+    if (!proof) { unproved.push(chunk); continue; }
+    const roles = proof.roles.map(w => ({ ...w, start: w.start + r.start, end: w.end + r.start }));
+    proofs.push({ ...proof, ...r, roles });
+    for (const w of roles) {
+      // Keep attached option prefixes visible; only their literal values are data.
+      if (w.role === 'attached literal pattern') spans.push({ ...w, start: w.start + (w.value.startsWith('--regexp=') ? 9 : 3) });
+      else if (w.role.startsWith('literal ') || (w.role === 'reader executable' && /[\\/]/.test(w.value))) spans.push(w);
     }
   }
   if (!proofs.length) return null;
-  const parts = []; let at = 0;
-  for (const span of spans) { parts.push(text.slice(at, span.start), ' '.repeat(span.end - span.start)); at = span.end; }
-  parts.push(text.slice(at));
-  return { candidate: parts.join(''), proofs, unproved };
+  return { candidate: mask(text, spans), proofs, spans, unproved, separators };
 }
-
+function mask(text, spans) {
+  let at = 0; const parts = [];
+  for (const s of spans) { parts.push(text.slice(at, s.start), ' '.repeat(s.end - s.start)); at = s.end; }
+  parts.push(text.slice(at)); const candidate = parts.join(''); return candidate;
+}
 function commandRoles(text, input) {
   const shell = roleShell(input), words = roleWords(text);
   const data = readerProof(words, shell);
   if (data) return { data, candidate: text, script: null };
-  const wrapper = wrapperRoles(words, shell);
+  const wrapper = wrapperRoles(words, shell) || (shell === 'powershell' ? wrapperRoles(roleWords(text, { scriptWord: true }), shell) : null);
   if (!wrapper) {
     const segments = readerSegments(text, shell);
     return { data: null, candidate: segments?.candidate ?? text, script: null, segments };
@@ -376,7 +429,11 @@ function commandRoles(text, input) {
   // either layer defeats that proof; scripts themselves are never recursively admitted.
   const transparent = wrapper.fixed && wrapper.powershell && literalWord(wrapper.script, shell);
   const inner = transparent ? readerProof(roleWords(wrapper.script.value), 'powershell') : null;
-  const scriptSegments = transparent && !inner ? readerSegments(wrapper.script.value, 'powershell') : null;
+  // Keep inherited common/one-line transport until a replacement proves those consumers.
+  // Extended composition requires explicit PowerShell and a complete literal script word.
+  const extended = shell === 'powershell' && wrapper.fixed && wrapper.powershell && wrapper.script.quote
+    && (literalWord(wrapper.script, shell) || (wrapper.script.quote === "'" && !/[\x60%!^]/.test(wrapper.script.value)));
+  const scriptSegments = (transparent || extended) && !inner ? readerSegments(wrapper.script.value, 'powershell') : null;
   const script = scriptSegments?.candidate ?? wrapper.script.value;
   const scriptStart = wrapper.script.start + (wrapper.script.quote ? 1 : 0);
   // Compose the same proved operand view into both the outer source and the executable
@@ -385,7 +442,10 @@ function commandRoles(text, input) {
     + ' '.repeat(wrapper.executable.end - wrapper.executable.start)
     + text.slice(wrapper.executable.end, scriptStart) + script
     + text.slice(scriptStart + wrapper.script.value.length) : text;
-  const segments = scriptSegments ? { ...scriptSegments, candidate, proofs: scriptSegments.proofs.map(proof => ({ ...proof,
+  const segments = scriptSegments ? { ...scriptSegments, candidate,
+    spans: scriptSegments.spans.map(word => ({ ...word, start: word.start + scriptStart, end: word.end + scriptStart })),
+    separators: scriptSegments.separators.map(separator => ({ ...separator, start: separator.start + scriptStart, end: separator.end + scriptStart })),
+    proofs: scriptSegments.proofs.map(proof => ({ ...proof,
     start: proof.start + scriptStart, end: proof.end + scriptStart,
     roles: proof.roles.map(word => ({ ...word, start: word.start + scriptStart, end: word.end + scriptStart })),
   })) } : null;
@@ -404,7 +464,7 @@ function visible(text, input) {
   text = roles.candidate;
   if (roles.script && broadVisible(roles.script, true)) return true;
   for (const segment of roles.segments?.unproved || []) {
-    const wrapper = wrapperRoles(roleWords(segment), roleShell(input));
+    const wrapper = wrapperRoles(roleWords(segment, { scriptWord: true }), roleShell(input));
     if (broadVisible(segment) || (wrapper && broadVisible(wrapper.script.value, true))) return true;
   }
   if (!broadVisible(text)) return false;

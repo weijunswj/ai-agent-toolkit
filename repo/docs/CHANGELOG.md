@@ -1,5 +1,12 @@
 # Toolkit Changelog
 
+## 3.15.18 (multiline and pipeline reader operands)
+
+- Extended fixed literal reader proofs across top-level newline and single-pipe stages while keeping every operator, unproved stage and nested block visible to continuation detection.
+- Added separate literal option-value roles for the five bounded gh run list filters, including its enumerated JSON field tuple. Unknown options, expressions and alternate command forms remain unproved.
+- Composed the same operand spans through one explicitly selected PowerShell literal script transport, preserving exact outer and inner source positions and the existing one-line wrapper behaviour.
+- Added structural, acquisition-schema, hostile-input and source-hook regressions. Native parsing, target authority, generic guards and held-queue independence retain their existing boundaries; installed interception remains a separate acceptance step.
+
 ## 3.15.17 (literal reads and shell script operands)
 
 - Fixed ordinary literal reader patterns and Windows file paths being mistaken for continuation commands. Only complete fixed reader schemas receive the data proof; subprocess options, unknown flags and executable syntax remain conservative.
