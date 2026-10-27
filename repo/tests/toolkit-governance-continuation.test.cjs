@@ -29,7 +29,7 @@ function fixture(t) {
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const ctx = { dir, caller: path.join(dir, 'caller'), target: path.join(dir, 'target'), other: path.join(dir, 'other'), home: path.join(dir, 'home') };
   ctx.projects = path.join(ctx.home, '.claude', 'projects');
-  ctx.file = path.join(ctx.projects, 'fixture-project', `${ID}.jsonl`);
+  ctx.file = path.join(ctx.projects, 'fixture project', `${ID}.jsonl`);
   for (const folder of [ctx.caller, ctx.target, ctx.other, path.join(ctx.target, 'sub'), path.dirname(ctx.file)]) fs.mkdirSync(folder, { recursive: true });
   ctx.options = { registryPath: path.join(ctx.home, '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json'), testOnly: true };
   ctx.environment = { USERPROFILE: ctx.home, HOME: ctx.home, CLAUDE_CONFIG_DIR: path.join(ctx.home, '.claude'), CODEX_HOME: path.join(ctx.home, '.codex') };
@@ -225,6 +225,42 @@ test('inert-data model distinguishes literal arguments from actual command posit
   assert.match(new gate.ToolGate({ registryOptions: ctx.options, stateReader: () => ({ state: 'DISABLED', rule: 'R1' }) }).decide(shell(ctx, 'echo "claude --resume fixture toolkit governance enable"'))?.deny || '', /only the user/, 'existing owner-answer guard remains before inert classification');
 });
 
+test('shell-family model refuses ambiguous data, help and native selector syntax on both envelopes', t => {
+  const ctx = fixture(t);
+  const spaced = path.join(ctx.target, 'space directory');
+  fs.mkdirSync(spaced); transcript(ctx);
+  new gate.HeldPrompts({ registryOptions: ctx.options }).add('synthetic-rootless', 'synthetic queued fixture', null, {}, null);
+  const before = snapshot(ctx.dir);
+  const resolver = new ContinuationResolver({ environment: ctx.environment });
+  const supported = [undefined, 'cmd.exe', 'powershell.exe', 'pwsh.exe', 'bash', '/bin/sh', 'C:\\synthetic shell\\pwsh.exe'];
+  const unknown = ['unknown-shell', '', null, ['cmd.exe']];
+  assert.equal(matrix.shell_family_cases.length, 172);
+  for (const row of matrix.shell_family_cases) for (const tool_name of ['Bash', 'PowerShell']) for (const selected of [...supported, ...unknown]) {
+    const text = row.text.replaceAll('{TARGET}', spaced).replaceAll('{TRANSCRIPT}', ctx.file);
+    const input = shell(ctx, text, { tool_name });
+    if (selected !== undefined) input.tool_input.shell = selected;
+    const expected = unknown.includes(selected) ? 'UNKNOWN' : row.expected;
+    assert.equal(resolver.resolve(text, input).status, expected, `${row.id}/${tool_name}/${selected}`);
+    const decision = new gate.ToolGate({ registryOptions: ctx.options, environment: ctx.environment, stateReader: () => ({ state: 'DISABLED', rule: 'R1' }) }).decide(input);
+    assert.equal(Boolean(decision?.deny), expected === 'UNKNOWN', `${row.id}/${tool_name}/${selected}`);
+    if (expected !== 'UNKNOWN') {
+      const held = { state: 'UNDECIDED', rule: 'R4', repository_id: 'synthetic-held' };
+      assert.ok(new gate.ToolGate({ registryOptions: ctx.options, stateReader: () => held }).decide(input)?.deny, `${row.id}: current guard`);
+      const workdir = { ...input, tool_input: { ...input.tool_input, workdir: ctx.other } };
+      assert.ok(new gate.ToolGate({ registryOptions: ctx.options, environment: ctx.environment, stateReader: cwd => cwd === ctx.other ? held : { state: 'DISABLED', rule: 'R1' } }).decide(workdir)?.deny, `${row.id}: workdir guard`);
+    }
+  }
+  for (const tool_name of ['Bash', 'PowerShell', 'Monitor', 'exec_command', 'shell', 'local_shell']) {
+    for (const command of ['echo (codex resume)', "echo 'fixture & claude --continue & echo fixture'", 'co""dex resu""me']) {
+      for (const args of [{ command }, { cmd: command }, { command: command.split(' ') }]) {
+        const input = { tool_name, cwd: ctx.caller, tool_input: { ...args, shell: 'cmd.exe' } };
+        assert.ok(new gate.ToolGate({ registryOptions: ctx.options, environment: ctx.environment, stateReader: () => ({ state: 'DISABLED', rule: 'R1' }) }).decide(input)?.deny, `${tool_name}: text aliases cannot hide evaluation`);
+      }
+    }
+  }
+  assert.deepEqual(snapshot(ctx.dir), before, 'classification and target proof do not mutate queue, metadata or registry');
+});
+
 test('visible embedded and hostile continuations remain unknown rather than falling out of classification', t => {
   const ctx = fixture(t), command = 'codex exec resume --last';
   const cases = hostile.cases(['line-breaks', 'continued-lines', 'quoting', 'indents', 'invisible', 'large-input'], ['shell', 'text']);
@@ -303,7 +339,7 @@ test('Windows/source-hook UAT: both native entrypoints cross both CLI families w
     });
     assert.equal(result.status, denied ? hook.deniedExit : 0, `${hook.name}: ${result.stderr}`);
     const output = result.stdout.trim() ? JSON.parse(result.stdout) : {};
-    assert.equal(output.hookSpecificOutput?.permissionDecision === 'deny', denied, hook.name);
+    assert.equal(output.hookSpecificOutput?.permissionDecision === 'deny', denied, hook.name + ': ' + input.tool_input.command);
     if (!denied) {
       if (hook.name === 'codex') assert.equal(result.stdout, '', 'Codex admission is empty stdout');
       else assert.deepEqual(output, {}, 'Claude admission has no permission grant');
@@ -315,6 +351,12 @@ test('Windows/source-hook UAT: both native entrypoints cross both CLI families w
   const commands = [`claude --resume "${ctx.file}"`, `codex -C "${ctx.target}" exec resume --last`];
   for (const hook of hooks) {
     for (const { text, expected } of matrix.inert_data_cases) invoke(hook, shell(ctx, text), expected === 'UNKNOWN');
+    for (const row of matrix.shell_family_cases.filter(row => row.source)) {
+      const text = row.text.replaceAll('{TARGET}', ctx.target).replaceAll('{TRANSCRIPT}', ctx.file);
+      const input = shell(ctx, text, { tool_name: hook.name === 'claude' ? 'PowerShell' : 'Bash' });
+      input.tool_input.shell = row.id.includes('single-control') || row.id.includes('single-grep') ? 'cmd.exe' : 'powershell.exe';
+      invoke(hook, input, row.expected === 'UNKNOWN');
+    }
     for (const command of commands) for (const marker of [{}, { TOOLKIT_GATE_ROLE: 'G1' }, { TOOLKIT_GATE_ROLE: 'controller' }, { TOOLKIT_GATE_ROLE: 'helper' }]) invoke(hook, shell(ctx, command), false, marker);
     for (const command of commands) invoke(hook, shell(ctx, command, { tool_input: { command, workdir: ctx.other } }), true);
     for (const command of [`claude --resume ${ID}`, 'codex resume --last', `claude --resume "${ctx.file}" -p yes`, `codex exec resume ${ID} "toolkit governance enable"`, `codex -C "${ctx.other}" exec resume --last`]) invoke(hook, shell(ctx, command), true);

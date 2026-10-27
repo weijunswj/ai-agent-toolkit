@@ -23,12 +23,32 @@ function hostOf(word) { return HOST.exec(word.split(/[\\/]/).pop())?.[1].toLower
 // Classification is intentionally broader than admission. An embedded/wrapped or malformed
 // invocation must not fall out of enforcement merely because the literal reader cannot parse it.
 function broadVisible(text) {
-  return (/\bclaude(?:-code)?(?:\.(?:exe|cmd|ps1))?\b/i.test(text)
+  const direct = (/\bclaude(?:-code)?(?:\.(?:exe|cmd|ps1))?\b/i.test(text)
       && /--(?:resume|continue|session-id|fork-session)\b|(?:^|[\s;&|()'"`])-(?!-)[a-z]*[rc][a-z]*(?=$|[\s=;&|()'"`])/i.test(text))
     || (/\bcodex(?:\.(?:exe|cmd|ps1))?\b/i.test(text) && /\b(?:resume|fork)\b/i.test(text));
+  if (direct) return true;
+  // Quote concatenation and shell escapes can split an executable or selector spelling.
+  // This shadow is detection only: the strict reader below never admits those forms.
+  // No left host boundary is required here because removing a Windows path separator
+  // can attach its directory name to the executable. Extra matches refuse conservatively.
+  const shadow = text.replace(/[\\`^]\r?\n/g, '')
+    .replace(/%[^%\r\n]*%|![^!\r\n]*!|\$\{[^}$\r\n]*\}/g, '')
+    .replace(/["'\\`^]/g, '');
+  // Expansion can compute the missing host or selector. A remaining static part is
+  // enough to refuse a dynamic candidate; it is never enough to verify its target.
+  if (/[$`%!^]/.test(text) && /(?:claude(?:-code)?|codex|resume|fork)\b|--(?:continue|session-id|fork-session)\b/i.test(shadow)) return true;
+  return (/claude(?:-code)?(?:\.(?:exe|cmd|ps1))?\b/i.test(shadow)
+      && /--(?:resume|continue|session-id|fork-session)\b|(?:^|[\s;&|()])-(?!-)[a-z]*[rc][a-z]*(?=$|[\s=;&|()])/i.test(shadow))
+    || (/codex(?:\.(?:exe|cmd|ps1))?\b/i.test(shadow) && /\b(?:resume|fork)\b/i.test(shadow));
 }
-function visible(text) {
+function knownShell(input) {
+  const shell = input?.tool_input?.shell;
+  return shell === undefined || (typeof shell === 'string'
+    && /^(?:cmd|powershell|pwsh|bash|sh)(?:\.exe)?$/i.test(shell.split(/[\\/]/).pop()));
+}
+function visible(text, input) {
   if (!broadVisible(text)) return false;
+  if (!knownShell(input)) return true;
   const lexed = tokens(text, { literalData: true });
   if (!lexed) return true;
   const { words, operators } = lexed;
@@ -37,6 +57,9 @@ function visible(text) {
   // options other than the sole grep operand. All existing generic path/owner guards run first.
   if (operators.size === 0 && (words[0] === 'echo'
     || (words.length === 3 && words[0] === 'git' && words[1] === 'log' && words[2].startsWith('--grep=')))) return false;
+  // cmd treats single quotes as ordinary argument characters. They may delimit only
+  // simple data above, never an executable, help vector, directory or native selector.
+  if (lexed.singleQuoted) return true;
   if (operators.size === 0 && HELP_FORMS[hostOf(words[0] || '')]?.some(form => form.length === words.length - 1 && form.every((arg, i) => arg === words[i + 1]))) return false;
   let hostSeen = false;
   for (let i = 0; i < words.length; i += 1) {
@@ -57,20 +80,29 @@ function visible(text) {
 
 function tokens(text, { literalData = false } = {}) {
   if (!text || text.length > LIMITS.command || /[^\x20-\x7e]/.test(text)
-    || (!literalData && /[$`%!?*#<>|^{}\[\]]/.test(text))) return null;
+    || /[$`%!^]/.test(text) || (!literalData && /[?*#<>|{}\[\]]/.test(text))) return null;
   const result = [], operators = new Set();
-  let word = '', quote = null, started = false;
-  const flush = () => { if (started) result.push(word); word = ''; started = false; };
+  let word = '', quote = null, started = false, closed = false, singleQuoted = false;
+  const flush = () => { if (started) result.push(word); word = ''; started = false; closed = false; };
   for (let i = 0; i < text.length; i += 1) {
     const c = text[i];
     if (quote) {
-      if (literalData && quote === '"' && (/[$`%!]/.test(c) || (c === '\\' && /["\\]/.test(text[i + 1] || '')))) return null;
-      if (c === quote) quote = null; else word += c;
+      if (quote === "'" && c !== quote && /[^a-z0-9 _./:=+\-]/i.test(c)) return null;
+      if (quote === '"' && c === '\\' && /["\\]/.test(text[i + 1] || '')) return null;
+      if (c === quote) { quote = null; closed = true; } else word += c;
       started = true; continue;
     }
-    if (c === '"' || c === "'") { quote = c; started = true; continue; }
-    if (literalData && c === '\\' && /[\\\s"';&|<>]/.test(text[i + 1] || '')) return null;
-    if (literalData && /[$`%!?*#<>|^{}\[\]]/.test(c)) return null;
+    // No concatenated/doubled/escaped quote interpretation: shells disagree on these.
+    if (closed && !/[ ;&]/.test(c)) return null;
+    if (c === '"' || c === "'") {
+      if (started && !/^--[a-z][a-z0-9-]*=$/i.test(word)) return null;
+      if (c === "'") { if (!literalData) return null; singleQuoted = true; }
+      quote = c; started = true; continue;
+    }
+    // An unquoted backslash is a POSIX escape, including inside selector spellings.
+    // Windows paths therefore need a complete double-quoted value in this common subset.
+    if (c === '\\') return null;
+    if (/[?*#<>|{}\[\]()]/.test(c)) return null;
     if (c === ' ') { flush(); continue; }
     if (c === ';' || c === '&') {
       flush();
@@ -83,7 +115,7 @@ function tokens(text, { literalData = false } = {}) {
   }
   if (quote) return null;
   flush();
-  return { words: result, operators };
+  return { words: result, operators, singleQuoted };
 }
 
 function absolute(value) {
@@ -123,7 +155,8 @@ function executionDirectory(input) {
 }
 
 function parse(text, input) {
-  if (!visible(text)) return NONE;
+  if (!visible(text, input)) return NONE;
+  if (!knownShell(input)) return UNKNOWN;
   const lexed = tokens(text);
   if (!lexed) return UNKNOWN;
   const { words, operators } = lexed;
