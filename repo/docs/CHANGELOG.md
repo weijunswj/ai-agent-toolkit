@@ -1,5 +1,11 @@
 # Toolkit Changelog
 
+## 3.15.19 (source separators and literal Git operands)
+
+- Preserved whitespace in contiguous continuation evidence so separate source words no longer invent native spellings. Existing punctuation, quoted/template/ordered signals and refusal-only dynamic construction detection remain independent.
+- Added complete fixed Git operand proofs for add, commit, push, fetch, rev-parse and status. Only proved literal data spans are excluded; executable neighbours, options, operators, exit guards and unsupported stages remain visible.
+- Added anonymous boundary, schema, construction, raw-guard and source-hook tests with exact span and non-mutation checks. Native parsing, target authority and held-queue independence retain their boundaries; installed and actual-operation acceptance remain separate.
+
 ## 3.15.18 (multiline and pipeline reader operands)
 
 - Extended fixed literal reader proofs across top-level newline and single-pipe stages while keeping every operator, unproved stage and nested block visible to continuation detection.

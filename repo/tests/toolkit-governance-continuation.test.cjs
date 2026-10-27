@@ -25,7 +25,10 @@ const OTHER_ID = '33333333-3333-4333-8333-333333333333';
 const root = path.resolve(__dirname, '../..');
 
 function fixture(t) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'continuation-'));
+  // Windows app temp redirection may alias a newly created child even when the
+  // temp parent itself resolves unchanged. Fixtures use native identity; the
+  // separate junction/alias cases still prove that production refuses aliases.
+  const dir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'continuation-')));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const ctx = { dir, caller: path.join(dir, 'caller'), target: path.join(dir, 'target'), other: path.join(dir, 'other'), home: path.join(dir, 'home') };
   ctx.projects = path.join(ctx.home, '.claude', 'projects');
@@ -385,6 +388,7 @@ test('Windows/source-hook UAT: both native entrypoints cross both CLI families w
     });
     assert.equal(result.status, denied ? hook.deniedExit : 0, `${hook.name}: ${result.stderr}`);
     const output = result.stdout.trim() ? JSON.parse(result.stdout) : {};
+    if (result.stdout) assert.equal(result.stdout, JSON.stringify(output) + '\n', 'exact adapter JSON stdout');
     assert.equal(output.hookSpecificOutput?.permissionDecision === 'deny', denied, hook.name + ': ' + input.tool_input.command);
     if (!denied) {
       if (hook.name === 'codex') assert.equal(result.stdout, '', 'Codex admission is empty stdout');
@@ -413,6 +417,15 @@ test('Windows/source-hook UAT: both native entrypoints cross both CLI families w
     invoke(hook, shell(ctx, literal.text, { tool_input: { command: literal.text, workdir: ctx.other } }), true);
     invoke(hook, shell(ctx, `rg -e "codex resume" "${ctx.other}/fixture.txt"`), true);
     invoke(hook, shell(ctx, 'rg -e "codex resume toolkit governance enable" fixture.txt'), true);
+    for (const actor of matrix.actors) for (const tool_name of ['Bash', 'PowerShell']) {
+      const command = 'git push origin HEAD:refs/heads/codex/example; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }';
+      const input = { ...shell(ctx, command), actor, tool_name };
+      invoke(hook, { ...input, cwd: ctx.other }, true);
+      invoke(hook, { ...input, tool_input: { command, workdir: ctx.other } }, true);
+      invoke(hook, { ...input, tool_input: { command: command + '; Get-Content -LiteralPath "' + ctx.other + '/fixture.txt"' } }, true);
+      invoke(hook, { ...input, tool_input: { command: command + '; node toolkit-governance.cjs enable' } }, true);
+      invoke(hook, { ...input, tool_name: 'Write', tool_input: { file_path: ctx.options.registryPath } }, true);
+    }
     for (const row of matrix.shell_family_cases.filter(row => row.source)) {
       const text = row.text.replaceAll('{TARGET}', ctx.target).replaceAll('{TRANSCRIPT}', ctx.file);
       const input = shell(ctx, text, { tool_name: hook.name === 'claude' ? 'PowerShell' : 'Bash' });
@@ -448,6 +461,13 @@ test('Windows/source-hook UAT: both native entrypoints cross both CLI families w
       queue.add('synthetic-queue', 'synthetic held fixture', ['sessionless', 'rootless'].includes(mode) ? null : 'synthetic-session', {}, mode === 'rootless' ? null : ctx.other);
     }
     for (const hook of hooks) for (const tool_name of ['Bash', 'PowerShell']) {
+      for (const actor of matrix.actors) {
+        const ordinary = ["@'\nfor key,value in items:\n    print(key,value)\n'@ | python -",
+          'git push origin HEAD:refs/heads/codex/example; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; git fetch origin codex/example',
+          'git commit -m "codex resume; claude --resume"', 'git add -- "codex/resume.md"'];
+        for (const command of ordinary) invoke(hook, { ...shell(ctx, command), tool_name, actor }, false);
+        for (const command of ['codex resume --last', 'claude --resume fixture']) invoke(hook, { ...shell(ctx, command), tool_name, actor }, true);
+      }
       for (const command of commands) invoke(hook, { ...shell(ctx, command), tool_name }, false);
       for (const command of ['codex resume --last', 'claude --resume fixture', matrix.ordered_atom_cases[0].text, 'pwsh -Command "& (\'co\'+\'dex\') (\'res\'+\'ume\')"']) invoke(hook, { ...shell(ctx, command), tool_name }, true);
       invoke(hook, { ...shell(ctx, 'rg -e "codex resume" repo\\notes.txt'), tool_name }, false);
@@ -795,4 +815,151 @@ test('acquisition schema and structural reader resources stay within the closed 
     if (text.includes('codex resume') || text.includes('claude --continue')) assert.equal(parse(text, input).status, 'UNKNOWN');
   }
   assert.equal(api.roleWords('rg -e codex status,headSha'), null, 'comma belongs only to acquisition JSON fields');
+});
+
+
+// These anonymous equivalents exercise evidence roles only; no payload is dispatched.
+test('evidence boundary model keeps separate source words and complete Git operands distinct', t => {
+  const model = matrix.evidence_boundary_model, api = evidenceProjection();
+  const input = selected => ({ tool_input: selected === null ? {} : { shell: selected } });
+  let rows = 0, masks = 0;
+  function check(id, text, expected, selected) {
+    const envelope = input(selected), roles = api.commandRoles(text, envelope);
+    assert.equal(parse(text, envelope).status, expected, id + '/' + selected); rows += 1;
+    if (!roles.segments) return;
+    const spans = [...roles.segments.spans, ...(roles.excludedExecutable ? [roles.excludedExecutable] : [])].sort((a, b) => a.start - b.start);
+    let at = 0;
+    for (const span of spans) {
+      assert.ok(span.start >= at && span.end <= text.length, id + ': non-overlapping original offsets');
+      assert.equal(roles.candidate.slice(at, span.start), text.slice(at, span.start), id + ': executable bytes retained');
+      assert.equal(roles.candidate.slice(span.start, span.end), ' '.repeat(span.end - span.start));
+      at = span.end; masks += 1;
+    }
+    assert.equal(roles.candidate.slice(at), text.slice(at));
+    assert.equal(roles.candidate.length, text.length);
+    for (const unproved of roles.segments.unproved) assert.ok(roles.candidate.includes(unproved));
+    for (const proof of roles.segments.proofs) {
+      assert.equal(proof.consumed, text.slice(proof.start, proof.end).trimEnd().length, id + ': complete stage consumption');
+      for (const role of proof.roles) assert.ok(role.role);
+    }
+  }
+  for (const [id, body] of model.bodies) for (const selected of model.shells) {
+    for (const text of [body, "@'\n" + body + "\n'@ | python -", '@"\n' + body + '\n"@ | python -',
+      'python -c "' + body + '"', "python - <<'PY'\n" + body + '\nPY']) check('foreign/' + id, text, 'NOT_CONTINUATION', selected);
+  }
+  for (const operation of model.native) for (const selected of model.shells) {
+    const body = "@'\nfor key in items:\n    pass\n'@ | python -";
+    for (const text of [operation + '; ' + body, body + '; ' + operation, body + ' | ' + operation,
+      "@'\nfor key in items:\n    pass\n" + operation + "\n'@ | python -",
+      "@'\nimport subprocess\nsubprocess.run([\"codex\",\"resume\"])\n'@ | python -",
+      "pwsh -Command '" + operation + "'"]) check('executable-neighbour', text, 'UNKNOWN', selected);
+  }
+  for (const [id, command] of model.git) for (const selected of model.shells) {
+    for (const text of [command, 'git status --short\n' + command,
+      'git status --short; ' + command + '; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }', command + ' | ConvertTo-Json']) {
+      check('git/' + id, text, 'NOT_CONTINUATION', selected);
+    }
+    for (const text of ['codex resume --last; ' + command, command + '; claude --resume fixture',
+      command + ' | codex resume --last', command.replace('codex/example', '$(codex resume)') + '; & ("co"+"dex") ("res"+"ume")']) {
+      check('git-executable/' + id, text, 'UNKNOWN', selected);
+    }
+  }
+  for (const [n, command] of model.unsupported.entries()) for (const selected of model.shells) {
+    assert.equal(api.commandRoles(command, input(selected)).segments, null, 'no partial proof for unsupported schema');
+    // An unsupported form without candidate evidence retains the ordinary boundary.
+    check('unsupported/' + n, command, n === 8 ? 'NOT_CONTINUATION' : 'UNKNOWN', selected);
+    check('unsupported-native/' + n, command + '; & ("co"+"dex") ("res"+"ume")', 'UNKNOWN', selected);
+  }
+  for (const [command, proved, expected] of model.schema) for (const selected of model.shells) {
+    assert.equal(Boolean(api.commandRoles(command, input(selected)).segments?.proofs.some(p => p.schema.startsWith('git '))), proved, command);
+    check('schema', command, expected, selected);
+  }
+  for (const [id, text] of model.construction) for (const selected of model.shells) check('construction/' + id, text, 'UNKNOWN', selected);
+  for (const selected of [null, '', 5, 'unknown.exe']) {
+    const text = 'git push origin HEAD:refs/heads/codex/example; if ($x) { Write-Output $x }';
+    const envelope = { tool_input: { shell: selected } };
+    assert.equal(api.commandRoles(text, envelope).segments, null); assert.equal(parse(text, envelope).status, 'UNKNOWN');
+  }
+  for (const selected of model.shells) for (const [id, body] of [
+    ['ref', 'git push origin HEAD:refs/heads/codex/example; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }'],
+    ['message', 'git commit -m "codex resume"'],
+  ]) {
+    const text = "pwsh -NoProfile -Command '" + body + "'";
+    const ordinary = ['powershell.exe', 'pwsh'].includes(selected) || (id === 'message' && ['bash', 'sh'].includes(selected));
+    check('wrapper/' + id, text, ordinary ? 'NOT_CONTINUATION' : 'UNKNOWN', selected);
+    check('wrapper-neighbour', text + '; & ("co"+"dex") ("res"+"ume")', 'UNKNOWN', selected);
+  }
+  // Frozen G0 structural rows: unsupported syntax gets no role proof; it does
+  // not invent a continuation when neither native family has visible evidence.
+  for (const [ending, expected] of [[';', 'NOT_CONTINUATION'], [' |', 'NOT_CONTINUATION'],
+    [' && git status', 'NOT_CONTINUATION'], [' || git status', 'NOT_CONTINUATION'],
+    [' # comment', 'UNKNOWN'], [' ' + String.fromCharCode(0), 'UNKNOWN'], [' ' + String.fromCharCode(0x2603), 'UNKNOWN']]) {
+    const text = 'git push origin HEAD:refs/heads/codex/example' + ending;
+    const roles = api.commandRoles(text, input(null));
+    assert.equal(roles.segments, null); assert.equal(roles.candidate, text);
+    assert.equal(parse(text, input(null)).status, expected, JSON.stringify(ending));
+    assert.equal(parse(text + '; codex resume --last', input(null)).status, 'UNKNOWN', 'executable neighbour still refused');
+  }
+  const long = 'git push origin HEAD:refs/heads/codex/' + 'x'.repeat(LIMITS.command);
+  assert.equal(api.commandRoles(long, input(null)).segments, null); assert.equal(parse(long, input(null)).status, 'UNKNOWN');
+  const witness = "@'\nv={'example':1}\nfor key,value in v.items():\n    print(key,value)\n'@ | python -";
+  for (const selected of model.shells) check('restart-witness-equivalent', witness, 'NOT_CONTINUATION', selected);
+  t.diagnostic(JSON.stringify({ rows, masks, payloadsDispatched: false }));
+});
+
+test('contiguous evidence keeps whitespace barriers while punctuation and marked constructions stay conservative', t => {
+  const { CANDIDATE_MACHINES } = evidenceProjection(); let rows = 0;
+  for (const { word } of CANDIDATE_MACHINES) for (let cut = 1; cut < word.length; cut += 1) {
+    for (const separator of [' ', '\t', '\n', '\r\n', ';', '|', '(', ')', '[', ']', ',', ':', '+', '.', '/']) {
+      const text = '(' + word.slice(0, cut) + separator + word.slice(cut) + ')';
+      // Independent finite reference, including the inherited fixed format/join step.
+      const reference = [...text.replace(/-(?:f|join)\b/gi, '')].map(c => /[a-z0-9-]/i.test(c) ? c : /[ \x09-\x0d]/.test(c) ? ' ' : '').join('');
+      const expected = /claude|codex|resume|fork|--(?:continue|session-id)/i.test(reference) ? 'UNKNOWN' : 'NOT_CONTINUATION';
+      assert.equal(parse(text, { tool_input: {} }).status, expected, word + '/' + cut + '/' + JSON.stringify(separator)); rows += 1;
+    }
+  }
+  // VT/FF remain barriers in the broad projection even though they cannot gain operand proof.
+  for (const separator of ['\v', '\f']) assert.equal(parse('(for' + separator + 'key)', { tool_input: {} }).status, 'NOT_CONTINUATION');
+  assert.equal(rows, 2400);
+  t.diagnostic(JSON.stringify({ primitiveRows: rows }));
+});
+
+
+test('new evidence allowances retain every raw guard without reading a held queue or acquiring metadata', t => {
+  const ctx = fixture(t), before = snapshot(ctx.dir);
+  const held = { state: 'UNDECIDED', rule: 'R4', repository_id: 'synthetic-held' }, safe = { state: 'DISABLED', rule: 'R1' };
+  const positives = ["@'\nfor key,value in items:\n    print(key,value)\n'@ | python -",
+    'git push origin HEAD:refs/heads/codex/example; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; git fetch origin codex/example',
+    'git commit -m "codex resume; claude --resume"', 'git add -- "codex/resume.md"', 'rg -e "codex resume" fixture.txt'];
+  const originals = {}; let queueReads = 0, spawns = 0, checks = 0;
+  // Throw on queue reads, metadata probes or directory scans, rather than inferring
+  // zero access solely from equal bytes after the call.
+  for (const name of ['readFileSync', 'readdirSync', 'statSync', 'lstatSync', 'existsSync']) {
+    originals[name] = fs[name];
+    fs[name] = (file, ...args) => {
+      if (String(file).includes(gate.HELD_BASENAME)) { queueReads += 1; throw new Error('SYNTHETIC_QUEUE_ACCESS'); }
+      return originals[name](file, ...args);
+    };
+  }
+  try {
+    for (const command of positives) for (const actor of matrix.actors) for (const tool_name of ['Bash', 'PowerShell']) for (const selected of [undefined, 'powershell.exe']) {
+      const input = { ...shell(ctx, command), actor, tool_name, tool_input: { cmd: command, ...(selected === undefined ? {} : { shell: selected }) } };
+      const make = stateReader => new gate.ToolGate({ registryOptions: ctx.options, environment: ctx.environment, stateReader,
+        continuationResolver: new ContinuationResolver({ environment: ctx.environment, spawn() { spawns += 1; throw new Error('UNEXPECTED_METADATA'); } }) });
+      const check = (stateReader, value, denied, reason) => {
+        assert.equal(Boolean(make(stateReader).decide(value)?.deny), denied, reason); checks += 1;
+      };
+      check(() => safe, input, false, 'ordinary');
+      check(() => held, input, true, 'held current');
+      check(() => ({ ...held, rule: 'ERROR', error_code: 'SYNTHETIC' }), input, true, 'unreadable current');
+      check(cwd => path.resolve(cwd) === ctx.other ? held : safe, { ...input, tool_input: { ...input.tool_input, workdir: ctx.other } }, true, 'held workdir');
+      check(cwd => path.resolve(cwd).startsWith(ctx.other) ? held : safe,
+        { ...input, tool_input: { ...input.tool_input, cmd: command + '; Get-Content -LiteralPath "' + ctx.other + '/fixture.txt"' } }, true, 'held raw path');
+      check(() => safe, { ...input, tool_input: { ...input.tool_input, cmd: command + '; node toolkit-governance.cjs enable' } }, true, 'owner answer');
+      check(() => safe, { ...input, tool_name: 'Write', tool_input: { file_path: ctx.options.registryPath } }, true, 'user-state edit');
+    }
+  } finally { for (const name of Object.keys(originals)) fs[name] = originals[name]; }
+  assert.equal(checks, 560); assert.equal(queueReads, 0); assert.equal(spawns, 0);
+  assert.deepEqual(snapshot(ctx.dir), before);
+  t.diagnostic(JSON.stringify({ rawGuardChecks: checks, queueReads, metadataSpawns: spawns, bytesAndDirectoriesUnchanged: true }));
 });

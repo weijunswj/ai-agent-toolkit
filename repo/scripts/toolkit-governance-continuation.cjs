@@ -157,7 +157,7 @@ function broadVisible(text, executableScript = false) {
     // or pass this over-inclusive spelling to the target reader. Fully opaque runtime
     // scripts with no recognisable host/selector remain outside this guard's scope.
     const fragments = formatParts(shadow).filter(part => part !== null).join('').replace(/-(?:f|join)\b/gi, '')
-      .replace(/[^a-z0-9-]/gi, '');
+      .replace(/[\x09-\x0d]/g, ' ').replace(/[^a-z0-9 -]/gi, '');
     // Casts, methods and other syntax between quoted fragments must not hide their
     // visible spelling. Inspect potential spelling atoms at every quote, including
     // inner wrapper quotes, without claiming to parse shell quote nesting. Only the
@@ -167,7 +167,12 @@ function broadVisible(text, executableScript = false) {
     const quoted = formatParts(atoms.filter(atom => /^[a-z0-9_.:{},\\\x60^-]*$/i.test(atom)).join(''))
       .filter(part => part !== null).join('').replace(/[^a-z0-9-]/gi, '');
     const candidate = /claude|codex|resume|fork|--(?:continue|session-id)/i;
-    if (candidate.test(fragments) || candidate.test(quoted)) return true;
+    // Source whitespace is a barrier, not invented adjacency. Existing expansion,
+    // call and escape markers retain the collapsed signal for refusal only: an
+    // unquoted substitution with arguments can still construct a native word.
+    // Keep until a qualified replacement covers that dynamic construction family.
+    const constructed = /[$%!\x60^&]/.test(text) && candidate.test(fragments.replace(/ /g, ''));
+    if (candidate.test(fragments) || candidate.test(quoted) || constructed) return true;
     if (legacyTemplateEvidence(text) || orderedEvidence(text, atoms)) return true;
   }
   return (/claude(?:-code)?(?:\.(?:exe|cmd|ps1))?\b/i.test(shadow)
@@ -332,6 +337,64 @@ function wrapperRoles(words, shell) {
 // This is not a gh-wide exemption or a subprocess/format-expression schema.
 const GH_RUN_FIELDS = Object.freeze(['attempt', 'conclusion', 'createdAt', 'databaseId', 'displayTitle', 'event', 'headBranch',
   'headSha', 'name', 'number', 'startedAt', 'status', 'updatedAt', 'url', 'workflowDatabaseId', 'workflowName']);
+// Complete fixed built-ins only. This proves literal operand roles, never Git
+// validity, transport safety, external-operation approval or native target authority.
+function gitProof(text, shell) {
+  const words = roleWords(text);
+  if (!shell || !words?.length || words.some(word => !literalWord(word, shell))) return null;
+  const offset = words[0].value === '&' ? 1 : 0, executable = words[offset];
+  if (offset && (!['powershell', 'common'].includes(shell) || !executable?.quote)) return null;
+  if (!/^git(?:\.exe)?$/.test(executable?.value.split(/[\\/]/).pop().toLowerCase() || '')) return null;
+  const command = words[offset + 1];
+  if (!command || command.quote || !['add', 'commit', 'push', 'fetch', 'rev-parse', 'status'].includes(command.value)) return null;
+  const roles = words.map(word => ({ ...word, role: word === executable ? 'reader executable' : word === command ? 'fixed git command' : 'git option' }));
+  const args = words.slice(offset + 2);
+  const mark = (n, role) => { roles[offset + 2 + n].role = role; };
+  const ref = value => /^[a-z0-9_][a-z0-9_./-]*(?::[a-z0-9_][a-z0-9_./-]*)?$/i.test(value);
+  const remote = value => /^[a-z0-9_][a-z0-9_.-]*$/i.test(value);
+  if (command.value === 'add') {
+    if (args[0]?.value !== '--' || args[0].quote || args.length < 2) return null;
+    for (let n = 1; n < args.length; n += 1) {
+      if (!args[n].value) return null;
+      mark(n, 'literal git path');
+    }
+  } else if (command.value === 'commit') {
+    if (!args.length) return null;
+    for (let n = 0; n < args.length; n += 2) {
+      if (args[n].quote || !['-m', '--message'].includes(args[n].value) || !args[n + 1]?.value) return null;
+      mark(n + 1, 'literal git message');
+    }
+  } else if (command.value === 'push' || command.value === 'fetch') {
+    let at = 0;
+    if (args[at]?.value === '--' && !args[at].quote) at += 1;
+    if (!remote(args[at]?.value || '') || args.length < at + 2) return null;
+    mark(at++, 'literal git remote');
+    for (; at < args.length; at += 1) {
+      if (!ref(args[at].value)) return null;
+      mark(at, 'literal git refspec');
+    }
+  } else if (command.value === 'rev-parse') {
+    if (!args.length) return null;
+    for (let n = 0; n < args.length; n += 1) {
+      if (!ref(args[n].value) || args[n].value.includes(':')) return null;
+      mark(n, 'literal git revision');
+    }
+  } else {
+    let at = 0;
+    for (; at < args.length && args[at].value !== '--'; at += 1) {
+      if (args[at].quote || !['--short', '--branch', '--porcelain'].includes(args[at].value)) return null;
+    }
+    if (at < args.length) {
+      if (args[at].quote || ++at === args.length) return null;
+      for (; at < args.length; at += 1) {
+        if (!args[at].value) return null;
+        mark(at, 'literal git path');
+      }
+    }
+  }
+  return { schema: 'git ' + command.value + ' literal operands', shell, roles, consumed: words.at(-1).end };
+}
+
 function acquisitionProof(text, shell) {
   const ws = roleWords(text, { fieldComma: true });
   if (!shell || !ws?.length || ws.some(w => !literalWord(w, shell))) return null;
@@ -398,7 +461,7 @@ function readerSegments(text, shell) {
   const spans = [], proofs = [], unproved = [];
   for (const r of ranges) {
     const chunk = text.slice(r.start, r.end); if (!chunk.trim()) continue;
-    const proof = readerProof(roleWords(chunk), shell) || acquisitionProof(chunk, shell);
+    const proof = readerProof(roleWords(chunk), shell) || acquisitionProof(chunk, shell) || gitProof(chunk, shell);
     if (!proof) { unproved.push(chunk); continue; }
     const roles = proof.roles.map(w => ({ ...w, start: w.start + r.start, end: w.end + r.start }));
     proofs.push({ ...proof, ...r, roles });
