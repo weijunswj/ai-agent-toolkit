@@ -234,7 +234,7 @@ test('shell-family model refuses ambiguous data, help and native selector syntax
   const resolver = new ContinuationResolver({ environment: ctx.environment });
   const supported = [undefined, 'cmd.exe', 'powershell.exe', 'pwsh.exe', 'bash', '/bin/sh', 'C:\\synthetic shell\\pwsh.exe'];
   const unknown = ['unknown-shell', '', null, ['cmd.exe']];
-  assert.equal(matrix.shell_family_cases.length, 332);
+  assert.equal(matrix.shell_family_cases.length, 392);
   // Opaque runtime generation is outside this cooperative detector. No evaluation
   // or generic script interception is inferred from conservative static candidates.
   for (const text of [
@@ -248,6 +248,8 @@ test('shell-family model refuses ambiguous data, help and native selector syntax
     'Write-Output ("fixture {0}" -f 1)', 'echo ("{0}" -f "fixture")',
     'Write-Output (-join ("fi","xture"))', 'Write-Output ([char[]](102,105,120) -join "")',
     'Write-Output ("x{0}" -f 1)', 'Write-Output ("{0}q" -f 1)',
+    'Write-Output ("fi"+[string]"xture")', 'Write-Output ("fi".ToString()+"xture")',
+    'Write-Output (-join ([string]"fi",[string]"xture"))',
   ]) for (const selected of [...supported, ...unknown]) {
     const input = shell(ctx, text);
     if (selected !== undefined) input.tool_input.shell = selected;

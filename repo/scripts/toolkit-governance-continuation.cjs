@@ -50,7 +50,16 @@ function broadVisible(text) {
     // scripts with no recognisable host/selector remain outside this guard's scope.
     const fragments = shadow.replace(/\{\d+[^{}]*\}/g, '').replace(/-(?:f|join)\b/gi, '')
       .replace(/[^a-z0-9-]/gi, '');
-    if (/claude|codex|resume|fork|--(?:continue|session-id)/i.test(fragments)) return true;
+    // Casts, methods and other syntax between quoted fragments must not hide their
+    // visible spelling. Inspect potential spelling atoms at every quote, including
+    // inner wrapper quotes, without claiming to parse shell quote nesting. Only the
+    // spelling/escape/format alphabet contributes; intervening expression code does
+    // not. This can only make detection stricter, never prove runtime concatenation.
+    const quoted = [...text.matchAll(/(?=(["'])([a-z0-9_.:{},\\`^-]*)\1)/gi)]
+      .map(match => match[2]).join('')
+      .replace(/\{\d+[^{}]*\}/g, '').replace(/[^a-z0-9-]/gi, '');
+    const candidate = /claude|codex|resume|fork|--(?:continue|session-id)/i;
+    if (candidate.test(fragments) || candidate.test(quoted)) return true;
     // A format hole may insert characters inside both spellings. Fixed template
     // segments compatible with a native spelling are evidence, never an evaluated
     // format result. Empty templates and common short flags supply no such signal.
