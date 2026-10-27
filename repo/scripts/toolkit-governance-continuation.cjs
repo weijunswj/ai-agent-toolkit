@@ -12,6 +12,10 @@ const LIMITS = Object.freeze({ command: 32768, bytes: 8 * 1024 * 1024, record: 2
 const UNKNOWN = Object.freeze({ status: 'UNKNOWN', reason: 'TARGET_UNVERIFIED' });
 const NONE = Object.freeze({ status: 'NOT_CONTINUATION' });
 const HOST = /^(claude(?:-code)?|codex)(?:\.exe|\.cmd|\.ps1)?$/i;
+const CANDIDATE_SPELLINGS = Object.freeze([
+  ...['codex', 'claude', 'claude-code'].flatMap(host => ['', '.exe', '.cmd', '.ps1'].map(suffix => host + suffix)),
+  'resume', 'fork', '--resume', '--continue', '--session-id', '--fork-session',
+]);
 // Exact help-only forms verified on the frozen native CLIs in isolated homes. Do not infer
 // that a help-looking prompt after --, or a wrapped/compound command, exits before a session.
 const HELP_FORMS = Object.freeze({
@@ -34,9 +38,32 @@ function broadVisible(text) {
   const shadow = text.replace(/[\\`^]\r?\n/g, '')
     .replace(/%[^%\r\n]*%|![^!\r\n]*!|\$\{[^}$\r\n]*\}/g, '')
     .replace(/["'\\`^]/g, '');
-  // Expansion can compute the missing host or selector. A remaining static part is
-  // enough to refuse a dynamic candidate; it is never enough to verify its target.
-  if (/[$`%!^]/.test(text) && /(?:claude(?:-code)?|codex|resume|fork)\b|--(?:continue|session-id|fork-session)\b/i.test(shadow)) return true;
+  // Word syntax outside the literal grammar can compute the other spelling, including
+  // grouping, arrays, addition, formatting and join without expansion characters.
+  // Reuse the reader's boundary rather than maintaining a second syntax allowlist.
+  // Pipeline/redirection punctuation alone does not build a spelling. Whole visible
+  // continuations still use the unmodified text and strict reader below.
+  if (!tokens(text.replace(/[|<>]/g, ' '), { literalData: true })) {
+    // Detection only: join visible literal fragments across expression punctuation,
+    // format placeholders and format/join operators. Never evaluate the expression
+    // or pass this over-inclusive spelling to the target reader. Fully opaque runtime
+    // scripts with no recognisable host/selector remain outside this guard's scope.
+    const fragments = shadow.replace(/\{\d+[^{}]*\}/g, '').replace(/-(?:f|join)\b/gi, '')
+      .replace(/[^a-z0-9-]/gi, '');
+    if (/claude|codex|resume|fork|--(?:continue|session-id)/i.test(fragments)) return true;
+    // A format hole may insert characters inside both spellings. Fixed template
+    // segments compatible with a native spelling are evidence, never an evaluated
+    // format result. Empty templates and common short flags supply no such signal.
+    for (const match of text.matchAll(/["']([^"'\r\n]*\{\d+[^{}]*\}[^"'\r\n]*)["']/g)) {
+      const parts = match[1].toLowerCase().split(/\{\d+[^{}]*\}/g);
+      if (!parts.some(part => /[a-z]/.test(part))) continue;
+      if (CANDIDATE_SPELLINGS.some(word => {
+        if (!word.startsWith(parts[0]) || !word.endsWith(parts.at(-1))) return false;
+        let offset = 0;
+        return parts.every(part => { const index = word.indexOf(part, offset); if (index < 0) return false; offset = index + part.length; return true; });
+      })) return true;
+    }
+  }
   return (/claude(?:-code)?(?:\.(?:exe|cmd|ps1))?\b/i.test(shadow)
       && /--(?:resume|continue|session-id|fork-session)\b|(?:^|[\s;&|()])-(?!-)[a-z]*[rc][a-z]*(?=$|[\s=;&|()])/i.test(shadow))
     || (/codex(?:\.(?:exe|cmd|ps1))?\b/i.test(shadow) && /\b(?:resume|fork)\b/i.test(shadow));

@@ -234,7 +234,26 @@ test('shell-family model refuses ambiguous data, help and native selector syntax
   const resolver = new ContinuationResolver({ environment: ctx.environment });
   const supported = [undefined, 'cmd.exe', 'powershell.exe', 'pwsh.exe', 'bash', '/bin/sh', 'C:\\synthetic shell\\pwsh.exe'];
   const unknown = ['unknown-shell', '', null, ['cmd.exe']];
-  assert.equal(matrix.shell_family_cases.length, 172);
+  assert.equal(matrix.shell_family_cases.length, 332);
+  // Opaque runtime generation is outside this cooperative detector. No evaluation
+  // or generic script interception is inferred from conservative static candidates.
+  for (const text of [
+    '& $runtime $argument', '& ([char[]](99,111,100,101,120) -join "") $argument',
+    'PowerShell -Command "Write-Output $value"', 'bash -c "echo $value"',
+    'powershell -Command "$n=1; Write-Output $n"', 'bash -c "printf %s fixture"',
+    'git -c core.fsmonitor=false log --format=%H',
+    'git -c color.ui=false log --format="%h %s"', 'rg -r "$replacement" pattern fixture.txt',
+    'grep -c "$pattern" fixture.txt', 'findstr /r "$pattern" fixture.txt',
+    'cat ~/.claude/settings.json | grep -n yes', 'codex login --with-api-key < key.txt; echo ok',
+    'Write-Output ("fixture {0}" -f 1)', 'echo ("{0}" -f "fixture")',
+    'Write-Output (-join ("fi","xture"))', 'Write-Output ([char[]](102,105,120) -join "")',
+    'Write-Output ("x{0}" -f 1)', 'Write-Output ("{0}q" -f 1)',
+  ]) for (const selected of [...supported, ...unknown]) {
+    const input = shell(ctx, text);
+    if (selected !== undefined) input.tool_input.shell = selected;
+    assert.equal(resolver.resolve(text, input).status, 'NOT_CONTINUATION', text);
+    assert.equal(new gate.ToolGate({ registryOptions: ctx.options, environment: ctx.environment, stateReader: () => ({ state: 'DISABLED', rule: 'R1' }) }).decide(input), null, text);
+  }
   for (const row of matrix.shell_family_cases) for (const tool_name of ['Bash', 'PowerShell']) for (const selected of [...supported, ...unknown]) {
     const text = row.text.replaceAll('{TARGET}', spaced).replaceAll('{TRANSCRIPT}', ctx.file);
     const input = shell(ctx, text, { tool_name });
@@ -251,7 +270,7 @@ test('shell-family model refuses ambiguous data, help and native selector syntax
     }
   }
   for (const tool_name of ['Bash', 'PowerShell', 'Monitor', 'exec_command', 'shell', 'local_shell']) {
-    for (const command of ['echo (codex resume)', "echo 'fixture & claude --continue & echo fixture'", 'co""dex resu""me']) {
+    for (const command of ['echo (codex resume)', "echo 'fixture & claude --continue & echo fixture'", 'co""dex resu""me', '& ("co"+"dex") resume', 'codex ("res"+"ume")']) {
       for (const args of [{ command }, { cmd: command }, { command: command.split(' ') }]) {
         const input = { tool_name, cwd: ctx.caller, tool_input: { ...args, shell: 'cmd.exe' } };
         assert.ok(new gate.ToolGate({ registryOptions: ctx.options, environment: ctx.environment, stateReader: () => ({ state: 'DISABLED', rule: 'R1' }) }).decide(input)?.deny, `${tool_name}: text aliases cannot hide evaluation`);
