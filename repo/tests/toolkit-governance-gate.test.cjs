@@ -72,7 +72,14 @@ function hold(ctx, environment = {}) {
     return prompts.decide(request);
   } };
 }
-const tools = ctx => new gate.ToolGate({ registryOptions: ctx.options });
+const tools = ctx => new gate.ToolGate({ registryOptions: ctx.options, environment: { CLAUDE_CONFIG_DIR: path.join(ctx.root, 'native-claude') } });
+function nativeTranscript(ctx, cwd) {
+  const id = '11111111-1111-4111-8111-111111111111';
+  const file = path.join(ctx.root, 'native-claude', 'projects', 'synthetic-project', `${id}.jsonl`);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify({ type: 'user', sessionId: id, cwd, uuid: '22222222-2222-4222-8222-222222222222', timestamp: '2026-10-01T00:00:00.000Z', message: { role: 'user', content: 'synthetic fixture' } }) + '\n');
+  return file;
+}
 const stateOf = (ctx, repo) => governance.governanceState(repo, ctx.options);
 // The folder earlier versions kept a copy of the state in. Toolkit no longer writes it, and a copy
 // left over from before is read by nothing.
@@ -684,12 +691,13 @@ test('held messages expire, and a decided repository no longer stops sessions be
   const ctx = scratch(t);
   const plain = path.join(ctx.root, 'plain');
   fs.mkdirSync(plain);
-  const resume = () => tools(ctx).decide({ tool_name: 'Bash', cwd: plain, tool_input: { command: 'claude -c' } });
   // Sessions A and B are held; A answers, B never comes back.
   const repo = gitRepo(ctx, 'repo');
+  const transcript = nativeTranscript(ctx, repo);
+  const resume = () => tools(ctx).decide({ tool_name: 'Bash', cwd: plain, tool_input: { command: `claude --resume "${transcript}"` } });
   hold(ctx).decide({ cwd: repo, prompt: 'from b', sessionId: 'b' });
   hold(ctx).decide({ cwd: repo, prompt: 'from a', sessionId: 'a' });
-  assert.match(resume().deny, /a message is held for a repository's governance answer/);
+  assert.match(resume().deny, /a continuation target is waiting/);
   assert.equal(hold(ctx).decide({ cwd: repo, prompt: 'yes', sessionId: 'a' }).action, 'pass');
   assert.equal(resume(), null, 'the repository is decided, so B\'s leftover message no longer counts');
   // A message held long ago is dropped when the store is read.
@@ -1229,7 +1237,7 @@ test('B1: the full answer counts only in the session that was asked, on both kin
   assert.equal(governance.governanceState(repo, { registryPath: path.join(home, '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json'), testOnly: true }).state, 'UNDECIDED');
 });
 
-test('H2: an edit or command from another folder cannot write into a held repository, and resuming a session is refused while anything is held', (t) => {
+test('H2: edits and commands cannot reach held repositories; a verified decided continuation is independent of unrelated holds', (t) => {
   const ctx = scratch(t);
   const held = gitRepo(ctx, 'held');
   const decided = gitRepo(ctx, 'decided', { remote: 'https://github.com/example-owner/decided.git' });
@@ -1237,7 +1245,7 @@ test('H2: an edit or command from another folder cannot write into a held reposi
   const plain = path.join(ctx.root, 'plain');
   fs.mkdirSync(plain);
   const EDIT = /this edit is in a repository that is waiting for the user's governance answer/;
-  const RESUME = /no Claude or Codex session may be resumed, continued or forked/;
+  const RESUME = /selected session's repository could not be verified/;
   const binding = path.join(held, '.github', 'toolkit-programme.json');
   const edits = [
     ['Write', { file_path: path.join(held, 'AGENTS.md') }, EDIT],
@@ -1256,9 +1264,13 @@ test('H2: an edit or command from another folder cannot write into a held reposi
   // The probe: the governed block and binding written from another folder never make the repository ENABLED.
   assert.equal(stateOf(ctx, held).state, 'UNDECIDED');
   const resumes = ['claude -p --resume 0b4e "$(cat r.txt)"', 'claude --continue -p "$(cat r.txt)"', 'claude -r', 'codex exec resume --last "$(cat r.txt)"', 'codex resume', 'codex fork abc'];
-  for (const command of resumes) assert.equal(tools(ctx).decide({ tool_name: 'Bash', cwd: plain, tool_input: { command } }), null, `nothing held: ${command}`);
+  for (const command of resumes) assert.match(tools(ctx).decide({ tool_name: 'Bash', cwd: plain, tool_input: { command } })?.deny || '', RESUME, `unverified even without held messages: ${command}`);
   hold(ctx).decide({ cwd: held, prompt: 'go', sessionId: 'user' });
   for (const command of resumes) assert.match(tools(ctx).decide({ tool_name: 'Bash', cwd: plain, tool_input: { command } })?.deny || '', RESUME, command);
+  const transcript = nativeTranscript(ctx, decided);
+  assert.equal(tools(ctx).decide({ tool_name: 'Bash', cwd: plain, tool_input: { command: `claude --resume "${transcript}"` } }), null);
+  nativeTranscript(ctx, held);
+  assert.match(tools(ctx).decide({ tool_name: 'Bash', cwd: plain, tool_input: { command: `claude --resume "${transcript}"` } })?.deny || '', /a continuation target is waiting/);
   // Codex's -c is a config override, not continue.
   assert.equal(tools(ctx).decide({ tool_name: 'Bash', cwd: plain, tool_input: { command: 'codex -c model=x exec "summarise"' } }), null);
 });
