@@ -94,4 +94,6 @@ Claude Code's governance `PreToolUse` hook and Codex's helper hook use the same 
 
 The [Bridge's hook policy](TOOLKIT-LOCAL-BRIDGE.md#hook-policy) describes the supported literal selectors and deliberate refusals. A successful source check returns no permission decision: Claude emits an empty object, Codex emits no stdout and exits zero. A denial retains Claude's deny JSON and Codex's deny JSON with exit two. Owner-answer, card, epoch, attribution and native helper transition controls remain independent.
 
+The shared classifier distinguishes proved literal reader operands from executable shell script operands. Its evidence-only source views never supply native arguments, target directories or permission, and all current-repository and reached-path guards still inspect the original request first.
+
 Synthetic stdin tests exercise both source entrypoints with disposable homes, repositories and metadata, without executing a continuation or touching an installed plugin. These tests establish source behaviour and non-mutation only. Native dispatcher, hook trust, installed cache, desktop entrypoints and installed qualification remain separate host obligations; a source result does not replace them. Portable-only hosts gain no native continuation support.
