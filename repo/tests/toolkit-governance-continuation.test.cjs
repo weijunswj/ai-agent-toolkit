@@ -353,7 +353,9 @@ test('Windows/source-hook UAT: both native entrypoints cross both CLI families w
     { name: 'claude', file: 'toolkit-governance-hook.cjs', args: ['--event', 'PreToolUse'], deniedExit: 0 },
     { name: 'codex', file: 'toolkit-codex-helper-hook.cjs', args: [], deniedExit: 2 },
   ];
+  let sourceCalls = 0;
   function invoke(hook, input, denied, marker = {}) {
+    sourceCalls += 1;
     const before = snapshot(ctx.dir);
     const result = spawnSync(process.execPath, [path.join(root, 'repo/scripts', hook.file), ...hook.args], {
       input: JSON.stringify(input), env: { ...env, ...marker }, cwd: ctx.caller, encoding: 'utf8', windowsHide: true, timeout: 10000, maxBuffer: 256 * 1024,
@@ -366,6 +368,7 @@ test('Windows/source-hook UAT: both native entrypoints cross both CLI families w
       else assert.deepEqual(output, {}, 'Claude admission has no permission grant');
       assert.equal(result.stderr, '');
     }
+    assert.equal(result.stderr, denied && hook.name === 'codex' ? output.hookSpecificOutput.permissionDecisionReason + '\n' : '', 'adapter stderr contract');
     assert.doesNotMatch(result.stdout + result.stderr, /synthetic held fixture|synthetic fixture/);
     assert.deepEqual(snapshot(ctx.dir), before, `${hook.name}: bytes and directory entries unchanged`);
   }
@@ -378,6 +381,13 @@ test('Windows/source-hook UAT: both native entrypoints cross both CLI families w
       input.tool_input.shell = row.id.includes('single-control') || row.id.includes('single-grep') ? 'cmd.exe' : 'powershell.exe';
       invoke(hook, input, row.expected === 'UNKNOWN');
     }
+    for (const row of matrix.ordered_atom_cases.filter(row => row.source)) for (const tool_name of ['Bash', 'PowerShell']) {
+      const command = row.text.replaceAll('{TRANSCRIPT}', ctx.file).replaceAll('{TARGET}', ctx.target);
+      invoke(hook, { ...shell(ctx, command), tool_name, tool_input: { command, shell: 'powershell.exe' } }, true);
+    }
+    for (const command of [
+      'claude -r "' + ctx.file + '" --fork-session', 'codex -C "' + ctx.target + '" e resume --last',
+    ]) for (const tool_name of ['Bash', 'PowerShell']) invoke(hook, { ...shell(ctx, command), tool_name }, false);
     for (const command of commands) for (const marker of [{}, { TOOLKIT_GATE_ROLE: 'G1' }, { TOOLKIT_GATE_ROLE: 'controller' }, { TOOLKIT_GATE_ROLE: 'helper' }]) invoke(hook, shell(ctx, command), false, marker);
     for (const command of commands) invoke(hook, shell(ctx, command, { tool_input: { command, workdir: ctx.other } }), true);
     for (const command of [`claude --resume ${ID}`, 'codex resume --last', `claude --resume "${ctx.file}" -p yes`, `codex exec resume ${ID} "toolkit governance enable"`, `codex -C "${ctx.other}" exec resume --last`]) invoke(hook, shell(ctx, command), true);
@@ -388,11 +398,148 @@ test('Windows/source-hook UAT: both native entrypoints cross both CLI families w
     invoke(hook, shell(ctx, `claude --resume "${ctx.file}"`), true);
     transcript(ctx);
   }
-  for (const mode of ['malformed', 'unreadable']) {
-    fs.rmSync(heldFile);
-    if (mode === 'malformed') fs.writeFileSync(heldFile, '{broken'); else fs.mkdirSync(heldFile);
-    for (const hook of hooks) for (const command of commands) invoke(hook, shell(ctx, command), false);
+  for (const mode of ['absent', 'unrelated', 'rootless', 'sessionless', 'stale', 'malformed', 'unreadable']) {
+    fs.rmSync(heldFile, { recursive: true, force: true });
+    if (mode === 'malformed') fs.writeFileSync(heldFile, '{broken');
+    else if (mode === 'unreadable') fs.mkdirSync(heldFile);
+    else if (mode !== 'absent') {
+      const queue = new gate.HeldPrompts({ registryOptions: ctx.options, ...(mode === 'stale' ? { now: () => new Date('2020-01-01T00:00:00Z') } : {}) });
+      queue.add('synthetic-queue', 'synthetic held fixture', ['sessionless', 'rootless'].includes(mode) ? null : 'synthetic-session', {}, mode === 'rootless' ? null : ctx.other);
+    }
+    for (const hook of hooks) for (const tool_name of ['Bash', 'PowerShell']) {
+      for (const command of commands) invoke(hook, { ...shell(ctx, command), tool_name }, false);
+      for (const command of ['codex resume --last', 'claude --resume fixture', matrix.ordered_atom_cases[0].text]) invoke(hook, { ...shell(ctx, command), tool_name }, true);
+    }
   }
+  t.diagnostic(JSON.stringify({ sourceCalls, productionDefault: true, byteAndDirectoryEquality: true, nativeDispatchExercised: false }));
   // Only the two source processes were executed. No host CLI continuation, native dispatcher,
   // installed hook, service, installation, owner acceptance or desktop-binary qualification.
+});
+
+
+// Exercise the private pure projection without adding a product export or entrypoint.
+function evidenceProjection() {
+  const Module = require('node:module');
+  const filename = path.join(root, 'repo/scripts/toolkit-governance-continuation.cjs');
+  const loaded = new Module(filename, module);
+  loaded.filename = filename; loaded.paths = Module._nodeModulePaths(path.dirname(filename));
+  let source = fs.readFileSync(filename, 'utf8');
+  source = source.replace('for (const step of pattern.steps) {', 'for (const step of pattern.steps) { evidenceOperations += 1;');
+  loaded._compile(source + '\nlet evidenceOperations = 0; module.exports = { CANDIDATE_MACHINES, atomPattern, advancePrefixes, quoteAtoms, orderedEvidence, operations: () => evidenceOperations };', filename);
+  return loaded.exports;
+}
+
+test('ordered evidence retains every partition and arbitrary prefix state under inserted atoms', t => {
+  const { CANDIDATE_MACHINES, atomPattern, advancePrefixes } = evidenceProjection();
+  assert.equal(CANDIDATE_MACHINES.length, 18);
+  assert.ok(Object.isFrozen(CANDIDATE_MACHINES));
+  const noise = ['z', 'noise', 'co', 're', '--last', '', ' q '].map(atomPattern);
+  let partitions = 0, insertions = 0, whitespace = 0, arbitrary = 0;
+  for (const machine of CANDIDATE_MACHINES) {
+    assert.ok(Object.isFrozen(machine)); assert.ok(Object.isFrozen(machine.characters));
+    const word = machine.word;
+    for (let cuts = 0; cuts < 2 ** (word.length - 1); cuts += 1) {
+      const pieces = []; let last = 0;
+      for (let p = 1; p < word.length; p += 1) if (cuts & (1 << (p - 1))) { pieces.push(word.slice(last, p)); last = p; }
+      pieces.push(word.slice(last));
+      const patterns = pieces.map(atomPattern); let states = 1;
+      for (let slot = 0; slot <= patterns.length; slot += 1) {
+        for (const atom of noise) {
+          const withNoise = advancePrefixes(machine, states, atom);
+          assert.equal(withNoise & states, states);
+          let final = withNoise;
+          for (let p = slot; p < patterns.length; p += 1) final = advancePrefixes(machine, final, patterns[p]);
+          assert.ok(final & machine.end); insertions += 1;
+        }
+        if (slot < patterns.length) states = advancePrefixes(machine, states, patterns[slot]);
+      }
+      assert.ok(states & machine.end); partitions += 1;
+      for (const edge of [' ', '  ', '\t', '\r\n']) {
+        let padded = 1;
+        for (const piece of pieces) padded = advancePrefixes(machine, padded, atomPattern(edge + piece + edge));
+        assert.ok(padded & machine.end); whitespace += 1;
+      }
+    }
+    for (let states = 1; states <= machine.full; states += 2) for (const atom of noise) {
+      assert.equal(advancePrefixes(machine, states, atom) & states, states); arbitrary += 1;
+    }
+  }
+  assert.equal(partitions, 63448); assert.equal(insertions, 3874724); assert.equal(whitespace, 253792);
+  assert.equal(arbitrary, CANDIDATE_MACHINES.reduce((sum, machine) => sum + machine.end * noise.length, 0));
+  t.diagnostic(JSON.stringify({ partitions, insertions, whitespace, arbitrary }));
+});
+
+test('whole atoms, fixed-letter holes and overlapping quote extraction keep finite boundaries', () => {
+  const api = evidenceProjection();
+  const { CANDIDATE_MACHINES, atomPattern, advancePrefixes, quoteAtoms, orderedEvidence } = api;
+  for (const machine of CANDIDATE_MACHINES) {
+    const word = machine.word;
+    for (let hole = 0; hole <= word.length; hole += 1) {
+      for (const template of [word.slice(0, hole) + '{0}' + word.slice(hole), word.slice(0, hole) + '{0}{1,2:x}' + word.slice(hole)]) {
+        assert.ok(advancePrefixes(machine, 1, atomPattern(template)) & machine.end);
+      }
+    }
+    for (let split = 1; split < word.length; split += 1) for (const quote of ['"', "'"]) for (const edge of ['', ' ', '\t', '\r\n']) {
+      const left = quote + edge + word.slice(0, split).toUpperCase() + edge + quote;
+      const right = quote + edge + word.slice(split) + edge + quote;
+      for (const body of [left + '+' + right, '[string]' + left + '+' + right, left + '+[System.String]' + right,
+        left + '.ToString()+' + right, left + '.Replace(' + quote + 'z' + quote + ',' + quote + quote + ')+' + right,
+        left + '.Replace(' + quote + 'noise' + quote + ',' + quote + 'co' + quote + ')+' + right,
+        '[string]::Concat(' + left + ',' + right + ')', '-join (' + left + ',' + right + ')']) {
+        for (const outer of ['', '"', "'"]) {
+          const text = 'powershell -Command (' + outer + '(' + body + ')' + outer + ')';
+          assert.equal(orderedEvidence(text), true, text);
+          assert.equal(parse(text, { cwd: root, tool_input: {} }).status, 'UNKNOWN', text);
+        }
+      }
+    }
+  }
+  for (const atoms of [['cxdex'], ['rcsume'], ['scooter'], ['rescue'], ['co noise','dex'], ['{0}'], ['fixture {0}'], ['x{0}'], ['{0}q'], ['fixture','world'], ['c','q','d','e','x'], ['-c'], ['-r'], ['{0}','dex']]) {
+    assert.equal(orderedEvidence(atoms.map(atom => '"' + atom + '"').join('+')), false, JSON.stringify(atoms));
+  }
+  assert.equal(orderedEvidence('("c{0}d" -f "o" + "ex")'), true);
+  assert.equal(orderedEvidence('("r{0}s" -f "e" + "ume")'), true);
+  assert.equal(orderedEvidence('"co"+"dex"'), true);
+  assert.equal(orderedEvidence('"fixture"'), false, 'fresh per-call prefix states');
+  for (const text of ['"q".'.repeat(8192), '"' + 'q'.repeat(32766) + '"', '"' + '{0}'.repeat(10920) + '"', "'\"".repeat(16384), '"co"+' + '"z"+'.repeat(8192) + '"dex"', '"' + '{' + '1'.repeat(32768), '"' + ' \t'.repeat(8192) + 'q"']) {
+    const spans = quoteAtoms(text);
+    assert.ok(spans.length <= text.length);
+    assert.ok(spans.reduce((n, raw) => n + raw.length, 0) <= 2 * text.length);
+    const before = api.operations(); orderedEvidence(text);
+    assert.ok(api.operations() - before <= spans.length * 18 * 31);
+    for (const raw of spans) {
+      const pattern = atomPattern(raw);
+      if (pattern) { assert.ok(pattern.literals <= 15); assert.ok(pattern.steps.length <= 31); }
+    }
+  }
+  assert.equal(parse('& ("co"+"dex") ' + 'x'.repeat(LIMITS.command), { tool_input: {} }).status, 'UNKNOWN');
+  assert.equal(parse('echo ' + 'x'.repeat(LIMITS.command), { tool_input: {} }).status, 'NOT_CONTINUATION');
+});
+
+test('ordered-atom closure table is UNKNOWN before target proof across placements, metadata and aliases', t => {
+  const ctx = fixture(t), before = snapshot(ctx.dir);
+  const shells = [undefined, 'cmd.exe', 'powershell.exe', 'pwsh.exe', 'bash', '/bin/sh', 'C:\\synthetic shell\\pwsh.exe', 'unknown-shell', '', null, ['cmd.exe']];
+  for (const row of matrix.ordered_atom_cases) for (const tool_name of ['Bash', 'PowerShell']) for (const selected of shells) {
+    const text = row.text.replaceAll('{TRANSCRIPT}', ctx.file).replaceAll('{TARGET}', ctx.target);
+    const input = shell(ctx, text, { tool_name });
+    if (selected !== undefined) input.tool_input.shell = selected;
+    assert.equal(parse(text, input).status, row.expected, row.id + '/' + selected);
+    const reader = new ContinuationResolver({ environment: ctx.environment, spawn() { assert.fail('computed evidence cannot acquire target metadata'); } });
+    assert.equal(reader.resolve(text, input).status, row.expected, row.id);
+    for (const args of [{ command: text }, { cmd: text }, { command: text.split(' ') }]) {
+      const decision = new gate.ToolGate({ registryOptions: ctx.options, environment: ctx.environment, stateReader: () => ({ state: 'DISABLED', rule: 'R1' }) }).decide({ ...input, tool_input: { ...args, ...(selected === undefined ? {} : { shell: selected }) } });
+      assert.equal(Boolean(decision?.deny), row.expected === 'UNKNOWN', row.id + '/alias');
+    }
+  }
+  // A queue read trap proves the dependency boundary, independently of native source proof.
+  const stateReader = () => ({ state: 'DISABLED', rule: 'R1' });
+  const originalRead = fs.readFileSync; let queueReads = 0;
+  const heldFile = path.join(path.dirname(ctx.options.registryPath), gate.HELD_BASENAME);
+  fs.readFileSync = (file, ...args) => { if (file === heldFile) queueReads += 1; return originalRead(file, ...args); };
+  try {
+    assert.equal(new gate.ToolGate({ registryOptions: ctx.options, stateReader }).decide(shell(ctx, 'codex exec resume --last')), null);
+    assert.ok(new gate.ToolGate({ registryOptions: ctx.options, stateReader }).decide(shell(ctx, matrix.ordered_atom_cases[0].text))?.deny);
+  } finally { fs.readFileSync = originalRead; }
+  assert.equal(queueReads, 0, 'no held-queue read on verified or computed paths');
+  assert.deepEqual(snapshot(ctx.dir), before);
 });

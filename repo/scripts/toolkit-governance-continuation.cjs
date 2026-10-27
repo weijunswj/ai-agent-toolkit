@@ -24,6 +24,114 @@ const HELP_FORMS = Object.freeze({
 });
 function hostOf(word) { return HOST.exec(word.split(/[\\/]/).pop())?.[1].toLowerCase().replace('claude-code', 'claude'); }
 
+// Fixed read-only machines; reachability belongs to one classification call only.
+const CANDIDATE_MACHINES = Object.freeze(CANDIDATE_SPELLINGS.map(word => {
+  const characters = Object.create(null);
+  for (let p = 0; p < word.length; p += 1) characters[word[p]] = (characters[word[p]] || 0) | (1 << p);
+  return Object.freeze({ word, characters: Object.freeze(characters), end: 1 << word.length, full: (1 << (word.length + 1)) - 1 });
+}));
+
+// Equivalent to the fixed numeric-hole grammar, without regex backtracking on a
+// long digit run lacking a closing brace. Literal parts and holes stay separate.
+function formatParts(text) {
+  const parts = []; let start = 0;
+  for (let i = 0; i < text.length;) {
+    if (text[i] !== '{' || text[i + 1] < '0' || text[i + 1] > '9' || text[i + 1] === undefined) { i += 1; continue; }
+    let end = i + 2;
+    while (end < text.length && text[end] !== '{' && text[end] !== '}') end += 1;
+    if (text[end] === '}') { parts.push(text.slice(start, i), null); start = end + 1; i = start; }
+    else i = end;
+  }
+  parts.push(text.slice(start)); return parts;
+}
+
+function quoteAtoms(text) {
+  const atoms = []; let single = -1, double = -1;
+  // Every quote opens a potential span to the next quote of its own kind.
+  // Each character belongs to at most two spans, including wrapper overlaps.
+  for (let i = text.length - 1; i >= 0; i -= 1) {
+    const quote = text[i];
+    if (quote !== "'" && quote !== '"') continue;
+    const end = quote === "'" ? single : double;
+    if (end >= 0) atoms.push(text.slice(i + 1, end));
+    if (quote === "'") single = i; else double = i;
+  }
+  return atoms.reverse();
+}
+
+function atomPattern(raw) {
+  const space = c => c === ' ' || (c >= '\x09' && c <= '\x0d');
+  let first = 0, last = raw.length;
+  while (first < last && space(raw[first])) first += 1;
+  while (last > first && space(raw[last - 1])) last -= 1;
+  const steps = []; let literals = 0, letters = false, holes = false;
+  for (const part of formatParts(raw.slice(first, last))) {
+    if (part === null) { holes = true; if (steps.at(-1) !== null) steps.push(null); continue; }
+    for (let c of part) {
+      if (c >= 'A' && c <= 'Z') c = String.fromCharCode(c.charCodeAt(0) + 32);
+      if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c === '-' || c === '.') {
+        steps.push(c); literals += 1; if (c >= 'a' && c <= 'z') letters = true;
+        if (literals > 15) return null;
+      } else if (!'_.:{},\\\x60^'.includes(c)) return null;
+    }
+  }
+  // Literal hyphens, digits and dots can complete a split spelling. A template
+  // hole alone cannot supply native evidence, even beside a literal suffix.
+  return literals && (!holes || letters) ? { steps, literals } : null;
+}
+
+function advancePrefixes(machine, states, pattern) {
+  if (!pattern || pattern.literals > machine.word.length) return states;
+  let active = states;
+  for (const step of pattern.steps) {
+    if (!active) break;
+    // A hole consumes any span inside this one fixed spelling. All literal
+    // characters must match, and the entire contributing atom must be consumed.
+    active = step === null ? machine.full ^ ((active & -active) - 1)
+      : (active & (machine.characters[step] || 0)) << 1;
+  }
+  // Skipping an atom retains every alternative and every accepting endpoint.
+  return states | active;
+}
+
+function orderedEvidence(text, atoms = quoteAtoms(text)) {
+  const states = CANDIDATE_MACHINES.map(() => 1);
+  for (const raw of atoms) {
+    const pattern = atomPattern(raw);
+    for (let k = 0; k < CANDIDATE_MACHINES.length; k += 1) {
+      states[k] = advancePrefixes(CANDIDATE_MACHINES[k], states[k], pattern);
+      if (states[k] & CANDIDATE_MACHINES[k].end) return true;
+    }
+  }
+  return false;
+}
+
+// Preserve the old non-overlapping format-template signal independently of the
+// ordered whole-atom projection. Its full-word compatibility is not authority.
+function legacyTemplateEvidence(text) {
+  let opening = -1;
+  for (let i = 0; i < text.length; i += 1) {
+    if (text[i] !== '"' && text[i] !== "'") continue;
+    if (opening >= 0) {
+      const raw = text.slice(opening + 1, i);
+      const split = formatParts(raw);
+      if (!/[\r\n]/.test(raw) && split.includes(null)) {
+        opening = -1;
+        const parts = split.filter(part => part !== null).map(part => part.toLowerCase());
+        if (!parts.some(part => /[a-z]/.test(part))) continue;
+        if (CANDIDATE_SPELLINGS.some(word => {
+          if (!word.startsWith(parts[0]) || !word.endsWith(parts.at(-1))) return false;
+          let offset = 0;
+          return parts.every(part => { const index = word.indexOf(part, offset); if (index < 0) return false; offset = index + part.length; return true; });
+        })) return true;
+        continue;
+      }
+    }
+    opening = i;
+  }
+  return false;
+}
+
 // Classification is intentionally broader than admission. An embedded/wrapped or malformed
 // invocation must not fall out of enforcement merely because the literal reader cannot parse it.
 function broadVisible(text) {
@@ -48,30 +156,19 @@ function broadVisible(text) {
     // format placeholders and format/join operators. Never evaluate the expression
     // or pass this over-inclusive spelling to the target reader. Fully opaque runtime
     // scripts with no recognisable host/selector remain outside this guard's scope.
-    const fragments = shadow.replace(/\{\d+[^{}]*\}/g, '').replace(/-(?:f|join)\b/gi, '')
+    const fragments = formatParts(shadow).filter(part => part !== null).join('').replace(/-(?:f|join)\b/gi, '')
       .replace(/[^a-z0-9-]/gi, '');
     // Casts, methods and other syntax between quoted fragments must not hide their
     // visible spelling. Inspect potential spelling atoms at every quote, including
     // inner wrapper quotes, without claiming to parse shell quote nesting. Only the
     // spelling/escape/format alphabet contributes; intervening expression code does
     // not. This can only make detection stricter, never prove runtime concatenation.
-    const quoted = [...text.matchAll(/(?=(["'])([a-z0-9_.:{},\\`^-]*)\1)/gi)]
-      .map(match => match[2]).join('')
-      .replace(/\{\d+[^{}]*\}/g, '').replace(/[^a-z0-9-]/gi, '');
+    const atoms = quoteAtoms(text);
+    const quoted = formatParts(atoms.filter(atom => /^[a-z0-9_.:{},\\\x60^-]*$/i.test(atom)).join(''))
+      .filter(part => part !== null).join('').replace(/[^a-z0-9-]/gi, '');
     const candidate = /claude|codex|resume|fork|--(?:continue|session-id)/i;
     if (candidate.test(fragments) || candidate.test(quoted)) return true;
-    // A format hole may insert characters inside both spellings. Fixed template
-    // segments compatible with a native spelling are evidence, never an evaluated
-    // format result. Empty templates and common short flags supply no such signal.
-    for (const match of text.matchAll(/["']([^"'\r\n]*\{\d+[^{}]*\}[^"'\r\n]*)["']/g)) {
-      const parts = match[1].toLowerCase().split(/\{\d+[^{}]*\}/g);
-      if (!parts.some(part => /[a-z]/.test(part))) continue;
-      if (CANDIDATE_SPELLINGS.some(word => {
-        if (!word.startsWith(parts[0]) || !word.endsWith(parts.at(-1))) return false;
-        let offset = 0;
-        return parts.every(part => { const index = word.indexOf(part, offset); if (index < 0) return false; offset = index + part.length; return true; });
-      })) return true;
-    }
+    if (legacyTemplateEvidence(text) || orderedEvidence(text, atoms)) return true;
   }
   return (/claude(?:-code)?(?:\.(?:exe|cmd|ps1))?\b/i.test(shadow)
       && /--(?:resume|continue|session-id|fork-session)\b|(?:^|[\s;&|()])-(?!-)[a-z]*[rc][a-z]*(?=$|[\s=;&|()])/i.test(shadow))
