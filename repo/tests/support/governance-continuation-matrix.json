@@ -1808,6 +1808,53 @@
         "a=(co dex); IFS=; ${a[*]} resume"
       ]
     ],
+    "sentinel_transforms": {
+      "invariant": "Preserve every original UTF-16 code unit through the legacy consuming transforms. Only a nonempty unchanged whole-input proof retains generated NUL barriers; no-proof inputs use the exact legacy final alphabet.",
+      "words": ["codex","codex.exe","codex.cmd","codex.ps1","claude","claude.exe","claude.cmd","claude.ps1","claude-code","claude-code.exe","claude-code.cmd","claude-code.ps1","resume","fork","--resume","--continue","--session-id","--fork-session"],
+      "nul_counts": [1,2],
+      "shapes": [
+        {"id":"numeric-opener","template":"({{nul}0{word}})","expected":["UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN"]},
+        {"id":"expansion-opener","template":"(${nul}{{word}})","expected":["UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN"]},
+        {"id":"inside-numeric-control","template":"({0{nul}{word}})","expected":["NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION"]},
+        {"id":"nonnumeric-control","template":"({{nul}x{word}})","expected":["UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN"]},
+        {"id":"spelling-control","template":"({head}{nul}{tail})","expected":["UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN","UNKNOWN"]},
+        {"id":"numeric-join-reversal","template":"({head}{{nul}0noise}{tail})","expected":["NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","UNKNOWN","NOT_CONTINUATION","NOT_CONTINUATION","UNKNOWN"]},
+        {"id":"expansion-join-reversal","template":"({head}${nul}{noise}{tail})","expected":["NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","NOT_CONTINUATION","UNKNOWN","NOT_CONTINUATION","NOT_CONTINUATION","UNKNOWN"]}
+      ],
+      "control_code_points": [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,127,160,8232,8233,65279,55296,57343,128512],
+      "neighbours": [
+        ["percent-opener","(%{nul}{word}%)"],
+        ["percent-close","(%{word}{nul}%)"],
+        ["bang-opener","(!{nul}{word}!)"],
+        ["bang-close","(!{word}{nul}!)"],
+        ["dollar-close","(${{word}{nul}})"],
+        ["brace-close","({0{word}{nul}})"],
+        ["slash-newline","(\\{nul}\n{word})"],
+        ["tick-newline","(`{nul}\r\n{word})"],
+        ["caret-newline","(^{nul}\n{word})"],
+        ["quote-gap","(\"{head}\"{nul}\"{tail}\")"],
+        ["format-operator","(-f{nul}{word})"],
+        ["join-operator","(-join{nul}{word})"]
+      ],
+      "qualified_bodies": [
+        "for k in items:\n    pass",
+        "for\tkey,value in items:\n    pass",
+        "values={k:v for k,v in items}",
+        "for key in items:\n    text=\"{0} for k in items\"",
+        "for key in items:\n    # for k in items\n    pass",
+        "for k in items:\n    text=\"\\n\""
+      ],
+      "expected_rows": {"sentinel":3024,"original_review":2160,"early_deletion_lost_refusals":864,"early_deletion_extra_refusals":768,"unproved_projection":27360,"code_units":131072,"qualified_projection":864,"proof_withdrawal":370},
+      "adapter_cases": [
+        ["numeric-opener","({{nul}0codex})","UNKNOWN"],
+        ["expansion-opener","(${nul}{codex})","UNKNOWN"],
+        ["inside-numeric-control","({0{nul}codex})","NOT_CONTINUATION"],
+        ["nonnumeric-control","({{nul}xcodex})","UNKNOWN"],
+        ["spelling-control","(co{nul}dex)","UNKNOWN"],
+        ["numeric-join-reversal","(co{{nul}0noise}dex)","NOT_CONTINUATION"],
+        ["expansion-join-reversal","(co${nul}{noise}dex)","NOT_CONTINUATION"]
+      ]
+    },
     "binding_cases": [
       ["simple","for key in items:\n    pass",1],
       ["target-list","for key,value in items:\n    pass",1],

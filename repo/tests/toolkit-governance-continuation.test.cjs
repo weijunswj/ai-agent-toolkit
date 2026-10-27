@@ -485,19 +485,19 @@ test('Windows/source-hook UAT: both native entrypoints cross both CLI families w
 
 
 // Exercise the private pure projection without adding a product export or entrypoint.
-function evidenceProjection() {
+function evidenceProjection(transform = source => source) {
   const Module = require('node:module');
   const filename = path.join(root, 'repo/scripts/toolkit-governance-continuation.cjs');
   const loaded = new Module(filename, module);
   loaded.filename = filename; loaded.paths = Module._nodeModulePaths(path.dirname(filename));
-  let source = fs.readFileSync(filename, 'utf8');
+  let source = transform(fs.readFileSync(filename, 'utf8'));
   source = source.replace('for (const step of pattern.steps) {', 'for (const step of pattern.steps) { evidenceOperations += 1;');
   const start = source.indexOf('function roleWords('), end = source.indexOf('\nfunction literalWord(', start);
   const lexer = source.slice(start, end).replace('for (let i = 0; i < text.length;) {', 'for (let i = 0; i < text.length;) { roleVisits += 1;')
     .replace('value += text[i++];', 'roleVisits += 1; value += text[i++];')
     .replace('while (i < text.length && text[i] !== quote) i += 1;', 'while (i < text.length && text[i] !== quote) { roleVisits += 1; i += 1; }');
   source = source.slice(0, start) + lexer + source.slice(end);
-  loaded._compile(source + '\nlet evidenceOperations = 0, roleVisits = 0; module.exports = { CANDIDATE_MACHINES, atomPattern, advancePrefixes, quoteAtoms, orderedEvidence, commandRoles, roleWords, pythonBindingBarriers, constructionFragments, roleVisits: () => roleVisits, operations: () => evidenceOperations };', filename);
+  loaded._compile(source + '\nlet evidenceOperations = 0, roleVisits = 0; module.exports = { CANDIDATE_MACHINES, atomPattern, advancePrefixes, quoteAtoms, orderedEvidence, commandRoles, roleWords, pythonBindingBarriers, constructionFragments, parse, roleVisits: () => roleVisits, operations: () => evidenceOperations };', filename);
   return loaded.exports;
 }
 
@@ -1008,6 +1008,124 @@ test('binding closure changes only proved horizontal offsets and never hides sou
   t.diagnostic(JSON.stringify({ bindingRows: positive, unprovedRows: unproved, nativeNeighbours: neighbours, payloadsDispatched: false }));
 });
 
+// Frozen legacy projection: independent numeric-hole reference, original stage order.
+function legacyConstructionProjection(text) {
+  return text.replace(/[\\\x60^]\r?\n/g, '')
+    .replace(/%[^%\r\n]*%|![^!\r\n]*!|\$\{[^}$\r\n]*\}/g, '')
+    .replace(/["'\\\x60^]/g, '').replace(/\{[0-9][^{}]*\}/g, '')
+    .replace(/-(?:f|join)\b/gi, '').replace(/[^a-z0-9-]/gi, '');
+}
+function sentinelText(template, word, control) {
+  const values = { word, head: word.slice(0, 2), tail: word.slice(2), nul: control };
+  return template.replace(/\{(word|head|tail|nul)\}/g, (_, key) => values[key]);
+}
+
+test('source sentinels preserve the closed legacy classification and ToolGate family', t => {
+  const ctx = fixture(t), before = snapshot(ctx.dir), api = evidenceProjection();
+  const model = matrix.evidence_boundary_model, closed = model.sentinel_transforms, counts = closed.expected_rows;
+  assert.deepEqual(api.CANDIDATE_MACHINES.map(row => row.word), closed.words);
+  let rows = 0, reviewRows = 0, spawns = 0, queueAccesses = 0;
+  const failures = [], originals = {};
+  const resolver = new ContinuationResolver({ environment: ctx.environment,
+    spawn() { spawns += 1; assert.fail('sentinel source cannot acquire native metadata'); } });
+  const guard = new gate.ToolGate({ registryOptions: ctx.options, environment: ctx.environment,
+    stateReader: () => ({ state: 'DISABLED', rule: 'R1' }), continuationResolver: resolver });
+  for (const name of ['readFileSync', 'readdirSync', 'statSync', 'lstatSync', 'existsSync']) {
+    originals[name] = fs[name]; fs[name] = function(file, ...args) {
+      if (String(file).includes(gate.HELD_BASENAME)) { queueAccesses += 1; throw Error('SYNTHETIC_QUEUE_ACCESS'); }
+      return originals[name].call(this, file, ...args);
+    };
+  }
+  try {
+    for (const [wordIndex, word] of closed.words.entries()) for (const count of closed.nul_counts)
+      for (const shape of closed.shapes) for (const selected of model.shells) for (const tool_name of ['Bash', 'PowerShell']) {
+        const text = sentinelText(shape.template, word, String.fromCharCode(0).repeat(count));
+        const input = { ...shell(ctx, text), tool_name, tool_input: { command: text, ...(selected === null ? {} : { shell: selected }) } };
+        const expected = shape.expected[wordIndex], status = parse(text, input).status, denied = Boolean(guard.decide(input)?.deny);
+        if (status !== expected || denied !== (expected === 'UNKNOWN')) failures.push({ shape: shape.id, word, count, selected, tool_name, expected, status, denied });
+        rows += 1; if (!shape.id.endsWith('-join-reversal')) reviewRows += 1;
+      }
+  } finally { for (const name of Object.keys(originals)) fs[name] = originals[name]; }
+  assert.equal(rows, counts.sentinel); assert.equal(reviewRows, counts.original_review);
+  assert.equal(spawns, 0); assert.equal(queueAccesses, 0); assert.deepEqual(snapshot(ctx.dir), before);
+  t.diagnostic(JSON.stringify({ sentinelRows: rows, originalReviewRows: reviewRows, failures: failures.length,
+    lostRefusals: failures.filter(row => row.expected === 'UNKNOWN').length,
+    extraRefusals: failures.filter(row => row.expected === 'NOT_CONTINUATION').length, spawns, queueAccesses }));
+  assert.deepEqual(failures, [], 'original source controls must not create consuming syntax');
+});
+
+test('source sentinel projection preserves every consuming stage and UTF-16 code unit', t => {
+  const api = evidenceProjection(), closed = matrix.evidence_boundary_model.sentinel_transforms, counts = closed.expected_rows;
+  const controls = closed.control_code_points.map(point => String.fromCodePoint(point));
+  const neighbours = [...closed.shapes.map(row => [row.id, row.template]), ...closed.neighbours];
+  let unproved = 0, codeUnits = 0, qualified = 0, withdrawn = 0;
+  for (const word of closed.words) for (const control of controls) for (const [id, template] of neighbours)
+    for (const profile of ['common', 'powershell']) {
+      const text = sentinelText(template, word, control);
+      assert.deepEqual(api.pythonBindingBarriers(text, profile), [], id);
+      assert.equal(api.constructionFragments(text, profile), legacyConstructionProjection(text), id); unproved += 1;
+    }
+  for (let code = 0; code <= 65535; code += 1) for (const shape of closed.shapes.slice(0, 2)) {
+    const control = String.fromCharCode(code), text = sentinelText(shape.template, 'codex', control);
+    assert.equal(text.split('').join(''), text, 'identity includes lone surrogates');
+    assert.equal(api.constructionFragments(text, 'common'), legacyConstructionProjection(text), shape.id); codeUnits += 1;
+  }
+  const stdin = body => "@'\n" + body + "\n'@ | python -";
+  const placements = [(body, word) => body + '\ntext="' + word + '"', (body, word) => body + '\n# ' + word,
+    (body, word) => body + '\ntext="{0' + word + '}"', (body, word) => body + '\ntext="{ ' + word + '}"'];
+  for (const body of closed.qualified_bodies) for (const word of closed.words) for (const place of placements)
+    for (const profile of ['common', 'powershell']) {
+      const text = stdin(place(body, word)), spans = api.pythonBindingBarriers(text, profile);
+      assert.ok(spans.length); assert.equal(api.constructionFragments(text, profile).replace(/\0/g, ''), legacyConstructionProjection(text));
+      qualified += 1;
+    }
+  for (const control of controls.filter(c => !['\t', '\n', '\r'].includes(c)))
+    for (const place of ['before', 'after', 'header', 'string', 'comment']) for (const profile of ['common', 'powershell']) {
+      const body = place === 'before' ? control + '\nfor k in items:\n    pass' : place === 'after' ? 'for k in items:\n    pass' + control
+        : place === 'header' ? 'for ' + control + 'k in items:\n    pass' : place === 'string' ? 'for k in items:\n    text="' + control + '"'
+          : 'for k in items:\n    # ' + control;
+      const text = stdin(body); assert.deepEqual(api.pythonBindingBarriers(text, profile), []);
+      assert.equal(api.constructionFragments(text, profile), legacyConstructionProjection(text)); withdrawn += 1;
+    }
+  // Reuse the hostile-input set. CRLF and horizontal tabs remain permitted proof;
+  // every source string still equals the legacy letters after generated barriers.
+  let hostileRows = 0;
+  for (const shape of [...hostile.cases(['continued-lines', 'invisible', 'indents', 'large-input'], ['shell', 'text']),
+    ...hostile.variants('for k in items:\n    pass')]) {
+    const text = stdin(shape.text), projection = api.constructionFragments(text, 'common');
+    assert.equal(projection.replace(/\0/g, ''), legacyConstructionProjection(text), shape.id); hostileRows += 1;
+  }
+  assert.equal(unproved, counts.unproved_projection); assert.equal(codeUnits, counts.code_units);
+  assert.equal(qualified, counts.qualified_projection); assert.equal(withdrawn, counts.proof_withdrawal);
+  t.diagnostic(JSON.stringify({ unproved, codeUnits, qualified, withdrawn, hostileRows }));
+});
+
+test('source sentinel ablations expose early deletion, unowned barriers and missing proof', t => {
+  const closed = matrix.evidence_boundary_model.sentinel_transforms, counts = closed.expected_rows;
+  const api = evidenceProjection(), input = { tool_input: {} }; let lost = 0, extra = 0;
+  const replace = (source, before, after) => { assert.ok(source.includes(before), 'ablation anchor'); return source.replace(before, after); };
+  const retainNul = source => replace(source,
+    '.replace(barriers.length ? /[^a-z0-9\\x00-]/gi : /[^a-z0-9-]/gi,\'\');', '.replace(/[^a-z0-9\\x00-]/gi,\'\');');
+  const early = evidenceProjection(source => retainNul(replace(source,
+    "chars=text.split('')", "chars=[...text].map(c=>c==='\\0'?'':c)")));
+  // No-proof partition only: this freezes the rejected early-source-NUL deletion.
+  for (const [wordIndex, word] of closed.words.entries()) for (const count of closed.nul_counts) for (const shape of closed.shapes) {
+    const text = sentinelText(shape.template, word, String.fromCharCode(0).repeat(count));
+    const ablated = early.parse(text, input).status, expected = shape.expected[wordIndex];
+    if (expected === 'UNKNOWN' && ablated === 'NOT_CONTINUATION') lost += 12;
+    if (expected === 'NOT_CONTINUATION' && ablated === 'UNKNOWN') extra += 12;
+  }
+  assert.equal(lost, counts.early_deletion_lost_refusals); assert.equal(extra, counts.early_deletion_extra_refusals);
+  const unowned = evidenceProjection(retainNul);
+  const split = '(co' + String.fromCharCode(0) + 'dex)';
+  assert.equal(api.parse(split, input).status, 'UNKNOWN'); assert.equal(unowned.parse(split, input).status, 'NOT_CONTINUATION');
+  const noProof = evidenceProjection(source => replace(source, 'const barriers=pythonBindingBarriers(text, shell),chars=', 'const barriers=[],chars='));
+  const binding = "@'\nfor key in items:\n    pass\n'@ | python -";
+  assert.equal(api.parse(binding, input).status, 'NOT_CONTINUATION'); assert.equal(noProof.parse(binding, input).status, 'UNKNOWN');
+  t.diagnostic(JSON.stringify({ ablations: 3, lostRefusals: lost, extraRefusals: extra,
+    withdrawalReason: 'Restore exact legacy classification after early deletion invented consuming syntax' }));
+});
+
 test('source-hook construction delta uses production defaults and preserves every queue mode', t => {
   const model = matrix.evidence_boundary_model, trace = fixture(t);
   const preload = path.join(trace.dir, 'queue-trap.cjs'), traceFile = path.join(trace.dir, 'queue-trace.json');
@@ -1089,6 +1207,60 @@ process.on('exit', () => fs.writeFileSync(process.env.SYNTHETIC_QUEUE_TRACE, JSO
     stateReaderInjected: false, resolverInjected: false, queueAccesses: 0, byteAndDirectoryEquality: true, nativeDispatchExercised: false }));
 });
 
+
+test('source-hook sentinel delta uses both production defaults with exact non-mutation', t => {
+  const model = matrix.evidence_boundary_model, trace = fixture(t), ctx = fixture(t);
+  const preload = path.join(trace.dir, 'sentinel-queue-trap.cjs'), traceFile = path.join(trace.dir, 'sentinel-queue-trace.json');
+  fs.writeFileSync(preload, String.raw`'use strict';
+const fs = require('node:fs'); let accesses = 0;
+for (const name of ['readFileSync', 'readdirSync', 'statSync', 'lstatSync', 'existsSync']) {
+  const original = fs[name]; fs[name] = function(file, ...args) {
+    if (String(file).includes('held-prompts.v1.json')) { accesses += 1; throw Error('SYNTHETIC_QUEUE_ACCESS'); }
+    return original.call(this, file, ...args);
+  };
+}
+process.on('exit', () => fs.writeFileSync(process.env.SYNTHETIC_QUEUE_TRACE, JSON.stringify({ accesses })));
+`);
+  const env = { ...process.env, ...ctx.environment, GIT_CONFIG_NOSYSTEM: '1',
+    GIT_CONFIG_GLOBAL: path.join(ctx.home, 'absent-gitconfig'), SYNTHETIC_QUEUE_TRACE: traceFile };
+  for (const key of Object.keys(env)) if (/^(?:TOOLKIT_|CLAUDE_CODE_REMOTE|CLAUDE_ENV_FILE|NODE_OPTIONS)/.test(key)) delete env[key];
+  for (const [cwd, name] of [[ctx.caller, 'caller'], [ctx.other, 'held']]) {
+    for (const args of [['init', '--quiet'], ['remote', 'add', 'origin', 'https://github.com/example-owner/' + name + '.git']]) {
+      const result = spawnSync('git', ['-c', 'core.fsmonitor=false', '-C', cwd, ...args], { env, encoding: 'utf8', windowsHide: true, timeout: 10000 });
+      assert.equal(result.status, 0, 'synthetic fixture git: ' + result.stderr);
+    }
+  }
+  gate.writeGovernanceDecision(ctx.caller, 'enable', { registryOptions: ctx.options });
+  const hooks = [
+    { name: 'claude', file: 'toolkit-governance-hook.cjs', args: ['--event', 'PreToolUse'], deniedExit: 0 },
+    { name: 'codex', file: 'toolkit-codex-helper-hook.cjs', args: [], deniedExit: 2 },
+  ];
+  let calls = 0, restoredRefusals = 0, withdrawnExtraRefusals = 0;
+  for (const hook of hooks) for (const tool_name of ['Bash', 'PowerShell']) for (const selected of model.shells)
+    for (const [id, template, expected] of model.sentinel_transforms.adapter_cases) {
+      const command = sentinelText(template, 'codex', String.fromCharCode(0));
+      const before = snapshot(ctx.dir), input = { ...shell(ctx, command), tool_name,
+        tool_input: { command, ...(selected === null ? {} : { shell: selected }) } };
+      const result = spawnSync(process.execPath, ['--require', preload, path.join(root, 'repo/scripts', hook.file), ...hook.args], {
+        input: JSON.stringify(input), env, cwd: ctx.caller, encoding: 'utf8', windowsHide: true, timeout: 10000, maxBuffer: 256 * 1024,
+      });
+      const denied = expected === 'UNKNOWN', label = hook.name + '/' + id + '/' + selected + '/' + tool_name;
+      assert.equal(result.status, denied ? hook.deniedExit : 0, label + ': exit');
+      const output = result.stdout.trim() ? JSON.parse(result.stdout) : {};
+      assert.equal(output.hookSpecificOutput?.permissionDecision === 'deny', denied, label);
+      assert.equal(result.stdout, denied ? JSON.stringify(output) + '\n' : hook.name === 'codex' ? '' : '{}\n', label + ': exact stdout');
+      assert.equal(result.stderr, denied && hook.name === 'codex' ? output.hookSpecificOutput.permissionDecisionReason + '\n' : '', label + ': exact stderr');
+      assert.doesNotMatch(result.stdout + result.stderr, /synthetic held fixture|synthetic fixture/);
+      assert.equal(JSON.parse(fs.readFileSync(traceFile)).accesses, 0, label + ': queue trap');
+      assert.deepEqual(snapshot(ctx.dir), before, label + ': bytes and directories unchanged');
+      calls += 1; if (id === 'numeric-opener' || id === 'expansion-opener') restoredRefusals += 1;
+      if (id.endsWith('-join-reversal')) withdrawnExtraRefusals += 1;
+    }
+  assert.equal(calls, 168); assert.equal(restoredRefusals, 48); assert.equal(withdrawnExtraRefusals, 48);
+  t.diagnostic(JSON.stringify({ calls, restoredRefusals, withdrawnExtraRefusals, productionDefault: true,
+    stateReaderInjected: false, resolverInjected: false, candidateModulePreloaded: false,
+    queueAccesses: 0, byteAndDirectoryEquality: true, nativeDispatchExercised: false }));
+});
 
 test('new evidence allowances retain every raw guard without reading a held queue or acquiring metadata', t => {
   const ctx = fixture(t), before = snapshot(ctx.dir);

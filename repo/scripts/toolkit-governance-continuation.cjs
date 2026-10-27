@@ -184,12 +184,15 @@ function pythonBindingBarriers(text, shell) {
   return barriers;
 }
 function constructionFragments(text, shell) {
-  const chars=[...text].map(c=>c==='\0'?'':c);
-  for(const span of pythonBindingBarriers(text, shell))for(let i=span.start;i<span.end;i++)chars[i]='\0';
+  const barriers=pythonBindingBarriers(text, shell),chars=text.split('');
+  // Proof excludes source NUL; otherwise preserve every original code unit until
+  // the legacy consuming transforms finish, then discard controls as before.
+  for(const span of barriers)for(let i=span.start;i<span.end;i++)chars[i]='\0';
   const shadow=chars.join('').replace(/[\\\x60^]\r?\n/g,'')
     .replace(/%[^%\r\n]*%|![^!\r\n]*!|\$\{[^}$\r\n]*\}/g,'')
     .replace(/["'\\\x60^]/g,'');
-  return formatParts(shadow).filter(part=>part!==null).join('').replace(/-(?:f|join)\b/gi,'').replace(/[^a-z0-9\x00-]/gi,'');
+  return formatParts(shadow).filter(part=>part!==null).join('').replace(/-(?:f|join)\b/gi,'')
+    .replace(barriers.length ? /[^a-z0-9\x00-]/gi : /[^a-z0-9-]/gi,'');
 }
 function broadVisible(text, executableScript = false, shell = null) {
   const direct = (/\bclaude(?:-code)?(?:\.(?:exe|cmd|ps1))?\b/i.test(text)
