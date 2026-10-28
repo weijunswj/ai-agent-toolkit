@@ -36,6 +36,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const governance = require('./toolkit-governance-state.cjs');
+const { ContinuationResolver } = require('./toolkit-governance-continuation.cjs');
 
 const CAPABILITY = governance.GOVERNANCE_CAPABILITY;
 const HELD_BASENAME = 'held-prompts.v1.json';
@@ -92,10 +93,6 @@ function answerCommand(text) {
     || (/\b(?:claude|codex)\b/i.test(text) && /toolkit governance (?:enable|disable|decline)\b/i.test(text))
     || (text.split(/[;&|\r\n]+/).some(part => HOST_COMMAND.test(part) && !HOST_SUBCOMMAND.test(part)) && shortAnswerWord(text));
 }
-// A command that resumes, continues or forks a host session (Claude Code `--resume`, `-r`,
-// `--continue`, `-c`, `--session-id`; Codex `resume` or `fork`). While any message is held an agent
-// may not resume one; a resume that gets past this text check is a new run and cannot answer anyway.
-const HOST_RESUME = /(?:^|[\s;&|()`'"\\/])claude(?:-code)?(?:\.exe|\.cmd|\.ps1)?(?=\s)[^\n;&|]*?\s(?:--resume|-r|--continue|-c|--session-id|--fork-session)(?=$|[\s=])|(?:^|[\s;&|()`'"\\/])codex(?:\.exe|\.cmd|\.ps1)?\s+(?:exec\s+)?(?:resume|fork)(?=$|\s)/im;
 const USER_STATE_PATH = /[\\/]\.ai-agent-toolkit[\\/]user-state(?:[\\/]|$)/i;
 // In a held repository every tool is refused but these: ToolSearch only loads tool definitions (the
 // card's among them), and AskUserQuestion runs only as Toolkit's card (ToolGate).
@@ -390,17 +387,6 @@ class HeldPrompts {
     return Array.isArray(list) && list.some(entry => entry && entry.session_id === sessionId && entry.epoch === session && (entry.repository_mark || null) === repository);
   }
 
-  // The folders of the repositories with something held: { repositoryId: root or null }.
-  heldRoots() {
-    const roots = {};
-    for (const [id, list] of Object.entries(this.#read().repositories)) {
-      if (!Array.isArray(list) || list.length === 0) continue;
-      const root = list.map(entry => entry && entry.root).find(value => typeof value === 'string' && value !== '');
-      roots[id] = root || null;
-    }
-    return roots;
-  }
-
   // Keeps the prompt with the session and run that sent it and the repository's folder (trimmed to
   // a size cap; the oldest go first past the count cap) and returns the number now held.
   add(repositoryId, prompt, sessionId = null, marks = {}, root = null) {
@@ -667,7 +653,7 @@ function unreadableText(state, registryOptions) {
 
 // What the agent does in an ENABLED repository whose setup is not finished (the governed block or the
 // binding is missing): right after the user's yes, and at every session start until both land.
-const SETUP_ASK = 'GitHub governance setup is not finished here. Before other work, ask the user in one message: (1) the private evidence store, an existing private repository or a new `TRANSPORT-<repository>` one, separate from this repository; (2) the parent issue, an existing number or a new one; (3) confirm the defaults: record and writer prefix `INT-<SHORT>-`, required checks from the default branch protection, store branch `main`; (4) only if the repository is private, and never skipped then: whether to turn on GitHub\'s paid Secret Protection and Code Security, saying plainly that they are paid GitHub features billed per active committer each month, need GitHub Team or Enterprise Cloud, and stay off unless the user says on (record only the user\'s own answer, `"paid_security": "off"` or `"on"`, in the binding; if they have not answered, leave it out and never write "off" for them). The free security settings need no question: they are on by default and `toolkit governance security` turns them on once governance is enabled. Then use `repository-agent-rules` to add the governed block and `.github/toolkit-programme.json` in one pull request for the user to merge. If the user says not now, carry on under the global rules and ask again next session. Never act as the user: do not answer any of these questions yourself.';
+const SETUP_ASK = 'GitHub governance setup is not finished here. Before other work, ask the user in one message: (1) the private evidence store, an existing private repository or a new `TRANSPORT-<repository>` one, separate from this repository; (2) the parent issue, an existing number or a new one; (3) confirm the defaults: record and writer prefix `INT-<SHORT>-`, required checks from the default branch protection, store branch `main`. The free security settings need no question: they are on by default and `toolkit governance security` turns them on once governance is enabled; Toolkit never turns on a GitHub feature that needs billing. Then use `repository-agent-rules` to add the governed block and `.github/toolkit-programme.json` in one pull request for the user to merge. If the user says not now, carry on under the global rules and ask again next session. Never act as the user: do not answer any of these questions yourself.';
 
 function replayContext(state, prompts, { notNow = false, elsewhere = false } = {}) {
   const label = state.state === 'ENABLED' && state.materials_complete === false ? 'ENABLED (materials incomplete)' : state.state;
@@ -992,11 +978,11 @@ function sessionIdOf(input) {
 
 // The host-neutral PreToolUse decision: null (no decision) or { deny: reason }.
 class ToolGate {
-  #gate; #held; #epochs; #notes; #registryOptions;
+  #gate; #continuation; #epochs; #notes; #registryOptions;
 
-  constructor({ registryOptions = {}, stateReader = null, now } = {}) {
+  constructor({ registryOptions = {}, stateReader = null, now, environment = process.env, continuationResolver = null } = {}) {
     this.#gate = new GovernanceGate({ registryOptions, stateReader, now });
-    this.#held = new HeldPrompts({ registryOptions, now });
+    this.#continuation = continuationResolver || new ContinuationResolver({ environment });
     this.#epochs = new SessionEpochs({ registryOptions, now });
     this.#notes = new PickerNotes({ registryOptions, now });
     this.#registryOptions = registryOptions;
@@ -1051,14 +1037,29 @@ class ToolGate {
     if (SHELL_TOOLS.test(tool)) {
       const text = toolText(input);
       const cwd = path.resolve(String(input.cwd || process.cwd()));
-      if (HOST_RESUME.test(text) && this.#anyHeld()) {
-        return { deny: `Toolkit: a message is held for a repository's governance answer, so no Claude or Codex session may be resumed, continued or forked from here until the user answers in their own chat. ${NEVER_OWNER}` };
-      }
-      const targets = [...new Set([...commandTargets(text, cwd), ...absoluteTargets(text)])];
+      const args = input.tool_input || {};
+      const workdirs = [args.workdir, args.cwd].filter(value => typeof value === 'string' && value);
+      const resolvedWorkdirs = workdirs.map(value => path.resolve(cwd, value));
+      const targets = [...new Set([...resolvedWorkdirs, ...commandTargets(text, resolvedWorkdirs[0] || cwd), ...absoluteTargets(text)])];
       if (targets.some(target => this.#verdict(target, sessionId)?.hold)) {
         return { deny: `${HOST_COMMAND.test(text)
           ? "Toolkit: this command starts a Claude or Codex session in a repository that is waiting for the user's governance answer, so it is refused."
           : "Toolkit: this command works in a repository that is waiting for the user's governance answer, so it is refused."} Ask the user to answer in their own chat first; do not try to work around it. ${NEVER_OWNER}` };
+      }
+      // Generic owner/state/current-folder/path guards above always run first. A continuation
+      // starts a new run: the caller's session-specific 'later' never admits its targets.
+      let continuation;
+      try { continuation = this.#continuation.resolve(text, input); } catch { continuation = { status: 'UNKNOWN' }; }
+      if (continuation?.status === 'UNKNOWN') return { deny: `Toolkit: the selected session's repository could not be verified, so this continuation is refused. Use a supported literal selector whose target can be verified. ${NEVER_OWNER}` };
+      if (continuation?.status !== 'NOT_CONTINUATION') {
+        if (continuation?.status !== 'VERIFIED' || !Array.isArray(continuation.targets) || continuation.targets.length === 0
+          || continuation.targets.some(target => {
+            if (typeof target !== 'string' || !path.isAbsolute(target)) return true;
+            const targetVerdict = this.#verdict(target, null);
+            return targetVerdict?.hold !== false || !['ENABLED', 'DISABLED'].includes(targetVerdict.state?.state);
+          })) {
+          return { deny: `Toolkit: a continuation target is waiting for its governance answer or its state could not be verified, so this continuation is refused. The user answers for that repository in their own chat. ${NEVER_OWNER}` };
+        }
       }
     }
     if (EDIT_TOOLS.test(tool) && editTargets(input).some(target => this.#verdict(path.dirname(resolveTarget(input, target)), sessionId)?.hold)) {
@@ -1072,13 +1073,6 @@ class ToolGate {
     try { return this.#gate.evaluate(target, { sessionId }); } catch { return null; }
   }
 
-  // Whether a message is held for a repository that is still waiting for its answer (one decided
-  // since no longer counts); a store that cannot be read, or an entry without its folder, counts as yes.
-  #anyHeld() {
-    let roots;
-    try { roots = this.#held.heldRoots(); } catch { return true; }
-    return Object.values(roots).some(root => root === null || this.#verdict(root, null)?.hold !== false);
-  }
 }
 
 // ---- session line -----------------------------------------------------------------------------

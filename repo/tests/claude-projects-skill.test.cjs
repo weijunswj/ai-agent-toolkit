@@ -52,7 +52,7 @@ test('no plugin payload or skills folder reaches the Projects controller skill',
 
 test('Projects wires managed instructions, promises and fresh scheduled sessions to controller law', () => {
   const text = bundle();
-  assert.match(text, /^Version: 2026-10-26\.6$/m);
+  assert.match(text, /^Version: 2026-10-26\.7$/m);
   // The check-in posts the skill card itself; the coordinator lists the Save tap, re-upload only when the card failed.
   assert.match(text, /`SKILL BEHIND`: the account copy is an older Toolkit revision\. With "card posted", the check-in posted the skill update card in its thread: put "tap Save on the skill card"/);
   assert.match(text, /keep that thread open \(never resolve it in the hourly pass, even after the check-in moves to a new home thread\) until the owner saves/);
@@ -92,7 +92,9 @@ test('Projects wires managed instructions, promises and fresh scheduled sessions
   assert.match(text, /Every Toolkit scheduled task is bound to its own home thread \(`<PROJECT>: <task name>`\)[^\n]*A fresh session per run is the fallback, only where a task can't be bound/);
   assert.doesNotMatch(text, /with no bound thread, except the hourly nudge|It is a fresh session per run and read-only/);
   assert.match(text, /Fresh-session routines cannot be created from a device-linked/);
-  assert.match(text, /cheapest that does the task well, starting one notch higher and stepping down after clean runs/);
+  assert.match(text, /Model and effort: the cheapest step of the `agent-cost-control` ladder that can do the task \(small, mid or top tier; medium effort at least\), set on purpose, never left on a default/);
+  assert.match(text, /\| raised <tier>\/<effort> <YYYY-MM-DD>: <reason>\]/);
+  assert.match(text, /a template update never lowers a recorded raise/);
   assert.match(text, /Write these requirements into every task prompt/);
   for (const required of ['capped short message to the coordinator with retry', 'full report to a file',
     'only a fresh-session run resolves its own run thread after delivery', 'ALL unresolved threads and project-chat posts',
@@ -188,7 +190,32 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.match(text, /`setup-inventory\.json` beside this skill/);
   // Setup asks for the coordinator's model and effort only.
   assert.match(text, /Ask for one setting only: in the project's model settings, the \*\*coordinator\*\* gets the strongest available Opus model, effort \*\*High\*\*/);
-  assert.match(text, /Non-gate threads get High, set on the thread when it starts/);
+  // Cheapest first: every non-gate thread starts on the ladder's cheapest fitting step, never on High by default.
+  assert.doesNotMatch(text, /Non-gate threads get High|one notch higher/);
+  assert.match(text, /\*\*Set model and effort explicitly on every thread you start\.\*\* Gates get the pinned stack route/);
+  assert.match(text, /cheapest step of the `agent-cost-control` ladder that fits its brief \(small, mid or top tier; medium effort at least\)/);
+  // Restarting on the next step up is for non-gate threads; gates keep their pinned routes.
+  assert.match(text, /When a non-gate thread's output falls short \(a missed check, a wrong fact, a shallow review\), restart that work on the next step up/);
+  // The skill itself keeps gate sessions and the helpers a G0 or G1 lead launches off the ladder.
+  const costSkill = fs.readFileSync(path.join(__dirname, '../../skills/agent-cost-control/SKILL.md'), 'utf8');
+  assert.match(costSkill, /\*\*Gates are outside the ladder\.\*\* G0, G1, G2, reviewers and the helpers a G0 or G1 lead launches keep the models, effort and routes their gate rules pin\./);
+  assert.match(costSkill, /Gate sessions \(G0, G1, G2, reviewers\) and the helpers a G0 or G1 lead launches follow their gate rules'/);
+  assert.match(costSkill, /A task changes at its next rebuild; a non-gate thread is restarted on the new step\./);
+  // Only host settings that are confirmed are named.
+  assert.doesNotMatch(costSkill, /default_subagent_reasoning_effort/);
+  // One job per thread, automatic rotation with a handoff file, never the coordinator's own thread.
+  assert.match(text, /\*\*One job per non-gate thread; rotate long-lived ones\.\*\* A finished non-gate thread is never reused for new work/);
+  // Gate sessions keep the gate rules' fresh-context rules; the old reuse-after-rename sentence is gone.
+  assert.match(text, /Gate sessions follow the gate rules' fresh-context and recoverable-work rules, never this one/);
+  assert.doesNotMatch(text, /Rename an idle finished non-gate thread before reusing it/);
+  assert.match(text, /scheduled tasks start their home thread on the tier and effort in their prompt's params, which carry any recorded raise/);
+  assert.match(text, /never swap again for the same gap/);
+  assert.match(text, /it writes a handoff file in the shared folder/);
+  assert.match(text, /Never rotate your own coordinator thread/);
+  // Closing: work threads on saved and relayed output, chat reply threads after 6 quiet hours, home threads never.
+  assert.match(text, /A chat reply thread \(the replies under one of your project-chat posts\) also closes on the first pass after 6 hours with no new message in it \(`QUIET-6H`\)/);
+  assert.match(text, /idleness alone never closes a work thread/);
+  assert.match(text, /a task's home thread is never resolved/);
   // Instructions sync applies itself under safeguards.
   for (const required of ['**Apply it yourself, without asking, with these safeguards.**', 'No saved copy, no change.',
     '`--place <file>`', 'under the instructions limit (16,000 characters)', 'restore the saved copy and report',

@@ -1,11 +1,56 @@
 # Toolkit Changelog
 
-## 3.16.0
+## Unreleased
 
 ### Who may do what
 
 - **Merges wait for the user (a tripwire, not a lock):** on Claude Code and Codex, the hooks hold an agent's merge until the user typed a line with "merge" next to the pull request number in their own session, such as "merge 618", "618 merge" or "ok to merge 618". A line with a quote, a question, or one of a fixed list of words for a no, a doubt, a condition, a delay, a report or another kind of merge ("merge main into 618") does not count. This covers `gh pr merge`, the GitHub API merge endpoint and the GitHub connector's merge tool. One approval allows one merge of that pull request in that repository within a day, and the merge must name the head commit it expects. Connector auto-merge, GraphQL merges, the merge queue, branch merges, ref writes and pushes to the default branch are refused when written directly. It reads command text, so it catches mistakes, not a determined agent: wrapped or nested sessions, scripts, files, other HTTP clients and direct commits through the API or the connector's file tools get past it. Agents act as the user on GitHub, so GitHub cannot tell their merges apart; the hard limit is the repository's own rules where it has them (a pull request for the default branch, no force-push, no deletion). Cloud sessions are not covered yet.
 - **Stale plugin copies speak up:** when a session runs an account-synced Toolkit copy that is older than a Toolkit repository in its folder, the session-start message says so and that newer safety hooks do not run, instead of staying silent.
+
+## 3.15.19 (proved binding separators and literal Git operands)
+
+- Restored conservative collapsed continuation evidence for every unproved source byte, including implicit concatenation and joining pipelines. Only a bounded Python for-binding separator in a complete literal PowerShell here-string/stdin transport interrupts the projection; every source word, string, comment and executable neighbour remains inspected. Direct, quoted, template and ordered signals stay independent.
+- Added complete fixed Git operand proofs for add, commit, push, fetch, rev-parse and status. Only proved literal data spans are excluded; executable neighbours, options, operators, exit guards and unsupported stages remain visible.
+- Added anonymous boundary, schema, construction, raw-guard and source-hook tests with exact span and non-mutation checks. Native parsing, target authority and held-queue independence retain their boundaries; installed and actual-operation acceptance remain separate.
+
+## 3.15.18 (multiline and pipeline reader operands)
+
+- Extended fixed literal reader proofs across top-level newline and single-pipe stages while keeping every operator, unproved stage and nested block visible to continuation detection.
+- Added separate literal option-value roles for the five bounded gh run list filters, including its enumerated JSON field tuple. Unknown options, expressions and alternate command forms remain unproved.
+- Composed the same operand spans through one explicitly selected PowerShell literal script transport, preserving exact outer and inner source positions and the existing one-line wrapper behaviour.
+- Added structural, acquisition-schema, hostile-input and source-hook regressions. Native parsing, target authority, generic guards and held-queue independence retain their existing boundaries; installed interception remains a separate acceptance step.
+
+## 3.15.17 (literal reads and shell script operands)
+
+- Fixed ordinary literal reader patterns and Windows file paths being mistaken for continuation commands. Only complete fixed reader schemas receive the data proof; subprocess options, unknown flags and executable syntax remain conservative.
+- Proved reader operands also remain data inside bounded top-level semicolon lists, including Git metadata reads followed by a public Toolkit file read, both directly and inside one qualified PowerShell command wrapper. Every separator and unproved executable segment retains independent detection.
+- Recognised shell command operands are inspected as executable source even when quoted. Proved non-native wrapper executable paths no longer contribute false host evidence; native target verification and every generic guard retain their existing rules.
+- Added operand-role, wrapper, escape and source-hook regressions with synthetic non-mutation checks. Installed interception and ordinary-read replay remain separate acceptance steps.
+
+## 3.15.16 (continuation target isolation)
+
+### Governance continuations
+
+- Both native tool hooks check verified continuation targets without consulting or repairing the account-wide held-message queue. Unrelated, rootless, malformed and unreadable held groups no longer block a proven decided target. Held targets, unreadable target state, owner answers, user-state edits, card/epoch controls and native helper transition restrictions retain their protections.
+- The bounded reader admits exact native Claude transcript-path resumes and directory-filtered Codex `exec`/`e resume --last`. Unknown UUID/name/picker selectors, Claude implicit continue, interactive Codex worktree selection and unsupported shell syntax are refused independently of queue contents. Transcript acquisition returns only directories across a child-process boundary and detects incomplete records, excessive input, path links and file drift.
+- Added the complete compact target-authority model, default-reader and hostile-input tests, plus both source-hook processes crossed with both CLI families in synthetic homes. Source-process results do not qualify installed hooks or desktop dispatch; no installation, real continuation or user-state migration is part of this repair.
+- Plain literal output/grep data and verified native help/version forms retain ordinary-command behaviour. Balanced double quotes protect literal operators; single-quoted operators, shell evaluation/expansion and ambiguous quote forms are refused on both data and selector paths. Help-only exits were checked in disposable native CLI homes without starting sessions.
+- Computed host or selector spellings remain unverified when unsupported syntax leaves recognisable continuation evidence, including addition, arrays, format and join inside data or help-looking commands. Whole-atom prefix recognition preserves evidence across irrelevant quoted arguments, casts, methods and edge whitespace, including mixed fixed-letter format holes. Detection does not evaluate expressions or expand arbitrary-script enforcement.
+
+## 3.15.15 (agent cost control)
+
+### Agent cost control
+
+- **New skill `agent-cost-control`:** every scheduled task, routine, loop, automation, helper, spawned thread and workflow model call starts on the cheapest of three tiers (small, mid, top) that can do its job, with medium effort as the floor and no lowest-effort setting anywhere. A step up needs a written reason kept where the setting lives, a controller proposes the next step at once when output falls short, and a recorded raise survives rebuilds. The skill lists where Claude, Codex, OpenCode-style harnesses, n8n and CI keep their model and effort settings, and how long-running threads rotate with a short handoff file (never the controller's own thread). Coding gates keep their pinned routes.
+- **Global rules:** the Delegation paragraph now says to run each non-gate automation, thread and helper cheapest first at medium effort or above, pointing to the skill for the detail. Gate sessions and the helpers a G0 or G1 lead launches keep their pinned routes. A few nearby sentences are reworded more tightly, and the skipping-delegation sentence drops its "no note is needed" clause, which contradicted the gate contract's exception record for substantial gate work done without delegation; this keeps the global block inside its size budget.
+- **Claude Projects skill (2026-10-26.7):** non-gate threads no longer start on High; they start on the cheapest fitting step, and the brief names the step and any reason. One job per thread, with automatic rotation of long-lived workers. A chat reply thread under a coordinator post now closes after 6 quiet hours (`QUIET-6H`); work threads still close only once their output is saved and relayed, and home threads never. The scheduled-task reference drops "start one notch higher" for the ladder, and the `SCHEDULED TASKS:` memory line takes an optional `raised <tier>/<effort> <date>: <reason>` field that swaps keep.
+- **Task prompts:** `toolkit-projects-tasks.cjs` takes a `model` tier (default small for the hourly nudge and custom tasks, mid for the daily check-in) and an optional `raise_reason`, required above the default tier or above medium effort; `low` effort is refused. RUN SETUP states the tier and effort, and each run flags a `TIER GAP` when it was served something else. The daily check-in reports `model` and `effort` gaps, and the hourly nudge lists `QUIET-6H` resolve candidates and threads due for rotation under **Rotate:**. Prompts rendered before this release still check and refresh: they take their kind's default tier, `low` effort rises to medium, and effort above medium is kept with a reason asking the coordinator to confirm or lower it. A model or effort gap on a fresh-session task is listed as advice only, and a gap the last swap left is reported once, so neither causes a daily swap. Rotation applies to non-gate work only; gate sessions keep the gate rules. Every swap and rebuild first makes the saved params match the task's entry (a recorded raise, or the template's tier at medium effort once a raise is removed), so the prompt sets the right effort itself. A raise reason, in params and in memory alike, is 3 to 200 printable ASCII characters on one line and cannot read as the owner's stop or schedule mark in any case or spacing.
+
+## 3.15.14 (no paid GitHub features)
+
+### GitHub governance
+
+- **No paid GitHub features:** Toolkit never asks about, turns on or reports as drift a GitHub feature that needs billing. Governance setup no longer asks about GitHub Secret Protection or Code Security, `toolkit governance security` and `migrate` never write them, and the check no longer wants a paid-features answer in a private repository's binding. On a private or internal repository secret scanning, push protection and CodeQL show as not applicable (private repository); on a public repository they still turn on by default, as do Dependabot alerts and security updates everywhere. A binding's `paid_security` key is deprecated and ignored: older bindings that carry off or on stay valid and nothing changes, and any other value makes the binding invalid.
 
 ## 3.15.13 (post layout)
 
