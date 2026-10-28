@@ -9,9 +9,9 @@
 
 ### Toolkit CI
 
-- **Test time budgets:** the shard manifest sets 90 seconds per test file on Linux and 120 on Windows, and the `validate` job fails a file over its budget (`check-test-durations.cjs --ci`). A local `npm run validate:all` leaves that one check out and says so.
+- **Test time budgets:** the shard manifest sets 120 seconds per test file on Linux and Windows, and the `validate` job fails a file over its budget (`check-test-durations.cjs --ci`). A local `npm run validate:all` leaves that one check out and says so.
 - **Timing refresh with no AI:** `refresh-shard-timings.cjs` reads the test summaries of the latest green Validate run on `main`, reports untimed files and unbalanced shards, and with `--write` or `--open-pr` records the times and moves files between the named shards.
-- **Continuation tests split:** the continuation test is now four files by area, and its hook cases start a few hook processes at a time, still one process per case, with the no-change snapshot compared around each batch.
+- **Continuation tests split:** the continuation test is now five files, by area and by hook, and its hook cases start a few hook processes at a time, still one process per case, with the no-change snapshot compared around each batch.
 - **Status document:** `VALIDATION-STRATEGY.md` lists the dependency auto-merge and source-watch workflows.
 
 ## 3.16.4 (continuation folder names)

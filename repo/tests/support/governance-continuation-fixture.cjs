@@ -81,7 +81,9 @@ const HOOKS = Object.freeze([
   Object.freeze({ name: 'claude', file: 'toolkit-governance-hook.cjs', args: Object.freeze(['--event', 'PreToolUse']), deniedExit: 0 }),
   Object.freeze({ name: 'codex', file: 'toolkit-codex-helper-hook.cjs', args: Object.freeze([]), deniedExit: 2 }),
 ]);
-const HOOK_CONCURRENCY = Math.max(1, Math.min(4, os.availableParallelism()));
+// At most half the cores: the test runner already runs several files at once, and on a 4-core CI
+// runner four hook processes per file slowed neighbouring test files up to twice their usual time.
+const HOOK_CONCURRENCY = Math.max(1, Math.min(4, Math.floor(os.availableParallelism() / 2)));
 
 // Starts each call as its own node process with its own stdin, a few at a time, and returns
 // { status, stdout, stderr } per call in call order. Like spawnSync, a call over its timeout or
