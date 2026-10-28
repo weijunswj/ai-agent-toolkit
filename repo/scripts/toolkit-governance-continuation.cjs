@@ -1192,7 +1192,11 @@ const RG = { switches: set(['--line-number', '--ignore-case', '--smart-case', '-
   attached: ['--regexp=', '--glob=', '--type=', '--type-not=', '--max-count=', '--max-depth=', '--sort=', '--context=', '--color='],
   cluster: { switches: [...'nilFwvcoSuHNUL'], valued: [...'egtTABCm'] }, dashdash: true, nodash: true };
 // Fixed Toolkit entry points by exact basename; options and values are data to the script.
-const TOOLKIT_SCRIPTS = set(['setup-toolkit.cjs', 'toolkit-governance.cjs', 'toolkit-risk-tier.cjs', 'toolkit-install-health.cjs']);
+// Names to recognise in a command only; this module never loads or starts them.
+const TOOLKIT_SCRIPTS = set([
+  'setup-toolkit.cjs',
+  'toolkit-governance.cjs', 'toolkit-risk-tier.cjs', 'toolkit-install-health.cjs',
+]);
 // Coreutils without any option that runs a program. sort is listed separately below.
 const COREUTILS = set(['head', 'tail', 'wc', 'uniq', 'cut', 'touch', 'stat', 'realpath', 'basename', 'dirname']);
 const POSIX_FILE = set(['ls', 'cat', 'rm', 'mkdir', 'cp', 'mv', 'cd', 'pwd', 'echo']);
