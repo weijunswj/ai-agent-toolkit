@@ -46,8 +46,11 @@ const TRANSPORT_OVERRIDES = '^(core\\.sshcommand|core\\.gitproxy|remote\\.origin
 // GIT_CONFIG_PARAMETERS) that whoever runs the refresh can set. The user's global and system config
 // are not held here.
 const HELD_SCOPES = Object.freeze(['local', 'worktree', 'command']);
-// Environment that changes the transport or the config for every git call of the refresh.
-const HELD_ENVIRONMENT = Object.freeze(['GIT_SSH', 'GIT_SSH_COMMAND', 'GIT_CONFIG_PARAMETERS', 'GIT_CONFIG_COUNT']);
+// Environment that changes the config for every git call of the refresh, and, for an ssh origin only,
+// the ssh command (GIT_SSH and GIT_SSH_COMMAND do nothing for https, and Plink or TortoiseGit setups
+// set them for good). The rest of the user's environment is trusted.
+const HELD_CONFIG_ENVIRONMENT = Object.freeze(['GIT_CONFIG_PARAMETERS', 'GIT_CONFIG_COUNT']);
+const HELD_SSH_ENVIRONMENT = Object.freeze(['GIT_SSH', 'GIT_SSH_COMMAND']);
 const NO_HOOKS_DIR = 'no-hooks';
 
 // A branch name git would accept, kept to plain characters: no empty, dot-led or .lock part.
@@ -88,7 +91,7 @@ function parseSymref(text) {
 // remote.origin.url). git's own origin also follows url.<x>.insteadOf, [include] files and
 // config.worktree, so the URL git will actually use is checked first, and neither the repository's
 // own config nor command-scope config may carry a transport override (TRANSPORT_OVERRIDES) that would
-// fetch from somewhere else behind the same URL, nor may the environment (HELD_ENVIRONMENT): any of
+// fetch from somewhere else behind the same URL, nor may the environment (HELD_CONFIG_ENVIRONMENT, and HELD_SSH_ENVIRONMENT for an ssh origin): any of
 // these is held as 'remote-redirected' and nothing is fetched (A1). The fetch runs with hooks pointed
 // at `hooksDir`, an empty folder the refresh owns, so no repository hook can move the tracking ref,
 // and the ref must then be the commit the remote itself reported.
@@ -96,13 +99,15 @@ function readDefaultBranchBinding(root, { runGit = defaultRunGit, timeout = GIT_
   const git = args => {
     try { return runGit(args, { cwd: root, timeout }); } catch { return { status: null, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) }; }
   };
-  if (HELD_ENVIRONMENT.some(name => typeof environment[name] === 'string' && environment[name] !== '' && !(name === 'GIT_CONFIG_COUNT' && environment[name] === '0'))) return { status: 'unknown', error: 'remote-redirected' };
+  const set = name => typeof environment[name] === 'string' && environment[name] !== '' && !(name === 'GIT_CONFIG_COUNT' && environment[name] === '0');
+  if (HELD_CONFIG_ENVIRONMENT.some(set)) return { status: 'unknown', error: 'remote-redirected' };
   if (!emptyFolder(hooksDir)) return { status: 'unknown', error: 'hooks-unguarded' };
   const effective = git(['ls-remote', '--get-url', 'origin']);
   if (effective.status !== 0) return { status: 'unknown', error: 'remote-unreachable' };
   const resolved = validateRemoteIdentity(effective.stdout.toString('utf8').trim());
   // The same repository spelt another way (https, ssh, with or without .git) is the same origin.
   if (!expectedRemote || !resolved.valid || repositoryIdForCanonicalRemote(resolved.canonical) !== repositoryIdForCanonicalRemote(expectedRemote)) return { status: 'unknown', error: 'remote-redirected' };
+  if (/^(?:ssh|scp):\/\//.test(resolved.canonical) && HELD_SSH_ENVIRONMENT.some(set)) return { status: 'unknown', error: 'remote-redirected' };
   // Exit 1 is "no such setting"; anything else that is not a clean 0 cannot be shown safe.
   const overrides = git(['config', '--show-scope', '--get-regexp', TRANSPORT_OVERRIDES]);
   if (overrides.status !== 0 && overrides.status !== 1) return { status: 'unknown', error: 'remote-redirected' };
@@ -152,6 +157,22 @@ function removeKilledFetchLock(git, root, tracking, started) {
     if (stat.isFile() && stat.mtimeMs >= started - 1000) fs.rmSync(lock, { force: true });
   } catch { /* nothing to remove */ }
 }
+
+// Why a refresh kept the last read, in plain words for `status`, or null when there is nothing to say.
+const REFRESH_REASONS = Object.freeze({
+  'remote-redirected': 'git would fetch origin from somewhere else (a URL rewrite, or a transport, proxy or TLS override in this repository\'s git config, git -c or GIT_CONFIG_* variables, or GIT_SSH for an ssh origin), so the merged binding was not read',
+  'remote-unreachable': 'GitHub could not be reached (offline?)',
+  'fetch-failed': 'the default branch could not be fetched',
+  'default-branch-unknown': 'the remote did not say which branch is its default',
+  'ref-moved': 'the default branch moved while it was read; it is read again next time',
+  'hooks-unguarded': 'Toolkit could not prepare its empty hooks folder, so it did not fetch',
+  'commit-unreadable': 'the fetched commit could not be read',
+  'tree-unreadable': 'the fetched commit could not be read',
+  'blob-unreadable': 'the binding file could not be read',
+  'cache-unwritable': 'this computer\'s cache of the read could not be written',
+  offline: 'governance reads are switched off here (a test run or TOOLKIT_GOVERNANCE_OFFLINE=1)',
+});
+function refreshReason(error) { return Object.hasOwn(REFRESH_REASONS, error) ? REFRESH_REASONS[error] : null; }
 
 // Atomic write of one cache entry; returns the entry. Throws on a write failure.
 function writeCache(registryPath, entry) {
@@ -234,5 +255,6 @@ module.exports = Object.freeze({
   readBindingCache,
   writeCache,
   isFresh,
+  refreshReason,
   defaultRunGit,
 });

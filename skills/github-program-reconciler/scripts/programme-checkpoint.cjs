@@ -183,11 +183,61 @@ function deadlineTransport(deps) {
 // the binding merged on the default branch). A state that
 // cannot be read, or a copy without the state module, counts as off. `deps.governanceState` is for tests.
 function githubGovernanceOn(repoRoot, deps = {}) {
+  const current = governanceStateOf(repoRoot, deps);
+  return Boolean(current) && current.state === 'ENABLED' && current.programme_records_bind === true;
+}
+
+// The governance state for the repository, or null when it cannot be read (counts as off).
+function governanceStateOf(repoRoot, deps = {}) {
   try {
     const read = deps.governanceState || require('../../../repo/scripts/toolkit-governance-state.cjs').governanceState;
-    const current = read(repoRoot);
-    return current.state === 'ENABLED' && current.programme_records_bind === true;
-  } catch { return false; }
+    return read(repoRoot);
+  } catch { return null; }
+}
+
+// ---- offline queue ----------------------------------------------------------------------------------
+//
+// When governance is on but records cannot be written yet (the merged binding was last read over 24
+// hours ago or not at all, or GitHub cannot be reached), the turn's facts and return block are kept in
+// a queue next to the session binding, in Toolkit's own user-state, never the repository. The next
+// turn end where records bind and the store answers applies them in order before its own (the
+// journal's return IDs make a replay idempotent) and deletes the queue. Governance confirmed off
+// (DISABLED, by the merged binding or the user's answer) deletes the queue without replaying it.
+
+const QUEUE_SCHEMA = 'toolkit.programme-checkpoint-queue.v1';
+const QUEUE_LIMIT = 200;
+const QUEUE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+function queueFile(hash, deps) { return path.join(sessionsDir(deps), `${hash}.queued.json`); }
+
+// The queued entries still inside the bounds, oldest first; dropped ones are noted once.
+function readQueue(hash, deps = {}) {
+  const doc = readJson(queueFile(hash, deps));
+  if (!doc || doc.schema !== QUEUE_SCHEMA || !Array.isArray(doc.entries)) return [];
+  const now = deps.now ? Date.parse(deps.now()) : Date.now();
+  return doc.entries.filter(item => item && typeof item.at === 'string' && now - Date.parse(item.at) <= QUEUE_MAX_AGE_MS);
+}
+
+function queueEntry(hash, item, deps = {}) {
+  const entries = [...readQueue(hash, deps), item];
+  const kept = entries.slice(-QUEUE_LIMIT);
+  if (kept.length < entries.length) recordError(hash, 'QUEUE_FULL', `The offline queue keeps the newest ${QUEUE_LIMIT} turns; ${entries.length - kept.length} older one was dropped.`, deps);
+  writeJsonAtomically(queueFile(hash, deps), { schema: QUEUE_SCHEMA, entries: kept });
+  return kept.length;
+}
+
+function discardQueue(hash, deps = {}) {
+  const had = fs.existsSync(queueFile(hash, deps));
+  fs.rmSync(queueFile(hash, deps), { force: true });
+  return had;
+}
+
+// A store call that failed because GitHub could not be reached (no HTTP status, gh could not run, or
+// a server error), as opposed to a refusal the queue must not paper over.
+function unreachable(error) {
+  if (!error || error.code !== 'GH_FAILED') return false;
+  const status = error.details && typeof error.details.status === 'number' ? error.details.status : null;
+  return status === null || status >= 500;
 }
 
 // The binding merged on the default branch, from this computer's cache, or null. `deps.mergedBinding`
@@ -201,34 +251,70 @@ function mergedBindingOf(repoRoot, deps = {}) {
 
 // One checkpoint for a bound session. Returns { outcome, ... } and throws only for a programme error
 // the caller records. `UNBOUND` means no binding for this session or repository: nothing else ran.
+// `QUEUED` means the turn was kept in the offline queue (see above).
 function runCheckpoint({ sessionId, message = null }, deps = {}) {
   const hash = sessionHash(sessionId);
   const local = readLocalBinding(hash, deps);
   if (!local) return { outcome: 'UNBOUND' };
   const state = require('./programme-state.cjs');
   if (!local.repo_root || !fs.existsSync(path.join(local.repo_root, state.BINDING_FILE))) return { outcome: 'UNBOUND' };
-  // GitHub governance turned off (or never complete) after bind: nothing reaches the store.
-  if (!githubGovernanceOn(local.repo_root, deps)) return { outcome: 'GOVERNANCE_OFF' };
+  const current = governanceStateOf(local.repo_root, deps);
+  const parsed = parseReturnBlock(message);
+  const queueTurn = () => {
+    if (parsed.error) recordError(hash, parsed.error, 'The toolkit-return block could not be read; it was not recorded.', deps);
+    const facts = collectFacts(local.repo_root, deps);
+    const queued = queueEntry(hash, { at: deps.now ? deps.now() : new Date().toISOString(), facts, entry: parsed.entry }, deps);
+    return { outcome: 'QUEUED', queued, error: parsed.error };
+  };
+  if (!current || current.state !== 'ENABLED' || current.programme_records_bind !== true) {
+    // Confirmed off: what was queued is never written.
+    if (current && current.state === 'DISABLED') return { outcome: 'GOVERNANCE_OFF', discarded: discardQueue(hash, deps) };
+    // On, with the governed rules in force, but the merged binding is not freshly read: keep the turn.
+    if (current && current.state === 'ENABLED' && current.governed_rules_bind === true) return queueTurn();
+    return { outcome: 'GOVERNANCE_OFF' };
+  }
   // Only the binding merged on the default branch names the store; a working-tree copy never does.
   const binding = mergedBindingOf(local.repo_root, deps);
   if (!binding) return { outcome: 'GOVERNANCE_OFF' };
   if (binding.repository.toLowerCase() !== String(local.repository).toLowerCase()) {
     throw new ProgrammeError('BINDING_MOVED', 'The repository binding no longer names the repository this session was bound in; bind again.');
   }
-  const facts = collectFacts(local.repo_root, deps);
-  const parsed = parseReturnBlock(message);
   const store = new state.STORE_BACKENDS[binding.store.kind]({ transport: deadlineTransport(deps), store: binding.store, now: deps.now });
   const name = `${local.assignment}--${hash}.json`;
-  const { doc: previous, sha } = store.readJournal(local.issue, name);
+  let read;
+  try { read = store.readJournal(local.issue, name); } catch (error) {
+    if (unreachable(error)) return queueTurn();
+    throw error;
+  }
+  const { doc: previous, sha } = read;
   if (!previous) throw new ProgrammeError('JOURNAL_MISSING', `The journal for assignment ${local.assignment} is missing from the store; bind again.`);
   if (parsed.error) recordError(hash, parsed.error, 'The toolkit-return block could not be read; it was not recorded.', deps);
+  const facts = collectFacts(local.repo_root, deps);
+  // Queued turns first, in order, then this one, folded into one journal write.
+  const queued = readQueue(hash, deps);
   const pending = readErrors(hash, deps).pending;
-  const { doc: next, error } = nextJournal(previous, { facts, entry: parsed.entry, lastError: pending });
-  if (error) recordError(hash, error, 'A return ID was reused with different content; the first one stays.', deps);
-  if (!next) return { outcome: 'NOOP', journal: name, error: parsed.error || error };
-  const result = store.writeJournal(local.issue, name, next, { sha, previous });
+  let next = previous;
+  let changed = false;
+  let lastIdError = null;
+  for (const item of [...queued, { facts, entry: parsed.entry, lastError: pending }]) {
+    const step = nextJournal(next, { facts: item.facts, entry: item.entry || null, lastError: item.lastError || null });
+    if (step.error) lastIdError = step.error;
+    if (step.doc) { next = step.doc; changed = true; }
+  }
+  if (changed) next = { ...next, seq: previous.seq + 1 };
+  if (lastIdError) recordError(hash, lastIdError, 'A return ID was reused with different content; the first one stays.', deps);
+  if (!changed) {
+    if (queued.length) discardQueue(hash, deps);
+    return { outcome: 'NOOP', journal: name, error: parsed.error || lastIdError };
+  }
+  let result;
+  try { result = store.writeJournal(local.issue, name, next, { sha, previous }); } catch (error) {
+    if (unreachable(error)) return queueTurn();
+    throw error;
+  }
   if (pending) clearPending(hash, deps);
-  return { outcome: result.outcome, journal: name, seq: result.doc.seq, error: parsed.error || error };
+  if (queued.length) discardQueue(hash, deps);
+  return { outcome: result.outcome, journal: name, seq: result.doc.seq, replayed: queued.length, error: parsed.error || lastIdError };
 }
 
 // The Stop hook entry: never throws, never prints, records any failure locally.
@@ -250,4 +336,5 @@ function runHook(input, deps = {}) {
 module.exports = Object.freeze({
   BINDING_SCHEMA, HOOK_DEADLINE_MS, sessionHash, sessionsDir, bindingFile, errorsFile, readLocalBinding, writeLocalBinding,
   readErrors, recordError, collectFacts, parseReturnBlock, newJournal, nextJournal, runCheckpoint, runHook, githubGovernanceOn,
+  queueFile, readQueue, QUEUE_LIMIT, QUEUE_MAX_AGE_MS,
 });

@@ -1,5 +1,13 @@
 # Toolkit Changelog
 
+## 3.16.1 (offline queue for governed records)
+
+### Governance
+
+- **Nothing is lost offline:** while governance is on but GitHub cannot be reached, or the merged binding has not been read in the last 24 hours, the turn-end checkpoint keeps each turn in an offline queue in Toolkit's own state next to the session (never in the repository; at most 200 turns, 7 days). The next turn end that can write replays them in order, once, and deletes the queue. If governance is confirmed off, the queue is deleted without being written.
+- **Plink and TortoiseGit setups work:** `GIT_SSH` and `GIT_SSH_COMMAND` hold the read of the merged binding only for an ssh origin, where they matter; for https they are ignored. Your own environment, like your global and system git config, is trusted.
+- **`status` says why:** when a refresh keeps the last read (offline, a redirected origin or override, a moved branch), `toolkit-governance.cjs status` says so in plain words.
+
 ## 3.16.0 (governance as a repository setting)
 
 ### Governance

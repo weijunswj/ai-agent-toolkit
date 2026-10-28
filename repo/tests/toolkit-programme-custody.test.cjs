@@ -398,9 +398,13 @@ test('W10 hook failures exit 0, stay local, reach the journal on the next run an
   fx.ctrl(['assign', '--issue', '423', '--role', 'G1', '--assignment', 'g1-a1']);
   fx.run(['bind', '--issue', '423', '--assignment', 'g1-a1', '--session', 'exec-a']);
   const hash = checkpoint.sessionHash('exec-a');
-  // Store unreachable.
+  // Store unreachable: the turn is kept in the offline queue, not lost.
   const down = { request: () => ({ status: 503, json: { message: 'unavailable' } }), graphql: () => null };
-  const failed = fx.turnEnd('exec-a', null, { transport: down });
+  assert.equal(fx.turnEnd('exec-a', returnBlock('q1'), { transport: down }).outcome, 'QUEUED');
+  assert.equal(checkpoint.readQueue(hash, { sessionsDir: fx.sessionsDir }).length, 1);
+  // A refusal (not an unreachable GitHub) is a failure, recorded locally.
+  const refused = { request: () => ({ status: 403, json: { message: 'forbidden' } }), graphql: () => null };
+  const failed = fx.turnEnd('exec-a', null, { transport: refused });
   assert.equal(failed.outcome, 'FAILED');
   assert.equal(checkpoint.readErrors(hash, { sessionsDir: fx.sessionsDir }).pending.code, failed.code);
   const shown = fx.run(['show', '--session', 'exec-a']).result;
@@ -412,7 +416,7 @@ test('W10 hook failures exit 0, stay local, reach the journal on the next run an
     if (file === 'gh-for-tests') { ghCalls.push(options.timeout); return { status: 0, stdout: 'HTTP/2.0 500 Internal\n\n{}', stderr: '' }; }
     return fakeGit(fx)(file, args, options);
   };
-  assert.equal(checkpoint.runHook({ session_id: 'exec-a' }, { sessionsDir: fx.sessionsDir, gitPath: GIT, ghPath: 'gh-for-tests', run, deadline: Date.now() - 1, governanceState: GOVERNED, mergedBinding: MERGED }).outcome, 'FAILED');
+  assert.equal(checkpoint.runHook({ session_id: 'exec-a' }, { sessionsDir: fx.sessionsDir, gitPath: GIT, ghPath: 'gh-for-tests', run, deadline: Date.now() - 1, governanceState: GOVERNED, mergedBinding: MERGED }).outcome, 'QUEUED', 'gh never started: queued');
   assert.deepEqual(ghCalls, []);
   checkpoint.runHook({ session_id: 'exec-a' }, { sessionsDir: fx.sessionsDir, gitPath: GIT, ghPath: 'gh-for-tests', run, deadline: Date.now() + 20000, governanceState: GOVERNED, mergedBinding: MERGED });
   assert.ok(ghCalls.length > 0 && ghCalls.every(timeout => timeout <= 8000), `per-call timeouts ${ghCalls}`);
@@ -420,9 +424,11 @@ test('W10 hook failures exit 0, stay local, reach the journal on the next run an
   const seqBefore = fx.store.readJournal(423, `g1-a1--${hash}.json`).doc.seq;
   const next = fx.turnEnd('exec-a', 'Done.\n```toolkit-return\nreturn_id: r1\nverdict: ACCEPT\n```\n');
   assert.equal(next.error, 'RETURN_BLOCK_INVALID');
+  assert.ok(next.replayed >= 1, 'the queued turns are replayed first');
   const journal = fx.store.readJournal(423, `g1-a1--${hash}.json`).doc;
-  assert.equal(journal.seq, seqBefore + 1);
-  assert.deepEqual(journal.returns, []);
+  assert.equal(journal.seq, seqBefore + 1, 'queued turns and this one in one write');
+  assert.deepEqual(journal.returns.map(entry => entry.return_id), ['q1'], 'the queued return reached the journal; the malformed one did not');
+  assert.equal(fs.existsSync(checkpoint.queueFile(hash, { sessionsDir: fx.sessionsDir })), false, 'the queue is deleted once written');
   assert.ok(journal.last_error);
   assert.equal(checkpoint.readErrors(hash, { sessionsDir: fx.sessionsDir }).pending, null, 'cleared once written');
   // An identical turn writes nothing.
@@ -434,7 +440,7 @@ test('W10 hook failures exit 0, stay local, reach the journal on the next run an
   const once = fx.github.commits;
   assert.deepEqual([fx.turnEnd('exec-a', returnBlock('g1-r1')).outcome, fx.github.commits], ['NOOP', once]);
   assert.equal(fx.turnEnd('exec-a', returnBlock('g1-r1', { verdict: 'WAITING_OWNER' })).error, 'RETURN_ID_REUSED');
-  assert.deepEqual(fx.store.readJournal(423, `g1-a1--${hash}.json`).doc.returns.map(entry => entry.verdict_requested), ['ACCEPT']);
+  assert.deepEqual(fx.store.readJournal(423, `g1-a1--${hash}.json`).doc.returns.filter(entry => entry.return_id === 'g1-r1').map(entry => entry.verdict_requested), ['ACCEPT']);
 });
 
 test('W11 bind takes the session only from --session, never from an inherited environment', () => {
@@ -455,21 +461,28 @@ test('H4 the turn-end hook writes nothing to the store once GitHub governance is
   const hash = checkpoint.sessionHash('exec-a');
   const journal = () => JSON.stringify(fx.store.readJournal(423, `g1-a1--${hash}.json`).doc);
   const before = journal();
-  for (const [label, governanceState] of [
+  for (const [label, governanceState, outcome = 'GOVERNANCE_OFF'] of [
     ['disabled after bind', () => ({ state: 'DISABLED', governed_rules_bind: false })],
     ['enabled, setup not finished', () => ({ state: 'ENABLED', governed_rules_bind: false })],
     ['undecided', () => ({ state: 'UNDECIDED', governed_rules_bind: false })],
-    ['merged binding read over 24 hours ago', () => ({ state: 'ENABLED', governed_rules_bind: true, programme_records_bind: false })],
+    // On with the governed rules, but not freshly read: the turn goes to the offline queue, not the store.
+    ['merged binding read over 24 hours ago', () => ({ state: 'ENABLED', governed_rules_bind: true, programme_records_bind: false }), 'QUEUED'],
     ['merged binding unusable', () => ({ state: 'ERROR', governed_rules_bind: false, programme_records_bind: false })],
     ['state unreadable', () => { throw new Error('boom'); }],
   ]) {
     let calls = 0;
     const counting = { request: (...args) => { calls += 1; return fx.github.request(...args); }, graphql: (...args) => { calls += 1; return fx.github.graphql(...args); } };
     const result = fx.turnEnd('exec-a', returnBlock('h4'), { governanceState, transport: counting });
-    assert.equal(result.outcome, 'GOVERNANCE_OFF', label);
+    assert.equal(result.outcome, outcome, label);
     assert.equal(calls, 0, `${label}: no store call`);
     assert.equal(journal(), before, label);
   }
+  // Governance confirmed off deletes the queue: nothing queued is ever written.
+  const sessions = { sessionsDir: fx.sessionsDir };
+  assert.equal(checkpoint.readQueue(hash, sessions).length, 1);
+  assert.deepEqual(fx.turnEnd('exec-a', null, { governanceState: () => ({ state: 'DISABLED', governed_rules_bind: false }) }), { outcome: 'GOVERNANCE_OFF', discarded: true });
+  assert.equal(fs.existsSync(checkpoint.queueFile(hash, sessions)), false);
+  assert.equal(journal(), before);
   // Nothing merged on this computer's read (or the read is unusable): the working tree's copy never names the store.
   let mergedCalls = 0;
   const noMerged = { request: (...args) => { mergedCalls += 1; return fx.github.request(...args); }, graphql: (...args) => { mergedCalls += 1; return fx.github.graphql(...args); } };
@@ -566,4 +579,31 @@ test('journals match their schema at runtime and in the JSON schema', () => {
     assert.equal(validate(bad), false);
     assert.notDeepEqual(state.validateJournal(bad), []);
   }
+});
+
+test('Q1-Q4 the offline queue is bounded, kept in user-state, and replays a return only once', () => {
+  const fx = fixture();
+  fx.ctrl(['assign', '--issue', '423', '--role', 'G1', '--assignment', 'g1-a1']);
+  fx.run(['bind', '--issue', '423', '--assignment', 'g1-a1', '--session', 'exec-a']);
+  const hash = checkpoint.sessionHash('exec-a');
+  const sessions = { sessionsDir: fx.sessionsDir };
+  const stale = () => ({ state: 'ENABLED', governed_rules_bind: true, programme_records_bind: false });
+  const file = checkpoint.queueFile(hash, sessions);
+  assert.equal(path.dirname(file), fx.sessionsDir, 'next to the session binding, never in the repository');
+  // Older than seven days is dropped; the newest 200 are kept, and the drop is noted.
+  const old = new Date(Date.now() - checkpoint.QUEUE_MAX_AGE_MS - 60000).toISOString();
+  const recent = new Date().toISOString();
+  const entries = [{ at: old, facts: null, entry: null }, ...Array.from({ length: checkpoint.QUEUE_LIMIT }, () => ({ at: recent, facts: null, entry: null }))];
+  fs.writeFileSync(file, JSON.stringify({ schema: 'toolkit.programme-checkpoint-queue.v1', entries }));
+  assert.equal(checkpoint.readQueue(hash, sessions).length, checkpoint.QUEUE_LIMIT, 'the old entry is past its seven days');
+  assert.equal(fx.turnEnd('exec-a', returnBlock('q-new'), { governanceState: stale }).queued, checkpoint.QUEUE_LIMIT);
+  assert.equal(checkpoint.readErrors(hash, sessions).recent.at(-1).code, 'QUEUE_FULL');
+  // A return already in the journal, queued again, is not added twice.
+  fs.writeFileSync(file, JSON.stringify({ schema: 'toolkit.programme-checkpoint-queue.v1', entries: [] }));
+  fx.turnEnd('exec-a', returnBlock('q-once'));
+  assert.equal(fx.turnEnd('exec-a', returnBlock('q-once'), { governanceState: stale }).outcome, 'QUEUED');
+  fx.turnEnd('exec-a');
+  const returns = fx.store.readJournal(423, `g1-a1--${hash}.json`).doc.returns.map(entry => entry.return_id);
+  assert.deepEqual(returns.filter(id => id === 'q-once'), ['q-once']);
+  assert.equal(fs.existsSync(file), false);
 });
