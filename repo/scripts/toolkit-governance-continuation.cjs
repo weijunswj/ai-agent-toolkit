@@ -183,20 +183,43 @@ function pythonBindingBarriers(text, shell) {
   }
   return barriers;
 }
-// Host words that only name a path component or a variable. hostOf never reads a dotted
-// name as an executable, no shell drops that leading dot, and a variable's name is never its
-// value. Each span becomes a barrier, so neighbouring text still cannot join across it. The
+// Host words that only name a path component or a fixed folder variable. hostOf never reads a
+// dotted name as an executable and no shell drops that leading dot; these fixed variables hold
+// folders, never the host executable (CLAUDE_CODE_EXECPATH and other names stay evidence).
+// Each span becomes a barrier, so neighbouring text still cannot join across it. The
 // whole-input ASCII/no-control qualification excludes source NUL, as for the Python proof.
+const FOLDER_VARIABLES = /^(?:codex_home|claude_config_dir|claude_project_dir|claude_plugin_root)$/i;
+// Runtime extraction can pull a host spelling back out of a folder name: piping into a shell
+// or interpreter, substitutions, string methods/operators, slicing and parameter or cmd
+// substring expansion. Any of them anywhere keeps the unbarriered (main) result.
+const EXTRACTION = [
+  /\|\s*(?:&\s*)?(?:sh|bash|zsh|dash|ksh|fish|pwsh|powershell|cmd|xargs|iex|invoke-expression|python3?|py|node|perl|ruby|source)\b/i,
+  /\$\(|`|<\(/,
+  /\.(?:substring|trim(?:start|end)?|replace|remove|split|insert|chars|pad(?:left|right)|tostring|to(?:lower|upper)(?:invariant)?|getfilename\w*|getextension|name)\b/i,
+  /\[io\.path\]|\[char\b|\bsplit-path\b|-[ci]?(?:replace|split)\b|-join\b|\[\s*-?\d+\s*\.\./i,
+  /\$\{[^}]*[:#%\/^,]|[!%][a-z_][\w]*:~/i,
+];
 function nameBarriers(text) {
   if (text.length > LIMITS.command || /[^\x09\x0a\x0d\x20-\x7e]/.test(text)) return [];
+  if (EXTRACTION.some(pattern => pattern.test(text))) return [];
   const spans = [];
   for (const m of text.matchAll(/(?<![\w.$-])\.(?:claude|codex)[\w.-]*/gi)) {
     const before = text[m.index - 1], after = text[m.index + m[0].length];
     // A path separator must touch the name. A bare or quoted dotted word stays evidence.
     if (before === '/' || before === '\\' || after === '/' || after === '\\') spans.push({ start: m.index, end: m.index + m[0].length });
   }
-  for (const m of text.matchAll(/(?<![$\w])\$(?:env:)?([a-z_]\w*)/gi)) {
-    if (/claude|codex/i.test(m[1])) spans.push({ start: m.index + m[0].length - m[1].length, end: m.index + m[0].length });
+  // A variable is one only outside single quotes and not after an escape. Unbalanced
+  // quotes give no variable barriers at all.
+  const single = new Array(text.length).fill(false); let quote = null;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quote === "'") { single[i] = true; if (c === "'") quote = null; continue; }
+    if (quote === '"') { if ((c === '\\' || c === '`') && i + 1 < text.length) { i++; continue; } if (c === '"') quote = null; continue; }
+    if (c === "'" || c === '"') { quote = c; single[i] = c === "'"; }
+  }
+  if (quote) return spans.sort((a, b) => a.start - b.start);
+  for (const m of text.matchAll(/(?<![$\w\\`^])\$(?:env:)?([a-z_]\w*)/gi)) {
+    if (!single[m.index] && FOLDER_VARIABLES.test(m[1])) spans.push({ start: m.index + m[0].length - m[1].length, end: m.index + m[0].length });
   }
   return spans.sort((a, b) => a.start - b.start);
 }

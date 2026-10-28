@@ -1,10 +1,19 @@
 # Toolkit Changelog
 
-## 3.15.20 (host-named folders and variables are names, not continuations)
+## 3.15.20 (host-named folders are names, not continuations)
 
-- The continuation check no longer treats a host name that only names a folder or a variable as a session resume. A dotted name touching a path separator (`.codex/`, `.claude\\`, `.claude-plugin/`) and a variable name containing `claude` or `codex` (`$env:CODEX_HOME`, `$CLAUDE_PROJECT_DIR`) become barriers in every evidence scan, so neighbouring text still cannot join across them. Reading Toolkit's installed files or host settings with `$`, `^` or `%` syntax, or beside a short flag such as `-r` or `-Recurse`, is no longer refused on Claude Code or Codex.
-- Real `codex resume`/`fork` and `claude -r`/`-c`/`--resume` invocations, a host executable inside such a folder, constructed spellings, bare or quoted dotted words and non-ASCII input keep the earlier conservative result. Every raw owner, state, workdir and path guard still runs first.
-- Earlier unproved-syntax tests that used such a folder as their only evidence now use an undotted host folder, and their original texts are asserted as ordinary.
+- The continuation check no longer treats a host name that only names a folder as a session resume. Two kinds of span become barriers in every evidence scan, so neighbouring text still cannot join across them:
+  - a dotted name touching a path separator (`.codex/`, `.claude\\`, `.claude-plugin/`);
+  - the fixed folder variables `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, `CLAUDE_PROJECT_DIR` and `CLAUDE_PLUGIN_ROOT`, as `$NAME` or `$env:NAME` outside single quotes and not after an escape.
+- Reading Toolkit's installed files or host settings with `$`, `^` or `%` syntax, or beside a short flag such as `-r` or `-Recurse`, is no longer refused on Claude Code or Codex.
+- These keep the earlier conservative result:
+  - real `codex resume`/`fork` and `claude -r`/`-c`/`--resume`;
+  - a host executable inside such a folder;
+  - any other variable, including `CLAUDE_CODE_EXECPATH`;
+  - constructed spellings, bare or quoted dotted words, and non-ASCII input;
+  - any command that can extract text at run time: piping into a shell or interpreter, command substitution, string methods or operators, slicing, and parameter or cmd substring expansion.
+- Every raw owner, state, workdir and path guard still runs first.
+- Earlier tests that used such a folder as their only evidence, or that would pass without their proof, now use an undotted host folder. Their original texts are asserted as ordinary.
 
 ## 3.15.19 (proved binding separators and literal Git operands)
 

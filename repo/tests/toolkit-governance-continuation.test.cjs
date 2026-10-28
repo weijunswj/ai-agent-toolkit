@@ -1317,9 +1317,10 @@ test('host-named directories and variables are names, not continuation evidence,
     'echo co/.claude/dex$x',
     'cat ~/.codex/sessions/example.jsonl | grep resume',
   ];
-  // Earlier unproved-syntax rows whose only evidence was such a folder.
+  // Earlier rows that used such a folder: 18 unproved-syntax rows whose only evidence it was,
+  // and 61 proved rows that would pass without their proof. Both now use an undotted folder.
   const earlier = matrix.name_barrier_cases;
-  assert.equal(earlier.length, 18);
+  assert.equal(earlier.length, 79);
   // A dotted name touching no path separator, a host after the directory, a selector beside a
   // variable, constructed spellings and non-ASCII input all keep the conservative result.
   const retained = [
@@ -1335,6 +1336,15 @@ test('host-named directories and variables are names, not continuation evidence,
     'ls ~/.claude/; & ("cl"+"au"+"de") -r example',
     'Get-ChildItem ~/.claude/ -Recurse; & ("cl"+"aude") -c',
     'Get-Content "$env:USERPROFILE/.claude/\u00e9.json" -Raw',
+    // Variables that can hold the host executable, and names that are not variables.
+    '"$CLAUDE_CODE_EXECPATH" -c -p hi', '& $env:CLAUDE_CODE_EXECPATH -r x', 'exec "$CLAUDE_CODE_EXECPATH" -c -p hi',
+    "Start-Process $env:CLAUDE_CODE_EXECPATH -ArgumentList '-r'", '& $claude -r', '& $env:claude_BIN -r', '"$claude_PATH" -r',
+    "$x='$claude'.Substring(1); & $x -r", "x='$claude'; ${x:1} -r",
+    // Runtime extraction of a host spelling from a folder name keeps the earlier result.
+    'echo /.claude -r | cut -c3- | sh', 'echo /.codex resume | cut -c3- | sh', '$(echo /.claude | cut -c3-) -r',
+    '& (gi ~/.claude).Name.Substring(1) -r', '& ("x/.claude".Substring(3)) -r',
+    '& ([io.path]::GetFileName("~/.claude").TrimStart(".")) -r', "& ('~/.claude' -replace '.*\\.') -r",
+    '& (-join (gi ~/.claude).Name[1..6]) -r', 'x=~/.claude/; y=${x%/}; ${y##*/.} -r', 'cmd /v:on /c "set x=~/.claude&& !x:~3! -r"',
   ];
   let checks = 0;
   for (const row of earlier) {
