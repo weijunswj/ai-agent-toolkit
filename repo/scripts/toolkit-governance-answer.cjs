@@ -10,7 +10,8 @@
 // arrived in the run of the session that was shown the question; it names the repositories asked
 // about, works once and lapses after half an hour. This script records nothing without a live
 // ticket, prints what it recorded (or why not) for the agent to tell the user, and exits 0 only
-// when the answer was recorded.
+// when the answer was recorded, or, for `confirm-*`, when the confirmation was set up (nothing is
+// recorded then).
 
 const gate = require('./toolkit-governance-gate.cjs');
 

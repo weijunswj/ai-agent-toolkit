@@ -268,6 +268,11 @@ const boundOf = (context) => {
   const match = /record nothing yet|reply to the question/.test(context || '') ? / node "[^"\n]+" (yes|no|later) ([0-9a-f]{32})\n/.exec(context) : null;
   return match ? { word: match[1], ticket: match[2] } : null;
 };
+// The command a bare word's ticket allows: only starting the confirmation of that word.
+const askOf = (context) => {
+  const match = / node "[^"\n]+" confirm-(yes|no|later) ([0-9a-f]{32})\n/.exec(context || '');
+  return match && /is a bare "/.test(context) ? { word: match[1], ticket: match[2] } : null;
+};
 // Envelopes as a Claude Projects Remote Control session received them (ids replaced, text and layout kept).
 const REAL_THREAD_WAKE = (text) => `<wake reason="mention" current-time="2026-10-28T05:41:36Z">
   <project id="chan_example" type="project">
@@ -365,8 +370,14 @@ test('from a parent folder: reaching held repositories asks once for all of them
     if (gate.ANSWER.test(gate.ownerReply(reply))) return first;
     assert.equal(first.action, 'pass');
     assert.match(first.context, /is a bare "[a-z]+", and Toolkit has an open question for [^\n]*Nothing was recorded/);
-    assert.match(first.context, new RegExp(`Toolkit will ${command === 'enable' ? 'turn on' : command === 'disable' ? 'keep GitHub governance off' : 'leave GitHub governance undecided'}`));
-    assert.equal(ticketOf(first.context), undefined, 'no ticket for a bare word');
+    assert.equal(ticketOf(first.context), undefined, 'no answer ticket for a bare word');
+    // The bare word's ticket can only start the confirmation of that word, which the agent does when it asks.
+    const ask = askOf(first.context);
+    assert.equal(ask && ask.word, WORDS[command]);
+    for (const word of [...Object.values(WORDS), ...Object.values(WORDS).filter(w => w !== ask.word).map(w => `confirm-${w}`)]) assert.equal(prompts().answerTicket(ask.ticket, word).ok, false, word);
+    const started = prompts().answerTicket(ask.ticket, `confirm-${ask.word}`);
+    assert.equal(started.ok, true, started.text);
+    assert.match(started.text, new RegExp(`Toolkit will ${command === 'enable' ? 'turn on' : command === 'disable' ? 'keep GitHub governance off' : 'leave GitHub governance undecided'}`));
     const confirmed = prompts().decide({ cwd: parent, prompt: confirmation, sessionId });
     const bound = boundOf(confirmed.context);
     assert.ok(bound, 'the confirmation comes with a ticket for one answer');
@@ -464,7 +475,11 @@ test('from a parent folder: reaching held repositories asks once for all of them
   const own = site('own-question');
   start('own');
   assert.ok(reach('own', `git -C "${own}" status`)?.deny);
-  assert.match(prompts().decide({ cwd: parent, prompt: 'no', sessionId: 'own' }).context, /If it answered your own question, carry on with that and leave Toolkit's question open/);
+  assert.match(prompts().decide({ cwd: parent, prompt: 'no', sessionId: 'own' }).context, /If it answered your own question, carry on with that and run nothing for Toolkit: its question stays open/);
+  // The agent carries on: no confirmation exists, so the next bare word is again only a bare word.
+  const next = prompts().decide({ cwd: parent, prompt: 'yes', sessionId: 'own' });
+  assert.equal(boundOf(next.context), null);
+  assert.equal(askOf(next.context)?.word, 'yes');
   assert.equal(stateOf(ctx, own).state, 'UNDECIDED');
 });
 
@@ -625,7 +640,7 @@ test('reply tickets: only the exact answer command runs; newest only, half-hour 
   const late = ticketOf(prompts().decide({ cwd: parent, prompt: 'leave it off', sessionId: 'm' }).context);
   // While the question and ticket are open, no prompt is scheduled for the session; another session schedules freely.
   for (const tool_name of ['CronCreate', 'ScheduleWakeup', 'RemoteTrigger']) {
-    assert.match(toolGate().decide({ tool_name, cwd: parent, session_id: 'm', tool_input: { prompt: 'yes' } })?.deny || '', /no prompt is scheduled until they answer/, tool_name);
+    assert.match(toolGate().decide({ tool_name, cwd: parent, session_id: 'm', tool_input: { prompt: 'yes' } })?.deny || '', /no prompt is scheduled for the rest of this run, unless the user answers it/, tool_name);
     assert.equal(toolGate().decide({ tool_name, cwd: parent, session_id: 'free', tool_input: { prompt: 'yes' } }), null, tool_name);
   }
   gate.writeGovernanceDecision(moved, 'enable', { registryOptions: ctx.options });
@@ -702,9 +717,10 @@ test('confirmations: the reply records only the answer that was confirmed, on bo
   // A live ticket from an earlier message is dropped when a bare word starts the confirm step.
   const earlier = ticketOf(say('p', 'what does that do?').context);
   assert.ok(earlier);
-  const bare = say('p', 'no');
-  assert.match(bare.context, /"Toolkit will keep GitHub governance off \(never ask again\) for wp-one, wp-two\. Is that right\?"/);
+  const bare = askOf(say('p', 'no').context);
   assert.equal(prompts().answerTicket(earlier, 'yes').ok, false, 'the earlier ticket no longer records');
+  const started = prompts().answerTicket(bare.ticket, 'confirm-no');
+  assert.match(started.text, /"Toolkit will keep GitHub governance off \(never ask again\) for wp-one, wp-two\. Is that right\?"/);
   // While the confirmation is pending: a relay, another session and a launched session get nothing.
   const relay = '<project_claude_message session="s" thread_id="cmsg_A">\n<relay from="coordinator" session="s" current-time="2026-10-28T02:00:00Z">\n  <cited id="cmsg_B" author="user" name="Owner" at="2026-10-28T02:00:00Z" where="timeline">yes</cited>\n</relay>\n</project_claude_message>';
   assert.equal(boundOf(say('p', relay).context), null);
@@ -716,12 +732,19 @@ test('confirmations: the reply records only the answer that was confirmed, on bo
   const confirm = boundOf(say('p', REAL_THREAD_WAKE('sure').replace('cmsg_exampleReply', 'cmsg_sure')).context);
   assert.deepEqual(confirm && confirm.word, 'no');
   assert.equal(prompts().answerTicket(confirm.ticket, 'yes').ok, false);
-  // After that, a further bare word asks again instead of getting a ticket.
+  assert.equal(prompts().answerTicket(confirm.ticket, 'confirm-no').ok, false, 'not even a confirmation of the same word');
+  // After that, a further bare word starts over: only a ticket to start a new confirmation.
   const again = say('p', 'yes');
-  assert.match(again.context, /is a bare "yes"[\s\S]*"Toolkit will turn on GitHub governance for wp-one, wp-two\. Is that right\?"/);
+  assert.equal(askOf(again.context)?.word, 'yes');
   assert.equal(boundOf(again.context), null);
   assert.equal(ticketOf(again.context), undefined);
-  assert.equal(prompts().answerTicket(confirm.ticket, 'no').ok, false, 'the new confirm step dropped it');
+  assert.equal(prompts().answerTicket(confirm.ticket, 'no').ok, false, 'the new ticket replaced it');
+  // A confirmation started from a thread message: the same envelope delivered again is not its reply.
+  const thread = REAL_THREAD_WAKE('yes').replace('cmsg_exampleReply', 'cmsg_threadYes');
+  assert.equal(prompts().answerTicket(askOf(say('p', thread).context).ticket, 'confirm-yes').ok, true);
+  const redelivered = say('p', thread);
+  assert.match(redelivered.context, /could not be matched to the confirmation question, so nothing was recorded/);
+  assert.equal(boundOf(redelivered.context), null);
   assert.equal(stateOf(ctx, one).state, 'UNDECIDED');
   // A resume ends the pending confirmation: the next "yes" records nothing.
   start('p', parent, 'resume');
@@ -729,12 +752,72 @@ test('confirmations: the reply records only the answer that was confirmed, on bo
   assert.equal(stateOf(ctx, one).state, 'UNDECIDED');
   assert.equal(stateOf(ctx, two).state, 'UNDECIDED');
 
+  // Inside a held repository a confirmation lasts for the run: a "yes" 31 or 240 minutes later, or
+  // when no ticket can be written or the store cannot be read, never records ENABLED.
+  const late = site('late');
+  start('late', late);
+  say('late', 'set up', late);
+  const confirmNo = (note) => assert.equal(prompts().answerTicket(ticketOf(say('late', `hmm ${note}`, late).context), 'confirm-no').ok, true, note);
+  for (const minutes of [31, 240]) {
+    confirmNo(minutes);
+    const afterwards = new gate.PromptHold({ registryOptions: ctx.options, environment: {}, now: () => new Date(Date.now() + minutes * 60 * 1000) });
+    const bound = boundOf(afterwards.decide({ cwd: late, prompt: 'yes', sessionId: 'late' }).context);
+    assert.equal(bound && bound.word, 'no', `${minutes} minutes`);
+    assert.equal(stateOf(ctx, late).state, 'UNDECIDED', `${minutes} minutes`);
+  }
+  confirmNo('before the write failure');
+  const { issue } = gate.ReplyTickets.prototype;
+  gate.ReplyTickets.prototype.issue = () => { throw new Error('SYNTHETIC_WRITE_FAILURE'); };
+  try {
+    const refused = say('late', 'yes', late);
+    assert.equal(refused.action, 'block');
+    assert.match(refused.reason, /could not be matched to the confirmation question/);
+  } finally { gate.ReplyTickets.prototype.issue = issue; }
+  assert.equal(stateOf(ctx, late).state, 'UNDECIDED');
+  const ticketsFile = path.join(path.dirname(ctx.registryPath), gate.TICKETS_BASENAME);
+  fs.writeFileSync(ticketsFile, '{broken');
+  assert.equal(say('late', 'yes', late).action, 'block');
+  assert.equal(stateOf(ctx, late).state, 'UNDECIDED');
+  // The full answer still decides, and clears the damaged store.
+  assert.equal(say('late', 'toolkit governance disable', late).action, 'pass');
+  assert.equal(stateOf(ctx, late).state, 'DISABLED');
+  assert.equal(fs.existsSync(ticketsFile), false);
+
+  // In the confirm state inside a held repository: a relay, a peer and a launched session get nothing,
+  // and the confirmation stays for the user's own reply. A bound ticket dies with its run.
+  const kept = site('kept');
+  start('k', kept);
+  say('k', 'go', kept);
+  assert.equal(prompts().answerTicket(ticketOf(say('k', 'hmm', kept).context), 'confirm-no').ok, true);
+  for (const prompt of [relay, REAL_THREAD_WAKE('yes').replace('trust="principal"', 'trust="peer"').replace('cmsg_exampleReply', 'cmsg_keptPeer')]) {
+    const decision = say('k', prompt, kept);
+    assert.equal(decision.action, 'block', prompt);
+    assert.equal(boundOf(decision.context), null, prompt);
+  }
+  assert.equal(prompts({ TOOLKIT_GATE_ROLE: 'g2' }).decide({ cwd: kept, prompt: 'yes', sessionId: 'k' }).action, 'block');
+  assert.equal(stateOf(ctx, kept).state, 'UNDECIDED');
+  const keptBound = boundOf(say('k', 'yes', kept).context);
+  assert.equal(keptBound && keptBound.word, 'no');
+  start('k', kept, 'resume');
+  assert.equal(prompts().answerTicket(keptBound.ticket, 'no').ok, false, 'a bound ticket dies with its run');
+  // A confirmation pending from an earlier run does not apply in the new one: once that run is asked,
+  // its "yes" answers at once.
+  const runs = site('runs');
+  start('r', runs);
+  say('r', 'go', runs);
+  assert.equal(prompts().answerTicket(ticketOf(say('r', 'hmm', runs).context), 'confirm-no').ok, true);
+  start('r', runs, 'resume');
+  assert.equal(say('r', 'hello again', runs).action, 'block');
+  const newRun = say('r', 'yes', runs);
+  assert.equal(boundOf(newRun.context), null);
+  assert.equal(stateOf(ctx, runs).state, 'ENABLED');
+
   // A "later" run counts as open: no prompt is scheduled in it.
   const later = site('later');
   start('l', later);
   say('l', 'go', later);
   assert.equal(say('l', 'later', later).action, 'pass');
-  assert.match(toolGate().decide({ tool_name: 'CronCreate', cwd: later, session_id: 'l', tool_input: { prompt: 'toolkit governance enable' } })?.deny || '', /no prompt is scheduled until they answer/);
+  assert.match(toolGate().decide({ tool_name: 'CronCreate', cwd: later, session_id: 'l', tool_input: { prompt: 'toolkit governance enable' } })?.deny || '', /or the user said "later" to it\), so no prompt is scheduled for the rest of this run[^\n]*after "later", only the full `toolkit governance enable` or `disable`/);
 });
 
 test('later: nothing is recorded, this session carries on under the global rules and coding gates, and a new session asks again', (t) => {

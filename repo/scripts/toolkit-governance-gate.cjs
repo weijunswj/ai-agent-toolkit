@@ -736,16 +736,34 @@ class ReplyTickets {
     this.#now = now;
   }
 
+  // A store that is missing is empty; one that cannot be read or is damaged throws, so a pending
+  // confirmation is never silently lost (the callers hold, and a full answer clears the store).
   #read() {
+    let text;
+    try { text = fs.readFileSync(this.#file, 'utf8'); } catch (error) {
+      if (error && error.code === 'ENOENT') return { schema: TICKETS_SCHEMA, sessions: {}, used: [] };
+      throw new GovernanceGateError('REPLY_TICKETS_UNREADABLE');
+    }
     let parsed = null;
-    try { parsed = JSON.parse(fs.readFileSync(this.#file, 'utf8')); } catch { parsed = null; }
+    try { parsed = JSON.parse(text); } catch { parsed = null; }
     const usable = parsed && parsed.schema === TICKETS_SCHEMA && parsed.sessions && typeof parsed.sessions === 'object' && !Array.isArray(parsed.sessions) && Array.isArray(parsed.used);
-    return usable ? parsed : { schema: TICKETS_SCHEMA, sessions: {}, used: [] };
+    if (!usable) throw new GovernanceGateError('REPLY_TICKETS_MALFORMED');
+    return parsed;
   }
 
+  // Whether an entry is still kept: a ticket for half an hour, a pending confirmation for as long as
+  // held messages are kept (it ends with its run, a reply or a full answer, not with time).
+  #current(entry) {
+    if (!entry || typeof entry !== 'object') return false;
+    const age = this.#now().getTime() - Date.parse(entry.at);
+    return age <= (Object.hasOwn(entry, 'pending') ? MAX_HELD_AGE_MS : MAX_TICKET_AGE_MS);
+  }
+
+  // Removes the whole store; used when it cannot be read and the user's full answer was recorded.
+  reset() { fs.rmSync(this.#file, { force: true }); }
+
   #save(data) {
-    const oldest = this.#now().getTime() - MAX_TICKET_AGE_MS;
-    const sessions = Object.entries(data.sessions).filter(([, entry]) => entry && Date.parse(entry.at) >= oldest)
+    const sessions = Object.entries(data.sessions).filter(([, entry]) => this.#current(entry))
       .sort((a, b) => String(b[1].at).localeCompare(String(a[1].at))).slice(0, MAX_TICKET_SESSIONS);
     fs.mkdirSync(path.dirname(this.#file), { recursive: true });
     const temp = `${this.#file}.tmp-${process.pid}-${crypto.randomBytes(4).toString('hex')}`;
@@ -758,20 +776,23 @@ class ReplyTickets {
   }
 
   // A new ticket for this message, replacing any earlier ticket or pending confirmation of the
-  // session, or null when this thread message already had one. With command, the ticket records only
-  // that answer (the reply to a confirmation). Throws when the file cannot be written.
-  issue(sessionId, epoch, messageId, repositories, command = null) {
+  // session, or null when this thread message already had one. With command, the ticket is bound to
+  // that answer: it records only it (the reply to a confirmation), or with ask only starts the
+  // confirmation of it (a bare word the agent has yet to ask about). Throws when the file cannot be
+  // read or written.
+  issue(sessionId, epoch, messageId, repositories, command = null, { ask = false } = {}) {
     const data = this.#read();
     if (messageId !== null && data.used.includes(messageId)) return null;
     const ticket = crypto.randomBytes(16).toString('hex');
-    data.sessions[sessionId] = { hash: ticketHash(ticket), epoch, at: this.#now().toISOString(), message: messageId, repositories, ...(command ? { command } : {}) };
+    data.sessions[sessionId] = { hash: ticketHash(ticket), epoch, at: this.#now().toISOString(), message: messageId, repositories, ...(command ? { command } : {}), ...(command && ask ? { ask: true } : {}) };
     if (messageId !== null) data.used.push(messageId);
     this.#save(data);
     return ticket;
   }
 
   // Notes that the agent is asking this run to confirm exactly one answer for these repositories,
-  // replacing (and so dropping) the session's live ticket. Throws when the file cannot be written.
+  // replacing (and so dropping) the session's live ticket. Throws when the file cannot be read or
+  // written.
   confirm(sessionId, epoch, command, repositories) {
     const data = this.#read();
     data.sessions[sessionId] = { pending: command, epoch, at: this.#now().toISOString(), repositories };
@@ -791,7 +812,7 @@ class ReplyTickets {
     const sessions = this.#read().sessions;
     const entry = typeof sessionId === 'string' && Object.hasOwn(sessions, sessionId) ? sessions[sessionId] : null;
     if (!entry || !Object.hasOwn(COMMAND_WORDS, String(entry.pending)) || entry.epoch !== epoch || !EPOCH.test(String(epoch))
-      || !(Date.parse(entry.at) >= this.#now().getTime() - MAX_TICKET_AGE_MS) || !Array.isArray(entry.repositories)) return null;
+      || !this.#current(entry) || !Array.isArray(entry.repositories)) return null;
     return { command: entry.pending, repositories: entry.repositories };
   }
 
@@ -808,11 +829,11 @@ class ReplyTickets {
 
   peek(ticket, sessionId) { return this.#find(this.#read(), ticket, sessionId); }
 
-  // Whether this session holds a ticket that has not lapsed.
+  // Whether this session holds a ticket that has not lapsed, or a pending confirmation.
   live(sessionId) {
     const sessions = this.#read().sessions;
     const entry = typeof sessionId === 'string' && Object.hasOwn(sessions, sessionId) ? sessions[sessionId] : null;
-    return Boolean(entry && Date.parse(entry.at) >= this.#now().getTime() - MAX_TICKET_AGE_MS);
+    return this.#current(entry);
   }
 
   // Spends the ticket and returns its entry, or null; a ticket that cannot be removed is not used.
@@ -846,10 +867,11 @@ function confirmQuestion(repositories, command) {
 
 // What the agent is told when a bare yes, no or later arrives for a question asked from a folder
 // that is not held: it may answer the agent's own question, so nothing is recorded yet.
-function confirmContext(repositories, command) {
+function confirmContext(repositories, command, ticket) {
   return [
-    `Toolkit governance: the user's message above is a bare "${command === 'enable' ? 'yes' : command === 'disable' ? 'no' : 'later'}", and Toolkit has an open question for ${reachNames(repositories)}. Nothing was recorded, because it may answer something else you asked.`,
-    `If it was meant for Toolkit's question, ask once more, word for word: "${confirmQuestion(repositories, command)}" and end your turn; their reply comes with a ticket that can record only that answer. If it answered your own question, carry on with that and leave Toolkit's question open.`,
+    `Toolkit governance: the user's message above is a bare "${COMMAND_WORDS[command]}", and Toolkit has an open question for ${reachNames(repositories)}. Nothing was recorded, because it may answer something else you asked.`,
+    `- If it answered your own question, carry on with that and run nothing for Toolkit: its question stays open.`,
+    `- If it was meant for Toolkit's question, run exactly this once:\n  node "${ANSWER_SCRIPT}" confirm-${COMMAND_WORDS[command]} ${ticket}\n  Toolkit then gives you the question to ask, naming exactly what it would record; their reply to it comes with a ticket that can record only that answer. This ticket does nothing else.`,
     NEVER_OWNER,
   ].join('\n');
 }
@@ -1029,7 +1051,8 @@ function noMarkText(commands) {
   return `Toolkit: this session started before Toolkit could note it, so it cannot take the governance answer. Start a new session and answer there (in Codex, trust Toolkit's SessionStart hook in /hooks first, or no session can be noted), or run ${commands.map(terminalCommand).join(' or ')} in your own terminal.`;
 }
 const RESUMED_LINE = 'Toolkit: this session was resumed, or another session started in this repository, so Toolkit asks again and your reply was held.';
-const MOVED_LINE = 'Toolkit: another session started in this repository since you said "later", so Toolkit asks again and your reply was held.';
+const REASK_LINE = 'Toolkit: your reply could not be matched to the confirmation question, so nothing was recorded and Toolkit asks again (if this repeats, `toolkit governance enable` or `toolkit governance disable` as a message still answers).';
+const MOVED_LINE ='Toolkit: another session started in this repository since you said "later", so Toolkit asks again and your reply was held.';
 const LAUNCHED_HOLD_TEXT = `Toolkit: this repository is waiting for the user's governance answer, and this session was started by another session or a Toolkit launcher, so its message was not sent and not kept. The user answers in their own chat; start this again after that. ${NEVER_OWNER}`;
 const PICKER_UNCOUNTED = `Toolkit governance: no answer was recorded from that card, and the repository is still waiting. End your turn now without using any other tool; the user can reply yes, no or later as a message. ${NEVER_OWNER}`;
 
@@ -1195,7 +1218,10 @@ class PromptHold {
     // included, is read only as the reply to that question.
     if (asked && ownTyped(message)) {
       const confirmed = this.#confirmReply(message, sessionId, marks.session);
-      if (confirmed) { this.#held.add(id, prompt, sessionId, marks, verdict.state.root); return confirmed; }
+      if (confirmed) {
+        this.#held.add(id, prompt, sessionId, marks, verdict.state.root);
+        return confirmed.hold ? { action: 'block', reason: `${REASK_LINE}\n${questionText(verdict, 1)}` } : confirmed;
+      }
     }
     const short = SHORT_ANSWER.exec(reply);
     if (short && asked) { this.#dropTicket(sessionId); return this.#answer(cwd, SHORT_COMMANDS[short[1].toLowerCase()], verdict, sessionId, marks); }
@@ -1230,33 +1256,37 @@ class PromptHold {
     if (!ownTyped(message)) return null;
     // The reply to a confirmation question, bare or not, is read only as that.
     const confirmed = this.#confirmReply(message, sessionId, epoch);
+    if (confirmed?.hold) return { action: 'pass', context: `${REASK_LINE} Ask the user again in plain words: "${reachQuestion(asked).replace(/^Toolkit: t/, 'T')}" ${NEVER_OWNER}` };
     if (confirmed) return confirmed;
     // Here the agent keeps working, so a bare yes, no or later may answer its own question (owner
-    // decision of 28 Oct): it records nothing, any live ticket is dropped, and the agent asks once
-    // more, naming what would be recorded.
+    // decision of 28 Oct): it records nothing, and the agent gets a ticket that can only start the
+    // confirmation of that word, which it uses only if it asks the user.
     if (short) {
       const command = SHORT_COMMANDS[short[1].toLowerCase()];
-      try { this.#tickets.confirm(sessionId, epoch, command, asked); } catch { return null; }
-      return { action: 'pass', context: confirmContext(asked, command) };
+      let ticket = null;
+      try { ticket = this.#tickets.issue(sessionId, epoch, message.id, asked, command, { ask: true }); } catch { ticket = null; }
+      return ticket ? { action: 'pass', context: confirmContext(asked, command, ticket) } : null;
     }
     return this.#ticket(message, sessionId, epoch, asked);
   }
 
   // The user's reply to a pending confirmation of this run: a ticket that records only the answer
-  // that question named, which ends the confirmation. null when none is pending, or this thread
-  // message already had a ticket.
+  // that question named, which ends the confirmation. null when none is pending; { hold: true } when
+  // one may be pending but no ticket can be given (the store cannot be read or written, or this
+  // thread message already had a ticket), so the reply is never read another way.
   #confirmReply(message, sessionId, epoch) {
     let pending = null;
-    try { pending = this.#tickets.pending(sessionId, epoch); } catch { pending = null; }
+    try { pending = this.#tickets.pending(sessionId, epoch); } catch { return { hold: true }; }
     if (!pending) return null;
     let ticket = null;
     try { ticket = this.#tickets.issue(sessionId, epoch, message.id, pending.repositories, pending.command); } catch { ticket = null; }
-    return ticket ? { action: 'pass', context: confirmTicketContext(pending.repositories, pending.command, ticket) } : null;
+    return ticket ? { action: 'pass', context: confirmTicketContext(pending.repositories, pending.command, ticket) } : { hold: true };
   }
 
-  // An answer recorded another way ends any ticket or confirmation the session still holds.
+  // An answer recorded another way ends any ticket or confirmation the session still holds; a store
+  // that cannot be read is removed, since nothing in it is needed once the answer is recorded.
   #dropTicket(sessionId) {
-    try { this.#tickets.drop(sessionId); } catch { /* a ticket left behind lapses within half an hour */ }
+    try { this.#tickets.drop(sessionId); } catch { try { this.#tickets.reset(); } catch { /* the next confirmation re-asks */ } }
   }
 
   // A reply ticket for this message and these repositories, with what the agent is told; null when
@@ -1282,8 +1312,12 @@ class PromptHold {
     let found = null;
     try { found = this.#tickets.peek(ticket, undefined); } catch { found = null; }
     if (!found) return unusable;
-    // A ticket for the reply to a confirmation records only the answer that question named.
-    if (found.command && (asking || found.command !== command)) {
+    // A ticket for a bare word only starts the confirmation of that word; a ticket for the reply to a
+    // confirmation records only the answer that question named.
+    if (found.ask && (!asking || found.command !== command)) {
+      return { ok: false, text: `Toolkit: this ticket can only start the confirmation of "${COMMAND_WORDS[found.command]}" (confirm-${COMMAND_WORDS[found.command]}), so nothing was recorded.` };
+    }
+    if (found.command && !found.ask && (asking || found.command !== command)) {
       return { ok: false, text: `Toolkit: this ticket can record only "${COMMAND_WORDS[found.command]}", the answer the user was asked to confirm, so nothing was recorded. If they did not confirm it, record nothing.` };
     }
     // Checked before the ticket is spent, so a launched session or another run holding it cannot use
@@ -1525,9 +1559,10 @@ class ToolGate {
     }
     if (tool === PICKER_TOOL) return this.#picker(input, sessionId);
     // A prompt the agent schedules for itself could arrive as bare text and read as the user's reply,
-    // so none is scheduled while this run has a governance question or reply ticket open.
+    // so none is scheduled while this run has a governance question, reply ticket, confirmation or
+    // "later" answer open.
     if (SCHEDULE_TOOLS.test(tool) && this.#questionOpen(sessionId)) {
-      return { deny: `Toolkit: this session is waiting for the user's reply to Toolkit's governance question, so no prompt is scheduled until they answer. ${NEVER_OWNER}` };
+      return { deny: `Toolkit: this session has Toolkit's governance question open (or the user said "later" to it), so no prompt is scheduled for the rest of this run, unless the user answers it; after "later", only the full \`toolkit governance enable\` or \`disable\` sent as a message does. ${NEVER_OWNER}` };
     }
     if (ALWAYS_TOOLS.test(tool)) return null;
     // Read-only tools are held too: Claude Code lets a held turn run to show the card, with the held
