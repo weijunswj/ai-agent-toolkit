@@ -1,9 +1,10 @@
 'use strict';
 
 // Test support: turns a scratch folder into a repository the governance state reads as ENABLED with
-// the governed rules in force (rule R3): an origin remote in .git/config, the Toolkit-governed rules
-// block in AGENTS.md, a valid `.github/toolkit-programme.json`, and the user's recorded yes. The
-// block and binding alone are not the user's answer, so the yes is recorded in a scratch home: the
+// the governed rules in force (rule M1): an origin remote in .git/config, the Toolkit-governed rules
+// block in AGENTS.md, a valid `.github/toolkit-programme.json`, this computer's fresh read of that
+// binding as merged on the default branch (the cache a refresh writes), and the user's recorded yes.
+// Only the merged binding decides, so its cache entry is recorded in a scratch home: the
 // first yes recorded without a `home` points this test process (HOME, USERPROFILE) at one, so the
 // hooks it runs, in process or as child processes, read that registry and never the real user's.
 // Pass `home` to record into a home a test already uses for its child processes. The remote names a
@@ -46,11 +47,28 @@ function makeGoverned(repo, name, { home, enable = true } = {}) {
 }
 
 // Records the user's yes for an existing repository (such as the Toolkit checkout itself) in the
-// scratch home.
+// scratch home, and its working-tree binding as merged on the default branch.
 function recordEnabled(repo, { home = governedHome() } = {}) {
   const registryPath = path.join(home, '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json');
   require(path.join(ROOT, 'repo', 'scripts', 'toolkit-governance-gate.cjs')).writeGovernanceDecision(repo, 'enable', { registryOptions: { registryPath, testOnly: true } });
+  recordMerged(repo, { registryPath });
   return repo;
 }
 
-module.exports = Object.freeze({ governedHome, makeGoverned, recordEnabled });
+// Writes this computer's cache of the binding merged on the default branch, as a refresh would, from
+// the repository's working-tree binding (or `text`), read now.
+function recordMerged(repo, { home = null, registryPath = null, text = null, now = new Date() } = {}) {
+  if (!registryPath) registryPath = path.join(home || governedHome(), '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json');
+  const governance = require(path.join(ROOT, 'repo', 'scripts', 'toolkit-governance-state.cjs'));
+  const cache = require(path.join(ROOT, 'repo', 'scripts', 'toolkit-governance-binding.cjs'));
+  const identity = governance.readIdentity(repo);
+  const body = text !== null ? text : fs.readFileSync(path.join(identity.root, '.github', 'toolkit-programme.json'), 'utf8');
+  cache.writeCache(registryPath, {
+    schema: cache.CACHE_SCHEMA, repository_id: identity.repository_id, remote: identity.remote.canonical, default_branch: 'main',
+    commit: '0'.repeat(40), fetched_at: now.toISOString(), status: 'present',
+    bytes_sha256: require('node:crypto').createHash('sha256').update(body, 'utf8').digest('hex'), text: body, problem: null,
+  });
+  return repo;
+}
+
+module.exports = Object.freeze({ governedHome, makeGoverned, recordEnabled, recordMerged });

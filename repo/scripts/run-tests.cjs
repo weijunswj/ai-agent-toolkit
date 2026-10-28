@@ -149,6 +149,9 @@ class TestRun {
     // toolkit-test-temp-guard.cjs watches the real update-report folder; it lives under the
     // temp root the run started with, not the run's own folder.
     env.TOOLKIT_TEST_REAL_TEMP = this.env.TOOLKIT_TEST_REAL_TEMP || os.tmpdir();
+    // Fixture repositories name origins that do not exist: governance never reads the network in a
+    // test run (a credential helper asked about them leaves files in the run folder).
+    env.TOOLKIT_GOVERNANCE_OFFLINE = '1';
     return env;
   }
 

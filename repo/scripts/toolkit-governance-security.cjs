@@ -762,7 +762,7 @@ function dependencySecurity(root, { offline = false, reader = ghSecurityReader, 
   const advanced = online ? read.advanced_codeql || null : null;
   // Default-branch protection is checked against the working tree's required checks; it counts for
   // auto-merge only when those are the merged binding's.
-  const workingChecks = governance.bindingRequiredChecks(root);
+  const workingChecks = governance.workingBindingRequiredChecks(root);
   const checksMerged = Boolean(mergedChecks && workingChecks && [...mergedChecks].sort().join('\n') === [...workingChecks].sort().join('\n'));
   const protectedForAutoMerge = Boolean(protectionResult && protectionResult.status === 'conformant' && checksMerged);
   const value = key => (offline ? 'not-checked' : online ? read[key] : 'unreadable');

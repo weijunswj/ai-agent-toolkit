@@ -28,6 +28,7 @@ const { ProgrammeError, resolveExecutable } = require('./resolve-executable.cjs'
 
 const SCHEMA = Object.freeze({
   binding: 'toolkit.programme-binding.v1',
+  bindingV2: 'toolkit.programme-binding.v2',
   parent: 'toolkit.programme-state.parent.v1',
   child: 'toolkit.programme-state.child.v1',
   journal: 'toolkit.programme-journal.v1',
@@ -382,22 +383,52 @@ function assertValid(kind, doc) {
   return doc;
 }
 
+// A binding is v1 (one parent, always enabled) or v2 (`governance` enabled or disabled, and
+// `parents` as [{ issue, record_prefix, writer_prefix? }]; children come from native sub-issues, never
+// the binding). A valid enabled v2 binding is returned with the v1 fields the reconciler reads
+// (parent_issue, record_prefix, writer_prefix) taken from its first parent; a disabled one carries
+// only its identity and is never used for programme records.
 function validateBinding(binding) {
   const errors = [];
   check(errors, isObject(binding), 'binding must be an object');
+  let normalized = binding;
   if (isObject(binding)) {
-    check(errors, binding.schema === SCHEMA.binding, `schema must be ${SCHEMA.binding}`);
+    const v2 = binding.schema === SCHEMA.bindingV2;
+    check(errors, binding.schema === SCHEMA.binding || v2, `schema must be ${SCHEMA.binding} or ${SCHEMA.bindingV2}`);
     check(errors, REPO.test(String(binding.repository || '')), 'repository must be owner/name');
-    check(errors, isInt(binding.parent_issue, 1), 'parent_issue must be an issue number');
-    check(errors, PREFIX.test(String(binding.record_prefix || '')), 'record_prefix must be a record prefix');
-    check(errors, PREFIX.test(String(binding.writer_prefix || '')), 'writer_prefix must be a record prefix');
+    let enabled = true;
+    if (v2) {
+      const unknown = Object.keys(binding).filter(key => !BINDING_V2_KEYS.includes(key));
+      check(errors, unknown.length === 0, `${unknown.join(', ')} ${unknown.length === 1 ? 'is' : 'are'} not a version 2 binding key`);
+      check(errors, ['enabled', 'disabled'].includes(binding.governance), 'governance must be enabled or disabled');
+      enabled = binding.governance === 'enabled';
+      for (const key of ['parent_issue', 'record_prefix', 'writer_prefix']) check(errors, binding[key] === undefined, `${key} belongs to v1; v2 lists parents`);
+      const parents = binding.parents;
+      check(errors, enabled ? Array.isArray(parents) && parents.length > 0 : parents === undefined || Array.isArray(parents), enabled ? 'parents must list at least one parent issue' : 'parents must be a list');
+      if (Array.isArray(parents)) {
+        parents.forEach((entry, index) => {
+          check(errors, isObject(entry) && Object.keys(entry).every(key => ['issue', 'record_prefix', 'writer_prefix'].includes(key)), `parents[${index}] may hold only issue, record_prefix and writer_prefix`);
+          check(errors, isObject(entry) && isInt(entry.issue, 1), `parents[${index}].issue must be an issue number`);
+          check(errors, isObject(entry) && PREFIX.test(String(entry.record_prefix || '')), `parents[${index}].record_prefix must be a record prefix`);
+          check(errors, isObject(entry) && (entry.writer_prefix === undefined || (typeof entry.writer_prefix === 'string' && PREFIX.test(entry.writer_prefix))), `parents[${index}].writer_prefix must be a record prefix`);
+        });
+        check(errors, new Set(parents.map(entry => (isObject(entry) ? entry.issue : null))).size === parents.length, 'parents must not repeat an issue');
+      }
+    } else {
+      check(errors, binding.governance === undefined && binding.parents === undefined, 'governance and parents belong to v2');
+      check(errors, isInt(binding.parent_issue, 1), 'parent_issue must be an issue number');
+      check(errors, PREFIX.test(String(binding.record_prefix || '')), 'record_prefix must be a record prefix');
+      check(errors, PREFIX.test(String(binding.writer_prefix || '')), 'writer_prefix must be a record prefix');
+    }
     const store = binding.store;
-    check(errors, isObject(store) && Object.hasOwn(STORE_BACKENDS, store.kind), `store.kind ${JSON.stringify(store?.kind)} is not supported (supported: ${Object.keys(STORE_BACKENDS).join(', ')})`);
-    check(errors, isObject(store) && REPO.test(String(store.repository || '')), 'store.repository must be owner/name');
-    check(errors, isObject(store) && isText(store.branch) && !/\s|\.\./.test(store.branch), 'store.branch must be a branch name');
-    check(errors, isObject(store) && /^(?:[A-Za-z0-9_.-]+\/)+$/.test(String(store.path || '')) && !String(store.path).split('/').includes('..'), 'store.path must be a relative folder ending in /');
-    check(errors, isObject(store) && String(store.repository || '').toLowerCase() !== String(binding.repository || '').toLowerCase(), 'store.repository must be a separate repository');
-    check(errors, Array.isArray(binding.required_checks) && binding.required_checks.every(isText), 'required_checks must be a list of check names');
+    if (enabled || store !== undefined) {
+      check(errors, isObject(store) && Object.hasOwn(STORE_BACKENDS, store.kind), `store.kind ${JSON.stringify(store?.kind)} is not supported (supported: ${Object.keys(STORE_BACKENDS).join(', ')})`);
+      check(errors, isObject(store) && REPO.test(String(store.repository || '')), 'store.repository must be owner/name');
+      check(errors, isObject(store) && isText(store.branch) && !/\s|\.\./.test(store.branch), 'store.branch must be a branch name');
+      check(errors, isObject(store) && /^(?:[A-Za-z0-9_.-]+\/)+$/.test(String(store.path || '')) && !String(store.path).split('/').includes('..'), 'store.path must be a relative folder ending in /');
+      check(errors, isObject(store) && String(store.repository || '').toLowerCase() !== String(binding.repository || '').toLowerCase(), 'store.repository must be a separate repository');
+    }
+    if (enabled || binding.required_checks !== undefined) check(errors, Array.isArray(binding.required_checks) && binding.required_checks.every(isText), 'required_checks must be a list of check names');
     // Deprecated and ignored: older bindings that carry it must still validate.
     check(errors, optional(binding.paid_security, value => ['off', 'on'].includes(value)), 'paid_security must be off or on');
     const updates = binding.dependency_updates;
@@ -411,9 +442,21 @@ function validateBinding(binding) {
       check(errors, isObject(projection) && optional(projection.after_section, isText) && optional(projection.replace_section, isText), 'projection.after_section and projection.replace_section must be heading text');
     }
     screenSecrets(errors, binding, 'binding');
+    if (!errors.length && v2 && enabled) {
+      const first = binding.parents[0];
+      normalized = { ...binding, parent_issue: first.issue, record_prefix: first.record_prefix, writer_prefix: first.writer_prefix || first.record_prefix };
+    }
   }
   if (errors.length) throw new ProgrammeError('BINDING_INVALID', `${BINDING_FILE} is invalid: ${errors[0]}`, { errors });
-  return binding;
+  return normalized;
+}
+
+// The keys a version 2 binding may carry (binding-v2.schema.json); anything else makes it invalid.
+const BINDING_V2_KEYS = Object.freeze(['schema', 'repository', 'governance', 'parents', 'store', 'required_checks', 'paid_security', 'dependency_updates', 'projection']);
+
+// Whether a valid binding turns governance on: v1 always, v2 when `governance` is enabled.
+function bindingEnabled(binding) {
+  return binding.schema === SCHEMA.binding || binding.governance === 'enabled';
 }
 
 function loadBinding(repoRoot) {
@@ -424,7 +467,9 @@ function loadBinding(repoRoot) {
   let binding;
   try { binding = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '')); }
   catch (error) { throw new ProgrammeError('BINDING_INVALID', `${BINDING_FILE} is not valid JSON: ${error.message}`); }
-  return validateBinding(binding);
+  const valid = validateBinding(binding);
+  if (!bindingEnabled(valid)) throw new ProgrammeError('BINDING_DISABLED', `${BINDING_FILE.replace(/\\/g, '/')} sets governance to disabled, so every programme.cjs command refuses. Only an owner-merged pull request turns it back on.`);
+  return valid;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -2558,7 +2603,7 @@ function bindRepository({ transport, originUrl, binding }) {
 module.exports = Object.freeze({
   SCHEMA, BINDING_FILE, CLASSES, LIFECYCLES, PATCHABLE_CHILD_FIELDS, PATCHABLE_PARENT_FIELDS, BLOCK_SOURCE, BLOCK_NAME, TRACE_BLOCK_NAME,
   ProgrammeError, GitHubTransport, StateStore, STORE_BACKENDS, ProgrammeGraphReader, GitHubMutator, Reconciler,
-  canonical, canonicalText, contentDigest, sameState, validateParent, validateChild, validateBinding, assertValid, loadBinding,
+  canonical, canonicalText, contentDigest, sameState, validateParent, validateChild, validateBinding, bindingEnabled, assertValid, loadBinding,
   newParent, newChild, isHolder, isLaneHolder, parentRefusal, authoriseWrite, claimDocument, claimLane, assignGate, reopenGate, interruptGate,
   recordReturn, consumeReturn, foldJournals, validateJournal, currentGateAccepted, completionAccepted, applyPatch, refuseNewLegacy, legacyMigrationPatch, orderTies,
   evaluateChecks, renderParentBlockBody, renderChildBlockBody, renderTraceBlockBody, renderCurrentBlockBody, renderBlock, blockDigest, findStateBlock, upsertStateBlock, upsertTraceBlock,

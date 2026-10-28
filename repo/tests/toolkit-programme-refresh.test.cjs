@@ -17,7 +17,7 @@ const { FakeGitHub } = require('./toolkit-programme-fake-github.cjs');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const controller = { session: 'toolkit-421-controller', prefix: 'INT-TK421-' };
-const GOVERNED = () => ({ state: 'ENABLED', governed_rules_bind: true });
+const GOVERNED = () => ({ state: 'ENABLED', governed_rules_bind: true, programme_records_bind: true });
 const temps = [];
 const tmp = () => { const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'programme-refresh-')); temps.push(dir); return dir; };
 test.after(() => { for (const dir of temps) fs.rmSync(dir, { recursive: true, force: true }); });

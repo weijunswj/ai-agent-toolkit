@@ -50,19 +50,23 @@ Everything runs through `gh` (resolved to a full `.exe` path, never from the wor
 
 ## Binding
 
-The governed repository holds `.github/toolkit-programme.json` (no secrets):
+The governed repository holds `.github/toolkit-programme.json` (no secrets). It is the repository's own governance setting: only the copy merged on the default branch counts, on every computer, and a working tree, another branch or a fork's copy never does.
 
 ```json
 {
-  "schema": "toolkit.programme-binding.v1",
+  "schema": "toolkit.programme-binding.v2",
   "repository": "owner/name",
-  "parent_issue": 12,
-  "record_prefix": "INT-PROG-",
-  "writer_prefix": "INT-PROG-",
+  "governance": "enabled",
+  "parents": [{ "issue": 12, "record_prefix": "INT-PROG-" }],
   "store": { "kind": "github", "repository": "owner/private-store", "branch": "main", "path": "state/owner/name/" },
   "required_checks": ["validate"]
 }
 ```
+
+- `governance` is `enabled` or `disabled`. A merged `disabled` keeps governance off, and only an owner-merged pull request turns it back on; the repository is DISABLED, so every programme command refuses (`GITHUB_GOVERNANCE_OFF`).
+- `parents` lists the programme parent issues (`writer_prefix` defaults to `record_prefix`); the reconciler records against the first. Children come from native sub-issues, never from the binding. A version 1 binding (`parent_issue`, `record_prefix`, `writer_prefix`) is still read, as enabled with one parent.
+- The read holds when the repository's own or command-scope git config carries a transport, proxy or TLS override, or when `GIT_SSH` or `GIT_SSH_COMMAND` is set; it ignores replace refs and the repository's hooks. Trust boundary: the user's own global and system git config are trusted and not held.
+- Programme commands and the turn-end checkpoint run only on a read of the merged binding no older than 24 hours (`toolkit-governance.cjs status` and session start refresh it), and they take the store, parent, prefixes and required checks from that merged binding, never from the working tree.
 
 - The repository is the `origin` remote as GitHub names it; the file must agree and cannot override it (`REPO_IDENTITY_MISMATCH`).
 - `store.kind` names the backend. The only kind is `github`: a separate repository that exists, is private and is writable, checked before every pass (`STATE_STORE_UNVERIFIED`). Another kind (a different store) is added in code with the same compare-and-swap contract; an unknown kind stops at setup. There is no fallback store.

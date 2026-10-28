@@ -12,6 +12,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const { recordMerged } = require('./toolkit-governed-fixture-support.cjs');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const scripts = path.join(repoRoot, 'repo', 'scripts');
@@ -153,7 +154,8 @@ test('M-01: one batched question; the evidence store is disabled, the no-origin 
   assert.match(result.stdout, /evidence: disable \(evidence store named in a programme binding/);
   assert.match(result.stdout, /no-origin: skip/);
   // The governed block and binding are not the user's answer: the typed yes records it.
-  assert.match(result.stdout, /governed: enable \(carries the governed block and programme binding\)/);
+  assert.match(result.stdout, /governed: enable \(its working tree carries a programme binding that still has to be merged\)/);
+  assert.match(result.stdout, /governed: governance is on and the working tree carries the programme binding, but it is not merged on the default branch yet/);
   assert.deepEqual(states(ctx, repos), { governed: 'ENABLED', blockOnly: 'ENABLED', plain: 'DISABLED', noOrigin: 'UNDECIDED', store: 'DISABLED' });
   assert.deepEqual(treeDigest(ctx.projects), before, 'no repository file was written');
   // The block-only repository is enabled without a binding: reported with the template, not written.
@@ -228,6 +230,8 @@ test('PR-05: the Toolkit default-branch ruleset is offered after its own yes, wr
   const ctx = scratch(t);
   const { governed } = fixture(ctx);
   await migrate(ctx, { answers: ['yes', 'no', 'no'] });
+  // The setup pull request with the binding merged.
+  recordMerged(governed, { registryPath: ctx.registryPath });
   const rulesets = { 'example-owner/governed': true, 'example-owner/block-only': true };
   const written = [];
   // No job produces the binding's check yet: requiring it would block every merge, so no offer.
@@ -305,9 +309,11 @@ test('SEC-01: free dependency and security settings are turned on by default, wi
   const ctx = scratch(t);
   const { governed } = fixture(ctx);
   fs.writeFileSync(path.join(governed, 'package.json'), '{}');
-  // The decision run already writes the missing Dependabot file, asking nothing more about it.
+  // Settings follow the merged binding: the decision run writes nothing before the binding merges.
   const first = await migrate(ctx, { answers: ['yes', 'no', 'no'] });
-  assert.match(first.stdout, /\.github\/dependabot\.yml written; commit it through a pull request/);
+  assert.doesNotMatch(first.stdout, /dependabot\.yml written/);
+  // The setup pull request with the binding merged.
+  recordMerged(governed, { registryPath: ctx.registryPath });
   const rulesets = { 'example-owner/governed': true, 'example-owner/block-only': true };
   const protections = { 'example-owner/governed': { checks: ['validate'], methods: ['merge'], own: null } };
   const settings = { 'example-owner/governed': { alerts: 'disabled', code_scanning: 'disabled' } };
@@ -321,6 +327,7 @@ test('SEC-01: free dependency and security settings are turned on by default, wi
   const applied = await migrate(ctx, { answers: [], rulesets, protections, security: settings, securityWriter });
   assert.equal(applied.code, 0, applied.stdout);
   assert.equal(applied.asked.length, 0, 'on by default: no question');
+  assert.match(applied.stdout, /\.github\/dependabot\.yml written; commit it through a pull request/);
   assert.deepEqual(calls, [{ slug: 'example-owner/governed', plan: ['alerts', 'code_scanning'] }]);
   assert.match(fs.readFileSync(path.join(governed, '.github', 'dependabot.yml'), 'utf8'), /package-ecosystem: "npm"/);
   assert.match(applied.stdout, /example-owner\/governed: Dependabot alerts turned on\.\n- example-owner\/governed: CodeQL code scanning turned on/);
@@ -347,8 +354,9 @@ test('SEC-01: free dependency and security settings are turned on by default, wi
 
 test('T-01: the binding template is not a valid binding until it is filled in', () => {
   const template = JSON.parse(fs.readFileSync(path.join(repoRoot, ...migration.BINDING_TEMPLATE.split('/')), 'utf8'));
-  assert.throws(() => programmeState.validateBinding(template), /parent_issue/);
-  const filled = { ...template, repository: 'example-owner/example-repo', parent_issue: 1, store: { ...template.store, repository: 'example-owner/evidence' } };
+  assert.equal(template.schema, 'toolkit.programme-binding.v2');
+  assert.throws(() => programmeState.validateBinding(template), /parents\[0\]\.issue/);
+  const filled = { ...template, repository: 'example-owner/example-repo', parents: [{ ...template.parents[0], issue: 1 }], store: { ...template.store, repository: 'example-owner/evidence' } };
   assert.doesNotThrow(() => programmeState.validateBinding(filled));
 });
 

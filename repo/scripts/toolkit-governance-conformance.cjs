@@ -96,22 +96,32 @@ function checkConformance(cwd, options = {}) {
     if (state.materials.governed_block) findings.push(finding('GOVERNED_BLOCK_IGNORED', 'info', 'GitHub governance works only on github.com, so the governed block in AGENTS.md is not followed.'));
     return report(state.rule === 'R9' ? 1 : 0, state, findings, toolkitRoot);
   }
+  if (state.state === 'ERROR') {
+    findings.push(finding('MERGED_BINDING_INVALID', 'error', `The programme binding merged on the default branch cannot be used (${state.merged.problems.join(', ') || 'unreadable'}). Ordinary work continues; governed records, gate admission and finality hold until a pull request fixes it.`));
+    return report(2, state, findings, toolkitRoot);
+  }
   if (state.state === 'UNDECIDED') {
-    findings.push(finding('DECISION_PENDING', 'drift', state.rule === 'R6'
-      ? `The repository carries the governed block but no programme binding, and you have not decided yet. Answer Toolkit's question in chat (yes, no or later), or run \`${governance.governanceCommand('enable')}\` or \`${governance.governanceCommand('disable')}\` in your own terminal.`
-      : `You have not decided whether Toolkit's GitHub governance runs in this repository. Answer Toolkit's question in chat (yes, no or later), or run \`${governance.governanceCommand('enable')}\` or \`${governance.governanceCommand('disable')}\` in your own terminal.`));
+    findings.push(finding('DECISION_PENDING', 'drift', `You have not decided whether Toolkit's GitHub governance runs in this repository. Answer Toolkit's question in chat (yes, no or later), or run \`${governance.governanceCommand('enable')}\` or \`${governance.governanceCommand('disable')}\` in your own terminal.`));
   }
   if (state.state === 'DISABLED') {
-    if (state.materials.governed_block) findings.push(finding('GOVERNED_BLOCK_IGNORED', 'info', 'You disabled Toolkit governance here, so the governed block in AGENTS.md is not followed.'));
+    if (state.rule === 'M2') findings.push(finding('REPOSITORY_DISABLED', 'info', 'The binding merged on the default branch sets governance to disabled; only an owner-merged pull request turns it back on.'));
+    if (state.materials.governed_block) findings.push(finding('GOVERNED_BLOCK_IGNORED', 'info', state.rule === 'M2' ? 'Governance is disabled for this repository, so the governed block in AGENTS.md is not followed.' : 'You disabled Toolkit governance here, so the governed block in AGENTS.md is not followed.'));
     return report(0, state, findings, toolkitRoot);
   }
+  // Whatever enabled it, an ENABLED repository needs the governed block its agents are told to follow.
+  if (state.state === 'ENABLED' && !state.materials.governed_block) findings.push(finding('GOVERNED_BLOCK_MISSING', 'drift', 'Governance is enabled but AGENTS.md has no governed block; add it through a pull request.'));
   if (state.state === 'ENABLED' && !state.materials_complete) {
-    if (!state.materials.governed_block) findings.push(finding('GOVERNED_BLOCK_MISSING', 'drift', 'Governance is enabled but AGENTS.md has no governed block; add it through a pull request.'));
-    if (!state.materials.binding) findings.push(finding('BINDING_MISSING', 'drift', 'Governance is enabled but the programme binding .github/toolkit-programme.json is missing or invalid; only the owner adds it, through a pull request.'));
+    if (!state.materials.binding) findings.push(finding('BINDING_MISSING', 'drift', state.notes.includes('pending-binding-merge')
+      ? 'Governance is enabled but the programme binding is not merged on the default branch yet; it applies once its pull request merges.'
+      : 'Governance is enabled but the default branch has no programme binding .github/toolkit-programme.json; only the owner adds it, through a pull request.'));
   }
-  if (state.materials.binding_present && !state.materials.binding) {
-    findings.push(finding('BINDING_INVALID', 'drift', `The programme binding is invalid: ${state.materials.binding_problems.join(', ')}.`));
+  if (state.materials.binding_present && state.materials.binding_problems.length) {
+    findings.push(finding('BINDING_INVALID', 'drift', `The working tree's programme binding is invalid: ${state.materials.binding_problems.join(', ')}.`));
   }
+  if (state.notes.includes('binding-belongs-to-other-repository')) findings.push(finding('BINDING_FOREIGN', 'drift', `The default branch's programme binding belongs to ${state.merged.foreign_repository}, so it does not apply here.`));
+  if (state.state === 'ENABLED' && state.notes.includes('merged-binding-unknown')) findings.push(finding('MERGED_BINDING_UNKNOWN', 'unverified', `The binding merged on the default branch has not been read on this computer yet; run \`${governance.governanceCommand('status')}\` online.`));
+  if (state.notes.includes('merged-binding-stale')) findings.push(finding('MERGED_BINDING_STALE', 'drift', `The last read of the merged binding is over 24 hours old, so governed records, gate admission and finality hold; run \`${governance.governanceCommand('status')}\` online.`));
+  if (state.notes.includes('binding-v2-migration-offered')) findings.push(finding('BINDING_V1', 'info', 'The merged binding is version 1; the next setup pull request moves it to version 2.'));
   if (state.materials.governed_block) findings.push(...governedBlockFindings(state.root, toolkitRoot));
   if (state.state === 'ENABLED') findings.push(...plainTextFindings(state.root, toolkitRoot));
   let rulesetResult = null;
@@ -122,7 +132,7 @@ function checkConformance(cwd, options = {}) {
     findings.push(...rulesetFindings(rulesetResult));
   }
   let protectionResult = null;
-  const requiredChecks = state.state === 'ENABLED' && state.materials.binding ? governance.bindingRequiredChecks(state.root) : null;
+  const requiredChecks = state.state === 'ENABLED' && state.materials.binding ? governance.bindingRequiredChecks(state.root, options) : null;
   if (requiredChecks) {
     protectionResult = protection.defaultBranchProtection(state.root, {
       requiredChecks,

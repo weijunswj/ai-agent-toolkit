@@ -1,11 +1,47 @@
 # Toolkit Changelog
 
-## 3.15.25 (continuation folder names)
+## 3.16.3 (continuation folder names)
 
 - Dotted host folders used as arguments and the exact upper-case folder variables CODEX_HOME, CLAUDE_CONFIG_DIR, CLAUDE_PROJECT_DIR and CLAUDE_PLUGIN_ROOT count as names rather than continuation evidence.
 - Names in command position, derived-text execution and pipes into unknown commands retain the earlier checks. Only fixed data-reading pipe targets qualify for the folder-name rule.
 - Other variables, escaped or single-quoted variable names, unbalanced quotes, non-ASCII input, control characters and oversized commands retain the earlier evidence checks. Complete literal reader proofs remain independent.
 - Every raw owner, state, workdir and path guard still runs first.
+
+## 3.16.2 (thread replies, parent folders and replies in your own words)
+
+### Governance
+
+- **Real thread replies are read again:** the app's own notes at the end of a Projects thread message, and files or images attached to a message, no longer make Toolkit ignore the user's reply. A message that carries a file or image is not an answer.
+- **Asked from a parent folder:** a session working in a folder that holds several repositories (or in a decided repository) now asks Toolkit's question when a command or edit reaches github.com repositories that are waiting, naming them all, and one reply answers for every repository named. Before, the question was never asked there and no reply could answer it.
+- **Replies in your own words:** a reply such as "no for both" goes to the agent with a one-use reply ticket; the agent reads what it means and records it with `toolkit-governance-answer.cjs`, and Toolkit only checks that it is the user's own reply after its question, in the same run. When the agent is unsure, or a bare yes, no or later arrives from a parent folder, it asks once more naming exactly what Toolkit would record, and the user's reply can then record only that answer.
+
+## 3.16.0 (governance as a repository setting)
+
+### Governance
+
+- **The repository decides, on every computer:** `.github/toolkit-programme.json` as merged on the default branch is now the repository's governance setting. A repository with a merged binding is never asked about governance again, on any computer or fresh profile. A working tree, another branch, a fork's copy or this computer's own file never turns governance on, and never turns a merged "enabled" off.
+- **Binding version 2:** `governance` is `enabled` or `disabled`, and `parents` lists the programme parent issues (children come from native sub-issues). A merged `disabled` stays off until an owner-merged pull request changes it. Version 1 bindings still read as enabled with one parent, and the next setup pull request moves them to version 2. This repository's own binding is now version 2.
+- **No network per tool call:** `toolkit-governance.cjs status` and session start read the default branch's binding (a bounded fetch) into a cache next to your governance decisions; every hook reads only that cache. The read happens only when the URL git really uses for `origin` is the same repository, so a redirect in git's config changes nothing. Programme records take their store, parent and checks from the merged binding only. Offline, the last read keeps routine work going; governed records, gate admission and finality need a read from the last 24 hours.
+- **An unusable merged binding is an error, not off:** a malformed binding or unknown schema on the default branch shows ERROR. Ordinary work continues; governed records, gate admission and finality hold until a pull request fixes it.
+- **Repositories never set up still ask:** with no merged binding and no answer of yours, a github.com repository still pauses until you answer (yes, no or later), from any chat. Your earlier answers on this computer are kept as they are: a yes means setup is offered, a no means you are not asked again there, and where a binding is merged an old no becomes only a preference not to suggest governance.
+- **Discovery before questions:** the new read-only `toolkit-governance.cjs discover` (also shown by `enable`) looks before asking: it reuses a merged binding, lists parent-issue candidates (programme parents and issues with native sub-issues) and evidence-store candidates (verified private, owned by you, with an `archives/` or `state/` folder; a name alone selects nothing), and puts one adoption proposal: what Toolkit would reuse, add, repair, keep and defer, as one setup pull request after one yes.
+
+## 3.15.28 (footer hook follow-ups)
+
+- **Footer hook shell routing:** each `gh api` call in a command is read for its own method, so a long command stays fast. In the cloud, only shell writes that post a body (`gh issue|pr create`, `comment`, `edit`, `review`, `close --comment`, and `gh api` calls other than DELETE or GET) get the read-back note; `gh issue close`, `gh pr ready` and similar writes no longer do. Every `gh` write's response is still read for the footer.
+- **Code fences:** a fence closes only on the same character (backtick or tilde), at least as long as the opening and with nothing after it, so a footer after a long fence that quotes a shorter one is still found and one inside an open fence is left alone.
+
+## 3.15.27 (numbered questions and fresh posts in Projects)
+
+- **Claude Projects skill (2026-10-28.3):** several owner questions now go in a numbered list under **Waiting on you**, each written `1. **Question: ...?**` with its link, its choices as four-space-indented bullets marking "(my pick)", and an `&nbsp;` spacer line after the last choice. Each **[HH:MM] Update:** line is followed by the same spacer. Overlapping post-format rules are merged into one set, and work threads follow the same post rules.
+- **Projects post hook:** choice bullets under a numbered question need no link of their own, and spacers or other non-list lines no longer end the **Waiting on you** check, so a later item with no link is still caught. Once the owner has written after a post, every edit of that post is refused and a fresh post is asked for, so an answer can no longer land above the owner's message; an owner reply under the running post itself still leaves it open. Lines now also split on a lone carriage return.
+
+## 3.15.26 (cloud footer on GitHub posts)
+
+### GitHub posts
+
+- **Footer flagged after posting:** in cloud sessions the GitHub route appends a "Generated by Claude Code" footer to posts after they leave the session. In a governed, guarded or evidence-store checkout, a new Claude Code after-tool hook reads what GitHub sent back and tells the agent to remove the footer at once with the matching connector edit (issue and pull request comments, pull request and issue bodies). Review comments, review replies and review bodies, which the cloud cannot edit cleanly, are listed for the device sweep instead. The hook never stops a tool call and stays silent when it cannot read its input.
+- **Device sweep:** `node repo/scripts/toolkit-github-footer-sweep.cjs --repo <owner/name> [--since <ISO time>] [--apply]` scans a repository's comments, review comments, reviews and issue and pull request bodies for the footer, with no AI step, so a scheduled task can run it. With `--apply` it edits the signed-in account's posts, skips any post changed since the scan, and reads each edit back. Exit codes: 0 none found, 3 found and left, 4 cleaned, 1 a failure, 2 bad arguments.
 
 ## 3.15.24 (answer from a Projects thread)
 
