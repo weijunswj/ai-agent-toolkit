@@ -74,6 +74,30 @@ const SHORT_COMMANDS = Object.freeze({ yes: 'enable', y: 'enable', no: 'disable'
 // The replies that say ok to GitHub governance being off in a repository that is not on github.com.
 // Every one of them has the same effect, so a plain "yes" or "no" works too.
 const OK_ANSWER = /^\s*(ok|okay|yes|y|no|n|not now|later)[.!]?\s*$/i;
+// The reply the answers above are read from. Claude Code and Codex hand the hook what the user typed,
+// bare. A Claude Projects thread hands a Remote Control session each message the user sends there
+// wrapped in one `<wake>` envelope; the user's own words are the one message in it marked as the
+// trigger, from a human the session works for. Anything else in an envelope (a coordinator's relay
+// of the user's words, a scheduled task, another person, extra text, a broken envelope) reads as
+// no reply at all, so it never answers.
+const WAKE = /^\s*<wake(?:\s+[\w-]+="[^"<>]*")*\s*>([\s\S]*)<\/wake>\s*$/;
+const WAKE_FRAME = /<\/?(?:project|thread)(?:\s+[\w-]+="[^"<>]*")*\s*>/g;
+const WAKE_MESSAGES = /^\s*(?:<message(?:\s+[\w-]+="[^"<>]*")*\s*>[^<]*<\/message>\s*)+$/;
+const WAKE_MESSAGE = /<message((?:\s+[\w-]+="[^"<>]*")*)\s*>([^<]*)<\/message>/g;
+function ownerReply(prompt) {
+  const text = String(prompt || '');
+  const wake = WAKE.exec(text);
+  if (!wake) return text;
+  const body = wake[1].replace(WAKE_FRAME, '');
+  if (!WAKE_MESSAGES.test(body)) return '';
+  const messages = [...body.matchAll(WAKE_MESSAGE)].map(([, attributes, inner]) => ({
+    attributes: Object.fromEntries([...attributes.matchAll(/([\w-]+)="([^"]*)"/g)].map(([, name, value]) => [name, value])),
+    inner,
+  }));
+  const triggers = messages.filter(message => message.attributes.trigger === 'true');
+  if (triggers.length !== 1 || triggers[0].attributes.from !== 'human' || triggers[0].attributes.trust !== 'principal') return '';
+  return triggers[0].inner.replace(/&(lt|gt|quot|#39|apos|amp);/g, (_, name) => ({ lt: '<', gt: '>', quot: '"', '#39': "'", apos: "'", amp: '&' })[name]);
+}
 // An agent's command that would answer for the user: the CLI script with a decision, or a host
 // session started, resumed or fed on stdin with an answer (long or short) as its prompt. A host's
 // own subcommands (`claude config`, `codex login` and the like) start no session and are not read.
@@ -808,7 +832,9 @@ class PromptHold {
   #decide({ cwd, prompt, sessionId = null }) {
     const verdict = this.#gate.evaluate(cwd, { sessionId });
     const text = String(prompt || '');
-    const answer = ANSWER.exec(text);
+    // Answers are read from the user's reply; what is held and handed back is the message as sent.
+    const reply = ownerReply(text);
+    const answer = ANSWER.exec(reply);
     // After "not now", the full answer still decides in the same run, unless a session has started in
     // the repository since; a short reply is an ordinary message there, since it may answer the
     // agent's own question.
@@ -816,14 +842,14 @@ class PromptHold {
     if (!verdict.hold) return verdict.reason === 'no-git' ? { action: 'pass' } : this.#replayIfAny(verdict.state, sessionId);
     if (verdict.reason === 'state-unreadable') return { action: 'block', reason: unreadableText(verdict.state, this.#registryOptions) };
     // A session another session or a launcher started never answers and never adds to what is held.
-    if (this.#launched(sessionId)) return { action: 'block', reason: answer || OK_ANSWER.test(text) ? LAUNCHED_TEXT : LAUNCHED_HOLD_TEXT };
+    if (this.#launched(sessionId)) return { action: 'block', reason: answer || OK_ANSWER.test(reply) ? LAUNCHED_TEXT : LAUNCHED_HOLD_TEXT };
     const marks = this.#marks(verdict, sessionId);
-    if (verdict.reason === 'not-github') return this.#notGitHub(cwd, text, answer, verdict, sessionId, marks);
+    if (verdict.reason === 'not-github') return this.#notGitHub(cwd, text, reply, answer, verdict, sessionId, marks);
     // Only the run of the session that was shown the question answers it, in either form.
     const id = verdict.state.repository_id;
     const asked = this.#held.asked(id, sessionId, marks);
     if (answer && asked) return this.#answer(cwd, answer[1].toLowerCase(), verdict, sessionId, marks);
-    const short = SHORT_ANSWER.exec(text);
+    const short = SHORT_ANSWER.exec(reply);
     if (short && asked) return this.#answer(cwd, SHORT_COMMANDS[short[1].toLowerCase()], verdict, sessionId, marks);
     const unmarked = this.#unmarked(sessionId, marks, answer || short);
     if (unmarked) return unmarked;
@@ -858,12 +884,12 @@ class PromptHold {
   }
 
   // A git repository not on github.com: the only outcome is DISABLED, once the user says ok.
-  #notGitHub(cwd, text, answer, verdict, sessionId, marks) {
+  #notGitHub(cwd, text, reply, answer, verdict, sessionId, marks) {
     const id = verdict.state.repository_id;
     if (answer && answer[1].toLowerCase() === 'enable') {
       return { action: 'block', reason: `Toolkit: GitHub governance cannot be enabled here, because this repository ${whereText(verdict.state)}. ${OK_ASK}` };
     }
-    const ok = Boolean(answer) || OK_ANSWER.test(text);
+    const ok = Boolean(answer) || OK_ANSWER.test(reply);
     if (ok && this.#held.asked(id, sessionId, marks)) {
       let decided;
       try { decided = writeNotGitHubOk(cwd, { registryOptions: this.#registryOptions, now: this.#now }); } catch (error) {
@@ -1114,6 +1140,7 @@ module.exports = Object.freeze({
   NOT_NOW_BASENAME,
   NOT_GITHUB_BASENAME,
   OK_ANSWER,
+  ownerReply,
   SHORT_ANSWER,
   sessionIdOf,
   startSession,
