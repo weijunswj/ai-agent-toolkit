@@ -1,6 +1,6 @@
 # Toolkit Changelog
 
-## Unreleased
+## 3.15.20 (merge tripwire and stale-copy warning)
 
 ### Who may do what
 
