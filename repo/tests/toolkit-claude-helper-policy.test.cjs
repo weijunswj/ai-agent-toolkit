@@ -12,7 +12,7 @@ const control = require('../scripts/toolkit-agent-control.cjs');
 const { governedRepo } = require('../scripts/toolkit-governed-repo.cjs');
 const { ClaudeHelperAgentRenderer } = require('../scripts/toolkit-claude-helper-agents.cjs');
 const { managedAgentsDirectory } = require('../scripts/toolkit-claude-helper-policy.cjs');
-const { makeGoverned } = require('./toolkit-governed-fixture-support.cjs');
+const { governedHome, makeGoverned } = require('./toolkit-governed-fixture-support.cjs');
 
 
 function scratch(t) {
@@ -47,8 +47,13 @@ test('the governed-repo predicate walks to the first .git and follows the govern
   const managed = makeGoverned(path.join(dir, 'managed'), 'predicate');
   fs.mkdirSync(path.join(managed, 'src', 'deep'), { recursive: true });
   assert.equal(governedRepo(path.join(managed, 'src', 'deep'), {}).reason, 'governance-enabled');
-  // The managed block alone does not govern: without the binding the repository's setup is unfinished.
+  // Only the merged binding decides: removing the working tree's copy changes nothing.
   fs.rmSync(path.join(managed, '.github'), { recursive: true });
+  assert.equal(governedRepo(managed, {}).reason, 'governance-enabled');
+  // The user's yes without a merged binding does not govern: the repository's setup is unfinished.
+  const governance = require('../scripts/toolkit-governance-state.cjs');
+  const bindingCache = require('../scripts/toolkit-governance-binding.cjs');
+  fs.rmSync(bindingCache.cacheFileFor(governance.registryPathFor({ userHome: governedHome(), testOnly: true }), governance.readIdentity(managed).repository_id));
   assert.deepEqual([governedRepo(managed, {}).governed, governedRepo(managed, {}).reason], [false, 'governance-incomplete']);
   // The block and binding without the user's yes do not govern either: the repository is asked.
   const unasked = makeGoverned(path.join(dir, 'unasked'), 'predicate-unasked', { enable: false });
