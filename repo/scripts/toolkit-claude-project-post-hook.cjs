@@ -13,7 +13,7 @@
 // - Wording, on every post and reply: no em-dashes or arrows outside code, and at most one **Question:** block.
 // - Layout, on top-level posts of 25 words or more: a **Now:** line first (after an optional "Re: your reply on"
 //   line), **[HH:MM] Update:** one-liners with no question or numbered options inside, every item under
-//   **Waiting on you** carrying a link, and one **ELI5:** line as the very last line. An edit of an earlier post keeps
+//   **Waiting on you** carrying a link (indented choice bullets and the &nbsp; spacer under a question need none), and one **ELI5:** line as the very last line. An edit of an earlier post keeps
 //   every one of its Update lines word for word and adds at least one new one.
 // - Merge summary: in a Projects session (one that has used the Projects tools), a PR merge (the gh merge command, a
 //   gh api PUT to .../pulls/<n>/merge or a merge_pull_request tool) is refused until a line of one of its own posts
@@ -38,6 +38,7 @@ const MESSAGE_ID = /\b(cmsg_[A-Za-z0-9]+)\b/;
 const UPDATE_LINE = /^\s*(?:[-*]\s+)?\*\*\[\d{1,2}:\d{2}\] Update:\*\*/;
 const WAITING_LINE = /^\s*(?:[-*]\s+)?\*\*Waiting on you\b/i;
 const ITEM_LINE = /^\s*(?:\d+[.)]|[-*])\s+/;
+const SUB_LINE = /^(?: {2,}|\t)(?:[-*]\s+\S|&nbsp;\s*$)/;
 const NOW_LINE = /^\s*(?:[-*]\s+)?\*\*Now:\*\*/;
 const REPLY_LINE = /^\s*Re: your reply on\b/i;
 const ELI5_LINE = /^\s*(?:[-*]\s+)?\*\*ELI5:\*\*/;
@@ -218,6 +219,8 @@ function layoutIssue(text) {
   }
   if (waiting !== -1) {
     for (const line of lines.slice(waiting + 1)) {
+      // A question's choice bullets and its closing &nbsp; spacer sit indented under the item and need no link.
+      if (SUB_LINE.test(line)) continue;
       if (!ITEM_LINE.test(line) || UPDATE_LINE.test(line) || ELI5_LINE.test(line)) break;
       if (!LINK.test(line)) return `the Waiting on you item "${line.trim().slice(0, 80)}" has no link. Link each item to the card or thread where the owner acts, so it is one tap away.`;
     }

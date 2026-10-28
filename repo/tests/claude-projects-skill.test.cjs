@@ -169,8 +169,8 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.match(body, /Each Toolkit scheduled task is bound to its own home thread, which carries its model and effort \(fallback: a fresh session per run\)/);
   assert.match(body, /Never resolve a home thread; a fresh-session run resolves its own thread after delivery/);
   assert.match(body, /- Posts: after the owner's last message, keep output in one post you edit \(append, keep every detail\); post anew on an owner project-chat message or near 8 KB; answer an owner burst in one post\./);
-  // Coordinator posts, in the main project chat and reply threads alike.
-  assert.match(text, /\*\*Posts, everywhere you post\*\* \(the main project chat and reply threads alike\): after the owner's last message, keep all your output in one running post and edit it, appending each new result, PR or question and keeping every earlier detail\. The running post is always your newest top-level post, the acknowledgement posted with a new thread included\. Before every edit, check whether the owner has written in the main project chat since that post; if so, post fresh instead\. Start each appended update with its local time, for example \*\*\[16:41\] Update:\*\*\. Also start a fresh post when the running post nears about 8 KB; an owner message inside a thread does not start one, and the reply to it is appended to the running post\. Answer a burst of owner messages in one post\. When the owner replies under one of your earlier posts in the main project chat, answer in the main project chat \(you cannot post under your own posts there\) with a fresh post starting "Re: your reply on <short topic>", and never edit the older post\./);
+  // Posts, in the main project chat, reply threads and work threads alike.
+  assert.match(text, /\*\*Posts, everywhere you post\*\* \(the main project chat, reply threads and work threads alike\): after the owner's last message, keep all your output in one running post and edit it, appending each new result, PR or question and keeping every earlier detail\. The running post is always your newest top-level post, the acknowledgement posted with a new thread included\. Before every edit, check whether the owner has written in the main project chat since that post; if so, post fresh instead\. Start each appended update with its local time, for example \*\*\[16:41\] Update:\*\*\. Also start a fresh post when the running post nears about 8 KB; an owner message inside a thread does not start one, and the reply to it is appended to the running post\. Answer a burst of owner messages in one post\. When the owner replies under one of your earlier posts in the main project chat, answer in the main project chat \(you cannot post under your own posts there\) with a fresh post starting "Re: your reply on <short topic>", and never edit the older post\./);
   assert.doesNotMatch(text + body, /is always a new post|edit your own post only/);
   // Running post id in memory, links on everything named, both enforced by the post hook.
   assert.ok(text.includes('save its message id as the first line of project memory, `RUNNING POST: <message id>`'));
@@ -179,6 +179,12 @@ test('Projects keeps its Toolkit base layer current without touching the project
   // The post layout and the merge summary, also enforced by the post hook.
   assert.ok(text.includes('**Post layout.** A running post has four parts, in order: a **Now:** line'));
   assert.ok(text.includes('one **ELI5:** line, matched to the Now line, as the very last line with nothing after it'));
+  assert.ok(text.includes('one **[HH:MM] Update:** line per update with a blank line after each'));
+  // Questions: numbered items with indented choices, a "(my pick)" mark and an &nbsp; spacer after the last choice.
+  assert.ok(text.includes('Each owner question is one numbered item under **Waiting on you**, written `1. **Question: <the ask>?**`'));
+  assert.ok(text.includes('`    - **<Choice> (my pick).** <one-line reason>`'));
+  assert.ok(text.includes('then one line indented four spaces holding only `&nbsp;` after the last choice'));
+  assert.doesNotMatch(text, /put at most one \*\*Question:\*\* in a post|Use decision cards for questions, else group/);
   assert.ok(text.includes('an edit keeps every earlier Update line word for word and adds at least one new one'));
   assert.ok(text.includes('the post hook refuses a PR merge (`gh pr merge`, a `gh api` merge call or a merge tool) until a line in one of that session\'s own posts or edits says "external effects" and names the PR'));
   assert.ok(text.includes('It reads only the command text, so it is a tripwire, not a guarantee'));

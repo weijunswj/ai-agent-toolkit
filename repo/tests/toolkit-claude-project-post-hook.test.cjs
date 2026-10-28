@@ -240,6 +240,23 @@ test('layout: Now first, ELI5 last and alone, Update lines without questions, Wa
   for (const options of ['pick (1) merge (2) hold', 'pick 1) merge 2) hold']) {
     assert.match(layoutIssue(LAID_OUT.replace('CI passed.', options)), /numbered options/, options);
   }
+  // Questions under Waiting on you: indented choice bullets and the &nbsp; spacer need no link, the numbered items do.
+  const QUESTIONS = LAID_OUT.replace('**Waiting on you (1):**\n1. Merge OK for the hook: [card](#cmsg_CARD)', [
+    '**Waiting on you (2):**',
+    '1. **Question: merge the hook now?** [card](#cmsg_CARD)',
+    '    - **Merge (my pick).** CI is green and the review passed.',
+    '    - **Hold.** Wait for the next release.',
+    '    &nbsp;',
+    '2. **Question: keep the old wording?** [thread](#cmsg_THREAD)',
+    '    - **No (my pick).** The new wording replaces it.',
+    '    &nbsp;',
+  ].join('\n'));
+  assert.notEqual(QUESTIONS, LAID_OUT);
+  assert.equal(layoutIssue(QUESTIONS), '');
+  assert.equal(wordingIssue(QUESTIONS), '');
+  assert.match(layoutIssue(QUESTIONS.replace(' [thread](#cmsg_THREAD)', '')), /Waiting on you item "2\. .* has no link/);
+  // An unindented bullet is its own item and still needs a link.
+  assert.match(layoutIssue(QUESTIONS.replace('    - **Hold.**', '- **Hold.**')), /Waiting on you item "- \*\*Hold/);
   // A short post with a Waiting on you line uses the layout too.
   assert.match(layoutIssue('**Waiting on you (1):**\n1. Merge OK: [card](#cmsg_C)'), /\*\*Now:\*\*/);
   // Bulleted Now and ELI5 lines are fine, and the Waiting list stops at the ELI5 line.
