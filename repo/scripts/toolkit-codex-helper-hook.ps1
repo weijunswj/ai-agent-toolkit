@@ -25,16 +25,17 @@ try {
   # Codex blocks a PreToolUse call on exit 2 with the reason on stderr; any other failure lets the call run
   # (hooks page, https://learn.chatgpt.com/docs/hooks.md, read 2026-10-23). A helper launch, or input that
   # cannot be read, is blocked: the governance check cannot run. A shell command is blocked only when it
-  # could commit or open, edit or merge a pull request, the commands the attribution check covers; this
-  # is a wider match than that check's, so it never lets one through. Other shell commands run, and the
+  # could commit, push, open, edit or merge a pull request, call the GitHub API, start a host session or
+  # touch Toolkit's merge approvals: the commands the attribution check and the merge hold look at. This
+  # is a wider match than theirs, written to let none of theirs through. Other shell commands run, and the
   # non-zero exit shows Codex's hook failure notice.
   $toolName = $null; $command = ''
   try {
     $request = [Console]::In.ReadToEnd() | ConvertFrom-Json
     $toolName = [string]$request.tool_name
-    if ($null -ne $request.tool_input) { $command = [string]$request.tool_input.command }
+    if ($null -ne $request.tool_input) { $command = [string]$request.tool_input.command + ' ' + [string]$request.tool_input.cmd }
   } catch { $toolName = $null }
-  $guardedShell = $command -match '(?s)\bgit\b.*\bcommit\b' -or $command -match '\bgh\s+pr\s+(?:create|edit|merge)\b'
+  $guardedShell = $command -match '(?s)\bgit\b.*\b(?:commit|push)\b' -or $command -match '\bgh\s+pr\s+(?:create|edit|merge)\b' -or $command -match '(?s)\bgh\b.*\b(?:merge|sync|alias|api)\b' -or $command -match 'merge-approvals|user-state|TOOLKIT_HOST_SESSION|toolkit-(?:merge-hold|governance-hook|codex-helper-hook)' -or $command -match '\b(?:claude|codex)\b'
   if ($toolName -eq 'Bash' -and -not $guardedShell) {
     [Console]::Error.WriteLine($reason)
     exit 1

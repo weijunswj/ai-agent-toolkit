@@ -1,5 +1,12 @@
 # Toolkit Changelog
 
+## 3.15.20 (merge tripwire and stale-copy warning)
+
+### Who may do what
+
+- **Merges wait for the user (a tripwire, not a lock):** on Claude Code and Codex, the hooks hold an agent's merge until the user typed a line with "merge" next to the pull request number in their own session, such as "merge 618", "618 merge" or "ok to merge 618". A line with a quote, a question, or one of a fixed list of words for a no, a doubt, a condition, a delay, a report or another kind of merge ("merge main into 618") does not count. This covers `gh pr merge`, the GitHub API merge endpoint and the GitHub connector's merge tool. One approval allows one merge of that pull request in that repository within a day, and the merge must name the head commit it expects. Connector auto-merge, GraphQL merges, the merge queue, branch merges, ref writes and pushes to the default branch are refused when written directly. It reads command text, so it catches mistakes, not a determined agent: wrapped or nested sessions, scripts, files, other HTTP clients and direct commits through the API or the connector's file tools get past it. Agents act as the user on GitHub, so GitHub cannot tell their merges apart; the hard limit is the repository's own rules where it has them (a pull request for the default branch, no force-push, no deletion). Cloud sessions are not covered yet.
+- **Stale plugin copies speak up:** when a session runs an account-synced Toolkit copy that is older than a Toolkit repository in its folder, the session-start message says so and that newer safety hooks do not run, instead of staying silent.
+
 ## 3.15.19 (proved binding separators and literal Git operands)
 
 - Restored conservative collapsed continuation evidence for every unproved source byte, including implicit concatenation and joining pipelines. Only a bounded Python for-binding separator in a complete literal PowerShell here-string/stdin transport interrupts the projection; every source word, string, comment and executable neighbour remains inspected. Direct, quoted, template and ordered signals stay independent.
