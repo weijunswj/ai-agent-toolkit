@@ -159,6 +159,14 @@ test('in the cloud, shell writes that post no body get no read-back note', () =>
   }
 });
 
+test('a long run of gh close words stays fast', () => {
+  const command = 'gh pr close 1 '.repeat(Math.ceil((256 * 1024) / 14));
+  const input = { hook_event_name: 'PostToolUse', cwd: '/work', tool_name: 'Bash', tool_input: { command }, tool_response: { stdout: '' } };
+  const started = Date.now();
+  guard.footerDecision(input, { guarded, env: { CLAUDE_CODE_REMOTE: 'true' } });
+  assert.ok(Date.now() - started < 500, `took ${Date.now() - started} ms`);
+});
+
 test('method words inside a posted body never skip the response check', () => {
   const comment = { id: 5, body: footed('run gh api -X DELETE to undo'), html_url: 'https://github.com/acme/app/issues/1#issuecomment-5' };
   const write = { hook_event_name: 'PostToolUse', cwd: '/work', tool_name: 'Bash', tool_input: { command: 'gh api repos/acme/app/issues/1/comments -f "body=run gh api -X DELETE to undo"' }, tool_response: { stdout: JSON.stringify(comment) } };

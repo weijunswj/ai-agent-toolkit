@@ -161,7 +161,9 @@ const EDIT_TOOLS = new Set(['update_issue_comment', 'update_pull_request', 'upda
 const GH_API = /\bgh(?:\.exe)?\s+api\b[^\r\n;&|]*/gi;
 const GH_METHOD = /\s(?:-X|--method)[\s=]*['"]?([A-Z]+)\b/i;
 const GH_POST = /\bgh(?:\.exe)?\s+(?:issue|pr)\s+(?:create|comment|edit|review)\b/i;
-const GH_CLOSE_COMMENT = /\bgh(?:\.exe)?\s+(?:issue|pr)\s+close\b[^\r\n;&|]*\s(?:--comment|-c)\b/i;
+// gh issue or pr close pieces, each read on its own for a comment flag, so the check stays linear.
+const GH_CLOSE = /\bgh(?:\.exe)?\s+(?:issue|pr)\s+close\b[^\r\n;&|]*/gi;
+const closesWithComment = (command) => [...command.matchAll(GH_CLOSE)].some(([piece]) => /\s(?:--comment|-c)\b/.test(piece));
 const GH_EDIT = /\bgh(?:\.exe)?\s+(?:issue|pr)\s+edit\b/i;
 // Any gh write whose response is worth reading for a footer.
 const SHELL_GH = /\bgh(?:\.exe)?\s+(?:api|issue|pr)\b/i;
@@ -170,7 +172,7 @@ function ghApiMethods(command) {
   return [...command.matchAll(GH_API)].map(([piece]) => (GH_METHOD.exec(piece)?.[1] || 'POST').toUpperCase());
 }
 function shellPosts(command) {
-  return GH_POST.test(command) || GH_CLOSE_COMMENT.test(command) || ghApiMethods(command).some((method) => method !== 'DELETE' && method !== 'GET');
+  return GH_POST.test(command) || closesWithComment(command) || ghApiMethods(command).some((method) => method !== 'DELETE' && method !== 'GET');
 }
 // Shell edits: gh api with PATCH or PUT, and gh issue or pr edit.
 function shellEdit(command) {
