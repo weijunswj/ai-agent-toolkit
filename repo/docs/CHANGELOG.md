@@ -11,6 +11,11 @@
 - **Repositories never set up still ask:** with no merged binding and no answer of yours, a github.com repository still pauses until you answer (yes, no or later), from any chat. Your earlier answers on this computer are kept as they are: a yes means setup is offered, a no means you are not asked again there, and where a binding is merged an old no becomes only a preference not to suggest governance.
 - **Discovery before questions:** the new read-only `toolkit-governance.cjs discover` (also shown by `enable`) looks before asking: it reuses a merged binding, lists parent-issue candidates (programme parents and issues with native sub-issues) and evidence-store candidates (verified private, owned by you, with an `archives/` or `state/` folder; a name alone selects nothing), and puts one adoption proposal: what Toolkit would reuse, add, repair, keep and defer, as one setup pull request after one yes.
 
+## 3.15.27 (numbered questions and fresh posts in Projects)
+
+- **Claude Projects skill (2026-10-28.3):** several owner questions now go in a numbered list under **Waiting on you**, each written `1. **Question: ...?**` with its link, its choices as four-space-indented bullets marking "(my pick)", and an `&nbsp;` spacer line after the last choice. Each **[HH:MM] Update:** line is followed by the same spacer. Overlapping post-format rules are merged into one set, and work threads follow the same post rules.
+- **Projects post hook:** choice bullets under a numbered question need no link of their own, and spacers or other non-list lines no longer end the **Waiting on you** check, so a later item with no link is still caught. Once the owner has written after a post, every edit of that post is refused and a fresh post is asked for, so an answer can no longer land above the owner's message; an owner reply under the running post itself still leaves it open. Lines now also split on a lone carriage return.
+
 ## 3.15.26 (cloud footer on GitHub posts)
 
 ### GitHub posts
