@@ -1,6 +1,6 @@
 # Toolkit Changelog
 
-## Unreleased
+## 3.15.21 (no model or effort asks in Projects setup)
 
 - **Claude Projects skill (2026-10-28.1):** guided setup no longer asks the owner to choose a coordinator model or effort in the project's settings, and the setup inventory drops its models row. Thread effort is still set on every thread the coordinator starts, and scheduled tasks and gates keep their own model and effort rules.
 
