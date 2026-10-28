@@ -335,16 +335,14 @@ class SessionEpochs {
 
 // The session-start hook's call on both hosts: records the session's mark and refreshes the mark of
 // the repository it starts in, after refreshing this computer's read of the binding merged on that
-// repository's default branch (bounded; offline keeps the last read). Never throws. A test registry
-// (registryOptions.testOnly) refreshes only through its own `refreshBinding`, so tests never reach
-// the network.
+// repository's default branch (bounded; offline keeps the last read). Never throws. `refreshBinding`
+// is for tests; a test registry or test run never reaches the network (refreshMergedBinding).
 function startSession(input, { registryOptions = {}, now, refreshBinding = null } = {}) {
   try {
     let repositoryId = null;
     if (input && typeof input.cwd === 'string' && input.cwd && input.source !== 'clear' && input.source !== 'compact') {
       // The one place a hook reads the network: the merged binding, bounded, into this computer's cache.
-      const refresh = refreshBinding || (registryOptions.testOnly === true ? null : governance.refreshMergedBinding);
-      if (refresh) { try { refresh(input.cwd, registryOptions); } catch { /* offline keeps the last read */ } }
+      try { (refreshBinding || governance.refreshMergedBinding)(input.cwd, registryOptions); } catch { /* offline keeps the last read */ }
       try { repositoryId = governance.governanceState(input.cwd, registryOptions).repository_id || null; } catch { repositoryId = null; }
     }
     return new SessionEpochs({ registryOptions, now }).start(sessionIdOf(input), input && input.source, repositoryId);

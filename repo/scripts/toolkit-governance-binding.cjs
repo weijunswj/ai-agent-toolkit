@@ -170,4 +170,5 @@ module.exports = Object.freeze({
   readBindingCache,
   writeCache,
   isFresh,
+  defaultRunGit,
 });

@@ -195,6 +195,9 @@ test('A4: the cache never upgrades OFF to ON; offline keeps the last read', (t) 
   const offline = () => ({ status: 128, stdout: Buffer.alloc(0), stderr: Buffer.from('fatal: unable to access') });
   assert.deepEqual(bindingCache.refreshBindingCache(identity, ctx.registryPath, { runGit: offline }), { refreshed: false, entry: null, error: 'remote-unreachable' });
   assert.equal(stateAt(ctx, repo).rule, 'R7');
+  // Offline mode (set for test runs) and a test registry read nothing from the network.
+  assert.deepEqual(governance.refreshMergedBinding(repo, {}, { environment: { TOOLKIT_GOVERNANCE_OFFLINE: '1' } }), { refreshed: false, error: 'offline' });
+  assert.deepEqual(governance.refreshMergedBinding(repo, ctx.opts, { environment: {} }), { refreshed: false, error: 'offline' });
   cache(ctx, repo, { status: 'absent' });
   assert.equal(bindingCache.refreshBindingCache(identity, ctx.registryPath, { runGit: offline }).entry.status, 'absent', 'offline keeps the last read');
   assert.equal(stateAt(ctx, repo).rule, 'R7');
@@ -277,7 +280,7 @@ test('A1 end to end with real git: only the default branch\'s merged binding cou
   git(clone, ['remote', 'set-url', 'origin', REMOTE]);
   git(clone, ['config', `url.${origin.replace(/\\/g, '/')}.insteadOf`, REMOTE]);
   git(clone, ['checkout', '--quiet', 'feature']);
-  assert.equal(governance.refreshMergedBinding(clone, ctx.opts).refreshed, true);
+  assert.equal(governance.refreshMergedBinding(clone, ctx.opts, { runGit: bindingCache.defaultRunGit }).refreshed, true);
   let current = governance.governanceState(clone, ctx.opts);
   assert.deepEqual([current.rule, current.merged.status], ['R7', 'none'], 'a checked-out branch with a binding is not the default branch');
   assert.ok(current.notes.includes('pending-binding-merge'));
@@ -285,7 +288,7 @@ test('A1 end to end with real git: only the default branch\'s merged binding cou
   git(seed, ['checkout', '--quiet', 'main']);
   git(seed, [...id, 'merge', '--quiet', '--no-ff', '-m', 'merge binding', 'feature']);
   git(seed, ['push', '--quiet', origin, 'main']);
-  assert.equal(governance.refreshMergedBinding(clone, ctx.opts).refreshed, true);
+  assert.equal(governance.refreshMergedBinding(clone, ctx.opts, { runGit: bindingCache.defaultRunGit }).refreshed, true);
   current = governance.governanceState(clone, ctx.opts);
   assert.deepEqual([current.state, current.rule, current.programme_records_bind], ['ENABLED', 'M1', true]);
   // Editing the working tree does not change what was merged.

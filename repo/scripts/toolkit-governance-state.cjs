@@ -594,7 +594,11 @@ function governanceState(cwd, options = {}) {
 // Refreshes this computer's cache of the merged binding for the repository at cwd (setup,
 // `toolkit governance status` and the session-start hook only). Never throws; returns
 // { refreshed, error }. Nothing to refresh outside a github.com repository.
-function refreshMergedBinding(cwd, options = {}, { runGit, timeout, now } = {}) {
+// With TOOLKIT_GOVERNANCE_OFFLINE=1 (set for test runs), or for a test registry, nothing reads the
+// network unless a git runner is passed in: the last read stays, so governed effects hold once it is
+// over 24 hours old.
+function refreshMergedBinding(cwd, options = {}, { runGit, timeout, now, environment = process.env } = {}) {
+  if (!runGit && (environment.TOOLKIT_GOVERNANCE_OFFLINE === '1' || options.testOnly === true)) return { refreshed: false, error: 'offline' };
   try {
     const identity = readIdentity(cwd);
     if (!identity.root || !identity.valid || notGitHubOf(identity)) return { refreshed: false, error: 'not-applicable' };
