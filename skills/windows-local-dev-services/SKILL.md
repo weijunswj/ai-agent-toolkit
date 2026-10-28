@@ -1,6 +1,6 @@
 ---
 name: windows-local-dev-services
-description: Use when starting, relaunching, verifying, or debugging Windows localhost web apps, API servers, or dev services, especially long-running dev servers, bounded readiness polling, interrupted command cleanup, PowerShell startup, execution policy, Corepack/package-manager, Python runtime, spawn EPERM, duplicate Path/PATH, port conflict, detached launch, sandbox persistence, or empty-log failures.
+description: Use when starting, relaunching, verifying, or debugging Windows localhost web apps, API servers, or dev services, especially long-running dev servers, bounded readiness polling, interrupted command cleanup, leftover node processes, PowerShell startup, execution policy, Corepack/package-manager, Python runtime, spawn EPERM, duplicate Path/PATH, port conflict, detached launch, sandbox persistence, or empty-log failures.
 ---
 
 # Windows Local Dev Services
@@ -386,9 +386,20 @@ In Codex sandboxed shells, background localhost servers may exit or be killed wh
 
 Even when a sandboxed background launch appears to work while the shell command is still running, do not claim the service is persistent until a follow-up port or HTTP check succeeds after that shell command has returned.
 
-### Interrupted command left orphaned child processes
+### Stopped, interrupted or finished runs left orphaned child processes
 
 After a user interrupts a long localhost, validation, package-manager, or test command, immediately inspect likely child processes before retrying. Look for local `python`, `pip`, `node`, `npm`, `pnpm`, `yarn`, `bun`, test-runner, and dev-server processes that still own the target port or continue consuming CPU.
+
+On Windows, stopping a parent process does not stop its children, so `node` test workers and dev servers keep running after a timeout, an interrupt or `Stop-Process` on the parent.
+
+- To stop a run, stop its whole tree: `taskkill /PID <pid> /T /F`, not `Stop-Process` on the parent alone.
+- Note the PID of each long or background command you start. After stopping a run, after an interruption and before the session ends, list leftovers from your own run and stop only those:
+
+  ```powershell
+  Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object { $_.CommandLine -like "*$worktree*" } | Select-Object ProcessId,ParentProcessId
+  ```
+
+  `taskkill /T` cannot follow children whose parent already exited, so match them by your worktree or scratch path. Never stop by name (`taskkill /IM node.exe`) or a process from outside your run; ask about any that are unclear. Do not paste full command lines into reports, as they can hold tokens.
 
 On Windows, start with bounded, read-only process and port checks:
 
