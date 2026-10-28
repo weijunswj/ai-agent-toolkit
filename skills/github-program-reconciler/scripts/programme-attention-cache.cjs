@@ -106,11 +106,13 @@ function claimBackgroundStart(repository, deps = {}) {
     const last = Date.parse(fs.readFileSync(file, 'utf8').trim());
     if (Number.isFinite(last) && nowMs - last >= 0 && nowMs - last < START_GAP_MS) return false;
   } catch { /* no start yet */ }
+  // A start that cannot be recorded (a folder or a locked file at that path) is still allowed: only the
+  // throttle is lost, never the refresh.
   try {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, `${new Date(nowMs).toISOString()}\n`, { mode: 0o600 });
-    return true;
-  } catch { return false; }
+  } catch { /* unthrottled */ }
+  return true;
 }
 
 module.exports = Object.freeze({ CACHE_SCHEMA, STALE_MS, START_GAP_MS, cacheDir, cacheFile, readCache, writeCache, markShown, sessionAttention, claimBackgroundStart, ageText });

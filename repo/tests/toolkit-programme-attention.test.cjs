@@ -597,3 +597,31 @@ test('L4: inventory and attention only read GitHub, and the inventory command li
   assert.deepEqual(writes, [], 'no write of any kind: no issue, comment, label, link or store change');
   assert.equal(fx.github.commits, commits, 'no store commit');
 });
+
+test('N3: a dispose reason goes when its finding drops off the list, and stays while it is listed', () => {
+  const fx = fixture();
+  const at = n => new Date(Date.UTC(2026, 9, 1) + n * 60000).toISOString();
+  const entry = (n, entryState) => ({ id: state.findingId('inventory', 'NEEDS_PLACEMENT', n, ''), source: 'inventory', code: 'NEEDS_PLACEMENT', issue: n, head: null, state: entryState, first_seen: at(n), changed_at: at(n) });
+  // 200 closed entries: the oldest is disposed (it drops first), and one recent disposed entry stays.
+  const list = Array.from({ length: 200 }, (unused, n) => entry(5000 + n, n === 0 || n === 199 ? 'disposed' : 'resolved'));
+  const oldest = list[0].id;
+  const recent = list[199].id;
+  fx.store.mutate('parent', 421, { writer: controller, change: doc => ({ ...doc, attention: list, private: { ...doc.private, attention_notes: { [oldest]: 'old reason', [recent]: 'recent reason' } } }) });
+  fx.github.addIssue(470);
+  fx.run(['refresh']);
+  const doc = fx.parentDoc();
+  assert.equal(doc.attention.length, 200);
+  assert.equal(doc.attention.some(item => item.id === oldest), false, 'the oldest closed entry dropped');
+  assert.deepEqual(doc.private.attention_notes, { [recent]: 'recent reason' }, 'its reason went with it; the listed one kept its reason');
+});
+
+test('a folder at the throttle path never stops session-start refreshes', () => {
+  const attentionDir = tmp();
+  const deps = { attentionDir, now: () => '2026-10-28T10:00:00.000Z' };
+  fs.mkdirSync(`${cache.cacheFile('acme/app', deps)}.started`, { recursive: true });
+  assert.equal(cache.claimBackgroundStart('acme/app', deps), true);
+  assert.equal(cache.claimBackgroundStart('acme/app', deps), true, 'unthrottled, never blocked');
+  const fresh = { attentionDir: tmp(), now: () => '2026-10-28T10:00:00.000Z' };
+  assert.equal(cache.claimBackgroundStart('acme/app', fresh), true);
+  assert.equal(cache.claimBackgroundStart('acme/app', fresh), false, 'a normal file throttles');
+});

@@ -354,12 +354,17 @@ function foldAttention(current, { source, seen = [], complete, now, hold = [] })
   const seenIds = new Set();
   let changed = false;
   const open = () => list.filter(entry => OPEN_FINDING_STATES.includes(entry.state)).length;
-  const add = (code, issue, head) => {
+  const add = (code, issue, head, since = null) => {
     const id = findingId(FINDING_CODES[code].source, code, issue, head);
     seenIds.add(id);
     const existing = byId.get(id);
     if (existing) {
-      if (existing.state === 'resolved') { existing.state = 'new'; existing.changed_at = now; changed = true; }
+      // A resolved finding that comes back is new again. A one-time code is a fresh event each time it
+      // is reported, so it also reopens an answered entry, unless the report carries the time of what
+      // it reports and that is no later than the answer (a journal that still shows an old error).
+      const fresh = !since || Number.isNaN(Date.parse(since)) || Date.parse(since) > Date.parse(existing.changed_at);
+      const reopens = existing.state === 'resolved' || (ONE_TIME_CODES.has(code) && ['acknowledged', 'disposed'].includes(existing.state) && fresh);
+      if (reopens) { existing.state = 'new'; existing.changed_at = now; changed = true; }
       return;
     }
     if (code !== 'ATTENTION_FULL' && open() >= ATTENTION_LIMIT) { add('ATTENTION_FULL', null, null); return; }
@@ -372,7 +377,7 @@ function foldAttention(current, { source, seen = [], complete, now, hold = [] })
     if (!Object.hasOwn(FINDING_CODES, finding.code) || FINDING_CODES[finding.code].source !== source) continue;
     const issue = ISSUELESS_CODES.has(finding.code) ? null : finding.issue;
     if (!ISSUELESS_CODES.has(finding.code) && !isInt(issue, 1)) continue;
-    add(finding.code, issue, HEAD_BOUND_CODES.has(finding.code) && isSha(finding.head) ? finding.head : null);
+    add(finding.code, issue, HEAD_BOUND_CODES.has(finding.code) && isSha(finding.head) ? finding.head : null, typeof finding.since === 'string' ? finding.since : null);
   }
   for (const entry of complete ? list : []) {
     // ATTENTION_FULL resolves on any complete run back under the bound.
@@ -968,7 +973,7 @@ function foldJournals(doc, observation) {
     if (!journal || journal.issue !== issue || journal.assignment !== liveId || journal.session_hash !== file.session_hash) {
       if (fresh(file)) findings.push({ code: 'JOURNAL_INVALID', issue, detail: `the checkpoint journal for assignment ${liveId} could not be used (${file.error || 'it names another issue, assignment or session'})` });
     } else {
-      if (journal.last_error && fresh(file)) findings.push({ code: 'JOURNAL_ERROR', issue, detail: `the executor's checkpoint hook reported ${journal.last_error.code} at ${journal.last_error.at}` });
+      if (journal.last_error && fresh(file)) findings.push({ code: 'JOURNAL_ERROR', issue, since: journal.last_error.at, detail: `the executor's checkpoint hook reported ${journal.last_error.code} at ${journal.last_error.at}` });
       if (gate.state === 'ASSIGNED') {
         gate.state = 'ACTIVE';
         gate.session_id = file.session_hash;
@@ -2593,15 +2598,19 @@ class Reconciler {
   }
 
   // One-time findings that stay open although this pass did not report them again:
-  // - RETURN_CAPTURED while the task still holds a return no verdict has consumed;
-  // - JOURNAL_ERROR and JOURNAL_INVALID while still new and the task's assignment is live;
+  // - RETURN_CAPTURED while the live assignment holds a return no verdict has consumed (a return left
+  //   by an interrupted or superseded assignment can no longer be consumed, so it does not hold);
+  // - JOURNAL_ERROR and JOURNAL_INVALID while still new and the task has a live gate;
   // - STALE_ASSIGNMENT while still new.
   // An acknowledged one (RETURN_CAPTURED apart) resolves on the next complete pass; a disposed one is
   // closed already.
   oneTimeHolds(attention, children) {
     return (attention || []).filter(entry => ONE_TIME_CODES.has(entry.code) && OPEN_FINDING_STATES.includes(entry.state)).filter(entry => {
       const gate = children.get(entry.issue)?.gate;
-      if (entry.code === 'RETURN_CAPTURED') return Boolean(gate?.returns?.some(item => !item.consumed));
+      if (entry.code === 'RETURN_CAPTURED') {
+        const live = LIVE_GATE_STATES.includes(gate?.state) ? gate.assignment?.id : null;
+        return Boolean(live && gate.returns?.some(item => !item.consumed && item.assignment === live));
+      }
       if (entry.state !== 'new') return false;
       return entry.code === 'STALE_ASSIGNMENT' || LIVE_GATE_STATES.includes(gate?.state);
     }).map(entry => entry.id);
@@ -2613,7 +2622,7 @@ class Reconciler {
   // shows them after this pass.
   planAttention(parent, projected, observed, only, override, inventory, effects, findings, holds) {
     const folds = [];
-    if (!only && !override) folds.push({ source: 'reconcile', complete: true, seen: findings.filter(finding => ATTENTION.has(finding.code)).map(({ code, issue, head = null }) => ({ code, issue, head })), hold: this.oneTimeHolds(parent.attention, projected) });
+    if (!only && !override) folds.push({ source: 'reconcile', complete: true, seen: findings.filter(finding => ATTENTION.has(finding.code)).map(({ code, issue, head = null, since = null }) => ({ code, issue, head, ...(since ? { since } : {}) })), hold: this.oneTimeHolds(parent.attention, projected) });
     if (inventory) folds.push({ source: 'inventory', complete: inventory.complete, seen: inventory.findings });
     if (!folds.length) return;
     const now = this.now();
