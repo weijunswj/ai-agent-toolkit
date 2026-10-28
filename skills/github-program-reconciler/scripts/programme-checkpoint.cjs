@@ -211,15 +211,26 @@ const QUEUE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 function queueFile(hash, deps) { return path.join(sessionsDir(deps), `${hash}.queued.json`); }
 
 // The queued entries still inside the bounds, oldest first; dropped ones are noted once.
-function readQueue(hash, deps = {}) {
+function readQueue(hash, deps = {}) { return loadQueue(hash, deps).entries; }
+
+// { entries, expired }: the entries inside seven days, and how many were older.
+function loadQueue(hash, deps = {}) {
   const doc = readJson(queueFile(hash, deps));
-  if (!doc || doc.schema !== QUEUE_SCHEMA || !Array.isArray(doc.entries)) return [];
+  if (!doc || doc.schema !== QUEUE_SCHEMA || !Array.isArray(doc.entries)) return { entries: [], expired: 0 };
   const now = deps.now ? Date.parse(deps.now()) : Date.now();
-  return doc.entries.filter(item => item && typeof item.at === 'string' && now - Date.parse(item.at) <= QUEUE_MAX_AGE_MS);
+  const entries = doc.entries.filter(item => item && typeof item.at === 'string' && now - Date.parse(item.at) <= QUEUE_MAX_AGE_MS);
+  return { entries, expired: doc.entries.length - entries.length };
+}
+
+// Notes turns that aged out of the queue unwritten, once, when the queue is next read for a change.
+function noteExpired(hash, expired, deps) {
+  if (expired > 0) recordError(hash, 'QUEUE_EXPIRED', `${expired} queued turn${expired === 1 ? ' was' : 's were'} older than seven days and dropped unwritten.`, deps);
 }
 
 function queueEntry(hash, item, deps = {}) {
-  const entries = [...readQueue(hash, deps), item];
+  const loaded = loadQueue(hash, deps);
+  noteExpired(hash, loaded.expired, deps);
+  const entries = [...loaded.entries, item];
   const kept = entries.slice(-QUEUE_LIMIT);
   if (kept.length < entries.length) recordError(hash, 'QUEUE_FULL', `The offline queue keeps the newest ${QUEUE_LIMIT} turns; ${entries.length - kept.length} older one was dropped.`, deps);
   writeJsonAtomically(queueFile(hash, deps), { schema: QUEUE_SCHEMA, entries: kept });
@@ -263,7 +274,8 @@ function runCheckpoint({ sessionId, message = null }, deps = {}) {
   const queueTurn = () => {
     if (parsed.error) recordError(hash, parsed.error, 'The toolkit-return block could not be read; it was not recorded.', deps);
     const facts = collectFacts(local.repo_root, deps);
-    const queued = queueEntry(hash, { at: deps.now ? deps.now() : new Date().toISOString(), facts, entry: parsed.entry }, deps);
+    // Each turn names the repository, issue and assignment it belongs to; a replay skips any other.
+    const queued = queueEntry(hash, { at: deps.now ? deps.now() : new Date().toISOString(), repository: String(local.repository).toLowerCase(), issue: local.issue, assignment: local.assignment, facts, entry: parsed.entry }, deps);
     return { outcome: 'QUEUED', queued, error: parsed.error };
   };
   if (!current || current.state !== 'ENABLED' || current.programme_records_bind !== true) {
@@ -291,7 +303,13 @@ function runCheckpoint({ sessionId, message = null }, deps = {}) {
   if (parsed.error) recordError(hash, parsed.error, 'The toolkit-return block could not be read; it was not recorded.', deps);
   const facts = collectFacts(local.repo_root, deps);
   // Queued turns first, in order, then this one, folded into one journal write.
-  const queued = readQueue(hash, deps);
+  const loaded = loadQueue(hash, deps);
+  noteExpired(hash, loaded.expired, deps);
+  // Only turns queued for this binding replay here; a turn from before a rebind is dropped with a note.
+  const belongs = item => item.repository === String(local.repository).toLowerCase() && item.issue === local.issue && item.assignment === local.assignment;
+  const queued = loaded.entries.filter(belongs);
+  const foreign = loaded.entries.length - queued.length;
+  if (foreign > 0) recordError(hash, 'QUEUE_SKIPPED', `${foreign} queued turn${foreign === 1 ? '' : 's'} belonged to another repository, issue or assignment and ${foreign === 1 ? 'was' : 'were'} not written.`, deps);
   const pending = readErrors(hash, deps).pending;
   let next = previous;
   let changed = false;
@@ -304,7 +322,7 @@ function runCheckpoint({ sessionId, message = null }, deps = {}) {
   if (changed) next = { ...next, seq: previous.seq + 1 };
   if (lastIdError) recordError(hash, lastIdError, 'A return ID was reused with different content; the first one stays.', deps);
   if (!changed) {
-    if (queued.length) discardQueue(hash, deps);
+    if (loaded.entries.length || loaded.expired) discardQueue(hash, deps);
     return { outcome: 'NOOP', journal: name, error: parsed.error || lastIdError };
   }
   let result;
@@ -313,7 +331,8 @@ function runCheckpoint({ sessionId, message = null }, deps = {}) {
     throw error;
   }
   if (pending) clearPending(hash, deps);
-  if (queued.length) discardQueue(hash, deps);
+  // Deleted only now, after the write was confirmed; a failed write above keeps the queue.
+  if (loaded.entries.length || loaded.expired) discardQueue(hash, deps);
   return { outcome: result.outcome, journal: name, seq: result.doc.seq, replayed: queued.length, error: parsed.error || lastIdError };
 }
 

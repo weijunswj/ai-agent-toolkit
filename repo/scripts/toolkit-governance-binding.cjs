@@ -160,7 +160,7 @@ function removeKilledFetchLock(git, root, tracking, started) {
 
 // Why a refresh kept the last read, in plain words for `status`, or null when there is nothing to say.
 const REFRESH_REASONS = Object.freeze({
-  'remote-redirected': 'git would fetch origin from somewhere else (a URL rewrite, or a transport, proxy or TLS override in this repository\'s git config, git -c or GIT_CONFIG_* variables, or GIT_SSH for an ssh origin), so the merged binding was not read',
+  'remote-redirected': 'git would fetch origin from somewhere else (a URL rewrite, or a transport, proxy or TLS override in this repository\'s git config, git -c, GIT_CONFIG_COUNT or GIT_CONFIG_PARAMETERS, or GIT_SSH for an ssh origin), so the merged binding was not read',
   'remote-unreachable': 'GitHub could not be reached (offline?)',
   'fetch-failed': 'the default branch could not be fetched',
   'default-branch-unknown': 'the remote did not say which branch is its default',

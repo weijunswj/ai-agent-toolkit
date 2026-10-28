@@ -607,3 +607,39 @@ test('Q1-Q4 the offline queue is bounded, kept in user-state, and replays a retu
   assert.deepEqual(returns.filter(id => id === 'q-once'), ['q-once']);
   assert.equal(fs.existsSync(file), false);
 });
+
+test('Q5 queued turns replay in order, the queue goes only after a confirmed write, and a rebind never inherits it', () => {
+  const fx = fixture();
+  fx.ctrl(['assign', '--issue', '423', '--role', 'G1', '--assignment', 'g1-a1']);
+  fx.run(['bind', '--issue', '423', '--assignment', 'g1-a1', '--session', 'exec-a']);
+  const hash = checkpoint.sessionHash('exec-a');
+  const sessions = { sessionsDir: fx.sessionsDir };
+  const stale = () => ({ state: 'ENABLED', governed_rules_bind: true, programme_records_bind: false });
+  const returns = () => fx.store.readJournal(423, `g1-a1--${hash}.json`).doc.returns.map(entry => entry.return_id);
+  assert.equal(fx.turnEnd('exec-a', returnBlock('r1'), { governanceState: stale }).outcome, 'QUEUED');
+  assert.equal(fx.turnEnd('exec-a', returnBlock('r2'), { governanceState: stale }).outcome, 'QUEUED');
+  // The write fails during the replay: everything stays queued, now with this turn too.
+  const writesDown = { request: (method, ...rest) => (method === 'GET' ? fx.github.request(method, ...rest) : { status: 503, json: { message: 'unavailable' } }), graphql: (...args) => fx.github.graphql(...args) };
+  assert.equal(fx.turnEnd('exec-a', returnBlock('r3'), { transport: writesDown }).outcome, 'QUEUED');
+  assert.deepEqual(checkpoint.readQueue(hash, sessions).map(item => item.entry && item.entry.return_id), ['r1', 'r2', 'r3']);
+  assert.deepEqual(returns(), [], 'nothing reached the journal');
+  // The next writable turn writes them in order, then its own, and only then deletes the queue.
+  const written = fx.turnEnd('exec-a', returnBlock('r4'));
+  assert.equal(written.replayed, 3);
+  assert.deepEqual(returns(), ['r1', 'r2', 'r3', 'r4']);
+  assert.equal(fs.existsSync(checkpoint.queueFile(hash, sessions)), false);
+  // A turn queued under one assignment is never written into the next one's journal.
+  assert.equal(fx.turnEnd('exec-a', returnBlock('a1-final'), { governanceState: stale }).outcome, 'QUEUED');
+  const binding = JSON.parse(fs.readFileSync(checkpoint.bindingFile(hash, sessions), 'utf8'));
+  fs.writeFileSync(checkpoint.bindingFile(hash, sessions), JSON.stringify({ ...binding, assignment: 'g1-a2' }));
+  fx.store.writeJournal(423, `g1-a2--${hash}.json`, checkpoint.newJournal({ ...binding, assignment: 'g1-a2', hash }), {});
+  fx.turnEnd('exec-a', returnBlock('a2-first'));
+  const a2 = fx.store.readJournal(423, `g1-a2--${hash}.json`).doc.returns.map(entry => entry.return_id);
+  assert.deepEqual(a2, ['a2-first'], 'the other assignment\'s queued turn was skipped');
+  assert.equal(checkpoint.readErrors(hash, sessions).recent.some(entry => entry.code === 'QUEUE_SKIPPED'), true);
+  // Turns older than seven days are noted when dropped.
+  const old = new Date(new Date(fx.github.clock).getTime() - checkpoint.QUEUE_MAX_AGE_MS - 60000).toISOString();
+  fs.writeFileSync(checkpoint.queueFile(hash, sessions), JSON.stringify({ schema: 'toolkit.programme-checkpoint-queue.v1', entries: [{ at: old, facts: null, entry: null }] }));
+  fx.turnEnd('exec-a', returnBlock('a2-second'), { governanceState: stale });
+  assert.equal(checkpoint.readErrors(hash, sessions).recent.some(entry => entry.code === 'QUEUE_EXPIRED'), true);
+});
