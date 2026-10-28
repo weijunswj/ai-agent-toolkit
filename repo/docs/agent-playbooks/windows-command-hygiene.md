@@ -36,10 +36,10 @@ Get-Content -LiteralPath "log.txt" -Tail 120
 Get-NetTCPConnection -LocalPort 3000 -ErrorAction SilentlyContinue | Select-Object LocalAddress,LocalPort,State,OwningProcess
 ```
 
-- Stop only the known owning PID when needed:
+- Stop only the known owning PID and its children when needed:
 
 ```powershell
-Stop-Process -Id <PID> -Force
+taskkill /PID <PID> /T /F
 ```
 
 - Do not kill broad process names blindly.

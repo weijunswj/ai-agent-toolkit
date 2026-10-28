@@ -4,8 +4,11 @@
 // Checks per-file test times against the repository's declared budget.
 //
 //   node repo/scripts/check-test-durations.cjs <report.json>...
+//   node repo/scripts/check-test-durations.cjs --ci
 //
-// Each report is a run-tests.cjs --summary or --report-durations file. The budget lives in the
+// Each report is a run-tests.cjs --summary or --report-durations file. --ci reads every shard summary
+// the validate job downloaded to $RUNNER_TEMP/test-summaries (the same folder run-tests.cjs
+// --verify-ci checks), so CI fails a file over its budget. The budget lives in the
 // shard manifest (repo/contracts/ci/test-shards.json) under `budgets`:
 //
 //   "budgets": {
@@ -21,7 +24,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 const shards = require('./ci-test-shards.cjs');
 
-const REPORT_SCHEMAS = new Set(['toolkit-test-durations/v1', shards.SUMMARY_SCHEMA]);
+const CI_ARGUMENT = '--ci';
+// The validate job's gate command; a local gate run has no shard summaries and leaves it out.
+const CI_COMMAND = `node repo/scripts/check-test-durations.cjs ${CI_ARGUMENT}`;
+const REPORT_SCHEMAS =new Set(['toolkit-test-durations/v1', shards.SUMMARY_SCHEMA]);
 
 // { system, files: { file: seconds } } from either report shape.
 function readReport(value) {
@@ -70,12 +76,29 @@ function checkDurations(reports, budgets = {}) {
   return { errors, lines };
 }
 
-function main(argv = process.argv.slice(2), { root = shards.ROOT, out = process.stdout, err = process.stderr } = {}) {
-  if (!argv.length) {
-    err.write('Usage: node repo/scripts/check-test-durations.cjs <report.json>...\n');
+// The shard summaries the validate job downloaded. No summary at all is an error, never a pass.
+function ciReportFiles(env = process.env) {
+  if (!env.RUNNER_TEMP) throw new Error('--ci needs RUNNER_TEMP, which only the CI runner sets');
+  const dir = path.join(env.RUNNER_TEMP, 'test-summaries');
+  const files = fs.existsSync(dir) ? fs.readdirSync(dir).filter((name) => name.endsWith('.json')).sort().map((name) => path.join(dir, name)) : [];
+  if (!files.length) throw new Error(`no shard summaries in ${dir}`);
+  return files;
+}
+
+function main(argv = process.argv.slice(2), { root = shards.ROOT, out = process.stdout, err = process.stderr, env = process.env } = {}) {
+  if (!argv.length || (argv.includes('--ci') && argv.length > 1)) {
+    err.write(`Usage: node repo/scripts/check-test-durations.cjs <report.json>... | ${CI_ARGUMENT}\n`);
     return 2;
   }
-  const reports = argv.map((file) => readReport(JSON.parse(fs.readFileSync(file, 'utf8'))));
+  let files = argv;
+  if (argv[0] === CI_ARGUMENT) {
+    try { files = ciReportFiles(env); }
+    catch (error) {
+      err.write(`Test duration check could not run: ${error.message}\n`);
+      return 2;
+    }
+  }
+  const reports = files.map((file) => readReport(JSON.parse(fs.readFileSync(file, 'utf8'))));
   const { errors, lines } = checkDurations(reports, shards.loadManifest(root).budgets);
   for (const line of lines) out.write(`${line}\n`);
   if (errors.length) {
@@ -88,4 +111,4 @@ function main(argv = process.argv.slice(2), { root = shards.ROOT, out = process.
 
 if (require.main === module) process.exitCode = main();
 
-module.exports = Object.freeze({ checkDurations, main, readReport });
+module.exports = Object.freeze({ CI_COMMAND, checkDurations, ciReportFiles, main, readReport });

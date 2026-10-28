@@ -66,6 +66,8 @@ test('guidance moved out of root AGENTS.md is still reachable from a loaded laye
     ['global-rules.md', ROOT_AGENTS],
     ['repo/contracts/source-of-truth-contract.md', ROOT_AGENTS],
     ['repo/docs/agent-playbooks/INDEX.md', ROOT_AGENTS],
+    ['Check long runs early against their usual time', GLOBAL],
+    ['## Long Runs', read('skills/repository-agent-rules/repo-local/docs/agent-playbooks/fast-tests-and-sharding.md')],
   ];
   for (const [text, layer] of moved) assert.ok(layer.includes(text), text);
   assert.doesNotMatch(ROOT_AGENTS, /GLOBAL-AGENTS\.MD-TEMPLATE|N8N-AGENT-RULES-ADAPTER|one pending owner question/);

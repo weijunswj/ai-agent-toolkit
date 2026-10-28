@@ -847,7 +847,7 @@
     {
       "id": "windows-local-positive-3",
       "kind": "positive",
-      "prompt": "Relaunch this Windows localhost service safely after identifying the exact orphaned process and occupied port.",
+      "prompt": "Clean up the leftover node processes my test run left on Windows.",
       "expected": ["windows-local-dev-services"],
       "excluded": []
     },
