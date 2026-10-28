@@ -7,7 +7,7 @@
 // Contents API with compare-and-swap on the blob sha. The reconciler reads those documents and the
 // live GitHub state (issues, native parent/sub-issue links, dependency edges, PR heads and checks),
 // reports typed findings, plans effects and, only when asked to apply, runs each effect as
-// intent -> mutation -> readback -> resolution. It never closes, deletes or merges anything.
+// intent -> mutation -> readback -> resolution. It never closes, deletes or merges anything; the controller closes.
 //
 // GitHub facts these owners rely on, checked against the REST docs and a private sandbox on
 // 2026-10-23:
@@ -78,6 +78,7 @@ const TERMINAL_LIFECYCLES = ['DONE', 'RETIRED'];
 // UAT states that speak for one head, and review states that need verdicts at a head.
 const HEAD_BOUND_UAT = ['PASSED', 'UAT_RETAINED', 'UAT_PARTIAL_REQUIRED'];
 const DECIDED_REVIEW = ['PASSED', 'NOT_PASSED'];
+const CLOSABLE_UAT = [null, 'NOT_REQUIRED', 'PASSED', 'UAT_RETAINED'];
 const PATCHABLE_PARENT_FIELDS = ['outcomes', 'release_plan', 'private'];
 const BLOCK_SOURCE = 'programme-state';
 const BLOCK_NAME = 'STATE';
@@ -1960,7 +1961,11 @@ class Reconciler {
         const gate = desired.gate.role;
         const gateAccepted = currentGateAccepted(desired);
         const accepted = completionAccepted(desired);
-        findings.push({ code: 'READY_TO_CLOSE', issue: issueNumber, pr: pr.number, head: pr.head, gate, gate_accepted: gateAccepted, accepted, uat: desired.uat.state ? uatText(desired) : null, review: desired.review.state ? reviewText(desired) : null,
+        const uat = desired.uat.state ? uatText(desired) : null;
+        const review = desired.review.state ? reviewText(desired) : null;
+        // Closable as completed: G1-or-later acceptance, no UAT outstanding and no unpassed or stale review.
+        const closable = accepted && CLOSABLE_UAT.includes(uat) && [null, 'PASSED'].includes(review);
+        findings.push({ code: 'READY_TO_CLOSE', issue: issueNumber, pr: pr.number, head: pr.head, gate, gate_accepted: gateAccepted, accepted, closable, uat, review,
           detail: `PR #${pr.number} merged, checks GREEN at ${shortSha(pr.head)}; ${gate || 'unassigned gate'} ${gateAccepted ? 'acceptance recorded' : 'not accepted'}` });
       }
       if (desired.candidate.head && pr.state !== 'MERGED' && pr.state !== 'CLOSED' && desired.candidate.head !== pr.head) {
@@ -2484,7 +2489,7 @@ class Reconciler {
       mode: apply ? 'apply' : 'dry-run',
       parent_revision: plan.parent?.revision ?? null,
       findings: plan.findings,
-      close_list: plan.findings.filter(finding => finding.code === 'READY_TO_CLOSE').map(({ issue, pr, head, gate, gate_accepted, accepted, uat, review }) => ({ issue, pr, head, gate, gate_accepted, accepted, uat, review })),
+      close_list: plan.findings.filter(finding => finding.code === 'READY_TO_CLOSE').map(({ issue, pr, head, gate, gate_accepted, accepted, closable, uat, review }) => ({ issue, pr, head, gate, gate_accepted, accepted, closable, uat, review })),
       effects: plan.effects.map(effect => ({ kind: effect.kind, target: effect.target, text: effect.text })),
       recovered: plan.resolutions,
       holds: plan.holds,

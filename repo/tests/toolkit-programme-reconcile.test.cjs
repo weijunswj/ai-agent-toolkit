@@ -524,11 +524,11 @@ test('merged PRs with green checks list open issues for the controller without c
     assert.equal(finding.issue, 8);
     assert.match(finding.detail, /PR #540 merged, checks GREEN at aaaaaaa/);
     assert.ok(finding.detail.endsWith(accepted ? 'G1 acceptance recorded' : 'G1 not accepted'));
-    assert.deepEqual(dry.close_list, [{ issue: 8, pr: 540, head: SHA_A, gate: 'G1', gate_accepted: accepted, accepted, uat: null, review: accepted ? 'PASSED' : null }]);
+    assert.deepEqual(dry.close_list, [{ issue: 8, pr: 540, head: SHA_A, gate: 'G1', gate_accepted: accepted, accepted, closable: accepted, uat: null, review: accepted ? 'PASSED' : null }]);
     assert.equal(codes(dry).includes('CHILD_STATE_CONFLICT #8'), !accepted, 'a missing accepted return still conflicts');
     assert.equal(github.mutations(), 0);
     const formatted = cli.formatReport(dry);
-    assert.ok(formatted.includes('Ready to close (the controller decides; nothing is closed automatically)'));
+    assert.ok(formatted.includes('Ready to close (the controller closes each closable one as completed; the reconciler never closes)'));
     assert.ok(formatted.includes(`- #8: PR #540, head aaaaaaa; ${accepted ? 'G1 acceptance recorded' : 'G1 not accepted'}`));
     assert.ok(formatted.includes(`; UAT: not recorded; review: ${accepted ? 'PASSED' : 'not recorded'}`));
 
@@ -559,7 +559,7 @@ test('G0 acceptance cannot stand in for the current G1 gate acceptance on a merg
 
   const check = (accepted, review = 'IN_REVIEW') => {
     const report = reconciler().run();
-    assert.deepEqual(report.close_list, [{ issue: 8, pr: 540, head: SHA_A, gate: 'G1', gate_accepted: accepted, accepted, uat: 'PENDING', review }]);
+    assert.deepEqual(report.close_list, [{ issue: 8, pr: 540, head: SHA_A, gate: 'G1', gate_accepted: accepted, accepted, closable: false, uat: 'PENDING', review }]);
     assert.equal(codes(report).includes('CHILD_STATE_CONFLICT #8'), !accepted);
     assert.match(cli.formatReport(report), new RegExp(`UAT: PENDING; review: ${review}`));
   };
@@ -608,7 +608,7 @@ test('the CLI bootstraps with the controller, which records gates and acceptance
     run(['return', '--issue', '8', '--record', 'g1-r1', '--assignment', 'g1-a1']);
     github.addPr(540, { head: SHA_A, merged: true, contexts: [green('validate')], branch: 'feature' });
     const pending = dryRun();
-    assert.deepEqual(pending.close_list, [{ issue: 8, pr: 540, head: SHA_A, gate: 'G1', gate_accepted: false, accepted: false, uat: null, review: null }]);
+    assert.deepEqual(pending.close_list, [{ issue: 8, pr: 540, head: SHA_A, gate: 'G1', gate_accepted: false, accepted: false, closable: false, uat: null, review: null }]);
     assert.match(cli.formatReport(pending), /G1 not accepted/);
     for (const session of ['g0', 'g1', 'g2', 'helper']) {
       assert.throws(() => cli.main(['return', '--issue', '8', '--consume', 'g1-r1', '--verdict', 'ACCEPT', '--session', session], deps), { code: 'USAGE' });
@@ -619,7 +619,7 @@ test('the CLI bootstraps with the controller, which records gates and acceptance
     run(['update', '--issue', '8', '--patch', review]);
     run(['return', '--issue', '8', '--consume', 'g1-r1', '--verdict', 'ACCEPT']);
     const accepted = dryRun();
-    assert.deepEqual(accepted.close_list, [{ issue: 8, pr: 540, head: SHA_A, gate: 'G1', gate_accepted: true, accepted: true, uat: null, review: 'PASSED' }]);
+    assert.deepEqual(accepted.close_list, [{ issue: 8, pr: 540, head: SHA_A, gate: 'G1', gate_accepted: true, accepted: true, closable: true, uat: null, review: 'PASSED' }]);
     assert.match(cli.formatReport(accepted), /G1 acceptance recorded/);
     assert.equal(codes(accepted).includes('CHILD_STATE_CONFLICT #8'), false);
     assert.equal(store.read('child', 8).doc.fence.holder_session, null, 'the controller writes children through the parent fence');
@@ -640,7 +640,7 @@ test('G0-only acceptance is named but cannot count as merged implementation comp
     github.addPr(540, { head: SHA_A, merged: true, contexts: [green('validate')], branch: 'feature' });
     const report = reconciler().run();
     const accepted = gate !== 'G0';
-    assert.deepEqual(report.close_list, [{ issue: 8, pr: 540, head: SHA_A, gate, gate_accepted: true, accepted, uat: null, review: gate === 'G1' ? 'PASSED' : null }]);
+    assert.deepEqual(report.close_list, [{ issue: 8, pr: 540, head: SHA_A, gate, gate_accepted: true, accepted, closable: accepted, uat: null, review: gate === 'G1' ? 'PASSED' : null }]);
     const finding = report.findings.find(entry => entry.code === 'READY_TO_CLOSE');
     assert.equal(finding.gate, gate);
     assert.equal(finding.accepted, accepted);
