@@ -87,6 +87,12 @@ test('pre-push: with the plain-text check installed too, a hand push of a change
   assert.notEqual(leak.status, 0);
   assert.match(leak.stderr, /docs\/links\.md:1: github-link: /);
   for (let start = 0; start + 8 <= token.length; start += 4) assert.ok(!`${leak.stdout}${leak.stderr}`.includes(token.slice(start, start + 8)), 'no part of the token is printed');
+  // An annotated tag at the current commit sends that commit, so it is checked and blocked too.
+  repo.git(['tag', '-a', 'at-head-tag', '-m', 'tag at the current commit']);
+  const tagged = repo.git(['push', '-q', 'origin', 'at-head-tag'], { allowFailure: true });
+  assert.notEqual(tagged.status, 0, 'an annotated tag at HEAD is checked');
+  assert.match(tagged.stderr, /docs\/links\.md:1: github-link: /);
+  repo.git(['tag', '-d', 'at-head-tag']);
   // A push that does not send the current commit is not checked here, with a note.
   repo.git(['branch', 'other', 'origin/main']);
   const other = repo.git(['push', '-q', 'origin', 'other'], { allowFailure: true });

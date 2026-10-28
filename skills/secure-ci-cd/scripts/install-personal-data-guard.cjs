@@ -94,11 +94,14 @@ function hookText(name) {
       'if [ -f "$plain" ] && [ -f "$root/.github/plain-text.json" ]; then',
       '  head=$(git rev-parse -q --verify HEAD)',
       '  base=$(git rev-parse -q --verify \'@{upstream}\' || git rev-parse -q --verify refs/remotes/origin/HEAD || git rev-parse -q --verify refs/remotes/origin/main || git rev-parse -q --verify refs/remotes/origin/master)',
-      // Only each line's local object counts, peeled to a commit: a delete sends nothing, and a tag at
-      // HEAD sends the current commit.
+      // Only each line's local object counts: a delete sends nothing, and a tag at HEAD sends the
+      // current commit. Only tag lines are peeled to a commit, so a push of many branches starts no
+      // extra git process per line.
       '  sends_head=',
-      '  while read -r lref lsha rref rsha; do',
-      '    [ -n "$head" ] && [ "$(git rev-parse -q --verify "$lsha^{commit}" 2>/dev/null)" = "$head" ] && sends_head=yes',
+      '  while [ -n "$head" ] && [ -z "$sends_head" ] && read -r lref lsha rref rsha; do',
+      '    if [ "$lsha" = "$head" ]; then sends_head=yes',
+      '    else case "$lref" in refs/tags/*) [ "$(git rev-parse -q --verify "$lsha^{commit}" 2>/dev/null)" = "$head" ] && sends_head=yes;; esac',
+      '    fi',
       '  done <<EOF',
       '$input',
       'EOF',
