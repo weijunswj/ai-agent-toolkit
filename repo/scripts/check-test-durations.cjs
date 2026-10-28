@@ -27,7 +27,7 @@ const shards = require('./ci-test-shards.cjs');
 const CI_ARGUMENT = '--ci';
 // The validate job's gate command; a local gate run has no shard summaries and leaves it out.
 const CI_COMMAND = `node repo/scripts/check-test-durations.cjs ${CI_ARGUMENT}`;
-const REPORT_SCHEMAS =new Set(['toolkit-test-durations/v1', shards.SUMMARY_SCHEMA]);
+const REPORT_SCHEMAS = new Set(['toolkit-test-durations/v1', shards.SUMMARY_SCHEMA]);
 
 // { system, files: { file: seconds } } from either report shape.
 function readReport(value) {

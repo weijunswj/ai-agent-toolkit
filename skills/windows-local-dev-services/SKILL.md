@@ -390,12 +390,14 @@ Even when a sandboxed background launch appears to work while the shell command 
 
 After a user interrupts a long localhost, validation, package-manager, or test command, immediately inspect likely child processes before retrying. Look for local `python`, `pip`, `node`, `npm`, `pnpm`, `yarn`, `bun`, test-runner, and dev-server processes that still own the target port or continue consuming CPU.
 
-On Windows, stopping a parent process does not stop its children, so a `node` test run or dev server started from a shell (`cmd`, PowerShell or bash) keeps running after a timeout, an interrupt or `Stop-Process` on the shell. Node itself stops the children it started when it exits, but not the ones a shell or another program started.
+On Windows, stopping a parent process does not stop its children, so a `node` test run or dev server started from a shell (`cmd`, PowerShell or bash) keeps running after a timeout, an interrupt or `Stop-Process` on the shell. Node itself stops the non-detached children it started when it exits; detached ones, and the ones a shell or another program started, keep running.
 
 - To stop a run, stop its whole tree: `taskkill /PID <pid> /T /F`, not `Stop-Process` on the parent alone.
 - Note the PID of each long or background command you start, and start it with absolute paths so its command line names your worktree. After stopping a run, after an interruption and before the session ends, list leftovers from your own run and stop only those:
 
   ```powershell
+  $worktree = '<absolute worktree or scratch path>'; $myPids = @()  # add the PIDs you noted
+  if ([string]::IsNullOrWhiteSpace($worktree) -or $worktree -like '<*') { throw 'Set $worktree to your own worktree or scratch path first' }
   Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object { $_.CommandLine -like "*$worktree*" -or $_.ParentProcessId -in $myPids } | Select-Object ProcessId,ParentProcessId
   ```
 
