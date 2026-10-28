@@ -27,6 +27,22 @@ const pii = Object.freeze({
   plus: PLUS,
 });
 
+// Pull request text shapes: home-folder paths and AI attribution, assembled the same way.
+const CLAUDE_AI = ['claude', 'ai'].join('.');
+const prText = Object.freeze({
+  windowsHome: (name = 'jtan', sep = '\\') => ['C:', 'Users', name, 'repo'].join(sep),
+  linuxHome: (name = 'jtan') => ['', 'home', name, 'repo'].join('/'),
+  macHome: (name = 'jtan') => ['', 'Users', name, 'repo'].join('/'),
+  sessionLink: (id = 'session_01Test') => `https://${CLAUDE_AI}/code/${id}`,
+  projectLink: () => `https://${CLAUDE_AI}/code/project/chan_01Test?thread=cmsg_01Test`,
+  chatLink: () => `https://${CLAUDE_AI}/chat/0b1c`,
+  footer: (word = 'with') => `${['Generated', word].join(' ')} [${['Claude', 'Code'].join(' ')}](https://${['claude', 'com'].join('.')}/claude-code)`,
+  marker: () => `<!-- ${['claude', 'projects', 'attribution'].join('-')}: {"github_login":"octo"} -->`,
+  requestedBy: () => `_${['Requested', 'by'].join(' ')} **Octo** · [${['project', 'thread'].join(' ')}](https://${CLAUDE_AI}/code/project/chan_01Test)_`,
+});
+
+function markerAccount() { return `zq${crypto.randomBytes(5).toString('hex')}`; }
+
 // A unique marker value per test, to prove it never appears in any output.
 function markerEmail() { return pii.email(`zq${crypto.randomBytes(5).toString('hex')}`, ['marker', 'sg'].join('.')); }
 
@@ -184,5 +200,5 @@ class TestRepo {
 }
 
 module.exports = Object.freeze({
-  BASE_CONFIG, GUARD, INSTALLER, OLE, PNG, TestRepo, assertNoEcho, docxWithSplitRun, hashesOf, markerEmail, pdfWithFlateText, pii, zip,
+  BASE_CONFIG, GUARD, INSTALLER, OLE, PNG, TestRepo, assertNoEcho, docxWithSplitRun, hashesOf, markerAccount, markerEmail, pdfWithFlateText, pii, prText, zip,
 });

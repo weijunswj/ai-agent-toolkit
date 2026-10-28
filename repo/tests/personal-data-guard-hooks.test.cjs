@@ -232,6 +232,9 @@ test('the CI template checks pull requests and every branch push without interpo
   assert.match(text, /fetch-depth: 0/);
   assert.match(text, /persist-credentials: false/);
   assert.match(text, /contents: read/);
+  // A pull request's newer run cancels its older one; push runs are keyed on the run id so none is cancelled.
+  assert.match(text, /^  group: personal-data-\$\{\{ github\.event_name == 'pull_request' && github\.ref \|\| github\.run_id \}\}$/m);
+  assert.match(text, /types: \[opened, edited, reopened, synchronize\]/);
   assert.match(text, /node \.github\/scripts\/personal-data-guard\.cjs ci/);
   assert.doesNotMatch(text, /\$\{\{\s*github\.event\./, 'event text is read from the event file, never interpolated');
   for (const use of text.match(/uses: \S+/g)) assert.match(use, /@[0-9a-f]{40}$/, `${use} is pinned to a commit`);

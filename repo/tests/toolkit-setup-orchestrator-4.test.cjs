@@ -40,7 +40,7 @@ test('fully explicit setup does not wait for or advertise setup-question stdin',
   const bank = result.stdout.split('<!-- setup-toolkit-question-bank:complete -->')[0];
   assert.match(bank, /All visible setup questions are already resolved by explicit inputs/);
   assert.match(bank, /No setup-question stdin is required or read/);
-  assert.doesNotMatch(bank, /Reply with the displayed bank reference|Reply with one line for each unresolved question/);
+  assert.doesNotMatch(bank, /Reply with either:|Reply with one line for each unresolved question/);
 });
 
 test('Windows drive-letter path with spaces remains line-by-line detail input', { skip: process.platform !== 'win32' }, () => {

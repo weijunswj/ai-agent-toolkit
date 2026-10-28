@@ -60,11 +60,11 @@ Gate sessions (G0, G1, G2 and reviewers) and the controllers that launch them fi
 
 ## Delegation
 
-The root session owns integration, validation, conflict resolution and final judgement, and validates every returned result. Give each helper an isolated context and one minimal self-contained task. By default G0 delegates suitable separable evidence gathering and G1 suitable independent implementation or validation; the lead keeps reasoning, architecture, decisive proof, integration, UAT readiness and final quality. Skip delegation for trivial or inseparable work or when overhead exceeds the benefit; no note is needed. Outside gates, delegate when it saves context or wall time. In gate work only a G0 or G1 lead launches helpers; helpers never launch or ask for another agent, and G2 has none. Outside gate work the main session may start subagents, including Toolkit helpers on their installed route; subagents never start another. Mutating siblings need disjoint files and scope; read-only siblings may investigate separable questions in parallel. Gate models, effort and route proof are in the gate rules.
+The root session owns integration, validation, conflict resolution and final judgement, and validates every returned result. Give each helper an isolated context and one minimal self-contained task. By default G0 delegates suitable separable evidence gathering and G1 suitable independent implementation or validation; the lead keeps reasoning, architecture, decisive proof, integration, UAT readiness and final quality. Skip delegation when work is trivial or inseparable or overhead outweighs it. Outside gates, delegate when it saves context or wall time and run each automation, thread and helper cheapest first, medium effort at least (`agent-cost-control`). In gate work only a G0 or G1 lead launches helpers; helpers never launch or ask for another agent, and G2 has none. Outside gate work the main session may start subagents, including Toolkit helpers on their installed route; subagents never start another. Mutating siblings need disjoint files and scope; read-only siblings may investigate separable questions in parallel. Gate models, effort and route proof are in the gate rules.
 
 ## Tool Preference
 
-For an external service, prefer in order: its connector or plugin, its MCP server, its official API or CLI, browser automation, computer use. A lower option may win when materially better for one operation. If the preferred one is missing, guide its setup rather than silently downgrade. Never ask for or repeat a key or token in chat; use `toolkit-env`.
+For an external service, prefer in order: its connector or plugin, its MCP server, its official API or CLI, browser automation, computer use. A lower option may win when much better for one operation. If missing, guide its setup rather than silently downgrade. Never ask for or repeat a key or token in chat; use `toolkit-env`.
 
 ## Model Safety Flags
 
@@ -86,7 +86,7 @@ Shipping bias never overrides approvals, safety gates, privacy, required validat
 
 ## Scope And Hygiene
 
-Before editing, read the playbook index (e.g. `docs/agent-playbooks/INDEX.md`) and only the smallest matching docs, never recursively; include changed workflow, setup, policy, generated-file, migration, API-contract and operations docs. Read a repo map where one exists; keep one only where an ENABLED repository's governed block asks. Inspect targets. Broaden scans only if targeted evidence is insufficient.
+Before editing, read the playbook index (e.g. `docs/agent-playbooks/INDEX.md`) and only the smallest matching docs, never recursively; include changed workflow, setup, policy, generated-file, migration, API-contract and operations docs. Read a repo map where one exists; keep one only where an ENABLED repository's governed block asks. Inspect targets; broaden scans only if targeted evidence falls short.
 
 Keep the diff narrow and in style. Change order: no change, reuse, smallest root-cause fix, bounded simplification, new abstraction only if needed. Never weaken validation, schemas, guardrails, approvals or error handling to pass. After editing, run the smallest validation first, fix targeted failures, rerun, and review the diff for unrelated changes.
 
@@ -96,7 +96,7 @@ Status, reports, plans and notes go under an existing documented path, never new
 
 Put scratch first in a gitignored repo/worktree temp folder (e.g. `.tmp/`, worktrees in `.tmp/worktrees/<lane>-<gate>-<sha>`); use a user-profile folder only for an outside path or more permission, never a drive root.
 
-When a file says it is generated, edit its source, template or generator and regenerate, unless the user asks for generated output only or a manifest marks it directly maintained. Use plain ASCII punctuation in agent-facing and machine-read text unless the file already uses another character set.
+When a file says it is generated, edit its source, template or generator and regenerate, unless the user asks for generated output only or a manifest marks it directly maintained. Use plain ASCII punctuation in agent-facing and machine-read text unless the file already uses non-ASCII.
 
 ## Human-readable Work
 
@@ -104,7 +104,7 @@ New or changed human-facing work (screens, labels, notifications, errors, instru
 
 ## Validation And Git
 
-Use the repository's documented validation, else the smallest relevant check. Keep tests fast: sharding or caching only when coverage is unchanged, each test file under the repository's declared time budget. Run targeted tests locally and let CI run the full gate (run it locally only without CI or for broad, risky, workflow, generator, package or security-sensitive changes, known CI failures or thin coverage). After interruptions, check for orphaned package, test or server processes. Say why when you skip validation.
+Use the repository's documented validation, else the smallest relevant check. Keep tests fast: shard or cache only when coverage is unchanged, each test file within the repository's time budget. Run targeted tests locally and let CI run the full gate (run it locally only without CI or for broad, risky, workflow, generator, package or security-sensitive changes, known CI failures or thin coverage). After interruptions, check for orphaned processes. Say why when you skip validation.
 
 After requested edits in a git repository with a remote, unless the user asked for local-only work: validate, commit to a non-default branch, push, and open the PR with a body matching the full base-to-head diff (scope, safety, validation, generated output, user-facing behaviour). Update the body when scope or user-facing behaviour changes, and once before asking to merge. Check CI on the exact PR head (GitHub: `gh pr checks <PR> --watch --interval 60` or `gh run watch <run> --exit-status`), no keepalive loops or duplicate watchers, and never claim CI passed without every required check. On failure, read the logs and make one targeted fix; after two failed fixes, stop and report. If CI is inaccessible, say so and give the command. Never push failed validation, live or runtime files, or safety-blocked changes.
 
@@ -114,4 +114,4 @@ Issue and PR tracking acts only on the current repository's own remote and never
 
 ## Communication
 
-Make every action-blocking question to the user (choose, approve, confirm, give a path, continue) one fully bold sentence. On long tasks, update briefly at real checkpoints without narrating commands. Report changes, exact validation results, generated-output status, remaining risks and manual checks, the PR link and checked CI status.
+Make every action-blocking question to the user (choose, approve, confirm, give a path, continue) one fully bold sentence. On long tasks, update briefly at real checkpoints, not per command. Report changes, exact validation results, generated-output status, remaining risks and manual checks, the PR link and checked CI status.

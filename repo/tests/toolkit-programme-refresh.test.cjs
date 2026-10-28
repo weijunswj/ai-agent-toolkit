@@ -515,7 +515,9 @@ test('the shipped hooks send after-tool events for shell and connector tools to 
   for (const [host, hostSpec] of Object.entries(contract.hosts)) {
     for (const file of [hostSpec.hooks_file, `repo/contracts/toolkit-local-bridge/${host === 'codex' ? 'codex' : 'claude'}-plugin/hooks/hooks.json`]) {
       const hooks = JSON.parse(fs.readFileSync(path.join(ROOT, file), 'utf8')).hooks;
-      assert.deepEqual(hooks[spec.event], [{ matcher: hostSpec.after_tool_matcher, hooks: [{ type: 'command', command: `node "\${${hostSpec.plugin_root_variable}}/${spec.script}"`, timeout: spec.timeout_seconds }] }], file);
+      // Other after-tool hooks (Claude Code's governance card) may sit beside it; this script has exactly one entry.
+      const checkpoint = hooks[spec.event].filter(entry => entry.hooks.some(hook => hook.command.includes(spec.script)));
+      assert.deepEqual(checkpoint, [{ matcher: hostSpec.after_tool_matcher, hooks: [{ type: 'command', command: `node "\${${hostSpec.plugin_root_variable}}/${spec.script}"`, timeout: spec.timeout_seconds }] }], file);
     }
   }
 });
