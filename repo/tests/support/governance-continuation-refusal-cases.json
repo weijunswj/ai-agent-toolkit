@@ -72,7 +72,7 @@
     {"id":"D55","expected":"NOT_CONTINUATION","text":"ls $env:CODEX_HOME","shell_indexes":[0,1,2,3,4,5,6,7,8,9,10,11,12]},
     {"id":"D56","expected":"NOT_CONTINUATION","text":"echo co/.claude/dex$x","shell_indexes":[0,1,2,3,4,5,6,7,8,9,10,11,12]},
     {"id":"D57","expected":"NOT_CONTINUATION","text":"cat ~/.codex/sessions/example.jsonl | grep resume","shell_indexes":[0,1,2,3,4,5,6,7,8,9,10,11,12]},
-    {"id":"new/similar-case","expected":"UNKNOWN","text":"ls $env:codex_home","shell_indexes":[0,1,2,3,4,5,6,7,8,9,10,11,12]},
+    {"id":"new/similar-case","expected":"UNKNOWN","data":["omitted","powershell-tool","powershell","posix"],"text":"ls $env:codex_home","shell_indexes":[0,1,2,3,4,5,6,7,8,9,10,11,12]},
     {"id":"new/eval","expected":"UNKNOWN","text":"IFS=/.; x=/.claude; set -- $x; eval \"$3 -r\"","shell_indexes":[0,1,2,3,4,5,6,7,8,9,10,11,12]},
     {"id":"new/source","expected":"UNKNOWN","text":"echo /.claude -r | cut -c3- > /tmp/example.test; source /tmp/example.test","shell_indexes":[0,1,2,3,4,5,6,7,8,9,10,11,12]},
     {"id":"new/pipe-absolute-pwsh","expected":"UNKNOWN","text":"echo /.claude -r | cut -c3- | C:/PowerShell/pwsh.exe","shell_indexes":[0,1,2,3,4,5,6,7,8,9,10,11,12]},

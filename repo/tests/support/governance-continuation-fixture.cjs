@@ -41,6 +41,16 @@ function message(cwd, extra = {}) {
 }
 function transcript(ctx, rows = [message(ctx.target)]) { fs.writeFileSync(ctx.file, rows.map(row => JSON.stringify(row)).join('\n') + '\n'); }
 function shell(ctx, command, extra = {}) { return { tool_name: 'Bash', cwd: ctx.caller, session_id: 'fixture-run', tool_input: { command }, ...extra }; }
+// The shells a data-argument proof reads an input under. A corpus row's `data` lists the classes
+// where its host words are proved data, so it is NOT_CONTINUATION there and `expected` elsewhere.
+function dataClass(input) {
+  const selected = input?.tool_input?.shell;
+  if (selected === undefined) return input?.tool_name === 'PowerShell' ? 'powershell-tool' : 'omitted';
+  if (typeof selected !== 'string') return null;
+  const name = selected.split(/[\\/]/).pop().toLowerCase().replace(/\.exe$/, '');
+  return ['powershell', 'pwsh'].includes(name) ? 'powershell' : ['bash', 'sh'].includes(name) ? 'posix' : null;
+}
+function expectedFor(row, input) { return row.data?.includes(dataClass(input)) ? 'NOT_CONTINUATION' : row.expected; }
 function snapshot(dir) {
   const result = {};
   function walk(folder) {
@@ -117,5 +127,5 @@ function runNodeProcesses(calls, { concurrency = HOOK_CONCURRENCY, timeout = 100
 
 module.exports = Object.freeze({
   HOOKS, HOOK_CONCURRENCY, ID, MESSAGE_ID, OTHER_ID, root,
-  evidenceProjection, fixture, message, runNodeProcesses, sentinelText, shell, snapshot, transcript,
+  dataClass, evidenceProjection, expectedFor, fixture, message, runNodeProcesses, sentinelText, shell, snapshot, transcript,
 });

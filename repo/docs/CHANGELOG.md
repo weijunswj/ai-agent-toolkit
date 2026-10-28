@@ -1,5 +1,14 @@
 # Toolkit Changelog
 
+## 3.16.6 (host words used as data)
+
+- **Host words as data:** the continuation guard no longer refuses commands whose host words (Claude, Codex) and selector words (resume, fork, --continue) appear only as data: issue and PR text, commit messages, search patterns, paths, branch names and Toolkit setup options. This step runs only where the guard would refuse, and only turns that refusal into an allow. Every raw owner, state, workdir and path guard still runs first.
+- **What counts as data:** every command in the input, including commands inside `$(...)`, must be one of a fixed set: `gh issue` and `gh pr` (`comment`, `create`, `edit`, `view`, `list`) and `gh api` with fixed options; git `status`, `log`, `show`, `diff`, `rev-parse`, `branch`, `ls-remote`, `fetch`, `add`, `commit`, `push` and `worktree list|prune|remove|add`, optionally after `-C <folder>`; `grep`; `rg` without the options that run programs; the Toolkit setup, governance, risk-tier and install-health scripts, where only the `--host` value is data; PowerShell file and output cmdlets; POSIX file commands; `cat` or `tee` fed by a heredoc with a quoted delimiter; single-quoted here-strings; and plain variable values. Only the operands each one proves are data; the rest of the command must hold no host or selector word.
+- **Shells:** an explicit bash, sh, PowerShell or pwsh shell is read as that shell, and Claude Code's PowerShell tool as PowerShell. Any other omitted shell must read the command as data under both bash and PowerShell, and its first line must also be safe under cmd. cmd and unknown shells keep the earlier refusal.
+- **Still refused:** a host in command position, in a substitution or behind a wrapper; `eval`, `iex`, `&`, `Start-Process`, `xargs`, `find -exec` and `bash -c`; `git -c`, `--upload-pack` and `<transport>::` remotes; writes to anything other than a plain `.md`, `.txt`, `.log` or `.csv` file outside dot folders; PowerShell scope names such as `$function:` and `$env:` assignments; upper-case POSIX assignments; inline scripts such as `node -e`; and data that Windows PowerShell or cmd would split into extra arguments for git, rg or node.
+- **Folder names:** `Start-Process`, `saps`, `start` and `call` count as command wrappers, git reads a pipe as data only when no option follows it, and the parameter-expansion check runs in linear time.
+- **Correction to 3.16.4:** a folder name after a pipe stays a name for any listed pipe target, and some of those targets can still run code: `ForEach-Object { ... }` with any body, and `git`, `rg` or `sort` with options that run programs. Staged-file runs (`sh f`), `pwsh -File` with a dotted host folder and unquoted `bash -c ~/...` are not covered either.
+
 ## 3.16.5 (long runs and test time budgets)
 
 ### Guidance

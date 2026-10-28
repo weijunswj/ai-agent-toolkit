@@ -11,7 +11,7 @@ const { ContinuationResolver, LIMITS, parse } = require('../scripts/toolkit-gove
 const gate = require('../scripts/toolkit-governance-gate.cjs');
 const hostile = require('./support/hostile-inputs.cjs');
 const matrix = require('./support/governance-continuation-matrix.json');
-const { evidenceProjection, fixture, message, root, sentinelText, shell, snapshot } = require('./support/governance-continuation-fixture.cjs');
+const { dataClass, evidenceProjection, expectedFor, fixture, message, root, sentinelText, shell, snapshot } = require('./support/governance-continuation-fixture.cjs');
 
 test('complete data proofs retain consumed spans and unknown wrappers retain raw executable evidence', t => {
   const { commandRoles, roleWords, roleVisits } = evidenceProjection();
@@ -209,7 +209,8 @@ test('ordered-atom closure table is UNKNOWN before target proof across placement
     assert.ok(new gate.ToolGate({ registryOptions: ctx.options, stateReader }).decide(shell(ctx, matrix.ordered_atom_cases[0].text))?.deny);
     for (const id of ['original-read', 'sqag/single/absent', 'sqag/compound/absent', 'wrapper/runtime/assignment', 'wrapper/runtime/concat', 'composition/runtime/absent', 'composition/runtime/native-after', 'composition/runtime/computed-after']) {
       const row = matrix.literal_role_cases.find(row => row.id === id);
-      assert.equal(Boolean(new gate.ToolGate({ registryOptions: ctx.options, stateReader }).decide({ ...shell(ctx, row.text), tool_input: { command: row.text, ...(row.shell === undefined ? {} : { shell: row.shell }) } })?.deny), row.expected === 'UNKNOWN', id);
+      const input = { ...shell(ctx, row.text), tool_input: { command: row.text, ...(row.shell === undefined ? {} : { shell: row.shell }) } };
+      assert.equal(Boolean(new gate.ToolGate({ registryOptions: ctx.options, stateReader }).decide(input)?.deny), expectedFor(row, input) === 'UNKNOWN', id);
     }
   } finally { fs.readFileSync = originalRead; }
   assert.equal(queueReads, 0, 'no held-queue read on verified or computed paths');
@@ -227,7 +228,8 @@ test('multiline pipeline reader model keeps literal data separate from all execu
   for (const row of matrix.script_reader_cases) {
     const input = shell(ctx, row.text);
     if (Object.hasOwn(row, 'shell')) input.tool_input.shell = row.shell;
-    assert.equal(parse(row.text, input).status, row.expected, row.id);
+    const expected = expectedFor(row, input);
+    assert.equal(parse(row.text, input).status, expected, row.id);
     const roles = api.commandRoles(row.text, input);
     if (roles.segments) {
       assert.equal(roles.candidate.length, row.text.length, row.id);
@@ -251,8 +253,8 @@ test('multiline pipeline reader model keeps literal data separate from all execu
       || row.id.startsWith('bad-shell/')) assert.equal(roles.candidate, row.text, row.id + ': no unsupported projection');
     for (const actor of matrix.actors) {
       const decide = stateReader => new gate.ToolGate({ registryOptions: ctx.options, environment: ctx.environment, stateReader }).decide({ ...input, actor });
-      assert.equal(Boolean(decide(() => ({ state: 'DISABLED', rule: 'R1' }))?.deny), row.expected === 'UNKNOWN', row.id + '/' + actor);
-      if (row.expected !== 'NOT_CONTINUATION') continue;
+      assert.equal(Boolean(decide(() => ({ state: 'DISABLED', rule: 'R1' }))?.deny), expected === 'UNKNOWN', row.id + '/' + actor);
+      if (expected !== 'NOT_CONTINUATION') continue;
       positive += 1;
       const ordinary = new gate.ToolGate({ registryOptions: ctx.options, environment: ctx.environment, stateReader: () => ({ state: 'DISABLED', rule: 'R1' }) });
       assert.match(ordinary.decide({ ...input, actor, tool_input: { ...input.tool_input, command: row.text + '\nnode toolkit-governance.cjs enable' } })?.deny || '', /only the user/, row.id + ': raw owner-answer guard');
@@ -269,9 +271,10 @@ test('multiline pipeline reader model keeps literal data separate from all execu
   assert.equal(legacy.baseline_expected, 'UNKNOWN'); assert.ok(legacy.allowance);
   for (const text of [
     'Get-Content -Unknown "codex resume" | git status',
-    'Get-Content -LiteralPath "$codex/resume" | git status',
     legacy.text + '; codex resume --last', legacy.text + '; claude --continue',
   ]) assert.equal(parse(text, { tool_input: { shell: 'powershell.exe' } }).status, 'UNKNOWN', 'historical pipeline unsafe siblings');
+  // A variable in a file path is data to Get-Content, and git status reads no pipe input.
+  assert.equal(parse('Get-Content -LiteralPath "$codex/resume" | git status', { tool_input: { shell: 'powershell.exe' } }).status, 'NOT_CONTINUATION');
   assert.equal(queueReads, 0, 'role proof and all actor decisions never read the held queue');
   fs.readFileSync = originalRead;
   assert.deepEqual(snapshot(ctx.dir), before);
@@ -375,12 +378,14 @@ test('evidence boundary model proves only owned binding separators and complete 
   for (const [n, command] of model.unsupported.entries()) for (const selected of model.shells) {
     assert.equal(api.commandRoles(command, input(selected)).segments, null, 'no partial proof for unsupported schema');
     // An unsupported form without candidate evidence retains the ordinary boundary.
-    check('unsupported/' + n, command, n === 8 ? 'NOT_CONTINUATION' : 'UNKNOWN', selected);
+    // Here the reader has no partial proof, but a complete data-argument proof may still hold.
+    const data = model.unsupported_data[n]?.includes(dataClass(input(selected)));
+    check('unsupported/' + n, command, n === 8 || data ? 'NOT_CONTINUATION' : 'UNKNOWN', selected);
     check('unsupported-native/' + n, command + '; & ("co"+"dex") ("res"+"ume")', 'UNKNOWN', selected);
   }
-  for (const [command, proved, expected] of model.schema) for (const selected of model.shells) {
+  for (const [n, [command, proved, expected]] of model.schema.entries()) for (const selected of model.shells) {
     assert.equal(Boolean(api.commandRoles(command, input(selected)).segments?.proofs.some(p => p.schema.startsWith('git '))), proved, command);
-    check('schema', command, expected, selected);
+    check('schema', command, model.schema_data[n]?.includes(dataClass(input(selected))) ? 'NOT_CONTINUATION' : expected, selected);
   }
   for (const [id, text] of model.construction) for (const selected of model.shells) check('construction/' + id, text, 'UNKNOWN', selected);
   for (const selected of [null, '', 5, 'unknown.exe']) {
