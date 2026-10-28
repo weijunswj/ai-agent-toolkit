@@ -15,6 +15,8 @@
 //   line), **[HH:MM] Update:** one-liners with no question or numbered options inside, every item under
 //   **Waiting on you** carrying a link (indented choice bullets and the &nbsp; spacer under a question need none), and one **ELI5:** line as the very last line. An edit of an earlier post keeps
 //   every one of its Update lines word for word and adds at least one new one.
+// - Post fresh after the owner writes: an edit of a post the owner has written after may fix its wording but may not
+//   add an Update line, since the answer would then sit above the owner's message.
 // - Merge summary: in a Projects session (one that has used the Projects tools), a PR merge (the gh merge command, a
 //   gh api PUT to .../pulls/<n>/merge or a merge_pull_request tool) is refused until a line of one of its own posts
 //   says "external effects" and names that PR; every merge in a command is checked. The command is read word by word
@@ -117,7 +119,10 @@ function readTranscript(lines) {
     let entry;
     try { entry = JSON.parse(line); } catch { continue; }
     const text = userText(entry);
-    if (text && hasOwnerMessage(text)) running = null;
+    if (text && hasOwnerMessage(text)) {
+      running = null;
+      for (const post of posts.values()) post.ownerAfter = true;
+    }
     const content = entry?.message?.content;
     if (!Array.isArray(content)) continue;
     for (const block of content) {
@@ -130,11 +135,11 @@ function readTranscript(lines) {
         if (block.is_error) continue;
         if (call.name === POST_TOOL) {
           const id = resultText(block).match(MESSAGE_ID)?.[1];
-          if (id) posts.set(id, { text: textOf(call.input.text), reply: Boolean(call.input.thread_id) });
+          if (id) posts.set(id, { text: textOf(call.input.text), reply: Boolean(call.input.thread_id), ownerAfter: false });
           if (id && !call.input.thread_id) running = { id, size: bytes(call.input.text) };
         } else if (typeof call.input.message_id === 'string') {
           const known = posts.get(call.input.message_id);
-          posts.set(call.input.message_id, { text: textOf(call.input.text), reply: known ? known.reply : null });
+          posts.set(call.input.message_id, { text: textOf(call.input.text), reply: known ? known.reply : null, ownerAfter: known ? known.ownerAfter : false });
           if (running && call.input.message_id === running.id) running.size = bytes(call.input.text);
         }
       }
@@ -232,7 +237,7 @@ function layoutIssue(text) {
 }
 
 // An edit keeps every earlier Update line word for word, once and in order, and appends at least one new one.
-function editIssue(previous, text) {
+function editIssue(previous, text, { requireNew = true } = {}) {
   const before = updateLines(previous);
   const after = updateLines(text);
   const count = (lines, line) => lines.filter(item => item === line).length;
@@ -243,7 +248,7 @@ function editIssue(previous, text) {
   if (after.filter(line => before.includes(line)).join('\n') !== before.join('\n')) return 'it reorders the earlier Update lines. Keep them in their order and append new ones.';
   const lastKept = before.length ? after.lastIndexOf(before[before.length - 1]) : -1;
   if (after.some((line, index) => index < lastKept && !before.includes(line))) return 'it adds a new Update line above an earlier one. Append new lines after the last earlier line.';
-  if (!after.some(line => !before.includes(line))) return 'it adds no new **[HH:MM] Update:** line. Append one short line in the owner\'s local time for what changed.';
+  if (requireNew && !after.some(line => !before.includes(line))) return 'it adds no new **[HH:MM] Update:** line. Append one short line in the owner\'s local time for what changed.';
   return '';
 }
 
@@ -715,8 +720,14 @@ function decide(input, readLines = file => fs.readFileSync(file, 'utf8').split('
   // Replies under a post, and edits of a post this transcript never shows, keep only the wording and link rules.
   const known = tool === EDIT_TOOL ? posts.get(input.tool_input?.message_id) : null;
   const topLevel = tool === POST_TOOL ? !input.tool_input?.thread_id : known?.reply === false;
+  // The owner wrote after this post: an appended Update line would sit above the owner's message, so only a wording
+  // fix that adds no Update line may still edit it.
+  const stale = Boolean(topLevel && known?.ownerAfter);
+  if (stale && updateLines(text).some(line => !updateLines(known.text).includes(line))) {
+    return 'Toolkit Projects rule: post fresh: the owner wrote since this post. An edit would put your answer above the owner\'s message, so send it with post_message as a new post. Edit an older post only to fix its wording, with no new Update line.';
+  }
   if (topLevel) {
-    const layout = layoutIssue(text) || (known ? editIssue(known.text, text) : '');
+    const layout = layoutIssue(text) || (known ? editIssue(known.text, text, { requireNew: !stale }) : '');
     if (layout) return `Toolkit Projects rule: post layout (a **Now:** line, **[HH:MM] Update:** one-liners, linked **Waiting on you** items, the **ELI5:** line last). Rewrite the post: ${layout}`;
   }
   if (tool !== POST_TOOL || input.tool_input?.thread_id || !running || running.size >= NEAR_LIMIT_BYTES) return '';

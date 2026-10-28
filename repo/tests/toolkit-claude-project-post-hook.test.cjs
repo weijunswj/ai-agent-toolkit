@@ -290,6 +290,16 @@ test('edits keep every earlier Update line word for word and add a new one', () 
   assert.match(edit([wake(), call(POST, { text: earlier }), call(EDIT, { message_id: 'cmsg_A1', text: LAID_OUT }, 'ok')], LAID_OUT), /no new/);
   assert.equal(edit([wake(), call(POST, { thread_id: 'cmsg_T', text: 'Reply.' })], 'Reply, fixed.'), '');
   assert.equal(edit([wake()], 'Fixed.'), '');
+  // After the owner writes, appending an Update to the older post would put the answer above their message.
+  assert.match(edit([wake(), call(POST, { text: earlier }), wake()], LAID_OUT), /post fresh: the owner wrote since this post/);
+  assert.match(edit([wake(), call(POST, { text: earlier }), call(EDIT, { message_id: 'cmsg_A1', text: earlier }, 'ok'), wake()], LAID_OUT), /post fresh/);
+  // A wording fix outside the Update lines may still edit it; rewriting an Update line reads as a new one.
+  assert.equal(edit([wake(), call(POST, { text: LAID_OUT }), wake()], LAID_OUT.replace('is in review', 'is under review')), '');
+  assert.match(edit([wake(), call(POST, { text: LAID_OUT }), wake()], LAID_OUT.replace('built the layout', 'wrote the layout')), /post fresh/);
+  // Dropping an Update line is still refused by the edit rules.
+  assert.match(edit([wake(), call(POST, { text: LAID_OUT }), wake()], earlier), /drops or changes/);
+  // A message from another Claude is not the owner writing.
+  assert.equal(edit([wake(), call(POST, { text: earlier }), wake('claude')], LAID_OUT), '');
 });
 
 test('merges in a Projects session need an earlier post with the PR\'s external effects', () => {
