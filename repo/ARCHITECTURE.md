@@ -34,7 +34,7 @@ Last reviewed against `main` `37877aedbadfc2baf1f70c2e6b9f2281430174b8`.
 | Global rules installer | `repo/scripts/toolkit-global-rules.cjs` |
 | Managed marker format | `repo/scripts/toolkit-managed-block.cjs` |
 | Helper hooks | `repo/scripts/toolkit-claude-agent-hook.cjs`, `repo/scripts/toolkit-codex-helper-hook.cjs` |
-| Governance gate hooks (hold prompts and tools until a repository has a decision) | `repo/scripts/toolkit-governance-gate.cjs` (the gate), `repo/scripts/toolkit-governance-continuation.cjs` (read-only target admission), `repo/scripts/toolkit-governance-hook.cjs` (Claude Code), `repo/scripts/toolkit-codex-helper-hook.cjs` and `repo/scripts/toolkit-codex-session-start.cjs` (Codex) |
+| Governance gate hooks (hold prompts and tools until a repository has a decision) | `repo/scripts/toolkit-governance-gate.cjs` (the gate), `repo/scripts/toolkit-governance-continuation.cjs` (read-only target admission), `repo/scripts/toolkit-governance-answer.cjs` (records the user's reply the agent read, under a one-use reply ticket), `repo/scripts/toolkit-governance-hook.cjs` (Claude Code), `repo/scripts/toolkit-codex-helper-hook.cjs` and `repo/scripts/toolkit-codex-session-start.cjs` (Codex) |
 | Helper route guard and adapter | `repo/scripts/toolkit-v3-helper-guard.cjs`, `repo/scripts/toolkit-v3-native-helper-adapter.cjs` (shared core), `repo/scripts/toolkit-v3-native-helper-adapter-claude.cjs`, `repo/scripts/toolkit-v3-native-helper-adapter-codex.cjs` |
 | Claude helper agents | `repo/scripts/toolkit-claude-helper-agents.cjs`, `repo/scripts/toolkit-claude-helper-spec.cjs`, `repo/scripts/toolkit-claude-task-session.cjs` |
 | Version bump | `repo/scripts/bump-version.cjs` |
