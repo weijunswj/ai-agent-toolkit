@@ -1177,8 +1177,11 @@ test('answer guard: a host counts only where a shell starts it, so scratch files
   for (const cwd of [decided, plain]) {
     for (const [tool_name, command] of allowed) {
       assert.equal(gate.answerCommand(command), false, command);
-      // Off Windows a drive path is relative to the test's own folder, which may be a held checkout.
-      if (process.platform === 'win32' || !/[A-Za-z]:\\/.test(command)) assert.equal(tools(ctx).decide({ tool_name, cwd, tool_input: { command } }), null, command);
+      // The answer guard does not refuse it. The separate session-continuation check may still
+      // refuse text that names a host, and off Windows a drive path is relative to the test's own
+      // folder, which may be a held checkout; neither is the answer guard.
+      const deny = tools(ctx).decide({ tool_name, cwd, tool_input: { command } })?.deny || '';
+      assert.doesNotMatch(deny, /only the user (?:answers the governance question|can say ok)/, command);
     }
     for (const command of refused) {
       const decision = tools(ctx).decide({ tool_name: 'Bash', cwd, tool_input: { command } });
