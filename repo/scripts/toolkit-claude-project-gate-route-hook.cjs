@@ -4,10 +4,11 @@
 // Claude Code PreToolUse hook for the Claude Projects thread launch tool (start_thread). It holds the coordinator to
 // the pinned gate route when it starts a gate thread, so a tool default (a cloud thread at medium effort) never
 // replaces the owner's project rules:
-// - Gate line: a launch brief that runs a gate carries one line `Gate: <value>` (bold `**Gate:**` too, any case; the
-//   first such line outside code fences counts). Values: G0, G1, G2 (also G2 recheck, recheck, re-check and delta
-//   review, all G2, optionally naming `reviewer <id>`), design challenge, and none for a thread that runs no gate.
-//   With no Gate line, a gate word in the title or brief (G0, G1 or G2, gate, recheck or re-check, and upper-case
+// - Gate line: a launch brief that runs a gate carries one line `Gate: <value>` (any case, the label plain or bold,
+//   after an optional bullet, quote, number or heading; the first such line outside code fences counts). Values: G0,
+//   G1, G2 (also G2 recheck, recheck, re-check, delta review, delta G2 and independent review, all G2, optionally
+//   naming `reviewer <id>`), design challenge, and none for a thread that runs no gate. With no Gate line, a gate word
+//   in the title or brief (G0, G1 or G2, gate, recheck or re-check, reviewer, independent review, and upper-case
 //   DISCOVERY or BUILDER) refuses the launch until the brief says which gate it is, or none. A brief with neither
 //   passes untouched.
 // - Route: a gate maps to its stack registry route (G0 DISCOVERY, G1 BUILDER, G2 the profile's reviewer, design
@@ -17,10 +18,13 @@
 //   opus-5.5 all match opus-5.5; an alias such as opus never does). Placement remote_control needs a Remote Control
 //   device in the named folder (case and trailing separators ignored on Windows paths), cloud needs no device or a
 //   files device, and any is not checked. A route whose provider is not anthropic cannot run as a Projects thread.
-// - Memory line: read from this session's transcript, the newest line in a successful read_memory result or in a
-//   successful update_memory input (old-text fields skipped), whichever came later. A gate launch is refused when the
-//   session never read project memory, when memory has no line, when the line or its profile is unknown, and when
-//   the bundled stack registry cannot be read.
+// - Memory line: read from this session's transcript, the newest line in a successful read_memory result (the plain
+//   MEMORY.md text in its project-memory block) or in the content of a successful update_memory call (which replaces
+//   the whole file), whichever came later. Only a line that starts with the label (after an optional bullet, quote,
+//   heading, bold or backtick) and sits outside code fences counts, and its value ends with its own line. A gate
+//   launch is refused when the session never read project memory, when memory has no line, when the line or its
+//   profile is unknown, when the route lacks a provider, model or reasoning level, and when the bundled stack registry
+//   cannot be read.
 // Every refusal names each failing field with the exact values to pass. Limits: a brief that says `Gate: none` on a
 // real gate, a wrong GATE ROUTE line and launches by other tools are not seen, and the bundled registry is not
 // compared with a pinned revision; the gate's own start-record check stays the second line. Other tools, input it
@@ -34,13 +38,14 @@ const START_TOOL = 'mcp__hearthbot__start_thread';
 const READ_MEMORY = 'mcp__hearthbot__read_memory';
 const UPDATE_MEMORY = 'mcp__hearthbot__update_memory';
 const REGISTRY = path.join(__dirname, '..', 'contracts', 'controller-kernel', 'stack-registry-v3.json');
-const GATE_LINE = /^\s*(?:[-*]\s+)?(?:\*\*gate:\*\*|\*\*gate:|gate:)\s*(.*)$/i;
-const GATE_WORDS = [/\bG[012]\b/, /\bgate\b/i, /\brecheck\b/i, /\bre-check\b/i, /\bDISCOVERY\b/, /\bBUILDER\b/];
-const GATE_VALUES = 'G0, G1, G2 (or G2 recheck, recheck, delta review), design challenge, or none';
-const ROUTE_LINE = /GATE ROUTE:/;
+// A Gate line after an optional bullet, quote, number or heading, with the label bold or plain.
+const GATE_LINE = /^\s*(?:[-*>]\s*|\d+[.)]\s+|#{1,6}\s+)?\*{0,2}gate\*{0,2}:\*{0,2}\s*(.*)$/i;
+const GATE_WORDS = [/\bG[012]\b/, /\bgate\b/i, /\brecheck\b/i, /\bre-check\b/i, /\breviewer\b/i, /\bindependent review\b/i, /\bDISCOVERY\b/, /\bBUILDER\b/];
+const GATE_VALUES = 'G0, G1, G2 (or G2 recheck, recheck, delta review, delta G2, independent review), design challenge, or none';
+// A GATE ROUTE line: the label after an optional bullet, quote or heading, plain, bold or in backticks. Prose that
+// only mentions the label is not a line.
+const ROUTE_LINE = /^\s*(?:[-*>]\s*|#{1,6}\s+)?`?(?:\*\*)?GATE ROUTE:(?:\*\*)?/;
 const ROUTE_FORMAT = 'GATE ROUTE: profile <profile> placement <remote_control|cloud|any> [folder <path>]';
-// Fields of an edit that hold the text being replaced, never the new memory.
-const OLD_FIELD = /^(?:old|old_?str(?:ing)?|old_?text|find|search|remove|delete)/i;
 
 function textOf(value) {
   return typeof value === 'string' ? value : '';
@@ -73,8 +78,8 @@ function gateDeclaration(instructions) {
     const reviewer = value.match(/\breviewer\s+([A-Za-z0-9_.-]+)/i)?.[1] || null;
     if (/^G0\b/i.test(value)) return { gate: 'G0', reviewer: null };
     if (/^G1\b/i.test(value)) return { gate: 'G1', reviewer: null };
-    if (/^(?:G2\b|re-?check\b|delta review\b)/i.test(value)) return { gate: 'G2', reviewer };
-    if (/^design challenge\b/i.test(value)) return { gate: 'DESIGN_CHALLENGE', reviewer: null };
+    if (/^(?:G2\b|re-?check\b|delta (?:review|G2)\b|independent review\b)/i.test(value)) return { gate: 'G2', reviewer };
+    if (/^design[- ]challenge\b/i.test(value)) return { gate: 'DESIGN_CHALLENGE', reviewer: null };
     if (/^none\b/i.test(value)) return { gate: 'NONE', reviewer: null };
     return { unknown: value.slice(0, 60) };
   }
@@ -97,32 +102,33 @@ function normaliseModel(model) {
   return textOf(model).trim().toLowerCase().replace(/^claude-/, '').replace(/\[[^\]]*\]$/, '').replace(/\./g, '-');
 }
 
-// The newest GATE ROUTE line in a text: { profile, placement, folder } (folder null when not named), { malformed }
-// for a line that does not parse, or null when the text has none.
+// A line without trailing blanks or backticks, in one backward pass.
+function trimLineEnd(line) {
+  let end = line.length;
+  while (end > 0 && (line[end - 1] === '`' || /\s/.test(line[end - 1]))) end -= 1;
+  return line.slice(0, end);
+}
+
+// The newest GATE ROUTE line in a text (the last one outside code fences, each value ending with its own line):
+// { profile, placement, folder } (folder null when not named), { malformed } for a line that does not parse, or null
+// when the text has none.
 function gateRouteLine(text) {
   let found = null;
-  for (const raw of textOf(text).split(/\r\n|\r|\n/)) {
-    if (!ROUTE_LINE.test(raw)) continue;
-    const line = raw.replace(/^.*?GATE ROUTE:/, 'GATE ROUTE:').replace(/[`\s]+$/, '');
+  for (const raw of linesOutsideFences(text)) {
+    const label = raw.match(ROUTE_LINE);
+    if (!label) continue;
+    const line = `GATE ROUTE:${trimLineEnd(raw.slice(label[0].length)).replace(/^\*\*/, '')}`;
     const match = line.match(/^GATE ROUTE:\s*profile\s+(\S+)\s+placement\s+(remote_control|cloud|any)(?:\s+folder\s+(\S.*))?$/);
     found = match ? { profile: match[1], placement: match[2], folder: match[3] ? match[3].trim() : null } : { malformed: line.slice(0, 120) };
   }
   return found;
 }
 
+// A read_memory result: plain text (the whole MEMORY.md inside a project-memory block), as a string or text parts.
 function resultText(block) {
   if (typeof block.content === 'string') return block.content;
   if (!Array.isArray(block.content)) return '';
   return block.content.filter(part => part?.type === 'text').map(part => part.text || '').join('\n');
-}
-
-// Every string in an update_memory input outside old-text fields, joined.
-function newMemoryText(value, key = '') {
-  if (OLD_FIELD.test(key)) return '';
-  if (typeof value === 'string') return value;
-  if (Array.isArray(value)) return value.map(item => newMemoryText(item)).join('\n');
-  if (value && typeof value === 'object') return Object.entries(value).map(([name, item]) => newMemoryText(item, name)).join('\n');
-  return '';
 }
 
 // Walks the transcript: whether a read_memory call succeeded, and the newest GATE ROUTE line seen.
@@ -144,7 +150,8 @@ function readMemory(lines) {
         pending.delete(block.tool_use_id);
         if (block.is_error) continue;
         if (call.name === READ_MEMORY) read = true;
-        const found = gateRouteLine(call.name === READ_MEMORY ? resultText(block) : newMemoryText(call.input));
+        // update_memory replaces the whole file with its one content string; no other field is memory text.
+        const found = gateRouteLine(call.name === READ_MEMORY ? resultText(block) : textOf(call.input.content));
         if (found) route = found;
       }
     }
@@ -169,15 +176,17 @@ function routeFor(declared, profileName, registry) {
     const known = Object.keys(registry?.profiles || {}).join(', ') || 'none';
     return { issue: `${RULE} The GATE ROUTE line names profile "${profileName}", which the stack registry does not have (known profiles: ${known}). Fix the GATE ROUTE line in project memory to name the project's pinned profile, then launch again.` };
   }
+  // A route is usable only with a provider, a model and a reasoning level, so an empty entry never matches an empty launch.
+  const usable = route => ['provider', 'model', 'reasoning'].every(key => typeof route?.[key] === 'string' && route[key] !== '');
   if (declared.gate !== 'G2') {
     const route = profile.routes?.[ROLE[declared.gate]];
-    return route ? { route, label: ROLE[declared.gate] } : { issue: `${RULE} Profile ${profileName} has no ${ROLE[declared.gate]} route in the stack registry, so this gate cannot start as a Projects thread. Run it in its own harness.` };
+    return usable(route) ? { route, label: ROLE[declared.gate] } : { issue: `${RULE} Profile ${profileName} has no complete ${ROLE[declared.gate]} route (provider, model and reasoning) in the stack registry, so this gate cannot start as a Projects thread. Run it in its own harness.` };
   }
-  const reviewers = Array.isArray(profile.reviewers) ? profile.reviewers : [];
-  const ids = reviewers.map(item => item?.reviewer_id).join(', ') || 'none';
-  if (!reviewers.length) return { issue: `${RULE} Profile ${profileName} has no reviewer in the stack registry, so this G2 cannot start as a Projects thread.` };
+  const reviewers = (Array.isArray(profile.reviewers) ? profile.reviewers : []).filter(item => usable(item) && typeof item.reviewer_id === 'string' && item.reviewer_id);
+  const ids = reviewers.map(item => item.reviewer_id).join(', ');
+  if (!reviewers.length) return { issue: `${RULE} Profile ${profileName} has no complete reviewer (id, provider, model and reasoning) in the stack registry, so this G2 cannot start as a Projects thread.` };
   if (reviewers.length === 1) return { route: reviewers[0], label: `reviewer ${reviewers[0].reviewer_id}` };
-  const named = reviewers.find(item => item?.reviewer_id === declared.reviewer);
+  const named = reviewers.find(item => item.reviewer_id === declared.reviewer);
   if (!named) return { issue: `${RULE} Profile ${profileName} has more than one reviewer (${ids}). Name the one this G2 runs on its Gate line, as \`Gate: G2 reviewer <id>\`, then launch again.` };
   return { route: named, label: `reviewer ${named.reviewer_id}` };
 }
@@ -217,7 +226,7 @@ function decide(input, { readLines = file => fs.readFileSync(file, 'utf8').split
   if (!declared) {
     const word = gateWord(fields.title, fields.instructions);
     if (!word) return '';
-    return `${RULE} The title or brief mentions "${word}" but the brief has no Gate line. Add one line \`Gate: <value>\` naming the gate this thread runs (${GATE_VALUES}), then launch again.`;
+    return `${RULE} The title or brief mentions "${word}" but no line of the brief outside code reads as a Gate line. Add one line that starts \`Gate: <value>\`, naming the gate this thread runs (${GATE_VALUES}), then launch again.`;
   }
   if (declared.gate === 'NONE') return '';
   let memory = { read: false, route: null };
