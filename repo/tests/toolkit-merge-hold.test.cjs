@@ -139,7 +139,7 @@ test('a plain yes with "merge" and a number is an approval; a no, a doubt or a q
   ];
   for (const text of refusals) assert.deepEqual(hold.approvalsIn(text), [], text);
   // A question or quote after any kind of line break is still read as a line of its own.
-  for (const brk of ['\r', '\u0085', '\u2028', '\u2029']) for (const text of ['Did you merge 618', '- 1. why merge 622', '[x] did you merge 622', '> merge 622']) assert.deepEqual(hold.approvalsIn(`looks good${brk}${text}`), [], JSON.stringify(brk + text));
+  for (const brk of ['\r', '\v', '\f', '\x1c', '\x1d', '\x1e', '\u0085', '\u2028', '\u2029']) for (const text of ['Did you merge 618', '- 1. why merge 622', '[x] did you merge 622', '> merge 622']) assert.deepEqual(hold.approvalsIn(`looks good${brk}${text}`), [], JSON.stringify(brk + text));
   assert.deepEqual(hold.approvalsIn('1700 merge https://github.com/o/r/pull/622'), [{ repository: 'o/r', pr: 622, sha: null }]);
   // A SHA is kept only when the line names one pull request.
   assert.deepEqual(hold.approvalsIn('merge 601 and 605 at 62405eb').map(item => item.sha), [null, null]);
