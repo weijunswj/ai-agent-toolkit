@@ -11,6 +11,7 @@ const { ContinuationResolver, TranscriptReader, LIMITS, parse } = require('../sc
 const gate = require('../scripts/toolkit-governance-gate.cjs');
 const hostile = require('./support/hostile-inputs.cjs');
 const matrix = require('./support/governance-continuation-matrix.json');
+const refusalCases = require('./support/governance-continuation-refusal-cases.json');
 
 // Selector receipts, inspected against the PATH host versions frozen by discovery:
 // Claude 2.1.310: https://code.claude.com/docs/en/sessions (exact transcript path; internal JSONL).
@@ -55,6 +56,158 @@ function snapshot(dir) {
   }
   walk(dir); return result;
 }
+
+test('host-named directories and variables are names, not continuation evidence, on both envelopes', t => {
+  const ctx = fixture(t), before = snapshot(ctx.dir);
+  // Everyday reads of host configuration and plugin folders, and the reported readiness shape.
+  const ordinary = [
+    "git rev-parse 'HEAD^{tree}'; node C:/example.test/.codex/check.cjs",
+    "git rev-parse HEAD 'HEAD^{tree}'; git status --short; git ls-remote origin refs/heads/deployment/example; python _logs/example/validate.py; node C:/Users/example/.codex/plugins/cache/ai-agent-toolkit-local/ai-agent-toolkit/3.15.19/skills/external-operation-preflight/scripts/preflight-check.cjs _logs/example/plan.json",
+    'Get-Content "$env:USERPROFILE/.claude/settings.json"',
+    'Get-ChildItem ~/.claude -Recurse',
+    'grep -rn example ~/.claude/settings.json',
+    'cat .claude-plugin/plugin.json | jq -r .version',
+    'Get-ChildItem C:\\Users\\example\\.codex\\sessions -Recurse',
+    'node "$CLAUDE_PROJECT_DIR/scripts/example.js"',
+    'ls $env:CODEX_HOME',
+    'echo co/.claude/dex$x',
+    'cat ~/.codex/sessions/example.jsonl | grep resume',
+  ];
+  // Earlier rows that used such a folder: 18 unproved-syntax rows whose only evidence it was,
+  // and 61 proved rows that would pass without their proof. Both now use an undotted folder.
+  const earlier = matrix.name_barrier_cases;
+  assert.equal(earlier.length, 79);
+  // A dotted name touching no path separator, a host after the directory, a selector beside a
+  // variable, constructed spellings and non-ASCII input all keep the conservative result.
+  const retained = [
+    ...refusalCases.cases.filter(row => row.expected === 'UNKNOWN' && !row.id.startsWith('D')).map(row => row.text),
+    'codex resume --last',
+    'claude -r example',
+    'cp -r .claude-plugin /tmp/example',
+    "'.claude' -r example",
+    'C:/example.test/.codex/codex.exe resume',
+    'ls ~/.codex/; codex fork',
+    '& $codex resume',
+    '$env:CODEX_HOME; codex resume',
+    "node C:/example.test/.codex/check.cjs; & ('co'+'dex') resume",
+    'ls ~/.claude/; & ("cl"+"au"+"de") -r example',
+    'Get-ChildItem ~/.claude/ -Recurse; & ("cl"+"aude") -c',
+    'Get-Content "$env:USERPROFILE/.claude/\u00e9.json" -Raw',
+    // Variables that can hold the host executable, and names that are not variables.
+    '"$CLAUDE_CODE_EXECPATH" -c -p hi', '& $env:CLAUDE_CODE_EXECPATH -r x', 'exec "$CLAUDE_CODE_EXECPATH" -c -p hi',
+    "Start-Process $env:CLAUDE_CODE_EXECPATH -ArgumentList '-r'", '& $claude -r', '& $env:claude_BIN -r', '"$claude_PATH" -r',
+    "$x='$claude'.Substring(1); & $x -r", "x='$claude'; ${x:1} -r",
+    // Runtime extraction of a host spelling from a folder name keeps the earlier result.
+    'echo /.claude -r | cut -c3- | sh', 'echo /.codex resume | cut -c3- | sh', '$(echo /.claude | cut -c3-) -r',
+    '& (gi ~/.claude).Name.Substring(1) -r', '& ("x/.claude".Substring(3)) -r',
+    '& ([io.path]::GetFileName("~/.claude").TrimStart(".")) -r', "& ('~/.claude' -replace '.*\\.') -r",
+    '& (-join (gi ~/.claude).Name[1..6]) -r', 'x=~/.claude/; y=${x%/}; ${y##*/.} -r', 'cmd /v:on /c "set x=~/.claude&& !x:~3! -r"',
+  ];
+  let checks = 0;
+  for (const row of earlier) {
+    const input = shell(ctx, row.text, row.shell ? { tool_input: { command: row.text, shell: row.shell } } : {});
+    assert.equal(parse(row.text, input).status, row.expected, row.id); checks += 1;
+  }
+  for (const shellName of [undefined, 'powershell.exe', 'bash']) {
+    for (const command of ordinary) {
+      const input = shell(ctx, command, shellName ? { tool_input: { command, shell: shellName } } : {});
+      assert.deepEqual(parse(command, input), { status: 'NOT_CONTINUATION' }, `${shellName}: ${command}`); checks += 1;
+    }
+    for (const command of retained) {
+      const input = shell(ctx, command, shellName ? { tool_input: { command, shell: shellName } } : {});
+      assert.notEqual(parse(command, input).status, 'NOT_CONTINUATION', `${shellName}: ${command}`); checks += 1;
+    }
+  }
+  // Production ToolGate keeps every raw guard for the newly ordinary reads.
+  const held = { state: 'UNDECIDED', rule: 'R4', repository_id: 'synthetic-held' }, safe = { state: 'DISABLED', rule: 'R1' };
+  for (const command of ordinary) for (const tool_name of ['Bash', 'PowerShell']) {
+    const input = { ...shell(ctx, command), tool_name, tool_input: { command } };
+    const make = stateReader => new gate.ToolGate({ registryOptions: ctx.options, environment: ctx.environment, stateReader,
+      continuationResolver: new ContinuationResolver({ environment: ctx.environment, spawn() { throw new Error('UNEXPECTED_METADATA'); } }) });
+    assert.equal(make(() => safe).decide(input)?.deny, undefined, command);
+    assert.ok(make(() => held).decide(input)?.deny, command);
+    checks += 2;
+  }
+  assert.deepEqual(snapshot(ctx.dir), before);
+  t.diagnostic(JSON.stringify({ nameBarrierChecks: checks }));
+});
+
+// Every changed comparison row has an explicit result on its original shell envelopes.
+// Shell envelopes are retained exactly, including omitted and malformed metadata.
+for (const row of refusalCases.cases) test('comparison classification: ' + row.id, t => {
+  const ctx = fixture(t), before = snapshot(ctx.dir);
+  const resolver = new ContinuationResolver({ environment: ctx.environment,
+    spawn() { assert.fail('unproved command cannot acquire target metadata'); } });
+  const currentGate = new gate.ToolGate({ registryOptions: ctx.options, environment: ctx.environment,
+    continuationResolver: resolver, stateReader: () => ({ state: 'DISABLED', rule: 'R1' }) });
+  const heldGate = new gate.ToolGate({ registryOptions: ctx.options, environment: ctx.environment,
+    continuationResolver: resolver, stateReader: () => ({ state: 'UNDECIDED', rule: 'R4', repository_id: 'synthetic-held' }) });
+  assert.ok(['UNKNOWN', 'NOT_CONTINUATION'].includes(row.expected), row.id + ': explicit expected result');
+  assert.ok(row.shell_indexes.length, row.id + ': changed shell envelopes retained');
+  for (const index of row.shell_indexes) {
+    assert.ok(Object.hasOwn(refusalCases.shell_envelopes, index));
+    for (const tool_name of ['Bash', 'PowerShell']) for (const key of ['command', 'cmd']) {
+      const input = { ...shell(ctx, row.text), tool_name,
+        tool_input: { [key]: row.text, ...refusalCases.shell_envelopes[index] } };
+      const label = row.id + '/' + index + '/' + tool_name + '/' + key;
+      assert.equal(parse(row.text, input).status, row.expected, label);
+      assert.equal(resolver.resolve(row.text, input).status, row.expected, label);
+      for (const actor of matrix.actors) {
+        assert.equal(Boolean(currentGate.decide({ ...input, actor })?.deny), row.expected === 'UNKNOWN', label + '/' + actor);
+        assert.ok(heldGate.decide({ ...input, actor })?.deny, label + '/' + actor + ': held repository');
+      }
+    }
+  }
+  assert.deepEqual(snapshot(ctx.dir), before);
+});
+
+test('folder-name exclusions close command-position and derived-text families', () => {
+  const retained = [];
+  for (const separator of ['', '; ', '&& ', '|| ', '| ', '& ', '(', ') ', '{ ', '} ', '\n']) {
+    for (const word of ['/.claude', '~/.claude.exe', '.codex/resume', '"C:/example path/.claude"',
+      'C:/example\\ path/.claude', 'C:/example/".claude/resume"', "'C:/example/'\".claude/resume\""]) {
+      retained.push((separator ? 'git status ' + separator : '') + word + ' -r');
+    }
+  }
+  for (const wrapper of ['env', 'env -i', 'command --', 'nohup', 'xargs', 'sudo', 'time', 'nice -n 1',
+    'timeout 1', 'setsid', 'stdbuf -o0', 'chroot /tmp/example.test', 'if', 'then', 'else', 'while', 'until', 'do',
+    'VAR=value', '> /tmp/example.test', '"C:/tools/ENV.EXE"', "e'n'v", 'e\\nv', 'env command nohup']) {
+    retained.push(wrapper + ' /.claude -r');
+  }
+  retained.push('cat /.claude -r | ForEach-Object { /.claude -r }');
+  retained.push('cat /.claude -r | ForEach-Object { . /tmp/example.test }');
+  for (const target of ['sh', '/bin/sh', '"sh"', "'sh'", 'C:/PowerShell/PWSH.EXE', 'env sh',
+    'command sh', 'exec sh', 'nohup sh', 'xargs sh', "& 'iex'", 'Example-Transform']) {
+    retained.push('echo /.claude -r | cut -c3- | ' + target);
+  }
+  for (const action of ['eval "$x -r"', 'source fixture.test', '. fixture.test', 'exec "$x" -r',
+    'Invoke-Expression "$x -r"', 'IEX "$x -r"', '& ($x) -r', "& 'fixture' -r", '& "fixture" -r',
+    '& $x -r', "& ('x/.claude'.('Sub'+'string')(3)) -r", '& $x.$method(3) -r']) {
+    retained.push('x=/.claude -r; ' + action);
+  }
+  for (const action of ["e'va'l", 'e\\val', "s'ou'rce", "'.'", "'/bin/eval'", "'/bin/exec'", '"I"EX', "Invoke-'Expression'"]) {
+    retained.push('echo /.claude -r | cut -c3- > /tmp/example.test; ' + action + ' /tmp/example.test');
+  }
+  for (const text of ['ls $env:codex_home', "ls '$CODEX_HOME'", 'ls \\$CODEX_HOME',
+    'ls ^$CODEX_HOME', 'ls "$CODEX_HOME', 'ls ~/.claude/\u0000 -r', 'ls ~/.claude/\u00e9 -r']) retained.push(text);
+  for (const envelope of refusalCases.shell_envelopes) for (const text of retained) {
+    assert.equal(parse(text, { tool_input: { command: text, ...envelope } }).status, 'UNKNOWN', text);
+  }
+  // Every allowed pipe target consumes data without deriving a command name.
+  for (const target of ['grep resume', 'jq -r .version', 'head', 'tail', 'sort', 'wc', 'cut -c1-',
+    'ConvertFrom-Json', 'ConvertTo-Json', 'Select-Object', 'Select-String resume', 'Where-Object { $_ }',
+    'ForEach-Object { $_ }', 'Out-String', 'git status']) {
+    const text = 'cat ~/.codex/sessions/example.jsonl | ' + target;
+    assert.equal(parse(text, { tool_input: { command: text } }).status, 'NOT_CONTINUATION', text);
+  }
+  // Oversized requests must return to the existing evidence path before any new scan.
+  const bounded = evidenceProjection(source => source.replace('function derivedNameExecution(text) {',
+    'function derivedNameExecution(text) { throw new Error("OVERSIZED_NAME_SCAN");'));
+  for (const unit of ['ls ~/.claude/ -r; ', 'cat ~/.codex/sessions/example.jsonl | grep resume | ', '~/.claude/']) {
+    const text = (unit === '~/.claude/' ? '"' : '') + unit.repeat(Math.ceil(1048576 / unit.length));
+    assert.equal(bounded.parse(text, { tool_input: { command: text } }).status, 'UNKNOWN');
+  }
+});
 
 test('literal reader roles and executable script operands follow the closed data boundary', t => {
   const ctx = fixture(t), before = snapshot(ctx.dir);
