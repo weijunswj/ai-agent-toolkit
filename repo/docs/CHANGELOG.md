@@ -1,5 +1,9 @@
 # Toolkit Changelog
 
+## 3.15.22 (no Codex-only settings in the Claude plugin)
+
+- **Claude plugin manifest:** the Claude Code plugin no longer carries the Codex-only `interface` block, so syncing the plugin on claude.ai no longer warns that it strips an unknown key. The Codex plugin keeps its display name, prompts and icons.
+
 ## 3.15.21 (no model or effort asks in Projects setup)
 
 - **Claude Projects skill (2026-10-28.1):** guided setup no longer asks the owner to choose a coordinator model or effort in the project's settings, and the setup inventory drops its models row. Thread effort is still set on every thread the coordinator starts, and scheduled tasks and gates keep their own model and effort rules.
