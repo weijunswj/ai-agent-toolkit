@@ -58,8 +58,8 @@ class FakeGitHub {
     this.issues.get(parent).updated_at = this.tick();
   }
 
-  addPr(number, { head, state = 'OPEN', isDraft = false, merged = false, contexts = [], rollupOid = head, hasNextPage = false, branch = null, body = '' } = {}) {
-    this.prs.set(number, { number, head, state, isDraft, merged, contexts, rollupOid, hasNextPage, branch, body });
+  addPr(number, { head, state = 'OPEN', isDraft = false, merged = false, contexts = [], rollupOid = head, hasNextPage = false, branch = null, body = '', base = 'main' } = {}) {
+    this.prs.set(number, { number, head, state, isDraft, merged, contexts, rollupOid, hasNextPage, branch, body, base });
   }
 
   // A comment on an issue, as `login` posted it; `created_at` defaults to the fake clock.
@@ -87,6 +87,7 @@ class FakeGitHub {
       updated_at: issue.updated_at,
       parent_issue_url: issue.parent ? `https://api.github.com/repos/${this.repository}/issues/${issue.parent}` : null,
       issue_dependencies_summary: { total_blocked_by: issue.blockedBy.length },
+      sub_issues_summary: { total: issue.subs.length, completed: issue.subs.filter(n => this.issues.get(n)?.state === 'closed').length },
     };
   }
 
@@ -255,8 +256,8 @@ class FakeGitHub {
   graphqlRoute(body) {
     const pr = this.prs.get(body.variables.number);
     if (!pr) return ok(200, { data: { repository: { pullRequest: null } } });
-    return ok(200, { data: { repository: { pullRequest: {
-      number: pr.number, state: pr.merged ? 'MERGED' : pr.state, isDraft: pr.isDraft, merged: pr.merged, headRefOid: pr.head, baseRefName: 'main', mergeable: 'MERGEABLE',
+    return ok(200, { data: { repository: { defaultBranchRef: { name: 'main' }, pullRequest: {
+      number: pr.number, state: pr.merged ? 'MERGED' : pr.state, isDraft: pr.isDraft, merged: pr.merged, headRefOid: pr.head, baseRefName: pr.base || 'main', mergeable: 'MERGEABLE',
       commits: { nodes: [{ commit: { oid: pr.rollupOid, statusCheckRollup: { state: 'SUCCESS', contexts: { pageInfo: { hasNextPage: pr.hasNextPage }, nodes: pr.contexts } } } }] },
     } } } });
   }
