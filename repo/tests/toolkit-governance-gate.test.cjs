@@ -824,6 +824,22 @@ test('confirmations: the reply records only the answer that was confirmed, on bo
   assert.equal(boundOf(newRun.context), null);
   assert.equal(stateOf(ctx, runs).state, 'ENABLED');
 
+  // Inside a held repository, the user's reply to a confirmation delivered a second time is held and
+  // records nothing, in any form, while the agent reads the first delivery with its ticket.
+  const twice = site('twice');
+  start('t2', twice);
+  say('t2', 'go', twice);
+  assert.equal(prompts().answerTicket(ticketOf(say('t2', 'hmm', twice).context), 'confirm-no').ok, true);
+  for (const [n, words] of ['no', 'toolkit governance disable'].entries()) {
+    const envelope = REAL_THREAD_WAKE(words).replace('cmsg_exampleReply', `cmsg_twice${n}`);
+    if (n === 0) assert.equal(boundOf(say('t2', envelope, twice).context)?.word, 'no');
+    else assert.ok(ticketOf(say('t2', REAL_THREAD_WAKE('hmm').replace('cmsg_exampleReply', `cmsg_twice${n}`), twice).context));
+    const again = say('t2', envelope, twice);
+    assert.equal(again.action, 'block', words);
+    assert.match(again.reason, /arrived again after it was already read, so it answers nothing/);
+    assert.equal(stateOf(ctx, twice).state, 'UNDECIDED', words);
+  }
+
   // Other sessions' tickets never push a pending confirmation out of the store.
   const crowded = site('crowded');
   start('c', crowded);

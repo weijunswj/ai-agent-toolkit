@@ -834,6 +834,9 @@ class ReplyTickets {
     this.#save(data);
   }
 
+  // Whether this thread message already got a ticket.
+  used(messageId) { return this.#read().used.includes(messageId); }
+
   // Removes the session's ticket or pending confirmation, if any.
   drop(sessionId) {
     const data = this.#read();
@@ -1086,7 +1089,8 @@ function noMarkText(commands) {
   return `Toolkit: this session started before Toolkit could note it, so it cannot take the governance answer. Start a new session and answer there (in Codex, trust Toolkit's SessionStart hook in /hooks first, or no session can be noted), or run ${commands.map(terminalCommand).join(' or ')} in your own terminal.`;
 }
 const RESUMED_LINE = 'Toolkit: this session was resumed, or another session started in this repository, so Toolkit asks again and your reply was held.';
-const REASK_LINE = 'Toolkit: your reply could not be matched to the confirmation question, so nothing was recorded and Toolkit asks again.';
+const REPEAT_TEXT = 'Toolkit: this message arrived again after it was already read, so it answers nothing and nothing was recorded. Reply again if you meant to answer.';
+const REASK_LINE ='Toolkit: your reply could not be matched to the confirmation question, so nothing was recorded and Toolkit asks again.';
 const MOVED_LINE ='Toolkit: another session started in this repository since you said "later", so Toolkit asks again and your reply was held.';
 const LAUNCHED_HOLD_TEXT = `Toolkit: this repository is waiting for the user's governance answer, and this session was started by another session or a Toolkit launcher, so its message was not sent and not kept. The user answers in their own chat; start this again after that. ${NEVER_OWNER}`;
 const PICKER_UNCOUNTED = `Toolkit governance: no answer was recorded from that card, and the repository is still waiting. End your turn now without using any other tool; the user can reply yes, no or later as a message. ${NEVER_OWNER}`;
@@ -1248,6 +1252,12 @@ class PromptHold {
     // Only the run of the session that was shown the question answers it, in either form.
     const id = verdict.state.repository_id;
     const asked = this.#held.asked(id, sessionId, marks);
+    // A thread message that already got a ticket arriving again is the host delivering it twice: it
+    // was read once, so it is held and answers nothing, in either form.
+    if (asked && message.id !== null && this.#ticketed(message.id)) {
+      this.#held.add(id, prompt, sessionId, marks, verdict.state.root);
+      return { action: 'block', reason: REPEAT_TEXT };
+    }
     if (answer && asked) { this.#dropTicket(sessionId); return this.#answer(cwd, answer[1].toLowerCase(), verdict, sessionId, marks); }
     // After the agent asked the user to confirm one answer, their next own message, a bare yes
     // included, is read only as the reply to that question.
@@ -1332,6 +1342,12 @@ class PromptHold {
     return hold.pending
       ? `${REASK_LINE} The question is still: "${confirmQuestion(hold.pending.repositories, hold.pending.command)}"`
       : `${REASK_LINE} Toolkit cannot tell what was asked, so only the full \`toolkit governance enable\` or \`toolkit governance disable\` sent as a message answers now.`;
+  }
+
+  // Whether a thread message already got a ticket. A store that cannot be read counts as no: the
+  // confirmation check after this holds then, and the full answer still works.
+  #ticketed(messageId) {
+    try { return this.#tickets.used(messageId); } catch { return false; }
   }
 
   // An answer recorded another way ends any ticket or confirmation the session still holds; a store
