@@ -309,6 +309,12 @@ class SessionEpochs {
   // This run's session mark, or null when there is none or it cannot be read.
   get(sessionId) { return this.#read('s', sessionId); }
 
+  // When this run began (its session mark was written), or null.
+  startedAt(sessionId) {
+    const at = Date.parse(this.#record('s', sessionId)?.at);
+    return Number.isFinite(at) ? at : null;
+  }
+
   // Whether this run's session mark was written by a resume or a fork.
   resumed(sessionId) { return this.#record('s', sessionId)?.resumed === true; }
 
@@ -450,6 +456,13 @@ class HeldPrompts {
     if (sessionId === undefined) return list.length;
     if (typeof sessionId !== 'string' || sessionId === '') return 0;
     return list.filter(entry => entry && entry.session_id === sessionId).length;
+  }
+
+  // The number held for the repository that this run of the session sent (its session mark).
+  countRun(repositoryId, sessionId, epoch) {
+    const list = this.#read().repositories[repositoryId];
+    if (!Array.isArray(list) || typeof sessionId !== 'string' || sessionId === '') return 0;
+    return list.filter(entry => entry && entry.session_id === sessionId && (entry.epoch || null) === (EPOCH.test(String(epoch)) ? epoch : null)).length;
   }
 
   // Whether this session sent a held message in this run (the same session and repository marks),
@@ -713,11 +726,15 @@ class ReachAsks {
 // spent on first use, only the newest one per session counts, it lapses after half an hour, and one
 // thread message never gets a second ticket. Kept next to the registry, the ticket itself hashed.
 //
-// A confirmation is the same store's other kind of entry: when the agent is unsure (it records
-// `confirm-<answer>` with its ticket) or a bare yes, no or later arrives from a folder that is not
-// held, the session gets a pending confirmation of exactly one answer, and any live ticket of the
-// session is dropped. The user's next own message is then read only as a reply to that question:
-// its ticket records that one answer or nothing, and the pending confirmation ends with it.
+// A confirmation is the same store's other kind of entry: when the agent records `confirm-<answer>`
+// with a ticket (because it is unsure, or because a bare yes, no or later from a folder that is not
+// held got a ticket that can only start the confirmation of that word), the session gets a pending
+// confirmation of exactly one answer, and any live ticket of the session is dropped. The user's next
+// own message in that run is then read only as a reply to that question: its ticket records that
+// one answer or nothing, and the pending confirmation ends with it. A pending confirmation is kept
+// for its run, up to the seven days held messages are kept, and never pushed out by other sessions'
+// tickets. A damaged store is moved aside, and the new one notes when, so a run that began before
+// then cannot rely on a confirmation it may have lost.
 const TICKETS_BASENAME = 'governance-reply-tickets.v1.json';
 const TICKETS_SCHEMA = 'toolkit.governance-reply-tickets.v1';
 const TICKET = /^[0-9a-f]{32}$/;
@@ -736,8 +753,9 @@ class ReplyTickets {
     this.#now = now;
   }
 
-  // A store that is missing is empty; one that cannot be read or is damaged throws, so a pending
-  // confirmation is never silently lost (the callers hold, and a full answer clears the store).
+  // A store that is missing is empty, and one that cannot be read throws, so a pending confirmation
+  // is never silently lost (the callers hold). A damaged one is moved aside, kept on this computer
+  // next to the original, and a fresh store notes the time (reset_at).
   #read() {
     let text;
     try { text = fs.readFileSync(this.#file, 'utf8'); } catch (error) {
@@ -747,8 +765,23 @@ class ReplyTickets {
     let parsed = null;
     try { parsed = JSON.parse(text); } catch { parsed = null; }
     const usable = parsed && parsed.schema === TICKETS_SCHEMA && parsed.sessions && typeof parsed.sessions === 'object' && !Array.isArray(parsed.sessions) && Array.isArray(parsed.used);
-    if (!usable) throw new GovernanceGateError('REPLY_TICKETS_MALFORMED');
-    return parsed;
+    return usable ? parsed : this.reset();
+  }
+
+  // Moves the store aside and starts a fresh one that notes when; returns the fresh store. Throws
+  // when either step fails.
+  reset() {
+    const aside = `${this.#file}.damaged-${this.#now().toISOString().replace(/[:.]/g, '-')}-${crypto.randomBytes(2).toString('hex')}`;
+    try { fs.renameSync(this.#file, aside); } catch (error) { if (!error || error.code !== 'ENOENT') throw new GovernanceGateError('REPLY_TICKETS_MALFORMED'); }
+    const fresh = { schema: TICKETS_SCHEMA, sessions: {}, used: [], reset_at: this.#now().toISOString() };
+    this.#save(fresh);
+    return fresh;
+  }
+
+  // When the store was last moved aside, or null.
+  resetAt() {
+    const at = Date.parse(this.#read().reset_at);
+    return Number.isFinite(at) ? at : null;
   }
 
   // Whether an entry is still kept: a ticket for half an hour, a pending confirmation for as long as
@@ -759,16 +792,18 @@ class ReplyTickets {
     return age <= (Object.hasOwn(entry, 'pending') ? MAX_HELD_AGE_MS : MAX_TICKET_AGE_MS);
   }
 
-  // Removes the whole store; used when it cannot be read and the user's full answer was recorded.
-  reset() { fs.rmSync(this.#file, { force: true }); }
-
+  // Keeps every current pending confirmation, and the newest tickets up to the cap.
   #save(data) {
-    const sessions = Object.entries(data.sessions).filter(([, entry]) => this.#current(entry))
+    const current = Object.entries(data.sessions).filter(([, entry]) => this.#current(entry));
+    const pending = current.filter(([, entry]) => Object.hasOwn(entry, 'pending'));
+    const tickets = current.filter(([, entry]) => !Object.hasOwn(entry, 'pending'))
       .sort((a, b) => String(b[1].at).localeCompare(String(a[1].at))).slice(0, MAX_TICKET_SESSIONS);
+    const sessions = [...pending, ...tickets];
     fs.mkdirSync(path.dirname(this.#file), { recursive: true });
     const temp = `${this.#file}.tmp-${process.pid}-${crypto.randomBytes(4).toString('hex')}`;
     try {
-      fs.writeFileSync(temp, `${JSON.stringify({ schema: TICKETS_SCHEMA, sessions: Object.fromEntries(sessions), used: data.used.slice(-MAX_USED_MESSAGES) })}\n`, { mode: 0o600 });
+      const reset = typeof data.reset_at === 'string' ? { reset_at: data.reset_at } : {};
+      fs.writeFileSync(temp, `${JSON.stringify({ schema: TICKETS_SCHEMA, sessions: Object.fromEntries(sessions), used: data.used.slice(-MAX_USED_MESSAGES), ...reset })}\n`, { mode: 0o600 });
       fs.renameSync(temp, this.#file);
     } finally {
       fs.rmSync(temp, { force: true });
@@ -829,11 +864,11 @@ class ReplyTickets {
 
   peek(ticket, sessionId) { return this.#find(this.#read(), ticket, sessionId); }
 
-  // Whether this session holds a ticket that has not lapsed, or a pending confirmation.
-  live(sessionId) {
+  // Whether this run of the session holds a ticket that has not lapsed, or a pending confirmation.
+  live(sessionId, epoch) {
     const sessions = this.#read().sessions;
     const entry = typeof sessionId === 'string' && Object.hasOwn(sessions, sessionId) ? sessions[sessionId] : null;
-    return this.#current(entry);
+    return this.#current(entry) && EPOCH.test(String(epoch)) && entry.epoch === epoch;
   }
 
   // Spends the ticket and returns its entry, or null; a ticket that cannot be removed is not used.
@@ -1051,7 +1086,7 @@ function noMarkText(commands) {
   return `Toolkit: this session started before Toolkit could note it, so it cannot take the governance answer. Start a new session and answer there (in Codex, trust Toolkit's SessionStart hook in /hooks first, or no session can be noted), or run ${commands.map(terminalCommand).join(' or ')} in your own terminal.`;
 }
 const RESUMED_LINE = 'Toolkit: this session was resumed, or another session started in this repository, so Toolkit asks again and your reply was held.';
-const REASK_LINE = 'Toolkit: your reply could not be matched to the confirmation question, so nothing was recorded and Toolkit asks again (if this repeats, `toolkit governance enable` or `toolkit governance disable` as a message still answers).';
+const REASK_LINE = 'Toolkit: your reply could not be matched to the confirmation question, so nothing was recorded and Toolkit asks again.';
 const MOVED_LINE ='Toolkit: another session started in this repository since you said "later", so Toolkit asks again and your reply was held.';
 const LAUNCHED_HOLD_TEXT = `Toolkit: this repository is waiting for the user's governance answer, and this session was started by another session or a Toolkit launcher, so its message was not sent and not kept. The user answers in their own chat; start this again after that. ${NEVER_OWNER}`;
 const PICKER_UNCOUNTED = `Toolkit governance: no answer was recorded from that card, and the repository is still waiting. End your turn now without using any other tool; the user can reply yes, no or later as a message. ${NEVER_OWNER}`;
@@ -1220,7 +1255,7 @@ class PromptHold {
       const confirmed = this.#confirmReply(message, sessionId, marks.session);
       if (confirmed) {
         this.#held.add(id, prompt, sessionId, marks, verdict.state.root);
-        return confirmed.hold ? { action: 'block', reason: `${REASK_LINE}\n${questionText(verdict, 1)}` } : confirmed;
+        return confirmed.hold ? { action: 'block', reason: PromptHold.reask(confirmed) } : confirmed;
       }
     }
     const short = SHORT_ANSWER.exec(reply);
@@ -1237,8 +1272,10 @@ class PromptHold {
     const held = this.#held.add(id, prompt, sessionId, marks, verdict.state.root);
     if (resumed) return this.#ask(`${RESUMED_LINE}\n${questionText(verdict, 1)}`, sessionId, marks);
     // A session sees the whole question on its first held message, even when another session is waiting too.
-    const shown = typeof sessionId === 'string' && sessionId !== '' ? this.#held.count(id, sessionId) : held;
-    return this.#ask(questionText(verdict, shown), sessionId, marks);
+    // Each run sees the whole question on its own first held message: a resumed run is a new run.
+    const shown = typeof sessionId === 'string' && sessionId !== '' ? this.#held.countRun(id, sessionId, marks.session) : held;
+    const earlier = shown === 1 && typeof sessionId === 'string' && sessionId !== '' && this.#held.count(id, sessionId) > 1;
+    return this.#ask(earlier ? `${RESUMED_LINE}\n${questionText(verdict, 1)}` : questionText(verdict, shown), sessionId, marks);
   }
 
   // The reply to the question asked for reached repositories (ReachAsks), only in the run that was
@@ -1256,7 +1293,7 @@ class PromptHold {
     if (!ownTyped(message)) return null;
     // The reply to a confirmation question, bare or not, is read only as that.
     const confirmed = this.#confirmReply(message, sessionId, epoch);
-    if (confirmed?.hold) return { action: 'pass', context: `${REASK_LINE} Ask the user again in plain words: "${reachQuestion(asked).replace(/^Toolkit: t/, 'T')}" ${NEVER_OWNER}` };
+    if (confirmed?.hold) return { action: 'pass', context: `Toolkit governance: nothing was recorded. Tell the user this, word for word, and end your turn:\n${PromptHold.reask(confirmed)}\n${NEVER_OWNER}` };
     if (confirmed) return confirmed;
     // Here the agent keeps working, so a bare yes, no or later may answer its own question (owner
     // decision of 28 Oct): it records nothing, and the agent gets a ticket that can only start the
@@ -1276,15 +1313,29 @@ class PromptHold {
   // thread message already had a ticket), so the reply is never read another way.
   #confirmReply(message, sessionId, epoch) {
     let pending = null;
-    try { pending = this.#tickets.pending(sessionId, epoch); } catch { return { hold: true }; }
+    try {
+      pending = this.#tickets.pending(sessionId, epoch);
+      // A store moved aside after this run began may have held its confirmation.
+      const reset = this.#tickets.resetAt();
+      const started = this.#epochs.startedAt(sessionId);
+      if (!pending && reset !== null && (started === null || started <= reset)) return { hold: true, lost: true };
+    } catch { return { hold: true, lost: true }; }
     if (!pending) return null;
     let ticket = null;
     try { ticket = this.#tickets.issue(sessionId, epoch, message.id, pending.repositories, pending.command); } catch { ticket = null; }
-    return ticket ? { action: 'pass', context: confirmTicketContext(pending.repositories, pending.command, ticket) } : { hold: true };
+    return ticket ? { action: 'pass', context: confirmTicketContext(pending.repositories, pending.command, ticket) } : { hold: true, pending };
+  }
+
+  // The re-ask when a reply cannot be matched to the confirmation: the same confirmation question
+  // word for word while it is known, else only the full answer, since the question may be lost.
+  static reask(hold) {
+    return hold.pending
+      ? `${REASK_LINE} The question is still: "${confirmQuestion(hold.pending.repositories, hold.pending.command)}"`
+      : `${REASK_LINE} Toolkit cannot tell what was asked, so only the full \`toolkit governance enable\` or \`toolkit governance disable\` sent as a message answers now.`;
   }
 
   // An answer recorded another way ends any ticket or confirmation the session still holds; a store
-  // that cannot be read is removed, since nothing in it is needed once the answer is recorded.
+  // that cannot be changed is moved aside (other runs that began before then are asked again).
   #dropTicket(sessionId) {
     try { this.#tickets.drop(sessionId); } catch { try { this.#tickets.reset(); } catch { /* the next confirmation re-asks */ } }
   }
@@ -1642,13 +1693,17 @@ class ToolGate {
   }
 
   // Whether this run has a question asked from a folder that is not held, a live reply ticket or
-  // confirmation, or a "later" answer (after which the full answer still decides in the same run).
+  // confirmation of this run, or a "later" answer (after which the full answer still decides in the
+  // same run).
   // When that cannot be read it counts as open.
   #questionOpen(sessionId) {
     if (typeof sessionId !== 'string' || sessionId === '') return false;
     try {
       const epoch = this.#epochs.get(sessionId);
-      return this.#reach.get(sessionId, epoch).length > 0 || this.#tickets.live(sessionId) || this.#notNow.anyFor(sessionId, epoch);
+      // A confirmation whose repositories were all decided elsewhere is over.
+      const pending = this.#tickets.pending(sessionId, epoch);
+      if (pending && pending.repositories.every(item => this.#verdict(item.root, sessionId)?.reason === 'decided')) this.#tickets.drop(sessionId);
+      return this.#reach.get(sessionId, epoch).length > 0 || this.#tickets.live(sessionId, epoch) || this.#notNow.anyFor(sessionId, epoch);
     } catch { return true; }
   }
 

@@ -743,7 +743,7 @@ test('confirmations: the reply records only the answer that was confirmed, on bo
   const thread = REAL_THREAD_WAKE('yes').replace('cmsg_exampleReply', 'cmsg_threadYes');
   assert.equal(prompts().answerTicket(askOf(say('p', thread).context).ticket, 'confirm-yes').ok, true);
   const redelivered = say('p', thread);
-  assert.match(redelivered.context, /could not be matched to the confirmation question, so nothing was recorded/);
+  assert.match(redelivered.context, /could not be matched to the confirmation question, so nothing was recorded[^\n]*The question is still: "Toolkit will turn on GitHub governance for wp-one, wp-two\. Is that right\?"/);
   assert.equal(boundOf(redelivered.context), null);
   assert.equal(stateOf(ctx, one).state, 'UNDECIDED');
   // A resume ends the pending confirmation: the next "yes" records nothing.
@@ -771,17 +771,29 @@ test('confirmations: the reply records only the answer that was confirmed, on bo
   try {
     const refused = say('late', 'yes', late);
     assert.equal(refused.action, 'block');
-    assert.match(refused.reason, /could not be matched to the confirmation question/);
+    // The re-ask is the same confirmation question, word for word, so the next reply matches what was shown.
+    assert.match(refused.reason, /could not be matched to the confirmation question[^\n]*The question is still: "Toolkit will keep GitHub governance off \(never ask again\) for late\. Is that right\?"/);
   } finally { gate.ReplyTickets.prototype.issue = issue; }
   assert.equal(stateOf(ctx, late).state, 'UNDECIDED');
+  const afterReask = boundOf(say('late', 'yes', late).context);
+  assert.equal(afterReask && afterReask.word, 'no', 'the reply after the re-ask is still bound to the question shown');
+  assert.equal(stateOf(ctx, late).state, 'UNDECIDED');
+  // A damaged store is moved aside: a run that began before then takes only the full answer.
+  confirmNo('before the damage');
   const ticketsFile = path.join(path.dirname(ctx.registryPath), gate.TICKETS_BASENAME);
   fs.writeFileSync(ticketsFile, '{broken');
-  assert.equal(say('late', 'yes', late).action, 'block');
+  const lost = say('late', 'yes', late);
+  assert.equal(lost.action, 'block');
+  assert.match(lost.reason, /cannot tell what was asked, so only the full `toolkit governance enable` or `toolkit governance disable` sent as a message answers now/);
   assert.equal(stateOf(ctx, late).state, 'UNDECIDED');
-  // The full answer still decides, and clears the damaged store.
+  const aside = fs.readdirSync(path.dirname(ticketsFile)).filter(name => name.startsWith(`${gate.TICKETS_BASENAME}.damaged-`));
+  assert.equal(aside.length, 1, 'the damaged store is kept aside');
+  assert.ok(JSON.parse(fs.readFileSync(ticketsFile, 'utf8')).reset_at);
+  // The full answer still decides.
   assert.equal(say('late', 'toolkit governance disable', late).action, 'pass');
   assert.equal(stateOf(ctx, late).state, 'DISABLED');
-  assert.equal(fs.existsSync(ticketsFile), false);
+  // Runs below begin after the store was moved aside.
+  for (const until = Date.now() + 5; Date.now() < until;) { /* a clock tick */ }
 
   // In the confirm state inside a held repository: a relay, a peer and a launched session get nothing,
   // and the confirmation stays for the user's own reply. A bound ticket dies with its run.
@@ -811,6 +823,36 @@ test('confirmations: the reply records only the answer that was confirmed, on bo
   const newRun = say('r', 'yes', runs);
   assert.equal(boundOf(newRun.context), null);
   assert.equal(stateOf(ctx, runs).state, 'ENABLED');
+
+  // Other sessions' tickets never push a pending confirmation out of the store.
+  const crowded = site('crowded');
+  start('c', crowded);
+  say('c', 'go', crowded);
+  assert.equal(prompts().answerTicket(ticketOf(say('c', 'hmm', crowded).context), 'confirm-no').ok, true);
+  const store = new gate.ReplyTickets({ registryOptions: ctx.options });
+  const epochs = new gate.SessionEpochs({ registryOptions: ctx.options });
+  for (let n = 0; n < 40; n += 1) { start(`crowd-${n}`); store.issue(`crowd-${n}`, epochs.get(`crowd-${n}`), null, []); }
+  const crowdedReply = boundOf(say('c', 'yes', crowded).context);
+  assert.equal(crowdedReply && crowdedReply.word, 'no');
+  assert.equal(stateOf(ctx, crowded).state, 'UNDECIDED');
+
+  // A leftover confirmation stops refusing scheduling once its repositories are decided elsewhere,
+  // and never carries into another run. A resumed run sees the whole question again.
+  const leftover = site('leftover');
+  start('left', leftover);
+  say('left', 'go', leftover);
+  assert.equal(prompts().answerTicket(ticketOf(say('left', 'hmm', leftover).context), 'confirm-no').ok, true);
+  const cron = () => toolGate().decide({ tool_name: 'CronCreate', cwd: parent, session_id: 'left', tool_input: { prompt: 'check later' } });
+  assert.ok(cron()?.deny, 'refused while the confirmation is open');
+  start('left', leftover, 'resume');
+  assert.equal(cron(), null, 'a new run is not held up by the old confirmation');
+  const resumedHold = say('left', 'carry on', leftover);
+  assert.equal(resumedHold.action, 'block');
+  assert.match(resumedHold.reason, /^Toolkit: this session was resumed[^\n]*\nToolkit: message held\. Turn on GitHub governance/);
+  assert.equal(prompts().answerTicket(ticketOf(say('left', 'hmm', leftover).context), 'confirm-no').ok, true);
+  assert.ok(cron()?.deny);
+  gate.writeGovernanceDecision(leftover, 'enable', { registryOptions: ctx.options });
+  assert.equal(cron(), null, 'decided elsewhere: the confirmation is over');
 
   // A "later" run counts as open: no prompt is scheduled in it.
   const later = site('later');
