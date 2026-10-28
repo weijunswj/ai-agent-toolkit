@@ -3,8 +3,10 @@
 
 // Claude Code's governance hook: one script for four events, named by --event.
 //   UserPromptSubmit  holds every prompt in an undecided repository (toolkit-governance-gate.cjs);
-//                     in a github.com one the turn runs only to show the tap-to-answer card.
-//   PreToolUse        refuses every tool there but the card, and agent answers everywhere.
+//                     in a github.com one the turn runs only to show the tap-to-answer card. It also
+//                     keeps each "merge N" the user types, for the merge hold.
+//   PreToolUse        refuses every tool there but the card, and agent answers everywhere; and in every
+//                     folder refuses a merge the user has not typed "merge N" for (toolkit-merge-hold.cjs).
 //   PostToolUse       records the answer tapped on the card (AskUserQuestion).
 //   SessionStart      adds one line stating the effective governance state, exports the session's
 //                     id to its shell commands (CLAUDE_ENV_FILE), so a session an agent starts from
@@ -51,12 +53,23 @@ function respond(event, input, options = {}) {
     try { inside = (options.gate || require('./toolkit-governance-gate.cjs')).insideRepository(input.cwd); } catch { inside = false; }
     return inside ? { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: CLOUD_LINE } } : {};
   }
+  // The merge hold runs first and on its own, so an error in the governance check never skips it.
+  if (event === 'PreToolUse') {
+    const merge = mergeDecision(input, options);
+    if (merge) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: merge.deny } };
+  }
   let gate;
   try {
     gate = options.gate || require('./toolkit-governance-gate.cjs');
     if (event === 'UserPromptSubmit') {
       const decision = new gate.PromptHold({ ...options, picker: true }).decide({ cwd: input.cwd, prompt: input.prompt, sessionId: gate.sessionIdOf(input) });
       if (decision.action === 'block') return { decision: 'block', reason: decision.reason };
+      // A "merge N" the user types is kept for the merge hold, but not while the governance question
+      // holds the message: the user types it again after answering. A failure only means a later
+      // merge is refused.
+      if (!decision.notice) {
+        try { (options.mergeHold || mergeHold()).recordPrompt(input, { environment: options.environment || process.env, registryOptions: options.registryOptions, now: options.now }); } catch { /* fail closed later */ }
+      }
       const context = decision.context ? { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: decision.context } } : {};
       return decision.notice ? { systemMessage: decision.notice, ...context } : context;
     }
@@ -77,6 +90,19 @@ function respond(event, input, options = {}) {
     return failed(event, input, gate);
   }
 }
+
+const mergeHold = () => require('./toolkit-merge-hold.cjs');
+
+// The merge hold's decision (toolkit-merge-hold.cjs), failing closed for a call that may merge
+// when the module cannot run.
+function mergeDecision(input, options = {}) {
+  try { return (options.mergeHold || mergeHold()).decide(input, { registryOptions: options.registryOptions, now: options.now, environment: options.environment || process.env }); } catch {
+    let mayMerge = true;
+    try { mayMerge = (options.mergeHold || mergeHold()).mayMerge(input); } catch { mayMerge = STATE_CHANGING_TOOLS.test(String(input && input.tool_name || '')) && /merge|push/i.test(JSON.stringify(input || {})); }
+    return mayMerge ? { deny: MERGE_CHECK_FAILED } : null;
+  }
+}
+const MERGE_CHECK_FAILED = 'Toolkit: the merge check failed, so this merge or push is refused. Retry it; if this repeats, run `setup toolkit` to repair the Toolkit plugin.';
 
 // The gate's never-act line, spelled out here because the gate module may be what failed to load.
 const NEVER_OWNER = 'Never act as the user: do not answer the governance question yourself, start a session or script to answer it, or click a confirmation through a UI or computer use.';

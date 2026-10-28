@@ -1,11 +1,13 @@
 # Toolkit Changelog
 
-## 3.15.20 (host-named folders are names, not continuations)
+## 3.15.25 (host-named folders are names, not continuations)
 
 - The continuation check no longer treats a host name that only names a folder as a session resume. Two kinds of span become barriers in every evidence scan, so neighbouring text still cannot join across them:
   - a dotted name touching a path separator (`.codex/`, `.claude\\`, `.claude-plugin/`);
   - the fixed folder variables `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, `CLAUDE_PROJECT_DIR` and `CLAUDE_PLUGIN_ROOT`, as `$NAME` or `$env:NAME` outside single quotes and not after an escape.
-- Reading Toolkit's installed files or host settings with `$`, `^` or `%` syntax, or beside a short flag such as `-r` or `-Recurse`, is no longer refused on Claude Code or Codex.
+- Reading Toolkit's installed files or host settings with `# Toolkit Changelog
+
+, `^` or `%` syntax, or beside a short flag such as `-r` or `-Recurse`, is no longer refused on Claude Code or Codex.
 - These keep the earlier conservative result:
   - real `codex resume`/`fork` and `claude -r`/`-c`/`--resume`;
   - a host executable inside such a folder;
@@ -14,6 +16,33 @@
   - any command that can extract text at run time: piping into a shell or interpreter, command substitution, string methods or operators, slicing, and parameter or cmd substring expansion.
 - Every raw owner, state, workdir and path guard still runs first.
 - Earlier tests that used such a folder as their only evidence, or that would pass without their proof, now use an undotted host folder. Their original texts are asserted as ordinary.
+
+## 3.15.24 (answer from a Projects thread)
+
+### Governance
+
+- **Answer from a Claude Projects thread:** the user's yes, no, later or ok sent in a Projects thread now answers the governance question in the Remote Control session it reaches, and lifts the hold there. Before, the thread's wrapping meant the reply was never read as an answer, and the repository stayed held. Only the user's own message counts: a coordinator's relay, a scheduled task or anyone else's message does not.
+
+## 3.15.23 (finished child issues close as completed)
+
+- **Child issues close with their merge:** once a merge completes every criterion of a child issue and any owner UAT passed, the PR that completes it says `Closes #n` so the merge closes it as completed; when that could not apply (UAT after the merge, or work over several PRs), the controller closes it without asking. Closing a parent, a programme issue or as not planned still needs the owner. Staged, UAT-pending, blocked, partial or follow-up PRs keep using `Refs`.
+- **Reconciler close list:** each ready-to-close entry is marked closable only with G1-or-later acceptance, UAT recorded as not required, passed or retained at the head, every review verdict at the head passed, a merge into the default branch and no open sub-issue. The reconciler itself still never closes.
+- **Claude Projects skill (2026-10-28.2):** the skill and the managed project instructions no longer ask the owner before closing a completed child issue.
+
+## 3.15.22 (no Codex-only settings in the Claude plugin)
+
+- **Claude plugin manifest:** the Claude Code plugin no longer carries the Codex-only `interface` block, so syncing the plugin on claude.ai no longer warns that it strips an unknown key. The Codex plugin keeps its display name, prompts and icons.
+
+## 3.15.21 (no model or effort asks in Projects setup)
+
+- **Claude Projects skill (2026-10-28.1):** guided setup no longer asks the owner to choose a coordinator model or effort in the project's settings, and the setup inventory drops its models row. Thread effort is still set on every thread the coordinator starts, and scheduled tasks and gates keep their own model and effort rules.
+
+## 3.15.20 (merge tripwire and stale-copy warning)
+
+### Who may do what
+
+- **Merges wait for the user (a tripwire, not a lock):** on Claude Code and Codex, the hooks hold an agent's merge until the user typed a line with "merge" next to the pull request number in their own session, such as "merge 618", "618 merge" or "ok to merge 618". A line with a quote, a question, or one of a fixed list of words for a no, a doubt, a condition, a delay, a report or another kind of merge ("merge main into 618") does not count. This covers `gh pr merge`, the GitHub API merge endpoint and the GitHub connector's merge tool. One approval allows one merge of that pull request in that repository within a day, and the merge must name the head commit it expects. Connector auto-merge, GraphQL merges, the merge queue, branch merges, ref writes and pushes to the default branch are refused when written directly. It reads command text, so it catches mistakes, not a determined agent: wrapped or nested sessions, scripts, files, other HTTP clients and direct commits through the API or the connector's file tools get past it. Agents act as the user on GitHub, so GitHub cannot tell their merges apart; the hard limit is the repository's own rules where it has them (a pull request for the default branch, no force-push, no deletion). Cloud sessions are not covered yet.
+- **Stale plugin copies speak up:** when a session runs an account-synced Toolkit copy that is older than a Toolkit repository in its folder, the session-start message says so and that newer safety hooks do not run, instead of staying silent.
 
 ## 3.15.19 (proved binding separators and literal Git operands)
 
