@@ -746,11 +746,15 @@ function attentionCommand(args, deps, out) {
       const sink = { text: '', write(chunk) { this.text += chunk; return true; } };
       const passArgs = { command: 'refresh', json: true, ...(args['repo-root'] ? { 'repo-root': args['repo-root'] } : {}), ...(args['deadline-ms'] ? { 'deadline-ms': args['deadline-ms'] } : {}) };
       runPasses(passArgs, deps, sink);
-      let report = null;
-      try { report = JSON.parse(sink.text.split(/\n(?=\{)/).at(-1)); } catch { /* QUEUED or several passes */ }
-      refreshed = report?.outcome === 'QUEUED' ? { outcome: 'QUEUED', reason: report.reason } : { outcome: 'DONE', inventory_complete: report?.inventory?.complete ?? null };
+      // The last pass's holds are the ones still standing; they are printed and the exit code is 1, as
+      // plain refresh does.
+      const reports = sink.text.split(/\n(?=\{)/).map(text => { try { return JSON.parse(text); } catch { return null; } }).filter(Boolean);
+      const last = reports.at(-1) || null;
+      refreshed = last?.outcome === 'QUEUED' ? { outcome: 'QUEUED', reason: last.reason, holds: [] }
+        : { outcome: 'DONE', inventory_complete: last?.inventory?.complete ?? null, holds: last?.holds || [] };
     }
-    return finish({ ...args, refreshed }, deps, out);
+    const code = finish({ ...args, refreshed }, deps, out);
+    return refreshed?.holds?.length ? 1 : code;
   } catch (error) {
     const reason = error.code === 'GH_AUTH' ? 'gh not signed in' : `${error.code || 'FAIL'}: ${error.message}`;
     out.write(args.json ? `${JSON.stringify({ line: `Attention: unknown (${error.code === 'GH_AUTH' ? 'gh not signed in' : error.code || 'FAIL'})`, reason }, null, 2)}\n`
@@ -763,6 +767,7 @@ function formatAttention(result) {
   const lines = [result.text];
   if (result.refreshed?.outcome === 'QUEUED') lines.push(`Refresh queued: ${result.refreshed.reason}.`);
   if (result.refreshed?.inventory_complete === false) lines.push('The inventory could not read every open issue this time (INVENTORY_INCOMPLETE).');
+  if (result.refreshed?.holds?.length) lines.push('', 'The refresh pass held', ...result.refreshed.holds.map(hold => `- ${hold.code} ${hold.target}: ${hold.detail}`), '');
   for (const entry of result.findings) lines.push(`- ${entry.id} ${entry.state} ${entry.code}${entry.issue ? ` #${entry.issue}` : ''}${entry.head ? ` at ${entry.head.slice(0, 7)}` : ''}: ${entry.next_action}`);
   if (result.findings.length) lines.push('', 'The controller answers each new finding in this turn: fix it, or ack --finding <id>, or dispose --finding <id> --reason <text>.');
   return `${lines.join('\n')}\n`;

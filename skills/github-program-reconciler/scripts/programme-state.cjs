@@ -339,10 +339,16 @@ function validateAttention(errors, attention) {
   }
 }
 
+// Codes the reconciler reports once, on the pass that first reads a journal; the next pass no longer
+// sees them although nobody acted. The reconcile pass keeps such a finding open (`hold`) until it is
+// answered or its condition is really gone (see Reconciler.oneTimeHolds).
+const ONE_TIME_CODES = new Set(['RETURN_CAPTURED', 'JOURNAL_ERROR', 'JOURNAL_INVALID', 'STALE_ASSIGNMENT']);
+
 // What a run saw, as findings: [{ code, issue, head? }]. Returns the next attention list, or the same
 // list (===) when nothing changes, so an unchanged run writes nothing. A run that was not complete
 // adds what it saw (an incomplete inventory sees only INVENTORY_INCOMPLETE) and resolves nothing.
-function foldAttention(current, { source, seen = [], complete, now }) {
+// `hold` lists ids that stay open on this run although it did not see them.
+function foldAttention(current, { source, seen = [], complete, now, hold = [] }) {
   const list = Array.isArray(current) ? current.map(entry => ({ ...entry })) : [];
   const byId = new Map(list.map(entry => [entry.id, entry]));
   const seenIds = new Set();
@@ -371,7 +377,7 @@ function foldAttention(current, { source, seen = [], complete, now }) {
   for (const entry of complete ? list : []) {
     // ATTENTION_FULL resolves on any complete run back under the bound.
     const own = entry.source === source || entry.code === 'ATTENTION_FULL';
-    if (!own || seenIds.has(entry.id) || !OPEN_FINDING_STATES.includes(entry.state)) continue;
+    if (!own || seenIds.has(entry.id) || hold.includes(entry.id) || !OPEN_FINDING_STATES.includes(entry.state)) continue;
     if (entry.code === 'ATTENTION_FULL' && open() - 1 >= ATTENTION_LIMIT) continue;
     entry.state = 'resolved';
     entry.changed_at = now;
@@ -2586,13 +2592,28 @@ class Reconciler {
     return resolutions;
   }
 
+  // One-time findings that stay open although this pass did not report them again:
+  // - RETURN_CAPTURED while the task still holds a return no verdict has consumed;
+  // - JOURNAL_ERROR and JOURNAL_INVALID while still new and the task's assignment is live;
+  // - STALE_ASSIGNMENT while still new.
+  // An acknowledged one (RETURN_CAPTURED apart) resolves on the next complete pass; a disposed one is
+  // closed already.
+  oneTimeHolds(attention, children) {
+    return (attention || []).filter(entry => ONE_TIME_CODES.has(entry.code) && OPEN_FINDING_STATES.includes(entry.state)).filter(entry => {
+      const gate = children.get(entry.issue)?.gate;
+      if (entry.code === 'RETURN_CAPTURED') return Boolean(gate?.returns?.some(item => !item.consumed));
+      if (entry.state !== 'new') return false;
+      return entry.code === 'STALE_ASSIGNMENT' || LIVE_GATE_STATES.includes(gate?.state);
+    }).map(entry => entry.id);
+  }
+
   // The attention findings this pass records on the parent: the reconcile source from a full pass
   // (a pass for one issue records none), and the inventory source when the pass carries an inventory.
   // When they change, the parent's CURRENT block is planned again with the new list, so the page
   // shows them after this pass.
   planAttention(parent, projected, observed, only, override, inventory, effects, findings, holds) {
     const folds = [];
-    if (!only && !override) folds.push({ source: 'reconcile', complete: true, seen: findings.filter(finding => ATTENTION.has(finding.code)).map(({ code, issue, head = null }) => ({ code, issue, head })) });
+    if (!only && !override) folds.push({ source: 'reconcile', complete: true, seen: findings.filter(finding => ATTENTION.has(finding.code)).map(({ code, issue, head = null }) => ({ code, issue, head })), hold: this.oneTimeHolds(parent.attention, projected) });
     if (inventory) folds.push({ source: 'inventory', complete: inventory.complete, seen: inventory.findings });
     if (!folds.length) return;
     const now = this.now();
@@ -2751,6 +2772,12 @@ class Reconciler {
           const next = effect.folds.reduce((list, fold) => foldAttention(list, { ...fold, now: effect.now }), stored);
           if (JSON.stringify(canonical(next)) === JSON.stringify(canonical(stored))) return null;
           doc.attention = next;
+          // A dispose reason goes when its finding drops off the list.
+          const notes = doc.private?.attention_notes;
+          if (isObject(notes)) {
+            const kept = Object.fromEntries(Object.entries(notes).filter(([id]) => next.some(entry => entry.id === id)));
+            if (Object.keys(kept).length !== Object.keys(notes).length) doc.private = { ...doc.private, attention_notes: kept };
+          }
           return doc;
         } });
         record(effect, result.outcome === 'NOOP' ? 'NOOP' : 'DONE');

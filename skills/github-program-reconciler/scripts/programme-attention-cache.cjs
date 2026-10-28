@@ -75,20 +75,42 @@ function ageText(ms) {
 }
 
 // The session-start line for a repository, or null when there is nothing to say, and whether a
-// background refresh should start: { line, refresh }. While a finding is new or acknowledged the line
-// shows at every start; "clear" shows once after a change; with no cache it never says clear.
+// background refresh is due: { line, refresh, age }. `age` is set when the cache is over an hour old.
+// While a finding is new or acknowledged the line shows at every start; "clear" shows once after each
+// change (every line shown records its set); with no cache it never says clear. The caller says
+// whether a refresh started.
 function sessionAttention(repository, deps = {}) {
   const cache = readCache(repository, deps);
-  if (!cache) return { line: 'Attention: not checked on this computer yet; a refresh has started in the background.', refresh: true };
+  if (!cache) return { line: 'Attention: not checked on this computer yet', refresh: true, age: null };
   const nowMs = Date.parse((deps.now || (() => new Date().toISOString()))());
   const age = nowMs - Date.parse(cache.as_of);
   const stale = age > STALE_MS;
   const open = (cache.counts?.new || 0) + (cache.counts?.acknowledged || 0);
-  const suffix = stale ? ` (as of ${ageText(age)} ago; a refresh has started in the background)` : '';
-  if (open > 0) return { line: `${cache.line}${suffix}. Run programme.cjs attention for the list.`, refresh: stale };
-  if (cache.shown_digest === cache.digest) return { line: null, refresh: stale };
-  markShown(repository, cache.digest, deps);
-  return { line: `${cache.line}${suffix}.`, refresh: stale };
+  const result = line => ({ line, refresh: stale, age: stale ? ageText(age) : null });
+  if (open === 0 && cache.shown_digest === cache.digest) return result(null);
+  if (cache.shown_digest !== cache.digest) markShown(repository, cache.digest, deps);
+  return result(open > 0 ? `${cache.line}${stale ? ` (as of ${ageText(age)} ago)` : ''}. Run programme.cjs attention for the list` : `${cache.line}${stale ? ` (as of ${ageText(age)} ago)` : ''}`);
 }
 
-module.exports = Object.freeze({ CACHE_SCHEMA, STALE_MS, cacheDir, cacheFile, readCache, writeCache, markShown, sessionAttention, ageText });
+// Background refreshes from session start are at most one per START_GAP_MS per repository on this
+// computer, so a refresh that keeps failing (no holder, gh signed out) is not started at every start.
+const START_GAP_MS = 15 * 60 * 1000;
+const startFile = (repository, deps) => { const file = cacheFile(repository, deps); return file ? `${file}.started` : null; };
+
+// Records a start and returns true when the last one is older than START_GAP_MS (or there is none).
+function claimBackgroundStart(repository, deps = {}) {
+  const file = startFile(repository, deps);
+  if (!file) return false;
+  const nowMs = Date.parse((deps.now || (() => new Date().toISOString()))());
+  try {
+    const last = Date.parse(fs.readFileSync(file, 'utf8').trim());
+    if (Number.isFinite(last) && nowMs - last >= 0 && nowMs - last < START_GAP_MS) return false;
+  } catch { /* no start yet */ }
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, `${new Date(nowMs).toISOString()}\n`, { mode: 0o600 });
+    return true;
+  } catch { return false; }
+}
+
+module.exports = Object.freeze({ CACHE_SCHEMA, STALE_MS, START_GAP_MS, cacheDir, cacheFile, readCache, writeCache, markShown, sessionAttention, claimBackgroundStart, ageText });

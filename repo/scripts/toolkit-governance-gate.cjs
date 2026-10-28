@@ -1765,13 +1765,16 @@ function programmeLines(state, registryOptions = {}, deps = {}) {
   try {
     const binding = (deps.mergedBinding || governance.mergedBinding)(state.root, registryOptions);
     if (!binding || !binding.repository) return lines;
-    const attention = require('../../skills/github-program-reconciler/scripts/programme-attention-cache.cjs').sessionAttention(binding.repository, deps);
-    if (attention.line) lines.push(attention.line);
-    // Not where governance reads are switched off (a test run, TOOLKIT_GOVERNANCE_OFFLINE=1, a test registry).
+    const cache = require('../../skills/github-program-reconciler/scripts/programme-attention-cache.cjs');
+    const attention = cache.sessionAttention(binding.repository, deps);
+    // Not where governance reads are switched off (a test run, TOOLKIT_GOVERNANCE_OFFLINE=1, a test
+    // registry), and at most one start per 15 minutes per repository on this computer.
     const offline = (deps.environment || process.env).TOOLKIT_GOVERNANCE_OFFLINE === '1' || registryOptions.testOnly === true;
-    if (attention.refresh && (deps.startRefresh || !offline)) {
-      try { (deps.startRefresh || require('../../skills/github-program-reconciler/scripts/programme-refresh-trigger.cjs').startRefresh)(state.root, deps); } catch { /* the hourly sweep covers it */ }
+    let started = false;
+    if (attention.refresh && (deps.startRefresh || !offline) && cache.claimBackgroundStart(binding.repository, deps)) {
+      try { (deps.startRefresh || require('../../skills/github-program-reconciler/scripts/programme-refresh-trigger.cjs').startRefresh)(state.root, deps); started = true; } catch { /* the hourly sweep covers it */ }
     }
+    if (attention.line) lines.push(`${attention.line}${started ? '; a refresh has started in the background' : ''}.`);
   } catch { /* no attention line */ }
   try {
     const checkpoint = require('../../skills/github-program-reconciler/scripts/programme-checkpoint.cjs');

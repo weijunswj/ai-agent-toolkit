@@ -740,3 +740,70 @@ test('S6: the queue count for status, and the discard when governance is confirm
   assert.equal(checkpoint.discardQueuesFor(fx.repoRoot, now), 1);
   assert.equal(fs.existsSync(checkpoint.queueFile(hash, sessions)), false);
 });
+
+// ---- One-time findings (review M1) --------------------------------------------------------------
+
+test('M1: one-time findings stay open across passes until answered or their condition is gone', () => {
+  const fx = fixture();
+  fx.ctrl(['assign', '--issue', '423', '--role', 'G1', '--assignment', 'g1-a1']);
+  fx.run(['bind', '--issue', '423', '--assignment', 'g1-a1', '--session', 'exec-a']);
+  const hash = checkpoint.sessionHash('exec-a');
+  const sessions = { sessionsDir: fx.sessionsDir };
+  // The reviewer's repro: a checkpoint error, a turn end with a return, then two passes.
+  checkpoint.recordError(hash, 'GH_FAILED', 'GitHub could not be reached', sessions);
+  assert.equal(fx.turnEnd('exec-a', returnBlock('r-1')).outcome, 'WRITTEN');
+  const open = () => fx.parentDoc().attention.filter(entry => entry.issue === 423 && ['RETURN_CAPTURED', 'JOURNAL_ERROR'].includes(entry.code)).map(entry => `${entry.code} ${entry.state}`).sort();
+  fx.reconcile();
+  assert.deepEqual(open(), ['JOURNAL_ERROR new', 'RETURN_CAPTURED new'], 'pass 1');
+  fx.reconcile();
+  assert.deepEqual(open(), ['JOURNAL_ERROR new', 'RETURN_CAPTURED new'], 'pass 2: still open, the gate still waits');
+  assert.equal(fx.child().gate.state, 'SUBMITTED');
+  // An acknowledged one-time finding resolves on the next complete pass; nobody needs to see it again.
+  const journalError = fx.parentDoc().attention.find(entry => entry.code === 'JOURNAL_ERROR');
+  fx.ctrl(['ack', '--finding', journalError.id]);
+  fx.reconcile();
+  assert.deepEqual(open(), ['JOURNAL_ERROR resolved', 'RETURN_CAPTURED new']);
+  // Acknowledging the waiting return does not close it while the return is unconsumed.
+  const captured = fx.parentDoc().attention.find(entry => entry.code === 'RETURN_CAPTURED');
+  fx.ctrl(['ack', '--finding', captured.id]);
+  fx.reconcile();
+  assert.deepEqual(open(), ['JOURNAL_ERROR resolved', 'RETURN_CAPTURED acknowledged']);
+  // The verdict consumes the return: the condition is gone.
+  fx.ctrl(['return', '--issue', '423', '--consume', 'r-1', '--verdict', 'REOPEN']);
+  fx.reconcile();
+  assert.deepEqual(open(), ['JOURNAL_ERROR resolved', 'RETURN_CAPTURED resolved']);
+});
+
+test('M1: a late checkpoint from an ended assignment stays new until the controller answers it', () => {
+  const fx = fixture();
+  fx.ctrl(['assign', '--issue', '423', '--role', 'G1', '--assignment', 'g1-a1']);
+  fx.run(['bind', '--issue', '423', '--assignment', 'g1-a1', '--session', 'exec-a']);
+  fx.reconcile();
+  fx.ctrl(['assign', '--issue', '423', '--role', 'G1', '--assignment', 'g1-a2', '--supersede', '--reason', 'restart']);
+  // The old session ends a turn after its assignment stopped being live.
+  fx.turnEnd('exec-a', returnBlock('late-1'));
+  const stale = () => fx.parentDoc().attention.filter(entry => entry.code === 'STALE_ASSIGNMENT').map(entry => entry.state);
+  fx.reconcile();
+  fx.reconcile();
+  assert.deepEqual(stale(), ['new']);
+  fx.ctrl(['dispose', '--finding', fx.parentDoc().attention.find(entry => entry.code === 'STALE_ASSIGNMENT').id, '--reason', 'the restart superseded it']);
+  fx.reconcile();
+  assert.deepEqual(stale(), ['disposed']);
+});
+
+test('L2: a queued turn with an unreadable return entry is skipped, and the turns around it are written', () => {
+  const fx = fixture();
+  fx.ctrl(['assign', '--issue', '423', '--role', 'G1', '--assignment', 'g1-a1']);
+  fx.run(['bind', '--issue', '423', '--assignment', 'g1-a1', '--session', 'exec-a']);
+  const hash = checkpoint.sessionHash('exec-a');
+  const sessions = { sessionsDir: fx.sessionsDir };
+  const at = new Date(fx.github.clock).toISOString();
+  const entry = id => ({ return_id: id, verdict_requested: null, at_head: null, next_action: null, blockers: [] });
+  // A return entry no journal accepts: an unknown field and an at_head that is not a SHA.
+  const bad = queued(at, 'g1-a1', { entry: { ...entry('q-bad'), at_head: 'not-a-sha', extra: true } });
+  fs.writeFileSync(checkpoint.queueFile(hash, sessions), JSON.stringify({ schema: QUEUE_SCHEMA_V1, entries: [queued(at, 'g1-a1', { entry: entry('q-1') }), bad, queued(at, 'g1-a1', { entry: entry('q-2') })] }));
+  assert.equal(fx.turnEnd('exec-a', returnBlock('now-1')).outcome, 'WRITTEN');
+  assert.deepEqual(fx.store.readJournal(423, `g1-a1--${hash}.json`).doc.returns.map(item => item.return_id), ['q-1', 'q-2', 'now-1']);
+  assert.equal(checkpoint.readErrors(hash, sessions).recent.filter(item => item.code === 'QUEUE_ENTRY_INVALID').length, 1);
+  assert.equal(fs.existsSync(checkpoint.queueFile(hash, sessions)), false);
+});

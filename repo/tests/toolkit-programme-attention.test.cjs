@@ -319,27 +319,34 @@ test('E2: validation refuses a finding with an unknown code, field, state or a f
 
 // ---- E3. Delivery -------------------------------------------------------------------------------
 
-test('E3: the session-start line shows open findings every time, clear once, and never says clear unchecked', () => {
+test('E3: the session-start line shows open findings every time, clear once after each change, and never says clear unchecked', () => {
   const dir = tmp();
   let now = '2026-10-28T10:00:00.000Z';
   const deps = { attentionDir: dir, now: () => now };
-  assert.deepEqual(cache.sessionAttention('acme/app', deps), { line: 'Attention: not checked on this computer yet; a refresh has started in the background.', refresh: true });
+  assert.deepEqual(cache.sessionAttention('acme/app', deps), { line: 'Attention: not checked on this computer yet', refresh: true, age: null });
   const write = list => cache.writeCache('acme/app', { line: state.attentionLine(list), counts: state.attentionCounts(list), digest: state.attentionDigest(list), complete: true }, deps);
-  const finding = { id: state.findingId('inventory', 'NEEDS_PLACEMENT', 470, ''), source: 'inventory', code: 'NEEDS_PLACEMENT', issue: 470, head: null, state: 'new', first_seen: now, changed_at: now };
-  write([finding]);
+  const finding = (issue, findingState = 'new') => ({ id: state.findingId('inventory', 'NEEDS_PLACEMENT', issue, ''), source: 'inventory', code: 'NEEDS_PLACEMENT', issue, head: null, state: findingState, first_seen: now, changed_at: now });
+  write([finding(470)]);
   assert.match(cache.sessionAttention('acme/app', deps).line, /^Attention: 1 new, 0 acknowledged\. Run programme\.cjs attention/);
-  write([{ ...finding, state: 'acknowledged' }]);
+  write([finding(470, 'acknowledged')]);
   assert.match(cache.sessionAttention('acme/app', deps).line, /^Attention: 0 new, 1 acknowledged/, 'acknowledged never hides');
   assert.match(cache.sessionAttention('acme/app', deps).line, /1 acknowledged/, 'and again next session');
-  write([{ ...finding, state: 'resolved' }]);
-  assert.deepEqual(cache.sessionAttention('acme/app', deps), { line: 'Attention: clear.', refresh: false });
-  assert.deepEqual(cache.sessionAttention('acme/app', deps), { line: null, refresh: false }, 'then silent');
+  write([finding(470, 'resolved')]);
+  assert.deepEqual(cache.sessionAttention('acme/app', deps), { line: 'Attention: clear', refresh: false, age: null });
+  assert.deepEqual(cache.sessionAttention('acme/app', deps), { line: null, refresh: false, age: null }, 'then silent');
+  // A second finding comes and goes: clear shows again after that change too.
+  write([finding(470, 'resolved'), finding(471)]);
+  assert.match(cache.sessionAttention('acme/app', deps).line, /^Attention: 1 new/);
+  write([finding(470, 'resolved'), finding(471, 'resolved')]);
+  assert.equal(cache.sessionAttention('acme/app', deps).line, 'Attention: clear', 'clear after every change, not only the first');
+  assert.equal(cache.sessionAttention('acme/app', deps).line, null);
   now = '2026-10-28T13:00:00.000Z';
-  assert.deepEqual(cache.sessionAttention('acme/app', deps), { line: null, refresh: true }, 'an old cache starts a refresh even when silent');
-  write([finding]);
+  assert.deepEqual(cache.sessionAttention('acme/app', deps), { line: null, refresh: true, age: '3 h' }, 'an old cache asks for a refresh even when silent');
+  write([finding(472)]);
   now = '2026-10-28T16:00:00.000Z';
   const stale = cache.sessionAttention('acme/app', deps);
-  assert.match(stale.line, /^Attention: 1 new, 0 acknowledged \(as of 3 h ago; a refresh has started in the background\)/);
+  assert.match(stale.line, /^Attention: 1 new, 0 acknowledged \(as of 3 h ago\)\. Run programme\.cjs attention/);
+  assert.doesNotMatch(stale.line, /started/, 'the cache never claims a refresh started');
   assert.equal(stale.refresh, true);
 });
 
@@ -348,12 +355,26 @@ test('E3: sessionLine appends the cached line and Checkpoint lines for an ENABLE
   const sessionsDir = tmp();
   const attentionDir = tmp();
   const started = [];
+  let now = '2026-10-28T10:00:00.000Z';
   const enabled = { state: 'ENABLED', rule: 'M1', materials_complete: true, root };
-  const programmeDeps = { attentionDir, sessionsDir, mergedBinding: () => ({ repository: 'acme/app' }), startRefresh: folder => started.push(folder), now: () => '2026-10-28T10:00:00.000Z' };
+  const programmeDeps = { attentionDir, sessionsDir, mergedBinding: () => ({ repository: 'acme/app' }), startRefresh: folder => started.push(folder), now: () => now };
   // The repository's state as decided, in place of reading it.
-  const evaluate = stateValue => gate.sessionLine(root, { stateReader: () => stateValue, programmeDeps });
-  assert.match(evaluate(enabled), /Toolkit governance: ENABLED[^]*Attention: not checked on this computer yet/);
+  const evaluate = (stateValue, deps = programmeDeps) => gate.sessionLine(root, { stateReader: () => stateValue, programmeDeps: deps });
+  assert.match(evaluate(enabled), /Toolkit governance: ENABLED[^]*Attention: not checked on this computer yet; a refresh has started in the background\./);
   assert.deepEqual(started, [root], 'one background refresh, started by the trigger');
+  // Within 15 minutes no second start, and the line does not claim one.
+  now = '2026-10-28T10:10:00.000Z';
+  const again = evaluate(enabled);
+  assert.match(again, /Attention: not checked on this computer yet\./);
+  assert.doesNotMatch(again, /refresh has started/);
+  assert.deepEqual(started, [root], 'throttled');
+  now = '2026-10-28T10:20:00.000Z';
+  assert.match(evaluate(enabled), /refresh has started/);
+  assert.equal(started.length, 2);
+  // Offline (no injected starter): the refresh never starts and the line never says it did.
+  const offline = evaluate(enabled, { ...programmeDeps, startRefresh: undefined, environment: { TOOLKIT_GOVERNANCE_OFFLINE: '1' } });
+  assert.match(offline, /Attention: not checked on this computer yet\./);
+  assert.doesNotMatch(offline, /refresh has started/);
   for (const off of [{ state: 'DISABLED', rule: 'M2', root }, { state: 'ENABLED', rule: 'R5', materials_complete: false, root }]) {
     assert.doesNotMatch(evaluate(off), /Attention:/, `${off.state} ${off.rule}: no line`);
   }
@@ -512,4 +533,67 @@ test('session start deletes this repository\'s offline queues once governance is
     gate.startSession({ session_id: `s-${decision}`, cwd: repo, source: 'startup' }, { registryOptions, refreshBinding: () => ({ refreshed: false }), programmeDeps: { sessionsDir } });
     assert.equal(fs.existsSync(checkpoint.queueFile(hash, { sessionsDir })), decision === null, `${decision || 'undecided'}`);
   }
+});
+
+// ---- Review fixes -------------------------------------------------------------------------------
+
+test('M2: attention --refresh prints the pass\'s holds and exits 1, as plain refresh does', () => {
+  const fx = fixture();
+  // Pages written by a newer Toolkit: the pass holds their bodies.
+  const newer = '<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN STATE v2 toolkit=9.9.9 sha256=000000000000 -->\nx\n<!-- AI-AGENT-TOOLKIT:programme-state:END STATE -->';
+  fx.github.issues.get(421).body = `## CURRENT\n${newer}\n`;
+  const plain = fx.run(['refresh']);
+  assert.equal(plain.code, 1);
+  assert.ok(plain.result.holds.some(hold => hold.code === 'BLOCK_NEWER_TOOLKIT'));
+  const json = fx.run(['attention', '--refresh']);
+  assert.equal(json.code, 1);
+  assert.ok(json.result.refreshed.holds.some(hold => hold.code === 'BLOCK_NEWER_TOOLKIT' && hold.target === '#421'));
+  const text = fx.run(['attention', '--refresh'], {}, { json: false });
+  assert.equal(text.code, 1);
+  assert.match(text.result, /^Attention: [^\n]+\n\nThe refresh pass held\n- BLOCK_NEWER_TOOLKIT #421: /);
+  // Without a hold it exits 0 and prints no hold section.
+  const clean = fixture();
+  const ok = clean.run(['attention', '--refresh'], {}, { json: false });
+  assert.equal(ok.code, 0);
+  assert.doesNotMatch(ok.result, /refresh pass held/);
+});
+
+test('L1: a partial reconcile resolves no reconcile-source finding', () => {
+  const fx = fixture();
+  fx.github.addIssue(450, { parent: 421 });
+  fx.run(['reconcile', '--apply', '--controller', '--session', controller.session]);
+  const entry = () => fx.parentDoc().attention.find(item => item.code === 'NATIVE_CHILD_UNKNOWN' && item.issue === 450);
+  assert.equal(entry().state, 'new');
+  // The condition goes away, but a pass for one issue never resolves anything.
+  fx.github.issues.get(421).subs = fx.github.issues.get(421).subs.filter(number => number !== 450);
+  fx.github.issues.get(450).parent = null;
+  fx.run(['reconcile', '--apply', '--controller', '--session', controller.session, '--issue', '423']);
+  assert.equal(entry().state, 'new', 'unchanged after reconcile --issue');
+  fx.run(['reconcile', '--apply', '--controller', '--session', controller.session]);
+  assert.equal(entry().state, 'resolved', 'a full pass resolves it');
+});
+
+test('L4: inventory and attention only read GitHub, and the inventory command lists every class', () => {
+  const fx = fixture();
+  fx.github.addIssue(440, { parent: 423 });
+  fx.github.addIssue(470);
+  fx.github.addIssue(471, { labels: ['programme:outside'] });
+  fx.github.addIssue(472);
+  fx.github.addComment(472, { body: 'OUTSIDE-PROGRAMME\nOwn board', association: 'OWNER' });
+  fx.run(['refresh']);
+  const from = fx.github.calls.length;
+  const commits = fx.github.commits;
+  const text = fx.run(['inventory'], {}, { json: false });
+  assert.equal(text.code, 0);
+  assert.match(text.result, /^Inventory of acme\/app \(registered parents #421, #600\): complete\nPARENT 2, CHILD 2, OUTSIDE 2, NEEDS_PLACEMENT 1\n/);
+  assert.match(text.result, /NEEDS_PLACEMENT\n- #470\n/);
+  assert.match(text.result, /OUTSIDE\n- #471: label programme:outside\n- #472: Own board\n/);
+  assert.match(text.result, /Findings \(recorded by the next refresh\)\n- NEEDS_PLACEMENT #470/);
+  const json = fx.run(['inventory']).result;
+  assert.deepEqual(json.counts, { PARENT: 2, CHILD: 2, OUTSIDE: 2, NEEDS_PLACEMENT: 1 });
+  fx.run(['attention']);
+  fx.run(['attention'], {}, { json: false });
+  const writes = fx.github.calls.slice(from).filter(call => call.method !== 'GET' && !(call.path === 'graphql' && !/\bmutation\b/.test(call.body.query)));
+  assert.deepEqual(writes, [], 'no write of any kind: no issue, comment, label, link or store change');
+  assert.equal(fx.github.commits, commits, 'no store commit');
 });
