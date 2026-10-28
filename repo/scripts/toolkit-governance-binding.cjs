@@ -6,8 +6,8 @@
 //
 //   refresh   asks the origin remote for its default branch (`git ls-remote --symref origin HEAD`),
 //             fetches that one branch (bounded), reads `.github/toolkit-programme.json` at its tip
-//             and writes the result to this computer's cache. Only setup, `toolkit governance
-//             status` and the session-start hook refresh.
+//             and writes the result to this computer's cache. Only `toolkit governance status`
+//             and the session-start hook refresh.
 //   read      returns the cached result for one repository identity, or null. Every other caller,
 //             every hook on every tool call included, reads only the cache: no network per tool use.
 //
@@ -18,12 +18,14 @@
 // entry (governed effects then hold until the next refresh), never as a binding.
 //
 // No model calls, no gh, no writes outside the cache (the fetch updates only the remote-tracking
-// ref of the default branch).
+// ref of the default branch, and a lock that fetch left when its timeout stopped it is removed).
 
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+
+const { validateRemoteIdentity, repositoryIdForCanonicalRemote } = require('./toolkit-capability-registry.cjs');
 
 const CACHE_SCHEMA = 'toolkit.governance-binding-cache.v1';
 const CACHE_DIR = 'governance-binding-cache';
@@ -68,16 +70,28 @@ function parseSymref(text) {
 // Reads the default-branch binding through git. { status: 'present', default_branch, commit, text }
 // or { status: 'absent', default_branch, commit } or { status: 'unknown', error } when the remote,
 // the fetch or the read failed (offline included). Never throws.
-function readDefaultBranchBinding(root, { runGit = defaultRunGit, timeout = GIT_TIMEOUT_MS } = {}) {
+//
+// `expectedRemote` is the canonical origin the identity was read from (the literal
+// remote.origin.url). git's own origin also follows url.<x>.insteadOf, [include] files and
+// config.worktree, so the URL git will actually use is checked first: a remote that resolves anywhere
+// else is held as 'remote-redirected' and nothing is fetched (A1).
+function readDefaultBranchBinding(root, { runGit = defaultRunGit, timeout = GIT_TIMEOUT_MS, expectedRemote = null } = {}) {
   const git = args => {
     try { return runGit(args, { cwd: root, timeout }); } catch { return { status: null, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) }; }
   };
+  const effective = git(['ls-remote', '--get-url', 'origin']);
+  if (effective.status !== 0) return { status: 'unknown', error: 'remote-unreachable' };
+  const resolved = validateRemoteIdentity(effective.stdout.toString('utf8').trim());
+  // The same repository spelt another way (https, ssh, with or without .git) is the same origin.
+  if (!expectedRemote || !resolved.valid || repositoryIdForCanonicalRemote(resolved.canonical) !== repositoryIdForCanonicalRemote(expectedRemote)) return { status: 'unknown', error: 'remote-redirected' };
   const symref = git(['ls-remote', '--symref', 'origin', 'HEAD']);
   if (symref.status !== 0) return { status: 'unknown', error: 'remote-unreachable' };
   const branch = parseSymref(symref.stdout.toString('utf8'));
   if (!branch) return { status: 'unknown', error: 'default-branch-unknown' };
   const tracking = `refs/remotes/origin/${branch}`;
+  const started = Date.now();
   const fetched = git(['fetch', '--no-tags', '--no-recurse-submodules', 'origin', `+refs/heads/${branch}:${tracking}`]);
+  if (fetched.status === null) removeKilledFetchLock(git, root, tracking, started);
   if (fetched.status !== 0) return { status: 'unknown', error: 'fetch-failed' };
   const head = git(['rev-parse', '--verify', '--quiet', `${tracking}^{commit}`]);
   const commit = head.status === 0 ? head.stdout.toString('utf8').trim() : '';
@@ -92,6 +106,19 @@ function readDefaultBranchBinding(root, { runGit = defaultRunGit, timeout = GIT_
   const blob = git(['cat-file', 'blob', entry[1]]);
   if (blob.status !== 0) return { status: 'unknown', error: 'blob-unreadable' };
   return { status: 'present', default_branch: branch, commit, text: blob.stdout.toString('utf8') };
+}
+
+// A fetch stopped by the timeout can leave the tracking ref's lock behind, which would make every
+// later fetch of that branch fail. Only a lock written since this fetch started is removed: an older
+// one belongs to someone else.
+function removeKilledFetchLock(git, root, tracking, started) {
+  try {
+    const common = git(['rev-parse', '--git-common-dir']);
+    if (common.status !== 0) return;
+    const lock = path.join(path.resolve(root, common.stdout.toString('utf8').trim()), ...tracking.split('/')) + '.lock';
+    const stat = fs.lstatSync(lock);
+    if (stat.isFile() && stat.mtimeMs >= started - 1000) fs.rmSync(lock, { force: true });
+  } catch { /* nothing to remove */ }
 }
 
 // Atomic write of one cache entry; returns the entry. Throws on a write failure.
@@ -109,7 +136,7 @@ function writeCache(registryPath, entry) {
 // Returns { refreshed, entry, error }.
 function refreshBindingCache(identity, registryPath, { runGit, timeout, now = () => new Date() } = {}) {
   if (!identity || !identity.valid || !identity.root || !identity.repository_id) return { refreshed: false, entry: null, error: 'identity-invalid' };
-  const read = readDefaultBranchBinding(identity.root, { runGit, timeout });
+  const read = readDefaultBranchBinding(identity.root, { runGit, timeout, expectedRemote: identity.remote.canonical });
   if (read.status === 'unknown') return { refreshed: false, entry: readBindingCache(identity, registryPath), error: read.error };
   const entry = {
     schema: CACHE_SCHEMA,

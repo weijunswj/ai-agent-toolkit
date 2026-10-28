@@ -49,6 +49,8 @@ function defaultGh(args) {
   try { return { ok: true, value: JSON.parse(String(run.stdout || 'null')) }; } catch { return { ok: false, reason: 'gh-output-invalid' }; }
 }
 
+function offlineGh() { return { ok: false, reason: 'offline' }; }
+
 function initials(name) {
   const words = String(name).split(/[^A-Za-z0-9]+/).filter(Boolean);
   const short = (words.length > 1 ? words.map(word => word[0]) : [String(name).slice(0, 3)]).join('').toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -132,8 +134,10 @@ function localInventory(root) {
 class GovernanceDiscovery {
   #gh; #registryOptions;
 
-  constructor({ gh = defaultGh, registryOptions = {} } = {}) {
-    this.#gh = gh;
+  // `gh` is for tests. Without it, a test registry or TOOLKIT_GOVERNANCE_OFFLINE=1 (set for test runs)
+  // reads nothing from GitHub, and every search reports itself as unknown.
+  constructor({ gh = null, registryOptions = {}, environment = process.env } = {}) {
+    this.#gh = gh || (registryOptions.testOnly === true || environment.TOOLKIT_GOVERNANCE_OFFLINE === '1' ? offlineGh : defaultGh);
     this.#registryOptions = registryOptions;
   }
 
@@ -296,4 +300,4 @@ function describeDiscovery(result) {
   return lines;
 }
 
-module.exports = Object.freeze({ SCHEMA, GovernanceDiscovery, parentCandidates, judgeStore, choose, adoptionList, describeDiscovery, initials, localInventory });
+module.exports = Object.freeze({ SCHEMA, GovernanceDiscovery, offlineGh, parentCandidates, judgeStore, choose, adoptionList, describeDiscovery, initials, localInventory });

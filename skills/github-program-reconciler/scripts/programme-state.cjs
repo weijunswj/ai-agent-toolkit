@@ -398,6 +398,8 @@ function validateBinding(binding) {
     check(errors, REPO.test(String(binding.repository || '')), 'repository must be owner/name');
     let enabled = true;
     if (v2) {
+      const unknown = Object.keys(binding).filter(key => !BINDING_V2_KEYS.includes(key));
+      check(errors, unknown.length === 0, `${unknown.join(', ')} ${unknown.length === 1 ? 'is' : 'are'} not a version 2 binding key`);
       check(errors, ['enabled', 'disabled'].includes(binding.governance), 'governance must be enabled or disabled');
       enabled = binding.governance === 'enabled';
       for (const key of ['parent_issue', 'record_prefix', 'writer_prefix']) check(errors, binding[key] === undefined, `${key} belongs to v1; v2 lists parents`);
@@ -408,7 +410,7 @@ function validateBinding(binding) {
           check(errors, isObject(entry) && Object.keys(entry).every(key => ['issue', 'record_prefix', 'writer_prefix'].includes(key)), `parents[${index}] may hold only issue, record_prefix and writer_prefix`);
           check(errors, isObject(entry) && isInt(entry.issue, 1), `parents[${index}].issue must be an issue number`);
           check(errors, isObject(entry) && PREFIX.test(String(entry.record_prefix || '')), `parents[${index}].record_prefix must be a record prefix`);
-          check(errors, isObject(entry) && optional(entry.writer_prefix, value => PREFIX.test(String(value))), `parents[${index}].writer_prefix must be a record prefix`);
+          check(errors, isObject(entry) && (entry.writer_prefix === undefined || (typeof entry.writer_prefix === 'string' && PREFIX.test(entry.writer_prefix))), `parents[${index}].writer_prefix must be a record prefix`);
         });
         check(errors, new Set(parents.map(entry => (isObject(entry) ? entry.issue : null))).size === parents.length, 'parents must not repeat an issue');
       }
@@ -448,6 +450,9 @@ function validateBinding(binding) {
   if (errors.length) throw new ProgrammeError('BINDING_INVALID', `${BINDING_FILE} is invalid: ${errors[0]}`, { errors });
   return normalized;
 }
+
+// The keys a version 2 binding may carry (binding-v2.schema.json); anything else makes it invalid.
+const BINDING_V2_KEYS = Object.freeze(['schema', 'repository', 'governance', 'parents', 'store', 'required_checks', 'paid_security', 'dependency_updates', 'projection']);
 
 // Whether a valid binding turns governance on: v1 always, v2 when `governance` is enabled.
 function bindingEnabled(binding) {

@@ -205,9 +205,12 @@ test('A4: the cache never upgrades OFF to ON; offline keeps the last read', (t) 
 
 // ---- the reader and its cache, hostile input ---------------------------------------------------
 
+// Answers by subcommand; `ls-remote --get-url` (the URL git really uses for origin) answers the
+// example origin unless the script says otherwise.
 function fakeGit(script) {
   return (args) => {
-    const key = args[0];
+    const key = args[0] === 'ls-remote' && args[1] === '--get-url' ? 'get-url' : args[0];
+    if (key === 'get-url' && !script['get-url']) return { status: 0, stdout: Buffer.from(`${REMOTE}\n`), stderr: Buffer.alloc(0) };
     const answer = script[key];
     if (typeof answer === 'function') return answer(args);
     return answer || { status: 1, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) };
@@ -219,19 +222,30 @@ const SHA = 'b'.repeat(40);
 test('reader: default branch from the symref, then the binding at its tip; hostile answers never become a binding', () => {
   const base = { 'ls-remote': ok(`ref: refs/heads/main\tHEAD\n${SHA}\tHEAD\n`), fetch: ok(''), 'rev-parse': ok(`${SHA}\n`) };
   const text = JSON.stringify(v2());
-  const present = bindingCache.readDefaultBranchBinding('/r', { runGit: fakeGit({ ...base, 'ls-tree': ok(`100644 blob ${'c'.repeat(40)}    ${text.length}\t.github/toolkit-programme.json\n`), 'cat-file': ok(text) }) });
+  const present = bindingCache.readDefaultBranchBinding('/r', { expectedRemote: REMOTE, runGit: fakeGit({ ...base, 'ls-tree': ok(`100644 blob ${'c'.repeat(40)}    ${text.length}\t.github/toolkit-programme.json\n`), 'cat-file': ok(text) }) });
   assert.deepEqual([present.status, present.default_branch, present.commit, present.text], ['present', 'main', SHA, text]);
-  assert.equal(bindingCache.readDefaultBranchBinding('/r', { runGit: fakeGit({ ...base, 'ls-tree': ok('') }) }).status, 'absent');
-  const link = bindingCache.readDefaultBranchBinding('/r', { runGit: fakeGit({ ...base, 'ls-tree': ok(`120000 blob ${'c'.repeat(40)}    20\t.github/toolkit-programme.json\n`) }) });
+  assert.equal(bindingCache.readDefaultBranchBinding('/r', { expectedRemote: REMOTE, runGit: fakeGit({ ...base, 'ls-tree': ok('') }) }).status, 'absent');
+  const link = bindingCache.readDefaultBranchBinding('/r', { expectedRemote: REMOTE, runGit: fakeGit({ ...base, 'ls-tree': ok(`120000 blob ${'c'.repeat(40)}    20\t.github/toolkit-programme.json\n`) }) });
   assert.deepEqual([link.status, link.text], ['present', null], 'a link is an unusable binding (ERROR), never absent');
-  const huge = bindingCache.readDefaultBranchBinding('/r', { runGit: fakeGit({ ...base, 'ls-tree': ok(`100644 blob ${'c'.repeat(40)} 9999999\t.github/toolkit-programme.json\n`) }) });
+  const huge = bindingCache.readDefaultBranchBinding('/r', { expectedRemote: REMOTE, runGit: fakeGit({ ...base, 'ls-tree': ok(`100644 blob ${'c'.repeat(40)} 9999999\t.github/toolkit-programme.json\n`) }) });
   assert.deepEqual([huge.status, huge.problem], ['present', 'too large']);
   for (const symref of ['ref: refs/heads/../x\tHEAD\n', 'ref: refs/heads/.hidden\tHEAD\n', `${SHA}\tHEAD\n`, 'ref: refs/heads/a b\tHEAD\n', 'ref: refs/tags/v1\tHEAD\n']) {
-    assert.equal(bindingCache.readDefaultBranchBinding('/r', { runGit: fakeGit({ ...base, 'ls-remote': ok(symref) }) }).status, 'unknown', JSON.stringify(symref));
+    assert.equal(bindingCache.readDefaultBranchBinding('/r', { expectedRemote: REMOTE, runGit: fakeGit({ ...base, 'ls-remote': ok(symref) }) }).status, 'unknown', JSON.stringify(symref));
   }
-  assert.equal(bindingCache.readDefaultBranchBinding('/r', { runGit: fakeGit({ ...base, fetch: { status: 1, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) } }) }).error, 'fetch-failed');
-  assert.equal(bindingCache.readDefaultBranchBinding('/r', { runGit: fakeGit({ ...base, 'rev-parse': ok('not-a-sha') }) }).error, 'commit-unreadable');
-  assert.equal(bindingCache.readDefaultBranchBinding('/r', { runGit: () => { throw new Error('spawn failed'); } }).status, 'unknown');
+  assert.equal(bindingCache.readDefaultBranchBinding('/r', { expectedRemote: REMOTE, runGit: fakeGit({ ...base, fetch: { status: 1, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) } }) }).error, 'fetch-failed');
+  assert.equal(bindingCache.readDefaultBranchBinding('/r', { expectedRemote: REMOTE, runGit: fakeGit({ ...base, 'rev-parse': ok('not-a-sha') }) }).error, 'commit-unreadable');
+  assert.equal(bindingCache.readDefaultBranchBinding('/r', { expectedRemote: REMOTE, runGit: () => { throw new Error('spawn failed'); } }).status, 'unknown');
+  // F1: the URL git really fetches from must be the origin the identity names (insteadOf, include, config.worktree).
+  let fetchedAnything = false;
+  const watching = script => fakeGit({ ...script, fetch: () => { fetchedAnything = true; return ok(''); } });
+  for (const url of ['file:///srv/mirror/example-repo.git', 'https://github.com/example-owner/other-repo.git', 'https://gitlab.com/example-owner/example-repo.git', '']) {
+    const redirected = bindingCache.readDefaultBranchBinding('/r', { expectedRemote: REMOTE, runGit: watching({ ...base, 'get-url': ok(`${url}\n`) }) });
+    assert.deepEqual(redirected, { status: 'unknown', error: 'remote-redirected' }, url);
+  }
+  assert.equal(bindingCache.readDefaultBranchBinding('/r', { runGit: watching(base) }).error, 'remote-redirected', 'no expected origin: nothing is read');
+  assert.equal(fetchedAnything, false, 'a redirected origin is never fetched');
+  // Another spelling of the same origin is the same origin.
+  assert.equal(bindingCache.readDefaultBranchBinding('/r', { expectedRemote: REMOTE, runGit: fakeGit({ ...base, 'get-url': ok('git@github.com:example-owner/example-repo.git\n'), 'ls-tree': ok('') }) }).status, 'absent');
 });
 
 test('cache: an entry for another identity, a tampered or damaged entry reads as no entry', (t) => {
@@ -278,9 +292,14 @@ test('A1 end to end with real git: only the default branch\'s merged binding cou
   git(ctx.root, ['clone', '--quiet', origin, clone]);
   // The origin is named as github.com and served from the local bare repository.
   git(clone, ['remote', 'set-url', 'origin', REMOTE]);
-  git(clone, ['config', `url.${origin.replace(/\\/g, '/')}.insteadOf`, REMOTE]);
+  // The origin is named as github.com; this runner serves it from the local bare repository by
+  // passing that path where git would use origin, and answers --get-url as git would for origin.
+  const served = (args, options) => {
+    if (args[0] === 'ls-remote' && args[1] === '--get-url') return { status: 0, stdout: Buffer.from(`${REMOTE}\n`), stderr: Buffer.alloc(0) };
+    return bindingCache.defaultRunGit(args.map(arg => (arg === 'origin' ? origin : arg)), options);
+  };
   git(clone, ['checkout', '--quiet', 'feature']);
-  assert.equal(governance.refreshMergedBinding(clone, ctx.opts, { runGit: bindingCache.defaultRunGit }).refreshed, true);
+  assert.equal(governance.refreshMergedBinding(clone, ctx.opts, { runGit: served }).refreshed, true);
   let current = governance.governanceState(clone, ctx.opts);
   assert.deepEqual([current.rule, current.merged.status], ['R7', 'none'], 'a checked-out branch with a binding is not the default branch');
   assert.ok(current.notes.includes('pending-binding-merge'));
@@ -288,7 +307,7 @@ test('A1 end to end with real git: only the default branch\'s merged binding cou
   git(seed, ['checkout', '--quiet', 'main']);
   git(seed, [...id, 'merge', '--quiet', '--no-ff', '-m', 'merge binding', 'feature']);
   git(seed, ['push', '--quiet', origin, 'main']);
-  assert.equal(governance.refreshMergedBinding(clone, ctx.opts, { runGit: bindingCache.defaultRunGit }).refreshed, true);
+  assert.equal(governance.refreshMergedBinding(clone, ctx.opts, { runGit: served }).refreshed, true);
   current = governance.governanceState(clone, ctx.opts);
   assert.deepEqual([current.state, current.rule, current.programme_records_bind], ['ENABLED', 'M1', true]);
   // Editing the working tree does not change what was merged.
@@ -296,6 +315,13 @@ test('A1 end to end with real git: only the default branch\'s merged binding cou
   assert.equal(governance.governanceState(clone, ctx.opts).rule, 'M1');
   assert.deepEqual(governance.bindingRequiredChecks(clone, ctx.opts), ['validate'], 'required checks come from the merged binding');
   assert.equal(governance.bindingStoreRepository(clone, ctx.opts), STORE.repository);
+  // F1: one config line that sends origin elsewhere (here a disabled binding's mirror) changes nothing:
+  // git's real origin URL no longer matches the identity, so the refresh holds and keeps the last read.
+  const mirror = path.join(ctx.root, 'mirror.git');
+  git(ctx.root, ['clone', '--quiet', '--bare', origin, mirror]);
+  git(clone, ['config', `url.${mirror.replace(/\\/g, '/')}.insteadOf`, REMOTE]);
+  assert.deepEqual(governance.refreshMergedBinding(clone, ctx.opts, { runGit: bindingCache.defaultRunGit }), { refreshed: false, error: 'remote-redirected' });
+  assert.equal(governance.governanceState(clone, ctx.opts).rule, 'M1');
 });
 
 // ---- matrix B: discovery ---------------------------------------------------------------------------
@@ -466,4 +492,130 @@ test('D: consumers read ENABLED, DISABLED, ERROR and stale the same way', (t) =>
   assert.match(sessionLine(repos.stale, { registryOptions: ctx.opts }), /^Toolkit governance: ENABLED [^\n]*last read over 24 hours ago, so programme records, gate admission and finality hold/);
   assert.match(sessionLine(repos.disabled, { registryOptions: ctx.opts }), /^Toolkit governance: DISABLED/);
   assert.doesNotMatch(sessionLine(repos.enabled, { registryOptions: ctx.opts }), /24 hours/);
+});
+
+// ---- review findings --------------------------------------------------------------------------------
+
+test('F4: an ENABLED repository without the governed block is drift, however it was enabled', (t) => {
+  const ctx = scratch(t);
+  const repo = fakeRepo(ctx, 'no-block');
+  cache(ctx, repo);
+  const state = governance.governanceState(repo, ctx.opts);
+  assert.deepEqual([state.state, state.rule, state.materials_complete], ['ENABLED', 'M1', true]);
+  const report = conformance.checkConformance(repo, { ...ctx.opts, offline: true });
+  assert.ok(report.findings.some(entry => entry.id === 'GOVERNED_BLOCK_MISSING'), JSON.stringify(report.findings.map(entry => entry.id)));
+});
+
+test('F5: a version 2 binding with an unknown key or a non-string writer prefix is ERROR, never ON', (t) => {
+  const ctx = scratch(t);
+  for (const [name, binding] of [
+    ['children', v2({ children: [8] })],
+    ['extra', v2({ foo: 1 })],
+    ['null-writer', v2({ parents: [{ issue: 7, record_prefix: 'INT-ER7-', writer_prefix: null }] })],
+    ['number-writer', v2({ parents: [{ issue: 7, record_prefix: 'INT-ER7-', writer_prefix: 12 }] })],
+  ]) {
+    const repo = fakeRepo(ctx, `f5-${name}`);
+    cache(ctx, repo, { binding });
+    const state = stateAt(ctx, repo);
+    assert.deepEqual([state.state, state.rule, state.programme_records_bind], ['ERROR', 'M0', false], name);
+  }
+});
+
+test('F3: discovery reads nothing from GitHub in a test run or for a test registry', (t) => {
+  const ctx = scratch(t);
+  const repo = fakeRepo(ctx, 'quiet-discovery', { remote: REMOTE });
+  cache(ctx, repo, { status: 'absent' });
+  // A test registry: every GitHub read is answered offline, so each search reports itself unknown.
+  const found = new discovery.GovernanceDiscovery({ registryOptions: ctx.opts, environment: {} }).discover(repo);
+  assert.equal(found.status, 'propose');
+  assert.deepEqual([found.parents.status, found.stores.status], ['unknown', 'unknown']);
+  assert.ok(found.unknown.includes('parent issues (offline)') && found.unknown.includes('the owner\'s repositories (offline)'), found.unknown.join('; '));
+  // TOOLKIT_GOVERNANCE_OFFLINE=1 (set for every test child by run-tests.cjs) picks the same offline reader.
+  const source = fs.readFileSync(path.join(scripts, 'toolkit-governance-discovery.cjs'), 'utf8');
+  assert.match(source, /environment\.TOOLKIT_GOVERNANCE_OFFLINE === '1' \? offlineGh : defaultGh/);
+  assert.deepEqual(discovery.offlineGh(), { ok: false, reason: 'offline' });
+});
+
+test('F7: programme commands refuse a stale or unusable merged binding and use only the merged one', (t) => {
+  const { governedHome, makeGoverned, recordMerged } = require('./toolkit-governed-fixture-support.cjs');
+  const programme = require(path.join(repoRoot, 'skills', 'github-program-reconciler', 'scripts', 'programme.cjs'));
+  governedHome();
+  const repo = makeGoverned(path.join(scratch(t).root, 'programme-repo'), 'programme-repo');
+  // A transport that stops the command right after governance admitted it, naming the binding it got.
+  const stop = { request: () => { throw Object.assign(new Error('admitted'), { code: 'ADMITTED' }); }, graphql: () => { throw Object.assign(new Error('admitted'), { code: 'ADMITTED' }); } };
+  const open = () => programme.openContext({ 'repo-root': repo }, { transport: stop, toolkitVersion: '0.0.0' });
+  assert.throws(open, error => error.code !== 'GITHUB_GOVERNANCE_OFF', 'fresh merged binding: admitted');
+  // The working tree's binding never names the store: change it and the merged one is still used.
+  const file = path.join(repo, '.github', 'toolkit-programme.json');
+  const merged = fs.readFileSync(file, 'utf8');
+  fs.writeFileSync(file, merged.replace('toolkit-test-fixture/store', 'toolkit-test-fixture/elsewhere'));
+  assert.equal(governance.mergedBinding(repo).store.repository, 'toolkit-test-fixture/store');
+  fs.writeFileSync(file, merged);
+  recordMerged(repo, { now: new Date(Date.now() - 25 * HOUR) });
+  assert.throws(open, { code: 'GITHUB_GOVERNANCE_OFF' }, 'read over 24 hours ago');
+  recordMerged(repo, { text: '{broken' });
+  assert.throws(open, { code: 'GITHUB_GOVERNANCE_OFF' }, 'unusable merged binding');
+});
+
+test('F7: the attribution guard and the bridge keep their protection on ERROR, and drop it only when DISABLED', (t) => {
+  const ctx = scratch(t);
+  const { bypassRefusal, BYPASS_MESSAGE } = require(path.join(scripts, 'toolkit-attribution-guard.cjs'));
+  const bridge = require(path.join(scripts, 'toolkit-local-bridge.cjs'));
+  const error = fakeRepo(ctx, 'guard-error');
+  cache(ctx, error, { text: '{bad' });
+  const stale = fakeRepo(ctx, 'guard-stale');
+  cache(ctx, stale, { ageMs: 30 * 24 * HOUR });
+  const off = fakeRepo(ctx, 'guard-off');
+  cache(ctx, off, { binding: { schema: 'toolkit.programme-binding.v2', repository: SLUG, governance: 'disabled' } });
+  for (const [repo, protectedHere] of [[error, true], [stale, true], [off, false]]) {
+    assert.equal(bypassRefusal('git commit -n -m x', repo, 0, ctx.opts), protectedHere ? BYPASS_MESSAGE : '', path.basename(repo));
+    assert.equal(bridge.governanceEnabledAt(repo, ctx.opts), protectedHere, path.basename(repo));
+  }
+});
+
+test('F8: a fetch the timeout stopped leaves no lock of its own behind; an older lock is not touched', (t) => {
+  const ctx = scratch(t);
+  const root = path.join(ctx.root, 'locked');
+  const lockDir = path.join(root, '.git', 'refs', 'remotes', 'origin');
+  fs.mkdirSync(lockDir, { recursive: true });
+  const lock = path.join(lockDir, 'main.lock');
+  const base = {
+    'ls-remote': ok(`ref: refs/heads/main\tHEAD\n${SHA}\tHEAD\n`),
+    'rev-parse': args => (args[1] === '--git-common-dir' ? ok('.git\n') : ok(`${SHA}\n`)),
+  };
+  const killed = () => { fs.writeFileSync(lock, ''); return { status: null, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) }; };
+  assert.equal(bindingCache.readDefaultBranchBinding(root, { expectedRemote: REMOTE, runGit: fakeGit({ ...base, fetch: killed }) }).error, 'fetch-failed');
+  assert.equal(fs.existsSync(lock), false, 'the lock this fetch left is removed');
+  fs.writeFileSync(lock, '');
+  const old = new Date(Date.now() - HOUR);
+  fs.utimesSync(lock, old, old);
+  const timedOut = () => ({ status: null, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) });
+  bindingCache.readDefaultBranchBinding(root, { expectedRemote: REMOTE, runGit: fakeGit({ ...base, fetch: timedOut }) });
+  assert.equal(fs.existsSync(lock), true, 'an older lock belongs to someone else');
+});
+
+test('F8: the session-start hook refreshes once; the bridge only reads the cache', () => {
+  // Session marks go to a scratch home, never the real one.
+  require('./toolkit-governed-fixture-support.cjs').governedHome();
+  const gate = require(path.join(scripts, 'toolkit-governance-gate.cjs'));
+  const calls = [];
+  gate.startSession({ cwd: repoRoot, source: 'startup', session_id: 'f8-session' }, { registryOptions: {}, refreshBinding: (cwd) => { calls.push(cwd); return {}; } });
+  assert.deepEqual(calls, [repoRoot]);
+  gate.startSession({ cwd: repoRoot, source: 'compact', session_id: 'f8-session' }, { registryOptions: {}, refreshBinding: (cwd) => { calls.push(cwd); return {}; } });
+  assert.equal(calls.length, 1, 'compaction keeps the run and refreshes nothing');
+  assert.doesNotMatch(fs.readFileSync(path.join(scripts, 'toolkit-local-bridge.cjs'), 'utf8'), /refreshMergedBinding/);
+});
+
+test('F9: security writes nothing on a merged binding read over 24 hours ago', async (t) => {
+  const ctx = scratch(t);
+  const repo = fakeRepo(ctx, 'stale-security');
+  cache(ctx, repo, { ageMs: 25 * HOUR });
+  const { ToolkitGovernanceCli } = require(path.join(scripts, 'toolkit-governance.cjs'));
+  const out = [];
+  let wrote = false;
+  const cli = new ToolkitGovernanceCli({ cwd: repo, registryOptions: ctx.opts, interactive: false, stdout: { write: text => out.push(text) }, stderr: { write: () => {} },
+    securityReader: () => { throw new Error('not read'); }, securityWriter: () => { wrote = true; return []; }, securityFileWriter: () => { wrote = true; } });
+  assert.equal(await cli.main(['security']), 1);
+  assert.match(out.join(''), /last read over 24 hours ago/);
+  assert.equal(wrote, false);
 });

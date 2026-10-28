@@ -43,7 +43,7 @@
 // closed). A folder with no git root is never held.
 //
 // Reads local files only: no network, no git or gh subprocess, no writes (refreshMergedBinding,
-// called only by setup, `status` and the session-start hook, is the one exception). Node built-ins
+// called only by `status` and the session-start hook, is the one exception). Node built-ins
 // plus the existing registry (with its remote-identity check), managed-block, binding-cache and
 // programme-binding modules.
 
@@ -591,8 +591,8 @@ function governanceState(cwd, options = {}) {
   return new GovernanceState({ registryOptions: options }).evaluate(cwd);
 }
 
-// Refreshes this computer's cache of the merged binding for the repository at cwd (setup,
-// `toolkit governance status` and the session-start hook only). Never throws; returns
+// Refreshes this computer's cache of the merged binding for the repository at cwd (`toolkit
+// governance status` and the session-start hook only). Never throws; returns
 // { refreshed, error }. Nothing to refresh outside a github.com repository.
 // With TOOLKIT_GOVERNANCE_OFFLINE=1 (set for test runs), or for a test registry, nothing reads the
 // network unless a git runner is passed in: the last read stays, so governed effects hold once it is

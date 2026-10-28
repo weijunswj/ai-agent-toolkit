@@ -25,6 +25,8 @@ const TREE = 'e'.repeat(40);
 const GIT = 'git-for-tests';
 const controller = { session: 'controller-1', prefix: 'INT-TK421-' };
 const GOVERNED = () => ({ state: 'ENABLED', governed_rules_bind: true, programme_records_bind: true });
+// The fixture's binding as merged on the default branch: its working-tree file.
+const MERGED = root => state.loadBinding(root);
 const green = name => ({ kind: 'CheckRun', name, status: 'COMPLETED', conclusion: 'SUCCESS', required: false });
 const CATALOGUE = [
   { issue: 423, label: 'C2', class: 'COMMITTED', parent: 421, order: 1 },
@@ -70,7 +72,7 @@ function fixture({ lane = false } = {}) {
   fx.child = (issue = 423) => store.read('child', issue).doc;
   fx.deps = (extra = {}) => ({
     transport: github, binding, originUrl: 'https://github.com/acme/app.git', repoRoot, toolkitVersion: '3.9.0', sessionsDir: fx.sessionsDir,
-    gitPath: GIT, run: fakeGit(fx), now: () => new Date(github.clock).toISOString(), environment: { TOOLKIT_PROGRAMME_SESSION: controller.session }, governanceState: GOVERNED,
+    gitPath: GIT, run: fakeGit(fx), now: () => new Date(github.clock).toISOString(), environment: { TOOLKIT_PROGRAMME_SESSION: controller.session }, governanceState: GOVERNED, mergedBinding: MERGED,
     stdout: { write: text => { fx.output += text; } }, ...extra,
   });
   // Runs one command; returns { result, error }. Output is JSON for every command used here.
@@ -90,7 +92,7 @@ function fixture({ lane = false } = {}) {
   };
   // An executor's turn end, as its host would run the hook.
   fx.turnEnd = (session, message = null, extra = {}) => checkpoint.runHook({ hook_event_name: 'Stop', session_id: session, last_assistant_message: message },
-    { transport: github, sessionsDir: fx.sessionsDir, gitPath: GIT, run: fakeGit(fx), now: () => new Date(github.clock).toISOString(), governanceState: GOVERNED, ...extra });
+    { transport: github, sessionsDir: fx.sessionsDir, gitPath: GIT, run: fakeGit(fx), now: () => new Date(github.clock).toISOString(), governanceState: GOVERNED, mergedBinding: MERGED, ...extra });
   fx.reconcile = () => {
     const reconciler = new state.Reconciler({
       store, reader: new state.ProgrammeGraphReader({ transport: github, repository }), mutator: new state.GitHubMutator({ transport: github, repository }),
@@ -410,9 +412,9 @@ test('W10 hook failures exit 0, stay local, reach the journal on the next run an
     if (file === 'gh-for-tests') { ghCalls.push(options.timeout); return { status: 0, stdout: 'HTTP/2.0 500 Internal\n\n{}', stderr: '' }; }
     return fakeGit(fx)(file, args, options);
   };
-  assert.equal(checkpoint.runHook({ session_id: 'exec-a' }, { sessionsDir: fx.sessionsDir, gitPath: GIT, ghPath: 'gh-for-tests', run, deadline: Date.now() - 1, governanceState: GOVERNED }).outcome, 'FAILED');
+  assert.equal(checkpoint.runHook({ session_id: 'exec-a' }, { sessionsDir: fx.sessionsDir, gitPath: GIT, ghPath: 'gh-for-tests', run, deadline: Date.now() - 1, governanceState: GOVERNED, mergedBinding: MERGED }).outcome, 'FAILED');
   assert.deepEqual(ghCalls, []);
-  checkpoint.runHook({ session_id: 'exec-a' }, { sessionsDir: fx.sessionsDir, gitPath: GIT, ghPath: 'gh-for-tests', run, deadline: Date.now() + 20000, governanceState: GOVERNED });
+  checkpoint.runHook({ session_id: 'exec-a' }, { sessionsDir: fx.sessionsDir, gitPath: GIT, ghPath: 'gh-for-tests', run, deadline: Date.now() + 20000, governanceState: GOVERNED, mergedBinding: MERGED });
   assert.ok(ghCalls.length > 0 && ghCalls.every(timeout => timeout <= 8000), `per-call timeouts ${ghCalls}`);
   // A malformed block is not recorded as a return; the facts and the error code still reach the journal.
   const seqBefore = fx.store.readJournal(423, `g1-a1--${hash}.json`).doc.seq;
@@ -468,6 +470,12 @@ test('H4 the turn-end hook writes nothing to the store once GitHub governance is
     assert.equal(calls, 0, `${label}: no store call`);
     assert.equal(journal(), before, label);
   }
+  // Nothing merged on this computer's read (or the read is unusable): the working tree's copy never names the store.
+  let mergedCalls = 0;
+  const noMerged = { request: (...args) => { mergedCalls += 1; return fx.github.request(...args); }, graphql: (...args) => { mergedCalls += 1; return fx.github.graphql(...args); } };
+  assert.equal(fx.turnEnd('exec-a', returnBlock('h4'), { mergedBinding: () => null, transport: noMerged }).outcome, 'GOVERNANCE_OFF', 'no merged binding');
+  assert.equal(mergedCalls, 0);
+  assert.equal(journal(), before);
   assert.notEqual(fx.turnEnd('exec-a', returnBlock('h4')).outcome, 'GOVERNANCE_OFF', 'ENABLED with the governed rules: the journal is written');
 });
 

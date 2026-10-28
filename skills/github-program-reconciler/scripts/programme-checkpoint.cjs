@@ -190,6 +190,15 @@ function githubGovernanceOn(repoRoot, deps = {}) {
   } catch { return false; }
 }
 
+// The binding merged on the default branch, from this computer's cache, or null. `deps.mergedBinding`
+// is for tests.
+function mergedBindingOf(repoRoot, deps = {}) {
+  try {
+    const read = deps.mergedBinding || require('../../../repo/scripts/toolkit-governance-state.cjs').mergedBinding;
+    return read(repoRoot) || null;
+  } catch { return null; }
+}
+
 // One checkpoint for a bound session. Returns { outcome, ... } and throws only for a programme error
 // the caller records. `UNBOUND` means no binding for this session or repository: nothing else ran.
 function runCheckpoint({ sessionId, message = null }, deps = {}) {
@@ -200,7 +209,9 @@ function runCheckpoint({ sessionId, message = null }, deps = {}) {
   if (!local.repo_root || !fs.existsSync(path.join(local.repo_root, state.BINDING_FILE))) return { outcome: 'UNBOUND' };
   // GitHub governance turned off (or never complete) after bind: nothing reaches the store.
   if (!githubGovernanceOn(local.repo_root, deps)) return { outcome: 'GOVERNANCE_OFF' };
-  const binding = state.loadBinding(local.repo_root);
+  // Only the binding merged on the default branch names the store; a working-tree copy never does.
+  const binding = mergedBindingOf(local.repo_root, deps);
+  if (!binding) return { outcome: 'GOVERNANCE_OFF' };
   if (binding.repository.toLowerCase() !== String(local.repository).toLowerCase()) {
     throw new ProgrammeError('BINDING_MOVED', 'The repository binding no longer names the repository this session was bound in; bind again.');
   }

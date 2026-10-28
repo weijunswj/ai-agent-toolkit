@@ -80,6 +80,9 @@ async function run(ctx, cwd, argv, { answer = 'yes', interactive = true, ruleset
     stdout, stderr, cwd, interactive,
     ask: async (question) => { asked.push(question); return answer; },
     registryOptions: { registryPath: ctx.registryPath, testOnly: true },
+    // Fixture origins do not exist: discovery and the status refresh never reach GitHub here.
+    discoveryGh: () => ({ ok: false, reason: 'offline' }),
+    refresh: () => ({ refreshed: false, error: 'offline' }),
     rulesetReader,
     protectionReader,
     securityReader,

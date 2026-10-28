@@ -108,8 +108,9 @@ function checkConformance(cwd, options = {}) {
     if (state.materials.governed_block) findings.push(finding('GOVERNED_BLOCK_IGNORED', 'info', state.rule === 'M2' ? 'Governance is disabled for this repository, so the governed block in AGENTS.md is not followed.' : 'You disabled Toolkit governance here, so the governed block in AGENTS.md is not followed.'));
     return report(0, state, findings, toolkitRoot);
   }
+  // Whatever enabled it, an ENABLED repository needs the governed block its agents are told to follow.
+  if (state.state === 'ENABLED' && !state.materials.governed_block) findings.push(finding('GOVERNED_BLOCK_MISSING', 'drift', 'Governance is enabled but AGENTS.md has no governed block; add it through a pull request.'));
   if (state.state === 'ENABLED' && !state.materials_complete) {
-    if (!state.materials.governed_block) findings.push(finding('GOVERNED_BLOCK_MISSING', 'drift', 'Governance is enabled but AGENTS.md has no governed block; add it through a pull request.'));
     if (!state.materials.binding) findings.push(finding('BINDING_MISSING', 'drift', state.notes.includes('pending-binding-merge')
       ? 'Governance is enabled but the programme binding is not merged on the default branch yet; it applies once its pull request merges.'
       : 'Governance is enabled but the default branch has no programme binding .github/toolkit-programme.json; only the owner adds it, through a pull request.'));

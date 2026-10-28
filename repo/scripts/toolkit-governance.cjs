@@ -209,6 +209,10 @@ class ToolkitGovernanceCli {
       this.#print(json, { state: state.state, writes: 0 }, [`Nothing changed. Toolkit turns on dependency and security settings only in a governed repository with a programme binding; this one is ${label(state)}.`]);
       return 1;
     }
+    if (!state.programme_records_bind) {
+      this.#print(json, { state: state.state, writes: 0 }, [`Nothing changed. The binding merged on the default branch was last read over 24 hours ago; run ${CMD('status')} online first.`]);
+      return 1;
+    }
     const protectionOptions = this.#protectionReader ? { reader: this.#protectionReader } : {};
     const requiredChecks = governance.bindingRequiredChecks(state.root, this.#registryOptions);
     const read = () => security.dependencySecurity(state.root, {
@@ -237,6 +241,10 @@ class ToolkitGovernanceCli {
   #reopen(json) {
     const state = this.#state();
     if (state.rule === 'ERROR') throw new GovernanceCliError(`The governance state could not be read (${state.error_code}). ${governance.repairHint(state, this.#registryOptions)}`.trim());
+    if (['M0', 'M1', 'M2'].includes(state.rule)) {
+      this.#print(json, { state: state.state, writes: 0 }, [`Nothing changed. This repository is ${label(state)} by the programme binding merged on its default branch, on every computer.`, 'To change it, merge a pull request that changes .github/toolkit-programme.json.']);
+      return 0;
+    }
     const lines = state.state === 'DISABLED'
       ? ['Nothing changed. You disabled Toolkit governance for this repository, so Toolkit does not ask about it.', `To turn it on, run ${CMD('enable')}. To keep it off, do nothing.`]
       : [`Nothing changed. This repository is ${label(state)}, so there is no disabled decision to reopen.`, state.state === 'ENABLED'
