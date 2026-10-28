@@ -1309,8 +1309,11 @@ const VENDORED_REPO_CHECKS = Object.freeze(['plain-text-check', 'personal-data-g
 const REQUIRED_REPO_CHECKS = Object.freeze(['plain-text-check']);
 const VENDORED_CHECK_MARKER = /^\/\/ AI-AGENT-TOOLKIT:secure-ci-cd:VENDORED (\S+) \w+=\d+ sha256=([0-9a-f]{12})$/m;
 
-function governanceEnabledAt(targetRoot) {
-  try { return require('./toolkit-governance-state.cjs').governanceState(targetRoot).state === 'ENABLED'; }
+// Reads this computer's cached state only (the session-start hook refreshes it). ERROR (an unusable
+// merged binding) keeps the governed checks: it never quietly drops to off. `registryOptions` is for
+// tests.
+function governanceEnabledAt(targetRoot, registryOptions = {}) {
+  try { return ['ENABLED', 'ERROR'].includes(require('./toolkit-governance-state.cjs').governanceState(targetRoot, registryOptions).state); }
   catch { return false; }
 }
 
@@ -3482,6 +3485,7 @@ if (require.main === module) {
 module.exports = {
   BRIDGE_VERSION,
   compareVendoredRepoChecks,
+  governanceEnabledAt,
   acquireLock,
   lockOwnerLiveness,
   parseArgs,

@@ -27,7 +27,8 @@ test('the JSON schemas and the runtime validator agree on valid and invalid docu
   const ajv = new Ajv2020({ strict: false, allErrors: true });
   const validateChild = ajv.compile(schema('child-state-v1.schema.json'));
   const validateParent = ajv.compile(schema('parent-state-v1.schema.json'));
-  const validateBinding = ajv.compile(schema('binding-v1.schema.json'));
+  const validateBindingV1 = ajv.compile(schema('binding-v1.schema.json'));
+  const validateBinding = ajv.compile(schema('binding-v2.schema.json'));
 
   const good = child({ candidate: { branch: 'feature', head: SHA_A, tree: SHA_B, base: SHA_B } });
   assert.equal(validateChild(good), true, JSON.stringify(validateChild.errors));
@@ -37,7 +38,20 @@ test('the JSON schemas and the runtime validator agree on valid and invalid docu
   assert.deepEqual(state.validateParent(parent), []);
   const binding = JSON.parse(fs.readFileSync(path.join(ROOT, '.github', 'toolkit-programme.json'), 'utf8'));
   assert.equal(validateBinding(binding), true, JSON.stringify(validateBinding.errors));
-  assert.equal(state.validateBinding(binding), binding);
+  const normalized = state.validateBinding(binding);
+  assert.deepEqual([normalized.parent_issue, normalized.record_prefix, normalized.writer_prefix], [binding.parents[0].issue, binding.parents[0].record_prefix, binding.parents[0].writer_prefix]);
+  // Version 1 is still read, as enabled with one parent.
+  const { governance: _governance, parents: _parents, ...rest } = binding;
+  const v1 = { ...rest, schema: state.SCHEMA.binding, parent_issue: 421, record_prefix: 'INT-TK421-', writer_prefix: 'INT-TK421-' };
+  assert.equal(validateBindingV1(v1), true, JSON.stringify(validateBindingV1.errors));
+  assert.equal(state.validateBinding(v1), v1);
+  const disabled = { schema: state.SCHEMA.bindingV2, repository: 'acme/app', governance: 'disabled' };
+  assert.equal(validateBinding(disabled), true);
+  assert.equal(state.bindingEnabled(state.validateBinding(disabled)), false);
+  for (const doc of [{ ...disabled, governance: 'enabled' }, { ...binding, parents: [] }, { ...binding, parents: [{ issue: 1, record_prefix: 'X', children: [2] }] }]) {
+    assert.equal(validateBinding(doc), false, JSON.stringify(doc).slice(0, 80));
+    assert.throws(() => state.validateBinding(doc), /is invalid/);
+  }
 
   const bad = [
     child({ candidate: { branch: 'x', head: 'abc1234', tree: null, base: null } }),

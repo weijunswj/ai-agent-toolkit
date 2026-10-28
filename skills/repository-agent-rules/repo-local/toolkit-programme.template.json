@@ -1,9 +1,10 @@
 {
-  "schema": "toolkit.programme-binding.v1",
+  "schema": "toolkit.programme-binding.v2",
   "repository": "OWNER/REPOSITORY",
-  "parent_issue": 0,
-  "record_prefix": "INT-PREFIX-",
-  "writer_prefix": "INT-PREFIX-",
+  "governance": "enabled",
+  "parents": [
+    { "issue": 0, "record_prefix": "INT-PREFIX-" }
+  ],
   "store": {
     "kind": "github",
     "repository": "OWNER/EVIDENCE-STORE",
