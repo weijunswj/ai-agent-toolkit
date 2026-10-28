@@ -126,6 +126,10 @@ const ROWS = [
   ['I5 a prose mention of the label is not a line', { transcript: [memory(RC_LINE), call(UPDATE, { content: `- ${RC_LINE}\n- Note: check the GATE ROUTE: line after each move.` })] }, ''],
   ['I5 a line inside a code fence is not read', { transcript: [memory(`${RC_LINE}\n\`\`\`\nGATE ROUTE: profile owner-claude placement cloud\n\`\`\``)] }, ''],
   ['I5 a bold label reads', { transcript: [memory(`**GATE ROUTE:** ${RC_LINE.slice('GATE ROUTE: '.length)}`)] }, ''],
+  // L-a: a numbered line and a line bold from end to end read too.
+  ['L-a a numbered line reads', { transcript: [call(READ, {}, `1. BINDING: x\n3. ${RC_LINE}\n4. other`)] }, ''],
+  ['L-a a numbered line with a bracket reads', { transcript: [call(UPDATE, { content: `2) ${RC_LINE}` }), call(READ, {}, `2) ${RC_LINE}`)] }, ''],
+  ['L-a a whole-line bold line reads', { transcript: [memory(`**${RC_LINE}**`)] }, ''],
   ['28 an update before any read counts once memory was read', { transcript: [call(READ, {}, '- BINDING: x'), call(UPDATE, { content: RC_LINE })] }, ''],
   ['29 registry unreadable', { registry: () => { throw new Error('ENOENT'); } }, /stack registry bundled with this plugin cannot be read/],
   ['29 registry not a registry', { registry: () => ({ schema: 'x' }) }, /cannot be read/],

@@ -63,6 +63,87 @@ test('installer: default hooks folder; real commits and pushes are blocked; --no
   assert.equal(repo.git(['push', '-q', '--no-verify', 'origin', 'main'], { allowFailure: true }).status, 0);
 });
 
+test('pre-push: with the plain-text check installed too, a hand push of a changed file with a finding is blocked', (t) => {
+  const repo = new TestRepo(t);
+  repo.commit('base', { 'README.md': 'base\n' });
+  assert.equal(repo.installer([]).status, 0);
+  const plainInstaller = path.resolve(__dirname, '..', '..', 'skills', 'secure-ci-cd', 'scripts', 'install-plain-text-check.cjs');
+  const installed = require('node:child_process').spawnSync(process.execPath, [plainInstaller, '--repo', repo.root], { cwd: repo.root, env: repo.env, encoding: 'utf8', windowsHide: true });
+  assert.equal(installed.status, 0, `${installed.stdout}${installed.stderr}`);
+  repo.git(['add', '-A']);
+  repo.git(['commit', '-q', '--no-verify', '-m', 'plain-text check']);
+  const remote = new TestRepo(t, { config: null, bare: true });
+  repo.git(['remote', 'add', 'origin', remote.root]);
+  repo.git(['push', '-q', '-u', 'origin', 'main']);
+  // Built from pieces so this file carries no reference itself.
+  repo.commit('guide', { 'docs/guide.md': `See ${['#', '42'].join('')} for details.\n` });
+  const push = repo.git(['push', '-q', 'origin', 'main'], { allowFailure: true });
+  assert.notEqual(push.status, 0, 'pre-push blocks the plain-text finding');
+  assert.match(push.stderr, /docs\/guide\.md:1: number-reference/);
+  // A token inside a link is never printed: the item names the file, line and rule only.
+  const token = ['gh', 'p_', 'A1b2C3d4E5f6G7h8'.repeat(2), 'Q9r0'].join('');
+  repo.commit('links', { 'docs/links.md': `Issue: https://github.com/owner/repo/issues/12?access=${token}\nCompare: https://github.com/owner/repo/compare/main...${token}\n` });
+  const leak = repo.git(['push', '-q', 'origin', 'main'], { allowFailure: true });
+  assert.notEqual(leak.status, 0);
+  assert.match(leak.stderr, /docs\/links\.md:1: github-link: /);
+  for (let start = 0; start + 8 <= token.length; start += 4) assert.ok(!`${leak.stdout}${leak.stderr}`.includes(token.slice(start, start + 8)), 'no part of the token is printed');
+  // An annotated tag at the current commit sends that commit, so it is checked and blocked too.
+  repo.git(['tag', '-a', 'at-head-tag', '-m', 'tag at the current commit']);
+  const tagged = repo.git(['push', '-q', 'origin', 'at-head-tag'], { allowFailure: true });
+  assert.notEqual(tagged.status, 0, 'an annotated tag at HEAD is checked');
+  assert.match(tagged.stderr, /docs\/links\.md:1: github-link: /);
+  repo.git(['tag', '-d', 'at-head-tag']);
+  // A push that does not send the current commit is not checked here, with a note.
+  repo.git(['branch', 'other', 'origin/main']);
+  const other = repo.git(['push', '-q', 'origin', 'other'], { allowFailure: true });
+  assert.equal(other.status, 0, other.stderr);
+  assert.match(other.stderr, /plain-text check: skipped, because this push does not send the current commit/);
+  repo.git(['reset', '-q', '--hard', 'HEAD~1']);
+  // Deleting a remote branch that sits at the current commit sends nothing, so it is not checked.
+  repo.git(['push', '-q', '--no-verify', 'origin', 'HEAD:refs/heads/at-head']);
+  const removed = repo.git(['push', '-q', 'origin', '--delete', 'at-head'], { allowFailure: true });
+  assert.equal(removed.status, 0, removed.stderr);
+  assert.match(removed.stderr, /plain-text check: skipped, because this push does not send the current commit/);
+  // No upstream: the step compares with origin/main instead, and still blocks the finding.
+  repo.git(['branch', '--unset-upstream']);
+  const fallback = repo.git(['push', '-q', 'origin', 'main'], { allowFailure: true });
+  assert.notEqual(fallback.status, 0);
+  assert.match(fallback.stderr, /docs\/guide\.md:1: number-reference/);
+  repo.git(['branch', '-u', 'origin/main']);
+  // Uncommitted changes: the working folder is not what is pushed, so the step is skipped with a note.
+  repo.write('docs/guide.md', 'Being rewritten.\n');
+  const dirty = repo.git(['push', '-q', 'origin', 'main'], { allowFailure: true });
+  assert.equal(dirty.status, 0, dirty.stderr);
+  assert.match(dirty.stderr, /plain-text check: skipped, because the working folder has uncommitted changes/);
+  repo.commit('plain guide', { 'docs/guide.md': 'See the install steps for details.\n' });
+  const clean = repo.git(['push', '-q', 'origin', 'main'], { allowFailure: true });
+  assert.equal(clean.status, 0, clean.stderr);
+  // Broken settings: the check cannot run, so the push goes on with a note.
+  repo.commit('broken settings', { '.github/plain-text.json': '{ not json\n' });
+  const broken = repo.git(['push', '-q', 'origin', 'main'], { allowFailure: true });
+  assert.equal(broken.status, 0, broken.stderr);
+  assert.match(broken.stderr, /plain-text check: could not run, so the push goes on unchecked/);
+  // Nothing to compare with: no upstream and no origin branch.
+  repo.commit('more', { 'docs/more.md': 'More.\n' });
+  repo.git(['branch', '--unset-upstream']);
+  repo.git(['update-ref', '-d', 'refs/remotes/origin/main']);
+  const nobase = repo.git(['push', '-q', remote.root, 'main'], { allowFailure: true });
+  assert.equal(nobase.status, 0, nobase.stderr);
+  assert.match(nobase.stderr, /plain-text check: skipped, because no upstream or origin branch was found/);
+});
+
+test('installer --check: a guard hook from an older template is reported as outdated', (t) => {
+  const repo = new TestRepo(t);
+  repo.commit('base', { 'README.md': 'base\n' });
+  assert.equal(repo.installer([]).status, 0);
+  assert.equal(repo.installer(['--check']).status, 0);
+  const hook = path.join(repo.root, '.git', 'hooks', 'pre-push');
+  fs.writeFileSync(hook, fs.readFileSync(hook, 'utf8').replace(/^plain=.*\n/m, ''));
+  const check = repo.installer(['--check']);
+  assert.equal(check.status, 1);
+  assert.match(check.all, /Drift: hook pre-push: outdated/);
+});
+
 test('installer: core.hooksPath is followed, and the default folder is left alone', (t) => {
   const repo = new TestRepo(t);
   repo.commit('base', { 'README.md': 'base\n' });

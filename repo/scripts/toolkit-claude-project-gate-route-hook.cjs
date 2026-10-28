@@ -21,7 +21,7 @@
 // - Memory line: read from this session's transcript, the newest line in a successful read_memory result (the plain
 //   MEMORY.md text in its project-memory block) or in the content of a successful update_memory call (which replaces
 //   the whole file), whichever came later. Only a line that starts with the label (after an optional bullet, quote,
-//   heading, bold or backtick) and sits outside code fences counts, and its value ends with its own line. A gate
+//   number, heading, bold or backtick) and sits outside code fences counts, and its value ends with its own line. A gate
 //   launch is refused when the session never read project memory, when memory has no line, when the line or its
 //   profile is unknown, when the route lacks a provider, model or reasoning level, and when the bundled stack registry
 //   cannot be read.
@@ -42,9 +42,9 @@ const REGISTRY = path.join(__dirname, '..', 'contracts', 'controller-kernel', 's
 const GATE_LINE = /^\s*(?:[-*>]\s*|\d+[.)]\s+|#{1,6}\s+)?\*{0,2}gate\*{0,2}:\*{0,2}\s*(.*)$/i;
 const GATE_WORDS = [/\bG[012]\b/, /\bgate\b/i, /\brecheck\b/i, /\bre-check\b/i, /\breviewer\b/i, /\bindependent review\b/i, /\bDISCOVERY\b/, /\bBUILDER\b/];
 const GATE_VALUES = 'G0, G1, G2 (or G2 recheck, recheck, delta review, delta G2, independent review), design challenge, or none';
-// A GATE ROUTE line: the label after an optional bullet, quote or heading, plain, bold or in backticks. Prose that
-// only mentions the label is not a line.
-const ROUTE_LINE = /^\s*(?:[-*>]\s*|#{1,6}\s+)?`?(?:\*\*)?GATE ROUTE:(?:\*\*)?/;
+// A GATE ROUTE line: the label after an optional bullet, quote, number or heading, plain, bold or in backticks. Prose
+// that only mentions the label is not a line.
+const ROUTE_LINE = /^\s*(?:[-*>]\s*|\d+[.)]\s+|#{1,6}\s+)?`?(?:\*\*)?GATE ROUTE:(?:\*\*)?/;
 const ROUTE_FORMAT = 'GATE ROUTE: profile <profile> placement <remote_control|cloud|any> [folder <path>]';
 
 function textOf(value) {
@@ -102,10 +102,10 @@ function normaliseModel(model) {
   return textOf(model).trim().toLowerCase().replace(/^claude-/, '').replace(/\[[^\]]*\]$/, '').replace(/\./g, '-');
 }
 
-// A line without trailing blanks or backticks, in one backward pass.
+// A line without trailing blanks, backticks or bold marks, in one backward pass.
 function trimLineEnd(line) {
   let end = line.length;
-  while (end > 0 && (line[end - 1] === '`' || /\s/.test(line[end - 1]))) end -= 1;
+  while (end > 0 && (line[end - 1] === '`' || line[end - 1] === '*' || /\s/.test(line[end - 1]))) end -= 1;
   return line.slice(0, end);
 }
 
