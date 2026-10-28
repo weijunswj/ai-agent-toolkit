@@ -1,5 +1,11 @@
 # Toolkit Changelog
 
+## Unreleased
+
+### Governance
+
+- **Answer from a Claude Projects thread:** the user's yes, no, later or ok sent in a Projects thread now answers the governance question in the Remote Control session it reaches, and lifts the hold there. Before, the thread's wrapping meant the reply was never read as an answer, and the repository stayed held. Only the user's own message counts: a coordinator's relay, a scheduled task or anyone else's message does not.
+
 ## 3.15.22 (no Codex-only settings in the Claude plugin)
 
 - **Claude plugin manifest:** the Claude Code plugin no longer carries the Codex-only `interface` block, so syncing the plugin on claude.ai no longer warns that it strips an unknown key. The Codex plugin keeps its display name, prompts and icons.
