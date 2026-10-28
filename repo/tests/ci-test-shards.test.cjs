@@ -482,6 +482,40 @@ test('the duration check reports without a budget and fails files over a declare
   assert.match(result.errors.join('\n'), /must be a positive number/);
 });
 
+test('the CI duration check reads the downloaded shard summaries and never passes on none', (t) => {
+  const { ciReportFiles, main } = require('../scripts/check-test-durations.cjs');
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'durations-ci-'));
+  t.after(() => fs.rmSync(temp, { recursive: true, force: true }));
+  const sink = () => { let text = ''; return { write: (chunk) => { text += chunk; }, text: () => text }; };
+  assert.throws(() => ciReportFiles({}), /needs RUNNER_TEMP/);
+  assert.throws(() => ciReportFiles({ RUNNER_TEMP: temp }), /no shard summaries/);
+  let err = sink();
+  assert.equal(main(['--ci'], { out: sink(), err, env: { RUNNER_TEMP: temp } }), 2);
+  assert.match(err.text(), /could not run: no shard summaries/);
+  assert.equal(main(['--ci', 'extra.json'], { out: sink(), err: sink(), env: { RUNNER_TEMP: temp } }), 2);
+  const dir = path.join(temp, 'test-summaries');
+  fs.mkdirSync(dir);
+  const summary = (system, seconds) => ({ schema: shards.SUMMARY_SCHEMA, system, exit_code: 0, node: 'v22', files: [{ file: 'repo/tests/a.test.cjs', seconds }], missing: [] });
+  fs.writeFileSync(path.join(dir, 'test-summary-linux-1.json'), JSON.stringify(summary('linux', 1)));
+  fs.writeFileSync(path.join(dir, 'test-summary-windows-1.json'), JSON.stringify(summary('windows', 1)));
+  assert.deepEqual(ciReportFiles({ RUNNER_TEMP: temp }).map((file) => path.basename(file)), ['test-summary-linux-1.json', 'test-summary-windows-1.json']);
+  const out = sink();
+  assert.equal(main(['--ci'], { out, err: sink(), env: { RUNNER_TEMP: temp } }), 0);
+  assert.match(out.text(), /linux: 1 file\(s\) checked against \d+ s per file/);
+  fs.writeFileSync(path.join(dir, 'test-summary-windows-1.json'), JSON.stringify(summary('windows', 100000)));
+  err = sink();
+  assert.equal(main(['--ci'], { out: sink(), err, env: { RUNNER_TEMP: temp } }), 1);
+  assert.match(err.text(), /windows: repo\/tests\/a\.test\.cjs took 100000 s, over its \d+ s budget/);
+});
+
+test('this repository declares a per-file budget for every system and its recorded times fit it', () => {
+  const { checkDurations } = require('../scripts/check-test-durations.cjs');
+  const manifest = shards.loadManifest(ROOT);
+  for (const system of shards.SYSTEMS) assert.equal(typeof manifest.budgets.seconds_per_file[system], 'number', system);
+  const reports = shards.SYSTEMS.map((system) => ({ system, files: manifest.durations_seconds[system] }));
+  assert.deepEqual(checkDurations(reports, manifest.budgets).errors, []);
+});
+
 test('shard files run longest first and the estimate models the concurrency slots', () => {
   const durations = { 'x': 10, 'y': 30, 'z': 20 };
   assert.deepEqual(shards.runOrder(['x', 'y', 'w', 'z'], durations), ['y', 'z', 'x', 'w']);
