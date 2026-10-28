@@ -18,16 +18,22 @@
 //     session or a Toolkit launcher started is refused in a held repository and nothing is kept.
 //     In Claude Code a held github.com message is not blocked but kept, and the turn runs only to show
 //     a tap-to-answer card (AskUserQuestion) next to the same short text; PromptHold.picked records
-//     the tapped answer under the same checks as a typed one.
+//     the tapped answer under the same checks as a typed one. Any other message of the user's own in
+//     the run that was shown the question (a Projects thread reply, with the app's notes set aside,
+//     or bare text with no tags) is kept too and goes to the agent with a one-use reply ticket
+//     (ReplyTickets, owner decision of 28 Oct): the agent reads what the user means and records it
+//     with toolkit-governance-answer.cjs, or asks again when it is unclear.
 //   - ToolGate is the PreToolUse core. A held repository runs no tool but the card, which must be
-//     exactly Toolkit's with no answer filled in by the caller. In every
+//     exactly Toolkit's with no answer filled in by the caller, and the exact answer command with
+//     the session's live reply ticket. In every
 //     folder, an agent may not answer the question for the user: commands that run the governance
 //     CLI or start a host session with the answer as its prompt are refused, and so are edits to
 //     Toolkit's user-state files. A command that starts a host session in a held repository (after
 //     `cd`, or with Codex's `-C`) is refused too. From a plain folder or a decided repository, a
 //     command or edit that reaches github.com repositories waiting for their answer is refused with
-//     Toolkit's question naming them (ReachAsks), and the user's exact reply in that run answers for
-//     every repository listed (PromptHold).
+//     Toolkit's question naming them (ReachAsks), and the user's reply in that run answers for every
+//     repository listed (PromptHold); while that question is open its list is fixed and no prompt
+//     can be scheduled for the session.
 //   - sessionLine is the one SessionStart line that states the effective state.
 //
 // Every failure inside a git repository holds (fail closed). Held prompts never leave this computer
@@ -163,6 +169,8 @@ const ALWAYS_TOOLS = /^ToolSearch$/;
 const PICKER_TOOL = 'AskUserQuestion';
 const EDIT_TOOLS = /^(?:Edit|Write|MultiEdit|NotebookEdit|apply_patch)$/;
 const SHELL_TOOLS = /^(?:Bash|PowerShell|Monitor|exec_command|shell|local_shell)$/;
+// Tools that schedule a prompt for the session itself.
+const SCHEDULE_TOOLS = /^(?:CronCreate|ScheduleWakeup|RemoteTrigger)$/;
 
 class GovernanceGateError extends Error {
   constructor(code) {
@@ -677,6 +685,17 @@ class ReachAsks {
     return data.sessions[sessionId].repositories;
   }
 
+  // Whether the agent was told to ask this run's open question once more, to confirm a bare answer;
+  // with a value, notes that it was (true) or clears it.
+  confirming(sessionId, epoch, value = undefined) {
+    if (this.get(sessionId, epoch).length === 0) return false;
+    const data = this.#read();
+    if (value === undefined) return data.sessions[sessionId].confirming === true;
+    data.sessions[sessionId].confirming = value === true;
+    this.#save(data);
+    return value === true;
+  }
+
   // Forgets this session's question; true once it is gone.
   clear(sessionId) {
     const data = this.#read();
@@ -757,6 +776,13 @@ class ReplyTickets {
 
   peek(ticket, sessionId) { return this.#find(this.#read(), ticket, sessionId); }
 
+  // Whether this session holds a ticket that has not lapsed.
+  live(sessionId) {
+    const sessions = this.#read().sessions;
+    const entry = typeof sessionId === 'string' && Object.hasOwn(sessions, sessionId) ? sessions[sessionId] : null;
+    return Boolean(entry && Date.parse(entry.at) >= this.#now().getTime() - MAX_TICKET_AGE_MS);
+  }
+
   // Spends the ticket and returns its entry, or null; a ticket that cannot be removed is not used.
   take(ticket) {
     const data = this.#read();
@@ -774,20 +800,45 @@ function ticketContext(repositories, ticket) {
   return [
     `Toolkit governance: the user's message above came after Toolkit asked them whether to turn on GitHub governance for ${several ? `these repositories: ${reachNames(repositories)}` : `the repository ${reachNames(repositories)}`}. Read what they mean before anything else.`,
     `- If it clearly answers yes, no or later${several ? ' for all of them' : ''} (in any words, such as "no for both" or "yeah go ahead"), record it by running exactly this once, with yes, no or later in place of ANSWER:\n  node "${ANSWER_SCRIPT}" ANSWER ${ticket}\n  Then tell the user in plain words what Toolkit recorded${several ? ' for each repository' : ''}.`,
-    `- If it is unclear, mixed (yes for one and no for another), a question, or about something else, record nothing: ask again in plain words, "${reachQuestion(repositories).replace(/^Toolkit: t/, 'T')}", and end your turn.`,
+    `- If you are unsure what they mean, record nothing: ask once more, naming exactly what Toolkit would record (for example "${confirmQuestion(repositories, 'disable')}"), and end your turn. Their reply comes with a new ticket.`,
+    `- If it is mixed (yes for one and no for another), a question, or about something else, record nothing: ask again in plain words, "${reachQuestion(repositories).replace(/^Toolkit: t/, 'T')}", and end your turn.`,
     `The ticket works once, only in this session, and only for this message. ${NEVER_OWNER}`,
   ].join('\n');
 }
 
+// The confirmation question for one answer: what Toolkit would record, for which repositories.
+const ANSWER_EFFECTS = Object.freeze({ enable: 'turn on GitHub governance', disable: 'keep GitHub governance off (never ask again)', 'not-now': 'leave GitHub governance undecided until next session' });
+function confirmQuestion(repositories, command) {
+  return `Toolkit will ${ANSWER_EFFECTS[command]} for ${reachNames(repositories)}. Is that right?`;
+}
+
+// What the agent is told when a bare yes, no or later arrives for a question asked from a folder
+// that is not held: it may answer the agent's own question, so nothing is recorded yet.
+function confirmContext(repositories, command) {
+  return [
+    `Toolkit governance: the user's message above is a bare "${command === 'enable' ? 'yes' : command === 'disable' ? 'no' : 'later'}", and Toolkit has an open question for ${reachNames(repositories)}. Nothing was recorded, because it may answer something else you asked.`,
+    `If it was meant for Toolkit's question, ask once more, word for word: "${confirmQuestion(repositories, command)}" and end your turn; their reply comes with a reply ticket to record it. If it answered your own question, carry on with that and leave Toolkit's question open.`,
+    NEVER_OWNER,
+  ].join('\n');
+}
+
 // Whether a shell command is exactly the answer command with a live ticket of this session: the one
-// command a held session may run, wherever it is.
-const ANSWER_COMMAND = /^\s*(?:&\s*)?node(?:\.exe)?\s+(?:"([^"]+)"|'([^']+)'|(\S+))\s+(yes|no|later)\s+([0-9a-f]{32})\s*$/;
+// command a held session may run, wherever it is. The script must be Toolkit's own path as written
+// (on Windows any letter case and either slash), never a path the shell or path resolution would
+// rewrite, and the line holds nothing a shell expands: no `$`, backtick or `%`, and only spaces or
+// tabs between the words.
+const ANSWER_COMMAND = /^[ \t]*(?:&[ \t]*)?node(?:\.exe)?[ \t]+(?:"([^"\r\n]+)"|'([^'\r\n]+)'|([^\s"']+))[ \t]+(yes|no|later)[ \t]+([0-9a-f]{32})[ \t]*$/;
+function sameScript(script) {
+  return process.platform === 'win32'
+    ? script.replace(/\//g, '\\').toLowerCase() === ANSWER_SCRIPT.replace(/\//g, '\\').toLowerCase()
+    : script === ANSWER_SCRIPT;
+}
 function ticketCommand(text, sessionId, tickets) {
-  const match = ANSWER_COMMAND.exec(String(text || ''));
+  const command = String(text || '');
+  if (/[$`%]/.test(command)) return false;
+  const match = ANSWER_COMMAND.exec(command);
   if (!match || typeof sessionId !== 'string' || sessionId === '') return false;
-  const script = match[1] ?? match[2] ?? match[3];
-  const fold = value => (process.platform === 'win32' ? path.resolve(value).toLowerCase() : path.resolve(value));
-  if (fold(script) !== fold(ANSWER_SCRIPT)) return false;
+  if (!sameScript(match[1] ?? match[2] ?? match[3])) return false;
   try { return tickets.peek(match[5], sessionId) !== null; } catch { return false; }
 }
 
@@ -923,8 +974,11 @@ function reachQuestion(repositories) {
     ? `Toolkit: turn on GitHub governance (issues, records, evidence store) for these repositories: ${reachNames(repositories)}? Reply yes, no or later for all of these.`
     : `Toolkit: turn on GitHub governance (issues, records, evidence store) for the repository ${reachNames(repositories)}? Reply yes, no or later.`;
 }
-function reachDenial(what, repositories) {
-  return `Toolkit: ${what} ${repositories.length > 1 ? 'repositories that have' : 'a repository that has'} no governance decision yet, so it is refused. Send the user this, word for word, and end your turn; their own reply answers it, so never ask them to run a command:\n${reachQuestion(repositories)}\n${NEVER_OWNER}`;
+// The refusal for a reach (ToolGate's #askReach result): the question when it was asked, or, while
+// another question is open, a wait for the user's reply to that one.
+function reachDenial(what, { asked = null, waiting = null }) {
+  if (waiting) return `Toolkit: ${what} a repository that has no governance decision yet, and Toolkit's question for ${reachNames(waiting)} is still open, so it is refused. Wait for the user's reply to that question and end your turn; never ask them to run a command. ${NEVER_OWNER}`;
+  return `Toolkit: ${what} ${asked.length > 1 ? 'repositories that have' : 'a repository that has'} no governance decision yet, so it is refused. Send the user this, word for word, and end your turn; their own reply answers it, so never ask them to run a command:\n${reachQuestion(asked)}\n${NEVER_OWNER}`;
 }
 
 const LAUNCHED_TEXT = `Toolkit: an automated session cannot answer the governance question. Answer it in your own chat, or run the command in your own terminal. ${NEVER_OWNER}`;
@@ -1113,17 +1167,29 @@ class PromptHold {
   }
 
   // The reply to the question asked for reached repositories (ReachAsks), only in the run that was
-  // asked and only from the user's own session. An exact answer applies at once to every repository
-  // listed that is still waiting and that no session has started in since; any other message of the
-  // user's own is handed to the agent with a reply ticket, and the message passes either way.
+  // asked and only from the user's own session. The full `toolkit governance` answer applies at once
+  // to every repository listed that is still waiting and that no session has started in since; a
+  // bare yes, no or later has the agent confirm first; any other message of the user's own is
+  // handed to the agent with a reply ticket, and the message passes either way.
   #reachAnswer(message, answer, sessionId) {
     const short = answer ? null : SHORT_ANSWER.exec(message.text);
     const epoch = this.#epochs.get(sessionId);
     const asked = this.#reach.get(sessionId, epoch);
     if (asked.length === 0) return null;
     if (this.#launched(sessionId)) return answer || short ? { action: 'block', reason: LAUNCHED_TEXT } : null;
-    if (!answer && !short) return ownTyped(message) ? this.#ticket(message, sessionId, epoch, asked) : null;
-    return this.#applyAll(answer ? answer[1].toLowerCase() : SHORT_COMMANDS[short[1].toLowerCase()], asked, sessionId, epoch);
+    if (answer) return this.#applyAll(answer[1].toLowerCase(), asked, sessionId, epoch);
+    // Here the agent keeps working, so a bare yes, no or later may answer its own question (owner
+    // decision of 28 Oct): it records nothing, and the agent asks once more, naming what would be
+    // recorded; the user's confirmation then comes with a reply ticket.
+    // The reply after that re-ask, bare or not, is read by the agent with a ticket.
+    if (!ownTyped(message)) return null;
+    let confirming = false;
+    try { confirming = this.#reach.confirming(sessionId, epoch); } catch { confirming = false; }
+    if (short && !confirming) {
+      try { this.#reach.confirming(sessionId, epoch, true); } catch { return null; }
+      return { action: 'pass', context: confirmContext(asked, SHORT_COMMANDS[short[1].toLowerCase()]) };
+    }
+    return this.#ticket(message, sessionId, epoch, asked);
   }
 
   // A reply ticket for this message and these repositories, with what the agent is told; null when
@@ -1141,16 +1207,23 @@ class PromptHold {
   answerTicket(ticket, word) {
     const command = Object.hasOwn(ANSWER_WORDS, String(word)) ? ANSWER_WORDS[word] : null;
     if (command === null) return { ok: false, text: 'Toolkit: the answer must be yes, no or later. Nothing was recorded.' };
-    let entry = null;
-    try { entry = this.#tickets.take(ticket); } catch { entry = null; }
-    if (!entry) return { ok: false, text: `Toolkit: that reply ticket is used, lapsed or unknown, so nothing was recorded. Ask the user the governance question again in plain words. ${NEVER_OWNER}` };
-    if (this.#launched(entry.session_id) || this.#epochs.get(entry.session_id) !== entry.epoch) {
+    const unusable = { ok: false, text: `Toolkit: that reply ticket is used, lapsed or unknown, so nothing was recorded. Ask the user the governance question again in plain words. ${NEVER_OWNER}` };
+    let found = null;
+    try { found = this.#tickets.peek(ticket, undefined); } catch { found = null; }
+    if (!found) return unusable;
+    // Checked before the ticket is spent, so a launched session or another run holding it cannot use
+    // up the user's ticket.
+    if (this.#launched(found.session_id) || this.#epochs.get(found.session_id) !== found.epoch) {
       return { ok: false, text: `Toolkit: that reply ticket belongs to another run of the session, so nothing was recorded. ${NEVER_OWNER}` };
     }
+    let entry = null;
+    try { entry = this.#tickets.take(ticket); } catch { entry = null; }
+    if (!entry || entry.session_id !== found.session_id || entry.epoch !== found.epoch) return unusable;
     const result = this.#applyAll(command, entry.repositories, entry.session_id, entry.epoch);
-    return result.action === 'pass'
+    if (result.action !== 'pass') return { ok: false, text: result.reason };
+    return result.recorded > 0
       ? { ok: true, text: `${result.context}\nTell the user in plain words what Toolkit recorded.` }
-      : { ok: false, text: result.reason };
+      : { ok: false, text: `${result.context}\nNothing was recorded. Tell the user so in plain words.` };
   }
 
   // One answer for every repository listed: each one still waiting for its github.com answer, with the
@@ -1179,7 +1252,7 @@ class PromptHold {
     const lines = [`The user's message is their answer (${command === 'not-now' ? 'later' : command === 'enable' ? 'yes' : 'no'}) to Toolkit's GitHub governance question for ${reachNames(asked)}; it is not a reply to anything else.`];
     for (const { item, result } of done) lines.push(`${reachNames([item])} (${item.root}): ${result.context}`);
     if (moved.length > 0) lines.push(`Nothing was recorded for ${reachNames(moved)}: it was decided elsewhere, or a session started there since the question, so Toolkit asks again if a command reaches it.`);
-    return { action: 'pass', context: lines.join('\n') };
+    return { action: 'pass', context: lines.join('\n'), recorded: done.length };
   }
 
   // An answer from a session the session-start hook never marked cannot count, so it is refused
@@ -1369,6 +1442,11 @@ class ToolGate {
       return { deny: `Toolkit: its user-state files (governance decisions and held messages) are changed only by Toolkit itself. ${NEVER_OWNER}` };
     }
     if (tool === PICKER_TOOL) return this.#picker(input, sessionId);
+    // A prompt the agent schedules for itself could arrive as bare text and read as the user's reply,
+    // so none is scheduled while this run has a governance question or reply ticket open.
+    if (SCHEDULE_TOOLS.test(tool) && this.#questionOpen(sessionId)) {
+      return { deny: `Toolkit: this session is waiting for the user's reply to Toolkit's governance question, so no prompt is scheduled until they answer. ${NEVER_OWNER}` };
+    }
     if (ALWAYS_TOOLS.test(tool)) return null;
     // Read-only tools are held too: Claude Code lets a held turn run to show the card, with the held
     // message in front of Claude, and only the card runs on it.
@@ -1428,6 +1506,8 @@ class ToolGate {
   // reply in this session answers for them. Returns every repository now asked in this run, or null
   // when it cannot ask: the folder itself is held or said "later", a repository reached is not on
   // github.com or could not be read, the session has no mark, or another session started it.
+  // { asked } is every repository the question now names; { waiting } is the open question's list
+  // when this reach adds another repository, which waits until that question is answered.
   #askReach(input, sessionId, verdicts) {
     const here = this.#verdict(path.resolve(String(input && input.cwd || process.cwd())), sessionId);
     if (!here || here.hold || !['no-git', 'decided'].includes(here.reason)) return null;
@@ -1436,7 +1516,19 @@ class ToolGate {
     const epoch = this.#epochs.get(sessionId);
     if (!EPOCH.test(String(epoch))) return null;
     const repositories = [...new Map(verdicts.map(verdict => [verdict.state.repository_id, { id: verdict.state.repository_id, root: verdict.state.root, mark: this.#epochs.repository(verdict.state.repository_id) }])).values()];
-    try { return this.#reach.add(sessionId, epoch, repositories); } catch { return null; }
+    // While a question is open its list is fixed, so the user's reply covers exactly what they were
+    // shown: reaching another repository gets the plain refusal until that question is answered.
+    let open;
+    try { open = this.#reach.get(sessionId, epoch); } catch { return null; }
+    if (open.length > 0) return repositories.every(item => open.some(known => known.id === item.id)) ? { asked: open } : { waiting: open };
+    try { return { asked: this.#reach.add(sessionId, epoch, repositories) }; } catch { return null; }
+  }
+
+  // Whether this run has a question asked from a folder that is not held, or a live reply ticket.
+  // When that cannot be read it counts as open.
+  #questionOpen(sessionId) {
+    if (typeof sessionId !== 'string' || sessionId === '') return false;
+    try { return this.#reach.get(sessionId, this.#epochs.get(sessionId)).length > 0 || this.#tickets.live(sessionId); } catch { return true; }
   }
 
   // The gate's verdict for a folder a command names, or null when it cannot be told.
