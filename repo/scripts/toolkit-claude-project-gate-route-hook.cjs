@@ -229,7 +229,7 @@ function decide(input, { readLines = file => fs.readFileSync(file, 'utf8').split
     return `${RULE} ${name} needs the project's GATE ROUTE line, and this session has not read project memory. Call read_memory, then launch again.`;
   }
   if (!memory.route) {
-    return `${RULE} ${name} needs the project's GATE ROUTE line, and project memory has none. Add one line \`${ROUTE_FORMAT}\` with update_memory, taken from the project instructions' rule on where gates run and the project's pinned stack profile, then launch again.`;
+    return `${RULE} ${name} needs the project's GATE ROUTE line, and project memory has none. Add one line \`${ROUTE_FORMAT}\` with update_memory (it replaces the whole file, so keep every other line), taken from the project instructions' rule on where gates run and the project's pinned stack profile, then launch again.`;
   }
   if (memory.route.malformed !== undefined) {
     return `${RULE} The GATE ROUTE line "${memory.route.malformed}" does not read as \`${ROUTE_FORMAT}\`. Fix it with update_memory, then launch again.`;
