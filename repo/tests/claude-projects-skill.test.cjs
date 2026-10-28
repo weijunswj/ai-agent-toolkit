@@ -188,10 +188,10 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.match(text, /\*\*Toolkit is the base layer; the project builds on top\.\*\* Only Toolkit-governed parts ever change/);
   assert.match(text, /Never overwrite other project memory, owner text outside the markers or the project's own tasks/);
   assert.match(text, /`setup-inventory\.json` beside this skill/);
-  // Setup asks for the coordinator's model only: project settings have no coordinator effort option.
-  assert.match(text, /Ask for one setting only: in the project's model settings, the \*\*coordinator\*\* gets the strongest available Opus model\. Ask the user/);
-  assert.match(text, /never ask the user to change the coordinator's effort or reasoning level there/);
-  assert.doesNotMatch(text, /effort \*\*High\*\*|default Low is too weak/);
+  // Setup asks for no model or effort settings; threads and tasks still set their own.
+  assert.match(text, /Setup never asks the user to choose models or effort in the project's settings\. Thread effort is never a project setting/);
+  assert.doesNotMatch(text, /Ask for one setting only|effort \*\*High\*\*|default Low is too weak/);
+  assert.equal(JSON.parse(read('repo/contracts/claude-projects/web-controller-projects/setup-inventory.json')).rows.some(row => row.id === 'models'), false);
   // Cheapest first: every non-gate thread starts on the ladder's cheapest fitting step, never on High by default.
   assert.doesNotMatch(text, /Non-gate threads get High|one notch higher/);
   assert.match(text, /\*\*Set model and effort explicitly on every thread you start\.\*\* Gates get the pinned stack route/);

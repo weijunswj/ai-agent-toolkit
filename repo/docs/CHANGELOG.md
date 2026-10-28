@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- **Claude Projects skill (2026-10-28.1):** guided setup no longer asks the owner to set the coordinator's effort, because Claude Projects settings now offer only a coordinator model. Setup still asks for the coordinator model; thread effort stays set on every thread the coordinator starts.
+- **Claude Projects skill (2026-10-28.1):** guided setup no longer asks the owner to choose a coordinator model or effort in the project's settings, and the setup inventory drops its models row. Thread effort is still set on every thread the coordinator starts, and scheduled tasks and gates keep their own model and effort rules.
 
 ## 3.15.19 (proved binding separators and literal Git operands)
 
