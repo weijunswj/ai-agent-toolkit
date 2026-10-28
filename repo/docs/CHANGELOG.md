@@ -6,6 +6,12 @@
 
 - **Answer from a Claude Projects thread:** the user's yes, no, later or ok sent in a Projects thread now answers the governance question in the Remote Control session it reaches, and lifts the hold there. Before, the thread's wrapping meant the reply was never read as an answer, and the repository stayed held. Only the user's own message counts: a coordinator's relay, a scheduled task or anyone else's message does not.
 
+## 3.15.23 (finished child issues close as completed)
+
+- **Child issues close with their merge:** once a merge completes every criterion of a child issue and any owner UAT passed, the PR that completes it says `Closes #n` so the merge closes it as completed; when that could not apply (UAT after the merge, or work over several PRs), the controller closes it without asking. Closing a parent, a programme issue or as not planned still needs the owner. Staged, UAT-pending, blocked, partial or follow-up PRs keep using `Refs`.
+- **Reconciler close list:** each ready-to-close entry is marked closable only with G1-or-later acceptance, UAT recorded as not required, passed or retained at the head, every review verdict at the head passed, a merge into the default branch and no open sub-issue. The reconciler itself still never closes.
+- **Claude Projects skill (2026-10-28.2):** the skill and the managed project instructions no longer ask the owner before closing a completed child issue.
+
 ## 3.15.22 (no Codex-only settings in the Claude plugin)
 
 - **Claude plugin manifest:** the Claude Code plugin no longer carries the Codex-only `interface` block, so syncing the plugin on claude.ai no longer warns that it strips an unknown key. The Codex plugin keeps its display name, prompts and icons.

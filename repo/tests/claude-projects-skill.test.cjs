@@ -52,7 +52,7 @@ test('no plugin payload or skills folder reaches the Projects controller skill',
 
 test('Projects wires managed instructions, promises and fresh scheduled sessions to controller law', () => {
   const text = bundle();
-  assert.match(text, /^Version: 2026-10-28\.1$/m);
+  assert.match(text, /^Version: 2026-10-28\.2$/m);
   // The check-in posts the skill card itself; the coordinator lists the Save tap, re-upload only when the card failed.
   assert.match(text, /`SKILL BEHIND`: the account copy is an older Toolkit revision\. With "card posted", the check-in posted the skill update card in its thread: put "tap Save on the skill card"/);
   assert.match(text, /keep that thread open \(never resolve it in the hourly pass, even after the check-in moves to a new home thread\) until the owner saves/);

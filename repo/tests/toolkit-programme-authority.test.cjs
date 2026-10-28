@@ -302,10 +302,12 @@ test('the close list shows evidence at an older head as STALE_HEAD', () => {
   const stale = reconciler().run().close_list[0];
   assert.match(stale.uat, /^PASSED \(STALE_HEAD, was aaaaaaa\)$/);
   assert.match(stale.review, /^PASSED \(STALE_HEAD\)$/);
+  assert.equal(stale.closable, false, 'UAT or review at an older head keeps the child open');
   github.prs.get(540).head = SHA_A;
   github.prs.get(540).rollupOid = SHA_A;
   const current = reconciler().run().close_list[0];
   assert.deepEqual([current.uat, current.review], ['PASSED', 'PASSED']);
+  assert.equal(current.closable, true);
 });
 
 test('sessions come from --session only, every --issue is 1 or more, and a dry run after an interrupted pass asks the controller to apply', () => {

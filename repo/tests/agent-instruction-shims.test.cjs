@@ -240,7 +240,7 @@ test('governed rules hold only the GitHub governance parts: release lanes, recor
     /Decision traces:[^\n]*Record each owner decision that changes scope, authority or the plan as one tagged comment[^\n]*other comments need no index entry[^\n]*`SUPERSEDES=<record ID>`/,
     /7-character short SHA[^\n]*Write the full 40-character SHA only in review verdicts, UAT results and merge summaries/,
     /Issues: to add a task, search the parent's sub-issues and open or recently closed issues; extend or reopen an owner, else create a child and attach it as a native sub-issue/,
-    /Use `Refs` for staged, UAT-pending, blocked or follow-up PRs; `Closes`\/`Fixes`, and closing, only once the merge completes every criterion and any owner UAT passed/,
+    /A child closes as completed once a merge completes every criterion and any owner UAT passed, any remainder moved to a linked follow-up first: that PR says `Closes #n`, else the controller does\. Use `Refs` for staged, UAT-pending, blocked, partial or follow-up PRs\./,
     /in a Git store the commit is the manifest and a push plus one fetch the read-back/,
     /session folders, side-session notes, scratchpads and temp paths are never custody/,
     /a name or prefix alone grants nothing/,
