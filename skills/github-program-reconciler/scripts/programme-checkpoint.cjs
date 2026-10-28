@@ -213,27 +213,62 @@ function queueFile(hash, deps) { return path.join(sessionsDir(deps), `${hash}.qu
 // The queued entries still inside the bounds, oldest first; dropped ones are noted once.
 function readQueue(hash, deps = {}) { return loadQueue(hash, deps).entries; }
 
-// { entries, expired }: the entries inside seven days, and how many were older.
-function loadQueue(hash, deps = {}) {
-  const doc = readJson(queueFile(hash, deps));
-  if (!doc || doc.schema !== QUEUE_SCHEMA || !Array.isArray(doc.entries)) return { entries: [], expired: 0 };
-  const now = deps.now ? Date.parse(deps.now()) : Date.now();
-  const entries = doc.entries.filter(item => item && typeof item.at === 'string' && now - Date.parse(item.at) <= QUEUE_MAX_AGE_MS);
-  return { entries, expired: doc.entries.length - entries.length };
+// A queued turn as `queueEntry` writes it: its time, repository, issue and assignment, and facts and a
+// return entry a journal would accept. Anything else (a hand edit) is skipped, never replayed.
+function validQueueItem(item) {
+  if (!item || typeof item !== 'object' || typeof item.at !== 'string' || Number.isNaN(Date.parse(item.at))) return false;
+  if (typeof item.repository !== 'string' || !Number.isSafeInteger(item.issue) || item.issue < 1 || typeof item.assignment !== 'string' || !item.assignment) return false;
+  const state = require('./programme-state.cjs');
+  const probe = { schema: state.SCHEMA.journal, repository: 'probe/probe', issue: 1, assignment: 'probe', session_hash: '0'.repeat(16),
+    completion_mode: 'native', route: null, seq: 1, checkpoint: item.facts ?? null, returns: item.entry ? [item.entry] : [], last_error: null };
+  return state.validateJournal(probe).length === 0;
 }
 
-// Notes turns that aged out of the queue unwritten, once, when the queue is next read for a change.
-function noteExpired(hash, expired, deps) {
-  if (expired > 0) recordError(hash, 'QUEUE_EXPIRED', `${expired} queued turn${expired === 1 ? ' was' : 's were'} older than seven days and dropped unwritten.`, deps);
+// A dropped or skipped turn's key for its once-only note: its time and assignment.
+const queueKey = item => `${typeof item?.at === 'string' ? item.at : ''}|${typeof item?.assignment === 'string' ? item.assignment : ''}`;
+
+// { entries, expired, invalid, noted }: the valid entries inside seven days, the older and the
+// unusable ones, and the keys already noted.
+function loadQueue(hash, deps = {}) {
+  const doc = readJson(queueFile(hash, deps));
+  if (!doc || doc.schema !== QUEUE_SCHEMA || !Array.isArray(doc.entries)) return { entries: [], expired: [], invalid: [], noted: new Set() };
+  const now = deps.now ? Date.parse(deps.now()) : Date.now();
+  const invalid = doc.entries.filter(item => !validQueueItem(item));
+  const valid = doc.entries.filter(validQueueItem);
+  const entries = valid.filter(item => now - Date.parse(item.at) <= QUEUE_MAX_AGE_MS);
+  return { entries, expired: valid.filter(item => !entries.includes(item)), invalid, noted: new Set(Array.isArray(doc.noted) ? doc.noted.filter(key => typeof key === 'string') : []) };
+}
+
+// Records one note for the turns in `items` not noted before, and remembers them in the queue file,
+// so a write that keeps failing never repeats it.
+function noteOnce(hash, loaded, items, code, message, deps) {
+  const fresh = items.filter(item => !loaded.noted.has(queueKey(item)));
+  if (!fresh.length) return;
+  recordError(hash, code, message(fresh), deps);
+  for (const item of fresh) loaded.noted.add(queueKey(item));
+  try {
+    const doc = readJson(queueFile(hash, deps));
+    if (doc && doc.schema === QUEUE_SCHEMA && Array.isArray(doc.entries)) writeJsonAtomically(queueFile(hash, deps), { ...doc, noted: [...loaded.noted].slice(-QUEUE_LIMIT * 2) });
+  } catch { /* noted again next time */ }
+}
+
+const plural = (count, one, many) => `${count} queued turn${count === 1 ? ` ${one}` : `s ${many}`}`;
+
+// Notes turns that aged out of the queue unwritten, and unusable entries, once each.
+function noteDropped(hash, loaded, deps) {
+  noteOnce(hash, loaded, loaded.expired, 'QUEUE_EXPIRED', fresh => `${plural(fresh.length, 'was', 'were')} older than seven days and dropped unwritten.`, deps);
+  noteOnce(hash, loaded, loaded.invalid, 'QUEUE_ENTRY_INVALID', fresh => `${plural(fresh.length, 'could not be read and was', 'could not be read and were')} skipped (queued at ${fresh.map(item => (typeof item?.at === 'string' ? item.at.slice(0, 40) : 'an unknown time')).join(', ')}).`, deps);
 }
 
 function queueEntry(hash, item, deps = {}) {
   const loaded = loadQueue(hash, deps);
-  noteExpired(hash, loaded.expired, deps);
+  noteDropped(hash, loaded, deps);
   const entries = [...loaded.entries, item];
   const kept = entries.slice(-QUEUE_LIMIT);
   if (kept.length < entries.length) recordError(hash, 'QUEUE_FULL', `The offline queue keeps the newest ${QUEUE_LIMIT} turns; ${entries.length - kept.length} older one was dropped.`, deps);
-  writeJsonAtomically(queueFile(hash, deps), { schema: QUEUE_SCHEMA, entries: kept });
+  // Only notes for turns still queued are kept.
+  const noted = [...loaded.noted].filter(key => kept.some(entry => queueKey(entry) === key));
+  writeJsonAtomically(queueFile(hash, deps), { schema: QUEUE_SCHEMA, entries: kept, ...(noted.length ? { noted } : {}) });
   return kept.length;
 }
 
@@ -304,12 +339,12 @@ function runCheckpoint({ sessionId, message = null }, deps = {}) {
   const facts = collectFacts(local.repo_root, deps);
   // Queued turns first, in order, then this one, folded into one journal write.
   const loaded = loadQueue(hash, deps);
-  noteExpired(hash, loaded.expired, deps);
+  noteDropped(hash, loaded, deps);
   // Only turns queued for this binding replay here; a turn from before a rebind is dropped with a note.
   const belongs = item => item.repository === String(local.repository).toLowerCase() && item.issue === local.issue && item.assignment === local.assignment;
   const queued = loaded.entries.filter(belongs);
-  const foreign = loaded.entries.length - queued.length;
-  if (foreign > 0) recordError(hash, 'QUEUE_SKIPPED', `${foreign} queued turn${foreign === 1 ? '' : 's'} belonged to another repository, issue or assignment and ${foreign === 1 ? 'was' : 'were'} not written.`, deps);
+  noteOnce(hash, loaded, loaded.entries.filter(item => !belongs(item)), 'QUEUE_SKIPPED', fresh => `${plural(fresh.length, 'belonged', 'belonged')} to another repository, issue or assignment and ${fresh.length === 1 ? 'was' : 'were'} not written.`, deps);
+  const hadQueue = loaded.entries.length || loaded.expired.length || loaded.invalid.length;
   const pending = readErrors(hash, deps).pending;
   let next = previous;
   let changed = false;
@@ -319,10 +354,13 @@ function runCheckpoint({ sessionId, message = null }, deps = {}) {
     if (step.error) lastIdError = step.error;
     if (step.doc) { next = step.doc; changed = true; }
   }
+  // seq moves only when the content does: a replay that ends where it started writes nothing.
+  const content = doc => { const copy = { ...doc }; delete copy.seq; delete copy.volatile; return JSON.stringify(require('./programme-state.cjs').canonical(copy)); };
+  if (changed && content(next) === content(previous)) changed = false;
   if (changed) next = { ...next, seq: previous.seq + 1 };
   if (lastIdError) recordError(hash, lastIdError, 'A return ID was reused with different content; the first one stays.', deps);
   if (!changed) {
-    if (loaded.entries.length || loaded.expired) discardQueue(hash, deps);
+    if (hadQueue) discardQueue(hash, deps);
     return { outcome: 'NOOP', journal: name, error: parsed.error || lastIdError };
   }
   let result;
@@ -332,8 +370,43 @@ function runCheckpoint({ sessionId, message = null }, deps = {}) {
   }
   if (pending) clearPending(hash, deps);
   // Deleted only now, after the write was confirmed; a failed write above keeps the queue.
-  if (loaded.entries.length || loaded.expired) discardQueue(hash, deps);
+  if (hadQueue) discardQueue(hash, deps);
   return { outcome: result.outcome, journal: name, seq: result.doc.seq, replayed: queued.length, error: parsed.error || lastIdError };
+}
+
+// The sessions bound on this computer in the checkout at `root`: [{ hash, binding, errors, queue }].
+// Reads local files only.
+function localSessionsFor(root, deps = {}) {
+  const dir = sessionsDir(deps);
+  let names = [];
+  try { names = fs.readdirSync(dir); } catch { return []; }
+  const same = (a, b) => {
+    const norm = value => path.resolve(String(value || ''));
+    return process.platform === 'win32' ? norm(a).toLowerCase() === norm(b).toLowerCase() : norm(a) === norm(b);
+  };
+  const sessions = [];
+  for (const name of names) {
+    const match = /^([0-9a-f]{16})\.json$/.exec(name);
+    if (!match) continue;
+    const binding = readLocalBinding(match[1], deps);
+    if (!binding || !binding.repo_root || !same(binding.repo_root, root)) continue;
+    sessions.push({ hash: match[1], binding, errors: readErrors(match[1], deps), queue: loadQueue(match[1], deps).entries });
+  }
+  return sessions;
+}
+
+// Turns waiting in this computer's offline queues for the checkout at `root`: { count, oldest }.
+function queueSummary(root, deps = {}) {
+  const entries = localSessionsFor(root, deps).flatMap(session => session.queue);
+  const oldest = entries.map(item => item.at).sort()[0] || null;
+  return { count: entries.length, oldest };
+}
+
+// Deletes this computer's offline queues for the checkout at `root` (governance confirmed off).
+function discardQueuesFor(root, deps = {}) {
+  let discarded = 0;
+  for (const session of localSessionsFor(root, deps)) if (discardQueue(session.hash, deps)) discarded += 1;
+  return discarded;
 }
 
 // The Stop hook entry: never throws, never prints, records any failure locally.
@@ -355,5 +428,5 @@ function runHook(input, deps = {}) {
 module.exports = Object.freeze({
   BINDING_SCHEMA, HOOK_DEADLINE_MS, sessionHash, sessionsDir, bindingFile, errorsFile, readLocalBinding, writeLocalBinding,
   readErrors, recordError, collectFacts, parseReturnBlock, newJournal, nextJournal, runCheckpoint, runHook, githubGovernanceOn,
-  queueFile, readQueue, QUEUE_LIMIT, QUEUE_MAX_AGE_MS,
+  queueFile, readQueue, QUEUE_LIMIT, QUEUE_MAX_AGE_MS, localSessionsFor, queueSummary, discardQueuesFor,
 });

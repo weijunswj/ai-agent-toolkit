@@ -4,7 +4,7 @@ description: "Use when running as a Claude Projects coordinator and the user app
 ---
 
 # Web Controller for Claude Projects
-Version: 2026-10-28.3
+Version: 2026-10-29.1
 
 Run Toolkit repos through Claude Projects. The global rules and coding gates apply in every project; GitHub governance (parent and child issues, records, decision traces, evidence custody) applies only to a github.com repo whose governance state is ENABLED. Keep project facts (repos, devices, lanes, pending work) in project memory; durable work state lives in the branch, the PR and the programme comments or evidence store, mirrored in memory, never only there.
 
@@ -71,6 +71,7 @@ When the skill or Toolkit updates, or the daily check-in reports BLOCK OUTDATED,
 - **G0 first, tier named.** Every new task, repo or environment gets a G0 first; only LIGHT edits and fixes inside an already-discovered task skip it. Every G1 brief carries the G0 plan as its handoff and names the risk tier from `toolkit-risk-tier.cjs`; check the tag before launch, and launch the review the tier asks for.
 - **Briefs name sibling PRs.** Every G0 brief asks for the open sibling PRs (same base or lane) the G0 checked for overlap, listed in its plan. Every G1 brief carries that list and requires a re-check against those still open, and any opened since, before building; overlap goes to the coordinator, never built over.
 - **Child G0 briefs read history first.** Every G0 brief for a programme child says to read the parent's and the child's decision traces first (decision-trace playbook) and to return the live-scope summary for the owner to confirm before it becomes the spec.
+- **Programme attention before gates, finality and settling.** In an ENABLED repo, before launching a gate, before an acceptance or finality step, and before calling a turn or the programme settled, read the programme's `Attention:` line: through a thread that runs `programme.cjs attention --refresh` where `gh` is signed in, or from the `CURRENT` block of the parent issue. Answer every `new` finding in that turn: fix it, or acknowledge or dispose of it (`ack --finding <id>`, `dispose --finding <id> --reason <text>`, run by the parent's holder). An acknowledged finding stays listed until it is resolved.
 - **A task the user adds to an ENABLED repo goes into its issue tree** under `CONTROLLER.md`'s task-intake rule; elsewhere it goes into project memory's queue. Tell the user in one line where it landed, with the issue link.
 - **Can I do it myself? first.** Check coordinator/worker/thread capabilities before asking for owner action. Only approvals, credentials, typed local rc lines or unreachable settings need their hands.
 - **End finished local Remote Control sessions straight away:** once work is done/superseded and its result relayed, end sessions with nothing left to do.

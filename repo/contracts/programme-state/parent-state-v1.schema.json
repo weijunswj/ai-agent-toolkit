@@ -62,6 +62,26 @@
         }
       }
     },
+    "attention": {
+      "description": "Findings the controller must answer, kept beyond the run that saw them. A complete run of a source adds and resolves only its own findings; only the parent's holder acknowledges or disposes, with a dispose reason kept in private.attention_notes. Not part of the revision digest.",
+      "type": "array",
+      "maxItems": 700,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "source", "code", "issue", "head", "state", "first_seen", "changed_at"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[0-9a-f]{12}$", "description": "First 12 hex characters of sha256 of source|code|issue|head." },
+          "source": { "enum": ["reconcile", "inventory"] },
+          "code": { "type": "string", "pattern": "^[A-Z][A-Z_]{0,63}$", "description": "From the fixed code table, which gives the next action." },
+          "issue": { "type": ["integer", "null"], "minimum": 1 },
+          "head": { "type": ["string", "null"], "pattern": "^[0-9a-f]{40}$" },
+          "state": { "enum": ["new", "acknowledged", "resolved", "disposed"] },
+          "first_seen": { "type": "string", "minLength": 1 },
+          "changed_at": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
     "private": { "type": "object" },
     "volatile": { "type": "object" }
   }

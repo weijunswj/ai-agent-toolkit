@@ -68,9 +68,10 @@ const REVIEW_VERDICTS = ['PASSED', 'NOT_PASSED'];
 const EFFECT_KINDS = ['attach', 'reparent', 'reorder', 'replace_block', 'post_index_comment', 'replace_pr_nav'];
 const EFFECT_STATES = ['IN_FLIGHT', 'DONE', 'UNKNOWN'];
 // Fields that never count towards a document's content digest or revision: the revision itself,
-// observation timestamps, pending effects (an intent write must not make the rendered state stale) and
-// the journal blobs the controller has read.
-const UNHASHED = ['revision', 'volatile', 'pending_effects', 'journals_seen'];
+// observation timestamps, pending effects (an intent write must not make the rendered state stale),
+// the journal blobs the controller has read and the parent's attention findings. sameState still
+// compares the last two, so a real change is written without a revision bump.
+const UNHASHED = ['revision', 'volatile', 'pending_effects', 'journals_seen', 'attention'];
 // Child fields `update` may change. UAT, review and a terminal lifecycle (DONE, RETIRED) are
 // acceptance records: only the parent's holder (the controller) writes them.
 const PATCHABLE_CHILD_FIELDS = ['lifecycle', 'completed_at', 'release', 'candidate', 'uat', 'review', 'blockers', 'next_action', 'private'];
@@ -119,7 +120,8 @@ function contentDigest(doc) {
 function sameState(previous, next) {
   return contentDigest(previous) === contentDigest(next)
     && JSON.stringify(canonical(previous.pending_effects || [])) === JSON.stringify(canonical(next.pending_effects || []))
-    && JSON.stringify(canonical(previous.journals_seen || {})) === JSON.stringify(canonical(next.journals_seen || {}));
+    && JSON.stringify(canonical(previous.journals_seen || {})) === JSON.stringify(canonical(next.journals_seen || {}))
+    && JSON.stringify(canonical(previous.attention || [])) === JSON.stringify(canonical(next.attention || []));
 }
 
 function check(errors, condition, message) { if (!condition) errors.push(message); }
@@ -127,7 +129,8 @@ function check(errors, condition, message) { if (!condition) errors.push(message
 // Fields each object may and must hold, as the schemas' additionalProperties: false and required.
 const SHAPES = {
   child: { all: ['schema', 'repository', 'issue', 'revision', 'fence', 'lifecycle', 'completed_at', 'release', 'gate', 'candidate', 'pr', 'uat', 'review', 'blockers', 'next_action', 'pending_effects', 'journals_seen', 'private', 'volatile'], optional: ['volatile', 'journals_seen', 'completed_at'] },
-  parent: { all: ['schema', 'repository', 'parent_issue', 'revision', 'fence', 'release_plan', 'outcomes', 'pending_effects', 'private', 'volatile'], optional: ['volatile'] },
+  parent: { all: ['schema', 'repository', 'parent_issue', 'revision', 'fence', 'release_plan', 'outcomes', 'pending_effects', 'attention', 'private', 'volatile'], optional: ['volatile', 'attention'] },
+  finding: { all: ['id', 'source', 'code', 'issue', 'head', 'state', 'first_seen', 'changed_at'] },
   fence: { all: ['epoch', 'holder_prefix', 'holder_session'] },
   effect: { all: ['intent_id', 'kind', 'target', 'state'] },
   outcome: { all: ['issue', 'label', 'name', 'description', 'class', 'parent', 'order', 'lane', 'owner_prefix'], optional: ['label', 'name', 'description', 'lane', 'owner_prefix'] },
@@ -256,8 +259,181 @@ function validateParent(doc) {
         visited.add(at.issue);
       }
     }
+    validateAttention(errors, doc.attention);
   }
   return errors;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Attention findings (pure)
+//
+// A finding is a condition the controller must answer, kept on the primary parent document so it
+// lasts beyond the run that saw it. Each code belongs to one source: a complete run of that source
+// adds what it saw and resolves only its own findings that are gone. The fixed table gives each
+// code its next action, so no free text is stored in a finding.
+
+const FINDING_STATES = ['new', 'acknowledged', 'resolved', 'disposed'];
+const OPEN_FINDING_STATES = ['new', 'acknowledged'];
+const FINDING_ID = /^[0-9a-f]{12}$/;
+// Kept: at most ATTENTION_KEEP entries, dropping the oldest resolved or disposed first. New and
+// acknowledged entries are never dropped; past ATTENTION_LIMIT of them, nothing more is added and
+// ATTENTION_FULL is set.
+const ATTENTION_KEEP = 200;
+const ATTENTION_LIMIT = 500;
+// Codes whose finding speaks for one PR head; a new head is a new finding.
+const HEAD_BOUND_CODES = new Set(['PR_HEAD_MOVED', 'CHECKS_RED']);
+const FINDING_CODES = Object.freeze({
+  // reconcile source: what the reconciler reports but never changes itself.
+  ISSUE_MISSING: { source: 'reconcile', next_action: 'Controller: fix or remove the catalogue entry; the issue cannot be read or is a pull request' },
+  NATIVE_PARENT_UNEXPECTED: { source: 'reconcile', next_action: 'Controller: set the expected parent in the catalogue, or move the issue natively' },
+  NATIVE_CHILD_UNKNOWN: { source: 'reconcile', next_action: 'Controller: add the issue to the catalogue, or move it out from under the parent' },
+  DEPENDENCY_IMPLIES_PARENT: { source: 'reconcile', next_action: 'Controller: set the native parent on purpose; a dependency never sets one' },
+  PR_HEAD_MOVED: { source: 'reconcile', next_action: 'Controller: re-check review and UAT at the new head before accepting' },
+  CHECKS_RED: { source: 'reconcile', next_action: 'Controller: have the builder fix the failing checks' },
+  READY_TO_CLOSE: { source: 'reconcile', next_action: 'Controller: close the issue as completed if every criterion is met' },
+  CHILD_STATE_CONFLICT: { source: 'reconcile', next_action: 'Controller: bring the state document and the issue in line' },
+  MANAGED_BLOCK_BROKEN: { source: 'reconcile', next_action: 'Controller: repair the broken managed block in the issue body' },
+  TRACE_UNLINKED: { source: 'reconcile', next_action: 'Controller: link the decision comments with decision-trace-audit --repair' },
+  TRACE_SUPERSEDED_UNMARKED: { source: 'reconcile', next_action: 'Controller: mark the superseded decision record' },
+  PR_UNTRACKED: { source: 'reconcile', next_action: 'Controller: confirm the PR and record it with update --patch' },
+  RETURN_CAPTURED: { source: 'reconcile', next_action: 'Controller: give the waiting return its verdict' },
+  STALE_ASSIGNMENT: { source: 'reconcile', next_action: 'Controller: check the late checkpoint from an ended assignment' },
+  JOURNAL_ERROR: { source: 'reconcile', next_action: "Controller: check the executor's checkpoint failure" },
+  JOURNAL_INVALID: { source: 'reconcile', next_action: 'Controller: check the unusable checkpoint journal' },
+  CLASS_LEGACY: { source: 'reconcile', next_action: 'Controller: migrate the old classes with the patch from reconcile --json' },
+  ORDER_TIE: { source: 'reconcile', next_action: 'Controller: give the tied tasks distinct priorities' },
+  DUPLICATE_HIERARCHY: { source: 'reconcile', next_action: 'Controller: decide which registered parent owns the issue; nothing was moved' },
+  // inventory source: open issues and registered parents.
+  NEEDS_PLACEMENT: { source: 'inventory', next_action: 'Controller: place the issue under a registered parent, or mark it programme:outside' },
+  CLOSED_PARENT_OPEN_CHILD: { source: 'inventory', next_action: 'Controller: reopen the parent, or move or close its open descendants' },
+  INVENTORY_INCOMPLETE: { source: 'inventory', next_action: 'Controller: run programme.cjs attention --refresh again; this run could not read every open issue' },
+  ATTENTION_FULL: { source: 'inventory', next_action: 'Controller: answer or dispose open findings; no new finding is recorded until there are fewer than 500' },
+});
+// Findings with no issue of their own.
+const ISSUELESS_CODES = new Set(['INVENTORY_INCOMPLETE', 'ATTENTION_FULL']);
+const ATTENTION_NOTE_LIMIT = 200;
+
+function findingId(source, code, issue, head = '') {
+  return sha256(`${source}|${code}|${issue ?? ''}|${head || ''}`).slice(0, 12);
+}
+
+function validateAttention(errors, attention) {
+  if (attention === undefined) return;
+  check(errors, Array.isArray(attention) && attention.length <= ATTENTION_LIMIT + ATTENTION_KEEP, `attention must be a list of at most ${ATTENTION_LIMIT + ATTENTION_KEEP}`);
+  const ids = new Set();
+  for (const [index, entry] of (Array.isArray(attention) ? attention : []).entries()) {
+    const at = `attention[${index}]`;
+    check(errors, isObject(entry), `${at} must be an object`);
+    if (!isObject(entry)) continue;
+    checkShape(errors, entry, 'finding', at);
+    const known = Object.hasOwn(FINDING_CODES, entry.code) ? FINDING_CODES[entry.code] : null;
+    check(errors, Boolean(known), `${at}.code is not a known finding code`);
+    check(errors, Boolean(known) && entry.source === known.source, `${at}.source must be the code's source`);
+    check(errors, ISSUELESS_CODES.has(entry.code) ? entry.issue === null : isInt(entry.issue, 1), `${at}.issue must be an issue number${ISSUELESS_CODES.has(entry.code) ? ' or null' : ''}`);
+    check(errors, HEAD_BOUND_CODES.has(entry.code) ? optional(entry.head, isSha) : entry.head === null, `${at}.head must be a full 40-character SHA for a head-bound code, otherwise null`);
+    check(errors, FINDING_STATES.includes(entry.state), `${at}.state must be ${FINDING_STATES.join(', ')}`);
+    for (const field of ['first_seen', 'changed_at']) check(errors, isText(entry[field]) && !Number.isNaN(Date.parse(entry[field])), `${at}.${field} must be a date and time`);
+    check(errors, FINDING_ID.test(String(entry.id)) && entry.id === findingId(entry.source, entry.code, entry.issue, entry.head), `${at}.id must be the finding's own id`);
+    check(errors, !ids.has(entry.id), `${at}.id is repeated`);
+    ids.add(entry.id);
+  }
+}
+
+// What a run saw, as findings: [{ code, issue, head? }]. Returns the next attention list, or the same
+// list (===) when nothing changes, so an unchanged run writes nothing. A run that was not complete
+// adds what it saw (an incomplete inventory sees only INVENTORY_INCOMPLETE) and resolves nothing.
+function foldAttention(current, { source, seen = [], complete, now }) {
+  const list = Array.isArray(current) ? current.map(entry => ({ ...entry })) : [];
+  const byId = new Map(list.map(entry => [entry.id, entry]));
+  const seenIds = new Set();
+  let changed = false;
+  const open = () => list.filter(entry => OPEN_FINDING_STATES.includes(entry.state)).length;
+  const add = (code, issue, head) => {
+    const id = findingId(FINDING_CODES[code].source, code, issue, head);
+    seenIds.add(id);
+    const existing = byId.get(id);
+    if (existing) {
+      if (existing.state === 'resolved') { existing.state = 'new'; existing.changed_at = now; changed = true; }
+      return;
+    }
+    if (code !== 'ATTENTION_FULL' && open() >= ATTENTION_LIMIT) { add('ATTENTION_FULL', null, null); return; }
+    const entry = { id, source: FINDING_CODES[code].source, code, issue, head, state: 'new', first_seen: now, changed_at: now };
+    list.push(entry);
+    byId.set(id, entry);
+    changed = true;
+  };
+  for (const finding of seen) {
+    if (!Object.hasOwn(FINDING_CODES, finding.code) || FINDING_CODES[finding.code].source !== source) continue;
+    const issue = ISSUELESS_CODES.has(finding.code) ? null : finding.issue;
+    if (!ISSUELESS_CODES.has(finding.code) && !isInt(issue, 1)) continue;
+    add(finding.code, issue, HEAD_BOUND_CODES.has(finding.code) && isSha(finding.head) ? finding.head : null);
+  }
+  for (const entry of complete ? list : []) {
+    // ATTENTION_FULL resolves on any complete run back under the bound.
+    const own = entry.source === source || entry.code === 'ATTENTION_FULL';
+    if (!own || seenIds.has(entry.id) || !OPEN_FINDING_STATES.includes(entry.state)) continue;
+    if (entry.code === 'ATTENTION_FULL' && open() - 1 >= ATTENTION_LIMIT) continue;
+    entry.state = 'resolved';
+    entry.changed_at = now;
+    changed = true;
+  }
+  if (!changed) return current || [];
+  return boundAttention(list);
+}
+
+// Keeps at most ATTENTION_KEEP entries by dropping the oldest resolved or disposed ones first.
+function boundAttention(list) {
+  const closed = list.filter(entry => !OPEN_FINDING_STATES.includes(entry.state))
+    .sort((a, b) => Date.parse(a.changed_at) - Date.parse(b.changed_at) || a.id.localeCompare(b.id));
+  const drop = new Set(closed.slice(0, Math.max(0, list.length - ATTENTION_KEEP)).map(entry => entry.id));
+  return list.filter(entry => !drop.has(entry.id));
+}
+
+// The holder's answer to one finding: acknowledged (still listed) or disposed, with its reason kept
+// only in `private.attention_notes`.
+function answerFinding(doc, { id, state, reason = null, now }) {
+  if (!['acknowledged', 'disposed'].includes(state)) throw new ProgrammeError('USAGE', 'A finding is acknowledged or disposed.');
+  const entry = (doc.attention || []).find(item => item.id === id);
+  if (!entry) throw new ProgrammeError('FINDING_UNKNOWN', `No finding ${id} on the parent document. Run programme.cjs attention to list them.`);
+  if (state === 'disposed' && (!isText(reason) || reason.length > ATTENTION_NOTE_LIMIT)) {
+    throw new ProgrammeError('USAGE', `dispose needs --reason <text> of at most ${ATTENTION_NOTE_LIMIT} characters.`);
+  }
+  if (entry.state === state || (state === 'acknowledged' && entry.state !== 'new')) {
+    if (entry.state === state) return null;
+    throw new ProgrammeError('FINDING_STATE', `Finding ${id} is ${entry.state}; only a new finding is acknowledged.`);
+  }
+  const next = clone(doc);
+  const target = next.attention.find(item => item.id === id);
+  target.state = state;
+  target.changed_at = now;
+  if (state === 'disposed') next.private = { ...next.private, attention_notes: { ...(next.private.attention_notes || {}), [id]: reason } };
+  return next;
+}
+
+function attentionCounts(attention) {
+  const list = Array.isArray(attention) ? attention : [];
+  return { new: list.filter(entry => entry.state === 'new').length, acknowledged: list.filter(entry => entry.state === 'acknowledged').length };
+}
+
+// `Attention: <n> new, <m> acknowledged` or `Attention: clear`.
+function attentionLine(attention) {
+  const counts = attentionCounts(attention);
+  return counts.new || counts.acknowledged ? `Attention: ${counts.new} new, ${counts.acknowledged} acknowledged` : 'Attention: clear';
+}
+
+// Open findings, newest first.
+function openFindings(attention) {
+  return (Array.isArray(attention) ? attention : []).filter(entry => OPEN_FINDING_STATES.includes(entry.state))
+    .sort((a, b) => Date.parse(b.changed_at) - Date.parse(a.changed_at) || a.id.localeCompare(b.id));
+}
+
+function findingText(entry) {
+  return `${entry.code}${entry.issue ? ` #${entry.issue}` : ''}${entry.head ? ` at ${shortSha(entry.head)}` : ''}: ${FINDING_CODES[entry.code]?.next_action || ''}`;
+}
+
+// A digest of the open findings and their states, to tell when the set changed.
+function attentionDigest(attention) {
+  return sha256(openFindings(attention).map(entry => `${entry.id}:${entry.state}`).sort().join('\n')).slice(0, 16);
 }
 
 function validateChild(doc) {
@@ -1158,7 +1334,21 @@ function renderCurrentBlockBody(parent, children, issues = new Map()) {
     ...(working.length ? working : ['- None.']),
     '',
     `**Start next:** ${next ? `${taskName(next.outcome, issues.get(next.outcome.issue))} (#${next.outcome.issue})` : 'None.'}`,
+    '',
+    ...attentionBlockLines(parent.attention),
   ].join('\n');
+}
+
+// The attention summary on the parent page, so a surface without `gh` can read it: the line, then up
+// to ATTENTION_SHOWN open findings, newest first.
+const ATTENTION_SHOWN = 10;
+function attentionBlockLines(attention) {
+  const open = openFindings(attention);
+  return [
+    `**${attentionLine(attention)}**`,
+    ...open.slice(0, ATTENTION_SHOWN).map(entry => `- ${entry.state === 'acknowledged' ? '(acknowledged) ' : ''}${findingText(entry)}`),
+    ...(open.length > ATTENTION_SHOWN ? [`- and ${open.length - ATTENTION_SHOWN} more: run programme.cjs attention`] : []),
+  ];
 }
 
 // The links that open a task page or PR: the programme parent, any expected parents in between,
@@ -1439,6 +1629,10 @@ class GitHubTransport {
       maxBuffer: 64 * 1024 * 1024, windowsHide: true, timeout: this.timeoutMs,
     });
     if (result.error) throw new ProgrammeError('GH_FAILED', `gh could not run: ${result.error.message}`);
+    // gh exits 4 when it is not signed in, before any request: a refusal, never "unreachable".
+    if (result.status === 4 && !/^HTTP\/[\d.]+ \d{3}/m.test(String(result.stdout || ''))) {
+      throw new ProgrammeError('GH_AUTH', 'gh is not signed in on this computer (gh auth login), so GitHub was not read.');
+    }
     return GitHubTransport.parse(String(result.stdout || ''), String(result.stderr || ''));
   }
 
@@ -1761,6 +1955,143 @@ class ProgrammeGraphReader {
   }
 }
 
+const INVENTORY_QUERY = `query($owner: String!, $name: String!, $after: String) {
+  repository(owner: $owner, name: $name) {
+    issues(states: OPEN, first: 100, after: $after) {
+      pageInfo { hasNextPage endCursor }
+      nodes { __typename number state parent { number state repository { nameWithOwner } } labels(first: 50) { nodes { name } } }
+    }
+  }
+}`;
+const OUTSIDE_LABEL = 'programme:outside';
+const OUTSIDE_MARKER = 'OUTSIDE-PROGRAMME';
+// Authors whose OUTSIDE-PROGRAMME comment counts: people with a say in the repository.
+const OUTSIDE_AUTHORS = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
+// GitHub allows sub-issues eight levels deep.
+const PARENT_CHAIN_LIMIT = 8;
+const INVENTORY_DEADLINE_MS = 120000;
+const INVENTORY_CLASSES = ['PARENT', 'CHILD', 'OUTSIDE', 'NEEDS_PLACEMENT'];
+
+// Read-only: every open issue of the repository in exactly one class, with the inventory source's
+// findings. It never links, labels, comments, closes or catalogues anything. A missed deadline, a
+// failed read or an unwalkable parent chain makes the run incomplete: it then reports only
+// INVENTORY_INCOMPLETE, so nothing is resolved from a partial view.
+class ProgrammeInventory {
+  constructor({ transport, repository, parents, catalogue = [], deadlineMs = INVENTORY_DEADLINE_MS, nowMs = () => Date.now() }) {
+    this.transport = transport;
+    this.repository = repository;
+    this.parents = new Set(parents);
+    this.catalogue = new Set(catalogue);
+    this.nowMs = nowMs;
+    this.deadline = nowMs() + deadlineMs;
+  }
+
+  // Every request goes through here, so a run that passes its deadline stops before the next one.
+  request(method, apiPath, body) {
+    if (this.nowMs() > this.deadline) throw new ProgrammeError('INVENTORY_DEADLINE', 'the inventory passed its deadline');
+    return this.transport.request(method, apiPath, body);
+  }
+
+  openIssues() {
+    const [owner, name] = this.repository.split('/');
+    const issues = new Map();
+    let after = null;
+    for (let page = 0; page < 1000; page += 1) {
+      const response = this.request('POST', 'graphql', { query: INVENTORY_QUERY, variables: { owner, name, after } });
+      if (response.status !== 200 || response.json?.errors?.length || !response.json?.data?.repository?.issues) {
+        throw new ProgrammeError('GH_GRAPHQL_FAILED', `the open issues could not be read (${response.status})`);
+      }
+      const connection = response.json.data.repository.issues;
+      for (const node of connection.nodes || []) {
+        // The issues connection holds no pull request; anything else is never listed.
+        if (!node || node.__typename !== 'Issue' || !isInt(node.number, 1)) continue;
+        issues.set(node.number, {
+          number: node.number, state: 'open',
+          parent: node.parent && node.parent.repository?.nameWithOwner?.toLowerCase() === this.repository.toLowerCase() ? node.parent.number : node.parent ? 'outside' : null,
+          labels: (node.labels?.nodes || []).map(label => String(label?.name || '')),
+        });
+      }
+      if (!connection.pageInfo?.hasNextPage) return issues;
+      after = connection.pageInfo.endCursor;
+    }
+    throw new ProgrammeError('GH_FAILED', 'the open issues did not end within the page limit');
+  }
+
+  // A closed ancestor, read once by number: { number, state, parent }.
+  ancestor(number, known) {
+    if (known.has(number)) return known.get(number);
+    const response = this.request('GET', `repos/${this.repository}/issues/${number}`);
+    if (response.status !== 200 || !response.json) throw ghFailure(response, `Reading issue ${number}`);
+    const parent = parentFromUrl(response.json.parent_issue_url, this.repository);
+    const entry = { number, state: response.json.state === 'closed' ? 'closed' : 'open', parent: typeof parent === 'number' ? parent : parent ? 'outside' : null };
+    known.set(number, entry);
+    return entry;
+  }
+
+  // The registered parent above `number`, null when there is none, or throws when the chain cannot be
+  // walked (a cycle or deeper than GitHub allows).
+  registeredRoot(number, known) {
+    const visited = new Set([number]);
+    let at = known.get(number);
+    for (let depth = 0; depth <= PARENT_CHAIN_LIMIT; depth += 1) {
+      const parent = at.parent;
+      if (parent === null || parent === 'outside') return null;
+      if (this.parents.has(parent)) return parent;
+      if (visited.has(parent)) throw new ProgrammeError('INVENTORY_CHAIN', `the parent chain of #${number} loops`);
+      visited.add(parent);
+      at = this.ancestor(parent, known);
+    }
+    throw new ProgrammeError('INVENTORY_CHAIN', `the parent chain of #${number} is deeper than ${PARENT_CHAIN_LIMIT}`);
+  }
+
+  // The OUTSIDE-PROGRAMME comment that counts, as its reason, or null.
+  outsideComment(number) {
+    for (let page = 1; page < 100; page += 1) {
+      const response = this.request('GET', `repos/${this.repository}/issues/${number}/comments?per_page=100&page=${page}`);
+      if (response.status !== 200 || !Array.isArray(response.json)) throw ghFailure(response, `Reading comments of ${number}`);
+      for (const comment of response.json) {
+        const [first, ...rest] = String(comment?.body || '').split(/\r?\n/);
+        if (first.trim() === OUTSIDE_MARKER && OUTSIDE_AUTHORS.has(String(comment.author_association || '').toUpperCase())) {
+          return rest.join(' ').trim().slice(0, TEXT_LIMIT) || 'marked OUTSIDE-PROGRAMME';
+        }
+      }
+      if (response.json.length < 100) return null;
+    }
+    return null;
+  }
+
+  run() {
+    let issues;
+    try {
+      issues = this.openIssues();
+      const known = new Map(issues);
+      const classified = [];
+      const findings = [];
+      const closedParents = new Set();
+      for (const issue of [...issues.values()].sort((a, b) => a.number - b.number)) {
+        if (this.parents.has(issue.number)) { classified.push({ number: issue.number, class: 'PARENT' }); continue; }
+        const root = this.registeredRoot(issue.number, known);
+        if (root !== null) {
+          classified.push({ number: issue.number, class: 'CHILD', parent: root });
+          if (known.get(root)?.state === 'closed' || (!issues.has(root) && this.ancestor(root, known).state === 'closed')) closedParents.add(root);
+          continue;
+        }
+        if (issue.parent === null && this.catalogue.has(issue.number)) { classified.push({ number: issue.number, class: 'CHILD', parent: null, catalogued: true }); continue; }
+        if (issue.labels.includes(OUTSIDE_LABEL)) { classified.push({ number: issue.number, class: 'OUTSIDE', reason: `label ${OUTSIDE_LABEL}` }); continue; }
+        const reason = this.outsideComment(issue.number);
+        if (reason) { classified.push({ number: issue.number, class: 'OUTSIDE', reason }); continue; }
+        classified.push({ number: issue.number, class: 'NEEDS_PLACEMENT' });
+        findings.push({ code: 'NEEDS_PLACEMENT', issue: issue.number });
+      }
+      for (const number of [...closedParents].sort((a, b) => a - b)) findings.push({ code: 'CLOSED_PARENT_OPEN_CHILD', issue: number });
+      return { complete: true, reason: null, issues: classified, findings };
+    } catch (error) {
+      if (error.code === 'GH_AUTH' || STOPS_PASS.has(error.code)) throw error;
+      return { complete: false, reason: error.code === 'INVENTORY_DEADLINE' ? 'the deadline passed' : error.message, issues: [], findings: [{ code: 'INVENTORY_INCOMPLETE', issue: null }] };
+    }
+  }
+}
+
 // Issue numbers each PR body references with Refs, Completes, Closes, Fixes or Resolves, including
 // lists such as "Refs #421, #423": issue -> sorted PR numbers.
 function referencedIssues(prs) {
@@ -1850,10 +2181,18 @@ function intentId(kind, target) {
   return sha256(JSON.stringify(canonical({ kind, target }))).slice(0, 16);
 }
 
-// Findings the reconciler reports but never fixes itself; each needs a controller decision.
-const ATTENTION = new Set(['ISSUE_MISSING', 'NATIVE_PARENT_UNEXPECTED', 'NATIVE_CHILD_UNKNOWN', 'DEPENDENCY_IMPLIES_PARENT',
-  'PR_HEAD_MOVED', 'CHECKS_RED', 'READY_TO_CLOSE', 'CHILD_STATE_CONFLICT', 'MANAGED_BLOCK_BROKEN', 'TRACE_UNLINKED', 'TRACE_SUPERSEDED_UNMARKED', 'PR_UNTRACKED',
-  'RETURN_CAPTURED', 'STALE_ASSIGNMENT', 'JOURNAL_ERROR', 'JOURNAL_INVALID', 'CLASS_LEGACY', 'ORDER_TIE']);
+// Findings the reconciler reports but never fixes itself; each needs a controller decision. These are
+// the reconcile source's attention findings (FINDING_CODES).
+const ATTENTION = new Set(Object.keys(FINDING_CODES).filter(code => FINDING_CODES[code].source === 'reconcile'));
+
+function inventoryCounts(inventory) {
+  return Object.fromEntries(INVENTORY_CLASSES.map(name => [name, inventory.issues.filter(entry => entry.class === name).length]));
+}
+
+// The issue numbers the binding registers as programme parents; the first is the primary parent.
+function registeredParents(binding) {
+  return Array.isArray(binding.parents) && binding.parents.length ? binding.parents.map(entry => entry.issue) : [binding.parent_issue];
+}
 // Child fields the journal fold owns; apply re-folds them on the document it reads, never copies them.
 const FOLD_FIELDS = ['gate', 'journals_seen', 'next_action'];
 
@@ -1865,6 +2204,7 @@ const EFFECT_TEXT = {
   reorder: effect => `Move #${effect.target.issue} ${effect.target.before !== undefined ? `before #${effect.target.before}` : `after #${effect.target.after}`} under #${effect.target.parent}`,
   replace_block: effect => (effect.state === false ? `Update the comment trace in #${effect.target.issue}'s body` : `${effect.insert ? 'Add' : effect.move ? 'Move' : 'Update'} the state block in #${effect.target.issue}'s body`),
   replace_pr_nav: effect => `Add the parent and task links at the top of PR #${effect.target.pr}`,
+  update_attention: effect => `Update the attention findings on #${effect.target.issue} (${effect.line} after this pass)`,
   post_index_comment: effect => `Move #${effect.target.issue}'s "${effect.label || effect.target.tag || OTHER_COMMENTS}" comment trace (${effect.lines.length} link(s)) into a new index comment`,
 };
 
@@ -1880,8 +2220,10 @@ function holdScope(kind) {
 
 // One reconcile pass: bind, observe, recover, diff, plan and (with apply) run each effect.
 class Reconciler {
-  constructor({ store, reader, mutator, binding, writer = null, toolkitVersion = null, threshold = DEFAULT_THRESHOLD }) {
+  constructor({ store, reader, mutator, binding, writer = null, toolkitVersion = null, threshold = DEFAULT_THRESHOLD, now = null }) {
     this.store = store;
+    // The clock attention findings are dated by (the store's clock dates only its own commits).
+    this.now = now || (() => new Date().toISOString());
     this.reader = reader;
     this.mutator = mutator;
     this.binding = binding;
@@ -1991,6 +2333,9 @@ class Reconciler {
       if (issue.parent === null) {
         findings.push({ code: 'NATIVE_PARENT_MISSING', issue: issueNumber, detail: `expected under #${outcome.parent}` });
         effects.push({ kind: 'attach', target: { issue: issueNumber, parent: outcome.parent }, childId: issue.id });
+      } else if (issue.parent !== outcome.parent && typeof issue.parent === 'number' && issue.parent !== this.binding.parent_issue && registeredParents(this.binding).includes(issue.parent)) {
+        // Another registered parent owns it natively: never move it across programmes.
+        findings.push({ code: 'DUPLICATE_HIERARCHY', issue: issueNumber, detail: `catalogued under #${this.binding.parent_issue} but natively under the registered parent #${issue.parent}; not moved, the controller decides` });
       } else if (issue.parent !== outcome.parent) {
         findings.push({ code: 'NATIVE_PARENT_WRONG', issue: issueNumber, detail: `under ${typeof issue.parent === 'number' ? `#${issue.parent}` : issue.parent}, expected #${outcome.parent}` });
         effects.push({ kind: 'reparent', target: { issue: issueNumber, parent: outcome.parent }, childId: issue.id, from: issue.parent });
@@ -2022,12 +2367,12 @@ class Reconciler {
           detail: `PR #${pr.number} merged, checks GREEN at ${shortSha(pr.head)}; ${gate || 'unassigned gate'} ${gateAccepted ? 'acceptance recorded' : 'not accepted'}` });
       }
       if (desired.candidate.head && pr.state !== 'MERGED' && pr.state !== 'CLOSED' && desired.candidate.head !== pr.head) {
-        findings.push({ code: 'PR_HEAD_MOVED', issue: issueNumber, detail: `candidate ${shortSha(desired.candidate.head)}, PR #${pr.number} head ${shortSha(pr.head)}; review and UAT evidence at the old head is STALE_HEAD` });
+        findings.push({ code: 'PR_HEAD_MOVED', issue: issueNumber, head: pr.head, detail: `candidate ${shortSha(desired.candidate.head)}, PR #${pr.number} head ${shortSha(pr.head)}; review and UAT evidence at the old head is STALE_HEAD` });
       }
       if (pr.state === 'OPEN' || pr.state === 'DRAFT') {
         const code = { GREEN: 'CHECKS_GREEN_AT_HEAD', PENDING: 'CHECKS_PENDING', RED: 'CHECKS_RED', UNKNOWN: 'CHECKS_UNKNOWN' }[checks.state];
         const detail = checks.reason || [checks.failing.length ? `failing: ${checks.failing.join(', ')}` : '', checks.missing.length ? `missing: ${checks.missing.join(', ')}` : '', `${checks.required_passed}/${checks.required_total} required passed at ${shortSha(checks.at_head)}`].filter(Boolean).join('; ');
-        findings.push({ code, issue: issueNumber, detail });
+        findings.push({ code, issue: issueNumber, ...(code === 'CHECKS_RED' ? { head: checks.at_head || pr.head } : {}), detail });
       }
     }
     // Document versus issue.
@@ -2154,10 +2499,10 @@ class Reconciler {
     effects.push({ kind: 'replace_pr_nav', target: { issue: number, pr: pr.number, digest: blockDigest(navBody) }, body: navBody });
   }
 
-  diffBlocks(parent, children, observed, only, effects, findings, holds) {
+  diffBlocks(parent, children, observed, only, effects, findings, holds, targetsOverride = null) {
     const blocks = this.renderAll(parent, children, observed.issues);
     const version = this.toolkitVersion || '0.0.0';
-    const targets = only ? [only, parent.parent_issue] : [...blocks.keys()];
+    const targets = targetsOverride || (only ? [only, parent.parent_issue] : [...blocks.keys()]);
     for (const number of targets) {
       const issue = observed.issues.get(number);
       const body = blocks.get(number);
@@ -2241,7 +2586,30 @@ class Reconciler {
     return resolutions;
   }
 
-  plan({ issue: only = null, parentOverride = null } = {}) {
+  // The attention findings this pass records on the parent: the reconcile source from a full pass
+  // (a pass for one issue records none), and the inventory source when the pass carries an inventory.
+  // When they change, the parent's CURRENT block is planned again with the new list, so the page
+  // shows them after this pass.
+  planAttention(parent, projected, observed, only, override, inventory, effects, findings, holds) {
+    const folds = [];
+    if (!only && !override) folds.push({ source: 'reconcile', complete: true, seen: findings.filter(finding => ATTENTION.has(finding.code)).map(({ code, issue, head = null }) => ({ code, issue, head })) });
+    if (inventory) folds.push({ source: 'inventory', complete: inventory.complete, seen: inventory.findings });
+    if (!folds.length) return;
+    const now = this.now();
+    const stored = parent.attention || [];
+    const next = folds.reduce((list, fold) => foldAttention(list, { ...fold, now }), stored);
+    if (JSON.stringify(canonical(next)) === JSON.stringify(canonical(stored))) return;
+    effects.push({ kind: 'update_attention', target: { issue: parent.parent_issue }, folds, now, line: attentionLine(next) });
+    const number = parent.parent_issue;
+    const blockFindings = new Set(['PROJECTION_STALE', 'TRACE_STALE', 'MANAGED_BLOCK_BROKEN']);
+    const keep = (list, test) => { const kept = list.filter(item => !test(item)); list.splice(0, list.length, ...kept); };
+    keep(effects, effect => ['replace_block', 'post_index_comment'].includes(effect.kind) && effect.target.issue === number);
+    keep(findings, finding => finding.issue === number && blockFindings.has(finding.code));
+    keep(holds, hold => hold.target === `#${number}` && ['BLOCK_NEWER_TOOLKIT', 'BODY_TOO_LARGE'].includes(hold.code));
+    this.diffBlocks({ ...parent, attention: next }, projected, observed, only, effects, findings, holds, [number]);
+  }
+
+  plan({ issue: only = null, parentOverride = null, inventory = null } = {}) {
     const holds = [];
     const parentRead = this.loadParent(parentOverride);
     if (!parentRead.doc) {
@@ -2286,6 +2654,7 @@ class Reconciler {
     if (legacy.length) findings.push({ code: 'CLASS_LEGACY', issue: parent.parent_issue, patch: legacyMigrationPatch(parent),
       detail: `${legacy.map(outcome => `#${outcome.issue} ${outcome.class}`).join(', ')} read as COMMITTED and sort like any other task, by group, priority (order) and child number; to migrate, save this finding's patch (reconcile --json) and apply it whole with update-parent, which sets COMMITTED and renumbers order in the old CORE, HARDENING, LATER sequence` });
     if (!only) for (const tie of orderTies(parent, desiredDocs)) findings.push({ code: 'ORDER_TIE', issue: parent.parent_issue, detail: `${tie.map(outcome => `#${outcome.issue}`).join(', ')} share priority order ${tie[0].order}, so child number decides. Controller: set a distinct order with update-parent; if CLASS_LEGACY is reported too, migrate first, or set COMMITTED and the priority in one update-parent patch` });
+    this.planAttention(parent, projected, observed, only, Boolean(parentOverride), inventory, effects, findings, holds);
     for (const effect of effects) effect.text = describeEffect(effect);
     return { parent, parentSha: parentRead.sha, override: Boolean(parentRead.override), children, observed, findings, effects, holds, resolutions };
   }
@@ -2373,7 +2742,24 @@ class Reconciler {
       record(effect, outcome, detail);
     };
 
-    // 1. State documents.
+    // 1. State documents: the parent's attention findings first, re-folded on the document read now so
+    // an acknowledgement made since planning is kept.
+    for (const effect of plan.effects.filter(entry => entry.kind === 'update_attention')) {
+      try {
+        const result = mutateDoc('parent', parentNumber, { change: doc => {
+          const stored = doc.attention || [];
+          const next = effect.folds.reduce((list, fold) => foldAttention(list, { ...fold, now: effect.now }), stored);
+          if (JSON.stringify(canonical(next)) === JSON.stringify(canonical(stored))) return null;
+          doc.attention = next;
+          return doc;
+        } });
+        record(effect, result.outcome === 'NOOP' ? 'NOOP' : 'DONE');
+      } catch (error) {
+        if (STOPS_PASS.has(error.code)) throw error;
+        record(effect, 'HELD', error.message);
+        hold(effect, error.code || 'STATE_WRITE_FAILED', error.message);
+      }
+    }
     for (const effect of plan.effects.filter(entry => entry.kind === 'create_state' || entry.kind === 'update_state')) {
       try {
         const desired = effect.doc;
@@ -2533,8 +2919,8 @@ class Reconciler {
     return { results, holds };
   }
 
-  run({ apply = false, issue = null, parentOverride = null } = {}) {
-    const plan = this.plan({ issue, parentOverride });
+  run({ apply = false, issue = null, parentOverride = null, inventory = null } = {}) {
+    const plan = this.plan({ issue, parentOverride, inventory });
     const report = {
       repository: this.binding.repository,
       parent_issue: this.binding.parent_issue,
@@ -2548,6 +2934,7 @@ class Reconciler {
       holds: plan.holds,
       results: [],
       writes: { state: 0, github: 0 },
+      ...(inventory ? { inventory: { complete: inventory.complete, reason: inventory.reason, counts: inventoryCounts(inventory) } } : {}),
     };
     if (apply && plan.parent && (plan.effects.length || plan.resolutions.some(entry => entry.outcome !== 'UNKNOWN'))) {
       const storeWrites = this.store.writes;
@@ -2561,6 +2948,8 @@ class Reconciler {
       : !report.effects.length && !report.holds.length && !plan.resolutions.length ? 'No changes'
         : apply ? `${report.results.filter(entry => entry.outcome === 'DONE').length} of ${report.results.length} effect(s) done, ${report.holds.length} hold(s)`
           : `${report.effects.length} planned effect(s), ${report.holds.length} hold(s)`;
+    const planned = plan.effects.find(effect => effect.kind === 'update_attention');
+    report.attention = planned ? planned.line : plan.parent ? attentionLine(plan.parent.attention) : null;
     const attention = report.findings.filter(finding => ATTENTION.has(finding.code));
     report.next_action = report.holds.length ? `Controller: resolve ${report.holds[0].code} on ${report.holds[0].target}: ${report.holds[0].detail}`
       : !apply && report.effects.length ? 'Controller: run reconcile --apply --controller for this plan; other sessions report it'
@@ -2608,4 +2997,6 @@ module.exports = Object.freeze({
   recordReturn, consumeReturn, foldJournals, validateJournal, currentGateAccepted, completionAccepted, applyPatch, refuseNewLegacy, legacyMigrationPatch, orderTies,
   evaluateChecks, renderParentBlockBody, renderChildBlockBody, renderTraceBlockBody, renderCurrentBlockBody, renderBlock, blockDigest, findStateBlock, upsertStateBlock, upsertTraceBlock,
   orderMoves, intentId, describeEffect, resolveExecutable, isGitHubHost, originSlug, bindRepository,
+  FINDING_CODES, ATTENTION_KEEP, ATTENTION_LIMIT, findingId, foldAttention, answerFinding, attentionCounts, attentionLine, openFindings, findingText, attentionDigest,
+  ProgrammeInventory, INVENTORY_CLASSES, INVENTORY_DEADLINE_MS, registeredParents,
 });

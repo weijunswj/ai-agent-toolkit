@@ -593,7 +593,9 @@ test('Q1-Q4 the offline queue is bounded, kept in user-state, and replays a retu
   // Older than seven days is dropped; the newest 200 are kept, and the drop is noted.
   const old = new Date(Date.now() - checkpoint.QUEUE_MAX_AGE_MS - 60000).toISOString();
   const recent = new Date().toISOString();
-  const entries = [{ at: old, facts: null, entry: null }, ...Array.from({ length: checkpoint.QUEUE_LIMIT }, () => ({ at: recent, facts: null, entry: null }))];
+  // Entries as the queue writes them: time, repository, issue and assignment with the turn.
+  const turn = at => ({ at, repository: 'acme/app', issue: 423, assignment: 'g1-a1', facts: null, entry: null });
+  const entries = [turn(old), ...Array.from({ length: checkpoint.QUEUE_LIMIT }, () => turn(recent))];
   fs.writeFileSync(file, JSON.stringify({ schema: 'toolkit.programme-checkpoint-queue.v1', entries }));
   assert.equal(checkpoint.readQueue(hash, sessions).length, checkpoint.QUEUE_LIMIT, 'the old entry is past its seven days');
   assert.equal(fx.turnEnd('exec-a', returnBlock('q-new'), { governanceState: stale }).queued, checkpoint.QUEUE_LIMIT);
@@ -639,7 +641,102 @@ test('Q5 queued turns replay in order, the queue goes only after a confirmed wri
   assert.equal(checkpoint.readErrors(hash, sessions).recent.some(entry => entry.code === 'QUEUE_SKIPPED'), true);
   // Turns older than seven days are noted when dropped.
   const old = new Date(new Date(fx.github.clock).getTime() - checkpoint.QUEUE_MAX_AGE_MS - 60000).toISOString();
-  fs.writeFileSync(checkpoint.queueFile(hash, sessions), JSON.stringify({ schema: 'toolkit.programme-checkpoint-queue.v1', entries: [{ at: old, facts: null, entry: null }] }));
+  fs.writeFileSync(checkpoint.queueFile(hash, sessions), JSON.stringify({ schema: 'toolkit.programme-checkpoint-queue.v1', entries: [{ at: old, repository: 'acme/app', issue: 423, assignment: 'g1-a2', facts: null, entry: null }] }));
   fx.turnEnd('exec-a', returnBlock('a2-second'), { governanceState: stale });
   assert.equal(checkpoint.readErrors(hash, sessions).recent.some(entry => entry.code === 'QUEUE_EXPIRED'), true);
+});
+
+// ---- Offline-queue follow-ups -------------------------------------------------------------------
+
+const QUEUE_SCHEMA_V1 = 'toolkit.programme-checkpoint-queue.v1';
+const queued = (at, assignment = 'g1-a1', extra = {}) => ({ at, repository: 'acme/app', issue: 423, assignment, facts: null, entry: null, ...extra });
+const codesOf = (hash, sessions) => checkpoint.readErrors(hash, sessions).recent.map(entry => entry.code);
+
+test('S6: a dropped or skipped turn is noted once, however often the write keeps failing', () => {
+  const fx = fixture();
+  fx.ctrl(['assign', '--issue', '423', '--role', 'G1', '--assignment', 'g1-a1']);
+  fx.run(['bind', '--issue', '423', '--assignment', 'g1-a1', '--session', 'exec-a']);
+  const hash = checkpoint.sessionHash('exec-a');
+  const sessions = { sessionsDir: fx.sessionsDir };
+  const old = new Date(new Date(fx.github.clock).getTime() - checkpoint.QUEUE_MAX_AGE_MS - 60000).toISOString();
+  const recent = new Date(fx.github.clock).toISOString();
+  fs.writeFileSync(checkpoint.queueFile(hash, sessions), JSON.stringify({ schema: QUEUE_SCHEMA_V1, entries: [queued(old), queued(recent, 'g1-other')] }));
+  const writesDown = { request: (method, ...rest) => (method === 'GET' ? fx.github.request(method, ...rest) : { status: 503, json: { message: 'unavailable' } }), graphql: (...args) => fx.github.graphql(...args) };
+  for (let turn = 0; turn < 3; turn += 1) assert.equal(fx.turnEnd('exec-a', returnBlock(`x${turn}`), { transport: writesDown }).outcome, 'QUEUED');
+  assert.equal(fx.turnEnd('exec-a', returnBlock('x3')).outcome, 'WRITTEN');
+  const codes = codesOf(hash, sessions);
+  assert.equal(codes.filter(code => code === 'QUEUE_EXPIRED').length, 1, 'the expired turn is noted once');
+  assert.equal(codes.filter(code => code === 'QUEUE_SKIPPED').length, 1, 'the other assignment\'s turn is noted once');
+  assert.deepEqual(fx.store.readJournal(423, `g1-a1--${hash}.json`).doc.returns.map(entry => entry.return_id), ['x0', 'x1', 'x2', 'x3']);
+});
+
+test('S6: a signed-out gh is recorded as an error, never queued', () => {
+  const fx = fixture();
+  fx.ctrl(['assign', '--issue', '423', '--role', 'G1', '--assignment', 'g1-a1']);
+  fx.run(['bind', '--issue', '423', '--assignment', 'g1-a1', '--session', 'exec-a']);
+  const hash = checkpoint.sessionHash('exec-a');
+  const sessions = { sessionsDir: fx.sessionsDir };
+  const signedOut = new state.GitHubTransport({ ghPath: 'gh-for-tests', run: () => ({ status: 4, stdout: '', stderr: 'To get started with GitHub CLI, please run:  gh auth login' }) });
+  assert.throws(() => signedOut.request('GET', 'user'), { code: 'GH_AUTH' });
+  // gh with no HTTP status for another reason (a network failure) is still unreachable.
+  const offline = new state.GitHubTransport({ ghPath: 'gh-for-tests', run: () => ({ status: 1, stdout: '', stderr: 'error connecting to api.github.com' }) });
+  assert.throws(() => offline.request('GET', 'user'), { code: 'GH_FAILED' });
+  const result = fx.turnEnd('exec-a', returnBlock('auth-1'), { transport: signedOut });
+  assert.deepEqual(result, { outcome: 'FAILED', code: 'GH_AUTH' });
+  assert.equal(fs.existsSync(checkpoint.queueFile(hash, sessions)), false, 'nothing queued');
+  assert.equal(checkpoint.readErrors(hash, sessions).pending.code, 'GH_AUTH');
+});
+
+test('S6: a replay that ends where it started bumps no seq and writes nothing', () => {
+  const fx = fixture();
+  fx.ctrl(['assign', '--issue', '423', '--role', 'G1', '--assignment', 'g1-a1']);
+  fx.run(['bind', '--issue', '423', '--assignment', 'g1-a1', '--session', 'exec-a']);
+  const hash = checkpoint.sessionHash('exec-a');
+  const sessions = { sessionsDir: fx.sessionsDir };
+  const name = `g1-a1--${hash}.json`;
+  const before = fx.store.readJournal(423, name).doc;
+  const commits = fx.github.commits;
+  // A queued turn from a crash, with other facts, then this turn back on the journal's own facts.
+  const other = { ...before.checkpoint, head: SHA_B };
+  fs.writeFileSync(checkpoint.queueFile(hash, sessions), JSON.stringify({ schema: QUEUE_SCHEMA_V1, entries: [queued(new Date(fx.github.clock).toISOString(), 'g1-a1', { facts: other })] }));
+  const result = fx.turnEnd('exec-a');
+  assert.equal(result.outcome, 'NOOP');
+  assert.equal(fx.store.readJournal(423, name).doc.seq, before.seq);
+  assert.equal(fx.github.commits, commits, 'no commit');
+  assert.equal(fs.existsSync(checkpoint.queueFile(hash, sessions)), false, 'the replayed queue is gone');
+});
+
+test('S6: an unusable queued entry is skipped with one note, and the turn is still written', () => {
+  const fx = fixture();
+  fx.ctrl(['assign', '--issue', '423', '--role', 'G1', '--assignment', 'g1-a1']);
+  fx.run(['bind', '--issue', '423', '--assignment', 'g1-a1', '--session', 'exec-a']);
+  const hash = checkpoint.sessionHash('exec-a');
+  const sessions = { sessionsDir: fx.sessionsDir };
+  const at = new Date(fx.github.clock).toISOString();
+  const bad = queued(at, 'g1-a1', { facts: { branch: 'x', head: 'not-a-sha' } });
+  const good = queued(at, 'g1-a1', { entry: { return_id: 'q-good', verdict_requested: null, at_head: null, next_action: null, blockers: [] } });
+  fs.writeFileSync(checkpoint.queueFile(hash, sessions), JSON.stringify({ schema: QUEUE_SCHEMA_V1, entries: [bad, good] }));
+  const result = fx.turnEnd('exec-a', returnBlock('now-1'));
+  assert.equal(result.outcome, 'WRITTEN');
+  assert.deepEqual(fx.store.readJournal(423, `g1-a1--${hash}.json`).doc.returns.map(entry => entry.return_id), ['q-good', 'now-1']);
+  const notes = checkpoint.readErrors(hash, sessions).recent.filter(entry => entry.code === 'QUEUE_ENTRY_INVALID');
+  assert.equal(notes.length, 1);
+  assert.ok(notes[0].message.includes(`queued at ${at}`), notes[0].message);
+  assert.equal(fs.existsSync(checkpoint.queueFile(hash, sessions)), false, 'no leftover file is kept');
+  assert.equal(fs.readdirSync(fx.sessionsDir).some(file => file.includes('invalid')), false);
+});
+
+test('S6: the queue count for status, and the discard when governance is confirmed off', () => {
+  const fx = fixture();
+  fx.ctrl(['assign', '--issue', '423', '--role', 'G1', '--assignment', 'g1-a1']);
+  fx.run(['bind', '--issue', '423', '--assignment', 'g1-a1', '--session', 'exec-a']);
+  const hash = checkpoint.sessionHash('exec-a');
+  const sessions = { sessionsDir: fx.sessionsDir };
+  assert.deepEqual(checkpoint.queueSummary(fx.repoRoot, sessions), { count: 0, oldest: null });
+  fs.writeFileSync(checkpoint.queueFile(hash, sessions), JSON.stringify({ schema: QUEUE_SCHEMA_V1, entries: [queued('2026-10-22T09:00:00.000Z'), queued('2026-10-23T09:00:00.000Z')] }));
+  const now = { now: () => '2026-10-23T12:00:00.000Z', ...sessions };
+  assert.deepEqual(checkpoint.queueSummary(fx.repoRoot, now), { count: 2, oldest: '2026-10-22T09:00:00.000Z' });
+  assert.deepEqual(checkpoint.queueSummary(tmp(), now), { count: 0, oldest: null }, 'another checkout counts nothing');
+  assert.equal(checkpoint.discardQueuesFor(fx.repoRoot, now), 1);
+  assert.equal(fs.existsSync(checkpoint.queueFile(hash, sessions)), false);
 });

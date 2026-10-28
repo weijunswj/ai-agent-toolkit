@@ -1,5 +1,19 @@
 # Toolkit Changelog
 
+## Next release (programme attention; the version is set at merge)
+
+### Governance
+
+- **Attention that lasts:** findings the controller must answer are now kept on the programme's parent document instead of only in one run's report. Each has a fixed code and next action, and is `new`, `acknowledged`, `resolved` or `disposed`. A complete run adds new ones and resolves only its own source's findings that are gone; an unchanged run writes nothing; only the parent's holder acknowledges or disposes (`programme.cjs ack` and `dispose`, with the reason kept private). At most 200 are kept, and new and acknowledged ones are never dropped.
+- **Open-issue inventory:** `programme.cjs inventory`, and every `refresh`, put each open issue in one class: a registered parent, a child at any depth, outside the programme (the `programme:outside` label, or an `OUTSIDE-PROGRAMME` comment by an owner, member or collaborator) or needing placement, which becomes a finding. A closed parent with open children is a finding too. A run that misses its deadline or a page records that it was incomplete and resolves nothing. It never links, labels, comments or closes anything.
+- **No move across programmes:** a catalogued task that sits under another registered parent is no longer reparented; the pass reports it for the controller to decide.
+- **Where attention shows:** `programme.cjs attention [--refresh]` lists it, or says `unknown` when GitHub cannot be read (never clear). The parent page's CURRENT summary ends with the same line and the open findings. Gate and finality commands print the stored line first, with no extra GitHub request. In Claude Code and Codex the session-start line adds it from this computer's cache, and starts a background refresh when the cache is missing or an hour old; it also names a session whose last turn-end record failed. The Projects skill reads it before gates, finality and settling, and the hourly nudge reports it.
+- **Hooks and queue in `status`:** `toolkit governance status` shows which hosts run Toolkit's hooks here (`Hooks:` lines, with the by-hand path where none run) and how many turn-end records wait offline (`Queue:`).
+
+### Offline queue
+
+- Session start deletes the queues of a repository whose governance is confirmed off. A dropped, skipped or unreadable queued turn is noted once, however often the write keeps failing, and an unreadable entry no longer stops the rest. A replay that ends where it started writes nothing. A signed-out `gh` is an error, never queued. `status` names `GIT_SSH_COMMAND` with `GIT_SSH`, says what a permanent Plink setting means for queued turns, and gives a plain reason for any refresh held by an error code.
+
 ## 3.16.6 (host words used as data)
 
 - **Host words as data:** the continuation guard no longer refuses commands whose host words (Claude, Codex) and selector words (resume, fork, --continue) appear only as data: issue and PR text, commit messages, search patterns, paths, branch names and Toolkit setup options. This step runs only where the guard would refuse, and only turns that refusal into an allow. Every raw owner, state, workdir and path guard still runs first.
