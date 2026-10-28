@@ -1,21 +1,11 @@
 # Toolkit Changelog
 
-## 3.15.25 (host-named folders are names, not continuations)
+## 3.15.25 (continuation refusal parity)
 
-- The continuation check no longer treats a host name that only names a folder as a session resume. Two kinds of span become barriers in every evidence scan, so neighbouring text still cannot join across them:
-  - a dotted name touching a path separator (`.codex/`, `.claude\\`, `.claude-plugin/`);
-  - the fixed folder variables `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, `CLAUDE_PROJECT_DIR` and `CLAUDE_PLUGIN_ROOT`, as `$NAME` or `$env:NAME` outside single quotes and not after an escape.
-- Reading Toolkit's installed files or host settings with `# Toolkit Changelog
-
-, `^` or `%` syntax, or beside a short flag such as `-r` or `-Recurse`, is no longer refused on Claude Code or Codex.
-- These keep the earlier conservative result:
-  - real `codex resume`/`fork` and `claude -r`/`-c`/`--resume`;
-  - a host executable inside such a folder;
-  - any other variable, including `CLAUDE_CODE_EXECPATH`;
-  - constructed spellings, bare or quoted dotted words, and non-ASCII input;
-  - any command that can extract text at run time: piping into a shell or interpreter, command substitution, string methods or operators, slicing, and parameter or cmd substring expansion.
+- Host folder names and fixed folder variables retain the conservative continuation checks. They earn no general exemption from evidence scans.
+- Complete literal reader proofs still distinguish file operands from executable source. Unknown shells, unproved syntax, wrappers and runtime extraction retain their refusals.
+- Retained comparison cases cover the command strings and shell envelopes that previously lost refusals, including computed commands and executable paths.
 - Every raw owner, state, workdir and path guard still runs first.
-- Earlier tests that used such a folder as their only evidence, or that would pass without their proof, now use an undotted host folder. Their original texts are asserted as ordinary.
 
 ## 3.15.24 (answer from a Projects thread)
 

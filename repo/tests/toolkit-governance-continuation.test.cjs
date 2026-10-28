@@ -11,6 +11,7 @@ const { ContinuationResolver, TranscriptReader, LIMITS, parse } = require('../sc
 const gate = require('../scripts/toolkit-governance-gate.cjs');
 const hostile = require('./support/hostile-inputs.cjs');
 const matrix = require('./support/governance-continuation-matrix.json');
+const refusalCases = require('./support/governance-continuation-refusal-cases.json');
 
 // Selector receipts, inspected against the PATH host versions frozen by discovery:
 // Claude 2.1.310: https://code.claude.com/docs/en/sessions (exact transcript path; internal JSONL).
@@ -55,6 +56,29 @@ function snapshot(dir) {
   }
   walk(dir); return result;
 }
+
+// Every comparison row that main refused and the name-barrier change allowed.
+// Shell envelopes are retained exactly, including omitted and malformed metadata.
+for (const row of refusalCases.cases) test('comparison refusal: ' + row.id, t => {
+  const ctx = fixture(t), before = snapshot(ctx.dir);
+  const resolver = new ContinuationResolver({ environment: ctx.environment,
+    spawn() { assert.fail('unproved command cannot acquire target metadata'); } });
+  const currentGate = new gate.ToolGate({ registryOptions: ctx.options, environment: ctx.environment,
+    continuationResolver: resolver, stateReader: () => ({ state: 'DISABLED', rule: 'R1' }) });
+  assert.ok(row.shell_indexes.length, row.id + ': changed shell envelopes retained');
+  for (const index of row.shell_indexes) {
+    assert.ok(Object.hasOwn(refusalCases.shell_envelopes, index));
+    for (const tool_name of ['Bash', 'PowerShell']) for (const key of ['command', 'cmd']) {
+      const input = { ...shell(ctx, row.text), tool_name,
+        tool_input: { [key]: row.text, ...refusalCases.shell_envelopes[index] } };
+      const label = row.id + '/' + index + '/' + tool_name + '/' + key;
+      assert.equal(parse(row.text, input).status, 'UNKNOWN', label);
+      assert.equal(resolver.resolve(row.text, input).status, 'UNKNOWN', label);
+      for (const actor of matrix.actors) assert.ok(currentGate.decide({ ...input, actor })?.deny, label + '/' + actor);
+    }
+  }
+  assert.deepEqual(snapshot(ctx.dir), before);
+});
 
 test('literal reader roles and executable script operands follow the closed data boundary', t => {
   const ctx = fixture(t), before = snapshot(ctx.dir);
@@ -1301,24 +1325,24 @@ test('new evidence allowances retain every raw guard without reading a held queu
   t.diagnostic(JSON.stringify({ rawGuardChecks: checks, queueReads, metadataSpawns: spawns, bytesAndDirectoriesUnchanged: true }));
 });
 
-test('host-named directories and variables are names, not continuation evidence, on both envelopes', t => {
+test('host-named paths and variables keep the conservative evidence boundary on both envelopes', t => {
   const ctx = fixture(t), before = snapshot(ctx.dir);
-  // Everyday reads of host configuration and plugin folders, and the reported readiness shape.
-  const ordinary = [
-    "git rev-parse 'HEAD^{tree}'; node C:/example.test/.codex/check.cjs",
-    "git rev-parse HEAD 'HEAD^{tree}'; git status --short; git ls-remote origin refs/heads/deployment/example; python _logs/example/validate.py; node C:/Users/example/.codex/plugins/cache/ai-agent-toolkit-local/ai-agent-toolkit/3.15.19/skills/external-operation-preflight/scripts/preflight-check.cjs _logs/example/plan.json",
-    'Get-Content "$env:USERPROFILE/.claude/settings.json"',
-    'Get-ChildItem ~/.claude -Recurse',
-    'grep -rn example ~/.claude/settings.json',
-    'cat .claude-plugin/plugin.json | jq -r .version',
-    'Get-ChildItem C:\\Users\\example\\.codex\\sessions -Recurse',
-    'node "$CLAUDE_PROJECT_DIR/scripts/example.js"',
-    'ls $env:CODEX_HOME',
-    'echo co/.claude/dex$x',
-    'cat ~/.codex/sessions/example.jsonl | grep resume',
+  // Folder and variable names earn no exemption without a complete reader proof.
+  const named = [
+    {"text":"git rev-parse 'HEAD^{tree}'; node C:/example.test/.codex/check.cjs","expected":["UNKNOWN","UNKNOWN","UNKNOWN"]},
+    {"text":"git rev-parse HEAD 'HEAD^{tree}'; git status --short; git ls-remote origin refs/heads/deployment/example; python _logs/example/validate.py; node C:/Users/example/.codex/plugins/cache/ai-agent-toolkit-local/ai-agent-toolkit/3.15.19/skills/external-operation-preflight/scripts/preflight-check.cjs _logs/example/plan.json","expected":["UNKNOWN","UNKNOWN","UNKNOWN"]},
+    {"text":"Get-Content \"$env:USERPROFILE/.claude/settings.json\"","expected":["UNKNOWN","UNKNOWN","UNKNOWN"]},
+    {"text":"Get-ChildItem ~/.claude -Recurse","expected":["UNKNOWN","UNKNOWN","UNKNOWN"]},
+    {"text":"grep -rn example ~/.claude/settings.json","expected":["UNKNOWN","UNKNOWN","UNKNOWN"]},
+    {"text":"cat .claude-plugin/plugin.json | jq -r .version","expected":["UNKNOWN","NOT_CONTINUATION","UNKNOWN"]},
+    {"text":"Get-ChildItem C:\\Users\\example\\.codex\\sessions -Recurse","expected":["UNKNOWN","UNKNOWN","UNKNOWN"]},
+    {"text":"node \"$CLAUDE_PROJECT_DIR/scripts/example.js\"","expected":["UNKNOWN","UNKNOWN","UNKNOWN"]},
+    {"text":"ls $env:CODEX_HOME","expected":["UNKNOWN","UNKNOWN","UNKNOWN"]},
+    {"text":"echo co/.claude/dex$x","expected":["UNKNOWN","UNKNOWN","UNKNOWN"]},
+    {"text":"cat ~/.codex/sessions/example.jsonl | grep resume","expected":["UNKNOWN","UNKNOWN","UNKNOWN"]},
   ];
-  // Earlier rows that used such a folder: 18 unproved-syntax rows whose only evidence it was,
-  // and 61 proved rows that would pass without their proof. Both now use an undotted folder.
+  // Retain the original path spellings: unproved syntax is refused, while the
+  // complete reader proofs still allow their literal operands.
   const earlier = matrix.name_barrier_cases;
   assert.equal(earlier.length, 79);
   // A dotted name touching no path separator, a host after the directory, a selector beside a
@@ -1349,28 +1373,29 @@ test('host-named directories and variables are names, not continuation evidence,
   let checks = 0;
   for (const row of earlier) {
     const input = shell(ctx, row.text, row.shell ? { tool_input: { command: row.text, shell: row.shell } } : {});
-    assert.deepEqual(parse(row.text, input), { status: 'NOT_CONTINUATION' }, row.id); checks += 1;
+    assert.equal(parse(row.text, input).status, row.expected, row.id); checks += 1;
   }
-  for (const shellName of [undefined, 'powershell.exe', 'bash']) {
-    for (const command of ordinary) {
-      const input = shell(ctx, command, shellName ? { tool_input: { command, shell: shellName } } : {});
-      assert.deepEqual(parse(command, input), { status: 'NOT_CONTINUATION' }, `${shellName}: ${command}`); checks += 1;
+  for (const [index, shellName] of [undefined, 'powershell.exe', 'bash'].entries()) {
+    for (const row of named) {
+      const input = shell(ctx, row.text, { tool_input: { command: row.text, ...(shellName === undefined ? {} : { shell: shellName }) } });
+      assert.equal(parse(row.text, input).status, row.expected[index], `${shellName}: ${row.text}`); checks += 1;
     }
     for (const command of retained) {
       const input = shell(ctx, command, shellName ? { tool_input: { command, shell: shellName } } : {});
       assert.notEqual(parse(command, input).status, 'NOT_CONTINUATION', `${shellName}: ${command}`); checks += 1;
     }
   }
-  // Production ToolGate keeps every raw guard for the newly ordinary reads.
+  // Production ToolGate retains refusals and every raw guard for named paths.
   const held = { state: 'UNDECIDED', rule: 'R4', repository_id: 'synthetic-held' }, safe = { state: 'DISABLED', rule: 'R1' };
-  for (const command of ordinary) for (const tool_name of ['Bash', 'PowerShell']) {
+  for (const row of named) for (const tool_name of ['Bash', 'PowerShell']) {
+    const command = row.text;
     const input = { ...shell(ctx, command), tool_name, tool_input: { command } };
     const make = stateReader => new gate.ToolGate({ registryOptions: ctx.options, environment: ctx.environment, stateReader,
       continuationResolver: new ContinuationResolver({ environment: ctx.environment, spawn() { throw new Error('UNEXPECTED_METADATA'); } }) });
-    assert.equal(make(() => safe).decide(input)?.deny, undefined, command);
+    assert.equal(Boolean(make(() => safe).decide(input)?.deny), row.expected[0] === 'UNKNOWN', command);
     assert.ok(make(() => held).decide(input)?.deny, command);
     checks += 2;
   }
   assert.deepEqual(snapshot(ctx.dir), before);
-  t.diagnostic(JSON.stringify({ nameBarrierChecks: checks }));
+  t.diagnostic(JSON.stringify({ namedPathChecks: checks }));
 });
