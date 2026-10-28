@@ -179,7 +179,7 @@ test('Projects keeps its Toolkit base layer current without touching the project
   // The post layout and the merge summary, also enforced by the post hook.
   assert.ok(text.includes('**Post layout.** A running post has four parts, in order: a **Now:** line'));
   assert.ok(text.includes('one **ELI5:** line, matched to the Now line, as the very last line with nothing after it'));
-  assert.ok(text.includes('one **[HH:MM] Update:** line per update with a blank line after each'));
+  assert.ok(text.includes('one **[HH:MM] Update:** line per update, each followed by a line holding only `&nbsp;` as a spacer'));
   // Questions: numbered items with indented choices, a "(my pick)" mark and an &nbsp; spacer after the last choice.
   assert.ok(text.includes('Each owner question is one numbered item under **Waiting on you**, written `1. **Question: <the ask>?**`'));
   assert.ok(text.includes('`    - **<Choice> (my pick).** <one-line reason>`'));

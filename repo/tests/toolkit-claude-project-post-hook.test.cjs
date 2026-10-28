@@ -254,6 +254,11 @@ test('layout: Now first, ELI5 last and alone, Update lines without questions, Wa
   assert.notEqual(QUESTIONS, LAID_OUT);
   assert.equal(layoutIssue(QUESTIONS), '');
   assert.equal(wordingIssue(QUESTIONS), '');
+  // An &nbsp; spacer after each Update line keeps the layout and the edit rules happy.
+  const SPACED = QUESTIONS.replace(/(Update:\*\* [^\n]*)/g, '$1\n&nbsp;');
+  assert.notEqual(SPACED, QUESTIONS);
+  assert.equal(layoutIssue(SPACED), '');
+  assert.equal(editIssue(SPACED.replace(/\n- \*\*\[09:52\][^\n]*\n&nbsp;/, ''), SPACED), '');
   assert.match(layoutIssue(QUESTIONS.replace(' [thread](#cmsg_THREAD)', '')), /Waiting on you item "2\. .* has no link/);
   // An unindented bullet is its own item and still needs a link.
   assert.match(layoutIssue(QUESTIONS.replace('    - **Hold.**', '- **Hold.**')), /Waiting on you item "- \*\*Hold/);
