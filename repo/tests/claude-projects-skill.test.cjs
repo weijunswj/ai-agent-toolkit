@@ -52,7 +52,7 @@ test('no plugin payload or skills folder reaches the Projects controller skill',
 
 test('Projects wires managed instructions, promises and fresh scheduled sessions to controller law', () => {
   const text = bundle();
-  assert.match(text, /^Version: 2026-10-26\.7$/m);
+  assert.match(text, /^Version: 2026-10-28\.1$/m);
   // The check-in posts the skill card itself; the coordinator lists the Save tap, re-upload only when the card failed.
   assert.match(text, /`SKILL BEHIND`: the account copy is an older Toolkit revision\. With "card posted", the check-in posted the skill update card in its thread: put "tap Save on the skill card"/);
   assert.match(text, /keep that thread open \(never resolve it in the hourly pass, even after the check-in moves to a new home thread\) until the owner saves/);
@@ -188,8 +188,10 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.match(text, /\*\*Toolkit is the base layer; the project builds on top\.\*\* Only Toolkit-governed parts ever change/);
   assert.match(text, /Never overwrite other project memory, owner text outside the markers or the project's own tasks/);
   assert.match(text, /`setup-inventory\.json` beside this skill/);
-  // Setup asks for the coordinator's model and effort only.
-  assert.match(text, /Ask for one setting only: in the project's model settings, the \*\*coordinator\*\* gets the strongest available Opus model, effort \*\*High\*\*/);
+  // Setup asks for no model or effort settings; threads and tasks still set their own.
+  assert.match(text, /Setup never asks the user to choose models or effort in the project's settings\. Thread effort is never a project setting/);
+  assert.doesNotMatch(text, /Ask for one setting only|effort \*\*High\*\*|default Low is too weak/);
+  assert.equal(JSON.parse(read('repo/contracts/claude-projects/web-controller-projects/setup-inventory.json')).rows.some(row => row.id === 'models'), false);
   // Cheapest first: every non-gate thread starts on the ladder's cheapest fitting step, never on High by default.
   assert.doesNotMatch(text, /Non-gate threads get High|one notch higher/);
   assert.match(text, /\*\*Set model and effort explicitly on every thread you start\.\*\* Gates get the pinned stack route/);
