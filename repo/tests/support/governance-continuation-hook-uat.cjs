@@ -10,7 +10,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const gate = require('../../scripts/toolkit-governance-gate.cjs');
 const matrix = require('./governance-continuation-matrix.json');
-const { HOOKS, fixture, ID, message, root, runNodeProcesses, shell, snapshot, transcript } = require('./governance-continuation-fixture.cjs');
+const { HOOKS, expectedFor, fixture, ID, message, root, runNodeProcesses, shell, snapshot, transcript } = require('./governance-continuation-fixture.cjs');
 
 async function sourceHookUat(t, hookName) {
   const ctx = fixture(t);
@@ -64,15 +64,15 @@ async function sourceHookUat(t, hookName) {
   }
   const commands = [`claude --resume "${ctx.file}"`, `codex -C "${ctx.target}" exec resume --last`];
   for (const hook of hooks) {
-    for (const { text, expected } of matrix.inert_data_cases) invoke(hook, shell(ctx, text), expected === 'UNKNOWN');
+    for (const row of matrix.inert_data_cases) invoke(hook, shell(ctx, row.text), expectedFor(row, shell(ctx, row.text)) === 'UNKNOWN');
     for (const row of matrix.literal_role_cases.filter(row => ['original-read', 'powershell.exe/pattern', 'get-content', 'findstr', 'pre', 'hostname', 'wrapper/runtime/read', 'wrapper/runtime/location', 'wrapper/runtime/assignment', 'wrapper/runtime/concat', 'wrapper/runtime/method', 'wrapper/cmd', 'cmd-single-control'].includes(row.id))) {
-      for (const tool_name of ['Bash', 'PowerShell']) invoke(hook, { ...shell(ctx, row.text), tool_name, tool_input: { command: row.text, shell: row.shell } }, row.expected === 'UNKNOWN');
+      for (const tool_name of ['Bash', 'PowerShell']) { const input = { ...shell(ctx, row.text), tool_name, tool_input: { command: row.text, shell: row.shell } }; invoke(hook, input, expectedFor(row, input) === 'UNKNOWN'); }
     }
     for (const row of matrix.literal_role_cases.filter(row => row.id.startsWith('sqag/') || ['segments/native/before', 'segments/native/after', 'segments/script/before', 'segments/script/after', 'segments/reader-path'].includes(row.id))) {
-      for (const tool_name of ['Bash', 'PowerShell']) invoke(hook, { ...shell(ctx, row.text), tool_name, tool_input: { command: row.text, ...(row.shell === undefined ? {} : { shell: row.shell }) } }, row.expected === 'UNKNOWN');
+      for (const tool_name of ['Bash', 'PowerShell']) { const input = { ...shell(ctx, row.text), tool_name, tool_input: { command: row.text, ...(row.shell === undefined ? {} : { shell: row.shell }) } }; invoke(hook, input, expectedFor(row, input) === 'UNKNOWN'); }
     }
     for (const row of matrix.literal_role_cases.filter(row => ['composition/basename/absent', 'composition/runtime/absent', 'composition/basename/powershell.exe', 'composition/runtime/powershell.exe', 'composition/basename/native-before', 'composition/runtime/native-after', 'composition/runtime/computed-after', 'composition/runtime/unsafe', 'composition/runtime/-Unknown', 'composition/runtime/outer-native'].includes(row.id))) {
-      for (const tool_name of ['Bash', 'PowerShell']) invoke(hook, { ...shell(ctx, row.text), tool_name, tool_input: { command: row.text, ...(row.shell === undefined ? {} : { shell: row.shell }) } }, row.expected === 'UNKNOWN');
+      for (const tool_name of ['Bash', 'PowerShell']) { const input = { ...shell(ctx, row.text), tool_name, tool_input: { command: row.text, ...(row.shell === undefined ? {} : { shell: row.shell }) } }; invoke(hook, input, expectedFor(row, input) === 'UNKNOWN'); }
     }
     const literal = matrix.literal_role_cases.find(row => row.id === 'original-read');
     for (const tool_input of [{ cmd: literal.text }, { command: literal.text.split(' ') }]) invoke(hook, { ...shell(ctx, literal.text), tool_input: { ...tool_input, shell: literal.shell } }, false);
@@ -93,7 +93,7 @@ async function sourceHookUat(t, hookName) {
       const text = row.text.replaceAll('{TARGET}', ctx.target).replaceAll('{TRANSCRIPT}', ctx.file);
       const input = shell(ctx, text, { tool_name: hook.name === 'claude' ? 'PowerShell' : 'Bash' });
       input.tool_input.shell = row.id.includes('single-control') || row.id.includes('single-grep') ? 'cmd.exe' : 'powershell.exe';
-      invoke(hook, input, row.expected === 'UNKNOWN');
+      invoke(hook, input, expectedFor(row, input) === 'UNKNOWN');
     }
     for (const row of matrix.ordered_atom_cases.filter(row => row.source)) for (const tool_name of ['Bash', 'PowerShell']) {
       const command = row.text.replaceAll('{TRANSCRIPT}', ctx.file).replaceAll('{TARGET}', ctx.target);
@@ -103,7 +103,7 @@ async function sourceHookUat(t, hookName) {
       'claude -r "' + ctx.file + '" --fork-session', 'codex -C "' + ctx.target + '" e resume --last',
     ]) for (const tool_name of ['Bash', 'PowerShell']) invoke(hook, { ...shell(ctx, command), tool_name }, false);
     for (const row of matrix.script_reader_cases.filter(row => ['caller/absent/lf', 'route/absent/lf', 'newline/absent/lf', 'wrapper/route-literal-single', 'wrapper/caller-literal-single', 'gh-negative/unknown-option', 'gh-negative/expanded-branch', 'codex-direct/block/absent', 'claude-direct/after/absent', 'computed/pipe/absent'].includes(row.id))) {
-      for (const tool_name of ['Bash', 'PowerShell']) invoke(hook, { ...shell(ctx, row.text), tool_name, tool_input: { command: row.text, ...(row.shell === undefined ? {} : { shell: row.shell }) } }, row.expected === 'UNKNOWN');
+      for (const tool_name of ['Bash', 'PowerShell']) { const input = { ...shell(ctx, row.text), tool_name, tool_input: { command: row.text, ...(row.shell === undefined ? {} : { shell: row.shell }) } }; invoke(hook, input, expectedFor(row, input) === 'UNKNOWN'); }
     }
     for (const command of commands) for (const marker of [{}, { TOOLKIT_GATE_ROLE: 'G1' }, { TOOLKIT_GATE_ROLE: 'controller' }, { TOOLKIT_GATE_ROLE: 'helper' }]) invoke(hook, shell(ctx, command), false, marker);
     for (const command of commands) invoke(hook, shell(ctx, command, { tool_input: { command, workdir: ctx.other } }), true);
@@ -140,7 +140,8 @@ async function sourceHookUat(t, hookName) {
       invoke(hook, { ...shell(ctx, matrix.literal_role_cases.find(row => row.id === 'sqag/compound/absent').text), tool_name }, false);
       invoke(hook, { ...shell(ctx, matrix.literal_role_cases.find(row => row.id === 'composition/runtime/absent').text), tool_name }, false);
       for (const row of matrix.script_reader_cases.filter(row => ['caller/absent/lf', 'route/absent/lf', 'newline/absent/lf', 'wrapper/caller-literal-single', 'codex-direct/block/absent', 'claude-direct/after/absent'].includes(row.id))) {
-        invoke(hook, { ...shell(ctx, row.text), tool_name, tool_input: { command: row.text, ...(row.shell === undefined ? {} : { shell: row.shell }) } }, row.expected === 'UNKNOWN');
+        const input = { ...shell(ctx, row.text), tool_name, tool_input: { command: row.text, ...(row.shell === undefined ? {} : { shell: row.shell }) } };
+        invoke(hook, input, expectedFor(row, input) === 'UNKNOWN');
       }
     }
     await flush();

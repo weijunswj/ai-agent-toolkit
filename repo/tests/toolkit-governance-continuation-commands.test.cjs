@@ -13,7 +13,7 @@ const gate = require('../scripts/toolkit-governance-gate.cjs');
 const hostile = require('./support/hostile-inputs.cjs');
 const matrix = require('./support/governance-continuation-matrix.json');
 const refusalCases = require('./support/governance-continuation-refusal-cases.json');
-const { evidenceProjection, fixture, ID, message, OTHER_ID, shell, snapshot, transcript } = require('./support/governance-continuation-fixture.cjs');
+const { dataClass, evidenceProjection, expectedFor, fixture, ID, message, OTHER_ID, shell, snapshot, transcript } = require('./support/governance-continuation-fixture.cjs');
 
 test('host-named directories and variables are names, not continuation evidence, on both envelopes', t => {
   const ctx = fixture(t), before = snapshot(ctx.dir);
@@ -38,10 +38,9 @@ test('host-named directories and variables are names, not continuation evidence,
   // A dotted name touching no path separator, a host after the directory, a selector beside a
   // variable, constructed spellings and non-ASCII input all keep the conservative result.
   const retained = [
-    ...refusalCases.cases.filter(row => row.expected === 'UNKNOWN' && !row.id.startsWith('D')).map(row => row.text),
+    ...refusalCases.cases.filter(row => row.expected === 'UNKNOWN' && !row.data && !row.id.startsWith('D')).map(row => row.text),
     'codex resume --last',
     'claude -r example',
-    'cp -r .claude-plugin /tmp/example',
     "'.claude' -r example",
     'C:/example.test/.codex/codex.exe resume',
     'ls ~/.codex/; codex fork',
@@ -75,6 +74,9 @@ test('host-named directories and variables are names, not continuation evidence,
       const input = shell(ctx, command, shellName ? { tool_input: { command, shell: shellName } } : {});
       assert.notEqual(parse(command, input).status, 'NOT_CONTINUATION', `${shellName}: ${command}`); checks += 1;
     }
+    // Copying a dotted plugin folder is data where a POSIX shell runs cp; the other shells keep the refusal.
+    const copy = 'cp -r .claude-plugin /tmp/example', input = shell(ctx, copy, shellName ? { tool_input: { command: copy, shell: shellName } } : {});
+    assert.equal(parse(copy, input).status, shellName === 'bash' ? 'NOT_CONTINUATION' : 'UNKNOWN', `${shellName}: ${copy}`); checks += 1;
   }
   // Production ToolGate keeps every raw guard for the newly ordinary reads.
   const held = { state: 'UNDECIDED', rule: 'R4', repository_id: 'synthetic-held' }, safe = { state: 'DISABLED', rule: 'R1' };
@@ -107,11 +109,11 @@ for (const row of refusalCases.cases) test('comparison classification: ' + row.i
     for (const tool_name of ['Bash', 'PowerShell']) for (const key of ['command', 'cmd']) {
       const input = { ...shell(ctx, row.text), tool_name,
         tool_input: { [key]: row.text, ...refusalCases.shell_envelopes[index] } };
-      const label = row.id + '/' + index + '/' + tool_name + '/' + key;
-      assert.equal(parse(row.text, input).status, row.expected, label);
-      assert.equal(resolver.resolve(row.text, input).status, row.expected, label);
+      const label = row.id + '/' + index + '/' + tool_name + '/' + key, expected = expectedFor(row, input);
+      assert.equal(parse(row.text, input).status, expected, label);
+      assert.equal(resolver.resolve(row.text, input).status, expected, label);
       for (const actor of matrix.actors) {
-        assert.equal(Boolean(currentGate.decide({ ...input, actor })?.deny), row.expected === 'UNKNOWN', label + '/' + actor);
+        assert.equal(Boolean(currentGate.decide({ ...input, actor })?.deny), expected === 'UNKNOWN', label + '/' + actor);
         assert.ok(heldGate.decide({ ...input, actor })?.deny, label + '/' + actor + ': held repository');
       }
     }
@@ -146,10 +148,17 @@ test('folder-name exclusions close command-position and derived-text families', 
   for (const action of ["e'va'l", 'e\\val', "s'ou'rce", "'.'", "'/bin/eval'", "'/bin/exec'", '"I"EX', "Invoke-'Expression'"]) {
     retained.push('echo /.claude -r | cut -c3- > /tmp/example.test; ' + action + ' /tmp/example.test');
   }
-  for (const text of ['ls $env:codex_home', "ls '$CODEX_HOME'", 'ls \\$CODEX_HOME',
-    'ls ^$CODEX_HOME', 'ls "$CODEX_HOME', 'ls ~/.claude/\u0000 -r', 'ls ~/.claude/\u00e9 -r']) retained.push(text);
-  for (const envelope of refusalCases.shell_envelopes) for (const text of retained) {
-    assert.equal(parse(text, { tool_input: { command: text, ...envelope } }).status, 'UNKNOWN', text);
+  for (const text of ['ls "$CODEX_HOME', 'ls ~/.claude/\u0000 -r', 'ls ~/.claude/\u00e9 -r']) retained.push(text);
+  // Variable names spelled with a host word are listed data wherever the shell reads them as data.
+  // cmd and unknown shells keep the refusal, and an omitted shell may be cmd, which reads '^'.
+  const every = ['omitted', 'powershell', 'posix'];
+  const named = [['ls $env:codex_home', every], ["ls '$CODEX_HOME'", every], ['ls \\$CODEX_HOME', every], ['ls ^$CODEX_HOME', ['powershell', 'posix']]];
+  for (const envelope of refusalCases.shell_envelopes) {
+    for (const text of retained) assert.equal(parse(text, { tool_input: { command: text, ...envelope } }).status, 'UNKNOWN', text);
+    for (const [text, data] of named) {
+      const input = { tool_input: { command: text, ...envelope } };
+      assert.equal(parse(text, input).status, data.includes(dataClass(input)) ? 'NOT_CONTINUATION' : 'UNKNOWN', text + ' ' + JSON.stringify(envelope));
+    }
   }
   // Every allowed pipe target consumes data without deriving a command name.
   for (const target of ['grep resume', 'jq -r .version', 'head', 'tail', 'sort', 'wc', 'cut -c1-',
@@ -173,10 +182,11 @@ test('literal reader roles and executable script operands follow the closed data
   for (const row of matrix.literal_role_cases) {
     const input = shell(ctx, row.text);
     if (row.shell !== undefined) input.tool_input.shell = row.shell;
-    assert.equal(parse(row.text, input).status, row.expected, row.id);
+    const expected = expectedFor(row, input);
+    assert.equal(parse(row.text, input).status, expected, row.id);
     for (const actor of matrix.actors) {
       const decide = stateReader => new gate.ToolGate({ registryOptions: ctx.options, environment: ctx.environment, stateReader }).decide({ ...input, actor });
-      assert.equal(Boolean(decide(() => ({ state: 'DISABLED', rule: 'R1' }))?.deny), row.expected === 'UNKNOWN', row.id + '/' + actor);
+      assert.equal(Boolean(decide(() => ({ state: 'DISABLED', rule: 'R1' }))?.deny), expected === 'UNKNOWN', row.id + '/' + actor);
       assert.ok(decide(() => held)?.deny, row.id + ': current guard before data proof');
       const workdir = { ...input, actor, tool_input: { ...input.tool_input, workdir: ctx.other } };
       assert.ok(new gate.ToolGate({ registryOptions: ctx.options, stateReader: cwd => cwd === ctx.other ? held : { state: 'DISABLED', rule: 'R1' } }).decide(workdir)?.deny, row.id + ': workdir guard');
@@ -347,8 +357,8 @@ test('every command axis has an explicit default native qualification, with no i
 test('inert-data model distinguishes literal arguments from actual command positions and wrappers', t => {
   const ctx = fixture(t), resolver = new ContinuationResolver({ environment: ctx.environment });
   assert.equal(matrix.inert_data_cases.length, 39);
-  for (const { text, expected } of matrix.inert_data_cases) {
-    const input = shell(ctx, text);
+  for (const row of matrix.inert_data_cases) {
+    const { text } = row, input = shell(ctx, text), expected = expectedFor(row, input);
     assert.equal(resolver.resolve(text, input).status, expected, text);
     const decision = new gate.ToolGate({ registryOptions: ctx.options, environment: ctx.environment, stateReader: () => ({ state: 'DISABLED', rule: 'R1' }) }).decide(input);
     assert.equal(Boolean(decision?.deny), expected === 'UNKNOWN', text);
@@ -397,7 +407,7 @@ test('shell-family model refuses ambiguous data, help and native selector syntax
     const text = row.text.replaceAll('{TARGET}', spaced).replaceAll('{TRANSCRIPT}', ctx.file);
     const input = shell(ctx, text, { tool_name });
     if (selected !== undefined) input.tool_input.shell = selected;
-    const expected = unknown.includes(selected) ? 'UNKNOWN' : row.expected;
+    const expected = unknown.includes(selected) ? 'UNKNOWN' : expectedFor(row, input);
     assert.equal(resolver.resolve(text, input).status, expected, `${row.id}/${tool_name}/${selected}`);
     const decision = new gate.ToolGate({ registryOptions: ctx.options, environment: ctx.environment, stateReader: () => ({ state: 'DISABLED', rule: 'R1' }) }).decide(input);
     assert.equal(Boolean(decision?.deny), expected === 'UNKNOWN', `${row.id}/${tool_name}/${selected}`);
