@@ -47,6 +47,7 @@ const conformance = require('./toolkit-governance-conformance.cjs');
 const catalogue = require('./toolkit-governance-catalogue.cjs');
 const gate = require('./toolkit-governance-gate.cjs');
 const discovery = require('./toolkit-governance-discovery.cjs');
+const bindingCache = require('./toolkit-governance-binding.cjs');
 const protection = require('./toolkit-governance-protection.cjs');
 const security = require('./toolkit-governance-security.cjs');
 const { GovernanceMigration, MigrationError, appendRunRecord } = require('./toolkit-governance-migration.cjs');
@@ -154,9 +155,14 @@ class ToolkitGovernanceCli {
   }
 
   #status(json) {
-    this.#refresh(this.#cwd);
+    const refresh = this.#refresh(this.#cwd) || {};
     const state = this.#state();
-    this.#print(json, state, describe(state, this.#registryOptions));
+    // Why the merged binding was not read just now, in plain words (nothing to say when it was, or
+    // when the repository is not a github.com one).
+    const reason = refresh.refreshed === false ? bindingCache.refreshReason(refresh.error) : null;
+    const lines = describe(state, this.#registryOptions);
+    if (reason) lines.push(`Refresh held: ${reason}. The last read on this computer is kept.`);
+    this.#print(json, reason ? { ...state, refresh: { refreshed: false, reason: refresh.error } } : state, lines);
     return state.rule === 'ERROR' || state.state === 'ERROR' ? 2 : 0;
   }
 
