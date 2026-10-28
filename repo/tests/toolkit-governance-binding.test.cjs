@@ -315,13 +315,39 @@ test('A1 end to end with real git: only the default branch\'s merged binding cou
   assert.equal(governance.governanceState(clone, ctx.opts).rule, 'M1');
   assert.deepEqual(governance.bindingRequiredChecks(clone, ctx.opts), ['validate'], 'required checks come from the merged binding');
   assert.equal(governance.bindingStoreRepository(clone, ctx.opts), STORE.repository);
-  // F1: one config line that sends origin elsewhere (here a disabled binding's mirror) changes nothing:
-  // git's real origin URL no longer matches the identity, so the refresh holds and keeps the last read.
+  // A mirror whose main carries a disabled binding: reading it would turn the state DISABLED (M2).
   const mirror = path.join(ctx.root, 'mirror.git');
   git(ctx.root, ['clone', '--quiet', '--bare', origin, mirror]);
-  git(clone, ['config', `url.${mirror.replace(/\\/g, '/')}.insteadOf`, REMOTE]);
+  git(seed, ['checkout', '--quiet', '-b', 'disabled']);
+  fs.writeFileSync(path.join(seed, '.github', 'toolkit-programme.json'), JSON.stringify({ schema: 'toolkit.programme-binding.v2', repository: SLUG, governance: 'disabled' }));
+  git(seed, ['add', '.']);
+  git(seed, [...id, 'commit', '--quiet', '-m', 'disable on the mirror']);
+  git(seed, ['push', '--quiet', mirror, 'disabled:main']);
+  // F1: one config line that sends origin to the mirror changes nothing: git's real origin URL no
+  // longer matches the identity, so the refresh holds and keeps the last read.
+  const mirrorUrl = mirror.replace(/\\/g, '/');
+  git(clone, ['config', `url.${mirrorUrl}.insteadOf`, REMOTE]);
   assert.deepEqual(governance.refreshMergedBinding(clone, ctx.opts, { runGit: bindingCache.defaultRunGit }), { refreshed: false, error: 'remote-redirected' });
   assert.equal(governance.governanceState(clone, ctx.opts).rule, 'M1');
+  git(clone, ['config', '--unset', `url.${mirrorUrl}.insteadOf`]);
+  // N1: an ssh origin whose transport command serves the mirror behind the same URL is held too, as
+  // is any other transport, proxy or TLS override in the repository's own config.
+  git(clone, ['remote', 'set-url', 'origin', 'git@github.com:example-owner/example-repo.git']);
+  assert.equal(governance.governanceState(clone, ctx.opts).rule, 'M1', 'another spelling of the same origin keeps the read');
+  for (const [key, value] of [
+    ['core.sshCommand', `sh -c "exec git-upload-pack ${mirrorUrl}" x`],
+    ['core.gitProxy', 'sh -c true'],
+    ['remote.origin.uploadpack', `git-upload-pack ${mirrorUrl}`],
+    ['remote.origin.proxy', 'http://proxy.example.com:3128'],
+    ['http.proxy', 'http://proxy.example.com:3128'],
+    ['http.https://github.com/.sslVerify', 'false'],
+    ['http.curloptResolve', 'github.com:443:127.0.0.1'],
+  ]) {
+    git(clone, ['config', key, value]);
+    assert.deepEqual(governance.refreshMergedBinding(clone, ctx.opts, { runGit: bindingCache.defaultRunGit }), { refreshed: false, error: 'remote-redirected' }, key);
+    assert.equal(governance.governanceState(clone, ctx.opts).rule, 'M1', key);
+    git(clone, ['config', '--unset', key]);
+  }
 });
 
 // ---- matrix B: discovery ---------------------------------------------------------------------------
@@ -526,7 +552,14 @@ test('F3: discovery reads nothing from GitHub in a test run or for a test regist
   const repo = fakeRepo(ctx, 'quiet-discovery', { remote: REMOTE });
   cache(ctx, repo, { status: 'absent' });
   // A test registry: every GitHub read is answered offline, so each search reports itself unknown.
-  const found = new discovery.GovernanceDiscovery({ registryOptions: ctx.opts, environment: {} }).discover(repo);
+  // The real gh cannot be found during the call, so a regression shows as gh-unavailable, not a
+  // network read.
+  const savedPath = process.env.PATH;
+  let found;
+  try {
+    process.env.PATH = ctx.root;
+    found = new discovery.GovernanceDiscovery({ registryOptions: ctx.opts, environment: {} }).discover(repo);
+  } finally { process.env.PATH = savedPath; }
   assert.equal(found.status, 'propose');
   assert.deepEqual([found.parents.status, found.stores.status], ['unknown', 'unknown']);
   assert.ok(found.unknown.includes('parent issues (offline)') && found.unknown.includes('the owner\'s repositories (offline)'), found.unknown.join('; '));
@@ -545,11 +578,23 @@ test('F7: programme commands refuse a stale or unusable merged binding and use o
   const stop = { request: () => { throw Object.assign(new Error('admitted'), { code: 'ADMITTED' }); }, graphql: () => { throw Object.assign(new Error('admitted'), { code: 'ADMITTED' }); } };
   const open = () => programme.openContext({ 'repo-root': repo }, { transport: stop, toolkitVersion: '0.0.0' });
   assert.throws(open, error => error.code !== 'GITHUB_GOVERNANCE_OFF', 'fresh merged binding: admitted');
-  // The working tree's binding never names the store: change it and the merged one is still used.
+  // The working tree's binding never names the store: with it pointing elsewhere, the command still
+  // verifies the merged binding's store. The transport answers the origin lookup and stops at the
+  // store's, recording which repository it asked for.
   const file = path.join(repo, '.github', 'toolkit-programme.json');
   const merged = fs.readFileSync(file, 'utf8');
   fs.writeFileSync(file, merged.replace('toolkit-test-fixture/store', 'toolkit-test-fixture/elsewhere'));
-  assert.equal(governance.mergedBinding(repo).store.repository, 'toolkit-test-fixture/store');
+  const asked = [];
+  const recording = {
+    request: (method, url) => {
+      asked.push(url);
+      if (url === 'repos/toolkit-test-fixture/programme-repo') return { status: 200, json: { full_name: 'toolkit-test-fixture/programme-repo' } };
+      throw Object.assign(new Error('store'), { code: 'STORE_ASKED' });
+    },
+    graphql: () => { throw new Error('not used'); },
+  };
+  assert.throws(() => programme.openContext({ 'repo-root': repo }, { transport: recording, toolkitVersion: '0.0.0' }), { code: 'STORE_ASKED' });
+  assert.deepEqual(asked, ['repos/toolkit-test-fixture/programme-repo', 'repos/toolkit-test-fixture/store'], 'the merged binding names the store, never the working tree');
   fs.writeFileSync(file, merged);
   recordMerged(repo, { now: new Date(Date.now() - 25 * HOUR) });
   assert.throws(open, { code: 'GITHUB_GOVERNANCE_OFF' }, 'read over 24 hours ago');

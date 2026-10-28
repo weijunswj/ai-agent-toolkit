@@ -63,7 +63,7 @@ The governed repository holds `.github/toolkit-programme.json` (no secrets). It 
 }
 ```
 
-- `governance` is `enabled` or `disabled`. A merged `disabled` keeps governance off, and only an owner-merged pull request turns it back on; the repository is DISABLED, so every programme command refuses (`GITHUB_GOVERNANCE_OFF`; a working tree whose binding says disabled refuses with `BINDING_DISABLED`).
+- `governance` is `enabled` or `disabled`. A merged `disabled` keeps governance off, and only an owner-merged pull request turns it back on; the repository is DISABLED, so every programme command refuses (`GITHUB_GOVERNANCE_OFF`).
 - `parents` lists the programme parent issues (`writer_prefix` defaults to `record_prefix`); the reconciler records against the first. Children come from native sub-issues, never from the binding. A version 1 binding (`parent_issue`, `record_prefix`, `writer_prefix`) is still read, as enabled with one parent.
 - Programme commands and the turn-end checkpoint run only on a read of the merged binding no older than 24 hours (`toolkit-governance.cjs status` and session start refresh it), and they take the store, parent, prefixes and required checks from that merged binding, never from the working tree.
 

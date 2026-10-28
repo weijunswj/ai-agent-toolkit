@@ -37,6 +37,12 @@ const GIT_TIMEOUT_MS = 5000;
 const FRESH_MS = 24 * 60 * 60 * 1000;
 const BRANCH = /^[A-Za-z0-9._\/-]{1,200}$/;
 const SHA = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
+// Settings in the repository's own config that change where or how git fetches without changing the
+// URL --get-url reports: a transport command (core.sshCommand, core.gitProxy, the origin's
+// uploadpack, vcs or proxy) or an HTTP proxy, TLS or name-resolution override. git lowercases section
+// and key names; an http.<url>.* subsection keeps its case, so the URL part matches anything.
+const TRANSPORT_OVERRIDES = '^(core\\.sshcommand|core\\.gitproxy|remote\\.origin\\.(uploadpack|vcs|proxy)|http\\..*(proxy|sslverify|curloptresolve))$';
+const REPOSITORY_SCOPES = Object.freeze(['local', 'worktree']);
 
 // A branch name git would accept, kept to plain characters: no empty, dot-led or .lock part.
 function validBranch(name) {
@@ -73,8 +79,9 @@ function parseSymref(text) {
 //
 // `expectedRemote` is the canonical origin the identity was read from (the literal
 // remote.origin.url). git's own origin also follows url.<x>.insteadOf, [include] files and
-// config.worktree, so the URL git will actually use is checked first: a remote that resolves anywhere
-// else is held as 'remote-redirected' and nothing is fetched (A1).
+// config.worktree, so the URL git will actually use is checked first, and the repository's own config
+// must not carry a transport override (TRANSPORT_OVERRIDES) that would fetch from somewhere else
+// behind the same URL: either is held as 'remote-redirected' and nothing is fetched (A1).
 function readDefaultBranchBinding(root, { runGit = defaultRunGit, timeout = GIT_TIMEOUT_MS, expectedRemote = null } = {}) {
   const git = args => {
     try { return runGit(args, { cwd: root, timeout }); } catch { return { status: null, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) }; }
@@ -84,6 +91,10 @@ function readDefaultBranchBinding(root, { runGit = defaultRunGit, timeout = GIT_
   const resolved = validateRemoteIdentity(effective.stdout.toString('utf8').trim());
   // The same repository spelt another way (https, ssh, with or without .git) is the same origin.
   if (!expectedRemote || !resolved.valid || repositoryIdForCanonicalRemote(resolved.canonical) !== repositoryIdForCanonicalRemote(expectedRemote)) return { status: 'unknown', error: 'remote-redirected' };
+  // Exit 1 is "no such setting"; anything else that is not a clean 0 cannot be shown safe.
+  const overrides = git(['config', '--show-scope', '--get-regexp', TRANSPORT_OVERRIDES]);
+  if (overrides.status !== 0 && overrides.status !== 1) return { status: 'unknown', error: 'remote-redirected' };
+  if (overrides.status === 0 && overrides.stdout.toString('utf8').split(/\r?\n/).some(line => REPOSITORY_SCOPES.includes(line.split('\t')[0]))) return { status: 'unknown', error: 'remote-redirected' };
   const symref = git(['ls-remote', '--symref', 'origin', 'HEAD']);
   if (symref.status !== 0) return { status: 'unknown', error: 'remote-unreachable' };
   const branch = parseSymref(symref.stdout.toString('utf8'));
@@ -165,7 +176,10 @@ function readBindingCache(identity, registryPath) {
     parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
   } catch { return null; }
   if (!parsed || typeof parsed !== 'object' || parsed.schema !== CACHE_SCHEMA) return null;
-  if (parsed.repository_id !== identity.repository_id || !identity.remote || parsed.remote !== identity.remote.canonical) return null;
+  // Another spelling of the same origin (https or ssh) is the same repository.
+  let remoteId = null;
+  try { remoteId = typeof parsed.remote === 'string' ? repositoryIdForCanonicalRemote(parsed.remote) : null; } catch { remoteId = null; }
+  if (parsed.repository_id !== identity.repository_id || !identity.remote || remoteId !== identity.repository_id) return null;
   if (!['present', 'absent'].includes(parsed.status) || !SHA.test(String(parsed.commit)) || !validBranch(parsed.default_branch)) return null;
   const fetched = Date.parse(parsed.fetched_at);
   if (!Number.isFinite(fetched)) return null;
