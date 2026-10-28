@@ -1,10 +1,10 @@
 # Toolkit Changelog
 
-## 3.15.25 (continuation refusal parity)
+## 3.15.25 (continuation folder names)
 
-- Host folder names and fixed folder variables retain the conservative continuation checks. They earn no general exemption from evidence scans.
-- Complete literal reader proofs still distinguish file operands from executable source. Unknown shells, unproved syntax, wrappers and runtime extraction retain their refusals.
-- Retained comparison cases cover the command strings and shell envelopes that previously lost refusals, including computed commands and executable paths.
+- Dotted host folders used as arguments and the exact upper-case folder variables CODEX_HOME, CLAUDE_CONFIG_DIR, CLAUDE_PROJECT_DIR and CLAUDE_PLUGIN_ROOT count as names rather than continuation evidence.
+- Names in command position, derived-text execution and pipes into unknown commands retain the earlier checks. Only fixed data-reading pipe targets qualify for the folder-name rule.
+- Other variables, escaped or single-quoted variable names, unbalanced quotes, non-ASCII input, control characters and oversized commands retain the earlier evidence checks. Complete literal reader proofs remain independent.
 - Every raw owner, state, workdir and path guard still runs first.
 
 ## 3.15.24 (answer from a Projects thread)

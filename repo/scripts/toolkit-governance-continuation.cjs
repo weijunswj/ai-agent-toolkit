@@ -183,8 +183,106 @@ function pythonBindingBarriers(text, shell) {
   }
   return barriers;
 }
-function constructionFragments(text, shell) {
+// Dotted host path components and the exact upper-case folder variables are names only
+// in argument position. Command words and derived-text execution keep the earlier evidence.
+// Each span becomes a barrier, so neighbouring text still cannot join across it. The
+// whole-input ASCII/no-control qualification excludes source NUL, as for the Python proof.
+const FOLDER_VARIABLES = /^(?:CODEX_HOME|CLAUDE_CONFIG_DIR|CLAUDE_PROJECT_DIR|CLAUDE_PLUGIN_ROOT)$/;
+const NAME_EVALUATORS = /(?:^|[^\w-])(?:eval|source|exec|invoke-expression|iex)(?:\.exe)?(?=$|[^\w-])/i;
+const NAME_DOT_SOURCE = /(?:^|[;&|(){}\r\n])[ \t]*\.[ \t]+/;
+const NAME_COMMAND_WRAPPERS = /^(?:env|command|exec|nohup|xargs|sudo|time|nice|timeout|setsid|stdbuf|chroot|if|then|else|while|until|do)$/i;
+// Runtime extraction can pull a host spelling back out of a folder name: piping into a shell
+// or interpreter, substitutions, string methods/operators, slicing and parameter or cmd
+// substring expansion. Any of them anywhere keeps the unbarriered (main) result.
+const EXTRACTION = [
+  /\$\(|`|<\(/,
+  /\.(?:substring|trim(?:start|end)?|replace|remove|split|insert|chars|pad(?:left|right)|tostring|to(?:lower|upper)(?:invariant)?|getfilename\w*|getextension|name)\b/i,
+  /\[io\.path\]|\[char\b|\bsplit-path\b|-[ci]?(?:replace|split)\b|-join\b|\[\s*-?\d+\s*\.\./i,
+  /\$\{[^}]*[:#%\/^,]|[!%][a-z_][\w]*:~/i,
+  NAME_EVALUATORS,
+  NAME_DOT_SOURCE,
+  /\.[ \t]*(?:\(|\$)/,
+];
+// Pipe consumers must be fixed data readers. Unknown commands, quoted/path-qualified
+// shells and wrappers all retain the raw evidence instead of extending a shell denylist.
+const NAME_PIPE_READERS = /^(?:grep|rg|jq|head|tail|sort|wc|cut|cat|git|convertfrom-json|convertto-json|select-object|select-string|where-object|out-string)(?:\.exe)?$/i;
+function derivedNameExecution(text) {
+  if (EXTRACTION.some(pattern => pattern.test(text))) return true;
+  // Shell quote fragments and escapes can spell an evaluator without changing
+  // its command name. Keep path separators in one view and POSIX escapes in another.
+  const unquoted = text.replace(/['"]/g, '');
+  for (const view of [unquoted, unquoted.replace(/\\/g, '')]) {
+    if (NAME_EVALUATORS.test(view) || NAME_DOT_SOURCE.test(view)) return true;
+  }
+  for (const m of text.matchAll(/\|\|?|(?:^|[^&])&(?=[ \t]*['"($])/g)) {
+    if (m[0] === '||') continue;
+    const rest = text.slice(m.index + m[0].length);
+    if (m[0] === '|') {
+      const target = /^[ \t\r\n]*([^\s;|&(){}]+)/.exec(rest)?.[1];
+      if (NAME_PIPE_READERS.test(target || '')) continue;
+      if (/^[ \t\r\n]*foreach-object[ \t]+\{/i.test(rest)) continue;
+      return true;
+    }
+    // A literal shell executable does not compute its own name. Its entire script
+    // still undergoes the extraction, pipe and command-position scans here.
+    if (!/^[ \t]*(['"])(?:[a-z]:[\\/]|\/)?(?:[a-z0-9_.-]+[\\/])*(?:pwsh|powershell|bash|sh|cmd)(?:\.exe)?\1(?=[ \t]|$)/i.test(rest)) return true;
+  }
+  return false;
+}
+function nameBarriers(text) {
+  if (text.length > LIMITS.command || /[^\x09\x0a\x0d\x20-\x7e]/.test(text)) return [];
+  if (derivedNameExecution(text)) return [];
+  // Word ranges in command position, including quoted paths and nested commands.
+  // The scan is deliberately conservative inside quoted executable scripts too.
+  const stageEnd = /[;&|(){}\r\n]/g;
+  const commands = [...text.matchAll(/(?:^|[;&|(){}\r\n])[ \t]*((?:"[^"\r\n]*"|'[^'\r\n]*'|[\\^][ \t]|[^\s;'"&|(){}])+)/g)]
+    .map(m => {
+      let end = m.index + m[0].length;
+      const word = m[1].replace(/['"]/g, '');
+      const leaf = word.split(/[\\/]/).pop().replace(/\.exe$/i, '');
+      // Wrappers, conditions and leading assignments/redirections can run a later
+      // argument. Keep their whole stage visible, including options and wrapper chains.
+      if (NAME_COMMAND_WRAPPERS.test(leaf) || NAME_COMMAND_WRAPPERS.test(word.replace(/\\/g, ''))
+        || /^[a-z_]\w*=|^\d*[<>]/i.test(word)) {
+        stageEnd.lastIndex = end; end = stageEnd.exec(text)?.index ?? text.length;
+      }
+      return { start: m.index, end };
+    });
+  let commandIndex = 0;
+  const inCommand = at => {
+    while (commands[commandIndex]?.end <= at) commandIndex++;
+    return commands[commandIndex]?.start <= at && at < commands[commandIndex].end;
+  };
+  const spans = [];
+  for (const m of text.matchAll(/(?<![\w.$-])\.(?:claude|codex)[\w.-]*/gi)) {
+    const before = text[m.index - 1], after = text[m.index + m[0].length];
+    // A path separator must touch the name. A bare or quoted dotted word stays evidence.
+    if (!inCommand(m.index) && (before === '/' || before === '\\' || after === '/' || after === '\\')) spans.push({ start: m.index, end: m.index + m[0].length });
+  }
+  // A variable is one only outside single quotes and not after an escape. Unbalanced
+  // quotes withdraw all name barriers.
+  const single = new Array(text.length).fill(false); let quote = null;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quote === "'") { single[i] = true; if (c === "'") quote = null; continue; }
+    if (quote === '"') { if ((c === '\\' || c === '`') && i + 1 < text.length) { i++; continue; } if (c === '"') quote = null; continue; }
+    if (c === "'" || c === '"') { quote = c; single[i] = c === "'"; }
+  }
+  if (quote) return [];
+  commandIndex = 0;
+  for (const m of text.matchAll(/(?<![$\w\\`^])\$(?:env:)?([a-z_]\w*)/gi)) {
+    if (!single[m.index] && !inCommand(m.index) && FOLDER_VARIABLES.test(m[1])) spans.push({ start: m.index + m[0].length - m[1].length, end: m.index + m[0].length });
+  }
+  return spans.sort((a, b) => a.start - b.start);
+}
+function barrierText(text, spans) {
+  const chars = text.split('');
+  for (const span of spans) for (let i = span.start; i < span.end; i++) chars[i] = '\0';
+  return chars.join('');
+}
+function constructionFragments(text, shell, names = []) {
   const barriers=pythonBindingBarriers(text, shell),chars=text.split('');
+  barriers.push(...names);
   // Proof excludes source NUL; otherwise preserve every original code unit until
   // the legacy consuming transforms finish, then discard controls as before.
   for(const span of barriers)for(let i=span.start;i<span.end;i++)chars[i]='\0';
@@ -194,7 +292,9 @@ function constructionFragments(text, shell) {
   return formatParts(shadow).filter(part=>part!==null).join('').replace(/-(?:f|join)\b/gi,'')
     .replace(barriers.length ? /[^a-z0-9\x00-]/gi : /[^a-z0-9-]/gi,'');
 }
-function broadVisible(text, executableScript = false, shell = null) {
+function broadVisible(source, executableScript = false, shell = null) {
+  // Every evidence scan reads the barriered text; only the strict reader sees the source.
+  const names = nameBarriers(source), text = names.length ? barrierText(source, names) : source;
   const direct = (/\bclaude(?:-code)?(?:\.(?:exe|cmd|ps1))?\b/i.test(text)
       && /--(?:resume|continue|session-id|fork-session)\b|(?:^|[\s;&|()'"`])-(?!-)[a-z]*[rc][a-z]*(?=$|[\s=;&|()'"`])/i.test(text))
     || (/\bcodex(?:\.(?:exe|cmd|ps1))?\b/i.test(text) && /\b(?:resume|fork)\b/i.test(text));
@@ -211,12 +311,12 @@ function broadVisible(text, executableScript = false, shell = null) {
   // Reuse the reader's boundary rather than maintaining a second syntax allowlist.
   // Pipeline/redirection punctuation alone does not build a spelling. Whole visible
   // continuations still use the unmodified text and strict reader below.
-  if (executableScript || !tokens(text.replace(/[|<>]/g, ' '), { literalData: true })) {
+  if (executableScript || !tokens(source.replace(/[|<>]/g, ' '), { literalData: true })) {
     // Detection only: join visible literal fragments across expression punctuation,
     // format placeholders and format/join operators. Never evaluate the expression
     // or pass this over-inclusive spelling to the target reader. Fully opaque runtime
     // scripts with no recognisable host/selector remain outside this guard's scope.
-    const fragments = constructionFragments(text, shell);
+    const fragments = constructionFragments(source, shell, names);
     // Casts, methods and other syntax between quoted fragments must not hide their
     // visible spelling. Inspect potential spelling atoms at every quote, including
     // inner wrapper quotes, without claiming to parse shell quote nesting. Only the
