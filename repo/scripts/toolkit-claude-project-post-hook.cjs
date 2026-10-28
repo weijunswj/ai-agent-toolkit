@@ -10,11 +10,16 @@
 //   post; the link rule still applies to it.
 // - Links: every PR a post names, each number in a list included, must carry a link: link text on that number or a
 //   /pull/<n>/files link in the same text. A bare /pull/<n> link outside link text, without /files, is refused with the fix.
-// - Wording, on every post and reply: no em-dashes or arrows outside code, and at most one **Question:** block.
+// - Wording, on every post and reply: no em-dashes or arrows outside code, and at most one bare **Question:** label.
 // - Layout, on top-level posts of 25 words or more: a **Now:** line first (after an optional "Re: your reply on"
 //   line), **[HH:MM] Update:** one-liners with no question or numbered options inside, every item under
-//   **Waiting on you** carrying a link, and one **ELI5:** line as the very last line. An edit of an earlier post keeps
-//   every one of its Update lines word for word and adds at least one new one.
+//   **Waiting on you** carrying a link, and one **ELI5:** line as the very last line. Choice bullets indented three or
+//   more spaces (or a tab) under a numbered **Question:** item need no link; other lines that are not list items
+//   (spacers, prose) are passed over, and the list ends at the next Update or ELI5 line. An edit of an
+//   earlier post keeps every one of its Update lines word for word and adds at least one new one.
+// - Post fresh after the owner writes: every edit of a top-level post the owner has written after is refused, since
+//   anything it adds would sit above the owner's message. Only an owner reply under the running post itself (a
+//   thread whose root is that post) leaves the running post open to edits; any other owner message marks every post.
 // - Merge summary: in a Projects session (one that has used the Projects tools), a PR merge (the gh merge command, a
 //   gh api PUT to .../pulls/<n>/merge or a merge_pull_request tool) is refused until a line of one of its own posts
 //   says "external effects" and names that PR; every merge in a command is checked. The command is read word by word
@@ -22,8 +27,8 @@
 //   replace the PR, a redirection's stream number and target are never read as it, and a command it cannot finish
 //   reading counts as a merge with no number. It is a tripwire on the command text only: curl, GraphQL, wrapper shells, prefixes such as VAR= or sudo, aliases, scripts, direct
 //   pushes and a command inside a double-quoted $(...) or backticks are not seen.
-// Sessions without these tools (normal chats, Codex and sessions outside Projects) are never touched. Questions go
-// on decision cards, a separate tool this hook does not check. Input or a transcript it cannot read passes. The
+// Sessions without these tools (normal chats, Codex and sessions outside Projects) are never touched. Decision cards
+// are a separate tool this hook does not check. Input or a transcript it cannot read passes. The
 // hook is registered without `onFailure: "block"` so a hook that cannot start never silences every post.
 const fs = require('node:fs');
 
@@ -38,6 +43,9 @@ const MESSAGE_ID = /\b(cmsg_[A-Za-z0-9]+)\b/;
 const UPDATE_LINE = /^\s*(?:[-*]\s+)?\*\*\[\d{1,2}:\d{2}\] Update:\*\*/;
 const WAITING_LINE = /^\s*(?:[-*]\s+)?\*\*Waiting on you\b/i;
 const ITEM_LINE = /^\s*(?:\d+[.)]|[-*])\s+/;
+// A choice bullet under a numbered question item.
+const SUB_LINE = /^(?: {3,}|\t)[-*]\s+\S/;
+const QUESTION_ITEM = /^\s*\d+[.)]\s+\*\*Question:/;
 const NOW_LINE = /^\s*(?:[-*]\s+)?\*\*Now:\*\*/;
 const REPLY_LINE = /^\s*Re: your reply on\b/i;
 const ELI5_LINE = /^\s*(?:[-*]\s+)?\*\*ELI5:\*\*/;
@@ -61,19 +69,24 @@ const QUOTE_TAGS = new Set([
   'message', 'note', 'cited', 'relay', 'coordinator-relay',
   'cross-session-message', 'task-notification', 'child-session-output', 'project_claude_message',
 ]);
-function hasOwnerMessage(text) {
+// Returns one entry per owner message: the ts of the innermost <thread> around it, or null outside any thread.
+function ownerMessages(text) {
   const open = [];
+  const found = [];
   for (const tag of text.matchAll(/<(\/?)([A-Za-z][\w-]*)\b([^<>]*?)(\/?)>/g)) {
     const [, closing, name, attributes, selfClosing] = tag;
     if (closing) {
-      const at = open.lastIndexOf(name);
+      const at = open.map(item => item.name).lastIndexOf(name);
       if (at !== -1) open.length = at;
       continue;
     }
-    if (name === 'message' && /\bfrom=["']human["']/.test(attributes) && !open.some(item => QUOTE_TAGS.has(item))) return true;
-    if (!selfClosing) open.push(name);
+    if (name === 'message' && /\bfrom=["']human["']/.test(attributes) && !open.some(item => QUOTE_TAGS.has(item.name))) {
+      const thread = [...open].reverse().find(item => item.name === 'thread');
+      found.push(thread ? thread.attributes.match(/\bts=["']([^"']+)["']/)?.[1] || null : null);
+    }
+    if (!selfClosing) open.push({ name, attributes });
   }
-  return false;
+  return found;
 }
 
 function textOf(text) {
@@ -108,6 +121,8 @@ function resultText(block) {
 // post; null when only an edit of it is known), and whether the session has used the Projects tools.
 function readTranscript(lines) {
   let running = null;
+  // The newest top-level post, kept after owner messages so a second reply under it is still a reply under it.
+  let newest = null;
   let projects = false;
   const pending = new Map();
   const posts = new Map();
@@ -115,8 +130,16 @@ function readTranscript(lines) {
     if (!line.trim()) continue;
     let entry;
     try { entry = JSON.parse(line); } catch { continue; }
-    const text = userText(entry);
-    if (text && hasOwnerMessage(text)) running = null;
+    const owner = ownerMessages(userText(entry));
+    if (owner.length) {
+      // Only an owner reply under the running post itself leaves that post open to edits; any other owner message
+      // (main chat, a work thread, or a reply under an older post) puts every post above it.
+      const runningId = newest;
+      for (const [id, post] of posts) {
+        if (id !== runningId || owner.some(thread => thread !== runningId)) post.ownerAfter = true;
+      }
+      running = null;
+    }
     const content = entry?.message?.content;
     if (!Array.isArray(content)) continue;
     for (const block of content) {
@@ -129,11 +152,14 @@ function readTranscript(lines) {
         if (block.is_error) continue;
         if (call.name === POST_TOOL) {
           const id = resultText(block).match(MESSAGE_ID)?.[1];
-          if (id) posts.set(id, { text: textOf(call.input.text), reply: Boolean(call.input.thread_id) });
-          if (id && !call.input.thread_id) running = { id, size: bytes(call.input.text) };
+          if (id) posts.set(id, { text: textOf(call.input.text), reply: Boolean(call.input.thread_id), ownerAfter: false });
+          if (id && !call.input.thread_id) {
+            running = { id, size: bytes(call.input.text) };
+            newest = id;
+          }
         } else if (typeof call.input.message_id === 'string') {
           const known = posts.get(call.input.message_id);
-          posts.set(call.input.message_id, { text: textOf(call.input.text), reply: known ? known.reply : null });
+          posts.set(call.input.message_id, { text: textOf(call.input.text), reply: known ? known.reply : null, ownerAfter: known ? known.ownerAfter : false });
           if (running && call.input.message_id === running.id) running.size = bytes(call.input.text);
         }
       }
@@ -184,17 +210,22 @@ function linkIssue(text) {
 const EM_DASH = String.fromCharCode(0x2014);
 const ARROW = String.fromCharCode(0x2192);
 
-// Em-dashes, arrows and more than one Question block, outside code and HTML comments.
+// Em-dashes, arrows and more than one bare Question label, outside code and HTML comments.
 function wordingIssue(text) {
   const plain = withoutCode(textOf(text)).replace(/<!--[\s\S]*?-->/g, ' ');
   if (plain.includes(EM_DASH)) return 'it has an em-dash. Use a comma, a colon or a full stop instead.';
   if (plain.includes('->') || plain.includes(ARROW)) return 'it has an arrow. Say it in words ("then", "so", "leads to") instead.';
-  if ((plain.match(/\*\*Question:\*\*/g) || []).length > 1) return 'it has more than one **Question:**. Ask one question per post, and put the others on decision cards in the threads that own them.';
+  if ((plain.match(/\*\*Question:\*\*/g) || []).length > 1) return 'it has more than one bare **Question:** label. Write each question as a numbered item under **Waiting on you**, `1. **Question: <the ask>?**` with the link to its card or thread, and its choices indented under it.';
   return '';
 }
 
+// Every line ending CommonMark accepts (CRLF, LF or a lone CR) ends a line here too.
+function lineSplit(text) {
+  return text.split(/\r\n|\r|\n/);
+}
+
 function lineList(text) {
-  return withoutCode(textOf(text)).split(/\r?\n/).filter(line => line.trim());
+  return lineSplit(withoutCode(textOf(text).replace(/\r\n?/g, '\n'))).filter(line => line.trim());
 }
 
 function updateLines(text) {
@@ -213,17 +244,23 @@ function layoutIssue(text) {
   for (const line of updates) {
     const body = line.replace(UPDATE_LINE, '');
     if (/Question:/i.test(body) || hasOptionList(body)) {
-      return `the Update line "${line.trim().slice(0, 80)}" has a question or numbered options in it. An Update line is one short status sentence; put the question on a decision card and list it under **Waiting on you**.`;
+      return `the Update line "${line.trim().slice(0, 80)}" has a question or numbered options in it. An Update line is one short status sentence; ask the question as a numbered **Question:** item under **Waiting on you** instead.`;
     }
   }
   if (waiting !== -1) {
+    let item = '';
     for (const line of lines.slice(waiting + 1)) {
-      if (!ITEM_LINE.test(line) || UPDATE_LINE.test(line) || ELI5_LINE.test(line)) break;
+      // The list runs to the next Update or ELI5 line. A question's choice bullets sit indented under it and need no
+      // link; spacers and other lines that are not list items are passed over.
+      if (SUB_LINE.test(line) && QUESTION_ITEM.test(item)) continue;
+      if (UPDATE_LINE.test(line) || ELI5_LINE.test(line)) break;
+      if (!ITEM_LINE.test(line)) continue;
+      item = line;
       if (!LINK.test(line)) return `the Waiting on you item "${line.trim().slice(0, 80)}" has no link. Link each item to the card or thread where the owner acts, so it is one tap away.`;
     }
   }
   const eli5 = lines.filter(line => ELI5_LINE.test(line)).length;
-  const last = textOf(text).split(/\r?\n/).filter(line => line.trim()).pop();
+  const last = lineSplit(textOf(text)).filter(line => line.trim()).pop();
   if (eli5 !== 1 || !ELI5_LINE.test(last)) return 'it must end with exactly one **ELI5:** line, with nothing after it.';
   return '';
 }
@@ -677,7 +714,7 @@ function namesPr(line, number) {
 
 // One line of an own post, outside code, says "external effects" and names the PR.
 function summarised(target, posts) {
-  return [...posts.values()].some(({ text }) => withoutCode(text).split(/\r?\n/)
+  return [...posts.values()].some(({ text }) => lineSplit(withoutCode(text.replace(/\r\n?/g, '\n')))
     .some(line => /\bexternal effects?\b/i.test(line) && namesPr(line, target.number)));
 }
 
@@ -712,6 +749,10 @@ function decide(input, readLines = file => fs.readFileSync(file, 'utf8').split('
   // Replies under a post, and edits of a post this transcript never shows, keep only the wording and link rules.
   const known = tool === EDIT_TOOL ? posts.get(input.tool_input?.message_id) : null;
   const topLevel = tool === POST_TOOL ? !input.tool_input?.thread_id : known?.reply === false;
+  // The owner wrote after this post: anything an edit adds or changes would sit above the owner's message.
+  if (topLevel && known?.ownerAfter) {
+    return 'Toolkit Projects rule: post fresh: the owner wrote since this post. An edit would put your answer above the owner\'s message, so send it with post_message as a new post.';
+  }
   if (topLevel) {
     const layout = layoutIssue(text) || (known ? editIssue(known.text, text) : '');
     if (layout) return `Toolkit Projects rule: post layout (a **Now:** line, **[HH:MM] Update:** one-liners, linked **Waiting on you** items, the **ELI5:** line last). Rewrite the post: ${layout}`;

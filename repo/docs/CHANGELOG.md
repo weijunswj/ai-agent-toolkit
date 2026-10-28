@@ -1,5 +1,10 @@
 # Toolkit Changelog
 
+## 3.15.27 (numbered questions and fresh posts in Projects)
+
+- **Claude Projects skill (2026-10-28.3):** several owner questions now go in a numbered list under **Waiting on you**, each written `1. **Question: ...?**` with its link, its choices as four-space-indented bullets marking "(my pick)", and an `&nbsp;` spacer line after the last choice. Each **[HH:MM] Update:** line is followed by the same spacer. Overlapping post-format rules are merged into one set, and work threads follow the same post rules.
+- **Projects post hook:** choice bullets under a numbered question need no link of their own, and spacers or other non-list lines no longer end the **Waiting on you** check, so a later item with no link is still caught. Once the owner has written after a post, every edit of that post is refused and a fresh post is asked for, so an answer can no longer land above the owner's message; an owner reply under the running post itself still leaves it open. Lines now also split on a lone carriage return.
+
 ## 3.15.26 (cloud footer on GitHub posts)
 
 ### GitHub posts
