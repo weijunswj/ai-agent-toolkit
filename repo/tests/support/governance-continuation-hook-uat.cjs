@@ -1,18 +1,18 @@
 'use strict';
 
-// Continuation through the real source hook entrypoints: both hooks across both CLI families, every
-// held-queue mode and actor, with exact stdout, stderr and exit codes and no state change.
+// Continuation through one real source hook entrypoint across both CLI families, every held-queue
+// mode and actor, with exact stdout, stderr and exit codes and no state change. Each hook runs in its
+// own test file (toolkit-governance-continuation-hook-uat-<hook>.test.cjs) so the two run in parallel.
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const test = require('node:test');
-const gate = require('../scripts/toolkit-governance-gate.cjs');
-const matrix = require('./support/governance-continuation-matrix.json');
-const { fixture, ID, message, root, runNodeProcesses, shell, snapshot, transcript } = require('./support/governance-continuation-fixture.cjs');
+const gate = require('../../scripts/toolkit-governance-gate.cjs');
+const matrix = require('./governance-continuation-matrix.json');
+const { HOOKS, fixture, ID, message, root, runNodeProcesses, shell, snapshot, transcript } = require('./governance-continuation-fixture.cjs');
 
-test('Windows/source-hook UAT: both native entrypoints cross both CLI families with isolated stdin and no state mutation', async t => {
+async function sourceHookUat(t, hookName) {
   const ctx = fixture(t);
   const env = { ...process.env, ...ctx.environment, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: path.join(ctx.home, 'absent-gitconfig') };
   for (const key of Object.keys(env)) if (/^(?:TOOLKIT_|CLAUDE_CODE_REMOTE|CLAUDE_ENV_FILE)/.test(key)) delete env[key];
@@ -28,10 +28,8 @@ test('Windows/source-hook UAT: both native entrypoints cross both CLI families w
   const stores = new gate.HeldPrompts({ registryOptions: ctx.options });
   stores.add('synthetic-unrelated', 'synthetic held fixture', null, {}, null);
   const heldFile = path.join(path.dirname(ctx.options.registryPath), gate.HELD_BASENAME);
-  const hooks = [
-    { name: 'claude', file: 'toolkit-governance-hook.cjs', args: ['--event', 'PreToolUse'], deniedExit: 0 },
-    { name: 'codex', file: 'toolkit-codex-helper-hook.cjs', args: [], deniedExit: 2 },
-  ];
+  const hooks = HOOKS.filter(hook => hook.name === hookName);
+  assert.equal(hooks.length, 1, hookName);
   let sourceCalls = 0, batches = 0, pending = [];
   // Each case is still its own hook process with its own stdin. Cases between two fixture changes
   // run a few at a time, and the fixture snapshot is compared before and after each such batch, so
@@ -148,7 +146,9 @@ test('Windows/source-hook UAT: both native entrypoints cross both CLI families w
     await flush();
   }
   assert.equal(pending.length, 0);
-  t.diagnostic(JSON.stringify({ sourceCalls, batches, productionDefault: true, byteAndDirectoryEquality: true, nativeDispatchExercised: false }));
+  t.diagnostic(JSON.stringify({ hook: hookName, sourceCalls, batches, productionDefault: true, byteAndDirectoryEquality: true, nativeDispatchExercised: false }));
   // Only the two source processes were executed. No host CLI continuation, native dispatcher,
   // installed hook, service, installation, owner acceptance or desktop-binary qualification.
-});
+}
+
+module.exports = Object.freeze({ sourceHookUat });

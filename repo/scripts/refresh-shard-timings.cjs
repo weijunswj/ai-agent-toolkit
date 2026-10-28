@@ -8,8 +8,8 @@
 //
 // Without a flag it only reports. Each shard job already uploads its run-tests.cjs summary (per-file
 // seconds) as a test-summary-<shard> artifact, so this reads those through read-only `gh` and changes
-// nothing. --run <id> reads that successful Validate run instead, for example a pull request's
-// run that measured a new or split test file. It reports the refresh triggers it checks:
+// nothing. --run <id> reads that finished Validate run instead, for example a pull request's run
+// that measured a new or split test file. It reports the refresh triggers it checks:
 //   - more than 10% of test files have no measured time;
 //   - with the fresh times, the slowest shard of a system is estimated over 1.3x its fastest;
 //   - a file is over its per-file budget (budgets in the manifest). Refreshing cannot fix this: the
@@ -159,8 +159,10 @@ function command(program, args, options = {}) {
 function latestGreenRun(root, run) {
   const fields = 'databaseId,headSha,conclusion,headBranch,workflowName';
   if (run) {
+    // A named run may have failed after its shards, for example on a file over its budget. Only a
+    // shard whose tests passed uploads its summary, so every time read from it is from a passing run.
     const value = JSON.parse(command('gh', ['run', 'view', run, '--json', fields], { cwd: root }));
-    if (value.conclusion !== 'success' || value.workflowName !== 'Validate') throw new Error(`run ${run} is not a successful Validate run`);
+    if (!value.conclusion || value.workflowName !== 'Validate') throw new Error(`run ${run} is not a finished Validate run`);
     return value;
   }
   const list = JSON.parse(command('gh', ['run', 'list', '--workflow', WORKFLOW_FILE, '--branch', 'main', '--event', 'push', '--status', 'success', '--limit', '1', '--json', fields], { cwd: root }));
