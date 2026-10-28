@@ -17,8 +17,9 @@ concurrency:
 
 # The test files run in shards on Linux and Windows (repo/contracts/ci/test-shards.json). The
 # validate job runs after every shard, also when one failed: its "Run validation" step runs the
-# repository checks and then proves from the shard summaries that each system ran every test file
-# once with no failure. A failed, cancelled or skipped shard fails it. The personal-data job checks
+# repository checks, fails any test file over its time budget (check-test-durations.cjs), and then
+# proves from the shard summaries that each system ran every test file once with no failure. A
+# failed, cancelled or skipped shard fails it. The personal-data job checks
 # every commit of the pull request or push, the commit messages, the branch name and the pull
 # request title and body for email addresses, phone numbers and WhatsApp links, and the title and
 # body for home-folder paths and AI attribution (values are never printed); validate waits for it
@@ -165,4 +166,5 @@ jobs:
           node repo/scripts/run-design-tests.cjs
           node repo/scripts/generate-n8n-stack-launcher-flow.cjs --check
           node repo/scripts/check-diff-whitespace.cjs
+          node repo/scripts/check-test-durations.cjs --ci
           node repo/scripts/run-tests.cjs --verify-ci "$RUNNER_TEMP/test-summaries"

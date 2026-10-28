@@ -9,7 +9,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const { LOCAL_TESTS, gateCommands, localCommands } = require('../scripts/run-validation-gate.cjs');
+const { DURATIONS_COMMAND, LOCAL_TESTS, gateCommands, localCommands } = require('../scripts/run-validation-gate.cjs');
 const { VERIFY_COMMAND } = require('../scripts/ci-test-shards.cjs');
 
 const ROOT = path.resolve(__dirname, '..', '..');
@@ -28,13 +28,16 @@ test('npm run validate:all runs exactly the CI gate list from validate.yml', () 
     'node repo/scripts/run-design-tests.cjs',
     'node repo/scripts/generate-n8n-stack-launcher-flow.cjs --check',
     'node repo/scripts/check-diff-whitespace.cjs',
+    DURATIONS_COMMAND,
   ];
   for (const required of checks) assert.ok(commands.includes(required), required);
   // CI ends by checking the shard summaries; a local run has no shards and runs every test file there.
   assert.equal(commands.at(-1), VERIFY_COMMAND);
   assert.equal(commands.length, checks.length + 1);
+  // The budget check reads the CI shard summaries, so a local run leaves only it out.
+  assert.equal(DURATIONS_COMMAND, 'node repo/scripts/check-test-durations.cjs --ci');
   const local = localCommands(commands);
-  assert.deepEqual(local.slice(0, -1), commands.slice(0, -1));
+  assert.deepEqual(local.slice(0, -1), commands.slice(0, -1).filter((command) => command !== DURATIONS_COMMAND));
   assert.equal(local.at(-1), LOCAL_TESTS);
   assert.equal(LOCAL_TESTS, 'node repo/scripts/run-tests.cjs --all');
   const scripts = JSON.parse(read('package.json')).scripts;

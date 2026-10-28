@@ -1,5 +1,19 @@
 # Toolkit Changelog
 
+## 3.16.5 (long runs and test time budgets)
+
+### Guidance
+
+- **Long runs:** a new global rule says to check long runs early against their usual time, stop one that is far over, and stop the process trees you started when a run ends or is interrupted. The fast-tests playbook gains a Long Runs section: note the usual time, check at about a quarter of it, rerun the narrowest form, and keep capture wrappers at a constant cost per write.
+- **Windows leftovers:** `windows-local-dev-services` explains that stopping a parent process on Windows leaves its children running, stops whole trees with `taskkill /T`, and lists your own leftover `node` processes by path. Both command-hygiene playbooks use the tree form.
+
+### Toolkit CI
+
+- **Test time budgets:** the shard manifest sets 120 seconds per test file on Linux and Windows (180 seconds, with a recorded reason, for three files waiting to be split), and the `validate` job fails a file over its budget (`check-test-durations.cjs --ci`). A local `npm run validate:all` leaves that one check out and says so.
+- **Timing refresh with no AI:** `refresh-shard-timings.cjs` reads the test summaries of the latest green Validate run on `main`, reports untimed files and unbalanced shards, and with `--write` or `--open-pr` records the times and moves files between the named shards.
+- **Continuation tests split:** the continuation test is now five files, by area and by hook, and its hook cases start a few hook processes at a time, still one process per case, with the no-change snapshot compared around each batch.
+- **Status document:** `VALIDATION-STRATEGY.md` lists the dependency auto-merge and source-watch workflows.
+
 ## 3.16.4 (continuation folder names)
 
 - Dotted host folders used as arguments and the exact upper-case folder variables CODEX_HOME, CLAUDE_CONFIG_DIR, CLAUDE_PROJECT_DIR and CLAUDE_PLUGIN_ROOT count as names rather than continuation evidence.
