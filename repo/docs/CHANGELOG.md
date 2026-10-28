@@ -1,5 +1,11 @@
 # Toolkit Changelog
 
+## 3.15.24 (answer from a Projects thread)
+
+### Governance
+
+- **Answer from a Claude Projects thread:** the user's yes, no, later or ok sent in a Projects thread now answers the governance question in the Remote Control session it reaches, and lifts the hold there. Before, the thread's wrapping meant the reply was never read as an answer, and the repository stayed held. Only the user's own message counts: a coordinator's relay, a scheduled task or anyone else's message does not.
+
 ## 3.15.23 (finished child issues close as completed)
 
 - **Child issues close with their merge:** once a merge completes every criterion of a child issue and any owner UAT passed, the PR that completes it says `Closes #n` so the merge closes it as completed; when that could not apply (UAT after the merge, or work over several PRs), the controller closes it without asking. Closing a parent, a programme issue or as not planned still needs the owner. Staged, UAT-pending, blocked, partial or follow-up PRs keep using `Refs`.
