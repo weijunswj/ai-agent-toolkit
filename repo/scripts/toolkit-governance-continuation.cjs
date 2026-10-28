@@ -183,8 +183,31 @@ function pythonBindingBarriers(text, shell) {
   }
   return barriers;
 }
-function constructionFragments(text, shell) {
+// Host words that only name a path component or a variable. hostOf never reads a dotted
+// name as an executable, no shell drops that leading dot, and a variable's name is never its
+// value. Each span becomes a barrier, so neighbouring text still cannot join across it. The
+// whole-input ASCII/no-control qualification excludes source NUL, as for the Python proof.
+function nameBarriers(text) {
+  if (text.length > LIMITS.command || /[^\x09\x0a\x0d\x20-\x7e]/.test(text)) return [];
+  const spans = [];
+  for (const m of text.matchAll(/(?<![\w.$-])\.(?:claude|codex)[\w.-]*/gi)) {
+    const before = text[m.index - 1], after = text[m.index + m[0].length];
+    // A path separator must touch the name. A bare or quoted dotted word stays evidence.
+    if (before === '/' || before === '\\' || after === '/' || after === '\\') spans.push({ start: m.index, end: m.index + m[0].length });
+  }
+  for (const m of text.matchAll(/(?<![$\w])\$(?:env:)?([a-z_]\w*)/gi)) {
+    if (/claude|codex/i.test(m[1])) spans.push({ start: m.index + m[0].length - m[1].length, end: m.index + m[0].length });
+  }
+  return spans.sort((a, b) => a.start - b.start);
+}
+function barrierText(text, spans) {
+  const chars = text.split('');
+  for (const span of spans) for (let i = span.start; i < span.end; i++) chars[i] = '\0';
+  return chars.join('');
+}
+function constructionFragments(text, shell, names = []) {
   const barriers=pythonBindingBarriers(text, shell),chars=text.split('');
+  barriers.push(...names);
   // Proof excludes source NUL; otherwise preserve every original code unit until
   // the legacy consuming transforms finish, then discard controls as before.
   for(const span of barriers)for(let i=span.start;i<span.end;i++)chars[i]='\0';
@@ -194,7 +217,9 @@ function constructionFragments(text, shell) {
   return formatParts(shadow).filter(part=>part!==null).join('').replace(/-(?:f|join)\b/gi,'')
     .replace(barriers.length ? /[^a-z0-9\x00-]/gi : /[^a-z0-9-]/gi,'');
 }
-function broadVisible(text, executableScript = false, shell = null) {
+function broadVisible(source, executableScript = false, shell = null) {
+  // Every evidence scan reads the barriered text; only the strict reader sees the source.
+  const names = nameBarriers(source), text = names.length ? barrierText(source, names) : source;
   const direct = (/\bclaude(?:-code)?(?:\.(?:exe|cmd|ps1))?\b/i.test(text)
       && /--(?:resume|continue|session-id|fork-session)\b|(?:^|[\s;&|()'"`])-(?!-)[a-z]*[rc][a-z]*(?=$|[\s=;&|()'"`])/i.test(text))
     || (/\bcodex(?:\.(?:exe|cmd|ps1))?\b/i.test(text) && /\b(?:resume|fork)\b/i.test(text));
@@ -211,12 +236,12 @@ function broadVisible(text, executableScript = false, shell = null) {
   // Reuse the reader's boundary rather than maintaining a second syntax allowlist.
   // Pipeline/redirection punctuation alone does not build a spelling. Whole visible
   // continuations still use the unmodified text and strict reader below.
-  if (executableScript || !tokens(text.replace(/[|<>]/g, ' '), { literalData: true })) {
+  if (executableScript || !tokens(source.replace(/[|<>]/g, ' '), { literalData: true })) {
     // Detection only: join visible literal fragments across expression punctuation,
     // format placeholders and format/join operators. Never evaluate the expression
     // or pass this over-inclusive spelling to the target reader. Fully opaque runtime
     // scripts with no recognisable host/selector remain outside this guard's scope.
-    const fragments = constructionFragments(text, shell);
+    const fragments = constructionFragments(source, shell, names);
     // Casts, methods and other syntax between quoted fragments must not hide their
     // visible spelling. Inspect potential spelling atoms at every quote, including
     // inner wrapper quotes, without claiming to parse shell quote nesting. Only the

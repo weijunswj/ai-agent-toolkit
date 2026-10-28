@@ -1,5 +1,11 @@
 # Toolkit Changelog
 
+## 3.15.20 (host-named folders and variables are names, not continuations)
+
+- The continuation check no longer treats a host name that only names a folder or a variable as a session resume. A dotted name touching a path separator (`.codex/`, `.claude\\`, `.claude-plugin/`) and a variable name containing `claude` or `codex` (`$env:CODEX_HOME`, `$CLAUDE_PROJECT_DIR`) become barriers in every evidence scan, so neighbouring text still cannot join across them. Reading Toolkit's installed files or host settings with `$`, `^` or `%` syntax, or beside a short flag such as `-r` or `-Recurse`, is no longer refused on Claude Code or Codex.
+- Real `codex resume`/`fork` and `claude -r`/`-c`/`--resume` invocations, a host executable inside such a folder, constructed spellings, bare or quoted dotted words and non-ASCII input keep the earlier conservative result. Every raw owner, state, workdir and path guard still runs first.
+- Earlier unproved-syntax tests that used such a folder as their only evidence now use an undotted host folder, and their original texts are asserted as ordinary.
+
 ## 3.15.19 (proved binding separators and literal Git operands)
 
 - Restored conservative collapsed continuation evidence for every unproved source byte, including implicit concatenation and joining pipelines. Only a bounded Python for-binding separator in a complete literal PowerShell here-string/stdin transport interrupts the projection; every source word, string, comment and executable neighbour remains inspected. Direct, quoted, template and ordered signals stay independent.

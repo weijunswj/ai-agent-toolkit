@@ -1300,3 +1300,67 @@ test('new evidence allowances retain every raw guard without reading a held queu
   assert.deepEqual(snapshot(ctx.dir), before);
   t.diagnostic(JSON.stringify({ rawGuardChecks: checks, queueReads, metadataSpawns: spawns, bytesAndDirectoriesUnchanged: true }));
 });
+
+test('host-named directories and variables are names, not continuation evidence, on both envelopes', t => {
+  const ctx = fixture(t), before = snapshot(ctx.dir);
+  // Everyday reads of host configuration and plugin folders, and the reported readiness shape.
+  const ordinary = [
+    "git rev-parse 'HEAD^{tree}'; node C:/example.test/.codex/check.cjs",
+    "git rev-parse HEAD 'HEAD^{tree}'; git status --short; git ls-remote origin refs/heads/deployment/example; python _logs/example/validate.py; node C:/Users/example/.codex/plugins/cache/ai-agent-toolkit-local/ai-agent-toolkit/3.15.19/skills/external-operation-preflight/scripts/preflight-check.cjs _logs/example/plan.json",
+    'Get-Content "$env:USERPROFILE/.claude/settings.json"',
+    'Get-ChildItem ~/.claude -Recurse',
+    'grep -rn example ~/.claude/settings.json',
+    'cat .claude-plugin/plugin.json | jq -r .version',
+    'Get-ChildItem C:\\Users\\example\\.codex\\sessions -Recurse',
+    'node "$CLAUDE_PROJECT_DIR/scripts/example.js"',
+    'ls $env:CODEX_HOME',
+    'echo co/.claude/dex$x',
+    'cat ~/.codex/sessions/example.jsonl | grep resume',
+  ];
+  // Earlier unproved-syntax rows whose only evidence was such a folder.
+  const earlier = matrix.name_barrier_cases;
+  assert.equal(earlier.length, 18);
+  // A dotted name touching no path separator, a host after the directory, a selector beside a
+  // variable, constructed spellings and non-ASCII input all keep the conservative result.
+  const retained = [
+    'codex resume --last',
+    'claude -r example',
+    'cp -r .claude-plugin /tmp/example',
+    "'.claude' -r example",
+    'C:/example.test/.codex/codex.exe resume',
+    'ls ~/.codex/; codex fork',
+    '& $codex resume',
+    '$env:CODEX_HOME; codex resume',
+    "node C:/example.test/.codex/check.cjs; & ('co'+'dex') resume",
+    'ls ~/.claude/; & ("cl"+"au"+"de") -r example',
+    'Get-ChildItem ~/.claude/ -Recurse; & ("cl"+"aude") -c',
+    'Get-Content "$env:USERPROFILE/.claude/\u00e9.json" -Raw',
+  ];
+  let checks = 0;
+  for (const row of earlier) {
+    const input = shell(ctx, row.text, row.shell ? { tool_input: { command: row.text, shell: row.shell } } : {});
+    assert.deepEqual(parse(row.text, input), { status: 'NOT_CONTINUATION' }, row.id); checks += 1;
+  }
+  for (const shellName of [undefined, 'powershell.exe', 'bash']) {
+    for (const command of ordinary) {
+      const input = shell(ctx, command, shellName ? { tool_input: { command, shell: shellName } } : {});
+      assert.deepEqual(parse(command, input), { status: 'NOT_CONTINUATION' }, `${shellName}: ${command}`); checks += 1;
+    }
+    for (const command of retained) {
+      const input = shell(ctx, command, shellName ? { tool_input: { command, shell: shellName } } : {});
+      assert.notEqual(parse(command, input).status, 'NOT_CONTINUATION', `${shellName}: ${command}`); checks += 1;
+    }
+  }
+  // Production ToolGate keeps every raw guard for the newly ordinary reads.
+  const held = { state: 'UNDECIDED', rule: 'R4', repository_id: 'synthetic-held' }, safe = { state: 'DISABLED', rule: 'R1' };
+  for (const command of ordinary) for (const tool_name of ['Bash', 'PowerShell']) {
+    const input = { ...shell(ctx, command), tool_name, tool_input: { command } };
+    const make = stateReader => new gate.ToolGate({ registryOptions: ctx.options, environment: ctx.environment, stateReader,
+      continuationResolver: new ContinuationResolver({ environment: ctx.environment, spawn() { throw new Error('UNEXPECTED_METADATA'); } }) });
+    assert.equal(make(() => safe).decide(input)?.deny, undefined, command);
+    assert.ok(make(() => held).decide(input)?.deny, command);
+    checks += 2;
+  }
+  assert.deepEqual(snapshot(ctx.dir), before);
+  t.diagnostic(JSON.stringify({ nameBarrierChecks: checks }));
+});
