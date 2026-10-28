@@ -1,5 +1,13 @@
 # Toolkit Changelog
 
+## 3.16.2 (thread replies, parent folders and replies in your own words)
+
+### Governance
+
+- **Real thread replies are read again:** the app's own notes at the end of a Projects thread message, and files or images attached to a message, no longer make Toolkit ignore the user's reply. A message that carries a file or image is not an answer.
+- **Asked from a parent folder:** a session working in a folder that holds several repositories (or in a decided repository) now asks Toolkit's question when a command or edit reaches github.com repositories that are waiting, naming them all, and one reply answers for every repository named. Before, the question was never asked there and no reply could answer it.
+- **Replies in your own words:** a reply such as "no for both" goes to the agent with a one-use reply ticket; the agent reads what it means and records it with `toolkit-governance-answer.cjs`, and Toolkit only checks that it is the user's own reply after its question, in the same run. When the agent is unsure, or a bare yes, no or later arrives from a parent folder, it asks once more naming exactly what Toolkit would record, and the user's reply can then record only that answer.
+
 ## 3.16.0 (governance as a repository setting)
 
 ### Governance
