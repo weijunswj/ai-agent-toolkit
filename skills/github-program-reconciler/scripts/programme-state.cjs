@@ -7,7 +7,7 @@
 // Contents API with compare-and-swap on the blob sha. The reconciler reads those documents and the
 // live GitHub state (issues, native parent/sub-issue links, dependency edges, PR heads and checks),
 // reports typed findings, plans effects and, only when asked to apply, runs each effect as
-// intent -> mutation -> readback -> resolution. It never closes, deletes or merges anything.
+// intent -> mutation -> readback -> resolution. It never closes, deletes or merges anything; the controller closes.
 //
 // GitHub facts these owners rely on, checked against the REST docs and a private sandbox on
 // 2026-10-23:
@@ -28,6 +28,7 @@ const { ProgrammeError, resolveExecutable } = require('./resolve-executable.cjs'
 
 const SCHEMA = Object.freeze({
   binding: 'toolkit.programme-binding.v1',
+  bindingV2: 'toolkit.programme-binding.v2',
   parent: 'toolkit.programme-state.parent.v1',
   child: 'toolkit.programme-state.child.v1',
   journal: 'toolkit.programme-journal.v1',
@@ -78,6 +79,8 @@ const TERMINAL_LIFECYCLES = ['DONE', 'RETIRED'];
 // UAT states that speak for one head, and review states that need verdicts at a head.
 const HEAD_BOUND_UAT = ['PASSED', 'UAT_RETAINED', 'UAT_PARTIAL_REQUIRED'];
 const DECIDED_REVIEW = ['PASSED', 'NOT_PASSED'];
+// UAT must be settled on record: an unrecorded UAT never counts as not required.
+const CLOSABLE_UAT = ['NOT_REQUIRED', 'PASSED', 'UAT_RETAINED'];
 const PATCHABLE_PARENT_FIELDS = ['outcomes', 'release_plan', 'private'];
 const BLOCK_SOURCE = 'programme-state';
 const BLOCK_NAME = 'STATE';
@@ -380,22 +383,52 @@ function assertValid(kind, doc) {
   return doc;
 }
 
+// A binding is v1 (one parent, always enabled) or v2 (`governance` enabled or disabled, and
+// `parents` as [{ issue, record_prefix, writer_prefix? }]; children come from native sub-issues, never
+// the binding). A valid enabled v2 binding is returned with the v1 fields the reconciler reads
+// (parent_issue, record_prefix, writer_prefix) taken from its first parent; a disabled one carries
+// only its identity and is never used for programme records.
 function validateBinding(binding) {
   const errors = [];
   check(errors, isObject(binding), 'binding must be an object');
+  let normalized = binding;
   if (isObject(binding)) {
-    check(errors, binding.schema === SCHEMA.binding, `schema must be ${SCHEMA.binding}`);
+    const v2 = binding.schema === SCHEMA.bindingV2;
+    check(errors, binding.schema === SCHEMA.binding || v2, `schema must be ${SCHEMA.binding} or ${SCHEMA.bindingV2}`);
     check(errors, REPO.test(String(binding.repository || '')), 'repository must be owner/name');
-    check(errors, isInt(binding.parent_issue, 1), 'parent_issue must be an issue number');
-    check(errors, PREFIX.test(String(binding.record_prefix || '')), 'record_prefix must be a record prefix');
-    check(errors, PREFIX.test(String(binding.writer_prefix || '')), 'writer_prefix must be a record prefix');
+    let enabled = true;
+    if (v2) {
+      const unknown = Object.keys(binding).filter(key => !BINDING_V2_KEYS.includes(key));
+      check(errors, unknown.length === 0, `${unknown.join(', ')} ${unknown.length === 1 ? 'is' : 'are'} not a version 2 binding key`);
+      check(errors, ['enabled', 'disabled'].includes(binding.governance), 'governance must be enabled or disabled');
+      enabled = binding.governance === 'enabled';
+      for (const key of ['parent_issue', 'record_prefix', 'writer_prefix']) check(errors, binding[key] === undefined, `${key} belongs to v1; v2 lists parents`);
+      const parents = binding.parents;
+      check(errors, enabled ? Array.isArray(parents) && parents.length > 0 : parents === undefined || Array.isArray(parents), enabled ? 'parents must list at least one parent issue' : 'parents must be a list');
+      if (Array.isArray(parents)) {
+        parents.forEach((entry, index) => {
+          check(errors, isObject(entry) && Object.keys(entry).every(key => ['issue', 'record_prefix', 'writer_prefix'].includes(key)), `parents[${index}] may hold only issue, record_prefix and writer_prefix`);
+          check(errors, isObject(entry) && isInt(entry.issue, 1), `parents[${index}].issue must be an issue number`);
+          check(errors, isObject(entry) && PREFIX.test(String(entry.record_prefix || '')), `parents[${index}].record_prefix must be a record prefix`);
+          check(errors, isObject(entry) && (entry.writer_prefix === undefined || (typeof entry.writer_prefix === 'string' && PREFIX.test(entry.writer_prefix))), `parents[${index}].writer_prefix must be a record prefix`);
+        });
+        check(errors, new Set(parents.map(entry => (isObject(entry) ? entry.issue : null))).size === parents.length, 'parents must not repeat an issue');
+      }
+    } else {
+      check(errors, binding.governance === undefined && binding.parents === undefined, 'governance and parents belong to v2');
+      check(errors, isInt(binding.parent_issue, 1), 'parent_issue must be an issue number');
+      check(errors, PREFIX.test(String(binding.record_prefix || '')), 'record_prefix must be a record prefix');
+      check(errors, PREFIX.test(String(binding.writer_prefix || '')), 'writer_prefix must be a record prefix');
+    }
     const store = binding.store;
-    check(errors, isObject(store) && Object.hasOwn(STORE_BACKENDS, store.kind), `store.kind ${JSON.stringify(store?.kind)} is not supported (supported: ${Object.keys(STORE_BACKENDS).join(', ')})`);
-    check(errors, isObject(store) && REPO.test(String(store.repository || '')), 'store.repository must be owner/name');
-    check(errors, isObject(store) && isText(store.branch) && !/\s|\.\./.test(store.branch), 'store.branch must be a branch name');
-    check(errors, isObject(store) && /^(?:[A-Za-z0-9_.-]+\/)+$/.test(String(store.path || '')) && !String(store.path).split('/').includes('..'), 'store.path must be a relative folder ending in /');
-    check(errors, isObject(store) && String(store.repository || '').toLowerCase() !== String(binding.repository || '').toLowerCase(), 'store.repository must be a separate repository');
-    check(errors, Array.isArray(binding.required_checks) && binding.required_checks.every(isText), 'required_checks must be a list of check names');
+    if (enabled || store !== undefined) {
+      check(errors, isObject(store) && Object.hasOwn(STORE_BACKENDS, store.kind), `store.kind ${JSON.stringify(store?.kind)} is not supported (supported: ${Object.keys(STORE_BACKENDS).join(', ')})`);
+      check(errors, isObject(store) && REPO.test(String(store.repository || '')), 'store.repository must be owner/name');
+      check(errors, isObject(store) && isText(store.branch) && !/\s|\.\./.test(store.branch), 'store.branch must be a branch name');
+      check(errors, isObject(store) && /^(?:[A-Za-z0-9_.-]+\/)+$/.test(String(store.path || '')) && !String(store.path).split('/').includes('..'), 'store.path must be a relative folder ending in /');
+      check(errors, isObject(store) && String(store.repository || '').toLowerCase() !== String(binding.repository || '').toLowerCase(), 'store.repository must be a separate repository');
+    }
+    if (enabled || binding.required_checks !== undefined) check(errors, Array.isArray(binding.required_checks) && binding.required_checks.every(isText), 'required_checks must be a list of check names');
     // Deprecated and ignored: older bindings that carry it must still validate.
     check(errors, optional(binding.paid_security, value => ['off', 'on'].includes(value)), 'paid_security must be off or on');
     const updates = binding.dependency_updates;
@@ -409,9 +442,21 @@ function validateBinding(binding) {
       check(errors, isObject(projection) && optional(projection.after_section, isText) && optional(projection.replace_section, isText), 'projection.after_section and projection.replace_section must be heading text');
     }
     screenSecrets(errors, binding, 'binding');
+    if (!errors.length && v2 && enabled) {
+      const first = binding.parents[0];
+      normalized = { ...binding, parent_issue: first.issue, record_prefix: first.record_prefix, writer_prefix: first.writer_prefix || first.record_prefix };
+    }
   }
   if (errors.length) throw new ProgrammeError('BINDING_INVALID', `${BINDING_FILE} is invalid: ${errors[0]}`, { errors });
-  return binding;
+  return normalized;
+}
+
+// The keys a version 2 binding may carry (binding-v2.schema.json); anything else makes it invalid.
+const BINDING_V2_KEYS = Object.freeze(['schema', 'repository', 'governance', 'parents', 'store', 'required_checks', 'paid_security', 'dependency_updates', 'projection']);
+
+// Whether a valid binding turns governance on: v1 always, v2 when `governance` is enabled.
+function bindingEnabled(binding) {
+  return binding.schema === SCHEMA.binding || binding.governance === 'enabled';
 }
 
 function loadBinding(repoRoot) {
@@ -422,7 +467,9 @@ function loadBinding(repoRoot) {
   let binding;
   try { binding = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '')); }
   catch (error) { throw new ProgrammeError('BINDING_INVALID', `${BINDING_FILE} is not valid JSON: ${error.message}`); }
-  return validateBinding(binding);
+  const valid = validateBinding(binding);
+  if (!bindingEnabled(valid)) throw new ProgrammeError('BINDING_DISABLED', `${BINDING_FILE.replace(/\\/g, '/')} sets governance to disabled, so every programme.cjs command refuses. Only an owner-merged pull request turns it back on.`);
+  return valid;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1602,6 +1649,7 @@ const STORE_BACKENDS = Object.freeze({ github: StateStore });
 
 const PR_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
+    defaultBranchRef { name }
     pullRequest(number: $number) {
       number state isDraft merged headRefOid baseRefName mergeable
       commits(last: 1) { nodes { commit { oid statusCheckRollup { state contexts(first: 100) {
@@ -1639,6 +1687,7 @@ class ProgrammeGraphReader {
       is_pull_request: Boolean(issue.pull_request),
       parent: parentFromUrl(issue.parent_issue_url, this.repository),
       blocked_by_total: issue.issue_dependencies_summary?.total_blocked_by ?? 0,
+      open_sub_issues: Math.max(0, (issue.sub_issues_summary?.total ?? 0) - (issue.sub_issues_summary?.completed ?? 0)),
     };
   }
 
@@ -1673,14 +1722,15 @@ class ProgrammeGraphReader {
 
   pullRequest(number) {
     const [owner, name] = this.repository.split('/');
-    const pr = this.transport.graphql(PR_QUERY, { owner, name, number })?.repository?.pullRequest;
+    const repo = this.transport.graphql(PR_QUERY, { owner, name, number })?.repository;
+    const pr = repo?.pullRequest;
     if (!pr) return null;
     const commit = pr.commits?.nodes?.[0]?.commit;
     const rollup = commit?.statusCheckRollup;
     return {
       number: pr.number,
       state: pr.merged ? 'MERGED' : pr.state === 'CLOSED' ? 'CLOSED' : pr.isDraft ? 'DRAFT' : 'OPEN',
-      head: pr.headRefOid, base: pr.baseRefName, mergeable: pr.mergeable,
+      head: pr.headRefOid, base: pr.baseRefName, default_branch: repo.defaultBranchRef?.name || null, mergeable: pr.mergeable,
       rollupOid: commit?.oid || null,
       complete: !rollup?.contexts?.pageInfo?.hasNextPage,
       contexts: (rollup?.contexts?.nodes || []).map(node => ({
@@ -1960,7 +2010,15 @@ class Reconciler {
         const gate = desired.gate.role;
         const gateAccepted = currentGateAccepted(desired);
         const accepted = completionAccepted(desired);
-        findings.push({ code: 'READY_TO_CLOSE', issue: issueNumber, pr: pr.number, head: pr.head, gate, gate_accepted: gateAccepted, accepted, uat: desired.uat.state ? uatText(desired) : null, review: desired.review.state ? reviewText(desired) : null,
+        const uat = desired.uat.state ? uatText(desired) : null;
+        const review = desired.review.state ? reviewText(desired) : null;
+        // Closable as completed: G1-or-later acceptance, UAT settled at the head, every review verdict at the
+        // head passed, merged into the default branch (a staged PR uses Refs) and no open sub-issue.
+        const headVerdicts = (desired.review.verdicts || []).filter(verdict => verdict.head === pr.head);
+        const reviewSettled = review === 'PASSED' ? headVerdicts.every(verdict => verdict.verdict === 'PASSED') : review === null && !(desired.review.verdicts || []).length;
+        const openSubs = issue.open_sub_issues > 0 || (observed.subIssues.get(issueNumber) || []).some(sub => observed.issues.get(sub.number)?.state !== 'closed');
+        const closable = accepted && CLOSABLE_UAT.includes(uat) && reviewSettled && Boolean(pr.base) && pr.base === pr.default_branch && !openSubs;
+        findings.push({ code: 'READY_TO_CLOSE', issue: issueNumber, pr: pr.number, head: pr.head, gate, gate_accepted: gateAccepted, accepted, closable, uat, review,
           detail: `PR #${pr.number} merged, checks GREEN at ${shortSha(pr.head)}; ${gate || 'unassigned gate'} ${gateAccepted ? 'acceptance recorded' : 'not accepted'}` });
       }
       if (desired.candidate.head && pr.state !== 'MERGED' && pr.state !== 'CLOSED' && desired.candidate.head !== pr.head) {
@@ -2484,7 +2542,7 @@ class Reconciler {
       mode: apply ? 'apply' : 'dry-run',
       parent_revision: plan.parent?.revision ?? null,
       findings: plan.findings,
-      close_list: plan.findings.filter(finding => finding.code === 'READY_TO_CLOSE').map(({ issue, pr, head, gate, gate_accepted, accepted, uat, review }) => ({ issue, pr, head, gate, gate_accepted, accepted, uat, review })),
+      close_list: plan.findings.filter(finding => finding.code === 'READY_TO_CLOSE').map(({ issue, pr, head, gate, gate_accepted, accepted, closable, uat, review }) => ({ issue, pr, head, gate, gate_accepted, accepted, closable, uat, review })),
       effects: plan.effects.map(effect => ({ kind: effect.kind, target: effect.target, text: effect.text })),
       recovered: plan.resolutions,
       holds: plan.holds,
@@ -2545,7 +2603,7 @@ function bindRepository({ transport, originUrl, binding }) {
 module.exports = Object.freeze({
   SCHEMA, BINDING_FILE, CLASSES, LIFECYCLES, PATCHABLE_CHILD_FIELDS, PATCHABLE_PARENT_FIELDS, BLOCK_SOURCE, BLOCK_NAME, TRACE_BLOCK_NAME,
   ProgrammeError, GitHubTransport, StateStore, STORE_BACKENDS, ProgrammeGraphReader, GitHubMutator, Reconciler,
-  canonical, canonicalText, contentDigest, sameState, validateParent, validateChild, validateBinding, assertValid, loadBinding,
+  canonical, canonicalText, contentDigest, sameState, validateParent, validateChild, validateBinding, bindingEnabled, assertValid, loadBinding,
   newParent, newChild, isHolder, isLaneHolder, parentRefusal, authoriseWrite, claimDocument, claimLane, assignGate, reopenGate, interruptGate,
   recordReturn, consumeReturn, foldJournals, validateJournal, currentGateAccepted, completionAccepted, applyPatch, refuseNewLegacy, legacyMigrationPatch, orderTies,
   evaluateChecks, renderParentBlockBody, renderChildBlockBody, renderTraceBlockBody, renderCurrentBlockBody, renderBlock, blockDigest, findStateBlock, upsertStateBlock, upsertTraceBlock,

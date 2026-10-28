@@ -5,10 +5,16 @@
 // Shown to people as `toolkit governance <command>`; run as
 //   node <Toolkit checkout>/repo/scripts/toolkit-governance.cjs <command>
 //
-//   status      the repository's governance state and which rules apply
-//   enable      record that you want Toolkit governance here (asks you to confirm)
+//   status      refreshes this computer's read of the binding merged on the default branch, then
+//               shows the repository's governance state and which rules apply
+//   discover    read-only: what Toolkit already finds (a merged binding to reuse, parent-issue and
+//               evidence-store candidates with their evidence) and the one adoption proposal it
+//               would put to you; asks nothing and writes nothing, so agents may run it
+//   enable      shows the discovery proposal, then records that you want Toolkit governance here
+//               (asks you to confirm); it applies once the setup pull request with the binding merges
 //   disable     record that you do not (asks you to confirm); Toolkit stops asking.
-//               `decline` is kept as the older word for it.
+//               `decline` is kept as the older word for it. Where a binding is merged on the
+//               default branch, it decides instead, and only an owner-merged pull request changes it.
 //   reopen      changes nothing: says what was decided and which command changes it
 //   check       read-only conformance report; exit 0 conformant, 1 drift or pending, 2 error
 //   catalogue   the skills offered in this repository's state
@@ -40,6 +46,8 @@ const governance = require('./toolkit-governance-state.cjs');
 const conformance = require('./toolkit-governance-conformance.cjs');
 const catalogue = require('./toolkit-governance-catalogue.cjs');
 const gate = require('./toolkit-governance-gate.cjs');
+const discovery = require('./toolkit-governance-discovery.cjs');
+const bindingCache = require('./toolkit-governance-binding.cjs');
 const protection = require('./toolkit-governance-protection.cjs');
 const security = require('./toolkit-governance-security.cjs');
 const { GovernanceMigration, MigrationError, appendRunRecord } = require('./toolkit-governance-migration.cjs');
@@ -47,15 +55,16 @@ const { GovernanceMigration, MigrationError, appendRunRecord } = require('./tool
 const CMD = subcommand => `\`${governance.governanceCommand(subcommand)}\``;
 
 const CAPABILITY = governance.GOVERNANCE_CAPABILITY;
-const COMMANDS = Object.freeze(['status', 'enable', 'disable', 'reopen', 'check', 'catalogue', 'migrate', 'repair', 'security']);
+const COMMANDS = Object.freeze(['status', 'discover', 'enable', 'disable', 'reopen', 'check', 'catalogue', 'migrate', 'repair', 'security']);
 const ALIASES = Object.freeze({ decline: 'disable' });
-const USAGE = `Usage: ${governance.governanceCommand('<status|enable|disable|reopen|catalogue|repair|security> [--json]')}\n`
+const USAGE = `Usage: ${governance.governanceCommand('<status|discover|enable|disable|reopen|catalogue|repair|security> [--json]')}\n`
   + `       ${governance.governanceCommand('check [--json] [--offline]')}\n`
   + `       ${governance.governanceCommand('migrate [--root <folder>]...')}\n`;
 
 const RULES_TEXT = Object.freeze({
   ENABLED: 'Global rules and coding gates, plus GitHub governance: programme records, decision traces and evidence custody.',
-  ENABLED_INCOMPLETE: 'Global rules and coding gates. GitHub governance starts once the governed block and the programme binding are both in the repository.',
+  ENABLED_INCOMPLETE: 'Global rules and coding gates. GitHub governance starts once the setup pull request with the programme binding merges on the default branch.',
+  ERROR: 'Global rules and coding gates. The binding merged on the default branch cannot be used, so governed records, gate admission and finality hold until a pull request fixes it.',
   DISABLED: 'Global rules and coding gates, without GitHub governance. A governed block in AGENTS.md is not followed.',
   UNDECIDED: `GitHub governance is not decided yet. Toolkit asks in chat (yes, no or later) and records your reply; in your own terminal, ${CMD('enable')} or ${CMD('disable')} also works.`,
   NOT_GITHUB: `GitHub governance works only for github.com repositories, so it will be DISABLED here once you say ok. Toolkit asks in chat; in your own terminal, ${CMD('disable')} also works.`,
@@ -70,19 +79,22 @@ class GovernanceCliError extends Error {
 }
 
 class ToolkitGovernanceCli {
-  #stdout; #stderr; #ask; #interactive; #cwd; #registryOptions; #rulesetReader; #rulesetCreator; #protectionReader; #protectionWriter; #securityReader; #securityWriter; #securityFileWriter;
+  #stdout; #stderr; #ask; #interactive; #cwd; #registryOptions; #discoveryGh; #refresh; #rulesetReader; #rulesetCreator; #protectionReader; #protectionWriter; #securityReader; #securityWriter; #securityFileWriter;
 
   // `ask(question)` resolves to the typed line; `interactive` says whether a person is at a
   // terminal. `registryOptions` ({ registryPath, testOnly: true }), `rulesetReader`,
   // `rulesetCreator`, `protectionReader`, `protectionWriter`, `securityReader`, `securityWriter` and
-  // `securityFileWriter` are only for tests.
-  constructor({ stdout = process.stdout, stderr = process.stderr, ask = terminalAsk, interactive = isInteractiveTerminal(), cwd = process.cwd(), registryOptions = {}, rulesetReader = null, rulesetCreator = null, protectionReader = null, protectionWriter = null, securityReader = null, securityWriter = null, securityFileWriter = null } = {}) {
+  // `securityFileWriter` are only for tests, as are `discoveryGh` (discovery's GitHub reader) and
+  // `refresh` (the merged-binding refresh `status` runs first).
+  constructor({ stdout = process.stdout, stderr = process.stderr, ask = terminalAsk, interactive = isInteractiveTerminal(), cwd = process.cwd(), registryOptions = {}, discoveryGh = null, refresh = null, rulesetReader = null, rulesetCreator = null, protectionReader = null, protectionWriter = null, securityReader = null, securityWriter = null, securityFileWriter = null } = {}) {
     this.#stdout = stdout;
     this.#stderr = stderr;
     this.#ask = ask;
     this.#interactive = interactive === true;
     this.#cwd = cwd;
     this.#registryOptions = registryOptions;
+    this.#discoveryGh = discoveryGh;
+    this.#refresh = refresh || (cwd => governance.refreshMergedBinding(cwd, registryOptions));
     this.#rulesetReader = rulesetReader;
     this.#rulesetCreator = rulesetCreator;
     this.#protectionReader = protectionReader;
@@ -119,6 +131,7 @@ class ToolkitGovernanceCli {
         }).run(roots.length ? roots : [this.#cwd]);
       }
       if (command === 'status') return this.#status(json);
+      if (command === 'discover') return this.#discover(json);
       if (command === 'check') return this.#check(json, offline);
       if (command === 'catalogue') return this.#catalogue(json);
       if (command === 'security') return this.#security(json);
@@ -142,9 +155,23 @@ class ToolkitGovernanceCli {
   }
 
   #status(json) {
+    const refresh = this.#refresh(this.#cwd) || {};
     const state = this.#state();
-    this.#print(json, state, describe(state, this.#registryOptions));
-    return state.rule === 'ERROR' ? 2 : 0;
+    // Why the merged binding was not read just now, in plain words (nothing to say when it was, or
+    // when the repository is not a github.com one).
+    const reason = refresh.refreshed === false ? bindingCache.refreshReason(refresh.error) : null;
+    const lines = describe(state, this.#registryOptions);
+    if (reason) lines.push(`Refresh held: ${reason}. The last read on this computer is kept.`);
+    this.#print(json, reason ? { ...state, refresh: { refreshed: false, reason: refresh.error } } : state, lines);
+    return state.rule === 'ERROR' || state.state === 'ERROR' ? 2 : 0;
+  }
+
+  #discovery() { return new discovery.GovernanceDiscovery({ registryOptions: this.#registryOptions, ...(this.#discoveryGh ? { gh: this.#discoveryGh } : {}) }); }
+
+  #discover(json) {
+    const result = this.#discovery().discover(this.#cwd);
+    this.#print(json, result, discovery.describeDiscovery(result));
+    return result.status === 'error' ? 2 : 0;
   }
 
   #check(json, offline) {
@@ -188,8 +215,12 @@ class ToolkitGovernanceCli {
       this.#print(json, { state: state.state, writes: 0 }, [`Nothing changed. Toolkit turns on dependency and security settings only in a governed repository with a programme binding; this one is ${label(state)}.`]);
       return 1;
     }
+    if (!state.programme_records_bind) {
+      this.#print(json, { state: state.state, writes: 0 }, [`Nothing changed. The binding merged on the default branch was last read over 24 hours ago; run ${CMD('status')} online first.`]);
+      return 1;
+    }
     const protectionOptions = this.#protectionReader ? { reader: this.#protectionReader } : {};
-    const requiredChecks = governance.bindingRequiredChecks(state.root);
+    const requiredChecks = governance.bindingRequiredChecks(state.root, this.#registryOptions);
     const read = () => security.dependencySecurity(state.root, {
       protectionResult: requiredChecks ? protection.defaultBranchProtection(state.root, { requiredChecks, ...protectionOptions }) : null,
       ...(this.#securityReader ? { reader: this.#securityReader } : {}),
@@ -216,6 +247,10 @@ class ToolkitGovernanceCli {
   #reopen(json) {
     const state = this.#state();
     if (state.rule === 'ERROR') throw new GovernanceCliError(`The governance state could not be read (${state.error_code}). ${governance.repairHint(state, this.#registryOptions)}`.trim());
+    if (['M0', 'M1', 'M2'].includes(state.rule)) {
+      this.#print(json, { state: state.state, writes: 0 }, [`Nothing changed. This repository is ${label(state)} by the programme binding merged on its default branch, on every computer.`, 'To change it, merge a pull request that changes .github/toolkit-programme.json.']);
+      return 0;
+    }
     const lines = state.state === 'DISABLED'
       ? ['Nothing changed. You disabled Toolkit governance for this repository, so Toolkit does not ask about it.', `To turn it on, run ${CMD('enable')}. To keep it off, do nothing.`]
       : [`Nothing changed. This repository is ${label(state)}, so there is no disabled decision to reopen.`, state.state === 'ENABLED'
@@ -251,6 +286,9 @@ class ToolkitGovernanceCli {
     if (notGitHub && command === 'enable') {
       throw new GovernanceCliError('GitHub governance works only for github.com repositories, and this one is not on github.com, so it cannot be enabled here. Nothing was written.');
     }
+    if (['M0', 'M1', 'M2'].includes(before.rule)) {
+      throw new GovernanceCliError(`Nothing was written: this repository's binding merged on the default branch decides its governance (${label(before)}) on every computer. To change it, merge a pull request that changes .github/toolkit-programme.json.`);
+    }
     if (!this.#interactive) {
       throw new GovernanceCliError(`Nothing was written: a governance decision is recorded only when you make it yourself. If you are an agent, ask the user in chat instead: "${notGitHub ? 'Reply ok to turn GitHub governance off for this repository.' : gate.ASK}" Toolkit records their own reply. If you are the user, run this in your own terminal.`);
     }
@@ -264,8 +302,12 @@ class ToolkitGovernanceCli {
       this.#print(json, { state: before.state, writes: 0 }, [`Already ${command === 'enable' ? 'enabled' : 'disabled'} for this repository; no new decision was written.`]);
       return 0;
     }
+    if (command === 'enable') {
+      const found = this.#discovery().discover(this.#cwd);
+      this.#stderr.write(`${discovery.describeDiscovery(found).join('\n')}\n`);
+    }
     const question = command === 'enable'
-      ? `Enable Toolkit's GitHub governance for ${before.root}?\nIt starts once the repository also carries the governed block and the programme binding, which arrive only through a pull request you approve.\nGitHub's free security settings (Dependabot alerts and updates, and on a public repository secret scanning, push protection, code scanning and private vulnerability reporting) are then turned on by default (on a private repository the update pull requests they open use your Actions minutes).\nType yes to confirm: `
+      ? `Enable Toolkit's GitHub governance for ${before.root}?\nYour yes covers the adoption proposal above as one setup pull request; governance starts once that pull request, with the programme binding, merges on the default branch.\nGitHub's free security settings (Dependabot alerts and updates, and on a public repository secret scanning, push protection, code scanning and private vulnerability reporting) are then turned on by default (on a private repository the update pull requests they open use your Actions minutes).\nType yes to confirm: `
       : `Turn off Toolkit's GitHub governance for ${before.root}?\nThe global rules and coding gates still apply here, and Toolkit will not ask again unless you run ${CMD('enable')}.\nType yes to confirm: `;
     const answer = String(await this.#ask(question) || '').trim().toLowerCase();
     if (answer !== 'yes') {
@@ -313,15 +355,27 @@ function label(state) {
 function describe(state, registryOptions = {}) {
   const hint = governance.repairHint(state, registryOptions);
   if (state.rule === 'ERROR') return [`State: UNDECIDED (the state could not be read: ${state.error_code}). Prompts in this repository are held until it can.`, ...(hint ? [hint] : [])];
+  if (state.state === 'ERROR') return ['State: ERROR', `Rules: ${RULES_TEXT.ERROR}`, `Problem: ${(state.merged && state.merged.problems.join(', ')) || 'unreadable'}`, ...(state.root ? [`Repository: ${state.root}`] : [])];
   const key = state.rule === 'R9' ? 'NOT_GITHUB' : state.state === 'ENABLED' && state.materials_complete === false ? 'ENABLED_INCOMPLETE' : state.state;
   const lines = [`State: ${label(state)}`, `Rules: ${RULES_TEXT[key]}`];
   if (state.root) lines.push(`Repository: ${state.root}`);
   if (state.rule === 'R1') lines.push(`Folder: ${state.folder} (not a git repository, so DISABLED automatically).`);
-  if (state.state === 'UNDECIDED' && state.rule === 'R6') lines.push('This repository carries the governed block but no programme binding yet.');
-  if (state.state === 'UNDECIDED' && state.rule === 'R4') lines.push('This repository carries the governed block and programme binding; Toolkit still asks you, because files in a repository are not your answer.');
+  if (state.rule === 'M1') lines.push('Decided by the programme binding merged on the default branch, so no computer asks.');
+  if (state.rule === 'M2') lines.push('The programme binding merged on the default branch sets governance to disabled; only an owner-merged pull request turns it back on.');
+  for (const note of state.notes || []) if (NOTE_TEXT[note]) lines.push(NOTE_TEXT[note](state));
   if (state.rule === 'R8' || state.rule === 'R9') lines.push(`Not on github.com: ${state.host ? `this repository is on ${state.host}` : 'there is no single github.com origin remote'}. Toolkit asks about GitHub governance if the repository moves to github.com.`);
   return lines;
 }
+
+const NOTE_TEXT = Object.freeze({
+  'local-no-is-preference': () => 'Your earlier "no" on this computer is now only a preference not to suggest governance; the merged binding decides.',
+  'binding-v2-migration-offered': () => 'The merged binding is version 1; the next setup pull request moves it to version 2.',
+  'merged-binding-stale': () => 'The last read of the merged binding is over 24 hours old, so governed records, gate admission and finality hold until it is read again online.',
+  'merged-binding-unknown': () => 'The binding merged on the default branch has not been read on this computer yet, so governed effects hold until it is.',
+  'binding-belongs-to-other-repository': state => `The default branch's binding belongs to ${state.merged.foreign_repository}, so it does not apply here.`,
+  'pending-binding-merge': () => 'Pending: the working tree has a programme binding; merge it on the default branch to apply it.',
+  'setup-pr-offered': () => `Setup is not finished: run ${CMD('discover')} for the adoption proposal and its one setup pull request.`,
+});
 
 function isInteractiveTerminal() {
   return Boolean(process.stdin.isTTY && process.stderr.isTTY);

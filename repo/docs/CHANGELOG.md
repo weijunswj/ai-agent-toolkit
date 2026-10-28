@@ -1,11 +1,112 @@
 # Toolkit Changelog
 
-## Unreleased
+## 3.16.7 (credentials and plain-text findings before a push)
 
 ### Check before a push
 
 - **Credentials and plain-text findings are refused before they leave the computer:** the shell hook in Claude Code and Codex now reads what a `git push` or `gh pr create` would send and refuses it in the same turn when a line added by any commit being sent carries a credential (the shared formats in `skills/secure-ci-cd/scripts/secret-patterns.cjs`), or, in a repository that runs the plain-text check, the sent version of a changed file has a plain-text finding. It lists up to 10 items by file, line and rule (and commit, for a credential), never the matched text of a credential, link or reference (a banned term shows its short code). It reads the pushed remote and branch, `gh pr create --head` and `--base`, and the same command forms as the force-push check (`git -C`, a `cd` earlier in the line, PowerShell, nested shells). A check that cannot run or takes over 30 seconds lets the command run, and Claude Code shows the user a note. With `--all` or `--tags` only credentials are checked. It moves feedback earlier and does not replace CI or GitHub push protection.
 - **Hand pushes:** where the personal-data guard's hooks and the plain-text check are both installed, the guard's pre-push hook also runs the plain-text check on the files the current branch changes, when the push sends the current commit. It is skipped with a note when the push sends another branch, when there is nothing to compare with or while the working folder has uncommitted changes, and a check that cannot run lets the push go on with a note. Its messages, like CI's, name the file, line and rule without the matched text of a link or reference. The guard installer's `--check` now reports a hook from an older template as outdated.
+
+## 3.16.6 (host words used as data)
+
+- **Host words as data:** the continuation guard no longer refuses commands whose host words (Claude, Codex) and selector words (resume, fork, --continue) appear only as data: issue and PR text, commit messages, search patterns, paths, branch names and Toolkit setup options. This step runs only where the guard would refuse, and only turns that refusal into an allow. Every raw owner, state, workdir and path guard still runs first.
+- **What counts as data:** every command in the input, including commands inside `$(...)`, must be one of a fixed set: `gh issue` and `gh pr` (`comment`, `create`, `edit`, `view`, `list`) and `gh api` with fixed options; git `status`, `log`, `show`, `diff`, `rev-parse`, `branch`, `ls-remote`, `fetch`, `add`, `commit`, `push` and `worktree list|prune|remove|add`, optionally after `-C <folder>`; `grep`; `rg` without the options that run programs; the Toolkit setup, governance, risk-tier and install-health scripts, where only the `--host` value is data; PowerShell file and output cmdlets; POSIX file commands; `cat` or `tee` fed by a heredoc with a quoted delimiter; single-quoted here-strings; and plain variable values. Only the operands each one proves are data; the rest of the command must hold no host or selector word.
+- **Shells:** an explicit bash, sh, PowerShell or pwsh shell is read as that shell, and Claude Code's PowerShell tool as PowerShell. Any other omitted shell must read the command as data under both bash and PowerShell, and its first line must also be safe under cmd. cmd and unknown shells keep the earlier refusal.
+- **Still refused:** a host in command position, in a substitution or behind a wrapper; `eval`, `iex`, `&`, `Start-Process`, `xargs`, `find -exec` and `bash -c`; `git -c`, `--upload-pack` and `<transport>::` remotes; writes to anything other than a plain `.md`, `.txt`, `.log` or `.csv` file outside dot folders; PowerShell scope names such as `$function:` and `$env:` assignments; upper-case POSIX assignments; inline scripts such as `node -e`; and data that Windows PowerShell or cmd would split into extra arguments for git, rg or node.
+- **Folder names:** `Start-Process`, `saps`, `start` and `call` count as command wrappers, git reads a pipe as data only when no option follows it, and the parameter-expansion check runs in linear time.
+- **Correction to 3.16.4:** a folder name after a pipe stays a name for any listed pipe target, and some of those targets can still run code: `ForEach-Object { ... }` with any body, and `git`, `rg` or `sort` with options that run programs. Staged-file runs (`sh f`), `pwsh -File` with a dotted host folder and unquoted `bash -c ~/...` are not covered either.
+
+## 3.16.5 (long runs and test time budgets)
+
+### Guidance
+
+- **Long runs:** a new global rule says to check long runs early against their usual time, stop one that is far over, and stop the process trees you started when a run ends or is interrupted. The fast-tests playbook gains a Long Runs section: note the usual time, check at about a quarter of it, rerun the narrowest form, and keep capture wrappers at a constant cost per write.
+- **Windows leftovers:** `windows-local-dev-services` explains that stopping a parent process on Windows leaves its children running, stops whole trees with `taskkill /T`, and lists your own leftover `node` processes by path. Both command-hygiene playbooks use the tree form.
+
+### Toolkit CI
+
+- **Test time budgets:** the shard manifest sets 120 seconds per test file on Linux and Windows (180 seconds, with a recorded reason, for three files waiting to be split), and the `validate` job fails a file over its budget (`check-test-durations.cjs --ci`). A local `npm run validate:all` leaves that one check out and says so.
+- **Timing refresh with no AI:** `refresh-shard-timings.cjs` reads the test summaries of the latest green Validate run on `main`, reports untimed files and unbalanced shards, and with `--write` or `--open-pr` records the times and moves files between the named shards.
+- **Continuation tests split:** the continuation test is now five files, by area and by hook, and its hook cases start a few hook processes at a time, still one process per case, with the no-change snapshot compared around each batch.
+- **Status document:** `VALIDATION-STRATEGY.md` lists the dependency auto-merge and source-watch workflows.
+
+## 3.16.4 (continuation folder names)
+
+- Dotted host folders used as arguments and the exact upper-case folder variables CODEX_HOME, CLAUDE_CONFIG_DIR, CLAUDE_PROJECT_DIR and CLAUDE_PLUGIN_ROOT count as names rather than continuation evidence.
+- Names in command position, derived-text execution and pipes into unknown commands retain the earlier checks. Only fixed data-reading pipe targets qualify for the folder-name rule.
+- Other variables, escaped or single-quoted variable names, unbalanced quotes, non-ASCII input, control characters and oversized commands retain the earlier evidence checks. Complete literal reader proofs remain independent.
+- Every raw owner, state, workdir and path guard still runs first.
+
+## 3.16.3 (offline queue for governed records)
+
+### Governance
+
+- **Governed records wait offline:** while governance is on but GitHub cannot be reached, or the merged binding has not been read in the last 24 hours, the turn-end checkpoint keeps each turn in an offline queue in Toolkit's own state next to the session (never in the repository; at most 200 turns, 7 days). The next turn end of that session that can write replays them in order, once, and deletes the queue after the write is confirmed. If governance is confirmed off, the queue is deleted without being written. A session that never resumes leaves its queued turns unwritten, and turns older than 7 days are dropped with a note.
+- **Plink and TortoiseGit setups work:** `GIT_SSH` and `GIT_SSH_COMMAND` hold the read of the merged binding only for an ssh origin, where they matter; for https they are ignored. Your own environment, like your global and system git config, is trusted.
+- **`status` says why:** when a refresh keeps the last read (offline, a redirected origin or override, a moved branch), `toolkit-governance.cjs status` says so in plain words.
+
+## 3.16.2 (thread replies, parent folders and replies in your own words)
+
+### Governance
+
+- **Real thread replies are read again:** the app's own notes at the end of a Projects thread message, and files or images attached to a message, no longer make Toolkit ignore the user's reply. A message that carries a file or image is not an answer.
+- **Asked from a parent folder:** a session working in a folder that holds several repositories (or in a decided repository) now asks Toolkit's question when a command or edit reaches github.com repositories that are waiting, naming them all, and one reply answers for every repository named. Before, the question was never asked there and no reply could answer it.
+- **Replies in your own words:** a reply such as "no for both" goes to the agent with a one-use reply ticket; the agent reads what it means and records it with `toolkit-governance-answer.cjs`, and Toolkit only checks that it is the user's own reply after its question, in the same run. When the agent is unsure, or a bare yes, no or later arrives from a parent folder, it asks once more naming exactly what Toolkit would record, and the user's reply can then record only that answer.
+
+## 3.16.0 (governance as a repository setting)
+
+### Governance
+
+- **The repository decides, on every computer:** `.github/toolkit-programme.json` as merged on the default branch is now the repository's governance setting. A repository with a merged binding is never asked about governance again, on any computer or fresh profile. A working tree, another branch, a fork's copy or this computer's own file never turns governance on, and never turns a merged "enabled" off.
+- **Binding version 2:** `governance` is `enabled` or `disabled`, and `parents` lists the programme parent issues (children come from native sub-issues). A merged `disabled` stays off until an owner-merged pull request changes it. Version 1 bindings still read as enabled with one parent, and the next setup pull request moves them to version 2. This repository's own binding is now version 2.
+- **No network per tool call:** `toolkit-governance.cjs status` and session start read the default branch's binding (a bounded fetch) into a cache next to your governance decisions; every hook reads only that cache. The read happens only when the URL git really uses for `origin` is the same repository, so a redirect in git's config changes nothing. Programme records take their store, parent and checks from the merged binding only. Offline, the last read keeps routine work going; governed records, gate admission and finality need a read from the last 24 hours.
+- **An unusable merged binding is an error, not off:** a malformed binding or unknown schema on the default branch shows ERROR. Ordinary work continues; governed records, gate admission and finality hold until a pull request fixes it.
+- **Repositories never set up still ask:** with no merged binding and no answer of yours, a github.com repository still pauses until you answer (yes, no or later), from any chat. Your earlier answers on this computer are kept as they are: a yes means setup is offered, a no means you are not asked again there, and where a binding is merged an old no becomes only a preference not to suggest governance.
+- **Discovery before questions:** the new read-only `toolkit-governance.cjs discover` (also shown by `enable`) looks before asking: it reuses a merged binding, lists parent-issue candidates (programme parents and issues with native sub-issues) and evidence-store candidates (verified private, owned by you, with an `archives/` or `state/` folder; a name alone selects nothing), and puts one adoption proposal: what Toolkit would reuse, add, repair, keep and defer, as one setup pull request after one yes.
+
+## 3.15.28 (footer hook follow-ups)
+
+- **Footer hook shell routing:** each `gh api` call in a command is read for its own method, so a long command stays fast. In the cloud, only shell writes that post a body (`gh issue|pr create`, `comment`, `edit`, `review`, `close --comment`, and `gh api` calls other than DELETE or GET) get the read-back note; `gh issue close`, `gh pr ready` and similar writes no longer do. Every `gh` write's response is still read for the footer.
+- **Code fences:** a fence closes only on the same character (backtick or tilde), at least as long as the opening and with nothing after it, so a footer after a long fence that quotes a shorter one is still found and one inside an open fence is left alone.
+
+## 3.15.27 (numbered questions and fresh posts in Projects)
+
+- **Claude Projects skill (2026-10-28.3):** several owner questions now go in a numbered list under **Waiting on you**, each written `1. **Question: ...?**` with its link, its choices as four-space-indented bullets marking "(my pick)", and an `&nbsp;` spacer line after the last choice. Each **[HH:MM] Update:** line is followed by the same spacer. Overlapping post-format rules are merged into one set, and work threads follow the same post rules.
+- **Projects post hook:** choice bullets under a numbered question need no link of their own, and spacers or other non-list lines no longer end the **Waiting on you** check, so a later item with no link is still caught. Once the owner has written after a post, every edit of that post is refused and a fresh post is asked for, so an answer can no longer land above the owner's message; an owner reply under the running post itself still leaves it open. Lines now also split on a lone carriage return.
+
+## 3.15.26 (cloud footer on GitHub posts)
+
+### GitHub posts
+
+- **Footer flagged after posting:** in cloud sessions the GitHub route appends a "Generated by Claude Code" footer to posts after they leave the session. In a governed, guarded or evidence-store checkout, a new Claude Code after-tool hook reads what GitHub sent back and tells the agent to remove the footer at once with the matching connector edit (issue and pull request comments, pull request and issue bodies). Review comments, review replies and review bodies, which the cloud cannot edit cleanly, are listed for the device sweep instead. The hook never stops a tool call and stays silent when it cannot read its input.
+- **Device sweep:** `node repo/scripts/toolkit-github-footer-sweep.cjs --repo <owner/name> [--since <ISO time>] [--apply]` scans a repository's comments, review comments, reviews and issue and pull request bodies for the footer, with no AI step, so a scheduled task can run it. With `--apply` it edits the signed-in account's posts, skips any post changed since the scan, and reads each edit back. Exit codes: 0 none found, 3 found and left, 4 cleaned, 1 a failure, 2 bad arguments.
+
+## 3.15.24 (answer from a Projects thread)
+
+### Governance
+
+- **Answer from a Claude Projects thread:** the user's yes, no, later or ok sent in a Projects thread now answers the governance question in the Remote Control session it reaches, and lifts the hold there. Before, the thread's wrapping meant the reply was never read as an answer, and the repository stayed held. Only the user's own message counts: a coordinator's relay, a scheduled task or anyone else's message does not.
+
+## 3.15.23 (finished child issues close as completed)
+
+- **Child issues close with their merge:** once a merge completes every criterion of a child issue and any owner UAT passed, the PR that completes it says `Closes #n` so the merge closes it as completed; when that could not apply (UAT after the merge, or work over several PRs), the controller closes it without asking. Closing a parent, a programme issue or as not planned still needs the owner. Staged, UAT-pending, blocked, partial or follow-up PRs keep using `Refs`.
+- **Reconciler close list:** each ready-to-close entry is marked closable only with G1-or-later acceptance, UAT recorded as not required, passed or retained at the head, every review verdict at the head passed, a merge into the default branch and no open sub-issue. The reconciler itself still never closes.
+- **Claude Projects skill (2026-10-28.2):** the skill and the managed project instructions no longer ask the owner before closing a completed child issue.
+
+## 3.15.22 (no Codex-only settings in the Claude plugin)
+
+- **Claude plugin manifest:** the Claude Code plugin no longer carries the Codex-only `interface` block, so syncing the plugin on claude.ai no longer warns that it strips an unknown key. The Codex plugin keeps its display name, prompts and icons.
+
+## 3.15.21 (no model or effort asks in Projects setup)
+
+- **Claude Projects skill (2026-10-28.1):** guided setup no longer asks the owner to choose a coordinator model or effort in the project's settings, and the setup inventory drops its models row. Thread effort is still set on every thread the coordinator starts, and scheduled tasks and gates keep their own model and effort rules.
+
+## 3.15.20 (merge tripwire and stale-copy warning)
+
+### Who may do what
+
+- **Merges wait for the user (a tripwire, not a lock):** on Claude Code and Codex, the hooks hold an agent's merge until the user typed a line with "merge" next to the pull request number in their own session, such as "merge 618", "618 merge" or "ok to merge 618". A line with a quote, a question, or one of a fixed list of words for a no, a doubt, a condition, a delay, a report or another kind of merge ("merge main into 618") does not count. This covers `gh pr merge`, the GitHub API merge endpoint and the GitHub connector's merge tool. One approval allows one merge of that pull request in that repository within a day, and the merge must name the head commit it expects. Connector auto-merge, GraphQL merges, the merge queue, branch merges, ref writes and pushes to the default branch are refused when written directly. It reads command text, so it catches mistakes, not a determined agent: wrapped or nested sessions, scripts, files, other HTTP clients and direct commits through the API or the connector's file tools get past it. Agents act as the user on GitHub, so GitHub cannot tell their merges apart; the hard limit is the repository's own rules where it has them (a pull request for the default branch, no force-push, no deletion). Cloud sessions are not covered yet.
+- **Stale plugin copies speak up:** when a session runs an account-synced Toolkit copy that is older than a Toolkit repository in its folder, the session-start message says so and that newer safety hooks do not run, instead of staying silent.
 
 ## 3.15.19 (proved binding separators and literal Git operands)
 

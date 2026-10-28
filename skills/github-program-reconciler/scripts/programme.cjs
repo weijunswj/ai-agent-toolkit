@@ -259,17 +259,22 @@ function runGit(gitPath, cwd, args) {
   return result.stdout.trim();
 }
 
-// Refuses unless the Toolkit governance state for the repository is ENABLED with the governed block and
-// binding present. The state module ships with the plugin; without it nothing can show the repository
-// is ENABLED, so the command refuses.
+// Refuses unless the Toolkit governance state for the repository is ENABLED with programme records in
+// force (a fresh read of the binding merged on the default branch), and returns that merged binding:
+// only it names the store, parent, prefixes and required checks, never a working-tree copy an agent
+// can edit. The state module ships with the plugin; without it nothing can show the repository is
+// ENABLED, so the command refuses.
 function requireGitHubGovernance(repoRoot) {
   let governance;
   try { governance = require('../../../repo/scripts/toolkit-governance-state.cjs'); } catch {
     throw new ProgrammeError('GOVERNANCE_STATE_UNAVAILABLE', 'The Toolkit governance state could not be read from this copy, so no programme command runs. Use a full Toolkit install.');
   }
   const current = governance.governanceState(repoRoot);
-  if (current.state === 'ENABLED' && current.governed_rules_bind) return;
-  throw new ProgrammeError('GITHUB_GOVERNANCE_OFF', `Toolkit's GitHub governance is ${current.state === 'ENABLED' ? 'ENABLED but incomplete (the governed block or binding is missing)' : current.state} for this repository, so no programme command runs. Nothing changed.`);
+  if (current.state === 'ENABLED' && current.programme_records_bind) {
+    const merged = governance.mergedBinding(repoRoot);
+    if (merged) return merged;
+  }
+  throw new ProgrammeError('GITHUB_GOVERNANCE_OFF', `Toolkit's GitHub governance is ${current.state === 'ENABLED' ? (current.governed_rules_bind ? 'ENABLED, but the binding merged on the default branch was last read over 24 hours ago or not at all (run toolkit governance status online)' : 'ENABLED but incomplete (the binding is not merged on the default branch yet)') : current.state} for this repository, so no programme command runs. Nothing changed.`);
 }
 
 // Binds repository identity, the store and the writer. `deps` lets tests supply a transport and the
@@ -284,8 +289,9 @@ function openContext(args, deps = {}) {
   }
   // GitHub governance must be ENABLED with its materials in place; a DISABLED or undecided repository
   // never runs programme commands, whatever files it carries. Tests that supply the origin own the state.
-  if (!deps.originUrl) requireGitHubGovernance(repoRoot);
-  const binding = deps.binding || state.loadBinding(repoRoot);
+  // Tests that supply the origin own the state and the binding.
+  const merged = deps.originUrl ? null : requireGitHubGovernance(repoRoot);
+  const binding = deps.binding || merged || state.loadBinding(repoRoot);
   const base = deps.transport || new state.GitHubTransport({ ghPath: state.resolveExecutable('gh') });
   // A pass that holds the lock checks it still does, and renews it, before every GitHub request.
   const transport = deps.heartbeat ? Object.assign(Object.create(base), { request: (...call) => { deps.heartbeat(); return base.request(...call); } }) : base;
@@ -599,7 +605,7 @@ function formatReport(report) {
     `${report.mode === 'apply' ? 'Apply' : 'Dry run'}: ${report.summary}`,
   ];
   if (report.findings.length) lines.push('', 'Findings', ...report.findings.map(finding => `- ${finding.code} #${finding.issue}: ${finding.detail}`));
-  if (report.close_list.length) lines.push('', 'Ready to close (the controller decides; nothing is closed automatically)', ...report.close_list.map(entry => `- #${entry.issue}: PR #${entry.pr}, head ${entry.head.slice(0, 7)}; ${entry.gate || 'unassigned gate'} ${entry.gate_accepted ? 'acceptance recorded' : 'not accepted'}; UAT: ${entry.uat || 'not recorded'}; review: ${entry.review || 'not recorded'}${entry.accepted ? '' : '; completion not accepted'}`));
+  if (report.close_list.length) lines.push('', 'Ready to close (the controller closes each closable one as completed unless a criterion is still open; the reconciler never closes)', ...report.close_list.map(entry => `- #${entry.issue}: PR #${entry.pr}, head ${entry.head.slice(0, 7)}; ${entry.gate || 'unassigned gate'} ${entry.gate_accepted ? 'acceptance recorded' : 'not accepted'}; UAT: ${entry.uat || 'not recorded'}; review: ${entry.review || 'not recorded'}${entry.accepted ? '' : '; completion not accepted'}${entry.closable ? '; closable' : ''}`));
   if (report.mode === 'apply' && report.results.length) lines.push('', 'Effects', ...report.results.map(entry => `- ${entry.outcome}: ${entry.text}${entry.detail ? ` (${entry.detail})` : ''}`));
   else if (report.effects.length) lines.push('', 'Planned effects', ...report.effects.map((effect, index) => `${index + 1}. ${effect.text}`));
   if (report.recovered.length) lines.push('', 'Recovered from an earlier pass', ...report.recovered.map(entry => `- ${entry.outcome}: ${entry.kind} ${entry.number} intent ${entry.intent_id}`));

@@ -254,6 +254,8 @@ function validateInstalledEnforcement(installed, repoRoot, expectedVersion) {
     ['repo/scripts/toolkit-push-check.cjs', false],
     ['skills/secure-ci-cd/scripts/secret-patterns.cjs', false],
     ['skills/secure-ci-cd/scripts/plain-text-check.cjs', false],
+    ['repo/scripts/toolkit-github-footer-hook.cjs', false],
+    ['repo/scripts/toolkit-github-footer-guard.cjs', false],
     ['repo/scripts/repo-ignore-hygiene.cjs', false],
     ['repo/scripts/repo-local-backup.cjs', false],
     ["repo/scripts/toolkit-antigravity-project-skills.cjs",false],

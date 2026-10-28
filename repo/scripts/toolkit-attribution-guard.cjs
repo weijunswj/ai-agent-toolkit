@@ -349,11 +349,12 @@ function gitConfigText(root) {
 const STORE_URL = /(?:^|[/:])transport-[\w.-]+?(?:\.git)?\/?$/i;
 function storeUrl(url) { return STORE_URL.test(String(url || '').trim()); }
 
-// Whether the repository's GitHub governance state is ENABLED (setup finished or not). A state that
-// cannot be read, or a copy without the state module, counts as not enabled here; the block and
-// guard-config checks below still apply.
+// Whether the repository's GitHub governance state is ENABLED (setup finished or not), or ERROR (a
+// merged binding that cannot be used never quietly drops protection). A state that cannot be read, or
+// a copy without the state module, counts as not enabled here; the block and guard-config checks
+// below still apply.
 function governanceEnabled(root, registryOptions) {
-  try { return require('./toolkit-governance-state.cjs').governanceState(root, registryOptions).state === 'ENABLED'; } catch { return false; }
+  try { return ['ENABLED', 'ERROR'].includes(require('./toolkit-governance-state.cjs').governanceState(root, registryOptions).state); } catch { return false; }
 }
 
 // What protects the repository a folder is in: `checked` when the nearest folder with a .git entry
@@ -522,4 +523,4 @@ function attributionDecision(input, options = {}) {
   return reason ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } } : {};
 }
 
-module.exports = Object.freeze({ ATTRIBUTION_PATTERNS, BYPASS_MESSAGE, FORCE_MESSAGE, MESSAGE, attributionDecision, attributionRefusal, bypassRefusal, hasAttribution, outgoingChanges, outgoingRefusal });
+module.exports = Object.freeze({ ATTRIBUTION_PATTERNS, BYPASS_MESSAGE, FORCE_MESSAGE, MESSAGE, attributionDecision, attributionRefusal, bypassRefusal, hasAttribution, outgoingChanges, outgoingRefusal, repositoryKind });
