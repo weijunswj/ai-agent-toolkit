@@ -76,7 +76,7 @@ Before committing, pushing, creating a pull request, merging, or deploying, paus
 
 ## Check Before A Push
 
-- With the Toolkit plugin installed, the shell hook in Claude Code and Codex refuses a `git push` or `gh pr create` when a commit being sent adds a credential (the formats in [`scripts/secret-patterns.cjs`](scripts/secret-patterns.cjs)) or, where the plain-text check runs, a sent file has a plain-text finding. It names the file, line and rule (and the commit, for a credential), never the matched text. Take a credential out of the commits being sent and treat it as exposed if it was real; mark a reviewed false positive with `secret-scan: allow <reason>` on that line. If the check cannot run, the push goes ahead with a note.
+- With the Toolkit plugin installed, the shell hook in Claude Code and Codex refuses a `git push` or `gh pr create` when a commit being sent adds a credential (the formats in [`scripts/secret-patterns.cjs`](scripts/secret-patterns.cjs)) or, where the plain-text check runs, a sent file has a plain-text finding. It names the file, line and rule (and the commit, for a credential), never the matched text of a credential, link or reference (a banned term shows its short code). Take a credential out of the commits being sent and treat it as exposed if it was real; mark a reviewed false positive with `secret-scan: allow <reason>` on that line. If the check cannot run, the push goes ahead with a note.
 
 ## Local Security Scan
 

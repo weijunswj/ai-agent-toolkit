@@ -94,7 +94,14 @@ function hookText(name) {
       'if [ -f "$plain" ] && [ -f "$root/.github/plain-text.json" ]; then',
       '  head=$(git rev-parse -q --verify HEAD)',
       '  base=$(git rev-parse -q --verify \'@{upstream}\' || git rev-parse -q --verify refs/remotes/origin/HEAD || git rev-parse -q --verify refs/remotes/origin/main || git rev-parse -q --verify refs/remotes/origin/master)',
-      '  case " $(printf \'%s\\n\' "$input" | tr \'\\n\' \' \') " in *" $head "*) sends_head=yes ;; *) sends_head= ;; esac',
+      // Only each line's local object counts, peeled to a commit: a delete sends nothing, and a tag at
+      // HEAD sends the current commit.
+      '  sends_head=',
+      '  while read -r lref lsha rref rsha; do',
+      '    [ -n "$head" ] && [ "$(git rev-parse -q --verify "$lsha^{commit}" 2>/dev/null)" = "$head" ] && sends_head=yes',
+      '  done <<EOF',
+      '$input',
+      'EOF',
       '  if [ -z "$head" ] || [ -z "$sends_head" ]; then',
       '    echo "plain-text check: skipped, because this push does not send the current commit; the pushed files were not checked here." >&2',
       '  elif [ -z "$base" ]; then',

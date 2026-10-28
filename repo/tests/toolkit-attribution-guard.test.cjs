@@ -717,12 +717,17 @@ test('push check: a URL remote, --all, the baseline, the plain-text scope and a 
   commitAll(repo, 'url');
   const url = git(repo, 'remote', 'get-url', 'origin').trim();
   assert.match(outgoingRefusal(`git push "${url}" by-url`, repo, quiet()), /src\/url\.js:1 /);
+  // Once the remote has that commit, a clean commit on top is all a URL push sends.
+  git(repo, 'push', '--quiet', 'origin', 'by-url');
+  writeFiles(repo, { 'docs/url.md': 'Plain.\n' });
+  commitAll(repo, 'clean on top');
+  assert.equal(outgoingRefusal(`git push "${url}" by-url`, repo, quiet()), '');
   // --all reads every branch; the plain-text step is skipped there.
   branch('all-plain');
-  writeFiles(repo, { 'docs/all.md': `See ${numberReference()}.\n` });
+  writeFiles(repo, { 'docs/all.md': `See ${numberReference()}.\n`, 'src/all.js': `"${fakeToken()}"\n` });
   commitAll(repo, 'all');
   const all = outgoingRefusal('git push --all origin', repo, quiet());
-  assert.match(all, /src\/url\.js:1 /);
+  assert.match(all, /src\/all\.js:1 /);
   assert.ok(!all.includes('number-reference'));
   // The baseline allows what was already there, up to its count.
   branch('baseline');

@@ -93,6 +93,17 @@ test('pre-push: with the plain-text check installed too, a hand push of a change
   assert.equal(other.status, 0, other.stderr);
   assert.match(other.stderr, /plain-text check: skipped, because this push does not send the current commit/);
   repo.git(['reset', '-q', '--hard', 'HEAD~1']);
+  // Deleting a remote branch that sits at the current commit sends nothing, so it is not checked.
+  repo.git(['push', '-q', '--no-verify', 'origin', 'HEAD:refs/heads/at-head']);
+  const removed = repo.git(['push', '-q', 'origin', '--delete', 'at-head'], { allowFailure: true });
+  assert.equal(removed.status, 0, removed.stderr);
+  assert.match(removed.stderr, /plain-text check: skipped, because this push does not send the current commit/);
+  // No upstream: the step compares with origin/main instead, and still blocks the finding.
+  repo.git(['branch', '--unset-upstream']);
+  const fallback = repo.git(['push', '-q', 'origin', 'main'], { allowFailure: true });
+  assert.notEqual(fallback.status, 0);
+  assert.match(fallback.stderr, /docs\/guide\.md:1: number-reference/);
+  repo.git(['branch', '-u', 'origin/main']);
   // Uncommitted changes: the working folder is not what is pushed, so the step is skipped with a note.
   repo.write('docs/guide.md', 'Being rewritten.\n');
   const dirty = repo.git(['push', '-q', 'origin', 'main'], { allowFailure: true });
