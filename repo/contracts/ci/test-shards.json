@@ -269,6 +269,20 @@
     "seconds_per_file": {
       "linux": 120,
       "windows": 120
+    },
+    "raised": {
+      "linux:repo/tests/n8n-workflow-transport.test.cjs": {
+        "seconds": 180,
+        "reason": "split pending: 62 to 117 s on Linux in CI; CI runs vary up to about 1.5x, so 120 s fails runs at random until the file is split by area"
+      },
+      "windows:repo/tests/toolkit-governance-gate.test.cjs": {
+        "seconds": 180,
+        "reason": "split pending: 68 to 131 s on Windows in CI; CI runs vary up to about 1.5x, so 120 s fails runs at random until the file is split by area"
+      },
+      "windows:repo/tests/toolkit-setup-orchestrator-2.test.cjs": {
+        "seconds": 180,
+        "reason": "split pending: 77 to 116 s on Windows in CI; CI runs vary up to about 1.5x, so 120 s fails runs at random until the file is split by area"
+      }
     }
   },
   "durations_seconds": {

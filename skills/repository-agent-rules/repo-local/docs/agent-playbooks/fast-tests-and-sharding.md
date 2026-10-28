@@ -18,7 +18,7 @@ Use when tests or CI got slow, or when adding a test runner, test shards or CI t
 ## Long Runs
 
 - Before a long or background command, note its usual time (CI timings, a recent run or the file's budget), then check progress early: at about a quarter of that time, or 15 minutes, whichever comes first.
-- When it is far over (about twice its usual time) or its rate keeps falling, stop it and rerun the cheapest plain form that still proves the point; never wait open-ended. Say what you stopped and why.
+- When a test, check or build is far over (about twice its usual time) or its rate keeps falling, stop it and rerun the cheapest plain form that still proves the point; never wait open-ended. Say what you stopped and why. An install, migration or deploy stopped halfway can leave a partial state: report how far over it is and ask before stopping it.
 - Run the narrowest check that proves the point: one file or one test name before the whole suite.
 - When you stop a run, stop its whole process tree, not just the parent. On Windows, follow the orphan cleanup in `windows-local-dev-services`.
 - Capture and logging wrappers must cost the same per write however long the run is: open the log once and stream to it, or batch writes; never reopen, re-read or rewrite one growing file per test. For big suites, keep only failures and the summary.
