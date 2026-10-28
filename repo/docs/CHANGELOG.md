@@ -1,12 +1,20 @@
 # Toolkit Changelog
 
-## 3.16.1 (offline queue for governed records)
+## 3.16.3 (offline queue for governed records)
 
 ### Governance
 
 - **Governed records wait offline:** while governance is on but GitHub cannot be reached, or the merged binding has not been read in the last 24 hours, the turn-end checkpoint keeps each turn in an offline queue in Toolkit's own state next to the session (never in the repository; at most 200 turns, 7 days). The next turn end of that session that can write replays them in order, once, and deletes the queue after the write is confirmed. If governance is confirmed off, the queue is deleted without being written. A session that never resumes leaves its queued turns unwritten, and turns older than 7 days are dropped with a note.
 - **Plink and TortoiseGit setups work:** `GIT_SSH` and `GIT_SSH_COMMAND` hold the read of the merged binding only for an ssh origin, where they matter; for https they are ignored. Your own environment, like your global and system git config, is trusted.
 - **`status` says why:** when a refresh keeps the last read (offline, a redirected origin or override, a moved branch), `toolkit-governance.cjs status` says so in plain words.
+
+## 3.16.2 (thread replies, parent folders and replies in your own words)
+
+### Governance
+
+- **Real thread replies are read again:** the app's own notes at the end of a Projects thread message, and files or images attached to a message, no longer make Toolkit ignore the user's reply. A message that carries a file or image is not an answer.
+- **Asked from a parent folder:** a session working in a folder that holds several repositories (or in a decided repository) now asks Toolkit's question when a command or edit reaches github.com repositories that are waiting, naming them all, and one reply answers for every repository named. Before, the question was never asked there and no reply could answer it.
+- **Replies in your own words:** a reply such as "no for both" goes to the agent with a one-use reply ticket; the agent reads what it means and records it with `toolkit-governance-answer.cjs`, and Toolkit only checks that it is the user's own reply after its question, in the same run. When the agent is unsure, or a bare yes, no or later arrives from a parent folder, it asks once more naming exactly what Toolkit would record, and the user's reply can then record only that answer.
 
 ## 3.16.0 (governance as a repository setting)
 
