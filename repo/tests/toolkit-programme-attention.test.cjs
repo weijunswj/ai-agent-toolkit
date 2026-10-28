@@ -454,6 +454,8 @@ test('F: the Hooks lines for each host, with the portable path whenever a host h
   const absent = { toolkitInstall: () => ({ installed: false }) };
   const rows = [
     ['Claude Code, plugin, hooks declared', { claudeRegistry: installed, claudeBlockers: () => [] }, {}, ['Hooks: Claude Code present (trust not checkable)'], false],
+    ['Claude Code from the desktop app\'s claude.ai account copy', { claudeRegistry: absent, claudeAccountCopy: () => plugin, claudeBlockers: () => [] }, {}, ['Hooks: Claude Code present (claude.ai account copy; trust not checkable)'], false],
+    ['Claude Code, no install and no account copy', { claudeRegistry: absent, claudeAccountCopy: () => null }, {}, ['Hooks: Claude Code plugin absent'], true],
     ['Claude Code, hooks off in settings', { claudeRegistry: installed, claudeBlockers: () => ['Your Claude Code user settings set disableAllHooks.'] }, {}, ['Hooks: Claude Code disabled (Your Claude Code user settings set disableAllHooks.)'], true],
     ['Codex, plugin enabled', { claudeRegistry: absent, codexInspect: () => ({ status: 'enabled' }) }, { codex: true }, ['Hooks: Claude Code plugin absent', 'Hooks: Codex present, trust unknown'], true],
     ['Projects synced copy', { claudeRegistry: absent }, { synced: true }, ['Hooks: Claude Code plugin absent', 'Hooks: Claude Projects no local hooks'], true],

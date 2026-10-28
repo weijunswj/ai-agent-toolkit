@@ -5,7 +5,8 @@
 // synced Projects skill. Hook trust is not readable on either host, so a present hook is never
 // reported as trusted. A missing hook refuses nothing; the line names the portable path instead.
 //
-//   Claude Code     present (trust not checkable) | disabled (settings turn hooks off) | plugin absent
+//   Claude Code     present (trust not checkable), from a local plugin install or the desktop app's
+//                   claude.ai account copy | disabled (settings turn hooks off) | plugin absent
 //   Codex           present, trust unknown | plugin absent
 //   Claude Projects no local hooks (a skill synced from claude.ai runs in the cloud)
 
@@ -19,7 +20,7 @@ const CODEX_PLUGIN_ID = 'ai-agent-toolkit@ai-agent-toolkit-local';
 function isDir(folder) { try { return fs.statSync(folder).isDirectory(); } catch { return false; } }
 
 // The Claude Code line, or null when Claude Code is not on this computer.
-function claudeCodeHooks({ environment, homeDir, registry = null, blockers = null }) {
+function claudeCodeHooks({ environment, homeDir, registry = null, blockers = null, accountCopy = null }) {
   const configDir = environment.CLAUDE_CONFIG_DIR || path.join(homeDir, '.claude');
   if (environment.CLAUDE_CODE_REMOTE === 'true') return { host: 'Claude Code', state: 'no local hooks (cloud session)' };
   if (!isDir(configDir)) return null;
@@ -28,12 +29,32 @@ function claudeCodeHooks({ environment, homeDir, registry = null, blockers = nul
     const { ClaudePluginRegistry } = require('./toolkit-claude-plugin-registry.cjs');
     install = (registry || new ClaudePluginRegistry({ environment, homeDir })).toolkitInstall();
   } catch { install = { installed: false }; }
-  if (!install.installed) return { host: 'Claude Code', state: 'plugin absent' };
-  if (!fs.existsSync(path.join(install.runningRoot, '.claude-plugin', 'hooks', 'hooks.json'))) return { host: 'Claude Code', state: 'plugin present, no hooks declared' };
+  // The Claude desktop app runs the Toolkit copy from the user's claude.ai account instead of a
+  // local plugin install; its declared hooks run the same way.
+  const account = install.installed ? null : (accountCopy || accountHookCopy)(environment);
+  if (!install.installed && !account) return { host: 'Claude Code', state: 'plugin absent' };
+  const root = install.installed ? install.runningRoot : account;
+  if (!fs.existsSync(path.join(root, '.claude-plugin', 'hooks', 'hooks.json'))) return { host: 'Claude Code', state: 'plugin present, no hooks declared' };
   let reasons = [];
   try { reasons = (blockers || require('./setup-claude-toolkit-plugin.cjs').hookBlockers)({ env: { ...environment, USERPROFILE: environment.USERPROFILE || homeDir } }); }
   catch { reasons = ['the settings that can turn hooks off could not be read']; }
-  return reasons.length ? { host: 'Claude Code', state: 'disabled', detail: reasons.join(' ') } : { host: 'Claude Code', state: 'present (trust not checkable)' };
+  if (reasons.length) return { host: 'Claude Code', state: 'disabled', detail: reasons.join(' ') };
+  return { host: 'Claude Code', state: account ? 'present (claude.ai account copy; trust not checkable)' : 'present (trust not checkable)' };
+}
+
+// The folder of a Toolkit copy the Claude desktop app keeps from the user's claude.ai account, or
+// null. Read only, from the app's plugin manifests (see toolkit-install-health.cjs).
+function accountHookCopy(environment) {
+  try {
+    const { claudeAccountPluginFolders } = require('./toolkit-install-health.cjs');
+    for (const folder of claudeAccountPluginFolders(environment)) {
+      const manifest = JSON.parse(fs.readFileSync(path.join(folder, 'manifest.json'), 'utf8'));
+      for (const plugin of Array.isArray(manifest?.plugins) ? manifest.plugins : []) {
+        if (plugin?.name === 'ai-agent-toolkit' && typeof plugin.id === 'string' && /^[A-Za-z0-9_-]+$/.test(plugin.id)) return path.join(folder, plugin.id);
+      }
+    }
+  } catch { /* no account copy */ }
+  return null;
 }
 
 // The Codex line, or null when Codex is not on this computer.
@@ -59,7 +80,7 @@ function projectsHooks({ environment, homeDir }) {
 // [{ host, state, detail? }] and whether the portable path applies.
 function hookCapability({ environment = process.env, homeDir = os.homedir(), readers = {} } = {}) {
   const hosts = [
-    claudeCodeHooks({ environment, homeDir, registry: readers.claudeRegistry, blockers: readers.claudeBlockers }),
+    claudeCodeHooks({ environment, homeDir, registry: readers.claudeRegistry, blockers: readers.claudeBlockers, accountCopy: readers.claudeAccountCopy }),
     codexHooks({ environment, homeDir, inspect: readers.codexInspect }),
     projectsHooks({ environment, homeDir }),
   ].filter(Boolean);
