@@ -96,7 +96,7 @@ function fixture({ lane = false } = {}) {
   fx.reconcile = () => {
     const reconciler = new state.Reconciler({
       store, reader: new state.ProgrammeGraphReader({ transport: github, repository }), mutator: new state.GitHubMutator({ transport: github, repository }),
-      binding, writer: controller, toolkitVersion: '3.9.0',
+      binding, writer: controller, toolkitVersion: '3.9.0', now: () => new Date(github.clock).toISOString(),
     });
     return reconciler.run({ apply: true });
   };
@@ -876,11 +876,40 @@ test('N2: a fresh report of a one-time code reopens an acknowledged or disposed 
   assert.deepEqual(oneTime(fx, 'JOURNAL_ERROR'), ['acknowledged'], 'the old error, already acknowledged: not reopened');
   fx.reconcile();
   assert.deepEqual(oneTime(fx, 'JOURNAL_ERROR'), ['resolved'], 'then resolved on the next complete pass');
+  // The executor keeps working: its next turns still show the old error, which never reopens it.
+  for (const head of [SHA_A, SHA_B]) {
+    fx.github.tick();
+    fx.head = head;
+    fx.turnEnd('exec-a');
+    fx.reconcile();
+    assert.deepEqual(oneTime(fx, 'JOURNAL_ERROR'), ['resolved'], 'the old error does not come back after it resolved');
+  }
   for (let n = 0; n < 5; n += 1) fx.github.tick();
   checkpoint.recordError(hash, 'GH_FAILED', 'GitHub could not be reached again', clock);
   fx.turnEnd('exec-a');
   fx.reconcile();
   assert.deepEqual(oneTime(fx, 'JOURNAL_ERROR'), ['new'], 'a new error reopens it');
+});
+
+test('F2: a newer checkpoint error reopens a JOURNAL_ERROR that is still acknowledged', () => {
+  const fx = fixture();
+  fx.ctrl(['assign', '--issue', '423', '--role', 'G1', '--assignment', 'g1-a1']);
+  fx.run(['bind', '--issue', '423', '--assignment', 'g1-a1', '--session', 'exec-a']);
+  const hash = checkpoint.sessionHash('exec-a');
+  const clock = { sessionsDir: fx.sessionsDir, now: () => new Date(fx.github.clock).toISOString() };
+  checkpoint.recordError(hash, 'GH_FAILED', 'GitHub could not be reached', clock);
+  fx.turnEnd('exec-a');
+  fx.reconcile();
+  fx.github.tick();
+  fx.ctrl(['ack', '--finding', fx.parentDoc().attention.find(entry => entry.code === 'JOURNAL_ERROR').id]);
+  assert.deepEqual(oneTime(fx, 'JOURNAL_ERROR'), ['acknowledged']);
+  // A newer error lands before any pass resolves the acknowledged entry.
+  for (let n = 0; n < 5; n += 1) fx.github.tick();
+  checkpoint.recordError(hash, 'GH_FAILED', 'GitHub could not be reached again', clock);
+  fx.head = SHA_B;
+  fx.turnEnd('exec-a');
+  fx.reconcile();
+  assert.deepEqual(oneTime(fx, 'JOURNAL_ERROR'), ['new'], 'reopened from acknowledged');
 });
 
 test('N3: a JOURNAL_ERROR stays new while the task has a live gate, and resolves once it has none', () => {

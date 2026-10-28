@@ -360,10 +360,12 @@ function foldAttention(current, { source, seen = [], complete, now, hold = [] })
     const existing = byId.get(id);
     if (existing) {
       // A resolved finding that comes back is new again. A one-time code is a fresh event each time it
-      // is reported, so it also reopens an answered entry, unless the report carries the time of what
-      // it reports and that is no later than the answer (a journal that still shows an old error).
+      // is reported, so it also reopens an answered entry. A report that carries the time of what it
+      // reports (a journal's error) reopens nothing when that is no later than the entry's last change:
+      // a journal that still shows an old error is not a new one, whether the entry was answered or
+      // has resolved since.
       const fresh = !since || Number.isNaN(Date.parse(since)) || Date.parse(since) > Date.parse(existing.changed_at);
-      const reopens = existing.state === 'resolved' || (ONE_TIME_CODES.has(code) && ['acknowledged', 'disposed'].includes(existing.state) && fresh);
+      const reopens = fresh && (existing.state === 'resolved' || (ONE_TIME_CODES.has(code) && ['acknowledged', 'disposed'].includes(existing.state)));
       if (reopens) { existing.state = 'new'; existing.changed_at = now; changed = true; }
       return;
     }
