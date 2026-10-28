@@ -98,6 +98,16 @@
             "timeout": 10
           }
         ]
+      },
+      {
+        "matcher": "^(?:Bash|PowerShell|mcp__.*[Gg][Ii][Tt][Hh][Uu][Bb].*)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-github-footer-hook.cjs\"",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "Stop": [
