@@ -251,9 +251,19 @@ test('reader: default branch from the symref, then the binding at its tip; hosti
   }
   assert.equal(bindingCache.readDefaultBranchBinding('/r', { hooksDir: GUARDED.hooksDir, environment: {}, runGit: watching(base) }).error, 'remote-redirected', 'no expected origin: nothing is read');
   // M2: transport or config overrides in the environment, or in command-scope config, are held too.
-  for (const name of ['GIT_SSH', 'GIT_SSH_COMMAND', 'GIT_CONFIG_PARAMETERS', 'GIT_CONFIG_COUNT']) {
+  for (const name of ['GIT_CONFIG_PARAMETERS', 'GIT_CONFIG_COUNT']) {
     assert.deepEqual(bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, environment: { [name]: name === 'GIT_CONFIG_COUNT' ? '1' : 'x' }, runGit: watching(base) }), { status: 'unknown', error: 'remote-redirected' }, name);
   }
+  // GIT_SSH and GIT_SSH_COMMAND change only an ssh origin's transport: held there, trusted for https.
+  const sshOrigin = { ...base, 'get-url': ok('git@github.com:example-owner/example-repo.git\n') };
+  for (const name of ['GIT_SSH', 'GIT_SSH_COMMAND']) {
+    assert.deepEqual(bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, environment: { [name]: 'plink.exe' }, runGit: watching(sshOrigin) }), { status: 'unknown', error: 'remote-redirected' }, `${name} with an ssh origin`);
+    assert.equal(bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, environment: { [name]: 'plink.exe' }, runGit: fakeGit({ ...base, 'ls-tree': ok('') }) }).status, 'absent', `${name} with an https origin`);
+  }
+  // status says in plain words why a refresh kept the last read.
+  assert.match(bindingCache.refreshReason('remote-redirected'), /GIT_SSH for an ssh origin/);
+  assert.match(bindingCache.refreshReason('remote-unreachable'), /could not be reached/);
+  assert.equal(bindingCache.refreshReason('not-applicable'), null);
   assert.notEqual(bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, environment: { GIT_CONFIG_COUNT: '0' }, runGit: fakeGit({ ...base, 'ls-tree': ok('') }) }).error, 'remote-redirected', 'a zero count sets nothing');
   assert.deepEqual(bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, runGit: watching({ ...base, config: ok('command\tcore.sshcommand ssh -v\n') }) }), { status: 'unknown', error: 'remote-redirected' }, 'command scope');
   assert.notEqual(bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, runGit: fakeGit({ ...base, config: ok('global\tcore.sshcommand ssh -v\n'), 'ls-tree': ok('') }) }).error, 'remote-redirected', 'the user\'s global config is not held here');
@@ -725,4 +735,21 @@ test('F9: security writes nothing on a merged binding read over 24 hours ago', a
   assert.equal(await cli.main(['security']), 1);
   assert.match(out.join(''), /last read over 24 hours ago/);
   assert.equal(wrote, false);
+});
+
+test('status says in plain words why the merged binding was not read, and says nothing when it was', async (t) => {
+  const ctx = scratch(t);
+  const repo = fakeRepo(ctx, 'status-reason');
+  cache(ctx, repo);
+  const { ToolkitGovernanceCli } = require(path.join(scripts, 'toolkit-governance.cjs'));
+  const run = async (refresh) => {
+    const out = [];
+    const cli = new ToolkitGovernanceCli({ cwd: repo, registryOptions: ctx.opts, interactive: false, stdout: { write: text => out.push(text) }, stderr: { write: () => {} }, refresh: () => refresh });
+    assert.equal(await cli.main(['status']), 0);
+    return out.join('');
+  };
+  assert.match(await run({ refreshed: false, error: 'remote-redirected' }), /Refresh held: git would fetch origin from somewhere else[^\n]*The last read on this computer is kept\./);
+  assert.match(await run({ refreshed: false, error: 'remote-unreachable' }), /Refresh held: GitHub could not be reached/);
+  assert.doesNotMatch(await run({ refreshed: true, error: null }), /Refresh held/);
+  assert.doesNotMatch(await run({ refreshed: false, error: 'not-applicable' }), /Refresh held/);
 });
