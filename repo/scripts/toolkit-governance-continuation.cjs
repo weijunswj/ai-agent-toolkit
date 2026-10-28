@@ -215,10 +215,43 @@ const EXTRACTION = [
   NAME_DOT_SOURCE,
   /\.[ \t]*(?:\(|\$)/,
 ];
-// Pipe consumers must be fixed data readers. Unknown commands, quoted/path-qualified
-// shells and wrappers all retain the raw evidence instead of extending a shell denylist.
-const NAME_PIPE_READERS = /^(?:grep|rg|jq|head|tail|sort|wc|cut|cat|git|convertfrom-json|convertto-json|select-object|select-string|where-object|out-string)(?:\.exe)?$/i;
-function derivedNameExecution(text) {
+// Pipe consumers must be fixed data readers or pure data filters. Unknown commands,
+// quoted/path-qualified shells and wrappers all retain the raw evidence instead of
+// extending a shell denylist. The PowerShell-only data filters (Sort-Object and the rest of
+// the second group) do not apply to an explicit cmd shell.
+const NAME_PIPE_READERS = /^(?:grep|rg|jq|head|tail|sort|wc|cut|cat|git|tr|uniq|convertfrom-json|convertto-json|select-object|select-string|where-object|out-string|sort-object|measure-object|format-table|format-list|get-unique|out-null)(?:\.exe)?$/i;
+const CMD_PIPE_READERS = /^(?:grep|rg|jq|head|tail|sort|wc|cut|cat|git|tr|uniq|convertfrom-json|convertto-json|select-object|select-string|where-object|out-string)(?:\.exe)?$/i;
+// A quoted script argument still runs: its pipes and command positions count.
+// -e and -p are case-sensitive (grep -E and -P take patterns); -c and PowerShell's
+// -Command with its prefixes are not.
+const NAME_SCRIPT_SELECTOR_CASED = /(?:^|\s)(?:-lc|-e|-p|--eval|--print|\/[cC])[ \t]*$/;
+const NAME_SCRIPT_SELECTOR_COMMAND = /(?:^|\s)-c(?:o(?:m(?:m(?:a(?:n(?:d)?)?)?)?)?)?[ \t]*$/i;
+// POSIX and PowerShell quoting: single quotes are literal, double quotes allow a '\' or
+// backtick escape. Quoted text is blanked to spaces (offsets kept), so a '|', '&' or path
+// inside quotes is neither a pipe nor a command word. A quoted script argument is kept as
+// written and its first word is a command position. cmd does not quote with single quotes,
+// so cmd and unknown shells keep the raw scan, as do unbalanced quotes: all return null.
+function quotedView(text, shell) {
+  if (!['common', 'posix', 'powershell'].includes(shell)) return null;
+  let out = '', quote = null, script = false; const scripts = [];
+  for (let i = 0; i < text.length; i += 1) {
+    const c = text[i];
+    if (quote) {
+      if (quote === '"' && (c === '\\' || c === '`') && i + 1 < text.length) { out += script ? c + text[i + 1] : '  '; i += 1; continue; }
+      if (c === quote) { quote = null; out += c; continue; }
+      out += script ? c : ' '; continue;
+    }
+    if (c === "'" || c === '"') {
+      const before = text.slice(Math.max(0, i - 64), i);
+      script = NAME_SCRIPT_SELECTOR_CASED.test(before) || NAME_SCRIPT_SELECTOR_COMMAND.test(before);
+      if (script) scripts.push(i + 1);
+      quote = c;
+    }
+    out += c;
+  }
+  return quote ? null : { text: out, scripts };
+}
+function derivedNameExecution(text, shell = null, view = quotedView(text, shell)) {
   if (EXTRACTION.some(pattern => pattern.test(text))) return true;
   // Shell quote fragments and escapes can spell an evaluator without changing
   // its command name. Keep path separators in one view and POSIX escapes in another.
@@ -226,13 +259,14 @@ function derivedNameExecution(text) {
   for (const view of [unquoted, unquoted.replace(/\\/g, '')]) {
     if (NAME_EVALUATORS.test(view) || NAME_DOT_SOURCE.test(view)) return true;
   }
-  for (const m of text.matchAll(/\|\|?|(?:^|[^&])&(?=[ \t]*['"($])/g)) {
+  const readers = shell === 'cmd' ? CMD_PIPE_READERS : NAME_PIPE_READERS;
+  for (const m of (view?.text ?? text).matchAll(/\|\|?|(?:^|[^&])&(?=[ \t]*['"($])/g)) {
     if (m[0] === '||') continue;
     const rest = text.slice(m.index + m[0].length);
     if (m[0] === '|') {
       const target = /^[ \t\r\n]*([^\s;|&(){}]+)/.exec(rest)?.[1];
       // git reads a pipe only as a plain subcommand; an option first can define an alias that runs a program.
-      if (NAME_PIPE_READERS.test(target || '') && !(/^git(?:\.exe)?$/i.test(target) && /^[ \t\r\n]*\S+[ \t]+-/.test(rest))) continue;
+      if (readers.test(target || '') && !(/^git(?:\.exe)?$/i.test(target) && /^[ \t\r\n]*\S+[ \t]+-/.test(rest))) continue;
       if (/^[ \t\r\n]*foreach-object[ \t]+\{/i.test(rest)) continue;
       return true;
     }
@@ -242,35 +276,63 @@ function derivedNameExecution(text) {
   }
   return false;
 }
-function nameBarriers(text) {
+const NAME_STAGE_WORD = /[ \t]*((?:"[^"\r\n]*"|'[^'\r\n]*'|[\\^][ \t]|[^\s;'"&|(){}])+)/y;
+function nameBarriers(text, shell = null) {
   if (text.length > LIMITS.command || /[^\x09\x0a\x0d\x20-\x7e]/.test(text)) return [];
-  if (derivedNameExecution(text)) return [];
-  // Word ranges in command position, including quoted paths and nested commands.
-  // The scan is deliberately conservative inside quoted executable scripts too.
+  const view = quotedView(text, shell), scan = view?.text ?? text;
+  if (derivedNameExecution(text, shell, view)) return [];
+  // Word ranges in command position, including quoted paths and nested commands. Stages
+  // are found outside quotes, and at the start of a quoted script argument, whose text is
+  // scanned as written. The command word itself is read from the source text.
   const stageEnd = /[;&|(){}\r\n]/g;
-  const commands = [...text.matchAll(/(?:^|[;&|(){}\r\n])[ \t]*((?:"[^"\r\n]*"|'[^'\r\n]*'|[\\^][ \t]|[^\s;'"&|(){}])+)/g)]
-    .map(m => {
-      let end = m.index + m[0].length;
-      const word = m[1].replace(/['"]/g, '');
-      const leaf = word.split(/[\\/]/).pop().replace(/\.exe$/i, '');
-      // Wrappers, conditions and leading assignments/redirections can run a later
-      // argument. Keep their whole stage visible, including options and wrapper chains.
-      if (NAME_COMMAND_WRAPPERS.test(leaf) || NAME_COMMAND_WRAPPERS.test(word.replace(/\\/g, ''))
-        || /^[a-z_]\w*=|^\d*[<>]/i.test(word)) {
-        stageEnd.lastIndex = end; end = stageEnd.exec(text)?.index ?? text.length;
-      }
-      return { start: m.index, end };
-    });
-  let commandIndex = 0;
-  const inCommand = at => {
-    while (commands[commandIndex]?.end <= at) commandIndex++;
-    return commands[commandIndex]?.start <= at && at < commands[commandIndex].end;
-  };
+  const starts = [...scan.matchAll(/(?:^|[;&|(){}\r\n])(?=[ \t]*[^\s;'"&|(){}]|[ \t]*['"])/g)].map(m => m.index + m[0].length);
+  for (const at of view?.scripts || []) starts.push(at);
+  const cover = new Array(text.length + 1).fill(0);
+  for (const at of starts) {
+    NAME_STAGE_WORD.lastIndex = at;
+    const m = NAME_STAGE_WORD.exec(scan);
+    if (!m) continue;
+    let end = at + m[0].length;
+    const word = text.slice(end - m[1].length, end).replace(/['"]/g, '');
+    const leaf = word.split(/[\\/]/).pop().replace(/\.exe$/i, '');
+    // Wrappers, conditions and leading assignments/redirections can run a later
+    // argument. Keep their whole stage visible, including options and wrapper chains.
+    if (NAME_COMMAND_WRAPPERS.test(leaf) || NAME_COMMAND_WRAPPERS.test(word.replace(/\\/g, ''))
+      || /^[a-z_]\w*=|^\d*[<>]/i.test(word)) {
+      stageEnd.lastIndex = end; end = stageEnd.exec(scan)?.index ?? text.length;
+    }
+    cover[at] += 1; cover[end] -= 1;
+  }
+  for (let i = 1; i <= text.length; i += 1) cover[i] += cover[i - 1];
+  const inCommand = at => cover[at] > 0;
   const spans = [];
   for (const m of text.matchAll(/(?<![\w.$-])\.(?:claude|codex)[\w.-]*/gi)) {
     const before = text[m.index - 1], after = text[m.index + m[0].length];
     // A path separator must touch the name. A bare or quoted dotted word stays evidence.
     if (!inCommand(m.index) && (before === '/' || before === '\\' || after === '/' || after === '\\')) spans.push({ start: m.index, end: m.index + m[0].length });
+  }
+  // An undotted host word is a name only inside a standalone path-like word (one holding
+  // '/' or '\' that no quote or operator glues to another fragment), as a directory
+  // component or joined by '-' or '_' to more letters or digits. A path leaf spelled as a
+  // host executable ('.../claude', 'codex.exe', 'claude-code') is never a name.
+  for (const m of text.matchAll(/(?<![A-Za-z0-9.])(?:claude|codex)(?![A-Za-z0-9])/gi)) {
+    if (inCommand(m.index) || spans.some(s => s.start <= m.index && m.index < s.end)) continue;
+    const end = m.index + m[0].length, before = text[m.index - 1], after = text[end];
+    let a = m.index, b = end;
+    while (a > 0 && /[A-Za-z0-9_.\-\/\\:]/.test(text[a - 1])) a -= 1;
+    while (b < text.length && /[A-Za-z0-9_.\-\/\\:]/.test(text[b])) b += 1;
+    const left = text[a - 1], right = text[b];
+    const leftAlone = left === undefined || /[\s;|&(=]/.test(left) || (/['"]/.test(left) && (a < 2 || /[\s;|&(=:]/.test(text[a - 2])));
+    const rightAlone = right === undefined || /[\s;|&)]/.test(right) || (/['"]/.test(right) && (b + 1 >= text.length || /[\s;|&)]/.test(text[b + 1])));
+    if (!leftAlone || !rightAlone || !/[\\/]/.test(text.slice(a, b))) continue;
+    let p = m.index, q = end;
+    while (p > a && !/[\\/]/.test(text[p - 1])) p -= 1;
+    while (q < b && !/[\\/]/.test(text[q])) q += 1;
+    if (q === b && HOST.test(text.slice(p, q))) continue;
+    const directory = after === '/' || after === '\\';
+    const joined = (/[-_]/.test(before || '') && /[A-Za-z0-9]/.test(text[m.index - 2] || ''))
+      || (/[-_]/.test(after || '') && /[A-Za-z0-9]/.test(text[end + 1] || ''));
+    if (directory || joined) spans.push({ start: m.index, end });
   }
   // A variable is one only outside single quotes and not after an escape. Unbalanced
   // quotes withdraw all name barriers.
@@ -282,7 +344,6 @@ function nameBarriers(text) {
     if (c === "'" || c === '"') { quote = c; single[i] = c === "'"; }
   }
   if (quote) return [];
-  commandIndex = 0;
   for (const m of text.matchAll(/(?<![$\w\\`^])\$(?:env:)?([a-z_]\w*)/gi)) {
     if (!single[m.index] && !inCommand(m.index) && FOLDER_VARIABLES.test(m[1])) spans.push({ start: m.index + m[0].length - m[1].length, end: m.index + m[0].length });
   }
@@ -307,7 +368,7 @@ function constructionFragments(text, shell, names = []) {
 }
 function broadVisible(source, executableScript = false, shell = null) {
   // Every evidence scan reads the barriered text; only the strict reader sees the source.
-  const names = nameBarriers(source), text = names.length ? barrierText(source, names) : source;
+  const names = nameBarriers(source, shell), text = names.length ? barrierText(source, names) : source;
   const direct = (/\bclaude(?:-code)?(?:\.(?:exe|cmd|ps1))?\b/i.test(text)
       && /--(?:resume|continue|session-id|fork-session)\b|(?:^|[\s;&|()'"`])-(?!-)[a-z]*[rc][a-z]*(?=$|[\s=;&|()'"`])/i.test(text))
     || (/\bcodex(?:\.(?:exe|cmd|ps1))?\b/i.test(text) && /\b(?:resume|fork)\b/i.test(text));
@@ -811,10 +872,15 @@ function executionDirectory(input) {
 // This can only turn UNKNOWN into NOT_CONTINUATION: PARSED and VERIFIED never reach it.
 const DATA_STOP = Object.freeze({ stop: true });
 const DATA_INERT = Object.freeze({ inert: true });
-function dataShells(input) {
+const DATA_MAX_DEPTH = 64;
+function dataShells(input, host = null) {
   const shell = input?.tool_input?.shell;
-  // Claude Code's PowerShell tool runs PowerShell. Any other omitted shell must prove under both.
-  if (shell === undefined) return input?.tool_name === 'PowerShell' ? ['powershell'] : ['posix', 'powershell'];
+  // Claude Code's PowerShell tool runs PowerShell and its Bash tool runs bash. The host comes
+  // from the hook entry point, never from the payload. Any other omitted shell must prove under both.
+  if (shell === undefined) {
+    if (input?.tool_name === 'PowerShell') return ['powershell'];
+    return host === 'claude' && input?.tool_name === 'Bash' ? ['posix'] : ['posix', 'powershell'];
+  }
   const role = roleShell(input);
   return role === 'posix' || role === 'powershell' ? [role] : null;
 }
@@ -991,7 +1057,8 @@ class DataScanner {
   dollar(parts, quoted) {
     const t = this.text, s = this.i;
     if (this.at('$(')) {
-      if (this.at('$((')) this.stop();
+      // Nesting this deep is no ordinary data command, and recursion must not reach the stack limit.
+      if (this.at('$((') || this.depth >= DATA_MAX_DEPTH) this.stop();
       this.i += 2; this.depth += 1; const first = this.all.length;
       this.list(true);
       if (t[this.i] !== ')') this.stop();
@@ -1170,6 +1237,12 @@ const GIT_SUBCOMMANDS = {
   commit: { switches: ['-a', '--all', '--amend', '--no-edit', '--allow-empty', '-q', '--quiet', '-v', '--no-verify', '-n', '--signoff', '-s'],
     valued: ['-m', '--message', '-F', '--file', '--author', '--date'], attached: ['--message=', '--file=', '--author=', '--date='] },
   push: { switches: ['-u', '--set-upstream', '--tags', '--dry-run', '-n', '--follow-tags', '-v', '--verbose', '-q', '--quiet', '--porcelain', '--atomic', '--delete', '-d'], remote: true },
+  // The patch path, branch names, start points and revisions are operands only.
+  apply: { switches: ['-R', '--reverse', '--check', '--stat', '--numstat', '--summary'] },
+  switch: { switches: ['--detach', '-q', '--quiet', '--track'], valued: ['-c', '-C'] },
+  checkout: { switches: ['--detach', '-q', '--quiet', '--track'], valued: ['-b', '-B'] },
+  'merge-base': { switches: ['--is-ancestor', '--all'] },
+  'ls-tree': { switches: ['-r', '--name-only'] },
 };
 const GIT_WORKTREE = {
   list: { switches: ['--porcelain', '-v', '--verbose'] },
@@ -1200,7 +1273,7 @@ const TOOLKIT_SCRIPTS = set([
 // Coreutils without any option that runs a program. sort is listed separately below.
 const COREUTILS = set(['head', 'tail', 'wc', 'uniq', 'cut', 'touch', 'stat', 'realpath', 'basename', 'dirname']);
 const POSIX_FILE = set(['ls', 'cat', 'rm', 'mkdir', 'cp', 'mv', 'cd', 'pwd', 'echo']);
-const SORT = { switches: set(['-r', '-n', '-u', '-f', '-V', '-h', '--reverse', '--numeric-sort', '--unique']), valued: set(['-k', '-t']), attached: ['--key=', '--field-separator='] };
+const SORT = { switches: set(['-r', '-n', '-u', '-f', '-V', '-h', '--reverse', '--numeric-sort', '--unique']), valued: set(['-k', '-t']), attached: ['--key=', '--field-separator='], nodash: true };
 // PowerShell cmdlets and their default aliases. No parameter here runs code or writes outside
 // a checked document; -Value, -Target, -OutVariable and script blocks are absent.
 const PS_PATH_CMDLETS = set(['get-childitem', 'gci', 'ls', 'dir', 'get-content', 'gc', 'cat', 'type', 'get-item', 'gi', 'test-path', 'resolve-path', 'rvpa',
@@ -1399,9 +1472,9 @@ function shellDataProof(text, shell, inertAllowed, scanShell) {
   for (const span of spans) for (let i = span.start; i < span.end; i += 1) if (chars[i] !== '\n') chars[i] = ' ';
   return broadVisible(chars.join(''), true, scanShell) ? null : { spans, inert: false };
 }
-function dataArguments(text, input) {
+function dataArguments(text, input, host = null) {
   if (typeof text !== 'string' || !text || text.length > LIMITS.command || /[^\x09\x0a\x0d\x20-\x7e]/.test(text)) return false;
-  const shells = dataShells(input);
+  const shells = dataShells(input, host);
   if (!shells) return false;
   const scanShell = roleShell(input), common = shells.length > 1;
   const proofs = shells.map(shell => shellDataProof(text, shell, common, scanShell));
@@ -1409,9 +1482,10 @@ function dataArguments(text, input) {
   return !common || proofs.every(proof => cmdLineSafe(text, proof.spans));
 }
 
-function parse(text, input) {
+// host is the hook entry point's own host ('claude' or 'codex'), or null when unknown.
+function parse(text, input, { host = null } = {}) {
   const result = parseCommand(text, input);
-  return result === UNKNOWN && dataArguments(text, input) ? NONE : result;
+  return result === UNKNOWN && dataArguments(text, input, host) ? NONE : result;
 }
 
 function parseCommand(text, input) {
@@ -1527,12 +1601,12 @@ class TranscriptReader {
 }
 
 class ContinuationResolver {
-  constructor({ environment = process.env, io = fs, spawn = spawnSync } = {}) {
-    this.environment = environment; this.io = io; this.spawn = spawn;
+  constructor({ environment = process.env, io = fs, spawn = spawnSync, host = null } = {}) {
+    this.environment = environment; this.io = io; this.spawn = spawn; this.host = host;
   }
 
   resolve(text, input) {
-    const parsed = parse(text, input);
+    const parsed = parse(text, input, { host: this.host });
     if (parsed.status === 'NOT_CONTINUATION' || parsed.status === 'UNKNOWN') return parsed;
     try {
       for (const target of parsed.targets) regularPath(target, 'directory', this.io);
