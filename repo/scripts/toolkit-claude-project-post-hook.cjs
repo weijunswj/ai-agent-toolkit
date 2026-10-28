@@ -121,6 +121,8 @@ function resultText(block) {
 // post; null when only an edit of it is known), and whether the session has used the Projects tools.
 function readTranscript(lines) {
   let running = null;
+  // The newest top-level post, kept after owner messages so a second reply under it is still a reply under it.
+  let newest = null;
   let projects = false;
   const pending = new Map();
   const posts = new Map();
@@ -132,7 +134,7 @@ function readTranscript(lines) {
     if (owner.length) {
       // Only an owner reply under the running post itself leaves that post open to edits; any other owner message
       // (main chat, a work thread, or a reply under an older post) puts every post above it.
-      const runningId = running?.id;
+      const runningId = newest;
       for (const [id, post] of posts) {
         if (id !== runningId || owner.some(thread => thread !== runningId)) post.ownerAfter = true;
       }
@@ -151,7 +153,10 @@ function readTranscript(lines) {
         if (call.name === POST_TOOL) {
           const id = resultText(block).match(MESSAGE_ID)?.[1];
           if (id) posts.set(id, { text: textOf(call.input.text), reply: Boolean(call.input.thread_id), ownerAfter: false });
-          if (id && !call.input.thread_id) running = { id, size: bytes(call.input.text) };
+          if (id && !call.input.thread_id) {
+            running = { id, size: bytes(call.input.text) };
+            newest = id;
+          }
         } else if (typeof call.input.message_id === 'string') {
           const known = posts.get(call.input.message_id);
           posts.set(call.input.message_id, { text: textOf(call.input.text), reply: known ? known.reply : null, ownerAfter: known ? known.ownerAfter : false });
@@ -247,8 +252,8 @@ function layoutIssue(text) {
     for (const line of lines.slice(waiting + 1)) {
       // The list runs to the next Update or ELI5 line. A question's choice bullets sit indented under it and need no
       // link; spacers and other lines that are not list items are passed over.
-      if (UPDATE_LINE.test(line) || ELI5_LINE.test(line)) break;
       if (SUB_LINE.test(line) && QUESTION_ITEM.test(item)) continue;
+      if (UPDATE_LINE.test(line) || ELI5_LINE.test(line)) break;
       if (!ITEM_LINE.test(line)) continue;
       item = line;
       if (!LINK.test(line)) return `the Waiting on you item "${line.trim().slice(0, 80)}" has no link. Link each item to the card or thread where the owner acts, so it is one tap away.`;

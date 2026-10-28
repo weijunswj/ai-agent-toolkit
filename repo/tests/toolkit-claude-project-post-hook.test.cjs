@@ -285,6 +285,11 @@ test('layout: Now first, ELI5 last and alone, Update lines without questions, Wa
     const spaced = QUESTIONS.replace('    &nbsp;\n2.', `${spacer}\n2.`).replace(' [thread](#cmsg_THREAD)', '');
     assert.match(layoutIssue(spaced), /Waiting on you item "2\. .* has no link/, JSON.stringify(spacer));
   }
+  // A choice that looks like an Update or ELI5 line is still a choice, so the scan goes on to the next item.
+  for (const lookAlike of ['    - **[10:00] Update:** later.', '    - **ELI5:** later.']) {
+    const shaped = QUESTIONS.replace('    - **Hold.** Wait for the next release.', lookAlike).replace(' [thread](#cmsg_THREAD)', '');
+    assert.match(layoutIssue(shaped), /Waiting on you item "2\. .* has no link/, lookAlike);
+  }
   // A lone CR or CRLF ends a line like LF does.
   assert.match(layoutIssue(QUESTIONS.replace(' [thread](#cmsg_THREAD)', '').replace(/\n/g, '\r')), /Waiting on you item "2\. .* has no link/);
   assert.equal(layoutIssue(QUESTIONS.replace(/\n/g, '\r\n')), '');
@@ -348,6 +353,8 @@ test('edits keep every earlier Update line word for word and add a new one', () 
   // message in the work thread is not.
   const threadWake = ts => ({ type: 'user', message: { role: 'user', content: `<wake reason="mention"><project id="chan_X"><thread ts="${ts}"><message from="human" trust="principal">ok</message></thread></project></wake>` } });
   assert.equal(edit([wake(), call(POST, { text: earlier }), threadWake('cmsg_A1')], LAID_OUT), '');
+  // A second owner reply under the same post is still a reply under it.
+  assert.equal(edit([wake(), call(POST, { text: earlier }), threadWake('cmsg_A1'), threadWake('cmsg_A1')], LAID_OUT), '');
   assert.match(edit([wake(), call(POST, { text: earlier }), threadWake('cmsg_OTHER')], LAID_OUT), /post fresh/);
   // A reply under an older own post marks the running post too, and the older post stays closed to edits.
   const second = text => call(POST, { text }, '{"message_id":"cmsg_B2"}');
