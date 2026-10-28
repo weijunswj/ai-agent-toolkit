@@ -81,19 +81,22 @@ const OK_ANSWER = /^\s*(ok|okay|yes|y|no|n|not now|later)[.!]?\s*$/i;
 // of the user's words, a scheduled task, another person, extra text, a broken envelope) reads as
 // no reply at all, so it never answers.
 const WAKE = /^\s*<wake(?:\s+[\w-]+="[^"<>]*")*\s*>([\s\S]*)<\/wake>\s*$/;
-const WAKE_FRAME = /<\/?(?:project|thread)(?:\s+[\w-]+="[^"<>]*")*\s*>/g;
-const WAKE_MESSAGES = /^\s*(?:<message(?:\s+[\w-]+="[^"<>]*")*\s*>[^<]*<\/message>\s*)+$/;
+// The envelope's body is only `project` and `thread` tags and `message` elements whose text holds no
+// markup; it is matched whole, as sent, so no tag inside a message is ever read as part of the frame.
+const WAKE_BODY = /^\s*(?:(?:<\/?(?:project|thread)(?:\s+[\w-]+="[^"<>]*")*\s*>|<message(?:\s+[\w-]+="[^"<>]*")*\s*>[^<]*<\/message>)\s*)+$/;
 const WAKE_MESSAGE = /<message((?:\s+[\w-]+="[^"<>]*")*)\s*>([^<]*)<\/message>/g;
 function ownerReply(prompt) {
   const text = String(prompt || '');
   const wake = WAKE.exec(text);
   if (!wake) return text;
-  const body = wake[1].replace(WAKE_FRAME, '');
-  if (!WAKE_MESSAGES.test(body)) return '';
-  const messages = [...body.matchAll(WAKE_MESSAGE)].map(([, attributes, inner]) => ({
-    attributes: Object.fromEntries([...attributes.matchAll(/([\w-]+)="([^"]*)"/g)].map(([, name, value]) => [name, value])),
+  if (!WAKE_BODY.test(wake[1])) return '';
+  const messages = [...wake[1].matchAll(WAKE_MESSAGE)].map(([, attributes, inner]) => ({
+    attributes: [...attributes.matchAll(/([\w-]+)="([^"]*)"/g)].map(([, name, value]) => [name, value]),
     inner,
   }));
+  // An attribute given twice could say two things; such a message is read as no reply.
+  if (messages.some(message => new Set(message.attributes.map(([name]) => name)).size !== message.attributes.length)) return '';
+  for (const message of messages) message.attributes = Object.fromEntries(message.attributes);
   const triggers = messages.filter(message => message.attributes.trigger === 'true');
   if (triggers.length !== 1 || triggers[0].attributes.from !== 'human' || triggers[0].attributes.trust !== 'principal') return '';
   return triggers[0].inner.replace(/&(lt|gt|quot|#39|apos|amp);/g, (_, name) => ({ lt: '<', gt: '>', quot: '"', '#39': "'", apos: "'", amp: '&' })[name]);
@@ -838,7 +841,7 @@ class PromptHold {
     // After "not now", the full answer still decides in the same run, unless a session has started in
     // the repository since; a short reply is an ordinary message there, since it may answer the
     // agent's own question.
-    if (verdict.reason === 'not-now') return answer ? this.#afterNotNow(cwd, answer, verdict, sessionId) : { action: 'pass' };
+    if (verdict.reason === 'not-now') return answer ? this.#afterNotNow(cwd, text, answer, verdict, sessionId) : { action: 'pass' };
     if (!verdict.hold) return verdict.reason === 'no-git' ? { action: 'pass' } : this.#replayIfAny(verdict.state, sessionId);
     if (verdict.reason === 'state-unreadable') return { action: 'block', reason: unreadableText(verdict.state, this.#registryOptions) };
     // A session another session or a launcher started never answers and never adds to what is held.
@@ -874,12 +877,12 @@ class PromptHold {
 
   // The full answer after "not now": it counts in the run that said it while no session has started
   // in the repository since; otherwise "not now" ends for this session and Toolkit asks again.
-  #afterNotNow(cwd, answer, verdict, sessionId) {
+  #afterNotNow(cwd, text, answer, verdict, sessionId) {
     const marks = this.#marks(verdict, sessionId);
     const id = verdict.state.repository_id;
     if (this.#notNow.repositoryMark(id, sessionId) === marks.repository) return this.#answer(cwd, answer[1].toLowerCase(), verdict, sessionId, marks);
     try { this.#notNow.set(id, sessionId, null); } catch { /* the reply is held below either way */ }
-    this.#held.add(id, answer[0], sessionId, marks, verdict.state.root);
+    this.#held.add(id, text, sessionId, marks, verdict.state.root);
     return this.#ask(`${MOVED_LINE}\n${questionText(verdict, 1)}`, sessionId, marks);
   }
 
