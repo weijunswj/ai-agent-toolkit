@@ -390,16 +390,16 @@ Even when a sandboxed background launch appears to work while the shell command 
 
 After a user interrupts a long localhost, validation, package-manager, or test command, immediately inspect likely child processes before retrying. Look for local `python`, `pip`, `node`, `npm`, `pnpm`, `yarn`, `bun`, test-runner, and dev-server processes that still own the target port or continue consuming CPU.
 
-On Windows, stopping a parent process does not stop its children, so `node` test workers and dev servers keep running after a timeout, an interrupt or `Stop-Process` on the parent.
+On Windows, stopping a parent process does not stop its children, so a `node` test run or dev server started from a shell (`cmd`, PowerShell or bash) keeps running after a timeout, an interrupt or `Stop-Process` on the shell. Node itself stops the children it started when it exits, but not the ones a shell or another program started.
 
 - To stop a run, stop its whole tree: `taskkill /PID <pid> /T /F`, not `Stop-Process` on the parent alone.
-- Note the PID of each long or background command you start. After stopping a run, after an interruption and before the session ends, list leftovers from your own run and stop only those:
+- Note the PID of each long or background command you start, and start it with absolute paths so its command line names your worktree. After stopping a run, after an interruption and before the session ends, list leftovers from your own run and stop only those:
 
   ```powershell
-  Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object { $_.CommandLine -like "*$worktree*" } | Select-Object ProcessId,ParentProcessId
+  Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object { $_.CommandLine -like "*$worktree*" -or $_.ParentProcessId -in $myPids } | Select-Object ProcessId,ParentProcessId
   ```
 
-  `taskkill /T` cannot follow children whose parent already exited, so match them by your worktree or scratch path. Never stop by name (`taskkill /IM node.exe`) or a process from outside your run; ask about any that are unclear. Do not paste full command lines into reports, as they can hold tokens.
+  `taskkill /T` cannot follow children whose parent already exited, but a leftover still shows the stopped parent's PID as its `ParentProcessId`, and a command started with a relative path does not name your worktree, so match by both. Never stop by name (`taskkill /IM node.exe`) or a process from outside your run; ask about any that are unclear. Do not paste full command lines into reports, as they can hold tokens.
 
 On Windows, start with bounded, read-only process and port checks:
 
