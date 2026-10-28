@@ -1,5 +1,16 @@
 # Toolkit Changelog
 
+## 3.16.8 (fewer false continuation refusals)
+
+- **Quoted text:** the continuation guard reads quotes the way bash and PowerShell do. A `|` or `&` inside a quoted search pattern (`rg 'a|b' path`, `--grep="a|b"`) is no longer a pipe, and a quoted path is no longer a command word, so host folder names next to it stay names. A quoted script after `-c`, `-lc`, `-e`, `-p`, `--eval`, `--print`, `-Command` or `/c` is still read as a script. An explicit cmd shell, which does not quote with single quotes, and unbalanced quotes keep the earlier reading.
+- **Data filters:** a pipe into `tr` or `uniq`, or into the PowerShell cmdlets `Sort-Object`, `Measure-Object`, `Format-Table`, `Format-List`, `Get-Unique` and `Out-Null`, keeps folder names as names. The cmdlets do not count under an explicit cmd shell.
+- **Undotted host folders:** a `claude` or `codex` folder or a name joined to one by `-` or `_` (`Temp/claude/`, `claude/project-thread-x`, `scripts/toolkit-codex-hook.cjs`, `Claude-Data/`) is a name when it sits in a standalone path argument. A path whose last part is a host program (`.../claude`, `codex.exe`, `claude-code`), a path glued to another fragment by a quote or `+`, and command positions stay evidence.
+- **Claude Code's Bash tool:** commands from the Bash tool are proved as data under bash only, because that tool always runs bash. The host comes from the hook entry point, never from the hook input. Codex, the Monitor tool and other omitted shells still need the proof under both bash and PowerShell.
+- **More data commands:** `git apply`, `git switch`, `git checkout`, `git merge-base` and `git ls-tree` with fixed options, where patch paths, branch names, start points and revisions are operands only. A `sort` operand may not start with `-`.
+- **Deep nesting:** the data proof stops at 64 nested `$(...)` levels and refuses, instead of running out of stack.
+- **Still refused:** a host program in command position, in a substitution, behind a wrapper or built from fragments; pipes into shells, interpreters, `xargs` or unknown commands; inline scripts such as `node -e`; PowerShell script blocks and `"$(...)"` strings that build a path; and `VAR=value` prefixes. Resuming a session with `codex resume` or `claude --resume` is refused as before.
+- **Correction to 3.16.6:** the fixed set of data commands also covers plain assignments and single-quoted here-string stages, which count as commands in that proof.
+
 ## 3.16.7 (credentials and plain-text findings before a push)
 
 ### Check before a push

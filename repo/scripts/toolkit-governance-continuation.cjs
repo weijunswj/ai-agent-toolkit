@@ -1309,6 +1309,7 @@ function cmdletArgs(args, ctx, data, { paths = false, writer = false } = {}) {
   }
   for (const word of [...positional, ...values]) {
     // A provider path (function:, alias:, env:, variable:) is a definition or a variable, not a file.
+    // Only PowerShell has providers; under bash the same check only refuses more.
     if (paths && word.parts.some((p, k) => p.type === 'lit' && p.text.includes(':')
       && !(k === 0 && /^[A-Za-z]:(?:[\\/]|$)/.test(p.text) && p.text.indexOf(':', 2) < 0))) return false;
     data.push(...dataSpans(word));
