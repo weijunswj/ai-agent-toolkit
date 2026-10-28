@@ -16,7 +16,11 @@
 //     oldest first. An answer counts only in the run of the session that was shown the question
 //     (SessionEpochs). Each session gets back only the messages it sent itself, and a session another
 //     session or a Toolkit launcher started is refused in a held repository and nothing is kept.
-//   - ToolGate is the PreToolUse core. A held repository runs no state-changing tool. In every
+//     In Claude Code a held github.com message is not blocked but kept, and the turn runs only to show
+//     a tap-to-answer card (AskUserQuestion) next to the same short text; PromptHold.picked records
+//     the tapped answer under the same checks as a typed one.
+//   - ToolGate is the PreToolUse core. A held repository runs no tool but the card, which must be
+//     exactly Toolkit's with no answer filled in by the caller. In every
 //     folder, an agent may not answer the question for the user: commands that run the governance
 //     CLI or start a host session with the answer as its prompt are refused, and so are edits to
 //     Toolkit's user-state files. A command that starts a host session in a held repository (after
@@ -32,6 +36,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const governance = require('./toolkit-governance-state.cjs');
+const { ContinuationResolver } = require('./toolkit-governance-continuation.cjs');
 
 const CAPABILITY = governance.GOVERNANCE_CAPABILITY;
 const HELD_BASENAME = 'held-prompts.v1.json';
@@ -535,13 +540,11 @@ function answerCommand(text) {
   if (read.scripts.length && (wideAnswer(text) || read.scripts.some(code => HOST_COMMAND.test(code) && QUOTED_REPLY.test(code)))) return true;
   return read.hosts.length > 0 && (GOVERNANCE_PHRASE.test(text) || [text, ...read.runs].some(shortAnswerWord));
 }
-// A command that resumes, continues or forks a host session (Claude Code `--resume`, `-r`,
-// `--continue`, `-c`, `--session-id`; Codex `resume` or `fork`). While any message is held an agent
-// may not resume one; a resume that gets past this text check is a new run and cannot answer anyway.
-const HOST_RESUME = /(?:^|[\s;&|()`'"\\/])claude(?:-code)?(?:\.exe|\.cmd|\.ps1)?(?=\s)[^\n;&|]*?\s(?:--resume|-r|--continue|-c|--session-id|--fork-session)(?=$|[\s=])|(?:^|[\s;&|()`'"\\/])codex(?:\.exe|\.cmd|\.ps1)?\s+(?:exec\s+)?(?:resume|fork)(?=$|\s)/im;
 const USER_STATE_PATH = /[\\/]\.ai-agent-toolkit[\\/]user-state(?:[\\/]|$)/i;
-// Tools that read only; everything else changes something and is held.
-const READ_ONLY_TOOLS = /^(?:Read|Glob|Grep|LS|WebFetch|WebSearch|TodoWrite|update_plan|view_image)$/;
+// In a held repository every tool is refused but these: ToolSearch only loads tool definitions (the
+// card's among them), and AskUserQuestion runs only as Toolkit's card (ToolGate).
+const ALWAYS_TOOLS = /^ToolSearch$/;
+const PICKER_TOOL = 'AskUserQuestion';
 const EDIT_TOOLS = /^(?:Edit|Write|MultiEdit|NotebookEdit|apply_patch)$/;
 const SHELL_TOOLS = /^(?:Bash|PowerShell|Monitor|exec_command|shell|local_shell)$/;
 
@@ -831,17 +834,6 @@ class HeldPrompts {
     return Array.isArray(list) && list.some(entry => entry && entry.session_id === sessionId && entry.epoch === session && (entry.repository_mark || null) === repository);
   }
 
-  // The folders of the repositories with something held: { repositoryId: root or null }.
-  heldRoots() {
-    const roots = {};
-    for (const [id, list] of Object.entries(this.#read().repositories)) {
-      if (!Array.isArray(list) || list.length === 0) continue;
-      const root = list.map(entry => entry && entry.root).find(value => typeof value === 'string' && value !== '');
-      roots[id] = root || null;
-    }
-    return roots;
-  }
-
   // Keeps the prompt with the session and run that sent it and the repository's folder (trimmed to
   // a size cap; the oldest go first past the count cap) and returns the number now held.
   add(repositoryId, prompt, sessionId = null, marks = {}, root = null) {
@@ -1023,26 +1015,63 @@ function writeNotGitHubOk(cwd, { registryOptions = {}, now } = {}) {
 // ---- messages ---------------------------------------------------------------------------------
 
 const ASK = "Enable Toolkit's automated GitHub tracking governance for this repository? Reply yes, no or later.";
+// The held-message notice: two lines here, and PromptHold.decide adds the line for agents.
 const QUESTION = [
-  'Toolkit: this repository has no governance decision yet, so your message was held and not sent.',
-  ASK,
-  "Toolkit takes over this repository's task tracking on GitHub and adds the no-force-push ruleset:",
-  '  1. Creates PARENT and CHILD GitHub issues for programme management.',
-  '  2. Records plans, reviews and decisions.',
-  '  3. Uses a private evidence store of your choice.',
-  '  yes    Toolkit keeps those records here; setup helps add the governed block and programme file.',
-  '  no     No GitHub records here, the coding rules still apply, and Toolkit will not ask again.',
-  '  later  Nothing is recorded, and Toolkit asks again next session.',
-  'Your held messages stay on this computer and are handed over, in order, after you answer.',
+  'Toolkit: message held. Turn on GitHub governance (issues, records, evidence store) for this repository?',
+  'Reply yes, no (never ask again) or later (ask next session). Held messages follow your answer.',
 ];
 
 function questionText(verdict, held) {
-  if (held > 1) return `Toolkit: still waiting for this repository's governance decision (${held} messages held). ${ASK}`;
+  if (held > 1) return `Toolkit: still waiting for the governance answer (${held} messages held). Reply yes, no or later.`;
   const lines = [...QUESTION];
   if (verdict.state.rule === 'R6') lines.splice(1, 0, 'It carries the Toolkit governed rules block but no programme binding.');
   if (verdict.state.rule === 'R4') lines.splice(1, 0, 'It carries the Toolkit governed rules block and programme binding, but files in a repository are not your answer.');
   return lines.join('\n');
 }
+
+// The tap-to-answer card in Claude Code: the one AskUserQuestion input the tool gate lets through
+// while a repository waits, and the answer each option records.
+const PICKER_QUESTION = 'Turn on GitHub governance (issues, records, evidence store) for this repository?';
+const PICKER_HEADER = 'Governance';
+const PICKER_OPTIONS = Object.freeze([
+  Object.freeze({ label: 'Yes', description: 'Toolkit keeps issues, records and an evidence store here; setup questions follow.' }),
+  Object.freeze({ label: 'No', description: 'No GitHub records here, the coding rules still apply, and Toolkit never asks again.' }),
+  Object.freeze({ label: 'Later', description: 'Nothing is recorded, and Toolkit asks again next session.' }),
+]);
+const PICKER_COMMANDS = Object.freeze({ Yes: 'enable', No: 'disable', Later: 'not-now' });
+const PICKER_INPUT = Object.freeze({ questions: [{ question: PICKER_QUESTION, header: PICKER_HEADER, multiSelect: false, options: PICKER_OPTIONS }] });
+// The keys a model's own AskUserQuestion input may carry; an answer field set by the caller is refused.
+const PICKER_KEYS = Object.freeze(['questions', 'metadata']);
+
+// Whether a tool input is exactly the card, with no answer filled in by whoever called it.
+function pickerInput(toolInput) {
+  if (!toolInput || typeof toolInput !== 'object' || Array.isArray(toolInput)) return false;
+  if (Object.keys(toolInput).some(key => !PICKER_KEYS.includes(key))) return false;
+  const questions = toolInput.questions;
+  if (!Array.isArray(questions) || questions.length !== 1) return false;
+  const [question] = questions;
+  if (!question || typeof question !== 'object' || question.question !== PICKER_QUESTION || question.header !== PICKER_HEADER) return false;
+  if (question.multiSelect !== undefined && question.multiSelect !== false) return false;
+  if (Object.keys(question).some(key => !['question', 'header', 'multiSelect', 'options'].includes(key))) return false;
+  const options = question.options;
+  return Array.isArray(options) && options.length === PICKER_OPTIONS.length
+    && options.every((option, index) => option && typeof option === 'object' && Object.keys(option).every(key => ['label', 'description'].includes(key))
+      && option.label === PICKER_OPTIONS[index].label && option.description === PICKER_OPTIONS[index].description);
+}
+
+// What Claude is told on a held turn in Claude Code: show the notice as text (so it is seen where the
+// card is not drawn) and the card, and do nothing else.
+function pickerContext(notice) {
+  return [
+    'Toolkit governance: this repository has no governance decision yet, so the user\'s message above is held. Do not act on it, answer it or use any other tool: Toolkit hands it back after the user answers.',
+    'Do exactly this and nothing else:',
+    `1. Reply with this text, word for word:\n${notice}`,
+    `2. Then call AskUserQuestion once with exactly this input, adding no answers field: ${JSON.stringify(PICKER_INPUT)}`,
+    '3. Then end your turn. If the card is refused or not answered, end your turn: the user can still reply yes, no or later as a message.',
+    `For agents: ${NEVER_OWNER}`,
+  ].join('\n');
+}
+const PICKER_NOTICE = 'Toolkit: pick an answer to the governance question; your message is kept until then.';
 
 // Where the repository lives, for the not-on-github.com notice.
 function whereText(state) {
@@ -1053,26 +1082,25 @@ function whereText(state) {
 const OK_ASK = 'Reply ok to continue.';
 // Said to the agent wherever it meets the question: only the user answers.
 const NEVER_OWNER = 'Never act as the user: do not answer the governance question yourself, start a session or script to answer it, or click a confirmation through a UI or computer use.';
+// The same rule in the short form the held-message notices end with.
+const NEVER_OWNER_SHORT = 'only the user answers; never answer, script or click it for them.';
 
 function notGitHubText(verdict, held) {
-  if (held > 1) return `Toolkit: still waiting for your ok (${held} messages held). GitHub governance will be DISABLED for this repository because it ${whereText(verdict.state)}. ${OK_ASK}`;
+  if (held > 1) return `Toolkit: still waiting for your ok (${held} messages held). ${OK_ASK}`;
   return [
-    'Toolkit: this repository is not on github.com, so your message was held and not sent.',
-    `Toolkit's GitHub governance (GitHub issues for programme tracking, records and a private evidence store) works only for github.com repositories, and this one ${whereText(verdict.state)}.`,
-    'So GitHub governance will be DISABLED here. The global rules and coding gates still apply.',
-    `${OK_ASK} Toolkit records DISABLED and hands over your held messages, in order.`,
-    'If this repository moves to github.com later, Toolkit asks whether to enable GitHub governance there. If a similar repository host becomes available, it can be set up then.',
+    `Toolkit: message held. This repository ${whereText(verdict.state)}, so GitHub governance will be off here; the coding rules still apply.`,
+    `${OK_ASK} Held messages follow your answer.`,
   ].join('\n');
 }
 
 function unreadableText(state, registryOptions) {
   const hint = governance.repairHint(state, registryOptions);
-  return `Toolkit: the governance state of this repository could not be read (${state.error_code}), so your message was held and not sent. ${hint || `Run ${terminalCommand('check')} in a terminal to see why.`}`;
+  return `Toolkit: message held. The governance state of this repository could not be read (${state.error_code}). ${hint || `Run ${terminalCommand('check')} in a terminal to see why.`}`;
 }
 
 // What the agent does in an ENABLED repository whose setup is not finished (the governed block or the
 // binding is missing): right after the user's yes, and at every session start until both land.
-const SETUP_ASK = 'GitHub governance setup is not finished here. Before other work, ask the user in one message: (1) the private evidence store, an existing private repository or a new `TRANSPORT-<repository>` one, separate from this repository; (2) the parent issue, an existing number or a new one; (3) confirm the defaults: record and writer prefix `INT-<SHORT>-`, required checks from the default branch protection, store branch `main`; (4) only if the repository is private, and never skipped then: whether to turn on GitHub\'s paid Secret Protection and Code Security, saying plainly that they are paid GitHub features billed per active committer each month, need GitHub Team or Enterprise Cloud, and stay off unless the user says on (record only the user\'s own answer, `"paid_security": "off"` or `"on"`, in the binding; if they have not answered, leave it out and never write "off" for them). The free security settings need no question: they are on by default and `toolkit governance security` turns them on once governance is enabled. Then use `repository-agent-rules` to add the governed block and `.github/toolkit-programme.json` in one pull request for the user to merge. If the user says not now, carry on under the global rules and ask again next session. Never act as the user: do not answer any of these questions yourself.';
+const SETUP_ASK = 'GitHub governance setup is not finished here. Before other work, ask the user in one message: (1) the private evidence store, an existing private repository or a new `TRANSPORT-<repository>` one, separate from this repository; (2) the parent issue, an existing number or a new one; (3) confirm the defaults: record and writer prefix `INT-<SHORT>-`, required checks from the default branch protection, store branch `main`. The free security settings need no question: they are on by default and `toolkit governance security` turns them on once governance is enabled; Toolkit never turns on a GitHub feature that needs billing. Then use `repository-agent-rules` to add the governed block and `.github/toolkit-programme.json` in one pull request for the user to merge. If the user says not now, carry on under the global rules and ask again next session. Never act as the user: do not answer any of these questions yourself.';
 
 function replayContext(state, prompts, { notNow = false, elsewhere = false } = {}) {
   const label = state.state === 'ENABLED' && state.materials_complete === false ? 'ENABLED (materials incomplete)' : state.state;
@@ -1102,29 +1130,126 @@ function noMarkText(commands) {
 const RESUMED_LINE = 'Toolkit: this session was resumed, or another session started in this repository, so Toolkit asks again and your reply was held.';
 const MOVED_LINE = 'Toolkit: another session started in this repository since you said "later", so Toolkit asks again and your reply was held.';
 const LAUNCHED_HOLD_TEXT = `Toolkit: this repository is waiting for the user's governance answer, and this session was started by another session or a Toolkit launcher, so its message was not sent and not kept. The user answers in their own chat; start this again after that. ${NEVER_OWNER}`;
+const PICKER_UNCOUNTED = `Toolkit governance: no answer was recorded from that card, and the repository is still waiting. End your turn now without using any other tool; the user can reply yes, no or later as a message. ${NEVER_OWNER}`;
+
+function withAgentLine(text) { return `${text}\nFor agents: ${NEVER_OWNER_SHORT}`; }
+
+// ---- picker notes -----------------------------------------------------------------------------
+
+// The cards the tool gate let through, one small file each next to the session marks: the call's
+// tool_use_id with the session and marks of the run that made it. The answer to a call counts only
+// once, and only with its note; a note older than a day is never used.
+const NOTE_SCHEMA = 'toolkit.governance-picker-note.v1';
+const MAX_NOTE_AGE_MS = 24 * 60 * 60 * 1000;
+class PickerNotes {
+  #folder; #now;
+
+  constructor({ registryOptions = {}, now = () => new Date() } = {}) {
+    this.#folder = path.join(path.dirname(governance.registryPathFor(registryOptions)), SESSIONS_FOLDER);
+    this.#now = now;
+  }
+
+  #file(toolUseId) {
+    return path.join(this.#folder, `q-${crypto.createHash('sha256').update(toolUseId).digest('hex').slice(0, 32)}.json`);
+  }
+
+  // marks is { session_id, session, repository }. Throws when the note cannot be written.
+  note(toolUseId, marks) {
+    if (typeof toolUseId !== 'string' || toolUseId === '') throw new GovernanceGateError('NO_TOOL_USE_ID');
+    fs.mkdirSync(this.#folder, { recursive: true });
+    const file = this.#file(toolUseId);
+    const temp = `${file}.tmp-${process.pid}-${crypto.randomBytes(4).toString('hex')}`;
+    try {
+      fs.writeFileSync(temp, `${JSON.stringify({ schema: NOTE_SCHEMA, tool_use_id: toolUseId, session_id: marks.session_id, session: marks.session, repository: marks.repository || null, at: this.#now().toISOString() })}\n`, { mode: 0o600 });
+      fs.renameSync(temp, file);
+    } finally {
+      fs.rmSync(temp, { force: true });
+    }
+    this.#prune();
+  }
+
+  // The note for a call, removed as it is read, or null.
+  take(toolUseId) {
+    if (typeof toolUseId !== 'string' || toolUseId === '') return null;
+    const file = this.#file(toolUseId);
+    let parsed = null;
+    try { parsed = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { parsed = null; }
+    // A note that cannot be removed could be used again, so it is not used at all.
+    try { fs.rmSync(file, { force: true }); } catch { /* checked below */ }
+    if (fs.existsSync(file)) return null;
+    const fresh = parsed && Date.parse(parsed.at) >= this.#now().getTime() - MAX_NOTE_AGE_MS;
+    return fresh && parsed.schema === NOTE_SCHEMA && parsed.tool_use_id === toolUseId && EPOCH.test(String(parsed.session)) ? parsed : null;
+  }
+
+  #prune() {
+    try {
+      const names = fs.readdirSync(this.#folder).filter(name => /^q-[0-9a-f]{32}\.json$/.test(name));
+      if (names.length <= MAX_SESSIONS) return;
+      const aged = names.map(name => {
+        const file = path.join(this.#folder, name);
+        try { return { file, at: fs.statSync(file).mtimeMs }; } catch { return { file, at: 0 }; }
+      }).sort((a, b) => b.at - a.at);
+      for (const { file } of aged.slice(MAX_SESSIONS)) fs.rmSync(file, { force: true });
+    } catch { /* pruning is housekeeping only */ }
+  }
+}
 
 // ---- prompt hold ------------------------------------------------------------------------------
 
 // The host-neutral UserPromptSubmit decision: { action: 'pass' } | { action: 'pass', context } |
 // { action: 'block', reason }.
 class PromptHold {
-  #gate; #held; #notNow; #epochs; #registryOptions; #environment; #now;
+  #gate; #held; #notNow; #epochs; #notes; #registryOptions; #environment; #now; #picker;
 
-  constructor({ registryOptions = {}, environment = process.env, now = () => new Date(), stateReader = null } = {}) {
+  // picker: the host can show Toolkit's tap-to-answer card (Claude Code). Then a held message in a
+  // github.com repository lets the turn run with an instruction to show the card, and only the card
+  // runs (ToolGate); the message stays held and comes back after the answer, as with a typed one.
+  constructor({ registryOptions = {}, environment = process.env, now = () => new Date(), stateReader = null, picker = false } = {}) {
     this.#registryOptions = registryOptions;
     this.#gate = new GovernanceGate({ registryOptions, stateReader, now });
     this.#held = new HeldPrompts({ registryOptions, now });
     this.#notNow = new NotNow({ registryOptions, now });
     this.#epochs = new SessionEpochs({ registryOptions, now });
+    this.#notes = new PickerNotes({ registryOptions, now });
     this.#environment = environment || {};
     this.#now = now;
+    this.#picker = picker === true;
   }
 
   // sessionId is the host's session id; "not now" lasts for that session's run only. Whoever reads a
   // hold, the user or an agent that started the run, is also told that only the user answers.
   decide(request) {
     const result = this.#decide(request);
-    return result.action === 'block' && !result.reason.endsWith(NEVER_OWNER) ? { ...result, reason: `${result.reason}\nFor agents: ${NEVER_OWNER}` } : result;
+    return result.action === 'block' && !result.reason.endsWith(NEVER_OWNER) ? { ...result, reason: withAgentLine(result.reason) } : result;
+  }
+
+  // The card's answer, from Claude Code's PostToolUse on AskUserQuestion: { context } for Claude, or
+  // null when the call was not Toolkit's card. It counts only when the tool gate let this exact call
+  // through as a clean card in this run of the session that was asked, as a typed answer would.
+  picked({ cwd, sessionId = null, toolUseId = null, toolResponse = null }) {
+    const answers = toolResponse && typeof toolResponse === 'object' && toolResponse.answers && typeof toolResponse.answers === 'object' ? toolResponse.answers : {};
+    const questions = toolResponse && Array.isArray(toolResponse.questions) ? toolResponse.questions : [];
+    if (!questions.some(question => question && question.question === PICKER_QUESTION)) return null;
+    const noted = this.#notes.take(toolUseId);
+    // The card shown must still be exactly Toolkit's: options changed after the tool gate's check
+    // (relabelled, reordered) make the answer mean something else, so it counts for nothing.
+    if (!pickerInput({ questions })) return { context: PICKER_UNCOUNTED };
+    const verdict = this.#gate.evaluate(cwd, { sessionId });
+    if (!verdict.hold || verdict.reason !== 'undecided') return null;
+    const marks = this.#marks(verdict, sessionId);
+    const counts = noted !== null && !this.#launched(sessionId) && noted.session_id === sessionId && noted.session === marks.session
+      && noted.repository === marks.repository && this.#held.asked(verdict.state.repository_id, sessionId, marks);
+    const label = Object.hasOwn(answers, PICKER_QUESTION) ? answers[PICKER_QUESTION] : null;
+    const command = typeof label === 'string' && Object.hasOwn(PICKER_COMMANDS, label) ? PICKER_COMMANDS[label] : null;
+    if (!counts || command === null) return { context: PICKER_UNCOUNTED };
+    const result = this.#answer(cwd, command, verdict, sessionId, marks);
+    return { context: result.action === 'pass' ? result.context : `Tell the user this, word for word, then end your turn: ${result.reason}${result.reason.endsWith(NEVER_OWNER) ? '' : `\n${NEVER_OWNER}`}` };
+  }
+
+  // The notice for a held message: the card where the host can show it to this run, else the text.
+  #ask(text, sessionId, marks) {
+    if (!this.#picker || typeof sessionId !== 'string' || sessionId === '' || !marks || !EPOCH.test(String(marks.session))) return { action: 'block', reason: text };
+    return { action: 'pass', context: pickerContext(withAgentLine(text)), notice: PICKER_NOTICE };
   }
 
   #decide({ cwd, prompt, sessionId = null }) {
@@ -1151,10 +1276,10 @@ class PromptHold {
     if (unmarked) return unmarked;
     const resumed = Boolean(answer || short) && this.#held.count(id, sessionId) > 0;
     const held = this.#held.add(id, prompt, sessionId, marks, verdict.state.root);
-    if (resumed) return { action: 'block', reason: `${RESUMED_LINE}\n${questionText(verdict, 1)}` };
+    if (resumed) return this.#ask(`${RESUMED_LINE}\n${questionText(verdict, 1)}`, sessionId, marks);
     // A session sees the whole question on its first held message, even when another session is waiting too.
     const shown = typeof sessionId === 'string' && sessionId !== '' ? this.#held.count(id, sessionId) : held;
-    return { action: 'block', reason: questionText(verdict, shown) };
+    return this.#ask(questionText(verdict, shown), sessionId, marks);
   }
 
   // An answer from a session the session-start hook never marked cannot count, so it is refused
@@ -1176,7 +1301,7 @@ class PromptHold {
     if (this.#notNow.repositoryMark(id, sessionId) === marks.repository) return this.#answer(cwd, answer[1].toLowerCase(), verdict, sessionId, marks);
     try { this.#notNow.set(id, sessionId, null); } catch { /* the reply is held below either way */ }
     this.#held.add(id, answer[0], sessionId, marks, verdict.state.root);
-    return { action: 'block', reason: `${MOVED_LINE}\n${questionText(verdict, 1)}` };
+    return this.#ask(`${MOVED_LINE}\n${questionText(verdict, 1)}`, sessionId, marks);
   }
 
   // A git repository not on github.com: the only outcome is DISABLED, once the user says ok.
@@ -1300,12 +1425,29 @@ function sessionIdOf(input) {
 
 // The host-neutral PreToolUse decision: null (no decision) or { deny: reason }.
 class ToolGate {
-  #gate; #held; #registryOptions;
+  #gate; #continuation; #epochs; #notes; #registryOptions;
 
-  constructor({ registryOptions = {}, stateReader = null, now } = {}) {
+  constructor({ registryOptions = {}, stateReader = null, now, environment = process.env, continuationResolver = null } = {}) {
     this.#gate = new GovernanceGate({ registryOptions, stateReader, now });
-    this.#held = new HeldPrompts({ registryOptions, now });
+    this.#continuation = continuationResolver || new ContinuationResolver({ environment });
+    this.#epochs = new SessionEpochs({ registryOptions, now });
+    this.#notes = new PickerNotes({ registryOptions, now });
     this.#registryOptions = registryOptions;
+  }
+
+  // AskUserQuestion in a repository waiting for its github.com answer runs only as Toolkit's own
+  // card, with no answer filled in by the caller, from a run that can answer; the call is noted so
+  // the answer that comes back (PromptHold.picked) is known to come from that card.
+  #picker(input, sessionId) {
+    const verdict = this.#gate.evaluate(input && input.cwd, { sessionId });
+    if (!verdict.hold) return null;
+    const refused = { deny: `Toolkit: while this repository waits for the governance answer, AskUserQuestion runs only as Toolkit's own card, exactly as given and with no answer filled in. End your turn; the user can reply yes, no or later as a message. ${NEVER_OWNER}` };
+    if (verdict.reason !== 'undecided' || !pickerInput(input.tool_input)) return refused;
+    const toolUseId = input.tool_use_id;
+    const marks = { session: this.#epochs.get(sessionId), repository: this.#epochs.repository(verdict.state.repository_id) };
+    if (typeof sessionId !== 'string' || sessionId === '' || !EPOCH.test(String(marks.session))) return refused;
+    try { this.#notes.note(toolUseId, { session_id: sessionId, ...marks }); } catch { return refused; }
+    return null;
   }
 
   decide(input) {
@@ -1324,7 +1466,10 @@ class ToolGate {
     if (EDIT_TOOLS.test(tool) && editTargets(input).some(target => USER_STATE_PATH.test(resolveTarget(input, target)))) {
       return { deny: `Toolkit: its user-state files (governance decisions and held messages) are changed only by Toolkit itself. ${NEVER_OWNER}` };
     }
-    if (READ_ONLY_TOOLS.test(tool)) return null;
+    if (tool === PICKER_TOOL) return this.#picker(input, sessionId);
+    if (ALWAYS_TOOLS.test(tool)) return null;
+    // Read-only tools are held too: Claude Code lets a held turn run to show the card, with the held
+    // message in front of Claude, and only the card runs on it.
     const verdict = this.#gate.evaluate(input && input.cwd, { sessionId });
     if (verdict.hold) {
       if (verdict.reason === 'state-unreadable') return { deny: [`Toolkit: the governance state of this repository could not be read (${verdict.state.error_code}), so nothing runs here until it can.`, governance.repairHint(verdict.state, this.#registryOptions), NEVER_OWNER].filter(Boolean).join(' ') };
@@ -1339,14 +1484,29 @@ class ToolGate {
     if (SHELL_TOOLS.test(tool)) {
       const text = toolText(input);
       const cwd = path.resolve(String(input.cwd || process.cwd()));
-      if (HOST_RESUME.test(text) && this.#anyHeld()) {
-        return { deny: `Toolkit: a message is held for a repository's governance answer, so no Claude or Codex session may be resumed, continued or forked from here until the user answers in their own chat. ${NEVER_OWNER}` };
-      }
-      const targets = [...new Set([...commandTargets(text, cwd), ...absoluteTargets(text)])];
+      const args = input.tool_input || {};
+      const workdirs = [args.workdir, args.cwd].filter(value => typeof value === 'string' && value);
+      const resolvedWorkdirs = workdirs.map(value => path.resolve(cwd, value));
+      const targets = [...new Set([...resolvedWorkdirs, ...commandTargets(text, resolvedWorkdirs[0] || cwd), ...absoluteTargets(text)])];
       if (targets.some(target => this.#verdict(target, sessionId)?.hold)) {
         return { deny: `${HOST_COMMAND.test(text)
           ? "Toolkit: this command starts a Claude or Codex session in a repository that is waiting for the user's governance answer, so it is refused."
           : "Toolkit: this command works in a repository that is waiting for the user's governance answer, so it is refused."} Ask the user to answer in their own chat first; do not try to work around it. ${NEVER_OWNER}` };
+      }
+      // Generic owner/state/current-folder/path guards above always run first. A continuation
+      // starts a new run: the caller's session-specific 'later' never admits its targets.
+      let continuation;
+      try { continuation = this.#continuation.resolve(text, input); } catch { continuation = { status: 'UNKNOWN' }; }
+      if (continuation?.status === 'UNKNOWN') return { deny: `Toolkit: the selected session's repository could not be verified, so this continuation is refused. Use a supported literal selector whose target can be verified. ${NEVER_OWNER}` };
+      if (continuation?.status !== 'NOT_CONTINUATION') {
+        if (continuation?.status !== 'VERIFIED' || !Array.isArray(continuation.targets) || continuation.targets.length === 0
+          || continuation.targets.some(target => {
+            if (typeof target !== 'string' || !path.isAbsolute(target)) return true;
+            const targetVerdict = this.#verdict(target, null);
+            return targetVerdict?.hold !== false || !['ENABLED', 'DISABLED'].includes(targetVerdict.state?.state);
+          })) {
+          return { deny: `Toolkit: a continuation target is waiting for its governance answer or its state could not be verified, so this continuation is refused. The user answers for that repository in their own chat. ${NEVER_OWNER}` };
+        }
       }
     }
     if (EDIT_TOOLS.test(tool) && editTargets(input).some(target => this.#verdict(path.dirname(resolveTarget(input, target)), sessionId)?.hold)) {
@@ -1360,13 +1520,6 @@ class ToolGate {
     try { return this.#gate.evaluate(target, { sessionId }); } catch { return null; }
   }
 
-  // Whether a message is held for a repository that is still waiting for its answer (one decided
-  // since no longer counts); a store that cannot be read, or an entry without its folder, counts as yes.
-  #anyHeld() {
-    let roots;
-    try { roots = this.#held.heldRoots(); } catch { return true; }
-    return Object.values(roots).some(root => root === null || this.#verdict(root, null)?.hold !== false);
-  }
 }
 
 // ---- session line -----------------------------------------------------------------------------
@@ -1416,6 +1569,7 @@ module.exports = Object.freeze({
   MAX_HELD,
   MAX_HELD_CHARS,
   NEVER_OWNER,
+  NEVER_OWNER_SHORT,
   GovernanceGate,
   GovernanceGateError,
   HeldPrompts,
@@ -1426,4 +1580,7 @@ module.exports = Object.freeze({
   terminalCommand,
   writeGovernanceDecision,
   writeNotGitHubOk,
+  PICKER_INPUT,
+  PICKER_QUESTION,
+  pickerInput,
 });

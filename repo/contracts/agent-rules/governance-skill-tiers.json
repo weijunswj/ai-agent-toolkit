@@ -3,6 +3,7 @@
   "description": "Governance tier of every skill under skills/. The per-state skill catalogue is computed from this file and the skill folders by repo/scripts/toolkit-governance-catalogue.cjs; it is never written to a second file. portable: offered wherever the plugin is installed, in every state. governed: the GitHub governance skills, offered only in an ENABLED repository whose governed block and programme binding are both present.",
   "tiers": ["portable", "governed"],
   "skills": {
+    "agent-cost-control": "portable",
     "codex-ssh-hostinger-coolify-setup-maintainer": "portable",
     "controller-bootstrap": "portable",
     "external-operation-preflight": "portable",

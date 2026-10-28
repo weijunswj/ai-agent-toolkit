@@ -1,0 +1,10 @@
+interface:
+  display_name: Agent Cost Control
+  short_description: Pick the cheapest model and effort for automations and non-gate helpers.
+  primary_color: '#4D7C0F'
+policy:
+  products:
+    - chatgpt
+    - codex
+    - atlas
+  allow_implicit_invocation: true

@@ -313,7 +313,7 @@ test('SEC-01: free dependency and security settings are turned on by default, wi
   const settings = { 'example-owner/governed': { alerts: 'disabled', code_scanning: 'disabled' } };
   const calls = [];
   const securityWriter = (slug, plan) => {
-    const keys = Object.keys(plan).filter(key => key !== 'paid' && plan[key]);
+    const keys = Object.keys(plan).filter(key => plan[key]);
     calls.push({ slug, plan: keys });
     settings[slug] = {};
     return keys.map(setting => ({ setting, ok: true, reason: null }));
@@ -334,17 +334,15 @@ test('SEC-01: free dependency and security settings are turned on by default, wi
   assert.equal(refusedCalls, 1);
   assert.equal(refused.code, 2);
   assert.match(refused.stdout, /private vulnerability reporting not turned on \(forbidden\)/);
-  // A private repository: paid features are never turned on without the binding's answer.
-  // A private repository: paid features are never turned on without the merged binding's answer,
-  // whatever the working tree says.
-  const merged = { status: 'ok', text: fs.readFileSync(path.join(governed, '.github', 'toolkit-programme.json'), 'utf8') };
-  const working = JSON.parse(merged.text);
-  fs.writeFileSync(path.join(governed, '.github', 'toolkit-programme.json'), JSON.stringify({ ...working, paid_security: 'on' }));
-  settings['example-owner/governed'] = { visibility: 'private', secret_scanning: 'disabled', push_protection: 'disabled', code_scanning: 'disabled', private_reporting: 'not-on-plan', binding: merged };
+  // A private repository: features GitHub bills for there are never written or asked about, even
+  // with a deprecated paid_security "on" merged and in the working tree.
+  const text = JSON.stringify({ ...JSON.parse(fs.readFileSync(path.join(governed, '.github', 'toolkit-programme.json'), 'utf8')), paid_security: 'on' });
+  fs.writeFileSync(path.join(governed, '.github', 'toolkit-programme.json'), text);
+  settings['example-owner/governed'] = { visibility: 'private', secret_scanning: 'disabled', push_protection: 'disabled', code_scanning: 'disabled', private_reporting: 'not-on-plan', binding: { status: 'ok', text } };
   const privateRun = await migrate(ctx, { answers: [], rulesets, protections, security: settings, securityWriter });
   assert.equal(calls.length, 1, 'nothing paid was written');
-  assert.match(privateRun.stdout, /no paid_security answer/);
-  assert.match(privateRun.stdout, /the working-tree binding asks for [^\n]*"paid_security":"on"[^\n]*counts only once merged/);
+  assert.equal(privateRun.asked.length, 0, 'nothing asked');
+  assert.doesNotMatch(privateRun.stdout, /paid|Secret Protection|Code Security/);
 });
 
 test('T-01: the binding template is not a valid binding until it is filled in', () => {

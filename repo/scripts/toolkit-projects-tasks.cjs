@@ -29,9 +29,9 @@ const FENCE_OPEN = /^```toolkit-task-params[ \t]*$/;
 const FENCE_CLOSE = /^```[ \t]*$/;
 
 const KINDS = Object.freeze({
-  'daily-check-in': { checks: { name: 'DAILY-CHECK-IN-CHECKS', file: 'daily-check-in.md' }, session: 'bound', title: 'Daily check-in' },
-  'hourly-nudge': { checks: { name: 'HOURLY-NUDGE-CHECKS', file: 'hourly-nudge.md' }, session: 'bound', title: 'Hourly nudge' },
-  custom: { checks: null, session: null, title: null }
+  'daily-check-in': { checks: { name: 'DAILY-CHECK-IN-CHECKS', file: 'daily-check-in.md' }, session: 'bound', title: 'Daily check-in', tier: 'mid' },
+  'hourly-nudge': { checks: { name: 'HOURLY-NUDGE-CHECKS', file: 'hourly-nudge.md' }, session: 'bound', title: 'Hourly nudge', tier: 'small' },
+  custom: { checks: null, session: null, title: null, tier: 'small' }
 });
 const SHELL = Object.freeze({
   setup: { name: 'TASK-RUN-SETUP', file: 'run-setup.md' },
@@ -41,14 +41,28 @@ const OWN_NAMES = new Set([SHELL.setup.name, SHELL.delivery.name, ...Object.valu
 const PROJECT_HEADING = 'Project additions (kept on every refresh; they override the Toolkit base where they differ):';
 const KEPT_LABEL = '(kept from an edit inside the block)';
 
+const TIERS = Object.freeze(['small', 'mid', 'top']);
+const EFFORTS = Object.freeze(['medium', 'high', 'xhigh', 'max']);
 const REPO = /^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/;
+// A raise reason, in params and in memory alike: 3 to 200 printable ASCII characters with no
+// | ; { } or backtick, no leading or trailing space, and nothing that reads as the owner's stop or
+// schedule mark in any case or spacing.
+const OWNER_MARK = /stopped\W*by\W*(?:the\W*)?owner|owner\W*schedule/i;
+function isReason(value) {
+  return /^[\x20-\x3a\x3c-\x5f\x61-\x7a\x7e]{3,200}$/.test(value) && value.trim() === value && !OWNER_MARK.test(value);
+}
+
 const PARAMS = Object.freeze({
   project: { required: true, test: v => /^[A-Z0-9][A-Z0-9 _-]{0,39}$/.test(v) && !/ $/.test(v) },
   repo: { required: true, test: v => v === 'none' || REPO.test(v) },
   toolkit_repo: { fallback: 'weijunswj/ai-agent-toolkit', test: v => REPO.test(v) },
   parent_issue: { fallback: 'none', test: v => v === 'none' || /^[1-9]\d{0,6}$/.test(v) },
   report_dir: { required: true, test: v => /^\/mnt\/project-files\/[A-Za-z0-9._/-]+$/.test(v) && !v.split('/').includes('..') && !v.endsWith('/') && !v.includes('//') },
-  effort: { required: true, test: v => ['low', 'medium', 'high', 'xhigh', 'max'].includes(v) },
+  // Medium is the effort floor (agent-cost-control); anything above medium needs raise_reason.
+  effort: { required: true, test: v => EFFORTS.includes(v) },
+  // The model tier; left out, it is the kind's default tier.
+  model: { test: v => TIERS.includes(v) },
+  raise_reason: { test: v => isReason(v) },
   // A custom task defaults to a fresh session; the two Toolkit tasks default to bound and take
   // session fresh only as the fallback, which is then kept in their params.
   session: { fallback: 'fresh', test: v => v === 'fresh' || v === 'bound' }
@@ -67,18 +81,23 @@ function validateParams(kind, raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new TaskInputError('TASK_PARAMS');
   const params = {};
   for (const key of Object.keys(raw)) {
-    const rule = PARAMS[key];
+    const rule = Object.hasOwn(PARAMS, key) ? PARAMS[key] : undefined;
     if (!rule || (rule.customOnly && kind !== 'custom') || typeof raw[key] !== 'string') throw new TaskInputError('TASK_PARAMS');
   }
   for (const [key, rule] of Object.entries(PARAMS)) {
     if (rule.customOnly && kind !== 'custom') continue;
-    const fallback = key === 'session' && KINDS[kind].session ? KINDS[kind].session : rule.fallback;
+    let fallback = key === 'session' && KINDS[kind].session ? KINDS[kind].session : rule.fallback;
+    if (key === 'model') fallback = KINDS[kind].tier;
     const value = raw[key] === undefined ? fallback : raw[key];
     if (value === undefined && rule.required) throw new TaskInputError('TASK_PARAMS');
+    if (value === undefined) continue;
     if (!rule.test(value)) throw new TaskInputError('TASK_PARAMS');
     if (key === 'session' && KINDS[kind].session && value === KINDS[kind].session) continue;
     params[key] = value;
   }
+  // A step above the kind's default tier, or effort above medium, carries its written reason.
+  const raised = TIERS.indexOf(params.model) > TIERS.indexOf(KINDS[kind].tier) || params.effort !== EFFORTS[0];
+  if (raised && !params.raise_reason) throw new TaskInputError('TASK_PARAMS');
   return params;
 }
 
@@ -92,7 +111,7 @@ function taskName(kind, params) {
   return `${params.project}: ${title}`;
 }
 
-// Template lines may start with a condition tag: [repo], [no-repo], [parent], [toolkit], [fresh], [bound].
+// Template lines may start with a condition tag: [repo], [no-repo], [parent], [toolkit], [fresh], [bound], [raised].
 // [toolkit] is the project whose repo is the Toolkit repo itself.
 // Placeholders are {{name}}; an unknown placeholder or tag is a broken source.
 function fill(template, kind, params) {
@@ -106,7 +125,7 @@ function fill(template, kind, params) {
   const conditions = {
     repo: params.repo !== 'none', 'no-repo': params.repo === 'none', parent: params.parent_issue !== 'none',
     toolkit: params.repo === params.toolkit_repo,
-    fresh: session === 'fresh', bound: session === 'bound'
+    fresh: session === 'fresh', bound: session === 'bound', raised: Boolean(params.raise_reason)
   };
   const lines = [];
   for (const line of normalizeBody(template).split('\n')) {
@@ -143,12 +162,31 @@ function findParams(text) {
   return found[0] || null;
 }
 
-function parseParams(kind, text) {
+// A params block with no model key was rendered before tiers existed. It is migrated, not
+// refused, so every live prompt still checks and refreshes: effort low rises to the medium floor,
+// and effort above medium is kept with LEGACY_RAISE as its reason for the coordinator to confirm.
+const LEGACY_RAISE = 'kept from the setting before tiers, confirm or lower it';
+
+function migrateLegacy(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw) || Object.hasOwn(raw, 'model')) return { raw, legacy: false };
+  const next = { ...raw };
+  if (next.effort === 'low') next.effort = EFFORTS[0];
+  if (EFFORTS.slice(1).includes(next.effort) && next.raise_reason === undefined) next.raise_reason = LEGACY_RAISE;
+  // Only a migration that changed a value rewrites the block; a medium prompt keeps it as it is.
+  return { raw: next, legacy: next.effort !== raw.effort || next.raise_reason !== raw.raise_reason };
+}
+
+function storedParams(kind, text) {
   const fence = findParams(text);
   if (!fence) throw new TaskInputError('TASK_PARAMS_FENCE');
-  let raw;
-  try { raw = JSON.parse(fence.json); } catch { throw new TaskInputError('TASK_PARAMS'); }
-  return validateParams(kind, raw);
+  let parsed;
+  try { parsed = JSON.parse(fence.json); } catch { throw new TaskInputError('TASK_PARAMS'); }
+  const { raw, legacy } = migrateLegacy(parsed);
+  return { params: validateParams(kind, raw), legacy };
+}
+
+function parseParams(kind, text) {
+  return storedParams(kind, text).params;
 }
 
 class ProjectsTasks {
@@ -201,7 +239,7 @@ class ProjectsTasks {
     }
     if (override || projectText !== undefined) throw new TaskInputError('TASK_ARGUMENTS');
     const lf = lfText(text);
-    const stored = parseParams(kind, lf);
+    const { params: stored, legacy } = storedParams(kind, lf);
     const params = withSession(stored);
     const expected = this.expectedBlocks(kind, params);
     const { blocks } = findBlocks(lf);
@@ -216,8 +254,8 @@ class ProjectsTasks {
     const fence = findParams(lf);
     let project = projectSegments(lf, own, fence).join('\n\n');
     if (kept.length) project = [project, KEPT_LABEL, ...kept].filter(Boolean).join('\n');
-    // A session change rewrites the params block; otherwise it is kept byte for byte.
-    const fenceText = params.session === stored.session ? lf.split('\n').slice(fence.startLine, fence.endLine + 1).join('\n') : paramsFence(params);
+    // A session change or a legacy migration rewrites the params block; otherwise it is kept byte for byte.
+    const fenceText = params.session === stored.session && !legacy ? lf.split('\n').slice(fence.startLine, fence.endLine + 1).join('\n') : paramsFence(params);
     return this.render(kind, params, project, fenceText);
   }
 }
@@ -294,10 +332,16 @@ function inOrder(lf, own, fence, expected) {
 
 // The two memory lines Toolkit defines. Nothing else in memory is read.
 const BINDING_LINE = /^[-*\s]*BINDING: [A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+ \S+ commit [0-9a-f]{40} CONTROLLER\.md blob [0-9a-f]{40} toolkit \d+\.\d+\.\d+ skill \S+ bound \S+\s*$/;
-const TASK_ENTRY = /^(?<name>[^|;]+?) \| (?<id>trig_[A-Za-z0-9]+) \| (?<cron>[^|;]+?) \| (?<mode>fresh|local|device|bound home cmsg_[A-Za-z0-9]+ since \d{4}-\d{2}-\d{2})(?: \| owner schedule)?(?: \| stopped by owner \d{4}-\d{2}-\d{2})?$/;
+const TASK_ENTRY = /^(?<name>[^|;]+?) \| (?<id>trig_[A-Za-z0-9]+) \| (?<cron>[^|;]+?) \| (?<mode>fresh|local|device|bound home cmsg_[A-Za-z0-9]+ since \d{4}-\d{2}-\d{2})(?: \| owner schedule)?(?: \| raised (?:small|mid|top)\/(?:medium|high|xhigh|max) \d{4}-\d{2}-\d{2}: (?<reason>[\x20-\x3a\x3c-\x5f\x61-\x7a\x7e]+?))?(?: \| stopped by owner \d{4}-\d{2}-\d{2})?$/;
+
+function validEntry(entry) {
+  const match = TASK_ENTRY.exec(entry);
+  return Boolean(match) && (match.groups.reason === undefined || isReason(match.groups.reason));
+}
 
 function checkMemory(text) {
-  const lines = lfText(text).split('\n');
+  // Only LF and CRLF end a line: a lone CR or a Unicode line break stays inside its line and fails it.
+  const lines = String(text).replace(/^\uFEFF/, '').split('\n').map(line => line.replace(/\r$/, ''));
   const faults = [];
   const binding = lines.filter(line => /^[-*\s]*BINDING:/.test(line));
   if (!binding.length) faults.push('MEMORY FORMAT: BINDING missing');
@@ -307,8 +351,8 @@ function checkMemory(text) {
   if (!tasks.length) faults.push('MEMORY FORMAT: SCHEDULED TASKS missing');
   else if (tasks.length > 1) faults.push('MEMORY FORMAT: SCHEDULED TASKS more than one line');
   else {
-    const entries = tasks[0].replace(/^[-*\s]*SCHEDULED TASKS:\s*/, '').trim().split(/\s*;\s*/).filter(Boolean);
-    if (!entries.length || entries.some(entry => !TASK_ENTRY.test(entry))) faults.push('MEMORY FORMAT: SCHEDULED TASKS old format');
+    const entries = tasks[0].replace(/^[-*\s]*SCHEDULED TASKS:\s*/, '').trim().split(';').map(entry => entry.trim()).filter(Boolean);
+    if (!entries.length || /[\r\u0085\u2028\u2029]/.test(tasks[0]) || entries.some(entry => !validEntry(entry))) faults.push('MEMORY FORMAT: SCHEDULED TASKS old format');
   }
   return faults.length ? { lines: faults, exitCode: 1 } : { lines: ['current'], exitCode: 0 };
 }
@@ -393,4 +437,4 @@ function main(args = process.argv.slice(2)) {
 }
 
 if (require.main === module) process.exitCode = main();
-module.exports = Object.freeze({ ProjectsTasks, KINDS, PROJECT_HEADING, KEPT_LABEL, validateParams, taskName, checkTask, checkMemory, parseArgs, fill });
+module.exports = Object.freeze({ ProjectsTasks, KINDS, LEGACY_RAISE, PROJECT_HEADING, KEPT_LABEL, validateParams, taskName, checkTask, checkMemory, parseArgs, fill });
