@@ -89,7 +89,7 @@ test('a new reference fails with its line and a plain-English fix; a baselined o
     [{ file: 'repo/docs/A.md', rule: 'number-reference', text: `${HASH}7`, count: 1 }]);
   const result = plain.check(root);
   assert.deepEqual(result.failures.map(finding => finding.line), [2, 3], 'every occurrence is listed once the count is exceeded');
-  assert.match(plain.describeFailure(result.failures[0]), /^repo\/docs\/A\.md:2: number-reference "#7": replace the #number with what it refers to, in plain English \(if it is not a reference, mark the line `plain-text: allow <reason>`\)$/);
+  assert.match(plain.describeFailure(result.failures[0]), /^repo\/docs\/A\.md:2: number-reference: replace the #number with what it refers to, in plain English \(if it is not a reference, mark the line `plain-text: allow <reason>`\)$/);
   fs.writeFileSync(path.join(root, 'repo/docs/A.md'), `See ${HASH}7.\n`);
   assert.deepEqual(plain.check(root).failures, []);
 });
