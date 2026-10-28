@@ -535,6 +535,11 @@ function wideAnswer(text) {
 }
 function answerCommand(text) {
   if (/toolkit-governance\.cjs["']?\s+(?:enable|disable|decline|reopen|migrate|repair)\b/i.test(text)) return true;
+  // A host and the full answer in one quoted string is a prompt being handed on, wherever it goes.
+  if ([...text.matchAll(SHELL_WORD)].some(match => {
+    const word = match[1] ?? match[2] ?? match[3];
+    return /\b(?:claude|codex)\b/i.test(word) && GOVERNANCE_PHRASE.test(word);
+  })) return true;
   const read = readHostLaunches(text);
   if (!read) return wideAnswer(text);
   if (read.scripts.length && (wideAnswer(text) || read.scripts.some(code => HOST_COMMAND.test(code) && QUOTED_REPLY.test(code)))) return true;

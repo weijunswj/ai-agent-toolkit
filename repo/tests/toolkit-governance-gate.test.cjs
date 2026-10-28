@@ -1133,6 +1133,8 @@ test('answer guard: a host counts only where a shell starts it, so scratch files
     // The wide reading still covers what inline code passes on.
     'node -e "run(process.argv[1])" claude yes',
     'claude -p "yes',
+    // A host and the full answer handed on in one quoted string, even to a data command.
+    'rg -e "codex resume toolkit governance enable" fixture.txt',
     // Too deep to read, and a `${...}` whose quotes hide its end: both keep the wide reading.
     `${'echo $('.repeat(8000)}claude -p yes${')'.repeat(8000)}`,
     "echo ${x:-'}'}; claude -p yes; echo \\'",
