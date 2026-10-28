@@ -602,7 +602,7 @@ function refreshMergedBinding(cwd, options = {}, { runGit, timeout, now, environ
   try {
     const identity = readIdentity(cwd);
     if (!identity.root || !identity.valid || notGitHubOf(identity)) return { refreshed: false, error: 'not-applicable' };
-    const outcome = bindingCache.refreshBindingCache(identity, registryPathFor(options), { runGit, timeout, now });
+    const outcome = bindingCache.refreshBindingCache(identity, registryPathFor(options), { runGit, timeout, now, environment });
     return { refreshed: outcome.refreshed, error: outcome.error };
   } catch (error) { return { refreshed: false, error: codeOf(error) }; }
 }

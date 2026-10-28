@@ -209,6 +209,8 @@ test('A4: the cache never upgrades OFF to ON; offline keeps the last read', (t) 
 // example origin unless the script says otherwise.
 function fakeGit(script) {
   return (args) => {
+    // Leading `-c name=value` pairs (the fetch's hook override) do not change which command it is.
+    while (args[0] === '-c') args = args.slice(2);
     const key = args[0] === 'ls-remote' && args[1] === '--get-url' ? 'get-url' : args[0];
     if (key === 'get-url' && !script['get-url']) return { status: 0, stdout: Buffer.from(`${REMOTE}\n`), stderr: Buffer.alloc(0) };
     const answer = script[key];
@@ -217,35 +219,59 @@ function fakeGit(script) {
   };
 }
 const ok = text => ({ status: 0, stdout: Buffer.from(text), stderr: Buffer.alloc(0) });
+// What the refresh gives the reader: the expected origin, an empty hooks folder it owns, and the
+// environment (here a clean one).
+const NO_HOOKS = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-no-hooks-'));
+process.on('exit', () => fs.rmSync(NO_HOOKS, { recursive: true, force: true }));
+const GUARDED = Object.freeze({ expectedRemote: REMOTE, hooksDir: NO_HOOKS, environment: {} });
 const SHA = 'b'.repeat(40);
 
 test('reader: default branch from the symref, then the binding at its tip; hostile answers never become a binding', () => {
   const base = { 'ls-remote': ok(`ref: refs/heads/main\tHEAD\n${SHA}\tHEAD\n`), fetch: ok(''), 'rev-parse': ok(`${SHA}\n`) };
   const text = JSON.stringify(v2());
-  const present = bindingCache.readDefaultBranchBinding('/r', { expectedRemote: REMOTE, runGit: fakeGit({ ...base, 'ls-tree': ok(`100644 blob ${'c'.repeat(40)}    ${text.length}\t.github/toolkit-programme.json\n`), 'cat-file': ok(text) }) });
+  const present = bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, runGit: fakeGit({ ...base, 'ls-tree': ok(`100644 blob ${'c'.repeat(40)}    ${text.length}\t.github/toolkit-programme.json\n`), 'cat-file': ok(text) }) });
   assert.deepEqual([present.status, present.default_branch, present.commit, present.text], ['present', 'main', SHA, text]);
-  assert.equal(bindingCache.readDefaultBranchBinding('/r', { expectedRemote: REMOTE, runGit: fakeGit({ ...base, 'ls-tree': ok('') }) }).status, 'absent');
-  const link = bindingCache.readDefaultBranchBinding('/r', { expectedRemote: REMOTE, runGit: fakeGit({ ...base, 'ls-tree': ok(`120000 blob ${'c'.repeat(40)}    20\t.github/toolkit-programme.json\n`) }) });
+  assert.equal(bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, runGit: fakeGit({ ...base, 'ls-tree': ok('') }) }).status, 'absent');
+  const link = bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, runGit: fakeGit({ ...base, 'ls-tree': ok(`120000 blob ${'c'.repeat(40)}    20\t.github/toolkit-programme.json\n`) }) });
   assert.deepEqual([link.status, link.text], ['present', null], 'a link is an unusable binding (ERROR), never absent');
-  const huge = bindingCache.readDefaultBranchBinding('/r', { expectedRemote: REMOTE, runGit: fakeGit({ ...base, 'ls-tree': ok(`100644 blob ${'c'.repeat(40)} 9999999\t.github/toolkit-programme.json\n`) }) });
+  const huge = bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, runGit: fakeGit({ ...base, 'ls-tree': ok(`100644 blob ${'c'.repeat(40)} 9999999\t.github/toolkit-programme.json\n`) }) });
   assert.deepEqual([huge.status, huge.problem], ['present', 'too large']);
   for (const symref of ['ref: refs/heads/../x\tHEAD\n', 'ref: refs/heads/.hidden\tHEAD\n', `${SHA}\tHEAD\n`, 'ref: refs/heads/a b\tHEAD\n', 'ref: refs/tags/v1\tHEAD\n']) {
-    assert.equal(bindingCache.readDefaultBranchBinding('/r', { expectedRemote: REMOTE, runGit: fakeGit({ ...base, 'ls-remote': ok(symref) }) }).status, 'unknown', JSON.stringify(symref));
+    assert.equal(bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, runGit: fakeGit({ ...base, 'ls-remote': ok(symref) }) }).status, 'unknown', JSON.stringify(symref));
   }
-  assert.equal(bindingCache.readDefaultBranchBinding('/r', { expectedRemote: REMOTE, runGit: fakeGit({ ...base, fetch: { status: 1, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) } }) }).error, 'fetch-failed');
-  assert.equal(bindingCache.readDefaultBranchBinding('/r', { expectedRemote: REMOTE, runGit: fakeGit({ ...base, 'rev-parse': ok('not-a-sha') }) }).error, 'commit-unreadable');
-  assert.equal(bindingCache.readDefaultBranchBinding('/r', { expectedRemote: REMOTE, runGit: () => { throw new Error('spawn failed'); } }).status, 'unknown');
+  assert.equal(bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, runGit: fakeGit({ ...base, fetch: { status: 1, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) } }) }).error, 'fetch-failed');
+  assert.equal(bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, runGit: fakeGit({ ...base, 'rev-parse': ok('not-a-sha') }) }).error, 'commit-unreadable');
+  assert.equal(bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, runGit: () => { throw new Error('spawn failed'); } }).status, 'unknown');
   // F1: the URL git really fetches from must be the origin the identity names (insteadOf, include, config.worktree).
   let fetchedAnything = false;
   const watching = script => fakeGit({ ...script, fetch: () => { fetchedAnything = true; return ok(''); } });
   for (const url of ['file:///srv/mirror/example-repo.git', 'https://github.com/example-owner/other-repo.git', 'https://gitlab.com/example-owner/example-repo.git', '']) {
-    const redirected = bindingCache.readDefaultBranchBinding('/r', { expectedRemote: REMOTE, runGit: watching({ ...base, 'get-url': ok(`${url}\n`) }) });
+    const redirected = bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, runGit: watching({ ...base, 'get-url': ok(`${url}\n`) }) });
     assert.deepEqual(redirected, { status: 'unknown', error: 'remote-redirected' }, url);
   }
-  assert.equal(bindingCache.readDefaultBranchBinding('/r', { runGit: watching(base) }).error, 'remote-redirected', 'no expected origin: nothing is read');
+  assert.equal(bindingCache.readDefaultBranchBinding('/r', { hooksDir: GUARDED.hooksDir, environment: {}, runGit: watching(base) }).error, 'remote-redirected', 'no expected origin: nothing is read');
+  // M2: transport or config overrides in the environment, or in command-scope config, are held too.
+  for (const name of ['GIT_SSH', 'GIT_SSH_COMMAND', 'GIT_CONFIG_PARAMETERS', 'GIT_CONFIG_COUNT']) {
+    assert.deepEqual(bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, environment: { [name]: name === 'GIT_CONFIG_COUNT' ? '1' : 'x' }, runGit: watching(base) }), { status: 'unknown', error: 'remote-redirected' }, name);
+  }
+  assert.notEqual(bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, environment: { GIT_CONFIG_COUNT: '0' }, runGit: fakeGit({ ...base, 'ls-tree': ok('') }) }).error, 'remote-redirected', 'a zero count sets nothing');
+  assert.deepEqual(bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, runGit: watching({ ...base, config: ok('command\tcore.sshcommand ssh -v\n') }) }), { status: 'unknown', error: 'remote-redirected' }, 'command scope');
+  assert.notEqual(bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, runGit: fakeGit({ ...base, config: ok('global\tcore.sshcommand ssh -v\n'), 'ls-tree': ok('') }) }).error, 'remote-redirected', 'the user\'s global config is not held here');
+  // N3: the fetch runs only with an owned, empty hooks folder, and the ref must be what the remote reported.
+  for (const hooksDir of [null, 'relative/hooks', path.join(NO_HOOKS, 'missing')]) {
+    assert.deepEqual(bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, hooksDir, runGit: watching(base) }), { status: 'unknown', error: 'hooks-unguarded' }, String(hooksDir));
+  }
+  fs.writeFileSync(path.join(NO_HOOKS, 'reference-transaction'), '');
+  assert.equal(bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, runGit: watching(base) }).error, 'hooks-unguarded', 'a non-empty hooks folder');
+  fs.rmSync(path.join(NO_HOOKS, 'reference-transaction'));
+  let fetchArgs = null;
+  const capturing = fakeGit({ ...base, fetch: ok(''), 'ls-tree': ok('') });
+  bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, runGit: (args, options) => { if (args[0] === '-c') fetchArgs = args; return capturing(args, options); } });
+  assert.deepEqual(fetchArgs.slice(0, 3), ['-c', `core.hooksPath=${NO_HOOKS}`, 'fetch']);
+  assert.deepEqual(bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, runGit: fakeGit({ ...base, 'rev-parse': ok(`${'c'.repeat(40)}\n`) }) }), { status: 'unknown', error: 'ref-moved' });
   assert.equal(fetchedAnything, false, 'a redirected origin is never fetched');
   // Another spelling of the same origin is the same origin.
-  assert.equal(bindingCache.readDefaultBranchBinding('/r', { expectedRemote: REMOTE, runGit: fakeGit({ ...base, 'get-url': ok('git@github.com:example-owner/example-repo.git\n'), 'ls-tree': ok('') }) }).status, 'absent');
+  assert.equal(bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, runGit: fakeGit({ ...base, 'get-url': ok('git@github.com:example-owner/example-repo.git\n'), 'ls-tree': ok('') }) }).status, 'absent');
 });
 
 test('cache: an entry for another identity, a tampered or damaged entry reads as no entry', (t) => {
@@ -323,6 +349,33 @@ test('A1 end to end with real git: only the default branch\'s merged binding cou
   git(seed, ['add', '.']);
   git(seed, [...id, 'commit', '--quiet', '-m', 'disable on the mirror']);
   git(seed, ['push', '--quiet', mirror, 'disabled:main']);
+  const disabledCommit = git(seed, ['rev-parse', 'disabled']);
+  const enabledCommit = git(clone, ['rev-parse', 'refs/remotes/origin/main']);
+  const refreshedOk = { refreshed: true, error: null };
+  // N2: a replace ref that swaps the fetched tip for the mirror's commit is not followed.
+  git(clone, ['fetch', '--quiet', mirror, 'main']);
+  git(clone, ['replace', enabledCommit, disabledCommit]);
+  assert.deepEqual(governance.refreshMergedBinding(clone, ctx.opts, { runGit: served }), refreshedOk, 'replace');
+  assert.equal(governance.governanceState(clone, ctx.opts).rule, 'M1', 'replace');
+  git(clone, ['replace', '-d', enabledCommit]);
+  // N3: a reference-transaction hook that moves the tracking ref after the fetch never runs, whether
+  // it is in .git/hooks or in a folder the repository's own core.hooksPath names.
+  const hook = `#!/bin/sh\n[ "$1" = committed ] || exit 0\n[ -n "$MOVED" ] && exit 0\nMOVED=1 git update-ref refs/remotes/origin/main ${disabledCommit}\n`;
+  const ownHooks = path.join(ctx.root, 'repo-hooks');
+  fs.mkdirSync(ownHooks, { recursive: true });
+  for (const [label, folder, setup, undo] of [
+    ['.git/hooks', path.join(clone, '.git', 'hooks'), () => {}, () => {}],
+    ['core.hooksPath', ownHooks, () => git(clone, ['config', 'core.hooksPath', ownHooks.replace(/\\/g, '/')]), () => git(clone, ['config', '--unset', 'core.hooksPath'])],
+  ]) {
+    fs.mkdirSync(folder, { recursive: true });
+    fs.writeFileSync(path.join(folder, 'reference-transaction'), hook, { mode: 0o755 });
+    setup();
+    assert.deepEqual(governance.refreshMergedBinding(clone, ctx.opts, { runGit: served }), refreshedOk, label);
+    assert.equal(git(clone, ['rev-parse', 'refs/remotes/origin/main']), enabledCommit, `${label}: the hook did not run`);
+    assert.equal(governance.governanceState(clone, ctx.opts).rule, 'M1', label);
+    undo();
+    fs.rmSync(path.join(folder, 'reference-transaction'));
+  }
   // F1: one config line that sends origin to the mirror changes nothing: git's real origin URL no
   // longer matches the identity, so the refresh holds and keeps the last read.
   const mirrorUrl = mirror.replace(/\\/g, '/');
@@ -334,6 +387,14 @@ test('A1 end to end with real git: only the default branch\'s merged binding cou
   // is any other transport, proxy or TLS override in the repository's own config.
   git(clone, ['remote', 'set-url', 'origin', 'git@github.com:example-owner/example-repo.git']);
   assert.equal(governance.governanceState(clone, ctx.opts).rule, 'M1', 'another spelling of the same origin keeps the read');
+  // L4: these rows may only read config and the origin URL; any other git call (a transport) is refused
+  // and counted, so a regression in the hold can never reach github.com.
+  const transports = [];
+  const configOnly = (args, options) => {
+    if (args[0] === 'config' || (args[0] === 'ls-remote' && args[1] === '--get-url')) return bindingCache.defaultRunGit(args, options);
+    transports.push(args.join(' '));
+    return { status: 1, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) };
+  };
   for (const [key, value] of [
     ['core.sshCommand', `sh -c "exec git-upload-pack ${mirrorUrl}" x`],
     ['core.gitProxy', 'sh -c true'],
@@ -344,10 +405,11 @@ test('A1 end to end with real git: only the default branch\'s merged binding cou
     ['http.curloptResolve', 'github.com:443:127.0.0.1'],
   ]) {
     git(clone, ['config', key, value]);
-    assert.deepEqual(governance.refreshMergedBinding(clone, ctx.opts, { runGit: bindingCache.defaultRunGit }), { refreshed: false, error: 'remote-redirected' }, key);
+    assert.deepEqual(governance.refreshMergedBinding(clone, ctx.opts, { runGit: configOnly }), { refreshed: false, error: 'remote-redirected' }, key);
     assert.equal(governance.governanceState(clone, ctx.opts).rule, 'M1', key);
     git(clone, ['config', '--unset', key]);
   }
+  assert.deepEqual(transports, [], 'no transport call was made');
 });
 
 // ---- matrix B: discovery ---------------------------------------------------------------------------
@@ -629,13 +691,13 @@ test('F8: a fetch the timeout stopped leaves no lock of its own behind; an older
     'rev-parse': args => (args[1] === '--git-common-dir' ? ok('.git\n') : ok(`${SHA}\n`)),
   };
   const killed = () => { fs.writeFileSync(lock, ''); return { status: null, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) }; };
-  assert.equal(bindingCache.readDefaultBranchBinding(root, { expectedRemote: REMOTE, runGit: fakeGit({ ...base, fetch: killed }) }).error, 'fetch-failed');
+  assert.equal(bindingCache.readDefaultBranchBinding(root, { ...GUARDED, runGit: fakeGit({ ...base, fetch: killed }) }).error, 'fetch-failed');
   assert.equal(fs.existsSync(lock), false, 'the lock this fetch left is removed');
   fs.writeFileSync(lock, '');
   const old = new Date(Date.now() - HOUR);
   fs.utimesSync(lock, old, old);
   const timedOut = () => ({ status: null, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) });
-  bindingCache.readDefaultBranchBinding(root, { expectedRemote: REMOTE, runGit: fakeGit({ ...base, fetch: timedOut }) });
+  bindingCache.readDefaultBranchBinding(root, { ...GUARDED, runGit: fakeGit({ ...base, fetch: timedOut }) });
   assert.equal(fs.existsSync(lock), true, 'an older lock belongs to someone else');
 });
 

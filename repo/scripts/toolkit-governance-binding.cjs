@@ -42,7 +42,13 @@ const SHA = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 // uploadpack, vcs or proxy) or an HTTP proxy, TLS or name-resolution override. git lowercases section
 // and key names; an http.<url>.* subsection keeps its case, so the URL part matches anything.
 const TRANSPORT_OVERRIDES = '^(core\\.sshcommand|core\\.gitproxy|remote\\.origin\\.(uploadpack|vcs|proxy)|http\\..*(proxy|sslverify|curloptresolve))$';
-const REPOSITORY_SCOPES = Object.freeze(['local', 'worktree']);
+// The repository's own config, and command-scope config (git -c, GIT_CONFIG_COUNT/KEY/VALUE,
+// GIT_CONFIG_PARAMETERS) that whoever runs the refresh can set. The user's global and system config
+// are not held here.
+const HELD_SCOPES = Object.freeze(['local', 'worktree', 'command']);
+// Environment that changes the transport or the config for every git call of the refresh.
+const HELD_ENVIRONMENT = Object.freeze(['GIT_SSH', 'GIT_SSH_COMMAND', 'GIT_CONFIG_PARAMETERS', 'GIT_CONFIG_COUNT']);
+const NO_HOOKS_DIR = 'no-hooks';
 
 // A branch name git would accept, kept to plain characters: no empty, dot-led or .lock part.
 function validBranch(name) {
@@ -61,7 +67,8 @@ function cacheFileFor(registryPath, repositoryId) {
 function defaultRunGit(args, { cwd, timeout }) {
   const run = spawnSync('git', args, {
     cwd, timeout, windowsHide: true, maxBuffer: 1024 * 1024,
-    env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', GIT_ASKPASS: '', SSH_ASKPASS: '' },
+    // Replace refs would make rev-parse, ls-tree and cat-file read other objects than the fetched ones.
+    env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', GIT_ASKPASS: '', SSH_ASKPASS: '', GIT_NO_REPLACE_OBJECTS: '1' },
   });
   return { status: run.error ? null : run.status, stdout: run.stdout || Buffer.alloc(0), stderr: run.stderr || Buffer.alloc(0) };
 }
@@ -79,13 +86,18 @@ function parseSymref(text) {
 //
 // `expectedRemote` is the canonical origin the identity was read from (the literal
 // remote.origin.url). git's own origin also follows url.<x>.insteadOf, [include] files and
-// config.worktree, so the URL git will actually use is checked first, and the repository's own config
-// must not carry a transport override (TRANSPORT_OVERRIDES) that would fetch from somewhere else
-// behind the same URL: either is held as 'remote-redirected' and nothing is fetched (A1).
-function readDefaultBranchBinding(root, { runGit = defaultRunGit, timeout = GIT_TIMEOUT_MS, expectedRemote = null } = {}) {
+// config.worktree, so the URL git will actually use is checked first, and neither the repository's
+// own config nor command-scope config may carry a transport override (TRANSPORT_OVERRIDES) that would
+// fetch from somewhere else behind the same URL, nor may the environment (HELD_ENVIRONMENT): any of
+// these is held as 'remote-redirected' and nothing is fetched (A1). The fetch runs with hooks pointed
+// at `hooksDir`, an empty folder the refresh owns, so no repository hook can move the tracking ref,
+// and the ref must then be the commit the remote itself reported.
+function readDefaultBranchBinding(root, { runGit = defaultRunGit, timeout = GIT_TIMEOUT_MS, expectedRemote = null, hooksDir = null, environment = process.env } = {}) {
   const git = args => {
     try { return runGit(args, { cwd: root, timeout }); } catch { return { status: null, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) }; }
   };
+  if (HELD_ENVIRONMENT.some(name => typeof environment[name] === 'string' && environment[name] !== '' && !(name === 'GIT_CONFIG_COUNT' && environment[name] === '0'))) return { status: 'unknown', error: 'remote-redirected' };
+  if (!emptyFolder(hooksDir)) return { status: 'unknown', error: 'hooks-unguarded' };
   const effective = git(['ls-remote', '--get-url', 'origin']);
   if (effective.status !== 0) return { status: 'unknown', error: 'remote-unreachable' };
   const resolved = validateRemoteIdentity(effective.stdout.toString('utf8').trim());
@@ -94,19 +106,23 @@ function readDefaultBranchBinding(root, { runGit = defaultRunGit, timeout = GIT_
   // Exit 1 is "no such setting"; anything else that is not a clean 0 cannot be shown safe.
   const overrides = git(['config', '--show-scope', '--get-regexp', TRANSPORT_OVERRIDES]);
   if (overrides.status !== 0 && overrides.status !== 1) return { status: 'unknown', error: 'remote-redirected' };
-  if (overrides.status === 0 && overrides.stdout.toString('utf8').split(/\r?\n/).some(line => REPOSITORY_SCOPES.includes(line.split('\t')[0]))) return { status: 'unknown', error: 'remote-redirected' };
+  if (overrides.status === 0 && overrides.stdout.toString('utf8').split(/\r?\n/).some(line => HELD_SCOPES.includes(line.split('\t')[0]))) return { status: 'unknown', error: 'remote-redirected' };
   const symref = git(['ls-remote', '--symref', 'origin', 'HEAD']);
   if (symref.status !== 0) return { status: 'unknown', error: 'remote-unreachable' };
   const branch = parseSymref(symref.stdout.toString('utf8'));
   if (!branch) return { status: 'unknown', error: 'default-branch-unknown' };
+  const advertised = /^([0-9a-f]{40}(?:[0-9a-f]{24})?)\tHEAD$/m.exec(symref.stdout.toString('utf8'));
+  if (!advertised) return { status: 'unknown', error: 'default-branch-unknown' };
   const tracking = `refs/remotes/origin/${branch}`;
   const started = Date.now();
-  const fetched = git(['fetch', '--no-tags', '--no-recurse-submodules', 'origin', `+refs/heads/${branch}:${tracking}`]);
+  const fetched = git(['-c', `core.hooksPath=${hooksDir}`, 'fetch', '--no-tags', '--no-recurse-submodules', 'origin', `+refs/heads/${branch}:${tracking}`]);
   if (fetched.status === null) removeKilledFetchLock(git, root, tracking, started);
   if (fetched.status !== 0) return { status: 'unknown', error: 'fetch-failed' };
   const head = git(['rev-parse', '--verify', '--quiet', `${tracking}^{commit}`]);
   const commit = head.status === 0 ? head.stdout.toString('utf8').trim() : '';
   if (!SHA.test(commit)) return { status: 'unknown', error: 'commit-unreadable' };
+  // The remote's HEAD moved between the two reads, or something rewrote the ref: read again later.
+  if (commit !== advertised[1]) return { status: 'unknown', error: 'ref-moved' };
   const tree = git(['ls-tree', '-l', commit, '--', BINDING_PATH]);
   if (tree.status !== 0) return { status: 'unknown', error: 'tree-unreadable' };
   const line = tree.stdout.toString('utf8').trim();
@@ -117,6 +133,11 @@ function readDefaultBranchBinding(root, { runGit = defaultRunGit, timeout = GIT_
   const blob = git(['cat-file', 'blob', entry[1]]);
   if (blob.status !== 0) return { status: 'unknown', error: 'blob-unreadable' };
   return { status: 'present', default_branch: branch, commit, text: blob.stdout.toString('utf8') };
+}
+
+// Whether `folder` is an existing, empty, real folder.
+function emptyFolder(folder) {
+  try { return typeof folder === 'string' && path.isAbsolute(folder) && fs.lstatSync(folder).isDirectory() && fs.readdirSync(folder).length === 0; } catch { return false; }
 }
 
 // A fetch stopped by the timeout can leave the tracking ref's lock behind, which would make every
@@ -145,9 +166,11 @@ function writeCache(registryPath, entry) {
 // Refreshes the cache for one identity (from toolkit-governance-state readIdentity). A failed read
 // keeps the existing entry: offline narrows (see freshness), it never erases what was merged.
 // Returns { refreshed, entry, error }.
-function refreshBindingCache(identity, registryPath, { runGit, timeout, now = () => new Date() } = {}) {
+function refreshBindingCache(identity, registryPath, { runGit, timeout, now = () => new Date(), environment = process.env } = {}) {
   if (!identity || !identity.valid || !identity.root || !identity.repository_id) return { refreshed: false, entry: null, error: 'identity-invalid' };
-  const read = readDefaultBranchBinding(identity.root, { runGit, timeout, expectedRemote: identity.remote.canonical });
+  const hooksDir = path.join(cacheDirFor(registryPath), NO_HOOKS_DIR);
+  try { fs.mkdirSync(hooksDir, { recursive: true }); } catch { /* emptyFolder holds the read */ }
+  const read = readDefaultBranchBinding(identity.root, { runGit, timeout, expectedRemote: identity.remote.canonical, hooksDir, environment });
   if (read.status === 'unknown') return { refreshed: false, entry: readBindingCache(identity, registryPath), error: read.error };
   const entry = {
     schema: CACHE_SCHEMA,
