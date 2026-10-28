@@ -12,6 +12,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const { recordMerged } = require('./toolkit-governed-fixture-support.cjs');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const scripts = path.join(repoRoot, 'repo', 'scripts');
@@ -106,8 +107,8 @@ function writeGoverned(repo, { blockText = expectedBlockText(), binding = true, 
   if (binding) {
     fs.mkdirSync(path.join(repo, '.github'), { recursive: true });
     fs.writeFileSync(path.join(repo, '.github', 'toolkit-programme.json'), JSON.stringify({
-      schema: 'toolkit.programme-binding.v1', repository, parent_issue: 7,
-      record_prefix: 'INT-EX', writer_prefix: 'EX',
+      schema: 'toolkit.programme-binding.v2', repository, governance: 'enabled',
+      parents: [{ issue: 7, record_prefix: 'INT-EX', writer_prefix: 'EX' }],
       store: { kind: 'github', repository: 'example-owner/example-store', branch: 'main', path: 'state/' },
       required_checks: ['validate'],
     }));
@@ -118,10 +119,11 @@ function writeGoverned(repo, { blockText = expectedBlockText(), binding = true, 
 }
 
 // Every file under `dir` with its content digest, to prove a command wrote nothing.
-// Records the user's yes, as the governance gate does from their reply: the governed block and binding
-// alone are not an answer.
+// Records the user's yes, as the governance gate does from their reply, and, where the repository has
+// a binding, this computer's read of it as merged on the default branch: only a merged binding decides.
 function enable(ctx, repo) {
   require(path.join(scripts, 'toolkit-governance-gate.cjs')).writeGovernanceDecision(repo, 'enable', { registryOptions: { registryPath: ctx.registryPath, testOnly: true } });
+  if (fs.existsSync(path.join(repo, '.github', 'toolkit-programme.json'))) recordMerged(repo, { registryPath: ctx.registryPath });
 }
 
 function treeDigest(dir) {
@@ -319,12 +321,16 @@ test('K-01: check exit codes and read-only behaviour', async (t) => {
   // Enabled without the binding is incomplete; disabled with a block reports it ignored.
   await run(ctx, incomplete, ['enable']);
   const enabledIncomplete = JSON.parse((await run(ctx, incomplete, ['check', '--json'])).stdout);
-  assert.deepEqual(enabledIncomplete.findings.map(entry => entry.id), ['BINDING_MISSING']);
+  assert.deepEqual(enabledIncomplete.findings.map(entry => entry.id), ['BINDING_MISSING', 'MERGED_BINDING_UNKNOWN'], 'the default branch has not been read on this computer yet');
   assert.equal(enabledIncomplete.no_force_push_ruleset.status, 'present', 'the ruleset applies to every ENABLED repository');
-  await run(ctx, stale, ['disable']);
+  // A merged binding decides, so a local disable is refused; a merged disabled turns it off everywhere.
+  const refusedDisable = await run(ctx, stale, ['disable']);
+  assert.equal(refusedDisable.code, 2);
+  assert.match(refusedDisable.stderr, /merged on the default branch decides/);
+  recordMerged(stale, { registryPath: ctx.registryPath, text: JSON.stringify({ schema: 'toolkit.programme-binding.v2', repository: 'example-owner/example-repo', governance: 'disabled' }) });
   const ignored = await run(ctx, stale, ['check', '--json']);
   assert.equal(ignored.code, 0);
-  assert.deepEqual(JSON.parse(ignored.stdout).findings.map(entry => entry.id), ['GOVERNED_BLOCK_IGNORED']);
+  assert.deepEqual(JSON.parse(ignored.stdout).findings.map(entry => entry.id), ['REPOSITORY_DISABLED', 'GOVERNED_BLOCK_IGNORED']);
   // DISABLED and UNDECIDED repositories never ask GitHub about default-branch protection.
   for (const repo of [stale, unasked]) {
     let asked = false;

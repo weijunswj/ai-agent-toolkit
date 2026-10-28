@@ -55,7 +55,7 @@ function catalogueProblems(root = ROOT) {
 // Which tiers a state offers. `materialsComplete` matters only for ENABLED.
 function tiersFor(state, materialsComplete) {
   if (state === 'ENABLED') return materialsComplete === true ? ['portable', 'governed'] : ['portable'];
-  if (state === 'DISABLED' || state === 'UNDECIDED') return ['portable'];
+  if (state === 'DISABLED' || state === 'UNDECIDED' || state === 'ERROR') return ['portable'];
   return [];
 }
 

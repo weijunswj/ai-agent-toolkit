@@ -12,6 +12,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const { recordMerged } = require('./toolkit-governed-fixture-support.cjs');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const scripts = path.join(repoRoot, 'repo', 'scripts');
@@ -136,13 +137,14 @@ test('H-04: the answer is recorded in the user-state files only, nothing is writ
   assert.equal(answered.action, 'pass');
   assert.match(answered.context, /now ENABLED \(materials incomplete\)/);
   // A yes leads straight into the setup questions, asked before the held messages are handled.
-  assert.match(answered.context, /GitHub governance setup is not finished here\. Before other work, ask the user in one message: \(1\) the private evidence store/);
-  assert.match(answered.context, /\(2\) the parent issue[^\n]*\(3\) confirm the defaults[^\n]*Toolkit never turns on a GitHub feature that needs billing[^\n]*If the user says not now, carry on under the global rules and ask again next session\. Never act as the user/);
+  // Discovery comes before any question: the agent runs the read-only discover command and puts its one proposal.
+  assert.match(answered.context, /GitHub governance setup is not finished here\. Before other work, run node "[^"]+toolkit-governance\.cjs" discover \(it only reads, and asks nothing\) and put its adoption proposal to the user in one message/);
+  assert.match(answered.context, /A candidate is used only after the user confirms it[^\n]*Toolkit never turns on a GitHub feature that needs billing[^\n]*One yes covers the whole list[^\n]*the binding applies only once that pull request merges[^\n]*If the user says not now, carry on under the global rules and ask again next session\. Never act as the user/);
   assert.doesNotMatch(answered.context, /\(4\)|paid|Secret Protection|Code Security|paid_security/, 'setup asks nothing about paid features');
   assert.ok(answered.context.indexOf('Before other work') < answered.context.indexOf('1. first request'));
   assert.ok(answered.context.indexOf('1. first request') < answered.context.indexOf('2. second request'));
   // Until the block and binding land, every new session is reminded, and nothing is held.
-  assert.match(gate.sessionLine(repo, { registryOptions: ctx.options, sessionId: 'later-session' }), /^Toolkit governance: ENABLED, setup not finished [^\n]*Before other work, ask the user in one message: \(1\) the private evidence store/);
+  assert.match(gate.sessionLine(repo, { registryOptions: ctx.options, sessionId: 'later-session' }), /^Toolkit governance: ENABLED, setup not finished [^\n]*Before other work, run node "[^"]+" discover/);
   assert.equal(tools(ctx).decide({ tool_name: 'Bash', cwd: repo, session_id: 'later-session', tool_input: { command: 'ls' } }), null);
   assert.equal(stateOf(ctx, repo).recorded_decision, 'enabled');
   writesNothingIn(repo);
@@ -155,7 +157,7 @@ test('H-04: the answer is recorded in the user-state files only, nothing is writ
 test('H-05: disable is recorded, never asked again in new sessions, and the session line says the block does not apply', (t) => {
   const ctx = scratch(t);
   const repo = gitRepo(ctx, 'repo', { block: true });
-  assert.match(hold(ctx).decide({ cwd: repo, prompt: 'hello', sessionId: 's1' }).reason, /governed rules block but no programme binding/);
+  assert.match(hold(ctx).decide({ cwd: repo, prompt: 'hello', sessionId: 's1' }).reason, /Turn on GitHub governance/);
   const answered = hold(ctx).decide({ cwd: repo, prompt: 'TOOLKIT GOVERNANCE DISABLE', sessionId: 's1' });
   assert.equal(answered.action, 'pass');
   assert.match(answered.context, /now DISABLED/);
@@ -997,14 +999,15 @@ for (const decision of ['disable', 'enable']) {
   }
 }
 
-test('R4: files in a repository are not the user\'s answer; the governed block and binding are held and asked until the user says yes', (t) => {
+test('R7: a working-tree binding is neither merged nor the user\'s answer; it is held and asked, and applies only once merged', (t) => {
   const ctx = scratch(t);
   const carried = gitRepo(ctx, 'carried', { block: true, binding: true });
   const before = stateOf(ctx, carried);
-  assert.deepEqual([before.state, before.rule, before.reason, before.governed_rules_bind], ['UNDECIDED', 'R4', 'repository-carries-governance', false]);
+  assert.deepEqual([before.state, before.rule, before.reason, before.governed_rules_bind], ['UNDECIDED', 'R7', 'no-decision', false]);
+  assert.ok(before.notes.includes('pending-binding-merge'));
   const first = hold(ctx).decide({ cwd: carried, prompt: 'go', sessionId: 's1' });
   assert.equal(first.action, 'block');
-  assert.match(first.reason, /^It carries the Toolkit governed rules block and programme binding, but files in a repository are not your answer\.$/m);
+  assert.match(first.reason, /^Its working tree has a programme binding that is not merged on the default branch yet\.$/m);
   assert.match(tools(ctx).decide({ tool_name: 'Bash', cwd: carried, session_id: 's1', tool_input: { command: 'ls' } }).deny, /no governance decision yet/);
   assert.match(gate.sessionLine(carried, { registryOptions: ctx.options, sessionId: 's1' }), /no GitHub governance decision yet/);
   // An earlier version's copy saying ENABLED by repository opt-in grants nothing.
@@ -1015,7 +1018,10 @@ test('R4: files in a repository are not the user\'s answer; the governed block a
   const answered = hold(ctx).decide({ cwd: carried, prompt: 'yes', sessionId: 's1' });
   assert.equal(answered.action, 'pass');
   const after = stateOf(ctx, carried);
-  assert.deepEqual([after.state, after.rule, after.governed_rules_bind], ['ENABLED', 'R3', true]);
+  assert.deepEqual([after.state, after.rule, after.governed_rules_bind], ['ENABLED', 'R5', false], 'records bind only once the binding merges');
+  recordMerged(carried, { registryPath: ctx.options.registryPath });
+  const merged = stateOf(ctx, carried);
+  assert.deepEqual([merged.state, merged.rule, merged.governed_rules_bind], ['ENABLED', 'M1', true]);
   assert.equal(fs.readFileSync(oldCopy(carried), 'utf8'), leftover, 'the old copy is never rewritten');
 });
 

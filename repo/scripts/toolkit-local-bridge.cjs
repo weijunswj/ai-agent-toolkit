@@ -1309,8 +1309,14 @@ const VENDORED_REPO_CHECKS = Object.freeze(['plain-text-check', 'personal-data-g
 const REQUIRED_REPO_CHECKS = Object.freeze(['plain-text-check']);
 const VENDORED_CHECK_MARKER = /^\/\/ AI-AGENT-TOOLKIT:secure-ci-cd:VENDORED (\S+) \w+=\d+ sha256=([0-9a-f]{12})$/m;
 
+// Setup refreshes this computer's read of the binding merged on the target's default branch first.
 function governanceEnabledAt(targetRoot) {
-  try { return require('./toolkit-governance-state.cjs').governanceState(targetRoot).state === 'ENABLED'; }
+  try {
+    const governance = require('./toolkit-governance-state.cjs');
+    governance.refreshMergedBinding(targetRoot);
+    // ERROR (an unusable merged binding) keeps the governed checks: it never quietly drops to off.
+    return ['ENABLED', 'ERROR'].includes(governance.governanceState(targetRoot).state);
+  }
   catch { return false; }
 }
 

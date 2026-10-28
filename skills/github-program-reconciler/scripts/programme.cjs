@@ -268,8 +268,8 @@ function requireGitHubGovernance(repoRoot) {
     throw new ProgrammeError('GOVERNANCE_STATE_UNAVAILABLE', 'The Toolkit governance state could not be read from this copy, so no programme command runs. Use a full Toolkit install.');
   }
   const current = governance.governanceState(repoRoot);
-  if (current.state === 'ENABLED' && current.governed_rules_bind) return;
-  throw new ProgrammeError('GITHUB_GOVERNANCE_OFF', `Toolkit's GitHub governance is ${current.state === 'ENABLED' ? 'ENABLED but incomplete (the governed block or binding is missing)' : current.state} for this repository, so no programme command runs. Nothing changed.`);
+  if (current.state === 'ENABLED' && current.programme_records_bind) return;
+  throw new ProgrammeError('GITHUB_GOVERNANCE_OFF', `Toolkit's GitHub governance is ${current.state === 'ENABLED' ? (current.governed_rules_bind ? 'ENABLED, but the binding merged on the default branch was last read over 24 hours ago or not at all (run toolkit governance status online)' : 'ENABLED but incomplete (the binding is not merged on the default branch yet)') : current.state} for this repository, so no programme command runs. Nothing changed.`);
 }
 
 // Binds repository identity, the store and the writer. `deps` lets tests supply a transport and the

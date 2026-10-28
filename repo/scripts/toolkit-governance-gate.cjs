@@ -334,11 +334,17 @@ class SessionEpochs {
 }
 
 // The session-start hook's call on both hosts: records the session's mark and refreshes the mark of
-// the repository it starts in. Never throws.
-function startSession(input, { registryOptions = {}, now } = {}) {
+// the repository it starts in, after refreshing this computer's read of the binding merged on that
+// repository's default branch (bounded; offline keeps the last read). Never throws. A test registry
+// (registryOptions.testOnly) refreshes only through its own `refreshBinding`, so tests never reach
+// the network.
+function startSession(input, { registryOptions = {}, now, refreshBinding = null } = {}) {
   try {
     let repositoryId = null;
     if (input && typeof input.cwd === 'string' && input.cwd && input.source !== 'clear' && input.source !== 'compact') {
+      // The one place a hook reads the network: the merged binding, bounded, into this computer's cache.
+      const refresh = refreshBinding || (registryOptions.testOnly === true ? null : governance.refreshMergedBinding);
+      if (refresh) { try { refresh(input.cwd, registryOptions); } catch { /* offline keeps the last read */ } }
       try { repositoryId = governance.governanceState(input.cwd, registryOptions).repository_id || null; } catch { repositoryId = null; }
     }
     return new SessionEpochs({ registryOptions, now }).start(sessionIdOf(input), input && input.source, repositoryId);
@@ -604,8 +610,7 @@ const QUESTION = [
 function questionText(verdict, held) {
   if (held > 1) return `Toolkit: still waiting for the governance answer (${held} messages held). Reply yes, no or later.`;
   const lines = [...QUESTION];
-  if (verdict.state.rule === 'R6') lines.splice(1, 0, 'It carries the Toolkit governed rules block but no programme binding.');
-  if (verdict.state.rule === 'R4') lines.splice(1, 0, 'It carries the Toolkit governed rules block and programme binding, but files in a repository are not your answer.');
+  if (verdict.state.notes && verdict.state.notes.includes('pending-binding-merge')) lines.splice(1, 0, 'Its working tree has a programme binding that is not merged on the default branch yet.');
   return lines.join('\n');
 }
 
@@ -680,7 +685,8 @@ function unreadableText(state, registryOptions) {
 
 // What the agent does in an ENABLED repository whose setup is not finished (the governed block or the
 // binding is missing): right after the user's yes, and at every session start until both land.
-const SETUP_ASK = 'GitHub governance setup is not finished here. Before other work, ask the user in one message: (1) the private evidence store, an existing private repository or a new `TRANSPORT-<repository>` one, separate from this repository; (2) the parent issue, an existing number or a new one; (3) confirm the defaults: record and writer prefix `INT-<SHORT>-`, required checks from the default branch protection, store branch `main`. The free security settings need no question: they are on by default and `toolkit governance security` turns them on once governance is enabled; Toolkit never turns on a GitHub feature that needs billing. Then use `repository-agent-rules` to add the governed block and `.github/toolkit-programme.json` in one pull request for the user to merge. If the user says not now, carry on under the global rules and ask again next session. Never act as the user: do not answer any of these questions yourself.';
+const SETUP_ASK = `GitHub governance setup is not finished here. Before other work, run ${terminalCommand('discover')} (it only reads, and asks nothing) and put its adoption proposal to the user in one message: the parent issue and private evidence store it recommends with their evidence (or the alternatives, or the create defaults when it found none), and what Toolkit would reuse, add, repair, keep and defer. A candidate is used only after the user confirms it; never pick one for them. The free security settings need no question: they are on by default and \`toolkit governance security\` turns them on once governance is enabled; Toolkit never turns on a GitHub feature that needs billing. One yes covers the whole list: then use \`repository-agent-rules\` to add the governed block and the version 2 \`.github/toolkit-programme.json\` in one pull request for the user to merge; the binding applies only once that pull request merges.`
+  + ' If the user says not now, carry on under the global rules and ask again next session. Never act as the user: do not answer any of these questions yourself.';
 
 function replayContext(state, prompts, { notNow = false, elsewhere = false } = {}) {
   const label = state.state === 'ENABLED' && state.materials_complete === false ? 'ENABLED (materials incomplete)' : state.state;
@@ -1121,9 +1127,11 @@ function sessionLine(cwd, { registryOptions = {}, stateReader = null, now, sessi
 function decidedLine(state) {
   if (state.rule === 'R1') return 'Toolkit governance: DISABLED automatically (this folder is not a git repository, so there is no GitHub governance). Follow the global rules, coding gates included.';
   if (state.rule === 'R8') return `Toolkit governance: DISABLED for this repository (not on github.com: it ${whereText(state)}; the user said ok). Follow the global rules, coding gates included; any TOOLKIT-GOVERNED-RULES block in AGENTS.md does not apply.`;
+  if (state.state === 'ERROR') return 'Toolkit governance: ERROR for this repository (the programme binding merged on the default branch cannot be used). Follow the global rules, coding gates included; ordinary work continues, but programme records, gate admission and finality hold until a pull request fixes the binding. Never treat this as ENABLED or as DISABLED.';
   if (state.state === 'DISABLED') return 'Toolkit governance: DISABLED for this repository (no GitHub governance). Follow the global rules, coding gates included; any TOOLKIT-GOVERNED-RULES block in AGENTS.md does not apply.';
-  if (state.materials_complete === false) return `Toolkit governance: ENABLED, setup not finished (the governed block or \`.github/toolkit-programme.json\` is missing). Follow the global rules, coding gates included; GitHub governance starts once both are in the repository. ${SETUP_ASK}`;
-  return 'Toolkit governance: ENABLED for this repository. Follow the global rules, coding gates included, and the TOOLKIT-GOVERNED-RULES block in AGENTS.md (GitHub governance: records and evidence).';
+  if (state.materials_complete === false) return `Toolkit governance: ENABLED, setup not finished (\`.github/toolkit-programme.json\` is not merged on the default branch yet). Follow the global rules, coding gates included; GitHub governance starts once the setup pull request with the binding merges. ${SETUP_ASK}`;
+  const enabled = 'Toolkit governance: ENABLED for this repository. Follow the global rules, coding gates included, and the TOOLKIT-GOVERNED-RULES block in AGENTS.md (GitHub governance: records and evidence).';
+  return state.governed_effects_hold ? `${enabled} The binding merged on the default branch was last read over 24 hours ago, so programme records, gate admission and finality hold until it is read again online.` : enabled;
 }
 
 // ---- fail-closed fallbacks --------------------------------------------------------------------

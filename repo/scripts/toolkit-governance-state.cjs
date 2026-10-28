@@ -6,11 +6,15 @@
 //
 //   identity   the origin-remote repository identity (toolkit.repository-identity.v1), read
 //              from the repository's own git config file, never from the path;
-//   materials  the governed block in the git root's AGENTS.md (B) and a valid programme binding
-//              `.github/toolkit-programme.json` (P);
+//   merged     the programme binding `.github/toolkit-programme.json` as merged on the origin's
+//              default branch, from this computer's cache (toolkit-governance-binding.cjs). It is
+//              the repository's own setting and decides on every computer;
+//   materials  the governed block in the git root's AGENTS.md and the working tree's binding,
+//              shown only (a working-tree binding is "pending: merge it"), never deciding;
 //   registry   the user's own decision for that identity in
 //              ~/.ai-agent-toolkit/user-state/repository-governance.v1.json (U), stored and
-//              written only by toolkit-capability-registry.cjs;
+//              written only by toolkit-capability-registry.cjs. It decides only where nothing is
+//              merged, and is never deleted or rewritten here;
 //   ok         the user's ok that GitHub governance is off in a git repository that is not on
 //              github.com (K), in governance-not-github.v1.json next to the registry, written only
 //              by the hook gate from the user's own reply.
@@ -18,22 +22,30 @@
 // GitHub governance (programme records, decision traces, evidence custody, the governed block)
 // works only for github.com repositories. States, first matching rule wins:
 //   R1 no git root                                  DISABLED       automatically, never held
-//   R2 U declined or disabled                       DISABLED       global rules only; a governed block is ignored
-//   R8 not GitHub (no usable origin, or another host), K present
-//                                                   DISABLED       the user said ok; nothing to enable here
-//   R9 not GitHub, K absent                         UNDECIDED      held until the user says ok
-//   R3 U enabled, B and P present                   ENABLED        global rules plus the governed block
-//   R4 U not recorded, B and P present              UNDECIDED      held until the user answers: files in a repository are
-//                                                                  not the user's answer, since an agent can write them
-//   R5 U enabled, B or P missing                    ENABLED        materials incomplete: no GitHub governance yet
-//   R6 U not recorded, B present, P absent          UNDECIDED      held until the one-time migration or the user answers
-//   R7 anything else                                UNDECIDED      held until the user answers
-// A read error after a git root is found gives UNDECIDED (rule ERROR): the state cannot be shown
-// not to be UNDECIDED, so callers that hold must hold (fail closed). A folder with no git root is
-// never held.
+//   not GitHub (no usable origin, or another host):
+//     R2 U declined or disabled                     DISABLED
+//     R8 K present                                  DISABLED       the user said ok; nothing to enable here
+//     R9 K absent                                   UNDECIDED      held until the user says ok
+//   github.com, by the merged binding:
+//     M0 merged binding malformed or unknown schema ERROR          not held; governed effects hold (A2)
+//     M2 merged v2 binding says disabled            DISABLED       only an owner-merged PR changes it (A3)
+//     M1 merged binding enabled (v2, or v1)         ENABLED        on every computer; a local "no" is only a
+//                                                                  suggestion preference
+//   github.com, nothing merged for this repository (none, a fork's, or not read yet):
+//     R2 U declined or disabled                     DISABLED       not asked again on this computer
+//     R5 U enabled                                  ENABLED        not held; materials incomplete until the
+//                                                                  setup PR with the binding merges
+//     R7 U not recorded                             UNDECIDED      held until the owner's own reply
+// ENABLED by M1 keeps routine work going on a stale or offline cache; gate admission, finality and
+// governed writes (programme_records_bind) need a read of the merged binding no older than 24
+// hours, else governed_effects_hold (A4). A read error after a git root is found gives UNDECIDED
+// (rule ERROR): the state cannot be shown not to be UNDECIDED, so callers that hold must hold (fail
+// closed). A folder with no git root is never held.
 //
-// Reads local files only: no network, no git or gh subprocess, no writes. Node built-ins plus the
-// existing registry (with its remote-identity check), managed-block and programme-binding modules.
+// Reads local files only: no network, no git or gh subprocess, no writes (refreshMergedBinding,
+// called only by setup, `status` and the session-start hook, is the one exception). Node built-ins
+// plus the existing registry (with its remote-identity check), managed-block, binding-cache and
+// programme-binding modules.
 
 const crypto = require('node:crypto');
 const fs = require('node:fs');
@@ -41,6 +53,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const registry = require('./toolkit-capability-registry.cjs');
+const bindingCache = require('./toolkit-governance-binding.cjs');
 const managedBlock = require('./toolkit-managed-block.cjs');
 const { validateRemoteIdentity } = registry;
 const programmeState = require('../../skills/github-program-reconciler/scripts/programme-state.cjs');
@@ -52,7 +65,7 @@ const SCHEMA = 'toolkit.governance-state.v1';
 // Enterprise server included, is not github.com. The reconciler uses the same test.
 const TRACKING_HOST = 'github.com';
 const trackingHost = programmeState.isGitHubHost;
-const STATES = Object.freeze(['ENABLED', 'DISABLED', 'UNDECIDED']);
+const STATES = Object.freeze(['ENABLED', 'DISABLED', 'UNDECIDED', 'ERROR']);
 const NOT_GITHUB_BASENAME = 'governance-not-github.v1.json';
 const NOT_GITHUB_SCHEMA = 'toolkit.governance-not-github.v1';
 const NOT_GITHUB_READ_LIMIT = 256 * 1024;
@@ -61,6 +74,7 @@ const GOVERNED_BLOCK = 'TOOLKIT-GOVERNED-RULES';
 const LEGACY_GOVERNED_BLOCK = 'GLOBAL-AGENTS.MD-TEMPLATE';
 const GOVERNED_BLOCK_LINE = /^<!-- AI-AGENT-TOOLKIT:[^\r\n]*:BEGIN (TOOLKIT-GOVERNED-RULES|GLOBAL-AGENTS\.MD-TEMPLATE) v\d+(?: [^\r\n]*)? -->\r?$/m;
 const BINDING_FILE = Object.freeze(['.github', 'toolkit-programme.json']);
+// The version 1 schema name; a v1 binding reads as enabled with one parent.
 const BINDING_SCHEMA = 'toolkit.programme-binding.v1';
 // An early name for the binding; reported for the owner, never read or rewritten.
 const LEGACY_BINDING_FILE = Object.freeze(['.github', 'ai-agent-toolkit-programme.json']);
@@ -234,7 +248,7 @@ function readGovernedBlock(root) {
 
 // The problems with a parsed binding, as the reconciler that consumes it judges them
 // (validateBinding in skills/github-program-reconciler/scripts/programme-state.cjs, schema
-// repo/contracts/programme-state/binding-v1.schema.json), plus the rule that the binding agrees
+// binding-v1.schema.json and binding-v2.schema.json under repo/contracts/programme-state/), plus the rule that the binding agrees
 // with the origin identity and cannot override it. Empty when valid.
 function bindingProblems(binding, identity) {
   try {
@@ -254,24 +268,54 @@ function readBinding(root, identity) {
   try { parsed = JSON.parse(bytes.toString('utf8').replace(/^﻿/, '')); } catch { return { present: true, valid: false, problems: ['not valid JSON'] }; }
   const problems = bindingProblems(parsed, identity);
   const valid = problems.length === 0;
-  return { present: true, valid, problems, store_repository: valid ? parsed.store.repository : null, required_checks: valid ? [...parsed.required_checks] : null };
+  return { present: true, valid, problems };
 }
 
-// The evidence store a valid binding names ("owner/name"), or null. Kept out of the state result,
+// The valid binding merged on the default branch for the repository at root, from this computer's
+// cache, or null. Only this binding names the evidence store and required checks: a working tree
+// any agent can edit does not.
+function mergedBinding(root, options = {}) {
+  try {
+    const identity = readIdentity(root);
+    if (!identity.valid) return null;
+    const judged = judgeMerged(bindingCache.readBindingCache(identity, registryPathFor(options)), identity, new Date());
+    return judged.status === 'enabled' ? judged.binding : null;
+  } catch { return null; }
+}
+
+// The evidence store the merged binding names ("owner/name"), or null. Kept out of the state result,
 // which never carries repository names.
-function bindingStoreRepository(root) {
+function bindingStoreRepository(root, options = {}) {
+  const binding = mergedBinding(root, options);
+  return binding ? binding.store.repository : null;
+}
+
+// The evidence store the working tree's binding names, or null. Only for proposals the owner
+// confirms (migration marks such a store as an evidence store); it never decides governance.
+function workingBindingStoreRepository(root) {
   try {
-    const binding = readBinding(root, readIdentity(root));
-    return binding.valid ? binding.store_repository : null;
+    const bytes = readSmallFile(path.join(root, ...BINDING_FILE), BINDING_READ_LIMIT, 'BINDING_TOO_LARGE');
+    if (!bytes) return null;
+    const parsed = JSON.parse(bytes.toString('utf8').replace(/^﻿/, ''));
+    return bindingProblems(parsed, readIdentity(root)).length === 0 && parsed.store ? parsed.store.repository : null;
   } catch { return null; }
 }
 
-// The check names a valid binding requires at the head ("CI green"), or null.
-function bindingRequiredChecks(root) {
+// The check names the working tree's binding requires, or null. Compared with the merged binding's
+// only; it never decides anything on its own.
+function workingBindingRequiredChecks(root) {
   try {
-    const binding = readBinding(root, readIdentity(root));
-    return binding.valid ? binding.required_checks : null;
+    const bytes = readSmallFile(path.join(root, ...BINDING_FILE), BINDING_READ_LIMIT, 'BINDING_TOO_LARGE');
+    if (!bytes) return null;
+    const result = committedBindingPolicy(bytes.toString('utf8'), readIdentity(root));
+    return result.valid ? result.required_checks : null;
   } catch { return null; }
+}
+
+// The check names the merged binding requires at the head ("CI green"), or null.
+function bindingRequiredChecks(root, options = {}) {
+  const binding = mergedBinding(root, options);
+  return binding ? [...binding.required_checks] : null;
 }
 
 // The dependency policy of a parsed binding: { auto_merge, github_actions }. Missing keys take the
@@ -295,7 +339,7 @@ function committedBindingPolicy(text, identity) {
   try { parsed = JSON.parse(String(text).replace(/^\uFEFF/, '')); } catch { return { valid: false, policy: policyOf(null), required_checks: null, problems: ['not valid JSON'] }; }
   const problems = bindingProblems(parsed, identity);
   return problems.length ? { valid: false, policy: policyOf(null), required_checks: null, problems }
-    : { valid: true, policy: policyOf(parsed), required_checks: [...parsed.required_checks], problems: [] };
+    : { valid: true, policy: policyOf(parsed), required_checks: Array.isArray(parsed.required_checks) ? [...parsed.required_checks] : [], problems: [] };
 }
 
 // The policy the working-tree binding asks for, or null when it is missing or invalid. Shown only
@@ -372,6 +416,7 @@ function readNotGitHubOk(key, options = {}) {
 function result(fields) {
   const state = fields.state;
   const complete = state === 'ENABLED' && fields.materials_complete === true;
+  const effectsHold = state === 'ERROR' || (complete && fields.merged_fresh !== true);
   return Object.freeze({
     schema: SCHEMA,
     state,
@@ -381,7 +426,10 @@ function result(fields) {
     persistable: fields.persistable === true,
     materials_complete: state === 'ENABLED' ? complete : null,
     governed_rules_bind: complete,
-    programme_records_bind: complete,
+    // Gate admission, finality and governed writes (programme records): only on a fresh read of
+    // the merged binding (A4). Routine work follows governed_rules_bind.
+    programme_records_bind: complete && !effectsHold,
+    governed_effects_hold: effectsHold,
     recorded_decision: fields.recorded_decision || null,
     recorded_under_legacy_key: fields.legacy_key === true,
     repository_id: fields.repository_id || null,
@@ -389,49 +437,83 @@ function result(fields) {
     materials: fields.materials ? Object.freeze({
       governed_block: fields.materials.governed_block.present === true,
       governed_block_legacy: fields.materials.governed_block.legacy === true,
-      binding: fields.materials.binding.valid === true,
+      binding: fields.merged_binding_valid === true,
       binding_present: fields.materials.binding.present === true,
       binding_problems: Object.freeze([...(fields.materials.binding.problems || [])]),
       legacy_binding_file: fields.materials.legacy_binding_file === true,
     }) : null,
+    merged: fields.merged ? Object.freeze({ ...fields.merged }) : null,
+    notes: Object.freeze([...(fields.notes || [])]),
     error_code: fields.error_code || null,
     host: fields.host || null,
     folder: fields.folder || null,
   });
 }
 
+// What the cached default-branch binding says: { status: 'none' | 'unknown' | 'invalid' | 'foreign'
+// | 'enabled' | 'disabled', version, problems, foreign_repository, commit, fetched_at, fresh }.
+function judgeMerged(entry, identity, now) {
+  if (!entry) return { status: 'unknown', fresh: false };
+  const base = { commit: entry.commit, fetched_at: entry.fetched_at, fresh: bindingCache.isFresh(entry, now) };
+  if (entry.status === 'absent') return { ...base, status: 'none' };
+  if (typeof entry.text !== 'string') return { ...base, status: 'invalid', problems: [entry.problem || 'unreadable'] };
+  let parsed;
+  try { parsed = JSON.parse(entry.text.replace(/^﻿/, '')); } catch { return { ...base, status: 'invalid', problems: ['not valid JSON'] }; }
+  let valid;
+  try { valid = programmeState.validateBinding(parsed); } catch (error) {
+    const errors = error && error.details && Array.isArray(error.details.errors) ? error.details.errors.map(String) : ['binding is invalid'];
+    return { ...base, status: 'invalid', problems: errors };
+  }
+  const slug = remoteSlug(identity.remote);
+  if (!slug || slug.toLowerCase() !== valid.repository.toLowerCase()) return { ...base, status: 'foreign', foreign_repository: valid.repository };
+  return { ...base, status: programmeState.bindingEnabled(valid) ? 'enabled' : 'disabled', version: valid.schema === BINDING_SCHEMA ? 1 : 2, binding: valid };
+}
+
 class GovernanceState {
-  #readIdentity; #readMaterials; #readDecision; #readOk;
+  #readIdentity; #readMaterials; #readDecision; #readOk; #readMerged; #now;
 
   // Readers are injectable so the derivation can be tested on its own; the defaults read the
-  // real repository and the real user-state files.
-  constructor({ identityReader = readIdentity, materialsReader = readMaterials, decisionReader = readDecision, okReader = readNotGitHubOk, registryOptions = {} } = {}) {
+  // real repository, the real user-state files and this computer's cache of the merged binding.
+  constructor({ identityReader = readIdentity, materialsReader = readMaterials, decisionReader = readDecision, okReader = readNotGitHubOk, mergedReader = null, registryOptions = {}, now = () => new Date() } = {}) {
     this.#readIdentity = identityReader;
     this.#readMaterials = materialsReader;
     this.#readDecision = (identity) => decisionReader(identity.repository_id, registryOptions, identity.legacy_repository_ids || []);
     this.#readOk = key => okReader(key, registryOptions);
+    this.#readMerged = mergedReader || (identity => bindingCache.readBindingCache(identity, registryPathFor(registryOptions)));
+    this.#now = now;
   }
 
   // The pure rule table over already-read inputs. `ok` is whether the user said ok to GitHub
-  // governance being off (read only for a repository that is not on GitHub).
-  static derive({ identity, materials, decision, ok = false }) {
+  // governance being off (read only for a repository that is not on GitHub); `merged` is
+  // judgeMerged's view of the default-branch binding (read only for a github.com repository).
+  static derive({ identity, materials, decision, ok = false, merged = { status: 'unknown', fresh: false } }) {
     const base = { root: identity.root, repository_id: identity.repository_id, persistable: true, recorded_decision: decision.state, legacy_key: decision.legacy_key === true, materials };
-    const block = materials.governed_block.present === true;
-    const binding = materials.binding.valid === true;
-    if (decision.state === 'disabled') return result({ ...base, state: 'DISABLED', rule: 'R2', reason: decision.decision_kind === 'disable' ? 'user-disabled' : 'user-declined' });
     const notGitHub = notGitHubOf(identity);
     if (notGitHub) {
+      if (decision.state === 'disabled') return result({ ...base, state: 'DISABLED', rule: 'R2', reason: decision.decision_kind === 'disable' ? 'user-disabled' : 'user-declined' });
       const fields = { ...base, host: notGitHub.host, reason: notGitHub.reason };
       return ok ? result({ ...fields, state: 'DISABLED', rule: 'R8' }) : result({ ...fields, state: 'UNDECIDED', rule: 'R9' });
     }
-    if (block && binding) {
-      return decision.state === 'enabled'
-        ? result({ ...base, state: 'ENABLED', rule: 'R3', reason: 'user-enabled', materials_complete: true })
-        : result({ ...base, state: 'UNDECIDED', rule: 'R4', reason: 'repository-carries-governance' });
+    const view = { status: merged.status, version: merged.version || null, commit: merged.commit || null, fetched_at: merged.fetched_at || null, fresh: merged.fresh === true, foreign_repository: merged.foreign_repository || null, problems: merged.problems || [] };
+    const withMerged = { ...base, merged: view, merged_fresh: view.fresh };
+    // The repository's merged binding decides, on every computer (A1, A3).
+    if (merged.status === 'invalid') return result({ ...withMerged, state: 'ERROR', rule: 'M0', reason: 'merged-binding-invalid' });
+    if (merged.status === 'disabled') return result({ ...withMerged, state: 'DISABLED', rule: 'M2', reason: 'repository-disabled' });
+    if (merged.status === 'enabled') {
+      const notes = [];
+      if (decision.state === 'disabled') notes.push('local-no-is-preference');
+      if (merged.version === 1) notes.push('binding-v2-migration-offered');
+      if (!view.fresh) notes.push('merged-binding-stale');
+      return result({ ...withMerged, state: 'ENABLED', rule: 'M1', reason: 'repository-enabled', materials_complete: true, merged_binding_valid: true, notes });
     }
-    if (decision.state === 'enabled') return result({ ...base, state: 'ENABLED', rule: 'R5', reason: block ? 'binding-missing' : 'governed-block-missing', materials_complete: false });
-    if (block) return result({ ...base, state: 'UNDECIDED', rule: 'R6', reason: 'governed-block-without-binding' });
-    return result({ ...base, state: 'UNDECIDED', rule: 'R7', reason: 'no-decision' });
+    // No merged binding (none, a fork's, or nothing read yet): this computer's answer decides.
+    const notes = [];
+    if (merged.status === 'foreign') notes.push('binding-belongs-to-other-repository');
+    if (merged.status === 'unknown') notes.push('merged-binding-unknown');
+    if (materials.binding.present === true) notes.push('pending-binding-merge');
+    if (decision.state === 'disabled') return result({ ...withMerged, state: 'DISABLED', rule: 'R2', reason: decision.decision_kind === 'disable' ? 'user-disabled' : 'user-declined', notes });
+    if (decision.state === 'enabled') return result({ ...withMerged, state: 'ENABLED', rule: 'R5', reason: 'binding-not-merged', materials_complete: false, notes: [...notes, 'setup-pr-offered'] });
+    return result({ ...withMerged, state: 'UNDECIDED', rule: 'R7', reason: 'no-decision', notes });
   }
 
   evaluate(cwd) {
@@ -470,7 +552,13 @@ class GovernanceState {
     } catch (error) {
       return result({ ...partial, state: 'UNDECIDED', rule: 'ERROR', reason: 'materials-unreadable', error_code: codeOf(error), recorded_decision: decision.state });
     }
-    return GovernanceState.derive({ identity, materials, decision, ok });
+    let merged = { status: 'unknown', fresh: false };
+    if (!notGitHubOf(identity)) {
+      let entry = null;
+      try { entry = this.#readMerged(identity); } catch { entry = null; }
+      merged = judgeMerged(entry, identity, this.#now());
+    }
+    return GovernanceState.derive({ identity, materials, decision, ok, merged });
   }
 }
 
@@ -501,6 +589,18 @@ function governanceCommand(subcommand) {
 
 function governanceState(cwd, options = {}) {
   return new GovernanceState({ registryOptions: options }).evaluate(cwd);
+}
+
+// Refreshes this computer's cache of the merged binding for the repository at cwd (setup,
+// `toolkit governance status` and the session-start hook only). Never throws; returns
+// { refreshed, error }. Nothing to refresh outside a github.com repository.
+function refreshMergedBinding(cwd, options = {}, { runGit, timeout, now } = {}) {
+  try {
+    const identity = readIdentity(cwd);
+    if (!identity.root || !identity.valid || notGitHubOf(identity)) return { refreshed: false, error: 'not-applicable' };
+    const outcome = bindingCache.refreshBindingCache(identity, registryPathFor(options), { runGit, timeout, now });
+    return { refreshed: outcome.refreshed, error: outcome.error };
+  } catch (error) { return { refreshed: false, error: codeOf(error) }; }
 }
 
 // ---- repair -----------------------------------------------------------------------------------
@@ -554,6 +654,9 @@ module.exports = Object.freeze({
   GovernanceState,
   GovernanceStateError,
   governanceState,
+  refreshMergedBinding,
+  judgeMerged,
+  mergedBinding,
   governanceCommand,
   isGitHubHost: trackingHost,
   repairHint,
@@ -563,7 +666,9 @@ module.exports = Object.freeze({
   readMaterials,
   readGovernedBlock,
   bindingStoreRepository,
+  workingBindingStoreRepository,
   bindingRequiredChecks,
+  workingBindingRequiredChecks,
   committedBindingPolicy,
   workingBindingPolicy,
   readDecision,

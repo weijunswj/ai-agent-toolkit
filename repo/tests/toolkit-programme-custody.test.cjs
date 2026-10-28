@@ -24,7 +24,7 @@ const SHA_B = 'b'.repeat(40);
 const TREE = 'e'.repeat(40);
 const GIT = 'git-for-tests';
 const controller = { session: 'controller-1', prefix: 'INT-TK421-' };
-const GOVERNED = () => ({ state: 'ENABLED', governed_rules_bind: true });
+const GOVERNED = () => ({ state: 'ENABLED', governed_rules_bind: true, programme_records_bind: true });
 const green = name => ({ kind: 'CheckRun', name, status: 'COMPLETED', conclusion: 'SUCCESS', required: false });
 const CATALOGUE = [
   { issue: 423, label: 'C2', class: 'COMMITTED', parent: 421, order: 1 },
@@ -457,6 +457,8 @@ test('H4 the turn-end hook writes nothing to the store once GitHub governance is
     ['disabled after bind', () => ({ state: 'DISABLED', governed_rules_bind: false })],
     ['enabled, setup not finished', () => ({ state: 'ENABLED', governed_rules_bind: false })],
     ['undecided', () => ({ state: 'UNDECIDED', governed_rules_bind: false })],
+    ['merged binding read over 24 hours ago', () => ({ state: 'ENABLED', governed_rules_bind: true, programme_records_bind: false })],
+    ['merged binding unusable', () => ({ state: 'ERROR', governed_rules_bind: false, programme_records_bind: false })],
     ['state unreadable', () => { throw new Error('boom'); }],
   ]) {
     let calls = 0;

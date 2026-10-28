@@ -179,13 +179,14 @@ function deadlineTransport(deps) {
   return transport;
 }
 
-// Whether the repository's GitHub governance is ENABLED with its governed rules in force. A state that
+// Whether the repository's GitHub governance is ENABLED with programme records in force (a fresh read of
+// the binding merged on the default branch). A state that
 // cannot be read, or a copy without the state module, counts as off. `deps.governanceState` is for tests.
 function githubGovernanceOn(repoRoot, deps = {}) {
   try {
     const read = deps.governanceState || require('../../../repo/scripts/toolkit-governance-state.cjs').governanceState;
     const current = read(repoRoot);
-    return current.state === 'ENABLED' && current.governed_rules_bind === true;
+    return current.state === 'ENABLED' && current.programme_records_bind === true;
   } catch { return false; }
 }
 
