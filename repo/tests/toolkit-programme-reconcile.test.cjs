@@ -524,11 +524,11 @@ test('merged PRs with green checks list open issues for the controller without c
     assert.equal(finding.issue, 8);
     assert.match(finding.detail, /PR #540 merged, checks GREEN at aaaaaaa/);
     assert.ok(finding.detail.endsWith(accepted ? 'G1 acceptance recorded' : 'G1 not accepted'));
-    assert.deepEqual(dry.close_list, [{ issue: 8, pr: 540, head: SHA_A, gate: 'G1', gate_accepted: accepted, accepted, closable: accepted, uat: null, review: accepted ? 'PASSED' : null }]);
+    assert.deepEqual(dry.close_list, [{ issue: 8, pr: 540, head: SHA_A, gate: 'G1', gate_accepted: accepted, accepted, closable: false, uat: null, review: accepted ? 'PASSED' : null }]);
     assert.equal(codes(dry).includes('CHILD_STATE_CONFLICT #8'), !accepted, 'a missing accepted return still conflicts');
     assert.equal(github.mutations(), 0);
     const formatted = cli.formatReport(dry);
-    assert.ok(formatted.includes('Ready to close (the controller closes each closable one as completed; the reconciler never closes)'));
+    assert.ok(formatted.includes('Ready to close (the controller closes each closable one as completed unless a criterion is still open; the reconciler never closes)'));
     assert.ok(formatted.includes(`- #8: PR #540, head aaaaaaa; ${accepted ? 'G1 acceptance recorded' : 'G1 not accepted'}`));
     assert.ok(formatted.includes(`; UAT: not recorded; review: ${accepted ? 'PASSED' : 'not recorded'}`));
 
@@ -619,7 +619,7 @@ test('the CLI bootstraps with the controller, which records gates and acceptance
     run(['update', '--issue', '8', '--patch', review]);
     run(['return', '--issue', '8', '--consume', 'g1-r1', '--verdict', 'ACCEPT']);
     const accepted = dryRun();
-    assert.deepEqual(accepted.close_list, [{ issue: 8, pr: 540, head: SHA_A, gate: 'G1', gate_accepted: true, accepted: true, closable: true, uat: null, review: 'PASSED' }]);
+    assert.deepEqual(accepted.close_list, [{ issue: 8, pr: 540, head: SHA_A, gate: 'G1', gate_accepted: true, accepted: true, closable: false, uat: null, review: 'PASSED' }]);
     assert.match(cli.formatReport(accepted), /G1 acceptance recorded/);
     assert.equal(codes(accepted).includes('CHILD_STATE_CONFLICT #8'), false);
     assert.equal(store.read('child', 8).doc.fence.holder_session, null, 'the controller writes children through the parent fence');
@@ -627,6 +627,47 @@ test('the CLI bootstraps with the controller, which records gates and acceptance
     assert.equal(github.mutations(), 0, 'the walk writes private state only, never public issue state');
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// The controller closes closable entries without asking, so every way the governed issue rule keeps a
+// child open must leave `closable` false: unrecorded or outstanding UAT, any unpassed review verdict at
+// the head, a staged (non-default) base and an open sub-issue.
+test('closable needs settled UAT, passed head reviews, a default-branch merge and no open sub-issue', () => {
+  const passedAtHead = { state: 'PASSED', verdicts: [{ reviewer: 'g2', head: SHA_A, verdict: 'PASSED' }] };
+  const cases = [
+    { name: 'UAT not required', uat: { state: 'NOT_REQUIRED', at_head: null }, closable: true },
+    { name: 'UAT passed at the head', uat: { state: 'PASSED', at_head: SHA_A }, closable: true },
+    { name: 'UAT retained at the head', uat: { state: 'UAT_RETAINED', at_head: SHA_A }, closable: true },
+    { name: 'G2 accepted with no review record', role: 'G2', uat: { state: 'NOT_REQUIRED', at_head: null }, review: { state: null, verdicts: [] }, closable: true },
+    { name: 'closed sub-issue', uat: { state: 'NOT_REQUIRED', at_head: null }, sub: 'closed', closable: true },
+    { name: 'UAT not recorded', uat: { state: null, at_head: null }, closable: false },
+    { name: 'UAT pending', uat: { state: 'PENDING', at_head: null }, closable: false },
+    { name: 'partial UAT required', uat: { state: 'UAT_PARTIAL_REQUIRED', at_head: SHA_A }, closable: false },
+    { name: 'full UAT required', uat: { state: 'UAT_FULL_REQUIRED', at_head: null }, closable: false },
+    { name: 'review passed but another head verdict failed', uat: { state: 'NOT_REQUIRED', at_head: null },
+      review: { state: 'PASSED', verdicts: [...passedAtHead.verdicts, { reviewer: 'g2b', head: SHA_A, verdict: 'NOT_PASSED' }] }, closable: false },
+    { name: 'no review state but a failed head verdict', role: 'G2', uat: { state: 'NOT_REQUIRED', at_head: null },
+      review: { state: null, verdicts: [{ reviewer: 'g2', head: SHA_A, verdict: 'NOT_PASSED' }] }, closable: false },
+    { name: 'staged base branch', uat: { state: 'NOT_REQUIRED', at_head: null }, base: 'deployment/staging', closable: false },
+    { name: 'open sub-issue', uat: { state: 'NOT_REQUIRED', at_head: null }, sub: 'open', closable: false },
+  ];
+  for (const entry of cases) {
+    const outcomes = [{ issue: 8, class: 'COMMITTED', parent: 7, order: 0 }];
+    const { github, store, reconciler } = setup({ parentIssue: 7, outcomes, issues: gh => {
+      gh.addIssue(8, { parent: 7 });
+      if (entry.sub) gh.addIssue(9, { parent: 8, state: entry.sub });
+    } });
+    const doc = gatedChild(state, state.newChild({ repository: 'acme/app', outcome: outcomes[0] }), { role: entry.role || 'G1', returnId: 'r1', verdict: 'ACCEPT', writer, parentDoc: store.read('parent', 7).doc, head: SHA_A });
+    doc.candidate.branch = 'feature';
+    doc.uat = entry.uat;
+    if (entry.review) doc.review = entry.review;
+    store.write('child', 8, doc, { sha: null, previous: null });
+    github.addPr(540, { head: SHA_A, merged: true, contexts: [green('validate')], branch: 'feature', base: entry.base || 'main' });
+    const [listed] = reconciler().run().close_list;
+    assert.equal(listed.closable, entry.closable, entry.name);
+    assert.equal(cli.formatReport(reconciler().run()).includes('; closable'), entry.closable, entry.name);
+    assert.equal(github.issues.get(8).state, 'open', `${entry.name}: the reconciler never closes`);
   }
 });
 
@@ -640,7 +681,7 @@ test('G0-only acceptance is named but cannot count as merged implementation comp
     github.addPr(540, { head: SHA_A, merged: true, contexts: [green('validate')], branch: 'feature' });
     const report = reconciler().run();
     const accepted = gate !== 'G0';
-    assert.deepEqual(report.close_list, [{ issue: 8, pr: 540, head: SHA_A, gate, gate_accepted: true, accepted, closable: accepted, uat: null, review: gate === 'G1' ? 'PASSED' : null }]);
+    assert.deepEqual(report.close_list, [{ issue: 8, pr: 540, head: SHA_A, gate, gate_accepted: true, accepted, closable: false, uat: null, review: gate === 'G1' ? 'PASSED' : null }]);
     const finding = report.findings.find(entry => entry.code === 'READY_TO_CLOSE');
     assert.equal(finding.gate, gate);
     assert.equal(finding.accepted, accepted);

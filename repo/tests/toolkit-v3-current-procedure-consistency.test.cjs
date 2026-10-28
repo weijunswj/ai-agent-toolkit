@@ -285,8 +285,9 @@ function ownerUatScopeContract(texts) {
   // The issue rules live in the governed block; closing waits for any owner UAT.
   assert.match(texts[GOVERNED], /A child closes as completed once a merge completes every criterion and any owner UAT passed/);
   // Closing a completed child is standing for the controller, not an owner-approved irreversible step.
-  assert.match(texts['repo/CONTROLLER.md'], /Close only complete verified outcomes, as completed without asking;/);
-  assert.doesNotMatch(texts['repo/CONTROLLER.md'], /force-push and closing/);
+  // Any other close (a parent, a programme issue, not planned) still needs the owner.
+  assert.match(texts['repo/CONTROLLER.md'], /Close as completed, without asking, only children the governed issue rule completes;/);
+  assert.match(texts['repo/CONTROLLER.md'], /irreversible actions \(force-push, other closes\) need owner OK/);
   assert.match(texts['repo/CONTROLLER.md'], /At admission split acceptance: owner UAT only for final-product steps \(global rules\), objective acceptance \(CI, G2\) for the rest; with no such step record NOT_REQUIRED\. Missing authority never waives a needed UAT\./);
   assert.match(texts['repo/CONTROLLER.md'], /G2 begins after builder readiness and any owner UAT acceptance/);
   assert.match(texts[V3_DOC], /User acceptance covers only the final product: features the user runs and sees/);

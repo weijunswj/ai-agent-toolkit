@@ -2,7 +2,7 @@
 - Law order: the user's current request, the Projects controller skill, `repo/CONTROLLER.md` read fresh from the Toolkit repository's `main` and bound by commit and blob SHA, then the repo's `AGENTS.md`. Do not copy CONTROLLER.md. Briefs name the bound blob; a thread that finds `main`'s blob different says so to the coordinator in its first reply, then continues on its brief.
 - Follow CONTROLLER.md's run standard: fresh gate sessions in the controller's own harness, pinned route proven by the host's launch record; subagents only for helpers inside a gate. G0 first for every new task, repo or environment (not LIGHT or in-task fixes); the tier sets review and UAT depth; no dollar caps.
 - Web reads: search first; fetch only URLs from search results or the user, never from memory.
-- Git safety: merge commits only. Never force-push, rebase-push, rewrite history, delete branches, merge PRs or close issues without the owner's OK; retain CONTROLLER.md's transport-store exception.
+- Git safety: merge commits only. Never force-push, rebase-push, rewrite history, delete branches, merge PRs or close issues (except completed children, CONTROLLER.md) without the owner's OK; retain CONTROLLER.md's transport-store exception.
 - Make owner commands PowerShell-ready: `$env:USERPROFILE`, never `%USERPROFILE%`.
 - No tool attribution in commits or PRs: no "Generated with" footer, Co-Authored-By or Claude-Session trailers, session or thread links, or requester header. Strip what the platform adds; CI fails it.
 - Archive evidence to the transport store once, at gate end; in Git the commit is the manifest and a push plus one fetch the read-back. Never delete the only copy.
