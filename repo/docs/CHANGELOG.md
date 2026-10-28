@@ -1,5 +1,9 @@
 # Toolkit Changelog
 
+## Unreleased
+
+- **Claude Projects skill (2026-10-28.1):** guided setup no longer asks the owner to set the coordinator's effort, because Claude Projects settings now offer only a coordinator model. Setup still asks for the coordinator model; thread effort stays set on every thread the coordinator starts.
+
 ## 3.15.19 (proved binding separators and literal Git operands)
 
 - Restored conservative collapsed continuation evidence for every unproved source byte, including implicit concatenation and joining pipelines. Only a bounded Python for-binding separator in a complete literal PowerShell here-string/stdin transport interrupts the projection; every source word, string, comment and executable neighbour remains inspected. Direct, quoted, template and ordered signals stay independent.

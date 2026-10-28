@@ -23,7 +23,7 @@ Reference for the `web-controller-projects` skill, opened when the coordinator r
    - Verify by reading the repo's default branch and one file.
 2. **Project memory and models.**
    - Have the user turn project memory on. Verify by saving one memory entry and reading it back.
-   - Ask for one setting only: in the project's model settings, the **coordinator** gets the strongest available Opus model, effort **High** (the default Low is too weak for controller decisions). Ask the user to confirm what the settings page now shows.
+   - Ask for one setting only: in the project's model settings, the **coordinator** gets the strongest available Opus model. Ask the user to confirm what the settings page now shows. The settings have no coordinator effort option, so never ask the user to change the coordinator's effort or reasoning level there.
    - Thread effort is never a project setting: you set it on every thread you start (**Threads** in the skill), gates get their pinned route, and scheduled tasks start their home thread on the tier and effort in their prompt's params, which carry any recorded raise.
 3. **Device and folder** (only when the project works locally).
    - Ask for the device to use for local Remote Control and the repo folder on it.

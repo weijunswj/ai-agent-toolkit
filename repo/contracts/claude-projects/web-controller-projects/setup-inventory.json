@@ -14,7 +14,7 @@
     { "id": "other-memory", "artefact": "Every other memory line and note", "setup_steps": [], "source": "none", "check": "never changed", "resync": "report" },
     { "id": "account-plugin", "artefact": "Toolkit plugin on the claude.ai account", "setup_steps": [], "source": ".claude-plugin/plugin.json", "check": "PLUGIN BEHIND", "resync": "owner" },
     { "id": "report-files", "artefact": "Report files in the shared folder", "setup_steps": [8], "source": "report_dir param", "check": "{{report_dir}}/state.md", "resync": "auto" },
-    { "id": "models", "artefact": "Coordinator model and effort", "setup_steps": [2], "source": "SKILL.md setup step 2", "check": "**Setup:**", "resync": "report" },
+    { "id": "models", "artefact": "Coordinator model", "setup_steps": [2], "source": "SKILL.md setup step 2", "check": "**Setup:**", "resync": "report" },
     { "id": "project-memory", "artefact": "Project memory turned on", "setup_steps": [2], "source": "SKILL.md setup step 2", "check": "MEMFILE", "resync": "report" },
     { "id": "repos", "artefact": "Repos and transport store attached", "setup_steps": [1], "source": "SKILL.md setup step 1", "check": "**PRs:**", "resync": "report" },
     { "id": "device", "artefact": "Device, folder, Toolkit on the device and keep-awake", "setup_steps": [3], "source": "SKILL.md setup step 3", "check": "**Setup:**", "resync": "report" },
