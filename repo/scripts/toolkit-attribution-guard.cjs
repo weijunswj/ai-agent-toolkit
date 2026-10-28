@@ -13,6 +13,10 @@
 // branch rules are the backstop. Not covered:
 // GIT_CONFIG_* environment variables, remote.*.push or remote.*.mirror settings, git aliases, scripts and programs that run git themselves,
 // a cd that is not its own command in the same line, and commands nested more than two shells deep.
+//
+// Last, a `git push` or `gh pr create` that passed those checks is refused when what it would send
+// carries a credential or a plain-text finding (toolkit-push-check.cjs). That step fails open: if it
+// cannot check, the command runs with one note on stderr. The same gaps apply.
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -413,12 +417,110 @@ function bypassRefusal(command, cwd, depth = 0, registryOptions = {}) {
   return '';
 }
 
+// The value of a gh option given as `--name value`, `--name=value`, `-X value` or `-Xvalue`.
+function ghOption(words, long, short) {
+  let value = '';
+  for (let index = 0; index < words.length; index += 1) {
+    const word = words[index];
+    if (word === long || word === short) value = words[++index] || '';
+    else if (word.startsWith(`${long}=`)) value = word.slice(long.length + 1);
+    else if (word.startsWith(short) && word.length > 2) value = word.slice(2);
+  }
+  return value;
+}
+
+// `gh pr create` with its base branch (--base or -B) and the branch it proposes (--head or -H,
+// `owner:branch` read as `branch`), or null.
+function pullRequestCreate({ words }, root) {
+  const start = words.findIndex((word) => /(?:^|[\\/])gh(?:\.exe)?$/i.test(word));
+  if (start === -1 || words[start + 1] !== 'pr' || words[start + 2] !== 'create') return null;
+  const rest = words.slice(start + 3);
+  const head = ghOption(rest, '--head', '-H').replace(/^[^:]*:/, '');
+  return { folder: root, pullRequest: true, base: ghOption(rest, '--base', '-B'), sources: head ? [head] : [] };
+}
+
+// What a `git push` sends: { remote, sources } from its remote and the local side of each refspec,
+// or null when it only deletes. No refspec means the current branch; --all and --tags read every
+// branch or tag.
+function pushTarget(args, folder) {
+  if (args.some((word) => word === '--delete' || word === '-d')) return null;
+  const positional = []; const sources = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const word = args[index];
+    if (word === '--') { positional.push(...args.slice(index + 1)); break; }
+    if (word === '--all' || word === '--branches') sources.push('--branches');
+    else if (word === '--tags') sources.push('--tags');
+    else if (PUSH_VALUE_OPTIONS.has(word) || word === '-o') index += 1;
+    else if (!word.startsWith('-')) positional.push(word);
+  }
+  const [remote, ...refspecs] = positional;
+  let deletes = 0;
+  for (let index = 0; index < refspecs.length; index += 1) {
+    let spec = refspecs[index].replace(/^\+/, '');
+    if (spec === 'tag' && refspecs[index + 1]) spec = `refs/tags/${refspecs[++index]}`;
+    const source = spec.includes(':') ? spec.slice(0, spec.indexOf(':')) : spec;
+    if (source) sources.push(source); else deletes += 1;
+  }
+  if (deletes && !sources.length) return null;
+  return { folder, remote: remote || '', sources };
+}
+
+// What a push or a new pull request sends, for each one in a command line, with the same cd,
+// git -C and nested-shell reading as the bypass check: push and pull-request targets as
+// toolkit-push-check.cjs reads them. A push that only deletes sends nothing to check.
+function outgoingChanges(command, cwd, depth = 0) {
+  const text = String(command || '');
+  const found = [];
+  if (text.length > MAX_COMMAND_CHARS || !/\b(?:git|gh)\b/i.test(text)) return found;
+  let root = cwd || process.cwd();
+  for (const current of shellCommands(text)) {
+    if (/^(?:cd|pushd|set-location|sl)$/i.test(current.words[0]) && current.words.length === 2) {
+      root = path.resolve(root, current.words[1]);
+      continue;
+    }
+    const git = gitCommand(current, root);
+    const push = git && !git.refusal && git.sub === 'push' ? pushTarget(git.args, git.base) : null;
+    if (push) found.push(push);
+    const pullRequest = pullRequestCreate(current, root);
+    if (pullRequest) found.push(pullRequest);
+    if (depth < 2 && SHELLS.test(current.words[0])) {
+      for (const word of current.words.slice(1)) {
+        if (/\s/.test(word) && /\b(?:git|gh)\b/i.test(word)) found.push(...outgoingChanges(word, root, depth + 1));
+      }
+    }
+  }
+  return found;
+}
+
+// Returns the refusal reason for a push or new pull request that carries a credential or a
+// plain-text finding (toolkit-push-check.cjs), or ''. This step fails open: if it cannot check, the
+// command runs and one note goes to `notes` (a list the caller shows) or else to stderr.
+function outgoingRefusal(command, cwd, { notes, budgetMs, check = (target) => require('./toolkit-push-check.cjs').checkOutgoing(target, budgetMs ? { budgetMs } : {}) } = {}) {
+  let targets;
+  try { targets = outgoingChanges(command, cwd); } catch { return ''; }
+  const seen = new Set();
+  for (const target of targets) {
+    const key = JSON.stringify(target);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    let result;
+    try { result = check(target) || {}; } catch { result = { note: 'Toolkit could not check this push for credentials and plain-text findings, so it was let through: the check could not load.' }; }
+    if (result.note) {
+      if (Array.isArray(notes)) notes.push(result.note);
+      else { try { process.stderr.write(`${result.note}\n`); } catch { /* a note is best effort */ } }
+    }
+    if (result.refusal) return result.refusal;
+  }
+  return '';
+}
+
 // A PreToolUse decision for a shell tool call, in the shape Claude Code and Codex both read.
-function attributionDecision(input) {
+// `options` is for the push check: `notes` collects its fail-open notes, and tests set its budget.
+function attributionDecision(input, options = {}) {
   const command = input?.tool_input?.command;
   if (typeof command !== 'string') return {};
-  const reason = attributionRefusal(command, input?.cwd) || bypassRefusal(command, input?.cwd);
+  const reason = attributionRefusal(command, input?.cwd) || bypassRefusal(command, input?.cwd) || outgoingRefusal(command, input?.cwd, options);
   return reason ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } } : {};
 }
 
-module.exports = Object.freeze({ ATTRIBUTION_PATTERNS, BYPASS_MESSAGE, FORCE_MESSAGE, MESSAGE, attributionDecision, attributionRefusal, bypassRefusal, hasAttribution, repositoryKind });
+module.exports = Object.freeze({ ATTRIBUTION_PATTERNS, BYPASS_MESSAGE, FORCE_MESSAGE, MESSAGE, attributionDecision, attributionRefusal, bypassRefusal, hasAttribution, outgoingChanges, outgoingRefusal, repositoryKind });

@@ -84,6 +84,45 @@ function hookText(name) {
   } else {
     lines.push('input=$(cat)');
     lines.push('printf \'%s\\n\' "$input" | node "$guard" pre-push "$1" --repo "$root" || exit $?');
+    // A repository that also runs the plain-text check gets it on the files the current branch changes
+    // since the branch it tracks, else origin's default branch, main or master. The check reads the
+    // working folder, so it runs only when this push sends the current commit and the folder has no
+    // uncommitted changes; otherwise it is skipped with a note. It blocks only on findings (exit 1);
+    // a check that cannot run (exit 2, such as broken settings) prints a note and the push goes on.
+    lines.push(
+      'plain="$root/.github/scripts/plain-text-check.cjs"',
+      'if [ -f "$plain" ] && [ -f "$root/.github/plain-text.json" ]; then',
+      '  head=$(git rev-parse -q --verify HEAD)',
+      '  base=$(git rev-parse -q --verify \'@{upstream}\' || git rev-parse -q --verify refs/remotes/origin/HEAD || git rev-parse -q --verify refs/remotes/origin/main || git rev-parse -q --verify refs/remotes/origin/master)',
+      // Only each line's local object counts: a delete sends nothing, and a tag at HEAD sends the
+      // current commit. Only tag lines are peeled to a commit, so a push of many branches starts no
+      // extra git process per line.
+      '  sends_head=',
+      '  while [ -n "$head" ] && [ -z "$sends_head" ] && read -r lref lsha rref rsha; do',
+      '    if [ "$lsha" = "$head" ]; then sends_head=yes',
+      '    else case "$lref" in refs/tags/*) [ "$(git rev-parse -q --verify "$lsha^{commit}" 2>/dev/null)" = "$head" ] && sends_head=yes;; esac',
+      '    fi',
+      '  done <<EOF',
+      '$input',
+      'EOF',
+      '  if [ -z "$head" ] || [ -z "$sends_head" ]; then',
+      '    echo "plain-text check: skipped, because this push does not send the current commit; the pushed files were not checked here." >&2',
+      '  elif [ -z "$base" ]; then',
+      '    echo "plain-text check: skipped, because no upstream or origin branch was found to compare with; the pushed files were not checked here." >&2',
+      '  elif ! git diff --quiet HEAD --; then',
+      '    echo "plain-text check: skipped, because the working folder has uncommitted changes; the pushed files were not checked here." >&2',
+      '  else',
+      '    changed=$(git -c core.quotePath=false diff --name-only --diff-filter=d "$base...HEAD")',
+      '    (set --; while IFS= read -r file; do [ -n "$file" ] && set -- "$@" "$file"; done <<EOF',
+      '$changed',
+      'EOF',
+      '    node "$plain" --repo "$root" --files "$@")',
+      '    status=$?',
+      '    if [ "$status" -eq 1 ]; then exit 1; fi',
+      '    if [ "$status" -ne 0 ]; then echo "plain-text check: could not run, so the push goes on unchecked." >&2; fi',
+      '  fi',
+      'fi'
+    );
     lines.push('if [ -f "$chained" ]; then printf \'%s\\n\' "$input" | "$chained" "$@"; exit $?; fi');
   }
   lines.push('exit 0', '');
@@ -190,7 +229,8 @@ class GuardInstaller {
       const text = readOrNull(path.join(hooks, name));
       if (text === null) problems.push(`hook ${name}: missing from ${hooks}`);
       else if (!text.includes(HOOK_MARKER)) problems.push(`hook ${name}: not the guard's hook`);
-      else if (!text.includes(`guard=${GUARD_VERSION} `)) problems.push(`hook ${name}: outdated`);
+      // Any difference from the current hook text, so a hook from before a template change is found too.
+      else if (text.replace(/\r\n/g, '\n') !== hookText(name)) problems.push(`hook ${name}: outdated`);
     }
     if (problems.length) {
       for (const problem of problems) this.#say(`Drift: ${problem}`);
