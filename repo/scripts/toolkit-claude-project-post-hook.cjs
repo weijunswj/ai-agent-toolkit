@@ -14,12 +14,12 @@
 // - Layout, on top-level posts of 25 words or more: a **Now:** line first (after an optional "Re: your reply on"
 //   line), **[HH:MM] Update:** one-liners with no question or numbered options inside, every item under
 //   **Waiting on you** carrying a link, and one **ELI5:** line as the very last line. Choice bullets indented three or
-//   more spaces (or a tab) under a numbered **Question:** item, and &nbsp; spacer lines, need no link. An edit of an
+//   more spaces (or a tab) under a numbered **Question:** item need no link; other lines that are not list items
+//   (spacers, prose) are passed over, and the list ends at the next Update or ELI5 line. An edit of an
 //   earlier post keeps every one of its Update lines word for word and adds at least one new one.
-// - Post fresh after the owner writes: an edit that adds a line to a post the owner has written after is refused,
-//   since the answer would then sit above the owner's message; any other edit of it still needs a new Update line,
-//   so it is refused too. An owner reply under one of these posts (a thread
-//   whose root is that post) does not count; an owner message anywhere else in the session does.
+// - Post fresh after the owner writes: every edit of a top-level post the owner has written after is refused, since
+//   anything it adds would sit above the owner's message. Only an owner reply under the running post itself (a
+//   thread whose root is that post) leaves the running post open to edits; any other owner message marks every post.
 // - Merge summary: in a Projects session (one that has used the Projects tools), a PR merge (the gh merge command, a
 //   gh api PUT to .../pulls/<n>/merge or a merge_pull_request tool) is refused until a line of one of its own posts
 //   says "external effects" and names that PR; every merge in a command is checked. The command is read word by word
@@ -43,10 +43,9 @@ const MESSAGE_ID = /\b(cmsg_[A-Za-z0-9]+)\b/;
 const UPDATE_LINE = /^\s*(?:[-*]\s+)?\*\*\[\d{1,2}:\d{2}\] Update:\*\*/;
 const WAITING_LINE = /^\s*(?:[-*]\s+)?\*\*Waiting on you\b/i;
 const ITEM_LINE = /^\s*(?:\d+[.)]|[-*])\s+/;
-// A choice bullet under a numbered question item, and a spacer line holding only a non-breaking space.
+// A choice bullet under a numbered question item.
 const SUB_LINE = /^(?: {3,}|\t)[-*]\s+\S/;
 const QUESTION_ITEM = /^\s*\d+[.)]\s+\*\*Question:/;
-const SPACER_LINE = /^\s*(?:&nbsp;|&#160;| )\s*$/;
 const NOW_LINE = /^\s*(?:[-*]\s+)?\*\*Now:\*\*/;
 const REPLY_LINE = /^\s*Re: your reply on\b/i;
 const ELI5_LINE = /^\s*(?:[-*]\s+)?\*\*ELI5:\*\*/;
@@ -130,10 +129,14 @@ function readTranscript(lines) {
     let entry;
     try { entry = JSON.parse(line); } catch { continue; }
     const owner = ownerMessages(userText(entry));
-    if (owner.length) running = null;
-    // An owner reply under one of these posts sits below it, so only a message elsewhere puts the posts above it.
-    if (owner.some(thread => !posts.has(thread))) {
-      for (const post of posts.values()) post.ownerAfter = true;
+    if (owner.length) {
+      // Only an owner reply under the running post itself leaves that post open to edits; any other owner message
+      // (main chat, a work thread, or a reply under an older post) puts every post above it.
+      const runningId = running?.id;
+      for (const [id, post] of posts) {
+        if (id !== runningId || owner.some(thread => thread !== runningId)) post.ownerAfter = true;
+      }
+      running = null;
     }
     const content = entry?.message?.content;
     if (!Array.isArray(content)) continue;
@@ -242,10 +245,11 @@ function layoutIssue(text) {
   if (waiting !== -1) {
     let item = '';
     for (const line of lines.slice(waiting + 1)) {
-      // Spacers sit between items; a question's choice bullets sit indented under it. Neither needs a link.
-      if (SPACER_LINE.test(line)) continue;
+      // The list runs to the next Update or ELI5 line. A question's choice bullets sit indented under it and need no
+      // link; spacers and other lines that are not list items are passed over.
+      if (UPDATE_LINE.test(line) || ELI5_LINE.test(line)) break;
       if (SUB_LINE.test(line) && QUESTION_ITEM.test(item)) continue;
-      if (!ITEM_LINE.test(line) || UPDATE_LINE.test(line) || ELI5_LINE.test(line)) break;
+      if (!ITEM_LINE.test(line)) continue;
       item = line;
       if (!LINK.test(line)) return `the Waiting on you item "${line.trim().slice(0, 80)}" has no link. Link each item to the card or thread where the owner acts, so it is one tap away.`;
     }
@@ -740,8 +744,8 @@ function decide(input, readLines = file => fs.readFileSync(file, 'utf8').split('
   // Replies under a post, and edits of a post this transcript never shows, keep only the wording and link rules.
   const known = tool === EDIT_TOOL ? posts.get(input.tool_input?.message_id) : null;
   const topLevel = tool === POST_TOOL ? !input.tool_input?.thread_id : known?.reply === false;
-  // The owner wrote after this post: anything an edit adds would sit above the owner's message.
-  if (topLevel && known?.ownerAfter && lineList(text).length > lineList(known.text).length) {
+  // The owner wrote after this post: anything an edit adds or changes would sit above the owner's message.
+  if (topLevel && known?.ownerAfter) {
     return 'Toolkit Projects rule: post fresh: the owner wrote since this post. An edit would put your answer above the owner\'s message, so send it with post_message as a new post.';
   }
   if (topLevel) {

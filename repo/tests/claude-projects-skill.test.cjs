@@ -185,7 +185,7 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.ok(text.includes('`    - **<Choice> (my pick).** <one-line reason>`'));
   assert.ok(text.includes('then one line indented four spaces holding only `&nbsp;` after the last choice'));
   assert.ok(text.includes('Choices need no link of their own unless they name a PR, thread or file.'));
-  assert.ok(text.includes('refuses an edit that adds a line to a post the owner has written after'));
+  assert.ok(text.includes('refuses any edit of a post the owner has written after (post fresh instead)'));
   assert.doesNotMatch(text, /put at most one \*\*Question:\*\* in a post|Use decision cards for questions, else group/);
   assert.ok(text.includes('an edit keeps every earlier Update line word for word and adds at least one new one'));
   assert.ok(text.includes('the post hook refuses a PR merge (`gh pr merge`, a `gh api` merge call or a merge tool) until a line in one of that session\'s own posts or edits says "external effects" and names the PR'));

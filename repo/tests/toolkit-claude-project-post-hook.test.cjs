@@ -209,7 +209,7 @@ test('wording: no em-dashes or arrows outside code, and one Question per post, r
   assert.equal(wordingIssue('Log:\n```\na -> b'), '');
   // A fence counts only at the start of a line, so a lone ``` in prose hides nothing after it.
   assert.match(wordingIssue('Type ``` to start a block, then -> done.'), /arrow/);
-  assert.match(wordingIssue('**Question:** a?\n**Question:** b?'), /more than one/);
+  assert.match(wordingIssue('**Question:** a?\n**Question:** b?'), /more than one bare \*\*Question:\*\* label\. Write each question as a numbered item under \*\*Waiting on you\*\*/);
   assert.equal(wordingIssue('**Question:** merge it?'), '');
   const reply = decide({ tool_name: POST, transcript_path: 't', tool_input: { thread_id: 'cmsg_T', text: 'Yes — done.' } }, () => lines([wake()]));
   assert.match(reply, /post wording/);
@@ -235,7 +235,7 @@ test('layout: Now first, ELI5 last and alone, Update lines without questions, Wa
   assert.match(layoutIssue(LAID_OUT.replace('[card](#cmsg_CARD)', 'the card')), /Waiting on you item .* has no link/);
   assert.equal(layoutIssue(LAID_OUT.replace('[card](#cmsg_CARD)', 'https://github.com/o/r/pull/7/files')), '');
   // A question in an Update line is refused on its own; one numbered item alone is not an option list.
-  assert.match(layoutIssue(LAID_OUT.replace('CI passed.', 'CI passed. Question: merge it?')), /question or numbered options/);
+  assert.match(layoutIssue(LAID_OUT.replace('CI passed.', 'CI passed. Question: merge it?')), /question or numbered options in it\. An Update line is one short status sentence; ask the question as a numbered \*\*Question:\*\* item under \*\*Waiting on you\*\* instead\./);
   assert.equal(layoutIssue(LAID_OUT.replace('CI passed.', 'G2 (round 1) passed. Phase 2. Review starts.')), '');
   for (const options of ['pick (1) merge (2) hold', 'pick 1) merge 2) hold']) {
     assert.match(layoutIssue(LAID_OUT.replace('CI passed.', options)), /numbered options/, options);
@@ -279,8 +279,9 @@ test('layout: Now first, ELI5 last and alone, Update lines without questions, Wa
     .replace('\n- **[09:41]', '\n1. **Question: merge?** [card](#cmsg_CARD)\n- **[09:41]');
   assert.notEqual(earlierQuestion, LAID_OUT);
   assert.match(layoutIssue(earlierQuestion), /Waiting on you item ".*Hold/);
-  // Spacers in any form never end the scan, so a later item with no link is still caught.
-  for (const spacer of ['&nbsp;', '    &nbsp;', '&#160;', '  &#160;  ']) {
+  // Spacers in any form, and other lines that are not list items, never end the scan, so a later item with no link
+  // is still caught; only an Update or ELI5 line ends the list.
+  for (const spacer of ['&nbsp;', '    &nbsp;', '&#160;', '  &#160;  ', '&#xA0;', '&nbsp;&nbsp;', '&nbsp; note', '<br>', '+ plus bullet', '    indented prose']) {
     const spaced = QUESTIONS.replace('    &nbsp;\n2.', `${spacer}\n2.`).replace(' [thread](#cmsg_THREAD)', '');
     assert.match(layoutIssue(spaced), /Waiting on you item "2\. .* has no link/, JSON.stringify(spacer));
   }
@@ -328,10 +329,15 @@ test('edits keep every earlier Update line word for word and add a new one', () 
   for (const added of ['More news here.', '[PR 7](https://github.com/o/r/pull/7/files) is up.', '2. Another ask: [card](#cmsg_C2)', '**[10:00] update:** lower case.', '[10:00] Update: no bold.']) {
     assert.match(edit([wake(), call(POST, { text: LAID_OUT }), wake()], LAID_OUT.replace('**Waiting on you', `${added}\n**Waiting on you`)), /post fresh/, added);
   }
-  // Other edits still need a new Update line, as before the owner wrote, so they are refused too.
-  assert.match(edit([wake(), call(POST, { text: LAID_OUT }), wake()], LAID_OUT.replace('is in review', 'is under review')), /no new/);
-  assert.match(edit([wake(), call(POST, { text: LAID_OUT }), wake()], LAID_OUT.replace('built the layout', 'wrote the layout')), /drops or changes/);
-  assert.match(edit([wake(), call(POST, { text: LAID_OUT }), wake()], earlier), /drops or changes/);
+  // Every other edit is refused the same way: wording, a changed or dropped Update line.
+  assert.match(edit([wake(), call(POST, { text: LAID_OUT }), wake()], LAID_OUT.replace('is in review', 'is under review')), /post fresh/);
+  assert.match(edit([wake(), call(POST, { text: LAID_OUT }), wake()], LAID_OUT.replace('built the layout', 'wrote the layout')), /post fresh/);
+  assert.match(edit([wake(), call(POST, { text: LAID_OUT }), wake()], earlier), /post fresh/);
+  // The owner answers the question; dropping the answered item while appending an Update is refused too.
+  const answered = LAID_OUT.replace('\n1. Merge OK for the hook: [card](#cmsg_CARD)', '').replace('\n**Waiting on you (1):**', '\n- **[10:05] Update:** you said merge, so I merged it.');
+  assert.notEqual(answered, LAID_OUT);
+  assert.equal(layoutIssue(answered), '');
+  assert.match(edit([wake(), call(POST, { text: LAID_OUT }), wake()], answered), /post fresh: the owner wrote since this post/);
   // A wording edit after the owner wrote does not clear the mark, so a later append is still refused.
   const reworded = LAID_OUT.replace('is in review', 'is under review');
   const plusUpdate = `${reworded.replace('\n**Waiting on you', '\n- **[10:00] Update:** new.\n**Waiting on you')}`;
@@ -343,6 +349,13 @@ test('edits keep every earlier Update line word for word and add a new one', () 
   const threadWake = ts => ({ type: 'user', message: { role: 'user', content: `<wake reason="mention"><project id="chan_X"><thread ts="${ts}"><message from="human" trust="principal">ok</message></thread></project></wake>` } });
   assert.equal(edit([wake(), call(POST, { text: earlier }), threadWake('cmsg_A1')], LAID_OUT), '');
   assert.match(edit([wake(), call(POST, { text: earlier }), threadWake('cmsg_OTHER')], LAID_OUT), /post fresh/);
+  // A reply under an older own post marks the running post too, and the older post stays closed to edits.
+  const second = text => call(POST, { text }, '{"message_id":"cmsg_B2"}');
+  const editB = (entries, text) => decide({ tool_name: EDIT, transcript_path: 't', tool_input: { message_id: 'cmsg_B2', text } }, () => lines(entries));
+  const big = 'x'.repeat(NEAR_LIMIT_BYTES);
+  assert.match(editB([wake(), call(POST, { text: big }), second(earlier), threadWake('cmsg_A1')], LAID_OUT), /post fresh/);
+  assert.equal(editB([wake(), call(POST, { text: big }), second(earlier), threadWake('cmsg_B2')], LAID_OUT), '');
+  assert.match(edit([wake(), call(POST, { text: earlier }), second('y'), threadWake('cmsg_A1')], LAID_OUT), /post fresh/);
 });
 
 test('merges in a Projects session need an earlier post with the PR\'s external effects', () => {
