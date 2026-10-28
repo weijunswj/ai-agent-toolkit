@@ -52,6 +52,9 @@ async function decide(input, environment = process.env) {
     governanceDenial = insideRepository(input?.cwd) ? { deny: `Toolkit: the governance check failed, so nothing runs in this repository until it works again. ${NEVER_OWNER}` } : null;
   }
   if (governanceDenial) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: governanceDenial.deny } };
+  // Merges: the merge hold, a tripwire that waits for the user's own "merge N" (toolkit-merge-hold.cjs), in every folder.
+  const mergeDenial = mergeDecision(input);
+  if (mergeDenial) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: mergeDenial.deny } };
   // Shell commands: refuse AI attribution in commits and pull requests, in every folder.
   if (input?.tool_name === 'Bash') return require('./toolkit-attribution-guard.cjs').attributionDecision(input);
   const state = governance(input, environment);
@@ -69,10 +72,22 @@ async function decide(input, environment = process.env) {
   return new CodexNamedHelperPolicy({ environment }).decide(input, state);
 }
 
+// The merge hold's decision, failing closed for a call that may merge when the module cannot run.
+function mergeDecision(input) {
+  try { return require('./toolkit-merge-hold.cjs').decide(input || {}); } catch {
+    let mayMerge = true;
+    try { mayMerge = require('./toolkit-merge-hold.cjs').mayMerge(input || {}); } catch { mayMerge = /merge|push/i.test(JSON.stringify(input || {})); }
+    return mayMerge ? { deny: 'Toolkit: the merge check failed, so this merge or push is refused. Retry it; if this repeats, run `setup toolkit` to repair the Toolkit plugin.' } : null;
+  }
+}
+
 // The UserPromptSubmit decision: { block: reason } or { context } or {}.
 function decidePrompt(input, environment = process.env) {
   const decision = new (gate().PromptHold)({ environment }).decide({ cwd: input?.cwd, prompt: input?.prompt, sessionId: gate().sessionIdOf(input) });
   if (decision.action === 'block') return { block: decision.reason };
+  // A "merge N" the user types is kept for the merge hold, but not while the governance question holds
+  // the message: the user types it again after answering. A failure only means a later merge is refused.
+  try { require('./toolkit-merge-hold.cjs').recordPrompt(input || {}, { environment }); } catch { /* fail closed later */ }
   return decision.context ? { context: decision.context } : {};
 }
 
