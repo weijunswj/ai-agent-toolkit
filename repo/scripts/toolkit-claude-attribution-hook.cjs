@@ -2,8 +2,9 @@
 'use strict';
 
 // Claude Code PreToolUse hook for Bash and PowerShell: refuses a git commit or gh pr create/edit/merge that carries AI
-// attribution, a command that skips a governed or guarded repository's commit and push checks, and a force push (see
-// toolkit-attribution-guard.cjs). Any other command, or input it cannot read, passes.
+// attribution, a command that skips a governed or guarded repository's commit and push checks, a force push, and a
+// push or new pull request whose changes carry a credential or a plain-text finding (see toolkit-attribution-guard.cjs).
+// Any other command, or input it cannot read, passes.
 //
 // If the check itself fails (the guard module is missing or throws), only commands the guard would have
 // looked at for attribution are refused, with a plain reason; every other command still runs. The hook is
@@ -30,15 +31,23 @@ function main(guard = () => require('./toolkit-attribution-guard.cjs')) {
   try { input = JSON.parse(fs.readFileSync(0, 'utf8') || '{}'); }
   catch { return 0; }
   let decision;
-  try { decision = guard().attributionDecision(input); }
+  const notes = [];
+  try { decision = guard().attributionDecision(input, { notes }); }
   catch {
     const command = input?.tool_input?.command;
     return typeof command === 'string' && mayCarryAttribution(command) ? refuse(CHECK_FAILED_REASON) : 0;
   }
   if (decision?.hookSpecificOutput) {
+    // Notes from a step that could not run go with the refusal, so they are not lost.
+    if (notes.length) decision.hookSpecificOutput.permissionDecisionReason += `\n${notes.join('\n')}`;
     process.stdout.write(`${JSON.stringify(decision)}\n`);
     process.stderr.write(`${decision.hookSpecificOutput.permissionDecisionReason}\n`);
     return 2;
+  }
+  // A push the check could not read still runs; Claude Code shows `systemMessage` to the user.
+  if (notes.length) {
+    process.stdout.write(`${JSON.stringify({ systemMessage: notes.join('\n') })}\n`);
+    process.stderr.write(`${notes.join('\n')}\n`);
   }
   return 0;
 }

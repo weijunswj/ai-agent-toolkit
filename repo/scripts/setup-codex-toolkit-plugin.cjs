@@ -39,6 +39,7 @@ const CACHE_FINGERPRINT_PATHS = [
   "repo/scripts/toolkit-v3-helper-guard.cjs",
   "repo/scripts/toolkit-codex-helper-hook.cjs",
   "repo/scripts/toolkit-attribution-guard.cjs",
+  "repo/scripts/toolkit-push-check.cjs",
   "repo/scripts/toolkit-claude-agent-hook.cjs",
   "repo/scripts/toolkit-gate-contract-compiler.cjs",
   "repo/scripts/toolkit-capability-registry.cjs",

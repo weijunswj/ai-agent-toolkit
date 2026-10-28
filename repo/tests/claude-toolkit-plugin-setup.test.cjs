@@ -1005,7 +1005,7 @@ test('installed enforcement byte verification rejects missing and stale cache fi
   const cache = tmpRoot();
   // A package fixture contains the actual canonical runtime and contracts.
   // Negative checks below independently remove/drift protected cache files.
-  for (const directory of ['repo/scripts','repo/contracts','.claude-plugin','skills/github-program-reconciler/scripts']) {
+  for (const directory of ['repo/scripts','repo/contracts','.claude-plugin','skills/github-program-reconciler/scripts','skills/secure-ci-cd/scripts']) {
     fs.cpSync(path.join(repoRoot,directory),path.join(cache,directory),{recursive:true});
   }
   for(const file of ['repo/CONTROLLER.md','repo/ARCHITECTURE.md'])fs.copyFileSync(path.join(repoRoot,file),path.join(cache,file));
