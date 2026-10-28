@@ -1070,6 +1070,15 @@ test('answer guard: a host counts only where a shell starts it, so scratch files
     // A reply word in other text a shell runs does not belong to a session started elsewhere.
     ['Bash', 'bash -c "echo ok" && claude -p "summarise"'],
     ['Bash', 'npm install -g @anthropic-ai/claude-code && echo ok'],
+    // An issue comment about Claude and Codex, with a quoted reply word, was once refused.
+    ...(() => {
+      const body = 'CONTROLLER-TAKEOVER\n\nClaude Projects Controller takes over; no comment after it.\nNext: the quoted `HEAD^{tree}` plus a `.codex` script path, then codex exec review "ok".';
+      return [
+        ['Bash', `gh issue comment 1 --repo example-owner/example-repo --body-file - <<'EOF'\n${body}\nEOF`],
+        ['Bash', `gh issue comment 1 --body "$(cat <<'EOF'\n${body}\nEOF\n)"`],
+        ['PowerShell', `$body = @'\n${body}\n'@\ngh issue comment 1 --body $body`],
+      ];
+    })(),
   ];
   const refused = [
     'bash <<EOF\nclaude -p yes\nEOF',
