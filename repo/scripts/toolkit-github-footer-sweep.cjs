@@ -8,10 +8,14 @@
 // --apply, edits each one to the same text minus the footer and reads it back.
 //
 // Only posts written by the signed-in account are edited unless --any-author is given; others are
-// listed as skipped. Without --apply nothing is written.
+// listed as skipped. Without --apply nothing is written. Each edit re-reads the post first and skips
+// it (SKIPPED_CHANGED) if it changed since the scan, then reads it back and reports MISMATCH when
+// GitHub stored anything other than the text sent.
 //
 // Usage: node repo/scripts/toolkit-github-footer-sweep.cjs --repo <owner/name> [--repo ...] [--since <ISO time>] [--apply] [--any-author] [--json]
-// Exit: 0 finished with no failed edit, 1 an edit or read failed, 2 bad arguments.
+// Exit: 0 no post with the footer; 3 posts with the footer found and none cleaned (a report-only run,
+// or every one skipped); 4 at least one post cleaned and nothing failed; 1 a scan, edit or read-back
+// failed (FAILED, STILL_FOOTED or MISMATCH); 2 bad arguments.
 
 const { execFileSync } = require('node:child_process');
 const { hasFooter, stripFooter } = require('./toolkit-github-footer-guard.cjs');
@@ -89,12 +93,16 @@ function sweep(options, deps = {}) {
       const row = { repo, kind: post.kind, url: post.url, author: post.author };
       const body = stripFooter(post.body);
       if (login && post.author !== login) { results.push({ ...row, status: 'SKIPPED_OTHER_AUTHOR' }); continue; }
-      if (!body.trim()) { results.push({ ...row, status: 'SKIPPED_EMPTY_AFTER_STRIP' }); continue; }
+      // GitHub refuses an empty comment or review; an issue or pull request body may be empty.
+      if (!body.trim() && !EMPTY_ALLOWED.has(post.kind)) { results.push({ ...row, status: 'SKIPPED_EMPTY_AFTER_STRIP' }); continue; }
       if (!options.apply) { results.push({ ...row, status: 'FOUND' }); continue; }
       try {
+        // Re-read just before writing, so an edit made since the scan is never overwritten.
+        if (getOne(gh, post.path).body !== post.body) { results.push({ ...row, status: 'SKIPPED_CHANGED' }); continue; }
         gh(['api', '-X', post.method, post.path, '--input', '-'], JSON.stringify({ body }));
         const back = getOne(gh, post.path);
-        results.push({ ...row, status: hasFooter(back.body) ? 'STILL_FOOTED' : 'CLEANED' });
+        const status = hasFooter(back.body) ? 'STILL_FOOTED' : (normalise(back.body) === normalise(body) ? 'CLEANED' : 'MISMATCH');
+        results.push({ ...row, status });
       } catch (error) {
         results.push({ ...row, status: 'FAILED', detail: firstLine(error) });
       }
@@ -109,7 +117,21 @@ function firstLine(error) {
   return text.split(/\r?\n/)[0].slice(0, 200) || 'failed';
 }
 
-const FAILED = new Set(['FAILED', 'STILL_FOOTED']);
+const EMPTY_ALLOWED = new Set(['issue', 'pull_request']);
+// Line endings and trailing whitespace GitHub may change on its own.
+const normalise = (body) => String(body ?? '').replace(/\r\n/g, '\n').trimEnd();
+
+const FAILED = new Set(['FAILED', 'STILL_FOOTED', 'MISMATCH']);
+const EXIT = Object.freeze({ CLEAN: 0, FAILED: 1, USAGE: 2, FOUND: 3, FIXED: 4 });
+
+// 1 when anything failed, else 4 when a post was cleaned, else 3 when footers were found (and left),
+// else 0.
+function exitCode(results) {
+  if (results.some((row) => FAILED.has(row.status))) return EXIT.FAILED;
+  if (results.some((row) => row.status === 'CLEANED')) return EXIT.FIXED;
+  if (results.length) return EXIT.FOUND;
+  return EXIT.CLEAN;
+}
 
 function main(argv = process.argv.slice(2), deps = {}) {
   const out = deps.stdout || ((text) => process.stdout.write(text));
@@ -127,9 +149,9 @@ function main(argv = process.argv.slice(2), deps = {}) {
     const summary = Object.entries(counts).map(([status, count]) => `${count} ${status}`).join(', ') || 'no posts with the footer';
     out(`GitHub footer sweep (${options.apply ? 'apply' : 'report only'}) of ${options.repos.join(', ')}: ${summary}\n`);
   }
-  return results.some((row) => FAILED.has(row.status)) ? 1 : 0;
+  return exitCode(results);
 }
 
 if (require.main === module) process.exitCode = main();
 
-module.exports = { parseArgs, findFooted, sweep, main, USAGE };
+module.exports = { parseArgs, findFooted, sweep, main, exitCode, EXIT, USAGE };
