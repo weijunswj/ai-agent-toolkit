@@ -154,9 +154,17 @@ test('in the cloud, shell writes that post no body get no read-back note', () =>
   for (const command of ['gh issue close 3', 'gh pr ready 4', 'gh issue lock 3', 'gh api -X DELETE repos/acme/app/issues/comments/5']) {
     assert.deepEqual(guard.footerDecision(shell(command), cloud), {}, command);
   }
-  for (const command of ['gh pr comment 4 --body x', 'gh issue create --title t --body b', 'gh pr review 4 --comment --body x', 'gh api repos/acme/app/issues/1/comments -f body=x']) {
+  for (const command of ['gh pr comment 4 --body x', 'gh issue create --title t --body b', 'gh pr review 4 --comment --body x', 'gh api repos/acme/app/issues/1/comments -f body=x', 'gh issue close 3 --comment done', 'gh pr close 4 -c done']) {
     assert.match(guard.footerDecision(shell(command), cloud).hookSpecificOutput.additionalContext, /Read it back/, command);
   }
+});
+
+test('method words inside a posted body never skip the response check', () => {
+  const comment = { id: 5, body: footed('run gh api -X DELETE to undo'), html_url: 'https://github.com/acme/app/issues/1#issuecomment-5' };
+  const write = { hook_event_name: 'PostToolUse', cwd: '/work', tool_name: 'Bash', tool_input: { command: 'gh api repos/acme/app/issues/1/comments -f "body=run gh api -X DELETE to undo"' }, tool_response: { stdout: JSON.stringify(comment) } };
+  assert.equal(guard.footerDecision(write, { guarded }).decision, 'block');
+  const closing = { ...write, tool_input: { command: 'gh issue close 1 --comment done' } };
+  assert.equal(guard.footerDecision(closing, { guarded }).decision, 'block', 'a closing comment returned with the footer is caught');
 });
 
 test('code fences close only on the same character and at least the same length', () => {
