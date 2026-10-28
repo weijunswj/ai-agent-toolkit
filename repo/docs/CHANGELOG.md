@@ -1,5 +1,10 @@
 # Toolkit Changelog
 
+## 3.15.28 (footer hook follow-ups)
+
+- **Footer hook shell routing:** each `gh api` call in a command is read for its own method, so a long command stays fast. In the cloud, only shell writes that post a body (`gh issue|pr create`, `comment`, `edit`, `review`, `close --comment`, and `gh api` calls other than DELETE or GET) get the read-back note; `gh issue close`, `gh pr ready` and similar writes no longer do. Every `gh` write's response is still read for the footer.
+- **Code fences:** a fence closes only on the same character (backtick or tilde), at least as long as the opening and with nothing after it, so a footer after a long fence that quotes a shorter one is still found and one inside an open fence is left alone.
+
 ## 3.15.27 (numbered questions and fresh posts in Projects)
 
 - **Claude Projects skill (2026-10-28.3):** several owner questions now go in a numbered list under **Waiting on you**, each written `1. **Question: ...?**` with its link, its choices as four-space-indented bullets marking "(my pick)", and an `&nbsp;` spacer line after the last choice. Each **[HH:MM] Update:** line is followed by the same spacer. Overlapping post-format rules are merged into one set, and work threads follow the same post rules.
