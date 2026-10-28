@@ -3,6 +3,8 @@
 
 // Records the user's answer to Toolkit's governance question after the agent read what their reply
 // means (owner decision of 28 Oct). Usage: node toolkit-governance-answer.cjs <yes|no|later> <ticket>
+// When the agent is unsure, `confirm-yes`, `confirm-no` or `confirm-later` records nothing and gives
+// it the question to ask; the user's reply then comes with a ticket that records only that answer.
 //
 // The ticket comes from the governance hook, which gives one only when the user's own message
 // arrived in the run of the session that was shown the question; it names the repositories asked
@@ -15,7 +17,7 @@ const gate = require('./toolkit-governance-gate.cjs');
 function main(argv) {
   const [word, ticket, ...rest] = argv;
   if (rest.length > 0 || typeof word !== 'string' || typeof ticket !== 'string') {
-    process.stderr.write('Usage: node toolkit-governance-answer.cjs <yes|no|later> <ticket>\n');
+    process.stderr.write('Usage: node toolkit-governance-answer.cjs <yes|no|later|confirm-yes|confirm-no|confirm-later> <ticket>\n');
     return 2;
   }
   let result;
