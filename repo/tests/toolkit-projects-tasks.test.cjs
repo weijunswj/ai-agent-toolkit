@@ -483,7 +483,10 @@ test('every setup step that creates something has an inventory row, and every ro
   const template = fs.readFileSync(path.join(TASKS, 'daily-check-in.md'), 'utf8');
   for (const row of inventory.rows) {
     assert.match(row.resync, /^(auto|owner|report)\b/, row.id);
-    if (row.check !== 'never changed') assert.ok(template.includes(row.check), `${row.id}: ${row.check}`);
+    // A row a launch hook enforces names that hook's script, which must exist; every other row is in the check-in.
+    const hook = row.check.match(/^hook: (\S+)$/);
+    if (hook) assert.ok(fs.existsSync(path.join(ROOT, hook[1])), `${row.id}: ${hook[1]}`);
+    else if (row.check !== 'never changed') assert.ok(template.includes(row.check), `${row.id}: ${row.check}`);
   }
   assert.equal(new Set(inventory.rows.map(row => row.id)).size, inventory.rows.length);
 });
