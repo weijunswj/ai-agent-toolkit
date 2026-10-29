@@ -1,5 +1,13 @@
 # Toolkit Changelog
 
+## 3.19.7 (the continuation guard reads what a command runs)
+
+- **Fewer false refusals:** the guard that refuses resuming or forking a Claude or Codex session now reads where a shell runs a program, instead of looking for host letters anywhere in the text. Read-only commands that name a `.codex`, `.claude`, `Claude-Data` or `Temp\claude` folder, or mention resume or fork, now run, with pipes, chains, loops, heredocs and here-strings: ssh and Docker comparisons, PowerShell reads at chat start and Python scripts piped into Codex's bundled Python among them.
+- **Real resumes still refused:** a resume or fork as the command word, through a wrapper (`env`, `xargs`, `Start-Process`, `cmd /c`, `npx`, `find -exec`), in a shell script (`bash -c`, `pwsh -Command`, decoded `-EncodedCommand`, a heredoc or text piped in, or one argument string passed by `Start-Process`), through `eval` or `iex`, held in a variable (`$c = "claude --continue"; iex $c`, `M=resume; codex "$M"`), in a script written and run in the same command, with a split spelling (`c"o"dex`) or a computed name with host letters is refused as before. Option values and variables that some programs run (`git -c`, `--upload-pack`, `rg --pre`, `ssh -o`, `GIT_PAGER`) are checked too.
+- **No slow reads:** a command with long chains of wrappers or nested shells is refused once it passes a fixed reading budget, instead of slowing the hook. cmd's reading keeps `;` inside one command, so a message like `'Fix x; codex resume refused'` is not refused there.
+- **Clearer refusal:** the message says what it found (for example `claude -c`) and names the two forms Toolkit can verify, `claude --resume <full path to the session's .jsonl file>` and `codex exec resume --last`.
+- **Informational:** a host name built inside an interpreter script or from character codes is out of this check's reach; the resumed session's own repository hold still applies.
+
 ## 3.19.6 (Codex setup table reads what Codex runs)
 
 - **No Codex command before your answers:** the read-only Codex setup plan no longer starts Codex. It reads the Codex files instead: the Toolkit version in the installed plugin cache, whether the Toolkit plugin is turned on, the local marketplace folder, `project_doc_max_bytes`, each Toolkit hook's state and the setup journal. Codex's own checks run after you answer, and only when an answer needs them: the plugin commands for Install or refresh, and the helper feature check for a helper change.
