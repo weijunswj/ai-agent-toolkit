@@ -497,7 +497,7 @@ Do not add one bridge skill per command. Keep `toolkit-setup` as the only bridge
 
 ## Windows Scheduled Tasks
 
-On Windows, setup ends with a `## Windows scheduled tasks` section for the managed checkout's repository: each no-AI task Toolkit keeps, with its folder, name, schedule, purpose and state (to create, to update in place, up to date, or refused), and why a task does not apply. Setup never creates a task itself. When one needs creating or updating, the section ends with one PowerShell line for the user to paste:
+On Windows, setup ends with a `## Windows scheduled tasks` section for the managed checkout's repository: each no-AI task Toolkit keeps, with its folder, name, schedule, purpose and state (to create, to update in place, up to date, or refused), and why a task does not apply. For any other governed repository, `node repo/scripts/toolkit-windows-tasks.cjs plan --repo-root <its checkout>` gives the same read-only report and line. Setup never creates a task itself. When one needs creating or updating, the section ends with one PowerShell line for the user to paste:
 
 ```powershell
 node "$env:USERPROFILE\.ai-agent-toolkit\source\ai-agent-toolkit\repo\scripts\toolkit-windows-tasks.cjs" apply --repo-root "$env:USERPROFILE\.ai-agent-toolkit\source\ai-agent-toolkit"

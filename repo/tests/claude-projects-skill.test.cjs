@@ -312,6 +312,18 @@ test('the device programme sweep needs both GitHub governance ENABLED and a name
   assert.match(sweep.artefact, /GitHub governance ENABLED and a device named/);
 });
 
+test('on a Windows device every governed repository gets its own programme sweep line, not only Toolkit', () => {
+  // Setup plans tasks only for the managed Toolkit checkout, so another governed repository's line
+  // comes from the read-only plan command run against that repository's checkout.
+  const recurring = read('repo/contracts/claude-projects/web-controller-projects/reference/recurring-tasks.md');
+  assert.match(recurring, /Toolkit setup on the device lists it for the Toolkit repository only\. For any other governed repository, the device's local Remote Control thread runs `node <Toolkit checkout>\/repo\/scripts\/toolkit-windows-tasks\.cjs plan --repo-root <that repository's checkout>`, which is read-only/);
+  assert.match(recurring, /Hand the user that exact line, for that repository's checkout, and put "paste the programme sweep line for <owner\/repo>" on the owner's pending list/);
+  assert.doesNotMatch(recurring, /paste the programme sweep line from setup/);
+  assert.match(read('skills/github-program-reconciler/SKILL.md'), /the line that setup prints for the Toolkit repository, or that `toolkit-windows-tasks\.cjs plan --repo-root <checkout>` prints, read-only, for any other governed repository/);
+  const windowsTasks = require('../scripts/toolkit-windows-tasks.cjs');
+  assert.equal(windowsTasks.parseArgs(['plan', '--repo-root', 'C:\\work\\other']).repo_root, 'C:\\work\\other');
+});
+
 // Moving a task can skip today's run, and fire_trigger on a bound task runs it unwired.
 test('Projects catches up a moved task through its home thread and never fire_triggers a bound task', () => {
   const text = bundle();

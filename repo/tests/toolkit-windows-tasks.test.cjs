@@ -280,6 +280,60 @@ test('G: a first run stopped by a console close is started once more, and health
   const failed = windowsTasks.applyTasks(desired(t, { shards: false }), { scheduler: silent, home: home2, now, firstRunOptions: { wait: () => {}, waitMs: 10, pollMs: 5 } });
   assert.equal(failed.items[0].first_run.status, 'failed');
   assert.match(failed.items[0].first_run.detail, /wrote no result/);
+  // A run whose record says it failed is not healthy, even though Windows reports 0x0.
+  const home3 = tempHome(t);
+  const failing = fakeScheduler();
+  failing.onStart = (task) => {
+    clock += 1000;
+    Object.assign(task, { last_run: new Date(clock).toISOString(), last_result: 0, state: 'Ready' });
+    tasks.writeLastRun('toolkit-programme-sweep', { started: new Date(clock).toISOString(), exit: 1, status: 'failed', summary: ['Footer sweep failed (exit 1): 1 MISMATCH.'] }, home3);
+  };
+  const unhealthy = windowsTasks.applyTasks(desired(t, { shards: false }), { scheduler: failing, home: home3, now, firstRunOptions: { wait: () => {}, waitMs: 10, pollMs: 5 } });
+  assert.equal(unhealthy.items[0].first_run.status, 'failed');
+  assert.match(unhealthy.items[0].first_run.detail, /^failed: Footer sweep failed/);
+});
+
+test('G: a change to the schedule alone is updated in place, through the definition digest', (t) => {
+  const home = tempHome(t);
+  const scheduler = fakeScheduler();
+  const root = checkout(t);
+  windowsTasks.applyTasks(desired(t, { root }), { scheduler, home });
+  const changed = desired(t, { root });
+  const sweep = changed.wanted[0];
+  const before = sweep.def;
+  sweep.schedule = { kind: 'hourly', at: '09:00', hours: 15 };
+  sweep.def = windowsTasks.definitionDigest(sweep);
+  sweep.description = sweep.description.replace(`def=${before}]`, `def=${sweep.def}]`);
+  assert.notEqual(sweep.def, before);
+  const plan = windowsTasks.planTasks(changed, { scheduler, home });
+  assert.deepEqual(plan.items.map(item => item.action), ['update', 'current'], 'the action, its arguments and folder are unchanged; only the digest tells');
+});
+
+test('G: setup only plans and reports the tasks, and --remove-toolkit-tasks removes only Toolkit\'s own', async (t) => {
+  const core = require('../scripts/setup-toolkit-core.cjs');
+  const home = tempHome(t);
+  const root = checkout(t);
+  const scheduler = fakeScheduler();
+  const lines = [];
+  const plan = core.printWindowsTasks({ repoRoot: root }, { platform: 'win32', scheduler, checkoutDeps: { governance: governance() }, home, log: line => lines.push(line) });
+  assert.deepEqual(plan.items.map(item => item.action), ['create', 'create']);
+  const text = lines.join('\n');
+  assert.match(text, /## Windows scheduled tasks\nWindows scheduled tasks for weijunswj\/ai-agent-toolkit in \\TOOLKIT\\:/);
+  assert.match(text, /paste this line into PowerShell yourself[\s\S]*toolkit-windows-tasks\.cjs" apply --repo-root /);
+  assert.deepEqual(scheduler.calls.map(call => call[0]), ['list'], 'setup never registers, starts or removes a task');
+  assert.deepEqual(tasks.readRegistry(home).tasks, [], 'setup records nothing');
+  assert.equal(core.printWindowsTasks({ repoRoot: root }, { platform: 'linux', scheduler, log: line => lines.push(line) }), null);
+  // The remove flag runs on its own and goes to remove, never apply.
+  windowsTasks.applyTasks(desired(t, { root }), { scheduler, home });
+  scheduler.folders.get('TOOLKIT').push(unmarked('Mine'));
+  scheduler.calls.length = 0;
+  const out = [];
+  const code = await core.main(['--remove-toolkit-tasks'], { platform: 'win32', windowsTasksDeps: { platform: 'win32', scheduler, home, stdout: text => out.push(text) } });
+  assert.equal(code, 0);
+  assert.deepEqual(scheduler.folders.get('TOOLKIT').map(task => task.name), ['Mine']);
+  assert.equal(scheduler.calls.some(call => call[0] === 'register' || call[0] === 'start'), false);
+  assert.match(out.join(''), /TOOLKIT - PROGRAMME SWEEP in \\TOOLKIT\\: removed/);
+  await assert.rejects(core.main(['--remove-toolkit-tasks', '--execute'], { platform: 'win32', windowsTasksDeps: { platform: 'win32', scheduler, home } }), /runs on its own/);
 });
 
 test('G: adopt records a task the owner made and refuses one carrying Toolkit\'s marker', (t) => {
@@ -425,6 +479,19 @@ test('L: a live Toolkit task shows its live schedule, last run and result', (t) 
   const row = result.rows.find(item => item.name === 'TOOLKIT - PROGRAMME SWEEP');
   assert.deepEqual([row.state, row.source, row.schedule, row.ai, row.result, row.last_result, row.last_run], ['Toolkit', tasks.LIVE, 'hourly, 08:00 to 23:59', 'no AI', 'ok', 'ok', '2026-10-29T01:03:00.000Z']);
   assert.match(tasks.formatList(result), /TOOLKIT - PROGRAMME SWEEP: Toolkit\. Windows Task Scheduler \\TOOLKIT\\; hourly, 08:00 to 23:59; no AI; last run 2026-10-29 01:03 ok/);
+});
+
+test('L: a run that stopped before writing its record is not shown as the previous good run', (t) => {
+  const { home, scheduler } = listedHome(t);
+  const live = scheduler.folders.get('TOOLKIT').find(task => task.name === 'TOOLKIT - PROGRAMME SWEEP');
+  tasks.writeLastRun('toolkit-programme-sweep', { started: '2026-10-29T01:00:05.000Z', finished: '2026-10-29T01:03:00.000Z', exit: 0, status: 'ok', summary: ['Programme refresh: done.'] }, home);
+  Object.assign(live, { last_run: '2026-10-29T02:00:04.000Z', last_result: 0 });
+  const row = tasks.listTasks({ home, platform: 'win32', scheduler, folderFor: () => null }).rows.find(item => item.name === 'TOOLKIT - PROGRAMME SWEEP');
+  assert.deepEqual([row.last_run, row.result, row.summary], ['2026-10-29T02:00:04.000Z', 'no result recorded (the run stopped before writing one)', undefined]);
+  // Within 2 seconds of the Windows start time, the record is that run's.
+  Object.assign(live, { last_run: '2026-10-29T01:00:06.500Z' });
+  const same = tasks.listTasks({ home, platform: 'win32', scheduler, folderFor: () => null }).rows.find(item => item.name === 'TOOLKIT - PROGRAMME SWEEP');
+  assert.equal(same.result, 'ok');
 });
 
 test('L: a recorded task deleted by hand shows missing; an unmarked task in the folder shows found, not recorded', (t) => {

@@ -3598,20 +3598,21 @@ async function execute(args){return new ToolkitSetupExecution(args).execute();}
 // (toolkit-windows-tasks.cjs): each with its folder, name, schedule, purpose and state. Setup only
 // reports them: agents do not create scheduled tasks, so when one needs creating or updating the
 // report ends with the one PowerShell line the owner pastes. A failure here never stops setup.
-function printWindowsTasks(args, { platform = process.platform } = {}) {
+// Tests pass a fake scheduler, checkout reads, home and log.
+function printWindowsTasks(args, { platform = process.platform, scheduler = null, checkoutDeps = {}, home = os.homedir(), log = console.log } = {}) {
   if (platform !== 'win32') return null;
-  console.log('');
-  console.log('## Windows scheduled tasks');
+  log('');
+  log('## Windows scheduled tasks');
   try {
     const windowsTasks = require('./toolkit-windows-tasks.cjs');
     const toolkitRoot = path.resolve(args.repoRoot);
-    const desired = windowsTasks.desiredTasks({ checkout: toolkitRoot, toolkitRoot });
-    const plan = windowsTasks.planTasks(desired, { scheduler: windowsTasks.powerShellScheduler(), home: os.homedir() });
-    const command = windowsTasks.applyCommand(desired, { toolkitRoot, home: os.homedir() });
-    for (const line of windowsTasks.describePlan(plan, { command })) console.log(line);
+    const desired = windowsTasks.desiredTasks({ checkout: toolkitRoot, toolkitRoot, deps: checkoutDeps });
+    const plan = windowsTasks.planTasks(desired, { scheduler: scheduler || windowsTasks.powerShellScheduler(), home });
+    const command = windowsTasks.applyCommand(desired, { toolkitRoot, home });
+    for (const line of windowsTasks.describePlan(plan, { command })) log(line);
     return plan;
   } catch (error) {
-    console.log(`Windows scheduled tasks could not be checked: ${error.message}`);
+    log(`Windows scheduled tasks could not be checked: ${error.message}`);
     return null;
   }
 }
@@ -3632,7 +3633,7 @@ async function main(argv = process.argv.slice(2), options = {}) {
   if (argv.includes(REMOVE_TOOLKIT_TASKS_FLAG)) {
     if (argv.length !== 1) throw new Error(`${REMOVE_TOOLKIT_TASKS_FLAG} runs on its own`);
     assertSupportedComputer(options);
-    return require('./toolkit-windows-tasks.cjs').main(['remove']);
+    return require('./toolkit-windows-tasks.cjs').main(['remove'], options.windowsTasksDeps || {});
   }
   const restoreIndex = argv.indexOf(RESTORE_FLAG);
   const restoreInline = argv.find((arg) => arg.startsWith(`${RESTORE_FLAG}=`));
@@ -3711,6 +3712,7 @@ const {
 
 module.exports = {
   assertSupportedComputer,
+  printWindowsTasks,
   gitFailureHint,
   nativePluginRebindFailure,
   installOfficialN8nSkills,
