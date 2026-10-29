@@ -106,7 +106,11 @@ function promptFailure(input) {
 }
 
 const HELD = `Toolkit helper guard failed. ${NEVER_OWNER}`;
-const UNCHECKED_PUSH = 'Codex does not show Toolkit\'s warnings, so this push or pull request is refused instead of going out unchecked. Retry it; if this repeats, run `setup toolkit`.';
+// The way through depends on the cause the note names; a cause that stays the same refuses every retry.
+const UNCHECKED_PUSH = [
+  'Codex does not show Toolkit\'s warnings, so this push or pull request is refused instead of going out unchecked.',
+  'Fix what the note above names, then retry: for a check that took too long or read too much, push fewer new commits at a time (an older commit first, for example `git push origin <older commit>:<branch>`); with no base branch found, run `git fetch origin` or name `--base`; for an unreadable setting, fix the file it names; when git was not found or could not run, run `setup toolkit`.',
+].join('\n');
 function deny(reason) {
   process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } }) + '\n');
   // Blocking exit status, with the reason on stderr, for hosts that honour exit 2.

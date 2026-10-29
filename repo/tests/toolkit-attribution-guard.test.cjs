@@ -696,7 +696,7 @@ test('push check: the Claude Code hook (Bash and PowerShell) and the Codex helpe
   assert.equal(clean.stdout + clean.stderr, '');
 });
 
-test('push check: with no git on PATH the check still finds git and refuses; when git cannot run, both hooks let the push run and show a note', (t) => {
+test('push check: with no git on PATH the check still finds git and refuses; when git cannot run, the Claude Code hook lets the push run and shows a note', (t) => {
   const { repos } = pushFixtures();
   // No git on PATH: node is started by its full path, and git is found in its install location.
   const key = Object.keys(process.env).find((name) => name.toUpperCase() === 'PATH') || 'PATH';
