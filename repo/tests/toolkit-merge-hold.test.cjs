@@ -270,6 +270,28 @@ test('a REST merge path after a quoted value with a newline, ; & or | is still h
   }
 });
 
+// Codex names the folder a command runs in as workdir; the session folder (cwd) can be elsewhere.
+test('matrix: Codex shell shapes are judged in the folder the command runs in, for merges and default-branch pushes', (t) => {
+  const ctx = context(t);
+  const rows = [
+    ['R4 Bash cmd and workdir', (command, workdir) => ({ cwd: ctx.root, tool_name: 'Bash', tool_input: { cmd: command, workdir } })],
+    ['R5 exec_command', (command, workdir) => ({ cwd: ctx.root, tool_name: 'exec_command', tool_input: { cmd: command, workdir } })],
+    ['R6 shell, bash -lc', (command, workdir) => ({ cwd: ctx.root, tool_name: 'shell', tool_input: { command: ['bash', '-lc', command], workdir } })],
+    ['R8 relative workdir', (command, workdir) => ({ cwd: ctx.root, tool_name: 'local_shell', tool_input: { cmd: command, workdir: path.relative(ctx.root, workdir) } })],
+    ['R8 session folder in another repository', (command, workdir) => ({ cwd: ctx.other, tool_name: 'exec_command', tool_input: { cmd: command, workdir } })],
+    ['R9 command and cmd both given', (command, workdir) => ({ cwd: ctx.root, tool_name: 'Bash', tool_input: { command: 'git status', cmd: command, workdir } })],
+  ];
+  for (const [row, shape] of rows) {
+    assert.match(decide(ctx, shape(`gh pr merge 618 --match-head-commit ${SHA}`, ctx.repo))?.deny || '', /has not approved a merge of owner\/a#618/, `${row}: C6`);
+    assert.match(decide(ctx, shape('git push origin main', ctx.repo))?.deny || '', /default branch `main`/, `${row}: C8`);
+    assert.equal(decide(ctx, shape('git status', ctx.repo)), null, `${row}: allowed control`);
+  }
+  // An argument list without a shell.
+  assert.match(decide(ctx, { cwd: ctx.root, tool_name: 'shell', tool_input: { command: ['git', 'push', 'origin', 'main'], workdir: ctx.repo } })?.deny || '', /default branch `main`/, 'R7');
+  // The broken-module screen reads the whole raw input, whatever field the command is in.
+  assert.equal(hold.mayMerge({ tool_name: 'exec_command', tool_input: { script: 'git push origin main' } }), true);
+});
+
 test('one approval allows one merge of that pull request in that repository, naming a head commit', (t) => {
   const ctx = context(t);
   typed(ctx, 'merge 618');

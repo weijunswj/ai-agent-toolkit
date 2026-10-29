@@ -696,15 +696,27 @@ test('push check: the Claude Code hook (Bash and PowerShell) and the Codex helpe
   assert.equal(clean.stdout + clean.stderr, '');
 });
 
-test('push check: when it cannot check, the Claude Code hook lets the push run and shows the user a note', () => {
+test('push check: with no git on PATH the check still finds git and refuses; when git cannot run, both hooks let the push run and show a note', (t) => {
   const { repos } = pushFixtures();
-  // No git on PATH: node is started by its full path.
+  // No git on PATH: node is started by its full path, and git is found in its install location.
   const key = Object.keys(process.env).find((name) => name.toUpperCase() === 'PATH') || 'PATH';
-  const env = { ...process.env, [key]: path.join(os.tmpdir(), 'no-such-folder') };
+  const noPath = { ...process.env, [key]: path.join(os.tmpdir(), 'no-such-folder') };
+  delete noPath.TOOLKIT_GIT_PATH;
+  const found = runHook(claudeHook, 'Bash', repos['settings-secret'], 'git push', noPath);
+  assert.equal(found.status, 2, found.stderr);
+  assert.match(JSON.parse(found.stdout).hookSpecificOutput.permissionDecisionReason, /found 1 item\(s\) to fix first/);
+  // A configured git that is not a program: the check cannot run.
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-push-check-git-'));
+  t.after(() => fs.rmSync(scratch, { recursive: true, force: true }));
+  const notAProgram = path.join(scratch, 'not-git.txt');
+  fs.writeFileSync(notAProgram, 'not a program\n');
+  const env = { ...noPath, TOOLKIT_GIT_PATH: notAProgram };
+  // The Codex hook's own run of this case is in toolkit-codex-helper-hook.test.cjs: this fixture is
+  // not on github.com, so the governance check holds it there first.
   const result = runHook(claudeHook, 'Bash', repos['settings-secret'], 'git push', env);
-  assert.equal(result.status, 0);
-  assert.equal(JSON.parse(result.stdout).systemMessage, 'Toolkit could not check this push for credentials and plain-text findings, so it was let through: git could not run (ENOENT).');
-  assert.match(result.stderr, /could not run \(ENOENT\)/);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(JSON.parse(result.stdout).systemMessage, /^Toolkit could not check this push for credentials and plain-text findings, so it was let through: git could not run \(\w+\)\.$/);
+  assert.match(result.stderr, /git could not run \(\w+\)/);
 });
 
 test('push check: a URL remote, --all, the baseline, the plain-text scope and a path that became a folder', () => {
@@ -777,4 +789,88 @@ test('push check: the Claude Code hook keeps a note when it also refuses, and bi
   assert.match(reason, /could not check this push for plain-text findings/);
   const big = pushCheck.checkOutgoing({ folder: os.tmpdir() }, { spawn: () => ({ error: Object.assign(new Error('x'), { code: 'ENOBUFS' }), status: null, signal: 'SIGTERM' }) });
   assert.match(big.note, /git wrote more than 64 MB, more than the check reads/);
+});
+
+test('push check: git is run by absolute path, never from the pushed folder, PATH order kept', () => {
+  const windowsFiles = new Set(['C:\\Tools\\git.exe', 'C:\\repo\\git.exe', 'C:\\Program Files\\Git\\cmd\\git.exe', 'C:\\Users\\u\\AppData\\Local\\Programs\\Git\\cmd\\git.exe', 'D:\\custom\\git.exe']);
+  const windows = (environment, folder = 'C:\\repo') => pushCheck.resolveGit(folder, { environment, platform: 'win32', exists: (file) => windowsFiles.has(file) });
+  assert.equal(windows({ Path: 'C:\\repo;C:\\Tools' }), 'C:\\Tools\\git.exe', 'the pushed folder on PATH is skipped');
+  assert.equal(windows({ PATH: '.;relative\\bin;;C:\\Tools' }), 'C:\\Tools\\git.exe', 'empty and relative entries are skipped');
+  assert.equal(windows({ PATH: '"C:\\Tools"' }), 'C:\\Tools\\git.exe', 'a quoted entry');
+  assert.equal(windows({ PATH: '', ProgramFiles: 'C:\\Program Files' }), 'C:\\Program Files\\Git\\cmd\\git.exe', 'the usual install location');
+  assert.equal(windows({ PATH: '', LOCALAPPDATA: 'C:\\Users\\u\\AppData\\Local' }), 'C:\\Users\\u\\AppData\\Local\\Programs\\Git\\cmd\\git.exe', 'a per-user install');
+  assert.equal(windows({ toolkit_git_path: 'D:\\custom\\git.exe', PATH: 'C:\\Tools' }), 'D:\\custom\\git.exe', 'TOOLKIT_GIT_PATH first, any case on Windows');
+  assert.equal(windows({ TOOLKIT_GIT_PATH: 'custom\\git.exe', PATH: 'C:\\Tools' }), 'C:\\Tools\\git.exe', 'a relative TOOLKIT_GIT_PATH is ignored');
+  assert.equal(windows({ PATH: 'C:\\repo' }), '', 'only the pushed folder holds a git');
+  const posix = (environment) => pushCheck.resolveGit('/work/repo', { environment, platform: 'linux', exists: (file) => ['/opt/git/bin/git', '/usr/bin/git', '/work/repo/git'].includes(file) });
+  assert.equal(posix({ PATH: '/work/repo:/opt/git/bin' }), '/opt/git/bin/git');
+  assert.equal(posix({ PATH: '' }), '/usr/bin/git');
+  // Every git call of one check spawns the resolved program.
+  const programs = [];
+  pushCheck.checkOutgoing({ folder: os.tmpdir() }, { git: () => '/fixed/git', spawn: (program) => { programs.push(program); return { status: 128, stdout: '', stderr: '' }; } });
+  assert.deepEqual(programs, ['/fixed/git']);
+  assert.deepEqual(pushCheck.checkOutgoing({ folder: os.tmpdir() }, { git: () => '' }), { note: 'Toolkit could not check this push for credentials and plain-text findings, so it was let through: git was not found.' });
+});
+
+// The closure matrix for every shell-call shape the two hosts send (R1 to R9) against the checks
+// that judge commits, pushes and pull requests (C1 to C5). Codex rows name the folder the command
+// runs in as workdir, with the session folder elsewhere, so a check that judged the session folder
+// would let them through. Each row runs through attributionDecision and through its host's hook as a
+// process.
+test('matrix: every host shape gets the attribution, bypass, force-push and push checks in the folder the command runs in', (t) => {
+  const support = require('./toolkit-governed-fixture-support.cjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-shell-matrix-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const governed = support.makeGoverned(path.join(dir, 'governed'), 'shell-matrix');
+  const session = path.join(dir, 'session');
+  fs.mkdirSync(session);
+  const hooks = path.join(dir, 'no-hooks');
+  fs.mkdirSync(hooks);
+  writeFiles(governed, { 'body.md': 'Summary\n\nGenerated with [Claude Code](https://claude.com/claude-code)\n', 'uat-config.txt': `token = "${fakeToken()}"\n` });
+  fixtureGit(governed, ['checkout', '--quiet', '-b', 'feature'], hooks);
+  fixtureGit(governed, ['add', '-A'], hooks);
+  fixtureGit(governed, ['commit', '--quiet', '-m', 'fixture'], hooks);
+  const checks = [
+    ['C1 attribution in git commit -m', `git commit -m x -m "${trailer}"`, (reason) => reason === MESSAGE],
+    ['C2 attribution in a body file read from the run folder', 'gh pr create --body-file body.md', (reason) => reason === MESSAGE],
+    ['C3 bypass in a governed repository', 'git commit --no-verify -m x', (reason) => reason === BYPASS_MESSAGE],
+    ['C4 force push in a governed repository', 'git push --force origin feature', (reason) => reason === FORCE_MESSAGE],
+    ['C4 force push to an evidence store', 'git push https://github.com/owner/TRANSPORT-evidence.git +feature', (reason) => reason === FORCE_MESSAGE],
+    ['C5 push of a committed credential', 'git push origin feature', (reason) => /uat-config\.txt:1 /.test(reason)],
+  ];
+  const rows = [
+    ['R1 Claude Bash', claudeHook, (command) => ({ tool_name: 'Bash', cwd: governed, tool_input: { command } })],
+    ['R2 Claude PowerShell', claudeHook, (command) => ({ tool_name: 'PowerShell', cwd: governed, tool_input: { command } })],
+    ['R3 Codex Bash command', codexHook, (command) => ({ tool_name: 'Bash', cwd: governed, tool_input: { command, workdir: governed } })],
+    ['R4 Codex Bash cmd and workdir', codexHook, (command) => ({ tool_name: 'Bash', cwd: session, tool_input: { cmd: command, workdir: governed } })],
+    ['R5 Codex exec_command', codexHook, (command) => ({ tool_name: 'exec_command', cwd: session, tool_input: { cmd: command, workdir: governed } })],
+    ['R6 Codex shell, bash -lc', codexHook, (command) => ({ tool_name: 'shell', cwd: session, tool_input: { command: ['bash', '-lc', command], workdir: governed } })],
+    ['R6 Codex local_shell, pwsh -Command', codexHook, (command) => ({ tool_name: 'local_shell', cwd: session, tool_input: { command: ['pwsh', '-NoProfile', '-Command', command], workdir: governed } })],
+    ['R8 Codex relative workdir', codexHook, (command) => ({ tool_name: 'exec_command', cwd: dir, tool_input: { cmd: command, workdir: 'governed' } })],
+    ['R9 Codex command and cmd both given', codexHook, (command) => ({ tool_name: 'Bash', cwd: session, tool_input: { command: 'git status', cmd: command, workdir: governed } })],
+  ];
+  const env = { ...process.env };
+  delete env.TOOLKIT_GIT_PATH;
+  for (const [row, hookPath, shape] of rows) {
+    for (const [check, command, expected] of checks) {
+      const input = shape(command);
+      const direct = attributionDecision(input, quiet()).hookSpecificOutput?.permissionDecisionReason || '';
+      assert.ok(expected(direct), `${row} x ${check}: attributionDecision gave ${JSON.stringify(direct)}`);
+      const hook = spawnSync(process.execPath, [hookPath], { input: JSON.stringify(input), encoding: 'utf8', env, timeout: 60000 });
+      assert.equal(hook.status, 2, `${row} x ${check}: ${hook.stderr}`);
+      const reason = JSON.parse(hook.stdout.trim().split('\n').pop()).hookSpecificOutput.permissionDecisionReason;
+      assert.ok(expected(reason), `${row} x ${check}: the hook gave ${JSON.stringify(reason)}`);
+    }
+  }
+  // R7: an argument list without a shell, the shape of the force push the owner's probe sent.
+  const argv = { tool_name: 'shell', cwd: session, tool_input: { command: ['git', 'push', '--force', 'origin', 'feature'], workdir: governed } };
+  assert.equal(attributionDecision(argv, quiet()).hookSpecificOutput?.permissionDecisionReason, FORCE_MESSAGE, 'R7');
+  // Allowed controls in the same rows: an ordinary commit that mentions Claude, and git status.
+  for (const [row, , shape] of rows) {
+    for (const command of ['git commit -m "Document how Claude Code reads AGENTS.md"', 'git status']) {
+      assert.deepEqual(attributionDecision(shape(command), quiet()), {}, `${row}: ${command}`);
+    }
+  }
+  // The run folder decides, not the session folder: a force push run outside the governed repository passes.
+  assert.deepEqual(attributionDecision({ tool_name: 'exec_command', cwd: governed, tool_input: { cmd: 'git push --force origin feature', workdir: session } }, quiet()), {}, 'R8');
 });

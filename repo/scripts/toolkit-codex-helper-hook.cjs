@@ -46,7 +46,8 @@ function promptEvent(input) {
 // Native hook names: `spawn_agent` (V1 `multi_agent` and the default namespace), the `Agent`
 // alias, and the flattened V2 `multi_agent_v2` name `<namespace>spawn_agent` for any host-valid
 // namespace, hyphenated ones included (`collaborationspawn_agent`, `multi-agentspawn_agent`).
-async function decide(input, environment = process.env) {
+// `notes` collects what a shell check could not check, for the caller to show the user.
+async function decide(input, environment = process.env, { notes } = {}) {
   let governanceDenial;
   // Codex gives no shell in its payload and may run either shell, so commands keep both readings.
   try { governanceDenial = new (gate().ToolGate)({ host: 'codex' }).decide(input || {}); } catch {
@@ -56,8 +57,9 @@ async function decide(input, environment = process.env) {
   // Merges: the merge hold, a tripwire that waits for the user's own "merge N" (toolkit-merge-hold.cjs), in every folder.
   const mergeDenial = mergeDecision(input);
   if (mergeDenial) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: mergeDenial.deny } };
-  // Shell commands: refuse AI attribution in commits and pull requests, in every folder.
-  if (input?.tool_name === 'Bash') return require('./toolkit-attribution-guard.cjs').attributionDecision(input);
+  // Shell commands, under any of the shell tool names Codex may report: refuse AI attribution in
+  // commits and pull requests, skipped checks, force pushes and pushes that carry a credential.
+  if (require('./toolkit-shell-call.cjs').ShellCall.isShellTool(input?.tool_name)) return require('./toolkit-attribution-guard.cjs').attributionDecision(input, { notes });
   const state = governance(input, environment);
   if (!state.governed) return {};
   const { CodexDialect, commandDecision } = adapter();
@@ -127,10 +129,17 @@ async function main() {
     if (output.context) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: output.context } }) + '\n');
     return;
   }
-  const output = await decide(input);
-  if (output?.hookSpecificOutput?.permissionDecision === 'deny') return deny(output.hookSpecificOutput.permissionDecisionReason);
+  const notes = [];
+  const output = await decide(input, process.env, { notes });
+  // Notes from a check that could not run go with the refusal, so they are not lost.
+  if (output?.hookSpecificOutput?.permissionDecision === 'deny') return deny([output.hookSpecificOutput.permissionDecisionReason, ...notes].join('\n'));
   // Codex accepts no bare permissionDecision:allow (it records an unsupported-output
-  // hook failure and continues). An admitted request is exit 0 with empty output.
+  // hook failure and continues). An admitted request is exit 0 with empty output, or with only a
+  // systemMessage, which Codex shows the user as a warning, when a check could not run.
+  if (notes.length) {
+    process.stdout.write(JSON.stringify({ systemMessage: notes.join('\n') }) + '\n');
+    process.stderr.write(`${notes.join('\n')}\n`);
+  }
 }
 if (require.main === module) main().catch(() => deny(HELD));
 module.exports = { main, decide, decidePrompt, governed, promptEvent, NEVER_OWNER, PROMPT_FAILED };

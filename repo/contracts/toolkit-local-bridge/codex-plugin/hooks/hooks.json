@@ -23,11 +23,12 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "^(?:Agent|[A-Za-z0-9_-]*spawn_agent|Bash)$",
+        "matcher": "^(?:Agent|[A-Za-z0-9_-]*spawn_agent|Bash|exec_command|shell|local_shell|PowerShell)$",
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${PLUGIN_ROOT}/repo/scripts/toolkit-codex-helper-hook.cjs\""
+            "command": "node \"${PLUGIN_ROOT}/repo/scripts/toolkit-codex-helper-hook.cjs\"",
+            "timeout": 60
           }
         ]
       },
@@ -43,7 +44,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "^(?:Bash|mcp__.*[Gg][Ii][Tt][Hh][Uu][Bb].*)$",
+        "matcher": "^(?:Bash|exec_command|shell|local_shell|PowerShell|mcp__.*[Gg][Ii][Tt][Hh][Uu][Bb].*)$",
         "hooks": [
           {
             "type": "command",

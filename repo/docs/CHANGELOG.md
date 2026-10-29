@@ -1,5 +1,16 @@
 # Toolkit Changelog
 
+## 3.18.4 (Codex shell calls get every commit and push check)
+
+**Codex asks you to trust the Toolkit hooks again after this update**, because their matchers changed. Trust them in Codex's hooks review, or the checks do not run.
+
+- **One shell-call reader:** the attribution, bypass, force-push and push checks, the merge hold and the governance gate now read a shell call through one module, `repo/scripts/toolkit-shell-call.cjs`. It reads Codex's `cmd` and argument lists as well as `command`, and judges the folder the command runs in (Codex's `workdir`, else the tool's `cwd`, else the session folder). Before, the attribution, force-push and push checks read only a string `command` and the session folder, so a Codex call shaped another way, or run in another folder, skipped them.
+- **Codex shell names:** the Codex hook checks every shell tool name Codex may report (`Bash`, `exec_command`, `shell`, `local_shell`, `PowerShell`), and both Codex hook files register them for the helper hook and the after-tool programme refresh. Codex documents its shell calls as `Bash`, so this changes nothing when it does.
+- **Unreadable shell calls:** a shell call whose command or folder has a shape no host sends is refused when its raw input could commit, push, or create, edit or merge a pull request. Other such calls run.
+- **Warnings Codex shows:** when the push check cannot run, the Codex hook now prints the note as a `systemMessage`, which Codex shows as a warning, and adds it to a refusal, as the Claude Code hook already did.
+- **Git by full path:** the push check runs git by its absolute path (`TOOLKIT_GIT_PATH`, else PATH, else the usual install locations), so a hook started with no git on PATH still checks, and a git program inside the pushed repository never runs. When none is found, the note says so.
+- **Hook time limits:** the Claude Code attribution hook and the Codex helper hook now have an explicit 60-second limit, above the push check's own 30 seconds.
+
 ## 3.18.3 (security alert cleanup and Dependabot action updates)
 
 - **CI drift guard:** a Dependabot update to a pinned action in `validate.yml` now passes when only the commit SHA and `# vX.Y.Z` version comment change and the action name stays the same. A different action, a tag or short ref, a missing version comment or any other edit to the file is still refused. The guard's tests find the pins in the live file and rerun every drift case with each pinned action updated, so the whole test run passes on such an update too. The portable sharding playbook says the same.

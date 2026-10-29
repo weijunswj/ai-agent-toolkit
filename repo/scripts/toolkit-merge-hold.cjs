@@ -64,7 +64,7 @@ const MAX_APPROVALS = 100;
 const MAX_PROMPT_CHARS = 8000;
 const MAX_COMMAND_CHARS = 1024 * 1024;
 
-const SHELL_TOOLS = /^(?:Bash|PowerShell|Monitor|exec_command|shell|local_shell)$/;
+const { SHELL_TOOLS, ShellCall } = require('./toolkit-shell-call.cjs');
 const CONNECTOR_MERGE = /^mcp__.*github.*?_(merge_pull_request|enable_pr_auto_merge)$/i;
 const SLUG = '[A-Za-z0-9._-]+\\/[A-Za-z0-9._-]+';
 const MAX_APPROVAL_LINE = 200;
@@ -452,14 +452,14 @@ function decide(input, { registryOptions = {}, now, environment = process.env } 
   const tool = String(input && (input.tool_name || input.toolName) || '');
   let merges;
   if (CONNECTOR_MERGE.test(tool)) merges = [connectorMerge(tool, input)];
-  else if (SHELL_TOOLS.test(tool)) {
-    const args = input && (input.tool_input || input.toolInput) || {};
-    // A line continuation (\, a PowerShell backtick or a cmd caret before a line break) joins the
-    // next line. Codex may send the command as cmd, or as a list of words.
-    const command = args.command ?? args.cmd ?? '';
-    const text = (Array.isArray(command) ? command.join(' ') : String(command)).replace(/[\\`^]\r?\n/g, ' ');
+  else if (ShellCall.isShellTool(tool)) {
+    // The shared reader: command, cmd or a list of words, and the folder the command runs in
+    // (Codex's workdir before the session folder). A line continuation (\, a PowerShell backtick or
+    // a cmd caret before a line break) joins the next line.
+    const call = ShellCall.from(input);
+    const text = call.text.replace(/[\\`^]\r?\n/g, ' ');
     if (text.length > MAX_COMMAND_CHARS) return /merge|push/i.test(text) ? refuse('this command is too long to check for a merge or push, so it is refused. Split it.') : null;
-    const cwd = input && input.cwd ? path.resolve(String(input.cwd)) : process.cwd();
+    const cwd = call.folder;
     const refusal = shellRefusal(text, cwd);
     if (refusal) return refusal;
     merges = shellMerges(text, cwd, environment || {});
@@ -484,8 +484,10 @@ function mayMerge(input) {
   const tool = String(input && (input.tool_name || input.toolName) || '');
   if (CONNECTOR_MERGE.test(tool)) return true;
   if (!SHELL_TOOLS.test(tool)) return false;
+  // The whole raw input: this runs when the merge check failed, possibly while reading it.
   const args = input.tool_input || input.toolInput || {};
-  const text = JSON.stringify(args.command ?? args.cmd ?? '');
+  let text;
+  try { text = JSON.stringify(args); } catch { text = String(args); }
   return /\bgh\b[\s\S]*\b(?:merge|sync|alias|api)\b/i.test(text) || /\bgit\b[\s\S]*\bpush\b/i.test(text) || STATE_WORDS.test(text) || HOOK_FEED.test(text) || /\b(?:claude|codex)\b/i.test(text);
 }
 

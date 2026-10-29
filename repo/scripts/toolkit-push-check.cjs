@@ -16,8 +16,8 @@
 // base branch (--base, else origin's default branch, else origin/main or origin/master). A folder that
 // is not a repository is not checked.
 //
-// It fails open: when git cannot run, the check takes longer than 30 seconds for one push, or a
-// setting cannot be read, the command runs and one note is returned for the user. A broken check must
+// It fails open: when git is not found or cannot run, the check takes longer than 30 seconds for one
+// shell command, or a setting cannot be read, the command runs and one note is returned for the user. A broken check must
 // never stop every push; it moves feedback earlier and does not replace CI or GitHub push protection.
 
 const fs = require('node:fs');
@@ -31,6 +31,44 @@ const NOTE = 'Toolkit could not check this push for credentials and plain-text f
 const REV_OPTIONS = new Set(['--branches', '--tags']);
 
 class CheckSkipped extends Error {}
+
+function isFile(file) {
+  try { return fs.statSync(file).isFile(); } catch { return false; }
+}
+
+// An environment value by name, ignoring case on Windows as Windows does.
+function environmentValue(environment, name, windows) {
+  if (!windows) return environment[name];
+  const key = Object.keys(environment).find((candidate) => candidate.toLowerCase() === name.toLowerCase());
+  return key === undefined ? undefined : environment[key];
+}
+
+// The git program by absolute path, or '' when there is none. A bare `git` would make the operating
+// system search for it, and on Windows that search also looks in the folder the check runs git in, so
+// a git.exe inside the repository being pushed could run. In order: TOOLKIT_GIT_PATH (absolute, a
+// file), each absolute PATH entry other than that folder, then the usual install locations.
+function resolveGit(folder, { environment = process.env, platform = process.platform, exists = isFile } = {}) {
+  const windows = platform === 'win32';
+  const paths = windows ? path.win32 : path.posix;
+  const name = windows ? 'git.exe' : 'git';
+  const same = (left, right) => (windows ? left.toLowerCase() === right.toLowerCase() : left === right);
+  const own = folder ? paths.resolve(folder) : '';
+  const candidates = [];
+  const configured = environmentValue(environment, 'TOOLKIT_GIT_PATH', windows);
+  if (configured && paths.isAbsolute(configured)) candidates.push(configured);
+  for (const entry of String(environmentValue(environment, 'PATH', windows) || '').split(windows ? ';' : ':')) {
+    const directory = entry.trim().replace(/^"(.*)"$/, '$1');
+    if (directory && paths.isAbsolute(directory) && !same(paths.resolve(directory), own)) candidates.push(paths.join(directory, name));
+  }
+  if (windows) {
+    for (const root of [environmentValue(environment, 'ProgramFiles', true), environmentValue(environment, 'ProgramW6432', true)]) {
+      if (root && paths.isAbsolute(root)) candidates.push(paths.join(root, 'Git', 'cmd', name), paths.join(root, 'Git', 'bin', name));
+    }
+    const local = environmentValue(environment, 'LOCALAPPDATA', true);
+    if (local && paths.isAbsolute(local)) candidates.push(paths.join(local, 'Programs', 'Git', 'cmd', name));
+  } else candidates.push('/usr/bin/git', '/usr/local/bin/git');
+  return candidates.find((candidate) => exists(candidate)) || '';
+}
 
 function runGit(folder, args, deadline, spawn, { input, encoding = 'utf8' } = {}) {
   const left = deadline - Date.now();
@@ -169,18 +207,25 @@ function why(error) {
 //   { folder, remote?, sources?: [rev...] }               for a push, or
 //   { folder, pullRequest: true, base?, sources?: [rev] } for a pull request.
 // A missing or empty `sources` means HEAD.
+// `deadline` (a Date.now() time) shares one budget across every target of one shell call; without
+// it the budget starts now. `git` finds the git program (tests replace it).
 function checkOutgoing(target, {
-  spawn = spawnSync,
+  spawn: spawnProgram = spawnSync,
   patterns = () => require('../../skills/secure-ci-cd/scripts/secret-patterns.cjs'),
   portable = () => require('../../skills/secure-ci-cd/scripts/plain-text-check.cjs'),
-  budgetMs = BUDGET_MS
+  budgetMs = BUDGET_MS,
+  deadline = Date.now() + budgetMs,
+  git = resolveGit
 } = {}) {
-  const deadline = Date.now() + budgetMs;
   const sources = target.sources?.length ? target.sources : ['HEAD'];
   // A source git would read as an option is never passed on.
   if (sources.some((source) => source.startsWith('-') && !REV_OPTIONS.has(source))) return {};
   const allRefs = sources.some((source) => REV_OPTIONS.has(source));
   try {
+    const program = git(target.folder);
+    if (!program) throw new CheckSkipped('git was not found');
+    // Every git call below runs this absolute path, never a name the system looks up.
+    const spawn = (_name, args, options) => spawnProgram(program, args, options);
     // One call for the repository folder and the pushed commits.
     const revs = sources.map((source) => (REV_OPTIONS.has(source) ? source : `${source}^{commit}`));
     const probe = runGit(target.folder, ['rev-parse', '--show-toplevel', ...revs], deadline, spawn);
@@ -220,4 +265,4 @@ function checkOutgoing(target, {
   }
 }
 
-module.exports = Object.freeze({ BUDGET_MS, MAX_LISTED, addedLines, checkOutgoing, diffPath });
+module.exports = Object.freeze({ BUDGET_MS, MAX_LISTED, addedLines, checkOutgoing, diffPath, resolveGit });

@@ -20,6 +20,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { ShellCall } = require('./toolkit-shell-call.cjs');
 
 const MESSAGE = 'Remove the AI attribution lines (Co-Authored-By or Claude-Session trailers, claude.ai session links, "Generated with" footers) and retry.';
 const ATTRIBUTION_PATTERNS = Object.freeze([
@@ -514,12 +515,14 @@ function outgoingRefusal(command, cwd, { notes, budgetMs, check = (target) => re
   return '';
 }
 
-// A PreToolUse decision for a shell tool call, in the shape Claude Code and Codex both read.
+// A PreToolUse decision for a shell tool call, in the shape Claude Code and Codex both read. The
+// hooks call it for shell calls only, so the call is read as one whatever its tool name. Every check
+// reads the same text and judges the folder the command runs in (toolkit-shell-call.cjs).
 // `options` is for the push check: `notes` collects its fail-open notes, and tests set its budget.
 function attributionDecision(input, options = {}) {
-  const command = input?.tool_input?.command;
-  if (typeof command !== 'string') return {};
-  const reason = attributionRefusal(command, input?.cwd) || bypassRefusal(command, input?.cwd) || outgoingRefusal(command, input?.cwd, options);
+  const call = ShellCall.from(input, { shell: true });
+  const command = call.text;
+  const reason = call.refusal() || (command && (attributionRefusal(command, call.folder) || bypassRefusal(command, call.folder) || outgoingRefusal(command, call.folder, options)));
   return reason ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } } : {};
 }
 

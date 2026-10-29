@@ -171,7 +171,7 @@ const USER_STATE_PATH = /[\\/]\.ai-agent-toolkit[\\/]user-state(?:[\\/]|$)/i;
 const ALWAYS_TOOLS = /^ToolSearch$/;
 const PICKER_TOOL = 'AskUserQuestion';
 const EDIT_TOOLS = /^(?:Edit|Write|MultiEdit|NotebookEdit|apply_patch)$/;
-const SHELL_TOOLS = /^(?:Bash|PowerShell|Monitor|exec_command|shell|local_shell)$/;
+const { SHELL_TOOLS, ShellCall } = require('./toolkit-shell-call.cjs');
 // Tools that schedule a prompt for the session itself.
 const SCHEDULE_TOOLS = /^(?:CronCreate|ScheduleWakeup|RemoteTrigger)$/;
 
@@ -1528,10 +1528,15 @@ class PromptHold {
 
 // ---- tool gate --------------------------------------------------------------------------------
 
+// A shell call's text as every check reads it (toolkit-shell-call.cjs), with an apply_patch-style
+// input or patch a host may send alongside it. An argument list is read both ways: quoted word for
+// word, and its words joined unquoted, so a word that holds shell syntax is still screened as syntax.
 function toolText(input) {
   const args = input && input.tool_input && typeof input.tool_input === 'object' ? input.tool_input : {};
-  return [args.command, args.cmd, args.input, args.patch, Array.isArray(args.command) ? args.command.join(' ') : null]
-    .filter(value => typeof value === 'string').join('\n');
+  const call = ShellCall.from(input);
+  // Read twice only when the two readings differ: a repeated command reads as two commands.
+  const joined = call.joinedWords !== call.text ? call.joinedWords : '';
+  return [call.text, joined, args.input, args.patch].filter(value => typeof value === 'string' && value).join('\n');
 }
 
 function editTargets(input) {
@@ -1626,7 +1631,9 @@ class ToolGate {
       // ticket, runs wherever the session is; the script checks the ticket again as it records.
       if (tool !== 'Monitor' && ticketCommand(text, sessionId, this.#tickets)) return null;
       if (answerCommand(text)) {
-        const notGitHub = [cwd, ...commandTargets(text, cwd)].some(target => this.#verdict(target, sessionId)?.reason === 'not-github');
+        // The session folder, the folder the command runs in and the folders it moves into.
+        const call = ShellCall.from(input);
+        const notGitHub = [cwd, ...call.folders, ...commandTargets(text, call.folder)].some(target => this.#verdict(target, sessionId)?.reason === 'not-github');
         return { deny: notGitHub
           ? `Toolkit: only the user can say ok to GitHub governance being off in a repository that is not on github.com. Ask them in chat to reply ok; Toolkit records their own reply. ${NEVER_OWNER}`
           : `Toolkit: only the user answers the governance question. Ask them in chat instead: "${ASK}" Toolkit records their own reply. ${NEVER_OWNER}` };
@@ -1658,11 +1665,10 @@ class ToolGate {
   #reachesHeld(tool, input, sessionId) {
     if (SHELL_TOOLS.test(tool)) {
       const text = toolText(input);
-      const cwd = path.resolve(String(input.cwd || process.cwd()));
-      const args = input.tool_input || {};
-      const workdirs = [args.workdir, args.cwd].filter(value => typeof value === 'string' && value);
-      const resolvedWorkdirs = workdirs.map(value => path.resolve(cwd, value));
-      const targets = [...new Set([...resolvedWorkdirs, ...commandTargets(text, resolvedWorkdirs[0] || cwd), ...absoluteTargets(text)])];
+      // The folders the call names (Codex's workdir, the tool's cwd) are reached targets; the session
+      // folder itself was judged above.
+      const call = ShellCall.from(input);
+      const targets = [...new Set([...call.folders, ...commandTargets(text, call.folder), ...absoluteTargets(text)])];
       const reached = targets.map(target => this.#verdict(target, sessionId)).filter(verdict => verdict?.hold);
       if (reached.length > 0) {
         const asked = this.#askReach(input, sessionId, reached);

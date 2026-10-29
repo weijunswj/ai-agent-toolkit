@@ -52,7 +52,8 @@ test('inside the V3-governed Toolkit checkout a helper request without installed
     assert.equal(r.output.hookSpecificOutput.permissionDecision, 'deny');
     assert.match(r.stderr, /no toolkit-g1-helper agent file is installed/);
   }
-  assert.deepEqual(run({ tool_name: 'shell', cwd: ROOT }).output, {}, 'other tools are untouched');
+  assert.deepEqual(run({ tool_name: 'view_image', cwd: ROOT }).output, {}, 'other tools are untouched');
+  assert.deepEqual(run({ tool_name: 'shell', cwd: ROOT }).output, {}, 'a shell call with no command has nothing to refuse');
 });
 
 // F1: Codex validates features.multi_agent_v2.tool_namespace as [A-Za-z0-9_-]+ and names the
@@ -69,9 +70,24 @@ test('F1: an unbound spawn under any host-valid Codex namespace, hyphenated ones
     assert.equal(r.output.hookSpecificOutput.permissionDecision, 'deny', tool);
     assert.match(r.stderr, /allows only the toolkit-g0-helper and toolkit-g1-helper agents/, tool);
   }
-  // Both registrations carry the one helper-hook matcher: every spawn name the recogniser holds, plus Bash.
+  // Both registrations carry the one helper-hook matcher: every spawn name the recogniser holds, plus
+  // every shell tool name Codex may report.
   for (const hooks of [plugin, contract]) assert.equal(hooks.hooks.PreToolUse[0].matcher, CODEX_HELPER_HOOK_MATCHER);
-  for (const name of ['spawn_agent', 'Agent', 'collaborationspawn_agent', 'multi-agentspawn_agent', 'Bash']) assert.equal(new CodexHookMatcher(CODEX_HELPER_HOOK_MATCHER).matches(name), true, name);
+  for (const name of ['spawn_agent', 'Agent', 'collaborationspawn_agent', 'multi-agentspawn_agent', 'Bash', 'exec_command', 'shell', 'local_shell', 'PowerShell']) assert.equal(new CodexHookMatcher(CODEX_HELPER_HOOK_MATCHER).matches(name), true, name);
+  assert.equal(new CodexHookMatcher(CODEX_HELPER_HOOK_MATCHER).matches('write_stdin'), false, 'write_stdin does not run PreToolUse again');
+});
+
+test('a push the check cannot read runs with a warning Codex shows, under every Codex shell tool name', t => {
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-codex-hook-git-'));
+  t.after(() => fs.rmSync(scratch, { recursive: true, force: true }));
+  const notAProgram = path.join(scratch, 'not-git.txt');
+  fs.writeFileSync(notAProgram, 'not a program\n');
+  // Codex's shell and exec tools, each with the folder in workdir: every one reaches the push check.
+  for (const tool of ['Bash', 'exec_command', 'shell', 'local_shell']) {
+    const r = run({ tool_name: tool, hook_event_name: 'PreToolUse', cwd: os.tmpdir(), tool_input: { cmd: 'git push origin HEAD:refs/heads/toolkit-test-unused', workdir: ROOT } }, { TOOLKIT_GIT_PATH: notAProgram });
+    assert.equal(r.status, 0, `${tool}: ${r.stderr}`);
+    assert.match(r.output.systemMessage, /^Toolkit could not check this push for credentials and plain-text findings, so it was let through: git could not run \(\w+\)\.$/, tool);
+  }
 });
 
 test('a drifted pinned binding is blocked wherever it is supplied', () => {
