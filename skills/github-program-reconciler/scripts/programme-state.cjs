@@ -2215,11 +2215,18 @@ const EFFECT_TEXT = {
   attach: effect => `Attach #${effect.target.issue} under #${effect.target.parent}`,
   reparent: effect => `Move #${effect.target.issue} from under ${typeof effect.from === 'number' ? `#${effect.from}` : effect.from} to under #${effect.target.parent}`,
   reorder: effect => `Move #${effect.target.issue} ${effect.target.before !== undefined ? `before #${effect.target.before}` : `after #${effect.target.after}`} under #${effect.target.parent}`,
-  replace_block: effect => (effect.state === false ? `Update the comment trace in #${effect.target.issue}'s body` : `${effect.insert ? 'Add' : effect.move ? 'Move' : 'Update'} the state block in #${effect.target.issue}'s body`),
+  replace_block: effect => (effect.state === false ? `Update the ${staleParts(effect)} in #${effect.target.issue}'s body` : `${effect.insert ? 'Add' : effect.move ? 'Move' : 'Update'} the state block in #${effect.target.issue}'s body`),
   replace_pr_nav: effect => `Add the parent and task links at the top of PR #${effect.target.pr}`,
   update_attention: effect => `Update the attention findings on #${effect.target.issue} (${effect.line} after this pass)`,
   post_index_comment: effect => `Move #${effect.target.issue}'s "${effect.label || effect.target.tag || OTHER_COMMENTS}" comment trace (${effect.lines.length} link(s)) into a new index comment`,
 };
+
+// The parts of a body a block effect rewrites when its state block is already current.
+function staleParts(effect) {
+  const names = [['trace', 'comment trace'], ['nav', 'parent and task links'], ['current', 'CURRENT summary']].filter(([key]) => effect.stale?.[key]).map(([, name]) => name);
+  if (!names.length) return 'comment trace';
+  return names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
+}
 
 function describeEffect(effect) { return EFFECT_TEXT[effect.kind](effect); }
 
@@ -2558,7 +2565,7 @@ class Reconciler {
       }
       for (const part of projected.overflow) effects.push({ kind: 'post_index_comment', target: { issue: number, tag: part.tag, after: String(comments.at(-1)?.id || '') }, label: part.label, lines: part.lines });
       effects.push({ kind: 'replace_block', target: { issue: number, digest: blockDigest(body), trace: blockDigest(projected.traceBody), ...(navBody ? { nav: blockDigest(navBody) } : {}), ...(currentBody ? { current: blockDigest(currentBody) } : {}) },
-        insert: !block, move: current && move, state: !current || move, body, updated_at: issue.updated_at });
+        insert: !block, move: current && move, state: !current || move, stale: { trace: !traceCurrent, nav: !navCurrent, current: !currentCurrent }, body, updated_at: issue.updated_at });
     }
   }
 

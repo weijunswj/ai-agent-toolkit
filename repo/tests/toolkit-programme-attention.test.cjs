@@ -455,6 +455,8 @@ test('F: the Hooks lines for each host, with the portable path whenever a host h
   const rows = [
     ['Claude Code, plugin, hooks declared', { claudeRegistry: installed, claudeBlockers: () => [] }, {}, ['Hooks: Claude Code present (trust not checkable)'], false],
     ['Claude Code from the desktop app\'s claude.ai account copy', { claudeRegistry: absent, claudeAccountCopy: () => plugin, claudeBlockers: () => [] }, {}, ['Hooks: Claude Code present (claude.ai account copy; trust not checkable)'], false],
+    ['Claude Code account copy, hooks off in settings', { claudeRegistry: absent, claudeAccountCopy: () => plugin, claudeBlockers: () => ['Your Claude Code user settings set disableAllHooks.'] }, {}, ['Hooks: Claude Code disabled (Your Claude Code user settings set disableAllHooks.)'], true],
+    ['Claude Code account copy with no hooks declared', { claudeRegistry: absent, claudeAccountCopy: () => tmp(), claudeBlockers: () => [] }, {}, ['Hooks: Claude Code plugin present, no hooks declared'], true],
     ['Claude Code, no install and no account copy', { claudeRegistry: absent, claudeAccountCopy: () => null }, {}, ['Hooks: Claude Code plugin absent'], true],
     ['Claude Code, hooks off in settings', { claudeRegistry: installed, claudeBlockers: () => ['Your Claude Code user settings set disableAllHooks.'] }, {}, ['Hooks: Claude Code disabled (Your Claude Code user settings set disableAllHooks.)'], true],
     ['Codex, plugin enabled', { claudeRegistry: absent, codexInspect: () => ({ status: 'enabled' }) }, { codex: true }, ['Hooks: Claude Code plugin absent', 'Hooks: Codex present, trust unknown'], true],
@@ -626,4 +628,29 @@ test('a folder at the throttle path never stops session-start refreshes', () => 
   const fresh = { attentionDir: tmp(), now: () => '2026-10-28T10:00:00.000Z' };
   assert.equal(cache.claimBackgroundStart('acme/app', fresh), true);
   assert.equal(cache.claimBackgroundStart('acme/app', fresh), false, 'a normal file throttles');
+});
+
+test('F: an account folder without a readable manifest never hides a later one that holds Toolkit', () => {
+  const appData = tmp();
+  const rpm = path.join(appData, 'Claude-Data', 'claude_test', 'rpm');
+  const empty = path.join(rpm, 'a', 'b');
+  const broken = path.join(rpm, 'a', 'c');
+  const holder = path.join(rpm, 'a', 'd');
+  for (const folder of [empty, broken, holder]) fs.mkdirSync(folder, { recursive: true });
+  fs.writeFileSync(path.join(broken, 'manifest.json'), '{ not json');
+  fs.writeFileSync(path.join(holder, 'manifest.json'), JSON.stringify({ plugins: [{ name: 'other', id: 'x1' }, { name: 'ai-agent-toolkit', id: 'tk_1' }] }));
+  assert.equal(hooks.accountHookCopy({ LOCALAPPDATA: appData }), path.join(holder, 'tk_1'));
+  assert.equal(hooks.accountHookCopy({ LOCALAPPDATA: tmp() }), null, 'no account folders');
+  fs.writeFileSync(path.join(holder, 'manifest.json'), JSON.stringify({ plugins: [{ name: 'ai-agent-toolkit', id: '../escape' }] }));
+  assert.equal(hooks.accountHookCopy({ LOCALAPPDATA: appData }), null, 'an id that is not a plain name is never followed');
+});
+
+test('a refresh that changes only the CURRENT summary names it in the effect', () => {
+  const fx = fixture();
+  fx.run(['refresh']);
+  fx.github.addIssue(450, { parent: 421 });
+  const plan = fx.run(['reconcile']).result;
+  assert.ok(plan.effects.some(effect => effect.kind === 'update_attention'));
+  assert.ok(plan.effects.some(effect => effect.text === "Update the comment trace and CURRENT summary in #421's body" || effect.text === "Update the CURRENT summary in #421's body"), JSON.stringify(plan.effects.map(effect => effect.text)));
+  assert.equal(plan.effects.some(effect => /comment trace in #421/.test(effect.text) && !/CURRENT/.test(effect.text)), false, 'never labelled as the comment trace alone');
 });

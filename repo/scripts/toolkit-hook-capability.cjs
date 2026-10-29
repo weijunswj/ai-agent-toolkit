@@ -45,15 +45,16 @@ function claudeCodeHooks({ environment, homeDir, registry = null, blockers = nul
 // The folder of a Toolkit copy the Claude desktop app keeps from the user's claude.ai account, or
 // null. Read only, from the app's plugin manifests (see toolkit-install-health.cjs).
 function accountHookCopy(environment) {
-  try {
-    const { claudeAccountPluginFolders } = require('./toolkit-install-health.cjs');
-    for (const folder of claudeAccountPluginFolders(environment)) {
-      const manifest = JSON.parse(fs.readFileSync(path.join(folder, 'manifest.json'), 'utf8'));
-      for (const plugin of Array.isArray(manifest?.plugins) ? manifest.plugins : []) {
-        if (plugin?.name === 'ai-agent-toolkit' && typeof plugin.id === 'string' && /^[A-Za-z0-9_-]+$/.test(plugin.id)) return path.join(folder, plugin.id);
-      }
+  let folders = [];
+  try { folders = require('./toolkit-install-health.cjs').claudeAccountPluginFolders(environment); } catch { return null; }
+  // Each folder on its own: one without a readable manifest never hides a later one.
+  for (const folder of folders) {
+    let manifest;
+    try { manifest = JSON.parse(fs.readFileSync(path.join(folder, 'manifest.json'), 'utf8')); } catch { continue; }
+    for (const plugin of Array.isArray(manifest?.plugins) ? manifest.plugins : []) {
+      if (plugin?.name === 'ai-agent-toolkit' && typeof plugin.id === 'string' && /^[A-Za-z0-9_-]+$/.test(plugin.id)) return path.join(folder, plugin.id);
     }
-  } catch { /* no account copy */ }
+  }
   return null;
 }
 
@@ -94,4 +95,4 @@ function describeHooks(result) {
   return lines;
 }
 
-module.exports = Object.freeze({ PORTABLE_PATH, hookCapability, describeHooks });
+module.exports = Object.freeze({ PORTABLE_PATH, hookCapability, describeHooks, accountHookCopy });
