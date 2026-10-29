@@ -13,8 +13,9 @@ const agentControl = require('./toolkit-agent-control.cjs');
 const processLaunch = require('./claude-process-launch.cjs');
 const { ClaudeSubagentDepthSetting, STATES: SUBAGENT_DEPTH_STATES } = require('./toolkit-claude-subagent-depth.cjs');
 const { ClaudeUserSettings, STATES: CLAUDE_SETTINGS_STATES } = require('./toolkit-claude-user-settings.cjs');
+const { ClaudePluginRegistry } = require('./toolkit-claude-plugin-registry.cjs');
 const { OfficialN8nSkills, installSummary: n8nSkillsSummary } = require('./toolkit-n8n-official-skills.cjs');
-const { disableUserPlugin } = require('./setup-claude-toolkit-plugin.cjs');
+const { disableUserPlugin, registrySourceEvidence } = require('./setup-claude-toolkit-plugin.cjs');
 const { AntigravityGlobalSkills, globalCopySummary } = require('./toolkit-antigravity-project-skills.cjs');
 const { CodexHelperDefinitions, describeSetupResult: describeCodexHelpers } = require('./toolkit-codex-helper-agents.cjs');
 const { STATUS: INSTALL_CHECK_STATUS } = require('./toolkit-install-health.cjs');
@@ -1142,7 +1143,9 @@ async function collectCurrentState(args) {
     antigravity: antigravityState(args),
     nativePlugin: args.host === 'claude-code'
       ? inspectClaudeNativePluginStatePreApproval(args)
-      : inspectCodexNativePluginState(args)
+      : inspectCodexNativePluginState(args),
+    // Read from Claude Code's plugin registry files only; no Claude session is launched before approval.
+    ...(args.host === 'claude-code' ? { claudePluginInstall: claudePluginInstallState(new ClaudePluginRegistry()) } : {}),
   };
 }
 
@@ -1196,7 +1199,35 @@ function wizardChoice(value, label, consequence) {
   return { value, label, consequence };
 }
 
+// currentChoice names the choice that would change nothing in the verified current state. When the
+// recommendation is that choice or keep, the two do the same thing, so the bank shows one recommended
+// Keep current. Usually keep stays and its twin is hidden. With keepAs (the twin also re-checks or
+// follows another answer, which keep would skip), the twin stays under the Keep current label with keepAs
+// as its effect, and keep is hidden. Either way the hidden choice's canonical name (a flag or a typed
+// word) still works and applies as the shown one.
+function foldedTwin(definition) {
+  const twin = definition.currentChoice;
+  const has = (value) => definition.choices?.some((choice) => choice.value === value);
+  return twin && twin !== 'keep' && has(twin) && has('keep') && [twin, 'keep'].includes(definition.recommendation?.value) ? twin : '';
+}
+
+function foldDefinition(definition, twin) {
+  const keep = definition.choices.find((choice) => choice.value === 'keep');
+  const [hidden, shown] = definition.keepAs ? ['keep', twin] : [twin, 'keep'];
+  const choices = definition.choices.filter((choice) => choice.value !== hidden)
+    .map((choice) => (definition.keepAs && choice.value === twin ? { ...choice, label: keep.label, consequence: definition.keepAs } : choice));
+  const recommendation = definition.recommendation.value === shown && !definition.keepAs ? definition.recommendation
+    : { ...definition.recommendation, value: shown, outcome: choices.find((choice) => choice.value === shown).consequence };
+  return {
+    definition: { ...definition, choices, recommendation, selected: definition.selected === hidden ? shown : definition.selected },
+    fold: { folded_value: hidden, folded_into: shown },
+  };
+}
+
 function resolvedQuestion(definition) {
+  const twin = foldedTwin(definition);
+  let fold = null;
+  if (twin) ({ definition, fold } = foldDefinition(definition, twin));
   const recommendation = definition.recommendation;
   if (!definition.id || !definition.key || !definition.title) throw new Error('Setup question metadata is incomplete.');
   if (!definition.whatThisControls || !definition.current || !recommendation?.value
@@ -1227,10 +1258,12 @@ function resolvedQuestion(definition) {
     availability: definition.availability || { status: 'available', condition: 'Available for the detected setup state.' },
     privacySafeFallback: definition.privacySafeFallback || 'The effective state could not be verified safely; setup will not guess or expose private configuration.',
     selected: definition.selected,
+    ...(fold || {}),
     // Compatibility aliases for existing consumers. Every alias is derived from
     // the structured semantic fields above rather than maintained separately.
     description: definition.whatThisControls,
     current: definition.current,
+    current_short: definition.currentShort || definition.current,
     recommended: recommendation.value,
     recommended_outcome: recommendation.outcome,
     recommendation_reason: recommendation.reason,
@@ -1300,6 +1333,7 @@ function questionBankApprovalPayload(specs) {
         current: {
           effective_behavior: spec.currentState?.effectiveBehavior || spec.current,
           displayed_text: spec.current,
+          table_text: spec.current_short || spec.current,
           verification: spec.currentState?.verification || 'unverified',
         },
         availability: {
@@ -1504,7 +1538,7 @@ function antigravitySkillsQuestion(args, current) {
     prompt: 'Antigravity skills choice',
     whatThisControls: "Whether setup copies Toolkit's portable skills, and the official n8n skills Toolkit ships, into Antigravity's global skills folder (~/.gemini/config/skills) and keeps them current on each setup. Toolkit-only skills (setup, env, controller and programme tools) stay out. Folders you copied yourself are never changed.",
     choices: [
-      wizardChoice('copy', 'Copy and keep current', "Copy Toolkit's portable skills and the official n8n skills into ~/.gemini/config/skills, update Toolkit's copies when they are out of date, and record them."),
+      wizardChoice('copy', 'Copy and keep updated', "Copy Toolkit's portable skills and the official n8n skills into ~/.gemini/config/skills, update Toolkit's copies when they are out of date, and record them."),
       ...(current.antigravity?.copies ? [wizardChoice('remove', "Remove Toolkit's copies", 'Delete only the skill folders Toolkit recorded there.')] : []),
       wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${outcome}`),
     ],
@@ -1513,6 +1547,7 @@ function antigravitySkillsQuestion(args, current) {
       : { value: 'keep', outcome: 'Leave Antigravity unchanged.', reason: 'The copy is opt-in: choose it if you use Toolkit skills in Antigravity.' },
     selected: args.setupChoices.antigravitySkills,
     current: outcome,
+    currentShort: current.antigravity?.copies ? 'Copied' : 'Not copied',
     currentVerification: 'state-derived',
     afterApplying: 'Start a new Antigravity session to load changed skills.',
   });
@@ -1576,6 +1611,153 @@ function currentBooleanOutcome(value, enabledText, disabledText, unknownText) {
   return unknownText;
 }
 
+// Short current states for the bank's Current column; the full text stays in --explain and the reference.
+function shortOnOff(value, on = 'On', off = 'Off') {
+  if (value === true) return on;
+  if (value === false) return off;
+  return 'Unknown';
+}
+
+function shortUpdateSource(current, args) {
+  if (!current?.managed?.currentPath) return 'None yet';
+  if (!canPreserveManagedCheckout(current, args)) return 'Not usable';
+  return isStandardManagedCheckout(current) ? 'Dedicated update copy' : 'Custom copy';
+}
+
+function shortCodexHelpers(delegation) {
+  if (delegation?.status === 'configured' && Number.isInteger(delegation.helper_count)) {
+    return delegation.helper_count === 0 ? 'No helpers' : `${delegation.helper_count} helper${delegation.helper_count === 1 ? '' : 's'}`;
+  }
+  if (delegation?.status === 'unconfigured') return 'Not set';
+  if (delegation?.status === 'migration-required') return 'Old Toolkit setting';
+  return 'Not verified';
+}
+
+function shortClaudeTopology(profile, depth) {
+  const topology = profile?.topology === agentControl.TOPOLOGIES.BROADER_NATIVE ? 'Broader native' : 'Root only';
+  if (depth?.state === SUBAGENT_DEPTH_STATES.TOOLKIT) return `${topology}; subagent limit 1`;
+  if (depth?.state === SUBAGENT_DEPTH_STATES.OWNER) return `${topology}; subagent limit ${depth.value} (yours)`;
+  if (depth?.state === SUBAGENT_DEPTH_STATES.DEFAULT) return `${topology}; no subagent limit set`;
+  return `${topology}; subagent limit unknown`;
+}
+
+function shortClaudePlugin(current) {
+  if (current.nativePlugin.status === 'fresh') return 'Current';
+  const install = current.claudePluginInstall;
+  if (install?.installed !== true) return 'Checked after you answer';
+  const state = install.enabled === false ? 'Off' : install.enabled === true ? 'On' : 'Installed';
+  const latest = current.nativePlugin.manifest_version;
+  const notes = [latest && latest !== install.version ? `${latest} available` : '', claudePluginRecordLag(install)].filter(Boolean);
+  return `${state}, ${install.version || 'version unknown'}${notes.length ? ` (${notes.join('; ')})` : ''}`;
+}
+
+const CLAUDE_SETTING_SHORT_NAMES = Object.freeze({
+  attribution: 'No AI attribution',
+  'cross-session-inbound': 'Session wake-ups',
+  'switch-models-on-flag': 'Ask before model switch',
+  'agents-md': 'Read AGENTS.md',
+});
+
+// Each setting by a short name: set by Toolkit, kept as you set it, or not set.
+function shortClaudeSettings(entries) {
+  if (!Array.isArray(entries) || !entries.length) return 'Not read yet';
+  if (entries.some((entry) => entry.state === CLAUDE_SETTINGS_STATES.UNREADABLE)) return 'Could not read';
+  const name = (entry) => CLAUDE_SETTING_SHORT_NAMES[entry.id] || entry.label;
+  return entries.map((entry) => (entry.state === CLAUDE_SETTINGS_STATES.TOOLKIT ? `${name(entry)}: on`
+    : entry.state === CLAUDE_SETTINGS_STATES.OWNER ? `${name(entry)}: yours` : `${name(entry)}: not set`)).join('; ');
+}
+
+// The on/off choice that reproduces a verified stored boolean; none when it is unverified.
+function booleanCurrentChoice(value) {
+  if (value === true) return 'enable';
+  if (value === false) return 'disable';
+  return '';
+}
+
+// A selection of a hidden choice (see foldedTwin) is applied as the shown one, which does the same thing.
+function foldTwinSelections(args, specs) {
+  for (const spec of specs) {
+    if (spec.folded_value && choiceForKey(args, spec.key) === spec.folded_value) assignChoice(args, spec.key, spec.folded_into);
+  }
+  return specs;
+}
+
+// The update source 1.1 recommends: the current one when it is kept, else the standard managed copy.
+function recommendedUpdateSource(current, args) {
+  return recommendedChoice('managedCheckout', current, args) === 'keep' ? current.managed.currentPath : defaultManagedSourcePath();
+}
+
+// Automatic updates are on, with startup sync, and already check the source 1.1 recommends, so
+// Turn on would write the same values again.
+function automaticUpdatesUnchanged(current, args) {
+  const saved = current.audit?.repo_auto_update || {};
+  return saved.enabled === true && current.audit?.auto_sync_enabled === true && Boolean(saved.repo_path)
+    && samePath(saved.repo_path, recommendedUpdateSource(current, args))
+    && saved.repo_branch === args.repoBranch && normalizeRemote(saved.repo_remote) === normalizeRemote(args.repoRemote);
+}
+
+// Root-only is stored and the one-layer depth setting is already in place (set by Toolkit, or 1 set
+// by you), so choosing root-only would change nothing. Keep resolves to root-only here too, whether or
+// not the stored profile still verifies.
+function claudeRootOnlyUnchanged(profile, depth) {
+  return profile?.topology === agentControl.TOPOLOGIES.ROOT_ONLY
+    && (depth?.state === SUBAGENT_DEPTH_STATES.TOOLKIT || (depth?.state === SUBAGENT_DEPTH_STATES.OWNER && depth.value === '1'));
+}
+
+// What Claude Code's plugin registry and user settings say about Toolkit: installed, where it runs
+// from, the version of that folder, whether it is turned on, and whether Claude Code's install record
+// matches that folder. Claude Code runs Toolkit in place from the folder, so its manifest is the
+// version that runs; the install record can lag behind, and then Install or refresh rewrites it (an
+// uninstall and reinstall), so a lagging record counts as a change. The record check is the one the
+// plugin setup uses (one record, at the folder's version and commit). Reads files and the folder's
+// Git commit only; no Claude session is launched.
+function claudePluginInstallState(registry, recordMatches = (record, root, version) => registrySourceEvidence(record, root, version).ok) {
+  const install = registry.toolkitInstall();
+  let version = '';
+  if (install.installed) {
+    try { version = JSON.parse(fs.readFileSync(path.join(install.runningRoot, '.claude-plugin', 'plugin.json'), 'utf8').replace(/^﻿/, '')).version || ''; }
+    catch { version = ''; }
+  }
+  const record = install.records.length === 1 ? install.records[0] : null;
+  return {
+    installed: install.installed,
+    runningRoot: install.runningRoot,
+    version,
+    recordedVersion: install.records.at(-1)?.version || '',
+    recordCurrent: Boolean(install.installed && record && version && recordMatches(record, install.runningRoot, version)),
+    enabled: registry.toolkitEnabled(),
+  };
+}
+
+// Toolkit is installed, turned on, runs in place from the update source 1.1 recommends, that folder is
+// at the version of the Toolkit copy setup reads, and Claude Code's install record matches it, so
+// Install or refresh would find nothing to do.
+function claudePluginUnchanged(current, args) {
+  const install = current.claudePluginInstall;
+  return install?.installed === true && install.enabled === true && install.recordCurrent === true
+    && Boolean(install.version) && install.version === current.nativePlugin.manifest_version
+    && samePath(install.runningRoot, recommendedUpdateSource(current, args));
+}
+
+// Why Claude Code's install record does not match the folder it runs Toolkit from, in a few words.
+function claudePluginRecordLag(install) {
+  if (install.recordCurrent !== false) return '';
+  return install.recordedVersion && install.recordedVersion !== install.version
+    ? `Claude Code's record says ${install.recordedVersion}` : "Claude Code's record is out of date";
+}
+
+function claudePluginCurrent(current, args) {
+  if (current.nativePlugin.status === 'fresh') return 'The Claude Code Toolkit plugin is current.';
+  if (current.nativePlugin.status === 'invalid-source-metadata') return 'Setup could not read the Claude Code plugin details in the Toolkit copy.';
+  const install = current.claudePluginInstall;
+  if (install?.installed === true) {
+    const state = install.enabled === false ? 'turned off' : install.enabled === true ? 'turned on' : 'on or off unknown';
+    const lag = claudePluginRecordLag(install);
+    return `Claude Code runs Toolkit ${install.version || '(version unknown)'} (${state}); this Toolkit copy is ${current.nativePlugin.manifest_version || 'unknown'}.${lag ? ` ${lag}, so Install or refresh rewrites it.` : ''}`;
+  }
+  return 'Setup checks the Claude Code Toolkit plugin after you answer, and installs or refreshes it only if needed.';
+}
+
 function setupQuestionSpecs(args, current) {
   const managedRecommendation = recommendedChoice('managedCheckout', current, args);
   const managedCurrent = currentManagedSourceOutcome(current, args);
@@ -1594,10 +1776,11 @@ function setupQuestionSpecs(args, current) {
       choices: [
         wizardChoice('default', 'Use the dedicated clean update copy', 'Create or reuse the standard managed checkout, verify its clean main branch, and make it the update source without moving or deleting another checkout.'),
         ...(canPreserveManagedCheckout(current, args)
-          ? [wizardChoice('keep', 'Keep the current update source', `Preserve this effective behavior: ${managedCurrent}`)]
+          ? [wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${managedCurrent}`)]
           : []),
         wizardChoice('custom', 'Choose another location', 'Create or reuse a clean Toolkit checkout at the approved location and make that location the managed update source; existing managed copies are not migrated or deleted.'),
       ],
+      currentChoice: canPreserveManagedCheckout(current, args) && isStandardManagedCheckout(current) ? 'default' : '',
       recommendation: {
         value: managedRecommendation,
         outcome: managedRecommendation === 'keep'
@@ -1607,6 +1790,7 @@ function setupQuestionSpecs(args, current) {
       },
       selected: args.setupChoices.managedCheckout,
       current: managedCurrent,
+      currentShort: shortUpdateSource(current, args),
       currentVerification: current?.managed?.currentPath && current?.managed?.exists ? 'state-derived' : 'unverified-or-absent',
       afterApplying: 'After final approval, setup will create or verify only the selected managed checkout and store it as Toolkit update state. The active project checkout is unchanged; no existing managed copy is moved or removed.',
       availability: {
@@ -1624,16 +1808,21 @@ function setupQuestionSpecs(args, current) {
       prompt: 'Automatic Toolkit updates choice',
       whatThisControls: 'Whether Toolkit checks the managed update source when a supported coding app starts. Any update still has to be fetched, fast-forwarded, validated, and safely activated before enabled integrations use it.',
       choices: [
-        wizardChoice('enable', 'Turn on', 'Store automatic maintenance as enabled so trusted startup maintenance checks for, verifies, and safely activates clean updates.'),
+        wizardChoice('enable', 'Turn on', 'Store automatic maintenance as enabled so trusted startup maintenance checks for, verifies, and safely activates clean updates, and point automatic updates at the update source chosen above.'),
         wizardChoice('disable', 'Turn off', 'Disable startup update checks and automatic hub synchronization; manual `setup toolkit` or explicit maintenance remains available.'),
-        wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${currentBooleanOutcome(current.audit?.repo_auto_update?.enabled, 'Automatic startup update checks are on.', 'Automatic startup update checks are off; manual setup remains available.', 'The automatic-update state could not be verified; setup will not claim that startup updates are active.')}`),
+        wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${currentBooleanOutcome(current.audit?.repo_auto_update?.enabled, 'Automatic startup update checks are on.', 'Automatic startup update checks are off; manual setup remains available.', 'The automatic-update state could not be verified; setup will not claim that startup updates are active.')} The update source it checks stays as it is.`),
       ],
+      // Turn on also points updates at the update source chosen in 1.1, which keep does not, so it is
+      // the one kept under the Keep current label.
+      currentChoice: automaticUpdatesUnchanged(current, args) ? 'enable' : '',
+      keepAs: 'Keep automatic updates on. They check the update source chosen in 1.1; if you choose another source there, they follow it.',
       recommendation: {
         value: recommendedChoice('repoAutoUpdate', current, args),
         outcome: 'Turn on clean, verified automatic updates.',
         reason: 'Startup checks keep Toolkit current while the clean-checkout, expected-remote, fast-forward, and validation gates protect active work.',
       },
       selected: args.setupChoices.repoAutoUpdate,
+      currentShort: shortOnOff(current.audit?.repo_auto_update?.enabled),
       current: currentBooleanOutcome(current.audit?.repo_auto_update?.enabled, 'Automatic startup update checks are on.', 'Automatic startup update checks are off; manual setup remains available.', 'The automatic-update state could not be verified; setup will not claim that startup updates are active.'),
       currentVerification: typeof current.audit?.repo_auto_update?.enabled === 'boolean' ? 'verified' : 'unverified',
       afterApplying: 'This changes Toolkit maintenance state and future trusted SessionStart behavior; it does not directly edit native host configuration and does not require a restart by itself.',
@@ -1650,12 +1839,14 @@ function setupQuestionSpecs(args, current) {
         wizardChoice('disable', 'Do not keep reports', 'Stop creating normal Toolkit maintenance reports; concise failure or safety status still appears when action is required.'),
         wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${currentBooleanOutcome(current.audit?.update_report_enabled, 'Meaningful maintenance reports are kept; only action-required reports open automatically.', 'Maintenance reports are disabled.', 'The saved report setting could not be verified; the effective default is to keep meaningful reports.')}`),
       ],
+      currentChoice: booleanCurrentChoice(current.audit?.update_report_enabled),
       recommendation: {
         value: recommendedChoice('updateReports', current, args),
         outcome: 'Keep meaningful reports; open only reports that require action.',
         reason: 'A short-lived, privacy-safe record makes failed or safety-blocked maintenance diagnosable without making routine success noisy.',
       },
       selected: args.setupChoices.updateReports,
+      currentShort: shortOnOff(current.audit?.update_report_enabled),
       current: currentBooleanOutcome(current.audit?.update_report_enabled, 'Meaningful maintenance reports are kept; only action-required reports open automatically.', 'Maintenance reports are disabled.', 'The saved report setting could not be verified; the effective default is to keep meaningful reports.'),
       currentVerification: typeof current.audit?.update_report_enabled === 'boolean' ? 'verified' : 'defaulted',
       afterApplying: 'This changes Toolkit report state only. It does not change native host configuration, and no restart is required.',
@@ -1672,6 +1863,7 @@ function setupQuestionSpecs(args, current) {
         wizardChoice('custom', 'Choose another duration', 'Use the approved positive day count for future Toolkit report cleanup; no unrelated logs or project files are considered.'),
         wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${retentionCurrent}`),
       ],
+      currentChoice: retentionRaw === DEFAULT_UPDATE_REPORT_RETENTION_DAYS ? 'default' : '',
       recommendation: {
         value: recommendedChoice('updateReportRetention', current, args),
         outcome: currentReportRetentionDays(current) === DEFAULT_UPDATE_REPORT_RETENTION_DAYS
@@ -1681,6 +1873,7 @@ function setupQuestionSpecs(args, current) {
       },
       selected: args.setupChoices.updateReportRetention,
       current: retentionCurrent,
+      currentShort: Number.isSafeInteger(retentionRaw) && retentionRaw > 0 ? `${retentionRaw} days` : `Unknown (${DEFAULT_UPDATE_REPORT_RETENTION_DAYS} days)`,
       currentVerification: Number.isSafeInteger(retentionRaw) && retentionRaw > 0 ? 'verified' : 'defaulted',
       afterApplying: 'The approved duration is stored in Toolkit state. Eligible Toolkit maintenance-report cleanup runs during the approved setup and future maintenance; unrelated files are never included.',
     }),
@@ -1696,12 +1889,14 @@ function setupQuestionSpecs(args, current) {
         wizardChoice('disable', 'Leave it', 'Do not raise it; if Toolkit raised it earlier, put the previous value back. Setup still reports the combined size.'),
         wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${currentBooleanOutcome(current.audit?.codex_doc_limit_enabled, "Toolkit keeps Codex's instruction limit raised.", "Toolkit leaves Codex's instruction limit alone.", "No choice is recorded, so Toolkit leaves Codex's instruction limit alone.")}`),
       ],
+      currentChoice: booleanCurrentChoice(current.audit?.codex_doc_limit_enabled),
       recommendation: {
         value: recommendedChoice('codexDocLimit', current, args),
         outcome: "Raise Codex's instruction limit to 65536.",
         reason: 'Repository rules reach Codex whole; the change is one marked line that is backed up and reversible.',
       },
       selected: args.setupChoices.codexDocLimit,
+      currentShort: shortOnOff(current.audit?.codex_doc_limit_enabled, 'Raised', 'Left alone'),
       current: currentBooleanOutcome(current.audit?.codex_doc_limit_enabled, "Toolkit keeps Codex's instruction limit raised.", "Toolkit leaves Codex's instruction limit alone.", "No choice is recorded, so Toolkit leaves Codex's instruction limit alone."),
       currentVerification: typeof current.audit?.codex_doc_limit_enabled === 'boolean' ? 'verified' : 'defaulted',
       afterApplying: 'This stores your choice in Toolkit state and, on a yes, edits `~/.codex/config.toml` at the end of setup. Start a new Codex session to use the new limit.',
@@ -1725,9 +1920,12 @@ function setupQuestionSpecs(args, current) {
         ...(String(current.delegation?.ownership || '').startsWith('toolkit-') ? [wizardChoice('remove', 'Remove Toolkit setting', 'Remove only the owned block after approval.')] : []),
         wizardChoice('skip', 'Skip', 'Write no helper setting this run.'),
       ],
+      // One helper is already configured, so setup would leave config.toml as it is either way.
+      currentChoice: current.delegation?.status === 'configured' && current.delegation?.helper_count === 1 ? 'one-helper' : '',
       recommendation: { value: recommendedChoice('codexHelperCapacity', current, args), outcome: recommendedChoice('codexHelperCapacity', current, args) === 'one-helper' ? 'Allow one helper.' : 'Keep the current configuration.', reason: recommendedChoice('codexHelperCapacity', current, args) === 'one-helper' ? 'G0 and G1 leads need helpers for independent work.' : 'This state needs an explicit compatibility or repair choice before helper settings can change.' },
       selected: args.setupChoices.codexHelperCapacity,
       current: current.delegation?.detail || 'Helper capacity has not been verified.',
+      currentShort: shortCodexHelpers(current.delegation),
       currentVerification: current.runtime?.runtime === RUNTIMES.UNKNOWN ? 'unverified' : 'verified',
       afterApplying: 'Setup presents any required replacement proposal before writing, backs up config.toml, and asks Codex to load it. Fully restart Codex and complete one successful turn.',
     }));
@@ -1743,12 +1941,14 @@ function setupQuestionSpecs(args, current) {
         wizardChoice('disable', 'Turn off', 'Disable future automatic cache refresh; the installed Toolkit plugin is not uninstalled, and manual `setup toolkit` repair or refresh remains available.'),
         wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${currentBooleanOutcome(current.audit?.codex_plugin_auto_refresh_enabled, 'Automatic Codex Toolkit maintenance is on.', 'Automatic Codex Toolkit maintenance is off; the installed plugin remains in place.', 'The automatic Codex maintenance preference could not be verified; setup will not claim that it is active.')}`),
       ],
+      currentChoice: booleanCurrentChoice(current.audit?.codex_plugin_auto_refresh_enabled),
       recommendation: {
         value: recommendedChoice('codexPluginAutoRefresh', current, args),
         outcome: 'Turn on native Toolkit cache refresh and safe Windows hook maintenance.',
         reason: 'Keeping the installed cache aligned with the verified managed source avoids stale setup behavior after Toolkit updates.',
       },
       selected: args.setupChoices.codexPluginAutoRefresh,
+      currentShort: shortOnOff(current.audit?.codex_plugin_auto_refresh_enabled),
       current: currentBooleanOutcome(current.audit?.codex_plugin_auto_refresh_enabled, 'Automatic Codex Toolkit maintenance is on.', 'Automatic Codex Toolkit maintenance is off; the installed plugin remains in place.', 'The automatic Codex maintenance preference could not be verified; setup will not claim that it is active.'),
       currentVerification: typeof current.audit?.codex_plugin_auto_refresh_enabled === 'boolean' ? 'verified' : 'unverified',
       afterApplying: 'The approved setup always verifies the current native Toolkit plugin. If files change, setup may update the Codex plugin cache and Windows hook launchers; then open `/hooks` in the Codex app and trust the updated Toolkit hooks. Turning maintenance off only changes future Toolkit state and does not uninstall the plugin.',
@@ -1768,6 +1968,10 @@ function setupQuestionSpecs(args, current) {
         wizardChoice('broader-native', 'Broader native behaviour', 'Permit native Claude agent behavior outside Toolkit control and its resource guarantees. Outside Toolkit repos Claude Code\'s own defaults apply: a Toolkit-set `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` is removed (a value you set yourself is kept), and the Toolkit hook no longer refuses a subagent that starts another.'),
         wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${topologyCurrent} Stale, unverifiable or retired topology state falls back safely to root-only, and the subagent depth setting is left as it is.`),
       ],
+      // Root-only and its depth setting are already in place. Setup resolves keep to root-only after the
+      // answers anyway, so root-only is the one kept under the Keep current label.
+      currentChoice: claudeRootOnlyUnchanged(activeProfile, current.claudeSubagentDepth) ? 'root-only' : '',
+      keepAs: 'Keep root-only: Toolkit repos admit only the main session and the Toolkit planning and build helpers; elsewhere one layer of subagents. Both settings are already in place, so nothing changes.',
       recommendation: {
         value: recommendedChoice('claudeTopology', current, args),
         outcome: 'Toolkit repos: main session + Toolkit planning and build helpers only. Elsewhere: one layer of subagents.',
@@ -1775,6 +1979,7 @@ function setupQuestionSpecs(args, current) {
       },
       selected: args.setupChoices.claudeTopology,
       current: topologyCurrent,
+      currentShort: shortClaudeTopology(activeProfile, current.claudeSubagentDepth),
       // Read from the stored profile and the Claude Code user settings; setup does not test the hook itself.
       currentVerification: current.claudeSubagentDepth && current.claudeSubagentDepth.state !== SUBAGENT_DEPTH_STATES.UNREADABLE ? 'state-derived' : 'unverified',
       afterApplying: 'A changed choice updates the Claude Toolkit profile and the one Toolkit-owned `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` key in the Claude Code user settings (`settings.json` in your Claude Code config folder). Start a new Claude Code session before relying on it. Claude Code 2.1.217 or later reads the depth setting; earlier versions ignore it.',
@@ -1787,9 +1992,15 @@ function setupQuestionSpecs(args, current) {
       prompt: 'Claude Code Toolkit choice',
       whatThisControls: 'Whether Claude Code installs or refreshes its own Toolkit plugin, shows manual instructions, or preserves current plugin state. This never changes Codex.',
       choices: [wizardChoice('install', 'Install or refresh', 'Use Claude Code native plugin commands to verify and refresh its Toolkit cache when needed.'), wizardChoice('instructions', 'Show instructions only', 'Make no native plugin change and report the manual Claude Code action required.'), wizardChoice('keep', 'Keep current', 'Preserve the currently detected Claude Code plugin behavior and state.')],
+      // Toolkit is installed, turned on and current, running in place from the update copy. Install or
+      // refresh then only checks it, and re-enables or refreshes it if that check still finds a gap keep
+      // would leave, so it is the one kept under the Keep current label.
+      currentChoice: claudePluginUnchanged(current, args) ? 'install' : '',
+      keepAs: 'Keep it installed. Setup checks it after you answer and changes something only if that check finds it disabled or out of date.',
       recommendation: { value: recommendedChoice('claudePluginBehavior', current, args), outcome: 'Let Claude Code install or refresh its own Toolkit plugin.', reason: 'Native host commands keep cache identity, version, and hooks aligned without cross-host mutation.' },
       selected: args.setupChoices.claudePluginBehavior,
-      current: current.nativePlugin.status === 'fresh' ? 'The Claude Code Toolkit plugin is current.' : current.nativePlugin.status === 'invalid-source-metadata' ? 'Setup could not read the Claude Code plugin details in the Toolkit copy.' : 'Setup checks the Claude Code Toolkit plugin after you answer, and installs or refreshes it only if needed.',
+      current: claudePluginCurrent(current, args),
+      currentShort: shortClaudePlugin(current),
       afterApplying: 'If native plugin files change, start a new Claude Code session (close sessions opened before the update) and complete any native trust or activation steps reported by setup.',
     }));
     specs.push(resolvedQuestion({
@@ -1804,14 +2015,17 @@ function setupQuestionSpecs(args, current) {
         wizardChoice('disable', 'Turn off', 'Remove only the values Toolkit set and still match what it recorded. Values you set yourself stay as they are.'),
         wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${claudeSettingsOutcome(current.claudeSettings)}`),
       ],
+      currentChoice: claudeSettingsAllSet(current) ? 'enable' : '',
       recommendation: { value: recommendedChoice('claudeSettings', current, args), outcome: claudeSettingsAllSet(current) ? 'Keep them: all four are already set.' : 'Set the recommended values that are not set yet; values you set yourself stay as they are.', reason: 'They keep AI attribution out of your commits and pull requests, let a Projects coordinator wake Remote Control sessions on your computer, keep a flagged request on the model you chose, and make Claude Code read the repository\'s AGENTS.md.' },
       selected: args.setupChoices.claudeSettings,
       current: claudeSettingsOutcome(current.claudeSettings),
+      currentShort: shortClaudeSettings(current.claudeSettings),
       currentVerification: Array.isArray(current.claudeSettings) && current.claudeSettings.length && current.claudeSettings.every((entry) => entry.state !== CLAUDE_SETTINGS_STATES.UNREADABLE) ? 'state-derived' : 'unverified',
       afterApplying: 'Start a new Claude Code session so it reads the changed settings.',
     }));
   }
   if (current.antigravity?.installed || current.antigravity?.copies) specs.push(antigravitySkillsQuestion(args, current));
+  foldTwinSelections(args, specs);
 
   return withPresentationMetadata(specs.filter((spec) => args.host === 'codex' || spec.key !== 'codexDocLimit').map((spec) => ({
     ...spec,
@@ -1886,11 +2100,18 @@ function renderQuestionRows(specs, onlyRef = '') {
 // Table cells hold one line: backslashes and pipes are escaped and line breaks become spaces.
 const tableCell = (text) => String(text || '').replace(/\r?\n/g, ' ').replace(/\\/g, '\\\\').replace(/\|/g, '\\|');
 
-// The bank as one compact table: the question, what is true now, the recommended choice and its
+// The bank as one compact table: the question, a short current state, the recommended choice and its
 // effect, and the other choices. The full text of a question is shown only on request.
 function renderCompactQuestionTable(specs, markdown = true) {
   specs = ensurePresentationMetadata(specs);
-  const recommended = (spec) => `${spec.presentation.recommended_choice_ref}. ${choiceLabel(spec, spec.recommended)}: ${spec.recommended_outcome}`;
+  // Keeping things as they are needs no outcome: the Current column already says what stays.
+  // An outcome that only repeats the label is left out too.
+  const keepsCurrent = (spec) => spec.recommended === 'keep' || spec.folded_into === spec.recommended;
+  const recommended = (spec) => {
+    const label = choiceLabel(spec, spec.recommended);
+    const effect = keepsCurrent(spec) || spec.recommended_outcome === label ? '' : `: ${spec.recommended_outcome}`;
+    return `${spec.presentation.recommended_choice_ref}. ${label}${effect}`;
+  };
   const others = (spec) => spec.choices.filter((choice) => choice.value !== spec.recommended).map((choice) => `${choice.presentation_ref}. ${choice.label}`);
   const selected = (spec) => (spec.selected ? `${choiceReference(spec, spec.selected)}. ${choiceLabel(spec, spec.selected)}` : '');
   const lines = [];
@@ -1899,11 +2120,11 @@ function renderCompactQuestionTable(specs, markdown = true) {
     if (spec.section !== section) {
       section = spec.section;
       const heading = `${spec.presentation.section_index}. ${section}`;
-      if (markdown) lines.push('', `## ${heading}`, '', '| # | Question | Now | Recommended | Other choices |', '|---|---|---|---|---|');
+      if (markdown) lines.push('', `## ${heading}`, '', '| # | Question | Current | Recommended | Other choices |', '|---|---|---|---|---|');
       else lines.push('', heading, '='.repeat(heading.length));
     }
     if (!markdown) {
-      lines.push('', `${spec.presentation.question_ref} ${spec.title}`, `  Now: ${spec.current}`, `  Recommended: ${recommended(spec)}`);
+      lines.push('', `${spec.presentation.question_ref} ${spec.title}`, `  Current: ${spec.current_short || spec.current}`, `  Recommended: ${recommended(spec)}`);
       const rest = others(spec);
       // One choice per line, so each alternative reads on its own.
       if (rest.length) lines.push('  Other choices:', ...rest.map((choice) => `    ${choice}`));
@@ -1912,7 +2133,7 @@ function renderCompactQuestionTable(specs, markdown = true) {
     }
     const rest = others(spec).map(tableCell).join('<br>') || '-';
     const chosen = spec.selected ? `<br>Selected: ${tableCell(selected(spec))}` : '';
-    lines.push(`| ${spec.presentation.question_ref} | ${tableCell(spec.title)} | ${tableCell(spec.current)} | ${tableCell(recommended(spec))}${chosen} | ${rest} |`);
+    lines.push(`| ${spec.presentation.question_ref} | ${tableCell(spec.title)} | ${tableCell(spec.current_short || spec.current)} | ${tableCell(recommended(spec))}${chosen} | ${rest} |`);
   }
   return lines;
 }
@@ -2479,6 +2700,7 @@ function resolveDisplayedChoiceAnswer(spec, answer) {
   const presented = choiceByPresentationReference(spec, normalized);
   if (presented) return presented.value;
   const canonical = spec.choices.find((choice) => choice.value.toLowerCase() === normalized.toLowerCase());
+  if (!canonical && spec.folded_value === normalized.toLowerCase()) return spec.folded_into;
   return canonical?.value || normalized.toLowerCase();
 }
 
@@ -3726,6 +3948,8 @@ module.exports = {
   emitCompleteQuestionBank,
   runManagedQuestionBankChild,
   plannedQuestionBank,
+  applySetupChoices,
+  claudePluginInstallState,
   setupPlan,
   canPreserveManagedCheckout,
   main

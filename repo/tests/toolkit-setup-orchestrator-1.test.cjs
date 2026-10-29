@@ -228,6 +228,10 @@ test('distinct piped answers follow the canonical question order without shifts'
   assert.match(bank, /Reply with one line for each unresolved question in this exact order:[\s\S]*\*\*1\.2\*\* Automatic updates[\s\S]*\*\*1\.3\*\* Update reports[\s\S]*\*\*1\.4\*\* Report retention[\s\S]*\*\*2\.2\*\* Codex Toolkit maintenance/);
   assert.doesNotMatch(bank, /Reply with either:|: all recommended/);
   assert.match(result.stdout, /Setup choices confirmed before writes:[\s\S]*2\.2 Codex Toolkit maintenance: C - Keep current \(canonical: keep; effective: disable\)/);
+  // Reports are already kept for seven days, so "enable" and "default" name the hidden twins of the
+  // recommended Keep current and apply as keep, with the same effect.
+  assert.match(result.stdout, /1\.3 Update reports: B - Keep current \(canonical: keep; effective: enable\)/);
+  assert.match(result.stdout, /1\.4 Report retention: B - Keep current \(canonical: keep; effective: 7 days\)/);
   assert.doesNotMatch(result.stdout, /Codex helper agents:/);
   assert.match(result.stdout, /Question answers initially required: yes/);
   assert.match(result.stdout, /Question answers supplied by complete stdin: yes/);
@@ -236,7 +240,8 @@ test('distinct piped answers follow the canonical question order without shifts'
   assert.match(fs.readFileSync(configPath, 'utf8'), /AI-AGENT-TOOLKIT:BEGIN CODEX-HELPER-CAPACITY/);
   const bridgeArgs = fs.readFileSync(path.join(setupRepo, 'BRIDGE_ARGS.log'), 'utf8');
   assert.match(bridgeArgs, /--disable-repo-auto-update/);
-  assert.match(bridgeArgs, /--disable-update-report-open --enable-update-reports --update-report-retention-days 7 --write/);
+  assert.match(bridgeArgs, /--disable-update-report-open --write/);
+  assert.doesNotMatch(bridgeArgs, /--enable-update-reports|--update-report-retention-days/);
   assert.doesNotMatch(bridgeArgs, /codex-plugin-auto-refresh/);
   assert.doesNotMatch(bridgeArgs, /--enable-target|--disable-target/);
 });
@@ -287,7 +292,7 @@ test('choice-activated custom checkout detail is rendered and consumed in the ca
   const customPath = path.join(root, 'Chosen Managed Source');
   const result = run(['--execute', '--repo-remote', origin, '--enable-repo-auto-update'], {
     env: isolatedHomeEnv(root),
-    input: ['custom', 'A', 'C', 'keep', 'B', customPath].join('\n'),
+    input: ['custom', 'B', 'B', 'keep', 'B', customPath].join('\n'),
     timeout: 300000,
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
@@ -302,11 +307,11 @@ test('choice-activated custom retention detail follows the displayed canonical o
   const { origin } = createGitBackedSetupRepo(root);
   const result = run(['--execute', '--repo-remote', origin, '--enable-repo-auto-update'], {
     env: isolatedHomeEnv(root),
-    input: ['A', 'A', 'B', 'keep', 'B', '14'].join('\n'),
+    input: ['A', 'B', 'A', 'keep', 'B', '14'].join('\n'),
     timeout: 300000,
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /2\. 1\.4 Report retention: positive report-retention duration in days \(when 1\.4 is B\/custom/);
+  assert.match(result.stdout, /2\. 1\.4 Report retention: positive report-retention duration in days \(when 1\.4 is A\/custom/);
   assert.match(result.stdout, /Detail 2 1\.4 Report retention: positive report-retention duration in days - 14 days/);
 });
 
@@ -316,7 +321,7 @@ test('simultaneous custom checkout and retention consume details in displayed or
   const customPath = path.join(root, 'Two Detail Managed Source');
   const result = run(['--execute', '--repo-remote', origin, '--enable-repo-auto-update'], {
     env: isolatedHomeEnv(root),
-    input: ['custom', 'A', 'B', 'keep', 'B', customPath, '21'].join('\n'),
+    input: ['custom', 'B', 'A', 'keep', 'B', customPath, '21'].join('\n'),
     timeout: 300000,
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
@@ -337,7 +342,7 @@ test('preselected path and helper details share rendering consumption and summar
     '--approve-codex-config-proposal',
   ], {
     env: isolatedHomeEnv(root),
-    input: ['A', 'B', 'B', customPath, '30', '1'].join('\n'),
+    input: ['B', 'A', 'B', customPath, '30', '1'].join('\n'),
     timeout: 300000,
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
