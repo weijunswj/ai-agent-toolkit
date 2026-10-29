@@ -42,6 +42,8 @@ const EDIT_TOOL = 'mcp__hearthbot__edit_message';
 const CHAT_READ_TOOL = 'mcp__hearthbot__read_project_chat';
 const TRACKED_TOOLS = new Set([POST_TOOL, EDIT_TOOL, CHAT_READ_TOOL]);
 const SPAWN_RELAY = /^\s*<relay\b[^<>]*\breason=["']spawn["']/;
+// Sorts after every ISO time: an owner message with no sent-at counts as later than any chat post.
+const LATEST_TIME = String.fromCharCode(0xffff);
 const PROJECTS_TOOL = /^mcp__hearthbot__/;
 const SHELL_TOOL = /^(?:Bash|PowerShell)$/;
 const MERGE_TOOL = /^mcp__.*merge_pull_request$/i;
@@ -200,7 +202,7 @@ function readTranscript(lines) {
       if (id !== runningId || owner.some(({ thread }) => thread !== runningId)) post.ownerAfter = true;
     }
     for (const { at } of owner) {
-      const time = at || '￿';
+      const time = at || LATEST_TIME;
       if (ownerAt === null || time > ownerAt) ownerAt = time;
     }
     running = null;
@@ -228,6 +230,8 @@ function readTranscript(lines) {
             && !posts.get(latest.id)?.ownerAfter && (ownerAt === null || ownerAt < latest.created_at)) {
             running = { id: latest.id, size: bytes(latest.body) };
             newest = latest.id;
+            // Recorded as a top-level post, so a later owner message closes it to edits and its edits are layout-checked.
+            posts.set(latest.id, { text: latest.body, reply: false, ownerAfter: false });
           }
         } else if (call.name === POST_TOOL) {
           const id = resultText(block).match(MESSAGE_ID)?.[1];

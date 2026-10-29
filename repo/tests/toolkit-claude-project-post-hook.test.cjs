@@ -411,6 +411,40 @@ test('a project chat read to its last page makes the coordinator\'s newest post 
   assert.match(post([early, read([OWNER_TOP, OLD_POST]), call(POST, { text: 'Second.' }, '{"message_id":"cmsg_D4","thread_id":"cmsg_D4"}')]), /cmsg_D4/);
 });
 
+test('a chat read over two pages counts only its last page, reached with a cursor', () => {
+  // Pages run oldest first: the first page (no cursor) has more after it, and the cursor read reaches the newest.
+  const firstPage = call(READ, { limit: 2 }, listing([OWNER_TOP, chatMessage('agent', 'cmsg_C5', '**Now:** old', '05')], true));
+  const lastPage = messages => call(READ, { limit: 2, cursor: 'c' }, listing(messages));
+  assert.equal(post([early, firstPage]), '');
+  assert.match(post([early, firstPage, lastPage([chatMessage('user', 'cmsg_U8', 'ok', '08'), OLD_POST])]), /cmsg_C9/);
+  assert.doesNotMatch(post([early, firstPage, lastPage([chatMessage('user', 'cmsg_U8', 'ok', '08'), OLD_POST])]), /cmsg_C5/);
+  // The owner's message newest on the last page opens a fresh post, whatever the first page held.
+  assert.equal(post([early, firstPage, lastPage([OLD_POST, chatMessage('user', 'cmsg_U9', 'ok', '20')])]), '');
+});
+
+test('a post an owner message was queued after is never taken over from a chat read', () => {
+  // The owner wrote just before the post, but the message was queued after it: the post is closed to edits, so the
+  // read must not make it the running post as well, or both a fresh post and an edit would be refused.
+  const queuedOwner = { type: 'queue-operation', operation: 'enqueue', content: '<wake><project id="p"><thread ts="cmsg_W"><message from="human" sent-at="2026-10-29T01:08:00Z">wait</message></thread></project></wake>' };
+  const own = call(POST, { text: LAID_OUT }, '{"message_id":"cmsg_C9","thread_id":"cmsg_C9"}');
+  const entries = [early, own, queuedOwner, read([OWNER_TOP, OLD_POST])];
+  const editC9 = (list, text) => decide({ tool_name: EDIT, transcript_path: 't', tool_input: { message_id: 'cmsg_C9', text } }, () => lines(list));
+  const appended = LAID_OUT.replace('\n**Waiting on you', '\n- **[10:00] Update:** new.\n**Waiting on you');
+  assert.equal(post(entries), '');
+  assert.match(editC9(entries, appended), /post fresh/);
+});
+
+test('a post taken over from a chat read is a top-level post: an owner message closes it and edits are checked', () => {
+  const taken = chatMessage('agent', 'cmsg_C9', LAID_OUT, '10');
+  const editC9 = (list, text) => decide({ tool_name: EDIT, transcript_path: 't', tool_input: { message_id: 'cmsg_C9', text } }, () => lines(list));
+  const appended = LAID_OUT.replace('\n**Waiting on you', '\n- **[10:00] Update:** new.\n**Waiting on you');
+  assert.equal(editC9([early, read([OWNER_TOP, taken])], appended), '');
+  // An edit that drops an earlier Update line is refused, as for the session's own posts.
+  assert.match(editC9([early, read([OWNER_TOP, taken])], appended.replace('- **[09:41] Update:** built the layout checks and their tests.\n', '')), /drops or changes/);
+  // After an edit, an owner message still closes it to edits.
+  assert.match(editC9([early, read([OWNER_TOP, taken]), call(EDIT, { message_id: 'cmsg_C9', text: appended }, 'ok'), wake()], `${appended.replace('\n**Waiting on you', '\n- **[10:10] Update:** more.\n**Waiting on you')}`), /post fresh/);
+});
+
 test('an owner message newest in the chat counts as the owner writing, so the session posts fresh', () => {
   const ownerLast = read([OLD_POST, chatMessage('user', 'cmsg_U2', 'ok', '20')]);
   assert.equal(post([wake(), call(POST, { text: 'First.' }), ownerLast]), '');
