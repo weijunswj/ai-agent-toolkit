@@ -1,5 +1,10 @@
 # Toolkit Changelog
 
+## 3.17.0 (gate route for Projects thread launches)
+
+- **Gate route hook:** a new Claude Code hook on the Claude Projects thread launch tool holds gate threads to their pinned route. A brief that runs a gate carries a `Gate:` line (G0, G1, G2, G2 recheck, delta review, design challenge, or none). A gate launch must pass the effort and model of its stack registry route and the device the project's `GATE ROUTE:` memory line asks for (local Remote Control in a named folder, cloud, or any). Otherwise the launch is refused, and the refusal lists every wrong field with the exact values to pass. A brief that mentions a gate (a gate label, gate, recheck, reviewer or independent review) with no `Gate:` line is refused until it says which gate it is; an independent review declares `Gate: G2`. Other threads, other tools and a hook that cannot start pass.
+- **Projects skill:** the Threads section says gate briefs carry the `Gate:` line and their route, Binding defines the `GATE ROUTE:` line, and setup writes it at the Bind step from the pinned profile and the owner's answer on where gate work runs. The setup inventory has a row for it.
+
 ## 3.16.7 (credentials and plain-text findings before a push)
 
 ### Check before a push
