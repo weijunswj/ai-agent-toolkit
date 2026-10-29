@@ -206,11 +206,13 @@ function windowsRows(registry, folders, scheduler, home) {
       if (owned) {
         const last = readLastRun(recorded.id, home);
         row.state = 'Toolkit';
-        // The job's record counts only for the run Task Scheduler last started (the same 2 second
-        // rule as the first-run check): a run that stopped before writing one is not shown as the
-        // previous good run.
+        // The job writes its record as it starts and again as it ends, so a record that ended (or,
+        // still running, started) before Task Scheduler's last run time, less 2 seconds, belongs to
+        // an older run: the newer one stopped before writing anything, and is not shown as the
+        // previous good run. A start that IgnoreNew dropped while a run was still going moves the
+        // Windows time too; that run's record ends after it and still counts.
         const windowsTime = task.last_run ? Date.parse(task.last_run) : NaN;
-        const fresh = last && (!Number.isFinite(windowsTime) || Date.parse(last.started) >= windowsTime - 2000);
+        const fresh = last && (!Number.isFinite(windowsTime) || Date.parse(last.finished || last.started) >= windowsTime - 2000);
         if (fresh) Object.assign(row, { last_run: last.finished || last.started || row.last_run, result: safeText(last.status), summary: (Array.isArray(last.summary) ? last.summary : []).slice(0, 4).map(line => safeText(line)) });
         else if (Number.isFinite(windowsTime)) row.result = 'no result recorded (the run stopped before writing one)';
       } else if (adopted) row.state = 'adopted (recorded, never changed by Toolkit)';

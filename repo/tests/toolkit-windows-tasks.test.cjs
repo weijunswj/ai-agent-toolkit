@@ -492,6 +492,17 @@ test('L: a run that stopped before writing its record is not shown as the previo
   Object.assign(live, { last_run: '2026-10-29T01:00:06.500Z' });
   const same = tasks.listTasks({ home, platform: 'win32', scheduler, folderFor: () => null }).rows.find(item => item.name === 'TOOLKIT - PROGRAMME SWEEP');
   assert.equal(same.result, 'ok');
+  // Seen on WJ_Lappy: a run started at 11:58 was still going when the 12:00 trigger fired. IgnoreNew
+  // dropped that start but Windows still showed 12:00 as the last run; the record that ended at 12:07
+  // is that run's.
+  tasks.writeLastRun('toolkit-programme-sweep', { started: '2026-10-29T03:58:10.000Z', finished: '2026-10-29T04:07:30.000Z', exit: 0, status: 'ok', summary: ['Programme refresh: done.'] }, home);
+  Object.assign(live, { last_run: '2026-10-29T04:00:00.000Z' });
+  const overlapped = tasks.listTasks({ home, platform: 'win32', scheduler, folderFor: () => null }).rows.find(item => item.name === 'TOOLKIT - PROGRAMME SWEEP');
+  assert.deepEqual([overlapped.result, overlapped.last_run], ['ok', '2026-10-29T04:07:30.000Z']);
+  // A run that died after writing its start record shows that it is unfinished, not the older result.
+  tasks.writeLastRun('toolkit-programme-sweep', { started: '2026-10-29T05:00:01.000Z', finished: null, exit: null, status: 'running', summary: [] }, home);
+  Object.assign(live, { last_run: '2026-10-29T05:00:00.000Z' });
+  assert.equal(tasks.listTasks({ home, platform: 'win32', scheduler, folderFor: () => null }).rows.find(item => item.name === 'TOOLKIT - PROGRAMME SWEEP').result, 'running');
 });
 
 test('L: a recorded task deleted by hand shows missing; an unmarked task in the folder shows found, not recorded', (t) => {
