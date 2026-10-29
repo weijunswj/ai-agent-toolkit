@@ -289,7 +289,7 @@ function testJobText(system, ids) {
     '        run: npm ci --ignore-scripts',
     '',
     '      - name: Set up Python',
-    '        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0',
+    '        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0',
     '        with:',
     "          python-version: '3.12'",
     '',
@@ -297,7 +297,7 @@ function testJobText(system, ids) {
     `        run: node repo/scripts/run-tests.cjs --shard \${{ matrix.shard }} --os ${system} --temp-root "\${{ runner.temp }}/tests" --summary "\${{ runner.temp }}/summary/test-summary-\${{ matrix.shard }}.json"`,
     '',
     '      - name: Upload test summary',
-    '        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1',
+    '        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2',
     '        with:',
     '          name: test-summary-${{ matrix.shard }}',
     '          path: ${{ runner.temp }}/summary/test-summary-${{ matrix.shard }}.json',
@@ -346,14 +346,14 @@ function validateJobText(commands) {
     '          node-version: 22',
     '',
     '      - name: Download test summaries',
-    '        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1',
+    '        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2',
     '        with:',
     '          pattern: test-summary-*',
     '          path: ${{ runner.temp }}/test-summaries',
     '          merge-multiple: true',
     '',
     '      - name: Set up Python',
-    '        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0',
+    '        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0',
     '        with:',
     "          python-version: '3.12'",
     '',
@@ -455,14 +455,36 @@ function workflowJobs(source) {
   }));
 }
 
+// One pinned action line: the action, a full commit SHA and its version comment.
+const PINNED_USES = /^( {8}uses: [A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+@)[0-9a-f]{40} # v\d+\.\d+\.\d+$/;
+
+// The workflow text with each action pin update put back to its pinned line, so a Dependabot update
+// that changes only the commit SHA and version comment of the same action passes. A different
+// action, a tag or short ref, a missing version comment or any other edit stays a difference.
+function withPinUpdatesAccepted(text, expected) {
+  const lines = text.split('\n');
+  const pinned = expected.split('\n');
+  if (lines.length !== pinned.length) return text;
+  return lines.map((line, index) => {
+    const found = line.match(PINNED_USES);
+    const want = pinned[index].match(PINNED_USES);
+    return found && want && found[1] === want[1] ? pinned[index] : line;
+  }).join('\n');
+}
+
 // Drift guard for .github/workflows/validate.yml: the whole file matches its pinned text, with only
-// the gate command list taken from the file; each command but the last is a plain repository script
-// and the last is the summary check. The per-job checks before the whole-file comparison say what
-// moved when they can.
+// the gate command list taken from the file and action pin updates accepted (withPinUpdatesAccepted);
+// each command but the last is a plain repository script and the last is the summary check. The
+// per-job checks before the whole-file comparison say what moved when they can.
 function workflowErrors(source, manifest) {
   const errors = [];
-  const text = source.replace(/\r\n/g, '\n');
-  for (const [pattern, label] of FORBIDDEN) if (pattern.test(text)) errors.push(`validate.yml must not contain ${label}`);
+  const raw = source.replace(/\r\n/g, '\n');
+  for (const [pattern, label] of FORBIDDEN) if (pattern.test(raw)) errors.push(`validate.yml must not contain ${label}`);
+  let commands = null;
+  let commandError = null;
+  try { commands = gateCommands(raw); }
+  catch (error) { commandError = error.message; }
+  const text = commands ? withPinUpdatesAccepted(raw, workflowText(manifest, commands)) : raw;
   const jobs = workflowJobs(text);
   const expected = ['tests-linux', 'tests-windows', 'personal-data', 'validate'];
   if ([...jobs.keys()].join(',') !== expected.join(',')) errors.push(`validate.yml jobs must be exactly ${expected.join(', ')} in that order (found ${[...jobs.keys()].join(', ') || 'none'})`);
@@ -482,14 +504,12 @@ function workflowErrors(source, manifest) {
     if (lines[lines.length - 1].trim() !== VERIFY_COMMAND) errors.push(`the Run validation step must end with ${VERIFY_COMMAND}`);
     if (!/^ {10}TEST_LEGS: \$\{\{ toJSON\(needs\) \}\}$/m.test(aggregate)) errors.push('the Run validation step must pass TEST_LEGS: ${{ toJSON(needs) }}');
   }
-  let commands = null;
-  try { commands = gateCommands(text); }
-  catch (error) { errors.push(error.message); }
+  if (commandError) errors.push(commandError);
   if (commands) {
     for (const command of commands.slice(0, -1)) {
       if (!PLAIN_GATE_COMMAND.test(command)) errors.push(`the Run validation command "${command}" must be a plain node repo/scripts/<name>.cjs line with no shell syntax`);
     }
-    if (text !== workflowText(manifest, commands)) errors.push('validate.yml differs from its pinned text (repo/scripts/ci-test-shards.cjs workflowText); only the Run validation command list may change');
+    if (text !== workflowText(manifest, commands)) errors.push('validate.yml differs from its pinned text (repo/scripts/ci-test-shards.cjs workflowText); only the Run validation command list and the commit SHA and version comment of a pinned action may change');
   }
   return errors;
 }

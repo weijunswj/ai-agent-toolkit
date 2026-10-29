@@ -438,7 +438,8 @@ test('Claude probe timeout cannot silently suppress the real managed bank', () =
   assert.equal(result.status, 23, result.stderr || result.stdout);
   assert.equal(markerCount(result.stdout, core.QUESTION_BANK_BEGIN), 1);
   assert.equal(markerCount(result.stdout, core.QUESTION_BANK_COMPLETE), 1);
-  assert.match(result.stdout, /could not be verified|checks the Claude Code Toolkit plugin after you answer|unavailable/i);
+  // The bank's Current column shows the plugin's short state.
+  assert.match(result.stdout, /could not be verified|checked after you answer|unavailable/i);
   assert.equal(fs.existsSync(path.join(fixture.managedPath, 'BRIDGE_ARGS.log')), false);
   assert.equal(fs.existsSync(codexConfig(fixture.root)), false);
 });

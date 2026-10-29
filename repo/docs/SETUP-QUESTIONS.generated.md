@@ -5,17 +5,17 @@ This reference uses a privacy-safe representative Codex state in which all curre
 
 Toolkit setup choices - 8 questions across 3 sections
 
-Bank reference: X21A-EH91-FXWP-XYJB
+Bank reference: WM2Q-HSE3-BJD8-2NDH
 
 Quick index
 
-1.1 Update source - Recommended: B - Keep the current update source
+1.1 Update source - Recommended: A - Keep current
 1.2 Automatic updates - Recommended: A - Turn on
-1.3 Update reports - Recommended: A - Keep reports
-1.4 Report retention - Recommended: C - Keep current
-1.5 Raise Codex's instruction limit - Recommended: A - Raise it
+1.3 Update reports - Recommended: B - Keep current
+1.4 Report retention - Recommended: B - Keep current
+1.5 Raise Codex's instruction limit - Recommended: B - Keep current
 2.1 Codex helper capacity - Recommended: A - One helper
-2.2 Codex Toolkit maintenance - Recommended: A - Turn on
+2.2 Codex Toolkit maintenance - Recommended: B - Keep current
 3.1 Copy Toolkit's skills into Antigravity? - Recommended: B - Keep current
 
 
@@ -29,7 +29,7 @@ Quick index
 
 **Verification:** state-derived
 
-**Recommended:** B - Keep the current update source
+**Recommended:** A - Keep current
 
 **Recommended outcome:** Keep using the verified dedicated clean managed copy.
 
@@ -37,13 +37,12 @@ Quick index
 
 **Choices:**
 
-- **A. Use the dedicated clean update copy** - Create or reuse the standard managed checkout, verify its clean main branch, and make it the update source without moving or deleting another checkout.
-- **B. Keep the current update source** - Preserve this effective behavior: Toolkit uses the dedicated clean managed copy for updates.
-- **C. Choose another location** - Create or reuse a clean Toolkit checkout at the approved location and make that location the managed update source; existing managed copies are not migrated or deleted.
+- **A. Keep current** - Preserve this effective behavior: Toolkit uses the dedicated clean managed copy for updates.
+- **B. Choose another location** - Create or reuse a clean Toolkit checkout at the approved location and make that location the managed update source; existing managed copies are not migrated or deleted.
 
 **After applying:** After final approval, setup will create or verify only the selected managed checkout and store it as Toolkit update state. The active project checkout is unchanged; no existing managed copy is moved or removed.
 
-**Selected:** B - Keep the current update source
+**Selected:** A - Keep current
 
 ---
 
@@ -63,9 +62,9 @@ Quick index
 
 **Choices:**
 
-- **A. Turn on** - Store automatic maintenance as enabled so trusted startup maintenance checks for, verifies, and safely activates clean updates.
+- **A. Turn on** - Store automatic maintenance as enabled so trusted startup maintenance checks for, verifies, and safely activates clean updates, and point automatic updates at the update source chosen above.
 - **B. Turn off** - Disable startup update checks and automatic hub synchronization; manual `setup toolkit` or explicit maintenance remains available.
-- **C. Keep current** - Preserve this effective behavior: Automatic startup update checks are on.
+- **C. Keep current** - Preserve this effective behavior: Automatic startup update checks are on. The update source it checks stays as it is.
 
 **After applying:** This changes Toolkit maintenance state and future trusted SessionStart behavior; it does not directly edit native host configuration and does not require a restart by itself.
 
@@ -81,21 +80,20 @@ Quick index
 
 **Verification:** verified
 
-**Recommended:** A - Keep reports
+**Recommended:** B - Keep current
 
-**Recommended outcome:** Keep meaningful reports; open only reports that require action.
+**Recommended outcome:** Preserve this effective behavior: Meaningful maintenance reports are kept; only action-required reports open automatically.
 
 **Why:** A short-lived, privacy-safe record makes failed or safety-blocked maintenance diagnosable without making routine success noisy.
 
 **Choices:**
 
-- **A. Keep reports** - Create deduplicated reports for meaningful maintenance, keep successful reports closed, and automatically open only reports classified as requiring action.
-- **B. Do not keep reports** - Stop creating normal Toolkit maintenance reports; concise failure or safety status still appears when action is required.
-- **C. Keep current** - Preserve this effective behavior: Meaningful maintenance reports are kept; only action-required reports open automatically.
+- **A. Do not keep reports** - Stop creating normal Toolkit maintenance reports; concise failure or safety status still appears when action is required.
+- **B. Keep current** - Preserve this effective behavior: Meaningful maintenance reports are kept; only action-required reports open automatically.
 
 **After applying:** This changes Toolkit report state only. It does not change native host configuration, and no restart is required.
 
-**Selected:** A - Keep reports
+**Selected:** B - Keep current
 
 ---
 
@@ -107,7 +105,7 @@ Quick index
 
 **Verification:** verified
 
-**Recommended:** C - Keep current
+**Recommended:** B - Keep current
 
 **Recommended outcome:** Keep the effective seven-day retention window.
 
@@ -115,13 +113,12 @@ Quick index
 
 **Choices:**
 
-- **A. 7 days** - Use the seven-day retention window and remove only eligible Toolkit maintenance reports older than that window.
-- **B. Choose another duration** - Use the approved positive day count for future Toolkit report cleanup; no unrelated logs or project files are considered.
-- **C. Keep current** - Preserve this effective behavior: Toolkit maintenance reports are currently kept for 7 day(s).
+- **A. Choose another duration** - Use the approved positive day count for future Toolkit report cleanup; no unrelated logs or project files are considered.
+- **B. Keep current** - Preserve this effective behavior: Toolkit maintenance reports are currently kept for 7 day(s).
 
 **After applying:** The approved duration is stored in Toolkit state. Eligible Toolkit maintenance-report cleanup runs during the approved setup and future maintenance; unrelated files are never included.
 
-**Selected:** C - Keep current
+**Selected:** B - Keep current
 
 ---
 
@@ -133,21 +130,20 @@ Quick index
 
 **Verification:** verified
 
-**Recommended:** A - Raise it
+**Recommended:** B - Keep current
 
-**Recommended outcome:** Raise Codex's instruction limit to 65536.
+**Recommended outcome:** Preserve this effective behavior: Toolkit keeps Codex's instruction limit raised.
 
 **Why:** Repository rules reach Codex whole; the change is one marked line that is backed up and reversible.
 
 **Choices:**
 
-- **A. Raise it** - Raise a lower value to 65536 now and keep it there at later Codex session starts; every change prints a line and writes an update report.
-- **B. Leave it** - Do not raise it; if Toolkit raised it earlier, put the previous value back. Setup still reports the combined size.
-- **C. Keep current** - Preserve this effective behavior: Toolkit keeps Codex's instruction limit raised.
+- **A. Leave it** - Do not raise it; if Toolkit raised it earlier, put the previous value back. Setup still reports the combined size.
+- **B. Keep current** - Preserve this effective behavior: Toolkit keeps Codex's instruction limit raised.
 
 **After applying:** This stores your choice in Toolkit state and, on a yes, edits `~/.codex/config.toml` at the end of setup. Start a new Codex session to use the new limit.
 
-**Selected:** A - Raise it
+**Selected:** B - Keep current
 
 ---
 
@@ -191,21 +187,20 @@ Quick index
 
 **Verification:** verified
 
-**Recommended:** A - Turn on
+**Recommended:** B - Keep current
 
-**Recommended outcome:** Turn on native Toolkit cache refresh and safe Windows hook maintenance.
+**Recommended outcome:** Preserve this effective behavior: Automatic Codex Toolkit maintenance is on.
 
 **Why:** Keeping the installed cache aligned with the verified managed source avoids stale setup behavior after Toolkit updates.
 
 **Choices:**
 
-- **A. Turn on** - Enable future native Toolkit cache refresh when maintenance detects stale or incompatible files.
-- **B. Turn off** - Disable future automatic cache refresh; the installed Toolkit plugin is not uninstalled, and manual `setup toolkit` repair or refresh remains available.
-- **C. Keep current** - Preserve this effective behavior: Automatic Codex Toolkit maintenance is on.
+- **A. Turn off** - Disable future automatic cache refresh; the installed Toolkit plugin is not uninstalled, and manual `setup toolkit` repair or refresh remains available.
+- **B. Keep current** - Preserve this effective behavior: Automatic Codex Toolkit maintenance is on.
 
 **After applying:** The approved setup always verifies the current native Toolkit plugin. If files change, setup may update the Codex plugin cache and Windows hook launchers; then open `/hooks` in the Codex app and trust the updated Toolkit hooks. Turning maintenance off only changes future Toolkit state and does not uninstall the plugin.
 
-**Selected:** A - Turn on
+**Selected:** B - Keep current
 
 ---
 
@@ -228,7 +223,7 @@ Quick index
 
 **Choices:**
 
-- **A. Copy and keep current** - Copy Toolkit's portable skills and the official n8n skills into ~/.gemini/config/skills, update Toolkit's copies when they are out of date, and record them.
+- **A. Copy and keep updated** - Copy Toolkit's portable skills and the official n8n skills into ~/.gemini/config/skills, update Toolkit's copies when they are out of date, and record them.
 - **B. Keep current** - Preserve this effective behavior: Toolkit's skills are not in Antigravity's global skills folder.
 
 **After applying:** Start a new Antigravity session to load changed skills.
@@ -240,7 +235,7 @@ Quick index
 Reply with either:
 
 - `all recommended`
-- only your changes, for example: `1.2=B, 1.3=B`
+- only your changes, for example: `1.2=B, 1.3=A`
 
 Anything you do not list takes its recommendation.
 
@@ -250,14 +245,14 @@ Setup run with `--host claude-code` shows this bank instead, for the same repres
 
 Toolkit setup choices - 8 questions across 3 sections
 
-Bank reference: 4884-3YP2-8F7X-0W4Q
+Bank reference: RTK2-FD6N-R8Q4-78ES
 
 Quick index
 
-1.1 Update source - Recommended: B - Keep the current update source
+1.1 Update source - Recommended: A - Keep current
 1.2 Automatic updates - Recommended: A - Turn on
-1.3 Update reports - Recommended: A - Keep reports
-1.4 Report retention - Recommended: C - Keep current
+1.3 Update reports - Recommended: B - Keep current
+1.4 Report retention - Recommended: B - Keep current
 2.1 How should Claude Code use agents? - Recommended: A - Toolkit repos: main session + Toolkit planning and build helpers only. Elsewhere: one layer of subagents.
 3.1 Keep Toolkit available in Claude Code? - Recommended: A - Install or refresh
 3.2 Use Toolkit's recommended Claude Code settings? - Recommended: A - Turn on
@@ -274,7 +269,7 @@ Quick index
 
 **Verification:** state-derived
 
-**Recommended:** B - Keep the current update source
+**Recommended:** A - Keep current
 
 **Recommended outcome:** Keep using the verified dedicated clean managed copy.
 
@@ -282,13 +277,12 @@ Quick index
 
 **Choices:**
 
-- **A. Use the dedicated clean update copy** - Create or reuse the standard managed checkout, verify its clean main branch, and make it the update source without moving or deleting another checkout.
-- **B. Keep the current update source** - Preserve this effective behavior: Toolkit uses the dedicated clean managed copy for updates.
-- **C. Choose another location** - Create or reuse a clean Toolkit checkout at the approved location and make that location the managed update source; existing managed copies are not migrated or deleted.
+- **A. Keep current** - Preserve this effective behavior: Toolkit uses the dedicated clean managed copy for updates.
+- **B. Choose another location** - Create or reuse a clean Toolkit checkout at the approved location and make that location the managed update source; existing managed copies are not migrated or deleted.
 
 **After applying:** After final approval, setup will create or verify only the selected managed checkout and store it as Toolkit update state. The active project checkout is unchanged; no existing managed copy is moved or removed.
 
-**Selected:** B - Keep the current update source
+**Selected:** A - Keep current
 
 ---
 
@@ -308,9 +302,9 @@ Quick index
 
 **Choices:**
 
-- **A. Turn on** - Store automatic maintenance as enabled so trusted startup maintenance checks for, verifies, and safely activates clean updates.
+- **A. Turn on** - Store automatic maintenance as enabled so trusted startup maintenance checks for, verifies, and safely activates clean updates, and point automatic updates at the update source chosen above.
 - **B. Turn off** - Disable startup update checks and automatic hub synchronization; manual `setup toolkit` or explicit maintenance remains available.
-- **C. Keep current** - Preserve this effective behavior: Automatic startup update checks are on.
+- **C. Keep current** - Preserve this effective behavior: Automatic startup update checks are on. The update source it checks stays as it is.
 
 **After applying:** This changes Toolkit maintenance state and future trusted SessionStart behavior; it does not directly edit native host configuration and does not require a restart by itself.
 
@@ -326,21 +320,20 @@ Quick index
 
 **Verification:** verified
 
-**Recommended:** A - Keep reports
+**Recommended:** B - Keep current
 
-**Recommended outcome:** Keep meaningful reports; open only reports that require action.
+**Recommended outcome:** Preserve this effective behavior: Meaningful maintenance reports are kept; only action-required reports open automatically.
 
 **Why:** A short-lived, privacy-safe record makes failed or safety-blocked maintenance diagnosable without making routine success noisy.
 
 **Choices:**
 
-- **A. Keep reports** - Create deduplicated reports for meaningful maintenance, keep successful reports closed, and automatically open only reports classified as requiring action.
-- **B. Do not keep reports** - Stop creating normal Toolkit maintenance reports; concise failure or safety status still appears when action is required.
-- **C. Keep current** - Preserve this effective behavior: Meaningful maintenance reports are kept; only action-required reports open automatically.
+- **A. Do not keep reports** - Stop creating normal Toolkit maintenance reports; concise failure or safety status still appears when action is required.
+- **B. Keep current** - Preserve this effective behavior: Meaningful maintenance reports are kept; only action-required reports open automatically.
 
 **After applying:** This changes Toolkit report state only. It does not change native host configuration, and no restart is required.
 
-**Selected:** A - Keep reports
+**Selected:** B - Keep current
 
 ---
 
@@ -352,7 +345,7 @@ Quick index
 
 **Verification:** verified
 
-**Recommended:** C - Keep current
+**Recommended:** B - Keep current
 
 **Recommended outcome:** Keep the effective seven-day retention window.
 
@@ -360,13 +353,12 @@ Quick index
 
 **Choices:**
 
-- **A. 7 days** - Use the seven-day retention window and remove only eligible Toolkit maintenance reports older than that window.
-- **B. Choose another duration** - Use the approved positive day count for future Toolkit report cleanup; no unrelated logs or project files are considered.
-- **C. Keep current** - Preserve this effective behavior: Toolkit maintenance reports are currently kept for 7 day(s).
+- **A. Choose another duration** - Use the approved positive day count for future Toolkit report cleanup; no unrelated logs or project files are considered.
+- **B. Keep current** - Preserve this effective behavior: Toolkit maintenance reports are currently kept for 7 day(s).
 
 **After applying:** The approved duration is stored in Toolkit state. Eligible Toolkit maintenance-report cleanup runs during the approved setup and future maintenance; unrelated files are never included.
 
-**Selected:** C - Keep current
+**Selected:** B - Keep current
 
 ---
 
@@ -470,7 +462,7 @@ Quick index
 
 **Choices:**
 
-- **A. Copy and keep current** - Copy Toolkit's portable skills and the official n8n skills into ~/.gemini/config/skills, update Toolkit's copies when they are out of date, and record them.
+- **A. Copy and keep updated** - Copy Toolkit's portable skills and the official n8n skills into ~/.gemini/config/skills, update Toolkit's copies when they are out of date, and record them.
 - **B. Keep current** - Preserve this effective behavior: Toolkit's skills are not in Antigravity's global skills folder.
 
 **After applying:** Start a new Antigravity session to load changed skills.

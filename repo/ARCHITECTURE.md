@@ -11,7 +11,7 @@ Last reviewed against `main` `37877aedbadfc2baf1f70c2e6b9f2281430174b8`.
 | Skills | `skills/` | The copyable product: one folder per skill, edited directly |
 | Agent-rule sources | `repo/contracts/agent-rules/` | Global rules, gate rules, governed-repository rules, n8n safety rules, skill routing |
 | Repo-local templates | `repo/contracts/agent-rules/repo-local/` | Managed `AGENTS.md` template, the one-line `CLAUDE.md` and the Antigravity bootstrap, projected into `skills/repository-agent-rules/repo-local/` |
-| Projects controller skill | `repo/contracts/claude-projects/web-controller-projects/` | Source of the Claude Projects coordinator skill and its `reference/` files, uploaded to claude.ai by hand, the managed project-instructions block it places and its scheduled task templates; never offered as a plugin skill |
+| Projects controller skill | `repo/contracts/claude-projects/web-controller-projects/` | Source of the Claude Projects coordinator skill and its `reference/` files, updated on claude.ai from a skill card the owner saves (or uploaded by hand where no card tool exists), the managed project-instructions block it places and its scheduled task templates; never offered as a plugin skill |
 | Controller kernel | `repo/contracts/controller-kernel/` | Stack registry, controller decision, gate IR and Codex adapter schemas |
 | Bridge contract | `repo/contracts/toolkit-local-bridge/` | Package version and native plugin inputs |
 | Lane map | `repo/contracts/lanes/lane-map.json` | Which files the Claude and Codex lanes own and which stay integration-owned |

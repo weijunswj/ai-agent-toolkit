@@ -11,7 +11,7 @@ const { ToolkitInstallHealthCheck, STATUS, claudeAccountPluginFolders, claudeAcc
 const { ClaudeHelperAgentRenderer } = require('../scripts/toolkit-claude-helper-agents.cjs');
 const { ClaudeNamedHelperPolicy } = require('../scripts/toolkit-claude-helper-policy.cjs');
 const {
-  assert, fs, path, repoRoot, tmpRoot, isolatedHomeEnv, writeFile, run, runTestGit, createGitBackedSetupRepo,
+  assert, fs, path, repoRoot, tmpRoot, isolatedHomeEnv, writeFile, run, runTestGit, createGitBackedSetupRepo, escapeRegExp,
 } = require('./toolkit-setup-test-support.cjs');
 
 const VERSION = JSON.parse(fs.readFileSync(path.join(repoRoot, '.claude-plugin', 'plugin.json'), 'utf8')).version;
@@ -240,9 +240,25 @@ test('the Projects controller skill check compares the synced claude.ai copy wit
   writeFile(path.join(synced, 'abc_def', 'web-controller-projects', 'SKILL.md'), '---\nname: web-controller-projects\n---\nVersion: 2026-01-01.1\n');
   const older = check();
   assert.equal(older.status, STATUS.PASSED);
-  assert.match(older.summary, new RegExp(`Your uploaded copy is 2026-01-01\.1; Toolkit has ${repoVersion.replace('.', '\.')}\. Upload .*web-controller-projects/SKILL\.md to claude\.ai`));
+  // The update is offered as a skill card; uploading by hand is only the fallback without a card tool.
+  assert.match(older.summary, new RegExp(`Your uploaded copy is 2026-01-01\\.1; Toolkit has ${escapeRegExp(repoVersion)}\\. Skill card: offer \\S*web-controller-projects/SKILL\\.md as a skill update card to save\\. Without a card tool, upload the folder \\S*web-controller-projects to claude\\.ai`));
+  const reference = path.join(synced, 'abc_def', 'web-controller-projects', 'reference');
+  fs.cpSync(path.join(repoRoot, 'repo', 'contracts', 'claude-projects', 'web-controller-projects', 'reference'), reference, { recursive: true });
+  assert.match(check().summary, /Skill card: offer/, 'reference files equal to Toolkit\'s: a card is enough');
+  writeFile(path.join(reference, 'recurring-tasks.md'), 'edited on the account\n');
+  const edited = check();
+  assert.match(edited.summary, /Your copy has its own reference files, so a skill card is not enough: upload the folder \S*web-controller-projects to claude\.ai/);
+  assert.doesNotMatch(edited.summary, /Skill card: offer/);
   writeFile(path.join(synced, 'abc_def', 'web-controller-projects', 'SKILL.md'), `Version: ${repoVersion}\n`);
   assert.match(check().summary, /Your uploaded copy is current/);
+});
+
+test('the setup skill turns the Projects skill notice into a skill card, with the hand upload only as the fallback', () => {
+  const text = fs.readFileSync(path.join(repoRoot, 'skills', 'toolkit-setup', 'SKILL.md'), 'utf8').replace(/\r\n/g, '\n');
+  assert.match(text, /line says `Skill card: offer <SKILL\.md path>`, offer the update as a card the owner saves rather than asking them to upload it: load `propose_skills` \(ToolSearch\) and call it with kind `improvement`, target and name `web-controller-projects`, the description copied from that SKILL\.md's frontmatter, and `skillMd` set to that file read byte for byte \(never retyped\)\./);
+  assert.match(text, /Then tell the owner to tap Save on the card, and that saving replaces any edits made directly to their claude\.ai copy\./);
+  assert.match(text, /Only when `propose_skills` does not exist in this session, or the call fails, say so and give the owner the line's hand-upload step\./);
+  assert.match(text, /When the line says the copy has its own reference files, a card is not enough: give only the folder upload step\./);
 });
 
 test('the Claude app account copy check reports an older claude.ai copy with the fix, reads only, and blocks nothing', (t) => {

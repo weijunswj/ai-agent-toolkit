@@ -14,8 +14,8 @@ test('missing and misordered conditional details fail before every setup write',
     const { origin, setupRepo } = createGitBackedSetupRepo(root);
     const customPath = path.join(root, 'Must Not Be Written');
     const input = mode === 'missing'
-      ? ['custom', 'A', 'C', 'keep', 'B'].join('\n')
-      : ['custom', 'A', 'B', 'keep', 'B', '14', customPath].join('\n');
+      ? ['custom', 'B', 'B', 'keep', 'B'].join('\n')
+      : ['custom', 'B', 'A', 'keep', 'B', '14', customPath].join('\n');
     const result = run(['--execute', '--repo-remote', origin, '--enable-repo-auto-update'], {
       env: isolatedHomeEnv(root), input, timeout: 300000,
     });
@@ -90,7 +90,8 @@ test('changed-only piped answer applies recommendations except exact indexed cha
   assert.match(result.stdout, /Question answer source: user-approved recommended except listed changes/);
   assert.match(result.stdout, /1\.2 Automatic updates: B - Turn off \(canonical: disable; effective: disable\)/);
   assert.match(result.stdout, /2\.2 Codex Toolkit maintenance: B - Turn off \(canonical: disable; effective: disable\)/);
-  assert.match(result.stdout, /1\.3 Update reports: A - Keep reports \(canonical: enable; effective: enable\)/);
+  // Reports are already kept, so the recommendation is the single Keep current.
+  assert.match(result.stdout, /1\.3 Update reports: B - Keep current \(canonical: keep; effective: enable\)/);
 });
 
 test('cross-process concise replay fails before mapping across a host change', () => {
