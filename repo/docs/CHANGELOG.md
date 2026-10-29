@@ -1,5 +1,11 @@
 # Toolkit Changelog
 
+## 3.17.3 (shorter review rounds)
+
+- **Gate rules:** a G0 plan now splits the work into small slices, one reviewable PR each, with acceptance tests (action, expected result, test file). Before review, the builder checks its own diff against the G2 review section in the same session and notes the result in the PR; this replaces no review. Reviewers rate findings High, Medium or Low: High and Medium block exactly as before, and Low never blocks and goes into one follow-up record per PR. A recheck after a failed review reads the fix commits, the findings they close and the rules they depend on, and widens to the whole diff only where a fix reaches beyond them. The gate rules size cap rose from 10,500 to 11,000 bytes to hold this.
+- **Controller:** findings map to ship blocker (High or Medium) and follow-up (Low). A small fix found mid-lane joins the lane's next slice not yet in review instead of its own PR, unless it repairs the default branch or a safety-floor gap or unblocks other work; the slice takes its highest risk tier. Four sentences that repeated other rules were removed.
+- **Projects skill:** G1 briefs ask for the builder's self-check result, recheck briefs name the fix commits and the findings they close, small fixes go into the next slice's brief, and Low findings are relayed as one follow-up line.
+
 ## 3.17.2 (spacer lines only in the update log)
 
 - **Projects skill:** only the **[HH:MM] Update:** lines in a running post keep the `&nbsp;` spacer line after each one. A question's last choice no longer takes a spacer line; the next numbered item follows it directly. The post hook already passed over spacer lines, so it neither requires nor refuses one anywhere, and its tests now cover questions with and without a leftover spacer.
