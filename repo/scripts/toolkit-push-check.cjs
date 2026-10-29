@@ -14,7 +14,7 @@
 // that the target remote does not already have (its remote-tracking refs, so a remote with none gets
 // the whole history; every remote's when no remote or a URL is named). For a pull request, the commits of --head (else HEAD) not on the
 // base branch (--base, else origin's default branch, else origin/main or origin/master). A folder that
-// is not a repository is not checked.
+// is not a repository is not checked; a folder that cannot be found is refused.
 //
 // The check runs before the whole shell command. When a `git commit` comes earlier in the same
 // command and repository, what it could commit is checked too, marked "not committed yet": the staged
@@ -42,6 +42,13 @@ class CheckSkipped extends Error {}
 function isFile(file) {
   try { return fs.statSync(file).isFile(); } catch { return false; }
 }
+
+function isFolder(folder) {
+  try { return typeof folder === 'string' && fs.statSync(folder).isDirectory(); } catch { return false; }
+}
+
+const FOLDER_MISSING = 'Toolkit could not find the folder this push or pull request runs in, so it could not check what would be sent and refused it. If the same command creates that folder first (`git clone`, `mkdir`, `git worktree add`), run that step as its own command, then the push. Otherwise check the folder in `cd` or `git -C` (`~/...`, and on Windows `C:/...` and Git Bash `/c/...`, all work).';
+const FOLDER_UNREADABLE = 'Toolkit could not read the folder this push or pull request runs in, because it is written with a variable or a command (such as `$HOME`, `$(...)` or `$env:USERPROFILE`), so it could not check what would be sent and refused it. Write the folder out (`~/...` works), or run the command from inside that folder.';
 
 // An environment value by name, ignoring case on Windows as Windows does.
 function environmentValue(environment, name, windows) {
@@ -301,6 +308,10 @@ function checkOutgoing(target, {
   // A source git would read as an option is never passed on.
   if (sources.some((source) => source.startsWith('-') && !REV_OPTIONS.has(source))) return {};
   const allRefs = sources.some((source) => REV_OPTIONS.has(source));
+  // A folder Toolkit cannot find is refused rather than let through unchecked: either it does not
+  // exist yet (made earlier in the same command, so the push can run as its own command after it),
+  // or it is written in a form the check cannot read (a variable or a command substitution).
+  if (!isFolder(target.folder)) return { refusal: /[$%`]/.test(String(target.folder)) ? FOLDER_UNREADABLE : FOLDER_MISSING };
   try {
     const program = git(target.folder);
     if (!program) throw new CheckSkipped('git was not found');
@@ -365,4 +376,4 @@ function checkOutgoing(target, {
   }
 }
 
-module.exports = Object.freeze({ BUDGET_MS, MAX_LISTED, addedLines, checkOutgoing, diffPath, resolveGit });
+module.exports = Object.freeze({ BUDGET_MS, FOLDER_MISSING, FOLDER_UNREADABLE, MAX_LISTED, addedLines, checkOutgoing, diffPath, resolveGit });

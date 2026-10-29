@@ -49,6 +49,36 @@ test('argument lists keep their words: quoting reads back, and a shell wrapper h
   assert.equal(argvText(['powershell', '-c']), 'powershell -c', 'a script option with no script');
 });
 
+test('shellPath reads the home folder, Git Bash drive paths and /tmp as the shell does, and leaves every other path to Node', () => {
+  const { shellPath } = require('../scripts/toolkit-shell-call.cjs');
+  const base = 'C:\\Users\\u\\work';
+  const windows = { platform: 'win32', home: 'C:\\Users\\u', temp: 'C:\\Users\\u\\AppData\\Local\\Temp' };
+  for (const [value, expected] of [
+    ['~', 'C:\\Users\\u'],
+    ['~/repo', 'C:\\Users\\u\\repo'],
+    ['~\\repo\\sub', 'C:\\Users\\u\\repo\\sub'],
+    ['~other/repo', 'C:\\Users\\u\\work\\~other\\repo'],
+    ['/tmp', 'C:\\Users\\u\\AppData\\Local\\Temp'],
+    ['/tmp/scratch', 'C:\\Users\\u\\AppData\\Local\\Temp\\scratch'],
+    ['/tmpfiles/x', 'C:\\tmpfiles\\x'],
+    ['$HOME/repo', 'C:\\Users\\u\\work\\$HOME\\repo'],
+    ['/c/Users/u/repo', 'C:\\Users\\u\\repo'],
+    ['/C/Users/u/repo/', 'C:\\Users\\u\\repo'],
+    ['/d', 'D:\\'],
+    ['/d/', 'D:\\'],
+    ['/cygdrive/e/data', 'E:\\data'],
+    ['/c/Users/u/../v', 'C:\\Users\\v'],
+    ['C:/Users/u/repo', 'C:\\Users\\u\\repo'],
+    ['sub', 'C:\\Users\\u\\work\\sub'],
+    ['..\\other', 'C:\\Users\\u\\other'],
+    ['/cd/x', 'C:\\cd\\x'],
+  ]) assert.equal(shellPath(base, value, windows), expected, value);
+  // Elsewhere /c and /tmp are real folders; ~ is still the home folder.
+  assert.equal(shellPath('/home/u', '/c/Users', { platform: 'linux' }), path.resolve('/home/u', '/c/Users'));
+  assert.equal(shellPath('/home/u', '/tmp/x', { platform: 'linux', temp: '/var/elsewhere' }), path.resolve('/tmp/x'));
+  assert.equal(shellPath('/srv', '~/repo', { platform: 'linux', home: '/home/u' }), path.resolve('/home/u', 'repo'));
+});
+
 test('the shell tool list is the one the gate, the merge hold and the Codex hook use', () => {
   assert.deepEqual(SHELL_TOOL_NAMES, ['Bash', 'PowerShell', 'Monitor', 'exec_command', 'shell', 'local_shell']);
   for (const name of SHELL_TOOL_NAMES) assert.equal(ShellCall.isShellTool(name), true, name);
@@ -114,6 +144,16 @@ test('C7: the governance gate refuses a Codex call whose run folder waits for it
     ['R7', command => ({ tool_name: 'shell', cwd: session, tool_input: { command: command.split(' '), workdir: held } })],
     ['R8', command => ({ tool_name: 'local_shell', cwd: dir, tool_input: { cmd: command, workdir: 'held' } })],
   ];
+  if (process.platform === 'win32') {
+    // A Git Bash drive path to the held folder, in cd, git -C, an absolute word and a Codex workdir.
+    const drive = `/${held[0].toLowerCase()}${held.slice(2).replace(/\\/g, '/')}`;
+    for (const input of [
+      { tool_name: 'Bash', cwd: session, tool_input: { command: `cd ${drive} && git status` } },
+      { tool_name: 'Bash', cwd: session, tool_input: { command: `git -C ${drive} status` } },
+      { tool_name: 'Bash', cwd: session, tool_input: { command: `ls ${drive}` } },
+      { tool_name: 'exec_command', cwd: session, tool_input: { cmd: 'git status', workdir: drive } },
+    ]) assert.match(decide(input)?.deny || '', /works in a repository that is waiting for the user's governance answer/, JSON.stringify(input.tool_input));
+  }
   for (const [row, shape] of rows) {
     assert.match(decide(shape('git status'))?.deny || '', /works in a repository that is waiting for the user's governance answer/, row);
     assert.equal(decide({ ...shape('git status'), tool_input: { ...shape('git status').tool_input, workdir: session } }), null, `${row}: a run folder that is not held`);

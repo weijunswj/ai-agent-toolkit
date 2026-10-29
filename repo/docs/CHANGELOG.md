@@ -7,6 +7,11 @@
 - **Daily check-in:** the **Skill:** line shows the account SKILL.md's size and sha256 next to main's, and a drifted copy that is a cut-short or HTML-escaped Toolkit revision is reported as `SKILL DRIFT: damaged card`, which the coordinator answers with a card thread instead of bringing that text into Toolkit.
 - **Install check:** the `Skill card: offer` line names the file's size and sha256, and the setup agent checks them, the Version line and the frontmatter name before it calls `propose_skills` in its own session.
 
+## 3.19.3 (Git Bash folder paths in the push checks)
+
+- **Folders read as the shell reads them:** a folder or file in `cd`, `git -C`, `--work-tree`, a message or body file, a Codex `workdir` or a path word now resolves the way the shell does in every check (the attribution, bypass, force-push and push checks, the merge hold and the governance gate): a leading `~` is the home folder everywhere, and on Windows a Git Bash drive path (`/c/Users/...`, `/cygdrive/c/...`, any drive letter) names that drive and `/tmp` the user's temp folder. Before, `/c/Users` was read as a folder `c` on the current drive and `~/repo` as a folder `~`, neither of which exists, so in Claude Code a push from such a folder went out unchecked with only a note. Git Bash is the shell behind Claude Code's Bash tool on Windows.
+- **A folder Toolkit cannot find refuses the push:** a push or new pull request whose folder cannot be found is now refused in both hosts, instead of letting it through with a note that the check could not run. When the same command creates the folder first (`git clone`, `mkdir`, `git worktree add`), the refusal says to run that step as its own command, then the push. A folder written as a variable or a command (`$HOME`, `$(...)`, `$env:USERPROFILE`) cannot be read, and the refusal says so.
+
 ## 3.19.2 (links only where the owner acts, and no flattened questions)
 
 - **Projects post hook (skill version 2026-10-29.6, upload it again):** links are required only where the owner acts. A PR, thread or file named in prose or a plain bullet no longer needs a link, in posts and in replies. Every numbered item under the **Waiting on you** header (each question and merge ask) still needs one, and a pull request link there without `/files` is refused with the fix.
