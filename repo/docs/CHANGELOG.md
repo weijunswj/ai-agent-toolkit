@@ -1,5 +1,9 @@
 # Toolkit Changelog
 
+## 3.17.2 (spacer lines only in the update log)
+
+- **Projects skill:** only the **[HH:MM] Update:** lines in a running post keep the `&nbsp;` spacer line after each one. A question's last choice no longer takes a spacer line; the next numbered item follows it directly. The post hook already passed over spacer lines, so it neither requires nor refuses one anywhere, and its tests now cover questions with and without a leftover spacer.
+
 ## 3.17.0 (gate route for Projects thread launches)
 
 - **Gate route hook:** a new Claude Code hook on the Claude Projects thread launch tool holds gate threads to their pinned route. A brief that runs a gate carries a `Gate:` line (G0, G1, G2, G2 recheck, delta review, design challenge, or none). A gate launch must pass the effort and model of its stack registry route and the device the project's `GATE ROUTE:` memory line asks for (local Remote Control in a named folder, cloud, or any). Otherwise the launch is refused, and the refusal lists every wrong field with the exact values to pass. A brief that mentions a gate (a gate label, gate, recheck, reviewer or independent review) with no `Gate:` line is refused until it says which gate it is; an independent review declares `Gate: G2`. Other threads, other tools and a hook that cannot start pass.

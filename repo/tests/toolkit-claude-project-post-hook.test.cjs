@@ -240,24 +240,28 @@ test('layout: Now first, ELI5 last and alone, Update lines without questions, Wa
   for (const options of ['pick (1) merge (2) hold', 'pick 1) merge 2) hold']) {
     assert.match(layoutIssue(LAID_OUT.replace('CI passed.', options)), /numbered options/, options);
   }
-  // Questions under Waiting on you: indented choice bullets and the &nbsp; spacer need no link, the numbered items do.
+  // Questions under Waiting on you: indented choice bullets need no link, the numbered items do. No spacer line is
+  // needed after the last choice.
   const QUESTIONS = LAID_OUT.replace('**Waiting on you (1):**\n1. Merge OK for the hook: [card](#cmsg_CARD)', [
     '**Waiting on you (2):**',
     '1. **Question: merge the hook now?** [card](#cmsg_CARD)',
     '    - **Merge (my pick).** CI is green and the review passed.',
     '    - **Hold.** Wait for the next release.',
-    '    &nbsp;',
     '2. **Question: keep the old wording?** [thread](#cmsg_THREAD)',
     '    - **No (my pick).** The new wording replaces it.',
-    '    &nbsp;',
   ].join('\n'));
   assert.notEqual(QUESTIONS, LAID_OUT);
   assert.equal(layoutIssue(QUESTIONS), '');
   assert.equal(wordingIssue(QUESTIONS), '');
-  // An &nbsp; spacer after each Update line keeps the layout and the edit rules happy.
+  // A spacer left after a question's last choice is neither required nor refused.
+  const LEFTOVER = QUESTIONS.replace('\n2. **Question', '\n    &nbsp;\n2. **Question').replace('replaces it.', 'replaces it.\n    &nbsp;');
+  assert.notEqual(LEFTOVER, QUESTIONS);
+  assert.equal(layoutIssue(LEFTOVER), '');
+  // An &nbsp; spacer after each Update line keeps the layout and the edit rules happy, and leaving it out is not refused.
   const SPACED = QUESTIONS.replace(/(Update:\*\* [^\n]*)/g, '$1\n&nbsp;');
   assert.notEqual(SPACED, QUESTIONS);
   assert.equal(layoutIssue(SPACED), '');
+  assert.equal(editIssue(QUESTIONS.replace(/\n- \*\*\[09:52\][^\n]*/, ''), QUESTIONS), '');
   assert.equal(editIssue(SPACED.replace(/\n- \*\*\[09:52\][^\n]*\n&nbsp;/, ''), SPACED), '');
   assert.match(layoutIssue(QUESTIONS.replace(' [thread](#cmsg_THREAD)', '')), /Waiting on you item "2\. .* has no link/);
   // An unindented or two-space bullet is its own item and still needs a link.
@@ -282,7 +286,7 @@ test('layout: Now first, ELI5 last and alone, Update lines without questions, Wa
   // Spacers in any form, and other lines that are not list items, never end the scan, so a later item with no link
   // is still caught; only an Update or ELI5 line ends the list.
   for (const spacer of ['&nbsp;', '    &nbsp;', '&#160;', '  &#160;  ', '&#xA0;', '&nbsp;&nbsp;', '&nbsp; note', '<br>', '+ plus bullet', '    indented prose']) {
-    const spaced = QUESTIONS.replace('    &nbsp;\n2.', `${spacer}\n2.`).replace(' [thread](#cmsg_THREAD)', '');
+    const spaced = QUESTIONS.replace('\n2. **Question', `\n${spacer}\n2. **Question`).replace(' [thread](#cmsg_THREAD)', '');
     assert.match(layoutIssue(spaced), /Waiting on you item "2\. .* has no link/, JSON.stringify(spacer));
   }
   // A choice that looks like an Update or ELI5 line is still a choice, so the scan goes on to the next item.
