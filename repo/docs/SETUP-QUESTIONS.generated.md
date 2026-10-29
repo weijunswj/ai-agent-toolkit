@@ -5,7 +5,7 @@ This reference uses a privacy-safe representative Codex state in which all curre
 
 Toolkit setup choices - 8 questions across 3 sections
 
-Bank reference: KJF0-G3HW-ZH8Z-ZTQP
+Bank reference: WM2Q-HSE3-BJD8-2NDH
 
 Quick index
 
@@ -245,7 +245,7 @@ Setup run with `--host claude-code` shows this bank instead, for the same repres
 
 Toolkit setup choices - 8 questions across 3 sections
 
-Bank reference: YKJX-3SCK-Y8C7-QKAQ
+Bank reference: RTK2-FD6N-R8Q4-78ES
 
 Quick index
 

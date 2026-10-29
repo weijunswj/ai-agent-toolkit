@@ -127,7 +127,8 @@ test('terminal, piped, plan, JSON, approval and generated docs share canonical r
   for (const row of rows) {
     for (const output of [markdown, terminal, generated]) {
       assert.ok(output.includes(row.title), row.id);
-      assert.ok(output.includes(row.current), row.id);
+      // The bank shows the short current state; the reference shows the full one.
+      assert.ok(output.includes(output === generated ? row.current : row.current_short), row.id);
       if (output === generated || row.recommended !== 'keep') assert.ok(output.includes(row.recommended_outcome), row.id);
       for (const choice of row.choices) assert.ok(output.includes(`${choice.presentation_ref}. ${choice.label}`), `${row.id} ${choice.value}`);
     }
@@ -582,7 +583,8 @@ test('a recommendation that matches the current state shows one recommended Keep
     return { row: core.setupQuestionSpecs(args, current).find((spec) => spec.id === id), args };
   };
   const cases = [
-    // Turn on also points updates at the chosen update source, which Keep current does not, so it never folds.
+    // On, but with no saved source matching 1.1, Turn on would re-point updates, so nothing folds here
+    // (the matching case is in the next test).
     ['automatic-updates', (c) => { c.audit.repo_auto_update = { enabled: true }; }, '', ['enable', 'disable', 'keep']],
     ['update-reports', (c) => { c.audit.update_report_enabled = true; }, 'enable', ['disable', 'keep']],
     ['update-reports', (c) => { c.audit.update_report_enabled = false; }, '', ['enable', 'disable', 'keep']],
@@ -651,7 +653,7 @@ test('automatic updates, Claude agents, the Claude plugin and Codex helpers read
     current.agentProfile = { supported: false, topology: 'root-only' };
     current.claudeSubagentDepth = { state: 'toolkit-one-layer', value: '1' };
     current.nativePlugin = { status: 'verification-deferred', manifest_version: '9.9.9' };
-    current.claudePluginInstall = { installed: true, runningRoot: source };
+    current.claudePluginInstall = { installed: true, runningRoot: source, version: '9.9.9', enabled: true };
     current.claudeSettings = [{ state: 'claude-default' }];
     change(current);
     const args = core.parseArgs(['--plan', '--host', 'claude-code']);
@@ -660,10 +662,24 @@ test('automatic updates, Claude agents, the Claude plugin and Codex helpers read
   const folded = claude(() => {});
   assert.deepEqual(folded['claude-agent-topology'].choices.map((choice) => [choice.value, choice.label]), [['root-only', 'Keep current'], ['broader-native', 'Broader native behaviour']]);
   assert.deepEqual(folded['claude-toolkit-plugin'].choices.map((choice) => [choice.value, choice.label]), [['install', 'Keep current'], ['instructions', 'Show instructions only']]);
-  assert.equal(folded['claude-toolkit-plugin'].current, 'Toolkit 9.9.9 is installed in Claude Code and runs from the update copy.');
+  assert.equal(folded['claude-toolkit-plugin'].current, 'Toolkit 9.9.9 is installed in Claude Code (turned on); this Toolkit copy is 9.9.9.');
   const table = core.renderSetupQuestionBank(Object.values(folded));
-  assert.match(table, /\| 2\.1 \| How should Claude Code use agents\? \|[^\n]*\| A\. Keep current \| B\. Broader native behaviour \|/);
-  assert.match(table, /\| 3\.1 \| Keep Toolkit available in Claude Code\? \|[^\n]*\| A\. Keep current \| B\. Show instructions only \|/);
+  // The Current column holds a short state.
+  assert.match(table, /\| 2\.1 \| How should Claude Code use agents\? \| Root only; subagent limit 1 \| A\. Keep current \| B\. Broader native behaviour \|/);
+  assert.match(table, /\| 3\.1 \| Keep Toolkit available in Claude Code\? \| On, 9\.9\.9 \| A\. Keep current \| B\. Show instructions only \|/);
+
+  // The plugin folds only when Toolkit is also turned on and recorded at this copy's version.
+  for (const [label, change] of [
+    ['turned off', (c) => { c.claudePluginInstall.enabled = false; }],
+    ['on or off unknown', (c) => { c.claudePluginInstall.enabled = null; }],
+    ['older recorded version', (c) => { c.claudePluginInstall.version = '9.9.8'; }],
+  ]) {
+    const row = claude(change)['claude-toolkit-plugin'];
+    assert.ok(row.choices.some((choice) => choice.value === 'keep'), label);
+    assert.equal(row.recommended, 'install', label);
+  }
+  assert.equal(claude((c) => { c.claudePluginInstall.version = '9.9.8'; })['claude-toolkit-plugin'].current_short, 'On, 9.9.8 (9.9.9 available)');
+  assert.equal(claude((c) => { c.claudePluginInstall.enabled = false; })['claude-toolkit-plugin'].current_short, 'Off, 9.9.9');
 
   const changing = claude((c) => {
     c.claudeSubagentDepth = { state: 'claude-default' };

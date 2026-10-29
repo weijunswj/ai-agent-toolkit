@@ -1102,6 +1102,18 @@ test('the one Claude plugin registry reader follows CLAUDE_CODE_PLUGIN_CACHE_DIR
   assert.equal(registry(override).isRunningCopy(repoRoot), false, 'only a local directory marketplace is a Toolkit-managed install');
   fs.writeFileSync(path.join(pluginsDir, 'known_marketplaces.json'), '{ not json');
   assert.match(registry(override).toolkitInstall().reason, /could not be read/);
+
+  // Whether Toolkit is turned on comes from the user settings in the config folder.
+  const settings = path.join(root, 'config', 'settings.json');
+  assert.equal(registry(override).toolkitEnabled(), null, 'no settings file');
+  writeJson(settings, { enabledPlugins: { [TOOLKIT_PLUGIN_ID]: true } });
+  assert.equal(registry(override).toolkitEnabled(), true);
+  writeJson(settings, { enabledPlugins: { [TOOLKIT_PLUGIN_ID]: false } });
+  assert.equal(registry(override).toolkitEnabled(), false);
+  writeJson(settings, { enabledPlugins: {} });
+  assert.equal(registry(override).toolkitEnabled(), null, 'not mentioned');
+  fs.writeFileSync(settings, '{ not json');
+  assert.equal(registry(override).toolkitEnabled(), null, 'unreadable');
 });
 
 

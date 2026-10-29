@@ -1145,7 +1145,7 @@ async function collectCurrentState(args) {
       ? inspectClaudeNativePluginStatePreApproval(args)
       : inspectCodexNativePluginState(args),
     // Read from Claude Code's plugin registry files only; no Claude session is launched before approval.
-    ...(args.host === 'claude-code' ? { claudePluginInstall: new ClaudePluginRegistry().toolkitInstall() } : {}),
+    ...(args.host === 'claude-code' ? { claudePluginInstall: claudePluginInstallState(new ClaudePluginRegistry()) } : {}),
   };
 }
 
@@ -1263,6 +1263,7 @@ function resolvedQuestion(definition) {
     // the structured semantic fields above rather than maintained separately.
     description: definition.whatThisControls,
     current: definition.current,
+    current_short: definition.currentShort || definition.current,
     recommended: recommendation.value,
     recommended_outcome: recommendation.outcome,
     recommendation_reason: recommendation.reason,
@@ -1332,6 +1333,7 @@ function questionBankApprovalPayload(specs) {
         current: {
           effective_behavior: spec.currentState?.effectiveBehavior || spec.current,
           displayed_text: spec.current,
+          table_text: spec.current_short || spec.current,
           verification: spec.currentState?.verification || 'unverified',
         },
         availability: {
@@ -1545,6 +1547,7 @@ function antigravitySkillsQuestion(args, current) {
       : { value: 'keep', outcome: 'Leave Antigravity unchanged.', reason: 'The copy is opt-in: choose it if you use Toolkit skills in Antigravity.' },
     selected: args.setupChoices.antigravitySkills,
     current: outcome,
+    currentShort: current.antigravity?.copies ? 'Copied' : 'Not copied',
     currentVerification: 'state-derived',
     afterApplying: 'Start a new Antigravity session to load changed skills.',
   });
@@ -1608,6 +1611,52 @@ function currentBooleanOutcome(value, enabledText, disabledText, unknownText) {
   return unknownText;
 }
 
+// Short current states for the bank's Current column; the full text stays in --explain and the reference.
+function shortOnOff(value, on = 'On', off = 'Off') {
+  if (value === true) return on;
+  if (value === false) return off;
+  return 'Unknown';
+}
+
+function shortUpdateSource(current, args) {
+  if (!current?.managed?.currentPath) return 'None yet';
+  if (!canPreserveManagedCheckout(current, args)) return 'Not usable';
+  return isStandardManagedCheckout(current) ? 'Dedicated update copy' : 'Custom copy';
+}
+
+function shortCodexHelpers(delegation) {
+  if (delegation?.status === 'configured' && Number.isInteger(delegation.helper_count)) {
+    return delegation.helper_count === 0 ? 'No helpers' : `${delegation.helper_count} helper${delegation.helper_count === 1 ? '' : 's'}`;
+  }
+  if (delegation?.status === 'unconfigured') return 'Not set';
+  if (delegation?.status === 'migration-required') return 'Old Toolkit setting';
+  return 'Not verified';
+}
+
+function shortClaudeTopology(profile, depth) {
+  const topology = profile?.topology === agentControl.TOPOLOGIES.BROADER_NATIVE ? 'Broader native' : 'Root only';
+  if (depth?.state === SUBAGENT_DEPTH_STATES.TOOLKIT) return `${topology}; subagent limit 1`;
+  if (depth?.state === SUBAGENT_DEPTH_STATES.OWNER) return `${topology}; subagent limit ${depth.value} (yours)`;
+  if (depth?.state === SUBAGENT_DEPTH_STATES.DEFAULT) return `${topology}; no subagent limit set`;
+  return `${topology}; subagent limit unknown`;
+}
+
+function shortClaudePlugin(current) {
+  if (current.nativePlugin.status === 'fresh') return 'Current';
+  const install = current.claudePluginInstall;
+  if (install?.installed !== true) return 'Checked after you answer';
+  const state = install.enabled === false ? 'Off' : install.enabled === true ? 'On' : 'Installed';
+  const latest = current.nativePlugin.manifest_version;
+  return `${state}, ${install.version || 'version unknown'}${latest && latest !== install.version ? ` (${latest} available)` : ''}`;
+}
+
+function shortClaudeSettings(entries) {
+  if (!Array.isArray(entries) || !entries.length) return 'Not read yet';
+  if (entries.some((entry) => entry.state === CLAUDE_SETTINGS_STATES.UNREADABLE)) return 'Could not read';
+  const set = entries.filter((entry) => entry.state === CLAUDE_SETTINGS_STATES.TOOLKIT || entry.state === CLAUDE_SETTINGS_STATES.OWNER).length;
+  return set === entries.length ? `All ${set} set` : `${set} of ${entries.length} set`;
+}
+
 // The on/off choice that reproduces a verified stored boolean; none when it is unverified.
 function booleanCurrentChoice(value) {
   if (value === true) return 'enable';
@@ -1645,18 +1694,34 @@ function claudeRootOnlyUnchanged(profile, depth) {
     && (depth?.state === SUBAGENT_DEPTH_STATES.TOOLKIT || (depth?.state === SUBAGENT_DEPTH_STATES.OWNER && depth.value === '1'));
 }
 
-// Claude Code has Toolkit installed and runs it in place from the update source 1.1 recommends.
-function claudePluginInstalledInPlace(current, args) {
+// What Claude Code's plugin registry and user settings say about Toolkit: installed, where it runs
+// from, its recorded version and whether it is turned on. Files only; no Claude session is launched.
+function claudePluginInstallState(registry) {
+  const install = registry.toolkitInstall();
+  return {
+    installed: install.installed,
+    runningRoot: install.runningRoot,
+    version: install.records.at(-1)?.version || '',
+    enabled: registry.toolkitEnabled(),
+  };
+}
+
+// Toolkit is installed, turned on, recorded at the version of the Toolkit copy setup reads, and runs
+// in place from the update source 1.1 recommends, so Install or refresh would find nothing to do.
+function claudePluginUnchanged(current, args) {
   const install = current.claudePluginInstall;
-  return install?.installed === true && samePath(install.runningRoot, recommendedUpdateSource(current, args));
+  return install?.installed === true && install.enabled === true
+    && Boolean(install.version) && install.version === current.nativePlugin.manifest_version
+    && samePath(install.runningRoot, recommendedUpdateSource(current, args));
 }
 
 function claudePluginCurrent(current, args) {
   if (current.nativePlugin.status === 'fresh') return 'The Claude Code Toolkit plugin is current.';
   if (current.nativePlugin.status === 'invalid-source-metadata') return 'Setup could not read the Claude Code plugin details in the Toolkit copy.';
-  if (claudePluginInstalledInPlace(current, args)) {
-    const version = /^\d+\.\d+\.\d+$/.test(current.nativePlugin.manifest_version || '') ? ` ${current.nativePlugin.manifest_version}` : '';
-    return `Toolkit${version} is installed in Claude Code and runs from the update copy.`;
+  const install = current.claudePluginInstall;
+  if (install?.installed === true) {
+    const state = install.enabled === false ? 'turned off' : install.enabled === true ? 'turned on' : 'on or off unknown';
+    return `Toolkit ${install.version || '(version unknown)'} is installed in Claude Code (${state}); this Toolkit copy is ${current.nativePlugin.manifest_version || 'unknown'}.`;
   }
   return 'Setup checks the Claude Code Toolkit plugin after you answer, and installs or refreshes it only if needed.';
 }
@@ -1693,6 +1758,7 @@ function setupQuestionSpecs(args, current) {
       },
       selected: args.setupChoices.managedCheckout,
       current: managedCurrent,
+      currentShort: shortUpdateSource(current, args),
       currentVerification: current?.managed?.currentPath && current?.managed?.exists ? 'state-derived' : 'unverified-or-absent',
       afterApplying: 'After final approval, setup will create or verify only the selected managed checkout and store it as Toolkit update state. The active project checkout is unchanged; no existing managed copy is moved or removed.',
       availability: {
@@ -1724,6 +1790,7 @@ function setupQuestionSpecs(args, current) {
         reason: 'Startup checks keep Toolkit current while the clean-checkout, expected-remote, fast-forward, and validation gates protect active work.',
       },
       selected: args.setupChoices.repoAutoUpdate,
+      currentShort: shortOnOff(current.audit?.repo_auto_update?.enabled),
       current: currentBooleanOutcome(current.audit?.repo_auto_update?.enabled, 'Automatic startup update checks are on.', 'Automatic startup update checks are off; manual setup remains available.', 'The automatic-update state could not be verified; setup will not claim that startup updates are active.'),
       currentVerification: typeof current.audit?.repo_auto_update?.enabled === 'boolean' ? 'verified' : 'unverified',
       afterApplying: 'This changes Toolkit maintenance state and future trusted SessionStart behavior; it does not directly edit native host configuration and does not require a restart by itself.',
@@ -1747,6 +1814,7 @@ function setupQuestionSpecs(args, current) {
         reason: 'A short-lived, privacy-safe record makes failed or safety-blocked maintenance diagnosable without making routine success noisy.',
       },
       selected: args.setupChoices.updateReports,
+      currentShort: shortOnOff(current.audit?.update_report_enabled),
       current: currentBooleanOutcome(current.audit?.update_report_enabled, 'Meaningful maintenance reports are kept; only action-required reports open automatically.', 'Maintenance reports are disabled.', 'The saved report setting could not be verified; the effective default is to keep meaningful reports.'),
       currentVerification: typeof current.audit?.update_report_enabled === 'boolean' ? 'verified' : 'defaulted',
       afterApplying: 'This changes Toolkit report state only. It does not change native host configuration, and no restart is required.',
@@ -1773,6 +1841,7 @@ function setupQuestionSpecs(args, current) {
       },
       selected: args.setupChoices.updateReportRetention,
       current: retentionCurrent,
+      currentShort: Number.isSafeInteger(retentionRaw) && retentionRaw > 0 ? `${retentionRaw} days` : `Unknown (${DEFAULT_UPDATE_REPORT_RETENTION_DAYS} days)`,
       currentVerification: Number.isSafeInteger(retentionRaw) && retentionRaw > 0 ? 'verified' : 'defaulted',
       afterApplying: 'The approved duration is stored in Toolkit state. Eligible Toolkit maintenance-report cleanup runs during the approved setup and future maintenance; unrelated files are never included.',
     }),
@@ -1795,6 +1864,7 @@ function setupQuestionSpecs(args, current) {
         reason: 'Repository rules reach Codex whole; the change is one marked line that is backed up and reversible.',
       },
       selected: args.setupChoices.codexDocLimit,
+      currentShort: shortOnOff(current.audit?.codex_doc_limit_enabled, 'Raised', 'Left alone'),
       current: currentBooleanOutcome(current.audit?.codex_doc_limit_enabled, "Toolkit keeps Codex's instruction limit raised.", "Toolkit leaves Codex's instruction limit alone.", "No choice is recorded, so Toolkit leaves Codex's instruction limit alone."),
       currentVerification: typeof current.audit?.codex_doc_limit_enabled === 'boolean' ? 'verified' : 'defaulted',
       afterApplying: 'This stores your choice in Toolkit state and, on a yes, edits `~/.codex/config.toml` at the end of setup. Start a new Codex session to use the new limit.',
@@ -1823,6 +1893,7 @@ function setupQuestionSpecs(args, current) {
       recommendation: { value: recommendedChoice('codexHelperCapacity', current, args), outcome: recommendedChoice('codexHelperCapacity', current, args) === 'one-helper' ? 'Allow one helper.' : 'Keep the current configuration.', reason: recommendedChoice('codexHelperCapacity', current, args) === 'one-helper' ? 'G0 and G1 leads need helpers for independent work.' : 'This state needs an explicit compatibility or repair choice before helper settings can change.' },
       selected: args.setupChoices.codexHelperCapacity,
       current: current.delegation?.detail || 'Helper capacity has not been verified.',
+      currentShort: shortCodexHelpers(current.delegation),
       currentVerification: current.runtime?.runtime === RUNTIMES.UNKNOWN ? 'unverified' : 'verified',
       afterApplying: 'Setup presents any required replacement proposal before writing, backs up config.toml, and asks Codex to load it. Fully restart Codex and complete one successful turn.',
     }));
@@ -1845,6 +1916,7 @@ function setupQuestionSpecs(args, current) {
         reason: 'Keeping the installed cache aligned with the verified managed source avoids stale setup behavior after Toolkit updates.',
       },
       selected: args.setupChoices.codexPluginAutoRefresh,
+      currentShort: shortOnOff(current.audit?.codex_plugin_auto_refresh_enabled),
       current: currentBooleanOutcome(current.audit?.codex_plugin_auto_refresh_enabled, 'Automatic Codex Toolkit maintenance is on.', 'Automatic Codex Toolkit maintenance is off; the installed plugin remains in place.', 'The automatic Codex maintenance preference could not be verified; setup will not claim that it is active.'),
       currentVerification: typeof current.audit?.codex_plugin_auto_refresh_enabled === 'boolean' ? 'verified' : 'unverified',
       afterApplying: 'The approved setup always verifies the current native Toolkit plugin. If files change, setup may update the Codex plugin cache and Windows hook launchers; then open `/hooks` in the Codex app and trust the updated Toolkit hooks. Turning maintenance off only changes future Toolkit state and does not uninstall the plugin.',
@@ -1875,6 +1947,7 @@ function setupQuestionSpecs(args, current) {
       },
       selected: args.setupChoices.claudeTopology,
       current: topologyCurrent,
+      currentShort: shortClaudeTopology(activeProfile, current.claudeSubagentDepth),
       // Read from the stored profile and the Claude Code user settings; setup does not test the hook itself.
       currentVerification: current.claudeSubagentDepth && current.claudeSubagentDepth.state !== SUBAGENT_DEPTH_STATES.UNREADABLE ? 'state-derived' : 'unverified',
       afterApplying: 'A changed choice updates the Claude Toolkit profile and the one Toolkit-owned `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` key in the Claude Code user settings (`settings.json` in your Claude Code config folder). Start a new Claude Code session before relying on it. Claude Code 2.1.217 or later reads the depth setting; earlier versions ignore it.',
@@ -1887,14 +1960,15 @@ function setupQuestionSpecs(args, current) {
       prompt: 'Claude Code Toolkit choice',
       whatThisControls: 'Whether Claude Code installs or refreshes its own Toolkit plugin, shows manual instructions, or preserves current plugin state. This never changes Codex.',
       choices: [wizardChoice('install', 'Install or refresh', 'Use Claude Code native plugin commands to verify and refresh its Toolkit cache when needed.'), wizardChoice('instructions', 'Show instructions only', 'Make no native plugin change and report the manual Claude Code action required.'), wizardChoice('keep', 'Keep current', 'Preserve the currently detected Claude Code plugin behavior and state.')],
-      // Toolkit is installed and runs in place from the update copy. Install or refresh then only checks
-      // it, and re-enables or refreshes it if that check finds a gap keep would leave, so it is the one
-      // kept under the Keep current label.
-      currentChoice: claudePluginInstalledInPlace(current, args) ? 'install' : '',
+      // Toolkit is installed, turned on and current, running in place from the update copy. Install or
+      // refresh then only checks it, and re-enables or refreshes it if that check still finds a gap keep
+      // would leave, so it is the one kept under the Keep current label.
+      currentChoice: claudePluginUnchanged(current, args) ? 'install' : '',
       keepAs: 'Keep it installed. Setup checks it after you answer and changes something only if that check finds it disabled or out of date.',
       recommendation: { value: recommendedChoice('claudePluginBehavior', current, args), outcome: 'Let Claude Code install or refresh its own Toolkit plugin.', reason: 'Native host commands keep cache identity, version, and hooks aligned without cross-host mutation.' },
       selected: args.setupChoices.claudePluginBehavior,
       current: claudePluginCurrent(current, args),
+      currentShort: shortClaudePlugin(current),
       afterApplying: 'If native plugin files change, start a new Claude Code session (close sessions opened before the update) and complete any native trust or activation steps reported by setup.',
     }));
     specs.push(resolvedQuestion({
@@ -1913,6 +1987,7 @@ function setupQuestionSpecs(args, current) {
       recommendation: { value: recommendedChoice('claudeSettings', current, args), outcome: claudeSettingsAllSet(current) ? 'Keep them: all four are already set.' : 'Set the recommended values that are not set yet; values you set yourself stay as they are.', reason: 'They keep AI attribution out of your commits and pull requests, let a Projects coordinator wake Remote Control sessions on your computer, keep a flagged request on the model you chose, and make Claude Code read the repository\'s AGENTS.md.' },
       selected: args.setupChoices.claudeSettings,
       current: claudeSettingsOutcome(current.claudeSettings),
+      currentShort: shortClaudeSettings(current.claudeSettings),
       currentVerification: Array.isArray(current.claudeSettings) && current.claudeSettings.length && current.claudeSettings.every((entry) => entry.state !== CLAUDE_SETTINGS_STATES.UNREADABLE) ? 'state-derived' : 'unverified',
       afterApplying: 'Start a new Claude Code session so it reads the changed settings.',
     }));
@@ -1993,7 +2068,7 @@ function renderQuestionRows(specs, onlyRef = '') {
 // Table cells hold one line: backslashes and pipes are escaped and line breaks become spaces.
 const tableCell = (text) => String(text || '').replace(/\r?\n/g, ' ').replace(/\\/g, '\\\\').replace(/\|/g, '\\|');
 
-// The bank as one compact table: the question, what is true now, the recommended choice and its
+// The bank as one compact table: the question, a short current state, the recommended choice and its
 // effect, and the other choices. The full text of a question is shown only on request.
 function renderCompactQuestionTable(specs, markdown = true) {
   specs = ensurePresentationMetadata(specs);
@@ -2017,7 +2092,7 @@ function renderCompactQuestionTable(specs, markdown = true) {
       else lines.push('', heading, '='.repeat(heading.length));
     }
     if (!markdown) {
-      lines.push('', `${spec.presentation.question_ref} ${spec.title}`, `  Current: ${spec.current}`, `  Recommended: ${recommended(spec)}`);
+      lines.push('', `${spec.presentation.question_ref} ${spec.title}`, `  Current: ${spec.current_short || spec.current}`, `  Recommended: ${recommended(spec)}`);
       const rest = others(spec);
       // One choice per line, so each alternative reads on its own.
       if (rest.length) lines.push('  Other choices:', ...rest.map((choice) => `    ${choice}`));
@@ -2026,7 +2101,7 @@ function renderCompactQuestionTable(specs, markdown = true) {
     }
     const rest = others(spec).map(tableCell).join('<br>') || '-';
     const chosen = spec.selected ? `<br>Selected: ${tableCell(selected(spec))}` : '';
-    lines.push(`| ${spec.presentation.question_ref} | ${tableCell(spec.title)} | ${tableCell(spec.current)} | ${tableCell(recommended(spec))}${chosen} | ${rest} |`);
+    lines.push(`| ${spec.presentation.question_ref} | ${tableCell(spec.title)} | ${tableCell(spec.current_short || spec.current)} | ${tableCell(recommended(spec))}${chosen} | ${rest} |`);
   }
   return lines;
 }
