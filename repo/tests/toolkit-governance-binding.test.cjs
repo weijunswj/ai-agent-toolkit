@@ -261,7 +261,8 @@ test('reader: default branch from the symref, then the binding at its tip; hosti
     assert.equal(bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, environment: { [name]: 'plink.exe' }, runGit: fakeGit({ ...base, 'ls-tree': ok('') }) }).status, 'absent', `${name} with an https origin`);
   }
   // status says in plain words why a refresh kept the last read.
-  assert.match(bindingCache.refreshReason('remote-redirected'), /GIT_SSH for an ssh origin/);
+  assert.match(bindingCache.refreshReason('remote-redirected'), /GIT_SSH or GIT_SSH_COMMAND for an ssh origin/);
+  assert.match(bindingCache.refreshReason('remote-redirected'), /Plink or TortoiseGit\) keeps every refresh of an ssh origin held, and turns queued offline are then dropped unwritten after seven days/);
   assert.match(bindingCache.refreshReason('remote-unreachable'), /could not be reached/);
   assert.equal(bindingCache.refreshReason('not-applicable'), null);
   assert.notEqual(bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, environment: { GIT_CONFIG_COUNT: '0' }, runGit: fakeGit({ ...base, 'ls-tree': ok('') }) }).error, 'remote-redirected', 'a zero count sets nothing');

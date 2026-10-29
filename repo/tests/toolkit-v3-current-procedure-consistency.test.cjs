@@ -144,7 +144,7 @@ function securityReviewContract(text) {
   assert.match(review, /a newly proposed environment, feature or threat goes to the owner for classification before adoption/);
   assert.match(review, /A genuinely serious reachable issue found late still blocks, even when an earlier review missed it/);
   assert.match(review, /G1 inventories every material entrypoint for that invariant inside the frozen profile and fixes the family once, with positive and negative controls, rather than one bypass per cycle/);
-  assert.match(review, /The fresh recheck covers the corrected families, cumulative diff, dependent invariants, new real host evidence and retained previously reviewed scope/);
+  assert.match(review, /The fresh recheck covers the fix commits, the corrected families and findings they close, dependent invariants and new real host evidence, and widens to the cumulative diff only where a fix changes code beyond those findings/);
   assert.match(review, /It does not restart discovery, rescan the whole product by default, add reviewers or open unbounded follow-up work/);
   assert.match(review, /preserves any genuinely new security finding without manufacturing an extra gate/);
   assert.match(review, /G2 does not spawn subagents/);
