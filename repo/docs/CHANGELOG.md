@@ -2,7 +2,7 @@
 
 ## 3.17.4 (security alert cleanup and Dependabot action updates)
 
-- **CI drift guard:** a Dependabot update to a pinned action in `validate.yml` now passes when only the commit SHA and `# vX.Y.Z` version comment change and the action name stays the same. A different action, a tag or short ref, a missing version comment or any other edit to the file is still refused. The portable sharding playbook says the same.
+- **CI drift guard:** a Dependabot update to a pinned action in `validate.yml` now passes when only the commit SHA and `# vX.Y.Z` version comment change and the action name stays the same. A different action, a tag or short ref, a missing version comment or any other edit to the file is still refused. The guard's tests find the pins in the live file and rerun every drift case with each pinned action updated, so the whole test run passes on such an update too. The portable sharding playbook says the same.
 - **Personal-data guard config:** Dependabot's public sign-off address is on the role address allow list, so its commit trailers no longer fail the check. Other addresses at the same domain still block.
 - **Action pins:** `setup-python` 7.1.0, `upload-artifact` 7.0.2 and `download-artifact` 8.0.2, each pinned to its verified tag commit.
 - **Dependencies:** the test-only `fast-uri` package is locked at 3.1.9, which fixes four advisories.

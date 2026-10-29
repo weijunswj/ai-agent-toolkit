@@ -169,7 +169,26 @@ test('the CI aggregate check passes only when every leg succeeded and covered ev
   }
 });
 
-test('the workflow drift guard accepts validate.yml and rejects each way to narrow or mask a test step', () => {
+// The pinned uses: text of an action as it stands in a workflow. Found at run time, so the tests
+// keep working on the live validate.yml after a Dependabot update changes its pins.
+function pinOf(workflow, action) {
+  const match = workflow.match(new RegExp(`${action}@[0-9a-f]{40} # v\\d+\\.\\d+\\.\\d+`));
+  assert.ok(match, `${action} is pinned in the workflow`);
+  return match[0];
+}
+
+// A stand-in commit SHA that differs from the one in a pin.
+function otherSha(pin) {
+  return pin.includes('@0123456789abcdef') ? 'fedcba9876543210fedcba9876543210fedcba98' : '0123456789abcdef0123456789abcdef01234567';
+}
+
+// Every pinned action of a workflow, in order of first use.
+function pinnedActions(workflow) {
+  return [...new Set([...workflow.matchAll(/^ {8}uses: ([^@\s]+)@/gm)].map((match) => match[1]))];
+}
+
+// The drift cases, run against the live workflow and against copies with updated pins.
+function assertDriftGuard(WORKFLOW) {
   assert.deepEqual(shards.workflowErrors(WORKFLOW, MANIFEST), []);
   const shardStep = 'node repo/scripts/run-tests.cjs --shard ${{ matrix.shard }} --os windows';
   const verify = `          ${shards.VERIFY_COMMAND}`;
@@ -197,7 +216,7 @@ test('the workflow drift guard accepts validate.yml and rejects each way to narr
     ['the summary check removed', WORKFLOW.replace(`\n${verify}`, '')],
     ['the summary check not last', WORKFLOW.replace(`\n${verify}`, '').replace('          node repo/scripts/validate-toolkit.cjs\n', `          node repo/scripts/validate-toolkit.cjs\n${verify}\n`)],
     ['the leg results not passed in', WORKFLOW.replace('          TEST_LEGS: ${{ toJSON(needs) }}\n', '')],
-    ['a step before Run validation', WORKFLOW.replace('      - name: Set up Python\n        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0\n        with:\n          python-version: \'3.12\'\n\n      # The one', '      - name: Set up Python\n        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0\n        with:\n          python-version: \'3.12\'\n\n      - name: Extra\n        run: echo hi\n\n      # The one')],
+    ['a step before Run validation', WORKFLOW.replace('          python-version: \'3.12\'\n\n      # The one', '          python-version: \'3.12\'\n\n      - name: Extra\n        run: echo hi\n\n      # The one')],
     ['a condition on the gate step', WORKFLOW.replace('      - name: Run validation\n', '      - name: Run validation\n        if: ${{ github.event_name == \'push\' }}\n')],
     ['an extra job', `${WORKFLOW}\n  extra:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo\n`],
     ['a test job removed', WORKFLOW.replace(/\n  tests-windows:\n[\s\S]*?(?=\n  validate:\n)/, '')],
@@ -222,7 +241,7 @@ test('the workflow drift guard accepts validate.yml and rejects each way to narr
     ['an unnamed step before Run validation', WORKFLOW.replace(`      # The one gate list`, '      - run: echo hi\n\n      # The one gate list')],
     ['the summaries not merged', WORKFLOW.replace('          merge-multiple: true', '          merge-multiple: false')],
     ['the summaries downloaded elsewhere', WORKFLOW.replace('          path: ${{ runner.temp }}/test-summaries', '          path: ${{ runner.temp }}/other')],
-    ['a different download action', WORKFLOW.replace('actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2', 'actions/download-artifact@v8')],
+    ['a different download action', WORKFLOW.replace(pinOf(WORKFLOW, 'actions/download-artifact'), 'actions/download-artifact@v8')],
     ['the diff base removed', WORKFLOW.replace('          DIFF_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}\n', '')],
     ['a shallow checkout in validate', WORKFLOW.replace(/(\n  validate:\n[\s\S]*?)fetch-depth: 0/, '$1fetch-depth: 1')],
     ['an extra env value on the gate step', WORKFLOW.replace('          TEST_LEGS: ${{ toJSON(needs) }}\n', '          TEST_LEGS: ${{ toJSON(needs) }}\n          NODE_OPTIONS: --require ./x.cjs\n')],
@@ -260,12 +279,12 @@ test('the workflow drift guard accepts validate.yml and rejects each way to narr
   const manifest = clone(MANIFEST);
   manifest.systems.linux.shards.splice(1, 0, { id: 'linux-9', files: [manifest.systems.linux.shards[0].files.pop()] });
   assert.match(shards.workflowErrors(WORKFLOW, manifest).join('\n'), /tests-linux job differs/);
-});
+}
 
-test('the workflow drift guard accepts a Dependabot pin update of the same action and nothing else on that line', () => {
-  const pin = 'actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0';
-  const newer = 'actions/setup-python@0123456789abcdef0123456789abcdef01234567 # v7.2.0';
-  assert.ok(WORKFLOW.includes(pin));
+// A pin update of the same action passes; nothing else on that line does.
+function assertPinUpdates(WORKFLOW) {
+  const pin = pinOf(WORKFLOW, 'actions/setup-python');
+  const newer = `actions/setup-python@${otherSha(pin)} # v7.2.0`;
   const everywhere = WORKFLOW.split(pin).join(newer);
   assert.deepEqual(shards.workflowErrors(everywhere, MANIFEST), [], 'every copy of the pin updated');
   assert.deepEqual(shards.workflowErrors(WORKFLOW.replace(pin, newer), MANIFEST), [], 'one copy of the pin updated');
@@ -292,6 +311,33 @@ test('the workflow drift guard accepts a Dependabot pin update of the same actio
   assert.match(shards.workflowErrors(moved, MANIFEST).join('\n'), /differs from its pinned text/, 'a re-indented pin line');
   const swapped = WORKFLOW.replace(`uses: ${pin}`, 'uses: actions/checkout@0123456789abcdef0123456789abcdef01234567 # v7.2.0');
   assert.match(shards.workflowErrors(swapped, MANIFEST).join('\n'), /differs from its pinned text/, 'another action in place of a pinned one');
+}
+
+test('the workflow drift guard accepts validate.yml and rejects each way to narrow or mask a test step', () => {
+  assertDriftGuard(WORKFLOW);
+});
+
+test('the workflow drift guard accepts a Dependabot pin update of the same action and nothing else on that line', () => {
+  assertPinUpdates(WORKFLOW);
+});
+
+test('after a Dependabot update of any pinned action in validate.yml, the whole drift set still holds', () => {
+  const actions = pinnedActions(WORKFLOW);
+  for (const action of ['actions/checkout', 'actions/setup-node', 'actions/setup-python', 'actions/upload-artifact', 'actions/download-artifact']) {
+    assert.ok(actions.includes(action), `${action} is one of the pinned actions`);
+  }
+  const updated = (workflow, action) => {
+    const pin = pinOf(workflow, action);
+    return workflow.split(pin).join(`${action}@${otherSha(pin)} # v99.1.0`);
+  };
+  const variants = actions.map((action) => [action, updated(WORKFLOW, action)]);
+  variants.push(['every pinned action', actions.reduce(updated, WORKFLOW)]);
+  for (const [label, workflow] of variants) {
+    assert.notEqual(workflow, WORKFLOW, `${label} must change the workflow`);
+    assert.deepEqual(shards.workflowErrors(workflow, MANIFEST), [], label);
+    assertDriftGuard(workflow);
+    assertPinUpdates(workflow);
+  }
 });
 
 test('the runner refuses unknown shards, a shard for another system, mixed modes and a drive-root temp folder', () => {
