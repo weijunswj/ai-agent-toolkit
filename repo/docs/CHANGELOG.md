@@ -1,5 +1,12 @@
 # Toolkit Changelog
 
+## 3.18.1 (shorter review rounds)
+
+- **Gate rules:** a G0 plan now splits the work into small slices, one reviewable PR each, with acceptance tests (action, expected result, test file). Before review, the builder checks its own diff against the G2 review section in the same session and notes the result in the PR; this replaces no review. Reviewers rate findings High, Medium or Low: High and Medium block exactly as before, and Low never blocks and goes into one follow-up record per PR. A recheck after a failed review reads the fix commits, the findings they close and the rules they depend on, and widens to the whole diff only where a fix reaches beyond them. The gate rules size cap rose from 10,500 to 11,000 bytes to hold this.
+- **Controller:** findings map to ship blocker (High or Medium) and follow-up (Low). A small fix found mid-lane joins the lane's next slice not yet in review instead of its own PR, unless it repairs the default branch or a safety-floor gap or unblocks other work; the slice takes its highest risk tier. Four sentences that repeated other rules were removed.
+- **Projects skill (version 2026-10-29.3, upload it again):** G1 briefs ask for the builder's self-check result, recheck briefs name the fix commits and the findings they close, small fixes go into the next slice's brief unless the controller's batching rule lets them go alone, and Low findings are relayed as one follow-up line.
+- **Delivery contract:** Low findings are either a follow-up or a Later or optional outcome, and publication is tracked as its own state.
+
 ## 3.18.0 (programme attention)
 
 **Update every computer that runs programme commands.** An older Toolkit copy refuses a parent document that carries attention findings ("unknown field(s): attention"), so it stops with an error instead of writing. Update with `setup toolkit`. Upload the Projects controller skill again too: it is now version 2026-10-29.2.
