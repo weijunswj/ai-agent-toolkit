@@ -2,7 +2,7 @@
 
 ## 3.19.0 (Windows scheduled tasks)
 
-**Update every computer that reads this repository's binding.** The binding now carries `schedule_folder`, and an older Toolkit copy reads a binding with an unknown key as invalid, so it shows governance as ERROR and holds governed writes until it updates. Update with `setup toolkit`. Upload the Projects controller skill again too: it is now version 2026-10-29.3.
+**Update every computer that reads this repository's binding.** The binding now carries `schedule_folder`, and an older Toolkit copy reads a binding with an unknown key as invalid, so it shows governance as ERROR and holds governed writes until it updates. Update with `setup toolkit`. Upload the Projects controller skill again too: it is now version 2026-10-29.4.
 
 ### Scheduled tasks
 
@@ -13,6 +13,13 @@
 - **Setup:** on Windows, setup lists each task with its folder, name, schedule, purpose and state. It never creates one: when a task needs creating or updating, it prints one PowerShell line for you to paste, which registers the tasks and runs the programme sweep once, starting it again if a closing console stopped it. `setup-toolkit.cjs --remove-toolkit-tasks` removes only Toolkit's own tasks, then the folder when it is empty.
 - **List every task:** `toolkit-tasks.cjs [--json]` lists Windows tasks live, Claude Code desktop tasks by name and description, and Codex and cloud tasks from the registry (`~/.ai-agent-toolkit/user-state/tasks.json`), saying where each row was read. `--record` and `--forget` keep cloud tasks in the registry; `toolkit-windows-tasks.cjs adopt` records a task you made yourself, which Toolkit never changes.
 - **Projects skill:** on a Windows device the programme sweep is the Windows task, and "list my tasks" merges the project's own list with the device's list.
+
+## 3.18.1 (shorter review rounds)
+
+- **Gate rules:** a G0 plan now splits the work into small slices, one reviewable PR each, with acceptance tests (action, expected result, test file). Before review, the builder checks its own diff against the G2 review section in the same session and notes the result in the PR; this replaces no review. Reviewers rate findings High, Medium or Low: High and Medium block exactly as before, and Low never blocks and goes into one follow-up record per PR. A recheck after a failed review reads the fix commits, the findings they close and the rules they depend on, and widens to the whole diff only where a fix reaches beyond them. The gate rules size cap rose from 10,500 to 11,000 bytes to hold this.
+- **Controller:** findings map to ship blocker (High or Medium) and follow-up (Low). A small fix found mid-lane joins the lane's next slice not yet in review instead of its own PR, unless it repairs the default branch or a safety-floor gap or unblocks other work; the slice takes its highest risk tier. Four sentences that repeated other rules were removed.
+- **Projects skill (version 2026-10-29.3, upload it again):** G1 briefs ask for the builder's self-check result, recheck briefs name the fix commits and the findings they close, small fixes go into the next slice's brief unless the controller's batching rule lets them go alone, and Low findings are relayed as one follow-up line.
+- **Delivery contract:** Low findings are either a follow-up or a Later or optional outcome, and publication is tracked as its own state.
 
 ## 3.18.0 (programme attention)
 
