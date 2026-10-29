@@ -144,6 +144,7 @@
         "node --test repo/tests/toolkit-programme-reconcile.test.cjs",
         "node --test repo/tests/toolkit-programme-authority.test.cjs",
         "node --test repo/tests/toolkit-programme-custody.test.cjs",
+        "node --test repo/tests/toolkit-programme-attention.test.cjs",
         "node --test repo/tests/decision-trace-audit.test.cjs"
       ]
     },

@@ -6,7 +6,8 @@
 //   node <Toolkit checkout>/repo/scripts/toolkit-governance.cjs <command>
 //
 //   status      refreshes this computer's read of the binding merged on the default branch, then
-//               shows the repository's governance state and which rules apply
+//               shows the repository's governance state and which rules apply, which hosts here run
+//               Toolkit's hooks (Hooks:), and any turn-end records waiting offline (Queue:)
 //   discover    read-only: what Toolkit already finds (a merged binding to reuse, parent-issue and
 //               evidence-store candidates with their evidence) and the one adoption proposal it
 //               would put to you; asks nothing and writes nothing, so agents may run it
@@ -50,6 +51,7 @@ const discovery = require('./toolkit-governance-discovery.cjs');
 const bindingCache = require('./toolkit-governance-binding.cjs');
 const protection = require('./toolkit-governance-protection.cjs');
 const security = require('./toolkit-governance-security.cjs');
+const hookCapability = require('./toolkit-hook-capability.cjs');
 const { GovernanceMigration, MigrationError, appendRunRecord } = require('./toolkit-governance-migration.cjs');
 
 const CMD = subcommand => `\`${governance.governanceCommand(subcommand)}\``;
@@ -79,14 +81,15 @@ class GovernanceCliError extends Error {
 }
 
 class ToolkitGovernanceCli {
-  #stdout; #stderr; #ask; #interactive; #cwd; #registryOptions; #discoveryGh; #refresh; #rulesetReader; #rulesetCreator; #protectionReader; #protectionWriter; #securityReader; #securityWriter; #securityFileWriter;
+  #stdout; #stderr; #ask; #interactive; #cwd; #registryOptions; #discoveryGh; #refresh; #rulesetReader; #rulesetCreator; #protectionReader; #protectionWriter; #securityReader; #securityWriter; #securityFileWriter; #hookReader; #queueReader;
 
   // `ask(question)` resolves to the typed line; `interactive` says whether a person is at a
   // terminal. `registryOptions` ({ registryPath, testOnly: true }), `rulesetReader`,
   // `rulesetCreator`, `protectionReader`, `protectionWriter`, `securityReader`, `securityWriter` and
   // `securityFileWriter` are only for tests, as are `discoveryGh` (discovery's GitHub reader) and
-  // `refresh` (the merged-binding refresh `status` runs first).
-  constructor({ stdout = process.stdout, stderr = process.stderr, ask = terminalAsk, interactive = isInteractiveTerminal(), cwd = process.cwd(), registryOptions = {}, discoveryGh = null, refresh = null, rulesetReader = null, rulesetCreator = null, protectionReader = null, protectionWriter = null, securityReader = null, securityWriter = null, securityFileWriter = null } = {}) {
+  // `refresh` (the merged-binding refresh `status` runs first), `hookReader` (the Hooks: lines) and
+  // `queueReader` (the offline queue count for a repository root).
+  constructor({ stdout = process.stdout, stderr = process.stderr, ask = terminalAsk, interactive = isInteractiveTerminal(), cwd = process.cwd(), registryOptions = {}, discoveryGh = null, refresh = null, rulesetReader = null, rulesetCreator = null, protectionReader = null, protectionWriter = null, securityReader = null, securityWriter = null, securityFileWriter = null, hookReader = null, queueReader = null } = {}) {
     this.#stdout = stdout;
     this.#stderr = stderr;
     this.#ask = ask;
@@ -102,6 +105,8 @@ class ToolkitGovernanceCli {
     this.#securityReader = securityReader;
     this.#securityWriter = securityWriter;
     this.#securityFileWriter = securityFileWriter;
+    this.#hookReader = hookReader || (() => hookCapability.hookCapability());
+    this.#queueReader = queueReader || (root => require('../../skills/github-program-reconciler/scripts/programme-checkpoint.cjs').queueSummary(root));
   }
 
   async main(argv) {
@@ -162,7 +167,15 @@ class ToolkitGovernanceCli {
     const reason = refresh.refreshed === false ? bindingCache.refreshReason(refresh.error) : null;
     const lines = describe(state, this.#registryOptions);
     if (reason) lines.push(`Refresh held: ${reason}. The last read on this computer is kept.`);
-    this.#print(json, reason ? { ...state, refresh: { refreshed: false, reason: refresh.error } } : state, lines);
+    let hooks = null;
+    try { hooks = this.#hookReader(); } catch { hooks = null; }
+    if (hooks) lines.push(...hookCapability.describeHooks(hooks));
+    else lines.push('Hooks: could not be checked on this computer.');
+    let queue = null;
+    try { queue = state.root ? this.#queueReader(state.root) : null; } catch { queue = null; }
+    if (queue && queue.count > 0) lines.push(`Queue: ${queue.count} turn${queue.count === 1 ? '' : 's'} waiting (oldest ${String(queue.oldest).slice(0, 10)}); they are written at the next turn end that can reach GitHub, and dropped unwritten after seven days.`);
+    const extra = { ...(reason ? { refresh: { refreshed: false, reason: refresh.error } } : {}), ...(hooks ? { hooks: hooks.hosts } : {}), ...(queue ? { queue } : {}) };
+    this.#print(json, { ...state, ...extra }, lines);
     return state.rule === 'ERROR' || state.state === 'ERROR' ? 2 : 0;
   }
 
