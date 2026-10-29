@@ -288,6 +288,14 @@ test('matrix: Codex shell shapes are judged in the folder the command runs in, f
   }
   // An argument list without a shell.
   assert.match(decide(ctx, { cwd: ctx.root, tool_name: 'shell', tool_input: { command: ['git', 'push', 'origin', 'main'], workdir: ctx.repo } })?.deny || '', /default branch `main`/, 'R7');
+  // A program path with spaces is quoted in the shared reading; the unquoted reading still finds the merge.
+  const gh = 'C:\\Program Files\\GitHub CLI\\gh.exe';
+  assert.match(decide(ctx, { cwd: ctx.root, tool_name: 'shell', tool_input: { command: [gh, 'pr', 'merge', '618', '--repo', 'owner/a', '--match-head-commit', SHA] } })?.deny || '', /has not approved a merge of owner\/a#618/, 'quoted gh path');
+  assert.match(decide(ctx, { cwd: ctx.root, tool_name: 'shell', tool_input: { command: [gh, 'api', '-X', 'PUT', 'repos/owner/a/pulls/618/merge', '-f', `sha=${SHA}`] } })?.deny || '', /has not approved a merge of owner\/a#618/, 'quoted gh path, REST merge');
+  // Found by both readings, a merge still uses one approval.
+  typed(ctx, 'merge 618');
+  assert.equal(decide(ctx, { cwd: ctx.root, tool_name: 'shell', tool_input: { command: ['gh', 'pr', 'merge', '618', '--repo', 'owner/a', '--match-head-commit', SHA, '--subject', 'two words'] } }), null, 'one approval, one merge');
+  assert.match(decide(ctx, { cwd: ctx.root, tool_name: 'shell', tool_input: { command: ['gh', 'pr', 'merge', '618', '--repo', 'owner/a', '--match-head-commit', SHA] } })?.deny || '', /has not approved/, 'used up');
   // The broken-module screen reads the whole raw input, whatever field the command is in.
   assert.equal(hold.mayMerge({ tool_name: 'exec_command', tool_input: { script: 'git push origin main' } }), true);
 });

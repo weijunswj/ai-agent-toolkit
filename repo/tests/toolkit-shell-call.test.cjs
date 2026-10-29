@@ -77,6 +77,14 @@ test('R10: an unreadable shell call is refused when its raw input could commit, 
     assert.equal(harmless.unreadable, true);
     assert.equal(harmless.refusal(), '', 'any other unreadable call runs');
   }
+  // Tabs and continued lines still separate words for the screen.
+  for (const text of ['git\tpush --force x', 'git \\\npush --force x', 'git `\r\npush x', 'gh pr\tmerge 5', 'gh pr \\\nmerge 5', 'gh pr ^\r\ncreate --fill']) {
+    assert.equal(read('exec_command', { cmd: { script: text } }).refusal(), UNREADABLE, JSON.stringify(text));
+  }
+  // Deeper than the walk reads, the whole input is still screened.
+  let deep = 'git push --force x';
+  for (let depth = 0; depth < 40; depth += 1) deep = { inner: deep };
+  assert.equal(read('exec_command', { cmd: deep }).refusal(), UNREADABLE, 'deeply nested');
   assert.equal(read('Bash', undefined).refusal(), '', 'no input at all has nothing to refuse');
   assert.equal(ShellCall.from({ tool_name: 'Edit', tool_input: { cmd: { x: 'git push' } } }).refusal(), '', 'only shell calls are judged');
   assert.match(UNREADABLE, /could not read this shell command, so it was refused\. Retry it; if this repeats, run `setup toolkit`\./);

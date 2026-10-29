@@ -62,6 +62,32 @@ function argvText(words) {
   return quoteWords(words);
 }
 
+// Every key and string in the raw input, a line apart, with line continuations (\, a PowerShell
+// backtick or a cmd caret before a line break) joined, so the screen sees the words as a shell would:
+// a tab or a continued line still separates them. Past its depth or count bound the walk adds the
+// whole input as JSON with its escapes read as spaces, so nothing deeper goes unscreened.
+const MAX_SCREEN_DEPTH = 16;
+const MAX_SCREEN_ITEMS = 10000;
+function screenText(value) {
+  const parts = [];
+  let cut = false;
+  const walk = (item, depth) => {
+    if (parts.length >= MAX_SCREEN_ITEMS) { cut = true; return; }
+    if (typeof item === 'string') parts.push(item);
+    else if (typeof item === 'number' || typeof item === 'boolean') parts.push(String(item));
+    else if (item && typeof item === 'object') {
+      if (depth >= MAX_SCREEN_DEPTH) { cut = true; return; }
+      for (const [key, entry] of Object.entries(item)) {
+        if (!Array.isArray(item)) parts.push(key);
+        walk(entry, depth + 1);
+      }
+    }
+  };
+  walk(value, 0);
+  if (cut) { try { parts.push(JSON.stringify(value).replace(/\\[nrt]/g, ' ')); } catch { /* the parts read so far */ } }
+  return parts.join('\n').replace(/[\\`^]\r?\n/g, ' ');
+}
+
 function stringList(value) {
   return Array.isArray(value) && value.every(item => typeof item === 'string');
 }
@@ -82,8 +108,7 @@ class ShellCall {
     const args = input && (input.tool_input ?? input.toolInput);
     const isShell = shell === true || ShellCall.isShellTool(tool);
     const base = path.resolve(typeof input?.cwd === 'string' && input.cwd ? input.cwd : cwd);
-    let raw = '';
-    try { raw = JSON.stringify(args ?? '') || ''; } catch { raw = String(args); }
+    const raw = screenText(args);
     const named = args && typeof args === 'object' && !Array.isArray(args) ? args : {};
     let unreadable = isShell && (args === undefined || args === null ? false : named !== args);
     const texts = [];
@@ -118,8 +143,8 @@ class ShellCall {
   get folders() { return [...this.#folders]; }
   get unreadable() { return this.#unreadable; }
 
-  // The refusal for an unreadable call whose raw input could commit, push or touch a pull request,
-  // or ''.
+  // The refusal for an unreadable call whose raw input (every key and string in it) could commit,
+  // push or touch a pull request, or ''.
   refusal() {
     if (!this.#unreadable) return '';
     return GUARDED.some(pattern => pattern.test(this.#raw)) ? UNREADABLE : '';

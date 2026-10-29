@@ -460,13 +460,23 @@ function decide(input, { registryOptions = {}, now, environment = process.env } 
     const text = call.text.replace(/[\\`^]\r?\n/g, ' ');
     if (text.length > MAX_COMMAND_CHARS) return /merge|push/i.test(text) ? refuse('this command is too long to check for a merge or push, so it is refused. Split it.') : null;
     const cwd = call.folder;
-    // An argument list's words joined unquoted are screened too, as they were before the shared
-    // reader quoted them; merges themselves are read from the quoted text only, so none counts twice.
-    const joined = call.joinedWords && call.joinedWords !== call.text ? `\n${call.joinedWords.replace(/[\\`^]\r?\n/g, ' ')}` : '';
-    const refusal = shellRefusal(text + joined, cwd);
+    // An argument list is read both ways, as its words quoted and joined unquoted (as before the
+    // shared reader), so a quoted program path such as `C:\Program Files\GitHub CLI\gh.exe` cannot
+    // hide a merge. A merge both readings find counts once.
+    const joined = call.joinedWords && call.joinedWords !== call.text ? call.joinedWords.replace(/[\\`^]\r?\n/g, ' ') : '';
+    const refusal = shellRefusal(joined ? `${text}\n${joined}` : text, cwd);
     if (refusal) return refusal;
     merges = shellMerges(text, cwd, environment || {});
-    if (merges.some(merge => !merge.explicit) && MOVES_TARGET.test(text)) {
+    if (joined) {
+      const key = merge => JSON.stringify([merge.repository, merge.pr, merge.sha, merge.auto, merge.explicit]);
+      const left = new Map();
+      for (const merge of merges) left.set(key(merge), (left.get(key(merge)) || 0) + 1);
+      for (const merge of shellMerges(joined, cwd, environment || {})) {
+        const count = left.get(key(merge)) || 0;
+        if (count > 0) left.set(key(merge), count - 1); else merges.push(merge);
+      }
+    }
+    if (merges.some(merge => !merge.explicit) && MOVES_TARGET.test(joined ? `${text}\n${joined}` : text)) {
       return deny('this merge command changes folder or GH_REPO first, so Toolkit cannot tell which repository it merges in and it is refused. Name the repository with --repo owner/name or a pull request URL.');
     }
   } else return null;
