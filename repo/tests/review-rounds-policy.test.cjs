@@ -38,6 +38,8 @@ test('High and Medium findings block; Low never blocks and is recorded', () => {
   assert.doesNotMatch(GATE, /High[^.;]*never blocks/);
   assert.match(DELIVERY, /\| Current ship blocker \(High or Medium\) \|/);
   assert.match(DELIVERY, /\| Follow-up \(Low\) \|/);
+  assert.match(DELIVERY, /\| Later or optional \(Low\) \|/);
+  assert.match(DELIVERY, /review, custody, integration, publication, installation, Core release and parent completion separately/);
 });
 
 test('correction rechecks review the fix, and post-PASS deltas are unchanged', () => {
@@ -58,4 +60,5 @@ test('Projects briefs keep review rounds short', () => {
   assert.match(SKILL, /\*\*Briefs keep review rounds short\.\*\*/);
   assert.match(SKILL, /every recheck brief names the fix commits and the findings they close/);
   assert.match(SKILL, /Relay Low findings as one follow-up line, never as a blocker/);
+  assert.match(SKILL, /unless `CONTROLLER\.md` batching lets it go alone \(a default-branch repair, a safety-floor gap or a fix that unblocks work\)/);
 });
