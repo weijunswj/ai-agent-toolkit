@@ -1,5 +1,19 @@
 # Toolkit Changelog
 
+## 3.19.0 (Windows scheduled tasks)
+
+**Update every computer that reads this repository's binding.** The binding now carries `schedule_folder`, and an older Toolkit copy reads a binding with an unknown key as invalid, so it shows governance as ERROR and holds governed writes until it updates. Update with `setup toolkit`. Upload the Projects controller skill again too: it is now version 2026-10-29.3.
+
+### Scheduled tasks
+
+- **No-AI Windows tasks:** `toolkit-windows-tasks.cjs` is the only code that creates, changes or removes Windows scheduled tasks. It keeps them in one Task Scheduler folder per repository (the binding's new optional `schedule_folder`, `TOOLKIT` for this repository, else the repository name in capitals), named `<FOLDER> - <TASK>`. A task is Toolkit's only when it is in that folder, carries Toolkit's marker and is in this computer's task registry; anything else is listed and never changed.
+- **Programme sweep:** `<FOLDER> - PROGRAMME SWEEP` runs hourly from 08:00 to 23:59 for an ENABLED repository: the programme refresh, the attention line, then the footer sweep over the bound repository and its evidence store for the signed-in account's own posts since the last sweep that ended well. It skips with a reason when `gh` is signed out or the merged binding was not read in 24 hours. On Windows it replaces the AI local programme sweep task; an existing one is removed only after you say so.
+- **Shard timings:** `TOOLKIT - SHARD TIMINGS` runs on Mondays at 09:15 for the Toolkit repository and opens a pull request only when the measured CI test times drifted.
+- **Job runner:** both run `toolkit-scheduled-job.cjs`, which starts only node and gh, never a model, and writes each run's result to `~/.ai-agent-toolkit/user-state/tasks/<id>/last-run.json`. Tasks run as you while you are logged on, with no stored password and no console window (`conhost.exe --headless`), ignore a second start and stop at 30 minutes.
+- **Setup:** on Windows, setup lists each task with its folder, name, schedule, purpose and state. It never creates one: when a task needs creating or updating, it prints one PowerShell line for you to paste, which registers the tasks and runs the programme sweep once, starting it again if a closing console stopped it. `setup-toolkit.cjs --remove-toolkit-tasks` removes only Toolkit's own tasks, then the folder when it is empty.
+- **List every task:** `toolkit-tasks.cjs [--json]` lists Windows tasks live, Claude Code desktop tasks by name and description, and Codex and cloud tasks from the registry (`~/.ai-agent-toolkit/user-state/tasks.json`), saying where each row was read. `--record` and `--forget` keep cloud tasks in the registry; `toolkit-windows-tasks.cjs adopt` records a task you made yourself, which Toolkit never changes.
+- **Projects skill:** on a Windows device the programme sweep is the Windows task, and "list my tasks" merges the project's own list with the device's list.
+
 ## 3.18.0 (programme attention)
 
 **Update every computer that runs programme commands.** An older Toolkit copy refuses a parent document that carries attention findings ("unknown field(s): attention"), so it stops with an error instead of writing. Update with `setup toolkit`. Upload the Projects controller skill again too: it is now version 2026-10-29.2.

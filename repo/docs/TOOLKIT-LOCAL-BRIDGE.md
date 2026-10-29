@@ -495,6 +495,24 @@ node repo/scripts/toolkit-local-bridge.cjs --sync-enabled --write
 
 Do not add one bridge skill per command. Keep `toolkit-setup` as the only bridge/setup discoverability skill, and keep setup guidance in this doc, the updater help, validators, and tests.
 
+## Windows Scheduled Tasks
+
+On Windows, setup ends with a `## Windows scheduled tasks` section for the managed checkout's repository: each no-AI task Toolkit keeps, with its folder, name, schedule, purpose and state (to create, to update in place, up to date, or refused), and why a task does not apply. Setup never creates a task itself. When one needs creating or updating, the section ends with one PowerShell line for the user to paste:
+
+```powershell
+node "$env:USERPROFILE\.ai-agent-toolkit\source\ai-agent-toolkit\repo\scripts\toolkit-windows-tasks.cjs" apply --repo-root "$env:USERPROFILE\.ai-agent-toolkit\source\ai-agent-toolkit"
+```
+
+It registers the tasks, records them in `~/.ai-agent-toolkit/user-state/tasks.json`, then starts a new or changed programme sweep once (once more if a closing console stopped it, 0xC000013A) and calls it healthy only when the job's own last-run record says it ended well.
+
+- **Tasks:** `<FOLDER> - PROGRAMME SWEEP` runs hourly from 08:00 to 23:59 for a repository whose GitHub governance is ENABLED: the programme refresh, the attention line and the footer sweep over the bound repository and its evidence store. `<FOLDER> - SHARD TIMINGS` runs on Mondays at 09:15 for the Toolkit repository only and opens a pull request when the CI shard times drift. Both run `repo/scripts/toolkit-scheduled-job.cjs`, which starts only node and gh and records each run in `~/.ai-agent-toolkit/user-state/tasks/<id>/last-run.json`.
+- **Folder and names:** the folder is the binding's `schedule_folder` (`TOOLKIT` here), else the repository name in capitals. Names are `<FOLDER> - <TASK>`; Windows keeps each task as a file, so a name never holds `\ / : * ? " < > |`.
+- **Ownership:** a task is Toolkit's only when it sits in that folder, its Description carries `[toolkit-task v1 id=<id> def=<digest>]`, and the registry lists that id. Toolkit lists every other task and never changes it, including the root folder's n8n backups and a same-named task of your own.
+- **How they run:** as you, only while you are logged on, with no stored password, through `conhost.exe --headless` so no console window opens. A second start while one runs is ignored, and each run stops at 30 minutes. A headless console host does not pass the job's exit code to Task Scheduler, so the job's result is in its last-run file.
+- **A task you made yourself** can be recorded so the list shows it as known: `toolkit-windows-tasks.cjs adopt --folder <F> --task <name> --id <id> --purpose <text>`. Toolkit never changes or removes an adopted task.
+- **List every task:** `node repo/scripts/toolkit-tasks.cjs [--json]`, read-only: Windows tasks live from Task Scheduler, Claude Code desktop tasks live by name and description, and Codex and cloud tasks from the registry, marked "from record, not checked live".
+- **Remove:** `node repo/scripts/setup-toolkit.cjs --remove-toolkit-tasks` removes only Toolkit's own tasks and their records, then the folder when nothing else is in it.
+
 ## Hook Policy
 
 Hooks are optional automation. They must not contain unique critical policy.
