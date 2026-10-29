@@ -20,6 +20,7 @@
 //     command at all. The checks cannot read it, so a call whose raw input could commit, push or open,
 //     edit or merge a pull request is refused (refusal()); any other unreadable call runs.
 
+const os = require('node:os');
 const path = require('node:path');
 
 const SHELL_TOOL_NAMES = Object.freeze(['Bash', 'PowerShell', 'Monitor', 'exec_command', 'shell', 'local_shell']);
@@ -36,15 +37,23 @@ const SCRIPT_OPTION = { posix: /^-[A-Za-z]*c$/, powershell: /^-(?:c|command)$/i,
 // Backslashes are quoted too: outside quotes, one before a space or quote escapes it.
 const PLAIN_WORD = /^[A-Za-z0-9_@%+=:,./-]+$/;
 
-// A folder or file a shell command names, resolved against `base`. On Windows a Git Bash drive path
-// (`/c/Users/...`, `/cygdrive/c/...`, any drive letter) names that drive, as Git Bash reads it; it is
-// the shell behind Claude Code's Bash tool there. Node alone would read `/c/Users` as a folder `c` on
-// the current drive, a folder that does not exist, and the checks would look in the wrong place.
-function shellPath(base, value, platform = process.platform) {
+// A folder or file a shell command names, resolved against `base` as the shell would: a leading `~`
+// (alone, `~/` or `~\`) is the home folder in every shell. On Windows a Git Bash drive path
+// (`/c/Users/...`, `/cygdrive/c/...`, any drive letter) names that drive and `/tmp` the user's temp
+// folder, as Git Bash reads them; it is the shell behind Claude Code's Bash tool there. Node alone
+// would read `/c/Users` as a folder `c` on the current drive, which does not exist, and the checks
+// would look in the wrong place. A variable or command substitution (`$HOME`, `$(...)`,
+// `$env:USERPROFILE`) is left as written, so its folder is not found and a push from it is refused.
+function shellPath(base, value, { platform = process.platform, home = os.homedir(), temp = os.tmpdir() } = {}) {
   const text = String(value);
+  const paths = platform === 'win32' ? path.win32 : path;
+  const tilde = /^~(?:[\\/](.*))?$/s.exec(text);
+  if (tilde) return paths.resolve(home, tilde[1] || '');
   if (platform === 'win32') {
     const drive = /^\/(?:cygdrive\/)?([A-Za-z])(?:\/(.*))?$/s.exec(text);
     if (drive) return path.win32.resolve(`${drive[1].toUpperCase()}:\\`, drive[2] || '');
+    const tmp = /^\/tmp(?:\/(.*))?$/s.exec(text);
+    if (tmp) return path.win32.resolve(temp, tmp[1] || '');
     return path.win32.resolve(base, text);
   }
   return path.resolve(base, text);

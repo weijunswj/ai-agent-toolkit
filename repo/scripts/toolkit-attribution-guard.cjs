@@ -16,8 +16,10 @@
 //
 // Last, a `git push` or `gh pr create` that passed those checks is refused when what it would send
 // carries a credential or a plain-text finding (toolkit-push-check.cjs), including what a `git commit`
-// earlier in the same command could add. That step fails open: if it cannot check, the command runs
-// with one note for the user. The same gaps apply.
+// earlier in the same command could add. A push whose folder cannot be found is refused. When the step
+// cannot check for another reason (git missing, too slow, a setting unreadable), Claude Code lets the
+// command run with one note for the user and the Codex hook refuses it (Codex shows no notes). Folders
+// are read as the shell reads them (toolkit-shell-call.cjs shellPath). The same gaps apply.
 
 const fs = require('node:fs');
 const path = require('node:path');

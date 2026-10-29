@@ -49,10 +49,19 @@ test('argument lists keep their words: quoting reads back, and a shell wrapper h
   assert.equal(argvText(['powershell', '-c']), 'powershell -c', 'a script option with no script');
 });
 
-test('shellPath reads Git Bash drive paths on Windows and leaves every other path to Node', () => {
+test('shellPath reads the home folder, Git Bash drive paths and /tmp as the shell does, and leaves every other path to Node', () => {
   const { shellPath } = require('../scripts/toolkit-shell-call.cjs');
   const base = 'C:\\Users\\u\\work';
+  const windows = { platform: 'win32', home: 'C:\\Users\\u', temp: 'C:\\Users\\u\\AppData\\Local\\Temp' };
   for (const [value, expected] of [
+    ['~', 'C:\\Users\\u'],
+    ['~/repo', 'C:\\Users\\u\\repo'],
+    ['~\\repo\\sub', 'C:\\Users\\u\\repo\\sub'],
+    ['~other/repo', 'C:\\Users\\u\\work\\~other\\repo'],
+    ['/tmp', 'C:\\Users\\u\\AppData\\Local\\Temp'],
+    ['/tmp/scratch', 'C:\\Users\\u\\AppData\\Local\\Temp\\scratch'],
+    ['/tmpfiles/x', 'C:\\tmpfiles\\x'],
+    ['$HOME/repo', 'C:\\Users\\u\\work\\$HOME\\repo'],
     ['/c/Users/u/repo', 'C:\\Users\\u\\repo'],
     ['/C/Users/u/repo/', 'C:\\Users\\u\\repo'],
     ['/d', 'D:\\'],
@@ -63,10 +72,11 @@ test('shellPath reads Git Bash drive paths on Windows and leaves every other pat
     ['sub', 'C:\\Users\\u\\work\\sub'],
     ['..\\other', 'C:\\Users\\u\\other'],
     ['/cd/x', 'C:\\cd\\x'],
-    ['/tmp/x', 'C:\\tmp\\x'],
-  ]) assert.equal(shellPath(base, value, 'win32'), expected, value);
-  // Elsewhere /c is a real folder.
-  assert.equal(shellPath('/home/u', '/c/Users', 'linux'), path.resolve('/home/u', '/c/Users'));
+  ]) assert.equal(shellPath(base, value, windows), expected, value);
+  // Elsewhere /c and /tmp are real folders; ~ is still the home folder.
+  assert.equal(shellPath('/home/u', '/c/Users', { platform: 'linux' }), path.resolve('/home/u', '/c/Users'));
+  assert.equal(shellPath('/home/u', '/tmp/x', { platform: 'linux', temp: '/var/elsewhere' }), path.resolve('/tmp/x'));
+  assert.equal(shellPath('/srv', '~/repo', { platform: 'linux', home: '/home/u' }), path.resolve('/home/u', 'repo'));
 });
 
 test('the shell tool list is the one the gate, the merge hold and the Codex hook use', () => {
