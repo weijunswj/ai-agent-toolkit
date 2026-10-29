@@ -262,7 +262,9 @@ test('an interrupted index-comment move is settled by reading the comments, neve
   reconciler().run({ apply: true });
   const limit = Math.max(github.issues.get(423).body.length, github.issues.get(421).body.length) + 400;
   const run = apply => { const pass = reconciler(); pass.threshold = limit; return pass.run({ apply }); };
-  Array.from({ length: 16 }, (unused, n) => comment(github, 423, `INT-TK421-4${String(n).padStart(2, '0')} ${'y'.repeat(80)}`));
+  // Enough comments to push #423 past the limit, which the parent's longer CURRENT summary (its
+  // attention lines) raises.
+  Array.from({ length: 40 }, (unused, n) => comment(github, 423, `INT-TK421-4${String(n).padStart(2, '0')} ${'y'.repeat(80)}`));
   let failBody = true;
   github.intercept(call => (failBody && call.method === 'PATCH' && call.path.endsWith('/issues/423') ? (failBody = false, { status: 502, json: { message: 'Bad gateway' } }) : undefined));
   run(true);
@@ -281,14 +283,16 @@ test('an open PR that references an untracked outcome is reported for the contro
   github.addPr(601, { head: SHA_A, body: 'Work for the shared contract.\n\nRefs #421, #423 and #467' });
   github.addPr(602, { head: SHA_B, state: 'MERGED', merged: true, body: 'Closes #423' });
   github.addPr(603, { head: SHA_B, isDraft: true, state: 'DRAFT', body: 'Completes: #459' });
-  const commits = github.commits;
+  const child = store.read('child', 423);
   const report = reconciler().run({ apply: true });
   assert.deepEqual(report.findings.filter(finding => finding.code === 'PR_UNTRACKED').map(finding => `#${finding.issue}: ${finding.detail}`), [
     '#423: open PR #601 references this outcome, but its state records no PR or branch; the controller confirms and records it with update --patch',
     '#467: open PR #601 references this outcome, but its state records no PR or branch; the controller confirms and records it with update --patch',
   ], 'merged PRs and finished outcomes are left out');
-  assert.equal(github.commits, commits, 'nothing is recorded');
+  assert.equal(store.read('child', 423).sha, child.sha, 'nothing is recorded on the task');
   assert.equal(store.read('child', 423).doc.pr.number, null);
+  // The finding itself is kept for the controller on the parent, as attention.
+  assert.deepEqual(store.read('parent', 421).doc.attention.filter(entry => entry.code === 'PR_UNTRACKED').map(entry => `${entry.state} #${entry.issue}`), ['new #423', 'new #467']);
 });
 
 test('reclassifying an outcome keeps its identity, document and native link', () => {
