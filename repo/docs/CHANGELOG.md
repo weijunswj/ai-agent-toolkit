@@ -1,5 +1,13 @@
 # Toolkit Changelog
 
+## 3.18.3 (security alert cleanup and Dependabot action updates)
+
+- **CI drift guard:** a Dependabot update to a pinned action in `validate.yml` now passes when only the commit SHA and `# vX.Y.Z` version comment change and the action name stays the same. A different action, a tag or short ref, a missing version comment or any other edit to the file is still refused. The guard's tests find the pins in the live file and rerun every drift case with each pinned action updated, so the whole test run passes on such an update too. The portable sharding playbook says the same.
+- **Personal-data guard config:** Dependabot's public sign-off address is on the role address allow list, so its commit trailers no longer fail the check. Other addresses at the same domain still block.
+- **Action pins:** `setup-python` 7.1.0, `upload-artifact` 7.0.2 and `download-artifact` 8.0.2, each pinned to its verified tag commit.
+- **Dependencies:** the test-only `fast-uri` package is locked at 3.1.9, which fixes four advisories.
+- **Tests:** two test assertions escape every value they put into a regular expression, so they check the exact text instead of matching any character where a dot was meant.
+
 ## 3.18.2 (the project chat's newest post is the one to edit)
 
 - **Projects post hook (skill version 2026-10-29.4, upload it again):** a hook cannot read the project chat, so in the main project chat it now uses the session's own reads of it. After a project chat read that reaches the last page, the newest top-level message decides: when it is the coordinator's own post (not a card), even one an earlier session wrote, and no owner message the session saw (a reply in a thread included) came after it, a fresh post is refused and the refusal names that post to edit with an **[HH:MM] Update:** line, and the post is then checked like the session's own (edits keep its Update lines, and a later owner message closes it to edits), unless the read's copy is near the 8 KB limit and may have been cut short, in which case the post is left untracked and a fresh post passes; when it is the owner's message, the owner counts as having written, so the session posts fresh and earlier posts stay closed to edits. Work-thread sessions (started by a spawn relay, or whose posts land in a thread) skip these reads. Replies under a post, cards and thread launches are not checked by this rule.

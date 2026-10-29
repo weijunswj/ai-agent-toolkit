@@ -11,7 +11,7 @@ const { ToolkitInstallHealthCheck, STATUS, claudeAccountPluginFolders, claudeAcc
 const { ClaudeHelperAgentRenderer } = require('../scripts/toolkit-claude-helper-agents.cjs');
 const { ClaudeNamedHelperPolicy } = require('../scripts/toolkit-claude-helper-policy.cjs');
 const {
-  assert, fs, path, repoRoot, tmpRoot, isolatedHomeEnv, writeFile, run, runTestGit, createGitBackedSetupRepo,
+  assert, fs, path, repoRoot, tmpRoot, isolatedHomeEnv, writeFile, run, runTestGit, createGitBackedSetupRepo, escapeRegExp,
 } = require('./toolkit-setup-test-support.cjs');
 
 const VERSION = JSON.parse(fs.readFileSync(path.join(repoRoot, '.claude-plugin', 'plugin.json'), 'utf8')).version;
@@ -240,7 +240,7 @@ test('the Projects controller skill check compares the synced claude.ai copy wit
   writeFile(path.join(synced, 'abc_def', 'web-controller-projects', 'SKILL.md'), '---\nname: web-controller-projects\n---\nVersion: 2026-01-01.1\n');
   const older = check();
   assert.equal(older.status, STATUS.PASSED);
-  assert.match(older.summary, new RegExp(`Your uploaded copy is 2026-01-01\.1; Toolkit has ${repoVersion.replace('.', '\.')}\. Upload .*web-controller-projects/SKILL\.md to claude\.ai`));
+  assert.match(older.summary, new RegExp(`Your uploaded copy is 2026-01-01\\.1; Toolkit has ${escapeRegExp(repoVersion)}\\. Upload .*web-controller-projects/SKILL\\.md to claude\\.ai`));
   writeFile(path.join(synced, 'abc_def', 'web-controller-projects', 'SKILL.md'), `Version: ${repoVersion}\n`);
   assert.match(check().summary, /Your uploaded copy is current/);
 });
