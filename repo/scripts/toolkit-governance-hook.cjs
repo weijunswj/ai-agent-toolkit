@@ -74,7 +74,8 @@ function respond(event, input, options = {}) {
       return decision.notice ? { systemMessage: decision.notice, ...context } : context;
     }
     if (event === 'PreToolUse') {
-      const decision = new gate.ToolGate(options).decide(input);
+      // This entry point serves Claude Code only, whose Bash tool always runs bash.
+      const decision = new gate.ToolGate({ ...options, host: 'claude' }).decide(input);
       return decision ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: decision.deny } } : {};
     }
     if (event === 'PostToolUse') {

@@ -43,7 +43,13 @@ test('session-start hooks never load or launch interactive setup', () => {
       assert.doesNotMatch(rel, SETUP_ENTRY, `${script} loads ${rel}`);
       // setup-codex-toolkit-plugin.cjs lists both files only as plugin payload paths, and the
       // continuation classifier lists the setup script's basename only to recognise it in a command.
-      const text = fs.readFileSync(file, 'utf8').replace(/^\s*'(?:repo\/scripts\/)?setup-toolkit(?:-core)?\.cjs',\r?$/gm, '');
+      // Each exemption covers its own file and exact list lines only.
+      const exempt = {
+        'repo/scripts/setup-codex-toolkit-plugin.cjs': /^ {2}'repo\/scripts\/setup-toolkit(?:-core)?\.cjs',\r?$/gm,
+        'repo/scripts/toolkit-governance-continuation.cjs': /^ {2}'setup-toolkit\.cjs',\r?$/gm,
+      }[rel];
+      const source = fs.readFileSync(file, 'utf8');
+      const text = exempt ? source.replace(exempt, '') : source;
       assert.doesNotMatch(text, SETUP_ENTRY, `${rel} names an interactive setup entry`);
       assert.doesNotMatch(text, /setup-toolkit-question-bank:begin/, `${rel} prints a question bank`);
     }

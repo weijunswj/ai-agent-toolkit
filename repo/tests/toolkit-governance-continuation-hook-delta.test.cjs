@@ -60,7 +60,7 @@ process.on('exit', () => fs.writeFileSync(process.env.SYNTHETIC_QUEUE_TRACE, JSO
     for (const hook of hooks) for (const tool_name of ['Bash', 'PowerShell']) {
       for (const [id, command, expected] of [
         ['binding', stdin('for key,value in items:\n    print(key,value)'), 'NOT_CONTINUATION'],
-        ['git', 'git push origin HEAD:refs/heads/codex/example; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; git fetch origin codex/example', 'NOT_CONTINUATION'],
+        ['git', 'git push origin HEAD:refs/heads/codex.example; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; git fetch origin codex.example', 'NOT_CONTINUATION'],
         ['explicit', model.confirmed_constructions[0][1], 'UNKNOWN'],
         ['implicit', model.construction_siblings.find(row => row[0] === 'awk-valid-one-argument')[1], 'UNKNOWN'],
       ]) { invoke(hook, tool_name, id, command, null, expected); smokeCalls += 1; }
@@ -167,8 +167,8 @@ test('new evidence allowances retain every raw guard without reading a held queu
   const ctx = fixture(t), before = snapshot(ctx.dir);
   const held = { state: 'UNDECIDED', rule: 'R4', repository_id: 'synthetic-held' }, safe = { state: 'DISABLED', rule: 'R1' };
   const positives = ["@'\nfor key,value in items:\n    print(key,value)\n'@ | python -",
-    'git push origin HEAD:refs/heads/codex/example; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; git fetch origin codex/example',
-    'git commit -m "codex resume; claude --resume"', 'git add -- "codex/resume.md"', 'rg -e "codex resume" fixture.txt'];
+    'git push origin HEAD:refs/heads/codex.example; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; git fetch origin codex.example',
+    'git commit -m "codex resume; claude --resume"', 'git add -- "codex.resume.md"', 'rg -e "codex resume" fixture.txt'];
   const originals = {}; let queueReads = 0, spawns = 0, checks = 0;
   // Throw on queue reads, metadata probes or directory scans, rather than inferring
   // zero access solely from equal bytes after the call.
