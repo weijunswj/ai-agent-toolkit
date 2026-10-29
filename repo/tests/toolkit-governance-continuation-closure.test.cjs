@@ -40,12 +40,12 @@ function envelope(ctx, text, name) {
   return { input: { tool_name, cwd: ctx.caller, session_id: 'fixture-run', tool_input: { command: text, ...(selected ? { shell: selected } : {}) } }, host };
 }
 
-const CODEX_WORKTREE = 'C:/Users/example/.codex/worktrees/a1b2/alpha2';
+const CODEX_WORKTREE = 'C:/Users/example/.codex/worktrees/a1b2/example-app';
 const SSH = 'ssh deploy@203.0.113.10';
-// The owner's Alpha2 comparison as Codex sent it: a Python script in a PowerShell here-string,
+// The owner's server comparison as Codex sent it: a Python script in a PowerShell here-string,
 // piped into Codex's bundled Python, which runs a read-only docker inspect over ssh.
-const ALPHA2 = [
-  "git -C 'C:/Users/example/GitHub/alpha2' rev-parse --show-toplevel",
+const COMPARISON = [
+  "git -C 'C:/Users/example/GitHub/example-app' rev-parse --show-toplevel",
   "@'",
   'import json,shlex,subprocess',
   "code=r'''import json,subprocess",
@@ -73,7 +73,7 @@ const MATRIX = [
   [3, 'claude -c', all(U)], [3, 'claude -r', all(U)], [3, 'claude --continue', all(U)], [3, 'claude --resume ' + ID, all(U)],
   [3, 'claude --session-id ' + ID, all(U)], [3, 'claude -p --fork-session x', all(U)], [3, 'codex resume', all(U)],
   [3, 'codex fork abc', all(U)], [3, 'codex resume --last', all(U)], [3, 'cd /c/work/repo && claude -r', all(U)],
-  [3, 'echo start; codex resume --last', all(U)], [3, 'git status && claude -c "go on"', all(U)],
+  [3, 'echo start; codex resume --last', but(U, { cmd: N })], [3, 'git status && claude -c "go on"', all(U)],
   // 4. Wrapped launches: wrappers, shells with a script, the call operator and script blocks.
   [4, 'env claude -c', all(U)], [4, 'nohup codex resume --last &', all(U)], [4, 'xargs -n1 claude -c', all(U)], [4, 'timeout 5 codex fork x', all(U)],
   [4, "Start-Process claude -ArgumentList '--resume'", all(U)], [4, "Start-Process -FilePath codex -ArgumentList 'resume','--last'", but(U, { cmd: N })],
@@ -110,7 +110,7 @@ const MATRIX = [
   [11, `cd ${CODEX_WORKTREE} && ${SSH} "docker compose config" | diff - docker-compose.yml`, all(N)],
   [11, `${SSH} "docker compose config" | diff - ${CODEX_WORKTREE}/docker-compose.yml`, all(N)],
   [11, `${SSH} "docker compose config" | Out-File $env:TEMP\\r.yml; git diff --no-index ${CODEX_WORKTREE}\\docker-compose.yml $env:TEMP\\r.yml`, all(N)],
-  [11, `$remote = ${SSH} "cat /srv/alpha2/.env.example"; $local = Get-Content "${CODEX_WORKTREE}/.env.example"; Compare-Object $local $remote`, all(N)],
+  [11, `$remote = ${SSH} "cat /srv/example-app/.env.example"; $local = Get-Content "${CODEX_WORKTREE}/.env.example"; Compare-Object $local $remote`, all(N)],
   [11, `ls "${CLAUDE_DATA}" ; echo done`, all(N)], [11, `cd ${CLAUDE_DATA} && ls -r`, all(N)],
   [11, 'S="/c/Users/example/AppData/Local/Temp/claude/x"; mkdir -p "$S" && git archive origin/main | tar -x -C "$S"', all(N)],
   [11, 'Get-ChildItem "$env:USERPROFILE\\.codex\\plugins" -Recurse | ForEach-Object { $_.FullName }', all(N)],
@@ -124,9 +124,9 @@ const MATRIX = [
   [12, 'Example-Run "codex resume"', all(N)], [12, "echo 'fixture & codex resume & echo fixture'", only(['cmd', ...COMMON], U, N)],
   // 13. Loops and flags near host-named paths.
   [13, 'for k in a b; do echo $k; done; ls ~/.codex', all(N)], [13, 'rm -rf .tmp/claude-scratch', all(N)], [13, 'Get-ChildItem -Force $env:USERPROFILE\\.claude', all(N)],
-  [13, `for s in app db; do ${SSH} "docker inspect alpha2-$s --format '{{json .HostConfig.RestartPolicy}}'"; done`, all(N)],
+  [13, `for s in app db; do ${SSH} "docker inspect example-$s --format '{{json .HostConfig.RestartPolicy}}'"; done`, all(N)],
   // 14. ssh remote commands are data, even when they name a host.
-  [14, `${SSH} "docker compose -f /srv/alpha2/docker-compose.yml config"`, all(N)], [14, `${SSH} "codex resume --last"`, all(N)],
+  [14, `${SSH} "docker compose -f /srv/example-app/docker-compose.yml config"`, all(N)], [14, `${SSH} "codex resume --last"`, all(N)],
   // 15. Unreadable text falls back to the letters check; encoded PowerShell is decoded and read.
   [15, "echo 'unclosed codex resume", but(U, { cmd: N })], [15, 'echo fine', all(N)],
   [15, 'pwsh -EncodedCommand ' + Buffer.from('codex resume', 'utf16le').toString('base64'), all(U)],
@@ -134,6 +134,32 @@ const MATRIX = [
   // 16. Programs whose option values or piped input run commands.
   [16, 'git -c alias.x="!codex resume" x', all(U)], [16, 'git -c core.sshCommand="claude -c" fetch', all(U)], [16, 'rg --pre=codex pattern resume', all(U)],
   [16, 'echo /.claude -r | cut -c3- | sh', all(U)], [16, 'git -c user.name=x commit -m "fix codex resume parsing"', all(N)],
+  [16, 'git -c alias.x=!codex x resume', all(U)], [16, "o='--upload-pack=codex resume'; git fetch origin $o", but(U, { cmd: N })],
+  // 17. A wrapper that starts a shell with one argument string (review finding 1).
+  [17, 'Start-Process pwsh -ArgumentList "-NoExit -Command codex resume --last"', all(U)],
+  [17, 'Start-Process powershell -ArgumentList "-NoExit -Command claude --continue"', all(U)],
+  [17, "Start-Process bash -ArgumentList '-c \"codex resume\"'", but(U, { cmd: N })], [17, 'Start-Process ~/.claude -r', all(U)],
+  [17, 'Start-Process pwsh -ArgumentList "-NoExit -Command Get-ChildItem ~/.codex"', all(N)],
+  // 18. A command or selector held in a variable assigned earlier (review finding 2).
+  [18, '$c = "claude --continue"; Invoke-Expression $c', only([...POWERSHELL_ONLY, ...COMMON], U, N)], [18, '$b = @\'\ncodex resume\n\'@; iex $b', only([...POWERSHELL_ONLY, ...COMMON, 'cmd'], U, N)],
+  [18, 'c="codex resume"; eval "$c"', but(U, { cmd: N })], [18, 'c="codex resume"; $c', only([...POSIX_ONLY, ...COMMON], U, N)],
+  [18, 'c="codex resume"; bash -c "$c"', but(U, { cmd: N })], [18, 'M=resume; codex "$M"', but(U, { cmd: N })],
+  [18, 'M=status; codex "$M"', all(N)], [18, 'c="ls -la"; eval "$c"', all(N)],
+  // 19. A script written and then run in the same command (review finding 3).
+  [19, "cat > r.sh <<'EOF'\ncodex resume\nEOF\nbash r.sh", but(U, { 'claude powershell': N, powershell: N })],
+  [19, "Set-Content r.ps1 'claude --continue'; pwsh -File r.ps1", but(U, { cmd: N })], [19, "echo 'claude -c' > r.sh && sh r.sh", all(U)],
+  [19, "cat > notes.txt <<'EOF'\ncodex resume\nEOF\nbash build.sh", only(['cmd'], U, N)],
+  // 20. cmd keeps ';' inside one command (review finding 6).
+  [20, "gh api repos/x/y/issues/1/comments -f body='Claude resumed; Codex fork done'", all(N)], [20, "git commit -m 'Fix x; codex resume refused'", all(N)],
+  // 21. Shell functions that build the name (review finding 4).
+  [21, 'd(){ printf d; }; ume(){ printf ume; }; co$(d)ex res$(ume)', but(U, { cmd: N })],
+  // Restored from the earlier refuse lists: functions defined in PowerShell, command variables
+  // and remotes held in variables (review finding 4).
+  [21, "$function:gh = 'codex resume'; gh issue view 1", only([...POWERSHELL_ONLY, ...COMMON], U, N)],
+  [21, "Set-Content function:gh 'codex resume'; gh issue view 1", but(U, { cmd: N })],
+  [21, "GIT_PAGER='codex resume' git log", but(U, { cmd: N })], [21, "$env:GIT_PAGER='claude --continue'; git log", but(U, { cmd: N })],
+  [21, "r='ext::codex resume'; git push \"$r\" main", but(U, { cmd: N })], [21, "x='a --upload-pack=codex${IFS}resume'; git fetch origin $x", but(U, { cmd: N })],
+  [21, "GIT_PAGER='less -R' git log", all(N)],
 ];
 
 test('closure matrix: every shape of the plan, under every shell reading', t => {
@@ -153,7 +179,7 @@ test('closure matrix: every shape of the plan, under every shell reading', t => 
       checks += 1;
     }
   }
-  assert.deepEqual([...rows].sort((a, b) => a - b), [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+  assert.deepEqual([...rows].sort((a, b) => a - b), [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]);
   assert.deepEqual(snapshot(ctx.dir), before);
   t.diagnostic(JSON.stringify({ closureChecks: checks }));
 });
@@ -163,7 +189,7 @@ test('the commands the owner and agents had refused pass in the shape each host 
   const make = stateReader => new gate.ToolGate({ registryOptions: ctx.options, environment: ctx.environment, stateReader, host: 'codex' });
   const held = { state: 'UNDECIDED', rule: 'R4', repository_id: 'synthetic-held' }, safe = { state: 'DISABLED', rule: 'R1' };
   const PWSH = 'C:\\Program Files\\PowerShell\\7\\pwsh.exe';
-  for (const text of [ALPHA2, CHAT_START, `cd ${CODEX_WORKTREE} && ${SSH} "docker compose config" | diff - docker-compose.yml`]) {
+  for (const text of [COMPARISON, CHAT_START, `cd ${CODEX_WORKTREE} && ${SSH} "docker compose config" | diff - docker-compose.yml`]) {
     for (const input of [
       { tool_name: 'Bash', cwd: ctx.caller, tool_input: { command: text } },
       { tool_name: 'exec_command', cwd: ctx.caller, tool_input: { cmd: text, workdir: ctx.caller } },
@@ -176,7 +202,7 @@ test('the commands the owner and agents had refused pass in the shape each host 
     }
   }
   // The same comparison with a real launch added on its own line is still refused.
-  const launch = `${ALPHA2}\ncodex resume --last`;
+  const launch = `${COMPARISON}\ncodex resume --last`;
   assert.equal(parse(launch, { tool_name: 'Bash', cwd: ctx.caller, tool_input: { command: launch } }, { host: 'codex' }).status, U);
 });
 
@@ -226,6 +252,7 @@ test('inputs at the length limit are read in linear time', () => {
     size => '${'.repeat(size / 2) + ' ls ~/.claude/x', size => '"'.repeat(size), size => "'a' ".repeat(size / 4) + 'codex',
     size => '$('.repeat(size / 2), size => '{ '.repeat(size / 2), size => 'env '.repeat(size / 4) + 'claude -c',
     size => '@(\n'.repeat(size / 3), size => 'a | '.repeat(size / 4) + 'sh', size => ('x=' + 'c'.repeat(64) + '; ').repeat(size / 70) + '$x -c',
+    size => 'env '.repeat(size / 4) + 'ls', size => 'pwsh '.repeat(size / 5) + 'ls', size => 'sudo env nohup timeout 5 '.repeat(size / 25) + 'ls',
   ];
   for (const shape of shapes) {
     const ms = time(shape(LIMITS.command));
@@ -245,7 +272,7 @@ test('the source hooks set their own host: Claude Bash reads as bash, Codex and 
   const POSIX_TEXT = 'x=co; "${x}dex" resume';
   // [text, tool, refused by the Claude hook, refused by the Codex hook]
   const cases = [
-    [ALPHA2, 'Bash', false, false], [CHAT_START, 'PowerShell', false, false], [CHAT_START, 'Bash', false, false],
+    [COMPARISON, 'Bash', false, false], [CHAT_START, 'PowerShell', false, false], [CHAT_START, 'Bash', false, false],
     [POSIX_TEXT, 'Bash', true, true], [POSIX_TEXT, 'PowerShell', false, false], [POSIX_TEXT, 'Monitor', true, true],
     ['codex resume', 'Bash', true, true], ['claude --resume ' + ID, 'Bash', true, true],
   ];
@@ -271,7 +298,7 @@ test('the source hooks set their own host: Claude Bash reads as bash, Codex and 
 test('allowed commands still meet every raw guard, without reading a held queue or acquiring metadata', t => {
   const ctx = fixture(t), before = snapshot(ctx.dir);
   const held = { state: 'UNDECIDED', rule: 'R4', repository_id: 'synthetic-held' }, safe = { state: 'DISABLED', rule: 'R1' };
-  const allowed = [ALPHA2, CHAT_START, `cd ${CODEX_WORKTREE} && ${SSH} "docker compose config" | diff - docker-compose.yml`,
+  const allowed = [COMPARISON, CHAT_START, `cd ${CODEX_WORKTREE} && ${SSH} "docker compose config" | diff - docker-compose.yml`,
     'git commit -m "codex resume; claude --resume"', 'rg -e "codex resume" fixture.txt', 'for k in a b; do echo $k; done; ls ~/.codex'];
   const originals = {}; let queueReads = 0, spawns = 0, checks = 0;
   // Throw on queue reads rather than inferring zero access solely from equal bytes after the call.

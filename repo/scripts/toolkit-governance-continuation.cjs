@@ -55,8 +55,16 @@ const INTERPRETERS = new Set(['node', 'nodejs', 'python', 'python2', 'python3', 
   'luajit', 'bun', 'osascript', 'rscript', 'tclsh', 'wish', 'awk', 'gawk', 'mawk', 'nawk', 'sed', 'jshell', 'groovy', 'cscript', 'wscript']);
 // Commands that run their arguments as a script in the same shell.
 const EVALUATORS = new Set(['eval', 'iex', 'invoke-expression', 'source', '.']);
+// Commands that write their path arguments.
+const WRITERS = new Set(['set-content', 'add-content', 'ac', 'out-file', 'tee-object', 'tee', 'new-item', 'ni']);
+// Environment variables that programs run as commands.
+const COMMAND_VARIABLES = Object.freeze(['git_pager', 'pager', 'gh_pager', 'git_editor', 'editor', 'visual', 'gh_editor', 'git_ssh_command',
+  'git_ssh', 'git_external_diff', 'git_askpass', 'ssh_askpass', 'git_sequence_editor']);
+// Readings of wrappers and expansions per text before the command is refused unread.
+const STEP_LIMIT = 4000;
+const EXPANSION_LIMIT = 32;
 // Commands that make a name run a host later.
-const DEFINERS = new Set(['alias', 'set-alias', 'sal', 'new-alias', 'nal', 'doskey']);
+const DEFINERS =new Set(['alias', 'set-alias', 'sal', 'new-alias', 'nal', 'doskey']);
 // Words after which the next word is again a command position.
 const POSIX_PREFIX = new Set(['!', '{', 'then', 'else', 'elif', 'if', 'do', 'while', 'until', 'coproc']);
 const POWERSHELL_PREFIX = new Set(['return', 'throw', 'exit', 'else', 'try', 'finally', 'do', 'begin', 'process', 'end', 'clean']);
@@ -150,7 +158,8 @@ class ShellReader {
         if (this.pending.length) this.bodies();
         continue;
       }
-      if (c === ';' || this.at('&&') || this.at('||')) {
+      // cmd does not separate commands at ';'; it is an ordinary character there.
+      if ((c === ';' && this.d !== CMD) || this.at('&&') || this.at('||')) {
         this.i += c === ';' ? (this.peek(1) === ';' || this.peek(1) === '&' ? 2 : 1) : 2; finish(); command = this.start(0); continue;
       }
       if (c === '|') {
@@ -191,7 +200,7 @@ class ShellReader {
     }
   }
 
-  start(stage) { return { words: [], heredocs: [], stdin: [], stage, dialect: this.d }; }
+  start(stage) { return { words: [], heredocs: [], stdin: [], writes: [], stage, dialect: this.d }; }
 
   comment() {
     if (this.d === POSIX && this.peek() === '#') { this.toLineEnd(); return true; }
@@ -226,7 +235,7 @@ class ShellReader {
     else if (/<<-?$/.test(m[0])) {
       const doc = { delimiter: target.value ?? target.raw, strip: m[0].endsWith('-'), quoted: target.quoted, body: null };
       command.heredocs.push(doc); this.pending.push(doc);
-    }
+    } else if (/>/.test(m[0])) command.writes.push(target.value ?? target.raw);
     return true;
   }
 
@@ -265,7 +274,7 @@ class ShellReader {
       if (this.i > start || value) tokens.push(word(this.t.slice(start, this.i), dynamic ? null : value, { glob, quoted }));
     };
     const ends = c => c === undefined || c === ' ' || c === '\t' || c === '\n' || ODD.test(c) || (c === '\r')
-      || ';&|<>()'.includes(c) || (this.d === POWERSHELL && '{},'.includes(c));
+      || '&|<>()'.includes(c) || (c === ';' && this.d !== CMD) || (this.d === POWERSHELL && '{},'.includes(c));
     while (!ends(this.peek())) {
       const c = this.peek();
       if (this.d === POSIX) {
@@ -430,31 +439,76 @@ function dialectsOf(input, host) {
 
 const leaf = value => value.split(/[\\/]/).pop().toLowerCase().replace(/\.(?:exe|cmd|bat|ps1)$/, '');
 const raws = words => words.map(w => w.raw).join(' ');
+// One argument string split the way a started Windows program reads it: spaces and commas
+// separate words, double quotes group them.
+const splitArguments = text => [...text.matchAll(/"([^"]*)"|([^\s,"]+)/g)].map(m => m[1] ?? m[2]).filter(Boolean);
+// A host program name, including a dotted file named like one (`~/.claude -r`).
+const hostName = value => hostOf(value) || hostOf(value.split(/[\\/]/).pop().replace(/^\.+/, ''));
 
 // Decides whether any command the reader found could resume or fork a session. `seen` names the
 // first one found, for the refusal text.
 class CandidateFinder {
-  constructor({ text, stdin = [] }) { this.full = text; this.stdin = stdin; this.seen = null; this.assigned = new Map(); }
+  constructor({ text, stdin = [] }) {
+    this.full = text; this.stdin = stdin; this.seen = null;
+    this.assigned = new Map(); this.written = new Set(); this.bodies = []; this.steps = 0; this.expansions = 0;
+  }
 
-  // Literal variable assignments (`x=co`, `$h = 'codex'`), so a computed command word can be
-  // read with them filled in.
+  // Variables programs run as commands (`GIT_PAGER='codex resume' git log`) and function bodies
+  // defined in the text (`$function:gh = 'codex resume'`) are read as scripts.
+  defined(depth) {
+    for (const name of COMMAND_VARIABLES) {
+      if ((this.assigned.get(name) || []).some(directCheck)) return this.found(`a command in ${name.toUpperCase()}`);
+    }
+    for (const body of this.bodies.splice(0)) if (this.text(body, POWERSHELL, depth + 1)) return true;
+    return false;
+  }
+
+  // Literal variable assignments (`x=co`, `$h = 'codex'`), so a computed word can be read with
+  // them filled in, and the files the text writes (`> r.sh`, `Set-Content r.ps1`), so running one
+  // of them later in the same text is read with what was written.
   remember(commands) {
-    for (const { words, dialect } of commands) {
+    for (const { words, dialect, writes } of commands) {
       const add = (name, value) => this.assigned.set(name.toLowerCase(), [...(this.assigned.get(name.toLowerCase()) || []), value]);
-      if (dialect === POWERSHELL && /^\$\w+$/.test(words[0]?.raw || '') && words[1]?.raw === '=' && typeof words[2]?.value === 'string') add(words[0].raw.slice(1), words[2].value);
+      const target = dialect === POWERSHELL && words[1]?.raw === '=' && typeof words[2]?.value === 'string' ? /^\$(env:|function:)?(\w[\w-]*)$/i.exec(words[0]?.raw || '') : null;
+      // `$function:gh = '...'` defines a command whose body runs later in the same text.
+      if (target?.[1]?.toLowerCase() === 'function:') this.bodies.push(words[2].value);
+      else if (target) add(target[2], words[2].value);
+      if (WRITERS.has(leaf(words[0]?.value || '')) && words.some(w => /^function:/i.test(w.value || ''))) {
+        for (const w of words.slice(1)) if (w.kind === 'word' && w.value && !/^(?:-|function:)/i.test(w.value)) this.bodies.push(w.value);
+      }
       for (const w of words) {
         const m = w.kind === 'word' && typeof w.value === 'string' ? /^([A-Za-z_]\w*)=([\s\S]*)$/.exec(w.value) : null;
         if (!m || !/^[A-Za-z_]\w*=/.test(w.raw)) break;
         add(m[1], m[2]);
       }
+      for (const file of writes) this.written.add(leaf(file));
+      if (WRITERS.has(leaf(words[0]?.value || ''))) {
+        for (const w of words.slice(1)) if (w.kind === 'word' && w.value && !w.value.startsWith('-')) this.written.add(leaf(w.value));
+      }
     }
   }
   expand(raw) { return raw.replace(/\$\{?(?:env:)?([A-Za-z_]\w*)\}?/gi, (m, name) => (this.assigned.get(name.toLowerCase()) || [m]).join('')); }
+  // A word's text: its literal value, or its value with assigned variables filled in, or null.
+  resolved(w) {
+    if (w.kind !== 'word') return null;
+    if (w.value !== null) return w.value;
+    const filled = this.expand(w.raw);
+    return filled === w.raw || /\$|`/.test(filled) ? null : filled.replace(/["']/g, '');
+  }
+  // True when an argument runs a file written earlier in the same text: the written text is read.
+  runsWritten(args) {
+    return args.some(x => x.kind === 'word' && this.written.has(leaf(this.resolved(x) ?? x.raw))) && fallback(this.full) && this.found('a script written and run in one command');
+  }
 
   found(seen) { this.seen ??= seen; return true; }
+  // Wrapper chains and positional scripts can multiply the reading; past the budget the command
+  // is refused rather than read further, well inside the hosts' hook timeouts.
+  // Each read of a text costs one step per 256 characters, so the budget also bounds re-reading.
+  spent(cost = 1) { this.steps += cost; return this.steps > STEP_LIMIT; }
 
   text(text, dialect, depth = 0) {
     if (depth > MAX_DEPTH || text.length > LIMITS.command) return fallback(text) && this.found('a command Toolkit could not read');
+    if (this.spent(1 + Math.floor(text.length / 256))) return this.found('a command too long to read in time');
     let commands;
     try { commands = new ShellReader(text, dialect).read(); }
     catch (error) {
@@ -463,7 +517,7 @@ class CandidateFinder {
       throw error;
     }
     this.remember(commands);
-    return commands.some(command => this.command(command, depth));
+    return this.defined(depth) || commands.some(command => this.command(command, depth));
   }
 
   // An argument list run without a shell (Codex's shell tool).
@@ -528,28 +582,31 @@ class CandidateFinder {
     return { literal, raw: stages.map(stage => raws(stage.words)).join(' | ') };
   }
 
-  // A command word that is computed at run time: refused only with host letters outside folder
-  // paths, or in the word's own assigned or built value, and a selector after it.
+  // A command word that is computed at run time. A variable holding a whole command is read with
+  // its assigned text; otherwise it is refused only with host letters outside folder paths, or in
+  // the word's assigned or built value, and a selector after it (also from assigned values).
   dynamic(words, command) {
     if (words[1]?.raw === '=') return false;
-    const own = words[0].raw, after = raws(words.slice(1));
-    const selector = selectorSignal(after) || selectorSignal(own);
+    const own = words[0].raw, after = this.expand(raws(words.slice(1))), filled = this.expand(own);
+    if (filled !== own && this.expansions++ < EXPANSION_LIMIT
+      && this.text(`${filled.replace(/["']/g, '')} ${after}`, command.dialect ?? POWERSHELL, MAX_DEPTH)) return true;
+    const selector = selectorSignal(after) || selectorSignal(own) || /resume|fork|continue|sessionid/i.test(after.replace(/[^a-z0-9]/gi, ''));
     // A name assigned elsewhere (`$h='codex'; & $h resume`), or built in the command word itself.
-    const assigned = (outsidePaths(this.full) || hostLetters(this.expand(own))) && selector;
+    const assigned = (outsidePaths(this.full) || hostLetters(filled)) && selector;
     const built = HOST_NAMES.some(name => inOrder(constructed(own), name))
       && (selector || SELECTOR_NAMES.some(name => inOrder(constructed(after), name)));
     return (assigned || built) && this.found('a command name computed at run time');
   }
 
   at(words, i, command, { depth, viaWrapper = false, xargs = false, argv = false }) {
+    if (this.spent()) return this.found('a command too long to read in time');
     const w = words[i];
     if (!w) return false;
     if (w.kind !== 'word') return w.kind === 'group' ? this.dynamic(words.slice(i), command) : false;
     if (w.value === null || w.glob) return this.dynamic(words.slice(i), command);
     const pieces = w.value.split(ODD);
     const value = pieces[0], args = pieces.length > 1 ? [...pieces.slice(1).filter(Boolean).map(p => word(p, p)), ...words.slice(i + 1)] : words.slice(i + 1);
-    // A dotted file named like a host (`~/.claude -r`) is read as the host too.
-    const host = hostOf(value) || hostOf(value.split(/[\\/]/).pop().replace(/^\.+/, ''));
+    const host = hostName(value);
     if (host) return this.launch(host, value, args, { viaWrapper, xargs });
     const name = leaf(value);
     if (WRAPPERS.has(name) || (CMD_KEYWORDS.has(name) && command.dialect === CMD)) {
@@ -558,20 +615,21 @@ class CandidateFinder {
         const x = words[j];
         if (x.kind !== 'word') continue;
         if (x.value === null || x.glob) { if (this.dynamic(words.slice(j), command)) return true; continue; }
-        const inner = leaf(x.value.split(ODD)[0]);
-        if (hostOf(x.value.split(ODD)[0]) || WRAPPERS.has(inner) || RUNNERS[inner] || INTERPRETERS.has(inner) || EVALUATORS.has(inner)) {
-          if (this.at(words, j, command, { depth: depth + 1, viaWrapper: true, xargs: name === 'xargs', argv })) return true;
-        }
+        const head = x.value.split(ODD)[0], inner = leaf(head);
+        const options = { depth: depth + 1, viaWrapper: true, xargs: name === 'xargs', argv };
+        // An inner wrapper reads every later word itself.
+        if (WRAPPERS.has(inner)) return this.at(words, j, command, options);
+        if ((hostName(head) || RUNNERS[inner] || INTERPRETERS.has(inner) || EVALUATORS.has(inner)) && this.at(words, j, command, options)) return true;
       }
       return false;
     }
-    if (RUNNERS[name]) return this.runner(RUNNERS[name], name, args, command, depth, argv);
+    if (RUNNERS[name]) return this.runner(RUNNERS[name], name, args, command, depth, argv, viaWrapper);
     if (INTERPRETERS.has(name)) {
       // The script is its arguments, a heredoc or here-string, or known text piped in. Text an
       // earlier stage builds gets the letters check over those stages.
       const up = command.prev ? this.upstream(command) : null;
       const body = [raws(args), ...command.heredocs.map(doc => doc.body || ''), ...command.stdin, up?.literal ?? ''].join('\n');
-      return (directCheck(body) || (up && up.literal === null && fallback(up.raw))) && this.found(`a ${name} script`);
+      return ((directCheck(body) || (up && up.literal === null && fallback(up.raw))) && this.found(`a ${name} script`)) || this.runsWritten(args);
     }
     if (EVALUATORS.has(name)) {
       // `... | iex` runs its piped input.
@@ -584,24 +642,34 @@ class CandidateFinder {
         // The sourced file may have been written earlier in the same command.
         return fallback(this.full) && this.found(`${name} on a script file`);
       }
-      if (args.some(x => x.kind !== 'word' || x.value === null)) {
-        const own = raws(words.slice(i));
-        return ((hostLetters(own) && selectorSignal(own)) || this.dynamic(words.slice(i), command)) && this.found(`${name} on computed text`);
-      }
-      const script = args.filter(x => !/^-c(?:o(?:m(?:m(?:a(?:n(?:d)?)?)?)?)?)?$/i.test(x.value));
-      return this.text(script.map(x => x.value).join(' '), command.dialect ?? POWERSHELL, depth + 1);
+      const script = args.filter(x => x.kind !== 'word' || !/^-c(?:o(?:m(?:m(?:a(?:n(?:d)?)?)?)?)?)?$/i.test(x.value ?? ''));
+      const values = script.map(x => this.resolved(x));
+      // Text held in a variable assigned earlier (`$c = "claude -c"; iex $c`) is read as the script.
+      if (values.every(v => v !== null)) return this.text(values.join(' '), command.dialect ?? POWERSHELL, depth + 1);
+      const own = this.expand(raws(words.slice(i)));
+      return ((hostLetters(own) && selectorSignal(own)) || this.dynamic(words.slice(i), command)) && this.found(`${name} on computed text`);
     }
     const options = COMMAND_OPTIONS[name];
     if (options) {
-      for (let n = 0; n < args.length; n += 1) {
-        const v = args[n].kind === 'word' ? args[n].value ?? args[n].raw : '';
+      // A value held in a variable is read with its assigned text, split as the shell splits it.
+      const values = args.flatMap(x => (x.kind !== 'word' ? [] : x.value !== null ? [x.value] : (this.resolved(x) ?? x.raw).split(/\s+/)));
+      for (let n = 0; n < values.length; n += 1) {
+        const v = values[n];
         const eq = v.startsWith('-') ? v.indexOf('=') : -1;
         let value = null;
-        if (options.test(eq > 0 ? v.slice(0, eq) : v)) value = eq > 0 ? v.slice(eq + 1) : (args[n + 1]?.value ?? args[n + 1]?.raw ?? '');
+        if (options.test(eq > 0 ? v.slice(0, eq) : v)) value = eq > 0 ? v.slice(eq + 1) : (values[n + 1] ?? '');
         else if (name === 'git' && /^(?:ext|fd)::/.test(v)) value = v;
-        // rg runs its --pre program on each searched path, so the paths are its arguments.
-        if (value !== null && name === 'rg' && /^--pre(?:=|$)/.test(v)) value += ' ' + raws(args.slice(n + 1));
+        // rg runs its --pre program on each searched path, and a git `!` alias gets the
+        // command's later words, so those words are its arguments.
+        if (value !== null && ((name === 'rg' && /^--pre(?:=|$)/.test(v)) || (name === 'git' && /^alias\.[^=]+=!/.test(value)))) value += ' ' + values.slice(n + 2).join(' ');
         if (value !== null && directCheck(value)) return this.found(`a command run by ${name}`);
+      }
+      // A variable holding such an option with its command (`o='--upload-pack=codex resume'`).
+      for (const x of args) {
+        // Read as assigned, before the shell's later expansions (`codex${IFS}resume`).
+        const held = x.kind === 'word' && x.value === null ? this.expand(x.raw).replace(/["']/g, '') : null;
+        if (held && held !== x.raw.replace(/["']/g, '') && (held.split(/\s+/).some(p => options.test(p.split('=')[0])) || (name === 'git' && /^(?:ext|fd)::/.test(held)))
+          && directCheck(held)) return this.found(`a command run by ${name}`);
       }
       return false;
     }
@@ -613,27 +681,39 @@ class CandidateFinder {
     if (xargs) return this.found(`${leaf(value)} through xargs`);
     const words = args.filter(x => x.kind === 'word');
     // An unquoted computed argument can become a selector at run time.
-    if (args.some(x => x.kind !== 'word' || (x.value === null && !x.quoted))) return this.found(`${leaf(value)} with computed arguments`);
-    const values = words.filter(x => x.value !== null).map(x => x.value);
+    if (args.some(x => x.kind !== 'word' || (x.value === null && !x.quoted && this.resolved(x) === null))) return this.found(`${leaf(value)} with computed arguments`);
+    // A quoted computed argument is read with its assigned text (`M=resume; codex "$M"`).
+    const values = words.map(x => this.resolved(x)).filter(v => v !== null);
     if (!viaWrapper && HELP_FORMS[host]?.some(form => form.length === values.length && form.every((arg, n) => arg === values[n]))) return false;
-    const pieces = values.flatMap(v => v.split(viaWrapper ? /[\s,]+/ : /,/)).filter(Boolean);
+    const pieces = words.flatMap(x => {
+      const v = this.resolved(x);
+      return v === null ? [] : v.split(viaWrapper || x.value === null ? /[\s,]+/ : /,/);
+    }).filter(Boolean);
     const selector = host === 'claude'
       ? pieces.find(p => /^(?:--(?:resume|continue|session-id|fork-session)(?:=|$)|-(?!-)[a-z]*[rc][a-z]*(?:=|$))/i.test(p))
       : pieces.find(p => p === 'resume' || p === 'fork');
     return selector !== undefined && this.found(`${leaf(value)} ${selector.split('=')[0]}`);
   }
 
-  // A shell given a script, or reading one from stdin or a heredoc.
-  runner(dialect, name, args, command, depth, argv) {
+  // A shell given a script, or reading one from stdin or a heredoc. Reached through a wrapper that
+  // passes it one argument string (`Start-Process pwsh -ArgumentList "-NoExit -Command ..."`), the
+  // string is split into words as the started shell receives them.
+  runner(dialect, name, args, command, depth, argv, viaWrapper = false) {
     if (depth >= MAX_DEPTH) return fallback(raws(args)) && this.found('a deeply nested shell');
-    const words = args.filter(x => x.kind === 'word');
-    const computed = words.findIndex(x => x.value === null);
-    if (computed >= 0) return this.dynamic(words.slice(computed), command);
+    const words = [];
+    for (const x of args.filter(a => a.kind === 'word')) {
+      // A word held in a variable assigned earlier is read with that text (`bash -c "$c"`).
+      const v = this.resolved(x);
+      if (v === null) return this.dynamic(args.slice(args.indexOf(x)), command);
+      if (viaWrapper) words.push(...splitArguments(v).map(p => word(p, p)));
+      else words.push(x.value === v ? x : word(x.raw, v));
+    }
     // script: null reads stdin, 'file' runs a file Toolkit cannot see, else the script words.
     let script = null;
     if (dialect === POSIX) {
       const n = words.findIndex(x => /^-[A-Za-z]*c[A-Za-z]*$/.test(x.value));
-      if (n >= 0) script = words.slice(n + 1, n + 2);
+      // Split words of one argument string are all the script; otherwise the script is one word.
+      if (n >= 0) script = viaWrapper ? words.slice(n + 1) : words.slice(n + 1, n + 2);
       else if (words.some(x => !/^[-+]/.test(x.value))) script = 'file';
     } else if (dialect === POWERSHELL) {
       const encoded = words.findIndex(x => /^-(?:e(?:n(?:c(?:o(?:d(?:e(?:d(?:c(?:o(?:m(?:m(?:a(?:n(?:d)?)?)?)?)?)?)?)?)?)?)?)?)?|ec)$/i.test(x.value));
@@ -647,11 +727,15 @@ class CandidateFinder {
       if (n >= 0) script = words.slice(n + 1);
       else if (words.some(x => /^-f(?:i(?:l(?:e)?)?)?$/i.test(x.value))) script = 'file';
       else if (words.some(x => !x.value.startsWith('-'))) {
-        // A positional script may follow options that take a value, so read from each plain word.
-        for (let k = 0; k < words.length; k += 1) {
-          if (!words[k].value.startsWith('-') && this.text(words.slice(k).map(x => x.value).join(' '), dialect, depth + 1)) return true;
+        // A positional script may follow options that take a value, so read from each of the
+        // first few plain words.
+        let tried = 0;
+        for (let k = 0; k < words.length && tried < 4; k += 1) {
+          if (words[k].value.startsWith('-')) continue;
+          tried += 1;
+          if (this.text(words.slice(k).map(x => x.value).join(' '), dialect, depth + 1)) return true;
         }
-        return false;
+        return this.runsWritten(words);
       }
       if (Array.isArray(script) && script.length === 1 && script[0].value === '-') script = null;
     } else {
@@ -661,7 +745,7 @@ class CandidateFinder {
         script = [...(attached ? [word(attached, attached)] : []), ...words.slice(n + 1)];
       }
     }
-    if (script === 'file') return false;
+    if (script === 'file') return this.runsWritten(words);
     if (script?.length) {
       let text = script.map(x => x.value).join(' ');
       if (dialect === CMD && /^".*"$/s.test(text)) text = text.slice(1, -1);

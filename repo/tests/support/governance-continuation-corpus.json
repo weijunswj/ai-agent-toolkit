@@ -877,12 +877,13 @@
    "expected": {
     "bash": "NOT_CONTINUATION",
     "powershell": "UNKNOWN",
-    "cmd": "UNKNOWN",
+    "cmd": "NOT_CONTINUATION",
     "common": "UNKNOWN",
     "unknown": "UNKNOWN"
    },
    "was": {
-    "bash": "UNKNOWN"
+    "bash": "UNKNOWN",
+    "cmd": "UNKNOWN"
    }
   },
   {
@@ -893,9 +894,12 @@
    "expected": {
     "bash": "UNKNOWN",
     "powershell": "UNKNOWN",
-    "cmd": "UNKNOWN",
+    "cmd": "NOT_CONTINUATION",
     "common": "UNKNOWN",
     "unknown": "UNKNOWN"
+   },
+   "was": {
+    "cmd": "UNKNOWN"
    }
   },
   {
@@ -919,9 +923,12 @@
    "expected": {
     "bash": "UNKNOWN",
     "powershell": "UNKNOWN",
-    "cmd": "UNKNOWN",
+    "cmd": "NOT_CONTINUATION",
     "common": "UNKNOWN",
     "unknown": "UNKNOWN"
+   },
+   "was": {
+    "cmd": "UNKNOWN"
    }
   },
   {
@@ -1410,9 +1417,12 @@
    "expected": {
     "bash": "UNKNOWN",
     "powershell": "UNKNOWN",
-    "cmd": "UNKNOWN",
+    "cmd": "NOT_CONTINUATION",
     "common": "UNKNOWN",
     "unknown": "UNKNOWN"
+   },
+   "was": {
+    "cmd": "UNKNOWN"
    }
   },
   {
@@ -1423,9 +1433,12 @@
    "expected": {
     "bash": "UNKNOWN",
     "powershell": "UNKNOWN",
-    "cmd": "UNKNOWN",
+    "cmd": "NOT_CONTINUATION",
     "common": "UNKNOWN",
     "unknown": "UNKNOWN"
+   },
+   "was": {
+    "cmd": "UNKNOWN"
    }
   },
   {
@@ -1780,9 +1793,12 @@
    "expected": {
     "bash": "UNKNOWN",
     "powershell": "NOT_CONTINUATION",
-    "cmd": "UNKNOWN",
+    "cmd": "NOT_CONTINUATION",
     "common": "UNKNOWN",
     "unknown": "UNKNOWN"
+   },
+   "was": {
+    "cmd": "UNKNOWN"
    }
   },
   {
@@ -2367,9 +2383,12 @@
    "expected": {
     "bash": "NOT_CONTINUATION",
     "powershell": "UNKNOWN",
-    "cmd": "UNKNOWN",
+    "cmd": "NOT_CONTINUATION",
     "common": "UNKNOWN",
     "unknown": "UNKNOWN"
+   },
+   "was": {
+    "cmd": "UNKNOWN"
    }
   },
   {
@@ -3059,9 +3078,12 @@
    "expected": {
     "bash": "UNKNOWN",
     "powershell": "UNKNOWN",
-    "cmd": "UNKNOWN",
+    "cmd": "NOT_CONTINUATION",
     "common": "UNKNOWN",
     "unknown": "UNKNOWN"
+   },
+   "was": {
+    "cmd": "UNKNOWN"
    }
   },
   {
@@ -3072,9 +3094,12 @@
    "expected": {
     "bash": "UNKNOWN",
     "powershell": "UNKNOWN",
-    "cmd": "UNKNOWN",
+    "cmd": "NOT_CONTINUATION",
     "common": "UNKNOWN",
     "unknown": "UNKNOWN"
+   },
+   "was": {
+    "cmd": "UNKNOWN"
    }
   },
   {
@@ -3098,9 +3123,12 @@
    "expected": {
     "bash": "UNKNOWN",
     "powershell": "UNKNOWN",
-    "cmd": "UNKNOWN",
+    "cmd": "NOT_CONTINUATION",
     "common": "UNKNOWN",
     "unknown": "UNKNOWN"
+   },
+   "was": {
+    "cmd": "UNKNOWN"
    }
   },
   {
@@ -3158,9 +3186,12 @@
    "expected": {
     "bash": "UNKNOWN",
     "powershell": "UNKNOWN",
-    "cmd": "UNKNOWN",
+    "cmd": "NOT_CONTINUATION",
     "common": "UNKNOWN",
     "unknown": "UNKNOWN"
+   },
+   "was": {
+    "cmd": "UNKNOWN"
    }
   },
   {
@@ -3171,9 +3202,12 @@
    "expected": {
     "bash": "UNKNOWN",
     "powershell": "UNKNOWN",
-    "cmd": "UNKNOWN",
+    "cmd": "NOT_CONTINUATION",
     "common": "UNKNOWN",
     "unknown": "UNKNOWN"
+   },
+   "was": {
+    "cmd": "UNKNOWN"
    }
   },
   {
