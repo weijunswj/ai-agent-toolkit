@@ -653,7 +653,7 @@ test('automatic updates, Claude agents, the Claude plugin and Codex helpers read
     current.agentProfile = { supported: false, topology: 'root-only' };
     current.claudeSubagentDepth = { state: 'toolkit-one-layer', value: '1' };
     current.nativePlugin = { status: 'verification-deferred', manifest_version: '9.9.9' };
-    current.claudePluginInstall = { installed: true, runningRoot: source, version: '9.9.9', recordedVersion: '9.9.9', recordCurrent: true, enabled: true };
+    current.claudePluginInstall = { installed: true, runningRoot: source, version: '9.9.9', recordCurrent: true, enabled: true };
     current.claudeSettings = [{ state: 'claude-default' }];
     change(current);
     const args = core.parseArgs(['--plan', '--host', 'claude-code']);
@@ -668,15 +668,15 @@ test('automatic updates, Claude agents, the Claude plugin and Codex helpers read
   assert.match(table, /\| 2\.1 \| How should Claude Code use agents\? \| Root only; subagent limit 1 \| A\. Keep current \| B\. Broader native behaviour \|/);
   assert.match(table, /\| 3\.1 \| Keep Toolkit available in Claude Code\? \| On, 9\.9\.9 \| A\. Keep current \| B\. Show instructions only \|/);
 
-  // The plugin folds only when Toolkit is also turned on, recorded at this copy's version and run from
+  // The plugin folds only when Toolkit is also turned on, at this copy's version, with one install record, and run from
   // the update source 1.1 recommends.
   for (const [label, change] of [
     ['turned off', (c) => { c.claudePluginInstall.enabled = false; }],
     ['on or off unknown', (c) => { c.claudePluginInstall.enabled = null; }],
     ['runs an older version', (c) => { c.claudePluginInstall.version = '9.9.8'; }],
     ['another run folder', (c) => { c.claudePluginInstall.runningRoot = path.resolve(repoRoot, '..', 'elsewhere'); }],
-    // Install or refresh rewrites a lagging record (an uninstall and reinstall), so that is a change.
-    ['lagging install record', (c) => { Object.assign(c.claudePluginInstall, { recordedVersion: '9.9.0', recordCurrent: false }); }],
+    // Install or refresh rewrites duplicate install records (an uninstall and reinstall), so that is a change.
+    ['duplicate install records', (c) => { c.claudePluginInstall.recordCurrent = false; }],
   ]) {
     const row = claude(change)['claude-toolkit-plugin'];
     assert.ok(row.choices.some((choice) => choice.value === 'keep'), label);
@@ -684,27 +684,23 @@ test('automatic updates, Claude agents, the Claude plugin and Codex helpers read
   }
   assert.equal(claude((c) => { c.claudePluginInstall.version = '9.9.8'; })['claude-toolkit-plugin'].current_short, 'On, 9.9.8 (9.9.9 available)');
 
-  // The version that runs is the manifest in the folder Claude Code runs Toolkit from, not a lagging
-  // install record.
+  // The version that runs is the manifest in the folder Claude Code runs Toolkit from. The install
+  // record keeps the version and commit of its first install, which change nothing (Claude Code
+  // 2.1.310 runs the folder in place), so an old record is still current; only duplicates are not.
   const manifestVersion = JSON.parse(fs.readFileSync(path.join(repoRoot, '.claude-plugin', 'plugin.json'), 'utf8')).version;
-  const fakeRegistry = (installed, records = [{ version: '0.0.1' }]) => ({
+  const fakeRegistry = (installed, records = [{ version: '0.0.1', gitCommitSha: 'b'.repeat(40) }]) => ({
     toolkitInstall: () => ({ installed, runningRoot: installed ? repoRoot : '', records }),
     toolkitEnabled: () => true,
   });
-  const checked = [];
-  const recordMatches = (answer) => (record, root, version) => { checked.push([record.version, root, version]); return answer; };
-  assert.deepEqual(core.claudePluginInstallState(fakeRegistry(true), recordMatches(false)),
-    { installed: true, runningRoot: repoRoot, version: manifestVersion, recordedVersion: '0.0.1', recordCurrent: false, enabled: true });
-  assert.deepEqual(checked, [['0.0.1', repoRoot, manifestVersion]], 'the record is checked against the folder that runs, at its version');
-  assert.equal(core.claudePluginInstallState(fakeRegistry(true, [{ version: manifestVersion }]), recordMatches(true)).recordCurrent, true);
-  assert.equal(core.claudePluginInstallState(fakeRegistry(true, [{ version: manifestVersion }, { version: manifestVersion }]), recordMatches(true)).recordCurrent, false, 'two records are ambiguous');
+  assert.deepEqual(core.claudePluginInstallState(fakeRegistry(true)),
+    { installed: true, runningRoot: repoRoot, version: manifestVersion, recordCurrent: true, enabled: true });
+  assert.equal(core.claudePluginInstallState(fakeRegistry(true, [{ version: manifestVersion }, { version: manifestVersion }])).recordCurrent, false, 'two records are ambiguous');
   assert.equal(core.claudePluginInstallState(fakeRegistry(false)).version, '');
   assert.equal(core.claudePluginInstallState(fakeRegistry(false)).recordCurrent, false);
   assert.equal(claude((c) => { c.claudePluginInstall.enabled = false; })['claude-toolkit-plugin'].current_short, 'Off, 9.9.9');
-  const lagging = claude((c) => { Object.assign(c.claudePluginInstall, { recordedVersion: '9.9.0', recordCurrent: false }); })['claude-toolkit-plugin'];
-  assert.equal(lagging.current_short, "On, 9.9.9 (Claude Code's record says 9.9.0)");
-  assert.match(lagging.current, /Claude Code's record says 9\.9\.0, so Install or refresh rewrites it\./);
-  assert.equal(claude((c) => { c.claudePluginInstall.recordCurrent = false; })['claude-toolkit-plugin'].current_short, "On, 9.9.9 (Claude Code's record is out of date)");
+  const duplicated = claude((c) => { c.claudePluginInstall.recordCurrent = false; })['claude-toolkit-plugin'];
+  assert.equal(duplicated.current_short, 'On, 9.9.9 (Claude Code holds more than one install record for it)');
+  assert.match(duplicated.current, /Claude Code holds more than one install record for it, so Install or refresh rewrites it\./);
 
   const changing = claude((c) => {
     c.claudeSubagentDepth = { state: 'claude-default' };
