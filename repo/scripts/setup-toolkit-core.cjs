@@ -1661,9 +1661,9 @@ function setupQuestionSpecs(args, current) {
       prompt: 'Automatic Toolkit updates choice',
       whatThisControls: 'Whether Toolkit checks the managed update source when a supported coding app starts. Any update still has to be fetched, fast-forwarded, validated, and safely activated before enabled integrations use it.',
       choices: [
-        wizardChoice('enable', 'Turn on', 'Store automatic maintenance as enabled so trusted startup maintenance checks for, verifies, and safely activates clean updates.'),
+        wizardChoice('enable', 'Turn on', 'Store automatic maintenance as enabled so trusted startup maintenance checks for, verifies, and safely activates clean updates, and point automatic updates at the update source chosen above.'),
         wizardChoice('disable', 'Turn off', 'Disable startup update checks and automatic hub synchronization; manual `setup toolkit` or explicit maintenance remains available.'),
-        wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${currentBooleanOutcome(current.audit?.repo_auto_update?.enabled, 'Automatic startup update checks are on.', 'Automatic startup update checks are off; manual setup remains available.', 'The automatic-update state could not be verified; setup will not claim that startup updates are active.')}`),
+        wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${currentBooleanOutcome(current.audit?.repo_auto_update?.enabled, 'Automatic startup update checks are on.', 'Automatic startup update checks are off; manual setup remains available.', 'The automatic-update state could not be verified; setup will not claim that startup updates are active.')} The update source it checks stays as it is.`),
       ],
       // No folding here: Turn on also points updates at the chosen update source, which Keep current does not.
       recommendation: {

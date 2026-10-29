@@ -253,6 +253,14 @@ test('the Projects controller skill check compares the synced claude.ai copy wit
   assert.match(check().summary, /Your uploaded copy is current/);
 });
 
+test('the setup skill turns the Projects skill notice into a skill card, with the hand upload only as the fallback', () => {
+  const text = fs.readFileSync(path.join(repoRoot, 'skills', 'toolkit-setup', 'SKILL.md'), 'utf8').replace(/\r\n/g, '\n');
+  assert.match(text, /line says `Skill card: offer <SKILL\.md path>`, offer the update as a card the owner saves rather than asking them to upload it: load `propose_skills` \(ToolSearch\) and call it with kind `improvement`, target and name `web-controller-projects`, the description copied from that SKILL\.md's frontmatter, and `skillMd` set to that file read byte for byte \(never retyped\)\./);
+  assert.match(text, /Then tell the owner to tap Save on the card, and that saving replaces any edits made directly to their claude\.ai copy\./);
+  assert.match(text, /Only when `propose_skills` does not exist in this session, or the call fails, say so and give the owner the line's hand-upload step\./);
+  assert.match(text, /When the line says the copy has its own reference files, a card is not enough: give only the folder upload step\./);
+});
+
 test('the Claude app account copy check reports an older claude.ai copy with the fix, reads only, and blocks nothing', (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-account-plugin-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));

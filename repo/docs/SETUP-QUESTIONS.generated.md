@@ -5,7 +5,7 @@ This reference uses a privacy-safe representative Codex state in which all curre
 
 Toolkit setup choices - 8 questions across 3 sections
 
-Bank reference: A71X-P51K-AK8K-8A3V
+Bank reference: SB28-1S1E-S41K-YXFR
 
 Quick index
 
@@ -62,9 +62,9 @@ Quick index
 
 **Choices:**
 
-- **A. Turn on** - Store automatic maintenance as enabled so trusted startup maintenance checks for, verifies, and safely activates clean updates.
+- **A. Turn on** - Store automatic maintenance as enabled so trusted startup maintenance checks for, verifies, and safely activates clean updates, and point automatic updates at the update source chosen above.
 - **B. Turn off** - Disable startup update checks and automatic hub synchronization; manual `setup toolkit` or explicit maintenance remains available.
-- **C. Keep current** - Preserve this effective behavior: Automatic startup update checks are on.
+- **C. Keep current** - Preserve this effective behavior: Automatic startup update checks are on. The update source it checks stays as it is.
 
 **After applying:** This changes Toolkit maintenance state and future trusted SessionStart behavior; it does not directly edit native host configuration and does not require a restart by itself.
 
@@ -245,7 +245,7 @@ Setup run with `--host claude-code` shows this bank instead, for the same repres
 
 Toolkit setup choices - 8 questions across 3 sections
 
-Bank reference: QHXE-RB2K-6S00-39PM
+Bank reference: X7DX-JHY9-AVNB-FXDW
 
 Quick index
 
@@ -302,9 +302,9 @@ Quick index
 
 **Choices:**
 
-- **A. Turn on** - Store automatic maintenance as enabled so trusted startup maintenance checks for, verifies, and safely activates clean updates.
+- **A. Turn on** - Store automatic maintenance as enabled so trusted startup maintenance checks for, verifies, and safely activates clean updates, and point automatic updates at the update source chosen above.
 - **B. Turn off** - Disable startup update checks and automatic hub synchronization; manual `setup toolkit` or explicit maintenance remains available.
-- **C. Keep current** - Preserve this effective behavior: Automatic startup update checks are on.
+- **C. Keep current** - Preserve this effective behavior: Automatic startup update checks are on. The update source it checks stays as it is.
 
 **After applying:** This changes Toolkit maintenance state and future trusted SessionStart behavior; it does not directly edit native host configuration and does not require a restart by itself.
 
