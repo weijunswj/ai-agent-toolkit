@@ -9,7 +9,8 @@
 - **Unreadable shell calls:** a shell call whose command or folder has a shape no host sends is refused when its raw input could commit, push, or create, edit or merge a pull request. Other such calls run.
 - **Warnings Codex shows:** when the push check cannot run, the Codex hook now prints the note as a `systemMessage`, which Codex shows as a warning, and adds it to a refusal, as the Claude Code hook already did.
 - **Git by full path:** the push check runs git by its absolute path (`TOOLKIT_GIT_PATH`, else PATH, else the usual install locations), so a hook started with no git on PATH still checks, and a git program inside the pushed repository never runs. When none is found, the note says so.
-- **Hook time limits:** the Claude Code attribution hook and the Codex helper hook now have an explicit 60-second limit, above the push check's own 30 seconds.
+- **Hook time limits:** the Claude Code attribution hook and the Codex helper hook now have an explicit 60-second limit, above the push check's own 30 seconds, which every push and pull request in one shell command now shares.
+- **Commit and push in one command:** the push check runs before the whole command, so a `git add; git commit; git push` line used to send a new commit unchecked. Now, after a `git commit` earlier in the same command and repository, it also checks what that commit could add (staged and unstaged tracked changes, and untracked files after a `git add`), and names those items "not committed yet". A `git merge`, `cherry-pick`, `revert`, `am` or `rebase` before a push in the same command is refused with "run the push as its own command".
 
 ## 3.18.3 (security alert cleanup and Dependabot action updates)
 
