@@ -27,7 +27,7 @@ const { ClaudeHelperDefinitions } = require('./toolkit-claude-helper-agents.cjs'
 const { GlobalRules, describeResult: describeGlobalRules } = require('./toolkit-global-rules.cjs');
 const { ClaudeSubagentDepthSetting, SETTING: DEPTH_SETTING, STATES: DEPTH } = require('./toolkit-claude-subagent-depth.cjs');
 const { ToolkitEnv } = require('./toolkit-env.cjs');
-const { accountCopyBehind } = require('./toolkit-claude-account-copy.cjs');
+const { accountCopyBehind, claudeAccountPluginFolders } = require('./toolkit-claude-account-copy.cjs');
 
 const STATUS = Object.freeze({ PASSED: 'passed', RESTART: 'restart-required', ACTION: 'action-required' });
 const RECORDED_SOURCES = Object.freeze(['claude-plugin', 'repo']);
@@ -59,22 +59,8 @@ function compareSkillVersions(left, right) {
   return Number(ln) === Number(rn) ? 0 : (Number(ln) > Number(rn) ? 1 : -1);
 }
 
-// The Claude desktop app keeps plugins from the user's claude.ai account in
-// %LOCALAPPDATA%\Claude-Data\claude_<package>\rpm\<a>\<b>\, with a manifest.json listing each plugin's id.
-// Returns those folders, or [] when the app is not installed. Read only.
-function claudeAccountPluginFolders(environment = process.env) {
-  const base = environment.LOCALAPPDATA ? path.join(environment.LOCALAPPDATA, 'Claude-Data') : '';
-  const folders = [];
-  const children = (dir) => { try { return fs.readdirSync(dir, { withFileTypes: true }).filter((entry) => entry.isDirectory()); } catch { return []; } };
-  for (const app of children(base).filter((entry) => entry.name.startsWith('claude_'))) {
-    const rpm = path.join(base, app.name, 'rpm');
-    for (const first of children(rpm)) for (const second of children(path.join(rpm, first.name))) folders.push(path.join(rpm, first.name, second.name));
-  }
-  // In name order, so every reader sees the same first copy whatever order the disk lists them in.
-  return folders.sort();
-}
-
-// The newest Toolkit version among the account copies in those folders, or '' when there is none.
+// The newest Toolkit version among the account copies in the Claude app's account-plugin folders
+// (claudeAccountPluginFolders), or '' when there is none.
 function claudeAccountToolkitVersion(folders) {
   const versions = [];
   for (const folder of folders) {
@@ -369,4 +355,4 @@ if (require.main === module) {
   catch (error) { process.stderr.write(`${error.message}\n`); process.exitCode = 1; }
 }
 
-module.exports = Object.freeze({ claudeAccountPluginFolders, claudeAccountToolkitVersion, ToolkitInstallHealthCheck, STATUS, storedClaudeTopology, main });
+module.exports = Object.freeze({ claudeAccountToolkitVersion, ToolkitInstallHealthCheck, STATUS, storedClaudeTopology, main });

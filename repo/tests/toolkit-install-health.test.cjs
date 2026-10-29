@@ -7,8 +7,8 @@ require('./toolkit-test-temp-guard.cjs'); // private temp; fails if real update 
 
 const test = require('node:test');
 const os = require('node:os');
-const { ToolkitInstallHealthCheck, STATUS, claudeAccountPluginFolders, claudeAccountToolkitVersion } = require('../scripts/toolkit-install-health.cjs');
-const { accountCopyBehind, claudeAppCopyLine } = require('../scripts/toolkit-claude-account-copy.cjs');
+const { ToolkitInstallHealthCheck, STATUS, claudeAccountToolkitVersion } = require('../scripts/toolkit-install-health.cjs');
+const { accountCopyBehind, claudeAccountPluginFolders, claudeAppCopyLine } = require('../scripts/toolkit-claude-account-copy.cjs');
 const { ClaudeHelperAgentRenderer } = require('../scripts/toolkit-claude-helper-agents.cjs');
 const { ClaudeNamedHelperPolicy } = require('../scripts/toolkit-claude-helper-policy.cjs');
 const {

@@ -20,6 +20,7 @@ const {
 const { copyPortableSkills } = require('./toolkit-antigravity-project-skills.cjs');
 const { ClaudePluginRegistry } = require('./toolkit-claude-plugin-registry.cjs');
 const { samePath } = require('./toolkit-canonical-path.cjs');
+const { accountCopyBehind, claudeAccountPluginFolders } = require('./toolkit-claude-account-copy.cjs');
 const { GlobalRules, describeResult: describeGlobalRules } = require('./toolkit-global-rules.cjs');
 const { TOOLKIT_VERSION } = require('./toolkit-version.cjs');
 
@@ -2901,7 +2902,6 @@ function newerWorkspaceToolkit(runningRoot, start = process.env.CLAUDE_PROJECT_D
 // { context } when it could not compare, and {} otherwise (a --plugin-dir test copy, a cloud
 // session, or a current account copy).
 function claudeAppCopyStatus(runningRoot, managedCheckout, environment = process.env) {
-  const { claudeAccountPluginFolders } = require('./toolkit-install-health.cjs');
   if (!claudeAccountPluginFolders(environment).some((folder) => samePath(path.dirname(runningRoot), folder))) return {};
   const versionAt = (dir) => {
     try {
@@ -2916,7 +2916,6 @@ function claudeAppCopyStatus(runningRoot, managedCheckout, environment = process
     return { context: `Toolkit: could not compare this claude.ai copy with this PC's Toolkit (${missing}), so no update reminder is shown.` };
   }
   if (compareBridgeVersions(account, local) >= 0) return {};
-  const { accountCopyBehind } = require('./toolkit-claude-account-copy.cjs');
   return { reminder: accountCopyBehind(account, local) };
 }
 
