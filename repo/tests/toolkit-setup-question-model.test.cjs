@@ -662,7 +662,7 @@ test('automatic updates, Claude agents, the Claude plugin and Codex helpers read
   const folded = claude(() => {});
   assert.deepEqual(folded['claude-agent-topology'].choices.map((choice) => [choice.value, choice.label]), [['root-only', 'Keep current'], ['broader-native', 'Broader native behaviour']]);
   assert.deepEqual(folded['claude-toolkit-plugin'].choices.map((choice) => [choice.value, choice.label]), [['install', 'Keep current'], ['instructions', 'Show instructions only']]);
-  assert.equal(folded['claude-toolkit-plugin'].current, 'Toolkit 9.9.9 is installed in Claude Code (turned on); this Toolkit copy is 9.9.9.');
+  assert.equal(folded['claude-toolkit-plugin'].current, 'Claude Code runs Toolkit 9.9.9 (turned on); this Toolkit copy is 9.9.9.');
   const table = core.renderSetupQuestionBank(Object.values(folded));
   // The Current column holds a short state.
   assert.match(table, /\| 2\.1 \| How should Claude Code use agents\? \| Root only; subagent limit 1 \| A\. Keep current \| B\. Broader native behaviour \|/);
@@ -673,7 +673,7 @@ test('automatic updates, Claude agents, the Claude plugin and Codex helpers read
   for (const [label, change] of [
     ['turned off', (c) => { c.claudePluginInstall.enabled = false; }],
     ['on or off unknown', (c) => { c.claudePluginInstall.enabled = null; }],
-    ['older recorded version', (c) => { c.claudePluginInstall.version = '9.9.8'; }],
+    ['runs an older version', (c) => { c.claudePluginInstall.version = '9.9.8'; }],
     ['another run folder', (c) => { c.claudePluginInstall.runningRoot = path.resolve(repoRoot, '..', 'elsewhere'); }],
   ]) {
     const row = claude(change)['claude-toolkit-plugin'];
@@ -681,6 +681,16 @@ test('automatic updates, Claude agents, the Claude plugin and Codex helpers read
     assert.equal(row.recommended, 'install', label);
   }
   assert.equal(claude((c) => { c.claudePluginInstall.version = '9.9.8'; })['claude-toolkit-plugin'].current_short, 'On, 9.9.8 (9.9.9 available)');
+
+  // The version that runs is the manifest in the folder Claude Code runs Toolkit from, not a lagging
+  // install record.
+  const manifestVersion = JSON.parse(fs.readFileSync(path.join(repoRoot, '.claude-plugin', 'plugin.json'), 'utf8')).version;
+  const fakeRegistry = (installed) => ({
+    toolkitInstall: () => ({ installed, runningRoot: installed ? repoRoot : '', records: [{ version: '0.0.1' }] }),
+    toolkitEnabled: () => true,
+  });
+  assert.deepEqual(core.claudePluginInstallState(fakeRegistry(true)), { installed: true, runningRoot: repoRoot, version: manifestVersion, enabled: true });
+  assert.equal(core.claudePluginInstallState(fakeRegistry(false)).version, '');
   assert.equal(claude((c) => { c.claudePluginInstall.enabled = false; })['claude-toolkit-plugin'].current_short, 'Off, 9.9.9');
 
   const changing = claude((c) => {
@@ -715,11 +725,16 @@ test('Claude Code settings fold when all four are set; agents and plugin questio
   const current = stateWithManaged(managedState({ currentPath: '', exists: false, git: false }));
   current.agentProfile = { supported: true, topology: 'root-only' };
   current.nativePlugin = { status: 'fresh' };
-  current.claudeSettings = [{ state: 'toolkit-value' }, { state: 'owner-value' }, { state: 'toolkit-value' }, { state: 'toolkit-value' }];
+  current.claudeSettings = [
+    { id: 'attribution', state: 'toolkit-value' }, { id: 'cross-session-inbound', state: 'owner-value' },
+    { id: 'switch-models-on-flag', state: 'toolkit-value' }, { id: 'agents-md', state: 'toolkit-value' },
+  ];
   const rows = core.setupQuestionSpecs(core.parseArgs(['--plan', '--host', 'claude-code']), current);
   const settings = rows.find((spec) => spec.id === 'claude-recommended-settings');
   assert.deepEqual(settings.choices.map((choice) => choice.value), ['disable', 'keep']);
   assert.equal(settings.recommended, 'keep');
+  // The Current column names each of the four settings and its state.
+  assert.equal(settings.current_short, 'No AI attribution: on; Session wake-ups: yours; Ask before model switch: on; Read AGENTS.md: on');
   current.claudeSettings[1] = { state: 'claude-default' };
   const unset = core.setupQuestionSpecs(core.parseArgs(['--plan', '--host', 'claude-code']), current).find((spec) => spec.id === 'claude-recommended-settings');
   assert.deepEqual(unset.choices.map((choice) => choice.value), ['enable', 'disable', 'keep']);

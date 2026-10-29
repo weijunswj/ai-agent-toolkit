@@ -1650,11 +1650,20 @@ function shortClaudePlugin(current) {
   return `${state}, ${install.version || 'version unknown'}${latest && latest !== install.version ? ` (${latest} available)` : ''}`;
 }
 
+const CLAUDE_SETTING_SHORT_NAMES = Object.freeze({
+  attribution: 'No AI attribution',
+  'cross-session-inbound': 'Session wake-ups',
+  'switch-models-on-flag': 'Ask before model switch',
+  'agents-md': 'Read AGENTS.md',
+});
+
+// Each setting by a short name: set by Toolkit, kept as you set it, or not set.
 function shortClaudeSettings(entries) {
   if (!Array.isArray(entries) || !entries.length) return 'Not read yet';
   if (entries.some((entry) => entry.state === CLAUDE_SETTINGS_STATES.UNREADABLE)) return 'Could not read';
-  const set = entries.filter((entry) => entry.state === CLAUDE_SETTINGS_STATES.TOOLKIT || entry.state === CLAUDE_SETTINGS_STATES.OWNER).length;
-  return set === entries.length ? `All ${set} set` : `${set} of ${entries.length} set`;
+  const name = (entry) => CLAUDE_SETTING_SHORT_NAMES[entry.id] || entry.label;
+  return entries.map((entry) => (entry.state === CLAUDE_SETTINGS_STATES.TOOLKIT ? `${name(entry)}: on`
+    : entry.state === CLAUDE_SETTINGS_STATES.OWNER ? `${name(entry)}: yours` : `${name(entry)}: not set`)).join('; ');
 }
 
 // The on/off choice that reproduces a verified stored boolean; none when it is unverified.
@@ -1695,19 +1704,21 @@ function claudeRootOnlyUnchanged(profile, depth) {
 }
 
 // What Claude Code's plugin registry and user settings say about Toolkit: installed, where it runs
-// from, its recorded version and whether it is turned on. Files only; no Claude session is launched.
+// from, the version of that folder and whether it is turned on. Claude Code runs Toolkit in place from
+// that folder, so its manifest is the version that runs; the version in the install record can lag
+// behind and is not used. Files only; no Claude session is launched.
 function claudePluginInstallState(registry) {
   const install = registry.toolkitInstall();
-  return {
-    installed: install.installed,
-    runningRoot: install.runningRoot,
-    version: install.records.at(-1)?.version || '',
-    enabled: registry.toolkitEnabled(),
-  };
+  let version = '';
+  if (install.installed) {
+    try { version = JSON.parse(fs.readFileSync(path.join(install.runningRoot, '.claude-plugin', 'plugin.json'), 'utf8').replace(/^﻿/, '')).version || ''; }
+    catch { version = ''; }
+  }
+  return { installed: install.installed, runningRoot: install.runningRoot, version, enabled: registry.toolkitEnabled() };
 }
 
-// Toolkit is installed, turned on, recorded at the version of the Toolkit copy setup reads, and runs
-// in place from the update source 1.1 recommends, so Install or refresh would find nothing to do.
+// Toolkit is installed, turned on, runs in place from the update source 1.1 recommends, and that
+// folder is at the version of the Toolkit copy setup reads, so Install or refresh would find nothing to do.
 function claudePluginUnchanged(current, args) {
   const install = current.claudePluginInstall;
   return install?.installed === true && install.enabled === true
@@ -1721,7 +1732,7 @@ function claudePluginCurrent(current, args) {
   const install = current.claudePluginInstall;
   if (install?.installed === true) {
     const state = install.enabled === false ? 'turned off' : install.enabled === true ? 'turned on' : 'on or off unknown';
-    return `Toolkit ${install.version || '(version unknown)'} is installed in Claude Code (${state}); this Toolkit copy is ${current.nativePlugin.manifest_version || 'unknown'}.`;
+    return `Claude Code runs Toolkit ${install.version || '(version unknown)'} (${state}); this Toolkit copy is ${current.nativePlugin.manifest_version || 'unknown'}.`;
   }
   return 'Setup checks the Claude Code Toolkit plugin after you answer, and installs or refreshes it only if needed.';
 }
@@ -3917,6 +3928,7 @@ module.exports = {
   runManagedQuestionBankChild,
   plannedQuestionBank,
   applySetupChoices,
+  claudePluginInstallState,
   setupPlan,
   canPreserveManagedCheckout,
   main
