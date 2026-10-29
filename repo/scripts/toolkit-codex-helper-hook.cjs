@@ -106,6 +106,7 @@ function promptFailure(input) {
 }
 
 const HELD = `Toolkit helper guard failed. ${NEVER_OWNER}`;
+const UNCHECKED_PUSH = 'Codex does not show Toolkit\'s warnings, so this push or pull request is refused instead of going out unchecked. Retry it; if this repeats, run `setup toolkit`.';
 function deny(reason) {
   process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } }) + '\n');
   // Blocking exit status, with the reason on stderr, for hosts that honour exit 2.
@@ -133,13 +134,12 @@ async function main() {
   const output = await decide(input, process.env, { notes });
   // Notes from a check that could not run go with the refusal, so they are not lost.
   if (output?.hookSpecificOutput?.permissionDecision === 'deny') return deny([output.hookSpecificOutput.permissionDecisionReason, ...notes].join('\n'));
+  // A push or new pull request the push check could not check is refused here, not let through with
+  // a warning: Codex showed neither the agent nor its session record a hook's systemMessage
+  // (captured 29 October 2026), so the user would never see that it ran unchecked.
+  if (notes.length) return deny([...notes.map(note => note.replace(', so it was let through', '')), UNCHECKED_PUSH].join('\n'));
   // Codex accepts no bare permissionDecision:allow (it records an unsupported-output
-  // hook failure and continues). An admitted request is exit 0 with empty output, or with only a
-  // systemMessage, which Codex shows the user as a warning, when a check could not run.
-  if (notes.length) {
-    process.stdout.write(JSON.stringify({ systemMessage: notes.join('\n') }) + '\n');
-    process.stderr.write(`${notes.join('\n')}\n`);
-  }
+  // hook failure and continues). An admitted request is exit 0 with empty output.
 }
 if (require.main === module) main().catch(() => deny(HELD));
 module.exports = { main, decide, decidePrompt, governed, promptEvent, NEVER_OWNER, PROMPT_FAILED };

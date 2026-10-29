@@ -7,6 +7,8 @@
 //     the top-level `cwd`;
 //   - Codex documents Bash with a string `command`, but its shell and exec tools also carry `cmd`,
 //     an argument list, and `workdir`, the folder the command runs in, which can differ from `cwd`.
+//     Codex Desktop's code-mode program (`exec`) reaches no hook itself; each shell call it makes
+//     arrives as Bash with a string `command` (captured 29 October 2026).
 // ShellCall.from(input) reads all of these the same way:
 //   - text: a string `command` and a string `cmd` (both, a line apart, when both are given), or an
 //     argument list: the script of a shell wrapper (`bash -lc <script>`, `pwsh -Command <script>`,
