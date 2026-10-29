@@ -100,6 +100,16 @@ function writeCodexConfig(codexHome, options = {}) {
   if (options.trustedHook !== false) {
     lines.push('[trusted_hooks]', `${JSON.stringify(trustedHookPath)} = true`, '');
   }
+  // Codex's own record of each Toolkit hook: 'on' or 'off' for every hook in the plugin's hooks file.
+  if (options.hookStates) {
+    const hooks = JSON.parse(fs.readFileSync(path.join(repoRoot, '.codex-plugin', 'hooks', 'hooks.json'), 'utf8')).hooks;
+    for (const [event, groups] of Object.entries(hooks)) {
+      groups.forEach((group, groupIndex) => group.hooks.forEach((_hook, hookIndex) => {
+        const key = `ai-agent-toolkit@ai-agent-toolkit-local:.codex-plugin/hooks/hooks.json:${event.replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase()}:${groupIndex}:${hookIndex}`;
+        lines.push(`[hooks.state.${JSON.stringify(key)}]`, `trusted_hash = "sha256:${'a'.repeat(64)}"`, `enabled = ${options.hookStates === 'on'}`, '');
+      }));
+    }
+  }
   fs.mkdirSync(codexHome, { recursive: true });
   fs.writeFileSync(path.join(codexHome, 'config.toml'), `${lines.join('\n')}\n`, 'utf8');
 }
@@ -820,13 +830,10 @@ test('Codex Toolkit verifier falls back to config and cache when CLI list omits 
 
   assert.equal(state.ok, true);
   assert.equal(state.verificationMethod, 'config-cache-fallback');
-  assert.equal(state.hookTrustStatus, 'verification-unavailable');
-  assert.match(state.hookTrustMessage, /Open `\/hooks` in Codex/);
-  assert.match(state.hookTrustMessage, /review and trust the current Toolkit hooks \(`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse` and `Stop`\)/);
-  // Every event the plugin registers must be named, or Codex skips the ones the user never trusted.
-  for (const event of Object.keys(JSON.parse(fs.readFileSync(path.join(repoRoot, '.codex-plugin', 'hooks', 'hooks.json'), 'utf8')).hooks)) {
-    assert.match(state.hookTrustMessage, new RegExp(`\`${event}\``), event);
-  }
+  // No [hooks.state] entry yet: every hook is not reviewed and is named, or Codex skips the ones never turned on.
+  assert.equal(state.hookTrustStatus, 'not-reviewed');
+  assert.equal(state.hookTrustMessage, 'Open `/hooks` in Codex and turn on: Session start updates, Prompt check, Shell and agent check, File edit check, Checkpoint after tool use, Checkpoint at stop. Codex skips a Toolkit hook that is off or not reviewed.');
+  assert.equal(state.hookExecutionStatus, 'skipped: Session start updates, Prompt check, Shell and agent check, File edit check, Checkpoint after tool use, Checkpoint at stop');
   assert.equal(state.installed.enabled, true);
   assert.equal(path.resolve(state.installed.source.path), path.resolve(repoRoot));
   assert.equal(path.resolve(state.cacheRoot), path.resolve(cacheRoot));
@@ -887,22 +894,24 @@ test('Codex Toolkit fallback accepts a verbatim-prefixed marketplace source for 
   assert.deepEqual(state.errors, []);
 });
 
-test('Codex Toolkit fallback does not infer hook trust from config text', () => {
-  const codexHome = tmpRoot();
-  writeInstalledCache(codexHome);
-  writeCodexConfig(codexHome, { trustedHook: false });
-
-  const state = setup.evaluateCodexToolkitPluginState({ installed: [], available: [] }, {
-    codexHome,
-    repoRoot,
-    allowConfigCacheFallback: true
-  });
-
-  assert.equal(state.ok, true);
-  assert.equal(state.verificationMethod, 'config-cache-fallback');
-  assert.equal(state.hookTrustStatus, 'verification-unavailable');
-  assert.match(state.hookTrustMessage, /Open `\/hooks` in Codex/);
-  assert.match(state.hookTrustMessage, /verification (?:is )?unavailable/i);
+test('Codex Toolkit hook state comes only from Codex hooks.state entries', () => {
+  const evaluate = (options) => {
+    const codexHome = tmpRoot();
+    writeInstalledCache(codexHome);
+    writeCodexConfig(codexHome, options);
+    const before = fs.readFileSync(path.join(codexHome, 'config.toml'));
+    const state = setup.evaluateCodexToolkitPluginState({ installed: [], available: [] }, { codexHome, repoRoot, allowConfigCacheFallback: true });
+    assert.ok(fs.readFileSync(path.join(codexHome, 'config.toml')).equals(before), 'hooks.state is never edited');
+    return state;
+  };
+  // Other config text never counts as trust.
+  assert.equal(evaluate({ trustedHook: true }).hookTrustStatus, 'not-reviewed');
+  const on = evaluate({ trustedHook: false, hookStates: 'on' });
+  assert.equal(on.ok, true);
+  assert.deepEqual([on.hookTrustStatus, on.hookTrustMessage, on.hookExecutionStatus], ['on', 'All 6 Toolkit hooks are on in Codex.', 'running']);
+  const off = evaluate({ trustedHook: false, hookStates: 'off' });
+  assert.equal(off.hookTrustStatus, 'off');
+  assert.match(off.hookTrustMessage, /^Open `\/hooks` in Codex and turn on: Session start updates, Prompt check/);
 });
 
 test('Codex Toolkit verification route reports bare Windows alias access denied with remediation', { skip: process.platform !== 'win32' }, async () => {
@@ -939,7 +948,7 @@ test('Codex Toolkit Windows alias detection helper recognizes Access denied fall
   assert.equal(setup.isWindowsAppsAliasAccessDenied(candidate, 'some other error'), false);
 });
 
-test('Codex Toolkit verify-only human output keeps trust verification unavailable without config inference', () => {
+test('Codex Toolkit verify-only human output reports the hook state Codex recorded', () => {
   const codexHome = tmpRoot();
   writeInstalledCache(codexHome);
   writeCodexConfig(codexHome);
@@ -949,16 +958,14 @@ test('Codex Toolkit verify-only human output keeps trust verification unavailabl
 
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
   assert.match(result.stdout, /verified by config\/cache fallback/i);
-  assert.match(result.stdout, /Hook trust status: verification-unavailable/);
-  assert.match(result.stdout, /Hook execution status: verification unavailable; open `\/hooks` in Codex/);
+  assert.match(result.stdout, /Hook trust status: not-reviewed/);
+  assert.match(result.stdout, /Hook execution status: skipped: Session start updates, Prompt check, Shell and agent check, File edit check, Checkpoint after tool use, Checkpoint at stop/);
   assert.match(result.stdout, /\*\*Next Steps:\*\*/);
   assert.match(result.stdout, /Verify the enabled Toolkit `SessionStart` hook belongs to the installed `ai-agent-toolkit` plugin/);
   assert.match(result.stdout, /installed plugin-cache copy/);
   assert.match(result.stdout, /not the managed Git checkout/);
   assert.doesNotMatch(result.stdout, /Review and trust.*only if it runs:/);
-  assert.match(result.stdout, /Hook trust verification is unavailable from supported non-interactive Codex inspection/i);
-  assert.match(result.stdout, /Open `\/hooks` in Codex/i);
-  assert.match(result.stdout, /review and trust the current Toolkit hooks \(`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse` and `Stop`\)/i);
+  assert.match(result.stdout, /Open `\/hooks` in Codex and turn on: Session start updates, Prompt check, Shell and agent check, File edit check, Checkpoint after tool use, Checkpoint at stop\./);
   assert.match(result.stdout, /applies to Codex only/i);
   assert.match(result.stdout, /Claude Code does not need Codex hook approval/i);
   assert.match(result.stdout, /Codex must not install or update Claude Code/i);

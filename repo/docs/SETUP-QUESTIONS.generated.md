@@ -3,9 +3,9 @@
 
 This reference uses a privacy-safe representative Codex state in which all current ordinary questions are available. Runtime output resolves Current, Recommended, Why, available choices, and After applying from the same canonical metadata and the actual inspected state.
 
-Toolkit setup choices - 8 questions across 3 sections
+Toolkit setup choices - 10 questions across 3 sections
 
-Bank reference: WM2Q-HSE3-BJD8-2NDH
+Bank reference: J5CT-CT80-6DHA-ZY4K
 
 Quick index
 
@@ -16,7 +16,9 @@ Quick index
 1.5 Raise Codex's instruction limit - Recommended: B - Keep current
 2.1 Codex helper capacity - Recommended: A - One helper
 2.2 Codex Toolkit maintenance - Recommended: B - Keep current
-3.1 Copy Toolkit's skills into Antigravity? - Recommended: B - Keep current
+3.1 Keep Toolkit available in Codex? - Recommended: C - Keep current
+3.2 Toolkit hooks in Codex - Recommended: Keep current
+3.3 Copy Toolkit's skills into Antigravity? - Recommended: B - Keep current
 
 
 ## 1. Updates and reports
@@ -126,20 +128,20 @@ Quick index
 
 **What this controls:** Whether Toolkit keeps Codex's `project_doc_max_bytes` in `~/.codex/config.toml` at 65536, because Codex desktop has cut off the end of a repository's AGENTS.md at the 32 KiB default once the Toolkit global rules are installed. Toolkit edits only that one top-level line, inside its own markers, after a backup and a TOML parse check; it never changes 0 (project docs off) or a value of 65536 or more, and `toolkit-global-rules.cjs --remove` puts the previous value back.
 
-**Current:** Toolkit keeps Codex's instruction limit raised.
+**Current:** Toolkit's record says keep Codex's instruction limit raised. Codex's config.toml: Raised (65536).
 
-**Verification:** verified
+**Verification:** state-derived
 
 **Recommended:** B - Keep current
 
-**Recommended outcome:** Preserve this effective behavior: Toolkit keeps Codex's instruction limit raised.
+**Recommended outcome:** Preserve this effective behavior: Toolkit's record says keep Codex's instruction limit raised. Codex's config.toml: Raised (65536).
 
 **Why:** Repository rules reach Codex whole; the change is one marked line that is backed up and reversible.
 
 **Choices:**
 
 - **A. Leave it** - Do not raise it; if Toolkit raised it earlier, put the previous value back. Setup still reports the combined size.
-- **B. Keep current** - Preserve this effective behavior: Toolkit keeps Codex's instruction limit raised.
+- **B. Keep current** - Preserve this effective behavior: Toolkit's record says keep Codex's instruction limit raised. Codex's config.toml: Raised (65536).
 
 **After applying:** This stores your choice in Toolkit state and, on a yes, edits `~/.codex/config.toml` at the end of setup. Start a new Codex session to use the new limit.
 
@@ -198,7 +200,7 @@ Quick index
 - **A. Turn off** - Disable future automatic cache refresh; the installed Toolkit plugin is not uninstalled, and manual `setup toolkit` repair or refresh remains available.
 - **B. Keep current** - Preserve this effective behavior: Automatic Codex Toolkit maintenance is on.
 
-**After applying:** The approved setup always verifies the current native Toolkit plugin. If files change, setup may update the Codex plugin cache and Windows hook launchers; then open `/hooks` in the Codex app and trust the updated Toolkit hooks. Turning maintenance off only changes future Toolkit state and does not uninstall the plugin.
+**After applying:** This is about later Codex session starts; "Keep Toolkit available in Codex?" decides what this run does to the plugin. If maintenance refreshes the plugin cache and Windows hook launchers, open `/hooks` in the Codex app and turn the updated Toolkit hooks on. Turning maintenance off only changes future Toolkit state and does not uninstall the plugin.
 
 **Selected:** B - Keep current
 
@@ -207,7 +209,49 @@ Quick index
 
 ## 3. Other coding apps
 
-### 3.1 Copy Toolkit's skills into Antigravity?
+### 3.1 Keep Toolkit available in Codex?
+
+**What this controls:** Whether setup verifies and refreshes the Toolkit plugin in Codex this run, only shows the commands, or leaves it as it is. This row is read from the Codex files; the Codex plugin commands run only after you choose Install or refresh. This never changes Claude Code.
+
+**Current:** Codex runs Toolkit 1.0.0 (turned on); the update copy has 1.0.0.
+
+**Verification:** state-derived
+
+**Recommended:** C - Keep current
+
+**Recommended outcome:** Leave the Codex plugin as it is.
+
+**Why:** Codex already runs the current Toolkit from the update copy, so a refresh would change nothing.
+
+**Choices:**
+
+- **A. Install or refresh** - Run the Codex plugin commands to verify Toolkit in Codex, and refresh its cache from the update copy when it is missing, off, older or different.
+- **B. Show instructions only** - Make no plugin change and show the Codex plugin commands to run yourself.
+- **C. Keep current** - Make no plugin change and run no Codex command this run: Codex runs Toolkit 1.0.0 (turned on); the update copy has 1.0.0.
+
+**After applying:** If the plugin files change, fully restart Codex, then open `/hooks` and turn the Toolkit hooks on; Codex may ask you to review them again.
+
+**Selected:** C - Keep current
+
+---
+
+### 3.2 Toolkit hooks in Codex
+
+**What this controls:** Whether Codex runs each Toolkit hook. Codex keeps this in ~/.codex/config.toml ([hooks.state]) and you change it in Codex's /hooks; setup only reports it and never edits it. A hook that is off or not reviewed does not run, so its check is skipped.
+
+**Current:** Toolkit hooks in Codex: Session start updates on; Prompt check on; Shell and agent check on; File edit check on; Checkpoint after tool use on; Checkpoint at stop on.
+
+**Verification:** state-derived
+
+**Recommended:** Keep current
+
+**Why:** Setup never edits this; you change it in Codex.
+
+**Choices:** none; this row only reports.
+
+---
+
+### 3.3 Copy Toolkit's skills into Antigravity?
 
 **What this controls:** Whether setup copies Toolkit's portable skills, and the official n8n skills Toolkit ships, into Antigravity's global skills folder (~/.gemini/config/skills) and keeps them current on each setup. Toolkit-only skills (setup, env, controller and programme tools) stay out. Folders you copied yourself are never changed.
 

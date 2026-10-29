@@ -9,8 +9,12 @@ const path = require('node:path');
 const readline = require('node:readline/promises');
 const delegation = require('./codex-delegation-config.cjs');
 const { describeResult: describeGlobalRules } = require('./toolkit-global-rules.cjs');
+const { CodexToolkitInstall, describeHookStates } = require('./toolkit-codex-install-state.cjs');
 
-function defineCodexSetup({ RUNTIMES, defaultCodexPluginCachePath, expectedToolkitVersion, nodeScriptArgs, printDelegationPreview, printDelegationRemovalPreview, runCommand, runNativePluginJsonPhase, scriptRootForReadOnlyProbe, setupGlobalRules }) {
+// The helper answers that change config.toml, so setup checks the runtime with Codex first.
+const HELPER_CHANGES = Object.freeze(['one-helper', 'root-only', 'custom', 'migrate', 'remove']);
+
+function defineCodexSetup({ RUNTIMES, defaultCodexPluginCachePath, expectedToolkitVersion, nodeScriptArgs, printDelegationPreview, printDelegationRemovalPreview, runNativePluginJsonPhase, setupGlobalRules }) {
   function selectedHelperCount(args, current) {
     const choice = args.setupChoices.codexHelperCapacity;
     if (choice === 'one-helper') return 1;
@@ -26,20 +30,25 @@ function defineCodexSetup({ RUNTIMES, defaultCodexPluginCachePath, expectedToolk
     if (!['one-helper', 'root-only', 'custom', 'migrate', 'remove'].includes(choice)) return false;
     const helperCount = selectedHelperCount(args, current);
     if (choice === 'custom' && !Number.isSafeInteger(helperCount)) return false;
-    const previewOptions = {
-      runtime: current.runtime.runtime,
-      setupScriptPath: path.resolve(__dirname, 'setup-toolkit.cjs'),
-    };
-    const preview = choice === 'remove'
-      ? delegation.previewCodexDelegationRemoval(current.delegation.config_path || delegation.codexConfigPath(), previewOptions)
-      : delegation.previewCodexDelegation(current.delegation.config_path || delegation.codexConfigPath(), {
-          ...previewOptions,
-          helperCount,
-          allowUserOwnedReplacement: true,
-        });
-    return preview.selected_outcome_matches !== true
-      && ['preview', 'removal-preview'].includes(preview.status)
-      && preview.requires_user_confirmation === true;
+    // Before the answers the runtime may be read from the file only; when it is unknown, either
+    // form needing a confirmation means the piped answer may hold one.
+    const runtimes = current.runtime.runtime === RUNTIMES.UNKNOWN && current.runtime.from_config ? [RUNTIMES.V1, RUNTIMES.V2] : [current.runtime.runtime];
+    return runtimes.some((runtime) => {
+      const previewOptions = { runtime, setupScriptPath: path.resolve(__dirname, 'setup-toolkit.cjs') };
+      let preview;
+      try {
+        preview = choice === 'remove'
+          ? delegation.previewCodexDelegationRemoval(current.delegation.config_path || delegation.codexConfigPath(), previewOptions)
+          : delegation.previewCodexDelegation(current.delegation.config_path || delegation.codexConfigPath(), {
+              ...previewOptions,
+              helperCount,
+              allowUserOwnedReplacement: true,
+            });
+      } catch { return false; }
+      return preview.selected_outcome_matches !== true
+        && ['preview', 'removal-preview'].includes(preview.status)
+        && preview.requires_user_confirmation === true;
+    });
   }
 
   async function confirmSelectedDelegationProposal(args, current, questionBank) {
@@ -149,17 +158,44 @@ function defineCodexSetup({ RUNTIMES, defaultCodexPluginCachePath, expectedToolk
     return result;
   }
 
-  function inspectCodexNativePluginState(args) {
-    const probeRoot = scriptRootForReadOnlyProbe(args);
-    const result = runCommand(
-      'node repo/scripts/setup-codex-toolkit-plugin.cjs --verify --json',
-      process.execPath,
-      setupCodexArgs({ ...args, repoRoot: probeRoot }, '--verify'),
-      { cwd: probeRoot, capture: true, timeout: 120000, allowFailure: true, quiet: true }
-    );
+  // The effective Codex runtime, checked with Codex itself only after the owner answered and only
+  // when the helper answer changes config.toml. The question bank used the form of Toolkit's own
+  // block instead, so the plan never starts Codex.
+  async function detectCodexRuntimeAfterApproval(args, current) {
+    if (!HELPER_CHANGES.includes(args.setupChoices.codexHelperCapacity)) return current;
+    const runtime = await delegation.inspectCodexMultiAgentRuntime({
+      codexCommand: args.codexCli,
+      codexHome: delegation.defaultCodexHome(),
+      cwd: path.resolve(__dirname, '..', '..'),
+    });
+    const configPath = current.delegation.config_path || delegation.codexConfigPath();
+    const state = delegation.inspectCodexDelegationConfig(configPath, runtime.runtime);
+    if (runtime.runtime === RUNTIMES.V1 && (args.setupChoices.codexHelperCapacity === 'root-only'
+        || (args.setupChoices.codexHelperCapacity === 'custom' && args.codexHelperCount !== null && args.codexHelperCount < 1))) {
+      throw new Error('Codex cannot limit helpers to zero; choose one helper or a custom number of at least 1. Setup wrote nothing.');
+    }
+    args.codexRuntime = runtime.runtime;
+    return { ...current, runtime, delegation: state };
+  }
+
+  // Keep current and Show instructions only make no plugin change and start no Codex command: they
+  // report what the Codex files say. Install or refresh runs the verify, write, verify sequence.
+  function codexPluginFromFiles(args, status) {
+    const install = new CodexToolkitInstall({ managedRoot: args.repoRoot }).read();
+    const hooks = describeHookStates(install.hooks || { status: 'unreadable', entries: [] });
     return {
-      status: result.status === 0 ? 'fresh' : 'needs-review',
-      detail: (result.status === 0 ? result.stdout : (result.stderr || result.stdout || '')).trim()
+      status,
+      installed: (install.versions || []).length > 0,
+      enabled: install.plugin === 'on',
+      current: (install.versions || []).length === 1 && Boolean(install.version) && install.version === install.sourceVersion,
+      cache_path: defaultCodexPluginCachePath(install.version || expectedToolkitVersion(args.repoRoot, 'codex')),
+      expected_version: expectedToolkitVersion(args.repoRoot, 'codex'),
+      installed_version: install.version || 'none',
+      updated_this_run: false,
+      restart_required: false,
+      hook_trust_status: hooks.status,
+      hook_execution_status: hooks.execution,
+      hook_trust_action: hooks.message,
     };
   }
 
@@ -192,9 +228,9 @@ function defineCodexSetup({ RUNTIMES, defaultCodexPluginCachePath, expectedToolk
         installed_version: summary.version || expectedVersion,
         updated_this_run: false,
         restart_required: false,
-        hook_trust_status: summary.hook_trust_status || 'verification-unavailable',
-        hook_execution_status: summary.hook_execution_status || 'verification unavailable; open `/hooks` in Codex',
-        hook_trust_action: summary.hook_trust_message || 'Open `/hooks` in Codex and review the current Toolkit hooks'
+        hook_trust_status: summary.hook_trust_status || 'unknown',
+        hook_execution_status: summary.hook_execution_status || 'unknown',
+        hook_trust_action: summary.hook_trust_message || 'Open `/hooks` in Codex and check that the Toolkit hooks are on'
       };
     }
     runNativePluginJsonPhase({
@@ -225,7 +261,7 @@ function defineCodexSetup({ RUNTIMES, defaultCodexPluginCachePath, expectedToolk
       restart_required: true,
       hook_trust_status: 'pending-review',
       hook_execution_status: 'skipped until the current hook is reviewed and trusted',
-      hook_trust_action: 'Open `/hooks` in Codex, review and trust the current Toolkit hooks'
+      hook_trust_action: 'Codex may ask you to review the Toolkit hooks again after the refresh: open `/hooks` in Codex and turn them on'
     };
   }
 
@@ -240,7 +276,7 @@ function defineCodexSetup({ RUNTIMES, defaultCodexPluginCachePath, expectedToolk
     for (const line of lines.length ? lines : [`held: ${result.detail}`]) console.log(line);
     return result;
   }
-  return { selectedHelperCount, needsPipedCodexProposalApproval, confirmSelectedDelegationProposal, applyCodexDelegationControl, inspectCodexNativePluginState, setupCodexArgs, runCodexNativePluginSetup, runCodexGlobalRules };
+  return { selectedHelperCount, needsPipedCodexProposalApproval, confirmSelectedDelegationProposal, applyCodexDelegationControl, detectCodexRuntimeAfterApproval, codexPluginFromFiles, runCodexNativePluginSetup, runCodexGlobalRules };
 }
 
 module.exports = { defineCodexSetup };

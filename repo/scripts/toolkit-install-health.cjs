@@ -12,8 +12,9 @@
 // record in the Toolkit hub, the Toolkit helper definitions and global rules (each refreshed
 // when stale), the Toolkit-owned Claude Code depth setting against the selected topology, and,
 // once toolkit env is in use, its store and connected MCP entries (by key name only).
-// Notices that block nothing: an older uploaded Projects controller skill, and an older Toolkit copy
-// from the user's claude.ai account in the Claude desktop app (read only; claude.ai alone updates it).
+// Notices that block nothing: an older uploaded Projects controller skill, an older Toolkit copy
+// from the user's claude.ai account in the Claude desktop app (read only; claude.ai alone updates it),
+// and Codex running an older Toolkit or with Toolkit hooks off (read from the Codex files only).
 //
 // Usage (session-start hook): node repo/scripts/toolkit-install-health.cjs --session-start [--hub <path>]
 // Prints the result as JSON. Exit 0 when the check ran, 1 when it could not run.
@@ -28,6 +29,7 @@ const { GlobalRules, describeResult: describeGlobalRules } = require('./toolkit-
 const { ClaudeSubagentDepthSetting, SETTING: DEPTH_SETTING, STATES: DEPTH } = require('./toolkit-claude-subagent-depth.cjs');
 const { ToolkitEnv } = require('./toolkit-env.cjs');
 const { accountCopyBehind, claudeAccountPluginFolders } = require('./toolkit-claude-account-copy.cjs');
+const { CodexToolkitInstall, codexReminderLine } = require('./toolkit-codex-install-state.cjs');
 
 const STATUS = Object.freeze({ PASSED: 'passed', RESTART: 'restart-required', ACTION: 'action-required' });
 const RECORDED_SOURCES = Object.freeze(['claude-plugin', 'repo']);
@@ -77,12 +79,13 @@ function claudeAccountToolkitVersion(folders) {
 }
 
 class ToolkitInstallHealthCheck {
-  #toolkitRoot; #expectedVersion; #hubPath; #helpers; #globalRules; #depth; #env; #syncedSkillsDir; #accountPluginFolders; #platform;
+  #toolkitRoot; #expectedVersion; #hubPath; #helpers; #globalRules; #depth; #env; #syncedSkillsDir; #accountPluginFolders; #codexInstall; #platform;
 
   // envHealth: an object with health() (see toolkit-env.cjs), or null to skip that check.
   // syncedSkillsDir: where Claude Code keeps skills synced from claude.ai, or null to skip the Projects skill check.
   // accountPluginFolders: the Claude desktop app's account-plugin folders, or null to skip that check.
-  constructor({ toolkitRoot, expectedVersion, hubPath, helperDefinitions, globalRules, depthSetting, envHealth = null, syncedSkillsDir = null, accountPluginFolders = null, platform = process.platform }) {
+  // codexInstall: a CodexToolkitInstall reader, or null to skip the Codex notice.
+  constructor({ toolkitRoot, expectedVersion, hubPath, helperDefinitions, globalRules, depthSetting, envHealth = null, syncedSkillsDir = null, accountPluginFolders = null, codexInstall = null, platform = process.platform }) {
     this.#platform = platform;
     this.#toolkitRoot = path.resolve(toolkitRoot);
     this.#expectedVersion = expectedVersion;
@@ -93,6 +96,7 @@ class ToolkitInstallHealthCheck {
     this.#env = envHealth;
     this.#syncedSkillsDir = syncedSkillsDir;
     this.#accountPluginFolders = accountPluginFolders;
+    this.#codexInstall = codexInstall;
   }
 
   // The checks the installed session-start hook runs, wired to the real files.
@@ -112,6 +116,7 @@ class ToolkitInstallHealthCheck {
       envHealth: ToolkitEnv.forUser({ environment }),
       syncedSkillsDir: path.join(environment.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'skills', 'synced'),
       accountPluginFolders: claudeAccountPluginFolders(environment),
+      codexInstall: new CodexToolkitInstall({ codexHome: environment.CODEX_HOME || path.join(os.homedir(), '.codex'), managedRoot: toolkitRoot }),
     });
   }
 
@@ -172,6 +177,16 @@ class ToolkitInstallHealthCheck {
     const label = 'Claude app account copy';
     if (compareVersions(account, this.#expectedVersion) >= 0) return this.#check('account-plugin', label, STATUS.PASSED, `Your claude.ai account copy of Toolkit is current (${account}).`);
     return this.#check('account-plugin', label, STATUS.PASSED, accountCopyBehind(account, this.#expectedVersion));
+  }
+
+  // Shown only when Codex has the Toolkit plugin on and runs an older Toolkit than this PC, or some
+  // Toolkit hooks are off or not reviewed. Read from the Codex files only: Toolkit never starts
+  // Codex, edits hooks.state or writes the Codex cache here, and it blocks nothing.
+  #codexCheck() {
+    if (!this.#codexInstall) return null;
+    let line = '';
+    try { line = codexReminderLine(this.#codexInstall.read()); } catch { return null; }
+    return line ? { ...this.#check('codex-toolkit', 'Codex', STATUS.PASSED, line), notice: true } : null;
   }
 
   #check(id, label, status, summary, action = '') {
@@ -323,6 +338,8 @@ class ToolkitInstallHealthCheck {
     if (projectsSkill) checks.push(projectsSkill);
     const accountPlugin = this.#accountPluginCheck();
     if (accountPlugin) checks.push(accountPlugin);
+    const codex = this.#codexCheck();
+    if (codex) checks.push(codex);
     const status = checks.some((entry) => entry.status === STATUS.ACTION) ? STATUS.ACTION
       : checks.some((entry) => entry.status === STATUS.RESTART) ? STATUS.RESTART : STATUS.PASSED;
     const actions = checks.filter((entry) => entry.status !== STATUS.PASSED && entry.action).map((entry) => entry.action);
