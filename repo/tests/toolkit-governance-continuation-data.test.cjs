@@ -59,8 +59,9 @@ const DATA = [
   ['git worktree remove "$env:USERPROFILE\\t\\codex-542"; git worktree prune', POSIX_AND_PS],
   ["cat > f.md <<'EOF'\nClaude and Codex: codex resume --last\nEOF", ['omitted', 'bash']],
   // Everyday false refusals: branch names, folders, variable names, apostrophes, API edits.
-  ['git -C C:/Users/example/GitHub/repo push -u origin claude/project-thread-x', POSIX_AND_PS],
-  ['git -C "C:/example.test/codex/resume" push origin HEAD:refs/heads/codex/example', POSIX_AND_PS],
+  // A host-named branch folder is a name to every shell, so cmd needs no data proof here.
+  ['git -C C:/Users/example/GitHub/repo push -u origin claude/project-thread-x', ALL],
+  ['git -C "C:/example.test/codex.resume" push origin HEAD:refs/heads/codex.example', POSIX_AND_PS],
   ['Get-ChildItem "$env:LOCALAPPDATA\\Claude-Data\\logs" -Recurse | Select-Object -First 5', POSIX_AND_PS],
   ['Get-ChildItem "$env:USERPROFILE\\.claude\\projects" | Sort-Object LastWriteTime -Descending | Select-Object -First 3', POSIX_AND_PS],
   ['$codexHome = "$env:USERPROFILE\\.codex"; Get-ChildItem $codexHome -Recurse', PS_ONLY],
