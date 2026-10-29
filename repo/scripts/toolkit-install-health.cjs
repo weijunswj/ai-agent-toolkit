@@ -68,7 +68,8 @@ function claudeAccountPluginFolders(environment = process.env) {
     const rpm = path.join(base, app.name, 'rpm');
     for (const first of children(rpm)) for (const second of children(path.join(rpm, first.name))) folders.push(path.join(rpm, first.name, second.name));
   }
-  return folders;
+  // In name order, so every reader sees the same first copy whatever order the disk lists them in.
+  return folders.sort();
 }
 
 // The newest Toolkit version among the account copies in those folders, or '' when there is none.

@@ -13,7 +13,7 @@
     "parents": {
       "type": "array",
       "minItems": 1,
-      "description": "The programme parent issues. The first is the one the reconciler records against.",
+      "description": "The programme parent issues. The first is the one the reconciler records against. List one parent only for now: with a second, a task under a sub-issue of that programme could still be moved across programmes until a planning gate rules on descendants.",
       "items": {
         "type": "object",
         "additionalProperties": false,

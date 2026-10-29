@@ -540,6 +540,8 @@ test('every line that re-arms, updates, swaps, rebuilds, recreates or sets up a 
     'start a bounded G0 to create or refresh it before you plan anything',
     // The reconciler's `refresh` command brings programme pages up to date; it touches no task.
     '**Programme pages refresh themselves, without tokens.**', '5b. Programme sweep',
+    // The attention check reads the programme with `attention --refresh`; it touches no task.
+    '**Programme attention before gates, finality and settling.**',
   ];
   const unguarded = [];
   for (const rel of files) {

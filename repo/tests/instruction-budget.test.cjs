@@ -46,8 +46,9 @@ test('each block stays inside its own budget', () => {
   assert.ok(crlfBytes(ROOT_AGENTS) <= 15000, `root AGENTS.md ${crlfBytes(ROOT_AGENTS)} bytes`);
   // CONTROLLER.md loads only for controllers, not every session; the rules audit cut it below 18000.
   assert.ok(crlfBytes(read('repo/CONTROLLER.md')) <= 18000, 'CONTROLLER.md');
-  // The gate rules load on demand for gate sessions only, but stay compact.
-  assert.ok(crlfBytes(read('repo/contracts/agent-rules/gate-rules.md')) <= 10500, 'gate rules');
+  // The gate rules load on demand for gate sessions only, but stay compact. The cap rose from
+  // 10,500 to hold the review-round rules (self-check, finding severities, narrow rechecks).
+  assert.ok(crlfBytes(read('repo/contracts/agent-rules/gate-rules.md')) <= 11000, 'gate rules');
 });
 
 test('guidance moved out of root AGENTS.md is still reachable from a loaded layer', () => {

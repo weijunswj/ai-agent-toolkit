@@ -390,13 +390,19 @@ class SessionEpochs {
 // the repository it starts in, after refreshing this computer's read of the binding merged on that
 // repository's default branch (bounded; offline keeps the last read). Never throws. `refreshBinding`
 // is for tests; a test registry or test run never reaches the network (refreshMergedBinding).
-function startSession(input, { registryOptions = {}, now, refreshBinding = null } = {}) {
+function startSession(input, { registryOptions = {}, now, refreshBinding = null, programmeDeps = {} } = {}) {
   try {
     let repositoryId = null;
     if (input && typeof input.cwd === 'string' && input.cwd && input.source !== 'clear' && input.source !== 'compact') {
       // The one place a hook reads the network: the merged binding, bounded, into this computer's cache.
       try { (refreshBinding || governance.refreshMergedBinding)(input.cwd, registryOptions); } catch { /* offline keeps the last read */ }
-      try { repositoryId = governance.governanceState(input.cwd, registryOptions).repository_id || null; } catch { repositoryId = null; }
+      let current = null;
+      try { current = governance.governanceState(input.cwd, registryOptions); repositoryId = current.repository_id || null; } catch { repositoryId = null; }
+      // Governance confirmed off (the merged binding disables it, or the user's no): turns queued
+      // offline for this repository on this computer are never written, so they are deleted now.
+      if (current && current.state === 'DISABLED' && ['M2', 'R2'].includes(current.rule) && current.root) {
+        try { require('../../skills/github-program-reconciler/scripts/programme-checkpoint.cjs').discardQueuesFor(current.root, programmeDeps); } catch { /* the next turn end discards it */ }
+      }
     }
     return new SessionEpochs({ registryOptions, now }).start(sessionIdOf(input), input && input.source, repositoryId);
   } catch { return null; }
@@ -1737,7 +1743,7 @@ class ToolGate {
 
 // ---- session line -----------------------------------------------------------------------------
 
-function sessionLine(cwd, { registryOptions = {}, stateReader = null, now, sessionId = null } = {}) {
+function sessionLine(cwd, { registryOptions = {}, stateReader = null, now, sessionId = null, programmeDeps = {} } = {}) {
   const verdict = new GovernanceGate({ registryOptions, stateReader, now }).evaluate(cwd, { sessionId });
   const state = verdict.state;
   if (verdict.reason === 'not-now') return 'Toolkit governance: not decided yet; the user said "later" for this session. Follow the global rules (coding gates included) without GitHub governance; Toolkit asks again next session. If the user wants to decide sooner, they can send `toolkit governance enable` or `toolkit governance disable` as a message.';
@@ -1746,7 +1752,38 @@ function sessionLine(cwd, { registryOptions = {}, stateReader = null, now, sessi
     if (verdict.reason === 'not-github') return `Toolkit governance: this repository ${whereText(state)}, so GitHub governance will be DISABLED here once the user says ok. Every user message is held until then. If you need to raise it, ask the user to reply ok; Toolkit records their own reply, so never ask them to run a command, and do not try to work around it. ${NEVER_OWNER}`;
     return `Toolkit governance: this repository has no GitHub governance decision yet. Every user message is held until the user answers Toolkit's question. If you need to raise it, ask "${ASK}"; Toolkit records their own reply, so never ask them to run a command, and do not try to work around it. ${NEVER_OWNER}`;
   }
-  return decidedLine(state);
+  const decided = decidedLine(state);
+  const programme = state.state === 'ENABLED' && state.materials_complete !== false ? programmeLines(state, registryOptions, programmeDeps) : [];
+  return [decided, ...programme].join(' ');
+}
+
+// For an ENABLED repository: the attention line from this computer's cache, and a Checkpoint line for
+// each session here whose last turn-end record failed. Reads local files only (no git, gh or network
+// call); a missing or old cache starts `programme.cjs refresh` in the background. Any failure only
+// drops these lines.
+function programmeLines(state, registryOptions = {}, deps = {}) {
+  const lines = [];
+  try {
+    const binding = (deps.mergedBinding || governance.mergedBinding)(state.root, registryOptions);
+    if (!binding || !binding.repository) return lines;
+    const cache = require('../../skills/github-program-reconciler/scripts/programme-attention-cache.cjs');
+    const attention = cache.sessionAttention(binding.repository, deps);
+    // Not where governance reads are switched off (a test run, TOOLKIT_GOVERNANCE_OFFLINE=1, a test
+    // registry), and at most one start per 15 minutes per repository on this computer.
+    const offline = (deps.environment || process.env).TOOLKIT_GOVERNANCE_OFFLINE === '1' || registryOptions.testOnly === true;
+    let started = false;
+    if (attention.refresh && (deps.startRefresh || !offline) && cache.claimBackgroundStart(binding.repository, deps)) {
+      try { (deps.startRefresh || require('../../skills/github-program-reconciler/scripts/programme-refresh-trigger.cjs').startRefresh)(state.root, deps); started = true; } catch { /* the hourly sweep covers it */ }
+    }
+    if (attention.line) lines.push(`${attention.line}${started ? '; a refresh has started in the background' : ''}.`);
+  } catch { /* no attention line */ }
+  try {
+    const checkpoint = require('../../skills/github-program-reconciler/scripts/programme-checkpoint.cjs');
+    for (const session of checkpoint.localSessionsFor(state.root, deps)) {
+      if (session.errors.pending) lines.push(`Checkpoint: last turn's record failed (${session.errors.pending.code}); see programme.cjs show --session <that session's id> (session ${session.hash.slice(0, 8)}).`);
+    }
+  } catch { /* no checkpoint line */ }
+  return lines;
 }
 
 function decidedLine(state) {

@@ -108,7 +108,8 @@ function own(fx, argv = ['refresh']) {
 const firstWrite = (fx, act) => {
   let done = false;
   fx.github.hooks.push((call, github) => {
-    if (done || call.method === 'GET') return null;
+    // GraphQL calls here are reads (the inventory and PR queries).
+    if (done || call.method === 'GET' || call.path === 'graphql') return null;
     done = true;
     act(call, github);
     return null;
