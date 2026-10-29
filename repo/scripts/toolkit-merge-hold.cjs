@@ -460,7 +460,10 @@ function decide(input, { registryOptions = {}, now, environment = process.env } 
     const text = call.text.replace(/[\\`^]\r?\n/g, ' ');
     if (text.length > MAX_COMMAND_CHARS) return /merge|push/i.test(text) ? refuse('this command is too long to check for a merge or push, so it is refused. Split it.') : null;
     const cwd = call.folder;
-    const refusal = shellRefusal(text, cwd);
+    // An argument list's words joined unquoted are screened too, as they were before the shared
+    // reader quoted them; merges themselves are read from the quoted text only, so none counts twice.
+    const joined = call.joinedWords && call.joinedWords !== call.text ? `\n${call.joinedWords.replace(/[\\`^]\r?\n/g, ' ')}` : '';
+    const refusal = shellRefusal(text + joined, cwd);
     if (refusal) return refusal;
     merges = shellMerges(text, cwd, environment || {});
     if (merges.some(merge => !merge.explicit) && MOVES_TARGET.test(text)) {

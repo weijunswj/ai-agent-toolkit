@@ -209,6 +209,11 @@ test('Windows launcher without Node blocks commit, pull request, merge, push and
     assert.equal(r.stdout, '', command);
     assert.match(r.stderr, /setup toolkit/, command);
   }
+  // Every shell tool name Codex may report is a shell call here too.
+  for (const tool of ['exec_command', 'shell', 'local_shell', 'PowerShell']) {
+    assert.equal(runBrokenWindowsLauncher(t, { tool_name: tool, cwd: ROOT, tool_input: { cmd: 'git status' } }).status, 1, `${tool}: an ordinary command runs`);
+    assert.equal(runBrokenWindowsLauncher(t, { tool_name: tool, cwd: ROOT, tool_input: { cmd: 'git push --force origin main' } }).status, 2, `${tool}: a push is refused`);
+  }
 });
 
 test('Windows launcher treats unreadable, unsupported or relative runtime metadata as a broken install', { skip: process.platform !== 'win32' }, t => {
