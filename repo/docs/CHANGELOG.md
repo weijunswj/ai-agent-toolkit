@@ -1,5 +1,12 @@
 # Toolkit Changelog
 
+## 3.19.5 (a Claude app update reminder, and no Claude plugin update step)
+
+- **Claude app reminder:** when a new Claude app chat starts from the Toolkit copy in your claude.ai account and that copy is older than this PC's Toolkit, the session-start hook shows you one reminder with both versions and the steps: Check for updates on claude.ai, then remove only the plugin on claude.ai in a web browser, then remove and add the marketplace again, then fully quit and reopen the Claude app. It goes out as the hook's message to you and as a line asking the chat to say it in its first reply. It reads two version files and writes nothing. Account copies from before this release stay quiet; the install check and the daily check-in still report them.
+- **One set of steps:** the install check row, the daily check-in's plugin steps (skill version 2026-10-29.7, upload it again) and the reminder now use the same four steps in that order.
+- **Setup names both Claude copies:** instead of "Claude plugin updated this run", setup prints `Claude Code in a terminal: <version> (runs from this PC's Toolkit folder)` and `Claude app: claude.ai copy <version>, which only claude.ai updates`, pointing to the install check's steps when the app copy is behind.
+- **No Claude plugin update step:** a probe on Claude Code 2.1.310 showed the terminal app runs Toolkit in place from this PC's Toolkit folder, picks up a new version without `claude plugin update`, and never runs the cache copy. Setup now judges such an install by the folder's version and no longer runs `claude plugin update` after each release; it still installs the plugin once.
+
 ## 3.19.3 (Git Bash folder paths in the push checks)
 
 - **Folders read as the shell reads them:** a folder or file in `cd`, `git -C`, `--work-tree`, a message or body file, a Codex `workdir` or a path word now resolves the way the shell does in every check (the attribution, bypass, force-push and push checks, the merge hold and the governance gate): a leading `~` is the home folder everywhere, and on Windows a Git Bash drive path (`/c/Users/...`, `/cygdrive/c/...`, any drive letter) names that drive and `/tmp` the user's temp folder. Before, `/c/Users` was read as a folder `c` on the current drive and `~/repo` as a folder `~`, neither of which exists, so in Claude Code a push from such a folder went out unchecked with only a note. Git Bash is the shell behind Claude Code's Bash tool on Windows.

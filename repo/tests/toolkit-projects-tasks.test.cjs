@@ -9,6 +9,7 @@ const { spawnSync } = require('node:child_process');
 const test = require('node:test');
 const { renderBlock, findBlocks } = require('../scripts/toolkit-managed-block.cjs');
 const hostile = require('./support/hostile-inputs.cjs');
+const { STEPS_TEXT } = require('../scripts/toolkit-claude-account-copy.cjs');
 const { ProjectsTasks, KEPT_LABEL, PROJECT_HEADING, LEGACY_RAISE, validateParams, checkMemory, parseArgs } = require('../scripts/toolkit-projects-tasks.cjs');
 
 const ROOT = path.resolve(__dirname, '../..');
@@ -383,7 +384,7 @@ test('the check-in carries every prefix in the fixed order and checks both Toolk
   for (const required of ['"EXAMPLE: Daily check-in"', '"EXAMPLE: Hourly nudge"', '--check daily-check-in', '--check hourly-nudge',
     '--check-memory', 'bound to its home thread (persist_session true), or a fresh session per run (persist_session false) only where the entry says fresh', 'CONTEXT RESET DUE, SKILL UPDATE', 'weekly-rebuild', 'unlisted', 'hearth_channel_id',
     'advice only', 'local, advice', 'Never suggest moving a local task to the cloud', '--declined-dedupe', 'overlaps',
-    'remove the Toolkit plugin only', 'state done', 'older than 65 minutes', 'Never flag other memory lines',
+    'remove only the ai-agent-toolkit plugin on claude.ai in a web browser', 'state done', 'older than 65 minutes', 'Never flag other memory lines',
     'git hash-object --stdin', 'matches no revision', '/skill-drift/', 'unless state.md already reported these hashes',
     'every run reaches the owner as one line', 'swaps each named Toolkit task from the template on main the same turn']) {
     assert.ok(text.includes(required), required);
@@ -403,7 +404,8 @@ test('the check-in carries every prefix in the fixed order and checks both Toolk
     'Equal: "**Plugin:** current (<version>)"', 'take the newest commit whose plugin.json has the account version; main moved past it at the next newer commit',
     'use the oldest commit whose version is above the account\'s', 'age unverified: unshallow failed: <error>" and no prefix, and name it on the first line as stuck', 'Under 24 hours ago: name both versions and that commit under **Plugin:**',
     'unless state.md has "plugin behind <main version>"', 'its "plugin behind <version>" record', 'No agent can update the plugin',
-    'remove the Toolkit plugin only and let it reinstall; if it is still behind, select Check for updates on its marketplace',
+    // The Claude app steps, rendered, equal the shared text the session-start reminder and install check use.
+    `put the owner's steps under **Plugin:** for the coordinator's plugin card: ${STEPS_TEXT} Missing account copy`,
     '"plugin behind <main version>" for the version reported as PLUGIN BEHIND (carried forward while the account copy is still behind)',
     'Omit empty bullets except Skill, Block, Binding, Tasks, Nudge, Plugin and Run.']) {
     assert.ok(text.includes(required), required);

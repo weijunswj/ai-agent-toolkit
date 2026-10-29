@@ -8,6 +8,7 @@ require('./toolkit-test-temp-guard.cjs'); // private temp; fails if real update 
 const test = require('node:test');
 const os = require('node:os');
 const { ToolkitInstallHealthCheck, STATUS, claudeAccountPluginFolders, claudeAccountToolkitVersion } = require('../scripts/toolkit-install-health.cjs');
+const { accountCopyBehind, claudeAppCopyLine } = require('../scripts/toolkit-claude-account-copy.cjs');
 const { ClaudeHelperAgentRenderer } = require('../scripts/toolkit-claude-helper-agents.cjs');
 const { ClaudeNamedHelperPolicy } = require('../scripts/toolkit-claude-helper-policy.cjs');
 const {
@@ -18,6 +19,15 @@ const VERSION = JSON.parse(fs.readFileSync(path.join(repoRoot, '.claude-plugin',
 
 const CURRENT_GLOBAL_RULES = Object.freeze({ status: 'current', files: [], covered: [], backup_dir: null, detail: '' });
 const fakeGlobalRules = (result = CURRENT_GLOBAL_RULES) => ({ refresh: () => { if (result instanceof Error) throw result; return result; } });
+
+test('setup names the Claude app copy and points to the steps only when it is behind', () => {
+  assert.equal(claudeAppCopyLine('', '9.9.1'), 'no claude.ai copy found on this PC');
+  assert.equal(claudeAppCopyLine('9.9.1', '9.9.1'), 'claude.ai copy 9.9.1, which only claude.ai updates');
+  assert.equal(claudeAppCopyLine('9.10.0', '9.9.1'), 'claude.ai copy 9.10.0, which only claude.ai updates');
+  assert.equal(claudeAppCopyLine('9.8.0', '9.9.1'),
+    'claude.ai copy 9.8.0, which only claude.ai updates; it is behind this PC, so follow the "Claude app account copy" steps under Install check');
+  assert.equal(claudeAppCopyLine('9.8.0', 'unknown'), 'claude.ai copy 9.8.0, which only claude.ai updates');
+});
 
 function unit(t, { helpers = { status: 'current' }, depth = { state: 'toolkit-one-layer', value: '1' }, recorded = null, globalRules = CURRENT_GLOBAL_RULES } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-install-health-'));
@@ -287,7 +297,8 @@ test('the Claude app account copy check reports an older claude.ai copy with the
   const older = find(result);
   assert.equal(older.status, STATUS.PASSED, 'an older account copy never blocks');
   assert.equal(result.status, STATUS.PASSED);
-  assert.match(older.summary, /Your claude\.ai account copy of Toolkit is 9\.8\.0; this computer has 9\.9\.1\. The Claude app runs the account copy, and claude\.ai updates it from Toolkit's main branch: check that Sync automatically is on for the ai-agent-toolkit marketplace in claude\.ai, and if the copy stays behind, remove that marketplace and add it again\./);
+  // The same notice and steps as the Claude app's session-start reminder and the daily check-in.
+  assert.equal(older.summary, accountCopyBehind('9.8.0', '9.9.1'));
   assert.doesNotMatch(older.summary, /plugin_toolkit|claude_example|LocalAppData/, 'no ids or paths in the report');
   assert.ok(fs.readFileSync(path.join(folder, 'manifest.json')).equals(before), 'the check never writes');
 

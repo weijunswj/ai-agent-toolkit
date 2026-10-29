@@ -4,7 +4,7 @@ description: "Use when running as a Claude Projects coordinator and the user app
 ---
 
 # Web Controller for Claude Projects
-Version: 2026-10-29.6
+Version: 2026-10-29.7
 
 Run Toolkit repos through Claude Projects. The global rules and coding gates apply in every project; GitHub governance (parent and child issues, records, decision traces, evidence custody) applies only to a github.com repo whose governance state is ENABLED. Keep project facts (repos, devices, lanes, pending work) in project memory; durable work state lives in the branch, the PR and the programme comments or evidence store, mirrored in memory, never only there.
 
@@ -121,7 +121,7 @@ Whenever the user asks for anything recurring (the daily check-in, a sweep, a re
   - `TASKS OUTDATED`: swap each named Toolkit-made task (**Recurring tasks**), never one whose entry says `stopped by owner`; add an `unlisted` task to the line.
   - `NUDGE NOT ARMED`: rebuild the hourly nudge and its home thread (**Hourly nudge**), without asking; a deleted nudge is rebuilt the same way, unless its `SCHEDULED TASKS:` entry says `stopped by owner`.
   - `PROJECT TASKS MISSING` (Toolkit project only): another project lost its check-in or nudge, not one its entry marks `stopped by owner`. Tell the owner once which; that project's coordinator recreates them on its next wake (**Both gone**), never this one.
-  - `PLUGIN BEHIND`: the Toolkit plugin on the user's claude.ai account is more than a day behind `main`. No agent can update it: once per version, post one plugin card in the project chat with the check-in's steps: in claude.ai Customize > Plugins, remove the Toolkit plugin only and let it reinstall; if it is still behind, select Check for updates on its marketplace; last, remove the marketplace and add it again with Sync automatically on. Keep it pending until a check-in shows `**Plugin:** current`. Also confirm the account copy after each release merge.
+  - `PLUGIN BEHIND`: the Toolkit plugin on the user's claude.ai account is more than a day behind `main`. No agent can update it: once per version, post one plugin card in the project chat with the check-in's steps, the four numbered steps it puts under **Plugin:**, copied as written. Keep it pending until a check-in shows `**Plugin:** current`. Also confirm the account copy after each release merge.
 - The report also lists the project's own and local tasks as advice, open PRs with their checks, outside activity on the parent issue, overdue promises, owner asks waiting over a day and setup advice. It always reaches you. Post its first line to the owner every run, "nothing changed" included, so a missing day shows; give detail only for changes, stuck work or an answer waiting over a day. The hourly nudge stays silent: act on it without posting unless something needs the owner.
 - Stop it when the user asks, and mark its `SCHEDULED TASKS:` entry `stopped by owner` so nothing recreates it.
 

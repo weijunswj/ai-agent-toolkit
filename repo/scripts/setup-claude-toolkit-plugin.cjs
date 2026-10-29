@@ -93,6 +93,9 @@ function registrySourceEvidence(installed, repoRoot, expectedVersion, options = 
   if (matching.length !== 1) {
     return { ok: false, reason: 'Claude installed-plugin registry identity is missing or ambiguous' };
   }
+  // Run in place, the folder is the managed checkout itself, so the record's version and commit
+  // (left at the first install) prove nothing more.
+  if (installed?.readFromFolder) return { ok: true, sourcePath: repoRoot, sourceIdentity: 'claude-plugin-registry' };
   const record = matching[0];
   if (record.version !== expectedVersion || installed.version !== expectedVersion) {
     return { ok: false, reason: 'Claude installed-plugin registry version is not current' };
@@ -221,6 +224,14 @@ function validateRepoPluginSource(repoRoot, expectedVersion = '') {
 function pluginRunFolder(installed) {
   const folder = installed?.readFromFolder || installed?.installPath;
   return folder ? path.resolve(String(folder)) : '';
+}
+
+// The version Claude Code runs. Run in place from `readFromFolder`, that folder's version
+// (`folderVersion`) takes effect in the next session without `claude plugin update`, while the
+// install record keeps the version and commit it was first installed at (measured on Claude Code
+// 2.1.310), so the record's own version decides nothing there.
+function runningVersion(installed) {
+  return String((installed?.readFromFolder ? installed.folderVersion : installed?.version) || '');
 }
 
 function validateInstalledEnforcement(installed, repoRoot, expectedVersion) {
@@ -382,13 +393,13 @@ function verifyCurrentInstalledEnforcement(expectedProof, options = {}) {
     if (installed.enabled !== true) throw new Error('Current Claude plugin enabled state is not verified.');
     const activation = hookActivation(installed, { env: options.env });
     if (!activation.hook_active) throw new Error(activation.reasons.join(' '));
-    if (installed.version !== expectedProof?.plugin_version) throw new Error('Current Claude plugin version does not match the activation proof.');
+    if (runningVersion(installed) !== expectedProof?.plugin_version) throw new Error('Current Claude plugin version does not match the activation proof.');
     const cachePath = pluginRunFolder(installed);
     const cacheStat = fs.lstatSync(cachePath);
     if (!cacheStat.isDirectory() || cacheStat.isSymbolicLink()) throw new Error('Current Claude plugin cache is not a regular directory.');
     const hookErrors = verifySessionStartHook(path.join(cachePath, '.claude-plugin', 'hooks', 'hooks.json'));
     if (hookErrors.length) throw new Error(hookErrors.join('; '));
-    const currentProof = installedActivationProof(installed, installed.version);
+    const currentProof = installedActivationProof(installed, runningVersion(installed));
     if (!sameActivationProof(currentProof, expectedProof)) throw new Error('Current Claude enforcement identity does not match the activation proof.');
     return { verified: true, activation_proof: currentProof };
   } catch (error) {
@@ -818,13 +829,15 @@ function evaluateClaudeToolkitPluginState(pluginList, options = {}) {
   }
   let refusesDowngrade = false;
   let staleVersion = false;
-  if (installed.version && installed.version !== expectedVersion) {
-    if (compareSemver(installed.version, expectedVersion) > 0) {
+  const version = runningVersion(installed);
+  if (installed.readFromFolder && !version) errors.push(`Claude Code does not list the version of the folder it runs ${pluginId()} from`);
+  if (version && version !== expectedVersion) {
+    if (compareSemver(version, expectedVersion) > 0) {
       refusesDowngrade = true;
-      errors.push(`Refusing downgrade: installed ${pluginId()} version ${installed.version} is newer than source version ${expectedVersion}. Update the managed source checkout or uninstall the newer plugin explicitly before retrying.`);
+      errors.push(`Refusing downgrade: installed ${pluginId()} version ${version} is newer than source version ${expectedVersion}. Update the managed source checkout or uninstall the newer plugin explicitly before retrying.`);
     } else {
       staleVersion = true;
-      errors.push(`${pluginId()} expected version ${expectedVersion}: ${installed.version}`);
+      errors.push(`${pluginId()} expected version ${expectedVersion}: ${version}`);
     }
   }
   const listedSourcePath = installed.projectPath || installed.source?.path || installed.path || '';
@@ -845,9 +858,6 @@ function evaluateClaudeToolkitPluginState(pluginList, options = {}) {
   if (installed.readFromFolder && !samePath(installed.readFromFolder, repoRoot)) {
     errors.push(`Claude Code runs ${pluginId()} from a folder that is not the managed Toolkit checkout`);
   }
-  if (installed.folderVersion && installed.folderVersion !== expectedVersion) {
-    errors.push(`Claude Code runs ${pluginId()} version ${installed.folderVersion}; expected ${expectedVersion}`);
-  }
   if (enabled && sourceMatches) {
     errors.push(...validateInstalledEnforcement(installed, repoRoot, expectedVersion));
   }
@@ -857,8 +867,9 @@ function evaluateClaudeToolkitPluginState(pluginList, options = {}) {
   // An in-place `claude plugin update` is only the right remediation when
   // version staleness is the *only* problem -- an install that is also
   // disabled or points at a different source path still needs the full
-  // marketplace add + install path.
-  const canUpdateInPlace = staleVersion && enabled && sourceMatches;
+  // marketplace add + install path. A plugin Claude Code runs in place needs
+  // no update: its folder is the managed checkout, already at the new version.
+  const canUpdateInPlace = staleVersion && enabled && sourceMatches && !installed.readFromFolder;
 
   return { ok: errors.length === 0, installed, errors, refusesDowngrade, staleVersion, canUpdateInPlace, sourcePath, sourceIdentity };
 }

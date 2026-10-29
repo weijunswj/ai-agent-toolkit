@@ -26,6 +26,7 @@ const { ClaudeHelperDefinitions } = require('./toolkit-claude-helper-agents.cjs'
 const { GlobalRules, describeResult: describeGlobalRules } = require('./toolkit-global-rules.cjs');
 const { ClaudeSubagentDepthSetting, SETTING: DEPTH_SETTING, STATES: DEPTH } = require('./toolkit-claude-subagent-depth.cjs');
 const { ToolkitEnv } = require('./toolkit-env.cjs');
+const { accountCopyBehind } = require('./toolkit-claude-account-copy.cjs');
 
 const STATUS = Object.freeze({ PASSED: 'passed', RESTART: 'restart-required', ACTION: 'action-required' });
 const RECORDED_SOURCES = Object.freeze(['claude-plugin', 'repo']);
@@ -180,8 +181,7 @@ class ToolkitInstallHealthCheck {
     if (!account) return null;
     const label = 'Claude app account copy';
     if (compareVersions(account, this.#expectedVersion) >= 0) return this.#check('account-plugin', label, STATUS.PASSED, `Your claude.ai account copy of Toolkit is current (${account}).`);
-    return this.#check('account-plugin', label, STATUS.PASSED,
-      `Your claude.ai account copy of Toolkit is ${account}; this computer has ${this.#expectedVersion}. The Claude app runs the account copy, and claude.ai updates it from Toolkit's main branch: check that Sync automatically is on for the ai-agent-toolkit marketplace in claude.ai, and if the copy stays behind, remove that marketplace and add it again.`);
+    return this.#check('account-plugin', label, STATUS.PASSED, accountCopyBehind(account, this.#expectedVersion));
   }
 
   #check(id, label, status, summary, action = '') {

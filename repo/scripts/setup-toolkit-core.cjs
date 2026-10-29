@@ -18,7 +18,8 @@ const { OfficialN8nSkills, installSummary: n8nSkillsSummary } = require('./toolk
 const { disableUserPlugin, registrySourceEvidence } = require('./setup-claude-toolkit-plugin.cjs');
 const { AntigravityGlobalSkills, globalCopySummary } = require('./toolkit-antigravity-project-skills.cjs');
 const { CodexHelperDefinitions, describeSetupResult: describeCodexHelpers } = require('./toolkit-codex-helper-agents.cjs');
-const { STATUS: INSTALL_CHECK_STATUS } = require('./toolkit-install-health.cjs');
+const { STATUS: INSTALL_CHECK_STATUS, claudeAccountPluginFolders, claudeAccountToolkitVersion } = require('./toolkit-install-health.cjs');
+const { claudeAppCopyLine } = require('./toolkit-claude-account-copy.cjs');
 const { GlobalRules } = require('./toolkit-global-rules.cjs');
 const { defineCodexSetup } = require('./setup-core-codex.cjs');
 const { defineClaudeSetup } = require('./setup-core-claude.cjs');
@@ -3685,7 +3686,8 @@ function printFinalSummary({ args, current, managed, localClone, nativeCache, de
     console.log(`Claude manifest Toolkit version: ${unknown(nativeCache.manifest_version)}`);
     console.log(`Claude plugin status: ${unknown(nativeCache.status)}`);
     if (nativeCache.scope) console.log(`Claude plugin install scope: ${nativeCache.scope}`);
-    console.log(`Claude plugin updated this run: ${yesNo(nativeCache.updated_this_run === true)}`);
+    console.log(`Claude Code in a terminal: ${unknown(nativeCache.manifest_version)} (runs from this PC's Toolkit folder)`);
+    console.log(`Claude app: ${claudeAppCopyLine(claudeAccountToolkitVersion(claudeAccountPluginFolders()), nativeCache.manifest_version)}`);
     console.log(`Claude new session needed: ${yesNo(nativeCache.restart_required === true)}`);
     console.log(`Claude hook trust action: ${unknown(nativeCache.hook_trust_action || 'none')}`);
   } else {

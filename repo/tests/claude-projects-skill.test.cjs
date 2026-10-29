@@ -52,7 +52,7 @@ test('no plugin payload or skills folder reaches the Projects controller skill',
 
 test('Projects wires managed instructions, promises and fresh scheduled sessions to controller law', () => {
   const text = bundle();
-  assert.match(text, /^Version: 2026-10-29\.6$/m);
+  assert.match(text, /^Version: 2026-10-29\.7$/m);
   // Gate launches name their gate and route; setup writes the GATE ROUTE line the launch hook reads.
   assert.ok(text.includes('`GATE ROUTE: profile <profile> placement <remote_control|cloud|any> [folder <path>]`'));
   assert.match(text, /\*\*Gate launches carry a Gate line and their route\.\*\* Every thread brief that names a gate carries one line `Gate: <value>`/);
@@ -65,7 +65,7 @@ test('Projects wires managed instructions, promises and fresh scheduled sessions
   assert.match(text, /If you could not post a due card, or with neither marker and no "drift unverified", tell the owner once per Version to re-upload the skill with its reference files\./);
   assert.match(text, /Fresh-session scheduled runs resolve their own run thread after delivery, except a check-in run that posted a skill card;/);
   assert.match(text, /each fresh scheduled run resolves its own thread after report delivery, except a check-in run that posted a skill card\./);
-  // Plugin lag: removing the plugin alone is the fix that worked; the marketplace re-add is the fallback.
+  // Plugin lag: Check for updates first, then removing the plugin alone, then the marketplace re-add, then an app restart.
   assert.match(text, /`PLUGIN BEHIND`: the Toolkit plugin on the user's claude\.ai account is more than a day behind `main`/);
   // One card each where the owner reads: the coordinator posts a due or failed skill card in the project chat, and one plugin card.
   assert.match(text, /With "card due" or "card failed", load propose_skills \(ToolSearch\) and post the card yourself in the project chat \(kind improvement, target and name web-controller-projects, description from main's frontmatter; skillMd main's SKILL\.md read byte for byte\), never with SKILL DRIFT, and link it in the pending item\./);
@@ -77,7 +77,9 @@ test('Projects wires managed instructions, promises and fresh scheduled sessions
   assert.match(text, /`SKILL DRIFT`: the account copy has direct edits that match no Toolkit revision\. Bring them into Toolkit from the saved copy/);
   assert.match(text, /Post its first line to the owner every run, "nothing changed" included/);
   assert.match(text, /The hourly nudge stays silent/);
-  assert.match(text, /in claude\.ai Customize > Plugins, remove the Toolkit plugin only and let it reinstall; if it is still behind, select Check for updates on its marketplace; last, remove the marketplace and add it again with Sync automatically on/);
+  // The steps live once, in the check-in (toolkit-projects-tasks.test.cjs keeps them equal to Toolkit's shared Claude app steps).
+  assert.match(text, /post one plugin card in the project chat with the check-in's steps, the four numbered steps it puts under \*\*Plugin:\*\*, copied as written\./);
+  assert.doesNotMatch(text, /remove the Toolkit plugin only and let it reinstall/);
   assert.doesNotMatch(text, /Thread effort follows the role|fires into that same thread|firing runs in the dedicated check-in thread/);
   assert.match(text, /toolkit-projects-instructions\.cjs --render/);
   assert.match(text, /toolkit-projects-instructions\.cjs --check <file>/);
