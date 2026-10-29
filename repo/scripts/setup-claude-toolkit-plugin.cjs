@@ -251,6 +251,7 @@ function validateInstalledEnforcement(installed, repoRoot, expectedVersion) {
     ['repo/scripts/toolkit-claude-attribution-hook.cjs', false],
     ['repo/scripts/toolkit-claude-project-post-hook.cjs', false],
     ['repo/scripts/toolkit-claude-project-gate-route-hook.cjs', false],
+    ['repo/scripts/toolkit-claude-project-skill-card-hook.cjs', false],
     ['repo/scripts/toolkit-attribution-guard.cjs', false],
     ['repo/scripts/toolkit-push-check.cjs', false],
     ['skills/secure-ci-cd/scripts/secret-patterns.cjs', false],

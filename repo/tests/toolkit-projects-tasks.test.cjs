@@ -388,18 +388,24 @@ test('the check-in carries every prefix in the fixed order and checks both Toolk
     'every run reaches the owner as one line', 'swaps each named Toolkit task from the template on main the same turn']) {
     assert.ok(text.includes(required), required);
   }
-  // The check-in posts the skill update card itself, once per main Version, and never over direct account edits.
-  for (const required of ['SKILL CARD: post one skill update card only when all of these hold', 'never on SKILL DRIFT: a card would overwrite direct edits',
+  // A due card is named once per main Version, never over direct account edits, and sent by the coordinator's card thread, never by the check-in.
+  for (const required of ['SKILL CARD: a skill update card is due only when all of these hold', 'never on SKILL DRIFT: a card would overwrite direct edits',
     'the account folder is under 26 hours old', 'every account reference/*.md is absent or equal to main', 'state.md records no "card <main Version>"',
-    'Otherwise call propose_skills', 'skillMd main\'s SKILL.md byte for byte', 'even when state.md already reported this Version',
-    ', card posted', 'fails or is skipped for any other reason', ', card failed: <reason>', 'tap Save on the skill card',
-    'A reference file missing from the account is not drift', 'straight after the call and read it back', 'SKILL BEHIND (carried forward while still seen)', 'every "card <Version>" record (this run\'s and all earlier ones, carried forward)']) {
+    'This check-in never calls propose_skills and never builds the card', '"SKILL BEHIND: <account> -> <main>, card due | "', 'even when state.md already reported this Version',
+    'the coordinator sends it from a fresh skill card thread (main\'s reference/skill-card.md)', 'tap Save on the skill card',
+    'A reference file missing from the account is not drift', 'Record "card <main Version>" in state.md and read it back', 'SKILL BEHIND (carried forward while still seen)', 'every "card <Version>" record (this run\'s and all earlier ones, carried forward)']) {
     assert.ok(text.includes(required), required);
   }
-  // Drift needs the full history (and a failed fetch never reports drift), plugin lag shows every run and is reported once per main version,
-  // and a coordinator that posts skill cards itself gets "card due" instead of a second card.
+  assert.doesNotMatch(text, /call propose_skills:|card posted|skill cards: coordinator|card failed/);
+  // The Skill line compares the saved copy with main in the card thread's terms, and a cut-short or escaped copy is a damaged card, not direct edits.
+  for (const required of ['The **Skill:** line always names the account SKILL.md\'s byte size and sha256 next to main\'s, both normalised the same way.',
+    'is the start of a revision\'s (cut short), or that holds `&lt;`, `&gt;`, `&amp;` or `&quot;` where that revision has none (HTML-escaped), is a damaged card, not direct edits',
+    '"SKILL DRIFT: damaged card, <files>, copy: <path> | "']) {
+    assert.ok(text.includes(required), required);
+  }
+  // Drift needs the full history (and a failed fetch never reports drift), and plugin lag shows every run and is reported once per main version.
   for (const required of ['`git -C TK fetch --unshallow` once and hash every revision again', 'If that fetch fails, report no SKILL DRIFT and post no card',
-    '"drift unverified: unshallow failed: <error>"', 'When memory has the line "skill cards: coordinator", do not call propose_skills: write ", card due"',
+    '"drift unverified: unshallow failed: <error>"',
     'Equal: "**Plugin:** current (<version>)"', 'take the newest commit whose plugin.json has the account version; main moved past it at the next newer commit',
     'use the oldest commit whose version is above the account\'s', 'age unverified: unshallow failed: <error>" and no prefix, and name it on the first line as stuck', 'Under 24 hours ago: name both versions and that commit under **Plugin:**',
     'unless state.md has "plugin behind <main version>"', 'its "plugin behind <version>" record', 'No agent can update the plugin',
@@ -408,9 +414,9 @@ test('the check-in carries every prefix in the fixed order and checks both Toolk
     'Omit empty bullets except Skill, Block, Binding, Tasks, Nudge, Plugin and Run.']) {
     assert.ok(text.includes(required), required);
   }
-  assert.doesNotMatch(text, /skip the resolve in DELIVERY/, 'bound runs never resolve, so no fresh-only card line');
+  // The check-in holds no card, so no run of it, bound or fresh, keeps its thread open for one.
   const freshCheckIn = tasks().render('daily-check-in', validateParams('daily-check-in', { ...PARAMS['daily-check-in'], session: 'fresh' }));
-  assert.match(freshCheckIn, /When this run posted a card, skip the resolve in DELIVERY: a resolved thread hides the card\./);
+  for (const rendered of [text, freshCheckIn]) assert.doesNotMatch(rendered, /skip the resolve in DELIVERY|posted a card/);
   // Both Toolkit tasks are bound now, so a bound check-in is never its own gap.
   assert.doesNotMatch(text, /the check-in runs a fresh session per run/);
   assert.match(text, /bound-session or fresh-session when that differs from the entry/);
