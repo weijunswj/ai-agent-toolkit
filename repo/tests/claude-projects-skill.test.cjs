@@ -52,7 +52,7 @@ test('no plugin payload or skills folder reaches the Projects controller skill',
 
 test('Projects wires managed instructions, promises and fresh scheduled sessions to controller law', () => {
   const text = bundle();
-  assert.match(text, /^Version: 2026-10-29\.4$/m);
+  assert.match(text, /^Version: 2026-10-29\.5$/m);
   // Gate launches name their gate and route; setup writes the GATE ROUTE line the launch hook reads.
   assert.ok(text.includes('`GATE ROUTE: profile <profile> placement <remote_control|cloud|any> [folder <path>]`'));
   assert.match(text, /\*\*Gate launches carry a Gate line and their route\.\*\* Every thread brief that names a gate carries one line `Gate: <value>`/);
@@ -192,6 +192,9 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.equal((text.match(/&nbsp;/g) || []).length, 1, 'only the Update log lines take an &nbsp; spacer');
   assert.ok(text.includes('Choices need no link of their own unless they name a PR, thread or file.'));
   assert.ok(text.includes('refuses any edit of a post the owner has written after (post fresh instead)'));
+  // The hook cannot read the chat, so it uses the session's own reads of it and counts queued owner messages.
+  assert.ok(text.includes('after a project chat read that reaches the last page, a newest top-level post of yours (one an earlier session wrote included) is the post to edit'));
+  assert.ok(text.includes('Owner messages that arrive while a turn runs count as soon as they are queued.'));
   assert.doesNotMatch(text, /put at most one \*\*Question:\*\* in a post|Use decision cards for questions, else group/);
   assert.ok(text.includes('an edit keeps every earlier Update line word for word and adds at least one new one'));
   assert.ok(text.includes('the post hook refuses a PR merge (`gh pr merge`, a `gh api` merge call or a merge tool) until a line in one of that session\'s own posts or edits says "external effects" and names the PR'));

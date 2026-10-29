@@ -2,7 +2,7 @@
 
 ## 3.19.0 (Windows scheduled tasks)
 
-**Update every computer that reads this repository's binding.** The binding now carries `schedule_folder`, and an older Toolkit copy reads a binding with an unknown key as invalid, so it shows governance as ERROR and holds governed writes until it updates. Update with `setup toolkit`. Upload the Projects controller skill again too: it is now version 2026-10-29.4.
+**Update every computer that reads this repository's binding.** The binding now carries `schedule_folder`, and an older Toolkit copy reads a binding with an unknown key as invalid, so it shows governance as ERROR and holds governed writes until it updates. Update with `setup toolkit`. Upload the Projects controller skill again too: it is now version 2026-10-29.5.
 
 ### Scheduled tasks
 
@@ -13,6 +13,12 @@
 - **Setup:** on Windows, setup lists each task with its folder, name, schedule, purpose and state. It never creates one: when a task needs creating or updating, it prints one PowerShell line for you to paste, which registers the tasks and runs the programme sweep once, starting it again if a closing console stopped it. `setup-toolkit.cjs --remove-toolkit-tasks` removes only Toolkit's own tasks, then the folder when it is empty.
 - **List every task:** `toolkit-tasks.cjs [--json]` lists Windows tasks live, Claude Code desktop tasks by name and description, and Codex and cloud tasks from the registry (`~/.ai-agent-toolkit/user-state/tasks.json`), saying where each row was read. `--record` and `--forget` keep cloud tasks in the registry; `toolkit-windows-tasks.cjs adopt` records a task you made yourself, which Toolkit never changes.
 - **Projects skill:** on a Windows device the programme sweep is the Windows task, and "list my tasks" merges the project's own list with the device's list.
+
+## 3.18.2 (the project chat's newest post is the one to edit)
+
+- **Projects post hook (skill version 2026-10-29.4, upload it again):** a hook cannot read the project chat, so in the main project chat it now uses the session's own reads of it. After a project chat read that reaches the last page, the newest top-level message decides: when it is the coordinator's own post (not a card), even one an earlier session wrote, and no owner message the session saw (a reply in a thread included) came after it, a fresh post is refused and the refusal names that post to edit with an **[HH:MM] Update:** line, and the post is then checked like the session's own (edits keep its Update lines, and a later owner message closes it to edits), unless the read's copy is near the 8 KB limit and may have been cut short, in which case the post is left untracked and a fresh post passes; when it is the owner's message, the owner counts as having written, so the session posts fresh and earlier posts stay closed to edits. Work-thread sessions (started by a spawn relay, or whose posts land in a thread) skip these reads. Replies under a post, cards and thread launches are not checked by this rule.
+- **Queued owner messages:** an owner message that arrives while a turn runs is recorded first as a queued entry and may never appear as a prompt of its own. The hook now counts it as soon as it is queued, so it never asks for an edit that would land above that message.
+- **Still not seen:** a coordinator session that has neither posted nor read the chat to its last page has nothing to go on, so its first fresh post passes as before. A live check would need the host to hand the chat's newest message to the hook, or a hook that can call the chat-reading tool.
 
 ## 3.18.1 (shorter review rounds)
 
