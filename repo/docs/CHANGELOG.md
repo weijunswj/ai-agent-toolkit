@@ -1,12 +1,25 @@
 # Toolkit Changelog
 
-## 3.18.1 (security alert cleanup and Dependabot action updates)
+## 3.18.3 (security alert cleanup and Dependabot action updates)
 
 - **CI drift guard:** a Dependabot update to a pinned action in `validate.yml` now passes when only the commit SHA and `# vX.Y.Z` version comment change and the action name stays the same. A different action, a tag or short ref, a missing version comment or any other edit to the file is still refused. The guard's tests find the pins in the live file and rerun every drift case with each pinned action updated, so the whole test run passes on such an update too. The portable sharding playbook says the same.
 - **Personal-data guard config:** Dependabot's public sign-off address is on the role address allow list, so its commit trailers no longer fail the check. Other addresses at the same domain still block.
 - **Action pins:** `setup-python` 7.1.0, `upload-artifact` 7.0.2 and `download-artifact` 8.0.2, each pinned to its verified tag commit.
 - **Dependencies:** the test-only `fast-uri` package is locked at 3.1.9, which fixes four advisories.
 - **Tests:** two test assertions escape every value they put into a regular expression, so they check the exact text instead of matching any character where a dot was meant.
+
+## 3.18.2 (the project chat's newest post is the one to edit)
+
+- **Projects post hook (skill version 2026-10-29.4, upload it again):** a hook cannot read the project chat, so in the main project chat it now uses the session's own reads of it. After a project chat read that reaches the last page, the newest top-level message decides: when it is the coordinator's own post (not a card), even one an earlier session wrote, and no owner message the session saw (a reply in a thread included) came after it, a fresh post is refused and the refusal names that post to edit with an **[HH:MM] Update:** line, and the post is then checked like the session's own (edits keep its Update lines, and a later owner message closes it to edits), unless the read's copy is near the 8 KB limit and may have been cut short, in which case the post is left untracked and a fresh post passes; when it is the owner's message, the owner counts as having written, so the session posts fresh and earlier posts stay closed to edits. Work-thread sessions (started by a spawn relay, or whose posts land in a thread) skip these reads. Replies under a post, cards and thread launches are not checked by this rule.
+- **Queued owner messages:** an owner message that arrives while a turn runs is recorded first as a queued entry and may never appear as a prompt of its own. The hook now counts it as soon as it is queued, so it never asks for an edit that would land above that message.
+- **Still not seen:** a coordinator session that has neither posted nor read the chat to its last page has nothing to go on, so its first fresh post passes as before. A live check would need the host to hand the chat's newest message to the hook, or a hook that can call the chat-reading tool.
+
+## 3.18.1 (shorter review rounds)
+
+- **Gate rules:** a G0 plan now splits the work into small slices, one reviewable PR each, with acceptance tests (action, expected result, test file). Before review, the builder checks its own diff against the G2 review section in the same session and notes the result in the PR; this replaces no review. Reviewers rate findings High, Medium or Low: High and Medium block exactly as before, and Low never blocks and goes into one follow-up record per PR. A recheck after a failed review reads the fix commits, the findings they close and the rules they depend on, and widens to the whole diff only where a fix reaches beyond them. The gate rules size cap rose from 10,500 to 11,000 bytes to hold this.
+- **Controller:** findings map to ship blocker (High or Medium) and follow-up (Low). A small fix found mid-lane joins the lane's next slice not yet in review instead of its own PR, unless it repairs the default branch or a safety-floor gap or unblocks other work; the slice takes its highest risk tier. Four sentences that repeated other rules were removed.
+- **Projects skill (version 2026-10-29.3, upload it again):** G1 briefs ask for the builder's self-check result, recheck briefs name the fix commits and the findings they close, small fixes go into the next slice's brief unless the controller's batching rule lets them go alone, and Low findings are relayed as one follow-up line.
+- **Delivery contract:** Low findings are either a follow-up or a Later or optional outcome, and publication is tracked as its own state.
 
 ## 3.18.0 (programme attention)
 

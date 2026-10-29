@@ -1,11 +1,11 @@
 # Toolkit Gate Rules
 
-The gate playbook: G0, G1 and G2 sessions, reviewers and the controllers that launch them read it before starting. The global rules hold the risk tiers, the safety floor and everything every session needs; this file holds the gate mechanics. Repository rules still win on conventions, and nothing here relaxes the safety floor.
+The gate playbook: G0, G1 and G2 sessions, reviewers and their controllers read it first. The global rules hold the risk tiers, the safety floor and everything every session needs; this file holds the gate mechanics. Repository rules still win on conventions, and nothing here relaxes the safety floor.
 
 ## Gate order
 
-- **G0 Discovery** runs for every new task, repository or environment; only LIGHT edits and fixes inside an already-discovered task skip it. Walk the real happy path, find out what the stack really is (an app built in Flutter, for example, breaks browser automation such as Playwright) and test assumptions before planning. It can be short when the ground is already known. It returns the G0 plan: findings, chosen approach, acceptance, risks, and what was tried and failed.
-- **G1 Builder** starts in a fresh session, with the G0 plan passed in its brief as the handoff. G0 and G1 share the same strong lead route. One builder owns the whole approved outcome across corrections, checkpoints and fresh sessions; in-scope fixes need no new admission. G1 includes UAT.
+- **G0 Discovery** runs for every new task, repository or environment; only LIGHT edits and fixes inside an already-discovered task skip it. Walk the real happy path, find out what the stack really is (an app built in Flutter, for example, breaks browser automation) and test assumptions before planning. It can be short on known ground. It returns the G0 plan: findings, chosen approach, risks, what was tried and failed, and small slices (one reviewable PR each) with acceptance tests (action, expected result, test file).
+- **G1 Builder** starts in a fresh session, with the G0 plan passed in its brief as the handoff. G0 and G1 share the same strong lead route. One builder owns the whole approved outcome across corrections, checkpoints and fresh sessions; in-scope fixes need no new admission. G1 includes UAT. Before review, the builder self-checks its diff against the G2 review section in the same session, fixes what it finds and notes it in the PR; this replaces no review.
 - **Review** follows the tier: full G2 for RISKY, one independent review for NORMAL, the builder's own diff read for LIGHT.
 - Gate names `G0`, `G1` and `G2` are fine where the reader needs them.
 
@@ -36,7 +36,7 @@ A gate works in the primary checkout unless it needs its own worktree, then uses
 
 ## G2 review
 
-G2 starts after the working result and any owner UAT acceptance, in fresh independent contexts, and has no helpers. The pinned stack fixes the reviewer set (no added peer, duplicate or automatic closing panel), and every reviewer independently reviews the full accepted scope. Acceptance needs the whole roster, qualified routes, the exact candidate and coverage, verified evidence and no unresolved blocking finding, never a majority verdict or a scope/execution split. G2 stays adversarial on every reachable path inside the frozen supported host/environment matrix and agreed invariants. Reviewers block only on gaps that break an agreed criterion or the safety floor, or on an unexplained loosening (below); everything else is optional and never blocks. G2 scans every commit, title and body of a PR for personal data, and checks where a computation ran before accepting that data stayed in place. No review has a dollar cap.
+G2 starts after the working result and any owner UAT acceptance, in fresh independent contexts, and has no helpers. The pinned stack fixes the reviewer set (no added peer, duplicate or automatic closing panel), and every reviewer independently reviews the full accepted scope. Acceptance needs the whole roster, qualified routes, the exact candidate and coverage, verified evidence and no unresolved blocking finding, never a majority verdict or a scope/execution split. G2 stays adversarial on every reachable path inside the frozen supported host/environment matrix and agreed invariants. Reviewers rate findings: High breaks an agreed criterion or the safety floor; Medium is a plausible supported-path break, missing needed proof or an unexplained loosening (below); both block. Low is anything else, never blocks and joins one follow-up record per PR. G2 scans every commit, title and body of a PR for personal data, and checks where a computation ran before accepting that data stayed in place. No review has a dollar cap.
 
 - **No-weakening proof:** for changed detection or guard code, run base tests and fixtures on the head; each case blocked or flagged on base and now allowed needs a stated reason.
 - **Early returns keep the guards:** every early return or fast path in changed code must still run the generic guards first (identity, path, secret, personal-data, approval), or show they are not needed, with a test.
@@ -45,8 +45,7 @@ G2 starts after the working result and any owner UAT acceptance, in fresh indepe
 
 - Before the first fix of a security finding, list every route to the same invariant and fix them together, with positive and negative controls.
 - After a G2 PASS, a delta G2 runs when a new edit touches a RISKY path or changes behaviour the review relied on. Each delta G2 covers the whole diff since the last PASS, and rechecks target corrected boundary families rather than restarting discovery. Before merge to the default branch, any RISKY change no G2 has seen gets one.
-- Correction rechecks use fresh contexts for the same selected reviewers unless a specific reviewer must be replaced. A same-family recheck is readmitted only on a closed family-closure record evaluated against the exact corrected candidate; a passing latest reproducer is not enough, and after two NOT PASSED rechecks of one family a consolidated root-cause reassessment comes first.
-- Keep functional, UAT, review, custody, integration, publication, Core and parent states distinct.
+- Correction rechecks use fresh contexts for the same selected reviewers unless a specific reviewer must be replaced, and review the fix commits, closed findings and dependent invariants, widening to the whole diff only where a fix reaches beyond them. A same-family recheck is readmitted only on a closed family-closure record evaluated against the exact corrected candidate; a passing latest reproducer is not enough, and after two NOT PASSED rechecks of one family a consolidated root-cause reassessment comes first.
 
 ## Routes
 
