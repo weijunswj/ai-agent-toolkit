@@ -59,15 +59,16 @@ function fakeRepo(ctx, name, { remote = `https://github.com/example-owner/${name
   return repo;
 }
 
-// Writes this computer's cache entry as a refresh would.
-function cache(ctx, repo, { status = 'present', binding = v2(), text = undefined, ageMs = 0 } = {}) {
+// Writes this computer's cache entry as a refresh would, `ageMs` before `at`. Checks that read the
+// real clock (no `now` to inject) pass `at: new Date()`, so the entry's age never drifts with the date.
+function cache(ctx, repo, { status = 'present', binding = v2(), text = undefined, ageMs = 0, at = NOW } = {}) {
   const identity = governance.readIdentity(repo);
   // Each fixture repository has its own origin; a binding naming the example slug is written for it.
   const own = binding && binding.repository === SLUG ? { ...binding, repository: governance.remoteSlug(identity.remote) } : binding;
   const body = status === 'present' ? (text !== undefined ? text : JSON.stringify(own)) : null;
   return bindingCache.writeCache(ctx.registryPath, {
     schema: bindingCache.CACHE_SCHEMA, repository_id: identity.repository_id, remote: identity.remote.canonical,
-    default_branch: 'main', commit: 'a'.repeat(40), fetched_at: new Date(NOW.getTime() - ageMs).toISOString(), status,
+    default_branch: 'main', commit: 'a'.repeat(40), fetched_at: new Date(at.getTime() - ageMs).toISOString(), status,
     bytes_sha256: body === null ? null : crypto.createHash('sha256').update(body, 'utf8').digest('hex'), text: body, problem: null,
   });
 }
@@ -561,11 +562,13 @@ test('C: old local answers are read and annotated, never rewritten', (t) => {
 test('D: consumers read ENABLED, DISABLED, ERROR and stale the same way', (t) => {
   const ctx = scratch(t);
   const make = (name, setup) => { const repo = fakeRepo(ctx, name, { remote: `https://github.com/example-owner/${name}.git` }); setup(repo); return repo; };
+  // These consumers read the real clock, so the cache ages are measured from it.
+  const at = new Date();
   const repos = {
-    enabled: make('d-enabled', repo => cache(ctx, repo, { binding: v2({ repository: 'example-owner/d-enabled' }) })),
-    disabled: make('d-disabled', repo => cache(ctx, repo, { binding: { schema: 'toolkit.programme-binding.v2', repository: 'example-owner/d-disabled', governance: 'disabled' } })),
-    error: make('d-error', repo => cache(ctx, repo, { text: '{bad' })),
-    stale: make('d-stale', repo => cache(ctx, repo, { binding: v2({ repository: 'example-owner/d-stale' }), ageMs: 30 * 24 * HOUR })),
+    enabled: make('d-enabled', repo => cache(ctx, repo, { binding: v2({ repository: 'example-owner/d-enabled' }), at })),
+    disabled: make('d-disabled', repo => cache(ctx, repo, { binding: { schema: 'toolkit.programme-binding.v2', repository: 'example-owner/d-disabled', governance: 'disabled' }, at })),
+    error: make('d-error', repo => cache(ctx, repo, { text: '{bad', at })),
+    stale: make('d-stale', repo => cache(ctx, repo, { binding: v2({ repository: 'example-owner/d-stale' }), ageMs: 30 * 24 * HOUR, at })),
   };
   const gate = new GovernanceGate({ registryOptions: ctx.opts });
   const expect = {
