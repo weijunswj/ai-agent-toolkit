@@ -14,7 +14,8 @@ const processLaunch = require('./claude-process-launch.cjs');
 const { ClaudeSubagentDepthSetting } = require('./toolkit-claude-subagent-depth.cjs');
 const { ClaudeUserSettings, STATES: CLAUDE_SETTINGS_STATES } = require('./toolkit-claude-user-settings.cjs');
 const { ClaudeHelperDefinitions } = require('./toolkit-claude-helper-agents.cjs');
-const { ToolkitInstallHealthCheck, claudeAccountPluginFolders } = require('./toolkit-install-health.cjs');
+const { ToolkitInstallHealthCheck } = require('./toolkit-install-health.cjs');
+const { claudeAccountPluginFolders } = require('./toolkit-claude-account-copy.cjs');
 const { ToolkitEnv } = require('./toolkit-env.cjs');
 const { CodexToolkitInstall } = require('./toolkit-codex-install-state.cjs');
 

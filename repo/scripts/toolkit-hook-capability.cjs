@@ -48,7 +48,7 @@ function claudeCodeHooks({ environment, homeDir, registry = null, blockers = nul
 // null. Read only, from the app's plugin manifests (see toolkit-install-health.cjs).
 function accountHookCopy(environment) {
   let folders = [];
-  try { folders = require('./toolkit-install-health.cjs').claudeAccountPluginFolders(environment); } catch { return null; }
+  try { folders = require('./toolkit-claude-account-copy.cjs').claudeAccountPluginFolders(environment); } catch { return null; }
   // Each folder on its own: one without a readable manifest never hides a later one.
   for (const folder of folders) {
     let manifest;

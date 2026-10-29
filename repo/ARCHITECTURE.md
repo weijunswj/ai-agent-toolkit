@@ -29,7 +29,7 @@ Last reviewed against `main` `37877aedbadfc2baf1f70c2e6b9f2281430174b8`.
 | Setup (`setup toolkit`) | `repo/scripts/setup-toolkit.cjs`, `repo/scripts/setup-toolkit-core.cjs` (shared core), `repo/scripts/setup-core-claude.cjs`, `repo/scripts/setup-core-codex.cjs` |
 | Native plugin install | `repo/scripts/setup-claude-toolkit-plugin.cjs`, `repo/scripts/setup-codex-toolkit-plugin.cjs` |
 | Session-start hooks and bridge | `repo/scripts/toolkit-local-bridge.cjs`, `repo/scripts/toolkit-codex-session-start.cjs` |
-| Install check | `repo/scripts/toolkit-install-health.cjs`; Codex's Toolkit state, read from the Codex files only, in `repo/scripts/toolkit-codex-install-state.cjs` |
+| Install check | `repo/scripts/toolkit-install-health.cjs`, `repo/scripts/toolkit-claude-account-copy.cjs` (the Claude app copy steps, shared with the session-start reminder and the daily check-in); Codex's Toolkit state, read from the Codex files only, in `repo/scripts/toolkit-codex-install-state.cjs` |
 | Keys and tokens (`toolkit env`) | `repo/scripts/toolkit-env.cjs`, `repo/scripts/toolkit-env-store.cjs`, `repo/scripts/toolkit-env-feeders.cjs` |
 | Global rules installer | `repo/scripts/toolkit-global-rules.cjs` |
 | Managed marker format | `repo/scripts/toolkit-managed-block.cjs` |

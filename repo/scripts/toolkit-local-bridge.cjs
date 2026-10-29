@@ -20,6 +20,7 @@ const {
 const { copyPortableSkills } = require('./toolkit-antigravity-project-skills.cjs');
 const { ClaudePluginRegistry } = require('./toolkit-claude-plugin-registry.cjs');
 const { samePath } = require('./toolkit-canonical-path.cjs');
+const { accountCopyBehind, claudeAccountPluginFolders } = require('./toolkit-claude-account-copy.cjs');
 const { GlobalRules, describeResult: describeGlobalRules } = require('./toolkit-global-rules.cjs');
 const { TOOLKIT_VERSION } = require('./toolkit-version.cjs');
 
@@ -2895,6 +2896,40 @@ function newerWorkspaceToolkit(runningRoot, start = process.env.CLAUDE_PROJECT_D
   return null;
 }
 
+// Whether the running copy is the Claude desktop app's copy from the user's claude.ai account (a
+// plugin folder inside one of the app's account-plugin folders) and older than this PC's managed
+// checkout. Reads two plugin.json files only. Returns { reminder } when the account copy is older,
+// { context } when it could not compare, and {} otherwise (a --plugin-dir test copy, a cloud
+// session, or a current account copy).
+// `app` is true for any copy inside those folders.
+function claudeAppCopyStatus(runningRoot, managedCheckout, environment = process.env) {
+  if (!claudeAccountPluginFolders(environment).some((folder) => samePath(path.dirname(runningRoot), folder))) return {};
+  const versionAt = (dir) => {
+    try {
+      const { version } = JSON.parse(fs.readFileSync(path.join(dir, '.claude-plugin', 'plugin.json'), 'utf8'));
+      return isValidBridgeVersion(version) ? version : '';
+    } catch { return ''; }
+  };
+  const account = versionAt(runningRoot);
+  const local = managedCheckout ? versionAt(managedCheckout) : '';
+  if (!account || !local) {
+    const missing = !account ? 'this copy has no readable version' : (managedCheckout ? `the Toolkit folder ${slash(managedCheckout)} has no readable version` : 'no Toolkit folder is recorded on this PC');
+    return { app: true, context: `Toolkit: could not compare this claude.ai copy with this PC's Toolkit (${missing}), so no update reminder is shown.` };
+  }
+  if (compareBridgeVersions(account, local) >= 0) return { app: true };
+  return { app: true, reminder: accountCopyBehind(account, local) };
+}
+
+// The Codex line for a Claude app chat (the one the terminal install check prints), against this
+// PC's managed checkout; '' when there is nothing to say or it cannot be read. Files only.
+function codexReminderFor(managedCheckout, environment = process.env) {
+  if (!managedCheckout) return '';
+  try {
+    const { CodexToolkitInstall, codexReminderLine } = require('./toolkit-codex-install-state.cjs');
+    return codexReminderLine(new CodexToolkitInstall({ codexHome: environment.CODEX_HOME || path.join(os.homedir(), '.codex'), managedRoot: managedCheckout }).read());
+  } catch { return ''; }
+}
+
 function codexNativePluginCacheStatus(args, state) {
   if (!args.hook || args.syncSource !== 'codex-plugin') return { status: '' };
   if (!state.repo_path) return { status: '' };
@@ -3424,9 +3459,22 @@ class LocalBridgeRun {
     const root = runtimeClaudePluginRoot();
     const managedCheckout = normalizedState(readJsonIfExists(path.join(args.hub || defaultHubPath(), 'state.json'))).repo_path;
     if (managedCheckout && samePath(root, managedCheckout) && new ClaudePluginRegistry().isRunningCopy(root)) return false;
-    console.log(`Toolkit: this session runs an uninstalled Toolkit copy (${slash(root)}); session-start maintenance is skipped and nothing is recorded.`);
+    const lines = [`Toolkit: this session runs an uninstalled Toolkit copy (${slash(root)}); session-start maintenance is skipped and nothing is recorded.`];
     const newer = newerWorkspaceToolkit(root);
-    if (newer) console.log(`Toolkit: this copy is ${BRIDGE_VERSION}, older than the ${newer.version} in the Toolkit repository at ${slash(newer.root)}, so safety hooks added since then do not run in this session. Ask the owner to refresh the account's Toolkit plugin copy.`);
+    if (newer) lines.push(`Toolkit: this copy is ${BRIDGE_VERSION}, older than the ${newer.version} in the Toolkit repository at ${slash(newer.root)}, so safety hooks added since then do not run in this session. Ask the owner to refresh the account's Toolkit plugin copy.`);
+    const appCopy = claudeAppCopyStatus(root, managedCheckout);
+    if (appCopy.context) lines.push(appCopy.context);
+    // In a Claude app chat the Codex line (Codex runs an older Toolkit, or its Toolkit hooks are off)
+    // goes the same way as the app reminder.
+    const reminders = [appCopy.reminder, appCopy.app ? codexReminderFor(managedCheckout) : ''].filter(Boolean);
+    if (!reminders.length) {
+      for (const line of lines) console.log(line);
+      return true;
+    }
+    // Hook text on stdout reaches only the model, so each reminder goes to the owner twice over: in
+    // the hook's systemMessage, and as a context line asking the session to say it in its first reply.
+    for (const reminder of reminders) lines.push(`Toolkit update reminder for the owner: ${reminder} Say this reminder to the owner once, in your first reply.`);
+    console.log(JSON.stringify({ systemMessage: reminders.join('\n'), hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: lines.join('\n') } }));
     return true;
   }
 

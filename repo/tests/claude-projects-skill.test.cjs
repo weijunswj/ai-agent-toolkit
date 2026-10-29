@@ -52,7 +52,7 @@ test('no plugin payload or skills folder reaches the Projects controller skill',
 
 test('Projects wires managed instructions, promises and fresh scheduled sessions to controller law', () => {
   const text = bundle();
-  assert.match(text, /^Version: 2026-10-29\.7$/m);
+  assert.match(text, /^Version: 2026-10-29\.8$/m);
   // Gate launches name their gate and route; setup writes the GATE ROUTE line the launch hook reads.
   assert.ok(text.includes('`GATE ROUTE: profile <profile> placement <remote_control|cloud|any> [folder <path>]`'));
   assert.match(text, /\*\*Gate launches carry a Gate line and their route\.\*\* Every thread brief that names a gate carries one line `Gate: <value>`/);
@@ -78,7 +78,7 @@ test('Projects wires managed instructions, promises and fresh scheduled sessions
   // Setup compares the loaded Version with main's and starts the card thread when a card is due.
   assert.match(text, /State the skill Version you loaded and compare it with the Version line of main's SKILL\.md\. When main's is newer, have a read-only cloud thread compare the account copy with main as the daily check-in's SKILL DRIFT and SKILL CARD steps do; when a card would be due there, start a skill card thread \(`SKILL BEHIND` in the skill\) and carry on with step 1\./);
   assert.match(text, /the skill card waiting for Save \(with its thread link\) when one is, and the next work item\./);
-  // Plugin lag: removing the plugin alone is the fix that worked; the marketplace re-add is the fallback.
+  // Plugin lag: Check for updates first, then removing the plugin alone, then the marketplace re-add, then an app restart.
   assert.match(text, /`PLUGIN BEHIND`: the Toolkit plugin on the user's claude\.ai account is more than a day behind `main`/);
   // One plugin card where the owner reads.
   assert.match(text, /No agent can update it: once per version, post one plugin card in the project chat with the check-in's steps/);
@@ -88,7 +88,9 @@ test('Projects wires managed instructions, promises and fresh scheduled sessions
   assert.match(text, /`SKILL DRIFT`: the account copy has direct edits that match no Toolkit revision\. Bring them into Toolkit from the saved copy/);
   assert.match(text, /Post its first line to the owner every run, "nothing changed" included/);
   assert.match(text, /The hourly nudge stays silent/);
-  assert.match(text, /in claude\.ai Customize > Plugins, remove the Toolkit plugin only and let it reinstall; if it is still behind, select Check for updates on its marketplace; last, remove the marketplace and add it again with Sync automatically on/);
+  // The steps live once, in the check-in (toolkit-projects-tasks.test.cjs keeps them equal to Toolkit's shared Claude app steps).
+  assert.match(text, /post one plugin card in the project chat with the check-in's steps, the four numbered steps it puts under \*\*Plugin:\*\*, copied as written\./);
+  assert.doesNotMatch(text, /remove the Toolkit plugin only and let it reinstall/);
   assert.doesNotMatch(text, /Thread effort follows the role|fires into that same thread|firing runs in the dedicated check-in thread/);
   assert.match(text, /toolkit-projects-instructions\.cjs --render/);
   assert.match(text, /toolkit-projects-instructions\.cjs --check <file>/);

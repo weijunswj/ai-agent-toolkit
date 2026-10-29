@@ -14,6 +14,7 @@ const { spawnSync } = require('node:child_process');
 const test = require('node:test');
 const { BRIDGE_VERSION } = require('../scripts/toolkit-local-bridge.cjs');
 const { ClaudeHelperAgentRenderer } = require('../scripts/toolkit-claude-helper-agents.cjs');
+const { STEPS, STEPS_TEXT, accountCopyBehind } = require('../scripts/toolkit-claude-account-copy.cjs');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
@@ -59,9 +60,10 @@ function env(root, extra = {}) {
   };
 }
 
+// Codex's home is always the test home's, so a real Codex on this computer never shows up.
 function hook(root, hub, pluginRoot) {
   return spawnSync(process.execPath, [script, '--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'claude-plugin'], {
-    cwd: root, encoding: 'utf8', timeout: 120000, env: env(root, { CLAUDE_PLUGIN_ROOT: pluginRoot, CLAUDE_PROJECT_DIR: root }),
+    cwd: root, encoding: 'utf8', timeout: 120000, env: env(root, { CLAUDE_PLUGIN_ROOT: pluginRoot, CLAUDE_PROJECT_DIR: root, CODEX_HOME: path.join(root, '.codex') }),
   });
 }
 
@@ -150,6 +152,117 @@ test('an uninstalled copy says nothing more when the repository in the session f
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, UNINSTALLED_LINE);
   assert.doesNotMatch(result.stdout, STALE_LINE);
+});
+
+// A Claude desktop app copy of Toolkit from the user's claude.ai account at `version`, in the
+// app's account-plugin folder layout under the test LOCALAPPDATA. Returns the plugin folder.
+function accountCopy(root, version) {
+  const folder = path.join(root, 'local-app-data', 'Claude-Data', 'claude_test', 'rpm', 'a1', 'b2');
+  writeJson(path.join(folder, 'manifest.json'), { plugins: [{ id: 'plugin_test', name: 'ai-agent-toolkit' }] });
+  const plugin = path.join(folder, 'plugin_test');
+  fakeToolkit(plugin, version);
+  return plugin;
+}
+
+// A hub state naming `checkout` as this PC's managed Toolkit checkout. The checkout sits two
+// levels below the session folder, so the workspace check above never finds it.
+function recordManagedCheckout(root, version) {
+  const checkout = path.join(root, 'pc', 'managed');
+  if (version) fakeToolkit(checkout, version);
+  const hub = path.join(root, '.ai-agent-toolkit', 'current');
+  writeJson(path.join(hub, 'state.json'), { schema_version: 1, architecture_version: 2, hub_version: BRIDGE_VERSION, auto_sync_enabled: true, repo_path: checkout });
+  return { hub, checkout };
+}
+
+test('a Claude app copy older than this PC\'s Toolkit shows the owner the update reminder and writes nothing', (t) => {
+  const root = tmpRoot(t);
+  const plugin = accountCopy(root, '9.8.0');
+  const { hub, checkout } = recordManagedCheckout(root, '9.9.1');
+  const hubBefore = treeDigest(hub);
+  const checkoutBefore = treeDigest(checkout);
+  const reportsBefore = reports().length;
+  const result = hook(root, hub, plugin);
+  assert.equal(result.status, 0, result.stderr);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.systemMessage, accountCopyBehind('9.8.0', '9.9.1'));
+  assert.ok(output.systemMessage.startsWith('The Toolkit copy from your claude.ai account is 9.8.0; this PC has 9.9.1.'), output.systemMessage);
+  assert.ok(output.systemMessage.endsWith(STEPS_TEXT));
+  assert.equal(STEPS.length, 4);
+  const context = output.hookSpecificOutput.additionalContext;
+  assert.equal(output.hookSpecificOutput.hookEventName, 'SessionStart');
+  assert.match(context, UNINSTALLED_LINE);
+  assert.ok(context.includes(`Toolkit update reminder for the owner: ${output.systemMessage} Say this reminder to the owner once, in your first reply.`), context);
+  assert.equal(treeDigest(hub), hubBefore, 'hub untouched');
+  assert.equal(treeDigest(checkout), checkoutBefore, 'managed checkout untouched');
+  assert.equal(reports().length, reportsBefore, 'no update report');
+});
+
+test('a current Claude app copy, a --plugin-dir copy and an unreadable checkout show no reminder', (t) => {
+  const root = tmpRoot(t);
+  const { hub } = recordManagedCheckout(root, '9.9.1');
+  const plainOnly = (result) => {
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, UNINSTALLED_LINE);
+    assert.doesNotMatch(result.stdout, /systemMessage|update reminder|could not compare/);
+    assert.equal(result.stdout.trim().split(/\r?\n/).length, 1, result.stdout);
+  };
+  // Same version as this PC.
+  plainOnly(hook(root, hub, accountCopy(root, '9.9.1')));
+  // A test candidate outside the app's account-plugin folders.
+  const candidate = path.join(root, 'pc', 'candidate');
+  fakeToolkit(candidate, '9.8.0');
+  plainOnly(hook(root, hub, candidate));
+
+  // The recorded checkout is missing: say so in context only.
+  const older = accountCopy(root, '9.8.0');
+  const missing = recordManagedCheckout(tmpRoot(t), null);
+  const unreadable = hook(root, missing.hub, older);
+  assert.equal(unreadable.status, 0, unreadable.stderr);
+  assert.match(unreadable.stdout, UNINSTALLED_LINE);
+  assert.match(unreadable.stdout, /^Toolkit: could not compare this claude\.ai copy with this PC's Toolkit \(the Toolkit folder .+ has no readable version\), so no update reminder is shown\.$/m);
+  assert.doesNotMatch(unreadable.stdout, /systemMessage/);
+
+  // No hub state at all.
+  const none = hook(root, path.join(tmpRoot(t), 'no-hub'), older);
+  assert.equal(none.status, 0, none.stderr);
+  assert.match(none.stdout, /could not compare this claude\.ai copy with this PC's Toolkit \(no Toolkit folder is recorded on this PC\)/);
+});
+
+test('a Claude app chat shows the Codex reminder in the hook JSON, never as a plain line', (t) => {
+  const CODEX_LINE = 'Codex runs Toolkit 9.8.0; this PC has 9.9.1. In Codex say "refresh toolkit", then open /hooks and turn the Toolkit hooks on.';
+  const root = tmpRoot(t);
+  const { hub, checkout } = recordManagedCheckout(root, '9.9.1');
+  writeJson(path.join(checkout, '.codex-plugin', 'plugin.json'), { name: 'ai-agent-toolkit', version: '9.9.1' });
+  // Codex has the Toolkit plugin on and runs an older version than this PC's checkout.
+  const codexHome = path.join(root, '.codex');
+  fs.mkdirSync(codexHome, { recursive: true });
+  fs.writeFileSync(path.join(codexHome, 'config.toml'), '[plugins."ai-agent-toolkit@ai-agent-toolkit-local"]\nenabled = true\n');
+  writeJson(path.join(codexHome, 'plugins', 'cache', 'ai-agent-toolkit-local', 'ai-agent-toolkit', '9.8.0', '.codex-plugin', 'plugin.json'), { name: 'ai-agent-toolkit', version: '9.8.0' });
+  const config = fs.readFileSync(path.join(codexHome, 'config.toml'));
+  const json = (result) => {
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout.trim().split(/\r?\n/).length, 1, 'one JSON line and nothing else');
+    return JSON.parse(result.stdout);
+  };
+
+  // A current app copy: the Codex line alone.
+  const current = json(hook(root, hub, accountCopy(root, '9.9.1')));
+  assert.equal(current.systemMessage, CODEX_LINE);
+  assert.match(current.hookSpecificOutput.additionalContext, UNINSTALLED_LINE);
+  assert.ok(current.hookSpecificOutput.additionalContext.includes(`Toolkit update reminder for the owner: ${CODEX_LINE} Say this reminder to the owner once, in your first reply.`));
+
+  // An older app copy: both reminders, the app's first, each once.
+  const both = json(hook(root, hub, accountCopy(root, '9.8.0')));
+  assert.equal(both.systemMessage, `${accountCopyBehind('9.8.0', '9.9.1')}\n${CODEX_LINE}`);
+  assert.equal(both.hookSpecificOutput.additionalContext.split('Toolkit update reminder for the owner: ').length - 1, 2);
+
+  // A --plugin-dir test copy is not a Claude app chat: no Codex line.
+  const candidate = path.join(root, 'pc', 'candidate');
+  fakeToolkit(candidate, '9.9.1');
+  const plain = hook(root, hub, candidate);
+  assert.equal(plain.status, 0, plain.stderr);
+  assert.doesNotMatch(plain.stdout, /systemMessage|Codex runs Toolkit/);
+  assert.ok(fs.readFileSync(path.join(codexHome, 'config.toml')).equals(config), 'the Codex config is never written');
 });
 
 test('a session started from an uninstalled Toolkit copy writes no update state and leaves the managed checkout alone', (t) => {
