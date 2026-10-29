@@ -378,7 +378,7 @@ test('all recommended and changed-only answers resolve to canonical values', () 
   assert.deepEqual(all.selections.map((selection) => selection.canonical_value), rows.map((row) => row.recommended));
   core.assertQuestionBankAnswerBinding(all, rows);
 
-  const changed = core.parseConciseQuestionBankAnswer(`${reference}: 1.2=a, 2.2 = a`, rows);
+  const changed = core.parseConciseQuestionBankAnswer(`${reference}: 1.2=b, 2.2 = a`, rows);
   assert.equal(changed.mode, 'recommended-except');
   assert.equal(changed.selections.find((selection) => selection.question_ref === '1.2').canonical_value, 'disable');
   assert.equal(changed.selections.find((selection) => selection.question_ref === '2.2').canonical_value, 'disable');
@@ -402,7 +402,7 @@ test('concise answers tolerate case, spacing, hyphens and look-alike reference l
       core.assertQuestionBankAnswerBinding(parsed, rows);
     }
   }
-  for (const form of ['1.2=A 2.1=c', '1.2 = a; 2.1=C', '1.2=a,2.1=c', '1.2=A ; 2.1=C']) {
+  for (const form of ['1.2=B 2.1=c', '1.2 = b; 2.1=C', '1.2=b,2.1=c', '1.2=B ; 2.1=C']) {
     const parsed = core.parseConciseQuestionBankAnswer(`${reference} ${form}`, rows);
     assert.equal(parsed?.mode, 'recommended-except', form);
     assert.equal(parsed.selections.find((selection) => selection.question_ref === '1.2').canonical_value, 'disable');
@@ -562,12 +562,13 @@ test('bank reference covers host, order, recommendations and approval-visible se
 
 test('display letters and canonical textual values resolve without becoming stored identities', () => {
   const automatic = allRows().find((row) => row.id === 'automatic-updates');
-  assert.equal(core.resolveDisplayedChoiceAnswer(automatic, 'a'), 'disable');
+  assert.equal(core.resolveDisplayedChoiceAnswer(automatic, 'b'), 'disable');
   assert.equal(core.resolveDisplayedChoiceAnswer(automatic, 'DISABLE'), 'disable');
   assert.equal(core.resolveDisplayedChoiceAnswer(automatic, ''), automatic.recommended);
-  // Updates are on already, so "Turn on" is hidden; typing its canonical word still works, as keep.
-  assert.equal(core.resolveDisplayedChoiceAnswer(automatic, 'Enable'), 'keep');
-  assert.equal(core.resolveDisplayedChoiceAnswer(automatic, 'c'), 'c', 'a hidden choice has no letter');
+  // Reports are kept already, so "Keep reports" is hidden; typing its canonical word still works, as keep.
+  const reports = allRows().find((row) => row.id === 'update-reports');
+  assert.equal(core.resolveDisplayedChoiceAnswer(reports, 'Enable'), 'keep');
+  assert.equal(core.resolveDisplayedChoiceAnswer(reports, 'c'), 'c', 'a hidden choice has no letter');
 });
 
 // When the recommendation already matches the verified current state, the bank shows one recommended
@@ -580,10 +581,11 @@ test('a recommendation that matches the current state shows one recommended Keep
     return { row: core.setupQuestionSpecs(args, current).find((spec) => spec.id === id), args };
   };
   const cases = [
-    ['automatic-updates', (c) => { c.audit.repo_auto_update = { enabled: true }; }, 'enable', ['disable', 'keep']],
-    ['automatic-updates', (c) => { c.audit.repo_auto_update = { enabled: false }; }, '', ['enable', 'disable', 'keep']],
-    ['automatic-updates', () => {}, '', ['enable', 'disable', 'keep']],
+    // Turn on also points updates at the chosen update source, which Keep current does not, so it never folds.
+    ['automatic-updates', (c) => { c.audit.repo_auto_update = { enabled: true }; }, '', ['enable', 'disable', 'keep']],
     ['update-reports', (c) => { c.audit.update_report_enabled = true; }, 'enable', ['disable', 'keep']],
+    ['update-reports', (c) => { c.audit.update_report_enabled = false; }, '', ['enable', 'disable', 'keep']],
+    ['update-reports', () => {}, '', ['enable', 'disable', 'keep']],
     ['report-retention', (c) => { c.audit.update_report_retention_days = 7; }, 'default', ['custom', 'keep']],
     ['report-retention', (c) => { c.audit.update_report_retention_days = 14; }, '', ['default', 'custom', 'keep']],
     ['codex-instruction-limit', (c) => { c.audit.codex_doc_limit_enabled = true; }, 'enable', ['disable', 'keep']],
@@ -604,13 +606,13 @@ test('a recommendation that matches the current state shows one recommended Keep
   }
 
   // A flag naming the hidden twin is accepted and applied as keep, which does the same thing.
-  const { row, args } = rowFor('automatic-updates', (c) => { c.audit.repo_auto_update = { enabled: true }; }, ['--enable-repo-auto-update']);
-  assert.equal(args.setupChoices.repoAutoUpdate, 'keep');
+  const { row, args } = rowFor('update-reports', (c) => { c.audit.update_report_enabled = true; }, ['--enable-update-reports']);
+  assert.equal(args.setupChoices.updateReports, 'keep');
   assert.equal(row.selected, 'keep');
   const current = stateWithManaged(managedState());
-  current.audit.repo_auto_update = { enabled: true };
+  current.audit.update_report_enabled = true;
   core.applySetupChoices(args, current);
-  assert.equal(args.repoAutoUpdate, true);
+  assert.equal(args.updateReports, true);
 });
 
 test('Claude Code settings fold when all four are set; agents and plugin questions never fold', () => {

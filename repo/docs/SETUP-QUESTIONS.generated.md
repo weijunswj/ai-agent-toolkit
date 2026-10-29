@@ -5,12 +5,12 @@ This reference uses a privacy-safe representative Codex state in which all curre
 
 Toolkit setup choices - 8 questions across 3 sections
 
-Bank reference: 3B3Z-74VQ-M34Q-ZS4M
+Bank reference: A71X-P51K-AK8K-8A3V
 
 Quick index
 
 1.1 Update source - Recommended: A - Keep current
-1.2 Automatic updates - Recommended: B - Keep current
+1.2 Automatic updates - Recommended: A - Turn on
 1.3 Update reports - Recommended: B - Keep current
 1.4 Report retention - Recommended: B - Keep current
 1.5 Raise Codex's instruction limit - Recommended: B - Keep current
@@ -54,20 +54,21 @@ Quick index
 
 **Verification:** verified
 
-**Recommended:** B - Keep current
+**Recommended:** A - Turn on
 
-**Recommended outcome:** Preserve this effective behavior: Automatic startup update checks are on.
+**Recommended outcome:** Turn on clean, verified automatic updates.
 
 **Why:** Startup checks keep Toolkit current while the clean-checkout, expected-remote, fast-forward, and validation gates protect active work.
 
 **Choices:**
 
-- **A. Turn off** - Disable startup update checks and automatic hub synchronization; manual `setup toolkit` or explicit maintenance remains available.
-- **B. Keep current** - Preserve this effective behavior: Automatic startup update checks are on.
+- **A. Turn on** - Store automatic maintenance as enabled so trusted startup maintenance checks for, verifies, and safely activates clean updates.
+- **B. Turn off** - Disable startup update checks and automatic hub synchronization; manual `setup toolkit` or explicit maintenance remains available.
+- **C. Keep current** - Preserve this effective behavior: Automatic startup update checks are on.
 
 **After applying:** This changes Toolkit maintenance state and future trusted SessionStart behavior; it does not directly edit native host configuration and does not require a restart by itself.
 
-**Selected:** B - Keep current
+**Selected:** A - Turn on
 
 ---
 
@@ -234,7 +235,7 @@ Quick index
 Reply with either:
 
 - `all recommended`
-- only your changes, for example: `1.2=A, 1.3=A`
+- only your changes, for example: `1.2=B, 1.3=A`
 
 Anything you do not list takes its recommendation.
 
@@ -244,12 +245,12 @@ Setup run with `--host claude-code` shows this bank instead, for the same repres
 
 Toolkit setup choices - 8 questions across 3 sections
 
-Bank reference: TM3W-QPNJ-AEQ2-4SHJ
+Bank reference: QHXE-RB2K-6S00-39PM
 
 Quick index
 
 1.1 Update source - Recommended: A - Keep current
-1.2 Automatic updates - Recommended: B - Keep current
+1.2 Automatic updates - Recommended: A - Turn on
 1.3 Update reports - Recommended: B - Keep current
 1.4 Report retention - Recommended: B - Keep current
 2.1 How should Claude Code use agents? - Recommended: A - Toolkit repos: main session + Toolkit planning and build helpers only. Elsewhere: one layer of subagents.
@@ -293,20 +294,21 @@ Quick index
 
 **Verification:** verified
 
-**Recommended:** B - Keep current
+**Recommended:** A - Turn on
 
-**Recommended outcome:** Preserve this effective behavior: Automatic startup update checks are on.
+**Recommended outcome:** Turn on clean, verified automatic updates.
 
 **Why:** Startup checks keep Toolkit current while the clean-checkout, expected-remote, fast-forward, and validation gates protect active work.
 
 **Choices:**
 
-- **A. Turn off** - Disable startup update checks and automatic hub synchronization; manual `setup toolkit` or explicit maintenance remains available.
-- **B. Keep current** - Preserve this effective behavior: Automatic startup update checks are on.
+- **A. Turn on** - Store automatic maintenance as enabled so trusted startup maintenance checks for, verifies, and safely activates clean updates.
+- **B. Turn off** - Disable startup update checks and automatic hub synchronization; manual `setup toolkit` or explicit maintenance remains available.
+- **C. Keep current** - Preserve this effective behavior: Automatic startup update checks are on.
 
 **After applying:** This changes Toolkit maintenance state and future trusted SessionStart behavior; it does not directly edit native host configuration and does not require a restart by itself.
 
-**Selected:** B - Keep current
+**Selected:** A - Turn on
 
 ---
 

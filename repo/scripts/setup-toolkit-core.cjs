@@ -1665,7 +1665,7 @@ function setupQuestionSpecs(args, current) {
         wizardChoice('disable', 'Turn off', 'Disable startup update checks and automatic hub synchronization; manual `setup toolkit` or explicit maintenance remains available.'),
         wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${currentBooleanOutcome(current.audit?.repo_auto_update?.enabled, 'Automatic startup update checks are on.', 'Automatic startup update checks are off; manual setup remains available.', 'The automatic-update state could not be verified; setup will not claim that startup updates are active.')}`),
       ],
-      currentChoice: booleanCurrentChoice(current.audit?.repo_auto_update?.enabled),
+      // No folding here: Turn on also points updates at the chosen update source, which Keep current does not.
       recommendation: {
         value: recommendedChoice('repoAutoUpdate', current, args),
         outcome: 'Turn on clean, verified automatic updates.',
