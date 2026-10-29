@@ -217,6 +217,31 @@ test('the installed copy is recognised in any path spelling and keeps its sessio
   assert.equal(state.last_sync_source, 'claude-plugin');
 });
 
+test('session start prints the Codex reminder once, and nothing when the Codex plugin is off', (t) => {
+  const REMINDER = /^Toolkit reminder for the owner: Codex runs Toolkit 1\.0\.0; this PC has \S+\. In Codex say "refresh toolkit", then open \/hooks and turn the Toolkit hooks on\. Say this reminder to the owner once, in your first reply\.$/gm;
+  const run = (pluginOn) => {
+    const root = tmpRoot(t);
+    installToolkit(root, repoRoot);
+    const hub = path.join(root, '.ai-agent-toolkit', 'current');
+    writeJson(path.join(hub, 'state.json'), { schema_version: 1, architecture_version: 2, hub_version: '1.0.0', auto_sync_enabled: true, repo_path: repoRoot });
+    // Codex runs an older Toolkit than the copy Claude Code runs (the managed checkout here).
+    const codexHome = path.join(root, '.codex');
+    fs.mkdirSync(codexHome, { recursive: true });
+    fs.writeFileSync(path.join(codexHome, 'config.toml'), `[plugins."ai-agent-toolkit@ai-agent-toolkit-local"]\nenabled = ${pluginOn}\n`);
+    const cache = path.join(codexHome, 'plugins', 'cache', 'ai-agent-toolkit-local', 'ai-agent-toolkit', '1.0.0');
+    writeJson(path.join(cache, '.codex-plugin', 'plugin.json'), { name: 'ai-agent-toolkit', version: '1.0.0' });
+    const config = fs.readFileSync(path.join(codexHome, 'config.toml'));
+    const result = spawnSync(process.execPath, [script, '--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'claude-plugin'], {
+      cwd: root, encoding: 'utf8', timeout: 120000, env: env(root, { CLAUDE_PLUGIN_ROOT: repoRoot, CLAUDE_PROJECT_DIR: root, CODEX_HOME: codexHome }),
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.ok(fs.readFileSync(path.join(codexHome, 'config.toml')).equals(config), 'the Codex config is never written');
+    return result.stdout;
+  };
+  assert.equal((run(true).match(REMINDER) || []).length, 1, 'printed exactly once');
+  assert.doesNotMatch(run(false), /Toolkit reminder for the owner/);
+});
+
 test('a newer recorded version names the likely cause and the one-step recovery', (t) => {
   const root = tmpRoot(t);
   installToolkit(root, repoRoot);

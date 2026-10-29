@@ -212,6 +212,41 @@ test('the install check shows the Codex line as a notice that never blocks', (t)
   assert.equal(find(check(new CodexToolkitInstall({ codexHome: current.codexHome, managedRoot: current.managed }))), undefined);
 });
 
+test('at setup time Keep current and Show instructions only run no Codex plugin command; Install or refresh does', (t) => {
+  const support = require('./toolkit-setup-test-support.cjs');
+  const runWith = (behavior) => {
+    const root = support.tmpRoot();
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const { origin, setupRepo } = support.createGitBackedSetupRepo(root);
+    // A Codex home with an older Toolkit, so a plugin check would want a refresh.
+    write(path.join(root, '.codex', 'config.toml'), `[plugins."${ID}"]\nenabled = true\n\n[hooks.state]\n\n${hookTables('on')}`);
+    const cache = path.join(root, '.codex', 'plugins', 'cache', 'ai-agent-toolkit-local', 'ai-agent-toolkit', '1.0.0');
+    write(path.join(cache, '.codex-plugin', 'plugin.json'), JSON.stringify({ name: 'ai-agent-toolkit', version: '1.0.0' }));
+    write(path.join(cache, '.codex-plugin', 'hooks', 'hooks.json'), HOOKS);
+    const spy = spyPreload(root, { codexOnly: true });
+    const result = support.run(['--execute', '--repo-root', setupRepo, '--repo-remote', origin, '--yes-recommended', '--skip-codex-plugin-auto-refresh',
+      '--codex-helper-capacity', 'keep', '--codex-plugin-behavior', behavior], {
+      env: { ...support.isolatedHomeEnv(root), SETUP_FAKE_CODEX_REFRESH_REQUIRED: '1', NODE_OPTIONS: `--require "${spy.file.replace(/\\/g, '/')}"` },
+      timeout: 300000,
+    });
+    assert.equal(result.status, 0, `${behavior}: ${result.stdout}\n${result.stderr}`);
+    assert.equal(fs.existsSync(spy.log), false, `${behavior}: ${fs.existsSync(spy.log) ? fs.readFileSync(spy.log, 'utf8') : ''}`);
+    // The fake plugin helper writes this log on --write and the refresh marker on a write.
+    return { result, wrote: fs.existsSync(path.join(setupRepo, 'PLUGIN_SETUP.log')), refreshed: fs.existsSync(path.join(setupRepo, 'CODEX_PLUGIN_REFRESHED')) };
+  };
+  const kept = runWith('keep');
+  assert.deepEqual([kept.wrote, kept.refreshed], [false, false], 'Keep current runs no plugin command');
+  assert.match(kept.result.stdout, /Codex plugin status: kept/);
+  assert.match(kept.result.stdout, /Codex installed Toolkit version: 1\.0\.0/);
+  const instructions = runWith('instructions');
+  assert.deepEqual([instructions.wrote, instructions.refreshed], [false, false], 'Show instructions only runs no plugin command');
+  assert.match(instructions.result.stdout, /Codex plugin status: instructions only/);
+  assert.match(instructions.result.stdout, /Codex plugin instructions: no plugin change was made\. To refresh it, say "refresh toolkit" in Codex/);
+  const installed = runWith('install');
+  assert.deepEqual([installed.wrote, installed.refreshed], [true, true], 'Install or refresh runs verify, write, verify');
+  assert.match(installed.result.stdout, /Codex plugin status: refreshed/);
+});
+
 // Rows 3.1 and 3.2 of the Codex bank, built from a reader state.
 function codexRows(install, audit = {}) {
   const managedPath = core.defaultManagedSourcePath();
