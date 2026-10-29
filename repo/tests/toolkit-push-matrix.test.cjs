@@ -184,6 +184,90 @@ test('commit and push in one command: clean changes, unadded files and other rep
   assert.equal(outgoingRefusal('git push origin feature; git merge main', repo, quiet()), '', 'a merge after the push changes nothing it sends');
 });
 
+// A Windows folder as Git Bash writes it: C:\Users\x -> /c/Users/x (or /cygdrive/c/Users/x).
+const gitBashPath = (folder, prefix = '') => `${prefix}/${folder[0].toLowerCase()}${folder.slice(2).replace(/\\/g, '/')}`;
+
+test('Git Bash drive paths in cd, git -C and file options reach every check in the right folder', { skip: process.platform !== 'win32' && 'Git Bash drive paths are a Windows form' }, (t) => {
+  const support = require('./toolkit-governed-fixture-support.cjs');
+  const { clone } = chainRepos(t);
+  const session = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-drive-session-'));
+  t.after(() => fs.rmSync(session, { recursive: true, force: true }));
+  for (const prefix of ['', '/cygdrive']) {
+    const repo = clone();
+    writeFiles(repo, { 'uat-config.txt': `token = "${fakeToken()}"\n` });
+    fixtureGit(repo, ['add', '-A'], path.join(path.dirname(repo), 'no-hooks'));
+    fixtureGit(repo, ['commit', '--quiet', '-m', 'key'], path.join(path.dirname(repo), 'no-hooks'));
+    const drive = gitBashPath(repo, prefix);
+    for (const command of [`cd ${drive} && git push origin feature`, `git -C ${drive} push origin feature`, `git -C "${drive}" push origin feature`]) {
+      assert.match(outgoingRefusal(command, session, quiet()), /uat-config\.txt:1 \(commit [0-9a-f]{7}\)/, `${prefix || 'git bash'}: ${command}`);
+      // The UAT forms, through the Claude Code hook as a process.
+      const result = runHook(claudeHook, 'Bash', session, command);
+      assert.equal(result.status, 2, `${command}: ${result.stderr}`);
+      assert.match(JSON.parse(result.stdout).hookSpecificOutput.permissionDecisionReason, /uat-config\.txt:1 /, command);
+    }
+  }
+  // Bypass, force push and a body file named by a Git Bash path, in a governed repository.
+  const governed = support.makeGoverned(path.join(session, 'governed'), 'drive-paths');
+  writeFiles(governed, { 'body.md': 'Summary\n\nGenerated with [Claude Code](https://claude.com/claude-code)\n' });
+  const drive = gitBashPath(governed);
+  assert.equal(attributionDecision({ tool_name: 'Bash', cwd: session, tool_input: { command: `git -C ${drive} push --force origin feature` } }, quiet()).hookSpecificOutput?.permissionDecisionReason, FORCE_MESSAGE);
+  assert.equal(attributionDecision({ tool_name: 'Bash', cwd: session, tool_input: { command: `cd ${drive} && git commit --no-verify -m x` } }, quiet()).hookSpecificOutput?.permissionDecisionReason, BYPASS_MESSAGE);
+  assert.equal(attributionDecision({ tool_name: 'Bash', cwd: session, tool_input: { command: `gh pr create --body-file ${drive}/body.md` } }, quiet()).hookSpecificOutput?.permissionDecisionReason, MESSAGE);
+  assert.equal(attributionDecision({ tool_name: 'exec_command', cwd: session, tool_input: { cmd: 'git push --force origin feature', workdir: drive } }, quiet()).hookSpecificOutput?.permissionDecisionReason, FORCE_MESSAGE, 'a Codex workdir in Git Bash form');
+});
+
+test('a leading ~ is the home folder for every check; a folder written as a variable is refused as unreadable', (t) => {
+  const support = require('./toolkit-governed-fixture-support.cjs');
+  // A scratch home for this process and the hooks it starts, never the real one.
+  const home = support.governedHome();
+  assert.equal(path.resolve(os.homedir()), path.resolve(home));
+  const { clone } = chainRepos(t);
+  const session = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-home-session-'));
+  t.after(() => fs.rmSync(session, { recursive: true, force: true }));
+  const repo = path.join(home, 'tilde-repo');
+  fs.cpSync(clone(), repo, { recursive: true });
+  t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
+  writeFiles(repo, { 'uat-config.txt': `token = "${fakeToken()}"\n` });
+  fixtureGit(repo, ['add', '-A'], session);
+  fixtureGit(repo, ['commit', '--quiet', '-m', 'key'], session);
+  for (const command of ['cd ~/tilde-repo && git push origin feature', 'git -C ~/tilde-repo push origin feature', 'git -C ~\\tilde-repo push origin feature', 'cd ~/tilde-repo && gh pr create --fill']) {
+    assert.match(outgoingRefusal(command, session, quiet()), /uat-config\.txt:1 \(commit [0-9a-f]{7}\)/, command);
+    const result = runHook(claudeHook, 'Bash', session, command);
+    assert.equal(result.status, 2, `${command}: ${result.stderr}`);
+    assert.match(JSON.parse(result.stdout).hookSpecificOutput.permissionDecisionReason, /uat-config\.txt:1 /, command);
+  }
+  const governed = support.makeGoverned(path.join(home, 'tilde-governed'), 'tilde-paths');
+  t.after(() => fs.rmSync(governed, { recursive: true, force: true }));
+  writeFiles(home, { 'tilde-msg.txt': `Fix\n\n${trailer}\n` });
+  t.after(() => fs.rmSync(path.join(home, 'tilde-msg.txt'), { force: true }));
+  assert.equal(attributionDecision({ tool_name: 'Bash', cwd: session, tool_input: { command: 'cd ~/tilde-governed && git commit --no-verify -m x' } }, quiet()).hookSpecificOutput?.permissionDecisionReason, BYPASS_MESSAGE);
+  assert.equal(attributionDecision({ tool_name: 'Bash', cwd: session, tool_input: { command: 'git commit -F ~/tilde-msg.txt' } }, quiet()).hookSpecificOutput?.permissionDecisionReason, MESSAGE);
+  // Written with a variable or a command, the folder cannot be read: refused, saying so.
+  const pushCheck = require('../scripts/toolkit-push-check.cjs');
+  for (const command of ['cd $HOME/tilde-repo && git push origin feature', 'git -C "$(pwd)/x" push', 'cd $env:USERPROFILE\\tilde-repo; git push origin feature']) {
+    assert.equal(outgoingRefusal(command, session, quiet()), pushCheck.FOLDER_UNREADABLE, command);
+  }
+  assert.match(pushCheck.FOLDER_UNREADABLE, /could not read the folder .* variable or a command/);
+});
+
+test('a push whose folder does not exist is refused, not let through unchecked, in both hooks', (t) => {
+  const session = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-missing-folder-'));
+  t.after(() => fs.rmSync(session, { recursive: true, force: true }));
+  const missing = path.join(session, 'no-such-folder');
+  const pushCheck = require('../scripts/toolkit-push-check.cjs');
+  for (const command of [`git -C "${missing}" push origin main`, `cd "${missing}" && git push`, `cd "${missing}" && gh pr create --fill`]) {
+    assert.equal(outgoingRefusal(command, session, quiet()), pushCheck.FOLDER_MISSING, command);
+    for (const hook of [claudeHook, codexHook]) {
+      const result = runHook(hook, 'Bash', session, command);
+      assert.equal(result.status, 2, `${path.basename(hook)} ${command}: ${result.stderr}`);
+      assert.match(JSON.parse(result.stdout.trim().split('\n').pop()).hookSpecificOutput.permissionDecisionReason, /could not find the folder this push or pull request runs in/, command);
+    }
+  }
+  assert.equal(outgoingRefusal('git status', session, quiet()), '', 'a command that sends nothing');
+  // A folder the same command creates first: the refusal says to run that step on its own.
+  assert.match(outgoingRefusal(`mkdir "${missing}" && cd "${missing}" && git init && git push origin main`, session, quiet()), /run that step as its own command, then the push/);
+});
+
 test('push check: every target of one command shares one deadline', () => {
   const deadlines = [];
   const check = (target, options) => { deadlines.push(options.deadline); return {}; };
