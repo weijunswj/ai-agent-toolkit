@@ -1,0 +1,194 @@
+'use strict';
+
+// The shell-call closure matrix and the commit-and-push chain checks, through attributionDecision and
+// through both shell hooks as processes. Fake credentials are built from pieces at run time.
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const childProcess = require('node:child_process');
+const { spawnSync } = childProcess;
+const test = require('node:test');
+const { BYPASS_MESSAGE, FORCE_MESSAGE, MESSAGE, attributionDecision, outgoingRefusal } = require('../scripts/toolkit-attribution-guard.cjs');
+
+const repoRoot = path.resolve(__dirname, '..', '..');
+const trailer = 'Co-Authored-By: Claude <noreply@anthropic.com>';
+const fakeToken = () => ['gh', 'p_', 'A1b2C3d4E5f6G7h8'.repeat(2), 'Q9r0'].join('');
+const quiet = () => ({ notes: [] });
+const claudeHook = path.join(repoRoot, 'repo', 'scripts', 'toolkit-claude-attribution-hook.cjs');
+const codexHook = path.join(repoRoot, 'repo', 'scripts', 'toolkit-codex-helper-hook.cjs');
+const runHook = (hook, tool, cwd, command, env = process.env) => spawnSync(process.execPath, [hook], { input: JSON.stringify({ tool_name: tool, cwd, tool_input: { command } }), encoding: 'utf8', env });
+
+function fixtureGit(cwd, args, hooks) {
+  return childProcess.execFileSync('git', ['-c', 'user.name=Fixture Author', '-c', 'user.email=fixture@example.test', '-c', 'commit.gpgsign=false', '-c', `core.hooksPath=${hooks}`, '-c', 'init.defaultBranch=main', '-c', 'core.fsmonitor=false', ...args], { cwd, encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+}
+
+function writeFiles(root, files) {
+  for (const [name, text] of Object.entries(files)) {
+    fs.mkdirSync(path.dirname(path.join(root, name)), { recursive: true });
+    fs.writeFileSync(path.join(root, name), text);
+  }
+}
+
+// The closure matrix for every shell-call shape the two hosts send (R1 to R9) against the checks
+// that judge commits, pushes and pull requests (C1 to C5). Codex rows name the folder the command
+// runs in as workdir, with the session folder elsewhere, so a check that judged the session folder
+// would let them through. Each row runs through attributionDecision and through its host's hook as a
+// process.
+test('matrix: every host shape gets the attribution, bypass, force-push and push checks in the folder the command runs in', (t) => {
+  const support = require('./toolkit-governed-fixture-support.cjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-shell-matrix-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const governed = support.makeGoverned(path.join(dir, 'governed'), 'shell-matrix');
+  const session = path.join(dir, 'session');
+  fs.mkdirSync(session);
+  const hooks = path.join(dir, 'no-hooks');
+  fs.mkdirSync(hooks);
+  writeFiles(governed, { 'body.md': 'Summary\n\nGenerated with [Claude Code](https://claude.com/claude-code)\n', 'uat-config.txt': `token = "${fakeToken()}"\n` });
+  fixtureGit(governed, ['checkout', '--quiet', '-b', 'feature'], hooks);
+  fixtureGit(governed, ['add', '-A'], hooks);
+  fixtureGit(governed, ['commit', '--quiet', '-m', 'fixture'], hooks);
+  const checks = [
+    ['C1 attribution in git commit -m', `git commit -m x -m "${trailer}"`, (reason) => reason === MESSAGE],
+    ['C2 attribution in a body file read from the run folder', 'gh pr create --body-file body.md', (reason) => reason === MESSAGE],
+    ['C3 bypass in a governed repository', 'git commit --no-verify -m x', (reason) => reason === BYPASS_MESSAGE],
+    ['C4 force push in a governed repository', 'git push --force origin feature', (reason) => reason === FORCE_MESSAGE],
+    ['C4 force push to an evidence store', 'git push https://github.com/owner/TRANSPORT-evidence.git +feature', (reason) => reason === FORCE_MESSAGE],
+    ['C5 push of a committed credential', 'git push origin feature', (reason) => /uat-config\.txt:1 /.test(reason)],
+  ];
+  const rows = [
+    ['R1 Claude Bash', claudeHook, (command) => ({ tool_name: 'Bash', cwd: governed, tool_input: { command } })],
+    ['R2 Claude PowerShell', claudeHook, (command) => ({ tool_name: 'PowerShell', cwd: governed, tool_input: { command } })],
+    ['R3 Codex Bash command', codexHook, (command) => ({ tool_name: 'Bash', cwd: governed, tool_input: { command, workdir: governed } })],
+    ['R4 Codex Bash cmd and workdir', codexHook, (command) => ({ tool_name: 'Bash', cwd: session, tool_input: { cmd: command, workdir: governed } })],
+    ['R5 Codex exec_command', codexHook, (command) => ({ tool_name: 'exec_command', cwd: session, tool_input: { cmd: command, workdir: governed } })],
+    ['R6 Codex shell, bash -lc', codexHook, (command) => ({ tool_name: 'shell', cwd: session, tool_input: { command: ['bash', '-lc', command], workdir: governed } })],
+    ['R6 Codex local_shell, pwsh -Command', codexHook, (command) => ({ tool_name: 'local_shell', cwd: session, tool_input: { command: ['pwsh', '-NoProfile', '-Command', command], workdir: governed } })],
+    ['R8 Codex relative workdir', codexHook, (command) => ({ tool_name: 'exec_command', cwd: dir, tool_input: { cmd: command, workdir: 'governed' } })],
+    ['R9 Codex command and cmd both given', codexHook, (command) => ({ tool_name: 'Bash', cwd: session, tool_input: { command: 'git status', cmd: command, workdir: governed } })],
+  ];
+  const env = { ...process.env };
+  delete env.TOOLKIT_GIT_PATH;
+  for (const [row, hookPath, shape] of rows) {
+    for (const [check, command, expected] of checks) {
+      const input = shape(command);
+      const direct = attributionDecision(input, quiet()).hookSpecificOutput?.permissionDecisionReason || '';
+      assert.ok(expected(direct), `${row} x ${check}: attributionDecision gave ${JSON.stringify(direct)}`);
+      const hook = spawnSync(process.execPath, [hookPath], { input: JSON.stringify(input), encoding: 'utf8', env, timeout: 60000 });
+      assert.equal(hook.status, 2, `${row} x ${check}: ${hook.stderr}`);
+      const reason = JSON.parse(hook.stdout.trim().split('\n').pop()).hookSpecificOutput.permissionDecisionReason;
+      // The Codex hook runs the governance gate first. It reads a word list unquoted too, and refuses a
+      // continuation-like word list that names Claude before the attribution check sees it, as before.
+      const gateFirst = Array.isArray(input.tool_input.command) && /claude/i.test(command) && /^Toolkit: the selected session's repository could not be verified/.test(reason);
+      assert.ok(expected(reason) || gateFirst, `${row} x ${check}: the hook gave ${JSON.stringify(reason)}`);
+    }
+  }
+  // R7: an argument list without a shell, the shape of the force push the owner's probe sent.
+  const argv = { tool_name: 'shell', cwd: session, tool_input: { command: ['git', 'push', '--force', 'origin', 'feature'], workdir: governed } };
+  assert.equal(attributionDecision(argv, quiet()).hookSpecificOutput?.permissionDecisionReason, FORCE_MESSAGE, 'R7');
+  // Allowed controls in the same rows: an ordinary commit that mentions Claude, and git status.
+  for (const [row, , shape] of rows) {
+    for (const command of ['git commit -m "Document how Claude Code reads AGENTS.md"', 'git status']) {
+      assert.deepEqual(attributionDecision(shape(command), quiet()), {}, `${row}: ${command}`);
+    }
+  }
+  // The run folder decides, not the session folder: a force push run outside the governed repository passes.
+  assert.deepEqual(attributionDecision({ tool_name: 'exec_command', cwd: governed, tool_input: { cmd: 'git push --force origin feature', workdir: session } }, quiet()), {}, 'R8');
+});
+
+// Commit and push in one shell command: the check runs before the commit exists, so it also reads
+// what the commit could add. Each case gets its own clone with main pushed and a feature branch.
+function chainRepos(t) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-push-chain-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const hooks = path.join(dir, 'no-hooks');
+  fs.mkdirSync(hooks);
+  const git = (cwd, ...args) => fixtureGit(cwd, args, hooks);
+  let count = 0;
+  const clone = () => {
+    const name = `case-${count += 1}`;
+    const origin = path.join(dir, `${name}-origin.git`);
+    const work = path.join(dir, name);
+    git(dir, 'init', '--quiet', '--bare', origin);
+    git(dir, 'init', '--quiet', work);
+    writeFiles(work, { 'README.md': 'A fixture.\n' });
+    git(work, 'add', '-A');
+    git(work, 'commit', '--quiet', '-m', 'base');
+    git(work, 'remote', 'add', 'origin', origin);
+    git(work, 'push', '--quiet', '-u', 'origin', 'main');
+    git(work, 'checkout', '--quiet', '-b', 'feature');
+    return work;
+  };
+  return { dir, git, clone };
+}
+
+test('commit and push in one command: what the commit could add is refused before it is sent', (t) => {
+  const { dir, git, clone } = chainRepos(t);
+  const secret = `token = "${fakeToken()}"\n`;
+  const newFile = (repo) => writeFiles(repo, { 'uat-config.txt': secret });
+  const refused = [
+    ['add; commit; push', newFile, 'git add -A; git commit -m x; git push origin feature', /uat-config\.txt:1 \(not committed yet\): /],
+    ['add && commit -m && push', newFile, 'git add . && git commit -m "x" && git push origin feature', /uat-config\.txt:1 \(not committed yet\)/],
+    ['newline-separated lines', newFile, 'git add -A\ngit commit -m x\ngit push origin feature', /uat-config\.txt:1 \(not committed yet\)/],
+    ['commit -am && push, a tracked file', (repo) => writeFiles(repo, { 'README.md': secret }), 'git commit -am x && git push origin feature', /README\.md:1 \(not committed yet\)/],
+    ['commit; push with only staged changes', (repo) => { newFile(repo); git(repo, 'add', 'uat-config.txt'); }, 'git commit -m x; git push origin feature', /uat-config\.txt:1 \(not committed yet\)/],
+    ['nested bash -c', newFile, 'bash -c "git add -A && git commit -m x && git push origin feature"', /uat-config\.txt:1 \(not committed yet\)/],
+    ['nested pwsh -Command', newFile, 'pwsh -Command "git add -A; git commit -m x; git push origin feature"', /uat-config\.txt:1 \(not committed yet\)/],
+    ['git -C from another folder', newFile, null, /uat-config\.txt:1 \(not committed yet\)/],
+    ['a new pull request after the commit', (repo) => { newFile(repo); git(repo, 'add', '-A'); }, 'git commit -m x && gh pr create --fill', /uat-config\.txt:1 \(not committed yet\)/],
+  ];
+  for (const [name, prepare, command, expected] of refused) {
+    const repo = clone();
+    prepare(repo);
+    const line = command || `git -C "${repo}" add -A && git -C "${repo}" commit -m x && git -C "${repo}" push origin feature`;
+    const reason = outgoingRefusal(line, command ? repo : dir, quiet());
+    assert.match(reason, expected, name);
+    assert.match(reason, /If that file will not be in this commit, run the commit and the push as separate commands\./, name);
+  }
+  // A first commit in a new repository: there is no commit to read yet, only what it could add.
+  const fresh = path.join(dir, 'fresh');
+  git(dir, 'init', '--quiet', fresh);
+  newFile(fresh);
+  assert.match(outgoingRefusal('git add -A && git commit -m init && git push -u origin main', fresh, quiet()), /uat-config\.txt:1 \(not committed yet\)/, 'first commit');
+  // Through both shell hooks as processes, Bash and PowerShell separators.
+  for (const [tool, command] of [['Bash', 'git add -A && git commit -m x && git push origin feature'], ['PowerShell', 'git add -A; git commit -m x; git push origin feature']]) {
+    const repo = clone();
+    newFile(repo);
+    const result = runHook(claudeHook, tool, repo, command);
+    assert.equal(result.status, 2, `${tool}: ${result.stderr}`);
+    assert.match(JSON.parse(result.stdout).hookSpecificOutput.permissionDecisionReason, /uat-config\.txt:1 \(not committed yet\)/, tool);
+  }
+});
+
+test('commit and push in one command: clean changes, unadded files and other repositories pass; merges before a push are refused', (t) => {
+  const { dir, git, clone } = chainRepos(t);
+  const secret = `token = "${fakeToken()}"\n`;
+  let repo = clone();
+  writeFiles(repo, { 'notes.txt': 'Plain words only.\n' });
+  assert.equal(outgoingRefusal('git add -A; git commit -m x; git push origin feature', repo, quiet()), '', 'the same steps with no credential');
+  repo = clone();
+  writeFiles(repo, { 'notes.txt': 'Plain words only.\n' });
+  git(repo, 'add', 'notes.txt');
+  writeFiles(repo, { 'uat-config.txt': secret });
+  assert.equal(outgoingRefusal('git commit -m x; git push origin feature', repo, quiet()), '', 'an untracked file with no git add in the command is not committed');
+  const other = clone();
+  writeFiles(other, { 'uat-config.txt': secret });
+  repo = clone();
+  assert.equal(outgoingRefusal(`git -C "${other}" add -A; git -C "${other}" commit -m x; git push origin feature`, repo, quiet()), '', 'a commit in another repository');
+  repo = clone();
+  for (const step of ['merge main', 'cherry-pick main', 'revert HEAD', 'am patch.mbox', 'rebase main']) {
+    assert.match(outgoingRefusal(`git ${step}; git push origin feature`, repo, quiet()), new RegExp(`runs \`git ${step.split(' ')[0]}\` before the push in the same command.*Run the push as its own command after this finishes\\.`), step);
+  }
+  assert.match(outgoingRefusal('git merge main && gh pr create --fill', repo, quiet()), /Run the `gh pr create` as its own command/);
+  assert.equal(outgoingRefusal('git pull; git push origin feature', repo, quiet()), '', 'a pull brings in only what a remote already has');
+  assert.equal(outgoingRefusal('git push origin feature; git merge main', repo, quiet()), '', 'a merge after the push changes nothing it sends');
+});
+
+test('push check: every target of one command shares one deadline', () => {
+  const deadlines = [];
+  const check = (target, options) => { deadlines.push(options.deadline); return {}; };
+  assert.equal(outgoingRefusal('git push origin a; git push origin b; gh pr create --fill', os.tmpdir(), { notes: [], budgetMs: 5000, check }), '');
+  assert.equal(deadlines.length, 3);
+  assert.equal(new Set(deadlines).size, 1, 'one deadline');
+  assert.ok(deadlines[0] > Date.now() && deadlines[0] <= Date.now() + 5000);
+});

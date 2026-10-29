@@ -36,7 +36,9 @@ try {
     if ($null -ne $request.tool_input) { $command = [string]$request.tool_input.command + ' ' + [string]$request.tool_input.cmd }
   } catch { $toolName = $null }
   $guardedShell = $command -match '(?s)\bgit\b.*\b(?:commit|push)\b' -or $command -match '\bgh\s+pr\s+(?:create|edit|merge)\b' -or $command -match '(?s)\bgh\b.*\b(?:merge|sync|alias|api)\b' -or $command -match 'merge-approvals|user-state|TOOLKIT_HOST_SESSION|toolkit-(?:merge-hold|governance-hook|codex-helper-hook)' -or $command -match '\b(?:claude|codex)\b'
-  if ($toolName -eq 'Bash' -and -not $guardedShell) {
+  # The shell tool names Codex may report (toolkit-shell-call.cjs holds the same list).
+  $shellTool = $toolName -cmatch '^(?:Bash|PowerShell|Monitor|exec_command|shell|local_shell)$'
+  if ($shellTool -and -not $guardedShell) {
     [Console]::Error.WriteLine($reason)
     exit 1
   }

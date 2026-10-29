@@ -64,7 +64,7 @@ const MAX_APPROVALS = 100;
 const MAX_PROMPT_CHARS = 8000;
 const MAX_COMMAND_CHARS = 1024 * 1024;
 
-const SHELL_TOOLS = /^(?:Bash|PowerShell|Monitor|exec_command|shell|local_shell)$/;
+const { SHELL_TOOLS, ShellCall } = require('./toolkit-shell-call.cjs');
 const CONNECTOR_MERGE = /^mcp__.*github.*?_(merge_pull_request|enable_pr_auto_merge)$/i;
 const SLUG = '[A-Za-z0-9._-]+\\/[A-Za-z0-9._-]+';
 const MAX_APPROVAL_LINE = 200;
@@ -452,18 +452,31 @@ function decide(input, { registryOptions = {}, now, environment = process.env } 
   const tool = String(input && (input.tool_name || input.toolName) || '');
   let merges;
   if (CONNECTOR_MERGE.test(tool)) merges = [connectorMerge(tool, input)];
-  else if (SHELL_TOOLS.test(tool)) {
-    const args = input && (input.tool_input || input.toolInput) || {};
-    // A line continuation (\, a PowerShell backtick or a cmd caret before a line break) joins the
-    // next line. Codex may send the command as cmd, or as a list of words.
-    const command = args.command ?? args.cmd ?? '';
-    const text = (Array.isArray(command) ? command.join(' ') : String(command)).replace(/[\\`^]\r?\n/g, ' ');
+  else if (ShellCall.isShellTool(tool)) {
+    // The shared reader: command, cmd or a list of words, and the folder the command runs in
+    // (Codex's workdir before the session folder). A line continuation (\, a PowerShell backtick or
+    // a cmd caret before a line break) joins the next line.
+    const call = ShellCall.from(input);
+    const text = call.text.replace(/[\\`^]\r?\n/g, ' ');
     if (text.length > MAX_COMMAND_CHARS) return /merge|push/i.test(text) ? refuse('this command is too long to check for a merge or push, so it is refused. Split it.') : null;
-    const cwd = input && input.cwd ? path.resolve(String(input.cwd)) : process.cwd();
-    const refusal = shellRefusal(text, cwd);
+    const cwd = call.folder;
+    // An argument list is read both ways, as its words quoted and joined unquoted (as before the
+    // shared reader), so a quoted program path such as `C:\Program Files\GitHub CLI\gh.exe` cannot
+    // hide a merge. A merge both readings find counts once.
+    const joined = call.joinedWords && call.joinedWords !== call.text ? call.joinedWords.replace(/[\\`^]\r?\n/g, ' ') : '';
+    const refusal = shellRefusal(joined ? `${text}\n${joined}` : text, cwd);
     if (refusal) return refusal;
     merges = shellMerges(text, cwd, environment || {});
-    if (merges.some(merge => !merge.explicit) && MOVES_TARGET.test(text)) {
+    if (joined) {
+      const key = merge => JSON.stringify([merge.repository, merge.pr, merge.sha, merge.auto, merge.explicit]);
+      const left = new Map();
+      for (const merge of merges) left.set(key(merge), (left.get(key(merge)) || 0) + 1);
+      for (const merge of shellMerges(joined, cwd, environment || {})) {
+        const count = left.get(key(merge)) || 0;
+        if (count > 0) left.set(key(merge), count - 1); else merges.push(merge);
+      }
+    }
+    if (merges.some(merge => !merge.explicit) && MOVES_TARGET.test(joined ? `${text}\n${joined}` : text)) {
       return deny('this merge command changes folder or GH_REPO first, so Toolkit cannot tell which repository it merges in and it is refused. Name the repository with --repo owner/name or a pull request URL.');
     }
   } else return null;
@@ -484,8 +497,10 @@ function mayMerge(input) {
   const tool = String(input && (input.tool_name || input.toolName) || '');
   if (CONNECTOR_MERGE.test(tool)) return true;
   if (!SHELL_TOOLS.test(tool)) return false;
+  // The whole raw input: this runs when the merge check failed, possibly while reading it.
   const args = input.tool_input || input.toolInput || {};
-  const text = JSON.stringify(args.command ?? args.cmd ?? '');
+  let text;
+  try { text = JSON.stringify(args); } catch { text = String(args); }
   return /\bgh\b[\s\S]*\b(?:merge|sync|alias|api)\b/i.test(text) || /\bgit\b[\s\S]*\bpush\b/i.test(text) || STATE_WORDS.test(text) || HOOK_FEED.test(text) || /\b(?:claude|codex)\b/i.test(text);
 }
 
