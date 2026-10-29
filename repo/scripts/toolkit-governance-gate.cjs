@@ -171,7 +171,7 @@ const USER_STATE_PATH = /[\\/]\.ai-agent-toolkit[\\/]user-state(?:[\\/]|$)/i;
 const ALWAYS_TOOLS = /^ToolSearch$/;
 const PICKER_TOOL = 'AskUserQuestion';
 const EDIT_TOOLS = /^(?:Edit|Write|MultiEdit|NotebookEdit|apply_patch)$/;
-const { SHELL_TOOLS, ShellCall } = require('./toolkit-shell-call.cjs');
+const { SHELL_TOOLS, ShellCall, shellPath } = require('./toolkit-shell-call.cjs');
 // Tools that schedule a prompt for the session itself.
 const SCHEDULE_TOOLS = /^(?:CronCreate|ScheduleWakeup|RemoteTrigger)$/;
 
@@ -1559,7 +1559,7 @@ function commandTargets(text, cwd) {
       const target = match[1] ?? match[2] ?? match[3];
       if (!target || target === '-') continue;
       const expanded = /^~(?=$|[\\/])/.test(target) ? path.join(os.homedir(), target.slice(1)) : target;
-      targets.push(path.resolve(cwd, expanded));
+      targets.push(shellPath(cwd, expanded));
     }
   }
   return targets;
@@ -1572,7 +1572,7 @@ function absoluteTargets(text) {
   for (const match of text.matchAll(SHELL_WORD)) {
     const word = match[1] ?? match[2] ?? match[3];
     if (!word || !/^(?:\/|~(?=$|[\\/])|[A-Za-z]:[\\/]|\\\\)/.test(word)) continue;
-    targets.push(word.startsWith('~') ? path.join(os.homedir(), word.slice(1)) : path.resolve(word));
+    targets.push(word.startsWith('~') ? path.join(os.homedir(), word.slice(1)) : shellPath(process.cwd(), word));
     if (targets.length >= MAX_PATH_WORDS) break;
   }
   return targets;

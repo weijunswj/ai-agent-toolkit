@@ -14,7 +14,7 @@
 // that the target remote does not already have (its remote-tracking refs, so a remote with none gets
 // the whole history; every remote's when no remote or a URL is named). For a pull request, the commits of --head (else HEAD) not on the
 // base branch (--base, else origin's default branch, else origin/main or origin/master). A folder that
-// is not a repository is not checked.
+// is not a repository is not checked; a folder that does not exist is refused.
 //
 // The check runs before the whole shell command. When a `git commit` comes earlier in the same
 // command and repository, what it could commit is checked too, marked "not committed yet": the staged
@@ -42,6 +42,12 @@ class CheckSkipped extends Error {}
 function isFile(file) {
   try { return fs.statSync(file).isFile(); } catch { return false; }
 }
+
+function isFolder(folder) {
+  try { return typeof folder === 'string' && fs.statSync(folder).isDirectory(); } catch { return false; }
+}
+
+const FOLDER_MISSING = 'Toolkit could not find the folder this push or pull request runs in, so it could not check what would be sent and refused it. Check the folder in `cd` or `git -C` (on Windows, `C:/...` and Git Bash `/c/...` both work), or run the command from inside that folder.';
 
 // An environment value by name, ignoring case on Windows as Windows does.
 function environmentValue(environment, name, windows) {
@@ -301,6 +307,9 @@ function checkOutgoing(target, {
   // A source git would read as an option is never passed on.
   if (sources.some((source) => source.startsWith('-') && !REV_OPTIONS.has(source))) return {};
   const allRefs = sources.some((source) => REV_OPTIONS.has(source));
+  // A folder that is not there: the push cannot run there either, so nothing is lost by refusing,
+  // while letting it through would skip the check whenever the folder was read wrongly.
+  if (!isFolder(target.folder)) return { refusal: FOLDER_MISSING };
   try {
     const program = git(target.folder);
     if (!program) throw new CheckSkipped('git was not found');
@@ -365,4 +374,4 @@ function checkOutgoing(target, {
   }
 }
 
-module.exports = Object.freeze({ BUDGET_MS, MAX_LISTED, addedLines, checkOutgoing, diffPath, resolveGit });
+module.exports = Object.freeze({ BUDGET_MS, FOLDER_MISSING, MAX_LISTED, addedLines, checkOutgoing, diffPath, resolveGit });

@@ -1,5 +1,10 @@
 # Toolkit Changelog
 
+## 3.19.3 (Git Bash folder paths in the push checks)
+
+- **Git Bash drive paths:** on Windows, a folder written the Git Bash way (`/c/Users/...`, `/cygdrive/c/...`, any drive letter) in `cd`, `git -C`, `--work-tree`, a message or body file, a Codex `workdir` or a path word now names that drive in every check: the attribution, bypass, force-push and push checks, the merge hold and the governance gate. Before, it was read as a folder `c` on the current drive, which does not exist, so in Claude Code a push from such a folder went out unchecked with only a note. Git Bash is the shell behind Claude Code's Bash tool on Windows.
+- **A missing folder refuses the push:** a push or new pull request whose folder does not exist is now refused in both hosts with a plain reason, instead of letting it through with a note that the check could not run. Such a push cannot run there anyway.
+
 ## 3.19.2 (links only where the owner acts, and no flattened questions)
 
 - **Projects post hook (skill version 2026-10-29.6, upload it again):** links are required only where the owner acts. A PR, thread or file named in prose or a plain bullet no longer needs a link, in posts and in replies. Every numbered item under the **Waiting on you** header (each question and merge ask) still needs one, and a pull request link there without `/files` is refused with the fix.

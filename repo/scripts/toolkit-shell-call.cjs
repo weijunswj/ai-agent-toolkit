@@ -14,7 +14,8 @@
 //     argument list: the script of a shell wrapper (`bash -lc <script>`, `pwsh -Command <script>`,
 //     `cmd /c <script>`), else the words quoted so that shell parsing gives back the same words;
 //   - folder: `workdir`, else the tool's own `cwd`, else the top-level `cwd`, else this process's
-//     folder, a relative value resolved against the top-level `cwd`;
+//     folder, a relative value resolved against the top-level `cwd`. shellPath() resolves every
+//     folder or file a command names the same way, Git Bash drive paths included;
 //   - unreadable: a shell call whose command or folder has a type no host sends, or that has no
 //     command at all. The checks cannot read it, so a call whose raw input could commit, push or open,
 //     edit or merge a pull request is refused (refusal()); any other unreadable call runs.
@@ -34,6 +35,20 @@ const POWERSHELL = /^(?:pwsh|powershell)$/;
 const SCRIPT_OPTION = { posix: /^-[A-Za-z]*c$/, powershell: /^-(?:c|command)$/i, cmd: /^\/[ck]$/i };
 // Backslashes are quoted too: outside quotes, one before a space or quote escapes it.
 const PLAIN_WORD = /^[A-Za-z0-9_@%+=:,./-]+$/;
+
+// A folder or file a shell command names, resolved against `base`. On Windows a Git Bash drive path
+// (`/c/Users/...`, `/cygdrive/c/...`, any drive letter) names that drive, as Git Bash reads it; it is
+// the shell behind Claude Code's Bash tool there. Node alone would read `/c/Users` as a folder `c` on
+// the current drive, a folder that does not exist, and the checks would look in the wrong place.
+function shellPath(base, value, platform = process.platform) {
+  const text = String(value);
+  if (platform === 'win32') {
+    const drive = /^\/(?:cygdrive\/)?([A-Za-z])(?:\/(.*))?$/s.exec(text);
+    if (drive) return path.win32.resolve(`${drive[1].toUpperCase()}:\\`, drive[2] || '');
+    return path.win32.resolve(base, text);
+  }
+  return path.resolve(base, text);
+}
 
 function programName(word) {
   return path.win32.basename(path.posix.basename(word)).replace(/\.exe$/i, '').toLowerCase();
@@ -126,7 +141,7 @@ class ShellCall {
     for (const field of ['workdir', 'cwd']) {
       const value = named[field];
       if (value === undefined || value === null || value === '') continue;
-      if (typeof value === 'string') folders.push(path.resolve(base, value));
+      if (typeof value === 'string') folders.push(shellPath(base, value));
       else unreadable = true;
     }
     if (isShell && !texts.length) unreadable = true;
@@ -153,4 +168,4 @@ class ShellCall {
   }
 }
 
-module.exports = Object.freeze({ SHELL_TOOL_NAMES, SHELL_TOOLS, UNREADABLE, ShellCall, argvText, quoteWords });
+module.exports = Object.freeze({ SHELL_TOOL_NAMES, SHELL_TOOLS, UNREADABLE, ShellCall, argvText, quoteWords, shellPath });

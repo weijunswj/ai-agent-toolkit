@@ -21,7 +21,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { ShellCall } = require('./toolkit-shell-call.cjs');
+const { ShellCall, shellPath } = require('./toolkit-shell-call.cjs');
 
 const MESSAGE = 'Remove the AI attribution lines (Co-Authored-By or Claude-Session trailers, claude.ai session links, "Generated with" footers) and retry.';
 const ATTRIBUTION_PATTERNS = Object.freeze([
@@ -132,11 +132,11 @@ function messageCommand({ words, offsets }, root) {
       if (value === undefined) return null;
       if (word === '-C') {
         if (++directories > MAX_DIRECTORY_OPTIONS) return { refusal: DIRECTORY_LIMIT };
-        if (value) base = path.resolve(base, value);
+        if (value) base = shellPath(base, value);
       }
     } else if (word.startsWith('-C') && word.length > 2) {
       if (++directories > MAX_DIRECTORY_OPTIONS) return { refusal: DIRECTORY_LIMIT };
-      base = path.resolve(base, word.slice(2));
+      base = shellPath(base, word.slice(2));
     } else if (!word.startsWith('-')) return word === 'commit' ? { base, git: true, words: words.slice(index + 1), offsets: offsets.slice(index + 1) } : null;
     // Other global options, including --option=value and attached -c values, occupy one word.
   }
@@ -195,7 +195,7 @@ class AttributionFileScreen {
     if (!raw || raw === '-') return false;
     if (!this.resolved.has(base)) this.resolved.set(base, new Map());
     const paths = this.resolved.get(base);
-    if (!paths.has(raw)) paths.set(raw, path.resolve(base, raw));
+    if (!paths.has(raw)) paths.set(raw, shellPath(base, raw));
     const file = paths.get(raw);
     if (!this.checked.has(file)) this.checked.set(file, hasAttribution(this.readFile(file)));
     return this.checked.get(file);
@@ -226,7 +226,7 @@ function attributionRefusal(command, cwd) {
   // The legacy -C interpretation is retained only for unpaired files. Always check the base
   // folder too: a wrapper or an unmatched quote must not silently disable file screening.
   const legacyDirectory = /\bgit\s+-C\s+("[^"]+"|'[^']+'|\S+)/.exec(text)?.[1]?.replace(/^["']|["']$/g, '');
-  const bases = legacyDirectory ? [root, path.resolve(root, legacyDirectory)] : [root];
+  const bases = legacyDirectory ? [root, shellPath(root, legacyDirectory)] : [root];
   let unpaired = 0;
   for (const match of text.matchAll(FILE_OPTIONS)) {
     const offset = match.index + (/\s/.test(match[0][0]) ? 1 : 0);
@@ -267,9 +267,9 @@ function gitCommand({ words }, root) {
       const value = word === '-C' ? words[++index] : word.slice(2);
       if (value === undefined) return null;
       if (++directories > MAX_DIRECTORY_OPTIONS) return { refusal: DIRECTORY_LIMIT };
-      if (value) base = path.resolve(base, value);
-    } else if (word === '--work-tree') { const value = words[++index]; if (value) base = path.resolve(base, value); }
-    else if (word.startsWith('--work-tree=')) base = path.resolve(base, word.slice(12));
+      if (value) base = shellPath(base, value);
+    } else if (word === '--work-tree') { const value = words[++index]; if (value) base = shellPath(base, value); }
+    else if (word.startsWith('--work-tree=')) base = shellPath(base, word.slice(12));
     else if (GIT_VALUE_OPTIONS.has(word)) index += 1;
     else if (!word.startsWith('-')) return { base, configs, sub: word, args: words.slice(index + 1) };
   }
@@ -396,7 +396,7 @@ function bypassRefusal(command, cwd, depth = 0, registryOptions = {}) {
   for (const current of shellCommands(text)) {
     // A cd earlier in the same command line moves the folder later git commands run in.
     if (/^(?:cd|pushd|set-location|sl)$/i.test(current.words[0]) && current.words.length === 2) {
-      root = path.resolve(root, current.words[1]);
+      root = shellPath(root, current.words[1]);
       continue;
     }
     const git = gitCommand(current, root);
@@ -484,7 +484,7 @@ function outgoingChanges(command, cwd, depth = 0, preceding = []) {
   const withPreceding = (target) => (preceding.length ? { ...target, preceding: preceding.slice() } : target);
   for (const current of shellCommands(text)) {
     if (/^(?:cd|pushd|set-location|sl)$/i.test(current.words[0]) && current.words.length === 2) {
-      root = path.resolve(root, current.words[1]);
+      root = shellPath(root, current.words[1]);
       continue;
     }
     const git = gitCommand(current, root);

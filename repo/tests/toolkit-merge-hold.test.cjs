@@ -286,6 +286,13 @@ test('matrix: Codex shell shapes are judged in the folder the command runs in, f
     assert.match(decide(ctx, shape('git push origin main', ctx.repo))?.deny || '', /default branch `main`/, `${row}: C8`);
     assert.equal(decide(ctx, shape('git status', ctx.repo)), null, `${row}: allowed control`);
   }
+  if (process.platform === 'win32') {
+    // Git Bash drive paths in git -C and cd name the same repository.
+    const drive = `/${ctx.repo[0].toLowerCase()}${ctx.repo.slice(2).replace(/\\/g, '/')}`;
+    for (const command of [`git -C ${drive} push origin main`, `cd ${drive} && git push origin main`, `cd /cygdrive${drive} && git push origin main`]) {
+      assert.match(decide(ctx, bash(ctx.root, command))?.deny || '', /default branch `main`/, command);
+    }
+  }
   // An argument list without a shell.
   assert.match(decide(ctx, { cwd: ctx.root, tool_name: 'shell', tool_input: { command: ['git', 'push', 'origin', 'main'], workdir: ctx.repo } })?.deny || '', /default branch `main`/, 'R7');
   // A program path with spaces is quoted in the shared reading; the unquoted reading still finds the merge.

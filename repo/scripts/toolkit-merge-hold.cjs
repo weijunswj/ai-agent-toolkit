@@ -64,7 +64,7 @@ const MAX_APPROVALS = 100;
 const MAX_PROMPT_CHARS = 8000;
 const MAX_COMMAND_CHARS = 1024 * 1024;
 
-const { SHELL_TOOLS, ShellCall } = require('./toolkit-shell-call.cjs');
+const { SHELL_TOOLS, ShellCall, shellPath } = require('./toolkit-shell-call.cjs');
 const CONNECTOR_MERGE = /^mcp__.*github.*?_(merge_pull_request|enable_pr_auto_merge)$/i;
 const SLUG = '[A-Za-z0-9._-]+\\/[A-Za-z0-9._-]+';
 const MAX_APPROVAL_LINE = 200;
@@ -314,7 +314,7 @@ function pushRefusal(words, cwd) {
   index += 1;
   while (index < words.length && words[index].startsWith('-')) {
     const option = words[index];
-    if (option === '-C' && index + 1 < words.length) root = path.resolve(root, words[index + 1]);
+    if (option === '-C' && index + 1 < words.length) root = shellPath(root, words[index + 1]);
     index += GIT_VALUE_OPTIONS.has(option) ? 2 : 1;
   }
   if (words[index] !== 'push') return '';
@@ -440,7 +440,7 @@ function shellRefusal(text, cwd) {
   }
   let root = cwd;
   for (const words of parts) {
-    if (/^(?:cd|pushd|chdir|set-location|sl)$/i.test(words[0]) && words.length >= 2) { root = path.resolve(root || '.', words[words.length - 1]); continue; }
+    if (/^(?:cd|pushd|chdir|set-location|sl)$/i.test(words[0]) && words.length >= 2) { root = shellPath(root || process.cwd(), words[words.length - 1]); continue; }
     const reason = pushRefusal(words, root || process.cwd());
     if (reason) return refuse(reason);
   }
