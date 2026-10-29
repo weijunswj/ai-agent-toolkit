@@ -15,7 +15,7 @@ const { ClaudeSubagentDepthSetting, STATES: SUBAGENT_DEPTH_STATES } = require('.
 const { ClaudeUserSettings, STATES: CLAUDE_SETTINGS_STATES } = require('./toolkit-claude-user-settings.cjs');
 const { ClaudePluginRegistry } = require('./toolkit-claude-plugin-registry.cjs');
 const { OfficialN8nSkills, installSummary: n8nSkillsSummary } = require('./toolkit-n8n-official-skills.cjs');
-const { disableUserPlugin } = require('./setup-claude-toolkit-plugin.cjs');
+const { disableUserPlugin, registrySourceEvidence } = require('./setup-claude-toolkit-plugin.cjs');
 const { AntigravityGlobalSkills, globalCopySummary } = require('./toolkit-antigravity-project-skills.cjs');
 const { CodexHelperDefinitions, describeSetupResult: describeCodexHelpers } = require('./toolkit-codex-helper-agents.cjs');
 const { STATUS: INSTALL_CHECK_STATUS } = require('./toolkit-install-health.cjs');
@@ -1647,7 +1647,8 @@ function shortClaudePlugin(current) {
   if (install?.installed !== true) return 'Checked after you answer';
   const state = install.enabled === false ? 'Off' : install.enabled === true ? 'On' : 'Installed';
   const latest = current.nativePlugin.manifest_version;
-  return `${state}, ${install.version || 'version unknown'}${latest && latest !== install.version ? ` (${latest} available)` : ''}`;
+  const notes = [latest && latest !== install.version ? `${latest} available` : '', claudePluginRecordLag(install)].filter(Boolean);
+  return `${state}, ${install.version || 'version unknown'}${notes.length ? ` (${notes.join('; ')})` : ''}`;
 }
 
 const CLAUDE_SETTING_SHORT_NAMES = Object.freeze({
@@ -1704,26 +1705,45 @@ function claudeRootOnlyUnchanged(profile, depth) {
 }
 
 // What Claude Code's plugin registry and user settings say about Toolkit: installed, where it runs
-// from, the version of that folder and whether it is turned on. Claude Code runs Toolkit in place from
-// that folder, so its manifest is the version that runs; the version in the install record can lag
-// behind and is not used. Files only; no Claude session is launched.
-function claudePluginInstallState(registry) {
+// from, the version of that folder, whether it is turned on, and whether Claude Code's install record
+// matches that folder. Claude Code runs Toolkit in place from the folder, so its manifest is the
+// version that runs; the install record can lag behind, and then Install or refresh rewrites it (an
+// uninstall and reinstall), so a lagging record counts as a change. The record check is the one the
+// plugin setup uses (one record, at the folder's version and commit). Reads files and the folder's
+// Git commit only; no Claude session is launched.
+function claudePluginInstallState(registry, recordMatches = (record, root, version) => registrySourceEvidence(record, root, version).ok) {
   const install = registry.toolkitInstall();
   let version = '';
   if (install.installed) {
     try { version = JSON.parse(fs.readFileSync(path.join(install.runningRoot, '.claude-plugin', 'plugin.json'), 'utf8').replace(/^﻿/, '')).version || ''; }
     catch { version = ''; }
   }
-  return { installed: install.installed, runningRoot: install.runningRoot, version, enabled: registry.toolkitEnabled() };
+  const record = install.records.length === 1 ? install.records[0] : null;
+  return {
+    installed: install.installed,
+    runningRoot: install.runningRoot,
+    version,
+    recordedVersion: install.records.at(-1)?.version || '',
+    recordCurrent: Boolean(install.installed && record && version && recordMatches(record, install.runningRoot, version)),
+    enabled: registry.toolkitEnabled(),
+  };
 }
 
-// Toolkit is installed, turned on, runs in place from the update source 1.1 recommends, and that
-// folder is at the version of the Toolkit copy setup reads, so Install or refresh would find nothing to do.
+// Toolkit is installed, turned on, runs in place from the update source 1.1 recommends, that folder is
+// at the version of the Toolkit copy setup reads, and Claude Code's install record matches it, so
+// Install or refresh would find nothing to do.
 function claudePluginUnchanged(current, args) {
   const install = current.claudePluginInstall;
-  return install?.installed === true && install.enabled === true
+  return install?.installed === true && install.enabled === true && install.recordCurrent === true
     && Boolean(install.version) && install.version === current.nativePlugin.manifest_version
     && samePath(install.runningRoot, recommendedUpdateSource(current, args));
+}
+
+// Why Claude Code's install record does not match the folder it runs Toolkit from, in a few words.
+function claudePluginRecordLag(install) {
+  if (install.recordCurrent !== false) return '';
+  return install.recordedVersion && install.recordedVersion !== install.version
+    ? `Claude Code's record says ${install.recordedVersion}` : "Claude Code's record is out of date";
 }
 
 function claudePluginCurrent(current, args) {
@@ -1732,7 +1752,8 @@ function claudePluginCurrent(current, args) {
   const install = current.claudePluginInstall;
   if (install?.installed === true) {
     const state = install.enabled === false ? 'turned off' : install.enabled === true ? 'turned on' : 'on or off unknown';
-    return `Claude Code runs Toolkit ${install.version || '(version unknown)'} (${state}); this Toolkit copy is ${current.nativePlugin.manifest_version || 'unknown'}.`;
+    const lag = claudePluginRecordLag(install);
+    return `Claude Code runs Toolkit ${install.version || '(version unknown)'} (${state}); this Toolkit copy is ${current.nativePlugin.manifest_version || 'unknown'}.${lag ? ` ${lag}, so Install or refresh rewrites it.` : ''}`;
   }
   return 'Setup checks the Claude Code Toolkit plugin after you answer, and installs or refreshes it only if needed.';
 }
