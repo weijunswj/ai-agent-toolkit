@@ -45,7 +45,10 @@ test('Claude managed stale refresh captures write JSON and emits only the saniti
   assert.match(result.stdout, /Claude native plugin verification: current source identity was not established; approved refresh is required\./);
   assert.match(result.stdout, /Claude plugin manifest path: <managed-toolkit-checkout>/);
   assert.match(result.stdout, /Claude plugin status: installed this run/);
-  assert.match(result.stdout, /Claude plugin updated this run: yes/);
+  // Setup names both Claude copies and never says it updated the Claude app.
+  assert.match(result.stdout, /^Claude Code in a terminal: \d+\.\d+\.\d+ \(runs from this PC's Toolkit folder\)$/m);
+  assert.match(result.stdout, /^Claude app: no claude\.ai copy found on this PC$/m);
+  assert.doesNotMatch(result.stdout, /Claude plugin updated this run/);
   assert.equal(fs.existsSync(path.join(fixture.setupRepo, 'CLAUDE_PLUGIN_REFRESHED')), true);
   assertPrivateHelperOutputAbsent(result, fixture);
 });

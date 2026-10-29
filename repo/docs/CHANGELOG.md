@@ -1,5 +1,12 @@
 # Toolkit Changelog
 
+## 3.19.5 (a Claude app update reminder, and no Claude plugin update step)
+
+- **Claude app reminder:** when a new Claude app chat starts from the Toolkit copy in your claude.ai account and that copy is older than this PC's Toolkit, the session-start hook shows you one reminder with both versions and the steps: Check for updates on claude.ai, then remove only the plugin on claude.ai in a web browser, then remove and add the marketplace again, then fully quit and reopen the Claude app. It goes out as the hook's message to you and as a line asking the chat to say it in its first reply. It reads two version files and writes nothing. Account copies from before this release stay quiet; the install check and the daily check-in still report them.
+- **One set of steps:** the install check row, the daily check-in's plugin steps (skill version 2026-10-29.8, save the card) and the reminder now use the same four steps in that order.
+- **Setup names both Claude copies:** instead of "Claude plugin updated this run", setup prints `Claude Code in a terminal: <version> (runs from this PC's Toolkit folder)` and `Claude app: claude.ai copy <version>, which only claude.ai updates`, pointing to the install check's steps when the app copy is behind.
+- **No Claude plugin update step:** a probe on Claude Code 2.1.310 showed the terminal app runs Toolkit in place from this PC's Toolkit folder, picks up a new version without `claude plugin update`, and never runs the cache copy. Setup now judges such an install by the folder's version and no longer runs `claude plugin update` after each release; it still installs the plugin once.
+
 ## 3.19.4 (skill cards carry the exact file)
 
 - **Skill card hook:** a new Claude Code hook on `propose_skills` checks every card for the Projects controller skill (`web-controller-projects`) against main's SKILL.md, downloaded fresh (raw file, then the GitHub contents API on a mismatch). The card must be kind `improvement` with name and target `web-controller-projects`, the frontmatter description and main's text exactly (only CR and the final newline may differ). Any other card is refused with both sizes and sha256 hashes, where they first differ and the likely cause (cut short, HTML-escaped or changed text). When main cannot be read, the card holds. Other skills' cards pass untouched.
