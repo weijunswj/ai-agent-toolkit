@@ -168,8 +168,11 @@ test('folder-name exclusions close command-position and derived-text families', 
     assert.equal(parse(text, { tool_input: { command: text } }).status, 'NOT_CONTINUATION', text);
   }
   // Oversized requests must return to the existing evidence path before any new scan.
-  const bounded = evidenceProjection(source => source.replace('function derivedNameExecution(text) {',
-    'function derivedNameExecution(text) { throw new Error("OVERSIZED_NAME_SCAN");'));
+  const scans = ['function derivedNameExecution(text, shell = null, view = quotedView(text, shell)) {', 'function quotedView(text, shell) {'];
+  const bounded = evidenceProjection(source => scans.reduce((patched, head) => {
+    assert.ok(patched.includes(head), head);
+    return patched.replace(head, head + ' throw new Error("OVERSIZED_NAME_SCAN");');
+  }, source));
   for (const unit of ['ls ~/.claude/ -r; ', 'cat ~/.codex/sessions/example.jsonl | grep resume | ', '~/.claude/']) {
     const text = (unit === '~/.claude/' ? '"' : '') + unit.repeat(Math.ceil(1048576 / unit.length));
     assert.equal(bounded.parse(text, { tool_input: { command: text } }).status, 'UNKNOWN');

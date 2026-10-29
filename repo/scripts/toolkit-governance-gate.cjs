@@ -1588,9 +1588,10 @@ function sessionIdOf(input) {
 class ToolGate {
   #gate; #continuation; #epochs; #notes; #reach; #tickets; #notNow; #registryOptions; #environment;
 
-  constructor({ registryOptions = {}, stateReader = null, now, environment = process.env, continuationResolver = null } = {}) {
+  // host is set by the hook entry point ('claude' or 'codex'), never read from the payload.
+  constructor({ registryOptions = {}, stateReader = null, now, environment = process.env, continuationResolver = null, host = null } = {}) {
     this.#gate = new GovernanceGate({ registryOptions, stateReader, now });
-    this.#continuation = continuationResolver || new ContinuationResolver({ environment });
+    this.#continuation = continuationResolver || new ContinuationResolver({ environment, host });
     this.#epochs = new SessionEpochs({ registryOptions, now });
     this.#notes = new PickerNotes({ registryOptions, now });
     this.#reach = new ReachAsks({ registryOptions, now });

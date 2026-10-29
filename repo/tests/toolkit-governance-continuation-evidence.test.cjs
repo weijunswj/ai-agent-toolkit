@@ -283,7 +283,7 @@ test('multiline pipeline reader model keeps literal data separate from all execu
 
 test('acquisition schema and structural reader resources stay within the closed lexical subset', () => {
   const api = evidenceProjection(), input = { tool_input: { shell: 'powershell.exe' } };
-  const branch = 'gh run list --branch codex/resume';
+  const branch = 'gh run list --branch codex.resume';
   const fields = ['attempt', 'conclusion', 'createdAt', 'databaseId', 'displayTitle', 'event', 'headBranch', 'headSha',
     'name', 'number', 'startedAt', 'status', 'updatedAt', 'url', 'workflowDatabaseId', 'workflowName'];
   for (const tail of ['', ' --repo example-org/example-repo', ' --repo github.example.test/example-org/example-repo',
@@ -304,9 +304,9 @@ test('acquisition schema and structural reader resources stay within the closed 
     assert.equal(api.commandRoles(text, input).candidate, text, 'whole malformed acquisition stage is retained');
   }
   for (const text of ['gh run list --branch --codex', 'gh run list --branch -codex/resume',
-    'gh run list --branch=codex/example-branch', 'gh run list -b codex/example-branch',
-    'gh run watch --branch codex/example-branch', 'gh workflow list --branch codex/example-branch',
-    'gh "run" list --branch codex/example-branch', 'gh run "list" --branch codex/example-branch']) {
+    'gh run list --branch=codex.example-branch', 'gh run list -b codex.example-branch',
+    'gh run watch --branch codex.example-branch', 'gh workflow list --branch codex.example-branch',
+    'gh "run" list --branch codex.example-branch', 'gh run "list" --branch codex.example-branch']) {
     assert.equal(api.commandRoles(text, input).candidate, text, 'no alias, option-like value or alternate command proof');
   }
   for (const text of ['rg --regexp="codex resume" fixture.txt | ConvertFrom-Json', 'findstr /c:"codex resume" fixture.txt | ConvertFrom-Json']) {
@@ -371,7 +371,7 @@ test('evidence boundary model proves only owned binding separators and complete 
       check('git/' + id, text, 'NOT_CONTINUATION', selected);
     }
     for (const text of ['codex resume --last; ' + command, command + '; claude --resume fixture',
-      command + ' | codex resume --last', command.replace('codex/example', '$(codex resume)') + '; & ("co"+"dex") ("res"+"ume")']) {
+      command + ' | codex resume --last', command.replace('codex.example', '$(codex resume)') + '; & ("co"+"dex") ("res"+"ume")']) {
       check('git-executable/' + id, text, 'UNKNOWN', selected);
     }
   }
@@ -389,12 +389,12 @@ test('evidence boundary model proves only owned binding separators and complete 
   }
   for (const [id, text] of model.construction) for (const selected of model.shells) check('construction/' + id, text, 'UNKNOWN', selected);
   for (const selected of [null, '', 5, 'unknown.exe']) {
-    const text = 'git push origin HEAD:refs/heads/codex/example; if ($x) { Write-Output $x }';
+    const text = 'git push origin HEAD:refs/heads/codex.example; if ($x) { Write-Output $x }';
     const envelope = { tool_input: { shell: selected } };
     assert.equal(api.commandRoles(text, envelope).segments, null); assert.equal(parse(text, envelope).status, 'UNKNOWN');
   }
   for (const selected of model.shells) for (const [id, body] of [
-    ['ref', 'git push origin HEAD:refs/heads/codex/example; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }'],
+    ['ref', 'git push origin HEAD:refs/heads/codex.example; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }'],
     ['message', 'git commit -m "codex resume"'],
   ]) {
     const text = "pwsh -NoProfile -Command '" + body + "'";
@@ -407,7 +407,7 @@ test('evidence boundary model proves only owned binding separators and complete 
   for (const [ending, expected] of [[';', 'NOT_CONTINUATION'], [' |', 'NOT_CONTINUATION'],
     [' && git status', 'NOT_CONTINUATION'], [' || git status', 'NOT_CONTINUATION'],
     [' # comment', 'UNKNOWN'], [' ' + String.fromCharCode(0), 'UNKNOWN'], [' ' + String.fromCharCode(0x2603), 'UNKNOWN']]) {
-    const text = 'git push origin HEAD:refs/heads/codex/example' + ending;
+    const text = 'git push origin HEAD:refs/heads/codex.example' + ending;
     const roles = api.commandRoles(text, input(null));
     assert.equal(roles.segments, null); assert.equal(roles.candidate, text);
     assert.equal(parse(text, input(null)).status, expected, JSON.stringify(ending));

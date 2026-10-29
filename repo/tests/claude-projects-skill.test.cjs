@@ -52,7 +52,7 @@ test('no plugin payload or skills folder reaches the Projects controller skill',
 
 test('Projects wires managed instructions, promises and fresh scheduled sessions to controller law', () => {
   const text = bundle();
-  assert.match(text, /^Version: 2026-10-29\.1$/m);
+  assert.match(text, /^Version: 2026-10-29\.2$/m);
   // Gate launches name their gate and route; setup writes the GATE ROUTE line the launch hook reads.
   assert.ok(text.includes('`GATE ROUTE: profile <profile> placement <remote_control|cloud|any> [folder <path>]`'));
   assert.match(text, /\*\*Gate launches carry a Gate line and their route\.\*\* Every thread brief that names a gate carries one line `Gate: <value>`/);
@@ -184,10 +184,12 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.ok(text.includes('**Post layout.** A running post has four parts, in order: a **Now:** line'));
   assert.ok(text.includes('one **ELI5:** line, matched to the Now line, as the very last line with nothing after it'));
   assert.ok(text.includes('one **[HH:MM] Update:** line per update, each followed by a line holding only `&nbsp;` as a spacer'));
-  // Questions: numbered items with indented choices, a "(my pick)" mark and an &nbsp; spacer after the last choice.
+  assert.ok(text.includes('(only Update lines take a spacer line)'));
+  // Questions: numbered items with indented choices and a "(my pick)" mark; no spacer after the last choice.
   assert.ok(text.includes('Each owner question is one numbered item under **Waiting on you**, written `1. **Question: <the ask>?**`'));
   assert.ok(text.includes('`    - **<Choice> (my pick).** <one-line reason>`'));
-  assert.ok(text.includes('then one line indented four spaces holding only `&nbsp;` after the last choice'));
+  assert.ok(text.includes('The next numbered item follows the last choice directly, with no spacer line.'));
+  assert.equal((text.match(/&nbsp;/g) || []).length, 1, 'only the Update log lines take an &nbsp; spacer');
   assert.ok(text.includes('Choices need no link of their own unless they name a PR, thread or file.'));
   assert.ok(text.includes('refuses any edit of a post the owner has written after (post fresh instead)'));
   assert.doesNotMatch(text, /put at most one \*\*Question:\*\* in a post|Use decision cards for questions, else group/);
