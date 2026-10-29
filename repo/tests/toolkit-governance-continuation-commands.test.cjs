@@ -1,8 +1,7 @@
 'use strict';
 
-// Continuation classification of shell commands: host folder names, folder-name exclusions, literal
-// readers, inert data, shell families, embedded and hostile text, refusals and path guards; and the
-// target-authority model with its resolver, transcript reader and selectors.
+// The continuation target-authority model with its resolver, transcript reader and selectors;
+// embedded and hostile text; the reviewed command corpus under every shell reading; and path guards.
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -12,194 +11,29 @@ const { ContinuationResolver, TranscriptReader, LIMITS, parse } = require('../sc
 const gate = require('../scripts/toolkit-governance-gate.cjs');
 const hostile = require('./support/hostile-inputs.cjs');
 const matrix = require('./support/governance-continuation-matrix.json');
-const refusalCases = require('./support/governance-continuation-refusal-cases.json');
-const { dataClass, evidenceProjection, expectedFor, fixture, ID, message, OTHER_ID, shell, snapshot, transcript } = require('./support/governance-continuation-fixture.cjs');
+const corpus = require('./support/governance-continuation-corpus.json');
+const { READINGS, expectedFor, fixture, ID, message, OTHER_ID, readingInput, shell, snapshot, transcript } = require('./support/governance-continuation-fixture.cjs');
 
-test('host-named directories and variables are names, not continuation evidence, on both envelopes', t => {
+test('the reviewed command corpus keeps its result under every shell reading', t => {
+  // Commands earlier reviews collected, each with its expected result per reading. A row whose
+  // `was` differs is a reviewed allowance of the letters-anywhere guard's refusal; it never
+  // covers a verified resume, and no row refused by that guard is allowed in its own shell
+  // unless the text runs no host there.
   const ctx = fixture(t), before = snapshot(ctx.dir);
-  // Everyday reads of host configuration and plugin folders, and the reported readiness shape.
-  const ordinary = [
-    "git rev-parse 'HEAD^{tree}'; node C:/example.test/.codex/check.cjs",
-    "git rev-parse HEAD 'HEAD^{tree}'; git status --short; git ls-remote origin refs/heads/deployment/example; python _logs/example/validate.py; node C:/Users/example/.codex/plugins/cache/ai-agent-toolkit-local/ai-agent-toolkit/3.15.19/skills/external-operation-preflight/scripts/preflight-check.cjs _logs/example/plan.json",
-    'Get-Content "$env:USERPROFILE/.claude/settings.json"',
-    'Get-ChildItem ~/.claude -Recurse',
-    'grep -rn example ~/.claude/settings.json',
-    'cat .claude-plugin/plugin.json | jq -r .version',
-    'Get-ChildItem C:\\Users\\example\\.codex\\sessions -Recurse',
-    'node "$CLAUDE_PROJECT_DIR/scripts/example.js"',
-    'ls $env:CODEX_HOME',
-    'echo co/.claude/dex$x',
-    'cat ~/.codex/sessions/example.jsonl | grep resume',
-  ];
-  // Earlier rows that used such a folder: 18 unproved-syntax rows whose only evidence it was,
-  // and 61 proved rows that would pass without their proof. Both now use an undotted folder.
-  const earlier = matrix.name_barrier_cases;
-  assert.equal(earlier.length, 79);
-  // A dotted name touching no path separator, a host after the directory, a selector beside a
-  // variable, constructed spellings and non-ASCII input all keep the conservative result.
-  const retained = [
-    ...refusalCases.cases.filter(row => row.expected === 'UNKNOWN' && !row.data && !row.id.startsWith('D')).map(row => row.text),
-    'codex resume --last',
-    'claude -r example',
-    "'.claude' -r example",
-    'C:/example.test/.codex/codex.exe resume',
-    'ls ~/.codex/; codex fork',
-    '& $codex resume',
-    '$env:CODEX_HOME; codex resume',
-    "node C:/example.test/.codex/check.cjs; & ('co'+'dex') resume",
-    'ls ~/.claude/; & ("cl"+"au"+"de") -r example',
-    'Get-ChildItem ~/.claude/ -Recurse; & ("cl"+"aude") -c',
-    'Get-Content "$env:USERPROFILE/.claude/\u00e9.json" -Raw',
-    // Variables that can hold the host executable, and names that are not variables.
-    '"$CLAUDE_CODE_EXECPATH" -c -p hi', '& $env:CLAUDE_CODE_EXECPATH -r x', 'exec "$CLAUDE_CODE_EXECPATH" -c -p hi',
-    "Start-Process $env:CLAUDE_CODE_EXECPATH -ArgumentList '-r'", '& $claude -r', '& $env:claude_BIN -r', '"$claude_PATH" -r',
-    "$x='$claude'.Substring(1); & $x -r", "x='$claude'; ${x:1} -r",
-    // Runtime extraction of a host spelling from a folder name keeps the earlier result.
-    'echo /.claude -r | cut -c3- | sh', 'echo /.codex resume | cut -c3- | sh', '$(echo /.claude | cut -c3-) -r',
-    '& (gi ~/.claude).Name.Substring(1) -r', '& ("x/.claude".Substring(3)) -r',
-    '& ([io.path]::GetFileName("~/.claude").TrimStart(".")) -r', "& ('~/.claude' -replace '.*\\.') -r",
-    '& (-join (gi ~/.claude).Name[1..6]) -r', 'x=~/.claude/; y=${x%/}; ${y##*/.} -r', 'cmd /v:on /c "set x=~/.claude&& !x:~3! -r"',
-  ];
-  let checks = 0;
-  for (const row of earlier) {
-    const input = shell(ctx, row.text, row.shell ? { tool_input: { command: row.text, shell: row.shell } } : {});
-    assert.equal(parse(row.text, input).status, row.expected, row.id); checks += 1;
-  }
-  for (const shellName of [undefined, 'powershell.exe', 'bash']) {
-    for (const command of ordinary) {
-      const input = shell(ctx, command, shellName ? { tool_input: { command, shell: shellName } } : {});
-      assert.deepEqual(parse(command, input), { status: 'NOT_CONTINUATION' }, `${shellName}: ${command}`); checks += 1;
+  assert.deepEqual(corpus.readings, READINGS);
+  let checks = 0, allowances = 0;
+  for (const row of corpus.rows) for (const reading of READINGS) {
+    const text = row.text.replaceAll('{TARGET}', ctx.target).replaceAll('{TRANSCRIPT}', ctx.file);
+    const input = readingInput(ctx, text, reading);
+    assert.equal(parse(text, input).status, row.expected[reading], `${row.ids[0]} ${reading}: ${row.text.slice(0, 120)}`);
+    if (row.was?.[reading] && row.expected[reading] === 'NOT_CONTINUATION') {
+      assert.equal(row.was[reading], 'UNKNOWN', row.ids[0]);
+      allowances += 1;
     }
-    for (const command of retained) {
-      const input = shell(ctx, command, shellName ? { tool_input: { command, shell: shellName } } : {});
-      assert.notEqual(parse(command, input).status, 'NOT_CONTINUATION', `${shellName}: ${command}`); checks += 1;
-    }
-    // Copying a dotted plugin folder is data where a POSIX shell runs cp; the other shells keep the refusal.
-    const copy = 'cp -r .claude-plugin /tmp/example', input = shell(ctx, copy, shellName ? { tool_input: { command: copy, shell: shellName } } : {});
-    assert.equal(parse(copy, input).status, shellName === 'bash' ? 'NOT_CONTINUATION' : 'UNKNOWN', `${shellName}: ${copy}`); checks += 1;
+    checks += 1;
   }
-  // Production ToolGate keeps every raw guard for the newly ordinary reads.
-  const held = { state: 'UNDECIDED', rule: 'R4', repository_id: 'synthetic-held' }, safe = { state: 'DISABLED', rule: 'R1' };
-  for (const command of ordinary) for (const tool_name of ['Bash', 'PowerShell']) {
-    const input = { ...shell(ctx, command), tool_name, tool_input: { command } };
-    const make = stateReader => new gate.ToolGate({ registryOptions: ctx.options, environment: ctx.environment, stateReader,
-      continuationResolver: new ContinuationResolver({ environment: ctx.environment, spawn() { throw new Error('UNEXPECTED_METADATA'); } }) });
-    assert.equal(make(() => safe).decide(input)?.deny, undefined, command);
-    assert.ok(make(() => held).decide(input)?.deny, command);
-    checks += 2;
-  }
-  assert.deepEqual(snapshot(ctx.dir), before);
-  t.diagnostic(JSON.stringify({ nameBarrierChecks: checks }));
-});
-
-// Every changed comparison row has an explicit result on its original shell envelopes.
-// Shell envelopes are retained exactly, including omitted and malformed metadata.
-for (const row of refusalCases.cases) test('comparison classification: ' + row.id, t => {
-  const ctx = fixture(t), before = snapshot(ctx.dir);
-  const resolver = new ContinuationResolver({ environment: ctx.environment,
-    spawn() { assert.fail('unproved command cannot acquire target metadata'); } });
-  const currentGate = new gate.ToolGate({ registryOptions: ctx.options, environment: ctx.environment,
-    continuationResolver: resolver, stateReader: () => ({ state: 'DISABLED', rule: 'R1' }) });
-  const heldGate = new gate.ToolGate({ registryOptions: ctx.options, environment: ctx.environment,
-    continuationResolver: resolver, stateReader: () => ({ state: 'UNDECIDED', rule: 'R4', repository_id: 'synthetic-held' }) });
-  assert.ok(['UNKNOWN', 'NOT_CONTINUATION'].includes(row.expected), row.id + ': explicit expected result');
-  assert.ok(row.shell_indexes.length, row.id + ': changed shell envelopes retained');
-  for (const index of row.shell_indexes) {
-    assert.ok(Object.hasOwn(refusalCases.shell_envelopes, index));
-    for (const tool_name of ['Bash', 'PowerShell']) for (const key of ['command', 'cmd']) {
-      const input = { ...shell(ctx, row.text), tool_name,
-        tool_input: { [key]: row.text, ...refusalCases.shell_envelopes[index] } };
-      const label = row.id + '/' + index + '/' + tool_name + '/' + key, expected = expectedFor(row, input);
-      assert.equal(parse(row.text, input).status, expected, label);
-      assert.equal(resolver.resolve(row.text, input).status, expected, label);
-      for (const actor of matrix.actors) {
-        assert.equal(Boolean(currentGate.decide({ ...input, actor })?.deny), expected === 'UNKNOWN', label + '/' + actor);
-        assert.ok(heldGate.decide({ ...input, actor })?.deny, label + '/' + actor + ': held repository');
-      }
-    }
-  }
-  assert.deepEqual(snapshot(ctx.dir), before);
-});
-
-test('folder-name exclusions close command-position and derived-text families', () => {
-  const retained = [];
-  for (const separator of ['', '; ', '&& ', '|| ', '| ', '& ', '(', ') ', '{ ', '} ', '\n']) {
-    for (const word of ['/.claude', '~/.claude.exe', '.codex/resume', '"C:/example path/.claude"',
-      'C:/example\\ path/.claude', 'C:/example/".claude/resume"', "'C:/example/'\".claude/resume\""]) {
-      retained.push((separator ? 'git status ' + separator : '') + word + ' -r');
-    }
-  }
-  for (const wrapper of ['env', 'env -i', 'command --', 'nohup', 'xargs', 'sudo', 'time', 'nice -n 1',
-    'timeout 1', 'setsid', 'stdbuf -o0', 'chroot /tmp/example.test', 'if', 'then', 'else', 'while', 'until', 'do',
-    'VAR=value', '> /tmp/example.test', '"C:/tools/ENV.EXE"', "e'n'v", 'e\\nv', 'env command nohup']) {
-    retained.push(wrapper + ' /.claude -r');
-  }
-  retained.push('cat /.claude -r | ForEach-Object { /.claude -r }');
-  retained.push('cat /.claude -r | ForEach-Object { . /tmp/example.test }');
-  for (const target of ['sh', '/bin/sh', '"sh"', "'sh'", 'C:/PowerShell/PWSH.EXE', 'env sh',
-    'command sh', 'exec sh', 'nohup sh', 'xargs sh', "& 'iex'", 'Example-Transform']) {
-    retained.push('echo /.claude -r | cut -c3- | ' + target);
-  }
-  for (const action of ['eval "$x -r"', 'source fixture.test', '. fixture.test', 'exec "$x" -r',
-    'Invoke-Expression "$x -r"', 'IEX "$x -r"', '& ($x) -r', "& 'fixture' -r", '& "fixture" -r',
-    '& $x -r', "& ('x/.claude'.('Sub'+'string')(3)) -r", '& $x.$method(3) -r']) {
-    retained.push('x=/.claude -r; ' + action);
-  }
-  for (const action of ["e'va'l", 'e\\val', "s'ou'rce", "'.'", "'/bin/eval'", "'/bin/exec'", '"I"EX', "Invoke-'Expression'"]) {
-    retained.push('echo /.claude -r | cut -c3- > /tmp/example.test; ' + action + ' /tmp/example.test');
-  }
-  for (const text of ['ls "$CODEX_HOME', 'ls ~/.claude/\u0000 -r', 'ls ~/.claude/\u00e9 -r']) retained.push(text);
-  // Variable names spelled with a host word are listed data wherever the shell reads them as data.
-  // cmd and unknown shells keep the refusal, and an omitted shell may be cmd, which reads '^'.
-  const every = ['omitted', 'powershell', 'posix'];
-  const named = [['ls $env:codex_home', every], ["ls '$CODEX_HOME'", every], ['ls \\$CODEX_HOME', every], ['ls ^$CODEX_HOME', ['powershell', 'posix']]];
-  for (const envelope of refusalCases.shell_envelopes) {
-    for (const text of retained) assert.equal(parse(text, { tool_input: { command: text, ...envelope } }).status, 'UNKNOWN', text);
-    for (const [text, data] of named) {
-      const input = { tool_input: { command: text, ...envelope } };
-      assert.equal(parse(text, input).status, data.includes(dataClass(input)) ? 'NOT_CONTINUATION' : 'UNKNOWN', text + ' ' + JSON.stringify(envelope));
-    }
-  }
-  // Every allowed pipe target consumes data without deriving a command name.
-  for (const target of ['grep resume', 'jq -r .version', 'head', 'tail', 'sort', 'wc', 'cut -c1-',
-    'ConvertFrom-Json', 'ConvertTo-Json', 'Select-Object', 'Select-String resume', 'Where-Object { $_ }',
-    'ForEach-Object { $_ }', 'Out-String', 'git status']) {
-    const text = 'cat ~/.codex/sessions/example.jsonl | ' + target;
-    assert.equal(parse(text, { tool_input: { command: text } }).status, 'NOT_CONTINUATION', text);
-  }
-  // Oversized requests must return to the existing evidence path before any new scan.
-  const scans = ['function derivedNameExecution(text, shell = null, view = quotedView(text, shell)) {', 'function quotedView(text, shell) {'];
-  const bounded = evidenceProjection(source => scans.reduce((patched, head) => {
-    assert.ok(patched.includes(head), head);
-    return patched.replace(head, head + ' throw new Error("OVERSIZED_NAME_SCAN");');
-  }, source));
-  for (const unit of ['ls ~/.claude/ -r; ', 'cat ~/.codex/sessions/example.jsonl | grep resume | ', '~/.claude/']) {
-    const text = (unit === '~/.claude/' ? '"' : '') + unit.repeat(Math.ceil(1048576 / unit.length));
-    assert.equal(bounded.parse(text, { tool_input: { command: text } }).status, 'UNKNOWN');
-  }
-});
-
-test('literal reader roles and executable script operands follow the closed data boundary', t => {
-  const ctx = fixture(t), before = snapshot(ctx.dir);
-  const held = { state: 'UNDECIDED', rule: 'R4', repository_id: 'synthetic-held' };
-  for (const row of matrix.literal_role_cases) {
-    const input = shell(ctx, row.text);
-    if (row.shell !== undefined) input.tool_input.shell = row.shell;
-    const expected = expectedFor(row, input);
-    assert.equal(parse(row.text, input).status, expected, row.id);
-    for (const actor of matrix.actors) {
-      const decide = stateReader => new gate.ToolGate({ registryOptions: ctx.options, environment: ctx.environment, stateReader }).decide({ ...input, actor });
-      assert.equal(Boolean(decide(() => ({ state: 'DISABLED', rule: 'R1' }))?.deny), expected === 'UNKNOWN', row.id + '/' + actor);
-      assert.ok(decide(() => held)?.deny, row.id + ': current guard before data proof');
-      const workdir = { ...input, actor, tool_input: { ...input.tool_input, workdir: ctx.other } };
-      assert.ok(new gate.ToolGate({ registryOptions: ctx.options, stateReader: cwd => cwd === ctx.other ? held : { state: 'DISABLED', rule: 'R1' } }).decide(workdir)?.deny, row.id + ': workdir guard');
-    }
-  }
-  const currentGate = new gate.ToolGate({ registryOptions: ctx.options, stateReader: () => ({ state: 'DISABLED', rule: 'R1' }) });
-  assert.ok(currentGate.decide(shell(ctx, 'rg -e "codex resume toolkit governance enable" fixture.txt'))?.deny, 'owner answer guard precedes reader roles');
-  assert.ok(currentGate.decide({ tool_name: 'Write', cwd: ctx.caller, tool_input: { file_path: ctx.options.registryPath } })?.deny, 'user-state edit guard remains independent');
-  const absoluteHeld = `rg -e "codex resume" "${ctx.other}/fixture.txt"`;
-  assert.ok(new gate.ToolGate({ registryOptions: ctx.options, stateReader: cwd => cwd === ctx.other || cwd.startsWith(ctx.other + path.sep) ? held : { state: 'DISABLED', rule: 'R1' } }).decide(shell(ctx, absoluteHeld))?.deny, 'known absolute path guard precedes reader roles');
+  assert.equal(corpus.rows.length, 911);
+  t.diagnostic(JSON.stringify({ corpusChecks: checks, reviewedAllowances: allowances }));
   assert.deepEqual(snapshot(ctx.dir), before);
 });
 
@@ -355,81 +189,6 @@ test('every command axis has an explicit default native qualification, with no i
     const input = { tool_name, cwd: ctx.caller, tool_input: { ...args, workdir: ctx.target } };
     assert.equal(new gate.ToolGate({ registryOptions: ctx.options, environment: ctx.environment, stateReader: () => ({ state: 'DISABLED', rule: 'R1' }) }).decide(input), null, `${tool_name}/${Object.keys(args)[0]}`);
   }
-});
-
-test('inert-data model distinguishes literal arguments from actual command positions and wrappers', t => {
-  const ctx = fixture(t), resolver = new ContinuationResolver({ environment: ctx.environment });
-  assert.equal(matrix.inert_data_cases.length, 39);
-  for (const row of matrix.inert_data_cases) {
-    const { text } = row, input = shell(ctx, text), expected = expectedFor(row, input);
-    assert.equal(resolver.resolve(text, input).status, expected, text);
-    const decision = new gate.ToolGate({ registryOptions: ctx.options, environment: ctx.environment, stateReader: () => ({ state: 'DISABLED', rule: 'R1' }) }).decide(input);
-    assert.equal(Boolean(decision?.deny), expected === 'UNKNOWN', text);
-    if (expected === 'NOT_CONTINUATION') {
-      const held = { state: 'UNDECIDED', rule: 'R4', repository_id: 'synthetic-held' };
-      assert.ok(new gate.ToolGate({ registryOptions: ctx.options, stateReader: () => held }).decide(input)?.deny, `current-scope guard before inert/help: ${text}`);
-      const inHeldWorkdir = { ...input, tool_input: { ...input.tool_input, workdir: ctx.other } };
-      assert.ok(new gate.ToolGate({ registryOptions: ctx.options, stateReader: cwd => cwd === ctx.other ? held : { state: 'DISABLED', rule: 'R1' } }).decide(inHeldWorkdir)?.deny, `workdir guard before inert/help: ${text}`);
-    }
-  }
-  assert.match(new gate.ToolGate({ registryOptions: ctx.options, stateReader: () => ({ state: 'DISABLED', rule: 'R1' }) }).decide(shell(ctx, 'echo "claude --resume fixture toolkit governance enable"'))?.deny || '', /only the user/, 'existing owner-answer guard remains before inert classification');
-});
-
-test('shell-family model refuses ambiguous data, help and native selector syntax on both envelopes', t => {
-  const ctx = fixture(t);
-  const spaced = path.join(ctx.target, 'space directory');
-  fs.mkdirSync(spaced); transcript(ctx);
-  new gate.HeldPrompts({ registryOptions: ctx.options }).add('synthetic-rootless', 'synthetic queued fixture', null, {}, null);
-  const before = snapshot(ctx.dir);
-  const resolver = new ContinuationResolver({ environment: ctx.environment });
-  const supported = [undefined, 'cmd.exe', 'powershell.exe', 'pwsh.exe', 'bash', '/bin/sh', 'C:\\synthetic shell\\pwsh.exe'];
-  const unknown = ['unknown-shell', '', null, ['cmd.exe']];
-  assert.equal(matrix.shell_family_cases.length, 392);
-  // Opaque runtime generation is outside this cooperative detector. No evaluation
-  // or generic script interception is inferred from conservative static candidates.
-  for (const text of [
-    '& $runtime $argument', '& ([char[]](99,111,100,101,120) -join "") $argument',
-    'PowerShell -Command "Write-Output $value"', 'bash -c "echo $value"',
-    'powershell -Command "$n=1; Write-Output $n"', 'bash -c "printf %s fixture"',
-    'git -c core.fsmonitor=false log --format=%H',
-    'git -c color.ui=false log --format="%h %s"', 'rg -r "$replacement" pattern fixture.txt',
-    'grep -c "$pattern" fixture.txt', 'findstr /r "$pattern" fixture.txt',
-    'cat ~/.claude/settings.json | grep -n yes', 'codex login --with-api-key < key.txt; echo ok',
-    'Write-Output ("fixture {0}" -f 1)', 'echo ("{0}" -f "fixture")',
-    'Write-Output (-join ("fi","xture"))', 'Write-Output ([char[]](102,105,120) -join "")',
-    'Write-Output ("x{0}" -f 1)', 'Write-Output ("{0}q" -f 1)',
-    'Write-Output ("fi"+[string]"xture")', 'Write-Output ("fi".ToString()+"xture")',
-    'Write-Output (-join ([string]"fi",[string]"xture"))',
-  ]) for (const selected of [...supported, ...unknown]) {
-    const input = shell(ctx, text);
-    if (selected !== undefined) input.tool_input.shell = selected;
-    assert.equal(resolver.resolve(text, input).status, 'NOT_CONTINUATION', text);
-    assert.equal(new gate.ToolGate({ registryOptions: ctx.options, environment: ctx.environment, stateReader: () => ({ state: 'DISABLED', rule: 'R1' }) }).decide(input), null, text);
-  }
-  for (const row of matrix.shell_family_cases) for (const tool_name of ['Bash', 'PowerShell']) for (const selected of [...supported, ...unknown]) {
-    const text = row.text.replaceAll('{TARGET}', spaced).replaceAll('{TRANSCRIPT}', ctx.file);
-    const input = shell(ctx, text, { tool_name });
-    if (selected !== undefined) input.tool_input.shell = selected;
-    const expected = unknown.includes(selected) ? 'UNKNOWN' : expectedFor(row, input);
-    assert.equal(resolver.resolve(text, input).status, expected, `${row.id}/${tool_name}/${selected}`);
-    const decision = new gate.ToolGate({ registryOptions: ctx.options, environment: ctx.environment, stateReader: () => ({ state: 'DISABLED', rule: 'R1' }) }).decide(input);
-    assert.equal(Boolean(decision?.deny), expected === 'UNKNOWN', `${row.id}/${tool_name}/${selected}`);
-    if (expected !== 'UNKNOWN') {
-      const held = { state: 'UNDECIDED', rule: 'R4', repository_id: 'synthetic-held' };
-      assert.ok(new gate.ToolGate({ registryOptions: ctx.options, stateReader: () => held }).decide(input)?.deny, `${row.id}: current guard`);
-      const workdir = { ...input, tool_input: { ...input.tool_input, workdir: ctx.other } };
-      assert.ok(new gate.ToolGate({ registryOptions: ctx.options, environment: ctx.environment, stateReader: cwd => cwd === ctx.other ? held : { state: 'DISABLED', rule: 'R1' } }).decide(workdir)?.deny, `${row.id}: workdir guard`);
-    }
-  }
-  for (const tool_name of ['Bash', 'PowerShell', 'Monitor', 'exec_command', 'shell', 'local_shell']) {
-    for (const command of ['echo (codex resume)', "echo 'fixture & claude --continue & echo fixture'", 'co""dex resu""me', '& ("co"+"dex") resume', 'codex ("res"+"ume")']) {
-      for (const args of [{ command }, { cmd: command }, { command: command.split(' ') }]) {
-        const input = { tool_name, cwd: ctx.caller, tool_input: { ...args, shell: 'cmd.exe' } };
-        assert.ok(new gate.ToolGate({ registryOptions: ctx.options, environment: ctx.environment, stateReader: () => ({ state: 'DISABLED', rule: 'R1' }) }).decide(input)?.deny, `${tool_name}: text aliases cannot hide evaluation`);
-      }
-    }
-  }
-  assert.deepEqual(snapshot(ctx.dir), before, 'classification and target proof do not mutate queue, metadata or registry');
 });
 
 test('visible embedded and hostile continuations remain unknown rather than falling out of classification', t => {

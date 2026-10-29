@@ -79,7 +79,7 @@ test('matrix: every host shape gets the attribution, bypass, force-push and push
       const reason = JSON.parse(hook.stdout.trim().split('\n').pop()).hookSpecificOutput.permissionDecisionReason;
       // The Codex hook runs the governance gate first. It reads a word list unquoted too, and refuses a
       // continuation-like word list that names Claude before the attribution check sees it, as before.
-      const gateFirst = Array.isArray(input.tool_input.command) && /claude/i.test(command) && /^Toolkit: the selected session's repository could not be verified/.test(reason);
+      const gateFirst = Array.isArray(input.tool_input.command) && /claude/i.test(command) && /^Toolkit: this command could resume or fork a Claude or Codex session/.test(reason);
       assert.ok(expected(reason) || gateFirst, `${row} x ${check}: the hook gave ${JSON.stringify(reason)}`);
     }
   }

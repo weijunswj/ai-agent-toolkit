@@ -1681,7 +1681,10 @@ class ToolGate {
       // starts a new run: the caller's session-specific 'later' never admits its targets.
       let continuation;
       try { continuation = this.#continuation.resolve(text, input); } catch { continuation = { status: 'UNKNOWN' }; }
-      if (continuation?.status === 'UNKNOWN') return { deny: `Toolkit: the selected session's repository could not be verified, so this continuation is refused. Use a supported literal selector whose target can be verified. ${NEVER_OWNER}` };
+      if (continuation?.status === 'UNKNOWN') {
+        const found = typeof continuation.seen === 'string' ? ` (found: ${continuation.seen})` : '';
+        return { deny: `Toolkit: this command could resume or fork a Claude or Codex session${found}, and Toolkit cannot confirm which repository that session belongs to, so it is refused. To continue a session, use \`claude --resume <full path to the session's .jsonl file>\` or \`codex exec resume --last\` from that session's repository, or ask the user to resume it. ${NEVER_OWNER}` };
+      }
       if (continuation?.status !== 'NOT_CONTINUATION') {
         if (continuation?.status !== 'VERIFIED' || !Array.isArray(continuation.targets) || continuation.targets.length === 0
           || continuation.targets.some(target => {

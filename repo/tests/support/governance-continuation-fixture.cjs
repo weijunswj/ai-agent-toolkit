@@ -1,8 +1,8 @@
 'use strict';
 
 // Shared fixture for the toolkit-governance-continuation-*.test.cjs files: synthetic caller, target
-// and held folders with a native Claude transcript, shell inputs, byte snapshots, the private
-// evidence projection and a runner that starts the source hooks a few at a time.
+// and held folders with a native Claude transcript, shell inputs and readings, byte snapshots and a
+// runner that starts the source hooks a few at a time.
 
 const fs = require('node:fs');
 const os = require('node:os');
@@ -41,16 +41,23 @@ function message(cwd, extra = {}) {
 }
 function transcript(ctx, rows = [message(ctx.target)]) { fs.writeFileSync(ctx.file, rows.map(row => JSON.stringify(row)).join('\n') + '\n'); }
 function shell(ctx, command, extra = {}) { return { tool_name: 'Bash', cwd: ctx.caller, session_id: 'fixture-run', tool_input: { command }, ...extra }; }
-// The shells a data-argument proof reads an input under. A corpus row's `data` lists the classes
-// where its host words are proved data, so it is NOT_CONTINUATION there and `expected` elsewhere.
-function dataClass(input) {
+// The shell readings a corpus row records: bash (Claude Code Bash or an explicit bash shell),
+// powershell, cmd, common (no shell named, so bash, PowerShell or the first line under cmd may run
+// it) and unknown (an unrecognised shell). The hook entry point sets the host, never the payload.
+const READINGS = Object.freeze(['bash', 'powershell', 'cmd', 'common', 'unknown']);
+function readingOf(input, host = null) {
   const selected = input?.tool_input?.shell;
-  if (selected === undefined) return input?.tool_name === 'PowerShell' ? 'powershell-tool' : 'omitted';
-  if (typeof selected !== 'string') return null;
+  if (selected === undefined) return input?.tool_name === 'PowerShell' ? 'powershell' : input?.tool_name === 'Bash' && host === 'claude' ? 'bash' : 'common';
+  if (typeof selected !== 'string') return 'unknown';
   const name = selected.split(/[\\/]/).pop().toLowerCase().replace(/\.exe$/, '');
-  return ['powershell', 'pwsh'].includes(name) ? 'powershell' : ['bash', 'sh'].includes(name) ? 'posix' : null;
+  return ['powershell', 'pwsh'].includes(name) ? 'powershell' : ['bash', 'sh'].includes(name) ? 'bash' : name === 'cmd' ? 'cmd' : 'unknown';
 }
-function expectedFor(row, input) { return row.data?.includes(dataClass(input)) ? 'NOT_CONTINUATION' : row.expected; }
+const READING_SHELLS = Object.freeze({ bash: 'bash', powershell: 'powershell.exe', cmd: 'cmd.exe', common: undefined, unknown: 'unknown-shell' });
+function readingInput(ctx, text, reading, extra = {}) {
+  const shellName = READING_SHELLS[reading];
+  return { tool_name: 'Bash', cwd: ctx.caller, session_id: 'fixture-run', ...extra, tool_input: { command: text, ...(shellName ? { shell: shellName } : {}) } };
+}
+function expectedFor(row, input, host = null) { return row.expected[readingOf(input, host)]; }
 function snapshot(dir) {
   const result = {};
   function walk(folder) {
@@ -62,28 +69,6 @@ function snapshot(dir) {
     }
   }
   walk(dir); return result;
-}
-
-// Exercise the private pure projection without adding a product export or entrypoint.
-function evidenceProjection(transform = source => source) {
-  const Module = require('node:module');
-  const filename = path.join(root, 'repo/scripts/toolkit-governance-continuation.cjs');
-  const loaded = new Module(filename, module);
-  loaded.filename = filename; loaded.paths = Module._nodeModulePaths(path.dirname(filename));
-  let source = transform(fs.readFileSync(filename, 'utf8'));
-  source = source.replace('for (const step of pattern.steps) {', 'for (const step of pattern.steps) { evidenceOperations += 1;');
-  const start = source.indexOf('function roleWords('), end = source.indexOf('\nfunction literalWord(', start);
-  const lexer = source.slice(start, end).replace('for (let i = 0; i < text.length;) {', 'for (let i = 0; i < text.length;) { roleVisits += 1;')
-    .replace('value += text[i++];', 'roleVisits += 1; value += text[i++];')
-    .replace('while (i < text.length && text[i] !== quote) i += 1;', 'while (i < text.length && text[i] !== quote) { roleVisits += 1; i += 1; }');
-  source = source.slice(0, start) + lexer + source.slice(end);
-  loaded._compile(source + '\nlet evidenceOperations = 0, roleVisits = 0; module.exports = { CANDIDATE_MACHINES, atomPattern, advancePrefixes, quoteAtoms, orderedEvidence, commandRoles, roleWords, pythonBindingBarriers, constructionFragments, parse, roleVisits: () => roleVisits, operations: () => evidenceOperations };', filename);
-  return loaded.exports;
-}
-
-function sentinelText(template, word, control) {
-  const values = { word, head: word.slice(0, 2), tail: word.slice(2), nul: control };
-  return template.replace(/\{(word|head|tail|nul)\}/g, (_, key) => values[key]);
 }
 
 // The two source hook entrypoints the hook tests start, one process per case.
@@ -127,5 +112,5 @@ function runNodeProcesses(calls, { concurrency = HOOK_CONCURRENCY, timeout = 100
 
 module.exports = Object.freeze({
   HOOKS, HOOK_CONCURRENCY, ID, MESSAGE_ID, OTHER_ID, root,
-  dataClass, evidenceProjection, expectedFor, fixture, message, runNodeProcesses, sentinelText, shell, snapshot, transcript,
+  READINGS, expectedFor, fixture, message, readingInput, readingOf, runNodeProcesses, shell, snapshot, transcript,
 });

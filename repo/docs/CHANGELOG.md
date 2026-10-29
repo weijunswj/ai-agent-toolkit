@@ -1,5 +1,12 @@
 # Toolkit Changelog
 
+## 3.19.7 (the continuation guard reads what a command runs)
+
+- **Fewer false refusals:** the guard that refuses resuming or forking a Claude or Codex session now reads where a shell runs a program, instead of looking for host letters anywhere in the text. Read-only commands that name a `.codex`, `.claude`, `Claude-Data` or `Temp\claude` folder, or mention resume or fork, now run, with pipes, chains, loops, heredocs and here-strings: ssh and Docker comparisons, PowerShell reads at chat start and Python scripts piped into Codex's bundled Python among them.
+- **Real resumes still refused:** a resume or fork as the command word, through a wrapper (`env`, `xargs`, `Start-Process`, `cmd /c`, `npx`, `find -exec`), in a shell script (`bash -c`, `pwsh -Command`, decoded `-EncodedCommand`, a heredoc or text piped in), through `eval` or `iex`, with a split spelling (`c"o"dex`) or a computed name with host letters is refused as before. Option values that some programs run (`git -c`, `--upload-pack`, `rg --pre`, `ssh -o`) are checked too.
+- **Clearer refusal:** the message says what it found (for example `claude -c`) and names the two forms Toolkit can verify, `claude --resume <full path to the session's .jsonl file>` and `codex exec resume --last`.
+- **Informational:** a host name built inside an interpreter script or from character codes is out of this check's reach; the resumed session's own repository hold still applies.
+
 ## 3.19.5 (a Claude app update reminder, and no Claude plugin update step)
 
 - **Claude app reminder:** when a new Claude app chat starts from the Toolkit copy in your claude.ai account and that copy is older than this PC's Toolkit, the session-start hook shows you one reminder with both versions and the steps: Check for updates on claude.ai, then remove only the plugin on claude.ai in a web browser, then remove and add the marketplace again, then fully quit and reopen the Claude app. It goes out as the hook's message to you and as a line asking the chat to say it in its first reply. It reads two version files and writes nothing. Account copies from before this release stay quiet; the install check and the daily check-in still report them.

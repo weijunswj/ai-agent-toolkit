@@ -1,7 +1,8 @@
 'use strict';
 
-// A deliberately small admission reader, never a shell interpreter. Unknown selectors are
-// refused even when no prompts are queued. See the source/selector receipts in the focused test.
+// Continuation guard: finds commands that could resume or fork a Claude or Codex session, then
+// admits only two exact forms whose target folder can be verified. Unknown selectors are refused
+// even when no prompts are queued. See the source/selector receipts in the focused test.
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -12,10 +13,6 @@ const LIMITS = Object.freeze({ command: 32768, bytes: 8 * 1024 * 1024, record: 2
 const UNKNOWN = Object.freeze({ status: 'UNKNOWN', reason: 'TARGET_UNVERIFIED' });
 const NONE = Object.freeze({ status: 'NOT_CONTINUATION' });
 const HOST = /^(claude(?:-code)?|codex)(?:\.exe|\.cmd|\.ps1)?$/i;
-const CANDIDATE_SPELLINGS = Object.freeze([
-  ...['codex', 'claude', 'claude-code'].flatMap(host => ['', '.exe', '.cmd', '.ps1'].map(suffix => host + suffix)),
-  'resume', 'fork', '--resume', '--continue', '--session-id', '--fork-session',
-]);
 // Exact help-only forms verified on the frozen native CLIs in isolated homes. Do not infer
 // that a help-looking prompt after --, or a wrapped/compound command, exits before a session.
 const HELP_FORMS = Object.freeze({
@@ -24,787 +21,685 @@ const HELP_FORMS = Object.freeze({
 });
 function hostOf(word) { return HOST.exec(word.split(/[\\/]/).pop())?.[1].toLowerCase().replace('claude-code', 'claude'); }
 
-// Fixed read-only machines; reachability belongs to one classification call only.
-const CANDIDATE_MACHINES = Object.freeze(CANDIDATE_SPELLINGS.map(word => {
-  const characters = Object.create(null);
-  for (let p = 0; p < word.length; p += 1) characters[word[p]] = (characters[word[p]] || 0) | (1 << p);
-  return Object.freeze({ word, characters: Object.freeze(characters), end: 1 << word.length, full: (1 << (word.length + 1)) - 1 });
-}));
+// Candidate reader. A command is a continuation candidate only when a place where a shell runs a
+// program could run Claude or Codex with a resume or fork selector. Everything in argument
+// position (paths, patterns, ssh remote commands, redirect targets, heredoc bodies fed to ordinary
+// programs, echo text) is data. The text is read under every shell that may run it; a reading the
+// reader cannot finish falls back to a plain letters check, so unreadable input stays refused.
+// Only a candidate reaches the strict reader (parseCommand), which admits two exact forms.
+const POSIX = 'posix', POWERSHELL = 'powershell', CMD = 'cmd', CMD_FIRST_LINE = 'cmd-first-line';
+const MAX_DEPTH = 8;
+const MAX_NESTING = 64;
+const UNREADABLE = Object.freeze({ unreadable: true });
+// PowerShell refuses to parse a script holding '<' outside a string or comment, so it runs nothing.
+const INERT = Object.freeze({ inert: true });
+// Invisible, control and look-alike space characters split words for host detection, so
+// `codex<NUL>exec` still reads as a codex launch. Splitting never creates a new command position.
+const ODD = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u00a0\u00ad\u1680\u180e\u2000-\u200f\u2028-\u202f\u205f-\u206f\u3000\ufeff]/;
+// A bare carriage return ends a PowerShell line, and PowerShell or cmd may honour the Unicode line
+// breaks, so outside POSIX shells each is read as a new line: that only adds command positions.
+const BREAK = /[\r\u0085\u2028\u2029]/;
+const PS_QUOTES = Object.freeze({ "'": "'", '\u2018': "'", '\u2019': "'", '\u201a': "'", '\u201b': "'", '"': '"', '\u201c': '"', '\u201d': '"', '\u201e': '"' });
 
-// Equivalent to the fixed numeric-hole grammar, without regex backtracking on a
-// long digit run lacking a closing brace. Literal parts and holes stay separate.
-function formatParts(text) {
-  const parts = []; let start = 0;
-  for (let i = 0; i < text.length;) {
-    if (text[i] !== '{' || text[i + 1] < '0' || text[i + 1] > '9' || text[i + 1] === undefined) { i += 1; continue; }
-    let end = i + 2;
-    while (end < text.length && text[end] !== '{' && text[end] !== '}') end += 1;
-    if (text[end] === '}') { parts.push(text.slice(start, i), null); start = end + 1; i = start; }
-    else i = end;
-  }
-  parts.push(text.slice(start)); return parts;
+// Programs that run a later word as a command, read by checking every later word.
+const WRAPPERS = new Set(['env', 'command', 'builtin', 'exec', 'nohup', 'xargs', 'sudo', 'doas', 'timeout', 'nice', 'ionice', 'setsid',
+  'stdbuf', 'time', 'chroot', 'watch', 'strace', 'ltrace', 'nsenter', 'unshare', 'flock', 'chrt', 'taskset', 'unbuffer', 'winpty',
+  'busybox', 'start', 'start-process', 'saps', 'call', 'wsl', 'npx', 'pnpx', 'bunx', 'npm', 'pnpm', 'yarn', 'find']);
+// cmd keywords whose command comes later on the line.
+const CMD_KEYWORDS = new Set(['if', 'for', 'do', 'else']);
+// Shells that take a script argument or read a script from stdin.
+const RUNNERS = Object.freeze({ bash: POSIX, sh: POSIX, zsh: POSIX, dash: POSIX, ksh: POSIX, ash: POSIX, mksh: POSIX, yash: POSIX, fish: POSIX,
+  csh: POSIX, tcsh: POSIX, pwsh: POWERSHELL, powershell: POWERSHELL, cmd: CMD });
+// Language interpreters: their script body gets the direct check (host spelling plus selector).
+const INTERPRETERS = new Set(['node', 'nodejs', 'python', 'python2', 'python3', 'py', 'pypy', 'pypy3', 'perl', 'ruby', 'php', 'deno', 'lua',
+  'luajit', 'bun', 'osascript', 'rscript', 'tclsh', 'wish', 'awk', 'gawk', 'mawk', 'nawk', 'sed', 'jshell', 'groovy', 'cscript', 'wscript']);
+// Commands that run their arguments as a script in the same shell.
+const EVALUATORS = new Set(['eval', 'iex', 'invoke-expression', 'source', '.']);
+// Commands that make a name run a host later.
+const DEFINERS = new Set(['alias', 'set-alias', 'sal', 'new-alias', 'nal', 'doskey']);
+// Words after which the next word is again a command position.
+const POSIX_PREFIX = new Set(['!', '{', 'then', 'else', 'elif', 'if', 'do', 'while', 'until', 'coproc']);
+const POWERSHELL_PREFIX = new Set(['return', 'throw', 'exit', 'else', 'try', 'finally', 'do', 'begin', 'process', 'end', 'clean']);
+const POWERSHELL_ASSIGN = new Set(['=', '+=', '-=', '*=', '/=', '%=', '??=']);
+
+const CLAUDE_WORD = /(?<![\w.-])claude(?:-code)?(?:\.(?:exe|cmd|ps1))?(?![\w-])/i;
+// Claude's long selectors, or a short flag cluster of Claude's own lower-case letters holding -c
+// or -r (`-c`, `-pr`), so `-Raw`, `-rf` and `git -C` are not selectors.
+const CLAUDE_SELECTOR = /--(?:resume|continue|session-id|fork-session)(?![\w-])|(?:^|[\s'"`(,[=])-(?=[cdhprv]{1,3}(?![\w-]))[dhpv]*[cr]/;
+const CODEX_WORD = /(?<![\w.-])codex(?:\.(?:exe|cmd|ps1))?(?![\w-])/i;
+const CODEX_SELECTOR = /(?<![\w-])(?:resume|fork)(?![\w-])/i;
+// Host spelling plus selector in one script body (interpreters, stdin fed to a shell).
+function directCheck(text) {
+  return (CLAUDE_WORD.test(text) && CLAUDE_SELECTOR.test(text)) || (CODEX_WORD.test(text) && CODEX_SELECTOR.test(text));
 }
-
-function quoteAtoms(text) {
-  const atoms = []; let single = -1, double = -1;
-  // Every quote opens a potential span to the next quote of its own kind.
-  // Each character belongs to at most two spans, including wrapper overlaps.
-  for (let i = text.length - 1; i >= 0; i -= 1) {
-    const quote = text[i];
-    if (quote !== "'" && quote !== '"') continue;
-    const end = quote === "'" ? single : double;
-    if (end >= 0) atoms.push(text.slice(i + 1, end));
-    if (quote === "'") single = i; else double = i;
-  }
-  return atoms.reverse();
+// Letters of a host name anywhere, even split by quotes or operators (`"cla"+"ude"`).
+function hostLetters(text) { return /claude|codex/i.test(text.replace(/[^a-z0-9]/gi, '')); }
+// The same outside folder paths (`C:/Users/x/.codex/...`), which name places, not programs.
+function outsidePaths(text) { return hostLetters(text.replace(/\S*[\\/]\S*/g, ' ')); }
+function selectorSignal(text) { return CLAUDE_SELECTOR.test(text) || CODEX_SELECTOR.test(text); }
+// A computed command name can be built from quoted pieces with noise or format holes between
+// them (`("co".Replace("z","")+"dex")`, `("c{0}dex" -f "o")`): the pieces are joined in order,
+// format holes filled from the pieces after them, and the name's letters looked for in order.
+const HOST_NAMES = Object.freeze(['claude', 'codex']);
+const SELECTOR_NAMES = Object.freeze(['resume', 'fork', 'continue', 'session']);
+function constructed(text) {
+  const pieces = [...text.matchAll(/'([^']*)'|"([^"]*)"/g)].map(m => m[1] ?? m[2]);
+  if (!/(?:^|[\s)])-f(?![\w-])/i.test(text) || !pieces.length) return pieces.join('');
+  const rest = pieces.slice(1);
+  let used = 0;
+  const filled = pieces[0].replace(/\{(\d+)\}/g, (_, n) => { used = Math.max(used, Number(n) + 1); return rest[Number(n)] ?? ''; });
+  return filled + rest.slice(used).join('');
 }
-
-function atomPattern(raw) {
-  const space = c => c === ' ' || (c >= '\x09' && c <= '\x0d');
-  let first = 0, last = raw.length;
-  while (first < last && space(raw[first])) first += 1;
-  while (last > first && space(raw[last - 1])) last -= 1;
-  const steps = []; let literals = 0, letters = false, holes = false;
-  for (const part of formatParts(raw.slice(first, last))) {
-    if (part === null) { holes = true; if (steps.at(-1) !== null) steps.push(null); continue; }
-    for (let c of part) {
-      if (c >= 'A' && c <= 'Z') c = String.fromCharCode(c.charCodeAt(0) + 32);
-      if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c === '-' || c === '.') {
-        steps.push(c); literals += 1; if (c >= 'a' && c <= 'z') letters = true;
-        if (literals > 15) return null;
-      } else if (!'_.:{},\\\x60^'.includes(c)) return null;
-    }
-  }
-  // Literal hyphens, digits and dots can complete a split spelling. A template
-  // hole alone cannot supply native evidence, even beside a literal suffix.
-  return literals && (!holes || letters) ? { steps, literals } : null;
+function inOrder(text, name) {
+  let at = 0;
+  for (let i = 0; i < text.length && at < name.length; i += 1) if (text[i].toLowerCase() === name[at]) at += 1;
+  return at === name.length;
 }
+// Programs whose option values are command lines they run: the values get the direct check.
+const COMMAND_OPTIONS = Object.freeze({
+  git: /^(?:-c|--config-env|--receive-pack|--upload-pack|--exec)$/,
+  rg: /^(?:--pre|--hostname-bin)$/,
+  ssh: /^-o$/,
+  tar: /^(?:--to-command|--use-compress-program|-I|--checkpoint-action|--info-script|--new-volume-script)$/,
+});
+// The reading for text no reader could finish: host letters and a selector anywhere in it.
+function fallback(text) { return hostLetters(text) && selectorSignal(text); }
 
-function advancePrefixes(machine, states, pattern) {
-  if (!pattern || pattern.literals > machine.word.length) return states;
-  let active = states;
-  for (const step of pattern.steps) {
-    if (!active) break;
-    // A hole consumes any span inside this one fixed spelling. All literal
-    // characters must match, and the entire contributing atom must be consumed.
-    active = step === null ? machine.full ^ ((active & -active) - 1)
-      : (active & (machine.characters[step] || 0)) << 1;
+const word = (raw, value, extra = {}) => ({ kind: 'word', raw, value, glob: false, quoted: false, ...extra });
+
+// One pass over one shell's syntax. It records every simple command, including those inside
+// substitutions, groups, script blocks and unquoted heredoc bodies; it never runs or expands
+// anything. Throws UNREADABLE for syntax it cannot finish and INERT for PowerShell that cannot parse.
+class ShellReader {
+  constructor(text, dialect) { this.t = text; this.d = dialect; this.i = 0; this.commands = []; this.nesting = 0; this.pending = []; }
+
+  read() {
+    this.list(null);
+    if (this.pending.length) this.bodies();
+    return this.commands;
   }
-  // Skipping an atom retains every alternative and every accepting endpoint.
-  return states | active;
-}
 
-function orderedEvidence(text, atoms = quoteAtoms(text)) {
-  const states = CANDIDATE_MACHINES.map(() => 1);
-  for (const raw of atoms) {
-    const pattern = atomPattern(raw);
-    for (let k = 0; k < CANDIDATE_MACHINES.length; k += 1) {
-      states[k] = advancePrefixes(CANDIDATE_MACHINES[k], states[k], pattern);
-      if (states[k] & CANDIDATE_MACHINES[k].end) return true;
-    }
+  peek(offset = 0) { return this.t[this.i + offset]; }
+  at(s) { return this.t.startsWith(s, this.i); }
+
+  // A bare carriage return is a word character to POSIX shells, which the word splitting above
+  // reads as a gap; elsewhere it and the Unicode line breaks end a line.
+  lineBreak(c) { return c === '\r' ? this.peek(1) === '\n' || this.d !== POSIX : this.d !== POSIX && BREAK.test(c); }
+
+  blank() {
+    const c = this.peek();
+    if (c === ' ' || c === '\t' || (c !== undefined && (ODD.test(c) || c === '\r') && !this.lineBreak(c))) return 1;
+    const escape = this.d === POSIX ? '\\' : this.d === POWERSHELL ? '`' : '^';
+    if (c === escape && (this.peek(1) === '\n' || (this.peek(1) === '\r' && this.peek(2) === '\n'))) return this.peek(1) === '\n' ? 2 : 3;
+    return 0;
   }
-  return false;
-}
 
-// Preserve the old non-overlapping format-template signal independently of the
-// ordered whole-atom projection. Its full-word compatibility is not authority.
-function legacyTemplateEvidence(text) {
-  let opening = -1;
-  for (let i = 0; i < text.length; i += 1) {
-    if (text[i] !== '"' && text[i] !== "'") continue;
-    if (opening >= 0) {
-      const raw = text.slice(opening + 1, i);
-      const split = formatParts(raw);
-      if (!/[\r\n]/.test(raw) && split.includes(null)) {
-        opening = -1;
-        const parts = split.filter(part => part !== null).map(part => part.toLowerCase());
-        if (!parts.some(part => /[a-z]/.test(part))) continue;
-        if (CANDIDATE_SPELLINGS.some(word => {
-          if (!word.startsWith(parts[0]) || !word.endsWith(parts.at(-1))) return false;
-          let offset = 0;
-          return parts.every(part => { const index = word.indexOf(part, offset); if (index < 0) return false; offset = index + part.length; return true; });
-        })) return true;
+  // A list of pipelines up to `close` (')' or '}') or the end of the text.
+  list(close) {
+    if (++this.nesting > MAX_NESTING) throw UNREADABLE;
+    let command = this.start(0);
+    const finish = () => { if (command.words.length || command.heredocs.length) this.commands.push(command); };
+    for (;;) {
+      for (let n = this.blank(); n; n = this.blank()) this.i += n;
+      const c = this.peek();
+      if (c === undefined) { if (close) throw UNREADABLE; finish(); this.nesting -= 1; return; }
+      if (c === close && (close === ')' || this.d === POWERSHELL)) { this.i += 1; finish(); this.nesting -= 1; return; }
+      if (this.comment()) continue;
+      if (c === '\n' || this.lineBreak(c)) {
+        this.i += c === '\r' && this.peek(1) === '\n' ? 2 : 1; finish(); command = this.start(0);
+        if (this.pending.length) this.bodies();
         continue;
       }
+      if (c === ';' || this.at('&&') || this.at('||')) {
+        this.i += c === ';' ? (this.peek(1) === ';' || this.peek(1) === '&' ? 2 : 1) : 2; finish(); command = this.start(0); continue;
+      }
+      if (c === '|') {
+        this.i += this.peek(1) === '&' ? 2 : 1; finish();
+        const prev = command; command = this.start(prev.stage + 1); command.prev = prev; continue;
+      }
+      if (c === '&') {
+        if (this.d === POWERSHELL && !command.words.length) { this.i += 1; command.words.push({ kind: 'op', raw: '&', value: '&' }); continue; }
+        if (this.d === POSIX && this.peek(1) === '>') { this.redirect(command); continue; }
+        this.i += 1; finish(); command = this.start(0); continue;
+      }
+      if (c === ')' || (c === '}' && this.d === POWERSHELL)) {
+        if (this.d === POWERSHELL) throw UNREADABLE;
+        // A case pattern ends with ')' in POSIX shells, so the next word is a command position
+        // again; cmd prints a stray ')' as text.
+        this.i += 1; if (this.d === POSIX) { finish(); command = this.start(0); } continue;
+      }
+      if (this.d === POSIX && (this.at('<(') || this.at('>('))) { command.words.push(this.group(2, ')')); continue; }
+      if (this.redirect(command)) continue;
+      if (c === '(') {
+        if (this.d === CMD && command.words.length) { this.i += 1; continue; }
+        command.words.push(this.group(1, ')')); continue;
+      }
+      if (c === '{' && this.d === POWERSHELL) { command.words.push(this.group(1, '}', 'block')); continue; }
+      // A POSIX `{` opening a group or a function body (`f() {`) starts a new command position.
+      if ((c === '{' || c === '}') && this.d === POSIX && /^[\s;]?$/.test(this.peek(1) || '')
+        && (!command.words.length || (c === '{' && command.words.at(-1).kind === 'group'))) { this.i += 1; finish(); command = this.start(0); continue; }
+      if (c === ',' && this.d === POWERSHELL) { this.i += 1; continue; }
+      if (this.d === POWERSHELL && this.at('--%') && /[\s]/.test(this.peek(3) || ' ') && command.words.length) {
+        // Stop-parsing: the rest of the line goes to the program as written.
+        const end = this.t.indexOf('\n', this.i), rest = this.t.slice(this.i + 3, end < 0 ? this.t.length : end);
+        for (const piece of rest.split(/\s+/).filter(Boolean)) command.words.push(word(piece, piece));
+        this.i = end < 0 ? this.t.length : end; continue;
+      }
+      const before = this.i, tokens = this.word();
+      if (this.i === before) throw UNREADABLE;
+      command.words.push(...tokens);
     }
-    opening = i;
   }
-  return false;
+
+  start(stage) { return { words: [], heredocs: [], stdin: [], stage, dialect: this.d }; }
+
+  comment() {
+    if (this.d === POSIX && this.peek() === '#') { this.toLineEnd(); return true; }
+    if (this.d === POWERSHELL) {
+      if (this.at('<#')) { const end = this.t.indexOf('#>', this.i + 2); if (end < 0) throw UNREADABLE; this.i = end + 2; return true; }
+      if (this.peek() === '#') { this.toLineEnd(); return true; }
+    }
+    return false;
+  }
+  toLineEnd() { this.i = this.lineEnd(); }
+
+  group(width, close, kind = 'group') {
+    const start = this.i; this.i += width;
+    this.list(close);
+    return { kind, raw: this.t.slice(start, this.i), value: null };
+  }
+
+  redirect(command) {
+    const rest = this.t.slice(this.i, this.i + 8);
+    const m = this.d === POSIX ? /^(?:\d*(?:<<<|<<-|<<|<>|<&|>>|>&|>\||<|>)|&>>?)/.exec(rest)
+      : this.d === POWERSHELL ? /^(?:[\d*]?(?:>>|>)(?:&\d)?|<)/.exec(rest) : /^\d?(?:>>|>|<)(?:&\d)?/.exec(rest);
+    if (!m) return false;
+    if (this.d === POWERSHELL && m[0] === '<') throw INERT;
+    this.i += m[0].length;
+    // A descriptor duplication (2>&1, >&2) names no file.
+    if (/&\d$/.test(m[0])) return true;
+    if (/[<>]&$/.test(m[0]) && /^\d|^-/.test(this.peek() || '')) { this.i += 1; return true; }
+    for (let n = this.blank(); n; n = this.blank()) this.i += n;
+    const target = this.word()[0];
+    if (!target) throw UNREADABLE;
+    if (m[0].endsWith('<<<')) command.stdin.push(target.value ?? target.raw);
+    else if (/<<-?$/.test(m[0])) {
+      const doc = { delimiter: target.value ?? target.raw, strip: m[0].endsWith('-'), quoted: target.quoted, body: null };
+      command.heredocs.push(doc); this.pending.push(doc);
+    }
+    return true;
+  }
+
+  // Read pending heredoc bodies starting at the current line.
+  bodies() {
+    for (const doc of this.pending) {
+      let body = '';
+      for (;;) {
+        if (this.i >= this.t.length) break;
+        const next = this.t.indexOf('\n', this.i), end = next < 0 ? this.t.length : next;
+        let line = this.t.slice(this.i, end).replace(/\r$/, '');
+        this.i = next < 0 ? this.t.length : next + 1;
+        if (doc.strip) line = line.replace(/^\t+/, '');
+        if (line === doc.delimiter) break;
+        body += line + '\n';
+      }
+      doc.body = body;
+      // An unquoted delimiter expands substitutions in the body, which run.
+      if (!doc.quoted) this.expandable(body, this);
+    }
+    this.pending = [];
+  }
+
+  // Substitutions inside heredoc or here-string text whose quotes are ordinary characters.
+  expandable(text, parent) {
+    const reader = new ShellReader(text, this.d); reader.nesting = parent.nesting;
+    reader.doubleQuotedPart(null);
+    parent.commands.push(...reader.commands);
+  }
+
+  // One shell word, or several when an odd character or a PowerShell '=' splits it.
+  word() {
+    const start = this.i, tokens = [];
+    let value = '', dynamic = false, glob = false, quoted = false, brace = false;
+    const push = () => {
+      if (this.i > start || value) tokens.push(word(this.t.slice(start, this.i), dynamic ? null : value, { glob, quoted }));
+    };
+    const ends = c => c === undefined || c === ' ' || c === '\t' || c === '\n' || ODD.test(c) || (c === '\r')
+      || ';&|<>()'.includes(c) || (this.d === POWERSHELL && '{},'.includes(c));
+    while (!ends(this.peek())) {
+      const c = this.peek();
+      if (this.d === POSIX) {
+        if (c === '\\') { if (this.peek(1) === '\n') { this.i += 2; continue; } value += this.peek(1) ?? ''; this.i += 2; continue; }
+        if (c === "'") { const end = this.t.indexOf("'", this.i + 1); if (end < 0) throw UNREADABLE; value += this.t.slice(this.i + 1, end); this.i = end + 1; quoted = true; continue; }
+        if (c === '$' && this.peek(1) === "'") {
+          let j = this.i + 2; for (; j < this.t.length && this.t[j] !== "'"; j += 1) if (this.t[j] === '\\') j += 1;
+          if (j >= this.t.length) throw UNREADABLE;
+          const inner = this.t.slice(this.i + 2, j); if (inner.includes('\\')) dynamic = true; else value += inner;
+          this.i = j + 1; quoted = true; continue;
+        }
+        if (c === '"') { this.i += 1; if (this.doubleQuotedPart('"')) dynamic = true; value += this.literal; quoted = true; continue; }
+        if (c === '$' || c === '`') { this.substitution(); dynamic = true; continue; }
+        // Wildcards, and brace expansion (`{a,b}`, `{a..b}`), can produce another command name.
+        if ('*?['.includes(c)) glob = true;
+        if (c === '{') brace = true;
+        if (brace && (c === ',' || (c === '.' && this.peek(1) === '.'))) glob = true;
+        value += c; this.i += 1; continue;
+      }
+      if (this.d === POWERSHELL) {
+        if (c === '`') { value += this.peek(1) ?? ''; this.i += 2; continue; }
+        if (PS_QUOTES[c] === "'") {
+          this.i += 1; let text = '';
+          for (;;) {
+            const d = this.peek(); if (d === undefined) throw UNREADABLE;
+            if (PS_QUOTES[d] === "'") { if (PS_QUOTES[this.peek(1)] === "'") { text += "'"; this.i += 2; continue; } this.i += 1; break; }
+            text += d; this.i += 1;
+          }
+          value += text; quoted = true; continue;
+        }
+        if (PS_QUOTES[c] === '"') { this.i += 1; if (this.doubleQuotedPart('"')) dynamic = true; value += this.literal; quoted = true; continue; }
+        if (c === '@' && (this.at("@'") || this.at('@"')) && /^\r?\n/.test(this.t.slice(this.i + 2, this.i + 4))) { if (this.hereString()) dynamic = true; value += this.literal; quoted = true; continue; }
+        if (c === '@' && (this.peek(1) === '(' || this.peek(1) === '{')) { this.group(2, this.peek(1) === '(' ? ')' : '}'); dynamic = true; continue; }
+        if (c === '$') {
+          if (this.peek(1) === '(') { this.group(2, ')'); dynamic = true; continue; }
+          if (this.peek(1) === '{') { const end = this.t.indexOf('}', this.i); if (end < 0) throw UNREADABLE; this.i = end + 1; dynamic = true; continue; }
+          if (/[\w:?^$]/.test(this.peek(1) || '')) {
+            this.i += 1; while (/[\w:]/.test(this.peek() || '')) this.i += 1;
+            dynamic = true;
+            // `$x=value`: the assignment's right side is a pipeline.
+            if (this.peek() === '=' && this.peek(1) !== '=') { push(); tokens.push(word('=', '=')); this.i += 1; return tokens.concat(this.wordOrNothing()); }
+            continue;
+          }
+        }
+        if (c === '@' && /[\w]/.test(this.peek(1) || '') && this.i === start) { this.i += 1; while (/\w/.test(this.peek() || '')) this.i += 1; dynamic = true; continue; }
+        // PowerShell resolves wildcards in a command path.
+        if (c === '*' || c === '?' || c === '[') glob = true;
+        value += c; this.i += 1; continue;
+      }
+      // cmd
+      if (c === '^') { value += this.peek(1) ?? ''; this.i += 2; continue; }
+      if (c === '"') { const end = this.t.indexOf('"', this.i + 1); const stop = end < 0 ? this.lineEnd() : end; const inner = this.t.slice(this.i + 1, stop); if (/%[^%\s]+%|![^!\s]+!/.test(inner)) dynamic = true; value += inner; this.i = end < 0 ? stop : end + 1; quoted = true; continue; }
+      if (c === '%' || c === '!') {
+        const m = (c === '%' ? /^%(?:%?~?[a-z]|[^%\s]+%)/i : /^![^!\s]+!/).exec(this.t.slice(this.i, this.i + 256));
+        if (m) { this.i += m[0].length; dynamic = true; continue; }
+      }
+      value += c; this.i += 1;
+    }
+    push();
+    return tokens;
+  }
+  wordOrNothing() { for (let n = this.blank(); n; n = this.blank()) this.i += n; return []; }
+  lineEnd() { const breaks = /[\n\r\u0085\u2028\u2029]/g; breaks.lastIndex = this.i; return breaks.exec(this.t)?.index ?? this.t.length; }
+
+  // POSIX $(...), `...`, ${...} and $name; the caller marks the word dynamic.
+  substitution() {
+    const c = this.peek();
+    if (c === '`') {
+      let j = this.i + 1, inner = '';
+      for (; j < this.t.length && this.t[j] !== '`'; j += 1) { if (this.t[j] === '\\' && j + 1 < this.t.length) { j += 1; inner += this.t[j]; continue; } inner += this.t[j]; }
+      if (j >= this.t.length) throw UNREADABLE;
+      this.nested(inner); this.i = j + 1; return;
+    }
+    if (this.peek(1) === '(') { this.group(2, ')'); return; }
+    if (this.peek(1) === '{') {
+      // Parameter expansion; its default or alternative words may hold substitutions.
+      this.i += 2; let depth = 1;
+      while (depth) {
+        const d = this.peek(); if (d === undefined) throw UNREADABLE;
+        if (d === '}') { depth -= 1; this.i += 1; continue; }
+        if (d === '\\') { this.i += 2; continue; }
+        if (d === "'") { const end = this.t.indexOf("'", this.i + 1); if (end < 0) throw UNREADABLE; this.i = end + 1; continue; }
+        if (d === '"') { this.i += 1; this.doubleQuotedPart('"'); continue; }
+        if (d === '$' || d === '`') { if (this.peek(1) === '{') { depth += 1; this.i += 2; continue; } this.substitution(); continue; }
+        this.i += 1;
+      }
+      return;
+    }
+    this.i += 1;
+    if (/[\w@*#?$!-]/.test(this.peek() || '')) { if (/\w/.test(this.peek())) while (/\w/.test(this.peek() || '')) this.i += 1; else this.i += 1; }
+  }
+
+  nested(text) {
+    const reader = new ShellReader(text, this.d); reader.nesting = this.nesting;
+    this.commands.push(...reader.read());
+  }
+
+  // Reads a double-quoted part (or, with close null, expandable text to its end). Sets
+  // this.literal and returns true when the part expands something.
+  doubleQuotedPart(close) {
+    let literal = '', dynamic = false;
+    for (;;) {
+      const c = this.peek();
+      if (c === undefined) { if (close) throw UNREADABLE; break; }
+      if (close && (c === close || (this.d === POWERSHELL && PS_QUOTES[c] === '"'))) {
+        if (this.d === POWERSHELL && PS_QUOTES[this.peek(1)] === '"') { literal += '"'; this.i += 2; continue; }
+        this.i += 1; break;
+      }
+      if (this.d === POSIX) {
+        if (c === '\\') { const d = this.peek(1); if (d !== undefined && '$`"\\\n'.includes(d)) { if (d !== '\n') literal += d; this.i += 2; continue; } literal += c; this.i += 1; continue; }
+        if (c === '`' || (c === '$' && /[({\w@*#?$!-]/.test(this.peek(1) || ''))) { this.substitution(); dynamic = true; continue; }
+      } else {
+        if (c === '`') { literal += this.peek(1) ?? ''; this.i += 2; continue; }
+        if (c === '$' && this.peek(1) === '(') { this.group(2, ')'); dynamic = true; continue; }
+        if (c === '$' && /[\w{:?^$]/.test(this.peek(1) || '')) {
+          if (this.peek(1) === '{') { const end = this.t.indexOf('}', this.i); if (end < 0) throw UNREADABLE; this.i = end + 1; }
+          else { this.i += 1; while (/[\w:]/.test(this.peek() || '')) this.i += 1; }
+          dynamic = true; continue;
+        }
+      }
+      literal += c; this.i += 1;
+    }
+    this.literal = literal;
+    return dynamic;
+  }
+
+  // PowerShell @'...'@ and @"..."@; the expandable form may hold subexpressions.
+  hereString() {
+    const quote = this.peek(1); this.i += 2;
+    if (this.peek() === '\r') this.i += 1;
+    this.i += 1;
+    const bodyStart = this.i;
+    for (let line = this.i; ; ) {
+      if (line >= this.t.length) throw UNREADABLE;
+      if (this.t.startsWith(quote + '@', line)) {
+        const body = this.t.slice(bodyStart, Math.max(bodyStart, line - 1));
+        this.i = line + 2; this.literal = body;
+        if (quote === '"') { const before = this.commands.length; this.expandable(body, this); return this.commands.length > before || /\$/.test(body); }
+        return false;
+      }
+      const next = this.t.indexOf('\n', line);
+      if (next < 0) throw UNREADABLE;
+      line = next + 1;
+    }
+  }
 }
 
-// Classification is intentionally broader than admission. An embedded/wrapped or malformed
-// invocation must not fall out of enforcement merely because the literal reader cannot parse it.
-function pythonBindingBarriers(text, shell) {
-  if (!['common','powershell'].includes(shell) || /[$%!\x60^&]/.test(text)) return [];
-  if (text.length>32768 || /[^\x09\x0a\x0d\x20-\x7e]/.test(text)) return [];
-  // This is source ownership for lexical proof only, never shell admission.
-  // Single-quoted PowerShell here-string, exact stdin consumer, no prefix/suffix.
-  const transport=/^[ \t]*@'\r?\n([\s\S]*?)\r?\n'@[ \t]*\|[ \t]*python(?:3)?(?:\.exe)?[ \t]+-[ \t]*$/i.exec(text);
-  if(!transport)return [];
-  const source=transport[1],offset=transport[0].indexOf('\n')+1;
-  if (/\r(?!\n)/.test(source) || source.split(/\r?\n/).slice(0,2).some(line=>/^[ \t]*#.*coding[=:]/.test(line))) return [];
-  // A here-string closing delimiter cannot be embedded before the final close.
-  if(/(?:^|\n)'@/.test(source))return [];
-  const tokens=[];
-  for(let i=0;i<source.length;) {
-    const c=source[i];
-    if(/[ \t\r\n]/.test(c)){i++;continue;}
-    if(c==='#'){while(i<source.length&&source[i]!=='\n')i++;continue;}
-    const start=i;
-    if(c==='"'||c==="'") {
-      const prefix=tokens.at(-1);
-      if(prefix?.end===start && /^[a-z_]/i.test(prefix.value||'') && !/^(?:r|u|b|br|rb)$/i.test(prefix.value))return [];
-      const triple=source.slice(i,i+3)===c.repeat(3),width=triple?3:1;i+=width;let closed=false;
-      while(i<source.length){
-        if(source[i]==='\\'){i+=2;continue;}
-        if(source.slice(i,i+width)===c.repeat(width)){i+=width;closed=true;break;}
-        if(!triple&&/[\r\n]/.test(source[i]))return [];
-        i++;
+// The shells that may run a text: the one the call names, else the tool's own shell, else bash,
+// PowerShell and the first line under cmd. An unrecognised shell is read under all three in full.
+function dialectsOf(input, host) {
+  const shell = input?.tool_input?.shell;
+  if (shell !== undefined) {
+    if (!knownShell(input)) return [POSIX, POWERSHELL, CMD];
+    const name = shell.split(/[\\/]/).pop().toLowerCase().replace(/\.exe$/, '');
+    return [/^(?:powershell|pwsh)$/.test(name) ? POWERSHELL : name === 'cmd' ? CMD : POSIX];
+  }
+  if (input?.tool_name === 'PowerShell') return [POWERSHELL];
+  if (input?.tool_name === 'Bash' && host === 'claude') return [POSIX];
+  // cmd runs only the first line of a command it is handed.
+  return [POSIX, POWERSHELL, CMD_FIRST_LINE];
+}
+
+const leaf = value => value.split(/[\\/]/).pop().toLowerCase().replace(/\.(?:exe|cmd|bat|ps1)$/, '');
+const raws = words => words.map(w => w.raw).join(' ');
+
+// Decides whether any command the reader found could resume or fork a session. `seen` names the
+// first one found, for the refusal text.
+class CandidateFinder {
+  constructor({ text, stdin = [] }) { this.full = text; this.stdin = stdin; this.seen = null; this.assigned = new Map(); }
+
+  // Literal variable assignments (`x=co`, `$h = 'codex'`), so a computed command word can be
+  // read with them filled in.
+  remember(commands) {
+    for (const { words, dialect } of commands) {
+      const add = (name, value) => this.assigned.set(name.toLowerCase(), [...(this.assigned.get(name.toLowerCase()) || []), value]);
+      if (dialect === POWERSHELL && /^\$\w+$/.test(words[0]?.raw || '') && words[1]?.raw === '=' && typeof words[2]?.value === 'string') add(words[0].raw.slice(1), words[2].value);
+      for (const w of words) {
+        const m = w.kind === 'word' && typeof w.value === 'string' ? /^([A-Za-z_]\w*)=([\s\S]*)$/.exec(w.value) : null;
+        if (!m || !/^[A-Za-z_]\w*=/.test(w.raw)) break;
+        add(m[1], m[2]);
       }
-      if(!closed)return [];
-      tokens.push({value:null,start,end:i});continue;
     }
-    if(/[a-z_]/i.test(c)){i++;while(i<source.length&&/[a-z0-9_]/i.test(source[i]))i++;tokens.push({value:source.slice(start,i),start,end:i});continue;}
-    tokens.push({value:c,start,end:++i});
   }
-  const name=t=>t&&/^[a-z_]\w*$/i.test(t.value||'')&&!new Set(['False','None','True','and','as','assert','async','await','break','class','continue','def','del','elif','else','except','finally','for','from','global','if','import','in','is','lambda','nonlocal','not','or','pass','raise','return','try','while','with','yield']).has(t.value);
-  const barriers=[];
-  for(let n=0;n<tokens.length;n++) {
-    if(tokens[n].value!=='for'||!name(tokens[n+1]))continue;
-    const whitespace=source.slice(tokens[n].end,tokens[n+1].start);
-    if(!/^[ \t]+$/.test(whitespace))continue;
-    let at=n+2;
-    while(tokens[at]?.value===','&&name(tokens[at+1]))at+=2;
-    if(tokens[at]?.value!=='in'||!name(tokens[n+1]))continue;
-    // Every header gap must be horizontal trivia. No continuation/comment/newline
-    // or expression may impersonate this deliberately small binding grammar.
-    if(tokens.slice(n+1,at+1).some((t,j)=>j>0&&!/^[ \t]*$/.test(source.slice(tokens[n+j].end,t.start))))continue;
-    barriers.push({start:offset+tokens[n].end,end:offset+tokens[n+1].start,role:'Python for binding separator'});
-  }
-  return barriers;
-}
-// Dotted host path components and the exact upper-case folder variables are names only
-// in argument position. Command words and derived-text execution keep the earlier evidence.
-// Each span becomes a barrier, so neighbouring text still cannot join across it. The
-// whole-input ASCII/no-control qualification excludes source NUL, as for the Python proof.
-const FOLDER_VARIABLES = /^(?:CODEX_HOME|CLAUDE_CONFIG_DIR|CLAUDE_PROJECT_DIR|CLAUDE_PLUGIN_ROOT)$/;
-const NAME_EVALUATORS = /(?:^|[^\w-])(?:eval|source|exec|invoke-expression|iex)(?:\.exe)?(?=$|[^\w-])/i;
-const NAME_DOT_SOURCE = /(?:^|[;&|(){}\r\n])[ \t]*\.[ \t]+/;
-const NAME_COMMAND_WRAPPERS = /^(?:env|command|exec|nohup|xargs|sudo|time|nice|timeout|setsid|stdbuf|chroot|start-process|saps|start|call|if|then|else|while|until|do)$/i;
-// Runtime extraction can pull a host spelling back out of a folder name: piping into a shell
-// or interpreter, substitutions, string methods/operators, slicing and parameter or cmd
-// substring expansion. Any of them anywhere keeps the unbarriered (main) result.
-// Same matches as /\$\{[^}]*[:#%\/^,]/ in one linear pass: a '${' with an operator before its
-// first '}'. The regex backtracked quadratically on long runs of unclosed '${'.
-const BRACE_OPERATOR = Object.freeze({ test(text) {
-  let close = -1, operator = -1;
-  for (let i = text.length - 1; i >= 0; i -= 1) {
-    if (text[i] === '}') close = i;
-    else if (':#%/^,'.includes(text[i])) operator = i;
-    if (text[i] === '$' && text[i + 1] === '{' && operator > i + 1 && (close < 0 || operator < close)) return true;
-  }
-  return false;
-} });
-const EXTRACTION = [
-  /\$\(|`|<\(/,
-  /\.(?:substring|trim(?:start|end)?|replace|remove|split|insert|chars|pad(?:left|right)|tostring|to(?:lower|upper)(?:invariant)?|getfilename\w*|getextension|name)\b/i,
-  /\[io\.path\]|\[char\b|\bsplit-path\b|-[ci]?(?:replace|split)\b|-join\b|\[\s*-?\d+\s*\.\./i,
-  BRACE_OPERATOR,
-  /[!%][a-z_][\w]*:~/i,
-  NAME_EVALUATORS,
-  NAME_DOT_SOURCE,
-  /\.[ \t]*(?:\(|\$)/,
-];
-// Pipe consumers must be fixed data readers or pure data filters. Unknown commands,
-// quoted/path-qualified shells and wrappers all retain the raw evidence instead of
-// extending a shell denylist. The PowerShell-only data filters (Sort-Object and the rest of
-// the second group) do not apply to an explicit cmd shell.
-const NAME_PIPE_READERS = /^(?:grep|rg|jq|head|tail|sort|wc|cut|cat|git|tr|uniq|convertfrom-json|convertto-json|select-object|select-string|where-object|out-string|sort-object|measure-object|format-table|format-list|get-unique|out-null)(?:\.exe)?$/i;
-const CMD_PIPE_READERS = /^(?:grep|rg|jq|head|tail|sort|wc|cut|cat|git|tr|uniq|convertfrom-json|convertto-json|select-object|select-string|where-object|out-string)(?:\.exe)?$/i;
-// A quoted script argument still runs: its pipes and command positions count.
-// -e and -p are case-sensitive (grep -E and -P take patterns); -c and PowerShell's
-// -Command with its prefixes are not.
-const NAME_SCRIPT_SELECTOR_CASED = /(?:^|\s)(?:-lc|-e|-p|--eval|--print|\/[cC])[ \t]*$/;
-const NAME_SCRIPT_SELECTOR_COMMAND = /(?:^|\s)-c(?:o(?:m(?:m(?:a(?:n(?:d)?)?)?)?)?)?[ \t]*$/i;
-// The selectors run a script only for programs that interpret code: shells, language
-// interpreters, runners that hand a string to a shell, and text tools that can run commands.
-// Elsewhere (git -C, tar -C, mkdir -p) the quoted word is an ordinary argument.
-const NAME_SCRIPT_RUNNERS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'ash', 'fish', 'csh', 'tcsh', 'pwsh', 'powershell', 'cmd',
-  'node', 'nodejs', 'python', 'python2', 'python3', 'py', 'perl', 'ruby', 'php', 'deno', 'bun', 'lua', 'luajit', 'rscript', 'osascript',
-  'tclsh', 'wish', 'su', 'script', 'flock', 'wsl', 'awk', 'gawk', 'mawk', 'nawk', 'sed']);
-function scriptRunnerIn(stage) {
-  return stage.split(/\s+/).some(word => NAME_SCRIPT_RUNNERS.has(word.replace(/['"]/g, '').split(/[\\/]/).pop().toLowerCase().replace(/\.exe$/, '')));
-}
-// POSIX and PowerShell quoting: single quotes are literal, double quotes allow a '\' or
-// backtick escape. Quoted text is blanked to spaces (offsets kept), so a '|', '&' or path
-// inside quotes is neither a pipe nor a command word. A quoted script argument (a selector
-// after a script runner in the same stage) is kept as written and its first word is a
-// command position. cmd does not quote with single quotes, so cmd and unknown shells keep
-// the raw scan, as do unbalanced quotes: all return null.
-function quotedView(text, shell) {
-  if (!['common', 'posix', 'powershell'].includes(shell)) return null;
-  // runner and scanned cache the stage's runner check, so each character is read once or twice.
-  let out = '', quote = null, script = false, stage = 0, scanned = 0, runner = false; const scripts = [];
-  for (let i = 0; i < text.length; i += 1) {
-    const c = text[i];
-    if (quote) {
-      if (quote === '"' && (c === '\\' || c === '`') && i + 1 < text.length) { out += script ? c + text[i + 1] : '  '; i += 1; continue; }
-      if (c === quote) { quote = null; out += c; continue; }
-      out += script ? c : ' '; continue;
+  expand(raw) { return raw.replace(/\$\{?(?:env:)?([A-Za-z_]\w*)\}?/gi, (m, name) => (this.assigned.get(name.toLowerCase()) || [m]).join('')); }
+
+  found(seen) { this.seen ??= seen; return true; }
+
+  text(text, dialect, depth = 0) {
+    if (depth > MAX_DEPTH || text.length > LIMITS.command) return fallback(text) && this.found('a command Toolkit could not read');
+    let commands;
+    try { commands = new ShellReader(text, dialect).read(); }
+    catch (error) {
+      if (error === INERT) return false;
+      if (error === UNREADABLE || error instanceof RangeError) return fallback(text) && this.found('a command Toolkit could not read');
+      throw error;
     }
-    if (';&|(){}\r\n'.includes(c)) { stage = scanned = i + 1; runner = false; }
-    if (c === "'" || c === '"') {
-      const before = text.slice(Math.max(0, i - 64), i);
-      script = NAME_SCRIPT_SELECTOR_CASED.test(before) || NAME_SCRIPT_SELECTOR_COMMAND.test(before);
-      if (script && !runner) {
-        let from = scanned;
-        while (from > stage && !/\s/.test(text[from - 1])) from -= 1;
-        runner = scriptRunnerIn(text.slice(from, i)); scanned = i;
+    this.remember(commands);
+    return commands.some(command => this.command(command, depth));
+  }
+
+  // An argument list run without a shell (Codex's shell tool).
+  argv(values, depth = 0) {
+    const words = values.map(value => word(value, value, { quoted: true }));
+    return this.at(words, 0, { words, heredocs: [], stdin: this.stdin, stage: 0, dialect: null }, { depth, argv: true });
+  }
+
+  command(command, depth) {
+    const { words, dialect } = command;
+    let i = 0, call = false;
+    for (;;) {
+      const w = words[i];
+      if (!w) return false;
+      if (w.kind === 'op') { i += 1; call = true; continue; }
+      if (w.kind !== 'word') {
+        if (call && w.kind === 'group') return this.dynamic(words.slice(i), command);
+        return dialect === POWERSHELL && !call ? this.expression(command) : false;
       }
-      script = script && runner;
-      if (script) scripts.push(i + 1);
-      quote = c;
+      if (call) break;
+      if (dialect === POSIX) {
+        if (/^[A-Za-z_]\w*\+?=/.test(w.raw)) { i += 1; continue; }
+        if (w.value !== null && POSIX_PREFIX.has(w.value)) { i += 1; continue; }
+      } else if (dialect === POWERSHELL) {
+        // A quoted host path at statement start is a parse error, not a launch; read it as one anyway.
+        if (/^["'\u2018-\u201e]/.test(w.raw) && w.value !== null && hostOf(w.value)) break;
+        if (/^[$[@\d"'\u2018-\u201e]/.test(w.raw)) {
+          const assign = words.findIndex((x, n) => n > i && x.kind === 'word' && !x.quoted && POWERSHELL_ASSIGN.has(x.raw));
+          if (assign < 0) return this.expression(command);
+          i = assign + 1; continue;
+        }
+        if (w.value !== null && POWERSHELL_PREFIX.has(w.value.toLowerCase())) { i += 1; continue; }
+        // Dot-sourcing runs a script file or block in this scope; at() reads it like `source`.
+        if (w.raw === '.') break;
+      } else if (dialect === CMD && w.value?.startsWith('@')) {
+        words[i] = { ...w, value: w.value.slice(1) };
+      }
+      break;
     }
-    out += c;
+    return this.at(words, i, command, { depth });
   }
-  return quote ? null : { text: out, scripts };
-}
-function derivedNameExecution(text, shell = null, view = quotedView(text, shell)) {
-  if (EXTRACTION.some(pattern => pattern.test(text))) return true;
-  // Shell quote fragments and escapes can spell an evaluator without changing
-  // its command name. Keep path separators in one view and POSIX escapes in another.
-  const unquoted = text.replace(/['"]/g, '');
-  for (const view of [unquoted, unquoted.replace(/\\/g, '')]) {
-    if (NAME_EVALUATORS.test(view) || NAME_DOT_SOURCE.test(view)) return true;
+
+  // PowerShell expression statements run no program, except through .NET calls such as
+  // [Diagnostics.Process]::Start(); those get the direct check.
+  expression(command) {
+    const text = raws(command.words);
+    return /::|\.(?:start|invoke)\s*\(/i.test(text) && directCheck(text) && this.found('a .NET process start');
   }
-  const readers = shell === 'cmd' ? CMD_PIPE_READERS : NAME_PIPE_READERS;
-  for (const m of (view?.text ?? text).matchAll(/\|\|?|(?:^|[^&])&(?=[ \t]*['"($])/g)) {
-    if (m[0] === '||') continue;
-    const rest = text.slice(m.index + m[0].length);
-    if (m[0] === '|') {
-      const target = /^[ \t\r\n]*([^\s;|&(){}]+)/.exec(rest)?.[1];
-      // git reads a pipe only as a plain subcommand; an option first can define an alias that runs a program.
-      if (readers.test(target || '') && !(/^git(?:\.exe)?$/i.test(target) && /^[ \t\r\n]*\S+[ \t]+-/.test(rest))) continue;
-      if (/^[ \t\r\n]*foreach-object[ \t]+\{/i.test(rest)) continue;
-      return true;
+
+  // What an earlier pipeline stage feeds this command: a quoted string, a here-string or a
+  // variable holding one is known text (`literal`); anything else is only the stages' own text.
+  upstream(command) {
+    const stages = [];
+    for (let at = command.prev; at; at = at.prev) stages.unshift(at);
+    const first = command.prev?.words;
+    let literal = null;
+    if (first?.length === 1 && first[0].kind === 'word') {
+      const w = first[0];
+      if (w.quoted && w.value !== null) literal = w.value;
+      else if (/^\$\w+$/.test(w.raw) && this.assigned.has(w.raw.slice(1).toLowerCase())) literal = this.assigned.get(w.raw.slice(1).toLowerCase()).join('\n');
     }
-    // A literal shell executable does not compute its own name. Its entire script
-    // still undergoes the extraction, pipe and command-position scans here.
-    if (!/^[ \t]*(['"])(?:[a-z]:[\\/]|\/)?(?:[a-z0-9_.-]+[\\/])*(?:pwsh|powershell|bash|sh|cmd)(?:\.exe)?\1(?=[ \t]|$)/i.test(rest)) return true;
+    return { literal, raw: stages.map(stage => raws(stage.words)).join(' | ') };
   }
-  return false;
-}
-const NAME_STAGE_WORD = /[ \t]*((?:"[^"\r\n]*"|'[^'\r\n]*'|[\\^][ \t]|[^\s;'"&|(){}])+)/y;
-function nameBarriers(text, shell = null) {
-  if (text.length > LIMITS.command || /[^\x09\x0a\x0d\x20-\x7e]/.test(text)) return [];
-  const view = quotedView(text, shell), scan = view?.text ?? text;
-  if (derivedNameExecution(text, shell, view)) return [];
-  // Word ranges in command position, including quoted paths and nested commands. Stages
-  // are found outside quotes, and at the start of a quoted script argument, whose text is
-  // scanned as written. The command word itself is read from the source text.
-  const stageEnd = /[;&|(){}\r\n]/g;
-  const starts = [...scan.matchAll(/(?:^|[;&|(){}\r\n])(?=[ \t]*[^\s;'"&|(){}]|[ \t]*['"])/g)].map(m => m.index + m[0].length);
-  for (const at of view?.scripts || []) starts.push(at);
-  const cover = new Array(text.length + 1).fill(0);
-  for (const at of starts) {
-    NAME_STAGE_WORD.lastIndex = at;
-    const m = NAME_STAGE_WORD.exec(scan);
-    if (!m) continue;
-    let end = at + m[0].length;
-    const word = text.slice(end - m[1].length, end).replace(/['"]/g, '');
-    const leaf = word.split(/[\\/]/).pop().replace(/\.exe$/i, '');
-    // Wrappers, conditions and leading assignments/redirections can run a later
-    // argument. Keep their whole stage visible, including options and wrapper chains.
-    if (NAME_COMMAND_WRAPPERS.test(leaf) || NAME_COMMAND_WRAPPERS.test(word.replace(/\\/g, ''))
-      || /^[a-z_]\w*=|^\d*[<>]/i.test(word)) {
-      stageEnd.lastIndex = end; end = stageEnd.exec(scan)?.index ?? text.length;
+
+  // A command word that is computed at run time: refused only with host letters outside folder
+  // paths, or in the word's own assigned or built value, and a selector after it.
+  dynamic(words, command) {
+    if (words[1]?.raw === '=') return false;
+    const own = words[0].raw, after = raws(words.slice(1));
+    const selector = selectorSignal(after) || selectorSignal(own);
+    // A name assigned elsewhere (`$h='codex'; & $h resume`), or built in the command word itself.
+    const assigned = (outsidePaths(this.full) || hostLetters(this.expand(own))) && selector;
+    const built = HOST_NAMES.some(name => inOrder(constructed(own), name))
+      && (selector || SELECTOR_NAMES.some(name => inOrder(constructed(after), name)));
+    return (assigned || built) && this.found('a command name computed at run time');
+  }
+
+  at(words, i, command, { depth, viaWrapper = false, xargs = false, argv = false }) {
+    const w = words[i];
+    if (!w) return false;
+    if (w.kind !== 'word') return w.kind === 'group' ? this.dynamic(words.slice(i), command) : false;
+    if (w.value === null || w.glob) return this.dynamic(words.slice(i), command);
+    const pieces = w.value.split(ODD);
+    const value = pieces[0], args = pieces.length > 1 ? [...pieces.slice(1).filter(Boolean).map(p => word(p, p)), ...words.slice(i + 1)] : words.slice(i + 1);
+    // A dotted file named like a host (`~/.claude -r`) is read as the host too.
+    const host = hostOf(value) || hostOf(value.split(/[\\/]/).pop().replace(/^\.+/, ''));
+    if (host) return this.launch(host, value, args, { viaWrapper, xargs });
+    const name = leaf(value);
+    if (WRAPPERS.has(name) || (CMD_KEYWORDS.has(name) && command.dialect === CMD)) {
+      if (depth >= MAX_DEPTH) return fallback(raws(words.slice(i))) && this.found('a deeply wrapped command');
+      for (let j = i + 1; j < words.length; j += 1) {
+        const x = words[j];
+        if (x.kind !== 'word') continue;
+        if (x.value === null || x.glob) { if (this.dynamic(words.slice(j), command)) return true; continue; }
+        const inner = leaf(x.value.split(ODD)[0]);
+        if (hostOf(x.value.split(ODD)[0]) || WRAPPERS.has(inner) || RUNNERS[inner] || INTERPRETERS.has(inner) || EVALUATORS.has(inner)) {
+          if (this.at(words, j, command, { depth: depth + 1, viaWrapper: true, xargs: name === 'xargs', argv })) return true;
+        }
+      }
+      return false;
     }
-    cover[at] += 1; cover[end] -= 1;
+    if (RUNNERS[name]) return this.runner(RUNNERS[name], name, args, command, depth, argv);
+    if (INTERPRETERS.has(name)) {
+      // The script is its arguments, a heredoc or here-string, or known text piped in. Text an
+      // earlier stage builds gets the letters check over those stages.
+      const up = command.prev ? this.upstream(command) : null;
+      const body = [raws(args), ...command.heredocs.map(doc => doc.body || ''), ...command.stdin, up?.literal ?? ''].join('\n');
+      return (directCheck(body) || (up && up.literal === null && fallback(up.raw))) && this.found(`a ${name} script`);
+    }
+    if (EVALUATORS.has(name)) {
+      // `... | iex` runs its piped input.
+      if (command.prev && !args.length) {
+        const up = this.upstream(command);
+        return (up.literal !== null ? this.text(up.literal, command.dialect ?? POWERSHELL, depth + 1) : fallback(up.raw)) && this.found(`text piped into ${name}`);
+      }
+      if (name === '.' || name === 'source') {
+        if (args.some(x => x.kind !== 'word' || x.value === null)) return this.dynamic(words.slice(i), command);
+        // The sourced file may have been written earlier in the same command.
+        return fallback(this.full) && this.found(`${name} on a script file`);
+      }
+      if (args.some(x => x.kind !== 'word' || x.value === null)) {
+        const own = raws(words.slice(i));
+        return ((hostLetters(own) && selectorSignal(own)) || this.dynamic(words.slice(i), command)) && this.found(`${name} on computed text`);
+      }
+      const script = args.filter(x => !/^-c(?:o(?:m(?:m(?:a(?:n(?:d)?)?)?)?)?)?$/i.test(x.value));
+      return this.text(script.map(x => x.value).join(' '), command.dialect ?? POWERSHELL, depth + 1);
+    }
+    const options = COMMAND_OPTIONS[name];
+    if (options) {
+      for (let n = 0; n < args.length; n += 1) {
+        const v = args[n].kind === 'word' ? args[n].value ?? args[n].raw : '';
+        const eq = v.startsWith('-') ? v.indexOf('=') : -1;
+        let value = null;
+        if (options.test(eq > 0 ? v.slice(0, eq) : v)) value = eq > 0 ? v.slice(eq + 1) : (args[n + 1]?.value ?? args[n + 1]?.raw ?? '');
+        else if (name === 'git' && /^(?:ext|fd)::/.test(v)) value = v;
+        // rg runs its --pre program on each searched path, so the paths are its arguments.
+        if (value !== null && name === 'rg' && /^--pre(?:=|$)/.test(v)) value += ' ' + raws(args.slice(n + 1));
+        if (value !== null && directCheck(value)) return this.found(`a command run by ${name}`);
+      }
+      return false;
+    }
+    if (DEFINERS.has(name)) return args.some(x => x.kind === 'word' && x.value !== null && x.value.split(/[=\s]/).some(p => hostOf(p.replace(/^['"]|['"]$/g, '')))) && this.found('an alias for a host');
+    return false;
   }
-  for (let i = 1; i <= text.length; i += 1) cover[i] += cover[i - 1];
-  const inCommand = at => cover[at] > 0;
-  const spans = [];
-  for (const m of text.matchAll(/(?<![\w.$-])\.(?:claude|codex)[\w.-]*/gi)) {
-    const before = text[m.index - 1], after = text[m.index + m[0].length];
-    // A path separator must touch the name. A bare or quoted dotted word stays evidence.
-    if (!inCommand(m.index) && (before === '/' || before === '\\' || after === '/' || after === '\\')) spans.push({ start: m.index, end: m.index + m[0].length });
+
+  launch(host, value, args, { viaWrapper, xargs }) {
+    if (xargs) return this.found(`${leaf(value)} through xargs`);
+    const words = args.filter(x => x.kind === 'word');
+    // An unquoted computed argument can become a selector at run time.
+    if (args.some(x => x.kind !== 'word' || (x.value === null && !x.quoted))) return this.found(`${leaf(value)} with computed arguments`);
+    const values = words.filter(x => x.value !== null).map(x => x.value);
+    if (!viaWrapper && HELP_FORMS[host]?.some(form => form.length === values.length && form.every((arg, n) => arg === values[n]))) return false;
+    const pieces = values.flatMap(v => v.split(viaWrapper ? /[\s,]+/ : /,/)).filter(Boolean);
+    const selector = host === 'claude'
+      ? pieces.find(p => /^(?:--(?:resume|continue|session-id|fork-session)(?:=|$)|-(?!-)[a-z]*[rc][a-z]*(?:=|$))/i.test(p))
+      : pieces.find(p => p === 'resume' || p === 'fork');
+    return selector !== undefined && this.found(`${leaf(value)} ${selector.split('=')[0]}`);
   }
-  // An undotted host word is a name only inside a standalone path-like word (one holding
-  // '/' or '\' that no quote or operator glues to another fragment), as a directory
-  // component or joined by '-' or '_' to more letters or digits. A path leaf spelled as a
-  // host executable ('.../claude', 'codex.exe', 'claude-code') is never a name.
-  for (const m of text.matchAll(/(?<![A-Za-z0-9.])(?:claude|codex)(?![A-Za-z0-9])/gi)) {
-    if (inCommand(m.index) || spans.some(s => s.start <= m.index && m.index < s.end)) continue;
-    const end = m.index + m[0].length, before = text[m.index - 1], after = text[end];
-    let a = m.index, b = end;
-    while (a > 0 && /[A-Za-z0-9_.\-\/\\:]/.test(text[a - 1])) a -= 1;
-    while (b < text.length && /[A-Za-z0-9_.\-\/\\:]/.test(text[b])) b += 1;
-    const left = text[a - 1], right = text[b];
-    const leftAlone = left === undefined || /[\s;|&(=]/.test(left) || (/['"]/.test(left) && (a < 2 || /[\s;|&(=:]/.test(text[a - 2])));
-    const rightAlone = right === undefined || /[\s;|&)]/.test(right) || (/['"]/.test(right) && (b + 1 >= text.length || /[\s;|&)]/.test(text[b + 1])));
-    if (!leftAlone || !rightAlone || !/[\\/]/.test(text.slice(a, b))) continue;
-    let p = m.index, q = end;
-    while (p > a && !/[\\/]/.test(text[p - 1])) p -= 1;
-    while (q < b && !/[\\/]/.test(text[q])) q += 1;
-    if (q === b && HOST.test(text.slice(p, q))) continue;
-    const directory = after === '/' || after === '\\';
-    const joined = (/[-_]/.test(before || '') && /[A-Za-z0-9]/.test(text[m.index - 2] || ''))
-      || (/[-_]/.test(after || '') && /[A-Za-z0-9]/.test(text[end + 1] || ''));
-    if (directory || joined) spans.push({ start: m.index, end });
+
+  // A shell given a script, or reading one from stdin or a heredoc.
+  runner(dialect, name, args, command, depth, argv) {
+    if (depth >= MAX_DEPTH) return fallback(raws(args)) && this.found('a deeply nested shell');
+    const words = args.filter(x => x.kind === 'word');
+    const computed = words.findIndex(x => x.value === null);
+    if (computed >= 0) return this.dynamic(words.slice(computed), command);
+    // script: null reads stdin, 'file' runs a file Toolkit cannot see, else the script words.
+    let script = null;
+    if (dialect === POSIX) {
+      const n = words.findIndex(x => /^-[A-Za-z]*c[A-Za-z]*$/.test(x.value));
+      if (n >= 0) script = words.slice(n + 1, n + 2);
+      else if (words.some(x => !/^[-+]/.test(x.value))) script = 'file';
+    } else if (dialect === POWERSHELL) {
+      const encoded = words.findIndex(x => /^-(?:e(?:n(?:c(?:o(?:d(?:e(?:d(?:c(?:o(?:m(?:m(?:a(?:n(?:d)?)?)?)?)?)?)?)?)?)?)?)?)?|ec)$/i.test(x.value));
+      if (encoded >= 0) {
+        // -EncodedCommand carries the script as Base64 of UTF-16LE text: read it decoded.
+        const value = words[encoded + 1]?.value || '';
+        if (this.text(Buffer.from(value, 'base64').toString('utf16le'), dialect, depth + 1)) return true;
+        words.splice(encoded, 2);
+      }
+      const n = words.findIndex(x => /^-c(?:o(?:m(?:m(?:a(?:n(?:d)?)?)?)?)?)?$/i.test(x.value));
+      if (n >= 0) script = words.slice(n + 1);
+      else if (words.some(x => /^-f(?:i(?:l(?:e)?)?)?$/i.test(x.value))) script = 'file';
+      else if (words.some(x => !x.value.startsWith('-'))) {
+        // A positional script may follow options that take a value, so read from each plain word.
+        for (let k = 0; k < words.length; k += 1) {
+          if (!words[k].value.startsWith('-') && this.text(words.slice(k).map(x => x.value).join(' '), dialect, depth + 1)) return true;
+        }
+        return false;
+      }
+      if (Array.isArray(script) && script.length === 1 && script[0].value === '-') script = null;
+    } else {
+      const n = words.findIndex(x => /^\/[ck]/i.test(x.value));
+      if (n >= 0) {
+        const attached = words[n].value.slice(2);
+        script = [...(attached ? [word(attached, attached)] : []), ...words.slice(n + 1)];
+      }
+    }
+    if (script === 'file') return false;
+    if (script?.length) {
+      let text = script.map(x => x.value).join(' ');
+      if (dialect === CMD && /^".*"$/s.test(text)) text = text.slice(1, -1);
+      return this.text(text, dialect, depth + 1);
+    }
+    // No script argument: stdin, a heredoc or a here-string is the script.
+    for (const doc of command.heredocs) if (doc.body && this.text(doc.body, dialect, depth + 1)) return true;
+    for (const input of command.stdin) if (this.text(input, dialect, depth + 1)) return true;
+    // Known text piped in is read as the script; text an earlier stage builds gets the letters check.
+    if (command.prev) {
+      const up = this.upstream(command);
+      if (up.literal !== null) return this.text(up.literal, dialect, depth + 1);
+      return fallback(up.raw) && this.found(`a script piped into ${name}`);
+    }
+    return this.stdin.length > 0 && fallback(this.stdin.join('\n')) && this.found(`a script piped into ${name}`);
   }
-  // A variable is one only outside single quotes and not after an escape. Unbalanced
-  // quotes withdraw all name barriers.
-  const single = new Array(text.length).fill(false); let quote = null;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    if (quote === "'") { single[i] = true; if (c === "'") quote = null; continue; }
-    if (quote === '"') { if ((c === '\\' || c === '`') && i + 1 < text.length) { i++; continue; } if (c === '"') quote = null; continue; }
-    if (c === "'" || c === '"') { quote = c; single[i] = c === "'"; }
-  }
-  if (quote) return [];
-  for (const m of text.matchAll(/(?<![$\w\\`^])\$(?:env:)?([a-z_]\w*)/gi)) {
-    if (!single[m.index] && !inCommand(m.index) && FOLDER_VARIABLES.test(m[1])) spans.push({ start: m.index + m[0].length - m[1].length, end: m.index + m[0].length });
-  }
-  return spans.sort((a, b) => a.start - b.start);
 }
-function barrierText(text, spans) {
-  const chars = text.split('');
-  for (const span of spans) for (let i = span.start; i < span.end; i++) chars[i] = '\0';
-  return chars.join('');
+
+// True when the call could resume or fork a session; `seen` says what was found.
+function candidate(text, input, host = null) {
+  const args = input?.tool_input;
+  const fields = args && typeof args === 'object' && !Array.isArray(args)
+    ? ['command', 'cmd'].map(field => args[field]).filter(value => (typeof value === 'string' && value) || (Array.isArray(value) && value.length)) : [];
+  const stdin = fields.length ? [args.input, args.patch].filter(value => typeof value === 'string' && value) : [];
+  const finder = new CandidateFinder({ text: typeof text === 'string' ? text : '', stdin });
+  // The fields the gate's text came from are read as the host gives them: a string as shell text,
+  // an argument list as the program and its arguments, so no shell ever re-reads its unquoted words.
+  const readings = fields.length ? fields : [finder.full];
+  const hit = readings.some(value => Array.isArray(value)
+    ? (value.every(item => typeof item === 'string') ? finder.argv(value) : fallback(JSON.stringify(value)) && finder.found('a command Toolkit could not read'))
+    : dialectsOf(input, host).some(dialect => (dialect === CMD_FIRST_LINE ? finder.text(value.split('\n')[0], CMD) : finder.text(value, dialect))));
+  return hit ? { seen: finder.seen } : null;
 }
-function constructionFragments(text, shell, names = []) {
-  const barriers=pythonBindingBarriers(text, shell),chars=text.split('');
-  barriers.push(...names);
-  // Proof excludes source NUL; otherwise preserve every original code unit until
-  // the legacy consuming transforms finish, then discard controls as before.
-  for(const span of barriers)for(let i=span.start;i<span.end;i++)chars[i]='\0';
-  const shadow=chars.join('').replace(/[\\\x60^]\r?\n/g,'')
-    .replace(/%[^%\r\n]*%|![^!\r\n]*!|\$\{[^}$\r\n]*\}/g,'')
-    .replace(/["'\\\x60^]/g,'');
-  return formatParts(shadow).filter(part=>part!==null).join('').replace(/-(?:f|join)\b/gi,'')
-    .replace(barriers.length ? /[^a-z0-9\x00-]/gi : /[^a-z0-9-]/gi,'');
-}
-function broadVisible(source, executableScript = false, shell = null) {
-  // Every evidence scan reads the barriered text; only the strict reader sees the source.
-  const names = nameBarriers(source, shell), text = names.length ? barrierText(source, names) : source;
-  const direct = (/\bclaude(?:-code)?(?:\.(?:exe|cmd|ps1))?\b/i.test(text)
-      && /--(?:resume|continue|session-id|fork-session)\b|(?:^|[\s;&|()'"`])-(?!-)[a-z]*[rc][a-z]*(?=$|[\s=;&|()'"`])/i.test(text))
-    || (/\bcodex(?:\.(?:exe|cmd|ps1))?\b/i.test(text) && /\b(?:resume|fork)\b/i.test(text));
-  if (direct) return true;
-  // Quote concatenation and shell escapes can split an executable or selector spelling.
-  // This shadow is detection only: the strict reader below never admits those forms.
-  // No left host boundary is required here because removing a Windows path separator
-  // can attach its directory name to the executable. Extra matches refuse conservatively.
-  const shadow = text.replace(/[\\`^]\r?\n/g, '')
-    .replace(/%[^%\r\n]*%|![^!\r\n]*!|\$\{[^}$\r\n]*\}/g, '')
-    .replace(/["'\\`^]/g, '');
-  // Word syntax outside the literal grammar can compute the other spelling, including
-  // grouping, arrays, addition, formatting and join without expansion characters.
-  // Reuse the reader's boundary rather than maintaining a second syntax allowlist.
-  // Pipeline/redirection punctuation alone does not build a spelling. Whole visible
-  // continuations still use the unmodified text and strict reader below.
-  if (executableScript || !tokens(source.replace(/[|<>]/g, ' '), { literalData: true })) {
-    // Detection only: join visible literal fragments across expression punctuation,
-    // format placeholders and format/join operators. Never evaluate the expression
-    // or pass this over-inclusive spelling to the target reader. Fully opaque runtime
-    // scripts with no recognisable host/selector remain outside this guard's scope.
-    const fragments = constructionFragments(source, shell, names);
-    // Casts, methods and other syntax between quoted fragments must not hide their
-    // visible spelling. Inspect potential spelling atoms at every quote, including
-    // inner wrapper quotes, without claiming to parse shell quote nesting. Only the
-    // spelling/escape/format alphabet contributes; intervening expression code does
-    // not. This can only make detection stricter, never prove runtime concatenation.
-    const atoms = quoteAtoms(text);
-    const quoted = formatParts(atoms.filter(atom => /^[a-z0-9_.:{},\\\x60^-]*$/i.test(atom)).join(''))
-      .filter(part => part !== null).join('').replace(/[^a-z0-9-]/gi, '');
-    const candidate = /claude|codex|resume|fork|--(?:continue|session-id)/i;
-    if (candidate.test(fragments) || candidate.test(quoted)) return true;
-    if (legacyTemplateEvidence(text) || orderedEvidence(text, atoms)) return true;
-  }
-  return (/claude(?:-code)?(?:\.(?:exe|cmd|ps1))?\b/i.test(shadow)
-      && /--(?:resume|continue|session-id|fork-session)\b|(?:^|[\s;&|()])-(?!-)[a-z]*[rc][a-z]*(?=$|[\s=;&|()])/i.test(shadow))
-    || (/codex(?:\.(?:exe|cmd|ps1))?\b/i.test(shadow) && /\b(?:resume|fork)\b/i.test(shadow));
-}
+
 function knownShell(input) {
   const shell = input?.tool_input?.shell;
   return shell === undefined || (typeof shell === 'string'
     && /^(?:cmd|powershell|pwsh|bash|sh)(?:\.exe)?$/i.test(shell.split(/[\\/]/).pop()));
-}
-
-function roleShell(input) {
-  const shell = input?.tool_input?.shell;
-  if (shell === undefined) return 'common';
-  if (!knownShell(input)) return null;
-  const name = shell.split(/[\\/]/).pop().toLowerCase().replace(/\.exe$/, '');
-  return /^(?:powershell|pwsh)$/.test(name) ? 'powershell' : name === 'cmd' ? 'cmd' : 'posix';
-}
-
-// This separate lexer proves operand roles, never native argv. Offsets and quote ownership
-// stay with every word. No operators, concatenation, escaped quotes or partial consumption.
-const horizontalSpace = c => c === ' ' || c === '\t';
-function roleWords(text, { scriptWord = false, fieldComma = false } = {}) {
-  if (!text || text.length > LIMITS.command || /[^\x09\x20-\x7e\r\n]/.test(text)) return null;
-  const words = [];
-  for (let i = 0; i < text.length;) {
-    if (horizontalSpace(text[i])) { i += 1; continue; }
-    const start = i; let value = '', quote = null, prefix = '';
-    if (text[i] === '&' && !words.length && horizontalSpace(text[i + 1])) { words.push({ start, end: ++i, value: '&', quote, prefix }); continue; }
-    while (i < text.length && !horizontalSpace(text[i]) && !['"', "'"].includes(text[i])) {
-      if (!/[a-z0-9_./:\\=+\-]/i.test(text[i]) && !(fieldComma && text[i] === ',')) return null;
-      value += text[i++];
-    }
-    if (['"', "'"].includes(text[i])) {
-      if (value && !/^(?:--regexp=|\/c:)$/i.test(value)) return null;
-      prefix = value; quote = text[i++]; const opening = i;
-      while (i < text.length && text[i] !== quote) {
-        if (text[i] === '`' || (text[i] === '\\' && text[i + 1] === quote)) return null;
-        if (!scriptWord && /[\r\n]/.test(text[i])) return null;
-        i += 1;
-      }
-      if (i === text.length) return null;
-      value += text.slice(opening, i++);
-      if (i < text.length && !horizontalSpace(text[i])) return null;
-    }
-    if (start === i) return null;
-    words.push({ start, end: i, value, quote, prefix });
-  }
-  return words.length ? words : null;
-}
-
-function literalWord(word, shell) {
-  if (!word || !shell || /[$`%!^]/.test(word.value)) return false;
-  // cmd does not protect controls with single quotes. The common subset can still
-  // prove a simple, unspaced pathname whose quote characters cannot introduce code.
-  if (word.quote === "'" && !['powershell', 'posix'].includes(shell)
-    && !/^[a-z0-9_./:\\-]+$/i.test(word.value)) return false;
-  // POSIX backslashes may remove ordinary path characters but cannot introduce code.
-  // A slash next to a quote, whitespace, operator or expansion earns no data proof.
-  for (let i = 0; i < word.value.length; i += 1) {
-    if (word.value[i] === '\\' && !/[a-z0-9_./:\\-]/i.test(word.value[i + 1] || '')) return false;
-  }
-  return true;
-}
-
-// Exact rg help entries: -e/--regexp (patterns), -n/--line-number, -i/--ignore-case,
-// -F/--fixed-strings, -l/--files-with-matches, --files, --hidden, --no-ignore,
-// --help and --no-config. --pre and --hostname-bin execute programs and are absent.
-const RG_DATA_SWITCHES = Object.freeze(['-n', '--line-number', '-i', '--ignore-case', '-F', '--fixed-strings', '-l', '--files-with-matches', '--files', '--hidden', '--no-ignore', '--help', '--no-config']);
-// Fixed schemas from Microsoft's findstr, type and Get-Content command references.
-const FINDSTR_DATA_SWITCHES = Object.freeze(['/n', '/i', '/l', '/r', '/s', '/m']);
-function readerProof(words, shell) {
-  if (!shell || !words?.length || words.some(word => !literalWord(word, shell))) return null;
-  let offset = 0;
-  if (words[0].value === '&') {
-    if (!['powershell', 'common'].includes(shell) || !words[1]?.quote) return null;
-    offset = 1;
-  }
-  const executable = words[offset], name = executable?.value.split(/[\\/]/).pop().toLowerCase();
-  const args = words.slice(offset + 1), roles = words.map(word => ({ ...word, role: word === executable ? 'reader executable' : 'call operator' }));
-  const mark = (n, role) => { roles[offset + 1 + n].role = role; };
-  if (/^rg(?:\.exe)?$/.test(name || '')) {
-    let pattern = false, mode = false, ended = false;
-    for (let n = 0; n < args.length; n += 1) {
-      const value = args[n].value;
-      if (!ended && value === '--') { ended = true; mark(n, 'option delimiter'); continue; }
-      if (!ended && RG_DATA_SWITCHES.includes(value)) { if (['--files', '--help'].includes(value)) mode = true; mark(n, 'search switch'); continue; }
-      if (!ended && ['-e', '--regexp'].includes(value)) {
-        mark(n, 'pattern option'); if (!args[++n] || !args[n].value) return null;
-        pattern = true; mark(n, 'literal pattern'); continue;
-      }
-      if (!ended && value.startsWith('--regexp=')) {
-        if (!value.slice(9)) return null;
-        pattern = true; mark(n, 'attached literal pattern'); continue;
-      }
-      if (!ended && value.startsWith('-')) return null;
-      mark(n, pattern || mode ? 'literal path' : 'literal pattern'); pattern = true;
-    }
-    if (!pattern && !mode) return null;
-  } else if (/^findstr(?:\.exe)?$/.test(name || '')) {
-    let pattern = false, paths = false;
-    for (let n = 0; n < args.length; n += 1) {
-      const value = args[n].value, lower = value.toLowerCase();
-      if (!pattern && FINDSTR_DATA_SWITCHES.includes(lower)) { mark(n, 'search switch'); continue; }
-      if (!paths && lower.startsWith('/c:') && value.length > 3) { pattern = true; mark(n, 'attached literal pattern'); continue; }
-      if (value.startsWith('/')) return null;
-      mark(n, pattern ? 'literal path' : 'literal pattern'); if (pattern) paths = true; pattern = true;
-    }
-    if (!pattern) return null;
-  } else if (name === 'get-content' || (shell === 'powershell' && ['cat', 'type'].includes(name))) {
-    let paths = 0;
-    const seen = new Set();
-    for (let n = 0; n < args.length; n += 1) {
-      const value = args[n].value, lower = value.toLowerCase();
-      if (['-raw', '-literalpath', '-path', '-totalcount', '-tail'].includes(lower)) {
-        if (seen.has(lower)) return null; seen.add(lower); mark(n, 'content option');
-        if (lower === '-raw') continue;
-        if (!args[++n]) return null;
-        if (['-totalcount', '-tail'].includes(lower)) {
-          if (!/^\d+$/.test(args[n].value)) return null;
-          mark(n, 'literal count'); continue;
-        }
-        paths += 1;
-      } else if (value.startsWith('-')) return null;
-      else paths += 1;
-      // Custom providers and expression/array binding are outside this filesystem subset.
-      if (!args[n].value || /[\[\],]/.test(args[n].value)
-        || (args[n].value.includes(':') && !/^[a-z]:[\\/][^:]*$/i.test(args[n].value))) return null;
-      mark(n, 'literal filesystem path');
-    }
-    if (paths !== 1) return null;
-  } else if (name === 'type' && shell === 'cmd') {
-    if (!args.length || args.some(word => !word.value || /^[/-]/.test(word.value))) return null;
-    args.forEach((_, n) => mark(n, 'literal path'));
-  } else return null;
-  return { schema: name, shell, roles, consumed: words.at(-1).end };
-}
-
-// Recognise a fixed wrapper shape, not arbitrary scripts or native admission. Unknown
-// flags may still expose a script for refusal, but never exclude executable-path evidence.
-function wrapperRoles(words, shell) {
-  if (!words?.length) return null;
-  const offset = words[0].value === '&' ? 1 : 0, executable = words[offset];
-  if (!executable) return null;
-  const name = executable.value.split(/[\\/]/).pop().toLowerCase().replace(/\.exe$/, '');
-  if (!['powershell', 'pwsh', 'cmd', 'bash', 'sh'].includes(name)) return null;
-  const powershell = ['powershell', 'pwsh'].includes(name);
-  const selector = value => powershell ? /^-(?:command|c)$/i.test(value) : name === 'cmd' ? /^\/c$/i.test(value) : /^-(?:c|lc)$/.test(value);
-  const index = words.findIndex((word, n) => n > offset && selector(word.value));
-  if (index < 0 || !words[index + 1]) return null;
-  const script = words[index + 1], flags = words.slice(offset + 1, index);
-  const fixed = Boolean(index === words.length - 2 && shell && literalWord(executable, shell)
-    && (!offset || (['common', 'powershell'].includes(shell) && executable.quote))
-    && flags.every(word => powershell && !word.quote && /^-(?:noprofile|noninteractive)$/i.test(word.value))
-    && new Set(flags.map(word => word.value.toLowerCase())).size === flags.length
-    && !words[index].quote && !script.prefix);
-  return { executable, script, fixed, powershell };
-}
-
-// The actual caller needs these five literal acquisition-option roles only.
-// This is not a gh-wide exemption or a subprocess/format-expression schema.
-const GH_RUN_FIELDS = Object.freeze(['attempt', 'conclusion', 'createdAt', 'databaseId', 'displayTitle', 'event', 'headBranch',
-  'headSha', 'name', 'number', 'startedAt', 'status', 'updatedAt', 'url', 'workflowDatabaseId', 'workflowName']);
-// Complete fixed built-ins only. This proves literal operand roles, never Git
-// validity, transport safety, external-operation approval or native target authority.
-function gitProof(text, shell) {
-  const words = roleWords(text);
-  if (!shell || !words?.length || words.some(word => !literalWord(word, shell))) return null;
-  const offset = words[0].value === '&' ? 1 : 0, executable = words[offset];
-  if (offset && (!['powershell', 'common'].includes(shell) || !executable?.quote)) return null;
-  if (!/^git(?:\.exe)?$/.test(executable?.value.split(/[\\/]/).pop().toLowerCase() || '')) return null;
-  const command = words[offset + 1];
-  if (!command || command.quote || !['add', 'commit', 'push', 'fetch', 'rev-parse', 'status'].includes(command.value)) return null;
-  const roles = words.map(word => ({ ...word, role: word === executable ? 'reader executable' : word === command ? 'fixed git command' : 'git option' }));
-  const args = words.slice(offset + 2);
-  const mark = (n, role) => { roles[offset + 2 + n].role = role; };
-  const ref = value => /^[a-z0-9_][a-z0-9_./-]*(?::[a-z0-9_][a-z0-9_./-]*)?$/i.test(value);
-  const remote = value => /^[a-z0-9_][a-z0-9_.-]*$/i.test(value);
-  if (command.value === 'add') {
-    if (args[0]?.value !== '--' || args[0].quote || args.length < 2) return null;
-    for (let n = 1; n < args.length; n += 1) {
-      if (!args[n].value) return null;
-      mark(n, 'literal git path');
-    }
-  } else if (command.value === 'commit') {
-    if (!args.length) return null;
-    for (let n = 0; n < args.length; n += 2) {
-      if (args[n].quote || !['-m', '--message'].includes(args[n].value) || !args[n + 1]?.value) return null;
-      mark(n + 1, 'literal git message');
-    }
-  } else if (command.value === 'push' || command.value === 'fetch') {
-    let at = 0;
-    if (args[at]?.value === '--' && !args[at].quote) at += 1;
-    if (!remote(args[at]?.value || '') || args.length < at + 2) return null;
-    mark(at++, 'literal git remote');
-    for (; at < args.length; at += 1) {
-      if (!ref(args[at].value)) return null;
-      mark(at, 'literal git refspec');
-    }
-  } else if (command.value === 'rev-parse') {
-    if (!args.length) return null;
-    for (let n = 0; n < args.length; n += 1) {
-      if (!ref(args[n].value) || args[n].value.includes(':')) return null;
-      mark(n, 'literal git revision');
-    }
-  } else {
-    let at = 0;
-    for (; at < args.length && args[at].value !== '--'; at += 1) {
-      if (args[at].quote || !['--short', '--branch', '--porcelain'].includes(args[at].value)) return null;
-    }
-    if (at < args.length) {
-      if (args[at].quote || ++at === args.length) return null;
-      for (; at < args.length; at += 1) {
-        if (!args[at].value) return null;
-        mark(at, 'literal git path');
-      }
-    }
-  }
-  return { schema: 'git ' + command.value + ' literal operands', shell, roles, consumed: words.at(-1).end };
-}
-
-function acquisitionProof(text, shell) {
-  const ws = roleWords(text, { fieldComma: true });
-  if (!shell || !ws?.length || ws.some(w => !literalWord(w, shell))) return null;
-  const offset = ws[0].value === '&' ? 1 : 0, exe = ws[offset];
-  if (offset && (!['powershell', 'common'].includes(shell) || !exe?.quote)) return null;
-  if (!/^gh(?:\.exe)?$/i.test(exe?.value.split(/[\\/]/).pop() || '') || ws[offset + 1]?.quote || ws[offset + 2]?.quote
-    || ws[offset + 1]?.value !== 'run' || ws[offset + 2]?.value !== 'list') return null;
-  const rs = ws.map((w, n) => ({ ...w, role: n === offset ? 'reader executable' : n <= offset + 2 ? 'fixed acquisition command' : 'acquisition option' }));
-  const seen = new Set();
-  for (let n = offset + 3; n < ws.length; n += 2) {
-    const option = ws[n], value = ws[n + 1];
-    if (!['--repo', '--branch', '--commit', '--limit', '--json'].includes(option.value) || option.quote || !value || value.value.startsWith('-') || seen.has(option.value)) return null;
-    seen.add(option.value);
-    if (option.value === '--repo' && !/^(?:[a-z0-9.-]+\/)?[a-z0-9_.-]+\/[a-z0-9_.-]+$/i.test(value.value)) return null;
-    if (option.value === '--branch' && !/^[a-z0-9_./-]+$/i.test(value.value)) return null;
-    if (option.value === '--commit' && !/^[a-f0-9]{40}$/i.test(value.value)) return null;
-    if (option.value === '--limit' && !/^\d+$/.test(value.value)) return null;
-    if (option.value === '--json' && (!value.value || value.value.split(',').some(f => !GH_RUN_FIELDS.includes(f)))) return null;
-    rs[n + 1].role = 'literal acquisition ' + option.value.slice(2);
-  }
-  return { schema: 'gh run list literal filters', shell, roles: rs, consumed: ws.at(-1).end };
-}
-
-// Complete structural scan. Only top-level statement/pipeline stages can earn data
-// roles. All groups, blocks, arrays and their contents remain executable evidence.
-function readerSegments(text, shell) {
-  if (!shell || !text || text.length > LIMITS.command || /[^\x09\x0a\x0d\x20-\x7e]/.test(text)) return null;
-  const ranges = [], separators = [], stack = []; let quote = null, start = 0;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    if (c === '\r' && text[i + 1] !== '\n') return null;
-    if (quote) {
-      if (c === '`' || (c === '\\' && text[i + 1] === quote)) return null;
-      if (quote === '"' && c === '$') return null; // No interpolated-string ownership claim.
-      if (c === quote) {
-        if (text[i + 1] === quote) return null;
-        quote = null;
-      }
-      continue;
-    }
-    if (c === '#' || c === '`' || c === '^' || (c === '@' && ['"', "'"].includes(text[i + 1]))) return null;
-    if (c === '\\' && /[\s'";&|<>]/.test(text[i + 1] || '')) return null;
-    if (['"', "'"].includes(c)) { quote = c; continue; }
-    if ('({['.includes(c)) { stack.push(c); continue; }
-    if (')}]'.includes(c)) { if (stack.pop() !== { ')': '(', '}': '{', ']': '[' }[c]) return null; continue; }
-    if (!stack.length && (c === ';' || c === '\n' || c === '\r' || c === '|')) {
-      if (c === '|' && (text[i + 1] === '|' || text[i - 1] === '|')) return null;
-      ranges.push({ start, end: i });
-      const end = c === '\r' ? ++i + 1 : i + 1;
-      separators.push({ start: ranges.at(-1).end, end, value: text.slice(ranges.at(-1).end, end) }); start = end;
-    }
-    if (!stack.length && (text.slice(i, i + 2) === '&&' || c === '<' || c === '>')) return null;
-  }
-  if (quote || stack.length) return null;
-  ranges.push({ start, end: text.length });
-  const nonemptyAfter = new Array(ranges.length + 1).fill(false);
-  for (let n = ranges.length - 1; n >= 0; n--) nonemptyAfter[n] = nonemptyAfter[n + 1] || Boolean(text.slice(ranges[n].start, ranges[n].end).trim());
-  // Blank lines are inert. Missing semicolon/pipe stages are deliberately unqualified.
-  for (let n = 0; n < ranges.length; n++) if (!text.slice(ranges[n].start, ranges[n].end).trim()) {
-    if (separators[n - 1]?.value === ';' || separators[n]?.value === ';') return null;
-    if (separators[n]?.value === '|') return null;
-    if (separators[n - 1]?.value === '|' && !nonemptyAfter[n + 1]) return null;
-  }
-  const spans = [], proofs = [], unproved = [];
-  for (const r of ranges) {
-    const chunk = text.slice(r.start, r.end); if (!chunk.trim()) continue;
-    const proof = readerProof(roleWords(chunk), shell) || acquisitionProof(chunk, shell) || gitProof(chunk, shell);
-    if (!proof) { unproved.push(chunk); continue; }
-    const roles = proof.roles.map(w => ({ ...w, start: w.start + r.start, end: w.end + r.start }));
-    proofs.push({ ...proof, ...r, roles });
-    for (const w of roles) {
-      // Keep attached option prefixes visible; only their literal values are data.
-      if (w.role === 'attached literal pattern') spans.push({ ...w, start: w.start + (w.value.startsWith('--regexp=') ? 9 : 3) });
-      else if (w.role.startsWith('literal ') || (w.role === 'reader executable' && /[\\/]/.test(w.value))) spans.push(w);
-    }
-  }
-  if (!proofs.length) return null;
-  return { candidate: mask(text, spans), proofs, spans, unproved, separators };
-}
-function mask(text, spans) {
-  let at = 0; const parts = [];
-  for (const s of spans) { parts.push(text.slice(at, s.start), ' '.repeat(s.end - s.start)); at = s.end; }
-  parts.push(text.slice(at)); const candidate = parts.join(''); return candidate;
-}
-function commandRoles(text, input) {
-  const shell = roleShell(input), words = roleWords(text);
-  const data = readerProof(words, shell);
-  if (data) return { data, candidate: text, script: null };
-  const wrapper = wrapperRoles(words, shell) || (shell === 'powershell' ? wrapperRoles(roleWords(text, { scriptWord: true }), shell) : null);
-  if (!wrapper) {
-    const segments = readerSegments(text, shell);
-    return { data: null, candidate: segments?.candidate ?? text, script: null, segments };
-  }
-  // One transparent PowerShell layer may prove a complete literal reader. Expansion in
-  // either layer defeats that proof; scripts themselves are never recursively admitted.
-  const transparent = wrapper.fixed && wrapper.powershell && literalWord(wrapper.script, shell);
-  const inner = transparent ? readerProof(roleWords(wrapper.script.value), 'powershell') : null;
-  // Keep inherited common/one-line transport until a replacement proves those consumers.
-  // Extended composition requires explicit PowerShell and a complete literal script word.
-  const extended = shell === 'powershell' && wrapper.fixed && wrapper.powershell && wrapper.script.quote
-    && (literalWord(wrapper.script, shell) || (wrapper.script.quote === "'" && !/[\x60%!^]/.test(wrapper.script.value)));
-  const scriptSegments = (transparent || extended) && !inner ? readerSegments(wrapper.script.value, 'powershell') : null;
-  const script = scriptSegments?.candidate ?? wrapper.script.value;
-  const scriptStart = wrapper.script.start + (wrapper.script.quote ? 1 : 0);
-  // Compose the same proved operand view into both the outer source and the executable
-  // script. Otherwise an outer raw scan would reintroduce data excluded by the inner proof.
-  const candidate = wrapper.fixed ? text.slice(0, wrapper.executable.start)
-    + ' '.repeat(wrapper.executable.end - wrapper.executable.start)
-    + text.slice(wrapper.executable.end, scriptStart) + script
-    + text.slice(scriptStart + wrapper.script.value.length) : text;
-  const segments = scriptSegments ? { ...scriptSegments, candidate,
-    spans: scriptSegments.spans.map(word => ({ ...word, start: word.start + scriptStart, end: word.end + scriptStart })),
-    separators: scriptSegments.separators.map(separator => ({ ...separator, start: separator.start + scriptStart, end: separator.end + scriptStart })),
-    proofs: scriptSegments.proofs.map(proof => ({ ...proof,
-    start: proof.start + scriptStart, end: proof.end + scriptStart,
-    roles: proof.roles.map(word => ({ ...word, start: word.start + scriptStart, end: word.end + scriptStart })),
-  })) } : null;
-  return { data: inner ? { schema: 'powershell reader wrapper', shell, roles: words.map(word => ({ ...word,
-    role: word === wrapper.executable ? 'shell executable' : word === wrapper.script ? 'literal reader script'
-      : word.value === '&' ? 'call operator' : /^-(?:command|c)$/i.test(word.value) ? 'script selector' : 'fixed shell switch',
-  })), inner, consumed: words.at(-1).end } : null, candidate, script, segments,
-  excludedExecutable: wrapper.fixed ? { ...wrapper.executable, role: 'shell executable' } : null };
-}
-
-function visible(text, input) {
-  const shell = roleShell(input), roles = commandRoles(text, input);
-  if (roles.data) return false;
-  // Only the proved non-native executable span is excluded. Never OR the raw path
-  // back into evidence; keep the complete executable script, even inside outer quotes.
-  text = roles.candidate;
-  if (roles.script && broadVisible(roles.script, true, shell)) return true;
-  for (const segment of roles.segments?.unproved || []) {
-    const wrapper = wrapperRoles(roleWords(segment, { scriptWord: true }), roleShell(input));
-    if (broadVisible(segment, false, shell) || (wrapper && broadVisible(wrapper.script.value, true, shell))) return true;
-  }
-  if (!broadVisible(text, false, shell)) return false;
-  if (!knownShell(input)) return true;
-  const lexed = tokens(text, { literalData: true });
-  if (!lexed) return true;
-  const { words, operators } = lexed;
-  // Literal data in these exact command forms cannot launch a host. Keep this exception
-  // narrower than a shell parser: no control operators, substitutions, wrappers or git
-  // options other than the sole grep operand. All existing generic path/owner guards run first.
-  if (operators.size === 0 && (words[0] === 'echo'
-    || (words.length === 3 && words[0] === 'git' && words[1] === 'log' && words[2].startsWith('--grep=')))) return false;
-  // cmd treats single quotes as ordinary argument characters. They may delimit only
-  // simple data above, never an executable, help vector, directory or native selector.
-  if (lexed.singleQuoted) return true;
-  if (operators.size === 0 && HELP_FORMS[hostOf(words[0] || '')]?.some(form => form.length === words.length - 1 && form.every((arg, i) => arg === words[i + 1]))) return false;
-  let hostSeen = false;
-  for (let i = 0; i < words.length; i += 1) {
-    const host = hostOf(words[i]);
-    if (!host) {
-      // A wrapped command remains visible, even beside another ordinary host invocation.
-      if (broadVisible(words[i], false, shell)) return true;
-      continue;
-    }
-    hostSeen = true;
-    const end = words.findIndex((word, index) => index > i && operators.has(index));
-    const args = words.slice(i + 1, end < 0 ? undefined : end);
-    if (host === 'claude' && args.some(word => /^(?:--(?:resume|continue|session-id|fork-session)(?:=|$)|-(?!-)[a-z]*[rc][a-z]*(?:=|$))/i.test(word))) return true;
-    if (host === 'codex' && args.some(word => word === 'resume' || word === 'fork')) return true;
-  }
-  return !hostSeen;
 }
 
 function tokens(text, { literalData = false } = {}) {
@@ -883,632 +778,16 @@ function executionDirectory(input) {
   return path.resolve(cwd);
 }
 
-// Data-argument proofs. A closed structural scanner reads the whole input as simple commands
-// under every shell that may run it, and each command, including those inside substitutions,
-// must match one fixed data-command schema. Only operand spans a schema proves are data get
-// masked; the remainder must then hold no host or selector signal under every evidence scan.
-// This can only turn UNKNOWN into NOT_CONTINUATION: PARSED and VERIFIED never reach it.
-const DATA_STOP = Object.freeze({ stop: true });
-const DATA_INERT = Object.freeze({ inert: true });
-const DATA_MAX_DEPTH = 64;
-function dataShells(input, host = null) {
-  const shell = input?.tool_input?.shell;
-  // Claude Code's PowerShell tool runs PowerShell and its Bash tool runs bash. The host comes
-  // from the hook entry point, never from the payload. Any other omitted shell must prove under both.
-  if (shell === undefined) {
-    if (input?.tool_name === 'PowerShell') return ['powershell'];
-    return host === 'claude' && input?.tool_name === 'Bash' ? ['posix'] : ['posix', 'powershell'];
-  }
-  const role = roleShell(input);
-  return role === 'posix' || role === 'powershell' ? [role] : null;
-}
-
-class DataScanner {
-  constructor(text, shell, inertAllowed) {
-    this.text = text; this.shell = shell; this.ps = shell === 'powershell'; this.inertAllowed = inertAllowed;
-    this.i = 0; this.all = []; this.heredocs = []; this.depth = 0;
-  }
-  stop() { throw DATA_STOP; }
-  at(s) { return this.text.startsWith(s, this.i); }
-  blanks() { while (this.text[this.i] === ' ' || this.text[this.i] === '\t') this.i += 1; }
-  newline() { return this.text[this.i] === '\n' || (this.ps && this.at('\r\n')); }
-  ends(nested) {
-    const c = this.text[this.i];
-    return c === undefined || this.newline() || c === ';' || c === '|' || this.at('&&') || (nested && c === ')');
-  }
-  run() {
-    if (!this.ps && this.text.includes('\r')) this.stop();
-    this.list(false);
-    if (this.i !== this.text.length || this.heredocs.length) this.stop();
-    return this.all;
-  }
-  // Separators only order or join commands; every command still needs its own schema.
-  list(nested) {
-    const t = this.text; let after = false, pending = false, piped = false;
-    for (;;) {
-      this.blanks();
-      const c = t[this.i];
-      if (c === undefined || (nested && c === ')')) { if (pending || (nested && c === undefined)) this.stop(); return; }
-      if (this.newline()) {
-        if (pending || nested) this.stop();
-        this.i += t[this.i] === '\r' ? 2 : 1; this.readHeredocs(); after = false; piped = false; continue;
-      }
-      if (c === ';') { if (!after) this.stop(); this.i += 1; after = false; piped = false; continue; }
-      if (this.at('&&') || this.at('||')) { if (!after) this.stop(); this.i += 2; after = false; pending = true; piped = false; continue; }
-      if (c === '|') { if (!after) this.stop(); this.i += 1; after = false; pending = true; piped = true; continue; }
-      if (after) this.stop();
-      this.command(nested, piped); after = true; pending = false;
-    }
-  }
-  command(nested, piped) {
-    const t = this.text, cmd = { words: [], redirects: [], heredoc: null, piped, start: this.i, depth: this.depth };
-    const assign = this.ps ? /^\$([A-Za-z_][A-Za-z0-9_]*)[ \t]*=(?!=)[ \t]*/.exec(t.slice(this.i, this.i + 300))
-      : /^([A-Za-z_][A-Za-z0-9_]*)=/.exec(t.slice(this.i, this.i + 300));
-    if (assign) {
-      cmd.assign = { name: assign[1], start: this.i + (this.ps ? 1 : 0), end: this.i + (this.ps ? 1 : 0) + assign[1].length };
-      this.i += assign[0].length;
-      cmd.assign.value = this.ends(nested) || t[this.i] === ' ' || t[this.i] === '\t' ? null : this.word(nested);
-      this.blanks();
-      if (!this.ends(nested)) this.stop();
-    } else {
-      for (;;) {
-        this.blanks();
-        if (this.ends(nested)) break;
-        if (t[this.i] === '&') this.stop();
-        if (this.redirect(cmd)) continue;
-        cmd.words.push(this.word(nested));
-      }
-      if (!cmd.words.length) this.stop();
-    }
-    cmd.end = this.i; this.all.push(cmd);
-  }
-  redirect(cmd) {
-    const t = this.text;
-    if (t[this.i] === '<') {
-      // PowerShell reserves '<': a script holding one outside quotes fails to parse and runs nothing.
-      if (this.ps) { if (this.inertAllowed) throw DATA_INERT; this.stop(); }
-      if (!this.at('<<') || this.at('<<<') || this.at('<<-') || this.depth) this.stop();
-      this.i += 2; this.blanks();
-      const m = /^(?:'([A-Za-z_][A-Za-z0-9_]*)'|"([A-Za-z_][A-Za-z0-9_]*)"|\\([A-Za-z_][A-Za-z0-9_]*))(?=[ \t\n;|&>]|$)/.exec(t.slice(this.i, this.i + 300));
-      if (!m || cmd.heredoc) this.stop();
-      cmd.heredoc = { delimiter: m[1] || m[2] || m[3] }; this.heredocs.push(cmd.heredoc); this.i += m[0].length;
-      return true;
-    }
-    const m = (this.ps ? /^([1-6*])?(>>|>)/ : /^([12])?(>>|>&|>)/).exec(t.slice(this.i, this.i + 4));
-    if (!m) return false;
-    if (m[2] === '>&' || (this.ps && t[this.i + m[0].length] === '&')) {
-      const target = /^&?([12])(?=[ \t\n;|]|$)/.exec(t.slice(this.i + m[0].length, this.i + m[0].length + 3));
-      if (!target || (m[1] || '1') === target[1] || (this.ps && m[1] === undefined)) this.stop();
-      this.i += m[0].length + target[0].length; return true;
-    }
-    this.i += m[0].length; this.blanks();
-    const word = this.word(false);
-    const discard = this.ps ? this.raw(word).toLowerCase() === '$null' : word.value === '/dev/null';
-    if (!discard && !safeTarget(word)) this.stop();
-    cmd.redirects.push(word); return true;
-  }
-  readHeredocs() {
-    const t = this.text;
-    for (const doc of this.heredocs) {
-      doc.bodyStart = this.i;
-      for (let line = this.i; ; ) {
-        const next = t.indexOf('\n', line), end = next < 0 ? t.length : next;
-        if (t.slice(line, end) === doc.delimiter) { doc.bodyEnd = line; this.i = next < 0 ? t.length : next + 1; break; }
-        if (next < 0) this.stop();
-        line = next + 1;
-      }
-    }
-    this.heredocs = [];
-  }
-  raw(word) { return this.text.slice(word.start, word.end); }
-  word(nested) {
-    const t = this.text, start = this.i, parts = [];
-    if (this.ps && (this.at("@'\n") || this.at("@'\r\n") || this.at('@"\n') || this.at('@"\r\n'))) return this.hereString();
-    const lit = (text, s, quoted) => parts.push({ type: 'lit', text, start: s, end: this.i, quoted });
-    while (this.i < t.length) {
-      const c = t[this.i];
-      if (c === ' ' || c === '\t' || c === '\n' || c === '\r' || c === ';' || c === '|' || c === '&' || c === '<' || c === '>' || (nested && c === ')')) break;
-      const s = this.i;
-      if (c === "'") {
-        let text = ''; this.i += 1;
-        for (;;) {
-          if (this.i >= t.length) this.stop();
-          if (t[this.i] === "'") { if (this.ps && t[this.i + 1] === "'") { text += "'"; this.i += 2; continue; } this.i += 1; break; }
-          text += t[this.i++];
-        }
-        lit(text, s, "'"); continue;
-      }
-      if (c === '"') { this.doubleQuoted(parts); continue; }
-      if (c === '$') { this.dollar(parts, false); continue; }
-      if (this.ps) {
-        if (!/[A-Za-z0-9_\-./\\:=+~%!?*^]/.test(c)) this.stop();
-        this.i += 1; lit(c, s, false); continue;
-      }
-      if (c === '\\') { if (this.i + 1 >= t.length || t[this.i + 1] === '\n') this.stop(); this.i += 2; lit(t[s + 1], s, "\\"); continue; }
-      if (c === '*' || c === '?' || c === '[' || c === ']') { this.i += 1; parts.push({ type: 'glob', start: s, end: this.i }); continue; }
-      if (c === '~' && this.i === start) { this.i += 1; parts.push({ type: 'tilde', start: s, end: this.i }); continue; }
-      if (!/[A-Za-z0-9_\-./:=+~%,@^!]/.test(c)) this.stop();
-      this.i += 1; lit(c, s, false);
-    }
-    if (this.i === start) this.stop();
-    return finishWord(start, this.i, parts);
-  }
-  hereString() {
-    const t = this.text, start = this.i, quote = t[this.i + 1];
-    this.i += t[this.i + 2] === '\r' ? 4 : 3;
-    const bodyStart = this.i;
-    for (let line = this.i; ; ) {
-      if (t.startsWith(quote + '@', line)) {
-        const bodyEnd = Math.max(bodyStart, line - (t[line - 2] === '\r' ? 2 : 1));
-        this.i = line + 2;
-        // An expandable here-string is data only when it expands nothing.
-        if (quote === '"' && /[$`]/.test(t.slice(bodyStart, bodyEnd))) this.stop();
-        if (this.i < t.length && !/[ \t\r\n;|]/.test(t[this.i])) this.stop();
-        return { start, end: this.i, parts: [], value: null, here: { start: bodyStart, end: bodyEnd } };
-      }
-      const next = t.indexOf('\n', line);
-      if (next < 0) this.stop();
-      line = next + 1;
-    }
-  }
-  doubleQuoted(parts) {
-    const t = this.text; this.i += 1;
-    let text = '', s = this.i;
-    const flush = () => { if (text) parts.push({ type: 'lit', text, start: s, end: this.i, quoted: '"' }); text = ''; };
-    for (;;) {
-      const c = t[this.i];
-      if (c === undefined || c === '`') this.stop();
-      if (c === '"') {
-        if (this.ps && t[this.i + 1] === '"') { text += '"'; this.i += 2; continue; }
-        flush(); this.i += 1; return;
-      }
-      if (c === '$' && (this.ps ? /[A-Za-z_({?^]/.test(t[this.i + 1] || '') : /[A-Za-z_({0-9@*#?$!-]/.test(t[this.i + 1] || ''))) {
-        flush(); this.dollar(parts, true); s = this.i; continue;
-      }
-      if (!this.ps && c === '\\') {
-        if (t[this.i + 1] === '\n' || t[this.i + 1] === undefined) this.stop();
-        if ('$`"\\'.includes(t[this.i + 1])) { text += t[this.i + 1]; this.i += 2; continue; }
-      }
-      text += c; this.i += 1;
-    }
-  }
-  dollar(parts, quoted) {
-    const t = this.text, s = this.i;
-    if (this.at('$(')) {
-      // Nesting this deep is no ordinary data command, and recursion must not reach the stack limit.
-      if (this.at('$((') || this.depth >= DATA_MAX_DEPTH) this.stop();
-      this.i += 2; this.depth += 1; const first = this.all.length;
-      this.list(true);
-      if (t[this.i] !== ')') this.stop();
-      this.i += 1; this.depth -= 1;
-      parts.push({ type: 'sub', start: s, end: this.i, commands: this.all.slice(first), quoted }); return;
-    }
-    const m = (this.ps ? /^\$(?:\{(env:)?([A-Za-z_][A-Za-z0-9_]*)\}|(env:)?([A-Za-z_][A-Za-z0-9_]*)|([?$^]))/i
-      : /^\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*)|([0-9@*#?$!-]))/).exec(t.slice(this.i, this.i + 300));
-    if (!m) this.stop();
-    this.i += m[0].length;
-    const env = this.ps && Boolean(m[1] || m[3]);
-    const name = this.ps ? (m[2] || m[4] || m[5]).toLowerCase() : m[1] || m[2] || m[3];
-    // Scope-qualified names (function:, alias:, using:) and member access are never data here.
-    if (t[this.i] === ':' && this.ps) this.stop();
-    if (!quoted && this.ps && this.i < t.length && !/[ \t\r\n;|\\/)]/.test(t[this.i])) this.stop();
-    parts.push({ type: 'var', name, env, quoted, start: s, end: this.i });
-  }
-}
-function finishWord(start, end, pieces) {
-  // Adjacent literal pieces with the same quoting form one part, with its source offsets.
-  const parts = [];
-  for (const piece of pieces) {
-    const prev = parts.at(-1);
-    if (piece.type === 'lit' && prev?.type === 'lit' && prev.quoted === piece.quoted && prev.end === piece.start) {
-      parts[parts.length - 1] = { ...prev, text: prev.text + piece.text, end: piece.end };
-    } else parts.push(piece);
-  }
-  const literal = parts.every(p => p.type === 'lit');
-  return { start, end, parts, quoted: parts.some(p => p.quoted), value: literal ? parts.map(p => p.text).join('') : null };
-}
-// Written files get a plain document name: no dot folder or dot file, no provider prefix and
-// an extension nothing runs, so a write here cannot stage code, config or hooks.
-function safeTarget(word) {
-  return word.value !== null && !word.here
-    && /^(?:[A-Za-z]:)?[\\/]?(?:[A-Za-z0-9_][A-Za-z0-9_ .-]*[\\/])*[A-Za-z0-9_][A-Za-z0-9_ .-]*\.(?:md|txt|log|csv)$/i.test(word.value);
-}
-
-const lower = value => value === null ? null : value.toLowerCase();
-const optionWord = word => !word.quoted && word.value !== null && word.value.startsWith('-');
-// Operand spans that are data: the whole word except nested substitutions, which are commands.
-function dataSpans(word, from = word.start) {
-  const spans = []; let at = from;
-  for (const part of word.parts) {
-    if (part.type !== 'sub' || part.end <= from) continue;
-    if (part.start > at) spans.push({ start: at, end: part.start });
-    at = part.end;
-  }
-  if (word.end > at) spans.push({ start: at, end: word.end });
-  if (word.here) spans.push({ ...word.here });
-  return spans;
-}
-// The value after an attached '--name=' prefix, when the prefix is a literal unquoted part.
-function attachedValue(word, prefixes) {
-  const first = word.parts[0];
-  if (!first || first.type !== 'lit' || first.quoted) return null;
-  const head = first.text.toLowerCase();
-  const prefix = prefixes.find(p => head.startsWith(p) && head.length >= p.length);
-  return prefix === undefined ? null : { start: first.start + prefix.length, end: word.end, prefix };
-}
-
-// Native programs with options that run programs (git, rg, node) must get each data word as
-// exactly one argument. Windows PowerShell passes embedded quotes raw, and cmd splits single
-// quotes and escaped quotes its own way, so either could turn data into an option.
-function nativeWord(word, ctx) {
-  // An unquoted substitution splits into several arguments (fields in POSIX, array items in
-  // PowerShell), and so does an unquoted POSIX variable holding spaces or wildcards.
-  if (word.parts.some(p => p.type === 'sub' && !p.quoted)) return false;
-  if (ctx.shell === 'posix' && word.parts.some(p => p.type === 'var' && !p.quoted
-    && (ctx.assigned.get(p.name) || []).some(value => value === null || /[\s*?[\]]/.test(value)))) return false;
-  if (ctx.shell === 'powershell' || ctx.common) {
-    if (word.parts.some(p => p.type === 'lit' && p.text.includes('"'))) return false;
-    // Windows PowerShell quotes a spaced argument as "...\" when it ends in a backslash, and the
-    // program then reads that quote as escaped and joins the following arguments differently.
-    const last = word.parts.at(-1);
-    if (last?.type === 'lit' && last.text.endsWith('\\')) return false;
-    if (last?.type === 'var' && (ctx.assigned.get(last.name) || []).some(value => value === null || value.endsWith('\\'))) return false;
-  }
-  if (ctx.common && (/\\"|""/.test(ctx.raw(word))
-    || word.parts.some(p => p.type === 'lit' && p.quoted === "'" && !/^[A-Za-z0-9_./:\\-]*$/.test(p.text)))) return false;
-  return true;
-}
-// ...and a positional data word must never start with '-' at run time.
-function plainOperand(word, ctx) {
-  if (!nativeWord(word, ctx)) return false;
-  const first = word.parts.find(p => p.type !== 'lit' || p.text !== '');
-  if (!first || first.type === 'sub' || first.type === 'glob') return false;
-  if (first.type === 'lit') return !first.text.startsWith('-');
-  if (first.type === 'var') {
-    const values = ctx.assigned.get(first.name) || [];
-    return values.every(value => value !== null && !value.startsWith('-') && !(ctx.shell === 'powershell' && value.includes('"')));
-  }
-  return true;
-}
-
-// Walk native arguments against a fixed option table. Unknown or quoted options fail.
-function nativeArgs(args, spec, ctx, data) {
-  let ended = false, positional = 0;
-  for (let n = 0; n < args.length; n += 1) {
-    const word = args[n];
-    if (word.here) return false;
-    if (!ended && spec.dashdash && word.value === '--' && !word.quoted) { ended = true; continue; }
-    const leading = word.parts[0]?.type === 'lit' && !word.parts[0].quoted && word.parts[0].text.startsWith('-');
-    if (!ended && (leading || (word.value !== null && word.value.startsWith('-')))) {
-      const attached = attachedValue(word, spec.attached || []);
-      if (attached) { if (spec.nodash && !nativeWord(word, ctx)) return false; data.push(...dataSpans(word, attached.start)); continue; }
-      if (!optionWord(word)) return false;
-      const v = word.value;
-      if (spec.switches.has(v) || spec.numeric?.test(v)) continue;
-      if (spec.valued.has(v)) {
-        const value = args[++n];
-        if (!value || value.here || (spec.nodash && !nativeWord(value, ctx))) return false;
-        data.push(...dataSpans(value)); continue;
-      }
-      if (spec.cluster) {
-        const letters = v.slice(1);
-        if (/^[A-Za-z]+$/.test(letters) && v[1] !== '-') {
-          const last = letters.at(-1);
-          if ([...letters.slice(0, -1)].every(l => spec.cluster.switches.includes(l))) {
-            if (spec.cluster.switches.includes(last)) continue;
-            if (spec.cluster.valued.includes(last)) {
-              const value = args[++n];
-              if (!value || value.here || (spec.nodash && !nativeWord(value, ctx))) return false;
-              data.push(...dataSpans(value)); continue;
-            }
-          }
-        }
-        if (/^-[A-Za-z]\d+$/.test(v) && spec.cluster.valued.includes(v[1])) continue;
-      }
-      return false;
-    }
-    if (spec.nodash && !plainOperand(word, ctx)) return false;
-    // A '<transport>::<address>' remote runs a remote helper, and git's ext:: helper runs a command.
-    if (spec.remote && positional++ === 0 && word.parts.some(p => p.type === 'sub' || (p.type === 'lit' && p.text.includes('::'))
-      || (p.type === 'var' && (ctx.assigned.get(p.name) || []).some(value => value === null || value.includes('::'))))) return false;
-    data.push(...dataSpans(word));
-  }
-  return true;
-}
-const set = values => new Set(values);
-const GH_SUBJECTS = set(['issue', 'pr']);
-const GH_ACTIONS = set(['comment', 'create', 'edit', 'view', 'list']);
-const GH_ITEM = {
-  switches: set(['--draft', '-d', '--fill', '--comments', '-c', '--edit-last', '--web', '-w']),
-  valued: set(['--body', '-b', '--title', '-t', '--body-file', '-F', '--repo', '-R', '--label', '-l', '--add-label', '--remove-label',
-    '--assignee', '-a', '--add-assignee', '--remove-assignee', '--reviewer', '-r', '--add-reviewer', '--remove-reviewer', '--base', '-B',
-    '--head', '-H', '--milestone', '-m', '--json', '--jq', '-q', '--template', '--state', '-s', '--limit', '-L', '--search', '-S', '--author', '-A']),
-  attached: ['--body=', '--title=', '--body-file=', '--repo=', '--label=', '--json=', '--jq=', '--template=', '--base=', '--head=', '--state=', '--limit=', '--search='],
-};
-const GH_API = {
-  switches: set(['--paginate', '--silent', '-i', '--include', '--verbose', '--slurp']),
-  valued: set(['-X', '--method', '-f', '--raw-field', '-F', '--field', '-H', '--header', '--jq', '-q', '--template', '-t', '--input', '--hostname', '--cache']),
-  attached: ['--method=', '--raw-field=', '--field=', '--header=', '--jq=', '--template=', '--input=', '--hostname='],
-};
-const GIT_SUBCOMMANDS = {
-  status: { switches: ['--short', '-s', '--branch', '-b', '--porcelain', '--long', '--ignored', '-uno', '-unormal', '-uall', '--show-stash'],
-    attached: ['--porcelain=', '--untracked-files=', '--ignore-submodules='] },
-  log: { switches: ['--oneline', '--graph', '--decorate', '--no-decorate', '--all', '--stat', '--shortstat', '--name-only', '--name-status', '--no-merges',
-    '--merges', '--first-parent', '--reverse', '-p', '--patch', '--no-patch', '-s', '--no-color', '--follow', '--date-order', '--topo-order',
-    '--abbrev-commit', '--left-right', '--boundary', '--no-ext-diff'],
-    valued: ['-n', '--max-count', '--author', '--grep', '--since', '--until', '--format', '--pretty', '--date', '--skip'],
-    attached: ['--format=', '--pretty=', '--grep=', '--author=', '--since=', '--until=', '--after=', '--before=', '--max-count=', '--date=', '--skip=', '--decorate='],
-    numeric: /^-\d+$/ },
-  show: { switches: ['--stat', '--shortstat', '--name-only', '--name-status', '--oneline', '-s', '--no-patch', '--quiet', '--no-color', '--no-ext-diff', '--abbrev-commit'],
-    attached: ['--format=', '--pretty=', '--date='] },
-  diff: { switches: ['--stat', '--shortstat', '--numstat', '--name-only', '--name-status', '--cached', '--staged', '--check', '--no-color', '--quiet',
-    '--exit-code', '--no-ext-diff', '--no-textconv', '-w', '--ignore-all-space', '--ignore-space-change', '-R', '--merge-base', '--summary', '--raw'],
-    attached: ['--unified=', '--stat=', '--color=', '--diff-filter=', '--relative='], numeric: /^-U\d+$/ },
-  'rev-parse': { switches: ['--short', '--verify', '--abbrev-ref', '--show-toplevel', '--git-dir', '--git-common-dir', '--is-inside-work-tree', '-q', '--quiet',
-    '--symbolic-full-name', '--show-prefix', '--absolute-git-dir'], attached: ['--short='] },
-  branch: { switches: ['--show-current', '-a', '--all', '-r', '--remotes', '--list', '-l', '-v', '-vv', '--verbose', '-d', '-D', '--delete', '--merged', '--no-merged', '--contains'],
-    valued: ['-u', '--set-upstream-to'], attached: ['--set-upstream-to=', '--format='] },
-  'ls-remote': { switches: ['--heads', '--tags', '-h', '-t', '--refs', '-q', '--quiet', '--symref'], remote: true },
-  fetch: { switches: ['--prune', '-p', '--tags', '-t', '--all', '-q', '--quiet', '--no-tags', '--dry-run', '-v', '--verbose', '--prune-tags', '--unshallow'],
-    valued: ['--depth'], attached: ['--depth='], remote: true },
-  add: { switches: ['-A', '--all', '-u', '--update', '-v', '--verbose', '-n', '--dry-run', '-N', '--intent-to-add', '--ignore-errors'] },
-  commit: { switches: ['-a', '--all', '--amend', '--no-edit', '--allow-empty', '-q', '--quiet', '-v', '--no-verify', '-n', '--signoff', '-s'],
-    valued: ['-m', '--message', '-F', '--file', '--author', '--date'], attached: ['--message=', '--file=', '--author=', '--date='] },
-  push: { switches: ['-u', '--set-upstream', '--tags', '--dry-run', '-n', '--follow-tags', '-v', '--verbose', '-q', '--quiet', '--porcelain', '--atomic', '--delete', '-d'], remote: true },
-  // The patch path, branch names, start points and revisions are operands only.
-  apply: { switches: ['-R', '--reverse', '--check', '--stat', '--numstat', '--summary'] },
-  switch: { switches: ['--detach', '-q', '--quiet', '--track'], valued: ['-c', '-C'] },
-  checkout: { switches: ['--detach', '-q', '--quiet', '--track'], valued: ['-b', '-B'] },
-  'merge-base': { switches: ['--is-ancestor', '--all'] },
-  'ls-tree': { switches: ['-r', '--name-only'] },
-};
-const GIT_WORKTREE = {
-  list: { switches: ['--porcelain', '-v', '--verbose'] },
-  prune: { switches: ['-v', '--verbose', '-n', '--dry-run'], valued: ['--expire'], attached: ['--expire='] },
-  remove: { switches: ['-f', '--force'] },
-  add: { switches: ['--detach', '-f', '--force', '--no-checkout', '--lock', '-q', '--quiet'], valued: ['-b', '-B'] },
-};
-function gitSpec(entry) {
-  return { switches: set(entry.switches || []), valued: set(entry.valued || []), attached: entry.attached || [], numeric: entry.numeric, remote: entry.remote, dashdash: true, nodash: true };
-}
-const GREP = { switches: set(['--line-number', '--recursive', '--ignore-case', '--files-with-matches', '--files-without-match', '--count', '--fixed-strings',
-  '--extended-regexp', '--word-regexp', '--line-regexp', '--invert-match', '--only-matching', '--no-filename', '--with-filename', '--quiet', '--silent', '--null', '--no-messages']),
-  valued: set(['--regexp', '--file', '--include', '--exclude', '--exclude-dir', '--max-count', '--context', '--after-context', '--before-context']),
-  attached: ['--regexp=', '--file=', '--include=', '--exclude=', '--exclude-dir=', '--max-count=', '--context=', '--after-context=', '--before-context=', '--color=', '--colour=', '--binary-files='],
-  cluster: { switches: [...'rRnilLcwxFEhHovsqIaz'], valued: [...'efABCm'] }, numeric: /^-\d+$/, dashdash: true };
-// rg has no --pre, --pre-glob, --search-zip or --hostname-bin here: those run programs.
-const RG = { switches: set(['--line-number', '--ignore-case', '--smart-case', '--fixed-strings', '--files-with-matches', '--files', '--hidden', '--no-ignore',
-  '--word-regexp', '--invert-match', '--count', '--only-matching', '--json', '--no-heading', '--with-filename', '--no-filename', '--no-line-number', '--multiline', '--no-config', '--follow']),
-  valued: set(['--regexp', '--glob', '--type', '--type-not', '--max-count', '--max-depth', '--sort', '--context', '--after-context', '--before-context']),
-  attached: ['--regexp=', '--glob=', '--type=', '--type-not=', '--max-count=', '--max-depth=', '--sort=', '--context=', '--color='],
-  cluster: { switches: [...'nilFwvcoSuHNUL'], valued: [...'egtTABCm'] }, dashdash: true, nodash: true };
-// Fixed Toolkit entry points by exact basename; options and values are data to the script.
-// Names to recognise in a command only; this module never loads or starts them.
-const TOOLKIT_SCRIPTS = set([
-  'setup-toolkit.cjs',
-  'toolkit-governance.cjs', 'toolkit-risk-tier.cjs', 'toolkit-install-health.cjs',
-]);
-// Coreutils without any option that runs a program. sort is listed separately below.
-const COREUTILS = set(['head', 'tail', 'wc', 'uniq', 'cut', 'touch', 'stat', 'realpath', 'basename', 'dirname']);
-const POSIX_FILE = set(['ls', 'cat', 'rm', 'mkdir', 'cp', 'mv', 'cd', 'pwd', 'echo']);
-const SORT = { switches: set(['-r', '-n', '-u', '-f', '-V', '-h', '--reverse', '--numeric-sort', '--unique']), valued: set(['-k', '-t']), attached: ['--key=', '--field-separator='], nodash: true };
-// PowerShell cmdlets and their default aliases. No parameter here runs code or writes outside
-// a checked document; -Value, -Target, -OutVariable and script blocks are absent.
-const PS_PATH_CMDLETS = set(['get-childitem', 'gci', 'ls', 'dir', 'get-content', 'gc', 'cat', 'type', 'get-item', 'gi', 'test-path', 'resolve-path', 'rvpa',
-  'remove-item', 'rm', 'del', 'ri', 'rmdir', 'rd', 'erase', 'new-item', 'ni', 'mkdir', 'md', 'copy-item', 'cp', 'copy', 'cpi', 'move-item', 'mv', 'move', 'mi',
-  'set-location', 'cd', 'sl', 'chdir', 'push-location', 'pushd', 'pop-location', 'popd', 'get-location', 'pwd', 'gl', 'get-filehash', 'select-string', 'sls']);
-const PS_DATA_CMDLETS = set(['out-null', 'out-string', 'select-object', 'select', 'sort-object', 'sort', 'measure-object', 'measure', 'format-table', 'ft', 'format-list', 'fl',
-  'convertfrom-json', 'convertto-json', 'get-unique', 'gu', 'write-output', 'echo', 'write', 'write-host']);
-const PS_WRITERS = set(['set-content', 'add-content', 'ac', 'out-file', 'tee-object', 'tee']);
-const PS_SWITCHES = set(['-recurse', '-force', '-file', '-directory', '-hidden', '-name', '-raw', '-leaf', '-parent', '-descending', '-unique', '-autosize', '-wrap',
-  '-compress', '-line', '-word', '-character', '-sum', '-average', '-maximum', '-minimum', '-asstring', '-ashashtable', '-passthru', '-whatif', '-nonewline',
-  '-noenumerate', '-simplematch', '-casesensitive', '-list', '-notmatch', '-allmatches', '-quiet', '-noemphasis', '-append', '-noclobber', '-confirm:$false']);
-const PS_VALUED = set(['-path', '-literalpath', '-filter', '-include', '-exclude', '-destination', '-itemtype', '-depth', '-tail', '-totalcount', '-first', '-last', '-skip',
-  '-index', '-property', '-expandproperty', '-encoding', '-erroraction', '-ea', '-algorithm', '-delimiter', '-readcount', '-object', '-foregroundcolor', '-backgroundcolor',
-  '-separator', '-pattern', '-context', '-inputobject', '-width']);
-
-function cmdletArgs(args, ctx, data, { paths = false, writer = false } = {}) {
-  let target = null; const positional = [], values = [];
-  for (let n = 0; n < args.length; n += 1) {
-    const word = args[n];
-    const raw = ctx.raw(word).toLowerCase();
-    if (!word.quoted && raw.startsWith('-')) {
-      if (PS_SWITCHES.has(raw)) continue;
-      if (writer && ['-path', '-literalpath', '-filepath'].includes(raw)) { if (target || !args[n + 1]) return false; target = args[++n]; continue; }
-      if (writer && raw === '-value') { if (!args[n + 1]) return false; data.push(...dataSpans(args[++n])); continue; }
-      if (!PS_VALUED.has(raw) || !args[n + 1]) return false;
-      values.push(args[++n]); continue;
-    }
-    positional.push(word);
-  }
-  if (writer) {
-    if (!target) target = positional.shift();
-    if (!target || !safeTarget(target)) return false;
-  }
-  for (const word of [...positional, ...values]) {
-    // A provider path (function:, alias:, env:, variable:) is a definition or a variable, not a file.
-    // Only PowerShell has providers; under bash the same check only refuses more.
-    if (paths && word.parts.some((p, k) => p.type === 'lit' && p.text.includes(':')
-      && !(k === 0 && /^[A-Za-z]:(?:[\\/]|$)/.test(p.text) && p.text.indexOf(':', 2) < 0))) return false;
-    data.push(...dataSpans(word));
-  }
-  return true;
-}
-
-function matchDataCommand(cmd, ctx) {
-  const data = [];
-  if (cmd.assign) {
-    const value = cmd.assign.value;
-    if (ctx.shell === 'powershell') {
-      const name = cmd.assign.name.toLowerCase();
-      if (/^ps|preference$/.test(name) || ['ofs', 'args', 'input', 'home', 'pwd', 'profile', 'host', 'null', 'true', 'false', 'this', 'executioncontext',
-        'error', 'matches', 'lastexitcode', 'myinvocation', 'pid', 'shellid', 'foreach', 'switch'].includes(name)) return null;
-      // In expression mode a bare word would run as a command; only strings and variables are values.
-      if (!value || !(value.here || value.parts[0]?.quoted || value.parts[0]?.type === 'var')) return null;
-    } else if (!/[a-z]/.test(cmd.assign.name)) return null;
-    data.push({ start: cmd.assign.start, end: cmd.assign.end });
-    if (value) data.push(...dataSpans(value));
-    return { data };
-  }
-  const words = cmd.words;
-  if (words.length === 1 && words[0].here) return { data: dataSpans(words[0]) };
-  const head = words[0];
-  if (head.quoted || head.value === null || !/^[A-Za-z][A-Za-z0-9_.-]*$/.test(head.value)) return null;
-  const name = head.value.toLowerCase().replace(/\.exe$/, ''), args = words.slice(1);
-  if (args.some(w => w.here) && !(ctx.shell === 'powershell' && PS_WRITERS.has(name))) return null;
-  if (cmd.heredoc && !((name === 'cat' && !args.length) || name === 'tee')) return null;
-  if (cmd.heredoc) data.push({ start: cmd.heredoc.bodyStart, end: cmd.heredoc.bodyEnd });
-  if (name === 'gh') {
-    const subject = lower(args[0]?.value ?? null), action = lower(args[1]?.value ?? null);
-    if (args[0]?.quoted || args[1]?.quoted) return null;
-    if (subject === 'api') return nativeArgs(args.slice(1), GH_API, ctx, data) ? { data } : null;
-    if (!GH_SUBJECTS.has(subject) || !GH_ACTIONS.has(action)) return null;
-    return nativeArgs(args.slice(2), GH_ITEM, ctx, data) ? { data } : null;
-  }
-  if (name === 'git') {
-    let n = 0;
-    for (; n < args.length; n += 1) {
-      if (args[n].quoted) return null;
-      if (['--no-pager', '-P'].includes(args[n].value)) continue;
-      if (args[n].value === '-C') {
-        if (!args[n + 1] || !plainOperand(args[n + 1], ctx)) return null;
-        data.push(...dataSpans(args[++n])); continue;
-      }
-      break;
-    }
-    const sub = args[n]?.value;
-    let entry = Object.hasOwn(GIT_SUBCOMMANDS, sub || '') ? GIT_SUBCOMMANDS[sub] : null;
-    if (sub === 'worktree') {
-      if (args[n + 1]?.quoted) return null;
-      entry = Object.hasOwn(GIT_WORKTREE, args[n + 1]?.value || '') ? GIT_WORKTREE[args[++n].value] : null;
-    }
-    if (!entry || args[n].quoted) return null;
-    return nativeArgs(args.slice(n + 1), gitSpec(entry), ctx, data) ? { data } : null;
-  }
-  if (name === 'grep') return nativeArgs(args, GREP, ctx, data) ? { data } : null;
-  if (name === 'rg') return nativeArgs(args, RG, ctx, data) ? { data } : null;
-  if (name === 'node') {
-    const script = args[0];
-    if (!script || script.here || optionWord(script) || !plainOperand(script, ctx)) return null;
-    const last = script.parts.at(-1);
-    if (!last || last.type !== 'lit' || script.parts.some(p => p.type === 'sub' || p.type === 'glob')) return null;
-    const base = /(?:^|[\\/])([^\\/]+)$/.exec(last.text)?.[1];
-    if (!base || !TOOLKIT_SCRIPTS.has(base.toLowerCase()) || (script.parts.length === 1 ? false : !/[\\/]/.test(last.text))) return null;
-    // The folder is literal, the home folder or the user profile; never a variable this input sets.
-    // A POSIX shell reads $env:USERPROFILE as an unset $env before a literal folder name.
-    const first = script.parts[0];
-    if (first.type === 'var' && (ctx.assigned.has(first.name)
-      || !(ctx.shell === 'powershell' ? first.env && first.name === 'userprofile' : ['HOME', 'env'].includes(first.name)))) return null;
-    data.push(...dataSpans(script));
-    // Only the --host value is data. Every other option and operand stays evidence.
-    const rest = args.slice(1);
-    for (let n = 0; n < rest.length; n += 1) {
-      const word = rest[n];
-      if (word.here || !plainOperand(word, ctx) && !optionWord(word)) return null;
-      if (!optionWord(word)) continue;
-      if (!/^--?[A-Za-z][A-Za-z0-9-]*(?:=[A-Za-z0-9_.-]*)?$/.test(word.value)) return null;
-      if (word.value.startsWith('--host=')) data.push({ start: word.start + 7, end: word.end });
-      else if (word.value === '--host') {
-        const value = rest[++n];
-        if (!value || value.value === null || !/^[a-z]+$/.test(value.value)) return null;
-        data.push(...dataSpans(value));
-      }
-    }
-    return { data };
-  }
-  if (ctx.shell === 'powershell') {
-    if (PS_WRITERS.has(name)) return cmdletArgs(args, ctx, data, { paths: true, writer: true }) ? { data } : null;
-    if (PS_PATH_CMDLETS.has(name)) return cmdletArgs(args, ctx, data, { paths: true }) ? { data } : null;
-    if (PS_DATA_CMDLETS.has(name)) return cmdletArgs(args, ctx, data) ? { data } : null;
-  } else {
-    if (name === 'tee') {
-      for (const word of args) {
-        if (word.value === '-a' && !word.quoted) continue;
-        if (!safeTarget(word)) return null;
-      }
-      return args.length ? { data } : null;
-    }
-    if (name === 'sort') return nativeArgs(args, SORT, ctx, data) ? { data } : null;
-    // A shell that may be PowerShell needs the cmdlet reading too. Verb-noun names are no POSIX tools.
-    if (name.includes('-') && (PS_PATH_CMDLETS.has(name) || PS_DATA_CMDLETS.has(name))) return cmdletArgs(args, ctx, data) ? { data } : null;
-    if (COREUTILS.has(name) || POSIX_FILE.has(name)) {
-      for (const word of args) {
-        if (optionWord(word)) { if (!/^-{1,2}[A-Za-z0-9][A-Za-z0-9-]*$/.test(word.value)) return null; continue; }
-        data.push(...dataSpans(word));
-      }
-      return { data };
-    }
-  }
-  if (COREUTILS.has(name)) {
-    for (const word of args) {
-      if (optionWord(word)) { if (!/^-{1,2}[A-Za-z0-9][A-Za-z0-9-]*$/.test(word.value)) return null; continue; }
-      data.push(...dataSpans(word));
-    }
-    return { data };
-  }
-  return null;
-}
-
-// An omitted shell may also be cmd, which ignores everything after the first LF but sees
-// neither single quotes nor the other shells' escapes. Within that line, data must hold no
-// expansion and no unquoted cmd operator, so cmd cannot run part of it either.
-function cmdLineSafe(text, spans) {
-  const line = text.indexOf('\n') < 0 ? text.length : text.indexOf('\n');
-  const data = new Array(line).fill(false);
-  for (const span of spans) for (let i = span.start; i < Math.min(span.end, line); i += 1) data[i] = true;
-  let quoted = false;
-  for (let i = 0; i < line; i += 1) {
-    const c = text[i];
-    if (c === '"') { quoted = !quoted; continue; }
-    if (c === '^' && !quoted) return false;
-    if (data[i] && (c === '%' || c === '!' || (!quoted && '&|<>'.includes(c)))) return false;
-  }
-  return true;
-}
-
-// One proof per shell: the scanner consumed everything, every command matched a schema, and the
-// masked remainder carries no host or selector evidence. Inert PowerShell runs nothing at all.
-function shellDataProof(text, shell, inertAllowed, scanShell) {
-  const scanner = new DataScanner(text, shell, inertAllowed);
-  let commands;
-  try { commands = scanner.run(); } catch (error) { if (error === DATA_INERT) return { spans: [], inert: true }; if (error === DATA_STOP) return null; throw error; }
-  const assigned = new Map();
-  for (const cmd of commands) {
-    if (!cmd.assign) continue;
-    const value = cmd.assign.value, key = shell === 'powershell' ? cmd.assign.name.toLowerCase() : cmd.assign.name;
-    const literal = !value ? '' : value.here ? text.slice(value.here.start, value.here.end) : value.value;
-    assigned.set(key, [...(assigned.get(key) || []), literal]);
-  }
-  const ctx = { shell, common: inertAllowed, assigned, raw: word => text.slice(word.start, word.end) };
-  const spans = [];
-  for (const cmd of commands) {
-    const proof = matchDataCommand(cmd, ctx);
-    if (!proof) return null;
-    spans.push(...proof.data);
-  }
-  if (!spans.length) return null;
-  const chars = text.split('');
-  for (const span of spans) for (let i = span.start; i < span.end; i += 1) if (chars[i] !== '\n') chars[i] = ' ';
-  return broadVisible(chars.join(''), true, scanShell) ? null : { spans, inert: false };
-}
-function dataArguments(text, input, host = null) {
-  if (typeof text !== 'string' || !text || text.length > LIMITS.command || /[^\x09\x0a\x0d\x20-\x7e]/.test(text)) return false;
-  const shells = dataShells(input, host);
-  if (!shells) return false;
-  const scanShell = roleShell(input), common = shells.length > 1;
-  const proofs = shells.map(shell => shellDataProof(text, shell, common, scanShell));
-  if (proofs.some(proof => !proof) || proofs.every(proof => proof.inert)) return false;
-  return !common || proofs.every(proof => cmdLineSafe(text, proof.spans));
-}
-
 // host is the hook entry point's own host ('claude' or 'codex'), or null when unknown.
 function parse(text, input, { host = null } = {}) {
+  const found = candidate(text, input, host);
+  if (!found) return NONE;
   const result = parseCommand(text, input);
-  return result === UNKNOWN && dataArguments(text, input, host) ? NONE : result;
+  return result === UNKNOWN && found.seen ? Object.freeze({ ...UNKNOWN, seen: found.seen }) : result;
 }
 
+// The strict reader: a candidate is admitted only in one of two exact forms.
 function parseCommand(text, input) {
-  if (!visible(text, input)) return NONE;
   if (!knownShell(input)) return UNKNOWN;
   const lexed = tokens(text);
   if (!lexed) return UNKNOWN;
@@ -1655,4 +934,4 @@ if (require.main === module) {
   process.stdout.write(JSON.stringify(result));
 }
 
-module.exports = Object.freeze({ ContinuationResolver, TranscriptReader, LIMITS, parse, visible, executionDirectory });
+module.exports = Object.freeze({ ContinuationResolver, TranscriptReader, LIMITS, parse, executionDirectory });

@@ -1942,7 +1942,7 @@ test('H2: edits and commands cannot reach held repositories; a verified decided 
   const plain = path.join(ctx.root, 'plain');
   fs.mkdirSync(plain);
   const EDIT = /this edit is in a repository that is waiting for the user's governance answer/;
-  const RESUME = /selected session's repository could not be verified/;
+  const RESUME = /could resume or fork a Claude or Codex session.*cannot confirm which repository/;
   const binding = path.join(held, '.github', 'toolkit-programme.json');
   const edits = [
     ['Write', { file_path: path.join(held, 'AGENTS.md') }, EDIT],
