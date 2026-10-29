@@ -160,7 +160,7 @@ function removeKilledFetchLock(git, root, tracking, started) {
 
 // Why a refresh kept the last read, in plain words for `status`, or null when there is nothing to say.
 const REFRESH_REASONS = Object.freeze({
-  'remote-redirected': 'git would fetch origin from somewhere else (a URL rewrite, or a transport, proxy or TLS override in this repository\'s git config, git -c, GIT_CONFIG_COUNT or GIT_CONFIG_PARAMETERS, or GIT_SSH for an ssh origin), so the merged binding was not read',
+  'remote-redirected': 'git would fetch origin from somewhere else (a URL rewrite, or a transport, proxy or TLS override in this repository\'s git config, git -c, GIT_CONFIG_COUNT or GIT_CONFIG_PARAMETERS, or GIT_SSH or GIT_SSH_COMMAND for an ssh origin), so the merged binding was not read. A GIT_SSH or GIT_SSH_COMMAND set for good (Plink or TortoiseGit) keeps every refresh of an ssh origin held, and turns queued offline are then dropped unwritten after seven days; an https origin is read normally',
   'remote-unreachable': 'GitHub could not be reached (offline?)',
   'fetch-failed': 'the default branch could not be fetched',
   'default-branch-unknown': 'the remote did not say which branch is its default',
@@ -172,7 +172,12 @@ const REFRESH_REASONS = Object.freeze({
   'cache-unwritable': 'this computer\'s cache of the read could not be written',
   offline: 'governance reads are switched off here (a test run or TOOLKIT_GOVERNANCE_OFFLINE=1)',
 });
-function refreshReason(error) { return Object.hasOwn(REFRESH_REASONS, error) ? REFRESH_REASONS[error] : null; }
+// An error code from a read that threw (uppercase, such as an identity read failure) gets a generic
+// line naming it; 'not-applicable' (not a github.com repository) has nothing to say.
+function refreshReason(error) {
+  if (Object.hasOwn(REFRESH_REASONS, error)) return REFRESH_REASONS[error];
+  return /^[A-Z][A-Z0-9_]{0,63}$/.test(String(error || '')) ? `the identity read failed (${error})` : null;
+}
 
 // Atomic write of one cache entry; returns the entry. Throws on a write failure.
 function writeCache(registryPath, entry) {

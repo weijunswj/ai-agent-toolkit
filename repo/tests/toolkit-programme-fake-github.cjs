@@ -41,8 +41,8 @@ class FakeGitHub {
 
   tick() { this.clock += 1000; return new Date(this.clock).toISOString(); }
 
-  addIssue(number, { title = `Issue ${number}`, body = '', state = 'open', parent = null, blockedBy = [] } = {}) {
-    const issue = { number, id: this.nextId++ * 1000 + number, title, body, state, parent: null, subs: [], blockedBy, updated_at: this.tick() };
+  addIssue(number, { title = `Issue ${number}`, body = '', state = 'open', parent = null, blockedBy = [], labels = [] } = {}) {
+    const issue = { number, id: this.nextId++ * 1000 + number, title, body, state, parent: null, subs: [], blockedBy, labels, updated_at: this.tick() };
     if (state === 'closed') issue.closed_at = this.tick();
     this.issues.set(number, issue);
     if (parent) this.link(parent, number);
@@ -63,16 +63,16 @@ class FakeGitHub {
   }
 
   // A comment on an issue, as `login` posted it; `created_at` defaults to the fake clock.
-  addComment(issue, { body, login = this.login, createdAt = this.tick(), type = 'User' } = {}) {
+  addComment(issue, { body, login = this.login, createdAt = this.tick(), type = 'User', association = 'OWNER' } = {}) {
     const id = 7000000000 + this.comments.size + 1;
-    this.comments.set(id, { id, issue, body, login, type, created_at: createdAt });
+    this.comments.set(id, { id, issue, body, login, type, association, created_at: createdAt });
     return id;
   }
 
   // An issue's comments as the REST list shows them, oldest first.
   commentsOf(issue) {
     return [...this.comments.values()].filter(comment => comment.issue === issue)
-      .map(comment => ({ id: comment.id, user: { login: comment.login, type: comment.type || 'User' }, body: comment.body, created_at: comment.created_at }));
+      .map(comment => ({ id: comment.id, user: { login: comment.login, type: comment.type || 'User' }, author_association: comment.association || 'OWNER', body: comment.body, created_at: comment.created_at }));
   }
 
   // A hook runs before every call and may answer it: (call) => response | undefined.
@@ -253,7 +253,24 @@ class FakeGitHub {
     return file ? JSON.parse(file.text) : null;
   }
 
+  // The inventory's paged open-issues query: issues only (no pull request), 100 a page, each with its
+  // native parent and label names. `labels` on an issue lists its label names.
+  inventoryRoute(body) {
+    const open = [...this.issues.values()].filter(issue => issue.state === 'open').sort((a, b) => a.number - b.number);
+    const start = body.variables.after ? Number(body.variables.after) : 0;
+    const page = open.slice(start, start + 100);
+    const nodes = page.map(issue => {
+      const parent = issue.parent ? this.issues.get(issue.parent) : null;
+      return { __typename: 'Issue', number: issue.number, state: 'OPEN',
+        parent: parent ? { number: parent.number, state: parent.state.toUpperCase(), repository: { nameWithOwner: this.repository } } : null,
+        labels: { nodes: (issue.labels || []).map(name => ({ name })) } };
+    });
+    const hasNextPage = start + 100 < open.length;
+    return ok(200, { data: { repository: { issues: { pageInfo: { hasNextPage, endCursor: hasNextPage ? String(start + 100) : null }, nodes } } } });
+  }
+
   graphqlRoute(body) {
+    if (/issues\(states: OPEN/.test(body.query)) return this.inventoryRoute(body);
     const pr = this.prs.get(body.variables.number);
     if (!pr) return ok(200, { data: { repository: { pullRequest: null } } });
     return ok(200, { data: { repository: { defaultBranchRef: { name: 'main' }, pullRequest: {
