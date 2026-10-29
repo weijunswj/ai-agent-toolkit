@@ -17,6 +17,7 @@ const { ClaudeHelperDefinitions } = require('./toolkit-claude-helper-agents.cjs'
 const { ToolkitInstallHealthCheck } = require('./toolkit-install-health.cjs');
 const { claudeAccountPluginFolders } = require('./toolkit-claude-account-copy.cjs');
 const { ToolkitEnv } = require('./toolkit-env.cjs');
+const { CodexToolkitInstall } = require('./toolkit-codex-install-state.cjs');
 
 function defineClaudeSetup({ CLAUDE_HOOK_TRUST_ACTION, SUBAGENT_DEPTH_FOR_TOPOLOGY, claudeSetupBudgets, expectedToolkitVersion, nodeScriptArgs, readJsonFile, runNativePluginJsonPhase, scriptRootForReadOnlyProbe, setupGlobalRules, unknown }) {
   function inspectClaudeNativePluginStatePreApproval(args) {
@@ -252,6 +253,7 @@ function defineClaudeSetup({ CLAUDE_HOOK_TRUST_ACTION, SUBAGENT_DEPTH_FOR_TOPOLO
       envHealth: ToolkitEnv.forUser(),
       syncedSkillsDir: path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'skills', 'synced'),
       accountPluginFolders: claudeAccountPluginFolders(),
+      codexInstall: new CodexToolkitInstall({ managedRoot: args.repoRoot }),
     });
     const installed = ['already fresh', 'installed this run'].includes(nativeCache.status);
     return check.run({

@@ -17,8 +17,12 @@ const expectedCodexRows = [
   ['codex-instruction-limit', "Raise Codex's instruction limit"],
   ['codex-helper-capacity', 'Codex helper capacity'],
   ['codex-toolkit-maintenance', 'Codex Toolkit maintenance'],
+  ['codex-toolkit-plugin', 'Keep Toolkit available in Codex?'],
+  ['codex-toolkit-hooks', 'Toolkit hooks in Codex'],
   ['antigravity-skills', "Copy Toolkit's skills into Antigravity?"],
 ];
+// The rows that take an answer; the Codex hooks row only reports.
+const answerable = (rows) => rows.filter((row) => !row.report_only);
 
 function assertGeneratedDocumentationEqual(actual, expected) {
   assert.equal(
@@ -97,7 +101,12 @@ async function runInjectedTTY(responses, configure = () => {}) {
 test('all ordinary Codex questions expose complete canonical semantics', () => {
   const rows = allRows();
   assert.deepEqual(rows.map((row) => [row.id, row.title]), expectedCodexRows);
-  for (const row of rows) {
+  const report = rows.find((row) => row.report_only);
+  assert.equal(report.id, 'codex-toolkit-hooks');
+  assert.deepEqual(report.choices, []);
+  assert.equal(report.current_short, 'All 6 on');
+  assert.equal(report.recommended_text, 'Keep current');
+  for (const row of answerable(rows)) {
     assert.ok(row.whatThisControls.trim(), `${row.id} controls`);
     assert.ok(row.currentState.effectiveBehavior.trim(), `${row.id} current`);
     assert.equal(row.currentState.effectiveBehavior, row.current);
@@ -133,7 +142,7 @@ test('terminal, piped, plan, JSON, approval and generated docs share canonical r
       for (const choice of row.choices) assert.ok(output.includes(`${choice.presentation_ref}. ${choice.label}`), `${row.id} ${choice.value}`);
     }
     assert.ok(generated.includes(row.whatThisControls));
-    assert.ok(generated.includes(row.recommendation.reason));
+    assert.ok(generated.includes(row.recommendation_reason));
     for (const choice of row.choices) assert.ok(generated.includes(choice.consequence));
   }
   assert.doesNotMatch(markdown, /\*\*What this controls:\*\*/);
@@ -230,7 +239,7 @@ test('representative recommendations are all selectable and deterministic', () =
   const first = allRows();
   const second = allRows();
   assert.deepEqual(second, first);
-  for (const row of first) assert.ok(row.choices.map((choice) => choice.value).includes(row.recommended));
+  for (const row of answerable(first)) assert.ok(row.choices.map((choice) => choice.value).includes(row.recommended));
 });
 
 test('Update source keep availability uses one verified preservation predicate', () => {
@@ -342,6 +351,12 @@ test('compact table, full text, recommendations, and choices share one indexed o
     const tablePosition = rendered.indexOf(tableLine);
     assert.ok(tablePosition > previousIndex, row.id);
     previousIndex = tablePosition;
+    if (row.report_only) {
+      // No letters: the Recommended cell says what to do, and Other choices says it only reports.
+      assert.ok(rendered.includes(`${tableLine}${row.current_short} | ${row.recommended_text} | (report only) |`), row.id);
+      assert.match(detailed, new RegExp(`### ${escapeRegExp(row.presentation.question_ref)} ${escapeRegExp(row.title)}[\\s\\S]*?\\*\\*Choices:\\*\\* none; this row only reports\\.`));
+      continue;
+    }
     const recommendedLabel = `${row.presentation.recommended_choice_ref}. ${row.choices.find((choice) => choice.value === row.recommended).label}`;
     // Keeping things as they are shows only the choice; any other recommendation also shows its effect.
     assert.ok(rendered.includes(row.recommended === 'keep' || row.folded_into === row.recommended ? `${recommendedLabel} |` : `${recommendedLabel}: `), row.id);
@@ -359,7 +374,7 @@ test('conditional questions renumber without gaps and change the bound bank iden
   const all = allRows();
   const withoutConditional = all.filter((row) => row.id !== 'report-retention');
   const renumbered = core.withPresentationMetadata(withoutConditional.map((row) => ({ ...row, presentation: undefined })));
-  assert.deepEqual(renumbered.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '2.1', '2.2', '3.1']);
+  assert.deepEqual(renumbered.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '2.1', '2.2', '3.1', '3.2', '3.3']);
   assert.notEqual(renumbered[0].presentation.bank_identity, all[0].presentation.bank_identity);
 });
 
@@ -377,8 +392,11 @@ test('all recommended and changed-only answers resolve to canonical values', () 
   const reference = rows[0].presentation.bank_reference;
   const all = core.parseConciseQuestionBankAnswer(`  ${reference.toLowerCase()}: ALL recommended  `, rows);
   assert.equal(all.mode, 'all-recommended');
-  assert.deepEqual(all.selections.map((selection) => selection.canonical_value), rows.map((row) => row.recommended));
+  assert.deepEqual(all.selections.map((selection) => selection.canonical_value), answerable(rows).map((row) => row.recommended));
   core.assertQuestionBankAnswerBinding(all, rows);
+  // The report-only hooks row (3.2) takes no answer.
+  assert.equal(all.selections.some((selection) => selection.question_ref === '3.2'), false);
+  assert.throws(() => core.parseConciseQuestionBankAnswer(`${reference}: 3.2=A`, rows), /unavailable question 3\.2/);
 
   const changed = core.parseConciseQuestionBankAnswer(`${reference}: 1.2=b, 2.2 = a`, rows);
   assert.equal(changed.mode, 'recommended-except');
@@ -526,7 +544,12 @@ test('bank reference covers host, order, recommendations and approval-visible se
   assert.equal(payload.host, 'codex');
   assert.deepEqual(payload.sections.map((section) => section.title), ['Updates and reports', 'Computer performance', 'Other coding apps']);
   assert.ok(payload.questions.every((question) => question.what_this_controls));
-  assert.ok(payload.questions.every((question) => question.recommendation.choice_ref && question.recommendation.label));
+  assert.ok(payload.questions.filter((question) => !question.report_only).every((question) => question.recommendation.choice_ref && question.recommendation.label));
+  // The report-only row's state is bound too: a hooks change between plan and approval is a new bank.
+  const hooksIndex = rows.findIndex((row) => row.report_only);
+  const hooksChanged = core.withPresentationMetadata(rows.map((row, index) => ({ ...row, presentation: undefined,
+    ...(index === hooksIndex ? { current_short: 'All 6 off' } : {}) })), 'codex');
+  assert.notEqual(hooksChanged[0].presentation.bank_reference, reference);
 
   const changedHost = core.withPresentationMetadata(rows, 'claude-code');
   const changedRecommendation = core.withPresentationMetadata(rows.map((row, index) => index === 0
@@ -591,7 +614,9 @@ test('a recommendation that matches the current state shows one recommended Keep
     ['update-reports', () => {}, '', ['enable', 'disable', 'keep']],
     ['report-retention', (c) => { c.audit.update_report_retention_days = 7; }, 'default', ['custom', 'keep']],
     ['report-retention', (c) => { c.audit.update_report_retention_days = 14; }, '', ['default', 'custom', 'keep']],
-    ['codex-instruction-limit', (c) => { c.audit.codex_doc_limit_enabled = true; }, 'enable', ['disable', 'keep']],
+    // Folds only when config.toml has Toolkit's raised block too; the record alone is not enough.
+    ['codex-instruction-limit', (c) => { c.audit.codex_doc_limit_enabled = true; c.codexInstall = { config: 'read', docLimit: { value: 65536, toolkit: true } }; }, 'enable', ['disable', 'keep']],
+    ['codex-instruction-limit', (c) => { c.audit.codex_doc_limit_enabled = true; }, '', ['enable', 'disable', 'keep']],
     ['codex-instruction-limit', () => {}, '', ['enable', 'disable', 'keep']],
     ['codex-toolkit-maintenance', (c) => { c.audit.codex_plugin_auto_refresh_enabled = true; }, 'enable', ['disable', 'keep']],
   ];
@@ -837,7 +862,7 @@ test('the Codex instruction limit question is recommended on, explains the edit 
   assert.deepEqual(row.choices.map((choice) => choice.label), ['Raise it', 'Leave it', 'Keep current']);
   assert.match(row.whatThisControls, /never changes 0 \(project docs off\) or a value of 65536 or more/);
   assert.match(row.whatThisControls, /--remove` puts the previous value back/);
-  assert.equal(row.currentState.verification, 'defaulted');
+  assert.equal(row.currentState.verification, 'state-derived');
   assert.match(row.current, /No choice is recorded, so Toolkit leaves Codex's instruction limit alone/);
   // Claude Code setup does not ask; its plan keeps the stored choice.
   const claudeArgs = core.parseArgs(['--plan', '--host', 'claude-code']);

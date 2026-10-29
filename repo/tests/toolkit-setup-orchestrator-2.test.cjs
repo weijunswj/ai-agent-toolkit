@@ -183,9 +183,27 @@ test('ordinary capacity choices cannot silently migrate a pending legacy block',
   const original = Buffer.from(`[agents]\n${delegation.expectedLegacyBlock(1)}\n`);
   const editorLog = path.join(root, 'editor.log');
   writeFile(configPath, original.toString('utf8'));
-  const result = run([
+  // The bank reads the V1 form of Toolkit's own block, where one helper is what is already there, so
+  // it shows one recommended Keep current and the one-helper flag applies as keep: no Codex check,
+  // no migration and no write.
+  const kept = run([
     '--execute', '--repo-root', setupRepo, '--repo-remote', origin,
     '--yes-recommended', '--skip-codex-plugin-auto-refresh', '--codex-helper-capacity', 'one-helper',
+  ], { env: { ...isolatedHomeEnv(root), SETUP_FAKE_CODEX_EDITOR_LOG: editorLog } });
+  assert.equal(kept.status, 0, kept.stderr || kept.stdout);
+  assert.match(kept.stdout, /Helper-capacity outcome this run: kept/);
+  assert.match(kept.stdout, /Old Toolkit helper block migrated: no/);
+  assert.deepEqual(fs.readFileSync(configPath), original);
+  assert.equal(fs.existsSync(editorLog), false);
+  assert.deepEqual(backupFiles(root), []);
+
+  // A real change is checked with Codex after the answers: Codex runs V2 here, so the old block
+  // can change only through migrate, and setup stops before any plugin, preference or config write.
+  fs.rmSync(path.join(setupRepo, 'BRIDGE_ARGS.log'), { force: true });
+  fs.rmSync(path.join(setupRepo, 'PLUGIN_SETUP.log'), { force: true });
+  const result = run([
+    '--execute', '--repo-root', setupRepo, '--repo-remote', origin,
+    '--yes-recommended', '--skip-codex-plugin-auto-refresh', '--codex-helper-capacity', 'custom', '--codex-helper-count', '1',
   ], { env: { ...isolatedHomeEnv(root), SETUP_FAKE_CODEX_EDITOR_LOG: editorLog } });
   assert.equal(result.status, 23, result.stderr || result.stdout);
   assert.match(result.stderr, /can only change through the explicit `migrate` choice/);
