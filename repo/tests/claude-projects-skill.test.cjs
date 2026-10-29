@@ -73,7 +73,8 @@ test('Projects wires managed instructions, promises and fresh scheduled sessions
   assert.match(method, /Print its byte size, sha256 and Version line, then check: the frontmatter `name` is `web-controller-projects`; it holds no `&lt;`, `&gt;`, `&amp;` or `&quot;`; it holds no CR\. If any check fails, stop and report it\./);
   assert.match(method, /call `propose_skills` \(ToolSearch\) with one proposal: kind `improvement`, name and target `web-controller-projects`, description copied from the file's frontmatter, and `skillMd` the file text exactly as read\./);
   assert.match(method, /report `card failed: <reason>` instead/);
-  assert.doesNotMatch(fs.readFileSync(path.join(repoRoot, SKILL_REL), 'utf8'), /&(?:lt|gt|amp|quot);|\r/, 'the card method refuses a SKILL.md with HTML entities or CR');
+  // (CR is not checked here: a Windows checkout may add it, and the file on main has none.)
+  assert.doesNotMatch(read(SKILL_REL), /&(?:lt|gt|amp|quot);/, 'the card method refuses a SKILL.md with HTML entities');
   // Setup compares the loaded Version with main's and starts the card thread when a card is due.
   assert.match(text, /State the skill Version you loaded and compare it with the Version line of main's SKILL\.md\. When main's is newer, have a read-only cloud thread compare the account copy with main as the daily check-in's SKILL DRIFT and SKILL CARD steps do; when a card would be due there, start a skill card thread \(`SKILL BEHIND` in the skill\) and carry on with step 1\./);
   assert.match(text, /the skill card waiting for Save \(with its thread link\) when one is, and the next work item\./);

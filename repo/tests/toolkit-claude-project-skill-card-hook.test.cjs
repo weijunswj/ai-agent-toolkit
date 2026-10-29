@@ -11,8 +11,9 @@ const HOOK = path.join(ROOT, 'repo', 'scripts', 'toolkit-claude-project-skill-ca
 const { decide, normalise, frontmatterDescription, RAW_URL, API_URL } = require('../scripts/toolkit-claude-project-skill-card-hook.cjs');
 
 const SKILL = 'web-controller-projects';
-// main's SKILL.md as the hook would download it: the file in this checkout stands in for main.
-const MAIN = fs.readFileSync(path.join(ROOT, 'repo', 'contracts', 'claude-projects', SKILL, 'SKILL.md'), 'utf8');
+// main's SKILL.md as the hook would download it: the file in this checkout stands in for main, without the CR a
+// Windows checkout may add.
+const MAIN = fs.readFileSync(path.join(ROOT, 'repo', 'contracts', 'claude-projects', SKILL, 'SKILL.md'), 'utf8').replace(/\r\n/g, '\n');
 const DESCRIPTION = frontmatterDescription(MAIN);
 // The card tool's real input shape, as the coordinator read it from its tool list: one to three proposals.
 const proposal = fields => ({ name: SKILL, kind: 'improvement', target: SKILL, description: DESCRIPTION, skillMd: MAIN, ...fields });
