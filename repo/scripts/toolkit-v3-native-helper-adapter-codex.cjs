@@ -14,10 +14,11 @@ function fail(code) { throw Object.assign(new Error(code), { code }); }
 // `Agent` matcher alias. Codex accepts `features.multi_agent_v2.tool_namespace` only
 // as [A-Za-z0-9_-]+, so the registered matcher and this recogniser share that one
 // alphabet, hyphen included. Both hooks.json copies carry CODEX_HELPER_HOOK_MATCHER: the spawn
-// names plus Bash, which the same hook checks for AI attribution lines.
+// names plus every shell tool name Codex may report (Bash, the documented one, and its exec and
+// shell tools), which the same hook checks for attribution, force pushes and pushed credentials.
 const CODEX_TOOL_NAMESPACE = /^[A-Za-z0-9_-]+$/;
 const CODEX_SPAWN_MATCHER = '^(?:Agent|[A-Za-z0-9_-]*spawn_agent)$';
-const CODEX_HELPER_HOOK_MATCHER = '^(?:Agent|[A-Za-z0-9_-]*spawn_agent|Bash)$';
+const CODEX_HELPER_HOOK_MATCHER = '^(?:Agent|[A-Za-z0-9_-]*spawn_agent|Bash|exec_command|shell|local_shell|PowerShell)$';
 const CODEX_SPAWN_TOOL = new RegExp(CODEX_SPAWN_MATCHER);
 // Registration probes: default/V1 name, its alias, the default V2 namespace and a hyphenated one.
 const CODEX_REGISTRATION_PROBES = Object.freeze(['spawn_agent', 'Agent', 'collaborationspawn_agent', 'multi-agentspawn_agent']);

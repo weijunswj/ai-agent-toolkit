@@ -15,11 +15,13 @@
 // a cd that is not its own command in the same line, and commands nested more than two shells deep.
 //
 // Last, a `git push` or `gh pr create` that passed those checks is refused when what it would send
-// carries a credential or a plain-text finding (toolkit-push-check.cjs). That step fails open: if it
-// cannot check, the command runs with one note on stderr. The same gaps apply.
+// carries a credential or a plain-text finding (toolkit-push-check.cjs), including what a `git commit`
+// earlier in the same command could add. That step fails open: if it cannot check, the command runs
+// with one note for the user. The same gaps apply.
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { ShellCall } = require('./toolkit-shell-call.cjs');
 
 const MESSAGE = 'Remove the AI attribution lines (Co-Authored-By or Claude-Session trailers, claude.ai session links, "Generated with" footers) and retry.';
 const ATTRIBUTION_PATTERNS = Object.freeze([
@@ -465,14 +467,21 @@ function pushTarget(args, folder) {
   return { folder, remote: remote || '', sources };
 }
 
+// git commands that change what a later push in the same command line sends: commits, the adds
+// before them, and the history commands the push check refuses before a push.
+const COMMIT_STEPS = new Set(['add', 'stage', 'commit', 'merge', 'cherry-pick', 'revert', 'am', 'rebase']);
+
 // What a push or a new pull request sends, for each one in a command line, with the same cd,
 // git -C and nested-shell reading as the bypass check: push and pull-request targets as
-// toolkit-push-check.cjs reads them. A push that only deletes sends nothing to check.
-function outgoingChanges(command, cwd, depth = 0) {
+// toolkit-push-check.cjs reads them. A push that only deletes sends nothing to check. Each target
+// carries `preceding`, the commit steps earlier in the same command line ({ folder, sub }, in order),
+// because the check runs before any of them.
+function outgoingChanges(command, cwd, depth = 0, preceding = []) {
   const text = String(command || '');
   const found = [];
   if (text.length > MAX_COMMAND_CHARS || !/\b(?:git|gh)\b/i.test(text)) return found;
   let root = cwd || process.cwd();
+  const withPreceding = (target) => (preceding.length ? { ...target, preceding: preceding.slice() } : target);
   for (const current of shellCommands(text)) {
     if (/^(?:cd|pushd|set-location|sl)$/i.test(current.words[0]) && current.words.length === 2) {
       root = path.resolve(root, current.words[1]);
@@ -480,12 +489,13 @@ function outgoingChanges(command, cwd, depth = 0) {
     }
     const git = gitCommand(current, root);
     const push = git && !git.refusal && git.sub === 'push' ? pushTarget(git.args, git.base) : null;
-    if (push) found.push(push);
+    if (push) found.push(withPreceding(push));
+    if (git && !git.refusal && COMMIT_STEPS.has(git.sub)) preceding.push({ folder: git.base, sub: git.sub });
     const pullRequest = pullRequestCreate(current, root);
-    if (pullRequest) found.push(pullRequest);
+    if (pullRequest) found.push(withPreceding(pullRequest));
     if (depth < 2 && SHELLS.test(current.words[0])) {
       for (const word of current.words.slice(1)) {
-        if (/\s/.test(word) && /\b(?:git|gh)\b/i.test(word)) found.push(...outgoingChanges(word, root, depth + 1));
+        if (/\s/.test(word) && /\b(?:git|gh)\b/i.test(word)) found.push(...outgoingChanges(word, root, depth + 1, preceding));
       }
     }
   }
@@ -494,8 +504,15 @@ function outgoingChanges(command, cwd, depth = 0) {
 
 // Returns the refusal reason for a push or new pull request that carries a credential or a
 // plain-text finding (toolkit-push-check.cjs), or ''. This step fails open: if it cannot check, the
-// command runs and one note goes to `notes` (a list the caller shows) or else to stderr.
-function outgoingRefusal(command, cwd, { notes, budgetMs, check = (target) => require('./toolkit-push-check.cjs').checkOutgoing(target, budgetMs ? { budgetMs } : {}) } = {}) {
+// command runs and one note goes to `notes` (a list the caller shows) or else to stderr. Every
+// target of one command line shares one time budget, which starts at the first check (30 seconds,
+// or `budgetMs` in tests); `check(target, { deadline })` is for tests.
+function outgoingRefusal(command, cwd, { notes, budgetMs, check = (target, options) => require('./toolkit-push-check.cjs').checkOutgoing(target, options) } = {}) {
+  let deadline;
+  const run = (target) => {
+    if (deadline === undefined) deadline = Date.now() + (budgetMs ?? require('./toolkit-push-check.cjs').BUDGET_MS);
+    return check(target, { deadline });
+  };
   let targets;
   try { targets = outgoingChanges(command, cwd); } catch { return ''; }
   const seen = new Set();
@@ -504,7 +521,7 @@ function outgoingRefusal(command, cwd, { notes, budgetMs, check = (target) => re
     if (seen.has(key)) continue;
     seen.add(key);
     let result;
-    try { result = check(target) || {}; } catch { result = { note: 'Toolkit could not check this push for credentials and plain-text findings, so it was let through: the check could not load.' }; }
+    try { result = run(target) || {}; } catch { result = { note: 'Toolkit could not check this push for credentials and plain-text findings, so it was let through: the check could not load.' }; }
     if (result.note) {
       if (Array.isArray(notes)) notes.push(result.note);
       else { try { process.stderr.write(`${result.note}\n`); } catch { /* a note is best effort */ } }
@@ -514,12 +531,14 @@ function outgoingRefusal(command, cwd, { notes, budgetMs, check = (target) => re
   return '';
 }
 
-// A PreToolUse decision for a shell tool call, in the shape Claude Code and Codex both read.
+// A PreToolUse decision for a shell tool call, in the shape Claude Code and Codex both read. The
+// hooks call it for shell calls only, so the call is read as one whatever its tool name. Every check
+// reads the same text and judges the folder the command runs in (toolkit-shell-call.cjs).
 // `options` is for the push check: `notes` collects its fail-open notes, and tests set its budget.
 function attributionDecision(input, options = {}) {
-  const command = input?.tool_input?.command;
-  if (typeof command !== 'string') return {};
-  const reason = attributionRefusal(command, input?.cwd) || bypassRefusal(command, input?.cwd) || outgoingRefusal(command, input?.cwd, options);
+  const call = ShellCall.from(input, { shell: true });
+  const command = call.text;
+  const reason = call.refusal() || (command && (attributionRefusal(command, call.folder) || bypassRefusal(command, call.folder) || outgoingRefusal(command, call.folder, options)));
   return reason ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } } : {};
 }
 

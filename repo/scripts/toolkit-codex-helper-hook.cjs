@@ -46,7 +46,8 @@ function promptEvent(input) {
 // Native hook names: `spawn_agent` (V1 `multi_agent` and the default namespace), the `Agent`
 // alias, and the flattened V2 `multi_agent_v2` name `<namespace>spawn_agent` for any host-valid
 // namespace, hyphenated ones included (`collaborationspawn_agent`, `multi-agentspawn_agent`).
-async function decide(input, environment = process.env) {
+// `notes` collects what a shell check could not check, for the caller to show the user.
+async function decide(input, environment = process.env, { notes } = {}) {
   let governanceDenial;
   // Codex gives no shell in its payload and may run either shell, so commands keep both readings.
   try { governanceDenial = new (gate().ToolGate)({ host: 'codex' }).decide(input || {}); } catch {
@@ -56,8 +57,9 @@ async function decide(input, environment = process.env) {
   // Merges: the merge hold, a tripwire that waits for the user's own "merge N" (toolkit-merge-hold.cjs), in every folder.
   const mergeDenial = mergeDecision(input);
   if (mergeDenial) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: mergeDenial.deny } };
-  // Shell commands: refuse AI attribution in commits and pull requests, in every folder.
-  if (input?.tool_name === 'Bash') return require('./toolkit-attribution-guard.cjs').attributionDecision(input);
+  // Shell commands, under any of the shell tool names Codex may report: refuse AI attribution in
+  // commits and pull requests, skipped checks, force pushes and pushes that carry a credential.
+  if (require('./toolkit-shell-call.cjs').ShellCall.isShellTool(input?.tool_name)) return require('./toolkit-attribution-guard.cjs').attributionDecision(input, { notes });
   const state = governance(input, environment);
   if (!state.governed) return {};
   const { CodexDialect, commandDecision } = adapter();
@@ -104,6 +106,11 @@ function promptFailure(input) {
 }
 
 const HELD = `Toolkit helper guard failed. ${NEVER_OWNER}`;
+// The way through depends on the cause the note names; a cause that stays the same refuses every retry.
+const UNCHECKED_PUSH = [
+  'Codex does not show Toolkit\'s warnings, so this push or pull request is refused instead of going out unchecked.',
+  'Fix what the note above names, then retry: for a check that took too long or read too much, push fewer new commits at a time (an older commit first, for example `git push origin <older commit>:<branch>`); with no base branch found, run `git fetch origin` or name `--base`; for an unreadable setting, fix the file it names; when git was not found or could not run, run `setup toolkit`.',
+].join('\n');
 function deny(reason) {
   process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } }) + '\n');
   // Blocking exit status, with the reason on stderr, for hosts that honour exit 2.
@@ -127,8 +134,14 @@ async function main() {
     if (output.context) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: output.context } }) + '\n');
     return;
   }
-  const output = await decide(input);
-  if (output?.hookSpecificOutput?.permissionDecision === 'deny') return deny(output.hookSpecificOutput.permissionDecisionReason);
+  const notes = [];
+  const output = await decide(input, process.env, { notes });
+  // Notes from a check that could not run go with the refusal, so they are not lost.
+  if (output?.hookSpecificOutput?.permissionDecision === 'deny') return deny([output.hookSpecificOutput.permissionDecisionReason, ...notes].join('\n'));
+  // A push or new pull request the push check could not check is refused here, not let through with
+  // a warning: Codex showed neither the agent nor its session record a hook's systemMessage
+  // (captured 29 October 2026), so the user would never see that it ran unchecked.
+  if (notes.length) return deny([...notes.map(note => note.replace(', so it was let through', '')), UNCHECKED_PUSH].join('\n'));
   // Codex accepts no bare permissionDecision:allow (it records an unsupported-output
   // hook failure and continues). An admitted request is exit 0 with empty output.
 }

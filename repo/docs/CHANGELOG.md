@@ -1,12 +1,24 @@
 # Toolkit Changelog
 
-## 3.19.1 (links only where the owner acts, and no flattened questions)
+## 3.19.2 (links only where the owner acts, and no flattened questions)
 
 - **Projects post hook (skill version 2026-10-29.6, upload it again):** links are required only where the owner acts. A PR, thread or file named in prose or a plain bullet no longer needs a link, in posts and in replies. Every numbered item under the **Waiting on you** header (each question and merge ask) still needs one, and a pull request link there without `/files` is refused with the fix.
 - **Exact Waiting list:** only a line that is exactly `**Waiting on you (n):**` (or `**Waiting on you:**`) opens the list, so a bullet or prose line that names it does not. Bullets after the items that do not follow a question are prose and pass. Link text may hold one level of brackets, as in `[[09:41] Update card](#cmsg_X)`.
 - **No flattened questions:** a line starting `**Question:` must be a numbered item in that list. A bare label line, a bulleted question, a numbered question outside the list or a question in an Update line is refused, and so is a choice left unindented after a question, a "(my pick)" choice with no numbered question above it, or an indented choice with no numbered item above it. A question line also makes a short post take the layout. Every refusal says how to fix the post and not to flatten it to get past the check.
 - **Replies:** the bare-label count now counts only lines that start with `**Question:**`, so prose that talks about the label passes.
 - **Projects skill:** "Link everything worth opening" is now "Link where the owner acts", and the question format says never to write a question outside the numbered list or flatten its choices.
+
+## 3.19.1 (Codex shell calls get every commit and push check)
+
+**Codex asks you to trust the Toolkit hooks again after this update**, because their matchers changed. Trust them in Codex's hooks review, or the checks do not run.
+
+- **One shell-call reader:** the attribution, bypass, force-push and push checks, the merge hold and the governance gate now read a shell call through one module, `repo/scripts/toolkit-shell-call.cjs`. It reads Codex's `cmd` and argument lists as well as `command`, and judges the folder the command runs in (Codex's `workdir`, else the tool's `cwd`, else the session folder). Before, the attribution, force-push and push checks read only a string `command` and the session folder, so a Codex call shaped another way, or run in another folder, skipped them.
+- **Codex shell names:** the Codex hook checks every shell tool name Codex may report (`Bash`, `exec_command`, `shell`, `local_shell`, `PowerShell`), and both Codex hook files register them for the helper hook and the after-tool programme refresh. Codex documents its shell calls as `Bash`, so this changes nothing when it does.
+- **Unreadable shell calls:** a shell call whose command or folder has a shape no host sends is refused when its raw input could commit, push, or create, edit or merge a pull request. Other such calls run.
+- **Unchecked pushes in Codex:** Codex shows no hook warning (`systemMessage`), so when the push check cannot run, the Codex hook now refuses the push or new pull request with the reason and the way through for that cause (push fewer new commits at a time, fetch the base branch, fix the named setting, or run `setup toolkit` when git is missing), instead of letting it out unchecked. Claude Code still lets it run with the note. A refusal for another reason carries the note too.
+- **Git by full path:** the push check runs git by its absolute path (`TOOLKIT_GIT_PATH`, else PATH, else the usual install locations), so a hook started with no git on PATH still checks, and a git program inside the pushed repository never runs. When none is found, the note says so.
+- **Hook time limits:** the Claude Code attribution hook and the Codex helper hook now have an explicit 60-second limit, above the push check's own 30 seconds, which every push and pull request in one shell command now shares.
+- **Commit and push in one command:** the push check runs before the whole command, so a `git add; git commit; git push` line used to send a new commit unchecked. Now, after a `git commit` earlier in the same command and repository, it also checks what that commit could add (staged and unstaged tracked changes, and untracked files after a `git add`), and names those items "not committed yet". A `git merge`, `cherry-pick`, `revert`, `am` or `rebase` before a push in the same command is refused with "run the push as its own command".
 
 ## 3.19.0 (Windows scheduled tasks)
 

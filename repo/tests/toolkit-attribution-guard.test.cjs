@@ -696,15 +696,27 @@ test('push check: the Claude Code hook (Bash and PowerShell) and the Codex helpe
   assert.equal(clean.stdout + clean.stderr, '');
 });
 
-test('push check: when it cannot check, the Claude Code hook lets the push run and shows the user a note', () => {
+test('push check: with no git on PATH the check still finds git and refuses; when git cannot run, the Claude Code hook lets the push run and shows a note', (t) => {
   const { repos } = pushFixtures();
-  // No git on PATH: node is started by its full path.
+  // No git on PATH: node is started by its full path, and git is found in its install location.
   const key = Object.keys(process.env).find((name) => name.toUpperCase() === 'PATH') || 'PATH';
-  const env = { ...process.env, [key]: path.join(os.tmpdir(), 'no-such-folder') };
+  const noPath = { ...process.env, [key]: path.join(os.tmpdir(), 'no-such-folder') };
+  delete noPath.TOOLKIT_GIT_PATH;
+  const found = runHook(claudeHook, 'Bash', repos['settings-secret'], 'git push', noPath);
+  assert.equal(found.status, 2, found.stderr);
+  assert.match(JSON.parse(found.stdout).hookSpecificOutput.permissionDecisionReason, /found 1 item\(s\) to fix first/);
+  // A configured git that is not a program: the check cannot run.
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-push-check-git-'));
+  t.after(() => fs.rmSync(scratch, { recursive: true, force: true }));
+  const notAProgram = path.join(scratch, 'not-git.txt');
+  fs.writeFileSync(notAProgram, 'not a program\n');
+  const env = { ...noPath, TOOLKIT_GIT_PATH: notAProgram };
+  // The Codex hook's own run of this case is in toolkit-codex-helper-hook.test.cjs: this fixture is
+  // not on github.com, so the governance check holds it there first.
   const result = runHook(claudeHook, 'Bash', repos['settings-secret'], 'git push', env);
-  assert.equal(result.status, 0);
-  assert.equal(JSON.parse(result.stdout).systemMessage, 'Toolkit could not check this push for credentials and plain-text findings, so it was let through: git could not run (ENOENT).');
-  assert.match(result.stderr, /could not run \(ENOENT\)/);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(JSON.parse(result.stdout).systemMessage, /^Toolkit could not check this push for credentials and plain-text findings, so it was let through: git could not run \(\w+\)\.$/);
+  assert.match(result.stderr, /git could not run \(\w+\)/);
 });
 
 test('push check: a URL remote, --all, the baseline, the plain-text scope and a path that became a folder', () => {
@@ -777,4 +789,25 @@ test('push check: the Claude Code hook keeps a note when it also refuses, and bi
   assert.match(reason, /could not check this push for plain-text findings/);
   const big = pushCheck.checkOutgoing({ folder: os.tmpdir() }, { spawn: () => ({ error: Object.assign(new Error('x'), { code: 'ENOBUFS' }), status: null, signal: 'SIGTERM' }) });
   assert.match(big.note, /git wrote more than 64 MB, more than the check reads/);
+});
+
+test('push check: git is run by absolute path, never from the pushed folder, PATH order kept', () => {
+  const windowsFiles = new Set(['C:\\Tools\\git.exe', 'C:\\repo\\git.exe', 'C:\\Program Files\\Git\\cmd\\git.exe', 'C:\\Users\\u\\AppData\\Local\\Programs\\Git\\cmd\\git.exe', 'D:\\custom\\git.exe']);
+  const windows = (environment, folder = 'C:\\repo') => pushCheck.resolveGit(folder, { environment, platform: 'win32', exists: (file) => windowsFiles.has(file) });
+  assert.equal(windows({ Path: 'C:\\repo;C:\\Tools' }), 'C:\\Tools\\git.exe', 'the pushed folder on PATH is skipped');
+  assert.equal(windows({ PATH: '.;relative\\bin;;C:\\Tools' }), 'C:\\Tools\\git.exe', 'empty and relative entries are skipped');
+  assert.equal(windows({ PATH: '"C:\\Tools"' }), 'C:\\Tools\\git.exe', 'a quoted entry');
+  assert.equal(windows({ PATH: '', ProgramFiles: 'C:\\Program Files' }), 'C:\\Program Files\\Git\\cmd\\git.exe', 'the usual install location');
+  assert.equal(windows({ PATH: '', LOCALAPPDATA: 'C:\\Users\\u\\AppData\\Local' }), 'C:\\Users\\u\\AppData\\Local\\Programs\\Git\\cmd\\git.exe', 'a per-user install');
+  assert.equal(windows({ toolkit_git_path: 'D:\\custom\\git.exe', PATH: 'C:\\Tools' }), 'D:\\custom\\git.exe', 'TOOLKIT_GIT_PATH first, any case on Windows');
+  assert.equal(windows({ TOOLKIT_GIT_PATH: 'custom\\git.exe', PATH: 'C:\\Tools' }), 'C:\\Tools\\git.exe', 'a relative TOOLKIT_GIT_PATH is ignored');
+  assert.equal(windows({ PATH: 'C:\\repo' }), '', 'only the pushed folder holds a git');
+  const posix = (environment) => pushCheck.resolveGit('/work/repo', { environment, platform: 'linux', exists: (file) => ['/opt/git/bin/git', '/usr/bin/git', '/work/repo/git'].includes(file) });
+  assert.equal(posix({ PATH: '/work/repo:/opt/git/bin' }), '/opt/git/bin/git');
+  assert.equal(posix({ PATH: '' }), '/usr/bin/git');
+  // Every git call of one check spawns the resolved program.
+  const programs = [];
+  pushCheck.checkOutgoing({ folder: os.tmpdir() }, { git: () => '/fixed/git', spawn: (program) => { programs.push(program); return { status: 128, stdout: '', stderr: '' }; } });
+  assert.deepEqual(programs, ['/fixed/git']);
+  assert.deepEqual(pushCheck.checkOutgoing({ folder: os.tmpdir() }, { git: () => '' }), { note: 'Toolkit could not check this push for credentials and plain-text findings, so it was let through: git was not found.' });
 });
