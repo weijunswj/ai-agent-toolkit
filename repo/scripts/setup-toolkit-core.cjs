@@ -13,6 +13,7 @@ const agentControl = require('./toolkit-agent-control.cjs');
 const processLaunch = require('./claude-process-launch.cjs');
 const { ClaudeSubagentDepthSetting, STATES: SUBAGENT_DEPTH_STATES } = require('./toolkit-claude-subagent-depth.cjs');
 const { ClaudeUserSettings, STATES: CLAUDE_SETTINGS_STATES } = require('./toolkit-claude-user-settings.cjs');
+const { ClaudePluginRegistry } = require('./toolkit-claude-plugin-registry.cjs');
 const { OfficialN8nSkills, installSummary: n8nSkillsSummary } = require('./toolkit-n8n-official-skills.cjs');
 const { disableUserPlugin } = require('./setup-claude-toolkit-plugin.cjs');
 const { AntigravityGlobalSkills, globalCopySummary } = require('./toolkit-antigravity-project-skills.cjs');
@@ -1142,7 +1143,9 @@ async function collectCurrentState(args) {
     antigravity: antigravityState(args),
     nativePlugin: args.host === 'claude-code'
       ? inspectClaudeNativePluginStatePreApproval(args)
-      : inspectCodexNativePluginState(args)
+      : inspectCodexNativePluginState(args),
+    // Read from Claude Code's plugin registry files only; no Claude session is launched before approval.
+    ...(args.host === 'claude-code' ? { claudePluginInstall: new ClaudePluginRegistry().toolkitInstall() } : {}),
   };
 }
 
@@ -1196,27 +1199,35 @@ function wizardChoice(value, label, consequence) {
   return { value, label, consequence };
 }
 
-// currentChoice names the choice that reproduces the verified current state. When the recommendation
-// is that choice or keep, the two do the same thing, so the bank shows one recommended Keep current and
-// hides its twin. The twin's canonical name (a flag or a typed word) still works and applies as keep.
+// currentChoice names the choice that would change nothing in the verified current state. When the
+// recommendation is that choice or keep, the two do the same thing, so the bank shows one recommended
+// Keep current. Usually keep stays and its twin is hidden. With keepAs (the twin also re-checks or
+// follows another answer, which keep would skip), the twin stays under the Keep current label with keepAs
+// as its effect, and keep is hidden. Either way the hidden choice's canonical name (a flag or a typed
+// word) still works and applies as the shown one.
 function foldedTwin(definition) {
   const twin = definition.currentChoice;
   const has = (value) => definition.choices?.some((choice) => choice.value === value);
   return twin && twin !== 'keep' && has(twin) && has('keep') && [twin, 'keep'].includes(definition.recommendation?.value) ? twin : '';
 }
 
+function foldDefinition(definition, twin) {
+  const keep = definition.choices.find((choice) => choice.value === 'keep');
+  const [hidden, shown] = definition.keepAs ? ['keep', twin] : [twin, 'keep'];
+  const choices = definition.choices.filter((choice) => choice.value !== hidden)
+    .map((choice) => (definition.keepAs && choice.value === twin ? { ...choice, label: keep.label, consequence: definition.keepAs } : choice));
+  const recommendation = definition.recommendation.value === shown && !definition.keepAs ? definition.recommendation
+    : { ...definition.recommendation, value: shown, outcome: choices.find((choice) => choice.value === shown).consequence };
+  return {
+    definition: { ...definition, choices, recommendation, selected: definition.selected === hidden ? shown : definition.selected },
+    fold: { folded_value: hidden, folded_into: shown },
+  };
+}
+
 function resolvedQuestion(definition) {
   const twin = foldedTwin(definition);
-  if (twin) {
-    const keep = definition.choices.find((choice) => choice.value === 'keep');
-    definition = {
-      ...definition,
-      choices: definition.choices.filter((choice) => choice.value !== twin),
-      recommendation: definition.recommendation.value === 'keep' ? definition.recommendation
-        : { ...definition.recommendation, value: 'keep', outcome: keep.consequence },
-      selected: definition.selected === twin ? 'keep' : definition.selected,
-    };
-  }
+  let fold = null;
+  if (twin) ({ definition, fold } = foldDefinition(definition, twin));
   const recommendation = definition.recommendation;
   if (!definition.id || !definition.key || !definition.title) throw new Error('Setup question metadata is incomplete.');
   if (!definition.whatThisControls || !definition.current || !recommendation?.value
@@ -1247,7 +1258,7 @@ function resolvedQuestion(definition) {
     availability: definition.availability || { status: 'available', condition: 'Available for the detected setup state.' },
     privacySafeFallback: definition.privacySafeFallback || 'The effective state could not be verified safely; setup will not guess or expose private configuration.',
     selected: definition.selected,
-    ...(twin ? { folded_value: twin } : {}),
+    ...(fold || {}),
     // Compatibility aliases for existing consumers. Every alias is derived from
     // the structured semantic fields above rather than maintained separately.
     description: definition.whatThisControls,
@@ -1527,7 +1538,7 @@ function antigravitySkillsQuestion(args, current) {
     choices: [
       wizardChoice('copy', 'Copy and keep updated', "Copy Toolkit's portable skills and the official n8n skills into ~/.gemini/config/skills, update Toolkit's copies when they are out of date, and record them."),
       ...(current.antigravity?.copies ? [wizardChoice('remove', "Remove Toolkit's copies", 'Delete only the skill folders Toolkit recorded there.')] : []),
-      wizardChoice('keep', 'Leave as is', `Preserve this effective behavior: ${outcome}`),
+      wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${outcome}`),
     ],
     recommendation: current.antigravity?.copies
       ? { value: 'copy', outcome: "Keep Toolkit's skills in Antigravity current.", reason: 'You chose to copy them before, so setup keeps those copies up to date.' }
@@ -1604,12 +1615,50 @@ function booleanCurrentChoice(value) {
   return '';
 }
 
-// A selection of a hidden twin (see foldedTwin) is applied as keep, which does the same thing.
+// A selection of a hidden choice (see foldedTwin) is applied as the shown one, which does the same thing.
 function foldTwinSelections(args, specs) {
   for (const spec of specs) {
-    if (spec.folded_value && choiceForKey(args, spec.key) === spec.folded_value) assignChoice(args, spec.key, 'keep');
+    if (spec.folded_value && choiceForKey(args, spec.key) === spec.folded_value) assignChoice(args, spec.key, spec.folded_into);
   }
   return specs;
+}
+
+// The update source 1.1 recommends: the current one when it is kept, else the standard managed copy.
+function recommendedUpdateSource(current, args) {
+  return recommendedChoice('managedCheckout', current, args) === 'keep' ? current.managed.currentPath : defaultManagedSourcePath();
+}
+
+// Automatic updates are on, with startup sync, and already check the source 1.1 recommends, so
+// Turn on would write the same values again.
+function automaticUpdatesUnchanged(current, args) {
+  const saved = current.audit?.repo_auto_update || {};
+  return saved.enabled === true && current.audit?.auto_sync_enabled === true && Boolean(saved.repo_path)
+    && samePath(saved.repo_path, recommendedUpdateSource(current, args))
+    && saved.repo_branch === args.repoBranch && normalizeRemote(saved.repo_remote) === normalizeRemote(args.repoRemote);
+}
+
+// Root-only is stored and the one-layer depth setting is already in place (set by Toolkit, or 1 set
+// by you), so choosing root-only would change nothing. Keep resolves to root-only here too, whether or
+// not the stored profile still verifies.
+function claudeRootOnlyUnchanged(profile, depth) {
+  return profile?.topology === agentControl.TOPOLOGIES.ROOT_ONLY
+    && (depth?.state === SUBAGENT_DEPTH_STATES.TOOLKIT || (depth?.state === SUBAGENT_DEPTH_STATES.OWNER && depth.value === '1'));
+}
+
+// Claude Code has Toolkit installed and runs it in place from the update source 1.1 recommends.
+function claudePluginInstalledInPlace(current, args) {
+  const install = current.claudePluginInstall;
+  return install?.installed === true && samePath(install.runningRoot, recommendedUpdateSource(current, args));
+}
+
+function claudePluginCurrent(current, args) {
+  if (current.nativePlugin.status === 'fresh') return 'The Claude Code Toolkit plugin is current.';
+  if (current.nativePlugin.status === 'invalid-source-metadata') return 'Setup could not read the Claude Code plugin details in the Toolkit copy.';
+  if (claudePluginInstalledInPlace(current, args)) {
+    const version = /^\d+\.\d+\.\d+$/.test(current.nativePlugin.manifest_version || '') ? ` ${current.nativePlugin.manifest_version}` : '';
+    return `Toolkit${version} is installed in Claude Code and runs from the update copy.`;
+  }
+  return 'Setup checks the Claude Code Toolkit plugin after you answer, and installs or refreshes it only if needed.';
 }
 
 function setupQuestionSpecs(args, current) {
@@ -1665,7 +1714,10 @@ function setupQuestionSpecs(args, current) {
         wizardChoice('disable', 'Turn off', 'Disable startup update checks and automatic hub synchronization; manual `setup toolkit` or explicit maintenance remains available.'),
         wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${currentBooleanOutcome(current.audit?.repo_auto_update?.enabled, 'Automatic startup update checks are on.', 'Automatic startup update checks are off; manual setup remains available.', 'The automatic-update state could not be verified; setup will not claim that startup updates are active.')} The update source it checks stays as it is.`),
       ],
-      // No folding here: Turn on also points updates at the chosen update source, which Keep current does not.
+      // Turn on also points updates at the update source chosen in 1.1, which keep does not, so it is
+      // the one kept under the Keep current label.
+      currentChoice: automaticUpdatesUnchanged(current, args) ? 'enable' : '',
+      keepAs: 'Keep automatic updates on. They check the update source chosen in 1.1; if you choose another source there, they follow it.',
       recommendation: {
         value: recommendedChoice('repoAutoUpdate', current, args),
         outcome: 'Turn on clean, verified automatic updates.',
@@ -1766,6 +1818,8 @@ function setupQuestionSpecs(args, current) {
         ...(String(current.delegation?.ownership || '').startsWith('toolkit-') ? [wizardChoice('remove', 'Remove Toolkit setting', 'Remove only the owned block after approval.')] : []),
         wizardChoice('skip', 'Skip', 'Write no helper setting this run.'),
       ],
+      // One helper is already configured, so setup would leave config.toml as it is either way.
+      currentChoice: current.delegation?.status === 'configured' && current.delegation?.helper_count === 1 ? 'one-helper' : '',
       recommendation: { value: recommendedChoice('codexHelperCapacity', current, args), outcome: recommendedChoice('codexHelperCapacity', current, args) === 'one-helper' ? 'Allow one helper.' : 'Keep the current configuration.', reason: recommendedChoice('codexHelperCapacity', current, args) === 'one-helper' ? 'G0 and G1 leads need helpers for independent work.' : 'This state needs an explicit compatibility or repair choice before helper settings can change.' },
       selected: args.setupChoices.codexHelperCapacity,
       current: current.delegation?.detail || 'Helper capacity has not been verified.',
@@ -1810,6 +1864,10 @@ function setupQuestionSpecs(args, current) {
         wizardChoice('broader-native', 'Broader native behaviour', 'Permit native Claude agent behavior outside Toolkit control and its resource guarantees. Outside Toolkit repos Claude Code\'s own defaults apply: a Toolkit-set `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` is removed (a value you set yourself is kept), and the Toolkit hook no longer refuses a subagent that starts another.'),
         wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${topologyCurrent} Stale, unverifiable or retired topology state falls back safely to root-only, and the subagent depth setting is left as it is.`),
       ],
+      // Root-only and its depth setting are already in place. Setup resolves keep to root-only after the
+      // answers anyway, so root-only is the one kept under the Keep current label.
+      currentChoice: claudeRootOnlyUnchanged(activeProfile, current.claudeSubagentDepth) ? 'root-only' : '',
+      keepAs: 'Keep root-only: Toolkit repos admit only the main session and the Toolkit planning and build helpers; elsewhere one layer of subagents. Both settings are already in place, so nothing changes.',
       recommendation: {
         value: recommendedChoice('claudeTopology', current, args),
         outcome: 'Toolkit repos: main session + Toolkit planning and build helpers only. Elsewhere: one layer of subagents.',
@@ -1829,9 +1887,14 @@ function setupQuestionSpecs(args, current) {
       prompt: 'Claude Code Toolkit choice',
       whatThisControls: 'Whether Claude Code installs or refreshes its own Toolkit plugin, shows manual instructions, or preserves current plugin state. This never changes Codex.',
       choices: [wizardChoice('install', 'Install or refresh', 'Use Claude Code native plugin commands to verify and refresh its Toolkit cache when needed.'), wizardChoice('instructions', 'Show instructions only', 'Make no native plugin change and report the manual Claude Code action required.'), wizardChoice('keep', 'Keep current', 'Preserve the currently detected Claude Code plugin behavior and state.')],
+      // Toolkit is installed and runs in place from the update copy. Install or refresh then only checks
+      // it, and re-enables or refreshes it if that check finds a gap keep would leave, so it is the one
+      // kept under the Keep current label.
+      currentChoice: claudePluginInstalledInPlace(current, args) ? 'install' : '',
+      keepAs: 'Keep it installed. Setup checks it after you answer and changes something only if that check finds it disabled or out of date.',
       recommendation: { value: recommendedChoice('claudePluginBehavior', current, args), outcome: 'Let Claude Code install or refresh its own Toolkit plugin.', reason: 'Native host commands keep cache identity, version, and hooks aligned without cross-host mutation.' },
       selected: args.setupChoices.claudePluginBehavior,
-      current: current.nativePlugin.status === 'fresh' ? 'The Claude Code Toolkit plugin is current.' : current.nativePlugin.status === 'invalid-source-metadata' ? 'Setup could not read the Claude Code plugin details in the Toolkit copy.' : 'Setup checks the Claude Code Toolkit plugin after you answer, and installs or refreshes it only if needed.',
+      current: claudePluginCurrent(current, args),
       afterApplying: 'If native plugin files change, start a new Claude Code session (close sessions opened before the update) and complete any native trust or activation steps reported by setup.',
     }));
     specs.push(resolvedQuestion({
@@ -1935,7 +1998,13 @@ const tableCell = (text) => String(text || '').replace(/\r?\n/g, ' ').replace(/\
 function renderCompactQuestionTable(specs, markdown = true) {
   specs = ensurePresentationMetadata(specs);
   // Keeping things as they are needs no outcome: the Current column already says what stays.
-  const recommended = (spec) => `${spec.presentation.recommended_choice_ref}. ${choiceLabel(spec, spec.recommended)}${spec.recommended === 'keep' ? '' : `: ${spec.recommended_outcome}`}`;
+  // An outcome that only repeats the label is left out too.
+  const keepsCurrent = (spec) => spec.recommended === 'keep' || spec.folded_into === spec.recommended;
+  const recommended = (spec) => {
+    const label = choiceLabel(spec, spec.recommended);
+    const effect = keepsCurrent(spec) || spec.recommended_outcome === label ? '' : `: ${spec.recommended_outcome}`;
+    return `${spec.presentation.recommended_choice_ref}. ${label}${effect}`;
+  };
   const others = (spec) => spec.choices.filter((choice) => choice.value !== spec.recommended).map((choice) => `${choice.presentation_ref}. ${choice.label}`);
   const selected = (spec) => (spec.selected ? `${choiceReference(spec, spec.selected)}. ${choiceLabel(spec, spec.selected)}` : '');
   const lines = [];
@@ -2524,7 +2593,7 @@ function resolveDisplayedChoiceAnswer(spec, answer) {
   const presented = choiceByPresentationReference(spec, normalized);
   if (presented) return presented.value;
   const canonical = spec.choices.find((choice) => choice.value.toLowerCase() === normalized.toLowerCase());
-  if (!canonical && spec.folded_value === normalized.toLowerCase()) return 'keep';
+  if (!canonical && spec.folded_value === normalized.toLowerCase()) return spec.folded_into;
   return canonical?.value || normalized.toLowerCase();
 }
 

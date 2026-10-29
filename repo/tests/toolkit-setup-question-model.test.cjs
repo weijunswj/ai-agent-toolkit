@@ -615,7 +615,84 @@ test('a recommendation that matches the current state shows one recommended Keep
   assert.equal(args.updateReports, true);
 });
 
-test('Claude Code settings fold when all four are set; agents and plugin questions never fold', () => {
+// Where the choice that changes nothing also re-checks or follows another answer, it stays and takes the
+// Keep current label, and keep is hidden instead.
+test('automatic updates, Claude agents, the Claude plugin and Codex helpers read Keep current when nothing would change', () => {
+  const source = core.defaultManagedSourcePath();
+  const noSource = () => stateWithManaged(managedState({ currentPath: '', selectedPath: '', exists: false, git: false }));
+  const automatic = (change = () => {}, argv = []) => {
+    const current = noSource();
+    current.audit.repo_auto_update = { enabled: true, repo_path: source, repo_branch: core.DEFAULT_REPO_BRANCH, repo_remote: core.DEFAULT_REPO_REMOTE };
+    current.audit.auto_sync_enabled = true;
+    change(current);
+    const args = core.parseArgs(['--plan', '--host', 'codex', ...argv]);
+    return { row: core.setupQuestionSpecs(args, current).find((spec) => spec.id === 'automatic-updates'), args };
+  };
+  const { row: same } = automatic();
+  assert.deepEqual(same.choices.map((choice) => [choice.value, choice.label]), [['enable', 'Keep current'], ['disable', 'Turn off']]);
+  assert.equal(same.recommended, 'enable');
+  assert.deepEqual([same.folded_value, same.folded_into], ['keep', 'enable']);
+  assert.match(core.renderSetupQuestionBank([same]), /\| A\. Keep current \| B\. Turn off \|/);
+  assert.equal(core.resolveDisplayedChoiceAnswer(same, 'keep'), 'enable');
+  assert.equal(automatic(() => {}, ['--keep-repo-auto-update']).args.setupChoices.repoAutoUpdate, 'enable');
+  for (const [label, change] of [
+    ['another saved source', (c) => { c.audit.repo_auto_update.repo_path = path.resolve(repoRoot, '..', 'elsewhere'); }],
+    ['startup sync off', (c) => { c.audit.auto_sync_enabled = false; }],
+    ['another remote', (c) => { c.audit.repo_auto_update.repo_remote = 'https://example.test/other.git'; }],
+    ['updates off', (c) => { c.audit.repo_auto_update.enabled = false; }],
+  ]) {
+    const { row } = automatic(change);
+    assert.deepEqual(row.choices.map((choice) => [choice.value, choice.label]), [['enable', 'Turn on'], ['disable', 'Turn off'], ['keep', 'Keep current']], label);
+  }
+
+  const claude = (change) => {
+    const current = noSource();
+    current.agentProfile = { supported: false, topology: 'root-only' };
+    current.claudeSubagentDepth = { state: 'toolkit-one-layer', value: '1' };
+    current.nativePlugin = { status: 'verification-deferred', manifest_version: '9.9.9' };
+    current.claudePluginInstall = { installed: true, runningRoot: source };
+    current.claudeSettings = [{ state: 'claude-default' }];
+    change(current);
+    const args = core.parseArgs(['--plan', '--host', 'claude-code']);
+    return Object.fromEntries(core.setupQuestionSpecs(args, current).map((spec) => [spec.id, spec]));
+  };
+  const folded = claude(() => {});
+  assert.deepEqual(folded['claude-agent-topology'].choices.map((choice) => [choice.value, choice.label]), [['root-only', 'Keep current'], ['broader-native', 'Broader native behaviour']]);
+  assert.deepEqual(folded['claude-toolkit-plugin'].choices.map((choice) => [choice.value, choice.label]), [['install', 'Keep current'], ['instructions', 'Show instructions only']]);
+  assert.equal(folded['claude-toolkit-plugin'].current, 'Toolkit 9.9.9 is installed in Claude Code and runs from the update copy.');
+  const table = core.renderSetupQuestionBank(Object.values(folded));
+  assert.match(table, /\| 2\.1 \| How should Claude Code use agents\? \|[^\n]*\| A\. Keep current \| B\. Broader native behaviour \|/);
+  assert.match(table, /\| 3\.1 \| Keep Toolkit available in Claude Code\? \|[^\n]*\| A\. Keep current \| B\. Show instructions only \|/);
+
+  const changing = claude((c) => {
+    c.claudeSubagentDepth = { state: 'claude-default' };
+    c.claudePluginInstall = { installed: false, runningRoot: '' };
+  });
+  assert.ok(changing['claude-agent-topology'].choices.some((choice) => choice.value === 'keep'));
+  assert.ok(changing['claude-toolkit-plugin'].choices.some((choice) => choice.value === 'keep'));
+  // A recommendation whose effect only repeats its label shows the label once.
+  const label = 'Toolkit repos: main session + Toolkit planning and build helpers only. Elsewhere: one layer of subagents.';
+  assert.match(core.renderSetupQuestionBank(Object.values(changing)), new RegExp(`\\| A\\. ${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\|`));
+
+  // Keep on the agents question resolves to root-only after the answers, which is the shown choice.
+  const planned = core.plannedQuestionBank(core.parseArgs(['--plan', '--host', 'claude-code', '--claude-topology', 'keep']), (() => {
+    const current = noSource();
+    current.agentProfile = { supported: false, topology: 'root-only' };
+    current.claudeSubagentDepth = { state: 'toolkit-one-layer', value: '1' };
+    return current;
+  })());
+  assert.equal(planned.args.setupChoices.claudeTopology, 'root-only');
+  assert.equal(planned.specs.find((spec) => spec.id === 'claude-agent-topology').selected, 'root-only');
+
+  const codex = stateWithManaged(managedState());
+  codex.runtime = { runtime: 'MultiAgentV2' };
+  codex.delegation = { status: 'configured', ownership: 'toolkit-managed-v2', helper_count: 1, detail: 'One helper is configured.' };
+  const helper = core.setupQuestionSpecs(core.parseArgs(['--plan', '--host', 'codex']), codex).find((spec) => spec.id === 'codex-helper-capacity');
+  assert.equal(helper.recommended, 'keep');
+  assert.equal(helper.choices.some((choice) => choice.value === 'one-helper'), false);
+});
+
+test('Claude Code settings fold when all four are set; agents and plugin questions keep every choice when their state is unread', () => {
   const current = stateWithManaged(managedState({ currentPath: '', exists: false, git: false }));
   current.agentProfile = { supported: true, topology: 'root-only' };
   current.nativePlugin = { status: 'fresh' };

@@ -5,7 +5,7 @@ This reference uses a privacy-safe representative Codex state in which all curre
 
 Toolkit setup choices - 8 questions across 3 sections
 
-Bank reference: SB28-1S1E-S41K-YXFR
+Bank reference: KJF0-G3HW-ZH8Z-ZTQP
 
 Quick index
 
@@ -16,7 +16,7 @@ Quick index
 1.5 Raise Codex's instruction limit - Recommended: B - Keep current
 2.1 Codex helper capacity - Recommended: A - One helper
 2.2 Codex Toolkit maintenance - Recommended: B - Keep current
-3.1 Copy Toolkit's skills into Antigravity? - Recommended: B - Leave as is
+3.1 Copy Toolkit's skills into Antigravity? - Recommended: B - Keep current
 
 
 ## 1. Updates and reports
@@ -215,7 +215,7 @@ Quick index
 
 **Verification:** state-derived
 
-**Recommended:** B - Leave as is
+**Recommended:** B - Keep current
 
 **Recommended outcome:** Leave Antigravity unchanged.
 
@@ -224,11 +224,11 @@ Quick index
 **Choices:**
 
 - **A. Copy and keep updated** - Copy Toolkit's portable skills and the official n8n skills into ~/.gemini/config/skills, update Toolkit's copies when they are out of date, and record them.
-- **B. Leave as is** - Preserve this effective behavior: Toolkit's skills are not in Antigravity's global skills folder.
+- **B. Keep current** - Preserve this effective behavior: Toolkit's skills are not in Antigravity's global skills folder.
 
 **After applying:** Start a new Antigravity session to load changed skills.
 
-**Selected:** B - Leave as is
+**Selected:** B - Keep current
 
 ---
 
@@ -245,7 +245,7 @@ Setup run with `--host claude-code` shows this bank instead, for the same repres
 
 Toolkit setup choices - 8 questions across 3 sections
 
-Bank reference: X7DX-JHY9-AVNB-FXDW
+Bank reference: YKJX-3SCK-Y8C7-QKAQ
 
 Quick index
 
@@ -256,7 +256,7 @@ Quick index
 2.1 How should Claude Code use agents? - Recommended: A - Toolkit repos: main session + Toolkit planning and build helpers only. Elsewhere: one layer of subagents.
 3.1 Keep Toolkit available in Claude Code? - Recommended: A - Install or refresh
 3.2 Use Toolkit's recommended Claude Code settings? - Recommended: A - Turn on
-3.3 Copy Toolkit's skills into Antigravity? - Recommended: B - Leave as is
+3.3 Copy Toolkit's skills into Antigravity? - Recommended: B - Keep current
 
 
 ## 1. Updates and reports
@@ -454,7 +454,7 @@ Quick index
 
 **Verification:** state-derived
 
-**Recommended:** B - Leave as is
+**Recommended:** B - Keep current
 
 **Recommended outcome:** Leave Antigravity unchanged.
 
@@ -463,10 +463,10 @@ Quick index
 **Choices:**
 
 - **A. Copy and keep updated** - Copy Toolkit's portable skills and the official n8n skills into ~/.gemini/config/skills, update Toolkit's copies when they are out of date, and record them.
-- **B. Leave as is** - Preserve this effective behavior: Toolkit's skills are not in Antigravity's global skills folder.
+- **B. Keep current** - Preserve this effective behavior: Toolkit's skills are not in Antigravity's global skills folder.
 
 **After applying:** Start a new Antigravity session to load changed skills.
 
-**Selected:** B - Leave as is
+**Selected:** B - Keep current
 
 ---
