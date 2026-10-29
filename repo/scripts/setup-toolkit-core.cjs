@@ -1196,7 +1196,27 @@ function wizardChoice(value, label, consequence) {
   return { value, label, consequence };
 }
 
+// currentChoice names the choice that reproduces the verified current state. When the recommendation
+// is that choice or keep, the two do the same thing, so the bank shows one recommended Keep current and
+// hides its twin. The twin's canonical name (a flag or a typed word) still works and applies as keep.
+function foldedTwin(definition) {
+  const twin = definition.currentChoice;
+  const has = (value) => definition.choices?.some((choice) => choice.value === value);
+  return twin && twin !== 'keep' && has(twin) && has('keep') && [twin, 'keep'].includes(definition.recommendation?.value) ? twin : '';
+}
+
 function resolvedQuestion(definition) {
+  const twin = foldedTwin(definition);
+  if (twin) {
+    const keep = definition.choices.find((choice) => choice.value === 'keep');
+    definition = {
+      ...definition,
+      choices: definition.choices.filter((choice) => choice.value !== twin),
+      recommendation: definition.recommendation.value === 'keep' ? definition.recommendation
+        : { ...definition.recommendation, value: 'keep', outcome: keep.consequence },
+      selected: definition.selected === twin ? 'keep' : definition.selected,
+    };
+  }
   const recommendation = definition.recommendation;
   if (!definition.id || !definition.key || !definition.title) throw new Error('Setup question metadata is incomplete.');
   if (!definition.whatThisControls || !definition.current || !recommendation?.value
@@ -1227,6 +1247,7 @@ function resolvedQuestion(definition) {
     availability: definition.availability || { status: 'available', condition: 'Available for the detected setup state.' },
     privacySafeFallback: definition.privacySafeFallback || 'The effective state could not be verified safely; setup will not guess or expose private configuration.',
     selected: definition.selected,
+    ...(twin ? { folded_value: twin } : {}),
     // Compatibility aliases for existing consumers. Every alias is derived from
     // the structured semantic fields above rather than maintained separately.
     description: definition.whatThisControls,
@@ -1504,9 +1525,9 @@ function antigravitySkillsQuestion(args, current) {
     prompt: 'Antigravity skills choice',
     whatThisControls: "Whether setup copies Toolkit's portable skills, and the official n8n skills Toolkit ships, into Antigravity's global skills folder (~/.gemini/config/skills) and keeps them current on each setup. Toolkit-only skills (setup, env, controller and programme tools) stay out. Folders you copied yourself are never changed.",
     choices: [
-      wizardChoice('copy', 'Copy and keep current', "Copy Toolkit's portable skills and the official n8n skills into ~/.gemini/config/skills, update Toolkit's copies when they are out of date, and record them."),
+      wizardChoice('copy', 'Copy and keep updated', "Copy Toolkit's portable skills and the official n8n skills into ~/.gemini/config/skills, update Toolkit's copies when they are out of date, and record them."),
       ...(current.antigravity?.copies ? [wizardChoice('remove', "Remove Toolkit's copies", 'Delete only the skill folders Toolkit recorded there.')] : []),
-      wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${outcome}`),
+      wizardChoice('keep', 'Leave as is', `Preserve this effective behavior: ${outcome}`),
     ],
     recommendation: current.antigravity?.copies
       ? { value: 'copy', outcome: "Keep Toolkit's skills in Antigravity current.", reason: 'You chose to copy them before, so setup keeps those copies up to date.' }
@@ -1576,6 +1597,21 @@ function currentBooleanOutcome(value, enabledText, disabledText, unknownText) {
   return unknownText;
 }
 
+// The on/off choice that reproduces a verified stored boolean; none when it is unverified.
+function booleanCurrentChoice(value) {
+  if (value === true) return 'enable';
+  if (value === false) return 'disable';
+  return '';
+}
+
+// A selection of a hidden twin (see foldedTwin) is applied as keep, which does the same thing.
+function foldTwinSelections(args, specs) {
+  for (const spec of specs) {
+    if (spec.folded_value && choiceForKey(args, spec.key) === spec.folded_value) assignChoice(args, spec.key, 'keep');
+  }
+  return specs;
+}
+
 function setupQuestionSpecs(args, current) {
   const managedRecommendation = recommendedChoice('managedCheckout', current, args);
   const managedCurrent = currentManagedSourceOutcome(current, args);
@@ -1594,10 +1630,11 @@ function setupQuestionSpecs(args, current) {
       choices: [
         wizardChoice('default', 'Use the dedicated clean update copy', 'Create or reuse the standard managed checkout, verify its clean main branch, and make it the update source without moving or deleting another checkout.'),
         ...(canPreserveManagedCheckout(current, args)
-          ? [wizardChoice('keep', 'Keep the current update source', `Preserve this effective behavior: ${managedCurrent}`)]
+          ? [wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${managedCurrent}`)]
           : []),
         wizardChoice('custom', 'Choose another location', 'Create or reuse a clean Toolkit checkout at the approved location and make that location the managed update source; existing managed copies are not migrated or deleted.'),
       ],
+      currentChoice: canPreserveManagedCheckout(current, args) && isStandardManagedCheckout(current) ? 'default' : '',
       recommendation: {
         value: managedRecommendation,
         outcome: managedRecommendation === 'keep'
@@ -1628,6 +1665,7 @@ function setupQuestionSpecs(args, current) {
         wizardChoice('disable', 'Turn off', 'Disable startup update checks and automatic hub synchronization; manual `setup toolkit` or explicit maintenance remains available.'),
         wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${currentBooleanOutcome(current.audit?.repo_auto_update?.enabled, 'Automatic startup update checks are on.', 'Automatic startup update checks are off; manual setup remains available.', 'The automatic-update state could not be verified; setup will not claim that startup updates are active.')}`),
       ],
+      currentChoice: booleanCurrentChoice(current.audit?.repo_auto_update?.enabled),
       recommendation: {
         value: recommendedChoice('repoAutoUpdate', current, args),
         outcome: 'Turn on clean, verified automatic updates.',
@@ -1650,6 +1688,7 @@ function setupQuestionSpecs(args, current) {
         wizardChoice('disable', 'Do not keep reports', 'Stop creating normal Toolkit maintenance reports; concise failure or safety status still appears when action is required.'),
         wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${currentBooleanOutcome(current.audit?.update_report_enabled, 'Meaningful maintenance reports are kept; only action-required reports open automatically.', 'Maintenance reports are disabled.', 'The saved report setting could not be verified; the effective default is to keep meaningful reports.')}`),
       ],
+      currentChoice: booleanCurrentChoice(current.audit?.update_report_enabled),
       recommendation: {
         value: recommendedChoice('updateReports', current, args),
         outcome: 'Keep meaningful reports; open only reports that require action.',
@@ -1672,6 +1711,7 @@ function setupQuestionSpecs(args, current) {
         wizardChoice('custom', 'Choose another duration', 'Use the approved positive day count for future Toolkit report cleanup; no unrelated logs or project files are considered.'),
         wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${retentionCurrent}`),
       ],
+      currentChoice: retentionRaw === DEFAULT_UPDATE_REPORT_RETENTION_DAYS ? 'default' : '',
       recommendation: {
         value: recommendedChoice('updateReportRetention', current, args),
         outcome: currentReportRetentionDays(current) === DEFAULT_UPDATE_REPORT_RETENTION_DAYS
@@ -1696,6 +1736,7 @@ function setupQuestionSpecs(args, current) {
         wizardChoice('disable', 'Leave it', 'Do not raise it; if Toolkit raised it earlier, put the previous value back. Setup still reports the combined size.'),
         wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${currentBooleanOutcome(current.audit?.codex_doc_limit_enabled, "Toolkit keeps Codex's instruction limit raised.", "Toolkit leaves Codex's instruction limit alone.", "No choice is recorded, so Toolkit leaves Codex's instruction limit alone.")}`),
       ],
+      currentChoice: booleanCurrentChoice(current.audit?.codex_doc_limit_enabled),
       recommendation: {
         value: recommendedChoice('codexDocLimit', current, args),
         outcome: "Raise Codex's instruction limit to 65536.",
@@ -1743,6 +1784,7 @@ function setupQuestionSpecs(args, current) {
         wizardChoice('disable', 'Turn off', 'Disable future automatic cache refresh; the installed Toolkit plugin is not uninstalled, and manual `setup toolkit` repair or refresh remains available.'),
         wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${currentBooleanOutcome(current.audit?.codex_plugin_auto_refresh_enabled, 'Automatic Codex Toolkit maintenance is on.', 'Automatic Codex Toolkit maintenance is off; the installed plugin remains in place.', 'The automatic Codex maintenance preference could not be verified; setup will not claim that it is active.')}`),
       ],
+      currentChoice: booleanCurrentChoice(current.audit?.codex_plugin_auto_refresh_enabled),
       recommendation: {
         value: recommendedChoice('codexPluginAutoRefresh', current, args),
         outcome: 'Turn on native Toolkit cache refresh and safe Windows hook maintenance.',
@@ -1804,6 +1846,7 @@ function setupQuestionSpecs(args, current) {
         wizardChoice('disable', 'Turn off', 'Remove only the values Toolkit set and still match what it recorded. Values you set yourself stay as they are.'),
         wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${claudeSettingsOutcome(current.claudeSettings)}`),
       ],
+      currentChoice: claudeSettingsAllSet(current) ? 'enable' : '',
       recommendation: { value: recommendedChoice('claudeSettings', current, args), outcome: claudeSettingsAllSet(current) ? 'Keep them: all four are already set.' : 'Set the recommended values that are not set yet; values you set yourself stay as they are.', reason: 'They keep AI attribution out of your commits and pull requests, let a Projects coordinator wake Remote Control sessions on your computer, keep a flagged request on the model you chose, and make Claude Code read the repository\'s AGENTS.md.' },
       selected: args.setupChoices.claudeSettings,
       current: claudeSettingsOutcome(current.claudeSettings),
@@ -1812,6 +1855,7 @@ function setupQuestionSpecs(args, current) {
     }));
   }
   if (current.antigravity?.installed || current.antigravity?.copies) specs.push(antigravitySkillsQuestion(args, current));
+  foldTwinSelections(args, specs);
 
   return withPresentationMetadata(specs.filter((spec) => args.host === 'codex' || spec.key !== 'codexDocLimit').map((spec) => ({
     ...spec,
@@ -1890,7 +1934,8 @@ const tableCell = (text) => String(text || '').replace(/\r?\n/g, ' ').replace(/\
 // effect, and the other choices. The full text of a question is shown only on request.
 function renderCompactQuestionTable(specs, markdown = true) {
   specs = ensurePresentationMetadata(specs);
-  const recommended = (spec) => `${spec.presentation.recommended_choice_ref}. ${choiceLabel(spec, spec.recommended)}: ${spec.recommended_outcome}`;
+  // Keeping things as they are needs no outcome: the Current column already says what stays.
+  const recommended = (spec) => `${spec.presentation.recommended_choice_ref}. ${choiceLabel(spec, spec.recommended)}${spec.recommended === 'keep' ? '' : `: ${spec.recommended_outcome}`}`;
   const others = (spec) => spec.choices.filter((choice) => choice.value !== spec.recommended).map((choice) => `${choice.presentation_ref}. ${choice.label}`);
   const selected = (spec) => (spec.selected ? `${choiceReference(spec, spec.selected)}. ${choiceLabel(spec, spec.selected)}` : '');
   const lines = [];
@@ -1899,11 +1944,11 @@ function renderCompactQuestionTable(specs, markdown = true) {
     if (spec.section !== section) {
       section = spec.section;
       const heading = `${spec.presentation.section_index}. ${section}`;
-      if (markdown) lines.push('', `## ${heading}`, '', '| # | Question | Now | Recommended | Other choices |', '|---|---|---|---|---|');
+      if (markdown) lines.push('', `## ${heading}`, '', '| # | Question | Current | Recommended | Other choices |', '|---|---|---|---|---|');
       else lines.push('', heading, '='.repeat(heading.length));
     }
     if (!markdown) {
-      lines.push('', `${spec.presentation.question_ref} ${spec.title}`, `  Now: ${spec.current}`, `  Recommended: ${recommended(spec)}`);
+      lines.push('', `${spec.presentation.question_ref} ${spec.title}`, `  Current: ${spec.current}`, `  Recommended: ${recommended(spec)}`);
       const rest = others(spec);
       // One choice per line, so each alternative reads on its own.
       if (rest.length) lines.push('  Other choices:', ...rest.map((choice) => `    ${choice}`));
@@ -2479,6 +2524,7 @@ function resolveDisplayedChoiceAnswer(spec, answer) {
   const presented = choiceByPresentationReference(spec, normalized);
   if (presented) return presented.value;
   const canonical = spec.choices.find((choice) => choice.value.toLowerCase() === normalized.toLowerCase());
+  if (!canonical && spec.folded_value === normalized.toLowerCase()) return 'keep';
   return canonical?.value || normalized.toLowerCase();
 }
 
@@ -3726,6 +3772,7 @@ module.exports = {
   emitCompleteQuestionBank,
   runManagedQuestionBankChild,
   plannedQuestionBank,
+  applySetupChoices,
   setupPlan,
   canPreserveManagedCheckout,
   main

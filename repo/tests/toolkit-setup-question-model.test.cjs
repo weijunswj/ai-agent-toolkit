@@ -61,12 +61,17 @@ function updateSourceRow(managed, argv = ['--plan', '--host', 'codex']) {
   return core.setupQuestionSpecs(args, stateWithManaged(managed)).find((row) => row.id === 'update-source');
 }
 
-async function runInjectedTTY(responses, configure = () => {}) {
-  const args = core.parseArgs(['--execute', '--host', 'codex']);
+function injectedState() {
   const current = stateWithManaged(managedState());
   current.audit.update_report_enabled = true;
   current.audit.update_report_retention_days = 7;
   current.audit.codex_plugin_auto_refresh_enabled = false;
+  return current;
+}
+
+async function runInjectedTTY(responses, configure = () => {}) {
+  const args = core.parseArgs(['--execute', '--host', 'codex']);
+  const current = injectedState();
   configure({ args, current });
   const prompts = [];
   let bank = '';
@@ -115,13 +120,14 @@ test('terminal, piped, plan, JSON, approval and generated docs share canonical r
   const generated = core.renderSetupQuestionDocumentation(rows);
   const generatedFile = fs.readFileSync(path.join(repoRoot, 'repo/docs/SETUP-QUESTIONS.generated.md'), 'utf8');
   assertGeneratedDocumentationEqual(generatedFile, core.renderSetupQuestionDocumentation());
-  // The bank (markdown and terminal) is compact: title, what is true now, the recommended choice and
-  // its effect, and every choice label. The full text lives in the generated reference and --explain.
+  // The bank (markdown and terminal) is compact: title, the current state, the recommended choice and
+  // its effect (none for keeping things as they are), and every choice label. The full text lives in
+  // the generated reference and --explain.
   for (const row of rows) {
     for (const output of [markdown, terminal, generated]) {
       assert.ok(output.includes(row.title), row.id);
       assert.ok(output.includes(row.current), row.id);
-      assert.ok(output.includes(row.recommended_outcome), row.id);
+      if (output === generated || row.recommended !== 'keep') assert.ok(output.includes(row.recommended_outcome), row.id);
       for (const choice of row.choices) assert.ok(output.includes(`${choice.presentation_ref}. ${choice.label}`), `${row.id} ${choice.value}`);
     }
     assert.ok(generated.includes(row.whatThisControls));
@@ -129,8 +135,9 @@ test('terminal, piped, plan, JSON, approval and generated docs share canonical r
     for (const choice of row.choices) assert.ok(generated.includes(choice.consequence));
   }
   assert.doesNotMatch(markdown, /\*\*What this controls:\*\*/);
-  assert.match(markdown, /^\| # \| Question \| Now \| Recommended \| Other choices \|$/m);
-  assert.match(terminal, /\n1\.1 [^\n]+\n  Now: [^\n]+\n  Recommended: [A-Z]\. /);
+  assert.match(markdown, /^\| # \| Question \| Current \| Recommended \| Other choices \|$/m);
+  assert.match(terminal, /\n1\.1 [^\n]+\n  Current: [^\n]+\n  Recommended: [A-Z]\. /);
+  assert.doesNotMatch(`${markdown}\n${terminal}`, /\| Now \||\n  Now: /);
   // Alternatives read one per line in both forms, never joined with semicolons.
   assert.match(terminal, /\n  Other choices:\n    [A-Z]\. [^\n]+\n/);
   assert.doesNotMatch(terminal, /Other choices: .*; /);
@@ -243,7 +250,7 @@ test('Update source keep availability uses one verified preservation predicate',
     assert.ok(row.choices.some((choice) => choice.value === row.recommended), label);
     assert.match(row.current, currentPattern, label);
     const output = `${core.renderSetupQuestionBank([row])}\n${core.renderSetupQuestionBankTerminal([row])}\n${JSON.stringify(row)}`;
-    assert.doesNotMatch(output, /Keep the current update source/i, label);
+    assert.doesNotMatch(output, /[A-Z]\. Keep current/, label);
     assert.doesNotMatch(output, /example\.invalid|tk013-|\.tmp[\\/]managed-source/i, label);
   }
 
@@ -251,8 +258,10 @@ test('Update source keep availability uses one verified preservation predicate',
   const standard = managedState({ currentPath: standardPath, selectedPath: standardPath, defaultPath: standardPath });
   const standardRow = updateSourceRow(standard);
   assert.equal(core.canPreserveManagedCheckout(stateWithManaged(standard), core.parseArgs(['--plan'])), true);
-  assert.deepEqual(standardRow.choices.map((choice) => choice.value), ['default', 'keep', 'custom']);
+  // The standard copy is what "default" would set up, so only the recommended Keep current is shown.
+  assert.deepEqual(standardRow.choices.map((choice) => choice.value), ['keep', 'custom']);
   assert.equal(standardRow.recommended, 'keep');
+  assert.equal(standardRow.folded_value, 'default');
 
   const custom = managedState();
   const customRow = updateSourceRow(custom);
@@ -273,7 +282,8 @@ test('Update source renderers and generated documentation use corrected canonica
   const terminal = core.renderSetupQuestionBankTerminal(planned.specs);
   assert.deepEqual(row.choices.map((choice) => choice.value), ['default', 'custom']);
   assert.equal(plan.question_bank.find((spec) => spec.id === 'update-source').choices.length, 2);
-  assert.doesNotMatch(`${markdown}\n${terminal}\n${JSON.stringify(plan.question_bank)}`, /Keep the current update source/i);
+  assert.doesNotMatch(markdown, /\| 1\.1 \| Update source \|[^\n]*Keep current/);
+  assert.doesNotMatch(terminal, /1\.1 Update source\n(?: {2}[^\n]*\n)*? {2,}[A-Z]\. Keep current/);
   assert.throws(
     () => core.plannedQuestionBank(core.parseArgs(['--plan', '--managed-checkout', 'keep']), current),
     /Update source must be one of: default, custom/i,
@@ -330,7 +340,9 @@ test('compact table, full text, recommendations, and choices share one indexed o
     const tablePosition = rendered.indexOf(tableLine);
     assert.ok(tablePosition > previousIndex, row.id);
     previousIndex = tablePosition;
-    assert.ok(rendered.includes(`${row.presentation.recommended_choice_ref}. ${row.choices.find((choice) => choice.value === row.recommended).label}: `), row.id);
+    const recommendedLabel = `${row.presentation.recommended_choice_ref}. ${row.choices.find((choice) => choice.value === row.recommended).label}`;
+    // Keeping things as they are shows only the choice; any other recommendation also shows its effect.
+    assert.ok(rendered.includes(row.recommended === 'keep' ? `${recommendedLabel} |` : `${recommendedLabel}: `), row.id);
     assert.match(detailed, new RegExp(`### ${row.presentation.question_ref.replace('.', '\\.')} ${row.title.replace(/[?]/g, '\\?')}`));
     assert.equal(new Set(row.choices.map((choice) => choice.presentation_ref)).size, row.choices.length);
     assert.equal(
@@ -366,10 +378,10 @@ test('all recommended and changed-only answers resolve to canonical values', () 
   assert.deepEqual(all.selections.map((selection) => selection.canonical_value), rows.map((row) => row.recommended));
   core.assertQuestionBankAnswerBinding(all, rows);
 
-  const changed = core.parseConciseQuestionBankAnswer(`${reference}: 1.2=b, 2.2 = c`, rows);
+  const changed = core.parseConciseQuestionBankAnswer(`${reference}: 1.2=a, 2.2 = a`, rows);
   assert.equal(changed.mode, 'recommended-except');
   assert.equal(changed.selections.find((selection) => selection.question_ref === '1.2').canonical_value, 'disable');
-  assert.equal(changed.selections.find((selection) => selection.question_ref === '2.2').canonical_value, 'keep');
+  assert.equal(changed.selections.find((selection) => selection.question_ref === '2.2').canonical_value, 'disable');
   assert.equal(changed.selections.find((selection) => selection.question_ref === '1.1').canonical_value, rows[0].recommended);
   core.assertQuestionBankAnswerBinding(changed, rows);
 });
@@ -390,11 +402,11 @@ test('concise answers tolerate case, spacing, hyphens and look-alike reference l
       core.assertQuestionBankAnswerBinding(parsed, rows);
     }
   }
-  for (const form of ['1.2=B 2.2=c', '1.2 = b; 2.2=C', '1.2=b,2.2=c', '1.2=B ; 2.2=C']) {
+  for (const form of ['1.2=A 2.1=c', '1.2 = a; 2.1=C', '1.2=a,2.1=c', '1.2=A ; 2.1=C']) {
     const parsed = core.parseConciseQuestionBankAnswer(`${reference} ${form}`, rows);
     assert.equal(parsed?.mode, 'recommended-except', form);
     assert.equal(parsed.selections.find((selection) => selection.question_ref === '1.2').canonical_value, 'disable');
-    assert.equal(parsed.selections.find((selection) => selection.question_ref === '2.2').canonical_value, 'keep');
+    assert.equal(parsed.selections.find((selection) => selection.question_ref === '2.1').canonical_value, 'custom');
   }
   assert.throws(() => core.parseConciseQuestionBankAnswer('0000 0000 0000 0000: all recommended', rows), /require the displayed bank reference/);
   assert.throws(() => core.parseConciseQuestionBankAnswer('00000000O0000000 allrecommended', rows), /stale or belongs/);
@@ -483,7 +495,9 @@ test('canonical non-TTY answer plan owns question and conditional detail orderin
   assert.equal(plan.details[0].question_ref, '1.1');
   assert.equal(plan.details[0].activation_choice_ref, rows.find((row) => row.id === 'update-source').choices.find((choice) => choice.value === 'custom').presentation_ref);
   assert.equal(plan.details[1].question_ref, '1.4');
-  assert.equal(plan.details[1].activation_choice_ref, 'B');
+  // Seven days is the current retention, so only Keep current and Choose another duration show.
+  assert.deepEqual(rows.find((row) => row.id === 'report-retention').choices.map((choice) => choice.value), ['custom', 'keep']);
+  assert.equal(plan.details[1].activation_choice_ref, 'A');
 
   const advanced = core.parseArgs([
     '--execute', '--host', 'codex', '--managed-checkout', 'custom',
@@ -548,9 +562,74 @@ test('bank reference covers host, order, recommendations and approval-visible se
 
 test('display letters and canonical textual values resolve without becoming stored identities', () => {
   const automatic = allRows().find((row) => row.id === 'automatic-updates');
-  assert.equal(core.resolveDisplayedChoiceAnswer(automatic, 'b'), 'disable');
+  assert.equal(core.resolveDisplayedChoiceAnswer(automatic, 'a'), 'disable');
   assert.equal(core.resolveDisplayedChoiceAnswer(automatic, 'DISABLE'), 'disable');
   assert.equal(core.resolveDisplayedChoiceAnswer(automatic, ''), automatic.recommended);
+  // Updates are on already, so "Turn on" is hidden; typing its canonical word still works, as keep.
+  assert.equal(core.resolveDisplayedChoiceAnswer(automatic, 'Enable'), 'keep');
+  assert.equal(core.resolveDisplayedChoiceAnswer(automatic, 'c'), 'c', 'a hidden choice has no letter');
+});
+
+// When the recommendation already matches the verified current state, the bank shows one recommended
+// Keep current and hides its twin; otherwise every choice shows as before.
+test('a recommendation that matches the current state shows one recommended Keep current', () => {
+  const rowFor = (id, change, argv = []) => {
+    const current = stateWithManaged(managedState());
+    change(current);
+    const args = core.parseArgs(['--plan', '--host', 'codex', ...argv]);
+    return { row: core.setupQuestionSpecs(args, current).find((spec) => spec.id === id), args };
+  };
+  const cases = [
+    ['automatic-updates', (c) => { c.audit.repo_auto_update = { enabled: true }; }, 'enable', ['disable', 'keep']],
+    ['automatic-updates', (c) => { c.audit.repo_auto_update = { enabled: false }; }, '', ['enable', 'disable', 'keep']],
+    ['automatic-updates', () => {}, '', ['enable', 'disable', 'keep']],
+    ['update-reports', (c) => { c.audit.update_report_enabled = true; }, 'enable', ['disable', 'keep']],
+    ['report-retention', (c) => { c.audit.update_report_retention_days = 7; }, 'default', ['custom', 'keep']],
+    ['report-retention', (c) => { c.audit.update_report_retention_days = 14; }, '', ['default', 'custom', 'keep']],
+    ['codex-instruction-limit', (c) => { c.audit.codex_doc_limit_enabled = true; }, 'enable', ['disable', 'keep']],
+    ['codex-instruction-limit', () => {}, '', ['enable', 'disable', 'keep']],
+    ['codex-toolkit-maintenance', (c) => { c.audit.codex_plugin_auto_refresh_enabled = true; }, 'enable', ['disable', 'keep']],
+  ];
+  for (const [id, change, twin, visible] of cases) {
+    const { row } = rowFor(id, change);
+    const label = `${id} ${twin || 'not folded'}`;
+    assert.deepEqual(row.choices.map((choice) => choice.value), visible, label);
+    assert.equal(row.folded_value, twin || undefined, label);
+    if (!twin) continue;
+    assert.equal(row.recommended, 'keep', label);
+    assert.equal(row.choices.find((choice) => choice.value === 'keep').label, 'Keep current', label);
+    const table = core.renderSetupQuestionBank([row]);
+    assert.match(table, new RegExp(`\\| ${row.presentation.recommended_choice_ref}\\. Keep current \\| `), label);
+    assert.doesNotMatch(table, /Preserve this effective behavior/, `${label}: the Recommended cell does not repeat the current state`);
+  }
+
+  // A flag naming the hidden twin is accepted and applied as keep, which does the same thing.
+  const { row, args } = rowFor('automatic-updates', (c) => { c.audit.repo_auto_update = { enabled: true }; }, ['--enable-repo-auto-update']);
+  assert.equal(args.setupChoices.repoAutoUpdate, 'keep');
+  assert.equal(row.selected, 'keep');
+  const current = stateWithManaged(managedState());
+  current.audit.repo_auto_update = { enabled: true };
+  core.applySetupChoices(args, current);
+  assert.equal(args.repoAutoUpdate, true);
+});
+
+test('Claude Code settings fold when all four are set; agents and plugin questions never fold', () => {
+  const current = stateWithManaged(managedState({ currentPath: '', exists: false, git: false }));
+  current.agentProfile = { supported: true, topology: 'root-only' };
+  current.nativePlugin = { status: 'fresh' };
+  current.claudeSettings = [{ state: 'toolkit-value' }, { state: 'owner-value' }, { state: 'toolkit-value' }, { state: 'toolkit-value' }];
+  const rows = core.setupQuestionSpecs(core.parseArgs(['--plan', '--host', 'claude-code']), current);
+  const settings = rows.find((spec) => spec.id === 'claude-recommended-settings');
+  assert.deepEqual(settings.choices.map((choice) => choice.value), ['disable', 'keep']);
+  assert.equal(settings.recommended, 'keep');
+  current.claudeSettings[1] = { state: 'claude-default' };
+  const unset = core.setupQuestionSpecs(core.parseArgs(['--plan', '--host', 'claude-code']), current).find((spec) => spec.id === 'claude-recommended-settings');
+  assert.deepEqual(unset.choices.map((choice) => choice.value), ['enable', 'disable', 'keep']);
+  for (const id of ['claude-agent-topology', 'claude-toolkit-plugin']) {
+    const row = rows.find((spec) => spec.id === id);
+    assert.equal(row.folded_value, undefined, id);
+    assert.ok(row.choices.some((choice) => choice.value === 'keep'), id);
+  }
 });
 
 test('TTY all recommended and changed-only commands execute after exactly one complete bank', async () => {
@@ -597,7 +676,7 @@ test('TTY malformed concise input can be corrected and secondary details are col
   assert.equal(corrected.args.setupChoices.repoAutoUpdate, 'disable');
   assert.equal(corrected.prompts.filter((prompt) => /all recommended/.test(prompt)).length, 4);
 
-  const rows = core.setupQuestionSpecs(core.parseArgs(['--execute', '--host', 'codex']), stateWithManaged(managedState()));
+  const rows = core.setupQuestionSpecs(core.parseArgs(['--execute', '--host', 'codex']), injectedState());
   const updateSource = rows.find((row) => row.id === 'update-source');
   const customSource = updateSource.choices.find((choice) => choice.value === 'custom');
   const customPath = path.resolve(repoRoot, '..', 'tty-approved-custom-source');

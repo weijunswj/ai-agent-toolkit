@@ -127,7 +127,10 @@ class ToolkitInstallHealthCheck {
   }
 
   // Shown only when a copy of the Projects controller skill is synced from claude.ai (the user runs a
-  // Claude Project as controller). An older upload is reported, with the file to upload; it blocks nothing.
+  // Claude Project as controller). An older copy is reported with Toolkit's SKILL.md, which the setup
+  // agent offers as a skill card the owner saves; it blocks nothing. A card carries SKILL.md only, so
+  // when the account copy holds reference files that differ from Toolkit's, the whole folder is
+  // uploaded by hand instead.
   #projectsSkillCheck() {
     if (!this.#syncedSkillsDir) return null;
     let copies = [];
@@ -144,8 +147,27 @@ class ToolkitInstallHealthCheck {
     const uploaded = copies.map((file) => skillVersion(fs.readFileSync(file, 'utf8'))).filter(Boolean).sort(compareSkillVersions).pop() || '';
     const label = 'Claude Projects controller skill';
     if (uploaded && compareSkillVersions(uploaded, repoVersion) >= 0) return this.#check('projects-skill', label, STATUS.PASSED, `Your uploaded copy is current (${uploaded}).`);
+    const behind = `Your uploaded copy is ${uploaded || 'missing its Version line'}; Toolkit has ${repoVersion}.`;
+    const folder = slash(path.dirname(source));
+    if (copies.some((file) => this.#referenceFilesDiffer(path.dirname(file), path.dirname(source)))) {
+      return this.#check('projects-skill', label, STATUS.PASSED,
+        `${behind} Your copy has its own reference files, so a skill card is not enough: upload the folder ${folder} to claude.ai (Customize > Skills, replace web-controller-projects).`);
+    }
     return this.#check('projects-skill', label, STATUS.PASSED,
-      `Your uploaded copy is ${uploaded || 'missing its Version line'}; Toolkit has ${repoVersion}. Upload ${slash(source)} to claude.ai (Customize > Skills, replace web-controller-projects).`);
+      `${behind} Skill card: offer ${slash(source)} as a skill update card to save. Without a card tool, upload the folder ${folder} to claude.ai (Customize > Skills, replace web-controller-projects).`);
+  }
+
+  // Whether an account copy holds a reference/*.md file that is not byte-equal to Toolkit's. A folder
+  // that cannot be read counts as differing, so the notice asks for the whole folder.
+  #referenceFilesDiffer(copyDir, sourceDir) {
+    const referenceDir = path.join(copyDir, 'reference');
+    let names;
+    try { names = fs.readdirSync(referenceDir).filter((name) => name.endsWith('.md')); }
+    catch (error) { return error.code !== 'ENOENT'; }
+    return names.some((name) => {
+      const ours = path.join(sourceDir, 'reference', name);
+      return !fs.existsSync(ours) || !fs.readFileSync(ours).equals(fs.readFileSync(path.join(referenceDir, name)));
+    });
   }
 
   // Shown only when the Claude desktop app holds a Toolkit copy from the user's claude.ai account.

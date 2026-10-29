@@ -1,5 +1,11 @@
 # Toolkit Changelog
 
+## 3.18.2 (clearer setup choices and a skill update card)
+
+- **Projects controller skill:** when the copy on claude.ai is older than Toolkit's, setup's install check now has the setup agent offer the new SKILL.md as a skill card the owner saves (`propose_skills`). Uploading the folder by hand is only the fallback when the session has no card tool or the card fails. When the account copy has its own reference files that differ from Toolkit's, a card is not enough, so the check asks for the folder upload instead.
+- **Setup question table:** the `Now` column is now `Current`. When the recommended choice would leave things as they are, the bank shows a single recommended `Keep current` instead of two choices that do the same thing. A flag or typed word naming the hidden choice still works and applies as keep. The Recommended cell then shows only the choice, since the Current column already says what stays. This covers update source, automatic updates, update reports, report retention, Codex's instruction limit, Codex Toolkit maintenance and the recommended Claude Code settings. The Claude agents, Claude plugin and Codex helper questions keep every choice.
+- **Antigravity skills question:** its choices read `Copy and keep updated` and `Leave as is`, so "keep" no longer means two things. The update source's keep choice is now labelled `Keep current` like the others.
+
 ## 3.17.3 (fewer false continuation refusals)
 
 - **Quoted text:** the continuation guard reads quotes the way bash and PowerShell do. A `|` or `&` inside a quoted search pattern (`rg 'a|b' path`, `--grep="a|b"`) is no longer a pipe, and a quoted path is no longer a command word, so host folder names next to it stay names. A quoted script after `-c`, `-lc`, `-e`, `-p`, `--eval`, `--print`, `-Command` or `/c` is still read as a script when a shell, an interpreter or a script runner (`su`, `script`, `flock`, `wsl`, `awk`, `sed`) comes earlier in the same command; after other programs (`git -C`, `tar -C`, `mkdir -p`) it is an ordinary argument. An explicit cmd shell, which does not quote with single quotes, and unbalanced quotes keep the earlier reading.

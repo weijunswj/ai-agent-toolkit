@@ -240,7 +240,15 @@ test('the Projects controller skill check compares the synced claude.ai copy wit
   writeFile(path.join(synced, 'abc_def', 'web-controller-projects', 'SKILL.md'), '---\nname: web-controller-projects\n---\nVersion: 2026-01-01.1\n');
   const older = check();
   assert.equal(older.status, STATUS.PASSED);
-  assert.match(older.summary, new RegExp(`Your uploaded copy is 2026-01-01\.1; Toolkit has ${repoVersion.replace('.', '\.')}\. Upload .*web-controller-projects/SKILL\.md to claude\.ai`));
+  // The update is offered as a skill card; uploading by hand is only the fallback without a card tool.
+  assert.match(older.summary, new RegExp(`Your uploaded copy is 2026-01-01\\.1; Toolkit has ${repoVersion.replace('.', '\\.')}\\. Skill card: offer \\S*web-controller-projects/SKILL\\.md as a skill update card to save\\. Without a card tool, upload the folder \\S*web-controller-projects to claude\\.ai`));
+  const reference = path.join(synced, 'abc_def', 'web-controller-projects', 'reference');
+  fs.cpSync(path.join(repoRoot, 'repo', 'contracts', 'claude-projects', 'web-controller-projects', 'reference'), reference, { recursive: true });
+  assert.match(check().summary, /Skill card: offer/, 'reference files equal to Toolkit\'s: a card is enough');
+  writeFile(path.join(reference, 'recurring-tasks.md'), 'edited on the account\n');
+  const edited = check();
+  assert.match(edited.summary, /Your copy has its own reference files, so a skill card is not enough: upload the folder \S*web-controller-projects to claude\.ai/);
+  assert.doesNotMatch(edited.summary, /Skill card: offer/);
   writeFile(path.join(synced, 'abc_def', 'web-controller-projects', 'SKILL.md'), `Version: ${repoVersion}\n`);
   assert.match(check().summary, /Your uploaded copy is current/);
 });
