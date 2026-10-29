@@ -668,11 +668,13 @@ test('automatic updates, Claude agents, the Claude plugin and Codex helpers read
   assert.match(table, /\| 2\.1 \| How should Claude Code use agents\? \| Root only; subagent limit 1 \| A\. Keep current \| B\. Broader native behaviour \|/);
   assert.match(table, /\| 3\.1 \| Keep Toolkit available in Claude Code\? \| On, 9\.9\.9 \| A\. Keep current \| B\. Show instructions only \|/);
 
-  // The plugin folds only when Toolkit is also turned on and recorded at this copy's version.
+  // The plugin folds only when Toolkit is also turned on, recorded at this copy's version and run from
+  // the update source 1.1 recommends.
   for (const [label, change] of [
     ['turned off', (c) => { c.claudePluginInstall.enabled = false; }],
     ['on or off unknown', (c) => { c.claudePluginInstall.enabled = null; }],
     ['older recorded version', (c) => { c.claudePluginInstall.version = '9.9.8'; }],
+    ['another run folder', (c) => { c.claudePluginInstall.runningRoot = path.resolve(repoRoot, '..', 'elsewhere'); }],
   ]) {
     const row = claude(change)['claude-toolkit-plugin'];
     assert.ok(row.choices.some((choice) => choice.value === 'keep'), label);
