@@ -360,6 +360,23 @@ test('A commit-msg: a hit in the subject, body, trailer or a comment line blocks
   }
 });
 
+test('A commit-msg: with this repository\'s config, the Dependabot sign-off passes and another GitHub address still blocks', (t) => {
+  const config = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', '.github', 'personal-data-guard.json'), 'utf8'));
+  const repo = new TestRepo(t, { config });
+  const subject = 'Bump actions/setup-python from 7.0.0 to 7.1.0\n\n';
+  const cases = [
+    [`${subject}Signed-off-by: dependabot[bot] <support${pii.at}github.com>\n`, 0],
+    [`${subject}Signed-off-by: dependabot[bot] <SUPPORT${pii.at}GITHUB.COM>\n`, 0],
+    [`${subject}Signed-off-by: Jane <jane.tan${pii.at}github.com>\n`, 1],
+    [`${subject}Signed-off-by: dependabot[bot] <support${pii.at}github.co>\n`, 1],
+  ];
+  for (const [message, status] of cases) {
+    const file = repo.write('.git/COMMIT_EDITMSG', message);
+    const result = repo.guard(['message', file]);
+    assert.equal(result.status, status, message);
+  }
+});
+
 // ---------------------------------------------------------------------------------------------
 // A. pre-push.
 

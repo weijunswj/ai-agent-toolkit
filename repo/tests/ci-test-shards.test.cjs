@@ -197,7 +197,7 @@ test('the workflow drift guard accepts validate.yml and rejects each way to narr
     ['the summary check removed', WORKFLOW.replace(`\n${verify}`, '')],
     ['the summary check not last', WORKFLOW.replace(`\n${verify}`, '').replace('          node repo/scripts/validate-toolkit.cjs\n', `          node repo/scripts/validate-toolkit.cjs\n${verify}\n`)],
     ['the leg results not passed in', WORKFLOW.replace('          TEST_LEGS: ${{ toJSON(needs) }}\n', '')],
-    ['a step before Run validation', WORKFLOW.replace('      - name: Set up Python\n        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0\n        with:\n          python-version: \'3.12\'\n\n      # The one', '      - name: Set up Python\n        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0\n        with:\n          python-version: \'3.12\'\n\n      - name: Extra\n        run: echo hi\n\n      # The one')],
+    ['a step before Run validation', WORKFLOW.replace('      - name: Set up Python\n        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0\n        with:\n          python-version: \'3.12\'\n\n      # The one', '      - name: Set up Python\n        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0\n        with:\n          python-version: \'3.12\'\n\n      - name: Extra\n        run: echo hi\n\n      # The one')],
     ['a condition on the gate step', WORKFLOW.replace('      - name: Run validation\n', '      - name: Run validation\n        if: ${{ github.event_name == \'push\' }}\n')],
     ['an extra job', `${WORKFLOW}\n  extra:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo\n`],
     ['a test job removed', WORKFLOW.replace(/\n  tests-windows:\n[\s\S]*?(?=\n  validate:\n)/, '')],
@@ -222,7 +222,7 @@ test('the workflow drift guard accepts validate.yml and rejects each way to narr
     ['an unnamed step before Run validation', WORKFLOW.replace(`      # The one gate list`, '      - run: echo hi\n\n      # The one gate list')],
     ['the summaries not merged', WORKFLOW.replace('          merge-multiple: true', '          merge-multiple: false')],
     ['the summaries downloaded elsewhere', WORKFLOW.replace('          path: ${{ runner.temp }}/test-summaries', '          path: ${{ runner.temp }}/other')],
-    ['a different download action', WORKFLOW.replace('actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1', 'actions/download-artifact@v8')],
+    ['a different download action', WORKFLOW.replace('actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2', 'actions/download-artifact@v8')],
     ['the diff base removed', WORKFLOW.replace('          DIFF_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}\n', '')],
     ['a shallow checkout in validate', WORKFLOW.replace(/(\n  validate:\n[\s\S]*?)fetch-depth: 0/, '$1fetch-depth: 1')],
     ['an extra env value on the gate step', WORKFLOW.replace('          TEST_LEGS: ${{ toJSON(needs) }}\n', '          TEST_LEGS: ${{ toJSON(needs) }}\n          NODE_OPTIONS: --require ./x.cjs\n')],
@@ -260,6 +260,38 @@ test('the workflow drift guard accepts validate.yml and rejects each way to narr
   const manifest = clone(MANIFEST);
   manifest.systems.linux.shards.splice(1, 0, { id: 'linux-9', files: [manifest.systems.linux.shards[0].files.pop()] });
   assert.match(shards.workflowErrors(WORKFLOW, manifest).join('\n'), /tests-linux job differs/);
+});
+
+test('the workflow drift guard accepts a Dependabot pin update of the same action and nothing else on that line', () => {
+  const pin = 'actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0';
+  const newer = 'actions/setup-python@0123456789abcdef0123456789abcdef01234567 # v7.2.0';
+  assert.ok(WORKFLOW.includes(pin));
+  const everywhere = WORKFLOW.split(pin).join(newer);
+  assert.deepEqual(shards.workflowErrors(everywhere, MANIFEST), [], 'every copy of the pin updated');
+  assert.deepEqual(shards.workflowErrors(WORKFLOW.replace(pin, newer), MANIFEST), [], 'one copy of the pin updated');
+  assert.deepEqual(shards.workflowErrors(everywhere.replace(/\n/g, '\r\n'), MANIFEST), [], 'a CRLF checkout with an update');
+  const rejected = [
+    ['a different action', 'evil/setup-python@0123456789abcdef0123456789abcdef01234567 # v7.2.0'],
+    ['a renamed action', 'actions/setup-pythons@0123456789abcdef0123456789abcdef01234567 # v7.2.0'],
+    ['a short SHA', 'actions/setup-python@0123456 # v7.2.0'],
+    ['a ref that is not hex', 'actions/setup-python@0123456789abcdef0123456789abcdef0123456z # v7.2.0'],
+    ['an upper-case SHA', 'actions/setup-python@0123456789ABCDEF0123456789ABCDEF01234567 # v7.2.0'],
+    ['a tag ref', 'actions/setup-python@v7 # v7.2.0'],
+    ['a branch ref', 'actions/setup-python@main'],
+    ['a removed version comment', 'actions/setup-python@0123456789abcdef0123456789abcdef01234567'],
+    ['a version comment that is not a version', 'actions/setup-python@0123456789abcdef0123456789abcdef01234567 # latest'],
+    ['text after the version comment', 'actions/setup-python@0123456789abcdef0123456789abcdef01234567 # v7.2.0 with: x'],
+  ];
+  for (const [label, line] of rejected) {
+    assert.match(shards.workflowErrors(WORKFLOW.replace(pin, line), MANIFEST).join('\n'), /differs from its pinned text/, label);
+  }
+  // A pin update does not excuse another edit beside it.
+  const unmerged = everywhere.replace('          merge-multiple: true', '          merge-multiple: false');
+  assert.match(shards.workflowErrors(unmerged, MANIFEST).join('\n'), /differs from its pinned text/, 'a pin update beside another edit');
+  const moved = WORKFLOW.replace(`        uses: ${pin}\n`, `          uses: ${newer}\n`);
+  assert.match(shards.workflowErrors(moved, MANIFEST).join('\n'), /differs from its pinned text/, 'a re-indented pin line');
+  const swapped = WORKFLOW.replace(`uses: ${pin}`, 'uses: actions/checkout@0123456789abcdef0123456789abcdef01234567 # v7.2.0');
+  assert.match(shards.workflowErrors(swapped, MANIFEST).join('\n'), /differs from its pinned text/, 'another action in place of a pinned one');
 });
 
 test('the runner refuses unknown shards, a shard for another system, mixed modes and a drive-root temp folder', () => {

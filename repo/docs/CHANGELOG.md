@@ -1,5 +1,13 @@
 # Toolkit Changelog
 
+## 3.17.3 (security alert cleanup and Dependabot action updates)
+
+- **CI drift guard:** a Dependabot update to a pinned action in `validate.yml` now passes when only the commit SHA and `# vX.Y.Z` version comment change and the action name stays the same. A different action, a tag or short ref, a missing version comment or any other edit to the file is still refused. The portable sharding playbook says the same.
+- **Personal-data guard config:** Dependabot's public sign-off address is on the role address allow list, so its commit trailers no longer fail the check. Other addresses at the same domain still block.
+- **Action pins:** `setup-python` 7.1.0, `upload-artifact` 7.0.2 and `download-artifact` 8.0.2, each pinned to its verified tag commit.
+- **Dependencies:** the test-only `fast-uri` package is locked at 3.1.9, which fixes four advisories.
+- **Tests:** two test assertions escape every value they put into a regular expression, so they check the exact text instead of matching any character where a dot was meant.
+
 ## 3.17.2 (spacer lines only in the update log)
 
 - **Projects skill:** only the **[HH:MM] Update:** lines in a running post keep the `&nbsp;` spacer line after each one. A question's last choice no longer takes a spacer line; the next numbered item follows it directly. The post hook already passed over spacer lines, so it neither requires nor refuses one anywhere, and its tests now cover questions with and without a leftover spacer.

@@ -8,6 +8,7 @@ const core = require('../scripts/setup-toolkit-core.cjs');
 const setupQuestionDocs = require('../scripts/generate-setup-question-docs.cjs');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
+const escapeRegExp = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const expectedCodexRows = [
   ['update-source', 'Update source'],
   ['automatic-updates', 'Automatic updates'],
@@ -331,7 +332,7 @@ test('compact table, full text, recommendations, and choices share one indexed o
     assert.ok(tablePosition > previousIndex, row.id);
     previousIndex = tablePosition;
     assert.ok(rendered.includes(`${row.presentation.recommended_choice_ref}. ${row.choices.find((choice) => choice.value === row.recommended).label}: `), row.id);
-    assert.match(detailed, new RegExp(`### ${row.presentation.question_ref.replace('.', '\\.')} ${row.title.replace(/[?]/g, '\\?')}`));
+    assert.match(detailed, new RegExp(`### ${escapeRegExp(row.presentation.question_ref)} ${escapeRegExp(row.title)}`));
     assert.equal(new Set(row.choices.map((choice) => choice.presentation_ref)).size, row.choices.length);
     assert.equal(
       row.choices.find((choice) => choice.value === row.recommended).presentation_ref,
