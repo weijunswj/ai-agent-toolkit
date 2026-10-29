@@ -1,10 +1,24 @@
 # Toolkit Changelog
 
-## 3.18.2 (clearer setup choices and a skill update card)
+## 3.18.4 (clearer setup choices and a skill update card)
 
 - **Projects controller skill:** when the copy on claude.ai is older than Toolkit's, setup's install check now has the setup agent offer the new SKILL.md as a skill card the owner saves (`propose_skills`). Uploading the folder by hand is only the fallback when the session has no card tool or the card fails. When the account copy has its own reference files that differ from Toolkit's, a card is not enough, so the check asks for the folder upload instead.
 - **Setup question table:** the `Now` column is now `Current`. When the recommended choice would change nothing, every question shows a single recommended `Keep current` instead of two choices that do the same thing, and the Recommended cell shows only that, since the Current column already says what stays. Otherwise the cell names the change, without repeating a label as its effect. Automatic updates read `Keep current` when they are on and already check the update source 1.1 recommends; the Claude agents question when root-only and its depth setting are in place; the Claude plugin question when Toolkit is installed and runs from the update copy, which setup now reads from Claude Code's plugin registry files before you answer (no Claude session is started). There, `Keep current` still re-checks and follows the 1.1 source. A flag or typed word naming a hidden choice still works and applies as the shown one.
 - **Antigravity skills question:** copying reads `Copy and keep updated`, so it no longer looks like `Keep current`. The update source's keep choice is now labelled `Keep current` like the others.
+
+## 3.18.3 (security alert cleanup and Dependabot action updates)
+
+- **CI drift guard:** a Dependabot update to a pinned action in `validate.yml` now passes when only the commit SHA and `# vX.Y.Z` version comment change and the action name stays the same. A different action, a tag or short ref, a missing version comment or any other edit to the file is still refused. The guard's tests find the pins in the live file and rerun every drift case with each pinned action updated, so the whole test run passes on such an update too. The portable sharding playbook says the same.
+- **Personal-data guard config:** Dependabot's public sign-off address is on the role address allow list, so its commit trailers no longer fail the check. Other addresses at the same domain still block.
+- **Action pins:** `setup-python` 7.1.0, `upload-artifact` 7.0.2 and `download-artifact` 8.0.2, each pinned to its verified tag commit.
+- **Dependencies:** the test-only `fast-uri` package is locked at 3.1.9, which fixes four advisories.
+- **Tests:** two test assertions escape every value they put into a regular expression, so they check the exact text instead of matching any character where a dot was meant.
+
+## 3.18.2 (the project chat's newest post is the one to edit)
+
+- **Projects post hook (skill version 2026-10-29.4, upload it again):** a hook cannot read the project chat, so in the main project chat it now uses the session's own reads of it. After a project chat read that reaches the last page, the newest top-level message decides: when it is the coordinator's own post (not a card), even one an earlier session wrote, and no owner message the session saw (a reply in a thread included) came after it, a fresh post is refused and the refusal names that post to edit with an **[HH:MM] Update:** line, and the post is then checked like the session's own (edits keep its Update lines, and a later owner message closes it to edits), unless the read's copy is near the 8 KB limit and may have been cut short, in which case the post is left untracked and a fresh post passes; when it is the owner's message, the owner counts as having written, so the session posts fresh and earlier posts stay closed to edits. Work-thread sessions (started by a spawn relay, or whose posts land in a thread) skip these reads. Replies under a post, cards and thread launches are not checked by this rule.
+- **Queued owner messages:** an owner message that arrives while a turn runs is recorded first as a queued entry and may never appear as a prompt of its own. The hook now counts it as soon as it is queued, so it never asks for an edit that would land above that message.
+- **Still not seen:** a coordinator session that has neither posted nor read the chat to its last page has nothing to go on, so its first fresh post passes as before. A live check would need the host to hand the chat's newest message to the hook, or a hook that can call the chat-reading tool.
 
 ## 3.18.1 (shorter review rounds)
 

@@ -8,6 +8,7 @@ const core = require('../scripts/setup-toolkit-core.cjs');
 const setupQuestionDocs = require('../scripts/generate-setup-question-docs.cjs');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
+const escapeRegExp = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const expectedCodexRows = [
   ['update-source', 'Update source'],
   ['automatic-updates', 'Automatic updates'],
@@ -342,8 +343,8 @@ test('compact table, full text, recommendations, and choices share one indexed o
     previousIndex = tablePosition;
     const recommendedLabel = `${row.presentation.recommended_choice_ref}. ${row.choices.find((choice) => choice.value === row.recommended).label}`;
     // Keeping things as they are shows only the choice; any other recommendation also shows its effect.
-    assert.ok(rendered.includes(row.recommended === 'keep' ? `${recommendedLabel} |` : `${recommendedLabel}: `), row.id);
-    assert.match(detailed, new RegExp(`### ${row.presentation.question_ref.replace('.', '\\.')} ${row.title.replace(/[?]/g, '\\?')}`));
+    assert.ok(rendered.includes(row.recommended === 'keep' || row.folded_into === row.recommended ? `${recommendedLabel} |` : `${recommendedLabel}: `), row.id);
+    assert.match(detailed, new RegExp(`### ${escapeRegExp(row.presentation.question_ref)} ${escapeRegExp(row.title)}`));
     assert.equal(new Set(row.choices.map((choice) => choice.presentation_ref)).size, row.choices.length);
     assert.equal(
       row.choices.find((choice) => choice.value === row.recommended).presentation_ref,
@@ -672,7 +673,7 @@ test('automatic updates, Claude agents, the Claude plugin and Codex helpers read
   assert.ok(changing['claude-toolkit-plugin'].choices.some((choice) => choice.value === 'keep'));
   // A recommendation whose effect only repeats its label shows the label once.
   const label = 'Toolkit repos: main session + Toolkit planning and build helpers only. Elsewhere: one layer of subagents.';
-  assert.match(core.renderSetupQuestionBank(Object.values(changing)), new RegExp(`\\| A\\. ${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\|`));
+  assert.match(core.renderSetupQuestionBank(Object.values(changing)), new RegExp(`\\| A\\. ${escapeRegExp(label)} \\|`));
 
   // Keep on the agents question resolves to root-only after the answers, which is the shown choice.
   const planned = core.plannedQuestionBank(core.parseArgs(['--plan', '--host', 'claude-code', '--claude-topology', 'keep']), (() => {

@@ -11,7 +11,7 @@ const { ToolkitInstallHealthCheck, STATUS, claudeAccountPluginFolders, claudeAcc
 const { ClaudeHelperAgentRenderer } = require('../scripts/toolkit-claude-helper-agents.cjs');
 const { ClaudeNamedHelperPolicy } = require('../scripts/toolkit-claude-helper-policy.cjs');
 const {
-  assert, fs, path, repoRoot, tmpRoot, isolatedHomeEnv, writeFile, run, runTestGit, createGitBackedSetupRepo,
+  assert, fs, path, repoRoot, tmpRoot, isolatedHomeEnv, writeFile, run, runTestGit, createGitBackedSetupRepo, escapeRegExp,
 } = require('./toolkit-setup-test-support.cjs');
 
 const VERSION = JSON.parse(fs.readFileSync(path.join(repoRoot, '.claude-plugin', 'plugin.json'), 'utf8')).version;
@@ -241,7 +241,7 @@ test('the Projects controller skill check compares the synced claude.ai copy wit
   const older = check();
   assert.equal(older.status, STATUS.PASSED);
   // The update is offered as a skill card; uploading by hand is only the fallback without a card tool.
-  assert.match(older.summary, new RegExp(`Your uploaded copy is 2026-01-01\\.1; Toolkit has ${repoVersion.replace('.', '\\.')}\\. Skill card: offer \\S*web-controller-projects/SKILL\\.md as a skill update card to save\\. Without a card tool, upload the folder \\S*web-controller-projects to claude\\.ai`));
+  assert.match(older.summary, new RegExp(`Your uploaded copy is 2026-01-01\\.1; Toolkit has ${escapeRegExp(repoVersion)}\\. Skill card: offer \\S*web-controller-projects/SKILL\\.md as a skill update card to save\\. Without a card tool, upload the folder \\S*web-controller-projects to claude\\.ai`));
   const reference = path.join(synced, 'abc_def', 'web-controller-projects', 'reference');
   fs.cpSync(path.join(repoRoot, 'repo', 'contracts', 'claude-projects', 'web-controller-projects', 'reference'), reference, { recursive: true });
   assert.match(check().summary, /Skill card: offer/, 'reference files equal to Toolkit\'s: a card is enough');
