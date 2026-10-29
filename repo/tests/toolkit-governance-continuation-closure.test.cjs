@@ -68,16 +68,24 @@ const MATRIX = [
   [4, 'git log -i -E --grep="co-authored|claude\\.ai|session" --format="%h %s" HEAD~3..HEAD', but(N, { cmd: U })],
   // 5. The same glued to another fragment by a quote or operator, which can spell a host.
   [5, '$x = "C:/x/claude-c"+"ode"; & $x -r', all(U)], [5, 'x=C:/x/claude-"co"de; "$x" -r', all(U)],
-  [5, "x='C:/x/'claude-y; codex$x resume", all(U)],
+  [5, "x='C:/x/'claude-y; codex$x resume", all(U)], [5, '$p = "C:/x/claude-c"+"ode"; & $p -r y', all(U)],
+  // Glued by adjacent quotes the word is no name; only bash's echo proves it data.
+  [5, 'echo "C:/x/claude-c""ode" -r', { ...all(U), 'claude bash': N, bash: N }],
   // 6. A host spelling as a path leaf.
   [6, 'C:/bin/claude -r x', all(U)], [6, 'C:/x/codex.exe resume', all(U)], [6, 'C:/x/claude-code --resume a', all(U)],
   [6, 'env C:/bin/claude/../claude -r', all(U)], [6, 'ls C:/bin/claude/ && C:/bin/claude -r x', all(U)],
+  [6, 'node C:/x/claude-code --resume a', all(U)],
   // 7. A '|' inside a quoted reader pattern is literal, except to cmd, which does not quote with '.
   [7, "rg -n 'resume|fork' C:/example.test/.codex/x.jsonl", but(N, { cmd: U })], [7, "rg -n 'a|b' C:/example.test/.codex/x.jsonl", all(N)],
   [7, OWNER_BATCH, but(N, { cmd: U })],
   // 8. A '|' inside a quoted script argument is a real pipe in that script.
   [8, "bash -c 'echo /x/.claude/ -c | tr -d ./ | sh'", all(U)], [8, "pwsh -Command 'echo /x/.claude -r | iex'", all(U)],
   [8, "sh -c 'cat a | /x/.claude -r'", all(U)], [8, "bash -c 'cat /x/.claude/settings.json | grep model'", all(N)],
+  [8, "bash -c 'echo /.claude/ -c | tr -d ./ | sh' && echo ok", all(U)], [8, "env bash -c 'echo /.claude/ -c | tr -d ./ | sh'", all(U)],
+  [8, "xargs sh -c 'echo /.claude/ -c | tr -d ./ | sh'", all(U)], [8, "\"C:/Program Files/Git/bin/bash.exe\" -c 'echo /.claude/ -c | tr -d ./ | sh'", all(U)],
+  // The same selectors after a program that runs no script take an ordinary argument.
+  [8, 'git -C "C:/Users/example/.claude/plugins/marketplaces/x" pull --ff-only', all(N)], [8, 'tar -C "C:/Users/example/.claude/x" -xf a.tar', all(N)],
+  [8, 'mkdir -p "C:/Users/example/.claude/x" && cp -r a "C:/Users/example/.claude/x"', all(N)],
   // 9. A real pipe into a pure data filter keeps the folder names; cmd has no PowerShell cmdlets.
   [9, 'Get-Content ~/.claude/x.json | Sort-Object -r', but(N, { cmd: U })], [9, "cat ~/.claude/x.json | tr -cd 'a-z'", all(N)],
   [9, 'cat ~/.claude/x.json | uniq -c', all(N)], [9, 'Get-ChildItem ~/.claude/projects -r | Measure-Object | Format-List | Out-Null', but(N, { cmd: U })],

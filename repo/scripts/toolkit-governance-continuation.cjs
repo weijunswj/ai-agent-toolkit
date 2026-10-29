@@ -226,14 +226,25 @@ const CMD_PIPE_READERS = /^(?:grep|rg|jq|head|tail|sort|wc|cut|cat|git|tr|uniq|c
 // -Command with its prefixes are not.
 const NAME_SCRIPT_SELECTOR_CASED = /(?:^|\s)(?:-lc|-e|-p|--eval|--print|\/[cC])[ \t]*$/;
 const NAME_SCRIPT_SELECTOR_COMMAND = /(?:^|\s)-c(?:o(?:m(?:m(?:a(?:n(?:d)?)?)?)?)?)?[ \t]*$/i;
+// The selectors run a script only for programs that interpret code: shells, language
+// interpreters, runners that hand a string to a shell, and text tools that can run commands.
+// Elsewhere (git -C, tar -C, mkdir -p) the quoted word is an ordinary argument.
+const NAME_SCRIPT_RUNNERS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'ash', 'fish', 'csh', 'tcsh', 'pwsh', 'powershell', 'cmd',
+  'node', 'nodejs', 'python', 'python2', 'python3', 'py', 'perl', 'ruby', 'php', 'deno', 'bun', 'lua', 'luajit', 'rscript', 'osascript',
+  'tclsh', 'wish', 'su', 'script', 'flock', 'wsl', 'awk', 'gawk', 'mawk', 'nawk', 'sed']);
+function scriptRunnerIn(stage) {
+  return stage.split(/\s+/).some(word => NAME_SCRIPT_RUNNERS.has(word.replace(/['"]/g, '').split(/[\\/]/).pop().toLowerCase().replace(/\.exe$/, '')));
+}
 // POSIX and PowerShell quoting: single quotes are literal, double quotes allow a '\' or
 // backtick escape. Quoted text is blanked to spaces (offsets kept), so a '|', '&' or path
-// inside quotes is neither a pipe nor a command word. A quoted script argument is kept as
-// written and its first word is a command position. cmd does not quote with single quotes,
-// so cmd and unknown shells keep the raw scan, as do unbalanced quotes: all return null.
+// inside quotes is neither a pipe nor a command word. A quoted script argument (a selector
+// after a script runner in the same stage) is kept as written and its first word is a
+// command position. cmd does not quote with single quotes, so cmd and unknown shells keep
+// the raw scan, as do unbalanced quotes: all return null.
 function quotedView(text, shell) {
   if (!['common', 'posix', 'powershell'].includes(shell)) return null;
-  let out = '', quote = null, script = false; const scripts = [];
+  // runner and scanned cache the stage's runner check, so each character is read once or twice.
+  let out = '', quote = null, script = false, stage = 0, scanned = 0, runner = false; const scripts = [];
   for (let i = 0; i < text.length; i += 1) {
     const c = text[i];
     if (quote) {
@@ -241,9 +252,16 @@ function quotedView(text, shell) {
       if (c === quote) { quote = null; out += c; continue; }
       out += script ? c : ' '; continue;
     }
+    if (';&|(){}\r\n'.includes(c)) { stage = scanned = i + 1; runner = false; }
     if (c === "'" || c === '"') {
       const before = text.slice(Math.max(0, i - 64), i);
       script = NAME_SCRIPT_SELECTOR_CASED.test(before) || NAME_SCRIPT_SELECTOR_COMMAND.test(before);
+      if (script && !runner) {
+        let from = scanned;
+        while (from > stage && !/\s/.test(text[from - 1])) from -= 1;
+        runner = scriptRunnerIn(text.slice(from, i)); scanned = i;
+      }
+      script = script && runner;
       if (script) scripts.push(i + 1);
       quote = c;
     }
