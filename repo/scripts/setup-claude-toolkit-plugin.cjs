@@ -1105,6 +1105,7 @@ module.exports = {
   installedActivationProof,
   probeTimeoutMs,
   readExpectedToolkitVersion,
+  registrySourceEvidence,
   resolutionBudgetMs,
   runClaudeMutationAndVerify,
   validateMarketplaceWrapper,

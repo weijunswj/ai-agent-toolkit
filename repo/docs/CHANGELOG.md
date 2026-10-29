@@ -1,6 +1,6 @@
 # Toolkit Changelog
 
-## 3.18.4 (Codex shell calls get every commit and push check)
+## 3.19.1 (Codex shell calls get every commit and push check)
 
 **Codex asks you to trust the Toolkit hooks again after this update**, because their matchers changed. Trust them in Codex's hooks review, or the checks do not run.
 
@@ -11,6 +11,26 @@
 - **Git by full path:** the push check runs git by its absolute path (`TOOLKIT_GIT_PATH`, else PATH, else the usual install locations), so a hook started with no git on PATH still checks, and a git program inside the pushed repository never runs. When none is found, the note says so.
 - **Hook time limits:** the Claude Code attribution hook and the Codex helper hook now have an explicit 60-second limit, above the push check's own 30 seconds, which every push and pull request in one shell command now shares.
 - **Commit and push in one command:** the push check runs before the whole command, so a `git add; git commit; git push` line used to send a new commit unchecked. Now, after a `git commit` earlier in the same command and repository, it also checks what that commit could add (staged and unstaged tracked changes, and untracked files after a `git add`), and names those items "not committed yet". A `git merge`, `cherry-pick`, `revert`, `am` or `rebase` before a push in the same command is refused with "run the push as its own command".
+
+## 3.19.0 (Windows scheduled tasks)
+
+**Update every computer that reads this repository's binding.** The binding now carries `schedule_folder`, and an older Toolkit copy reads a binding with an unknown key as invalid, so it shows governance as ERROR and holds governed writes until it updates. Update with `setup toolkit`. Upload the Projects controller skill again too: it is now version 2026-10-29.5.
+
+### Scheduled tasks
+
+- **No-AI Windows tasks:** `toolkit-windows-tasks.cjs` is the only code that creates, changes or removes Windows scheduled tasks. It keeps them in one Task Scheduler folder per repository (the binding's new optional `schedule_folder`, `TOOLKIT` for this repository, else the repository name in capitals), named `<FOLDER> - <TASK>`. A task is Toolkit's only when it is in that folder, carries Toolkit's marker and is in this computer's task registry; anything else is listed and never changed.
+- **Programme sweep:** `<FOLDER> - PROGRAMME SWEEP` runs hourly from 08:00 to 23:59 for an ENABLED repository: the programme refresh, the attention line, then the footer sweep over the bound repository and its evidence store for the signed-in account's own posts since the last sweep that ended well. It skips with a reason when `gh` is signed out or the merged binding was not read in 24 hours. On Windows it replaces the AI local programme sweep task; an existing one is removed only after you say so.
+- **Shard timings:** `TOOLKIT - SHARD TIMINGS` runs on Mondays at 09:15 for the Toolkit repository and opens a pull request only when the measured CI test times drifted.
+- **Job runner:** both run `toolkit-scheduled-job.cjs`, which starts only node and gh, never a model, and writes each run's result to `~/.ai-agent-toolkit/user-state/tasks/<id>/last-run.json`. Tasks run as you while you are logged on, with no stored password and no console window (`conhost.exe --headless`), ignore a second start and stop at 30 minutes.
+- **Setup:** on Windows, setup lists each task with its folder, name, schedule, purpose and state. It never creates one: when a task needs creating or updating, it prints one PowerShell line for you to paste, which registers the tasks and runs the programme sweep once, starting it again if a closing console stopped it. `setup-toolkit.cjs --remove-toolkit-tasks` removes only Toolkit's own tasks, then the folder when it is empty.
+- **List every task:** `toolkit-tasks.cjs [--json]` lists Windows tasks live, Claude Code desktop tasks by name and description, and Codex and cloud tasks from the registry (`~/.ai-agent-toolkit/user-state/tasks.json`), saying where each row was read. `--record` and `--forget` keep cloud tasks in the registry; `toolkit-windows-tasks.cjs adopt` records a task you made yourself, which Toolkit never changes.
+- **Projects skill:** on a Windows device the programme sweep is the Windows task, and "list my tasks" merges the project's own list with the device's list.
+
+## 3.18.4 (clearer setup choices and a skill update card)
+
+- **Projects controller skill:** when the copy on claude.ai is older than Toolkit's, setup's install check now has the setup agent offer the new SKILL.md as a skill card the owner saves (`propose_skills`). Uploading the folder by hand is only the fallback when the session has no card tool or the card fails. When the account copy has its own reference files that differ from Toolkit's, a card is not enough, so the check asks for the folder upload instead.
+- **Setup question table:** the `Now` column is now `Current`, and holds a short state such as `On`, `7 days`, `Root only; subagent limit 1`, or each recommended Claude Code setting by name with its state; `explain` keeps the full text. When the recommended choice would change nothing, every question shows a single recommended `Keep current` instead of two choices that do the same thing, and the Recommended cell shows only that, since the Current column already says what stays. Otherwise the cell names the change, without repeating a label as its effect. Automatic updates read `Keep current` when they are on and already check the update source 1.1 recommends; the Claude agents question when root-only and its depth setting are in place; the Claude plugin question when Toolkit is installed, turned on, runs from the update copy at this copy's version (read from that folder's manifest, since Claude Code runs Toolkit in place) and Claude Code's install record matches it (a lagging record is shown, for example `On, 3.18.3 (Claude Code's record says 3.17.3)`, and recommends a refresh), which setup now reads from Claude Code's plugin registry files and user settings before you answer (no Claude session is started). There, `Keep current` still re-checks and follows the 1.1 source. A flag or typed word naming a hidden choice still works and applies as the shown one.
+- **Antigravity skills question:** copying reads `Copy and keep updated`, so it no longer looks like `Keep current`. The update source's keep choice is now labelled `Keep current` like the others.
 
 ## 3.18.3 (security alert cleanup and Dependabot action updates)
 

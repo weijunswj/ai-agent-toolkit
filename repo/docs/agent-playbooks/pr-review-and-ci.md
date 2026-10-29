@@ -45,7 +45,7 @@ node repo/scripts/toolkit-github-footer-sweep.cjs --repo <owner/name> --since <I
 node repo/scripts/toolkit-github-footer-sweep.cjs --repo <owner/name> --since <ISO time> --apply
 ```
 
-Without `--since` it scans the whole repository, which reads the reviews of every pull request. Exit codes: 0 no post with the footer, 3 posts with the footer found and none cleaned, 4 at least one cleaned and nothing failed, 1 a scan, edit or read-back failed, 2 bad arguments.
+On Windows the hourly `PROGRAMME SWEEP` scheduled task runs it with `--apply` over the bound repository and its evidence store, for posts changed since its last sweep that ended well, so nobody needs to run it by hand there (`node repo/scripts/toolkit-tasks.cjs` shows its last run). Without `--since` it scans the whole repository, which reads the reviews of every pull request. Exit codes: 0 no post with the footer, 3 posts with the footer found and none cleaned, 4 at least one cleaned and nothing failed, 1 a scan, edit or read-back failed, 2 bad arguments.
 
 ## CI Honesty
 

@@ -74,6 +74,16 @@ class ClaudePluginRegistry {
     return { installed: true, records, runningRoot, reason: '' };
   }
 
+  // Whether the Claude Code user settings turn Toolkit on: true, false, or null when the file
+  // cannot be read or does not say.
+  toolkitEnabled() {
+    let settings;
+    try { settings = readJsonIfExists(path.join(this.configDir, 'settings.json')); }
+    catch { return null; }
+    const value = settings?.enabledPlugins?.[TOOLKIT_PLUGIN_ID];
+    return typeof value === 'boolean' ? value : null;
+  }
+
   // True only when `root` is the installed Toolkit copy Claude Code runs.
   isRunningCopy(root) {
     const install = this.toolkitInstall();

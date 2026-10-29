@@ -4,7 +4,7 @@ description: "Use when running as a Claude Projects coordinator and the user app
 ---
 
 # Web Controller for Claude Projects
-Version: 2026-10-29.4
+Version: 2026-10-29.5
 
 Run Toolkit repos through Claude Projects. The global rules and coding gates apply in every project; GitHub governance (parent and child issues, records, decision traces, evidence custody) applies only to a github.com repo whose governance state is ENABLED. Keep project facts (repos, devices, lanes, pending work) in project memory; durable work state lives in the branch, the PR and the programme comments or evidence store, mirrored in memory, never only there.
 
@@ -101,6 +101,7 @@ Whenever the user asks for anything recurring (the daily check-in, a sweep, a re
 - Only three project memory lines are Toolkit's to rewrite: `BINDING:` and `GATE ROUTE:` (**Binding**) and `SCHEDULED TASKS:`. Trigger ids live only on that line, never in a prompt.
 - **Stopped by owner:** a task whose `SCHEDULED TASKS:` entry says `stopped by owner` is outside every automatic path in this skill, its references and task prompts: never re-arm, update, swap, rebuild or recreate it, or report it missing. Only the owner restarts it, and the restart removes the mark.
 - When a recurring task replaces an older one, delete the older one so the user isn't sent two.
+- **Listing tasks:** when the user asks to list their scheduled tasks, merge the project's own list with the device's read-only `toolkit-tasks.cjs --json`, and say where each row was read (**Listing every task** in `reference/recurring-tasks.md`).
 - **Moving a task or catching up:** a move to a time already passed today skips today's run unless it already ran today, so catch it up the same turn by messaging its home thread to run its prompt; never fire_trigger a bound task from another thread (it runs with no project tools, files or memory). Never catch up a task whose entry says `stopped by owner`. Details in `reference/recurring-tasks.md`.
 - On every coordinator turn, check that each recurring task is still armed with a future next run; re-arm a missed one before ending the turn, unless its entry says `stopped by owner`.
 - When a skill update changes what the daily check-in or hourly nudge does, update those tasks' prompts in the same turn (the swap above) and confirm each next run is armed, skipping a task whose entry says `stopped by owner`.

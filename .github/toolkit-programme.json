@@ -16,6 +16,7 @@
     "auto_merge": "patch-minor",
     "github_actions": "owner"
   },
+  "schedule_folder": "TOOLKIT",
   "projection": {
     "after_section": "CURRENT",
     "replace_section": "Programme index"
