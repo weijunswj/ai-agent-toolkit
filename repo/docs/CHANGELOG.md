@@ -1,5 +1,13 @@
 # Toolkit Changelog
 
+## 3.19.2 (links only where the owner acts, and no flattened questions)
+
+- **Projects post hook (skill version 2026-10-29.6, upload it again):** links are required only where the owner acts. A PR, thread or file named in prose or a plain bullet no longer needs a link, in posts and in replies. Every numbered item under the **Waiting on you** header (each question and merge ask) still needs one, and a pull request link there without `/files` is refused with the fix.
+- **Exact Waiting list:** only a line that is exactly `**Waiting on you (n):**` (or `**Waiting on you:**`) opens the list, so a bullet or prose line that names it does not. Bullets after the items that do not follow a question are prose and pass. Link text may hold one level of brackets, as in `[[09:41] Update card](#cmsg_X)`.
+- **No flattened questions:** a line starting `**Question:` must be a numbered item in that list. A bare label line, a bulleted question, a numbered question outside the list or a question in an Update line is refused, and so is a choice left unindented after a question, a "(my pick)" choice with no numbered question above it, or an indented choice with no numbered item above it. A question line also makes a short post take the layout. Every refusal says how to fix the post and not to flatten it to get past the check.
+- **Replies:** the bare-label count now counts only lines that start with `**Question:**`, so prose that talks about the label passes.
+- **Projects skill:** "Link everything worth opening" is now "Link where the owner acts", and the question format says never to write a question outside the numbered list or flatten its choices.
+
 ## 3.19.1 (Codex shell calls get every commit and push check)
 
 **Codex asks you to trust the Toolkit hooks again after this update**, because their matchers changed. Trust them in Codex's hooks review, or the checks do not run.
