@@ -1,5 +1,11 @@
 # Toolkit Changelog
 
+## 3.17.4 (the project chat's newest post is the one to edit)
+
+- **Projects post hook:** a hook cannot read the project chat, so in the main project chat it now uses the session's own reads of it. After a project chat read that reaches the last page, the newest top-level message decides: when it is the coordinator's own post (not a card), even one an earlier session wrote, and no owner message the session saw (a reply in a thread included) came after it, a fresh post is refused and the refusal names that post to edit with an **[HH:MM] Update:** line; when it is the owner's message, the owner counts as having written, so the session posts fresh and earlier posts stay closed to edits. Work-thread sessions (started by a spawn relay, or whose posts land in a thread) skip these reads. Replies under a post, cards and thread launches are not checked by this rule.
+- **Queued owner messages:** an owner message that arrives while a turn runs is recorded first as a queued entry and may never appear as a prompt of its own. The hook now counts it as soon as it is queued, so it never asks for an edit that would land above that message.
+- **Still not seen:** a coordinator session that has neither posted nor read the chat to its last page has nothing to go on, so its first fresh post passes as before. A live check would need the host to hand the chat's newest message to the hook, or a hook that can call the chat-reading tool.
+
 ## 3.17.3 (fewer false continuation refusals)
 
 - **Quoted text:** the continuation guard reads quotes the way bash and PowerShell do. A `|` or `&` inside a quoted search pattern (`rg 'a|b' path`, `--grep="a|b"`) is no longer a pipe, and a quoted path is no longer a command word, so host folder names next to it stay names. A quoted script after `-c`, `-lc`, `-e`, `-p`, `--eval`, `--print`, `-Command` or `/c` is still read as a script when a shell, an interpreter or a script runner (`su`, `script`, `flock`, `wsl`, `awk`, `sed`) comes earlier in the same command; after other programs (`git -C`, `tar -C`, `mkdir -p`) it is an ordinary argument. An explicit cmd shell, which does not quote with single quotes, and unbalanced quotes keep the earlier reading.

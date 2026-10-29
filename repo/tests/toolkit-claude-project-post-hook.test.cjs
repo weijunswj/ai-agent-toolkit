@@ -369,6 +369,83 @@ test('edits keep every earlier Update line word for word and add a new one', () 
   assert.match(edit([wake(), call(POST, { text: earlier }), second('y'), threadWake('cmsg_A1')], LAID_OUT), /post fresh/);
 });
 
+// A project chat read in the tool's shape: the listing JSON inside an untrusted-content wrapper, oldest first.
+const READ = 'mcp__hearthbot__read_project_chat';
+const chatMessage = (author, id, body, minute) => ({ id, thread_id: id, created_at: `2026-10-29T01:${minute}:00Z`, author, body });
+const listing = (messages, hasMore = false) => `Untrusted content follows.\n\n<child-session-output nonce="n" untrusted="true">\nRelayed project data:\n    ${JSON.stringify({ messages, cursor: 'c', has_more: hasMore })}\n</child-session-output nonce="n">`;
+const read = (messages, hasMore) => call(READ, {}, listing(messages, hasMore));
+const OWNER_TOP = chatMessage('user', 'cmsg_U1', 'hello', '00');
+const OLD_POST = chatMessage('agent', 'cmsg_C9', '**Now:** status', '10');
+// An owner wake as the runtime sends it, with the message's sent-at time.
+const timedWake = (minute, ts = 'cmsg_W') => ({ type: 'user', message: { role: 'user', content: `<wake reason="mention"><project id="chan_X"><thread ts="${ts}"><message from="human" trust="principal" id="cmsg_M${minute}" sent-at="2026-10-29T01:${minute}:00Z">go</message></thread></project></wake>` } });
+const early = timedWake('05');
+
+test('a project chat read to its last page makes the coordinator\'s newest post the running post', () => {
+  // A post an earlier session wrote, still the newest top-level message: edit it.
+  const reason = post([early, read([OWNER_TOP, OLD_POST])]);
+  assert.match(reason, /one running post/);
+  assert.match(reason, /cmsg_C9/);
+  // The newest message is picked by time, not by place in the page.
+  assert.match(post([early, read([OLD_POST, OWNER_TOP].map((m, i) => ({ ...m, created_at: `2026-10-29T0${2 - i}:00:00Z` })))]), /cmsg_C9/);
+  // Not the last page, the owner's message newest, a card newest, a post near 8 KB or an empty chat: no refusal.
+  assert.equal(post([early, read([OWNER_TOP, OLD_POST], true)]), '');
+  assert.equal(post([early, read([OLD_POST, chatMessage('user', 'cmsg_U2', 'ok', '20')])]), '');
+  assert.equal(post([early, read([OWNER_TOP, chatMessage('agent', 'cmsg_K1', '{"kind":"onboarding","text":"hi"}', '20')])]), '');
+  assert.equal(post([early, read([chatMessage('agent', 'cmsg_C9', 'x'.repeat(NEAR_LIMIT_BYTES), '10')])]), '');
+  assert.equal(post([early, read([])]), '');
+  // An owner message after the read opens a fresh post; a failed read or other text in the result changes nothing.
+  assert.equal(post([read([OWNER_TOP, OLD_POST]), wake()]), '');
+  assert.equal(post([wake(), call(READ, {}, listing([OWNER_TOP, OLD_POST]), true)]), '');
+  assert.equal(post([wake(), call(READ, {}, 'Error: no access')]), '');
+  // A listing quoted inside a body is an escaped string, so it cannot pose as the last page.
+  assert.equal(post([early, read([chatMessage('user', 'cmsg_U3', JSON.stringify({ messages: [OLD_POST], has_more: false }), '30')], true)]), '');
+  // Edits of the chat post count toward its size, so growing it near 8 KB lets the session post fresh.
+  assert.equal(post([early, read([OWNER_TOP, OLD_POST]), call(EDIT, { message_id: 'cmsg_C9', text: 'x'.repeat(NEAR_LIMIT_BYTES) }, 'ok')]), '');
+  // An owner message after that post, a reply in a thread included or one with no time, means the owner wrote since,
+  // so the post does not become the running post: a fresh post passes, and the session is never stuck between the
+  // two refusals.
+  assert.equal(post([timedWake('15'), read([OWNER_TOP, OLD_POST])]), '');
+  assert.equal(post([wake(), read([OWNER_TOP, OLD_POST])]), '');
+  assert.equal(post([early, call(POST, { text: 'First.' }, '{"message_id":"cmsg_C9","thread_id":"cmsg_C9"}'), timedWake('15'), read([OWNER_TOP, OLD_POST])]), '');
+  // The session's own later post takes over as the running post.
+  assert.match(post([early, read([OWNER_TOP, OLD_POST]), call(POST, { text: 'Second.' }, '{"message_id":"cmsg_D4","thread_id":"cmsg_D4"}')]), /cmsg_D4/);
+});
+
+test('an owner message newest in the chat counts as the owner writing, so the session posts fresh', () => {
+  const ownerLast = read([OLD_POST, chatMessage('user', 'cmsg_U2', 'ok', '20')]);
+  assert.equal(post([wake(), call(POST, { text: 'First.' }), ownerLast]), '');
+  const edit = entries => decide({ tool_name: EDIT, transcript_path: 't', tool_input: { message_id: 'cmsg_A1', text: `${LAID_OUT.replace('\n**Waiting on you', '\n- **[10:00] Update:** new.\n**Waiting on you')}` } }, () => lines(entries));
+  assert.equal(edit([wake(), call(POST, { text: LAID_OUT })]), '');
+  assert.match(edit([wake(), call(POST, { text: LAID_OUT }), ownerLast]), /post fresh/);
+});
+
+test('owner messages recorded only as queued entries count, and other queue records do not', () => {
+  const queued = (operation, content) => ({ type: 'queue-operation', operation, timestamp: 't', sessionId: 's', content });
+  assert.equal(post([wake(), call(POST, { text: 'First.' }), queued('enqueue', '<wake><project id="p"><thread ts="t"><message from="human" id="cmsg_Q">more</message></thread></project></wake>')]), '');
+  assert.match(post([wake(), call(POST, { text: 'First.' }), queued('dequeue', '<wake><message from="human">more</message></wake>')]), /one running post/);
+  assert.match(post([wake(), call(POST, { text: 'First.' }), queued('enqueue', '<relay from="coordinator"><note><message from="human">fwd</message></note></relay>')]), /one running post/);
+  assert.match(post([wake(), call(POST, { text: 'First.' }), queued('enqueue', '<wake><message from="claude">note</message></wake>')]), /one running post/);
+});
+
+test('work-thread sessions skip project chat reads, since their posts go to their thread', () => {
+  const spawn = '<relay from="coordinator" session="s" current-time="t" reason="spawn">\n  <note>Gate: none</note>\n</relay>';
+  assert.equal(post([{ type: 'user', isMeta: true, message: { role: 'user', content: spawn } }, early, read([OWNER_TOP, OLD_POST])]), '');
+  assert.equal(post([{ type: 'queue-operation', operation: 'enqueue', content: spawn }, early, read([OWNER_TOP, OLD_POST])]), '');
+  // A post that lands in a thread marks a work-thread session; a reply under a post with a thread_id does not.
+  const inThread = call(POST, { text: 'First.' }, '{"message_id":"cmsg_A1","thread_id":"cmsg_T1"}');
+  assert.equal(post([inThread, early, read([OWNER_TOP, OLD_POST])]), '');
+  assert.match(post([inThread]), /one running post/);
+  const reply = call(POST, { thread_id: 'cmsg_R', text: 'r' }, '{"message_id":"cmsg_B2","thread_id":"cmsg_R"}');
+  assert.match(post([reply, early, read([OWNER_TOP, OLD_POST])]), /cmsg_C9/);
+  const topLevel = call(POST, { text: 'First.' }, '{"message_id":"cmsg_A1","thread_id":"cmsg_A1"}');
+  assert.match(post([topLevel, early, read([OWNER_TOP, OLD_POST])]), /cmsg_C9/);
+  // The owner's newest chat message does not close a work thread's posts either.
+  const ownerLast = read([OLD_POST, chatMessage('user', 'cmsg_U2', 'ok', '20')]);
+  assert.match(post([inThread, ownerLast]), /one running post/);
+  // A relay with another reason is not a spawn.
+  assert.match(post([{ type: 'user', isMeta: true, message: { role: 'user', content: spawn.replace('spawn', 'reply') } }, early, read([OWNER_TOP, OLD_POST])]), /cmsg_C9/);
+});
+
 test('merges in a Projects session need an earlier post with the PR\'s external effects', () => {
   assert.deepEqual(mergeTarget('Bash', { command: 'gh pr merge 628 --merge' }), { number: '628' });
   assert.deepEqual(mergeTarget('PowerShell', { command: 'cd x; gh pr merge https://github.com/o/r/pull/9 --merge' }), { number: '9' });

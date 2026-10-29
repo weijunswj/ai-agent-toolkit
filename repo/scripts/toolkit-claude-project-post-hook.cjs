@@ -8,6 +8,11 @@
 //   owner message after it, unless that post nears the 8 KB size limit. It must edit the running post instead. A
 //   reply under one of its posts (a post with a thread_id) is exempt from this rule and never becomes the running
 //   post; the link rule still applies to it.
+// - The project chat's newest message: the hook cannot read the chat, so it uses the session's own reads of it. When
+//   a read of the project chat reaches the last page, its newest top-level message decides: the coordinator's own
+//   post (not a card) becomes the running post, even one an earlier session wrote, unless an owner message this
+//   session saw (by its sent-at time) came after it; an owner message there counts as the owner writing. A work-thread session (one started by a spawn relay, or whose posts land in a thread) skips
+//   these reads, since its posts go to its thread and not the chat.
 // - Links: every PR a post names, each number in a list included, must carry a link: link text on that number or a
 //   /pull/<n>/files link in the same text. A bare /pull/<n> link outside link text, without /files, is refused with the fix.
 // - Wording, on every post and reply: no em-dashes or arrows outside code, and at most one bare **Question:** label.
@@ -34,6 +39,9 @@ const fs = require('node:fs');
 
 const POST_TOOL = 'mcp__hearthbot__post_message';
 const EDIT_TOOL = 'mcp__hearthbot__edit_message';
+const CHAT_READ_TOOL = 'mcp__hearthbot__read_project_chat';
+const TRACKED_TOOLS = new Set([POST_TOOL, EDIT_TOOL, CHAT_READ_TOOL]);
+const SPAWN_RELAY = /^\s*<relay\b[^<>]*\breason=["']spawn["']/;
 const PROJECTS_TOOL = /^mcp__hearthbot__/;
 const SHELL_TOOL = /^(?:Bash|PowerShell)$/;
 const MERGE_TOOL = /^mcp__.*merge_pull_request$/i;
@@ -69,7 +77,8 @@ const QUOTE_TAGS = new Set([
   'message', 'note', 'cited', 'relay', 'coordinator-relay',
   'cross-session-message', 'task-notification', 'child-session-output', 'project_claude_message',
 ]);
-// Returns one entry per owner message: the ts of the innermost <thread> around it, or null outside any thread.
+// Returns one entry per owner message: the ts of the innermost <thread> around it (null outside any thread) and its
+// sent-at time (null when the wake gives none).
 function ownerMessages(text) {
   const open = [];
   const found = [];
@@ -82,7 +91,10 @@ function ownerMessages(text) {
     }
     if (name === 'message' && /\bfrom=["']human["']/.test(attributes) && !open.some(item => QUOTE_TAGS.has(item.name))) {
       const thread = [...open].reverse().find(item => item.name === 'thread');
-      found.push(thread ? thread.attributes.match(/\bts=["']([^"']+)["']/)?.[1] || null : null);
+      found.push({
+        thread: thread ? thread.attributes.match(/\bts=["']([^"']+)["']/)?.[1] || null : null,
+        at: attributes.match(/\bsent-at=["']([^"']+)["']/)?.[1] || null,
+      });
     }
     if (!selfClosing) open.push({ name, attributes });
   }
@@ -97,17 +109,63 @@ function bytes(text) {
   return Buffer.byteLength(textOf(text), 'utf8');
 }
 
-// Text the user side of the transcript carries: prompts and wakes, never tool results.
-function userText(entry) {
-  if (entry?.isMeta || entry?.isCompactSummary) return '';
-  let content;
-  if (entry?.type === 'attachment' && entry.attachment?.type === 'queued_command') content = entry.attachment.prompt;
-  else if (entry?.type === 'user') content = entry.message?.content;
-  else return '';
+function promptText(content) {
   // A message with an image arrives as blocks: an image block, then the wake as a text block.
   if (typeof content === 'string') return content;
   if (!Array.isArray(content)) return '';
   return content.filter(block => block?.type === 'text' && typeof block.text === 'string').map(block => block.text).join('\n');
+}
+
+// Text the user side of the transcript carries: prompts and wakes, never tool results. A message that arrives while
+// a turn runs is first recorded as a queued entry, and may never appear as a prompt of its own.
+function userText(entry) {
+  if (entry?.isMeta || entry?.isCompactSummary) return '';
+  if (entry?.type === 'queue-operation') return entry.operation === 'enqueue' ? promptText(entry.content) : '';
+  if (entry?.type === 'attachment' && entry.attachment?.type === 'queued_command') return promptText(entry.attachment.prompt);
+  if (entry?.type === 'user') return promptText(entry.message?.content);
+  return '';
+}
+
+// A work-thread session: one started by a spawn relay (recorded as a meta prompt or a queued entry), or one whose
+// post without a thread_id landed in a thread other than its own message.
+function threadSession(entries) {
+  const pending = new Map();
+  for (const entry of entries) {
+    if (entry?.type === 'queue-operation' && SPAWN_RELAY.test(promptText(entry.content))) return true;
+    if (entry?.type === 'user' && SPAWN_RELAY.test(promptText(entry.message?.content))) return true;
+    const content = entry?.message?.content;
+    if (!Array.isArray(content)) continue;
+    for (const block of content) {
+      if (entry.type === 'assistant' && block?.type === 'tool_use' && block.name === POST_TOOL && !block.input?.thread_id) pending.set(block.id, true);
+      else if (entry.type === 'user' && block?.type === 'tool_result' && pending.delete(block.tool_use_id) && !block.is_error) {
+        let result;
+        try { result = JSON.parse(resultText(block)); } catch { continue; }
+        if (typeof result?.message_id === 'string' && typeof result.thread_id === 'string' && result.thread_id !== result.message_id) return true;
+      }
+    }
+  }
+  return false;
+}
+
+// The newest top-level message in a project chat read that reached the last page, or null. The listing is the JSON
+// object in the result; message bodies inside it are escaped strings, so they cannot fake its shape.
+function chatNewest(text) {
+  const start = text.indexOf('{"messages":');
+  const end = text.lastIndexOf('}');
+  if (start === -1 || end < start) return null;
+  let listing;
+  try { listing = JSON.parse(text.slice(start, end + 1)); } catch { return null; }
+  if (listing?.has_more !== false || !Array.isArray(listing.messages)) return null;
+  let newest = null;
+  for (const message of listing.messages) {
+    if (typeof message?.created_at === 'string' && (!newest || message.created_at >= newest.created_at)) newest = message;
+  }
+  return typeof newest?.id === 'string' && MESSAGE_ID.test(newest.id) ? newest : null;
+}
+
+// A card (onboarding, decision or activity) is a JSON object with a kind, not a post.
+function isCard(body) {
+  try { return typeof JSON.parse(body)?.kind === 'string'; } catch { return false; }
 }
 
 function resultText(block) {
@@ -126,31 +184,52 @@ function readTranscript(lines) {
   let projects = false;
   const pending = new Map();
   const posts = new Map();
+  const entries = [];
   for (const line of lines) {
     if (!line.trim()) continue;
-    let entry;
-    try { entry = JSON.parse(line); } catch { continue; }
-    const owner = ownerMessages(userText(entry));
-    if (owner.length) {
-      // Only an owner reply under the running post itself leaves that post open to edits; any other owner message
-      // (main chat, a work thread, or a reply under an older post) puts every post above it.
-      const runningId = newest;
-      for (const [id, post] of posts) {
-        if (id !== runningId || owner.some(thread => thread !== runningId)) post.ownerAfter = true;
-      }
-      running = null;
+    try { entries.push(JSON.parse(line)); } catch { continue; }
+  }
+  const inThread = threadSession(entries);
+  // The time of the newest owner message seen so far; one with no time counts as later than any chat post.
+  let ownerAt = null;
+  const ownerWrote = owner => {
+    // Only an owner reply under the running post itself leaves that post open to edits; any other owner message
+    // (main chat, a work thread, or a reply under an older post) puts every post above it.
+    const runningId = newest;
+    for (const [id, post] of posts) {
+      if (id !== runningId || owner.some(({ thread }) => thread !== runningId)) post.ownerAfter = true;
     }
+    for (const { at } of owner) {
+      const time = at || '￿';
+      if (ownerAt === null || time > ownerAt) ownerAt = time;
+    }
+    running = null;
+  };
+  for (const entry of entries) {
+    const owner = ownerMessages(userText(entry));
+    if (owner.length) ownerWrote(owner);
     const content = entry?.message?.content;
     if (!Array.isArray(content)) continue;
     for (const block of content) {
       if (entry.type === 'assistant' && block?.type === 'tool_use' && PROJECTS_TOOL.test(String(block.name))) projects = true;
-      if (entry.type === 'assistant' && block?.type === 'tool_use' && (block.name === POST_TOOL || block.name === EDIT_TOOL)) {
+      if (entry.type === 'assistant' && block?.type === 'tool_use' && TRACKED_TOOLS.has(block.name)) {
         pending.set(block.id, { name: block.name, input: block.input || {} });
       } else if (entry.type === 'user' && block?.type === 'tool_result' && pending.has(block.tool_use_id)) {
         const call = pending.get(block.tool_use_id);
         pending.delete(block.tool_use_id);
         if (block.is_error) continue;
-        if (call.name === POST_TOOL) {
+        if (call.name === CHAT_READ_TOOL) {
+          const latest = inThread ? null : chatNewest(resultText(block));
+          // The owner's top-level message is the newest: it sits below every post, as an owner message in the chat.
+          // The coordinator's newest post is the running post only when no owner message seen here (a reply in a
+          // thread included) came after it, so it is never both closed to edits and barred from a fresh post.
+          if (latest?.author === 'user') ownerWrote([{ thread: null, at: latest.created_at }]);
+          else if (latest?.author === 'agent' && typeof latest.body === 'string' && !isCard(latest.body)
+            && !posts.get(latest.id)?.ownerAfter && (ownerAt === null || ownerAt < latest.created_at)) {
+            running = { id: latest.id, size: bytes(latest.body) };
+            newest = latest.id;
+          }
+        } else if (call.name === POST_TOOL) {
           const id = resultText(block).match(MESSAGE_ID)?.[1];
           if (id) posts.set(id, { text: textOf(call.input.text), reply: Boolean(call.input.thread_id), ownerAfter: false });
           if (id && !call.input.thread_id) {
