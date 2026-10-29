@@ -1,6 +1,6 @@
 # Toolkit Changelog
 
-## 3.16.8 (fewer false continuation refusals)
+## 3.17.1 (fewer false continuation refusals)
 
 - **Quoted text:** the continuation guard reads quotes the way bash and PowerShell do. A `|` or `&` inside a quoted search pattern (`rg 'a|b' path`, `--grep="a|b"`) is no longer a pipe, and a quoted path is no longer a command word, so host folder names next to it stay names. A quoted script after `-c`, `-lc`, `-e`, `-p`, `--eval`, `--print`, `-Command` or `/c` is still read as a script when a shell, an interpreter or a script runner (`su`, `script`, `flock`, `wsl`, `awk`, `sed`) comes earlier in the same command; after other programs (`git -C`, `tar -C`, `mkdir -p`) it is an ordinary argument. An explicit cmd shell, which does not quote with single quotes, and unbalanced quotes keep the earlier reading.
 - **Data filters:** a pipe into `tr` or `uniq`, or into the PowerShell cmdlets `Sort-Object`, `Measure-Object`, `Format-Table`, `Format-List`, `Get-Unique` and `Out-Null`, keeps folder names as names. The cmdlets do not count under an explicit cmd shell.
@@ -10,6 +10,11 @@
 - **Deep nesting:** the data proof stops at 64 nested `$(...)` levels and refuses, instead of running out of stack.
 - **Still refused:** a host program in command position, in a substitution, behind a wrapper or built from fragments; pipes into shells, interpreters, `xargs` or unknown commands; inline scripts such as `node -e`; PowerShell script blocks and `"$(...)"` strings that build a path; and `VAR=value` prefixes. Resuming a session with `codex resume` or `claude --resume` is refused as before.
 - **Correction to 3.16.6:** the fixed set of data commands also covers plain assignments and single-quoted here-string stages, which count as commands in that proof.
+
+## 3.17.0 (gate route for Projects thread launches)
+
+- **Gate route hook:** a new Claude Code hook on the Claude Projects thread launch tool holds gate threads to their pinned route. A brief that runs a gate carries a `Gate:` line (G0, G1, G2, G2 recheck, delta review, design challenge, or none). A gate launch must pass the effort and model of its stack registry route and the device the project's `GATE ROUTE:` memory line asks for (local Remote Control in a named folder, cloud, or any). Otherwise the launch is refused, and the refusal lists every wrong field with the exact values to pass. A brief that mentions a gate (a gate label, gate, recheck, reviewer or independent review) with no `Gate:` line is refused until it says which gate it is; an independent review declares `Gate: G2`. Other threads, other tools and a hook that cannot start pass.
+- **Projects skill:** the Threads section says gate briefs carry the `Gate:` line and their route, Binding defines the `GATE ROUTE:` line, and setup writes it at the Bind step from the pinned profile and the owner's answer on where gate work runs. The setup inventory has a row for it.
 
 ## 3.16.7 (credentials and plain-text findings before a push)
 

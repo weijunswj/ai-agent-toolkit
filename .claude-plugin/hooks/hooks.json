@@ -76,6 +76,16 @@
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-claude-project-post-hook.cjs\""
           }
         ]
+      },
+      {
+        "matcher": "^mcp__hearthbot__start_thread$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-claude-project-gate-route-hook.cjs\"",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "PostToolUse": [
