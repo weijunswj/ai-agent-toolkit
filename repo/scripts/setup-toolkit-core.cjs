@@ -19,6 +19,7 @@ const { disableUserPlugin, registrySourceEvidence } = require('./setup-claude-to
 const { AntigravityGlobalSkills, globalCopySummary } = require('./toolkit-antigravity-project-skills.cjs');
 const { CodexHelperDefinitions, describeSetupResult: describeCodexHelpers } = require('./toolkit-codex-helper-agents.cjs');
 const { STATUS: INSTALL_CHECK_STATUS } = require('./toolkit-install-health.cjs');
+const { CodexToolkitInstall, hookGaps } = require('./toolkit-codex-install-state.cjs');
 const { GlobalRules } = require('./toolkit-global-rules.cjs');
 const { defineCodexSetup } = require('./setup-core-codex.cjs');
 const { defineClaudeSetup } = require('./setup-core-claude.cjs');
@@ -121,6 +122,7 @@ function emptySetupChoices() {
     codexDocLimit: '',
     codexPluginAutoRefresh: '',
     codexHelperCapacity: '',
+    codexPluginBehavior: '',
     claudeTopology: '',
     claudePluginBehavior: '',
     claudeSettings: '',
@@ -289,7 +291,11 @@ function parseArgs(argv = process.argv.slice(2)) {
       if (!['root-only', 'broader-native', 'keep'].includes(choice)) throw new Error(`Unsupported --claude-topology choice: ${choice}`);
       args.setupChoices.claudeTopology = choice;
     }
-    else if (arg === '--claude-plugin-behavior') {
+    else if (arg === '--codex-plugin-behavior' || arg.startsWith('--codex-plugin-behavior=')) {
+      const choice = (arg === '--codex-plugin-behavior' ? next() : arg.slice('--codex-plugin-behavior='.length)).toLowerCase();
+      if (!['keep', 'instructions', 'install'].includes(choice)) throw new Error(`Unsupported --codex-plugin-behavior choice: ${choice}`);
+      args.setupChoices.codexPluginBehavior = choice;
+    } else if (arg === '--claude-plugin-behavior') {
       const choice = next().toLowerCase();
       if (!['keep', 'instructions', 'install'].includes(choice)) throw new Error(`Unsupported --claude-plugin-behavior choice: ${choice}`);
       args.setupChoices.claudePluginBehavior = choice;
@@ -445,7 +451,11 @@ function setupPlan(options = {}) {
         id: 'claude_native_plugin_cache',
         title: 'Verify Claude Code native plugin metadata and report manual native refresh action if needed',
         commands: [relNodeCommand('repo/scripts/setup-toolkit.cjs', ['--verify-claude-plugin', '--host', 'claude-code', '--repo-root', quote(repoRoot)])]
-      }) : {
+      }) : ['keep', 'instructions'].includes(choices.codexPluginBehavior) ? {
+        id: 'codex_native_plugin_cache',
+        title: 'Leave the Codex native plugin as it is and report its state from the Codex files',
+        commands: []
+      } : {
         id: 'codex_native_plugin_cache',
         title: 'Verify and refresh only the Codex native plugin cache when stale',
         commands: [
@@ -569,6 +579,8 @@ function printHelp() {
     '                               leave stale Codex plugin cache refresh manual',
     '  --keep-codex-plugin-auto-refresh',
     '                               preserve Codex plugin cache auto-refresh preference',
+    '  --codex-plugin-behavior keep|instructions|install',
+    '                               Codex only; leave the Codex Toolkit plugin as it is, show the refresh commands, or verify and refresh it',
     '  --claude-topology root-only|broader-native|keep',
     '                               Claude-only topology; root-only admits only the Toolkit planning (G0) and build (G1) helpers in Toolkit repos and sets the one-layer CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1 elsewhere',
     '  --claude-plugin-behavior keep|instructions|install',
@@ -1114,17 +1126,41 @@ async function applyHostDelegationControl(args, current, nativeCache = {}) {
   return applyCodexDelegationControl(args, current);
 }
 
-async function collectCurrentState(args) {
+// Codex's helper runtime as the form of Toolkit's own block in config.toml says: the V1 or V2 form
+// Toolkit wrote for that runtime, else unknown. Read from the file only, so the plan never starts
+// Codex; Codex itself is checked after the owner answers, and only for a helper change.
+function codexRuntimeFromConfig() {
+  const block = delegation.inspectCodexDelegationConfig(delegation.codexConfigPath(), RUNTIMES.UNKNOWN);
+  const runtime = { 'toolkit-managed-v1': RUNTIMES.V1, 'toolkit-managed-v2': RUNTIMES.V2 }[block.ownership] || RUNTIMES.UNKNOWN;
+  return {
+    runtime,
+    detector: "the form of Toolkit's helper block in config.toml",
+    from_config: true,
+    detail: runtime === RUNTIMES.UNKNOWN
+      ? 'No Toolkit helper block shows which helper feature Codex runs; setup checks with Codex after you answer.'
+      : `Toolkit's helper block in config.toml is the ${runtimeLabel(runtime)} form; setup checks with Codex after you answer.`,
+  };
+}
+
+// The helper settings in config.toml for that runtime. With no Toolkit block to show the runtime,
+// the reading is the form that has helper settings (V2 when both or neither do), and Codex is
+// checked after the answers.
+function codexDelegationFromConfig(runtime) {
+  const configPath = delegation.codexConfigPath();
+  if (runtime !== RUNTIMES.UNKNOWN) return delegation.inspectCodexDelegationConfig(configPath, runtime);
+  const [v1, v2] = [RUNTIMES.V1, RUNTIMES.V2].map((form) => delegation.inspectCodexDelegationConfig(configPath, form));
+  const reading = v1.status !== 'unconfigured' && v2.status === 'unconfigured' ? v1 : v2;
+  const detail = v1.status === 'unconfigured' && v2.status === 'unconfigured' ? 'No helper limit is set in config.toml.' : reading.detail;
+  return { ...reading, runtime, detail: `${detail} Setup checks which helper feature Codex runs after you answer.` };
+}
+
+function collectCurrentState(args) {
   const audit = runBridgeAuditReadOnly(args);
   const runtime = args.host === 'codex'
-    ? await delegation.inspectCodexMultiAgentRuntime({
-        codexCommand: args.codexCli,
-        codexHome: delegation.defaultCodexHome(),
-        cwd: repoRootFromScript(),
-      })
+    ? codexRuntimeFromConfig()
     : { runtime: RUNTIMES.UNKNOWN, detector: 'not applicable', detail: 'Codex runtime detection is not applicable to this host.' };
   const delegationState = args.host === 'codex'
-    ? delegation.inspectCodexDelegationConfig(delegation.codexConfigPath(), runtime.runtime)
+    ? codexDelegationFromConfig(runtime.runtime)
     : { status: 'unsupported', detail: 'No enforceable host topology profile is available; portable root-first launch gates still apply', client_scope: 'not applicable' };
   const delegationMigrationPreview = args.host === 'codex' && delegationState.status === 'migration-required'
     ? delegation.previewCodexDelegation(delegationState.config_path, {
@@ -1134,10 +1170,11 @@ async function collectCurrentState(args) {
       })
     : null;
   const agentProfile = args.host === 'claude-code' ? agentControl.readProfile('claude-code') : agentControl.readProfile('codex');
+  const managed = inspectManagedCheckout(args, audit);
   return {
     audit,
     runtime,
-    managed: inspectManagedCheckout(args, audit),
+    managed,
     delegation: delegationState,
     delegationMigrationPreview,
     agentProfile,
@@ -1145,9 +1182,11 @@ async function collectCurrentState(args) {
     antigravity: antigravityState(args),
     nativePlugin: args.host === 'claude-code'
       ? inspectClaudeNativePluginStatePreApproval(args)
-      : inspectCodexNativePluginState(args),
+      : { status: 'verification-deferred', detail: 'Read from the Codex files; the Codex plugin commands run only after you choose Install or refresh.' },
     // Read from Claude Code's plugin registry files only; no Claude session is launched before approval.
     ...(args.host === 'claude-code' ? { claudePluginInstall: claudePluginInstallState(new ClaudePluginRegistry()) } : {}),
+    // Read from the Codex files only, against the update source 1.1 recommends; Codex is not started.
+    ...(args.host === 'codex' ? { codexInstall: new CodexToolkitInstall({ managedRoot: recommendedUpdateSource({ managed }, args) }).read({ freshness: true }) } : {}),
   };
 }
 
@@ -1188,10 +1227,14 @@ function recommendedChoice(key, current, args) {
   if (key === 'codexPluginAutoRefresh') return 'enable';
   if (key === 'codexHelperCapacity') {
     if (current.delegation?.status === 'migration-required') return 'keep';
-    return [RUNTIMES.V1, RUNTIMES.V2].includes(current.runtime?.runtime) && !['migration-required', 'unsupported'].includes(current.delegation?.status) && !/enablement is false or non-boolean/.test(current.delegation?.detail || '') ? 'one-helper' : 'keep';
+    // With no Toolkit block the file cannot show the runtime, but one helper suits V1 and V2 alike;
+    // Codex is checked after the answers.
+    const runtimeRead = current.runtime?.from_config === true || [RUNTIMES.V1, RUNTIMES.V2].includes(current.runtime?.runtime);
+    return runtimeRead && !['migration-required', 'unsupported'].includes(current.delegation?.status) && !/enablement is false or non-boolean/.test(current.delegation?.detail || '') ? 'one-helper' : 'keep';
   }
   if (key === 'claudeTopology') return 'root-only';
   if (key === 'claudePluginBehavior') return 'install';
+  if (key === 'codexPluginBehavior') return codexPluginUnchanged(current, args) ? 'keep' : 'install';
   if (key === 'claudeSettings') return claudeSettingsAllSet(current) ? 'keep' : 'enable';
   if (key === 'antigravitySkills') return current.antigravity?.copies ? 'copy' : 'keep';
   return 'keep';
@@ -1331,6 +1374,7 @@ function questionBankApprovalPayload(specs) {
         question_ref: spec.presentation.question_ref,
         section_title: spec.section,
         title: spec.title,
+        ...(spec.report_only ? { report_only: true } : {}),
         what_this_controls: spec.whatThisControls,
         current: {
           effective_behavior: spec.currentState?.effectiveBehavior || spec.current,
@@ -1433,7 +1477,8 @@ function withPresentationMetadata(specs, host = specs[0]?.presentation?.host || 
         section_index: section.index,
         question_index: questionIndex,
         question_ref: `${section.index}.${questionIndex}`,
-        recommended_choice_ref: recommendedChoice.presentation_ref,
+        // A report-only row has no choices, so no recommended letter.
+        recommended_choice_ref: recommendedChoice?.presentation_ref || '',
         total_visible_section_count: sections.length,
         total_visible_question_count: specs.length,
       },
@@ -1628,7 +1673,8 @@ function shortUpdateSource(current, args) {
 
 function shortCodexHelpers(delegation) {
   if (delegation?.status === 'configured' && Number.isInteger(delegation.helper_count)) {
-    return delegation.helper_count === 0 ? 'No helpers' : `${delegation.helper_count} helper${delegation.helper_count === 1 ? '' : 's'}`;
+    const form = { 'toolkit-managed-v1': ' (V1 setting)', 'toolkit-managed-v2': ' (V2 setting)' }[delegation.ownership] || '';
+    return `${delegation.helper_count === 0 ? 'No helpers' : `${delegation.helper_count} helper${delegation.helper_count === 1 ? '' : 's'}`}${form}`;
   }
   if (delegation?.status === 'unconfigured') return 'Not set';
   if (delegation?.status === 'migration-required') return 'Old Toolkit setting';
@@ -1760,6 +1806,105 @@ function claudePluginCurrent(current, args) {
   return 'Setup checks the Claude Code Toolkit plugin after you answer, and installs or refreshes it only if needed.';
 }
 
+// Toolkit in Codex is turned on, exactly one version is installed, it is the version of the update
+// source 1.1 recommends and its files match that copy, Codex's marketplace runs from that source and
+// no earlier setup step is unfinished, so Install or refresh would find nothing to do.
+function codexPluginUnchanged(current, args) {
+  const install = current.codexInstall;
+  return install?.config === 'read' && install.plugin === 'on' && install.versions?.length === 1
+    && Boolean(install.version) && install.version === install.sourceVersion && install.cacheFresh === true
+    && !install.journalPending && Boolean(install.marketplacePath)
+    && samePath(install.marketplacePath, recommendedUpdateSource(current, args));
+}
+
+// Why Install or refresh is recommended, in a few words each.
+function codexPluginNotes(current, args) {
+  const install = current.codexInstall;
+  const notes = [];
+  if (install.older) notes.push(`${install.sourceVersion} available`);
+  else if (install.cacheFresh === false) notes.push('files differ from the update copy');
+  if (!install.marketplacePath) notes.push('no Toolkit marketplace in Codex');
+  else if (!samePath(install.marketplacePath, recommendedUpdateSource(current, args))) notes.push('runs from another folder');
+  if (install.journalPending) notes.push('an earlier setup step did not finish');
+  return notes;
+}
+
+const codexPluginWord = (install) => (install.plugin === 'on' ? 'On' : install.plugin === 'off' ? 'Off' : 'Installed');
+
+function shortCodexPlugin(current, args) {
+  const install = current.codexInstall;
+  if (install.config === 'unreadable') return 'Could not read';
+  if (!install.versions?.length) return 'Not installed';
+  if (install.versions.length > 1) return `${codexPluginWord(install)}, ${install.versions.length} versions installed`;
+  const notes = codexPluginNotes(current, args);
+  return `${codexPluginWord(install)}, ${install.version}${notes.length ? ` (${notes.join('; ')})` : ''}`;
+}
+
+function codexPluginCurrent(current, args) {
+  const install = current.codexInstall;
+  if (install.config === 'unreadable') return 'Setup could not read the Codex config.toml, so it cannot tell whether Codex has Toolkit turned on.';
+  if (!install.versions?.length) return 'Codex has no Toolkit plugin installed.';
+  const state = install.plugin === 'on' ? 'turned on' : install.plugin === 'off' ? 'turned off' : 'on or off unknown';
+  const runs = install.versions.length > 1
+    ? `Codex has ${install.versions.length} Toolkit versions installed (${install.versions.join(', ')}); the newest is ${install.version}`
+    : `Codex runs Toolkit ${install.version}`;
+  const notes = codexPluginNotes(current, args);
+  return `${runs} (${state}); the update copy has ${install.sourceVersion || 'no readable version'}.${notes.length ? ` Install or refresh is recommended: ${notes.join('; ')}.` : ''}`;
+}
+
+// The Toolkit hooks in Codex, from config.toml [hooks.state]; the owner turns them on in Codex.
+function codexHookCells(current, args) {
+  const install = current.codexInstall;
+  const refresh = recommendedChoice('codexPluginBehavior', current, args) === 'install'
+    ? ' Codex may ask you to review the hooks again after a refresh; check /hooks afterwards.' : '';
+  const keep = { short: '', full: '', recommended: `Keep current.${refresh}`.replace(/\.$/, '') };
+  if (install.config === 'unreadable') return { ...keep, short: 'Could not read', full: 'Setup could not read the Codex config.toml, so the Toolkit hook state is unknown.' };
+  if (!install.versions?.length) return { ...keep, short: 'Not installed', full: 'Codex has no Toolkit plugin installed, so no Toolkit hook runs.' };
+  if (install.plugin === 'off') return { ...keep, short: 'Plugin off', full: 'The Toolkit plugin is turned off in Codex, so no Toolkit hook runs.' };
+  if (install.hooks?.status !== 'read' || !install.hooks.entries.length) return { ...keep, short: 'No hooks file', full: 'The installed Toolkit plugin has no readable hooks file.' };
+  const { off, notReviewed, total } = hookGaps(install.hooks);
+  const full = `Toolkit hooks in Codex: ${install.hooks.entries.map((entry) => `${entry.name} ${entry.state === 'not-reviewed' ? 'not reviewed' : entry.state}`).join('; ')}.`;
+  if (!off.length && !notReviewed.length) return { ...keep, short: `All ${total} on`, full };
+  const short = off.length === total ? `All ${total} off`
+    : notReviewed.length === total ? `All ${total} not reviewed`
+      : [off.length ? `Off: ${off.join(', ')}` : '', notReviewed.length ? `Not reviewed: ${notReviewed.join(', ')}` : ''].filter(Boolean).join('; ');
+  const names = [...off, ...notReviewed];
+  const list = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : names[0];
+  return { short, full, recommended: `You turn them on in Codex: open /hooks and turn on ${list}.${refresh}`.replace(/\.$/, '') };
+}
+
+// Codex's project_doc_max_bytes as config.toml has it, against Toolkit's recorded answer, and the
+// answer that would change nothing: Raise it only when the record says raise and Toolkit's markers
+// hold 65536 or more; Leave it only when the record says leave and Toolkit has no block there.
+function codexDocLimitCells(current) {
+  const record = current.audit?.codex_doc_limit_enabled;
+  const install = current.codexInstall;
+  if (install?.config === 'unreadable') return { short: 'Could not read', currentChoice: '' };
+  const { value, toolkit } = install?.docLimit || { value: null, toolkit: false };
+  const leave = record === false && !toolkit ? 'disable' : '';
+  if (record === true && value !== 0 && (value === null || value < 65536)) return { short: `Record says raised; config has ${value ?? 32768}`, currentChoice: '' };
+  if (value === null) return { short: 'Left alone (32 KiB default)', currentChoice: leave };
+  if (value === 0) return { short: 'Project docs off (0)', currentChoice: leave };
+  if (toolkit) return { short: `Raised (${value})`, currentChoice: record === true && value >= 65536 ? 'enable' : '' };
+  return { short: `Yours (${value})`, currentChoice: leave };
+}
+
+// A report-only row: it shows Codex state the owner changes in Codex itself, takes no answer and
+// has no letters, and its Current text is still bound into the bank identity.
+function reportOnlyRow({ id, key, section, title, whatThisControls, current, currentShort, recommendedText }) {
+  return {
+    id, key, section, title, whatThisControls, report_only: true,
+    currentState: { effectiveBehavior: current, verification: 'state-derived' },
+    recommendation: null, choices: [], recommended_text: recommendedText,
+    afterApplying: '', availability: { status: 'available', condition: 'Shown when Codex has a Toolkit home on this PC.' },
+    description: whatThisControls, current, current_short: currentShort,
+    recommended: '', recommended_outcome: recommendedText, recommendation_reason: 'Setup never edits this; you change it in Codex.',
+  };
+}
+
+const answerable = (specs) => specs.filter((spec) => !spec.report_only);
+const unanswered = (specs, args) => answerable(specs).filter((spec) => !choiceForKey(args, spec.key));
+
 function setupQuestionSpecs(args, current) {
   const managedRecommendation = recommendedChoice('managedCheckout', current, args);
   const managedCurrent = currentManagedSourceOutcome(current, args);
@@ -1767,6 +1912,8 @@ function setupQuestionSpecs(args, current) {
   const retentionCurrent = Number.isSafeInteger(retentionRaw) && retentionRaw > 0
     ? `Toolkit maintenance reports are currently kept for ${retentionRaw} day(s).`
     : `The saved retention duration could not be verified; the effective safe fallback is ${DEFAULT_UPDATE_REPORT_RETENTION_DAYS} days.`;
+  const docLimit = codexDocLimitCells(current);
+  const docLimitCurrent = `${currentBooleanOutcome(current.audit?.codex_doc_limit_enabled, "Toolkit's record says keep Codex's instruction limit raised.", "Toolkit's record says leave Codex's instruction limit alone.", "No choice is recorded, so Toolkit leaves Codex's instruction limit alone.")} Codex's config.toml: ${docLimit.short}.`;
   const specs = [
     resolvedQuestion({
       id: 'update-source',
@@ -1889,25 +2036,29 @@ function setupQuestionSpecs(args, current) {
       choices: [
         wizardChoice('enable', 'Raise it', 'Raise a lower value to 65536 now and keep it there at later Codex session starts; every change prints a line and writes an update report.'),
         wizardChoice('disable', 'Leave it', 'Do not raise it; if Toolkit raised it earlier, put the previous value back. Setup still reports the combined size.'),
-        wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${currentBooleanOutcome(current.audit?.codex_doc_limit_enabled, "Toolkit keeps Codex's instruction limit raised.", "Toolkit leaves Codex's instruction limit alone.", "No choice is recorded, so Toolkit leaves Codex's instruction limit alone.")}`),
+        wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${docLimitCurrent}`),
       ],
-      currentChoice: booleanCurrentChoice(current.audit?.codex_doc_limit_enabled),
+      // Read from config.toml: the record alone can disagree with the file Codex reads.
+      currentChoice: docLimit.currentChoice,
       recommendation: {
         value: recommendedChoice('codexDocLimit', current, args),
         outcome: "Raise Codex's instruction limit to 65536.",
         reason: 'Repository rules reach Codex whole; the change is one marked line that is backed up and reversible.',
       },
       selected: args.setupChoices.codexDocLimit,
-      currentShort: shortOnOff(current.audit?.codex_doc_limit_enabled, 'Raised', 'Left alone'),
-      current: currentBooleanOutcome(current.audit?.codex_doc_limit_enabled, "Toolkit keeps Codex's instruction limit raised.", "Toolkit leaves Codex's instruction limit alone.", "No choice is recorded, so Toolkit leaves Codex's instruction limit alone."),
-      currentVerification: typeof current.audit?.codex_doc_limit_enabled === 'boolean' ? 'verified' : 'defaulted',
+      currentShort: docLimit.short,
+      current: docLimitCurrent,
+      currentVerification: current.codexInstall?.config === 'unreadable' ? 'unverified' : 'state-derived',
       afterApplying: 'This stores your choice in Toolkit state and, on a yes, edits `~/.codex/config.toml` at the end of setup. Start a new Codex session to use the new limit.',
     }),
   ];
 
   if (args.host === 'codex') {
     const v1 = current.runtime?.runtime === RUNTIMES.V1;
-    if (args.setupChoices.codexHelperCapacity === 'migrate' && current.delegation?.status !== 'migration-required') throw new Error('Selected helper setting remains unapplied. No exact Toolkit-managed legacy setting is available to migrate; choose an ordinary helper setting or keep.');
+    // Toolkit's V1 block on a Codex that now runs V2 needs migrating; the plan reads only the block,
+    // so migration is offered and checked with Codex after the answers.
+    const migrateAfterCheck = current.runtime?.from_config === true && current.delegation?.ownership === 'toolkit-managed-v1';
+    if (args.setupChoices.codexHelperCapacity === 'migrate' && current.delegation?.status !== 'migration-required' && !migrateAfterCheck) throw new Error('Selected helper setting remains unapplied. No exact Toolkit-managed legacy setting is available to migrate; choose an ordinary helper setting or keep.');
     if (v1 && (args.setupChoices.codexHelperCapacity === 'root-only' || (args.setupChoices.codexHelperCapacity === 'custom' && args.codexHelperCount !== null && args.codexHelperCount < 1))) throw new Error('Codex cannot limit helpers to zero; choose one helper or a custom number of at least 1. Setup wrote nothing.');
     specs.push(resolvedQuestion({
       id: 'codex-helper-capacity', key: 'codexHelperCapacity', section: 'Computer performance',
@@ -1915,20 +2066,24 @@ function setupQuestionSpecs(args, current) {
       whatThisControls: 'How many helpers the main Codex session can open; helpers cannot start helpers under Toolkit rules. ' + (v1 ? 'Codex cannot limit helpers to zero; choose one helper or a custom number.' : 'Root-only is an explicit opt-out.'),
       choices: [
         wizardChoice('one-helper', 'One helper', 'Allow one helper for planning (G0) and build (G1) evidence gathering and validation.'),
-        ...(!v1 ? [wizardChoice('root-only', 'No helpers', 'Explicitly opt out of helpers.')] : []),
+        ...(!v1 ? [wizardChoice('root-only', 'No helpers', current.runtime?.runtime === RUNTIMES.UNKNOWN
+          ? 'Explicitly opt out of helpers. Checked with Codex after you answer: Codex V1 (multi_agent) cannot limit helpers to zero, and then setup writes nothing.'
+          : 'Explicitly opt out of helpers.')] : []),
         wizardChoice('custom', 'Choose a number', v1 ? 'Choose a whole helper count of at least 1; more than one needs RAM-risk approval.' : 'Choose a non-negative helper count; more than one needs RAM-risk approval.'),
         wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${current.delegation?.detail || 'Helper capacity has not been verified.'}`),
         ...(current.delegation?.status === 'migration-required' ? [wizardChoice('migrate', 'Migrate legacy setting', 'Preview and approve migration of the exact Toolkit legacy block.')] : []),
+        ...(migrateAfterCheck ? [wizardChoice('migrate', 'Migrate legacy setting', 'If Codex now runs the V2 (multi_agent_v2) helper feature, checked with Codex after you answer, preview and approve moving the V1 Toolkit block to it; otherwise setup stops before writing.')] : []),
         ...(String(current.delegation?.ownership || '').startsWith('toolkit-') ? [wizardChoice('remove', 'Remove Toolkit setting', 'Remove only the owned block after approval.')] : []),
         wizardChoice('skip', 'Skip', 'Write no helper setting this run.'),
       ],
-      // One helper is already configured, so setup would leave config.toml as it is either way.
-      currentChoice: current.delegation?.status === 'configured' && current.delegation?.helper_count === 1 ? 'one-helper' : '',
+      // One helper is already configured for the known runtime, so setup would leave config.toml as
+      // it is either way. With the runtime unknown, the same file can still need a change.
+      currentChoice: current.runtime?.runtime !== RUNTIMES.UNKNOWN && current.delegation?.status === 'configured' && current.delegation?.helper_count === 1 ? 'one-helper' : '',
       recommendation: { value: recommendedChoice('codexHelperCapacity', current, args), outcome: recommendedChoice('codexHelperCapacity', current, args) === 'one-helper' ? 'Allow one helper.' : 'Keep the current configuration.', reason: recommendedChoice('codexHelperCapacity', current, args) === 'one-helper' ? 'G0 and G1 leads need helpers for independent work.' : 'This state needs an explicit compatibility or repair choice before helper settings can change.' },
       selected: args.setupChoices.codexHelperCapacity,
       current: current.delegation?.detail || 'Helper capacity has not been verified.',
       currentShort: shortCodexHelpers(current.delegation),
-      currentVerification: current.runtime?.runtime === RUNTIMES.UNKNOWN ? 'unverified' : 'verified',
+      currentVerification: current.runtime?.runtime === RUNTIMES.UNKNOWN ? 'unverified' : (current.runtime?.from_config ? 'state-derived' : 'verified'),
       afterApplying: 'Setup presents any required replacement proposal before writing, backs up config.toml, and asks Codex to load it. Fully restart Codex and complete one successful turn.',
     }));
     specs.push(resolvedQuestion({
@@ -1953,8 +2108,44 @@ function setupQuestionSpecs(args, current) {
       currentShort: shortOnOff(current.audit?.codex_plugin_auto_refresh_enabled),
       current: currentBooleanOutcome(current.audit?.codex_plugin_auto_refresh_enabled, 'Automatic Codex Toolkit maintenance is on.', 'Automatic Codex Toolkit maintenance is off; the installed plugin remains in place.', 'The automatic Codex maintenance preference could not be verified; setup will not claim that it is active.'),
       currentVerification: typeof current.audit?.codex_plugin_auto_refresh_enabled === 'boolean' ? 'verified' : 'unverified',
-      afterApplying: 'The approved setup always verifies the current native Toolkit plugin. If files change, setup may update the Codex plugin cache and Windows hook launchers; then open `/hooks` in the Codex app and trust the updated Toolkit hooks. Turning maintenance off only changes future Toolkit state and does not uninstall the plugin.',
+      afterApplying: 'This is about later Codex session starts; "Keep Toolkit available in Codex?" decides what this run does to the plugin. If maintenance refreshes the plugin cache and Windows hook launchers, open `/hooks` in the Codex app and turn the updated Toolkit hooks on. Turning maintenance off only changes future Toolkit state and does not uninstall the plugin.',
     }));
+    if (current.codexInstall?.present) {
+      const unchanged = codexPluginUnchanged(current, args);
+      const notes = codexPluginNotes(current, args);
+      specs.push(resolvedQuestion({
+        id: 'codex-toolkit-plugin',
+        key: 'codexPluginBehavior',
+        section: 'Other coding apps',
+        title: 'Keep Toolkit available in Codex?',
+        prompt: 'Codex Toolkit choice',
+        whatThisControls: 'Whether setup verifies and refreshes the Toolkit plugin in Codex this run, only shows the commands, or leaves it as it is. This row is read from the Codex files; the Codex plugin commands run only after you choose Install or refresh. This never changes Claude Code.',
+        choices: [
+          wizardChoice('install', 'Install or refresh', 'Run the Codex plugin commands to verify Toolkit in Codex, and refresh its cache from the update copy when it is missing, off, older or different.'),
+          wizardChoice('instructions', 'Show instructions only', 'Make no plugin change and show the Codex plugin commands to run yourself.'),
+          wizardChoice('keep', 'Keep current', `Make no plugin change and run no Codex command this run: ${codexPluginCurrent(current, args)}`),
+        ],
+        recommendation: unchanged
+          ? { value: 'keep', outcome: 'Leave the Codex plugin as it is.', reason: 'Codex already runs the current Toolkit from the update copy, so a refresh would change nothing.' }
+          : { value: 'install', outcome: 'Verify and refresh the Toolkit plugin in Codex.', reason: notes.length ? `Codex does not run the current Toolkit from the update copy: ${notes.join('; ')}.` : 'Codex does not run the current Toolkit from the update copy.' },
+        selected: args.setupChoices.codexPluginBehavior,
+        current: codexPluginCurrent(current, args),
+        currentShort: shortCodexPlugin(current, args),
+        currentVerification: current.codexInstall.config === 'unreadable' ? 'unverified' : 'state-derived',
+        afterApplying: 'If the plugin files change, fully restart Codex, then open `/hooks` and turn the Toolkit hooks on; Codex may ask you to review them again.',
+      }));
+      const hooks = codexHookCells(current, args);
+      specs.push(reportOnlyRow({
+        id: 'codex-toolkit-hooks',
+        key: 'codexHooks',
+        section: 'Other coding apps',
+        title: 'Toolkit hooks in Codex',
+        whatThisControls: "Whether Codex runs each Toolkit hook. Codex keeps this in ~/.codex/config.toml ([hooks.state]) and you change it in Codex's /hooks; setup only reports it and never edits it. A hook that is off or not reviewed does not run, so its check is skipped.",
+        current: hooks.full,
+        currentShort: hooks.short,
+        recommendedText: hooks.recommended,
+      }));
+    }
   } else {
     const activeProfile = current.agentProfile || agentControl.readProfile('claude-code');
     const topologyCurrent = `Current topology: ${activeProfile.topology || 'root-only'}. ${claudeSubagentDepthOutcome(current.claudeSubagentDepth)} ${claudeHookNormalFolderOutcome(activeProfile.topology)}`;
@@ -2027,7 +2218,7 @@ function setupQuestionSpecs(args, current) {
     }));
   }
   if (current.antigravity?.installed || current.antigravity?.copies) specs.push(antigravitySkillsQuestion(args, current));
-  foldTwinSelections(args, specs);
+  foldTwinSelections(args, answerable(specs));
 
   return withPresentationMetadata(specs.filter((spec) => args.host === 'codex' || spec.key !== 'codexDocLimit').map((spec) => ({
     ...spec,
@@ -2048,9 +2239,7 @@ function plannedQuestionBank(args, current) {
   const planned = clonedSetupArgs(args);
   const initialSpecs = setupQuestionSpecs(planned, current);
   assertManagedCheckoutChoiceAvailable(planned, initialSpecs);
-  for (const spec of initialSpecs) {
-    if (!choiceForKey(planned, spec.key)) assignChoice(planned, spec.key, spec.recommended);
-  }
+  for (const spec of unanswered(initialSpecs, planned)) assignChoice(planned, spec.key, spec.recommended);
   if (planned.host === 'claude-code') resolveClaudeTopology(planned, current);
   const resolvedSpecs = setupQuestionSpecs(planned, current);
   assertManagedCheckoutChoiceAvailable(planned, resolvedSpecs);
@@ -2080,6 +2269,10 @@ function renderQuestionRows(specs, onlyRef = '') {
     lines.push('');
     lines.push(`**Verification:** ${spec.currentState?.verification || 'unverified'}`);
     lines.push('');
+    if (spec.report_only) {
+      lines.push(`**Recommended:** ${spec.recommended_text}`, '', `**Why:** ${spec.recommendation_reason}`, '', '**Choices:** none; this row only reports.', '', '---', '');
+      continue;
+    }
     lines.push(`**Recommended:** ${spec.presentation.recommended_choice_ref} - ${choiceLabel(spec, spec.recommended)}`);
     lines.push('');
     lines.push(`**Recommended outcome:** ${spec.recommended_outcome}`);
@@ -2110,11 +2303,13 @@ function renderCompactQuestionTable(specs, markdown = true) {
   // An outcome that only repeats the label is left out too.
   const keepsCurrent = (spec) => spec.recommended === 'keep' || spec.folded_into === spec.recommended;
   const recommended = (spec) => {
+    if (spec.report_only) return spec.recommended_text;
     const label = choiceLabel(spec, spec.recommended);
     const effect = keepsCurrent(spec) || spec.recommended_outcome === label ? '' : `: ${spec.recommended_outcome}`;
     return `${spec.presentation.recommended_choice_ref}. ${label}${effect}`;
   };
-  const others = (spec) => spec.choices.filter((choice) => choice.value !== spec.recommended).map((choice) => `${choice.presentation_ref}. ${choice.label}`);
+  const others = (spec) => (spec.report_only ? ['(report only)']
+    : spec.choices.filter((choice) => choice.value !== spec.recommended).map((choice) => `${choice.presentation_ref}. ${choice.label}`));
   const selected = (spec) => (spec.selected ? `${choiceReference(spec, spec.selected)}. ${choiceLabel(spec, spec.selected)}` : '');
   const lines = [];
   let section = '';
@@ -2153,7 +2348,8 @@ function renderQuestionBankHeader(specs, markdown = true, quickIndex = true) {
   if (!quickIndex) return lines;
   lines.push('Quick index', '');
   for (const spec of specs) {
-    lines.push(`${spec.presentation.question_ref} ${spec.title} - Recommended: ${spec.presentation.recommended_choice_ref} - ${choiceLabel(spec, spec.recommended)}`);
+    lines.push(`${spec.presentation.question_ref} ${spec.title} - Recommended: ${spec.report_only ? spec.recommended_text
+      : `${spec.presentation.recommended_choice_ref} - ${choiceLabel(spec, spec.recommended)}`}`);
   }
   lines.push('');
   return lines;
@@ -2162,7 +2358,7 @@ function renderQuestionBankHeader(specs, markdown = true, quickIndex = true) {
 function changedOnlyExample(specs) {
   const preferred = ['automatic-updates', 'update-reports'];
   const picked = preferred.map((id) => specs.find((spec) => spec.id === id)).filter(Boolean);
-  for (const spec of specs) {
+  for (const spec of answerable(specs)) {
     if (picked.length >= 2) break;
     if (!picked.includes(spec)) picked.push(spec);
   }
@@ -2174,7 +2370,7 @@ function changedOnlyExample(specs) {
 }
 
 function buildNonTtyAnswerPlan(specs, args) {
-  const unresolved = specs.filter((spec) => !choiceForKey(args, spec.key));
+  const unresolved = unanswered(specs, args);
   const unresolvedIds = new Set(unresolved.map((spec) => spec.id));
   const byId = new Map(specs.map((spec) => [spec.id, spec]));
   const questions = unresolved.map((spec, index) => ({
@@ -2416,6 +2612,12 @@ function documentationFixtureState() {
     antigravity: { installed: true, copies: false },
     delegation: { status: 'configured', ownership: 'toolkit-managed-v2', helper_count: 0, detail: 'documentation fixture' },
     nativePlugin: { status: 'fresh' },
+    // Codex runs the update copy's Toolkit (an example version) with every hook on.
+    codexInstall: {
+      present: true, config: 'read', plugin: 'on', versions: ['1.0.0'], version: '1.0.0', sourceVersion: '1.0.0', older: false,
+      marketplacePath: managedPath, cacheFresh: true, journalPending: false, docLimit: { value: 65536, toolkit: true },
+      hooks: { status: 'read', entries: ['Session start updates', 'Prompt check', 'Shell and agent check', 'File edit check', 'Checkpoint after tool use', 'Checkpoint at stop'].map((name) => ({ name, state: 'on' })) },
+    },
   };
 }
 
@@ -2494,6 +2696,7 @@ function assignChoice(args, key, choice) {
   else if (key === 'codexDocLimit') args.setupChoices.codexDocLimit = choice;
   else if (key === 'codexPluginAutoRefresh') args.setupChoices.codexPluginAutoRefresh = choice;
   else if (key === 'codexHelperCapacity') args.setupChoices.codexHelperCapacity = choice;
+  else if (key === 'codexPluginBehavior') args.setupChoices.codexPluginBehavior = choice;
   else if (key === 'claudeTopology') args.setupChoices.claudeTopology = choice;
   else if (key === 'claudePluginBehavior') args.setupChoices.claudePluginBehavior = choice;
   else if (key === 'claudeSettings') args.setupChoices.claudeSettings = choice;
@@ -2508,6 +2711,7 @@ function choiceForKey(args, key) {
   if (key === 'codexDocLimit') return args.setupChoices.codexDocLimit;
   if (key === 'codexPluginAutoRefresh') return args.setupChoices.codexPluginAutoRefresh;
   if (key === 'codexHelperCapacity') return args.setupChoices.codexHelperCapacity;
+  if (key === 'codexPluginBehavior') return args.setupChoices.codexPluginBehavior;
   if (key === 'claudeTopology') return args.setupChoices.claudeTopology;
   if (key === 'claudePluginBehavior') return args.setupChoices.claudePluginBehavior;
   if (key === 'claudeSettings') return args.setupChoices.claudeSettings;
@@ -2618,12 +2822,15 @@ function parseConciseQuestionBankAnswer(input, specs, options = {}) {
       answerText = optionalEnvelope.payload;
     }
   }
+  const identity = specs[0]?.presentation.bank_identity || questionBankSemanticIdentity(specs);
+  // A report-only row takes no answer, so it has no selection and no changed-only reference.
+  specs = answerable(specs);
   if (isAllRecommendedAnswer(answerText)) {
     return {
       mode: 'all-recommended',
       binding_mode: requireBankReference ? 'displayed-reference' : 'same-process',
       bank_reference: suppliedReference,
-      bank_identity: specs[0]?.presentation.bank_identity || questionBankSemanticIdentity(specs),
+      bank_identity: identity,
       selections: specs.map((spec) => ({
         question_id: spec.id,
         question_ref: spec.presentation.question_ref,
@@ -2664,7 +2871,7 @@ function parseConciseQuestionBankAnswer(input, specs, options = {}) {
     mode: 'recommended-except',
     binding_mode: requireBankReference ? 'displayed-reference' : 'same-process',
     bank_reference: suppliedReference,
-    bank_identity: specs[0]?.presentation.bank_identity || questionBankSemanticIdentity(specs),
+    bank_identity: identity,
     selections: specs.map((spec) => byQuestionId.get(spec.id) || ({
       question_id: spec.id,
       question_ref: spec.presentation.question_ref,
@@ -2680,6 +2887,7 @@ function assertQuestionBankAnswerBinding(parsed, specs) {
   if (!parsed || parsed.bank_identity !== currentIdentity || parsed.bank_reference !== currentReference) {
     throw new Error('Setup question bank answer does not match the exact rendered bank.');
   }
+  specs = answerable(specs);
   if (parsed.selections.length !== specs.length) {
     throw new Error('Setup question bank answer does not cover the exact rendered bank.');
   }
@@ -2840,19 +3048,17 @@ async function answerSetupQuestionBank(args, current, options = {}) {
   const isTTY = options.isTTY === undefined ? process.stdin.isTTY === true : options.isTTY === true;
   const initialSpecs = setupQuestionSpecs(args, current);
   assertManagedCheckoutChoiceAvailable(args, initialSpecs);
-  const initialMissingCount = initialSpecs.filter((spec) => !choiceForKey(args, spec.key)).length;
+  const initialMissingCount = unanswered(initialSpecs, args).length;
   let answerSource = initialMissingCount ? (isTTY ? 'interactive' : 'stdin') : 'explicit flags';
   let completeStdinConsumed = false;
 
   if (args.yesRecommended) {
     answerSource = 'user-approved yes-recommended';
-    for (const spec of initialSpecs) {
-      if (!choiceForKey(args, spec.key)) assignChoice(args, spec.key, spec.recommended);
-    }
+    for (const spec of unanswered(initialSpecs, args)) assignChoice(args, spec.key, spec.recommended);
   }
 
   let specs = setupQuestionSpecs(args, current);
-  let missing = specs.filter((spec) => !choiceForKey(args, spec.key));
+  let missing = unanswered(specs, args);
   let needsCustomPath = args.setupChoices.managedCheckout === 'custom' && !args.repoRootExplicit;
   let needsRetentionDetails = args.setupChoices.updateReportRetention === 'custom' && !args.updateReportRetentionDaysExplicit;
   let needsHelperDetails = args.setupChoices.codexHelperCapacity === 'custom'
@@ -2861,7 +3067,7 @@ async function answerSetupQuestionBank(args, current, options = {}) {
   const needsCodexProposalInput = !isTTY && needsPipedCodexProposalApproval(args, current);
   const conciseAllowed = !args.yesRecommended
     && initialMissingCount > 0
-    && initialMissingCount === initialSpecs.length;
+    && initialMissingCount === answerable(initialSpecs).length;
   const nonTtyAnswerMode = !needsPromptedAnswers
     ? 'non-tty-resolved'
     : (conciseAllowed ? 'non-tty' : 'non-tty-line-by-line');
@@ -2892,7 +3098,7 @@ async function answerSetupQuestionBank(args, current, options = {}) {
   let approvedBankAnswer = null;
   let rl = null;
 
-  if (isTTY && missing.length && initialMissingCount === initialSpecs.length) {
+  if (isTTY && missing.length && initialMissingCount === answerable(initialSpecs).length) {
     rl = options.createReadlineInterface
       ? options.createReadlineInterface()
       : readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -2908,7 +3114,7 @@ async function answerSetupQuestionBank(args, current, options = {}) {
         ? 'interactive all recommended'
         : 'interactive recommended except listed changes';
       specs = setupQuestionSpecs(args, current);
-      missing = specs.filter((spec) => !choiceForKey(args, spec.key));
+      missing = unanswered(specs, args);
       needsCustomPath = args.setupChoices.managedCheckout === 'custom' && !args.repoRootExplicit;
       needsRetentionDetails = args.setupChoices.updateReportRetention === 'custom' && !args.updateReportRetentionDaysExplicit;
       needsHelperDetails = args.setupChoices.codexHelperCapacity === 'custom'
@@ -2934,7 +3140,7 @@ async function answerSetupQuestionBank(args, current, options = {}) {
       completeStdinConsumed = true;
       lines = [];
       specs = setupQuestionSpecs(args, current);
-      missing = specs.filter((spec) => !choiceForKey(args, spec.key));
+      missing = unanswered(specs, args);
       needsCustomPath = args.setupChoices.managedCheckout === 'custom' && !args.repoRootExplicit;
       needsRetentionDetails = args.setupChoices.updateReportRetention === 'custom' && !args.updateReportRetentionDaysExplicit;
       needsHelperDetails = args.setupChoices.codexHelperCapacity === 'custom'
@@ -2955,7 +3161,7 @@ async function answerSetupQuestionBank(args, current, options = {}) {
     await consumeNonTtyAnswerPlan(nonTtyAnswerPlan, displayedSpecs, args, lines);
     completeStdinConsumed = true;
     specs = setupQuestionSpecs(args, current);
-    missing = specs.filter((spec) => !choiceForKey(args, spec.key));
+    missing = unanswered(specs, args);
     needsCustomPath = args.setupChoices.managedCheckout === 'custom' && !args.repoRootExplicit;
     needsRetentionDetails = args.setupChoices.updateReportRetention === 'custom' && !args.updateReportRetentionDaysExplicit;
     needsHelperDetails = args.setupChoices.codexHelperCapacity === 'custom'
@@ -3023,7 +3229,7 @@ async function answerSetupQuestionBank(args, current, options = {}) {
   applySetupChoices(args, current);
   console.log('');
   console.log('Setup choices confirmed before writes:');
-  for (const spec of confirmedSpecs) {
+  for (const spec of answerable(confirmedSpecs)) {
     const value = choiceForKey(args, spec.key);
     const choice = selectedChoice(spec, value);
     if (!choice || choice.value !== value) throw new Error(`Setup question bank canonical value is inconsistent for ${spec.id}.`);
@@ -3670,9 +3876,13 @@ function printFinalSummary({ args, current, managed, localClone, nativeCache, de
     console.log(`Codex plugin status: ${unknown(nativeCache.status)}`);
     console.log(`Codex plugin updated this run: ${yesNo(nativeCache.updated_this_run === true)}`);
     console.log(`Codex: open /hooks and trust the updated Toolkit hooks: ${yesNo(nativeCache.restart_required === true)}`);
-    console.log(`Codex hook trust status: ${unknown(nativeCache.hook_trust_status || 'verification-unavailable')}`);
-    console.log(`Codex hook execution status: ${unknown(nativeCache.hook_execution_status || 'verification unavailable; open /hooks in Codex')}`);
-    console.log(`Codex hook trust action: Open /hooks and verify the enabled Toolkit hooks belong to the installed ai-agent-toolkit plugin at version ${unknown(nativeCache.installed_version || nativeCache.expected_version)}. ${unknown(nativeCache.hook_trust_action || '')}`);
+    if (nativeCache.status === 'instructions only') {
+      console.log('Codex plugin instructions: no plugin change was made. To refresh it, say "refresh toolkit" in Codex, or run node "<managed-toolkit-checkout>/repo/scripts/setup-codex-toolkit-plugin.cjs" --write --json --repo-root "<managed-toolkit-checkout>".');
+    }
+    // Read from config.toml [hooks.state]; setup never edits it.
+    console.log(`Codex hook trust status: ${unknown(nativeCache.hook_trust_status)}`);
+    console.log(`Codex hook execution status: ${unknown(nativeCache.hook_execution_status)}`);
+    console.log(`Codex hook trust action: ${unknown(nativeCache.hook_trust_action)}`);
   } else {
     console.log('Codex plugin status: not checked for this host');
     console.log('Codex plugin mutation: no');
@@ -3758,6 +3968,7 @@ class ToolkitSetupExecution {
     this.#current = await collectCurrentState(args);
     args.codexRuntime = this.#current.runtime.runtime;
     this.#questionBank = await answerSetupQuestionBank(args, this.#current);
+    if (args.host === 'codex') this.#current = await detectCodexRuntimeAfterApproval(args, this.#current);
     await confirmSelectedDelegationProposal(args, this.#current, this.#questionBank);
   }
 
@@ -3769,7 +3980,12 @@ class ToolkitSetupExecution {
 
   #nativePluginSetup() {
     const args = this.#args;
-    if (args.host !== 'claude-code') return runCodexNativePluginSetup(args);
+    if (args.host !== 'claude-code') {
+      // With no Codex home the question is not shown, and setup installs as before.
+      const choice = args.setupChoices.codexPluginBehavior || 'install';
+      if (choice === 'install') return runCodexNativePluginSetup(args);
+      return codexPluginFromFiles(args, choice === 'keep' ? 'kept' : 'instructions only');
+    }
     return args.setupChoices.claudePluginBehavior === 'install' ? runClaudeNativePluginSetup(args) : verifyCurrentClaudeNativeEnforcement(args);
   }
 
@@ -3915,12 +4131,11 @@ if (require.main === module) {
 // Host lanes (setup-core-codex.cjs, setup-core-claude.cjs) receive the core helpers they use.
 const {
   selectedHelperCount, needsPipedCodexProposalApproval, confirmSelectedDelegationProposal,
-  applyCodexDelegationControl, inspectCodexNativePluginState, setupCodexArgs,
+  applyCodexDelegationControl, detectCodexRuntimeAfterApproval, codexPluginFromFiles,
   runCodexNativePluginSetup, runCodexGlobalRules
 } = defineCodexSetup({
   RUNTIMES, defaultCodexPluginCachePath, expectedToolkitVersion, nodeScriptArgs,
-  printDelegationPreview, printDelegationRemovalPreview, runCommand, runNativePluginJsonPhase,
-  scriptRootForReadOnlyProbe, setupGlobalRules
+  printDelegationPreview, printDelegationRemovalPreview, runNativePluginJsonPhase, setupGlobalRules
 });
 const {
   inspectClaudeNativePluginStatePreApproval, resolveClaudeTopology, claudeSettingsOutcome, claudeSettingsAllSet,

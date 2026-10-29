@@ -2915,6 +2915,17 @@ function nativePluginCacheStatus(args, state) {
   return { status: '' };
 }
 
+// The install check's Codex notice (Codex runs an older Toolkit, or Toolkit hooks are off there),
+// printed once per run. Session-start stdout reaches only the session, so the line asks it to tell
+// the owner.
+let codexReminderPrinted = false;
+function printCodexReminder(check) {
+  const codex = (check.checks || []).find((entry) => entry.id === 'codex-toolkit' && entry.notice === true);
+  if (!codex || codexReminderPrinted) return;
+  codexReminderPrinted = true;
+  console.log(`Toolkit reminder for the owner: ${sanitizeOutputMessage(codex.summary)} Say this reminder to the owner once, in your first reply.`);
+}
+
 // The installed Claude Code session-start hook checks the install after its maintenance.
 // Claude Code runs Toolkit in place from the managed checkout, so the check runs in a fresh
 // process: after an update it uses the updated code and stack registry on disk.
@@ -2927,8 +2938,13 @@ function sessionStartInstallCheck(args, hubPath, codexGlobalRules = null) {
     timeout: 60000
   });
   if (result.ok) {
-    try { return JSON.parse(result.stdout.trim().split(/\r?\n/).pop()); }
+    let check = null;
+    try { check = JSON.parse(result.stdout.trim().split(/\r?\n/).pop()); }
     catch { /* reported below */ }
+    if (check) {
+      printCodexReminder(check);
+      return check;
+    }
   }
   const reason = sanitizeOutputMessage(commandOutput(result)) || 'no result';
   return { status: 'action-required', checks: [], actions: [`The Toolkit install check could not run (${reason}). Run \`setup toolkit\`.`] };

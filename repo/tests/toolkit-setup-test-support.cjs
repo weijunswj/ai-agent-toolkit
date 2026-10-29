@@ -142,6 +142,9 @@ function createMinimalSetupRepo(root, options = {}) {
   }, null, 2));
   writeFile(path.join(root, 'repo', 'scripts', 'setup-codex-toolkit-plugin.cjs'), [
     "'use strict';",
+    // Setup's Codex file reader requires this script for its TOML helpers; that require gets the
+    // real helpers, and only running it as a command is faked.
+    `if (require.main !== module) { module.exports = require(${JSON.stringify(path.join(repoRoot, 'repo', 'scripts', 'setup-codex-toolkit-plugin.cjs'))}); return; }`,
     "const fs = require('node:fs');",
     "const path = require('node:path');",
     "const write = process.argv.includes('--write');",
@@ -233,12 +236,13 @@ function createGitBackedSetupRepo(root, options = {}) {
 }
 
 // The real setup scripts plus every local script they require, followed through require('./x.cjs').
+// The Codex plugin helper stays the fake one, which hands a require on to the real helpers.
 function realSetupScriptClosure() {
   const names = new Set();
   const pending = ['setup-toolkit.cjs', 'setup-toolkit-core.cjs', 'setup-claude-toolkit-plugin.cjs'];
   while (pending.length) {
     const name = pending.pop();
-    if (names.has(name)) continue;
+    if (names.has(name) || name === 'setup-codex-toolkit-plugin.cjs') continue;
     names.add(name);
     const text = fs.readFileSync(path.join(repoRoot, 'repo', 'scripts', name), 'utf8');
     for (const match of text.matchAll(/require\('\.\/([\w./-]+\.cjs)'\)/g)) pending.push(match[1]);
