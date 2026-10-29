@@ -81,7 +81,7 @@ async function sourceHookUat(t, hookName) {
     invoke(hook, shell(ctx, `rg -e "codex resume" "${ctx.other}/fixture.txt"`), true);
     invoke(hook, shell(ctx, 'rg -e "codex resume toolkit governance enable" fixture.txt'), true);
     for (const actor of matrix.actors) for (const tool_name of ['Bash', 'PowerShell']) {
-      const command = 'git push origin HEAD:refs/heads/codex/example; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }';
+      const command = 'git push origin HEAD:refs/heads/codex.example; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }';
       const input = { ...shell(ctx, command), actor, tool_name };
       invoke(hook, { ...input, cwd: ctx.other }, true);
       invoke(hook, { ...input, tool_input: { command, workdir: ctx.other } }, true);
@@ -129,8 +129,8 @@ async function sourceHookUat(t, hookName) {
     for (const hook of hooks) for (const tool_name of ['Bash', 'PowerShell']) {
       for (const actor of matrix.actors) {
         const ordinary = ["@'\nfor key,value in items:\n    print(key,value)\n'@ | python -",
-          'git push origin HEAD:refs/heads/codex/example; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; git fetch origin codex/example',
-          'git commit -m "codex resume; claude --resume"', 'git add -- "codex/resume.md"'];
+          'git push origin HEAD:refs/heads/codex.example; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; git fetch origin codex.example',
+          'git commit -m "codex resume; claude --resume"', 'git add -- "codex.resume.md"'];
         for (const command of ordinary) invoke(hook, { ...shell(ctx, command), tool_name, actor }, false);
         for (const command of ['codex resume --last', 'claude --resume fixture']) invoke(hook, { ...shell(ctx, command), tool_name, actor }, true);
       }

@@ -1,12 +1,23 @@
 # Toolkit Changelog
 
-## 3.17.3 (security alert cleanup and Dependabot action updates)
+## 3.17.4 (security alert cleanup and Dependabot action updates)
 
 - **CI drift guard:** a Dependabot update to a pinned action in `validate.yml` now passes when only the commit SHA and `# vX.Y.Z` version comment change and the action name stays the same. A different action, a tag or short ref, a missing version comment or any other edit to the file is still refused. The portable sharding playbook says the same.
 - **Personal-data guard config:** Dependabot's public sign-off address is on the role address allow list, so its commit trailers no longer fail the check. Other addresses at the same domain still block.
 - **Action pins:** `setup-python` 7.1.0, `upload-artifact` 7.0.2 and `download-artifact` 8.0.2, each pinned to its verified tag commit.
 - **Dependencies:** the test-only `fast-uri` package is locked at 3.1.9, which fixes four advisories.
 - **Tests:** two test assertions escape every value they put into a regular expression, so they check the exact text instead of matching any character where a dot was meant.
+
+## 3.17.3 (fewer false continuation refusals)
+
+- **Quoted text:** the continuation guard reads quotes the way bash and PowerShell do. A `|` or `&` inside a quoted search pattern (`rg 'a|b' path`, `--grep="a|b"`) is no longer a pipe, and a quoted path is no longer a command word, so host folder names next to it stay names. A quoted script after `-c`, `-lc`, `-e`, `-p`, `--eval`, `--print`, `-Command` or `/c` is still read as a script when a shell, an interpreter or a script runner (`su`, `script`, `flock`, `wsl`, `awk`, `sed`) comes earlier in the same command; after other programs (`git -C`, `tar -C`, `mkdir -p`) it is an ordinary argument. An explicit cmd shell, which does not quote with single quotes, and unbalanced quotes keep the earlier reading.
+- **Data filters:** a pipe into `tr` or `uniq`, or into the PowerShell cmdlets `Sort-Object`, `Measure-Object`, `Format-Table`, `Format-List`, `Get-Unique` and `Out-Null`, keeps folder names as names. The cmdlets do not count under an explicit cmd shell.
+- **Undotted host folders:** a `claude` or `codex` folder or a name joined to one by `-` or `_` (`Temp/claude/`, `claude/project-thread-x`, `scripts/toolkit-codex-hook.cjs`, `Claude-Data/`) is a name when it sits in a standalone path argument. A path whose last part is a host program (`.../claude`, `codex.exe`, `claude-code`), a path glued to another fragment by a quote or `+`, and command positions stay evidence.
+- **Claude Code's Bash tool:** commands from the Bash tool are proved as data under bash only, because that tool always runs bash. The host comes from the hook entry point, never from the hook input. Codex, the Monitor tool and other omitted shells still need the proof under both bash and PowerShell.
+- **More data commands:** `git apply`, `git switch`, `git checkout`, `git merge-base` and `git ls-tree` with fixed options, where patch paths, branch names, start points and revisions are operands only. A `sort` operand may not start with `-`.
+- **Deep nesting:** the data proof stops at 64 nested `$(...)` levels and refuses, instead of running out of stack.
+- **Still refused:** a host program in command position, in a substitution, behind a wrapper or built from fragments; pipes into shells, interpreters, `xargs` or unknown commands; inline scripts such as `node -e`; PowerShell script blocks and `"$(...)"` strings that build a path; and `VAR=value` prefixes. Resuming a session with `codex resume` or `claude --resume` is refused as before.
+- **Correction to 3.16.6:** the fixed set of data commands also covers plain assignments and single-quoted here-string stages, which count as commands in that proof.
 
 ## 3.17.2 (spacer lines only in the update log)
 

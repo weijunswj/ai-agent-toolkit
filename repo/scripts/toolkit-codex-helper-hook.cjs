@@ -48,7 +48,8 @@ function promptEvent(input) {
 // namespace, hyphenated ones included (`collaborationspawn_agent`, `multi-agentspawn_agent`).
 async function decide(input, environment = process.env) {
   let governanceDenial;
-  try { governanceDenial = new (gate().ToolGate)().decide(input || {}); } catch {
+  // Codex gives no shell in its payload and may run either shell, so commands keep both readings.
+  try { governanceDenial = new (gate().ToolGate)({ host: 'codex' }).decide(input || {}); } catch {
     governanceDenial = insideRepository(input?.cwd) ? { deny: `Toolkit: the governance check failed, so nothing runs in this repository until it works again. ${NEVER_OWNER}` } : null;
   }
   if (governanceDenial) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: governanceDenial.deny } };
