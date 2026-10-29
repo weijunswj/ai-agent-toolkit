@@ -1,5 +1,12 @@
 # Toolkit Changelog
 
+## 3.19.4 (skill cards carry the exact file)
+
+- **Skill card hook:** a new Claude Code hook on `propose_skills` checks every card for the Projects controller skill (`web-controller-projects`) against main's SKILL.md, downloaded fresh (raw file, then the GitHub contents API on a mismatch). The card must be kind `improvement` with name and target `web-controller-projects`, the frontmatter description and main's text exactly (only CR and the final newline may differ). Any other card is refused with both sizes and sha256 hashes, where they first differ and the likely cause (cut short, HTML-escaped or changed text). When main cannot be read, the card holds. Other skills' cards pass untouched.
+- **One card route (skill version 2026-10-29.7, save the card):** the daily check-in no longer posts skill cards. When a card is due it writes `card due`, and the coordinator starts a fresh skill card thread that follows the new `reference/skill-card.md`: download main's SKILL.md, check its size, hash, Version and that it holds no HTML entities or CR, and pass it unchanged to `propose_skills` in that thread. The `skill cards: coordinator` memory line is gone. Guided setup compares the loaded Version with main's at step 0 and starts the card thread when one is due.
+- **Daily check-in:** the **Skill:** line shows the account SKILL.md's size and sha256 next to main's, and a drifted copy that is a cut-short or HTML-escaped Toolkit revision is reported as `SKILL DRIFT: damaged card`, which the coordinator answers with a card thread instead of bringing that text into Toolkit.
+- **Install check:** the `Skill card: offer` line names the file's size and sha256, and the setup agent checks them, the Version line and the frontmatter name before it calls `propose_skills` in its own session.
+
 ## 3.19.2 (links only where the owner acts, and no flattened questions)
 
 - **Projects post hook (skill version 2026-10-29.6, upload it again):** links are required only where the owner acts. A PR, thread or file named in prose or a plain bullet no longer needs a link, in posts and in replies. Every numbered item under the **Waiting on you** header (each question and merge ask) still needs one, and a pull request link there without `/files` is refused with the fix.

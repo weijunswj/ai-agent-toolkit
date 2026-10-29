@@ -87,6 +87,16 @@
             "timeout": 10
           }
         ]
+      },
+      {
+        "matcher": "^propose_skills$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-claude-project-skill-card-hook.cjs\"",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "PostToolUse": [
