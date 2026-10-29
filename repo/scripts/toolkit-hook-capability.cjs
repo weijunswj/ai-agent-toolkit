@@ -5,8 +5,10 @@
 // synced Projects skill. Hook trust is not readable on either host, so a present hook is never
 // reported as trusted. A missing hook refuses nothing; the line names the portable path instead.
 //
-//   Claude Code     present (trust not checkable), from a local plugin install or the desktop app's
-//                   claude.ai account copy | disabled (settings turn hooks off) | plugin absent
+//   Claude Code     present (trust not checkable) from a local plugin install, or present (claude.ai
+//                   account copy; trust not checkable) from the desktop app's account copy |
+//                   disabled (settings turn hooks off) | plugin present, no hooks declared |
+//                   plugin absent
 //   Codex           present, trust unknown | plugin absent
 //   Claude Projects no local hooks (a skill synced from claude.ai runs in the cloud)
 

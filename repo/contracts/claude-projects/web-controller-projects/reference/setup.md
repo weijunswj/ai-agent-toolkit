@@ -33,6 +33,7 @@ Reference for the `web-controller-projects` skill, opened when the coordinator r
 4. **Bind.**
    - Bind `CONTROLLER.md` (**Binding** in the skill).
    - Write the binding line (**Binding** in the skill).
+   - Write the `GATE ROUTE:` line (**Binding** in the skill) from the pinned stack profile and the owner's answer on where gate work runs: `placement remote_control folder <step 3's folder>` for local Remote Control, `cloud` for cloud threads, `any` when the project sets no place. A gate launch is refused until this line is in memory.
 5. **Project instructions.**
    - Have a cloud thread run `node repo/scripts/toolkit-projects-instructions.cjs --render` from bound Toolkit `main`, save the block to the shared folder and read it back. Every project on one Toolkit version gets the same block.
    - Draft the project lines from the setup answers: repos and transport store, device and folder, where work runs, owner-granted approvals, project-specific roles. Only facts that differ by project, nothing the block says.
