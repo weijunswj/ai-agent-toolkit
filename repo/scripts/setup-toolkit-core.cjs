@@ -38,6 +38,7 @@ const QUESTION_BANK_BEGIN = '<!-- setup-toolkit-question-bank:begin -->';
 const QUESTION_BANK_COMPLETE = '<!-- setup-toolkit-question-bank:complete -->';
 const MANAGED_QUESTION_BANK_PROTOCOL = 'setup-toolkit-managed-question-bank-v2';
 const MANAGED_PROTOCOL_PROBE_FLAG = '--managed-question-bank-protocol-probe';
+const REMOVE_TOOLKIT_TASKS_FLAG = '--remove-toolkit-tasks';
 const MANAGED_PROTOCOL_ENV = 'AI_AGENT_TOOLKIT_MANAGED_QUESTION_BANK_PROTOCOL';
 const MANAGED_DELEGATION_DEPTH_ENV = 'AI_AGENT_TOOLKIT_MANAGED_DELEGATION_DEPTH';
 const MANAGED_CHILD_TIMEOUT_MS = 300000;
@@ -523,6 +524,7 @@ function printHelp() {
     '',
     'Options:',
     '  --repo-root <path>           advanced override for managed Toolkit checkout source',
+    '  --remove-toolkit-tasks       on its own: remove only Toolkit\'s own Windows scheduled tasks and their records',
     '  --repo-branch <branch>       default: main',
     '  --repo-remote <url>          default: https://github.com/weijunswj/ai-agent-toolkit',
     '  --host codex|claude-code     default: codex',
@@ -3805,6 +3807,7 @@ class ToolkitSetupExecution {
     const installCheck = args.host === 'claude-code' ? runClaudeInstallCheck(args, nativeCache, delegation) : null;
     printFinalSummary({ args, current: this.#current, managed, localClone, nativeCache, delegation, subagentDepth, claudeSettings, n8nSkills, antigravitySkills, audit,
       questionBank: this.#questionBank, validationResults: this.#validationResults, installCheck });
+    printWindowsTasks(args);
     const globalRules = args.host === 'claude-code' ? null : runCodexGlobalRules(args);
     const codexHelpers = args.host === 'claude-code' ? null : runCodexHelperAgents(args);
     return installCheck?.status === INSTALL_CHECK_STATUS.ACTION || globalRules?.status === 'held' || codexHelpers?.status === 'held' ? SETUP_ACTION_REQUIRED : 0;
@@ -3812,6 +3815,29 @@ class ToolkitSetupExecution {
 }
 
 async function execute(args){return new ToolkitSetupExecution(args).execute();}
+
+// The Windows scheduled tasks Toolkit keeps for the managed checkout's repository
+// (toolkit-windows-tasks.cjs): each with its folder, name, schedule, purpose and state. Setup only
+// reports them: agents do not create scheduled tasks, so when one needs creating or updating the
+// report ends with the one PowerShell line the owner pastes. A failure here never stops setup.
+// Tests pass a fake scheduler, checkout reads, home and log.
+function printWindowsTasks(args, { platform = process.platform, scheduler = null, checkoutDeps = {}, home = os.homedir(), log = console.log } = {}) {
+  if (platform !== 'win32') return null;
+  log('');
+  log('## Windows scheduled tasks');
+  try {
+    const windowsTasks = require('./toolkit-windows-tasks.cjs');
+    const toolkitRoot = path.resolve(args.repoRoot);
+    const desired = windowsTasks.desiredTasks({ checkout: toolkitRoot, toolkitRoot, deps: checkoutDeps });
+    const plan = windowsTasks.planTasks(desired, { scheduler: scheduler || windowsTasks.powerShellScheduler(), home });
+    const command = windowsTasks.applyCommand(desired, { toolkitRoot, home });
+    for (const line of windowsTasks.describePlan(plan, { command })) log(line);
+    return plan;
+  } catch (error) {
+    log(`Windows scheduled tasks could not be checked: ${error.message}`);
+    return null;
+  }
+}
 
 // Toolkit supports Windows computers only. Linux stays a build machine: CI runners set CI=true, and the
 // setup tests run there. Every other platform stops here, before any host install or settings write.
@@ -3825,6 +3851,11 @@ async function main(argv = process.argv.slice(2), options = {}) {
   if (argv.length === 1 && argv[0] === MANAGED_PROTOCOL_PROBE_FLAG) {
     process.stdout.write(`${JSON.stringify(managedProtocolProbe())}\n`);
     return 0;
+  }
+  if (argv.includes(REMOVE_TOOLKIT_TASKS_FLAG)) {
+    if (argv.length !== 1) throw new Error(`${REMOVE_TOOLKIT_TASKS_FLAG} runs on its own`);
+    assertSupportedComputer(options);
+    return require('./toolkit-windows-tasks.cjs').main(['remove'], options.windowsTasksDeps || {});
   }
   const restoreIndex = argv.indexOf(RESTORE_FLAG);
   const restoreInline = argv.find((arg) => arg.startsWith(`${RESTORE_FLAG}=`));
@@ -3903,6 +3934,7 @@ const {
 
 module.exports = {
   assertSupportedComputer,
+  printWindowsTasks,
   gitFailureHint,
   nativePluginRebindFailure,
   installOfficialN8nSkills,

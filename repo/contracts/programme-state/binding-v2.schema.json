@@ -63,6 +63,11 @@
         "after_section": { "type": "string", "minLength": 1 },
         "replace_section": { "type": "string", "minLength": 1 }
       }
+    },
+    "schedule_folder": {
+      "type": "string",
+      "pattern": "^[A-Z0-9][A-Z0-9-]{0,31}$",
+      "description": "The Windows Task Scheduler folder for this repository's no-AI Toolkit tasks, such as TOOLKIT for the TOOLKIT folder. When left out it is the repository name in capitals, with dots and underscores turned into hyphens."
     }
   },
   "if": { "properties": { "governance": { "const": "enabled" } } },

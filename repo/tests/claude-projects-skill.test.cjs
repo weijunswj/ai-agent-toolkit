@@ -52,7 +52,7 @@ test('no plugin payload or skills folder reaches the Projects controller skill',
 
 test('Projects wires managed instructions, promises and fresh scheduled sessions to controller law', () => {
   const text = bundle();
-  assert.match(text, /^Version: 2026-10-29\.4$/m);
+  assert.match(text, /^Version: 2026-10-29\.5$/m);
   // Gate launches name their gate and route; setup writes the GATE ROUTE line the launch hook reads.
   assert.ok(text.includes('`GATE ROUTE: profile <profile> placement <remote_control|cloud|any> [folder <path>]`'));
   assert.match(text, /\*\*Gate launches carry a Gate line and their route\.\*\* Every thread brief that names a gate carries one line `Gate: <value>`/);
@@ -313,6 +313,18 @@ test('the device programme sweep needs both GitHub governance ENABLED and a name
   assert.match(at('tasks/hourly-nudge.md'), /when project memory names a device, "; no device programme sweep task armed", and with no device named "; no device named, so cloud writes wait for the next session on a computer with gh signed in"/);
   const sweep = JSON.parse(at('setup-inventory.json')).rows.find(row => row.id === 'programme-sweep');
   assert.match(sweep.artefact, /GitHub governance ENABLED and a device named/);
+});
+
+test('on a Windows device every governed repository gets its own programme sweep line, not only Toolkit', () => {
+  // Setup plans tasks only for the managed Toolkit checkout, so another governed repository's line
+  // comes from the read-only plan command run against that repository's checkout.
+  const recurring = read('repo/contracts/claude-projects/web-controller-projects/reference/recurring-tasks.md');
+  assert.match(recurring, /Toolkit setup on the device lists it for the Toolkit repository only\. For any other governed repository, the device's local Remote Control thread runs `node <Toolkit checkout>\/repo\/scripts\/toolkit-windows-tasks\.cjs plan --repo-root <that repository's checkout>`, which is read-only/);
+  assert.match(recurring, /Hand the user that exact line, for that repository's checkout, and put "paste the programme sweep line for <owner\/repo>" on the owner's pending list/);
+  assert.doesNotMatch(recurring, /paste the programme sweep line from setup/);
+  assert.match(read('skills/github-program-reconciler/SKILL.md'), /the line that setup prints for the Toolkit repository, or that `toolkit-windows-tasks\.cjs plan --repo-root <checkout>` prints, read-only, for any other governed repository/);
+  const windowsTasks = require('../scripts/toolkit-windows-tasks.cjs');
+  assert.equal(windowsTasks.parseArgs(['plan', '--repo-root', 'C:\\work\\other']).repo_root, 'C:\\work\\other');
 });
 
 // Moving a task can skip today's run, and fire_trigger on a bound task runs it unwired.
