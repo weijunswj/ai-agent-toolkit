@@ -52,24 +52,35 @@ test('no plugin payload or skills folder reaches the Projects controller skill',
 
 test('Projects wires managed instructions, promises and fresh scheduled sessions to controller law', () => {
   const text = bundle();
-  assert.match(text, /^Version: 2026-10-29\.7$/m);
+  assert.match(text, /^Version: 2026-10-29\.8$/m);
   // Gate launches name their gate and route; setup writes the GATE ROUTE line the launch hook reads.
   assert.ok(text.includes('`GATE ROUTE: profile <profile> placement <remote_control|cloud|any> [folder <path>]`'));
   assert.match(text, /\*\*Gate launches carry a Gate line and their route\.\*\* Every thread brief that names a gate carries one line `Gate: <value>`/);
   assert.match(text, /Write the `GATE ROUTE:` line \(\*\*Binding\*\* in the skill\)/);
-  // The check-in posts the skill card itself; the coordinator lists the Save tap, re-upload only when the card failed.
-  assert.match(text, /`SKILL BEHIND`: the account copy is an older Toolkit revision\. With "card posted", the check-in posted the skill update card in its thread: put "tap Save on the skill card"/);
-  assert.match(text, /keep that thread open \(never resolve it in the hourly pass, even after the check-in moves to a new home thread\) until the owner saves/);
-  assert.match(text, /Once a check-in shows the account copy current, drop the pending item and resolve the thread unless it is a current home thread\. Do the same for an older card when a newer card is posted, when the owner declines it, or when a check-in reports SKILL DRIFT or no account copy: its Save would install an older Version or overwrite direct edits; for a chat card, post "Don't save the <Version> card above\." Name the Version in each Save item\./);
-  assert.match(text, /the coordinator resolves a check-in run thread that holds a skill card once `SKILL BEHIND` \(\*\*Daily check-in\*\*\) releases it\./);
-  assert.match(text, /If you could not post a due card, or with neither marker and no "drift unverified", tell the owner once per Version to re-upload the skill with its reference files\./);
-  assert.match(text, /Fresh-session scheduled runs resolve their own run thread after delivery, except a check-in run that posted a skill card;/);
-  assert.match(text, /each fresh scheduled run resolves its own thread after report delivery, except a check-in run that posted a skill card\./);
+  // One card route: a due card goes to a fresh skill card thread; the coordinator lists the Save tap, re-upload only when the card failed.
+  assert.match(text, /`SKILL BEHIND`: the account copy is an older Toolkit revision\. With "card due", start a skill card thread: a fresh cloud thread on the mid tier \(after a hook refusal, the next one on the top tier\) whose brief is "follow main's `reference\/skill-card\.md` exactly", never with SKILL DRIFT\./);
+  assert.match(text, /Never call propose_skills yourself or have a helper build the card: the card thread is the only route\./);
+  assert.match(text, /keep that thread open \(never resolve it in the hourly pass\) until a check-in shows the account copy current; then drop the pending item and resolve it\./);
+  assert.match(text, /Do the same for an older card thread when a newer one starts, when the owner declines its card, or when a check-in reports SKILL DRIFT or no account copy: its Save would install an older Version or overwrite direct edits; post "Don't save the <Version> card\." in it\. Name the Version in each Save item\./);
+  assert.match(text, /If the card thread reports "card failed", or with no card marker and no "drift unverified", tell the owner once per Version to re-upload the skill with its reference files\./);
+  assert.match(text, /With "damaged card" \(the copy is a cut-short or HTML-escaped Toolkit revision\), start a skill card thread as `SKILL BEHIND` says instead, and never bring that text into Toolkit\./);
+  assert.match(text, /Fresh-session scheduled runs resolve their own run thread after delivery; a task's home thread is never resolved\./);
+  assert.match(text, /each fresh scheduled run resolves its own thread after report delivery\. Stop the nudge/);
+  assert.doesNotMatch(read(SKILL_REL), /skill cards: coordinator|card posted|posted a skill card|post the card yourself/);
+  // The card method lives in one reference file a fresh thread downloads from main; SKILL.md itself holds no HTML entity.
+  const method = read(`${REFERENCE_DIR}/skill-card.md`);
+  assert.match(method, /The card is never built by a helper, subagent or Agent worker, never by the coordinator, and its text is never retyped or summarised\./);
+  assert.match(method, /Print its byte size, sha256 and Version line, then check: the frontmatter `name` is `web-controller-projects`; it holds no `&lt;`, `&gt;`, `&amp;` or `&quot;`; it holds no CR\. If any check fails, stop and report it\./);
+  assert.match(method, /call `propose_skills` \(ToolSearch\) with one proposal: kind `improvement`, name and target `web-controller-projects`, description copied from the file's frontmatter, and `skillMd` the file text exactly as read\./);
+  assert.match(method, /report `card failed: <reason>` instead/);
+  // (CR is not checked here: a Windows checkout may add it, and the file on main has none.)
+  assert.doesNotMatch(read(SKILL_REL), /&(?:lt|gt|amp|quot);/, 'the card method refuses a SKILL.md with HTML entities');
+  // Setup compares the loaded Version with main's and starts the card thread when a card is due.
+  assert.match(text, /State the skill Version you loaded and compare it with the Version line of main's SKILL\.md\. When main's is newer, have a read-only cloud thread compare the account copy with main as the daily check-in's SKILL DRIFT and SKILL CARD steps do; when a card would be due there, start a skill card thread \(`SKILL BEHIND` in the skill\) and carry on with step 1\./);
+  assert.match(text, /the skill card waiting for Save \(with its thread link\) when one is, and the next work item\./);
   // Plugin lag: Check for updates first, then removing the plugin alone, then the marketplace re-add, then an app restart.
   assert.match(text, /`PLUGIN BEHIND`: the Toolkit plugin on the user's claude\.ai account is more than a day behind `main`/);
-  // One card each where the owner reads: the coordinator posts a due or failed skill card in the project chat, and one plugin card.
-  assert.match(text, /With "card due" or "card failed", load propose_skills \(ToolSearch\) and post the card yourself in the project chat \(kind improvement, target and name web-controller-projects, description from main's frontmatter; skillMd main's SKILL\.md read byte for byte\), never with SKILL DRIFT, and link it in the pending item\./);
-  assert.match(text, /On "card posted", if propose_skills loads for you, add memory line `skill cards: coordinator` so the check-in writes "card due" next time; remove it if a post fails\./);
+  // One plugin card where the owner reads.
   assert.match(text, /No agent can update it: once per version, post one plugin card in the project chat with the check-in's steps/);
   assert.match(text, /Keep it pending until a check-in shows `\*\*Plugin:\*\* current`\./);
   assert.match(text, /Only the account skill \(one Save tap\) and plugin \(two clicks\) need the owner: no agent can write them\./);

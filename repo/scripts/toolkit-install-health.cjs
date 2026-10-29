@@ -18,6 +18,7 @@
 // Usage (session-start hook): node repo/scripts/toolkit-install-health.cjs --session-start [--hub <path>]
 // Prints the result as JSON. Exit 0 when the check ran, 1 when it could not run.
 
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -129,8 +130,8 @@ class ToolkitInstallHealthCheck {
   }
 
   // Shown only when a copy of the Projects controller skill is synced from claude.ai (the user runs a
-  // Claude Project as controller). An older copy is reported with Toolkit's SKILL.md, which the setup
-  // agent offers as a skill card the owner saves; it blocks nothing. A card carries SKILL.md only, so
+  // Claude Project as controller). An older copy is reported with Toolkit's SKILL.md, its size and sha256,
+  // which the setup agent offers as a skill card the owner saves; it blocks nothing. A card carries SKILL.md only, so
   // when the account copy holds reference files that differ from Toolkit's, the whole folder is
   // uploaded by hand instead.
   #projectsSkillCheck() {
@@ -155,8 +156,11 @@ class ToolkitInstallHealthCheck {
       return this.#check('projects-skill', label, STATUS.PASSED,
         `${behind} Your copy has its own reference files, so a skill card is not enough: upload the folder ${folder} to claude.ai (Customize > Skills, replace web-controller-projects).`);
     }
+    // The size and sha256 let the setup agent confirm it passes the file it read, unchanged.
+    const body = fs.readFileSync(source);
+    const sha256 = crypto.createHash('sha256').update(body).digest('hex');
     return this.#check('projects-skill', label, STATUS.PASSED,
-      `${behind} Skill card: offer ${slash(source)} as a skill update card to save. Without a card tool, upload the folder ${folder} to claude.ai (Customize > Skills, replace web-controller-projects).`);
+      `${behind} Skill card: offer ${slash(source)} (${body.length} bytes, sha256 ${sha256}) as a skill update card to save. Without a card tool, upload the folder ${folder} to claude.ai (Customize > Skills, replace web-controller-projects).`);
   }
 
   // Whether an account copy holds a reference/*.md file that is not byte-equal to Toolkit's. A folder
