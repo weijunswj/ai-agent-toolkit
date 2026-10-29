@@ -226,7 +226,10 @@ function readTranscript(lines) {
           // The coordinator's newest post is the running post only when no owner message seen here (a reply in a
           // thread included) came after it, so it is never both closed to edits and barred from a fresh post.
           if (latest?.author === 'user') ownerWrote([{ thread: null, at: latest.created_at }]);
+          // A body near the 8 KB limit may be cut short by the read, so that post is left untracked: a fresh post
+          // passes, as for any running post that size, and its edits are never compared with a shortened text.
           else if (latest?.author === 'agent' && typeof latest.body === 'string' && !isCard(latest.body)
+            && bytes(latest.body) < NEAR_LIMIT_BYTES
             && !posts.get(latest.id)?.ownerAfter && (ownerAt === null || ownerAt < latest.created_at)) {
             running = { id: latest.id, size: bytes(latest.body) };
             newest = latest.id;
