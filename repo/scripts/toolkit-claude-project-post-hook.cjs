@@ -22,8 +22,8 @@
 //   line first (after an optional "Re: your reply on" line), **[HH:MM] Update:** one-liners with no question or
 //   numbered options inside, and one **ELI5:** line as the very last line. The Waiting list opens only at a line that
 //   is exactly the header and runs to the next Update or ELI5 line. In it, choice bullets indented three or more
-//   spaces (or a tab) sit under a numbered item and need no link; a "(my pick)" choice needs a numbered **Question:**
-//   item above it. A question is never flattened: every line starting **Question: must be a numbered item in the
+//   spaces (or a tab), and numbered lines indented at least as far as their item's text starts, sit under a numbered
+//   item and need no link; a "(my pick)" choice needs a numbered **Question:** item above it. A question is never flattened: every line starting **Question: must be a numbered item in the
 //   list, and an unindented or two-space bullet right after a question or its choices (spacers skipped), or one
 //   marked "(my pick)", is refused. Other bullets, spacers and prose are passed over. An edit of an earlier post keeps
 //   every one of its Update lines word for word and adds at least one new one.
@@ -67,6 +67,9 @@ const UPDATE_LINE = /^\s*(?:[-*]\s+)?\*\*\[\d{1,2}:\d{2}\] Update:\*\*/;
 const WAITING_LINE = /^\s*\*\*Waiting on you(?: \(\d+\))?:\*\*\s*$/i;
 // An owner item in the Waiting list.
 const NUMBERED_LINE = /^\s{0,3}\d+[.)]\s+/;
+// Any numbered line, with its indent, marker and the spaces after it: one indented at least as far as the current
+// item's text starts is a sub-item of that item, as in Markdown.
+const NUMBERED_PARTS = /^(\s*)(\d+[.)])(\s+)\S/;
 // An unindented or two-space bullet: its own line, not a choice under an item.
 const BULLET_LINE = /^ {0,2}[-*]\s+/;
 // A choice bullet under a numbered item.
@@ -434,6 +437,12 @@ function updateLines(text) {
 
 const quoted = line => `"${line.trim().slice(0, 80)}"`;
 
+// Where a numbered item's text starts: its indent, marker and the spaces after it ("1. " is 3, "10. " is 4).
+function itemTextStart(item) {
+  const parts = NUMBERED_PARTS.exec(item);
+  return parts ? parts[1].length + parts[2].length + parts[3].length : Infinity;
+}
+
 // The Waiting on you lists and every question line. Each header opens a list that runs to the next Update or ELI5
 // line. In it, a numbered line is an owner item and needs a link; a choice is a bullet indented under a numbered item;
 // an unindented bullet right after a question or its choices (spacers skipped) is a flattened choice. Anywhere else,
@@ -450,12 +459,14 @@ function waitingIssue(lines) {
       last = '';
       continue;
     }
-    const numbered = inList && NUMBERED_LINE.test(line);
+    const parts = NUMBERED_PARTS.exec(line);
+    const nested = Boolean(inList && item && parts && parts[1].length >= itemTextStart(item));
+    const numbered = inList && !nested && NUMBERED_LINE.test(line);
     if (QUESTION_LINE.test(line) && !numbered) {
       return `the question ${quoted(line)} is not a numbered item under **Waiting on you (n):**. Keep the owner's question layout: put it in that list as 1. **Question: <the ask>?** with its link, and indent its choices four spaces under it. Do not flatten it into a plain bullet, a bold label or an Update line.`;
     }
     if (!inList) continue;
-    if (SUB_LINE.test(line) && item) {
+    if ((SUB_LINE.test(line) || nested) && item) {
       const question = QUESTION_LINE.test(item);
       if (MY_PICK.test(line) && !question) {
         return `the choice ${quoted(line)} has no numbered **Question:** item above it. Write the question as 1. **Question: <the ask>?** with its link and indent the choices under it.`;

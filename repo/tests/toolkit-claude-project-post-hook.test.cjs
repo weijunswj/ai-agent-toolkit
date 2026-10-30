@@ -376,6 +376,32 @@ test('questions stay numbered under the exact Waiting header and are never flatt
   assert.match(layoutIssue(twoLists.replace(' [thread](#cmsg_T)', '')), /item "1\. \*\*Question: keep it\?\*\*" has no link/);
 });
 
+test('numbered choices indented as far as their item\'s text are sub-items, as in Markdown', () => {
+  const head = [
+    '**Now:** the hook build is in review and CI is green on the branch head, so it can merge once you say yes.',
+  ];
+  const tail = '**ELI5:** The rule checker is built and waiting for your OK.';
+  const postOf = (...middle) => [...head, '**Waiting on you (1):**', ...middle, tail].join('\n');
+  const outside = /the question ".*" is not a numbered item under \*\*Waiting on you \(n\):\*\*/;
+  // Three spaces under "1. " and four under "10. " start where the item's text does, so they need no link.
+  const three = postOf('1. **Question: Merge it?** [card](#cmsg_CARD)', '   1. **Yes (my pick).** Green.', '   2. **No.** Wait.');
+  assert.equal(layoutIssue(three), '');
+  assert.equal(post([wake()], three), '');
+  assert.equal(layoutIssue(postOf('10. **Question: Merge it?** [card](#cmsg_CARD)', '    1. **Yes (my pick).** Green.', '    2. **No.** Wait.')), '');
+  assert.equal(layoutIssue(postOf('1. **Question: Merge it?** [card](#cmsg_CARD)', '      1. **Yes (my pick).** Green.')), '');
+  // Two spaces under "1. ", or three under "10. ", sit short of the text: a new owner item that needs its link.
+  assert.match(layoutIssue(postOf('1. **Question: Merge it?** [card](#cmsg_CARD)', '  1. **Yes (my pick).** Green.')), /Waiting on you item "1\. \*\*Yes \(my pick\)\.\*\* Green\." has no link/);
+  assert.match(layoutIssue(postOf('10. **Question: Merge it?** [card](#cmsg_CARD)', '   1. **Yes.** Green.')), /Waiting on you item "1\. \*\*Yes\.\*\* Green\." has no link/);
+  // A numbered sub-item marked "(my pick)" still needs a numbered question above it.
+  assert.match(layoutIssue(postOf('1. Merge OK: [card](#cmsg_CARD)', '   1. **Yes (my pick).** Green.')), /the choice "1\. \*\*Yes \(my pick\)\.\*\* Green\." has no numbered \*\*Question:\*\* item above it/);
+  assert.equal(layoutIssue(postOf('1. Merge OK: [card](#cmsg_CARD)', '   1. **Details.** CI is green.')), '');
+  // A question nested under an item is still a flattened question, at three spaces as at four.
+  assert.match(layoutIssue(postOf('1. Merge OK: [card](#cmsg_CARD)', '   1. **Question: also this?** [card](#cmsg_C2)')), outside);
+  assert.match(layoutIssue(postOf('1. Merge OK: [card](#cmsg_CARD)', '    1. **Question: also this?** [card](#cmsg_C2)')), outside);
+  // Unindented numbered items after the sub-items are new owner items and still need links.
+  assert.match(layoutIssue(postOf('1. **Question: Merge it?** [card](#cmsg_CARD)', '   1. **Yes (my pick).** Green.', '2. Tag the release')), /Waiting on you item "2\. Tag the release" has no link/);
+});
+
 test('edits keep every earlier Update line word for word and add a new one', () => {
   const earlier = LAID_OUT.split('\n').filter(line => !line.includes('09:52')).join('\n');
   assert.equal(editIssue(earlier, LAID_OUT), '');
