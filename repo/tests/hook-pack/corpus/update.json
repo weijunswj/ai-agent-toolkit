@@ -1,0 +1,129 @@
+{
+  "family": "update",
+  "about": "A chat that was open while Toolkit updated itself: the version folder its hook commands name is replaced. fixture.version_folder is 'stand-in' (setup left the refusing stand-in) or 'missing' (the folder is gone). expect.exit is the hook's exit code as the host sees it: 2 refuses, 1 runs the call with a hook notice, 0 passes.",
+  "rows": [
+    {
+      "id": "U1",
+      "source": "stale hooks after update plan; Codex deletes older version folders on plugin install",
+      "kind": "update",
+      "hosts": ["codex"],
+      "shells": ["powershell", "cmd", "sh"],
+      "payload": { "hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": { "command": "git push origin HEAD" } },
+      "fixture": { "version_folder": "stand-in" },
+      "expect": { "decision": "deny", "exit": 2, "reason": "superseded" },
+      "status": "pass"
+    },
+    {
+      "id": "U1-no-stand-in",
+      "source": "stale hooks after update plan, step 1",
+      "kind": "update",
+      "hosts": ["codex"],
+      "shells": ["powershell", "sh"],
+      "payload": { "hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": { "command": "git push origin HEAD" } },
+      "fixture": { "version_folder": "missing" },
+      "expect": { "decision": "deny", "exit": 2, "reason": "launcher-missing" },
+      "status": "pass"
+    },
+    {
+      "id": "U1-commit",
+      "source": "stale hooks after update plan",
+      "kind": "update",
+      "hosts": ["codex"],
+      "shells": ["powershell", "cmd", "sh"],
+      "payload": { "hook_event_name": "PreToolUse", "tool_name": "exec_command", "tool_input": { "cmd": "git commit -m update" } },
+      "fixture": { "version_folder": "stand-in" },
+      "expect": { "decision": "deny", "exit": 2, "reason": "superseded" },
+      "status": "pass"
+    },
+    {
+      "id": "U1-merge",
+      "source": "stale hooks after update plan",
+      "kind": "update",
+      "hosts": ["codex"],
+      "shells": ["powershell", "cmd", "sh"],
+      "payload": { "hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": { "command": "gh pr merge 5 --merge" } },
+      "fixture": { "version_folder": "stand-in" },
+      "expect": { "decision": "deny", "exit": 2, "reason": "superseded" },
+      "status": "pass"
+    },
+    {
+      "id": "U1-edit",
+      "source": "stale hooks after update plan",
+      "kind": "update",
+      "hosts": ["codex"],
+      "shells": ["powershell", "cmd", "sh"],
+      "payload": { "hook_event_name": "PreToolUse", "tool_name": "apply_patch", "tool_input": { "input": "*** Begin Patch" } },
+      "fixture": { "version_folder": "stand-in" },
+      "expect": { "decision": "deny", "exit": 2, "reason": "superseded" },
+      "status": "pass"
+    },
+    {
+      "id": "U1-helper",
+      "source": "stale hooks after update plan",
+      "kind": "update",
+      "hosts": ["codex"],
+      "shells": ["powershell", "cmd", "sh"],
+      "payload": { "hook_event_name": "PreToolUse", "tool_name": "collaborationspawn_agent", "tool_input": { "task_name": "leaf" } },
+      "fixture": { "version_folder": "stand-in" },
+      "expect": { "decision": "deny", "exit": 2, "reason": "superseded" },
+      "status": "pass"
+    },
+    {
+      "id": "U3",
+      "source": "stale hooks after update plan",
+      "kind": "benign",
+      "hosts": ["codex"],
+      "shells": ["powershell", "cmd", "sh"],
+      "payload": { "hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": { "command": "git status" } },
+      "fixture": { "version_folder": "stand-in" },
+      "expect": { "decision": "allow", "exit": 1, "reason": "superseded-notice" },
+      "status": "pass"
+    },
+    {
+      "id": "U3-prompt",
+      "source": "stale hooks after update plan",
+      "kind": "benign",
+      "hosts": ["codex"],
+      "shells": ["powershell", "cmd", "sh"],
+      "payload": { "hook_event_name": "UserPromptSubmit", "prompt": "what changed?" },
+      "fixture": { "version_folder": "stand-in" },
+      "expect": { "decision": "allow", "exit": 0, "reason": "superseded-context" },
+      "status": "pass"
+    },
+    {
+      "id": "U3-no-stand-in",
+      "source": "stale hooks after update plan, step 1: with no hook script there is no way to tell a read from a push",
+      "kind": "update",
+      "hosts": ["codex"],
+      "shells": ["powershell", "sh"],
+      "payload": { "hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": { "command": "git status" } },
+      "fixture": { "version_folder": "missing" },
+      "expect": { "decision": "deny", "exit": 2, "reason": "launcher-missing" },
+      "status": "pass"
+    },
+    {
+      "id": "U2",
+      "source": "hooks reliability pack plan, seed U2",
+      "kind": "update",
+      "hosts": ["claude"],
+      "shells": ["bash", "powershell"],
+      "payload": { "hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": { "command": "git push origin HEAD" } },
+      "fixture": { "version_folder": "missing" },
+      "expect": { "decision": "deny", "exit": 2, "reason": "launcher-missing" },
+      "status": "known-bad",
+      "known_bad": { "lane": "Stop hooks failing open after update", "added": "2026-10-30", "note": "Claude Code keeps replaced version folders and runs Toolkit in place, so this is not reached by an update; a missing attribution hook script still fails open. Follow-up: the stable entry script from the pack plan." }
+    },
+    {
+      "id": "U4",
+      "source": "hooks reliability pack plan, seed U4",
+      "kind": "fault",
+      "hosts": ["claude", "codex"],
+      "shells": ["bash", "powershell"],
+      "payload": { "hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": { "command": "git push origin HEAD" } },
+      "fixture": { "decision_module": "missing" },
+      "expect": { "decision": "deny", "exit": 2, "reason": "check-unavailable" },
+      "status": "known-bad",
+      "known_bad": { "lane": "Stop hooks failing open after update", "added": "2026-10-30", "note": "Fault suite for every enforcing hook; needs the pack runner. Follow-up." }
+    }
+  ]
+}

@@ -279,6 +279,7 @@ function validateInstalledEnforcement(installed, repoRoot, expectedVersion) {
     ["repo/scripts/setup-core-codex.cjs",false],
     ["repo/scripts/setup-toolkit.cjs",false],
     ["repo/scripts/codex-delegation-backup.cjs",false],
+    ["repo/scripts/toolkit-codex-stand-in.cjs",false],
     ["repo/scripts/codex-config-load-check.cjs",false],
     ["repo/scripts/codex-app-server.cjs",false],
     ["repo/scripts/host-json-config-write.cjs",false],

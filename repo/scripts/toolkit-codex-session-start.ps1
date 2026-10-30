@@ -7,6 +7,11 @@ $warning = 'Toolkit SessionStart skipped optional maintenance safely. Run `setup
 
 try {
   $pluginRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.."))
+  # A stand-in at a replaced version's path (toolkit-codex-stand-in.cjs): no maintenance runs here.
+  if (Test-Path -LiteralPath (Join-Path $pluginRoot ".toolkit-superseded.json") -PathType Leaf) {
+    Write-Output 'Toolkit was updated after this chat started, so its checks no longer run here. Commits, pushes, pull requests, edits and helper launches are refused in this chat. Open a new chat to continue.'
+    exit 0
+  }
   $runtimePath = Join-Path $pluginRoot ".codex-plugin\session-start-runtime.json"
   $launcherPath = Join-Path $pluginRoot "repo\scripts\toolkit-codex-session-start.cjs"
 

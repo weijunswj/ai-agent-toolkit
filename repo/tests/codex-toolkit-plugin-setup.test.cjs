@@ -10,6 +10,7 @@ const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const setup = require('../scripts/setup-codex-toolkit-plugin.cjs');
+const standIn = require('../scripts/toolkit-codex-stand-in.cjs');
 
 function tmpRoot() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'codex-toolkit-plugin-'));
@@ -655,8 +656,11 @@ test('installed hooks keep the portable command and add commandWindows to both h
   const helper = installed.hooks.PreToolUse[0].hooks[0];
   assert.equal(session.command, setup.sourceSessionStartCommand());
   assert.equal(helper.command, setup.sourceHelperHookCommand());
-  assert.equal(session.commandWindows, `${powershellPath} -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "\${PLUGIN_ROOT}/repo/scripts/toolkit-codex-session-start.ps1" ; exit $LASTEXITCODE`);
-  assert.equal(helper.commandWindows, `${powershellPath} -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "\${PLUGIN_ROOT}/repo/scripts/toolkit-codex-helper-hook.ps1" ; exit $LASTEXITCODE`);
+  assert.equal(session.commandWindows, setup.windowsSessionStartCommand(powershellPath));
+  assert.equal(helper.commandWindows, setup.windowsHelperHookCommand(powershellPath));
+  assert.ok(helper.commandWindows.startsWith(`${powershellPath} -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "\${PLUGIN_ROOT}/repo/scripts/toolkit-codex-helper-hook.ps1" ; if (Test-Path -LiteralPath "\${PLUGIN_ROOT}/repo/scripts/toolkit-codex-helper-hook.ps1") { exit $LASTEXITCODE } ; `));
+  assert.match(helper.commandWindows, /; exit 2$/);
+  assert.match(session.commandWindows, /; exit 0$/);
   const source = JSON.parse(fs.readFileSync(path.join(repoRoot, '.codex-plugin', 'hooks', 'hooks.json'), 'utf8'));
   assert.equal(JSON.stringify(source).includes('commandWindows'), false);
   assert.equal(setup.CACHE_FINGERPRINT_PATHS.includes(setup.HELPER_HOOK_POWERSHELL_REL_PATH), true);
@@ -1076,6 +1080,25 @@ test('Codex Toolkit --write refreshes same-version stale cache by removing befor
   assert.equal(state.removeCount, 1);
   assert.deepEqual(setup.verifyInstalledCacheFreshness(summary.cache_root, repoRoot), []);
   assert.equal(fs.readFileSync(sentinel, 'utf8'), 'unchanged\n');
+});
+
+test('Codex Toolkit --write leaves a refusing stand-in where the replaced older version was', () => {
+  const codexHome = tmpRoot();
+  const oldRoot = writeInstalledCache(codexHome, { version: '3.0.0' });
+  const fakeCodex = writeFakeHangingCodex(codexHome, { initialInstalled: true, installedVersion: '3.0.0' });
+
+  const result = runSetupWrite(codexHome, fakeCodex);
+
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  const summary = JSON.parse(result.stdout);
+  assert.equal(summary.ok, true);
+  assert.equal((summary.warnings || []).some((warning) => /stand-in/.test(warning)), false, summary.warnings);
+  // Open chats on 3.0.0 still run hook commands that name this folder; it now holds only the stand-in.
+  assert.equal(standIn.isStandInFolder(oldRoot), true);
+  const marker = JSON.parse(fs.readFileSync(path.join(oldRoot, standIn.MARKER_NAME), 'utf8'));
+  assert.equal(marker.from_version, '3.0.0');
+  assert.equal(marker.to_version, setup.EXPECTED_TOOLKIT_VERSION);
+  assert.deepEqual(setup.verifyInstalledCacheFreshness(summary.cache_root, repoRoot), []);
 });
 
 test('Codex Toolkit --write waits for verification when plugin add installs after timeout window', () => {

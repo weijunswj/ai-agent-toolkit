@@ -2026,6 +2026,29 @@ function printUpdateReportLine(args, reportPath) {
   console.log('Toolkit local bridge sync complete.');
 }
 
+// A chat keeps the hooks it loaded at start. When this session-start run updated Toolkit, the chat runs
+// on with the old version's hooks, so the line asks for a new chat. In Codex the old version's folder is
+// replaced by a refusing stand-in (toolkit-codex-stand-in.cjs); Claude Code keeps the old hook list.
+// Session-start stdout reaches only the model, so the line asks it to tell the owner. Printed once.
+let newChatNoticePrinted = false;
+function printNewChatNotice(args, fromVersion, toVersion) {
+  if (!args.hook || newChatNoticePrinted) return;
+  if (!isValidBridgeVersion(fromVersion) || !isValidBridgeVersion(toVersion) || compareBridgeVersions(fromVersion, toVersion) >= 0) return;
+  newChatNoticePrinted = true;
+  const effect = args.syncSource === 'codex-plugin'
+    ? 'Its checks stay with the old version, so commits, pushes, pull requests, edits and helper launches are refused in this chat.'
+    : 'This chat keeps the Toolkit hooks it started with until it ends.';
+  console.log(`Toolkit was updated from ${fromVersion} to ${toVersion} as this chat started. ${effect} Open a new chat before committing, pushing or opening pull requests. Say this to the owner once, in your first reply.`);
+}
+
+// The version recorded in a Toolkit checkout; '' when unreadable.
+function checkoutVersion(repoPath) {
+  try {
+    const { version } = JSON.parse(fs.readFileSync(path.join(repoPath, 'repo', 'contracts', 'toolkit-local-bridge', 'version.json'), 'utf8'));
+    return isValidBridgeVersion(version) ? version : '';
+  } catch { return ''; }
+}
+
 function buildManifest({ checksum, sourceCommit, syncSource, hubPath }) {
   return {
     name: 'ai-agent-toolkit-local-bridge',
@@ -2986,6 +3009,13 @@ function sessionStartInstallCheck(args, hubPath, codexGlobalRules = null) {
 }
 
 function refreshCodexNativePluginCacheFromRepo({ args, state, repoPath, validateRepo = false }) {
+  if (args.hook && args.syncSource === 'codex-plugin') {
+    // Refusing stand-ins that setup left for chats on a replaced version go after their age; best effort.
+    try {
+      const standIn = require('./toolkit-codex-stand-in.cjs');
+      standIn.removeExpiredStandIns({ base: standIn.pluginCacheBase() });
+    } catch { /* a stand-in that stays refuses only in chats that still name it */ }
+  }
   const before = codexNativePluginCacheStatus(args, state);
   if (before.status !== 'stale') return before;
   if (!state.codex_plugin_auto_refresh_enabled) return before;
@@ -3039,6 +3069,8 @@ function refreshCodexNativePluginCacheFromRepo({ args, state, repoPath, validate
     };
   }
   const installedRoot = path.resolve(installed.cache_root);
+  const runningVersion = path.basename(path.resolve(before.plugin_root || ''));
+  printNewChatNotice(args, isValidBridgeVersion(runningVersion) ? runningVersion : BRIDGE_VERSION, installed.version);
   const afterErrors = verifyInstalledCacheFreshness(installedRoot, resolvedRepoPath);
   if (afterErrors.length) {
     return {
@@ -3289,6 +3321,10 @@ class RepositoryAutoUpdateOperation {
       releaseLock(reportLock);
     }
     printUpdateReportLine(args, report.reportPath);
+    // Claude Code runs Toolkit in place from the managed checkout, so this process started on the old version.
+    if (args.syncSource === 'claude-plugin' && this.#updateResult.repoPath) {
+      printNewChatNotice(args, BRIDGE_VERSION, checkoutVersion(this.#updateResult.repoPath));
+    }
     if (!report.reportPath && !args.hook && this.#updateResult.status === 'up-to-date') {
       console.log('Toolkit already up to date.');
     }

@@ -1,5 +1,13 @@
 # Toolkit Changelog
 
+## 3.19.19 (chats open during a Toolkit update stop guarded work instead of running unchecked)
+
+- **Fixed:** a Codex chat keeps the hook commands it loaded at start, and they name that version's plugin cache folder. When Toolkit updated itself while the chat was open, Codex deleted that folder, every later hook failed to start, and Codex let the call run: pushes, commits and merges in that chat went out with no Toolkit check. Now setup leaves a small stand-in at the replaced version's path that refuses commits, pushes, pull requests, edits, MCP calls and helper launches with "Toolkit was updated from X to Y after this chat started ... Open a new chat to continue". Other shell commands and prompts still go through, so the chat can read and talk. This covers chats opened on earlier versions too.
+- **Fixed:** the installed Codex hook commands now check that their launcher is still there. Under PowerShell, a missing helper launcher refuses with exit 2 and the same "open a new chat" reason; a missing session-start or checkpoint launcher exits quietly. The portable helper command does the same check through `sh`.
+- **New:** when the session-start hook updated Toolkit, it now prints "Toolkit was updated from X to Y as this chat started" with what that means for the chat, asks for a new chat before committing, pushing or opening pull requests, and asks the agent to tell the owner once. In Claude Code the chat keeps the hooks it started with (Claude Code keeps replaced version folders), and the line says so.
+- **Clean-up:** Codex removes a stand-in at the next plugin update, and the Codex session-start hook removes any stand-in older than 7 days. A stand-in has no plugin manifest, is only written for versions older than the installed one and never over an existing folder, and is not counted as leftover state from an earlier install. Removal condition for the stand-in writer: once no supported upgrade starts from a version whose installed hook commands lack the missing-launcher check.
+- **After updating:** the Codex hook commands changed, so open `/hooks` in Codex once and trust the updated Toolkit hooks.
+
 ## 3.19.14 (setup shows report-only rows as status lines)
 
 - **Changed:** a setup row that only reports state and takes no answer is no longer a numbered question. "Toolkit hooks in Codex" now shows under its section as an unnumbered line, for example "Status (nothing to answer): Toolkit hooks in Codex: Off: Shell and agent check, File edit check. Turn them on in Codex: open /hooks and turn on Shell and agent check and File edit check." The questions after it move up one number (Antigravity becomes 3.2 in the Codex table), and the table heading counts only the numbered questions.

@@ -4,9 +4,24 @@
 # Node from the absolute path setup recorded and lets Node read the hook input on stdin unchanged.
 
 $ErrorActionPreference = "Stop"
+$superseded = $null
 
 try {
   $pluginRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.."))
+  # A stand-in that setup left at a replaced version's path (toolkit-codex-stand-in.cjs): no Toolkit
+  # check runs here, so this launcher refuses guarded calls and asks for a new chat.
+  $markerPath = Join-Path $pluginRoot ".toolkit-superseded.json"
+  if (Test-Path -LiteralPath $markerPath -PathType Leaf) {
+    $superseded = 'Toolkit was updated from an older version to a newer version after this chat started, so its checks no longer run here.'
+    try {
+      $marker = [System.IO.File]::ReadAllText($markerPath) | ConvertFrom-Json
+      if ([string]$marker.from_version -match '^\d+\.\d+\.\d+$' -and [string]$marker.to_version -match '^\d+\.\d+\.\d+$') {
+        $superseded = "Toolkit was updated from $($marker.from_version) to $($marker.to_version) after this chat started, so its checks no longer run here."
+      }
+    } catch { }
+    $superseded += ' Commits, pushes, pull requests, edits and helper launches are refused in this chat. Open a new chat to continue.'
+    throw "superseded"
+  }
   $runtimePath = Join-Path $pluginRoot ".codex-plugin\session-start-runtime.json"
   $hookPath = Join-Path $pluginRoot "repo\scripts\toolkit-codex-helper-hook.cjs"
 
@@ -21,6 +36,7 @@ try {
   if (-not (Test-Path -LiteralPath $nodePath -PathType Leaf)) { throw "Node executable unavailable" }
 } catch {
   $reason = "Toolkit helper hook could not start ($($_.Exception.Message)). Run ``setup toolkit`` in Codex to repair the installed hook."
+  if ($null -ne $superseded) { $reason = $superseded }
   # Without Node no Toolkit check can run, so this launcher decides alone, before the guarded call starts.
   # Codex blocks a PreToolUse call on exit 2 with the reason on stderr; any other failure lets the call run
   # (hooks page, https://learn.chatgpt.com/docs/hooks.md, read 2026-10-23). A helper launch, or input that
@@ -29,13 +45,19 @@ try {
   # touch Toolkit's merge approvals: the commands the attribution check and the merge hold look at. This
   # is a wider match than theirs, written to let none of theirs through. Other shell commands run, and the
   # non-zero exit shows Codex's hook failure notice.
-  $toolName = $null; $command = ''
+  $toolName = $null; $command = ''; $hookEvent = ''
   try {
     $request = [Console]::In.ReadToEnd() | ConvertFrom-Json
     $toolName = [string]$request.tool_name
+    $hookEvent = [string]$request.hook_event_name
     if ($null -ne $request.tool_input) { $command = [string]$request.tool_input.command + ' ' + [string]$request.tool_input.cmd }
   } catch { $toolName = $null }
-  $guardedShell = $command -match '(?s)\bgit\b.*\b(?:commit|push)\b' -or $command -match '\bgh\s+pr\s+(?:create|edit|merge)\b' -or $command -match '(?s)\bgh\b.*\b(?:merge|sync|alias|api)\b' -or $command -match 'merge-approvals|user-state|TOOLKIT_HOST_SESSION|toolkit-(?:merge-hold|governance-hook|codex-helper-hook)' -or $command -match '\b(?:claude|codex)\b'
+  # In a superseded chat a prompt still goes through, so the chat can talk; the model reads the reason.
+  if ($null -ne $superseded -and $hookEvent -ceq 'UserPromptSubmit') {
+    [Console]::Out.WriteLine($reason)
+    exit 0
+  }
+  $guardedShell =$command -match '(?s)\bgit\b.*\b(?:commit|push)\b' -or $command -match '\bgh\s+pr\s+(?:create|edit|merge)\b' -or $command -match '(?s)\bgh\b.*\b(?:merge|sync|alias|api)\b' -or $command -match 'merge-approvals|user-state|TOOLKIT_HOST_SESSION|toolkit-(?:merge-hold|governance-hook|codex-helper-hook)' -or $command -match '\b(?:claude|codex)\b'
   # The shell tool names Codex may report (toolkit-shell-call.cjs holds the same list).
   $shellTool = $toolName -cmatch '^(?:Bash|PowerShell|Monitor|exec_command|shell|local_shell)$'
   if ($shellTool -and -not $guardedShell) {

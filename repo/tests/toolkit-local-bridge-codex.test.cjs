@@ -214,6 +214,9 @@ test('Codex auto-refresh across a version bump checks the newly installed cache 
   assert.equal(result.status, 0, result.stderr);
   assert.equal(fs.existsSync(oldPluginRoot), false, 'the folder the hook ran from was replaced');
   assert.equal(fs.existsSync(path.join(newPluginRoot, '.codex-plugin', 'plugin.json')), true);
+  // The chat that ran this hook keeps the old version's hooks, so the hook output asks for a new chat, once.
+  const notice = /Toolkit was updated from 3\.6\.0 to 9\.9\.9 as this chat started\. Its checks stay with the old version, so commits, pushes, pull requests, edits and helper launches are refused in this chat\. Open a new chat before committing, pushing or opening pull requests\./g;
+  assert.equal((result.stdout.match(notice) || []).length, 1, result.stdout);
   const report = readLatestReport(hub);
   assert.match(report.text, /Codex native plugin cache: `refreshed`/);
   assert.match(report.text, /Codex plugin updated to 9\.9\.9\. It takes effect in your next Codex session\./);

@@ -11,6 +11,7 @@ const { TOOLKIT_VERSION } = require('./toolkit-version.cjs');
 const { CodexConfigLoadCheck } = require('./codex-config-load-check.cjs');
 const { captureCodexConfigSnapshot } = require('./codex-delegation-backup.cjs');
 const { backupRoot: codexBackupRoot } = require('./codex-delegation-common.cjs');
+const standIn = require('./toolkit-codex-stand-in.cjs');
 
 const TOOLKIT_PLUGIN_NAME = 'ai-agent-toolkit';
 const TOOLKIT_MARKETPLACE_NAME = 'ai-agent-toolkit-local';
@@ -48,6 +49,7 @@ const CACHE_FINGERPRINT_PATHS = [
   '.codex-plugin/plugin.json',
   '.codex-plugin/hooks/hooks.json',
   'repo/scripts/codex-delegation-backup.cjs',
+  'repo/scripts/toolkit-codex-stand-in.cjs',
   'repo/scripts/codex-config-load-check.cjs',
   'repo/scripts/codex-app-server.cjs',
   'repo/scripts/host-json-config-write.cjs',
@@ -131,8 +133,11 @@ function defaultWindowsPowerShellPath() {
   return path.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
 }
 
+// The portable helper hook command (macOS and Linux). A chat keeps the command it loaded at start, and a
+// plugin update deletes that version's folder; node would then fail with a non-2 code and Codex would let
+// the call run. So the shell checks the script is still there and otherwise refuses with exit 2.
 function sourceHelperHookCommand() {
-  return `node "\${PLUGIN_ROOT}/${HELPER_HOOK_REL_PATH}"`;
+  return `sh -c 'test -f "$1" || { echo "${UPDATED_WHILE_OPEN}" >&2; exit 2; }; exec node "$1"' toolkit-hook "\${PLUGIN_ROOT}/${HELPER_HOOK_REL_PATH}"`;
 }
 
 // The Windows-only hook command (Codex's commandWindows). The full powershell.exe path is written without
@@ -143,20 +148,34 @@ function sourceHelperHookCommand() {
 // form turns any non-zero exit of the last program into 1 (PowerShell issue 13501). Codex blocks only on
 // exit 2, so the trailing `; exit $LASTEXITCODE` hands the launcher's own exit code back; under cmd.exe
 // the same words reach the launcher as unused script arguments, and cmd.exe already keeps the code.
-function windowsHookCommand(scriptRelPath, powershellPath = defaultWindowsPowerShellPath()) {
+// A chat keeps the command it loaded at start, and a plugin update deletes that version's folder; PowerShell
+// then fails -File with its own non-2 code and Codex lets the call run. So under PowerShell the command
+// checks the launcher is still there before handing its code back, and otherwise ends the way the role
+// needs (`missing`). Under cmd.exe those words are unused launcher arguments as before; the stand-in that
+// setup writes at the old path (toolkit-codex-stand-in.cjs) covers that shell. The texts avoid cmd.exe's
+// special characters and single quotes.
+const UPDATED_WHILE_OPEN = 'Toolkit was updated or removed while this chat was open, so its checks cannot run here. Open a new chat to continue.';
+const MISSING_LAUNCHER_ENDINGS = Object.freeze({
+  helper: `[Console]::Error.WriteLine('${UPDATED_WHILE_OPEN}') ; exit 2`,
+  sessionStart: `Write-Output '${UPDATED_WHILE_OPEN}' ; exit 0`,
+  checkpoint: 'exit 0'
+});
+
+function windowsHookCommand(scriptRelPath, powershellPath = defaultWindowsPowerShellPath(), missing = MISSING_LAUNCHER_ENDINGS.helper) {
   const value = String(powershellPath);
   if (!path.win32.isAbsolute(value) || /[\s"'&|<>^%]/.test(value)) {
     throw new Error(`Toolkit can only write a Windows hook command for a PowerShell path without spaces or special characters: ${value}`);
   }
-  return `${value} -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "\${PLUGIN_ROOT}/${scriptRelPath}" ; exit $LASTEXITCODE`;
+  const launcher = `"\${PLUGIN_ROOT}/${scriptRelPath}"`;
+  return `${value} -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ${launcher} ; if (Test-Path -LiteralPath ${launcher}) { exit $LASTEXITCODE } ; ${missing}`;
 }
 
 function windowsSessionStartCommand(powershellPath = defaultWindowsPowerShellPath()) {
-  return windowsHookCommand(SESSION_START_POWERSHELL_REL_PATH, powershellPath);
+  return windowsHookCommand(SESSION_START_POWERSHELL_REL_PATH, powershellPath, MISSING_LAUNCHER_ENDINGS.sessionStart);
 }
 
 function windowsHelperHookCommand(powershellPath = defaultWindowsPowerShellPath()) {
-  return windowsHookCommand(HELPER_HOOK_POWERSHELL_REL_PATH, powershellPath);
+  return windowsHookCommand(HELPER_HOOK_POWERSHELL_REL_PATH, powershellPath, MISSING_LAUNCHER_ENDINGS.helper);
 }
 
 function sourceCheckpointHookCommand() {
@@ -164,7 +183,7 @@ function sourceCheckpointHookCommand() {
 }
 
 function windowsCheckpointHookCommand(powershellPath = defaultWindowsPowerShellPath()) {
-  return windowsHookCommand(CHECKPOINT_HOOK_POWERSHELL_REL_PATH, powershellPath);
+  return windowsHookCommand(CHECKPOINT_HOOK_POWERSHELL_REL_PATH, powershellPath, MISSING_LAUNCHER_ENDINGS.checkpoint);
 }
 
 // The installed copy keeps the portable command and adds commandWindows to every Toolkit hook. The
@@ -1207,9 +1226,13 @@ function inspectResidualToolkitState(codexHome, pluginList = null) {
       evidence.push(`the Toolkit plugin cache path ${base} is not a plain directory`);
     } else {
       cache = listToolkitCacheTree(base);
-      const generations = cache.filter((entry) => /^[^/]+\/[^/]+\/$/.test(entry)).map((entry) => entry.slice(0, -1));
-      if (cache.length) {
-        evidence.push(`the Toolkit plugin cache ${base} still holds ${generations.length ? generations.join(', ') : `${cache.length} entries`}`);
+      // A refusing stand-in left for open chats (toolkit-codex-stand-in.cjs) is not an earlier install.
+      const standIns = cache.filter((entry) => /^[^/]+\/[^/]+\/$/.test(entry) && standIn.isStandInFolder(path.join(base, entry)));
+      const installed = cache.filter((entry) => !standIns.some((prefix) => entry.startsWith(prefix))
+        && !(standIns.length && /^[^/]+\/$/.test(entry)));
+      const generations = installed.filter((entry) => /^[^/]+\/[^/]+\/$/.test(entry)).map((entry) => entry.slice(0, -1));
+      if (installed.length) {
+        evidence.push(`the Toolkit plugin cache ${base} still holds ${generations.length ? generations.join(', ') : `${installed.length} entries`}`);
       }
     }
   } catch (error) {
@@ -1391,6 +1414,21 @@ class CodexToolkitWriteTransaction {
     return { state, pluginChanged: this.#pluginChanged, transition: this.#transition, warnings: this.#warnings };
   }
 
+  // Chats opened on a replaced version keep running hook commands that name its folder: leave a
+  // refusing stand-in there (toolkit-codex-stand-in.cjs) and clear stand-ins past their age. A stand-in
+  // that cannot be written is a warning, never a setup failure: the install itself succeeded.
+  #leaveStandIns(cacheBase, versionsBefore, installedVersion) {
+    try {
+      standIn.removeExpiredStandIns({ base: cacheBase });
+      const { skipped } = standIn.writeStandIns({ base: cacheBase, before: versionsBefore, toVersion: installedVersion, sourceRoot: this.#options.repoRoot });
+      for (const entry of skipped.filter((item) => item.reason !== 'not older than the installed version')) {
+        this.#warnings.push(`Open Codex chats on Toolkit ${entry.version} get no refusing stand-in (${entry.reason}); open a new chat there before committing or pushing.`);
+      }
+    } catch (error) {
+      this.#warnings.push(`Open Codex chats on the replaced Toolkit version get no refusing stand-in (${error.message}); open a new chat there before committing or pushing.`);
+    }
+  }
+
   async run() {
     try {
       return await this.#run();
@@ -1440,6 +1478,9 @@ class CodexToolkitWriteTransaction {
     }
     this.#record('plugin-replacement', current, state);
     this.#pluginChanged = true;
+    // The version folders open chats may still run from; the install below deletes them.
+    const cacheBase = standIn.pluginCacheBase(this.#options.codexHome);
+    const versionsBefore = standIn.installedVersionFolders(cacheBase);
     if (shouldRemoveBeforeInstall(state, current)) {
       runCodexJson(this.#command, ['plugin', 'remove', pluginId(), '--json']);
       if (findInstalledEntry(this.#listPlugins())) {
@@ -1452,6 +1493,7 @@ class CodexToolkitWriteTransaction {
     });
     this.#pluginChanged = this.#pluginChanged || addOutcome.hookChanged;
     if (addOutcome.warning) this.#warnings.push(addOutcome.warning);
+    this.#leaveStandIns(cacheBase, versionsBefore, addOutcome.state.installed?.version);
     this.#complete({ installed_version: addOutcome.state.installed?.version || null });
     return this.#result(addOutcome.state);
   }
@@ -1842,6 +1884,7 @@ module.exports = {
   CodexSetupJournal,
   codexToolkitInstallCommands,
   compareSemver,
+  inspectResidualToolkitState,
   comparablePath,
   defaultCodexHome,
   defaultWindowsPowerShellPath,

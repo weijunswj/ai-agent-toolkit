@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${PLUGIN_ROOT}/repo/scripts/toolkit-codex-helper-hook.cjs\""
+            "command": "sh -c 'test -f \"$1\" || { echo \"Toolkit was updated or removed while this chat was open, so its checks cannot run here. Open a new chat to continue.\" >&2; exit 2; }; exec node \"$1\"' toolkit-hook \"${PLUGIN_ROOT}/repo/scripts/toolkit-codex-helper-hook.cjs\""
           }
         ]
       }
@@ -27,7 +27,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${PLUGIN_ROOT}/repo/scripts/toolkit-codex-helper-hook.cjs\"",
+            "command": "sh -c 'test -f \"$1\" || { echo \"Toolkit was updated or removed while this chat was open, so its checks cannot run here. Open a new chat to continue.\" >&2; exit 2; }; exec node \"$1\"' toolkit-hook \"${PLUGIN_ROOT}/repo/scripts/toolkit-codex-helper-hook.cjs\"",
             "timeout": 60
           }
         ]
@@ -37,7 +37,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${PLUGIN_ROOT}/repo/scripts/toolkit-codex-helper-hook.cjs\""
+            "command": "sh -c 'test -f \"$1\" || { echo \"Toolkit was updated or removed while this chat was open, so its checks cannot run here. Open a new chat to continue.\" >&2; exit 2; }; exec node \"$1\"' toolkit-hook \"${PLUGIN_ROOT}/repo/scripts/toolkit-codex-helper-hook.cjs\""
           }
         ]
       }

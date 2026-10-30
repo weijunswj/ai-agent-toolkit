@@ -479,4 +479,30 @@ test('an automatic update that changes the stack registry refreshes the installe
   }
   const report = reports().find((text) => /Toolkit helpers: updated this run/.test(text) && text.includes(updated));
   assert.ok(report, 'the update report records the refresh');
+  assert.doesNotMatch(result.stdout, /as this chat started/, 'the version did not change, so no new-chat line');
+});
+
+test('an automatic update to a newer version asks for a new chat once, since the chat keeps its hooks', (t) => {
+  const root = tmpRoot(t);
+  const { origin, seed, managed } = runnableManagedCheckout(root);
+  installToolkit(root, managed);
+  const hub = path.join(root, '.ai-agent-toolkit', 'current');
+  writeJson(path.join(hub, 'state.json'), {
+    schema_version: 1, architecture_version: 2, hub_version: BRIDGE_VERSION,
+    auto_sync_enabled: true, repo_auto_update_enabled: true, repo_path: managed, repo_branch: 'main', repo_remote: origin,
+    bridge_versions_by_source: { 'claude-plugin': BRIDGE_VERSION },
+  });
+  const versionFile = path.join(seed, 'repo', 'contracts', 'toolkit-local-bridge', 'version.json');
+  fs.writeFileSync(versionFile, `${JSON.stringify({ ...JSON.parse(fs.readFileSync(versionFile, 'utf8')), version: '99.0.0' }, null, 2)}\n`);
+  git(seed, ['commit', '-am', 'release 99.0.0']);
+  git(seed, ['push', 'origin', 'main']);
+
+  const result = spawnSync(process.execPath, [path.join(managed, 'repo', 'scripts', 'toolkit-local-bridge.cjs'),
+    '--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'claude-plugin'], {
+    cwd: root, encoding: 'utf8', timeout: 300000, env: env(root, { CLAUDE_PLUGIN_ROOT: managed }),
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const escaped = BRIDGE_VERSION.replace(/\./g, '\\.');
+  const notice = new RegExp(`Toolkit was updated from ${escaped} to 99\\.0\\.0 as this chat started\\. This chat keeps the Toolkit hooks it started with until it ends\\. Open a new chat before committing, pushing or opening pull requests\\.`, 'g');
+  assert.equal((result.stdout.match(notice) || []).length, 1, result.stdout);
 });

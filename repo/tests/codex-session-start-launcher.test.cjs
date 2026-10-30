@@ -63,6 +63,7 @@ function createRealBridgePluginFixture(root) {
     setup.SESSION_START_POWERSHELL_REL_PATH,
     'repo/scripts/toolkit-local-bridge.cjs',
     'repo/scripts/setup-codex-toolkit-plugin.cjs',
+    'repo/scripts/toolkit-codex-stand-in.cjs',
     'repo/scripts/toolkit-staging-generations.cjs',
     'repo/scripts/toolkit-antigravity-project-skills.cjs',
     'repo/scripts/toolkit-skill-copies.cjs',
@@ -245,11 +246,18 @@ test('Windows launcher uses exact Node metadata, preserves stdin and output, and
 
 test('Windows installed commands use a full PowerShell path and -File with no nested command text', () => {
   const command = setup.windowsSessionStartCommand('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe');
-  assert.equal(command, 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${PLUGIN_ROOT}/repo/scripts/toolkit-codex-session-start.ps1" ; exit $LASTEXITCODE');
-  assert.doesNotMatch(command, /\$env:|(?:^|\s)-Command(?:\s|$)|&\s*[{'"]/i);
-  assert.doesNotMatch(command, /\.sh(?:["\s]|$)|(?:^|[\\/])code(?:\.exe)?(?:["\s]|$)/i);
-  assert.match(setup.windowsHelperHookCommand('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'), /-File "\$\{PLUGIN_ROOT\}\/repo\/scripts\/toolkit-codex-helper-hook\.ps1" ; exit \$LASTEXITCODE$/);
-  assert.match(setup.windowsCheckpointHookCommand('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'), /-File "\$\{PLUGIN_ROOT\}\/repo\/scripts\/toolkit-programme-checkpoint-hook\.ps1" ; exit \$LASTEXITCODE$/);
+  const launcher = '"${PLUGIN_ROOT}/repo/scripts/toolkit-codex-session-start.ps1"';
+  assert.equal(command, `C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ${launcher} ; if (Test-Path -LiteralPath ${launcher}) { exit $LASTEXITCODE } ; Write-Output 'Toolkit was updated or removed while this chat was open, so its checks cannot run here. Open a new chat to continue.' ; exit 0`);
+  const helper = setup.windowsHelperHookCommand('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe');
+  const checkpoint = setup.windowsCheckpointHookCommand('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe');
+  for (const value of [command, helper, checkpoint]) {
+    assert.doesNotMatch(value, /\$env:|(?:^|\s)-Command(?:\s|$)|&\s*[{'"]/i);
+    assert.doesNotMatch(value, /\.sh(?:["\s]|$)|(?:^|[\\/])code(?:\.exe)?(?:["\s]|$)/i);
+    // Under cmd.exe the words after -File reach the launcher as arguments, so none may be special to cmd.exe.
+    assert.doesNotMatch(value, /[&|<>^%]/);
+  }
+  assert.match(helper, /-File "\$\{PLUGIN_ROOT\}\/repo\/scripts\/toolkit-codex-helper-hook\.ps1" ; if \(Test-Path -LiteralPath "\$\{PLUGIN_ROOT\}\/repo\/scripts\/toolkit-codex-helper-hook\.ps1"\) \{ exit \$LASTEXITCODE \} ; \[Console\]::Error\.WriteLine\('[^']+Open a new chat to continue\.'\) ; exit 2$/);
+  assert.match(checkpoint, /-File "\$\{PLUGIN_ROOT\}\/repo\/scripts\/toolkit-programme-checkpoint-hook\.ps1" ; if \(Test-Path -LiteralPath "\$\{PLUGIN_ROOT\}\/repo\/scripts\/toolkit-programme-checkpoint-hook\.ps1"\) \{ exit \$LASTEXITCODE \} ; exit 0$/);
   assert.throws(() => setup.prepareInstalledSessionStart(path.join(tmpRoot(), 'cache $dollar'), { platform: 'win32' }), /cannot carry safely/);
 });
 
