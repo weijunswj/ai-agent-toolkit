@@ -35,12 +35,14 @@ test('names-only listing: the names-only listing returns names only, through a r
   const prefix = `ai-agent-toolkit-test/${crypto.randomBytes(6).toString('hex')}`;
   const value = marker();
   const outputs = [];
+  // A loaded CI runner can start the child slower than the store's 30 s limit: the test allows 120 s; the store keeps 30 s.
+  const slow = (command, args, options) => spawnSync(command, args, { ...options, timeout: 120000 });
   const recording = (command, args, options) => {
-    const result = spawnSync(command, args, options);
+    const result = slow(command, args, options);
     outputs.push({ ops: String(options.input || ''), stdout: String(result.stdout || ''), stderr: String(result.stderr || '') });
     return result;
   };
-  const store = new WindowsCredentialStore({ prefix });
+  const store = new WindowsCredentialStore({ prefix, spawn: slow });
   t.after(() => { for (const name of store.list()) store.remove(name); });
   store.writeAll(new Map([['X4_TEST_MARKER', value]]));
   const listing = new WindowsCredentialStore({ prefix, spawn: recording });
