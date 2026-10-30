@@ -184,7 +184,10 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.doesNotMatch(body, /Keep any attribution header/);
   assert.match(body, /Each Toolkit scheduled task is bound to its own home thread, which carries its model and effort \(fallback: a fresh session per run\)/);
   assert.match(body, /Never resolve a home thread; a fresh-session run resolves its own thread after delivery/);
-  assert.match(body, /- Posts: after the owner's last message, keep output in one post you edit \(append, keep every detail\); post anew on an owner project-chat message or near 8 KB; answer an owner burst in one post\./);
+  assert.ok(body.includes('- Posts: before every post, read the newest page where you post (the project chat, or your thread).'));
+  assert.ok(body.includes('Decide from the chat itself, never from a memory line.'));
+  assert.ok(body.includes('- Post layout: a `**Now:**` line first;'));
+  assert.ok(body.includes('- Problem, fix, skip first: every plan, G0 plan, decision ask and explanation opens with'));
   // Posts, in the main project chat, reply threads and work threads alike.
   assert.match(text, /\*\*Posts, everywhere you post\*\* \(the main project chat, reply threads and work threads alike\): after the owner's last message, keep all your output in one running post and edit it, appending each new result, PR or question and keeping every earlier detail\. The running post is always your newest top-level post, the acknowledgement posted with a new thread included\. Before every edit, check whether the owner has written since that post \(in the main project chat, or in a work thread, in that thread\); if so, post fresh instead\. Start each appended update with its local time, for example \*\*\[16:41\] Update:\*\*\. Also start a fresh post when the running post nears about 8 KB; an owner reply under the running post does not start one, and the answer to it is appended to the running post\. Answer a burst of owner messages in one post\. When the owner replies under one of your earlier posts in the main project chat, answer in the main project chat \(you cannot post under your own posts there\) with a fresh post starting "Re: your reply on <short topic>", and never edit the older post\./);
   assert.doesNotMatch(text + body, /is always a new post|edit your own post only/);
