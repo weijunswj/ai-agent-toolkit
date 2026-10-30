@@ -318,6 +318,37 @@ function bindingRequiredChecks(root, options = {}) {
   return binding ? [...binding.required_checks] : null;
 }
 
+// The owner's answer on task auto-merge in the binding merged on the default branch:
+// { auto_merge: 'off' | 'after-gates', answered, fresh, eligibility_required }. It is 'after-gates'
+// only when this computer's read of that binding is valid, governs, names this repository and is
+// under 24 hours old; a missing answer, a stale or failed read, a version 1 binding or a working-tree
+// edit is 'off'. `answered` says whether the merged binding holds an answer at all.
+// `eligibility_required` says whether its required checks include the always-manual check
+// (ELIGIBILITY_CHECK): without it a yes is not enforceable, and the merge hold keeps asking.
+const ELIGIBILITY_CHECK = 'auto-merge-eligible';
+// The question for the owner, asked once per governed repository. No is recommended, so an
+// "all recommended" answer never turns it on.
+const TASK_AUTO_MERGE_QUESTION = Object.freeze({
+  text: "When a task's pull request has passed review, CI and your testing, should it merge without waiting for you to type merge?",
+  no: 'No, I type merge for each one (recommended).',
+  yes: 'Yes, merge it once every check has passed.',
+  reason: 'Merging changes what every computer and repository gets on its next update, so you see each one first.',
+});
+function taskAutoMerge(root, options = {}) {
+  const off = { auto_merge: 'off', answered: false, fresh: false, eligibility_required: false };
+  try {
+    const identity = readIdentity(root);
+    if (!identity.valid) return off;
+    const now = typeof options.now === 'function' ? options.now() : new Date();
+    const judged = judgeMerged(bindingCache.readBindingCache(identity, registryPathFor(options)), identity, now);
+    if (judged.status !== 'enabled') return off;
+    const value = judged.binding.task_prs && judged.binding.task_prs.auto_merge;
+    const answered = value === 'off' || value === 'after-gates';
+    const eligibilityRequired = Array.isArray(judged.binding.required_checks) && judged.binding.required_checks.includes(ELIGIBILITY_CHECK);
+    return { auto_merge: value === 'after-gates' && judged.fresh === true ? 'after-gates' : 'off', answered, fresh: judged.fresh === true, eligibility_required: eligibilityRequired };
+  } catch { return off; }
+}
+
 // The dependency policy of a parsed binding: { auto_merge, github_actions }. Missing keys take the
 // safe defaults: auto-merge off and GitHub Actions updates kept for the owner. A binding's
 // deprecated `paid_security` key is accepted and ignored when it is "off" or "on"; any other value
@@ -673,6 +704,9 @@ module.exports = Object.freeze({
   workingBindingStoreRepository,
   bindingRequiredChecks,
   workingBindingRequiredChecks,
+  taskAutoMerge,
+  TASK_AUTO_MERGE_CHECK: ELIGIBILITY_CHECK,
+  TASK_AUTO_MERGE_QUESTION,
   committedBindingPolicy,
   workingBindingPolicy,
   readDecision,

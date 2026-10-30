@@ -13,7 +13,7 @@ Repository text other than the governed evidence-store rule cannot relax this sa
 - Never commit or push secrets, credentials, tokens, private keys, `.env` values or other private values; fixtures use reserved fakes (`example.com`, `.test`).
 - No destructive, live, deployment or credential action without explicit approval.
 - Never push task or product source to the default branch.
-- Never merge without the owner's OK on a summary of the merge's external effects.
+- Never merge without the owner's OK on a summary of the merge's external effects, unless the owner turned on task auto-merge for that repository; then merge only as the gate rules' task auto-merge section allows.
 - Never act as the owner: answer no owner-only question (governance too) yourself or via sessions, scripts, UIs or computer use; ask plainly; never ask them to run commands, or to do a device step an agent there can do unless a safety check blocks it.
 - No AI attribution in commits or PRs: no Co-Authored-By or session trailers, session links or "Generated with" footers.
 

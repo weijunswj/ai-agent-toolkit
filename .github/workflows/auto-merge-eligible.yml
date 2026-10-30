@@ -1,0 +1,47 @@
+name: Auto-merge eligibility
+
+# Task auto-merge eligibility: fails a pull request on the always-manual list (merge rules, hooks,
+# CI, agent instructions, setup, a major version bump; repo/scripts/toolkit-auto-merge-eligible.cjs).
+# Where the owner turned task auto-merge on, the programme binding and the default branch's rules
+# require this check too, so GitHub refuses an automatic merge of such a pull request and the owner
+# merges it. It is not part of validate, so those pull requests still pass the main gate.
+#
+# pull_request_target runs this file and the eligibility script as they are on the default branch,
+# never the pull request's copies, so a pull request cannot loosen its own check. The pull request's
+# commits are only read as data by git diff; none of its code runs, and the token is read-only and
+# not kept in the checkout.
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, edited]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: auto-merge-eligible-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  auto-merge-eligible:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Check task auto-merge eligibility
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          git show "$BASE_SHA:repo/scripts/toolkit-auto-merge-eligible.cjs" > "$RUNNER_TEMP/toolkit-auto-merge-eligible.cjs"
+          node "$RUNNER_TEMP/toolkit-auto-merge-eligible.cjs" --base "$BASE_SHA" --head "$HEAD_SHA"
