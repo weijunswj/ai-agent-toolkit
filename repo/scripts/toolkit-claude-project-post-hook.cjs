@@ -50,7 +50,18 @@ const fs = require('node:fs');
 const POST_TOOL = 'mcp__hearthbot__post_message';
 const EDIT_TOOL = 'mcp__hearthbot__edit_message';
 const CHAT_READ_TOOL = 'mcp__hearthbot__read_project_chat';
-const TRACKED_TOOLS = new Set([POST_TOOL, EDIT_TOOL, CHAT_READ_TOOL]);
+const READ_MEMORY = 'mcp__hearthbot__read_memory';
+const UPDATE_MEMORY = 'mcp__hearthbot__update_memory';
+const START_THREAD = 'mcp__hearthbot__start_thread';
+const LIST_THREADS = 'mcp__hearthbot__list_threads';
+const TRACKED_TOOLS = new Set([POST_TOOL, EDIT_TOOL, CHAT_READ_TOOL, READ_MEMORY, UPDATE_MEMORY, START_THREAD, LIST_THREADS]);
+// A thread id in a thread launch or thread listing result.
+const THREAD_ID_FIELD = /"(?:thread_id|id|ts)"s*:s*"(cmsg_[A-Za-z0-9]+)"/g;
+// The project memory line naming the running post: the label after an optional bullet, quote, number or heading,
+// plain, bold or in backticks, then the message id. Prose that only mentions the label is not a line.
+const RUNNING_LINE = /^\s*(?:[-*>]\s*|\d+[.)]\s+|#{1,6}\s+)?`?(?:\*\*)?RUNNING POST:(?:\*\*)?\s*`?(cmsg_[A-Za-z0-9]+)\b/;
+// A one-line gate anchor post, as in "Gate: G1 started for PR 700".
+const ANCHOR_LINE = /^\s*(?:\*\*)?Gate:(?:\*\*)?\s*\S/i;
 const SPAWN_RELAY = /^\s*<relay\b[^<>]*\breason=["']spawn["']/;
 // Sorts after every ISO time: an owner message with no sent-at counts as later than any chat post.
 const LATEST_TIME = String.fromCharCode(0xffff);
@@ -215,25 +226,49 @@ function threadSession(entries) {
   return false;
 }
 
-// The top-level messages of a project chat read that reached the last page, or null. The listing is the JSON object
-// in the result; message bodies inside it are escaped strings, so they cannot fake its shape.
+// The top-level messages of one page of a project chat read, and whether it is the last page, or null. The listing is
+// the JSON object in the result; message bodies inside it are escaped strings, so they cannot fake its shape.
 function chatPage(text) {
   const start = text.indexOf('{"messages":');
   const end = text.lastIndexOf('}');
   if (start === -1 || end < start) return null;
   let listing;
   try { listing = JSON.parse(text.slice(start, end + 1)); } catch { return null; }
-  if (listing?.has_more !== false || !Array.isArray(listing.messages)) return null;
-  return listing.messages;
+  if (typeof listing?.has_more !== 'boolean' || !Array.isArray(listing.messages)) return null;
+  return { messages: listing.messages.filter(message => message && typeof message === 'object'), last: !listing.has_more };
 }
 
-// The newest message on that page, or null.
+// A coordinator chat item that is not a status post: a card (thread start, routing, activity, Remote Control or any
+// other kind) or a one-line gate anchor. Owner messages are never skipped.
+function notStatusPost(message) {
+  return message.author !== 'user' && typeof message.body === 'string' && (isCard(message.body) || isAnchor(message.body));
+}
+
+// The newest message on the last page, passing over cards and anchors, or null.
 function chatNewest(messages) {
   let newest = null;
   for (const message of messages || []) {
-    if (typeof message?.created_at === 'string' && (!newest || message.created_at >= newest.created_at)) newest = message;
+    if (notStatusPost(message)) continue;
+    if (typeof message.created_at === 'string' && (!newest || message.created_at >= newest.created_at)) newest = message;
   }
   return typeof newest?.id === 'string' && MESSAGE_ID.test(newest.id) ? newest : null;
+}
+
+// The running post a project memory text names (the first RUNNING POST line outside code fences), or null. A fence
+// may be indented, since read_memory indents every line of the file.
+function memoryRunning(text) {
+  const unfenced = textOf(text).replace(/(^|\n)[ \t]*(```|~~~)[\s\S]*?(?:\n[ \t]*\2[^\n]*|$)/g, match => match.replace(/[^\n]/g, ' '));
+  for (const line of lineSplit(unfenced)) {
+    const id = line.match(RUNNING_LINE)?.[1];
+    if (id) return id;
+  }
+  return null;
+}
+
+// A one-line Gate: anchor of under 25 words. It never becomes the running post.
+function isAnchor(text) {
+  const lines = lineSplit(textOf(text)).filter(line => line.trim());
+  return lines.length === 1 && ANCHOR_LINE.test(lines[0]) && lines[0].split(/\s+/).filter(Boolean).length < SHORT_POST_WORDS;
 }
 
 // Whether a post recorded at `time` came before an owner message sent at `at`; a missing or unreadable time counts as
@@ -244,9 +279,16 @@ function postedBefore(time, at) {
   return !(posted >= sent);
 }
 
-// A card (onboarding, decision or activity) is a JSON object with a kind, not a post.
+// A card (onboarding, decision, thread start, routing or activity) is a JSON object with a kind, not a post.
+function cardKind(body) {
+  try {
+    const kind = JSON.parse(body)?.kind;
+    return typeof kind === 'string' ? kind : null;
+  } catch { return null; }
+}
+
 function isCard(body) {
-  try { return typeof JSON.parse(body)?.kind === 'string'; } catch { return false; }
+  return cardKind(body) !== null;
 }
 
 function resultText(block) {
@@ -256,8 +298,9 @@ function resultText(block) {
 }
 
 // Walks the transcript and returns the running post (the newest successful top-level post with no owner message
-// after it) with its current size, the latest text of each successful own post (and whether it is a reply under a
-// post; null when only an edit of it is known), and whether the session has used the Projects tools.
+// after it; failing that, the post the project memory names) with its current size, the latest text of each
+// successful own post (and whether it is a reply under a post; null when only an edit of it is known), whether an
+// owner message arrived anywhere since the running post, and whether the session has used the Projects tools.
 function readTranscript(lines) {
   let running = null;
   // The newest top-level post, kept after owner messages so a second reply under it is still a reply under it.
@@ -273,6 +316,19 @@ function readTranscript(lines) {
   const inThread = threadSession(entries);
   // The time of the newest owner message seen so far; one with no time counts as later than any chat post.
   let ownerAt = null;
+  // Whether an owner message opened the chat in this session, whether the session made a top-level post of its own,
+  // and whether any owner message (a work thread's or a reply's included) arrived since the running post was set.
+  let chatOwner = false;
+  let ownPost = false;
+  let ownerSince = false;
+  // Work threads this session knows: from its thread launches and listings, and the thread-start cards a chat read
+  // shows. An owner message in one of them is not a main-chat message.
+  const workThreads = new Set();
+  const setRunning = value => {
+    running = value;
+    newest = value.id;
+    ownerSince = false;
+  };
   const ownerWrote = owner => {
     // Only an owner reply under the running post itself leaves that post open to edits; any other owner message
     // (main chat, a work thread, or a reply under an older post) puts every post above it.
@@ -285,6 +341,7 @@ function readTranscript(lines) {
       if (ownerAt === null || time > ownerAt) ownerAt = time;
     }
     running = null;
+    chatOwner = true;
   };
   // A citation in the coordinator of an owner chat message it never saw: only its posts from before that message sit
   // above it, and the running post stays open when it came after.
@@ -295,6 +352,7 @@ function readTranscript(lines) {
     const time = at || LATEST_TIME;
     if (ownerAt === null || time > ownerAt) ownerAt = time;
     if (running && posts.get(running.id)?.ownerAfter) running = null;
+    chatOwner = true;
   };
   // Owner message ids already counted, so one message counts once however often it is queued, delivered or cited.
   const seen = new Set();
@@ -306,10 +364,13 @@ function readTranscript(lines) {
       return true;
     });
     // A work thread shows every owner message forwarded to it below its posts, wherever the owner wrote it. The
-    // coordinator posts in the main project chat, so only a citation of an owner chat message counts there.
-    const wakes = owner.filter(({ where }) => where === null || inThread);
+    // coordinator posts in the main project chat, so there only an owner message in that chat counts: a wake that is
+    // not in a work thread the session knows, or a citation of a chat message. An owner message in a work thread
+    // leaves the coordinator's running post open; an unknown thread counts as the chat, as before.
+    const wakes = owner.filter(({ where, id, thread }) => (where === null && !(thread !== null && thread !== id && workThreads.has(thread))) || inThread);
     if (wakes.length) ownerWrote(wakes);
     for (const { at } of owner.filter(({ where }) => where === 'timeline' && !inThread)) ownerWroteBefore(at);
+    if (owner.length) ownerSince = true;
     const content = entry?.message?.content;
     if (!Array.isArray(content)) continue;
     for (const block of content) {
@@ -320,13 +381,41 @@ function readTranscript(lines) {
         const call = pending.get(block.tool_use_id);
         pending.delete(block.tool_use_id);
         if (block.is_error) continue;
-        if (call.name === CHAT_READ_TOOL) {
-          const page = inThread ? null : chatPage(resultText(block));
+        if (call.name === READ_MEMORY || call.name === UPDATE_MEMORY) {
+          // update_memory replaces the whole file with its one content string; no other field is memory text. The
+          // memory line names the running post only for a session that knows none of its own: no own top-level post
+          // and no owner message in the chat yet, since either one tells it more than an earlier session's line.
+          const id = memoryRunning(call.name === READ_MEMORY ? resultText(block) : textOf(call.input.content));
+          if (id && !running && !ownPost && !chatOwner) {
+            // Its size is unknown until a chat read shows its body or an edit sets it, so it counts as under the limit.
+            setRunning({ id, size: 0, memory: true });
+            if (!posts.has(id)) posts.set(id, { text: '', reply: false, ownerAfter: false, time: undefined });
+          }
+        } else if (call.name === CHAT_READ_TOOL) {
+          const listing = inThread ? null : chatPage(resultText(block));
+          const messages = listing ? listing.messages : [];
+          for (const message of messages) {
+            if (message.author !== 'user' && typeof message.body === 'string' && cardKind(message.body)?.startsWith('thread_start')) {
+              for (const id of [message.id, message.thread_id]) if (typeof id === 'string' && MESSAGE_ID.test(id)) workThreads.add(id);
+            }
+          }
+          // Any page, not just the last, gives a memory post its real size and time, and shows owner messages after it.
+          const shown = running?.memory ? messages.find(message => message.id === running.id) : null;
+          if (shown && typeof shown.body === 'string') {
+            running.size = bytes(shown.body);
+            posts.get(running.id).time = shown.created_at;
+          }
+          const memoryTime = running?.memory ? posts.get(running.id)?.time : undefined;
+          const later = typeof memoryTime === 'string'
+            ? messages.filter(message => message.author === 'user' && typeof message.id === 'string' && !seen.has(message.id) && typeof message.created_at === 'string' && message.created_at > memoryTime)
+            : [];
+          const page = listing?.last ? messages : null;
           const latest = chatNewest(page);
           const fresh = latest?.author === 'user' && !seen.has(latest.id);
-          for (const message of page || []) {
-            if (message?.author === 'user' && typeof message.id === 'string') seen.add(message.id);
+          for (const message of messages) {
+            if (message.author === 'user' && typeof message.id === 'string') seen.add(message.id);
           }
+          if (later.length && !fresh) ownerWrote(later.map(message => ({ thread: null, at: message.created_at })));
           // The owner's top-level message is the newest: it sits below every post, as an owner message in the chat,
           // unless this session already counted it. The coordinator's newest post is the running post only when no
           // owner message seen here (a reply in a thread included) came after it, so it is never both closed to
@@ -334,21 +423,27 @@ function readTranscript(lines) {
           if (fresh) ownerWrote([{ thread: null, at: latest.created_at }]);
           // A body near the 8 KB limit may be cut short by the read, so that post is left untracked: a fresh post
           // passes, as for any running post that size, and its edits are never compared with a shortened text.
-          else if (latest?.author === 'agent' && typeof latest.body === 'string' && !isCard(latest.body)
+          else if (latest?.author === 'agent' && typeof latest.body === 'string'
             && bytes(latest.body) < NEAR_LIMIT_BYTES
             && !posts.get(latest.id)?.ownerAfter && (ownerAt === null || ownerAt < latest.created_at)) {
-            running = { id: latest.id, size: bytes(latest.body) };
-            newest = latest.id;
+            setRunning({ id: latest.id, size: bytes(latest.body) });
             // Recorded as a top-level post, so a later owner message closes it to edits and its edits are layout-checked.
             posts.set(latest.id, { text: latest.body, reply: false, ownerAfter: false, time: latest.created_at });
+          } else if (latest?.author === 'agent' && running?.memory && running.id !== latest.id) {
+            // The chat shows a newer post than the memory line names, cut short or closed: the memory line is stale.
+            running = null;
           }
+        } else if (call.name === START_THREAD || call.name === LIST_THREADS) {
+          for (const [, id] of resultText(block).matchAll(THREAD_ID_FIELD)) workThreads.add(id);
         } else if (call.name === POST_TOOL) {
           const id = resultText(block).match(MESSAGE_ID)?.[1];
+          const topLevel = id && !call.input.thread_id;
           // The post's time is when its result was recorded.
           if (id) posts.set(id, { text: textOf(call.input.text), reply: Boolean(call.input.thread_id), ownerAfter: false, time: entry.timestamp });
-          if (id && !call.input.thread_id) {
-            running = { id, size: bytes(call.input.text) };
-            newest = id;
+          // A gate anchor sits in the chat but never takes over from the running post.
+          if (topLevel && !isAnchor(call.input.text)) {
+            ownPost = true;
+            setRunning({ id, size: bytes(call.input.text) });
           }
         } else if (typeof call.input.message_id === 'string') {
           const known = posts.get(call.input.message_id);
@@ -358,7 +453,7 @@ function readTranscript(lines) {
       }
     }
   }
-  return { running, projects, posts };
+  return { running, projects, posts, ownerSince };
 }
 
 // Blanks code (a fence of ``` or ~~~ at the start of a line, running to its closing fence or the end, and inline spans)
@@ -972,6 +1067,9 @@ function mergeIssue(target, posts) {
   return `Toolkit Projects rule: before every merge, post a short summary of the merge's external effects (what changes on the user's machines, hooks, rules, setup defaults and other repos) with the diff link, and merge only after the user's OK. None of your posts names the external effects of ${pr} yet: add them to your running post on one line that says "external effects" and names ${pr}, then merge.`;
 }
 
+// Added to a refusal about a running post known only from the project memory line.
+const MEMORY_HINT = ' This post comes from the RUNNING POST line in project memory. If the owner wrote after it, or it nears 8 KB, read the project chat to its last page so this hook sees that, then post again.';
+
 function decide(input, readLines = file => fs.readFileSync(file, 'utf8').split('\n')) {
   const tool = String(input?.tool_name || '');
   const post = tool === POST_TOOL || tool === EDIT_TOOL;
@@ -980,7 +1078,7 @@ function decide(input, readLines = file => fs.readFileSync(file, 'utf8').split('
   if (typeof input.transcript_path !== 'string' || !input.transcript_path) return '';
   let lines;
   try { lines = readLines(input.transcript_path); } catch { return ''; }
-  const { running, projects, posts } = readTranscript(lines);
+  const { running, projects, posts, ownerSince } = readTranscript(lines);
   if (merge) {
     if (!projects) return '';
     for (const target of merge) {
@@ -995,6 +1093,12 @@ function decide(input, readLines = file => fs.readFileSync(file, 'utf8').split('
   // Replies under a post, and edits of a post this transcript never shows, keep only the wording rules.
   const known = tool === EDIT_TOOL ? posts.get(input.tool_input?.message_id) : null;
   const topLevel = tool === POST_TOOL ? !input.tool_input?.thread_id : known?.reply === false;
+  // While a running post is known, only it takes edits: an older post, an anchor or a post this session never saw
+  // would put the update in the wrong place. Replies under a post stay exempt.
+  const target = input.tool_input?.message_id;
+  if (tool === EDIT_TOOL && running && target !== running.id && known?.reply !== true) {
+    return `Toolkit Projects rule: one running post. Your running post is ${running.id}, so edit that post, not ${typeof target === 'string' ? target : 'this one'}: keep its full text and append a line starting **[HH:MM] Update:** in the owner's local time.${running.memory ? MEMORY_HINT : ''}`;
+  }
   // The owner wrote after this post: anything an edit adds or changes would sit above the owner's message.
   if (topLevel && known?.ownerAfter) {
     return 'Toolkit Projects rule: post fresh: the owner wrote since this post. An edit would put your answer above the owner\'s message, so send it with post_message as a new post.';
@@ -1004,7 +1108,12 @@ function decide(input, readLines = file => fs.readFileSync(file, 'utf8').split('
     if (layout) return `Toolkit Projects rule: post layout (a **Now:** line, **[HH:MM] Update:** one-liners, linked **Waiting on you** items, the **ELI5:** line last). Rewrite the post: ${layout}`;
   }
   if (tool !== POST_TOOL || input.tool_input?.thread_id || !running || running.size >= NEAR_LIMIT_BYTES) return '';
-  return `Toolkit Projects rule: one running post. The owner has not written since your post ${running.id}, so edit it with edit_message instead: keep its full text and append a line starting **[HH:MM] Update:** in the owner's local time. Post fresh only after the owner writes, or once the running post nears 8 KB.`;
+  // Two new posts are allowed beside a running post: a one-line gate anchor, and a direct answer ("Re: your reply
+  // on ...") to an owner message that arrived since the running post somewhere this session does not count as the
+  // chat, such as a work thread or a reply.
+  if (isAnchor(text)) return '';
+  if (ownerSince && REPLY_LINE.test(lineList(text)[0] || '')) return '';
+  return `Toolkit Projects rule: one running post. The owner has not written since your post ${running.id}, so edit it with edit_message instead: keep its full text and append a line starting **[HH:MM] Update:** in the owner's local time. Post fresh only after the owner writes, or once the running post nears 8 KB. A one-line "Gate: ..." anchor may still be posted, and an owner message from a thread or a reply is answered in a fresh post starting "Re: your reply on <topic>".${running.memory ? MEMORY_HINT : ''}`;
 }
 
 function main() {
