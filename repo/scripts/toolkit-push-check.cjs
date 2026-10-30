@@ -22,6 +22,14 @@
 // That is a superset of the real commit. A `git merge`, `cherry-pick`, `revert`, `am` or `rebase`
 // earlier in the same command and repository refuses the push, since what it adds cannot be foreseen.
 //
+// A Codex call that names no folder (no `workdir`, and no `cd` or `git -C` to a full path) gives only
+// the chat's folder, and the command may run in another working tree of the same repository. Then
+// (`folderConfirmed: false`) a folder that is not a repository is refused (FOLDER_UNCONFIRMED). With
+// more than one working tree (`git worktree list`), so is a source the chat's folder cannot find and
+// a push or pull request of HEAD; when the same command commits first, what it could commit is read
+// in the working tree that has the pushed branch checked out, and any other source is refused. With
+// one working tree, the check runs as for a named folder.
+//
 // It fails open: when git is not found or cannot run, the check takes longer than 30 seconds for one
 // shell command, or a setting cannot be read, the command runs and one note is returned for the user. A broken check must
 // never stop every push; it moves feedback earlier and does not replace CI or GitHub push protection.
@@ -49,6 +57,7 @@ function isFolder(folder) {
 
 const FOLDER_MISSING = 'Toolkit could not find the folder this push or pull request runs in, so it could not check what would be sent and refused it. If the same command creates that folder first (`git clone`, `mkdir`, `git worktree add`), run that step as its own command, then the push. Otherwise check the folder in `cd` or `git -C` (`~/...`, and on Windows `C:/...` and Git Bash `/c/...`, all work).';
 const FOLDER_UNREADABLE = 'Toolkit could not read the folder this push or pull request runs in, because it is written with a variable or a command (such as `$HOME`, `$(...)` or `$env:USERPROFILE`), so it could not check what would be sent and refused it. Write the folder out (`~/...` works), or run the command from inside that folder.';
+const FOLDER_UNCONFIRMED = 'Codex did not say which folder this command runs in, and Toolkit could not tell from the chat\'s folder what this push or pull request would send, so it refused it. Run the commit and the push as separate commands and name the branch (`git push <remote> <branch>`), or name the folder first with `git -C <full path>` or `cd <full path>`.';
 
 // An environment value by name, ignoring case on Windows as Windows does.
 function environmentValue(environment, name, windows) {
@@ -178,6 +187,57 @@ function precedingIn(root, preceding, deadline, spawn) {
     else if (UNFORESEEN.has(sub) && !found.unforeseen) found.unforeseen = sub;
   }
   return found;
+}
+
+// The working trees of the repository at `root`, from `git worktree list --porcelain -z`:
+// [{ folder, branch }], `branch` the checked-out ref or '' when detached. A bare entry is left out.
+function workingTrees(root, deadline, spawn) {
+  const listed = runGit(root, ['worktree', 'list', '--porcelain', '-z'], deadline, spawn);
+  if (listed.status !== 0) throw new CheckSkipped('git could not list the working trees');
+  const trees = [];
+  let current = null;
+  for (const field of String(listed.stdout).split('\0')) {
+    if (field.startsWith('worktree ')) trees.push(current = { folder: path.resolve(field.slice(9)), branch: '', bare: false });
+    else if (current && field.startsWith('branch ')) current.branch = field.slice(7);
+    else if (current && field === 'bare') current.bare = true;
+  }
+  return trees.filter((tree) => !tree.bare).map(({ folder, branch }) => ({ folder, branch }));
+}
+
+// A source that names the current branch rather than a branch of its own: HEAD or @, and what
+// follows from them (HEAD~1, @{u}).
+const followsHead = (source) => /^(?:HEAD|@)(?:$|[~^@{])/i.test(source);
+
+// For a target whose folder Codex did not name (`folderConfirmed: false`), the working tree whose
+// changes the push can carry: { root } or { refusal }. It matters only when the same command commits
+// first or the source is HEAD, and only when the repository has more than one working tree; otherwise
+// the chat's folder is the one. With several, a HEAD source is refused (each working tree has its
+// own). After a commit in the same command, each source must be a branch exactly one working tree
+// has checked out, and that working tree is read. Otherwise the commit's folder cannot be told and the
+// push is refused: a branch none has checked out (a `git checkout` or `git tag` earlier in the same
+// command could put the commit on it wherever the command runs), `--all` or `--tags`, and sources
+// held in more than one working tree.
+function unconfirmedFolder(root, target, sources, deadline, spawn) {
+  const head = sources.some(followsHead);
+  if (!head && !target.preceding?.length) return { root };
+  const trees = workingTrees(root, deadline, spawn);
+  if (trees.length <= 1) return { root };
+  if (head) return { refusal: FOLDER_UNCONFIRMED };
+  const folders = [];
+  for (const source of sources) {
+    if (REV_OPTIONS.has(source)) return { refusal: FOLDER_UNCONFIRMED };
+    const ref = source.startsWith('refs/') ? source : `refs/heads/${source}`;
+    const holders = trees.filter((tree) => tree.branch === ref);
+    if (!holders.length) return { refusal: FOLDER_UNCONFIRMED };
+    for (const tree of holders) if (!folders.some((known) => samePath(known, tree.folder))) folders.push(tree.folder);
+  }
+  return folders.length === 1 ? { root: folders[0] } : { refusal: FOLDER_UNCONFIRMED };
+}
+
+// Whether the folder is in a repository with a single working tree. Not a repository: false.
+function singleWorkingTree(folder, deadline, spawn) {
+  const top = runGit(folder, ['rev-parse', '--show-toplevel'], deadline, spawn);
+  return top.status === 0 && workingTrees(path.resolve(lines(top.stdout)[0]), deadline, spawn).length <= 1;
 }
 
 // The working-tree file a pending change reads, or '' when it is missing, too big or binary.
@@ -322,19 +382,29 @@ function checkOutgoing(target, {
     let probe = runGit(target.folder, ['rev-parse', '--show-toplevel', ...revs], deadline, spawn);
     // A source that is not a commit yet: with a commit earlier in the same shell command (a first
     // commit in a new repository, say) only what it could commit is checked; otherwise the push
-    // fails on its own. Not a repository: nothing to check.
+    // fails on its own. Not a repository: nothing to check. When Codex did not name the folder, the
+    // chat's folder may simply be the wrong one, so either is refused instead, unless the chat's
+    // folder is in a repository with one working tree, which is then the one.
     let committed = true;
     if (probe.status !== 0) {
+      if (target.folderConfirmed === false && !singleWorkingTree(target.folder, deadline, spawn)) return { refusal: FOLDER_UNCONFIRMED };
       if (!target.preceding?.some((entry) => entry.sub === 'commit')) return {};
       probe = runGit(target.folder, ['rev-parse', '--show-toplevel'], deadline, spawn);
       if (probe.status !== 0) return {};
       committed = false;
     }
     const out = lines(probe.stdout);
-    const root = path.resolve(out[0]);
+    let root = path.resolve(out[0]);
+    if (target.folderConfirmed === false) {
+      const found = unconfirmedFolder(root, target, sources, deadline, spawn);
+      if (found.refusal) return { refusal: found.refusal };
+      root = found.root;
+    }
     // Earlier git commands in the same shell command, in this repository: a commit Toolkit cannot
-    // foresee refuses the push; a plain commit adds what it could commit to what is checked.
-    const earlier = target.preceding?.length ? precedingIn(root, target.preceding, deadline, spawn) : {};
+    // foresee refuses the push; a plain commit adds what it could commit to what is checked. A step
+    // whose folder Codex did not name counts as this repository's.
+    const preceding = (target.preceding || []).map((entry) => (entry.folderConfirmed === false ? { ...entry, folder: root } : entry));
+    const earlier = preceding.length ? precedingIn(root, preceding, deadline, spawn) : {};
     const action = target.pullRequest ? 'pull request' : 'push';
     if (earlier.unforeseen) {
       return { refusal: `This command runs \`git ${earlier.unforeseen}\` before the ${action} in the same command, so Toolkit cannot tell what the ${action} would send. Run the ${action === 'push' ? 'push' : '`gh pr create`'} as its own command after this finishes.` };
@@ -376,4 +446,4 @@ function checkOutgoing(target, {
   }
 }
 
-module.exports = Object.freeze({ BUDGET_MS, FOLDER_MISSING, FOLDER_UNREADABLE, MAX_LISTED, addedLines, checkOutgoing, diffPath, resolveGit });
+module.exports = Object.freeze({ BUDGET_MS, FOLDER_MISSING, FOLDER_UNCONFIRMED, FOLDER_UNREADABLE, MAX_LISTED, addedLines, checkOutgoing, diffPath, resolveGit });

@@ -1,5 +1,11 @@
 # Toolkit Changelog
 
+## 3.19.10 (Codex pushes from a lane worktree are checked there)
+
+- **Fixed:** in Codex Desktop, a one-command `git add`, `git commit` and `git push` run in a lane worktree under the chat's folder went out unchecked, even with a new credential file. Codex tells the hook only the chat's folder, so the push check read the main checkout, which had nothing pending. The check now reads the working tree that has the pushed branch checked out, and refuses naming the file and "not committed yet".
+- **Refused when the folder cannot be told:** for a Codex call that names no folder, a push from a chat folder that is not a repository is refused. In a repository with more than one working tree, so is a push or pull request of the current branch (`git push`, `git push origin HEAD`, `gh pr create` without `--head`), a branch the chat's repository does not have, and, after a commit in the same command, a branch no working tree has checked out, `--all` or `--tags`. The refusal says to name the branch and run the commit and the push as separate commands, or to name the folder with `git -C <full path>` or `cd <full path>` first.
+- **Unchanged:** a Codex call with a `workdir`, or after a `cd` or `git -C` to a full path, is checked as before, and so is every Claude Code shell call. In a repository with one working tree, a Codex call is checked as before too, apart from the not-a-repository refusal above.
+
 ## 3.19.9 (writing a report that mentions Claude or Codex is no longer refused)
 
 - **Fixed:** an agent's shell command that only mentions Claude or Codex and has a short word such as "no" or "ok" in it, for example a test report written to a file with a heredoc, is no longer refused with "only the user answers the governance question". The answer guard now counts Claude or Codex only where a shell would really start it, using the same command reader as the continuation guard; heredoc bodies, echo text, file names, here-strings and commit messages are data. A host's own subcommands (`claude config`, `codex login` and the like) still start no session.
