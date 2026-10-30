@@ -17,6 +17,10 @@ Everything else is a written rule in a playbook, a skill or the global rules. CI
 - **One named failure.** The hook's header comment names the concrete failure it prevents, as the global rules ask of every safeguard.
 - **Its own failure.** It says what happens when it cannot read the call or its own process fails: fail closed only where the effect is irreversible or leaks (the merge hold, the push guard), and fail open with a note everywhere else.
 
+## Proportionate, Not Bank-Grade
+
+A hook stops realistic agent slips, not a determined attacker, so it may accept a rare gap to avoid a common false block. Write each accepted gap down where the hook is described. For example, the push check reads a new or empty remote against what any remote already holds, so it does not re-read a long history on every first push; a credential already in history that another remote holds is not caught again when that history goes to the new remote.
+
 ## Tests
 
 Every hook carries both kinds of rows:
