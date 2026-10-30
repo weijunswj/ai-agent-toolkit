@@ -225,9 +225,10 @@ test('distinct piped answers follow the canonical question order without shifts'
   assert.equal(result.status, 0, result.stderr || result.stdout);
   const bank = result.stdout.split('<!-- setup-toolkit-question-bank:complete -->')[0];
   assert.match(bank, /Some visible questions are already resolved by explicit setup flags/);
-  // The Codex home exists, so 3.1 asks about the Codex plugin; the report-only 3.2 takes no line.
+  // The Codex home exists, so 3.1 asks about the Codex plugin; the Codex hooks status line takes no answer line.
   assert.match(bank, /Reply with one line for each unresolved question in this exact order:[\s\S]*\*\*1\.2\*\* Automatic updates[\s\S]*\*\*1\.3\*\* Update reports[\s\S]*\*\*1\.4\*\* Report retention[\s\S]*\*\*2\.2\*\* Codex Toolkit maintenance[\s\S]*\*\*3\.1\*\* Keep Toolkit available in Codex\?/);
-  assert.doesNotMatch(bank, /\*\*3\.2\*\* Toolkit hooks in Codex/);
+  assert.doesNotMatch(bank, /\*\*\d+\.\d+\*\* Toolkit hooks in Codex|\| \d+\.\d+ \| Toolkit hooks in Codex/);
+  assert.match(bank, /\nStatus \(nothing to answer\): Toolkit hooks in Codex: /);
   assert.doesNotMatch(bank, /Reply with either:|: all recommended/);
   assert.match(result.stdout, /Setup choices confirmed before writes:[\s\S]*2\.2 Codex Toolkit maintenance: C - Keep current \(canonical: keep; effective: disable\)/);
   // Reports are already kept for seven days, so "enable" and "default" name the hidden twins of the
