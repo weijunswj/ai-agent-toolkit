@@ -125,6 +125,44 @@ test('R11: the captured Codex payload shape is refused for a force push and a pu
   assert.deepEqual(run(captured('git --version'), env).output, {}, 'an ordinary call runs');
 });
 
+// R12: the same code-mode shape when the command runs in a linked worktree under the chat folder's
+// ignored .tmp/. The payload names only the chat folder (the main checkout), so the push check must
+// find the worktree that has the pushed branch checked out to see what the commit could add.
+test('R12: a one-command add, commit and push from a lane worktree is checked in that worktree', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-codex-hook-r12-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const repo = require('./toolkit-governed-fixture-support.cjs').makeGoverned(path.join(dir, 'governed'), 'codex-r12');
+  const hooks = path.join(dir, 'no-hooks'); fs.mkdirSync(hooks);
+  const git = (cwd, ...args) => spawnSync('git', ['-c', 'user.name=Fixture Author', '-c', 'user.email=fixture@example.test', '-c', 'commit.gpgsign=false', '-c', `core.hooksPath=${hooks}`, '-c', 'core.fsmonitor=false', ...args], { cwd, encoding: 'utf8', windowsHide: true });
+  fs.writeFileSync(path.join(repo, '.gitignore'), '.tmp/\n');
+  assert.equal(git(repo, 'add', '-A').status, 0);
+  assert.equal(git(repo, 'commit', '--quiet', '-m', 'base').status, 0);
+  assert.equal(git(repo, 'branch', 'lane/one').status, 0);
+  const lane = path.join(repo, '.tmp', 'worktrees', 'lane-one');
+  assert.equal(git(repo, 'worktree', 'add', '--quiet', lane, 'lane/one').status, 0);
+  const remote = path.join(dir, 'uat.git');
+  assert.equal(git(dir, 'clone', '--quiet', '--bare', repo, remote).status, 0);
+  assert.equal(git(repo, 'remote', 'add', 'uat', remote).status, 0);
+  assert.equal(git(repo, 'fetch', '--quiet', 'uat').status, 0);
+  // The main checkout moves off the remote's default branch, so the merge hold's rule stays out.
+  assert.equal(git(repo, 'checkout', '--quiet', '-b', 'feature').status, 0);
+  fs.writeFileSync(path.join(lane, 'uat-new.txt'), `token = "${['gh', 'p_', 'A1b2C3d4E5f6G7h8'.repeat(2), 'Q9r0'].join('')}"\n`);
+  const captured = (cwd, command) => ({
+    cwd, hook_event_name: 'PreToolUse', model: 'fixture-model', permission_mode: 'default', session_id: 'fixture-session',
+    tool_input: { command }, tool_name: 'Bash', tool_use_id: 'fixture-call', transcript_path: path.join(dir, 'transcript.jsonl'), turn_id: 'fixture-turn',
+  });
+  const env = { ...process.env }; delete env.TOOLKIT_GIT_PATH;
+  for (const cwd of [repo, repo.split(path.sep).join('/')]) {
+    const sent = run(captured(cwd, 'git add -A; git commit -m t2; git push uat lane/one'), env);
+    assert.equal(sent.status, 2, `${cwd}: ${sent.stderr}`);
+    assert.match(sent.output.hookSpecificOutput.permissionDecisionReason, /uat-new\.txt:1 \(not committed yet\)/, cwd);
+    // A push of HEAD cannot tell which working tree's HEAD it sends.
+    const bare = run(captured(cwd, 'git push uat'), env);
+    assert.equal(bare.status, 2, `${cwd}: ${bare.stderr}`);
+    assert.match(bare.output.hookSpecificOutput.permissionDecisionReason, /Codex did not say which folder this command runs in/, cwd);
+  }
+});
+
 test('a drifted pinned binding is blocked wherever it is supplied', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-codex-hook-'));
   try {

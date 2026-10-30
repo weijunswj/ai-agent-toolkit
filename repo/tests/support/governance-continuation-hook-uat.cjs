@@ -28,6 +28,9 @@ async function sourceHookUat(t, hookName) {
   for (const [cwd, name] of [[ctx.caller, 'caller'], [ctx.target, 'target'], [ctx.other, 'held']]) {
     git(cwd, ['init', '--quiet']); git(cwd, ['remote', 'add', 'origin', `https://github.com/example-owner/${name}.git`]);
   }
+  // The caller has a commit, so its ordinary `git push origin HEAD:...` row has a HEAD to check: a
+  // Codex call that names no folder is refused when its source does not resolve in the chat's folder.
+  git(ctx.caller, ['-c', 'user.name=Fixture Author', '-c', 'user.email=fixture@example.test', '-c', 'commit.gpgsign=false', 'commit', '--quiet', '--allow-empty', '-m', 'base']);
   for (const cwd of [ctx.caller, ctx.target]) gate.writeGovernanceDecision(cwd, 'enable', { registryOptions: ctx.options });
   transcript(ctx);
   const stores = new gate.HeldPrompts({ registryOptions: ctx.options });

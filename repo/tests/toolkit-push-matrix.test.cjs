@@ -268,6 +268,121 @@ test('a push whose folder does not exist is refused, not let through unchecked, 
   assert.match(outgoingRefusal(`mkdir "${missing}" && cd "${missing}" && git init && git push origin main`, session, quiet()), /run that step as its own command, then the push/);
 });
 
+// A governed repository whose main checkout (on `feature`) has two lane worktrees under its ignored
+// .tmp/: lane/one with a new, uncommitted credential file, lane/two with a committed one. Its `uat`
+// remote is a bare copy made from `main`, so the merge hold's default-branch rule stays out.
+function laneRepos(t, { lanes = true } = {}) {
+  const support = require('./toolkit-governed-fixture-support.cjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-push-lanes-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const hooks = path.join(dir, 'no-hooks');
+  fs.mkdirSync(hooks);
+  const git = (cwd, ...args) => fixtureGit(cwd, args, hooks);
+  const repo = support.makeGoverned(path.join(dir, 'governed'), `push-lanes-${lanes ? 'two' : 'one'}`);
+  writeFiles(repo, { '.gitignore': '.tmp/\n', 'notes.txt': 'Plain words only.\n' });
+  git(repo, 'symbolic-ref', 'HEAD', 'refs/heads/main');
+  git(repo, 'add', '-A');
+  git(repo, 'commit', '--quiet', '-m', 'base');
+  const lane = (name) => path.join(repo, '.tmp', 'worktrees', name);
+  if (lanes) {
+    git(repo, 'branch', 'spare');
+    for (const name of ['one', 'two']) {
+      git(repo, 'branch', `lane/${name}`);
+      git(repo, 'worktree', 'add', '--quiet', lane(`lane-${name}`), `lane/${name}`);
+    }
+  }
+  git(dir, 'clone', '--quiet', '--bare', repo, path.join(dir, 'uat.git'));
+  git(repo, 'remote', 'add', 'uat', path.join(dir, 'uat.git'));
+  git(repo, 'fetch', '--quiet', 'uat');
+  git(repo, 'checkout', '--quiet', '-b', 'feature');
+  if (lanes) {
+    writeFiles(lane('lane-two'), { 'uat-config.txt': `token = "${fakeToken()}"\n` });
+    git(lane('lane-two'), 'add', '-A');
+    git(lane('lane-two'), 'commit', '--quiet', '-m', 'key');
+    writeFiles(lane('lane-one'), { 'uat-new.txt': `token = "${fakeToken()}"\n` });
+  }
+  return { dir, repo, laneOne: lane('lane-one') };
+}
+
+// The closure matrix for a Codex call that names no folder (the code-mode shape: Bash, a string
+// command, the chat's folder as cwd): rows are the folder state, each with what the command must get,
+// through attributionDecision as the Codex hook calls it and through the Codex hook as a process.
+test('matrix: a Codex call that names no folder is checked in the working tree it can reach, or refused', (t) => {
+  const pushCheck = require('../scripts/toolkit-push-check.cjs');
+  const { dir, repo, laneOne } = laneRepos(t);
+  const single = laneRepos(t, { lanes: false }).repo;
+  const plain = path.join(dir, 'plain');
+  fs.mkdirSync(plain);
+  const pendingFile = (reason) => /uat-new\.txt:1 \(not committed yet\)/.test(reason);
+  const unconfirmed = (reason) => reason === pushCheck.FOLDER_UNCONFIRMED;
+  const allowed = (reason) => reason === '';
+  const rows = [
+    ['lanes: add, commit, push a named branch', repo, 'git add -A; git commit -m t2; git push uat lane/one', pendingFile],
+    ['lanes: the same in a nested pwsh -Command', repo, 'pwsh -Command "git add -A; git commit -m t2; git push uat lane/one"', pendingFile],
+    ['lanes: push a branch with a committed credential', repo, 'git push uat lane/two', (reason) => /uat-config\.txt:1 \(commit [0-9a-f]{7}\)/.test(reason)],
+    ['lanes: bare push', repo, 'git push', unconfirmed],
+    ['lanes: push of HEAD', repo, 'git push origin HEAD', unconfirmed],
+    ['lanes: pull request without --head', repo, 'gh pr create --fill', unconfirmed],
+    ['lanes: a relative cd keeps the folder unconfirmed', repo, 'cd .tmp/worktrees/lane-one; git push', unconfirmed],
+    ['lanes: git -C to the full path confirms it', repo, `git -C "${laneOne}" add -A; git -C "${laneOne}" commit -m x; git -C "${laneOne}" push uat lane/one`, pendingFile],
+    ['lanes: cd to the full path confirms it', repo, `cd "${laneOne}"; git add -A; git commit -m x; git push`, pendingFile],
+    ['lanes: a branch no working tree has checked out, after a commit', repo, 'git commit -m x; git push uat spare', unconfirmed],
+    ['lanes: --tags after a commit', repo, 'git add -A; git commit -m x; git tag v9; git push uat --tags', unconfirmed],
+    ['one working tree: add, commit, push, clean', single, 'git add -A; git commit -m x; git push uat feature', allowed],
+    ['one working tree: bare push, clean', single, 'git push', allowed],
+    ['one working tree: a new branch made, committed and pushed in one command, clean', single, 'git checkout -b brand-new; git add -A; git commit -m x; git push -u uat brand-new', allowed],
+    ['chat folder not a repository', plain, 'git push origin feature', unconfirmed],
+    ['branch unknown in the chat repository', repo, 'git push origin other-branch', unconfirmed],
+  ];
+  const env = { ...process.env };
+  delete env.TOOLKIT_GIT_PATH;
+  // The hook runs as a process for the first row of each outcome and for the folder-state rows, which
+  // keeps the file inside its time budget.
+  const asProcess = new Set(['lanes: add, commit, push a named branch', 'lanes: push a branch with a committed credential', 'lanes: bare push', 'one working tree: add, commit, push, clean', 'chat folder not a repository', 'branch unknown in the chat repository']);
+  for (const [row, cwd, command, expected] of rows) {
+    const codex = { tool_name: 'Bash', cwd, tool_input: { command } };
+    const direct = attributionDecision(codex, { ...quiet(), sessionFolderOnly: true }).hookSpecificOutput?.permissionDecisionReason || '';
+    assert.ok(expected(direct), `${row}: attributionDecision gave ${JSON.stringify(direct)}`);
+    // Confirmed by a workdir: today's check, the one the Claude hook runs (its cwd is the shell's own folder).
+    const named = { tool_name: 'Bash', cwd, tool_input: { command, workdir: cwd } };
+    assert.deepEqual(attributionDecision(named, { ...quiet(), sessionFolderOnly: true }), attributionDecision(codex, quiet()), `${row}: a named workdir`);
+    if (!asProcess.has(row)) continue;
+    const hook = spawnSync(process.execPath, [codexHook], { input: JSON.stringify(codex), encoding: 'utf8', env, timeout: 60000 });
+    const reason = hook.stdout.trim() ? JSON.parse(hook.stdout.trim().split('\n').pop()).hookSpecificOutput.permissionDecisionReason : '';
+    assert.equal(hook.status, expected === allowed ? 0 : 2, `${row}: ${hook.stderr}`);
+    assert.ok(expected(reason), `${row}: the hook gave ${JSON.stringify(reason)}`);
+  }
+  // After a commit, a branch no working tree has checked out is refused: a checkout or tag step in the
+  // same command could put the commit on it in whichever folder the command runs. So are sources held
+  // in more than one working tree, --all and --tags.
+  const codexDecision = (cwd, line) => attributionDecision({ tool_name: 'Bash', cwd, tool_input: { command: line } }, { ...quiet(), sessionFolderOnly: true }).hookSpecificOutput?.permissionDecisionReason || '';
+  for (const line of ['git checkout spare; git add -A; git commit -m x; git push uat spare', 'git add -A; git commit -m x; git tag v9; git push uat v9', 'git add -A; git commit -m x; git push uat lane/one lane/two',
+    'git add -A; git commit -m x; git push uat lane/one spare', 'git commit -m x; git push --all uat', 'git commit -m x; git push uat --tags']) {
+    assert.ok(unconfirmed(codexDecision(repo, line)), line);
+  }
+  // One working tree: a source that does not exist yet falls through to the check of what the commit
+  // could add, as for a named folder. A new branch or a first commit with a credential is refused
+  // naming the file; the same steps with a clean change run.
+  const { dir: chainDir, git: chainGit, clone } = chainRepos(t);
+  const branchRepo = clone();
+  writeFiles(branchRepo, { 'uat-config.txt': `token = "${fakeToken()}"\n` });
+  assert.match(codexDecision(branchRepo, 'git checkout -b brand-new; git add -A; git commit -m x; git push -u origin brand-new'), /uat-config\.txt:1 \(not committed yet\)/);
+  const fresh = path.join(chainDir, 'fresh');
+  chainGit(chainDir, 'init', '--quiet', fresh);
+  writeFiles(fresh, { 'uat-config.txt': `token = "${fakeToken()}"\n` });
+  assert.match(codexDecision(fresh, 'git add -A && git commit -m init && git push -u origin main'), /uat-config\.txt:1 \(not committed yet\)/, 'first commit');
+  writeFiles(fresh, { 'uat-config.txt': 'Plain words only.\n' });
+  assert.equal(codexDecision(fresh, 'git add -A && git commit -m init && git push -u origin main'), '', 'a clean first commit');
+  // A named workdir is believed: the lane folder gets the normal check there, the main checkout's
+  // clean tree passes, and the Claude hook judges its cwd the same way.
+  const command = 'git add -A; git commit -m t2; git push uat lane/one';
+  assert.ok(pendingFile(attributionDecision({ tool_name: 'Bash', cwd: repo, tool_input: { command, workdir: laneOne } }, { ...quiet(), sessionFolderOnly: true }).hookSpecificOutput?.permissionDecisionReason || ''));
+  assert.deepEqual(attributionDecision({ tool_name: 'Bash', cwd: repo, tool_input: { command, workdir: repo } }, { ...quiet(), sessionFolderOnly: true }), {});
+  const claude = runHook(claudeHook, 'Bash', repo, command, env);
+  assert.deepEqual([claude.status, claude.stdout.trim()], [0, ''], `the Claude hook: ${claude.stderr}`);
+  assert.match(pushCheck.FOLDER_UNCONFIRMED, /name the branch \(`git push <remote> <branch>`\), or name the folder first with `git -C <full path>` or `cd <full path>`/);
+});
+
 test('push check: every target of one command shares one deadline', () => {
   const deadlines = [];
   const check = (target, options) => { deadlines.push(options.deadline); return {}; };
