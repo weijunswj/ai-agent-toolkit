@@ -551,9 +551,10 @@ test('row 14: both hook files send every merge tool name to the merge hold', () 
     assert.match(tool, new RegExp(governanceEntry.matcher), `Claude: ${tool}`);
     assert.ok(codex.some(entry => new RegExp(entry.matcher).test(tool) && entry.hooks.some(hook => hook.command.includes('toolkit-codex-helper-hook.cjs'))), `Codex: ${tool}`);
   }
-  // The packaged copies are the contract sources.
+  // The packaged copies match the contract sources (compared as JSON, since a checkout may change line endings).
+  const read = file => JSON.parse(fs.readFileSync(file, 'utf8'));
   for (const host of ['claude', 'codex']) {
-    assert.equal(fs.readFileSync(path.join(root, `.${host}-plugin`, 'hooks', 'hooks.json'), 'utf8'), fs.readFileSync(path.join(root, 'repo', 'contracts', 'toolkit-local-bridge', `${host}-plugin`, 'hooks', 'hooks.json'), 'utf8'), host);
+    assert.deepEqual(read(path.join(root, `.${host}-plugin`, 'hooks', 'hooks.json')), read(path.join(root, 'repo', 'contracts', 'toolkit-local-bridge', `${host}-plugin`, 'hooks', 'hooks.json')), host);
   }
 });
 
