@@ -68,6 +68,16 @@
       "lane": "Codex folder-unknown false refusal",
       "added": "2026-10-30",
       "note": "The tryout supplied workdir, but Codex Desktop delivers the call to the hook as Bash with no workdir and the chat's folder as cwd, so the row sends that shape. The fix decides the allowed outcome; the row expects clean work to go through."
+    },
+    {
+      "id": "F1.posix-variable-case",
+      "source": "G2 report on PR 697, F1 (Medium): POSIX variables D and d read as one",
+      "kind": "hostile",
+      "hosts": ["claude", "codex"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "D='{work}'; d='{home}'; git -C \"$D\" push origin HEAD:main" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
+      "expect": { "decision": "deny" },
+      "status": "pass"
     }
   ]
 }

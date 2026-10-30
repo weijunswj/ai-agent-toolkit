@@ -300,12 +300,13 @@ function wordsOf(text) {
   return [...String(text).matchAll(/"((?:[^"\\]|\\.)*)"|'([^']*)'|(\S+)/g)].map(match => match[1] ?? match[2] ?? match[3]);
 }
 
-// A variable a command segment assigns a literal to, as [name, value]: PowerShell `$name = 'value'`
-// or POSIX `name=value`. Names are compared without case. Anything else is null.
+// A variable a command segment assigns a literal to, as [key, value]: PowerShell `$name = 'value'`,
+// whose names ignore case, or POSIX `name=value`, whose names keep it (`D` and `d` are two variables).
+// Anything else is null.
 function assignmentOf(words) {
-  if (words.length === 3 && /^\$[A-Za-z_][A-Za-z0-9_]*$/.test(words[0]) && words[1] === '=') return [words[0].slice(1).toLowerCase(), words[2]];
+  if (words.length === 3 && /^\$[A-Za-z_][A-Za-z0-9_]*$/.test(words[0]) && words[1] === '=') return [`ps:${words[0].slice(1).toLowerCase()}`, words[2]];
   const posix = words.length === 1 ? /^([A-Za-z_][A-Za-z0-9_]*)=(?:"([^"$`]*)"|'([^']*)'|([^\s"'$`]*))$/.exec(words[0]) : null;
-  return posix ? [posix[1].toLowerCase(), posix[2] ?? posix[3] ?? posix[4]] : null;
+  return posix ? [`sh:${posix[1]}`, posix[2] ?? posix[3] ?? posix[4]] : null;
 }
 
 const HOME_VARIABLE = /^(?:\$env:USERPROFILE|\$env:HOME|\$HOME|\$\{HOME\}|%USERPROFILE%)(?=$|[\\/])/i;
@@ -314,7 +315,9 @@ const HOME_VARIABLE = /^(?:\$env:USERPROFILE|\$env:HOME|\$HOME|\$\{HOME\}|%USERP
 // and a leading home variable as `~` (shellPath resolves it).
 function folderWord(word, variables) {
   const name = /^\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))$/.exec(word);
-  const value = name && variables.has((name[1] || name[2]).toLowerCase()) ? variables.get((name[1] || name[2]).toLowerCase()) : word;
+  // A POSIX name matches only its exact case; a PowerShell name matches in any case.
+  const key = name && [`sh:${name[1] || name[2]}`, `ps:${(name[1] || name[2]).toLowerCase()}`].find(candidate => variables.has(candidate));
+  const value = key ? variables.get(key) : word;
   return String(value).replace(HOME_VARIABLE, '~');
 }
 
