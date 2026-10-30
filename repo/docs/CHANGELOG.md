@@ -1,5 +1,9 @@
 # Toolkit Changelog
 
+## 3.19.14 (numbered choices under a question pass the Projects post check)
+
+- **Fixed:** the Claude Projects post check read a numbered line indented one to three spaces as a new **Waiting on you** item, so numbered choices indented three spaces under `1. **Question: ...?**` were refused for having no link, though Markdown already shows them nested. A numbered line indented at least as far as its item's text starts (three spaces under `1. `, four under `10. `) is now a choice under that item: it needs no link, and a "(my pick)" choice still needs a numbered **Question:** item above it. A numbered line indented less is still a new item that needs its link, and a **Question:** line nested under an item is still refused.
+
 ## 3.19.13 (the merge hold reads every GitHub connector's merge call)
 
 - **Fixed:** the merge hold read only one connector shape (`owner`, `repo`, `pullNumber`, `expectedHeadSha`), so Codex's GitHub app merge (`repository_full_name`, `pr_number`, `expected_head_sha`) was always refused as a pull request Toolkit "cannot identify", even after the user approved it. One shared reader now reads the official GitHub server and Codex's GitHub app. A `sha` field is never read as the head commit (a server that drops it would merge whatever head is there), so older servers (`pull_number`, `sha`) stay refused and the refusal points to `gh pr merge N --match-head-commit <sha>`. A call whose fields are missing, cannot be read or disagree is still refused, and the refusal now names the fields it found and the one that is missing, never their values.
