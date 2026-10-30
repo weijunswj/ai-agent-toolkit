@@ -1,5 +1,14 @@
 # Toolkit Changelog
 
+## 3.19.21 (hooks keep only the checks that stop real damage)
+
+- **Fixed:** shell commands that only name Claude or Codex next to a yes, no or ok, or next to a resume or fork word, are no longer refused as a governance answer or a session resume. This covers metadata saves (`--host claude --tracking yes`), summary reads (`head -c`, `grep -rn` and pipes over `.claude` and `.codex` folders), heredoc and here-string writes, SSH reads and loops over file names, in every folder that is not waiting for its governance answer.
+- **Removed:** the short-answer launch reader, the session resume and fork reader (`toolkit-governance-continuation.cjs`) and the question asked from a parent folder for repositories a command reaches. A command or edit that works in a waiting repository from another folder is still refused, and the user answers in that repository's own chat. A session another session started, or a resumed run, still cannot answer, and the governance CLI with a decision and edits to Toolkit's user-state files are still refused everywhere.
+- **Removed:** the gate route hook and the skill card hook. The Projects skill keeps both rules as written rules: a gate launch passes its pinned route and the gate's start record is the proof, and a skill card carries main's SKILL.md exactly.
+- **Removed:** the Projects post hook no longer requires a link on each Waiting on you item or a pull request's files page. It keeps the post layout, wording and one running post. Linking where the owner acts stays a written rule in the Projects skill.
+- **Removed:** the shell hook no longer refuses commands that skip a repository's commit or push checks (`--no-verify`, `core.hooksPath`), and the push check no longer refuses plain-text findings. Both are written rules now, with CI as the gate. The force-push, default-branch, merge, attribution and credential checks are unchanged.
+- **New:** the hook design playbook (`repo/docs/agent-playbooks/hook-design.md`) says when a hook is allowed, that it checks an exact effect and never guesses intent from text, and that every hook carries must-pass rows for ordinary commands as well as must-refuse rows.
+
 ## 3.19.18 (the Projects post hook keeps one running post after a handoff)
 
 - **Fixed:** a new coordinator session no longer starts a fresh chat post when it should edit the running one. With no post of its own and no owner message yet, the post hook takes the running post from the `RUNNING POST:` line the session read from project memory (or wrote to it), and refuses a fresh status post until the owner writes. The refusal says to read the project chat if the owner wrote since or the post nears 8 KB.
