@@ -58,13 +58,41 @@ test('CI runs the default branch\'s copy, which needs nothing but Node\'s own mo
   assert.doesNotMatch(workflow, /git (?:checkout|switch|worktree)|gh pr checkout/, 'nothing from the pull request is checked out');
   assert.match(workflow, /fetch --no-tags --quiet origin "\$HEAD_SHA" "\$BASE_SHA"/);
   assert.match(workflow, /node repo\/scripts\/toolkit-auto-merge-eligible\.cjs --base "\$BASE_SHA" --head "\$HEAD_SHA" \$owner/, 'the default branch\'s script decides');
-  assert.match(workflow, /^permissions:\n {2}contents: read\n {2}issues: write$/m, 'read-only but for removing the owner\'s label');
+  assert.match(workflow, /^permissions:\n {2}contents: read\n {2}issues: write\n {2}statuses: write$/m, 'read-only but for the owner\'s label and its status');
   assert.match(workflow, /persist-credentials: false/);
   assert.match(workflow, /types: \[opened, reopened, synchronize, edited, labeled, unlabeled\]/, 'a label change runs the check again');
-  assert.match(workflow, /"\$ACTION" = "synchronize"[\s\S]*-X DELETE "repos\/\$GH_REPO\/issues\/\$NUMBER\/labels\/toolkit-owner-merge"/, 'a new push removes the owner\'s label');
-  assert.match(workflow, /owner="--owner-merge"/);
+  assert.match(workflow, /group: auto-merge-eligible-\$\{\{ github\.event\.pull_request\.number \}\}-\$\{\{ github\.event\.action == 'synchronize' && 'push' \|\| 'other' \}\}\n {2}cancel-in-progress: \$\{\{ github\.event\.action != 'synchronize' \}\}/, 'nothing cancels a push\'s run');
+  assert.match(workflow, /--label-decision\)"/, 'the label decision is the tested one');
+  assert.match(workflow, /\*record=1\*\)\n\s+gh api -X POST "repos\/\$GH_REPO\/statuses\/\$HEAD_SHA" -f state=success -f context=toolkit-owner-merge/);
+  assert.match(workflow, /\*remove=1\*\)\n\s+gh api -X DELETE "repos\/\$GH_REPO\/issues\/\$NUMBER\/labels\/toolkit-owner-merge"/);
+  assert.match(workflow, /\*owner_merge=1\*\) owner="--owner-merge"/);
+  assert.match(workflow, /ADDED_LABEL: \$\{\{ github\.event\.label\.name \}\}/);
   assert.ok(workflow.includes(eligible.OWNER_LABEL));
   assert.match(workflow, /^ {2}auto-merge-eligible:$/m, 'the check name the binding requires');
+});
+
+test('the owner\'s label counts only for the head it was added on, whatever runs were cancelled', () => {
+  const label = eligible.OWNER_LABEL;
+  const bot = eligible.OWNER_STATUS_CREATOR;
+  const ok = [{ context: label, state: 'success', creator: bot }];
+  const decide = (action, extra = {}) => eligible.labelDecision({ action, labels: [label], ...extra });
+  assert.deepEqual(decide('labeled', { added: label }), { owner_merge: true, record: true, remove: false }, 'adding it records it on that head');
+  assert.deepEqual(decide('edited', { statuses: ok }), { owner_merge: true, record: false, remove: false }, 'a later run on that head keeps it');
+  assert.deepEqual(decide('synchronize', { statuses: ok }), { owner_merge: false, record: false, remove: true }, 'a push removes it');
+  // The race: the owner labels head A, an agent pushes head B, and an edit to the body cancels the
+  // push's run before it removed the label. The edit's run sees the label but no status on B.
+  assert.deepEqual(decide('edited', { statuses: [] }), { owner_merge: false, record: false, remove: true }, 'a label left behind by a cancelled push run');
+  assert.deepEqual(decide('labeled', { added: 'bug', statuses: [] }), { owner_merge: false, record: false, remove: true }, 'another label added after the push');
+  assert.deepEqual(decide('reopened', { statuses: [{ context: label, state: 'success', creator: 'weijunswj' }] }).owner_merge, false, 'a status an agent made through the owner\'s login');
+  assert.deepEqual(decide('edited', { statuses: [{ context: label, state: 'failure', creator: bot }] }).owner_merge, false);
+  assert.deepEqual(eligible.labelDecision({ action: 'unlabeled', labels: ['bug'], statuses: ok }), { owner_merge: false, record: false, remove: false }, 'no label, no merge');
+  // The workflow step's own reading of its environment.
+  const out = [];
+  const step = environment => { out.length = 0; eligible.main(['--label-decision'], { environment, stdout: { write: text => out.push(text) } }); return out.join('').trim(); };
+  assert.equal(step({ ACTION: 'labeled', ADDED_LABEL: label, LABELS: JSON.stringify([label]), STATUSES: '[]' }), 'owner_merge=1 record=1 remove=0');
+  assert.equal(step({ ACTION: 'edited', LABELS: JSON.stringify([label]), STATUSES: '[]' }), 'owner_merge=0 record=0 remove=1');
+  assert.equal(step({ ACTION: 'edited', LABELS: JSON.stringify([label]), STATUSES: JSON.stringify(ok) }), 'owner_merge=1 record=0 remove=0');
+  assert.equal(step({ ACTION: 'edited', LABELS: JSON.stringify([label]), STATUSES: 'not json' }), 'owner_merge=0 record=0 remove=0', 'unreadable statuses give no merge');
 });
 
 test('the CLI reads the diff with git: exit 0 eligible, 1 always manual, 2 unreadable', (t) => {
@@ -150,9 +178,14 @@ test('every module a hook loads is always manual, followed from hooks.json at bo
 
 test('the list covers every repository file the real hooks load when they start', () => {
   const root = path.resolve(__dirname, '..', '..');
+  // The repository's files from git, or from the folder itself in a copy without git (an archive).
   const listed = spawnSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '-z'], { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-  assert.equal(listed.status, 0, listed.stderr);
-  const paths = listed.stdout.split('\0').filter(Boolean);
+  const walk = (folder, prefix = '') => fs.readdirSync(folder, { withFileTypes: true }).flatMap(entry => {
+    if (['.git', 'node_modules', '.tmp'].includes(entry.name)) return [];
+    const rel = `${prefix}${entry.name}`;
+    return entry.isDirectory() ? walk(path.join(folder, entry.name), `${rel}/`) : [rel];
+  });
+  const paths = listed.status === 0 ? listed.stdout.split('\0').filter(Boolean) : walk(root);
   const hooks = eligible.hookModules(paths, file => { try { return fs.readFileSync(path.join(root, file), 'utf8'); } catch { return null; } });
   const entries = new Set();
   for (const file of paths.filter(name => /(?:^|\/)hooks\.json$/.test(name))) {

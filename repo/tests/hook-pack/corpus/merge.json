@@ -191,6 +191,16 @@
       "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
       "expect": { "decision": "allow" },
       "status": "pass"
+    },
+    {
+      "id": "MERGE.auto-yes-stale",
+      "source": "G2 recheck on PR 708: a yes read over a day ago",
+      "kind": "state",
+      "hosts": ["claude", "codex"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "gh pr merge 5 --merge --match-head-commit 62405ebd4c27859d66036e18f13c856c645d366d" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature", "task_auto_merge": "after-gates-stale" }, "owner_session": true },
+      "expect": { "decision": "deny" },
+      "status": "pass"
     }
   ]
 }

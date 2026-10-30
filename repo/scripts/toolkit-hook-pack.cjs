@@ -44,8 +44,8 @@ const STATUSES = Object.freeze(['pass', 'known-bad']);
 const FAULTS = Object.freeze(['deleted-plugin-root', 'remove-file', 'throw-module', 'stall-module', 'bad-json', 'empty-input']);
 const GOVERNANCE = Object.freeze(['enabled', 'undecided', 'none']);
 // A governed fixture's task auto-merge answer in its merged binding: yes with the always-manual check
-// required, yes without it, or no.
-const TASK_AUTO_MERGE = Object.freeze(['after-gates', 'unenforced', 'off']);
+// required (read now, or over a day ago), yes without it, or no.
+const TASK_AUTO_MERGE = Object.freeze(['after-gates', 'after-gates-stale', 'unenforced', 'off']);
 const ROW_KEYS = new Set(['id', 'source', 'kind', 'hosts', 'event', 'payload', 'fixture', 'fault', 'expect', 'expect_by_host', 'status', 'known_bad_on', 'lane', 'added', 'note']);
 const ID = /^[A-Z][A-Za-z0-9._-]*$/;
 // The plugin content the hooks can reach: both host manifests, the scripts and contracts, and the
@@ -361,12 +361,13 @@ class Fixture {
       schema: 'toolkit.programme-binding.v2', repository: slug, governance: 'enabled',
       parents: [{ issue: 1, record_prefix: 'INT-FX', writer_prefix: 'FX' }],
       store: { kind: 'github', repository: 'toolkit-test-fixture/store', branch: 'main', path: 'state/' },
-      required_checks: answer === 'after-gates' ? ['validate', 'auto-merge-eligible'] : ['validate'],
+      required_checks: answer.startsWith('after-gates') ? ['validate', 'auto-merge-eligible'] : ['validate'],
       task_prs: { auto_merge: answer === 'off' ? 'off' : 'after-gates' },
     }, null, 2)}
 `;
     fs.writeFileSync(path.join(this.work, '.github', 'toolkit-programme.json'), text);
-    support.recordMerged(this.work, { home: this.home, text });
+    // A stale read is one over a day old, as when this computer has not reached GitHub since.
+    support.recordMerged(this.work, { home: this.home, text, ...(answer === 'after-gates-stale' ? { now: new Date(Date.now() - 25 * 60 * 60 * 1000) } : {}) });
   }
 
   // The session-start mark of a session the user opened (not resumed, not launched by another).

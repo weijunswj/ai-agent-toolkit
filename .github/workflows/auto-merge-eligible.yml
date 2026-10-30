@@ -4,16 +4,21 @@ name: Auto-merge eligibility
 # and the modules they load, setup that writes hook config, CI, agent instructions, a major version
 # bump; repo/scripts/toolkit-auto-merge-eligible.cjs). Where the owner turned task auto-merge on,
 # the programme binding and the default branch's rules require this check too, so such a pull
-# request merges only once the owner adds the toolkit-owner-merge label in GitHub, which passes the
-# check for the head it was added on. A new push removes the label again, so the owner's OK never
-# covers commits they have not seen. It is not part of validate, so those pull requests still pass
-# the main gate.
+# request merges only once the owner adds the toolkit-owner-merge label in GitHub. It is not part
+# of validate, so those pull requests still pass the main gate.
+#
+# The label counts only for the head it was added on: the run for that labeled event records a
+# toolkit-owner-merge commit status on that head with this workflow's own token, and every other
+# run passes only while the head carries that status from github-actions[bot]. A push, or a label
+# without the status on the current head (whichever runs were cancelled before), removes the label
+# and fails, so the owner's OK never covers commits they have not seen. Pushes run in their own
+# group that nothing cancels.
 #
 # pull_request_target runs this file and the eligibility script as they are on the default branch,
 # never the pull request's copies, so a pull request cannot loosen its own check. Only the default
 # branch is checked out; the pull request's commits are fetched as objects and read as data by git,
 # none of its files are checked out or run, and the token is never kept in the checkout. Its only
-# write is removing that one label after a push.
+# writes are that label's removal and that commit status.
 on:
   pull_request_target:
     types: [opened, reopened, synchronize, edited, labeled, unlabeled]
@@ -21,10 +26,11 @@ on:
 permissions:
   contents: read
   issues: write
+  statuses: write
 
 concurrency:
-  group: auto-merge-eligible-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+  group: auto-merge-eligible-${{ github.event.pull_request.number }}-${{ github.event.action == 'synchronize' && 'push' || 'other' }}
+  cancel-in-progress: ${{ github.event.action != 'synchronize' }}
 
 jobs:
   auto-merge-eligible:
@@ -45,6 +51,7 @@ jobs:
       - name: Check task auto-merge eligibility
         env:
           ACTION: ${{ github.event.action }}
+          ADDED_LABEL: ${{ github.event.label.name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
@@ -54,13 +61,16 @@ jobs:
         run: |
           auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
           git -c "http.https://github.com/.extraheader=$auth" fetch --no-tags --quiet origin "$HEAD_SHA" "$BASE_SHA"
+          STATUSES="$(gh api --paginate "repos/$GH_REPO/commits/$HEAD_SHA/statuses" --jq '.[] | {context, state, creator: .creator.login}' | jq -s -c .)"
+          decision="$(STATUSES="$STATUSES" node repo/scripts/toolkit-auto-merge-eligible.cjs --label-decision)"
+          echo "Owner label: $decision"
           owner=""
-          if printf '%s' "$LABELS" | grep -q '"toolkit-owner-merge"'; then
-            if [ "$ACTION" = "synchronize" ]; then
-              gh api -X DELETE "repos/$GH_REPO/issues/$NUMBER/labels/toolkit-owner-merge" > /dev/null
-              echo "A new push removed the toolkit-owner-merge label; the owner adds it again for this head."
-            else
-              owner="--owner-merge"
-            fi
-          fi
+          case "$decision" in *record=1*)
+            gh api -X POST "repos/$GH_REPO/statuses/$HEAD_SHA" -f state=success -f context=toolkit-owner-merge -f description="The owner's toolkit-owner-merge label, added on this head" > /dev/null ;;
+          esac
+          case "$decision" in *remove=1*)
+            gh api -X DELETE "repos/$GH_REPO/issues/$NUMBER/labels/toolkit-owner-merge" > /dev/null || true
+            echo "The toolkit-owner-merge label did not belong to this head, so it was removed; the owner adds it again once they have seen it." ;;
+          esac
+          case "$decision" in *owner_merge=1*) owner="--owner-merge" ;; esac
           node repo/scripts/toolkit-auto-merge-eligible.cjs --base "$BASE_SHA" --head "$HEAD_SHA" $owner

@@ -9,9 +9,11 @@
 // before a merge. It loads only Node's own modules, so that copy runs on its own.
 //
 //   node repo/scripts/toolkit-auto-merge-eligible.cjs --base <commit> --head <commit> [--owner-merge] [--json]
+//   node repo/scripts/toolkit-auto-merge-eligible.cjs --label-decision   (the workflow's label step)
 //
 // Exit 0: eligible, or always manual and the owner allowed it (--owner-merge, which the workflow
-// passes when the pull request has the OWNER_LABEL label). Exit 1: always manual, with each reason.
+// passes when the label step allows it: the OWNER_LABEL label, tied to this head). Exit 1: always
+// manual, with each reason.
 // Exit 2: the commits could not be read.
 //
 // Always manual, each for the failure it prevents:
@@ -194,7 +196,43 @@ function eligibilityOf(cwd, base, head) {
   return eligibility({ files, toolkit, hooks, stampOnly, versions });
 }
 
-function main(argv, { cwd = process.cwd(), stdout = process.stdout, stderr = process.stderr } = {}) {
+// The commit status that ties the owner's label to the head it was added on. Only the workflow's own
+// token writes it, so it reads as made by github-actions[bot]; an agent working through the owner's
+// login would show as the owner.
+const OWNER_STATUS_CREATOR = 'github-actions[bot]';
+
+// What the workflow does with the owner's label for one event, whatever runs were cancelled before:
+// { owner_merge, record, remove }. `labels` are the pull request's labels, `added` the label a
+// labeled event added, `statuses` the head commit's statuses ({ context, state, creator }).
+//   - the labeled event that adds it records the status on the head it was added on, and passes;
+//   - any other run passes only while the head carries that status from the workflow;
+//   - a push, or a label with no status on this head (a run that recorded it was cancelled, or the
+//     label was added before a push the removal missed), removes the label and fails.
+function labelDecision({ action, labels = [], added = null, statuses = [] }) {
+  if (!labels.includes(OWNER_LABEL)) return { owner_merge: false, record: false, remove: false };
+  if (action === 'labeled' && added === OWNER_LABEL) return { owner_merge: true, record: true, remove: false };
+  const recorded = statuses.some(entry => entry && entry.context === OWNER_LABEL && entry.state === 'success' && entry.creator === OWNER_STATUS_CREATOR);
+  if (action === 'synchronize' || !recorded) return { owner_merge: false, record: false, remove: true };
+  return { owner_merge: true, record: false, remove: false };
+}
+
+// The workflow's label step: reads ACTION, LABELS, ADDED_LABEL and STATUSES (JSON) from the
+// environment and prints `owner_merge=0|1 record=0|1 remove=0|1`. Anything unreadable gives no
+// owner merge and removes nothing.
+function labelDecisionMain(environment, stdout) {
+  let labels = [];
+  let statuses = [];
+  try { labels = JSON.parse(environment.LABELS || '[]'); } catch { labels = []; }
+  try { statuses = JSON.parse(environment.STATUSES || '[]'); } catch { statuses = null; }
+  const decision = Array.isArray(labels) && Array.isArray(statuses)
+    ? labelDecision({ action: environment.ACTION, labels, added: environment.ADDED_LABEL || null, statuses })
+    : { owner_merge: false, record: false, remove: false };
+  stdout.write(`owner_merge=${Number(decision.owner_merge)} record=${Number(decision.record)} remove=${Number(decision.remove)}\n`);
+  return 0;
+}
+
+function main(argv, { cwd = process.cwd(), stdout = process.stdout, stderr = process.stderr, environment = process.env } = {}) {
+  if (argv[0] === '--label-decision') return labelDecisionMain(environment, stdout);
   const value = name => { const at = argv.indexOf(name); return at >= 0 ? argv[at + 1] : undefined; };
   const json = argv.includes('--json');
   const ownerMerge = argv.includes('--owner-merge');
@@ -217,4 +255,4 @@ function main(argv, { cwd = process.cwd(), stdout = process.stdout, stderr = pro
 
 if (require.main === module) process.exitCode = main(process.argv.slice(2));
 
-module.exports = Object.freeze({ GENERAL, OWNER_LABEL, TOOLKIT, eligibility, eligibilityOf, hookModules, hookModulesAt, main, withoutStamps });
+module.exports = Object.freeze({ GENERAL, OWNER_LABEL, OWNER_STATUS_CREATOR, TOOLKIT, eligibility, eligibilityOf, hookModules, hookModulesAt, labelDecision, main, withoutStamps });
