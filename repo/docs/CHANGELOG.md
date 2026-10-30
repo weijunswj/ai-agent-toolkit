@@ -8,6 +8,13 @@
 - **CI:** a `hook-pack` job runs the pack on Linux and Windows on every pull request, and the `validate` job waits for it. The validate job also fails a pull request that removes a row, changes a row's expectation or lowers a row to known-bad without a line for it under a "Pack changes" heading in the body.
 - **Gate rules:** a new "Hook changes" section says what a hook change must show before it merges (the pack green on both systems, a pack row and revert proof for each bug it fixes, explained expectation changes, and a real-host smoke per release), and that an enforcing hook that breaks refuses only the calls it guards while advisory hooks stay fail-open.
 
+## 3.19.15 (CI runs the tests that pin a date a year ahead)
+
+- **New CI check:** the Validate workflow has a `tests-clock-ahead` job. It runs every test file that pins a calendar date (an ISO date literal or `Date.UTC(`, in the file or in a test helper it loads) with Node's clock 400 days ahead, so a test that pins a date but lets the code read the real clock fails on its pull request instead of turning `main` red weeks later. The `validate` job waits for it. Locally, `node repo/scripts/run-tests.cjs --clock-ahead` runs the same check, and `--clock-offset-days <n>` moves the clock for a named, `--changed` or `--all` run.
+- **Clearer CI failures:** a test shard that fails now still uploads its summary, so the `validate` job names the tests that failed instead of listing every file of that shard as not run. The shard-timing refresh reads times only from shards that passed.
+- **Fixed:** the test runner's sweep of old run folders now uses the system clock, so a test that starts a nested run with Node's clock moved can never remove a live run's folder.
+- **Tests:** seven lock tests that compared a file they had just written with Node's clock now date that file from Node's clock, so they pass with the clock moved too. The playbook for fast tests and sharding says how a test that pins a date stays correct.
+
 ## 3.19.14 (setup shows report-only rows as status lines)
 
 - **Changed:** a setup row that only reports state and takes no answer is no longer a numbered question. "Toolkit hooks in Codex" now shows under its section as an unnumbered line, for example "Status (nothing to answer): Toolkit hooks in Codex: Off: Shell and agent check, File edit check. Turn them on in Codex: open /hooks and turn on Shell and agent check and File edit check." The questions after it move up one number (Antigravity becomes 3.2 in the Codex table), and the table heading counts only the numbered questions.

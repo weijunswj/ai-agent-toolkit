@@ -160,6 +160,7 @@ test('the CI aggregate check passes only when every leg succeeded and covered ev
     ['a non-zero leg exit', (f) => { f.summaries[0].exit_code = 1; }, /exited with 1/],
     ['an unknown summary schema', (f) => { f.summaries[0].schema = 'other'; }, /does not use toolkit-test-summary\/v1/],
     ['a new test file nobody ran', (f) => { f.files.push('repo/tests/d.test.cjs'); }, /d\.test\.cjs/],
+    ['a clock-ahead run in place of a shard', (f) => { f.summaries[1].clock_offset_days = 400; }, /moved 400 days ahead, so it does not count as a shard run[\s\S]*linux-2 has no summary/],
   ];
   for (const [label, mutate, pattern] of cases) {
     const fixture = ciFixture();
@@ -208,15 +209,20 @@ function assertDriftGuard(WORKFLOW) {
     ['the leg timeout removed', WORKFLOW.replace('    timeout-minutes: 30\n', '')],
     ['the aggregate no longer always runs', WORKFLOW.replace('    if: ${{ always() }}\n', '')],
     ['the aggregate skipped on failure', WORKFLOW.replace('if: ${{ always() }}', 'if: ${{ success() }}')],
-    ['the aggregate not waiting for Windows', WORKFLOW.replace('needs: [tests-linux, tests-windows, hook-pack, personal-data]', 'needs: [tests-linux, hook-pack, personal-data]')],
-    ['the aggregate not waiting for the personal-data check', WORKFLOW.replace('needs: [tests-linux, tests-windows, hook-pack, personal-data]', 'needs: [tests-linux, tests-windows, hook-pack]')],
+    ['the aggregate not waiting for Windows', WORKFLOW.replace('needs: [tests-linux, tests-windows, tests-clock-ahead, hook-pack, personal-data]', 'needs: [tests-linux, tests-clock-ahead, hook-pack, personal-data]')],
+    ['the aggregate not waiting for the personal-data check', WORKFLOW.replace('needs: [tests-linux, tests-windows, tests-clock-ahead, hook-pack, personal-data]', 'needs: [tests-linux, tests-windows, tests-clock-ahead, hook-pack]')],
+    ['the aggregate not waiting for the clock-ahead run', WORKFLOW.replace('needs: [tests-linux, tests-windows, tests-clock-ahead, hook-pack, personal-data]', 'needs: [tests-linux, tests-windows, hook-pack, personal-data]')],
+    ['the clock-ahead job removed', WORKFLOW.replace(/\n  tests-clock-ahead:\n[\s\S]*?(?=\n  personal-data:\n)/, '')],
+    ['the clock-ahead run narrowed to one file', WORKFLOW.replace('--clock-ahead --clock-offset-days 400', 'repo/tests/skill-routing.test.cjs --clock-offset-days 400')],
+    ['the clock-ahead run moved one day only', WORKFLOW.replace('--clock-ahead --clock-offset-days 400', '--clock-ahead --clock-offset-days 1')],
+    ['a failed shard no longer uploads its summary', WORKFLOW.replace('        if: ${{ !cancelled() }}\n', '')],
     ['the personal-data check narrowed to one mode', WORKFLOW.replace('personal-data-guard.cjs ci', 'personal-data-guard.cjs pr')],
     ['the personal-data check on a shallow clone', WORKFLOW.replace(/(\n  personal-data:\n[\s\S]*?)fetch-depth: 0/, '$1fetch-depth: 1')],
     ['the personal-data job removed', WORKFLOW.replace(/\n  personal-data:\n[\s\S]*?(?=\n  validate:\n)/, '')],
     ['the hook pack job removed', WORKFLOW.replace(/\n  hook-pack:\n[\s\S]*?(?=\n  personal-data:\n)/, '')],
     ['the hook pack dropped on Windows', WORKFLOW.replace('os: [ubuntu-latest, windows-latest]', 'os: [ubuntu-latest]')],
     ['the hook pack budget removed', WORKFLOW.replace(' run --budget-seconds 360', ' run')],
-    ['the aggregate not waiting for the hook pack', WORKFLOW.replace('needs: [tests-linux, tests-windows, hook-pack, personal-data]', 'needs: [tests-linux, tests-windows, personal-data]')],
+    ['the aggregate not waiting for the hook pack', WORKFLOW.replace('needs: [tests-linux, tests-windows, tests-clock-ahead, hook-pack, personal-data]', 'needs: [tests-linux, tests-windows, tests-clock-ahead, personal-data]')],
     ['the summary check removed', WORKFLOW.replace(`\n${verify}`, '')],
     ['the summary check not last', WORKFLOW.replace(`\n${verify}`, '').replace('          node repo/scripts/validate-toolkit.cjs\n', `          node repo/scripts/validate-toolkit.cjs\n${verify}\n`)],
     ['the leg results not passed in', WORKFLOW.replace('          TEST_LEGS: ${{ toJSON(needs) }}\n', '')],
@@ -542,6 +548,119 @@ test('local runs pick the test files a change affects', () => {
     { file: 'repo/tests/c.test.cjs', reason: 'names docs/GUIDE.md' },
   ]);
   assert.deepEqual(shards.affectedTestFiles(['README.md'], discovered, (file) => texts[file]), []);
+});
+
+test('the clock-ahead run picks the test files that pin a date, in the file or in a repo/tests helper it loads', () => {
+  const texts = {
+    'repo/tests/iso.test.cjs': "const at = '2026-10-23T00:00:00Z';",
+    'repo/tests/utc.test.cjs': 'const at = Date.UTC(2026, 9, 23);',
+    'repo/tests/nested.test.cjs': "require('./support/clock.cjs');",
+    'repo/tests/support/clock.cjs': "module.exports = require('../fake-clock.cjs');",
+    'repo/tests/fake-clock.cjs': "module.exports = { clock: '2026-01-31' };",
+    'repo/tests/plain.test.cjs': "const version = '1.2.3'; const notADate = '2026-13-01'; const longer = '12026-01-01';",
+    'repo/tests/loads-a-test.test.cjs': "require('./iso.test.cjs');",
+    'repo/tests/outside.test.cjs': "require('../../repo/scripts/clock.cjs');",
+    'repo/scripts/clock.cjs': "const at = '2026-10-23';",
+    'repo/tests/missing-helper.test.cjs': "require('./gone.cjs');",
+    'repo/tests/loop.test.cjs': "require('./loop-a.cjs');",
+    'repo/tests/loop-a.cjs': "require('./loop-b.cjs');",
+    'repo/tests/loop-b.cjs': "require('./loop-a.cjs');",
+  };
+  const discovered = Object.keys(texts).filter((file) => file.endsWith('.test.cjs')).sort();
+  const picked = shards.dateBoundTestFiles(discovered, (file) => (file in texts ? texts[file] : null));
+  assert.deepEqual(picked, ['repo/tests/iso.test.cjs', 'repo/tests/nested.test.cjs', 'repo/tests/utc.test.cjs']);
+  // The live suite: the custody tests pin dates through the fake GitHub clock helper.
+  const live = shards.dateBoundTestFiles(DISCOVERED, (file) => {
+    try { return fs.readFileSync(path.join(ROOT, file), 'utf8'); }
+    catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+  });
+  assert.ok(live.includes('repo/tests/toolkit-programme-custody.test.cjs'));
+  assert.ok(live.includes('repo/tests/toolkit-programme-refresh.test.cjs'));
+  assert.ok(live.length < DISCOVERED.length, 'files that pin no date are left out');
+});
+
+test('the runner takes --clock-ahead and --clock-offset-days only where a moved clock belongs', () => {
+  assert.equal(runner.CLOCK_AHEAD_DAYS, 400);
+  assert.deepEqual([runner.parseArgs(['--clock-ahead']).mode, runner.parseArgs(['--clock-ahead']).clockOffsetDays], ['clock-ahead', 400]);
+  assert.equal(runner.parseArgs(['--clock-ahead', '--clock-offset-days', '30']).clockOffsetDays, 30);
+  assert.equal(runner.parseArgs(['--clock-offset-days', '7', 'repo/tests/ci-test-shards.test.cjs']).clockOffsetDays, 7);
+  assert.equal(runner.parseArgs(['--all', '--clock-offset-days', '7']).clockOffsetDays, 7);
+  assert.equal(runner.parseArgs(['--clock-offset-days', '7']).mode, 'changed');
+  assert.equal(runner.parseArgs(['--all']).clockOffsetDays, null, 'other runs keep the real clock');
+  for (const args of [
+    ['--shard', 'linux-1', '--os', 'linux', '--clock-offset-days', '400'],
+    ['--plan', '--clock-offset-days', '400'],
+    ['--verify-ci', 'x', '--clock-offset-days', '400'],
+    ['--clock-ahead', '--all'],
+    ['--clock-ahead', '--clock-offset-days', '0'],
+    ['--clock-ahead', '--clock-offset-days', '1.5'],
+    ['--clock-ahead', '--clock-offset-days', '10000'],
+    ['--clock-ahead', '--clock-offset-days'],
+  ]) assert.throws(() => runner.parseArgs(args), (error) => error.constructor.name === 'UsageError', args.join(' '));
+});
+
+test('a moved run moves Node\'s clock in the test processes and their node children, never in the runner', (t) => {
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-run-clock-'));
+  t.after(() => fs.rmSync(work, { recursive: true, force: true }));
+  const record = path.join(work, 'record.json');
+  const probe = path.join(work, 'clock.test.cjs');
+  fs.writeFileSync(probe, [
+    "const test = require('node:test');",
+    "const fs = require('node:fs');",
+    "const { spawnSync } = require('node:child_process');",
+    "test('records the clocks it sees', () => {",
+    "  const child = spawnSync(process.execPath, ['-e', 'process.stdout.write(String(Date.now()))'], { encoding: 'utf8' });",
+    "  const scrubbed = spawnSync(process.execPath, ['-e', 'process.stdout.write(String(Date.now()))'], { encoding: 'utf8', env: { ...process.env, TOOLKIT_TEST_CLOCK_OFFSET_DAYS: undefined } });",
+    '  fs.writeFileSync(process.env.RUN_TESTS_RECORD, JSON.stringify({',
+    '    real: Math.round(performance.timeOrigin + performance.now()), now: Date.now(), created: new Date().getTime(), called: Date.parse(Date()),',
+    "    fixed: new Date(0).getTime(), parsed: Date.parse('2026-01-01T00:00:00Z'), utc: Date.UTC(2026, 0, 1), isDate: new Date() instanceof Date,",
+    '    child: Number(child.stdout), scrubbed: Number(scrubbed.stdout), options: process.env.NODE_OPTIONS,',
+    '  }));',
+    '});',
+  ].join('\n'));
+  const env = { ...process.env, RUN_TESTS_RECORD: record, NODE_OPTIONS: '--max-old-space-size=2048' };
+  delete env.NODE_TEST_CONTEXT;
+  delete env.TOOLKIT_TEST_CLOCK_OFFSET_DAYS;
+  const day = 24 * 60 * 60 * 1000;
+  const slack = 10 * 60 * 1000;
+  const near = (value, expected, label) => assert.ok(Math.abs(value - expected) < slack, `${label}: ${value} is not near ${expected}`);
+  const before = Date.now();
+  const moved = new runner.TestRun({ root: ROOT, system: shards.platformSystem(), tempRoot: path.join(work, 'temp'), clockOffsetDays: 30, env, stdio: 'ignore', out: sink(), err: sink() });
+  const result = moved.run([probe], { concurrency: 1 });
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.summary.clock_offset_days, 30, 'the summary records the offset');
+  const seen = JSON.parse(fs.readFileSync(record, 'utf8'));
+  for (const key of ['now', 'created', 'child']) near(seen[key] - seen.real, 30 * day, key);
+  near(seen.called - seen.real, 30 * day, 'Date() without new');
+  near(seen.scrubbed, seen.real, 'a child whose environment drops the offset keeps the real clock');
+  assert.deepEqual([seen.fixed, seen.parsed, seen.utc, seen.isDate], [0, 1767225600000, 1767225600000, true]);
+  assert.match(seen.options, /^--max-old-space-size=2048 --require ".+test-clock-offset\.cjs"$/, 'the preload is added after the NODE_OPTIONS already set');
+  // The runner itself keeps its clock: its run folder is named by the real date and its env is untouched.
+  near(Date.now(), before, 'the runner process');
+  const stamp = path.basename(moved.folder).match(/^run-(\d{8})-/)[1];
+  const real = new Date(seen.real).toISOString().slice(0, 10).replace(/-/g, '');
+  assert.equal(stamp, real, 'the run folder is named by the real date');
+  assert.equal(env.NODE_OPTIONS, '--max-old-space-size=2048');
+  assert.equal(env.TOOLKIT_TEST_CLOCK_OFFSET_DAYS, undefined);
+
+  const plain = new runner.TestRun({ root: ROOT, system: shards.platformSystem(), tempRoot: path.join(work, 'temp'), env, stdio: 'ignore', out: sink(), err: sink() });
+  const unmoved = plain.run([probe], { concurrency: 1 });
+  assert.equal(unmoved.exitCode, 0);
+  assert.equal('clock_offset_days' in unmoved.summary, false);
+  const again = JSON.parse(fs.readFileSync(record, 'utf8'));
+  near(again.now, again.real, 'a run without an offset');
+  assert.equal(again.options, '--max-old-space-size=2048');
+});
+
+test('the clock preload refuses an offset that is not a whole number of days', () => {
+  const { spawnSync } = require('node:child_process');
+  for (const value of ['abc', '0', '-1', '1.5', '10000', '']) {
+    const env = { ...process.env, TOOLKIT_TEST_CLOCK_OFFSET_DAYS: value };
+    delete env.NODE_OPTIONS;
+    const result = spawnSync(process.execPath, ['--require', runner.CLOCK_PRELOAD, '-e', ''], { env, encoding: 'utf8' });
+    assert.notEqual(result.status, 0, value);
+    assert.match(result.stderr, /TOOLKIT_TEST_CLOCK_OFFSET_DAYS must be a whole number of days/, value);
+  }
 });
 
 test('the duration check reports without a budget and fails files over a declared or raised budget', () => {

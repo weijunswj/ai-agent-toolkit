@@ -57,19 +57,6 @@
       "note": "This shape passes on main; the reported refusal came from a chat with a governance question waiting, which its lane adds as its own row."
     },
     {
-      "id": "G4",
-      "source": "G2 report on PR 685, L1: a host launch through tmux carrying a short answer",
-      "kind": "hostile",
-      "hosts": ["claude", "codex"],
-      "payload": { "tool_name": "Bash", "tool_input": { "command": "tmux new-session -d \"claude --resume fixture -p yes\"" } },
-      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
-      "expect": { "decision": "deny" },
-      "status": "known-bad",
-      "lane": "Governance false block and chat ask",
-      "added": "2026-10-30",
-      "note": "The same command without tmux is refused."
-    },
-    {
       "id": "G5",
       "source": "G2 report on PR 685, L2: a dotted host folder name read as a host launch",
       "kind": "benign",
@@ -78,7 +65,7 @@
       "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
       "expect": { "decision": "allow" },
       "status": "known-bad",
-      "lane": "Governance false block and chat ask",
+      "lane": "Hooks cut-down (the short-answer launch reader is removed)",
       "added": "2026-10-30"
     }
   ]

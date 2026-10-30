@@ -385,7 +385,7 @@ function parseValidationWorkflowSteps(source, jobName = 'validate') {
   return { steps, errors: [] };
 }
 
-// Every job of the validation workflow (test shards, the hook pack, the personal-data check and the validate job)
+// Every job of the validation workflow (test shards, the personal-data check and the validate job)
 // checks out the event's full history before its validation floor.
 function validationWorkflowCheckoutErrors(source) {
   const names = workflowJobNames(source);
@@ -710,7 +710,7 @@ test('every validation job fetches full history before its own validation floor'
   const relPath = '.github/workflows/validate.yml';
   const source = readText(relPath);
   assert.deepEqual(validationWorkflowCheckoutErrors(source), [], relPath);
-  assert.deepEqual(workflowJobNames(source), ['tests-linux', 'tests-windows', 'hook-pack', 'personal-data', 'validate']);
+  assert.deepEqual(workflowJobNames(source), ['tests-linux', 'tests-windows', 'tests-clock-ahead', 'hook-pack', 'personal-data', 'validate']);
   assert.match(source, /^permissions:\n  contents: read$/m, relPath + ' read-only permissions');
   assert.match(source, /^on:\n  pull_request:\n/m, relPath + ' pull_request trigger');
   assert.match(source, /^  push:\n    branches:\n      - main$/m, relPath + ' main push trigger');
