@@ -65,6 +65,46 @@
       "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
       "expect": { "decision": "allow" },
       "status": "pass"
+    },
+    {
+      "id": "G2.codex-here-string",
+      "source": "two-bugs G0, Bug 1: a Codex here-string report write that names Codex next to short answer lines, refused as a governance answer",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "payload": { "tool_name": "PowerShell", "tool_input": { "command": "Set-Content -Path .tmp/uat-codex.md -Value @'\nCodex said no\nok\nlater\n'@" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
+      "expect": { "decision": "allow" },
+      "status": "pass"
+    },
+    {
+      "id": "G6.python-inspection",
+      "source": "owner report: a Python inspection of Codex session files read as a session resume or fork",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "python -c \"import json; d = json.load(open('.codex/sessions/index.json')); print([s for s in d if 'resume' in s or 'fork' in s])\"" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
+      "expect": { "decision": "allow" },
+      "status": "pass"
+    },
+    {
+      "id": "G7.metadata-save",
+      "source": "false-refusals G0, refusal 1: a metadata save naming a host next to yes",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "node scripts/save-meta.cjs --host claude --tracking yes" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
+      "expect": { "decision": "allow" },
+      "status": "pass"
+    },
+    {
+      "id": "G7.summary-read",
+      "source": "false-refusals G0, refusal 2: a summary read with -r style options over a .claude folder",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "head -c 2000 ~/.claude/projects/x/summary.md" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
+      "expect": { "decision": "allow" },
+      "status": "pass"
     }
   ]
 }
