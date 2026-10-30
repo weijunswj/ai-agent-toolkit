@@ -2,7 +2,7 @@
 
 ## 3.19.17 (a controller creates its gate chats without asking)
 
-- **Changed:** appointing a controller now counts as the owner's explicit request to create every gate session the controller procedure launches (G0, G1, G2, rechecks and their follow-ups) and to archive each once its evidence is stored and read back. A controller no longer asks before each one, including on hosts that create a chat only when the user asks (Codex `create_thread`, Claude Code desktop sessions). The controller procedure and the global rules' controller bullet both say so. A new model or route, spend and anything on the safety floor still need the owner.
+- **Changed:** appointing a controller now counts as the owner's explicit request to create every gate session the controller procedure launches (G0, G1, G2, rechecks and their follow-ups) and to archive each once its evidence is stored and read back. A controller no longer asks before each one, including on hosts that create a chat only when the user asks (Codex `create_thread`, Claude Code desktop sessions). The controller procedure says so; a controller binds it on appointment, before its first launch. A new model or route, spend and anything on the safety floor still need the owner.
 
 ## 3.19.14 (setup shows report-only rows as status lines)
 
