@@ -27,16 +27,13 @@
 // - Owner messages in the coordinator: an owner wake counts as the owner writing in the main chat unless its thread is
 //   a work thread the session knows (from its thread launches, thread listings or a thread-start card in a chat
 //   read). An unknown thread still counts, so a misread fails the way the hook worked before.
-// - Links, only where the owner acts: every numbered item under the **Waiting on you (n):** header (each question and
-//   merge ask) carries a link (link text may hold one level of brackets, or a bare https URL), and a /pull/<n> link in
-//   such an item without /files is refused with the fix. Prose, plain bullets and PR mentions elsewhere need no link.
 // - Wording, on every post and reply: no em-dashes or arrows outside code, and at most one line starting with a bare
 //   **Question:** label (prose that mentions the label is not counted).
 // - Layout, on top-level posts of 25 words or more, or with an Update, Waiting on you or **Question: line: a **Now:**
 //   line first (after an optional "Re: your reply on" line), **[HH:MM] Update:** one-liners with no question or
 //   numbered options inside, and one **ELI5:** line as the very last line. The Waiting list opens only at a line that
 //   is exactly the header and runs to the next Update or ELI5 line. In it, choice bullets indented three or more
-//   spaces (or a tab) sit under a numbered item and need no link; a "(my pick)" choice needs a numbered **Question:**
+//   spaces (or a tab) sit under a numbered item; a "(my pick)" choice needs a numbered **Question:**
 //   item above it. A question is never flattened: every line starting **Question: must be a numbered item in the
 //   list, and an unindented or two-space bullet right after a question or its choices (spacers skipped), or one
 //   marked "(my pick)", is refused. Other bullets, spacers and prose are passed over. An edit of an earlier post keeps
@@ -95,7 +92,6 @@ const SPACER_LINE = /^(?:\s|&nbsp;|&#160;|&#x[aA]0;|<br\s*\/?>)*$/i;
 const NOW_LINE = /^\s*(?:[-*]\s+)?\*\*Now:\*\*/;
 const REPLY_LINE = /^\s*Re: your reply on\b/i;
 const ELI5_LINE = /^\s*(?:[-*]\s+)?\*\*ELI5:\*\*/;
-const BARE_URL = /https?:\/\/\S/;
 // Numbered options: a 1 and a 2 in the same style ("1. ... 2.", "1) ... 2)" or "(1) ... (2)").
 const OPTION_LISTS = [[/(?:^|\s)1\.\s+\S/, /\s2\.\s+\S/], [/(?:^|\s)1\)\s+\S/, /\s2\)\s+\S/], [/\(1\)\s+\S/, /\(2\)\s+\S/]];
 // Finds the 1 marker first, then a 2 marker after it, so a long line stays linear.
@@ -463,46 +459,6 @@ function withoutCode(text) {
   return text.replace(/(^|\n)[ \t]{0,3}(```|~~~)[\s\S]*?(?:\n[ \t]{0,3}\2[^\n]*|$)|`[^`\n]*`/g, match => match.replace(/[^\n]/g, ' '));
 }
 
-// A markdown link whose text may hold one level of brackets ("[[09:41] Update card](#cmsg_X)"), or a bare https URL.
-// One pass: the scan keeps the "[" that opens the link text and at most one inner "[" inside it; a third "[" makes the
-// inner one the new opener. A "]" closes the inner "[" first, then the opener, and either one followed by a "(target)"
-// is a link. A target that runs into a space or the end of the line also ends every later target before that point,
-// so it is not read again, and the scan stays linear on long runs of brackets.
-function hasLink(line) {
-  if (BARE_URL.test(line)) return true;
-  let open = -1;
-  let inner = -1;
-  let noTargetBefore = -1;
-  for (let i = 0; i < line.length; i += 1) {
-    if (line[i] === '[') {
-      if (open === -1) open = i;
-      else if (inner === -1) inner = i;
-      else { open = inner; inner = i; }
-      continue;
-    }
-    if (line[i] !== ']' || open === -1) continue;
-    const textStart = (inner === -1 ? open : inner) + 1;
-    if (inner === -1) open = -1;
-    else inner = -1;
-    if (i === textStart || line[i + 1] !== '(' || i + 2 <= noTargetBefore) continue;
-    let end = i + 2;
-    while (end < line.length && line[end] !== ')' && !/\s/.test(line[end])) end += 1;
-    if (line[end] === ')' && end > i + 2) return true;
-    noTargetBefore = end;
-  }
-  return false;
-}
-
-// A /pull/<n> link in a Waiting on you item without its /files page.
-function filesIssue(line) {
-  const files = new Set([...line.matchAll(/\/pull\/(\d+)\/files\b/g)].map(match => match[1]));
-  for (const [, value] of line.matchAll(/\/pull\/(\d+)(?!\d)/g)) {
-    if (files.has(value)) continue;
-    return `PR ${value} in the Waiting on you item "${line.trim().slice(0, 80)}" is linked without /files. Link it as https://github.com/<owner>/<repo>/pull/${value}/files when it is ready for the owner to check and merge, otherwise link the chat thread that owns the work. Keep the item numbered as it is.`;
-  }
-  return '';
-}
-
 const EM_DASH = String.fromCharCode(0x2014);
 const ARROW = String.fromCharCode(0x2192);
 
@@ -531,7 +487,7 @@ function updateLines(text) {
 const quoted = line => `"${line.trim().slice(0, 80)}"`;
 
 // The Waiting on you lists and every question line. Each header opens a list that runs to the next Update or ELI5
-// line. In it, a numbered line is an owner item and needs a link; a choice is a bullet indented under a numbered item;
+// line. In it, a numbered line is an owner item; a choice is a bullet indented under a numbered item;
 // an unindented bullet right after a question or its choices (spacers skipped) is a flattened choice. Anywhere else,
 // a question line is a flattened question.
 function waitingIssue(lines) {
@@ -569,11 +525,6 @@ function waitingIssue(lines) {
     if (numbered) {
       item = line;
       last = QUESTION_LINE.test(line) ? 'question' : 'item';
-      if (!hasLink(line)) {
-        return `the Waiting on you item ${quoted(line)} has no link. Add the link to the card, thread or PR changes page where the owner acts, and keep the item numbered as it is. If the owner answers in chat and there is no card yet, post the card first and link it. Do not turn the item into a plain bullet or drop its number to get past this check.`;
-      }
-      const files = filesIssue(line);
-      if (files) return files;
       continue;
     }
     if (BULLET_LINE.test(line) && (last === 'question' || MY_PICK.test(line))) {
@@ -667,7 +618,7 @@ function decide(input, readLines = file => fs.readFileSync(file, 'utf8').split('
   }
   if (topLevel) {
     const layout = layoutIssue(text) || proseIssue(text, known?.text) || (known ? editIssue(known.text, text) : '');
-    if (layout) return `Toolkit Projects rule: post layout (a **Now:** line, **[HH:MM] Update:** one-liners, linked **Waiting on you** items, the **ELI5:** line last). Rewrite the post: ${layout}`;
+    if (layout) return `Toolkit Projects rule: post layout (a **Now:** line, **[HH:MM] Update:** one-liners, numbered **Waiting on you** items, the **ELI5:** line last). Rewrite the post: ${layout}`;
   }
   if (tool !== POST_TOOL || input.tool_input?.thread_id || !running || running.size >= NEAR_LIMIT_BYTES) return '';
   // Two new posts are allowed beside a running post: a one-line gate anchor, and a direct answer ("Re: your reply
@@ -694,4 +645,4 @@ function main() {
 
 if (require.main === module) process.exitCode = main();
 
-module.exports = { decide, hasLink, wordingIssue, layoutIssue, proseIssue, editIssue, readTranscript, NEAR_LIMIT_BYTES };
+module.exports = { decide, wordingIssue, layoutIssue, proseIssue, editIssue, readTranscript, NEAR_LIMIT_BYTES };

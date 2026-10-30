@@ -9,7 +9,7 @@ const { spawnSync } = require('node:child_process');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const HOOK = path.join(ROOT, 'repo', 'scripts', 'toolkit-claude-project-post-hook.cjs');
-const { decide, hasLink, wordingIssue, layoutIssue, proseIssue, editIssue, readTranscript, NEAR_LIMIT_BYTES } = require('../scripts/toolkit-claude-project-post-hook.cjs');
+const { decide, wordingIssue, layoutIssue, proseIssue, editIssue, readTranscript, NEAR_LIMIT_BYTES } = require('../scripts/toolkit-claude-project-post-hook.cjs');
 const hostile = require('./support/hostile-inputs.cjs');
 
 const POST = 'mcp__hearthbot__post_message';
@@ -65,24 +65,18 @@ test('work threads keep one running post too, and replies under a post are not c
   assert.equal(post([wake(), call(POST, { thread_id: 'cmsg_T', text: 'Reply.' })]), '');
 });
 
-test('links only where the owner acts: PR mentions elsewhere need none, Waiting items need one with /files for a PR', () => {
-  // A PR named in prose is not a call to action, in a post, an edit or a reply.
+test('links are a written rule: no post is refused for a missing link or a PR link without /files', () => {
   const edit = text => decide({ tool_name: EDIT, transcript_path: 't', tool_input: { message_id: 'cmsg_A1', text } }, () => lines([wake()]));
   for (const text of ['PR 7 merged', 'Merged PR 612 today.', 'See PR #613.', 'PR 614 at https://github.com/o/r/pull/614', 'PRs 612 and 613 are in review.']) {
     assert.equal(post([wake()], text), '', text);
     assert.equal(edit(text), '', text);
   }
-  // Case E: a long laid-out post whose prose names a PR without a link.
   assert.equal(layoutIssue(LAID_OUT.replace('**Now:** the hook', '**Now:** PR 612 merged earlier today, and the hook')), '');
-  // A Waiting item that links a PR without /files is refused with the fix; with /files it passes; a PR link of any
-  // shape is fine outside the Waiting items.
-  const pr = link => LAID_OUT.replace('[card](#cmsg_CARD)', link);
-  assert.match(layoutIssue(pr('https://github.com/o/r/pull/7')), /PR 7 in the Waiting on you item "1\. Merge OK.*" is linked without \/files\. Link it as https:\/\/github\.com\/<owner>\/<repo>\/pull\/7\/files when it is ready .* Keep the item numbered as it is\./);
-  assert.match(layoutIssue(pr('[PR 7](https://github.com/o/r/pull/7)')), /PR 7 in the Waiting on you item/);
-  assert.match(layoutIssue(pr('[PR 7](https://github.com/o/r/pull/7/files) and https://github.com/o/r/pull/8')), /PR 8 in the Waiting on you item/);
-  assert.equal(layoutIssue(pr('[PR 7](https://github.com/o/r/pull/7/files)')), '');
-  assert.equal(layoutIssue(LAID_OUT.replace('CI passed.', 'CI passed on https://github.com/o/r/pull/7.')), '');
-  assert.match(post([wake()], pr('https://github.com/o/r/pull/7')), /post layout.*without \/files/);
+  const item = link => LAID_OUT.replace('[card](#cmsg_CARD)', link);
+  for (const link of ['the card', 'https://github.com/o/r/pull/7', '[PR 7](https://github.com/o/r/pull/7)', '[PR 7](https://github.com/o/r/pull/7/files)']) {
+    assert.equal(layoutIssue(item(link)), '', link);
+    assert.equal(post([wake()], item(link)), '', link);
+  }
 });
 
 test('the hook process denies with a reason and passes other tools and unreadable input', t => {
@@ -117,46 +111,6 @@ test('the hook is for Claude Projects only: other tools, other servers and other
   for (const other of ['.codex-plugin/hooks/hooks.json', 'repo/contracts/toolkit-local-bridge/codex-plugin/hooks/hooks.json']) {
     assert.doesNotMatch(fs.readFileSync(path.join(ROOT, other), 'utf8'), /project-post-hook/, other);
   }
-});
-
-test('the link scanner accepts link text with one level of brackets and stays linear', () => {
-  for (const line of [
-    '1. Reply by noon: [[09:41] Update card](#cmsg_CARD)', '1. [PR 12 [draft]](https://github.com/o/r/pull/12/files)',
-    '1. [card](#cmsg_A)', '1. Merge OK: https://github.com/o/r/pull/7/files', '1. [x [a](#cmsg_A)', '1. [a [b [c] d](#cmsg_A)',
-    '1. [a] then [card](#cmsg_A)', '1. [09:41] Update: see [card](#cmsg_A)',
-  ]) {
-    assert.equal(hasLink(line), true, line);
-  }
-  for (const line of [
-    '1. the card', '1. [card]', '1. [card] (#cmsg_A)', '1. [](#cmsg_A)', '1. [card]()', '1. [card](#cmsg A)', '1. [a] b](#cmsg_A)',
-    '1. http:/x', '1. card)(#cmsg_A)',
-  ]) {
-    assert.equal(hasLink(line), false, line);
-  }
-  // Two levels of brackets inside link text are beyond the scanner, so such an item is refused and gets relinked.
-  assert.equal(hasLink('1. [[[a]]](#cmsg_A)'), false);
-  // Case A through the layout: a link whose text holds a bracketed time.
-  assert.equal(layoutIssue(LAID_OUT.replace('Merge OK for the hook: [card](#cmsg_CARD)', 'Reply by noon: [[09:41] Update card](#cmsg_CARD)')), '');
-  // Long runs of brackets and unclosed link targets: no false link, and the time grows linearly.
-  for (const build of [
-    size => '['.repeat(size), size => ']'.repeat(size), size => '[]'.repeat(size), size => '[[a]'.repeat(size),
-    size => '[x](aaa'.repeat(size), size => `[${'[a]('.repeat(size)}`, size => '[a [b] c]('.repeat(size), size => `${'[x]'.repeat(size)}(`,
-  ]) {
-    assert.equal(hasLink(build(64)), false, build(4));
-    const result = hostile.timing(hasLink, build);
-    assert.ok(result.ok, `${build(4)}: ${result.message}`);
-  }
-  // The shared large inputs, and a laid-out post whose Waiting item is a long run of brackets, stay linear too.
-  const large = hostile.cases(['large-input']);
-  assert.ok(large.length > 0);
-  for (const item of large) {
-    const result = hostile.timing(hasLink, item.build);
-    assert.ok(result.ok, `${item.id}: ${result.message}`);
-  }
-  const longItem = size => LAID_OUT.replace('Merge OK for the hook: [card](#cmsg_CARD)', `${'[a [b] c]('.repeat(size)}`);
-  assert.match(layoutIssue(longItem(64)), /has no link/);
-  const result = hostile.timing(layoutIssue, longItem);
-  assert.ok(result.ok, result.message);
 });
 
 test('guards hold: failed posts, size in bytes, the 8 KB escape and quoted owner text', () => {
@@ -250,7 +204,7 @@ test('layout: Now first, ELI5 last and alone, Update lines without questions, Wa
   assert.match(layoutIssue('- **[09:41] Update:** built it.'), /\*\*Now:\*\*/);
   assert.match(layoutIssue(LAID_OUT.replace('CI passed.', 'CI passed. Question: merge it? 1. merge 2. hold')), /question or numbered options/);
   assert.match(layoutIssue(LAID_OUT.replace('CI passed.', 'CI passed, merge it? 1. merge 2. hold')), /numbered options/);
-  assert.match(layoutIssue(LAID_OUT.replace('[card](#cmsg_CARD)', 'the card')), /Waiting on you item .* has no link/);
+  assert.equal(layoutIssue(LAID_OUT.replace('[card](#cmsg_CARD)', 'the card')), '');
   assert.equal(layoutIssue(LAID_OUT.replace('[card](#cmsg_CARD)', 'https://github.com/o/r/pull/7/files')), '');
   // A question in an Update line is refused on its own; one numbered item alone is not an option list.
   assert.match(layoutIssue(LAID_OUT.replace('CI passed.', 'CI passed. Question: merge it?')), /question or numbered options in it\. An Update line is one short status sentence; ask the question as a numbered \*\*Question:\*\* item under \*\*Waiting on you\*\* instead, and do not flatten it into a plain bullet\./);
@@ -281,7 +235,7 @@ test('layout: Now first, ELI5 last and alone, Update lines without questions, Wa
   assert.equal(layoutIssue(SPACED), '');
   assert.equal(editIssue(QUESTIONS.replace(/\n- \*\*\[09:52\][^\n]*/, ''), QUESTIONS), '');
   assert.equal(editIssue(SPACED.replace(/\n- \*\*\[09:52\][^\n]*\n&nbsp;/, ''), SPACED), '');
-  assert.match(layoutIssue(QUESTIONS.replace(' [thread](#cmsg_THREAD)', '')), /Waiting on you item "2\. .* has no link/);
+  assert.equal(layoutIssue(QUESTIONS.replace(' [thread](#cmsg_THREAD)', '')), '');
   // An unindented or two-space bullet after a question or its choices is a flattened choice.
   const flattened = /the choice "- \*\*Hold.*" is not indented under its question\. Indent each choice four spaces under its numbered \*\*Question:\*\* item\. Do not turn choices into plain bullets\./;
   assert.match(layoutIssue(QUESTIONS.replace('    - **Hold.**', '- **Hold.**')), flattened);
@@ -312,15 +266,15 @@ test('layout: Now first, ELI5 last and alone, Update lines without questions, Wa
   // is still caught; only an Update or ELI5 line ends the list.
   for (const spacer of ['&nbsp;', '    &nbsp;', '&#160;', '  &#160;  ', '&#xA0;', '&nbsp;&nbsp;', '&nbsp; note', '<br>', '+ plus bullet', '    indented prose']) {
     const spaced = QUESTIONS.replace('\n2. **Question', `\n${spacer}\n2. **Question`).replace(' [thread](#cmsg_THREAD)', '');
-    assert.match(layoutIssue(spaced), /Waiting on you item "2\. .* has no link/, JSON.stringify(spacer));
+    assert.equal(layoutIssue(spaced), '', JSON.stringify(spacer));
   }
   // A choice that looks like an Update or ELI5 line is still a choice, so the scan goes on to the next item.
   for (const lookAlike of ['    - **[10:00] Update:** later.', '    - **ELI5:** later.']) {
     const shaped = QUESTIONS.replace('    - **Hold.** Wait for the next release.', lookAlike).replace(' [thread](#cmsg_THREAD)', '');
-    assert.match(layoutIssue(shaped), /Waiting on you item "2\. .* has no link/, lookAlike);
+    assert.doesNotMatch(layoutIssue(shaped), /choice|question/, lookAlike);
   }
   // A lone CR or CRLF ends a line like LF does.
-  assert.match(layoutIssue(QUESTIONS.replace(' [thread](#cmsg_THREAD)', '').replace(/\n/g, '\r')), /Waiting on you item "2\. .* has no link/);
+  assert.equal(layoutIssue(QUESTIONS.replace(' [thread](#cmsg_THREAD)', '').replace(/\n/g, '\r')), '');
   assert.equal(layoutIssue(QUESTIONS.replace(/\n/g, '\r\n')), '');
   assert.match(layoutIssue(LAID_OUT.replace(/\n/g, '\r').replace('CI passed.', 'CI passed. Question: merge it?')), /question or numbered options/);
   // A short post with a Waiting on you line uses the layout too.
@@ -361,7 +315,7 @@ test('questions stay numbered under the exact Waiting header and are never flatt
   assert.match(layoutIssue('**Question:** merge it?'), /\*\*Now:\*\*/);
   assert.match(layoutIssue('**Now:** ready.\n**Question:** merge it?\n**ELI5:** Ready.'), outside);
   // An unlinked item names the fix and says to keep it numbered.
-  assert.match(layoutIssue(postOf('**Waiting on you (1):**', '1. Merge OK for the hook')), /the Waiting on you item "1\. Merge OK for the hook" has no link\. Add the link to the card, thread or PR changes page where the owner acts, and keep the item numbered as it is\. If the owner answers in chat and there is no card yet, post the card first and link it\. Do not turn the item into a plain bullet or drop its number to get past this check\./);
+  assert.equal(layoutIssue(postOf('**Waiting on you (1):**', '1. Merge OK for the hook')), '');
   // Case C: prose bullets after the Waiting items that do not follow a question are not owner items.
   const caseC = postOf('**Waiting on you (1):**', '1. **Question: merge?** [card](#cmsg_CARD)', '    - **Merge (my pick).** CI is green.', '&nbsp;', 'Notes on the rules:', '- **Numbered questions:** each one keeps its number and its link.', '- **Choices:** indented under it.');
   assert.equal(layoutIssue(caseC), '');
@@ -373,11 +327,11 @@ test('questions stay numbered under the exact Waiting header and are never flatt
   }
   // The exact header opens the list with spaces around it, in any letter case and with or without a count.
   for (const header of ['**Waiting on you (1):** ', '  **Waiting on you (12):**', '**waiting on you:**']) {
-    assert.match(layoutIssue(postOf(header, '1. Merge OK')), /has no link/, header);
+    assert.equal(layoutIssue(postOf(header, '1. Merge OK')), '', header);
   }
   const twoLists = [...head, '**Waiting on you (1):**', '1. Merge OK: [card](#cmsg_CARD)', '- **[09:52] Update:** opened the PR.', '**Waiting on you (1):**', '1. **Question: keep it?** [thread](#cmsg_T)', '    - **Yes (my pick).** Fine.', tail].join('\n');
   assert.equal(layoutIssue(twoLists), '');
-  assert.match(layoutIssue(twoLists.replace(' [thread](#cmsg_T)', '')), /item "1\. \*\*Question: keep it\?\*\*" has no link/);
+  assert.equal(layoutIssue(twoLists.replace(' [thread](#cmsg_T)', '')), '');
 });
 
 test('edits keep every earlier Update line word for word and add a new one', () => {
