@@ -1994,6 +1994,85 @@ test('N2: a host\'s own subcommands are not read as answers, while a session lau
   }
 });
 
+// A report an agent writes that names Claude or Codex and has short answer lines in it.
+const UAT_REPORT = '# Codex mini UAT\nObserved: the guard in Codex did not refuse the write.\nClaude Code ran the same check.\nno\nok\nlater\nResult: no GitHub push.\n';
+const REPORT_WRITE = `cat > .tmp/uat-codex-mini3-results.md <<'EOF'\n${UAT_REPORT}EOF`;
+
+test('the answer guard counts only a launched Claude or Codex; text that names them is data', (t) => {
+  const ctx = scratch(t);
+  const decided = gitRepo(ctx, 'decided');
+  gate.writeGovernanceDecision(decided, 'enable', { registryOptions: ctx.options });
+  const plain = path.join(ctx.root, 'plain');
+  fs.mkdirSync(plain);
+  const commands = [
+    REPORT_WRITE,
+    `cat > .tmp/uat-codex-mini3-results.md <<EOF\n${UAT_REPORT}EOF`,
+    `cat > codex-notes.md <<'EOF'\n${UAT_REPORT}EOF`,
+    "apply_patch <<'PATCH'\n*** Begin Patch\n*** Add File: notes/codex.md\n+Codex said no\n+no\n*** End Patch\nPATCH",
+    'echo Codex said no >> notes.md',
+    'grep -n "codex" notes.md && echo no',
+  ];
+  const calls = [
+    ...commands.flatMap(command => [
+      ['Bash', { command }],
+      ['exec_command', { cmd: command }],
+      ['shell', { command: ['bash', '-lc', command] }],
+    ]),
+    ['PowerShell', { command: `Set-Content -Path .tmp\\r.md -Value @'\n${UAT_REPORT}'@` }],
+    ['PowerShell', { command: `@"\n${UAT_REPORT}"@ | Out-File -FilePath .tmp\\r.md` }],
+  ];
+  for (const cwd of [decided, plain]) {
+    for (const [tool_name, tool_input] of calls) {
+      assert.equal(tools(ctx).decide({ tool_name, cwd, tool_input }), null, `${tool_name} ${JSON.stringify(tool_input)}`);
+    }
+  }
+});
+
+test('the answer guard reads launches inside shell scripts', (t) => {
+  const ctx = scratch(t);
+  const plain = path.join(ctx.root, 'plain');
+  fs.mkdirSync(plain);
+  for (const [tool_name, tool_input] of [
+    ['Bash', { command: 'bash -c "claude -p yes"' }],
+    ['Bash', { command: 'cmd /c "claude -p yes"' }],
+    ['PowerShell', { command: 'pwsh -Command "codex exec no"' }],
+    ['exec_command', { cmd: 'pwsh -Command "codex exec no"' }],
+    ['Bash', { command: 'claude -p hello; bash -c "claude -p yes"' }],
+    ['Bash', { command: 'codex exec hi && sh -c "echo y | codex exec -"' }],
+    ['PowerShell', { command: "$h = 'codex'; & $h exec no" }],
+    ['Bash', { command: 'sudo -u me codex exec y' }],
+  ]) {
+    const decision = tools(ctx).decide({ tool_name, cwd: plain, tool_input });
+    assert.ok(decision?.deny?.includes(gate.ASK), `${tool_name} ${JSON.stringify(tool_input)}`);
+  }
+});
+
+test('the Claude Code and Codex hooks let an agent write a report that names Claude or Codex', (t) => {
+  const ctx = scratch(t);
+  const repo = gitRepo(ctx, 'repo');
+  const home = path.join(ctx.root, 'home');
+  gate.writeGovernanceDecision(repo, 'enable', { registryOptions: { registryPath: path.join(home, '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json'), testOnly: true } });
+  const env = { ...process.env, HOME: home, USERPROFILE: home };
+  delete env.CLAUDE_CODE_REMOTE;
+  delete env.CLAUDE_ENV_FILE;
+  for (const marker of ['TOOLKIT_GATE_ROLE', 'TOOLKIT_NATIVE_HELPER_BINDING', 'TOOLKIT_CLAUDE_TASK_PROFILE_SHA256', gate.HOST_SESSION_VARIABLE]) delete env[marker];
+  const claude = command => childProcess.spawnSync(process.execPath, [path.join(scripts, 'toolkit-governance-hook.cjs'), '--event', 'PreToolUse'],
+    { input: JSON.stringify({ cwd: repo, tool_name: 'Bash', tool_input: { command } }), env, encoding: 'utf8' });
+  const codex = cmd => childProcess.spawnSync(process.execPath, [path.join(scripts, 'toolkit-codex-helper-hook.cjs')],
+    { input: JSON.stringify({ hook_event_name: 'PreToolUse', cwd: repo, tool_name: 'exec_command', tool_input: { cmd } }), env, encoding: 'utf8' });
+  const written = claude(REPORT_WRITE);
+  assert.equal(written.status, 0, written.stderr);
+  assert.doesNotMatch(written.stdout, /"deny"/);
+  const codexWritten = codex(REPORT_WRITE);
+  assert.equal(codexWritten.status, 0, codexWritten.stderr);
+  assert.doesNotMatch(codexWritten.stdout, /"deny"/);
+  // The same hooks still refuse a launch with a short reply.
+  assert.match(claude('claude -p yes').stdout, /only the user answers the governance question/);
+  const launched = codex('echo yes | codex exec');
+  assert.equal(launched.status, 2);
+  assert.match(launched.stdout, /only the user answers the governance question/);
+});
+
 test('H3: a damaged decisions file names itself and the terminal repair wherever it holds', (t) => {
   const ctx = scratch(t);
   const repo = gitRepo(ctx, 'repo');
