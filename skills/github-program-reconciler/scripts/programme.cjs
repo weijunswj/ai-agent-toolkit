@@ -38,6 +38,12 @@
 //   ack --finding <id>                                 acknowledge an attention finding (it stays listed)
 //   dispose --finding <id> --reason <text>             dispose of one; the reason stays in the private part
 //
+// Moving the documents to the public state branch (once per repository, before the binding gains
+// `state`): anyone may run the dry run; the apply is the controller's and asks for the owner's typed yes
+// in a terminal, in that run:
+//   migrate-state --dry-run                            print the public documents, sidecars and digests
+//   migrate-state --apply --plan-digest <digest>       create the branch from the dry run it names
+//
 // claim, assign, return --consume and an update that sets DONE or RETIRED first print the parent's
 // stored attention line (to standard error; in the JSON result as `attention`). They never refuse on it.
 //
@@ -55,10 +61,10 @@ const attentionCache = require('./programme-attention-cache.cjs');
 const { ProgrammeError } = state;
 const VERSION_FILE = path.resolve(__dirname, '..', '..', '..', 'repo', 'contracts', 'toolkit-local-bridge', 'version.json');
 const COMMANDS = ['reconcile', 'refresh', 'show', 'init-parent', 'update-parent', 'claim', 'assign', 'reopen', 'interrupt', 'update', 'return', 'bind', 'checkpoint',
-  'inventory', 'attention', 'ack', 'dispose'];
-const FLAGS = new Set(['--apply', '--parent', '--include-private', '--takeover', '--route-read-back', '--json', '--controller', '--supersede', '--lane', '--refresh']);
+  'inventory', 'attention', 'ack', 'dispose', 'migrate-state'];
+const FLAGS = new Set(['--apply', '--parent', '--include-private', '--takeover', '--route-read-back', '--json', '--controller', '--supersede', '--lane', '--refresh', '--dry-run']);
 const VALUES = new Set(['--issue', '--parent-file', '--catalogue', '--patch', '--role', '--model', '--effort', '--record', '--consume', '--verdict', '--session',
-  '--prefix', '--repo-root', '--assignment', '--reason', '--at-head', '--takeover-record', '--message-file', '--finding', '--deadline-ms']);
+  '--prefix', '--repo-root', '--assignment', '--reason', '--at-head', '--takeover-record', '--message-file', '--finding', '--deadline-ms', '--plan-digest']);
 const EXECUTOR_COMMANDS = ['bind', 'checkpoint'];
 const LANE_COMMANDS = ['assign', 'interrupt'];
 
@@ -124,6 +130,11 @@ function parseArgs(argv) {
   if (command === 'checkpoint') needs(args.session, 'checkpoint needs --session <this session\'s own id>.');
   if (command === 'ack') needs(args.finding && !args.reason, 'ack needs --finding <id> (and no --reason; dispose takes one).');
   if (command === 'dispose') needs(args.finding && args.reason, 'dispose needs --finding <id> and --reason <text>.');
+  if (command === 'migrate-state') {
+    needs(Boolean(args['dry-run']) !== Boolean(args.apply), 'migrate-state needs --dry-run or --apply.');
+    needs(!args.apply || /^[0-9a-f]{64}$/.test(String(args['plan-digest'] || '')), 'migrate-state --apply needs --plan-digest <the plan digest its dry run printed>.');
+    needs(args.apply || args['plan-digest'] === undefined, '--plan-digest goes with migrate-state --apply.');
+  }
   if (args.finding !== undefined) needs(/^[0-9a-f]{12}$/.test(args.finding), '--finding takes the 12-character finding id that programme.cjs attention lists.');
   return args;
 }
@@ -131,7 +142,7 @@ function parseArgs(argv) {
 // Commands that write programme state or GitHub. Each one is the controller's. `refresh` also writes,
 // but it is not listed: it carries no decision of its own (see commands.refresh).
 function isWrite(args) {
-  if (args.command === 'reconcile' || args.command === 'init-parent') return Boolean(args.apply);
+  if (args.command === 'reconcile' || args.command === 'init-parent' || args.command === 'migrate-state') return Boolean(args.apply);
   return ['update-parent', 'claim', 'assign', 'reopen', 'interrupt', 'update', 'return', 'ack', 'dispose'].includes(args.command);
 }
 
@@ -320,7 +331,7 @@ function openContext(args, deps = {}) {
   const transport = deps.heartbeat ? Object.assign(Object.create(base), { request: (...call) => { deps.heartbeat(); return base.request(...call); } }) : base;
   const repository = state.bindRepository({ transport, originUrl, binding });
   const version = deps.toolkitVersion === undefined ? toolkitVersion() : deps.toolkitVersion;
-  const store = new state.STORE_BACKENDS[binding.store.kind]({ transport, store: binding.store, now: deps.now, toolkitVersion: version });
+  const store = state.openStore({ transport, binding, now: deps.now, toolkitVersion: version, localCheckpoint: localCheckpoint(binding.repository, deps) });
   store.verify();
   // The session comes from --session only; an inherited environment never makes a session a writer.
   const writer = args.session ? { session: args.session, prefix: args.prefix || binding.writer_prefix } : null;
@@ -329,7 +340,35 @@ function openContext(args, deps = {}) {
 
 function requireWriter(context) {
   if (!context.writer) throw new ProgrammeError('WRITER_UNKNOWN', 'This write needs --session <this session\'s own id>.');
+  if (context.writer.by_hash === true) throw new ProgrammeError('ROLE_REFUSED', 'A refresh acts by the stored holder hash and carries no decision; only the controller\'s own session writes this.');
   return context.writer;
+}
+
+// This computer's copy of the public state branch's checkpoint. Tests that bring their own GitHub (an
+// origin URL) keep it only in a folder they name.
+const CHECKPOINT_CACHE_SCHEMA = 'toolkit.programme-state-checkpoint-cache.v1';
+function localCheckpoint(repository, deps = {}) {
+  if (deps.originUrl && !deps.stateCheckpointDir) return null;
+  const [owner, name] = String(repository || '').toLowerCase().split('/');
+  if (!owner || !name) return null;
+  const file = path.join(deps.stateCheckpointDir || path.join(deps.home || os.homedir(), '.ai-agent-toolkit', 'user-state', 'programme-state-checkpoint'), `${owner}--${name}.json`);
+  return {
+    read() {
+      try {
+        const value = JSON.parse(fs.readFileSync(file, 'utf8'));
+        return value?.schema === CHECKPOINT_CACHE_SCHEMA && value.checkpoint ? value.checkpoint : null;
+      } catch { return null; }
+    },
+    // A copy that cannot be written only means this computer has none; the store's checkpoint counts.
+    write(checkpoint) {
+      try {
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        const temp = `${file}.${process.pid}.tmp`;
+        fs.writeFileSync(temp, `${JSON.stringify({ schema: CHECKPOINT_CACHE_SCHEMA, checkpoint }, null, 2)}\n`, { mode: 0o600 });
+        fs.renameSync(temp, file);
+      } catch { /* the store's checkpoint stands */ }
+    },
+  };
 }
 
 // A writer whose prefix is not the binding's writer prefix is a lane controller.
@@ -417,6 +456,47 @@ function answer(args, context, deps, answerState) {
   return { ...writeResult('parent', context.binding.parent_issue, result, writer), finding: args.finding, state: answerState, attention: state.attentionLine(result.doc.attention) };
 }
 
+const STATE_BLOCK = Object.freeze({ kind: 'branch', branch: state.STATE_BRANCH, path: state.STATE_PATH });
+
+// What migrate-state would write: the parent and every catalogued child the private store holds, each
+// as its public view, digest and sidecar. Any document that is not public-safe, or has an intent not
+// yet settled, is a problem that stops the apply.
+function migrationPlan(context) {
+  const parentDoc = readParent(context);
+  const docs = [['parent', parentDoc.parent_issue, parentDoc],
+    ...parentDoc.outcomes.map(outcome => ['child', outcome.issue, context.store.read('child', outcome.issue).doc]).filter(([, , doc]) => doc)];
+  const sidecarDir = name => `${context.binding.store.path}private/${name}`;
+  const problems = [];
+  const documents = docs.map(([kind, number, doc]) => {
+    const name = state.documentName(kind, number);
+    if (doc.pending_effects.length) problems.push(`${name} has ${doc.pending_effects.length} intent(s) not yet settled; run reconcile --apply --controller first`);
+    let view = null;
+    try { view = state.publicView(kind, doc); } catch (error) { problems.push(`${name}: ${error.message}`); }
+    const text = view ? state.canonicalText(view) : null;
+    const sha256 = text ? state.sha256(text) : null;
+    return { kind, number, name, doc, view, text, sha256, revision: doc.revision, sidecar: sha256 ? `${sidecarDir(name)}/r${doc.revision}-${sha256.slice(0, 16)}.json` : null };
+  });
+  const digest = state.sha256(documents.map(entry => `${entry.name}:${entry.revision}:${entry.sha256 || 'invalid'}`).sort().join('\n'));
+  const branch = context.transport.request('GET', `repos/${context.repository}/branches/${encodeURIComponent(state.STATE_BRANCH)}`);
+  return { parentDoc, documents, problems, digest, branchExists: branch.status === 200 };
+}
+
+// The owner's typed yes, read from this terminal. Without a terminal (a pipe, an agent's shell) the
+// question is never asked and nothing is written.
+function askTyped(question, deps = {}) {
+  if (deps.ask) return deps.ask(question);
+  if (!process.stdin.isTTY) throw new ProgrammeError('NOT_CONFIRMED', 'This step needs the owner\'s typed yes in a terminal; run it yourself there. Nothing was written.');
+  process.stderr.write(question);
+  const buffer = Buffer.alloc(256);
+  let text = '';
+  while (!text.includes('\n')) {
+    const read = fs.readSync(0, buffer, 0, buffer.length, null);
+    if (!read) break;
+    text += buffer.toString('utf8', 0, read);
+  }
+  return text.trim();
+}
+
 function redact(doc) {
   const copy = JSON.parse(JSON.stringify(doc));
   copy.private = Object.keys(copy.private || {}).length ? '(redacted; --include-private shows it)' : {};
@@ -473,7 +553,12 @@ function liveHead(context, child) {
 
 const commands = {
   reconcile(args, context) {
-    if (args.apply) requireParentHolder(context, readParent(context));
+    if (args.apply) {
+      const parentDoc = readParent(context);
+      // refresh writes as the holder by its stored hash; any other apply needs the holder's own session.
+      if (context.writer?.by_hash !== true) requireParentHolder(context, parentDoc);
+      else if (!state.isHolder(parentDoc, context.writer)) throw new ProgrammeError('STALE_WRITER', state.parentRefusal(parentDoc));
+    }
     if (args.apply && args['parent-file']) throw usage('--parent-file is for dry runs only.');
     const reconciler = new state.Reconciler({
       store: context.store,
@@ -497,7 +582,8 @@ const commands = {
     if (!session || prefix !== context.binding.writer_prefix) {
       throw new ProgrammeError('PARENT_UNHELD', `The parent document of #${context.binding.parent_issue} has no controller holding it, so there is no one to refresh for. Nothing changed; report this to the controller.`);
     }
-    context.writer = { session, prefix };
+    // Only the hash of the holder's session: enough to write as it, never to decide for it.
+    context.writer = state.refreshWriter(parentDoc);
     const inventory = runInventory(context, parentDoc, deps, args['deadline-ms']);
     const report = commands.reconcile({ ...args, apply: true, inventory }, context);
     cacheAttention(context, context.store.read('parent', context.binding.parent_issue).doc, inventory.complete, deps);
@@ -519,6 +605,39 @@ const commands = {
     const open = state.openFindings(parentDoc.attention).map(entry => ({ id: entry.id, state: entry.state, source: entry.source, code: entry.code, issue: entry.issue, head: entry.head,
       first_seen: entry.first_seen, changed_at: entry.changed_at, next_action: state.FINDING_CODES[entry.code].next_action }));
     return { repository: context.repository, parent_issue: parentDoc.parent_issue, ...storedAttention(parentDoc, deps), findings: open };
+  },
+
+  // The documents in the private store, moved to the public state branch. The dry run writes nothing;
+  // the apply needs the dry run's plan digest, the parent's holder and the owner's typed yes in this
+  // run, then writes the sidecars, one orphan commit and the checkpoint, reads every document back
+  // and prints the binding change. Readers keep the private store until that change is merged.
+  'migrate-state'(args, context, deps = {}) {
+    if (context.binding.state) throw new ProgrammeError('STATE_MIGRATED', `The merged binding already names the public state branch ${state.STATE_BRANCH}; there is nothing to migrate.`);
+    const plan = migrationPlan(context);
+    const summary = { repository: context.repository, branch: state.STATE_BRANCH, path: state.STATE_PATH, plan_digest: plan.digest, branch_exists: plan.branchExists,
+      documents: plan.documents.map(({ name, revision, sha256, sidecar, view }) => ({ name, revision, public_sha256: sha256, sidecar, ...(view ? { public: view } : {}) })),
+      problems: plan.problems };
+    if (!args.apply) return { mode: 'dry-run', ...summary };
+    const writer = requireParentHolder(context, plan.parentDoc);
+    if (args['plan-digest'] !== plan.digest) throw new ProgrammeError('MIGRATION_CHANGED', `The documents changed since the dry run (plan digest ${plan.digest}, not ${args['plan-digest']}). Nothing was written; run the dry run again.`);
+    if (plan.problems.length) throw new ProgrammeError('MIGRATION_HELD', `The migration stops before anything is written: ${plan.problems[0]}${plan.problems.length > 1 ? ` (and ${plan.problems.length - 1} more; the dry run lists them)` : ''}.`);
+    if (plan.branchExists) throw new ProgrammeError('STATE_BRANCH_EXISTS', `The state branch ${state.STATE_BRANCH} already exists on ${context.repository}; nothing was replaced.`);
+    const answer = askTyped(`Create the public state branch ${state.STATE_BRANCH} on ${context.repository} with these ${plan.documents.length} document(s), and their private sidecars in ${context.binding.store.repository}? Type yes to confirm: `, deps);
+    if (String(answer || '').trim().toLowerCase() !== 'yes') throw new ProgrammeError('NOT_CONFIRMED', 'Not confirmed. Nothing was written.');
+    const target = new state.BranchStateStore({ transport: context.transport, binding: { ...context.binding, state: STATE_BLOCK }, now: deps.now, toolkitVersion: context.version, localCheckpoint: localCheckpoint(context.repository, deps) });
+    target.requirePrivateStore();
+    for (const entry of plan.documents) target.putSidecar(entry.name, entry.doc, entry.sha256);
+    const head = target.createCommit(plan.documents.map(entry => [`${state.STATE_PATH}${entry.name}.json`, entry.text]), `programme-state: migrate ${plan.documents.length} document(s) [skip ci]`, []);
+    target.checkpoint = target.readCheckpoint();
+    target.recordCheckpoint(Object.fromEntries(plan.documents.map(entry => [entry.name, { revision: entry.revision, sha256: entry.sha256 }])), head, { replace: true });
+    // Read back through the new store: every fence, epoch, hold, answer, return and finding, one to one.
+    for (const entry of plan.documents) {
+      const back = target.read(entry.kind, entry.number).doc;
+      if (!back || state.canonicalText(back) !== state.canonicalText(entry.doc)) throw new ProgrammeError('STATE_READBACK_MISMATCH', `${entry.name} did not read back from the state branch as it is in the private store.`);
+    }
+    return { mode: 'apply', ...summary, documents: summary.documents.map(({ public: _public, ...rest }) => rest), head, acting: { prefix: writer.prefix, session: writer.session },
+      binding_change: { state: STATE_BLOCK },
+      next_action: 'Owner: merge a pull request that adds this state block to .github/toolkit-programme.json; until it merges, every reader keeps the private store.' };
   },
 
   ack(args, context, deps = {}) { return answer(args, context, deps, 'acknowledged'); },
@@ -715,6 +834,7 @@ function formatReport(report) {
   if (report.holds.length) lines.push('', 'Holds', ...report.holds.map(hold => `- ${hold.code} ${hold.target}: ${hold.detail}`));
   if (report.inventory) lines.push('', `Inventory: ${report.inventory.complete ? 'complete' : `INCOMPLETE (${report.inventory.reason})`}; ${Object.entries(report.inventory.counts).map(([name, count]) => `${name} ${count}`).join(', ')}`);
   if (report.attention) lines.push('', `${report.attention} (programme.cjs attention lists them)`);
+  if (report.state_branch?.events.length) lines.push('', `State branch ${report.state_branch.branch}`, ...report.state_branch.events.map(event => `- ${event.code}: ${event.text}`));
   if (report.mode === 'apply') lines.push('', `Writes: ${report.writes.state} state, ${report.writes.github} GitHub`);
   lines.push('', `Next action: ${report.next_action}`);
   return `${lines.join('\n')}\n`;
@@ -840,6 +960,12 @@ function finish(args, deps, out, opened = null) {
   else {
     const context = opened || openContext(args, deps);
     result = commands[args.command](args, context, deps);
+    // A restore, rebuild or recompute of the public state branch is reported with any command.
+    const events = typeof context.store.stateBranch === 'function' && !result.state_branch ? context.store.stateBranch().events : [];
+    if (events.length) {
+      result = { ...result, state_branch: context.store.stateBranch() };
+      if (!args.json) for (const event of events) (deps.stderr || process.stderr).write(`State branch: ${event.code}: ${event.text}\n`);
+    }
   }
   const pass = args.command === 'reconcile' || args.command === 'refresh';
   if (args.command === 'attention') result = { ...result, ...(args.refreshed ? { refreshed: args.refreshed } : {}) };
