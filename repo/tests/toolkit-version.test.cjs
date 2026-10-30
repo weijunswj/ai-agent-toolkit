@@ -13,7 +13,7 @@ const test = require('node:test');
 const { TOOLKIT_VERSION, VERSION_REL_PATH, readToolkitVersion } = require('../scripts/toolkit-version.cjs');
 const { MANIFEST_REL_PATHS, parseArgs } = require('../scripts/bump-version.cjs');
 const {
-  CHANGELOG_REL_PATH, headingOf, heldHeadingsProblem, mergeSections, nextSkillVersion, nextVersion, topChangelogVersion,
+  CHANGELOG_REL_PATH, changelogHeadings, headingOf, heldHeadingsProblem, mergeSections, nextSkillVersion, nextVersion, topChangelogVersion,
   unreleasedProblems, versionProblems,
 } = require('../scripts/toolkit-version-at-merge.cjs');
 
@@ -283,7 +283,7 @@ test('--next folds an older "## Unreleased" section with the fragments', (t) => 
   const next = nextVersion(TOOLKIT_VERSION, 'patch');
   const folded = lane.read(CHANGELOG_REL_PATH);
   assert.ok(folded.includes(`## ${next} (lane work)\n\n### Lane\n\n- **A change:** what it does.\n\n### Older lane\n\n- **Old way:** a note.\n\n## ${TOOLKIT_VERSION}`), folded.slice(0, 600));
-  assert.equal(folded.includes('## Unreleased'), false);
+  assert.equal(changelogHeadings(folded).some((heading) => heading.startsWith('## Unreleased')), false, 'no Unreleased heading is left');
   lane.commit('bump');
   assert.deepEqual(versionProblems({ workspace: lane.copy, base: 'base' }), []);
 });
@@ -372,7 +372,7 @@ test('a base that already holds "## Unreleased" folds with the lane at merge', (
   const next = nextVersion(TOOLKIT_VERSION, 'patch');
   const folded = lane.read(CHANGELOG_REL_PATH);
   assert.ok(folded.includes(`## ${next} (lane work; other work; older lane)\n\n### Lane\n\n- **A change:** what it does.\n- **Other:** more.\n- **Old way:** a note.\n\n## ${TOOLKIT_VERSION}`), folded.slice(0, 600));
-  assert.equal(folded.includes('Unreleased'), false);
+  assert.equal(changelogHeadings(folded).some((heading) => heading.startsWith('## Unreleased')), false, 'no Unreleased heading is left');
   assert.equal(folded.includes('\uFEFF'), false, 'the byte order mark is dropped');
   lane.commit('bump');
   assert.deepEqual(versionProblems({ workspace: lane.copy, base: 'main' }), [], 'the bumped lane passes against a base with Unreleased');
