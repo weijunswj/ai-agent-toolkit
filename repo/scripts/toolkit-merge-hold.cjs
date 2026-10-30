@@ -300,6 +300,24 @@ function wordsOf(text) {
   return [...String(text).matchAll(/"((?:[^"\\]|\\.)*)"|'([^']*)'|(\S+)/g)].map(match => match[1] ?? match[2] ?? match[3]);
 }
 
+// A variable a command segment assigns a literal to, as [name, value]: PowerShell `$name = 'value'`
+// or POSIX `name=value`. Names are compared without case. Anything else is null.
+function assignmentOf(words) {
+  if (words.length === 3 && /^\$[A-Za-z_][A-Za-z0-9_]*$/.test(words[0]) && words[1] === '=') return [words[0].slice(1).toLowerCase(), words[2]];
+  const posix = words.length === 1 ? /^([A-Za-z_][A-Za-z0-9_]*)=(?:"([^"$`]*)"|'([^']*)'|([^\s"'$`]*))$/.exec(words[0]) : null;
+  return posix ? [posix[1].toLowerCase(), posix[2] ?? posix[3] ?? posix[4]] : null;
+}
+
+const HOME_VARIABLE = /^(?:\$env:USERPROFILE|\$env:HOME|\$HOME|\$\{HOME\}|%USERPROFILE%)(?=$|[\\/])/i;
+
+// A folder word as the shell would read it: a whole-word variable the same command assigned earlier,
+// and a leading home variable as `~` (shellPath resolves it).
+function folderWord(word, variables) {
+  const name = /^\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))$/.exec(word);
+  const value = name && variables.has((name[1] || name[2]).toLowerCase()) ? variables.get((name[1] || name[2]).toLowerCase()) : word;
+  return String(value).replace(HOME_VARIABLE, '~');
+}
+
 // The value of a flag in a command's words ("--repo x", "--repo=x", "-R x").
 function flagValue(words, names) {
   for (let index = 0; index < words.length; index += 1) {
@@ -338,8 +356,10 @@ function hasRef(common, ref) {
   try { return fs.readFileSync(path.join(common, 'packed-refs'), 'utf8').split('\n').some(line => line.endsWith(` ${ref}`)); } catch { return false; }
 }
 
-// { default, current, store } for a push from `cwd` to `remote`, or null outside a repository.
-function pushTarget(cwd, remote) {
+// { default, current, store } for a push from `cwd` to `remote`, or null outside a repository. A store
+// is an evidence store: by its remote's name (TRANSPORT-*), or, for a push to origin, a repository the
+// governance state names one (rule S1).
+function pushTarget(cwd, remote, registryOptions = {}) {
   let root;
   try { root = governance.findGitRoot(cwd); } catch { root = null; }
   if (!root) return null;
@@ -357,13 +377,21 @@ function pushTarget(cwd, remote) {
     try { defaultBranch = (/^ref:\s*refs\/remotes\/[^/]+\/(.+)$/m.exec(fs.readFileSync(path.join(dirs.common, 'refs', 'remotes', remoteName, 'HEAD'), 'utf8')) || [])[1] || null; } catch { defaultBranch = null; }
     if (!defaultBranch) defaultBranch = ['main', 'master'].find(name => hasRef(dirs.common, `refs/remotes/${remoteName}/${name}`)) || null;
   } else defaultBranch = ['main', 'master'].find(name => hasRef(dirs.common, `refs/remotes/origin/${name}`)) || null;
-  return { default: defaultBranch, current, store: /TRANSPORT-[^/\s]*?(?:\.git)?\/?$/i.test(String(url || '')) };
+  const named = /TRANSPORT-[^/\s]*?(?:\.git)?\/?$/i.test(String(url || ''));
+  return { default: defaultBranch, current, store: named || (remoteName === 'origin' && evidenceStoreAt(root, registryOptions)) };
+}
+
+// Whether the governance state names the repository at `root` an evidence store (rule S1). A state
+// that cannot be read is not one.
+function evidenceStoreAt(root, registryOptions = {}) {
+  try { return governance.governanceState(root, registryOptions).rule === 'S1'; } catch { return false; }
 }
 
 const PUSH_VALUE_OPTIONS = new Set(['--repo', '--receive-pack', '--exec', '-o', '--push-option', '--signed']);
 
-// The refusal for a git push in one segment, or ''.
-function pushRefusal(words, cwd) {
+// The refusal for a git push in one segment, or ''. `variables` holds what earlier segments of the
+// same command assigned (assignmentOf).
+function pushRefusal(words, cwd, { registryOptions = {}, variables = new Map() } = {}) {
   let index = 0;
   let root = cwd;
   while (index < words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[index])) index += 1;
@@ -371,7 +399,7 @@ function pushRefusal(words, cwd) {
   index += 1;
   while (index < words.length && words[index].startsWith('-')) {
     const option = words[index];
-    if (option === '-C' && index + 1 < words.length) root = shellPath(root, words[index + 1]);
+    if (option === '-C' && index + 1 < words.length) root = shellPath(root, folderWord(words[index + 1], variables));
     index += GIT_VALUE_OPTIONS.has(option) ? 2 : 1;
   }
   if (words[index] !== 'push') return '';
@@ -385,7 +413,7 @@ function pushRefusal(words, cwd) {
     if (!word.startsWith('-')) positional.push(word);
   }
   const remote = positional[0] || 'origin';
-  const target = pushTarget(root, remote);
+  const target = pushTarget(root, remote, registryOptions);
   if (!target || target.store || !target.default) return '';
   const refspecs = positional.slice(1);
   const branchOf = (name) => {
@@ -555,7 +583,7 @@ function judge(merge, approvals) {
 
 // A refusal for a shell command that could make an approval without the user, or merges outside
 // what an approval can allow; '' when there is none.
-function shellRefusal(text, cwd) {
+function shellRefusal(text, cwd, registryOptions = {}) {
   if (STATE_WORDS.test(text)) return refuse('Toolkit\'s user-state files (merge approvals and governance decisions) and its session variable must be read and changed only by Toolkit itself. Never act as the user.');
   if (HOOK_FEED.test(text) && FEED_WORDS.test(text)) return refuse('a merge approval must come from the user\'s own typed message, so commands that load Toolkit\'s hook scripts or feed them a prompt are refused.');
   const parts = segments(text);
@@ -576,9 +604,12 @@ function shellRefusal(text, cwd) {
     }
   }
   let root = cwd;
+  const variables = new Map();
   for (const words of parts) {
-    if (/^(?:cd|pushd|chdir|set-location|sl)$/i.test(words[0]) && words.length >= 2) { root = shellPath(root || process.cwd(), words[words.length - 1]); continue; }
-    const reason = pushRefusal(words, root || process.cwd());
+    const assigned = assignmentOf(words);
+    if (assigned) { variables.set(assigned[0], assigned[1]); continue; }
+    if (/^(?:cd|pushd|chdir|set-location|sl)$/i.test(words[0]) && words.length >= 2) { root = shellPath(root || process.cwd(), folderWord(words[words.length - 1], variables)); continue; }
+    const reason = pushRefusal(words, root || process.cwd(), { registryOptions, variables });
     if (reason) return refuse(reason);
   }
   return '';
@@ -601,7 +632,7 @@ function decide(input, { registryOptions = {}, now, environment = process.env } 
     // shared reader), so a quoted program path such as `C:\Program Files\GitHub CLI\gh.exe` cannot
     // hide a merge. A merge both readings find counts once.
     const joined = call.joinedWords && call.joinedWords !== call.text ? call.joinedWords.replace(/[\\`^]\r?\n/g, ' ') : '';
-    const refusal = shellRefusal(joined ? `${text}\n${joined}` : text, cwd);
+    const refusal = shellRefusal(joined ? `${text}\n${joined}` : text, cwd, registryOptions);
     if (refusal) return refusal;
     merges = shellMerges(text, cwd, environment || {});
     if (joined) {

@@ -153,9 +153,14 @@ function answerCommand(text) {
 }
 const USER_STATE_PATH = /[\\/]\.ai-agent-toolkit[\\/]user-state(?:[\\/]|$)/i;
 // In a held repository every tool is refused but these: ToolSearch only loads tool definitions (the
-// card's among them), and AskUserQuestion runs only as Toolkit's card (ToolGate).
-const ALWAYS_TOOLS = /^ToolSearch$/;
+// card's among them), and AskUserQuestion runs only as Toolkit's card (ToolGate). A Claude Projects
+// thread can reach the owner only through its posting tools, which post text in the thread and change
+// nothing on the computer or in any repository, so the thread can still ask the question; its decision
+// cards stay held, so a card never stands in for the owner's typed answer.
+const ALWAYS_TOOLS = /^(?:ToolSearch|mcp__hearthbot__(?:post_message|react|update_progress_checklist|no_reply_needed))$/;
 const PICKER_TOOL = 'AskUserQuestion';
+// States that are never governed: an evidence store (S1) and a scratch clone (R1s).
+const NEVER_GOVERNED = Object.freeze(['S1', 'R1s']);
 const EDIT_TOOLS = /^(?:Edit|Write|MultiEdit|NotebookEdit|apply_patch)$/;
 const { SHELL_TOOLS, ShellCall, shellPath } = require('./toolkit-shell-call.cjs');
 // Tools that schedule a prompt for the session itself.
@@ -211,6 +216,8 @@ class GovernanceGate {
 // is not the decided state.
 function writeGovernanceDecision(cwd, command, { registryOptions = {}, registry = require('./toolkit-capability-registry.cjs'), now } = {}) {
   if (!['enable', 'disable', 'decline'].includes(command)) throw new GovernanceGateError('UNKNOWN_COMMAND');
+  // An evidence store or a scratch clone is never governed, so "enable" is never recorded for one.
+  if (command === 'enable' && NEVER_GOVERNED.includes(new GovernanceGate({ registryOptions, now }).evaluate(cwd).state.rule)) throw new GovernanceGateError('NOT_GOVERNABLE');
   const status = registry.getRepositoryStatus({ cwd, ...registryOptions });
   if (status.actionable) throw new GovernanceGateError('REGISTRY_UNAVAILABLE');
   const current = status.capabilities[CAPABILITY].state;
@@ -1590,6 +1597,8 @@ function programmeLines(state, registryOptions = {}, deps = {}) {
 }
 
 function decidedLine(state) {
+  if (state.rule === 'S1') return "Toolkit governance: DISABLED here: this repository is an evidence store (agent-managed, not governed). Follow the global rules; the evidence-store rules in the governed repository's AGENTS.md apply.";
+  if (state.rule === 'R1s') return "Toolkit governance: DISABLED here: this repository is a scratch clone in another repository's ignored .tmp folder (not governed). Follow the global rules, coding gates included.";
   if (state.rule === 'R1') return 'Toolkit governance: DISABLED automatically (this folder is not a git repository, so there is no GitHub governance). Follow the global rules, coding gates included.';
   if (state.rule === 'R8') return `Toolkit governance: DISABLED for this repository (not on github.com: it ${whereText(state)}; the user said ok). Follow the global rules, coding gates included; any TOOLKIT-GOVERNED-RULES block in AGENTS.md does not apply.`;
   if (state.state === 'ERROR') return 'Toolkit governance: ERROR for this repository (the programme binding merged on the default branch cannot be used). Follow the global rules, coding gates included; ordinary work continues, but programme records, gate admission and finality hold until a pull request fixes the binding. Never treat this as ENABLED or as DISABLED.';

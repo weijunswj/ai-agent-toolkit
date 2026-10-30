@@ -32,7 +32,15 @@
 //     M1 merged binding enabled (v2, or v1)         ENABLED        on every computer; a local "no" is only a
 //                                                                  suggestion preference
 //   github.com, nothing merged for this repository (none, a fork's, or not read yet):
-//     R2 U declined or disabled                     DISABLED       not asked again on this computer
+//     S1 an evidence store                          DISABLED       never held or asked: a merged binding in
+//                                                                  this computer's cache names it as its store,
+//                                                                  or it is named TRANSPORT-* under the owner of
+//                                                                  such a binding's repository; U is ignored
+//     R1s a scratch clone                           DISABLED       never held or asked: a clone of another
+//                                                                  repository inside the ignored top-level .tmp/
+//                                                                  folder of a repository that is ENABLED or
+//                                                                  DISABLED; U is ignored
+//     R2 U declined or disabled                    DISABLED       not asked again on this computer
 //     R5 U enabled                                  ENABLED        not held; materials incomplete until the
 //                                                                  setup PR with the binding merges
 //     R7 U not recorded                             UNDECIDED      held until the owner's own reply
@@ -411,6 +419,67 @@ function readNotGitHubOk(key, options = {}) {
   return Object.hasOwn(entries, key) && entries[key] !== null && typeof entries[key] === 'object';
 }
 
+// ---- evidence stores and scratch clones -------------------------------------------------------
+
+// An evidence store by name: `TRANSPORT-<name>`, as the attribution guard and merge hold read it.
+const STORE_NAME = /^transport-[\w.-]+$/i;
+const SCRATCH_FOLDER = '.tmp';
+const SCRATCH_IGNORE_LINES = Object.freeze(['.tmp', '.tmp/', '/.tmp', '/.tmp/']);
+const GITIGNORE_READ_LIMIT = 1024 * 1024;
+const storeScans = new Map();
+
+// The evidence stores this computer's merged bindings name: { stores, owners }, lowercase sets of
+// "owner/name" store repositories and of the owners of the repositories whose bindings name them.
+// Only valid, enabled bindings with a github store count, and a damaged cache file is skipped.
+// Read once per process for each state of the cache folder.
+function evidenceStoreRepositories(options = {}, now = new Date()) {
+  const registryPath = registryPathFor(options);
+  let stamp = 'none';
+  try { stamp = String(fs.statSync(bindingCache.cacheDirFor(registryPath)).mtimeMs); } catch { stamp = 'none'; }
+  const known = storeScans.get(registryPath);
+  if (known && known.stamp === stamp) return known.scan;
+  const stores = new Set();
+  const owners = new Set();
+  for (const { identity, entry } of bindingCache.readAllBindingCaches(registryPath)) {
+    const judged = judgeMerged(entry, identity, now);
+    if (judged.status !== 'enabled' || !judged.binding.store || judged.binding.store.kind !== 'github') continue;
+    stores.add(judged.binding.store.repository.toLowerCase());
+    owners.add(judged.binding.repository.split('/')[0].toLowerCase());
+  }
+  const scan = Object.freeze({ stores, owners });
+  storeScans.set(registryPath, { stamp, scan });
+  return scan;
+}
+
+// 'evidence-store' when a cached binding names this repository as its evidence store,
+// 'evidence-store-by-name' for a `TRANSPORT-*` repository under the owner of a cached binding's
+// repository, else null.
+function evidenceStoreOf(identity, scan) {
+  const slug = remoteSlug(identity && identity.remote);
+  if (!slug || !scan) return null;
+  const lower = slug.toLowerCase();
+  if (scan.stores.has(lower)) return 'evidence-store';
+  const [owner, name] = lower.split('/');
+  return STORE_NAME.test(name) && scan.owners.has(owner) ? 'evidence-store-by-name' : null;
+}
+
+// Whether the parent repository's root .gitignore ignores the top-level scratch folder, by an exact
+// line (no git check-ignore).
+function ignoresScratch(parentRoot) {
+  let bytes;
+  try { bytes = readSmallFile(path.join(parentRoot, '.gitignore'), GITIGNORE_READ_LIMIT, 'GITIGNORE_TOO_LARGE'); } catch { return false; }
+  if (!bytes) return false;
+  return bytes.toString('utf8').replace(/^﻿/, '').split(/\r?\n/).some(line => SCRATCH_IGNORE_LINES.includes(line.trim()));
+}
+
+// The git root of the repository that holds `root` in its ignored top-level `.tmp/` folder, or null.
+function scratchParentOf(root) {
+  const parent = findGitRootQuietly(path.dirname(root));
+  if (!parent) return null;
+  const inside = path.relative(parent, root).split(path.sep);
+  return inside.length >= 2 && inside[0] === SCRATCH_FOLDER && ignoresScratch(parent) ? parent : null;
+}
+
 // ---- derivation -------------------------------------------------------------------------------
 
 function result(fields) {
@@ -470,23 +539,26 @@ function judgeMerged(entry, identity, now) {
 }
 
 class GovernanceState {
-  #readIdentity; #readMaterials; #readDecision; #readOk; #readMerged; #now;
+  #readIdentity; #readMaterials; #readDecision; #readOk; #readMerged; #readStores; #now;
 
   // Readers are injectable so the derivation can be tested on its own; the defaults read the
   // real repository, the real user-state files and this computer's cache of the merged binding.
-  constructor({ identityReader = readIdentity, materialsReader = readMaterials, decisionReader = readDecision, okReader = readNotGitHubOk, mergedReader = null, registryOptions = {}, now = () => new Date() } = {}) {
+  constructor({ identityReader = readIdentity, materialsReader = readMaterials, decisionReader = readDecision, okReader = readNotGitHubOk, mergedReader = null, storeReader = null, registryOptions = {}, now = () => new Date() } = {}) {
     this.#readIdentity = identityReader;
     this.#readMaterials = materialsReader;
     this.#readDecision = (identity) => decisionReader(identity.repository_id, registryOptions, identity.legacy_repository_ids || []);
     this.#readOk = key => okReader(key, registryOptions);
     this.#readMerged = mergedReader || (identity => bindingCache.readBindingCache(identity, registryPathFor(registryOptions)));
+    this.#readStores = storeReader || (() => evidenceStoreRepositories(registryOptions, now()));
     this.#now = now;
   }
 
   // The pure rule table over already-read inputs. `ok` is whether the user said ok to GitHub
   // governance being off (read only for a repository that is not on GitHub); `merged` is
   // judgeMerged's view of the default-branch binding (read only for a github.com repository).
-  static derive({ identity, materials, decision, ok = false, merged = { status: 'unknown', fresh: false } }) {
+  // `store` is evidenceStoreOf's answer and `scratch` whether the repository is a clone of another
+  // repository in a decided repository's ignored `.tmp/` folder (both read only for github.com).
+  static derive({ identity, materials, decision, ok = false, merged = { status: 'unknown', fresh: false }, store = null, scratch = false }) {
     const base = { root: identity.root, repository_id: identity.repository_id, persistable: true, recorded_decision: decision.state, legacy_key: decision.legacy_key === true, materials };
     const notGitHub = notGitHubOf(identity);
     if (notGitHub) {
@@ -506,6 +578,14 @@ class GovernanceState {
       if (!view.fresh) notes.push('merged-binding-stale');
       return result({ ...withMerged, state: 'ENABLED', rule: 'M1', reason: 'repository-enabled', materials_complete: true, merged_binding_valid: true, notes });
     }
+    // An evidence store, or a scratch clone, is never governed and never asked; a decision recorded
+    // for it decides nothing (a stored "enable" is shown so the owner can clear it).
+    if (store || scratch) {
+      const notes = decision.state === 'enabled' ? ['stored-decision-ignored'] : [];
+      return store
+        ? result({ ...withMerged, state: 'DISABLED', rule: 'S1', reason: store, notes })
+        : result({ ...withMerged, state: 'DISABLED', rule: 'R1s', reason: 'scratch-clone', notes });
+    }
     // No merged binding (none, a fork's, or nothing read yet): this computer's answer decides.
     const notes = [];
     if (merged.status === 'foreign') notes.push('binding-belongs-to-other-repository');
@@ -516,7 +596,7 @@ class GovernanceState {
     return result({ ...withMerged, state: 'UNDECIDED', rule: 'R7', reason: 'no-decision', notes });
   }
 
-  evaluate(cwd) {
+  evaluate(cwd, depth = 0) {
     let identity;
     try {
       identity = this.#readIdentity(cwd);
@@ -553,14 +633,34 @@ class GovernanceState {
       return result({ ...partial, state: 'UNDECIDED', rule: 'ERROR', reason: 'materials-unreadable', error_code: codeOf(error), recorded_decision: decision.state });
     }
     let merged = { status: 'unknown', fresh: false };
+    let store = null;
+    let scratch = false;
     if (!notGitHubOf(identity)) {
       let entry = null;
       try { entry = this.#readMerged(identity); } catch { entry = null; }
       merged = judgeMerged(entry, identity, this.#now());
+      if (!['invalid', 'disabled', 'enabled'].includes(merged.status)) {
+        try { store = evidenceStoreOf(identity, this.#readStores()); } catch { store = null; }
+        if (!store) scratch = this.#scratchClone(identity, depth);
+      }
     }
-    return GovernanceState.derive({ identity, materials, decision, ok, merged });
+    return GovernanceState.derive({ identity, materials, decision, ok, merged, store, scratch });
+  }
+
+  // Whether `identity` is a clone of a different repository inside the ignored top-level `.tmp/`
+  // folder of a repository whose own state is decided (ENABLED or DISABLED). A worktree of the
+  // parent itself has the parent's identity and keeps the parent's state.
+  #scratchClone(identity, depth) {
+    if (depth >= SCRATCH_DEPTH_LIMIT) return false;
+    const parent = scratchParentOf(identity.root);
+    if (!parent) return false;
+    const outer = this.evaluate(parent, depth + 1);
+    return ['ENABLED', 'DISABLED'].includes(outer.state) && outer.repository_id !== identity.repository_id;
   }
 }
+
+// How many enclosing repositories a scratch-clone check reads at most.
+const SCRATCH_DEPTH_LIMIT = 4;
 
 const EMPTY_MATERIALS = Object.freeze({ governed_block: Object.freeze({ present: false }), binding: Object.freeze({ present: false, valid: false, problems: [] }), legacy_binding_file: false });
 
@@ -650,6 +750,8 @@ module.exports = Object.freeze({
   NOT_GITHUB_SCHEMA,
   localRepositoryId,
   readNotGitHubOk,
+  evidenceStoreRepositories,
+  evidenceStoreOf,
   GOVERNANCE_CAPABILITY,
   GOVERNED_BLOCK,
   LEGACY_GOVERNED_BLOCK,
