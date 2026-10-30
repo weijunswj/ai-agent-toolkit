@@ -188,15 +188,16 @@ test('Projects keeps its Toolkit base layer current without touching the project
   // Posts, in the main project chat, reply threads and work threads alike.
   assert.match(text, /\*\*Posts, everywhere you post\*\* \(the main project chat, reply threads and work threads alike\): after the owner's last message, keep all your output in one running post and edit it, appending each new result, PR or question and keeping every earlier detail\. The running post is always your newest top-level post, the acknowledgement posted with a new thread included\. Before every edit, check whether the owner has written since that post \(in the main project chat, or in a work thread, in that thread\); if so, post fresh instead\. Start each appended update with its local time, for example \*\*\[16:41\] Update:\*\*\. Also start a fresh post when the running post nears about 8 KB; an owner reply under the running post does not start one, and the answer to it is appended to the running post\. Answer a burst of owner messages in one post\. When the owner replies under one of your earlier posts in the main project chat, answer in the main project chat \(you cannot post under your own posts there\) with a fresh post starting "Re: your reply on <short topic>", and never edit the older post\./);
   assert.doesNotMatch(text + body, /is always a new post|edit your own post only/);
-  // Running post id in memory, enforced by the post hook, and links on owner items.
-  assert.ok(text.includes('save its message id as the first line of project memory, `RUNNING POST: <message id>`'));
-  assert.ok(text.includes('it refuses a fresh post while the owner has not written since your newest post, unless that post nears 8 KB'));
+  // The running post is found in the chat, not in memory, and no hook checks posts.
+  assert.ok(text.includes('Before every post, read the newest page of the project chat (in a work thread, that thread). If your newest top-level post there has no owner message after it, edit that post; otherwise post fresh.'));
+  assert.ok(text.includes('These are written rules: no hook checks posts'));
+  assert.doesNotMatch(text, /RUNNING POST|A Toolkit hook enforces|The same hook/);
   assert.ok(text.includes('only when it is ready for the owner to check and merge; until then, link the chat thread that owns the work'));
   // Links only where the owner acts, as the owner decided; a written rule, no hook checks it.
   assert.ok(text.includes('**Link where the owner acts.** Every item under **Waiting on you** (each question and each merge ask included) carries the link'));
   assert.ok(text.includes('A PR, thread or file named elsewhere needs no link. This is a written rule: no hook checks it.'));
   assert.doesNotMatch(text, /Link everything worth opening|names "PR <n>" without a link|not from the link rule/);
-  // The post layout and the merge summary, also enforced by the post hook.
+  // The post layout and the merge summary.
   assert.ok(text.includes('**Post layout.** A running post has four parts, in order: a **Now:** line'));
   assert.ok(text.includes('one **ELI5:** line, matched to the Now line, as the very last line with nothing after it'));
   assert.ok(text.includes('one **[HH:MM] Update:** line per update, each followed by a line holding only `&nbsp;` as a spacer'));
@@ -207,14 +208,9 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.ok(text.includes('The next numbered item follows the last choice directly, with no spacer line.'));
   assert.equal((text.match(/&nbsp;/g) || []).length, 1, 'only the Update log lines take an &nbsp; spacer');
   assert.ok(text.includes('Choices need no link of their own. Never write a question outside that list: no bare **Question:** label, bulleted question or question in an Update line, and never flatten its choices into plain bullets.'));
-  assert.ok(text.includes('the question guard (a line starting `**Question:` anywhere but as a numbered item under a line that is exactly `**Waiting on you (n):**`, or a choice left unindented after it, is refused)'));
-  assert.ok(text.includes('refuses any edit of a post the owner has written after (post fresh instead)'));
-  // The hook cannot read the chat, so it uses the session's own reads of it and counts queued owner messages.
-  assert.ok(text.includes('after a project chat read that reaches the last page, a newest top-level post of yours (one an earlier session wrote included) is the post to edit'));
-  assert.ok(text.includes('Owner messages that arrive while a turn runs count as soon as they are queued.'));
   assert.doesNotMatch(text, /put at most one \*\*Question:\*\* in a post|Use decision cards for questions, else group/);
-  assert.ok(text.includes('an edit keeps every earlier Update line word for word and adds at least one new one'));
-  // The merge-summary rule binds without a hook: the post hook no longer reads merges.
+  assert.ok(text.includes('An edit keeps every earlier Update line word for word and adds at least one new one.'));
+  // The merge-summary rule binds without a hook.
   assert.ok(text.includes('post a short summary of the merge\'s external effects'));
   assert.ok(!text.includes('the post hook refuses a PR merge'));
   assert.ok(!text.includes('It reads only the command text, so it is a tripwire, not a guarantee'));

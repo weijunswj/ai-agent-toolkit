@@ -7,7 +7,7 @@ Use this before adding a Toolkit hook, adding a rule inside an existing hook, or
 A hook is allowed only for one of these:
 
 - An effect that cannot be undone or that leaks something: a merge, a push to the default branch, a force push, a credential in what a push sends, AI attribution in a commit or pull request, an agent recording an owner-only answer.
-- A behaviour the owner named that a written rule has already failed to hold, such as the Projects running post.
+- A behaviour the owner named that a written rule has already failed to hold, and that a hook can check where it runs. A hook only acts in the host sessions that load the plugin: the Projects post hook was removed because the coordinator it was written for runs where Toolkit's hooks do not.
 
 Everything else is a written rule in a playbook, a skill or the global rules. CI stays the backstop for checks it already runs (plain-text findings, skipped commit checks, personal data).
 

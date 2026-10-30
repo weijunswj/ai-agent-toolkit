@@ -260,7 +260,6 @@ function validateInstalledEnforcement(installed, repoRoot, expectedVersion) {
     ['repo/contracts/controller-kernel/qualification-overrides-v1.json', true],
     ['repo/scripts/toolkit-local-bridge.cjs', false],
     ['repo/scripts/toolkit-claude-attribution-hook.cjs', false],
-    ['repo/scripts/toolkit-claude-project-post-hook.cjs', false],
     ['repo/scripts/toolkit-attribution-guard.cjs', false],
     ['repo/scripts/toolkit-push-check.cjs', false],
     ['skills/secure-ci-cd/scripts/secret-patterns.cjs', false],

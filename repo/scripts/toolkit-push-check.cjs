@@ -54,7 +54,7 @@ function isFolder(folder) {
 }
 
 const FOLDER_MISSING = 'Toolkit could not find the folder this push or pull request runs in, so it could not check what would be sent and refused it. If the same command creates that folder first (`git clone`, `mkdir`, `git worktree add`), run that step as its own command, then the push. Otherwise check the folder in `cd` or `git -C` (`~/...`, and on Windows `C:/...` and Git Bash `/c/...`, all work).';
-const FOLDER_UNREADABLE = 'Toolkit could not read the folder this push or pull request runs in, because it is written with a variable or a command (such as `$HOME`, `$(...)` or `$env:USERPROFILE`), so it could not check what would be sent and refused it. Write the folder out (`~/...` works), or run the command from inside that folder.';
+const FOLDER_UNREADABLE = 'Toolkit could not read the folder this push or pull request runs in, because it is written with a variable or a command the same command line does not set (such as `$(...)` or `$REPO`), so it could not check what would be sent and refused it. Write the folder out (`~/...` works), or run the command from inside that folder.';
 const FOLDER_UNCONFIRMED = 'Codex did not say which folder this command runs in, and Toolkit could not tell from the chat\'s folder what this push or pull request would send, so it refused it. Run the commit and the push as separate commands and name the branch (`git push <remote> <branch>`), or name the folder first with `git -C <full path>` or `cd <full path>`.';
 
 // An environment value by name, ignoring case on Windows as Windows does.

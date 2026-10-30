@@ -213,7 +213,7 @@ test('Git Bash drive paths in cd, git -C and file options reach every check in t
   assert.equal(attributionDecision({ tool_name: 'exec_command', cwd: session, tool_input: { cmd: 'git push --force origin feature', workdir: drive } }, quiet()).hookSpecificOutput?.permissionDecisionReason, FORCE_MESSAGE, 'a Codex workdir in Git Bash form');
 });
 
-test('a leading ~ is the home folder for every check; a folder written as a variable is refused as unreadable', (t) => {
+test('a leading ~ or home variable is the home folder for every check; a folder written as a command is refused as unreadable', (t) => {
   const support = require('./toolkit-governed-fixture-support.cjs');
   // A scratch home for this process and the hooks it starts, never the real one.
   const home = support.governedHome();
@@ -239,9 +239,13 @@ test('a leading ~ is the home folder for every check; a folder written as a vari
   t.after(() => fs.rmSync(path.join(home, 'tilde-msg.txt'), { force: true }));
   assert.equal(attributionDecision({ tool_name: 'Bash', cwd: session, tool_input: { command: 'cd ~/tilde-governed && git push --force origin main' } }, quiet()).hookSpecificOutput?.permissionDecisionReason, FORCE_MESSAGE);
   assert.equal(attributionDecision({ tool_name: 'Bash', cwd: session, tool_input: { command: 'git commit -F ~/tilde-msg.txt' } }, quiet()).hookSpecificOutput?.permissionDecisionReason, MESSAGE);
-  // Written with a variable or a command, the folder cannot be read: refused, saying so.
+  // A leading home variable reads as the home folder, as the merge hold reads it; a folder written
+  // with a command, or a variable no earlier command assigned, cannot be read: refused, saying so.
   const pushCheck = require('../scripts/toolkit-push-check.cjs');
-  for (const command of ['cd $HOME/tilde-repo && git push origin feature', 'git -C "$(pwd)/x" push', 'cd $env:USERPROFILE\\tilde-repo; git push origin feature']) {
+  for (const command of ['cd $HOME/tilde-repo && git push origin feature', 'cd $env:USERPROFILE\\tilde-repo; git push origin feature', 'd=~/tilde-repo; git -C "$d" push origin feature']) {
+    assert.match(outgoingRefusal(command, session, quiet()), /uat-config\.txt:1 \(commit [0-9a-f]{7}\)/, command);
+  }
+  for (const command of ['git -C "$(pwd)/x" push', 'git -C "$REPO" push origin feature']) {
     assert.equal(outgoingRefusal(command, session, quiet()), pushCheck.FOLDER_UNREADABLE, command);
   }
   assert.match(pushCheck.FOLDER_UNREADABLE, /could not read the folder .* variable or a command/);
