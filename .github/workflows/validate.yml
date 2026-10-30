@@ -21,7 +21,8 @@ concurrency:
 # proves from the shard summaries that each system ran every test file once with no failure. A
 # failed, cancelled or skipped shard fails it. The tests-clock-ahead job runs the test files that
 # pin a calendar date with Node's clock 400 days ahead, so a test that only passes near the date
-# it pins fails now rather than months later; validate waits for it. The personal-data job checks
+# it pins fails now rather than months later; validate waits for it. The hook-pack job runs the
+# hook test pack on Linux and Windows, and validate waits for it too. The personal-data job checks
 # every commit of the pull request or push, the commit messages, the branch name and the pull
 # request title and body for email addresses, phone numbers and WhatsApp links, and the title and
 # body for home-folder paths and AI attribution (values are never printed); validate waits for it
@@ -132,6 +133,31 @@ jobs:
       - name: Run the tests that pin a date with the clock 400 days ahead
         run: node repo/scripts/run-tests.cjs --clock-ahead --clock-offset-days 400 --temp-root "${{ runner.temp }}/tests"
 
+  hook-pack:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Run the hook pack
+        run: node repo/scripts/toolkit-hook-pack.cjs run --budget-seconds 360
+
   personal-data:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -151,7 +177,7 @@ jobs:
         run: node skills/secure-ci-cd/scripts/personal-data-guard.cjs ci
 
   validate:
-    needs: [tests-linux, tests-windows, tests-clock-ahead, personal-data]
+    needs: [tests-linux, tests-windows, tests-clock-ahead, hook-pack, personal-data]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -185,6 +211,7 @@ jobs:
         env:
           DIFF_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
           TEST_LEGS: ${{ toJSON(needs) }}
+          PR_BODY: ${{ github.event.pull_request.body }}
         run: |
           node repo/scripts/sync-repo-doc-contract.cjs --check
           node repo/scripts/sync-agent-instruction-shims.cjs --check
@@ -197,4 +224,5 @@ jobs:
           node repo/scripts/generate-n8n-stack-launcher-flow.cjs --check
           node repo/scripts/check-diff-whitespace.cjs
           node repo/scripts/check-test-durations.cjs --ci
+          node repo/scripts/toolkit-hook-pack.cjs check-expectations
           node repo/scripts/run-tests.cjs --verify-ci "$RUNNER_TEMP/test-summaries"
