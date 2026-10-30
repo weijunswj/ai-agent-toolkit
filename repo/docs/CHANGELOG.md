@@ -1,11 +1,18 @@
 # Toolkit Changelog
 
-## 3.19.15 (see one key's value yourself, and env commands you can paste)
+## 3.19.16 (see one key's value yourself, and env commands you can paste)
 
 - **New:** `toolkit env show NAME` shows one stored value in a PowerShell window you opened yourself, after you type the key's name again; `show NAME --copy` puts it on the clipboard instead, marked so Windows clipboard history and sync skip it where Windows honours that. It refuses, before reading the store, in a shell an agent or an app's built-in terminal started, when it is not on a terminal (a pipe or a file), and on a wrong retype. There is no way to show every value, and nothing about it is recorded. The `toolkit-env` skill tells agents never to run it.
 - **Fixed:** messages that told you to "run toolkit env apply" (or `edit`, `remove`, `connect` and the rest) named a command your terminal does not know. In your own terminal they now give the full PowerShell line, `node "$env:USERPROFILE\...\toolkit-env.cjs" apply`; agents still see the short name. The edit file's header gives the same line for `apply` and `remove`, and an edit file made by an earlier version still applies without its old header being kept as your comment.
 - **Fixed:** with two edit files open, `apply` said to apply each, which it never could. It now says to close Notepad and wait 30 minutes for the old files to be deleted, then edit again.
 - **Safer apply:** a value typed in quotes (`NAME="abc"`) was saved with its quotes; it is now refused by line number, with nothing saved. An edit file saved as UTF-16 now gets one plain message to save it as UTF-8, instead of a problem on every line. The header says spaces around a value are dropped. New tests cover values containing `=`, a byte order mark before the first key, and the edit file being overwritten with zeros before it is deleted.
+
+## 3.19.15 (CI runs the tests that pin a date a year ahead)
+
+- **New CI check:** the Validate workflow has a `tests-clock-ahead` job. It runs every test file that pins a calendar date (an ISO date literal or `Date.UTC(`, in the file or in a test helper it loads) with Node's clock 400 days ahead, so a test that pins a date but lets the code read the real clock fails on its pull request instead of turning `main` red weeks later. The `validate` job waits for it. Locally, `node repo/scripts/run-tests.cjs --clock-ahead` runs the same check, and `--clock-offset-days <n>` moves the clock for a named, `--changed` or `--all` run.
+- **Clearer CI failures:** a test shard that fails now still uploads its summary, so the `validate` job names the tests that failed instead of listing every file of that shard as not run. The shard-timing refresh reads times only from shards that passed.
+- **Fixed:** the test runner's sweep of old run folders now uses the system clock, so a test that starts a nested run with Node's clock moved can never remove a live run's folder.
+- **Tests:** seven lock tests that compared a file they had just written with Node's clock now date that file from Node's clock, so they pass with the clock moved too. The playbook for fast tests and sharding says how a test that pins a date stays correct.
 
 ## 3.19.14 (setup shows report-only rows as status lines)
 

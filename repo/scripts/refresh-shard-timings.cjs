@@ -52,7 +52,8 @@ function parseArgs(argv) {
   return options;
 }
 
-// Per-file seconds by system from run-tests.cjs summaries, keeping only discovered test files.
+// Per-file seconds by system from run-tests.cjs summaries, keeping only discovered test files. A
+// failed shard also uploads its summary; its times come from a failing run, so they are left out.
 function timingsFromSummaries(summaries, discovered) {
   const known = new Set(discovered);
   const result = Object.fromEntries(shards.SYSTEMS.map((system) => [system, {}]));
@@ -60,6 +61,7 @@ function timingsFromSummaries(summaries, discovered) {
     if (!summary || summary.schema !== shards.SUMMARY_SCHEMA || !shards.SYSTEMS.includes(summary.system) || !Array.isArray(summary.files)) {
       throw new Error(`a downloaded summary is not a ${shards.SUMMARY_SCHEMA} file`);
     }
+    if (summary.exit_code !== 0) continue;
     for (const entry of summary.files) {
       if (known.has(entry.file) && typeof entry.seconds === 'number' && Number.isFinite(entry.seconds) && entry.seconds >= 0) {
         result[summary.system][entry.file] = Math.round(entry.seconds * 10) / 10;
@@ -159,8 +161,8 @@ function command(program, args, options = {}) {
 function latestGreenRun(root, run) {
   const fields = 'databaseId,headSha,conclusion,headBranch,workflowName';
   if (run) {
-    // A named run may have failed after its shards, for example on a file over its budget. Only a
-    // shard whose tests passed uploads its summary, so every time read from it is from a passing run.
+    // A named run may have failed, for example on a file over its budget or a failed shard. Only the
+    // summaries of shards whose tests passed are read (timingsFromSummaries), so every time is from a passing run.
     const value = JSON.parse(command('gh', ['run', 'view', run, '--json', fields], { cwd: root }));
     if (!value.conclusion || value.workflowName !== 'Validate') throw new Error(`run ${run} is not a finished Validate run`);
     return value;

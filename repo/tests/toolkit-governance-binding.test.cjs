@@ -704,7 +704,9 @@ test('F8: a fetch the timeout stopped leaves no lock of its own behind; an older
     'ls-remote': ok(`ref: refs/heads/main\tHEAD\n${SHA}\tHEAD\n`),
     'rev-parse': args => (args[1] === '--git-common-dir' ? ok('.git\n') : ok(`${SHA}\n`)),
   };
-  const killed = () => { fs.writeFileSync(lock, ''); return { status: null, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) }; };
+  // The lock's time is set from Node's clock, as a real fetch's lock matches it, so this also holds
+  // when the clock-ahead run moves Node's clock but not file times.
+  const killed = () => { fs.writeFileSync(lock, ''); const now = new Date(); fs.utimesSync(lock, now, now); return { status: null, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) }; };
   assert.equal(bindingCache.readDefaultBranchBinding(root, { ...GUARDED, runGit: fakeGit({ ...base, fetch: killed }) }).error, 'fetch-failed');
   assert.equal(fs.existsSync(lock), false, 'the lock this fetch left is removed');
   fs.writeFileSync(lock, '');
