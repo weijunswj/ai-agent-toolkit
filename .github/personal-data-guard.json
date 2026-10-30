@@ -13,6 +13,10 @@
     {
       "value": "noreply@anthropic.com",
       "reason": "public no-reply address that the attribution guard tests must recognise"
+    },
+    {
+      "value": "support@github.com",
+      "reason": "Dependabot's public Signed-off-by address in its commit messages"
     }
   ],
   "not_scanned": [

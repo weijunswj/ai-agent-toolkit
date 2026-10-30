@@ -24,7 +24,9 @@ const SHA_B = 'b'.repeat(40);
 const TREE = 'e'.repeat(40);
 const GIT = 'git-for-tests';
 const controller = { session: 'controller-1', prefix: 'INT-TK421-' };
-const GOVERNED = () => ({ state: 'ENABLED', governed_rules_bind: true });
+const GOVERNED = () => ({ state: 'ENABLED', governed_rules_bind: true, programme_records_bind: true });
+// The fixture's binding as merged on the default branch: its working-tree file.
+const MERGED = root => state.loadBinding(root);
 const green = name => ({ kind: 'CheckRun', name, status: 'COMPLETED', conclusion: 'SUCCESS', required: false });
 const CATALOGUE = [
   { issue: 423, label: 'C2', class: 'COMMITTED', parent: 421, order: 1 },
@@ -60,17 +62,18 @@ function fixture({ lane = false } = {}) {
   github.addIssue(421, { body: '## CURRENT\n' });
   for (const outcome of catalogue) github.addIssue(outcome.issue, { body: `Body of ${outcome.issue}` });
   github.addPr(540, { head: SHA_A, contexts: [green('validate')], branch: 'feature' });
-  const store = new state.StateStore({ transport: github, store: binding.store, now: () => new Date(github.clock).toISOString(), toolkitVersion: '3.9.0' });
+  const fx = { now: () => new Date(github.clock).toISOString() };
+  const store = new state.StateStore({ transport: github, store: binding.store, now: fx.now, toolkitVersion: '3.9.0' });
   store.write('parent', 421, state.claimDocument(state.newParent({ repository, parentIssue: 421, outcomes: catalogue }), controller, {}), { sha: null, previous: null });
   const repoRoot = tmp();
   fs.mkdirSync(path.join(repoRoot, '.github'));
   fs.writeFileSync(path.join(repoRoot, '.github', 'toolkit-programme.json'), JSON.stringify(binding));
-  const fx = { github, binding, store, catalogue, repoRoot, sessionsDir: tmp(), spawns: [], head: SHA_A, output: '' };
+  Object.assign(fx, { github, binding, store, catalogue, repoRoot, sessionsDir: tmp(), spawns: [], head: SHA_A, output: '' });
   fx.parentDoc = () => store.read('parent', 421).doc;
   fx.child = (issue = 423) => store.read('child', issue).doc;
   fx.deps = (extra = {}) => ({
     transport: github, binding, originUrl: 'https://github.com/acme/app.git', repoRoot, toolkitVersion: '3.9.0', sessionsDir: fx.sessionsDir,
-    gitPath: GIT, run: fakeGit(fx), now: () => new Date(github.clock).toISOString(), environment: { TOOLKIT_PROGRAMME_SESSION: controller.session }, governanceState: GOVERNED,
+    gitPath: GIT, run: fakeGit(fx), now: fx.now, environment: { TOOLKIT_PROGRAMME_SESSION: controller.session }, governanceState: GOVERNED, mergedBinding: MERGED,
     stdout: { write: text => { fx.output += text; } }, ...extra,
   });
   // Runs one command; returns { result, error }. Output is JSON for every command used here.
@@ -90,11 +93,11 @@ function fixture({ lane = false } = {}) {
   };
   // An executor's turn end, as its host would run the hook.
   fx.turnEnd = (session, message = null, extra = {}) => checkpoint.runHook({ hook_event_name: 'Stop', session_id: session, last_assistant_message: message },
-    { transport: github, sessionsDir: fx.sessionsDir, gitPath: GIT, run: fakeGit(fx), now: () => new Date(github.clock).toISOString(), governanceState: GOVERNED, ...extra });
+    { transport: github, sessionsDir: fx.sessionsDir, gitPath: GIT, run: fakeGit(fx), now: fx.now, governanceState: GOVERNED, mergedBinding: MERGED, ...extra });
   fx.reconcile = () => {
     const reconciler = new state.Reconciler({
       store, reader: new state.ProgrammeGraphReader({ transport: github, repository }), mutator: new state.GitHubMutator({ transport: github, repository }),
-      binding, writer: controller, toolkitVersion: '3.9.0',
+      binding, writer: controller, toolkitVersion: '3.9.0', now: fx.now,
     });
     return reconciler.run({ apply: true });
   };
@@ -396,9 +399,13 @@ test('W10 hook failures exit 0, stay local, reach the journal on the next run an
   fx.ctrl(['assign', '--issue', '423', '--role', 'G1', '--assignment', 'g1-a1']);
   fx.run(['bind', '--issue', '423', '--assignment', 'g1-a1', '--session', 'exec-a']);
   const hash = checkpoint.sessionHash('exec-a');
-  // Store unreachable.
+  // Store unreachable: the turn is kept in the offline queue, not lost.
   const down = { request: () => ({ status: 503, json: { message: 'unavailable' } }), graphql: () => null };
-  const failed = fx.turnEnd('exec-a', null, { transport: down });
+  assert.equal(fx.turnEnd('exec-a', returnBlock('q1'), { transport: down }).outcome, 'QUEUED');
+  assert.equal(checkpoint.readQueue(hash, { sessionsDir: fx.sessionsDir, now: fx.now }).length, 1);
+  // A refusal (not an unreachable GitHub) is a failure, recorded locally.
+  const refused = { request: () => ({ status: 403, json: { message: 'forbidden' } }), graphql: () => null };
+  const failed = fx.turnEnd('exec-a', null, { transport: refused });
   assert.equal(failed.outcome, 'FAILED');
   assert.equal(checkpoint.readErrors(hash, { sessionsDir: fx.sessionsDir }).pending.code, failed.code);
   const shown = fx.run(['show', '--session', 'exec-a']).result;
@@ -410,17 +417,19 @@ test('W10 hook failures exit 0, stay local, reach the journal on the next run an
     if (file === 'gh-for-tests') { ghCalls.push(options.timeout); return { status: 0, stdout: 'HTTP/2.0 500 Internal\n\n{}', stderr: '' }; }
     return fakeGit(fx)(file, args, options);
   };
-  assert.equal(checkpoint.runHook({ session_id: 'exec-a' }, { sessionsDir: fx.sessionsDir, gitPath: GIT, ghPath: 'gh-for-tests', run, deadline: Date.now() - 1, governanceState: GOVERNED }).outcome, 'FAILED');
+  assert.equal(checkpoint.runHook({ session_id: 'exec-a' }, { sessionsDir: fx.sessionsDir, now: fx.now, gitPath: GIT, ghPath: 'gh-for-tests', run, deadline: Date.now() - 1, governanceState: GOVERNED, mergedBinding: MERGED }).outcome, 'QUEUED', 'gh never started: queued');
   assert.deepEqual(ghCalls, []);
-  checkpoint.runHook({ session_id: 'exec-a' }, { sessionsDir: fx.sessionsDir, gitPath: GIT, ghPath: 'gh-for-tests', run, deadline: Date.now() + 20000, governanceState: GOVERNED });
+  checkpoint.runHook({ session_id: 'exec-a' }, { sessionsDir: fx.sessionsDir, now: fx.now, gitPath: GIT, ghPath: 'gh-for-tests', run, deadline: Date.now() + 20000, governanceState: GOVERNED, mergedBinding: MERGED });
   assert.ok(ghCalls.length > 0 && ghCalls.every(timeout => timeout <= 8000), `per-call timeouts ${ghCalls}`);
   // A malformed block is not recorded as a return; the facts and the error code still reach the journal.
   const seqBefore = fx.store.readJournal(423, `g1-a1--${hash}.json`).doc.seq;
   const next = fx.turnEnd('exec-a', 'Done.\n```toolkit-return\nreturn_id: r1\nverdict: ACCEPT\n```\n');
   assert.equal(next.error, 'RETURN_BLOCK_INVALID');
+  assert.ok(next.replayed >= 1, 'the queued turns are replayed first');
   const journal = fx.store.readJournal(423, `g1-a1--${hash}.json`).doc;
-  assert.equal(journal.seq, seqBefore + 1);
-  assert.deepEqual(journal.returns, []);
+  assert.equal(journal.seq, seqBefore + 1, 'queued turns and this one in one write');
+  assert.deepEqual(journal.returns.map(entry => entry.return_id), ['q1'], 'the queued return reached the journal; the malformed one did not');
+  assert.equal(fs.existsSync(checkpoint.queueFile(hash, { sessionsDir: fx.sessionsDir })), false, 'the queue is deleted once written');
   assert.ok(journal.last_error);
   assert.equal(checkpoint.readErrors(hash, { sessionsDir: fx.sessionsDir }).pending, null, 'cleared once written');
   // An identical turn writes nothing.
@@ -432,7 +441,7 @@ test('W10 hook failures exit 0, stay local, reach the journal on the next run an
   const once = fx.github.commits;
   assert.deepEqual([fx.turnEnd('exec-a', returnBlock('g1-r1')).outcome, fx.github.commits], ['NOOP', once]);
   assert.equal(fx.turnEnd('exec-a', returnBlock('g1-r1', { verdict: 'WAITING_OWNER' })).error, 'RETURN_ID_REUSED');
-  assert.deepEqual(fx.store.readJournal(423, `g1-a1--${hash}.json`).doc.returns.map(entry => entry.verdict_requested), ['ACCEPT']);
+  assert.deepEqual(fx.store.readJournal(423, `g1-a1--${hash}.json`).doc.returns.filter(entry => entry.return_id === 'g1-r1').map(entry => entry.verdict_requested), ['ACCEPT']);
 });
 
 test('W11 bind takes the session only from --session, never from an inherited environment', () => {
@@ -453,19 +462,34 @@ test('H4 the turn-end hook writes nothing to the store once GitHub governance is
   const hash = checkpoint.sessionHash('exec-a');
   const journal = () => JSON.stringify(fx.store.readJournal(423, `g1-a1--${hash}.json`).doc);
   const before = journal();
-  for (const [label, governanceState] of [
+  for (const [label, governanceState, outcome = 'GOVERNANCE_OFF'] of [
     ['disabled after bind', () => ({ state: 'DISABLED', governed_rules_bind: false })],
     ['enabled, setup not finished', () => ({ state: 'ENABLED', governed_rules_bind: false })],
     ['undecided', () => ({ state: 'UNDECIDED', governed_rules_bind: false })],
+    // On with the governed rules, but not freshly read: the turn goes to the offline queue, not the store.
+    ['merged binding read over 24 hours ago', () => ({ state: 'ENABLED', governed_rules_bind: true, programme_records_bind: false }), 'QUEUED'],
+    ['merged binding unusable', () => ({ state: 'ERROR', governed_rules_bind: false, programme_records_bind: false })],
     ['state unreadable', () => { throw new Error('boom'); }],
   ]) {
     let calls = 0;
     const counting = { request: (...args) => { calls += 1; return fx.github.request(...args); }, graphql: (...args) => { calls += 1; return fx.github.graphql(...args); } };
     const result = fx.turnEnd('exec-a', returnBlock('h4'), { governanceState, transport: counting });
-    assert.equal(result.outcome, 'GOVERNANCE_OFF', label);
+    assert.equal(result.outcome, outcome, label);
     assert.equal(calls, 0, `${label}: no store call`);
     assert.equal(journal(), before, label);
   }
+  // Governance confirmed off deletes the queue: nothing queued is ever written.
+  const sessions = { sessionsDir: fx.sessionsDir, now: fx.now };
+  assert.equal(checkpoint.readQueue(hash, sessions).length, 1);
+  assert.deepEqual(fx.turnEnd('exec-a', null, { governanceState: () => ({ state: 'DISABLED', governed_rules_bind: false }) }), { outcome: 'GOVERNANCE_OFF', discarded: true });
+  assert.equal(fs.existsSync(checkpoint.queueFile(hash, sessions)), false);
+  assert.equal(journal(), before);
+  // Nothing merged on this computer's read (or the read is unusable): the working tree's copy never names the store.
+  let mergedCalls = 0;
+  const noMerged = { request: (...args) => { mergedCalls += 1; return fx.github.request(...args); }, graphql: (...args) => { mergedCalls += 1; return fx.github.graphql(...args); } };
+  assert.equal(fx.turnEnd('exec-a', returnBlock('h4'), { mergedBinding: () => null, transport: noMerged }).outcome, 'GOVERNANCE_OFF', 'no merged binding');
+  assert.equal(mergedCalls, 0);
+  assert.equal(journal(), before);
   assert.notEqual(fx.turnEnd('exec-a', returnBlock('h4')).outcome, 'GOVERNANCE_OFF', 'ENABLED with the governed rules: the journal is written');
 });
 
@@ -556,4 +580,350 @@ test('journals match their schema at runtime and in the JSON schema', () => {
     assert.equal(validate(bad), false);
     assert.notDeepEqual(state.validateJournal(bad), []);
   }
+});
+
+test('Q1-Q4 the offline queue is bounded, kept in user-state, and replays a return only once', () => {
+  const fx = fixture();
+  fx.ctrl(['assign', '--issue', '423', '--role', 'G1', '--assignment', 'g1-a1']);
+  fx.run(['bind', '--issue', '423', '--assignment', 'g1-a1', '--session', 'exec-a']);
+  const hash = checkpoint.sessionHash('exec-a');
+  const sessions = { sessionsDir: fx.sessionsDir, now: fx.now };
+  const stale = () => ({ state: 'ENABLED', governed_rules_bind: true, programme_records_bind: false });
+  const file = checkpoint.queueFile(hash, sessions);
+  assert.equal(path.dirname(file), fx.sessionsDir, 'next to the session binding, never in the repository');
+  // Older than seven days is dropped; the newest 200 are kept, and the drop is noted.
+  const old = new Date(new Date(fx.github.clock).getTime() - checkpoint.QUEUE_MAX_AGE_MS - 60000).toISOString();
+  const recent = new Date(fx.github.clock).toISOString();
+  // Entries as the queue writes them: time, repository, issue and assignment with the turn.
+  const turn = at => ({ at, repository: 'acme/app', issue: 423, assignment: 'g1-a1', facts: null, entry: null });
+  const entries = [turn(old), ...Array.from({ length: checkpoint.QUEUE_LIMIT }, () => turn(recent))];
+  fs.writeFileSync(file, JSON.stringify({ schema: 'toolkit.programme-checkpoint-queue.v1', entries }));
+  assert.equal(checkpoint.readQueue(hash, sessions).length, checkpoint.QUEUE_LIMIT, 'the old entry is past its seven days');
+  assert.equal(fx.turnEnd('exec-a', returnBlock('q-new'), { governanceState: stale }).queued, checkpoint.QUEUE_LIMIT);
+  assert.equal(checkpoint.readErrors(hash, sessions).recent.at(-1).code, 'QUEUE_FULL');
+  // A return already in the journal, queued again, is not added twice.
+  fs.writeFileSync(file, JSON.stringify({ schema: 'toolkit.programme-checkpoint-queue.v1', entries: [] }));
+  fx.turnEnd('exec-a', returnBlock('q-once'));
+  assert.equal(fx.turnEnd('exec-a', returnBlock('q-once'), { governanceState: stale }).outcome, 'QUEUED');
+  fx.turnEnd('exec-a');
+  const returns = fx.store.readJournal(423, `g1-a1--${hash}.json`).doc.returns.map(entry => entry.return_id);
+  assert.deepEqual(returns.filter(id => id === 'q-once'), ['q-once']);
+  assert.equal(fs.existsSync(file), false);
+});
+
+test('Q5 queued turns replay in order, the queue goes only after a confirmed write, and a rebind never inherits it', () => {
+  const fx = fixture();
+  fx.ctrl(['assign', '--issue', '423', '--role', 'G1', '--assignment', 'g1-a1']);
+  fx.run(['bind', '--issue', '423', '--assignment', 'g1-a1', '--session', 'exec-a']);
+  const hash = checkpoint.sessionHash('exec-a');
+  const sessions = { sessionsDir: fx.sessionsDir, now: fx.now };
+  const stale = () => ({ state: 'ENABLED', governed_rules_bind: true, programme_records_bind: false });
+  const returns = () => fx.store.readJournal(423, `g1-a1--${hash}.json`).doc.returns.map(entry => entry.return_id);
+  assert.equal(fx.turnEnd('exec-a', returnBlock('r1'), { governanceState: stale }).outcome, 'QUEUED');
+  assert.equal(fx.turnEnd('exec-a', returnBlock('r2'), { governanceState: stale }).outcome, 'QUEUED');
+  // The write fails during the replay: everything stays queued, now with this turn too.
+  const writesDown = { request: (method, ...rest) => (method === 'GET' ? fx.github.request(method, ...rest) : { status: 503, json: { message: 'unavailable' } }), graphql: (...args) => fx.github.graphql(...args) };
+  assert.equal(fx.turnEnd('exec-a', returnBlock('r3'), { transport: writesDown }).outcome, 'QUEUED');
+  assert.deepEqual(checkpoint.readQueue(hash, sessions).map(item => item.entry && item.entry.return_id), ['r1', 'r2', 'r3']);
+  assert.deepEqual(returns(), [], 'nothing reached the journal');
+  // The next writable turn writes them in order, then its own, and only then deletes the queue.
+  const written = fx.turnEnd('exec-a', returnBlock('r4'));
+  assert.equal(written.replayed, 3);
+  assert.deepEqual(returns(), ['r1', 'r2', 'r3', 'r4']);
+  assert.equal(fs.existsSync(checkpoint.queueFile(hash, sessions)), false);
+  // A turn queued under one assignment is never written into the next one's journal.
+  assert.equal(fx.turnEnd('exec-a', returnBlock('a1-final'), { governanceState: stale }).outcome, 'QUEUED');
+  const binding = JSON.parse(fs.readFileSync(checkpoint.bindingFile(hash, sessions), 'utf8'));
+  fs.writeFileSync(checkpoint.bindingFile(hash, sessions), JSON.stringify({ ...binding, assignment: 'g1-a2' }));
+  fx.store.writeJournal(423, `g1-a2--${hash}.json`, checkpoint.newJournal({ ...binding, assignment: 'g1-a2', hash }), {});
+  fx.turnEnd('exec-a', returnBlock('a2-first'));
+  const a2 = fx.store.readJournal(423, `g1-a2--${hash}.json`).doc.returns.map(entry => entry.return_id);
+  assert.deepEqual(a2, ['a2-first'], 'the other assignment\'s queued turn was skipped');
+  assert.equal(checkpoint.readErrors(hash, sessions).recent.some(entry => entry.code === 'QUEUE_SKIPPED'), true);
+  // Turns older than seven days are noted when dropped.
+  const old = new Date(new Date(fx.github.clock).getTime() - checkpoint.QUEUE_MAX_AGE_MS - 60000).toISOString();
+  fs.writeFileSync(checkpoint.queueFile(hash, sessions), JSON.stringify({ schema: 'toolkit.programme-checkpoint-queue.v1', entries: [{ at: old, repository: 'acme/app', issue: 423, assignment: 'g1-a2', facts: null, entry: null }] }));
+  fx.turnEnd('exec-a', returnBlock('a2-second'), { governanceState: stale });
+  assert.equal(checkpoint.readErrors(hash, sessions).recent.some(entry => entry.code === 'QUEUE_EXPIRED'), true);
+});
+
+// ---- Offline-queue follow-ups -------------------------------------------------------------------
+
+const QUEUE_SCHEMA_V1 = 'toolkit.programme-checkpoint-queue.v1';
+const queued = (at, assignment = 'g1-a1', extra = {}) => ({ at, repository: 'acme/app', issue: 423, assignment, facts: null, entry: null, ...extra });
+const codesOf = (hash, sessions) => checkpoint.readErrors(hash, sessions).recent.map(entry => entry.code);
+
+test('S6: a dropped or skipped turn is noted once, however often the write keeps failing', () => {
+  const fx = fixture();
+  fx.ctrl(['assign', '--issue', '423', '--role', 'G1', '--assignment', 'g1-a1']);
+  fx.run(['bind', '--issue', '423', '--assignment', 'g1-a1', '--session', 'exec-a']);
+  const hash = checkpoint.sessionHash('exec-a');
+  const sessions = { sessionsDir: fx.sessionsDir };
+  const old = new Date(new Date(fx.github.clock).getTime() - checkpoint.QUEUE_MAX_AGE_MS - 60000).toISOString();
+  const recent = new Date(fx.github.clock).toISOString();
+  fs.writeFileSync(checkpoint.queueFile(hash, sessions), JSON.stringify({ schema: QUEUE_SCHEMA_V1, entries: [queued(old), queued(recent, 'g1-other')] }));
+  const writesDown = { request: (method, ...rest) => (method === 'GET' ? fx.github.request(method, ...rest) : { status: 503, json: { message: 'unavailable' } }), graphql: (...args) => fx.github.graphql(...args) };
+  for (let turn = 0; turn < 3; turn += 1) assert.equal(fx.turnEnd('exec-a', returnBlock(`x${turn}`), { transport: writesDown }).outcome, 'QUEUED');
+  assert.equal(fx.turnEnd('exec-a', returnBlock('x3')).outcome, 'WRITTEN');
+  const codes = codesOf(hash, sessions);
+  assert.equal(codes.filter(code => code === 'QUEUE_EXPIRED').length, 1, 'the expired turn is noted once');
+  assert.equal(codes.filter(code => code === 'QUEUE_SKIPPED').length, 1, 'the other assignment\'s turn is noted once');
+  assert.deepEqual(fx.store.readJournal(423, `g1-a1--${hash}.json`).doc.returns.map(entry => entry.return_id), ['x0', 'x1', 'x2', 'x3']);
+});
+
+test('S6: a signed-out gh is recorded as an error, never queued', () => {
+  const fx = fixture();
+  fx.ctrl(['assign', '--issue', '423', '--role', 'G1', '--assignment', 'g1-a1']);
+  fx.run(['bind', '--issue', '423', '--assignment', 'g1-a1', '--session', 'exec-a']);
+  const hash = checkpoint.sessionHash('exec-a');
+  const sessions = { sessionsDir: fx.sessionsDir };
+  const signedOut = new state.GitHubTransport({ ghPath: 'gh-for-tests', run: () => ({ status: 4, stdout: '', stderr: 'To get started with GitHub CLI, please run:  gh auth login' }) });
+  assert.throws(() => signedOut.request('GET', 'user'), { code: 'GH_AUTH' });
+  // gh with no HTTP status for another reason (a network failure) is still unreachable.
+  const offline = new state.GitHubTransport({ ghPath: 'gh-for-tests', run: () => ({ status: 1, stdout: '', stderr: 'error connecting to api.github.com' }) });
+  assert.throws(() => offline.request('GET', 'user'), { code: 'GH_FAILED' });
+  const result = fx.turnEnd('exec-a', returnBlock('auth-1'), { transport: signedOut });
+  assert.deepEqual(result, { outcome: 'FAILED', code: 'GH_AUTH' });
+  assert.equal(fs.existsSync(checkpoint.queueFile(hash, sessions)), false, 'nothing queued');
+  assert.equal(checkpoint.readErrors(hash, sessions).pending.code, 'GH_AUTH');
+});
+
+test('S6: a replay that ends where it started bumps no seq and writes nothing', () => {
+  const fx = fixture();
+  fx.ctrl(['assign', '--issue', '423', '--role', 'G1', '--assignment', 'g1-a1']);
+  fx.run(['bind', '--issue', '423', '--assignment', 'g1-a1', '--session', 'exec-a']);
+  const hash = checkpoint.sessionHash('exec-a');
+  const sessions = { sessionsDir: fx.sessionsDir };
+  const name = `g1-a1--${hash}.json`;
+  const before = fx.store.readJournal(423, name).doc;
+  const commits = fx.github.commits;
+  // A queued turn from a crash, with other facts, then this turn back on the journal's own facts.
+  const other = { ...before.checkpoint, head: SHA_B };
+  fs.writeFileSync(checkpoint.queueFile(hash, sessions), JSON.stringify({ schema: QUEUE_SCHEMA_V1, entries: [queued(new Date(fx.github.clock).toISOString(), 'g1-a1', { facts: other })] }));
+  const result = fx.turnEnd('exec-a');
+  assert.equal(result.outcome, 'NOOP');
+  assert.equal(fx.store.readJournal(423, name).doc.seq, before.seq);
+  assert.equal(fx.github.commits, commits, 'no commit');
+  assert.equal(fs.existsSync(checkpoint.queueFile(hash, sessions)), false, 'the replayed queue is gone');
+});
+
+test('S6: an unusable queued entry is skipped with one note, and the turn is still written', () => {
+  const fx = fixture();
+  fx.ctrl(['assign', '--issue', '423', '--role', 'G1', '--assignment', 'g1-a1']);
+  fx.run(['bind', '--issue', '423', '--assignment', 'g1-a1', '--session', 'exec-a']);
+  const hash = checkpoint.sessionHash('exec-a');
+  const sessions = { sessionsDir: fx.sessionsDir };
+  const at = new Date(fx.github.clock).toISOString();
+  const bad = queued(at, 'g1-a1', { facts: { branch: 'x', head: 'not-a-sha' } });
+  const good = queued(at, 'g1-a1', { entry: { return_id: 'q-good', verdict_requested: null, at_head: null, next_action: null, blockers: [] } });
+  fs.writeFileSync(checkpoint.queueFile(hash, sessions), JSON.stringify({ schema: QUEUE_SCHEMA_V1, entries: [bad, good] }));
+  const result = fx.turnEnd('exec-a', returnBlock('now-1'));
+  assert.equal(result.outcome, 'WRITTEN');
+  assert.deepEqual(fx.store.readJournal(423, `g1-a1--${hash}.json`).doc.returns.map(entry => entry.return_id), ['q-good', 'now-1']);
+  const notes = checkpoint.readErrors(hash, sessions).recent.filter(entry => entry.code === 'QUEUE_ENTRY_INVALID');
+  assert.equal(notes.length, 1);
+  assert.ok(notes[0].message.includes(`queued at ${at}`), notes[0].message);
+  assert.equal(fs.existsSync(checkpoint.queueFile(hash, sessions)), false, 'no leftover file is kept');
+  assert.equal(fs.readdirSync(fx.sessionsDir).some(file => file.includes('invalid')), false);
+});
+
+test('S6: the queue count for status, and the discard when governance is confirmed off', () => {
+  const fx = fixture();
+  fx.ctrl(['assign', '--issue', '423', '--role', 'G1', '--assignment', 'g1-a1']);
+  fx.run(['bind', '--issue', '423', '--assignment', 'g1-a1', '--session', 'exec-a']);
+  const hash = checkpoint.sessionHash('exec-a');
+  const sessions = { sessionsDir: fx.sessionsDir };
+  assert.deepEqual(checkpoint.queueSummary(fx.repoRoot, sessions), { count: 0, oldest: null });
+  fs.writeFileSync(checkpoint.queueFile(hash, sessions), JSON.stringify({ schema: QUEUE_SCHEMA_V1, entries: [queued('2026-10-22T09:00:00.000Z'), queued('2026-10-23T09:00:00.000Z')] }));
+  const now = { now: () => '2026-10-23T12:00:00.000Z', ...sessions };
+  assert.deepEqual(checkpoint.queueSummary(fx.repoRoot, now), { count: 2, oldest: '2026-10-22T09:00:00.000Z' });
+  assert.deepEqual(checkpoint.queueSummary(tmp(), now), { count: 0, oldest: null }, 'another checkout counts nothing');
+  assert.equal(checkpoint.discardQueuesFor(fx.repoRoot, now), 1);
+  assert.equal(fs.existsSync(checkpoint.queueFile(hash, sessions)), false);
+});
+
+// ---- One-time findings (review M1) --------------------------------------------------------------
+
+test('M1: one-time findings stay open across passes until answered or their condition is gone', () => {
+  const fx = fixture();
+  fx.ctrl(['assign', '--issue', '423', '--role', 'G1', '--assignment', 'g1-a1']);
+  fx.run(['bind', '--issue', '423', '--assignment', 'g1-a1', '--session', 'exec-a']);
+  const hash = checkpoint.sessionHash('exec-a');
+  const sessions = { sessionsDir: fx.sessionsDir };
+  // The reviewer's repro: a checkpoint error, a turn end with a return, then two passes.
+  checkpoint.recordError(hash, 'GH_FAILED', 'GitHub could not be reached', sessions);
+  assert.equal(fx.turnEnd('exec-a', returnBlock('r-1')).outcome, 'WRITTEN');
+  const open = () => fx.parentDoc().attention.filter(entry => entry.issue === 423 && ['RETURN_CAPTURED', 'JOURNAL_ERROR'].includes(entry.code)).map(entry => `${entry.code} ${entry.state}`).sort();
+  fx.reconcile();
+  assert.deepEqual(open(), ['JOURNAL_ERROR new', 'RETURN_CAPTURED new'], 'pass 1');
+  fx.reconcile();
+  assert.deepEqual(open(), ['JOURNAL_ERROR new', 'RETURN_CAPTURED new'], 'pass 2: still open, the gate still waits');
+  assert.equal(fx.child().gate.state, 'SUBMITTED');
+  // An acknowledged one-time finding resolves on the next complete pass; nobody needs to see it again.
+  const journalError = fx.parentDoc().attention.find(entry => entry.code === 'JOURNAL_ERROR');
+  fx.ctrl(['ack', '--finding', journalError.id]);
+  fx.reconcile();
+  assert.deepEqual(open(), ['JOURNAL_ERROR resolved', 'RETURN_CAPTURED new']);
+  // Acknowledging the waiting return does not close it while the return is unconsumed.
+  const captured = fx.parentDoc().attention.find(entry => entry.code === 'RETURN_CAPTURED');
+  fx.ctrl(['ack', '--finding', captured.id]);
+  fx.reconcile();
+  assert.deepEqual(open(), ['JOURNAL_ERROR resolved', 'RETURN_CAPTURED acknowledged']);
+  // The verdict consumes the return: the condition is gone.
+  fx.ctrl(['return', '--issue', '423', '--consume', 'r-1', '--verdict', 'REOPEN']);
+  fx.reconcile();
+  assert.deepEqual(open(), ['JOURNAL_ERROR resolved', 'RETURN_CAPTURED resolved']);
+});
+
+test('M1: a late checkpoint from an ended assignment stays new until the controller answers it', () => {
+  const fx = fixture();
+  fx.ctrl(['assign', '--issue', '423', '--role', 'G1', '--assignment', 'g1-a1']);
+  fx.run(['bind', '--issue', '423', '--assignment', 'g1-a1', '--session', 'exec-a']);
+  fx.reconcile();
+  fx.ctrl(['assign', '--issue', '423', '--role', 'G1', '--assignment', 'g1-a2', '--supersede', '--reason', 'restart']);
+  // The old session ends a turn after its assignment stopped being live.
+  fx.turnEnd('exec-a', returnBlock('late-1'));
+  const stale = () => fx.parentDoc().attention.filter(entry => entry.code === 'STALE_ASSIGNMENT').map(entry => entry.state);
+  fx.reconcile();
+  fx.reconcile();
+  assert.deepEqual(stale(), ['new']);
+  fx.ctrl(['dispose', '--finding', fx.parentDoc().attention.find(entry => entry.code === 'STALE_ASSIGNMENT').id, '--reason', 'the restart superseded it']);
+  fx.reconcile();
+  assert.deepEqual(stale(), ['disposed']);
+});
+
+test('L2: a queued turn with an unreadable return entry is skipped, and the turns around it are written', () => {
+  const fx = fixture();
+  fx.ctrl(['assign', '--issue', '423', '--role', 'G1', '--assignment', 'g1-a1']);
+  fx.run(['bind', '--issue', '423', '--assignment', 'g1-a1', '--session', 'exec-a']);
+  const hash = checkpoint.sessionHash('exec-a');
+  const sessions = { sessionsDir: fx.sessionsDir };
+  const at = new Date(fx.github.clock).toISOString();
+  const entry = id => ({ return_id: id, verdict_requested: null, at_head: null, next_action: null, blockers: [] });
+  // A return entry no journal accepts: an unknown field and an at_head that is not a SHA.
+  const bad = queued(at, 'g1-a1', { entry: { ...entry('q-bad'), at_head: 'not-a-sha', extra: true } });
+  fs.writeFileSync(checkpoint.queueFile(hash, sessions), JSON.stringify({ schema: QUEUE_SCHEMA_V1, entries: [queued(at, 'g1-a1', { entry: entry('q-1') }), bad, queued(at, 'g1-a1', { entry: entry('q-2') })] }));
+  assert.equal(fx.turnEnd('exec-a', returnBlock('now-1')).outcome, 'WRITTEN');
+  assert.deepEqual(fx.store.readJournal(423, `g1-a1--${hash}.json`).doc.returns.map(item => item.return_id), ['q-1', 'q-2', 'now-1']);
+  assert.equal(checkpoint.readErrors(hash, sessions).recent.filter(item => item.code === 'QUEUE_ENTRY_INVALID').length, 1);
+  assert.equal(fs.existsSync(checkpoint.queueFile(hash, sessions)), false);
+});
+
+// ---- One-time findings, delta review (N1 to N3) ------------------------------------------------
+
+// Assign g1-a1, bind exec-a, record a turn with a return, reconcile: RETURN_CAPTURED new, gate SUBMITTED.
+function submitted(fx, returnId = 'r-1', assignment = 'g1-a1', session = 'exec-a', extra = []) {
+  fx.ctrl(['assign', '--issue', '423', '--role', 'G1', '--assignment', assignment, ...extra]);
+  fx.run(['bind', '--issue', '423', '--assignment', assignment, '--session', session]);
+  assert.equal(fx.turnEnd(session, returnBlock(returnId)).outcome, 'WRITTEN');
+  fx.reconcile();
+}
+const oneTime = (fx, code) => fx.parentDoc().attention.filter(entry => entry.code === code && entry.issue === 423).map(entry => entry.state);
+
+test('N1: a captured return left by an interrupted or superseded assignment no longer holds its finding open', () => {
+  for (const ending of ['interrupt', 'supersede']) {
+    const fx = fixture();
+    submitted(fx);
+    assert.equal(fx.child().gate.state, 'SUBMITTED');
+    assert.deepEqual(oneTime(fx, 'RETURN_CAPTURED'), ['new']);
+    if (ending === 'interrupt') fx.ctrl(['interrupt', '--issue', '423', '--reason', 'stop for now']);
+    else fx.ctrl(['assign', '--issue', '423', '--role', 'G1', '--assignment', 'g1-a2', '--supersede', '--reason', 'restart']);
+    fx.reconcile();
+    fx.reconcile();
+    assert.deepEqual(oneTime(fx, 'RETURN_CAPTURED'), ['resolved'], `${ending}: r-1 can no longer be consumed, so it does not hold`);
+    // A later return on the issue shows as new again.
+    if (ending === 'interrupt') fx.ctrl(['assign', '--issue', '423', '--role', 'G1', '--assignment', 'g1-a2']);
+    fx.run(['bind', '--issue', '423', '--assignment', 'g1-a2', '--session', 'exec-b']);
+    assert.equal(fx.turnEnd('exec-b', returnBlock('r-2')).outcome, 'WRITTEN');
+    fx.reconcile();
+    assert.deepEqual(oneTime(fx, 'RETURN_CAPTURED'), ['new'], `${ending}: r-2 is new`);
+    fx.reconcile();
+    assert.deepEqual(oneTime(fx, 'RETURN_CAPTURED'), ['new'], `${ending}: and stays open while r-2 waits`);
+  }
+});
+
+test('N2: a fresh report of a one-time code reopens an acknowledged or disposed entry', () => {
+  for (const answer of ['ack', 'dispose']) {
+    const fx = fixture();
+    submitted(fx);
+    const id = fx.parentDoc().attention.find(entry => entry.code === 'RETURN_CAPTURED').id;
+    fx.ctrl(answer === 'ack' ? ['ack', '--finding', id] : ['dispose', '--finding', id, '--reason', 'handled in chat']);
+    assert.deepEqual(oneTime(fx, 'RETURN_CAPTURED'), [answer === 'ack' ? 'acknowledged' : 'disposed']);
+    // A new assignment's return arrives before the next pass: a fresh report of the same code.
+    fx.ctrl(['assign', '--issue', '423', '--role', 'G1', '--assignment', 'g1-a2', '--supersede', '--reason', 'restart']);
+    fx.run(['bind', '--issue', '423', '--assignment', 'g1-a2', '--session', 'exec-c']);
+    assert.equal(fx.turnEnd('exec-c', returnBlock('r-3')).outcome, 'WRITTEN');
+    fx.reconcile();
+    assert.deepEqual(oneTime(fx, 'RETURN_CAPTURED'), ['new'], `${answer}: reopened by the fresh report`);
+  }
+  // A journal that still carries the same old error does not reopen its acknowledged entry; a new error does.
+  const fx = fixture();
+  fx.ctrl(['assign', '--issue', '423', '--role', 'G1', '--assignment', 'g1-a1']);
+  fx.run(['bind', '--issue', '423', '--assignment', 'g1-a1', '--session', 'exec-a']);
+  const hash = checkpoint.sessionHash('exec-a');
+  const sessions = { sessionsDir: fx.sessionsDir };
+  // Every clock here is the fake GitHub's, as in production every clock is the computer's.
+  const clock = { ...sessions, now: () => new Date(fx.github.clock).toISOString() };
+  checkpoint.recordError(hash, 'GH_FAILED', 'GitHub could not be reached', clock);
+  fx.turnEnd('exec-a');
+  fx.reconcile();
+  assert.deepEqual(oneTime(fx, 'JOURNAL_ERROR'), ['new']);
+  fx.github.tick();
+  fx.ctrl(['ack', '--finding', fx.parentDoc().attention.find(entry => entry.code === 'JOURNAL_ERROR').id]);
+  // Another turn rewrites the journal with the old error still on it.
+  fx.head = SHA_B;
+  fx.turnEnd('exec-a');
+  fx.reconcile();
+  assert.deepEqual(oneTime(fx, 'JOURNAL_ERROR'), ['acknowledged'], 'the old error, already acknowledged: not reopened');
+  fx.reconcile();
+  assert.deepEqual(oneTime(fx, 'JOURNAL_ERROR'), ['resolved'], 'then resolved on the next complete pass');
+  // The executor keeps working: its next turns still show the old error, which never reopens it.
+  for (const head of [SHA_A, SHA_B]) {
+    fx.github.tick();
+    fx.head = head;
+    fx.turnEnd('exec-a');
+    fx.reconcile();
+    assert.deepEqual(oneTime(fx, 'JOURNAL_ERROR'), ['resolved'], 'the old error does not come back after it resolved');
+  }
+  for (let n = 0; n < 5; n += 1) fx.github.tick();
+  checkpoint.recordError(hash, 'GH_FAILED', 'GitHub could not be reached again', clock);
+  fx.turnEnd('exec-a');
+  fx.reconcile();
+  assert.deepEqual(oneTime(fx, 'JOURNAL_ERROR'), ['new'], 'a new error reopens it');
+});
+
+test('F2: a newer checkpoint error reopens a JOURNAL_ERROR that is still acknowledged', () => {
+  const fx = fixture();
+  fx.ctrl(['assign', '--issue', '423', '--role', 'G1', '--assignment', 'g1-a1']);
+  fx.run(['bind', '--issue', '423', '--assignment', 'g1-a1', '--session', 'exec-a']);
+  const hash = checkpoint.sessionHash('exec-a');
+  const clock = { sessionsDir: fx.sessionsDir, now: () => new Date(fx.github.clock).toISOString() };
+  checkpoint.recordError(hash, 'GH_FAILED', 'GitHub could not be reached', clock);
+  fx.turnEnd('exec-a');
+  fx.reconcile();
+  fx.github.tick();
+  fx.ctrl(['ack', '--finding', fx.parentDoc().attention.find(entry => entry.code === 'JOURNAL_ERROR').id]);
+  assert.deepEqual(oneTime(fx, 'JOURNAL_ERROR'), ['acknowledged']);
+  // A newer error lands before any pass resolves the acknowledged entry.
+  for (let n = 0; n < 5; n += 1) fx.github.tick();
+  checkpoint.recordError(hash, 'GH_FAILED', 'GitHub could not be reached again', clock);
+  fx.head = SHA_B;
+  fx.turnEnd('exec-a');
+  fx.reconcile();
+  assert.deepEqual(oneTime(fx, 'JOURNAL_ERROR'), ['new'], 'reopened from acknowledged');
+});
+
+test('N3: a JOURNAL_ERROR stays new while the task has a live gate, and resolves once it has none', () => {
+  const fx = fixture();
+  fx.ctrl(['assign', '--issue', '423', '--role', 'G1', '--assignment', 'g1-a1']);
+  fx.run(['bind', '--issue', '423', '--assignment', 'g1-a1', '--session', 'exec-a']);
+  checkpoint.recordError(checkpoint.sessionHash('exec-a'), 'GH_FAILED', 'GitHub could not be reached', { sessionsDir: fx.sessionsDir });
+  fx.turnEnd('exec-a');
+  fx.reconcile();
+  fx.reconcile();
+  assert.deepEqual(oneTime(fx, 'JOURNAL_ERROR'), ['new'], 'held while the gate is live');
+  fx.ctrl(['interrupt', '--issue', '423', '--reason', 'stop for now']);
+  assert.equal(fx.child().gate.state, 'INTERRUPTED');
+  fx.reconcile();
+  assert.deepEqual(oneTime(fx, 'JOURNAL_ERROR'), ['resolved'], 'no live gate: resolved');
 });

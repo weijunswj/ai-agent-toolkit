@@ -27,7 +27,8 @@ test('the JSON schemas and the runtime validator agree on valid and invalid docu
   const ajv = new Ajv2020({ strict: false, allErrors: true });
   const validateChild = ajv.compile(schema('child-state-v1.schema.json'));
   const validateParent = ajv.compile(schema('parent-state-v1.schema.json'));
-  const validateBinding = ajv.compile(schema('binding-v1.schema.json'));
+  const validateBindingV1 = ajv.compile(schema('binding-v1.schema.json'));
+  const validateBinding = ajv.compile(schema('binding-v2.schema.json'));
 
   const good = child({ candidate: { branch: 'feature', head: SHA_A, tree: SHA_B, base: SHA_B } });
   assert.equal(validateChild(good), true, JSON.stringify(validateChild.errors));
@@ -37,7 +38,21 @@ test('the JSON schemas and the runtime validator agree on valid and invalid docu
   assert.deepEqual(state.validateParent(parent), []);
   const binding = JSON.parse(fs.readFileSync(path.join(ROOT, '.github', 'toolkit-programme.json'), 'utf8'));
   assert.equal(validateBinding(binding), true, JSON.stringify(validateBinding.errors));
-  assert.equal(state.validateBinding(binding), binding);
+  const normalized = state.validateBinding(binding);
+  assert.deepEqual([normalized.parent_issue, normalized.record_prefix, normalized.writer_prefix], [binding.parents[0].issue, binding.parents[0].record_prefix, binding.parents[0].writer_prefix]);
+  // Version 1 is still read, as enabled with one parent.
+  // schedule_folder is a version 2 field.
+  const { governance: _governance, parents: _parents, schedule_folder: _folder, ...rest } = binding;
+  const v1 = { ...rest, schema: state.SCHEMA.binding, parent_issue: 421, record_prefix: 'INT-TK421-', writer_prefix: 'INT-TK421-' };
+  assert.equal(validateBindingV1(v1), true, JSON.stringify(validateBindingV1.errors));
+  assert.equal(state.validateBinding(v1), v1);
+  const disabled = { schema: state.SCHEMA.bindingV2, repository: 'acme/app', governance: 'disabled' };
+  assert.equal(validateBinding(disabled), true);
+  assert.equal(state.bindingEnabled(state.validateBinding(disabled)), false);
+  for (const doc of [{ ...disabled, governance: 'enabled' }, { ...binding, parents: [] }, { ...binding, parents: [{ issue: 1, record_prefix: 'X', children: [2] }] }]) {
+    assert.equal(validateBinding(doc), false, JSON.stringify(doc).slice(0, 80));
+    assert.throws(() => state.validateBinding(doc), /is invalid/);
+  }
 
   const bad = [
     child({ candidate: { branch: 'x', head: 'abc1234', tree: null, base: null } }),
@@ -313,22 +328,24 @@ test('the generated CURRENT summary lists work in progress, saying what waits on
     '- Task 4 (#4); waiting on you: blocked: needs the key; next: Controller: admit and plan this outcome',
     '',
     '**Start next:** Task 5 (#5)',
+    '',
+    '**Attention: clear**',
   ].join('\n'), 'queued work shows in the graph, with only the top Later task named here');
   const idle = state.renderCurrentBlockBody(state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes: [] }), new Map());
-  assert.match(idle, /\*\*In progress\*\*\n- None\.\n\n\*\*Start next:\*\* None\.$/);
+  assert.match(idle, /\*\*In progress\*\*\n- None\.\n\n\*\*Start next:\*\* None\.\n/);
   // The top LATER task by priority order starts next; optional work is never named.
   const later = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes: [
     { issue: 2, class: 'OPTIONAL', parent: 7, order: 0, name: 'Optional' },
     { issue: 3, class: 'COMMITTED', parent: 7, order: 4, name: 'Low' },
     { issue: 4, class: 'COMMITTED', parent: 7, order: 1, name: 'Top' },
   ] });
-  assert.match(state.renderCurrentBlockBody(later, new Map(), new Map()), /\*\*Start next:\*\* Top \(#4\)$/);
+  assert.match(state.renderCurrentBlockBody(later, new Map(), new Map()), /\*\*Start next:\*\* Top \(#4\)\n/);
   const merged = { number: 5, state: 'MERGED', head: null, checks: { state: 'UNKNOWN', required_total: 0, required_passed: 0, at_head: null } };
   const top = { ...state.newChild({ repository: 'acme/app', outcome: later.outcomes[2] }), pr: merged };
-  assert.match(state.renderCurrentBlockBody(later, new Map([[4, top]]), new Map()), /\*\*Start next:\*\* Low \(#3\)$/, 'a merged PR is not picked before its state catches up');
-  assert.match(state.renderCurrentBlockBody(later, new Map(), new Map([[4, { closed_at: '2026-10-25T00:00:00Z' }]])), /\*\*Start next:\*\* Low \(#3\)$/, 'a closed issue is not picked');
+  assert.match(state.renderCurrentBlockBody(later, new Map([[4, top]]), new Map()), /\*\*Start next:\*\* Low \(#3\)\n/, 'a merged PR is not picked before its state catches up');
+  assert.match(state.renderCurrentBlockBody(later, new Map(), new Map([[4, { closed_at: '2026-10-25T00:00:00Z' }]])), /\*\*Start next:\*\* Low \(#3\)\n/, 'a closed issue is not picked');
   const onlyOptional = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes: [{ issue: 2, class: 'OPTIONAL', parent: 7, order: 0 }] });
-  assert.match(state.renderCurrentBlockBody(onlyOptional, new Map(), new Map()), /\*\*Start next:\*\* None\.$/);
+  assert.match(state.renderCurrentBlockBody(onlyOptional, new Map(), new Map()), /\*\*Start next:\*\* None\.\n/);
 });
 
 test('a finished outcome takes the issue close time once, and the controller may set it', () => {

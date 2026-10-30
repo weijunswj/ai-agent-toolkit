@@ -100,31 +100,35 @@ function decide(ctx, repo, operation) {
 }
 
 test('derive: the rule table, first match wins', () => {
-  const identity = { root: '/r', repository_id: 'a'.repeat(64) };
+  const identity = { root: '/r', repository_id: 'a'.repeat(64), valid: true, remote: { host: 'github.com', path: '/example-owner/example-repo.git' } };
   const materials = (block, binding) => ({ governed_block: { present: block }, binding: { present: binding, valid: binding, problems: [] } });
+  const fresh = status => ({ status, fresh: true, version: 2 });
   const cases = [
-    ['disabled', true, true, 'DISABLED', 'R2'],
-    ['disabled', false, false, 'DISABLED', 'R2'],
-    ['enabled', true, true, 'ENABLED', 'R3'],
-    // The block and binding are files an agent can write, never the user's answer.
-    ['unresolved', true, true, 'UNDECIDED', 'R4'],
-    ['enabled', true, false, 'ENABLED', 'R5'],
-    ['enabled', false, true, 'ENABLED', 'R5'],
-    ['unresolved', true, false, 'UNDECIDED', 'R6'],
-    ['unresolved', false, true, 'UNDECIDED', 'R7'],
-    ['unresolved', false, false, 'UNDECIDED', 'R7'],
+    // [decision, merged, state, rule, governed rules bind]
+    ['unresolved', fresh('enabled'), 'ENABLED', 'M1', true],
+    ['disabled', fresh('enabled'), 'ENABLED', 'M1', true],
+    ['enabled', fresh('disabled'), 'DISABLED', 'M2', false],
+    ['unresolved', fresh('invalid'), 'ERROR', 'M0', false],
+    ['disabled', fresh('none'), 'DISABLED', 'R2', false],
+    ['enabled', fresh('none'), 'ENABLED', 'R5', false],
+    ['unresolved', fresh('none'), 'UNDECIDED', 'R7', false],
+    ['unresolved', fresh('foreign'), 'UNDECIDED', 'R7', false],
+    ['unresolved', { status: 'unknown', fresh: false }, 'UNDECIDED', 'R7', false],
   ];
-  for (const [decision, block, binding, expectedState, rule] of cases) {
-    const result = governance.GovernanceState.derive({ identity, materials: materials(block, binding), decision: { state: decision, decision_kind: null } });
-    assert.equal(governance.GovernanceState.derive({ identity, materials: materials(block, binding), decision: { state: decision, decision_kind: null }, ok: true }).rule, rule, 'an ok never matters on GitHub');
-    assert.equal(result.state, expectedState, `${decision}/${block}/${binding}`);
-    assert.equal(result.rule, rule, `${decision}/${block}/${binding}`);
-    assert.equal(result.hold, expectedState === 'UNDECIDED');
-    const complete = rule === 'R3';
-    assert.equal(result.governed_rules_bind, complete);
-    assert.equal(result.programme_records_bind, complete);
-    assert.equal(result.materials_complete, expectedState === 'ENABLED' ? complete : null);
-    assert.ok(Object.isFrozen(result));
+  for (const [decision, merged, expectedState, rule, binds] of cases) {
+    // Working-tree materials never decide.
+    for (const [block, binding] of [[false, false], [true, true]]) {
+      const result = governance.GovernanceState.derive({ identity, materials: materials(block, binding), decision: { state: decision, decision_kind: null }, merged });
+      assert.equal(governance.GovernanceState.derive({ identity, materials: materials(block, binding), decision: { state: decision, decision_kind: null }, merged, ok: true }).rule, rule, 'an ok never matters on GitHub');
+      assert.equal(result.state, expectedState, `${decision}/${merged.status}`);
+      assert.equal(result.rule, rule, `${decision}/${merged.status}`);
+      assert.equal(result.hold, expectedState === 'UNDECIDED');
+      assert.equal(result.governed_rules_bind, binds);
+      assert.equal(result.programme_records_bind, binds);
+      assert.equal(result.governed_effects_hold, expectedState === 'ERROR');
+      assert.equal(result.materials_complete, expectedState === 'ENABLED' ? binds : null);
+      assert.ok(Object.isFrozen(result));
+    }
   }
 
   // Not on github.com: a recorded disable still wins; otherwise the user's ok decides, whatever is enabled or present.
@@ -133,7 +137,7 @@ test('derive: the rule table, first match wins', () => {
   for (const id of [gitlab, noOrigin]) {
     for (const decision of ['enabled', 'unresolved']) {
       for (const [ok, expectedState, rule] of [[false, 'UNDECIDED', 'R9'], [true, 'DISABLED', 'R8']]) {
-        const result = governance.GovernanceState.derive({ identity: id, materials: materials(true, true), decision: { state: decision, decision_kind: null }, ok });
+        const result = governance.GovernanceState.derive({ identity: id, materials: materials(true, true), decision: { state: decision, decision_kind: null }, ok, merged: fresh('enabled') });
         assert.deepEqual([result.state, result.rule, result.governed_rules_bind, result.hold], [expectedState, rule, false, expectedState === 'UNDECIDED'], `${id.reason || 'gitlab'}/${decision}/${ok}`);
       }
     }
@@ -195,9 +199,11 @@ test('S-01, S-02: no git root is DISABLED automatically; a git repository not on
 test('S-03, S-06, S-07: materials without a decision', (t) => {
   const ctx = scratch(t);
   const optIn = state(ctx, fakeRepo(ctx.root, 'opt-in', { block: true, binding: true }));
-  assert.deepEqual([optIn.state, optIn.rule, optIn.reason, optIn.governed_rules_bind, optIn.hold], ['UNDECIDED', 'R4', 'repository-carries-governance', false, true]);
+  // A working-tree binding is not merged, so it never decides: it is shown as pending.
+  assert.deepEqual([optIn.state, optIn.rule, optIn.reason, optIn.governed_rules_bind, optIn.hold], ['UNDECIDED', 'R7', 'no-decision', false, true]);
+  assert.ok(optIn.notes.includes('pending-binding-merge'));
   const blockOnly = state(ctx, fakeRepo(ctx.root, 'block-only', { block: true }));
-  assert.deepEqual([blockOnly.state, blockOnly.rule, blockOnly.hold], ['UNDECIDED', 'R6', true]);
+  assert.deepEqual([blockOnly.state, blockOnly.rule, blockOnly.hold], ['UNDECIDED', 'R7', true]);
   const plain = state(ctx, fakeRepo(ctx.root, 'plain'));
   assert.deepEqual([plain.state, plain.rule, plain.hold], ['UNDECIDED', 'R7', true]);
   const bindingOnly = state(ctx, fakeRepo(ctx.root, 'binding-only', { binding: true }));
@@ -205,7 +211,7 @@ test('S-03, S-06, S-07: materials without a decision', (t) => {
   const legacy = fakeRepo(ctx.root, 'legacy', { binding: true });
   writeBlock(legacy, 'GLOBAL-AGENTS.MD-TEMPLATE');
   const legacyState = state(ctx, legacy);
-  assert.deepEqual([legacyState.state, legacyState.rule, legacyState.materials.governed_block_legacy], ['UNDECIDED', 'R4', true]);
+  assert.deepEqual([legacyState.state, legacyState.rule, legacyState.materials.governed_block_legacy], ['UNDECIDED', 'R7', true]);
   assert.equal(fs.existsSync(ctx.registryPath), false, 'nothing is written without the user\'s answer');
 });
 
@@ -298,7 +304,7 @@ test('binding: schema shape and agreement with the origin identity', (t) => {
   fs.mkdirSync(path.join(invalid, '.github'));
   fs.writeFileSync(path.join(invalid, '.github', 'toolkit-programme.json'), '{not json');
   const result = state(ctx, invalid);
-  assert.deepEqual([result.state, result.rule, result.materials.binding_present, result.materials.binding_problems], ['UNDECIDED', 'R6', true, ['not valid JSON']]);
+  assert.deepEqual([result.state, result.rule, result.materials.binding_present, result.materials.binding_problems], ['UNDECIDED', 'R7', true, ['not valid JSON']]);
   // This repository's own binding is valid for its own origin.
   const own = path.join(repoRoot, '.github', 'toolkit-programme.json');
   const ownIdentity = { remote: { path: '/weijunswj/ai-agent-toolkit.git' } };
@@ -357,7 +363,7 @@ test('H-15, H-16 (unit): no subprocess, no writes, no raw remote in the result',
     Object.assign(fs, savedFs);
   }
   const perRunMs = Number(process.hrtime.bigint() - started) / 1e6 / 20;
-  assert.deepEqual([result.state, result.rule], ['UNDECIDED', 'R4']);
+  assert.deepEqual([result.state, result.rule], ['UNDECIDED', 'R7']);
   assert.ok(perRunMs < 250, `one evaluation took ${perRunMs} ms`);
   const text = JSON.stringify(result);
   assert.doesNotMatch(text, /example-owner/, 'the raw remote is not in the result');

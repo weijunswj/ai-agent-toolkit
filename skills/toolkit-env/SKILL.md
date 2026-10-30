@@ -11,9 +11,11 @@ description: Use when the user talks about their env, env keys, secrets, API key
 
 Use the managed Toolkit checkout, so connected apps keep working after updates:
 
-- `node "$env:USERPROFILE\.ai-agent-toolkit\source\ai-agent-toolkit\repo\scripts\toolkit-env.cjs" <command>`
+- `node "<home folder>/.ai-agent-toolkit/source/ai-agent-toolkit/repo/scripts/toolkit-env.cjs" <command>`
 
-If that file is missing, ask the user to run `setup toolkit` first. When you tell the user about a command, call it `toolkit env <command>`.
+Write `<home folder>` as the resolved path in forward slashes, inside the double quotes (a space is fine). Never put `$env:...` or `%...%` in the command and never `cd` first: the host may run it through PowerShell or `cmd.exe`, and this line starts the same way in both.
+
+If `repo/scripts/toolkit-env.cjs` is missing from the managed checkout, ask the user to run `setup toolkit` first. When you tell the user about a command, call it `toolkit env <command>`.
 
 ## What the user asks, and what you run
 

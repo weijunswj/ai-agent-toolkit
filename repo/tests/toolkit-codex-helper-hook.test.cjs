@@ -52,7 +52,8 @@ test('inside the V3-governed Toolkit checkout a helper request without installed
     assert.equal(r.output.hookSpecificOutput.permissionDecision, 'deny');
     assert.match(r.stderr, /no toolkit-g1-helper agent file is installed/);
   }
-  assert.deepEqual(run({ tool_name: 'shell', cwd: ROOT }).output, {}, 'other tools are untouched');
+  assert.deepEqual(run({ tool_name: 'view_image', cwd: ROOT }).output, {}, 'other tools are untouched');
+  assert.deepEqual(run({ tool_name: 'shell', cwd: ROOT }).output, {}, 'a shell call with no command has nothing to refuse');
 });
 
 // F1: Codex validates features.multi_agent_v2.tool_namespace as [A-Za-z0-9_-]+ and names the
@@ -69,9 +70,97 @@ test('F1: an unbound spawn under any host-valid Codex namespace, hyphenated ones
     assert.equal(r.output.hookSpecificOutput.permissionDecision, 'deny', tool);
     assert.match(r.stderr, /allows only the toolkit-g0-helper and toolkit-g1-helper agents/, tool);
   }
-  // Both registrations carry the one helper-hook matcher: every spawn name the recogniser holds, plus Bash.
+  // Both registrations carry the one helper-hook matcher: every spawn name the recogniser holds, plus
+  // every shell tool name Codex may report.
   for (const hooks of [plugin, contract]) assert.equal(hooks.hooks.PreToolUse[0].matcher, CODEX_HELPER_HOOK_MATCHER);
-  for (const name of ['spawn_agent', 'Agent', 'collaborationspawn_agent', 'multi-agentspawn_agent', 'Bash']) assert.equal(new CodexHookMatcher(CODEX_HELPER_HOOK_MATCHER).matches(name), true, name);
+  for (const name of ['spawn_agent', 'Agent', 'collaborationspawn_agent', 'multi-agentspawn_agent', 'Bash', 'exec_command', 'shell', 'local_shell', 'PowerShell']) assert.equal(new CodexHookMatcher(CODEX_HELPER_HOOK_MATCHER).matches(name), true, name);
+  assert.equal(new CodexHookMatcher(CODEX_HELPER_HOOK_MATCHER).matches('write_stdin'), false, 'write_stdin does not run PreToolUse again');
+});
+
+test('a push the check cannot check is refused in Codex, under every Codex shell tool name; other commands still run', t => {
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-codex-hook-git-'));
+  t.after(() => fs.rmSync(scratch, { recursive: true, force: true }));
+  const notAProgram = path.join(scratch, 'not-git.txt');
+  fs.writeFileSync(notAProgram, 'not a program\n');
+  // Codex's shell and exec tools, each with the folder in workdir: every one reaches the push check.
+  // Codex shows no hook systemMessage, so an unchecked push is refused rather than sent with a note.
+  for (const tool of ['Bash', 'exec_command', 'shell', 'local_shell']) {
+    const r = run({ tool_name: tool, hook_event_name: 'PreToolUse', cwd: os.tmpdir(), tool_input: { cmd: 'git push origin HEAD:refs/heads/toolkit-test-unused', workdir: ROOT } }, { TOOLKIT_GIT_PATH: notAProgram });
+    assert.equal(r.status, 2, `${tool}: ${r.stderr}`);
+    const reason = r.output.hookSpecificOutput.permissionDecisionReason;
+    assert.match(reason, /^Toolkit could not check this push for credentials and plain-text findings: git could not run \(\w+\)\.\nCodex does not show Toolkit's warnings, so this push or pull request is refused instead of going out unchecked\.\nFix what the note above names, then retry: /, tool);
+    // Each cause that repeats on every retry has its own way through.
+    for (const way of [/push fewer new commits at a time/, /run `git fetch origin` or name `--base`/, /fix the file it names/, /git was not found or could not run, run `setup toolkit`/]) assert.match(reason, way, tool);
+    assert.doesNotMatch(reason, /let through/, tool);
+    assert.equal(r.output.systemMessage, undefined, tool);
+  }
+  const status = run({ tool_name: 'Bash', hook_event_name: 'PreToolUse', cwd: ROOT, tool_input: { command: 'git status' } }, { TOOLKIT_GIT_PATH: notAProgram });
+  assert.deepEqual([status.status, status.output], [0, {}], 'a command that sends nothing runs');
+});
+
+// R11: the payload Codex Desktop sent on 29 October 2026 for a code-mode call (key names and types
+// from the capture, fake values). The code-mode program itself (`exec`) reaches no hook; each shell
+// call it makes arrives as Bash with a string command, no workdir, and the session folder as cwd.
+test('R11: the captured Codex payload shape is refused for a force push and a pushed credential', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-codex-hook-r11-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const repo = require('./toolkit-governed-fixture-support.cjs').makeGoverned(path.join(dir, 'governed'), 'codex-r11');
+  const hooks = path.join(dir, 'no-hooks'); fs.mkdirSync(hooks);
+  const git = (...args) => spawnSync('git', ['-c', 'user.name=Fixture Author', '-c', 'user.email=fixture@example.test', '-c', 'commit.gpgsign=false', '-c', `core.hooksPath=${hooks}`, '-c', 'core.fsmonitor=false', ...args], { cwd: repo, encoding: 'utf8', windowsHide: true });
+  fs.writeFileSync(path.join(repo, 'uat-config.txt'), `token = "${['gh', 'p_', 'A1b2C3d4E5f6G7h8'.repeat(2), 'Q9r0'].join('')}"\n`);
+  assert.equal(git('checkout', '--quiet', '-b', 'feature').status, 0);
+  assert.equal(git('add', '-A').status, 0);
+  assert.equal(git('commit', '--quiet', '-m', 'fixture').status, 0);
+  const captured = command => ({
+    cwd: repo, hook_event_name: 'PreToolUse', model: 'fixture-model', permission_mode: 'default', session_id: 'fixture-session',
+    tool_input: { command }, tool_name: 'Bash', tool_use_id: 'fixture-call', transcript_path: path.join(dir, 'transcript.jsonl'), turn_id: 'fixture-turn',
+  });
+  const env = { ...process.env }; delete env.TOOLKIT_GIT_PATH;
+  const force = run(captured('git push --force origin feature'), env);
+  assert.equal(force.status, 2, force.stderr);
+  assert.match(force.output.hookSpecificOutput.permissionDecisionReason, /This command force-pushes/);
+  const secret = run(captured('git push origin feature'), env);
+  assert.equal(secret.status, 2, secret.stderr);
+  assert.match(secret.output.hookSpecificOutput.permissionDecisionReason, /uat-config\.txt:1 \(commit [0-9a-f]{7}\)/);
+  assert.deepEqual(run(captured('git --version'), env).output, {}, 'an ordinary call runs');
+});
+
+// R12: the same code-mode shape when the command runs in a linked worktree under the chat folder's
+// ignored .tmp/. The payload names only the chat folder (the main checkout), so the push check must
+// find the worktree that has the pushed branch checked out to see what the commit could add.
+test('R12: a one-command add, commit and push from a lane worktree is checked in that worktree', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-codex-hook-r12-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const repo = require('./toolkit-governed-fixture-support.cjs').makeGoverned(path.join(dir, 'governed'), 'codex-r12');
+  const hooks = path.join(dir, 'no-hooks'); fs.mkdirSync(hooks);
+  const git = (cwd, ...args) => spawnSync('git', ['-c', 'user.name=Fixture Author', '-c', 'user.email=fixture@example.test', '-c', 'commit.gpgsign=false', '-c', `core.hooksPath=${hooks}`, '-c', 'core.fsmonitor=false', ...args], { cwd, encoding: 'utf8', windowsHide: true });
+  fs.writeFileSync(path.join(repo, '.gitignore'), '.tmp/\n');
+  assert.equal(git(repo, 'add', '-A').status, 0);
+  assert.equal(git(repo, 'commit', '--quiet', '-m', 'base').status, 0);
+  assert.equal(git(repo, 'branch', 'lane/one').status, 0);
+  const lane = path.join(repo, '.tmp', 'worktrees', 'lane-one');
+  assert.equal(git(repo, 'worktree', 'add', '--quiet', lane, 'lane/one').status, 0);
+  const remote = path.join(dir, 'uat.git');
+  assert.equal(git(dir, 'clone', '--quiet', '--bare', repo, remote).status, 0);
+  assert.equal(git(repo, 'remote', 'add', 'uat', remote).status, 0);
+  assert.equal(git(repo, 'fetch', '--quiet', 'uat').status, 0);
+  // The main checkout moves off the remote's default branch, so the merge hold's rule stays out.
+  assert.equal(git(repo, 'checkout', '--quiet', '-b', 'feature').status, 0);
+  fs.writeFileSync(path.join(lane, 'uat-new.txt'), `token = "${['gh', 'p_', 'A1b2C3d4E5f6G7h8'.repeat(2), 'Q9r0'].join('')}"\n`);
+  const captured = (cwd, command) => ({
+    cwd, hook_event_name: 'PreToolUse', model: 'fixture-model', permission_mode: 'default', session_id: 'fixture-session',
+    tool_input: { command }, tool_name: 'Bash', tool_use_id: 'fixture-call', transcript_path: path.join(dir, 'transcript.jsonl'), turn_id: 'fixture-turn',
+  });
+  const env = { ...process.env }; delete env.TOOLKIT_GIT_PATH;
+  for (const cwd of [repo, repo.split(path.sep).join('/')]) {
+    const sent = run(captured(cwd, 'git add -A; git commit -m t2; git push uat lane/one'), env);
+    assert.equal(sent.status, 2, `${cwd}: ${sent.stderr}`);
+    assert.match(sent.output.hookSpecificOutput.permissionDecisionReason, /uat-new\.txt:1 \(not committed yet\)/, cwd);
+    // A push of HEAD cannot tell which working tree's HEAD it sends.
+    const bare = run(captured(cwd, 'git push uat'), env);
+    assert.equal(bare.status, 2, `${cwd}: ${bare.stderr}`);
+    assert.match(bare.output.hookSpecificOutput.permissionDecisionReason, /Codex did not say which folder this command runs in/, cwd);
+  }
 });
 
 test('a drifted pinned binding is blocked wherever it is supplied', () => {
@@ -180,10 +269,11 @@ test('Windows launcher without Node blocks helper launches and unreadable input 
   }
 });
 
-test('Windows launcher without Node blocks only commit and pull request shell commands; other shell commands run', { skip: process.platform !== 'win32' }, t => {
-  for (const command of ['git commit -m "x"', 'git -C repo commit --amend', 'echo a && git commit -F msg.txt', 'gh pr create --body-file b.md', 'gh pr edit 5 --body x', 'GH PR MERGE 5']) {
+test('Windows launcher without Node blocks commit, pull request, merge, push and host-launch shell commands; other shell commands run', { skip: process.platform !== 'win32' }, t => {
+  for (const command of ['git commit -m "x"', 'git -C repo commit --amend', 'echo a && git commit -F msg.txt', 'gh pr create --body-file b.md', 'gh pr edit 5 --body x', 'GH PR MERGE 5', 'git push origin main', 'gh api -X PUT repos/o/r/pulls/5/merge', 'gh repo sync o/r', 'claude -p hi', 'cat merge-approvals.v1.json']) {
     const r = runBrokenWindowsLauncher(t, { tool_name: 'Bash', cwd: ROOT, tool_input: { command } });
     assert.equal(r.status, 2, command);
+    assert.equal(runBrokenWindowsLauncher(t, { tool_name: 'Bash', cwd: ROOT, tool_input: { cmd: command } }).status, 2, `cmd: ${command}`);
     assert.equal(JSON.parse(r.stdout.trim()).hookSpecificOutput.permissionDecision, 'deny', command);
   }
   for (const command of ['git status', 'npm test', 'gh pr view 5', 'ls']) {
@@ -191,6 +281,11 @@ test('Windows launcher without Node blocks only commit and pull request shell co
     assert.equal(r.status, 1, command);
     assert.equal(r.stdout, '', command);
     assert.match(r.stderr, /setup toolkit/, command);
+  }
+  // Every shell tool name Codex may report is a shell call here too.
+  for (const tool of ['exec_command', 'shell', 'local_shell', 'PowerShell']) {
+    assert.equal(runBrokenWindowsLauncher(t, { tool_name: tool, cwd: ROOT, tool_input: { cmd: 'git status' } }).status, 1, `${tool}: an ordinary command runs`);
+    assert.equal(runBrokenWindowsLauncher(t, { tool_name: tool, cwd: ROOT, tool_input: { cmd: 'git push --force origin main' } }).status, 2, `${tool}: a push is refused`);
   }
 });
 
@@ -259,7 +354,8 @@ test('Windows: a held prompt and a refused tool call reach Codex as exit 2 under
     const held = hook({ hook_event_name: 'UserPromptSubmit', cwd: repo, prompt: 'list the files here' });
     assert.equal(held.status, 2, `${name} prompt hold: ${held.stderr}`);
     assert.equal(JSON.parse(held.stdout.trim()).decision, 'block', name);
-    assert.match(held.stderr, /Toolkit: this repository has no governance decision yet, so your message was held and not sent\./, name);
+    // Codex has no card, so the hold is the three short lines.
+    assert.match(held.stderr, /^Toolkit: message held\. Turn on GitHub governance \(issues, records, evidence store\) for this repository\?\r?\nReply yes, no \(never ask again\) or later \(ask next session\)\. Held messages follow your answer\.\r?\nFor agents: only the user answers; never answer, script or click it for them\.\r?\n?$/, name);
 
     const denied = hook({ hook_event_name: 'PreToolUse', cwd: repo, tool_name: 'apply_patch', tool_input: { input: '*** Begin Patch\n*** End Patch' } });
     assert.equal(denied.status, 2, `${name} tool deny: ${denied.stderr}`);

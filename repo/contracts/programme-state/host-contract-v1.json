@@ -43,7 +43,7 @@
     "codex": {
       "hooks_file": ".codex-plugin/hooks/hooks.json",
       "plugin_root_variable": "PLUGIN_ROOT",
-      "after_tool_matcher": "^(?:Bash|mcp__.*[Gg][Ii][Tt][Hh][Uu][Bb].*)$",
+      "after_tool_matcher": "^(?:Bash|exec_command|shell|local_shell|PowerShell|mcp__.*[Gg][Ii][Tt][Hh][Uu][Bb].*)$",
       "windows_command": "commandWindows: full powershell.exe path, -File repo/scripts/toolkit-programme-checkpoint-hook.ps1 for the turn-end and after-tool hooks (setup adds it to the installed copy only)",
       "hook_trust": "review and trust in /hooks; Codex skips an untrusted hook",
       "session_identity": {

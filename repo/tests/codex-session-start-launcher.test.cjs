@@ -68,6 +68,7 @@ function createRealBridgePluginFixture(root) {
     'repo/scripts/toolkit-skill-copies.cjs',
     'repo/scripts/claude-process-launch.cjs',
     'repo/scripts/toolkit-claude-plugin-registry.cjs',
+    'repo/scripts/toolkit-claude-account-copy.cjs',
     'repo/scripts/toolkit-canonical-path.cjs',
     'repo/scripts/toolkit-global-rules.cjs',
     'repo/scripts/toolkit-managed-block.cjs',

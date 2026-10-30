@@ -8,7 +8,9 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const test = require('node:test');
 const { renderBlock, findBlocks } = require('../scripts/toolkit-managed-block.cjs');
-const { ProjectsTasks, KEPT_LABEL, PROJECT_HEADING, validateParams, checkMemory, parseArgs } = require('../scripts/toolkit-projects-tasks.cjs');
+const hostile = require('./support/hostile-inputs.cjs');
+const { STEPS_TEXT } = require('../scripts/toolkit-claude-account-copy.cjs');
+const { ProjectsTasks, KEPT_LABEL, PROJECT_HEADING, LEGACY_RAISE, validateParams, checkMemory, parseArgs } = require('../scripts/toolkit-projects-tasks.cjs');
 
 const ROOT = path.resolve(__dirname, '../..');
 const SCRIPT = path.join(ROOT, 'repo/scripts/toolkit-projects-tasks.cjs');
@@ -23,10 +25,11 @@ const tasks = () => new ProjectsTasks({ root: ROOT });
 const PARAMS = {
   'daily-check-in': { project: 'EXAMPLE', repo: 'example-owner/example-repo', parent_issue: '12', report_dir: '/mnt/project-files/daily-check-in', effort: 'medium' },
   'hourly-nudge': { project: 'EXAMPLE', repo: 'example-owner/example-repo', report_dir: '/mnt/project-files/hourly-nudge', effort: 'medium' },
-  custom: { project: 'EXAMPLE', repo: 'none', report_dir: '/mnt/project-files/sweep', effort: 'low' }
+  custom: { project: 'EXAMPLE', repo: 'none', report_dir: '/mnt/project-files/sweep', effort: 'medium' }
 };
 const OWN_TEXT = 'Task: check the example folder and list what changed.\n1. List the folder.\n2. Compare with the last report.';
 const params = kind => validateParams(kind, PARAMS[kind]);
+const nudge0 = () => fs.readFileSync(path.join(TASKS, 'hourly-nudge.md'), 'utf8');
 const rendered = kind => tasks().render(kind, params(kind), kind === 'custom' ? OWN_TEXT : undefined);
 
 function tempDir(t) {
@@ -91,7 +94,9 @@ test('closure matrix: each prompt state gets its check result', t => {
   const rows = [
     ['rendered from current main, untouched', 'daily-check-in', checkIn, 'current', 0],
     ['template changed on main, params same', 'daily-check-in', laterMain({ template: true }).check('daily-check-in', checkIn).state, null],
-    ['params block changed by the project', 'daily-check-in', checkIn.replace('"effort": "medium"', '"effort": "high"'), 'outdated', 1],
+    ['params block changed by the project', 'daily-check-in', checkIn.replace('"effort": "medium"', '"effort": "high", "raise_reason": "misses checks at medium"'), 'outdated', 1],
+    ['a raise without its reason', 'daily-check-in', checkIn.replace('"effort": "medium"', '"effort": "high"'), 'malformed', 2],
+    ['effort below the medium floor', 'daily-check-in', checkIn.replace('"effort": "medium"', '"effort": "low"'), 'malformed', 2],
     ['text inside markers hand-edited', 'daily-check-in', replaceBlockBody(checkIn, 'DAILY-CHECK-IN-CHECKS', '\nCHECKS\n', '\nCHECKS (edited)\n'), 'edited', 1],
     ['a Toolkit block deleted', 'daily-check-in', checkIn.replace(/<!-- AI-AGENT-TOOLKIT:claude-projects:BEGIN DAILY-CHECK-IN-CHECKS[\s\S]*?END DAILY-CHECK-IN-CHECKS -->\n/, ''), 'edited', 1],
     ['owner lines in the additions section changed', 'daily-check-in', checkIn.replace('- none', '- Also list the example sweep.'), 'current', 0],
@@ -192,6 +197,98 @@ test('params are strict: known keys, safe values, report folder in the shared fo
   assert.throws(() => validateParams('weekly', base));
 });
 
+test('model tier and effort: cheapest by default, medium floor, every raise carries its reason', () => {
+  // Left out, each kind takes its default tier: the nudge and custom tasks small, the check-in mid.
+  assert.equal(params('hourly-nudge').model, 'small');
+  assert.equal(params('daily-check-in').model, 'mid');
+  assert.equal(params('custom').model, 'small');
+  const base = PARAMS['hourly-nudge'];
+  for (const bad of [
+    { ...base, effort: 'low' }, { ...base, effort: 'minimal' }, { ...base, model: 'haiku' }, { ...base, model: 'mid' },
+    { ...base, effort: 'high' }, { ...base, model: 'top', raise_reason: '' }, { ...base, model: 'top', raise_reason: 'no' },
+    { ...base, model: 'top', raise_reason: 'a | b' }, { ...base, model: 'top', raise_reason: 'line\nbreak' },
+    { ...base, model: 'top', raise_reason: ' padded ' }, { ...base, model: 'top', raise_reason: '{{project}} leak' }
+  ]) assert.throws(() => validateParams('hourly-nudge', bad), JSON.stringify(bad));
+  // A step down below the default needs no reason; a raise with one renders it.
+  assert.equal(validateParams('daily-check-in', { ...PARAMS['daily-check-in'], model: 'small' }).model, 'small');
+  const raised = validateParams('hourly-nudge', { ...base, model: 'top', effort: 'high', raise_reason: 'missed checks at small' });
+  const prompt = tasks().render('hourly-nudge', raised);
+  assert.match(prompt, /Model tier for this task: top \(agent-cost-control ladder; on Claude, small is Haiku, mid Sonnet, top Opus\), effort high\./);
+  assert.match(prompt, /Raised above the cheapest fitting step because: missed checks at small/);
+  assert.match(prompt, /TIER GAP: served <model>\/<effort>, want top\/high/);
+  assert.doesNotMatch(rendered('hourly-nudge'), /Raised above/);
+  assert.match(rendered('daily-check-in'), /Model tier for this task: mid /);
+  // A live prompt rendered before tiers existed still parses: its params take the default tier.
+  const legacy = rendered('hourly-nudge').replace(/,\n {2}"model": "small"/, '');
+  assert.doesNotMatch(legacy, /"model"/);
+  assert.equal(tasks().check('hourly-nudge', legacy).state, 'current');
+  // A prompt rendered before tiers (no model key) with any old effort still checks and refreshes.
+  const projectText = 'Project additions:\n- Keep this owner line.';
+  for (const kind of ['daily-check-in', 'hourly-nudge', 'custom']) {
+    for (const [effort, want, reason] of [['low', 'medium', undefined], ['medium', 'medium', undefined], ['high', 'high', LEGACY_RAISE], ['xhigh', 'xhigh', LEGACY_RAISE], ['max', 'max', LEGACY_RAISE]]) {
+      const old = laterMain({ version: '1.0.0' }).render(kind, params(kind), kind === 'custom' ? OWN_TEXT : projectText);
+      const legacyPrompt = old.replace(/,\n {2}"model": "[a-z]+"/, '').replace('"effort": "medium"', `"effort": "${effort}"`);
+      assert.doesNotMatch(legacyPrompt, /"model"/);
+      assert.equal(tasks().check(kind, legacyPrompt).state, 'outdated', `${kind} ${effort}`);
+      const session = kind === 'custom' ? undefined : 'bound';
+      const refreshed = tasks().refresh(kind, legacyPrompt, { session });
+      assert.equal(tasks().check(kind, refreshed).state, 'current', `${kind} ${effort} refreshed`);
+      const migrated = JSON.parse(refreshed.match(/```toolkit-task-params\n([\s\S]*?)\n```/)[1]);
+      assert.equal(migrated.effort, want);
+      assert.equal(migrated.raise_reason, reason);
+      assert.ok(refreshed.includes(kind === 'custom' ? 'List the folder.' : 'Keep this owner line.'), 'project text kept');
+    }
+  }
+  // Built-in object property names are unknown keys, in new and pre-tier params alike.
+  for (const key of ['constructor', 'toString', '__proto__']) {
+    assert.throws(() => validateParams('hourly-nudge', Object.assign(JSON.parse(`{"${key}": "x"}`), PARAMS['hourly-nudge'])), key);
+    const withKey = rendered('hourly-nudge').replace(/,\n {2}"model": "small"/, '').replace('"effort": "medium"', `"effort": "high",\n  "${key}": "x"`);
+    assert.equal(tasks().check('hourly-nudge', withKey).state, 'malformed', key);
+  }
+  // A swap carries a recorded raise by writing it into the saved params before the refresh,
+  // so the prompt itself sets the raised effort and checks current.
+  const saved = laterMain({ version: '1.0.0' }).render('hourly-nudge', params('hourly-nudge'), projectText);
+  const withRaise = saved.replace('"effort": "medium"', '"effort": "high",\n  "raise_reason": "missed checks at medium"');
+  const carried = tasks().refresh('hourly-nudge', withRaise, { session: 'bound' });
+  assert.equal(tasks().check('hourly-nudge', carried).state, 'current');
+  assert.match(carried, /call mcp__hearthbot__set_effort_level with high;/);
+  assert.match(carried, /Raised above the cheapest fitting step because: missed checks at medium/);
+  const swap = fs.readFileSync(path.join(path.dirname(SETUP), 'recurring-tasks.md'), 'utf8');
+  assert.match(swap, /First make the saved params block match the task's entry: with a recorded raise, set `model`, `effort` and `raise_reason` to the higher of the template's and the raised values and the entry's reason; with none, set the template's tier, `medium` effort and no `raise_reason`/);
+  assert.match(swap, /with its home thread started on the tier and effort in the rendered params/);
+  // A removed raise is removed from the params too, so the prompt drops back to medium.
+  const lowered = tasks().refresh('hourly-nudge', saved, { session: 'bound' });
+  assert.match(lowered, /call mcp__hearthbot__set_effort_level with medium;/);
+  assert.doesNotMatch(lowered, /Raised above/);
+  // Every rebuild renders the prompt the way the swap does, so a raise is carried.
+  const skill = fs.readFileSync(SKILL, 'utf8');
+  assert.match(skill, /new home thread and task, with the prompt rendered as in the swap \(\*\*Recurring tasks\*\* step 2, so a recorded raise is carried\)/);
+  assert.match(skill, /recreates it from the template on `main` \(rendered as in the swap, \*\*Recurring tasks\*\* step 2\)/);
+  // A params reason follows the same rules as the memory reason.
+  for (const reason of ['x stopped by the owner today', 'kept for Owner-Schedule', 'caf\u00e9 reason', 'a`b`c']) {
+    assert.throws(() => validateParams('hourly-nudge', { ...base, model: 'top', raise_reason: reason }), reason);
+  }
+  // New-format params stay strict: no migration once a model key is present.
+  assert.equal(tasks().check('hourly-nudge', rendered('hourly-nudge').replace('"effort": "medium"', '"effort": "low"')).state, 'malformed');
+  // The check-in reports model and effort gaps, and a recorded raise excuses them.
+  const checkIn = fs.readFileSync(path.join(TASKS, 'daily-check-in.md'), 'utf8');
+  assert.match(checkIn, /weekdays-only, no-effort, model, effort, name/);
+  assert.match(checkIn, /unless the served settings match a `raised <tier>\/<effort>` field/);
+  // A gap a swap cannot fix never causes a daily swap: fresh entries and repeats are advice only.
+  assert.match(checkIn, /Report each model or effort gap in the prefix only once: when the entry says fresh[^\n]*list it under \*\*Tasks:\*\* as "tier gap still open" instead, so it never causes a daily swap/);
+  assert.match(checkIn, /each model or effort gap reported or still open \(task, served, wanted\)/);
+  assert.match(checkIn, /listed under \*\*Tasks:\*\* as "effort kept from before tiers: confirm or lower"/);
+  assert.ok(checkIn.includes(`reads "${LEGACY_RAISE}"`), 'the check-in names the exact migration reason');
+  assert.match(nudge0(), /the earliest future time an open post reply thread without an unanswered owner question or decision reaches 6 hours with no new message; this run's next scheduled time while a QUIET-6H candidate listed by this run is still unresolved/);
+  // The nudge closes quiet chat reply threads and lists threads due for rotation.
+  const nudge = fs.readFileSync(path.join(TASKS, 'hourly-nudge.md'), 'utf8');
+  assert.match(nudge, /reason QUIET-6H, unresolved post reply threads with no new message for 6 hours or more/);
+  assert.match(nudge, /Rotate: long-lived non-gate worker threads \(integrator, review runner, record keeper; never gate sessions/);
+  assert.match(nudge, /the QUIET-6H due time in the state file has not passed/);
+  assert.match(nudge, /no answer; never a task home thread\./);
+  assert.match(nudge, /\*\*Rotate:\*\*/);
+});
+
 test('templates hold no ids, owner names, project-only tasks or old resolve rules, and fill every placeholder', () => {
   for (const name of fs.readdirSync(TASKS)) {
     const text = fs.readFileSync(path.join(TASKS, name), 'utf8');
@@ -287,34 +384,41 @@ test('the check-in carries every prefix in the fixed order and checks both Toolk
   for (const required of ['"EXAMPLE: Daily check-in"', '"EXAMPLE: Hourly nudge"', '--check daily-check-in', '--check hourly-nudge',
     '--check-memory', 'bound to its home thread (persist_session true), or a fresh session per run (persist_session false) only where the entry says fresh', 'CONTEXT RESET DUE, SKILL UPDATE', 'weekly-rebuild', 'unlisted', 'hearth_channel_id',
     'advice only', 'local, advice', 'Never suggest moving a local task to the cloud', '--declined-dedupe', 'overlaps',
-    'remove the Toolkit plugin only', 'state done', 'older than 65 minutes', 'Never flag other memory lines',
+    'remove only the ai-agent-toolkit plugin on claude.ai in a web browser', 'state done', 'older than 65 minutes', 'Never flag other memory lines',
     'git hash-object --stdin', 'matches no revision', '/skill-drift/', 'unless state.md already reported these hashes',
     'every run reaches the owner as one line', 'swaps each named Toolkit task from the template on main the same turn']) {
     assert.ok(text.includes(required), required);
   }
-  // The check-in posts the skill update card itself, once per main Version, and never over direct account edits.
-  for (const required of ['SKILL CARD: post one skill update card only when all of these hold', 'never on SKILL DRIFT: a card would overwrite direct edits',
+  // A due card is named once per main Version, never over direct account edits, and sent by the coordinator's card thread, never by the check-in.
+  for (const required of ['SKILL CARD: a skill update card is due only when all of these hold', 'never on SKILL DRIFT: a card would overwrite direct edits',
     'the account folder is under 26 hours old', 'every account reference/*.md is absent or equal to main', 'state.md records no "card <main Version>"',
-    'Otherwise call propose_skills', 'skillMd main\'s SKILL.md byte for byte', 'even when state.md already reported this Version',
-    ', card posted', 'fails or is skipped for any other reason', ', card failed: <reason>', 'tap Save on the skill card',
-    'A reference file missing from the account is not drift', 'straight after the call and read it back', 'SKILL BEHIND (carried forward while still seen)', 'every "card <Version>" record (this run\'s and all earlier ones, carried forward)']) {
+    'This check-in never calls propose_skills and never builds the card', '"SKILL BEHIND: <account> -> <main>, card due | "', 'even when state.md already reported this Version',
+    'the coordinator sends it from a fresh skill card thread (main\'s reference/skill-card.md)', 'tap Save on the skill card',
+    'A reference file missing from the account is not drift', 'Record "card <main Version>" in state.md and read it back', 'SKILL BEHIND (carried forward while still seen)', 'every "card <Version>" record (this run\'s and all earlier ones, carried forward)']) {
     assert.ok(text.includes(required), required);
   }
-  // Drift needs the full history (and a failed fetch never reports drift), plugin lag shows every run and is reported once per main version,
-  // and a coordinator that posts skill cards itself gets "card due" instead of a second card.
+  assert.doesNotMatch(text, /call propose_skills:|card posted|skill cards: coordinator|card failed/);
+  // The Skill line compares the saved copy with main in the card thread's terms, and a cut-short or escaped copy is a damaged card, not direct edits.
+  for (const required of ['The **Skill:** line always names the account SKILL.md\'s byte size and sha256 next to main\'s, both normalised the same way.',
+    'is the start of a revision\'s (cut short), or that holds `&lt;`, `&gt;`, `&amp;` or `&quot;` where that revision has none (HTML-escaped), is a damaged card, not direct edits',
+    '"SKILL DRIFT: damaged card, <files>, copy: <path> | "']) {
+    assert.ok(text.includes(required), required);
+  }
+  // Drift needs the full history (and a failed fetch never reports drift), and plugin lag shows every run and is reported once per main version.
   for (const required of ['`git -C TK fetch --unshallow` once and hash every revision again', 'If that fetch fails, report no SKILL DRIFT and post no card',
-    '"drift unverified: unshallow failed: <error>"', 'When memory has the line "skill cards: coordinator", do not call propose_skills: write ", card due"',
+    '"drift unverified: unshallow failed: <error>"',
     'Equal: "**Plugin:** current (<version>)"', 'take the newest commit whose plugin.json has the account version; main moved past it at the next newer commit',
     'use the oldest commit whose version is above the account\'s', 'age unverified: unshallow failed: <error>" and no prefix, and name it on the first line as stuck', 'Under 24 hours ago: name both versions and that commit under **Plugin:**',
     'unless state.md has "plugin behind <main version>"', 'its "plugin behind <version>" record', 'No agent can update the plugin',
-    'remove the Toolkit plugin only and let it reinstall; if it is still behind, select Check for updates on its marketplace',
+    // The Claude app steps, rendered, equal the shared text the session-start reminder and install check use.
+    `put the owner's steps under **Plugin:** for the coordinator's plugin card: ${STEPS_TEXT} Missing account copy`,
     '"plugin behind <main version>" for the version reported as PLUGIN BEHIND (carried forward while the account copy is still behind)',
     'Omit empty bullets except Skill, Block, Binding, Tasks, Nudge, Plugin and Run.']) {
     assert.ok(text.includes(required), required);
   }
-  assert.doesNotMatch(text, /skip the resolve in DELIVERY/, 'bound runs never resolve, so no fresh-only card line');
+  // The check-in holds no card, so no run of it, bound or fresh, keeps its thread open for one.
   const freshCheckIn = tasks().render('daily-check-in', validateParams('daily-check-in', { ...PARAMS['daily-check-in'], session: 'fresh' }));
-  assert.match(freshCheckIn, /When this run posted a card, skip the resolve in DELIVERY: a resolved thread hides the card\./);
+  for (const rendered of [text, freshCheckIn]) assert.doesNotMatch(rendered, /skip the resolve in DELIVERY|posted a card/);
   // Both Toolkit tasks are bound now, so a bound check-in is never its own gap.
   assert.doesNotMatch(text, /the check-in runs a fresh session per run/);
   assert.match(text, /bound-session or fresh-session when that differs from the entry/);
@@ -349,12 +453,31 @@ test('memory check reads only the BINDING and SCHEDULED TASKS lines', () => {
     [`${binding}\n${tasksLine.replace('since 2026-10-24;', 'since 2026-10-24 | stopped by owner 2026-10-25;')}\n`, ['current'], 0],
     [`${binding}\n${tasksLine.replace('since 2026-10-24;', 'since 2026-10-24 | stopped;')}\n`, ['MEMORY FORMAT: SCHEDULED TASKS old format'], 1],
     [`${binding}\n${tasksLine.replace('fresh;', 'sometimes;')}\n`, ['MEMORY FORMAT: SCHEDULED TASKS old format'], 1],
+    // A recorded raise survives swaps; it names tier, effort, date and reason.
+    [`${binding}\n${tasksLine.replace('since 2026-10-24;', 'since 2026-10-24 | raised top/high 2026-10-25: licence calls the owner acts on;')}\n`, ['current'], 0],
+    [`${binding}\n${tasksLine.replace('since 2026-10-24;', 'since 2026-10-24 | raised top/high 2026-10-25: licence calls | stopped by owner 2026-10-26;')}\n`, ['current'], 0],
+    [`${binding}\n${tasksLine.replace('since 2026-10-24;', 'since 2026-10-24 | raised top/low 2026-10-25: below the floor;')}\n`, ['MEMORY FORMAT: SCHEDULED TASKS old format'], 1],
+    [`${binding}\n${tasksLine.replace('since 2026-10-24;', 'since 2026-10-24 | raised top/high 2026-10-25;')}\n`, ['MEMORY FORMAT: SCHEDULED TASKS old format'], 1],
+    // A reason can never pass for the owner's stop or schedule marks.
+    [`${binding}\n${tasksLine.replace('since 2026-10-24;', 'since 2026-10-24 | raised top/high 2026-10-25: x stopped by owner 2026-10-26;')}\n`, ['MEMORY FORMAT: SCHEDULED TASKS old format'], 1],
+    [`${binding}\n${tasksLine.replace('since 2026-10-24;', 'since 2026-10-24 | raised top/high 2026-10-25: kept for the owner schedule;')}\n`, ['MEMORY FORMAT: SCHEDULED TASKS old format'], 1],
+    ...['x Stopped By Owner 2026-10-26', 'x stopped  by owner 2026-10-26', 'kept for owner-schedule', 'x stopped by the owner 2026-10-26',
+      // The same characters and length as the raise_reason param.
+      'a{b}c', 'a`b', 'ab', 'x'.repeat(201)
+    ].map(reason => [`${binding}\n${tasksLine.replace('since 2026-10-24;', `since 2026-10-24 | raised top/high 2026-10-25: ${reason};`)}\n`, ['MEMORY FORMAT: SCHEDULED TASKS old format'], 1]),
+    [`${binding}\n${tasksLine.replace('since 2026-10-24;', `since 2026-10-24 | raised top/high 2026-10-25: ${'x'.repeat(200)};`)}\n`, ['current'], 0],
     ['', ['MEMORY FORMAT: BINDING missing', 'MEMORY FORMAT: SCHEDULED TASKS missing'], 1]
   ];
   for (const [text, lines, exitCode] of rows) assert.deepEqual(checkMemory(text), { lines, exitCode }, text);
+  // The raise reason is printable ASCII on one line: a line break or invisible character inside it is
+  // refused, so no reader sees a stop or schedule mark the check does not. CRLF is a real line end.
+  const withReason = reason => `${binding}\n${tasksLine.replace('since 2026-10-24;', `since 2026-10-24 | raised top/high 2026-10-25: reason ${reason} end;`)}\n`;
+  hostile.expectDefaultDeny(assert, text => checkMemory(withReason(text)).exitCode === 0, hostile.cases(['line-breaks', 'invisible']), {
+    allow: ['crlf-line-end', 'crlf-then-lone-cr']
+  });
 });
 
-test('every setup step that creates something has an inventory row, and every row is checked by the daily check-in', () => {
+test('every setup step that creates something has an inventory row, and every row is checked by the daily check-in or a registered launch hook', () => {
   const inventory = JSON.parse(fs.readFileSync(INVENTORY, 'utf8'));
   const setup = fs.readFileSync(SETUP, 'utf8').replace(/\r\n/g, '\n');
   assert.match(fs.readFileSync(SKILL, 'utf8'), /reference\/setup\.md/, 'the skill routes setup to its reference file');
@@ -368,7 +491,14 @@ test('every setup step that creates something has an inventory row, and every ro
   const template = fs.readFileSync(path.join(TASKS, 'daily-check-in.md'), 'utf8');
   for (const row of inventory.rows) {
     assert.match(row.resync, /^(auto|owner|report)\b/, row.id);
-    if (row.check !== 'never changed') assert.ok(template.includes(row.check), `${row.id}: ${row.check}`);
+    // A row a launch hook enforces names that hook's script, which must exist and be registered in the Claude Code
+    // plugin; every other row is in the check-in.
+    const hook = row.check.match(/^hook: (\S+)$/);
+    if (hook) {
+      assert.ok(fs.existsSync(path.join(ROOT, hook[1])), `${row.id}: ${hook[1]}`);
+      assert.ok(fs.readFileSync(path.join(ROOT, '.claude-plugin', 'hooks', 'hooks.json'), 'utf8').includes(`/${hook[1]}\\"`), `${row.id}: ${hook[1]} registered`);
+    }
+    else if (row.check !== 'never changed') assert.ok(template.includes(row.check), `${row.id}: ${row.check}`);
   }
   assert.equal(new Set(inventory.rows.map(row => row.id)).size, inventory.rows.length);
 });
@@ -418,6 +548,8 @@ test('every line that re-arms, updates, swaps, rebuilds, recreates or sets up a 
     'start a bounded G0 to create or refresh it before you plan anything',
     // The reconciler's `refresh` command brings programme pages up to date; it touches no task.
     '**Programme pages refresh themselves, without tokens.**', '5b. Programme sweep',
+    // The attention check reads the programme with `attention --refresh`; it touches no task.
+    '**Programme attention before gates, finality and settling.**',
   ];
   const unguarded = [];
   for (const rel of files) {
@@ -430,7 +562,7 @@ test('every line that re-arms, updates, swaps, rebuilds, recreates or sets up a 
   assert.match(skill, /\*\*Stopped by owner:\*\* a task whose `SCHEDULED TASKS:` entry says `stopped by owner` is outside every automatic path/);
   assert.match(skill, /the restart removes the mark/);
   assert.match(fs.readFileSync(path.join(dir, 'reference', 'recurring-tasks.md'), 'utf8'), /When the owner restarts it, remove the mark\./);
-  assert.match(fs.readFileSync(path.join(dir, 'reference', 'recurring-tasks.md'), 'utf8'), /--refresh <kind> <old prompt file> --session <bound\|fresh>` keeps the params and project text and always names the session the replacement runs in/);
+  assert.match(fs.readFileSync(path.join(dir, 'reference', 'recurring-tasks.md'), 'utf8'), /--refresh <kind> <old prompt file> --session <bound\|fresh>`; it keeps the params and project text and always names the session the replacement runs in/);
 });
 
 // A run that starts outside its home thread (for example fire_trigger from another thread) has no

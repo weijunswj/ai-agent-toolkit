@@ -130,7 +130,7 @@ test('canonical wizard renderer is compact, aligned, and free of implementation 
   assert.doesNotMatch(text, /\*\*Choices:\*\*[^\n]*(?:\/|\|)/);
   assert.doesNotMatch(terminal, /Codex helper agents|One helper at most|Use a custom number/i);
   assert.doesNotMatch(terminal, /Choices:[^\n]*(?:\/|,)/);
-  assert.match(text, /Reply with the displayed bank reference[\s\S]*: all recommended`[\s\S]*setup-toolkit-question-bank:complete/);
+  assert.match(text, /Bank reference: [\s\S]*Reply with either:[\s\S]*- `all recommended`[\s\S]*setup-toolkit-question-bank:complete/);
   for (const spec of planned.specs) assert.ok(spec.description.split(/(?<=[.!?])\s+/).filter(Boolean).length <= 2, spec.key);
 
   current.delegation.helper_count = 4;
@@ -219,15 +219,22 @@ test('distinct piped answers follow the canonical question order without shifts'
     '--codex-cli', createFakeCodexAppServer(root),
   ], {
     env: isolatedHomeEnv(root),
-    input: ['disable', 'enable', 'default', 'one-helper', 'keep'].join('\n'),
+    input: ['disable', 'enable', 'default', 'one-helper', 'keep', 'install'].join('\n'),
     timeout: 300000,
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   const bank = result.stdout.split('<!-- setup-toolkit-question-bank:complete -->')[0];
   assert.match(bank, /Some visible questions are already resolved by explicit setup flags/);
-  assert.match(bank, /Reply with one line for each unresolved question in this exact order:[\s\S]*\*\*1\.2\*\* Automatic updates[\s\S]*\*\*1\.3\*\* Update reports[\s\S]*\*\*1\.4\*\* Report retention[\s\S]*\*\*2\.2\*\* Codex Toolkit maintenance/);
-  assert.doesNotMatch(bank, /Reply with the displayed bank reference and either|: all recommended/);
+  // The Codex home exists, so 3.1 asks about the Codex plugin; the Codex hooks status line takes no answer line.
+  assert.match(bank, /Reply with one line for each unresolved question in this exact order:[\s\S]*\*\*1\.2\*\* Automatic updates[\s\S]*\*\*1\.3\*\* Update reports[\s\S]*\*\*1\.4\*\* Report retention[\s\S]*\*\*2\.2\*\* Codex Toolkit maintenance[\s\S]*\*\*3\.1\*\* Keep Toolkit available in Codex\?/);
+  assert.doesNotMatch(bank, /\*\*\d+\.\d+\*\* Toolkit hooks in Codex|\| \d+\.\d+ \| Toolkit hooks in Codex/);
+  assert.match(bank, /\nStatus \(nothing to answer\): Toolkit hooks in Codex: /);
+  assert.doesNotMatch(bank, /Reply with either:|: all recommended/);
   assert.match(result.stdout, /Setup choices confirmed before writes:[\s\S]*2\.2 Codex Toolkit maintenance: C - Keep current \(canonical: keep; effective: disable\)/);
+  // Reports are already kept for seven days, so "enable" and "default" name the hidden twins of the
+  // recommended Keep current and apply as keep, with the same effect.
+  assert.match(result.stdout, /1\.3 Update reports: B - Keep current \(canonical: keep; effective: enable\)/);
+  assert.match(result.stdout, /1\.4 Report retention: B - Keep current \(canonical: keep; effective: 7 days\)/);
   assert.doesNotMatch(result.stdout, /Codex helper agents:/);
   assert.match(result.stdout, /Question answers initially required: yes/);
   assert.match(result.stdout, /Question answers supplied by complete stdin: yes/);
@@ -236,7 +243,8 @@ test('distinct piped answers follow the canonical question order without shifts'
   assert.match(fs.readFileSync(configPath, 'utf8'), /AI-AGENT-TOOLKIT:BEGIN CODEX-HELPER-CAPACITY/);
   const bridgeArgs = fs.readFileSync(path.join(setupRepo, 'BRIDGE_ARGS.log'), 'utf8');
   assert.match(bridgeArgs, /--disable-repo-auto-update/);
-  assert.match(bridgeArgs, /--disable-update-report-open --enable-update-reports --update-report-retention-days 7 --write/);
+  assert.match(bridgeArgs, /--disable-update-report-open --write/);
+  assert.doesNotMatch(bridgeArgs, /--enable-update-reports|--update-report-retention-days/);
   assert.doesNotMatch(bridgeArgs, /codex-plugin-auto-refresh/);
   assert.doesNotMatch(bridgeArgs, /--enable-target|--disable-target/);
 });
@@ -249,7 +257,7 @@ test('partial explicit flags reject concise input before writes and accept only 
   const preview = run(args, { env, input: '' });
   const reference = displayedBankReference(preview.stdout);
   assert.match(preview.stdout, /Some visible questions are already resolved by explicit setup flags/);
-  assert.doesNotMatch(preview.stdout, /Reply with the displayed bank reference and either/);
+  assert.doesNotMatch(preview.stdout, /Reply with either:/);
 
   const rejected = run(args, { env, input: `${reference}: all recommended\n` });
   assert.notEqual(rejected.status, 0);
@@ -287,7 +295,7 @@ test('choice-activated custom checkout detail is rendered and consumed in the ca
   const customPath = path.join(root, 'Chosen Managed Source');
   const result = run(['--execute', '--repo-remote', origin, '--enable-repo-auto-update'], {
     env: isolatedHomeEnv(root),
-    input: ['custom', 'A', 'C', 'keep', 'B', customPath].join('\n'),
+    input: ['custom', 'B', 'B', 'keep', 'B', customPath].join('\n'),
     timeout: 300000,
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
@@ -302,11 +310,11 @@ test('choice-activated custom retention detail follows the displayed canonical o
   const { origin } = createGitBackedSetupRepo(root);
   const result = run(['--execute', '--repo-remote', origin, '--enable-repo-auto-update'], {
     env: isolatedHomeEnv(root),
-    input: ['A', 'A', 'B', 'keep', 'B', '14'].join('\n'),
+    input: ['A', 'B', 'A', 'keep', 'B', '14'].join('\n'),
     timeout: 300000,
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /2\. 1\.4 Report retention: positive report-retention duration in days \(when 1\.4 is B\/custom/);
+  assert.match(result.stdout, /2\. 1\.4 Report retention: positive report-retention duration in days \(when 1\.4 is A\/custom/);
   assert.match(result.stdout, /Detail 2 1\.4 Report retention: positive report-retention duration in days - 14 days/);
 });
 
@@ -316,7 +324,7 @@ test('simultaneous custom checkout and retention consume details in displayed or
   const customPath = path.join(root, 'Two Detail Managed Source');
   const result = run(['--execute', '--repo-remote', origin, '--enable-repo-auto-update'], {
     env: isolatedHomeEnv(root),
-    input: ['custom', 'A', 'B', 'keep', 'B', customPath, '21'].join('\n'),
+    input: ['custom', 'B', 'A', 'keep', 'B', customPath, '21'].join('\n'),
     timeout: 300000,
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
@@ -337,7 +345,7 @@ test('preselected path and helper details share rendering consumption and summar
     '--approve-codex-config-proposal',
   ], {
     env: isolatedHomeEnv(root),
-    input: ['A', 'B', 'B', customPath, '30', '1'].join('\n'),
+    input: ['B', 'A', 'B', customPath, '30', '1'].join('\n'),
     timeout: 300000,
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);

@@ -46,8 +46,9 @@ test('each block stays inside its own budget', () => {
   assert.ok(crlfBytes(ROOT_AGENTS) <= 15000, `root AGENTS.md ${crlfBytes(ROOT_AGENTS)} bytes`);
   // CONTROLLER.md loads only for controllers, not every session; the rules audit cut it below 18000.
   assert.ok(crlfBytes(read('repo/CONTROLLER.md')) <= 18000, 'CONTROLLER.md');
-  // The gate rules load on demand for gate sessions only, but stay compact.
-  assert.ok(crlfBytes(read('repo/contracts/agent-rules/gate-rules.md')) <= 10500, 'gate rules');
+  // The gate rules load on demand for gate sessions only, but stay compact. The cap rose from
+  // 10,500 to hold the review-round rules (self-check, finding severities, narrow rechecks).
+  assert.ok(crlfBytes(read('repo/contracts/agent-rules/gate-rules.md')) <= 11000, 'gate rules');
 });
 
 test('guidance moved out of root AGENTS.md is still reachable from a loaded layer', () => {
@@ -66,6 +67,8 @@ test('guidance moved out of root AGENTS.md is still reachable from a loaded laye
     ['global-rules.md', ROOT_AGENTS],
     ['repo/contracts/source-of-truth-contract.md', ROOT_AGENTS],
     ['repo/docs/agent-playbooks/INDEX.md', ROOT_AGENTS],
+    ['Check long runs early against their usual time', GLOBAL],
+    ['## Long Runs', read('skills/repository-agent-rules/repo-local/docs/agent-playbooks/fast-tests-and-sharding.md')],
   ];
   for (const [text, layer] of moved) assert.ok(layer.includes(text), text);
   assert.doesNotMatch(ROOT_AGENTS, /GLOBAL-AGENTS\.MD-TEMPLATE|N8N-AGENT-RULES-ADAPTER|one pending owner question/);

@@ -39,6 +39,7 @@ const CACHE_FINGERPRINT_PATHS = [
   "repo/scripts/toolkit-v3-helper-guard.cjs",
   "repo/scripts/toolkit-codex-helper-hook.cjs",
   "repo/scripts/toolkit-attribution-guard.cjs",
+  "repo/scripts/toolkit-push-check.cjs",
   "repo/scripts/toolkit-claude-agent-hook.cjs",
   "repo/scripts/toolkit-gate-contract-compiler.cjs",
   "repo/scripts/toolkit-capability-registry.cjs",
@@ -59,6 +60,7 @@ const CACHE_FINGERPRINT_PATHS = [
   'repo/scripts/setup-core-codex.cjs',
   'repo/scripts/setup-toolkit.cjs',
   'repo/scripts/setup-codex-toolkit-plugin.cjs',
+  'repo/scripts/toolkit-codex-install-state.cjs',
   'repo/scripts/repo-ignore-hygiene.cjs',
   'repo/scripts/repo-local-backup.cjs',
   'repo/scripts/toolkit-agent-control.cjs',
@@ -711,12 +713,14 @@ function hookTrustList(pluginRoot) {
   return names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names.join('');
 }
 
-// The list comes from the installed cache's hooks file when there is one, else from this checkout.
+// Each Toolkit hook's on/off and review state, read from config.toml `[hooks.state]` against the
+// installed cache's hooks file. Read only: Toolkit never edits `hooks.state`.
 function detectHookTrustStatus(codexHome, cacheRoot) {
-  return {
-    status: 'verification-unavailable',
-    message: `Hook trust verification is unavailable from supported non-interactive Codex inspection. Open \`/hooks\` in Codex, review and trust the current Toolkit hooks (${hookTrustList(cacheRoot || undefined)}). Codex skips each hook until it is trusted.`
-  };
+  // Required here: the reader requires this file for its TOML helpers.
+  const { readToolkitHookStates, describeHookStates } = require('./toolkit-codex-install-state.cjs');
+  let configText = null;
+  try { configText = readConfigSnapshot(codexHome).text; } catch { configText = null; }
+  return describeHookStates(readToolkitHookStates(configText, cacheRoot));
 }
 
 function verifyInstalledCache(codexHome, expectedVersion = EXPECTED_TOOLKIT_VERSION, options = {}) {
@@ -808,7 +812,8 @@ function evaluateConfigCacheFallback(options = {}) {
     errors,
     verificationMethod: 'config-cache-fallback',
     hookTrustStatus: hookTrust.status,
-    hookTrustMessage: hookTrust.message
+    hookTrustMessage: hookTrust.message,
+    hookExecutionStatus: hookTrust.execution
   };
 }
 
@@ -835,6 +840,7 @@ function evaluateCodexToolkitPluginState(pluginList, options = {}) {
       verificationMethod: 'codex-cli-list',
       hookTrustStatus: hookTrust.status,
       hookTrustMessage: hookTrust.message,
+      hookExecutionStatus: hookTrust.execution,
       refusesDowngrade
     };
   }
@@ -864,6 +870,7 @@ function evaluateCodexToolkitPluginState(pluginList, options = {}) {
     verificationMethod: 'codex-cli-list',
     hookTrustStatus: hookTrust.status,
     hookTrustMessage: hookTrust.message,
+    hookExecutionStatus: hookTrust.execution,
     refusesDowngrade
   };
 }
@@ -1800,7 +1807,7 @@ async function main(argv = process.argv.slice(2), dependencies = {}) {
     verification_method: state.verificationMethod,
     hook_trust_status: hookTrustStatus,
     hook_trust_message: hookTrustMessage,
-    hook_execution_status: pluginChanged ? 'skipped until the current hook is reviewed and trusted' : 'verification unavailable; open `/hooks` in Codex',
+    hook_execution_status: pluginChanged ? 'skipped until the current hook is reviewed and trusted' : state.hookExecutionStatus,
     marketplace_transition: transition,
     install_path: codexToolkitInstallCommands(options.repoRoot),
     next_steps: nextStepsForState(reportedState, options),
@@ -1821,21 +1828,6 @@ async function main(argv = process.argv.slice(2), dependencies = {}) {
   return 0;
 }
 
-if (require.main === module) {
-  main().then((code) => {
-    process.exitCode = code;
-  }, (error) => {
-    // The orchestrator withholds helper stderr; this one structured line carries only the reason
-    // code and the user's own current marketplace path, so setup can say what to do next.
-    if (error.code === 'MARKETPLACE_REBIND_REQUIRED' && process.argv.includes('--json')) {
-      console.log(JSON.stringify({ ok: false, reason_code: 'marketplace-rebind-required', current_source: error.currentSource }));
-    }
-    console.error(`FAIL: ${error.message}`);
-    process.exitCode = 1;
-  });
-}
-
-
 module.exports = {
   TOOLKIT_PLUGIN_NAME,
   TOOLKIT_MARKETPLACE_NAME,
@@ -1847,8 +1839,17 @@ module.exports = {
   SESSION_START_LAUNCHER_REL_PATH,
   SESSION_START_POWERSHELL_REL_PATH,
   SESSION_START_RUNTIME_REL_PATH,
+  CodexSetupJournal,
   codexToolkitInstallCommands,
+  compareSemver,
+  comparablePath,
+  defaultCodexHome,
   defaultWindowsPowerShellPath,
+  findTomlSection,
+  inspectConfiguredPluginState,
+  localMarketplaceSection,
+  parseTomlSectionValues,
+  pluginId,
   evaluateCodexToolkitPluginState,
   evaluateMarketplaceBinding,
   findInstalledPluginEntries,
@@ -1878,3 +1879,18 @@ module.exports = {
   isWindowsAppsAliasAccessDenied,
   main
 };
+
+// After the exports: the hook-state reader requires this file back for its TOML helpers.
+if (require.main === module) {
+  main().then((code) => {
+    process.exitCode = code;
+  }, (error) => {
+    // The orchestrator withholds helper stderr; this one structured line carries only the reason
+    // code and the user's own current marketplace path, so setup can say what to do next.
+    if (error.code === 'MARKETPLACE_REBIND_REQUIRED' && process.argv.includes('--json')) {
+      console.log(JSON.stringify({ ok: false, reason_code: 'marketplace-rebind-required', current_source: error.currentSource }));
+    }
+    console.error(`FAIL: ${error.message}`);
+    process.exitCode = 1;
+  });
+}

@@ -29,7 +29,7 @@ Only the appointed controller writes programme state (the parent and child docum
 | Trust | Codex skips a plugin hook until it is reviewed and trusted in `/hooks`; setup says so after a hook change |
 | Programme refresh | After the checkpoint, a session the after-tool hook marked starts `programme.cjs refresh` detached, once for each governed repository it wrote for, then clears the mark; output is appended to one `last-run-<checkout key>.log` per checkout in `~/.ai-agent-toolkit/user-state/programme-refresh/`, and marks older than a day are removed. A write with no governed checkout on this computer, or governance not ENABLED there, starts nothing |
 
-The same script also runs on `PostToolUse` (one command hook, matcher `^(?:Bash|PowerShell|mcp__.*[Gg][Ii][Tt][Hh][Uu][Bb].*)$` in Claude Code and `^(?:Bash|mcp__.*[Gg][Ii][Tt][Hh][Uu][Bb].*)$` in Codex, 10-second timeout, the same Windows launcher in Codex). It reads only the hook input: after a GitHub write (a GitHub connector tool that writes an issue, comment, sub-issue link, pull request, review or branch files; `gh issue` or `gh pr` writes; `gh api` with a write method, or fields without `GET`, or a GraphQL mutation; `git push`) it writes one small mark file for the session. No git, gh or network call, exit 0, nothing on stdout.
+The same script also runs on `PostToolUse` (one command hook, matcher `^(?:Bash|PowerShell|mcp__.*[Gg][Ii][Tt][Hh][Uu][Bb].*)$` in Claude Code and `^(?:Bash|exec_command|shell|local_shell|PowerShell|mcp__.*[Gg][Ii][Tt][Hh][Uu][Bb].*)$` in Codex, 10-second timeout, the same Windows launcher in Codex). It reads only the hook input: after a GitHub write (a GitHub connector tool that writes an issue, comment, sub-issue link, pull request, review or branch files; `gh issue` or `gh pr` writes; `gh api` with a write method, or fields without `GET`, or a GraphQL mutation; `git push`) it writes one small mark file for the session. No git, gh or network call, exit 0, nothing on stdout.
 
 The return block the hook reads:
 
@@ -87,3 +87,13 @@ The integration controller alone writes the parent, the version files and the in
 - The fence orders cooperating Toolkit writers under one GitHub account; it authenticates nobody.
 - The tool cannot see whether another host session has stopped. A takeover record must carry that evidence (session archived, remote control ended).
 - A journal is evidence, not state, until the controller's reconcile reads it.
+
+## Continuation admission
+
+Claude Code's governance `PreToolUse` hook and Codex's helper hook use the same `ToolGate` continuation decision. Both envelopes can contain shell commands for either CLI. The hook's `cwd` remains the current-repository guard; a shell's explicit `workdir` or `cwd` is also checked as its execution directory. Neither a caller's `session_id` nor a claimed target field proves another session's repository.
+
+The [Bridge's hook policy](TOOLKIT-LOCAL-BRIDGE.md#hook-policy) describes which continuation commands Toolkit can verify and which it refuses. A successful source check returns no permission decision: Claude emits an empty object, Codex emits no stdout and exits zero. A denial retains Claude's deny JSON and Codex's deny JSON with exit two. Owner-answer, card, epoch, attribution and native helper transition controls remain independent.
+
+The shared reader looks only where a shell runs a program: the command word, wrapper targets, shell scripts, `eval` and `iex` text, substitutions, groups, script blocks, interpreter scripts, option values some programs run, and text held in variables or written to a file earlier in the same command. Arguments are data. It reads the text under every shell that may run it and refuses what it cannot finish reading when host letters and a selector appear. It never supplies native arguments, target directories or permission, and all current-repository and reached-path guards still inspect the original request first.
+
+Synthetic stdin tests exercise both source entrypoints with disposable homes, repositories and metadata, without executing a continuation or touching an installed plugin. These tests establish source behaviour and non-mutation only. Native dispatcher, hook trust, installed cache, desktop entrypoints and installed qualification remain separate host obligations; a source result does not replace them. Portable-only hosts gain no native continuation support.

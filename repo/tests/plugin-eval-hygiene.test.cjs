@@ -7,6 +7,7 @@ const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const intendedImplicitSkills = [
+  'agent-cost-control',
   'external-operation-preflight',
   'frontend-art-direction',
   'github-program-reconciler',
@@ -79,7 +80,9 @@ test('OpenAI invocation policy matches the behaviourally admitted 14-product imp
 });
 
 test('native plugin default prompts stay within Plugin Eval starter budget', () => {
-  for (const relPath of ['.codex-plugin/plugin.json', '.claude-plugin/plugin.json']) {
+  // Only Codex reads `interface`; claude.ai strips it from the Claude manifest with a sync warning.
+  assert.equal(readJson('.claude-plugin/plugin.json').interface, undefined, '.claude-plugin/plugin.json must not carry the Codex-only interface key');
+  for (const relPath of ['.codex-plugin/plugin.json']) {
     const manifest = readJson(relPath);
     assert.equal(manifest.name, 'ai-agent-toolkit', relPath + ' keeps the stable plugin id even inside versioned install cache folders');
     const prompts = manifest.interface?.defaultPrompt;

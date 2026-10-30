@@ -7,17 +7,27 @@ require('./toolkit-test-temp-guard.cjs'); // private temp; fails if real update 
 
 const test = require('node:test');
 const os = require('node:os');
-const { ToolkitInstallHealthCheck, STATUS, claudeAccountPluginFolders, claudeAccountToolkitVersion } = require('../scripts/toolkit-install-health.cjs');
+const { ToolkitInstallHealthCheck, STATUS, claudeAccountToolkitVersion } = require('../scripts/toolkit-install-health.cjs');
+const { accountCopyBehind, claudeAccountPluginFolders, claudeAppCopyLine } = require('../scripts/toolkit-claude-account-copy.cjs');
 const { ClaudeHelperAgentRenderer } = require('../scripts/toolkit-claude-helper-agents.cjs');
 const { ClaudeNamedHelperPolicy } = require('../scripts/toolkit-claude-helper-policy.cjs');
 const {
-  assert, fs, path, repoRoot, tmpRoot, isolatedHomeEnv, writeFile, run, runTestGit, createGitBackedSetupRepo,
+  assert, fs, path, repoRoot, tmpRoot, isolatedHomeEnv, writeFile, run, runTestGit, createGitBackedSetupRepo, escapeRegExp,
 } = require('./toolkit-setup-test-support.cjs');
 
 const VERSION = JSON.parse(fs.readFileSync(path.join(repoRoot, '.claude-plugin', 'plugin.json'), 'utf8')).version;
 
 const CURRENT_GLOBAL_RULES = Object.freeze({ status: 'current', files: [], covered: [], backup_dir: null, detail: '' });
 const fakeGlobalRules = (result = CURRENT_GLOBAL_RULES) => ({ refresh: () => { if (result instanceof Error) throw result; return result; } });
+
+test('setup names the Claude app copy and points to the steps only when it is behind', () => {
+  assert.equal(claudeAppCopyLine('', '9.9.1'), 'no claude.ai copy found on this PC');
+  assert.equal(claudeAppCopyLine('9.9.1', '9.9.1'), 'claude.ai copy 9.9.1, which only claude.ai updates');
+  assert.equal(claudeAppCopyLine('9.10.0', '9.9.1'), 'claude.ai copy 9.10.0, which only claude.ai updates');
+  assert.equal(claudeAppCopyLine('9.8.0', '9.9.1'),
+    'claude.ai copy 9.8.0, which only claude.ai updates; it is behind this PC, so follow the "Claude app account copy" steps under Install check');
+  assert.equal(claudeAppCopyLine('9.8.0', 'unknown'), 'claude.ai copy 9.8.0, which only claude.ai updates');
+});
 
 function unit(t, { helpers = { status: 'current' }, depth = { state: 'toolkit-one-layer', value: '1' }, recorded = null, globalRules = CURRENT_GLOBAL_RULES } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-install-health-'));
@@ -240,9 +250,30 @@ test('the Projects controller skill check compares the synced claude.ai copy wit
   writeFile(path.join(synced, 'abc_def', 'web-controller-projects', 'SKILL.md'), '---\nname: web-controller-projects\n---\nVersion: 2026-01-01.1\n');
   const older = check();
   assert.equal(older.status, STATUS.PASSED);
-  assert.match(older.summary, new RegExp(`Your uploaded copy is 2026-01-01\.1; Toolkit has ${repoVersion.replace('.', '\.')}\. Upload .*web-controller-projects/SKILL\.md to claude\.ai`));
+  // The update is offered as a skill card, with the file's size and sha256 so the setup agent can confirm it passes it unchanged;
+  // uploading by hand is only the fallback without a card tool.
+  const body = fs.readFileSync(path.join(repoRoot, 'repo', 'contracts', 'claude-projects', 'web-controller-projects', 'SKILL.md'));
+  const sha256 = require('node:crypto').createHash('sha256').update(body).digest('hex');
+  assert.match(older.summary, new RegExp(`Your uploaded copy is 2026-01-01\\.1; Toolkit has ${escapeRegExp(repoVersion)}\\. Skill card: offer \\S*web-controller-projects/SKILL\\.md \\(${body.length} bytes, sha256 ${sha256}\\) as a skill update card to save\\. Without a card tool, upload the folder \\S*web-controller-projects to claude\\.ai`));
+  const reference = path.join(synced, 'abc_def', 'web-controller-projects', 'reference');
+  fs.cpSync(path.join(repoRoot, 'repo', 'contracts', 'claude-projects', 'web-controller-projects', 'reference'), reference, { recursive: true });
+  assert.match(check().summary, /Skill card: offer/, 'reference files equal to Toolkit\'s: a card is enough');
+  writeFile(path.join(reference, 'recurring-tasks.md'), 'edited on the account\n');
+  const edited = check();
+  assert.match(edited.summary, /Your copy has its own reference files, so a skill card is not enough: upload the folder \S*web-controller-projects to claude\.ai/);
+  assert.doesNotMatch(edited.summary, /Skill card: offer/);
   writeFile(path.join(synced, 'abc_def', 'web-controller-projects', 'SKILL.md'), `Version: ${repoVersion}\n`);
   assert.match(check().summary, /Your uploaded copy is current/);
+});
+
+test('the setup skill turns the Projects skill notice into a skill card, with the hand upload only as the fallback', () => {
+  const text = fs.readFileSync(path.join(repoRoot, 'skills', 'toolkit-setup', 'SKILL.md'), 'utf8').replace(/\r\n/g, '\n');
+  assert.match(text, /line says `Skill card: offer <SKILL\.md path> \(<bytes> bytes, sha256 <hash>\)`, offer the update as a card the owner saves rather than asking them to upload it\. First check that file: its byte size and sha256 equal the line's, its Version line is the one the line says Toolkit has, its frontmatter `name` is `web-controller-projects`, and it holds no `&lt;`, `&gt;`, `&amp;` or `&quot;`; if any check fails, say so and stop\./);
+  assert.match(text, /Then, in this session \(never through a subagent or helper\), load `propose_skills` \(ToolSearch\) and call it with one proposal: kind `improvement`, target and name `web-controller-projects`, the description copied from that SKILL\.md's frontmatter, and `skillMd` set to that file's text exactly as read \(never retyped\)\./);
+  assert.match(text, /The Toolkit skill card hook refuses a card that is not main's SKILL\.md; when it does because this Toolkit copy is behind main, refresh Toolkit and run the install check again\./);
+  assert.match(text, /Then tell the owner to tap Save on the card, and that saving replaces any edits made directly to their claude\.ai copy\./);
+  assert.match(text, /Only when `propose_skills` does not exist in this session, or the call fails, say so and give the owner the line's hand-upload step\./);
+  assert.match(text, /When the line says the copy has its own reference files, a card is not enough: give only the folder upload step\./);
 });
 
 test('the Claude app account copy check reports an older claude.ai copy with the fix, reads only, and blocks nothing', (t) => {
@@ -271,7 +302,8 @@ test('the Claude app account copy check reports an older claude.ai copy with the
   const older = find(result);
   assert.equal(older.status, STATUS.PASSED, 'an older account copy never blocks');
   assert.equal(result.status, STATUS.PASSED);
-  assert.match(older.summary, /Your claude\.ai account copy of Toolkit is 9\.8\.0; this computer has 9\.9\.1\. The Claude app runs the account copy, and claude\.ai updates it from Toolkit's main branch: check that Sync automatically is on for the ai-agent-toolkit marketplace in claude\.ai, and if the copy stays behind, remove that marketplace and add it again\./);
+  // The same notice and steps as the Claude app's session-start reminder and the daily check-in.
+  assert.equal(older.summary, accountCopyBehind('9.8.0', '9.9.1'));
   assert.doesNotMatch(older.summary, /plugin_toolkit|claude_example|LocalAppData/, 'no ids or paths in the report');
   assert.ok(fs.readFileSync(path.join(folder, 'manifest.json')).equals(before), 'the check never writes');
 

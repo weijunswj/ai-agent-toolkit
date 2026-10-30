@@ -55,6 +55,19 @@ test('no script, skill or plugin hook runs a pull request merge', () => {
       if (!/\.(?:cjs|js|mjs|ps1|sh|cmd|json|md)$/.test(entry.name)) continue;
       // The attribution guard names gh pr merge only to check its message for AI attribution.
       if (entry.name === 'toolkit-attribution-guard.cjs') continue;
+      // The merge hold names merge commands only to refuse them, and must never run one itself: it
+      // loads only these modules and starts no process and makes no network call.
+      if (path.relative(root, full).split(path.sep).join('/') === 'repo/scripts/toolkit-merge-hold.cjs') {
+        const source = fs.readFileSync(full, 'utf8');
+        const loads = [...source.matchAll(/\brequire\s*\(([^)]*)\)/g)].map((match) => match[1].trim());
+        assert.deepEqual(loads.sort(), ["'./toolkit-governance-gate.cjs'", "'./toolkit-governance-state.cjs'", "'./toolkit-shell-call.cjs'", "'node:crypto'", "'node:fs'", "'node:path'"]);
+        assert.doesNotMatch(source, /\bimport\s*\(|child_process|(?<![.\w])(?:spawn|exec|execFile|fork)(?:Sync)?\s*\(|\bfetch\s*\(|node:https?\b|node:net\b/);
+        // The shell-call reader it loads only reads its input.
+        const reader = fs.readFileSync(path.join(root, 'repo', 'scripts', 'toolkit-shell-call.cjs'), 'utf8');
+        assert.deepEqual([...reader.matchAll(/\brequire\s*\(([^)]*)\)/g)].map((match) => match[1].trim()), ["'node:os'", "'node:path'"]);
+        assert.doesNotMatch(reader, /\bimport\s*\(|child_process|(?<![.\w])(?:spawn|exec|execFile|fork)(?:Sync)?\s*\(|\bfetch\s*\(|node:https?\b|node:net\b/);
+        continue;
+      }
       const text = fs.readFileSync(full, 'utf8');
       if (/gh\s+pr\s+merge|enablePullRequestAutoMerge|merge\s+--auto\b|--auto-merge\b/i.test(text)) hits.push(path.relative(root, full));
     }

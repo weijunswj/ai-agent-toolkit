@@ -193,6 +193,11 @@ function verifyCiSummaries({ manifest, discovered, summaries, needs }) {
       errors.push(`a summary does not use ${SUMMARY_SCHEMA}`);
       continue;
     }
+    // A clock-ahead run checks only the files that pin a date, so it never stands in for a shard.
+    if (summary.clock_offset_days !== undefined) {
+      errors.push(`a ${summary.system} summary ran with the clock moved ${summary.clock_offset_days} days ahead, so it does not count as a shard run`);
+      continue;
+    }
     const legs = bySystem.get(summary.system);
     if (!legs) {
       errors.push(`a summary names unknown system ${summary.system}`);
@@ -241,7 +246,7 @@ const VERIFY_COMMAND = 'node repo/scripts/run-tests.cjs --verify-ci "$RUNNER_TEM
 const GATE_STEP = 'Run validation';
 const AGGREGATE_HEADER = [
   '  validate:',
-  '    needs: [tests-linux, tests-windows, personal-data]',
+  '    needs: [tests-linux, tests-windows, tests-clock-ahead, personal-data]',
   '    if: ${{ always() }}',
   '    runs-on: ubuntu-latest',
   '    timeout-minutes: 15',
@@ -289,15 +294,17 @@ function testJobText(system, ids) {
     '        run: npm ci --ignore-scripts',
     '',
     '      - name: Set up Python',
-    '        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0',
+    '        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0',
     '        with:',
     "          python-version: '3.12'",
     '',
     '      - name: Run test shard',
     `        run: node repo/scripts/run-tests.cjs --shard \${{ matrix.shard }} --os ${system} --temp-root "\${{ runner.temp }}/tests" --summary "\${{ runner.temp }}/summary/test-summary-\${{ matrix.shard }}.json"`,
     '',
+    // A failed shard still uploads its summary, so the validate job names the failed tests.
     '      - name: Upload test summary',
-    '        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1',
+    '        if: ${{ !cancelled() }}',
+    '        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2',
     '        with:',
     '          name: test-summary-${{ matrix.shard }}',
     '          path: ${{ runner.temp }}/summary/test-summary-${{ matrix.shard }}.json',
@@ -305,6 +312,37 @@ function testJobText(system, ids) {
     '          retention-days: 7',
   ].join('\n');
 }
+
+// The exact text of the clock-ahead job: the test files that pin a calendar date, run with Node's
+// clock moved 400 days ahead (run-tests.cjs --clock-ahead). It uploads no summary, so it never
+// counts toward shard coverage; the validate job needs it, so a failure fails the required check.
+const CLOCK_AHEAD_JOB = [
+  '  tests-clock-ahead:',
+  '    runs-on: ubuntu-latest',
+  '    timeout-minutes: 30',
+  '    steps:',
+  '      - name: Checkout',
+  '        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1',
+  '        with:',
+  '          fetch-depth: 0',
+  '          persist-credentials: false',
+  '',
+  '      - name: Set up Node',
+  '        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0',
+  '        with:',
+  '          node-version: 22',
+  '',
+  '      - name: Install dependencies',
+  '        run: npm ci --ignore-scripts',
+  '',
+  '      - name: Set up Python',
+  '        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0',
+  '        with:',
+  "          python-version: '3.12'",
+  '',
+  '      - name: Run the tests that pin a date with the clock 400 days ahead',
+  '        run: node repo/scripts/run-tests.cjs --clock-ahead --clock-offset-days 400 --temp-root "${{ runner.temp }}/tests"',
+].join('\n');
 
 // The exact text of the personal-data job: every commit of the pull request or push, its messages,
 // branch name and pull request text, checked by the personal-data guard. The validate job waits
@@ -346,14 +384,14 @@ function validateJobText(commands) {
     '          node-version: 22',
     '',
     '      - name: Download test summaries',
-    '        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1',
+    '        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2',
     '        with:',
     '          pattern: test-summary-*',
     '          path: ${{ runner.temp }}/test-summaries',
     '          merge-multiple: true',
     '',
     '      - name: Set up Python',
-    '        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0',
+    '        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0',
     '        with:',
     "          python-version: '3.12'",
     '',
@@ -393,6 +431,7 @@ const WORKFLOW_HEADER = [
   '',
   'on:',
   '  pull_request:',
+  '    types: [opened, edited, reopened, synchronize]',
   '  push:',
   '    branches:',
   '      - main',
@@ -400,13 +439,23 @@ const WORKFLOW_HEADER = [
   'permissions:',
   '  contents: read',
   '',
+  '# A newer run for the same pull request cancels the older one; every push keeps its own run.',
+  'concurrency:',
+  "  group: validate-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}",
+  '  cancel-in-progress: true',
+  '',
   '# The test files run in shards on Linux and Windows (repo/contracts/ci/test-shards.json). The',
   '# validate job runs after every shard, also when one failed: its "Run validation" step runs the',
-  '# repository checks and then proves from the shard summaries that each system ran every test file',
-  '# once with no failure. A failed, cancelled or skipped shard fails it. The personal-data job checks',
+  '# repository checks, fails any test file over its time budget (check-test-durations.cjs), and then',
+  '# proves from the shard summaries that each system ran every test file once with no failure. A',
+  '# failed, cancelled or skipped shard fails it. The tests-clock-ahead job runs the test files that',
+  '# pin a calendar date with Node\'s clock 400 days ahead, so a test that only passes near the date',
+  '# it pins fails now rather than months later; validate waits for it. The personal-data job checks',
   '# every commit of the pull request or push, the commit messages, the branch name and the pull',
-  '# request title and body for email addresses, phone numbers and WhatsApp links (values are never',
-  '# printed); validate waits for it too, so a hit or a scan error fails the required check.',
+  '# request title and body for email addresses, phone numbers and WhatsApp links, and the title and',
+  '# body for home-folder paths and AI attribution (values are never printed); validate waits for it',
+  '# too, so a hit or a scan error fails the required check. An edit to the title or body runs the',
+  '# whole workflow again, so a fixed body clears the required check without a new commit.',
   'jobs:',
 ].join('\n');
 
@@ -419,6 +468,8 @@ function workflowText(manifest, commands) {
     testJobText('linux', shardIds(manifest, 'linux')),
     '',
     testJobText('windows', shardIds(manifest, 'windows')),
+    '',
+    CLOCK_AHEAD_JOB,
     '',
     PERSONAL_DATA_JOB,
     '',
@@ -446,43 +497,97 @@ function workflowJobs(source) {
   }));
 }
 
+// One pinned action line: the action, a full commit SHA and its version comment.
+const PINNED_USES = /^( {8}uses: [A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+@)[0-9a-f]{40} # v\d+\.\d+\.\d+$/;
+
+// The workflow text with each action pin update put back to its pinned line, so a Dependabot update
+// that changes only the commit SHA and version comment of the same action passes. A different
+// action, a tag or short ref, a missing version comment or any other edit stays a difference.
+function withPinUpdatesAccepted(text, expected) {
+  const lines = text.split('\n');
+  const pinned = expected.split('\n');
+  if (lines.length !== pinned.length) return text;
+  return lines.map((line, index) => {
+    const found = line.match(PINNED_USES);
+    const want = pinned[index].match(PINNED_USES);
+    return found && want && found[1] === want[1] ? pinned[index] : line;
+  }).join('\n');
+}
+
 // Drift guard for .github/workflows/validate.yml: the whole file matches its pinned text, with only
-// the gate command list taken from the file; each command but the last is a plain repository script
-// and the last is the summary check. The per-job checks before the whole-file comparison say what
-// moved when they can.
+// the gate command list taken from the file and action pin updates accepted (withPinUpdatesAccepted);
+// each command but the last is a plain repository script and the last is the summary check. The
+// per-job checks before the whole-file comparison say what moved when they can.
 function workflowErrors(source, manifest) {
   const errors = [];
-  const text = source.replace(/\r\n/g, '\n');
-  for (const [pattern, label] of FORBIDDEN) if (pattern.test(text)) errors.push(`validate.yml must not contain ${label}`);
+  const raw = source.replace(/\r\n/g, '\n');
+  for (const [pattern, label] of FORBIDDEN) if (pattern.test(raw)) errors.push(`validate.yml must not contain ${label}`);
+  let commands = null;
+  let commandError = null;
+  try { commands = gateCommands(raw); }
+  catch (error) { commandError = error.message; }
+  const text = commands ? withPinUpdatesAccepted(raw, workflowText(manifest, commands)) : raw;
   const jobs = workflowJobs(text);
-  const expected = ['tests-linux', 'tests-windows', 'personal-data', 'validate'];
+  const expected = ['tests-linux', 'tests-windows', 'tests-clock-ahead', 'personal-data', 'validate'];
   if ([...jobs.keys()].join(',') !== expected.join(',')) errors.push(`validate.yml jobs must be exactly ${expected.join(', ')} in that order (found ${[...jobs.keys()].join(', ') || 'none'})`);
   for (const system of SYSTEMS) {
     const job = jobs.get(`tests-${system}`);
     if (job !== undefined && job !== testJobText(system, shardIds(manifest, system))) errors.push(`the tests-${system} job differs from the pinned text for shards ${shardIds(manifest, system).join(', ')}`);
   }
+  const clockAhead = jobs.get('tests-clock-ahead');
+  if (clockAhead !== undefined && clockAhead !== CLOCK_AHEAD_JOB) errors.push('the tests-clock-ahead job differs from its pinned text');
   const personalData = jobs.get('personal-data');
   if (personalData !== undefined && personalData !== PERSONAL_DATA_JOB) errors.push('the personal-data job differs from its pinned text');
   const aggregate = jobs.get('validate');
   if (aggregate !== undefined) {
     const lines = aggregate.split('\n');
-    if (lines.slice(0, AGGREGATE_HEADER.length).join('\n') !== AGGREGATE_HEADER.join('\n')) errors.push('the validate job must start with needs: [tests-linux, tests-windows, personal-data], if: ${{ always() }}, runs-on: ubuntu-latest and timeout-minutes: 15');
+    if (lines.slice(0, AGGREGATE_HEADER.length).join('\n') !== AGGREGATE_HEADER.join('\n')) errors.push('the validate job must start with needs: [tests-linux, tests-windows, tests-clock-ahead, personal-data], if: ${{ always() }}, runs-on: ubuntu-latest and timeout-minutes: 15');
     const names = lines.filter((line) => /^ {6}- name: /.test(line)).map((line) => line.replace(/^ {6}- name: /, ''));
     if (names.join('|') !== 'Checkout|Set up Node|Download test summaries|Set up Python|Run validation') errors.push('the validate job steps must be Checkout, Set up Node, Download test summaries, Set up Python, Run validation (Run validation is step 6)');
     if (lines.filter((line) => /^ {8}if:/.test(line)).length) errors.push('no step in the validate job may have a condition');
     if (lines[lines.length - 1].trim() !== VERIFY_COMMAND) errors.push(`the Run validation step must end with ${VERIFY_COMMAND}`);
     if (!/^ {10}TEST_LEGS: \$\{\{ toJSON\(needs\) \}\}$/m.test(aggregate)) errors.push('the Run validation step must pass TEST_LEGS: ${{ toJSON(needs) }}');
   }
-  let commands = null;
-  try { commands = gateCommands(text); }
-  catch (error) { errors.push(error.message); }
+  if (commandError) errors.push(commandError);
   if (commands) {
     for (const command of commands.slice(0, -1)) {
       if (!PLAIN_GATE_COMMAND.test(command)) errors.push(`the Run validation command "${command}" must be a plain node repo/scripts/<name>.cjs line with no shell syntax`);
     }
-    if (text !== workflowText(manifest, commands)) errors.push('validate.yml differs from its pinned text (repo/scripts/ci-test-shards.cjs workflowText); only the Run validation command list may change');
+    if (text !== workflowText(manifest, commands)) errors.push('validate.yml differs from its pinned text (repo/scripts/ci-test-shards.cjs workflowText); only the Run validation command list and the commit SHA and version comment of a pinned action may change');
   }
   return errors;
+}
+
+// A calendar date written into the source: an ISO date literal (YYYY-MM-DD) or a Date.UTC( call.
+const PINNED_DATE = /\b(19|20)\d{2}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])(?!\d)|\bDate\.UTC\(/;
+// A helper loaded by a relative ./ or ../ path ending in .cjs.
+const LOCAL_REQUIRE = /require\((['"])(\.\.?\/[^'"]+\.cjs)\1\)/g;
+
+// The test files that pin a calendar date, in the file or in a repo/tests helper it loads, directly
+// or through other helpers (such as a fake clock). The clock-ahead run (run-tests.cjs --clock-ahead)
+// runs these with Node's clock moved forward: a test that pins a date but lets the code under test
+// read the real clock passes on the day it lands and fails once the real date moves past it. A file
+// that pins no date cannot hold that mistake, so the run leaves it out. readText returns a
+// repo-relative file's text, or null when it does not exist.
+function dateBoundTestFiles(discovered, readText) {
+  const texts = new Map();
+  const text = (file) => {
+    if (!texts.has(file)) texts.set(file, readText(file));
+    return texts.get(file);
+  };
+  const helpersOf = (file) => [...(text(file) || '').matchAll(LOCAL_REQUIRE)]
+    .map((match) => path.posix.normalize(path.posix.join(path.posix.dirname(file), match[2])))
+    .filter((helper) => helper.startsWith(`${TEST_DIR_REL}/`) && !helper.endsWith('.test.cjs'));
+  return discovered.filter((file) => {
+    const seen = new Set([file]);
+    const queue = [file];
+    while (queue.length) {
+      const next = queue.shift();
+      if (PINNED_DATE.test(text(next) || '')) return true;
+      for (const helper of helpersOf(next)) if (!seen.has(helper)) { seen.add(helper); queue.push(helper); }
+    }
+    return false;
+  });
 }
 
 // Test files a local change affects: changed test files, plus test files that name a changed
@@ -512,6 +617,7 @@ module.exports = Object.freeze({
   VERIFY_COMMAND,
   affectedTestFiles,
   assertManifest,
+  dateBoundTestFiles,
   discoverTestFiles,
   estimateShardSeconds,
   gateCommands,

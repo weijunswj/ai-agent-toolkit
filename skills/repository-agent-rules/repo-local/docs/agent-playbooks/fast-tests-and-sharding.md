@@ -15,12 +15,24 @@ Use when tests or CI got slow, or when adding a test runner, test shards or CI t
 - Replace repeated expensive setup with one template per file (a fixture repo or workspace copied or cloned per case), and call code in process instead of spawning it when the same path is covered.
 - Accept a converted file only after several consecutive green runs on every system with identical test counts.
 
+## Long Runs
+
+- Before a long or background command, note its usual time (CI timings, a recent run or the file's budget), then check progress early: at about a quarter of that time, or 15 minutes, whichever comes first.
+- When a test, check or build is far over (about twice its usual time) or its rate keeps falling, stop it and rerun the cheapest plain form that still proves the point; never wait open-ended. Say what you stopped and why. An install, migration or deploy stopped halfway can leave a partial state: report how far over it is and ask before stopping it.
+- Run the narrowest check that proves the point: one file or one test name before the whole suite.
+- When you stop a run, stop its whole process tree, not just the parent. On Windows, follow the orphan cleanup in `windows-local-dev-services`.
+- Capture and logging wrappers must cost the same per write however long the run is: open the log once and stream to it, or batch writes; never reopen, re-read or rewrite one growing file per test. For big suites, keep only failures and the summary.
+
 ## Shard From One Manifest
 
 - One manifest lists named shards per system and one `rest` shard per system that takes every file no other shard names, so new files always run.
 - The runner refuses an unknown or empty shard and fails when a file does not load. CI and local runs read the same manifest.
 - One final job waits for every shard, runs even when one failed, and passes only when every shard succeeded and the shard summaries cover plain test discovery exactly once per system, with at least one test per file and no failure or cancellation. Make that job the required check.
-- A drift guard pins the exact test step text and matrix, and its own test shows it rejects narrowed paths, name filters, `if: false`, `; exit 0` or `|| true`, `continue-on-error`, matrix `include`/`exclude` edits and a runner that ignores its shard. Compare the whole workflow file with the pinned text, not job by job, because a YAML comment, a quoted key or a workflow-wide default can sit outside what a job parser sees. Leave only the gate command list free and allow only plain script commands in it, so a custom `shell:`, `set +e` or `|| echo` cannot hide a failing check.
+- A drift guard pins the exact test step text and matrix, and its own test shows it rejects narrowed paths, name filters, `if: false`, `; exit 0` or `|| true`, `continue-on-error`, matrix `include`/`exclude` edits and a runner that ignores its shard. Compare the whole workflow file with the pinned text, not job by job, because a YAML comment, a quoted key or a workflow-wide default can sit outside what a job parser sees. Leave only the gate command list free and allow only plain script commands in it, so a custom `shell:`, `set +e` or `|| echo` cannot hide a failing check. So that Dependabot action updates pass on their own, also accept a pinned `uses:` line whose action stays the same and whose only change is a new full commit SHA and version comment, and have the guard's tests find the pins in the live file rather than naming today's SHAs, so the update passes the tests too.
+
+## Dates And Clocks
+
+- A test that pins a calendar date passes that same clock to every call that reads the time, so it passes at any real date. Prove it in CI with a job that runs the tests that pin a date with the clock moved about a year ahead; the job never counts toward shard coverage, and the final job waits for it.
 
 ## Windows
 

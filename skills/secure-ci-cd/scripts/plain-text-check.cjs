@@ -276,13 +276,15 @@ function check(root, config, { files = null, spawn } = {}) {
   return { failures, stale, findings, baseline };
 }
 
+// One failure. A reference is described without its matched text, because a matched link can carry
+// anything, a token included; a banned term's match is only the short code itself, so it is shown.
 function describeFailure(finding, config) {
   if (finding.rule === 'banned-term') {
     const entry = config.banned_terms.find((item) => item.term === finding.term) || { reason: 'a banned term', fix: 'say what it means in plain English' };
     return `${finding.file}:${finding.line}: banned-term "${finding.text}": ${entry.reason}; ${entry.fix}`;
   }
   const rule = REFERENCE_RULES.find((item) => item.id === finding.rule);
-  return `${finding.file}:${finding.line}: ${finding.rule} "${finding.text}": ${rule.fix}`;
+  return `${finding.file}:${finding.line}: ${finding.rule}: ${rule ? rule.fix : 'rewrite it in plain English'}`;
 }
 
 function writeBaseline(root, config, baseline) {

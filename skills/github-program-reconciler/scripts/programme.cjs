@@ -8,10 +8,14 @@
 //   reconcile [--issue <n>] [--parent-file <file>]   dry run
 //   show [--parent | --issue <n>] [--include-private]; show --session <id> alone shows that session's local binding
 //   init-parent --catalogue <file>                     validate a catalogue
+//   inventory [--deadline-ms <n>]                      classify every open issue (read-only)
+//   attention [--refresh] [--deadline-ms <n>]          the parent's attention findings; --refresh first runs
+//                                                      the refresh pass below
 //
 // Any session in a governed checkout, executors included, may bring the pages up to date:
-//   refresh                                            the full reconcile --apply pass, written under the
-//                                                      parent's current holder; it takes no decision input
+//   refresh                                            the full reconcile --apply pass with the inventory,
+//                                                      written under the parent's current holder; it takes
+//                                                      no decision input
 //
 // An executor session the controller assigned writes only its own checkpoint journal:
 //   bind --issue <n> --assignment <id> --session <id> [--model <m> --effort <e> [--route-read-back]]
@@ -31,6 +35,11 @@
 //   interrupt --issue <n> --reason <text>
 //   update --issue <n> --patch <file>
 //   return --issue <n> (--record <return-id> --assignment <id> [--at-head <sha>] | --consume <return-id> --verdict ACCEPT|REOPEN|WAITING_OWNER)
+//   ack --finding <id>                                 acknowledge an attention finding (it stays listed)
+//   dispose --finding <id> --reason <text>             dispose of one; the reason stays in the private part
+//
+// claim, assign, return --consume and an update that sets DONE or RETIRED first print the parent's
+// stored attention line (to standard error; in the JSON result as `attention`). They never refuse on it.
 //
 // The record prefix is the binding's writer prefix unless --prefix is given. --json prints JSON.
 
@@ -41,13 +50,15 @@ const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
 const state = require('./programme-state.cjs');
 const checkpoint = require('./programme-checkpoint.cjs');
+const attentionCache = require('./programme-attention-cache.cjs');
 
 const { ProgrammeError } = state;
 const VERSION_FILE = path.resolve(__dirname, '..', '..', '..', 'repo', 'contracts', 'toolkit-local-bridge', 'version.json');
-const COMMANDS = ['reconcile', 'refresh', 'show', 'init-parent', 'update-parent', 'claim', 'assign', 'reopen', 'interrupt', 'update', 'return', 'bind', 'checkpoint'];
-const FLAGS = new Set(['--apply', '--parent', '--include-private', '--takeover', '--route-read-back', '--json', '--controller', '--supersede', '--lane']);
+const COMMANDS = ['reconcile', 'refresh', 'show', 'init-parent', 'update-parent', 'claim', 'assign', 'reopen', 'interrupt', 'update', 'return', 'bind', 'checkpoint',
+  'inventory', 'attention', 'ack', 'dispose'];
+const FLAGS = new Set(['--apply', '--parent', '--include-private', '--takeover', '--route-read-back', '--json', '--controller', '--supersede', '--lane', '--refresh']);
 const VALUES = new Set(['--issue', '--parent-file', '--catalogue', '--patch', '--role', '--model', '--effort', '--record', '--consume', '--verdict', '--session',
-  '--prefix', '--repo-root', '--assignment', '--reason', '--at-head', '--takeover-record', '--message-file']);
+  '--prefix', '--repo-root', '--assignment', '--reason', '--at-head', '--takeover-record', '--message-file', '--finding', '--deadline-ms']);
 const EXECUTOR_COMMANDS = ['bind', 'checkpoint'];
 const LANE_COMMANDS = ['assign', 'interrupt'];
 
@@ -74,6 +85,15 @@ function parseArgs(argv) {
     const extra = Object.keys(args).filter(key => !['command', 'json', 'repo-root'].includes(key));
     if (extra.length) throw usage(`refresh takes no options but --json and --repo-root: it always runs the full pass as the parent's current holder (got --${extra[0]}).`);
   }
+  if (args['deadline-ms'] !== undefined) {
+    args['deadline-ms'] = /^\d+$/.test(args['deadline-ms']) ? Number(args['deadline-ms']) : NaN;
+    if (!Number.isSafeInteger(args['deadline-ms']) || args['deadline-ms'] < 1000) throw usage('--deadline-ms must be a whole number of milliseconds, 1000 or more.');
+  }
+  for (const [name, allowed] of [['inventory', ['json', 'repo-root', 'deadline-ms']], ['attention', ['json', 'repo-root', 'refresh', 'deadline-ms']]]) {
+    const extra = command === name ? Object.keys(args).filter(key => key !== 'command' && !allowed.includes(key)) : [];
+    if (extra.length) throw usage(`${name} takes only ${allowed.map(key => `--${key}`).join(', ')} (got --${extra[0]}).`);
+  }
+  if (command === 'attention' && args['deadline-ms'] !== undefined && !args.refresh) throw usage('--deadline-ms goes with attention --refresh.');
   if (EXECUTOR_COMMANDS.includes(command) && args.controller) throw usage(`${command} is an executor command; the controller does not bind or checkpoint.`);
   if (isWrite(args) && !args.controller) {
     throw usage('Only the appointed controller writes programme state. Other sessions run reconcile (a dry run) or show and report to the controller; an executor the controller assigned records its work only in its own checkpoint journal (bind, then its turn-end hook).');
@@ -102,6 +122,9 @@ function parseArgs(argv) {
     needs(!args['route-read-back'] || (args.model && args.effort), '--route-read-back needs --model and --effort.');
   }
   if (command === 'checkpoint') needs(args.session, 'checkpoint needs --session <this session\'s own id>.');
+  if (command === 'ack') needs(args.finding && !args.reason, 'ack needs --finding <id> (and no --reason; dispose takes one).');
+  if (command === 'dispose') needs(args.finding && args.reason, 'dispose needs --finding <id> and --reason <text>.');
+  if (args.finding !== undefined) needs(/^[0-9a-f]{12}$/.test(args.finding), '--finding takes the 12-character finding id that programme.cjs attention lists.');
   return args;
 }
 
@@ -109,7 +132,7 @@ function parseArgs(argv) {
 // but it is not listed: it carries no decision of its own (see commands.refresh).
 function isWrite(args) {
   if (args.command === 'reconcile' || args.command === 'init-parent') return Boolean(args.apply);
-  return ['update-parent', 'claim', 'assign', 'reopen', 'interrupt', 'update', 'return'].includes(args.command);
+  return ['update-parent', 'claim', 'assign', 'reopen', 'interrupt', 'update', 'return', 'ack', 'dispose'].includes(args.command);
 }
 
 function toolkitVersion(file = VERSION_FILE) {
@@ -259,17 +282,22 @@ function runGit(gitPath, cwd, args) {
   return result.stdout.trim();
 }
 
-// Refuses unless the Toolkit governance state for the repository is ENABLED with the governed block and
-// binding present. The state module ships with the plugin; without it nothing can show the repository
-// is ENABLED, so the command refuses.
+// Refuses unless the Toolkit governance state for the repository is ENABLED with programme records in
+// force (a fresh read of the binding merged on the default branch), and returns that merged binding:
+// only it names the store, parent, prefixes and required checks, never a working-tree copy an agent
+// can edit. The state module ships with the plugin; without it nothing can show the repository is
+// ENABLED, so the command refuses.
 function requireGitHubGovernance(repoRoot) {
   let governance;
   try { governance = require('../../../repo/scripts/toolkit-governance-state.cjs'); } catch {
     throw new ProgrammeError('GOVERNANCE_STATE_UNAVAILABLE', 'The Toolkit governance state could not be read from this copy, so no programme command runs. Use a full Toolkit install.');
   }
   const current = governance.governanceState(repoRoot);
-  if (current.state === 'ENABLED' && current.governed_rules_bind) return;
-  throw new ProgrammeError('GITHUB_GOVERNANCE_OFF', `Toolkit's GitHub governance is ${current.state === 'ENABLED' ? 'ENABLED but incomplete (the governed block or binding is missing)' : current.state} for this repository, so no programme command runs. Nothing changed.`);
+  if (current.state === 'ENABLED' && current.programme_records_bind) {
+    const merged = governance.mergedBinding(repoRoot);
+    if (merged) return merged;
+  }
+  throw new ProgrammeError('GITHUB_GOVERNANCE_OFF', `Toolkit's GitHub governance is ${current.state === 'ENABLED' ? (current.governed_rules_bind ? 'ENABLED, but the binding merged on the default branch was last read over 24 hours ago or not at all (run toolkit governance status online)' : 'ENABLED but incomplete (the binding is not merged on the default branch yet)') : current.state} for this repository, so no programme command runs. Nothing changed.`);
 }
 
 // Binds repository identity, the store and the writer. `deps` lets tests supply a transport and the
@@ -284,8 +312,9 @@ function openContext(args, deps = {}) {
   }
   // GitHub governance must be ENABLED with its materials in place; a DISABLED or undecided repository
   // never runs programme commands, whatever files it carries. Tests that supply the origin own the state.
-  if (!deps.originUrl) requireGitHubGovernance(repoRoot);
-  const binding = deps.binding || state.loadBinding(repoRoot);
+  // Tests that supply the origin own the state and the binding.
+  const merged = deps.originUrl ? null : requireGitHubGovernance(repoRoot);
+  const binding = deps.binding || merged || state.loadBinding(repoRoot);
   const base = deps.transport || new state.GitHubTransport({ ghPath: state.resolveExecutable('gh') });
   // A pass that holds the lock checks it still does, and renews it, before every GitHub request.
   const transport = deps.heartbeat ? Object.assign(Object.create(base), { request: (...call) => { deps.heartbeat(); return base.request(...call); } }) : base;
@@ -334,6 +363,58 @@ function readParent(context) {
   const { doc } = context.store.read('parent', context.binding.parent_issue);
   if (!doc) throw new ProgrammeError('PARENT_STATE_MISSING', `No parent state document for #${context.binding.parent_issue} yet. The appointed controller creates and holds it with init-parent --apply --controller; other sessions report this to the controller.`);
   return doc;
+}
+
+// The inventory of every open issue against the binding's registered parents and the primary
+// parent's catalogue. Read-only; zero model calls.
+function runInventory(context, parentDoc, deps = {}, deadlineMs = undefined) {
+  return new state.ProgrammeInventory({
+    transport: context.transport, repository: context.repository,
+    parents: state.registeredParents(context.binding), catalogue: (parentDoc?.outcomes || []).map(outcome => outcome.issue),
+    ...(deadlineMs ? { deadlineMs } : {}), ...(deps.inventoryClock ? { nowMs: deps.inventoryClock } : {}),
+  }).run();
+}
+
+const nowText = deps => (deps.now || (() => new Date().toISOString()))();
+
+// The stored attention line of a parent document, with how long ago that document was written.
+function storedAttention(parentDoc, deps = {}) {
+  const written = parentDoc.volatile?.written_at || null;
+  const age = written ? Date.parse(nowText(deps)) - Date.parse(written) : NaN;
+  return { line: state.attentionLine(parentDoc.attention), counts: state.attentionCounts(parentDoc.attention), as_of: written,
+    text: `${state.attentionLine(parentDoc.attention)} (stored on #${parentDoc.parent_issue}${Number.isFinite(age) ? `, written ${attentionCache.ageText(age)} ago` : ''})` };
+}
+
+// Gate and finality commands show the stored line before they act, from the parent they already
+// read: no GitHub request of its own, and never a refusal.
+function showAttention(parentDoc, args, deps) {
+  const stored = storedAttention(parentDoc, deps);
+  if (!args.json) (deps.stderr || process.stderr).write(`${stored.text}\n`);
+  return { line: stored.line, counts: stored.counts, as_of: stored.as_of };
+}
+
+// This computer's attention cache, for the session-start line. Tests that bring their own GitHub
+// (an origin URL) write it only to a folder they name.
+function cacheAttention(context, parentDoc, complete, deps = {}) {
+  if (!parentDoc || (deps.originUrl && !deps.attentionDir)) return;
+  attentionCache.writeCache(context.repository, { line: state.attentionLine(parentDoc.attention), counts: state.attentionCounts(parentDoc.attention),
+    digest: state.attentionDigest(parentDoc.attention), complete }, deps);
+}
+
+const TERMINAL = ['DONE', 'RETIRED'];
+
+// ack and dispose: only the session holding the parent document answers a finding. A dispose reason
+// goes to the private part only.
+function answer(args, context, deps, answerState) {
+  const writer = requireWriter(context);
+  const parentDoc = readParent(context);
+  if (!state.isHolder(parentDoc, writer)) {
+    throw new ProgrammeError('ROLE_REFUSED', `Only the session holding the parent document of #${context.binding.parent_issue} answers an attention finding; ${state.parentRefusal(parentDoc)}`);
+  }
+  const result = context.store.mutate('parent', context.binding.parent_issue, { writer,
+    change: doc => state.answerFinding(doc, { id: args.finding, state: answerState, reason: args.reason || null, now: nowText(deps) }) });
+  cacheAttention(context, result.doc, true, deps);
+  return { ...writeResult('parent', context.binding.parent_issue, result, writer), finding: args.finding, state: answerState, attention: state.attentionLine(result.doc.attention) };
 }
 
 function redact(doc) {
@@ -401,7 +482,7 @@ const commands = {
       binding: context.binding, writer: context.writer, toolkitVersion: context.version,
     });
     const parentOverride = args['parent-file'] ? readJsonFile(args['parent-file'], 'parent') : null;
-    return reconciler.run({ apply: Boolean(args.apply), issue: args.issue ?? null, parentOverride });
+    return reconciler.run({ apply: Boolean(args.apply), issue: args.issue ?? null, parentOverride, inventory: args.inventory || null });
   },
 
   // The same full pass as `reconcile --apply`, for any session in a governed checkout. It takes no
@@ -409,15 +490,39 @@ const commands = {
   // bring the pages and documents in line with what is already recorded and observed. Every decision
   // (assign, return, update, claim) stays the controller's. After a takeover the guard stops it at its
   // next effect, as it stops the controller's own pass.
-  refresh(args, context) {
+  // It also runs the inventory, so the inventory source's findings are recorded with the pass's own.
+  refresh(args, context, deps = {}) {
     const parentDoc = readParent(context);
     const { holder_session: session, holder_prefix: prefix } = parentDoc.fence;
     if (!session || prefix !== context.binding.writer_prefix) {
       throw new ProgrammeError('PARENT_UNHELD', `The parent document of #${context.binding.parent_issue} has no controller holding it, so there is no one to refresh for. Nothing changed; report this to the controller.`);
     }
     context.writer = { session, prefix };
-    return commands.reconcile({ ...args, apply: true }, context);
+    const inventory = runInventory(context, parentDoc, deps, args['deadline-ms']);
+    const report = commands.reconcile({ ...args, apply: true, inventory }, context);
+    cacheAttention(context, context.store.read('parent', context.binding.parent_issue).doc, inventory.complete, deps);
+    return report;
   },
+
+  // Read-only: every open issue in one class. It never adopts, links, labels or comments.
+  inventory(args, context, deps = {}) {
+    const parentDoc = context.store.read('parent', context.binding.parent_issue).doc;
+    const result = runInventory(context, parentDoc, deps, args['deadline-ms']);
+    const counts = Object.fromEntries(state.INVENTORY_CLASSES.map(name => [name, result.issues.filter(entry => entry.class === name).length]));
+    return { repository: context.repository, parents: state.registeredParents(context.binding), complete: result.complete, reason: result.reason, counts, issues: result.issues, findings: result.findings };
+  },
+
+  // The parent's attention findings, newest first; the local cache is written too.
+  attention(args, context, deps = {}) {
+    const parentDoc = readParent(context);
+    cacheAttention(context, parentDoc, true, deps);
+    const open = state.openFindings(parentDoc.attention).map(entry => ({ id: entry.id, state: entry.state, source: entry.source, code: entry.code, issue: entry.issue, head: entry.head,
+      first_seen: entry.first_seen, changed_at: entry.changed_at, next_action: state.FINDING_CODES[entry.code].next_action }));
+    return { repository: context.repository, parent_issue: parentDoc.parent_issue, ...storedAttention(parentDoc, deps), findings: open };
+  },
+
+  ack(args, context, deps = {}) { return answer(args, context, deps, 'acknowledged'); },
+  dispose(args, context, deps = {}) { return answer(args, context, deps, 'disposed'); },
 
   show(args, context) {
     const kind = args.issue ? 'child' : 'parent';
@@ -451,16 +556,17 @@ const commands = {
     return writeResult('parent', context.binding.parent_issue, result, writer);
   },
 
-  claim(args, context) {
+  claim(args, context, deps = {}) {
     const writer = requireWriter(context);
     const parentDoc = readParent(context);
+    const attention = showAttention(parentDoc, args, deps);
     if (args.lane) {
       const outcome = outcomeFor(parentDoc, args.issue);
       const result = context.store.mutate('child', args.issue, {
         writer, authorise: false, create: () => state.newChild({ repository: context.repository, outcome }),
         change: doc => state.claimLane(doc, writer, outcome, { takeover: Boolean(args.takeover) }),
       });
-      return writeResult('child', args.issue, result, writer);
+      return { ...writeResult('child', args.issue, result, writer), attention };
     }
     const retired = Array.isArray(parentDoc.private?.retired_holders) ? parentDoc.private.retired_holders : [];
     if (retired.includes(writer.session)) throw new ProgrammeError('STALE_WRITER', state.parentRefusal(parentDoc));
@@ -478,7 +584,7 @@ const commands = {
       next.private = { ...next.private, retired_holders: [...holders, previous].slice(-20), takeovers: [...takeovers, record].slice(-20) };
       return next;
     } });
-    const output = writeResult('parent', context.binding.parent_issue, result, writer);
+    const output = { ...writeResult('parent', context.binding.parent_issue, result, writer), attention };
     if (record) {
       const unsettled = [parentDoc, ...parentDoc.outcomes.map(outcome => context.store.read('child', outcome.issue).doc).filter(Boolean)]
         .reduce((count, doc) => count + doc.pending_effects.length, 0);
@@ -489,9 +595,10 @@ const commands = {
     return output;
   },
 
-  assign(args, context) {
+  assign(args, context, deps = {}) {
     const parentDoc = readParent(context);
     const outcome = outcomeFor(parentDoc, args.issue);
+    const attention = showAttention(parentDoc, args, deps);
     const writer = requireGateWriter(context, parentDoc, context.store.read('child', args.issue).doc, outcome);
     const files = context.store.listJournals(args.issue);
     const result = context.store.mutate('child', args.issue, {
@@ -501,7 +608,7 @@ const commands = {
         return next && markJournalsSeen(next, files);
       },
     });
-    return writeResult('child', args.issue, result, writer);
+    return { ...writeResult('child', args.issue, result, writer), attention };
   },
 
   reopen(args, context) {
@@ -523,18 +630,20 @@ const commands = {
     return writeResult('child', args.issue, result, writer);
   },
 
-  update(args, context) {
+  update(args, context, deps = {}) {
     if (!args.issue || !args.patch) throw usage('update needs --issue <n> and --patch <file>.');
     const parentDoc = readParent(context);
     const writer = requireParentHolder(context, parentDoc);
     const patch = readJsonFile(args.patch, 'patch');
+    const attention = TERMINAL.includes(patch?.lifecycle) ? showAttention(parentDoc, args, deps) : null;
     const result = context.store.mutate('child', args.issue, { writer, parentDoc, change: doc => state.applyPatch('child', doc, patch, { writer, parentDoc }) });
-    return writeResult('child', args.issue, result, writer);
+    return { ...writeResult('child', args.issue, result, writer), ...(attention ? { attention } : {}) };
   },
 
-  return(args, context) {
+  return(args, context, deps = {}) {
     const parentDoc = readParent(context);
     const writer = requireParentHolder(context, parentDoc);
+    const attention = args.consume ? showAttention(parentDoc, args, deps) : null;
     let change;
     if (args.record) {
       change = doc => state.recordReturn(doc, { returnId: args.record, assignment: args.assignment, atHead: args['at-head'] || null });
@@ -544,7 +653,7 @@ const commands = {
       change = doc => state.consumeReturn(doc, { returnId: args.consume, verdict: args.verdict, writer, parentDoc, liveHead: head });
     }
     const result = context.store.mutate('child', args.issue, { writer, parentDoc, change });
-    return writeResult('child', args.issue, result, writer);
+    return { ...writeResult('child', args.issue, result, writer), ...(attention ? { attention } : {}) };
   },
 
   // An executor binds its own session to the controller's current assignment and opens its journal.
@@ -599,11 +708,13 @@ function formatReport(report) {
     `${report.mode === 'apply' ? 'Apply' : 'Dry run'}: ${report.summary}`,
   ];
   if (report.findings.length) lines.push('', 'Findings', ...report.findings.map(finding => `- ${finding.code} #${finding.issue}: ${finding.detail}`));
-  if (report.close_list.length) lines.push('', 'Ready to close (the controller decides; nothing is closed automatically)', ...report.close_list.map(entry => `- #${entry.issue}: PR #${entry.pr}, head ${entry.head.slice(0, 7)}; ${entry.gate || 'unassigned gate'} ${entry.gate_accepted ? 'acceptance recorded' : 'not accepted'}; UAT: ${entry.uat || 'not recorded'}; review: ${entry.review || 'not recorded'}${entry.accepted ? '' : '; completion not accepted'}`));
+  if (report.close_list.length) lines.push('', 'Ready to close (the controller closes each closable one as completed unless a criterion is still open; the reconciler never closes)', ...report.close_list.map(entry => `- #${entry.issue}: PR #${entry.pr}, head ${entry.head.slice(0, 7)}; ${entry.gate || 'unassigned gate'} ${entry.gate_accepted ? 'acceptance recorded' : 'not accepted'}; UAT: ${entry.uat || 'not recorded'}; review: ${entry.review || 'not recorded'}${entry.accepted ? '' : '; completion not accepted'}${entry.closable ? '; closable' : ''}`));
   if (report.mode === 'apply' && report.results.length) lines.push('', 'Effects', ...report.results.map(entry => `- ${entry.outcome}: ${entry.text}${entry.detail ? ` (${entry.detail})` : ''}`));
   else if (report.effects.length) lines.push('', 'Planned effects', ...report.effects.map((effect, index) => `${index + 1}. ${effect.text}`));
   if (report.recovered.length) lines.push('', 'Recovered from an earlier pass', ...report.recovered.map(entry => `- ${entry.outcome}: ${entry.kind} ${entry.number} intent ${entry.intent_id}`));
   if (report.holds.length) lines.push('', 'Holds', ...report.holds.map(hold => `- ${hold.code} ${hold.target}: ${hold.detail}`));
+  if (report.inventory) lines.push('', `Inventory: ${report.inventory.complete ? 'complete' : `INCOMPLETE (${report.inventory.reason})`}; ${Object.entries(report.inventory.counts).map(([name, count]) => `${name} ${count}`).join(', ')}`);
+  if (report.attention) lines.push('', `${report.attention} (programme.cjs attention lists them)`);
   if (report.mode === 'apply') lines.push('', `Writes: ${report.writes.state} state, ${report.writes.github} GitHub`);
   lines.push('', `Next action: ${report.next_action}`);
   return `${lines.join('\n')}\n`;
@@ -622,7 +733,55 @@ function main(argv = process.argv.slice(2), deps = {}) {
     throw usage(`This session was started by a Toolkit launcher (${marker}), so it is an executor: it never writes programme state, even with --controller. Run reconcile (a dry run) or show and report to the controller.`);
   }
   if ((args.command === 'reconcile' && args.apply) || args.command === 'refresh') return runPasses(args, deps, out);
+  if (args.command === 'attention') return attentionCommand(args, deps, out);
   return finish(args, deps, out);
+}
+
+// attention, with --refresh first running the refresh pass (its report is not printed). It never says
+// "clear" from a read that failed: a GitHub that could not be read is "unknown".
+function attentionCommand(args, deps, out) {
+  let refreshed = null;
+  try {
+    if (args.refresh) {
+      const sink = { text: '', write(chunk) { this.text += chunk; return true; } };
+      const passArgs = { command: 'refresh', json: true, ...(args['repo-root'] ? { 'repo-root': args['repo-root'] } : {}), ...(args['deadline-ms'] ? { 'deadline-ms': args['deadline-ms'] } : {}) };
+      runPasses(passArgs, deps, sink);
+      // The last pass's holds are the ones still standing; they are printed and the exit code is 1, as
+      // plain refresh does.
+      const reports = sink.text.split(/\n(?=\{)/).map(text => { try { return JSON.parse(text); } catch { return null; } }).filter(Boolean);
+      const last = reports.at(-1) || null;
+      refreshed = last?.outcome === 'QUEUED' ? { outcome: 'QUEUED', reason: last.reason, holds: [] }
+        : { outcome: 'DONE', inventory_complete: last?.inventory?.complete ?? null, holds: last?.holds || [] };
+    }
+    const code = finish({ ...args, refreshed }, deps, out);
+    return refreshed?.holds?.length ? 1 : code;
+  } catch (error) {
+    const reason = error.code === 'GH_AUTH' ? 'gh not signed in' : `${error.code || 'FAIL'}: ${error.message}`;
+    out.write(args.json ? `${JSON.stringify({ line: `Attention: unknown (${error.code === 'GH_AUTH' ? 'gh not signed in' : error.code || 'FAIL'})`, reason }, null, 2)}\n`
+      : `Attention: unknown (${reason})\n`);
+    return 1;
+  }
+}
+
+function formatAttention(result) {
+  const lines = [result.text];
+  if (result.refreshed?.outcome === 'QUEUED') lines.push(`Refresh queued: ${result.refreshed.reason}.`);
+  if (result.refreshed?.inventory_complete === false) lines.push('The inventory could not read every open issue this time (INVENTORY_INCOMPLETE).');
+  if (result.refreshed?.holds?.length) lines.push('', 'The refresh pass held', ...result.refreshed.holds.map(hold => `- ${hold.code} ${hold.target}: ${hold.detail}`), '');
+  for (const entry of result.findings) lines.push(`- ${entry.id} ${entry.state} ${entry.code}${entry.issue ? ` #${entry.issue}` : ''}${entry.head ? ` at ${entry.head.slice(0, 7)}` : ''}: ${entry.next_action}`);
+  if (result.findings.length) lines.push('', 'The controller answers each new finding in this turn: fix it, or ack --finding <id>, or dispose --finding <id> --reason <text>.');
+  return `${lines.join('\n')}\n`;
+}
+
+function formatInventory(result) {
+  const lines = [`Inventory of ${result.repository} (registered parents ${result.parents.map(number => `#${number}`).join(', ')}): ${result.complete ? 'complete' : `INCOMPLETE (${result.reason})`}`,
+    state.INVENTORY_CLASSES.map(name => `${name} ${result.counts[name]}`).join(', ')];
+  for (const name of ['NEEDS_PLACEMENT', 'OUTSIDE']) {
+    const entries = result.issues.filter(entry => entry.class === name);
+    if (entries.length) lines.push('', name, ...entries.map(entry => `- #${entry.number}${entry.reason ? `: ${entry.reason}` : ''}`));
+  }
+  if (result.findings.length) lines.push('', 'Findings (recorded by the next refresh)', ...result.findings.map(finding => `- ${finding.code}${finding.issue ? ` #${finding.issue}` : ''}`));
+  return `${lines.join('\n')}\n`;
 }
 
 // reconcile --apply and refresh hold the repository's pass lock. The owner runs one more refresh pass
@@ -683,7 +842,10 @@ function finish(args, deps, out, opened = null) {
     result = commands[args.command](args, context, deps);
   }
   const pass = args.command === 'reconcile' || args.command === 'refresh';
+  if (args.command === 'attention') result = { ...result, ...(args.refreshed ? { refreshed: args.refreshed } : {}) };
   if (pass && !args.json) out.write(formatReport(result));
+  else if (args.command === 'attention' && !args.json) out.write(formatAttention(result));
+  else if (args.command === 'inventory' && !args.json) out.write(formatInventory(result));
   else out.write(`${JSON.stringify(result, null, 2)}\n`);
   if (pass) return result.holds.length ? 1 : 0;
   return 0;

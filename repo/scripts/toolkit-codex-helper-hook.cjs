@@ -46,14 +46,21 @@ function promptEvent(input) {
 // Native hook names: `spawn_agent` (V1 `multi_agent` and the default namespace), the `Agent`
 // alias, and the flattened V2 `multi_agent_v2` name `<namespace>spawn_agent` for any host-valid
 // namespace, hyphenated ones included (`collaborationspawn_agent`, `multi-agentspawn_agent`).
-async function decide(input, environment = process.env) {
+// `notes` collects what a shell check could not check, for the caller to show the user.
+async function decide(input, environment = process.env, { notes } = {}) {
   let governanceDenial;
-  try { governanceDenial = new (gate().ToolGate)().decide(input || {}); } catch {
+  // Codex gives no shell in its payload and may run either shell, so commands keep both readings.
+  try { governanceDenial = new (gate().ToolGate)({ host: 'codex' }).decide(input || {}); } catch {
     governanceDenial = insideRepository(input?.cwd) ? { deny: `Toolkit: the governance check failed, so nothing runs in this repository until it works again. ${NEVER_OWNER}` } : null;
   }
   if (governanceDenial) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: governanceDenial.deny } };
-  // Shell commands: refuse AI attribution in commits and pull requests, in every folder.
-  if (input?.tool_name === 'Bash') return require('./toolkit-attribution-guard.cjs').attributionDecision(input);
+  // Merges: the merge hold, a tripwire that waits for the user's own "merge N" (toolkit-merge-hold.cjs), in every folder.
+  const mergeDenial = mergeDecision(input);
+  if (mergeDenial) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: mergeDenial.deny } };
+  // Shell commands, under any of the shell tool names Codex may report: refuse AI attribution in
+  // commits and pull requests, skipped checks, force pushes and pushes that carry a credential.
+  // Codex's top-level cwd is the chat's folder, which may not be where a call with no workdir runs.
+  if (require('./toolkit-shell-call.cjs').ShellCall.isShellTool(input?.tool_name)) return require('./toolkit-attribution-guard.cjs').attributionDecision(input, { notes, sessionFolderOnly: true });
   const state = governance(input, environment);
   if (!state.governed) return {};
   const { CodexDialect, commandDecision } = adapter();
@@ -69,10 +76,22 @@ async function decide(input, environment = process.env) {
   return new CodexNamedHelperPolicy({ environment }).decide(input, state);
 }
 
+// The merge hold's decision, failing closed for a call that may merge when the module cannot run.
+function mergeDecision(input) {
+  try { return require('./toolkit-merge-hold.cjs').decide(input || {}); } catch {
+    let mayMerge = true;
+    try { mayMerge = require('./toolkit-merge-hold.cjs').mayMerge(input || {}); } catch { mayMerge = /merge|push/i.test(JSON.stringify(input || {})); }
+    return mayMerge ? { deny: 'Toolkit: the merge check failed, so this merge or push is refused. Retry it; if this repeats, run `setup toolkit` to repair the Toolkit plugin.' } : null;
+  }
+}
+
 // The UserPromptSubmit decision: { block: reason } or { context } or {}.
 function decidePrompt(input, environment = process.env) {
   const decision = new (gate().PromptHold)({ environment }).decide({ cwd: input?.cwd, prompt: input?.prompt, sessionId: gate().sessionIdOf(input) });
   if (decision.action === 'block') return { block: decision.reason };
+  // A "merge N" the user types is kept for the merge hold, but not while the governance question holds
+  // the message: the user types it again after answering. A failure only means a later merge is refused.
+  try { require('./toolkit-merge-hold.cjs').recordPrompt(input || {}, { environment }); } catch { /* fail closed later */ }
   return decision.context ? { context: decision.context } : {};
 }
 
@@ -88,6 +107,11 @@ function promptFailure(input) {
 }
 
 const HELD = `Toolkit helper guard failed. ${NEVER_OWNER}`;
+// The way through depends on the cause the note names; a cause that stays the same refuses every retry.
+const UNCHECKED_PUSH = [
+  'Codex does not show Toolkit\'s warnings, so this push or pull request is refused instead of going out unchecked.',
+  'Fix what the note above names, then retry: for a check that took too long or read too much, push fewer new commits at a time (an older commit first, for example `git push origin <older commit>:<branch>`); with no base branch found, run `git fetch origin` or name `--base`; for an unreadable setting, fix the file it names; when git was not found or could not run, run `setup toolkit`.',
+].join('\n');
 function deny(reason) {
   process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } }) + '\n');
   // Blocking exit status, with the reason on stderr, for hosts that honour exit 2.
@@ -111,8 +135,14 @@ async function main() {
     if (output.context) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: output.context } }) + '\n');
     return;
   }
-  const output = await decide(input);
-  if (output?.hookSpecificOutput?.permissionDecision === 'deny') return deny(output.hookSpecificOutput.permissionDecisionReason);
+  const notes = [];
+  const output = await decide(input, process.env, { notes });
+  // Notes from a check that could not run go with the refusal, so they are not lost.
+  if (output?.hookSpecificOutput?.permissionDecision === 'deny') return deny([output.hookSpecificOutput.permissionDecisionReason, ...notes].join('\n'));
+  // A push or new pull request the push check could not check is refused here, not let through with
+  // a warning: Codex showed neither the agent nor its session record a hook's systemMessage
+  // (captured 29 October 2026), so the user would never see that it ran unchecked.
+  if (notes.length) return deny([...notes.map(note => note.replace(', so it was let through', '')), UNCHECKED_PUSH].join('\n'));
   // Codex accepts no bare permissionDecision:allow (it records an unsupported-output
   // hook failure and continues). An admitted request is exit 0 with empty output.
 }

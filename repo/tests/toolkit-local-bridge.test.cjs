@@ -1229,6 +1229,9 @@ test('malformed lock JSON falls back to file mtime: fresh is respected, old is r
   // Freshly written malformed lock (for example a partial write from another
   // process) must not be recklessly removed.
   fs.writeFileSync(lockPath, '{ this is not json', 'utf8');
+  // Dated by Node's clock, which the clock-ahead run moves and file times do not.
+  const freshTime = new Date();
+  fs.utimesSync(lockPath, freshTime, freshTime);
   let result = run(['--hub', hub, '--write', '--enable-auto-sync'], { env: isolatedHomeEnv(root) });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /fresh Toolkit bridge lock/);
@@ -3646,16 +3649,24 @@ test('native plugin manifests and hooks are valid and policy-light', () => {
   // flattened namespaced MultiAgentV2 spawn names such as collaborationspawn_agent, and checks shell
   // commands (Bash) for AI attribution in commits and pull requests. The second entry and the
   // UserPromptSubmit entry run the same script for the governance hold (#542).
-  assert.deepEqual(codexHooks.hooks.PreToolUse.map(entry => entry.matcher), ['^(?:Agent|[A-Za-z0-9_-]*spawn_agent|Bash)$', '^(?:apply_patch|Edit|Write|mcp__.*)$']);
+  assert.deepEqual(codexHooks.hooks.PreToolUse.map(entry => entry.matcher), ['^(?:Agent|[A-Za-z0-9_-]*spawn_agent|Bash|exec_command|shell|local_shell|PowerShell)$', '^(?:apply_patch|Edit|Write|mcp__.*)$']);
   for (const entry of [...codexHooks.hooks.PreToolUse, ...codexHooks.hooks.UserPromptSubmit]) assert.match(entry.hooks[0].command, /toolkit-codex-helper-hook.cjs/);
   assert.deepEqual(Object.keys(claudeHooks.hooks).sort(), ['PostToolUse', 'PreToolUse', 'SessionStart', 'Stop', 'UserPromptSubmit']);
   const claudeAgentHook = claudeHooks.hooks.PreToolUse[0];
   assert.equal(claudeAgentHook.matcher, 'Agent|Task');
   assert.match(claudeAgentHook.hooks[0].command, /\$\{CLAUDE_PLUGIN_ROOT\}\/repo\/scripts\/toolkit-claude-agent-hook\.cjs/);
-  assert.deepEqual(claudeHooks.hooks.PreToolUse.map(entry => entry.matcher), ['Agent|Task', 'Bash|PowerShell', '^(?:Bash|PowerShell|Monitor|Edit|Write|MultiEdit|NotebookEdit|Agent|Task|mcp__.*)$', '^mcp__hearthbot__(?:post_message|edit_message)$']);
+  assert.deepEqual(claudeHooks.hooks.PreToolUse.map(entry => entry.matcher), ['Agent|Task', 'Bash|PowerShell', '^(?:Bash|PowerShell|Monitor|Edit|Write|MultiEdit|NotebookEdit|Agent|Task|TaskStop|EnterWorktree|CronCreate|CronDelete|RemoteTrigger|SendMessage|Workflow|mcp__.*)$', '^(?!(?:Bash|PowerShell|Monitor|Edit|Write|MultiEdit|NotebookEdit|Agent|Task|TaskStop|EnterWorktree|CronCreate|CronDelete|RemoteTrigger|SendMessage|Workflow|mcp__.*)$)', '^mcp__hearthbot__(?:post_message|edit_message)$', '^mcp__hearthbot__start_thread$', '^propose_skills$']);
   assert.match(claudeHooks.hooks.PreToolUse[1].hooks[0].command, /toolkit-claude-attribution-hook\.cjs/);
-  assert.match(claudeHooks.hooks.PreToolUse[2].hooks[0].command, /toolkit-governance-hook\.cjs" --event PreToolUse$/);
-  assert.match(claudeHooks.hooks.PreToolUse[3].hooks[0].command, /toolkit-claude-project-post-hook\.cjs"$/);
+  // The governance hook in two entries: state-changing tools (held if the hook cannot start) and the rest.
+  for (const index of [2, 3]) assert.match(claudeHooks.hooks.PreToolUse[index].hooks[0].command, /toolkit-governance-hook\.cjs" --event PreToolUse$/);
+  assert.deepEqual([claudeHooks.hooks.PreToolUse[2].hooks[0].onFailure, claudeHooks.hooks.PreToolUse[3].hooks[0].onFailure], ['block', undefined]);
+  assert.match(claudeHooks.hooks.PreToolUse[4].hooks[0].command, /toolkit-claude-project-post-hook\.cjs"$/);
+  // The gate route hook checks Projects thread launches; a hook that cannot start never stops every launch.
+  assert.match(claudeHooks.hooks.PreToolUse[5].hooks[0].command, /toolkit-claude-project-gate-route-hook\.cjs"$/);
+  assert.equal(claudeHooks.hooks.PreToolUse[5].hooks[0].onFailure, undefined);
+  // The skill card hook checks controller skill cards against main; a hook that cannot start never stops every card.
+  assert.match(claudeHooks.hooks.PreToolUse[6].hooks[0].command, /toolkit-claude-project-skill-card-hook\.cjs"$/);
+  assert.equal(claudeHooks.hooks.PreToolUse[6].hooks[0].onFailure, undefined);
   assert.match(claudeHooks.hooks.UserPromptSubmit[0].hooks[0].command, /toolkit-governance-hook\.cjs" --event UserPromptSubmit$/);
   assert.equal(codexHooks.hooks.SessionEnd, undefined);
   assert.equal(claudeHooks.hooks.SessionEnd, undefined);
@@ -3663,9 +3674,14 @@ test('native plugin manifests and hooks are valid and policy-light', () => {
   for (const [hooks, root] of [[codexHooks, 'PLUGIN_ROOT'], [claudeHooks, 'CLAUDE_PLUGIN_ROOT']]) {
     assert.deepEqual(hooks.hooks.Stop, [{ hooks: [{ type: 'command', command: `node "\${${root}}/repo/scripts/toolkit-programme-checkpoint-hook.cjs"`, timeout: 30 }] }]);
   }
-  // The after-tool hook runs the same script, only to mark a GitHub write for the turn-end programme refresh.
-  for (const [hooks, root, matcher] of [[codexHooks, 'PLUGIN_ROOT', '^(?:Bash|mcp__.*[Gg][Ii][Tt][Hh][Uu][Bb].*)$'], [claudeHooks, 'CLAUDE_PLUGIN_ROOT', '^(?:Bash|PowerShell|mcp__.*[Gg][Ii][Tt][Hh][Uu][Bb].*)$']]) {
-    assert.deepEqual(hooks.hooks.PostToolUse, [{ matcher, hooks: [{ type: 'command', command: `node "\${${root}}/repo/scripts/toolkit-programme-checkpoint-hook.cjs"`, timeout: 10 }] }]);
+  // The after-tool checkpoint hook runs the same script, only to mark a GitHub write for the turn-end
+  // programme refresh. Claude Code also reads the answer tapped on the governance card after the tool runs.
+  for (const [hooks, root, matcher] of [[codexHooks, 'PLUGIN_ROOT', '^(?:Bash|exec_command|shell|local_shell|PowerShell|mcp__.*[Gg][Ii][Tt][Hh][Uu][Bb].*)$'], [claudeHooks, 'CLAUDE_PLUGIN_ROOT', '^(?:Bash|PowerShell|mcp__.*[Gg][Ii][Tt][Hh][Uu][Bb].*)$']]) {
+    const checkpoint = { matcher, hooks: [{ type: 'command', command: `node "\${${root}}/repo/scripts/toolkit-programme-checkpoint-hook.cjs"`, timeout: 10 }] };
+    const card = { matcher: '^AskUserQuestion$', hooks: [{ type: 'command', command: `node "\${${root}}/repo/scripts/toolkit-governance-hook.cjs" --event PostToolUse`, timeout: 10 }] };
+    // Claude Code also checks what GitHub sent back for the cloud route's "Generated by Claude Code" footer.
+    const footer = { matcher, hooks: [{ type: 'command', command: `node "\${${root}}/repo/scripts/toolkit-github-footer-hook.cjs"`, timeout: 10 }] };
+    assert.deepEqual(hooks.hooks.PostToolUse, hooks === claudeHooks ? [card, checkpoint, footer] : [checkpoint]);
   }
   assert.doesNotMatch(`${codexCommand}\n${claudeCommand}`, /--enable-target|--force-downgrade/);
   assert.doesNotMatch(`${codexCommand}\n${claudeCommand}`, /\.sh(?:$|[\s"'])/i);
@@ -3681,10 +3697,11 @@ test('toolkit setup skill documents the end-to-end English setup journey', () =>
   for (const relPath of paths) {
     const text = fs.readFileSync(path.join(repoRoot, relPath), 'utf8');
     assert.match(text, /setup toolkit/i, relPath);
-    assert.match(text, /node "\$env:USERPROFILE\\\.ai-agent-toolkit\\source\\ai-agent-toolkit\\repo\\scripts\\setup-toolkit\.cjs"/, relPath);
+    assert.match(text, /Resolve the home folder yourself and run the managed script by its full path, in forward slashes inside double quotes/, relPath);
+    assert.match(text, /```text\r?\nnode "<home folder>\/\.ai-agent-toolkit\/source\/ai-agent-toolkit\/repo\/scripts\/setup-toolkit\.cjs" --execute --profile auto-main\r?\n```/, relPath);
     assert.doesNotMatch(text, /"%USERPROFILE%/, relPath);
     assert.doesNotMatch(text, /\$HOME\/\.ai-agent-toolkit/, relPath);
-    assert.match(text, /active repo command is bootstrap\/fallback only|active `repo\/scripts\/setup-toolkit\.cjs --execute --profile auto-main` as bootstrap\/fallback only|active repo only as bootstrap\/fallback/i, relPath);
+    assert.match(text, /active repo command is bootstrap\/fallback only/, relPath);
     assert.match(text, /append `--host claude-code`|with `--host claude-code`/i, relPath);
     assert.match(text, /Do not run an active stale verifier after managed setup|Verification after managed setup must use the managed checkout verifier/i, relPath);
     assert.match(text, /active worktree path and commit|active worktree path\/commit/i, relPath);
@@ -3706,7 +3723,7 @@ test('toolkit setup skill documents the end-to-end English setup journey', () =>
     assert.match(text, /Codex native plugin/i, relPath);
     assert.match(text, /setup-codex-toolkit-plugin\.cjs/, relPath);
     assert.match(text, /\.claude-plugin\/plugin\.json/, relPath);
-    assert.match(text, /\$env:USERPROFILE\\\.codex\\plugins\\\.plugin-appserver\\codex\.exe/, relPath);
+    assert.match(text, /--codex-cli "<home folder>\/\.codex\/plugins\/\.plugin-appserver\/codex\.exe"` as a full path in forward slashes inside double quotes/, relPath);
     assert.match(text, /Do not use Codex to update Claude Code or Claude Code to update Codex/i, relPath);
     assert.match(text, /repo-backed auto-update/i, relPath);
     assert.match(text, /OpenCode is not a Toolkit target/i, relPath);
