@@ -1,16 +1,5 @@
 # Toolkit Changelog
 
-## 3.20.0 (version at merge time)
-
-### Version at merge time
-
-- **Open branches keep `main`'s version:** a branch no longer changes `version.json`, the plugin manifests, the managed-block markers, the CHANGELOG version headings or the Projects skill Version line while it is open. Its notes go in its own fragment in `repo/docs/changelog.d/`, so open branches stop conflicting on version lines and renumbering after every merge. A branch that already keeps one `## Unreleased` section on top of the CHANGELOG (titled or not) may keep it; it is folded in at merge, and a `main` that already holds one counts the same; its notes cannot be dropped.
-- **One step at merge time:** after the branch merges `main`, `node repo/scripts/bump-version.cjs --next patch` (or `minor`) reads `main`'s version, sets the next one, folds the fragments and any `## Unreleased` section into the CHANGELOG, deletes the fragments, refreshes every copy of the version and bumps the Projects skill Version line when the branch changed that skill. It refuses when the branch is behind `main`, the tree has uncommitted changes, the branch already set its own version, its CHANGELOG `##` headings differ from `main`'s (a heading of its own, a reused number or a heading below the top one), a fragment is malformed, or there are no notes. The explicit `bump-version.cjs <x.y.z>` form still works.
-- **CI guard:** validation accepts a pull request that holds its base's version with the base's CHANGELOG headings, or one that sets exactly the next patch or minor version with that heading on top, the base's headings below it and no fragment left. A stale or skipped number, a stray heading, a half-done bump or a base that is not in the checkout fails with the fix to run.
-- **Folding:** sections with the same name from several fragments become one section, a byte order mark is ignored, `##` headings are read as GitHub shows them (a tab after `##`, or up to three spaces before it), and every error names the heading that was added, dropped or repeated.
-- **Review tier:** the merge-time bump commit stays a version-only change when it also bumps the Projects skill Version line.
-- **Projects skill test:** the test no longer pins one exact skill Version, so branches that change the skill stop conflicting on it.
-
 ## 3.19.19 (see one key's value yourself, and env commands you can paste)
 
 - **New:** `toolkit env show NAME` shows one stored value in a PowerShell window you opened yourself, after you type the key's name again; `show NAME --copy` puts it on the clipboard instead, marked so Windows clipboard history and sync skip it where Windows honours that. It refuses, before reading the store, in a shell an agent or an app's built-in terminal started, when it is not on a terminal (a pipe or a file), and on a wrong retype. There is no way to show every value, and nothing about it is recorded. The `toolkit-env` skill tells agents never to run it.
