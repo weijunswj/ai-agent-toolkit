@@ -95,8 +95,8 @@ function gitArgs(repo, args) {
   return ['--no-optional-locks', '-c', 'core.fsmonitor=false', '-c', 'log.showSignature=false', '-C', repo, ...args];
 }
 
-function git(command, repo, args) {
-  const result = spawnSync(command, gitArgs(repo, args), { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, windowsHide: true, shell: false });
+function git(command, repo, args, run = spawnSync) {
+  const result = run(command, gitArgs(repo, args), { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, windowsHide: true, shell: false });
   return { status: result.error ? null : result.status, stdout: result.stdout || '' };
 }
 
@@ -192,8 +192,9 @@ function historyFinding(findings, hit, file, commit) {
   findings.set(`${hit.rule}:${file}:${commit}:${hit.line}`, { id: findingId(key), kind: 'secret-in-history', class: classFor(file), rule: hit.rule, label: hit.label, file, line: hit.line, column: hit.column, commit: commit.slice(0, 12) });
 }
 
-// `start` replaces spawn only in tests that time the stream handler.
-function scanHistory(command, repo, { spawn: start = spawn } = {}) {
+// `start` replaces spawn only in tests that time the stream handler, and `run` replaces spawnSync
+// only in tests that watch the full-file reads.
+function scanHistory(command, repo, { spawn: start = spawn, spawnSync: run = spawnSync } = {}) {
   return new Promise((resolve) => {
     const args = gitArgs(repo, ['log', '--all', '--root', '--diff-merges=first-parent', '--format=commit %H', '-p', '-U0', '--inter-hunk-context=0', '--text', '--no-color', '--no-ext-diff', '--no-textconv', '--no-renames', '--src-prefix=a/', '--dst-prefix=b/']);
     const child = start(command, args, { windowsHide: true, shell: false, stdio: ['ignore', 'pipe', 'ignore'] });
@@ -251,12 +252,15 @@ function scanHistory(command, repo, { spawn: start = spawn } = {}) {
       let ok = code === 0 && !skipped;
       for (const { commit: at, file: name } of recheckFiles.values()) {
         // The same 5 MB limit as the tree: a file that cannot be read is listed, and the scan is incomplete.
-        const shown = spawnSync(command, gitArgs(repo, ['show', '--no-textconv', `${at}:${name}`]), { maxBuffer: MAX_FILE_BYTES, windowsHide: true, shell: false });
-        if (shown.error || shown.status !== 0) {
-          notScanned.push({ file: name, commit: at.slice(0, 12), reason: shown.error && shown.error.code === 'ENOBUFS' ? 'larger than 5 MB' : 'unreadable' });
-          ok = false;
-          continue;
-        }
+        // The size is checked before the read, so git is never stopped mid-read: on Windows, stopping
+        // Git's launcher leaves the real git.exe running in the repository folder for a while.
+        const unread = (reason) => { notScanned.push({ file: name, commit: at.slice(0, 12), reason }); ok = false; };
+        const size = git(command, repo, ['cat-file', '-s', `${at}:${name}`], run);
+        const bytes = size.status === 0 && /^\d+$/.test(size.stdout.trim()) ? Number(size.stdout.trim()) : null;
+        if (bytes === null) { unread('unreadable'); continue; }
+        if (bytes > MAX_FILE_BYTES) { unread('larger than 5 MB'); continue; }
+        const shown = run(command, gitArgs(repo, ['show', '--no-textconv', `${at}:${name}`]), { maxBuffer: MAX_FILE_BYTES, windowsHide: true, shell: false });
+        if (shown.error || shown.status !== 0) { unread('unreadable'); continue; }
         for (const hit of patterns.scanText(shown.stdout.toString('utf8'))) if (hit.rule === 'private-key') historyFinding(findings, hit, name, at);
       }
       resolve({ ok, findings: [...findings.values()], notScanned });

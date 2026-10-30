@@ -1,5 +1,10 @@
 # Toolkit Changelog
 
+## 3.19.11 (the local secret scan never stops git mid-read)
+
+- **Fixed:** when the local secret scan reads a whole file from history to check it for a private key, it now asks git for the file's size first. A file over 5 MB is listed as not scanned without being read, so git is never stopped part way through. On Windows, stopping Git's launcher left the real `git.exe` running in the scanned folder for a short while, so a folder removed straight after the scan could fail as busy.
+- **Unchanged:** the report is the same: a file over 5 MB is still listed with its commit as "larger than 5 MB", one git cannot read as "unreadable", and either makes the scan incomplete.
+
 ## 3.19.9 (writing a report that mentions Claude or Codex is no longer refused)
 
 - **Fixed:** an agent's shell command that only mentions Claude or Codex and has a short word such as "no" or "ok" in it, for example a test report written to a file with a heredoc, is no longer refused with "only the user answers the governance question". The answer guard now counts Claude or Codex only where a shell would really start it, using the same command reader as the continuation guard; heredoc bodies, echo text, file names, here-strings and commit messages are data. A host's own subcommands (`claude config`, `codex login` and the like) still start no session.
