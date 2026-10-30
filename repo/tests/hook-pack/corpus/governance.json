@@ -43,7 +43,8 @@
       "expect": { "decision": "allow" },
       "status": "known-bad",
       "lane": "Evidence-store governance exemption",
-      "added": "2026-10-30"
+      "added": "2026-10-30",
+      "note": "The evidence-store exemption decides a store only when a programme binding cached on this computer names it. This fixture has no cached binding, so the row stays known-bad until its lane gives the fixture one."
     },
     {
       "id": "G2",

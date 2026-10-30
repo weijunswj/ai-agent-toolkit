@@ -24,7 +24,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { ShellCall, absoluteShellPath, assignmentOf, folderWord, shellPath } = require('./toolkit-shell-call.cjs');
+const { ShellCall, absoluteShellPath, assignVariable, assignmentOf, folderWord, shellOf, shellPath } = require('./toolkit-shell-call.cjs');
 
 const MESSAGE = 'Remove the AI attribution lines (Co-Authored-By or Claude-Session trailers, claude.ai session links, "Generated with" footers) and retry.';
 const ATTRIBUTION_PATTERNS = Object.freeze([
@@ -120,13 +120,13 @@ function shellCommands(text) {
 // The commands of one line with each whole-word variable an earlier command assigned a literal to
 // read as its value, and a leading home variable as `~` (toolkit-shell-call.cjs folderWord), the way
 // the merge hold reads them. The assignments themselves are dropped.
-function withVariables(commands) {
+function withVariables(commands, shell = null) {
   const variables = new Map();
   const result = [];
   for (const current of commands) {
     const assigned = assignmentOf(current.words);
-    if (assigned) { variables.set(assigned[0], assigned[1]); continue; }
-    result.push({ ...current, words: current.words.map((word) => folderWord(word, variables)) });
+    if (assigned) { assignVariable(variables, assigned); continue; }
+    result.push({ ...current, words: current.words.map((word) => folderWord(word, variables, shell)) });
   }
   return result;
 }
@@ -367,12 +367,13 @@ const SHELLS = /(?:^|[\\/])(?:bash|sh|zsh|dash|ksh|pwsh|powershell|cmd|eval|invo
 // Returns the refusal reason, or '' when the command may run. A quoted command handed to a
 // shell (bash -c "...", pwsh -Command "...") is read too, up to two levels deep.
 // `registryOptions` is for tests (the governance decisions file to read).
-function forceRefusal(command, cwd, depth = 0, registryOptions = {}) {
+// `shell` is the shell the command runs in when the host says (shellOf), else null.
+function forceRefusal(command, cwd, depth = 0, registryOptions = {}, shell = null) {
   const text = String(command || '');
   if (text.length > MAX_COMMAND_CHARS || !/\bgit\b/i.test(text)) return '';
   let root = cwd || process.cwd();
   const cache = new Map();
-  for (const current of withVariables(shellCommands(text))) {
+  for (const current of withVariables(shellCommands(text), shell)) {
     // A cd earlier in the same command line moves the folder later git commands run in.
     if (/^(?:cd|pushd|set-location|sl)$/i.test(current.words[0]) && current.words.length === 2) {
       root = shellPath(root, current.words[1]);
@@ -388,7 +389,7 @@ function forceRefusal(command, cwd, depth = 0, registryOptions = {}) {
     if (depth < 2 && SHELLS.test(current.words[0])) {
       for (const word of current.words.slice(1)) {
         if (/\s/.test(word) && /\bgit\b/i.test(word)) {
-          const nested = forceRefusal(word, root, depth + 1, registryOptions);
+          const nested = forceRefusal(word, root, depth + 1, registryOptions, null);
           if (nested) return nested;
         }
       }
@@ -488,14 +489,14 @@ function branchCreated(sub, args) {
 // named no folder). A `cd`, `pushd` or `Set-Location` to a folder that stands on its own, or a git -C
 // or --work-tree one, confirms the folder from there on; a relative one keeps the state. Each push,
 // pull request and preceding step read from a folder not confirmed carries `folderConfirmed: false`.
-function outgoingChanges(command, cwd, depth = 0, preceding = [], confirmed = true) {
+function outgoingChanges(command, cwd, depth = 0, preceding = [], confirmed = true, shell = null) {
   const text = String(command || '');
   const found = [];
   if (text.length > MAX_COMMAND_CHARS || !/\b(?:git|gh)\b/i.test(text)) return found;
   let root = cwd || process.cwd();
   const withPreceding = (target) => (preceding.length ? { ...target, preceding: preceding.slice() } : target);
   const marked = (entry, known) => (known ? entry : { ...entry, folderConfirmed: false });
-  for (const current of withVariables(shellCommands(text))) {
+  for (const current of withVariables(shellCommands(text), shell)) {
     if (/^(?:cd|pushd|set-location|sl)$/i.test(current.words[0]) && current.words.length === 2) {
       root = shellPath(root, current.words[1]);
       confirmed ||= absoluteShellPath(current.words[1]);
@@ -514,7 +515,7 @@ function outgoingChanges(command, cwd, depth = 0, preceding = [], confirmed = tr
     if (pullRequest) found.push(withPreceding(marked(pullRequest, confirmed)));
     if (depth < 2 && SHELLS.test(current.words[0])) {
       for (const word of current.words.slice(1)) {
-        if (/\s/.test(word) && /\b(?:git|gh)\b/i.test(word)) found.push(...outgoingChanges(word, root, depth + 1, preceding, confirmed));
+        if (/\s/.test(word) && /\b(?:git|gh)\b/i.test(word)) found.push(...outgoingChanges(word, root, depth + 1, preceding, confirmed, null));
       }
     }
   }
@@ -527,14 +528,14 @@ function outgoingChanges(command, cwd, depth = 0, preceding = [], confirmed = tr
 // target of one command line shares one time budget, which starts at the first check (30 seconds,
 // or `budgetMs` in tests); `check(target, { deadline })` is for tests. `folderConfirmed` false says
 // `cwd` may not be where the command runs (outgoingChanges).
-function outgoingRefusal(command, cwd, { notes, budgetMs, folderConfirmed = true, check = (target, options) => require('./toolkit-push-check.cjs').checkOutgoing(target, options) } = {}) {
+function outgoingRefusal(command, cwd, { notes, budgetMs, folderConfirmed = true, shell = null, check = (target, options) => require('./toolkit-push-check.cjs').checkOutgoing(target, options) } = {}) {
   let deadline;
   const run = (target) => {
     if (deadline === undefined) deadline = Date.now() + (budgetMs ?? require('./toolkit-push-check.cjs').BUDGET_MS);
     return check(target, { deadline });
   };
   let targets;
-  try { targets = outgoingChanges(command, cwd, 0, [], folderConfirmed); } catch { return ''; }
+  try { targets = outgoingChanges(command, cwd, 0, [], folderConfirmed, shell); } catch { return ''; }
   const seen = new Set();
   for (const target of targets) {
     const key = JSON.stringify(target);
@@ -562,7 +563,9 @@ function attributionDecision(input, options = {}) {
   const call = ShellCall.from(input, { shell: true });
   const command = call.text;
   const folderConfirmed = !(options.sessionFolderOnly && !call.folders.length);
-  const reason = call.refusal() || (command && (attributionRefusal(command, call.folder) || forceRefusal(command, call.folder) || outgoingRefusal(command, call.folder, { ...options, folderConfirmed })));
+  // `options.host` is set by the hook entry point ('claude' or 'codex'), never read from the payload.
+  const shell = shellOf(input, options.host);
+  const reason = call.refusal() || (command && (attributionRefusal(command, call.folder) || forceRefusal(command, call.folder, 0, {}, shell) || outgoingRefusal(command, call.folder, { ...options, folderConfirmed, shell })));
   return reason ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } } : {};
 }
 

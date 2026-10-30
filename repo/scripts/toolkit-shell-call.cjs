@@ -81,14 +81,39 @@ function assignmentOf(words) {
 
 const HOME_VARIABLE = /^(?:\$env:USERPROFILE|\$env:HOME|\$HOME|\$\{HOME\}|%USERPROFILE%)(?=$|[\\/])/i;
 
+// Records an assignment (assignmentOf) in `variables`, noting a name assigned more than once.
+function assignVariable(variables, [key, value]) {
+  variables.set(key, { value, reassigned: variables.has(key) });
+}
+
 // A folder word as the shell would read it: a whole-word variable the same command assigned earlier,
-// and a leading home variable as `~` (shellPath resolves it).
-function folderWord(word, variables) {
+// and a leading home variable as `~` (shellPath resolves it). Names are read only as the shell that
+// runs the command reads them (`shell`: 'posix' or 'powershell', from shellOf): a POSIX name in its
+// exact case, a PowerShell name in any case, the last assignment winning. When the shell is not known,
+// a name assigned in both forms or more than once is left unread, so the folder stays the literal word
+// and the check fails closed.
+function folderWord(word, variables, shell = null) {
   const name = /^\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))$/.exec(word);
-  // A POSIX name matches only its exact case; a PowerShell name matches in any case.
-  const key = name && [`sh:${name[1] || name[2]}`, `ps:${(name[1] || name[2]).toLowerCase()}`].find(candidate => variables.has(candidate));
-  const value = key ? variables.get(key) : word;
+  let value = word;
+  if (name) {
+    const posix = variables.get(`sh:${name[1] || name[2]}`);
+    const power = variables.get(`ps:${(name[1] || name[2]).toLowerCase()}`);
+    if (shell === 'posix') value = posix ? posix.value : word;
+    else if (shell === 'powershell') value = power ? power.value : word;
+    else {
+      const found = [posix, power].filter(Boolean);
+      if (found.length === 1 && !found[0].reassigned) value = found[0].value;
+    }
+  }
   return String(value).replace(HOME_VARIABLE, '~');
+}
+
+// The shell a call runs in, when the host says: Claude Code's Bash tool runs bash and its PowerShell
+// tool PowerShell. Codex names no shell (its Bash tool may run PowerShell on Windows), so it is null.
+function shellOf(input, host) {
+  if (host !== 'claude') return null;
+  const tool = input && (input.tool_name || input.toolName);
+  return tool === 'Bash' ? 'posix' : tool === 'PowerShell' ? 'powershell' : null;
 }
 
 function programName(word) {
@@ -209,4 +234,4 @@ class ShellCall {
   }
 }
 
-module.exports = Object.freeze({ SHELL_TOOL_NAMES, SHELL_TOOLS, UNREADABLE, ShellCall, absoluteShellPath, argvText, assignmentOf, folderWord, quoteWords, shellPath });
+module.exports = Object.freeze({ SHELL_TOOL_NAMES, SHELL_TOOLS, UNREADABLE, ShellCall, absoluteShellPath, argvText, assignVariable, assignmentOf, folderWord, quoteWords, shellOf, shellPath });

@@ -71,7 +71,7 @@ const MAX_APPROVALS = 100;
 const MAX_PROMPT_CHARS = 8000;
 const MAX_COMMAND_CHARS = 1024 * 1024;
 
-const { SHELL_TOOLS, ShellCall, assignmentOf, folderWord, shellPath } = require('./toolkit-shell-call.cjs');
+const { SHELL_TOOLS, ShellCall, assignVariable, assignmentOf, folderWord, shellOf, shellPath } = require('./toolkit-shell-call.cjs');
 // A connector's merge or auto-merge tool, whatever its server is called (a claude.ai connector's
 // server name is a UUID): the tool name ends in one of these after a _ or -.
 const AUTO_MERGE_NAME = 'enable[_-]?(?:pr[_-]?|pull[_-]?request[_-]?)?auto[_-]?merge';
@@ -374,7 +374,7 @@ const PUSH_VALUE_OPTIONS = new Set(['--repo', '--receive-pack', '--exec', '-o', 
 
 // The refusal for a git push in one segment, or ''. `variables` holds what earlier segments of the
 // same command assigned (assignmentOf).
-function pushRefusal(words, cwd, { registryOptions = {}, variables = new Map() } = {}) {
+function pushRefusal(words, cwd, { registryOptions = {}, variables = new Map(), shell = null } = {}) {
   let index = 0;
   let root = cwd;
   while (index < words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[index])) index += 1;
@@ -382,7 +382,7 @@ function pushRefusal(words, cwd, { registryOptions = {}, variables = new Map() }
   index += 1;
   while (index < words.length && words[index].startsWith('-')) {
     const option = words[index];
-    if (option === '-C' && index + 1 < words.length) root = shellPath(root, folderWord(words[index + 1], variables));
+    if (option === '-C' && index + 1 < words.length) root = shellPath(root, folderWord(words[index + 1], variables, shell));
     index += GIT_VALUE_OPTIONS.has(option) ? 2 : 1;
   }
   if (words[index] !== 'push') return '';
@@ -566,7 +566,7 @@ function judge(merge, approvals) {
 
 // A refusal for a shell command that could make an approval without the user, or merges outside
 // what an approval can allow; '' when there is none.
-function shellRefusal(text, cwd, registryOptions = {}) {
+function shellRefusal(text, cwd, registryOptions = {}, shell = null) {
   if (STATE_WORDS.test(text)) return refuse('Toolkit\'s user-state files (merge approvals and governance decisions) and its session variable must be read and changed only by Toolkit itself. Never act as the user.');
   if (HOOK_FEED.test(text) && FEED_WORDS.test(text)) return refuse('a merge approval must come from the user\'s own typed message, so commands that load Toolkit\'s hook scripts or feed them a prompt are refused.');
   const parts = segments(text);
@@ -590,16 +590,17 @@ function shellRefusal(text, cwd, registryOptions = {}) {
   const variables = new Map();
   for (const words of parts) {
     const assigned = assignmentOf(words);
-    if (assigned) { variables.set(assigned[0], assigned[1]); continue; }
-    if (/^(?:cd|pushd|chdir|set-location|sl)$/i.test(words[0]) && words.length >= 2) { root = shellPath(root || process.cwd(), folderWord(words[words.length - 1], variables)); continue; }
-    const reason = pushRefusal(words, root || process.cwd(), { registryOptions, variables });
+    if (assigned) { assignVariable(variables, assigned); continue; }
+    if (/^(?:cd|pushd|chdir|set-location|sl)$/i.test(words[0]) && words.length >= 2) { root = shellPath(root || process.cwd(), folderWord(words[words.length - 1], variables, shell)); continue; }
+    const reason = pushRefusal(words, root || process.cwd(), { registryOptions, variables, shell });
     if (reason) return refuse(reason);
   }
   return '';
 }
 
 // The PreToolUse decision: { deny } or null.
-function decide(input, { registryOptions = {}, now, environment = process.env } = {}) {
+// `host` is the hook's own host ('claude' or 'codex'), set by the entry point, never read from the payload.
+function decide(input, { registryOptions = {}, now, environment = process.env, host = null } = {}) {
   const tool = String(input && (input.tool_name || input.toolName) || '');
   let merges;
   if (CONNECTOR_MERGE.test(tool)) merges = [connectorMerge(tool, input)];
@@ -615,7 +616,7 @@ function decide(input, { registryOptions = {}, now, environment = process.env } 
     // shared reader), so a quoted program path such as `C:\Program Files\GitHub CLI\gh.exe` cannot
     // hide a merge. A merge both readings find counts once.
     const joined = call.joinedWords && call.joinedWords !== call.text ? call.joinedWords.replace(/[\\`^]\r?\n/g, ' ') : '';
-    const refusal = shellRefusal(joined ? `${text}\n${joined}` : text, cwd, registryOptions);
+    const refusal = shellRefusal(joined ? `${text}\n${joined}` : text, cwd, registryOptions, shellOf(input, host));
     if (refusal) return refusal;
     merges = shellMerges(text, cwd, environment || {});
     if (joined) {

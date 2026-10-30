@@ -42,7 +42,7 @@ function main(guard = () => require('./toolkit-attribution-guard.cjs')) {
   catch { return 0; }
   let decision;
   const notes = [];
-  try { decision = guard().attributionDecision(input, { notes }); }
+  try { decision = guard().attributionDecision(input, { notes, host: 'claude' }); }
   catch { return mayCarryAttribution(commandText(input)) ? refuse(CHECK_FAILED_REASON) : 0; }
   if (decision?.hookSpecificOutput) {
     // Notes from a step that could not run go with the refusal, so they are not lost.
