@@ -398,7 +398,8 @@ function hookEnvironment(home) {
 function startProcess({ file, args, input, env, cwd, timeout }) {
   return new Promise(resolve => {
     let child;
-    try { child = spawn(file, args, { env, cwd, windowsHide: true }); } catch (error) { resolve({ status: -1, stdout: '', stderr: String(error.message) }); return; }
+    // Elsewhere than Windows the shell gets its own process group, so stopping it stops the hook too.
+    try { child = spawn(file, args, { env, cwd, windowsHide: true, detached: process.platform !== 'win32' }); } catch (error) { resolve({ status: -1, stdout: '', stderr: String(error.message) }); return; }
     let stdout = '', stderr = '', stopped = false;
     const timer = setTimeout(() => { stopped = true; stopTree(child); }, timeout);
     child.stdout.setEncoding('utf8'); child.stderr.setEncoding('utf8');
@@ -414,7 +415,7 @@ function startProcess({ file, args, input, env, cwd, timeout }) {
 // A shell's children outlive it when only the shell is stopped, so stop the whole tree.
 function stopTree(child) {
   if (process.platform === 'win32') spawnSync('taskkill', ['/pid', String(child.pid), '/t', '/f'], { windowsHide: true, stdio: 'ignore' });
-  else child.kill('SIGKILL');
+  else { try { process.kill(-child.pid, 'SIGKILL'); } catch { child.kill('SIGKILL'); } }
 }
 
 // One row on each of its hosts, one fixture between them: [{ host, observed }], where observed is
@@ -515,12 +516,19 @@ async function run(options, out = process.stdout) {
   const scratch = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'hook-pack-')));
   try {
     const roots = new PluginRoots(scratch, { against: options.against });
+    // Past its budget the run names the rows still running, so a stalled row shows in the log.
+    const running = new Set();
+    const watchdog = options.budgetSeconds ? setTimeout(() => out.write(`Still running after ${options.budgetSeconds} s: ${[...running].join(', ')}\n`), options.budgetSeconds * 1000) : null;
+    watchdog?.unref();
     const perRow = await pool(rows, options.concurrency || DEFAULT_CONCURRENCY, async row => {
       const hosts = row.hosts.filter(host => !options.host || host === options.host);
       let outcomes;
+      running.add(row.id);
       try { outcomes = await runRow(row, hosts, { roots, scratch }); } catch (error) { outcomes = hosts.map(host => ({ host, observed: { decision: 'error', problems: [`the runner failed: ${error.message}`], failed: [] } })); }
+      running.delete(row.id);
       return outcomes.map(({ host, observed }) => ({ row, host, observed, met: meets(row, host, observed) }));
     });
+    if (watchdog) clearTimeout(watchdog);
     const results = perRow.flat();
     const seconds = (Date.now() - started) / 1000;
     return options.against ? revertReport(results, options.against, seconds, out) : scoreboard(results, seconds, options, out);
