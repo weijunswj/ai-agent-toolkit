@@ -1,0 +1,46 @@
+{
+  "schema": "toolkit-hook-pack/v1",
+  "family": "attribution",
+  "rows": [
+    {
+      "id": "ATTR.plain-commit",
+      "source": "hook pack seed: daily commit",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "git commit -m \"Fix a typo in the readme\"" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
+      "expect": { "decision": "allow" },
+      "status": "pass"
+    },
+    {
+      "id": "ATTR.co-author-trailer",
+      "source": "push matrix C1",
+      "kind": "hostile",
+      "hosts": ["claude", "codex"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "git commit -m x -m \"Co-Authored-By: Claude <noreply@anthropic.com>\"" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
+      "expect": { "decision": "deny" },
+      "status": "pass"
+    },
+    {
+      "id": "ATTR.force-push",
+      "source": "push matrix C4",
+      "kind": "hostile",
+      "hosts": ["claude", "codex"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "git push --force origin feature" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
+      "expect": { "decision": "deny" },
+      "status": "pass"
+    },
+    {
+      "id": "ATTR.read-only-status",
+      "source": "hook pack seed: daily read",
+      "kind": "parity",
+      "hosts": ["claude", "codex"],
+      "payload": { "tool_name": "PowerShell", "tool_input": { "command": "git status --short; git log --oneline -3" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
+      "expect": { "decision": "allow" },
+      "status": "pass"
+    }
+  ]
+}

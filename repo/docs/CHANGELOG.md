@@ -1,5 +1,13 @@
 # Toolkit Changelog
 
+## 3.19.18 (a hook test pack every hook change must pass)
+
+- **New:** the hook test pack (`repo/scripts/toolkit-hook-pack.cjs`, rows in `repo/tests/hook-pack/corpus/`) runs tool calls through the hooks exactly as Claude Code and Codex start them: the real `hooks.json` matchers, the plugin folder written into each command, one process per hook with the call on stdin, and on Windows the Codex PowerShell launcher setup installs. It checks the decision the host would act on and that no fixture file changed, and prints a scoreboard of passes, known bugs, false blocks and leaks per family.
+- **Suites:** ordinary daily commands that must pass, hostile calls that must stop, hooks that break (a missing, throwing or stalled module, unreadable input), a plugin version folder deleted mid-chat, and host parity. Rows for bugs not fixed yet are marked known-bad with the lane that fixes them, and the run fails when one starts passing, so the fix flips it.
+- **Revert proof:** `run --against <commit>` runs a fix's new rows against the plugin as it was at that commit and passes only when they fail there, so a review never has to feed hook scripts by hand.
+- **CI:** a `hook-pack` job runs the pack on Linux and Windows on every pull request, and the `validate` job waits for it. The validate job also fails a pull request that removes a row, changes a row's expectation or lowers a row to known-bad without a line for it under a "Pack changes" heading in the body.
+- **Gate rules:** a new "Hook changes" section says what a hook change must show before it merges (the pack green on both systems, a pack row and revert proof for each bug it fixes, explained expectation changes, and a real-host smoke per release), and that an enforcing hook that breaks refuses only the calls it guards while advisory hooks stay fail-open.
+
 ## 3.19.14 (setup shows report-only rows as status lines)
 
 - **Changed:** a setup row that only reports state and takes no answer is no longer a numbered question. "Toolkit hooks in Codex" now shows under its section as an unnumbered line, for example "Status (nothing to answer): Toolkit hooks in Codex: Off: Shell and agent check, File edit check. Turn them on in Codex: open /hooks and turn on Shell and agent check and File edit check." The questions after it move up one number (Antigravity becomes 3.2 in the Codex table), and the table heading counts only the numbered questions.
