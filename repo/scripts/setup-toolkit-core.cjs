@@ -1352,7 +1352,7 @@ function questionBankApprovalPayload(specs) {
         section_index: spec.presentation.section_index,
         title: spec.section,
         question_count: spec.presentation.question_count
-          || specs.filter((candidate) => candidate.section === spec.section).length,
+          || answerable(specs).filter((candidate) => candidate.section === spec.section).length,
       });
     }
   }
@@ -1457,13 +1457,18 @@ function withPresentationMetadata(specs, host = specs[0]?.presentation?.host || 
       sections.push(section);
       sectionByName.set(spec.section, section);
     }
-    sectionByName.get(spec.section).question_count += 1;
+    if (!spec.report_only) sectionByName.get(spec.section).question_count += 1;
   }
+  // A report-only row is an unnumbered status line at the end of its section, so the numbered
+  // questions stay contiguous and every number has letters.
+  specs = [...specs].sort((left, right) => sectionByName.get(left.section).index - sectionByName.get(right.section).index
+    || Number(Boolean(left.report_only)) - Number(Boolean(right.report_only)));
+  const questionCount = answerable(specs).length;
   const seenBySection = new Map();
   const presented = specs.map((spec) => {
     const section = sectionByName.get(spec.section);
-    const questionIndex = (seenBySection.get(spec.section) || 0) + 1;
-    seenBySection.set(spec.section, questionIndex);
+    const questionIndex = spec.report_only ? null : (seenBySection.get(spec.section) || 0) + 1;
+    if (questionIndex) seenBySection.set(spec.section, questionIndex);
     const choices = spec.choices.map((choice, index) => ({
       ...choice,
       presentation_ref: spreadsheetChoiceReference(index + 1),
@@ -1477,11 +1482,11 @@ function withPresentationMetadata(specs, host = specs[0]?.presentation?.host || 
         section_id: section.id,
         section_index: section.index,
         question_index: questionIndex,
-        question_ref: `${section.index}.${questionIndex}`,
+        question_ref: questionIndex ? `${section.index}.${questionIndex}` : '',
         // A report-only row has no choices, so no recommended letter.
         recommended_choice_ref: recommendedChoice?.presentation_ref || '',
         total_visible_section_count: sections.length,
-        total_visible_question_count: specs.length,
+        total_visible_question_count: questionCount,
       },
     };
   });
@@ -1854,7 +1859,7 @@ function codexHookCells(current, args) {
   const install = current.codexInstall;
   const refresh = recommendedChoice('codexPluginBehavior', current, args) === 'install'
     ? ' Codex may ask you to review the hooks again after a refresh; check /hooks afterwards.' : '';
-  const keep = { short: '', full: '', recommended: `Keep current.${refresh}`.replace(/\.$/, '') };
+  const keep = { short: '', full: '', recommended: `Nothing to do.${refresh}`.replace(/\.$/, '') };
   if (install.config === 'unreadable') return { ...keep, short: 'Could not read', full: 'Setup could not read the Codex config.toml, so the Toolkit hook state is unknown.' };
   if (!install.versions?.length) return { ...keep, short: 'Not installed', full: 'Codex has no Toolkit plugin installed, so no Toolkit hook runs.' };
   if (install.plugin === 'off') return { ...keep, short: 'Plugin off', full: 'The Toolkit plugin is turned off in Codex, so no Toolkit hook runs.' };
@@ -1867,7 +1872,7 @@ function codexHookCells(current, args) {
       : [off.length ? `Off: ${off.join(', ')}` : '', notReviewed.length ? `Not reviewed: ${notReviewed.join(', ')}` : ''].filter(Boolean).join('; ');
   const names = [...off, ...notReviewed];
   const list = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : names[0];
-  return { short, full, recommended: `You turn them on in Codex: open /hooks and turn on ${list}.${refresh}`.replace(/\.$/, '') };
+  return { short, full, recommended: `Turn them on in Codex: open /hooks and turn on ${list}.${refresh}`.replace(/\.$/, '') };
 }
 
 // Codex's project_doc_max_bytes as config.toml has it, against Toolkit's recorded answer, and the
@@ -1886,8 +1891,8 @@ function codexDocLimitCells(current) {
   return { short: `Yours (${value})`, currentChoice: leave };
 }
 
-// A report-only row: it shows Codex state the owner changes in Codex itself, takes no answer and
-// has no letters, and its Current text is still bound into the bank identity.
+// A report-only row: it shows Codex state the owner changes in Codex itself, takes no answer, has
+// no number or letters and shows as a status line; its Current text is still bound into the bank identity.
 function reportOnlyRow({ id, key, section, title, whatThisControls, current, currentShort, recommendedText }) {
   return {
     id, key, section, title, whatThisControls, report_only: true,
@@ -1900,6 +1905,7 @@ function reportOnlyRow({ id, key, section, title, whatThisControls, current, cur
 }
 
 const answerable = (specs) => specs.filter((spec) => !spec.report_only);
+const statusLine = (spec) => `Status (nothing to answer): ${spec.title}: ${spec.current_short || spec.current}. ${spec.recommended_text}.`;
 const unanswered = (specs, args) => answerable(specs).filter((spec) => !choiceForKey(args, spec.key));
 
 function setupQuestionSpecs(args, current) {
@@ -2258,7 +2264,7 @@ function renderQuestionRows(specs, onlyRef = '') {
       section = spec.section;
       lines.push(`## ${spec.presentation.section_index}. ${section}`, '');
     }
-    lines.push(`### ${spec.presentation.question_ref} ${spec.title}`);
+    lines.push(spec.report_only ? `### Status (nothing to answer): ${spec.title}` : `### ${spec.presentation.question_ref} ${spec.title}`);
     lines.push('');
     lines.push(`**What this controls:** ${spec.whatThisControls}`);
     lines.push('');
@@ -2267,7 +2273,7 @@ function renderQuestionRows(specs, onlyRef = '') {
     lines.push(`**Verification:** ${spec.currentState?.verification || 'unverified'}`);
     lines.push('');
     if (spec.report_only) {
-      lines.push(`**Recommended:** ${spec.recommended_text}`, '', `**Why:** ${spec.recommendation_reason}`, '', '**Choices:** none; this row only reports.', '', '---', '');
+      lines.push(`**What to do:** ${spec.recommended_text}`, '', `**Why:** ${spec.recommendation_reason}`, '', '---', '');
       continue;
     }
     lines.push(`**Recommended:** ${spec.presentation.recommended_choice_ref} - ${choiceLabel(spec, spec.recommended)}`);
@@ -2300,22 +2306,30 @@ function renderCompactQuestionTable(specs, markdown = true) {
   // An outcome that only repeats the label is left out too.
   const keepsCurrent = (spec) => spec.recommended === 'keep' || spec.folded_into === spec.recommended;
   const recommended = (spec) => {
-    if (spec.report_only) return spec.recommended_text;
     const label = choiceLabel(spec, spec.recommended);
     const effect = keepsCurrent(spec) || spec.recommended_outcome === label ? '' : `: ${spec.recommended_outcome}`;
     return `${spec.presentation.recommended_choice_ref}. ${label}${effect}`;
   };
-  const others = (spec) => (spec.report_only ? ['(report only)']
-    : spec.choices.filter((choice) => choice.value !== spec.recommended).map((choice) => `${choice.presentation_ref}. ${choice.label}`));
+  const others = (spec) => spec.choices.filter((choice) => choice.value !== spec.recommended).map((choice) => `${choice.presentation_ref}. ${choice.label}`);
   const selected = (spec) => (spec.selected ? `${choiceReference(spec, spec.selected)}. ${choiceLabel(spec, spec.selected)}` : '');
   const lines = [];
   let section = '';
+  let tableOpen = false;
   for (const spec of specs) {
     if (spec.section !== section) {
       section = spec.section;
+      tableOpen = false;
       const heading = `${spec.presentation.section_index}. ${section}`;
-      if (markdown) lines.push('', `## ${heading}`, '', '| # | Question | Current | Recommended | Other choices |', '|---|---|---|---|---|');
-      else lines.push('', heading, '='.repeat(heading.length));
+      lines.push('', ...(markdown ? [`## ${heading}`] : [heading, '='.repeat(heading.length)]));
+    }
+    // Status lines come after the section's numbered questions (withPresentationMetadata orders them).
+    if (spec.report_only) {
+      lines.push('', statusLine(spec));
+      continue;
+    }
+    if (markdown && !tableOpen) {
+      lines.push('', '| # | Question | Current | Recommended | Other choices |', '|---|---|---|---|---|');
+      tableOpen = true;
     }
     if (!markdown) {
       lines.push('', `${spec.presentation.question_ref} ${spec.title}`, `  Current: ${spec.current_short || spec.current}`, `  Recommended: ${recommended(spec)}`);
@@ -2345,8 +2359,8 @@ function renderQuestionBankHeader(specs, markdown = true, quickIndex = true) {
   if (!quickIndex) return lines;
   lines.push('Quick index', '');
   for (const spec of specs) {
-    lines.push(`${spec.presentation.question_ref} ${spec.title} - Recommended: ${spec.report_only ? spec.recommended_text
-      : `${spec.presentation.recommended_choice_ref} - ${choiceLabel(spec, spec.recommended)}`}`);
+    lines.push(spec.report_only ? statusLine(spec)
+      : `${spec.presentation.question_ref} ${spec.title} - Recommended: ${spec.presentation.recommended_choice_ref} - ${choiceLabel(spec, spec.recommended)}`);
   }
   lines.push('');
   return lines;
