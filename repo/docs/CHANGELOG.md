@@ -1,5 +1,14 @@
 # Toolkit Changelog
 
+## 3.19.18 (the Projects post hook keeps one running post after a handoff)
+
+- **Fixed:** a new coordinator session no longer starts a fresh chat post when it should edit the running one. With no post of its own and no owner message yet, the post hook takes the running post from the `RUNNING POST:` line the session read from project memory (or wrote to it), and refuses a fresh status post until the owner writes. The refusal says to read the project chat if the owner wrote since or the post nears 8 KB.
+- **Fixed:** while a running post is known, an edit of any other post (an older one, or one the session never saw) is refused and names the running post. Edits of replies stay exempt.
+- **Fixed:** a project chat read passes over cards (thread starts, routing, activity, Remote Control) and gate anchors when it looks for the coordinator's newest post, and any page that shows the memory post gives its real size and any owner message after it.
+- **Changed:** in the coordinator, an owner message in a work thread it started or listed no longer counts as the owner writing in the main chat. Beside a running post, two new posts still pass: a one-line `Gate: ...` anchor, which never becomes the running post, and a post starting "Re: your reply on" after an owner message in a thread or a reply.
+- **Removed:** the post hook no longer checks merges. The rule to post a summary of a merge's external effects and wait for the owner's OK stays in the Projects skill and the global rules; the hook now runs only on the Projects post and edit tools, keeping the post layout, wording, linked Waiting items and the running-post rule.
+- **Unchanged:** a running post of 7,000 bytes or more still frees one fresh post, since the chat's 8 KB limit is real.
+
 ## 3.19.15 (CI runs the tests that pin a date a year ahead)
 
 - **New CI check:** the Validate workflow has a `tests-clock-ahead` job. It runs every test file that pins a calendar date (an ISO date literal or `Date.UTC(`, in the file or in a test helper it loads) with Node's clock 400 days ahead, so a test that pins a date but lets the code read the real clock fails on its pull request instead of turning `main` red weeks later. The `validate` job waits for it. Locally, `node repo/scripts/run-tests.cjs --clock-ahead` runs the same check, and `--clock-offset-days <n>` moves the clock for a named, `--changed` or `--all` run.
