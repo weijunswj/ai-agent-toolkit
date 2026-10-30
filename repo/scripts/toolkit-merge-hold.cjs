@@ -35,9 +35,9 @@
 //     `gh api` to a pull request's merge endpoint (found anywhere in the command), and any
 //     connector's merge tool (an mcp__ tool named merge_pull_request, merge-pull-request or
 //     mergePullRequest, whatever its server is called). Its call names the pull request with
-//     repository_full_name or owner and repo, pr_number, pull_number or pullNumber, and the head
-//     commit with expected_head_sha, expectedHeadSha or sha; a call whose fields are missing, not
-//     readable or disagree is refused;
+//     repository_full_name or owner and repo, pr_number, pull_number, pullNumber,
+//     pull_request_number or number, and the head commit with expected_head_sha or expectedHeadSha
+//     (a sha field is not read); a call whose fields are missing, not readable or disagree is refused;
 //   - refused when written directly: any connector's auto-merge tool, GraphQL merges (the number cannot be read), the merge queue, branch merges,
 //     writes to the default branch's ref, `gh repo sync`, gh aliases that mention merge, a `git push`
 //     to the remote's default branch (evidence stores excepted, by name), a merge whose target is
@@ -78,13 +78,16 @@ const AUTO_MERGE_NAME = 'enable[_-]?(?:pr[_-]?|pull[_-]?request[_-]?)?auto[_-]?m
 const CONNECTOR_MERGE = new RegExp(`^mcp__.+?[_-](?:merge[_-]?pull[_-]?request|${AUTO_MERGE_NAME})$`, 'i');
 const CONNECTOR_AUTO_MERGE = new RegExp(`[_-]${AUTO_MERGE_NAME}$`, 'i');
 // The fields a connector's merge tool names its target with. Official GitHub server: owner, repo,
-// pullNumber, expectedHeadSha. Older servers: pull_number and the REST API's sha. Codex's GitHub
-// app: repository_full_name, pr_number, expected_head_sha.
+// pullNumber, expectedHeadSha. Codex's GitHub app: repository_full_name, pr_number,
+// expected_head_sha. Older servers use pull_number; a `sha` field is not read as the head, since
+// no server is known to pass it on to GitHub (one that drops it would merge whatever head is there),
+// so their merges are refused for want of a head commit.
 const REPOSITORY_FIELDS = Object.freeze(['repository_full_name', 'owner', 'repo']);
 const NUMBER_FIELDS = Object.freeze(['pr_number', 'pull_number', 'pullNumber', 'pull_request_number', 'number']);
-const SHA_FIELDS = Object.freeze(['expected_head_sha', 'expectedHeadSha', 'sha']);
-// The head SHA field that goes with each number field, for the refusal's hint.
-const SHA_FIELD_FOR = Object.freeze({ pr_number: 'expected_head_sha', pull_number: 'sha', pullNumber: 'expectedHeadSha' });
+const SHA_FIELDS = Object.freeze(['expected_head_sha', 'expectedHeadSha']);
+// The head SHA field that goes with each number field, for the refusal's hint; a shape with none
+// (pull_number) is told to use gh instead.
+const SHA_FIELD_FOR = Object.freeze({ pr_number: 'expected_head_sha', pullNumber: 'expectedHeadSha' });
 const SLUG = '[A-Za-z0-9._-]+\\/[A-Za-z0-9._-]+';
 const MAX_APPROVAL_LINE = 200;
 // A no, a doubt, a condition, a delay, a hand-off, a report or another kind of merge (a branch name
@@ -440,14 +443,14 @@ function shellMerges(text, cwd, environment = {}) {
 }
 
 // What a connector's merge tool call names, read from its arguments by field name, default deny:
-// { repository, pr, sha, auto, connector, explicit, fields, unclear, shaField }. A field that is
+// { repository, pr, sha, badSha, auto, connector, explicit, fields, unclear, shaField, unreadSha }. A field that is
 // given but has no usable value leaves its part null; two fields for the same part that disagree
 // set `unclear` to that part ('pull request', 'repository' or 'head commit'). `fields` lists the
 // known fields the call gave, for refusal text (names only, never values).
 function connectorMergeArgs(tool, args) {
   const given = args && typeof args === 'object' && !Array.isArray(args) ? args : {};
   const has = name => Object.prototype.hasOwnProperty.call(given, name) && given[name] !== undefined;
-  const fields = [...REPOSITORY_FIELDS, ...NUMBER_FIELDS, ...SHA_FIELDS].filter(has);
+  const fields = [...REPOSITORY_FIELDS, ...NUMBER_FIELDS, ...SHA_FIELDS, 'sha'].filter(has);
   let unclear = null;
   const disagree = part => { unclear = unclear || part; };
 
@@ -479,12 +482,14 @@ function connectorMergeArgs(tool, args) {
   // The head commit: 7 to 40 hex; every SHA field given must agree.
   const shas = SHA_FIELDS.filter(has).map(field => (typeof given[field] === 'string' && /^[0-9a-f]{7,40}$/i.test(given[field]) ? given[field].toLowerCase() : null));
   let sha = shas.length > 0 && shas.every(value => value !== null) ? shas[0] : null;
-  if (sha !== null && shas.some(value => value !== sha)) { disagree('head commit'); sha = null; }
+  // A sha field is never the pin, but one that names another commit makes the call unclear.
+  const other = typeof given.sha === 'string' && /^[0-9a-f]{7,40}$/i.test(given.sha) ? given.sha.toLowerCase() : null;
+  if (sha !== null && (shas.some(value => value !== sha) || (other !== null && other !== sha))) { disagree('head commit'); sha = null; }
   const badSha = shas.some(value => value === null);
 
   const numberField = NUMBER_FIELDS.find(has);
-  const shaField = SHA_FIELD_FOR[numberField] || (has('repository_full_name') ? 'expected_head_sha' : 'expected_head_sha or expectedHeadSha');
-  return { repository, pr, sha, badSha, auto: CONNECTOR_AUTO_MERGE.test(tool), connector: true, explicit: true, fields, unclear, shaField };
+  const shaField = numberField === 'pull_number' ? null : SHA_FIELD_FOR[numberField] || (has('repository_full_name') ? 'expected_head_sha' : 'expected_head_sha or expectedHeadSha');
+  return { repository, pr, sha, badSha, auto: CONNECTOR_AUTO_MERGE.test(tool), connector: true, explicit: true, fields, unclear, shaField, unreadSha: has('sha') };
 }
 
 function connectorMerge(tool, input) {
@@ -534,7 +539,12 @@ function judge(merge, approvals) {
   }
   if (!(typeof merge.sha === 'string' && /^[0-9a-f]{7,40}$/i.test(merge.sha))) {
     const approved = approval.sha ? ` The user approved ${approval.sha}.` : '';
-    if (merge.connector) return { refusal: refuse(`name the head commit this merge expects, so GitHub refuses it if the branch moves: this merge tool call ${hasText(merge.fields)} but no head SHA field. Add ${merge.shaField} and retry.${approved}`) };
+    if (merge.connector) {
+      // A sha field is not read: a server that drops it would merge whatever head is there.
+      const unread = merge.unreadSha ? ' (its sha field is not read, since not every server passes it to GitHub)' : '';
+      const next = merge.shaField ? `Add ${merge.shaField} and retry.` : `This tool has no head SHA field Toolkit reads, so use \`gh pr merge ${merge.pr} --match-head-commit <sha>\` instead.`;
+      return { refusal: refuse(`name the head commit this merge expects, so GitHub refuses it if the branch moves: this merge tool call ${hasText(merge.fields)} but no head SHA field${unread}. ${next}${approved}`) };
+    }
     return { refusal: refuse(`name the head commit this merge expects, so GitHub refuses it if the branch moves: add --match-head-commit <sha> (gh) or sha= (API) and retry.${approved}`) };
   }
   if (approval.sha && !merge.sha.toLowerCase().startsWith(approval.sha) && !approval.sha.startsWith(merge.sha.toLowerCase())) {

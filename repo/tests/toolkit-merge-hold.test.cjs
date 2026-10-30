@@ -432,6 +432,7 @@ const codexCall = (args = {}, tool = CODEX_MERGE) => ({
   cwd: os.tmpdir(), tool_name: tool,
   tool_input: { repository_full_name: DIAGNOSTIC_REPO, pr_number: 292, expected_head_sha: DIAGNOSTIC_SHA, merge_method: 'merge', commit_title: 'Merge pull request 292', commit_message: 'Quote fixes', ...args },
 });
+const codexCallFor = (repository, pr, args = {}) => codexCall({ repository_full_name: repository, pr_number: pr, expected_head_sha: SHA, ...args });
 const shaped = (tool, args) => ({ cwd: os.tmpdir(), tool_name: tool, tool_input: args });
 const MERGE_NAMES = ['mcp__1a59c906-04da-521d-bda7-7f71b9f9e01c__merge_pull_request', 'mcp__x__merge-pull-request', 'mcp__x__mergePullRequest', 'mcp__plugin_engineering_github__merge_pull_request', 'mcp__codex_apps__github_merge_pull_request'];
 const AUTO_NAMES = ['mcp__github__enable_pr_auto_merge', 'mcp__codex_apps__github__enable_pr_auto_merge', 'mcp__1a59c906-04da-521d-bda7-7f71b9f9e01c__enable_pr_auto_merge', 'mcp__x__enable_auto_merge', 'mcp__x__enable_pull_request_auto_merge', 'mcp__x__enable-pr-auto-merge', 'mcp__x__enablePullRequestAutoMerge'];
@@ -465,19 +466,39 @@ test('rows 1-4: the diagnostic Codex merge is identified, held for the user, pin
   assert.equal(decide(ctx, codexCall()), null, 'the refused call did not use the approval');
 });
 
-test('row 5: the official server (pullNumber, expectedHeadSha) and older servers (pull_number, sha) keep today\'s outcomes', (t) => {
+test('row 5: the official server (pullNumber, expectedHeadSha) keeps today\'s outcomes', (t) => {
   const ctx = context(t);
-  for (const [number, shaField] of [['pullNumber', 'expectedHeadSha'], ['pull_number', 'sha']]) {
-    const call = (args = {}) => shaped('mcp__github__merge_pull_request', { owner: 'owner', repo: 'a', [number]: 618, [shaField]: SHA, ...args });
-    assert.match(decide(ctx, call()).deny, /has not approved a merge of owner\/a#618/, number);
-    typed(ctx, 'merge 618');
-    assert.match(decide(ctx, call({ [shaField]: undefined })).deny, new RegExp(`but no head SHA field\\. Add ${shaField} and retry`), number);
-    assert.equal(decide(ctx, call()), null, number);
-    assert.match(decide(ctx, call()).deny, /has not approved/, `${number}: used up`);
-  }
+  const call = (args = {}) => shaped('mcp__github__merge_pull_request', { owner: 'owner', repo: 'a', pullNumber: 618, expectedHeadSha: SHA, ...args });
+  assert.match(decide(ctx, call()).deny, /has not approved a merge of owner\/a#618/);
+  typed(ctx, 'merge 618');
+  assert.match(decide(ctx, call({ expectedHeadSha: undefined })).deny, /but no head SHA field\. Add expectedHeadSha and retry/);
+  assert.equal(decide(ctx, call()), null);
+  assert.match(decide(ctx, call()).deny, /has not approved/, 'used up');
   // A digit-only string is a number too.
   typed(ctx, 'merge 618');
-  assert.equal(decide(ctx, shaped('mcp__github__merge_pull_request', { owner: 'owner', repo: 'a', pull_number: '618', sha: SHA })), null);
+  assert.equal(decide(ctx, call({ pullNumber: '618' })), null);
+});
+
+// No server is known to pass a `sha` field on to GitHub, and one that drops it would merge whatever
+// head is there, so `sha` is never the pin: the older shape (pull_number, sha) is refused even with
+// an approval, as before, and pointed at gh, and a `sha` beside a real head field must not disagree.
+test('row 5b: a sha field is never read as the head commit', (t) => {
+  const ctx = context(t);
+  const older = (args = {}) => shaped('mcp__github__merge_pull_request', { owner: 'owner', repo: 'a', pull_number: 618, sha: SHA, ...args });
+  assert.match(decide(ctx, older()).deny, /has not approved a merge of owner\/a#618/);
+  typed(ctx, 'merge 618');
+  for (const call of [older(), older({ sha: undefined }), older({ pull_number: '618' })]) {
+    const deny = decide(ctx, call).deny;
+    assert.match(deny, /no head SHA field.*This tool has no head SHA field Toolkit reads, so use `gh pr merge 618 --match-head-commit <sha>` instead/, JSON.stringify(call.tool_input));
+    assert.doesNotMatch(deny, /Add sha/);
+  }
+  assert.match(decide(ctx, older()).deny, /\(its sha field is not read, since not every server passes it to GitHub\)/);
+  // With the official field names, sha alone is not enough either.
+  assert.match(decide(ctx, shaped('mcp__github__merge_pull_request', { owner: 'owner', repo: 'a', pullNumber: 618, sha: SHA })).deny, /its sha field is not read.*Add expectedHeadSha and retry/);
+  // A sha beside a real head field: the same commit is fine, another one is unclear.
+  assert.match(decide(ctx, codexCallFor('owner/a', 618, { sha: DIAGNOSTIC_SHA })).deny, /names more than one head commit/);
+  assert.equal(decide(ctx, codexCallFor('owner/a', 618, { sha: SHA })), null, 'the approval was still unused');
+  assert.equal(hold.connectorMergeArgs(CODEX_MERGE, { repository_full_name: 'owner/a', pr_number: 618, sha: SHA }).sha, null);
 });
 
 test('rows 6-10: fields that disagree or cannot be read are refused, even with an approval', (t) => {
