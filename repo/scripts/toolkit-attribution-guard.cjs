@@ -415,6 +415,7 @@ function pullRequestCreate({ words }, root) {
   const start = words.findIndex((word) => /(?:^|[\\/])gh(?:\.exe)?$/i.test(word));
   if (start === -1 || words[start + 1] !== 'pr' || words[start + 2] !== 'create') return null;
   const rest = words.slice(start + 3);
+  if (rest.includes('--dry-run')) return null;
   const head = ghOption(rest, '--head', '-H').replace(/^[^:]*:/, '');
   return { folder: root, pullRequest: true, base: ghOption(rest, '--base', '-B'), sources: head ? [head] : [] };
 }
@@ -424,6 +425,8 @@ function pullRequestCreate({ words }, root) {
 // branch or tag.
 function pushTarget(args, folder) {
   if (args.some((word) => word === '--delete' || word === '-d')) return null;
+  // A dry run (`--dry-run`, `-n`, or `n` in a short-option bundle without the value-taking `o`) sends nothing.
+  if (args.some((word) => word === '--dry-run' || (/^-[A-Za-z]+$/.test(word) && word.includes('n') && !word.includes('o')))) return null;
   const positional = []; const sources = [];
   for (let index = 0; index < args.length; index += 1) {
     const word = args[index];
@@ -448,6 +451,32 @@ function pushTarget(args, folder) {
 // git commands that change what a later push in the same command line sends: commits, the adds
 // before them, and the history commands the push check refuses before a push.
 const COMMIT_STEPS = new Set(['add', 'stage', 'commit', 'merge', 'cherry-pick', 'revert', 'am', 'rebase']);
+// git commands that can make or move the branch a later push in the same command line sends.
+const BRANCH_STEPS = new Set(['checkout', 'switch', 'branch', 'worktree']);
+
+// The branch a git step creates and its start point ({ name, start }, `HEAD` when none is named):
+// `checkout -b|-B <name> [<start>]`, `switch -c|-C <name> [<start>]`, `branch <name> [<start>]` with
+// no options, and `worktree add -b|-B <name> <path> [<start>]`. Anything else is null.
+function branchCreated(sub, args) {
+  const positional = (list) => list.filter((word) => !word.startsWith('-'));
+  const after = (flags) => {
+    const at = args.findIndex((word) => flags.includes(word));
+    return at === -1 || !args[at + 1] ? null : { name: args[at + 1], rest: [...args.slice(0, at), ...args.slice(at + 2)] };
+  };
+  if (sub === 'checkout' || sub === 'switch') {
+    const found = after(sub === 'checkout' ? ['-b', '-B'] : ['-c', '-C', '--create', '--force-create']);
+    return found ? { name: found.name, start: positional(found.rest)[0] || 'HEAD' } : null;
+  }
+  if (sub === 'branch') {
+    const words = positional(args);
+    return words.length === args.length && words.length >= 1 && words.length <= 2 ? { name: words[0], start: words[1] || 'HEAD' } : null;
+  }
+  if (sub === 'worktree' && args[0] === 'add') {
+    const found = after(['-b', '-B']);
+    return found ? { name: found.name, start: positional(found.rest.slice(1))[1] || 'HEAD' } : null;
+  }
+  return null;
+}
 
 // What a push or a new pull request sends, for each one in a command line, with the same cd,
 // git -C and nested-shell reading as the force-push check: push and pull-request targets as
@@ -477,6 +506,10 @@ function outgoingChanges(command, cwd, depth = 0, preceding = [], confirmed = tr
     const push = git && !git.refusal && git.sub === 'push' ? pushTarget(git.args, git.base) : null;
     if (push) found.push(withPreceding(marked(push, known)));
     if (git && !git.refusal && COMMIT_STEPS.has(git.sub)) preceding.push(marked({ folder: git.base, sub: git.sub }, known));
+    if (git && !git.refusal && BRANCH_STEPS.has(git.sub)) {
+      const created = branchCreated(git.sub, git.args);
+      preceding.push(marked(created ? { folder: git.base, sub: 'create', ...created } : { folder: git.base, sub: git.sub }, known));
+    }
     const pullRequest = pullRequestCreate(current, root);
     if (pullRequest) found.push(withPreceding(marked(pullRequest, confirmed)));
     if (depth < 2 && SHELLS.test(current.words[0])) {

@@ -55,6 +55,7 @@ function isFolder(folder) {
 
 const FOLDER_MISSING = 'Toolkit could not find the folder this push or pull request runs in, so it could not check what would be sent and refused it. If the same command creates that folder first (`git clone`, `mkdir`, `git worktree add`), run that step as its own command, then the push. Otherwise check the folder in `cd` or `git -C` (`~/...`, and on Windows `C:/...` and Git Bash `/c/...`, all work).';
 const FOLDER_UNREADABLE = 'Toolkit could not read the folder this push or pull request runs in, because it is written with a variable or a command the same command line does not set (such as `$(...)` or `$REPO`), so it could not check what would be sent and refused it. Write the folder out (`~/...` works), or run the command from inside that folder.';
+const SOURCE_UNKNOWN = 'This command changes branches or commits before the push in the same command, and the branch it pushes does not exist yet, so Toolkit cannot tell what the push would send. Run the push as its own command after this finishes.';
 const FOLDER_UNCONFIRMED = 'Codex did not say which folder this command runs in, and Toolkit could not tell from the chat\'s folder what this push or pull request would send, so it refused it. Run the commit and the push as separate commands and name the branch (`git push <remote> <branch>`), or name the folder first with `git -C <full path>` or `cd <full path>`.';
 
 // An environment value by name, ignoring case on Windows as Windows does.
@@ -165,8 +166,9 @@ const UNFORESEEN = new Set(['merge', 'cherry-pick', 'revert', 'am', 'rebase']);
 const DIFF_OPTIONS = ['-U0', '--no-color', '--no-ext-diff', '--no-textconv', '--no-renames', '--diff-filter=d', '--src-prefix=a/', '--dst-prefix=b/'];
 
 // What earlier git commands of the same shell command did in this repository: { add, commit,
-// unforeseen } from `preceding` ([{ folder, sub }] in command order), each folder matched to the
-// repository by its own top folder.
+// unforeseen, created, steps } from `preceding` ([{ folder, sub }] in command order), each folder
+// matched to the repository by its own top folder. `created` maps each branch a step creates
+// (`sub: 'create'`, with `name` and `start`) to its start point; `steps` counts every step.
 function precedingIn(root, preceding, deadline, spawn) {
   const tops = new Map();
   const same = (folder) => {
@@ -177,10 +179,12 @@ function precedingIn(root, preceding, deadline, spawn) {
     }
     return tops.get(resolved);
   };
-  const found = { add: false, commit: false, unforeseen: '' };
-  for (const { folder, sub } of preceding) {
+  const found = { add: false, commit: false, unforeseen: '', created: new Map(), steps: 0 };
+  for (const { folder, sub, name, start } of preceding) {
     if (!same(folder)) continue;
-    if (sub === 'add' || sub === 'stage') found.add = true;
+    found.steps += 1;
+    if (sub === 'create' && name && start) found.created.set(name, start);
+    else if (sub === 'add' || sub === 'stage') found.add = true;
     else if (sub === 'commit') found.commit = true;
     else if (UNFORESEEN.has(sub) && !found.unforeseen) found.unforeseen = sub;
   }
@@ -298,7 +302,7 @@ function checkOutgoing(target, {
   deadline = Date.now() + budgetMs,
   git = resolveGit
 } = {}) {
-  const sources = target.sources?.length ? target.sources : ['HEAD'];
+  let sources = target.sources?.length ? target.sources : ['HEAD'];
   // A source git would read as an option is never passed on.
   if (sources.some((source) => source.startsWith('-') && !REV_OPTIONS.has(source))) return {};
   // A folder Toolkit cannot find is refused rather than let through unchecked: either it does not
@@ -311,20 +315,34 @@ function checkOutgoing(target, {
     // Every git call below runs this absolute path, never a name the system looks up.
     const spawn = (_name, args, options) => spawnProgram(program, args, options);
     // One call for the repository folder and the pushed commits.
-    const revs = sources.map((source) => (REV_OPTIONS.has(source) ? source : `${source}^{commit}`));
-    let probe = runGit(target.folder, ['rev-parse', '--show-toplevel', ...revs], deadline, spawn);
-    // A source that is not a commit yet: with a commit earlier in the same shell command (a first
-    // commit in a new repository, say) only what it could commit is checked; otherwise the push
-    // fails on its own. Not a repository: nothing to check. When Codex did not name the folder, the
-    // chat's folder may simply be the wrong one, so either is refused instead, unless the chat's
+    const revsOf = (list) => list.map((source) => (REV_OPTIONS.has(source) ? source : `${source}^{commit}`));
+    let probe = runGit(target.folder, ['rev-parse', '--show-toplevel', ...revsOf(sources)], deadline, spawn);
+    // A source that is not a commit yet. A branch an earlier step of the same shell command creates
+    // (`checkout -b`, `switch -c`, `branch`, `worktree add -b`) is read at its start point, since that
+    // is what the push will send. With a commit earlier in the same shell command (a first commit in
+    // a new repository, say) only what it could commit is checked. After any other earlier git step
+    // in this repository the push is refused, since that step could make the branch; with none, the
+    // push fails on its own. Not a repository: nothing to check. When Codex did not name the folder,
+    // the chat's folder may simply be the wrong one, so either is refused instead, unless the chat's
     // folder is in a repository with one working tree, which is then the one.
     let committed = true;
     if (probe.status !== 0) {
       if (target.folderConfirmed === false && !singleWorkingTree(target.folder, deadline, spawn)) return { refusal: FOLDER_UNCONFIRMED };
-      if (!target.preceding?.some((entry) => entry.sub === 'commit')) return {};
-      probe = runGit(target.folder, ['rev-parse', '--show-toplevel'], deadline, spawn);
-      if (probe.status !== 0) return {};
-      committed = false;
+      const top = runGit(target.folder, ['rev-parse', '--show-toplevel'], deadline, spawn);
+      if (top.status !== 0) return {};
+      const here = path.resolve(lines(top.stdout)[0]);
+      const steps = (target.preceding || []).map((entry) => (entry.folderConfirmed === false ? { ...entry, folder: here } : entry));
+      const before = steps.length ? precedingIn(here, steps, deadline, spawn) : { steps: 0, created: new Map() };
+      const started = sources.map((source) => before.created.get(source) || source);
+      if (started.some((source, index) => source !== sources[index])) {
+        const again = runGit(target.folder, ['rev-parse', '--show-toplevel', ...revsOf(started)], deadline, spawn);
+        if (again.status === 0) { probe = again; sources = started; }
+      }
+      if (probe.status !== 0) {
+        if (before.commit) { probe = top; committed = false; }
+        else if (before.steps) return { refusal: SOURCE_UNKNOWN };
+        else return {};
+      }
     }
     const out = lines(probe.stdout);
     let root = path.resolve(out[0]);
@@ -350,10 +368,20 @@ function checkOutgoing(target, {
       if (!base) return { note: `${NOTE}: no base branch was found on origin.` };
       range = [...sources, '--not', base];
     } else if (committed) {
-      // What the named remote already has (a remote with none gets everything); for no remote or a
-      // URL, what any remote has.
+      // What the named remote already has; for no remote, a URL or a configured remote with no
+      // remote-tracking refs yet (new or empty), what any remote has, so history another remote
+      // already holds is not read again. A name that is no configured remote sends nothing: git
+      // refuses the push on its own.
       const named = target.remote && !looksLikeUrl(target.remote);
-      range = [...sources, '--not', named ? `--remotes=${target.remote}` : '--remotes'];
+      let remotes = '--remotes';
+      if (named) {
+        const configured = runGit(root, ['remote'], deadline, spawn);
+        if (configured.status !== 0) throw new CheckSkipped('git could not list the remotes');
+        if (!lines(configured.stdout).includes(target.remote)) return {};
+        const tracked = runGit(root, ['for-each-ref', '--count=1', '--format=%(refname)', `refs/remotes/${target.remote}/`], deadline, spawn);
+        if (lines(tracked.stdout).length) remotes = `--remotes=${target.remote}`;
+      }
+      range = [...sources, '--not', remotes];
     }
     let sent = [];
     if (range) {

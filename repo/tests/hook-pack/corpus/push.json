@@ -30,9 +30,7 @@
       "payload": { "tool_name": "Bash", "tool_input": { "command": "git checkout -b fix; git push -u origin fix" } },
       "fixture": { "repo": { "governance": "enabled", "commits": [{ "files": { "uat-config.txt": "token = \"{credential}\"\n" }, "message": "unpushed commit on main" }] } },
       "expect": { "decision": "deny" },
-      "status": "known-bad",
-      "lane": "Push check misses earlier unpushed commits",
-      "added": "2026-10-30"
+      "status": "pass"
     },
     {
       "id": "P2",
@@ -75,6 +73,66 @@
       "payload": { "tool_name": "Bash", "tool_input": { "command": "D='{work}'; d='{home}'; git -C \"$D\" push origin HEAD:main" } },
       "fixture": { "repo": { "governance": "enabled", "branch": "feature" }, "files": { ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n" } },
       "note": "The origin HEAD file names main as the default branch. D is the governed repository and d a folder outside it; read as one variable, the push would be judged from d and let through.",
+      "expect": { "decision": "deny" },
+      "status": "pass"
+    },
+    {
+      "id": "P1.switch-create",
+      "source": "hooks one-PR G0, 4.2: a branch made by switch -c earlier in the command",
+      "kind": "hostile",
+      "hosts": ["claude", "codex"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "git switch -c fix; git push -u origin fix" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature", "commits": [{ "files": { "uat-config.txt": "token = \"{credential}\"\n" }, "message": "unpushed commit with a credential" }] } },
+      "expect": { "decision": "deny" },
+      "status": "pass"
+    },
+    {
+      "id": "P1.branch-start",
+      "source": "hooks one-PR G0, 4.2: a branch made by git branch with a start point earlier in the command",
+      "kind": "hostile",
+      "hosts": ["claude", "codex"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "git branch fix feature; git push origin fix" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature", "commits": [{ "files": { "uat-config.txt": "token = \"{credential}\"\n" }, "message": "unpushed commit with a credential" }] } },
+      "expect": { "decision": "deny" },
+      "status": "pass"
+    },
+    {
+      "id": "PUSH.dry-run",
+      "source": "hooks one-PR G0, 4.1: a dry-run push sends nothing but was checked, and Codex refused it",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "git push --dry-run origin feature" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature", "commits": [{ "files": { "uat-config.txt": "token = \"{credential}\"\n" }, "message": "unpushed commit with a credential" }] } },
+      "expect": { "decision": "allow" },
+      "status": "pass"
+    },
+    {
+      "id": "PUSH.dry-run-short",
+      "source": "hooks one-PR G0, 4.1: git push -n is a dry run too",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "git push -n -u origin feature" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature", "commits": [{ "files": { "uat-config.txt": "token = \"{credential}\"\n" }, "message": "unpushed commit with a credential" }] } },
+      "expect": { "decision": "allow" },
+      "status": "pass"
+    },
+    {
+      "id": "PUSH.missing-remote",
+      "source": "hooks one-PR G0, 4.1: a remote name that is no configured remote sends nothing (git refuses it)",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "git push nowhere feature" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature", "commits": [{ "files": { "uat-config.txt": "token = \"{credential}\"\n" }, "message": "unpushed commit with a credential" }] } },
+      "expect": { "decision": "allow" },
+      "status": "pass"
+    },
+    {
+      "id": "PUSH.empty-remote-credential",
+      "source": "hooks one-PR G0, 4.1: a configured remote with no tracking refs still gets every unpushed commit checked",
+      "kind": "hostile",
+      "hosts": ["claude", "codex"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "git push origin feature" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature", "commits": [{ "files": { "uat-config.txt": "token = \"{credential}\"\n" }, "message": "unpushed commit with a credential" }] } },
       "expect": { "decision": "deny" },
       "status": "pass"
     }
