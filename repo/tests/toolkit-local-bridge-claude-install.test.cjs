@@ -502,7 +502,6 @@ test('an automatic update to a newer version asks for a new chat once, since the
     cwd: root, encoding: 'utf8', timeout: 300000, env: env(root, { CLAUDE_PLUGIN_ROOT: managed }),
   });
   assert.equal(result.status, 0, result.stderr);
-  const escaped = BRIDGE_VERSION.replace(/\./g, '\\.');
-  const notice = new RegExp(`Toolkit was updated from ${escaped} to 99\\.0\\.0 as this chat started\\. This chat keeps the Toolkit hooks it started with until it ends\\. Open a new chat before committing, pushing or opening pull requests\\.`, 'g');
-  assert.equal((result.stdout.match(notice) || []).length, 1, result.stdout);
+  const notice = `Toolkit was updated from ${BRIDGE_VERSION} to 99.0.0 as this chat started. This chat keeps the Toolkit hooks it started with until it ends. Open a new chat before committing, pushing or opening pull requests.`;
+  assert.equal(result.stdout.split(notice).length - 1, 1, result.stdout);
 });
