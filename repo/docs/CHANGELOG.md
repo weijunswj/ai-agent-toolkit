@@ -1,5 +1,14 @@
 # Toolkit Changelog
 
+## 3.19.16 (evidence stores and scratch clones are never governed)
+
+- **Fixed:** a clone of an evidence store (such as a `TRANSPORT-*` repository) was treated like any undecided github.com repository: Toolkit asked the governance question there, held every prompt and tool (Claude Projects posting included), and a "yes" recorded it as ENABLED. A repository that a programme binding cached on this computer names as its evidence store is now DISABLED automatically (rule S1): never asked, never held, and `enable` is refused. A `TRANSPORT-*` repository under the owner of such a binding's repository counts too, so a fresh clone on a new computer is not asked either. A binding merged in the store's own repository still decides.
+- **Scratch clones:** a clone of another repository inside the ignored top-level `.tmp/` folder of a repository whose governance is decided is DISABLED automatically (rule R1s). A worktree of that repository itself keeps its state.
+- **Recorded decisions:** an "enable" recorded earlier for a store or scratch clone decides nothing; `status` and `check` show it with the one command that clears it.
+- **Discover:** reports a store or scratch clone as not applicable, and never proposes a repository as its own evidence store.
+- **Default-branch push guard:** a push to an evidence store that a cached binding names is not refused, whatever its name. The guard also reads a folder named through a variable the same command assigned (`$d = 'C:\path'; git -C $d push`, `d=/path; cd "$d"`) and a leading home variable (`$env:USERPROFILE`, `$HOME`), so it judges the repository the push really comes from.
+- **Held repositories in Claude Projects:** a thread can still post, react, update its checklist or end its turn in a held repository, so it can ask the owner the governance question. Its decision cards and every other tool stay held.
+
 ## 3.19.14 (setup shows report-only rows as status lines)
 
 - **Changed:** a setup row that only reports state and takes no answer is no longer a numbered question. "Toolkit hooks in Codex" now shows under its section as an unnumbered line, for example "Status (nothing to answer): Toolkit hooks in Codex: Off: Shell and agent check, File edit check. Turn them on in Codex: open /hooks and turn on Shell and agent check and File edit check." The questions after it move up one number (Antigravity becomes 3.2 in the Codex table), and the table heading counts only the numbered questions.

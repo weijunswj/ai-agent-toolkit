@@ -148,6 +148,8 @@ class GovernanceDiscovery {
     if (['R8', 'R9'].includes(state.rule) || (state.rule === 'R2' && !state.merged)) return { ...base, status: 'not-applicable', reason: 'not on github.com' };
     if (state.rule === 'M1') return { ...base, status: 'reuse', reason: 'a valid binding is merged on the default branch, so nothing is asked', notes: state.notes };
     if (state.rule === 'M2') return { ...base, status: 'disabled', reason: 'the merged binding sets governance to disabled; only an owner-merged pull request changes it' };
+    if (state.rule === 'S1') return { ...base, status: 'not-applicable', reason: 'an evidence store that a programme binding names (agent-managed, not governed)' };
+    if (state.rule === 'R1s') return { ...base, status: 'not-applicable', reason: "a scratch clone in another repository's ignored .tmp folder (not governed)" };
     if (state.rule === 'M0') return { ...base, status: 'error', reason: 'the merged binding is invalid; fix it through a pull request first', problems: state.merged.problems };
     const identity = governance.readIdentity(state.root);
     const slug = governance.remoteSlug(identity.remote);
@@ -182,7 +184,8 @@ class GovernanceDiscovery {
       if (/^TRANSPORT-/i.test(repo.name)) addStore(`${owner}/${repo.name}`, 'named TRANSPORT-*');
       else if (repo.name.toLowerCase().includes(name.toLowerCase())) addStore(`${owner}/${repo.name}`, `name contains ${name}`);
     }
-    for (const binding of otherBindings) addStore(binding.store, `the store of ${binding.repository}'s binding`);
+    // A repository is never its own evidence store, even when another binding names it as one.
+    for (const binding of otherBindings) if (binding.store.toLowerCase() !== slug.toLowerCase()) addStore(binding.store, `the store of ${binding.repository}'s binding`);
     const judged = [...storeEvidence.values()].map(entry => judgeStore(this.#gh, owner, entry.full, entry.evidence));
     const eligible = judged.filter(entry => entry.eligible).sort((a, b) => storeRank(b, name) - storeRank(a, name));
     const stores = { ...choose(eligible, !repos.ok), rejected: judged.filter(entry => !entry.eligible) };
