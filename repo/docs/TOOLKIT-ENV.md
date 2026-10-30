@@ -2,7 +2,7 @@
 
 `toolkit env` keeps the API keys and tokens your coding apps use in this computer's own credential store, and feeds them to Claude Code and Codex when they need them. There is no plain-text key file, and no value ever goes through a chat, a log or a report.
 
-You can ask any agent in words ("edit my env", "what keys do I have", "remove the Coolify token"); the `toolkit-env` skill turns that into the commands below. The commands run from the managed Toolkit checkout. To run one yourself in PowerShell:
+You can ask any agent in your own words ("show env", "let me see my keys", "I need to update my OpenAI key", "is my GitHub token set?"); the `toolkit-env` skill works out what you want and turns it into the commands below. The commands run from the managed Toolkit checkout. To run one yourself in PowerShell:
 
 ```powershell
 node "$env:USERPROFILE\.ai-agent-toolkit\source\ai-agent-toolkit\repo\scripts\toolkit-env.cjs" status
@@ -23,11 +23,32 @@ Key names look like `PROVIDER_SOLUTION_PURPOSE`, for example `COOLIFY_SWOOSHZ_MC
 | You want to | Command | What happens |
 |---|---|---|
 | See your keys | `status` | Names, which app entries use each, present or missing. Never a value, length or prefix. |
-| Change or add keys | `edit`, then `apply` | Notepad (or your default editor) opens a private file listing every key as `NAME=<unchanged>`. Type new values over `<unchanged>` or add `NAME=value` lines, save and close, then tell your agent "done", or run the `apply` line shown at the top of the file yourself. It prints `changed:` and `added:` lines and deletes the file. A blank value or a deleted line changes nothing. An edit file left unsaved for 30 minutes is deleted by the next command. |
+| See, change, add or remove keys | `edit`, then `apply` | Notepad opens a private file with your keys as `NAME=value` lines, like a `.env` file. Each save is applied within a few seconds: see [Your keys in Notepad](#your-keys-in-notepad). When you are finished, close the tab and tell your agent "done", or run the `apply` line shown at the top of the file. It lists what was changed, added and removed, by name, and deletes the file. |
 | Set one key | `set NAME` | Asks for the value with hidden input. Run it yourself in PowerShell, as shown above. |
 | See one value | `show NAME` or `show NAME --copy` | Shows the value once, or copies it to the clipboard, in a PowerShell window you opened yourself. See [Seeing a value](#seeing-a-value). |
 | Remove a key | `remove NAME` | Asks a yes/no that names the key first. |
 | Run a command-line tool with a key | `run --names NAME -- <tool> <args>` | Starts the tool with only those keys added to its environment. It refuses unknown names and the usual commands that print the whole environment (such as `env`, `printenv`, `set` or `Get-ChildItem env:`); it cannot catch every way a program can print a variable. Programs start directly, without a shell; on Windows, npm-installed tools run through the program their command script wraps, and other `.cmd` or `.bat` scripts are refused. |
+
+## Your keys in Notepad
+
+`edit` writes a fresh private file from the store every time, in your saved order with your own comment lines, and opens it in Notepad:
+
+- Change a value, add a `NAME=value` line, or delete a line to remove that key. Type values without quotes; spaces at either end are dropped.
+- Save. A small helper started with the file applies the save once the file has stopped changing for about a second and a half. It watches only that file, prints nothing and writes no log.
+- When you are finished, close the tab and say "done" (or run `apply`). It applies a save not applied yet, deletes the file and lists what changed, by name only.
+
+A save is applied whole or not at all. Nothing is saved, and the `# Status:` line at the top of the file says why, when:
+
+- a line is not `NAME=value`, has no value, uses a key name twice, has a value in quotes or is too long, or a comment looks like a key;
+- the file was saved as UTF-16 (save it as UTF-8);
+- the save would remove every key;
+- a key changed elsewhere (`set`, `remove`, an import) while the tab was open. Ask for your keys again for a fresh tab, and copy your changes across; the typed lines stay in your tab.
+
+A key added elsewhere while the tab is open is never removed by it. A value that one line cannot show exactly (a line break, spaces at either end, or wrapping quotes) appears as `<kept: change it with toolkit env set NAME>` and stays as it is.
+
+Every `edit` wipes the earlier file first, so Notepad always shows what is stored now. A save from an older Notepad tab is never applied: the file it writes is wiped, and the next result says to use the newest tab. A save that was not applied when you start a new edit is not carried over, and the result says so. The file is overwritten with zeros, then deleted, at "done" or 30 minutes after its last save.
+
+Notepad's tab restore can keep its own copy of an open tab. After "done", Toolkit checks Notepad's tab-restore folder for the file's name (yes or no, never its content) and, when it finds it, tells you to close the tab and to set Notepad > Settings > When Notepad starts to "Start new session". Toolkit never changes Notepad's own files.
 
 ## Seeing a value
 
@@ -73,6 +94,6 @@ Comments over 200 characters are refused before screening. The screen refuses a 
 
 Existing layouts are checked again before use or writes. An unsafe record identifies each layout entry N (counting from 1) in the "layout" list of `~/.ai-agent-toolkit/env/manifest.json`, so you can remove or reword that list entry locally. N is not a JSON file line number.
 
-This screen cannot recognise every secret. A short password or a multi-word passphrase can look exactly like a heading and be saved as comment text. Never put a password, key or token in a comment. Retaining arbitrary comment text cannot guarantee that the layout is secret-free. The private edit file and a retired `.env` backup intentionally contain typed or original values and must be treated as sensitive.
+This screen cannot recognise every secret. A short password or a multi-word passphrase can look exactly like a heading and be saved as comment text. Never put a password, key or token in a comment. Retaining arbitrary comment text cannot guarantee that the layout is secret-free. The private edit file (while it is open, and any copy Notepad keeps of its tab) and a retired `.env` backup intentionally contain real values and must be treated as sensitive. Agents are told never to open, read or search the edit folder.
 
 Values are protected at rest by your operating-system login, and no single plain file holds them all. Any program running as you, including an agent's shell command, can still ask the store for a value, so this is not isolation from the agent or other programs. The skill rules, `run`'s name list and the tests that check no value reaches output reduce that risk but do not remove it. The same holds for `show`: its checks stop an agent reading a value through Toolkit by accident or on a casual request, not a determined program running as you. An agent that runs commands in a pseudo-terminal could pass the terminal check; the agent-shell check and the retyped name are what stop it.

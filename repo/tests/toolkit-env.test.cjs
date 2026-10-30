@@ -43,20 +43,25 @@ function noPrivateDirectory(directory) { fs.mkdirSync(directory, { recursive: tr
 
 // environment holds the agent markers a test sets (none by default, whatever runs the tests);
 // tty, typed and clipboard stand in for the terminal and the clipboard used by show.
-function harness(t, { values = {}, answers = [], hidden = [], typed = [], feeders = [], corruptReadBack = [], opener, environment = {}, tty = { stdin: true, stdout: true }, clipboard, scriptPath } = {}) {
+function harness(t, { values = {}, answers = [], hidden = [], typed = [], feeders = [], corruptReadBack = [], opener, environment = {}, tty = { stdin: true, stdout: true }, clipboard, scriptPath, clock, helpers = [], startHelper, editEnvironment = {}, platform } = {}) {
   const home = tempHome(t);
   const paths = new EnvPaths({ homeDir: home, environment: {} });
   const store = new FakeEnvStore({ values, corruptReadBack });
   const asked = [];
+  const now = clock ? () => new Date(clock.ms) : () => new Date();
   const env = new ToolkitEnv({
     environment,
+    now,
     tty: () => tty,
     askTerminal: async (question) => { asked.push(question); return typed.shift() ?? ''; },
     clipboard: clipboard || (() => { throw new Error('the clipboard is not used in this test'); }),
     ...(scriptPath ? { scriptPath } : {}),
     store,
-    manifest: new EnvManifest({ file: paths.manifest }),
-    editSession: new EnvEditSession({ directory: paths.editDir, opener: opener || (async () => true), privateDirectory: noPrivateDirectory }),
+    manifest: new EnvManifest({ file: paths.manifest, now }),
+    editSession: new EnvEditSession({
+      directory: paths.editDir, opener: opener || (async () => true), privateDirectory: noPrivateDirectory, now,
+      startHelper: startHelper || ((file) => { helpers.push(file); return true; }), environment: editEnvironment, platform: platform || process.platform,
+    }),
     feeders,
     paths,
     ask: async (question) => { asked.push(question); return answers.shift() ?? ''; },
@@ -69,12 +74,19 @@ function harness(t, { values = {}, answers = [], hidden = [], typed = [], feeder
     const code = await new ToolkitEnvCli({ env, stdout, stderr }).main(argv);
     return { code, stdout: stdout.text, stderr: stderr.text };
   };
-  return { home, paths, store, env, run, asked };
+  return { home, paths, store, env, run, asked, helpers };
 }
 
 function editFile(paths) {
   return path.join(paths.editDir, fs.readdirSync(paths.editDir).find((name) => name.endsWith('.txt')));
 }
+
+function editFiles(paths) {
+  try { return fs.readdirSync(paths.editDir).filter((name) => name.endsWith('.txt')); } catch { return []; }
+}
+
+// The lines of an edit file below its header.
+function bodyOf(text) { return text.split(/\r?\n/).filter((line) => line && !/^# (Toolkit env|Close any|Change a value|Each save|A line showing|Your own|When you are|Status:)/.test(line)); }
 
 test('key names follow PROVIDER_SOLUTION_PURPOSE and never start with CODEX_', () => {
   for (const name of ['COOLIFY_SWOOSHZ_MCP_TOKEN', 'NEONDB_SWOOSHZ_PLATFORM_API_KEY', 'CLOUDFLARE_ACCOUNT_ID', 'A1_B2_C3']) assert.equal(nameProblem(name), '', name);
@@ -95,34 +107,35 @@ test('status lists names and where they are used, never values', async (t) => {
   assert.doesNotMatch(result.stdout, /length|characters|prefix/i);
 });
 
-test('edit then apply: unchanged lines stay, changed and added keys are saved, blank is never a delete', async (t) => {
+test('edit shows real values; a save changes, adds and removes keys, and done reports names only', async (t) => {
   const kept = sentinel();
   const old = sentinel();
   const fresh = sentinel();
   const added = sentinel();
-  const { run, paths, store } = harness(t, { values: { X1_TEST_KEPT_KEY: kept, X1_TEST_CHANGED_KEY: old, X1_TEST_BLANK_KEY: sentinel() } });
+  const gone = sentinel();
+  const { run, paths, store, helpers } = harness(t, { values: { X1_TEST_KEPT_KEY: kept, X1_TEST_CHANGED_KEY: old, X1_TEST_GONE_KEY: gone } });
   const opened = await run('edit');
   assert.equal(opened.code, 0);
-  assert.match(opened.stdout, /Opened ~\/\.ai-agent-toolkit\/env\/edit\/env-edit-.*\.txt with your 3 keys/);
+  assert.match(opened.stdout, /Opened ~\/\.ai-agent-toolkit\/env\/edit\/env-edit-[0-9a-f]{16}\.txt with your 3 keys/);
   const file = editFile(paths);
+  assert.deepEqual(helpers, [file], 'the helper gets the file path only');
   const text = fs.readFileSync(file, 'utf8');
-  assert.match(text, /^X1_TEST_KEPT_KEY=<unchanged>$/m);
-  assert.doesNotMatch(text, new RegExp(`${kept}|${old}`));
+  assert.deepEqual(bodyOf(text), [`X1_TEST_CHANGED_KEY=${old}`, `X1_TEST_GONE_KEY=${gone}`, `X1_TEST_KEPT_KEY=${kept}`]);
   fs.writeFileSync(file, text
-    .replace('X1_TEST_CHANGED_KEY=<unchanged>', `X1_TEST_CHANGED_KEY=${fresh}`)
-    .replace('X1_TEST_BLANK_KEY=<unchanged>', 'X1_TEST_BLANK_KEY=')
+    .replace(`X1_TEST_CHANGED_KEY=${old}`, `X1_TEST_CHANGED_KEY=${fresh}`)
+    .replace(`X1_TEST_GONE_KEY=${gone}`, '')
     .concat(`X1_TEST_ADDED_KEY = ${added}\r\n`));
   const applied = await run('apply');
   assert.equal(applied.code, 0, applied.stderr);
   assert.match(applied.stdout, /^changed: X1_TEST_CHANGED_KEY$/m);
   assert.match(applied.stdout, /^added: X1_TEST_ADDED_KEY$/m);
-  assert.match(applied.stdout, /1 blank value was ignored/);
+  assert.match(applied.stdout, /^removed: X1_TEST_GONE_KEY$/m);
   assert.equal(store.peek('X1_TEST_CHANGED_KEY'), fresh);
   assert.equal(store.peek('X1_TEST_ADDED_KEY'), added);
   assert.equal(store.peek('X1_TEST_KEPT_KEY'), kept);
-  assert.ok(store.peek('X1_TEST_BLANK_KEY'));
-  assert.equal(fs.existsSync(file), false, 'the edit file is deleted after apply');
-  for (const secret of [kept, old, fresh, added]) assert.doesNotMatch(applied.stdout + applied.stderr, new RegExp(secret));
+  assert.equal(store.peek('X1_TEST_GONE_KEY'), undefined);
+  assert.deepEqual(fs.readdirSync(paths.editDir), [], 'the edit folder is empty after done');
+  for (const secret of [kept, old, fresh, added, gone]) assert.ok(!(applied.stdout + applied.stderr).includes(secret));
   const again = await run('apply');
   assert.match(again.stdout, /There is no open edit/);
 });
@@ -136,28 +149,38 @@ test('apply saves nothing when a line is wrong, and names the line without its v
   // the = is part of a value and must not be repeated.
   const spaced = sentinel();
   const based = sentinel();
-  fs.appendFileSync(file, `X1_TEST_GOOD_KEY=${value}\nbad_name_here=${value}\nnot a line\nX1_TEST_NEON_URL postgres://user:${spaced}@db.example/db?sslmode=require\n${based}QUJD==\n`);
+  fs.appendFileSync(file, `X1_TEST_GOOD_KEY=${value}\nbad_name_here=${value}\nnot a line\nX1_TEST_NEON_URL postgres://user:${spaced}@db.example/db?sslmode=require\n${based}QUJD==\nX1_TEST_BLANK_KEY=\n`);
   const result = await run('apply');
   assert.equal(result.code, 1);
   assert.match(result.stderr, /Nothing was saved/);
   assert.match(result.stderr, /line \d+: the text before = is not a valid key name \(key names look like/);
   assert.match(result.stderr, /line \d+ is not NAME=value/);
+  assert.match(result.stderr, /line \d+ has no value; to remove a key, delete its whole line/);
   for (const secret of [value, spaced, based, 'bad_name_here', 'postgres']) assert.doesNotMatch(result.stdout + result.stderr, new RegExp(secret));
   assert.equal(store.peek('X1_TEST_GOOD_KEY'), undefined);
   assert.ok(fs.existsSync(file), 'the file is kept so it can be fixed');
+  assert.match(fs.readFileSync(file, 'utf8'), /^# Status: NOT SAVED \(\d\d:\d\d UTC\)\. Fix: line \d+/m, 'the file says why at the top');
+  assert.ok(!fs.readFileSync(file, 'utf8').split(/\r?\n/).find((line) => line.startsWith('# Status:')).includes(value));
 });
 
-test('a second edit reopens the open file; an edit file untouched for 30 minutes is deleted', async (t) => {
-  const { run, paths } = harness(t, { values: { X1_TEST_KEPT_KEY: sentinel() } });
+test('a second edit builds a fresh file from the store and wipes the old one, which is never reused', async (t) => {
+  const kept = sentinel();
+  const { run, paths, store } = harness(t, { values: { X1_TEST_KEPT_KEY: kept, X1_TEST_GONE_KEY: sentinel() }, answers: ['yes'] });
   await run('edit');
+  const first = editFile(paths);
+  // Changed and removed outside the edit: the next edit shows exactly the store.
+  const changed = sentinel();
+  store.writeAll(new Map([['X1_TEST_KEPT_KEY', changed]]));
+  await run('remove', 'X1_TEST_GONE_KEY');
   const reopened = await run('edit');
-  assert.match(reopened.stdout, /Reopened/);
-  const file = editFile(paths);
-  const old = new Date(Date.now() - 31 * 60 * 1000);
-  fs.utimesSync(file, old, old);
-  const status = await run('status');
-  assert.match(status.stdout, /Deleted 1 unfinished edit file older than 30 minutes/);
-  assert.equal(fs.existsSync(file), false);
+  assert.match(reopened.stdout, /^Opened /m);
+  assert.doesNotMatch(reopened.stdout, /Reopened/);
+  const second = editFile(paths);
+  assert.notEqual(second, first);
+  assert.equal(fs.existsSync(first), false, 'the old file is gone');
+  assert.deepEqual(editFiles(paths), [path.basename(second)]);
+  assert.deepEqual(bodyOf(fs.readFileSync(second, 'utf8')), [`X1_TEST_KEPT_KEY=${changed}`]);
+  assert.ok(!fs.readFileSync(second, 'utf8').includes(kept));
 });
 
 test('set reads the value from the hidden prompt and reads it back', async (t) => {
@@ -352,11 +375,11 @@ test('the edit file keeps your comment and section lines in place, and never sto
   fs.writeFileSync(file, [
     ...fs.readFileSync(file, 'utf8').split(/\r?\n/).filter((line) => line.startsWith('#')),
     '# --- Hosting ---',
-    'COOLIFY_SWOOSHZ_MCP_TOKEN=<unchanged>',
+    `COOLIFY_SWOOSHZ_MCP_TOKEN=${value}`,
     '',
     '# --- Databases (Swooshz team) ---',
-    'NEONDB_SWOOSHZ_API_KEY=<unchanged>',
-    'CLOUDFLARE_ACCOUNT_ID=<unchanged>',
+    `NEONDB_SWOOSHZ_API_KEY=${value}`,
+    `CLOUDFLARE_ACCOUNT_ID=${value}`,
     '',
   ].join('\n'));
   const applied = await run('apply');
@@ -368,8 +391,7 @@ test('the edit file keeps your comment and section lines in place, and never sto
   store.writeAll(new Map([['GITHUB_SWOOSHZ_PAT', value]]));
   await run('edit');
   file = editFile(paths);
-  const body = fs.readFileSync(file, 'utf8').split(/\r?\n/).filter((line) => !line.startsWith('# Toolkit env') && !/^# (To |Leaving|Save|Your own)/.test(line));
-  assert.deepEqual(body.filter(Boolean), ['# --- Hosting ---', 'COOLIFY_SWOOSHZ_MCP_TOKEN=<unchanged>', '# --- Databases (Swooshz team) ---', 'NEONDB_SWOOSHZ_API_KEY=<unchanged>', 'CLOUDFLARE_ACCOUNT_ID=<unchanged>', 'GITHUB_SWOOSHZ_PAT=<unchanged>']);
+  assert.deepEqual(bodyOf(fs.readFileSync(file, 'utf8')), ['# --- Hosting ---', `COOLIFY_SWOOSHZ_MCP_TOKEN=${value}`, '# --- Databases (Swooshz team) ---', `NEONDB_SWOOSHZ_API_KEY=${value}`, `CLOUDFLARE_ACCOUNT_ID=${value}`, `GITHUB_SWOOSHZ_PAT=${value}`]);
   await run('apply');
 });
 
@@ -379,7 +401,7 @@ test('a comment that looks like a key or token stops apply and is reported by li
   await run('edit');
   const file = editFile(paths);
   for (const comment of [`# OLD_TOKEN=${value}`, '# ghp_0123456789abcdefABCDEF0123456789']) {
-    fs.writeFileSync(file, [comment, 'COOLIFY_SWOOSHZ_MCP_TOKEN=<unchanged>', ''].join('\n'));
+    fs.writeFileSync(file, [comment, `COOLIFY_SWOOSHZ_MCP_TOKEN=${value}`, ''].join('\n'));
     const refused = await run('apply');
     assert.equal(refused.code, 1, comment);
     assert.match(refused.stderr, /line 1: this comment looks like it may hold a key or token/);
@@ -458,7 +480,7 @@ test('decorations, URLs, paths, empty or unchanged commented keys and emoji head
     const { run, paths } = harness(t, { values: { X1_TEST_KEPT_KEY: value }, answers: ['yes'] });
     if (operation === 'apply') {
       await run('edit');
-      fs.writeFileSync(editFile(paths), `${comments.join('\n')}\nX1_TEST_KEPT_KEY=<unchanged>\n`);
+      fs.writeFileSync(editFile(paths), `${comments.join('\n')}\nX1_TEST_KEPT_KEY=${value}\n`);
     } else writeCodexEnv(paths, `${comments.join('\n')}\nX1_TEST_KEPT_KEY=${value}\n`);
     const result = await run(operation);
     assert.equal(result.code, 0, result.stderr);
@@ -492,7 +514,7 @@ test('CRLF, BOM, unicode headings, sections and blank lines round-trip without a
   const value = sentinel();
   const { run, paths } = harness(t, { values: { X1_TEST_KEPT_KEY: value } });
   await run('edit');
-  fs.writeFileSync(editFile(paths), `\uFEFF\r\n# --- Hosting ---\r\n\r\n\r\n# \u65e5\u672c / caf\u00e9\r\nX1_TEST_KEPT_KEY=<unchanged>\r\n\r\nX1_TEST_NEW_KEY=${value}\r\n\r\n`);
+  fs.writeFileSync(editFile(paths), `\uFEFF\r\n# --- Hosting ---\r\n\r\n\r\n# \u65e5\u672c / caf\u00e9\r\nX1_TEST_KEPT_KEY=${value}\r\n\r\nX1_TEST_NEW_KEY=${value}\r\n\r\n`);
   const applied = await run('apply');
   assert.equal(applied.code, 0, applied.stderr);
   const expected = ['# --- Hosting ---', '', '# \u65e5\u672c / caf\u00e9', 'X1_TEST_KEPT_KEY', '', 'X1_TEST_NEW_KEY'];
@@ -500,8 +522,7 @@ test('CRLF, BOM, unicode headings, sections and blank lines round-trip without a
   assert.ok(!fs.readFileSync(paths.manifest, 'utf8').includes(value));
   await run('edit');
   const reopened = fs.readFileSync(editFile(paths), 'utf8');
-  assert.ok(reopened.endsWith(`${expected.map((line) => line.startsWith('X1_') ? `${line}=<unchanged>` : line).join(os.EOL)}${os.EOL}`));
-  assert.ok(!reopened.includes(value));
+  assert.ok(reopened.endsWith(`${expected.map((line) => line.startsWith('X1_') ? `${line}=${value}` : line).join(os.EOL)}${os.EOL}`));
 });
 
 test('import and retire never adopt adversarial comments into the layout or repeat their contents', async (t) => {
@@ -523,7 +544,7 @@ test('import and retire never adopt adversarial comments into the layout or repe
     assert.deepEqual(fs.readdirSync(paths.envDir), ['manifest.json'], 'the manifest is the only layout store');
     await run('edit');
     const reopened = fs.readFileSync(editFile(paths), 'utf8');
-    assert.ok(!reopened.includes(value));
+    assert.deepEqual(bodyOf(reopened), ['# Safe section', `X1_TEST_KEPT_KEY=${value}`]);
     for (const comment of comments) assert.ok(!reopened.includes(comment));
   });
 });
@@ -1116,18 +1137,22 @@ test('commandLine names the command for an agent or as a PowerShell line for a p
 test('edit tells a person the PowerShell line to apply, and an agent to say done', async (t) => {
   const person = harness(t, { values: { X1_TEST_KEPT_KEY: sentinel() } });
   const opened = await person.run('edit');
-  assert.match(opened.stdout, /Then run: node ".*toolkit-env\.cjs" apply$/m);
+  assert.match(opened.stdout, /When finished, close the tab and run: node ".*toolkit-env\.cjs" apply$/m);
   assert.doesNotMatch(opened.stdout, /say "done"|toolkit env apply/);
+  assert.match(opened.stdout, /each save is applied within a few seconds/);
   const header = fs.readFileSync(editFile(person.paths), 'utf8');
-  assert.match(header, /^# Save and close this file\. Then tell your agent "done", or in PowerShell run: node ".*toolkit-env\.cjs" apply\r?$/m);
-  assert.match(header, /^# To remove a key, use: node ".*toolkit-env\.cjs" remove NAME\r?$/m);
+  assert.match(header, /^# When you are finished, save, close this tab, then tell your agent "done", or in PowerShell run: node ".*toolkit-env\.cjs" apply\r?$/m);
+  assert.match(header, /^# Toolkit env: your keys, with their real values \(edit [0-9a-f]{16}\)\./m);
+  assert.match(header, /^# Close any older Toolkit env tab/m);
   assert.doesNotMatch(header, /toolkit env (apply|remove)/);
   const agent = harness(t, { values: { X1_TEST_KEPT_KEY: sentinel() }, environment: { CLAUDECODE: '1' } });
   const asked = await agent.run('edit');
-  assert.match(asked.stdout, /Then say "done" \(or run toolkit env apply\)\./);
+  assert.match(asked.stdout, /When finished, close the tab and say "done" \(or run toolkit env apply\)\./);
   assert.match(fs.readFileSync(editFile(agent.paths), 'utf8'), /in PowerShell run: node ".*toolkit-env\.cjs" apply/, 'the file is read by the person either way');
+  const unwatched = harness(t, { values: { X1_TEST_KEPT_KEY: sentinel() }, startHelper: () => false });
+  assert.match((await unwatched.run('edit')).stdout, /your saves are applied when you finish/);
   const none = harness(t, {});
-  assert.match((await none.run('apply')).stdout, /There is no open edit\. Say "edit my env" to your agent, or run node ".*toolkit-env\.cjs" edit first\./);
+  assert.match((await none.run('apply')).stdout, /There is no open edit\. Ask your agent to show your keys, or run node ".*toolkit-env\.cjs" edit first\./);
   const unknown = await none.run('nope');
   assert.match(unknown.stderr, /That is not a toolkit env command\. Run node ".*toolkit-env\.cjs" help for help\./);
 });
@@ -1150,7 +1175,7 @@ test('apply never adopts the header of this or an earlier version as a comment',
   assert.deepEqual(JSON.parse(fs.readFileSync(fresh.paths.manifest, 'utf8')).layout, ['X1_TEST_KEPT_KEY', '# my own note']);
   const old = harness(t, { values: { X1_TEST_KEPT_KEY: sentinel() } });
   await old.run('edit');
-  fs.writeFileSync(editFile(old.paths), `${[...oldHeader, '# my own note', 'X1_TEST_KEPT_KEY=<unchanged>'].join('\r\n')}\r\n`);
+  fs.writeFileSync(editFile(old.paths), `${[...oldHeader, '# my own note', `X1_TEST_KEPT_KEY=${old.store.peek('X1_TEST_KEPT_KEY')}`].join('\r\n')}\r\n`);
   const applied = await old.run('apply');
   assert.equal(applied.code, 0, applied.stderr);
   assert.deepEqual(JSON.parse(fs.readFileSync(old.paths.manifest, 'utf8')).layout, ['# my own note', 'X1_TEST_KEPT_KEY']);
@@ -1199,7 +1224,7 @@ test('apply saves the value right after a byte order mark, and trims spaces arou
   assert.equal(store.peek('X1_TEST_BOM_KEY'), value);
   assert.equal(store.peek('X1_TEST_SPACE_KEY'), spaced);
   await run('edit');
-  assert.match(fs.readFileSync(editFile(paths), 'utf8'), /no quotes; spaces at either end are dropped/);
+  assert.match(fs.readFileSync(editFile(paths), 'utf8'), /No quotes; spaces at either end are dropped/);
 });
 
 test('apply overwrites the edit file with zeros before deleting it', async (t) => {
@@ -1222,18 +1247,20 @@ test('apply overwrites the edit file with zeros before deleting it', async (t) =
   assert.equal(fs.existsSync(file), false);
 });
 
-test('apply refuses while two edit files are open and saves nothing', async (t) => {
+test('an edit file of an earlier version is wiped, never applied', async (t) => {
   const { run, paths, store } = harness(t, { values: { X1_TEST_KEPT_KEY: sentinel() } });
   await run('edit');
   const value = sentinel();
   fs.appendFileSync(editFile(paths), `X1_TEST_ADDED_KEY=${value}\n`);
-  fs.writeFileSync(path.join(paths.editDir, 'env-edit-second-000000.txt'), `X1_TEST_OTHER_KEY=${sentinel()}\n`);
+  const earlier = path.join(paths.editDir, 'env-edit-2026-10-30T10-00-00-000Z-abc123.txt');
+  fs.writeFileSync(earlier, `X1_TEST_KEPT_KEY=<unchanged>\nX1_TEST_OTHER_KEY=${sentinel()}\n`);
   const result = await run('apply');
-  assert.equal(result.code, 1);
-  assert.match(result.stderr, /More than one edit file is open, so nothing was saved\. Close Notepad and wait 30 minutes/);
-  assert.doesNotMatch(result.stderr, /for each/);
-  assert.equal(store.peek('X1_TEST_ADDED_KEY'), undefined);
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /Deleted 1 edit file from an earlier Toolkit version; nothing in it was saved\./);
+  assert.equal(fs.existsSync(earlier), false);
+  assert.equal(store.peek('X1_TEST_ADDED_KEY'), value);
   assert.equal(store.peek('X1_TEST_OTHER_KEY'), undefined);
+  assert.notEqual(store.peek('X1_TEST_KEPT_KEY'), '<unchanged>');
 });
 
 test('apply says plainly when the edit file was saved as UTF-16', async (t) => {
@@ -1251,4 +1278,352 @@ test('apply says plainly when the edit file was saved as UTF-16', async (t) => {
     assert.equal(store.peek('X1_TEST_ADDED_KEY'), undefined);
     assert.ok(fs.existsSync(file));
   }
+});
+
+// Every save is applied: the helper, done, conflicts, older tabs and Notepad's tab-restore copy.
+
+function clockAt(iso = '2026-10-31T09:00:00.000Z') { return { ms: Date.parse(iso) }; }
+
+// What a save in Notepad does to the file: new bytes, a new modified time.
+function save(file, text) {
+  fs.writeFileSync(file, text);
+  const later = new Date(fs.statSync(file).mtimeMs + 1000);
+  fs.utimesSync(file, later, later);
+}
+
+function storeImage(h) { return JSON.stringify(h.store.list().map((name) => [name, h.store.peek(name)])); }
+
+function editState(paths) { return JSON.parse(fs.readFileSync(path.join(paths.editDir, 'session.json'), 'utf8')); }
+
+test('the helper applies each save once the file has been still for 1.5 seconds, once per save', async (t) => {
+  const clock = clockAt();
+  const old = sentinel();
+  const fresh = sentinel();
+  const h = harness(t, { clock, values: { X1_TEST_KEPT_KEY: old, X1_TEST_GONE_KEY: sentinel() } });
+  await h.run('edit');
+  const file = editFile(h.paths);
+  const watcher = h.env.editWatcher(file, { pid: 101, alive: () => true });
+  assert.equal(watcher.start(), true);
+  assert.equal(watcher.tick(), true);
+  save(file, fs.readFileSync(file, 'utf8').replace(old, fresh).replace(/^X1_TEST_GONE_KEY=.*$/m, ''));
+  assert.equal(watcher.tick(), true, 'a new save starts the wait');
+  assert.equal(h.store.peek('X1_TEST_KEPT_KEY'), old, 'not applied before the file is still');
+  clock.ms += 1000;
+  watcher.tick();
+  assert.equal(h.store.peek('X1_TEST_KEPT_KEY'), old);
+  clock.ms += 600;
+  watcher.tick();
+  assert.equal(h.store.peek('X1_TEST_KEPT_KEY'), fresh);
+  assert.equal(h.store.peek('X1_TEST_GONE_KEY'), undefined);
+  const writes = h.store.writes;
+  clock.ms += 5000;
+  watcher.tick();
+  watcher.tick();
+  assert.equal(h.store.writes, writes, 'the same save is never applied twice');
+  // done reports what the helper saved, and applies nothing again.
+  const done = await h.run('apply');
+  assert.equal(done.code, 0, done.stderr);
+  assert.match(done.stdout, /^changed: X1_TEST_KEPT_KEY$/m);
+  assert.match(done.stdout, /^removed: X1_TEST_GONE_KEY$/m);
+  assert.equal(h.store.writes, writes);
+  assert.equal(watcher.tick(), false, 'the helper ends once its file has gone');
+  assert.deepEqual(fs.readdirSync(h.paths.editDir), []);
+  assert.ok(!(done.stdout + done.stderr).includes(fresh));
+});
+
+test('done applies a save the helper has not applied yet', async (t) => {
+  const value = sentinel();
+  const h = harness(t, { values: { X1_TEST_KEPT_KEY: sentinel() } });
+  await h.run('edit');
+  const file = editFile(h.paths);
+  save(file, `${fs.readFileSync(file, 'utf8')}X1_TEST_ADDED_KEY=${value}\n`);
+  const done = await h.run('apply');
+  assert.equal(done.code, 0, done.stderr);
+  assert.match(done.stdout, /^added: X1_TEST_ADDED_KEY$/m);
+  assert.equal(h.store.peek('X1_TEST_ADDED_KEY'), value);
+});
+
+test('one helper per edit: a second helper for the same file stops, and an older helper stops when a new edit starts', async (t) => {
+  const h = harness(t, { values: { X1_TEST_KEPT_KEY: sentinel() } });
+  await h.run('edit');
+  const file = editFile(h.paths);
+  const first = h.env.editWatcher(file, { pid: 201, alive: () => true });
+  assert.equal(first.start(), true);
+  const twin = h.env.editWatcher(file, { pid: 202, alive: () => true });
+  assert.equal(twin.start(), false, 'a live helper already watches this file');
+  const afterDeath = h.env.editWatcher(file, { pid: 203, alive: () => false });
+  assert.equal(afterDeath.start(), true, 'a helper that died is replaced');
+  assert.equal(first.tick(), false, 'the replaced helper stops');
+  await h.run('edit');
+  assert.equal(afterDeath.tick(), false, 'a new edit ends the old helper');
+  assert.equal(h.env.editWatcher(file, { pid: 204, alive: () => true }).start(), false, 'no helper for a file that is not the open edit');
+});
+
+test('the helper only follows an edit file in the edit folder', (t) => {
+  const h = harness(t, { values: { X1_TEST_KEPT_KEY: sentinel() } });
+  for (const file of [path.join(h.home, 'env-edit-0123456789abcdef.txt'), path.join(h.paths.editDir, 'session.json'), path.join(h.paths.editDir, 'other.txt'), '']) {
+    assert.throws(() => h.env.editWatcher(file), /watch only follows a Toolkit env edit file in its own folder/);
+  }
+});
+
+test('the real helper starts as `watch <file>` with no other arguments, no window and no output', () => {
+  const source = fs.readFileSync(SCRIPT, 'utf8');
+  const starter = /function defaultHelperStarter\(file\) \{[\s\S]*?\n\}/.exec(source)[0];
+  assert.match(starter, /spawn\(process\.execPath, \[__filename, 'watch', file\], \{ detached: true, stdio: 'ignore', windowsHide: true \}\)/);
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-env-watch-'));
+  try {
+    const result = spawnSync(process.execPath, [SCRIPT, 'watch', path.join(home, 'not-an-edit-file.txt')], { encoding: 'utf8', env: { ...process.env, USERPROFILE: home, HOME: home } });
+    assert.equal(result.stdout, '');
+  } finally { fs.rmSync(home, { recursive: true, force: true }); }
+});
+
+test('an edit ends 30 minutes after its last save: the file is wiped and done says so', async (t) => {
+  const clock = clockAt();
+  const h = harness(t, { clock, values: { X1_TEST_KEPT_KEY: sentinel() } });
+  await h.run('edit');
+  const file = editFile(h.paths);
+  const watcher = h.env.editWatcher(file, { pid: 301, alive: () => true });
+  watcher.start();
+  clock.ms += 29 * 60 * 1000;
+  assert.equal(watcher.tick(), true);
+  clock.ms += 61 * 1000;
+  assert.equal(watcher.tick(), false);
+  assert.equal(fs.existsSync(file), false);
+  const done = await h.run('apply');
+  assert.match(done.stdout, /Closed your env edit 30 minutes after its last save\./);
+  // With no helper at all, the next command does the same.
+  await h.run('edit');
+  const second = editFile(h.paths);
+  clock.ms += 31 * 60 * 1000;
+  const status = await h.run('status');
+  assert.match(status.stdout, /Closed your env edit 30 minutes after its last save\./);
+  assert.equal(fs.existsSync(second), false);
+});
+
+test('a save that would remove every key is not applied, and the store stays exactly as it was', async (t) => {
+  const h = harness(t, { values: { X1_TEST_KEPT_KEY: sentinel(), X1_TEST_OTHER_KEY: sentinel() } });
+  await h.run('edit');
+  const file = editFile(h.paths);
+  const before = storeImage(h);
+  const manifest = fs.existsSync(h.paths.manifest) ? fs.readFileSync(h.paths.manifest) : null;
+  save(file, fs.readFileSync(file, 'utf8').split(/\r?\n/).filter((line) => line.startsWith('#')).join('\r\n'));
+  const done = await h.run('apply');
+  assert.equal(done.code, 1);
+  assert.match(done.stderr, /Nothing was saved: this save would remove every key/);
+  assert.equal(storeImage(h), before);
+  assert.deepEqual(fs.existsSync(h.paths.manifest) ? fs.readFileSync(h.paths.manifest) : null, manifest);
+  assert.match(fs.readFileSync(file, 'utf8'), /^# Status: NOT SAVED \(\d\d:\d\d UTC\)\. This save would remove every key\.\r?$/m);
+  // An empty file is the same.
+  save(file, '');
+  assert.match((await h.run('apply')).stderr, /would remove every key/);
+  assert.equal(storeImage(h), before);
+});
+
+test('keys changed elsewhere while the tab is open stop the whole save, by name only', async (t) => {
+  for (const [label, elsewhere, edit] of [
+    ['set elsewhere, line untouched', (h) => h.store.writeAll(new Map([['X1_TEST_KEPT_KEY', sentinel()]])), (text) => text],
+    ['set elsewhere, line changed too', (h) => h.store.writeAll(new Map([['X1_TEST_KEPT_KEY', sentinel()]])), (text) => text.replace(/^X1_TEST_KEPT_KEY=.*$/m, `X1_TEST_KEPT_KEY=${sentinel()}`)],
+    ['removed elsewhere, still listed', (h) => h.store.remove('X1_TEST_KEPT_KEY'), (text) => text],
+    ['added elsewhere and typed here differently', (h) => h.store.writeAll(new Map([['X1_TEST_NEW_KEY', sentinel()]])), (text) => `${text}X1_TEST_NEW_KEY=${sentinel()}\n`],
+    ['set elsewhere, line deleted here', (h) => h.store.writeAll(new Map([['X1_TEST_KEPT_KEY', sentinel()]])), (text) => text.replace(/^X1_TEST_KEPT_KEY=.*$/m, '')],
+  ]) await t.test(label, async (t) => {
+    const clock = clockAt();
+    const h = harness(t, { clock, values: { X1_TEST_KEPT_KEY: sentinel(), X1_TEST_OTHER_KEY: sentinel() } });
+    await h.run('edit');
+    const file = editFile(h.paths);
+    clock.ms += 1000;
+    elsewhere(h);
+    // Elsewhere means another toolkit env command, which records the change.
+    const touched = h.store.list().includes('X1_TEST_NEW_KEY') ? 'X1_TEST_NEW_KEY' : 'X1_TEST_KEPT_KEY';
+    new EnvManifest({ file: h.paths.manifest, now: () => new Date(clock.ms) }).update((record, at) => {
+      if (h.store.list().includes(touched)) record.names[touched] = { added_at: at, updated_at: at };
+      else delete record.names[touched];
+    });
+    const before = storeImage(h);
+    const manifest = fs.readFileSync(h.paths.manifest);
+    clock.ms += 1000;
+    save(file, `${edit(fs.readFileSync(file, 'utf8'))}X1_TEST_EXTRA_KEY=${sentinel()}\n`);
+    const done = await h.run('apply');
+    assert.equal(done.code, 1, label);
+    assert.match(done.stderr, new RegExp(`Your keys changed while this tab was open, so nothing was saved: ${touched}\\. Ask for your keys again for a fresh tab`));
+    assert.equal(storeImage(h), before);
+    assert.deepEqual(fs.readFileSync(h.paths.manifest), manifest);
+    assert.match(fs.readFileSync(file, 'utf8'), new RegExp(`^# Status: NOT SAVED .*These keys changed while this tab was open: ${touched}\\.`, 'm'));
+  });
+});
+
+test('a key added elsewhere while the tab is open is never removed by it', async (t) => {
+  const h = harness(t, { values: { X1_TEST_KEPT_KEY: sentinel() } });
+  await h.run('edit');
+  const file = editFile(h.paths);
+  const added = sentinel();
+  h.store.writeAll(new Map([['X1_TEST_NEW_KEY', added]]));
+  save(file, `${fs.readFileSync(file, 'utf8')}X1_TEST_EXTRA_KEY=${sentinel()}\n`);
+  const done = await h.run('apply');
+  assert.equal(done.code, 0, done.stderr);
+  assert.equal(h.store.peek('X1_TEST_NEW_KEY'), added);
+  assert.match(done.stdout, /^added: X1_TEST_EXTRA_KEY$/m);
+});
+
+test('a value one line cannot hold exactly shows the kept marker and stays as it is', async (t) => {
+  const values = {
+    X1_TEST_LINES_KEY: `${sentinel()}\n${sentinel()}`,
+    X1_TEST_SPACES_KEY: ` ${sentinel()} `,
+    X1_TEST_QUOTED_KEY: `"${sentinel()}"`,
+    X1_TEST_PLAIN_KEY: sentinel(),
+  };
+  const h = harness(t, { values });
+  await h.run('edit');
+  const file = editFile(h.paths);
+  const text = fs.readFileSync(file, 'utf8');
+  assert.deepEqual(bodyOf(text), [
+    'X1_TEST_LINES_KEY=<kept: change it with toolkit env set X1_TEST_LINES_KEY>',
+    `X1_TEST_PLAIN_KEY=${values.X1_TEST_PLAIN_KEY}`,
+    'X1_TEST_QUOTED_KEY=<kept: change it with toolkit env set X1_TEST_QUOTED_KEY>',
+    'X1_TEST_SPACES_KEY=<kept: change it with toolkit env set X1_TEST_SPACES_KEY>',
+  ]);
+  save(file, `${text}X1_TEST_ADDED_KEY=${sentinel()}\n`);
+  const done = await h.run('apply');
+  assert.equal(done.code, 0, done.stderr);
+  assert.match(done.stdout, /^added: X1_TEST_ADDED_KEY$/m);
+  assert.doesNotMatch(done.stdout, /changed:/);
+  for (const [name, value] of Object.entries(values)) assert.equal(h.store.peek(name), value);
+  // The marker only stands for its own key.
+  await h.run('edit');
+  const next = editFile(h.paths);
+  save(next, fs.readFileSync(next, 'utf8').replace('X1_TEST_LINES_KEY=<kept', 'X1_TEST_MOVED_KEY=<kept'));
+  const moved = await h.run('apply');
+  assert.equal(moved.code, 1);
+  assert.match(moved.stderr, /line \d+: a <kept: \.\.\.> line works only for the key it was written for/);
+  assert.equal(h.store.peek('X1_TEST_LINES_KEY'), values.X1_TEST_LINES_KEY);
+});
+
+test('a save from an older tab after a new edit is ignored and wiped; the new file always equals the store', async (t) => {
+  const kept = sentinel();
+  const h = harness(t, { values: { X1_TEST_KEPT_KEY: kept, X1_TEST_GONE_KEY: sentinel() }, answers: ['yes'] });
+  await h.run('edit');
+  const older = editFile(h.paths);
+  const olderText = fs.readFileSync(older, 'utf8');
+  await h.run('remove', 'X1_TEST_GONE_KEY');
+  await h.run('edit');
+  const newer = editFile(h.paths);
+  assert.equal(fs.existsSync(older), false);
+  // Notepad saves the older tab back to its own path, with a changed value and the removed key.
+  const before = storeImage(h);
+  fs.writeFileSync(older, olderText.replace(kept, sentinel()));
+  const watcher = h.env.editWatcher(newer, { pid: 401, alive: () => true });
+  watcher.start();
+  assert.equal(watcher.tick(), true);
+  assert.equal(fs.existsSync(older), false, 'the helper wipes the older tab at once');
+  assert.equal(storeImage(h), before);
+  const done = await h.run('apply');
+  assert.match(done.stdout, /An older Notepad tab was saved and ignored\. Use the newest tab; close the older one\. Its lines for X1_TEST_GONE_KEY, X1_TEST_KEPT_KEY differ from what is stored/);
+  assert.equal(storeImage(h), before);
+  // Without a helper, the next command wipes it the same way.
+  await h.run('edit');
+  const third = editFile(h.paths);
+  fs.writeFileSync(newer, 'X1_TEST_KEPT_KEY=whatever\n');
+  const status = await h.run('status');
+  assert.match(status.stdout, /An older Notepad tab was saved and ignored/);
+  assert.deepEqual(editFiles(h.paths), [path.basename(third)]);
+  assert.deepEqual(bodyOf(fs.readFileSync(third, 'utf8')), [`X1_TEST_KEPT_KEY=${kept}`]);
+});
+
+test('a new edit after a refused save says the last save was not applied, and shows the store', async (t) => {
+  const kept = sentinel();
+  const h = harness(t, { values: { X1_TEST_KEPT_KEY: kept } });
+  await h.run('edit');
+  const file = editFile(h.paths);
+  save(file, `${fs.readFileSync(file, 'utf8')}not a line\n`);
+  assert.equal((await h.run('apply')).code, 1);
+  const again = await h.run('edit');
+  assert.match(again.stdout, /Your last save in the earlier tab was not applied; the new file shows what is stored now\./);
+  assert.equal(fs.existsSync(file), false);
+  assert.deepEqual(bodyOf(fs.readFileSync(editFile(h.paths), 'utf8')), [`X1_TEST_KEPT_KEY=${kept}`]);
+});
+
+test('the tab-restore check looks for the edit file in Notepad\'s TabState and reports yes or no only', async (t) => {
+  for (const [label, setup, platform, expected] of [
+    ['path present', (dir, file) => fs.writeFileSync(path.join(dir, 'a1b2.bin'), Buffer.concat([Buffer.from([1, 2, 3]), Buffer.from(file, 'utf16le'), Buffer.from('canary-tab-text', 'utf16le')])), 'win32', true],
+    ['path absent', (dir) => fs.writeFileSync(path.join(dir, 'a1b2.bin'), Buffer.from('C:\\other\\file.txt', 'utf16le')), 'win32', false],
+    ['folder missing', () => {}, 'win32', false],
+    ['not Windows', (dir, file) => fs.writeFileSync(path.join(dir, 'a1b2.bin'), Buffer.from(file, 'utf16le')), 'linux', false],
+  ]) await t.test(label, async (t) => {
+    const local = tempHome(t);
+    const h = harness(t, { values: { X1_TEST_KEPT_KEY: sentinel() }, editEnvironment: { LOCALAPPDATA: local }, platform });
+    await h.run('edit');
+    const file = editFile(h.paths);
+    const tabState = path.join(local, 'Packages', 'Microsoft.WindowsNotepad_8wekyb3d8bbwe', 'LocalState', 'TabState');
+    if (label !== 'folder missing') fs.mkdirSync(tabState, { recursive: true });
+    setup(tabState, file);
+    const done = await h.run('apply');
+    assert.equal(done.code, 0, done.stderr);
+    assert.equal(/Notepad may still keep a copy in its tab-restore data\. Close the tab; to stop this for good, set Notepad > Settings > When Notepad starts to "Start new session"\./.test(done.stdout), expected);
+    assert.doesNotMatch(done.stdout + done.stderr, /canary-tab-text|a1b2/);
+  });
+});
+
+// The closure matrix of the edit (states E0 to E3 against each event), as one table.
+test('edit closure matrix: every state and event ends as the plan says', async (t) => {
+  const E = {
+    E0: async () => {},
+    E1: async (h) => { await h.run('edit'); },
+    E2: async (h, clock) => { await h.run('edit'); clock.ms += 31 * 60 * 1000; },
+    E3: async (h) => { await h.run('edit'); const older = editFile(h.paths); await h.run('edit'); fs.writeFileSync(older, `X1_TEST_KEPT_KEY=${sentinel()}\n`); },
+  };
+  const rows = [
+    ['E0', 'edit', { files: 1, out: /^Opened /m }],
+    ['E1', 'edit', { files: 1, out: /^Opened /m }],
+    ['E2', 'edit', { files: 1, out: /Closed your env edit 30 minutes after its last save/ }],
+    ['E3', 'edit', { files: 1, out: /An older Notepad tab was saved and ignored/ }],
+    ['E1', 'save', { files: 1, applied: true }],
+    ['E3', 'save', { files: 1, applied: true }],
+    ['E1', 'bad save', { files: 1, applied: false, code: 1 }],
+    ['E0', 'done', { files: 0, out: /There is no open edit/ }],
+    ['E1', 'done', { files: 0, out: /No changes\./ }],
+    ['E2', 'done', { files: 0, out: /Closed your env edit 30 minutes after its last save/ }],
+    ['E3', 'done', { files: 0, out: /An older Notepad tab was saved and ignored/ }],
+    ['E1', 'set elsewhere then save', { files: 1, applied: false, code: 1 }],
+  ];
+  for (const [state, event, expect] of rows) await t.test(`${state} ${event}`, async (t) => {
+    const clock = clockAt();
+    const kept = sentinel();
+    const h = harness(t, { clock, values: { X1_TEST_KEPT_KEY: kept }, hidden: [sentinel()] });
+    await E[state](h, clock);
+    let result = { code: 0, stdout: '', stderr: '' };
+    const added = sentinel();
+    if (event === 'edit') result = await h.run('edit');
+    else if (event === 'done') result = await h.run('apply');
+    else {
+      if (event === 'set elsewhere then save') { clock.ms += 1000; await h.run('set', 'X1_TEST_KEPT_KEY'); clock.ms += 1000; }
+      const file = path.join(h.paths.editDir, `env-edit-${editState(h.paths).id}.txt`);
+      const watcher = h.env.editWatcher(file, { pid: 501, alive: () => true });
+      watcher.start();
+      save(file, `${fs.readFileSync(file, 'utf8')}${event === 'bad save' ? 'not a line' : `X1_TEST_ADDED_KEY=${added}`}\n`);
+      watcher.tick();
+      clock.ms += 2000;
+      watcher.tick();
+      result = await h.run('status');
+      if (expect.code) result = { ...result, code: (await h.run('apply')).code };
+    }
+    assert.equal(result.code, expect.code || 0, result.stderr);
+    if (expect.out) assert.match(result.stdout, expect.out);
+    assert.equal(editFiles(h.paths).length, expect.files);
+    if ('applied' in expect) assert.equal(h.store.peek('X1_TEST_ADDED_KEY') === added, expect.applied);
+    for (const text of [result.stdout, result.stderr]) { assert.ok(!text.includes(kept)); assert.ok(!text.includes(added)); }
+    for (const name of fs.existsSync(h.paths.editDir) ? fs.readdirSync(h.paths.editDir).filter((entry) => entry.endsWith('.json')) : []) {
+      const text = fs.readFileSync(path.join(h.paths.editDir, name), 'utf8');
+      assert.ok(!text.includes(kept) && !text.includes(added), `${name} holds names only`);
+    }
+  });
+});
+
+test('the toolkit-env skill opens Notepad from context, keeps names-only questions on status, and never touches the edit file', () => {
+  const skill = fs.readFileSync(path.join(ROOT, 'skills', 'toolkit-env', 'SKILL.md'), 'utf8');
+  assert.match(skill, /^description: .*see, check, change, add or remove/m);
+  assert.match(skill, /Never open, read, write, search or list the edit file/);
+  assert.match(skill, /names-only question/);
+  const cases = JSON.parse(fs.readFileSync(path.join(ROOT, 'repo', 'tests', 'fixtures', 'toolkit-env-edit-routing.json'), 'utf8'));
+  assert.ok(cases.open.length >= 10);
+  assert.ok(cases.not_open.length >= 5);
 });
