@@ -52,7 +52,12 @@ test('CI runs the default branch\'s copy, which needs nothing but Node\'s own mo
   assert.deepEqual([...source.matchAll(/\brequire\s*\(([^)]*)\)/g)].map(match => match[1].trim()), ["'node:child_process'"]);
   const workflow = fs.readFileSync(path.join(__dirname, '..', '..', '.github', 'workflows', 'auto-merge-eligible.yml'), 'utf8').replace(/\r\n/g, '\n');
   assert.match(workflow, /^on:\n {2}pull_request_target:/m, 'the default branch\'s workflow decides');
-  assert.match(workflow, /git show "\$BASE_SHA:repo\/scripts\/toolkit-auto-merge-eligible\.cjs"/, 'the default branch\'s script decides');
+  // Only the default branch is checked out (no ref), and the pull request's commits are fetched as
+  // objects, never checked out: none of its files run, the script included.
+  assert.doesNotMatch(workflow, /^\s*ref:/m, 'the checkout is the default branch');
+  assert.doesNotMatch(workflow, /git (?:checkout|switch|worktree)|gh pr checkout/, 'nothing from the pull request is checked out');
+  assert.match(workflow, /fetch --no-tags --quiet origin "\$HEAD_SHA" "\$BASE_SHA"/);
+  assert.match(workflow, /node repo\/scripts\/toolkit-auto-merge-eligible\.cjs --base "\$BASE_SHA" --head "\$HEAD_SHA" \$owner/, 'the default branch\'s script decides');
   assert.match(workflow, /^permissions:\n {2}contents: read\n {2}issues: write$/m, 'read-only but for removing the owner\'s label');
   assert.match(workflow, /persist-credentials: false/);
   assert.match(workflow, /types: \[opened, reopened, synchronize, edited, labeled, unlabeled\]/, 'a label change runs the check again');

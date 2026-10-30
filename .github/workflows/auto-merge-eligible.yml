@@ -10,9 +10,10 @@ name: Auto-merge eligibility
 # the main gate.
 #
 # pull_request_target runs this file and the eligibility script as they are on the default branch,
-# never the pull request's copies, so a pull request cannot loosen its own check. The pull request's
-# commits are only read as data by git; none of its code runs, and the token is not kept in the
-# checkout. Its only write is removing that one label after a push.
+# never the pull request's copies, so a pull request cannot loosen its own check. Only the default
+# branch is checked out; the pull request's commits are fetched as objects and read as data by git,
+# none of its files are checked out or run, and the token is never kept in the checkout. Its only
+# write is removing that one label after a push.
 on:
   pull_request_target:
     types: [opened, reopened, synchronize, edited, labeled, unlabeled]
@@ -30,10 +31,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Checkout
+      - name: Checkout the default branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -52,6 +52,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
+          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          git -c "http.https://github.com/.extraheader=$auth" fetch --no-tags --quiet origin "$HEAD_SHA" "$BASE_SHA"
           owner=""
           if printf '%s' "$LABELS" | grep -q '"toolkit-owner-merge"'; then
             if [ "$ACTION" = "synchronize" ]; then
@@ -61,5 +63,4 @@ jobs:
               owner="--owner-merge"
             fi
           fi
-          git show "$BASE_SHA:repo/scripts/toolkit-auto-merge-eligible.cjs" > "$RUNNER_TEMP/toolkit-auto-merge-eligible.cjs"
-          node "$RUNNER_TEMP/toolkit-auto-merge-eligible.cjs" --base "$BASE_SHA" --head "$HEAD_SHA" $owner
+          node repo/scripts/toolkit-auto-merge-eligible.cjs --base "$BASE_SHA" --head "$HEAD_SHA" $owner
