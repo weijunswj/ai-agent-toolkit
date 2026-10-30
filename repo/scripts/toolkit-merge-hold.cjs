@@ -13,9 +13,12 @@
 // What an approval is: one line of the user's own typed message (UserPromptSubmit) that says "merge"
 // next to a pull request number, or names one with # or a link: "merge 618", "618 merge", "ok to
 // merge #618", "can merge 618", "merge owner/name#618", "merge 601, 605 and 609", "merge 618 at
-// 62405eb". A line does not count when it has a quote, a question, or one of a fixed list of words
+// 62405eb". A line that is only one inline code span ("`merge 618`", the way hosts show a suggested
+// reply) is read without its backticks. A line does not count when it has a quote (backticks
+// anywhere else included), a question, or one of a fixed list of words
 // for a no, a doubt, a condition, a delay, a report or another kind of merge ("don't", "not yet",
-// "if CI is green", "later", "should we ...?", "merge main into 618", "merge conflicts in 618").
+// "if CI is green", "later", "should we ...?", "merge main into 618", "merge conflicts in 618"),
+// nor does any line inside a fenced code block (``` or ~~~).
 // Other wording may still count, so the list leans towards not counting. It is recorded only in a session the user started: not one another session or a
 // Toolkit launcher started, and not a resumed or forked run (the governance gate's session marks).
 // It is for the repository the session is in, or the one the message names; a bare number typed
@@ -29,9 +32,13 @@
 //
 // What is held (decide, PreToolUse), with line continuations joined first:
 //   - needs an approval and the expected head commit: `gh pr merge` (any flags, --auto included),
-//     `gh api` to a pull request's merge endpoint (found anywhere in the command), and the GitHub
-//     connector's merge tool;
-//   - refused when written directly: the connector's auto-merge tool, GraphQL merges (the number cannot be read), the merge queue, branch merges,
+//     `gh api` to a pull request's merge endpoint (found anywhere in the command), and any
+//     connector's merge tool (an mcp__ tool named merge_pull_request, merge-pull-request or
+//     mergePullRequest, whatever its server is called). Its call names the pull request with
+//     repository_full_name or owner and repo, pr_number, pull_number, pullNumber,
+//     pull_request_number or number, and the head commit with expected_head_sha or expectedHeadSha
+//     (a sha field is not read); a call whose fields are missing, not readable or disagree is refused;
+//   - refused when written directly: any connector's auto-merge tool, GraphQL merges (the number cannot be read), the merge queue, branch merges,
 //     writes to the default branch's ref, `gh repo sync`, gh aliases that mention merge, a `git push`
 //     to the remote's default branch (evidence stores excepted, by name), a merge whose target is
 //     moved by cd, pushd, Set-Location or GH_REPO, and a bare number in a folder with more than one
@@ -41,7 +48,7 @@
 //     Toolkit's user-state folder, or the hook scripts together with what would feed them a prompt.
 //
 // Not covered: wrapped or nested host launches (bash -lc, timeout, Start-Process and the like), a
-// prompt file fed to a hook script, pasted text that has a plain approval line, scripts or programs
+// prompt file fed to a hook script, pasted text outside a code fence that has a plain approval line, scripts or programs
 // that call git or the GitHub API themselves, curl and other HTTP clients, a sha= field put in a
 // comment or an echo on purpose, git and shell aliases,
 // commands inside files, pushes through a second remote or a wrapper, GH_REPO set outside the command
@@ -65,7 +72,22 @@ const MAX_PROMPT_CHARS = 8000;
 const MAX_COMMAND_CHARS = 1024 * 1024;
 
 const { SHELL_TOOLS, ShellCall, shellPath } = require('./toolkit-shell-call.cjs');
-const CONNECTOR_MERGE = /^mcp__.*github.*?_(merge_pull_request|enable_pr_auto_merge)$/i;
+// A connector's merge or auto-merge tool, whatever its server is called (a claude.ai connector's
+// server name is a UUID): the tool name ends in one of these after a _ or -.
+const AUTO_MERGE_NAME = 'enable[_-]?(?:pr[_-]?|pull[_-]?request[_-]?)?auto[_-]?merge';
+const CONNECTOR_MERGE = new RegExp(`^mcp__.+?[_-](?:merge[_-]?pull[_-]?request|${AUTO_MERGE_NAME})$`, 'i');
+const CONNECTOR_AUTO_MERGE = new RegExp(`[_-]${AUTO_MERGE_NAME}$`, 'i');
+// The fields a connector's merge tool names its target with. Official GitHub server: owner, repo,
+// pullNumber, expectedHeadSha. Codex's GitHub app: repository_full_name, pr_number,
+// expected_head_sha. Older servers use pull_number; a `sha` field is not read as the head, since
+// no server is known to pass it on to GitHub (one that drops it would merge whatever head is there),
+// so their merges are refused for want of a head commit.
+const REPOSITORY_FIELDS = Object.freeze(['repository_full_name', 'owner', 'repo']);
+const NUMBER_FIELDS = Object.freeze(['pr_number', 'pull_number', 'pullNumber', 'pull_request_number', 'number']);
+const SHA_FIELDS = Object.freeze(['expected_head_sha', 'expectedHeadSha']);
+// The head SHA field that goes with each number field, for the refusal's hint; a shape with none
+// (pull_number) is told to use gh instead.
+const SHA_FIELD_FOR = Object.freeze({ pr_number: 'expected_head_sha', pullNumber: 'expectedHeadSha' });
 const SLUG = '[A-Za-z0-9._-]+\\/[A-Za-z0-9._-]+';
 const MAX_APPROVAL_LINE = 200;
 // A no, a doubt, a condition, a delay, a hand-off, a report or another kind of merge (a branch name
@@ -84,6 +106,7 @@ const APPROVAL_LINK = new RegExp(`${APPROVAL_URL.source.slice(0, -3)}(?:[/#][\\w
 // or a single quote at a word edge (apostrophes inside words, as in "622's", are fine).
 const QUOTED = /^>|["`<>「」『』…]|\.\.\.|(?:^|\s)'|'(?=\s|$|[.,!;:])/;
 const APPROVAL_SHA = /\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b/gi;
+const DIGIT_SHA = /\bat\s+(\d{7,40})\b/gi;
 // Named pull requests: owner/name#N or #N anywhere, and bare numbers right before or after "merge"
 // (a list such as "601, 605 and 609" included). Other numbers on the line are not read as pull
 // requests, nor is a number before "merge" that a word follows ("3 merge issues") or one after it
@@ -114,7 +137,7 @@ const HOST_WORD = /^(?:claude|codex)(?:-code)?(?:\.exe|\.cmd|\.ps1)?$|claude-cod
 const VALUE_FLAGS = new Set(['--repo', '-R', '--match-head-commit', '--subject', '-t', '--body', '-b', '--body-file', '-F', '--author-email', '-A']);
 const GIT_VALUE_OPTIONS = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--config-env', '--exec-path']);
 
-const ASK_TEXT = 'Ask the user to type a line with "merge" and the pull request number (such as "merge N", or "merge owner/name#N") in their own chat, in a session opened in that repository\'s folder, after reading the merge summary. Never type it yourself, start a session or script to type it, or touch Toolkit\'s user-state files.';
+const ASK_TEXT = 'Ask the user to type, as plain text and not in quotes, a line with the word merge and the pull request number, such as merge N or merge owner/name#N, in their own chat, in a session opened in that repository\'s folder, after reading the merge summary. Never type it yourself, start a session or script to type it, or touch Toolkit\'s user-state files.';
 
 class MergeHoldError extends Error {
   constructor(code) { super(code); this.name = 'MergeHoldError'; this.code = code; }
@@ -184,15 +207,45 @@ function normalise(text) {
   return String(text || '').replace(/[‘’ʼ′]/g, "'").replace(/[“”«»‹›＂]/g, '"').replace(/＞/g, '>').replace(/：/g, ':');
 }
 
+// A fenced code block's opening or closing line (``` or ~~~, after any indent or list marker); a
+// backtick fence never has a backtick after its run, so ```merge 618``` is a code span, not a fence.
+const FENCE = /^(`{3,})[^`]*$|^(~{3,})/;
+// A line that is one inline code span and nothing else: the same run of 1 to 3 backticks on each
+// side and none inside.
+const CODE_SPAN = /^(`{1,3})([^`]+)\1$/;
+
 // The approvals in one typed message: [{ repository|null, pr, sha|null }].
 function approvalsIn(prompt) {
   const found = [];
-  for (const raw of normalise(prompt).slice(0, MAX_PROMPT_CHARS).split(/\r\n|[\n\r\v\f\x1c-\x1e\u0085\u2028\u2029]/)) {
+  // The fence that opened the code block the reading is in, or null. Lines inside one never count,
+  // so pasted output in a fence carries no approval; one left open runs to the end of the message.
+  let fence = null;
+  for (let raw of normalise(prompt).slice(0, MAX_PROMPT_CHARS).split(/\r\n|[\n\r\v\f\x1c-\x1e\u0085\u2028\u2029]/)) {
     let line = raw;
     for (let strip = 0; strip < 5 && LIST_MARKER.test(line); strip += 1) line = line.replace(LIST_MARKER, '');
+    // A fence is looked for under every list marker, however many.
+    let fenceText = line;
+    for (let strip = 0; strip < MAX_APPROVAL_LINE && LIST_MARKER.test(fenceText); strip += 1) fenceText = fenceText.replace(LIST_MARKER, '');
+    // Zero-width characters do not hide a fence.
+    fenceText = fenceText.replace(/[\u200b-\u200d\u2060]/g, '').trim();
+    if (fence) {
+      // Closed only by a line of the same fence character, at least as long.
+      if (fenceText.length >= fence.length && fenceText === fence[0].repeat(fenceText.length)) fence = null;
+      continue;
+    }
+    const marker = FENCE.exec(fenceText);
+    if (marker) { fence = marker[1] || marker[2]; continue; }
     // More nested markers than that make the line unclear.
     if (LIST_MARKER.test(line)) continue;
     line = line.trim();
+    // A line that is only a code span ("`merge 618`", the way hosts show a suggested reply) is read
+    // once without its backticks, and every rule below still applies to what is inside.
+    const span = CODE_SPAN.exec(line);
+    if (span) {
+      const at = raw.lastIndexOf(line);
+      raw = `${raw.slice(0, at)}${span[2]}${raw.slice(at + line.length)}`;
+      line = span[2].trim();
+    }
     // Words in a link or a repository name ("ai-agent-toolkit") are not read as hold words. A link
     // reads as a number, so "merge <link> green" is held like "merge 618 green", but not as a
     // time, so "at <link>" is not a delay.
@@ -203,6 +256,10 @@ function approvalsIn(prompt) {
     let rest = line.replace(APPROVAL_URL, ' # ');
     const shas = [...rest.matchAll(APPROVAL_SHA)].map(match => match[0].toLowerCase());
     rest = rest.replace(APPROVAL_SHA, ' ');
+    // A short SHA can be all digits ("at 7384901"); right after "at" it is read as one, since a pull
+    // request number has at most six digits. Anywhere else such a number still makes the line unclear.
+    for (const match of rest.matchAll(DIGIT_SHA)) shas.push(match[1]);
+    rest = rest.replace(DIGIT_SHA, ' ');
     // A longer bare number is neither a pull request nor a SHA, so the line is unclear.
     if (/\d{7,}/.test(rest) || shas.length > 1) continue;
     for (const match of rest.matchAll(NAMED)) items.push({ repository: match[1] || null, pr: Number(match[2]) });
@@ -385,12 +442,83 @@ function shellMerges(text, cwd, environment = {}) {
   return merges;
 }
 
+// What a connector's merge tool call names, read from its arguments by field name, default deny:
+// { repository, pr, sha, badSha, auto, connector, explicit, fields, unclear, shaField, unreadSha }. A field that is
+// given but has no usable value leaves its part null; two fields for the same part that disagree
+// set `unclear` to that part ('pull request', 'repository' or 'head commit'). `fields` lists the
+// known fields the call gave, for refusal text (names only, never values).
+function connectorMergeArgs(tool, args) {
+  const given = args && typeof args === 'object' && !Array.isArray(args) ? args : {};
+  const has = name => Object.prototype.hasOwnProperty.call(given, name) && given[name] !== undefined;
+  const fields = [...REPOSITORY_FIELDS, ...NUMBER_FIELDS, ...SHA_FIELDS, 'sha'].filter(has);
+  let unclear = null;
+  const disagree = part => { unclear = unclear || part; };
+
+  // The repository: "owner/name", or owner and repo; when both are given they must agree.
+  const name = /^[A-Za-z0-9._-]+$/;
+  let repository = null;
+  let readable = true;
+  if (has('repository_full_name')) {
+    const full = given.repository_full_name;
+    if (typeof full === 'string' && new RegExp(`^${SLUG}$`).test(full)) repository = full; else readable = false;
+  }
+  if (has('owner') || has('repo')) {
+    const pair = typeof given.owner === 'string' && typeof given.repo === 'string' && name.test(given.owner) && name.test(given.repo) ? `${given.owner}/${given.repo}` : null;
+    if (!pair) readable = false;
+    else if (repository && repository.toLowerCase() !== pair.toLowerCase()) disagree('repository');
+    else repository = repository || pair;
+  }
+  if (!readable) repository = null;
+
+  // The number: a positive whole number, or a string of digits; every number field given must agree.
+  const numbers = NUMBER_FIELDS.filter(has).map(field => {
+    const value = given[field];
+    const number = typeof value === 'number' ? value : typeof value === 'string' && /^\d{1,10}$/.test(value) ? Number(value) : NaN;
+    return Number.isSafeInteger(number) && number > 0 ? number : null;
+  });
+  let pr = numbers.length > 0 && numbers.every(number => number !== null) ? numbers[0] : null;
+  if (pr !== null && numbers.some(number => number !== pr)) { disagree('pull request'); pr = null; }
+
+  // The head commit: 7 to 40 hex; every SHA field given must agree.
+  const shas = SHA_FIELDS.filter(has).map(field => (typeof given[field] === 'string' && /^[0-9a-f]{7,40}$/i.test(given[field]) ? given[field].toLowerCase() : null));
+  let sha = shas.length > 0 && shas.every(value => value !== null) ? shas[0] : null;
+  // A sha field is never the pin, but one that names another commit makes the call unclear.
+  const other = typeof given.sha === 'string' && /^[0-9a-f]{7,40}$/i.test(given.sha) ? given.sha.toLowerCase() : null;
+  if (sha !== null && (shas.some(value => value !== sha) || (other !== null && other !== sha))) { disagree('head commit'); sha = null; }
+  const badSha = shas.some(value => value === null);
+
+  const numberField = NUMBER_FIELDS.find(has);
+  const shaField = numberField === 'pull_number' ? null : SHA_FIELD_FOR[numberField] || (has('repository_full_name') ? 'expected_head_sha' : 'expected_head_sha or expectedHeadSha');
+  return { repository, pr, sha, badSha, auto: CONNECTOR_AUTO_MERGE.test(tool), connector: true, explicit: true, fields, unclear, shaField, unreadSha: has('sha') };
+}
+
 function connectorMerge(tool, input) {
-  const args = input && (input.tool_input || input.toolInput) || {};
-  const auto = /enable_pr_auto_merge$/i.test(tool);
-  const repository = typeof args.owner === 'string' && typeof args.repo === 'string' ? `${args.owner}/${args.repo}` : null;
-  const pr = args.pullNumber !== undefined && Number.isInteger(Number(args.pullNumber)) ? Number(args.pullNumber) : null;
-  return { repository, pr, sha: typeof args.expectedHeadSha === 'string' ? args.expectedHeadSha : null, auto, connector: true, explicit: true };
+  return connectorMergeArgs(tool, input && (input.tool_input || input.toolInput));
+}
+
+// "found a, b and c", or "found none of the fields Toolkit reads".
+function foundText(fields) {
+  if (fields.length === 0) return 'found none of the fields Toolkit reads';
+  return `found ${fields.length === 1 ? fields[0] : `${fields.slice(0, -1).join(', ')} and ${fields[fields.length - 1]}`}`;
+}
+
+// "has a, b and c", for the missing head SHA refusal.
+function hasText(fields) { return foundText(fields).replace(/^found /, 'has '); }
+
+// The refusal for a connector merge whose target cannot be read, or null.
+function connectorRefusal(merge) {
+  const found = foundText(merge.fields);
+  if (merge.unclear) return refuse(`this merge tool call names more than one ${merge.unclear} (${found}, and they disagree), so it is unclear and refused. Give each once.`);
+  if (merge.pr === null) {
+    const numbers = NUMBER_FIELDS.filter(field => merge.fields.includes(field));
+    const why = numbers.length === 0 ? 'no pull request number field' : numbers.length === 1 ? `${numbers[0]} is not a positive whole number` : `${numbers.join(' and ')} must each be a positive whole number`;
+    return refuse(`this merge tool call names a pull request Toolkit cannot identify (${found}; ${why}), so it is refused. Retry with the pull request's number.`);
+  }
+  if (typeof merge.repository !== 'string') {
+    return refuse(`Toolkit cannot tell which repository this merge tool call for pull request #${merge.pr} is in (${found}; it needs repository_full_name as owner/name, or owner and repo), so it is refused.`);
+  }
+  if (merge.badSha) return refuse(`this merge tool call names a head commit Toolkit cannot read (${found}; a head SHA is 7 to 40 hex characters), so it is refused.`);
+  return null;
 }
 
 function deny(reason) { return { deny: `Toolkit: ${reason} ${ASK_TEXT}` }; }
@@ -398,6 +526,8 @@ function refuse(reason) { return { deny: `Toolkit: ${reason}` }; }
 
 // The refusal for one requested merge, or the approval it uses.
 function judge(merge, approvals) {
+  const unreadable = merge.connector ? connectorRefusal(merge) : null;
+  if (unreadable) return { refusal: unreadable };
   if (merge.pr === null) return { refusal: deny('this command merges a pull request Toolkit cannot identify, so it is refused. Name the pull request by number.') };
   if (typeof merge.repository !== 'string') return { refusal: deny(`Toolkit cannot tell which repository pull request #${merge.pr} is in, so the merge is refused. Name it with --repo owner/name or a pull request URL.`) };
   const name = `${merge.repository}#${merge.pr}`;
@@ -405,10 +535,17 @@ function judge(merge, approvals) {
   if (!approval) return { refusal: deny(`the user has not approved a merge of ${name} in the last day, so this merge is refused.`) };
   // Connector auto-merge cannot name a head commit, so it is refused; gh can.
   if (merge.connector && merge.auto) {
-    return { refusal: refuse(`the connector's auto-merge cannot name the head commit it expects, so it is refused. After the user approves, use \`gh pr merge ${merge.pr} --auto --match-head-commit <sha>\` or the connector's merge tool with expectedHeadSha.`) };
+    return { refusal: refuse(`the connector's auto-merge cannot name the head commit it expects, so it is refused. After the user approves, use \`gh pr merge ${merge.pr} --auto --match-head-commit <sha>\` or the connector's merge tool with its head SHA field.`) };
   }
   if (!(typeof merge.sha === 'string' && /^[0-9a-f]{7,40}$/i.test(merge.sha))) {
-    return { refusal: refuse(`name the head commit this merge expects, so GitHub refuses it if the branch moves: add --match-head-commit <sha> (gh), sha= (API) or expectedHeadSha (connector) and retry.${approval.sha ? ` The user approved ${approval.sha}.` : ''}`) };
+    const approved = approval.sha ? ` The user approved ${approval.sha}.` : '';
+    if (merge.connector) {
+      // A sha field is not read: a server that drops it would merge whatever head is there.
+      const unread = merge.unreadSha ? ' (its sha field is not read, since not every server passes it to GitHub)' : '';
+      const next = merge.shaField ? `Add ${merge.shaField} and retry.` : `This tool has no head SHA field Toolkit reads, so use \`gh pr merge ${merge.pr} --match-head-commit <sha>\` instead.`;
+      return { refusal: refuse(`name the head commit this merge expects, so GitHub refuses it if the branch moves: this merge tool call ${hasText(merge.fields)} but no head SHA field${unread}. ${next}${approved}`) };
+    }
+    return { refusal: refuse(`name the head commit this merge expects, so GitHub refuses it if the branch moves: add --match-head-commit <sha> (gh) or sha= (API) and retry.${approved}`) };
   }
   if (approval.sha && !merge.sha.toLowerCase().startsWith(approval.sha) && !approval.sha.startsWith(merge.sha.toLowerCase())) {
     return { refusal: deny(`the user approved ${name} at ${approval.sha}, but this merge names ${merge.sha}, so it is refused.`) };
@@ -507,6 +644,6 @@ function mayMerge(input) {
 const CHECK_FAILED = 'Toolkit: the merge check failed, so this merge or push is refused. Retry it; if this repeats, run `setup toolkit` to repair the Toolkit plugin.';
 
 module.exports = Object.freeze({
-  APPROVALS_BASENAME, APPROVALS_SCHEMA, CHECK_FAILED, MAX_AGE_MS, MAX_COMMAND_CHARS, MergeApprovals, MergeHoldError,
-  approvalsIn, decide, mayMerge, recordPrompt, shellMerges,
+  APPROVALS_BASENAME, APPROVALS_SCHEMA, CHECK_FAILED, CONNECTOR_MERGE, MAX_AGE_MS, MAX_COMMAND_CHARS, MergeApprovals, MergeHoldError,
+  approvalsIn, connectorMergeArgs, decide, mayMerge, recordPrompt, shellMerges,
 });
