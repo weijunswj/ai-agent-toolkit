@@ -57,6 +57,7 @@
       "repo/scripts/toolkit-codex-install-state.cjs",
       "repo/scripts/toolkit-codex-session-start.cjs",
       "repo/scripts/toolkit-codex-session-start.ps1",
+      "repo/scripts/toolkit-codex-stand-in.cjs",
       "repo/scripts/toolkit-v3-native-helper-adapter-codex.cjs",
       "repo/tests/codex-delegation-config.test.cjs",
       "repo/tests/codex-delegation-malformed-repair.test.cjs",
@@ -69,6 +70,7 @@
       "repo/tests/toolkit-codex-helper-hook.test.cjs",
       "repo/tests/toolkit-codex-helper-policy.test.cjs",
       "repo/tests/toolkit-codex-install-state.test.cjs",
+      "repo/tests/toolkit-codex-stand-in.test.cjs",
       "repo/tests/toolkit-local-bridge-codex.test.cjs"
     ]
   },
