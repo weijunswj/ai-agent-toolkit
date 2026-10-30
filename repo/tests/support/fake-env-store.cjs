@@ -12,13 +12,16 @@ class FakeEnvStore {
     for (const [name, value] of Object.entries(values)) this.#values.set(name, value);
     this.#corruptReadBack = new Set(corruptReadBack);
     this.writes = 0;
+    this.reads = 0;
   }
 
   get backend() { return 'Test store'; }
 
   list() { return [...this.#values.keys()].sort(); }
 
+  // reads counts value reads (read calls readAll), so a test can prove a command never read one.
   readAll(names) {
+    this.reads += 1;
     const out = new Map();
     for (const name of names.map(assertName)) {
       if (!this.#values.has(name)) continue;
