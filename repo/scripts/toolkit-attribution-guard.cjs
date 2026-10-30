@@ -24,7 +24,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { ShellCall, absoluteShellPath, assignVariable, assignmentOf, folderWord, shellOf, shellPath } = require('./toolkit-shell-call.cjs');
+const { ShellCall, absoluteShellPath, assignVariable, assignmentOf, folderWord, shellOf, shellPath, shellReadings } = require('./toolkit-shell-call.cjs');
 
 const MESSAGE = 'Remove the AI attribution lines (Co-Authored-By or Claude-Session trailers, claude.ai session links, "Generated with" footers) and retry.';
 const ATTRIBUTION_PATTERNS = Object.freeze([
@@ -535,7 +535,8 @@ function outgoingRefusal(command, cwd, { notes, budgetMs, folderConfirmed = true
     return check(target, { deadline });
   };
   let targets;
-  try { targets = outgoingChanges(command, cwd, 0, [], folderConfirmed, shell); } catch { return ''; }
+  // An unknown shell gives the targets of every reading (shellReadings); each is checked once.
+  try { targets = shellReadings(shell).flatMap((reading) => outgoingChanges(command, cwd, 0, [], folderConfirmed, reading)); } catch { return ''; }
   const seen = new Set();
   for (const target of targets) {
     const key = JSON.stringify(target);
@@ -565,7 +566,7 @@ function attributionDecision(input, options = {}) {
   const folderConfirmed = !(options.sessionFolderOnly && !call.folders.length);
   // `options.host` is set by the hook entry point ('claude' or 'codex'), never read from the payload.
   const shell = shellOf(input, options.host);
-  const reason = call.refusal() || (command && (attributionRefusal(command, call.folder) || forceRefusal(command, call.folder, 0, {}, shell) || outgoingRefusal(command, call.folder, { ...options, folderConfirmed, shell })));
+  const reason = call.refusal() || (command && (attributionRefusal(command, call.folder) || shellReadings(shell).map((reading) => forceRefusal(command, call.folder, 0, {}, reading)).find(Boolean) || outgoingRefusal(command, call.folder, { ...options, folderConfirmed, shell })));
   return reason ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } } : {};
 }
 

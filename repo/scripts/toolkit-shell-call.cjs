@@ -89,9 +89,11 @@ function assignVariable(variables, [key, value]) {
 // A folder word as the shell would read it: a whole-word variable the same command assigned earlier,
 // and a leading home variable as `~` (shellPath resolves it). Names are read only as the shell that
 // runs the command reads them (`shell`: 'posix' or 'powershell', from shellOf): a POSIX name in its
-// exact case, a PowerShell name in any case, the last assignment winning. When the shell is not known,
-// a name assigned in both forms or more than once is left unread, so the folder stays the literal word
-// and the check fails closed.
+// exact case, a PowerShell name in any case, the last assignment winning. When the shell is not known
+// (null), a name assigned in both forms or more than once is left unread, so the folder stays the
+// literal word and the check fails closed; and the caller also judges the command a second time with
+// `shell` 'unset' (SHELL_READINGS), where every assigned name reads as empty, as it does in the shell
+// that cannot run the assignment, so the folder is the one the command is already in.
 function folderWord(word, variables, shell = null) {
   const name = /^\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))$/.exec(word);
   let value = word;
@@ -100,6 +102,7 @@ function folderWord(word, variables, shell = null) {
     const power = variables.get(`ps:${(name[1] || name[2]).toLowerCase()}`);
     if (shell === 'posix') value = posix ? posix.value : word;
     else if (shell === 'powershell') value = power ? power.value : word;
+    else if (shell === 'unset') value = posix || power ? '' : word;
     else {
       const found = [posix, power].filter(Boolean);
       if (found.length === 1 && !found[0].reassigned) value = found[0].value;
@@ -110,6 +113,10 @@ function folderWord(word, variables, shell = null) {
 
 // The shell a call runs in, when the host says: Claude Code's Bash tool runs bash and its PowerShell
 // tool PowerShell. Codex names no shell (its Bash tool may run PowerShell on Windows), so it is null.
+// The readings a check judges a command under: the known shell, or for an unknown one both the
+// variables as assigned and the variables as unset. A check refuses when any reading refuses.
+function shellReadings(shell) { return shell ? [shell] : [null, 'unset']; }
+
 function shellOf(input, host) {
   if (host !== 'claude') return null;
   const tool = input && (input.tool_name || input.toolName);
@@ -234,4 +241,4 @@ class ShellCall {
   }
 }
 
-module.exports = Object.freeze({ SHELL_TOOL_NAMES, SHELL_TOOLS, UNREADABLE, ShellCall, absoluteShellPath, argvText, assignVariable, assignmentOf, folderWord, quoteWords, shellOf, shellPath });
+module.exports = Object.freeze({ SHELL_TOOL_NAMES, SHELL_TOOLS, UNREADABLE, ShellCall, absoluteShellPath, argvText, assignVariable, assignmentOf, folderWord, quoteWords, shellOf, shellPath, shellReadings });

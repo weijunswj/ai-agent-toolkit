@@ -168,6 +168,28 @@
       "expect": { "decision": "deny" },
       "status": "pass",
       "note": "With the shell unknown (Codex), a name assigned twice is left unread, so the push is judged from the session folder and refused."
+    },
+    {
+      "id": "R1.posix-assignment-unknown-shell",
+      "source": "G2 recheck on PR 705 at 94f5123, R1 (Medium): with the shell unknown, one assignment in the other shell's form steered the guard",
+      "kind": "hostile",
+      "hosts": ["codex"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "x='{home}' ; git -C \"$x\" push origin HEAD:main" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature" }, "files": { ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n" } },
+      "expect": { "decision": "deny" },
+      "status": "pass",
+      "note": "Codex names no shell. If PowerShell runs it, the x= line fails, $x is empty and git pushes the session folder (the governed repository) to main; the guard judges that reading too."
+    },
+    {
+      "id": "R1.powershell-assignment-unknown-shell",
+      "source": "G2 recheck on PR 705 at 94f5123, R1 (Medium): with the shell unknown, one assignment in the other shell's form steered the guard",
+      "kind": "hostile",
+      "hosts": ["codex"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "$x = '{home}' ; git -C \"$x\" push origin HEAD:main" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature" }, "files": { ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n" } },
+      "expect": { "decision": "deny" },
+      "status": "pass",
+      "note": "Codex names no shell. If bash runs it, the $x = line fails, $x is empty and git pushes the session folder (the governed repository) to main; the guard judges that reading too."
     }
   ]
 }

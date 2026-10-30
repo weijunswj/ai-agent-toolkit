@@ -71,7 +71,7 @@ const MAX_APPROVALS = 100;
 const MAX_PROMPT_CHARS = 8000;
 const MAX_COMMAND_CHARS = 1024 * 1024;
 
-const { SHELL_TOOLS, ShellCall, assignVariable, assignmentOf, folderWord, shellOf, shellPath } = require('./toolkit-shell-call.cjs');
+const { SHELL_TOOLS, ShellCall, assignVariable, assignmentOf, folderWord, shellOf, shellPath, shellReadings } = require('./toolkit-shell-call.cjs');
 // A connector's merge or auto-merge tool, whatever its server is called (a claude.ai connector's
 // server name is a UUID): the tool name ends in one of these after a _ or -.
 const AUTO_MERGE_NAME = 'enable[_-]?(?:pr[_-]?|pull[_-]?request[_-]?)?auto[_-]?merge';
@@ -616,7 +616,8 @@ function decide(input, { registryOptions = {}, now, environment = process.env, h
     // shared reader), so a quoted program path such as `C:\Program Files\GitHub CLI\gh.exe` cannot
     // hide a merge. A merge both readings find counts once.
     const joined = call.joinedWords && call.joinedWords !== call.text ? call.joinedWords.replace(/[\\`^]\r?\n/g, ' ') : '';
-    const refusal = shellRefusal(joined ? `${text}\n${joined}` : text, cwd, registryOptions, shellOf(input, host));
+    // An unknown shell is judged under each reading (shellReadings); the first refusal stands.
+    const refusal = shellReadings(shellOf(input, host)).map(shell => shellRefusal(joined ? `${text}\n${joined}` : text, cwd, registryOptions, shell)).find(Boolean);
     if (refusal) return refusal;
     merges = shellMerges(text, cwd, environment || {});
     if (joined) {
