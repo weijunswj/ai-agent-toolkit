@@ -24,10 +24,11 @@
 //
 // A Codex call that names no folder (no `workdir`, and no `cd` or `git -C` to a full path) gives only
 // the chat's folder, and the command may run in another working tree of the same repository. Then
-// (`folderConfirmed: false`): a folder that is not a repository, or a source it cannot find, is refused
-// (FOLDER_UNCONFIRMED); with more than one working tree (`git worktree list`), a push or pull request
-// of HEAD is refused, and when the same command commits first, what it could commit is read in the
-// working tree that has the pushed branch checked out (none: in the chat's folder, as before).
+// (`folderConfirmed: false`) a folder that is not a repository is refused (FOLDER_UNCONFIRMED). With
+// more than one working tree (`git worktree list`), so is a source the chat's folder cannot find and
+// a push or pull request of HEAD; when the same command commits first, what it could commit is read
+// in the working tree that has the pushed branch checked out, and any other source is refused. With
+// one working tree, the check runs as for a named folder.
 //
 // It fails open: when git is not found or cannot run, the check takes longer than 30 seconds for one
 // shell command, or a setting cannot be read, the command runs and one note is returned for the user. A broken check must
@@ -211,10 +212,11 @@ const followsHead = (source) => /^(?:HEAD|@)(?:$|[~^@{])/i.test(source);
 // changes the push can carry: { root } or { refusal }. It matters only when the same command commits
 // first or the source is HEAD, and only when the repository has more than one working tree; otherwise
 // the chat's folder is the one. With several, a HEAD source is refused (each working tree has its
-// own). A named branch is read in the working tree that has it checked out, and a branch none has
-// checked out in the chat's folder, as before (a `git checkout` earlier in the same command could
-// put the commit on it there). When the sources lead to more than one working tree, the commit's
-// folder cannot be told, so it is refused.
+// own). After a commit in the same command, each source must be a branch exactly one working tree
+// has checked out, and that working tree is read. Otherwise the commit's folder cannot be told and the
+// push is refused: a branch none has checked out (a `git checkout` or `git tag` earlier in the same
+// command could put the commit on it wherever the command runs), `--all` or `--tags`, and sources
+// held in more than one working tree.
 function unconfirmedFolder(root, target, sources, deadline, spawn) {
   const head = sources.some(followsHead);
   if (!head && !target.preceding?.length) return { root };
@@ -222,17 +224,20 @@ function unconfirmedFolder(root, target, sources, deadline, spawn) {
   if (trees.length <= 1) return { root };
   if (head) return { refusal: FOLDER_UNCONFIRMED };
   const folders = [];
-  const add = (folder) => { if (!folders.some((known) => samePath(known, folder))) folders.push(folder); };
   for (const source of sources) {
-    if (source === '--tags') continue;
+    if (REV_OPTIONS.has(source)) return { refusal: FOLDER_UNCONFIRMED };
     const ref = source.startsWith('refs/') ? source : `refs/heads/${source}`;
-    const holders = trees.filter((tree) => tree.branch && (source === '--branches' || tree.branch === ref));
-    // --branches also sends the branches no working tree has checked out.
-    if (source === '--branches' || !holders.length) add(root);
-    for (const tree of holders) add(tree.folder);
+    const holders = trees.filter((tree) => tree.branch === ref);
+    if (!holders.length) return { refusal: FOLDER_UNCONFIRMED };
+    for (const tree of holders) if (!folders.some((known) => samePath(known, tree.folder))) folders.push(tree.folder);
   }
-  if (folders.length > 1) return { refusal: FOLDER_UNCONFIRMED };
-  return { root: folders[0] || root };
+  return folders.length === 1 ? { root: folders[0] } : { refusal: FOLDER_UNCONFIRMED };
+}
+
+// Whether the folder is in a repository with a single working tree. Not a repository: false.
+function singleWorkingTree(folder, deadline, spawn) {
+  const top = runGit(folder, ['rev-parse', '--show-toplevel'], deadline, spawn);
+  return top.status === 0 && workingTrees(path.resolve(lines(top.stdout)[0]), deadline, spawn).length <= 1;
 }
 
 // The working-tree file a pending change reads, or '' when it is missing, too big or binary.
@@ -378,10 +383,11 @@ function checkOutgoing(target, {
     // A source that is not a commit yet: with a commit earlier in the same shell command (a first
     // commit in a new repository, say) only what it could commit is checked; otherwise the push
     // fails on its own. Not a repository: nothing to check. When Codex did not name the folder, the
-    // chat's folder may simply be the wrong one, so either is refused instead.
+    // chat's folder may simply be the wrong one, so either is refused instead, unless the chat's
+    // folder is in a repository with one working tree, which is then the one.
     let committed = true;
     if (probe.status !== 0) {
-      if (target.folderConfirmed === false) return { refusal: FOLDER_UNCONFIRMED };
+      if (target.folderConfirmed === false && !singleWorkingTree(target.folder, deadline, spawn)) return { refusal: FOLDER_UNCONFIRMED };
       if (!target.preceding?.some((entry) => entry.sub === 'commit')) return {};
       probe = runGit(target.folder, ['rev-parse', '--show-toplevel'], deadline, spawn);
       if (probe.status !== 0) return {};

@@ -326,9 +326,11 @@ test('matrix: a Codex call that names no folder is checked in the working tree i
     ['lanes: a relative cd keeps the folder unconfirmed', repo, 'cd .tmp/worktrees/lane-one; git push', unconfirmed],
     ['lanes: git -C to the full path confirms it', repo, `git -C "${laneOne}" add -A; git -C "${laneOne}" commit -m x; git -C "${laneOne}" push uat lane/one`, pendingFile],
     ['lanes: cd to the full path confirms it', repo, `cd "${laneOne}"; git add -A; git commit -m x; git push`, pendingFile],
-    ['lanes: a branch no working tree has checked out, after a commit', repo, 'git commit -m x; git push uat spare', allowed],
+    ['lanes: a branch no working tree has checked out, after a commit', repo, 'git commit -m x; git push uat spare', unconfirmed],
+    ['lanes: --tags after a commit', repo, 'git add -A; git commit -m x; git tag v9; git push uat --tags', unconfirmed],
     ['one working tree: add, commit, push, clean', single, 'git add -A; git commit -m x; git push uat feature', allowed],
     ['one working tree: bare push, clean', single, 'git push', allowed],
+    ['one working tree: a new branch made, committed and pushed in one command, clean', single, 'git checkout -b brand-new; git add -A; git commit -m x; git push -u uat brand-new', allowed],
     ['chat folder not a repository', plain, 'git push origin feature', unconfirmed],
     ['branch unknown in the chat repository', repo, 'git push origin other-branch', unconfirmed],
   ];
@@ -350,16 +352,27 @@ test('matrix: a Codex call that names no folder is checked in the working tree i
     assert.equal(hook.status, expected === allowed ? 0 : 2, `${row}: ${hook.stderr}`);
     assert.ok(expected(reason), `${row}: the hook gave ${JSON.stringify(reason)}`);
   }
-  // A branch no working tree has checked out is read in the chat's folder, as before: a checkout
-  // earlier in the same command could put the commit on it there. Sources in more than one working
-  // tree are refused, since the commit's folder cannot be told.
+  // After a commit, a branch no working tree has checked out is refused: a checkout or tag step in the
+  // same command could put the commit on it in whichever folder the command runs. So are sources held
+  // in more than one working tree, --all and --tags.
   const codexDecision = (cwd, line) => attributionDecision({ tool_name: 'Bash', cwd, tool_input: { command: line } }, { ...quiet(), sessionFolderOnly: true }).hookSpecificOutput?.permissionDecisionReason || '';
-  writeFiles(repo, { 'main-secret.txt': `token = "${fakeToken()}"\n` });
-  assert.match(codexDecision(repo, 'git checkout spare; git add -A; git commit -m x; git push uat spare'), /main-secret\.txt:1 \(not committed yet\)/);
-  fs.rmSync(path.join(repo, 'main-secret.txt'));
-  for (const line of ['git add -A; git commit -m x; git push uat lane/one lane/two', 'git add -A; git commit -m x; git push uat lane/one spare', 'git commit -m x; git push --all uat']) {
+  for (const line of ['git checkout spare; git add -A; git commit -m x; git push uat spare', 'git add -A; git commit -m x; git tag v9; git push uat v9', 'git add -A; git commit -m x; git push uat lane/one lane/two',
+    'git add -A; git commit -m x; git push uat lane/one spare', 'git commit -m x; git push --all uat', 'git commit -m x; git push uat --tags']) {
     assert.ok(unconfirmed(codexDecision(repo, line)), line);
   }
+  // One working tree: a source that does not exist yet falls through to the check of what the commit
+  // could add, as for a named folder. A new branch or a first commit with a credential is refused
+  // naming the file; the same steps with a clean change run.
+  const { dir: chainDir, git: chainGit, clone } = chainRepos(t);
+  const branchRepo = clone();
+  writeFiles(branchRepo, { 'uat-config.txt': `token = "${fakeToken()}"\n` });
+  assert.match(codexDecision(branchRepo, 'git checkout -b brand-new; git add -A; git commit -m x; git push -u origin brand-new'), /uat-config\.txt:1 \(not committed yet\)/);
+  const fresh = path.join(chainDir, 'fresh');
+  chainGit(chainDir, 'init', '--quiet', fresh);
+  writeFiles(fresh, { 'uat-config.txt': `token = "${fakeToken()}"\n` });
+  assert.match(codexDecision(fresh, 'git add -A && git commit -m init && git push -u origin main'), /uat-config\.txt:1 \(not committed yet\)/, 'first commit');
+  writeFiles(fresh, { 'uat-config.txt': 'Plain words only.\n' });
+  assert.equal(codexDecision(fresh, 'git add -A && git commit -m init && git push -u origin main'), '', 'a clean first commit');
   // A named workdir is believed: the lane folder gets the normal check there, the main checkout's
   // clean tree passes, and the Claude hook judges its cwd the same way.
   const command = 'git add -A; git commit -m t2; git push uat lane/one';
