@@ -487,14 +487,22 @@ test('push check: what is sent is each pushed commit the target does not have', 
   // Without origin/HEAD, a new branch is still compared with what origin has.
   git(repo, 'remote', 'set-head', 'origin', '--delete');
   assert.match(outgoingRefusal('git push -u origin feature', repo, quiet()), /GitHub token/);
-  // Once origin has the branch, nothing is left to send to it, but another remote gets it all.
+  // Once origin has the branch, nothing is left to send to it. A new remote with no refs yet is read
+  // against every remote, so history origin already holds is not read again, but a commit no remote
+  // has still is. A name that is no configured remote sends nothing.
   git(repo, 'push', '--quiet', '-u', 'origin', 'feature');
   assert.equal(outgoingRefusal('git push', repo, quiet()), '');
   const other = path.join(path.dirname(repo), 'range-other.git');
   git(path.dirname(repo), 'init', '--quiet', '--bare', other);
   git(repo, 'remote', 'add', 'other', other);
   git(repo, 'fetch', '--quiet', 'other');
-  assert.match(outgoingRefusal('git push other HEAD:feature', repo, quiet()), /GitHub token/, 'a remote with no refs gets the whole branch');
+  assert.equal(outgoingRefusal('git push other HEAD:feature', repo, quiet()), '', 'history another remote holds is not read again');
+  writeFiles(repo, { 'src/again.js': `const token = "${fakeToken()}";\n` });
+  commitAll(repo, 'again');
+  assert.match(outgoingRefusal('git push other HEAD:feature', repo, quiet()), /src\/again\.js:1 /, 'a commit no remote has is read for a new remote');
+  assert.equal(outgoingRefusal('git push nowhere HEAD:feature', repo, quiet()), '', 'no such remote');
+  assert.equal(outgoingRefusal('git push --dry-run other HEAD:feature', repo, quiet()), '', 'a dry run sends nothing');
+  git(repo, 'reset', '--quiet', '--hard', 'HEAD~1');
   // A pull request against a base that already has the commits sends nothing new.
   assert.equal(outgoingRefusal('gh pr create --base feature', repo, quiet()), '');
   // On main, which tracks origin/main: only the commit not yet pushed counts.

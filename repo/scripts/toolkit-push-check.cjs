@@ -9,8 +9,9 @@
 // A refusal names the file, line and rule only: never any part of the matched text.
 //
 // What is sent: for a push, the commits of each pushed source (the refspec's local side, else HEAD)
-// that the target remote does not already have (its remote-tracking refs, so a remote with none gets
-// the whole history; every remote's when no remote or a URL is named). For a pull request, the commits of --head (else HEAD) not on the
+// that the target remote does not already have (its remote-tracking refs; every remote's when no
+// remote or a URL is named, or the named remote has none yet). A name that is no configured remote
+// sends nothing. For a pull request, the commits of --head (else HEAD) not on the
 // base branch (--base, else origin's default branch, else origin/main or origin/master). A folder that
 // is not a repository is not checked; a folder that cannot be found is refused.
 //
@@ -328,6 +329,7 @@ function checkOutgoing(target, {
     let committed = true;
     if (probe.status !== 0) {
       if (target.folderConfirmed === false && !singleWorkingTree(target.folder, deadline, spawn)) return { refusal: FOLDER_UNCONFIRMED };
+      if (!target.preceding?.length) return {};
       const top = runGit(target.folder, ['rev-parse', '--show-toplevel'], deadline, spawn);
       if (top.status !== 0) return {};
       const here = path.resolve(lines(top.stdout)[0]);
