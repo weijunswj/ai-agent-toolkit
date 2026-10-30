@@ -655,3 +655,36 @@ test('LS-21: the history line splitter grows linearly with a very long line', as
   const large = await time(32);
   assert.ok(large / Math.max(small, 1) < 48, `16x the data took ${(large / Math.max(small, 1)).toFixed(1)}x the time`);
 });
+
+test('LS-22: a history file is sized before its full read, so git is never stopped mid-read', async () => {
+  // A fake git log adds key material without its header to three files, so each needs a full read.
+  const commit = '1'.repeat(40);
+  const names = ['over.pem', 'exact.pem', 'gone.pem'];
+  const fakeSpawn = () => {
+    const { EventEmitter } = require('node:events');
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    setImmediate(() => {
+      const diffs = names.map(name => `diff --git a/${name} b/${name}\n+++ b/${name}\n@@ -0,0 +1 @@\n+${filler(64, B64, 171)}\n`);
+      child.stdout.emit('data', Buffer.from(`commit ${commit}\n${diffs.join('')}`));
+      child.emit('close', 0);
+    });
+    return child;
+  };
+  const key = [j('-----BEGIN ', 'RSA PRIVATE', ' KEY-----'), filler(64, B64, 173), j('-----END ', 'RSA PRIVATE', ' KEY-----')].join('\n');
+  const sizes = { 'over.pem': '5242881\n', 'exact.pem': '5242880\n' }; // gone.pem: cat-file fails
+  const calls = [];
+  const fakeSpawnSync = (command, args, options) => {
+    const own = args.slice(args.indexOf('-C') + 2);
+    const name = own[own.length - 1].slice(commit.length + 1);
+    calls.push({ args: own.join(' '), maxBuffer: options.maxBuffer });
+    if (own[0] === 'cat-file') return name in sizes ? { status: 0, stdout: sizes[name] } : { status: 128, stdout: '' };
+    return { status: 0, stdout: Buffer.from(`${key}\n`) };
+  };
+  const result = await scanner.scanHistory('git', os.tmpdir(), { spawn: fakeSpawn, spawnSync: fakeSpawnSync });
+  assert.deepEqual(calls.map(call => call.args), [`cat-file -s ${commit}:over.pem`, `cat-file -s ${commit}:exact.pem`, `show --no-textconv ${commit}:exact.pem`, `cat-file -s ${commit}:gone.pem`]);
+  assert.equal(calls[2].maxBuffer, 5 * 1024 * 1024, 'the read keeps the 5 MB limit, which a sized file cannot pass');
+  assert.deepEqual(result.notScanned, [{ file: 'over.pem', commit: commit.slice(0, 12), reason: 'larger than 5 MB' }, { file: 'gone.pem', commit: commit.slice(0, 12), reason: 'unreadable' }]);
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.findings.filter(item => item.rule === 'private-key').map(item => item.file), ['exact.pem'], 'the file of exactly 5 MB is read and scanned');
+});

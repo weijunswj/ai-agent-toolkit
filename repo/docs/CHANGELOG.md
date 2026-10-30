@@ -1,5 +1,10 @@
 # Toolkit Changelog
 
+## 3.19.11 (the local secret scan never stops git mid-read)
+
+- **Fixed:** when the local secret scan reads a whole file from history to check it for a private key, it now asks git for the file's size first. A file over 5 MB is listed as not scanned without being read, so git is never stopped part way through. On Windows, stopping Git's launcher left the real `git.exe` running in the scanned folder for a short while, so a folder removed straight after the scan could fail as busy.
+- **Unchanged:** the report is the same: a file over 5 MB is still listed with its commit as "larger than 5 MB", one git cannot read as "unreadable", and either makes the scan incomplete.
+
 ## 3.19.10 (Codex pushes from a lane worktree are checked there)
 
 - **Fixed:** in Codex Desktop, a one-command `git add`, `git commit` and `git push` run in a lane worktree under the chat's folder went out unchecked, even with a new credential file. Codex tells the hook only the chat's folder, so the push check read the main checkout, which had nothing pending. The check now reads the working tree that has the pushed branch checked out, and refuses naming the file and "not committed yet".
