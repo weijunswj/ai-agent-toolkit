@@ -48,8 +48,10 @@ test('each block stays inside its own budget', () => {
   assert.ok(crlfBytes(read('repo/CONTROLLER.md')) <= 18000, 'CONTROLLER.md');
   // The gate rules load on demand for gate sessions only, but stay compact. The cap rose from
   // 10,500 to hold the review-round rules (self-check, finding severities, narrow rechecks), then to
-  // 11,750 for the hook-change merge rule (the hook test pack, revert proof and real-host smoke).
-  assert.ok(crlfBytes(read('repo/contracts/agent-rules/gate-rules.md')) <= 11750, 'gate rules');
+  // 11,750 for the hook-change merge rule (the hook test pack, revert proof and real-host smoke), then
+  // to 12,800 for the task auto-merge rule (the owner's answer, when the controller merges, the
+  // always-manual list).
+  assert.ok(crlfBytes(read('repo/contracts/agent-rules/gate-rules.md')) <= 12800, 'gate rules');
 });
 
 test('guidance moved out of root AGENTS.md is still reachable from a loaded layer', () => {
