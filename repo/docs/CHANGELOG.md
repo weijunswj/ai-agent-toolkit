@@ -1,5 +1,12 @@
 # Toolkit Changelog
 
+## 3.19.19 (see one key's value yourself, and env commands you can paste)
+
+- **New:** `toolkit env show NAME` shows one stored value in a PowerShell window you opened yourself, after you type the key's name again; `show NAME --copy` puts it on the clipboard instead, marked so Windows clipboard history and sync skip it where Windows honours that. It refuses, before reading the store, in a shell an agent or an app's built-in terminal started, when it is not on a terminal (a pipe or a file), and on a wrong retype. There is no way to show every value, and nothing about it is recorded. The `toolkit-env` skill tells agents never to run it.
+- **Fixed:** messages that told you to "run toolkit env apply" (or `edit`, `remove`, `connect` and the rest) named a command your terminal does not know. In your own terminal they now give the full PowerShell line, `node "$env:USERPROFILE\...\toolkit-env.cjs" apply`; agents still see the short name. The edit file's header gives the same line for `apply` and `remove`, and an edit file made by an earlier version still applies without its old header being kept as your comment.
+- **Fixed:** with two edit files open, `apply` said to apply each, which it never could. It now says to close Notepad and wait 30 minutes for the old files to be deleted, then edit again.
+- **Safer apply:** a value typed in quotes (`NAME="abc"`) was saved with its quotes; it is now refused by line number, with nothing saved. An edit file saved as UTF-16 now gets one plain message to save it as UTF-8, instead of a problem on every line. The header says spaces around a value are dropped. New tests cover values containing `=`, a byte order mark before the first key, and the edit file being overwritten with zeros before it is deleted.
+
 ## 3.19.18 (the Projects post hook keeps one running post after a handoff)
 
 - **Fixed:** a new coordinator session no longer starts a fresh chat post when it should edit the running one. With no post of its own and no owner message yet, the post hook takes the running post from the `RUNNING POST:` line the session read from project memory (or wrote to it), and refuses a fresh status post until the owner writes. The refusal says to read the project chat if the owner wrote since or the post nears 8 KB.
