@@ -9,6 +9,14 @@
 //   node repo/scripts/run-tests.cjs --shard windows-2 --os windows   one CI shard
 //   node repo/scripts/run-tests.cjs --plan             the shards and their estimated times
 //   node repo/scripts/run-tests.cjs --verify-ci <dir>  the CI aggregate check over the leg summaries
+//   node repo/scripts/run-tests.cjs --clock-ahead      the test files that pin a calendar date, with
+//                                                      Node's clock moved 400 days ahead
+//
+// --clock-offset-days <n> moves Node's clock n days ahead in the test processes (never in this
+// runner) through the test-clock-offset.cjs preload, for --clock-ahead or any named, --changed or
+// --all run, and records n in the summary as clock_offset_days. A moved run never counts toward
+// the CI shard check. A test that pins a date passes the same clock to everything that reads the
+// time, so it passes at any real date; the clock-ahead run proves that in CI.
 //
 // Every run gets its own scratch temp folder, <temp root>\<run id>, set as TEMP, TMP and TMPDIR for
 // the run and every child process. It is removed when the run finishes, also when tests fail.
@@ -31,20 +39,24 @@ const { spawnSync } = require('node:child_process');
 const shards = require('./ci-test-shards.cjs');
 
 const REPORTER = path.join(__dirname, 'test-summary-reporter.cjs');
+const CLOCK_PRELOAD = path.join(__dirname, 'test-clock-offset.cjs');
+const CLOCK_AHEAD_DAYS = 400;
 const DEFAULT_CONCURRENCY = 3;
 const STALE_RUN_AGE_MS = 24 * 60 * 60 * 1000;
 // Written into every run folder this runner creates; the stale sweep removes only folders that carry it.
 const RUN_MARKER = '.toolkit-test-run';
 const RESULTS_FILE = 'test-results.jsonl';
-const USAGE = 'Usage: node repo/scripts/run-tests.cjs [--changed | --all | --shard <id> --os <linux|windows> | --plan | --verify-ci <dir> | <test file>...] [--temp-root <dir>] [--summary <file>] [--report-durations <file>] [--concurrency <n>] [--base <ref>]';
+const USAGE = 'Usage: node repo/scripts/run-tests.cjs [--changed | --all | --shard <id> --os <linux|windows> | --clock-ahead | --plan | --verify-ci <dir> | <test file>...] [--clock-offset-days <n>] [--temp-root <dir>] [--summary <file>] [--report-durations <file>] [--concurrency <n>] [--base <ref>]';
+// The run modes a moved clock may go with: a shard run proves CI coverage, so it keeps the real clock.
+const CLOCK_MODES = new Set(['clock-ahead', 'files', 'changed', 'all']);
 
 class UsageError extends Error {}
 
 function parseArgs(argv) {
-  const options = { mode: null, files: [], concurrency: DEFAULT_CONCURRENCY, base: 'origin/main' };
-  const valued = new Set(['--shard', '--os', '--temp-root', '--summary', '--report-durations', '--concurrency', '--base', '--verify-ci']);
+  const options = { mode: null, files: [], concurrency: DEFAULT_CONCURRENCY, base: 'origin/main', clockOffsetDays: null };
+  const valued = new Set(['--shard', '--os', '--temp-root', '--summary', '--report-durations', '--concurrency', '--base', '--verify-ci', '--clock-offset-days']);
   const setMode = (mode) => {
-    if (options.mode && options.mode !== mode) throw new UsageError(`Choose one of --changed, --all, --shard, --plan, --verify-ci or test files (got ${options.mode} and ${mode}).`);
+    if (options.mode && options.mode !== mode) throw new UsageError(`Choose one of --changed, --all, --shard, --clock-ahead, --plan, --verify-ci or test files (got ${options.mode} and ${mode}).`);
     options.mode = mode;
   };
   for (let index = 0; index < argv.length; index += 1) {
@@ -63,9 +75,13 @@ function parseArgs(argv) {
       else if (arg === '--concurrency') {
         if (!/^[1-9][0-9]?$/.test(value)) throw new UsageError('--concurrency takes a whole number from 1 to 99.');
         options.concurrency = Number(value);
+      } else if (arg === '--clock-offset-days') {
+        if (!/^[1-9][0-9]{0,3}$/.test(value)) throw new UsageError('--clock-offset-days takes a whole number of days from 1 to 9999.');
+        options.clockOffsetDays = Number(value);
       }
     } else if (arg === '--all') setMode('all');
     else if (arg === '--changed') setMode('changed');
+    else if (arg === '--clock-ahead') setMode('clock-ahead');
     else if (arg === '--plan') setMode('plan');
     else if (arg === '--help' || arg === '-h') setMode('help');
     else if (arg.startsWith('--')) throw new UsageError(`Unknown option ${arg}.`);
@@ -74,6 +90,8 @@ function parseArgs(argv) {
   if (!options.mode) options.mode = 'changed';
   if (options.mode === 'shard' && !options.os) throw new UsageError('--shard needs --os linux or --os windows.');
   if (options.os && options.mode !== 'shard') throw new UsageError('--os goes with --shard.');
+  if (options.clockOffsetDays !== null && !CLOCK_MODES.has(options.mode)) throw new UsageError('--clock-offset-days goes with --clock-ahead, --changed, --all or test files.');
+  if (options.mode === 'clock-ahead' && options.clockOffsetDays === null) options.clockOffsetDays = CLOCK_AHEAD_DAYS;
   return options;
 }
 
@@ -85,12 +103,17 @@ function tempRootError(root) {
   return null;
 }
 
+// The system clock that folder times use. A test that builds a TestRun inside a clock-ahead run has a
+// moved Date; with Date.now() the stale sweep would see every live run folder as a day old and remove it.
+const wallClock = () => Math.round(performance.timeOrigin + performance.now());
+
 // One test run: owns its temp folder (removed when the run finishes), the node --test child and the summary it reports.
 class TestRun {
-  constructor({ root, system, tempRoot, env = process.env, spawn = spawnSync, now = () => Date.now(), stdio = 'inherit', out = process.stdout, err = process.stderr }) {
+  constructor({ root, system, tempRoot, clockOffsetDays = null, env = process.env, spawn = spawnSync, now = wallClock, stdio = 'inherit', out = process.stdout, err = process.stderr }) {
     this.root = root;
     this.system = system;
     this.tempRoot = path.resolve(tempRoot);
+    this.clockOffsetDays = clockOffsetDays;
     this.env = env;
     this.spawn = spawn;
     this.now = now;
@@ -152,6 +175,12 @@ class TestRun {
     // Fixture repositories name origins that do not exist: governance never reads the network in a
     // test run (a credential helper asked about them leaves files in the run folder).
     env.TOOLKIT_GOVERNANCE_OFFLINE = '1';
+    if (this.clockOffsetDays !== null) {
+      // Inside NODE_OPTIONS quotes a backslash escapes the next character, so Windows paths double it.
+      const preload = CLOCK_PRELOAD.replace(/[\\"]/g, (char) => `\\${char}`);
+      env.NODE_OPTIONS = [this.env.NODE_OPTIONS, `--require "${preload}"`].filter(Boolean).join(' ');
+      env.TOOLKIT_TEST_CLOCK_OFFSET_DAYS = String(this.clockOffsetDays);
+    }
     return env;
   }
 
@@ -165,6 +194,7 @@ class TestRun {
     try {
       const results = path.join(this.folder, RESULTS_FILE);
       this.out.write(`Running ${files.length} test file(s) (${label}) in temp folder ${this.folder}, removed when the run finishes.\n`);
+      if (this.clockOffsetDays !== null) this.out.write(`Node's clock runs ${this.clockOffsetDays} days ahead in the test processes.\n`);
       const result = this.spawn(process.execPath, [
         '--test', `--test-concurrency=${concurrency}`,
         '--test-reporter=spec', '--test-reporter-destination=stdout',
@@ -174,6 +204,7 @@ class TestRun {
       if (result.error) throw result.error;
       exitCode = result.status === null ? 1 : result.status;
       summary = summarize(this.root, this.system, files, readResults(results), exitCode);
+      if (this.clockOffsetDays !== null) summary.clock_offset_days = this.clockOffsetDays;
       if (exitCode === 0 && summary.missing.length) exitCode = 1;
     } finally {
       if (!this.removeFolder() && exitCode === 0) exitCode = 1;
@@ -308,6 +339,13 @@ function selectFiles(root, options, out) {
     if (unknown.length) throw new UsageError(`Not a test file in repo/tests: ${unknown.join(', ')}`);
     return { files: [...new Set(files)], label: 'named files' };
   }
+  if (options.mode === 'clock-ahead') {
+    const files = shards.dateBoundTestFiles(discovered, (file) => {
+      try { return fs.readFileSync(path.join(root, file), 'utf8'); }
+      catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+    });
+    return { files, label: `test files that pin a date, clock ${options.clockOffsetDays} days ahead` };
+  }
   const affected = shards.affectedTestFiles(changedPaths(root, options.base), discovered, (file) => fs.readFileSync(path.join(root, file), 'utf8'));
   for (const item of affected) out.write(`  ${item.file} (${item.reason})\n`);
   return { files: affected.map((item) => item.file), label: `changed since ${options.base}` };
@@ -333,7 +371,7 @@ function main(argv = process.argv.slice(2), { root = shards.ROOT, out = process.
     const system = shards.platformSystem();
     const manifest = shards.loadManifest(root);
     const durations = (manifest.durations_seconds || {})[system] || {};
-    const testRun = new TestRun({ root, system, tempRoot: options.tempRoot || path.join(os.homedir(), 't'), out, err });
+    const testRun = new TestRun({ root, system, tempRoot: options.tempRoot || path.join(os.homedir(), 't'), clockOffsetDays: options.clockOffsetDays, out, err });
     const { exitCode, summary } = testRun.run(shards.runOrder(selection.files, durations), { concurrency: options.concurrency, label: selection.label });
     if (summary) {
       if (selection.shard) summary.shard = selection.shard;
@@ -360,4 +398,4 @@ function main(argv = process.argv.slice(2), { root = shards.ROOT, out = process.
 
 if (require.main === module) process.exitCode = main();
 
-module.exports = Object.freeze({ RUN_MARKER, TestRun, main, parseArgs, summarize, tempRootError });
+module.exports = Object.freeze({ CLOCK_AHEAD_DAYS, CLOCK_PRELOAD, RUN_MARKER, TestRun, main, parseArgs, summarize, tempRootError });

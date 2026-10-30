@@ -30,6 +30,10 @@ Use when tests or CI got slow, or when adding a test runner, test shards or CI t
 - One final job waits for every shard, runs even when one failed, and passes only when every shard succeeded and the shard summaries cover plain test discovery exactly once per system, with at least one test per file and no failure or cancellation. Make that job the required check.
 - A drift guard pins the exact test step text and matrix, and its own test shows it rejects narrowed paths, name filters, `if: false`, `; exit 0` or `|| true`, `continue-on-error`, matrix `include`/`exclude` edits and a runner that ignores its shard. Compare the whole workflow file with the pinned text, not job by job, because a YAML comment, a quoted key or a workflow-wide default can sit outside what a job parser sees. Leave only the gate command list free and allow only plain script commands in it, so a custom `shell:`, `set +e` or `|| echo` cannot hide a failing check. So that Dependabot action updates pass on their own, also accept a pinned `uses:` line whose action stays the same and whose only change is a new full commit SHA and version comment, and have the guard's tests find the pins in the live file rather than naming today's SHAs, so the update passes the tests too.
 
+## Dates And Clocks
+
+- A test that pins a calendar date passes that same clock to every call that reads the time, so it passes at any real date. Prove it in CI with a job that runs the tests that pin a date with the clock moved about a year ahead; the job never counts toward shard coverage, and the final job waits for it.
+
 ## Windows
 
 - Give each run its own long-form scratch temp folder inside the user profile for local runs, or under the CI runner's temp folder in CI (never at a drive root, never an 8.3 short name), set as `TEMP` and `TMP` for every child, and remove it when the run finishes, also on failure. Scratch must not outlive the run. Copy any report or evidence you need to its durable home first, then delete the folder; also clear folders an interrupted run left once they are more than a day old.
