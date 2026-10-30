@@ -109,7 +109,7 @@ test('the hook is for Claude Projects only: other tools, other servers and other
   // Only the Claude Code plugin registers it, on the Projects post tools and the merge commands; Codex hooks never name it.
   const claudeHooks = JSON.parse(fs.readFileSync(path.join(ROOT, '.claude-plugin', 'hooks', 'hooks.json'), 'utf8'));
   const entries = claudeHooks.hooks.PreToolUse.filter(entry => entry.hooks.some(hook => /toolkit-claude-project-post-hook/.test(hook.command)));
-  assert.deepEqual(entries.map(entry => entry.matcher), ['^(?:mcp__hearthbot__(?:post_message|edit_message)|Bash|PowerShell|mcp__.*merge_pull_request)$']);
+  assert.deepEqual(entries.map(entry => entry.matcher), ['^(?:mcp__hearthbot__(?:post_message|edit_message)|Bash|PowerShell|mcp__.*[Mm][Ee][Rr][Gg][Ee].*)$']);
   for (const other of ['.codex-plugin/hooks/hooks.json', 'repo/contracts/toolkit-local-bridge/codex-plugin/hooks/hooks.json']) {
     assert.doesNotMatch(fs.readFileSync(path.join(ROOT, other), 'utf8'), /project-post-hook/, other);
   }
@@ -903,4 +903,35 @@ test('the merge reader closure matrix for bash and PowerShell', () => {
       assert.ok(Date.now() - started < 1500, `${tool}: ${command.slice(0, 8)}`);
     }
   }
+});
+
+// Row 20 of the merge-connector invariants: every connector shape is read by the merge hold's own
+// reader, so a Codex-shaped merge (pr_number) needs a summary that names its PR like any other.
+test('a connector merge in any GitHub shape needs a summary naming its own PR', () => {
+  const hold = require('../scripts/toolkit-merge-hold.cjs');
+  const { MERGE_TOOL } = require('../scripts/toolkit-claude-project-post-hook.cjs');
+  assert.equal(MERGE_TOOL.source, hold.CONNECTOR_MERGE.source, 'the two hooks read the same merge tool names');
+  assert.equal(MERGE_TOOL.flags, hold.CONNECTOR_MERGE.flags);
+  const shapeC = { repository_full_name: 'o/r', pr_number: 292, expected_head_sha: '7384901397e63407783c60f6656499db9edf6b12' };
+  for (const [tool, input, number] of [
+    ['mcp__codex_apps__github__merge_pull_request', shapeC, '292'],
+    ['mcp__github__merge_pull_request', { owner: 'o', repo: 'r', pullNumber: 292 }, '292'],
+    ['mcp__github__merge_pull_request', { owner: 'o', repo: 'r', pull_number: '292' }, '292'],
+    ['mcp__1a59c906-04da-521d-bda7-7f71b9f9e01c__merge_pull_request', shapeC, '292'],
+    ['mcp__x__merge-pull-request', shapeC, '292'],
+    ['mcp__x__mergePullRequest', shapeC, '292'],
+    ['mcp__x__enable_pr_auto_merge', shapeC, '292'],
+    ['mcp__x__merge_pull_request', { ...shapeC, pullNumber: 293 }, null],
+    ['mcp__x__merge_pull_request', { ...shapeC, pr_number: '292abc' }, null],
+  ]) assert.deepEqual(mergeTargets(tool, input), [{ number }], `${tool} ${JSON.stringify(input)}`);
+  for (const tool of ['mcp__codex_apps__github__get_pull_request', 'mcp__x__pull_request_read', 'mcp__x__list_merge_requests']) assert.equal(mergeTargets(tool, shapeC), null, tool);
+  const merge = (entries, tool = 'mcp__codex_apps__github__merge_pull_request') => decide({ tool_name: tool, transcript_path: 't', tool_input: shapeC }, () => lines(entries));
+  assert.match(merge([wake(), call(POST, { text: 'External effects: a new hook.' })]), /external effects of PR 292/, 'a summary that names no PR no longer passes');
+  assert.match(merge([wake(), call(POST, { text: 'External effects of PR 291: none.' })]), /PR 292/);
+  assert.equal(merge([wake(), call(POST, { text: 'External effects of PR 292: none.' })]), '');
+  assert.equal(merge([wake(), call(POST, { text: 'External effects of PR 292: none.' })], 'mcp__1a59c906-04da-521d-bda7-7f71b9f9e01c__merge_pull_request'), '');
+  // The Claude Code hook file sends every spelling to this hook.
+  const entry = JSON.parse(fs.readFileSync(path.join(ROOT, '.claude-plugin', 'hooks', 'hooks.json'), 'utf8')).hooks.PreToolUse
+    .find(item => item.hooks.some(hook => hook.command.includes('toolkit-claude-project-post-hook.cjs')));
+  for (const tool of ['mcp__codex_apps__github__merge_pull_request', 'mcp__x__merge-pull-request', 'mcp__x__mergePullRequest', 'mcp__x__enable_pr_auto_merge']) assert.match(tool, new RegExp(entry.matcher), tool);
 });

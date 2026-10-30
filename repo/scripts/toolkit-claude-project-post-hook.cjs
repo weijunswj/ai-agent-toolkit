@@ -36,7 +36,7 @@
 //   for its posts from before that message. Each owner message counts once by its id, however often it is queued,
 //   delivered, cited or read in the chat.
 // - Merge summary: in a Projects session (one that has used the Projects tools), a PR merge (the gh merge command, a
-//   gh api PUT to .../pulls/<n>/merge or a merge_pull_request tool) is refused until a line of one of its own posts
+//   gh api PUT to .../pulls/<n>/merge or a connector merge tool, read as the merge hold reads it) is refused until a line of one of its own posts
 //   says "external effects" and names that PR; every merge in a command is checked. The command is read word by word
 //   with bash or PowerShell quoting rules (see shellSegments), so quotes, escapes and option values never hide or
 //   replace the PR, a redirection's stream number and target are never read as it, and a command it cannot finish
@@ -56,7 +56,9 @@ const SPAWN_RELAY = /^\s*<relay\b[^<>]*\breason=["']spawn["']/;
 const LATEST_TIME = String.fromCharCode(0xffff);
 const PROJECTS_TOOL = /^mcp__hearthbot__/;
 const SHELL_TOOL = /^(?:Bash|PowerShell)$/;
-const MERGE_TOOL = /^mcp__.*merge_pull_request$/i;
+// The same merge and auto-merge tool names the merge hold reads (its CONNECTOR_MERGE), kept here so
+// a post never loads the merge hold.
+const MERGE_TOOL = /^mcp__.+?[_-](?:merge[_-]?pull[_-]?request|enable[_-]?(?:pr[_-]?|pull[_-]?request[_-]?)?auto[_-]?merge)$/i;
 const NEAR_LIMIT_BYTES = 7000;
 const SHORT_POST_WORDS = 25;
 const MESSAGE_ID = /\b(cmsg_[A-Za-z0-9]+)\b/;
@@ -920,8 +922,10 @@ function apiMerge(args) {
 // the call merges no PR. Only a command at the start of a shell segment (after compound keywords) counts.
 function mergeTargets(tool, toolInput) {
   if (MERGE_TOOL.test(tool)) {
-    const number = String(toolInput?.pull_number ?? toolInput?.pullNumber ?? '');
-    return [{ number: /^\d+$/.test(number) ? number : null }];
+    // The merge hold's reader, so both hooks read the same pull request from every connector shape.
+    let pr = null;
+    try { pr = require('./toolkit-merge-hold.cjs').connectorMergeArgs(tool, toolInput).pr; } catch { pr = null; }
+    return [{ number: pr === null ? null : String(pr) }];
   }
   if (!SHELL_TOOL.test(tool)) return null;
   const command = textOf(toolInput?.command);
@@ -1019,4 +1023,4 @@ function main() {
 
 if (require.main === module) process.exitCode = main();
 
-module.exports = { decide, hasLink, wordingIssue, layoutIssue, editIssue, mergeTarget, mergeTargets, readTranscript, NEAR_LIMIT_BYTES };
+module.exports = { decide, hasLink, wordingIssue, layoutIssue, editIssue, mergeTarget, mergeTargets, readTranscript, MERGE_TOOL, NEAR_LIMIT_BYTES };
