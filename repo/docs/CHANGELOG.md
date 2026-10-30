@@ -1,5 +1,9 @@
 # Toolkit Changelog
 
+## 3.19.17 (a controller creates its gate chats without asking)
+
+- **Changed:** appointing a controller now counts as the owner's explicit request to create every gate session the controller procedure launches (G0, G1, G2, rechecks and their follow-ups) and to archive each once its evidence is stored and read back. A controller no longer asks before each one, including on hosts that create a chat only when the user asks (Codex `create_thread`, Claude Code desktop sessions). The controller procedure and the global rules' controller bullet both say so. A new model or route, spend and anything on the safety floor still need the owner.
+
 ## 3.19.14 (setup shows report-only rows as status lines)
 
 - **Changed:** a setup row that only reports state and takes no answer is no longer a numbered question. "Toolkit hooks in Codex" now shows under its section as an unnumbered line, for example "Status (nothing to answer): Toolkit hooks in Codex: Off: Shell and agent check, File edit check. Turn them on in Codex: open /hooks and turn on Shell and agent check and File edit check." The questions after it move up one number (Antigravity becomes 3.2 in the Codex table), and the table heading counts only the numbered questions.
