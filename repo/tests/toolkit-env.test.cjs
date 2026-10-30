@@ -13,7 +13,7 @@ const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
 const { FakeEnvStore } = require('./support/fake-env-store.cjs');
 const {
-  EnvEditSession, EnvManifest, EnvPaths, ToolkitEnv, ToolkitEnvCli, dumpsEnvironment, parseDotEnv,
+  AGENT_MARKERS, EnvEditSession, EnvManifest, EnvPaths, ToolkitEnv, ToolkitEnvCli, copyToClipboard, dumpsEnvironment, parseDotEnv,
 } = require('../scripts/toolkit-env.cjs');
 const { nameProblem } = require('../scripts/toolkit-env-store.cjs');
 const { ClaudeCodeFeeder, CodexFeeder, helperCommand } = require('../scripts/toolkit-env-feeders.cjs');
@@ -41,12 +41,19 @@ class Capture {
 
 function noPrivateDirectory(directory) { fs.mkdirSync(directory, { recursive: true }); }
 
-function harness(t, { values = {}, answers = [], hidden = [], feeders = [], corruptReadBack = [], opener } = {}) {
+// environment holds the agent markers a test sets (none by default, whatever runs the tests);
+// tty, typed and clipboard stand in for the terminal and the clipboard used by show.
+function harness(t, { values = {}, answers = [], hidden = [], typed = [], feeders = [], corruptReadBack = [], opener, environment = {}, tty = { stdin: true, stdout: true }, clipboard, scriptPath } = {}) {
   const home = tempHome(t);
   const paths = new EnvPaths({ homeDir: home, environment: {} });
   const store = new FakeEnvStore({ values, corruptReadBack });
   const asked = [];
   const env = new ToolkitEnv({
+    environment,
+    tty: () => tty,
+    askTerminal: async (question) => { asked.push(question); return typed.shift() ?? ''; },
+    clipboard: clipboard || (() => { throw new Error('the clipboard is not used in this test'); }),
+    ...(scriptPath ? { scriptPath } : {}),
     store,
     manifest: new EnvManifest({ file: paths.manifest }),
     editSession: new EnvEditSession({ directory: paths.editDir, opener: opener || (async () => true), privateDirectory: noPrivateDirectory }),
@@ -784,6 +791,12 @@ test('no-leak: a sentinel value never reaches output, errors, the record, backup
     ['remove', 'X1_TEST_SECOND_KEY'], ['header', 'X1_TEST_MISSING_KEY'], ['run', '--names', 'X1_TEST_COOLIFY_TOKEN', '--', 'env'],
     ['revoke', '--feeders'], ['retire-codex-env'], ['unknown-command'],
   ]) outputs.push(await h.run(...argv));
+  // show under an agent marker and through a pipe, even with the name retyped correctly.
+  for (const options of [{ environment: { CLAUDECODE: '1' } }, { tty: { stdin: false, stdout: false } }]) {
+    const refused = harness(t, { values: { X1_TEST_COOLIFY_TOKEN: value }, typed: ['X1_TEST_COOLIFY_TOKEN'], ...options });
+    outputs.push(await refused.run('show', 'X1_TEST_COOLIFY_TOKEN'), await refused.run('show', 'X1_TEST_COOLIFY_TOKEN', '--copy'));
+    assert.equal(refused.store.reads, 0);
+  }
   const header = await h.run('header', 'X1_TEST_COOLIFY_TOKEN');
   assert.match(header.stdout, new RegExp(value), 'header is the one command that prints the value');
   const everything = [
@@ -950,4 +963,292 @@ test('private folders and files work on Windows paths with non-ASCII characters'
   const acl = spawnSync(path.join(process.env.SystemRoot, 'System32', 'icacls.exe'), [folder], { encoding: 'utf8' }).stdout;
   assert.doesNotMatch(acl, /\(I\)|NT AUTHORITY|BUILTIN|Everyone/, acl);
   assert.equal(acl.split(/\r?\n/).filter((line) => /:\(/.test(line)).length, 1, acl);
+});
+
+// show: an agent must never be able to read a value through Toolkit.
+
+test('show refuses under every agent marker before the store is read', async (t) => {
+  for (const marker of AGENT_MARKERS) {
+    const value = sentinel();
+    const h = harness(t, { values: { X1_TEST_SHOW_KEY: value }, typed: ['X1_TEST_SHOW_KEY'], environment: { [marker]: '1' } });
+    const result = await h.run('show', 'X1_TEST_SHOW_KEY');
+    assert.equal(result.code, 1, marker);
+    assert.match(result.stderr, /only runs in a PowerShell window you opened yourself/, marker);
+    assert.match(result.stderr, /Open PowerShell and run: node ".*toolkit-env\.cjs" show X1_TEST_SHOW_KEY/, marker);
+    assert.equal(h.store.reads, 0, marker);
+    assert.equal(h.asked.length, 0, marker);
+    assert.doesNotMatch(result.stdout + result.stderr, new RegExp(value), marker);
+  }
+  const empty = harness(t, { values: { X1_TEST_SHOW_KEY: sentinel() }, environment: { CLAUDECODE: '' }, typed: ['X1_TEST_NOPE_KEY'] });
+  assert.match((await empty.run('show', 'X1_TEST_SHOW_KEY')).stdout, /^Not shown\.$/m, 'an empty marker is not a marker');
+});
+
+test('show needs a terminal on both ends and reads nothing from a pipe', async (t) => {
+  for (const tty of [{ stdin: false, stdout: true }, { stdin: true, stdout: false }, { stdin: false, stdout: false }]) {
+    const value = sentinel();
+    const h = harness(t, { values: { X1_TEST_SHOW_KEY: value }, typed: ['X1_TEST_SHOW_KEY'], tty });
+    const result = await h.run('show', 'X1_TEST_SHOW_KEY', '--copy');
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /show needs a terminal you type into/);
+    assert.equal(h.store.reads, 0);
+    assert.doesNotMatch(result.stdout + result.stderr, new RegExp(value));
+  }
+});
+
+test('the real show command refuses a pipe, and an agent shell, without touching the store', (t) => {
+  const home = tempHome(t);
+  const environment = Object.fromEntries(Object.entries(process.env).filter(([name]) => !AGENT_MARKERS.includes(name)));
+  Object.assign(environment, { USERPROFILE: home, HOME: home });
+  const piped = spawnSync(process.execPath, [SCRIPT, 'show', 'X1_TEST_SHOW_KEY'], { encoding: 'utf8', input: 'X1_TEST_SHOW_KEY\n', env: environment });
+  assert.equal(piped.status, 1, piped.stderr);
+  assert.match(piped.stderr, /show needs a terminal you type into/);
+  assert.equal(piped.stdout, '');
+  const agent = spawnSync(process.execPath, [SCRIPT, 'show', 'X1_TEST_SHOW_KEY'], { encoding: 'utf8', input: 'X1_TEST_SHOW_KEY\n', env: { ...environment, CLAUDECODE: '1' } });
+  assert.equal(agent.status, 1, agent.stderr);
+  assert.match(agent.stderr, /only runs in a PowerShell window you opened yourself/);
+  assert.equal(agent.stdout, '');
+  assert.equal(fs.existsSync(path.join(home, '.ai-agent-toolkit')), false, 'nothing is written');
+});
+
+test('show needs the exact name retyped, and a wrong retype reads nothing', async (t) => {
+  for (const answer of ['x1_test_show_key', 'X1_TEST_SHOW_KEY ', ' X1_TEST_SHOW_KEY', '', 'X1_TEST_OTHER_KEY']) {
+    const value = sentinel();
+    const h = harness(t, { values: { X1_TEST_SHOW_KEY: value }, typed: [answer] });
+    const result = await h.run('show', 'X1_TEST_SHOW_KEY');
+    assert.equal(result.code, 0);
+    assert.equal(result.stdout, 'Not shown.\n');
+    assert.equal(h.store.reads, 0, JSON.stringify(answer));
+    assert.deepEqual(h.asked, ['Type X1_TEST_SHOW_KEY again to show its value: ']);
+  }
+  const missing = harness(t, { values: {}, typed: ['X1_TEST_SHOW_KEY'] });
+  const result = await missing.run('show', 'X1_TEST_SHOW_KEY');
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /X1_TEST_SHOW_KEY is not in the Toolkit env store/);
+  assert.equal(missing.asked.length, 0);
+});
+
+test('show prints only the value on stdout and records nothing', async (t) => {
+  const value = sentinel();
+  const h = harness(t, { hidden: [value], typed: ['X1_TEST_SHOW_KEY'] });
+  await h.run('set', 'X1_TEST_SHOW_KEY');
+  const before = fs.readFileSync(h.paths.manifest);
+  const result = await h.run('show', 'X1_TEST_SHOW_KEY');
+  assert.equal(result.code, 0);
+  assert.equal(result.stdout, `${value}\n`);
+  assert.equal(result.stderr, 'Shown once. Clear the window when done (Clear-Host) and don\'t paste it into a chat.\n');
+  assert.ok(before.equals(fs.readFileSync(h.paths.manifest)), 'the record is unchanged');
+});
+
+test('show --copy puts the value on the clipboard and prints nothing to stdout', async (t) => {
+  const value = sentinel();
+  const copied = [];
+  const h = harness(t, { values: { X1_TEST_SHOW_KEY: value }, typed: ['X1_TEST_SHOW_KEY'], clipboard: (text) => { copied.push(text); return true; } });
+  const result = await h.run('show', 'X1_TEST_SHOW_KEY', '--copy');
+  assert.equal(result.code, 0);
+  assert.deepEqual(copied, [value]);
+  assert.equal(result.stdout, '');
+  assert.match(result.stderr, /^Copied X1_TEST_SHOW_KEY to the clipboard\. Windows clipboard history \(Win\+V\) and clipboard sync/);
+  assert.doesNotMatch(result.stderr, new RegExp(value));
+  const failing = harness(t, { values: { X1_TEST_SHOW_KEY: value }, typed: ['X1_TEST_SHOW_KEY'], clipboard: () => false });
+  const failed = await failing.run('show', 'X1_TEST_SHOW_KEY', '--copy');
+  assert.equal(failed.code, 1);
+  assert.match(failed.stderr, /could not be put on the clipboard/);
+  assert.equal(failed.stdout, '');
+  assert.doesNotMatch(failed.stderr, new RegExp(value));
+});
+
+test('the clipboard writer passes the value on stdin, never in its arguments', () => {
+  const value = sentinel();
+  const calls = [];
+  const fake = (command, args, options) => { calls.push({ command, args, options }); return { status: 0, stdout: 'ok' }; };
+  assert.equal(copyToClipboard(value, { platform: 'win32', environment: { SystemRoot: 'C:\\Windows' }, spawn: fake }), true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].command, 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe');
+  assert.doesNotMatch(calls[0].args.join(' '), new RegExp(value));
+  assert.doesNotMatch(calls[0].args.join(' '), new RegExp(Buffer.from(value, 'utf8').toString('base64')));
+  assert.equal(calls[0].options.input, Buffer.from(value, 'utf8').toString('base64'));
+  const script = Buffer.from(calls[0].args.at(-1), 'base64').toString('utf16le');
+  assert.match(script, /ExcludeClipboardContentFromMonitorProcessing/);
+  assert.equal(copyToClipboard(value, { platform: 'win32', environment: {}, spawn: () => ({ status: 3, stdout: '' }) }), false);
+  assert.equal(copyToClipboard(value, { platform: 'linux', environment: {}, spawn: fake }), false);
+  assert.equal(calls.length, 1, 'nothing runs on a computer Toolkit does not support');
+});
+
+test('show takes exactly one name: no show-all, no extra names', async (t) => {
+  for (const argv of [['show'], ['show', 'X1_TEST_SHOW_KEY', 'X1_TEST_OTHER_KEY'], ['show', '--all'], ['show', '--copy']]) {
+    const value = sentinel();
+    const h = harness(t, { values: { X1_TEST_SHOW_KEY: value, X1_TEST_OTHER_KEY: sentinel() }, typed: ['X1_TEST_SHOW_KEY'] });
+    const result = await h.run(...argv);
+    assert.equal(result.code, 1, argv.join(' '));
+    assert.equal(h.store.reads, 0, argv.join(' '));
+    assert.equal(result.stdout, '');
+    assert.doesNotMatch(result.stderr, new RegExp(value));
+  }
+});
+
+test('the toolkit-env skill tells agents never to run show', () => {
+  const text = fs.readFileSync(path.join(ROOT, 'skills', 'toolkit-env', 'SKILL.md'), 'utf8');
+  const rules = text.slice(text.indexOf('## Rules'), text.indexOf('## After a change'));
+  assert.match(rules, /Never run `show`/);
+  assert.match(rules, /never ask the user to paste what it printed/);
+  assert.match(text, /\| see a key's value .*`show NAME`/);
+});
+
+// Commands named in messages: short names for agents, full PowerShell lines for people.
+
+test('commandLine names the command for an agent or as a PowerShell line for a person', (t) => {
+  const inHome = harness(t, {});
+  const managed = path.join(inHome.home, '.ai-agent-toolkit', 'source', 'ai-agent-toolkit', 'repo', 'scripts', 'toolkit-env.cjs');
+  const person = harness(t, { scriptPath: managed });
+  const managedHome = path.relative(person.home, managed);
+  assert.ok(managedHome.startsWith('..'), 'each harness has its own home');
+  const local = new ToolkitEnv({ environment: {}, scriptPath: path.join(inHome.home, '.ai-agent-toolkit', 'source', 'ai-agent-toolkit', 'repo', 'scripts', 'toolkit-env.cjs'), paths: inHome.paths });
+  assert.equal(local.commandLine('apply'), `node "$env:USERPROFILE\\${['.ai-agent-toolkit', 'source', 'ai-agent-toolkit', 'repo', 'scripts', 'toolkit-env.cjs'].join('\\')}" apply`);
+  assert.equal(person.env.commandLine('apply'), `node "${managed}" apply`, 'outside the home folder: the absolute path, quoted');
+  assert.equal(inHome.env.commandLine('status'), `node "${SCRIPT}" status`);
+  for (const marker of AGENT_MARKERS) {
+    const agent = new ToolkitEnv({ environment: { [marker]: '1' }, scriptPath: managed, paths: inHome.paths });
+    assert.equal(agent.commandLine('apply'), 'toolkit env apply', marker);
+  }
+  for (const line of [local.commandLine('apply'), person.env.commandLine('remove NAME')]) assert.doesNotMatch(line, /%USERPROFILE%/);
+});
+
+test('edit tells a person the PowerShell line to apply, and an agent to say done', async (t) => {
+  const person = harness(t, { values: { X1_TEST_KEPT_KEY: sentinel() } });
+  const opened = await person.run('edit');
+  assert.match(opened.stdout, /Then run: node ".*toolkit-env\.cjs" apply$/m);
+  assert.doesNotMatch(opened.stdout, /say "done"|toolkit env apply/);
+  const header = fs.readFileSync(editFile(person.paths), 'utf8');
+  assert.match(header, /^# Save and close this file\. Then tell your agent "done", or in PowerShell run: node ".*toolkit-env\.cjs" apply\r?$/m);
+  assert.match(header, /^# To remove a key, use: node ".*toolkit-env\.cjs" remove NAME\r?$/m);
+  assert.doesNotMatch(header, /toolkit env (apply|remove)/);
+  const agent = harness(t, { values: { X1_TEST_KEPT_KEY: sentinel() }, environment: { CLAUDECODE: '1' } });
+  const asked = await agent.run('edit');
+  assert.match(asked.stdout, /Then say "done" \(or run toolkit env apply\)\./);
+  assert.match(fs.readFileSync(editFile(agent.paths), 'utf8'), /in PowerShell run: node ".*toolkit-env\.cjs" apply/, 'the file is read by the person either way');
+  const none = harness(t, {});
+  assert.match((await none.run('apply')).stdout, /There is no open edit\. Say "edit my env" to your agent, or run node ".*toolkit-env\.cjs" edit first\./);
+  const unknown = await none.run('nope');
+  assert.match(unknown.stderr, /That is not a toolkit env command\. Run node ".*toolkit-env\.cjs" help for help\./);
+});
+
+test('apply never adopts the header of this or an earlier version as a comment', async (t) => {
+  const oldHeader = [
+    '# Toolkit env: your keys. Values are never shown here.',
+    '# To change a key, replace <unchanged> with the new value (no quotes).',
+    '# To add a key, add a line NAME=value. Names look like PROVIDER_SOLUTION_PURPOSE.',
+    '# Leaving <unchanged>, a blank value or a deleted line changes nothing.',
+    '# To remove a key, use: toolkit env remove NAME',
+    '# Your own # comment and section lines are kept (never put a key or token in one).',
+    '# Save and close this file, then tell your agent "done" (or run: toolkit env apply).',
+  ];
+  const fresh = harness(t, { values: { X1_TEST_KEPT_KEY: sentinel() } });
+  await fresh.run('edit');
+  const file = editFile(fresh.paths);
+  fs.appendFileSync(file, '# my own note\n');
+  assert.equal((await fresh.run('apply')).code, 0);
+  assert.deepEqual(JSON.parse(fs.readFileSync(fresh.paths.manifest, 'utf8')).layout, ['X1_TEST_KEPT_KEY', '# my own note']);
+  const old = harness(t, { values: { X1_TEST_KEPT_KEY: sentinel() } });
+  await old.run('edit');
+  fs.writeFileSync(editFile(old.paths), `${[...oldHeader, '# my own note', 'X1_TEST_KEPT_KEY=<unchanged>'].join('\r\n')}\r\n`);
+  const applied = await old.run('apply');
+  assert.equal(applied.code, 0, applied.stderr);
+  assert.deepEqual(JSON.parse(fs.readFileSync(old.paths.manifest, 'utf8')).layout, ['# my own note', 'X1_TEST_KEPT_KEY']);
+});
+
+// apply: the cases a person can type in Notepad.
+
+test('apply saves values containing = exactly', async (t) => {
+  const { run, paths, store } = harness(t, { values: { X1_TEST_KEPT_KEY: sentinel() } });
+  await run('edit');
+  const based = `${crypto.randomBytes(10).toString('base64')}==`;
+  const url = `https://api.example.test/v1?a=${sentinel()}&c=d`;
+  const leading = `=${sentinel()}`;
+  fs.appendFileSync(editFile(paths), `X1_TEST_BASE_KEY=${based}\nX1_TEST_URL_KEY=${url}\nX1_TEST_LEAD_KEY=${leading}\n`);
+  const applied = await run('apply');
+  assert.equal(applied.code, 0, applied.stderr);
+  assert.equal(store.peek('X1_TEST_BASE_KEY'), based);
+  assert.equal(store.peek('X1_TEST_URL_KEY'), url);
+  assert.equal(store.peek('X1_TEST_LEAD_KEY'), leading);
+});
+
+test('apply refuses a value typed in quotes, by line number only', async (t) => {
+  const { run, paths, store } = harness(t, { values: { X1_TEST_KEPT_KEY: sentinel() } });
+  await run('edit');
+  const double = sentinel();
+  const single = sentinel();
+  const inner = `a"${sentinel()}"b`;
+  fs.appendFileSync(editFile(paths), `X1_TEST_DOUBLE_KEY="${double}"\nX1_TEST_SINGLE_KEY='${single}'\nX1_TEST_INNER_KEY=${inner}\n`);
+  const result = await run('apply');
+  assert.equal(result.code, 1);
+  assert.equal((result.stderr.match(/remove the quotes around the value/g) || []).length, 2);
+  for (const secret of [double, single, inner]) assert.doesNotMatch(result.stdout + result.stderr, new RegExp(secret.replace(/"/g, '\\"')));
+  assert.equal(store.peek('X1_TEST_DOUBLE_KEY'), undefined);
+  assert.equal(store.peek('X1_TEST_INNER_KEY'), undefined, 'nothing is saved when any line is wrong');
+});
+
+test('apply saves the value right after a byte order mark, and trims spaces around values', async (t) => {
+  const { run, paths, store } = harness(t, { values: {} });
+  await run('edit');
+  const value = sentinel();
+  const spaced = sentinel();
+  fs.writeFileSync(editFile(paths), `\uFEFFX1_TEST_BOM_KEY=${value}\r\nX1_TEST_SPACE_KEY =   ${spaced}   \r\n`);
+  const applied = await run('apply');
+  assert.equal(applied.code, 0, applied.stderr);
+  assert.deepEqual(store.list(), ['X1_TEST_BOM_KEY', 'X1_TEST_SPACE_KEY']);
+  assert.equal(store.peek('X1_TEST_BOM_KEY'), value);
+  assert.equal(store.peek('X1_TEST_SPACE_KEY'), spaced);
+  await run('edit');
+  assert.match(fs.readFileSync(editFile(paths), 'utf8'), /no quotes; spaces at either end are dropped/);
+});
+
+test('apply overwrites the edit file with zeros before deleting it', async (t) => {
+  const { run, paths } = harness(t, { values: { X1_TEST_KEPT_KEY: sentinel() } });
+  await run('edit');
+  const file = editFile(paths);
+  fs.appendFileSync(file, `X1_TEST_ADDED_KEY=${sentinel()}\n`);
+  const size = fs.statSync(file).size;
+  const writes = [];
+  const original = fs.writeFileSync;
+  fs.writeFileSync = function spy(target, data, ...rest) {
+    if (target === file) writes.push(Buffer.from(data));
+    return original.call(this, target, data, ...rest);
+  };
+  try { assert.equal((await run('apply')).code, 0); }
+  finally { fs.writeFileSync = original; }
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].length, size);
+  assert.ok(writes[0].every((byte) => byte === 0));
+  assert.equal(fs.existsSync(file), false);
+});
+
+test('apply refuses while two edit files are open and saves nothing', async (t) => {
+  const { run, paths, store } = harness(t, { values: { X1_TEST_KEPT_KEY: sentinel() } });
+  await run('edit');
+  const value = sentinel();
+  fs.appendFileSync(editFile(paths), `X1_TEST_ADDED_KEY=${value}\n`);
+  fs.writeFileSync(path.join(paths.editDir, 'env-edit-second-000000.txt'), `X1_TEST_OTHER_KEY=${sentinel()}\n`);
+  const result = await run('apply');
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /More than one edit file is open, so nothing was saved\. Close Notepad and wait 30 minutes/);
+  assert.doesNotMatch(result.stderr, /for each/);
+  assert.equal(store.peek('X1_TEST_ADDED_KEY'), undefined);
+  assert.equal(store.peek('X1_TEST_OTHER_KEY'), undefined);
+});
+
+test('apply says plainly when the edit file was saved as UTF-16', async (t) => {
+  const { run, paths, store } = harness(t, { values: { X1_TEST_KEPT_KEY: sentinel() } });
+  await run('edit');
+  const file = editFile(paths);
+  const value = sentinel();
+  for (const bom of [Buffer.from([0xff, 0xfe]), Buffer.from([0xfe, 0xff])]) {
+    const body = Buffer.from(`X1_TEST_ADDED_KEY=${value}\r\n`, 'utf16le');
+    fs.writeFileSync(file, Buffer.concat([bom, bom[0] === 0xfe ? body.swap16() : body]));
+    const result = await run('apply');
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /the file is saved as UTF-16; in Notepad use File > Save as with Encoding UTF-8/);
+    assert.doesNotMatch(result.stderr, /is not NAME=value/);
+    assert.equal(store.peek('X1_TEST_ADDED_KEY'), undefined);
+    assert.ok(fs.existsSync(file));
+  }
 });

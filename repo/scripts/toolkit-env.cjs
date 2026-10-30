@@ -3,7 +3,8 @@
 
 // `toolkit env`: one place for the API keys and tokens your coding apps use, kept in this
 // computer's own credential store (see toolkit-env-store.cjs), never in a plain file, a chat or
-// a log. Shown to people as `toolkit env <command>`; run as
+// a log. Shown to agents as `toolkit env <command>` and to people as the full PowerShell line
+// (commandLine); run as
 //   node <Toolkit checkout>/repo/scripts/toolkit-env.cjs <command>
 //
 //   status                     key names, which apps use them, present or missing (never values)
@@ -11,6 +12,7 @@
 //   apply                      save what you typed in that file, delete it, refresh the apps
 //   set NAME                   save one value from a hidden prompt (or stdin)
 //   remove NAME                remove one key, after a yes/no that names it
+//   show NAME [--copy]         show one value (or copy it) in the owner's own terminal, never an agent's
 //   header NAME                print the {"Authorization":"Bearer <value>"} header an app asks for
 //   run --names A,B -- CMD     run CMD with only those keys added to its environment
 //   connect SERVER --name NAME point an MCP entry in Claude Code and Codex at the store
@@ -19,7 +21,8 @@
 //   retire-codex-env           move ~/.codex/.env into a private backup once nothing needs it
 //
 // Values exist only in the store, in the edit file while it is open, on the stdout of `header`,
-// and in the environment of the program `run` starts.
+// in the environment of the program `run` starts, and in the owner's own terminal or clipboard
+// after `show`.
 
 const crypto = require('node:crypto');
 const fs = require('node:fs');
@@ -43,6 +46,22 @@ const MAX_COMMENT_CHARS = 200;
 const SCHEMES = new Set(['Bearer', 'none']);
 const DUMP_COMMANDS = new Set(['env', 'printenv', 'set', 'export', 'declare', 'typeset', 'compgen']);
 const SHELLS = new Set(['cmd', 'powershell', 'pwsh', 'bash', 'sh', 'zsh', 'dash', 'fish']);
+// Set (non-empty) in shells that a coding agent starts. Exact names only: a whole prefix such as
+// CODEX_ or CLAUDE_ would also match CODEX_HOME or CLAUDE_CONFIG_DIR in the owner's own profile.
+const AGENT_MARKERS = Object.freeze([
+  'CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'AI_AGENT',
+  'CODEX_THREAD_ID', 'CODEX_CI', 'CODEX_SANDBOX', 'CODEX_SANDBOX_NETWORK_DISABLED',
+]);
+
+function agentContext(environment) { return AGENT_MARKERS.some((name) => Boolean(environment[name])); }
+
+// The PowerShell line a person pastes to run this script: $env:USERPROFILE\... when the script is
+// under the home folder, else its absolute path. Never %USERPROFILE%, which PowerShell leaves as is.
+function personCommand(scriptPath, home, sub) {
+  const relative = path.relative(home, scriptPath);
+  const where = relative && !relative.startsWith('..') && !path.isAbsolute(relative) ? `$env:USERPROFILE\\${relative.replace(/\//g, '\\')}` : scriptPath;
+  return `node "${where}" ${sub}`;
+}
 
 class EnvError extends Error {
   constructor(message) { super(message); this.code = 'env-stopped'; }
@@ -116,6 +135,37 @@ function restrictToCurrentUser(target, folder, { platform = process.platform, en
   const powershell = path.win32.join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
   const result = run(powershell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(WINDOWS_PRIVATE_SCRIPT, 'utf16le').toString('base64')], {
     input: JSON.stringify({ path: Buffer.from(target, 'utf8').toString('base64'), folder }), encoding: 'utf8', windowsHide: true, timeout: 30000,
+  });
+  return !result.error && result.status === 0 && result.stdout === 'ok';
+}
+
+// Puts text on the Windows clipboard, marked so clipboard history and cloud sync skip it where
+// Windows honours the marks (best effort). The text arrives base64-encoded on stdin, never in argv.
+const WINDOWS_CLIPBOARD_SCRIPT = String.raw`
+$env:PSModulePath = [System.IO.Path]::Combine($PSHOME, 'Modules')
+$ErrorActionPreference = 'Stop'
+try {
+  Add-Type -AssemblyName System.Windows.Forms
+  $text = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([Console]::In.ReadToEnd().Trim()))
+  $data = [System.Windows.Forms.DataObject]::new()
+  $data.SetData([System.Windows.Forms.DataFormats]::UnicodeText, $text)
+  $data.SetData('ExcludeClipboardContentFromMonitorProcessing', [System.IO.MemoryStream]::new([byte[]]@(0)))
+  $data.SetData('CanIncludeInClipboardHistory', [System.IO.MemoryStream]::new([byte[]]@(0, 0, 0, 0)))
+  $data.SetData('CanUploadToCloudClipboard', [System.IO.MemoryStream]::new([byte[]]@(0, 0, 0, 0)))
+  [System.Windows.Forms.Clipboard]::SetDataObject($data, $true)
+  [Console]::Out.Write('ok')
+} catch {
+  exit 3
+}
+`;
+
+// Returns false when the clipboard could not be set.
+function copyToClipboard(text, { platform = process.platform, environment = process.env, spawn: run = spawnSync } = {}) {
+  if (platform !== 'win32') return false;
+  const root = environment.SystemRoot || environment.SYSTEMROOT || 'C:\\Windows';
+  const powershell = path.win32.join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+  const result = run(powershell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Sta', '-EncodedCommand', Buffer.from(WINDOWS_CLIPBOARD_SCRIPT, 'utf16le').toString('base64')], {
+    input: Buffer.from(text, 'utf8').toString('base64'), encoding: 'utf8', windowsHide: true, timeout: 30000,
   });
   return !result.error && result.status === 0 && result.stdout === 'ok';
 }
@@ -243,14 +293,14 @@ function checkedLayout(layout) {
 }
 
 // The names-only layout of env-file lines: comment lines, key names and single blank lines, in
-// order. Values are never kept. Lines in `skip` (the edit file's own header) are left out.
+// order. Values are never kept. Lines `skip` matches (the edit file's own header) are left out.
 // Returns { layout, refused: [line numbers of comments that look like a secret or are too long] }.
-function layoutOf(lines, { skip = new Set() } = {}) {
+function layoutOf(lines, { skip = () => false } = {}) {
   const layout = [];
   const refused = [];
   lines.forEach((line, index) => {
     const text = line.trim();
-    if (skip.has(text)) return;
+    if (skip(text)) return;
     if (!text) { if (layout.length && layout.at(-1) !== '') layout.push(''); return; }
     if (text.startsWith('#')) {
       if (text.length > MAX_COMMENT_CHARS || secretLikeComment(text)) refused.push(index + 1);
@@ -305,15 +355,32 @@ function defaultOpener(file, platform = process.platform) {
   });
 }
 
-const EDIT_HEADER = [
-  '# Toolkit env: your keys. Values are never shown here.',
-  '# To change a key, replace <unchanged> with the new value (no quotes).',
-  '# To add a key, add a line NAME=value. Names look like PROVIDER_SOLUTION_PURPOSE.',
+// The edit file's header, for the person reading it in Notepad. `command(sub)` gives the full line
+// to run. Its lines are matched by these fixed beginnings, so the header of a file made by an
+// earlier Toolkit version (or for another script path) is never adopted as the user's comment.
+const EDIT_HEADER_STARTS = Object.freeze([
+  '# Toolkit env: your keys.',
+  '# To change a key, replace <unchanged> with the new value',
+  '# To add a key, add a line NAME=value.',
   '# Leaving <unchanged>, a blank value or a deleted line changes nothing.',
-  '# To remove a key, use: toolkit env remove NAME',
-  '# Your own # comment and section lines are kept (never put a key or token in one).',
-  '# Save and close this file, then tell your agent "done" (or run: toolkit env apply).',
-];
+  '# To remove a key, use:',
+  '# Your own # comment and section lines are kept',
+  '# Save and close this file',
+]);
+
+function editHeader(command) {
+  return [
+    '# Toolkit env: your keys. Values are never shown here.',
+    '# To change a key, replace <unchanged> with the new value (no quotes; spaces at either end are dropped).',
+    '# To add a key, add a line NAME=value. Names look like PROVIDER_SOLUTION_PURPOSE.',
+    '# Leaving <unchanged>, a blank value or a deleted line changes nothing.',
+    `# To remove a key, use: ${command('remove NAME')}`,
+    '# Your own # comment and section lines are kept (never put a key or token in one).',
+    `# Save and close this file. Then tell your agent "done", or in PowerShell run: ${command('apply')}`,
+  ];
+}
+
+function isHeaderLine(text) { return EDIT_HEADER_STARTS.some((start) => text.startsWith(start)); }
 
 // The private edit file: create, open, read back, delete. One edit at a time; a file not saved
 // for 30 minutes is deleted by the next toolkit env command.
@@ -346,17 +413,17 @@ class EnvEditSession {
 
   current() {
     const files = this.#files();
-    if (files.length > 1) throw new EnvError('More than one edit file is open. Close Notepad, then run toolkit env apply for each, or wait 30 minutes and they are deleted.');
+    if (files.length > 1) throw new EnvError('More than one edit file is open, so nothing was saved. Close Notepad and wait 30 minutes: the old files are then deleted, with nothing in them saved. Then edit again.');
     return files[0]?.file || null;
   }
 
-  async open(names, { launch = true, layout = [] } = {}) {
+  async open(names, { launch = true, layout = [], header = [] } = {}) {
     let file = this.current();
     const reused = Boolean(file);
     if (!file) {
       this.#privateDirectory(this.#directory);
       file = path.join(this.#directory, `env-edit-${stamp(this.#now())}-${crypto.randomBytes(3).toString('hex')}.txt`);
-      fs.writeFileSync(file, `${[...EDIT_HEADER, ...editBody(names, layout)].join(os.EOL)}${os.EOL}`, { mode: 0o600, flag: 'wx' });
+      fs.writeFileSync(file, `${[...header, ...editBody(names, layout)].join(os.EOL)}${os.EOL}`, { mode: 0o600, flag: 'wx' });
     }
     const opened = launch ? await this.#opener(file) : false;
     return { file, reused, opened };
@@ -367,8 +434,13 @@ class EnvEditSession {
     const values = new Map();
     const problems = [];
     let blank = 0;
-    const lines = fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '').split(/\r?\n/);
-    const { layout, refused } = layoutOf(lines, { skip: new Set(EDIT_HEADER) });
+    const bytes = fs.readFileSync(file);
+    // Notepad's "UTF-16 LE/BE" encodings: every line would look wrong, so say what is wrong instead.
+    if (bytes.length >= 2 && ((bytes[0] === 0xff && bytes[1] === 0xfe) || (bytes[0] === 0xfe && bytes[1] === 0xff))) {
+      return { values, problems: ['the file is saved as UTF-16; in Notepad use File > Save as with Encoding UTF-8, then apply again'], blank, layout: [] };
+    }
+    const lines = bytes.toString('utf8').replace(/^\uFEFF/, '').split(/\r?\n/);
+    const { layout, refused } = layoutOf(lines, { skip: isHeaderLine });
     for (const line of refused) problems.push(`line ${line}: this comment looks like it may hold a key or token (or is over ${MAX_COMMENT_CHARS} characters); remove or reword it`);
     lines.forEach((line, index) => {
       const text = line.trim();
@@ -383,6 +455,8 @@ class EnvEditSession {
       if (values.has(name)) { problems.push(`line ${index + 1}: the key name appears more than once`); return; }
       if (value === UNCHANGED) return;
       if (value === '' || value === '<remove>') { blank += 1; return; }
+      // Quotes would be saved as part of the value; the header says to type it without them.
+      if (value.length >= 2 && (value[0] === '"' || value[0] === "'") && value.at(-1) === value[0]) { problems.push(`line ${index + 1}: remove the quotes around the value`); return; }
       if (Buffer.byteLength(value, 'utf8') > MAX_VALUE_BYTES) { problems.push(`line ${index + 1}: value too long (max ${MAX_VALUE_BYTES} bytes)`); return; }
       values.set(name, value);
     });
@@ -433,10 +507,16 @@ function listNames(names) { return names.length ? names.join(', ') : 'none'; }
 // The commands. Each returns { code, out: [lines], err: [lines] }; `header` and `run` write
 // directly. Every value-free message is safe to show; values never reach out or err.
 class ToolkitEnv {
-  #store; #manifest; #edit; #feeders; #paths; #ask; #askHidden; #commandFor; #platform; #spawnChild; #now;
+  #store; #manifest; #edit; #feeders; #paths; #ask; #askHidden; #askTerminal; #commandFor; #platform; #spawnChild; #now;
+  #environment; #scriptPath; #tty; #clipboard;
 
   // commandFor(binding) is the helper command an MCP entry runs; it is recorded with each connection.
-  constructor({ store, manifest, editSession, feeders, paths, ask, askHidden, commandFor, platform = process.platform, spawnChild = spawn, now = () => new Date() }) {
+  // scriptPath is the script people are told to run. askTerminal reads one visible line from a
+  // terminal only, tty() says whether stdin and stdout are terminals, and clipboard(text) copies.
+  constructor({
+    store, manifest, editSession, feeders, paths, ask, askHidden, askTerminal, commandFor, platform = process.platform, spawnChild = spawn, now = () => new Date(),
+    environment = process.env, scriptPath = __filename, tty = () => ({ stdin: Boolean(process.stdin.isTTY), stdout: Boolean(process.stdout.isTTY) }), clipboard = copyToClipboard,
+  }) {
     this.#store = store;
     this.#manifest = manifest;
     this.#edit = editSession;
@@ -444,24 +524,42 @@ class ToolkitEnv {
     this.#paths = paths;
     this.#ask = ask;
     this.#askHidden = askHidden;
+    this.#askTerminal = askTerminal;
     this.#commandFor = commandFor;
     this.#platform = platform;
     this.#spawnChild = spawnChild;
     this.#now = now;
+    this.#environment = environment;
+    this.#scriptPath = scriptPath;
+    this.#tty = tty;
+    this.#clipboard = clipboard;
   }
+
+  // How to name a command in a message: `toolkit env <sub>` for an agent (which runs the script
+  // itself), the full PowerShell line for a person in their own terminal.
+  commandLine(sub) {
+    return agentContext(this.#environment) ? `toolkit env ${sub}` : this.#personCommand(sub);
+  }
+
+  #personCommand(sub) { return personCommand(this.#scriptPath, this.#paths.home, sub); }
 
   // The real wiring for this user. The helper command always names the managed Toolkit checkout
   // (it survives updates), falling back to this copy only when no managed checkout is recorded.
   // The home folder comes from the given environment, so a test environment never reads real files.
-  static forUser({ environment = process.env, homeDir = (process.platform === 'win32' ? environment.USERPROFILE : environment.HOME) || os.homedir(), toolkitRoot, ask, askHidden, platform = process.platform } = {}) {
+  static forUser({ environment = process.env, homeDir = (process.platform === 'win32' ? environment.USERPROFILE : environment.HOME) || os.homedir(), toolkitRoot, ask, askHidden, askTerminal, platform = process.platform } = {}) {
     const paths = new EnvPaths({ homeDir, environment });
     let root = toolkitRoot;
     if (!root) {
       try { root = JSON.parse(fs.readFileSync(paths.hubState, 'utf8')).repo_path || ''; } catch {}
       if (!root || !fs.existsSync(path.join(root, 'repo', 'scripts', 'toolkit-env.cjs'))) root = path.resolve(__dirname, '..', '..');
     }
-    const commandFor = (binding) => helperCommand({ nodePath: process.execPath, scriptPath: path.join(root, 'repo', 'scripts', 'toolkit-env.cjs'), name: binding.name, header: binding.header, scheme: binding.scheme });
+    const scriptPath = path.join(root, 'repo', 'scripts', 'toolkit-env.cjs');
+    const commandFor = (binding) => helperCommand({ nodePath: process.execPath, scriptPath, name: binding.name, header: binding.header, scheme: binding.scheme });
     return new ToolkitEnv({
+      environment,
+      scriptPath,
+      askTerminal,
+      clipboard: (text) => copyToClipboard(text, { platform, environment }),
       store: new PlatformStore({ platform }),
       manifest: new EnvManifest({ file: paths.manifest }),
       editSession: new EnvEditSession({ directory: paths.editDir }),
@@ -492,7 +590,7 @@ class ToolkitEnv {
       const results = feeder.status(bindings);
       const off = results.filter((result) => result.state !== STATES.CURRENT);
       if (!off.length) lines.push(`${feeder.label}: current (${listNames(bindings.map((binding) => binding.server))}).`);
-      else lines.push(`${feeder.label}: ${off.map((result) => `${result.binding.server} ${result.state}`).join(', ')}. Run toolkit env connect ${off[0].binding.server} --name ${off[0].binding.name} to fix it.`);
+      else lines.push(`${feeder.label}: ${off.map((result) => `${result.binding.server} ${result.state}`).join(', ')}. Run ${this.commandLine(`connect ${off[0].binding.server} --name ${off[0].binding.name}`)} to fix it.`);
     }
     lines.push(`${OPENCODE_SLOT.label}: not supported yet.`);
     return lines;
@@ -505,7 +603,7 @@ class ToolkitEnv {
     const stored = this.#store.list();
     const names = [...new Set([...stored, ...Object.keys(record.names), ...record.bindings.map((binding) => binding.name)])].sort();
     out.push(`Toolkit env store: ${this.#store.backend}`);
-    out.push(names.length ? `${names.length} key${names.length === 1 ? '' : 's'}:` : 'No keys yet. Say "edit my env" or run toolkit env edit to add some.');
+    out.push(names.length ? `${names.length} key${names.length === 1 ? '' : 's'}:` : `No keys yet. Say "edit my env" to your agent, or run ${this.commandLine('edit')} to add some.`);
     for (const name of names) {
       const users = record.bindings.filter((binding) => binding.name === name)
         .map((binding) => `${this.#feeder(binding.harness)?.label || binding.harness} (${binding.server})`);
@@ -520,12 +618,13 @@ class ToolkitEnv {
     const out = [];
     this.#sweep(out);
     const names = this.#store.list();
-    const session = await this.#edit.open(names, { launch, layout: this.#manifest.read().layout });
+    const header = editHeader((sub) => this.#personCommand(sub));
+    const session = await this.#edit.open(names, { launch, layout: this.#manifest.read().layout, header });
     const where = this.#paths.show(session.file);
     if (!launch) out.push(`Edit file: ${session.file}`);
     else if (session.opened) out.push(`${session.reused ? 'Reopened' : 'Opened'} ${where} with your ${names.length} key${names.length === 1 ? '' : 's'}.`);
     else out.push(`Could not open an editor. Open this file yourself: ${session.file}`);
-    out.push('Type new values over <unchanged>, add NAME=value lines for new keys, then save and close it. Then say "done" (or run toolkit env apply).');
+    out.push(`Type new values over <unchanged>, add NAME=value lines for new keys, then save and close it. ${agentContext(this.#environment) ? 'Then say "done" (or run toolkit env apply).' : `Then run: ${this.commandLine('apply')}`}`);
     return { code: 0, out, err: [] };
   }
 
@@ -533,7 +632,7 @@ class ToolkitEnv {
     const out = [];
     this.#sweep(out);
     const file = this.#edit.current();
-    if (!file) return { code: 0, out: [...out, 'There is no open edit. Say "edit my env" (or run toolkit env edit) first.'], err: [] };
+    if (!file) return { code: 0, out: [...out, `There is no open edit. Say "edit my env" to your agent, or run ${this.commandLine('edit')} first.`], err: [] };
     const { values, problems, blank, layout } = this.#edit.read(file);
     if (problems.length) {
       return { code: 1, out, err: ['Nothing was saved. Fix these lines in the edit file, save it, then apply again:', ...problems.map((problem) => `  ${problem}`), `Edit file: ${file}`] };
@@ -544,7 +643,7 @@ class ToolkitEnv {
     if (!result.changed.length && !result.added.length) out.push('No changes.');
     if (result.changed.length) out.push(`changed: ${result.changed.join(', ')}`);
     if (result.added.length) out.push(`added: ${result.added.join(', ')}`);
-    if (blank) out.push(`${blank} blank value${blank === 1 ? ' was' : 's were'} ignored. To remove a key, use toolkit env remove NAME.`);
+    if (blank) out.push(`${blank} blank value${blank === 1 ? ' was' : 's were'} ignored. To remove a key, use ${this.commandLine('remove NAME')}.`);
     out.push(...this.#feederLines());
     return { code: 0, out, err: [] };
   }
@@ -564,7 +663,7 @@ class ToolkitEnv {
       this.#store.writeAll(changes);
       const after = this.#store.readAll([...changes.keys()]);
       const failed = [...changes.keys()].filter((name) => after.get(name) !== changes.get(name));
-      if (failed.length) throw new EnvError(`The store did not keep ${failed.join(', ')}; check it with toolkit env status.`);
+      if (failed.length) throw new EnvError(`The store did not keep ${failed.join(', ')}; check it with ${this.commandLine('status')}.`);
       this.#manifest.update((record, at) => this.#manifest.touch(record, [...changes.keys()], at));
     }
     return {
@@ -608,8 +707,28 @@ class ToolkitEnv {
     assertHeader(header);
     if (!SCHEMES.has(scheme)) throw new EnvError('The scheme is Bearer or none.');
     const value = this.#store.read(name);
-    if (value === undefined) throw new EnvError(`${name} is not in the Toolkit env store. Add it with toolkit env edit.`);
+    if (value === undefined) throw new EnvError(`${name} is not in the Toolkit env store. Add it with ${this.commandLine('edit')}.`);
     return JSON.stringify({ [header]: scheme === 'none' ? value : `${scheme} ${value}` });
+  }
+
+  // Shows one value to the owner in a terminal they opened themselves, or copies it. Every check
+  // runs before the store is read: one name, no agent marker, a real terminal on both ends, the key
+  // exists, and the owner retypes its name. Nothing about it is recorded.
+  async show(name, { copy = false } = {}) {
+    assertName(name);
+    if (agentContext(this.#environment)) {
+      throw new EnvError(`toolkit env show only runs in a PowerShell window you opened yourself, not through an agent or an app's built-in terminal. Open PowerShell and run: ${this.#personCommand(`show ${name}${copy ? ' --copy' : ''}`)}`);
+    }
+    const tty = this.#tty();
+    if (!tty.stdin || !tty.stdout) throw new EnvError('show needs a terminal you type into; it does not read from a pipe or print into a file.');
+    if (!this.#store.list().includes(name)) throw new EnvError(`${name} is not in the Toolkit env store.`);
+    const answer = await this.#askTerminal(`Type ${name} again to show its value: `);
+    if (answer !== name) return { code: 0, out: ['Not shown.'], err: [] };
+    const value = this.#store.read(name);
+    if (value === undefined) throw new EnvError(`${name} is not in the Toolkit env store.`);
+    if (!copy) return { code: 0, out: [value], err: ['Shown once. Clear the window when done (Clear-Host) and don\'t paste it into a chat.'] };
+    if (!this.#clipboard(value)) throw new EnvError('The value could not be put on the clipboard, so nothing was copied.');
+    return { code: 0, out: [], err: [`Copied ${name} to the clipboard. Windows clipboard history (Win+V) and clipboard sync across devices can keep a copy; clear it in Settings > System > Clipboard > Clear.`] };
   }
 
   // Starts the program with only the named keys added, and passes its exit code back.
@@ -642,7 +761,7 @@ class ToolkitEnv {
     assertName(name);
     assertHeader(header);
     if (!SCHEMES.has(scheme)) throw new EnvError('The scheme is Bearer or none.');
-    if (!this.#store.list().includes(name)) throw new EnvError(`${name} is not in the Toolkit env store yet. Add it first with toolkit env edit or toolkit env set ${name}.`);
+    if (!this.#store.list().includes(name)) throw new EnvError(`${name} is not in the Toolkit env store yet. Add it first with ${this.commandLine('edit')} or ${this.commandLine(`set ${name}`)}.`);
     const wanted = harness ? harness.split(',').map((entry) => entry.trim()) : this.#feeders.map((feeder) => feeder.id);
     const unknown = wanted.filter((id) => !this.#feeder(id));
     if (unknown.length) throw new EnvError('--harness takes claude-code, codex or both, separated by a comma.');
@@ -662,7 +781,7 @@ class ToolkitEnv {
     if (!plans.length) throw new EnvError('No app has an MCP entry with that name that Toolkit can connect. Check the name with claude mcp list or in the Codex config.');
     const changes = plans.flatMap((entry) => entry.plan.changes);
     if (changes.length) {
-      out.push('Toolkit will change:', ...changes.map((change) => `  ${change}`), 'A backup of each entry is kept, and toolkit env revoke --feeders puts them back.');
+      out.push('Toolkit will change:', ...changes.map((change) => `  ${change}`), `A backup of each entry is kept, and ${this.commandLine('revoke --feeders')} puts them back.`);
       const answer = String(await this.#ask(`Connect ${server} to ${name} in ${plans.map((entry) => entry.feeder.label).join(' and ')}? Type yes to go ahead: `) || '').trim().toLowerCase();
       if (answer !== 'yes' && answer !== 'y') return { code: 0, out: [...out, 'Nothing was changed.'], err: [] };
     }
@@ -724,7 +843,7 @@ class ToolkitEnv {
     const claude = this.#feeder(HARNESSES.CLAUDE);
     let interim = [];
     try { interim = claude ? claude.interimHelperEntries() : []; } catch {}
-    const actions = interim.map((server) => `Claude Code's ${server} entry still uses the old helper that reads ~/.codex/.env. Connect it with toolkit env connect ${server} --name NAME, then delete that helper file.`);
+    const actions = interim.map((server) => `Claude Code's ${server} entry still uses the old helper that reads ~/.codex/.env. Connect it with ${this.commandLine(`connect ${server} --name NAME`)}, then delete that helper file.`);
     if (!this.#manifest.exists) {
       return interim.length ? { state: 'action', summary: 'An MCP entry still uses the old ~/.codex/.env helper.', actions } : { state: 'not-set-up', summary: 'not set up', actions: [] };
     }
@@ -736,20 +855,20 @@ class ToolkitEnv {
     let stored;
     try { stored = this.#store.list(); }
     catch (error) {
-      return { state: 'action', summary: `${this.#store.backend} could not be reached.`, actions: [...actions, error instanceof EnvStoreError ? error.message : 'Run toolkit env status to see why.'] };
+      return { state: 'action', summary: `${this.#store.backend} could not be reached.`, actions: [...actions, error instanceof EnvStoreError ? error.message : `Run ${this.commandLine('status')} to see why.`] };
     }
     const missing = [...new Set(record.bindings.map((binding) => binding.name).filter((name) => !stored.includes(name)))].sort();
-    if (missing.length) actions.push(`Connected entries need keys that are not in the store: ${missing.join(', ')}. Add them with toolkit env edit.`);
+    if (missing.length) actions.push(`Connected entries need keys that are not in the store: ${missing.join(', ')}. Add them with ${this.commandLine('edit')}.`);
     for (const binding of record.bindings) {
       const paths = /^"([^"]+)" "([^"]+)"/.exec(binding.command || '');
       if (paths && !(fs.existsSync(paths[1]) && fs.existsSync(paths[2]))) {
-        actions.push(`${this.#feeder(binding.harness)?.label || binding.harness} ${binding.server} points at a Node.js or Toolkit copy that moved. Run toolkit env connect ${binding.server} --name ${binding.name} again.`);
+        actions.push(`${this.#feeder(binding.harness)?.label || binding.harness} ${binding.server} points at a Node.js or Toolkit copy that moved. Run ${this.commandLine(`connect ${binding.server} --name ${binding.name}`)} again.`);
       }
     }
     for (const feeder of this.#feeders) {
       const bindings = record.bindings.filter((binding) => binding.harness === feeder.id);
       for (const result of bindings.length ? feeder.status(bindings) : []) {
-        if (result.state !== STATES.CURRENT) actions.push(`${feeder.label} ${result.binding.server} ${result.state}. Run toolkit env connect ${result.binding.server} --name ${result.binding.name} to fix it.`);
+        if (result.state !== STATES.CURRENT) actions.push(`${feeder.label} ${result.binding.server} ${result.state}. Run ${this.commandLine(`connect ${result.binding.server} --name ${result.binding.name}`)} to fix it.`);
       }
     }
     const summary = `${this.#store.backend}, ${stored.length} key${stored.length === 1 ? '' : 's'}, ${record.bindings.length} connected entr${record.bindings.length === 1 ? 'y' : 'ies'}`;
@@ -827,11 +946,11 @@ class ToolkitEnv {
     const skipped = [...parsed.skipped, ...parsed.entries.filter((entry) => nameProblem(entry.name)).map((entry) => entry.line)].sort((a, b) => a - b);
     const stored = this.#store.readAll(entries.map((entry) => entry.name));
     const notStored = entries.filter((entry) => stored.get(entry.name) !== entry.value).map((entry) => entry.name);
-    if (notStored.length) throw new EnvError(`Not retired. These keys in the file are not in the store with the same value: ${[...new Set(notStored)].sort().join(', ')}. Run toolkit env import-codex-env, or add them with toolkit env edit.`);
+    if (notStored.length) throw new EnvError(`Not retired. These keys in the file are not in the store with the same value: ${[...new Set(notStored)].sort().join(', ')}. Run ${this.commandLine('import-codex-env')}, or add them with ${this.commandLine('edit')}.`);
     const codex = this.#feeder(HARNESSES.CODEX);
     const references = codex ? codex.environmentReferences() : [];
     if (references.length) {
-      throw new EnvError(`Not retired. Codex still reads keys from its environment for: ${references.map((entry) => `${entry.server} (${entry.name})`).join(', ')}. Connect them first with toolkit env connect SERVER --name NAME.`);
+      throw new EnvError(`Not retired. Codex still reads keys from its environment for: ${references.map((entry) => `${entry.server} (${entry.name})`).join(', ')}. Connect them first with ${this.commandLine('connect SERVER --name NAME')}.`);
     }
     const note = skipped.length ? ` Lines ${skipped.join(', ')} are not NAME=value with a valid key name and were not imported; check them first.` : '';
     const answer = String(await this.#ask(`Move ${this.#paths.show(file)} into a private backup folder?${note} Type yes to go ahead: `) || '').trim().toLowerCase();
@@ -878,6 +997,7 @@ const USAGE = [
   '  apply                        save the edit, then delete the edit file',
   '  set NAME                     save one value from a hidden prompt',
   '  remove NAME                  remove one key (asks first)',
+  '  show NAME [--copy]           show one value, or copy it, in a PowerShell window you opened yourself',
   '  connect SERVER --name NAME   connect an MCP entry in Claude Code and Codex to a key',
   '  revoke --feeders             put connected MCP entries back as they were',
   '  run --names A,B -- PROGRAM   run a program with only those keys in its environment',
@@ -902,9 +1022,9 @@ function takeFlag(args, flag) {
   return true;
 }
 
-function noExtra(args) {
+function noExtra(args, env) {
   // The extra text is not repeated: it may be a value typed in the wrong place.
-  if (args.length) throw new EnvError(`There ${args.length === 1 ? 'is 1 argument' : `are ${args.length} arguments`} too many. Never type a value on the command line; run toolkit env for help.`);
+  if (args.length) throw new EnvError(`There ${args.length === 1 ? 'is 1 argument' : `are ${args.length} arguments`} too many. Never type a value on the command line; run ${env.commandLine('help')} for help.`);
 }
 
 // Parses arguments and maps every failure to a plain message with a reference. No other work.
@@ -929,24 +1049,25 @@ class ToolkitEnvCli {
     try {
       const env = typeof this.#env === 'function' ? this.#env() : this.#env;
       switch (command) {
-        case 'status': noExtra(args); return this.#print(env.status());
-        case 'edit': { const launch = !takeFlag(args, '--no-open'); noExtra(args); return this.#print(await env.edit({ launch })); }
-        case 'apply': noExtra(args); return this.#print(env.apply());
-        case 'set': { const [name, ...extra] = args; noExtra(extra); return this.#print(await env.set(name)); }
-        case 'remove': { const [name, ...extra] = args; noExtra(extra); return this.#print(await env.remove(name)); }
+        case 'status': noExtra(args, env); return this.#print(env.status());
+        case 'edit': { const launch = !takeFlag(args, '--no-open'); noExtra(args, env); return this.#print(await env.edit({ launch })); }
+        case 'apply': noExtra(args, env); return this.#print(env.apply());
+        case 'set': { const [name, ...extra] = args; noExtra(extra, env); return this.#print(await env.set(name)); }
+        case 'remove': { const [name, ...extra] = args; noExtra(extra, env); return this.#print(await env.remove(name)); }
+        case 'show': { const copy = takeFlag(args, '--copy'); const [name, ...extra] = args; noExtra(extra, env); return this.#print(await env.show(name, { copy })); }
         case 'header': {
           const header = takeOption(args, '--header') || 'Authorization';
           const scheme = takeOption(args, '--scheme') || 'Bearer';
-          const [name, ...extra] = args; noExtra(extra);
+          const [name, ...extra] = args; noExtra(extra, env);
           this.#stdout.write(env.header(name, { header, scheme }));
           return 0;
         }
         case 'run': {
           const split = args.indexOf('--');
-          if (split === -1) throw new EnvError('Usage: toolkit env run --names A,B -- PROGRAM [ARGS]');
+          if (split === -1) throw new EnvError(`Usage: ${env.commandLine('run --names A,B -- PROGRAM [ARGS]')}`);
           const before = args.slice(0, split);
           const names = String(takeOption(before, '--names') || '').split(',').map((name) => name.trim()).filter(Boolean);
-          noExtra(before);
+          noExtra(before, env);
           const [program, ...programArgs] = args.slice(split + 1);
           return await env.run(names, program, programArgs);
         }
@@ -955,19 +1076,19 @@ class ToolkitEnvCli {
           const harness = takeOption(args, '--harness') || '';
           const header = takeOption(args, '--header') || 'Authorization';
           const scheme = takeOption(args, '--scheme') || 'Bearer';
-          const [server, ...extra] = args; noExtra(extra);
+          const [server, ...extra] = args; noExtra(extra, env);
           return this.#print(await env.connect(server, { name, harness, header, scheme }));
         }
         case 'revoke': {
-          if (!takeFlag(args, '--feeders')) throw new EnvError('Usage: toolkit env revoke --feeders [--server NAME]');
+          if (!takeFlag(args, '--feeders')) throw new EnvError(`Usage: ${env.commandLine('revoke --feeders [--server NAME]')}`);
           const server = takeOption(args, '--server') || '';
-          noExtra(args);
+          noExtra(args, env);
           return this.#print(await env.revoke({ server }));
         }
-        case 'import-codex-env': noExtra(args); return this.#print(env.importCodexEnv());
-        case 'retire-codex-env': noExtra(args); return this.#print(await env.retireCodexEnv());
+        case 'import-codex-env': noExtra(args, env); return this.#print(env.importCodexEnv());
+        case 'retire-codex-env': noExtra(args, env); return this.#print(await env.retireCodexEnv());
         case undefined: case 'help': case '--help': this.#stdout.write(`${USAGE.join('\n')}\n`); return 0;
-        default: throw new EnvError('That is not a toolkit env command. Run toolkit env for help.');
+        default: throw new EnvError(`That is not a toolkit env command. Run ${env.commandLine('help')} for help.`);
       }
     } catch (error) {
       const reference = supportReference();
@@ -1005,18 +1126,29 @@ function terminalReader(hidden) {
   });
 }
 
+// Reads one visible line from a terminal only. Unlike terminalReader, it never reads a pipe.
+function ttyLine(question) {
+  if (!process.stdin.isTTY) return Promise.reject(new EnvError('show needs a terminal you type into; it does not read from a pipe or print into a file.'));
+  return new Promise((resolve) => {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stderr, terminal: true });
+    rl.question(question, (answer) => { rl.close(); resolve(answer); });
+  });
+}
+
 if (require.main === module) {
-  const cli = new ToolkitEnvCli({ env: () => ToolkitEnv.forUser({ ask: terminalReader(false), askHidden: terminalReader(true) }) });
+  const cli = new ToolkitEnvCli({ env: () => ToolkitEnv.forUser({ ask: terminalReader(false), askHidden: terminalReader(true), askTerminal: ttyLine }) });
   cli.main(process.argv.slice(2)).then((code) => { process.exitCode = code; });
 }
 
 module.exports = Object.freeze({
+  AGENT_MARKERS,
   EnvEditSession,
   EnvError,
   EnvManifest,
   EnvPaths,
   ToolkitEnv,
   ToolkitEnvCli,
+  copyToClipboard,
   dumpsEnvironment,
   editorCommand,
   ensurePrivateDirectory,
