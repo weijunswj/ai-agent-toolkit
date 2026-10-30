@@ -20,6 +20,9 @@ const HELP_FORMS = Object.freeze({
   claude: Object.freeze([['--resume', '--help'], ['--resume', '-h'], ['-r', '--help'], ['--resume', '--version']].map(Object.freeze)),
 });
 function hostOf(word) { return HOST.exec(word.split(/[\\/]/).pop())?.[1].toLowerCase().replace('claude-code', 'claude'); }
+// A host's own subcommands and information flags: as its first argument, they start no session.
+const HOST_SUBCOMMANDS = Object.freeze(['config', 'mcp', 'plugin', 'plugins', 'update', 'upgrade', 'doctor', 'install', 'migrate-installer',
+  'setup-token', 'login', 'logout', 'auth', 'completion', 'features', 'sandbox', 'debug', 'apply', 'help', '--version', '-v', '--help', '-h']);
 
 // Candidate reader. A command is a continuation candidate only when a place where a shell runs a
 // program could run Claude or Codex with a resume or fork selector. Everything in argument
@@ -27,6 +30,9 @@ function hostOf(word) { return HOST.exec(word.split(/[\\/]/).pop())?.[1].toLower
 // programs, echo text) is data. The text is read under every shell that may run it; a reading the
 // reader cannot finish falls back to a plain letters check, so unreadable input stays refused.
 // Only a candidate reaches the strict reader (parseCommand), which admits two exact forms.
+// In launch mode (hostLaunch, for the governance answer guard) the same reader looks for any
+// host started at a command position, with any arguments but a host subcommand, and records
+// every script it reads; unreadable text counts only when one of its words is a host program name.
 const POSIX = 'posix', POWERSHELL = 'powershell', CMD = 'cmd', CMD_FIRST_LINE = 'cmd-first-line';
 const MAX_DEPTH = 8;
 const MAX_NESTING = 64;
@@ -112,6 +118,9 @@ const COMMAND_OPTIONS = Object.freeze({
 });
 // The reading for text no reader could finish: host letters and a selector anywhere in it.
 function fallback(text) { return hostLetters(text) && selectorSignal(text); }
+// The launch-mode reading of such text: a word, split at spaces, quotes and shell operators, that
+// is a host program name (`claude`, `C:\x\codex.cmd`), so file names such as `codex-notes.md` are not.
+function namesHost(text) { return text.replace(/\^/g, '').split(/[\s'"`;&|()<>{}=,]+/).some(token => token && hostName(token)); }
 
 const word = (raw, value, extra = {}) => ({ kind: 'word', raw, value, glob: false, quoted: false, ...extra });
 
@@ -445,13 +454,19 @@ const splitArguments = text => [...text.matchAll(/"([^"]*)"|([^\s,"]+)/g)].map(m
 // A host program name, including a dotted file named like one (`~/.claude -r`).
 const hostName = value => hostOf(value) || hostOf(value.split(/[\\/]/).pop().replace(/^\.+/, ''));
 
-// Decides whether any command the reader found could resume or fork a session. `seen` names the
-// first one found, for the refusal text.
+// Decides whether any command the reader found could resume or fork a session (or, in launch
+// mode, start one). `seen` names the first one found, for the refusal text.
 class CandidateFinder {
-  constructor({ text, stdin = [] }) {
-    this.full = text; this.stdin = stdin; this.seen = null;
+  constructor({ text, stdin = [], mode = 'continuation' }) {
+    this.full = text; this.stdin = stdin; this.seen = null; this.mode = mode; this.scripts = [];
     this.assigned = new Map(); this.written = new Set(); this.bodies = []; this.steps = 0; this.expansions = 0;
   }
+
+  // The readings that differ by mode. Continuation: a host spelling and a resume or fork selector.
+  // Launch: a host spelling, with any arguments.
+  direct(text) { return this.mode === 'launch' ? CLAUDE_WORD.test(text) || CODEX_WORD.test(text) : directCheck(text); }
+  selector(text) { return this.mode === 'launch' || selectorSignal(text); }
+  unreadable(text) { return this.mode === 'launch' ? namesHost(text) : fallback(text); }
 
   // Variables programs run as commands (`GIT_PAGER='codex resume' git log`) and function bodies
   // defined in the text (`$function:gh = 'codex resume'`) are read as scripts.
@@ -497,23 +512,25 @@ class CandidateFinder {
   }
   // True when an argument runs a file written earlier in the same text: the written text is read.
   runsWritten(args) {
-    return args.some(x => x.kind === 'word' && this.written.has(leaf(this.resolved(x) ?? x.raw))) && fallback(this.full) && this.found('a script written and run in one command');
+    return args.some(x => x.kind === 'word' && this.written.has(leaf(this.resolved(x) ?? x.raw))) && this.unreadable(this.full) && this.found('a script written and run in one command');
   }
 
-  found(seen) { this.seen ??= seen; return true; }
+  // Launch mode records the hit and keeps reading, so the scripts after it are recorded too.
+  found(seen) { this.seen ??= seen; return this.mode !== 'launch'; }
   // Wrapper chains and positional scripts can multiply the reading; past the budget the command
   // is refused rather than read further, well inside the hosts' hook timeouts.
   // Each read of a text costs one step per 256 characters, so the budget also bounds re-reading.
   spent(cost = 1) { this.steps += cost; return this.steps > STEP_LIMIT; }
 
   text(text, dialect, depth = 0) {
-    if (depth > MAX_DEPTH || text.length > LIMITS.command) return fallback(text) && this.found('a command Toolkit could not read');
+    if (this.mode === 'launch') this.scripts.push(text);
+    if (depth > MAX_DEPTH || text.length > LIMITS.command) return this.unreadable(text) && this.found('a command Toolkit could not read');
     if (this.spent(1 + Math.floor(text.length / 256))) return this.found('a command too long to read in time');
     let commands;
     try { commands = new ShellReader(text, dialect).read(); }
     catch (error) {
       if (error === INERT) return false;
-      if (error === UNREADABLE || error instanceof RangeError) return fallback(text) && this.found('a command Toolkit could not read');
+      if (error === UNREADABLE || error instanceof RangeError) return this.unreadable(text) && this.found('a command Toolkit could not read');
       throw error;
     }
     this.remember(commands);
@@ -564,7 +581,7 @@ class CandidateFinder {
   // [Diagnostics.Process]::Start(); those get the direct check.
   expression(command) {
     const text = raws(command.words);
-    return /::|\.(?:start|invoke)\s*\(/i.test(text) && directCheck(text) && this.found('a .NET process start');
+    return /::|\.(?:start|invoke)\s*\(/i.test(text) && this.direct(text) && this.found('a .NET process start');
   }
 
   // What an earlier pipeline stage feeds this command: a quoted string, a here-string or a
@@ -590,7 +607,7 @@ class CandidateFinder {
     const own = words[0].raw, after = this.expand(raws(words.slice(1))), filled = this.expand(own);
     if (filled !== own && this.expansions++ < EXPANSION_LIMIT
       && this.text(`${filled.replace(/["']/g, '')} ${after}`, command.dialect ?? POWERSHELL, MAX_DEPTH)) return true;
-    const selector = selectorSignal(after) || selectorSignal(own) || /resume|fork|continue|sessionid/i.test(after.replace(/[^a-z0-9]/gi, ''));
+    const selector = this.selector(after) || this.selector(own) || /resume|fork|continue|sessionid/i.test(after.replace(/[^a-z0-9]/gi, ''));
     // A name assigned elsewhere (`$h='codex'; & $h resume`), or built in the command word itself.
     const assigned = (outsidePaths(this.full) || hostLetters(filled)) && selector;
     const built = HOST_NAMES.some(name => inOrder(constructed(own), name))
@@ -610,7 +627,7 @@ class CandidateFinder {
     if (host) return this.launch(host, value, args, { viaWrapper, xargs });
     const name = leaf(value);
     if (WRAPPERS.has(name) || (CMD_KEYWORDS.has(name) && command.dialect === CMD)) {
-      if (depth >= MAX_DEPTH) return fallback(raws(words.slice(i))) && this.found('a deeply wrapped command');
+      if (depth >= MAX_DEPTH) return this.unreadable(raws(words.slice(i))) && this.found('a deeply wrapped command');
       for (let j = i + 1; j < words.length; j += 1) {
         const x = words[j];
         if (x.kind !== 'word') continue;
@@ -629,25 +646,25 @@ class CandidateFinder {
       // earlier stage builds gets the letters check over those stages.
       const up = command.prev ? this.upstream(command) : null;
       const body = [raws(args), ...command.heredocs.map(doc => doc.body || ''), ...command.stdin, up?.literal ?? ''].join('\n');
-      return ((directCheck(body) || (up && up.literal === null && fallback(up.raw))) && this.found(`a ${name} script`)) || this.runsWritten(args);
+      return ((this.direct(body) || (up && up.literal === null && this.unreadable(up.raw))) && this.found(`a ${name} script`)) || this.runsWritten(args);
     }
     if (EVALUATORS.has(name)) {
       // `... | iex` runs its piped input.
       if (command.prev && !args.length) {
         const up = this.upstream(command);
-        return (up.literal !== null ? this.text(up.literal, command.dialect ?? POWERSHELL, depth + 1) : fallback(up.raw)) && this.found(`text piped into ${name}`);
+        return (up.literal !== null ? this.text(up.literal, command.dialect ?? POWERSHELL, depth + 1) : this.unreadable(up.raw)) && this.found(`text piped into ${name}`);
       }
       if (name === '.' || name === 'source') {
         if (args.some(x => x.kind !== 'word' || x.value === null)) return this.dynamic(words.slice(i), command);
         // The sourced file may have been written earlier in the same command.
-        return fallback(this.full) && this.found(`${name} on a script file`);
+        return this.unreadable(this.full) && this.found(`${name} on a script file`);
       }
       const script = args.filter(x => x.kind !== 'word' || !/^-c(?:o(?:m(?:m(?:a(?:n(?:d)?)?)?)?)?)?$/i.test(x.value ?? ''));
       const values = script.map(x => this.resolved(x));
       // Text held in a variable assigned earlier (`$c = "claude -c"; iex $c`) is read as the script.
       if (values.every(v => v !== null)) return this.text(values.join(' '), command.dialect ?? POWERSHELL, depth + 1);
       const own = this.expand(raws(words.slice(i)));
-      return ((hostLetters(own) && selectorSignal(own)) || this.dynamic(words.slice(i), command)) && this.found(`${name} on computed text`);
+      return ((hostLetters(own) && this.selector(own)) || this.dynamic(words.slice(i), command)) && this.found(`${name} on computed text`);
     }
     const options = COMMAND_OPTIONS[name];
     if (options) {
@@ -662,14 +679,14 @@ class CandidateFinder {
         // rg runs its --pre program on each searched path, and a git `!` alias gets the
         // command's later words, so those words are its arguments.
         if (value !== null && ((name === 'rg' && /^--pre(?:=|$)/.test(v)) || (name === 'git' && /^alias\.[^=]+=!/.test(value)))) value += ' ' + values.slice(n + 2).join(' ');
-        if (value !== null && directCheck(value)) return this.found(`a command run by ${name}`);
+        if (value !== null && this.direct(value)) return this.found(`a command run by ${name}`);
       }
       // A variable holding such an option with its command (`o='--upload-pack=codex resume'`).
       for (const x of args) {
         // Read as assigned, before the shell's later expansions (`codex${IFS}resume`).
         const held = x.kind === 'word' && x.value === null ? this.expand(x.raw).replace(/["']/g, '') : null;
         if (held && held !== x.raw.replace(/["']/g, '') && (held.split(/\s+/).some(p => options.test(p.split('=')[0])) || (name === 'git' && /^(?:ext|fd)::/.test(held)))
-          && directCheck(held)) return this.found(`a command run by ${name}`);
+          && this.direct(held)) return this.found(`a command run by ${name}`);
       }
       return false;
     }
@@ -678,6 +695,10 @@ class CandidateFinder {
   }
 
   launch(host, value, args, { viaWrapper, xargs }) {
+    if (this.mode === 'launch') {
+      const first = args[0]?.kind === 'word' ? this.resolved(args[0]) : null;
+      return !(typeof first === 'string' && HOST_SUBCOMMANDS.includes(first.toLowerCase())) && this.found(leaf(value));
+    }
     if (xargs) return this.found(`${leaf(value)} through xargs`);
     const words = args.filter(x => x.kind === 'word');
     // An unquoted computed argument can become a selector at run time.
@@ -699,7 +720,7 @@ class CandidateFinder {
   // passes it one argument string (`Start-Process pwsh -ArgumentList "-NoExit -Command ..."`), the
   // string is split into words as the started shell receives them.
   runner(dialect, name, args, command, depth, argv, viaWrapper = false) {
-    if (depth >= MAX_DEPTH) return fallback(raws(args)) && this.found('a deeply nested shell');
+    if (depth >= MAX_DEPTH) return this.unreadable(raws(args)) && this.found('a deeply nested shell');
     const words = [];
     for (const x of args.filter(a => a.kind === 'word')) {
       // A word held in a variable assigned earlier is read with that text (`bash -c "$c"`).
@@ -758,26 +779,40 @@ class CandidateFinder {
     if (command.prev) {
       const up = this.upstream(command);
       if (up.literal !== null) return this.text(up.literal, dialect, depth + 1);
-      return fallback(up.raw) && this.found(`a script piped into ${name}`);
+      return this.unreadable(up.raw) && this.found(`a script piped into ${name}`);
     }
-    return this.stdin.length > 0 && fallback(this.stdin.join('\n')) && this.found(`a script piped into ${name}`);
+    return this.stdin.length > 0 && this.unreadable(this.stdin.join('\n')) && this.found(`a script piped into ${name}`);
   }
 }
 
-// True when the call could resume or fork a session; `seen` says what was found.
-function candidate(text, input, host = null) {
+// Reads the call with a finder in the given mode; `hit` is true when the finder stopped on a find.
+function readCall(text, input, host, mode) {
   const args = input?.tool_input;
   const fields = args && typeof args === 'object' && !Array.isArray(args)
     ? ['command', 'cmd'].map(field => args[field]).filter(value => (typeof value === 'string' && value) || (Array.isArray(value) && value.length)) : [];
   const stdin = fields.length ? [args.input, args.patch].filter(value => typeof value === 'string' && value) : [];
-  const finder = new CandidateFinder({ text: typeof text === 'string' ? text : '', stdin });
+  const finder = new CandidateFinder({ text: typeof text === 'string' ? text : '', stdin, mode });
   // The fields the gate's text came from are read as the host gives them: a string as shell text,
   // an argument list as the program and its arguments, so no shell ever re-reads its unquoted words.
   const readings = fields.length ? fields : [finder.full];
   const hit = readings.some(value => Array.isArray(value)
-    ? (value.every(item => typeof item === 'string') ? finder.argv(value) : fallback(JSON.stringify(value)) && finder.found('a command Toolkit could not read'))
+    ? (value.every(item => typeof item === 'string') ? finder.argv(value) : finder.unreadable(JSON.stringify(value)) && finder.found('a command Toolkit could not read'))
     : dialectsOf(input, host).some(dialect => (dialect === CMD_FIRST_LINE ? finder.text(value.split('\n')[0], CMD) : finder.text(value, dialect))));
+  return { hit, finder };
+}
+
+// True when the call could resume or fork a session; `seen` says what was found.
+function candidate(text, input, host = null) {
+  const { hit, finder } = readCall(text, input, host, 'continuation');
   return hit ? { seen: finder.seen } : null;
+}
+
+// When the call starts a Claude or Codex session anywhere a shell would run one: `seen` names the
+// first found, and `scripts` holds every text read (the command under each shell and each script
+// it hands to a shell), so the caller can look for an answer inside them. Otherwise null.
+function hostLaunch(text, input) {
+  const { finder } = readCall(text, input, null, 'launch');
+  return finder.seen === null ? null : { seen: finder.seen, scripts: finder.scripts };
 }
 
 function knownShell(input) {
@@ -1018,4 +1053,4 @@ if (require.main === module) {
   process.stdout.write(JSON.stringify(result));
 }
 
-module.exports = Object.freeze({ ContinuationResolver, TranscriptReader, LIMITS, parse, executionDirectory });
+module.exports = Object.freeze({ ContinuationResolver, TranscriptReader, LIMITS, HOST_SUBCOMMANDS, parse, hostLaunch, executionDirectory });
