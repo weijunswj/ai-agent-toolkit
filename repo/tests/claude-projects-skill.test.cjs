@@ -52,7 +52,7 @@ test('no plugin payload or skills folder reaches the Projects controller skill',
 
 test('Projects wires managed instructions, promises and fresh scheduled sessions to controller law', () => {
   const text = bundle();
-  assert.match(text, /^Version: 2026-10-30\.2$/m);
+  assert.match(text, /^Version: 2026-10-31\.1$/m);
   // Gate launches name their gate and route; setup writes the GATE ROUTE line the launch hook reads.
   assert.ok(text.includes('`GATE ROUTE: profile <profile> placement <remote_control|cloud|any> [folder <path>]`'));
   assert.match(text, /\*\*Gate launches carry a Gate line and their route\.\*\* Every thread brief that names a gate carries one line `Gate: <value>`/);
@@ -189,13 +189,13 @@ test('Projects keeps its Toolkit base layer current without touching the project
   // Posts, in the main project chat, reply threads and work threads alike.
   assert.match(text, /\*\*Posts, everywhere you post\*\* \(the main project chat, reply threads and work threads alike\): after the owner's last message, keep all your output in one running post and edit it, appending each new result, PR or question and keeping every earlier detail\. The running post is always your newest top-level post, the acknowledgement posted with a new thread included\. Before every edit, check whether the owner has written since that post \(in the main project chat, or in a work thread, in that thread\); if so, post fresh instead\. Start each appended update with its local time, for example \*\*\[16:41\] Update:\*\*\. Also start a fresh post when the running post nears about 8 KB; an owner reply under the running post does not start one, and the answer to it is appended to the running post\. Answer a burst of owner messages in one post\. When the owner replies under one of your earlier posts in the main project chat, answer in the main project chat \(you cannot post under your own posts there\) with a fresh post starting "Re: your reply on <short topic>", and never edit the older post\./);
   assert.doesNotMatch(text + body, /is always a new post|edit your own post only/);
-  // Running post id in memory and links on owner items, both enforced by the post hook.
+  // Running post id in memory, enforced by the post hook, and links on owner items.
   assert.ok(text.includes('save its message id as the first line of project memory, `RUNNING POST: <message id>`'));
   assert.ok(text.includes('it refuses a fresh post while the owner has not written since your newest post, unless that post nears 8 KB'));
   assert.ok(text.includes('only when it is ready for the owner to check and merge; until then, link the chat thread that owns the work'));
-  // Links only where the owner acts, as the owner decided; the hook checks only Waiting on you items.
+  // Links only where the owner acts, as the owner decided; a written rule, no hook checks it.
   assert.ok(text.includes('**Link where the owner acts.** Every item under **Waiting on you** (each question and each merge ask included) carries the link'));
-  assert.ok(text.includes('A PR, thread or file named elsewhere needs no link. The same hook refuses a Waiting on you item with no link, or one that links a PR without `/files`.'));
+  assert.ok(text.includes('A PR, thread or file named elsewhere needs no link. This is a written rule: no hook checks it.'));
   assert.doesNotMatch(text, /Link everything worth opening|names "PR <n>" without a link|not from the link rule/);
   // The post layout and the merge summary, also enforced by the post hook.
   assert.ok(text.includes('**Post layout.** A running post has four parts, in order: a **Now:** line'));

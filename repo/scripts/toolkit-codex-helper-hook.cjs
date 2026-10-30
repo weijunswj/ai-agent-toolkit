@@ -49,8 +49,7 @@ function promptEvent(input) {
 // `notes` collects what a shell check could not check, for the caller to show the user.
 async function decide(input, environment = process.env, { notes } = {}) {
   let governanceDenial;
-  // Codex gives no shell in its payload and may run either shell, so commands keep both readings.
-  try { governanceDenial = new (gate().ToolGate)({ host: 'codex' }).decide(input || {}); } catch {
+  try { governanceDenial = new (gate().ToolGate)().decide(input || {}); } catch {
     governanceDenial = insideRepository(input?.cwd) ? { deny: `Toolkit: the governance check failed, so nothing runs in this repository until it works again. ${NEVER_OWNER}` } : null;
   }
   if (governanceDenial) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: governanceDenial.deny } };

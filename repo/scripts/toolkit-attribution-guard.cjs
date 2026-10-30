@@ -6,16 +6,16 @@
 // `gh pr edit` / `gh pr merge`, in the command text and in a message or body file the command names. Ordinary text
 // that merely mentions Claude passes. Used by the Claude Code PreToolUse hook and the Codex helper hook.
 //
-// It also refuses commands that skip a repository's own commit and push checks (git commit -n or
-// --no-verify, git push --no-verify, or a different core.hooksPath) in a Toolkit-governed (GitHub governance ENABLED, or the governed block present) or
-// personal-data-guarded repository, and force pushes (--force, -f, --force-with-lease, --mirror or a
-// +refspec) there and to an evidence store (a TRANSPORT-* repository). This is best effort: CI and
-// branch rules are the backstop. Not covered:
+// It also refuses force pushes (--force, -f, --force-with-lease, --mirror or a +refspec) in a
+// Toolkit-governed (GitHub governance ENABLED, or the governed block present) or personal-data-guarded
+// repository and to an evidence store (a TRANSPORT-* repository), since they rewrite history. Skipped
+// commit and push checks (--no-verify, core.hooksPath) are a written rule, not a hook: CI is the
+// backstop. This is best effort: CI and branch rules are the backstop. Not covered:
 // GIT_CONFIG_* environment variables, remote.*.push or remote.*.mirror settings, git aliases, scripts and programs that run git themselves,
 // a cd that is not its own command in the same line, and commands nested more than two shells deep.
 //
 // Last, a `git push` or `gh pr create` that passed those checks is refused when what it would send
-// carries a credential or a plain-text finding (toolkit-push-check.cjs), including what a `git commit`
+// carries a credential (toolkit-push-check.cjs), including what a `git commit`
 // earlier in the same command could add. A push whose folder cannot be found is refused. When the step
 // cannot check for another reason (git missing, too slow, a setting unreadable), Claude Code lets the
 // command run with one note for the user and the Codex hook refuses it (Codex shows no notes). Folders
@@ -242,17 +242,9 @@ function attributionRefusal(command, cwd) {
   return '';
 }
 
-const BYPASS_MESSAGE = 'This command skips the repository\'s commit or push checks (git commit -n or --no-verify, git push --no-verify, or a different core.hooksPath). This repository runs them on every commit and push: fix what they report and retry without the bypass. If a check is wrong, tell the owner.';
 const FORCE_MESSAGE = 'This command force-pushes (--force, -f, --force-with-lease, --mirror or a +refspec). Toolkit-governed repositories and evidence stores keep their history: push a new commit or a merge commit instead, or push to a new branch.';
-const HOOKS_PATH = 'core.hookspath';
 const PUSH_VALUE_LETTERS = 'o';
 const PUSH_VALUE_OPTIONS = new Set(['--repo', '--receive-pack', '--exec', '--push-option']);
-const GIT_CONFIG_WRITES = new Set(['set', 'unset', '--unset', '--unset-all', '--replace-all', '--add', 'edit', '--edit', '-e', 'rename-section', 'remove-section', '--rename-section', '--remove-section']);
-const COMMIT_VALUE_LETTERS = 'mFcCtS';
-
-// git accepts any unambiguous prefix of a long option; "--no-veri" is the shortest that cannot
-// also mean --no-verbose.
-function noVerify(word) { return word.length >= 9 && '--no-verify'.startsWith(word); }
 
 // git's global options and its subcommand, with the folder the command runs in. `absolute` says
 // whether a -C or --work-tree folder that stands on its own set that folder.
@@ -262,12 +254,10 @@ function gitCommand({ words }, root) {
   let base = root;
   let absolute = false;
   let directories = 0;
-  const configs = [];
   for (let index = start + 1; index < words.length; index += 1) {
     const word = words[index];
-    if (word === '-c' || word === '--config-env') configs.push(words[++index] || '');
-    else if (word.startsWith('--config-env=')) configs.push(word.slice(13));
-    else if (word.startsWith('-c') && word.length > 2) configs.push(word.slice(2));
+    if (word === '-c' || word === '--config-env') index += 1;
+    else if (word.startsWith('--config-env=') || (word.startsWith('-c') && word.length > 2)) continue;
     else if (word === '-C' || word.startsWith('-C')) {
       const value = word === '-C' ? words[++index] : word.slice(2);
       if (value === undefined) return null;
@@ -277,40 +267,9 @@ function gitCommand({ words }, root) {
       const value = word === '--work-tree' ? words[++index] : word.slice(12);
       if (value) { base = shellPath(base, value); absolute ||= absoluteShellPath(value); }
     } else if (GIT_VALUE_OPTIONS.has(word)) index += 1;
-    else if (!word.startsWith('-')) return { base, absolute, configs, sub: word, args: words.slice(index + 1) };
+    else if (!word.startsWith('-')) return { base, absolute, sub: word, args: words.slice(index + 1) };
   }
-  return { base, absolute, configs, sub: null, args: [] };
-}
-
-function skipsChecks({ configs, sub, args }) {
-  if (configs.some((value) => value.toLowerCase().startsWith(`${HOOKS_PATH}=`) || value.toLowerCase() === HOOKS_PATH)) return true;
-  const end = args.indexOf('--');
-  const options = end === -1 ? args : args.slice(0, end);
-  if (sub === 'commit') {
-    for (let index = 0; index < options.length; index += 1) {
-      const word = options[index];
-      if (noVerify(word)) return true;
-      if (!word.startsWith('-') || word.startsWith('--')) continue;
-      // A short-option bundle such as -an. Letters after a value-taking letter are its value, and
-      // a value-taking letter at the end takes the next word (-S takes only an attached value).
-      for (let letter = 1; letter < word.length; letter += 1) {
-        if (word[letter] === 'n') return true;
-        if (COMMIT_VALUE_LETTERS.includes(word[letter])) {
-          if (letter === word.length - 1 && word[letter] !== 'S') index += 1;
-          break;
-        }
-      }
-    }
-  }
-  if (sub === 'push') return options.some(noVerify);
-  if (sub === 'config') {
-    const key = args.findIndex((word) => word.toLowerCase() === HOOKS_PATH);
-    if (key === -1) return false;
-    if (args.some((word) => GIT_CONFIG_WRITES.has(word))) return true;
-    // `git config core.hooksPath <value>` sets it; `--get` or the key alone only reads it.
-    return args.slice(key + 1).some((word) => !word.startsWith('-'));
-  }
-  return false;
+  return { base, absolute, sub: null, args: [] };
 }
 
 // Whether a push rewrites history on the remote: --force and its abbreviations, -f in a
@@ -394,7 +353,7 @@ const SHELLS = /(?:^|[\\/])(?:bash|sh|zsh|dash|ksh|pwsh|powershell|cmd|eval|invo
 // Returns the refusal reason, or '' when the command may run. A quoted command handed to a
 // shell (bash -c "...", pwsh -Command "...") is read too, up to two levels deep.
 // `registryOptions` is for tests (the governance decisions file to read).
-function bypassRefusal(command, cwd, depth = 0, registryOptions = {}) {
+function forceRefusal(command, cwd, depth = 0, registryOptions = {}) {
   const text = String(command || '');
   if (text.length > MAX_COMMAND_CHARS || !/\bgit\b/i.test(text)) return '';
   let root = cwd || process.cwd();
@@ -407,7 +366,6 @@ function bypassRefusal(command, cwd, depth = 0, registryOptions = {}) {
     }
     const git = gitCommand(current, root);
     if (git?.refusal) return git.refusal;
-    if (git && skipsChecks(git) && repositoryKind(git.base, cache, registryOptions).checked) return BYPASS_MESSAGE;
     if (git && forcePush(git)) {
       const kind = repositoryKind(git.base, cache, registryOptions);
       const target = git.args.find((word) => !word.startsWith('-'));
@@ -416,7 +374,7 @@ function bypassRefusal(command, cwd, depth = 0, registryOptions = {}) {
     if (depth < 2 && SHELLS.test(current.words[0])) {
       for (const word of current.words.slice(1)) {
         if (/\s/.test(word) && /\bgit\b/i.test(word)) {
-          const nested = bypassRefusal(word, root, depth + 1, registryOptions);
+          const nested = forceRefusal(word, root, depth + 1, registryOptions);
           if (nested) return nested;
         }
       }
@@ -478,7 +436,7 @@ function pushTarget(args, folder) {
 const COMMIT_STEPS = new Set(['add', 'stage', 'commit', 'merge', 'cherry-pick', 'revert', 'am', 'rebase']);
 
 // What a push or a new pull request sends, for each one in a command line, with the same cd,
-// git -C and nested-shell reading as the bypass check: push and pull-request targets as
+// git -C and nested-shell reading as the force-push check: push and pull-request targets as
 // toolkit-push-check.cjs reads them. A push that only deletes sends nothing to check. Each target
 // carries `preceding`, the commit steps earlier in the same command line ({ folder, sub }, in order),
 // because the check runs before any of them.
@@ -516,8 +474,8 @@ function outgoingChanges(command, cwd, depth = 0, preceding = [], confirmed = tr
   return found;
 }
 
-// Returns the refusal reason for a push or new pull request that carries a credential or a
-// plain-text finding (toolkit-push-check.cjs), or ''. This step fails open: if it cannot check, the
+// Returns the refusal reason for a push or new pull request that carries a credential
+// (toolkit-push-check.cjs), or ''. This step fails open: if it cannot check, the
 // command runs and one note goes to `notes` (a list the caller shows) or else to stderr. Every
 // target of one command line shares one time budget, which starts at the first check (30 seconds,
 // or `budgetMs` in tests); `check(target, { deadline })` is for tests. `folderConfirmed` false says
@@ -536,7 +494,7 @@ function outgoingRefusal(command, cwd, { notes, budgetMs, folderConfirmed = true
     if (seen.has(key)) continue;
     seen.add(key);
     let result;
-    try { result = run(target) || {}; } catch { result = { note: 'Toolkit could not check this push for credentials and plain-text findings, so it was let through: the check could not load.' }; }
+    try { result = run(target) || {}; } catch { result = { note: 'Toolkit could not check this push for credentials, so it was let through: the check could not load.' }; }
     if (result.note) {
       if (Array.isArray(notes)) notes.push(result.note);
       else { try { process.stderr.write(`${result.note}\n`); } catch { /* a note is best effort */ } }
@@ -557,8 +515,8 @@ function attributionDecision(input, options = {}) {
   const call = ShellCall.from(input, { shell: true });
   const command = call.text;
   const folderConfirmed = !(options.sessionFolderOnly && !call.folders.length);
-  const reason = call.refusal() || (command && (attributionRefusal(command, call.folder) || bypassRefusal(command, call.folder) || outgoingRefusal(command, call.folder, { ...options, folderConfirmed })));
+  const reason = call.refusal() || (command && (attributionRefusal(command, call.folder) || forceRefusal(command, call.folder) || outgoingRefusal(command, call.folder, { ...options, folderConfirmed })));
   return reason ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } } : {};
 }
 
-module.exports = Object.freeze({ ATTRIBUTION_PATTERNS, BYPASS_MESSAGE, FORCE_MESSAGE, MESSAGE, attributionDecision, attributionRefusal, bypassRefusal, hasAttribution, outgoingChanges, outgoingRefusal, repositoryKind });
+module.exports = Object.freeze({ ATTRIBUTION_PATTERNS, FORCE_MESSAGE, MESSAGE, attributionDecision, attributionRefusal, forceRefusal, hasAttribution, outgoingChanges, outgoingRefusal, repositoryKind });
