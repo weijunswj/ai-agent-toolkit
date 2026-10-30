@@ -59,7 +59,8 @@ async function decide(input, environment = process.env, { notes } = {}) {
   if (mergeDenial) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: mergeDenial.deny } };
   // Shell commands, under any of the shell tool names Codex may report: refuse AI attribution in
   // commits and pull requests, skipped checks, force pushes and pushes that carry a credential.
-  if (require('./toolkit-shell-call.cjs').ShellCall.isShellTool(input?.tool_name)) return require('./toolkit-attribution-guard.cjs').attributionDecision(input, { notes });
+  // Codex's top-level cwd is the chat's folder, which may not be where a call with no workdir runs.
+  if (require('./toolkit-shell-call.cjs').ShellCall.isShellTool(input?.tool_name)) return require('./toolkit-attribution-guard.cjs').attributionDecision(input, { notes, sessionFolderOnly: true });
   const state = governance(input, environment);
   if (!state.governed) return {};
   const { CodexDialect, commandDecision } = adapter();

@@ -8,14 +8,17 @@
 //   - Codex documents Bash with a string `command`, but its shell and exec tools also carry `cmd`,
 //     an argument list, and `workdir`, the folder the command runs in, which can differ from `cwd`.
 //     Codex Desktop's code-mode program (`exec`) reaches no hook itself; each shell call it makes
-//     arrives as Bash with a string `command` (captured 29 October 2026).
+//     arrives as Bash with a string `command`, no `workdir`, and the chat's folder as `cwd`, even when
+//     the program ran the command in another folder (captured 29 and 30 October 2026).
 // ShellCall.from(input) reads all of these the same way:
 //   - text: a string `command` and a string `cmd` (both, a line apart, when both are given), or an
 //     argument list: the script of a shell wrapper (`bash -lc <script>`, `pwsh -Command <script>`,
 //     `cmd /c <script>`), else the words quoted so that shell parsing gives back the same words;
 //   - folder: `workdir`, else the tool's own `cwd`, else the top-level `cwd`, else this process's
-//     folder, a relative value resolved against the top-level `cwd`. shellPath() resolves every
-//     folder or file a command names the same way, Git Bash drive paths included;
+//     folder, a relative value resolved against the top-level `cwd`. `folders` lists only what the
+//     call itself names, so a caller can tell a Codex call that named no folder: its top-level `cwd`
+//     may not be where the command runs. shellPath() resolves every folder or file a command names
+//     the same way, Git Bash drive paths included;
 //   - unreadable: a shell call whose command or folder has a type no host sends, or that has no
 //     command at all. The checks cannot read it, so a call whose raw input could commit, push or open,
 //     edit or merge a pull request is refused (refusal()); any other unreadable call runs.
@@ -57,6 +60,14 @@ function shellPath(base, value, { platform = process.platform, home = os.homedir
     return path.win32.resolve(base, text);
   }
   return path.resolve(base, text);
+}
+
+// Whether a folder a shell command names stands on its own, whatever folder the command starts in:
+// `~`, a rooted path (`/...`, which on Windows also covers Git Bash drive paths), a drive path
+// (`C:\...` or `C:/...`) or a network path (`\\server\...`), the last two on Windows only. A relative
+// path or a variable does not.
+function absoluteShellPath(value, { platform = process.platform } = {}) {
+  return (platform === 'win32' ? /^(?:~(?:[\\/]|$)|[\\/]|[A-Za-z]:[\\/])/ : /^(?:~(?:\/|$)|\/)/).test(String(value));
 }
 
 function programName(word) {
@@ -177,4 +188,4 @@ class ShellCall {
   }
 }
 
-module.exports = Object.freeze({ SHELL_TOOL_NAMES, SHELL_TOOLS, UNREADABLE, ShellCall, argvText, quoteWords, shellPath });
+module.exports = Object.freeze({ SHELL_TOOL_NAMES, SHELL_TOOLS, UNREADABLE, ShellCall, absoluteShellPath, argvText, quoteWords, shellPath });
