@@ -17,3 +17,7 @@ Title: hooks keep only the checks that stop real damage
 - **Discover:** reports a store or scratch clone as not applicable, and never proposes a repository as its own evidence store.
 - **Default-branch push guard:** a push to an evidence store that a cached binding names is not refused, whatever its name. The guard also reads a folder named through a variable the same command assigned (`$d = 'C:\path'; git -C $d push`, `d=/path; cd "$d"`) and a leading home variable (`$env:USERPROFILE`, `$HOME`), so it judges the repository the push really comes from.
 - **Held repositories in Claude Projects:** a thread can still post, react, update its checklist or end its turn in a held repository, so it can ask the owner the governance question. Its decision cards and every other tool stay held.
+
+### A controller creates its gate chats without asking
+
+- **Changed:** appointing a controller now counts as the owner's explicit request to create every gate session the controller procedure launches (G0, G1, G2, rechecks and their follow-ups) and to archive each once its evidence is stored and read back. A controller no longer asks before each one, including on hosts that create a chat only when the user asks (Codex `create_thread`, Claude Code desktop sessions). The controller procedure says so; a controller binds it on appointment, before its first launch. A new model or route, spend and anything on the safety floor still need the owner.
