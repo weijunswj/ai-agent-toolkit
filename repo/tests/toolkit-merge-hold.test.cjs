@@ -14,8 +14,14 @@ const test = require('node:test');
 const hold = require('../scripts/toolkit-merge-hold.cjs');
 const gate = require('../scripts/toolkit-governance-gate.cjs');
 const claudeHook = require('../scripts/toolkit-governance-hook.cjs');
+const hostile = require('./support/hostile-inputs.cjs');
 
 const SHA = '62405ebd4c27859d66036e18f13c856c645d366d';
+// The Codex GitHub app's merge call that the hold could not read (repository, number and head SHA
+// in their own field names), copied from the saved diagnostic.
+const DIAGNOSTIC_SHA = '7384901397e63407783c60f6656499db9edf6b12';
+const DIAGNOSTIC_REPO = 'Swooshz-com/swooshz-quote-auto-generator';
+const CODEX_MERGE = 'mcp__codex_apps__github__merge_pull_request';
 
 function git(cwd, args) {
   const result = spawnSync('git', args, { cwd, encoding: 'utf8' });
@@ -97,7 +103,8 @@ test('a plain yes with "merge" and a number is an approval; a no, a doubt or a q
     'I think merge 618', 'not sure, merge 618', 'merge 618 or 619', 'merge 618 in 5 minutes', 'is it ok to merge 618',
     'merge 618 at 62405eb or 7a1b2c3d',
     // quotes
-    '> merge 618', "'merge 618'", '‘merge 618’', '"merge 618"', '`merge 618`',
+    // (a line that is only a code span, such as `merge 618`, is read without its backticks: see the code span test)
+    '> merge 618', "'merge 618'", '‘merge 618’', '"merge 618"', 'run `merge 618`',
     // unclear: two SHAs, an over-long line
     'merge 618 62405eb 7a1b2c3', `merge 618 ${'x'.repeat(200)}`,
     // another kind of merge
@@ -416,4 +423,190 @@ test('both hook files send merge tools and shell commands to the merge hold', ()
   for (const tool of ['Bash', 'PowerShell', 'mcp__github__merge_pull_request', 'mcp__github__enable_pr_auto_merge']) assert.match(tool, new RegExp(governanceEntry.matcher), tool);
   const codex = JSON.parse(fs.readFileSync(path.join(root, '.codex-plugin', 'hooks', 'hooks.json'), 'utf8')).hooks.PreToolUse;
   for (const tool of ['Bash', 'mcp__github__merge_pull_request']) assert.ok(codex.some(entry => new RegExp(entry.matcher).test(tool) && entry.hooks.some(hook => hook.command.includes('toolkit-codex-helper-hook.cjs'))), tool);
+});
+
+// ---- Connector merges in every GitHub shape (the merge-connector invariant table, rows 1 to 21) ----
+
+// The diagnostic call: Codex's GitHub app, repository_full_name, pr_number and expected_head_sha.
+const codexCall = (args = {}, tool = CODEX_MERGE) => ({
+  cwd: os.tmpdir(), tool_name: tool,
+  tool_input: { repository_full_name: DIAGNOSTIC_REPO, pr_number: 292, expected_head_sha: DIAGNOSTIC_SHA, merge_method: 'merge', commit_title: 'Merge pull request 292', commit_message: 'Quote fixes', ...args },
+});
+const shaped = (tool, args) => ({ cwd: os.tmpdir(), tool_name: tool, tool_input: args });
+const MERGE_NAMES = ['mcp__1a59c906-04da-521d-bda7-7f71b9f9e01c__merge_pull_request', 'mcp__x__merge-pull-request', 'mcp__x__mergePullRequest', 'mcp__plugin_engineering_github__merge_pull_request', 'mcp__codex_apps__github_merge_pull_request'];
+const AUTO_NAMES = ['mcp__github__enable_pr_auto_merge', 'mcp__codex_apps__github__enable_pr_auto_merge', 'mcp__1a59c906-04da-521d-bda7-7f71b9f9e01c__enable_pr_auto_merge', 'mcp__x__enable_auto_merge', 'mcp__x__enable_pull_request_auto_merge', 'mcp__x__enable-pr-auto-merge', 'mcp__x__enablePullRequestAutoMerge'];
+
+function swooshzContext(t) {
+  const ctx = context(t);
+  ctx.swooshz = repository(ctx.root, 'swooshz', { slug: DIAGNOSTIC_REPO });
+  return ctx;
+}
+
+test('rows 1-4: the diagnostic Codex merge is identified, held for the user, pinned by a typed SHA and needs its SHA field', (t) => {
+  const ctx = swooshzContext(t);
+  // Row 1: identified, not "cannot identify".
+  const first = decide(ctx, codexCall()).deny;
+  assert.match(first, new RegExp(`has not approved a merge of ${DIAGNOSTIC_REPO}#292`));
+  assert.doesNotMatch(first, /cannot identify/);
+  // Row 2: allowed once after the user's own line in that repository, then refused again.
+  assert.equal(typed(ctx, 'merge 292', { cwd: ctx.swooshz }), 1);
+  assert.equal(decide(ctx, codexCall()), null);
+  assert.match(decide(ctx, codexCall()).deny, /has not approved/, 'used up');
+  // Row 3: a typed SHA (all digits here, as this head's short SHA is) pins the head.
+  assert.deepEqual(hold.approvalsIn('merge 292 at 7384901'), [{ repository: null, pr: 292, sha: '7384901' }]);
+  typed(ctx, 'merge 292 at 7384901', { cwd: ctx.swooshz });
+  assert.match(decide(ctx, codexCall({ expected_head_sha: SHA })).deny, new RegExp(`approved ${DIAGNOSTIC_REPO}#292 at 7384901`));
+  assert.equal(decide(ctx, codexCall()), null);
+  // Row 4: no head SHA field is refused, and the refusal names this shape's field, not a value.
+  typed(ctx, 'merge 292', { cwd: ctx.swooshz });
+  const noSha = decide(ctx, codexCall({ expected_head_sha: undefined })).deny;
+  assert.match(noSha, /has repository_full_name and pr_number but no head SHA field\. Add expected_head_sha and retry/);
+  assert.doesNotMatch(noSha, /Swooshz|292/);
+  assert.equal(decide(ctx, codexCall()), null, 'the refused call did not use the approval');
+});
+
+test('row 5: the official server (pullNumber, expectedHeadSha) and older servers (pull_number, sha) keep today\'s outcomes', (t) => {
+  const ctx = context(t);
+  for (const [number, shaField] of [['pullNumber', 'expectedHeadSha'], ['pull_number', 'sha']]) {
+    const call = (args = {}) => shaped('mcp__github__merge_pull_request', { owner: 'owner', repo: 'a', [number]: 618, [shaField]: SHA, ...args });
+    assert.match(decide(ctx, call()).deny, /has not approved a merge of owner\/a#618/, number);
+    typed(ctx, 'merge 618');
+    assert.match(decide(ctx, call({ [shaField]: undefined })).deny, new RegExp(`but no head SHA field\\. Add ${shaField} and retry`), number);
+    assert.equal(decide(ctx, call()), null, number);
+    assert.match(decide(ctx, call()).deny, /has not approved/, `${number}: used up`);
+  }
+  // A digit-only string is a number too.
+  typed(ctx, 'merge 618');
+  assert.equal(decide(ctx, shaped('mcp__github__merge_pull_request', { owner: 'owner', repo: 'a', pull_number: '618', sha: SHA })), null);
+});
+
+test('rows 6-10: fields that disagree or cannot be read are refused, even with an approval', (t) => {
+  const ctx = swooshzContext(t);
+  typed(ctx, 'merge 292', { cwd: ctx.swooshz });
+  typed(ctx, 'merge owner/a#292', { cwd: ctx.root });
+  // Row 6: two numbers.
+  assert.match(decide(ctx, codexCall({ pullNumber: 293 })).deny, /names more than one pull request \(found repository_full_name, pr_number, pullNumber and expected_head_sha, and they disagree\), so it is unclear and refused/);
+  // Row 7: two repositories.
+  assert.match(decide(ctx, codexCall({ repository_full_name: 'o/a', owner: 'o', repo: 'b' })).deny, /names more than one repository/);
+  // Row 8: a number Toolkit cannot read, in connector wording, with no value echoed.
+  for (const value of ['292abc', -1, 0, 1.5, '', null, '#292', [292], { n: 292 }, true, ' 292', '292 ', '\uff12\uff19\uff12', '0x124', '1e3', 2 ** 53, Number.NaN, Infinity, '292\n']) {
+    const deny = decide(ctx, codexCall({ pr_number: value })).deny;
+    assert.match(deny, /this merge tool call names a pull request Toolkit cannot identify \(found repository_full_name, pr_number and expected_head_sha; pr_number is not a positive whole number\)/, JSON.stringify(value));
+  }
+  assert.match(decide(ctx, codexCall({ pr_number: undefined })).deny, /cannot identify \(found repository_full_name and expected_head_sha; no pull request number field\)/);
+  assert.match(decide(ctx, codexCall({ pull_number: 'x' })).deny, /pr_number and pull_number must each be a positive whole number/);
+  // Row 9: a repository Toolkit cannot read.
+  const repositories = ['o', 'o/a/b', 'o/a?x', '', 'o/a ', ' o/a', 'o/\u0430', 'o//a', 42, null, ...Object.values(hostile.BREAKS).map(end => `owner/a${end}`)];
+  for (const value of repositories) assert.match(decide(ctx, codexCall({ repository_full_name: value })).deny, /Toolkit cannot tell which repository this merge tool call for pull request #292 is in/, JSON.stringify(value));
+  for (const args of [{ owner: 'owner' }, { repo: 'a' }, { owner: 'owner', repo: 'a/b' }, { owner: 'owner', repo: ['a'] }]) {
+    assert.match(decide(ctx, shaped('mcp__github__merge_pull_request', { pullNumber: 292, expectedHeadSha: SHA, ...args })).deny, /cannot tell which repository/, JSON.stringify(args));
+  }
+  // A readable repository_full_name does not cover for an unreadable owner and repo.
+  assert.match(decide(ctx, codexCall({ owner: 'Swooshz-com' })).deny, /cannot tell which repository/);
+  // Row 10: two head commits that disagree, and one that cannot be read.
+  assert.match(decide(ctx, codexCall({ sha: SHA })).deny, /names more than one head commit/);
+  assert.match(decide(ctx, codexCall({ expected_head_sha: 'not-a-sha' })).deny, /names a head commit Toolkit cannot read/);
+  assert.match(decide(ctx, codexCall({ expected_head_sha: SHA.slice(0, 6) })).deny, /names a head commit Toolkit cannot read/);
+  // Fields that agree are fine, in any letter case.
+  assert.equal(decide(ctx, codexCall({ owner: 'swooshz-com', repo: 'Swooshz-Quote-Auto-Generator', pullNumber: '292', expectedHeadSha: DIAGNOSTIC_SHA.toUpperCase() })), null);
+  // None of these refusals used the approval for owner/a#292.
+  assert.equal(decide(ctx, shaped('mcp__x__merge_pull_request', { owner: 'owner', repo: 'a', pr_number: 292, expected_head_sha: SHA })), null);
+});
+
+test('rows 11-13 and 21: any merge tool name is held, auto-merge is always refused, and read tools pass', (t) => {
+  const ctx = context(t);
+  const args = { repository_full_name: 'owner/a', pr_number: 618, expected_head_sha: SHA };
+  // Row 11: held exactly like the GitHub-named tool.
+  for (const tool of MERGE_NAMES) {
+    assert.match(decide(ctx, shaped(tool, args)).deny, /has not approved a merge of owner\/a#618/, tool);
+    typed(ctx, 'merge 618');
+    assert.equal(decide(ctx, shaped(tool, args)), null, tool);
+    assert.match(decide(ctx, shaped(tool, args)).deny, /has not approved/, `${tool}: used up`);
+  }
+  // Row 12: auto-merge under any server name, with or without an approval or a SHA.
+  for (const tool of AUTO_NAMES) {
+    for (const call of [args, { ...args, expected_head_sha: undefined }]) {
+      assert.match(decide(ctx, shaped(tool, call))?.deny || '', /^Toolkit: /, tool);
+      typed(ctx, 'merge 618');
+      assert.match(decide(ctx, shaped(tool, call))?.deny || '', /auto-merge cannot name the head commit/, `${tool} with an approval`);
+    }
+  }
+  // Row 13: read tools are not merges.
+  for (const tool of ['mcp__codex_apps__github__get_pull_request', 'mcp__github__pull_request_read', 'mcp__x__list_merge_requests', 'mcp__x__get_merge_status', 'mcp__x__unmerge_pull_request']) {
+    assert.equal(decide(ctx, shaped(tool, args)), null, tool);
+    assert.equal(hold.mayMerge(shaped(tool, args)), false, tool);
+  }
+  // Row 21: the failure path treats every merge and auto-merge name as a merge, so a crash fails closed.
+  for (const tool of [CODEX_MERGE, ...MERGE_NAMES, ...AUTO_NAMES]) assert.equal(hold.mayMerge(shaped(tool, {})), true, tool);
+  const broken = { environment: {}, ...ctx.options, mergeHold: { decide() { throw new Error('boom'); }, mayMerge: hold.mayMerge } };
+  for (const tool of [CODEX_MERGE, ...MERGE_NAMES, ...AUTO_NAMES]) assert.match(claudeHook.respond('PreToolUse', shaped(tool, args), broken).hookSpecificOutput.permissionDecisionReason, /merge check failed/, tool);
+});
+
+test('row 14: both hook files send every merge tool name to the merge hold', () => {
+  const root = path.resolve(__dirname, '..', '..');
+  const claude = JSON.parse(fs.readFileSync(path.join(root, '.claude-plugin', 'hooks', 'hooks.json'), 'utf8')).hooks.PreToolUse;
+  const governanceEntry = claude.find(entry => entry.hooks.some(hook => hook.command.includes('toolkit-governance-hook.cjs')));
+  const codex = JSON.parse(fs.readFileSync(path.join(root, '.codex-plugin', 'hooks', 'hooks.json'), 'utf8')).hooks.PreToolUse;
+  for (const tool of [CODEX_MERGE, 'mcp__x__merge_pull_request', ...MERGE_NAMES, ...AUTO_NAMES]) {
+    assert.match(tool, new RegExp(governanceEntry.matcher), `Claude: ${tool}`);
+    assert.ok(codex.some(entry => new RegExp(entry.matcher).test(tool) && entry.hooks.some(hook => hook.command.includes('toolkit-codex-helper-hook.cjs'))), `Codex: ${tool}`);
+  }
+  // The packaged copies are the contract sources.
+  for (const host of ['claude', 'codex']) {
+    assert.equal(fs.readFileSync(path.join(root, `.${host}-plugin`, 'hooks', 'hooks.json'), 'utf8'), fs.readFileSync(path.join(root, 'repo', 'contracts', 'toolkit-local-bridge', `${host}-plugin`, 'hooks', 'hooks.json'), 'utf8'), host);
+  }
+});
+
+test('row 15: the Codex hook refuses the Codex-shaped merge, records a code-span approval, allows one merge and refuses again', (t) => {
+  const ctx = context(t);
+  const home = path.join(ctx.root, 'home');
+  const script = path.resolve(__dirname, '..', 'scripts', 'toolkit-codex-helper-hook.cjs');
+  const env = { ...process.env, HOME: home, USERPROFILE: home, TOOLKIT_HOST_SESSION: '', TOOLKIT_GATE_ROLE: '', TOOLKIT_NATIVE_HELPER_BINDING: '', TOOLKIT_CLAUDE_TASK_PROFILE_SHA256: '', CLAUDE_CODE_REMOTE: '' };
+  const run = (input) => spawnSync(process.execPath, [script], { input: JSON.stringify(input), encoding: 'utf8', env, cwd: ctx.root });
+  const merge = { cwd: ctx.root, tool_name: CODEX_MERGE, tool_input: { repository_full_name: 'owner/a', pr_number: 618, expected_head_sha: SHA, merge_method: 'merge' } };
+  const refused = run(merge);
+  assert.equal(refused.status, 2, refused.stdout + refused.stderr);
+  assert.match(refused.stdout + refused.stderr, /has not approved a merge of owner\/a#618/);
+  gate.startSession({ session_id: 'codex-user', source: 'startup', cwd: ctx.root }, { registryOptions: { registryPath: path.join(home, '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json'), testOnly: true } });
+  const prompt = run({ hook_event_name: 'UserPromptSubmit', cwd: ctx.root, session_id: 'codex-user', prompt: 'Read the summary.\n`merge owner/a#618`' });
+  assert.equal(prompt.status, 0, prompt.stdout + prompt.stderr);
+  const allowed = run(merge);
+  assert.equal(allowed.status, 0, allowed.stdout + allowed.stderr);
+  assert.equal(run(merge).status, 2, 'used up');
+});
+
+test('rows 16-19: a line that is only a code span counts; other backticks, quotes and fenced lines do not', (t) => {
+  // Row 16.
+  for (const text of ['`merge 292`', '``merge 292``', '```merge 292```', '- `merge 292`', '1. `merge 292`', '` merge 292 `', '`merge owner/name#292`', '`merge 292 at 7384901`']) {
+    assert.deepEqual(hold.approvalsIn(text).map(item => item.pr), [292], text);
+  }
+  // Row 17: everything else with a backtick or a quote, and every existing rule inside a span.
+  for (const text of ['run `merge 292`', '`merge 292` later', '`merge 292', 'merge 292`', '`merge` 292', '``merge 292`', '````merge 292````', '`merge 292``', '"merge 292"', '> merge 292',
+    '`> merge 292`', '`"merge 292"`', '`merge 292?`', '`don\'t merge 292`', '`merge 292 later`', '`merge main into 292`', '`merge 292` `merge 293`', '\u200b`merge 292`']) {
+    assert.deepEqual(hold.approvalsIn(text), [], text);
+  }
+  // The quote and refusal shapes in the shared hostile set stay refused inside a code span.
+  const quotes = hostile.cases(['free-text']).filter(shape => /quote|refusal|condition/.test(shape.id));
+  hostile.expectDefaultDeny(assert, text => hold.approvalsIn(`\`${text}\``).length > 0, quotes);
+  // Row 18: a fenced line never counts; the same line after the fence closes does.
+  for (const [text, expected] of [
+    ['```\nmerge 292\n```', []], ['~~~\nmerge 292\n~~~', []], ['```text\nmerge 292\n```\nmerge 293', [293]], ['~~~~\nmerge 292\n~~~\nmerge 293', []],
+    ['````\n```\nmerge 292\n````\nmerge 293', [293]], ['```\nmerge 292\n```~\nmerge 293\n```\nmerge 294', [294]], ['- ```\n  merge 292\n  ```\nmerge 293', [293]],
+    ['- - - - - - ```\nmerge 292', []], ['```\nmerge 292', []], ['\u200b```\nmerge 292\n```', []], ['```\n```\nmerge 293', [293]],
+  ]) assert.deepEqual(hold.approvalsIn(text).map(item => item.pr), expected, JSON.stringify(text));
+  for (const { id, text } of hostile.variants('looks good\n```\nmerge 292\n```')) assert.deepEqual(hold.approvalsIn(text), [], id);
+  for (const { id, text } of hostile.variants('```\nmerge 292\n```\nmerge 293')) assert.deepEqual(hold.approvalsIn(text).map(item => item.pr), [293], id);
+  // Row 19: the session guard is unchanged.
+  const ctx = context(t);
+  assert.equal(typed(ctx, '`merge 292`'), 1, 'the user\'s own session');
+  assert.equal(typed(ctx, '`merge 292`', { session: userSession(ctx, 'resumed', 'resume') }), 0, 'a resumed run');
+  assert.equal(typed(ctx, '`merge 292`', { environment: { TOOLKIT_HOST_SESSION: 'another' } }), 0, 'started by another session');
+  assert.equal(typed(ctx, '`merge 292`', { session: 'unmarked' }), 0, 'no session-start mark');
+});
+
+test('the ask text shows the approval line as plain text', (t) => {
+  const ctx = context(t);
+  const deny = decide(ctx, codexCall()).deny;
+  assert.match(deny, /as plain text and not in quotes, a line with the word merge and the pull request number, such as merge N or merge owner\/name#N/);
+  assert.doesNotMatch(deny, /"merge N"/);
 });

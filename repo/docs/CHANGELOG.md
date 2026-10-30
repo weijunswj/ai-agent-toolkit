@@ -1,5 +1,12 @@
 # Toolkit Changelog
 
+## 3.19.13 (the merge hold reads every GitHub connector's merge call)
+
+- **Fixed:** the merge hold read only one connector shape (`owner`, `repo`, `pullNumber`, `expectedHeadSha`), so Codex's GitHub app merge (`repository_full_name`, `pr_number`, `expected_head_sha`) was always refused as a pull request Toolkit "cannot identify", even after the user approved it. One shared reader now reads the official GitHub server, older servers (`pull_number`, `sha`) and Codex's GitHub app. A call whose fields are missing, cannot be read or disagree is still refused, and the refusal now names the fields it found and the one that is missing, never their values.
+- **Wider:** any `mcp__` tool named `merge_pull_request`, `merge-pull-request` or `mergePullRequest` is held, whatever its server is called (claude.ai connectors name theirs with an ID), and every auto-merge spelling is refused. Read tools still pass.
+- **Approval lines:** a line that is only one inline code span, such as `` `merge 618` `` (the way Codex and Claude show a suggested reply), now counts, read with every other rule. A short SHA right after "at" may be all digits (`merge 618 at 7384901`). Lines inside a fenced code block (``` or ~~~) never count, so pasted output cannot carry an approval. The refusal asks for the line as plain text, not in quotes.
+- **Claude Projects:** the merge-summary check reads the pull request with the same reader, so a Codex-shaped merge needs an "external effects" line that names its pull request, and its hook now sees every merge tool spelling.
+
 ## 3.19.12 (setup shows the choices once when it updates itself)
 
 - **Fixed:** when the Toolkit copy setup runs from was behind and automatic updates are on, setup showed the choices, took the answer, then updated itself, stopped and showed the choices again. Setup started from that copy now makes the same clean update the session start makes before it shows the choices. When the update changed setup's own files it stops before any question with `## Setup updated itself`, and the rerun shows the one table, built from the new setup.

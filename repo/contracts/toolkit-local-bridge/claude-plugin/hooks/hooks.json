@@ -70,7 +70,7 @@
         ]
       },
       {
-        "matcher": "^(?:mcp__hearthbot__(?:post_message|edit_message)|Bash|PowerShell|mcp__.*merge_pull_request)$",
+        "matcher": "^(?:mcp__hearthbot__(?:post_message|edit_message)|Bash|PowerShell|mcp__.*[Mm][Ee][Rr][Gg][Ee].*)$",
         "hooks": [
           {
             "type": "command",
