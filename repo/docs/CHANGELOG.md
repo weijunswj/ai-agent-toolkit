@@ -1,5 +1,13 @@
 # Toolkit Changelog
 
+## 3.19.8 (answers to forwarded owner messages show below them)
+
+- **Fixed:** when the coordinator forwards one of your project chat messages into a work thread, the thread now answers with a new post under it. Before, the post hook did not count the forwarded copy as you writing, so it made the thread edit its older post, and the answer landed above your message where it was easy to miss.
+- **How it is read:** only the server's own copy of your message counts (a citation of your message inside the coordinator's relay, in the local and cloud shapes). The coordinator's note, quoted or escaped text, other sessions' output and tool results never count.
+- **Counted once:** a message that arrives more than once (queued, then delivered, or cited again later) counts once, so a thread that already answered it keeps editing its answer.
+- **Coordinator unchanged for its own wakes:** in the coordinator, a citation counts only for a main chat message it had not seen, and only for its posts from before that message.
+- **Projects skill 2026-10-30.1:** the post rule now says an owner message forwarded into a thread counts as the owner writing there.
+
 ## 3.19.7 (the continuation guard reads what a command runs)
 
 - **Fewer false refusals:** the guard that refuses resuming or forking a Claude or Codex session now reads where a shell runs a program, instead of looking for host letters anywhere in the text. Read-only commands that name a `.codex`, `.claude`, `Claude-Data` or `Temp\claude` folder, or mention resume or fork, now run, with pipes, chains, loops, heredocs and here-strings: ssh and Docker comparisons, PowerShell reads at chat start and Python scripts piped into Codex's bundled Python among them.

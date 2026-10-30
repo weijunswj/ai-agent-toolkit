@@ -30,6 +30,11 @@
 // - Post fresh after the owner writes: every edit of a top-level post the owner has written after is refused, since
 //   anything it adds would sit above the owner's message. Only an owner reply under the running post itself (a
 //   thread whose root is that post) leaves the running post open to edits; any other owner message marks every post.
+// - Forwarded owner messages: an owner message the coordinator forwards into a work thread arrives as the server's
+//   citation inside a relay, and the thread shows it below its posts, so in a work thread it counts as the owner
+//   writing there. In the coordinator, only a citation of an owner message in the main project chat counts, and only
+//   for its posts from before that message. Each owner message counts once by its id, however often it is queued,
+//   delivered, cited or read in the chat.
 // - Merge summary: in a Projects session (one that has used the Projects tools), a PR merge (the gh merge command, a
 //   gh api PUT to .../pulls/<n>/merge or a merge_pull_request tool) is refused until a line of one of its own posts
 //   says "external effects" and names that PR; every merge in a command is checked. The command is read word by word
@@ -89,31 +94,75 @@ function hasOptionList(body) {
 // task notification or another session's output), so an owner tag quoted or forwarded inside one of them never counts.
 // The runtime also escapes "<" in message text, so a quoted tag usually arrives as plain text; this is the second line
 // of defence. Any other wrapper (wake, project, thread or a newer one) is accepted, so a change in the wake's outer
-// shape cannot silently stop owner messages from counting.
+// shape cannot silently stop owner messages from counting. The one owner copy inside them that counts is the server's
+// citation of an owner message (see RELAY_WRAPPERS); nothing inside that citation counts.
 const QUOTE_TAGS = new Set([
   'message', 'note', 'cited', 'relay', 'coordinator-relay',
   'cross-session-message', 'task-notification', 'child-session-output', 'project_claude_message',
 ]);
-// Returns one entry per owner message: the ts of the innermost <thread> around it (null outside any thread) and its
-// sent-at time (null when the wake gives none).
+// The wrappers a server relay arrives in: <project_claude_message> on a local Remote Control thread, <coordinator-relay>
+// in the cloud. A <cited author="user" id="cmsg_..."> directly inside a <relay> that sits only inside these (or in
+// none) is the server's copy of an owner message it forwards, so it counts. The server escapes "<" in the
+// coordinator's note and in cited bodies, so Claude text cannot build one; a relay inside any other tag is quoted text,
+// and a newer wrapper fails toward not counting.
+const RELAY_WRAPPERS = new Set(['project_claude_message', 'coordinator-relay']);
+const TAG = /<(\/?)([A-Za-z][\w-]*)\b([^<>]*?)(\/?)>/g;
+const WHOLE_MESSAGE_ID = /^cmsg_[A-Za-z0-9]+$/;
+
+// The one value of an attribute in a tag, or null when it is missing or given twice ("id" never matches "author-id").
+function attribute(attributes, name) {
+  const values = [...attributes.matchAll(new RegExp(String.raw`(?:^|\s)${name}=["']([^"']*)["']`, 'g'))];
+  return values.length === 1 ? values[0][1] : null;
+}
+
+// Returns one entry per owner message: its id (null when not given), the ts of the innermost <thread> around it (null
+// outside any thread or for a citation), its time (sent-at, or a citation's at; null when not given) and, for a
+// citation, where the owner wrote it (timeline, this-thread or other-thread). Each tag costs constant work, so long
+// runs of nested tags stay linear.
 function ownerMessages(text) {
   const open = [];
+  // Where each tag name sits in `open`, and how many open tags quote or are not relay wrappers.
+  const places = new Map();
+  let quoting = 0;
+  let unwrapped = 0;
+  const track = (name, step) => {
+    if (QUOTE_TAGS.has(name)) quoting += step;
+    if (!RELAY_WRAPPERS.has(name)) unwrapped += step;
+  };
   const found = [];
-  for (const tag of text.matchAll(/<(\/?)([A-Za-z][\w-]*)\b([^<>]*?)(\/?)>/g)) {
+  for (const tag of text.matchAll(TAG)) {
     const [, closing, name, attributes, selfClosing] = tag;
     if (closing) {
-      const at = open.map(item => item.name).lastIndexOf(name);
-      if (at !== -1) open.length = at;
+      const at = places.get(name)?.at(-1);
+      while (at !== undefined && open.length > at) {
+        const item = open.pop();
+        places.get(item.name).pop();
+        track(item.name, -1);
+      }
       continue;
     }
-    if (name === 'message' && /\bfrom=["']human["']/.test(attributes) && !open.some(item => QUOTE_TAGS.has(item.name))) {
-      const thread = [...open].reverse().find(item => item.name === 'thread');
+    if (name === 'message' && /\bfrom=["']human["']/.test(attributes) && quoting === 0) {
+      const thread = open[places.get('thread')?.at(-1)];
+      const id = attribute(attributes, 'id');
       found.push({
+        id: id && WHOLE_MESSAGE_ID.test(id) ? id : null,
         thread: thread ? thread.attributes.match(/\bts=["']([^"']+)["']/)?.[1] || null : null,
         at: attributes.match(/\bsent-at=["']([^"']+)["']/)?.[1] || null,
+        where: null,
       });
+    } else if (name === 'cited' && open.at(-1)?.name === 'relay' && unwrapped === 1) {
+      // Only the relay itself is outside the wrappers, so it is the server's relay, not one quoted in other text.
+      const id = attribute(attributes, 'id');
+      if (attribute(attributes, 'author') === 'user' && id && WHOLE_MESSAGE_ID.test(id)) {
+        found.push({ id, thread: null, at: attribute(attributes, 'at'), where: attribute(attributes, 'where') });
+      }
     }
-    if (!selfClosing) open.push({ name, attributes });
+    if (!selfClosing) {
+      if (!places.has(name)) places.set(name, []);
+      places.get(name).push(open.length);
+      open.push({ name, attributes });
+      track(name, 1);
+    }
   }
   return found;
 }
@@ -164,20 +213,33 @@ function threadSession(entries) {
   return false;
 }
 
-// The newest top-level message in a project chat read that reached the last page, or null. The listing is the JSON
-// object in the result; message bodies inside it are escaped strings, so they cannot fake its shape.
-function chatNewest(text) {
+// The top-level messages of a project chat read that reached the last page, or null. The listing is the JSON object
+// in the result; message bodies inside it are escaped strings, so they cannot fake its shape.
+function chatPage(text) {
   const start = text.indexOf('{"messages":');
   const end = text.lastIndexOf('}');
   if (start === -1 || end < start) return null;
   let listing;
   try { listing = JSON.parse(text.slice(start, end + 1)); } catch { return null; }
   if (listing?.has_more !== false || !Array.isArray(listing.messages)) return null;
+  return listing.messages;
+}
+
+// The newest message on that page, or null.
+function chatNewest(messages) {
   let newest = null;
-  for (const message of listing.messages) {
+  for (const message of messages || []) {
     if (typeof message?.created_at === 'string' && (!newest || message.created_at >= newest.created_at)) newest = message;
   }
   return typeof newest?.id === 'string' && MESSAGE_ID.test(newest.id) ? newest : null;
+}
+
+// Whether a post recorded at `time` came before an owner message sent at `at`; a missing or unreadable time counts as
+// before, so the post is closed to edits and the session posts fresh.
+function postedBefore(time, at) {
+  const posted = Date.parse(time);
+  const sent = Date.parse(at);
+  return !(posted >= sent);
 }
 
 // A card (onboarding, decision or activity) is a JSON object with a kind, not a post.
@@ -222,9 +284,30 @@ function readTranscript(lines) {
     }
     running = null;
   };
+  // A citation in the coordinator of an owner chat message it never saw: only its posts from before that message sit
+  // above it, and the running post stays open when it came after.
+  const ownerWroteBefore = at => {
+    for (const post of posts.values()) {
+      if (postedBefore(post.time, at)) post.ownerAfter = true;
+    }
+    const time = at || LATEST_TIME;
+    if (ownerAt === null || time > ownerAt) ownerAt = time;
+    if (running && posts.get(running.id)?.ownerAfter) running = null;
+  };
+  // Owner message ids already counted, so one message counts once however often it is queued, delivered or cited.
+  const seen = new Set();
   for (const entry of entries) {
-    const owner = ownerMessages(userText(entry));
-    if (owner.length) ownerWrote(owner);
+    const owner = ownerMessages(userText(entry)).filter(({ id }) => {
+      if (id === null) return true;
+      if (seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
+    // A work thread shows every owner message forwarded to it below its posts, wherever the owner wrote it. The
+    // coordinator posts in the main project chat, so only a citation of an owner chat message counts there.
+    const wakes = owner.filter(({ where }) => where === null || inThread);
+    if (wakes.length) ownerWrote(wakes);
+    for (const { at } of owner.filter(({ where }) => where === 'timeline' && !inThread)) ownerWroteBefore(at);
     const content = entry?.message?.content;
     if (!Array.isArray(content)) continue;
     for (const block of content) {
@@ -236,11 +319,17 @@ function readTranscript(lines) {
         pending.delete(block.tool_use_id);
         if (block.is_error) continue;
         if (call.name === CHAT_READ_TOOL) {
-          const latest = inThread ? null : chatNewest(resultText(block));
-          // The owner's top-level message is the newest: it sits below every post, as an owner message in the chat.
-          // The coordinator's newest post is the running post only when no owner message seen here (a reply in a
-          // thread included) came after it, so it is never both closed to edits and barred from a fresh post.
-          if (latest?.author === 'user') ownerWrote([{ thread: null, at: latest.created_at }]);
+          const page = inThread ? null : chatPage(resultText(block));
+          const latest = chatNewest(page);
+          const fresh = latest?.author === 'user' && !seen.has(latest.id);
+          for (const message of page || []) {
+            if (message?.author === 'user' && typeof message.id === 'string') seen.add(message.id);
+          }
+          // The owner's top-level message is the newest: it sits below every post, as an owner message in the chat,
+          // unless this session already counted it. The coordinator's newest post is the running post only when no
+          // owner message seen here (a reply in a thread included) came after it, so it is never both closed to
+          // edits and barred from a fresh post.
+          if (fresh) ownerWrote([{ thread: null, at: latest.created_at }]);
           // A body near the 8 KB limit may be cut short by the read, so that post is left untracked: a fresh post
           // passes, as for any running post that size, and its edits are never compared with a shortened text.
           else if (latest?.author === 'agent' && typeof latest.body === 'string' && !isCard(latest.body)
@@ -249,18 +338,19 @@ function readTranscript(lines) {
             running = { id: latest.id, size: bytes(latest.body) };
             newest = latest.id;
             // Recorded as a top-level post, so a later owner message closes it to edits and its edits are layout-checked.
-            posts.set(latest.id, { text: latest.body, reply: false, ownerAfter: false });
+            posts.set(latest.id, { text: latest.body, reply: false, ownerAfter: false, time: latest.created_at });
           }
         } else if (call.name === POST_TOOL) {
           const id = resultText(block).match(MESSAGE_ID)?.[1];
-          if (id) posts.set(id, { text: textOf(call.input.text), reply: Boolean(call.input.thread_id), ownerAfter: false });
+          // The post's time is when its result was recorded.
+          if (id) posts.set(id, { text: textOf(call.input.text), reply: Boolean(call.input.thread_id), ownerAfter: false, time: entry.timestamp });
           if (id && !call.input.thread_id) {
             running = { id, size: bytes(call.input.text) };
             newest = id;
           }
         } else if (typeof call.input.message_id === 'string') {
           const known = posts.get(call.input.message_id);
-          posts.set(call.input.message_id, { text: textOf(call.input.text), reply: known ? known.reply : null, ownerAfter: known ? known.ownerAfter : false });
+          posts.set(call.input.message_id, { text: textOf(call.input.text), reply: known ? known.reply : null, ownerAfter: known ? known.ownerAfter : false, time: known?.time });
           if (running && call.input.message_id === running.id) running.size = bytes(call.input.text);
         }
       }
