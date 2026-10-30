@@ -52,7 +52,6 @@ test('no plugin payload or skills folder reaches the Projects controller skill',
 
 test('Projects wires managed instructions, promises and fresh scheduled sessions to controller law', () => {
   const text = bundle();
-  assert.match(text, /^Version: 2026-10-31\.1$/m);
   // Gate launches name their gate and route; setup writes the GATE ROUTE line the launch hook reads.
   assert.ok(text.includes('`GATE ROUTE: profile <profile> placement <remote_control|cloud|any> [folder <path>]`'));
   assert.match(text, /\*\*Gate launches carry a Gate line and their route\.\*\* Every thread brief that names a gate carries one line `Gate: <value>`/);

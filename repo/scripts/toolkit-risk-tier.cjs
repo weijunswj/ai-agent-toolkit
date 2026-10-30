@@ -39,13 +39,16 @@ const DEFAULT_CONFIG = Object.freeze({
 // only thing a bump changes. Every removed line must pair with an added line at the same place in its
 // hunk that differs only in that version, so a moved line is never a bump. Other version-like names, such as MIN_VERSION, can change behaviour, so they keep the
 // path's tier, and a code constant never lowers a RISKY path (an installer's VERSION picks what it
-// downloads).
+// downloads). The Projects skill's own "Version: <date>.<counter>" line, which bump-version.cjs --next
+// sets at merge time, counts too, in that one file only.
 const SEMVER_VALUE = /v?\d+\.\d+\.\d+/;
 const MARKER_VERSION = / toolkit=\d+\.\d+\.\d+ /;
+const SKILL_VERSION = /^Version: \d{4}-\d{2}-\d{2}\.\d+$/;
 const VERSION_LINES = Object.freeze([
   { files: /\.json$/i, line: /^\s*"version"\s*:\s*"v?\d+\.\d+\.\d+"\s*,?\s*$/, risky: true },
   { files: /\.(?:[cm]?js|ts|py)$/i, line: /^\s*(?:(?:export\s+)?(?:const|let|var)\s+)?(?:version|__version__)\s*=\s*["'`]v?\d+\.\d+\.\d+["'`]\s*;?\s*$/i, risky: false },
   { files: /./, line: /^\s*<!-- AI-AGENT-TOOLKIT:[^\s]+:BEGIN [A-Za-z0-9._-]+ v\d+ toolkit=\d+\.\d+\.\d+ sha256=[0-9a-f]{12} -->\s*$/, risky: true },
+  { files: /^repo\/contracts\/claude-projects\/web-controller-projects\/SKILL\.md$/, line: SKILL_VERSION, risky: true },
 ]);
 
 function fail(message) { throw Object.assign(new Error(message), { code: 'RISK_TIER_INPUT' }); }
@@ -101,7 +104,8 @@ function versionOnly(rel, changes, { risky = false } = {}) {
   const signed = !Array.isArray(changes);
   const lines = signed ? [...changes.removed, ...changes.added] : changes;
   if (!lines.length || !lines.every(line => rules.some(rule => rule.line.test(line)))) return false;
-  const key = line => (MARKER_VERSION.test(line) ? line.replace(MARKER_VERSION, ' toolkit=<version> ') : line.replace(SEMVER_VALUE, '<version>'));
+  const key = line => (SKILL_VERSION.test(line) ? 'Version: <version>'
+    : MARKER_VERSION.test(line) ? line.replace(MARKER_VERSION, ' toolkit=<version> ') : line.replace(SEMVER_VALUE, '<version>'));
   const bump = (removed, added) => removed !== added && key(removed) === key(added);
   if (signed && Array.isArray(changes.hunks)) {
     return changes.hunks.every(hunk => hunk.removed.length === hunk.added.length && hunk.removed.every((line, index) => bump(line, hunk.added[index])));
