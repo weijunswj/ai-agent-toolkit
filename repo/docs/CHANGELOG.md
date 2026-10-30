@@ -1,5 +1,12 @@
 # Toolkit Changelog
 
+## 3.19.12 (setup shows the choices once when it updates itself)
+
+- **Fixed:** when the Toolkit copy setup runs from was behind and automatic updates are on, setup showed the choices, took the answer, then updated itself, stopped and showed the choices again. Setup started from that copy now makes the same clean update the session start makes before it shows the choices. When the update changed setup's own files it stops before any question with `## Setup updated itself`, and the rerun shows the one table, built from the new setup.
+- **Plainer message:** `## Setup updated itself` now names the Toolkit version it moved from and to, and says whether that happened before the choices or after the answer. After an answer it adds that the earlier answers were for the older setup, so the next run shows the choices again.
+- **Setup skill:** when a table comes back after an answer, the agent says which version setup moved to and which questions changed, and does not quote the skill's rules as the reason.
+- **Unchanged:** with automatic updates off or undecided, a run handed on from another Toolkit copy, a plan or explain run, a missing managed copy, or a copy on another branch, setup shows the choices first and updates only after the answer, as before. A dirty or diverged managed copy, a wrong remote or a failed fetch now stops setup before the choices instead of after them. The table now says "Review every visible choice before setup changes any settings."
+
 ## 3.19.11 (the local secret scan never stops git mid-read)
 
 - **Fixed:** when the local secret scan reads a whole file from history to check it for a private key, it now asks git for the file's size first. A file over 5 MB is listed as not scanned without being read, so git is never stopped part way through. On Windows, stopping Git's launcher left the real `git.exe` running in the scanned folder for a short while, so a folder removed straight after the scan could fail as busy.

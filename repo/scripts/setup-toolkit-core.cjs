@@ -2541,7 +2541,7 @@ function renderSetupQuestionBankTerminal(specs, options = {}) {
   const lines = [
     QUESTION_BANK_BEGIN,
     ...renderQuestionBankHeader(specs, false, false),
-    'Review every visible choice before setup writes anything.',
+    'Review every visible choice before setup changes any settings.',
     ...renderCompactQuestionTable(specs, false),
     '',
     EXPLAIN_HINT,
@@ -2557,7 +2557,7 @@ function renderSetupQuestionBank(specs, options = {}) {
   return [
     QUESTION_BANK_BEGIN,
     ...renderQuestionBankHeader(specs, true, false),
-    'Review every visible choice before setup writes anything.',
+    'Review every visible choice before setup changes any settings.',
     '',
     ...renderCompactQuestionTable(specs, true),
     '',
@@ -3301,17 +3301,55 @@ function applySetupChoices(args, current) {
 // own scripts or the version source, this run stops before any plugin, settings or config step and
 // asks for one more run, which starts with the updated code and version.
 const SETUP_SELF_PATHS = Object.freeze(['repo/scripts', 'repo/contracts/toolkit-local-bridge/version.json']);
-function setupSelfUpdateRerun(args, managed) {
+function toolkitVersionAt(repoRoot, commit) {
+  const text = runGitCapture(repoRoot, ['show', `${commit}:repo/contracts/toolkit-local-bridge/version.json`], 'read the Toolkit version', true, true);
+  try {
+    const version = JSON.parse(text).version;
+    return /^\d+\.\d+\.\d+$/.test(version) ? version : '';
+  } catch {
+    return '';
+  }
+}
+
+function setupSelfUpdateRerun(args, managed, { beforeChoices = false } = {}) {
   if (managed.update_action !== 'fast-forwarded' || !samePath(repoRootFromScript(), args.repoRoot)) return null;
   const changed = runGitCapture(args.repoRoot, ['diff', '--name-only', managed.commit_before, managed.commit_after, '--', ...SETUP_SELF_PATHS],
     'git diff --name-only (setup scripts)', false, true);
   if (!changed) return null;
+  const from = toolkitVersionAt(args.repoRoot, managed.commit_before);
+  const to = toolkitVersionAt(args.repoRoot, managed.commit_after);
+  const when = beforeChoices ? 'before showing the choices' : 'after you answered the choices';
+  const plain = from && to && from !== to
+    ? `Setup updated itself from Toolkit ${from} to ${to} ${when}.`
+    : `Setup updated its own scripts${to ? ` (Toolkit ${to})` : ''} ${when}.`;
   return [
     '## Setup updated itself',
     `Setup updated its Toolkit copy from ${managed.commit_before.slice(0, 7)} to ${managed.commit_after.slice(0, 7)}, and the update changed setup's own scripts.`,
-    'This run stopped there, before any plugin, settings or config step, so the older setup code changed nothing else.',
-    'Run the same setup command again: it starts with the updated setup and asks the setup questions again.',
+    plain,
+    ...(beforeChoices ? [
+      'This run stopped there, before showing the choices or changing anything else.',
+      'Run the same setup command again: it starts with the updated setup and shows the choices once.',
+    ] : [
+      'This run stopped there, before any plugin, settings or config step, so the older setup code changed nothing else.',
+      'Your earlier answers were for the older setup, so the next run shows the choices again.',
+      'Run the same setup command again: it starts with the updated setup and asks the setup questions again.',
+    ]),
   ].join('\n');
+}
+
+// When automatic updates are recorded on for this managed copy and setup runs straight from it,
+// setup makes the same clean fast-forward the session start makes before it shows the choices, so
+// the choices come from the newest setup and the owner is not asked a second time after answering.
+// A delegated child, a plan or explain run, a missing copy, a copy on another branch, and automatic
+// updates that are off, undecided or recorded for another folder keep the update after the answers.
+function updateBeforeChoices(args) {
+  if (!args.execute || Number(process.env[MANAGED_DELEGATION_DEPTH_ENV] || 0) > 0) return null;
+  if (!fs.existsSync(args.repoRoot) || !samePath(repoRootFromScript(), args.repoRoot)) return null;
+  const saved = runBridgeAuditReadOnly(args).repo_auto_update || {};
+  if (saved.enabled !== true || !saved.repo_path || !samePath(saved.repo_path, args.repoRoot)) return null;
+  if (runGitCapture(args.repoRoot, ['branch', '--show-current'], 'git branch --show-current', true, true) !== args.repoBranch) return null;
+  const managed = verifyAndUpdateTrustedRepo(args, null);
+  return { managed, rerun: setupSelfUpdateRerun(args, managed, { beforeChoices: true }) };
 }
 
 // The user's own clone of Toolkit (the folder setup was started from), when it is not the managed
@@ -3989,13 +4027,22 @@ class ToolkitSetupExecution {
 
   async execute() {
     const args = this.#args;
+    const early = updateBeforeChoices(args);
+    if (early?.rerun) {
+      console.log(early.rerun);
+      return SETUP_ACTION_REQUIRED;
+    }
     await this.#collectAndAnswer();
     this.#announcePlan();
-    const managed = verifyAndUpdateTrustedRepo(args, this.#validationResults);
+    let managed = verifyAndUpdateTrustedRepo(args, this.#validationResults);
     const rerun = setupSelfUpdateRerun(args, managed);
     if (rerun) {
       console.log(rerun);
       return SETUP_ACTION_REQUIRED;
+    }
+    // The summary reports the update made before the choices, not the later "already up to date".
+    if (early?.managed.update_action === 'fast-forwarded' && managed.update_action === 'already up to date') {
+      managed = { ...managed, commit_before: early.managed.commit_before, update_action: 'fast-forwarded' };
     }
     const localClone = fastForwardLocalClone(args);
     // The owned V1 zero cap prevents Codex's plugin CLI from loading config.
