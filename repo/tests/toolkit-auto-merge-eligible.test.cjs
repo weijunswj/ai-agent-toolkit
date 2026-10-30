@@ -44,7 +44,7 @@ test('the always-manual paths and a major bump wait for the owner; ordinary chan
 test('CI runs the default branch\'s copy, which needs nothing but Node\'s own modules', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'toolkit-auto-merge-eligible.cjs'), 'utf8');
   assert.deepEqual([...source.matchAll(/\brequire\s*\(([^)]*)\)/g)].map(match => match[1].trim()), ["'node:child_process'"]);
-  const workflow = fs.readFileSync(path.join(__dirname, '..', '..', '.github', 'workflows', 'auto-merge-eligible.yml'), 'utf8');
+  const workflow = fs.readFileSync(path.join(__dirname, '..', '..', '.github', 'workflows', 'auto-merge-eligible.yml'), 'utf8').replace(/\r\n/g, '\n');
   assert.match(workflow, /^on:\n {2}pull_request_target:/m, 'the default branch\'s workflow decides');
   assert.match(workflow, /git show "\$BASE_SHA:repo\/scripts\/toolkit-auto-merge-eligible\.cjs"/, 'the default branch\'s script decides');
   assert.match(workflow, /^permissions:\n {2}contents: read$/m);
