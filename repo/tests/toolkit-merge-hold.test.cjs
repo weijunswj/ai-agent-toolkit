@@ -360,13 +360,19 @@ test('a push names its folder through a variable the same command assigned, and 
   const store = repository(ctx.root, 'store', { slug: 'owner/TRANSPORT-a' });
   const feature = repository(ctx.root, 'feature', { branch: 'work' });
   const ps = (cwd, command) => ({ cwd, tool_name: 'PowerShell', tool_input: { command } });
-  // The real refused call: PowerShell, a variable holding the store's literal path, from another repository.
+  // The real refused call: PowerShell, a variable holding the store's literal path, from another
+  // repository. Claude Code names its shell, so the variable is read as that shell reads it.
+  const claude = (input) => hold.decide(input, { ...ctx.options, environment: {}, host: 'claude' });
   for (const command of [`$d = '${store}'; git -C $d push origin HEAD:main 2>&1 | Select -Last 1`, `$D = "${store}"; Set-Location $d; git push origin main`, `git -C ${store} push origin HEAD:main`]) {
-    assert.equal(decide(ctx, ps(ctx.repo, command)), null, command);
+    assert.equal(claude(ps(ctx.repo, command)), null, command);
   }
-  assert.equal(decide(ctx, bash(ctx.repo, `d='${store.replace(/\\/g, '/')}' ; git -C "$d" push origin HEAD:main`)), null, 'POSIX assignment');
+  assert.equal(claude(bash(ctx.repo, `d='${store.replace(/\\/g, '/')}' ; git -C "$d" push origin HEAD:main`)), null, 'POSIX assignment');
+  // With no shell named (Codex), the push is also judged as if the assignment did not run, which leaves
+  // the session's own repository pushing to main: refused. A literal store path needs no variable.
+  assert.match(decide(ctx, ps(ctx.repo, `$d = '${store}'; git -C $d push origin HEAD:main`))?.deny || '', /default branch `main`/, 'unknown shell');
+  assert.equal(decide(ctx, ps(ctx.repo, `git -C ${store} push origin HEAD:main`)), null, 'literal store path, unknown shell');
   // The variable still points the check at the right repository when that one is not a store.
-  assert.match(decide(ctx, ps(ctx.repo, `$d = '${feature}'; git -C $d push origin work:main`))?.deny || '', /default branch `main`/);
+  assert.match(claude(ps(ctx.repo, `$d = '${feature}'; git -C $d push origin work:main`))?.deny || '', /default branch `main`/);
   // A store named by a cached programme binding, whatever its name, is an evidence store (rule S1).
   const governed = repository(ctx.root, 'governed', { slug: 'owner/governed' });
   const named = repository(ctx.root, 'evidence', { slug: 'owner/evidence' });

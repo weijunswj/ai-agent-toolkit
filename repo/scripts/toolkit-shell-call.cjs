@@ -79,7 +79,11 @@ function assignmentOf(words) {
   return posix ? [`sh:${posix[1]}`, posix[2] ?? posix[3] ?? posix[4]] : null;
 }
 
-const HOME_VARIABLE = /^(?:\$env:USERPROFILE|\$env:HOME|\$HOME|\$\{HOME\}|%USERPROFILE%)(?=$|[\\/])/i;
+// Leading home variables: `$HOME` (`${HOME}` too) is the home folder in bash and PowerShell alike;
+// `$env:USERPROFILE`, `$env:HOME` and `%USERPROFILE%` only in PowerShell and cmd. Bash reads `$env` as
+// an unset variable, so such a word is not the home folder there.
+const HOME_EVERYWHERE = /^(?:\$HOME|\$\{HOME\})(?=$|[\\/])/;
+const HOME_WINDOWS = /^(?:\$env:USERPROFILE|\$env:HOME|%USERPROFILE%)(?=$|[\\/])/i;
 
 // Records an assignment (assignmentOf) in `variables`, noting a name assigned more than once.
 function assignVariable(variables, [key, value]) {
@@ -92,8 +96,10 @@ function assignVariable(variables, [key, value]) {
 // exact case, a PowerShell name in any case, the last assignment winning. When the shell is not known
 // (null), a name assigned in both forms or more than once is left unread, so the folder stays the
 // literal word and the check fails closed; and the caller also judges the command a second time with
-// `shell` 'unset' (SHELL_READINGS), where every assigned name reads as empty, as it does in the shell
-// that cannot run the assignment, so the folder is the one the command is already in.
+// `shell` 'unset' (shellReadings), where every assigned name reads as empty, as it does in the shell
+// that cannot run the assignment, so the folder is the one the command is already in. The home
+// variables follow the same shells: a Windows-only one is the home folder in PowerShell and in the
+// unknown reading, a literal word in bash, and empty in the 'unset' reading.
 function folderWord(word, variables, shell = null) {
   const name = /^\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))$/.exec(word);
   let value = word;
@@ -108,15 +114,20 @@ function folderWord(word, variables, shell = null) {
       if (found.length === 1 && !found[0].reassigned) value = found[0].value;
     }
   }
-  return String(value).replace(HOME_VARIABLE, '~');
+  value = String(value).replace(HOME_EVERYWHERE, '~');
+  if (HOME_WINDOWS.test(value)) {
+    if (shell === 'unset') return '';
+    if (shell !== 'posix') value = value.replace(HOME_WINDOWS, '~');
+  }
+  return value;
 }
 
-// The shell a call runs in, when the host says: Claude Code's Bash tool runs bash and its PowerShell
-// tool PowerShell. Codex names no shell (its Bash tool may run PowerShell on Windows), so it is null.
 // The readings a check judges a command under: the known shell, or for an unknown one both the
 // variables as assigned and the variables as unset. A check refuses when any reading refuses.
 function shellReadings(shell) { return shell ? [shell] : [null, 'unset']; }
 
+// The shell a call runs in, when the host says: Claude Code's Bash tool runs bash and its PowerShell
+// tool PowerShell. Codex names no shell (its Bash tool may run PowerShell on Windows), so it is null.
 function shellOf(input, host) {
   if (host !== 'claude') return null;
   const tool = input && (input.tool_name || input.toolName);
