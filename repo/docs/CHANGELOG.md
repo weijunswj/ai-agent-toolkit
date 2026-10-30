@@ -1,11 +1,21 @@
 # Toolkit Changelog
 
-## 3.19.16 (see one key's value yourself, and env commands you can paste)
+## 3.19.19 (see one key's value yourself, and env commands you can paste)
 
 - **New:** `toolkit env show NAME` shows one stored value in a PowerShell window you opened yourself, after you type the key's name again; `show NAME --copy` puts it on the clipboard instead, marked so Windows clipboard history and sync skip it where Windows honours that. It refuses, before reading the store, in a shell an agent or an app's built-in terminal started, when it is not on a terminal (a pipe or a file), and on a wrong retype. There is no way to show every value, and nothing about it is recorded. The `toolkit-env` skill tells agents never to run it.
 - **Fixed:** messages that told you to "run toolkit env apply" (or `edit`, `remove`, `connect` and the rest) named a command your terminal does not know. In your own terminal they now give the full PowerShell line, `node "$env:USERPROFILE\...\toolkit-env.cjs" apply`; agents still see the short name. The edit file's header gives the same line for `apply` and `remove`, and an edit file made by an earlier version still applies without its old header being kept as your comment.
 - **Fixed:** with two edit files open, `apply` said to apply each, which it never could. It now says to close Notepad and wait 30 minutes for the old files to be deleted, then edit again.
 - **Safer apply:** a value typed in quotes (`NAME="abc"`) was saved with its quotes; it is now refused by line number, with nothing saved. An edit file saved as UTF-16 now gets one plain message to save it as UTF-8, instead of a problem on every line. The header says spaces around a value are dropped. New tests cover values containing `=`, a byte order mark before the first key, and the edit file being overwritten with zeros before it is deleted.
+
+## 3.19.18 (the Projects post hook keeps one running post after a handoff)
+
+- **Fixed:** a new coordinator session no longer starts a fresh chat post when it should edit the running one. With no post of its own and no owner message yet, the post hook takes the running post from the `RUNNING POST:` line the session read from project memory (or wrote to it), and refuses a fresh status post until the owner writes. The refusal says to read the project chat if the owner wrote since or the post nears 8 KB.
+- **Fixed:** while a running post is known, an edit of any other post (an older one, or one the session never saw) is refused and names the running post. Edits of replies stay exempt.
+- **Fixed:** a project chat read passes over cards (thread starts, routing, activity, Remote Control) and gate anchors when it looks for the coordinator's newest post, and any page that shows the memory post gives its real size and any owner message after it.
+- **Changed:** in the coordinator, an owner message in a work thread it started or listed no longer counts as the owner writing in the main chat. Beside a running post, two new posts still pass: a one-line `Gate: ...` anchor, which never becomes the running post, and a post starting "Re: your reply on" after an owner message in a thread or a reply.
+- **New:** things go in lists. In a laid-out post, a new line of three or more sentences is refused with a request to split it into nested bullets; lines an edited post already had are passed over.
+- **Removed:** the post hook no longer checks merges. The rule to post a summary of a merge's external effects and wait for the owner's OK stays in the Projects skill and the global rules; the hook now runs only on the Projects post and edit tools, keeping the post layout, wording, linked Waiting items and the running-post rule.
+- **Unchanged:** a running post of 7,000 bytes or more still frees one fresh post, since the chat's 8 KB limit is real.
 
 ## 3.19.15 (CI runs the tests that pin a date a year ahead)
 

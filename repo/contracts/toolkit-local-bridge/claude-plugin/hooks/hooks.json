@@ -70,7 +70,7 @@
         ]
       },
       {
-        "matcher": "^(?:mcp__hearthbot__(?:post_message|edit_message)|Bash|PowerShell|mcp__.*[Mm][Ee][Rr][Gg][Ee].*)$",
+        "matcher": "^mcp__hearthbot__(?:post_message|edit_message)$",
         "hooks": [
           {
             "type": "command",
