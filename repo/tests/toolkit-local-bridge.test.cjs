@@ -1229,6 +1229,9 @@ test('malformed lock JSON falls back to file mtime: fresh is respected, old is r
   // Freshly written malformed lock (for example a partial write from another
   // process) must not be recklessly removed.
   fs.writeFileSync(lockPath, '{ this is not json', 'utf8');
+  // Dated by Node's clock, which the clock-ahead run moves and file times do not.
+  const freshTime = new Date();
+  fs.utimesSync(lockPath, freshTime, freshTime);
   let result = run(['--hub', hub, '--write', '--enable-auto-sync'], { env: isolatedHomeEnv(root) });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /fresh Toolkit bridge lock/);
