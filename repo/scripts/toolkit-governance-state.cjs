@@ -331,7 +331,7 @@ const ELIGIBILITY_CHECK = 'auto-merge-eligible';
 const TASK_AUTO_MERGE_QUESTION = Object.freeze({
   text: "When a task's pull request has passed review, CI and your testing, should it merge without waiting for you to type merge?",
   no: 'No, I type merge for each one (recommended).',
-  yes: 'Yes, merge it once every check has passed.',
+  yes: 'Yes, merge it once every check has passed; a pull request that changes hooks or merge rules still waits until you add the toolkit-owner-merge label in GitHub.',
   reason: 'Merging changes what every computer and repository gets on its next update, so you see each one first.',
 });
 function taskAutoMerge(root, options = {}) {

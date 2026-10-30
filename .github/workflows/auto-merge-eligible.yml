@@ -1,21 +1,25 @@
 name: Auto-merge eligibility
 
-# Task auto-merge eligibility: fails a pull request on the always-manual list (merge rules, hooks,
-# CI, agent instructions, setup, a major version bump; repo/scripts/toolkit-auto-merge-eligible.cjs).
-# Where the owner turned task auto-merge on, the programme binding and the default branch's rules
-# require this check too, so GitHub refuses an automatic merge of such a pull request and the owner
-# merges it. It is not part of validate, so those pull requests still pass the main gate.
+# Task auto-merge eligibility: fails a pull request on the always-manual list (merge rules, hooks
+# and the modules they load, setup that writes hook config, CI, agent instructions, a major version
+# bump; repo/scripts/toolkit-auto-merge-eligible.cjs). Where the owner turned task auto-merge on,
+# the programme binding and the default branch's rules require this check too, so such a pull
+# request merges only once the owner adds the toolkit-owner-merge label in GitHub, which passes the
+# check for the head it was added on. A new push removes the label again, so the owner's OK never
+# covers commits they have not seen. It is not part of validate, so those pull requests still pass
+# the main gate.
 #
 # pull_request_target runs this file and the eligibility script as they are on the default branch,
 # never the pull request's copies, so a pull request cannot loosen its own check. The pull request's
-# commits are only read as data by git diff; none of its code runs, and the token is read-only and
-# not kept in the checkout.
+# commits are only read as data by git; none of its code runs, and the token is not kept in the
+# checkout. Its only write is removing that one label after a push.
 on:
   pull_request_target:
-    types: [opened, reopened, synchronize, edited]
+    types: [opened, reopened, synchronize, edited, labeled, unlabeled]
 
 permissions:
   contents: read
+  issues: write
 
 concurrency:
   group: auto-merge-eligible-${{ github.event.pull_request.number }}
@@ -40,8 +44,22 @@ jobs:
 
       - name: Check task auto-merge eligibility
         env:
+          ACTION: ${{ github.event.action }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          NUMBER: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
+          owner=""
+          if printf '%s' "$LABELS" | grep -q '"toolkit-owner-merge"'; then
+            if [ "$ACTION" = "synchronize" ]; then
+              gh api -X DELETE "repos/$GH_REPO/issues/$NUMBER/labels/toolkit-owner-merge" > /dev/null
+              echo "A new push removed the toolkit-owner-merge label; the owner adds it again for this head."
+            else
+              owner="--owner-merge"
+            fi
+          fi
           git show "$BASE_SHA:repo/scripts/toolkit-auto-merge-eligible.cjs" > "$RUNNER_TEMP/toolkit-auto-merge-eligible.cjs"
-          node "$RUNNER_TEMP/toolkit-auto-merge-eligible.cjs" --base "$BASE_SHA" --head "$HEAD_SHA"
+          node "$RUNNER_TEMP/toolkit-auto-merge-eligible.cjs" --base "$BASE_SHA" --head "$HEAD_SHA" $owner

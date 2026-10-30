@@ -209,7 +209,32 @@ test('governance check: asks the question once, says off or on, and flags a yes 
   for (const words of [governance.TASK_AUTO_MERGE_QUESTION.text, governance.TASK_AUTO_MERGE_QUESTION.no, 'task_prs.auto_merge', 'auto-merge-eligible']) assert.ok(unanswered.message.includes(words), words);
   assert.match(governance.TASK_AUTO_MERGE_QUESTION.no, /^No\b.*\(recommended\)/, 'No is the recommended answer');
   assert.doesNotMatch(governance.TASK_AUTO_MERGE_QUESTION.yes, /recommended/);
+  assert.match(governance.TASK_AUTO_MERGE_QUESTION.yes, /toolkit-owner-merge label/, 'the yes says how always-manual pull requests merge');
+  const version = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'contracts', 'toolkit-local-bridge', 'version.json'), 'utf8')).version;
+  assert.ok(unanswered.message.includes(`Once every Toolkit copy, the Claude account copy included, runs ${version} or later`), 'asked only once every copy can read the answer');
+  assert.match(unanswered.message, /Until then, ask nothing and merge no answer\./);
   assert.deepEqual(both(binding({ task_prs: { auto_merge: 'off' } })).map(entry => [entry.id, entry.severity]), [['TASK_AUTO_MERGE_OFF', 'info']]);
   assert.deepEqual(both(binding({ task_prs: { auto_merge: 'after-gates' } })).map(entry => [entry.id, entry.severity]), [['TASK_AUTO_MERGE_NOT_ENFORCEABLE', 'drift']]);
   assert.deepEqual(both(YES).map(entry => [entry.id, entry.severity]), [['TASK_AUTO_MERGE_ON', 'info']]);
+});
+
+test('hold: only the owner sets the toolkit-owner-merge label; agents naming it to GitHub are refused', (t) => {
+  const ctx = context(t);
+  merged(ctx, YES);
+  const session = userSession(ctx);
+  const label = require('../scripts/toolkit-auto-merge-eligible.cjs').OWNER_LABEL;
+  assert.equal(label, 'toolkit-owner-merge');
+  for (const command of [`gh pr edit 7 --add-label ${label}`, `gh api -X POST repos/owner/a/issues/7/labels -f labels[]=${label}`, `curl -X POST https://api.github.com/repos/owner/a/issues/7/labels -d '{"labels":["${label}"]}'`, `gh label create ${label}`, `gh pr edit 7 --remove-label ${label}`]) {
+    const result = decide(ctx, bash(ctx, command, session));
+    assert.ok(result && result.deny, command);
+    assert.match(result.deny, /only the owner adds or removes it, in GitHub/, command);
+  }
+  for (const command of [`grep -rn ${label} repo/docs`, 'gh pr view 7 --json labels']) assert.equal(decide(ctx, bash(ctx, command, session)), null, command);
+  const tool = (name, input) => ({ cwd: ctx.repo, session_id: session, tool_name: name, tool_input: input });
+  for (const name of ['mcp__github__issue_write', 'mcp__github__add_labels_to_issue', 'mcp__2f1c__update_pull_request']) {
+    assert.match(decide(ctx, tool(name, { owner: 'owner', repo: 'a', issue_number: 7, labels: [label] })).deny, /only the owner/, name);
+    assert.equal(decide(ctx, tool(name, { owner: 'owner', repo: 'a', issue_number: 7, labels: ['bug'] })), null, `${name} with another label`);
+  }
+  assert.equal(decide(ctx, tool('mcp__hearthbot__post_message', { text: `Add the ${label} label in GitHub.` })), null, 'chat may name it');
+  assert.equal(hold.mayMerge(tool('Bash', { command: `gh pr edit 7 --add-label ${label}` })), true, 'a failed check refuses it too');
 });

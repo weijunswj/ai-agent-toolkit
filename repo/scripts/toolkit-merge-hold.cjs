@@ -57,7 +57,11 @@
 //     remote or a gh default repository other than its own, unless --repo or a URL names it;
 //   - refused, as a tripwire against an agent approving for itself: a command that starts a Claude
 //     or Codex session and mentions merge, or that sets or clears TOOLKIT_HOST_SESSION, names
-//     Toolkit's user-state folder, or the hook scripts together with what would feed them a prompt.
+//     Toolkit's user-state folder, or the hook scripts together with what would feed them a prompt;
+//   - refused, so only the owner gives it: a shell command that names the toolkit-owner-merge label
+//     with a GitHub client (gh, curl and the like), and a connector tool for labels, issues or pull
+//     requests whose call names it. That label is the owner's OK for an always-manual pull request
+//     under task auto-merge; a label name built at run time or read from a file is not seen.
 //
 // Not covered: wrapped or nested host launches (bash -lc, timeout, Start-Process and the like), a
 // prompt file fed to a hook script, pasted text outside a code fence that has a plain approval line, scripts or programs
@@ -143,6 +147,14 @@ const MOVES_TARGET = /(?:^|[\s;&|({])(?:cd|pushd|chdir|set-location|sl)\s|\bGH_R
 // session another one started it (reading or searching for its name is fine).
 const STATE_WORDS = /merge-approvals|[\\/]\.ai-agent-toolkit[\\/]user-state\b|\bTOOLKIT_HOST_SESSION\s*=|(?:\bunset|-u|--unset(?:=|\s+)|\benv:|\$env:)\s*TOOLKIT_HOST_SESSION\b/i;
 const HOOK_FEED = /toolkit-(?:merge-hold|governance-hook|codex-helper-hook)/i;
+// The label the owner adds in GitHub to let an always-manual pull request merge under task
+// auto-merge (toolkit-auto-merge-eligible.cjs OWNER_LABEL). Only the owner sets it, so a shell
+// command that names it with a GitHub client, or a connector call that names it, is refused, reads
+// included; `gh pr view N --json labels` shows it without naming it.
+const OWNER_LABEL = 'toolkit-owner-merge';
+const OWNER_LABEL_WORD = /toolkit-owner-merge/i;
+const GITHUB_CLIENT = /\b(?:gh|hub|curl|wget|irm|iwr|invoke-restmethod|invoke-webrequest)(?:\.exe)?\b/i;
+const OWNER_LABEL_TEXT = `the ${OWNER_LABEL} label is the owner's own OK to merge a pull request on the task auto-merge always-manual list, so only the owner adds or removes it, in GitHub. To see a pull request's labels, use \`gh pr view N --json labels\`.`;
 const FEED_WORDS = /\brequire\b|\brecordPrompt\b|\bUserPromptSubmit\b|\bimport\b/;
 const HOST_WORD = /^(?:claude|codex)(?:-code)?(?:\.exe|\.cmd|\.ps1)?$|claude-code|@openai\/codex/i;
 // gh pr merge flags that take a value, so the value is not read as the pull request.
@@ -597,6 +609,7 @@ function judge(merge, approvals, standing = null) {
 // what an approval can allow; '' when there is none.
 function shellRefusal(text, cwd) {
   if (STATE_WORDS.test(text)) return refuse('Toolkit\'s user-state files (merge approvals and governance decisions) and its session variable must be read and changed only by Toolkit itself. Never act as the user.');
+  if (OWNER_LABEL_WORD.test(text) && GITHUB_CLIENT.test(text)) return refuse(OWNER_LABEL_TEXT);
   if (HOOK_FEED.test(text) && FEED_WORDS.test(text)) return refuse('a merge approval must come from the user\'s own typed message, so commands that load Toolkit\'s hook scripts or feed them a prompt are refused.');
   const parts = segments(text);
   for (const words of parts) {
@@ -646,6 +659,13 @@ function decide(input, { registryOptions = {}, now, environment = process.env } 
   const tool = String(input && (input.tool_name || input.toolName) || '');
   let merges;
   let cwd = input && typeof input.cwd === 'string' ? input.cwd : null;
+  // A connector tool that can set labels (GitHub servers name them after labels, issues or pull
+  // requests, whatever the server is called); chat and other tools may name the label freely.
+  if (/^mcp__.*(?:label|issue|pull)/i.test(tool) && !CONNECTOR_MERGE.test(tool)) {
+    let args = '';
+    try { args = JSON.stringify(input.tool_input || input.toolInput || {}); } catch { args = ''; }
+    return OWNER_LABEL_WORD.test(args) ? refuse(OWNER_LABEL_TEXT) : null;
+  }
   if (CONNECTOR_MERGE.test(tool)) merges = [connectorMerge(tool, input)];
   else if (ShellCall.isShellTool(tool)) {
     // The shared reader: command, cmd or a list of words, and the folder the command runs in
@@ -697,7 +717,7 @@ function mayMerge(input) {
   const args = input.tool_input || input.toolInput || {};
   let text;
   try { text = JSON.stringify(args); } catch { text = String(args); }
-  return /\bgh\b[\s\S]*\b(?:merge|sync|alias|api)\b/i.test(text) || /\bgit\b[\s\S]*\bpush\b/i.test(text) || STATE_WORDS.test(text) || HOOK_FEED.test(text) || /\b(?:claude|codex)\b/i.test(text);
+  return /\bgh\b[\s\S]*\b(?:merge|sync|alias|api)\b/i.test(text) || /\bgit\b[\s\S]*\bpush\b/i.test(text) || STATE_WORDS.test(text) || HOOK_FEED.test(text) || OWNER_LABEL_WORD.test(text) || /\b(?:claude|codex)\b/i.test(text);
 }
 
 const CHECK_FAILED = 'Toolkit: the merge check failed, so this merge or push is refused. Retry it; if this repeats, run `setup toolkit` to repair the Toolkit plugin.';
