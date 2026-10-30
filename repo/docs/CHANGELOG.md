@@ -6,6 +6,7 @@
 - **Fixed:** while a running post is known, an edit of any other post (an older one, or one the session never saw) is refused and names the running post. Edits of replies stay exempt.
 - **Fixed:** a project chat read passes over cards (thread starts, routing, activity, Remote Control) and gate anchors when it looks for the coordinator's newest post, and any page that shows the memory post gives its real size and any owner message after it.
 - **Changed:** in the coordinator, an owner message in a work thread it started or listed no longer counts as the owner writing in the main chat. Beside a running post, two new posts still pass: a one-line `Gate: ...` anchor, which never becomes the running post, and a post starting "Re: your reply on" after an owner message in a thread or a reply.
+- **New:** things go in lists. In a laid-out post, a new line of three or more sentences is refused with a request to split it into nested bullets; lines an edited post already had are passed over.
 - **Removed:** the post hook no longer checks merges. The rule to post a summary of a merge's external effects and wait for the owner's OK stays in the Projects skill and the global rules; the hook now runs only on the Projects post and edit tools, keeping the post layout, wording, linked Waiting items and the running-post rule.
 - **Unchanged:** a running post of 7,000 bytes or more still frees one fresh post, since the chat's 8 KB limit is real.
 

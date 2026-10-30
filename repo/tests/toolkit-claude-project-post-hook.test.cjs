@@ -9,7 +9,7 @@ const { spawnSync } = require('node:child_process');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const HOOK = path.join(ROOT, 'repo', 'scripts', 'toolkit-claude-project-post-hook.cjs');
-const { decide, hasLink, wordingIssue, layoutIssue, editIssue, readTranscript, NEAR_LIMIT_BYTES } = require('../scripts/toolkit-claude-project-post-hook.cjs');
+const { decide, hasLink, wordingIssue, layoutIssue, proseIssue, editIssue, readTranscript, NEAR_LIMIT_BYTES } = require('../scripts/toolkit-claude-project-post-hook.cjs');
 const hostile = require('./support/hostile-inputs.cjs');
 
 const POST = 'mcp__hearthbot__post_message';
@@ -831,4 +831,23 @@ test('a chat read passes over thread-start, routing, activity and Remote Control
   assert.equal(post([early, read([OLD_POST, chatMessage('user', 'cmsg_U2', '{"kind":"activity"}', '20')])]), '');
   // Cards only above the owner's newest message change nothing.
   assert.equal(post([early, read([OLD_POST, chatMessage('agent', 'cmsg_K1', '{"kind":"activity"}', '15'), chatMessage('user', 'cmsg_U2', 'ok', '20')])]), '');
+});
+
+test('things go in lists: a new line of three or more sentences in a laid-out post is refused', () => {
+  const paragraph = '1. Merge OK for the hook: [card](#cmsg_CARD). It changes the hook. The trade-off is speed. Pick A, B or C.';
+  const long = LAID_OUT.replace('1. Merge OK for the hook: [card](#cmsg_CARD)', paragraph);
+  assert.match(proseIssue(long), /runs as a paragraph of three or more sentences.*nested bullets/);
+  assert.match(post([wake()], long), /post layout.*nested bullets/);
+  // The same points as a list pass.
+  const listed = LAID_OUT.replace('1. Merge OK for the hook: [card](#cmsg_CARD)', '1. Merge OK for the hook: [card](#cmsg_CARD)\n    - It changes the hook.\n    - The trade-off is speed.');
+  assert.equal(post([wake()], listed), '');
+  // Two sentences, abbreviations, versions and URLs are fine.
+  for (const line of ['**Now:** built it. CI is green.', '**Now:** e.g. the hook in 3.19.18 at https://example.com/a.b is done. Next is G2.']) {
+    assert.equal(proseIssue(LAID_OUT.replace(/^\*\*Now:\*\*.*$/m, line)), '', line);
+  }
+  // Short posts are exempt, and an edit passes over lines the post already had.
+  assert.equal(proseIssue('One. Two. Three.'), '');
+  const before = LAID_OUT.replace('**Now:** the hook build', '**Now:** One. Two. Three. The hook build');
+  assert.equal(proseIssue(before, before), '');
+  assert.match(proseIssue(before, LAID_OUT), /paragraph/);
 });

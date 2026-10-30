@@ -40,7 +40,8 @@
 //   item above it. A question is never flattened: every line starting **Question: must be a numbered item in the
 //   list, and an unindented or two-space bullet right after a question or its choices (spacers skipped), or one
 //   marked "(my pick)", is refused. Other bullets, spacers and prose are passed over. An edit of an earlier post keeps
-//   every one of its Update lines word for word and adds at least one new one.
+//   every one of its Update lines word for word and adds at least one new one. Things go in lists: a new line of
+//   three or more sentences is refused, to be split into nested bullets.
 // - Post fresh after the owner writes: every edit of a top-level post the owner has written after is refused, since
 //   anything it adds would sit above the owner's message. Only an owner reply under the running post itself (a
 //   thread whose root is that post) leaves the running post open to edits; any other owner message marks every post.
@@ -606,6 +607,22 @@ function layoutIssue(text) {
   return '';
 }
 
+// Things go in lists: a line of a laid-out post holding three or more sentences is a paragraph to split into nested
+// bullets. A sentence ends at . ! or ? before a space and a capital, a quote, a bracket or bold, or at the line end, so
+// "e.g. the", 3.19.18 and URLs do not end one. Lines an earlier text of the post already had are passed over, since an
+// edit keeps them word for word.
+const PROSE_SENTENCES = 3;
+const SENTENCE_END = /[.!?](?=\s+[A-Z("'*[`]|\s*$)/g;
+function proseIssue(text, previous) {
+  const lines = lineList(text);
+  const words = lines.join(' ').split(/\s+/).filter(Boolean).length;
+  if (words < SHORT_POST_WORDS && !lines.some(line => UPDATE_LINE.test(line) || WAITING_LINE.test(line) || QUESTION_LINE.test(line))) return '';
+  const kept = new Set(lineList(textOf(previous)).map(line => line.trim()));
+  const long = lines.find(line => !kept.has(line.trim()) && (line.match(SENTENCE_END) || []).length >= PROSE_SENTENCES);
+  if (!long) return '';
+  return `the line ${quoted(long)} runs as a paragraph of three or more sentences. Keep things in lists: put one point on that line and split the rest into nested bullets indented under it (for example the step, then the trade-off, then each option as its own sub-bullet).`;
+}
+
 // An edit keeps every earlier Update line word for word, once and in order, and appends at least one new one.
 function editIssue(previous, text) {
   const before = updateLines(previous);
@@ -649,7 +666,7 @@ function decide(input, readLines = file => fs.readFileSync(file, 'utf8').split('
     return 'Toolkit Projects rule: post fresh: the owner wrote since this post. An edit would put your answer above the owner\'s message, so send it with post_message as a new post.';
   }
   if (topLevel) {
-    const layout = layoutIssue(text) || (known ? editIssue(known.text, text) : '');
+    const layout = layoutIssue(text) || proseIssue(text, known?.text) || (known ? editIssue(known.text, text) : '');
     if (layout) return `Toolkit Projects rule: post layout (a **Now:** line, **[HH:MM] Update:** one-liners, linked **Waiting on you** items, the **ELI5:** line last). Rewrite the post: ${layout}`;
   }
   if (tool !== POST_TOOL || input.tool_input?.thread_id || !running || running.size >= NEAR_LIMIT_BYTES) return '';
@@ -677,4 +694,4 @@ function main() {
 
 if (require.main === module) process.exitCode = main();
 
-module.exports = { decide, hasLink, wordingIssue, layoutIssue, editIssue, readTranscript, NEAR_LIMIT_BYTES };
+module.exports = { decide, hasLink, wordingIssue, layoutIssue, proseIssue, editIssue, readTranscript, NEAR_LIMIT_BYTES };
