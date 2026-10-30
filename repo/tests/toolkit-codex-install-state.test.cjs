@@ -171,7 +171,50 @@ test('the read-only Codex setup plan launches no Codex command', (t) => {
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
   assert.equal(fs.existsSync(spy.log), false, fs.existsSync(spy.log) ? fs.readFileSync(spy.log, 'utf8') : '');
   assert.match(result.stdout, /\| 3\.1 \| Keep Toolkit available in Codex\? \| On, 3\.19\.0 \([^|]*\) \| A\. Install or refresh/);
-  assert.match(result.stdout, /\| 3\.2 \| Toolkit hooks in Codex \| Off: Shell and agent check, File edit check \| You turn them on in Codex: open \/hooks and turn on Shell and agent check and File edit check\. Codex may ask you to review the hooks again after a refresh; check \/hooks afterwards \| \(report only\) \|/);
+  assert.match(result.stdout, /\nStatus \(nothing to answer\): Toolkit hooks in Codex: Off: Shell and agent check, File edit check\. Turn them on in Codex: open \/hooks and turn on Shell and agent check and File edit check\. Codex may ask you to review the hooks again after a refresh; check \/hooks afterwards\.\n/);
+});
+
+// Every numbered row in the setup table takes an answer, so each one shows letters; state the owner
+// changes elsewhere (the Codex hooks) is an unnumbered status line instead.
+test('every numbered setup row has letter choices in the Codex and Claude Code plans', (t) => {
+  const support = require('./toolkit-setup-test-support.cjs');
+  const root = support.tmpRoot();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const env = support.isolatedHomeEnv(root);
+  // Codex hooks off, so the report-only state is present.
+  write(path.join(root, '.codex', 'config.toml'), `[plugins."${ID}"]\nenabled = true\n\n[hooks.state]\n\n${hookTables('off')}`);
+  const cache = path.join(root, '.codex', 'plugins', 'cache', 'ai-agent-toolkit-local', 'ai-agent-toolkit', '3.19.0');
+  write(path.join(cache, '.codex-plugin', 'plugin.json'), JSON.stringify({ name: 'ai-agent-toolkit', version: '3.19.0' }));
+  write(path.join(cache, '.codex-plugin', 'hooks', 'hooks.json'), HOOKS);
+  for (const host of ['codex', 'claude-code']) {
+    const result = support.run(['--plan', '--host', host], { env });
+    assert.equal(result.status, 0, `${host}\n${result.stdout}\n${result.stderr}`);
+    const rows = result.stdout.split(/\r?\n/).filter((line) => /^\| \d+\.\d+ \|/.test(line));
+    assert.ok(rows.length >= 7, `${host}: ${rows.length} numbered rows`);
+    const refs = [];
+    for (const row of rows) {
+      const [, ref, , , recommended, others] = row.split(/ \| |^\| | \|$/);
+      refs.push(ref);
+      assert.match(recommended, /^[A-Z]+\. \S/, `${host} ${ref} recommends a letter`);
+      assert.match(others, /^[A-Z]+\. \S/, `${host} ${ref} lists other letters`);
+    }
+    // Numbers stay contiguous within each section.
+    const bySection = new Map();
+    for (const ref of refs) {
+      const [section, index] = ref.split('.').map(Number);
+      assert.equal(index, (bySection.get(section) || 0) + 1, `${host} ${ref} follows on`);
+      bySection.set(section, index);
+    }
+    assert.doesNotMatch(result.stdout, /report only/i, host);
+    // The heading counts only the numbered questions.
+    assert.match(result.stdout, new RegExp(`Toolkit setup choices - ${rows.length} questions across`), host);
+    if (host === 'codex') {
+      assert.match(result.stdout, /\nStatus \(nothing to answer\): Toolkit hooks in Codex: All 6 off\. Turn them on in Codex: open \/hooks and turn on /);
+      assert.doesNotMatch(result.stdout, /\| Toolkit hooks in Codex \|/);
+    } else {
+      assert.doesNotMatch(result.stdout, /Toolkit hooks in Codex/);
+    }
+  }
 });
 
 test('the instruction limit is read from the top level of config.toml with its Toolkit markers', () => {
@@ -247,7 +290,7 @@ test('at setup time Keep current and Show instructions only run no Codex plugin 
   assert.match(installed.result.stdout, /Codex plugin status: refreshed/);
 });
 
-// Rows 3.1 and 3.2 of the Codex bank, built from a reader state.
+// Row 3.1 of the Codex bank and its hooks status line, built from a reader state.
 function codexRows(install, audit = {}) {
   const managedPath = core.defaultManagedSourcePath();
   const current = {
@@ -266,25 +309,25 @@ function codexRows(install, audit = {}) {
   return Object.fromEntries(rows.map((row) => [row.id, row]));
 }
 
-test('setup rows 3.1 and 3.2 match the session-start line', () => {
+test('setup row 3.1 and the Codex hooks status line match the session-start line', () => {
   const same = codexRows({});
   assert.equal(same['codex-toolkit-plugin'].presentation.question_ref, '3.1');
   assert.equal(same['codex-toolkit-plugin'].current_short, 'On, 3.19.3');
   assert.equal(same['codex-toolkit-plugin'].recommended, 'keep');
   assert.deepEqual(same['codex-toolkit-plugin'].choices.map((choice) => choice.label), ['Install or refresh', 'Show instructions only', 'Keep current']);
-  assert.equal(same['codex-toolkit-hooks'].presentation.question_ref, '3.2');
+  assert.equal(same['codex-toolkit-hooks'].presentation.question_ref, '');
   assert.equal(same['codex-toolkit-hooks'].current_short, 'All 6 on');
-  assert.equal(same['codex-toolkit-hooks'].recommended_text, 'Keep current');
+  assert.equal(same['codex-toolkit-hooks'].recommended_text, 'Nothing to do');
 
   const older = codexRows({ versions: ['3.19.0'], version: '3.19.0', older: true, cacheFresh: null });
   assert.equal(older['codex-toolkit-plugin'].current_short, 'On, 3.19.0 (3.19.3 available)');
   assert.equal(older['codex-toolkit-plugin'].recommended, 'install');
-  assert.equal(older['codex-toolkit-hooks'].recommended_text, 'Keep current. Codex may ask you to review the hooks again after a refresh; check /hooks afterwards');
+  assert.equal(older['codex-toolkit-hooks'].recommended_text, 'Nothing to do. Codex may ask you to review the hooks again after a refresh; check /hooks afterwards');
 
   const off = codexRows({ hooks: { status: 'read', entries: ALL_NAMES.split(', ').map((name) => ({ name, state: 'off' })) } });
   assert.equal(off['codex-toolkit-plugin'].recommended, 'keep');
   assert.equal(off['codex-toolkit-hooks'].current_short, 'All 6 off');
-  assert.equal(off['codex-toolkit-hooks'].recommended_text, 'You turn them on in Codex: open /hooks and turn on Session start updates, Prompt check, Shell and agent check, File edit check, Checkpoint after tool use and Checkpoint at stop');
+  assert.equal(off['codex-toolkit-hooks'].recommended_text, 'Turn them on in Codex: open /hooks and turn on Session start updates, Prompt check, Shell and agent check, File edit check, Checkpoint after tool use and Checkpoint at stop');
 
   const notReviewed = codexRows({ hooks: { status: 'read', entries: ALL_NAMES.split(', ').map((name) => ({ name, state: name === 'File edit check' ? 'not-reviewed' : 'on' })) } });
   assert.equal(notReviewed['codex-toolkit-hooks'].current_short, 'Not reviewed: File edit check');
@@ -316,7 +359,7 @@ test('setup rows 3.1 and 3.2 match the session-start line', () => {
   assert.equal(codexRows({ versions: [], version: '' })['codex-toolkit-plugin'].current_short, 'Not installed');
 
   const absent = codexRows(null);
-  assert.equal(absent['codex-toolkit-plugin'], undefined, 'no Codex home: rows 3.1 and 3.2 are not shown');
+  assert.equal(absent['codex-toolkit-plugin'], undefined, 'no Codex home: row 3.1 and the hooks status line are not shown');
   assert.equal(absent['codex-toolkit-hooks'], undefined);
 });
 

@@ -18,8 +18,9 @@ const expectedCodexRows = [
   ['codex-helper-capacity', 'Codex helper capacity'],
   ['codex-toolkit-maintenance', 'Codex Toolkit maintenance'],
   ['codex-toolkit-plugin', 'Keep Toolkit available in Codex?'],
-  ['codex-toolkit-hooks', 'Toolkit hooks in Codex'],
   ['antigravity-skills', "Copy Toolkit's skills into Antigravity?"],
+  // A report-only row closes its section as an unnumbered status line.
+  ['codex-toolkit-hooks', 'Toolkit hooks in Codex'],
 ];
 // The rows that take an answer; the Codex hooks row only reports.
 const answerable = (rows) => rows.filter((row) => !row.report_only);
@@ -105,7 +106,9 @@ test('all ordinary Codex questions expose complete canonical semantics', () => {
   assert.equal(report.id, 'codex-toolkit-hooks');
   assert.deepEqual(report.choices, []);
   assert.equal(report.current_short, 'All 6 on');
-  assert.equal(report.recommended_text, 'Keep current');
+  assert.equal(report.recommended_text, 'Nothing to do');
+  assert.equal(report.presentation.question_ref, '');
+  assert.equal(report.presentation.question_index, null);
   for (const row of answerable(rows)) {
     assert.ok(row.whatThisControls.trim(), `${row.id} controls`);
     assert.ok(row.currentState.effectiveBehavior.trim(), `${row.id} current`);
@@ -343,20 +346,24 @@ test('compact table, full text, recommendations, and choices share one indexed o
   const detailed = core.renderSetupQuestionDocumentation(rows, rows);
   assert.equal(rendered.includes('### '), false, 'the bank shows the compact table, not the full text');
   assert.match(rendered, /For the full text of a question, say "explain 1\.2"/);
-  const references = rows.map((row) => row.presentation.question_ref);
-  assert.equal(new Set(references).size, rows.length);
+  const references = answerable(rows).map((row) => row.presentation.question_ref);
+  assert.equal(new Set(references).size, answerable(rows).length);
   let previousIndex = -1;
   for (const row of rows) {
+    if (row.report_only) {
+      // No number and no letters: an unnumbered status line after its section's questions says what to do.
+      const status = `\nStatus (nothing to answer): ${row.title}: ${row.current_short}. ${row.recommended_text}.\n`;
+      const statusPosition = rendered.indexOf(status);
+      assert.ok(statusPosition > previousIndex, row.id);
+      previousIndex = statusPosition;
+      assert.doesNotMatch(rendered, new RegExp(`\\| ${escapeRegExp(row.title)} \\|`));
+      assert.match(detailed, new RegExp(`### Status \\(nothing to answer\\): ${escapeRegExp(row.title)}[\\s\\S]*?\\*\\*What to do:\\*\\* ${escapeRegExp(row.recommended_text)}`));
+      continue;
+    }
     const tableLine = `| ${row.presentation.question_ref} | ${row.title} | `;
     const tablePosition = rendered.indexOf(tableLine);
     assert.ok(tablePosition > previousIndex, row.id);
     previousIndex = tablePosition;
-    if (row.report_only) {
-      // No letters: the Recommended cell says what to do, and Other choices says it only reports.
-      assert.ok(rendered.includes(`${tableLine}${row.current_short} | ${row.recommended_text} | (report only) |`), row.id);
-      assert.match(detailed, new RegExp(`### ${escapeRegExp(row.presentation.question_ref)} ${escapeRegExp(row.title)}[\\s\\S]*?\\*\\*Choices:\\*\\* none; this row only reports\\.`));
-      continue;
-    }
     const recommendedLabel = `${row.presentation.recommended_choice_ref}. ${row.choices.find((choice) => choice.value === row.recommended).label}`;
     // Keeping things as they are shows only the choice; any other recommendation also shows its effect.
     assert.ok(rendered.includes(row.recommended === 'keep' || row.folded_into === row.recommended ? `${recommendedLabel} |` : `${recommendedLabel}: `), row.id);
@@ -374,7 +381,7 @@ test('conditional questions renumber without gaps and change the bound bank iden
   const all = allRows();
   const withoutConditional = all.filter((row) => row.id !== 'report-retention');
   const renumbered = core.withPresentationMetadata(withoutConditional.map((row) => ({ ...row, presentation: undefined })));
-  assert.deepEqual(renumbered.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '2.1', '2.2', '3.1', '3.2', '3.3']);
+  assert.deepEqual(renumbered.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '2.1', '2.2', '3.1', '3.2', '']);
   assert.notEqual(renumbered[0].presentation.bank_identity, all[0].presentation.bank_identity);
 });
 
@@ -394,9 +401,10 @@ test('all recommended and changed-only answers resolve to canonical values', () 
   assert.equal(all.mode, 'all-recommended');
   assert.deepEqual(all.selections.map((selection) => selection.canonical_value), answerable(rows).map((row) => row.recommended));
   core.assertQuestionBankAnswerBinding(all, rows);
-  // The report-only hooks row (3.2) takes no answer.
-  assert.equal(all.selections.some((selection) => selection.question_ref === '3.2'), false);
-  assert.throws(() => core.parseConciseQuestionBankAnswer(`${reference}: 3.2=A`, rows), /unavailable question 3\.2/);
+  // The report-only hooks status line has no number and takes no answer; the numbers end at 3.2.
+  assert.equal(all.selections.some((selection) => selection.question_id === 'codex-toolkit-hooks'), false);
+  assert.equal(all.selections.at(-1).question_ref, '3.2');
+  assert.throws(() => core.parseConciseQuestionBankAnswer(`${reference}: 3.3=A`, rows), /unavailable question 3\.3/);
 
   const changed = core.parseConciseQuestionBankAnswer(`${reference}: 1.2=b, 2.2 = a`, rows);
   assert.equal(changed.mode, 'recommended-except');

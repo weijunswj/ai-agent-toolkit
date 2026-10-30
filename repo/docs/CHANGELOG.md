@@ -1,8 +1,14 @@
 # Toolkit Changelog
 
-## 3.19.14 (numbered choices under a question pass the Projects post check)
+## 3.19.15 (numbered choices under a question pass the Projects post check)
 
 - **Fixed:** the Claude Projects post check read a numbered line indented one to three spaces as a new **Waiting on you** item, so numbered choices indented three spaces under `1. **Question: ...?**` were refused for having no link, though Markdown already shows them nested. A numbered line indented at least as far as its item's text starts (three spaces under `1. `, four under `10. `) is now a choice under that item: it needs no link, and a "(my pick)" choice still needs a numbered **Question:** item above it. A numbered line indented less is still a new item that needs its link, and a **Question:** line nested under an item is still refused.
+
+## 3.19.14 (setup shows report-only rows as status lines)
+
+- **Changed:** a setup row that only reports state and takes no answer is no longer a numbered question. "Toolkit hooks in Codex" now shows under its section as an unnumbered line, for example "Status (nothing to answer): Toolkit hooks in Codex: Off: Shell and agent check, File edit check. Turn them on in Codex: open /hooks and turn on Shell and agent check and File edit check." The questions after it move up one number (Antigravity becomes 3.2 in the Codex table), and the table heading counts only the numbered questions.
+- **Every number has letters:** each numbered row in the Codex and Claude Code tables now always has lettered choices; the "(report only)" cell is gone. The generated setup question reference shows the hooks state under a "Status (nothing to answer)" heading with what to do; `--explain` takes a question number, so it does not show status lines.
+- **Unchanged:** the hooks state is still read from Codex's config.toml and never edited, and it is still part of the bank reference, so a hooks change between the table and the answer still asks for the table again.
 
 ## 3.19.13 (the merge hold reads every GitHub connector's merge call)
 

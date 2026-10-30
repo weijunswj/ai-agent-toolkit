@@ -3,9 +3,9 @@
 
 This reference uses a privacy-safe representative Codex state in which all current ordinary questions are available. Runtime output resolves Current, Recommended, Why, available choices, and After applying from the same canonical metadata and the actual inspected state.
 
-Toolkit setup choices - 10 questions across 3 sections
+Toolkit setup choices - 9 questions across 3 sections
 
-Bank reference: J5CT-CT80-6DHA-ZY4K
+Bank reference: MY2G-N8WP-330G-JX9B
 
 Quick index
 
@@ -17,8 +17,8 @@ Quick index
 2.1 Codex helper capacity - Recommended: A - One helper
 2.2 Codex Toolkit maintenance - Recommended: B - Keep current
 3.1 Keep Toolkit available in Codex? - Recommended: C - Keep current
-3.2 Toolkit hooks in Codex - Recommended: Keep current
-3.3 Copy Toolkit's skills into Antigravity? - Recommended: B - Keep current
+3.2 Copy Toolkit's skills into Antigravity? - Recommended: B - Keep current
+Status (nothing to answer): Toolkit hooks in Codex: All 6 on. Nothing to do.
 
 
 ## 1. Updates and reports
@@ -235,23 +235,7 @@ Quick index
 
 ---
 
-### 3.2 Toolkit hooks in Codex
-
-**What this controls:** Whether Codex runs each Toolkit hook. Codex keeps this in ~/.codex/config.toml ([hooks.state]) and you change it in Codex's /hooks; setup only reports it and never edits it. A hook that is off or not reviewed does not run, so its check is skipped.
-
-**Current:** Toolkit hooks in Codex: Session start updates on; Prompt check on; Shell and agent check on; File edit check on; Checkpoint after tool use on; Checkpoint at stop on.
-
-**Verification:** state-derived
-
-**Recommended:** Keep current
-
-**Why:** Setup never edits this; you change it in Codex.
-
-**Choices:** none; this row only reports.
-
----
-
-### 3.3 Copy Toolkit's skills into Antigravity?
+### 3.2 Copy Toolkit's skills into Antigravity?
 
 **What this controls:** Whether setup copies Toolkit's portable skills, and the official n8n skills Toolkit ships, into Antigravity's global skills folder (~/.gemini/config/skills) and keeps them current on each setup. Toolkit-only skills (setup, env, controller and programme tools) stay out. Folders you copied yourself are never changed.
 
@@ -273,6 +257,20 @@ Quick index
 **After applying:** Start a new Antigravity session to load changed skills.
 
 **Selected:** B - Keep current
+
+---
+
+### Status (nothing to answer): Toolkit hooks in Codex
+
+**What this controls:** Whether Codex runs each Toolkit hook. Codex keeps this in ~/.codex/config.toml ([hooks.state]) and you change it in Codex's /hooks; setup only reports it and never edits it. A hook that is off or not reviewed does not run, so its check is skipped.
+
+**Current:** Toolkit hooks in Codex: Session start updates on; Prompt check on; Shell and agent check on; File edit check on; Checkpoint after tool use on; Checkpoint at stop on.
+
+**Verification:** state-derived
+
+**What to do:** Nothing to do
+
+**Why:** Setup never edits this; you change it in Codex.
 
 ---
 
