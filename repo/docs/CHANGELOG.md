@@ -1,11 +1,17 @@
 # Toolkit Changelog
 
-## 3.19.14 (CI runs the tests that pin a date a year ahead)
+## 3.19.15 (CI runs the tests that pin a date a year ahead)
 
 - **New CI check:** the Validate workflow has a `tests-clock-ahead` job. It runs every test file that pins a calendar date (an ISO date literal or `Date.UTC(`, in the file or in a test helper it loads) with Node's clock 400 days ahead, so a test that pins a date but lets the code read the real clock fails on its pull request instead of turning `main` red weeks later. The `validate` job waits for it. Locally, `node repo/scripts/run-tests.cjs --clock-ahead` runs the same check, and `--clock-offset-days <n>` moves the clock for a named, `--changed` or `--all` run.
 - **Clearer CI failures:** a test shard that fails now still uploads its summary, so the `validate` job names the tests that failed instead of listing every file of that shard as not run. The shard-timing refresh reads times only from shards that passed.
 - **Fixed:** the test runner's sweep of old run folders now uses the system clock, so a test that starts a nested run with Node's clock moved can never remove a live run's folder.
 - **Tests:** seven lock tests that compared a file they had just written with Node's clock now date that file from Node's clock, so they pass with the clock moved too. The playbook for fast tests and sharding says how a test that pins a date stays correct.
+
+## 3.19.14 (setup shows report-only rows as status lines)
+
+- **Changed:** a setup row that only reports state and takes no answer is no longer a numbered question. "Toolkit hooks in Codex" now shows under its section as an unnumbered line, for example "Status (nothing to answer): Toolkit hooks in Codex: Off: Shell and agent check, File edit check. Turn them on in Codex: open /hooks and turn on Shell and agent check and File edit check." The questions after it move up one number (Antigravity becomes 3.2 in the Codex table), and the table heading counts only the numbered questions.
+- **Every number has letters:** each numbered row in the Codex and Claude Code tables now always has lettered choices; the "(report only)" cell is gone. The generated setup question reference shows the hooks state under a "Status (nothing to answer)" heading with what to do; `--explain` takes a question number, so it does not show status lines.
+- **Unchanged:** the hooks state is still read from Codex's config.toml and never edited, and it is still part of the bank reference, so a hooks change between the table and the answer still asks for the table again.
 
 ## 3.19.13 (the merge hold reads every GitHub connector's merge call)
 
