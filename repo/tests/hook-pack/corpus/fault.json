@@ -23,7 +23,7 @@
       "payload": { "tool_name": "Bash", "tool_input": { "command": "git push origin HEAD" } },
       "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
       "fault": { "type": "deleted-plugin-root" },
-      "expect": { "decision": "deny" },
+      "expect": { "decision": "deny", "reason": "toolkit-governance-hook:failure" },
       "status": "pass"
     },
     {

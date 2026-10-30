@@ -472,7 +472,10 @@ function meets(row, host, observed) {
   const expect = row.expect_by_host?.[host] || row.expect;
   if (observed.problems.length) return false;
   if (observed.decision !== expect.decision) return false;
-  return expect.reason === undefined || expect.reason === observed.reason;
+  // A refusal only because a hook itself failed (onFailure: block) proves nothing about what the
+  // hooks decide, so it meets a row only when the row names it.
+  if (expect.reason === undefined) return !observed.reason?.endsWith(':failure');
+  return expect.reason === observed.reason;
 }
 
 function failureKind(row, host, observed) {
@@ -480,6 +483,7 @@ function failureKind(row, host, observed) {
   if (observed.problems.length) return observed.problems.join('; ');
   if (expect.decision === 'allow' && observed.decision === 'deny') return `false block (refused by ${observed.reason})`;
   if (expect.decision === 'deny' && observed.decision === 'allow') return `leak (allowed${observed.failed.length ? `; ${observed.failed.join(', ')} failed and the host ran the call` : ''})`;
+  if (expect.reason === undefined) return `refused only because ${observed.reason.replace(/:failure$/, '')} itself failed; a row that expects that names the reason`;
   return `refused by ${observed.reason}, expected ${expect.reason}`;
 }
 
@@ -586,11 +590,19 @@ function expectationChanges(baseRows, headRows) {
   for (const before of baseRows) {
     const after = head.get(before.id);
     if (!after) changes.push({ id: before.id, change: 'removed' });
-    else if (JSON.stringify([before.expect, before.expect_by_host || null]) !== JSON.stringify([after.expect, after.expect_by_host || null])) changes.push({ id: before.id, change: 'expect changed' });
     else if (knownBadHosts(after).some(host => !knownBadHosts(before).includes(host))) changes.push({ id: before.id, change: 'lowered to known-bad on a host where it passed' });
+    else {
+      const changed = [...new Set([...Object.keys(before), ...Object.keys(after)])].filter(key => !BOOKKEEPING.has(key) && JSON.stringify(before[key]) !== JSON.stringify(after[key])).sort();
+      if (changed.length) changes.push({ id: before.id, change: `${changed.join(', ')} changed` });
+    }
   }
   return changes;
 }
+
+// The fields a row may change without a reason: its known-bad bookkeeping, which only moves toward
+// passing once the lowering check above has run. Any other change (hosts, event, payload, fixture,
+// fault, expectation, kind, source or note) can change what the row proves.
+const BOOKKEEPING = new Set(['status', 'known_bad_on', 'lane', 'added']);
 
 // The rows a pull request body explains: each line under a "Pack changes" heading that names a row
 // id followed by a reason.
@@ -613,7 +625,7 @@ function checkExpectations(options, out = process.stdout) {
   const base = options.base || process.env.DIFF_BASE || git(ROOT, ['merge-base', 'HEAD', 'origin/main']).trim();
   if (/^0+$/.test(base)) { out.write('No base commit to compare the hook pack with (a new branch); nothing to check.\n'); return 0; }
   const changes = expectationChanges(corpusAt(base).rows, head.rows);
-  if (!changes.length) { out.write(`Hook pack: no row was removed, changed its expectation or was lowered since ${base.slice(0, 7)}.\n`); return 0; }
+  if (!changes.length) { out.write(`Hook pack: no row was removed, lowered or changed since ${base.slice(0, 7)}.\n`); return 0; }
   const enforce = options.bodyFile !== undefined || process.env.GITHUB_EVENT_NAME === 'pull_request';
   const body = options.bodyFile !== undefined ? fs.readFileSync(options.bodyFile, 'utf8') : process.env.PR_BODY || '';
   const explained = explainedRows(body);
@@ -646,7 +658,9 @@ function parseArgs(argv) {
     options[key] = Number(options[key]);
     if (!Number.isInteger(options[key]) || options[key] < 1) throw new UsageError(`--${key === 'budgetSeconds' ? 'budget-seconds' : 'concurrency'} is a whole number above 0.`);
   }
-  if (options.against && !/^[0-9a-f]{7,40}$|^[A-Za-z0-9._\/-]+$/.test(options.against)) throw new UsageError('--against names a commit.');
+  for (const key of ['against', 'base']) {
+    if (options[key] !== undefined && !/^[A-Za-z0-9_][A-Za-z0-9._\/~^-]*$/.test(options[key])) throw new UsageError(`--${key} names a commit (a name or SHA that does not start with "-").`);
+  }
   return options;
 }
 
@@ -671,5 +685,5 @@ if (require.main === module) main().then(code => { process.exitCode = code; });
 
 module.exports = Object.freeze({
   CORPUS_REL, FAULTS, HOSTS, KINDS, SCHEMA,
-  expectationChanges, explainedRows, hookDecision, hostCommand, loadCorpus, main, matches, parseArgs, parseCorpusFile, rowErrors, selectHooks,
+  expectationChanges, explainedRows, hookDecision, hostCommand, loadCorpus, main, matches, meets, parseArgs, parseCorpusFile, rowErrors, selectHooks,
 });
