@@ -40,6 +40,9 @@ test('summaries give rounded times for discovered files only and refuse other fi
   const fresh = refresh.timingsFromSummaries([summary('linux', { [FILES[0]]: 1.234, 'repo/tests/gone.test.cjs': 5 })], FILES);
   assert.deepEqual(fresh.linux, { [FILES[0]]: 1.2 });
   assert.deepEqual(fresh.windows, {});
+  // A failed shard uploads its summary too, but its times come from a failing run.
+  const failed = { ...summary('windows', { [FILES[0]]: 99 }), exit_code: 1 };
+  assert.deepEqual(refresh.timingsFromSummaries([failed, summary('linux', { [FILES[0]]: 2 })], FILES), { linux: { [FILES[0]]: 2 }, windows: {} });
   assert.throws(() => refresh.timingsFromSummaries([{ schema: 'other', system: 'linux', files: [] }], FILES), /not a toolkit-test-summary/);
 });
 

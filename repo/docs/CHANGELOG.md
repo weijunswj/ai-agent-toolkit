@@ -1,5 +1,12 @@
 # Toolkit Changelog
 
+## 3.19.14 (CI runs the tests that pin a date a year ahead)
+
+- **New CI check:** the Validate workflow has a `tests-clock-ahead` job. It runs every test file that pins a calendar date (an ISO date literal or `Date.UTC(`, in the file or in a test helper it loads) with Node's clock 400 days ahead, so a test that pins a date but lets the code read the real clock fails on its pull request instead of turning `main` red weeks later. The `validate` job waits for it. Locally, `node repo/scripts/run-tests.cjs --clock-ahead` runs the same check, and `--clock-offset-days <n>` moves the clock for a named, `--changed` or `--all` run.
+- **Clearer CI failures:** a test shard that fails now still uploads its summary, so the `validate` job names the tests that failed instead of listing every file of that shard as not run. The shard-timing refresh reads times only from shards that passed.
+- **Fixed:** the test runner's sweep of old run folders now uses the system clock, so a test that starts a nested run with Node's clock moved can never remove a live run's folder.
+- **Tests:** seven lock tests that compared a file they had just written with Node's clock now date that file from Node's clock, so they pass with the clock moved too. The playbook for fast tests and sharding says how a test that pins a date stays correct.
+
 ## 3.19.13 (the merge hold reads every GitHub connector's merge call)
 
 - **Fixed:** the merge hold read only one connector shape (`owner`, `repo`, `pullNumber`, `expectedHeadSha`), so Codex's GitHub app merge (`repository_full_name`, `pr_number`, `expected_head_sha`) was always refused as a pull request Toolkit "cannot identify", even after the user approved it. One shared reader now reads the official GitHub server and Codex's GitHub app. A `sha` field is never read as the head commit (a server that drops it would merge whatever head is there), so older servers (`pull_number`, `sha`) stay refused and the refusal points to `gh pr merge N --match-head-commit <sha>`. A call whose fields are missing, cannot be read or disagree is still refused, and the refusal now names the fields it found and the one that is missing, never their values.
