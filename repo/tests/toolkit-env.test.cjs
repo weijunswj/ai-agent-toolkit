@@ -1182,7 +1182,7 @@ test('apply refuses a value typed in quotes, by line number only', async (t) => 
   const result = await run('apply');
   assert.equal(result.code, 1);
   assert.equal((result.stderr.match(/remove the quotes around the value/g) || []).length, 2);
-  for (const secret of [double, single, inner]) assert.doesNotMatch(result.stdout + result.stderr, new RegExp(secret.replace(/"/g, '\\"')));
+  for (const secret of [double, single, inner]) assert.ok(!(result.stdout + result.stderr).includes(secret));
   assert.equal(store.peek('X1_TEST_DOUBLE_KEY'), undefined);
   assert.equal(store.peek('X1_TEST_INNER_KEY'), undefined, 'nothing is saved when any line is wrong');
 });
