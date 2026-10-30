@@ -70,6 +70,27 @@ function absoluteShellPath(value, { platform = process.platform } = {}) {
   return (platform === 'win32' ? /^(?:~(?:[\\/]|$)|[\\/]|[A-Za-z]:[\\/])/ : /^(?:~(?:\/|$)|\/)/).test(String(value));
 }
 
+// A variable a command segment assigns a literal to, as [key, value]: PowerShell `$name = 'value'`,
+// whose names ignore case, or POSIX `name=value`, whose names keep it (`D` and `d` are two variables).
+// Anything else is null.
+function assignmentOf(words) {
+  if (words.length === 3 && /^\$[A-Za-z_][A-Za-z0-9_]*$/.test(words[0]) && words[1] === '=') return [`ps:${words[0].slice(1).toLowerCase()}`, words[2]];
+  const posix = words.length === 1 ? /^([A-Za-z_][A-Za-z0-9_]*)=(?:"([^"$`]*)"|'([^']*)'|([^\s"'$`]*))$/.exec(words[0]) : null;
+  return posix ? [`sh:${posix[1]}`, posix[2] ?? posix[3] ?? posix[4]] : null;
+}
+
+const HOME_VARIABLE = /^(?:\$env:USERPROFILE|\$env:HOME|\$HOME|\$\{HOME\}|%USERPROFILE%)(?=$|[\\/])/i;
+
+// A folder word as the shell would read it: a whole-word variable the same command assigned earlier,
+// and a leading home variable as `~` (shellPath resolves it).
+function folderWord(word, variables) {
+  const name = /^\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))$/.exec(word);
+  // A POSIX name matches only its exact case; a PowerShell name matches in any case.
+  const key = name && [`sh:${name[1] || name[2]}`, `ps:${(name[1] || name[2]).toLowerCase()}`].find(candidate => variables.has(candidate));
+  const value = key ? variables.get(key) : word;
+  return String(value).replace(HOME_VARIABLE, '~');
+}
+
 function programName(word) {
   return path.win32.basename(path.posix.basename(word)).replace(/\.exe$/i, '').toLowerCase();
 }
@@ -188,4 +209,4 @@ class ShellCall {
   }
 }
 
-module.exports = Object.freeze({ SHELL_TOOL_NAMES, SHELL_TOOLS, UNREADABLE, ShellCall, absoluteShellPath, argvText, quoteWords, shellPath });
+module.exports = Object.freeze({ SHELL_TOOL_NAMES, SHELL_TOOLS, UNREADABLE, ShellCall, absoluteShellPath, argvText, assignmentOf, folderWord, quoteWords, shellPath });

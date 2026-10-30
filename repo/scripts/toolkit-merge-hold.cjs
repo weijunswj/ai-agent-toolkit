@@ -71,7 +71,7 @@ const MAX_APPROVALS = 100;
 const MAX_PROMPT_CHARS = 8000;
 const MAX_COMMAND_CHARS = 1024 * 1024;
 
-const { SHELL_TOOLS, ShellCall, shellPath } = require('./toolkit-shell-call.cjs');
+const { SHELL_TOOLS, ShellCall, assignmentOf, folderWord, shellPath } = require('./toolkit-shell-call.cjs');
 // A connector's merge or auto-merge tool, whatever its server is called (a claude.ai connector's
 // server name is a UUID): the tool name ends in one of these after a _ or -.
 const AUTO_MERGE_NAME = 'enable[_-]?(?:pr[_-]?|pull[_-]?request[_-]?)?auto[_-]?merge';
@@ -300,26 +300,6 @@ function wordsOf(text) {
   return [...String(text).matchAll(/"((?:[^"\\]|\\.)*)"|'([^']*)'|(\S+)/g)].map(match => match[1] ?? match[2] ?? match[3]);
 }
 
-// A variable a command segment assigns a literal to, as [key, value]: PowerShell `$name = 'value'`,
-// whose names ignore case, or POSIX `name=value`, whose names keep it (`D` and `d` are two variables).
-// Anything else is null.
-function assignmentOf(words) {
-  if (words.length === 3 && /^\$[A-Za-z_][A-Za-z0-9_]*$/.test(words[0]) && words[1] === '=') return [`ps:${words[0].slice(1).toLowerCase()}`, words[2]];
-  const posix = words.length === 1 ? /^([A-Za-z_][A-Za-z0-9_]*)=(?:"([^"$`]*)"|'([^']*)'|([^\s"'$`]*))$/.exec(words[0]) : null;
-  return posix ? [`sh:${posix[1]}`, posix[2] ?? posix[3] ?? posix[4]] : null;
-}
-
-const HOME_VARIABLE = /^(?:\$env:USERPROFILE|\$env:HOME|\$HOME|\$\{HOME\}|%USERPROFILE%)(?=$|[\\/])/i;
-
-// A folder word as the shell would read it: a whole-word variable the same command assigned earlier,
-// and a leading home variable as `~` (shellPath resolves it).
-function folderWord(word, variables) {
-  const name = /^\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))$/.exec(word);
-  // A POSIX name matches only its exact case; a PowerShell name matches in any case.
-  const key = name && [`sh:${name[1] || name[2]}`, `ps:${(name[1] || name[2]).toLowerCase()}`].find(candidate => variables.has(candidate));
-  const value = key ? variables.get(key) : word;
-  return String(value).replace(HOME_VARIABLE, '~');
-}
 
 // The value of a flag in a command's words ("--repo x", "--repo=x", "-R x").
 function flagValue(words, names) {

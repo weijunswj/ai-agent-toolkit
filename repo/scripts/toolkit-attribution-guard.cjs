@@ -24,7 +24,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { ShellCall, absoluteShellPath, shellPath } = require('./toolkit-shell-call.cjs');
+const { ShellCall, absoluteShellPath, assignmentOf, folderWord, shellPath } = require('./toolkit-shell-call.cjs');
 
 const MESSAGE = 'Remove the AI attribution lines (Co-Authored-By or Claude-Session trailers, claude.ai session links, "Generated with" footers) and retry.';
 const ATTRIBUTION_PATTERNS = Object.freeze([
@@ -115,6 +115,20 @@ function shellCommands(text) {
   }
   finishCommand();
   return commands;
+}
+
+// The commands of one line with each whole-word variable an earlier command assigned a literal to
+// read as its value, and a leading home variable as `~` (toolkit-shell-call.cjs folderWord), the way
+// the merge hold reads them. The assignments themselves are dropped.
+function withVariables(commands) {
+  const variables = new Map();
+  const result = [];
+  for (const current of commands) {
+    const assigned = assignmentOf(current.words);
+    if (assigned) { variables.set(assigned[0], assigned[1]); continue; }
+    result.push({ ...current, words: current.words.map((word) => folderWord(word, variables)) });
+  }
+  return result;
 }
 
 // Find the relevant subcommand after git's global options. Each -C is relative to the previous
@@ -358,7 +372,7 @@ function forceRefusal(command, cwd, depth = 0, registryOptions = {}) {
   if (text.length > MAX_COMMAND_CHARS || !/\bgit\b/i.test(text)) return '';
   let root = cwd || process.cwd();
   const cache = new Map();
-  for (const current of shellCommands(text)) {
+  for (const current of withVariables(shellCommands(text))) {
     // A cd earlier in the same command line moves the folder later git commands run in.
     if (/^(?:cd|pushd|set-location|sl)$/i.test(current.words[0]) && current.words.length === 2) {
       root = shellPath(root, current.words[1]);
@@ -452,7 +466,7 @@ function outgoingChanges(command, cwd, depth = 0, preceding = [], confirmed = tr
   let root = cwd || process.cwd();
   const withPreceding = (target) => (preceding.length ? { ...target, preceding: preceding.slice() } : target);
   const marked = (entry, known) => (known ? entry : { ...entry, folderConfirmed: false });
-  for (const current of shellCommands(text)) {
+  for (const current of withVariables(shellCommands(text))) {
     if (/^(?:cd|pushd|set-location|sl)$/i.test(current.words[0]) && current.words.length === 2) {
       root = shellPath(root, current.words[1]);
       confirmed ||= absoluteShellPath(current.words[1]);
