@@ -15,7 +15,7 @@ Use the managed Toolkit checkout, so connected apps keep working after updates:
 
 Write `<home folder>` as the resolved path in forward slashes, inside the double quotes (a space is fine). Never put `$env:...` or `%...%` in the command and never `cd` first: the host may run it through PowerShell or `cmd.exe`, and this line starts the same way in both.
 
-If `repo/scripts/toolkit-env.cjs` is missing from the managed checkout, ask the user to run `setup toolkit` first. When you tell the user about a command, call it `toolkit env <command>`.
+If `repo/scripts/toolkit-env.cjs` is missing from the managed checkout, ask the user to run `setup toolkit` first. When you tell the user about a command you run, call it `toolkit env <command>`. When the user must run one themselves, give them the same full line you would run, with the resolved home folder, so they can paste it into a PowerShell window they open themselves; never just `toolkit env <command>`, which their terminal does not know.
 
 ## What the user asks, and what you run
 
@@ -23,7 +23,8 @@ If `repo/scripts/toolkit-env.cjs` is missing from the managed checkout, ask the 
 |---|---|
 | see, list or check their keys ("what keys do I have") | `status` |
 | edit, change, update, rotate or add keys ("edit my env", "add a key") | `edit`, then wait for them to say "done", then `apply` |
-| set one key | ask them to run `toolkit env set NAME` in their own terminal (it asks for the value with hidden input) |
+| set one key | ask them to run the full PowerShell line for `set NAME` in their own terminal (it asks for the value with hidden input) |
+| see a key's value | ask them to run the full PowerShell line for `show NAME` (or `show NAME --copy`) in a PowerShell window they open themselves; it asks them to retype the name. Never run it yourself |
 | remove or delete a key | ask "Remove NAME? yes or no" naming the exact key; only after they say yes, run `remove NAME` and answer `yes` on its stdin |
 | connect an MCP server entry to a key | `connect SERVER --name NAME`; show them the planned changes and pass on their yes or no |
 | undo connected entries | `revoke --feeders`, after their yes |
@@ -38,6 +39,7 @@ Comments over 200 characters are refused before screening. The screen checks `NA
 
 - Never ask for a value in chat, never type one into a command, and never pipe one into `set`.
 - Never print, echo, read back or summarise a value. `status` shows names only; do not try to show more.
+- Never run `show`, and never ask the user to paste what it printed. It refuses in agent shells and the app's built-in terminal, and needs a real terminal: this stops a value reaching you by accident or on a casual request, not a determined program running as the user.
 - Do not run `header`; the apps run it. Do not use `run` to start a shell or anything that prints the environment.
 - If the user pastes a secret into the chat anyway, do not repeat it. Tell them it is now exposed, recommend rotating it at the provider, and offer `edit` to save the new one.
 - Removing a key, connecting or undoing entries, and retiring `~/.codex/.env` change things on the user's computer: do them only after the user's own yes for that exact key or entry.

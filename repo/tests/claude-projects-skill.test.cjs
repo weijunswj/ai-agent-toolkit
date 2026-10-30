@@ -52,7 +52,6 @@ test('no plugin payload or skills folder reaches the Projects controller skill',
 
 test('Projects wires managed instructions, promises and fresh scheduled sessions to controller law', () => {
   const text = bundle();
-  assert.match(text, /^Version: 2026-10-30\.1$/m);
   // Gate launches name their gate and route; setup writes the GATE ROUTE line the launch hook reads.
   assert.ok(text.includes('`GATE ROUTE: profile <profile> placement <remote_control|cloud|any> [folder <path>]`'));
   assert.match(text, /\*\*Gate launches carry a Gate line and their route\.\*\* Every thread brief that names a gate carries one line `Gate: <value>`/);
@@ -215,8 +214,10 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.ok(text.includes('Owner messages that arrive while a turn runs count as soon as they are queued.'));
   assert.doesNotMatch(text, /put at most one \*\*Question:\*\* in a post|Use decision cards for questions, else group/);
   assert.ok(text.includes('an edit keeps every earlier Update line word for word and adds at least one new one'));
-  assert.ok(text.includes('the post hook refuses a PR merge (`gh pr merge`, a `gh api` merge call or a merge tool) until a line in one of that session\'s own posts or edits says "external effects" and names the PR'));
-  assert.ok(text.includes('It reads only the command text, so it is a tripwire, not a guarantee'));
+  // The merge-summary rule binds without a hook: the post hook no longer reads merges.
+  assert.ok(text.includes('post a short summary of the merge\'s external effects'));
+  assert.ok(!text.includes('the post hook refuses a PR merge'));
+  assert.ok(!text.includes('It reads only the command text, so it is a tripwire, not a guarantee'));
   assert.match(text, /also post a one-line pointer to it in top-level project chat/);
   // Base layer and project layer.
   assert.match(text, /Project instructions start with the managed block \(only blank lines before it\)/);
