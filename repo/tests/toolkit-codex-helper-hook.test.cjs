@@ -88,7 +88,7 @@ test('a push the check cannot check is refused in Codex, under every Codex shell
     const r = run({ tool_name: tool, hook_event_name: 'PreToolUse', cwd: os.tmpdir(), tool_input: { cmd: 'git push origin HEAD:refs/heads/toolkit-test-unused', workdir: ROOT } }, { TOOLKIT_GIT_PATH: notAProgram });
     assert.equal(r.status, 2, `${tool}: ${r.stderr}`);
     const reason = r.output.hookSpecificOutput.permissionDecisionReason;
-    assert.match(reason, /^Toolkit could not check this push for credentials and plain-text findings: git could not run \(\w+\)\.\nCodex does not show Toolkit's warnings, so this push or pull request is refused instead of going out unchecked\.\nFix what the note above names, then retry: /, tool);
+    assert.match(reason, /^Toolkit could not check this push for credentials: git could not run \(\w+\)\.\nCodex does not show Toolkit's warnings, so this push or pull request is refused instead of going out unchecked\.\nFix what the note above names, then retry: /, tool);
     // Each cause that repeats on every retry has its own way through.
     for (const way of [/push fewer new commits at a time/, /run `git fetch origin` or name `--base`/, /fix the file it names/, /git was not found or could not run, run `setup toolkit`/]) assert.match(reason, way, tool);
     assert.doesNotMatch(reason, /let through/, tool);

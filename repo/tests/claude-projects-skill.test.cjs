@@ -58,7 +58,7 @@ test('Projects wires managed instructions, promises and fresh scheduled sessions
   assert.match(text, /\*\*Gate launches carry a Gate line and their route\.\*\* Every thread brief that names a gate carries one line `Gate: <value>`/);
   assert.match(text, /Write the `GATE ROUTE:` line \(\*\*Binding\*\* in the skill\)/);
   // One card route: a due card goes to a fresh skill card thread; the coordinator lists the Save tap, re-upload only when the card failed.
-  assert.match(text, /`SKILL BEHIND`: the account copy is an older Toolkit revision\. With "card due", start a skill card thread: a fresh cloud thread on the mid tier \(after a hook refusal, the next one on the top tier\) whose brief is "follow main's `reference\/skill-card\.md` exactly", never with SKILL DRIFT\./);
+  assert.match(text, /`SKILL BEHIND`: the account copy is an older Toolkit revision\. With "card due", start a skill card thread: a fresh cloud thread on the mid tier \(after a refused card, the next one on the top tier\) whose brief is "follow main's `reference\/skill-card\.md` exactly", never with SKILL DRIFT\./);
   assert.match(text, /Never call propose_skills yourself or have a helper build the card: the card thread is the only route\./);
   assert.match(text, /keep that thread open \(never resolve it in the hourly pass\) until a check-in shows the account copy current; then drop the pending item and resolve it\./);
   assert.match(text, /Do the same for an older card thread when a newer one starts, when the owner declines its card, or when a check-in reports SKILL DRIFT or no account copy: its Save would install an older Version or overwrite direct edits; post "Don't save the <Version> card\." in it\. Name the Version in each Save item\./);
