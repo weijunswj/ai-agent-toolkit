@@ -68,8 +68,20 @@
       "type": "string",
       "pattern": "^[A-Z0-9][A-Z0-9-]{0,31}$",
       "description": "The Windows Task Scheduler folder for this repository's no-AI Toolkit tasks, such as TOOLKIT for the TOOLKIT folder. When left out it is the repository name in capitals, with dots and underscores turned into hyphens."
+    },
+    "state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "branch", "path"],
+      "description": "The public state branch: parent and child documents live on this branch of the bound repository, as public views (no private part, sessions only as hashes). The private store stays required beside it for the journals, the private sidecars and the checkpoint. Added by programme.cjs migrate-state; without it the documents stay in the private store.",
+      "properties": {
+        "kind": { "const": "branch" },
+        "branch": { "const": "DO-NOT-DELETE-IF-TOOLKIT-GOVERNANCE-IS-ENABLED" },
+        "path": { "const": "state/" }
+      }
     }
   },
+  "dependentRequired": { "state": ["store"] },
   "if": { "properties": { "governance": { "const": "enabled" } } },
   "then": { "required": ["parents", "store", "required_checks"] }
 }

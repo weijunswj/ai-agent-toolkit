@@ -467,11 +467,12 @@ function migrationPlan(context) {
     ...parentDoc.outcomes.map(outcome => ['child', outcome.issue, context.store.read('child', outcome.issue).doc]).filter(([, , doc]) => doc)];
   const sidecarDir = name => `${context.binding.store.path}private/${name}`;
   const problems = [];
+  const sessions = docs.flatMap(([, , doc]) => state.sessionsOf(doc));
   const documents = docs.map(([kind, number, doc]) => {
     const name = state.documentName(kind, number);
     if (doc.pending_effects.length) problems.push(`${name} has ${doc.pending_effects.length} intent(s) not yet settled; run reconcile --apply --controller first`);
     let view = null;
-    try { view = state.publicView(kind, doc); } catch (error) { problems.push(`${name}: ${error.message}`); }
+    try { view = state.publicView(kind, doc, sessions); } catch (error) { problems.push(`${name}: ${error.message}`); }
     const text = view ? state.canonicalText(view) : null;
     const sha256 = text ? state.sha256(text) : null;
     return { kind, number, name, doc, view, text, sha256, revision: doc.revision, sidecar: sha256 ? `${sidecarDir(name)}/r${doc.revision}-${sha256.slice(0, 16)}.json` : null };

@@ -11,7 +11,8 @@
 // (GET /repos/{owner}/{repo}/rulesets, then each ruleset by id); when `gh` is missing, signed out
 // or refused, the result is `unverified`, never `present`. Adding the ruleset is a GitHub write
 // that only `ghRulesetCreator` makes, and only `toolkit governance migrate` calls it, after the
-// owner's typed yes in that run; it needs a local session signed in to GitHub.
+// owner's typed yes in that run; it needs a local session signed in to GitHub. The same holds for the
+// keep-programme-state ruleset below.
 
 const childProcess = require('node:child_process');
 
@@ -95,6 +96,10 @@ function ghRulesetCreator(slug, { spawn = childProcess.spawnSync } = {}) {
 // { status: present | missing | not-enforceable | unverified | not-applicable, reason, bypass } for the repository
 // at `root`. `reader(slug)` is injectable for tests.
 function noForcePushRuleset(root, { reader = ghRulesetReader } = {}) {
+  return readVerdict(root, reader, rulesetVerdict);
+}
+
+function readVerdict(root, reader, verdict) {
   let identity;
   try { identity = governance.readIdentity(root); } catch { return Object.freeze({ status: 'unverified', reason: 'identity-unreadable', bypass: null }); }
   const slug = identity.valid ? governance.remoteSlug(identity.remote) : null;
@@ -105,7 +110,50 @@ function noForcePushRuleset(root, { reader = ghRulesetReader } = {}) {
   try { read = reader(slug); } catch { read = { ok: false, reason: 'reader-failed' }; }
   if (read && read.ok === false && read.reason === 'plan-has-no-rulesets') return Object.freeze({ status: 'not-enforceable', reason: 'plan-has-no-rulesets', bypass: null });
   if (!read || read.ok !== true) return Object.freeze({ status: 'unverified', reason: (read && read.reason) || 'reader-failed', bypass: null });
-  return rulesetVerdict(read.rulesets);
+  return verdict(read.rulesets);
 }
 
-module.exports = Object.freeze({ RULESET_NAME, rulesetVerdict, noForcePushRulesetBody, ghRulesetReader, ghRulesetCreator, noForcePushRuleset });
+// The second ruleset, for a repository whose merged binding keeps its programme state on the public
+// state branch: nobody, Toolkit included, can delete that branch. Force pushes to it are already
+// blocked by the no-force-push ruleset above. Added only by `toolkit governance migrate`, after its
+// own typed yes; never on a repository without the state branch in its binding.
+const STATE_BRANCH = 'DO-NOT-DELETE-IF-TOOLKIT-GOVERNANCE-IS-ENABLED';
+const KEEP_STATE_RULESET_NAME = 'Toolkit: keep programme state';
+
+function keepStateRulesetBody() {
+  return {
+    name: KEEP_STATE_RULESET_NAME,
+    target: 'branch',
+    enforcement: 'active',
+    bypass_actors: [],
+    conditions: { ref_name: { include: [`refs/heads/${STATE_BRANCH}`], exclude: [] } },
+    rules: [{ type: 'deletion' }],
+  };
+}
+
+// present when an active branch ruleset covers the state branch (by name or every branch), excludes
+// nothing and has a `deletion` rule.
+function keepStateVerdict(rulesets) {
+  const qualifying = (Array.isArray(rulesets) ? rulesets : []).some(ruleset => ruleset
+    && ruleset.enforcement === 'active'
+    && ruleset.target === 'branch'
+    && ruleset.conditions && ruleset.conditions.ref_name
+    && Array.isArray(ruleset.conditions.ref_name.include)
+    && (ruleset.conditions.ref_name.include.includes(`refs/heads/${STATE_BRANCH}`) || ruleset.conditions.ref_name.include.includes('~ALL'))
+    && Array.isArray(ruleset.conditions.ref_name.exclude) && ruleset.conditions.ref_name.exclude.length === 0
+    && Array.isArray(ruleset.rules) && ruleset.rules.some(rule => rule && rule.type === 'deletion'));
+  return Object.freeze(qualifying ? { status: 'present', reason: null, bypass: null } : { status: 'missing', reason: 'no-active-state-branch-deletion-ruleset', bypass: null });
+}
+
+function keepStateRuleset(root, { reader = ghRulesetReader } = {}) {
+  return readVerdict(root, reader, keepStateVerdict);
+}
+
+function ghKeepStateRulesetCreator(slug, { spawn = childProcess.spawnSync } = {}) {
+  const created = ghJson(['-X', 'POST', `repos/${slug}/rulesets`, '--input', '-'], spawn, JSON.stringify(keepStateRulesetBody()));
+  if (!created.ok) return created;
+  return created.value && Number.isInteger(created.value.id) ? { ok: true, id: created.value.id } : { ok: false, reason: 'gh-output-invalid' };
+}
+
+module.exports = Object.freeze({ RULESET_NAME, rulesetVerdict, noForcePushRulesetBody, ghRulesetReader, ghRulesetCreator, noForcePushRuleset,
+  KEEP_STATE_RULESET_NAME, STATE_BRANCH, keepStateRulesetBody, keepStateVerdict, keepStateRuleset, ghKeepStateRulesetCreator });

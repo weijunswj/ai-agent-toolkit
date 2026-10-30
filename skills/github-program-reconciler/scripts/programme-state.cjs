@@ -2000,18 +2000,22 @@ function validatePublic(kind, doc) {
   return doc;
 }
 
-// The public view of a full document. Raw session IDs become hashes; a raw session ID found anywhere
-// else in the view refuses it.
-function publicView(kind, doc) {
+// The session IDs a document names: its holder, its gate's session and retired parent holders.
+function sessionsOf(doc) {
+  return [doc?.fence?.holder_session, doc?.gate?.session_id, ...(Array.isArray(doc?.private?.retired_holders) ? doc.private.retired_holders : [])];
+}
+
+// The public view of a full document. Raw session IDs become hashes; a raw session ID of this
+// document, or one of `sessions` (those of the documents read with it), anywhere else refuses it.
+function publicView(kind, doc, sessions = []) {
   const view = clone(doc);
   delete view.private;
   const { epoch, holder_prefix: prefix, holder_session: session } = doc.fence;
   view.fence = { epoch, holder_prefix: prefix, holder_session_hash: session ? sessionHashOf(session) : null };
-  const raw = [session];
+  const raw = [...sessionsOf(doc), ...sessions];
   if (kind === 'child') {
     const { route, session_id: id, ...gate } = view.gate;
     view.gate = { ...gate, session_hash: id ? (SESSION_HASH.test(id) ? id : sessionHashOf(id)) : null };
-    raw.push(id);
   }
   const text = JSON.stringify(view);
   const leaked = raw.filter(value => isText(value) && value.length >= 8 && !SESSION_HASH.test(value)).some(value => text.includes(value));
@@ -2077,6 +2081,7 @@ class BranchStateStore extends StateStore {
     this.held = null;
     this.events = [];
     this.joined = new Map();
+    this.sessions = new Set();
   }
 
   // The public file holds only what validatePublic allows.
@@ -2247,10 +2252,15 @@ class BranchStateStore extends StateStore {
       if (!DOC_NAME.test(name)) continue;
       const text = this.textAt(`${STATE_PATH}${entry.name}`, head);
       let doc;
-      try { doc = validatePublic(kindOfName(name), JSON.parse(text)); } catch { continue; }
+      try { doc = validatePublic(kindOfName(name), JSON.parse(text)); } catch (error) {
+        this.hold('STATE_INVALID', `${STATE_PATH}${entry.name} on ${STATE_BRANCH} is not a valid public document (${error.code === 'STATE_INVALID' ? error.message : 'not JSON'}). Nothing was written. Controller: report to the owner.`);
+      }
       const digest = sha256(canonicalText(doc));
       const { doc: sidecar } = this.private.readPath(this.sidecarPath(name, doc.revision, digest), 'sidecar');
-      if (sidecar && sidecar.public_sha256 === digest) files[name] = { revision: doc.revision, sha256: digest };
+      if (!sidecar || sidecar.public_sha256 !== digest) {
+        this.hold('STATE_SIDECAR_MISSING', `${STATE_PATH}${entry.name} on ${STATE_BRANCH} has no private sidecar for revision ${doc.revision} with its digest (a hand edit, or a sidecar that was removed). Nothing was written. Controller: report to the owner.`);
+      }
+      files[name] = { revision: doc.revision, sha256: digest };
     }
     const previous = this.checkpoint.doc?.files || {};
     const lower = Object.entries(previous).filter(([name, entry]) => !files[name] || files[name].revision < entry.revision).map(([name]) => name);
@@ -2272,6 +2282,7 @@ class BranchStateStore extends StateStore {
       this.hold('STATE_SIDECAR_MISSING', `${STATE_PATH}${name}.json on ${STATE_BRANCH} has no private sidecar for revision ${publicDoc.revision} with its digest (a hand edit, or a sidecar that was removed). Nothing was written. Controller: report to the owner.`);
     }
     this.joined.set(name, { file, sha, revision: publicDoc.revision });
+    for (const session of sessionsOf(sidecar.doc)) if (isText(session)) this.sessions.add(session);
     return sidecar.doc;
   }
 
@@ -2313,7 +2324,7 @@ class BranchStateStore extends StateStore {
     doc.volatile = { written_at: this.now(), ...(this.toolkitVersion ? { toolkit: this.toolkitVersion } : {}) };
     assertValid(kind, doc);
     const name = documentName(kind, number);
-    const text = canonicalText(publicView(kind, doc));
+    const text = canonicalText(publicView(kind, doc, [...this.sessions]));
     const digest = sha256(text);
     this.requirePrivateStore();
     const sidecarSha = this.putSidecar(name, doc, digest);
@@ -3572,5 +3583,5 @@ module.exports = Object.freeze({
   SECRET_SHAPES, FINDING_CODES, ATTENTION_KEEP, ATTENTION_LIMIT, findingId, foldAttention, answerFinding, attentionCounts, attentionLine, openFindings, findingText, attentionDigest,
   ProgrammeInventory, INVENTORY_CLASSES, INVENTORY_DEADLINE_MS, registeredParents,
   STATE_BRANCH, STATE_PATH, STATE_SCHEMA, SIDECAR_KEEP, BranchStateStore, STATE_BACKENDS, openStore, publicView, validatePublic, documentName,
-  refreshWriter, isDecisionHolder, sha256,
+  refreshWriter, isDecisionHolder, sha256, sessionsOf,
 });
