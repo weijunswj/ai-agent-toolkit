@@ -1,0 +1,120 @@
+{
+  "schema": "toolkit-hook-pack/v1",
+  "family": "fault",
+  "rows": [
+    {
+      "id": "U1",
+      "source": "hooks reliability G0, seed U1: Codex version folder deleted mid-chat",
+      "kind": "update",
+      "hosts": ["codex"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "git push origin HEAD" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
+      "fault": { "type": "deleted-plugin-root" },
+      "expect": { "decision": "deny" },
+      "status": "known-bad",
+      "lane": "Stop hooks failing open after update",
+      "added": "2026-10-30"
+    },
+    {
+      "id": "U2",
+      "source": "hooks reliability G0, seed U2: Claude Code plugin folder deleted mid-chat",
+      "kind": "update",
+      "hosts": ["claude"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "git push origin HEAD" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
+      "fault": { "type": "deleted-plugin-root" },
+      "expect": { "decision": "deny", "reason": "toolkit-governance-hook:failure" },
+      "status": "pass"
+    },
+    {
+      "id": "U3",
+      "source": "hooks reliability G0, seed U3",
+      "kind": "update",
+      "hosts": ["claude", "codex"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "git status" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
+      "fault": { "type": "deleted-plugin-root" },
+      "expect": { "decision": "allow" },
+      "status": "known-bad",
+      "known_bad_on": ["claude"],
+      "lane": "Stop hooks failing open after update",
+      "added": "2026-10-30"
+    },
+    {
+      "id": "U4.push-check-throws.push",
+      "source": "hooks reliability G0, seed U4",
+      "kind": "fault",
+      "hosts": ["claude", "codex"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "git push origin feature" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature", "commits": [{ "files": { "uat-config.txt": "token = \"{credential}\"\n" }, "message": "fixture" }] } },
+      "fault": { "type": "throw-module", "file": "repo/scripts/toolkit-push-check.cjs" },
+      "expect": { "decision": "deny" },
+      "status": "known-bad",
+      "known_bad_on": ["claude"],
+      "lane": "Stop hooks failing open after update",
+      "added": "2026-10-30"
+    },
+    {
+      "id": "U4.push-check-throws.read",
+      "source": "hooks reliability G0, seed U4",
+      "kind": "fault",
+      "hosts": ["claude", "codex"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "git status" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
+      "fault": { "type": "throw-module", "file": "repo/scripts/toolkit-push-check.cjs" },
+      "expect": { "decision": "allow" },
+      "status": "pass"
+    },
+    {
+      "id": "U4.shell-reader-missing.push",
+      "source": "hooks reliability G0, seed U4",
+      "kind": "fault",
+      "hosts": ["claude", "codex"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "git push origin feature" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
+      "fault": { "type": "remove-file", "file": "repo/scripts/toolkit-shell-call.cjs" },
+      "expect": { "decision": "deny" },
+      "status": "pass"
+    },
+    {
+      "id": "U4.shell-reader-missing.read",
+      "source": "hooks reliability G0, seed U4",
+      "kind": "fault",
+      "hosts": ["claude", "codex"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "git status" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
+      "fault": { "type": "remove-file", "file": "repo/scripts/toolkit-shell-call.cjs" },
+      "expect": { "decision": "allow" },
+      "status": "known-bad",
+      "lane": "Stop hooks failing open after update",
+      "added": "2026-10-30"
+    },
+    {
+      "id": "U4.push-check-stalls.push",
+      "source": "hooks reliability G0, seed U4 (timeout)",
+      "kind": "fault",
+      "hosts": ["claude", "codex"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "git push origin feature" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
+      "fault": { "type": "stall-module", "file": "repo/scripts/toolkit-push-check.cjs" },
+      "expect": { "decision": "deny" },
+      "status": "known-bad",
+      "lane": "Stop hooks failing open after update",
+      "added": "2026-10-30"
+    },
+    {
+      "id": "U4.bad-json.push",
+      "source": "hooks reliability G0, seed U4 (bad input)",
+      "kind": "fault",
+      "hosts": ["claude", "codex"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "git push origin feature" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
+      "fault": { "type": "bad-json" },
+      "expect": { "decision": "deny" },
+      "status": "known-bad",
+      "known_bad_on": ["claude"],
+      "lane": "Stop hooks failing open after update",
+      "added": "2026-10-30"
+    }
+  ]
+}
