@@ -160,7 +160,7 @@ function git(cwd, args) {
 
 function scratch(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'local-security-scan-test-'));
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }));
   return root;
 }
 
