@@ -1,5 +1,11 @@
 # Toolkit Changelog
 
+## 3.19.9 (writing a report that mentions Claude or Codex is no longer refused)
+
+- **Fixed:** an agent's shell command that only mentions Claude or Codex and has a short word such as "no" or "ok" in it, for example a test report written to a file with a heredoc, is no longer refused with "only the user answers the governance question". The answer guard now counts Claude or Codex only where a shell would really start it, using the same command reader as the continuation guard; heredoc bodies, echo text, file names, here-strings and commit messages are data. A host's own subcommands (`claude config`, `codex login` and the like) still start no session.
+- **Tightened:** a launch inside a shell script is now read too, so `bash -c "claude -p yes"`, `cmd /c "claude -p yes"`, `pwsh -Command "codex exec no"` and a second launch later in the same command are refused. A program that starts a host the reader does not list as a wrapper (`tmux new-session`, `screen -dm`, `ssh localhost`, `systemd-run`, `parallel`, `pkexec`, `wt.exe`) is no longer refused with a short answer, where it was before; the same-run rule still stops a session started that way from answering.
+- **Informational:** a command that names Claude or Codex and holds the full `toolkit governance enable`, `disable` or `decline` is still refused anywhere in its text, as before. An interpreter script that names Claude or Codex together with a short answer word (`node -e "...Codex said no..."`), a command name computed at run time with host letters somewhere in the command, and text no shell can read that holds a host program name as a word are still refused too; these are rarer than a report write and fail closed.
+
 ## 3.19.8 (answers to forwarded owner messages show below them)
 
 - **Fixed:** when the coordinator forwards one of your project chat messages into a work thread, the thread now answers with a new post under it. Before, the post hook did not count the forwarded copy as you writing, so it made the thread edit its older post, and the answer landed above your message where it was easy to miss.

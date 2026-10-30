@@ -48,7 +48,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const governance = require('./toolkit-governance-state.cjs');
-const { ContinuationResolver } = require('./toolkit-governance-continuation.cjs');
+const { ContinuationResolver, hostLaunch } = require('./toolkit-governance-continuation.cjs');
 
 const CAPABILITY = governance.GOVERNANCE_CAPABILITY;
 const HELD_BASENAME = 'held-prompts.v1.json';
@@ -147,11 +147,17 @@ function ownerMessage(prompt) {
   return { text: reply, id, wrapped: true, markup: false };
 }
 // An agent's command that would answer for the user: the CLI script with a decision, or a host
-// session started, resumed or fed on stdin with an answer (long or short) as its prompt. A host's
-// own subcommands (`claude config`, `codex login` and the like) start no session and are not read.
+// session started, resumed or fed on stdin with an answer (long or short) as its prompt. The full
+// answer phrase next to a host name anywhere in the command is refused as before. For a short
+// answer, a host counts only where a shell would run it, read by the continuation guard's command
+// reader (hostLaunch), including one started inside `bash -c`, `pwsh -Command` or `cmd /c`; its
+// own subcommands (`claude config`, `codex login` and the like) start no session. Other text that
+// names Claude or Codex (a report written to a file, a commit message, echo text) is data. The
+// short answer is looked for in the whole command and in every script the reader unwrapped.
 // This reads the command's text, so it is best effort. What stops a fresh nested session is the
 // same-run rule above (it has nothing held, so nothing it sends answers) together with the refusal
 // of sessions another session started; a resumed session is a new run (SessionEpochs).
+// HOST_COMMAND only words the refusal for a command that reaches a held repository.
 const HOST_COMMAND = /(?:^|[\s;&|()`'"\\/])(?:claude|codex)(?:-code)?(?:\.exe|\.cmd|\.ps1)?(?=$|[\s;&|()`'"])/im;
 const SHELL_WORD = /"((?:[^"\\]|\\.)*)"|'([^']*)'|([^\s;&|()<>"'=`]+)/g;
 function shortAnswerWord(text) {
@@ -159,11 +165,14 @@ function shortAnswerWord(text) {
   return [...words, ...text.split(/\r?\n/)]
     .some(word => OK_ANSWER.test(word.replace(/^\$/, '').replace(/(?:\\[nr])+$/, '')));
 }
-const HOST_SUBCOMMAND = /^\s*(?:\S*[\\/])?(?:claude|codex)(?:-code)?(?:\.exe|\.cmd|\.ps1)?\s+(?:config|mcp|plugin|plugins|update|upgrade|doctor|install|migrate-installer|setup-token|login|logout|auth|completion|features|sandbox|debug|apply|help|--version|-v|--help|-h)(?=$|\s)/i;
-function answerCommand(text) {
-  return /toolkit-governance\.cjs["']?\s+(?:enable|disable|decline|reopen|migrate|repair)\b/i.test(text)
-    || (/\b(?:claude|codex)\b/i.test(text) && /toolkit governance (?:enable|disable|decline)\b/i.test(text))
-    || (text.split(/[;&|\r\n]+/).some(part => HOST_COMMAND.test(part) && !HOST_SUBCOMMAND.test(part)) && shortAnswerWord(text));
+// Any short answer word, quoted or not: only decides whether the command reader runs at all.
+const LOOSE_ANSWER = /\b(?:ok|okay|yes|y|no|n|not\s+now|later)\b/i;
+function answerCommand(text, input = { tool_name: 'Bash', tool_input: { command: text } }) {
+  if (/toolkit-governance\.cjs["']?\s+(?:enable|disable|decline|reopen|migrate|repair)\b/i.test(text)
+    || (/\b(?:claude|codex)\b/i.test(text) && /toolkit governance (?:enable|disable|decline)\b/i.test(text))) return true;
+  if (!LOOSE_ANSWER.test(text)) return false;
+  const launch = hostLaunch(text, input);
+  return launch !== null && [text, ...launch.scripts].some(shortAnswerWord);
 }
 const USER_STATE_PATH = /[\\/]\.ai-agent-toolkit[\\/]user-state(?:[\\/]|$)/i;
 // In a held repository every tool is refused but these: ToolSearch only loads tool definitions (the
@@ -1630,7 +1639,7 @@ class ToolGate {
       // Recording the answer the agent read from the user's own reply, with this session's live
       // ticket, runs wherever the session is; the script checks the ticket again as it records.
       if (tool !== 'Monitor' && ticketCommand(text, sessionId, this.#tickets)) return null;
-      if (answerCommand(text)) {
+      if (answerCommand(text, input)) {
         // The session folder, the folder the command runs in and the folders it moves into.
         const call = ShellCall.from(input);
         const notGitHub = [cwd, ...call.folders, ...commandTargets(text, call.folder)].some(target => this.#verdict(target, sessionId)?.reason === 'not-github');
