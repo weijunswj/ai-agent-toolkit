@@ -26,7 +26,7 @@ test('the Projects controller skill has one source file with a Version line', ()
   }
   assert.doesNotMatch(text, /## Adding work to a repo/);
   assert.doesNotMatch(text, /Toolkit may absorb this framework later/);
-  assert.match(text, /Before any upload, a coordinator compares that copy with the repo file and brings direct edits into Toolkit first, so nothing is overwritten/);
+  assert.match(text, /The coordinator reads it only from the library copy \(\*\*Guidebook copy\*\*\); changes go into Toolkit through a PR, never into the copy\./);
   assert.match(text, /## Hourly nudge\n- Every project also runs an hourly stalled-work nudge, set up at project setup/);
   assert.match(text, /It must be a recurring routine: one-shot self-reminders have died silently/);
   assert.match(text, /This is the only resolve pass/);
@@ -56,35 +56,32 @@ test('Projects wires managed instructions, promises and fresh scheduled sessions
   assert.ok(text.includes('`GATE ROUTE: profile <profile> placement <remote_control|cloud|any> [folder <path>]`'));
   assert.match(text, /\*\*Gate launches carry a Gate line and their route\.\*\* Every thread brief that names a gate carries one line `Gate: <value>`/);
   assert.match(text, /Write the `GATE ROUTE:` line \(\*\*Binding\*\* in the skill\)/);
-  // One card route: a due card goes to a fresh skill card thread; the coordinator lists the Save tap, re-upload only when the card failed.
-  assert.match(text, /`SKILL BEHIND`: the account copy is an older Toolkit revision\. With "card due", start a skill card thread: a fresh cloud thread on the mid tier \(after a refused card, the next one on the top tier\) whose brief is "follow main's `reference\/skill-card\.md` exactly", never with SKILL DRIFT\./);
-  assert.match(text, /Never call propose_skills yourself or have a helper build the card: the card thread is the only route\./);
-  assert.match(text, /keep that thread open \(never resolve it in the hourly pass\) until a check-in shows the account copy current; then drop the pending item and resolve it\./);
-  assert.match(text, /Do the same for an older card thread when a newer one starts, when the owner declines its card, or when a check-in reports SKILL DRIFT or no account copy: its Save would install an older Version or overwrite direct edits; post "Don't save the <Version> card\." in it\. Name the Version in each Save item\./);
-  assert.match(text, /If the card thread reports "card failed", or with no card marker and no "drift unverified", tell the owner once per Version to re-upload the skill with its reference files\./);
-  assert.match(text, /With "damaged card" \(the copy is a cut-short or HTML-escaped Toolkit revision\), start a skill card thread as `SKILL BEHIND` says instead, and never bring that text into Toolkit\./);
+  // The coordinator loads no account skills: it reads the skill from the library copy, which three routes keep current.
+  assert.match(text, /## Guidebook copy\n- The coordinator's runtime loads no account skills, so this skill reaches you as a copy in the project library: `\/mnt\/project-files\/toolkit\/web-controller-projects\/`/);
+  assert.match(text, /`VERSION` \(`Version: <skill Version> toolkit <x\.y\.z> main <commit7> copied <UTC>`, written last, so a copy cut short never looks current\)/);
+  assert.match(text, /Never edit the copy: every refresh overwrites it, and changes go into Toolkit through a PR\./);
+  assert.match(text, /The hourly nudge checks main every run and refreshes a stale copy itself/);
+  assert.match(text, /After a merge that changes this skill or the Toolkit version, start a cloud thread for the refresh at once/);
+  assert.match(text, /The daily check-in is the backstop/);
+  assert.match(text, /\*\*BLOCK CHANGED:\*\* in the turn that report arrives, replace the block in project settings with the library's `instructions-block\.md` under the \*\*Managed project-instructions sync\*\* safeguards/);
+  assert.match(text, /Its closing checklist carries "coordinator: refresh the guidebook"/);
+  assert.match(text, /`SKILL UPDATE`: the guidebook's Version is newer than the one on the BINDING line\./);
+  assert.match(text, /a guidebook refresh reports BLOCK CHANGED, or the daily check-in reports BLOCK OUTDATED/);
+  // The skill card route for the account copy is gone, with its brief.
+  assert.ok(!fs.existsSync(path.join(repoRoot, REFERENCE_DIR, 'skill-card.md')));
+  assert.doesNotMatch(text, /SKILL DRIFT|SKILL BEHIND|SKILL CARD|propose_skills|skill-card|skill card|card due|damaged card|tap Save/);
   assert.match(text, /Fresh-session scheduled runs resolve their own run thread after delivery; a task's home thread is never resolved\./);
   assert.match(text, /each fresh scheduled run resolves its own thread after report delivery\. Stop the nudge/);
-  assert.doesNotMatch(read(SKILL_REL), /skill cards: coordinator|card posted|posted a skill card|post the card yourself/);
-  // The card method lives in one reference file a fresh thread downloads from main; SKILL.md itself holds no HTML entity.
-  const method = read(`${REFERENCE_DIR}/skill-card.md`);
-  assert.match(method, /The card is never built by a helper, subagent or Agent worker, never by the coordinator, and its text is never retyped or summarised\./);
-  assert.match(method, /Print its byte size, sha256 and Version line, then check: the frontmatter `name` is `web-controller-projects`; it holds no `&lt;`, `&gt;`, `&amp;` or `&quot;`; it holds no CR\. If any check fails, stop and report it\./);
-  assert.match(method, /call `propose_skills` \(ToolSearch\) with one proposal: kind `improvement`, name and target `web-controller-projects`, description copied from the file's frontmatter, and `skillMd` the file text exactly as read\./);
-  assert.match(method, /report `card failed: <reason>` instead/);
-  // (CR is not checked here: a Windows checkout may add it, and the file on main has none.)
-  assert.doesNotMatch(read(SKILL_REL), /&(?:lt|gt|amp|quot);/, 'the card method refuses a SKILL.md with HTML entities');
-  // Setup compares the loaded Version with main's and starts the card thread when a card is due.
-  assert.match(text, /State the skill Version you loaded and compare it with the Version line of main's SKILL\.md\. When main's is newer, have a read-only cloud thread compare the account copy with main as the daily check-in's SKILL DRIFT and SKILL CARD steps do; when a card would be due there, start a skill card thread \(`SKILL BEHIND` in the skill\) and carry on with step 1\./);
-  assert.match(text, /the skill card waiting for Save \(with its thread link\) when one is, and the next work item\./);
+  assert.doesNotMatch(read(SKILL_REL), /&(?:lt|gt|amp|quot);/);
+  // Setup reads the guidebook first, refreshing it when missing or not current.
+  assert.match(text, /Read the guidebook's `VERSION` \(\*\*Guidebook copy\*\* in the skill\)\./);
+  assert.match(text, /the guidebook's `VERSION` line, and the next work item\./);
   // Plugin lag: Check for updates first, then removing the plugin alone, then the marketplace re-add, then an app restart.
   assert.match(text, /`PLUGIN BEHIND`: the Toolkit plugin on the user's claude\.ai account is more than a day behind `main`/);
   // One plugin card where the owner reads.
   assert.match(text, /No agent can update it: once per version, post one plugin card in the project chat with the check-in's steps/);
   assert.match(text, /Keep it pending until a check-in shows `\*\*Plugin:\*\* current`\./);
-  assert.match(text, /Only the account skill \(one Save tap\) and plugin \(two clicks\) need the owner: no agent can write them\./);
-  // The skill drift watch lives in the daily check-in: direct account edits come back into Toolkit first.
-  assert.match(text, /`SKILL DRIFT`: the account copy has direct edits that match no Toolkit revision\. Bring them into Toolkit from the saved copy/);
+  assert.match(text, /Only the plugin \(two clicks\) needs the owner: no agent can update it\./);
   assert.match(text, /Post its first line to the owner every run, "nothing changed" included/);
   assert.match(text, /The hourly nudge stays silent/);
   // The steps live once, in the check-in (toolkit-projects-tasks.test.cjs keeps them equal to Toolkit's shared Claude app steps).
@@ -285,7 +282,7 @@ test('Projects keeps its Toolkit base layer current without touching the project
     assert.ok(text.includes(required), required);
   }
   // The coordinator acts on every check-in prefix, in dependency order.
-  const prefixes = ['`SKILL UPDATE`', '`BLOCK OUTDATED`', '`BINDING STALE`', '`TOOLKIT CHANGED`', '`MEMORY FORMAT`', '`TASKS OUTDATED`', '`NUDGE NOT ARMED`', '`PROJECT TASKS MISSING`', '`PLUGIN BEHIND`'];
+  const prefixes = ['`GUIDEBOOK MISSING`', '`SKILL UPDATE`', '`BLOCK OUTDATED`', '`BINDING STALE`', '`TOOLKIT CHANGED`', '`MEMORY FORMAT`', '`TASKS OUTDATED`', '`NUDGE NOT ARMED`', '`PROJECT TASKS MISSING`', '`PLUGIN BEHIND`'];
   const section = text.slice(text.indexOf('## Daily check-in'), text.indexOf('## Hourly nudge'));
   const at = prefixes.map(prefix => section.indexOf(`  - ${prefix}`));
   assert.ok(at.every((position, index) => position > -1 && (index === 0 || position > at[index - 1])), at.join(','));
