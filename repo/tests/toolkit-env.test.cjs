@@ -1695,3 +1695,30 @@ test('deleting some listed lines is still applied', async (t) => {
   assert.equal(done.code, 0, done.stderr);
   assert.match(done.stdout, /^removed: X1_TEST_GONE_KEY$/m);
 });
+
+test('the save lock is taken over only when its holder has ended, or after two minutes', async (t) => {
+  const h = harness(t, { values: { X1_TEST_KEPT_KEY: sentinel() } });
+  await h.run('edit');
+  const lock = path.join(h.paths.editDir, 'apply.lock');
+  const session = (alive) => new EnvEditSession({ directory: h.paths.editDir, privateDirectory: noPrivateDirectory, alive, lockWaitMs: 300 });
+  // A live holder, however old its lock under two minutes: wait, then say busy.
+  fs.writeFileSync(lock, JSON.stringify({ pid: 4242, started_at: new Date().toISOString() }));
+  const twentySeconds = new Date(Date.now() - 20 * 1000);
+  fs.utimesSync(lock, twentySeconds, twentySeconds);
+  assert.throws(() => session(() => true).withLock(() => 'ran'), (error) => error.busy === true && /saving your keys right now/.test(error.message));
+  assert.ok(fs.existsSync(lock), 'a live holder keeps its lock');
+  // The holder has ended: taken over at once.
+  assert.equal(session(() => false).withLock(() => 'ran'), 'ran');
+  assert.equal(fs.existsSync(lock), false, 'released after the work');
+  // A live holder past the two-minute ceiling: taken over as a last resort.
+  fs.writeFileSync(lock, JSON.stringify({ pid: 4242, started_at: new Date().toISOString() }));
+  const old = new Date(Date.now() - 121 * 1000);
+  fs.utimesSync(lock, old, old);
+  assert.equal(session(() => true).withLock(() => 'ran'), 'ran');
+  // While held, the lock names this process.
+  session(() => true).withLock(() => {
+    const holder = JSON.parse(fs.readFileSync(lock, 'utf8'));
+    assert.equal(holder.pid, process.pid);
+    assert.ok(!Number.isNaN(Date.parse(holder.started_at)));
+  });
+});

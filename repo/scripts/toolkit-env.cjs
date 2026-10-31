@@ -56,6 +56,7 @@ const EDIT_STATE = 'session.json';
 const EDIT_RESULT = 'last-result.json';
 const EDIT_WATCH_LOCK = 'watch.lock';
 const EDIT_APPLY_LOCK = 'apply.lock';
+const EDIT_LOCK_CEILING_MS = 120 * 1000;
 const MAX_LAYOUT_LINES = 500;
 const MAX_COMMENT_CHARS = 200;
 const SCHEMES = new Set(['Bearer', 'none']);
@@ -444,14 +445,16 @@ const NOTEPAD_COPY_NOTE = 'Close the Toolkit env tab in Notepad without saving: 
 // last saved, the key names it listed, a hash of the last content handled), the names-only result
 // of saves the helper applied, and the locks. One edit at a time: every new edit replaces the file.
 class EnvEditSession {
-  #directory; #opener; #now; #privateDirectory; #startHelper;
+  #directory; #opener; #now; #privateDirectory; #startHelper; #alive; #lockWaitMs;
 
-  constructor({ directory, opener = defaultOpener, now = () => new Date(), privateDirectory = ensurePrivateDirectory, startHelper = () => false }) {
+  constructor({ directory, opener = defaultOpener, now = () => new Date(), privateDirectory = ensurePrivateDirectory, startHelper = () => false, alive = processAlive, lockWaitMs = 30000 }) {
     this.#directory = directory;
     this.#opener = opener;
     this.#now = now;
     this.#privateDirectory = privateDirectory;
     this.#startHelper = startHelper;
+    this.#alive = alive;
+    this.#lockWaitMs = lockWaitMs;
   }
 
   get directory() { return this.#directory; }
@@ -509,20 +512,28 @@ class EnvEditSession {
 
   // Runs one save, edit or sweep at a time across the helper and commands.
   // With no edit folder yet there is nothing to guard, and the folder is made private only by create.
+  // The lock holds { pid, started_at }. It is taken over only when that process has ended, or after
+  // EDIT_LOCK_CEILING_MS as a last resort (a save makes several Credential Manager calls of about a
+  // second each, so a live holder can need well over 15 seconds).
   withLock(work) {
     if (!fs.existsSync(this.#directory)) return work();
     const lock = this.#path(EDIT_APPLY_LOCK);
-    const until = Date.now() + 5000;
+    const until = Date.now() + this.#lockWaitMs;
     let handle;
     for (;;) {
       try { handle = fs.openSync(lock, 'wx'); break; }
       catch (error) {
         if (error.code !== 'EEXIST') throw error;
-        try { if (Date.now() - fs.statSync(lock).mtimeMs > 15000) { fs.rmSync(lock, { force: true }); continue; } } catch { continue; }
+        let holder = null;
+        let age = 0;
+        try { age = Date.now() - fs.statSync(lock).mtimeMs; holder = JSON.parse(fs.readFileSync(lock, 'utf8')); } catch {}
+        const ended = Number.isInteger(holder?.pid) && !this.#alive(holder.pid);
+        if (ended || age > EDIT_LOCK_CEILING_MS) { fs.rmSync(lock, { force: true }); continue; }
         if (Date.now() > until) throw Object.assign(new EnvError('Another toolkit env command is saving your keys right now. Try again in a moment.'), { busy: true });
         sleepSync(50);
       }
     }
+    fs.writeSync(handle, JSON.stringify({ pid: process.pid, started_at: new Date().toISOString() }));
     try { return work(); }
     finally { fs.closeSync(handle); fs.rmSync(lock, { force: true }); }
   }
