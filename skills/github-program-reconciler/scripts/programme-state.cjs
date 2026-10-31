@@ -2046,7 +2046,7 @@ function assertCheckpoint(doc) {
   const errors = [];
   check(errors, isObject(doc), 'checkpoint must be an object');
   if (isObject(doc)) {
-    checkShape(errors, doc, { all: ['schema', 'repository', 'branch', 'head_sha', 'files', 'written_at'] }, 'checkpoint');
+    checkShape(errors, doc, { all: ['schema', 'repository', 'branch', 'head_sha', 'files', 'written_at', 'migrated'], optional: ['migrated'] }, 'checkpoint');
     check(errors, doc.schema === STATE_SCHEMA.checkpoint, `schema must be ${STATE_SCHEMA.checkpoint}`);
     check(errors, REPO.test(String(doc.repository || '')), 'repository must be owner/name');
     check(errors, doc.branch === STATE_BRANCH, `branch must be ${STATE_BRANCH}`);
@@ -2054,6 +2054,8 @@ function assertCheckpoint(doc) {
     check(errors, isText(doc.written_at), 'written_at must be a date and time');
     check(errors, isObject(doc.files) && Object.entries(doc.files).every(([name, entry]) => DOC_NAME.test(name) && isObject(entry)
       && Object.keys(entry).length === 2 && isInt(entry.revision) && SHA256.test(String(entry.sha256))), 'files must map documents to their revision and sha256');
+    check(errors, doc.migrated === undefined || (isObject(doc.migrated) && Object.keys(doc.migrated).length === 2 && isSha(doc.migrated.head)
+      && isObject(doc.migrated.files) && Object.entries(doc.migrated.files).every(([name, blob]) => DOC_NAME.test(name) && isSha(blob))), 'migrated must hold the move commit and each private document blob');
   }
   if (errors.length) throw new ProgrammeError('STATE_INVALID', `The state checkpoint is invalid: ${errors[0]}`, { errors });
   return doc;
@@ -2141,6 +2143,7 @@ class BranchStateStore extends StateStore {
       const settled = stored.doc && stored.doc.head_sha !== head ? this.branchHead() : head;
       this.branch = { exists: true, head: settled };
       if (!stored.doc || stored.doc.head_sha !== settled) this.recomputeCheckpoint(settled);
+      this.checkMigration();
       return this.branch;
     }
     if (!stored.doc) {
@@ -2153,6 +2156,33 @@ class BranchStateStore extends StateStore {
     }
     this.branch = this.restore(stored.doc);
     return this.branch;
+  }
+
+  // The private store's own parent and child documents must be exactly as migrate-state moved them.
+  // One that changed or appeared since was written through a binding without `state` (before the
+  // binding pull request merged, or on a computer whose merged binding was not read again yet), and
+  // the branch does not hold it: hold, never read past it.
+  checkMigration() {
+    const moved = this.checkpoint?.doc?.migrated;
+    if (!moved) return;
+    const dir = this.binding.store.path.replace(/\/$/, '');
+    const listing = this.transport.request('GET', `${this.private.encodedContents(dir)}?ref=${encodeURIComponent(this.binding.store.branch)}`);
+    if (listing.status !== 200 && listing.status !== 404) throw ghFailure(listing, `Listing ${dir} in the private store`);
+    const now = Object.fromEntries((listing.status === 200 && Array.isArray(listing.json) ? listing.json : [])
+      .filter(entry => entry?.type === 'file' && DOC_NAME.test(String(entry.name).replace(/\.json$/, '')) && /\.json$/.test(String(entry.name)))
+      .map(entry => [String(entry.name).replace(/\.json$/, ''), entry.sha]));
+    const changed = [...new Set([...Object.keys(now), ...Object.keys(moved.files)])].filter(name => now[name] !== moved.files[name]).sort();
+    if (changed.length) {
+      this.hold('STATE_MIGRATION_STALE', `${changed.join(', ')} changed in the private store after migrate-state --apply (a write made before the binding pull request merged), so the state branch is behind it. Nothing was read or written. Controller: stop the programme sweep, then run migrate-state --dry-run and --apply again; it moves the newer documents onto the branch while nothing has been written there since the move.`);
+    }
+  }
+
+  // { head, files } of the move when nothing has been written to the branch since migrate-state moved
+  // the documents (so a second move may replace them), else null.
+  headSinceMove() {
+    const stored = this.readCheckpoint().doc;
+    const head = this.branchHead();
+    return stored?.migrated && head && stored.migrated.head === head && stored.head_sha === head ? { head, files: stored.migrated.files } : null;
   }
 
   // A file's public text at a commit, or null.
@@ -2200,7 +2230,9 @@ class BranchStateStore extends StateStore {
     return { exists: true, head };
   }
 
-  // One commit holding exactly `files` ([[path, text]]), its ref created; every file read back.
+  // One commit holding exactly `files` ([[path, text]]); every file read back. Without parents the
+  // branch is created (never over one that exists); with the branch head as its parent the branch is
+  // moved forward to it, never forced.
   createCommit(files, message, parents) {
     const repo = this.binding.repository;
     const tree = this.transport.request('POST', `repos/${repo}/git/trees`, { tree: files.map(([file, text]) => ({ path: file, mode: '100644', type: 'blob', content: text })) });
@@ -2210,6 +2242,12 @@ class BranchStateStore extends StateStore {
     for (const [file, text] of files) {
       if (this.textAt(file, commit.json.sha) !== text) throw new ProgrammeError('STATE_READBACK_MISMATCH', `${file} did not read back as written in the new state commit.`);
     }
+    if (parents.length) {
+      const moved = this.transport.request('PATCH', `repos/${repo}/git/refs/heads/${encodeURIComponent(STATE_BRANCH)}`, { sha: commit.json.sha, force: false });
+      if (moved.status === 422) throw new ProgrammeError('STATE_CONFLICT', `The state branch ${STATE_BRANCH} moved while the documents were being moved again; nothing was replaced. Run migrate-state again.`);
+      if (!okStatus(moved.status)) throw ghFailure(moved, `Moving the state branch ${STATE_BRANCH} forward`);
+      return commit.json.sha;
+    }
     const ref = this.transport.request('POST', `repos/${repo}/git/refs`, { ref: `refs/heads/${STATE_BRANCH}`, sha: commit.json.sha });
     if (ref.status === 422) throw new ProgrammeError('STATE_BRANCH_EXISTS', `The state branch ${STATE_BRANCH} already exists; nothing was replaced.`);
     if (!okStatus(ref.status)) throw ghFailure(ref, `Creating the state branch ${STATE_BRANCH}`);
@@ -2217,8 +2255,9 @@ class BranchStateStore extends StateStore {
   }
 
   // The checkpoint after a write, with compare-and-swap: the newer revision of each document wins.
-  // `replace` writes exactly `files` (a rebuild or a recompute).
-  recordCheckpoint(files, head, { replace = false } = {}) {
+  // `replace` writes exactly `files` (a rebuild or a recompute). The move record (`migrated`) is
+  // kept unless `migrated` gives a new one.
+  recordCheckpoint(files, head, { replace = false, migrated = undefined } = {}) {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const current = attempt === 0 && this.checkpoint ? this.checkpoint : this.readCheckpoint();
       const merged = replace ? { ...files } : { ...(current.doc?.files || {}) };
@@ -2227,7 +2266,8 @@ class BranchStateStore extends StateStore {
           if (!merged[name] || merged[name].revision <= entry.revision) merged[name] = entry;
         }
       }
-      const doc = { schema: STATE_SCHEMA.checkpoint, repository: this.binding.repository, branch: STATE_BRANCH, head_sha: head, files: merged, written_at: this.now() };
+      const move = migrated !== undefined ? migrated : current.doc?.migrated;
+      const doc = { schema: STATE_SCHEMA.checkpoint, repository: this.binding.repository, branch: STATE_BRANCH, head_sha: head, files: merged, written_at: this.now(), ...(move ? { migrated: move } : {}) };
       try {
         const written = this.private.putVerified(this.checkpointPath(), 'checkpoint', canonicalText(doc), current.sha, 'programme state: checkpoint');
         this.checkpoint = { doc: written.doc, sha: written.sha };
@@ -2333,13 +2373,14 @@ class BranchStateStore extends StateStore {
     this.joined.set(name, { file: this.sidecarPath(name, doc.revision, digest), sha: sidecarSha, revision: doc.revision });
     try {
       this.recordCheckpoint({ [name]: { revision: doc.revision, sha256: digest } }, this.lastCommit);
+      this.pruneSidecars(name, doc.revision, replaced);
     } catch (error) {
-      // The public write stands; the next run sets the checkpoint again from the branch.
+      // The public write stands; the next run sets the checkpoint again from the branch. The sidecar
+      // the old checkpoint names is kept until then, so a rebuild from sidecars still works.
       this.checkpoint = null;
       this.branch = null;
       this.note('STATE_CHECKPOINT_STALE', `${name} r${doc.revision} was written, but its checkpoint was not (${error.code || 'error'}); the next run sets it again from the branch.`);
     }
-    this.pruneSidecars(name, doc.revision, replaced);
     return { outcome: 'WRITTEN', doc, sha: result.sha };
   }
 

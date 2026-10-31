@@ -132,9 +132,10 @@ function keepStateRulesetBody() {
 }
 
 // present when an active branch ruleset covers the state branch (by name or every branch), excludes
-// nothing and has a `deletion` rule.
+// nothing, has a `deletion` rule and lets nobody bypass it. One whose bypass list is not visible to
+// this account is present with bypass `not-visible`; one with bypass actors does not count.
 function keepStateVerdict(rulesets) {
-  const qualifying = (Array.isArray(rulesets) ? rulesets : []).some(ruleset => ruleset
+  const covering = (Array.isArray(rulesets) ? rulesets : []).filter(ruleset => ruleset
     && ruleset.enforcement === 'active'
     && ruleset.target === 'branch'
     && ruleset.conditions && ruleset.conditions.ref_name
@@ -142,7 +143,9 @@ function keepStateVerdict(rulesets) {
     && (ruleset.conditions.ref_name.include.includes(`refs/heads/${STATE_BRANCH}`) || ruleset.conditions.ref_name.include.includes('~ALL'))
     && Array.isArray(ruleset.conditions.ref_name.exclude) && ruleset.conditions.ref_name.exclude.length === 0
     && Array.isArray(ruleset.rules) && ruleset.rules.some(rule => rule && rule.type === 'deletion'));
-  return Object.freeze(qualifying ? { status: 'present', reason: null, bypass: null } : { status: 'missing', reason: 'no-active-state-branch-deletion-ruleset', bypass: null });
+  if (covering.some(ruleset => Array.isArray(ruleset.bypass_actors) && ruleset.bypass_actors.length === 0)) return Object.freeze({ status: 'present', reason: null, bypass: 'none' });
+  if (covering.some(ruleset => !Array.isArray(ruleset.bypass_actors))) return Object.freeze({ status: 'present', reason: null, bypass: 'not-visible' });
+  return Object.freeze({ status: 'missing', reason: covering.length ? 'state-branch-deletion-ruleset-allows-bypass' : 'no-active-state-branch-deletion-ruleset', bypass: covering.length ? 'allowed' : null });
 }
 
 function keepStateRuleset(root, { reader = ghRulesetReader } = {}) {

@@ -91,6 +91,18 @@ class BranchFakeGitHub extends FakeGitHub {
       git.branches.set(branch, body.sha);
       return ok(201, { ref: body.ref, object: { sha: body.sha } });
     }
+    if ((found = /^git\/refs\/heads\/(.+)$/.exec(rest)) && method === 'PATCH') {
+      const branch = decodeURIComponent(found[1]);
+      const current = git.branches.get(branch);
+      if (!current) return ok(422, { message: 'Reference does not exist' });
+      const commit = git.commits.get(body.sha);
+      if (!commit) return ok(422, { message: 'Object does not exist' });
+      // Without force, only a fast-forward: the new commit must descend from the current head.
+      const descends = sha => sha === current || (git.commits.get(sha)?.parents || []).some(descends);
+      if (!body.force && !descends(body.sha)) return ok(422, { message: 'Update is not a fast forward' });
+      git.branches.set(branch, body.sha);
+      return ok(200, { ref: `refs/heads/${branch}`, object: { sha: body.sha } });
+    }
     if (rest === 'commits' && method === 'GET') {
       const date = git.dates.get(`${params.get('sha')}:${params.get('path')}`);
       return ok(200, date ? [{ sha: 'f'.repeat(40), commit: { committer: { date } } }] : []);

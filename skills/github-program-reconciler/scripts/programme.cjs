@@ -461,10 +461,14 @@ const STATE_BLOCK = Object.freeze({ kind: 'branch', branch: state.STATE_BRANCH, 
 // What migrate-state would write: the parent and every catalogued child the private store holds, each
 // as its public view, digest and sidecar. Any document that is not public-safe, or has an intent not
 // yet settled, is a problem that stops the apply.
-function migrationPlan(context) {
-  const parentDoc = readParent(context);
-  const docs = [['parent', parentDoc.parent_issue, parentDoc],
-    ...parentDoc.outcomes.map(outcome => ['child', outcome.issue, context.store.read('child', outcome.issue).doc]).filter(([, , doc]) => doc)];
+function migrationPlan(context, source) {
+  const parentRead = source.read('parent', context.binding.parent_issue);
+  if (!parentRead.doc) throw new ProgrammeError('PARENT_STATE_MISSING', `No parent state document for #${context.binding.parent_issue} in the private store, so there is nothing to move.`);
+  const parentDoc = parentRead.doc;
+  const reads = [['parent', parentDoc.parent_issue, parentRead],
+    ...parentDoc.outcomes.map(outcome => ['child', outcome.issue, source.read('child', outcome.issue)]).filter(([, , read]) => read.doc)];
+  const docs = reads.map(([kind, number, read]) => [kind, number, read.doc]);
+  const privateBlobs = Object.fromEntries(reads.map(([kind, number, read]) => [state.documentName(kind, number), read.sha]));
   const sidecarDir = name => `${context.binding.store.path}private/${name}`;
   const problems = [];
   const sessions = docs.flatMap(([, , doc]) => state.sessionsOf(doc));
@@ -479,12 +483,20 @@ function migrationPlan(context) {
   });
   const digest = state.sha256(documents.map(entry => `${entry.name}:${entry.revision}:${entry.sha256 || 'invalid'}`).sort().join('\n'));
   const branch = context.transport.request('GET', `repos/${context.repository}/branches/${encodeURIComponent(state.STATE_BRANCH)}`);
-  return { parentDoc, documents, problems, digest, branchExists: branch.status === 200 };
+  return { parentDoc, documents, problems, digest, privateBlobs, branchExists: branch.status === 200 };
 }
 
-// The owner's typed yes, read from this terminal. Without a terminal (a pipe, an agent's shell) the
-// question is never asked and nothing is written.
+// The owner's typed yes, read from this terminal. In a shell a coding agent started (the same exact
+// markers toolkit env show refuses on), or without a terminal (a pipe), the question is never asked
+// and nothing is written.
 function askTyped(question, deps = {}) {
+  const environment = deps.environment || process.env;
+  let markers;
+  try { markers = require('../../../repo/scripts/toolkit-env.cjs').AGENT_MARKERS; } catch {
+    throw new ProgrammeError('NOT_CONFIRMED', 'This copy cannot tell an agent\'s shell from the owner\'s terminal, so the owner\'s typed yes is not asked. Use a full Toolkit install. Nothing was written.');
+  }
+  const marker = markers.find(name => Boolean(environment[name]));
+  if (marker) throw new ProgrammeError('NOT_CONFIRMED', `This shell was started by a coding agent (${marker}), so the owner's typed yes is not asked here. The owner runs this in their own terminal. Nothing was written.`);
   if (deps.ask) return deps.ask(question);
   if (!process.stdin.isTTY) throw new ProgrammeError('NOT_CONFIRMED', 'This step needs the owner\'s typed yes in a terminal; run it yourself there. Nothing was written.');
   process.stderr.write(question);
@@ -613,24 +625,30 @@ const commands = {
   // run, then writes the sidecars, one orphan commit and the checkpoint, reads every document back
   // and prints the binding change. Readers keep the private store until that change is merged.
   'migrate-state'(args, context, deps = {}) {
-    if (context.binding.state) throw new ProgrammeError('STATE_MIGRATED', `The merged binding already names the public state branch ${state.STATE_BRANCH}; there is nothing to migrate.`);
-    const plan = migrationPlan(context);
-    const summary = { repository: context.repository, branch: state.STATE_BRANCH, path: state.STATE_PATH, plan_digest: plan.digest, branch_exists: plan.branchExists,
+    const target = new state.BranchStateStore({ transport: context.transport, binding: { ...context.binding, state: STATE_BLOCK }, now: deps.now, toolkitVersion: context.version, localCheckpoint: localCheckpoint(context.repository, deps) });
+    // A second move replaces the branch's documents only while nothing was written there since the
+    // first: writes that reached the private store before the binding pull request merged.
+    const moved = target.headSinceMove();
+    const plan = migrationPlan(context, target.private);
+    const names = moved ? [...new Set([...Object.keys(moved.files), ...Object.keys(plan.privateBlobs)])] : [];
+    const since = moved && names.some(name => moved.files[name] !== plan.privateBlobs[name]) ? moved.head : null;
+    if (context.binding.state && !since) throw new ProgrammeError('STATE_MIGRATED', `The merged binding already names the public state branch ${state.STATE_BRANCH}, and the private store has nothing newer to move (or the branch was written since the move); there is nothing to migrate.`);
+    const summary = { repository: context.repository, branch: state.STATE_BRANCH, path: state.STATE_PATH, plan_digest: plan.digest, branch_exists: plan.branchExists, again: Boolean(since),
       documents: plan.documents.map(({ name, revision, sha256, sidecar, view }) => ({ name, revision, public_sha256: sha256, sidecar, ...(view ? { public: view } : {}) })),
       problems: plan.problems };
     if (!args.apply) return { mode: 'dry-run', ...summary };
     const writer = requireParentHolder(context, plan.parentDoc);
     if (args['plan-digest'] !== plan.digest) throw new ProgrammeError('MIGRATION_CHANGED', `The documents changed since the dry run (plan digest ${plan.digest}, not ${args['plan-digest']}). Nothing was written; run the dry run again.`);
     if (plan.problems.length) throw new ProgrammeError('MIGRATION_HELD', `The migration stops before anything is written: ${plan.problems[0]}${plan.problems.length > 1 ? ` (and ${plan.problems.length - 1} more; the dry run lists them)` : ''}.`);
-    if (plan.branchExists) throw new ProgrammeError('STATE_BRANCH_EXISTS', `The state branch ${state.STATE_BRANCH} already exists on ${context.repository}; nothing was replaced.`);
-    const answer = askTyped(`Create the public state branch ${state.STATE_BRANCH} on ${context.repository} with these ${plan.documents.length} document(s), and their private sidecars in ${context.binding.store.repository}? Type yes to confirm: `, deps);
+    if (plan.branchExists && !since) throw new ProgrammeError('STATE_BRANCH_EXISTS', `The state branch ${state.STATE_BRANCH} already exists on ${context.repository} and has been written since its move; nothing was replaced.`);
+    const answer = askTyped(`${since ? 'Move these documents again onto' : 'Create'} the public state branch ${state.STATE_BRANCH} on ${context.repository} with these ${plan.documents.length} document(s), and their private sidecars in ${context.binding.store.repository}? Type yes to confirm: `, deps);
     if (String(answer || '').trim().toLowerCase() !== 'yes') throw new ProgrammeError('NOT_CONFIRMED', 'Not confirmed. Nothing was written.');
-    const target = new state.BranchStateStore({ transport: context.transport, binding: { ...context.binding, state: STATE_BLOCK }, now: deps.now, toolkitVersion: context.version, localCheckpoint: localCheckpoint(context.repository, deps) });
     target.requirePrivateStore();
     for (const entry of plan.documents) target.putSidecar(entry.name, entry.doc, entry.sha256);
-    const head = target.createCommit(plan.documents.map(entry => [`${state.STATE_PATH}${entry.name}.json`, entry.text]), `programme-state: migrate ${plan.documents.length} document(s) [skip ci]`, []);
+    const head = target.createCommit(plan.documents.map(entry => [`${state.STATE_PATH}${entry.name}.json`, entry.text]), `programme-state: ${since ? 'migrate again' : 'migrate'} ${plan.documents.length} document(s) [skip ci]`, since ? [since] : []);
     target.checkpoint = target.readCheckpoint();
-    target.recordCheckpoint(Object.fromEntries(plan.documents.map(entry => [entry.name, { revision: entry.revision, sha256: entry.sha256 }])), head, { replace: true });
+    target.recordCheckpoint(Object.fromEntries(plan.documents.map(entry => [entry.name, { revision: entry.revision, sha256: entry.sha256 }])), head,
+      { replace: true, migrated: { head, files: plan.privateBlobs } });
     // Read back through the new store: every fence, epoch, hold, answer, return and finding, one to one.
     for (const entry of plan.documents) {
       const back = target.read(entry.kind, entry.number).doc;
@@ -638,7 +656,9 @@ const commands = {
     }
     return { mode: 'apply', ...summary, documents: summary.documents.map(({ public: _public, ...rest }) => rest), head, acting: { prefix: writer.prefix, session: writer.session },
       binding_change: { state: STATE_BLOCK },
-      next_action: 'Owner: merge a pull request that adds this state block to .github/toolkit-programme.json; until it merges, every reader keeps the private store.' };
+      until_merged: 'Until that pull request merges, stop the programme sweep and make no programme writes (claims, verdicts, acks, refresh): they still go to the private store. If any is made, the first read of the branch holds with STATE_MIGRATION_STALE; run migrate-state --dry-run and --apply again, which moves the newer documents while nothing has been written to the branch.',
+      next_action: context.binding.state ? 'Controller: the branch holds the newer documents again; turn the programme sweep back on.'
+        : 'Owner: merge a pull request that adds this state block to .github/toolkit-programme.json, with the programme sweep stopped until it merges; until then every reader keeps the private store.' };
   },
 
   ack(args, context, deps = {}) { return answer(args, context, deps, 'acknowledged'); },

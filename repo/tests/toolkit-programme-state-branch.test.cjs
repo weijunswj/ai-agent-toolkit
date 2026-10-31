@@ -496,3 +496,82 @@ test('C: when the branch is gone, the hourly refresh restores it by the same pat
   for (const file of [...held.github.filesAt(STORE_REPO, 'main').keys()].filter(name => name.includes('/private/'))) held.github.writeRaw(STORE_REPO, 'main', file, null);
   assert.equal(held.run(['refresh']).error.code, 'STATE_RESTORE_HELD');
 });
+
+// ---------------------------------------------------------------------------------------------
+// M. Writes between the move and the binding merge
+
+const applyAgain = (fx, binding) => {
+  const dry = fx.run(['migrate-state', '--dry-run'], { binding });
+  if (dry.error) return dry;
+  return fx.run(['migrate-state', '--apply', '--plan-digest', dry.result.plan_digest, '--controller', '--session', controller.session], { binding, ask: () => 'yes' });
+};
+
+test('M: a write that reached the private store after the move holds the first branch read; moving again carries it over', () => {
+  const fx = fixture();
+  assert.match(fx.migration.until_merged, /stop the programme sweep/);
+  // Before the binding merges, a write still goes to the private store.
+  const parentDoc = fx.priv.read('parent', 7).doc;
+  fx.priv.mutate('child', 12, { writer: controller, parentDoc, change: doc => { doc.next_action = 'Controller: written before the merge'; return doc; } });
+  const before = fx.writes().length;
+  assert.throws(() => fx.store().read('child', 12), error => error.code === 'STATE_MIGRATION_STALE' && /issue-12/.test(error.message));
+  assert.throws(() => fx.store().read('parent', 7), { code: 'STATE_MIGRATION_STALE' }, 'every read holds, not only the changed document');
+  assert.equal(fx.writes().length, before, 'nothing written while held');
+  // The move runs again, after the binding merged (and before it).
+  const again = applyAgain(fx, fx.withState);
+  assert.equal(again.error, null, again.error?.message);
+  assert.equal(again.result.again, true);
+  const head = fx.github.head(REPO, BRANCH);
+  assert.deepEqual(fx.github.git(REPO).commits.get(head).parents, [fx.migration.head], 'the branch moved forward, not replaced');
+  assert.match(fx.github.git(REPO).commits.get(head).message, /^programme-state: migrate again 2 document\(s\) \[skip ci\]$/);
+  const store = fx.store();
+  assert.equal(store.read('child', 12).doc.next_action, 'Controller: written before the merge');
+  assert.deepEqual(store.read('child', 12).doc, fx.priv.read('child', 12).doc);
+  // With nothing newer there is nothing to move.
+  assert.equal(applyAgain(fx, fx.withState).error.code, 'STATE_MIGRATED');
+  assert.equal(applyAgain(fx, fx.withoutState).error.code, 'STATE_BRANCH_EXISTS');
+});
+
+test('M: once the branch has been written, a later private-store write still holds and is never moved over it', () => {
+  const fx = fixture();
+  bumpChild(fx);
+  const parentDoc = fx.priv.read('parent', 7).doc;
+  fx.priv.mutate('child', 12, { writer: controller, parentDoc, change: doc => { doc.release = 'from a stale binding'; return doc; } });
+  assert.throws(() => fx.store().read('child', 12), { code: 'STATE_MIGRATION_STALE' });
+  const head = fx.github.head(REPO, BRANCH);
+  const again = applyAgain(fx, fx.withState);
+  assert.equal(again.error.code, 'STATE_MIGRATED');
+  assert.equal(fx.github.head(REPO, BRANCH), head, 'the branch is not replaced');
+  // A new document in the private store holds too.
+  const other = fixture();
+  other.priv.write('child', 13, { ...state.newChild({ repository: REPO, outcome: { issue: 13, class: 'COMMITTED', parent: 7, order: 2 } }) }, { sha: null, previous: null });
+  assert.throws(() => other.store().read('parent', 7), error => error.code === 'STATE_MIGRATION_STALE' && /issue-13/.test(error.message));
+});
+
+test('M: the owner\'s typed yes is never asked in a shell a coding agent started', () => {
+  const fx = fixture({ migrate: false });
+  const dry = fx.run(['migrate-state', '--dry-run'], { binding: fx.withoutState }).result;
+  const markers = require('../scripts/toolkit-env.cjs').AGENT_MARKERS;
+  assert.ok(markers.includes('CLAUDECODE') && markers.includes('CODEX_THREAD_ID'));
+  for (const marker of markers) {
+    let asked = false;
+    const refused = fx.run(['migrate-state', '--apply', '--plan-digest', dry.plan_digest, '--controller', '--session', controller.session],
+      { binding: fx.withoutState, environment: { [marker]: '1' }, ask: () => { asked = true; return 'yes'; } });
+    assert.equal(refused.error?.code, 'NOT_CONFIRMED', marker);
+    assert.match(refused.error.message, new RegExp(marker));
+    assert.equal(asked, false, `${marker}: never asked`);
+  }
+  assert.equal(fx.github.head(REPO, BRANCH), null);
+});
+
+test('B: when a checkpoint write fails, the sidecar the old checkpoint names is kept', () => {
+  const fx = fixture();
+  const { store } = bumpChild(fx);
+  const before = [...fx.github.filesAt(STORE_REPO, 'main').keys()].filter(file => /private\/issue-12\/r2-/.test(file));
+  assert.equal(before.length, 1);
+  fx.github.intercept(call => (call.method === 'PUT' && call.path.endsWith('checkpoint.json') ? { status: 500, json: { message: 'stopped' } } : undefined));
+  const parentDoc = store.read('parent', 7).doc;
+  store.mutate('child', 12, { writer: controller, parentDoc, change: doc => { doc.pending_effects = [{ intent_id: 'i-2', kind: 'replace_block', target: { issue: 12 }, state: 'IN_FLIGHT' }]; return doc; } });
+  const after = [...fx.github.filesAt(STORE_REPO, 'main').keys()].filter(file => /private\/issue-12\/r2-/.test(file));
+  assert.equal(after.length, 2, 'the replaced revision 2 sidecar stays while the checkpoint names it');
+  assert.ok(after.includes(before[0]));
+});

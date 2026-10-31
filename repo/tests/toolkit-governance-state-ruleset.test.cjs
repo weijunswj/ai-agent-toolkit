@@ -95,3 +95,14 @@ test('migrate offers the keep-state ruleset only after its own typed yes, and on
   assert.match(notEnforceable.out, /cannot enforce a ruleset that keeps the programme state branch/);
   assert.equal(notEnforceable.asked.some(question => question.includes(ruleset.KEEP_STATE_RULESET_NAME)), false);
 });
+
+test('a keep-state ruleset someone can bypass is not full protection', () => {
+  const body = ruleset.keepStateRulesetBody();
+  assert.deepEqual(ruleset.keepStateVerdict([body]), { status: 'present', reason: null, bypass: 'none' });
+  const bypass = { ...body, bypass_actors: [{ actor_id: 5, actor_type: 'RepositoryRole', bypass_mode: 'always' }] };
+  assert.deepEqual(ruleset.keepStateVerdict([bypass]), { status: 'missing', reason: 'state-branch-deletion-ruleset-allows-bypass', bypass: 'allowed' });
+  assert.equal(ruleset.keepStateVerdict([bypass, body]).status, 'present', 'one without a bypass is enough');
+  const hidden = { ...body };
+  delete hidden.bypass_actors;
+  assert.deepEqual(ruleset.keepStateVerdict([hidden]), { status: 'present', reason: null, bypass: 'not-visible' });
+});
