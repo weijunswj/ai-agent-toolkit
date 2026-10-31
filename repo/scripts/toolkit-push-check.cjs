@@ -211,10 +211,24 @@ function workingTrees(root, deadline, spawn) {
 // follows from them (HEAD~1, @{u}).
 const followsHead = (source) => /^(?:HEAD|@)(?:$|[~^@{])/i.test(source);
 
+// Whether `inner` is `outer` or a folder below it.
+function within(inner, outer) {
+  const relative = path.relative(path.resolve(outer), path.resolve(inner));
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+// The working trees a Codex call from the chat's folder can run in: the one holding that folder and
+// any nested below it. Codex Desktop refuses a workdir outside the chat's folder (Windows error 267,
+// invalid directory), so a working tree elsewhere, such as a sibling worktree of the same
+// repository, is not where the command runs.
+function reachableTrees(trees, chatFolder) {
+  return trees.filter((tree) => within(chatFolder, tree.folder) || within(tree.folder, chatFolder));
+}
+
 // For a target whose folder Codex did not name (`folderConfirmed: false`), the working tree whose
 // changes the push can carry: { root } or { refusal }. It matters only when the same command commits
-// first or the source is HEAD, and only when the repository has more than one working tree; otherwise
-// the chat's folder is the one. With several, a HEAD source is refused (each working tree has its
+// first or the source is HEAD, and only when more than one working tree is reachable from the chat's
+// folder (reachableTrees); otherwise the chat's folder is the one. With several, a HEAD source is refused (each working tree has its
 // own). After a commit in the same command, each source must be a branch exactly one working tree
 // has checked out, and that working tree is read. Otherwise the commit's folder cannot be told and the
 // push is refused: a branch none has checked out (a `git checkout` or `git tag` earlier in the same
@@ -223,7 +237,7 @@ const followsHead = (source) => /^(?:HEAD|@)(?:$|[~^@{])/i.test(source);
 function unconfirmedFolder(root, target, sources, deadline, spawn) {
   const head = sources.some(followsHead);
   if (!head && !target.preceding?.length) return { root };
-  const trees = workingTrees(root, deadline, spawn);
+  const trees = reachableTrees(workingTrees(root, deadline, spawn), target.folder);
   if (trees.length <= 1) return { root };
   if (head) return { refusal: FOLDER_UNCONFIRMED };
   const folders = [];
@@ -237,10 +251,11 @@ function unconfirmedFolder(root, target, sources, deadline, spawn) {
   return folders.length === 1 ? { root: folders[0] } : { refusal: FOLDER_UNCONFIRMED };
 }
 
-// Whether the folder is in a repository with a single working tree. Not a repository: false.
+// Whether the folder is in a repository with a single working tree reachable from it
+// (reachableTrees). Not a repository: false.
 function singleWorkingTree(folder, deadline, spawn) {
   const top = runGit(folder, ['rev-parse', '--show-toplevel'], deadline, spawn);
-  return top.status === 0 && workingTrees(path.resolve(lines(top.stdout)[0]), deadline, spawn).length <= 1;
+  return top.status === 0 && reachableTrees(workingTrees(path.resolve(lines(top.stdout)[0]), deadline, spawn), folder).length <= 1;
 }
 
 // The working-tree file a pending change reads, or '' when it is missing, too big or binary.

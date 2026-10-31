@@ -60,9 +60,7 @@
       "payload": { "tool_name": "Bash", "tool_input": { "command": "git add -A; git commit -m \"Step 2\"; git push origin HEAD" } },
       "fixture": { "repo": { "governance": "enabled", "branch": "feature", "worktrees": ["spare"] }, "files": { "step2.txt": "step two\n" } },
       "expect": { "decision": "allow" },
-      "status": "known-bad",
-      "lane": "Codex folder-unknown false refusal",
-      "added": "2026-10-30",
+      "status": "pass",
       "note": "The tryout supplied workdir, but Codex Desktop delivers the call to the hook as Bash with no workdir and the chat's folder as cwd, so the row sends that shape. The fix decides the allowed outcome; the row expects clean work to go through."
     },
     {
@@ -190,6 +188,28 @@
       "expect": { "decision": "deny" },
       "status": "pass",
       "note": "Codex names no shell. If bash runs it, the $x = line fails, $x is empty and git pushes the session folder (the governed repository) to main; the guard judges that reading too."
+    },
+    {
+      "id": "CODEX.sibling-worktree-head-push",
+      "source": "PR 705 real-host smoke on Codex Desktop, 31 Oct 2026: a sibling worktree counted as a folder the chat could run in",
+      "kind": "benign",
+      "hosts": ["codex"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "git push origin HEAD:feature" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature", "worktrees": ["spare"] } },
+      "expect": { "decision": "allow" },
+      "status": "pass",
+      "note": "Codex Desktop names no folder and refuses a workdir outside the chat folder, so a sibling working tree of the same repository is not where the command runs. Real-host smoke row 14 was refused this way before the fix."
+    },
+    {
+      "id": "CODEX.sibling-worktree-leak",
+      "source": "PR 705 real-host smoke on Codex Desktop, 31 Oct 2026: a sibling worktree counted as a folder the chat could run in",
+      "kind": "hostile",
+      "hosts": ["codex"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "git checkout -b fix; git push -u origin fix" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature", "worktrees": ["spare"], "commits": [{ "files": { "uat-config.txt": "token = \"{credential}\"\n" }, "message": "unpushed commit with a credential" }] } },
+      "expect": { "decision": "deny" },
+      "status": "pass",
+      "note": "The same shape with an unpushed credential on HEAD is still refused, now for the credential. Real-host smoke row 16."
     }
   ]
 }
