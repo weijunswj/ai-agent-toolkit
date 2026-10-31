@@ -41,9 +41,16 @@ test('the edit file opens by absolute path: the Windows shell, or a VS Code-styl
   assert.throws(() => editor.editorCommand('/h/f.env', { platform: 'aix' }), /No way to open a file on aix/);
 });
 
-test('an editor never starts with the switch that runs Electron apps as plain Node.js', () => {
-  const copy = editor.editorEnvironment({ ELECTRON_RUN_AS_NODE: '1', electron_run_as_node: '1', PATH: 'x' });
-  assert.deepEqual(copy, { PATH: 'x' });
+test('an editor starts with system and folder variables only, never agent markers, session tokens or keys', () => {
+  const kept = { SystemRoot: 'C:\\Windows', Path: 'C:\\Windows', USERPROFILE: 'C:\\Users\\a', APPDATA: 'C:\\Users\\a\\AppData\\Roaming', LOCALAPPDATA: 'C:\\Users\\a\\AppData\\Local', TEMP: 'C:\\t', 'ProgramFiles(x86)': 'C:\\P', HOME: '/home/a', DISPLAY: ':0' };
+  const dropped = {
+    ELECTRON_RUN_AS_NODE: '1', CLAUDECODE: '1', CLAUDE_CODE_MESSAGING_TOKEN: 'secret', CLAUDE_CODE_SESSION_ID: 's', CLAUDE_CODE_OAUTH_SCOPES: 'x',
+    CLAUDE_CONFIG_DIR: 'c', ANTHROPIC_API_KEY: 'k', CODEX_THREAD_ID: 't', CODEX_HOME: 'h', OPENAI_API_KEY: 'k', TOOLKIT_HOST_SESSION: 's', AI_AGENT: '1',
+    GH_TOKEN: 'k', GITHUB_TOKEN: 'k', X1_TEST_STORED_KEY: 'value', NODE_OPTIONS: '--require x', VSCODE_IPC_HOOK_CLI: 'pipe',
+  };
+  assert.deepEqual(editor.editorEnvironment({ ...kept, ...dropped }), kept);
+  const source = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'toolkit-env.cjs'), 'utf8');
+  assert.match(source, /spawn\(command, args, \{ detached: true, stdio: 'ignore', windowsHide: false, env: editor\.editorEnvironment\(environment\) \}\)/, 'every open, the shell route too, uses it');
 });
 
 test('the program of an open command is its first token, absolute only, with %NAME% expanded', () => {

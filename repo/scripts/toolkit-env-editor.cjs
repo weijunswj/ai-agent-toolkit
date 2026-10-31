@@ -83,12 +83,21 @@ function editorCommand(file, { platform = process.platform, environment = proces
   throw new Error(`No way to open a file on ${platform}.`);
 }
 
-// The environment an editor starts with: this one without the switch that makes an Electron app
-// run as plain Node.js (set in some apps' terminals), which would stop VS Code opening a window.
+// The only variables an editor starts with: what a desktop app needs to find the system, the user's
+// folders and the display. A freshly started editor keeps its environment for its lifetime and
+// passes it to every terminal and extension in it, so agent markers, session tokens, API keys and
+// switches such as ELECTRON_RUN_AS_NODE never reach it. Names match without regard to case.
+const EDITOR_ENVIRONMENT = Object.freeze([
+  'SystemRoot', 'SystemDrive', 'windir', 'ComSpec', 'PATH', 'PATHEXT', 'OS', 'COMPUTERNAME',
+  'PROCESSOR_ARCHITECTURE', 'PROCESSOR_IDENTIFIER', 'NUMBER_OF_PROCESSORS',
+  'USERPROFILE', 'USERNAME', 'USERDOMAIN', 'HOMEDRIVE', 'HOMEPATH', 'APPDATA', 'LOCALAPPDATA', 'PUBLIC', 'ALLUSERSPROFILE',
+  'ProgramData', 'ProgramFiles', 'ProgramFiles(x86)', 'ProgramW6432', 'CommonProgramFiles', 'CommonProgramFiles(x86)', 'CommonProgramW6432',
+  'TEMP', 'TMP', 'TMPDIR', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'LANG', 'LANGUAGE', 'LC_ALL', 'LC_CTYPE',
+  'DISPLAY', 'WAYLAND_DISPLAY', 'XDG_RUNTIME_DIR', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_DATA_DIRS', 'XDG_CURRENT_DESKTOP', 'DBUS_SESSION_BUS_ADDRESS',
+].map((name) => name.toLowerCase()));
+
 function editorEnvironment(environment = process.env) {
-  const copy = { ...environment };
-  for (const name of Object.keys(copy)) if (/^ELECTRON_RUN_AS_NODE$/i.test(name)) delete copy[name];
-  return copy;
+  return Object.fromEntries(Object.entries(environment).filter(([name]) => EDITOR_ENVIRONMENT.includes(name.toLowerCase())));
 }
 
 // The user data folders of the VS Code-style editors that exist on this computer.
