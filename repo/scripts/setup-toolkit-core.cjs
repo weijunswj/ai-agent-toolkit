@@ -2191,7 +2191,7 @@ function setupQuestionSpecs(args, current) {
       prompt: 'Claude Code settings choice',
       whatThisControls: 'Four values in your Claude Code user settings (settings.json in your Claude Code config folder): no AI attribution lines in commits and pull requests ("attribution": false); messages from your other Claude sessions, such as a Claude Projects coordinator, wake this one ("crossSessionInbound": "accept"; messages still cannot approve actions or change settings); pause and ask before switching models when a request is flagged ("switchModelsOnFlag": false); and read AGENTS.md as well as CLAUDE.md (Project instructions: "claude-md-and-agents-md", Claude Code 2.1.285 or later). A value you set yourself is never changed.',
       choices: [
-        wizardChoice('enable', 'Add missing settings', `${claudeSettingsAddOutcome(current.claudeSettings)} Toolkit records each value it adds so it can remove it later. Values you set yourself, matching or not, stay as they are.`),
+        wizardChoice('enable', 'Add missing settings', `${claudeSettingsAddOutcome(current.claudeSettings)} Toolkit records each value it adds so it can remove it later. Values you set yourself, matching or not, are never changed.`),
         wizardChoice('disable', "Remove Toolkit's values", 'Remove only the values Toolkit set and still match what it recorded. Values you set yourself stay as they are.'),
         wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${claudeSettingsOutcome(current.claudeSettings)}`),
       ],

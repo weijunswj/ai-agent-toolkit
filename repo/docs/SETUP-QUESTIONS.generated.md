@@ -287,7 +287,7 @@ Setup run with `--host claude-code` shows this bank instead, for the same repres
 
 Toolkit setup choices - 8 questions across 3 sections
 
-Bank reference: KDAZ-6WYT-D4RV-SD3R
+Bank reference: 6775-NNQJ-105F-CBX0
 
 Quick index
 
@@ -478,7 +478,7 @@ Quick index
 
 **Choices:**
 
-- **A. Add missing settings** - Adds each recommended setting that is not set yet; values you set yourself stay as they are. Toolkit records each value it adds so it can remove it later. Values you set yourself, matching or not, stay as they are.
+- **A. Add missing settings** - Adds each recommended setting that is not set yet; values you set yourself stay as they are. Toolkit records each value it adds so it can remove it later. Values you set yourself, matching or not, are never changed.
 - **B. Remove Toolkit's values** - Remove only the values Toolkit set and still match what it recorded. Values you set yourself stay as they are.
 - **C. Keep current** - Preserve this effective behavior: The Claude Code user settings have not been read yet.
 
