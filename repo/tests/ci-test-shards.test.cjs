@@ -160,6 +160,7 @@ test('the CI aggregate check passes only when every leg succeeded and covered ev
     ['a non-zero leg exit', (f) => { f.summaries[0].exit_code = 1; }, /exited with 1/],
     ['an unknown summary schema', (f) => { f.summaries[0].schema = 'other'; }, /does not use toolkit-test-summary\/v1/],
     ['a new test file nobody ran', (f) => { f.files.push('repo/tests/d.test.cjs'); }, /d\.test\.cjs/],
+    ['a clock-ahead run in place of a shard', (f) => { f.summaries[1].clock_offset_days = 400; }, /moved 400 days ahead, so it does not count as a shard run[\s\S]*linux-2 has no summary/],
   ];
   for (const [label, mutate, pattern] of cases) {
     const fixture = ciFixture();
@@ -169,7 +170,26 @@ test('the CI aggregate check passes only when every leg succeeded and covered ev
   }
 });
 
-test('the workflow drift guard accepts validate.yml and rejects each way to narrow or mask a test step', () => {
+// The pinned uses: text of an action as it stands in a workflow. Found at run time, so the tests
+// keep working on the live validate.yml after a Dependabot update changes its pins.
+function pinOf(workflow, action) {
+  const match = workflow.match(new RegExp(`${action}@[0-9a-f]{40} # v\\d+\\.\\d+\\.\\d+`));
+  assert.ok(match, `${action} is pinned in the workflow`);
+  return match[0];
+}
+
+// A stand-in commit SHA that differs from the one in a pin.
+function otherSha(pin) {
+  return pin.includes('@0123456789abcdef') ? 'fedcba9876543210fedcba9876543210fedcba98' : '0123456789abcdef0123456789abcdef01234567';
+}
+
+// Every pinned action of a workflow, in order of first use.
+function pinnedActions(workflow) {
+  return [...new Set([...workflow.matchAll(/^ {8}uses: ([^@\s]+)@/gm)].map((match) => match[1]))];
+}
+
+// The drift cases, run against the live workflow and against copies with updated pins.
+function assertDriftGuard(WORKFLOW) {
   assert.deepEqual(shards.workflowErrors(WORKFLOW, MANIFEST), []);
   const shardStep = 'node repo/scripts/run-tests.cjs --shard ${{ matrix.shard }} --os windows';
   const verify = `          ${shards.VERIFY_COMMAND}`;
@@ -189,15 +209,24 @@ test('the workflow drift guard accepts validate.yml and rejects each way to narr
     ['the leg timeout removed', WORKFLOW.replace('    timeout-minutes: 30\n', '')],
     ['the aggregate no longer always runs', WORKFLOW.replace('    if: ${{ always() }}\n', '')],
     ['the aggregate skipped on failure', WORKFLOW.replace('if: ${{ always() }}', 'if: ${{ success() }}')],
-    ['the aggregate not waiting for Windows', WORKFLOW.replace('needs: [tests-linux, tests-windows, personal-data]', 'needs: [tests-linux, personal-data]')],
-    ['the aggregate not waiting for the personal-data check', WORKFLOW.replace('needs: [tests-linux, tests-windows, personal-data]', 'needs: [tests-linux, tests-windows]')],
+    ['the aggregate not waiting for Windows', WORKFLOW.replace('needs: [tests-linux, tests-windows, tests-clock-ahead, hook-pack, personal-data]', 'needs: [tests-linux, tests-clock-ahead, hook-pack, personal-data]')],
+    ['the aggregate not waiting for the personal-data check', WORKFLOW.replace('needs: [tests-linux, tests-windows, tests-clock-ahead, hook-pack, personal-data]', 'needs: [tests-linux, tests-windows, tests-clock-ahead, hook-pack]')],
+    ['the aggregate not waiting for the clock-ahead run', WORKFLOW.replace('needs: [tests-linux, tests-windows, tests-clock-ahead, hook-pack, personal-data]', 'needs: [tests-linux, tests-windows, hook-pack, personal-data]')],
+    ['the clock-ahead job removed', WORKFLOW.replace(/\n  tests-clock-ahead:\n[\s\S]*?(?=\n  personal-data:\n)/, '')],
+    ['the clock-ahead run narrowed to one file', WORKFLOW.replace('--clock-ahead --clock-offset-days 400', 'repo/tests/skill-routing.test.cjs --clock-offset-days 400')],
+    ['the clock-ahead run moved one day only', WORKFLOW.replace('--clock-ahead --clock-offset-days 400', '--clock-ahead --clock-offset-days 1')],
+    ['a failed shard no longer uploads its summary', WORKFLOW.replace('        if: ${{ !cancelled() }}\n', '')],
     ['the personal-data check narrowed to one mode', WORKFLOW.replace('personal-data-guard.cjs ci', 'personal-data-guard.cjs pr')],
     ['the personal-data check on a shallow clone', WORKFLOW.replace(/(\n  personal-data:\n[\s\S]*?)fetch-depth: 0/, '$1fetch-depth: 1')],
     ['the personal-data job removed', WORKFLOW.replace(/\n  personal-data:\n[\s\S]*?(?=\n  validate:\n)/, '')],
+    ['the hook pack job removed', WORKFLOW.replace(/\n  hook-pack:\n[\s\S]*?(?=\n  personal-data:\n)/, '')],
+    ['the hook pack dropped on Windows', WORKFLOW.replace('os: [ubuntu-latest, windows-latest]', 'os: [ubuntu-latest]')],
+    ['the hook pack budget removed', WORKFLOW.replace(' run --budget-seconds 360', ' run')],
+    ['the aggregate not waiting for the hook pack', WORKFLOW.replace('needs: [tests-linux, tests-windows, tests-clock-ahead, hook-pack, personal-data]', 'needs: [tests-linux, tests-windows, tests-clock-ahead, personal-data]')],
     ['the summary check removed', WORKFLOW.replace(`\n${verify}`, '')],
     ['the summary check not last', WORKFLOW.replace(`\n${verify}`, '').replace('          node repo/scripts/validate-toolkit.cjs\n', `          node repo/scripts/validate-toolkit.cjs\n${verify}\n`)],
     ['the leg results not passed in', WORKFLOW.replace('          TEST_LEGS: ${{ toJSON(needs) }}\n', '')],
-    ['a step before Run validation', WORKFLOW.replace('      - name: Set up Python\n        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0\n        with:\n          python-version: \'3.12\'\n\n      # The one', '      - name: Set up Python\n        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0\n        with:\n          python-version: \'3.12\'\n\n      - name: Extra\n        run: echo hi\n\n      # The one')],
+    ['a step before Run validation', WORKFLOW.replace('          python-version: \'3.12\'\n\n      # The one', '          python-version: \'3.12\'\n\n      - name: Extra\n        run: echo hi\n\n      # The one')],
     ['a condition on the gate step', WORKFLOW.replace('      - name: Run validation\n', '      - name: Run validation\n        if: ${{ github.event_name == \'push\' }}\n')],
     ['an extra job', `${WORKFLOW}\n  extra:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo\n`],
     ['a test job removed', WORKFLOW.replace(/\n  tests-windows:\n[\s\S]*?(?=\n  validate:\n)/, '')],
@@ -222,7 +251,7 @@ test('the workflow drift guard accepts validate.yml and rejects each way to narr
     ['an unnamed step before Run validation', WORKFLOW.replace(`      # The one gate list`, '      - run: echo hi\n\n      # The one gate list')],
     ['the summaries not merged', WORKFLOW.replace('          merge-multiple: true', '          merge-multiple: false')],
     ['the summaries downloaded elsewhere', WORKFLOW.replace('          path: ${{ runner.temp }}/test-summaries', '          path: ${{ runner.temp }}/other')],
-    ['a different download action', WORKFLOW.replace('actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1', 'actions/download-artifact@v8')],
+    ['a different download action', WORKFLOW.replace(pinOf(WORKFLOW, 'actions/download-artifact'), 'actions/download-artifact@v8')],
     ['the diff base removed', WORKFLOW.replace('          DIFF_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}\n', '')],
     ['a shallow checkout in validate', WORKFLOW.replace(/(\n  validate:\n[\s\S]*?)fetch-depth: 0/, '$1fetch-depth: 1')],
     ['an extra env value on the gate step', WORKFLOW.replace('          TEST_LEGS: ${{ toJSON(needs) }}\n', '          TEST_LEGS: ${{ toJSON(needs) }}\n          NODE_OPTIONS: --require ./x.cjs\n')],
@@ -260,6 +289,65 @@ test('the workflow drift guard accepts validate.yml and rejects each way to narr
   const manifest = clone(MANIFEST);
   manifest.systems.linux.shards.splice(1, 0, { id: 'linux-9', files: [manifest.systems.linux.shards[0].files.pop()] });
   assert.match(shards.workflowErrors(WORKFLOW, manifest).join('\n'), /tests-linux job differs/);
+}
+
+// A pin update of the same action passes; nothing else on that line does.
+function assertPinUpdates(WORKFLOW) {
+  const pin = pinOf(WORKFLOW, 'actions/setup-python');
+  const newer = `actions/setup-python@${otherSha(pin)} # v7.2.0`;
+  const everywhere = WORKFLOW.split(pin).join(newer);
+  assert.deepEqual(shards.workflowErrors(everywhere, MANIFEST), [], 'every copy of the pin updated');
+  assert.deepEqual(shards.workflowErrors(WORKFLOW.replace(pin, newer), MANIFEST), [], 'one copy of the pin updated');
+  assert.deepEqual(shards.workflowErrors(everywhere.replace(/\n/g, '\r\n'), MANIFEST), [], 'a CRLF checkout with an update');
+  const rejected = [
+    ['a different action', 'evil/setup-python@0123456789abcdef0123456789abcdef01234567 # v7.2.0'],
+    ['a renamed action', 'actions/setup-pythons@0123456789abcdef0123456789abcdef01234567 # v7.2.0'],
+    ['a short SHA', 'actions/setup-python@0123456 # v7.2.0'],
+    ['a ref that is not hex', 'actions/setup-python@0123456789abcdef0123456789abcdef0123456z # v7.2.0'],
+    ['an upper-case SHA', 'actions/setup-python@0123456789ABCDEF0123456789ABCDEF01234567 # v7.2.0'],
+    ['a tag ref', 'actions/setup-python@v7 # v7.2.0'],
+    ['a branch ref', 'actions/setup-python@main'],
+    ['a removed version comment', 'actions/setup-python@0123456789abcdef0123456789abcdef01234567'],
+    ['a version comment that is not a version', 'actions/setup-python@0123456789abcdef0123456789abcdef01234567 # latest'],
+    ['text after the version comment', 'actions/setup-python@0123456789abcdef0123456789abcdef01234567 # v7.2.0 with: x'],
+  ];
+  for (const [label, line] of rejected) {
+    assert.match(shards.workflowErrors(WORKFLOW.replace(pin, line), MANIFEST).join('\n'), /differs from its pinned text/, label);
+  }
+  // A pin update does not excuse another edit beside it.
+  const unmerged = everywhere.replace('          merge-multiple: true', '          merge-multiple: false');
+  assert.match(shards.workflowErrors(unmerged, MANIFEST).join('\n'), /differs from its pinned text/, 'a pin update beside another edit');
+  const moved = WORKFLOW.replace(`        uses: ${pin}\n`, `          uses: ${newer}\n`);
+  assert.match(shards.workflowErrors(moved, MANIFEST).join('\n'), /differs from its pinned text/, 'a re-indented pin line');
+  const swapped = WORKFLOW.replace(`uses: ${pin}`, 'uses: actions/checkout@0123456789abcdef0123456789abcdef01234567 # v7.2.0');
+  assert.match(shards.workflowErrors(swapped, MANIFEST).join('\n'), /differs from its pinned text/, 'another action in place of a pinned one');
+}
+
+test('the workflow drift guard accepts validate.yml and rejects each way to narrow or mask a test step', () => {
+  assertDriftGuard(WORKFLOW);
+});
+
+test('the workflow drift guard accepts a Dependabot pin update of the same action and nothing else on that line', () => {
+  assertPinUpdates(WORKFLOW);
+});
+
+test('after a Dependabot update of any pinned action in validate.yml, the whole drift set still holds', () => {
+  const actions = pinnedActions(WORKFLOW);
+  for (const action of ['actions/checkout', 'actions/setup-node', 'actions/setup-python', 'actions/upload-artifact', 'actions/download-artifact']) {
+    assert.ok(actions.includes(action), `${action} is one of the pinned actions`);
+  }
+  const updated = (workflow, action) => {
+    const pin = pinOf(workflow, action);
+    return workflow.split(pin).join(`${action}@${otherSha(pin)} # v99.1.0`);
+  };
+  const variants = actions.map((action) => [action, updated(WORKFLOW, action)]);
+  variants.push(['every pinned action', actions.reduce(updated, WORKFLOW)]);
+  for (const [label, workflow] of variants) {
+    assert.notEqual(workflow, WORKFLOW, `${label} must change the workflow`);
+    assert.deepEqual(shards.workflowErrors(workflow, MANIFEST), [], label);
+    assertDriftGuard(workflow);
+    assertPinUpdates(workflow);
+  }
 });
 
 test('the runner refuses unknown shards, a shard for another system, mixed modes and a drive-root temp folder', () => {
@@ -462,6 +550,119 @@ test('local runs pick the test files a change affects', () => {
   assert.deepEqual(shards.affectedTestFiles(['README.md'], discovered, (file) => texts[file]), []);
 });
 
+test('the clock-ahead run picks the test files that pin a date, in the file or in a repo/tests helper it loads', () => {
+  const texts = {
+    'repo/tests/iso.test.cjs': "const at = '2026-10-23T00:00:00Z';",
+    'repo/tests/utc.test.cjs': 'const at = Date.UTC(2026, 9, 23);',
+    'repo/tests/nested.test.cjs': "require('./support/clock.cjs');",
+    'repo/tests/support/clock.cjs': "module.exports = require('../fake-clock.cjs');",
+    'repo/tests/fake-clock.cjs': "module.exports = { clock: '2026-01-31' };",
+    'repo/tests/plain.test.cjs': "const version = '1.2.3'; const notADate = '2026-13-01'; const longer = '12026-01-01';",
+    'repo/tests/loads-a-test.test.cjs': "require('./iso.test.cjs');",
+    'repo/tests/outside.test.cjs': "require('../../repo/scripts/clock.cjs');",
+    'repo/scripts/clock.cjs': "const at = '2026-10-23';",
+    'repo/tests/missing-helper.test.cjs': "require('./gone.cjs');",
+    'repo/tests/loop.test.cjs': "require('./loop-a.cjs');",
+    'repo/tests/loop-a.cjs': "require('./loop-b.cjs');",
+    'repo/tests/loop-b.cjs': "require('./loop-a.cjs');",
+  };
+  const discovered = Object.keys(texts).filter((file) => file.endsWith('.test.cjs')).sort();
+  const picked = shards.dateBoundTestFiles(discovered, (file) => (file in texts ? texts[file] : null));
+  assert.deepEqual(picked, ['repo/tests/iso.test.cjs', 'repo/tests/nested.test.cjs', 'repo/tests/utc.test.cjs']);
+  // The live suite: the custody tests pin dates through the fake GitHub clock helper.
+  const live = shards.dateBoundTestFiles(DISCOVERED, (file) => {
+    try { return fs.readFileSync(path.join(ROOT, file), 'utf8'); }
+    catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+  });
+  assert.ok(live.includes('repo/tests/toolkit-programme-custody.test.cjs'));
+  assert.ok(live.includes('repo/tests/toolkit-programme-refresh.test.cjs'));
+  assert.ok(live.length < DISCOVERED.length, 'files that pin no date are left out');
+});
+
+test('the runner takes --clock-ahead and --clock-offset-days only where a moved clock belongs', () => {
+  assert.equal(runner.CLOCK_AHEAD_DAYS, 400);
+  assert.deepEqual([runner.parseArgs(['--clock-ahead']).mode, runner.parseArgs(['--clock-ahead']).clockOffsetDays], ['clock-ahead', 400]);
+  assert.equal(runner.parseArgs(['--clock-ahead', '--clock-offset-days', '30']).clockOffsetDays, 30);
+  assert.equal(runner.parseArgs(['--clock-offset-days', '7', 'repo/tests/ci-test-shards.test.cjs']).clockOffsetDays, 7);
+  assert.equal(runner.parseArgs(['--all', '--clock-offset-days', '7']).clockOffsetDays, 7);
+  assert.equal(runner.parseArgs(['--clock-offset-days', '7']).mode, 'changed');
+  assert.equal(runner.parseArgs(['--all']).clockOffsetDays, null, 'other runs keep the real clock');
+  for (const args of [
+    ['--shard', 'linux-1', '--os', 'linux', '--clock-offset-days', '400'],
+    ['--plan', '--clock-offset-days', '400'],
+    ['--verify-ci', 'x', '--clock-offset-days', '400'],
+    ['--clock-ahead', '--all'],
+    ['--clock-ahead', '--clock-offset-days', '0'],
+    ['--clock-ahead', '--clock-offset-days', '1.5'],
+    ['--clock-ahead', '--clock-offset-days', '10000'],
+    ['--clock-ahead', '--clock-offset-days'],
+  ]) assert.throws(() => runner.parseArgs(args), (error) => error.constructor.name === 'UsageError', args.join(' '));
+});
+
+test('a moved run moves Node\'s clock in the test processes and their node children, never in the runner', (t) => {
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-run-clock-'));
+  t.after(() => fs.rmSync(work, { recursive: true, force: true }));
+  const record = path.join(work, 'record.json');
+  const probe = path.join(work, 'clock.test.cjs');
+  fs.writeFileSync(probe, [
+    "const test = require('node:test');",
+    "const fs = require('node:fs');",
+    "const { spawnSync } = require('node:child_process');",
+    "test('records the clocks it sees', () => {",
+    "  const child = spawnSync(process.execPath, ['-e', 'process.stdout.write(String(Date.now()))'], { encoding: 'utf8' });",
+    "  const scrubbed = spawnSync(process.execPath, ['-e', 'process.stdout.write(String(Date.now()))'], { encoding: 'utf8', env: { ...process.env, TOOLKIT_TEST_CLOCK_OFFSET_DAYS: undefined } });",
+    '  fs.writeFileSync(process.env.RUN_TESTS_RECORD, JSON.stringify({',
+    '    real: Math.round(performance.timeOrigin + performance.now()), now: Date.now(), created: new Date().getTime(), called: Date.parse(Date()),',
+    "    fixed: new Date(0).getTime(), parsed: Date.parse('2026-01-01T00:00:00Z'), utc: Date.UTC(2026, 0, 1), isDate: new Date() instanceof Date,",
+    '    child: Number(child.stdout), scrubbed: Number(scrubbed.stdout), options: process.env.NODE_OPTIONS,',
+    '  }));',
+    '});',
+  ].join('\n'));
+  const env = { ...process.env, RUN_TESTS_RECORD: record, NODE_OPTIONS: '--max-old-space-size=2048' };
+  delete env.NODE_TEST_CONTEXT;
+  delete env.TOOLKIT_TEST_CLOCK_OFFSET_DAYS;
+  const day = 24 * 60 * 60 * 1000;
+  const slack = 10 * 60 * 1000;
+  const near = (value, expected, label) => assert.ok(Math.abs(value - expected) < slack, `${label}: ${value} is not near ${expected}`);
+  const before = Date.now();
+  const moved = new runner.TestRun({ root: ROOT, system: shards.platformSystem(), tempRoot: path.join(work, 'temp'), clockOffsetDays: 30, env, stdio: 'ignore', out: sink(), err: sink() });
+  const result = moved.run([probe], { concurrency: 1 });
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.summary.clock_offset_days, 30, 'the summary records the offset');
+  const seen = JSON.parse(fs.readFileSync(record, 'utf8'));
+  for (const key of ['now', 'created', 'child']) near(seen[key] - seen.real, 30 * day, key);
+  near(seen.called - seen.real, 30 * day, 'Date() without new');
+  near(seen.scrubbed, seen.real, 'a child whose environment drops the offset keeps the real clock');
+  assert.deepEqual([seen.fixed, seen.parsed, seen.utc, seen.isDate], [0, 1767225600000, 1767225600000, true]);
+  assert.match(seen.options, /^--max-old-space-size=2048 --require ".+test-clock-offset\.cjs"$/, 'the preload is added after the NODE_OPTIONS already set');
+  // The runner itself keeps its clock: its run folder is named by the real date and its env is untouched.
+  near(Date.now(), before, 'the runner process');
+  const stamp = path.basename(moved.folder).match(/^run-(\d{8})-/)[1];
+  const real = new Date(seen.real).toISOString().slice(0, 10).replace(/-/g, '');
+  assert.equal(stamp, real, 'the run folder is named by the real date');
+  assert.equal(env.NODE_OPTIONS, '--max-old-space-size=2048');
+  assert.equal(env.TOOLKIT_TEST_CLOCK_OFFSET_DAYS, undefined);
+
+  const plain = new runner.TestRun({ root: ROOT, system: shards.platformSystem(), tempRoot: path.join(work, 'temp'), env, stdio: 'ignore', out: sink(), err: sink() });
+  const unmoved = plain.run([probe], { concurrency: 1 });
+  assert.equal(unmoved.exitCode, 0);
+  assert.equal('clock_offset_days' in unmoved.summary, false);
+  const again = JSON.parse(fs.readFileSync(record, 'utf8'));
+  near(again.now, again.real, 'a run without an offset');
+  assert.equal(again.options, '--max-old-space-size=2048');
+});
+
+test('the clock preload refuses an offset that is not a whole number of days', () => {
+  const { spawnSync } = require('node:child_process');
+  for (const value of ['abc', '0', '-1', '1.5', '10000', '']) {
+    const env = { ...process.env, TOOLKIT_TEST_CLOCK_OFFSET_DAYS: value };
+    delete env.NODE_OPTIONS;
+    const result = spawnSync(process.execPath, ['--require', runner.CLOCK_PRELOAD, '-e', ''], { env, encoding: 'utf8' });
+    assert.notEqual(result.status, 0, value);
+    assert.match(result.stderr, /TOOLKIT_TEST_CLOCK_OFFSET_DAYS must be a whole number of days/, value);
+  }
+});
+
 test('the duration check reports without a budget and fails files over a declared or raised budget', () => {
   const { checkDurations, readReport } = require('../scripts/check-test-durations.cjs');
   const report = readReport({ schema: 'toolkit-test-durations/v1', system: 'windows', files: { 'repo/tests/a.test.cjs': 50, 'repo/tests/b.test.cjs': 5 } });
@@ -480,6 +681,40 @@ test('the duration check reports without a budget and fails files over a declare
   assert.match(result.errors.join('\n'), /needs a recorded reason/);
   result = checkDurations([report], { seconds_per_file: { windows: -1 } });
   assert.match(result.errors.join('\n'), /must be a positive number/);
+});
+
+test('the CI duration check reads the downloaded shard summaries and never passes on none', (t) => {
+  const { ciReportFiles, main } = require('../scripts/check-test-durations.cjs');
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'durations-ci-'));
+  t.after(() => fs.rmSync(temp, { recursive: true, force: true }));
+  const sink = () => { let text = ''; return { write: (chunk) => { text += chunk; }, text: () => text }; };
+  assert.throws(() => ciReportFiles({}), /needs RUNNER_TEMP/);
+  assert.throws(() => ciReportFiles({ RUNNER_TEMP: temp }), /no shard summaries/);
+  let err = sink();
+  assert.equal(main(['--ci'], { out: sink(), err, env: { RUNNER_TEMP: temp } }), 2);
+  assert.match(err.text(), /could not run: no shard summaries/);
+  assert.equal(main(['--ci', 'extra.json'], { out: sink(), err: sink(), env: { RUNNER_TEMP: temp } }), 2);
+  const dir = path.join(temp, 'test-summaries');
+  fs.mkdirSync(dir);
+  const summary = (system, seconds) => ({ schema: shards.SUMMARY_SCHEMA, system, exit_code: 0, node: 'v22', files: [{ file: 'repo/tests/a.test.cjs', seconds }], missing: [] });
+  fs.writeFileSync(path.join(dir, 'test-summary-linux-1.json'), JSON.stringify(summary('linux', 1)));
+  fs.writeFileSync(path.join(dir, 'test-summary-windows-1.json'), JSON.stringify(summary('windows', 1)));
+  assert.deepEqual(ciReportFiles({ RUNNER_TEMP: temp }).map((file) => path.basename(file)), ['test-summary-linux-1.json', 'test-summary-windows-1.json']);
+  const out = sink();
+  assert.equal(main(['--ci'], { out, err: sink(), env: { RUNNER_TEMP: temp } }), 0);
+  assert.match(out.text(), /linux: 1 file\(s\) checked against \d+ s per file/);
+  fs.writeFileSync(path.join(dir, 'test-summary-windows-1.json'), JSON.stringify(summary('windows', 100000)));
+  err = sink();
+  assert.equal(main(['--ci'], { out: sink(), err, env: { RUNNER_TEMP: temp } }), 1);
+  assert.match(err.text(), /windows: repo\/tests\/a\.test\.cjs took 100000 s, over its \d+ s budget/);
+});
+
+test('this repository declares a valid per-file budget for every system', () => {
+  // The CI duration check enforces it on each run's own times; recorded times can be from a slower run.
+  const { checkDurations } = require('../scripts/check-test-durations.cjs');
+  const manifest = shards.loadManifest(ROOT);
+  for (const system of shards.SYSTEMS) assert.equal(typeof manifest.budgets.seconds_per_file[system], 'number', system);
+  assert.deepEqual(checkDurations([], manifest.budgets).errors, []);
 });
 
 test('shard files run longest first and the estimate models the concurrency slots', () => {

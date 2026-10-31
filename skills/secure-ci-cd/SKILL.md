@@ -72,6 +72,11 @@ Before committing, pushing, creating a pull request, merging, or deploying, paus
 - [`scripts/plain-text-check.cjs`](scripts/plain-text-check.cjs) is a zero-dependency check that user-facing docs say what they mean: no GitHub issue, pull request, discussion, commit or compare links, no hash-number references or "PR" and "issue" number labels, and none of the repository's own shorthand codes listed as banned terms in `.github/plain-text.json` (each with a reason and the plain wording to use). Items already there sit in a baseline that only shrinks. It points; it never rewrites text. `--files` checks only named files, `--explain` lists the rules.
 - [`scripts/install-plain-text-check.cjs`](scripts/install-plain-text-check.cjs) installs it: a copy under `.github/scripts/`, the settings and starting baseline when missing (never overwritten), and with `--workflow` the CI job from [`templates/github-actions/plain-text.yml`](templates/github-actions/plain-text.yml). `--check` reports drift. Governed repositories get it with their governed materials; others on a yes.
 - Before writing user-facing text in a repository that has `.github/plain-text.json`, read its banned terms and write the plain wording first, so the check rarely fires.
+- Where the personal-data guard's hooks are installed too, its pre-push hook also runs the plain-text check on the files the current branch changes, when the push sends the current commit and the working folder has no uncommitted changes (otherwise it says it skipped); a check that cannot run lets the push go on with a note.
+
+## Check Before A Push
+
+- With the Toolkit plugin installed, the shell hook in Claude Code and Codex refuses a `git push` or `gh pr create` when a commit being sent adds a credential (the formats in [`scripts/secret-patterns.cjs`](scripts/secret-patterns.cjs)). It names the file, line, commit and rule, never the matched text. Plain-text findings are left to the CI plain-text check. Take a credential out of the commits being sent and treat it as exposed if it was real; mark a reviewed false positive with `secret-scan: allow <reason>` on that line. If the check cannot run, the push goes ahead with a note.
 
 ## Local Security Scan
 

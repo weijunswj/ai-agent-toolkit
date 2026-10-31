@@ -327,7 +327,7 @@ test('managed explicit flags without yes-recommended complete with non-TTY stdin
   assert.equal(markerCount(result.stdout, core.QUESTION_BANK_COMPLETE), 1);
   assert.equal((result.stdout.match(/^Bank reference: [0-9A-Z]{4}(?:-[0-9A-Z]{4}){3}$/gm) || []).length, 1);
   assert.match(result.stdout, /All visible setup questions are already resolved by explicit inputs/);
-  assert.doesNotMatch(result.stdout, /Reply with the displayed bank reference|Reply with one line for each unresolved question/);
+  assert.doesNotMatch(result.stdout, /Reply with either:|Reply with one line for each unresolved question/);
 });
 
 test('managed partial explicit flags preserve one bank and truthful child guidance', async () => {
@@ -348,7 +348,7 @@ test('managed partial explicit flags preserve one bank and truthful child guidan
   assert.match(result.stdout, /Reply with one line for each unresolved question in this exact order/);
   assert.equal((result.stdout.match(/After those question-answer lines, append detail lines in this exact canonical order/g) || []).length, 1);
   assert.match(result.stdout, /1\. 1\.1 Update source: custom managed-checkout path[\s\S]*2\. 1\.4 Report retention: positive report-retention duration/);
-  assert.doesNotMatch(result.stdout, /Reply with the displayed bank reference and either/);
+  assert.doesNotMatch(result.stdout, /Reply with either:/);
   assert.equal(fs.existsSync(path.join(fixture.managedPath, 'BRIDGE_ARGS.log')), false);
 });
 
@@ -438,7 +438,8 @@ test('Claude probe timeout cannot silently suppress the real managed bank', () =
   assert.equal(result.status, 23, result.stderr || result.stdout);
   assert.equal(markerCount(result.stdout, core.QUESTION_BANK_BEGIN), 1);
   assert.equal(markerCount(result.stdout, core.QUESTION_BANK_COMPLETE), 1);
-  assert.match(result.stdout, /could not be verified|checks the Claude Code Toolkit plugin after you answer|unavailable/i);
+  // The bank's Current column shows the plugin's short state.
+  assert.match(result.stdout, /could not be verified|checked after you answer|unavailable/i);
   assert.equal(fs.existsSync(path.join(fixture.managedPath, 'BRIDGE_ARGS.log')), false);
   assert.equal(fs.existsSync(codexConfig(fixture.root)), false);
 });

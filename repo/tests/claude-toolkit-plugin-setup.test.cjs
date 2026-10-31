@@ -1005,7 +1005,7 @@ test('installed enforcement byte verification rejects missing and stale cache fi
   const cache = tmpRoot();
   // A package fixture contains the actual canonical runtime and contracts.
   // Negative checks below independently remove/drift protected cache files.
-  for (const directory of ['repo/scripts','repo/contracts','.claude-plugin','skills/github-program-reconciler/scripts']) {
+  for (const directory of ['repo/scripts','repo/contracts','.claude-plugin','skills/github-program-reconciler/scripts','skills/secure-ci-cd/scripts']) {
     fs.cpSync(path.join(repoRoot,directory),path.join(cache,directory),{recursive:true});
   }
   for(const file of ['repo/CONTROLLER.md','repo/ARCHITECTURE.md'])fs.copyFileSync(path.join(repoRoot,file),path.join(cache,file));
@@ -1082,7 +1082,42 @@ test('a plugin list that reports another running folder or folder version is not
   versioned.installed[0].folderVersion = '0.0.1';
   state = setup.evaluateClaudeToolkitPluginState(versioned, { repoRoot });
   assert.equal(state.ok, false);
-  assert.match(state.errors.join('\n'), /runs ai-agent-toolkit@ai-agent-toolkit-local version 0\.0\.1/);
+  assert.match(state.errors.join('\n'), /ai-agent-toolkit@ai-agent-toolkit-local expected version \S+: 0\.0\.1/);
+  delete versioned.installed[0].folderVersion;
+  state = setup.evaluateClaudeToolkitPluginState(versioned, { repoRoot });
+  assert.equal(state.ok, false);
+  assert.match(state.errors.join('\n'), /does not list the version of the folder it runs/);
+});
+
+// Measured on Claude Code 2.1.310: a directory-marketplace plugin runs in place, a new version in
+// its folder takes effect without `claude plugin update`, and the install record keeps the version
+// and commit of its first install. Setup therefore never updates a plugin Claude Code runs in place.
+test('a plugin Claude Code runs in place from the managed checkout is current whatever its install record says', () => {
+  const list = installedList({ version: '2.3.0' });
+  list.installed[0].readFromFolder = repoRoot;
+  list.installed[0].folderVersion = expectedVersion();
+  let state = setup.evaluateClaudeToolkitPluginState(list, { repoRoot });
+  assert.deepEqual(state.errors, []);
+  assert.equal(state.ok, true);
+  assert.equal(state.canUpdateInPlace, false);
+
+  // The current list shape names no source path: the registry proves the marketplace folder, and
+  // the record's old version and commit no longer matter.
+  const pathLess = [{ id: `${setup.TOOLKIT_PLUGIN_NAME}@${setup.TOOLKIT_MARKETPLACE_NAME}`, version: '2.3.0', scope: 'user', enabled: true,
+    installPath: path.join(tmpRoot(), 'cache', '2.3.0'), readFromFolder: repoRoot, folderVersion: expectedVersion() }];
+  const registryState = {
+    knownMarketplaces: { [setup.TOOLKIT_MARKETPLACE_NAME]: { source: { source: 'directory', path: repoRoot } } },
+    installedPlugins: { plugins: { [pathLess[0].id]: [{ scope: 'user', version: '2.3.0', installPath: pathLess[0].installPath, gitCommitSha: 'b'.repeat(40) }] } },
+    repoCommit: 'a'.repeat(40)
+  };
+  state = setup.evaluateClaudeToolkitPluginState(pathLess, { repoRoot, registryState });
+  assert.deepEqual(state.errors, []);
+  assert.equal(state.ok, true);
+  assert.equal(state.sourceIdentity, 'claude-plugin-registry');
+
+  // The marketplace folder must still be the managed checkout.
+  state = setup.evaluateClaudeToolkitPluginState(pathLess, { repoRoot, registryState: { ...registryState, knownMarketplaces: {} } });
+  assert.equal(state.ok, false);
 });
 
 test('the one Claude plugin registry reader follows CLAUDE_CODE_PLUGIN_CACHE_DIR and needs a directory marketplace plus an install record', () => {
@@ -1102,6 +1137,18 @@ test('the one Claude plugin registry reader follows CLAUDE_CODE_PLUGIN_CACHE_DIR
   assert.equal(registry(override).isRunningCopy(repoRoot), false, 'only a local directory marketplace is a Toolkit-managed install');
   fs.writeFileSync(path.join(pluginsDir, 'known_marketplaces.json'), '{ not json');
   assert.match(registry(override).toolkitInstall().reason, /could not be read/);
+
+  // Whether Toolkit is turned on comes from the user settings in the config folder.
+  const settings = path.join(root, 'config', 'settings.json');
+  assert.equal(registry(override).toolkitEnabled(), null, 'no settings file');
+  writeJson(settings, { enabledPlugins: { [TOOLKIT_PLUGIN_ID]: true } });
+  assert.equal(registry(override).toolkitEnabled(), true);
+  writeJson(settings, { enabledPlugins: { [TOOLKIT_PLUGIN_ID]: false } });
+  assert.equal(registry(override).toolkitEnabled(), false);
+  writeJson(settings, { enabledPlugins: {} });
+  assert.equal(registry(override).toolkitEnabled(), null, 'not mentioned');
+  fs.writeFileSync(settings, '{ not json');
+  assert.equal(registry(override).toolkitEnabled(), null, 'unreadable');
 });
 
 

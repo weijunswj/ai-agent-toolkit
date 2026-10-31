@@ -179,44 +179,234 @@ function deadlineTransport(deps) {
   return transport;
 }
 
-// Whether the repository's GitHub governance is ENABLED with its governed rules in force. A state that
+// Whether the repository's GitHub governance is ENABLED with programme records in force (a fresh read of
+// the binding merged on the default branch). A state that
 // cannot be read, or a copy without the state module, counts as off. `deps.governanceState` is for tests.
 function githubGovernanceOn(repoRoot, deps = {}) {
+  const current = governanceStateOf(repoRoot, deps);
+  return Boolean(current) && current.state === 'ENABLED' && current.programme_records_bind === true;
+}
+
+// The governance state for the repository, or null when it cannot be read (counts as off).
+function governanceStateOf(repoRoot, deps = {}) {
   try {
     const read = deps.governanceState || require('../../../repo/scripts/toolkit-governance-state.cjs').governanceState;
-    const current = read(repoRoot);
-    return current.state === 'ENABLED' && current.governed_rules_bind === true;
-  } catch { return false; }
+    return read(repoRoot);
+  } catch { return null; }
+}
+
+// ---- offline queue ----------------------------------------------------------------------------------
+//
+// When governance is on but records cannot be written yet (the merged binding was last read over 24
+// hours ago or not at all, or GitHub cannot be reached), the turn's facts and return block are kept in
+// a queue next to the session binding, in Toolkit's own user-state, never the repository. The next
+// turn end where records bind and the store answers applies them in order before its own (the
+// journal's return IDs make a replay idempotent) and deletes the queue. Governance confirmed off
+// (DISABLED, by the merged binding or the user's answer) deletes the queue without replaying it.
+
+const QUEUE_SCHEMA = 'toolkit.programme-checkpoint-queue.v1';
+const QUEUE_LIMIT = 200;
+const QUEUE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+function queueFile(hash, deps) { return path.join(sessionsDir(deps), `${hash}.queued.json`); }
+
+// The queued entries still inside the bounds, oldest first; dropped ones are noted once.
+function readQueue(hash, deps = {}) { return loadQueue(hash, deps).entries; }
+
+// A queued turn as `queueEntry` writes it: its time, repository, issue and assignment, and facts and a
+// return entry a journal would accept. Anything else (a hand edit) is skipped, never replayed.
+function validQueueItem(item) {
+  if (!item || typeof item !== 'object' || typeof item.at !== 'string' || Number.isNaN(Date.parse(item.at))) return false;
+  if (typeof item.repository !== 'string' || !Number.isSafeInteger(item.issue) || item.issue < 1 || typeof item.assignment !== 'string' || !item.assignment) return false;
+  const state = require('./programme-state.cjs');
+  const probe = { schema: state.SCHEMA.journal, repository: 'probe/probe', issue: 1, assignment: 'probe', session_hash: '0'.repeat(16),
+    completion_mode: 'native', route: null, seq: 1, checkpoint: item.facts ?? null, returns: item.entry ? [item.entry] : [], last_error: null };
+  return state.validateJournal(probe).length === 0;
+}
+
+// A dropped or skipped turn's key for its once-only note: its time and assignment.
+const queueKey = item => `${typeof item?.at === 'string' ? item.at : ''}|${typeof item?.assignment === 'string' ? item.assignment : ''}`;
+
+// { entries, expired, invalid, noted }: the valid entries inside seven days, the older and the
+// unusable ones, and the keys already noted.
+function loadQueue(hash, deps = {}) {
+  const doc = readJson(queueFile(hash, deps));
+  if (!doc || doc.schema !== QUEUE_SCHEMA || !Array.isArray(doc.entries)) return { entries: [], expired: [], invalid: [], noted: new Set() };
+  const now = deps.now ? Date.parse(deps.now()) : Date.now();
+  const invalid = doc.entries.filter(item => !validQueueItem(item));
+  const valid = doc.entries.filter(validQueueItem);
+  const entries = valid.filter(item => now - Date.parse(item.at) <= QUEUE_MAX_AGE_MS);
+  return { entries, expired: valid.filter(item => !entries.includes(item)), invalid, noted: new Set(Array.isArray(doc.noted) ? doc.noted.filter(key => typeof key === 'string') : []) };
+}
+
+// Records one note for the turns in `items` not noted before, and remembers them in the queue file,
+// so a write that keeps failing never repeats it.
+function noteOnce(hash, loaded, items, code, message, deps) {
+  const fresh = items.filter(item => !loaded.noted.has(queueKey(item)));
+  if (!fresh.length) return;
+  recordError(hash, code, message(fresh), deps);
+  for (const item of fresh) loaded.noted.add(queueKey(item));
+  try {
+    const doc = readJson(queueFile(hash, deps));
+    if (doc && doc.schema === QUEUE_SCHEMA && Array.isArray(doc.entries)) writeJsonAtomically(queueFile(hash, deps), { ...doc, noted: [...loaded.noted].slice(-QUEUE_LIMIT * 2) });
+  } catch { /* noted again next time */ }
+}
+
+const plural = (count, one, many) => `${count} queued turn${count === 1 ? ` ${one}` : `s ${many}`}`;
+
+// Notes turns that aged out of the queue unwritten, and unusable entries, once each.
+function noteDropped(hash, loaded, deps) {
+  noteOnce(hash, loaded, loaded.expired, 'QUEUE_EXPIRED', fresh => `${plural(fresh.length, 'was', 'were')} older than seven days and dropped unwritten.`, deps);
+  noteOnce(hash, loaded, loaded.invalid, 'QUEUE_ENTRY_INVALID', fresh => `${plural(fresh.length, 'could not be read and was', 'could not be read and were')} skipped (queued at ${fresh.map(item => (typeof item?.at === 'string' ? item.at.slice(0, 40) : 'an unknown time')).join(', ')}).`, deps);
+}
+
+function queueEntry(hash, item, deps = {}) {
+  const loaded = loadQueue(hash, deps);
+  noteDropped(hash, loaded, deps);
+  const entries = [...loaded.entries, item];
+  const kept = entries.slice(-QUEUE_LIMIT);
+  if (kept.length < entries.length) recordError(hash, 'QUEUE_FULL', `The offline queue keeps the newest ${QUEUE_LIMIT} turns; ${entries.length - kept.length} older one was dropped.`, deps);
+  // Only notes for turns still queued are kept.
+  const noted = [...loaded.noted].filter(key => kept.some(entry => queueKey(entry) === key));
+  writeJsonAtomically(queueFile(hash, deps), { schema: QUEUE_SCHEMA, entries: kept, ...(noted.length ? { noted } : {}) });
+  return kept.length;
+}
+
+function discardQueue(hash, deps = {}) {
+  const had = fs.existsSync(queueFile(hash, deps));
+  fs.rmSync(queueFile(hash, deps), { force: true });
+  return had;
+}
+
+// A store call that failed because GitHub could not be reached (no HTTP status, gh could not run, or
+// a server error), as opposed to a refusal the queue must not paper over.
+function unreachable(error) {
+  if (!error || error.code !== 'GH_FAILED') return false;
+  const status = error.details && typeof error.details.status === 'number' ? error.details.status : null;
+  return status === null || status >= 500;
+}
+
+// The binding merged on the default branch, from this computer's cache, or null. `deps.mergedBinding`
+// is for tests.
+function mergedBindingOf(repoRoot, deps = {}) {
+  try {
+    const read = deps.mergedBinding || require('../../../repo/scripts/toolkit-governance-state.cjs').mergedBinding;
+    return read(repoRoot) || null;
+  } catch { return null; }
 }
 
 // One checkpoint for a bound session. Returns { outcome, ... } and throws only for a programme error
 // the caller records. `UNBOUND` means no binding for this session or repository: nothing else ran.
+// `QUEUED` means the turn was kept in the offline queue (see above).
 function runCheckpoint({ sessionId, message = null }, deps = {}) {
   const hash = sessionHash(sessionId);
   const local = readLocalBinding(hash, deps);
   if (!local) return { outcome: 'UNBOUND' };
   const state = require('./programme-state.cjs');
   if (!local.repo_root || !fs.existsSync(path.join(local.repo_root, state.BINDING_FILE))) return { outcome: 'UNBOUND' };
-  // GitHub governance turned off (or never complete) after bind: nothing reaches the store.
-  if (!githubGovernanceOn(local.repo_root, deps)) return { outcome: 'GOVERNANCE_OFF' };
-  const binding = state.loadBinding(local.repo_root);
+  const current = governanceStateOf(local.repo_root, deps);
+  const parsed = parseReturnBlock(message);
+  const queueTurn = () => {
+    if (parsed.error) recordError(hash, parsed.error, 'The toolkit-return block could not be read; it was not recorded.', deps);
+    const facts = collectFacts(local.repo_root, deps);
+    // Each turn names the repository, issue and assignment it belongs to; a replay skips any other.
+    const queued = queueEntry(hash, { at: deps.now ? deps.now() : new Date().toISOString(), repository: String(local.repository).toLowerCase(), issue: local.issue, assignment: local.assignment, facts, entry: parsed.entry }, deps);
+    return { outcome: 'QUEUED', queued, error: parsed.error };
+  };
+  if (!current || current.state !== 'ENABLED' || current.programme_records_bind !== true) {
+    // Confirmed off: what was queued is never written.
+    if (current && current.state === 'DISABLED') return { outcome: 'GOVERNANCE_OFF', discarded: discardQueue(hash, deps) };
+    // On, with the governed rules in force, but the merged binding is not freshly read: keep the turn.
+    if (current && current.state === 'ENABLED' && current.governed_rules_bind === true) return queueTurn();
+    return { outcome: 'GOVERNANCE_OFF' };
+  }
+  // Only the binding merged on the default branch names the store; a working-tree copy never does.
+  const binding = mergedBindingOf(local.repo_root, deps);
+  if (!binding) return { outcome: 'GOVERNANCE_OFF' };
   if (binding.repository.toLowerCase() !== String(local.repository).toLowerCase()) {
     throw new ProgrammeError('BINDING_MOVED', 'The repository binding no longer names the repository this session was bound in; bind again.');
   }
-  const facts = collectFacts(local.repo_root, deps);
-  const parsed = parseReturnBlock(message);
   const store = new state.STORE_BACKENDS[binding.store.kind]({ transport: deadlineTransport(deps), store: binding.store, now: deps.now });
   const name = `${local.assignment}--${hash}.json`;
-  const { doc: previous, sha } = store.readJournal(local.issue, name);
+  let read;
+  try { read = store.readJournal(local.issue, name); } catch (error) {
+    if (unreachable(error)) return queueTurn();
+    throw error;
+  }
+  const { doc: previous, sha } = read;
   if (!previous) throw new ProgrammeError('JOURNAL_MISSING', `The journal for assignment ${local.assignment} is missing from the store; bind again.`);
   if (parsed.error) recordError(hash, parsed.error, 'The toolkit-return block could not be read; it was not recorded.', deps);
+  const facts = collectFacts(local.repo_root, deps);
+  // Queued turns first, in order, then this one, folded into one journal write.
+  const loaded = loadQueue(hash, deps);
+  noteDropped(hash, loaded, deps);
+  // Only turns queued for this binding replay here; a turn from before a rebind is dropped with a note.
+  const belongs = item => item.repository === String(local.repository).toLowerCase() && item.issue === local.issue && item.assignment === local.assignment;
+  const queued = loaded.entries.filter(belongs);
+  noteOnce(hash, loaded, loaded.entries.filter(item => !belongs(item)), 'QUEUE_SKIPPED', fresh => `${plural(fresh.length, 'belonged', 'belonged')} to another repository, issue or assignment and ${fresh.length === 1 ? 'was' : 'were'} not written.`, deps);
+  const hadQueue = loaded.entries.length || loaded.expired.length || loaded.invalid.length;
   const pending = readErrors(hash, deps).pending;
-  const { doc: next, error } = nextJournal(previous, { facts, entry: parsed.entry, lastError: pending });
-  if (error) recordError(hash, error, 'A return ID was reused with different content; the first one stays.', deps);
-  if (!next) return { outcome: 'NOOP', journal: name, error: parsed.error || error };
-  const result = store.writeJournal(local.issue, name, next, { sha, previous });
+  let next = previous;
+  let changed = false;
+  let lastIdError = null;
+  for (const item of [...queued, { facts, entry: parsed.entry, lastError: pending }]) {
+    const step = nextJournal(next, { facts: item.facts, entry: item.entry || null, lastError: item.lastError || null });
+    if (step.error) lastIdError = step.error;
+    if (step.doc) { next = step.doc; changed = true; }
+  }
+  // seq moves only when the content does: a replay that ends where it started writes nothing.
+  const content = doc => { const copy = { ...doc }; delete copy.seq; delete copy.volatile; return JSON.stringify(require('./programme-state.cjs').canonical(copy)); };
+  if (changed && content(next) === content(previous)) changed = false;
+  if (changed) next = { ...next, seq: previous.seq + 1 };
+  if (lastIdError) recordError(hash, lastIdError, 'A return ID was reused with different content; the first one stays.', deps);
+  if (!changed) {
+    if (hadQueue) discardQueue(hash, deps);
+    return { outcome: 'NOOP', journal: name, error: parsed.error || lastIdError };
+  }
+  let result;
+  try { result = store.writeJournal(local.issue, name, next, { sha, previous }); } catch (error) {
+    if (unreachable(error)) return queueTurn();
+    throw error;
+  }
   if (pending) clearPending(hash, deps);
-  return { outcome: result.outcome, journal: name, seq: result.doc.seq, error: parsed.error || error };
+  // Deleted only now, after the write was confirmed; a failed write above keeps the queue.
+  if (hadQueue) discardQueue(hash, deps);
+  return { outcome: result.outcome, journal: name, seq: result.doc.seq, replayed: queued.length, error: parsed.error || lastIdError };
+}
+
+// The sessions bound on this computer in the checkout at `root`: [{ hash, binding, errors, queue }].
+// Reads local files only.
+function localSessionsFor(root, deps = {}) {
+  const dir = sessionsDir(deps);
+  let names = [];
+  try { names = fs.readdirSync(dir); } catch { return []; }
+  const same = (a, b) => {
+    const norm = value => path.resolve(String(value || ''));
+    return process.platform === 'win32' ? norm(a).toLowerCase() === norm(b).toLowerCase() : norm(a) === norm(b);
+  };
+  const sessions = [];
+  for (const name of names) {
+    const match = /^([0-9a-f]{16})\.json$/.exec(name);
+    if (!match) continue;
+    const binding = readLocalBinding(match[1], deps);
+    if (!binding || !binding.repo_root || !same(binding.repo_root, root)) continue;
+    sessions.push({ hash: match[1], binding, errors: readErrors(match[1], deps), queue: loadQueue(match[1], deps).entries });
+  }
+  return sessions;
+}
+
+// Turns waiting in this computer's offline queues for the checkout at `root`: { count, oldest }.
+function queueSummary(root, deps = {}) {
+  const entries = localSessionsFor(root, deps).flatMap(session => session.queue);
+  const oldest = entries.map(item => item.at).sort()[0] || null;
+  return { count: entries.length, oldest };
+}
+
+// Deletes this computer's offline queues for the checkout at `root` (governance confirmed off).
+function discardQueuesFor(root, deps = {}) {
+  let discarded = 0;
+  for (const session of localSessionsFor(root, deps)) if (discardQueue(session.hash, deps)) discarded += 1;
+  return discarded;
 }
 
 // The Stop hook entry: never throws, never prints, records any failure locally.
@@ -238,4 +428,5 @@ function runHook(input, deps = {}) {
 module.exports = Object.freeze({
   BINDING_SCHEMA, HOOK_DEADLINE_MS, sessionHash, sessionsDir, bindingFile, errorsFile, readLocalBinding, writeLocalBinding,
   readErrors, recordError, collectFacts, parseReturnBlock, newJournal, nextJournal, runCheckpoint, runHook, githubGovernanceOn,
+  queueFile, readQueue, QUEUE_LIMIT, QUEUE_MAX_AGE_MS, localSessionsFor, queueSummary, discardQueuesFor,
 });

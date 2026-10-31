@@ -43,12 +43,13 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-claude-attribution-hook.cjs\""
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-claude-attribution-hook.cjs\"",
+            "timeout": 60
           }
         ]
       },
       {
-        "matcher": "^(?:Bash|PowerShell|Monitor|Edit|Write|MultiEdit|NotebookEdit|Agent|Task|mcp__.*)$",
+        "matcher": "^(?:Bash|PowerShell|Monitor|Edit|Write|MultiEdit|NotebookEdit|Agent|Task|TaskStop|EnterWorktree|CronCreate|CronDelete|RemoteTrigger|SendMessage|Workflow|mcp__.*)$",
         "hooks": [
           {
             "type": "command",
@@ -59,22 +60,43 @@
         ]
       },
       {
-        "matcher": "^mcp__hearthbot__(?:post_message|edit_message)$",
+        "matcher": "^(?!(?:Bash|PowerShell|Monitor|Edit|Write|MultiEdit|NotebookEdit|Agent|Task|TaskStop|EnterWorktree|CronCreate|CronDelete|RemoteTrigger|SendMessage|Workflow|mcp__.*)$)",
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-claude-project-post-hook.cjs\""
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-governance-hook.cjs\" --event PreToolUse",
+            "timeout": 10
           }
         ]
       }
     ],
     "PostToolUse": [
       {
+        "matcher": "^AskUserQuestion$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-governance-hook.cjs\" --event PostToolUse",
+            "timeout": 10
+          }
+        ]
+      },
+      {
         "matcher": "^(?:Bash|PowerShell|mcp__.*[Gg][Ii][Tt][Hh][Uu][Bb].*)$",
         "hooks": [
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-programme-checkpoint-hook.cjs\"",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "^(?:Bash|PowerShell|mcp__.*[Gg][Ii][Tt][Hh][Uu][Bb].*)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-github-footer-hook.cjs\"",
             "timeout": 10
           }
         ]

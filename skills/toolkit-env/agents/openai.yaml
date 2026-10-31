@@ -1,6 +1,6 @@
 interface:
   display_name: Toolkit Env
-  short_description: See, add, change or remove your API keys without values in chat.
+  short_description: See, add, change or remove your API keys in Notepad, without values in chat.
   primary_color: '#0F766E'
 policy:
   products:

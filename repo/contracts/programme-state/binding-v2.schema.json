@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "toolkit.programme-binding.v2",
+  "title": "Programme binding (.github/toolkit-programme.json), version 2",
+  "description": "The repository's own Toolkit governance setting. Only the binding merged on the default branch counts, on every computer: a working tree, another branch or a fork's copy never does. Repository identity comes from the origin remote and GitHub; this file must agree and cannot override it. Child issues come from native sub-issues, never from the binding. Version 1 bindings are still read, as enabled with one parent.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "repository", "governance"],
+  "properties": {
+    "schema": { "const": "toolkit.programme-binding.v2" },
+    "repository": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" },
+    "governance": { "enum": ["enabled", "disabled"], "description": "enabled turns Toolkit's GitHub governance on for this repository; disabled keeps it off, and only an owner-merged pull request changes it." },
+    "parents": {
+      "type": "array",
+      "minItems": 1,
+      "description": "The programme parent issues. The first is the one the reconciler records against. List one parent only for now: with a second, a task under a sub-issue of that programme could still be moved across programmes until a planning gate rules on descendants.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["issue", "record_prefix"],
+        "properties": {
+          "issue": { "type": "integer", "minimum": 1 },
+          "record_prefix": { "type": "string", "pattern": "^[A-Za-z0-9._-]{1,40}$" },
+          "writer_prefix": { "type": "string", "pattern": "^[A-Za-z0-9._-]{1,40}$", "description": "Defaults to record_prefix." }
+        }
+      }
+    },
+    "store": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "repository", "branch", "path"],
+      "properties": {
+        "kind": { "enum": ["github"], "description": "The store backend. The only kind is github: a separate private repository written through the Contents API." },
+        "repository": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", "description": "A separate private repository; verified private and writable before every pass." },
+        "branch": { "type": "string", "minLength": 1 },
+        "path": { "type": "string", "pattern": "^([A-Za-z0-9_.-]+/)+$" }
+      }
+    },
+    "required_checks": {
+      "type": "array",
+      "description": "Check names that count as required at the PR head, in addition to the checks GitHub marks required. With none of either, checks are never GREEN.",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "paid_security": {
+      "enum": ["off", "on"],
+      "deprecated": true,
+      "description": "Deprecated. Toolkit never turns on a GitHub feature that needs billing: off or on is accepted and ignored."
+    },
+    "dependency_updates": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "How Dependabot updates are merged, as in version 1. Only the binding merged on the default branch counts.",
+      "properties": {
+        "auto_merge": { "enum": ["off", "patch-minor"] },
+        "github_actions": { "enum": ["auto-merge", "owner"] }
+      }
+    },
+    "projection": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Where the Programme Graph goes on the parent issue page, as in version 1.",
+      "properties": {
+        "after_section": { "type": "string", "minLength": 1 },
+        "replace_section": { "type": "string", "minLength": 1 }
+      }
+    },
+    "schedule_folder": {
+      "type": "string",
+      "pattern": "^[A-Z0-9][A-Z0-9-]{0,31}$",
+      "description": "The Windows Task Scheduler folder for this repository's no-AI Toolkit tasks, such as TOOLKIT for the TOOLKIT folder. When left out it is the repository name in capitals, with dots and underscores turned into hyphens."
+    }
+  },
+  "if": { "properties": { "governance": { "const": "enabled" } } },
+  "then": { "required": ["parents", "store", "required_checks"] }
+}

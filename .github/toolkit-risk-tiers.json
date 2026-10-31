@@ -33,6 +33,8 @@
     "skills/*/scripts/**",
     "skills/**/scripts/install*",
     "skills/**/templates/**/*.yml",
+    "repo/tests/hook-pack/**",
+    "repo/tests/toolkit-governed-fixture-support.cjs",
     "repo/tests/toolkit-local-bridge*.test.cjs",
     "repo/tests/support/toolkit-local-bridge-fixture.cjs",
     "repo/tests/toolkit-test-temp-guard.cjs",

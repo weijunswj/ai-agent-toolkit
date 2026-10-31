@@ -17,7 +17,7 @@ const { FakeGitHub } = require('./toolkit-programme-fake-github.cjs');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const controller = { session: 'toolkit-421-controller', prefix: 'INT-TK421-' };
-const GOVERNED = () => ({ state: 'ENABLED', governed_rules_bind: true });
+const GOVERNED = () => ({ state: 'ENABLED', governed_rules_bind: true, programme_records_bind: true });
 const temps = [];
 const tmp = () => { const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'programme-refresh-')); temps.push(dir); return dir; };
 test.after(() => { for (const dir of temps) fs.rmSync(dir, { recursive: true, force: true }); });
@@ -80,12 +80,20 @@ test('refresh refuses when no controller holds the parent', () => {
   assert.equal(fx.run(['refresh']).error.code, 'PARENT_UNHELD');
 });
 
+// Takes the pass lock and beats once, so its heartbeat is dated by Node's clock as a running pass's
+// is. A fresh lock file is dated by the file system, which the clock-ahead run does not move.
+const takeLiveLock = (file, deps) => {
+  const handle = cli.takeLock(file, deps);
+  if (handle) handle.beat();
+  return handle;
+};
+
 // The output of one or more passes printed with --json, one JSON document each.
 const documents = text => text.split(/\n(?=\{)/).filter(Boolean).map(part => JSON.parse(part));
 
 test('while another live pass holds the lock, refresh queues one more pass and reconcile --apply refuses', () => {
   const fx = fixture();
-  const other = cli.takeLock(fx.lockFile);
+  const other = takeLiveLock(fx.lockFile);
   assert.ok(other.token);
   const queued = fx.run(['refresh']);
   assert.deepEqual([queued.code, queued.result.outcome], [0, 'QUEUED']);
@@ -108,7 +116,8 @@ function own(fx, argv = ['refresh']) {
 const firstWrite = (fx, act) => {
   let done = false;
   fx.github.hooks.push((call, github) => {
-    if (done || call.method === 'GET') return null;
+    // GraphQL calls here are reads (the inventory and PR queries).
+    if (done || call.method === 'GET' || call.path === 'graphql') return null;
     done = true;
     act(call, github);
     return null;
@@ -177,7 +186,7 @@ test('a long burst stops at the pass limit and leaves the flag for the next refr
   assert.equal(run.passes.length, cli.MAX_PASSES);
   assert.equal(fs.existsSync(cli.againFile(fx.lockFile)), true, 'the flag stays for the next refresh or the sweep');
   assert.equal(fs.existsSync(fx.lockFile), false, 'released');
-  const queued = cli.takeLock(fx.lockFile);
+  const queued = takeLiveLock(fx.lockFile);
   assert.ok(queued);
   assert.match(fx.run(['refresh']).result.reason, /next refresh or the hourly sweep does/);
   queued.release();
@@ -248,7 +257,7 @@ test('a takeover in the middle of a refresh stops it with STALE_WRITER and relea
 test('the lock is never broken while its owner is alive and beating, and release removes only its own lock', () => {
   const dir = tmp();
   const file = path.join(dir, 'pass.lock');
-  const a = cli.takeLock(file);
+  const a = takeLiveLock(file);
   assert.equal(cli.takeLock(file), null, 'held by a live owner');
   const old = new Date(Date.now() - cli.LOCK_STALE_MS - 60000);
   fs.utimesSync(file, old, old);
@@ -332,7 +341,7 @@ const PASS_MATRIX = [
 for (const row of PASS_MATRIX) {
   test(`pass matrix: ${row.argv.join(' ')} | ${Object.keys(row.env)[0] || 'plain session'} | parent ${row.held} | lock ${row.lock}`, () => {
     const fx = fixture({ held: row.held });
-    if (row.lock === 'live') cli.takeLock(fx.lockFile);
+    if (row.lock === 'live') takeLiveLock(fx.lockFile);
     if (row.lock === 'dead') {
       fs.mkdirSync(path.dirname(fx.lockFile), { recursive: true });
       writeLock(fx.lockFile, {});
@@ -515,7 +524,9 @@ test('the shipped hooks send after-tool events for shell and connector tools to 
   for (const [host, hostSpec] of Object.entries(contract.hosts)) {
     for (const file of [hostSpec.hooks_file, `repo/contracts/toolkit-local-bridge/${host === 'codex' ? 'codex' : 'claude'}-plugin/hooks/hooks.json`]) {
       const hooks = JSON.parse(fs.readFileSync(path.join(ROOT, file), 'utf8')).hooks;
-      assert.deepEqual(hooks[spec.event], [{ matcher: hostSpec.after_tool_matcher, hooks: [{ type: 'command', command: `node "\${${hostSpec.plugin_root_variable}}/${spec.script}"`, timeout: spec.timeout_seconds }] }], file);
+      // Other after-tool hooks (Claude Code's governance card) may sit beside it; this script has exactly one entry.
+      const checkpoint = hooks[spec.event].filter(entry => entry.hooks.some(hook => hook.command.includes(spec.script)));
+      assert.deepEqual(checkpoint, [{ matcher: hostSpec.after_tool_matcher, hooks: [{ type: 'command', command: `node "\${${hostSpec.plugin_root_variable}}/${spec.script}"`, timeout: spec.timeout_seconds }] }], file);
     }
   }
 });

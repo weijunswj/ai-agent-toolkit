@@ -16,15 +16,14 @@ Reference for the `web-controller-projects` skill, opened when the coordinator r
    - (b) taking over from an existing controller (another chat, Claude Code session or project);
    - (c) a project with no repo.
 
-   State the skill Version you loaded.
+   Read the guidebook's `VERSION` (**Guidebook copy** in the skill). When the folder or `VERSION` is missing, or a cloud thread's `toolkit-projects-guidebook.cjs --check` against it is not current, have that thread run the refresh, read `SKILL.md` from the library once it reports, and carry on with step 1.
 1. **Project and repos.**
    - Confirm this project is for one repo.
    - Have the user attach that repo, plus its transport store if Toolkit defines one.
    - Verify by reading the repo's default branch and one file.
-2. **Project memory and models.**
+2. **Project memory.**
    - Have the user turn project memory on. Verify by saving one memory entry and reading it back.
-   - Ask for one setting only: in the project's model settings, the **coordinator** gets the strongest available Opus model, effort **High** (the default Low is too weak for controller decisions). Ask the user to confirm what the settings page now shows.
-   - Thread effort is never a project setting: you set it on every thread you start (**Threads** in the skill), gates get their pinned route, and scheduled tasks set theirs in the prompt.
+   - Setup never asks the user to choose models or effort in the project's settings. Thread effort is never a project setting: you set it on every thread you start (**Threads** in the skill), gates get their pinned route, and scheduled tasks start their home thread on the tier and effort in their prompt's params, which carry any recorded raise.
 3. **Device and folder** (only when the project works locally).
    - Ask for the device to use for local Remote Control and the repo folder on it.
    - Start one read-only local Remote Control thread there to confirm the folder is the repo's checkout on its default branch.
@@ -34,6 +33,7 @@ Reference for the `web-controller-projects` skill, opened when the coordinator r
 4. **Bind.**
    - Bind `CONTROLLER.md` (**Binding** in the skill).
    - Write the binding line (**Binding** in the skill).
+   - Write the `GATE ROUTE:` line (**Binding** in the skill) from the pinned stack profile and the owner's answer on where gate work runs: `placement remote_control folder <step 3's folder>` for local Remote Control, `cloud` for cloud threads, `any` when the project sets no place. A gate launch is refused until this line is in memory.
 5. **Project instructions.**
    - Have a cloud thread run `node repo/scripts/toolkit-projects-instructions.cjs --render` from bound Toolkit `main`, save the block to the shared folder and read it back. Every project on one Toolkit version gets the same block.
    - Draft the project lines from the setup answers: repos and transport store, device and folder, where work runs, owner-granted approvals, project-specific roles. Only facts that differ by project, nothing the block says.
@@ -57,4 +57,4 @@ Reference for the `web-controller-projects` skill, opened when the coordinator r
    - one decision card answered;
    - a test check-in and test nudge: each runs once now and reports to you, and the user confirms both tasks in the project's Scheduled tasks panel. Setup does not wait for the next run;
    - when step 8 armed the programme sweep, one run of it now, with its result line read back.
-10. **Done.** Post one line: setup complete, skill Version, bound commit and `CONTROLLER.md` blob, device and folder, check-in time, that the hourly nudge is on (and the programme sweep, when armed), where the recurring tasks live, and the next work item.
+10. **Done.** Post one line: setup complete, skill Version, bound commit and `CONTROLLER.md` blob, device and folder, check-in time, that the hourly nudge is on (and the programme sweep, when armed), where the recurring tasks live, the guidebook's `VERSION` line, and the next work item.

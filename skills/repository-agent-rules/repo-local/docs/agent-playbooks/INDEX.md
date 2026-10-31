@@ -17,7 +17,7 @@ Use this index only when it exists in the repo. Read the smallest matching playb
 - Generated files, templates, schemas, migrations, source data, publishing, or regenerated output: read [Generated files](generated-files.md) (`docs/agent-playbooks/generated-files.md`).
 - Git publication, pull requests, CI, review readiness, or status checks: read [Git completion](git-completion.md) (`docs/agent-playbooks/git-completion.md`).
 - Features touching authority, approvals, custody, state machines or host configuration (Codex, Claude Code or other app settings files): read [Invariant models](invariant-models.md) (`docs/agent-playbooks/invariant-models.md`) before G0 planning, G1 tests or G2 review.
-- Slow tests or CI, test runners, test shards, CI test jobs, or test time budgets: read [Fast tests and sharding](fast-tests-and-sharding.md) (`docs/agent-playbooks/fast-tests-and-sharding.md`).
+- Slow tests or CI, long or background commands, test runners, test shards, CI test jobs, or test time budgets: read [Fast tests and sharding](fast-tests-and-sharding.md) (`docs/agent-playbooks/fast-tests-and-sharding.md`).
 - Unfamiliar repo, docs index, repo map, architecture notes, validation docs, source-of-truth docs, or documented workflow: read [Local docs](local-docs.md) (`docs/agent-playbooks/local-docs.md`).
 
 If no match applies, continue baseline-only. If a referenced playbook is missing, continue safely using `AGENTS.md`; for install, repair, or refresh work, report that the repo-local playbook docs should be refreshed.

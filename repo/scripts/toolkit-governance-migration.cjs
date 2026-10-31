@@ -22,7 +22,7 @@
 // refused write is reported once, never retried. Last, each ENABLED GitHub repository gets its free
 // dependency and security settings turned on and its missing Dependabot files written
 // (toolkit-governance-security.cjs) without another question, because they are on by default under
-// governance; paid ones only where the binding records the owner's "on". Files land in the working
+// governance; nothing that needs billing is turned on. Files land in the working
 // tree for a normal pull request. Nothing is pushed to any
 // repository and no pull request is opened: missing bindings and legacy markers are reported
 // with what to do.
@@ -83,11 +83,15 @@ function proposalFor(state, slug, transportSlugs) {
   if (state.rule === 'ERROR') return { action: 'skip', reason: `its state could not be read (${state.error_code})` };
   if (state.rule === 'R1') return { action: 'skip', reason: 'not a git repository, so GitHub governance is DISABLED automatically' };
   if (state.rule === 'R9') return { action: 'skip', reason: 'not on github.com, so GitHub governance is off here once the user says ok in chat' };
+  if (state.state === 'ERROR') return { action: 'skip', reason: 'the programme binding merged on its default branch is invalid; fix it through a pull request' };
+  if (state.rule === 'S1') return { action: 'skip', reason: 'evidence store named in a programme binding (agent-managed, not governed)' };
+  if (state.rule === 'R1s') return { action: 'skip', reason: "a scratch clone in another repository's ignored .tmp folder (not governed)" };
+  if (['M1', 'M2'].includes(state.rule)) return { action: 'keep', reason: `${state.state === 'ENABLED' ? 'enabled' : 'disabled'} by the programme binding merged on its default branch` };
   if (state.recorded_under_legacy_key) return { action: 'carry-over', reason: `already ${state.recorded_decision === 'enabled' ? 'enabled' : 'disabled'} under an earlier key; kept under its own key` };
   if (state.state !== 'UNDECIDED') return { action: 'keep', reason: `already ${state.state === 'ENABLED' ? 'enabled' : 'disabled'}` };
   if (slug && transportSlugs.has(slug.toLowerCase())) return { action: 'disable', reason: 'evidence store named in a programme binding (agent-managed, not governed)' };
-  if (state.rule === 'R4') return { action: 'enable', reason: 'carries the governed block and programme binding' };
-  if (state.rule === 'R6') return { action: 'enable', reason: 'carries the governed block; its programme binding still has to be added' };
+  if (state.notes.includes('pending-binding-merge')) return { action: 'enable', reason: 'its working tree carries a programme binding that still has to be merged' };
+  if (state.materials && state.materials.governed_block) return { action: 'enable', reason: 'carries the governed block; its programme binding still has to be added' };
   return { action: 'disable', reason: 'no Toolkit materials' };
 }
 
@@ -130,7 +134,7 @@ class GovernanceMigration {
   plan(roots) {
     const repositories = discoverRepositories(roots).map(root => ({ root, state: governance.governanceState(root, this.#registryOptions), slug: slugFor(root) }));
     const transportSlugs = new Set(repositories
-      .map(entry => governance.bindingStoreRepository(entry.root))
+      .flatMap(entry => [governance.bindingStoreRepository(entry.root, this.#registryOptions), governance.workingBindingStoreRepository(entry.root)])
       .filter(Boolean).map(slug => slug.toLowerCase()));
     return repositories.map((entry, index) => ({ number: index + 1, ...entry, ...proposalFor(entry.state, entry.slug, transportSlugs) }));
   }
@@ -207,7 +211,9 @@ class GovernanceMigration {
     const notes = [];
     for (const row of rows) {
       const state = row.state;
-      if (state.state === 'ENABLED' && state.materials && !state.materials.binding) {
+      if (state.state === 'ENABLED' && state.materials && !state.materials.binding && state.notes.includes('pending-binding-merge')) {
+        notes.push(`${row.root}: governance is on and the working tree carries the programme binding, but it is not merged on the default branch yet; it applies once its pull request merges.`);
+      } else if (state.state === 'ENABLED' && state.materials && !state.materials.binding) {
         notes.push(`${row.root}: governance is on but the programme binding is missing. Copy ${BINDING_TEMPLATE} to .github/toolkit-programme.json, fill in the parent issue and the evidence store${row.slug ? ` (repository: ${row.slug})` : ''}, and add it through a pull request.`);
       }
       if (state.state === 'ENABLED' && state.materials && !state.materials.governed_block) {
@@ -247,7 +253,7 @@ class GovernanceMigration {
   }
 
   #protectionFor(row) {
-    const requiredChecks = governance.bindingRequiredChecks(row.root);
+    const requiredChecks = governance.bindingRequiredChecks(row.root, this.#registryOptions);
     if (!requiredChecks) return null;
     return { requiredChecks, result: protection.defaultBranchProtection(row.root, { requiredChecks, ...(this.#protectionReader ? { reader: this.#protectionReader } : {}) }) };
   }
@@ -334,8 +340,8 @@ class GovernanceMigration {
   }
 
   // The free dependency and security settings are on by default for every governed repository, so
-  // they are turned on without another question (the owner's yes to governance covers them); paid
-  // ones only where the binding records the owner's "on". Nothing here asks.
+  // they are turned on without another question (the owner's yes to governance covers them); nothing
+  // that needs billing is turned on. Nothing here asks.
   async #applySecurity(rows) {
     const results = [];
     for (const row of rows.filter(entry => entry.state.state === 'ENABLED' && entry.slug && entry.state.materials && entry.state.materials.binding)) {

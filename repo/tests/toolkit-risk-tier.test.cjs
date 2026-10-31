@@ -218,6 +218,12 @@ test('a version-only edit is LIGHT even on a RISKY path; any other line keeps th
     '<!-- AI-AGENT-TOOLKIT:a.md:BEGIN X v2 toolkit=3.11.0 sha256=0123456789ab -->']), 'LIGHT', 'a managed-block marker bump');
   assert.equal(tierOf('AGENTS.md', ['<!-- AI-AGENT-TOOLKIT:a.md:BEGIN X v2 toolkit=3.11.0 sha256=0123456789ab -->', '- a new rule']), 'RISKY');
   assert.equal(tierOf('repo/scripts/toolkit-local-bridge.cjs', []), 'RISKY', 'a mode-only change is not a version bump');
+  const skill = 'repo/contracts/claude-projects/web-controller-projects/SKILL.md';
+  assert.equal(tierOf(skill, ['Version: 2026-10-26.3', 'Version: 2026-10-26.4']), 'LIGHT', 'the Projects skill Version line set at merge time');
+  assert.equal(tierOf(skill, ['Version: 2026-10-26.3', 'Version: 2026-10-26.3 and a new rule']), 'RISKY', 'anything else on that line');
+  assert.equal(tierOf(skill, ['Version: 2026-10-26.3', '- a new rule']), 'RISKY');
+  assert.equal(tierOf('repo/contracts/claude-projects/web-controller-projects/reference/setup.md', ['Version: 2026-10-26.3', 'Version: 2026-10-26.4']), 'RISKY', 'only the skill file itself');
+  assert.equal(tierOf('AGENTS.md', ['Version: 2026-10-26.3', 'Version: 2026-10-26.4']), 'RISKY', 'not in other instruction files');
 });
 
 test('every real managed-block marker in this repository counts as a version bump, and only the toolkit= version may differ', () => {

@@ -1,0 +1,761 @@
+'use strict';
+
+// The repository's merged binding as its governance setting: the default-branch reader and its
+// cache, the state matrix (A), discovery before questions (B), old local answers (C) and the
+// consumers that read the result (D). Fixtures use reserved example names only.
+
+const assert = require('node:assert/strict');
+const childProcess = require('node:child_process');
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const test = require('node:test');
+
+const repoRoot = path.resolve(__dirname, '..', '..');
+const scripts = path.join(repoRoot, 'repo', 'scripts');
+const governance = require(path.join(scripts, 'toolkit-governance-state.cjs'));
+const bindingCache = require(path.join(scripts, 'toolkit-governance-binding.cjs'));
+const discovery = require(path.join(scripts, 'toolkit-governance-discovery.cjs'));
+const registry = require(path.join(scripts, 'toolkit-capability-registry.cjs'));
+const conformance = require(path.join(scripts, 'toolkit-governance-conformance.cjs'));
+const catalogue = require(path.join(scripts, 'toolkit-governance-catalogue.cjs'));
+const migration = require(path.join(scripts, 'toolkit-governance-migration.cjs'));
+const { governedRepo } = require(path.join(scripts, 'toolkit-governed-repo.cjs'));
+const { GovernanceGate } = require(path.join(scripts, 'toolkit-governance-gate.cjs'));
+const checkpoint = require(path.join(repoRoot, 'skills', 'github-program-reconciler', 'scripts', 'programme-checkpoint.cjs'));
+const programmeState = require(path.join(repoRoot, 'skills', 'github-program-reconciler', 'scripts', 'programme-state.cjs'));
+
+const SLUG = 'example-owner/example-repo';
+const REMOTE = `https://github.com/${SLUG}.git`;
+const NOW = new Date('2026-10-28T06:00:00.000Z');
+const HOUR = 60 * 60 * 1000;
+const STORE = { kind: 'github', repository: 'example-owner/TRANSPORT-example-repo', branch: 'main', path: 'state/example-owner/example-repo/' };
+
+function v2(overrides = {}) {
+  return { schema: 'toolkit.programme-binding.v2', repository: SLUG, governance: 'enabled', parents: [{ issue: 7, record_prefix: 'INT-ER7-' }], store: STORE, required_checks: ['validate'], ...overrides };
+}
+
+function v1(overrides = {}) {
+  return { schema: 'toolkit.programme-binding.v1', repository: SLUG, parent_issue: 7, record_prefix: 'INT-ER7-', writer_prefix: 'INT-ER7-', store: STORE, required_checks: ['validate'], ...overrides };
+}
+
+function scratch(t) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-governance-binding-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const registryPath = path.join(root, 'state', 'repository-governance.v1.json');
+  return { root, registryPath, opts: { registryPath, testOnly: true } };
+}
+
+// A real (empty) git repository: the registry resolves identity through git.
+function fakeRepo(ctx, name, { remote = `https://github.com/example-owner/${name}.git`, workingBinding = null } = {}) {
+  const repo = path.join(ctx.root, name);
+  childProcess.execFileSync('git', ['init', '--quiet', repo], { stdio: 'ignore', windowsHide: true });
+  childProcess.execFileSync('git', ['-C', repo, 'remote', 'add', 'origin', remote], { stdio: 'ignore', windowsHide: true });
+  if (workingBinding) {
+    fs.mkdirSync(path.join(repo, '.github'), { recursive: true });
+    fs.writeFileSync(path.join(repo, '.github', 'toolkit-programme.json'), JSON.stringify(workingBinding));
+  }
+  return repo;
+}
+
+// Writes this computer's cache entry as a refresh would, `ageMs` before `at`. Checks that read the
+// real clock (no `now` to inject) pass `at: new Date()`, so the entry's age never drifts with the date.
+function cache(ctx, repo, { status = 'present', binding = v2(), text = undefined, ageMs = 0, at = NOW } = {}) {
+  const identity = governance.readIdentity(repo);
+  // Each fixture repository has its own origin; a binding naming the example slug is written for it.
+  const own = binding && binding.repository === SLUG ? { ...binding, repository: governance.remoteSlug(identity.remote) } : binding;
+  const body = status === 'present' ? (text !== undefined ? text : JSON.stringify(own)) : null;
+  return bindingCache.writeCache(ctx.registryPath, {
+    schema: bindingCache.CACHE_SCHEMA, repository_id: identity.repository_id, remote: identity.remote.canonical,
+    default_branch: 'main', commit: 'a'.repeat(40), fetched_at: new Date(at.getTime() - ageMs).toISOString(), status,
+    bytes_sha256: body === null ? null : crypto.createHash('sha256').update(body, 'utf8').digest('hex'), text: body, problem: null,
+  });
+}
+
+function decide(ctx, repo, operation) {
+  const current = registry.getRepositoryStatus({ cwd: repo, ...ctx.opts });
+  return registry.writeCapabilityDecision({
+    cwd: repo, ...ctx.opts, capabilityId: 'repository.governance', operation,
+    ownerAction: {
+      confirmed: true, category: 'explicit-owner', channel: 'capability-route', operation,
+      choice_semantic_id: registry.capabilityDecisionSemanticId('repository.governance', operation),
+      contract_digest: registry.CONTRACT_DIGEST,
+      scope_digest: registry.capabilityScopeDigest(current.repository_id, 'repository.governance', operation, 'capability-route'),
+    },
+    expectedRevision: current.registry_revision, expectedHash: current.snapshot_hash,
+  });
+}
+
+function stateAt(ctx, repo, now = NOW) {
+  return new governance.GovernanceState({ registryOptions: ctx.opts, now: () => now }).evaluate(repo);
+}
+
+function registryBytes(ctx) { return fs.existsSync(ctx.registryPath) ? fs.readFileSync(ctx.registryPath) : null; }
+
+// ---- binding v2 ---------------------------------------------------------------------------------
+
+test('binding v2: enabled needs parents, store and checks; disabled needs only its identity', () => {
+  const normalized = programmeState.validateBinding(v2({ parents: [{ issue: 7, record_prefix: 'INT-ER7-' }, { issue: 9, record_prefix: 'INT-ER9-', writer_prefix: 'W-' }] }));
+  assert.deepEqual([normalized.parent_issue, normalized.record_prefix, normalized.writer_prefix], [7, 'INT-ER7-', 'INT-ER7-']);
+  assert.equal(programmeState.bindingEnabled(normalized), true);
+  const disabled = programmeState.validateBinding({ schema: 'toolkit.programme-binding.v2', repository: SLUG, governance: 'disabled' });
+  assert.equal(programmeState.bindingEnabled(disabled), false);
+  assert.equal(programmeState.bindingEnabled(programmeState.validateBinding(v1())), true, 'v1 reads as enabled with one parent');
+  const bad = [
+    v2({ governance: 'maybe' }), v2({ parents: [] }), v2({ parents: [{ issue: 0, record_prefix: 'X' }] }),
+    v2({ parents: [{ issue: 7, record_prefix: 'X' }, { issue: 7, record_prefix: 'Y' }] }),
+    v2({ parents: [{ issue: 7, record_prefix: 'X', children: [8] }] }), v2({ parent_issue: 7 }), v2({ store: undefined }),
+    v1({ governance: 'enabled' }), { ...v2(), schema: 'toolkit.programme-binding.v3' },
+  ];
+  for (const binding of bad) assert.throws(() => programmeState.validateBinding(binding), /BINDING_INVALID|is invalid/, JSON.stringify(binding));
+});
+
+test('this repository\'s own binding is version 2 and valid for its origin', () => {
+  const own = JSON.parse(fs.readFileSync(path.join(repoRoot, '.github', 'toolkit-programme.json'), 'utf8'));
+  assert.equal(own.schema, 'toolkit.programme-binding.v2');
+  assert.equal(own.governance, 'enabled');
+  assert.deepEqual(governance.bindingProblems(own, { remote: { path: '/weijunswj/ai-agent-toolkit.git' } }), []);
+});
+
+// ---- matrix A: state -----------------------------------------------------------------------------
+
+test('A: the merged binding decides on every computer; the local file decides only where nothing is merged', (t) => {
+  const ctx = scratch(t);
+  const row = (name, setup) => { const repo = fakeRepo(ctx, name, setup.repo || {}); setup.before && setup.before(repo); return stateAt(ctx, repo); };
+
+  const enabled = row('v2-enabled', { before: repo => cache(ctx, repo) });
+  assert.deepEqual([enabled.state, enabled.rule, enabled.hold, enabled.governed_rules_bind, enabled.programme_records_bind], ['ENABLED', 'M1', false, true, true]);
+
+  const localNo = row('v2-enabled-local-no', { before: (repo) => { decide(ctx, repo, 'decline'); cache(ctx, repo, { binding: v2({ repository: SLUG }) }); } });
+  assert.deepEqual([localNo.state, localNo.rule], ['ENABLED', 'M1']);
+  assert.ok(localNo.notes.includes('local-no-is-preference'));
+
+  const old = row('v1', { before: repo => cache(ctx, repo, { binding: v1() }) });
+  assert.deepEqual([old.state, old.rule, old.merged.version], ['ENABLED', 'M1', 1]);
+  assert.ok(old.notes.includes('binding-v2-migration-offered'));
+
+  const disabled = row('v2-disabled-local-yes', { before: (repo) => { decide(ctx, repo, 'enable'); cache(ctx, repo, { binding: { schema: 'toolkit.programme-binding.v2', repository: SLUG, governance: 'disabled' } }); } });
+  assert.deepEqual([disabled.state, disabled.rule, disabled.hold], ['DISABLED', 'M2', false]);
+
+  const none = row('none', { before: repo => cache(ctx, repo, { status: 'absent' }) });
+  assert.deepEqual([none.state, none.rule, none.hold], ['UNDECIDED', 'R7', true], 'never set up: pause and block until the owner\'s own reply');
+
+  const ownerNo = row('none-owner-no', { before: (repo) => { decide(ctx, repo, 'decline'); cache(ctx, repo, { status: 'absent' }); } });
+  assert.deepEqual([ownerNo.state, ownerNo.rule, ownerNo.hold], ['DISABLED', 'R2', false]);
+
+  const ownerYes = row('none-owner-yes', { before: (repo) => { decide(ctx, repo, 'enable'); cache(ctx, repo, { status: 'absent' }); } });
+  assert.deepEqual([ownerYes.state, ownerYes.rule, ownerYes.hold, ownerYes.programme_records_bind], ['ENABLED', 'R5', false, false], 'records bind only once the binding merges');
+  assert.ok(ownerYes.notes.includes('setup-pr-offered'));
+
+  const pending = row('none-working-tree', { repo: { workingBinding: v2() }, before: repo => cache(ctx, repo, { status: 'absent' }) });
+  assert.deepEqual([pending.state, pending.rule], ['UNDECIDED', 'R7'], 'a working tree never turns it on (A1)');
+  assert.ok(pending.notes.includes('pending-binding-merge'));
+
+  for (const [name, text] of [['bad-json', '{oops'], ['unknown-schema', JSON.stringify({ ...v2(), schema: 'toolkit.programme-binding.v9' })], ['bad-field', JSON.stringify(v2({ required_checks: 'validate' }))]]) {
+    const error = row(name, { before: repo => cache(ctx, repo, { text }) });
+    assert.deepEqual([error.state, error.rule, error.hold, error.governed_rules_bind, error.programme_records_bind, error.governed_effects_hold], ['ERROR', 'M0', false, false, false, true], `${name}: ERROR is never ON and never quietly OFF (A2)`);
+  }
+
+  const fork = row('fork', { before: repo => cache(ctx, repo, { binding: v2({ repository: 'example-owner/upstream-repo' }) }) });
+  assert.deepEqual([fork.state, fork.rule, fork.merged.foreign_repository], ['UNDECIDED', 'R7', 'example-owner/upstream-repo']);
+  assert.ok(fork.notes.includes('binding-belongs-to-other-repository'));
+
+  const fresh = row('cached-23h', { before: repo => cache(ctx, repo, { ageMs: 23 * HOUR }) });
+  assert.deepEqual([fresh.state, fresh.governed_rules_bind, fresh.programme_records_bind], ['ENABLED', true, true]);
+  const stale = row('cached-25h', { before: repo => cache(ctx, repo, { ageMs: 25 * HOUR }) });
+  assert.deepEqual([stale.state, stale.hold, stale.governed_rules_bind, stale.programme_records_bind, stale.governed_effects_hold], ['ENABLED', false, true, false, true], 'stale: routine work on, admission, finality and writes hold (A4)');
+  assert.ok(stale.notes.includes('merged-binding-stale'));
+
+  const unread = row('never-read', { before: repo => decide(ctx, repo, 'enable') });
+  assert.deepEqual([unread.state, unread.rule, unread.programme_records_bind], ['ENABLED', 'R5', false], 'nothing cached: as none, governed effects hold');
+  assert.ok(unread.notes.includes('merged-binding-unknown'));
+
+  const gitlab = row('gitlab', { repo: { remote: 'https://gitlab.com/example-owner/example-repo.git' } });
+  assert.deepEqual([gitlab.state, gitlab.rule, gitlab.merged], ['UNDECIDED', 'R9', null], 'not github.com: unchanged');
+});
+
+test('A3: a merged disabled is not flipped by the CLI, discovery or migration', async (t) => {
+  const ctx = scratch(t);
+  const repo = fakeRepo(ctx, 'sticky');
+  cache(ctx, repo, { binding: { schema: 'toolkit.programme-binding.v2', repository: SLUG, governance: 'disabled' } });
+  const { ToolkitGovernanceCli } = require(path.join(scripts, 'toolkit-governance.cjs'));
+  const out = []; const err = [];
+  const cli = new ToolkitGovernanceCli({ cwd: repo, registryOptions: ctx.opts, interactive: true, ask: async () => 'yes', stdout: { write: text => out.push(text) }, stderr: { write: text => err.push(text) }, refresh: () => ({}) });
+  assert.equal(await cli.main(['enable']), 2);
+  assert.match(err.join(''), /merged on the default branch decides/);
+  assert.equal(registryBytes(ctx), null, 'nothing written');
+  assert.equal(new discovery.GovernanceDiscovery({ registryOptions: ctx.opts, gh: () => { throw new Error('no GitHub read'); } }).discover(repo).status, 'disabled');
+  assert.equal(migration.proposalFor(governance.governanceState(repo, ctx.opts), SLUG, new Set()).action, 'keep');
+});
+
+test('A4: the cache never upgrades OFF to ON; offline keeps the last read', (t) => {
+  const ctx = scratch(t);
+  const repo = fakeRepo(ctx, 'offline');
+  const identity = governance.readIdentity(repo);
+  const offline = () => ({ status: 128, stdout: Buffer.alloc(0), stderr: Buffer.from('fatal: unable to access') });
+  assert.deepEqual(bindingCache.refreshBindingCache(identity, ctx.registryPath, { runGit: offline }), { refreshed: false, entry: null, error: 'remote-unreachable' });
+  assert.equal(stateAt(ctx, repo).rule, 'R7');
+  // Offline mode (set for test runs) and a test registry read nothing from the network.
+  assert.deepEqual(governance.refreshMergedBinding(repo, {}, { environment: { TOOLKIT_GOVERNANCE_OFFLINE: '1' } }), { refreshed: false, error: 'offline' });
+  assert.deepEqual(governance.refreshMergedBinding(repo, ctx.opts, { environment: {} }), { refreshed: false, error: 'offline' });
+  cache(ctx, repo, { status: 'absent' });
+  assert.equal(bindingCache.refreshBindingCache(identity, ctx.registryPath, { runGit: offline }).entry.status, 'absent', 'offline keeps the last read');
+  assert.equal(stateAt(ctx, repo).rule, 'R7');
+});
+
+// ---- the reader and its cache, hostile input ---------------------------------------------------
+
+// Answers by subcommand; `ls-remote --get-url` (the URL git really uses for origin) answers the
+// example origin unless the script says otherwise.
+function fakeGit(script) {
+  return (args) => {
+    // Leading `-c name=value` pairs (the fetch's hook override) do not change which command it is.
+    while (args[0] === '-c') args = args.slice(2);
+    const key = args[0] === 'ls-remote' && args[1] === '--get-url' ? 'get-url' : args[0];
+    if (key === 'get-url' && !script['get-url']) return { status: 0, stdout: Buffer.from(`${REMOTE}\n`), stderr: Buffer.alloc(0) };
+    const answer = script[key];
+    if (typeof answer === 'function') return answer(args);
+    return answer || { status: 1, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) };
+  };
+}
+const ok = text => ({ status: 0, stdout: Buffer.from(text), stderr: Buffer.alloc(0) });
+// What the refresh gives the reader: the expected origin, an empty hooks folder it owns, and the
+// environment (here a clean one).
+const NO_HOOKS = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-no-hooks-'));
+process.on('exit', () => fs.rmSync(NO_HOOKS, { recursive: true, force: true }));
+const GUARDED = Object.freeze({ expectedRemote: REMOTE, hooksDir: NO_HOOKS, environment: {} });
+const SHA = 'b'.repeat(40);
+
+test('reader: default branch from the symref, then the binding at its tip; hostile answers never become a binding', () => {
+  const base = { 'ls-remote': ok(`ref: refs/heads/main\tHEAD\n${SHA}\tHEAD\n`), fetch: ok(''), 'rev-parse': ok(`${SHA}\n`) };
+  const text = JSON.stringify(v2());
+  const present = bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, runGit: fakeGit({ ...base, 'ls-tree': ok(`100644 blob ${'c'.repeat(40)}    ${text.length}\t.github/toolkit-programme.json\n`), 'cat-file': ok(text) }) });
+  assert.deepEqual([present.status, present.default_branch, present.commit, present.text], ['present', 'main', SHA, text]);
+  assert.equal(bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, runGit: fakeGit({ ...base, 'ls-tree': ok('') }) }).status, 'absent');
+  const link = bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, runGit: fakeGit({ ...base, 'ls-tree': ok(`120000 blob ${'c'.repeat(40)}    20\t.github/toolkit-programme.json\n`) }) });
+  assert.deepEqual([link.status, link.text], ['present', null], 'a link is an unusable binding (ERROR), never absent');
+  const huge = bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, runGit: fakeGit({ ...base, 'ls-tree': ok(`100644 blob ${'c'.repeat(40)} 9999999\t.github/toolkit-programme.json\n`) }) });
+  assert.deepEqual([huge.status, huge.problem], ['present', 'too large']);
+  for (const symref of ['ref: refs/heads/../x\tHEAD\n', 'ref: refs/heads/.hidden\tHEAD\n', `${SHA}\tHEAD\n`, 'ref: refs/heads/a b\tHEAD\n', 'ref: refs/tags/v1\tHEAD\n']) {
+    assert.equal(bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, runGit: fakeGit({ ...base, 'ls-remote': ok(symref) }) }).status, 'unknown', JSON.stringify(symref));
+  }
+  assert.equal(bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, runGit: fakeGit({ ...base, fetch: { status: 1, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) } }) }).error, 'fetch-failed');
+  assert.equal(bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, runGit: fakeGit({ ...base, 'rev-parse': ok('not-a-sha') }) }).error, 'commit-unreadable');
+  assert.equal(bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, runGit: () => { throw new Error('spawn failed'); } }).status, 'unknown');
+  // F1: the URL git really fetches from must be the origin the identity names (insteadOf, include, config.worktree).
+  let fetchedAnything = false;
+  const watching = script => fakeGit({ ...script, fetch: () => { fetchedAnything = true; return ok(''); } });
+  for (const url of ['file:///srv/mirror/example-repo.git', 'https://github.com/example-owner/other-repo.git', 'https://gitlab.com/example-owner/example-repo.git', '']) {
+    const redirected = bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, runGit: watching({ ...base, 'get-url': ok(`${url}\n`) }) });
+    assert.deepEqual(redirected, { status: 'unknown', error: 'remote-redirected' }, url);
+  }
+  assert.equal(bindingCache.readDefaultBranchBinding('/r', { hooksDir: GUARDED.hooksDir, environment: {}, runGit: watching(base) }).error, 'remote-redirected', 'no expected origin: nothing is read');
+  // M2: transport or config overrides in the environment, or in command-scope config, are held too.
+  for (const name of ['GIT_CONFIG_PARAMETERS', 'GIT_CONFIG_COUNT']) {
+    assert.deepEqual(bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, environment: { [name]: name === 'GIT_CONFIG_COUNT' ? '1' : 'x' }, runGit: watching(base) }), { status: 'unknown', error: 'remote-redirected' }, name);
+  }
+  // GIT_SSH and GIT_SSH_COMMAND change only an ssh origin's transport: held there, trusted for https.
+  const sshOrigin = { ...base, 'get-url': ok('git@github.com:example-owner/example-repo.git\n') };
+  for (const name of ['GIT_SSH', 'GIT_SSH_COMMAND']) {
+    assert.deepEqual(bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, environment: { [name]: 'plink.exe' }, runGit: watching(sshOrigin) }), { status: 'unknown', error: 'remote-redirected' }, `${name} with an ssh origin`);
+    assert.equal(bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, environment: { [name]: 'plink.exe' }, runGit: fakeGit({ ...base, 'ls-tree': ok('') }) }).status, 'absent', `${name} with an https origin`);
+  }
+  // status says in plain words why a refresh kept the last read.
+  assert.match(bindingCache.refreshReason('remote-redirected'), /GIT_SSH or GIT_SSH_COMMAND for an ssh origin/);
+  assert.match(bindingCache.refreshReason('remote-redirected'), /Plink or TortoiseGit\) keeps every refresh of an ssh origin held, and turns queued offline are then dropped unwritten after seven days/);
+  assert.match(bindingCache.refreshReason('remote-unreachable'), /could not be reached/);
+  assert.equal(bindingCache.refreshReason('not-applicable'), null);
+  assert.notEqual(bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, environment: { GIT_CONFIG_COUNT: '0' }, runGit: fakeGit({ ...base, 'ls-tree': ok('') }) }).error, 'remote-redirected', 'a zero count sets nothing');
+  assert.deepEqual(bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, runGit: watching({ ...base, config: ok('command\tcore.sshcommand ssh -v\n') }) }), { status: 'unknown', error: 'remote-redirected' }, 'command scope');
+  assert.notEqual(bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, runGit: fakeGit({ ...base, config: ok('global\tcore.sshcommand ssh -v\n'), 'ls-tree': ok('') }) }).error, 'remote-redirected', 'the user\'s global config is not held here');
+  // N3: the fetch runs only with an owned, empty hooks folder, and the ref must be what the remote reported.
+  for (const hooksDir of [null, 'relative/hooks', path.join(NO_HOOKS, 'missing')]) {
+    assert.deepEqual(bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, hooksDir, runGit: watching(base) }), { status: 'unknown', error: 'hooks-unguarded' }, String(hooksDir));
+  }
+  fs.writeFileSync(path.join(NO_HOOKS, 'reference-transaction'), '');
+  assert.equal(bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, runGit: watching(base) }).error, 'hooks-unguarded', 'a non-empty hooks folder');
+  fs.rmSync(path.join(NO_HOOKS, 'reference-transaction'));
+  let fetchArgs = null;
+  const capturing = fakeGit({ ...base, fetch: ok(''), 'ls-tree': ok('') });
+  bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, runGit: (args, options) => { if (args[0] === '-c') fetchArgs = args; return capturing(args, options); } });
+  assert.deepEqual(fetchArgs.slice(0, 3), ['-c', `core.hooksPath=${NO_HOOKS}`, 'fetch']);
+  assert.deepEqual(bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, runGit: fakeGit({ ...base, 'rev-parse': ok(`${'c'.repeat(40)}\n`) }) }), { status: 'unknown', error: 'ref-moved' });
+  assert.equal(fetchedAnything, false, 'a redirected origin is never fetched');
+  // Another spelling of the same origin is the same origin.
+  assert.equal(bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, runGit: fakeGit({ ...base, 'get-url': ok('git@github.com:example-owner/example-repo.git\n'), 'ls-tree': ok('') }) }).status, 'absent');
+});
+
+test('cache: an entry for another identity, a tampered or damaged entry reads as no entry', (t) => {
+  const ctx = scratch(t);
+  const repo = fakeRepo(ctx, 'cached');
+  const identity = governance.readIdentity(repo);
+  const entry = cache(ctx, repo);
+  const file = bindingCache.cacheFileFor(ctx.registryPath, identity.repository_id);
+  assert.ok(bindingCache.readBindingCache(identity, ctx.registryPath));
+  const rewrite = change => fs.writeFileSync(file, JSON.stringify({ ...entry, ...change }));
+  for (const change of [{ text: JSON.stringify(v2({ governance: 'enabled', required_checks: [] })) }, { remote: 'github.com/example-owner/other-repo' }, { repository_id: 'f'.repeat(64) }, { schema: 'x' }, { commit: 'nope' }, { fetched_at: 'yesterday' }, { status: 'maybe' }, { default_branch: '../x' }]) {
+    rewrite(change);
+    assert.equal(bindingCache.readBindingCache(identity, ctx.registryPath), null, JSON.stringify(change));
+  }
+  fs.writeFileSync(file, '{damaged');
+  assert.equal(bindingCache.readBindingCache(identity, ctx.registryPath), null);
+  fs.writeFileSync(file, ' '.repeat(300 * 1024));
+  assert.equal(bindingCache.readBindingCache(identity, ctx.registryPath), null);
+  assert.deepEqual([stateAt(ctx, repo).rule, stateAt(ctx, repo).merged.status], ['R7', 'unknown']);
+  assert.match(path.relative(path.dirname(ctx.registryPath), file), /^governance-binding-cache[\\/][0-9a-f]{32}\.json$/, 'kept next to the user-state files the gate guards');
+});
+
+test('A1 end to end with real git: only the default branch\'s merged binding counts', (t) => {
+  const ctx = scratch(t);
+  const git = (cwd, args) => childProcess.execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true }).trim();
+  const id = ['-c', 'user.email=a@example.com', '-c', 'user.name=A'];
+  const origin = path.join(ctx.root, 'origin.git');
+  const seed = path.join(ctx.root, 'seed');
+  git(ctx.root, ['init', '--quiet', '--bare', '-b', 'main', origin]);
+  git(ctx.root, ['init', '--quiet', '-b', 'main', seed]);
+  fs.writeFileSync(path.join(seed, 'README.md'), 'x\n');
+  git(seed, ['add', '.']);
+  git(seed, [...id, 'commit', '--quiet', '-m', 'init']);
+  git(seed, ['push', '--quiet', origin, 'main']);
+  // A binding only on another branch.
+  git(seed, ['checkout', '--quiet', '-b', 'feature']);
+  fs.mkdirSync(path.join(seed, '.github'));
+  fs.writeFileSync(path.join(seed, '.github', 'toolkit-programme.json'), JSON.stringify(v2()));
+  git(seed, ['add', '.']);
+  git(seed, [...id, 'commit', '--quiet', '-m', 'binding on a branch']);
+  git(seed, ['push', '--quiet', origin, 'feature']);
+
+  const clone = path.join(ctx.root, 'clone');
+  git(ctx.root, ['clone', '--quiet', origin, clone]);
+  // The origin is named as github.com and served from the local bare repository.
+  git(clone, ['remote', 'set-url', 'origin', REMOTE]);
+  // The origin is named as github.com; this runner serves it from the local bare repository by
+  // passing that path where git would use origin, and answers --get-url as git would for origin.
+  const served = (args, options) => {
+    if (args[0] === 'ls-remote' && args[1] === '--get-url') return { status: 0, stdout: Buffer.from(`${REMOTE}\n`), stderr: Buffer.alloc(0) };
+    return bindingCache.defaultRunGit(args.map(arg => (arg === 'origin' ? origin : arg)), options);
+  };
+  git(clone, ['checkout', '--quiet', 'feature']);
+  assert.equal(governance.refreshMergedBinding(clone, ctx.opts, { runGit: served }).refreshed, true);
+  let current = governance.governanceState(clone, ctx.opts);
+  assert.deepEqual([current.rule, current.merged.status], ['R7', 'none'], 'a checked-out branch with a binding is not the default branch');
+  assert.ok(current.notes.includes('pending-binding-merge'));
+
+  git(seed, ['checkout', '--quiet', 'main']);
+  git(seed, [...id, 'merge', '--quiet', '--no-ff', '-m', 'merge binding', 'feature']);
+  git(seed, ['push', '--quiet', origin, 'main']);
+  assert.equal(governance.refreshMergedBinding(clone, ctx.opts, { runGit: served }).refreshed, true);
+  current = governance.governanceState(clone, ctx.opts);
+  assert.deepEqual([current.state, current.rule, current.programme_records_bind], ['ENABLED', 'M1', true]);
+  // Editing the working tree does not change what was merged.
+  fs.writeFileSync(path.join(clone, '.github', 'toolkit-programme.json'), JSON.stringify({ schema: 'toolkit.programme-binding.v2', repository: SLUG, governance: 'disabled' }));
+  assert.equal(governance.governanceState(clone, ctx.opts).rule, 'M1');
+  assert.deepEqual(governance.bindingRequiredChecks(clone, ctx.opts), ['validate'], 'required checks come from the merged binding');
+  assert.equal(governance.bindingStoreRepository(clone, ctx.opts), STORE.repository);
+  // A mirror whose main carries a disabled binding: reading it would turn the state DISABLED (M2).
+  const mirror = path.join(ctx.root, 'mirror.git');
+  git(ctx.root, ['clone', '--quiet', '--bare', origin, mirror]);
+  git(seed, ['checkout', '--quiet', '-b', 'disabled']);
+  fs.writeFileSync(path.join(seed, '.github', 'toolkit-programme.json'), JSON.stringify({ schema: 'toolkit.programme-binding.v2', repository: SLUG, governance: 'disabled' }));
+  git(seed, ['add', '.']);
+  git(seed, [...id, 'commit', '--quiet', '-m', 'disable on the mirror']);
+  git(seed, ['push', '--quiet', mirror, 'disabled:main']);
+  const disabledCommit = git(seed, ['rev-parse', 'disabled']);
+  const enabledCommit = git(clone, ['rev-parse', 'refs/remotes/origin/main']);
+  const refreshedOk = { refreshed: true, error: null };
+  // N2: a replace ref that swaps the fetched tip for the mirror's commit is not followed.
+  git(clone, ['fetch', '--quiet', mirror, 'main']);
+  git(clone, ['replace', enabledCommit, disabledCommit]);
+  assert.deepEqual(governance.refreshMergedBinding(clone, ctx.opts, { runGit: served }), refreshedOk, 'replace');
+  assert.equal(governance.governanceState(clone, ctx.opts).rule, 'M1', 'replace');
+  git(clone, ['replace', '-d', enabledCommit]);
+  // N3: a reference-transaction hook that moves the tracking ref after the fetch never runs, whether
+  // it is in .git/hooks or in a folder the repository's own core.hooksPath names.
+  const hook = `#!/bin/sh\n[ "$1" = committed ] || exit 0\n[ -n "$MOVED" ] && exit 0\nMOVED=1 git update-ref refs/remotes/origin/main ${disabledCommit}\n`;
+  const ownHooks = path.join(ctx.root, 'repo-hooks');
+  fs.mkdirSync(ownHooks, { recursive: true });
+  for (const [label, folder, setup, undo] of [
+    ['.git/hooks', path.join(clone, '.git', 'hooks'), () => {}, () => {}],
+    ['core.hooksPath', ownHooks, () => git(clone, ['config', 'core.hooksPath', ownHooks.replace(/\\/g, '/')]), () => git(clone, ['config', '--unset', 'core.hooksPath'])],
+  ]) {
+    fs.mkdirSync(folder, { recursive: true });
+    fs.writeFileSync(path.join(folder, 'reference-transaction'), hook, { mode: 0o755 });
+    setup();
+    assert.deepEqual(governance.refreshMergedBinding(clone, ctx.opts, { runGit: served }), refreshedOk, label);
+    assert.equal(git(clone, ['rev-parse', 'refs/remotes/origin/main']), enabledCommit, `${label}: the hook did not run`);
+    assert.equal(governance.governanceState(clone, ctx.opts).rule, 'M1', label);
+    undo();
+    fs.rmSync(path.join(folder, 'reference-transaction'));
+  }
+  // F1: one config line that sends origin to the mirror changes nothing: git's real origin URL no
+  // longer matches the identity, so the refresh holds and keeps the last read.
+  const mirrorUrl = mirror.replace(/\\/g, '/');
+  git(clone, ['config', `url.${mirrorUrl}.insteadOf`, REMOTE]);
+  assert.deepEqual(governance.refreshMergedBinding(clone, ctx.opts, { runGit: bindingCache.defaultRunGit }), { refreshed: false, error: 'remote-redirected' });
+  assert.equal(governance.governanceState(clone, ctx.opts).rule, 'M1');
+  git(clone, ['config', '--unset', `url.${mirrorUrl}.insteadOf`]);
+  // N1: an ssh origin whose transport command serves the mirror behind the same URL is held too, as
+  // is any other transport, proxy or TLS override in the repository's own config.
+  git(clone, ['remote', 'set-url', 'origin', 'git@github.com:example-owner/example-repo.git']);
+  assert.equal(governance.governanceState(clone, ctx.opts).rule, 'M1', 'another spelling of the same origin keeps the read');
+  // L4: these rows may only read config and the origin URL; any other git call (a transport) is refused
+  // and counted, so a regression in the hold can never reach github.com.
+  const transports = [];
+  const configOnly = (args, options) => {
+    if (args[0] === 'config' || (args[0] === 'ls-remote' && args[1] === '--get-url')) return bindingCache.defaultRunGit(args, options);
+    transports.push(args.join(' '));
+    return { status: 1, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) };
+  };
+  for (const [key, value] of [
+    ['core.sshCommand', `sh -c "exec git-upload-pack ${mirrorUrl}" x`],
+    ['core.gitProxy', 'sh -c true'],
+    ['remote.origin.uploadpack', `git-upload-pack ${mirrorUrl}`],
+    ['remote.origin.proxy', 'http://proxy.example.com:3128'],
+    ['http.proxy', 'http://proxy.example.com:3128'],
+    ['http.https://github.com/.sslVerify', 'false'],
+    ['http.curloptResolve', 'github.com:443:127.0.0.1'],
+  ]) {
+    git(clone, ['config', key, value]);
+    assert.deepEqual(governance.refreshMergedBinding(clone, ctx.opts, { runGit: configOnly }), { refreshed: false, error: 'remote-redirected' }, key);
+    assert.equal(governance.governanceState(clone, ctx.opts).rule, 'M1', key);
+    git(clone, ['config', '--unset', key]);
+  }
+  assert.deepEqual(transports, [], 'no transport call was made');
+});
+
+// ---- matrix B: discovery ---------------------------------------------------------------------------
+
+function fakeGh(routes) {
+  const calls = [];
+  const gh = (args) => {
+    const url = args[0];
+    calls.push(url);
+    for (const [pattern, answer] of routes) if (pattern.test(url)) return typeof answer === 'function' ? answer(url) : answer;
+    return { ok: false, reason: 'not-found' };
+  };
+  gh.calls = calls;
+  return gh;
+}
+const found = value => ({ ok: true, value });
+const storeRepo = (name, { privacy = true, owner = 'example-owner' } = {}) => ({ name, private: privacy, owner: { login: owner }, fork: false, archived: false });
+
+function discoverWith(ctx, routes, name = 'disc') {
+  const repo = fakeRepo(ctx, name, { remote: REMOTE });
+  cache(ctx, repo, { status: 'absent' });
+  const gh = fakeGh(routes);
+  return { result: new discovery.GovernanceDiscovery({ registryOptions: ctx.opts, gh }).discover(repo), gh, repo };
+}
+
+test('B: a valid merged binding is reused and nothing is asked or read', (t) => {
+  const ctx = scratch(t);
+  const repo = fakeRepo(ctx, 'reuse');
+  cache(ctx, repo);
+  const gh = fakeGh([]);
+  assert.equal(new discovery.GovernanceDiscovery({ registryOptions: ctx.opts, gh }).discover(repo).status, 'reuse');
+  assert.deepEqual(gh.calls, []);
+});
+
+test('B: one, several, none and a failed search; stores are judged on GitHub\'s own facts (A5)', (t) => {
+  const ctx = scratch(t);
+  const layout = found([{ type: 'dir', name: 'state' }, { type: 'dir', name: 'archives' }]);
+  const base = [
+    [/^repos\/example-owner\/example-repo\/issues/, found([
+      { number: 3, title: 'Programme parent', state: 'open', labels: [], sub_issues_summary: { total: 4, completed: 1 } },
+      { number: 5, title: 'A bug', state: 'open', labels: [] },
+      { number: 6, title: 'Old roadmap', state: 'closed', labels: [], sub_issues_summary: { total: 2, completed: 1 } },
+      { number: 8, title: 'Done tracker', state: 'closed', labels: [], sub_issues_summary: { total: 2, completed: 2 } },
+      { number: 9, title: 'Programme PR', state: 'open', pull_request: {} },
+    ])],
+    [/^user\/repos/, found([storeRepo('example-repo'), storeRepo('TRANSPORT-example-repo'), storeRepo('TRANSPORT-public', { privacy: false }), storeRepo('example-repo-notes'), storeRepo('other-app')])],
+    [/^repos\/example-owner\/other-app\/contents\/\.github\/toolkit-programme\.json/, found({ content: Buffer.from(JSON.stringify({ store: { repository: 'someone-else/TRANSPORT-x' } })).toString('base64') })],
+    [/^repos\/example-owner\/TRANSPORT-example-repo$/, found({ private: true, owner: { login: 'example-owner' } })],
+    [/^repos\/example-owner\/TRANSPORT-example-repo\/contents\/$/, layout],
+    [/^repos\/example-owner\/TRANSPORT-public$/, found({ private: false, owner: { login: 'example-owner' } })],
+    [/^repos\/example-owner\/example-repo-notes$/, found({ private: true, owner: { login: 'example-owner' } })],
+    [/^repos\/example-owner\/example-repo-notes\/contents\/$/, found([{ type: 'dir', name: 'docs' }])],
+    [/^repos\/example-owner\/example-repo$/, found({ default_branch: 'main' })],
+    [/rules\/branches\/main$/, found([{ type: 'required_status_checks', parameters: { required_status_checks: [{ context: 'validate' }] } }])],
+    [/protection\/required_status_checks$/, { ok: false, reason: 'not-found' }],
+    [/\/rulesets$/, found([{ name: 'protect-main' }])],
+  ];
+  const { result } = discoverWith(ctx, base);
+  assert.equal(result.status, 'propose');
+  assert.equal(result.parents.status, 'several');
+  assert.equal(result.parents.recommended.issue, 3, 'open with sub-issues is the strongest');
+  assert.deepEqual(result.parents.alternatives.map(entry => entry.issue), [6]);
+  assert.match(result.parents.alternatives[0].note, /closed, but 1 sub-issue is still open/);
+  assert.deepEqual([result.stores.status, result.stores.recommended.repository], ['one', 'example-owner/TRANSPORT-example-repo']);
+  const rejected = Object.fromEntries(result.stores.rejected.map(entry => [entry.repository, entry.rejected]));
+  assert.match(rejected['example-owner/TRANSPORT-public'], /public/);
+  assert.match(rejected['someone-else/TRANSPORT-x'], /another owner/);
+  assert.match(rejected['example-owner/example-repo-notes'], /layout/);
+  assert.deepEqual(result.binding_draft.required_checks, ['validate']);
+  assert.deepEqual(result.binding_draft.parents, [{ issue: 3, record_prefix: 'INT-ER3-' }]);
+  assert.doesNotThrow(() => programmeState.validateBinding(result.binding_draft), 'the draft is a valid v2 binding');
+  const text = discovery.describeDiscovery(result).join('\n');
+  assert.match(text, /recommend #3/);
+  assert.match(text, /one setup pull request/);
+
+  const none = discoverWith(ctx, [[/issues/, found([])], [/^user\/repos/, found([])], [/^repos\/example-owner\/example-repo$/, found({ default_branch: 'main' })], [/rules\/branches/, found([])], [/rulesets$/, found([])]], 'none').result;
+  assert.deepEqual([none.parents.status, none.stores.status], ['none', 'none']);
+  assert.equal(none.binding_draft.store.repository, 'example-owner/TRANSPORT-example-repo', 'the create proposal has concrete defaults');
+  assert.match(discovery.describeDiscovery(none).join('\n'), /none found, so Toolkit proposes creating one/);
+
+  const failed = discoverWith(ctx, [], 'failed').result;
+  assert.deepEqual([failed.parents.status, failed.stores.status], ['unknown', 'unknown']);
+  assert.ok(failed.unknown.length >= 2);
+  assert.match(discovery.describeDiscovery(failed).join('\n'), /Unknown: /);
+
+  const two = discoverWith(ctx, [...base.slice(0, 1), [/^user\/repos/, found([storeRepo('TRANSPORT-example-repo'), storeRepo('TRANSPORT-shared')])],
+    [/^repos\/example-owner\/TRANSPORT-(example-repo|shared)$/, found({ private: true, owner: { login: 'example-owner' } })], [/contents\/$/, layout]], 'two').result;
+  assert.deepEqual([two.stores.status, two.stores.recommended.repository, two.stores.alternatives.length], ['several', 'example-owner/TRANSPORT-example-repo', 1]);
+});
+
+test('B: adoption lists what exists from the working tree and keeps the owner text', (t) => {
+  const ctx = scratch(t);
+  const repo = fakeRepo(ctx, 'adopt');
+  const write = (rel, text) => { fs.mkdirSync(path.dirname(path.join(repo, rel)), { recursive: true }); fs.writeFileSync(path.join(repo, rel), text); };
+  const shim = ['CLAU', 'DE.md'].join('');
+  write('AGENTS.md', '# Owner rules\n');
+  write(shim, '@AGENTS.md\n');
+  write('.github/workflows/ci.yml', 'on: push\n');
+  write('.github/workflows/nightly.yml', 'on:\n  schedule:\n    - cron: "0 3 * * *"\n');
+  write('.github/workflows/uptime-monitor.yml', 'on: push\n');
+  write('docs/DEPLOY.md', '# Deploy\n');
+  const local = discovery.localInventory(repo);
+  assert.deepEqual([local.agents_md, local.governed_block, local.host_shims, local.scheduled, local.monitoring, local.deploy_docs, local.dependabot],
+    [true, false, [shim], ['nightly.yml'], ['uptime-monitor.yml'], ['docs/DEPLOY.md'], false]);
+  const list = discovery.adoptionList({ local, parents: { recommended: null }, stores: { recommended: null }, requiredChecks: [], rulesets: { ok: true, value: [] }, draft: { store: { repository: 'example-owner/TRANSPORT-adopt' } }, pending: false });
+  assert.match(list.add.join('\n'), /your own text stays byte-identical outside it/);
+  assert.match(list.add.join('\n'), /a new private evidence store example-owner\/TRANSPORT-adopt, created after your yes/);
+  assert.match(list.keep.join('\n'), /scheduled workflows: nightly\.yml/);
+  assert.match(list.keep.join('\n'), /deployment notes: docs\/DEPLOY\.md/);
+  assert.match(list.keep.join('\n'), /monitoring workflows: uptime-monitor\.yml/);
+  assert.match(list.defer.join('\n'), /required checks: none/);
+  assert.match(list.defer.join('\n'), /Dependabot/);
+  assert.equal(fs.readFileSync(path.join(repo, 'AGENTS.md'), 'utf8'), '# Owner rules\n', 'discovery writes nothing');
+});
+
+// ---- matrix C: old local answers -------------------------------------------------------------------
+
+test('C: old local answers are read and annotated, never rewritten', (t) => {
+  const ctx = scratch(t);
+  const yes = fakeRepo(ctx, 'old-yes');
+  decide(ctx, yes, 'enable');
+  const no = fakeRepo(ctx, 'old-no', { remote: 'https://github.com/example-owner/old-no.git' });
+  decide(ctx, no, 'decline');
+  const noMerged = fakeRepo(ctx, 'old-no-merged', { remote: 'https://github.com/example-owner/old-no-merged.git' });
+  decide(ctx, noMerged, 'decline');
+  const before = registryBytes(ctx);
+  cache(ctx, yes, { status: 'absent' });
+  cache(ctx, no, { status: 'absent' });
+  cache(ctx, noMerged, { binding: v2({ repository: 'example-owner/old-no-merged' }) });
+  assert.deepEqual([stateAt(ctx, yes).state, stateAt(ctx, yes).rule, stateAt(ctx, yes).hold], ['ENABLED', 'R5', false]);
+  assert.deepEqual([stateAt(ctx, no).state, stateAt(ctx, no).rule], ['DISABLED', 'R2']);
+  assert.deepEqual([stateAt(ctx, noMerged).state, stateAt(ctx, noMerged).notes.includes('local-no-is-preference')], ['ENABLED', true]);
+  assert.deepEqual(registryBytes(ctx), before, 'answers, holds and epochs are byte-identical');
+});
+
+// ---- matrix D: consumers ---------------------------------------------------------------------------
+
+test('D: consumers read ENABLED, DISABLED, ERROR and stale the same way', (t) => {
+  const ctx = scratch(t);
+  const make = (name, setup) => { const repo = fakeRepo(ctx, name, { remote: `https://github.com/example-owner/${name}.git` }); setup(repo); return repo; };
+  // These consumers read the real clock, so the cache ages are measured from it.
+  const at = new Date();
+  const repos = {
+    enabled: make('d-enabled', repo => cache(ctx, repo, { binding: v2({ repository: 'example-owner/d-enabled' }), at })),
+    disabled: make('d-disabled', repo => cache(ctx, repo, { binding: { schema: 'toolkit.programme-binding.v2', repository: 'example-owner/d-disabled', governance: 'disabled' }, at })),
+    error: make('d-error', repo => cache(ctx, repo, { text: '{bad', at })),
+    stale: make('d-stale', repo => cache(ctx, repo, { binding: v2({ repository: 'example-owner/d-stale' }), ageMs: 30 * 24 * HOUR, at })),
+  };
+  const gate = new GovernanceGate({ registryOptions: ctx.opts });
+  const expect = {
+    enabled: { hold: false, governed: true, records: true, tiers: ['portable', 'governed'] },
+    disabled: { hold: false, governed: false, records: false, tiers: ['portable'] },
+    error: { hold: false, governed: false, records: false, tiers: ['portable'] },
+    stale: { hold: false, governed: true, records: false, tiers: ['portable', 'governed'] },
+  };
+  for (const [kind, repo] of Object.entries(repos)) {
+    const state = governance.governanceState(repo, ctx.opts);
+    assert.equal(gate.evaluate(repo).hold, expect[kind].hold, `${kind}: gate`);
+    assert.equal(governedRepo(repo, {}, { registryOptions: ctx.opts }).governed, expect[kind].governed, `${kind}: governed-repo`);
+    assert.equal(checkpoint.githubGovernanceOn(repo, { governanceState: () => state }), expect[kind].records, `${kind}: programme records`);
+    assert.deepEqual(catalogue.tiersFor(state.state, state.materials_complete), expect[kind].tiers, `${kind}: catalogue`);
+    const report = conformance.checkConformance(repo, { ...ctx.opts, offline: true });
+    assert.equal(report.exit_code === 2, kind === 'error', `${kind}: conformance`);
+    assert.equal(migration.proposalFor(state, null, new Set()).action, kind === 'error' ? 'skip' : 'keep', `${kind}: migration`);
+  }
+  assert.ok(conformance.checkConformance(repos.stale, { ...ctx.opts, offline: true }).findings.some(entry => entry.id === 'MERGED_BINDING_STALE'));
+  // The session line agents read says the same.
+  const { sessionLine } = require(path.join(scripts, 'toolkit-governance-gate.cjs'));
+  assert.match(sessionLine(repos.error, { registryOptions: ctx.opts }), /^Toolkit governance: ERROR [^\n]*Never treat this as ENABLED or as DISABLED/);
+  assert.match(sessionLine(repos.stale, { registryOptions: ctx.opts }), /^Toolkit governance: ENABLED [^\n]*last read over 24 hours ago, so programme records, gate admission and finality hold/);
+  assert.match(sessionLine(repos.disabled, { registryOptions: ctx.opts }), /^Toolkit governance: DISABLED/);
+  assert.doesNotMatch(sessionLine(repos.enabled, { registryOptions: ctx.opts }), /24 hours/);
+});
+
+// ---- review findings --------------------------------------------------------------------------------
+
+test('F4: an ENABLED repository without the governed block is drift, however it was enabled', (t) => {
+  const ctx = scratch(t);
+  const repo = fakeRepo(ctx, 'no-block');
+  cache(ctx, repo);
+  const state = governance.governanceState(repo, ctx.opts);
+  assert.deepEqual([state.state, state.rule, state.materials_complete], ['ENABLED', 'M1', true]);
+  const report = conformance.checkConformance(repo, { ...ctx.opts, offline: true });
+  assert.ok(report.findings.some(entry => entry.id === 'GOVERNED_BLOCK_MISSING'), JSON.stringify(report.findings.map(entry => entry.id)));
+});
+
+test('F5: a version 2 binding with an unknown key or a non-string writer prefix is ERROR, never ON', (t) => {
+  const ctx = scratch(t);
+  for (const [name, binding] of [
+    ['children', v2({ children: [8] })],
+    ['extra', v2({ foo: 1 })],
+    ['null-writer', v2({ parents: [{ issue: 7, record_prefix: 'INT-ER7-', writer_prefix: null }] })],
+    ['number-writer', v2({ parents: [{ issue: 7, record_prefix: 'INT-ER7-', writer_prefix: 12 }] })],
+  ]) {
+    const repo = fakeRepo(ctx, `f5-${name}`);
+    cache(ctx, repo, { binding });
+    const state = stateAt(ctx, repo);
+    assert.deepEqual([state.state, state.rule, state.programme_records_bind], ['ERROR', 'M0', false], name);
+  }
+});
+
+test('F3: discovery reads nothing from GitHub in a test run or for a test registry', (t) => {
+  const ctx = scratch(t);
+  const repo = fakeRepo(ctx, 'quiet-discovery', { remote: REMOTE });
+  cache(ctx, repo, { status: 'absent' });
+  // A test registry: every GitHub read is answered offline, so each search reports itself unknown.
+  // The real gh cannot be found during the call, so a regression shows as gh-unavailable, not a
+  // network read.
+  const savedPath = process.env.PATH;
+  let found;
+  try {
+    process.env.PATH = ctx.root;
+    found = new discovery.GovernanceDiscovery({ registryOptions: ctx.opts, environment: {} }).discover(repo);
+  } finally { process.env.PATH = savedPath; }
+  assert.equal(found.status, 'propose');
+  assert.deepEqual([found.parents.status, found.stores.status], ['unknown', 'unknown']);
+  assert.ok(found.unknown.includes('parent issues (offline)') && found.unknown.includes('the owner\'s repositories (offline)'), found.unknown.join('; '));
+  // TOOLKIT_GOVERNANCE_OFFLINE=1 (set for every test child by run-tests.cjs) picks the same offline reader.
+  const source = fs.readFileSync(path.join(scripts, 'toolkit-governance-discovery.cjs'), 'utf8');
+  assert.match(source, /environment\.TOOLKIT_GOVERNANCE_OFFLINE === '1' \? offlineGh : defaultGh/);
+  assert.deepEqual(discovery.offlineGh(), { ok: false, reason: 'offline' });
+});
+
+test('F7: programme commands refuse a stale or unusable merged binding and use only the merged one', (t) => {
+  const { governedHome, makeGoverned, recordMerged } = require('./toolkit-governed-fixture-support.cjs');
+  const programme = require(path.join(repoRoot, 'skills', 'github-program-reconciler', 'scripts', 'programme.cjs'));
+  governedHome();
+  const repo = makeGoverned(path.join(scratch(t).root, 'programme-repo'), 'programme-repo');
+  // A transport that stops the command right after governance admitted it, naming the binding it got.
+  const stop = { request: () => { throw Object.assign(new Error('admitted'), { code: 'ADMITTED' }); }, graphql: () => { throw Object.assign(new Error('admitted'), { code: 'ADMITTED' }); } };
+  const open = () => programme.openContext({ 'repo-root': repo }, { transport: stop, toolkitVersion: '0.0.0' });
+  assert.throws(open, error => error.code !== 'GITHUB_GOVERNANCE_OFF', 'fresh merged binding: admitted');
+  // The working tree's binding never names the store: with it pointing elsewhere, the command still
+  // verifies the merged binding's store. The transport answers the origin lookup and stops at the
+  // store's, recording which repository it asked for.
+  const file = path.join(repo, '.github', 'toolkit-programme.json');
+  const merged = fs.readFileSync(file, 'utf8');
+  fs.writeFileSync(file, merged.replace('toolkit-test-fixture/store', 'toolkit-test-fixture/elsewhere'));
+  const asked = [];
+  const recording = {
+    request: (method, url) => {
+      asked.push(url);
+      if (url === 'repos/toolkit-test-fixture/programme-repo') return { status: 200, json: { full_name: 'toolkit-test-fixture/programme-repo' } };
+      throw Object.assign(new Error('store'), { code: 'STORE_ASKED' });
+    },
+    graphql: () => { throw new Error('not used'); },
+  };
+  assert.throws(() => programme.openContext({ 'repo-root': repo }, { transport: recording, toolkitVersion: '0.0.0' }), { code: 'STORE_ASKED' });
+  assert.deepEqual(asked, ['repos/toolkit-test-fixture/programme-repo', 'repos/toolkit-test-fixture/store'], 'the merged binding names the store, never the working tree');
+  fs.writeFileSync(file, merged);
+  recordMerged(repo, { now: new Date(Date.now() - 25 * HOUR) });
+  assert.throws(open, { code: 'GITHUB_GOVERNANCE_OFF' }, 'read over 24 hours ago');
+  recordMerged(repo, { text: '{broken' });
+  assert.throws(open, { code: 'GITHUB_GOVERNANCE_OFF' }, 'unusable merged binding');
+});
+
+test('F7: the attribution guard and the bridge keep their protection on ERROR, and drop it only when DISABLED', (t) => {
+  const ctx = scratch(t);
+  const { forceRefusal, FORCE_MESSAGE } = require(path.join(scripts, 'toolkit-attribution-guard.cjs'));
+  const bridge = require(path.join(scripts, 'toolkit-local-bridge.cjs'));
+  const error = fakeRepo(ctx, 'guard-error');
+  cache(ctx, error, { text: '{bad' });
+  const stale = fakeRepo(ctx, 'guard-stale');
+  cache(ctx, stale, { ageMs: 30 * 24 * HOUR });
+  const off = fakeRepo(ctx, 'guard-off');
+  cache(ctx, off, { binding: { schema: 'toolkit.programme-binding.v2', repository: SLUG, governance: 'disabled' } });
+  for (const [repo, protectedHere] of [[error, true], [stale, true], [off, false]]) {
+    assert.equal(forceRefusal('git push --force origin main', repo, 0, ctx.opts), protectedHere ? FORCE_MESSAGE : '', path.basename(repo));
+    assert.equal(bridge.governanceEnabledAt(repo, ctx.opts), protectedHere, path.basename(repo));
+  }
+});
+
+test('F8: a fetch the timeout stopped leaves no lock of its own behind; an older lock is not touched', (t) => {
+  const ctx = scratch(t);
+  const root = path.join(ctx.root, 'locked');
+  const lockDir = path.join(root, '.git', 'refs', 'remotes', 'origin');
+  fs.mkdirSync(lockDir, { recursive: true });
+  const lock = path.join(lockDir, 'main.lock');
+  const base = {
+    'ls-remote': ok(`ref: refs/heads/main\tHEAD\n${SHA}\tHEAD\n`),
+    'rev-parse': args => (args[1] === '--git-common-dir' ? ok('.git\n') : ok(`${SHA}\n`)),
+  };
+  // The lock's time is set from Node's clock, as a real fetch's lock matches it, so this also holds
+  // when the clock-ahead run moves Node's clock but not file times.
+  const killed = () => { fs.writeFileSync(lock, ''); const now = new Date(); fs.utimesSync(lock, now, now); return { status: null, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) }; };
+  assert.equal(bindingCache.readDefaultBranchBinding(root, { ...GUARDED, runGit: fakeGit({ ...base, fetch: killed }) }).error, 'fetch-failed');
+  assert.equal(fs.existsSync(lock), false, 'the lock this fetch left is removed');
+  fs.writeFileSync(lock, '');
+  const old = new Date(Date.now() - HOUR);
+  fs.utimesSync(lock, old, old);
+  const timedOut = () => ({ status: null, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) });
+  bindingCache.readDefaultBranchBinding(root, { ...GUARDED, runGit: fakeGit({ ...base, fetch: timedOut }) });
+  assert.equal(fs.existsSync(lock), true, 'an older lock belongs to someone else');
+});
+
+test('F8: the session-start hook refreshes once; the bridge only reads the cache', () => {
+  // Session marks go to a scratch home, never the real one.
+  require('./toolkit-governed-fixture-support.cjs').governedHome();
+  const gate = require(path.join(scripts, 'toolkit-governance-gate.cjs'));
+  const calls = [];
+  gate.startSession({ cwd: repoRoot, source: 'startup', session_id: 'f8-session' }, { registryOptions: {}, refreshBinding: (cwd) => { calls.push(cwd); return {}; } });
+  assert.deepEqual(calls, [repoRoot]);
+  gate.startSession({ cwd: repoRoot, source: 'compact', session_id: 'f8-session' }, { registryOptions: {}, refreshBinding: (cwd) => { calls.push(cwd); return {}; } });
+  assert.equal(calls.length, 1, 'compaction keeps the run and refreshes nothing');
+  assert.doesNotMatch(fs.readFileSync(path.join(scripts, 'toolkit-local-bridge.cjs'), 'utf8'), /refreshMergedBinding/);
+});
+
+test('F9: security writes nothing on a merged binding read over 24 hours ago', async (t) => {
+  const ctx = scratch(t);
+  const repo = fakeRepo(ctx, 'stale-security');
+  cache(ctx, repo, { ageMs: 25 * HOUR });
+  const { ToolkitGovernanceCli } = require(path.join(scripts, 'toolkit-governance.cjs'));
+  const out = [];
+  let wrote = false;
+  const cli = new ToolkitGovernanceCli({ cwd: repo, registryOptions: ctx.opts, interactive: false, stdout: { write: text => out.push(text) }, stderr: { write: () => {} },
+    securityReader: () => { throw new Error('not read'); }, securityWriter: () => { wrote = true; return []; }, securityFileWriter: () => { wrote = true; } });
+  assert.equal(await cli.main(['security']), 1);
+  assert.match(out.join(''), /last read over 24 hours ago/);
+  assert.equal(wrote, false);
+});
+
+test('status says in plain words why the merged binding was not read, and says nothing when it was', async (t) => {
+  const ctx = scratch(t);
+  const repo = fakeRepo(ctx, 'status-reason');
+  cache(ctx, repo);
+  const { ToolkitGovernanceCli } = require(path.join(scripts, 'toolkit-governance.cjs'));
+  const run = async (refresh) => {
+    const out = [];
+    const cli = new ToolkitGovernanceCli({ cwd: repo, registryOptions: ctx.opts, interactive: false, stdout: { write: text => out.push(text) }, stderr: { write: () => {} }, refresh: () => refresh });
+    assert.equal(await cli.main(['status']), 0);
+    return out.join('');
+  };
+  assert.match(await run({ refreshed: false, error: 'remote-redirected' }), /Refresh held: git would fetch origin from somewhere else[^\n]*The last read on this computer is kept\./);
+  assert.match(await run({ refreshed: false, error: 'remote-unreachable' }), /Refresh held: GitHub could not be reached/);
+  assert.doesNotMatch(await run({ refreshed: true, error: null }), /Refresh held/);
+  assert.doesNotMatch(await run({ refreshed: false, error: 'not-applicable' }), /Refresh held/);
+});
