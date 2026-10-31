@@ -1,5 +1,15 @@
 # Toolkit Changelog
 
+## 3.24.0 (the coordinator reads the latest Projects skill)
+
+### Projects guidebook
+
+- **Added:** `repo/scripts/toolkit-projects-guidebook.cjs`. `--out <folder>` copies the Projects controller skill (SKILL.md, its `reference/` and `tasks/` files) into a folder, writes `instructions-block.md` (main's project-instructions block with its real marker), then writes a one-line `VERSION` last and reads every file back. It prints `SKILL COPY REFRESHED <Version>`, plus `BLOCK CHANGED <version>` when the block changed, or `SKILL COPY FAILED <reason>`. `--check <folder>` only compares. It removes files a newer skill dropped and never takes over a folder it did not write.
+- **Changed:** the Projects coordinator's runtime loads no account skills, so the skill now reaches it as that copy in the project library, `/mnt/project-files/toolkit/web-controller-projects/`. The project-instructions block gains one guidebook line: read `VERSION` every turn, read `SKILL.md` when that Version is new to the session, start a refresh thread when the copy is missing or older than the block, and replace the block with `instructions-block.md` whenever they differ. The block's size limit rose to 5,600 bytes for that line.
+- **Changed:** the hourly nudge checks main every run (a cheap `git ls-remote` first) and refreshes a stale copy itself, reporting `BLOCK CHANGED` or `SKILL COPY FAILED` on its first line. The daily check-in is the backstop: it refreshes a copy still stale two hours after main changed, or when the nudge is stopped or not armed, and reports `GUIDEBOOK MISSING` or `SKILL COPY STALE`. Its `SKILL UPDATE` now compares the copy's Version with the one on the BINDING line.
+- **Changed:** the merge step's closing checklist carries "coordinator: refresh the guidebook", and setup reads the guidebook before step 1.
+- **Removed:** the skill card route for the account copy of the Projects skill: the skill card thread brief (`reference/skill-card.md`), the check-in's `SKILL DRIFT`, `SKILL BEHIND` and `SKILL CARD` steps, the coordinator's card, Save and re-upload handling, and the account-copy setup inventory row. They kept an account copy current that the coordinator never loads.
+
 ## 3.23.0 (hooks keep only the checks that stop real damage)
 
 ### Hooks cut down
