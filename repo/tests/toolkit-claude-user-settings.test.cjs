@@ -62,6 +62,18 @@ test('an owner value is reported and never changed, on enable, disable or keep',
   assert.deepEqual(read().attribution, { commit: '' });
 });
 
+test('an owner value reports whether it matches Toolkit\'s value; a blocked parent never matches', (t) => {
+  const { owner } = fixture(t, { crossSessionInbound: 'accept', attribution: true, pluginConfigs: 'x' });
+  const states = byId(owner.inspect());
+  assert.equal(states['cross-session-inbound'].state, STATES.OWNER);
+  assert.equal(states['cross-session-inbound'].matches, true);
+  assert.equal(states.attribution.state, STATES.OWNER);
+  assert.equal(states.attribution.matches, false);
+  assert.equal(states.attribution.value, true);
+  assert.equal(states['agents-md'].matches, false);
+  assert.equal(states['switch-models-on-flag'].state, STATES.DEFAULT);
+});
+
 test('an owner edit after Toolkit wrote a value is kept on disable', (t) => {
   const { owner, settingsPath, read } = fixture(t, {});
   owner.apply('enable');

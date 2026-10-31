@@ -1236,7 +1236,7 @@ function recommendedChoice(key, current, args) {
   if (key === 'claudeTopology') return 'root-only';
   if (key === 'claudePluginBehavior') return 'install';
   if (key === 'codexPluginBehavior') return codexPluginUnchanged(current, args) ? 'keep' : 'install';
-  if (key === 'claudeSettings') return claudeSettingsAllSet(current) ? 'keep' : 'enable';
+  if (key === 'claudeSettings') return claudeSettingsAnySet(current) ? 'keep' : 'enable';
   if (key === 'antigravitySkills') return current.antigravity?.copies ? 'copy' : 'keep';
   return 'keep';
 }
@@ -1703,22 +1703,6 @@ function shortClaudePlugin(current) {
   const latest = current.nativePlugin.manifest_version;
   const notes = [latest && latest !== install.version ? `${latest} available` : '', claudePluginRecordLag(install)].filter(Boolean);
   return `${state}, ${install.version || 'version unknown'}${notes.length ? ` (${notes.join('; ')})` : ''}`;
-}
-
-const CLAUDE_SETTING_SHORT_NAMES = Object.freeze({
-  attribution: 'No AI attribution',
-  'cross-session-inbound': 'Session wake-ups',
-  'switch-models-on-flag': 'Ask before model switch',
-  'agents-md': 'Read AGENTS.md',
-});
-
-// Each setting by a short name: set by Toolkit, kept as you set it, or not set.
-function shortClaudeSettings(entries) {
-  if (!Array.isArray(entries) || !entries.length) return 'Not read yet';
-  if (entries.some((entry) => entry.state === CLAUDE_SETTINGS_STATES.UNREADABLE)) return 'Could not read';
-  const name = (entry) => CLAUDE_SETTING_SHORT_NAMES[entry.id] || entry.label;
-  return entries.map((entry) => (entry.state === CLAUDE_SETTINGS_STATES.TOOLKIT ? `${name(entry)}: on`
-    : entry.state === CLAUDE_SETTINGS_STATES.OWNER ? `${name(entry)}: yours` : `${name(entry)}: not set`)).join('; ');
 }
 
 // The on/off choice that reproduces a verified stored boolean; none when it is unverified.
@@ -2203,19 +2187,21 @@ function setupQuestionSpecs(args, current) {
       id: 'claude-recommended-settings',
       key: 'claudeSettings',
       section: 'Other coding apps',
-      title: "Use Toolkit's recommended Claude Code settings?",
+      title: "Add Toolkit's recommended Claude Code settings that are missing?",
       prompt: 'Claude Code settings choice',
       whatThisControls: 'Four values in your Claude Code user settings (settings.json in your Claude Code config folder): no AI attribution lines in commits and pull requests ("attribution": false); messages from your other Claude sessions, such as a Claude Projects coordinator, wake this one ("crossSessionInbound": "accept"; messages still cannot approve actions or change settings); pause and ask before switching models when a request is flagged ("switchModelsOnFlag": false); and read AGENTS.md as well as CLAUDE.md (Project instructions: "claude-md-and-agents-md", Claude Code 2.1.285 or later). A value you set yourself is never changed.',
       choices: [
-        wizardChoice('enable', 'Turn on', 'Set each of the four values that is not set yet and record that Toolkit owns it. Values you set yourself stay as they are.'),
-        wizardChoice('disable', 'Turn off', 'Remove only the values Toolkit set and still match what it recorded. Values you set yourself stay as they are.'),
+        wizardChoice('enable', 'Add missing settings', `${claudeSettingsAddOutcome(current.claudeSettings)} Toolkit records each value it adds so it can remove it later. Values you set yourself, matching or not, are never changed.`),
+        wizardChoice('disable', "Remove Toolkit's values", 'Remove only the values Toolkit set and still match what it recorded. Values you set yourself stay as they are.'),
         wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${claudeSettingsOutcome(current.claudeSettings)}`),
       ],
-      currentChoice: claudeSettingsAllSet(current) ? 'enable' : '',
-      recommendation: { value: recommendedChoice('claudeSettings', current, args), outcome: claudeSettingsAllSet(current) ? 'Keep them: all four are already set.' : 'Set the recommended values that are not set yet; values you set yourself stay as they are.', reason: 'They keep AI attribution out of your commits and pull requests, let a Projects coordinator wake Remote Control sessions on your computer, keep a flagged request on the model you chose, and make Claude Code read the repository\'s AGENTS.md.' },
+      // No folded twin: Keep current is recommended once any setting is set, and both changes stay listed.
+      recommendation: claudeSettingsAnySet(current)
+        ? { value: 'keep', outcome: 'Keep your current Claude Code settings as they are.', reason: claudeSettingsKeepReason(current.claudeSettings) }
+        : { value: recommendedChoice('claudeSettings', current, args), outcome: claudeSettingsAddOutcome(current.claudeSettings), reason: claudeSettingsReason() },
       selected: args.setupChoices.claudeSettings,
       current: claudeSettingsOutcome(current.claudeSettings),
-      currentShort: shortClaudeSettings(current.claudeSettings),
+      currentShort: claudeSettingsShort(current.claudeSettings),
       currentVerification: Array.isArray(current.claudeSettings) && current.claudeSettings.length && current.claudeSettings.every((entry) => entry.state !== CLAUDE_SETTINGS_STATES.UNREADABLE) ? 'state-derived' : 'unverified',
       afterApplying: 'Start a new Claude Code session so it reads the changed settings.',
     }));
@@ -4197,8 +4183,8 @@ const {
   printDelegationPreview, printDelegationRemovalPreview, runNativePluginJsonPhase, setupGlobalRules
 });
 const {
-  inspectClaudeNativePluginStatePreApproval, resolveClaudeTopology, claudeSettingsOutcome, claudeSettingsAllSet,
-  applyClaudeUserSettings, applyClaudeSubagentDepth, applyClaudeAgentControl, setupClaudeArgs,
+  inspectClaudeNativePluginStatePreApproval, resolveClaudeTopology, claudeSettingsOutcome, claudeSettingsShort,
+  claudeSettingsAddOutcome, claudeSettingsReason, claudeSettingsKeepReason, claudeSettingsAnySet, applyClaudeUserSettings, applyClaudeSubagentDepth, applyClaudeAgentControl, setupClaudeArgs,
   runClaudeNativePluginSetup, verifyClaudeNativePluginMetadata, runClaudeInstallCheck
 } = defineClaudeSetup({
   CLAUDE_HOOK_TRUST_ACTION, SUBAGENT_DEPTH_FOR_TOPOLOGY, claudeSetupBudgets,
