@@ -8,4 +8,5 @@ Title: per-repository task auto-merge
 ### Changed
 
 - With an enforceable yes (the binding and the default branch both require `auto-merge-eligible`), the merge hold lets one merge shape through without a typed approval: a merge commit pinned to the full head SHA, in a session the user started, from that repository's folder. Every other merge still needs the owner's typed merge.
-- The global rules' merge line, the gate rules (new task auto-merge section), the controller rules and the Projects skill say when the controller may merge on that answer: G2 PASS, every required check green and owner UAT passed or not required, on the same head, one merge at a time.
+- The global rules' merge line, the gate rules (new task auto-merge section) and the Projects skill say when the controller may merge on that answer: G2 PASS, every required check green and owner UAT passed or not required, on the same head, one merge at a time.
+- The release-plan CI check-up rule moves from the delivery contract into the gate rules' G0 bullet, where gate sessions read it first.
