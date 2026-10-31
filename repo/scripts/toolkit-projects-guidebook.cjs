@@ -23,7 +23,8 @@ const SKILL_DIR = 'repo/contracts/claude-projects/web-controller-projects';
 const BLOCK_FILE = 'instructions-block.md';
 const VERSION_FILE = 'VERSION';
 const SKILL_VERSION = /^Version: (\d{4}-\d{2}-\d{2}\.\d+)$/m;
-const VERSION_LINE = /^Version: (\d{4}-\d{2}-\d{2}\.\d+) toolkit (\d+\.\d+\.\d+) main ([0-9a-f]{7}) copied (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)\n?$/;
+const BLOCK_MARKER = /^<!-- AI-AGENT-TOOLKIT:claude-projects:BEGIN PROJECT-INSTRUCTIONS v2 toolkit=\d+\.\d+\.\d+ sha256=[0-9a-f]{12} -->\n/;
+const VERSION_LINE =/^Version: (\d{4}-\d{2}-\d{2}\.\d+) toolkit (\d+\.\d+\.\d+) main ([0-9a-f]{7}) copied (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)\n?$/;
 
 class GuidebookError extends Error {
   constructor(code) { super(code); this.code = code; }
@@ -80,13 +81,20 @@ class Guidebook {
     return { state: 'current', version: expected.version };
   }
 
+  #written(out, present) {
+    const read = rel => (present.includes(rel) ? fs.readFileSync(path.join(out, rel), 'utf8') : '');
+    return VERSION_LINE.test(read(VERSION_FILE)) || BLOCK_MARKER.test(read(BLOCK_FILE));
+  }
+
   refresh(out) {
     const expected = this.expected();
     const exists = fs.existsSync(out);
     if (exists && !fs.statSync(out).isDirectory()) throw new GuidebookError('GUIDEBOOK_OUT');
     const present = exists ? listFiles(out) : [];
-    // Never take over a folder this script did not write.
-    if (present.length && !present.includes(VERSION_FILE) && !present.includes(BLOCK_FILE)) throw new GuidebookError('GUIDEBOOK_FOREIGN');
+    // Never take over a folder this script did not write: it holds a VERSION in this script's exact
+    // format, or a block file that starts with the real marker (a refresh cut short after removing
+    // VERSION, or a damaged VERSION). A file merely named VERSION is not enough.
+    if (present.length && !this.#written(out, present)) throw new GuidebookError('GUIDEBOOK_FOREIGN');
     const blockPath = path.join(out, BLOCK_FILE);
     const oldBlock = fs.existsSync(blockPath) ? fs.readFileSync(blockPath, 'utf8') : null;
     const commit = this.commit();

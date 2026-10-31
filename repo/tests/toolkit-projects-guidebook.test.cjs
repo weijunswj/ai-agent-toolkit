@@ -109,6 +109,28 @@ test('a refresh never takes over a folder it did not write and fails without a u
   fs.writeFileSync(path.join(foreign, 'notes.md'), 'owner notes\n');
   assert.throws(() => guidebook().refresh(foreign), { code: 'GUIDEBOOK_FOREIGN' });
   assert.equal(fs.readFileSync(path.join(foreign, 'notes.md'), 'utf8'), 'owner notes\n');
+  // A file named VERSION or instructions-block.md is not enough: only this script's exact formats
+  // claim a folder, so a made-up one never gets the owner's files deleted.
+  const fakes = [
+    ['VERSION', 'Version: 1\n'],
+    ['VERSION', 'anything\n'],
+    ['instructions-block.md', 'my own notes about the block\n'],
+  ];
+  for (const [name, text] of fakes) {
+    const folder = path.join(dir, `fake-${fakes.findIndex(entry => entry[1] === text)}`);
+    fs.mkdirSync(folder);
+    fs.writeFileSync(path.join(folder, name), text);
+    fs.writeFileSync(path.join(folder, 'important.md'), 'keep me\n');
+    assert.throws(() => guidebook().refresh(folder), { code: 'GUIDEBOOK_FOREIGN' }, `${name}: ${text}`);
+    assert.equal(fs.readFileSync(path.join(folder, 'important.md'), 'utf8'), 'keep me\n');
+    assert.equal(fs.readFileSync(path.join(folder, name), 'utf8'), text);
+  }
+  // A real copy whose refresh stopped after removing VERSION is still this script's to finish.
+  const cut = path.join(dir, 'cut-short');
+  guidebook().refresh(cut);
+  fs.rmSync(path.join(cut, 'VERSION'));
+  guidebook().refresh(cut);
+  assert.equal(guidebook().check(cut).state, 'current');
   const file = path.join(dir, 'a-file');
   fs.writeFileSync(file, 'x');
   assert.throws(() => guidebook().refresh(file), { code: 'GUIDEBOOK_OUT' });
