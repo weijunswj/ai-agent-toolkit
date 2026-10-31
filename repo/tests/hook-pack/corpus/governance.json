@@ -43,7 +43,8 @@
       "expect": { "decision": "allow" },
       "status": "known-bad",
       "lane": "Evidence-store governance exemption",
-      "added": "2026-10-30"
+      "added": "2026-10-30",
+      "note": "The evidence-store exemption decides a store only when a programme binding cached on this computer names it. This fixture has no cached binding, so the row stays known-bad until its lane gives the fixture one."
     },
     {
       "id": "G2",
@@ -64,9 +65,57 @@
       "payload": { "tool_name": "Bash", "tool_input": { "command": "ls .codex/agents; [ -d .claude ] && echo yes" } },
       "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
       "expect": { "decision": "allow" },
-      "status": "known-bad",
-      "lane": "Hooks cut-down (the short-answer launch reader is removed)",
-      "added": "2026-10-30"
+      "status": "pass"
+    },
+    {
+      "id": "G2.codex-here-string",
+      "source": "two-bugs G0, Bug 1: a Codex here-string report write that names Codex next to short answer lines, refused as a governance answer",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "payload": { "tool_name": "PowerShell", "tool_input": { "command": "Set-Content -Path .tmp/uat-codex.md -Value @'\nCodex said no\nok\nlater\n'@" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
+      "expect": { "decision": "allow" },
+      "status": "pass"
+    },
+    {
+      "id": "G6.python-inspection",
+      "source": "owner report: a Python inspection of Codex session files read as a session resume or fork",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "python -c \"import json; d = json.load(open('.codex/sessions/index.json')); print([s for s in d if 'resume' in s or 'fork' in s])\"" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
+      "expect": { "decision": "allow" },
+      "status": "pass"
+    },
+    {
+      "id": "G7.metadata-save",
+      "source": "false-refusals G0, refusal 1: a metadata save naming a host next to yes",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "node scripts/save-meta.cjs --host claude --tracking yes" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
+      "expect": { "decision": "allow" },
+      "status": "pass"
+    },
+    {
+      "id": "G7.summary-read",
+      "source": "false-refusals G0, refusal 2: a summary read with -r style options over a .claude folder",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "head -c 2000 ~/.claude/projects/x/summary.md" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
+      "expect": { "decision": "allow" },
+      "status": "pass"
+    },
+    {
+      "id": "G8.python-here-string-proposal",
+      "source": "owner report 31 Oct 2026: a PowerShell python -c here-string that only writes a JSON proposal, refused as a session resume or fork (a command Toolkit could not read)",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "payload": { "tool_name": "PowerShell", "tool_input": { "command": "& 'C:\\Users\\example\\python\\python.exe' -c @'\nfrom pathlib import Path\nimport json\nreport={'status':'PROPOSAL_NOT_EXECUTED','note':'no stack/stage supplied; resume or fork not used'}\np=Path('plan-1.json');p.write_text(json.dumps(report,indent=2)+'\\n')\nprint(json.dumps({'report':str(p),'executed':False}))\n'@; [DateTime]::UtcNow.ToString('o')" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
+      "expect": { "decision": "allow" },
+      "status": "pass"
     }
   ]
 }

@@ -86,6 +86,8 @@ function proposalFor(state, slug, transportSlugs) {
   if (state.rule === 'R1') return { action: 'skip', reason: 'not a git repository, so GitHub governance is DISABLED automatically' };
   if (state.rule === 'R9') return { action: 'skip', reason: 'not on github.com, so GitHub governance is off here once the user says ok in chat' };
   if (state.state === 'ERROR') return { action: 'skip', reason: 'the programme binding merged on its default branch is invalid; fix it through a pull request' };
+  if (state.rule === 'S1') return { action: 'skip', reason: 'evidence store named in a programme binding (agent-managed, not governed)' };
+  if (state.rule === 'R1s') return { action: 'skip', reason: "a scratch clone in another repository's ignored .tmp folder (not governed)" };
   if (['M1', 'M2'].includes(state.rule)) return { action: 'keep', reason: `${state.state === 'ENABLED' ? 'enabled' : 'disabled'} by the programme binding merged on its default branch` };
   if (state.recorded_under_legacy_key) return { action: 'carry-over', reason: `already ${state.recorded_decision === 'enabled' ? 'enabled' : 'disabled'} under an earlier key; kept under its own key` };
   if (state.state !== 'UNDECIDED') return { action: 'keep', reason: `already ${state.state === 'ENABLED' ? 'enabled' : 'disabled'}` };

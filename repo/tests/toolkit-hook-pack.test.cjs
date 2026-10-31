@@ -55,7 +55,7 @@ test('the hooks a host starts for a call come from its real hooks.json', () => {
   const names = (host, event, tool) => pack.selectHooks(hooksOf(host), event, tool).map(hook => /([a-z-]+)\.cjs/.exec(hook.command)[1]);
   assert.deepEqual(names('claude', 'PreToolUse', 'Bash'), ['toolkit-claude-attribution-hook', 'toolkit-governance-hook']);
   assert.deepEqual(names('claude', 'PreToolUse', 'mcp__github__merge_pull_request'), ['toolkit-governance-hook']);
-  assert.deepEqual(names('claude', 'PreToolUse', 'mcp__hearthbot__post_message'), ['toolkit-governance-hook', 'toolkit-claude-project-post-hook']);
+  assert.deepEqual(names('claude', 'PreToolUse', 'mcp__hearthbot__post_message'), ['toolkit-governance-hook']);
   assert.deepEqual(names('claude', 'PreToolUse', 'Read'), ['toolkit-governance-hook']);
   assert.deepEqual(names('codex', 'PreToolUse', 'exec_command'), ['toolkit-codex-helper-hook']);
   assert.deepEqual(names('codex', 'UserPromptSubmit'), ['toolkit-codex-helper-hook']);

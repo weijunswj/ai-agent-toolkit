@@ -300,6 +300,11 @@ class ToolkitGovernanceCli {
     if (notGitHub && command === 'enable') {
       throw new GovernanceCliError('GitHub governance works only for github.com repositories, and this one is not on github.com, so it cannot be enabled here. Nothing was written.');
     }
+    if (command === 'enable' && ['S1', 'R1s'].includes(before.rule)) {
+      throw new GovernanceCliError(before.rule === 'S1'
+        ? 'This repository is an evidence store that a programme binding names, so it is agent-managed and never governed; GitHub governance cannot be enabled here. Nothing was written.'
+        : "This repository is a scratch clone inside another repository's ignored .tmp folder, so it is never governed; GitHub governance cannot be enabled here. Nothing was written.");
+    }
     if (['M0', 'M1', 'M2'].includes(before.rule)) {
       throw new GovernanceCliError(`Nothing was written: this repository's binding merged on the default branch decides its governance (${label(before)}) on every computer. To change it, merge a pull request that changes .github/toolkit-programme.json.`);
     }
@@ -376,6 +381,8 @@ function describe(state, registryOptions = {}) {
   if (state.rule === 'R1') lines.push(`Folder: ${state.folder} (not a git repository, so DISABLED automatically).`);
   if (state.rule === 'M1') lines.push('Decided by the programme binding merged on the default branch, so no computer asks.');
   if (state.rule === 'M2') lines.push('The programme binding merged on the default branch sets governance to disabled; only an owner-merged pull request turns it back on.');
+  if (state.rule === 'S1') lines.push(`An evidence store ${state.reason === 'evidence-store-by-name' ? 'by its TRANSPORT-* name, under the owner of a repository with a programme binding' : 'that a programme binding names'}: agent-managed, never governed and never asked about.`);
+  if (state.rule === 'R1s') lines.push("A scratch clone in another repository's ignored .tmp folder: never governed and never asked about.");
   for (const note of state.notes || []) if (NOTE_TEXT[note]) lines.push(NOTE_TEXT[note](state));
   if (state.rule === 'R8' || state.rule === 'R9') lines.push(`Not on github.com: ${state.host ? `this repository is on ${state.host}` : 'there is no single github.com origin remote'}. Toolkit asks about GitHub governance if the repository moves to github.com.`);
   return lines;
@@ -388,6 +395,7 @@ const NOTE_TEXT = Object.freeze({
   'merged-binding-unknown': () => 'The binding merged on the default branch has not been read on this computer yet, so governed effects hold until it is.',
   'binding-belongs-to-other-repository': state => `The default branch's binding belongs to ${state.merged.foreign_repository}, so it does not apply here.`,
   'pending-binding-merge': () => 'Pending: the working tree has a programme binding; merge it on the default branch to apply it.',
+  'stored-decision-ignored': () => `A governance "enable" is still recorded for this repository on this computer, but it decides nothing here. To clear it, run ${CMD('disable')} in your own terminal.`,
   'setup-pr-offered': () => `Setup is not finished: run ${CMD('discover')} for the adoption proposal and its one setup pull request.`,
 });
 

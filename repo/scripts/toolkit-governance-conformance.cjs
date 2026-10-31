@@ -105,7 +105,10 @@ function checkConformance(cwd, options = {}) {
   }
   if (state.state === 'DISABLED') {
     if (state.rule === 'M2') findings.push(finding('REPOSITORY_DISABLED', 'info', 'The binding merged on the default branch sets governance to disabled; only an owner-merged pull request turns it back on.'));
-    if (state.materials.governed_block) findings.push(finding('GOVERNED_BLOCK_IGNORED', 'info', state.rule === 'M2' ? 'Governance is disabled for this repository, so the governed block in AGENTS.md is not followed.' : 'You disabled Toolkit governance here, so the governed block in AGENTS.md is not followed.'));
+    if (state.rule === 'S1') findings.push(finding('EVIDENCE_STORE', 'info', 'This repository is an evidence store a programme binding names: agent-managed, never governed, and never asked about.'));
+    if (state.rule === 'R1s') findings.push(finding('SCRATCH_CLONE', 'info', "This repository is a scratch clone in another repository's ignored .tmp folder: never governed, and never asked about."));
+    if (state.notes.includes('stored-decision-ignored')) findings.push(finding('STORED_DECISION_IGNORED', 'info', `A governance "enable" is still recorded for this repository on this computer, but it decides nothing here. To clear it, run \`${governance.governanceCommand('disable')}\` in your own terminal.`));
+    if (state.materials.governed_block) findings.push(finding('GOVERNED_BLOCK_IGNORED', 'info', state.rule === 'M2' ? 'Governance is disabled for this repository, so the governed block in AGENTS.md is not followed.' : ['S1', 'R1s'].includes(state.rule) ? 'This repository is not governed, so the governed block in AGENTS.md is not followed.' : 'You disabled Toolkit governance here, so the governed block in AGENTS.md is not followed.'));
     return report(0, state, findings, toolkitRoot);
   }
   // Whatever enabled it, an ENABLED repository needs the governed block its agents are told to follow.

@@ -477,7 +477,7 @@ test('memory check reads only the BINDING and SCHEDULED TASKS lines', () => {
   });
 });
 
-test('every setup step that creates something has an inventory row, and every row is checked by the daily check-in or a registered launch hook', () => {
+test('every setup step that creates something has an inventory row, and every row is checked by the daily check-in, a registered launch hook or a written rule', () => {
   const inventory = JSON.parse(fs.readFileSync(INVENTORY, 'utf8'));
   const setup = fs.readFileSync(SETUP, 'utf8').replace(/\r\n/g, '\n');
   assert.match(fs.readFileSync(SKILL, 'utf8'), /reference\/setup\.md/, 'the skill routes setup to its reference file');
@@ -492,9 +492,11 @@ test('every setup step that creates something has an inventory row, and every ro
   for (const row of inventory.rows) {
     assert.match(row.resync, /^(auto|owner|report)\b/, row.id);
     // A row a launch hook enforces names that hook's script, which must exist and be registered in the Claude Code
-    // plugin; every other row is in the check-in.
+    // plugin; a row a written rule covers names the file that holds the rule; every other row is in the check-in.
     const hook = row.check.match(/^hook: (\S+)$/);
-    if (hook) {
+    const rule = row.check.match(/^rule: (\S+)$/);
+    if (rule) assert.ok(fs.existsSync(path.join(ROOT, rule[1])), `${row.id}: ${rule[1]}`);
+    else if (hook) {
       assert.ok(fs.existsSync(path.join(ROOT, hook[1])), `${row.id}: ${hook[1]}`);
       assert.ok(fs.readFileSync(path.join(ROOT, '.claude-plugin', 'hooks', 'hooks.json'), 'utf8').includes(`/${hook[1]}\\"`), `${row.id}: ${hook[1]} registered`);
     }

@@ -355,6 +355,34 @@ test('a push to the default branch is refused; other branches and evidence store
   for (const [cwd, command] of allowed) assert.equal(decide(ctx, bash(cwd, command)), null, command);
 });
 
+test('a push names its folder through a variable the same command assigned, and an evidence store a binding names is not refused', (t) => {
+  const ctx = context(t);
+  const store = repository(ctx.root, 'store', { slug: 'owner/TRANSPORT-a' });
+  const feature = repository(ctx.root, 'feature', { branch: 'work' });
+  const ps = (cwd, command) => ({ cwd, tool_name: 'PowerShell', tool_input: { command } });
+  // The real refused call: PowerShell, a variable holding the store's literal path, from another
+  // repository. Claude Code names its shell, so the variable is read as that shell reads it.
+  const claude = (input) => hold.decide(input, { ...ctx.options, environment: {}, host: 'claude' });
+  for (const command of [`$d = '${store}'; git -C $d push origin HEAD:main 2>&1 | Select -Last 1`, `$D = "${store}"; Set-Location $d; git push origin main`, `git -C ${store} push origin HEAD:main`]) {
+    assert.equal(claude(ps(ctx.repo, command)), null, command);
+  }
+  assert.equal(claude(bash(ctx.repo, `d='${store.replace(/\\/g, '/')}' ; git -C "$d" push origin HEAD:main`)), null, 'POSIX assignment');
+  // With no shell named (Codex), the push is also judged as if the assignment did not run, which leaves
+  // the session's own repository pushing to main: refused. A literal store path needs no variable.
+  assert.match(decide(ctx, ps(ctx.repo, `$d = '${store}'; git -C $d push origin HEAD:main`))?.deny || '', /default branch `main`/, 'unknown shell');
+  assert.equal(decide(ctx, ps(ctx.repo, `git -C ${store} push origin HEAD:main`)), null, 'literal store path, unknown shell');
+  // The variable still points the check at the right repository when that one is not a store.
+  assert.match(claude(ps(ctx.repo, `$d = '${feature}'; git -C $d push origin work:main`))?.deny || '', /default branch `main`/);
+  // A store named by a cached programme binding, whatever its name, is an evidence store (rule S1).
+  const governed = repository(ctx.root, 'governed', { slug: 'owner/governed' });
+  const named = repository(ctx.root, 'evidence', { slug: 'owner/evidence' });
+  assert.match(decide(ctx, bash(named, 'git push origin main'))?.deny || '', /default branch `main`/, 'not a store before the binding is cached');
+  const binding = JSON.stringify({ schema: 'toolkit.programme-binding.v1', repository: 'owner/governed', parent_issue: 1, record_prefix: 'INT-G', writer_prefix: 'G', store: { kind: 'github', repository: 'owner/evidence', branch: 'main', path: 'state/' }, required_checks: ['validate'] });
+  require('./toolkit-governed-fixture-support.cjs').recordMerged(governed, { registryPath: ctx.options.registryOptions.registryPath, text: binding });
+  assert.equal(decide(ctx, bash(named, 'git push origin main')), null, 'a store the binding names');
+  assert.match(decide(ctx, bash(governed, 'git push origin main'))?.deny || '', /default branch `main`/, 'the governed repository itself');
+});
+
 test('an unreadable approvals store refuses the merge, and a governance error never skips the merge check', (t) => {
   const ctx = context(t);
   fs.mkdirSync(ctx.file, { recursive: true });

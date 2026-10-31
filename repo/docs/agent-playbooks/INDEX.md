@@ -19,6 +19,12 @@ Triggers: any Toolkit code that writes host configuration, including Codex, Clau
 
 Read: `repo/docs/agent-playbooks/host-config-writes.md`.
 
+## Match: Hook Design
+
+Triggers: adding a Toolkit hook, adding a rule inside an existing hook, or widening what a hook matches.
+
+Read: `repo/docs/agent-playbooks/hook-design.md`.
+
 ## Match: Model Safety Flags
 
 Triggers: a session or subagent switched to a fallback model by a safety classifier, or always-loaded wording that may trigger false safety flags.

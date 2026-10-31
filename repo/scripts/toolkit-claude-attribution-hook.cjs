@@ -2,8 +2,8 @@
 'use strict';
 
 // Claude Code PreToolUse hook for Bash and PowerShell: refuses a git commit or gh pr create/edit/merge that carries AI
-// attribution, a command that skips a governed or guarded repository's commit and push checks, a force push, and a
-// push or new pull request whose changes carry a credential or a plain-text finding (see toolkit-attribution-guard.cjs).
+// attribution, a force push in a governed or guarded repository or to an evidence store, and a push or new pull
+// request whose changes carry a credential (see toolkit-attribution-guard.cjs).
 // A shell call whose shape it cannot read is refused when its raw input could commit, push or touch a
 // pull request (toolkit-shell-call.cjs). Any other command, or hook input that is not JSON, passes.
 //
@@ -42,7 +42,7 @@ function main(guard = () => require('./toolkit-attribution-guard.cjs')) {
   catch { return 0; }
   let decision;
   const notes = [];
-  try { decision = guard().attributionDecision(input, { notes }); }
+  try { decision = guard().attributionDecision(input, { notes, host: 'claude' }); }
   catch { return mayCarryAttribution(commandText(input)) ? refuse(CHECK_FAILED_REASON) : 0; }
   if (decision?.hookSpecificOutput) {
     // Notes from a step that could not run go with the refusal, so they are not lost.

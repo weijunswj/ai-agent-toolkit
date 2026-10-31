@@ -106,6 +106,8 @@ The owner answered a card with a standing OK: on one computer, agents may replac
 - Do not run destructive commands, rewrite git history, deploy, restart services, change firewall/security settings, or mutate production config without approval.
 - Do not touch customer/private data or live databases without approval.
 - Do not remove tests, validation, guardrails, or approval gates to make a check pass.
+- Do not skip a repository's own commit or push checks (`git commit -n` or `--no-verify`, `git push --no-verify`, a different `core.hooksPath`). Fix what they report; if a check is wrong, tell the owner. No hook checks this: CI is the backstop.
+- Never answer the governance question for the owner: do not run the governance CLI with a decision, start, resume or fork a session to answer it, feed a session an answer, or type or click an answer in a UI. Hooks check only the governance CLI and edits to Toolkit's user-state files; the rest of this rule is yours to keep.
 
 ## Reporting
 
