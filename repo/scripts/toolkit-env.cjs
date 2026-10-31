@@ -741,9 +741,16 @@ class ToolkitEnv {
     const lines = [];
     const state = this.#edit.state();
     let earlier = 0;
+    let earlierOpen = false;
     for (const { file, id } of this.#edit.files()) {
       if (id && id === state?.id) continue;
-      if (!id) { this.#edit.discard(file); earlier += 1; continue; }
+      if (!id) {
+        // The open edit's own file under an earlier version's .txt name: an update in the middle of an edit.
+        if (state && path.basename(file) === `env-edit-${state.id}.txt`) earlierOpen = true;
+        else earlier += 1;
+        this.#edit.discard(file);
+        continue;
+      }
       let differs = [];
       try {
         const { entries } = this.#edit.read(file);
@@ -755,9 +762,10 @@ class ToolkitEnv {
       this.#edit.discard(file);
       lines.push(`An older Notepad tab was saved and ignored. Use the newest tab; close the older one.${differs.length ? ` Its lines for ${differs.join(', ')} differ from what is stored; retype them in the newest tab if you still want them.` : ''}`);
     }
-    // An update in the middle of an edit: the earlier version's helper may already have applied saves
-    // from that file, and they are reported with the edit's other saves.
-    if (earlier) lines.push(`Deleted ${earlier} edit file${earlier === 1 ? '' : 's'} from an earlier Toolkit version; ${this.#edit.result() ? `saves already applied from ${earlier === 1 ? 'it' : 'them'} are listed with your other saves, and nothing else in ${earlier === 1 ? 'it was' : 'them was'} saved` : `nothing in ${earlier === 1 ? 'it was' : 'them was'} saved`}.`);
+    if (earlier) lines.push(`Deleted ${earlier} edit file${earlier === 1 ? '' : 's'} from an earlier Toolkit version; nothing in ${earlier === 1 ? 'it was' : 'them was'} saved.`);
+    // The earlier version's helper may already have applied saves from the open edit's file; they are
+    // reported with the edit's other saves.
+    if (earlierOpen) lines.push(`Deleted your open edit file from an earlier Toolkit version; ${this.#edit.result() ? 'saves already applied from it are listed with your other saves, and nothing else in it was saved' : 'nothing in it was saved'}.`);
     if (state && this.#now().getTime() - state.last_save_ms >= EDIT_STALE_MS) {
       const file = this.#edit.currentFile();
       const unapplied = file && (state.refused || this.#edit.hash(file) !== state.handled);

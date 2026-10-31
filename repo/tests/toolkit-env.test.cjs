@@ -1280,6 +1280,21 @@ test('a .txt edit file with a current-style id is from an earlier version: wiped
   assert.equal(store.peek('X1_TEST_OTHER_KEY'), undefined);
 });
 
+test('another earlier .txt file never claims the open edit\'s saves, and its typed key is reported as not saved', async (t) => {
+  const { run, paths, store } = harness(t, { values: { X1_TEST_KEPT_KEY: sentinel() } });
+  await run('edit');
+  fs.writeFileSync(path.join(paths.editDir, 'last-result.json'), JSON.stringify({ changed: [], added: ['X1_TEST_SAVED_KEY'], removed: [], notes: [] }));
+  const earlier = path.join(paths.editDir, 'env-edit-0123456789abcdef.txt');
+  fs.writeFileSync(earlier, `X1_TEST_TYPED_KEY=${sentinel()}\n`);
+  const result = await run('apply');
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /Deleted 1 edit file from an earlier Toolkit version; nothing in it was saved\./);
+  assert.doesNotMatch(result.stdout, /saves already applied/);
+  assert.match(result.stdout, /^added: X1_TEST_SAVED_KEY$/m);
+  assert.equal(fs.existsSync(earlier), false);
+  assert.equal(store.peek('X1_TEST_TYPED_KEY'), undefined);
+});
+
 test('an update in the middle of an edit: done reports the saves already applied and stores nothing from the .txt file', async (t) => {
   const { run, env, paths, store } = harness(t, { values: { X1_TEST_KEPT_KEY: sentinel() } });
   await run('edit');
@@ -1293,7 +1308,7 @@ test('an update in the middle of an edit: done reports the saves already applied
   const before = store.writes;
   const result = await run('apply');
   assert.equal(result.code, 0, result.stderr);
-  assert.match(result.stdout, /Deleted 1 edit file from an earlier Toolkit version; saves already applied from it are listed with your other saves, and nothing else in it was saved\./);
+  assert.match(result.stdout, /Deleted your open edit file from an earlier Toolkit version; saves already applied from it are listed with your other saves, and nothing else in it was saved\./);
   assert.doesNotMatch(result.stdout, /nothing in it was saved/);
   assert.match(result.stdout, /^Saved, added: X1_TEST_SAVED_KEY$/m);
   assert.equal(fs.existsSync(earlier), false);
