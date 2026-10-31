@@ -51,11 +51,11 @@ function defineClaudeSetup({ CLAUDE_HOOK_TRUST_ACTION, SUBAGENT_DEPTH_FOR_TOPOLO
     return topology;
   }
 
-  // True when every managed Claude Code setting already has a value (yours or Toolkit's).
-  function claudeSettingsAllSet(current) {
+  // True when any managed Claude Code setting already has a value (yours or Toolkit's): the four are added
+  // all together or not at all, so once any is set, the ones still missing count as left out on purpose.
+  function claudeSettingsAnySet(current) {
     const entries = current?.claudeSettings;
-    return Array.isArray(entries) && entries.length > 0
-      && entries.every((entry) => entry.state === CLAUDE_SETTINGS_STATES.TOOLKIT || entry.state === CLAUDE_SETTINGS_STATES.OWNER);
+    return Array.isArray(entries) && entries.some((entry) => entry.state === CLAUDE_SETTINGS_STATES.TOOLKIT || entry.state === CLAUDE_SETTINGS_STATES.OWNER);
   }
 
   // One line per managed Claude Code setting: set by Toolkit, set by you to Toolkit's value or to a
@@ -99,15 +99,17 @@ function defineClaudeSetup({ CLAUDE_HOOK_TRUST_ACTION, SUBAGENT_DEPTH_FOR_TOPOLO
     return `Adds ${missing.length === 1 ? '1 missing setting' : `${missing.length} missing settings`}: ${names}.${rest ? ` Your other ${rest === 1 ? 'setting stays' : `${rest} settings stay`} as ${rest === 1 ? 'it is' : 'they are'}.` : ''}`;
   }
 
-  // Why to add them, naming only the benefits that will hold: a setting you set to a different value stays yours.
-  function claudeSettingsReason(entries) {
-    const usable = Array.isArray(entries) && entries.length && entries.every((entry) => entry.state !== CLAUDE_SETTINGS_STATES.UNREADABLE);
-    const differs = (entry) => entry.state === CLAUDE_SETTINGS_STATES.OWNER && entry.matches !== true;
-    const holding = usable ? entries.filter((entry) => !differs(entry)) : CLAUDE_SETTINGS.map((spec) => ({ id: spec.id }));
-    const different = usable ? entries.filter(differs) : [];
-    const benefits = holding.map((entry) => settingEffect(entry).benefit);
-    const kept = different.length ? ` Your own different value for ${listText(different.map((entry) => settingEffect(entry).short))} stays, so ${different.length === 1 ? 'that one does' : 'those do'} not apply.` : '';
-    return benefits.length ? `They ${listText(benefits)}.${kept}` : 'You set all four to your own values, which stay as they are.';
+  // Why keep them once any is set, naming what Add missing settings would still add.
+  function claudeSettingsKeepReason(entries) {
+    const set = entries.filter((entry) => entry.state === CLAUDE_SETTINGS_STATES.TOOLKIT || entry.state === CLAUDE_SETTINGS_STATES.OWNER);
+    const missing = entries.filter((entry) => entry.state === CLAUDE_SETTINGS_STATES.DEFAULT);
+    const have = set.length === entries.length ? `All ${set.length} settings already have a value` : `${set.length} of the ${entries.length} settings already have a value`;
+    return `${have}, so Keep current leaves your choices as they are.${missing.length ? ` Pick Add missing settings to also add ${listText(missing.map((entry) => settingEffect(entry).short))}.` : ''}`;
+  }
+
+  // Why to add them; asked only while none is set, so every benefit holds.
+  function claudeSettingsReason() {
+    return `They ${listText(CLAUDE_SETTINGS.map((spec) => settingEffect(spec).benefit))}.`;
   }
 
   const CLAUDE_SETTING_EFFECTS = Object.freeze({
@@ -318,7 +320,7 @@ function defineClaudeSetup({ CLAUDE_HOOK_TRUST_ACTION, SUBAGENT_DEPTH_FOR_TOPOLO
       projectDirectories: [path.join(process.cwd(), '.claude', 'agents')],
     });
   }
-  return { inspectClaudeNativePluginStatePreApproval, resolveClaudeTopology, claudeSettingsOutcome, claudeSettingsShort, claudeSettingsAddOutcome, claudeSettingsReason, claudeSettingsAllSet, applyClaudeUserSettings, applyClaudeSubagentDepth, applyClaudeAgentControl, setupClaudeArgs, runClaudeNativePluginSetup, verifyClaudeNativePluginMetadata, runClaudeInstallCheck };
+  return { inspectClaudeNativePluginStatePreApproval, resolveClaudeTopology, claudeSettingsOutcome, claudeSettingsShort, claudeSettingsAddOutcome, claudeSettingsReason, claudeSettingsKeepReason, claudeSettingsAnySet, applyClaudeUserSettings, applyClaudeSubagentDepth, applyClaudeAgentControl, setupClaudeArgs, runClaudeNativePluginSetup, verifyClaudeNativePluginMetadata, runClaudeInstallCheck };
 }
 
 module.exports = { defineClaudeSetup };

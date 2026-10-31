@@ -1236,7 +1236,7 @@ function recommendedChoice(key, current, args) {
   if (key === 'claudeTopology') return 'root-only';
   if (key === 'claudePluginBehavior') return 'install';
   if (key === 'codexPluginBehavior') return codexPluginUnchanged(current, args) ? 'keep' : 'install';
-  if (key === 'claudeSettings') return claudeSettingsAllSet(current) ? 'keep' : 'enable';
+  if (key === 'claudeSettings') return claudeSettingsAnySet(current) ? 'keep' : 'enable';
   if (key === 'antigravitySkills') return current.antigravity?.copies ? 'copy' : 'keep';
   return 'keep';
 }
@@ -2195,8 +2195,10 @@ function setupQuestionSpecs(args, current) {
         wizardChoice('disable', "Remove Toolkit's values", 'Remove only the values Toolkit set and still match what it recorded. Values you set yourself stay as they are.'),
         wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${claudeSettingsOutcome(current.claudeSettings)}`),
       ],
-      currentChoice: claudeSettingsAllSet(current) ? 'enable' : '',
-      recommendation: { value: recommendedChoice('claudeSettings', current, args), outcome: claudeSettingsAllSet(current) ? 'Keep them: all four already have a value.' : claudeSettingsAddOutcome(current.claudeSettings), reason: claudeSettingsReason(current.claudeSettings) },
+      // No folded twin: Keep current is recommended once any setting is set, and both changes stay listed.
+      recommendation: claudeSettingsAnySet(current)
+        ? { value: 'keep', outcome: 'Keep your current Claude Code settings as they are.', reason: claudeSettingsKeepReason(current.claudeSettings) }
+        : { value: recommendedChoice('claudeSettings', current, args), outcome: claudeSettingsAddOutcome(current.claudeSettings), reason: claudeSettingsReason() },
       selected: args.setupChoices.claudeSettings,
       current: claudeSettingsOutcome(current.claudeSettings),
       currentShort: claudeSettingsShort(current.claudeSettings),
@@ -4182,7 +4184,7 @@ const {
 });
 const {
   inspectClaudeNativePluginStatePreApproval, resolveClaudeTopology, claudeSettingsOutcome, claudeSettingsShort,
-  claudeSettingsAddOutcome, claudeSettingsReason, claudeSettingsAllSet, applyClaudeUserSettings, applyClaudeSubagentDepth, applyClaudeAgentControl, setupClaudeArgs,
+  claudeSettingsAddOutcome, claudeSettingsReason, claudeSettingsKeepReason, claudeSettingsAnySet, applyClaudeUserSettings, applyClaudeSubagentDepth, applyClaudeAgentControl, setupClaudeArgs,
   runClaudeNativePluginSetup, verifyClaudeNativePluginMetadata, runClaudeInstallCheck
 } = defineClaudeSetup({
   CLAUDE_HOOK_TRUST_ACTION, SUBAGENT_DEPTH_FOR_TOPOLOGY, claudeSetupBudgets,
