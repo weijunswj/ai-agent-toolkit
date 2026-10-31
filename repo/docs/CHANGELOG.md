@@ -1,12 +1,33 @@
 # Toolkit Changelog
 
-## 3.19.21 (your keys in Notepad, with every save kept)
+## 3.22.0 (plans and asks open with the problem, the fix and the cost of skipping)
 
-- **Changed:** `toolkit env edit` opens your keys in Notepad as `NAME=value` lines with their real values, like a `.env` file, in your saved order with your comment lines. Change a value, add a line, or delete a line to remove that key, then save: a small helper started with the file applies each save within a few seconds. Saying "done" (or `apply`) applies a save not applied yet, deletes the file and lists what was changed, added and removed, by name only. Deleting a line no longer needs a separate `remove`.
-- **Safer saves:** a save is applied whole or not at all. Nothing is saved, and a `# Status:` line at the top of the file says why, for an unreadable line, a blank value, a key name used twice, a quoted value, a UTF-16 save, a save that would remove every key, or keys changed elsewhere while the tab was open. A key added elsewhere during the edit is never removed. A value one line cannot show exactly appears as `<kept: change it with toolkit env set NAME>` and stays as it is.
-- **Fixed:** a second edit reused an open edit file younger than 30 minutes without refreshing it, so it could show a key you had removed. Every edit now writes a fresh file from the store and wipes the earlier one; a save from an older Notepad tab is ignored and wiped, and the result says to use the newest tab. Edit files of earlier versions are wiped, never applied.
-- **New:** after "done", Toolkit checks Notepad's tab-restore folder for the edit file's name (yes or no only) and, when it is there, says to close the tab and set Notepad to "Start new session". The file is deleted 30 minutes after its last save if "done" never comes.
-- **Skill:** the `toolkit-env` skill opens Notepad whenever you want to see or change your keys, in any words, keeps `status` for names-only questions, and tells agents never to open, read or search the edit file.
+### Projects skill
+
+- **New rule:** every plan, G0 plan, decision ask and explanation, from the coordinator and from every thread, opens with three lines: **The problem:** (one plain sentence on what goes wrong for the owner), **The fix:** (what would be built, in everyday words) and **If we skip it:** (what happens if nothing is done). The owner can then turn work down before it is built or reviewed.
+- **Where the lines go:** first in a plan, a decision card and a reply. In a running post the **Now:** line stays first and the lines sit under it, or under the question they belong to, before its choices. Plain status lines and a later reminder of the same ask need none.
+- **Threads:** every brief passes the rule on, and a G0 brief asks for it at the top of the plan. The managed project-instructions block is unchanged.
+
+## 3.21.0 (a hook test pack every hook change must pass)
+
+### Hook test pack
+
+- **New:** the hook test pack (`repo/scripts/toolkit-hook-pack.cjs`, rows in `repo/tests/hook-pack/corpus/`) runs tool calls through the hooks exactly as Claude Code and Codex start them: the real `hooks.json` matchers, the plugin folder written into each command, one process per hook with the call on stdin, and on Windows the Codex PowerShell launcher setup installs. It checks the decision the host would act on and that no fixture file changed, and prints a scoreboard of passes, known bugs, false blocks and leaks per family.
+- **Suites:** ordinary daily commands that must pass, hostile calls that must stop, hooks that break (a missing, throwing or stalled module, unreadable input), a plugin version folder deleted mid-chat, and host parity. Rows for bugs not fixed yet are marked known-bad with the lane that fixes them, and the run fails when one starts passing, so the fix flips it. A refusal that comes only from a hook failing counts only for a row that names it.
+- **Revert proof:** `run --against <commit>` runs a fix's new rows against the plugin as it was at that commit and passes only when they fail there, so a review never has to feed hook scripts by hand.
+- **CI:** a `hook-pack` job runs the pack on Linux and Windows on every pull request, and the `validate` job waits for it. The validate job also fails a pull request that removes, lowers or otherwise changes a row (anything but a known-bad row moving toward passing) without a line for it under a "Pack changes" heading in the body.
+- **Gate rules:** a new "Hook changes" section says what a hook change must show before it merges (the pack green on both systems, a pack row and revert proof for each bug it fixes, explained row changes, and a real-host smoke per release), and that an enforcing hook that breaks refuses only the calls it guards while advisory hooks stay fail-open.
+
+## 3.20.0 (version at merge time)
+
+### Version at merge time
+
+- **Open branches keep `main`'s version:** a branch no longer changes `version.json`, the plugin manifests, the managed-block markers, the CHANGELOG version headings or the Projects skill Version line while it is open. Its notes go in its own fragment in `repo/docs/changelog.d/`, so open branches stop conflicting on version lines and renumbering after every merge. A branch that already keeps one `## Unreleased` section on top of the CHANGELOG (titled or not) may keep it; it is folded in at merge, and a `main` that already holds one counts the same; its notes cannot be dropped.
+- **One step at merge time:** after the branch merges `main`, `node repo/scripts/bump-version.cjs --next patch` (or `minor`) reads `main`'s version, sets the next one, folds the fragments and any `## Unreleased` section into the CHANGELOG, deletes the fragments, refreshes every copy of the version and bumps the Projects skill Version line when the branch changed that skill. It refuses when the branch is behind `main`, the tree has uncommitted changes, the branch already set its own version, its CHANGELOG `##` headings differ from `main`'s (a heading of its own, a reused number or a heading below the top one), a fragment is malformed, or there are no notes. The explicit `bump-version.cjs <x.y.z>` form still works.
+- **CI guard:** validation accepts a pull request that holds its base's version with the base's CHANGELOG headings, or one that sets exactly the next patch or minor version with that heading on top, the base's headings below it and no fragment left. A stale or skipped number, a stray heading, a half-done bump or a base that is not in the checkout fails with the fix to run.
+- **Folding:** sections with the same name from several fragments become one section, a byte order mark is ignored, `##` headings are read as GitHub shows them (a tab after `##`, or up to three spaces before it), and every error names the heading that was added, dropped or repeated.
+- **Review tier:** the merge-time bump commit stays a version-only change when it also bumps the Projects skill Version line.
+- **Projects skill test:** the test no longer pins one exact skill Version, so branches that change the skill stop conflicting on it.
 
 ## 3.19.19 (see one key's value yourself, and env commands you can paste)
 

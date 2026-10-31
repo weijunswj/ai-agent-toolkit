@@ -20,7 +20,7 @@ Last reviewed against `main` `37877aedbadfc2baf1f70c2e6b9f2281430174b8`.
 | Docs | `repo/docs/` | Human and agent docs, routed by `repo/docs/agent-playbooks/INDEX.md` |
 | Provenance | `repo/source-watch/` | Third-party source locks and the notification-only source watch |
 | Native plugins | `.claude-plugin/`, `.codex-plugin/` | Claude Code and Codex plugin metadata and hooks |
-| CI | `.github/workflows/` | `validate.yml` is the full gate: test shards on Linux and Windows and the `personal-data` check (config `.github/personal-data-guard.json`), then the `validate` job checks and verifies them (the Windows shards include the env store tests on the real Credential Manager); it runs again when a pull request's title or body is edited |
+| CI | `.github/workflows/` | `validate.yml` is the full gate: test shards on Linux and Windows, the `hook-pack` job on both and the `personal-data` check (config `.github/personal-data-guard.json`), then the `validate` job checks and verifies them (the Windows shards include the env store tests on the real Credential Manager); it runs again when a pull request's title or body is edited |
 
 ## Entry points
 
@@ -33,11 +33,12 @@ Last reviewed against `main` `37877aedbadfc2baf1f70c2e6b9f2281430174b8`.
 | Keys and tokens (`toolkit env`) | `repo/scripts/toolkit-env.cjs`, `repo/scripts/toolkit-env-store.cjs`, `repo/scripts/toolkit-env-feeders.cjs` |
 | Global rules installer | `repo/scripts/toolkit-global-rules.cjs` |
 | Managed marker format | `repo/scripts/toolkit-managed-block.cjs` |
+| Hook test pack (every hook run as the hosts start it, against one list of calls that must pass or stop) | `repo/scripts/toolkit-hook-pack.cjs` (runner, revert proof and expectation-change check), `repo/tests/hook-pack/corpus/` (the rows), `repo/tests/hook-pack/README.md` (row format) |
 | Helper hooks | `repo/scripts/toolkit-claude-agent-hook.cjs`, `repo/scripts/toolkit-codex-helper-hook.cjs` |
 | Governance gate hooks (hold prompts and tools until a repository has a decision) | `repo/scripts/toolkit-governance-gate.cjs` (the gate), `repo/scripts/toolkit-governance-continuation.cjs` (read-only target admission), `repo/scripts/toolkit-governance-answer.cjs` (records the user's reply the agent read, under a one-use reply ticket), `repo/scripts/toolkit-governance-hook.cjs` (Claude Code), `repo/scripts/toolkit-codex-helper-hook.cjs` and `repo/scripts/toolkit-codex-session-start.cjs` (Codex) |
 | Helper route guard and adapter | `repo/scripts/toolkit-v3-helper-guard.cjs`, `repo/scripts/toolkit-v3-native-helper-adapter.cjs` (shared core), `repo/scripts/toolkit-v3-native-helper-adapter-claude.cjs`, `repo/scripts/toolkit-v3-native-helper-adapter-codex.cjs` |
 | Claude helper agents | `repo/scripts/toolkit-claude-helper-agents.cjs`, `repo/scripts/toolkit-claude-helper-spec.cjs`, `repo/scripts/toolkit-claude-task-session.cjs` |
-| Version bump | `repo/scripts/bump-version.cjs` |
+| Version bump | `repo/scripts/bump-version.cjs` (`--next patch\|minor` at merge time; notes wait in `repo/docs/changelog.d/`) |
 | Risk tier of a change | `repo/scripts/toolkit-risk-tier.cjs`, this repository's list `.github/toolkit-risk-tiers.json` |
 | Leftover worktrees and merged branches (read-only list) | `repo/scripts/workspace-residue-report.cjs` |
 | Instruction sync | `repo/scripts/sync-agent-instruction-shims.cjs`, `repo/scripts/sync-repo-doc-contract.cjs` |
