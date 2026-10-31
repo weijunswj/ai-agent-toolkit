@@ -1,6 +1,6 @@
 ---
 name: secure-ci-cd
-description: Use when planning security-first CI/CD setup, GitHub Actions workflows, pipelines, pipeline hardening, required checks, security checks, deployment automation, build/test automation, automated validation, secret scanning, local secret scans of a repository, branch protection, release automation, installer prompt/status templates, or safe rollout planning.
+description: Use when planning security-first CI/CD setup, GitHub Actions workflows, pipelines, pipeline hardening, required checks, security checks, deployment automation, build/test automation, automated validation, secret scanning, local secret scans of a repository, branch protection, release automation, installer prompt/status templates, safe rollout planning, or a CI check-up (is CI still up to date with the code).
 ---
 
 
@@ -90,6 +90,11 @@ Before committing, pushing, creating a pull request, merging, or deploying, paus
 
 - [`templates/github-actions/dependency-auto-merge.yml`](templates/github-actions/dependency-auto-merge.yml) turns on GitHub auto-merge, merge commit only, for Dependabot patch and minor updates, so GitHub merges only after every required check passes. It uses only the built-in token, never checks out the pull request's code, reads the policy from the default branch's programme binding (`dependency_updates.auto_merge: patch-minor` is the owner's standing permission) and refuses when no ruleset requires a check. Majors, minor updates from 0.x, maintainer changes and, unless the binding says `github_actions: auto-merge`, GitHub Actions updates get one comment for the owner. It acts only on pull requests to the default branch whose every commit is Dependabot's, and pins auto-merge to the head it checked. A push or re-run by anyone but Dependabot, or a base branch change, turns auto-merge off again, and the job fails if that cannot be confirmed.
 - In a Toolkit-governed repository, `toolkit governance check` reports it with the other dependency and security settings, and `toolkit governance security` installs it once the binding allows auto-merge. Elsewhere, install it only on the owner's explicit approval, after required checks exist.
+
+## CI Check-Up
+
+- [`scripts/ci-checkup.cjs`](scripts/ci-checkup.cjs) is a read-only, zero-dependency check that compares what a repository contains (packages, test files, scripts, Dockerfiles) with what its CI runs, plus job times, workflow hygiene and the CI status document. It lists `GAP` and `CHECK` items; the agent judges each and fixes the real ones. It never edits anything or fails a build.
+- Follow [`templates/cicd/ci-checkup.md`](templates/cicd/ci-checkup.md): run it at each release plan in a governed repository, while planning a change that touches CI or adds a package, language or test folder (with `--base`), in final readiness audits, and on request.
 
 ## AI-Facing Surfaces
 

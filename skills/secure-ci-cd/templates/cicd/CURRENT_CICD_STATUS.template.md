@@ -9,6 +9,7 @@ If the repo already has a documented CI/CD, deployment, operations, or status do
 - CI installed: no
 - Deployment enabled: no
 - Production approval required: yes
+- Last CI check-up: not run yet (date, commit and open gaps from `ci-checkup.cjs`)
 
 ## Workflow Files
 
