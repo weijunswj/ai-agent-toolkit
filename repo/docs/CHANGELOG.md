@@ -1,5 +1,16 @@
 # Toolkit Changelog
 
+## 3.26.2 (programme state on a protected public branch)
+
+### Programme state branch
+
+- **New:** a version 2 binding may add `"state": { "kind": "branch", "branch": "DO-NOT-DELETE-IF-TOOLKIT-GOVERNANCE-IS-ENABLED", "path": "state/" }`. Parent and child programme documents then live on that branch of the governed repository itself, as public views: no private part, no gate route, and sessions only as hashes. The private store stays required beside it and keeps the journals, one private sidecar per written revision and the checkpoint. Without `state` nothing changes.
+- **Public-safe only:** every read and write checks the public view against closed key lists; free text may not hold a path, an address, an `@`, something that reads as a host name or a session ID, and a refused write changes nothing (`STATE_INVALID`). Commits on the branch end in `[skip ci]`.
+- **Recovery:** a deleted branch is restored at its checkpoint commit when every file still matches, or rebuilt from the private sidecars when every digest matches, else held; it is never started empty. A branch pushed back below the checkpoint, a hand edit and a store that is no longer private all hold with a named code. This runs from any command or the hourly `refresh`, never from a hook.
+- **Moving:** `programme.cjs migrate-state --dry-run` shows what would be written; `migrate-state --apply --plan-digest <digest>` creates the branch after the owner's typed yes in a terminal and prints the binding change for a pull request. Readers keep the private store until that pull request merges; stop the programme sweep and make no programme writes until then. A private-store write made after the move holds every branch read (`STATE_MIGRATION_STALE`) until the move is run again, which carries the newer documents over while the branch is untouched. The typed yes is never asked in a shell a coding agent started.
+- **Protection:** `toolkit governance migrate` offers a "Toolkit: keep programme state" ruleset (no deletion of that branch) after its own typed yes, for repositories whose merged binding has `state`. A ruleset that lets someone bypass it does not count as protection.
+- **Changed:** `refresh` now acts as the parent's holder by the hash of the holder's session only, so it can bring documents in line but never make a decision.
+
 ## 3.26.1
 
 ### Changed
