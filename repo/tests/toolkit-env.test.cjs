@@ -78,11 +78,11 @@ function harness(t, { values = {}, answers = [], hidden = [], typed = [], feeder
 }
 
 function editFile(paths) {
-  return path.join(paths.editDir, fs.readdirSync(paths.editDir).find((name) => name.endsWith('.txt')));
+  return path.join(paths.editDir, fs.readdirSync(paths.editDir).find((name) => name.endsWith('.env')));
 }
 
 function editFiles(paths) {
-  try { return fs.readdirSync(paths.editDir).filter((name) => name.endsWith('.txt')); } catch { return []; }
+  try { return fs.readdirSync(paths.editDir).filter((name) => name.endsWith('.env')); } catch { return []; }
 }
 
 // The lines of an edit file below its header.
@@ -116,7 +116,7 @@ test('edit shows real values; a save changes, adds and removes keys, and done re
   const { run, paths, store, helpers } = harness(t, { values: { X1_TEST_KEPT_KEY: kept, X1_TEST_CHANGED_KEY: old, X1_TEST_GONE_KEY: gone } });
   const opened = await run('edit');
   assert.equal(opened.code, 0);
-  assert.match(opened.stdout, /Opened ~\/\.ai-agent-toolkit\/env\/edit\/env-edit-[0-9a-f]{16}\.txt with your 3 keys/);
+  assert.match(opened.stdout, /Opened ~\/\.ai-agent-toolkit\/env\/edit\/env-edit-[0-9a-f]{16}\.env with your 3 keys/);
   const file = editFile(paths);
   assert.deepEqual(helpers, [file], 'the helper gets the file path only');
   const text = fs.readFileSync(file, 'utf8');
@@ -937,7 +937,7 @@ test('no-leak: a value typed where a name, command, program or option belongs is
 
 test('the editor starts by its full path, so a program in the working folder is never picked up', () => {
   const { editorCommand } = require('../scripts/toolkit-env.cjs');
-  assert.deepEqual(editorCommand('C:\\x\\f.txt', 'win32', { SystemRoot: 'C:\\Windows' }), ['C:\\Windows\\System32\\notepad.exe', ['C:\\x\\f.txt']]);
+  assert.deepEqual(editorCommand('C:\\x\\f.env', 'win32', { SystemRoot: 'C:\\Windows' }), ['C:\\Windows\\System32\\notepad.exe', ['C:\\x\\f.env']]);
   assert.throws(() => editorCommand('/x/f.txt', 'linux', {}), /supports Windows only; this computer runs linux/);
 });
 
@@ -1267,6 +1267,44 @@ test('an edit file of an earlier version is wiped, never applied', async (t) => 
   assert.notEqual(store.peek('X1_TEST_KEPT_KEY'), '<unchanged>');
 });
 
+test('a .txt edit file with a current-style id is from an earlier version: wiped, never applied', async (t) => {
+  const { run, paths, store } = harness(t, { values: { X1_TEST_KEPT_KEY: sentinel() } });
+  await run('edit');
+  const earlier = path.join(paths.editDir, 'env-edit-0123456789abcdef.txt');
+  fs.writeFileSync(earlier, `X1_TEST_OTHER_KEY=${sentinel()}\n`);
+  const result = await run('apply');
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /Deleted 1 edit file from an earlier Toolkit version; nothing in it was saved\./);
+  assert.doesNotMatch(result.stdout, /older Notepad tab/);
+  assert.equal(fs.existsSync(earlier), false);
+  assert.equal(store.peek('X1_TEST_OTHER_KEY'), undefined);
+});
+
+test('an update in the middle of an edit: done reports the saves already applied and stores nothing from the .txt file', async (t) => {
+  const { run, env, paths, store } = harness(t, { values: { X1_TEST_KEPT_KEY: sentinel() } });
+  await run('edit');
+  // What the earlier version leaves: its session, its .txt edit file, the names its helper saved and its helper's lock.
+  const { id } = editState(paths);
+  const earlier = path.join(paths.editDir, `env-edit-${id}.txt`);
+  fs.renameSync(editFile(paths), earlier);
+  fs.appendFileSync(earlier, `X1_TEST_UNSAVED_KEY=${sentinel()}\n`);
+  fs.writeFileSync(path.join(paths.editDir, 'last-result.json'), JSON.stringify({ changed: [], added: ['X1_TEST_SAVED_KEY'], removed: [], notes: [] }));
+  fs.writeFileSync(path.join(paths.editDir, 'watch.lock'), JSON.stringify({ id, pid: 999999 }));
+  const before = store.writes;
+  const result = await run('apply');
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /Deleted 1 edit file from an earlier Toolkit version; saves already applied from it are listed with your other saves, and nothing else in it was saved\./);
+  assert.doesNotMatch(result.stdout, /nothing in it was saved/);
+  assert.match(result.stdout, /^Saved, added: X1_TEST_SAVED_KEY$/m);
+  assert.equal(fs.existsSync(earlier), false);
+  assert.equal(fs.existsSync(path.join(paths.editDir, 'session.json')), false);
+  assert.equal(store.peek('X1_TEST_UNSAVED_KEY'), undefined);
+  assert.equal(store.writes, before, 'nothing from the .txt file is stored');
+  // The next edit gets its own helper although the earlier helper's lock is still there.
+  await run('edit');
+  assert.equal(env.editWatcher(editFile(paths), { pid: 801, alive: () => true }).start(), true);
+});
+
 test('apply says plainly when the edit file was saved as UTF-16', async (t) => {
   const { run, paths, store } = harness(t, { values: { X1_TEST_KEPT_KEY: sentinel() } });
   await run('edit');
@@ -1363,11 +1401,14 @@ test('one helper per edit: a second helper for the same file stops, and an older
   assert.equal(h.env.editWatcher(file, { pid: 204, alive: () => true }).start(), false, 'no helper for a file that is not the open edit');
 });
 
-test('the helper only follows an edit file in the edit folder', (t) => {
+test('the helper only follows an edit file in the edit folder', async (t) => {
   const h = harness(t, { values: { X1_TEST_KEPT_KEY: sentinel() } });
-  for (const file of [path.join(h.home, 'env-edit-0123456789abcdef.txt'), path.join(h.paths.editDir, 'session.json'), path.join(h.paths.editDir, 'other.txt'), '']) {
+  await h.run('edit');
+  const { id } = editState(h.paths);
+  for (const file of [path.join(h.home, `env-edit-${id}.env`), path.join(h.paths.editDir, `env-edit-${id}.txt`), path.join(h.paths.editDir, 'session.json'), path.join(h.paths.editDir, 'other.txt'), '']) {
     assert.throws(() => h.env.editWatcher(file), /watch only follows a Toolkit env edit file in its own folder/);
   }
+  assert.equal(h.env.editWatcher(path.join(h.paths.editDir, `env-edit-${id}.env`), { pid: 701, alive: () => true }).start(), true);
 });
 
 test('the real helper starts as `watch <file>` with no other arguments, no window and no output', () => {
@@ -1592,7 +1633,7 @@ test('edit closure matrix: every state and event ends as the plan says', async (
     else if (event === 'done') result = await h.run('apply');
     else {
       if (event === 'set elsewhere then save') { clock.ms += 1000; await h.run('set', 'X1_TEST_KEPT_KEY'); clock.ms += 1000; }
-      const file = path.join(h.paths.editDir, `env-edit-${editState(h.paths).id}.txt`);
+      const file = path.join(h.paths.editDir, `env-edit-${editState(h.paths).id}.env`);
       const watcher = h.env.editWatcher(file, { pid: 501, alive: () => true });
       watcher.start();
       save(file, `${fs.readFileSync(file, 'utf8')}${event === 'bad save' ? 'not a line' : `X1_TEST_ADDED_KEY=${added}`}\n`);
