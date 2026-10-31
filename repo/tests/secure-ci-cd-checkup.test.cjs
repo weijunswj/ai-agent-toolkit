@@ -539,3 +539,16 @@ test('hygiene: path filters are found in flow style and at any indentation', () 
   const pushOnly = WORKFLOW('pytest').replace("  push:\n    branches: [main]\n", "  push:\n    paths: ['src/**']\n");
   for (const [text, want] of [[flow, true], [deep, true], [fullyFlow, true], [fullyFlowPush, false], [pushOnly, false]]) assert.equal(checkup.parseWorkflow('.github/workflows/ci.yml', text).prPathFilters, want, text);
 });
+
+test('parts: a repository with no workflow gets one no-CI item, not one per file', () => {
+  const items = report({
+    'package.json': JSON.stringify({ scripts: { test: 'node --test' } }),
+    'tests/a.test.js': '',
+    'tests/b.test.js': '',
+    'scripts/tool.js': '',
+  });
+  const coverage = items.filter((e) => /^(parts|tests|scripts)\./.test(e.check));
+  assert.deepEqual(coverage.map((e) => [e.level, e.check, e.path]), [['GAP', 'parts.no-ci', '.github/workflows']]);
+  assert.match(coverage[0].message, /1 parts, 2 test files or folders and 1 scripts/);
+  assert.deepEqual(report({ 'README.md': '# Notes\n' }).filter((e) => e.check === 'parts.no-ci'), [], 'nothing to run: no item');
+});

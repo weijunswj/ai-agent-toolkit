@@ -65,6 +65,7 @@ const MANIFEST_TOOLS = Object.freeze({
 const PACKAGE_SCRIPTS = Object.freeze(['test', 'lint', 'build', 'typecheck']);
 const PM_BUILTINS = new Set(['install', 'i', 'ci', 'add', 'remove', 'rm', 'uninstall', 'exec', 'dlx', 'x', 'npx', 'audit', 'publish', 'pack', 'link', 'init', 'create', 'outdated', 'update', 'up', 'upgrade', 'config', 'set', 'cache', 'why', 'list', 'ls', 'version', 'help', 'login', 'whoami', 'prune', 'dedupe', 'rebuild', 'fetch', 'store', 'import', 'workspace', 'workspaces', 'env', 'setup', 'self-update']);
 const CHECKS = Object.freeze({
+  'parts.no-ci': 'a repository with code or tests and no CI workflow',
   'parts.package-script': 'a package test, lint, build or typecheck script no CI step runs',
   'parts.manifest': 'a package manifest no CI step builds or tests',
   'parts.docker': 'a Dockerfile or compose build no CI step builds',
@@ -937,10 +938,15 @@ function checkup(root, options = {}) {
   const workflows = fileList.filter((rel) => /^\.github\/workflows\/[^/]+\.ya?ml$/.test(rel)).map((rel) => parseWorkflow(rel, readText(root, rel)));
   const analysis = reachAnalysis(root, fileList, workflows);
   const reachable = makeReachTest(analysis);
+  // With no workflow at all every part, test and script would be listed one by one; one item
+  // says so instead, with the counts.
+  let coverage = [...checkParts(root, fileList, workflows, analysis, reachable), ...checkTests(fileList, reachable), ...checkScripts(root, fileList, analysis)];
+  if (!workflows.length && coverage.length) {
+    const count = (area) => coverage.filter((entry) => entry.check.startsWith(`${area}.`)).length;
+    coverage = [item('GAP', 'parts.no-ci', '.github/workflows', `there is no CI workflow, so nothing here runs in CI (${count('parts')} parts, ${count('tests')} test files or folders and ${count('scripts')} scripts would be listed)`, 'add a workflow that builds and tests the repository, or ignore parts.no-ci with a reason if it needs no CI')];
+  }
   let items = [
-    ...checkParts(root, fileList, workflows, analysis, reachable),
-    ...checkTests(fileList, reachable),
-    ...checkScripts(root, fileList, analysis),
+    ...coverage,
     ...checkSpeed(root, fileList, workflows, analysis, settings, opts),
     ...checkHygiene(fileList, workflows, root, opts.requiredChecks !== undefined ? opts.requiredChecks : (opts.github ? requiredChecksFor(root, tools) : null)),
     ...checkStatusDoc(root, fileList, workflows, settings),
