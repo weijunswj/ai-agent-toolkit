@@ -1,0 +1,40 @@
+{
+  "schema": "ai-agent-toolkit.host-qualification.v1",
+  "host": "codex",
+  "purpose": "Stored native results for the Codex helper route (main session to named helper). Native rows are real launches on the owner's computer; hook rows run the installed hook process with crafted events. Nothing reads this file yet; the install check reads only the Claude Code file.",
+  "runs": [
+    {
+      "codex_version": "0.166.0-alpha.5.1",
+      "codex_cli_version": "0.164.0",
+      "client": "Codex Desktop",
+      "multi_agent_mode": "V2 (multi_agent_v2) in the Desktop session; the CLI config resolves to V1 (multi_agent)",
+      "platform": "win32",
+      "plugin_mode": "installed",
+      "installed_toolkit_version": "3.23.0",
+      "stack": "owner-gpt",
+      "date": "2026-10-31",
+      "toolkit_commit": "2a15dd4",
+      "native_cases": [
+        { "id": "positive-g1-helper", "expected": "toolkit-g1-helper launches with no route fields and serves the pinned route", "observed": "served gpt-6-luna at max effort in the child session log, matching the rendered helper file", "pass": true },
+        { "id": "negative-built-in-agent", "expected": "the hook refuses the built-in explorer agent", "observed": "refused: only toolkit-g0-helper and toolkit-g1-helper are allowed", "pass": true },
+        { "id": "negative-model-override", "expected": "the hook refuses a helper launch with a model field", "observed": "refused: helper launches cannot override the model", "pass": true }
+      ],
+      "hook_cases": 25,
+      "hook_cases_passed": 23,
+      "hook_not_passed": ["24-unbound-collaborationspawn_agent-held", "24-unbound-multi-agentspawn_agent-held"],
+      "hook_not_passed_reason": "Stale runner case: it expected an unbound named-helper launch to be refused, but the main session may launch a Toolkit helper on its installed route, so admission is correct. The case is corrected in the runner; the corrected runner passes 27 of 27 on Linux.",
+      "runner": "repo/tests/qualification/codex-native-helper.live.cjs",
+      "evidence": "TRANSPORT archives/TK-A7F2/codex-qualification-20261031/"
+    }
+  ],
+  "known_limits": [
+    {
+      "row": "hook-failure",
+      "summary": "Codex does not block when a hook cannot start, crashes, times out, or is missing, disabled or untrusted, so the helper guard fails open in those cases. On Windows the PowerShell launcher denies a helper launch when it cannot start Node."
+    },
+    {
+      "row": "depth",
+      "summary": "Codex sends hooks no caller-agent identity, so a helper that launches another helper cannot be refused; leaf depth stays an instruction."
+    }
+  ]
+}
