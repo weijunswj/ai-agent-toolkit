@@ -372,3 +372,25 @@ test('Projects catches up a moved task through its home thread and never fire_tr
   assert.match(setup, /^RUN SETUP \(\{\{project\}\} project, Toolkit base layer\)\n- First check, before anything else: [^\n]*Make no other tool call \(no effort call, message, file write, resolve or retry\) and skip every later step, DELIVERY included: end the turn with the single line "skipped: started outside its home thread"\.\n/);
   assert.match(text, /Never catch up a task whose entry says `stopped by owner`\./);
 });
+
+// The coordinator once held an unrelated PR behind another and left lanes idle; the skill and the
+// block both carry the never-hold rule and the lane cap, since the coordinator reads only the block.
+test('independent lanes run side by side under the owner\'s lane cap', () => {
+  const text = read(SKILL_REL);
+  const lanes = text.split('\n').find(line => line.startsWith('- **Run independent lanes side by side.**'));
+  assert.ok(lanes, 'Keep moving carries the lanes bullet');
+  assert.ok(text.indexOf(lanes) > text.indexOf('## Keep moving') && text.indexOf(lanes) < text.indexOf('## Threads'));
+  for (const phrase of ['Never hold a ready or working PR for another PR', 'Only merges land one at a time',
+    'at most 3 lanes actively working, of any type', 'unless the owner sets another number', 'no per-type limit',
+    'open one extra lane for it alone', 'Queued or coordinator-started work never takes that extra lane',
+    'usage-pacing rule', 'counts toward the cap']) {
+    assert.ok(lanes.includes(phrase), phrase);
+  }
+  const block = read('repo/contracts/claude-projects/web-controller-projects/project-instructions.md');
+  const line = block.split('\n').find(entry => entry.startsWith('- Lanes:'));
+  assert.ok(line, 'the block carries the lanes line');
+  for (const phrase of ['never holding one for another', 'at most 3 working lanes of any type',
+    'unless the owner sets another cap', 'a 4th lane only for one needing thread work', 'usage pacing']) {
+    assert.ok(line.includes(phrase), phrase);
+  }
+});

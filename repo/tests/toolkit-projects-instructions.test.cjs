@@ -127,7 +127,7 @@ test('--place keeps only real edits of a block written from an older version', t
 test('overlap hint flags repeated project lines and stays quiet on deduped fixtures', t => {
   const fixtures = path.join(ROOT, 'repo/tests/fixtures/projects-dedupe');
   const withBlock = name => `${owner().render()}\n\n${fs.readFileSync(path.join(fixtures, name), 'utf8')}`;
-  check(t, withBlock('repo-project-before.md'), 'current', 1, [], 'overlaps: 2 (line 27 ~ block line 3; line 29 ~ block line 1)\n');
+  check(t, withBlock('repo-project-before.md'), 'current', 1, [], 'overlaps: 2 (line 28 ~ block line 3; line 30 ~ block line 1)\n');
   for (const name of ['repo-project-expected.md', 'no-repo-project-before.md', 'no-repo-project-expected.md']) {
     check(t, withBlock(name), 'current', 0);
   }
@@ -140,9 +140,9 @@ test('overlap hint flags repeated project lines and stays quiet on deduped fixtu
   for (const kept of ['local first', 'CUSTODY_PENDING', 'SSH to real servers', 'one-line ELI5']) assert.ok(noRepo.includes(kept), kept);
   // A copy of a block line is flagged; declining the dedupe for this version silences it.
   const copy = `${owner().render()}\n\n${owner().expectedBlock().body.split('\n')[4]}\n`;
-  check(t, copy, 'current', 1, [], 'overlaps: 1 (line 25 ~ block line 5)\n');
+  check(t, copy, 'current', 1, [], 'overlaps: 1 (line 26 ~ block line 5)\n');
   check(t, copy, 'current', 0, ['--declined-dedupe', owner().expectedBlock().version]);
-  check(t, copy, 'current', 1, ['--declined-dedupe', '0.0.0'], 'overlaps: 1 (line 25 ~ block line 5)\n');
+  check(t, copy, 'current', 1, ['--declined-dedupe', '0.0.0'], 'overlaps: 1 (line 26 ~ block line 5)\n');
   // Overlaps add to a worse state without changing it; malformed never reports overlaps.
   check(t, `${copy}\n${owner().render()}`, 'malformed', 2);
 });
@@ -218,10 +218,12 @@ test('owner reads only injected source/version dependencies and rejects malforme
 
 // The cap rose from 4000 when the post rules moved into the block: the Projects coordinator does not
 // load the skill, so the block is the one place they reach it. It rose to 5600 for the guidebook
-// line, the one line that points the coordinator at the full skill in the project library.
-test('source body, measured without the two marker lines, stays under 5600 CRLF bytes and contains no marker lines or front matter', () => {
+// line, the one line that points the coordinator at the full skill in the project library, then to
+// 5850 for the lanes line: the coordinator does not load the skill, so the cap and the never-hold rule
+// must sit in the block.
+test('source body, measured without the two marker lines, stays under 5850 CRLF bytes and contains no marker lines or front matter', () => {
   const text = fs.readFileSync(BODY, 'utf8').replace(/\r\n/g, '\n');
-  assert.ok(Buffer.byteLength(text.replace(/\n/g, '\r\n')) < 5600);
+  assert.ok(Buffer.byteLength(text.replace(/\n/g, '\r\n')) < 5850);
   assert.match(text, /^- Roles:/);
   assert.doesNotMatch(text, /AI-AGENT-TOOLKIT:|^---$/m);
   assert.deepEqual(findBlocks(text), { blocks: [], errors: [] });
