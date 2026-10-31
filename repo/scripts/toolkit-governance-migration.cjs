@@ -13,7 +13,9 @@
 // origin remote are skipped.
 //
 // Afterwards, ENABLED GitHub repositories without the no-force-push ruleset are listed and the
-// ruleset is added only after a second typed yes in the same run. Then ENABLED GitHub repositories
+// ruleset is added only after a second typed yes in the same run; one whose merged binding keeps
+// programme state on the public state branch is then offered a ruleset that stops that branch being
+// deleted, after its own typed yes. Then ENABLED GitHub repositories
 // whose default branch does not require the binding's checks, or allows squash or rebase merges,
 // are listed, and Toolkit's own default-branch ruleset (toolkit-governance-protection.cjs) is
 // created or updated only after a third typed yes. Toolkit never edits a ruleset or branch
@@ -112,15 +114,16 @@ function parseAnswer(answer, rows) {
 }
 
 class GovernanceMigration {
-  #stdout; #ask; #interactive; #registryOptions; #rulesetReader; #rulesetCreator; #protectionReader; #protectionWriter; #securityReader; #securityWriter; #securityFileWriter; #now;
+  #stdout; #ask; #interactive; #registryOptions; #rulesetReader; #rulesetCreator; #stateRulesetCreator; #protectionReader; #protectionWriter; #securityReader; #securityWriter; #securityFileWriter; #now;
 
-  constructor({ stdout, ask, interactive, registryOptions = {}, rulesetReader = null, rulesetCreator = null, protectionReader = null, protectionWriter = null, securityReader = null, securityWriter = null, securityFileWriter = null, now = () => new Date() }) {
+  constructor({ stdout, ask, interactive, registryOptions = {}, rulesetReader = null, rulesetCreator = null, stateRulesetCreator = null, protectionReader = null, protectionWriter = null, securityReader = null, securityWriter = null, securityFileWriter = null, now = () => new Date() }) {
     this.#stdout = stdout;
     this.#ask = ask;
     this.#interactive = interactive === true;
     this.#registryOptions = registryOptions;
     this.#rulesetReader = rulesetReader;
     this.#rulesetCreator = rulesetCreator || ruleset.ghRulesetCreator;
+    this.#stateRulesetCreator = stateRulesetCreator || ruleset.ghKeepStateRulesetCreator;
     this.#protectionReader = protectionReader;
     this.#protectionWriter = protectionWriter || protection.ghProtectionRulesetWriter;
     this.#securityReader = securityReader;
@@ -164,7 +167,7 @@ class GovernanceMigration {
     }
     const after = rows.map(row => ({ ...row, state: governance.governanceState(row.root, this.#registryOptions) }));
     this.#reportMaterials(after);
-    const rulesets = await this.#offerRulesets(after);
+    const rulesets = [...await this.#offerRulesets(after), ...await this.#offerStateRulesets(after)];
     const protections = await this.#offerProtection(after);
     const securities = await this.#applySecurity(after);
     if (written.length || rulesets.length || protections.length || securities.length) this.#writeRecord(written, rulesets, protections, securities);
@@ -248,6 +251,37 @@ class GovernanceMigration {
       const ok = verified && verified.status === 'present';
       this.#say(`- ${row.slug}: ${ok ? 'ruleset added and read back' : `not added (${created && created.reason ? created.reason : 'read-back did not find it'})`}.`);
       results.push({ repository_id: row.state.repository_id, result: ok ? 'added' : 'failed' });
+    }
+    return results;
+  }
+
+  // Repositories whose merged binding keeps programme state on the public state branch get a second
+  // ruleset that stops anyone deleting that branch, after its own typed yes.
+  async #offerStateRulesets(rows) {
+    const reader = this.#rulesetReader ? { reader: this.#rulesetReader } : {};
+    const missing = [];
+    for (const row of rows.filter(entry => entry.state.state === 'ENABLED')) {
+      const binding = governance.mergedBinding(row.root, this.#registryOptions);
+      if (!binding || !binding.state) continue;
+      const result = ruleset.keepStateRuleset(row.root, reader);
+      if (result.status === 'missing') missing.push(row);
+      else if (result.status === 'not-enforceable') this.#say(`${row.root}: GitHub cannot enforce a ruleset that keeps the programme state branch here (private repository on GitHub Free); the branch's checkpoint and restore are the fallback.`);
+      else if (result.status === 'unverified') this.#say(`${row.root}: the ruleset that keeps the programme state branch could not be checked (${result.reason}).`);
+    }
+    if (missing.length === 0) return [];
+    this.#say(['These governed GitHub repositories keep programme state on the branch ' + ruleset.STATE_BRANCH + ', and nothing stops it being deleted:', ...missing.map(row => `- ${row.slug} (${row.root})`)]);
+    const answer = String(await this.#ask(`Add a "${ruleset.KEEP_STATE_RULESET_NAME}" ruleset (that branch only, no deletion, no bypass) to these ${missing.length} repositories on GitHub? Type yes to confirm: `) || '').trim().toLowerCase();
+    if (answer !== 'yes') {
+      this.#say('Programme state rulesets not added.');
+      return [];
+    }
+    const results = [];
+    for (const row of missing) {
+      const created = this.#stateRulesetCreator(row.slug);
+      const verified = created && created.ok ? ruleset.keepStateRuleset(row.root, reader) : null;
+      const ok = verified && verified.status === 'present';
+      this.#say(`- ${row.slug}: ${ok ? 'programme state ruleset added and read back' : `not added (${created && created.reason ? created.reason : 'read-back did not find it'})`}.`);
+      results.push({ repository_id: row.state.repository_id, ruleset: 'keep-programme-state', result: ok ? 'added' : 'failed' });
     }
     return results;
   }

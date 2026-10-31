@@ -154,7 +154,7 @@ const SHAPES = {
 
 function checkShape(errors, value, shape, at) {
   if (!isObject(value)) return;
-  const { all, optional: notRequired = [] } = SHAPES[shape];
+  const { all, optional: notRequired = [] } = typeof shape === 'string' ? SHAPES[shape] : shape;
   const unknown = Object.keys(value).filter(key => !all.includes(key));
   if (unknown.length) errors.push(`${at} has unknown field(s): ${unknown.join(', ')}`);
   const missing = all.filter(key => !notRequired.includes(key) && !Object.hasOwn(value, key));
@@ -589,6 +589,7 @@ function validateBinding(binding) {
     if (v2) {
       const unknown = Object.keys(binding).filter(key => !BINDING_V2_KEYS.includes(key));
       check(errors, unknown.length === 0, `${unknown.join(', ')} ${unknown.length === 1 ? 'is' : 'are'} not a version 2 binding key`);
+      if (binding.state !== undefined) validateStateBlock(errors, binding);
       check(errors, ['enabled', 'disabled'].includes(binding.governance), 'governance must be enabled or disabled');
       enabled = binding.governance === 'enabled';
       for (const key of ['parent_issue', 'record_prefix', 'writer_prefix']) check(errors, binding[key] === undefined, `${key} belongs to v1; v2 lists parents`);
@@ -650,7 +651,21 @@ function validateBinding(binding) {
 }
 
 // The keys a version 2 binding may carry (binding-v2.schema.json); anything else makes it invalid.
-const BINDING_V2_KEYS = Object.freeze(['schema', 'repository', 'governance', 'parents', 'store', 'required_checks', 'paid_security', 'dependency_updates', 'task_prs', 'projection', 'schedule_folder']);
+const BINDING_V2_KEYS = Object.freeze(['schema', 'repository', 'governance', 'parents', 'store', 'required_checks', 'paid_security', 'dependency_updates', 'task_prs', 'projection', 'schedule_folder', 'state']);
+
+// The public state branch of a version 2 binding: always this branch and folder on the bound
+// repository itself, and only beside a private store, which keeps the journals, the private sidecars
+// and the checkpoint. A version 1 binding never reads it.
+const STATE_BRANCH = 'DO-NOT-DELETE-IF-TOOLKIT-GOVERNANCE-IS-ENABLED';
+const STATE_PATH = 'state/';
+function validateStateBlock(errors, binding) {
+  const block = binding.state;
+  check(errors, isObject(block) && Object.keys(block).every(key => ['kind', 'branch', 'path'].includes(key)), 'state may hold only kind, branch and path');
+  check(errors, isObject(block) && Object.hasOwn(STATE_BACKENDS, block.kind), `state.kind must be ${Object.keys(STATE_BACKENDS).join(' or ')}`);
+  check(errors, isObject(block) && block.branch === STATE_BRANCH, `state.branch must be ${STATE_BRANCH}`);
+  check(errors, isObject(block) && block.path === STATE_PATH, `state.path must be ${STATE_PATH}`);
+  check(errors, isObject(binding.store), 'state needs store: the private store keeps the journals, the private sidecars and the checkpoint');
+}
 
 // Whether a valid binding turns governance on: v1 always, v2 when `governance` is enabled.
 function bindingEnabled(binding) {
@@ -708,8 +723,28 @@ function newChild({ repository, outcome }) {
 // The writer may change this document: its own holder, or (for a child) the parent's holder.
 // The fence orders cooperating Toolkit writers that act as the same GitHub account; it does not
 // authenticate anyone.
+// A refresh writer (refreshWriter) acts by the stored hash of the holder's session; nothing else may.
 function isHolder(doc, writer) {
-  return Boolean(writer && doc?.fence?.holder_session) && doc.fence.holder_session === writer.session && doc.fence.holder_prefix === writer.prefix;
+  if (!writer || !doc?.fence?.holder_session || doc.fence.holder_prefix !== writer.prefix) return false;
+  if (writer.by_hash === true) return SESSION_HASH.test(String(writer.session_hash || '')) && sessionHashOf(doc.fence.holder_session) === writer.session_hash;
+  return doc.fence.holder_session === writer.session;
+}
+
+// Decisions (claims, verdicts, acceptance records, answers to findings) need the holder's own session.
+const isDecisionHolder = (doc, writer) => writer?.by_hash !== true && isHolder(doc, writer);
+
+// The hash journal names and public state use for a session ID. programme-checkpoint.cjs owns it; it
+// is loaded on first use, so this module adds nothing to what a hook loads.
+function sessionHashOf(sessionId) {
+  return require('./programme-checkpoint.cjs').sessionHash(sessionId);
+}
+
+// The writer `refresh` uses: the parent's current holder, named only by the hash of its session. It
+// may bring documents in line with what is recorded and observed, never decide.
+function refreshWriter(parentDoc) {
+  const { holder_session: session, holder_prefix: prefix } = parentDoc?.fence || {};
+  if (!session || !prefix) return null;
+  return { by_hash: true, session_hash: sessionHashOf(session), prefix };
 }
 
 function holderDescription(doc, kind = doc?.schema === SCHEMA.parent ? 'parent' : 'child', parentDoc = null) {
@@ -727,7 +762,7 @@ function parentRefusal(doc) {
 }
 
 function authoriseWrite(kind, doc, parentDoc, writer) {
-  if (!writer || !isText(writer.session) || !PREFIX.test(String(writer.prefix || ''))) {
+  if (!writer || !(writer.by_hash === true ? SESSION_HASH.test(String(writer.session_hash || '')) : isText(writer.session)) || !PREFIX.test(String(writer.prefix || ''))) {
     throw new ProgrammeError('WRITER_UNKNOWN', 'This write needs --session <this session\'s own id> and a record prefix.');
   }
   if (kind === 'parent') {
@@ -742,6 +777,7 @@ function authoriseWrite(kind, doc, parentDoc, writer) {
 // Claim or take over a document's fence: one compare-and-swap that increments the epoch and records
 // the holder. Gates are not claimed; the controller assigns them (assignGate).
 function claimDocument(doc, writer, { takeover = false, parentDoc = null } = {}) {
+  if (writer?.by_hash === true) throw new ProgrammeError('ROLE_REFUSED', 'A refresh acts by the stored holder hash and never claims a document.');
   const next = clone(doc);
   const held = Boolean(next.fence.holder_session);
   if (isHolder(next, writer)) return null;
@@ -756,6 +792,7 @@ function claimDocument(doc, writer, { takeover = false, parentDoc = null } = {})
 
 // A lane controller takes the fence of a child the catalogue delegates to its record prefix.
 function claimLane(doc, writer, outcome, { takeover = false } = {}) {
+  if (writer?.by_hash === true) throw new ProgrammeError('ROLE_REFUSED', 'A refresh acts by the stored holder hash and never claims a document.');
   if (!outcome?.owner_prefix || outcome.owner_prefix !== writer.prefix) {
     throw new ProgrammeError('NOT_DELEGATED', `#${doc.issue} is not delegated to ${writer.prefix}; the catalogue names ${outcome?.owner_prefix || 'no lane'} for it. Report to the controller.`);
   }
@@ -915,7 +952,7 @@ function recordReturn(doc, { returnId, assignment, atHead = null, mode = 'toolki
 // G1 acceptance needs a G2 review PASSED at the live PR head (`liveHead`, else the recorded PR head).
 function consumeReturn(doc, { returnId, verdict, writer = null, parentDoc = null, liveHead = undefined }) {
   if (!VERDICTS.includes(verdict)) throw new ProgrammeError('USAGE', '--verdict must be ACCEPT, REOPEN or WAITING_OWNER.');
-  if (!isHolder(parentDoc, writer)) throw new ProgrammeError('ROLE_REFUSED', 'Only the holder of the parent document (the controller) consumes a gate return.');
+  if (!isDecisionHolder(parentDoc, writer)) throw new ProgrammeError('ROLE_REFUSED', 'Only the holder of the parent document (the controller) consumes a gate return.');
   const next = clone(doc);
   const entry = next.gate.returns.find(item => item.return_id === returnId);
   if (!entry) throw new ProgrammeError('RETURN_UNKNOWN', `No return ${returnId} on issue ${next.issue}.`);
@@ -1025,7 +1062,7 @@ function applyPatch(kind, doc, patch, { writer = null, parentDoc = null } = {}) 
   const allowed = kind === 'parent' ? PATCHABLE_PARENT_FIELDS : PATCHABLE_CHILD_FIELDS;
   const refused = Object.keys(patch).filter(key => !allowed.includes(key));
   if (refused.length) throw new ProgrammeError('PATCH_REFUSED', `These fields cannot be patched: ${refused.join(', ')}. Allowed: ${allowed.join(', ')}.`);
-  if (kind === 'child' && !isHolder(parentDoc, writer)) {
+  if (kind === 'child' && !isDecisionHolder(parentDoc, writer)) {
     const records = Object.keys(patch).filter(key => CONTROLLER_CHILD_FIELDS.includes(key));
     const terminal = Object.hasOwn(patch, 'lifecycle') && (TERMINAL_LIFECYCLES.includes(patch.lifecycle) || TERMINAL_LIFECYCLES.includes(doc.lifecycle));
     if (records.length || terminal) {
@@ -1750,7 +1787,14 @@ class StateStore {
     let doc;
     try { doc = JSON.parse(Buffer.from(response.json.content, 'base64').toString('utf8')); }
     catch { throw new ProgrammeError('STATE_INVALID', `${docPath} is not valid JSON.`); }
-    return { doc: assertValid(kind, doc), sha: response.json.sha };
+    return { doc: this.validateRead(kind, doc), sha: response.json.sha };
+  }
+
+  // State documents and journals, or a public state branch's sidecars and checkpoint.
+  validateRead(kind, doc) {
+    if (kind === 'sidecar') return assertSidecar(doc);
+    if (kind === 'checkpoint') return assertCheckpoint(doc);
+    return assertValid(kind, doc);
   }
 
   // PUT with compare-and-swap, then read back. A stale sha (409) or a create over an existing file
@@ -1774,6 +1818,7 @@ class StateStore {
       throw new ProgrammeError('STATE_READBACK_MISMATCH', `${docPath} did not read back as written.`);
     }
     this.ownWrites.set(docPath, { replaced: sha || null, doc: clone(readback.doc), sha: blob });
+    this.lastCommit = commit;
     return { outcome: 'WRITTEN', doc: readback.doc, sha: blob };
   }
 
@@ -1862,6 +1907,537 @@ class StateStore {
 // State store backends by binding `store.kind`. Another backend joins here with the same read,
 // write and mutate contract (compare-and-swap, readback, no write for unchanged state).
 const STORE_BACKENDS = Object.freeze({ github: StateStore });
+
+// ---------------------------------------------------------------------------------------------
+// The public state branch (binding `state`)
+//
+// With `state` in the merged binding, parent and child documents live on the bound repository itself,
+// on STATE_BRANCH under STATE_PATH, as public views: no `private` part, no gate route, and sessions
+// only as hashes. Everything else stays in the private store: the journals (unchanged), one private
+// sidecar per written revision (the whole document, joined to the public bytes by revision and
+// digest) and the checkpoint (the branch head and each file's digest), which tells a deleted branch
+// from one never created and drives its restore. A local copy of the checkpoint is kept too, so a
+// missing store checkpoint holds instead of reading as "never created". Nothing here runs from a hook:
+// detection and restore run inside the store's read path, from a command or `refresh`.
+
+const STATE_SCHEMA = Object.freeze({ sidecar: 'toolkit.programme-state-sidecar.v1', checkpoint: 'toolkit.programme-state-checkpoint.v1' });
+const SHA256 = /^[0-9a-f]{64}$/;
+const DOC_NAME = /^(?:parent|issue)-[1-9][0-9]*$/;
+// Sidecars of this many revisions back per document are kept.
+const SIDECAR_KEEP = 20;
+// A session ID shape (the hosts' UUIDs); never public, whatever field carries it.
+const SESSION_ID_SHAPE = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i;
+// Something that reads as a host name: three dotted labels ending in letters.
+const HOST_LIKE = /\b[A-Za-z0-9-]+\.[A-Za-z0-9-]+\.[A-Za-z]{2,}\b/;
+const PUBLIC_SHAPES = Object.freeze({
+  parent: { all: SHAPES.parent.all.filter(key => key !== 'private'), optional: SHAPES.parent.optional },
+  child: { all: SHAPES.child.all.filter(key => key !== 'private'), optional: SHAPES.child.optional },
+  fence: { all: ['epoch', 'holder_prefix', 'holder_session_hash'] },
+  gate: { all: ['role', 'state', 'session_hash', 'assignment', 'returns'], optional: ['assignment'] },
+  volatile: { all: ['written_at', 'toolkit'], optional: ['written_at', 'toolkit'] },
+});
+
+const documentName = (kind, number) => `${kind === 'parent' ? 'parent' : 'issue'}-${number}`;
+const kindOfName = name => (name.startsWith('parent-') ? 'parent' : 'child');
+const commitLine = text => `${text} [skip ci]`;
+
+function stateInvalid(what, errors) {
+  return new ProgrammeError('STATE_INVALID', `${what} is not public-safe: ${errors[0]}`, { errors });
+}
+
+// Free text a person or the controller writes. It may not carry a path, address, host, mention or
+// session ID; the render limits and the secret screen still apply.
+function freeTextFields(kind, doc) {
+  if (kind === 'parent') {
+    return [['release_plan.record', doc.release_plan?.record],
+      ...(Array.isArray(doc.outcomes) ? doc.outcomes : []).flatMap((outcome, index) => ['label', 'name', 'description', 'lane'].map(field => [`outcomes[${index}].${field}`, outcome?.[field]]))];
+  }
+  return [['release', doc.release], ['next_action', doc.next_action],
+    ...(Array.isArray(doc.blockers) ? doc.blockers : []).map((value, index) => [`blockers[${index}]`, value]),
+    ...(Array.isArray(doc.review?.verdicts) ? doc.review.verdicts : []).map((verdict, index) => [`review.verdicts[${index}].reviewer`, verdict?.reviewer])];
+}
+
+function everyString(value, at, visit) {
+  if (typeof value === 'string') visit(value, at);
+  else if (Array.isArray(value)) value.forEach((entry, index) => everyString(entry, `${at}[${index}]`, visit));
+  else if (isObject(value)) for (const [key, entry] of Object.entries(value)) { visit(key, `${at} key`); everyString(entry, `${at}.${key}`, visit); }
+}
+
+// The public view of a document as the branch holds it: closed keys, hashes for sessions, and only
+// public-safe text. Returns the error list; every read and write of the branch runs it.
+function publicErrors(kind, doc) {
+  const errors = [];
+  if (!isObject(doc)) return ['the document must be an object'];
+  checkShape(errors, doc, PUBLIC_SHAPES[kind], 'document');
+  checkShape(errors, doc.fence, PUBLIC_SHAPES.fence, 'fence');
+  check(errors, isObject(doc.fence) && optional(doc.fence.holder_session_hash, value => SESSION_HASH.test(String(value))), 'fence.holder_session_hash must be a session hash or null');
+  if (kind === 'child') {
+    checkShape(errors, doc.gate, PUBLIC_SHAPES.gate, 'gate');
+    check(errors, isObject(doc.gate) && optional(doc.gate.session_hash, value => SESSION_HASH.test(String(value))), 'gate.session_hash must be a session hash or null');
+  }
+  if (doc.volatile !== undefined) {
+    checkShape(errors, doc.volatile, PUBLIC_SHAPES.volatile, 'volatile');
+    check(errors, isObject(doc.volatile) && Object.values(doc.volatile).every(isText), 'volatile must hold text');
+  }
+  // Everything else is checked as the full document it stands for.
+  if (!errors.length) {
+    const full = { ...clone(doc), private: {}, fence: { epoch: doc.fence.epoch, holder_prefix: doc.fence.holder_prefix, holder_session: doc.fence.holder_session_hash } };
+    if (kind === 'child') {
+      const { session_hash: hash, ...gate } = full.gate;
+      full.gate = { ...gate, session_id: hash, route: null };
+    }
+    errors.push(...(kind === 'parent' ? validateParent(full) : validateChild(full)));
+  }
+  everyString(doc, 'document', (value, at) => {
+    if (value.includes('://')) errors.push(`${at} holds an address`);
+    if (SESSION_ID_SHAPE.test(value)) errors.push(`${at} holds a session ID`);
+  });
+  for (const [at, value] of freeTextFields(kind, doc)) {
+    if (typeof value !== 'string') continue;
+    if (value.includes('\\')) errors.push(`${at} holds a path`);
+    if (value.includes('@')) errors.push(`${at} holds an @ (an address or a mention)`);
+    if (HOST_LIKE.test(value)) errors.push(`${at} holds something that reads as a host name`);
+  }
+  return errors;
+}
+
+function validatePublic(kind, doc) {
+  const errors = publicErrors(kind, doc);
+  if (errors.length) throw stateInvalid(`The public ${kind} document`, errors);
+  return doc;
+}
+
+// The session IDs a document names: its holder, its gate's session and retired parent holders.
+function sessionsOf(doc) {
+  return [doc?.fence?.holder_session, doc?.gate?.session_id, ...(Array.isArray(doc?.private?.retired_holders) ? doc.private.retired_holders : [])];
+}
+
+// The public view of a full document. Raw session IDs become hashes; a raw session ID of this
+// document, or one of `sessions` (those of the documents read with it), anywhere else refuses it.
+function publicView(kind, doc, sessions = []) {
+  const view = clone(doc);
+  delete view.private;
+  const { epoch, holder_prefix: prefix, holder_session: session } = doc.fence;
+  view.fence = { epoch, holder_prefix: prefix, holder_session_hash: session ? sessionHashOf(session) : null };
+  const raw = [...sessionsOf(doc), ...sessions];
+  if (kind === 'child') {
+    const { route, session_id: id, ...gate } = view.gate;
+    view.gate = { ...gate, session_hash: id ? (SESSION_HASH.test(id) ? id : sessionHashOf(id)) : null };
+  }
+  const text = JSON.stringify(view);
+  const leaked = raw.filter(value => isText(value) && value.length >= 8 && !SESSION_HASH.test(value)).some(value => text.includes(value));
+  if (leaked) throw stateInvalid(`The public ${kind} document`, ['a raw session ID is in the public part']);
+  return validatePublic(kind, view);
+}
+
+function assertSidecar(doc) {
+  const errors = [];
+  check(errors, isObject(doc), 'sidecar must be an object');
+  if (isObject(doc)) {
+    checkShape(errors, doc, { all: ['schema', 'repository', 'document', 'revision', 'public_sha256', 'doc'] }, 'sidecar');
+    check(errors, doc.schema === STATE_SCHEMA.sidecar, `schema must be ${STATE_SCHEMA.sidecar}`);
+    check(errors, REPO.test(String(doc.repository || '')), 'repository must be owner/name');
+    check(errors, DOC_NAME.test(String(doc.document || '')), 'document must be parent-<n> or issue-<n>');
+    check(errors, isInt(doc.revision), 'revision must be a whole number');
+    check(errors, SHA256.test(String(doc.public_sha256 || '')), 'public_sha256 must be a sha256');
+    if (!errors.length) {
+      assertValid(kindOfName(doc.document), doc.doc);
+      check(errors, doc.doc.revision === doc.revision, 'the document revision must be the sidecar revision');
+    }
+  }
+  if (errors.length) throw new ProgrammeError('STATE_INVALID', `A state sidecar is invalid: ${errors[0]}`, { errors });
+  return doc;
+}
+
+function assertCheckpoint(doc) {
+  const errors = [];
+  check(errors, isObject(doc), 'checkpoint must be an object');
+  if (isObject(doc)) {
+    checkShape(errors, doc, { all: ['schema', 'repository', 'branch', 'head_sha', 'files', 'written_at', 'migrated'], optional: ['migrated'] }, 'checkpoint');
+    check(errors, doc.schema === STATE_SCHEMA.checkpoint, `schema must be ${STATE_SCHEMA.checkpoint}`);
+    check(errors, REPO.test(String(doc.repository || '')), 'repository must be owner/name');
+    check(errors, doc.branch === STATE_BRANCH, `branch must be ${STATE_BRANCH}`);
+    check(errors, isSha(doc.head_sha), 'head_sha must be a full commit SHA');
+    check(errors, isText(doc.written_at), 'written_at must be a date and time');
+    check(errors, isObject(doc.files) && Object.entries(doc.files).every(([name, entry]) => DOC_NAME.test(name) && isObject(entry)
+      && Object.keys(entry).length === 2 && isInt(entry.revision) && SHA256.test(String(entry.sha256))), 'files must map documents to their revision and sha256');
+    check(errors, doc.migrated === undefined || (isObject(doc.migrated) && Object.keys(doc.migrated).length === 2 && isSha(doc.migrated.head)
+      && isObject(doc.migrated.files) && Object.entries(doc.migrated.files).every(([name, blob]) => DOC_NAME.test(name) && isSha(blob))), 'migrated must hold the move commit and each private document blob');
+  }
+  if (errors.length) throw new ProgrammeError('STATE_INVALID', `The state checkpoint is invalid: ${errors[0]}`, { errors });
+  return doc;
+}
+
+// Parent and child documents on the public state branch, with their private parts in the private
+// store. It keeps StateStore's per-file compare-and-swap PUT, read-back and conflict handling (mutate)
+// unchanged; reads join each public file to its sidecar, and writes put the sidecar first, then the
+// public file, then the checkpoint.
+class BranchStateStore extends StateStore {
+  constructor({ transport, binding, now = () => new Date().toISOString(), toolkitVersion = null, localCheckpoint = null }) {
+    const block = binding?.state;
+    if (!isObject(block) || block.kind !== 'branch' || block.branch !== STATE_BRANCH || block.path !== STATE_PATH) {
+      throw new ProgrammeError('BINDING_INVALID', `The public state branch is always ${STATE_BRANCH}, folder ${STATE_PATH}, on the bound repository.`);
+    }
+    if (!isObject(binding.store) || !Object.hasOwn(STORE_BACKENDS, binding.store.kind)) {
+      throw new ProgrammeError('BINDING_INVALID', 'The public state branch needs the private store beside it.');
+    }
+    super({ transport, store: { kind: 'branch', repository: binding.repository, branch: STATE_BRANCH, path: STATE_PATH }, now, toolkitVersion });
+    this.binding = binding;
+    this.private = new STORE_BACKENDS[binding.store.kind]({ transport, store: binding.store, now, toolkitVersion });
+    this.localCheckpoint = localCheckpoint;
+    this.branch = null;
+    this.checkpoint = null;
+    this.held = null;
+    this.events = [];
+    this.joined = new Map();
+    this.sessions = new Set();
+  }
+
+  // The public file holds only what validatePublic allows.
+  validateRead(kind, doc) { return validatePublic(kind, doc); }
+
+  // The private store must be private, readable and writable. The bound repository is checked by
+  // bindRepository; the branch itself by the read path.
+  verify() { return this.private.verify(); }
+
+  // Journals stay in the private store, unchanged.
+  journalDir(issue) { return this.private.journalDir(issue); }
+  journalPath(issue, name) { return this.private.journalPath(issue, name); }
+  listJournals(issue) { return this.private.listJournals(issue); }
+  readJournal(issue, name) { return this.private.readJournal(issue, name); }
+  writeJournal(issue, name, next, options) { return this.private.writeJournal(issue, name, next, options); }
+
+  sidecarDir(name) { return `${this.binding.store.path}private/${name}`; }
+  sidecarPath(name, revision, digest) { return `${this.sidecarDir(name)}/r${revision}-${digest.slice(0, 16)}.json`; }
+  checkpointPath() { return `${this.binding.store.path}checkpoint.json`; }
+
+  note(code, text) {
+    this.events.push({ code, text });
+  }
+
+  // What this store did to the branch, for command output: restored, rebuilt, recomputed, held.
+  stateBranch() {
+    return { repository: this.binding.repository, branch: STATE_BRANCH, path: STATE_PATH, events: this.events.map(event => ({ ...event })) };
+  }
+
+  branchHead() {
+    const response = this.transport.request('GET', `repos/${this.binding.repository}/branches/${encodeURIComponent(STATE_BRANCH)}`);
+    if (response.status === 404) return null;
+    if (response.status !== 200 || !isSha(response.json?.commit?.sha)) throw ghFailure(response, `Reading the state branch ${STATE_BRANCH}`);
+    return response.json.commit.sha;
+  }
+
+  readCheckpoint() {
+    return this.private.readPath(this.checkpointPath(), 'checkpoint');
+  }
+
+  hold(code, text) {
+    this.held = new ProgrammeError(code, text);
+    this.note(code, text);
+    throw this.held;
+  }
+
+  // Once per store: is the branch there, deleted (restore it) or never created? A branch missing with
+  // a checkpoint anywhere was deleted, never new; it is restored only by a digest-verified path.
+  ensureBranch() {
+    if (this.held) throw this.held;
+    if (this.branch) return this.branch;
+    const head = this.branchHead();
+    const stored = this.readCheckpoint();
+    this.checkpoint = stored.doc ? { doc: stored.doc, sha: stored.sha } : { doc: null, sha: stored.sha };
+    if (head) {
+      // A branch read can lag a write made elsewhere: read the head once more before recomputing.
+      const settled = stored.doc && stored.doc.head_sha !== head ? this.branchHead() : head;
+      this.branch = { exists: true, head: settled };
+      if (!stored.doc || stored.doc.head_sha !== settled) this.recomputeCheckpoint(settled);
+      this.checkMigration();
+      return this.branch;
+    }
+    if (!stored.doc) {
+      const local = this.localCheckpoint?.read() || null;
+      if (local) {
+        this.hold('STATE_RESTORE_HELD', `The state branch ${STATE_BRANCH} is missing, and only this computer's copy of its checkpoint is left (the private store has none). It is not restored from a local copy and never started empty. Controller: check the private store's checkpoint.json, then run again.`);
+      }
+      this.branch = { exists: false };
+      return this.branch;
+    }
+    this.branch = this.restore(stored.doc);
+    return this.branch;
+  }
+
+  // The private store's own parent and child documents must be exactly as migrate-state moved them.
+  // One that changed or appeared since was written through a binding without `state` (before the
+  // binding pull request merged, or on a computer whose merged binding was not read again yet), and
+  // the branch does not hold it: hold, never read past it.
+  checkMigration() {
+    const moved = this.checkpoint?.doc?.migrated;
+    if (!moved) return;
+    const dir = this.binding.store.path.replace(/\/$/, '');
+    const listing = this.transport.request('GET', `${this.private.encodedContents(dir)}?ref=${encodeURIComponent(this.binding.store.branch)}`);
+    if (listing.status !== 200 && listing.status !== 404) throw ghFailure(listing, `Listing ${dir} in the private store`);
+    const now = Object.fromEntries((listing.status === 200 && Array.isArray(listing.json) ? listing.json : [])
+      .filter(entry => entry?.type === 'file' && DOC_NAME.test(String(entry.name).replace(/\.json$/, '')) && /\.json$/.test(String(entry.name)))
+      .map(entry => [String(entry.name).replace(/\.json$/, ''), entry.sha]));
+    const changed = [...new Set([...Object.keys(now), ...Object.keys(moved.files)])].filter(name => now[name] !== moved.files[name]).sort();
+    if (changed.length) {
+      this.hold('STATE_MIGRATION_STALE', `${changed.join(', ')} changed in the private store after migrate-state --apply (a write made before the binding pull request merged), so the state branch is behind it. Nothing was read or written. Controller: stop the programme sweep, then run migrate-state --dry-run and --apply again; it moves the newer documents onto the branch while nothing has been written there since the move.`);
+    }
+  }
+
+  // { head, files } of the move when nothing has been written to the branch since migrate-state moved
+  // the documents (so a second move may replace them), else null.
+  headSinceMove() {
+    const stored = this.readCheckpoint().doc;
+    const head = this.branchHead();
+    return stored?.migrated && head && stored.migrated.head === head && stored.head_sha === head ? { head, files: stored.migrated.files } : null;
+  }
+
+  // A file's public text at a commit, or null.
+  textAt(file, ref) {
+    const response = this.transport.request('GET', `${this.encodedContents(file)}?ref=${encodeURIComponent(ref)}`);
+    if (response.status === 404) return null;
+    if (response.status !== 200 || response.json?.encoding !== 'base64') throw ghFailure(response, `Reading ${file} at ${ref}`);
+    return Buffer.from(response.json.content, 'base64').toString('utf8');
+  }
+
+  // Restore, in order: the ref at the checkpoint head if GitHub still serves it with every file's
+  // digest matching; else a commit rebuilt from the sidecars' public bytes if every digest matches;
+  // else hold. Intents must be settled first. Nothing is ever started empty.
+  restore(checkpoint) {
+    const names = Object.keys(checkpoint.files).sort();
+    const settle = docs => {
+      const open = docs.flatMap(([name, doc]) => doc.pending_effects.map(effect => `${name} ${effect.kind} ${effect.intent_id} (${effect.state})`));
+      if (open.length) this.hold('STATE_RESTORE_HELD', `The state branch ${STATE_BRANCH} is missing and the checkpoint matches, but ${open.length} earlier intent(s) are not settled: ${open.join('; ')}. Nothing was restored. Controller: settle them from the private store's sidecars by readback first.`);
+    };
+    const commit = this.transport.request('GET', `repos/${this.binding.repository}/git/commits/${checkpoint.head_sha}`);
+    if (commit.status === 200) {
+      const texts = names.map(name => [name, this.textAt(`${STATE_PATH}${name}.json`, checkpoint.head_sha)]);
+      if (texts.every(([name, text]) => text !== null && sha256(text) === checkpoint.files[name].sha256)) {
+        settle(texts.map(([name, text]) => [name, JSON.parse(text)]));
+        const created = this.transport.request('POST', `repos/${this.binding.repository}/git/refs`, { ref: `refs/heads/${STATE_BRANCH}`, sha: checkpoint.head_sha });
+        if (!okStatus(created.status)) throw ghFailure(created, `Recreating the state branch ${STATE_BRANCH}`);
+        this.note('STATE_RESTORED', `The state branch was missing; it was restored at the checkpoint commit ${shortSha(checkpoint.head_sha)} (${names.length} document(s), digests matched).`);
+        return { exists: true, head: checkpoint.head_sha };
+      }
+    }
+    const rebuilt = [];
+    for (const name of names) {
+      const entry = checkpoint.files[name];
+      const { doc: sidecar } = this.private.readPath(this.sidecarPath(name, entry.revision, entry.sha256), 'sidecar');
+      const text = sidecar && sidecar.document === name ? canonicalText(publicView(kindOfName(name), sidecar.doc)) : null;
+      if (!text || sha256(text) !== entry.sha256) {
+        this.hold('STATE_RESTORE_HELD', `The state branch ${STATE_BRANCH} is missing. Its checkpoint commit is gone or no longer matches, and ${name} r${entry.revision} has no matching sidecar, so it cannot be rebuilt. Nothing was restored and it is never started empty. Controller: report to the owner.`);
+      }
+      rebuilt.push([name, text, sidecar.doc]);
+    }
+    settle(rebuilt.map(([name, , doc]) => [name, doc]));
+    const head = this.createCommit(rebuilt.map(([name, text]) => [`${STATE_PATH}${name}.json`, text]), commitLine(`programme-state: rebuilt ${rebuilt.length} document(s) from sidecars`), []);
+    this.recordCheckpoint(Object.fromEntries(rebuilt.map(([name]) => [name, checkpoint.files[name]])), head, { replace: true });
+    this.note('STATE_REBUILT', `The state branch was missing and its checkpoint commit could not be used; it was rebuilt from the private sidecars at the checkpoint revisions (${rebuilt.length} document(s), digests matched), as commit ${shortSha(head)}.`);
+    return { exists: true, head };
+  }
+
+  // One commit holding exactly `files` ([[path, text]]); every file read back. Without parents the
+  // branch is created (never over one that exists); with the branch head as its parent the branch is
+  // moved forward to it, never forced.
+  createCommit(files, message, parents) {
+    const repo = this.binding.repository;
+    const tree = this.transport.request('POST', `repos/${repo}/git/trees`, { tree: files.map(([file, text]) => ({ path: file, mode: '100644', type: 'blob', content: text })) });
+    if (!okStatus(tree.status) || !isText(tree.json?.sha)) throw ghFailure(tree, 'Writing the state tree');
+    const commit = this.transport.request('POST', `repos/${repo}/git/commits`, { message, tree: tree.json.sha, parents });
+    if (!okStatus(commit.status) || !isSha(commit.json?.sha)) throw ghFailure(commit, 'Writing the state commit');
+    for (const [file, text] of files) {
+      if (this.textAt(file, commit.json.sha) !== text) throw new ProgrammeError('STATE_READBACK_MISMATCH', `${file} did not read back as written in the new state commit.`);
+    }
+    if (parents.length) {
+      const moved = this.transport.request('PATCH', `repos/${repo}/git/refs/heads/${encodeURIComponent(STATE_BRANCH)}`, { sha: commit.json.sha, force: false });
+      if (moved.status === 422) throw new ProgrammeError('STATE_CONFLICT', `The state branch ${STATE_BRANCH} moved while the documents were being moved again; nothing was replaced. Run migrate-state again.`);
+      if (!okStatus(moved.status)) throw ghFailure(moved, `Moving the state branch ${STATE_BRANCH} forward`);
+      return commit.json.sha;
+    }
+    const ref = this.transport.request('POST', `repos/${repo}/git/refs`, { ref: `refs/heads/${STATE_BRANCH}`, sha: commit.json.sha });
+    if (ref.status === 422) throw new ProgrammeError('STATE_BRANCH_EXISTS', `The state branch ${STATE_BRANCH} already exists; nothing was replaced.`);
+    if (!okStatus(ref.status)) throw ghFailure(ref, `Creating the state branch ${STATE_BRANCH}`);
+    return commit.json.sha;
+  }
+
+  // The checkpoint after a write, with compare-and-swap: the newer revision of each document wins.
+  // `replace` writes exactly `files` (a rebuild or a recompute). The move record (`migrated`) is
+  // kept unless `migrated` gives a new one.
+  recordCheckpoint(files, head, { replace = false, migrated = undefined } = {}) {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const current = attempt === 0 && this.checkpoint ? this.checkpoint : this.readCheckpoint();
+      const merged = replace ? { ...files } : { ...(current.doc?.files || {}) };
+      if (!replace) {
+        for (const [name, entry] of Object.entries(files)) {
+          if (!merged[name] || merged[name].revision <= entry.revision) merged[name] = entry;
+        }
+      }
+      const move = migrated !== undefined ? migrated : current.doc?.migrated;
+      const doc = { schema: STATE_SCHEMA.checkpoint, repository: this.binding.repository, branch: STATE_BRANCH, head_sha: head, files: merged, written_at: this.now(), ...(move ? { migrated: move } : {}) };
+      try {
+        const written = this.private.putVerified(this.checkpointPath(), 'checkpoint', canonicalText(doc), current.sha, 'programme state: checkpoint');
+        this.checkpoint = { doc: written.doc, sha: written.sha };
+        this.localCheckpoint?.write(written.doc);
+        return;
+      } catch (error) {
+        if (error.code !== 'STATE_CONFLICT') throw error;
+        this.checkpoint = null;
+      }
+    }
+    throw new ProgrammeError('STATE_CONFLICT', 'The state checkpoint kept moving; it is recomputed from the branch on the next run.');
+  }
+
+  // The checkpoint lags the branch (a write that stopped before its checkpoint, or two writers at
+  // once): it is set again from the branch head, counting only files whose sidecar joins.
+  recomputeCheckpoint(head) {
+    const listing = this.transport.request('GET', `${this.encodedContents(STATE_PATH.replace(/\/$/, ''))}?ref=${encodeURIComponent(head)}`);
+    if (listing.status !== 200 || !Array.isArray(listing.json)) throw ghFailure(listing, `Listing ${STATE_PATH} on ${STATE_BRANCH}`);
+    const files = {};
+    for (const entry of listing.json.filter(item => item?.type === 'file' && /\.json$/.test(String(item.name)))) {
+      const name = String(entry.name).replace(/\.json$/, '');
+      if (!DOC_NAME.test(name)) continue;
+      const text = this.textAt(`${STATE_PATH}${entry.name}`, head);
+      let doc;
+      try { doc = validatePublic(kindOfName(name), JSON.parse(text)); } catch (error) {
+        this.hold('STATE_INVALID', `${STATE_PATH}${entry.name} on ${STATE_BRANCH} is not a valid public document (${error.code === 'STATE_INVALID' ? error.message : 'not JSON'}). Nothing was written. Controller: report to the owner.`);
+      }
+      const digest = sha256(canonicalText(doc));
+      const { doc: sidecar } = this.private.readPath(this.sidecarPath(name, doc.revision, digest), 'sidecar');
+      if (!sidecar || sidecar.public_sha256 !== digest) {
+        this.hold('STATE_SIDECAR_MISSING', `${STATE_PATH}${entry.name} on ${STATE_BRANCH} has no private sidecar for revision ${doc.revision} with its digest (a hand edit, or a sidecar that was removed). Nothing was written. Controller: report to the owner.`);
+      }
+      files[name] = { revision: doc.revision, sha256: digest };
+    }
+    const previous = this.checkpoint.doc?.files || {};
+    const lower = Object.entries(previous).filter(([name, entry]) => !files[name] || files[name].revision < entry.revision).map(([name]) => name);
+    if (lower.length) {
+      this.hold('STATE_ROLLED_BACK', `The state branch ${STATE_BRANCH} no longer holds ${lower.join(', ')} at the checkpoint's revision (a force-push back, a deleted file or a hand edit). Nothing was written. Controller: report to the owner; the private store's checkpoint and sidecars hold the last good state.`);
+    }
+    this.recordCheckpoint(files, head, { replace: true });
+    this.note('STATE_CHECKPOINT_RECOMPUTED', `The checkpoint lagged the branch; it was set again from ${shortSha(head)} (${Object.keys(files).length} document(s)).`);
+  }
+
+  // A public file joined to the sidecar of the same revision and public digest, as the full document.
+  join(kind, number, publicDoc) {
+    const name = documentName(kind, number);
+    const text = canonicalText(publicDoc);
+    const digest = sha256(text);
+    const file = this.sidecarPath(name, publicDoc.revision, digest);
+    const { doc: sidecar, sha } = this.private.readPath(file, 'sidecar');
+    if (!sidecar || sidecar.public_sha256 !== digest || sidecar.document !== name || canonicalText(publicView(kind, sidecar.doc)) !== text) {
+      this.hold('STATE_SIDECAR_MISSING', `${STATE_PATH}${name}.json on ${STATE_BRANCH} has no private sidecar for revision ${publicDoc.revision} with its digest (a hand edit, or a sidecar that was removed). Nothing was written. Controller: report to the owner.`);
+    }
+    this.joined.set(name, { file, sha, revision: publicDoc.revision });
+    for (const session of sessionsOf(sidecar.doc)) if (isText(session)) this.sessions.add(session);
+    return sidecar.doc;
+  }
+
+  read(kind, number) {
+    const branch = this.ensureBranch();
+    if (!branch.exists) return { doc: null, sha: null };
+    const name = documentName(kind, number);
+    let found = this.readPath(this.docPath(kind, number), kind);
+    const recorded = this.checkpoint?.doc?.files?.[name];
+    if (recorded && (!found.doc || found.doc.revision < recorded.revision)) {
+      // A branch read can lag a write made elsewhere: read the head commit before calling it a rollback.
+      const head = this.branchHead();
+      found = head ? this.readPath(this.docPath(kind, number), kind, head) : { doc: null, sha: null };
+      if (!found.doc || found.doc.revision < recorded.revision) {
+        this.hold('STATE_ROLLED_BACK', `${STATE_PATH}${name}.json on ${STATE_BRANCH} is ${found.doc ? `at revision ${found.doc.revision}` : 'missing'}, below the checkpoint's revision ${recorded.revision} (a force-push back, a deleted file or a hand edit). Nothing was written. Controller: report to the owner.`);
+      }
+    }
+    if (!found.doc) return found;
+    return { doc: this.join(kind, number, found.doc), sha: found.sha };
+  }
+
+  // The private store must still be private before any sidecar is written.
+  requirePrivateStore() {
+    const repo = this.transport.request('GET', `repos/${this.binding.store.repository}`);
+    if (repo.status !== 200) throw new ProgrammeError('STATE_STORE_UNVERIFIED', `The private store ${this.binding.store.repository} could not be read (${repo.status}); no public state was written.`);
+    if (repo.json.private !== true) throw new ProgrammeError('STORE_NOT_PRIVATE', `The private store ${this.binding.store.repository} is no longer private, so no sidecar and no public state was written. Controller: make it private again.`);
+  }
+
+  // Writes `next` only when its state differs from `previous`, as StateStore does: the sidecar first,
+  // then the public file (compare-and-swap, read back), then the checkpoint.
+  write(kind, number, next, { sha, previous }) {
+    if (previous && sameState(previous, next)) return { outcome: 'NOOP', doc: previous, sha };
+    const branch = this.ensureBranch();
+    if (!branch.exists) {
+      throw new ProgrammeError('STATE_BRANCH_MISSING', `The state branch ${STATE_BRANCH} was never created, so nothing was written. Only programme.cjs migrate-state --apply creates it.`);
+    }
+    const doc = clone(next);
+    doc.revision = previous ? previous.revision + (contentDigest(previous) === contentDigest(doc) ? 0 : 1) : Math.max(1, doc.revision || 0);
+    doc.volatile = { written_at: this.now(), ...(this.toolkitVersion ? { toolkit: this.toolkitVersion } : {}) };
+    assertValid(kind, doc);
+    const name = documentName(kind, number);
+    const text = canonicalText(publicView(kind, doc, [...this.sessions]));
+    const digest = sha256(text);
+    this.requirePrivateStore();
+    const sidecarSha = this.putSidecar(name, doc, digest);
+    const result = this.putVerified(this.docPath(kind, number), kind, text, sha, commitLine(`programme-state: ${name} r${doc.revision}`));
+    const replaced = this.joined.get(name);
+    this.joined.set(name, { file: this.sidecarPath(name, doc.revision, digest), sha: sidecarSha, revision: doc.revision });
+    try {
+      this.recordCheckpoint({ [name]: { revision: doc.revision, sha256: digest } }, this.lastCommit);
+      this.pruneSidecars(name, doc.revision, replaced);
+    } catch (error) {
+      // The public write stands; the next run sets the checkpoint again from the branch. The sidecar
+      // the old checkpoint names is kept until then, so a rebuild from sidecars still works.
+      this.checkpoint = null;
+      this.branch = null;
+      this.note('STATE_CHECKPOINT_STALE', `${name} r${doc.revision} was written, but its checkpoint was not (${error.code || 'error'}); the next run sets it again from the branch.`);
+    }
+    return { outcome: 'WRITTEN', doc, sha: result.sha };
+  }
+
+  putSidecar(name, doc, digest) {
+    const sidecar = { schema: STATE_SCHEMA.sidecar, repository: this.binding.repository, document: name, revision: doc.revision, public_sha256: digest, doc };
+    const file = this.sidecarPath(name, doc.revision, digest);
+    const text = canonicalText(sidecar);
+    try {
+      return this.private.putVerified(file, 'sidecar', text, null, `programme state: ${name} r${doc.revision} sidecar`).sha;
+    } catch (error) {
+      // The same revision and digest from an earlier try that stopped: keep it if it is the same.
+      if (error.code !== 'STATE_CONFLICT') throw error;
+      const existing = this.private.readPath(file, 'sidecar');
+      if (canonicalText(existing.doc || {}) !== text) throw error;
+      return existing.sha;
+    }
+  }
+
+  // Sidecars of SIDECAR_KEEP revisions are kept. The sidecar a same-revision write replaced is
+  // removed at once (the public file no longer points at it). A failed removal leaves a harmless
+  // file for the next pass.
+  pruneSidecars(name, revision, replaced) {
+    const remove = (file, sha) => {
+      const response = this.transport.request('DELETE', this.private.encodedContents(file), { message: `programme state: prune ${name} sidecar`, sha, branch: this.binding.store.branch });
+      if (!okStatus(response.status)) this.note('STATE_SIDECAR_KEPT', `An old sidecar of ${name} could not be removed (${response.status}); the next write tries again.`);
+    };
+    if (replaced && replaced.revision === revision) {
+      if (replaced.sha && replaced.file !== this.joined.get(name)?.file) remove(replaced.file, replaced.sha);
+      return;
+    }
+    if (revision <= SIDECAR_KEEP) return;
+    const dir = this.sidecarDir(name);
+    const listing = this.transport.request('GET', `${this.private.encodedContents(dir)}?ref=${encodeURIComponent(this.binding.store.branch)}`);
+    if (listing.status !== 200 || !Array.isArray(listing.json)) return;
+    for (const entry of listing.json) {
+      const match = /^r(\d+)-[0-9a-f]{16}\.json$/.exec(String(entry?.name || ''));
+      if (match && Number(match[1]) <= revision - SIDECAR_KEEP) remove(`${dir}/${entry.name}`, entry.sha);
+    }
+  }
+}
+
+// Public state backends by binding `state.kind`.
+const STATE_BACKENDS = Object.freeze({ branch: BranchStateStore });
+
+// The store a merged binding names: the public state branch with the private store beside it when
+// the binding has `state`, else the private store alone. A disabled binding never reaches here.
+function openStore({ transport, binding, now, toolkitVersion = null, localCheckpoint = null }) {
+  if (binding.state) return new STATE_BACKENDS[binding.state.kind]({ transport, binding, now, toolkitVersion, localCheckpoint });
+  return new STORE_BACKENDS[binding.store.kind]({ transport, store: binding.store, now, toolkitVersion });
+}
 
 const PR_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
@@ -3010,6 +3586,7 @@ class Reconciler {
         : !apply && plan.resolutions.some(entry => entry.outcome !== 'UNKNOWN') ? `Controller: run reconcile --apply --controller to clear ${plan.resolutions.filter(entry => entry.outcome !== 'UNKNOWN').length} settled intent(s)`
         : attention.length ? `Controller: decide on ${attention.length} finding(s) the reconciler does not change, starting with ${attention[0].code} on #${attention[0].issue}`
           : 'None: the state documents and GitHub agree';
+    if (typeof this.store.stateBranch === 'function') report.state_branch = this.store.stateBranch();
     return report;
   }
 }
@@ -3053,4 +3630,6 @@ module.exports = Object.freeze({
   orderMoves, intentId, describeEffect, resolveExecutable, isGitHubHost, originSlug, bindRepository,
   SECRET_SHAPES, FINDING_CODES, ATTENTION_KEEP, ATTENTION_LIMIT, findingId, foldAttention, answerFinding, attentionCounts, attentionLine, openFindings, findingText, attentionDigest,
   ProgrammeInventory, INVENTORY_CLASSES, INVENTORY_DEADLINE_MS, registeredParents,
+  STATE_BRANCH, STATE_PATH, STATE_SCHEMA, SIDECAR_KEEP, BranchStateStore, STATE_BACKENDS, openStore, publicView, validatePublic, documentName,
+  refreshWriter, isDecisionHolder, sha256, sessionsOf,
 });

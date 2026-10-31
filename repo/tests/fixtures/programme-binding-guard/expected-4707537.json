@@ -1,0 +1,929 @@
+{
+  "recorded_from": "47075370b3b6c51662545a85757d43aaf0740d29",
+  "results": {
+    "schema_journal": "toolkit.programme-journal.v1",
+    "bindings": [
+      {
+        "name": "v1 basic",
+        "validate": {
+          "ok": true,
+          "value": {
+            "schema": "toolkit.programme-binding.v1",
+            "repository": "example-owner/example-repo",
+            "parent_issue": 7,
+            "record_prefix": "INT-ER7-",
+            "writer_prefix": "INT-ER7-",
+            "store": {
+              "kind": "github",
+              "repository": "example-owner/TRANSPORT-example-repo",
+              "branch": "main",
+              "path": "state/example-owner/example-repo/"
+            },
+            "required_checks": [
+              "validate"
+            ]
+          }
+        },
+        "enabled": true
+      },
+      {
+        "name": "v1 with a state key (v1 ignores unknown keys)",
+        "validate": {
+          "ok": true,
+          "value": {
+            "schema": "toolkit.programme-binding.v1",
+            "repository": "example-owner/example-repo",
+            "parent_issue": 7,
+            "record_prefix": "INT-ER7-",
+            "writer_prefix": "INT-ER7-",
+            "store": {
+              "kind": "github",
+              "repository": "example-owner/TRANSPORT-example-repo",
+              "branch": "main",
+              "path": "state/example-owner/example-repo/"
+            },
+            "required_checks": [
+              "validate"
+            ],
+            "state": {
+              "kind": "branch",
+              "branch": "DO-NOT-DELETE-IF-TOOLKIT-GOVERNANCE-IS-ENABLED",
+              "path": "state/"
+            }
+          }
+        },
+        "enabled": true
+      },
+      {
+        "name": "v1 with projection and paid_security",
+        "validate": {
+          "ok": true,
+          "value": {
+            "schema": "toolkit.programme-binding.v1",
+            "repository": "example-owner/example-repo",
+            "parent_issue": 7,
+            "record_prefix": "INT-ER7-",
+            "writer_prefix": "INT-ER7-",
+            "store": {
+              "kind": "github",
+              "repository": "example-owner/TRANSPORT-example-repo",
+              "branch": "main",
+              "path": "state/example-owner/example-repo/"
+            },
+            "required_checks": [
+              "validate"
+            ],
+            "projection": {
+              "after_section": "CURRENT"
+            },
+            "paid_security": "off"
+          }
+        },
+        "enabled": true
+      },
+      {
+        "name": "v1 with a broken state key",
+        "validate": {
+          "ok": true,
+          "value": {
+            "schema": "toolkit.programme-binding.v1",
+            "repository": "example-owner/example-repo",
+            "parent_issue": 7,
+            "record_prefix": "INT-ER7-",
+            "writer_prefix": "INT-ER7-",
+            "store": {
+              "kind": "github",
+              "repository": "example-owner/TRANSPORT-example-repo",
+              "branch": "main",
+              "path": "state/example-owner/example-repo/"
+            },
+            "required_checks": [
+              "validate"
+            ],
+            "state": {
+              "kind": "branch",
+              "branch": "main",
+              "path": "x/"
+            }
+          }
+        },
+        "enabled": true
+      },
+      {
+        "name": "v2 enabled basic",
+        "validate": {
+          "ok": true,
+          "value": {
+            "schema": "toolkit.programme-binding.v2",
+            "repository": "example-owner/example-repo",
+            "governance": "enabled",
+            "parents": [
+              {
+                "issue": 7,
+                "record_prefix": "INT-ER7-"
+              }
+            ],
+            "store": {
+              "kind": "github",
+              "repository": "example-owner/TRANSPORT-example-repo",
+              "branch": "main",
+              "path": "state/example-owner/example-repo/"
+            },
+            "required_checks": [
+              "validate"
+            ],
+            "parent_issue": 7,
+            "record_prefix": "INT-ER7-",
+            "writer_prefix": "INT-ER7-"
+          }
+        },
+        "enabled": true
+      },
+      {
+        "name": "v2 enabled with schedule_folder",
+        "validate": {
+          "ok": true,
+          "value": {
+            "schema": "toolkit.programme-binding.v2",
+            "repository": "example-owner/example-repo",
+            "governance": "enabled",
+            "parents": [
+              {
+                "issue": 7,
+                "record_prefix": "INT-ER7-"
+              }
+            ],
+            "store": {
+              "kind": "github",
+              "repository": "example-owner/TRANSPORT-example-repo",
+              "branch": "main",
+              "path": "state/example-owner/example-repo/"
+            },
+            "required_checks": [
+              "validate"
+            ],
+            "schedule_folder": "TOOLKIT",
+            "parent_issue": 7,
+            "record_prefix": "INT-ER7-",
+            "writer_prefix": "INT-ER7-"
+          }
+        },
+        "enabled": true
+      },
+      {
+        "name": "v2 enabled with projection",
+        "validate": {
+          "ok": true,
+          "value": {
+            "schema": "toolkit.programme-binding.v2",
+            "repository": "example-owner/example-repo",
+            "governance": "enabled",
+            "parents": [
+              {
+                "issue": 7,
+                "record_prefix": "INT-ER7-"
+              }
+            ],
+            "store": {
+              "kind": "github",
+              "repository": "example-owner/TRANSPORT-example-repo",
+              "branch": "main",
+              "path": "state/example-owner/example-repo/"
+            },
+            "required_checks": [
+              "validate"
+            ],
+            "projection": {
+              "after_section": "CURRENT",
+              "replace_section": "Programme index"
+            },
+            "parent_issue": 7,
+            "record_prefix": "INT-ER7-",
+            "writer_prefix": "INT-ER7-"
+          }
+        },
+        "enabled": true
+      },
+      {
+        "name": "v2 enabled with dependency_updates",
+        "validate": {
+          "ok": true,
+          "value": {
+            "schema": "toolkit.programme-binding.v2",
+            "repository": "example-owner/example-repo",
+            "governance": "enabled",
+            "parents": [
+              {
+                "issue": 7,
+                "record_prefix": "INT-ER7-"
+              }
+            ],
+            "store": {
+              "kind": "github",
+              "repository": "example-owner/TRANSPORT-example-repo",
+              "branch": "main",
+              "path": "state/example-owner/example-repo/"
+            },
+            "required_checks": [
+              "validate"
+            ],
+            "dependency_updates": {
+              "auto_merge": "patch-minor",
+              "github_actions": "owner"
+            },
+            "parent_issue": 7,
+            "record_prefix": "INT-ER7-",
+            "writer_prefix": "INT-ER7-"
+          }
+        },
+        "enabled": true
+      },
+      {
+        "name": "v2 enabled with paid_security",
+        "validate": {
+          "ok": true,
+          "value": {
+            "schema": "toolkit.programme-binding.v2",
+            "repository": "example-owner/example-repo",
+            "governance": "enabled",
+            "parents": [
+              {
+                "issue": 7,
+                "record_prefix": "INT-ER7-"
+              }
+            ],
+            "store": {
+              "kind": "github",
+              "repository": "example-owner/TRANSPORT-example-repo",
+              "branch": "main",
+              "path": "state/example-owner/example-repo/"
+            },
+            "required_checks": [
+              "validate"
+            ],
+            "paid_security": "on",
+            "parent_issue": 7,
+            "record_prefix": "INT-ER7-",
+            "writer_prefix": "INT-ER7-"
+          }
+        },
+        "enabled": true
+      },
+      {
+        "name": "v2 enabled with every optional key",
+        "validate": {
+          "ok": true,
+          "value": {
+            "schema": "toolkit.programme-binding.v2",
+            "repository": "example-owner/example-repo",
+            "governance": "enabled",
+            "parents": [
+              {
+                "issue": 7,
+                "record_prefix": "INT-ER7-"
+              }
+            ],
+            "store": {
+              "kind": "github",
+              "repository": "example-owner/TRANSPORT-example-repo",
+              "branch": "main",
+              "path": "state/example-owner/example-repo/"
+            },
+            "required_checks": [
+              "validate"
+            ],
+            "schedule_folder": "TOOLKIT",
+            "projection": {
+              "after_section": "CURRENT"
+            },
+            "dependency_updates": {
+              "auto_merge": "off"
+            },
+            "paid_security": "off",
+            "parent_issue": 7,
+            "record_prefix": "INT-ER7-",
+            "writer_prefix": "INT-ER7-"
+          }
+        },
+        "enabled": true
+      },
+      {
+        "name": "v2 enabled with two parents and a writer prefix",
+        "validate": {
+          "ok": true,
+          "value": {
+            "schema": "toolkit.programme-binding.v2",
+            "repository": "example-owner/example-repo",
+            "governance": "enabled",
+            "parents": [
+              {
+                "issue": 7,
+                "record_prefix": "INT-ER7-",
+                "writer_prefix": "INT-ERW-"
+              },
+              {
+                "issue": 9,
+                "record_prefix": "INT-ER9-"
+              }
+            ],
+            "store": {
+              "kind": "github",
+              "repository": "example-owner/TRANSPORT-example-repo",
+              "branch": "main",
+              "path": "state/example-owner/example-repo/"
+            },
+            "required_checks": [
+              "validate"
+            ],
+            "parent_issue": 7,
+            "record_prefix": "INT-ER7-",
+            "writer_prefix": "INT-ERW-"
+          }
+        },
+        "enabled": true
+      },
+      {
+        "name": "v2 disabled minimal",
+        "validate": {
+          "ok": true,
+          "value": {
+            "schema": "toolkit.programme-binding.v2",
+            "repository": "example-owner/example-repo",
+            "governance": "disabled"
+          }
+        },
+        "enabled": false
+      },
+      {
+        "name": "v2 disabled with store and parents",
+        "validate": {
+          "ok": true,
+          "value": {
+            "schema": "toolkit.programme-binding.v2",
+            "repository": "example-owner/example-repo",
+            "governance": "disabled",
+            "parents": [
+              {
+                "issue": 7,
+                "record_prefix": "INT-ER7-"
+              }
+            ],
+            "store": {
+              "kind": "github",
+              "repository": "example-owner/TRANSPORT-example-repo",
+              "branch": "main",
+              "path": "state/example-owner/example-repo/"
+            },
+            "required_checks": [
+              "validate"
+            ]
+          }
+        },
+        "enabled": false
+      },
+      {
+        "name": "v2 enabled with state and a valid store",
+        "validate": {
+          "ok": false,
+          "code": "BINDING_INVALID",
+          "message": ".github/toolkit-programme.json is invalid: state is not a version 2 binding key",
+          "errors": [
+            "state is not a version 2 binding key"
+          ]
+        },
+        "enabled": null
+      },
+      {
+        "name": "v2 disabled with state and a valid store",
+        "validate": {
+          "ok": false,
+          "code": "BINDING_INVALID",
+          "message": ".github/toolkit-programme.json is invalid: state is not a version 2 binding key",
+          "errors": [
+            "state is not a version 2 binding key"
+          ]
+        },
+        "enabled": null
+      },
+      {
+        "name": "v2 enabled with state and every optional key",
+        "validate": {
+          "ok": false,
+          "code": "BINDING_INVALID",
+          "message": ".github/toolkit-programme.json is invalid: state is not a version 2 binding key",
+          "errors": [
+            "state is not a version 2 binding key"
+          ]
+        },
+        "enabled": null
+      },
+      {
+        "name": "v2 enabled with state and no store",
+        "validate": {
+          "ok": false,
+          "code": "BINDING_INVALID",
+          "message": ".github/toolkit-programme.json is invalid: state is not a version 2 binding key",
+          "errors": [
+            "state is not a version 2 binding key",
+            "store.kind undefined is not supported (supported: github)",
+            "store.repository must be owner/name",
+            "store.branch must be a branch name",
+            "store.path must be a relative folder ending in /",
+            "store.repository must be a separate repository"
+          ]
+        },
+        "enabled": null
+      },
+      {
+        "name": "v2 disabled with state and no store",
+        "validate": {
+          "ok": false,
+          "code": "BINDING_INVALID",
+          "message": ".github/toolkit-programme.json is invalid: state is not a version 2 binding key",
+          "errors": [
+            "state is not a version 2 binding key"
+          ]
+        },
+        "enabled": null
+      },
+      {
+        "name": "v2 enabled with state on another branch",
+        "validate": {
+          "ok": false,
+          "code": "BINDING_INVALID",
+          "message": ".github/toolkit-programme.json is invalid: state is not a version 2 binding key",
+          "errors": [
+            "state is not a version 2 binding key"
+          ]
+        },
+        "enabled": null
+      },
+      {
+        "name": "v2 enabled with state outside state/",
+        "validate": {
+          "ok": false,
+          "code": "BINDING_INVALID",
+          "message": ".github/toolkit-programme.json is invalid: state is not a version 2 binding key",
+          "errors": [
+            "state is not a version 2 binding key"
+          ]
+        },
+        "enabled": null
+      },
+      {
+        "name": "v2 enabled with state below state/",
+        "validate": {
+          "ok": false,
+          "code": "BINDING_INVALID",
+          "message": ".github/toolkit-programme.json is invalid: state is not a version 2 binding key",
+          "errors": [
+            "state is not a version 2 binding key"
+          ]
+        },
+        "enabled": null
+      },
+      {
+        "name": "v2 enabled with state of another kind",
+        "validate": {
+          "ok": false,
+          "code": "BINDING_INVALID",
+          "message": ".github/toolkit-programme.json is invalid: state is not a version 2 binding key",
+          "errors": [
+            "state is not a version 2 binding key"
+          ]
+        },
+        "enabled": null
+      },
+      {
+        "name": "v2 enabled with an extra state key",
+        "validate": {
+          "ok": false,
+          "code": "BINDING_INVALID",
+          "message": ".github/toolkit-programme.json is invalid: state is not a version 2 binding key",
+          "errors": [
+            "state is not a version 2 binding key"
+          ]
+        },
+        "enabled": null
+      },
+      {
+        "name": "v2 enabled with state as text",
+        "validate": {
+          "ok": false,
+          "code": "BINDING_INVALID",
+          "message": ".github/toolkit-programme.json is invalid: state is not a version 2 binding key",
+          "errors": [
+            "state is not a version 2 binding key"
+          ]
+        },
+        "enabled": null
+      },
+      {
+        "name": "v2 enabled with store kind branch",
+        "validate": {
+          "ok": false,
+          "code": "BINDING_INVALID",
+          "message": ".github/toolkit-programme.json is invalid: store.kind \"branch\" is not supported (supported: github)",
+          "errors": [
+            "store.kind \"branch\" is not supported (supported: github)"
+          ]
+        },
+        "enabled": null
+      },
+      {
+        "name": "v2 enabled with an unknown key",
+        "validate": {
+          "ok": false,
+          "code": "BINDING_INVALID",
+          "message": ".github/toolkit-programme.json is invalid: extra is not a version 2 binding key",
+          "errors": [
+            "extra is not a version 2 binding key"
+          ]
+        },
+        "enabled": null
+      },
+      {
+        "name": "v2 enabled with no parents",
+        "validate": {
+          "ok": false,
+          "code": "BINDING_INVALID",
+          "message": ".github/toolkit-programme.json is invalid: parents must list at least one parent issue",
+          "errors": [
+            "parents must list at least one parent issue"
+          ]
+        },
+        "enabled": null
+      },
+      {
+        "name": "v2 enabled with the store in the same repository",
+        "validate": {
+          "ok": false,
+          "code": "BINDING_INVALID",
+          "message": ".github/toolkit-programme.json is invalid: store.repository must be a separate repository",
+          "errors": [
+            "store.repository must be a separate repository"
+          ]
+        },
+        "enabled": null
+      },
+      {
+        "name": "v2 enabled with no store",
+        "validate": {
+          "ok": false,
+          "code": "BINDING_INVALID",
+          "message": ".github/toolkit-programme.json is invalid: store.kind undefined is not supported (supported: github)",
+          "errors": [
+            "store.kind undefined is not supported (supported: github)",
+            "store.repository must be owner/name",
+            "store.branch must be a branch name",
+            "store.path must be a relative folder ending in /",
+            "store.repository must be a separate repository"
+          ]
+        },
+        "enabled": null
+      },
+      {
+        "name": "v2 with a v1 field",
+        "validate": {
+          "ok": false,
+          "code": "BINDING_INVALID",
+          "message": ".github/toolkit-programme.json is invalid: parent_issue is not a version 2 binding key",
+          "errors": [
+            "parent_issue is not a version 2 binding key",
+            "parent_issue belongs to v1; v2 lists parents"
+          ]
+        },
+        "enabled": null
+      },
+      {
+        "name": "v2 with a bad schedule_folder",
+        "validate": {
+          "ok": false,
+          "code": "BINDING_INVALID",
+          "message": ".github/toolkit-programme.json is invalid: schedule_folder must be 1 to 32 capital letters, digits or hyphens, starting with a letter or digit",
+          "errors": [
+            "schedule_folder must be 1 to 32 capital letters, digits or hyphens, starting with a letter or digit"
+          ]
+        },
+        "enabled": null
+      },
+      {
+        "name": "v2 with a secret-shaped value",
+        "validate": {
+          "ok": false,
+          "code": "BINDING_INVALID",
+          "message": ".github/toolkit-programme.json is invalid: binding.projection.after_section looks like a GitHub token; state documents and bindings never hold secrets",
+          "errors": [
+            "binding.projection.after_section looks like a GitHub token; state documents and bindings never hold secrets"
+          ]
+        },
+        "enabled": null
+      },
+      {
+        "name": "v1 missing writer_prefix",
+        "validate": {
+          "ok": false,
+          "code": "BINDING_INVALID",
+          "message": ".github/toolkit-programme.json is invalid: writer_prefix must be a record prefix",
+          "errors": [
+            "writer_prefix must be a record prefix"
+          ]
+        },
+        "enabled": null
+      },
+      {
+        "name": "v1 with governance",
+        "validate": {
+          "ok": false,
+          "code": "BINDING_INVALID",
+          "message": ".github/toolkit-programme.json is invalid: governance and parents belong to v2",
+          "errors": [
+            "governance and parents belong to v2"
+          ]
+        },
+        "enabled": null
+      },
+      {
+        "name": "not an object",
+        "validate": {
+          "ok": false,
+          "code": "BINDING_INVALID",
+          "message": ".github/toolkit-programme.json is invalid: binding must be an object",
+          "errors": [
+            "binding must be an object"
+          ]
+        },
+        "enabled": null
+      }
+    ],
+    "journals": [
+      {
+        "name": "valid",
+        "errors": []
+      },
+      {
+        "name": "unknown field",
+        "errors": [
+          "journal has unknown field(s): extra"
+        ]
+      },
+      {
+        "name": "bad session hash",
+        "errors": [
+          "session_hash must be 16 hex characters"
+        ]
+      },
+      {
+        "name": "blockers text",
+        "errors": []
+      },
+      {
+        "name": "secret in next action",
+        "errors": [
+          "journal.returns[0].next_action looks like a API key; state documents and bindings never hold secrets"
+        ]
+      },
+      {
+        "name": "not an object",
+        "errors": [
+          "journal must be an object"
+        ]
+      }
+    ],
+    "canonical": [
+      {
+        "value": "{\"a\":[{\"c\":3,\"d\":2}],\"b\":1,\"e\":null}",
+        "text": "{\n  \"a\": [\n    {\n      \"c\": 3,\n      \"d\": 2\n    }\n  ],\n  \"b\": 1,\n  \"e\": null\n}\n"
+      },
+      {
+        "value": "[3,{\"y\":{\"x\":0},\"z\":1}]",
+        "text": "[\n  3,\n  {\n    \"y\": {\n      \"x\": 0\n    },\n    \"z\": 1\n  }\n]\n"
+      },
+      {
+        "value": "\"text\"",
+        "text": null
+      },
+      {
+        "value": "7",
+        "text": null
+      },
+      {
+        "value": "null",
+        "text": null
+      }
+    ],
+    "hosts": [
+      {
+        "host": "github.com",
+        "github": true
+      },
+      {
+        "host": "GitHub.com",
+        "github": true
+      },
+      {
+        "host": "api.github.com",
+        "github": true
+      },
+      {
+        "host": "github",
+        "github": true
+      },
+      {
+        "host": "github-enterprise",
+        "github": true
+      },
+      {
+        "host": "ghe.example.com",
+        "github": false
+      },
+      {
+        "host": "gitlab.com",
+        "github": false
+      },
+      {
+        "host": "",
+        "github": false
+      },
+      {
+        "host": null,
+        "github": false
+      }
+    ],
+    "transport_parse": [
+      {
+        "ok": true,
+        "value": {
+          "status": 200,
+          "json": {
+            "a": 1
+          }
+        }
+      },
+      {
+        "ok": true,
+        "value": {
+          "status": 201,
+          "json": {
+            "b": [
+              1,
+              2
+            ]
+          }
+        }
+      },
+      {
+        "ok": true,
+        "value": {
+          "status": 404,
+          "json": {
+            "message": "not json"
+          }
+        }
+      },
+      {
+        "ok": true,
+        "value": {
+          "status": 204,
+          "json": null
+        }
+      }
+    ],
+    "transport_request": [
+      {
+        "name": "ok",
+        "result": {
+          "ok": true,
+          "value": {
+            "status": 200,
+            "json": {
+              "ok": true
+            }
+          }
+        },
+        "seen": [
+          {
+            "file": "gh-example",
+            "args": [
+              "api",
+              "-i",
+              "-X",
+              "PUT",
+              "repos/example-owner/example-repo/contents/a.json",
+              "-H",
+              "Accept: application/vnd.github+json",
+              "--input",
+              "-"
+            ],
+            "input": "{\"message\":\"m\"}"
+          }
+        ]
+      },
+      {
+        "name": "signed out",
+        "result": {
+          "ok": false,
+          "code": "GH_AUTH",
+          "message": "gh is not signed in on this computer (gh auth login), so GitHub was not read.",
+          "errors": null
+        },
+        "seen": [
+          {
+            "file": "gh-example",
+            "args": [
+              "api",
+              "-i",
+              "-X",
+              "PUT",
+              "repos/example-owner/example-repo/contents/a.json",
+              "-H",
+              "Accept: application/vnd.github+json",
+              "--input",
+              "-"
+            ],
+            "input": "{\"message\":\"m\"}"
+          }
+        ]
+      },
+      {
+        "name": "exit 4 with a status",
+        "result": {
+          "ok": true,
+          "value": {
+            "status": 401,
+            "json": {}
+          }
+        },
+        "seen": [
+          {
+            "file": "gh-example",
+            "args": [
+              "api",
+              "-i",
+              "-X",
+              "PUT",
+              "repos/example-owner/example-repo/contents/a.json",
+              "-H",
+              "Accept: application/vnd.github+json",
+              "--input",
+              "-"
+            ],
+            "input": "{\"message\":\"m\"}"
+          }
+        ]
+      },
+      {
+        "name": "spawn error",
+        "result": {
+          "ok": false,
+          "code": "GH_FAILED",
+          "message": "gh could not run: spawn failed",
+          "errors": null
+        },
+        "seen": [
+          {
+            "file": "gh-example",
+            "args": [
+              "api",
+              "-i",
+              "-X",
+              "PUT",
+              "repos/example-owner/example-repo/contents/a.json",
+              "-H",
+              "Accept: application/vnd.github+json",
+              "--input",
+              "-"
+            ],
+            "input": "{\"message\":\"m\"}"
+          }
+        ]
+      },
+      {
+        "name": "no status",
+        "result": {
+          "ok": false,
+          "code": "GH_FAILED",
+          "message": "gh returned no HTTP status: network down",
+          "errors": null
+        },
+        "seen": [
+          {
+            "file": "gh-example",
+            "args": [
+              "api",
+              "-i",
+              "-X",
+              "PUT",
+              "repos/example-owner/example-repo/contents/a.json",
+              "-H",
+              "Accept: application/vnd.github+json",
+              "--input",
+              "-"
+            ],
+            "input": "{\"message\":\"m\"}"
+          }
+        ]
+      }
+    ]
+  }
+}
