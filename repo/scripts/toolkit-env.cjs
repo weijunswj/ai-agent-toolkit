@@ -425,6 +425,10 @@ function isHeaderLine(text) { return EDIT_HEADER_STARTS.some((start) => text.sta
 
 function sha256(bytes) { return crypto.createHash('sha256').update(bytes).digest('hex'); }
 
+// A hash of each listed key's stored value, kept with the edit's state, so a later save can tell a key
+// that changed outside Toolkit (which leaves no record) from one only this tab touched.
+function valueHashes(values) { return Object.fromEntries([...values].map(([name, value]) => [name, sha256(Buffer.from(value, 'utf8'))])); }
+
 function processAlive(pid) {
   try { process.kill(pid, 0); return true; } catch (error) { return error.code === 'EPERM'; }
 }
@@ -531,7 +535,7 @@ class EnvEditSession {
     const content = Buffer.from(`${[...header(id), ...editBody(values, layout)].join(os.EOL)}${os.EOL}`, 'utf8');
     fs.writeFileSync(file, content, { mode: 0o600, flag: 'wx' });
     const at = this.#now();
-    this.writeState({ id, created_at: at.toISOString(), baseline_at: at.toISOString(), last_save_ms: at.getTime(), snapshot: [...values.keys()].sort(), handled: sha256(content), refused: false });
+    this.writeState({ id, created_at: at.toISOString(), baseline_at: at.toISOString(), last_save_ms: at.getTime(), snapshot: [...values.keys()].sort(), hashes: valueHashes(values), handled: sha256(content), refused: false });
     return { file, id };
   }
 
@@ -543,10 +547,9 @@ class EnvEditSession {
 
   // { entries: Map name -> { value, line, kept }, problems: [line text without values], layout }.
   // Nothing is saved when problems exist.
-  read(file) {
+  read(file, bytes = fs.readFileSync(file)) {
     const entries = new Map();
     const problems = [];
-    const bytes = fs.readFileSync(file);
     // Notepad's "UTF-16 LE/BE" encodings: every line would look wrong, so say what is wrong instead.
     if (bytes.length >= 2 && ((bytes[0] === 0xff && bytes[1] === 0xfe) || (bytes[0] === 0xfe && bytes[1] === 0xff))) {
       return { entries, problems: ['the file is saved as UTF-16; in Notepad use File > Save as with Encoding UTF-8, then save again'], layout: [], utf16: true };
@@ -577,11 +580,13 @@ class EnvEditSession {
   }
 
   // Replaces the file's status line (keeping every other line, so line numbers stay put) and
-  // returns the hash of what was written, or null when the file has no status line.
-  writeStatus(file, text) {
-    let content;
-    try { content = fs.readFileSync(file, 'utf8'); } catch { return null; }
-    const lines = content.split('\n');
+  // returns the hash of what was written. Writes nothing, and returns null, when the file has no
+  // status line or no longer holds `checked` (a newer save arrived; it is handled on its own).
+  writeStatus(file, text, checked) {
+    let current;
+    try { current = fs.readFileSync(file); } catch { return null; }
+    if (!current.equals(checked)) return null;
+    const lines = current.toString('utf8').split('\n');
     const index = lines.findIndex((line) => line.trim().startsWith(EDIT_STATUS_START));
     if (index === -1) return null;
     lines[index] = `${EDIT_STATUS_START} ${text}${lines[index].endsWith('\r') ? '\r' : ''}`;
@@ -871,15 +876,15 @@ class ToolkitEnv {
   // success the state moves on to what is now stored; on refusal the file's status line says why.
   #applySave(file, state) {
     const bytes = fs.readFileSync(file);
-    const outcome = this.#checkSave(file, state);
+    const outcome = this.#checkSave(file, state, bytes);
     const now = this.#now();
     if (!outcome.ok) {
       const parsed = !outcome.utf16;
-      const written = parsed ? this.#edit.writeStatus(file, this.#statusText(outcome)) : null;
+      const written = parsed ? this.#edit.writeStatus(file, this.#statusText(outcome), bytes) : null;
       this.#edit.writeState({ ...state, refused: true, handled: written || sha256(bytes), last_save_ms: now.getTime() });
       return outcome;
     }
-    this.#edit.writeState({ ...state, baseline_at: outcome.at, snapshot: outcome.snapshot, refused: false, handled: sha256(bytes), last_save_ms: now.getTime() });
+    this.#edit.writeState({ ...state, baseline_at: outcome.at, snapshot: outcome.snapshot, hashes: valueHashes(this.#store.readAll(outcome.snapshot)), refused: false, handled: sha256(bytes), last_save_ms: now.getTime() });
     this.#edit.addResult(outcome);
     return outcome;
   }
@@ -887,8 +892,8 @@ class ToolkitEnv {
   // The save's changes, additions and removals, or why none can be made. A key listed when the tab
   // was made (or last saved) that changed elsewhere since, or a key added elsewhere that the file
   // also sets differently, is a conflict; only keys the tab listed can be removed.
-  #checkSave(file, state) {
-    const parsed = this.#edit.read(file);
+  #checkSave(file, state, bytes) {
+    const parsed = this.#edit.read(file, bytes);
     const problems = [...parsed.problems];
     const stored = new Set(this.#store.list());
     for (const [name, entry] of parsed.entries) {
@@ -897,9 +902,11 @@ class ToolkitEnv {
     if (problems.length) return { ok: false, problems, utf16: parsed.utf16 };
     const snapshot = new Set(state.snapshot);
     const record = this.#manifest.read();
-    const elsewhere = (name) => (record.names[name]?.updated_at || '') > state.baseline_at;
     const listed = [...parsed.entries.keys()];
-    const current = this.#store.readAll(listed.filter((name) => stored.has(name)));
+    const current = this.#store.readAll([...new Set([...listed, ...snapshot])].filter((name) => stored.has(name)));
+    const hashes = state.hashes || {};
+    const elsewhere = (name) => (record.names[name]?.updated_at || '') > state.baseline_at
+      || (name in hashes && current.has(name) && sha256(Buffer.from(current.get(name), 'utf8')) !== hashes[name]);
     const writes = new Map();
     const conflicts = [];
     for (const [name, entry] of parsed.entries) {

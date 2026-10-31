@@ -42,7 +42,9 @@ A save is applied whole or not at all. Nothing is saved, and the `# Status:` lin
 - a line is not `NAME=value`, has no value, uses a key name twice, has a value in quotes or is too long, or a comment looks like a key;
 - the file was saved as UTF-16 (save it as UTF-8);
 - the save would remove every key;
-- a key changed elsewhere (`set`, `remove`, an import) while the tab was open. Ask for your keys again for a fresh tab, and copy your changes across; the typed lines stay in your tab.
+- a key changed elsewhere (`set`, `remove`, an import, or straight in Credential Manager) while the tab was open. Ask for your keys again for a fresh tab, and copy your changes across; the typed lines stay in your tab.
+
+When Toolkit writes the status line, Notepad may say the file changed and offer to reload it; reload to see why. The edit's state keeps a hash of each listed value next to the file, never the value itself, so a change made outside Toolkit is caught too.
 
 A key added elsewhere while the tab is open is never removed by it. A value that one line cannot show exactly (a line break, spaces at either end, or wrapping quotes) appears as `<kept: change it with toolkit env set NAME>` and stays as it is.
 

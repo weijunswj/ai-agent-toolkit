@@ -1618,3 +1618,52 @@ test('the toolkit-env skill opens Notepad from context, keeps names-only questio
   assert.ok(cases.open.length >= 10);
   assert.ok(cases.not_open.length >= 5);
 });
+
+test('a key changed outside Toolkit while the tab is open (no record) is still a conflict', async (t) => {
+  const kept = sentinel();
+  const h = harness(t, { values: { X1_TEST_KEPT_KEY: kept, X1_TEST_OTHER_KEY: sentinel() } });
+  await h.run('edit');
+  const file = editFile(h.paths);
+  // Straight into the store, as Credential Manager or another tool would: no manifest change.
+  h.store.writeAll(new Map([['X1_TEST_KEPT_KEY', sentinel()]]));
+  const before = storeImage(h);
+  save(file, `${fs.readFileSync(file, 'utf8')}X1_TEST_EXTRA_KEY=${sentinel()}\n`);
+  const done = await h.run('apply');
+  assert.equal(done.code, 1);
+  assert.match(done.stderr, /Your keys changed while this tab was open, so nothing was saved: X1_TEST_KEPT_KEY\./);
+  assert.equal(storeImage(h), before);
+  assert.ok(!fs.readFileSync(path.join(h.paths.editDir, 'session.json'), 'utf8').includes(kept), 'the state holds hashes, never values');
+});
+
+test('after an applied save, the tab can be saved again without a false conflict', async (t) => {
+  const clock = clockAt();
+  const h = harness(t, { clock, values: { X1_TEST_KEPT_KEY: sentinel() } });
+  await h.run('edit');
+  const file = editFile(h.paths);
+  const watcher = h.env.editWatcher(file, { pid: 601, alive: () => true });
+  watcher.start();
+  const first = sentinel();
+  const second = sentinel();
+  save(file, fs.readFileSync(file, 'utf8').replace(/^X1_TEST_KEPT_KEY=.*$/m, `X1_TEST_KEPT_KEY=${first}`));
+  watcher.tick(); clock.ms += 2000; watcher.tick();
+  assert.equal(h.store.peek('X1_TEST_KEPT_KEY'), first);
+  clock.ms += 1000;
+  save(file, fs.readFileSync(file, 'utf8').replace(first, second));
+  watcher.tick(); clock.ms += 2000; watcher.tick();
+  assert.equal(h.store.peek('X1_TEST_KEPT_KEY'), second);
+});
+
+test('a refused save writes its status line only if the file still holds the bytes it checked', async (t) => {
+  const h = harness(t, { values: { X1_TEST_KEPT_KEY: sentinel() } });
+  await h.run('edit');
+  const file = editFile(h.paths);
+  const session = new EnvEditSession({ directory: h.paths.editDir, privateDirectory: noPrivateDirectory });
+  const checked = fs.readFileSync(file);
+  const newer = `${checked.toString('utf8')}X1_TEST_NEWER_KEY=${sentinel()}\n`;
+  fs.writeFileSync(file, newer);
+  assert.equal(session.writeStatus(file, 'NOT SAVED', checked), null);
+  assert.equal(fs.readFileSync(file, 'utf8'), newer, 'the newer save is untouched');
+  const now = fs.readFileSync(file);
+  assert.ok(session.writeStatus(file, 'NOT SAVED', now));
+  assert.match(fs.readFileSync(file, 'utf8'), /^# Status: NOT SAVED\r?$/m);
+});
