@@ -92,11 +92,20 @@ Codex (hook-process cases in `repo/tests/qualification/codex-native-helper.live.
 | Route proof | Served model and effort from the Codex session log, read by the lead, never the helper's report |
 | Known limit | Hook failures fail open (above). In Codex Desktop on Windows, a helper's shell can hit "Requested registry access is not allowed" (Desktop's sandbox for subagents, seen in October 2026) |
 
-## 7. Lane write fences
+## 7. Gate workspace
+
+A writing gate works only inside its own session's writable folders, so the owner's plan approval never needs a second yes in the gate chat.
+
+- **Codex Desktop:** a chat can write in its working folder and in any worktree attached to that chat. A controller starts a builder with `create_thread` and `environment: { type: "worktree" }`, which gives the builder its own worktree, or the builder's first step makes one with `create_worktree`, which attaches it. A chat started with `environment: { type: "local" }` writes only in the project's main checkout.
+- **Never point a chat at another folder.** A chat told to escalate its shells into a folder outside its own sends every write to Codex's automatic reviewer, which trusts only what the owner typed in that chat and rightly refuses an approval forwarded from the controller. Rewording or retrying after that refusal routes around the reviewer.
+- **Scratch:** a Codex gate keeps scratch in its worktree's ignored `.tmp/`, because a user-profile folder is outside the chat's folders.
+- **Known limit:** Codex cannot attach an existing worktree to a new chat (seen October 2026), and starting a successor from a lane branch still checked out in the old worktree is not yet qualified. Until it is, a successor continues in the old chat, or the owner approves its out-of-scope writes with Codex's native approval in the chat that asks.
+
+## 8. Lane write fences
 
 The integration controller alone writes the parent, the version files and the integration files the lane map names (`repo/contracts/lanes/lane-map.json` once it lands). A lane controller writes only the child the catalogue delegates to it (`assign` and `interrupt`), with its own decision-ID prefix.
 
-## 8. Honest limits
+## 9. Honest limits
 
 - The fence orders cooperating Toolkit writers under one GitHub account; it authenticates nobody.
 - The tool cannot see whether another host session has stopped. A takeover record must carry that evidence (session archived, remote control ended).
