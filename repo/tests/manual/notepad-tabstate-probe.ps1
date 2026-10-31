@@ -38,7 +38,7 @@ if (Get-Process -Name 'Notepad' -ErrorAction SilentlyContinue) {
 $tabState = Join-Path $env:LOCALAPPDATA 'Packages\Microsoft.WindowsNotepad_8wekyb3d8bbwe\LocalState\TabState'
 $scratch = Join-Path $env:USERPROFILE ("t\notepad-probe-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
 New-Item -ItemType Directory -Force -Path $scratch | Out-Null
-$file = Join-Path $scratch ('env-edit-' + (-join ((1..16) | ForEach-Object { '{0:x}' -f (Get-Random -Maximum 16) })) + '.txt')
+$file = Join-Path $scratch ('env-edit-' + (-join ((1..16) | ForEach-Object { '{0:x}' -f (Get-Random -Maximum 16) })) + '.env')
 $canary = 'X1_PROBE_' + [guid]::NewGuid().ToString('N')
 $typed = 'X1_TYPED_' + [guid]::NewGuid().ToString('N')
 Set-Content -LiteralPath $file -Value "X1_PROBE_DUMMY_KEY=$canary" -Encoding UTF8
