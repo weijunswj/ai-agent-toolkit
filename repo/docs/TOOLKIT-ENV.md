@@ -48,7 +48,7 @@ A key added elsewhere while the tab is open is never removed by it. A value that
 
 Every `edit` wipes the earlier file first, so Notepad always shows what is stored now. A save from an older Notepad tab is never applied: the file it writes is wiped, and the next result says to use the newest tab. A save that was not applied when you start a new edit is not carried over, and the result says so. The file is overwritten with zeros, then deleted, at "done" or 30 minutes after its last save.
 
-Notepad's tab restore can keep its own copy of an open tab. After "done", Toolkit checks Notepad's tab-restore folder for the file's name (yes or no, never its content) and, when it finds it, tells you to close the tab and to set Notepad > Settings > When Notepad starts to "Start new session". Toolkit never changes Notepad's own files.
+Notepad can keep its own copy of an open tab and bring it back after the file is deleted. Toolkit cannot reliably see Notepad's tab-restore data from an app's shell, so every "done" (and the 30-minute end) says to close the tab without saving, and how to stop it for good: Notepad > Settings > When Notepad starts > "Start new session". Toolkit never reads or changes Notepad's own files.
 
 ## Seeing a value
 

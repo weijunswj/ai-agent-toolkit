@@ -19,6 +19,8 @@ Cases:
   Killed   Notepad is stopped while the file is open.
 
 It stops, and changes nothing, if Notepad is already running (your own tabs are never closed).
+Run it in a PowerShell window started outside any packaged app: from inside one (such as the Claude
+desktop app's shell), Windows can hide Notepad's TabState folder, and every answer then reads "no".
 Scratch goes under $env:USERPROFILE\t and is deleted at the end.
 #>
 param(

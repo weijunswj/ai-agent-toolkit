@@ -43,7 +43,7 @@ function noPrivateDirectory(directory) { fs.mkdirSync(directory, { recursive: tr
 
 // environment holds the agent markers a test sets (none by default, whatever runs the tests);
 // tty, typed and clipboard stand in for the terminal and the clipboard used by show.
-function harness(t, { values = {}, answers = [], hidden = [], typed = [], feeders = [], corruptReadBack = [], opener, environment = {}, tty = { stdin: true, stdout: true }, clipboard, scriptPath, clock, helpers = [], startHelper, editEnvironment = {}, platform } = {}) {
+function harness(t, { values = {}, answers = [], hidden = [], typed = [], feeders = [], corruptReadBack = [], opener, environment = {}, tty = { stdin: true, stdout: true }, clipboard, scriptPath, clock, helpers = [], startHelper } = {}) {
   const home = tempHome(t);
   const paths = new EnvPaths({ homeDir: home, environment: {} });
   const store = new FakeEnvStore({ values, corruptReadBack });
@@ -60,7 +60,7 @@ function harness(t, { values = {}, answers = [], hidden = [], typed = [], feeder
     manifest: new EnvManifest({ file: paths.manifest, now }),
     editSession: new EnvEditSession({
       directory: paths.editDir, opener: opener || (async () => true), privateDirectory: noPrivateDirectory, now,
-      startHelper: startHelper || ((file) => { helpers.push(file); return true; }), environment: editEnvironment, platform: platform || process.platform,
+      startHelper: startHelper || ((file) => { helpers.push(file); return true; }),
     }),
     feeders,
     paths,
@@ -1542,25 +1542,16 @@ test('a new edit after a refused save says the last save was not applied, and sh
   assert.deepEqual(bodyOf(fs.readFileSync(editFile(h.paths), 'utf8')), [`X1_TEST_KEPT_KEY=${kept}`]);
 });
 
-test('the tab-restore check looks for the edit file in Notepad\'s TabState and reports yes or no only', async (t) => {
-  for (const [label, setup, platform, expected] of [
-    ['path present', (dir, file) => fs.writeFileSync(path.join(dir, 'a1b2.bin'), Buffer.concat([Buffer.from([1, 2, 3]), Buffer.from(file, 'utf16le'), Buffer.from('canary-tab-text', 'utf16le')])), 'win32', true],
-    ['path absent', (dir) => fs.writeFileSync(path.join(dir, 'a1b2.bin'), Buffer.from('C:\\other\\file.txt', 'utf16le')), 'win32', false],
-    ['folder missing', () => {}, 'win32', false],
-    ['not Windows', (dir, file) => fs.writeFileSync(path.join(dir, 'a1b2.bin'), Buffer.from(file, 'utf16le')), 'linux', false],
-  ]) await t.test(label, async (t) => {
-    const local = tempHome(t);
-    const h = harness(t, { values: { X1_TEST_KEPT_KEY: sentinel() }, editEnvironment: { LOCALAPPDATA: local }, platform });
-    await h.run('edit');
-    const file = editFile(h.paths);
-    const tabState = path.join(local, 'Packages', 'Microsoft.WindowsNotepad_8wekyb3d8bbwe', 'LocalState', 'TabState');
-    if (label !== 'folder missing') fs.mkdirSync(tabState, { recursive: true });
-    setup(tabState, file);
-    const done = await h.run('apply');
-    assert.equal(done.code, 0, done.stderr);
-    assert.equal(/Notepad may still keep a copy in its tab-restore data\. Close the tab; to stop this for good, set Notepad > Settings > When Notepad starts to "Start new session"\./.test(done.stdout), expected);
-    assert.doesNotMatch(done.stdout + done.stderr, /canary-tab-text|a1b2/);
-  });
+test('every end of an edit says to close the Notepad tab, since Notepad can keep its own copy', async (t) => {
+  const note = /Close the Toolkit env tab in Notepad without saving: Notepad can keep its own copy of an open tab and bring it back\. To stop that for good, set Notepad > Settings > When Notepad starts to "Start new session"\./;
+  const clock = clockAt();
+  const h = harness(t, { clock, values: { X1_TEST_KEPT_KEY: sentinel() } });
+  await h.run('edit');
+  assert.match((await h.run('apply')).stdout, note, 'done');
+  await h.run('edit');
+  clock.ms += 31 * 60 * 1000;
+  assert.match((await h.run('status')).stdout, note, 'the 30-minute end');
+  assert.doesNotMatch((await h.run('apply')).stdout, note, 'no open edit, no note');
 });
 
 // The closure matrix of the edit (states E0 to E3 against each event), as one table.

@@ -56,7 +56,6 @@ const EDIT_STATE = 'session.json';
 const EDIT_RESULT = 'last-result.json';
 const EDIT_WATCH_LOCK = 'watch.lock';
 const EDIT_APPLY_LOCK = 'apply.lock';
-const NOTEPAD_TABSTATE = ['Packages', 'Microsoft.WindowsNotepad_8wekyb3d8bbwe', 'LocalState', 'TabState'];
 const MAX_LAYOUT_LINES = 500;
 const MAX_COMMENT_CHARS = 200;
 const SCHEMES = new Set(['Bearer', 'none']);
@@ -432,43 +431,23 @@ function processAlive(pid) {
 
 function sleepSync(ms) { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); }
 
-// Whether Notepad's tab-restore data (Windows 11) still names the edit file. Reads only, reports
-// yes or no, and never returns or prints what it read.
-function notepadKeepsCopy(file, { platform = process.platform, environment = process.env } = {}) {
-  if (platform !== 'win32' || !environment.LOCALAPPDATA) return false;
-  const folder = path.join(environment.LOCALAPPDATA, ...NOTEPAD_TABSTATE);
-  let names;
-  try { names = fs.readdirSync(folder); } catch { return false; }
-  const needles = [...new Set([file, file.toLowerCase()])].map((text) => Buffer.from(text, 'utf16le'));
-  for (const name of names) {
-    if (!name.toLowerCase().endsWith('.bin')) continue;
-    let bytes;
-    try {
-      const entry = path.join(folder, name);
-      if (fs.statSync(entry).size > 64 * 1024 * 1024) continue;
-      bytes = fs.readFileSync(entry);
-    } catch { continue; }
-    if (needles.some((needle) => bytes.includes(needle))) return true;
-  }
-  return false;
-}
-
-const NOTEPAD_COPY_NOTE = 'Notepad may still keep a copy in its tab-restore data. Close the tab; to stop this for good, set Notepad > Settings > When Notepad starts to "Start new session".';
+// Windows 11 Notepad can keep the text of an open tab in its own tab-restore data after the file is
+// deleted, and bring the tab back. Toolkit cannot reliably see that data from an app's shell, so every
+// end of an edit says so.
+const NOTEPAD_COPY_NOTE = 'Close the Toolkit env tab in Notepad without saving: Notepad can keep its own copy of an open tab and bring it back. To stop that for good, set Notepad > Settings > When Notepad starts to "Start new session".';
 
 // The private edit folder: the open edit file, its names-only state (edit id, when it was made and
 // last saved, the key names it listed, a hash of the last content handled), the names-only result
 // of saves the helper applied, and the locks. One edit at a time: every new edit replaces the file.
 class EnvEditSession {
-  #directory; #opener; #now; #privateDirectory; #startHelper; #platform; #environment;
+  #directory; #opener; #now; #privateDirectory; #startHelper;
 
-  constructor({ directory, opener = defaultOpener, now = () => new Date(), privateDirectory = ensurePrivateDirectory, startHelper = () => false, platform = process.platform, environment = process.env }) {
+  constructor({ directory, opener = defaultOpener, now = () => new Date(), privateDirectory = ensurePrivateDirectory, startHelper = () => false }) {
     this.#directory = directory;
     this.#opener = opener;
     this.#now = now;
     this.#privateDirectory = privateDirectory;
     this.#startHelper = startHelper;
-    this.#platform = platform;
-    this.#environment = environment;
   }
 
   get directory() { return this.#directory; }
@@ -561,8 +540,6 @@ class EnvEditSession {
   startHelper(file) {
     try { return Boolean(this.#startHelper(file)); } catch { return false; }
   }
-
-  notepadKeepsCopy(file) { return notepadKeepsCopy(file, { platform: this.#platform, environment: this.#environment }); }
 
   // { entries: Map name -> { value, line, kept }, problems: [line text without values], layout }.
   // Nothing is saved when problems exist.
@@ -724,7 +701,7 @@ class ToolkitEnv {
       clipboard: (text) => copyToClipboard(text, { platform, environment }),
       store: new PlatformStore({ platform }),
       manifest: new EnvManifest({ file: paths.manifest }),
-      editSession: new EnvEditSession({ directory: paths.editDir, startHelper: defaultHelperStarter, platform, environment }),
+      editSession: new EnvEditSession({ directory: paths.editDir, startHelper: defaultHelperStarter }),
       feeders: [
         new ClaudeCodeFeeder({ claudeJson: paths.claudeJson, commandFor }),
         new CodexFeeder({ codexHome: paths.codexHome, commandFor }),
@@ -765,7 +742,7 @@ class ToolkitEnv {
       if (file) this.#edit.discard(file);
       this.#edit.clearState();
       lines.push(`Closed your env edit 30 minutes after its last save${unapplied ? '; its last save was not applied' : ''}.`);
-      if (file && this.#edit.notepadKeepsCopy(file)) lines.push(NOTEPAD_COPY_NOTE);
+      if (file) lines.push(NOTEPAD_COPY_NOTE);
     }
     return lines;
   }
@@ -861,7 +838,7 @@ class ToolkitEnv {
       this.#edit.clearState();
       const result = this.#edit.takeResult();
       out.push(...this.#resultLines(result, null));
-      if (this.#edit.notepadKeepsCopy(file)) out.push(NOTEPAD_COPY_NOTE);
+      out.push(NOTEPAD_COPY_NOTE);
       out.push(...this.#feederLines());
       return { code: 0, out, err: [] };
     });
@@ -1512,7 +1489,6 @@ module.exports = Object.freeze({
   AGENT_MARKERS,
   EnvEditSession,
   EnvError,
-  notepadKeepsCopy,
   EnvManifest,
   EnvPaths,
   ToolkitEnv,
