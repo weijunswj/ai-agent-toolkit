@@ -106,6 +106,16 @@
       "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
       "expect": { "decision": "allow" },
       "status": "pass"
+    },
+    {
+      "id": "G8.python-here-string-proposal",
+      "source": "owner report 31 Oct 2026: a PowerShell python -c here-string that only writes a JSON proposal, refused as a session resume or fork (a command Toolkit could not read)",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "payload": { "tool_name": "PowerShell", "tool_input": { "command": "& 'C:\\Users\\example\\python\\python.exe' -c @'\nfrom pathlib import Path\nimport json\nreport={'status':'PROPOSAL_NOT_EXECUTED','note':'no stack/stage supplied; resume or fork not used'}\np=Path('plan-1.json');p.write_text(json.dumps(report,indent=2)+'\\n')\nprint(json.dumps({'report':str(p),'executed':False}))\n'@; [DateTime]::UtcNow.ToString('o')" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
+      "expect": { "decision": "allow" },
+      "status": "pass"
     }
   ]
 }
