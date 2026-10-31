@@ -920,7 +920,9 @@ class ToolkitEnv {
     const removals = [...snapshot].filter((name) => !parsed.entries.has(name) && stored.has(name)).sort();
     conflicts.push(...removals.filter(elsewhere));
     if (conflicts.length) return { ok: false, conflicts: [...new Set(conflicts)].sort() };
-    if (removals.length && removals.length === stored.size) return { ok: false, removeAll: true };
+    // An emptied tab (select all, delete, save) removes every key it listed; a key added elsewhere
+    // meanwhile must not turn that into an allowed save.
+    if (removals.length && removals.length === [...snapshot].filter((name) => stored.has(name)).length) return { ok: false, removeAll: true };
     if (writes.size) {
       this.#store.writeAll(writes);
       const after = this.#store.readAll([...writes.keys()]);

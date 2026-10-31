@@ -1672,3 +1672,26 @@ test('a refused save writes its status line only if the file still holds the byt
   assert.ok(session.writeStatus(file, () => 'NOT SAVED', now));
   assert.match(fs.readFileSync(file, 'utf8'), /^# Status: NOT SAVED\r?$/m);
 });
+
+test('emptying the tab is refused even when a key was added elsewhere meanwhile', async (t) => {
+  const h = harness(t, { values: { X1_TEST_KEPT_KEY: sentinel(), X1_TEST_OTHER_KEY: sentinel() } });
+  await h.run('edit');
+  const file = editFile(h.paths);
+  h.store.writeAll(new Map([['X1_TEST_NEW_KEY', sentinel()]]));
+  const before = storeImage(h);
+  save(file, '');
+  const done = await h.run('apply');
+  assert.equal(done.code, 1);
+  assert.match(done.stderr, /this save would remove every key/);
+  assert.equal(storeImage(h), before);
+});
+
+test('deleting some listed lines is still applied', async (t) => {
+  const h = harness(t, { values: { X1_TEST_KEPT_KEY: sentinel(), X1_TEST_GONE_KEY: sentinel() } });
+  await h.run('edit');
+  const file = editFile(h.paths);
+  save(file, fs.readFileSync(file, 'utf8').replace(/^X1_TEST_GONE_KEY=.*$/m, ''));
+  const done = await h.run('apply');
+  assert.equal(done.code, 0, done.stderr);
+  assert.match(done.stdout, /^removed: X1_TEST_GONE_KEY$/m);
+});
