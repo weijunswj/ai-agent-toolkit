@@ -887,7 +887,7 @@ class ToolkitEnv {
       this.#edit.writeState({ ...state, refused: true, handled: written || sha256(bytes), last_save_ms: now.getTime() });
       return outcome;
     }
-    this.#edit.writeState({ ...state, baseline_at: outcome.at, snapshot: outcome.snapshot, hashes: valueHashes(this.#store.readAll(outcome.snapshot)), refused: false, handled: sha256(bytes), last_save_ms: now.getTime() });
+    this.#edit.writeState({ ...state, baseline_at: outcome.at, snapshot: outcome.snapshot, hashes: outcome.hashes, refused: false, handled: sha256(bytes), last_save_ms: now.getTime() });
     this.#edit.addResult(outcome);
     return outcome;
   }
@@ -942,6 +942,8 @@ class ToolkitEnv {
       ok: true,
       at,
       snapshot: listed.filter((name) => left.includes(name)).sort(),
+      // What each listed key now holds: this save's value, or the stored one it left alone.
+      hashes: valueHashes(new Map(listed.filter((name) => left.includes(name)).map((name) => [name, writes.has(name) ? writes.get(name) : current.get(name)]))),
       changed: [...writes.keys()].filter((name) => stored.has(name)).sort(),
       added: [...writes.keys()].filter((name) => !stored.has(name)).sort(),
       removed: removals,
