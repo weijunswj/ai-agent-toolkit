@@ -334,13 +334,14 @@ function bindingRequiredChecks(root, options = {}) {
 // `eligibility_required` says whether its required checks include the always-manual check
 // (ELIGIBILITY_CHECK): without it a yes is not enforceable, and the merge hold keeps asking.
 const ELIGIBILITY_CHECK = 'auto-merge-eligible';
-// The question for the owner, asked once per governed repository. No is recommended, so an
-// "all recommended" answer never turns it on.
+// The question for the owner, asked once per governed repository. Yes is recommended (the owner's
+// choice): a yes still takes effect only through a binding pull request and a required check the
+// owner sets, and pull requests on the always-manual list keep waiting for the owner's label.
 const TASK_AUTO_MERGE_QUESTION = Object.freeze({
   text: "When a task's pull request has passed review, CI and your testing, should it merge without waiting for you to type merge?",
-  no: 'No, I type merge for each one (recommended).',
-  yes: 'Yes, merge it once every check has passed; a pull request that changes hooks or merge rules still waits until you add the toolkit-owner-merge label in GitHub.',
-  reason: 'Merging changes what every computer and repository gets on its next update, so you see each one first.',
+  yes: 'Yes, merge it once every check has passed (recommended); a pull request that changes hooks or merge rules still waits until you add the toolkit-owner-merge label in GitHub.',
+  no: 'No, I type merge for each one.',
+  reason: 'A finished pull request has already passed review, CI and your testing, so waiting for you to type merge only slows it down; anything that changes hooks or merge rules still waits for you.',
 });
 function taskAutoMerge(root, options = {}) {
   const off = { auto_merge: 'off', answered: false, fresh: false, eligibility_required: false };

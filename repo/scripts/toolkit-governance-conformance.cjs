@@ -169,7 +169,7 @@ function taskAutoMergeFindings(root, options, version) {
   const question = governance.TASK_AUTO_MERGE_QUESTION;
   const check = governance.TASK_AUTO_MERGE_CHECK;
   if (!answer.answered) {
-    return [finding('TASK_AUTO_MERGE_UNANSWERED', 'info', `Task auto-merge: not answered, so it is off. Once every Toolkit copy, the Claude account copy included, runs ${version} or later (older copies treat an answered binding as invalid), ask the owner once: "${question.text}" A) ${question.no} B) ${question.yes}. ${question.reason} Record the answer as task_prs.auto_merge (off or after-gates) in ${governance.BINDING_FILE} through a pull request the owner merges; a yes also adds ${check} to required_checks there and to the default branch's required checks. Until then, ask nothing and merge no answer.`)];
+    return [finding('TASK_AUTO_MERGE_UNANSWERED', 'info', `Task auto-merge: not answered, so it is off. Once every Toolkit copy, the Claude account copy included, runs ${version} or later (older copies treat an answered binding as invalid), ask the owner once: "${question.text}" A) ${question.yes} B) ${question.no}. ${question.reason} Record the answer as task_prs.auto_merge (off or after-gates) in ${governance.BINDING_FILE} through a pull request the owner merges; a yes also adds ${check} to required_checks there and to the default branch's required checks. Until then, ask nothing and merge no answer.`)];
   }
   if (answer.auto_merge !== 'after-gates') return [finding('TASK_AUTO_MERGE_OFF', 'info', 'Task auto-merge: off. The owner types merge for each pull request.')];
   if (!answer.eligibility_required) {

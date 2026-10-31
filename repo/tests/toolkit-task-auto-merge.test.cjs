@@ -207,8 +207,10 @@ test('governance check: asks the question once, says off or on, and flags a yes 
   assert.equal(unanswered.id, 'TASK_AUTO_MERGE_UNANSWERED');
   assert.equal(unanswered.severity, 'info', 'never blocks');
   for (const words of [governance.TASK_AUTO_MERGE_QUESTION.text, governance.TASK_AUTO_MERGE_QUESTION.no, 'task_prs.auto_merge', 'auto-merge-eligible']) assert.ok(unanswered.message.includes(words), words);
-  assert.match(governance.TASK_AUTO_MERGE_QUESTION.no, /^No\b.*\(recommended\)/, 'No is the recommended answer');
-  assert.doesNotMatch(governance.TASK_AUTO_MERGE_QUESTION.yes, /recommended/);
+  // The owner chose Yes as the recommended answer, listed first.
+  assert.match(governance.TASK_AUTO_MERGE_QUESTION.yes, /^Yes\b.*\(recommended\)/, 'Yes is the recommended answer');
+  assert.doesNotMatch(governance.TASK_AUTO_MERGE_QUESTION.no, /recommended/);
+  assert.ok(unanswered.message.indexOf(`A) ${governance.TASK_AUTO_MERGE_QUESTION.yes}`) > 0, 'the recommended answer comes first');
   assert.match(governance.TASK_AUTO_MERGE_QUESTION.yes, /toolkit-owner-merge label/, 'the yes says how always-manual pull requests merge');
   const version = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'contracts', 'toolkit-local-bridge', 'version.json'), 'utf8')).version;
   assert.ok(unanswered.message.includes(`Once every Toolkit copy, the Claude account copy included, runs ${version} or later`), 'asked only once every copy can read the answer');
