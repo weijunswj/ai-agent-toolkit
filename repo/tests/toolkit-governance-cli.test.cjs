@@ -256,9 +256,10 @@ test('K-01: check exit codes and read-only behaviour', async (t) => {
     codes[name] = [result.code, parsed.status, parsed.findings.map(entry => entry.id).sort().join(',')];
   }
   assert.deepEqual(codes, {
-    conformant: [0, 'conformant', ''],
-    stale: [1, 'drift', 'GOVERNED_BLOCK_STALE'],
-    edited: [1, 'drift', 'GOVERNED_BLOCK_EDITED'],
+    // A governed binding with no task auto-merge answer gets the question once, as information only.
+    conformant: [0, 'conformant', 'TASK_AUTO_MERGE_UNANSWERED'],
+    stale: [1, 'drift', 'GOVERNED_BLOCK_STALE,TASK_AUTO_MERGE_UNANSWERED'],
+    edited: [1, 'drift', 'GOVERNED_BLOCK_EDITED,TASK_AUTO_MERGE_UNANSWERED'],
     unasked: [1, 'drift', 'DECISION_PENDING'],
     incomplete: [1, 'drift', 'DECISION_PENDING'],
     plain: [1, 'drift', 'DECISION_PENDING'],
@@ -272,11 +273,14 @@ test('K-01: check exit codes and read-only behaviour', async (t) => {
   fs.writeFileSync(ctx.registryPath, decisions);
   assert.deepEqual(treeDigest(ctx.root), snapshot, 'check wrote nothing');
 
+  // Task auto-merge's own finding (the question while unanswered) is covered in
+  // toolkit-task-auto-merge.test.cjs; these lists leave it out.
+  const notTaskAutoMerge = id => !id.startsWith('TASK_AUTO_MERGE');
   // An ENABLED repository without the no-force-push ruleset drifts; one GitHub cannot protect, or
   // that could not be checked, reports it without claiming protection or failing the check.
   const missing = await run(ctx, conformant, ['check', '--json'], { rulesetReader: () => ({ ok: true, rulesets: [] }) });
   assert.equal(missing.code, 1);
-  assert.deepEqual(JSON.parse(missing.stdout).findings.map(entry => entry.id), ['RULESET_NO_FORCE_PUSH_MISSING']);
+  assert.deepEqual(JSON.parse(missing.stdout).findings.map(entry => entry.id).filter(notTaskAutoMerge), ['RULESET_NO_FORCE_PUSH_MISSING']);
   for (const [reader, id, status] of [
     [() => ({ ok: false, reason: 'plan-has-no-rulesets' }), 'RULESET_NOT_ENFORCEABLE', 'not-enforceable'],
     [() => ({ ok: false, reason: 'gh-unavailable' }), 'RULESET_UNVERIFIED', 'unverified'],
@@ -284,7 +288,7 @@ test('K-01: check exit codes and read-only behaviour', async (t) => {
     const result = await run(ctx, conformant, ['check', '--json'], { rulesetReader: reader });
     const parsed = JSON.parse(result.stdout);
     assert.equal(result.code, 0, id);
-    assert.deepEqual(parsed.findings.map(entry => entry.id), [id]);
+    assert.deepEqual(parsed.findings.map(entry => entry.id).filter(notTaskAutoMerge), [id]);
     assert.equal(parsed.no_force_push_ruleset.status, status);
   }
   let called = false;
@@ -300,15 +304,15 @@ test('K-01: check exit codes and read-only behaviour', async (t) => {
   const squash = () => { const read = BRANCH_PROTECTED(); read.rules[0].parameters.allowed_merge_methods = ['merge', 'squash']; return read; };
   const loose = await run(ctx, conformant, ['check', '--json'], { protectionReader: squash });
   assert.equal(loose.code, 1);
-  assert.deepEqual(JSON.parse(loose.stdout).findings.map(entry => entry.id), ['PROTECTION_MERGE_METHODS']);
+  assert.deepEqual(JSON.parse(loose.stdout).findings.map(entry => entry.id).filter(notTaskAutoMerge), ['PROTECTION_MERGE_METHODS']);
   const unread = JSON.parse((await run(ctx, conformant, ['check', '--json'], { protectionReader: () => ({ ok: false, reason: 'gh-unavailable' }) })).stdout);
   assert.equal(unread.default_branch_protection.status, 'unverified');
-  assert.deepEqual(unread.findings.map(entry => entry.id), ['PROTECTION_CHECKS_MISMATCH_UNVERIFIED', 'PROTECTION_CHECK_UNPINNED_UNVERIFIED', 'PROTECTION_MERGE_METHODS_UNVERIFIED']);
+  assert.deepEqual(unread.findings.map(entry => entry.id).filter(notTaskAutoMerge), ['PROTECTION_CHECKS_MISMATCH_UNVERIFIED', 'PROTECTION_CHECK_UNPINNED_UNVERIFIED', 'PROTECTION_MERGE_METHODS_UNVERIFIED']);
   assert.match((await run(ctx, conformant, ['check'])).stdout, /Default-branch protection: conformant/);
 
   // An ENABLED repository needs a current plain-text check, unless its settings record why it is off.
   const PROTECTED_RUN = { rulesetReader: PROTECTED };
-  const checkIds = async () => JSON.parse((await run(ctx, conformant, ['check', '--json'], PROTECTED_RUN)).stdout).findings.map(entry => entry.id);
+  const checkIds = async () => JSON.parse((await run(ctx, conformant, ['check', '--json'], PROTECTED_RUN)).stdout).findings.map(entry => entry.id).filter(notTaskAutoMerge);
   const copy = path.join(conformant, '.github', 'scripts', 'plain-text-check.cjs');
   const settingsFile = path.join(conformant, '.github', 'plain-text.json');
   fs.rmSync(settingsFile);

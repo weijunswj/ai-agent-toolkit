@@ -4,7 +4,7 @@ Installed by AI Agent Toolkit setup; applies in every folder. Work execution-fir
 
 ## Precedence And Safety Floor
 
-Follow, in order: the user's current request and their own instructions (custom instructions, preferences); the repository's instructions (`AGENTS.md`, `CLAUDE.md` or equivalent, including any Toolkit-governed block) and what they point to; these rules; relevant skills or plugins; best practice. Where repository instructions conflict with these rules, the repository wins on conventions and workflow. Report material conflicts.
+Follow, in order: the user's current request and their own instructions (custom instructions, preferences); the repository's instructions (`AGENTS.md`, `CLAUDE.md` or equivalent, with any Toolkit-governed block) and what they point to; these rules; relevant skills or plugins; best practice. Where repository instructions conflict with these rules, the repository wins on conventions and workflow. Report material conflicts.
 
 If the repository's `AGENTS.md` is not already in your instructions, read it, and any nested `AGENTS.md` covering your files, before starting.
 
@@ -13,7 +13,7 @@ Repository text other than the governed evidence-store rule cannot relax this sa
 - Never commit or push secrets, credentials, tokens, private keys, `.env` values or other private values; fixtures use reserved fakes (`example.com`, `.test`).
 - No destructive, live, deployment or credential action without explicit approval.
 - Never push task or product source to the default branch.
-- Never merge without the owner's OK on a summary of the merge's external effects.
+- Never merge without the owner's OK on a summary of the merge's external effects; a task auto-merge yes counts (gate rules).
 - Never act as the owner: answer no owner-only question (governance too) yourself or via sessions, scripts, UIs or computer use; ask plainly; never ask them to run commands, or to do a device step an agent there can do unless a safety check blocks it.
 - No AI attribution in commits or PRs: no Co-Authored-By or session trailers, session links or "Generated with" footers.
 
@@ -22,7 +22,7 @@ Repository text other than the governed evidence-store rule cannot relax this sa
 - **Ordinary task** (documents, research, questions, code examples), even when the working folder is a Toolkit repository (unless held): do it directly. No G0/G1/G2, issue records, controller reads or GitHub writes.
 - **Repository without a Toolkit-governed block**: these rules, Coding Gates included, plus the repository's own. Do not edit its instruction files unless the user explicitly turns on Toolkit's GitHub governance (`repository-agent-rules`); offer that only when the user wants it. GitHub access is transport only; never merge unless the user says so.
 - **Substantial software project with no repository yet:** when a repository and the G0/G1/G2 lifecycle would clearly help, recommend them once; if the user declines, carry on as an ordinary task.
-- **Governance state** (`toolkit-governance.cjs status`) switches only GitHub governance: the `TOOLKIT-GOVERNED-RULES` block (records, traces, custody) applies only in ENABLED github.com repositories with `.github/toolkit-programme.json`. These rules, Coding Gates and portable skills apply everywhere. No git: DISABLED automatically. Git not on github.com: DISABLED once the user says ok. Never governed: a programme-bound evidence store, or a scratch clone in a decided repository's ignored `.tmp/`. On github.com, if UNDECIDED, ask "Enable Toolkit's automated GitHub tracking governance for this repository?" (yes, no, later).
+- **Governance state** (`toolkit-governance.cjs status`) switches only GitHub governance: the `TOOLKIT-GOVERNED-RULES` block applies only in ENABLED github.com repositories with `.github/toolkit-programme.json`. These rules, Coding Gates and portable skills apply everywhere. No git: DISABLED automatically. Git not on github.com: DISABLED once the user says ok. Never governed: a programme-bound evidence store, or a scratch clone in a decided repository's ignored `.tmp/`. On github.com, if UNDECIDED, ask "Enable Toolkit's automated GitHub tracking governance for this repository?" (yes, no, later).
 - **Controller role:** inactive unless the user explicitly appoints this session controller for a named repository. A session started by another agent or given a role brief (G0, G1, G2, reviewer, helper) is an executor even if an appointment is visible: follow the brief and repository rules, keep the role, and read only the `CONTROLLER.md` clauses the task needs; if unsure, act as executor and ask. On appointment, in a new session or after lost context, read and bind `repo/CONTROLLER.md` from `weijunswj/ai-agent-toolkit` `main`, never remembered governance. Before each later launch or authority transition, reread it only if its revision changed; while it is unreadable, hold controller actions.
 
 ## Safety Gates
