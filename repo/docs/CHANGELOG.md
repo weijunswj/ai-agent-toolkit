@@ -1,5 +1,30 @@
 # Toolkit Changelog
 
+## 3.23.0 (hooks keep only the checks that stop real damage)
+
+### Hooks cut down
+
+- **Fixed:** shell commands that only name Claude or Codex next to a yes, no or ok, or next to a resume or fork word, are no longer refused as a governance answer or a session resume. This covers metadata saves (`--host claude --tracking yes`), summary reads (`head -c`, `grep -rn` and pipes over `.claude` and `.codex` folders), heredoc and here-string writes, SSH reads and loops over file names, in every folder that is not waiting for its governance answer.
+- **Removed:** the short-answer launch reader, the session resume and fork reader (`toolkit-governance-continuation.cjs`) and the question asked from a parent folder for repositories a command reaches. A command or edit that works in a waiting repository from another folder is still refused, and the user answers in that repository's own chat. A session another session started, or a resumed run, still cannot answer, and the governance CLI with a decision and edits to Toolkit's user-state files are still refused everywhere.
+- **Removed:** the gate route hook and the skill card hook. The Projects skill keeps both rules as written rules: a gate launch passes its pinned route and the gate's start record is the proof, and a skill card carries main's SKILL.md exactly.
+- **Removed:** the Projects post hook (post layout, wording, links and the one running post). The coordinator it was written for runs where Toolkit's hooks do not, so it only ever checked Remote Control threads. The Projects skill keeps every post rule as a written rule, and finds the running post by reading the newest page of the chat instead of a `RUNNING POST:` line in project memory, which kept getting rewritten.
+- **Removed:** the shell hook no longer refuses commands that skip a repository's commit or push checks (`--no-verify`, `core.hooksPath`), and the push check no longer refuses plain-text findings. Both are written rules now, with CI as the gate. The force-push, default-branch, merge, attribution and credential checks are unchanged.
+- **Changed:** the Projects project instructions block now carries the post rules (find the running post in the chat, the post layout, and problem, fix and skip first), since the coordinator does not load the Projects skill. The block's size limit rose to 5,000 bytes.
+- **New:** the hook design playbook (`repo/docs/agent-playbooks/hook-design.md`) says when a hook is allowed, that it checks an exact effect and never guesses intent from text, and that every hook carries must-pass rows for ordinary commands as well as must-refuse rows.
+
+### Evidence stores and scratch clones are never governed
+
+- **Fixed:** a clone of an evidence store (such as a `TRANSPORT-*` repository) was treated like any undecided github.com repository: Toolkit asked the governance question there, held every prompt and tool (Claude Projects posting included), and a "yes" recorded it as ENABLED. A repository that a programme binding cached on this computer names as its evidence store is now DISABLED automatically: never asked, never held, and `enable` is refused. A `TRANSPORT-*` repository under the owner of such a binding's repository counts too, so a fresh clone on a new computer is not asked either. A binding merged in the store's own repository still decides.
+- **Scratch clones:** a clone of another repository inside the ignored top-level `.tmp/` folder of a repository whose governance is decided is DISABLED automatically. A worktree of that repository itself keeps its state.
+- **Recorded decisions:** an "enable" recorded earlier for a store or scratch clone decides nothing; `status` and `check` show it with the one command that clears it.
+- **Discover:** reports a store or scratch clone as not applicable, and never proposes a repository as its own evidence store.
+- **Default-branch push guard:** a push to an evidence store that a cached binding names is not refused, whatever its name. The guard also reads a folder named through a variable the same command assigned (`$d = 'C:\path'; git -C $d push`, `d=/path; cd "$d"`) and a leading home variable (`$env:USERPROFILE`, `$HOME`), so it judges the repository the push really comes from.
+- **Held repositories in Claude Projects:** a thread can still post, react, update its checklist or end its turn in a held repository, so it can ask the owner the governance question. Its decision cards and every other tool stay held.
+
+### A controller creates its gate chats without asking
+
+- **Changed:** appointing a controller now counts as the owner's explicit request to create every gate session the controller procedure launches (G0, G1, G2, rechecks and their follow-ups) and to archive each once its evidence is stored and read back. A controller no longer asks before each one, including on hosts that create a chat only when the user asks (Codex `create_thread`, Claude Code desktop sessions). The controller procedure says so; a controller binds it on appointment, before its first launch. A new model or route, spend and anything on the safety floor still need the owner.
+
 ## 3.22.0 (plans and asks open with the problem, the fix and the cost of skipping)
 
 ### Projects skill
