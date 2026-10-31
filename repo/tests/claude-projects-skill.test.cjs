@@ -209,6 +209,13 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.ok(text.includes('Each owner question is one numbered item under **Waiting on you**, written `1. **Question: <the ask>?**`'));
   assert.ok(text.includes('`    - **<Choice> (my pick).** <one-line reason>`'));
   assert.ok(text.includes('The next numbered item follows the last choice directly, with no spacer line.'));
+  // Plans, G0 plans, decision asks and explanations open with the problem, the fix and what skipping it costs.
+  assert.ok(text.includes('**Problem, fix, skip first.** Every plan, G0 plan, decision ask and explanation, from you and from every thread, opens with three lines'));
+  for (const label of ['**The problem:**', '**The fix:**', '**If we skip it:**']) assert.ok(text.includes(`  - \`${label}\``), label);
+  assert.ok(text.includes('In a running post the **Now:** line stays first: put them under it, or under the question they belong to.'));
+  assert.ok(text.includes('Every brief tells the thread to do the same, and a G0 brief to open its plan with them.'));
+  assert.ok(text.includes('Under it, indented four spaces, come its problem, fix and skip lines, then its choices'));
+  assert.ok(text.includes('for every approval or choice the coordinator acts on itself, opening with its problem, fix and skip lines'));
   assert.equal((text.match(/&nbsp;/g) || []).length, 1, 'only the Update log lines take an &nbsp; spacer');
   assert.ok(text.includes('Choices need no link of their own. Never write a question outside that list: no bare **Question:** label, bulleted question or question in an Update line, and never flatten its choices into plain bullets.'));
   assert.doesNotMatch(text, /put at most one \*\*Question:\*\* in a post|Use decision cards for questions, else group/);
