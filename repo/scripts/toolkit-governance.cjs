@@ -81,15 +81,15 @@ class GovernanceCliError extends Error {
 }
 
 class ToolkitGovernanceCli {
-  #stdout; #stderr; #ask; #interactive; #cwd; #registryOptions; #discoveryGh; #refresh; #rulesetReader; #rulesetCreator; #protectionReader; #protectionWriter; #securityReader; #securityWriter; #securityFileWriter; #hookReader; #queueReader;
+  #stdout; #stderr; #ask; #interactive; #cwd; #registryOptions; #discoveryGh; #refresh; #rulesetReader; #rulesetCreator; #stateRulesetCreator; #protectionReader; #protectionWriter; #securityReader; #securityWriter; #securityFileWriter; #hookReader; #queueReader;
 
   // `ask(question)` resolves to the typed line; `interactive` says whether a person is at a
   // terminal. `registryOptions` ({ registryPath, testOnly: true }), `rulesetReader`,
-  // `rulesetCreator`, `protectionReader`, `protectionWriter`, `securityReader`, `securityWriter` and
+  // `rulesetCreator`, `stateRulesetCreator`, `protectionReader`, `protectionWriter`, `securityReader`, `securityWriter` and
   // `securityFileWriter` are only for tests, as are `discoveryGh` (discovery's GitHub reader) and
   // `refresh` (the merged-binding refresh `status` runs first), `hookReader` (the Hooks: lines) and
   // `queueReader` (the offline queue count for a repository root).
-  constructor({ stdout = process.stdout, stderr = process.stderr, ask = terminalAsk, interactive = isInteractiveTerminal(), cwd = process.cwd(), registryOptions = {}, discoveryGh = null, refresh = null, rulesetReader = null, rulesetCreator = null, protectionReader = null, protectionWriter = null, securityReader = null, securityWriter = null, securityFileWriter = null, hookReader = null, queueReader = null } = {}) {
+  constructor({ stdout = process.stdout, stderr = process.stderr, ask = terminalAsk, interactive = isInteractiveTerminal(), cwd = process.cwd(), registryOptions = {}, discoveryGh = null, refresh = null, rulesetReader = null, rulesetCreator = null, stateRulesetCreator = null, protectionReader = null, protectionWriter = null, securityReader = null, securityWriter = null, securityFileWriter = null, hookReader = null, queueReader = null } = {}) {
     this.#stdout = stdout;
     this.#stderr = stderr;
     this.#ask = ask;
@@ -100,6 +100,7 @@ class ToolkitGovernanceCli {
     this.#refresh = refresh || (cwd => governance.refreshMergedBinding(cwd, registryOptions));
     this.#rulesetReader = rulesetReader;
     this.#rulesetCreator = rulesetCreator;
+    this.#stateRulesetCreator = stateRulesetCreator;
     this.#protectionReader = protectionReader;
     this.#protectionWriter = protectionWriter;
     this.#securityReader = securityReader;
@@ -130,7 +131,7 @@ class ToolkitGovernanceCli {
       if (command === 'migrate') {
         return await new GovernanceMigration({
           stdout: this.#stdout, ask: this.#ask, interactive: this.#interactive, registryOptions: this.#registryOptions,
-          rulesetReader: this.#rulesetReader, rulesetCreator: this.#rulesetCreator,
+          rulesetReader: this.#rulesetReader, rulesetCreator: this.#rulesetCreator, stateRulesetCreator: this.#stateRulesetCreator,
           protectionReader: this.#protectionReader, protectionWriter: this.#protectionWriter,
           securityReader: this.#securityReader, securityWriter: this.#securityWriter, securityFileWriter: this.#securityFileWriter,
         }).run(roots.length ? roots : [this.#cwd]);
