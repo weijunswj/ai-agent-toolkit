@@ -380,17 +380,17 @@ test('independent lanes run side by side under the owner\'s lane cap', () => {
   const lanes = text.split('\n').find(line => line.startsWith('- **Run independent lanes side by side.**'));
   assert.ok(lanes, 'Keep moving carries the lanes bullet');
   assert.ok(text.indexOf(lanes) > text.indexOf('## Keep moving') && text.indexOf(lanes) < text.indexOf('## Threads'));
-  for (const phrase of ['Never hold a ready or working PR for another PR', 'Only merges land one at a time',
+  for (const phrase of ['Never hold a ready or working PR for an independent PR', 'Only merges land one at a time',
     'at most 3 lanes actively working, of any type', 'unless the owner sets another number', 'no per-type limit',
     'open one extra lane for it alone', 'Queued or coordinator-started work never takes that extra lane',
-    'usage-pacing rule', 'counts toward the cap']) {
+    'any usage limit the owner records in project instructions', 'counts toward the cap']) {
     assert.ok(lanes.includes(phrase), phrase);
   }
   const block = read('repo/contracts/claude-projects/web-controller-projects/project-instructions.md');
   const line = block.split('\n').find(entry => entry.startsWith('- Lanes:'));
   assert.ok(line, 'the block carries the lanes line');
   for (const phrase of ['never holding one for another', 'at most 3 working lanes of any type',
-    'unless the owner sets another cap', 'a 4th lane only for one needing thread work', 'usage pacing']) {
+    'unless the owner sets a cap', 'one extra lane only for one needing thread work', 'owner usage limits']) {
     assert.ok(line.includes(phrase), phrase);
   }
 });
