@@ -38,7 +38,7 @@
     "repo/tests/toolkit-local-bridge*.test.cjs",
     "repo/tests/support/toolkit-local-bridge-fixture.cjs",
     "repo/tests/toolkit-test-temp-guard.cjs",
-    "repo/tests/toolkit-test-notepad-preload.cjs",
+    "repo/tests/toolkit-test-editor-preload.cjs",
     "skills/codex-ssh-hostinger-coolify-setup-maintainer/templates/*.env.example",
     "repo/docs/*-baseline.json",
     "repo/source-watch/**/*.json",

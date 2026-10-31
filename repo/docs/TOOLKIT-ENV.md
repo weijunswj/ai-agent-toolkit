@@ -23,19 +23,20 @@ Key names look like `PROVIDER_SOLUTION_PURPOSE`, for example `COOLIFY_SWOOSHZ_MC
 | You want to | Command | What happens |
 |---|---|---|
 | See your keys | `status` | Names, which app entries use each, present or missing. Never a value, length or prefix. |
-| See, change, add or remove keys | `edit`, then `apply` | Notepad opens a private file with your keys as `NAME=value` lines, like a `.env` file. Each save is applied within a few seconds: see [Your keys in Notepad](#your-keys-in-notepad). When you are finished, close the tab and tell your agent "done", or run the `apply` line shown at the top of the file. It lists what was changed, added and removed, by name, and deletes the file. |
+| See, change, add or remove keys | `edit`, then `apply` | A private file with your keys as `NAME=value` lines, like a `.env` file, opens in the app your computer uses for `.env` files. Each save applies changes and additions within a few seconds; a deleted line is removed at "done", after your yes: see [Your keys in your editor](#your-keys-in-your-editor). When you are finished, close the tab and tell your agent "done", or run the `apply` line shown at the top of the file. It lists what was changed, added and removed, by name, and deletes the file. |
 | Set one key | `set NAME` | Asks for the value with hidden input. Run it yourself in PowerShell, as shown above. |
 | See one value | `show NAME` or `show NAME --copy` | Shows the value once, or copies it to the clipboard, in a PowerShell window you opened yourself. See [Seeing a value](#seeing-a-value). |
 | Remove a key | `remove NAME` | Asks a yes/no that names the key first. |
 | Run a command-line tool with a key | `run --names NAME -- <tool> <args>` | Starts the tool with only those keys added to its environment. It refuses unknown names and the usual commands that print the whole environment (such as `env`, `printenv`, `set` or `Get-ChildItem env:`); it cannot catch every way a program can print a variable. Programs start directly, without a shell; on Windows, npm-installed tools run through the program their command script wraps, and other `.cmd` or `.bat` scripts are refused. |
 
-## Your keys in Notepad
+## Your keys in your editor
 
-`edit` writes a fresh private file from the store every time, in your saved order with your own comment lines, and opens it in Notepad:
+`edit` writes a fresh private file from the store every time, in your saved order with your own comment lines, and opens it in the app Windows uses for `.env` files (your choice in Settings > Apps > Default apps, or "Open with"). It opens through the Windows shell by full path, never through `cmd` or a bare program name; if no app is set, Windows asks which one to use. When that app is VS Code, VS Code Insiders, VSCodium or Cursor, Toolkit starts it by its own path with `--new-window`, so the file opens in a window with no folder, where workspace extensions and IDE links to agents do not attach.
 
-- Change a value, add a `NAME=value` line, or delete a line to remove that key. Type values without quotes; spaces at either end are dropped.
-- Save. A small helper started with the file applies the save once the file has stopped changing for about a second and a half. It watches only that file, prints nothing and writes no log.
-- When you are finished, close the tab and say "done" (or run `apply`). It applies a save not applied yet, deletes the file and lists what changed, by name only.
+- Change a value or add a `NAME=value` line. Type values without quotes; spaces at either end are dropped.
+- Save. A small helper started with the file applies changes and additions once the file has stopped changing for about a second and a half. It watches only that file, prints nothing and writes no log.
+- Delete a line to remove that key. The helper only marks it: the `# Status:` line says "Will remove on "done", after your yes", and `status` lists it. Put the line back before "done" to keep the key.
+- When you are finished, close the tab and say "done" (or run `apply`). It applies a save not applied yet, asks one yes/no that names every marked key (and any app entry that uses one), removes them only on yes, deletes the file and lists what changed, by name only. A no, no answer, a new edit or the 30-minute end keeps the keys and says so.
 
 A save is applied whole or not at all. Nothing is saved, and the `# Status:` line at the top of the file says why, when:
 
@@ -44,13 +45,19 @@ A save is applied whole or not at all. Nothing is saved, and the `# Status:` lin
 - the save would remove every key;
 - a key changed elsewhere (`set`, `remove`, an import, or straight in Credential Manager) while the tab was open. Ask for your keys again for a fresh tab, and copy your changes across; the typed lines stay in your tab.
 
-When Toolkit writes the status line, Notepad may say the file changed and offer to reload it; reload to see why. The edit's state keeps a hash of each listed value next to the file, never the value itself, so a change made outside Toolkit is caught too.
+When Toolkit writes the status line, your editor may reload the file or say it changed; reload to see why. The edit's state keeps a hash of each listed value next to the file, never the value itself, so a change made outside Toolkit is caught too.
 
 A key added elsewhere while the tab is open is never removed by it. A value that one line cannot show exactly (a line break, spaces at either end, or wrapping quotes) appears as `<kept: change it with toolkit env set NAME>` and stays as it is.
 
-Every `edit` wipes the earlier file first, so Notepad always shows what is stored now. A save from an older Notepad tab is never applied: the file it writes is wiped, and the next result says to use the newest tab. A save that was not applied when you start a new edit is not carried over, and the result says so. The file is overwritten with zeros, then deleted, at "done" or 30 minutes after its last save.
+Every `edit` wipes the earlier file first, so the new tab always shows what is stored now. A save from an older tab is never applied: the file it writes is wiped, and the next result says to use the newest tab. A save that was not applied when you start a new edit is not carried over, and the result says so. The file is overwritten with zeros, then deleted, at "done" or 30 minutes after its last save.
 
-Notepad can keep its own copy of an open tab and bring it back after the file is deleted. Toolkit cannot reliably see Notepad's tab-restore data from an app's shell, so every "done" (and the 30-minute end) says to close the tab without saving, and how to stop it for good: Notepad > Settings > When Notepad starts > "Start new session". Toolkit never reads or changes Notepad's own files.
+Editors can keep their own copies of what you type, so every "done" (and the 30-minute end) says to close the tab without saving, in words for the app the file opened in:
+
+- **VS Code, VS Code Insiders, VSCodium and Cursor** keep a Local History copy on each save and a backup of unsaved changes. When an edit ends (and when an older tab is wiped), Toolkit finds the copies of its own edit files in those apps' user data folders (`%APPDATA%\Code` and the like), overwrites each with zeros and deletes it, and says how many. It matches only the exact edit folder, touches nothing else and never changes the apps' settings. A running editor can write a new backup while the tab still has unsaved changes, so close it without saving. Extensions, including AI assistants, can read an open tab and may send its text elsewhere; Toolkit cannot clean that up, which is why the file opens in its own window and the header says so.
+- **Notepad** can keep its own copy of an open tab and bring it back after the file is deleted. Toolkit cannot reliably see Notepad's tab-restore data from an app's shell, so the note says how to stop it for good: Notepad > Settings > When Notepad starts > "Start new session". Toolkit never reads or changes Notepad's own files.
+- **Any other app** gets a plain note that it may keep its own copies.
+
+The Mac and Linux open commands (`open` and `xdg-open`) are written, but `toolkit env` stops before them because there is no key store there yet.
 
 ## Seeing a value
 
@@ -96,6 +103,6 @@ Comments over 200 characters are refused before screening. The screen refuses a 
 
 Existing layouts are checked again before use or writes. An unsafe record identifies each layout entry N (counting from 1) in the "layout" list of `~/.ai-agent-toolkit/env/manifest.json`, so you can remove or reword that list entry locally. N is not a JSON file line number.
 
-This screen cannot recognise every secret. A short password or a multi-word passphrase can look exactly like a heading and be saved as comment text. Never put a password, key or token in a comment. Retaining arbitrary comment text cannot guarantee that the layout is secret-free. The private edit file (while it is open, and any copy Notepad keeps of its tab) and a retired `.env` backup intentionally contain real values and must be treated as sensitive. Agents are told never to open, read or search the edit folder.
+This screen cannot recognise every secret. A short password or a multi-word passphrase can look exactly like a heading and be saved as comment text. Never put a password, key or token in a comment. Retaining arbitrary comment text cannot guarantee that the layout is secret-free. The private edit file (while it is open, and any copy your editor keeps of its tab) and a retired `.env` backup intentionally contain real values and must be treated as sensitive. Agents are told never to open, read or search the edit folder.
 
 Values are protected at rest by your operating-system login, and no single plain file holds them all. Any program running as you, including an agent's shell command, can still ask the store for a value, so this is not isolation from the agent or other programs. The skill rules, `run`'s name list and the tests that check no value reaches output reduce that risk but do not remove it. The same holds for `show`: its checks stop an agent reading a value through Toolkit by accident or on a casual request, not a determined program running as you. An agent that runs commands in a pseudo-terminal could pass the terminal check; the agent-shell check and the retyped name are what stop it.

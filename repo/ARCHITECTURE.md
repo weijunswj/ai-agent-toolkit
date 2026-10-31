@@ -30,7 +30,7 @@ Last reviewed against `main` `37877aedbadfc2baf1f70c2e6b9f2281430174b8`.
 | Native plugin install | `repo/scripts/setup-claude-toolkit-plugin.cjs`, `repo/scripts/setup-codex-toolkit-plugin.cjs` |
 | Session-start hooks and bridge | `repo/scripts/toolkit-local-bridge.cjs`, `repo/scripts/toolkit-codex-session-start.cjs` |
 | Install check | `repo/scripts/toolkit-install-health.cjs`, `repo/scripts/toolkit-claude-account-copy.cjs` (the Claude app copy steps, shared with the session-start reminder and the daily check-in); Codex's Toolkit state, read from the Codex files only, in `repo/scripts/toolkit-codex-install-state.cjs` |
-| Keys and tokens (`toolkit env`) | `repo/scripts/toolkit-env.cjs`, `repo/scripts/toolkit-env-store.cjs`, `repo/scripts/toolkit-env-feeders.cjs` |
+| Keys and tokens (`toolkit env`) | `repo/scripts/toolkit-env.cjs`, `repo/scripts/toolkit-env-store.cjs`, `repo/scripts/toolkit-env-feeders.cjs`, `repo/scripts/toolkit-env-editor.cjs` |
 | Global rules installer | `repo/scripts/toolkit-global-rules.cjs` |
 | Managed marker format | `repo/scripts/toolkit-managed-block.cjs` |
 | Hook test pack (every hook run as the hosts start it, against one list of calls that must pass or stop) | `repo/scripts/toolkit-hook-pack.cjs` (runner, revert proof and expectation-change check), `repo/tests/hook-pack/corpus/` (the rows), `repo/tests/hook-pack/README.md` (row format) |
