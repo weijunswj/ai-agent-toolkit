@@ -101,6 +101,38 @@ test('the recommended Claude Code settings are written to the temporary Claude s
   assert.equal(fs.existsSync(settingsPath), false, 'the file Toolkit created is removed when nothing else is left');
 });
 
+test('each Claude Code setting row is answered on its own: Add one, remove only Toolkit\'s attribution, keep an object form you set', () => {
+  const root = tmpRoot();
+  const { origin, setupRepo } = createGitBackedSetupRepo(root);
+  const fake = recordingClaude(root);
+  const env = isolatedHomeEnv(root);
+  const base = ['--execute', '--host', 'claude-code', '--repo-root', setupRepo, '--repo-remote', origin,
+    '--yes-recommended', '--claude-cli', fake.command, '--claude-plugin-behavior', 'instructions', '--claude-topology', 'broader-native', '--claude-settings', 'keep'];
+  const settingsPath = path.join(root, '.claude', 'settings.json');
+  const read = () => JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+  writeFile(settingsPath, `${JSON.stringify({ theme: 'dark' }, null, 2)}\n`);
+
+  const one = run([...base, '--claude-setting', 'switch-models-on-flag=enable'], { env, timeout: 300000 });
+  assert.equal(one.status, 0, one.stderr || one.stdout);
+  assert.deepEqual(read(), { theme: 'dark', switchModelsOnFlag: false });
+  clearLogs(setupRepo);
+  assert.equal(run([...base, '--claude-setting', 'attribution=enable'], { env, timeout: 300000 }).status, 0);
+  assert.deepEqual(read(), { theme: 'dark', switchModelsOnFlag: false, attribution: false });
+  clearLogs(setupRepo);
+  const removed = run([...base, '--claude-setting', 'attribution=disable'], { env, timeout: 300000 });
+  assert.equal(removed.status, 0, removed.stderr || removed.stdout);
+  assert.deepEqual(read(), { theme: 'dark', switchModelsOnFlag: false });
+
+  // An attribution object that hides everything shows as on and survives Remove.
+  const hidden = { commit: '', pr: '', sessionUrl: false };
+  writeFile(settingsPath, `${JSON.stringify({ ...read(), attribution: hidden }, null, 2)}\n`);
+  clearLogs(setupRepo);
+  const kept = run([...base, '--claude-setting', 'attribution=disable'], { env, timeout: 300000 });
+  assert.equal(kept.status, 0, kept.stderr || kept.stdout);
+  assert.match(kept.stdout, /\| Add Toolkit's recommended Claude Code setting: Hide AI credit in commits\/PRs\? \| On \(you set it\) \|/);
+  assert.deepEqual(read(), { theme: 'dark', switchModelsOnFlag: false, attribution: hidden });
+});
+
 test('the retired Toolkit direct topology and capacity flags fail before any setup write', () => {
   const root = tmpRoot();
   const { origin, setupRepo } = createGitBackedSetupRepo(root);

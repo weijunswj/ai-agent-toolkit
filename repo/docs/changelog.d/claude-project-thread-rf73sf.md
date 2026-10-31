@@ -1,0 +1,5 @@
+### Setup
+
+- **One row per Claude Code setting.** Setup now asks about each of Toolkit's four recommended Claude Code user settings in its own row: hide AI credit in commits and pull requests, let your other sessions wake this one, ask before switching model on a flag, and read AGENTS.md too. Each row offers Add, Remove Toolkit's value, or Keep current, so you can turn on one without the others. While none is set every row recommends Add; once any is set every row recommends Keep current, and a row still missing says to pick Add to turn it on.
+- **Hidden attribution counts as on.** If you hide attribution yourself with `"attribution": {"commit": "", "pr": "", "sessionUrl": false}`, setup shows it as on, the same as Toolkit's `false`, and leaves it as it is. An object that hides only some of it still shows as a different value.
+- **Answer one row from the command line.** `--claude-setting <name>=enable|disable|keep` answers one setting row and wins over `--claude-settings`, which still answers all four.

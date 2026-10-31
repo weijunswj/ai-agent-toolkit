@@ -74,6 +74,46 @@ test('an owner value reports whether it matches Toolkit\'s value; a blocked pare
   assert.equal(states['switch-models-on-flag'].state, STATES.DEFAULT);
 });
 
+test('attribution hidden with the full object form counts as Toolkit\'s value; a partial object does not', (t) => {
+  const full = { commit: '', pr: '', sessionUrl: false };
+  for (const [label, value, matches] of [
+    ['full object', full, true],
+    ['full object with another key', { ...full, extra: 'x' }, true],
+    ['commit only', { commit: '' }, false],
+    ['commit and pr', { commit: '', pr: '' }, false],
+    ['session link kept', { ...full, sessionUrl: true }, false],
+    ['true', true, false],
+  ]) {
+    const { owner, read } = fixture(t, { attribution: value });
+    const state = byId(owner.inspect()).attribution;
+    assert.equal(state.state, STATES.OWNER, label);
+    assert.equal(state.matches, matches, label);
+    // Matching or not, an owner value survives enable and disable untouched.
+    for (const choice of ['enable', 'disable']) assert.equal(byId(owner.apply(choice)).attribution.status, 'owner-value-kept', `${label} ${choice}`);
+    assert.deepEqual(read().attribution, value, label);
+  }
+});
+
+test('per-setting choices touch only the named settings; a setting left out is kept', (t) => {
+  const { owner, read } = fixture(t, { theme: 'dark' });
+  const first = byId(owner.apply({ 'switch-models-on-flag': 'enable' }));
+  assert.equal(first['switch-models-on-flag'].status, 'set');
+  for (const id of ['attribution', 'cross-session-inbound', 'agents-md']) assert.equal(first[id].status, 'kept', id);
+  assert.deepEqual(read(), { theme: 'dark', switchModelsOnFlag: false });
+
+  owner.apply({ attribution: 'enable', 'cross-session-inbound': 'enable' });
+  const removed = byId(owner.apply({ attribution: 'disable' }));
+  assert.equal(removed.attribution.status, 'claude-default');
+  assert.equal(removed.attribution.changed, true);
+  assert.deepEqual(read(), { theme: 'dark', switchModelsOnFlag: false, crossSessionInbound: 'accept' });
+  assert.deepEqual(owner.inspect().map((state) => state.state), [STATES.DEFAULT, STATES.TOOLKIT, STATES.TOOLKIT, STATES.DEFAULT]);
+
+  assert.throws(() => owner.apply({ 'not-a-setting': 'enable' }), /Unknown Claude setting: not-a-setting/);
+  assert.throws(() => owner.apply({ attribution: 'maybe' }), /Unsupported Claude settings choice: maybe/);
+  assert.throws(() => owner.apply('maybe'), /Unsupported Claude settings choice: maybe/);
+  assert.deepEqual(read(), { theme: 'dark', switchModelsOnFlag: false, crossSessionInbound: 'accept' }, 'a refused call writes nothing');
+});
+
 test('an owner edit after Toolkit wrote a value is kept on disable', (t) => {
   const { owner, settingsPath, read } = fixture(t, {});
   owner.apply('enable');

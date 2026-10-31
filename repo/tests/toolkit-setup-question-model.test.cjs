@@ -335,9 +335,9 @@ test('resolved Codex and Claude banks expose contiguous deterministic presentati
   claudeCurrent.nativePlugin = { status: 'unknown', trusted: false, hook_active: false };
   const claude = core.setupQuestionSpecs(claudeArgs, claudeCurrent);
   // Claude Code setup does not ask about Codex's instruction limit.
-  assert.equal(claude[0].presentation.total_visible_question_count, 7);
+  assert.equal(claude[0].presentation.total_visible_question_count, 10);
   assert.equal(claude[0].presentation.total_visible_section_count, 3);
-  assert.deepEqual(claude.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '2.1', '3.1', '3.2']);
+  assert.deepEqual(claude.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '2.1', '3.1', '3.2', '3.3', '3.4', '3.5']);
 });
 
 test('compact table, full text, recommendations, and choices share one indexed ordering', () => {
@@ -763,7 +763,9 @@ test('automatic updates, Claude agents, the Claude plugin and Codex helpers read
   assert.equal(helper.choices.some((choice) => choice.value === 'one-helper'), false);
 });
 
-test('Claude Code settings recommend Keep current once any is set and list both changes; agents and plugin questions keep every choice when their state is unread', () => {
+const CLAUDE_SETTING_ROWS = ['claude-setting-attribution', 'claude-setting-cross-session-inbound', 'claude-setting-switch-models-on-flag', 'claude-setting-agents-md'];
+
+test('Claude Code settings show one row per setting, recommend Keep current on every row once any is set and list all three choices; agents and plugin questions keep every choice when their state is unread', () => {
   const current = stateWithManaged(managedState({ currentPath: '', exists: false, git: false }));
   current.agentProfile = { supported: true, topology: 'root-only' };
   current.nativePlugin = { status: 'fresh' };
@@ -772,21 +774,49 @@ test('Claude Code settings recommend Keep current once any is set and list both 
     { id: 'switch-models-on-flag', state: 'toolkit-value' }, { id: 'agents-md', state: 'toolkit-value' },
   ];
   const rows = core.setupQuestionSpecs(core.parseArgs(['--plan', '--host', 'claude-code']), current);
-  const settings = rows.find((spec) => spec.id === 'claude-recommended-settings');
-  assert.deepEqual(settings.choices.map((choice) => choice.value), ['enable', 'disable', 'keep']);
-  assert.equal(settings.recommended, 'keep');
-  assert.equal(settings.folded_value, undefined);
-  assert.match(core.renderSetupQuestionBank([settings]), /\| C\. Keep current \| A\. Add missing settings<br>B\. Remove Toolkit's values \|/);
-  // The Current column names each of the four settings by its effect, and who set it.
-  assert.equal(settings.current_short, 'Hide AI credit in commits/PRs: on (Toolkit set it); Let other sessions wake this one: on (you set it); Ask before switching model on a flag: on (Toolkit set it); Read AGENTS.md too: on (Toolkit set it)');
-  const row = () => core.setupQuestionSpecs(core.parseArgs(['--plan', '--host', 'claude-code']), current).find((spec) => spec.id === 'claude-recommended-settings');
+  const settingRows = () => {
+    const byId = Object.fromEntries(core.setupQuestionSpecs(core.parseArgs(['--plan', '--host', 'claude-code']), current).map((spec) => [spec.id, spec]));
+    return CLAUDE_SETTING_ROWS.map((id) => byId[id]);
+  };
+  // The four rows follow the plugin row in SETTINGS order, and the old single row is gone.
+  const ids = rows.map((spec) => spec.id);
+  assert.deepEqual(ids.slice(ids.indexOf('claude-toolkit-plugin') + 1, ids.indexOf('claude-toolkit-plugin') + 5), CLAUDE_SETTING_ROWS);
+  assert.equal(ids.includes('claude-recommended-settings'), false);
+  const settings = settingRows();
+  assert.deepEqual(settings.map((row) => row.title), [
+    "Add Toolkit's recommended Claude Code setting: Hide AI credit in commits/PRs?",
+    "Add Toolkit's recommended Claude Code setting: Let other sessions wake this one?",
+    "Add Toolkit's recommended Claude Code setting: Ask before switching model on a flag?",
+    "Add Toolkit's recommended Claude Code setting: Read AGENTS.md too?",
+  ]);
+  assert.deepEqual(settings.map((row) => row.key), ['claudeSettingAttribution', 'claudeSettingCrossSessionInbound', 'claudeSettingSwitchModelsOnFlag', 'claudeSettingAgentsMd']);
+  for (const row of settings) {
+    assert.deepEqual(row.choices.map((choice) => [choice.value, choice.label]), [['enable', 'Add'], ['disable', "Remove Toolkit's value"], ['keep', 'Keep current']], row.id);
+    assert.equal(row.recommended, 'keep', row.id);
+    assert.equal(row.folded_value, undefined, row.id);
+    assert.equal(row.recommendation_reason, 'This setting already has a value, so Keep current leaves it as it is.', row.id);
+  }
+  assert.match(core.renderSetupQuestionBank([settings[0]]), /\| C\. Keep current \| A\. Add<br>B\. Remove Toolkit's value \|/);
+  // The Current column holds that one setting's state.
+  assert.deepEqual(settings.map((row) => row.current_short), ['On (Toolkit set it)', 'On (you set it)', 'On (Toolkit set it)', 'On (Toolkit set it)']);
+
   current.claudeSettings[1] = { id: 'cross-session-inbound', state: 'claude-default' };
-  assert.equal(row().recommended, 'keep', 'one left out on purpose');
+  const leftOut = settingRows();
+  assert.ok(leftOut.every((row) => row.recommended === 'keep'), 'one left out on purpose keeps every row on Keep current');
+  assert.equal(leftOut[1].recommendation_reason, '3 of the 4 recommended settings already have a value and this one does not, so it counts as left out on purpose. Pick Add to turn it on.');
+  assert.equal(leftOut[1].current_short, 'Not set (Claude Code default)');
+
   current.claudeSettings = current.claudeSettings.map((entry) => ({ id: entry.id, state: 'claude-default' }));
-  const fresh = row();
-  assert.equal(fresh.recommended, 'enable', 'none set yet');
-  assert.equal(fresh.recommendation_reason, "They keep AI attribution out of your commits and pull requests, let a Projects coordinator wake Remote Control sessions on your computer, keep a flagged request on the model you chose until you say otherwise and make Claude Code read the repository's AGENTS.md.");
-  assert.deepEqual(fresh.choices.map((choice) => choice.value), ['enable', 'disable', 'keep']);
+  const fresh = settingRows();
+  assert.ok(fresh.every((row) => row.recommended === 'enable'), 'none set yet recommends Add on every row');
+  assert.deepEqual(fresh.map((row) => row.recommendation_reason), [
+    'It keeps AI attribution out of your commits and pull requests.',
+    'It lets a Projects coordinator wake Remote Control sessions on your computer.',
+    'It keeps a flagged request on the model you chose until you say otherwise.',
+    "It makes Claude Code read the repository's AGENTS.md.",
+  ]);
+  assert.equal(fresh[2].choices[0].consequence, 'Adds "switchModelsOnFlag": false. Toolkit records a value it adds so it can remove it later.');
+  for (const row of fresh) assert.deepEqual(row.choices.map((choice) => choice.value), ['enable', 'disable', 'keep'], row.id);
   for (const id of ['claude-agent-topology', 'claude-toolkit-plugin']) {
     const row = rows.find((spec) => spec.id === id);
     assert.equal(row.folded_value, undefined, id);
@@ -794,7 +824,7 @@ test('Claude Code settings recommend Keep current once any is set and list both 
   }
 });
 
-test('Claude Code settings row tells a value you set to Toolkit\'s pick from a different one and names what the add choice adds', () => {
+test('Claude Code setting rows tell a value you set to Toolkit\'s pick from a different one, count the full attribution object as on, and say Add has nothing to add', () => {
   const current = stateWithManaged(managedState({ currentPath: '', exists: false, git: false }));
   current.agentProfile = { supported: true, topology: 'root-only' };
   current.nativePlugin = { status: 'fresh' };
@@ -804,15 +834,51 @@ test('Claude Code settings row tells a value you set to Toolkit\'s pick from a d
     { id: 'switch-models-on-flag', label: 'Ask before switching models when a request is flagged', state: 'claude-default' },
     { id: 'agents-md', label: 'Read AGENTS.md as well as CLAUDE.md', state: 'owner-value', value: 'claude-md-and-agents-md', matches: true },
   ];
-  const row = core.setupQuestionSpecs(core.parseArgs(['--plan', '--host', 'claude-code']), current).find((spec) => spec.id === 'claude-recommended-settings');
-  assert.equal(row.title, "Add Toolkit's recommended Claude Code settings that are missing?");
-  assert.equal(row.current_short, 'Hide AI credit in commits/PRs: different: you set true; Toolkit leaves it; Let other sessions wake this one: on (you set it); Ask before switching model on a flag: not set (Claude Code default); Read AGENTS.md too: on (you set it)');
-  assert.equal(row.recommended, 'keep');
-  const add = row.choices.find((choice) => choice.value === 'enable');
-  assert.equal(add.label, 'Add missing settings');
-  assert.match(add.consequence, /^Adds 1 missing setting: Ask before switching model on a flag\. Your other 3 settings stay as they are\. /);
-  assert.equal(row.recommendation_reason, '3 of the 4 settings already have a value, so Keep current leaves your choices as they are. Pick Add missing settings to also add Ask before switching model on a flag.');
-  assert.match(row.current, /No AI attribution in commits and pull requests: you set true instead of Toolkit's false; Toolkit leaves it\./);
+  const rows = () => Object.fromEntries(core.setupQuestionSpecs(core.parseArgs(['--plan', '--host', 'claude-code']), current).map((spec) => [spec.id, spec]));
+  const row = rows();
+  const attribution = row['claude-setting-attribution'];
+  assert.equal(attribution.current_short, 'Different: you set true; Toolkit leaves it');
+  assert.equal(attribution.current, "No AI attribution in commits and pull requests: you set true instead of Toolkit's false; Toolkit leaves it.");
+  assert.equal(attribution.choices[0].consequence, 'Nothing to add: you set true, which Toolkit leaves as it is. Toolkit records a value it adds so it can remove it later.');
+  assert.match(attribution.whatThisControls, /\{"commit": "", "pr": "", "sessionUrl": false\} yourself, that hides the same and counts as on\./);
+  assert.equal(row['claude-setting-switch-models-on-flag'].current_short, 'Not set (Claude Code default)');
+  assert.equal(row['claude-setting-switch-models-on-flag'].choices[0].consequence, 'Adds "switchModelsOnFlag": false. Toolkit records a value it adds so it can remove it later.');
+  assert.equal(row['claude-setting-switch-models-on-flag'].recommended, 'keep');
+
+  // The reader reports the full object form as matching, so the row shows it as on, whole.
+  current.claudeSettings[0] = { id: 'attribution', label: 'No AI attribution in commits and pull requests', state: 'owner-value', value: { commit: '', pr: '', sessionUrl: false }, matches: true };
+  assert.equal(rows()['claude-setting-attribution'].current_short, 'On (you set it)');
+  current.claudeSettings[0] = { ...current.claudeSettings[0], value: { commit: '', pr: '' }, matches: false };
+  assert.equal(rows()['claude-setting-attribution'].current_short, 'Different: you set {"commit":"","pr":""}; Toolkit leaves it');
+
+  // An unreadable file shows on every row and nothing is verified.
+  current.claudeSettings = current.claudeSettings.map((entry) => ({ id: entry.id, label: entry.label, state: 'unreadable', detail: 'The Claude Code user settings file is not valid JSON.' }));
+  for (const id of CLAUDE_SETTING_ROWS) {
+    assert.equal(rows()[id].current_short, 'Could not read', id);
+    assert.equal(rows()[id].currentState.verification, 'unverified', id);
+  }
+});
+
+test('--claude-settings answers all four Claude Code setting rows and --claude-setting answers one', () => {
+  const choices = (argv) => {
+    const { setupChoices } = core.parseArgs(['--plan', '--host', 'claude-code', ...argv]);
+    return ['claudeSettingAttribution', 'claudeSettingCrossSessionInbound', 'claudeSettingSwitchModelsOnFlag', 'claudeSettingAgentsMd'].map((key) => setupChoices[key]);
+  };
+  assert.deepEqual(choices([]), ['', '', '', '']);
+  assert.deepEqual(choices(['--claude-settings', 'enable']), ['enable', 'enable', 'enable', 'enable']);
+  // The single-row flag wins whichever comes first.
+  assert.deepEqual(choices(['--claude-setting', 'agents-md=keep', '--claude-settings', 'enable']), ['enable', 'enable', 'enable', 'keep']);
+  assert.deepEqual(choices(['--claude-setting=attribution=disable', '--claude-setting', 'switch-models-on-flag=enable']), ['disable', '', 'enable', '']);
+  assert.throws(() => core.parseArgs(['--plan', '--claude-setting', 'theme=enable']), /Unsupported --claude-setting name: theme/);
+  assert.throws(() => core.parseArgs(['--plan', '--claude-setting', 'attribution=maybe']), /Unsupported --claude-setting choice: maybe/);
+  assert.throws(() => core.parseArgs(['--plan', '--claude-setting', 'attribution']), /Unsupported --claude-setting choice/);
+  assert.throws(() => core.parseArgs(['--plan', '--claude-setting', 'attribution=keep=x']), /Unsupported --claude-setting value/);
+
+  // Applying hands each row's answer to its own setting; an unanswered row is kept.
+  let received;
+  const args = core.parseArgs(['--plan', '--host', 'claude-code', '--claude-setting', 'agents-md=enable']);
+  core.applyClaudeUserSettings(args, { apply: (map) => { received = map; return []; } });
+  assert.deepEqual(received, { attribution: 'keep', 'cross-session-inbound': 'keep', 'switch-models-on-flag': 'keep', 'agents-md': 'enable' });
 });
 
 test('TTY all recommended and changed-only commands execute after exactly one complete bank', async () => {
