@@ -580,16 +580,18 @@ class EnvEditSession {
   }
 
   // Replaces the file's status line (keeping every other line, so line numbers stay put) and
-  // returns the hash of what was written. Writes nothing, and returns null, when the file has no
-  // status line or no longer holds `checked` (a newer save arrived; it is handled on its own).
-  writeStatus(file, text, checked) {
+  // returns the hash of what was written. A file whose status line was deleted gets a new one at the
+  // top; `textFor(added)` words the status for that case. Writes nothing, and returns null, when the
+  // file no longer holds `checked` (a newer save arrived; it is handled on its own).
+  writeStatus(file, textFor, checked) {
     let current;
     try { current = fs.readFileSync(file); } catch { return null; }
     if (!current.equals(checked)) return null;
-    const lines = current.toString('utf8').split('\n');
+    const content = current.toString('utf8');
+    const lines = content.split('\n');
     const index = lines.findIndex((line) => line.trim().startsWith(EDIT_STATUS_START));
-    if (index === -1) return null;
-    lines[index] = `${EDIT_STATUS_START} ${text}${lines[index].endsWith('\r') ? '\r' : ''}`;
+    if (index === -1) lines.unshift(`${EDIT_STATUS_START} ${textFor(true)}${content.includes('\r\n') || !content ? os.EOL.replace('\n', '') : ''}`);
+    else lines[index] = `${EDIT_STATUS_START} ${textFor(false)}${lines[index].endsWith('\r') ? '\r' : ''}`;
     const bytes = Buffer.from(lines.join('\n'), 'utf8');
     fs.writeFileSync(file, bytes);
     return sha256(bytes);
@@ -865,9 +867,10 @@ class ToolkitEnv {
     return [`Nothing was saved: this save would remove every key. To remove them all, run ${this.commandLine('remove NAME')} for each one.`];
   }
 
-  #statusText(outcome) {
+  // `added`: the status line is new at the top, so the save's line numbers are one lower than shown.
+  #statusText(outcome, added) {
     const time = this.#now().toISOString().slice(11, 16);
-    if (outcome.problems) return `NOT SAVED (${time} UTC). Fix: ${outcome.problems.join('; ')}`;
+    if (outcome.problems) return `NOT SAVED (${time} UTC). Fix: ${outcome.problems.join('; ')}${added ? ' (line numbers count from the line below this one)' : ''}`;
     if (outcome.conflicts) return `NOT SAVED (${time} UTC). These keys changed while this tab was open: ${outcome.conflicts.join(', ')}. Ask for your keys again for a fresh tab, and copy your changes across.`;
     return `NOT SAVED (${time} UTC). This save would remove every key.`;
   }
@@ -880,7 +883,7 @@ class ToolkitEnv {
     const now = this.#now();
     if (!outcome.ok) {
       const parsed = !outcome.utf16;
-      const written = parsed ? this.#edit.writeStatus(file, this.#statusText(outcome), bytes) : null;
+      const written = parsed ? this.#edit.writeStatus(file, (added) => this.#statusText(outcome, added), bytes) : null;
       this.#edit.writeState({ ...state, refused: true, handled: written || sha256(bytes), last_save_ms: now.getTime() });
       return outcome;
     }

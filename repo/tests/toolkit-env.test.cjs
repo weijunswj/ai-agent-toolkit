@@ -160,6 +160,10 @@ test('apply saves nothing when a line is wrong, and names the line without its v
   assert.equal(store.peek('X1_TEST_GOOD_KEY'), undefined);
   assert.ok(fs.existsSync(file), 'the file is kept so it can be fixed');
   assert.match(fs.readFileSync(file, 'utf8'), /^# Status: NOT SAVED \(\d\d:\d\d UTC\)\. Fix: line \d+/m, 'the file says why at the top');
+  // Without its header, the status line is added at the top and says how line numbers count.
+  save(file, 'not a line\n');
+  assert.equal((await run('apply')).code, 1);
+  assert.match(fs.readFileSync(file, 'utf8'), /^# Status: NOT SAVED .*Fix: line 1 is not NAME=value \(line numbers count from the line below this one\)\r?\nnot a line\n$/);
   assert.ok(!fs.readFileSync(file, 'utf8').split(/\r?\n/).find((line) => line.startsWith('# Status:')).includes(value));
 });
 
@@ -1417,6 +1421,7 @@ test('a save that would remove every key is not applied, and the store stays exa
   save(file, '');
   assert.match((await h.run('apply')).stderr, /would remove every key/);
   assert.equal(storeImage(h), before);
+  assert.match(fs.readFileSync(file, 'utf8'), /^# Status: NOT SAVED \(\d\d:\d\d UTC\)\. This save would remove every key\.\r?\n$/, 'a deleted status line comes back at the top');
 });
 
 test('keys changed elsewhere while the tab is open stop the whole save, by name only', async (t) => {
@@ -1661,9 +1666,9 @@ test('a refused save writes its status line only if the file still holds the byt
   const checked = fs.readFileSync(file);
   const newer = `${checked.toString('utf8')}X1_TEST_NEWER_KEY=${sentinel()}\n`;
   fs.writeFileSync(file, newer);
-  assert.equal(session.writeStatus(file, 'NOT SAVED', checked), null);
+  assert.equal(session.writeStatus(file, () => 'NOT SAVED', checked), null);
   assert.equal(fs.readFileSync(file, 'utf8'), newer, 'the newer save is untouched');
   const now = fs.readFileSync(file);
-  assert.ok(session.writeStatus(file, 'NOT SAVED', now));
+  assert.ok(session.writeStatus(file, () => 'NOT SAVED', now));
   assert.match(fs.readFileSync(file, 'utf8'), /^# Status: NOT SAVED\r?$/m);
 });
