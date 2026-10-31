@@ -78,6 +78,20 @@ Claude Code (rows refer to the launch matrix in `repo/tests/support/claude-helpe
 | Route proof | Served model and effort from Claude Code's run records (subagent transcript and `.meta.json`), never the helper's report (the matrix's live rows) |
 | Known limit | A session `--agents` definition of a helper name outranks the files and no hook sees it (a matrix row); Toolkit launchers refuse it with `toolkit-claude-session-agents.cjs` |
 
+Codex (hook-process cases in `repo/tests/qualification/codex-native-helper.live.cjs`; stored results in `repo/contracts/host-qualification/codex.json`; the helper policy is in `repo/scripts/toolkit-codex-helper-policy.cjs`; the [Bridge's hook policy](TOOLKIT-LOCAL-BRIDGE.md#hook-policy) has the detail):
+
+| Need | How Codex meets it |
+|---|---|
+| Hook event | `PreToolUse` with matcher `^(?:Agent\|[A-Za-z0-9_-]*spawn_agent\|Bash\|exec_command\|shell\|local_shell\|PowerShell)$`, from the plugin's `hooks.json`. The spawn part covers V1 (`multi_agent`) `spawn_agent` and V2 (`multi_agent_v2`) `<namespace>spawn_agent` |
+| Blocking output | JSON `permissionDecision: "deny"` with a plain reason, the reason on stderr and exit 2. An allowed launch exits 0 with no output, because Codex records a bare allow as a failed hook run, so Codex's own permissions still apply |
+| Failure and timeout | Codex does not block when a hook cannot start, crashes, exits with another status or times out, or is missing, disabled or untrusted. The decision modules load inside the guarded path, so a broken module denies in governed work. On Windows the PowerShell launcher denies a helper launch when it cannot start Node |
+| Trust step | Codex skips a plugin hook until it is reviewed and trusted in `/hooks`. A changed hook needs trusting again, and setup says so |
+| Helper definitions | `toolkit-g0-helper.toml` and `toolkit-g1-helper.toml` in `<CODEX_HOME or ~/.codex>/agents`, rendered from the pinned stack by `toolkit-codex-helper-agents.cjs`. In governed work, every copy Codex could load (each `.codex/agents` folder from the working folder up to the repository root, and the user folder) must byte-match the rendered file |
+| Admission | In governed work only those two helpers launch. The hook refuses built-in agents, a launch that names no agent, model or effort fields, resume, a V1 `fork_context: true`, a V2 launch whose `fork_turns` is not `none`, and any launch in a G2 session |
+| Depth | Setup keeps V1 `max_depth = 1`. Codex sends hooks no caller-agent identity, so the hook cannot refuse a helper that launches another helper, and leaf depth stays an instruction |
+| Route proof | Served model and effort from the Codex session log, read by the lead, never the helper's report |
+| Known limit | Hook failures fail open (above). In Codex Desktop on Windows, a helper's shell can hit "Requested registry access is not allowed" (Desktop's sandbox for subagents, seen in October 2026) |
+
 ## 7. Lane write fences
 
 The integration controller alone writes the parent, the version files and the integration files the lane map names (`repo/contracts/lanes/lane-map.json` once it lands). A lane controller writes only the child the catalogue delegates to it (`assign` and `interrupt`), with its own decision-ID prefix.
