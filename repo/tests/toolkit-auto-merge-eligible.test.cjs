@@ -63,6 +63,7 @@ test('CI runs the default branch\'s copy, which needs nothing but Node\'s own mo
   assert.match(workflow, /types: \[opened, reopened, synchronize, edited, labeled, unlabeled\]/, 'a label change runs the check again');
   assert.match(workflow, /group: auto-merge-eligible-\$\{\{ github\.event\.pull_request\.number \}\}-\$\{\{ github\.event\.action == 'synchronize' && 'push' \|\| 'other' \}\}\n {2}cancel-in-progress: \$\{\{ github\.event\.action != 'synchronize' \}\}/, 'nothing cancels a push\'s run');
   assert.match(workflow, /--label-decision\)"/, 'the label decision is the tested one');
+  assert.match(workflow, /\{id, context, state, creator: \.creator\.login\}/, 'status ids reach the decision');
   assert.match(workflow, /\*record=1\*\)\n\s+gh api -X POST "repos\/\$GH_REPO\/statuses\/\$HEAD_SHA" -f state=success -f context=toolkit-owner-merge/);
   assert.match(workflow, /\*withdraw=1\*\)\n\s+gh api -X POST "repos\/\$GH_REPO\/statuses\/\$HEAD_SHA" -f state=failure -f context=toolkit-owner-merge/, 'a withdrawn or refused label sets the status to failure');
   assert.match(workflow, /\*remove=1\*\)\n\s+gh api -X DELETE "repos\/\$GH_REPO\/issues\/\$NUMBER\/labels\/toolkit-owner-merge"/);
@@ -115,6 +116,9 @@ test('the owner\'s label counts only for the head it was added on, whatever runs
   assert.deepEqual(decide('edited', { statuses: [failed, ...ok] }), { owner_merge: false, record: false, remove: true }, 'a withdrawn OK re-added without its own labeled run');
   assert.deepEqual(decide('edited', { statuses: [...ok, failed] }), { owner_merge: true, record: false, remove: false }, 'the owner added it again after withdrawing');
   assert.deepEqual(decide('edited', { statuses: [{ context: label, state: 'failure', creator: 'weijunswj' }, ...ok] }).owner_merge, true, 'only the workflow\'s own statuses count');
+  // With ids, the highest id wins whatever the order.
+  assert.equal(decide('edited', { statuses: [{ ...ok[0], id: 5 }, { ...failed, id: 9 }] }).owner_merge, false, 'a newer failure listed second');
+  assert.equal(decide('edited', { statuses: [{ ...failed, id: 3 }, { ...ok[0], id: 7 }] }).owner_merge, true, 'a newer success listed second');
   // The workflow step's own reading of its environment.
   const out = [];
   const step = environment => { out.length = 0; eligible.main(['--label-decision'], { environment, stdout: { write: text => out.push(text) } }); return out.join('').trim(); };
@@ -177,9 +181,9 @@ test('the controller runs the full check itself on the head it task-auto-merges'
   const read = rel => fs.readFileSync(path.join(__dirname, '..', '..', rel), 'utf8').replace(/\s+/g, ' ');
   const run = /`node repo\/scripts\/toolkit-auto-merge-eligible\.cjs --base <base> --head <head>` \(no `--binding-at`\)/;
   const gate = read('repo/contracts/agent-rules/gate-rules.md');
-  assert.match(gate, new RegExp(`${run.source} exits 0 there or the owner's label is on it\\. It posts the effects summary`), 'gate rules: a task auto-merge condition');
+  assert.match(gate, new RegExp(`${run.source} exits 0 or the newest \`toolkit-owner-merge\` status is success\\. It posts the effects summary`), 'gate rules: a task auto-merge condition');
   const skill = read('repo/contracts/claude-projects/web-controller-projects/SKILL.md');
-  assert.match(skill, new RegExp(`${run.source} on that head and merges without the label only on exit 0`), 'Projects skill merge line');
+  assert.match(skill, new RegExp(`${run.source} on that head and merges only on exit 0 or when the head's newest \`toolkit-owner-merge\` status is success`), 'Projects skill merge line');
 });
 
 test('while the default branch\'s binding leaves task auto-merge off, the check passes and only lists', (t) => {

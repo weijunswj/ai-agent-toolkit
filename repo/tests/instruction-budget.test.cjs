@@ -53,9 +53,9 @@ test('each block stays inside its own budget', () => {
   // 13,450 for the task auto-merge rule (the owner's answer, when the controller merges, the
   // always-manual list and the owner's label for it), then to 13,600 for the release-plan CI
   // check-up clause in the G0 bullet (it had moved to TOOLKIT-DELIVERY.md while this file was full),
-  // then to 13,750 for the controller's own eligibility run before a task auto-merge (the CI check
+  // then to 13,760 for the controller's own eligibility run before a task auto-merge (the CI check
   // passes while auto-merge is off, and that green can outlive the off period).
-  assert.ok(crlfBytes(read('repo/contracts/agent-rules/gate-rules.md')) <= 13750, 'gate rules');
+  assert.ok(crlfBytes(read('repo/contracts/agent-rules/gate-rules.md')) <= 13760, 'gate rules');
 });
 
 test('guidance moved out of root AGENTS.md is still reachable from a loaded layer', () => {

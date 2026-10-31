@@ -69,7 +69,7 @@ jobs:
         run: |
           auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
           git -c "http.https://github.com/.extraheader=$auth" fetch --no-tags --quiet origin "$HEAD_SHA" "$BASE_SHA"
-          STATUSES="$(gh api --paginate "repos/$GH_REPO/commits/$HEAD_SHA/statuses" --jq '.[] | {context, state, creator: .creator.login}' | jq -s -c .)"
+          STATUSES="$(gh api --paginate "repos/$GH_REPO/commits/$HEAD_SHA/statuses" --jq '.[] | {id, context, state, creator: .creator.login}' | jq -s -c .)"
           decision="$(STATUSES="$STATUSES" node repo/scripts/toolkit-auto-merge-eligible.cjs --label-decision)"
           echo "Owner label: $decision"
           owner=""

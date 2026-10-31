@@ -259,8 +259,12 @@ function labelDecision({ action, labels = [], added = null, sender = null, owner
       ? { owner_merge: true, record: true, remove: false }
       : { owner_merge: false, record: false, remove: true, not_owner: true, withdraw: true };
   }
-  // GitHub lists a commit's statuses newest first; only the newest one from the workflow counts.
-  const newest = statuses.find(entry => entry && entry.context === OWNER_LABEL && entry.creator === OWNER_STATUS_CREATOR);
+  // Only the newest status from the workflow counts: the highest id where ids are given, else the
+  // first, as GitHub lists a commit's statuses newest first.
+  const ours = statuses.filter(entry => entry && entry.context === OWNER_LABEL && entry.creator === OWNER_STATUS_CREATOR);
+  const newest = ours.every(entry => Number.isSafeInteger(entry.id))
+    ? ours.reduce((best, entry) => (!best || entry.id > best.id ? entry : best), null)
+    : ours[0];
   const recorded = Boolean(newest && newest.state === 'success');
   if (action === 'synchronize' || !recorded) return { owner_merge: false, record: false, remove: true };
   return { owner_merge: true, record: false, remove: false };
