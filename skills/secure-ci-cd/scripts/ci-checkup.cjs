@@ -259,6 +259,13 @@ function parseSteps(lines, start, end) {
   return steps;
 }
 
+function defaultsShell(lines, start, end, indent) {
+  const defaults = mapKeys(lines, start, end, indent).find((entry) => entry.key === 'defaults');
+  if (!defaults) return '';
+  const match = lines.slice(defaults.line, blockEnd(lines, defaults.line, indent)).join('\n').match(/shell:\s*(.+)/);
+  return match ? unquote(match[1].trim()) : '';
+}
+
 function defaultsDir(lines, start, end, indent) {
   const defaults = mapKeys(lines, start, end, indent).find((entry) => entry.key === 'defaults');
   if (!defaults) return '';
@@ -290,6 +297,7 @@ function parseWorkflow(rel, text) {
     permissions: top.some((entry) => entry.key === 'permissions'),
     prPathFilters,
     dir: defaultsDir(lines, 0, lines.length, 0),
+    shell: defaultsShell(lines, 0, lines.length, 0),
     jobs: [],
   };
   const jobsKey = top.find((entry) => entry.key === 'jobs');
@@ -310,6 +318,9 @@ function parseWorkflow(rel, text) {
       matrix: /\bmatrix:/.test(body),
       uses: (keys.find((entry) => entry.key === 'uses') || {}).value,
       dir: defaultsDir(lines, job.line + 1, end, jobIndent + 2) || workflow.dir,
+      shell: defaultsShell(lines, job.line + 1, end, jobIndent + 2) || workflow.shell,
+      // A runner named by expression may be Windows when the job body names a Windows image.
+      windows: (() => { const runsOn = (keys.find((entry) => entry.key === 'runs-on') || { value: '' }).value; return /windows/i.test(runsOn) || (/\$\{\{/.test(runsOn) && /windows/i.test(body)); })(),
       steps: stepsKey ? parseSteps(lines, stepsKey.line + 1, blockEnd(lines, stepsKey.line, jobIndent + 2)) : [],
     });
   }
@@ -858,8 +869,12 @@ function checkHygiene(fileList, workflows, root, requiredChecks = null) {
       const testy = (run, name = '') => Object.values(RUNNERS).some((re) => re.test(run)) || /\b(npm|pnpm|yarn|bun)\s+(run\s+)?t(est)?\b|run[-_]tests|unittest/i.test(run) || /\btests?\b/i.test(name);
       if (job.continueOnError) items.push(item(job.steps.some((s) => testy(s.run || '', s.name)) || testy('', job.name || job.id) ? 'GAP' : 'CHECK', 'hygiene.masked', `${workflow.rel}:${job.line}`, `job ${job.id} has continue-on-error, so its failure never fails the run`, 'remove continue-on-error, or move the job out of the required set with a recorded reason'));
       for (const step of job.steps) {
+        // PowerShell and cmd go on after a failing command, so `; exit 0` hides it there; bash
+        // and sh run with -e and stop first. A Windows runner with no shell set uses pwsh.
+        const shell = step.shell || job.shell || (job.windows ? 'pwsh' : 'bash');
         const masked = (step['continue-on-error'] && !/^false$/i.test(unquote(step['continue-on-error'])))
           || /\|\|\s*(true|:|exit\s+0|echo\b)|\bset\s+\+e\b/.test(step.run || '')
+          || (/^\s*(pwsh|powershell|cmd)\b/i.test(shell) && /;\s*exit\s+0\b|&\s*exit\s+0\b/i.test(step.run || ''))
           // `shell: bash` and `sh` get -e from GitHub; only a custom template such as `bash {0}`
           // without -e drops it.
           || (step.shell && /\{0\}/.test(step.shell) && /^\s*(ba)?sh\b/.test(step.shell) && !/\s-[a-z]*e/.test(step.shell));

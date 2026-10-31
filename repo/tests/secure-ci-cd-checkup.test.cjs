@@ -552,3 +552,16 @@ test('parts: a repository with no workflow gets one no-CI item, not one per file
   assert.match(coverage[0].message, /1 parts, 2 test files or folders and 1 scripts/);
   assert.deepEqual(report({ 'README.md': '# Notes\n' }).filter((e) => e.check === 'parts.no-ci'), [], 'nothing to run: no item');
 });
+
+test('hygiene: an early exit 0 still masks in PowerShell and cmd, including a Windows runner with no shell set', () => {
+  const step = (name, shell) => `      - name: ${name}\n${shell ? `        shell: ${shell}\n` : ''}        run: notify; exit 0\n`;
+  const job = (id, runsOn, steps, defaults = '') => `  ${id}:\n    runs-on: ${runsOn}\n${defaults}    steps:\n${steps}`;
+  const workflow = `name: CI\non:\n  pull_request:\npermissions:\n  contents: read\njobs:\n${[
+    job('linux', 'ubuntu-latest', step('Bash default') + step('Pwsh step', 'pwsh') + step('Cmd step', 'cmd')),
+    job('win', 'windows-latest', step('Windows default') + step('Windows bash', 'bash')),
+    job('matrix', '${{ matrix.os }}', step('Matrix default'), '    strategy:\n      matrix:\n        os: [ubuntu-latest, windows-latest]\n'),
+    job('defaults', 'ubuntu-latest', step('Job default pwsh'), '    defaults:\n      run:\n        shell: pwsh\n'),
+  ].join('')}`;
+  const items = hits(report({ '.github/workflows/ci.yml': workflow, 'docs/ci-cd/CURRENT_CICD_STATUS.md': STATUS('ci.yml') }), 'hygiene.masked');
+  assert.deepEqual(items.map((e) => e.message.match(/step "([^"]+)"/)[1]), ['Pwsh step', 'Cmd step', 'Windows default', 'Matrix default', 'Job default pwsh']);
+});
