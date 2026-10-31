@@ -1,18 +1,17 @@
 'use strict';
 
 // Checks what a `git push` or a new pull request (`gh pr create`) would send, before it leaves the
-// computer, so an agent hears about a problem in the same turn instead of from CI later:
-//   - a credential on a line any sent commit adds (the shared formats in
-//     skills/secure-ci-cd/scripts/secret-patterns.cjs: fixed prefixes and exact lengths only,
-//     placeholders skipped, `secret-scan: allow <reason>` for a reviewed exception). Every commit is
-//     read, so a credential added and removed again within one push is still found;
-//   - plain-text findings in the sent version of each changed file, in a repository that runs the
-//     plain-text check (.github/plain-text.json, or Toolkit's own settings in the Toolkit source).
+// computer, because a pushed credential cannot be taken back: a credential on a line any sent commit
+// adds (the shared formats in skills/secure-ci-cd/scripts/secret-patterns.cjs: fixed prefixes and
+// exact lengths only, placeholders skipped, `secret-scan: allow <reason>` for a reviewed exception).
+// Every commit is read, so a credential added and removed again within one push is still found.
+// Plain-text findings are left to CI's plain-text check: they leak nothing.
 // A refusal names the file, line and rule only: never any part of the matched text.
 //
 // What is sent: for a push, the commits of each pushed source (the refspec's local side, else HEAD)
-// that the target remote does not already have (its remote-tracking refs, so a remote with none gets
-// the whole history; every remote's when no remote or a URL is named). For a pull request, the commits of --head (else HEAD) not on the
+// that the target remote does not already have (its remote-tracking refs; every remote's when no
+// remote or a URL is named, or the named remote has none yet). A name that is no configured remote
+// sends nothing. For a pull request, the commits of --head (else HEAD) not on the
 // base branch (--base, else origin's default branch, else origin/main or origin/master). A folder that
 // is not a repository is not checked; a folder that cannot be found is refused.
 //
@@ -42,7 +41,7 @@ const BUDGET_MS = 30000;
 const MAX_LISTED = 10;
 const MAX_PENDING_FILE_BYTES = 1024 * 1024;
 const MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
-const NOTE = 'Toolkit could not check this push for credentials and plain-text findings, so it was let through';
+const NOTE = 'Toolkit could not check this push for credentials, so it was let through';
 const REV_OPTIONS = new Set(['--branches', '--tags']);
 
 class CheckSkipped extends Error {}
@@ -56,7 +55,8 @@ function isFolder(folder) {
 }
 
 const FOLDER_MISSING = 'Toolkit could not find the folder this push or pull request runs in, so it could not check what would be sent and refused it. If the same command creates that folder first (`git clone`, `mkdir`, `git worktree add`), run that step as its own command, then the push. Otherwise check the folder in `cd` or `git -C` (`~/...`, and on Windows `C:/...` and Git Bash `/c/...`, all work).';
-const FOLDER_UNREADABLE = 'Toolkit could not read the folder this push or pull request runs in, because it is written with a variable or a command (such as `$HOME`, `$(...)` or `$env:USERPROFILE`), so it could not check what would be sent and refused it. Write the folder out (`~/...` works), or run the command from inside that folder.';
+const FOLDER_UNREADABLE = 'Toolkit could not read the folder this push or pull request runs in, because it is written with a variable or a command the same command line does not set (such as `$(...)` or `$REPO`), so it could not check what would be sent and refused it. Write the folder out (`~/...` works), or run the command from inside that folder.';
+const SOURCE_UNKNOWN = 'This command changes branches or commits before the push in the same command, and the branch it pushes does not exist yet, so Toolkit cannot tell what the push would send. Run the push as its own command after this finishes.';
 const FOLDER_UNCONFIRMED = 'Codex did not say which folder this command runs in, and Toolkit could not tell from the chat\'s folder what this push or pull request would send, so it refused it. Run the commit and the push as separate commands and name the branch (`git push <remote> <branch>`), or name the folder first with `git -C <full path>` or `cd <full path>`.';
 
 // An environment value by name, ignoring case on Windows as Windows does.
@@ -167,8 +167,9 @@ const UNFORESEEN = new Set(['merge', 'cherry-pick', 'revert', 'am', 'rebase']);
 const DIFF_OPTIONS = ['-U0', '--no-color', '--no-ext-diff', '--no-textconv', '--no-renames', '--diff-filter=d', '--src-prefix=a/', '--dst-prefix=b/'];
 
 // What earlier git commands of the same shell command did in this repository: { add, commit,
-// unforeseen } from `preceding` ([{ folder, sub }] in command order), each folder matched to the
-// repository by its own top folder.
+// unforeseen, created, steps } from `preceding` ([{ folder, sub }] in command order), each folder
+// matched to the repository by its own top folder. `created` maps each branch a step creates
+// (`sub: 'create'`, with `name` and `start`) to its start point; `steps` counts every step.
 function precedingIn(root, preceding, deadline, spawn) {
   const tops = new Map();
   const same = (folder) => {
@@ -179,10 +180,12 @@ function precedingIn(root, preceding, deadline, spawn) {
     }
     return tops.get(resolved);
   };
-  const found = { add: false, commit: false, unforeseen: '' };
-  for (const { folder, sub } of preceding) {
+  const found = { add: false, commit: false, unforeseen: '', created: new Map(), steps: 0 };
+  for (const { folder, sub, name, start } of preceding) {
     if (!same(folder)) continue;
-    if (sub === 'add' || sub === 'stage') found.add = true;
+    found.steps += 1;
+    if (sub === 'create' && name && start) found.created.set(name, start);
+    else if (sub === 'add' || sub === 'stage') found.add = true;
     else if (sub === 'commit') found.commit = true;
     else if (UNFORESEEN.has(sub) && !found.unforeseen) found.unforeseen = sub;
   }
@@ -208,10 +211,24 @@ function workingTrees(root, deadline, spawn) {
 // follows from them (HEAD~1, @{u}).
 const followsHead = (source) => /^(?:HEAD|@)(?:$|[~^@{])/i.test(source);
 
+// Whether `inner` is `outer` or a folder below it.
+function within(inner, outer) {
+  const relative = path.relative(path.resolve(outer), path.resolve(inner));
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+// The working trees a Codex call from the chat's folder can run in: the one holding that folder and
+// any nested below it. Codex Desktop refuses a workdir outside the chat's folder (Windows error 267,
+// invalid directory), so a working tree elsewhere, such as a sibling worktree of the same
+// repository, is not where the command runs.
+function reachableTrees(trees, chatFolder) {
+  return trees.filter((tree) => within(chatFolder, tree.folder) || within(tree.folder, chatFolder));
+}
+
 // For a target whose folder Codex did not name (`folderConfirmed: false`), the working tree whose
 // changes the push can carry: { root } or { refusal }. It matters only when the same command commits
-// first or the source is HEAD, and only when the repository has more than one working tree; otherwise
-// the chat's folder is the one. With several, a HEAD source is refused (each working tree has its
+// first or the source is HEAD, and only when more than one working tree is reachable from the chat's
+// folder (reachableTrees); otherwise the chat's folder is the one. With several, a HEAD source is refused (each working tree has its
 // own). After a commit in the same command, each source must be a branch exactly one working tree
 // has checked out, and that working tree is read. Otherwise the commit's folder cannot be told and the
 // push is refused: a branch none has checked out (a `git checkout` or `git tag` earlier in the same
@@ -220,7 +237,7 @@ const followsHead = (source) => /^(?:HEAD|@)(?:$|[~^@{])/i.test(source);
 function unconfirmedFolder(root, target, sources, deadline, spawn) {
   const head = sources.some(followsHead);
   if (!head && !target.preceding?.length) return { root };
-  const trees = workingTrees(root, deadline, spawn);
+  const trees = reachableTrees(workingTrees(root, deadline, spawn), target.folder);
   if (trees.length <= 1) return { root };
   if (head) return { refusal: FOLDER_UNCONFIRMED };
   const folders = [];
@@ -234,10 +251,11 @@ function unconfirmedFolder(root, target, sources, deadline, spawn) {
   return folders.length === 1 ? { root: folders[0] } : { refusal: FOLDER_UNCONFIRMED };
 }
 
-// Whether the folder is in a repository with a single working tree. Not a repository: false.
+// Whether the folder is in a repository with a single working tree reachable from it
+// (reachableTrees). Not a repository: false.
 function singleWorkingTree(folder, deadline, spawn) {
   const top = runGit(folder, ['rev-parse', '--show-toplevel'], deadline, spawn);
-  return top.status === 0 && workingTrees(path.resolve(lines(top.stdout)[0]), deadline, spawn).length <= 1;
+  return top.status === 0 && reachableTrees(workingTrees(path.resolve(lines(top.stdout)[0]), deadline, spawn), folder).length <= 1;
 }
 
 // The working-tree file a pending change reads, or '' when it is missing, too big or binary.
@@ -274,74 +292,11 @@ function pendingChanges(root, { add }, deadline, spawn) {
   return changes;
 }
 
-// The plain-text settings this repository runs with, or null when it does not run the check.
-function plainTextSettings(top, portable) {
-  const own = path.join(top, '.github', 'plain-text.json');
-  const toolkit = path.join(top, 'repo', 'contracts', 'plain-references', 'config.json');
-  let file = '';
-  if (fs.existsSync(own)) file = own;
-  else if (fs.existsSync(toolkit) && fs.existsSync(path.join(top, 'repo', 'scripts', 'check-plain-references.cjs'))) file = toolkit;
-  if (!file) return null;
-  const config = portable.readConfigFile(file);
-  return config.off_reason ? null : config;
-}
-
-// Files as the pushed commit holds them, from one `git cat-file --batch` call: Map<file, text>.
-function sentFiles(root, tip, files, deadline, spawn) {
-  const result = runGit(root, ['cat-file', '--batch'], deadline, spawn, { input: Buffer.from(files.map((file) => `${tip}:${file}\n`).join(''), 'utf8'), encoding: 'buffer' });
-  if (result.status !== 0) throw new CheckSkipped('git could not read the pushed files');
-  const out = result.stdout;
-  const texts = new Map();
-  let offset = 0;
-  for (const file of files) {
-    const end = out.indexOf(0x0a, offset);
-    if (end === -1) break;
-    const header = out.subarray(offset, end).toString('utf8');
-    offset = end + 1;
-    // "<name> missing" has no content; any other object ("<sha> <type> <size>") is skipped whole, so a
-    // path that became a folder never shifts the files after it.
-    const object = /^[0-9a-f]+ (\w+) (\d+)$/.exec(header);
-    if (!object) continue;
-    const size = Number(object[2]);
-    if (object[1] === 'blob') texts.set(file, out.subarray(offset, offset + size).toString('utf8'));
-    offset += size + 1;
-  }
-  return texts;
-}
-
-// Plain-text findings in the sent version of each changed file, beyond the repository's baseline,
-// counted as the plain-text check in CI counts them. A file in `pending` (about to be committed by
-// the same shell command) is read from the working tree instead.
-function plainTextFindings(root, tip, files, deadline, spawn, portable, pending = new Set()) {
-  const config = plainTextSettings(root, portable);
-  if (!config) return [];
-  const scoped = [...new Set(files)].filter((file) => portable.scopeOf(file, config));
-  if (!scoped.length) return [];
-  const { baseline } = portable.check(root, config, { files: [] });
-  const key = (entry) => `${entry.file}\0${entry.rule}\0${entry.text}`;
-  const allowed = new Map(baseline.allowed.map((entry) => [key(entry), entry.count]));
-  const groups = new Map();
-  const committed = scoped.filter((file) => !pending.has(file));
-  const texts = committed.length ? sentFiles(root, tip, committed, deadline, spawn) : new Map();
-  for (const file of scoped) if (pending.has(file)) texts.set(file, workingText(root, file));
-  for (const [file, text] of texts) {
-    for (const finding of portable.findInText(text, file, config, portable.scopeOf(file, config))) {
-      if (!groups.has(key(finding))) groups.set(key(finding), []);
-      groups.get(key(finding)).push(finding);
-    }
-  }
-  const failures = [];
-  for (const [id, group] of groups) if (group.length > (allowed.get(id) || 0)) failures.push(...group);
-  return failures.map((finding) => portable.describeFailure(finding, config));
-}
-
-function refusalText(secrets, plain, action, pending = false) {
-  const items = [...secrets, ...plain];
+function refusalText(secrets, action, pending = false) {
+  const items = secrets;
   const listed = items.slice(0, MAX_LISTED).map((item) => `  ${item}`);
   if (items.length > MAX_LISTED) listed.push(`  ...and ${items.length - MAX_LISTED} more.`);
-  const advice = [];
-  if (secrets.length) advice.push('Credentials: take each one out of the commits being sent (each item names its commit), and treat it as exposed if it was real. For a reviewed false positive, add `secret-scan: allow <reason>` on that line.');
-  if (plain.length) advice.push('Plain-text items: rewrite them in plain English.');
+  const advice = ['Credentials: take each one out of the commits being sent (each item names its commit), and treat it as exposed if it was real. For a reviewed false positive, add `secret-scan: allow <reason>` on that line.'];
   if (pending) advice.push('This command commits before it sends, so Toolkit also checked the changes about to be committed (marked "not committed yet"). If that file will not be in this commit, run the commit and the push as separate commands.');
   return [`Toolkit checked what this ${action} would send and found ${items.length} item(s) to fix first:`, ...listed, ...advice, `Then ${action === 'push' ? 'push' : 'open the pull request'} again.`].join('\n');
 }
@@ -359,15 +314,13 @@ function why(error) {
 function checkOutgoing(target, {
   spawn: spawnProgram = spawnSync,
   patterns = () => require('../../skills/secure-ci-cd/scripts/secret-patterns.cjs'),
-  portable = () => require('../../skills/secure-ci-cd/scripts/plain-text-check.cjs'),
   budgetMs = BUDGET_MS,
   deadline = Date.now() + budgetMs,
   git = resolveGit
 } = {}) {
-  const sources = target.sources?.length ? target.sources : ['HEAD'];
+  let sources = target.sources?.length ? target.sources : ['HEAD'];
   // A source git would read as an option is never passed on.
   if (sources.some((source) => source.startsWith('-') && !REV_OPTIONS.has(source))) return {};
-  const allRefs = sources.some((source) => REV_OPTIONS.has(source));
   // A folder Toolkit cannot find is refused rather than let through unchecked: either it does not
   // exist yet (made earlier in the same command, so the push can run as its own command after it),
   // or it is written in a form the check cannot read (a variable or a command substitution).
@@ -378,20 +331,35 @@ function checkOutgoing(target, {
     // Every git call below runs this absolute path, never a name the system looks up.
     const spawn = (_name, args, options) => spawnProgram(program, args, options);
     // One call for the repository folder and the pushed commits.
-    const revs = sources.map((source) => (REV_OPTIONS.has(source) ? source : `${source}^{commit}`));
-    let probe = runGit(target.folder, ['rev-parse', '--show-toplevel', ...revs], deadline, spawn);
-    // A source that is not a commit yet: with a commit earlier in the same shell command (a first
-    // commit in a new repository, say) only what it could commit is checked; otherwise the push
-    // fails on its own. Not a repository: nothing to check. When Codex did not name the folder, the
-    // chat's folder may simply be the wrong one, so either is refused instead, unless the chat's
+    const revsOf = (list) => list.map((source) => (REV_OPTIONS.has(source) ? source : `${source}^{commit}`));
+    let probe = runGit(target.folder, ['rev-parse', '--show-toplevel', ...revsOf(sources)], deadline, spawn);
+    // A source that is not a commit yet. A branch an earlier step of the same shell command creates
+    // (`checkout -b`, `switch -c`, `branch`, `worktree add -b`) is read at its start point, since that
+    // is what the push will send. With a commit earlier in the same shell command (a first commit in
+    // a new repository, say) only what it could commit is checked. After any other earlier git step
+    // in this repository the push is refused, since that step could make the branch; with none, the
+    // push fails on its own. Not a repository: nothing to check. When Codex did not name the folder,
+    // the chat's folder may simply be the wrong one, so either is refused instead, unless the chat's
     // folder is in a repository with one working tree, which is then the one.
     let committed = true;
     if (probe.status !== 0) {
       if (target.folderConfirmed === false && !singleWorkingTree(target.folder, deadline, spawn)) return { refusal: FOLDER_UNCONFIRMED };
-      if (!target.preceding?.some((entry) => entry.sub === 'commit')) return {};
-      probe = runGit(target.folder, ['rev-parse', '--show-toplevel'], deadline, spawn);
-      if (probe.status !== 0) return {};
-      committed = false;
+      if (!target.preceding?.length) return {};
+      const top = runGit(target.folder, ['rev-parse', '--show-toplevel'], deadline, spawn);
+      if (top.status !== 0) return {};
+      const here = path.resolve(lines(top.stdout)[0]);
+      const steps = (target.preceding || []).map((entry) => (entry.folderConfirmed === false ? { ...entry, folder: here } : entry));
+      const before = steps.length ? precedingIn(here, steps, deadline, spawn) : { steps: 0, created: new Map() };
+      const started = sources.map((source) => before.created.get(source) || source);
+      if (started.some((source, index) => source !== sources[index])) {
+        const again = runGit(target.folder, ['rev-parse', '--show-toplevel', ...revsOf(started)], deadline, spawn);
+        if (again.status === 0) { probe = again; sources = started; }
+      }
+      if (probe.status !== 0) {
+        if (before.commit) { probe = top; committed = false; }
+        else if (before.steps) return { refusal: SOURCE_UNKNOWN };
+        else return {};
+      }
     }
     const out = lines(probe.stdout);
     let root = path.resolve(out[0]);
@@ -417,10 +385,20 @@ function checkOutgoing(target, {
       if (!base) return { note: `${NOTE}: no base branch was found on origin.` };
       range = [...sources, '--not', base];
     } else if (committed) {
-      // What the named remote already has (a remote with none gets everything); for no remote or a
-      // URL, what any remote has.
+      // What the named remote already has; for no remote, a URL or a configured remote with no
+      // remote-tracking refs yet (new or empty), what any remote has, so history another remote
+      // already holds is not read again. A name that is no configured remote sends nothing: git
+      // refuses the push on its own.
       const named = target.remote && !looksLikeUrl(target.remote);
-      range = [...sources, '--not', named ? `--remotes=${target.remote}` : '--remotes'];
+      let remotes = '--remotes';
+      if (named) {
+        const configured = runGit(root, ['remote'], deadline, spawn);
+        if (configured.status !== 0) throw new CheckSkipped('git could not list the remotes');
+        if (!lines(configured.stdout).includes(target.remote)) return {};
+        const tracked = runGit(root, ['for-each-ref', '--count=1', '--format=%(refname)', `refs/remotes/${target.remote}/`], deadline, spawn);
+        if (lines(tracked.stdout).length) remotes = `--remotes=${target.remote}`;
+      }
+      range = [...sources, '--not', remotes];
     }
     let sent = [];
     if (range) {
@@ -432,15 +410,7 @@ function checkOutgoing(target, {
     const changes = [...sent, ...pending];
     if (!changes.length) return {};
     const secrets = secretFindings(changes, patterns());
-    const result = {};
-    // The plain-text step has its own fallback, so a broken setting never drops a credential refusal.
-    let plain = [];
-    if (!allRefs) {
-      try { plain = plainTextFindings(root, out[1], changes.map((change) => change.file), deadline, spawn, portable(), new Set(pending.map((change) => change.file))); }
-      catch (error) { result.note = `Toolkit could not check this push for plain-text findings: ${why(error)}.`; }
-    }
-    if (secrets.length || plain.length) result.refusal = refusalText(secrets, plain, action, pending.length > 0);
-    return result;
+    return secrets.length ? { refusal: refusalText(secrets, action, pending.length > 0) } : {};
   } catch (error) {
     return { note: `${NOTE}: ${why(error)}.` };
   }

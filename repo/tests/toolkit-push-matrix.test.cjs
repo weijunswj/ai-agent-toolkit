@@ -9,7 +9,7 @@ const path = require('node:path');
 const childProcess = require('node:child_process');
 const { spawnSync } = childProcess;
 const test = require('node:test');
-const { BYPASS_MESSAGE, FORCE_MESSAGE, MESSAGE, attributionDecision, outgoingRefusal } = require('../scripts/toolkit-attribution-guard.cjs');
+const { FORCE_MESSAGE, MESSAGE, attributionDecision, outgoingRefusal } = require('../scripts/toolkit-attribution-guard.cjs');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const trailer = 'Co-Authored-By: Claude <noreply@anthropic.com>';
@@ -35,7 +35,7 @@ function writeFiles(root, files) {
 // runs in as workdir, with the session folder elsewhere, so a check that judged the session folder
 // would let them through. Each row runs through attributionDecision and through its host's hook as a
 // process.
-test('matrix: every host shape gets the attribution, bypass, force-push and push checks in the folder the command runs in', (t) => {
+test('matrix: every host shape gets the attribution, force-push and push checks in the folder the command runs in', (t) => {
   const support = require('./toolkit-governed-fixture-support.cjs');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-shell-matrix-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -51,7 +51,6 @@ test('matrix: every host shape gets the attribution, bypass, force-push and push
   const checks = [
     ['C1 attribution in git commit -m', `git commit -m x -m "${trailer}"`, (reason) => reason === MESSAGE],
     ['C2 attribution in a body file read from the run folder', 'gh pr create --body-file body.md', (reason) => reason === MESSAGE],
-    ['C3 bypass in a governed repository', 'git commit --no-verify -m x', (reason) => reason === BYPASS_MESSAGE],
     ['C4 force push in a governed repository', 'git push --force origin feature', (reason) => reason === FORCE_MESSAGE],
     ['C4 force push to an evidence store', 'git push https://github.com/owner/TRANSPORT-evidence.git +feature', (reason) => reason === FORCE_MESSAGE],
     ['C5 push of a committed credential', 'git push origin feature', (reason) => /uat-config\.txt:1 /.test(reason)],
@@ -77,18 +76,16 @@ test('matrix: every host shape gets the attribution, bypass, force-push and push
       const hook = spawnSync(process.execPath, [hookPath], { input: JSON.stringify(input), encoding: 'utf8', env, timeout: 60000 });
       assert.equal(hook.status, 2, `${row} x ${check}: ${hook.stderr}`);
       const reason = JSON.parse(hook.stdout.trim().split('\n').pop()).hookSpecificOutput.permissionDecisionReason;
-      // The Codex hook runs the governance gate first. It reads a word list unquoted too, and refuses a
-      // continuation-like word list that names Claude before the attribution check sees it, as before.
-      const gateFirst = Array.isArray(input.tool_input.command) && /claude/i.test(command) && /^Toolkit: this command could resume or fork a Claude or Codex session/.test(reason);
-      assert.ok(expected(reason) || gateFirst, `${row} x ${check}: the hook gave ${JSON.stringify(reason)}`);
+      assert.ok(expected(reason), `${row} x ${check}: the hook gave ${JSON.stringify(reason)}`);
     }
   }
   // R7: an argument list without a shell, the shape of the force push the owner's probe sent.
   const argv = { tool_name: 'shell', cwd: session, tool_input: { command: ['git', 'push', '--force', 'origin', 'feature'], workdir: governed } };
   assert.equal(attributionDecision(argv, quiet()).hookSpecificOutput?.permissionDecisionReason, FORCE_MESSAGE, 'R7');
-  // Allowed controls in the same rows: an ordinary commit that mentions Claude, and git status.
+  // Allowed controls in the same rows: an ordinary commit that mentions Claude, git status, and a commit
+  // that skips the repository's checks (a written rule; CI is the backstop).
   for (const [row, , shape] of rows) {
-    for (const command of ['git commit -m "Document how Claude Code reads AGENTS.md"', 'git status']) {
+    for (const command of ['git commit -m "Document how Claude Code reads AGENTS.md"', 'git status', 'git commit --no-verify -m x']) {
       assert.deepEqual(attributionDecision(shape(command), quiet()), {}, `${row}: ${command}`);
     }
   }
@@ -211,12 +208,12 @@ test('Git Bash drive paths in cd, git -C and file options reach every check in t
   writeFiles(governed, { 'body.md': 'Summary\n\nGenerated with [Claude Code](https://claude.com/claude-code)\n' });
   const drive = gitBashPath(governed);
   assert.equal(attributionDecision({ tool_name: 'Bash', cwd: session, tool_input: { command: `git -C ${drive} push --force origin feature` } }, quiet()).hookSpecificOutput?.permissionDecisionReason, FORCE_MESSAGE);
-  assert.equal(attributionDecision({ tool_name: 'Bash', cwd: session, tool_input: { command: `cd ${drive} && git commit --no-verify -m x` } }, quiet()).hookSpecificOutput?.permissionDecisionReason, BYPASS_MESSAGE);
+  assert.equal(attributionDecision({ tool_name: 'Bash', cwd: session, tool_input: { command: `cd ${drive} && git push --force origin main` } }, quiet()).hookSpecificOutput?.permissionDecisionReason, FORCE_MESSAGE);
   assert.equal(attributionDecision({ tool_name: 'Bash', cwd: session, tool_input: { command: `gh pr create --body-file ${drive}/body.md` } }, quiet()).hookSpecificOutput?.permissionDecisionReason, MESSAGE);
   assert.equal(attributionDecision({ tool_name: 'exec_command', cwd: session, tool_input: { cmd: 'git push --force origin feature', workdir: drive } }, quiet()).hookSpecificOutput?.permissionDecisionReason, FORCE_MESSAGE, 'a Codex workdir in Git Bash form');
 });
 
-test('a leading ~ is the home folder for every check; a folder written as a variable is refused as unreadable', (t) => {
+test('a leading ~ or home variable is the home folder for every check; a folder written as a command is refused as unreadable', (t) => {
   const support = require('./toolkit-governed-fixture-support.cjs');
   // A scratch home for this process and the hooks it starts, never the real one.
   const home = support.governedHome();
@@ -240,11 +237,15 @@ test('a leading ~ is the home folder for every check; a folder written as a vari
   t.after(() => fs.rmSync(governed, { recursive: true, force: true }));
   writeFiles(home, { 'tilde-msg.txt': `Fix\n\n${trailer}\n` });
   t.after(() => fs.rmSync(path.join(home, 'tilde-msg.txt'), { force: true }));
-  assert.equal(attributionDecision({ tool_name: 'Bash', cwd: session, tool_input: { command: 'cd ~/tilde-governed && git commit --no-verify -m x' } }, quiet()).hookSpecificOutput?.permissionDecisionReason, BYPASS_MESSAGE);
+  assert.equal(attributionDecision({ tool_name: 'Bash', cwd: session, tool_input: { command: 'cd ~/tilde-governed && git push --force origin main' } }, quiet()).hookSpecificOutput?.permissionDecisionReason, FORCE_MESSAGE);
   assert.equal(attributionDecision({ tool_name: 'Bash', cwd: session, tool_input: { command: 'git commit -F ~/tilde-msg.txt' } }, quiet()).hookSpecificOutput?.permissionDecisionReason, MESSAGE);
-  // Written with a variable or a command, the folder cannot be read: refused, saying so.
+  // A leading home variable reads as the home folder, as the merge hold reads it; a folder written
+  // with a command, or a variable no earlier command assigned, cannot be read: refused, saying so.
   const pushCheck = require('../scripts/toolkit-push-check.cjs');
-  for (const command of ['cd $HOME/tilde-repo && git push origin feature', 'git -C "$(pwd)/x" push', 'cd $env:USERPROFILE\\tilde-repo; git push origin feature']) {
+  for (const command of ['cd $HOME/tilde-repo && git push origin feature', 'cd $env:USERPROFILE\\tilde-repo; git push origin feature', 'd=~/tilde-repo; git -C "$d" push origin feature']) {
+    assert.match(outgoingRefusal(command, session, quiet()), /uat-config\.txt:1 \(commit [0-9a-f]{7}\)/, command);
+  }
+  for (const command of ['git -C "$(pwd)/x" push', 'git -C "$REPO" push origin feature']) {
     assert.equal(outgoingRefusal(command, session, quiet()), pushCheck.FOLDER_UNREADABLE, command);
   }
   assert.match(pushCheck.FOLDER_UNREADABLE, /could not read the folder .* variable or a command/);
