@@ -625,6 +625,13 @@ function validateBinding(binding) {
       check(errors, isObject(updates) && Object.keys(updates).every(key => ['auto_merge', 'github_actions'].includes(key)), 'dependency_updates may hold only auto_merge and github_actions');
       check(errors, isObject(updates) && optional(updates.auto_merge, value => ['off', 'patch-minor'].includes(value)) && optional(updates.github_actions, value => ['auto-merge', 'owner'].includes(value)), 'dependency_updates.auto_merge must be off or patch-minor, and github_actions auto-merge or owner');
     }
+    // The owner's answer to "merge finished task pull requests without waiting for me?" (version 2 only).
+    const taskPrs = binding.task_prs;
+    if (taskPrs !== undefined) {
+      check(errors, v2, 'task_prs belongs to version 2 bindings');
+      check(errors, isObject(taskPrs) && Object.keys(taskPrs).every(key => key === 'auto_merge'), 'task_prs may hold only auto_merge');
+      check(errors, isObject(taskPrs) && optional(taskPrs.auto_merge, value => ['off', 'after-gates'].includes(value)), 'task_prs.auto_merge must be off or after-gates');
+    }
     // The Windows Task Scheduler folder for this repository's no-AI tasks (toolkit-windows-tasks.cjs).
     check(errors, optional(binding.schedule_folder, value => typeof value === 'string' && /^[A-Z0-9][A-Z0-9-]{0,31}$/.test(value)), 'schedule_folder must be 1 to 32 capital letters, digits or hyphens, starting with a letter or digit');
     const projection = binding.projection;
@@ -643,7 +650,7 @@ function validateBinding(binding) {
 }
 
 // The keys a version 2 binding may carry (binding-v2.schema.json); anything else makes it invalid.
-const BINDING_V2_KEYS = Object.freeze(['schema', 'repository', 'governance', 'parents', 'store', 'required_checks', 'paid_security', 'dependency_updates', 'projection', 'schedule_folder']);
+const BINDING_V2_KEYS = Object.freeze(['schema', 'repository', 'governance', 'parents', 'store', 'required_checks', 'paid_security', 'dependency_updates', 'task_prs', 'projection', 'schedule_folder']);
 
 // Whether a valid binding turns governance on: v1 always, v2 when `governance` is enabled.
 function bindingEnabled(binding) {

@@ -24,6 +24,18 @@
 // It is for the repository the session is in, or the one the message names; a bare number typed
 // outside a GitHub repository records nothing.
 //
+// The owner's standing answer instead of a typed approval: when the binding merged on the default
+// branch says `task_prs.auto_merge: after-gates` and lists `auto-merge-eligible` among its required
+// checks (read from this computer's cache of it, under a day old; the check, from
+// toolkit-auto-merge-eligible.cjs, fails a pull request on the always-manual list, so GitHub refuses
+// that merge), a merge with no typed approval passes only in a session the user started, in that
+// repository's own folder, for that repository, as a plain merge commit pinned to the full 40
+// character head SHA: `gh pr merge N --merge --match-head-commit <sha>`, or a connector merge tool
+// call with merge_method "merge" and the head SHA field. --auto, --admin, --squash, --rebase,
+// --delete-branch, the API endpoint, connector auto-merge and any other repository still need a typed
+// approval. The gate conditions (review, CI, testing, the always-manual list) are the controller's
+// to check before it merges; this hold cannot read them.
+//
 // What one approval allows: one merge, of that pull request in that repository, within a day, by any
 // session on this computer. A typed SHA pins the head commit; without one the merge must still name
 // the head it expects, so a push after that read makes GitHub refuse it. Connector auto-merge cannot
@@ -45,7 +57,11 @@
 //     remote or a gh default repository other than its own, unless --repo or a URL names it;
 //   - refused, as a tripwire against an agent approving for itself: a command that starts a Claude
 //     or Codex session and mentions merge, or that sets or clears TOOLKIT_HOST_SESSION, names
-//     Toolkit's user-state folder, or the hook scripts together with what would feed them a prompt.
+//     Toolkit's user-state folder, or the hook scripts together with what would feed them a prompt;
+//   - refused, so only the owner gives it: a shell command that names the toolkit-owner-merge label
+//     with a GitHub client (gh, curl and the like), and a connector tool for labels, issues or pull
+//     requests whose call names it. That label is the owner's OK for an always-manual pull request
+//     under task auto-merge; a label name built at run time or read from a file is not seen.
 //
 // Not covered: wrapped or nested host launches (bash -lc, timeout, Start-Process and the like), a
 // prompt file fed to a hook script, pasted text outside a code fence that has a plain approval line, scripts or programs
@@ -131,6 +147,14 @@ const MOVES_TARGET = /(?:^|[\s;&|({])(?:cd|pushd|chdir|set-location|sl)\s|\bGH_R
 // session another one started it (reading or searching for its name is fine).
 const STATE_WORDS = /merge-approvals|[\\/]\.ai-agent-toolkit[\\/]user-state\b|\bTOOLKIT_HOST_SESSION\s*=|(?:\bunset|-u|--unset(?:=|\s+)|\benv:|\$env:)\s*TOOLKIT_HOST_SESSION\b/i;
 const HOOK_FEED = /toolkit-(?:merge-hold|governance-hook|codex-helper-hook)/i;
+// The label the owner adds in GitHub to let an always-manual pull request merge under task
+// auto-merge (toolkit-auto-merge-eligible.cjs OWNER_LABEL). Only the owner sets it, so a shell
+// command that names it with a GitHub client, or a connector call that names it, is refused, reads
+// included; `gh pr view N --json labels` shows it without naming it.
+const OWNER_LABEL = 'toolkit-owner-merge';
+const OWNER_LABEL_WORD = /toolkit-owner-merge/i;
+const GITHUB_CLIENT = /\b(?:gh|hub|curl|wget|irm|iwr|invoke-restmethod|invoke-webrequest)(?:\.exe)?\b/i;
+const OWNER_LABEL_TEXT = `the ${OWNER_LABEL} label is the owner's own OK to merge a pull request on the task auto-merge always-manual list, so only the owner adds or removes it, in GitHub. To see a pull request's labels, use \`gh pr view N --json labels\`.`;
 const FEED_WORDS = /\brequire\b|\brecordPrompt\b|\bUserPromptSubmit\b|\bimport\b/;
 const HOST_WORD = /^(?:claude|codex)(?:-code)?(?:\.exe|\.cmd|\.ps1)?$|claude-code|@openai\/codex/i;
 // gh pr merge flags that take a value, so the value is not read as the pull request.
@@ -438,7 +462,7 @@ function shellMerges(text, cwd, environment = {}) {
     const url = target ? PR_URL.exec(target) : null;
     const pr = url ? Number(url[2]) : target && /^#?\d+$/.test(target) ? Number(target.replace('#', '')) : null;
     const named = url ? url[1] : flagValue(words, ['--repo', '-R']) || flagValue(before, ['--repo', '-R']);
-    merges.push({ repository: named || here(), pr, sha: flagValue(words, ['--match-head-commit']), auto: words.includes('--auto'), explicit: Boolean(named) });
+    merges.push({ repository: named || here(), pr, sha: flagValue(words, ['--match-head-commit']), auto: words.includes('--auto'), explicit: Boolean(named), kind: 'gh', flags: words.filter(word => word.startsWith('-')) });
   }
   // Searched across the whole command, so a quoted value with a newline, ; & or | before it does
   // not hide the path. With more than one, no sha= field is trusted.
@@ -447,7 +471,7 @@ function shellMerges(text, cwd, environment = {}) {
     const shas = [...text.matchAll(/(?:^|\s)(?:-f|-F|--field|--raw-field)(?:\s+|=)["']?sha=([0-9a-f]{7,40})\b/gi)].map(match => match[1]);
     for (const pull of pulls) {
       const placeholder = /^(?:\{owner\}|:owner)$/.test(pull[1]) || /^(?:\{repo\}|:repo)$/.test(pull[2]);
-      merges.push({ repository: placeholder ? here() : `${pull[1]}/${pull[2]}`, pr: Number(pull[3]), sha: pulls.length === 1 && shas.length === 1 ? shas[0] : null, auto: false, explicit: !placeholder });
+      merges.push({ repository: placeholder ? here() : `${pull[1]}/${pull[2]}`, pr: Number(pull[3]), sha: pulls.length === 1 && shas.length === 1 ? shas[0] : null, auto: false, explicit: !placeholder, kind: 'api' });
     }
   }
   return merges;
@@ -500,7 +524,8 @@ function connectorMergeArgs(tool, args) {
 
   const numberField = NUMBER_FIELDS.find(has);
   const shaField = numberField === 'pull_number' ? null : SHA_FIELD_FOR[numberField] || (has('repository_full_name') ? 'expected_head_sha' : 'expected_head_sha or expectedHeadSha');
-  return { repository, pr, sha, badSha, auto: CONNECTOR_AUTO_MERGE.test(tool), connector: true, explicit: true, fields, unclear, shaField, unreadSha: has('sha') };
+  const method = ['merge_method', 'mergeMethod'].filter(has).map(field => given[field]);
+  return { repository, pr, sha, badSha, auto: CONNECTOR_AUTO_MERGE.test(tool), connector: true, explicit: true, fields, unclear, shaField, unreadSha: has('sha'), method: method.length > 0 && method.every(value => value === 'merge') ? 'merge' : null };
 }
 
 function connectorMerge(tool, input) {
@@ -535,15 +560,42 @@ function connectorRefusal(merge) {
 function deny(reason) { return { deny: `Toolkit: ${reason} ${ASK_TEXT}` }; }
 function refuse(reason) { return { deny: `Toolkit: ${reason}` }; }
 
-// The refusal for one requested merge, or the approval it uses.
-function judge(merge, approvals) {
+// gh pr merge flags a standing-answer merge may carry: the merge commit, the head pin and the
+// repository. Anything else (--auto, --admin, --squash, --rebase, --delete-branch, a subject or body)
+// needs a typed approval.
+const STANDING_FLAGS = /^(?:--merge|-m|--match-head-commit(?:=.*)?|--repo(?:=.*)?|-R)$/;
+
+// Why a merge with no typed approval does not fit the owner's standing answer, or '' when it does.
+function standingProblem(merge, standing) {
+  if (typeof merge.repository !== 'string' || merge.repository.toLowerCase() !== standing.repository.toLowerCase()) return `is for another repository than this folder's (${standing.repository})`;
+  if (!(typeof merge.sha === 'string' && /^[0-9a-f]{40}$/i.test(merge.sha))) return 'does not name the full 40 character head SHA it expects';
+  if (merge.connector) {
+    if (merge.auto) return 'uses connector auto-merge, which cannot be pinned';
+    if (merge.method !== 'merge') return 'does not set merge_method to "merge"';
+    return '';
+  }
+  if (merge.kind !== 'gh') return 'uses the API merge endpoint';
+  if (!merge.flags.some(flag => flag === '--merge' || flag === '-m')) return 'does not ask for a merge commit with --merge';
+  const other = merge.flags.filter(flag => !STANDING_FLAGS.test(flag));
+  if (other.length > 0) return `adds ${other.join(', ')}`;
+  return '';
+}
+
+// The refusal for one requested merge, or the approval it uses. `standing` is the owner's standing
+// answer for this folder's repository ({ repository }) when it is on, or null.
+function judge(merge, approvals, standing = null) {
   const unreadable = merge.connector ? connectorRefusal(merge) : null;
   if (unreadable) return { refusal: unreadable };
   if (merge.pr === null) return { refusal: deny('this command merges a pull request Toolkit cannot identify, so it is refused. Name the pull request by number.') };
   if (typeof merge.repository !== 'string') return { refusal: deny(`Toolkit cannot tell which repository pull request #${merge.pr} is in, so the merge is refused. Name it with --repo owner/name or a pull request URL.`) };
   const name = `${merge.repository}#${merge.pr}`;
   const approval = approvals.find(merge.repository, merge.pr);
-  if (!approval) return { refusal: deny(`the user has not approved a merge of ${name} in the last day, so this merge is refused.`) };
+  if (!approval) {
+    if (!standing) return { refusal: deny(`the user has not approved a merge of ${name} in the last day, so this merge is refused.`) };
+    const problem = standingProblem(merge, standing);
+    if (problem) return { refusal: deny(`task auto-merge is on for ${standing.repository}, but this merge of ${name} ${problem}, so it needs the user's typed approval. A merge without one must be exactly \`gh pr merge ${merge.pr} --merge --match-head-commit <full head sha>\` from this repository's folder, or the connector's merge tool with merge_method "merge" and its head SHA field, once the gate rules' task auto-merge conditions hold.`) };
+    return { standing: true };
+  }
   // Connector auto-merge cannot name a head commit, so it is refused; gh can.
   if (merge.connector && merge.auto) {
     return { refusal: refuse(`the connector's auto-merge cannot name the head commit it expects, so it is refused. After the user approves, use \`gh pr merge ${merge.pr} --auto --match-head-commit <sha>\` or the connector's merge tool with its head SHA field.`) };
@@ -568,6 +620,7 @@ function judge(merge, approvals) {
 // what an approval can allow; '' when there is none.
 function shellRefusal(text, cwd, registryOptions = {}, shell = null) {
   if (STATE_WORDS.test(text)) return refuse('Toolkit\'s user-state files (merge approvals and governance decisions) and its session variable must be read and changed only by Toolkit itself. Never act as the user.');
+  if (OWNER_LABEL_WORD.test(text) && GITHUB_CLIENT.test(text)) return refuse(OWNER_LABEL_TEXT);
   if (HOOK_FEED.test(text) && FEED_WORDS.test(text)) return refuse('a merge approval must come from the user\'s own typed message, so commands that load Toolkit\'s hook scripts or feed them a prompt are refused.');
   const parts = segments(text);
   for (const words of parts) {
@@ -598,11 +651,36 @@ function shellRefusal(text, cwd, registryOptions = {}, shell = null) {
   return '';
 }
 
+// The owner's standing answer for the repository of folder `cwd`: { repository } when the binding
+// merged on its default branch turns task auto-merge on, that binding requires the always-manual
+// check (so GitHub refuses a pull request on the always-manual list), and the user started this
+// session; else null.
+function standingAnswer(input, cwd, { environment, registryOptions, now }) {
+  if (typeof cwd !== 'string' || cwd === '') return null;
+  const repository = repositoryOf(cwd);
+  if (!repository) return null;
+  let root;
+  try { root = governance.findGitRoot(cwd); } catch { root = null; }
+  if (!root) return null;
+  const answer = governance.taskAutoMerge(root, { ...registryOptions, ...(now ? { now } : {}) });
+  if (answer.auto_merge !== 'after-gates' || !answer.eligibility_required) return null;
+  const sessionId = input && typeof input.session_id === 'string' ? input.session_id : null;
+  return startedByUser(sessionId, environment, registryOptions, now) ? { repository } : null;
+}
+
 // The PreToolUse decision: { deny } or null.
 // `host` is the hook's own host ('claude' or 'codex'), set by the entry point, never read from the payload.
 function decide(input, { registryOptions = {}, now, environment = process.env, host = null } = {}) {
   const tool = String(input && (input.tool_name || input.toolName) || '');
   let merges;
+  let cwd = input && typeof input.cwd === 'string' ? input.cwd : null;
+  // A connector tool that can set labels (GitHub servers name them after labels, issues or pull
+  // requests, whatever the server is called); chat and other tools may name the label freely.
+  if (/^mcp__.*(?:label|issue|pull)/i.test(tool) && !CONNECTOR_MERGE.test(tool)) {
+    let args = '';
+    try { args = JSON.stringify(input.tool_input || input.toolInput || {}); } catch { args = ''; }
+    return OWNER_LABEL_WORD.test(args) ? refuse(OWNER_LABEL_TEXT) : null;
+  }
   if (CONNECTOR_MERGE.test(tool)) merges = [connectorMerge(tool, input)];
   else if (ShellCall.isShellTool(tool)) {
     // The shared reader: command, cmd or a list of words, and the folder the command runs in
@@ -611,7 +689,7 @@ function decide(input, { registryOptions = {}, now, environment = process.env, h
     const call = ShellCall.from(input);
     const text = call.text.replace(/[\\`^]\r?\n/g, ' ');
     if (text.length > MAX_COMMAND_CHARS) return /merge|push/i.test(text) ? refuse('this command is too long to check for a merge or push, so it is refused. Split it.') : null;
-    const cwd = call.folder;
+    cwd = call.folder;
     // An argument list is read both ways, as its words quoted and joined unquoted (as before the
     // shared reader), so a quoted program path such as `C:\Program Files\GitHub CLI\gh.exe` cannot
     // hide a merge. A merge both readings find counts once.
@@ -635,11 +713,12 @@ function decide(input, { registryOptions = {}, now, environment = process.env, h
   } else return null;
   if (merges.length === 0) return null;
   const approvals = new MergeApprovals({ registryOptions, now });
+  const standing = standingAnswer(input, cwd, { environment: environment || {}, registryOptions, now });
   const used = [];
   for (const merge of merges) {
-    const { refusal, approval } = judge(merge, approvals);
+    const { refusal, approval } = judge(merge, approvals, standing);
     if (refusal) return refusal;
-    used.push(approval);
+    if (approval) used.push(approval);
   }
   for (const approval of used) approvals.use(approval);
   return null;
@@ -654,7 +733,7 @@ function mayMerge(input) {
   const args = input.tool_input || input.toolInput || {};
   let text;
   try { text = JSON.stringify(args); } catch { text = String(args); }
-  return /\bgh\b[\s\S]*\b(?:merge|sync|alias|api)\b/i.test(text) || /\bgit\b[\s\S]*\bpush\b/i.test(text) || STATE_WORDS.test(text) || HOOK_FEED.test(text) || /\b(?:claude|codex)\b/i.test(text);
+  return /\bgh\b[\s\S]*\b(?:merge|sync|alias|api)\b/i.test(text) || /\bgit\b[\s\S]*\bpush\b/i.test(text) || STATE_WORDS.test(text) || HOOK_FEED.test(text) || OWNER_LABEL_WORD.test(text) || /\b(?:claude|codex)\b/i.test(text);
 }
 
 const CHECK_FAILED = 'Toolkit: the merge check failed, so this merge or push is refused. Retry it; if this repeats, run `setup toolkit` to repair the Toolkit plugin.';
