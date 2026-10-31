@@ -41,7 +41,9 @@ test('Secure CI/CD source and generated skills expose broad trigger metadata', (
     'secret scanning',
     'required checks',
     'branch protection',
-    'automated validation'
+    'automated validation',
+    'CI check-up',
+    'is CI still up to date'
   ];
 
   for (const relPath of skillPaths) {

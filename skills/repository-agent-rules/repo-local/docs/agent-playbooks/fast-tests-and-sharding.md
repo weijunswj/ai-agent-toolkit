@@ -7,6 +7,7 @@ Use when tests or CI got slow, or when adding a test runner, test shards or CI t
 - Time each test file on every supported system, the whole suite as CI runs it, and the slowest single tests. Put before and after numbers (files, tests, skipped, time) in the PR; any drop in tests blocks.
 - Declare a per-file time budget once measured, and use a small check that reads the per-file times of a run and fails any file over its budget. Raise one file's budget only with a recorded reason.
 - Prefer caching or path filters only when the measurement shows they save real time and the same checks still run.
+- When a change touches CI or adds a package, language or test folder, run the `secure-ci-cd` CI check-up with `--base` and fix the real gaps it lists in the same PR.
 
 ## Make Slow Files Fast
 
