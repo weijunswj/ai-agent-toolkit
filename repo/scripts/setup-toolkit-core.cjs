@@ -12,7 +12,7 @@ const { runtimeLabel } = require('./codex-delegation-state.cjs');
 const agentControl = require('./toolkit-agent-control.cjs');
 const processLaunch = require('./claude-process-launch.cjs');
 const { ClaudeSubagentDepthSetting, STATES: SUBAGENT_DEPTH_STATES } = require('./toolkit-claude-subagent-depth.cjs');
-const { ClaudeUserSettings, STATES: CLAUDE_SETTINGS_STATES } = require('./toolkit-claude-user-settings.cjs');
+const { ClaudeUserSettings, SETTINGS: CLAUDE_SETTINGS, STATES: CLAUDE_SETTINGS_STATES } = require('./toolkit-claude-user-settings.cjs');
 const { ClaudePluginRegistry } = require('./toolkit-claude-plugin-registry.cjs');
 const { OfficialN8nSkills, installSummary: n8nSkillsSummary } = require('./toolkit-n8n-official-skills.cjs');
 const { disableUserPlugin } = require('./setup-claude-toolkit-plugin.cjs');
@@ -23,7 +23,7 @@ const { claudeAccountPluginFolders, claudeAppCopyLine } = require('./toolkit-cla
 const { CodexToolkitInstall, hookGaps } = require('./toolkit-codex-install-state.cjs');
 const { GlobalRules } = require('./toolkit-global-rules.cjs');
 const { defineCodexSetup } = require('./setup-core-codex.cjs');
-const { defineClaudeSetup } = require('./setup-core-claude.cjs');
+const { defineClaudeSetup, claudeSettingKey, CLAUDE_SETTING_KEYS } = require('./setup-core-claude.cjs');
 
 const DEFAULT_REPO_BRANCH = 'main';
 const DEFAULT_REPO_REMOTE = 'https://github.com/weijunswj/ai-agent-toolkit';
@@ -126,7 +126,7 @@ function emptySetupChoices() {
     codexPluginBehavior: '',
     claudeTopology: '',
     claudePluginBehavior: '',
-    claudeSettings: '',
+    ...Object.fromEntries(CLAUDE_SETTING_KEYS.map((key) => [key, ''])),
     antigravitySkills: ''
   };
 }
@@ -165,6 +165,9 @@ function parseArgs(argv = process.argv.slice(2)) {
     setupChoices: emptySetupChoices()
   };
 
+  // --claude-settings answers all four Claude Code setting rows; --claude-setting <name>=<choice> wins for its row.
+  let claudeSettingsAll = '';
+  const claudeSettingOne = {};
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     const next = () => argv[++index] || '';
@@ -307,7 +310,14 @@ function parseArgs(argv = process.argv.slice(2)) {
     } else if (arg === '--claude-settings' || arg.startsWith('--claude-settings=')) {
       const choice = (arg === '--claude-settings' ? next() : arg.slice('--claude-settings='.length)).toLowerCase();
       if (!['enable', 'disable', 'keep'].includes(choice)) throw new Error(`Unsupported --claude-settings choice: ${choice}`);
-      args.setupChoices.claudeSettings = choice;
+      claudeSettingsAll = choice;
+    } else if (arg === '--claude-setting' || arg.startsWith('--claude-setting=')) {
+      const pair = (arg === '--claude-setting' ? next() : arg.slice('--claude-setting='.length)).toLowerCase();
+      const [id, choice, ...rest] = pair.split('=');
+      if (rest.length) throw new Error(`Unsupported --claude-setting value: ${pair}`);
+      if (!CLAUDE_SETTINGS.some((spec) => spec.id === id)) throw new Error(`Unsupported --claude-setting name: ${id}`);
+      if (!['enable', 'disable', 'keep'].includes(choice)) throw new Error(`Unsupported --claude-setting choice: ${choice}`);
+      claudeSettingOne[id] = choice;
     } else if (arg === '--antigravity-skills' || arg.startsWith('--antigravity-skills=')) {
       const choice = (arg === '--antigravity-skills' ? next() : arg.slice('--antigravity-skills='.length)).toLowerCase();
       if (!['copy', 'remove', 'keep'].includes(choice)) throw new Error(`Unsupported --antigravity-skills choice: ${choice}`);
@@ -316,6 +326,10 @@ function parseArgs(argv = process.argv.slice(2)) {
     else throw new Error(`Unknown argument: ${arg}`);
   }
 
+  for (const spec of CLAUDE_SETTINGS) {
+    const choice = claudeSettingOne[spec.id] || claudeSettingsAll;
+    if (choice) args.setupChoices[claudeSettingKey(spec.id)] = choice;
+  }
   if (args.plan && args.execute) throw new Error('--plan and --execute cannot be used together');
   if (argv.some((arg) => arg === '--explain' || arg.startsWith('--explain=')) && !args.explain) throw new Error('--explain needs a question number, for example --explain 1.2');
   if (!args.plan && !args.execute && !args.help && !args.verifyClaudePlugin) args.plan = true;
@@ -588,8 +602,9 @@ function printHelp() {
     '                               Claude Code only; verify/report, show native refresh instructions, or install/enable via claude plugin marketplace add + install --scope user',
     '  --explain <ref>              print the full text of one setup question, for example --explain 1.2',
     '  --claude-settings enable|disable|keep',
+    '                               Claude Code only; answer all four recommended Claude Code user setting rows (attribution off, accept messages from your other sessions, ask before a model switch, read AGENTS.md) at once; values you set yourself are kept',
+    `  --claude-setting <name>=enable|disable|keep   answer one of those rows, overriding --claude-settings; names: ${CLAUDE_SETTINGS.map((spec) => spec.id).join(', ')}`,
     '  --antigravity-skills copy|remove|keep   copy Toolkit\'s portable skills into Antigravity\'s global skills folder',
-    '                               Claude Code only; set or remove Toolkit\'s recommended Claude Code user settings (attribution off, accept messages from your other sessions, ask before a model switch, read AGENTS.md); values you set yourself are kept',
     '  Antigravity uses portable workspace skills only; copy with toolkit-local-bridge.cjs --copy-antigravity-skills --antigravity-project-root <path> [--write]'
   ].join('\n'));
 }
@@ -1236,7 +1251,7 @@ function recommendedChoice(key, current, args) {
   if (key === 'claudeTopology') return 'root-only';
   if (key === 'claudePluginBehavior') return 'install';
   if (key === 'codexPluginBehavior') return codexPluginUnchanged(current, args) ? 'keep' : 'install';
-  if (key === 'claudeSettings') return claudeSettingsAnySet(current) ? 'keep' : 'enable';
+  if (CLAUDE_SETTING_KEYS.includes(key)) return claudeSettingsAnySet(current) ? 'keep' : 'enable';
   if (key === 'antigravitySkills') return current.antigravity?.copies ? 'copy' : 'keep';
   return 'keep';
 }
@@ -2183,28 +2198,7 @@ function setupQuestionSpecs(args, current) {
       currentShort: shortClaudePlugin(current),
       afterApplying: 'If native plugin files change, start a new Claude Code session (close sessions opened before the update) and complete any native trust or activation steps reported by setup.',
     }));
-    specs.push(resolvedQuestion({
-      id: 'claude-recommended-settings',
-      key: 'claudeSettings',
-      section: 'Other coding apps',
-      title: "Add Toolkit's recommended Claude Code settings that are missing?",
-      prompt: 'Claude Code settings choice',
-      whatThisControls: 'Four values in your Claude Code user settings (settings.json in your Claude Code config folder): no AI attribution lines in commits and pull requests ("attribution": false); messages from your other Claude sessions, such as a Claude Projects coordinator, wake this one ("crossSessionInbound": "accept"; messages still cannot approve actions or change settings); pause and ask before switching models when a request is flagged ("switchModelsOnFlag": false); and read AGENTS.md as well as CLAUDE.md (Project instructions: "claude-md-and-agents-md", Claude Code 2.1.285 or later). A value you set yourself is never changed.',
-      choices: [
-        wizardChoice('enable', 'Add missing settings', `${claudeSettingsAddOutcome(current.claudeSettings)} Toolkit records each value it adds so it can remove it later. Values you set yourself, matching or not, are never changed.`),
-        wizardChoice('disable', "Remove Toolkit's values", 'Remove only the values Toolkit set and still match what it recorded. Values you set yourself stay as they are.'),
-        wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${claudeSettingsOutcome(current.claudeSettings)}`),
-      ],
-      // No folded twin: Keep current is recommended once any setting is set, and both changes stay listed.
-      recommendation: claudeSettingsAnySet(current)
-        ? { value: 'keep', outcome: 'Keep your current Claude Code settings as they are.', reason: claudeSettingsKeepReason(current.claudeSettings) }
-        : { value: recommendedChoice('claudeSettings', current, args), outcome: claudeSettingsAddOutcome(current.claudeSettings), reason: claudeSettingsReason() },
-      selected: args.setupChoices.claudeSettings,
-      current: claudeSettingsOutcome(current.claudeSettings),
-      currentShort: claudeSettingsShort(current.claudeSettings),
-      currentVerification: Array.isArray(current.claudeSettings) && current.claudeSettings.length && current.claudeSettings.every((entry) => entry.state !== CLAUDE_SETTINGS_STATES.UNREADABLE) ? 'state-derived' : 'unverified',
-      afterApplying: 'Start a new Claude Code session so it reads the changed settings.',
-    }));
+    specs.push(...claudeSettingQuestions(args, current));
   }
   if (current.antigravity?.installed || current.antigravity?.copies) specs.push(antigravitySkillsQuestion(args, current));
   foldTwinSelections(args, answerable(specs));
@@ -2580,7 +2574,7 @@ function setupQuestionClaudeDocumentationSpecs() {
     ...documentationFixtureState(),
     agentProfile: { supported: true, topology: agentControl.TOPOLOGIES.ROOT_ONLY },
     claudeSubagentDepth: { state: SUBAGENT_DEPTH_STATES.DEFAULT },
-    claudeSettings: [],
+    claudeSettings: CLAUDE_SETTINGS.map((spec) => ({ id: spec.id, label: spec.label, state: CLAUDE_SETTINGS_STATES.DEFAULT })),
   };
   return plannedQuestionBank(parseArgs(['--plan', '--host', 'claude-code']), current).specs;
 }
@@ -2696,7 +2690,7 @@ function assignChoice(args, key, choice) {
   else if (key === 'codexPluginBehavior') args.setupChoices.codexPluginBehavior = choice;
   else if (key === 'claudeTopology') args.setupChoices.claudeTopology = choice;
   else if (key === 'claudePluginBehavior') args.setupChoices.claudePluginBehavior = choice;
-  else if (key === 'claudeSettings') args.setupChoices.claudeSettings = choice;
+  else if (CLAUDE_SETTING_KEYS.includes(key)) args.setupChoices[key] = choice;
   else if (key === 'antigravitySkills') args.setupChoices.antigravitySkills = choice;
 }
 
@@ -2711,7 +2705,7 @@ function choiceForKey(args, key) {
   if (key === 'codexPluginBehavior') return args.setupChoices.codexPluginBehavior;
   if (key === 'claudeTopology') return args.setupChoices.claudeTopology;
   if (key === 'claudePluginBehavior') return args.setupChoices.claudePluginBehavior;
-  if (key === 'claudeSettings') return args.setupChoices.claudeSettings;
+  if (CLAUDE_SETTING_KEYS.includes(key)) return args.setupChoices[key];
   if (key === 'antigravitySkills') return args.setupChoices.antigravitySkills;
   return '';
 }
@@ -4183,13 +4177,13 @@ const {
   printDelegationPreview, printDelegationRemovalPreview, runNativePluginJsonPhase, setupGlobalRules
 });
 const {
-  inspectClaudeNativePluginStatePreApproval, resolveClaudeTopology, claudeSettingsOutcome, claudeSettingsShort,
-  claudeSettingsAddOutcome, claudeSettingsReason, claudeSettingsKeepReason, claudeSettingsAnySet, applyClaudeUserSettings, applyClaudeSubagentDepth, applyClaudeAgentControl, setupClaudeArgs,
+  inspectClaudeNativePluginStatePreApproval, resolveClaudeTopology, claudeSettingsOutcome,
+  claudeSettingsAnySet, claudeSettingQuestions, applyClaudeUserSettings, applyClaudeSubagentDepth, applyClaudeAgentControl, setupClaudeArgs,
   runClaudeNativePluginSetup, verifyClaudeNativePluginMetadata, runClaudeInstallCheck
 } = defineClaudeSetup({
   CLAUDE_HOOK_TRUST_ACTION, SUBAGENT_DEPTH_FOR_TOPOLOGY, claudeSetupBudgets,
-  expectedToolkitVersion, nodeScriptArgs, readJsonFile, runNativePluginJsonPhase,
-  scriptRootForReadOnlyProbe, setupGlobalRules, unknown
+  expectedToolkitVersion, nodeScriptArgs, readJsonFile, resolvedQuestion, runNativePluginJsonPhase,
+  scriptRootForReadOnlyProbe, setupGlobalRules, unknown, wizardChoice
 });
 
 module.exports = {
@@ -4220,6 +4214,7 @@ module.exports = {
   configureCodexDelegation: delegation.configureCodexDelegation,
   applyHostDelegationControl,
   applyClaudeSubagentDepth,
+  applyClaudeUserSettings,
   parseArgs,
   setupQuestionSpecs,
   documentationFixtureState,

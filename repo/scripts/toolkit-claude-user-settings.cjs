@@ -18,10 +18,19 @@ const crypto = require('node:crypto');
 const { HostJsonConfigWrite } = require('./host-json-config-write.cjs');
 const { canonicalPath } = require('./toolkit-canonical-path.cjs');
 
+const isObject = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+const same = (left, right) => JSON.stringify(left) === JSON.stringify(right);
+
+// Claude Code also takes attribution as an object; empty commit and pr strings with sessionUrl false hide
+// everything false hides, so that full form counts as Toolkit's pick. A partial object still adds something.
+const hidesAllAttribution = (value) => value === false
+  || (isObject(value) && value.commit === '' && value.pr === '' && value.sessionUrl === false);
+
 // Existing Toolkit projections below are not a claim of host acceptance.
 // JSON read-back checks integrity; host schema/behaviour still requires restart/turn UAT.
+// equivalent, when present, says which owner values do what Toolkit's value does; others compare exactly.
 const SETTINGS = Object.freeze([
-  Object.freeze({ id: 'attribution', keyPath: ['attribution'], value: false, label: 'No AI attribution in commits and pull requests' }),
+  Object.freeze({ id: 'attribution', keyPath: ['attribution'], value: false, equivalent: hidesAllAttribution, label: 'No AI attribution in commits and pull requests' }),
   Object.freeze({ id: 'cross-session-inbound', keyPath: ['crossSessionInbound'], value: 'accept', label: 'Messages from your other Claude sessions wake this one' }),
   Object.freeze({ id: 'switch-models-on-flag', keyPath: ['switchModelsOnFlag'], value: false, label: 'Ask before switching models when a request is flagged' }),
   Object.freeze({ id: 'agents-md', keyPath: ['pluginConfigs', 'cc-plugin-agents-md@builtin', 'options', 'instructionFiles'], value: 'claude-md-and-agents-md', label: 'Read AGENTS.md as well as CLAUDE.md' })
@@ -29,8 +38,6 @@ const SETTINGS = Object.freeze([
 const RECORD_SCHEMA = 'ai-agent-toolkit.claude-user-settings.v1';
 const STATES = Object.freeze({ TOOLKIT: 'toolkit-value', OWNER: 'owner-value', DEFAULT: 'claude-default', UNREADABLE: 'unreadable' });
 
-const isObject = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-const same = (left, right) => JSON.stringify(left) === JSON.stringify(right);
 
 // Walks keyPath; returns { found, value } or { blocked } when a parent is not an object.
 function lookup(settings, keyPath) {
@@ -140,7 +147,7 @@ class ClaudeUserSettings {
     if (!found.found) return { id: spec.id, label: spec.label, state: STATES.DEFAULT };
     if (entry && same(entry.value, found.value) && same(found.value, spec.value)) return { id: spec.id, label: spec.label, state: STATES.TOOLKIT, value: found.value };
     // matches tells an owner value equal to Toolkit's pick apart from a different one; both stay untouched.
-    return { id: spec.id, label: spec.label, state: STATES.OWNER, value: found.value, matches: same(found.value, spec.value) };
+    return { id: spec.id, label: spec.label, state: STATES.OWNER, value: found.value, matches: spec.equivalent ? spec.equivalent(found.value) : same(found.value, spec.value) };
   }
 
   inspect() {
@@ -149,11 +156,17 @@ class ClaudeUserSettings {
     return SETTINGS.map((spec) => this.#stateOf(read, spec, entries[this.#entryKey(spec)]));
   }
 
-  // choice: enable | disable | keep, applied to every managed setting in order. Each setting settles on its
-  // own: owner values stay, an unreadable file holds everything, and the record keeps only live Toolkit values.
-  apply(choice) {
-    if (!['enable', 'disable', 'keep'].includes(choice)) throw new Error(`Unsupported Claude settings choice: ${choice}`);
-    return SETTINGS.map((spec) => this.#applyOne(spec, choice));
+  // choices: enable | disable | keep for every managed setting, or { <setting id>: enable | disable | keep }
+  // where a setting left out is kept. Settings apply in order and each settles on its own: owner values stay,
+  // an unreadable file holds everything, and the record keeps only live Toolkit values.
+  apply(choices) {
+    const byId = typeof choices === 'string' ? Object.fromEntries(SETTINGS.map((spec) => [spec.id, choices])) : choices;
+    if (!isObject(byId)) throw new Error('Unsupported Claude settings choices.');
+    for (const [id, choice] of Object.entries(byId)) {
+      if (!SETTINGS.some((spec) => spec.id === id)) throw new Error(`Unknown Claude setting: ${id}`);
+      if (!['enable', 'disable', 'keep'].includes(choice)) throw new Error(`Unsupported Claude settings choice: ${choice}`);
+    }
+    return SETTINGS.map((spec) => this.#applyOne(spec, byId[spec.id] || 'keep'));
   }
 
   #applyOne(spec, choice) {

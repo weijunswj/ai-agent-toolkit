@@ -392,7 +392,7 @@ test('real partial piped answers still show one complete effective bank before p
 
 test('real complete piped answers show one bank before synthetic-home setup mutation', () => {
   const fixture = realManagedFixture();
-  const input = ['default', 'enable', 'enable', 'default', 'root-only', 'instructions', 'keep', ''].join('\n');
+  const input = ['default', 'enable', 'enable', 'default', 'root-only', 'instructions', 'keep', 'keep', 'keep', 'keep', ''].join('\n');
   const result = runRealManaged(fixture, [], input);
   assertCompletedWithoutClaudePlugin(result.status, result);
   assert.equal(markerCount(result.stdout, core.QUESTION_BANK_BEGIN), 1);
