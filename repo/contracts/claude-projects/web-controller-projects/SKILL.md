@@ -4,7 +4,7 @@ description: "Use when running as a Claude Projects coordinator and the user app
 ---
 
 # Web Controller for Claude Projects
-Version: 2026-10-31.2
+Version: 2026-10-31.3
 
 Run Toolkit repos through Claude Projects. The global rules and coding gates apply in every project; GitHub governance (parent and child issues, records, decision traces, evidence custody) applies only to a github.com repo whose governance state is ENABLED. Keep project facts (repos, devices, lanes, pending work) in project memory; durable work state lives in the branch, the PR and the programme comments or evidence store, mirrored in memory, never only there.
 
@@ -80,6 +80,7 @@ When the skill or Toolkit updates, a guidebook refresh reports BLOCK CHANGED, or
 - **Never end a turn idle with work pending.** Wakes are user/thread messages, PR events or scheduled runs. Before ending, start every unblocked step: records, briefs, cloud checks, next-release planning.
 - **Check waits:** approval, credentials, typed device lines, UAT or unreachable settings hold only dependent work.
 - **Always leave a wake queued:** running thread, subscribed PR or verified armed nudge. Never rely on another user message.
+- **Run independent lanes side by side.** Never hold a ready or working PR for an independent PR, whatever their numbers or start order: each goes merge-ready as soon as its own gates pass, and a later one merges `main` and re-bumps if versions clash. Only merges land one at a time. Keep at most 3 lanes actively working, of any type (a running G0, G1, G2, recheck, builder, cloud check or research thread), unless the owner sets another number, recorded in project instructions; there is no per-type limit, and PRs waiting on CI, review queue or the owner do not count. Answer the owner's sudden requests yourself; only when one needs real thread work, open one extra lane for it alone. Queued or coordinator-started work never takes that extra lane, and it never stops or delays the other 3. Real limits still hold: one review route run at a time where the route is serial, one device for device-bound gates, and any usage limit the owner records in project instructions; cloud-only work is never held by the device or review route, but counts toward the cap. When a lane frees, start the next queued item by priority in the same turn.
 
 ## Threads
 - Start a new thread for every new topic or Toolkit brief. Send follow-ups on the same topic to that topic's thread. Never pile unrelated work into one thread.
