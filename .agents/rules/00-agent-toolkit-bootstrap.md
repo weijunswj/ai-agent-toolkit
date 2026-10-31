@@ -1,4 +1,4 @@
-<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/repo-local/antigravity-bootstrap.template.md:BEGIN ANTIGRAVITY.BOOTSTRAP v2 toolkit=3.28.0 sha256=7ecb651cea1c -->
+<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/repo-local/antigravity-bootstrap.template.md:BEGIN ANTIGRAVITY.BOOTSTRAP v2 toolkit=3.27.0 sha256=7ecb651cea1c -->
 # Agent Toolkit Antigravity Bootstrap
 
 Root `AGENTS.md` is the canonical repo instruction file.
