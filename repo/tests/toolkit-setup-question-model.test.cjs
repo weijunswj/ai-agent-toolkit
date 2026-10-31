@@ -768,16 +768,16 @@ test('Claude Code settings fold when all four are set; agents and plugin questio
   current.agentProfile = { supported: true, topology: 'root-only' };
   current.nativePlugin = { status: 'fresh' };
   current.claudeSettings = [
-    { id: 'attribution', state: 'toolkit-value' }, { id: 'cross-session-inbound', state: 'owner-value' },
+    { id: 'attribution', state: 'toolkit-value' }, { id: 'cross-session-inbound', state: 'owner-value', value: 'accept', matches: true },
     { id: 'switch-models-on-flag', state: 'toolkit-value' }, { id: 'agents-md', state: 'toolkit-value' },
   ];
   const rows = core.setupQuestionSpecs(core.parseArgs(['--plan', '--host', 'claude-code']), current);
   const settings = rows.find((spec) => spec.id === 'claude-recommended-settings');
   assert.deepEqual(settings.choices.map((choice) => choice.value), ['disable', 'keep']);
   assert.equal(settings.recommended, 'keep');
-  // The Current column names each of the four settings and its state.
-  assert.equal(settings.current_short, 'No AI attribution: on; Session wake-ups: yours; Ask before model switch: on; Read AGENTS.md: on');
-  current.claudeSettings[1] = { state: 'claude-default' };
+  // The Current column names each of the four settings by its effect, and who set it.
+  assert.equal(settings.current_short, 'Hide AI credit in commits/PRs: on (Toolkit set it); Let other sessions wake this one: on (you set it); Ask before switching model on a flag: on (Toolkit set it); Read AGENTS.md too: on (Toolkit set it)');
+  current.claudeSettings[1] = { id: 'cross-session-inbound', state: 'claude-default' };
   const unset = core.setupQuestionSpecs(core.parseArgs(['--plan', '--host', 'claude-code']), current).find((spec) => spec.id === 'claude-recommended-settings');
   assert.deepEqual(unset.choices.map((choice) => choice.value), ['enable', 'disable', 'keep']);
   for (const id of ['claude-agent-topology', 'claude-toolkit-plugin']) {
@@ -785,6 +785,28 @@ test('Claude Code settings fold when all four are set; agents and plugin questio
     assert.equal(row.folded_value, undefined, id);
     assert.ok(row.choices.some((choice) => choice.value === 'keep'), id);
   }
+});
+
+test('Claude Code settings row tells a value you set to Toolkit\'s pick from a different one and names what the add choice adds', () => {
+  const current = stateWithManaged(managedState({ currentPath: '', exists: false, git: false }));
+  current.agentProfile = { supported: true, topology: 'root-only' };
+  current.nativePlugin = { status: 'fresh' };
+  current.claudeSettings = [
+    { id: 'attribution', label: 'No AI attribution in commits and pull requests', state: 'owner-value', value: true, matches: false },
+    { id: 'cross-session-inbound', label: 'Messages from your other Claude sessions wake this one', state: 'owner-value', value: 'accept', matches: true },
+    { id: 'switch-models-on-flag', label: 'Ask before switching models when a request is flagged', state: 'claude-default' },
+    { id: 'agents-md', label: 'Read AGENTS.md as well as CLAUDE.md', state: 'owner-value', value: 'claude-md-and-agents-md', matches: true },
+  ];
+  const row = core.setupQuestionSpecs(core.parseArgs(['--plan', '--host', 'claude-code']), current).find((spec) => spec.id === 'claude-recommended-settings');
+  assert.equal(row.title, "Add Toolkit's recommended Claude Code settings that are missing?");
+  assert.equal(row.current_short, 'Hide AI credit in commits/PRs: different: you set true; Toolkit leaves it; Let other sessions wake this one: on (you set it); Ask before switching model on a flag: not set (Claude Code default); Read AGENTS.md too: on (you set it)');
+  assert.equal(row.recommended, 'enable');
+  assert.equal(row.choices.find((choice) => choice.value === 'enable').label, 'Add missing settings');
+  assert.equal(row.recommended_outcome, 'Adds 1 missing setting: Ask before switching model on a flag. Your other 3 settings stay as they are.');
+  // The reason names only the benefits that will hold; the different value is called out instead.
+  assert.equal(row.recommendation_reason, "They let a Projects coordinator wake Remote Control sessions on your computer, keep a flagged request on the model you chose until you say otherwise and make Claude Code read the repository's AGENTS.md. Your own different value for Hide AI credit in commits/PRs stays, so that one does not apply.");
+  assert.match(row.current, /No AI attribution in commits and pull requests: you set true instead of Toolkit's false; Toolkit leaves it\./);
+  assert.match(core.renderSetupQuestionBank([row]), /A\. Add missing settings: Adds 1 missing setting: Ask before switching model on a flag\. Your other 3 settings stay as they are\./);
 });
 
 test('TTY all recommended and changed-only commands execute after exactly one complete bank', async () => {

@@ -287,7 +287,7 @@ Setup run with `--host claude-code` shows this bank instead, for the same repres
 
 Toolkit setup choices - 8 questions across 3 sections
 
-Bank reference: RTK2-FD6N-R8Q4-78ES
+Bank reference: KDAZ-6WYT-D4RV-SD3R
 
 Quick index
 
@@ -297,7 +297,7 @@ Quick index
 1.4 Report retention - Recommended: B - Keep current
 2.1 How should Claude Code use agents? - Recommended: A - Toolkit repos: main session + Toolkit planning and build helpers only. Elsewhere: one layer of subagents.
 3.1 Keep Toolkit available in Claude Code? - Recommended: A - Install or refresh
-3.2 Use Toolkit's recommended Claude Code settings? - Recommended: A - Turn on
+3.2 Add Toolkit's recommended Claude Code settings that are missing? - Recommended: A - Add missing settings
 3.3 Copy Toolkit's skills into Antigravity? - Recommended: B - Keep current
 
 
@@ -462,7 +462,7 @@ Quick index
 
 ---
 
-### 3.2 Use Toolkit's recommended Claude Code settings?
+### 3.2 Add Toolkit's recommended Claude Code settings that are missing?
 
 **What this controls:** Four values in your Claude Code user settings (settings.json in your Claude Code config folder): no AI attribution lines in commits and pull requests ("attribution": false); messages from your other Claude sessions, such as a Claude Projects coordinator, wake this one ("crossSessionInbound": "accept"; messages still cannot approve actions or change settings); pause and ask before switching models when a request is flagged ("switchModelsOnFlag": false); and read AGENTS.md as well as CLAUDE.md (Project instructions: "claude-md-and-agents-md", Claude Code 2.1.285 or later). A value you set yourself is never changed.
 
@@ -470,21 +470,21 @@ Quick index
 
 **Verification:** unverified
 
-**Recommended:** A - Turn on
+**Recommended:** A - Add missing settings
 
-**Recommended outcome:** Set the recommended values that are not set yet; values you set yourself stay as they are.
+**Recommended outcome:** Adds each recommended setting that is not set yet; values you set yourself stay as they are.
 
-**Why:** They keep AI attribution out of your commits and pull requests, let a Projects coordinator wake Remote Control sessions on your computer, keep a flagged request on the model you chose, and make Claude Code read the repository's AGENTS.md.
+**Why:** They keep AI attribution out of your commits and pull requests, let a Projects coordinator wake Remote Control sessions on your computer, keep a flagged request on the model you chose until you say otherwise and make Claude Code read the repository's AGENTS.md.
 
 **Choices:**
 
-- **A. Turn on** - Set each of the four values that is not set yet and record that Toolkit owns it. Values you set yourself stay as they are.
-- **B. Turn off** - Remove only the values Toolkit set and still match what it recorded. Values you set yourself stay as they are.
+- **A. Add missing settings** - Adds each recommended setting that is not set yet; values you set yourself stay as they are. Toolkit records each value it adds so it can remove it later. Values you set yourself, matching or not, stay as they are.
+- **B. Remove Toolkit's values** - Remove only the values Toolkit set and still match what it recorded. Values you set yourself stay as they are.
 - **C. Keep current** - Preserve this effective behavior: The Claude Code user settings have not been read yet.
 
 **After applying:** Start a new Claude Code session so it reads the changed settings.
 
-**Selected:** A - Turn on
+**Selected:** A - Add missing settings
 
 ---
 

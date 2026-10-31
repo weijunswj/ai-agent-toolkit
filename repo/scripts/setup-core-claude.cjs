@@ -12,7 +12,7 @@ const delegation = require('./codex-delegation-config.cjs');
 const agentControl = require('./toolkit-agent-control.cjs');
 const processLaunch = require('./claude-process-launch.cjs');
 const { ClaudeSubagentDepthSetting } = require('./toolkit-claude-subagent-depth.cjs');
-const { ClaudeUserSettings, STATES: CLAUDE_SETTINGS_STATES } = require('./toolkit-claude-user-settings.cjs');
+const { ClaudeUserSettings, SETTINGS: CLAUDE_SETTINGS, STATES: CLAUDE_SETTINGS_STATES } = require('./toolkit-claude-user-settings.cjs');
 const { ClaudeHelperDefinitions } = require('./toolkit-claude-helper-agents.cjs');
 const { ToolkitInstallHealthCheck } = require('./toolkit-install-health.cjs');
 const { claudeAccountPluginFolders } = require('./toolkit-claude-account-copy.cjs');
@@ -58,17 +58,68 @@ function defineClaudeSetup({ CLAUDE_HOOK_TRUST_ACTION, SUBAGENT_DEPTH_FOR_TOPOLO
       && entries.every((entry) => entry.state === CLAUDE_SETTINGS_STATES.TOOLKIT || entry.state === CLAUDE_SETTINGS_STATES.OWNER);
   }
 
-  // One line per managed Claude Code setting: set by Toolkit, set by you (kept), or not set.
+  // One line per managed Claude Code setting: set by Toolkit, set by you to Toolkit's value or to a
+  // different one (kept either way), or not set.
   function claudeSettingsOutcome(entries) {
     if (!Array.isArray(entries) || entries.length === 0) return 'The Claude Code user settings have not been read yet.';
     if (entries.some((entry) => entry.state === CLAUDE_SETTINGS_STATES.UNREADABLE)) return `${entries[0].detail || 'The Claude Code user settings file could not be read.'} Toolkit will not change it.`;
     const describe = (entry) => {
       if (entry.state === CLAUDE_SETTINGS_STATES.TOOLKIT) return `${entry.label}: on (set by Toolkit).`;
-      if (entry.state === CLAUDE_SETTINGS_STATES.OWNER) return `${entry.label}: your own value is kept.`;
-      return `${entry.label}: not set.`;
+      if (entry.state === CLAUDE_SETTINGS_STATES.OWNER && entry.matches === true) return `${entry.label}: on (you set it; Toolkit leaves it).`;
+      if (entry.state === CLAUDE_SETTINGS_STATES.OWNER) {
+        const recommended = CLAUDE_SETTINGS.find((spec) => spec.id === entry.id);
+        const yours = entry.value === undefined || entry.value === null ? 'a different value' : settingValue(entry.value);
+        return `${entry.label}: you set ${yours}${recommended ? ` instead of Toolkit's ${settingValue(recommended.value)}` : ''}; Toolkit leaves it.`;
+      }
+      return `${entry.label}: not set (Claude Code default).`;
     };
     return entries.map(describe).join(' ');
   }
+
+  // Each setting by its plain effect and state, for the Current column.
+  function claudeSettingsShort(entries) {
+    if (!Array.isArray(entries) || !entries.length) return 'Not read yet';
+    if (entries.some((entry) => entry.state === CLAUDE_SETTINGS_STATES.UNREADABLE)) return 'Could not read';
+    const state = (entry) => {
+      if (entry.state === CLAUDE_SETTINGS_STATES.TOOLKIT) return 'on (Toolkit set it)';
+      if (entry.state === CLAUDE_SETTINGS_STATES.OWNER && entry.matches === true) return 'on (you set it)';
+      if (entry.state === CLAUDE_SETTINGS_STATES.OWNER) return `different: you set ${entry.value === undefined || entry.value === null ? 'your own value' : settingValue(entry.value)}; Toolkit leaves it`;
+      return 'not set (Claude Code default)';
+    };
+    return entries.map((entry) => `${settingEffect(entry).short}: ${state(entry)}`).join('; ');
+  }
+
+  // What the add choice changes: exactly the settings that are not set yet, by name.
+  function claudeSettingsAddOutcome(entries) {
+    if (!Array.isArray(entries) || !entries.length || entries.some((entry) => entry.state === CLAUDE_SETTINGS_STATES.UNREADABLE)) return 'Adds each recommended setting that is not set yet; values you set yourself stay as they are.';
+    const missing = entries.filter((entry) => entry.state === CLAUDE_SETTINGS_STATES.DEFAULT);
+    if (!missing.length) return 'Nothing to add: every setting already has a value.';
+    const rest = entries.length - missing.length;
+    const names = listText(missing.map((entry) => settingEffect(entry).short));
+    return `Adds ${missing.length === 1 ? '1 missing setting' : `${missing.length} missing settings`}: ${names}.${rest ? ` Your other ${rest === 1 ? 'setting stays' : `${rest} settings stay`} as ${rest === 1 ? 'it is' : 'they are'}.` : ''}`;
+  }
+
+  // Why to add them, naming only the benefits that will hold: a setting you set to a different value stays yours.
+  function claudeSettingsReason(entries) {
+    const usable = Array.isArray(entries) && entries.length && entries.every((entry) => entry.state !== CLAUDE_SETTINGS_STATES.UNREADABLE);
+    const differs = (entry) => entry.state === CLAUDE_SETTINGS_STATES.OWNER && entry.matches !== true;
+    const holding = usable ? entries.filter((entry) => !differs(entry)) : CLAUDE_SETTINGS.map((spec) => ({ id: spec.id }));
+    const different = usable ? entries.filter(differs) : [];
+    const benefits = holding.map((entry) => settingEffect(entry).benefit);
+    const kept = different.length ? ` Your own different value for ${listText(different.map((entry) => settingEffect(entry).short))} stays, so ${different.length === 1 ? 'that one does' : 'those do'} not apply.` : '';
+    return benefits.length ? `They ${listText(benefits)}.${kept}` : 'You set all four to your own values, which stay as they are.';
+  }
+
+  const CLAUDE_SETTING_EFFECTS = Object.freeze({
+    attribution: { short: 'Hide AI credit in commits/PRs', benefit: 'keep AI attribution out of your commits and pull requests' },
+    'cross-session-inbound': { short: 'Let other sessions wake this one', benefit: 'let a Projects coordinator wake Remote Control sessions on your computer' },
+    'switch-models-on-flag': { short: 'Ask before switching model on a flag', benefit: 'keep a flagged request on the model you chose until you say otherwise' },
+    'agents-md': { short: 'Read AGENTS.md too', benefit: "make Claude Code read the repository's AGENTS.md" },
+  });
+  const settingEffect = (entry) => CLAUDE_SETTING_EFFECTS[entry.id] || { short: entry.label || entry.id, benefit: `set ${entry.label || entry.id}` };
+  // A JSON value as it appears in settings.json, cut short so one table cell stays readable.
+  const settingValue = (value) => { const text = JSON.stringify(value); return text.length > 40 ? `${text.slice(0, 37)}...` : text; };
+  const listText = (items) => (items.length <= 1 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`);
 
   // Applies the owner's answer to the Toolkit-recommended Claude Code user settings; no answer changes nothing.
   function applyClaudeUserSettings(args, settings = new ClaudeUserSettings()) {
@@ -267,7 +318,7 @@ function defineClaudeSetup({ CLAUDE_HOOK_TRUST_ACTION, SUBAGENT_DEPTH_FOR_TOPOLO
       projectDirectories: [path.join(process.cwd(), '.claude', 'agents')],
     });
   }
-  return { inspectClaudeNativePluginStatePreApproval, resolveClaudeTopology, claudeSettingsOutcome, claudeSettingsAllSet, applyClaudeUserSettings, applyClaudeSubagentDepth, applyClaudeAgentControl, setupClaudeArgs, runClaudeNativePluginSetup, verifyClaudeNativePluginMetadata, runClaudeInstallCheck };
+  return { inspectClaudeNativePluginStatePreApproval, resolveClaudeTopology, claudeSettingsOutcome, claudeSettingsShort, claudeSettingsAddOutcome, claudeSettingsReason, claudeSettingsAllSet, applyClaudeUserSettings, applyClaudeSubagentDepth, applyClaudeAgentControl, setupClaudeArgs, runClaudeNativePluginSetup, verifyClaudeNativePluginMetadata, runClaudeInstallCheck };
 }
 
 module.exports = { defineClaudeSetup };
