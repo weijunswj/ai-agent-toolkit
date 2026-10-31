@@ -14,7 +14,9 @@ name: Auto-merge eligibility
 # added on: the run for that labeled event records a toolkit-owner-merge commit status on that
 # head with this workflow's own token, and every other run passes only while the head carries that status from github-actions[bot]. A push, or a label
 # without the status on the current head (whichever runs were cancelled before), removes the label
-# and fails, so the owner's OK never covers commits they have not seen. Pushes run in their own
+# and fails, so the owner's OK never covers commits they have not seen. Taking the label off, or a
+# refused label, sets that status to failure, and only the newest one counts. In a repository an
+# organisation owns no user is the owner, so the label never counts there (it fails closed). Pushes run in their own
 # group that nothing cancels.
 #
 # pull_request_target runs this file and the eligibility script as they are on the default branch,
@@ -73,6 +75,9 @@ jobs:
           owner=""
           case "$decision" in *record=1*)
             gh api -X POST "repos/$GH_REPO/statuses/$HEAD_SHA" -f state=success -f context=toolkit-owner-merge -f description="The owner's toolkit-owner-merge label, added on this head" > /dev/null ;;
+          esac
+          case "$decision" in *withdraw=1*)
+            gh api -X POST "repos/$GH_REPO/statuses/$HEAD_SHA" -f state=failure -f context=toolkit-owner-merge -f description="The owner's OK for this head was withdrawn or refused" > /dev/null ;;
           esac
           case "$decision" in *remove=1*)
             gh api -X DELETE "repos/$GH_REPO/issues/$NUMBER/labels/toolkit-owner-merge" > /dev/null || true

@@ -64,6 +64,7 @@ test('CI runs the default branch\'s copy, which needs nothing but Node\'s own mo
   assert.match(workflow, /group: auto-merge-eligible-\$\{\{ github\.event\.pull_request\.number \}\}-\$\{\{ github\.event\.action == 'synchronize' && 'push' \|\| 'other' \}\}\n {2}cancel-in-progress: \$\{\{ github\.event\.action != 'synchronize' \}\}/, 'nothing cancels a push\'s run');
   assert.match(workflow, /--label-decision\)"/, 'the label decision is the tested one');
   assert.match(workflow, /\*record=1\*\)\n\s+gh api -X POST "repos\/\$GH_REPO\/statuses\/\$HEAD_SHA" -f state=success -f context=toolkit-owner-merge/);
+  assert.match(workflow, /\*withdraw=1\*\)\n\s+gh api -X POST "repos\/\$GH_REPO\/statuses\/\$HEAD_SHA" -f state=failure -f context=toolkit-owner-merge/, 'a withdrawn or refused label sets the status to failure');
   assert.match(workflow, /\*remove=1\*\)\n\s+gh api -X DELETE "repos\/\$GH_REPO\/issues\/\$NUMBER\/labels\/toolkit-owner-merge"/);
   assert.match(workflow, /\*owner_merge=1\*\) owner="--owner-merge"/);
   assert.match(workflow, /ADDED_LABEL: \$\{\{ github\.event\.label\.name \}\}/);
@@ -92,7 +93,7 @@ test('the owner\'s label counts only for the head it was added on, whatever runs
   assert.deepEqual(eligible.labelDecision({ action: 'unlabeled', labels: ['bug'], statuses: ok }), { owner_merge: false, record: false, remove: false }, 'no label, no merge');
   // Only the repository owner's own user account counts; anyone else's label is removed and fails,
   // even when the head already carries the status.
-  const refused = { owner_merge: false, record: false, remove: true, not_owner: true };
+  const refused = { owner_merge: false, record: false, remove: true, not_owner: true, withdraw: true };
   for (const [sender, why] of [
     [{ login: 'someone-else', type: 'User' }, 'a collaborator'],
     [{ login: 'claude[bot]', type: 'Bot' }, 'an app'],
@@ -106,14 +107,23 @@ test('the owner\'s label counts only for the head it was added on, whatever runs
   }
   assert.deepEqual(eligible.labelDecision({ action: 'labeled', labels: [label], added: label, sender: owner, statuses: ok }), refused, 'no repository owner to compare with');
   assert.deepEqual(decide('synchronize', { sender: owner, statuses: ok }), { owner_merge: false, record: false, remove: true }, 'the owner pushing still removes it');
+  // Taking the label off withdraws the OK for this head, and only the newest status counts
+  // (GitHub lists them newest first).
+  const failed = { context: label, state: 'failure', creator: bot };
+  assert.deepEqual(eligible.labelDecision({ action: 'unlabeled', labels: [], added: label, statuses: ok }), { owner_merge: false, record: false, remove: false, withdraw: true }, 'removing the label withdraws');
+  assert.deepEqual(eligible.labelDecision({ action: 'unlabeled', labels: ['bug'], added: 'other', statuses: ok }), { owner_merge: false, record: false, remove: false }, 'removing another label withdraws nothing');
+  assert.deepEqual(decide('edited', { statuses: [failed, ...ok] }), { owner_merge: false, record: false, remove: true }, 'a withdrawn OK re-added without its own labeled run');
+  assert.deepEqual(decide('edited', { statuses: [...ok, failed] }), { owner_merge: true, record: false, remove: false }, 'the owner added it again after withdrawing');
+  assert.deepEqual(decide('edited', { statuses: [{ context: label, state: 'failure', creator: 'weijunswj' }, ...ok] }).owner_merge, true, 'only the workflow\'s own statuses count');
   // The workflow step's own reading of its environment.
   const out = [];
   const step = environment => { out.length = 0; eligible.main(['--label-decision'], { environment, stdout: { write: text => out.push(text) } }); return out.join('').trim(); };
   const by = (login, type = 'User') => ({ SENDER: login, SENDER_TYPE: type, OWNER: 'weijunswj' });
   assert.equal(step({ ACTION: 'labeled', ADDED_LABEL: label, LABELS: JSON.stringify([label]), STATUSES: '[]', ...by('weijunswj') }), 'owner_merge=1 record=1 remove=0');
-  assert.equal(step({ ACTION: 'labeled', ADDED_LABEL: label, LABELS: JSON.stringify([label]), STATUSES: '[]', ...by('someone-else') }), 'owner_merge=0 record=0 remove=1 not_owner=1');
-  assert.equal(step({ ACTION: 'labeled', ADDED_LABEL: label, LABELS: JSON.stringify([label]), STATUSES: '[]', ...by('claude[bot]', 'Bot') }), 'owner_merge=0 record=0 remove=1 not_owner=1');
-  assert.equal(step({ ACTION: 'labeled', ADDED_LABEL: label, LABELS: JSON.stringify([label]), STATUSES: '[]' }), 'owner_merge=0 record=0 remove=1 not_owner=1', 'no sender in the environment');
+  assert.equal(step({ ACTION: 'labeled', ADDED_LABEL: label, LABELS: JSON.stringify([label]), STATUSES: '[]', ...by('someone-else') }), 'owner_merge=0 record=0 remove=1 not_owner=1 withdraw=1');
+  assert.equal(step({ ACTION: 'labeled', ADDED_LABEL: label, LABELS: JSON.stringify([label]), STATUSES: '[]', ...by('claude[bot]', 'Bot') }), 'owner_merge=0 record=0 remove=1 not_owner=1 withdraw=1');
+  assert.equal(step({ ACTION: 'labeled', ADDED_LABEL: label, LABELS: JSON.stringify([label]), STATUSES: '[]' }), 'owner_merge=0 record=0 remove=1 not_owner=1 withdraw=1', 'no sender in the environment');
+  assert.equal(step({ ACTION: 'unlabeled', ADDED_LABEL: label, LABELS: '[]', STATUSES: JSON.stringify(ok) }), 'owner_merge=0 record=0 remove=0 withdraw=1');
   assert.equal(step({ ACTION: 'edited', LABELS: JSON.stringify([label]), STATUSES: '[]' }), 'owner_merge=0 record=0 remove=1');
   assert.equal(step({ ACTION: 'edited', LABELS: JSON.stringify([label]), STATUSES: JSON.stringify(ok) }), 'owner_merge=1 record=0 remove=0');
   assert.equal(step({ ACTION: 'edited', LABELS: JSON.stringify([label]), STATUSES: 'not json' }), 'owner_merge=0 record=0 remove=0', 'unreadable statuses give no merge');
@@ -159,6 +169,17 @@ test('the CLI reads the diff with git: exit 0 eligible, 1 always manual, 2 unrea
   assert.equal(JSON.parse(out.at(-1)).owner_merge, true);
   assert.equal(eligible.main(['--base', base, '--head', docs, '--owner-merge', '--json'], io), 0);
   assert.equal(JSON.parse(out.at(-1)).owner_merge, false, 'an eligible pull request does not need it');
+});
+
+test('the controller runs the full check itself on the head it task-auto-merges', () => {
+  // The CI check passes while auto-merge is off, and that green can outlive the off period, so the
+  // merge conditions name the full run (no --binding-at) on that head.
+  const read = rel => fs.readFileSync(path.join(__dirname, '..', '..', rel), 'utf8').replace(/\s+/g, ' ');
+  const run = /`node repo\/scripts\/toolkit-auto-merge-eligible\.cjs --base <base> --head <head>` \(no `--binding-at`\)/;
+  const gate = read('repo/contracts/agent-rules/gate-rules.md');
+  assert.match(gate, new RegExp(`${run.source} exits 0 there or the owner's label is on it\\. It posts the effects summary`), 'gate rules: a task auto-merge condition');
+  const skill = read('repo/contracts/claude-projects/web-controller-projects/SKILL.md');
+  assert.match(skill, new RegExp(`${run.source} on that head and merges without the label only on exit 0`), 'Projects skill merge line');
 });
 
 test('while the default branch\'s binding leaves task auto-merge off, the check passes and only lists', (t) => {

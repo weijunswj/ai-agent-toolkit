@@ -237,8 +237,11 @@ const OWNER_STATUS_CREATOR = 'github-actions[bot]';
 //   - the labeled event that adds it records the status on the head it was added on, and passes,
 //     only when the repository owner's own user account added it; a bot, an app or anyone else
 //     adding it has the label removed and fails (an agent working through the owner's login still
-//     reads as the owner: the accepted gap the merge hold covers);
-//   - any other run passes only while the head carries that status from the workflow;
+//     reads as the owner: the accepted gap the merge hold covers). In a repository an organisation
+//     owns, no user is the owner, so the label never counts there: it fails closed;
+//   - taking the label off, or a refused label, sets that status to failure on the head;
+//   - any other run passes only while the newest such status on the head, from the workflow, is a
+//     success;
 //   - a push, or a label with no status on this head (a run that recorded it was cancelled, or the
 //     label was added before a push the removal missed), removes the label and fails.
 function addedByOwner(sender, owner) {
@@ -247,20 +250,26 @@ function addedByOwner(sender, owner) {
 }
 
 function labelDecision({ action, labels = [], added = null, sender = null, owner = null, statuses = [] }) {
+  // Taking the label off withdraws the owner's OK for this head: the run records a failure status,
+  // which is then the newest, so a label added back later (and its refusal cancelled) cannot reuse it.
+  if (action === 'unlabeled' && added === OWNER_LABEL && !labels.includes(OWNER_LABEL)) return { owner_merge: false, record: false, remove: false, withdraw: true };
   if (!labels.includes(OWNER_LABEL)) return { owner_merge: false, record: false, remove: false };
   if (action === 'labeled' && added === OWNER_LABEL) {
     return addedByOwner(sender, owner)
       ? { owner_merge: true, record: true, remove: false }
-      : { owner_merge: false, record: false, remove: true, not_owner: true };
+      : { owner_merge: false, record: false, remove: true, not_owner: true, withdraw: true };
   }
-  const recorded = statuses.some(entry => entry && entry.context === OWNER_LABEL && entry.state === 'success' && entry.creator === OWNER_STATUS_CREATOR);
+  // GitHub lists a commit's statuses newest first; only the newest one from the workflow counts.
+  const newest = statuses.find(entry => entry && entry.context === OWNER_LABEL && entry.creator === OWNER_STATUS_CREATOR);
+  const recorded = Boolean(newest && newest.state === 'success');
   if (action === 'synchronize' || !recorded) return { owner_merge: false, record: false, remove: true };
   return { owner_merge: true, record: false, remove: false };
 }
 
 // The workflow's label step: reads ACTION, LABELS, ADDED_LABEL, SENDER, SENDER_TYPE, OWNER and
-// STATUSES (JSON) from the environment and prints `owner_merge=0|1 record=0|1 remove=0|1`, plus
-// `not_owner=1` when someone other than the owner added the label. Anything unreadable gives no
+// STATUSES (JSON, newest first) from the environment and prints `owner_merge=0|1 record=0|1
+// remove=0|1`, plus `not_owner=1` when someone other than the owner added the label and
+// `withdraw=1` when the head's toolkit-owner-merge status is to be set to failure. Anything unreadable gives no
 // owner merge and removes nothing.
 function labelDecisionMain(environment, stdout) {
   let labels = [];
@@ -278,7 +287,8 @@ function labelDecisionMain(environment, stdout) {
     })
     : { owner_merge: false, record: false, remove: false };
   const notOwner = decision.not_owner ? ' not_owner=1' : '';
-  stdout.write(`owner_merge=${Number(decision.owner_merge)} record=${Number(decision.record)} remove=${Number(decision.remove)}${notOwner}\n`);
+  const withdraw = decision.withdraw ? ' withdraw=1' : '';
+  stdout.write(`owner_merge=${Number(decision.owner_merge)} record=${Number(decision.record)} remove=${Number(decision.remove)}${notOwner}${withdraw}\n`);
   return 0;
 }
 
