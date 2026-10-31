@@ -246,7 +246,7 @@ const VERIFY_COMMAND = 'node repo/scripts/run-tests.cjs --verify-ci "$RUNNER_TEM
 const GATE_STEP = 'Run validation';
 const AGGREGATE_HEADER = [
   '  validate:',
-  '    needs: [tests-linux, tests-windows, tests-clock-ahead, personal-data]',
+  '    needs: [tests-linux, tests-windows, tests-clock-ahead, hook-pack, personal-data]',
   '    if: ${{ always() }}',
   '    runs-on: ubuntu-latest',
   '    timeout-minutes: 15',
@@ -344,6 +344,36 @@ const CLOCK_AHEAD_JOB = [
   '        run: node repo/scripts/run-tests.cjs --clock-ahead --clock-offset-days 400 --temp-root "${{ runner.temp }}/tests"',
 ].join('\n');
 
+// The exact text of the hook-pack job: the hook test pack (toolkit-hook-pack.cjs) on Linux and
+// Windows, every hook started the way Claude Code and Codex start it. The validate job waits for it,
+// so a failed or skipped system fails the required check.
+const HOOK_PACK_JOB = [
+  '  hook-pack:',
+  '    runs-on: ${{ matrix.os }}',
+  '    timeout-minutes: 15',
+  '    strategy:',
+  '      fail-fast: false',
+  '      matrix:',
+  '        os: [ubuntu-latest, windows-latest]',
+  '    steps:',
+  '      - name: Checkout',
+  '        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1',
+  '        with:',
+  '          fetch-depth: 0',
+  '          persist-credentials: false',
+  '',
+  '      - name: Set up Node',
+  '        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0',
+  '        with:',
+  '          node-version: 22',
+  '',
+  '      - name: Install dependencies',
+  '        run: npm ci --ignore-scripts',
+  '',
+  '      - name: Run the hook pack',
+  '        run: node repo/scripts/toolkit-hook-pack.cjs run --budget-seconds 360',
+].join('\n');
+
 // The exact text of the personal-data job: every commit of the pull request or push, its messages,
 // branch name and pull request text, checked by the personal-data guard. The validate job waits
 // for it, so the existing required check covers it.
@@ -401,6 +431,7 @@ function validateJobText(commands) {
     '        env:',
     '          DIFF_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}',
     '          TEST_LEGS: ${{ toJSON(needs) }}',
+    '          PR_BODY: ${{ github.event.pull_request.body }}',
     '        run: |',
     ...commands.map((command) => `          ${command}`),
   ].join('\n');
@@ -450,7 +481,8 @@ const WORKFLOW_HEADER = [
   '# proves from the shard summaries that each system ran every test file once with no failure. A',
   '# failed, cancelled or skipped shard fails it. The tests-clock-ahead job runs the test files that',
   '# pin a calendar date with Node\'s clock 400 days ahead, so a test that only passes near the date',
-  '# it pins fails now rather than months later; validate waits for it. The personal-data job checks',
+  '# it pins fails now rather than months later; validate waits for it. The hook-pack job runs the',
+  '# hook test pack on Linux and Windows, and validate waits for it too. The personal-data job checks',
   '# every commit of the pull request or push, the commit messages, the branch name and the pull',
   '# request title and body for email addresses, phone numbers and WhatsApp links, and the title and',
   '# body for home-folder paths and AI attribution (values are never printed); validate waits for it',
@@ -470,6 +502,8 @@ function workflowText(manifest, commands) {
     testJobText('windows', shardIds(manifest, 'windows')),
     '',
     CLOCK_AHEAD_JOB,
+    '',
+    HOOK_PACK_JOB,
     '',
     PERSONAL_DATA_JOB,
     '',
@@ -528,12 +562,14 @@ function workflowErrors(source, manifest) {
   catch (error) { commandError = error.message; }
   const text = commands ? withPinUpdatesAccepted(raw, workflowText(manifest, commands)) : raw;
   const jobs = workflowJobs(text);
-  const expected = ['tests-linux', 'tests-windows', 'tests-clock-ahead', 'personal-data', 'validate'];
+  const expected = ['tests-linux', 'tests-windows', 'tests-clock-ahead', 'hook-pack', 'personal-data', 'validate'];
   if ([...jobs.keys()].join(',') !== expected.join(',')) errors.push(`validate.yml jobs must be exactly ${expected.join(', ')} in that order (found ${[...jobs.keys()].join(', ') || 'none'})`);
   for (const system of SYSTEMS) {
     const job = jobs.get(`tests-${system}`);
     if (job !== undefined && job !== testJobText(system, shardIds(manifest, system))) errors.push(`the tests-${system} job differs from the pinned text for shards ${shardIds(manifest, system).join(', ')}`);
   }
+  const hookPack = jobs.get('hook-pack');
+  if (hookPack !== undefined && hookPack !== HOOK_PACK_JOB) errors.push('the hook-pack job differs from its pinned text');
   const clockAhead = jobs.get('tests-clock-ahead');
   if (clockAhead !== undefined && clockAhead !== CLOCK_AHEAD_JOB) errors.push('the tests-clock-ahead job differs from its pinned text');
   const personalData = jobs.get('personal-data');
@@ -541,7 +577,7 @@ function workflowErrors(source, manifest) {
   const aggregate = jobs.get('validate');
   if (aggregate !== undefined) {
     const lines = aggregate.split('\n');
-    if (lines.slice(0, AGGREGATE_HEADER.length).join('\n') !== AGGREGATE_HEADER.join('\n')) errors.push('the validate job must start with needs: [tests-linux, tests-windows, tests-clock-ahead, personal-data], if: ${{ always() }}, runs-on: ubuntu-latest and timeout-minutes: 15');
+    if (lines.slice(0, AGGREGATE_HEADER.length).join('\n') !== AGGREGATE_HEADER.join('\n')) errors.push('the validate job must start with needs: [tests-linux, tests-windows, tests-clock-ahead, hook-pack, personal-data], if: ${{ always() }}, runs-on: ubuntu-latest and timeout-minutes: 15');
     const names = lines.filter((line) => /^ {6}- name: /.test(line)).map((line) => line.replace(/^ {6}- name: /, ''));
     if (names.join('|') !== 'Checkout|Set up Node|Download test summaries|Set up Python|Run validation') errors.push('the validate job steps must be Checkout, Set up Node, Download test summaries, Set up Python, Run validation (Run validation is step 6)');
     if (lines.filter((line) => /^ {8}if:/.test(line)).length) errors.push('no step in the validate job may have a condition');

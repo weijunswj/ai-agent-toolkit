@@ -1,5 +1,23 @@
 # Toolkit Changelog
 
+## 3.22.0 (plans and asks open with the problem, the fix and the cost of skipping)
+
+### Projects skill
+
+- **New rule:** every plan, G0 plan, decision ask and explanation, from the coordinator and from every thread, opens with three lines: **The problem:** (one plain sentence on what goes wrong for the owner), **The fix:** (what would be built, in everyday words) and **If we skip it:** (what happens if nothing is done). The owner can then turn work down before it is built or reviewed.
+- **Where the lines go:** first in a plan, a decision card and a reply. In a running post the **Now:** line stays first and the lines sit under it, or under the question they belong to, before its choices. Plain status lines and a later reminder of the same ask need none.
+- **Threads:** every brief passes the rule on, and a G0 brief asks for it at the top of the plan. The managed project-instructions block is unchanged.
+
+## 3.21.0 (a hook test pack every hook change must pass)
+
+### Hook test pack
+
+- **New:** the hook test pack (`repo/scripts/toolkit-hook-pack.cjs`, rows in `repo/tests/hook-pack/corpus/`) runs tool calls through the hooks exactly as Claude Code and Codex start them: the real `hooks.json` matchers, the plugin folder written into each command, one process per hook with the call on stdin, and on Windows the Codex PowerShell launcher setup installs. It checks the decision the host would act on and that no fixture file changed, and prints a scoreboard of passes, known bugs, false blocks and leaks per family.
+- **Suites:** ordinary daily commands that must pass, hostile calls that must stop, hooks that break (a missing, throwing or stalled module, unreadable input), a plugin version folder deleted mid-chat, and host parity. Rows for bugs not fixed yet are marked known-bad with the lane that fixes them, and the run fails when one starts passing, so the fix flips it. A refusal that comes only from a hook failing counts only for a row that names it.
+- **Revert proof:** `run --against <commit>` runs a fix's new rows against the plugin as it was at that commit and passes only when they fail there, so a review never has to feed hook scripts by hand.
+- **CI:** a `hook-pack` job runs the pack on Linux and Windows on every pull request, and the `validate` job waits for it. The validate job also fails a pull request that removes, lowers or otherwise changes a row (anything but a known-bad row moving toward passing) without a line for it under a "Pack changes" heading in the body.
+- **Gate rules:** a new "Hook changes" section says what a hook change must show before it merges (the pack green on both systems, a pack row and revert proof for each bug it fixes, explained row changes, and a real-host smoke per release), and that an enforcing hook that breaks refuses only the calls it guards while advisory hooks stay fail-open.
+
 ## 3.20.0 (version at merge time)
 
 ### Version at merge time
