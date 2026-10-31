@@ -270,9 +270,14 @@ test('hygiene: shell: bash runs with -e and is not masked; the shell test builti
       - name: Quiet assert
         shell: bash {0}
         run: test "$A" = "$B"
+      - name: Early exit
+        run: if [ "$A" = 1 ]; then notify; exit 0; fi
+      - name: Early exit without -e
+        run: set +e; notify; exit 0
       - name: Test`);
   const items = hits(report({ '.github/workflows/ci.yml': workflow }), 'hygiene.masked');
-  assert.deepEqual(items.map((e) => [e.level, e.path]), [['CHECK', '.github/workflows/ci.yml:16']]);
+  // With -e a failing command stops the step before `exit 0`, so an early exit hides nothing.
+  assert.deepEqual(items.map((e) => [e.level, e.path]), [['CHECK', '.github/workflows/ci.yml:16'], ['CHECK', '.github/workflows/ci.yml:21']]);
 });
 
 test('hygiene: path filters are not raised when the required checks are known and none is in that workflow', () => {

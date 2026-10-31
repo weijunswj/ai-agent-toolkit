@@ -858,7 +858,7 @@ function checkHygiene(fileList, workflows, root, requiredChecks = null) {
       if (job.continueOnError) items.push(item(job.steps.some((s) => testy(s.run || '', s.name)) || testy('', job.name || job.id) ? 'GAP' : 'CHECK', 'hygiene.masked', `${workflow.rel}:${job.line}`, `job ${job.id} has continue-on-error, so its failure never fails the run`, 'remove continue-on-error, or move the job out of the required set with a recorded reason'));
       for (const step of job.steps) {
         const masked = (step['continue-on-error'] && !/^false$/i.test(unquote(step['continue-on-error'])))
-          || /\|\|\s*(true|:|exit\s+0|echo\b)|\bset\s+\+e\b|;\s*exit\s+0\b/.test(step.run || '')
+          || /\|\|\s*(true|:|exit\s+0|echo\b)|\bset\s+\+e\b/.test(step.run || '')
           // `shell: bash` and `sh` get -e from GitHub; only a custom template such as `bash {0}`
           // without -e drops it.
           || (step.shell && /\{0\}/.test(step.shell) && /^\s*(ba)?sh\b/.test(step.shell) && !/\s-[a-z]*e/.test(step.shell));
