@@ -78,7 +78,7 @@ Claude Code (rows refer to the launch matrix in `repo/tests/support/claude-helpe
 | Route proof | Served model and effort from Claude Code's run records (subagent transcript and `.meta.json`), never the helper's report (the matrix's live rows) |
 | Known limit | A session `--agents` definition of a helper name outranks the files and no hook sees it (a matrix row); Toolkit launchers refuse it with `toolkit-claude-session-agents.cjs` |
 
-Codex (hook-process cases in `repo/tests/qualification/codex-native-helper.live.cjs`; the helper policy is in `repo/scripts/toolkit-codex-helper-policy.cjs`; the [Bridge's hook policy](TOOLKIT-LOCAL-BRIDGE.md#hook-policy) has the detail):
+Codex (hook-process cases in `repo/tests/qualification/codex-native-helper.live.cjs`; stored results in `repo/contracts/host-qualification/codex.json`; the helper policy is in `repo/scripts/toolkit-codex-helper-policy.cjs`; the [Bridge's hook policy](TOOLKIT-LOCAL-BRIDGE.md#hook-policy) has the detail):
 
 | Need | How Codex meets it |
 |---|---|
