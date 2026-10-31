@@ -8,6 +8,7 @@ Reusable secure CI/CD source materials.
 - `secure-cicd-prompt.md`: prompt for an AI coding agent to install CI/CD safely in a consumer repo.
 - `CURRENT_CICD_STATUS.template.md`: status-file shape for consumer repos; copy or adapt it as `docs/ci-cd/CURRENT_CICD_STATUS.md` unless the repo already documents another CI/CD status path.
 - `safe-source-update-policy.md`: policy for source update detection and review.
+- `ci-checkup.md`: when and how to run the read-only CI check-up (`../../scripts/ci-checkup.cjs`) and act on what it finds, so CI keeps up with the code.
 
 These are templates. Review and adapt them before use.
 
