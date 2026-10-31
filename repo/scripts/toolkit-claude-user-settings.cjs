@@ -8,7 +8,7 @@
 //   pluginConfigs["cc-plugin-agents-md@builtin"].options.instructionFiles: "claude-md-and-agents-md"
 //                                           read AGENTS.md as well as CLAUDE.md
 // Toolkit records, per setting and per settings file, that it wrote the value. A value the owner set by hand
-// (any value Toolkit did not record) is reported and never changed or removed. Turning a setting off removes
+// (any value Toolkit did not record) is reported, with whether it matches Toolkit's value, and never changed or removed. Turning a setting off removes
 // it only while it still holds the value Toolkit recorded, along with any parent objects Toolkit created.
 
 const fs = require('node:fs');
@@ -136,10 +136,11 @@ class ClaudeUserSettings {
   #stateOf(read, spec, entry) {
     if (read.error) return { id: spec.id, label: spec.label, state: STATES.UNREADABLE, detail: read.error };
     const found = lookup(read.settings, spec.keyPath);
-    if (found.blocked) return { id: spec.id, label: spec.label, state: STATES.OWNER, value: null, detail: 'a parent entry is not an object' };
+    if (found.blocked) return { id: spec.id, label: spec.label, state: STATES.OWNER, value: null, matches: false, detail: 'a parent entry is not an object' };
     if (!found.found) return { id: spec.id, label: spec.label, state: STATES.DEFAULT };
     if (entry && same(entry.value, found.value) && same(found.value, spec.value)) return { id: spec.id, label: spec.label, state: STATES.TOOLKIT, value: found.value };
-    return { id: spec.id, label: spec.label, state: STATES.OWNER, value: found.value };
+    // matches tells an owner value equal to Toolkit's pick apart from a different one; both stay untouched.
+    return { id: spec.id, label: spec.label, state: STATES.OWNER, value: found.value, matches: same(found.value, spec.value) };
   }
 
   inspect() {
