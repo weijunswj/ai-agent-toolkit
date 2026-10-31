@@ -88,7 +88,7 @@ test('a push the check cannot check is refused in Codex, under every Codex shell
     const r = run({ tool_name: tool, hook_event_name: 'PreToolUse', cwd: os.tmpdir(), tool_input: { cmd: 'git push origin HEAD:refs/heads/toolkit-test-unused', workdir: ROOT } }, { TOOLKIT_GIT_PATH: notAProgram });
     assert.equal(r.status, 2, `${tool}: ${r.stderr}`);
     const reason = r.output.hookSpecificOutput.permissionDecisionReason;
-    assert.match(reason, /^Toolkit could not check this push for credentials and plain-text findings: git could not run \(\w+\)\.\nCodex does not show Toolkit's warnings, so this push or pull request is refused instead of going out unchecked\.\nFix what the note above names, then retry: /, tool);
+    assert.match(reason, /^Toolkit could not check this push for credentials: git could not run \(\w+\)\.\nCodex does not show Toolkit's warnings, so this push or pull request is refused instead of going out unchecked\.\nFix what the note above names, then retry: /, tool);
     // Each cause that repeats on every retry has its own way through.
     for (const way of [/push fewer new commits at a time/, /run `git fetch origin` or name `--base`/, /fix the file it names/, /git was not found or could not run, run `setup toolkit`/]) assert.match(reason, way, tool);
     assert.doesNotMatch(reason, /let through/, tool);
@@ -96,6 +96,38 @@ test('a push the check cannot check is refused in Codex, under every Codex shell
   }
   const status = run({ tool_name: 'Bash', hook_event_name: 'PreToolUse', cwd: ROOT, tool_input: { command: 'git status' } }, { TOOLKIT_GIT_PATH: notAProgram });
   assert.deepEqual([status.status, status.output], [0, {}], 'a command that sends nothing runs');
+});
+
+test('an evidence store a binding names and a scratch clone in an ignored .tmp folder are never held on Codex; a push to the store is not a default-branch push', t => {
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-codex-hook-store-'));
+  t.after(() => fs.rmSync(scratch, { recursive: true, force: true }));
+  const support = require('./toolkit-governed-fixture-support.cjs');
+  // Its binding names toolkit-test-fixture/store as the evidence store.
+  const app = support.makeGoverned(path.join(scratch, 'app'), 'codex-store-app');
+  fs.writeFileSync(path.join(app, '.gitignore'), '.tmp/\n');
+  const clone = (at, slug) => {
+    fs.mkdirSync(at, { recursive: true });
+    spawnSync('git', ['init', '--quiet', at], { windowsHide: true });
+    spawnSync('git', ['-C', at, 'remote', 'add', 'origin', `https://github.com/${slug}.git`], { windowsHide: true });
+    fs.mkdirSync(path.join(at, '.git', 'refs', 'remotes', 'origin'), { recursive: true });
+    fs.writeFileSync(path.join(at, '.git', 'refs', 'remotes', 'origin', 'main'), `${'1'.repeat(40)}\n`);
+    return at;
+  };
+  const store = clone(path.join(scratch, 'store'), 'toolkit-test-fixture/store');
+  const scratchClone = clone(path.join(app, '.tmp', 'library'), 'toolkit-test-fixture/library');
+  const held = clone(path.join(scratch, 'held'), 'toolkit-test-fixture/undecided');
+  for (const cwd of [store, scratchClone]) {
+    const prompt = run({ hook_event_name: 'UserPromptSubmit', cwd, prompt: 'list the files here' });
+    assert.equal(prompt.status, 0, `${cwd}: ${prompt.stderr}`);
+    const tool = run({ tool_name: 'exec_command', hook_event_name: 'PreToolUse', cwd, tool_input: { cmd: 'git status', workdir: cwd } });
+    assert.deepEqual([tool.status, tool.output], [0, {}], cwd);
+    const reach = run({ tool_name: 'exec_command', hook_event_name: 'PreToolUse', cwd: app, tool_input: { cmd: `git -C "${cwd}" status`, workdir: app } });
+    assert.deepEqual([reach.status, reach.output], [0, {}], `reach ${cwd}`);
+  }
+  assert.equal(run({ hook_event_name: 'UserPromptSubmit', cwd: held, prompt: 'list the files here' }).status, 2, 'an undecided repository is still held');
+  // The refused shape from a Claude Code session, as Codex sends it: the store named through a variable.
+  const push = run({ tool_name: 'exec_command', hook_event_name: 'PreToolUse', cwd: app, tool_input: { cmd: `$d = '${store}'; git -C $d push origin HEAD:main`, workdir: app } });
+  assert.doesNotMatch(push.stderr + JSON.stringify(push.output), /default branch `main`/);
 });
 
 // R11: the payload Codex Desktop sent on 29 October 2026 for a code-mode call (key names and types

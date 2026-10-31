@@ -293,7 +293,7 @@ test('templates hold no ids, owner names, project-only tasks or old resolve rule
   for (const name of fs.readdirSync(TASKS)) {
     const text = fs.readFileSync(path.join(TASKS, name), 'utf8');
     assert.doesNotMatch(text, /trig_|chan_|cmsg_|session_01|weijunswj|xPass|WJ_Lappy|TOOLKIT:|SWOO/, name);
-    // The skill drift watch is part of the daily check-in now (SKILL DRIFT), never a separate task.
+    // No separate drift watch task: the guidebook steps keep the library copy of the skill current.
     assert.doesNotMatch(text, /drift watch|resolve window|idle window|default 2 days|IDLE-2D/i, name);
     assert.doesNotMatch(text, /AI-AGENT-TOOLKIT:/, name);
     assert.doesNotMatch(text, /[^\x00-\x7f]/, name);
@@ -377,43 +377,35 @@ test('only the project that runs the Toolkit repo watches other projects, and on
 
 test('the check-in carries every prefix in the fixed order and checks both Toolkit tasks; the nudge compares cheaply first', () => {
   const text = rendered('daily-check-in');
-  const order = ['CONTEXT RESET DUE', 'SKILL UPDATE', 'SKILL DRIFT', 'SKILL BEHIND', 'BLOCK OUTDATED', 'BINDING STALE or BINDING UNKNOWN', 'TOOLKIT CHANGED', 'MEMORY FORMAT', 'TASKS OUTDATED', 'NUDGE NOT ARMED', 'PROJECT TASKS MISSING', 'PLUGIN BEHIND'];
+  const order = ['CONTEXT RESET DUE', 'GUIDEBOOK MISSING or SKILL COPY STALE', 'SKILL UPDATE', 'BLOCK OUTDATED', 'BINDING STALE or BINDING UNKNOWN', 'TOOLKIT CHANGED', 'MEMORY FORMAT', 'TASKS OUTDATED', 'NUDGE NOT ARMED', 'PROJECT TASKS MISSING', 'PLUGIN BEHIND'];
   const line = text.split('\n').find(entry => entry.startsWith('- First line:'));
   const positions = order.map(prefix => line.indexOf(prefix));
   assert.ok(positions.every((at, index) => at > -1 && (index === 0 || at > positions[index - 1])), line);
   for (const required of ['"EXAMPLE: Daily check-in"', '"EXAMPLE: Hourly nudge"', '--check daily-check-in', '--check hourly-nudge',
-    '--check-memory', 'bound to its home thread (persist_session true), or a fresh session per run (persist_session false) only where the entry says fresh', 'CONTEXT RESET DUE, SKILL UPDATE', 'weekly-rebuild', 'unlisted', 'hearth_channel_id',
+    '--check-memory', 'bound to its home thread (persist_session true), or a fresh session per run (persist_session false) only where the entry says fresh', 'CONTEXT RESET DUE, GUIDEBOOK MISSING', 'weekly-rebuild', 'unlisted', 'hearth_channel_id',
     'advice only', 'local, advice', 'Never suggest moving a local task to the cloud', '--declined-dedupe', 'overlaps',
     'remove only the ai-agent-toolkit plugin on claude.ai in a web browser', 'state done', 'older than 65 minutes', 'Never flag other memory lines',
-    'git hash-object --stdin', 'matches no revision', '/skill-drift/', 'unless state.md already reported these hashes',
     'every run reaches the owner as one line', 'swaps each named Toolkit task from the template on main the same turn']) {
     assert.ok(text.includes(required), required);
   }
-  // A due card is named once per main Version, never over direct account edits, and sent by the coordinator's card thread, never by the check-in.
-  for (const required of ['SKILL CARD: a skill update card is due only when all of these hold', 'never on SKILL DRIFT: a card would overwrite direct edits',
-    'the account folder is under 26 hours old', 'every account reference/*.md is absent or equal to main', 'state.md records no "card <main Version>"',
-    'This check-in never calls propose_skills and never builds the card', '"SKILL BEHIND: <account> -> <main>, card due | "', 'even when state.md already reported this Version',
-    'the coordinator sends it from a fresh skill card thread (main\'s reference/skill-card.md)', 'tap Save on the skill card',
-    'A reference file missing from the account is not drift', 'Record "card <main Version>" in state.md and read it back', 'SKILL BEHIND (carried forward while still seen)', 'every "card <Version>" record (this run\'s and all earlier ones, carried forward)']) {
+  // The guidebook step compares the library copy with main, refreshes it only as the backstop, and names the Version for SKILL UPDATE.
+  for (const required of ['3. GUIDEBOOK: run `node TK/repo/scripts/toolkit-projects-guidebook.cjs --check /mnt/project-files/toolkit/web-controller-projects`',
+    'Under two hours ago: "**Guidebook:** <printed line>, left to the hourly nudge"', 'unless the nudge\'s entry on the SCHEDULED TASKS line ends "stopped by owner <date>" or the nudge is not armed',
+    '"GUIDEBOOK MISSING: <reason>, <result> | "', '"SKILL COPY STALE: <reason>, <result> | "', 'with the `skill <Version>` on the BINDING line in memory',
+    '"SKILL UPDATE: <old> -> <new> | "', 'Read /mnt/project-files/toolkit/web-controller-projects/VERSION and state it.', 'the guidebook\'s VERSION line, main\'s SHA']) {
     assert.ok(text.includes(required), required);
   }
-  assert.doesNotMatch(text, /call propose_skills:|card posted|skill cards: coordinator|card failed/);
-  // The Skill line compares the saved copy with main in the card thread's terms, and a cut-short or escaped copy is a damaged card, not direct edits.
-  for (const required of ['The **Skill:** line always names the account SKILL.md\'s byte size and sha256 next to main\'s, both normalised the same way.',
-    'is the start of a revision\'s (cut short), or that holds `&lt;`, `&gt;`, `&amp;` or `&quot;` where that revision has none (HTML-escaped), is a damaged card, not direct edits',
-    '"SKILL DRIFT: damaged card, <files>, copy: <path> | "']) {
-    assert.ok(text.includes(required), required);
-  }
-  // Drift needs the full history (and a failed fetch never reports drift), and plugin lag shows every run and is reported once per main version.
-  for (const required of ['`git -C TK fetch --unshallow` once and hash every revision again', 'If that fetch fails, report no SKILL DRIFT and post no card',
-    '"drift unverified: unshallow failed: <error>"',
+  // The account copy of the skill is no longer kept: no drift, card or account-skill step remains.
+  assert.doesNotMatch(text, /SKILL DRIFT|SKILL BEHIND|SKILL CARD|propose_skills|skill-card|skill card|card <|account folder|skills\/synced/);
+  // Plugin lag needs the full history (a failed fetch is named as stuck) and is reported once per main version.
+  for (const required of ['If none has it, run `git -C TK fetch --unshallow` once and look again',
     'Equal: "**Plugin:** current (<version>)"', 'take the newest commit whose plugin.json has the account version; main moved past it at the next newer commit',
     'use the oldest commit whose version is above the account\'s', 'age unverified: unshallow failed: <error>" and no prefix, and name it on the first line as stuck', 'Under 24 hours ago: name both versions and that commit under **Plugin:**',
     'unless state.md has "plugin behind <main version>"', 'its "plugin behind <version>" record', 'No agent can update the plugin',
     // The Claude app steps, rendered, equal the shared text the session-start reminder and install check use.
     `put the owner's steps under **Plugin:** for the coordinator's plugin card: ${STEPS_TEXT} Missing account copy`,
     '"plugin behind <main version>" for the version reported as PLUGIN BEHIND (carried forward while the account copy is still behind)',
-    'Omit empty bullets except Skill, Block, Binding, Tasks, Nudge, Plugin and Run.']) {
+    'Omit empty bullets except Guidebook, Block, Binding, Tasks, Nudge, Plugin and Run.']) {
     assert.ok(text.includes(required), required);
   }
   // The check-in holds no card, so no run of it, bound or fresh, keeps its thread open for one.
@@ -424,10 +416,19 @@ test('the check-in carries every prefix in the fixed order and checks both Toolk
   assert.match(text, /bound-session or fresh-session when that differs from the entry/);
   const nudge = rendered('hourly-nudge');
   // The cheap check reads the last run's state first and skips the full sweep when nothing moved;
-  // the binding check is daily only, so the nudge clones nothing.
+  // the binding check is daily only. The nudge clones Toolkit once, in its guidebook step, every run:
+  // the library folder can change while main is quiet, so the check never waits for a merge.
   assert.ok(nudge.indexOf('nudge-state.md') > -1 && nudge.indexOf('nudge-state.md') < nudge.indexOf('list_threads'), 'cheap compare before the sweep');
   assert.match(nudge, /no change since <time>/);
-  assert.doesNotMatch(nudge, /git ls-remote|git clone|BINDING/);
+  assert.doesNotMatch(nudge, /BINDING|git ls-remote|guidebook checked/);
+  assert.equal((nudge.match(/git clone/g) || []).length, 1);
+  const guidebook = nudge.split('\n').find(line => line.startsWith('9. Guidebook'));
+  for (const required of ['runs every time, even when step 1 found no change', 'the library folder can change while main is quiet',
+    '`git clone --depth 1 https://github.com/weijunswj/ai-agent-toolkit TK` in your scratchpad (a fresh clone)',
+    'toolkit-projects-guidebook.cjs --check /mnt/project-files/toolkit/web-controller-projects',
+    'run it again with `--out` in place of `--check`', '"BLOCK CHANGED <version> | "', '"SKILL COPY FAILED: <reason> | "']) assert.ok(guidebook.includes(required), required);
+  assert.match(nudge, /report BLOCK CHANGED only when this run printed it/);
+  assert.match(nudge, /plus steps 7, 8 and 9 \(and 5b when it applies\)/);
   assert.match(nudge, /CONTEXT RESET DUE \(weekly\)/);
   // Each task reports the other missing, so the coordinator recreates a deleted one.
   assert.ok(nudge.includes('is missing (no such trigger in list_triggers'), 'nudge sees a deleted check-in');
@@ -477,7 +478,7 @@ test('memory check reads only the BINDING and SCHEDULED TASKS lines', () => {
   });
 });
 
-test('every setup step that creates something has an inventory row, and every row is checked by the daily check-in or a registered launch hook', () => {
+test('every setup step that creates something has an inventory row, and every row is checked by the daily check-in, a registered launch hook or a written rule', () => {
   const inventory = JSON.parse(fs.readFileSync(INVENTORY, 'utf8'));
   const setup = fs.readFileSync(SETUP, 'utf8').replace(/\r\n/g, '\n');
   assert.match(fs.readFileSync(SKILL, 'utf8'), /reference\/setup\.md/, 'the skill routes setup to its reference file');
@@ -492,9 +493,11 @@ test('every setup step that creates something has an inventory row, and every ro
   for (const row of inventory.rows) {
     assert.match(row.resync, /^(auto|owner|report)\b/, row.id);
     // A row a launch hook enforces names that hook's script, which must exist and be registered in the Claude Code
-    // plugin; every other row is in the check-in.
+    // plugin; a row a written rule covers names the file that holds the rule; every other row is in the check-in.
     const hook = row.check.match(/^hook: (\S+)$/);
-    if (hook) {
+    const rule = row.check.match(/^rule: (\S+)$/);
+    if (rule) assert.ok(fs.existsSync(path.join(ROOT, rule[1])), `${row.id}: ${rule[1]}`);
+    else if (hook) {
       assert.ok(fs.existsSync(path.join(ROOT, hook[1])), `${row.id}: ${hook[1]}`);
       assert.ok(fs.readFileSync(path.join(ROOT, '.claude-plugin', 'hooks', 'hooks.json'), 'utf8').includes(`/${hook[1]}\\"`), `${row.id}: ${hook[1]} registered`);
     }
@@ -550,6 +553,11 @@ test('every line that re-arms, updates, swaps, rebuilds, recreates or sets up a 
     '**Programme pages refresh themselves, without tokens.**', '5b. Programme sweep',
     // The attention check reads the programme with `attention --refresh`; it touches no task.
     '**Programme attention before gates, finality and settling.**',
+    // The guidebook refresh rewrites the library copy of the skill and the block file; it touches no task.
+    '**Read it every turn**', '**One refresh, three routes.**', 'refreshes a stale or changed copy itself', 'start a cloud thread for the refresh at once', 'The daily check-in is the backstop',
+    '**BLOCK CHANGED:**', '**Missing folder:**', '`SKILL COPY FAILED`: start one fresh refresh thread', 'a guidebook refresh reports BLOCK CHANGED', '`GUIDEBOOK MISSING` or `SKILL COPY STALE`',
+    '9. the guidebook:', 'coordinator: refresh the guidebook', 'the guidebook refresh brings both here', '- Projects guidebook:', "Read the guidebook's `VERSION`",
+    'library copy of the Projects skill (the guidebook)', 'and the guidebook refresh (step 9)', '9. Guidebook (runs every time', 'With BLOCK CHANGED, the coordinator replaces the block',
   ];
   const unguarded = [];
   for (const rel of files) {

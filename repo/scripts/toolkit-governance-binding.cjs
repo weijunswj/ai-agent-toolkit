@@ -32,6 +32,9 @@ const CACHE_DIR = 'governance-binding-cache';
 const BINDING_PATH = '.github/toolkit-programme.json';
 const BINDING_READ_LIMIT = 64 * 1024;
 const CACHE_READ_LIMIT = 256 * 1024;
+// At most this many cache files are read when listing every cached binding (evidence stores).
+const CACHE_SCAN_LIMIT = 256;
+const CACHE_FILE = /^[0-9a-f]{32}\.json$/;
 const GIT_TIMEOUT_MS = 5000;
 // Gate admission, finality and governed writes need a read no older than this.
 const FRESH_MS = 24 * 60 * 60 * 1000;
@@ -239,6 +242,32 @@ function readBindingCache(identity, registryPath) {
   return Object.freeze({ ...parsed });
 }
 
+// Every valid entry in this computer's cache, as [{ identity, entry }], at most `limit` files read.
+// Each file is checked as readBindingCache checks it; a damaged or unknown file is skipped.
+function readAllBindingCaches(registryPath, limit = CACHE_SCAN_LIMIT) {
+  let names;
+  try { names = fs.readdirSync(cacheDirFor(registryPath)); } catch { return []; }
+  const found = [];
+  for (const name of names.filter(file => CACHE_FILE.test(file)).sort().slice(0, limit)) {
+    let remote = null;
+    try {
+      const file = path.join(cacheDirFor(registryPath), name);
+      const stat = fs.lstatSync(file);
+      if (!stat.isFile() || stat.size > CACHE_READ_LIMIT) continue;
+      remote = JSON.parse(fs.readFileSync(file, 'utf8')).remote;
+    } catch { continue; }
+    let identity;
+    try {
+      const parsedRemote = validateRemoteIdentity(remote);
+      if (!parsedRemote.valid) continue;
+      identity = { valid: true, remote: parsedRemote, repository_id: repositoryIdForCanonicalRemote(parsedRemote.canonical) };
+    } catch { continue; }
+    const entry = readBindingCache(identity, registryPath);
+    if (entry) found.push({ identity, entry });
+  }
+  return found;
+}
+
 // Whether a cache entry is fresh enough for gate admission, finality and governed writes.
 function isFresh(entry, now = new Date()) {
   if (!entry) return false;
@@ -258,6 +287,8 @@ module.exports = Object.freeze({
   readDefaultBranchBinding,
   refreshBindingCache,
   readBindingCache,
+  readAllBindingCaches,
+  CACHE_SCAN_LIMIT,
   writeCache,
   isFresh,
   refreshReason,

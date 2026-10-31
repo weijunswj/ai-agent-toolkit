@@ -30,9 +30,7 @@
       "payload": { "tool_name": "Bash", "tool_input": { "command": "git checkout -b fix; git push -u origin fix" } },
       "fixture": { "repo": { "governance": "enabled", "commits": [{ "files": { "uat-config.txt": "token = \"{credential}\"\n" }, "message": "unpushed commit on main" }] } },
       "expect": { "decision": "deny" },
-      "status": "known-bad",
-      "lane": "Push check misses earlier unpushed commits",
-      "added": "2026-10-30"
+      "status": "pass"
     },
     {
       "id": "P2",
@@ -42,9 +40,7 @@
       "payload": { "tool_name": "PowerShell", "tool_input": { "command": "$d = '{work}'; git -C $d push origin feature" } },
       "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
       "expect": { "decision": "allow" },
-      "status": "known-bad",
-      "lane": "PowerShell variable push",
-      "added": "2026-10-30"
+      "status": "pass"
     },
     {
       "id": "P3",
@@ -64,10 +60,156 @@
       "payload": { "tool_name": "Bash", "tool_input": { "command": "git add -A; git commit -m \"Step 2\"; git push origin HEAD" } },
       "fixture": { "repo": { "governance": "enabled", "branch": "feature", "worktrees": ["spare"] }, "files": { "step2.txt": "step two\n" } },
       "expect": { "decision": "allow" },
-      "status": "known-bad",
-      "lane": "Codex folder-unknown false refusal",
-      "added": "2026-10-30",
+      "status": "pass",
       "note": "The tryout supplied workdir, but Codex Desktop delivers the call to the hook as Bash with no workdir and the chat's folder as cwd, so the row sends that shape. The fix decides the allowed outcome; the row expects clean work to go through."
+    },
+    {
+      "id": "F1.posix-variable-case",
+      "source": "G2 report on PR 697, F1 (Medium): POSIX variables D and d read as one",
+      "kind": "hostile",
+      "hosts": ["claude", "codex"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "D='{work}'; d='{home}'; git -C \"$D\" push origin HEAD:main" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature" }, "files": { ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n" } },
+      "note": "The origin HEAD file names main as the default branch. D is the governed repository and d a folder outside it; read as one variable, the push would be judged from d and let through.",
+      "expect": { "decision": "deny" },
+      "status": "pass"
+    },
+    {
+      "id": "P1.switch-create",
+      "source": "hooks one-PR G0, 4.2: a branch made by switch -c earlier in the command",
+      "kind": "hostile",
+      "hosts": ["claude", "codex"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "git switch -c fix; git push -u origin fix" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature", "commits": [{ "files": { "uat-config.txt": "token = \"{credential}\"\n" }, "message": "unpushed commit with a credential" }] } },
+      "expect": { "decision": "deny" },
+      "status": "pass"
+    },
+    {
+      "id": "P1.branch-start",
+      "source": "hooks one-PR G0, 4.2: a branch made by git branch with a start point earlier in the command",
+      "kind": "hostile",
+      "hosts": ["claude", "codex"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "git branch fix feature; git push origin fix" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature", "commits": [{ "files": { "uat-config.txt": "token = \"{credential}\"\n" }, "message": "unpushed commit with a credential" }] } },
+      "expect": { "decision": "deny" },
+      "status": "pass"
+    },
+    {
+      "id": "PUSH.dry-run",
+      "source": "hooks one-PR G0, 4.1: a dry-run push sends nothing but was checked, and Codex refused it",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "git push --dry-run origin feature" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature", "commits": [{ "files": { "uat-config.txt": "token = \"{credential}\"\n" }, "message": "unpushed commit with a credential" }] } },
+      "expect": { "decision": "allow" },
+      "status": "pass"
+    },
+    {
+      "id": "PUSH.dry-run-short",
+      "source": "hooks one-PR G0, 4.1: git push -n is a dry run too",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "git push -n -u origin feature" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature", "commits": [{ "files": { "uat-config.txt": "token = \"{credential}\"\n" }, "message": "unpushed commit with a credential" }] } },
+      "expect": { "decision": "allow" },
+      "status": "pass"
+    },
+    {
+      "id": "PUSH.missing-remote",
+      "source": "hooks one-PR G0, 4.1: a remote name that is no configured remote sends nothing (git refuses it)",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "git push nowhere feature" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature", "commits": [{ "files": { "uat-config.txt": "token = \"{credential}\"\n" }, "message": "unpushed commit with a credential" }] } },
+      "expect": { "decision": "allow" },
+      "status": "pass"
+    },
+    {
+      "id": "PUSH.empty-remote-credential",
+      "source": "hooks one-PR G0, 4.1: a configured remote with no tracking refs still gets every unpushed commit checked",
+      "kind": "hostile",
+      "hosts": ["claude", "codex"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "git push origin feature" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature", "commits": [{ "files": { "uat-config.txt": "token = \"{credential}\"\n" }, "message": "unpushed commit with a credential" }] } },
+      "expect": { "decision": "deny" },
+      "status": "pass"
+    },
+    {
+      "id": "N1.powershell-reads-powershell",
+      "source": "G2 report on PR 705 at 272d16f, N1 (Medium): a variable assigned in the other shell's form was read",
+      "kind": "hostile",
+      "hosts": ["claude", "codex"],
+      "payload": { "tool_name": "PowerShell", "tool_input": { "command": "$x = '{work}' ; x={home} ; git -C $x push origin HEAD:main" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature" }, "files": { ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n" } },
+      "expect": { "decision": "deny" },
+      "status": "pass",
+      "note": "PowerShell sets $x to the governed repository; the POSIX-looking x=... line fails there and must not be read. On Codex the shell is unknown, so a name assigned in both forms is left unread and the check fails closed."
+    },
+    {
+      "id": "N1.bash-reads-posix",
+      "source": "G2 report on PR 705 at 272d16f, N1 (Medium): a variable assigned in the other shell's form was read",
+      "kind": "hostile",
+      "hosts": ["claude", "codex"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "x='{work}'; $x = '{home}'; git -C \"$x\" push origin HEAD:main" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature" }, "files": { ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n" } },
+      "expect": { "decision": "deny" },
+      "status": "pass",
+      "note": "Bash sets x to the governed repository; the PowerShell-looking line runs as a command there and must not be read. On Codex the shell is unknown, so a name assigned in both forms is left unread and the check fails closed."
+    },
+    {
+      "id": "N1.reassigned-unknown-shell",
+      "source": "G2 report on PR 705 at 272d16f, N1 (Medium): a variable assigned in the other shell's form was read",
+      "kind": "hostile",
+      "hosts": ["codex"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "x='{work}'; x='{home}'; git -C \"$x\" push origin HEAD:main" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature" }, "files": { ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n" } },
+      "expect": { "decision": "deny" },
+      "status": "pass",
+      "note": "With the shell unknown (Codex), a name assigned twice is left unread, so the push is judged from the session folder and refused."
+    },
+    {
+      "id": "R1.posix-assignment-unknown-shell",
+      "source": "G2 recheck on PR 705 at 94f5123, R1 (Medium): with the shell unknown, one assignment in the other shell's form steered the guard",
+      "kind": "hostile",
+      "hosts": ["codex"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "x='{home}' ; git -C \"$x\" push origin HEAD:main" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature" }, "files": { ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n" } },
+      "expect": { "decision": "deny" },
+      "status": "pass",
+      "note": "Codex names no shell. If PowerShell runs it, the x= line fails, $x is empty and git pushes the session folder (the governed repository) to main; the guard judges that reading too."
+    },
+    {
+      "id": "R1.powershell-assignment-unknown-shell",
+      "source": "G2 recheck on PR 705 at 94f5123, R1 (Medium): with the shell unknown, one assignment in the other shell's form steered the guard",
+      "kind": "hostile",
+      "hosts": ["codex"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "$x = '{home}' ; git -C \"$x\" push origin HEAD:main" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature" }, "files": { ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n" } },
+      "expect": { "decision": "deny" },
+      "status": "pass",
+      "note": "Codex names no shell. If bash runs it, the $x = line fails, $x is empty and git pushes the session folder (the governed repository) to main; the guard judges that reading too."
+    },
+    {
+      "id": "CODEX.sibling-worktree-head-push",
+      "source": "PR 705 real-host smoke on Codex Desktop, 31 Oct 2026: a sibling worktree counted as a folder the chat could run in",
+      "kind": "benign",
+      "hosts": ["codex"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "git push origin HEAD:feature" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature", "worktrees": ["spare"] } },
+      "expect": { "decision": "allow" },
+      "status": "pass",
+      "note": "Codex Desktop names no folder and refuses a workdir outside the chat folder, so a sibling working tree of the same repository is not where the command runs. Real-host smoke row 14 was refused this way before the fix."
+    },
+    {
+      "id": "CODEX.sibling-worktree-leak",
+      "source": "PR 705 real-host smoke on Codex Desktop, 31 Oct 2026: a sibling worktree counted as a folder the chat could run in",
+      "kind": "hostile",
+      "hosts": ["codex"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "git checkout -b fix; git push -u origin fix" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature", "worktrees": ["spare"], "commits": [{ "files": { "uat-config.txt": "token = \"{credential}\"\n" }, "message": "unpushed commit with a credential" }] } },
+      "expect": { "decision": "deny" },
+      "status": "pass",
+      "note": "The same shape with an unpushed credential on HEAD is still refused, now for the credential. Real-host smoke row 16."
     }
   ]
 }

@@ -17,7 +17,7 @@ Fresh executor contexts are mandatory between G0 and G1, for initial G2, for a r
 
 There are no handover packets. Keep the work recoverable at all times instead: push work in progress to the branch, keep the PR (or the brief, before a PR exists) current at milestones, and post progress and decisions where every harness can read them: the PR, plus the programme issue comments when GitHub governance is ENABLED, otherwise the evidence store. Never rely on chat or host memory: a Projects controller may mirror state in project memory, never only there. Any new controller or executor starts from these, with no handover step, loading the current state and changed instructions rather than the full history.
 
-A gate works in the primary checkout unless it needs its own worktree, then uses `.tmp/worktrees/<lane>-<gate>-<sha>` at the admitted commit and records HEAD; the controller removes it after merge.
+A gate works in the primary checkout unless it needs its own worktree, then uses `.tmp/worktrees/<lane>-<gate>-<sha>` at the admitted commit and records HEAD; the controller removes it after merge. A writing gate's session opens in the folder it writes, never told to escalate into another (Codex: the host contract's gate workspace).
 
 ## Building
 
@@ -49,7 +49,7 @@ G2 starts after the working result and any owner UAT acceptance, in fresh indepe
 
 ## Hook changes
 
-A hook change touches a `hooks.json`, a `*-hook.cjs`/`*-hook.ps1` script, a module they decide with, or setup that writes host hook config. It merges only when the hook test pack (`repo/tests/hook-pack/README.md`) passes on Linux and Windows on the exact head; each bug it fixes has a pack row that `run --against <parent>` shows failing there; each row it removes, lowers or changes (anything but a flip toward passing) has a reason under the body's "Pack changes" heading; G2 runs the pack instead of feeding hook scripts by hand; and its release passes the real-host smoke (about 20 fixed rows, one update mid-chat, in fresh Claude Code and Codex chats on the installed build) before the owner's merge OK. A broken enforcing hook (push, attribution, governance, merge hold, agent launch, prompt hold) refuses only the calls it guards, with a plain reason and the recovery; advisory hooks stay fail-open.
+A hook change follows `repo/docs/agent-playbooks/hook-design.md`. It touches a `hooks.json`, a `*-hook.cjs`/`*-hook.ps1` script, a module they decide with, or setup that writes host hook config. It merges only when the hook test pack (`repo/tests/hook-pack/README.md`) passes on Linux and Windows on the exact head; each bug it fixes has a pack row that `run --against <parent>` shows failing there; each row it removes, lowers or changes (anything but a flip toward passing) has a reason under the body's "Pack changes" heading; G2 runs the pack instead of feeding hook scripts by hand; and its release passes the real-host smoke (about 20 fixed rows, one update mid-chat, in fresh Claude Code and Codex chats on the installed build) before the owner's merge OK. A broken enforcing hook (push, attribution, governance, merge hold, agent launch, prompt hold) refuses only the calls it guards, with a plain reason and the recovery; advisory hooks stay fail-open.
 
 ## Routes
 

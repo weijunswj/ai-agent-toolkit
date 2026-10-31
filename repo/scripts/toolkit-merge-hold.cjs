@@ -87,7 +87,7 @@ const MAX_APPROVALS = 100;
 const MAX_PROMPT_CHARS = 8000;
 const MAX_COMMAND_CHARS = 1024 * 1024;
 
-const { SHELL_TOOLS, ShellCall, shellPath } = require('./toolkit-shell-call.cjs');
+const { SHELL_TOOLS, ShellCall, assignVariable, assignmentOf, folderWord, shellOf, shellPath, shellReadings } = require('./toolkit-shell-call.cjs');
 // A connector's merge or auto-merge tool, whatever its server is called (a claude.ai connector's
 // server name is a UUID): the tool name ends in one of these after a _ or -.
 const AUTO_MERGE_NAME = 'enable[_-]?(?:pr[_-]?|pull[_-]?request[_-]?)?auto[_-]?merge';
@@ -324,6 +324,7 @@ function wordsOf(text) {
   return [...String(text).matchAll(/"((?:[^"\\]|\\.)*)"|'([^']*)'|(\S+)/g)].map(match => match[1] ?? match[2] ?? match[3]);
 }
 
+
 // The value of a flag in a command's words ("--repo x", "--repo=x", "-R x").
 function flagValue(words, names) {
   for (let index = 0; index < words.length; index += 1) {
@@ -362,8 +363,10 @@ function hasRef(common, ref) {
   try { return fs.readFileSync(path.join(common, 'packed-refs'), 'utf8').split('\n').some(line => line.endsWith(` ${ref}`)); } catch { return false; }
 }
 
-// { default, current, store } for a push from `cwd` to `remote`, or null outside a repository.
-function pushTarget(cwd, remote) {
+// { default, current, store } for a push from `cwd` to `remote`, or null outside a repository. A store
+// is an evidence store: by its remote's name (TRANSPORT-*), or, for a push to origin, a repository the
+// governance state names one (rule S1).
+function pushTarget(cwd, remote, registryOptions = {}) {
   let root;
   try { root = governance.findGitRoot(cwd); } catch { root = null; }
   if (!root) return null;
@@ -381,13 +384,21 @@ function pushTarget(cwd, remote) {
     try { defaultBranch = (/^ref:\s*refs\/remotes\/[^/]+\/(.+)$/m.exec(fs.readFileSync(path.join(dirs.common, 'refs', 'remotes', remoteName, 'HEAD'), 'utf8')) || [])[1] || null; } catch { defaultBranch = null; }
     if (!defaultBranch) defaultBranch = ['main', 'master'].find(name => hasRef(dirs.common, `refs/remotes/${remoteName}/${name}`)) || null;
   } else defaultBranch = ['main', 'master'].find(name => hasRef(dirs.common, `refs/remotes/origin/${name}`)) || null;
-  return { default: defaultBranch, current, store: /TRANSPORT-[^/\s]*?(?:\.git)?\/?$/i.test(String(url || '')) };
+  const named = /TRANSPORT-[^/\s]*?(?:\.git)?\/?$/i.test(String(url || ''));
+  return { default: defaultBranch, current, store: named || (remoteName === 'origin' && evidenceStoreAt(root, registryOptions)) };
+}
+
+// Whether the governance state names the repository at `root` an evidence store (rule S1). A state
+// that cannot be read is not one.
+function evidenceStoreAt(root, registryOptions = {}) {
+  try { return governance.governanceState(root, registryOptions).rule === 'S1'; } catch { return false; }
 }
 
 const PUSH_VALUE_OPTIONS = new Set(['--repo', '--receive-pack', '--exec', '-o', '--push-option', '--signed']);
 
-// The refusal for a git push in one segment, or ''.
-function pushRefusal(words, cwd) {
+// The refusal for a git push in one segment, or ''. `variables` holds what earlier segments of the
+// same command assigned (assignmentOf).
+function pushRefusal(words, cwd, { registryOptions = {}, variables = new Map(), shell = null } = {}) {
   let index = 0;
   let root = cwd;
   while (index < words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[index])) index += 1;
@@ -395,7 +406,7 @@ function pushRefusal(words, cwd) {
   index += 1;
   while (index < words.length && words[index].startsWith('-')) {
     const option = words[index];
-    if (option === '-C' && index + 1 < words.length) root = shellPath(root, words[index + 1]);
+    if (option === '-C' && index + 1 < words.length) root = shellPath(root, folderWord(words[index + 1], variables, shell));
     index += GIT_VALUE_OPTIONS.has(option) ? 2 : 1;
   }
   if (words[index] !== 'push') return '';
@@ -409,7 +420,7 @@ function pushRefusal(words, cwd) {
     if (!word.startsWith('-')) positional.push(word);
   }
   const remote = positional[0] || 'origin';
-  const target = pushTarget(root, remote);
+  const target = pushTarget(root, remote, registryOptions);
   if (!target || target.store || !target.default) return '';
   const refspecs = positional.slice(1);
   const branchOf = (name) => {
@@ -607,7 +618,7 @@ function judge(merge, approvals, standing = null) {
 
 // A refusal for a shell command that could make an approval without the user, or merges outside
 // what an approval can allow; '' when there is none.
-function shellRefusal(text, cwd) {
+function shellRefusal(text, cwd, registryOptions = {}, shell = null) {
   if (STATE_WORDS.test(text)) return refuse('Toolkit\'s user-state files (merge approvals and governance decisions) and its session variable must be read and changed only by Toolkit itself. Never act as the user.');
   if (OWNER_LABEL_WORD.test(text) && GITHUB_CLIENT.test(text)) return refuse(OWNER_LABEL_TEXT);
   if (HOOK_FEED.test(text) && FEED_WORDS.test(text)) return refuse('a merge approval must come from the user\'s own typed message, so commands that load Toolkit\'s hook scripts or feed them a prompt are refused.');
@@ -629,9 +640,12 @@ function shellRefusal(text, cwd) {
     }
   }
   let root = cwd;
+  const variables = new Map();
   for (const words of parts) {
-    if (/^(?:cd|pushd|chdir|set-location|sl)$/i.test(words[0]) && words.length >= 2) { root = shellPath(root || process.cwd(), words[words.length - 1]); continue; }
-    const reason = pushRefusal(words, root || process.cwd());
+    const assigned = assignmentOf(words);
+    if (assigned) { assignVariable(variables, assigned); continue; }
+    if (/^(?:cd|pushd|chdir|set-location|sl)$/i.test(words[0]) && words.length >= 2) { root = shellPath(root || process.cwd(), folderWord(words[words.length - 1], variables, shell)); continue; }
+    const reason = pushRefusal(words, root || process.cwd(), { registryOptions, variables, shell });
     if (reason) return refuse(reason);
   }
   return '';
@@ -655,7 +669,8 @@ function standingAnswer(input, cwd, { environment, registryOptions, now }) {
 }
 
 // The PreToolUse decision: { deny } or null.
-function decide(input, { registryOptions = {}, now, environment = process.env } = {}) {
+// `host` is the hook's own host ('claude' or 'codex'), set by the entry point, never read from the payload.
+function decide(input, { registryOptions = {}, now, environment = process.env, host = null } = {}) {
   const tool = String(input && (input.tool_name || input.toolName) || '');
   let merges;
   let cwd = input && typeof input.cwd === 'string' ? input.cwd : null;
@@ -679,7 +694,8 @@ function decide(input, { registryOptions = {}, now, environment = process.env } 
     // shared reader), so a quoted program path such as `C:\Program Files\GitHub CLI\gh.exe` cannot
     // hide a merge. A merge both readings find counts once.
     const joined = call.joinedWords && call.joinedWords !== call.text ? call.joinedWords.replace(/[\\`^]\r?\n/g, ' ') : '';
-    const refusal = shellRefusal(joined ? `${text}\n${joined}` : text, cwd);
+    // An unknown shell is judged under each reading (shellReadings); the first refusal stands.
+    const refusal = shellReadings(shellOf(input, host)).map(shell => shellRefusal(joined ? `${text}\n${joined}` : text, cwd, registryOptions, shell)).find(Boolean);
     if (refusal) return refusal;
     merges = shellMerges(text, cwd, environment || {});
     if (joined) {

@@ -1,8 +1,0 @@
-# Web Controller for Claude Projects: skill card
-
-Brief for a skill card thread, the one way the account copy of the `web-controller-projects` skill is brought current from Toolkit. A thread with no skill loaded follows it by downloading this file from Toolkit `main`. The Toolkit plugin's skill card hook refuses any card for this skill that does not carry main's SKILL.md exactly.
-
-1. **One job.** This is a fresh cloud thread that sends this card and nothing else. The card is never built by a helper, subagent or Agent worker, never by the coordinator, and its text is never retyped or summarised.
-2. **Download and check.** Download main's raw `repo/contracts/claude-projects/web-controller-projects/SKILL.md` from the Toolkit repository to scratch (a fresh download, never a local branch). Print its byte size, sha256 and Version line, then check: the frontmatter `name` is `web-controller-projects`; it holds no `&lt;`, `&gt;`, `&amp;` or `&quot;`; it holds no CR. If any check fails, stop and report it.
-3. **Send.** Read the file in this session and call `propose_skills` (ToolSearch) with one proposal: kind `improvement`, name and target `web-controller-projects`, description copied from the file's frontmatter, and `skillMd` the file text exactly as read.
-4. **Report.** Post one line: Version, bytes, sha256, card posted, tap Save. If `propose_skills` does not exist in this session, or it is refused twice, report `card failed: <reason>` instead; the coordinator then gives the owner the hand-upload step. Never resolve this thread: a resolved thread hides the card, and the coordinator resolves it once a check-in shows the account copy current.

@@ -78,22 +78,36 @@ Claude Code (rows refer to the launch matrix in `repo/tests/support/claude-helpe
 | Route proof | Served model and effort from Claude Code's run records (subagent transcript and `.meta.json`), never the helper's report (the matrix's live rows) |
 | Known limit | A session `--agents` definition of a helper name outranks the files and no hook sees it (a matrix row); Toolkit launchers refuse it with `toolkit-claude-session-agents.cjs` |
 
-## 7. Lane write fences
+Codex (hook-process cases in `repo/tests/qualification/codex-native-helper.live.cjs`; stored results in `repo/contracts/host-qualification/codex.json`; the helper policy is in `repo/scripts/toolkit-codex-helper-policy.cjs`; the [Bridge's hook policy](TOOLKIT-LOCAL-BRIDGE.md#hook-policy) has the detail):
+
+| Need | How Codex meets it |
+|---|---|
+| Hook event | `PreToolUse` with matcher `^(?:Agent\|[A-Za-z0-9_-]*spawn_agent\|Bash\|exec_command\|shell\|local_shell\|PowerShell)$`, from the plugin's `hooks.json`. The spawn part covers V1 (`multi_agent`) `spawn_agent` and V2 (`multi_agent_v2`) `<namespace>spawn_agent` |
+| Blocking output | JSON `permissionDecision: "deny"` with a plain reason, the reason on stderr and exit 2. An allowed launch exits 0 with no output, because Codex records a bare allow as a failed hook run, so Codex's own permissions still apply |
+| Failure and timeout | Codex does not block when a hook cannot start, crashes, exits with another status or times out, or is missing, disabled or untrusted. The decision modules load inside the guarded path, so a broken module denies in governed work. On Windows the PowerShell launcher denies a helper launch when it cannot start Node |
+| Trust step | Codex skips a plugin hook until it is reviewed and trusted in `/hooks`. A changed hook needs trusting again, and setup says so |
+| Helper definitions | `toolkit-g0-helper.toml` and `toolkit-g1-helper.toml` in `<CODEX_HOME or ~/.codex>/agents`, rendered from the pinned stack by `toolkit-codex-helper-agents.cjs`. In governed work, every copy Codex could load (each `.codex/agents` folder from the working folder up to the repository root, and the user folder) must byte-match the rendered file |
+| Admission | In governed work only those two helpers launch. The hook refuses built-in agents, a launch that names no agent, model or effort fields, resume, a V1 `fork_context: true`, a V2 launch whose `fork_turns` is not `none`, and any launch in a G2 session |
+| Depth | Setup keeps V1 `max_depth = 1`. Codex sends hooks no caller-agent identity, so the hook cannot refuse a helper that launches another helper, and leaf depth stays an instruction |
+| Route proof | Served model and effort from the Codex session log, read by the lead, never the helper's report |
+| Known limit | Hook failures fail open (above). In Codex Desktop on Windows, a helper's shell can hit "Requested registry access is not allowed" (Desktop's sandbox for subagents, seen in October 2026) |
+
+## 7. Gate workspace
+
+A writing gate works only inside its own session's writable folders, so the owner's plan approval never needs a second yes in the gate chat.
+
+- **Codex Desktop:** a chat can write in its working folder and in any worktree attached to that chat. A controller starts a builder with `create_thread` and `environment: { type: "worktree" }`, or the builder's first step makes its worktree with `create_worktree`. Either way the worktree becomes the chat's working folder and writable folder (session logs and an owner test, October 2026): a write inside it runs with no prompt, and a write one folder above it is refused by the sandbox. In those chats PowerShell could not start ("Requested registry access is not allowed"), so the builder used `cmd`. A chat started with `environment: { type: "local" }` writes only in the project's main checkout.
+- **Where they live:** Codex Desktop, not Toolkit, places these worktrees, in its own worktrees folder (seen as `_worktrees/<name>/<repository>` beside the repositories, October 2026), not in `.tmp/worktrees`. After the lane's PR merges, the controller removes it with Codex's `archive_worktree`, which saves a recoverable snapshot first, and keeps a worktree that tool refuses or that still holds unmerged work, reporting it.
+- **Never point a chat at another folder.** A chat told to escalate its shells into a folder outside its own sends every write to Codex's automatic reviewer, which trusts only what the owner typed in that chat and rightly refuses an approval forwarded from the controller. Rewording or retrying after that refusal routes around the reviewer.
+- **Scratch:** a Codex gate keeps scratch in its worktree's ignored `.tmp/`, because a user-profile folder is outside the chat's folders.
+- **Known limit:** Codex cannot attach an existing worktree to a new chat (seen October 2026), and starting a successor from a lane branch still checked out in the old worktree is not yet qualified. Until it is, a successor continues in the old chat, or the owner approves its out-of-scope writes with Codex's native approval in the chat that asks.
+
+## 8. Lane write fences
 
 The integration controller alone writes the parent, the version files and the integration files the lane map names (`repo/contracts/lanes/lane-map.json` once it lands). A lane controller writes only the child the catalogue delegates to it (`assign` and `interrupt`), with its own decision-ID prefix.
 
-## 8. Honest limits
+## 9. Honest limits
 
 - The fence orders cooperating Toolkit writers under one GitHub account; it authenticates nobody.
 - The tool cannot see whether another host session has stopped. A takeover record must carry that evidence (session archived, remote control ended).
 - A journal is evidence, not state, until the controller's reconcile reads it.
-
-## Continuation admission
-
-Claude Code's governance `PreToolUse` hook and Codex's helper hook use the same `ToolGate` continuation decision. Both envelopes can contain shell commands for either CLI. The hook's `cwd` remains the current-repository guard; a shell's explicit `workdir` or `cwd` is also checked as its execution directory. Neither a caller's `session_id` nor a claimed target field proves another session's repository.
-
-The [Bridge's hook policy](TOOLKIT-LOCAL-BRIDGE.md#hook-policy) describes which continuation commands Toolkit can verify and which it refuses. A successful source check returns no permission decision: Claude emits an empty object, Codex emits no stdout and exits zero. A denial retains Claude's deny JSON and Codex's deny JSON with exit two. Owner-answer, card, epoch, attribution and native helper transition controls remain independent.
-
-The shared reader looks only where a shell runs a program: the command word, wrapper targets, shell scripts, `eval` and `iex` text, substitutions, groups, script blocks, interpreter scripts, option values some programs run, and text held in variables or written to a file earlier in the same command. Arguments are data. It reads the text under every shell that may run it and refuses what it cannot finish reading when host letters and a selector appear. It never supplies native arguments, target directories or permission, and all current-repository and reached-path guards still inspect the original request first.
-
-Synthetic stdin tests exercise both source entrypoints with disposable homes, repositories and metadata, without executing a continuation or touching an installed plugin. These tests establish source behaviour and non-mutation only. Native dispatcher, hook trust, installed cache, desktop entrypoints and installed qualification remain separate host obligations; a source result does not replace them. Portable-only hosts gain no native continuation support.

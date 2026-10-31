@@ -70,6 +70,70 @@ function absoluteShellPath(value, { platform = process.platform } = {}) {
   return (platform === 'win32' ? /^(?:~(?:[\\/]|$)|[\\/]|[A-Za-z]:[\\/])/ : /^(?:~(?:\/|$)|\/)/).test(String(value));
 }
 
+// A variable a command segment assigns a literal to, as [key, value]: PowerShell `$name = 'value'`,
+// whose names ignore case, or POSIX `name=value`, whose names keep it (`D` and `d` are two variables).
+// Anything else is null.
+function assignmentOf(words) {
+  if (words.length === 3 && /^\$[A-Za-z_][A-Za-z0-9_]*$/.test(words[0]) && words[1] === '=') return [`ps:${words[0].slice(1).toLowerCase()}`, words[2]];
+  const posix = words.length === 1 ? /^([A-Za-z_][A-Za-z0-9_]*)=(?:"([^"$`]*)"|'([^']*)'|([^\s"'$`]*))$/.exec(words[0]) : null;
+  return posix ? [`sh:${posix[1]}`, posix[2] ?? posix[3] ?? posix[4]] : null;
+}
+
+// Leading home variables: `$HOME` (`${HOME}` too) is the home folder in bash and PowerShell alike;
+// `$env:USERPROFILE`, `$env:HOME` and `%USERPROFILE%` only in PowerShell and cmd. Bash reads `$env` as
+// an unset variable, so such a word is not the home folder there.
+const HOME_EVERYWHERE = /^(?:\$HOME|\$\{HOME\})(?=$|[\\/])/;
+const HOME_WINDOWS = /^(?:\$env:USERPROFILE|\$env:HOME|%USERPROFILE%)(?=$|[\\/])/i;
+
+// Records an assignment (assignmentOf) in `variables`, noting a name assigned more than once.
+function assignVariable(variables, [key, value]) {
+  variables.set(key, { value, reassigned: variables.has(key) });
+}
+
+// A folder word as the shell would read it: a whole-word variable the same command assigned earlier,
+// and a leading home variable as `~` (shellPath resolves it). Names are read only as the shell that
+// runs the command reads them (`shell`: 'posix' or 'powershell', from shellOf): a POSIX name in its
+// exact case, a PowerShell name in any case, the last assignment winning. When the shell is not known
+// (null), a name assigned in both forms or more than once is left unread, so the folder stays the
+// literal word and the check fails closed; and the caller also judges the command a second time with
+// `shell` 'unset' (shellReadings), where every assigned name reads as empty, as it does in the shell
+// that cannot run the assignment, so the folder is the one the command is already in. The home
+// variables follow the same shells: a Windows-only one is the home folder in PowerShell and in the
+// unknown reading, a literal word in bash, and empty in the 'unset' reading.
+function folderWord(word, variables, shell = null) {
+  const name = /^\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))$/.exec(word);
+  let value = word;
+  if (name) {
+    const posix = variables.get(`sh:${name[1] || name[2]}`);
+    const power = variables.get(`ps:${(name[1] || name[2]).toLowerCase()}`);
+    if (shell === 'posix') value = posix ? posix.value : word;
+    else if (shell === 'powershell') value = power ? power.value : word;
+    else if (shell === 'unset') value = posix || power ? '' : word;
+    else {
+      const found = [posix, power].filter(Boolean);
+      if (found.length === 1 && !found[0].reassigned) value = found[0].value;
+    }
+  }
+  value = String(value).replace(HOME_EVERYWHERE, '~');
+  if (HOME_WINDOWS.test(value)) {
+    if (shell === 'unset') return '';
+    if (shell !== 'posix') value = value.replace(HOME_WINDOWS, '~');
+  }
+  return value;
+}
+
+// The readings a check judges a command under: the known shell, or for an unknown one both the
+// variables as assigned and the variables as unset. A check refuses when any reading refuses.
+function shellReadings(shell) { return shell ? [shell] : [null, 'unset']; }
+
+// The shell a call runs in, when the host says: Claude Code's Bash tool runs bash and its PowerShell
+// tool PowerShell. Codex names no shell (its Bash tool may run PowerShell on Windows), so it is null.
+function shellOf(input, host) {
+  if (host !== 'claude') return null;
+  const tool = input && (input.tool_name || input.toolName);
+  return tool === 'Bash' ? 'posix' : tool === 'PowerShell' ? 'powershell' : null;
+}
+
 function programName(word) {
   return path.win32.basename(path.posix.basename(word)).replace(/\.exe$/i, '').toLowerCase();
 }
@@ -188,4 +252,4 @@ class ShellCall {
   }
 }
 
-module.exports = Object.freeze({ SHELL_TOOL_NAMES, SHELL_TOOLS, UNREADABLE, ShellCall, absoluteShellPath, argvText, quoteWords, shellPath });
+module.exports = Object.freeze({ SHELL_TOOL_NAMES, SHELL_TOOLS, UNREADABLE, ShellCall, absoluteShellPath, argvText, assignVariable, assignmentOf, folderWord, quoteWords, shellOf, shellPath, shellReadings });

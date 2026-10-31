@@ -1,5 +1,80 @@
 # Toolkit Changelog
 
+## 3.26.1
+
+### Changed
+
+- Gate rules: a writing gate's session opens in the folder it writes, never told to escalate its shells into another folder.
+- Host contract: a new gate workspace section says how Codex Desktop gives a builder chat its own writable worktree (`create_thread` with a worktree environment, or `create_worktree` from the builder), why a forwarded approval is refused by Codex's automatic reviewer, where Codex gates keep scratch, and the known limit for successors in an existing worktree.
+
+## 3.26.0 (the coordinator reads the latest Projects skill)
+
+### Projects guidebook
+
+- **Added:** `repo/scripts/toolkit-projects-guidebook.cjs`. `--out <folder>` copies the Projects controller skill (SKILL.md, its `reference/` and `tasks/` files) into a folder, writes `instructions-block.md` (main's project-instructions block with its real marker), then writes a one-line `VERSION` last and reads every file back. It prints `SKILL COPY REFRESHED <Version>`, plus `BLOCK CHANGED <version>` when the block changed, or `SKILL COPY FAILED <reason>`. `--check <folder>` only compares. It removes files a newer skill dropped and folders left empty, and it claims a folder only when its `VERSION` is in the exact format or its block file starts with the real marker, so it never takes over a folder it did not write.
+- **Changed:** the Projects coordinator's runtime loads no account skills, so the skill now reaches it as that copy in the project library, `/mnt/project-files/toolkit/web-controller-projects/`. The project-instructions block gains one guidebook line: read `VERSION` every turn, read `SKILL.md` when that Version is new to the session, start a refresh thread when the copy is missing or older than the block, and replace the block with `instructions-block.md` only when a refresh from a fresh clone of main reports `BLOCK CHANGED` that turn, never on its own comparison of the library files. The skill adds that the guidebook never relaxes the safety floor or the owner's instructions. The block's size limit rose to 5,600 bytes for that line.
+- **Changed:** the hourly nudge checks the copy against a fresh clone of main every run, so a stray write to the folder is caught within the hour, and refreshes a stale or changed copy itself, reporting `BLOCK CHANGED` or `SKILL COPY FAILED` on its first line. The daily check-in is the backstop: it refreshes a copy still stale two hours after main changed, or when the nudge is stopped or not armed, and reports `GUIDEBOOK MISSING` or `SKILL COPY STALE`. Its `SKILL UPDATE` now compares the copy's Version with the one on the BINDING line.
+- **Changed:** the merge step's closing checklist carries "coordinator: refresh the guidebook", and setup reads the guidebook before step 1.
+- **Removed:** the skill card route for the account copy of the Projects skill: the skill card thread brief (`reference/skill-card.md`), the check-in's `SKILL DRIFT`, `SKILL BEHIND` and `SKILL CARD` steps, the coordinator's card, Save and re-upload handling, and the account-copy setup inventory row. They kept an account copy current that the coordinator never loads.
+
+## 3.25.0 (Codex host contract)
+
+### Host contract
+
+- The host contract now has a Codex helper table next to the Claude Code one: hook event, blocking output, failure and timeout, trust step, helper definitions, admission, depth, route proof and known limits.
+- The first stored Codex helper result is in `repo/contracts/host-qualification/codex.json`: on Codex Desktop on Windows, the G1 helper served its pinned model and effort, and the hook refused a built-in agent and a model override.
+
+### Codex qualification runner
+
+- The unbound-launch cases now match the helper-launch rule: in governed work with no launcher binding, a named helper with no installed file is refused and one that matches the stack is admitted. They run against a scratch Codex home, so real helper files never decide them.
+
+## 3.24.0 (your keys in Notepad, with every save kept)
+
+### toolkit env
+
+- **Changed:** `toolkit env edit` opens your keys in Notepad as `NAME=value` lines with their real values, like a `.env` file, in your saved order with your comment lines. Change a value, add a line, or delete a line to remove that key, then save: a small helper started with the file applies each save within a few seconds. Saying "done" (or `apply`) applies a save not applied yet, deletes the file and lists what was changed, added and removed, by name only. Deleting a line no longer needs a separate `remove`.
+- **Safer saves:** a save is applied whole or not at all. Nothing is saved, and a `# Status:` line at the top of the file says why, for an unreadable line, a blank value, a key name used twice, a quoted value, a UTF-16 save, a save that would remove every key, or keys changed elsewhere while the tab was open, including straight in Credential Manager. A key added elsewhere during the edit is never removed. A value one line cannot show exactly appears as `<kept: change it with toolkit env set NAME>` and stays as it is.
+- **Fixed:** a second edit reused an open edit file younger than 30 minutes without refreshing it, so it could show a key you had removed. Every edit now writes a fresh file from the store and wipes the earlier one; a save from an older Notepad tab is ignored and wiped, and the result says to use the newest tab. Edit files of earlier versions are wiped, never applied.
+- **New:** every "done" says to close the Notepad tab without saving, because Notepad can keep its own copy of an open tab and bring it back, and how to stop that for good ("Start new session"). The file is deleted 30 minutes after its last save if "done" never comes.
+
+### Skill
+
+- The `toolkit-env` skill opens Notepad whenever you want to see or change your keys, in any words, keeps `status` for names-only questions, and tells agents never to open, read or search the edit file.
+
+## 3.23.0 (hooks keep only the checks that stop real damage)
+
+### Hooks cut down
+
+- **Fixed:** shell commands that only name Claude or Codex next to a yes, no or ok, or next to a resume or fork word, are no longer refused as a governance answer or a session resume. This covers metadata saves (`--host claude --tracking yes`), summary reads (`head -c`, `grep -rn` and pipes over `.claude` and `.codex` folders), heredoc and here-string writes, SSH reads and loops over file names, in every folder that is not waiting for its governance answer.
+- **Removed:** the short-answer launch reader, the session resume and fork reader (`toolkit-governance-continuation.cjs`) and the question asked from a parent folder for repositories a command reaches. A command or edit that works in a waiting repository from another folder is still refused, and the user answers in that repository's own chat. A session another session started, or a resumed run, still cannot answer, and the governance CLI with a decision and edits to Toolkit's user-state files are still refused everywhere.
+- **Removed:** the gate route hook and the skill card hook. The Projects skill keeps both rules as written rules: a gate launch passes its pinned route and the gate's start record is the proof, and a skill card carries main's SKILL.md exactly.
+- **Removed:** the Projects post hook (post layout, wording, links and the one running post). The coordinator it was written for runs where Toolkit's hooks do not, so it only ever checked Remote Control threads. The Projects skill keeps every post rule as a written rule, and finds the running post by reading the newest page of the chat instead of a `RUNNING POST:` line in project memory, which kept getting rewritten.
+- **Removed:** the shell hook no longer refuses commands that skip a repository's commit or push checks (`--no-verify`, `core.hooksPath`), and the push check no longer refuses plain-text findings. Both are written rules now, with CI as the gate. The force-push, default-branch, merge, attribution and credential checks are unchanged.
+- **Changed:** the Projects project instructions block now carries the post rules (find the running post in the chat, the post layout, and problem, fix and skip first), since the coordinator does not load the Projects skill. The block's size limit rose to 5,000 bytes.
+- **Fixed:** in Codex, a push from a repository with other working trees elsewhere (sibling worktrees) is no longer refused as "Codex did not say which folder". Only working trees the chat's folder can reach count: the one holding it and any nested below it, since Codex Desktop refuses a workdir outside the chat's folder.
+- **New:** the hook design playbook (`repo/docs/agent-playbooks/hook-design.md`) says when a hook is allowed, that it checks an exact effect and never guesses intent from text, and that every hook carries must-pass rows for ordinary commands as well as must-refuse rows.
+
+### Evidence stores and scratch clones are never governed
+
+- **Fixed:** a clone of an evidence store (such as a `TRANSPORT-*` repository) was treated like any undecided github.com repository: Toolkit asked the governance question there, held every prompt and tool (Claude Projects posting included), and a "yes" recorded it as ENABLED. A repository that a programme binding cached on this computer names as its evidence store is now DISABLED automatically: never asked, never held, and `enable` is refused. A `TRANSPORT-*` repository under the owner of such a binding's repository counts too, so a fresh clone on a new computer is not asked either. A binding merged in the store's own repository still decides.
+- **Scratch clones:** a clone of another repository inside the ignored top-level `.tmp/` folder of a repository whose governance is decided is DISABLED automatically. A worktree of that repository itself keeps its state.
+- **Recorded decisions:** an "enable" recorded earlier for a store or scratch clone decides nothing; `status` and `check` show it with the one command that clears it.
+- **Discover:** reports a store or scratch clone as not applicable, and never proposes a repository as its own evidence store.
+- **Default-branch push guard:** a push to an evidence store that a cached binding names is not refused, whatever its name. The guard also reads a folder named through a variable the same command assigned (`$d = 'C:\path'; git -C $d push`, `d=/path; cd "$d"`) and a leading home variable (`$env:USERPROFILE`, `$HOME`), so it judges the repository the push really comes from.
+- **Held repositories in Claude Projects:** a thread can still post, react, update its checklist or end its turn in a held repository, so it can ask the owner the governance question. Its decision cards and every other tool stay held.
+
+### A controller creates its gate chats without asking
+
+- **Changed:** appointing a controller now counts as the owner's explicit request to create every gate session the controller procedure launches (G0, G1, G2, rechecks and their follow-ups) and to archive each once its evidence is stored and read back. A controller no longer asks before each one, including on hosts that create a chat only when the user asks (Codex `create_thread`, Claude Code desktop sessions). The controller procedure says so; a controller binds it on appointment, before its first launch. A new model or route, spend and anything on the safety floor still need the owner.
+
+## 3.22.0 (plans and asks open with the problem, the fix and the cost of skipping)
+
+### Projects skill
+
+- **New rule:** every plan, G0 plan, decision ask and explanation, from the coordinator and from every thread, opens with three lines: **The problem:** (one plain sentence on what goes wrong for the owner), **The fix:** (what would be built, in everyday words) and **If we skip it:** (what happens if nothing is done). The owner can then turn work down before it is built or reviewed.
+- **Where the lines go:** first in a plan, a decision card and a reply. In a running post the **Now:** line stays first and the lines sit under it, or under the question they belong to, before its choices. Plain status lines and a later reminder of the same ask need none.
+- **Threads:** every brief passes the rule on, and a G0 brief asks for it at the top of the plan. The managed project-instructions block is unchanged.
+
 ## 3.21.0 (a hook test pack every hook change must pass)
 
 ### Hook test pack

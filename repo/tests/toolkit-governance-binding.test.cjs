@@ -680,7 +680,7 @@ test('F7: programme commands refuse a stale or unusable merged binding and use o
 
 test('F7: the attribution guard and the bridge keep their protection on ERROR, and drop it only when DISABLED', (t) => {
   const ctx = scratch(t);
-  const { bypassRefusal, BYPASS_MESSAGE } = require(path.join(scripts, 'toolkit-attribution-guard.cjs'));
+  const { forceRefusal, FORCE_MESSAGE } = require(path.join(scripts, 'toolkit-attribution-guard.cjs'));
   const bridge = require(path.join(scripts, 'toolkit-local-bridge.cjs'));
   const error = fakeRepo(ctx, 'guard-error');
   cache(ctx, error, { text: '{bad' });
@@ -689,7 +689,7 @@ test('F7: the attribution guard and the bridge keep their protection on ERROR, a
   const off = fakeRepo(ctx, 'guard-off');
   cache(ctx, off, { binding: { schema: 'toolkit.programme-binding.v2', repository: SLUG, governance: 'disabled' } });
   for (const [repo, protectedHere] of [[error, true], [stale, true], [off, false]]) {
-    assert.equal(bypassRefusal('git commit -n -m x', repo, 0, ctx.opts), protectedHere ? BYPASS_MESSAGE : '', path.basename(repo));
+    assert.equal(forceRefusal('git push --force origin main', repo, 0, ctx.opts), protectedHere ? FORCE_MESSAGE : '', path.basename(repo));
     assert.equal(bridge.governanceEnabledAt(repo, ctx.opts), protectedHere, path.basename(repo));
   }
 });

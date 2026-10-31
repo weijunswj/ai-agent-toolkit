@@ -49,8 +49,7 @@ function promptEvent(input) {
 // `notes` collects what a shell check could not check, for the caller to show the user.
 async function decide(input, environment = process.env, { notes } = {}) {
   let governanceDenial;
-  // Codex gives no shell in its payload and may run either shell, so commands keep both readings.
-  try { governanceDenial = new (gate().ToolGate)({ host: 'codex' }).decide(input || {}); } catch {
+  try { governanceDenial = new (gate().ToolGate)().decide(input || {}); } catch {
     governanceDenial = insideRepository(input?.cwd) ? { deny: `Toolkit: the governance check failed, so nothing runs in this repository until it works again. ${NEVER_OWNER}` } : null;
   }
   if (governanceDenial) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: governanceDenial.deny } };
@@ -58,7 +57,7 @@ async function decide(input, environment = process.env, { notes } = {}) {
   const mergeDenial = mergeDecision(input);
   if (mergeDenial) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: mergeDenial.deny } };
   // Shell commands, under any of the shell tool names Codex may report: refuse AI attribution in
-  // commits and pull requests, skipped checks, force pushes and pushes that carry a credential.
+  // commits and pull requests, force pushes and pushes that carry a credential.
   // Codex's top-level cwd is the chat's folder, which may not be where a call with no workdir runs.
   if (require('./toolkit-shell-call.cjs').ShellCall.isShellTool(input?.tool_name)) return require('./toolkit-attribution-guard.cjs').attributionDecision(input, { notes, sessionFolderOnly: true });
   const state = governance(input, environment);

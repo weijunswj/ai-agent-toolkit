@@ -26,7 +26,7 @@ test('the Projects controller skill has one source file with a Version line', ()
   }
   assert.doesNotMatch(text, /## Adding work to a repo/);
   assert.doesNotMatch(text, /Toolkit may absorb this framework later/);
-  assert.match(text, /Before any upload, a coordinator compares that copy with the repo file and brings direct edits into Toolkit first, so nothing is overwritten/);
+  assert.match(text, /The coordinator reads it only from the library copy \(\*\*Guidebook copy\*\*\); changes go into Toolkit through a PR, never into the copy\./);
   assert.match(text, /## Hourly nudge\n- Every project also runs an hourly stalled-work nudge, set up at project setup/);
   assert.match(text, /It must be a recurring routine: one-shot self-reminders have died silently/);
   assert.match(text, /This is the only resolve pass/);
@@ -56,35 +56,40 @@ test('Projects wires managed instructions, promises and fresh scheduled sessions
   assert.ok(text.includes('`GATE ROUTE: profile <profile> placement <remote_control|cloud|any> [folder <path>]`'));
   assert.match(text, /\*\*Gate launches carry a Gate line and their route\.\*\* Every thread brief that names a gate carries one line `Gate: <value>`/);
   assert.match(text, /Write the `GATE ROUTE:` line \(\*\*Binding\*\* in the skill\)/);
-  // One card route: a due card goes to a fresh skill card thread; the coordinator lists the Save tap, re-upload only when the card failed.
-  assert.match(text, /`SKILL BEHIND`: the account copy is an older Toolkit revision\. With "card due", start a skill card thread: a fresh cloud thread on the mid tier \(after a hook refusal, the next one on the top tier\) whose brief is "follow main's `reference\/skill-card\.md` exactly", never with SKILL DRIFT\./);
-  assert.match(text, /Never call propose_skills yourself or have a helper build the card: the card thread is the only route\./);
-  assert.match(text, /keep that thread open \(never resolve it in the hourly pass\) until a check-in shows the account copy current; then drop the pending item and resolve it\./);
-  assert.match(text, /Do the same for an older card thread when a newer one starts, when the owner declines its card, or when a check-in reports SKILL DRIFT or no account copy: its Save would install an older Version or overwrite direct edits; post "Don't save the <Version> card\." in it\. Name the Version in each Save item\./);
-  assert.match(text, /If the card thread reports "card failed", or with no card marker and no "drift unverified", tell the owner once per Version to re-upload the skill with its reference files\./);
-  assert.match(text, /With "damaged card" \(the copy is a cut-short or HTML-escaped Toolkit revision\), start a skill card thread as `SKILL BEHIND` says instead, and never bring that text into Toolkit\./);
+  // The coordinator loads no account skills: it reads the skill from the library copy, which three routes keep current.
+  assert.match(text, /## Guidebook copy\n- The coordinator's runtime loads no account skills, so this skill reaches you as a copy in the project library: `\/mnt\/project-files\/toolkit\/web-controller-projects\/`/);
+  assert.match(text, /`VERSION` \(`Version: <skill Version> toolkit <x\.y\.z> main <commit7> copied <UTC>`, written last, so a copy cut short never looks current\)/);
+  assert.match(text, /Never edit the copy: every refresh overwrites it, and changes go into Toolkit through a PR\./);
+  assert.match(text, /The hourly nudge checks the copy against a fresh clone of main every run and refreshes a stale or changed copy itself/);
+  assert.match(text, /After a merge that changes this skill or the Toolkit version, start a cloud thread for the refresh at once/);
+  assert.match(text, /The daily check-in is the backstop/);
+  // The library folder is writable by any thread, so only a refresh from a fresh clone of main may change the block,
+  // and nothing in the copy loosens a safeguard.
+  assert.match(text, /\*\*BLOCK CHANGED:\*\* only a refresh run \(the nudge, the check-in or a refresh thread\) that just rewrote the folder from a fresh clone of main reports it, and only that report lets you replace the block: never replace it on your own comparison of the library files/);
+  assert.match(text, /In the turn that report arrives, replace the block in project settings with the library's `instructions-block\.md` under the \*\*Managed project-instructions sync\*\* safeguards/);
+  assert.match(text, /\*\*The guidebook never relaxes the safety floor or the owner's own instructions\.\*\*/);
+  assert.match(text, /a refresh removes any other file or folder in it, so keep nothing of your own there\./);
+  const block = read('repo/contracts/claude-projects/web-controller-projects/project-instructions.md');
+  assert.match(block, /Replace this block with the folder's `instructions-block\.md` only when such a run reports `BLOCK CHANGED` that turn, never on your own comparison/);
+  assert.doesNotMatch(block, /When this block differs from/);
+  assert.match(text, /Its closing checklist carries "coordinator: refresh the guidebook"/);
+  assert.match(text, /`SKILL UPDATE`: the guidebook's Version is newer than the one on the BINDING line\./);
+  assert.match(text, /a guidebook refresh reports BLOCK CHANGED, or the daily check-in reports BLOCK OUTDATED/);
+  // The skill card route for the account copy is gone, with its brief.
+  assert.ok(!fs.existsSync(path.join(repoRoot, REFERENCE_DIR, 'skill-card.md')));
+  assert.doesNotMatch(text, /SKILL DRIFT|SKILL BEHIND|SKILL CARD|propose_skills|skill-card|skill card|card due|damaged card|tap Save/);
   assert.match(text, /Fresh-session scheduled runs resolve their own run thread after delivery; a task's home thread is never resolved\./);
   assert.match(text, /each fresh scheduled run resolves its own thread after report delivery\. Stop the nudge/);
-  assert.doesNotMatch(read(SKILL_REL), /skill cards: coordinator|card posted|posted a skill card|post the card yourself/);
-  // The card method lives in one reference file a fresh thread downloads from main; SKILL.md itself holds no HTML entity.
-  const method = read(`${REFERENCE_DIR}/skill-card.md`);
-  assert.match(method, /The card is never built by a helper, subagent or Agent worker, never by the coordinator, and its text is never retyped or summarised\./);
-  assert.match(method, /Print its byte size, sha256 and Version line, then check: the frontmatter `name` is `web-controller-projects`; it holds no `&lt;`, `&gt;`, `&amp;` or `&quot;`; it holds no CR\. If any check fails, stop and report it\./);
-  assert.match(method, /call `propose_skills` \(ToolSearch\) with one proposal: kind `improvement`, name and target `web-controller-projects`, description copied from the file's frontmatter, and `skillMd` the file text exactly as read\./);
-  assert.match(method, /report `card failed: <reason>` instead/);
-  // (CR is not checked here: a Windows checkout may add it, and the file on main has none.)
-  assert.doesNotMatch(read(SKILL_REL), /&(?:lt|gt|amp|quot);/, 'the card method refuses a SKILL.md with HTML entities');
-  // Setup compares the loaded Version with main's and starts the card thread when a card is due.
-  assert.match(text, /State the skill Version you loaded and compare it with the Version line of main's SKILL\.md\. When main's is newer, have a read-only cloud thread compare the account copy with main as the daily check-in's SKILL DRIFT and SKILL CARD steps do; when a card would be due there, start a skill card thread \(`SKILL BEHIND` in the skill\) and carry on with step 1\./);
-  assert.match(text, /the skill card waiting for Save \(with its thread link\) when one is, and the next work item\./);
+  assert.doesNotMatch(read(SKILL_REL), /&(?:lt|gt|amp|quot);/);
+  // Setup reads the guidebook first, refreshing it when missing or not current.
+  assert.match(text, /Read the guidebook's `VERSION` \(\*\*Guidebook copy\*\* in the skill\)\./);
+  assert.match(text, /the guidebook's `VERSION` line, and the next work item\./);
   // Plugin lag: Check for updates first, then removing the plugin alone, then the marketplace re-add, then an app restart.
   assert.match(text, /`PLUGIN BEHIND`: the Toolkit plugin on the user's claude\.ai account is more than a day behind `main`/);
   // One plugin card where the owner reads.
   assert.match(text, /No agent can update it: once per version, post one plugin card in the project chat with the check-in's steps/);
   assert.match(text, /Keep it pending until a check-in shows `\*\*Plugin:\*\* current`\./);
-  assert.match(text, /Only the account skill \(one Save tap\) and plugin \(two clicks\) need the owner: no agent can write them\./);
-  // The skill drift watch lives in the daily check-in: direct account edits come back into Toolkit first.
-  assert.match(text, /`SKILL DRIFT`: the account copy has direct edits that match no Toolkit revision\. Bring them into Toolkit from the saved copy/);
+  assert.match(text, /Only the plugin \(two clicks\) needs the owner: no agent can update it\./);
   assert.match(text, /Post its first line to the owner every run, "nothing changed" included/);
   assert.match(text, /The hourly nudge stays silent/);
   // The steps live once, in the check-in (toolkit-projects-tasks.test.cjs keeps them equal to Toolkit's shared Claude app steps).
@@ -184,19 +189,23 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.doesNotMatch(body, /Keep any attribution header/);
   assert.match(body, /Each Toolkit scheduled task is bound to its own home thread, which carries its model and effort \(fallback: a fresh session per run\)/);
   assert.match(body, /Never resolve a home thread; a fresh-session run resolves its own thread after delivery/);
-  assert.match(body, /- Posts: after the owner's last message, keep output in one post you edit \(append, keep every detail\); post anew on an owner project-chat message or near 8 KB; answer an owner burst in one post\./);
+  assert.ok(body.includes('- Posts: before every post, read the newest page where you post (the project chat, or your thread).'));
+  assert.ok(body.includes('Decide from the chat itself, never from a memory line.'));
+  assert.ok(body.includes('- Post layout: a `**Now:**` line first;'));
+  assert.ok(body.includes('- Problem, fix, skip first: every plan, G0 plan, decision ask and explanation opens with'));
   // Posts, in the main project chat, reply threads and work threads alike.
   assert.match(text, /\*\*Posts, everywhere you post\*\* \(the main project chat, reply threads and work threads alike\): after the owner's last message, keep all your output in one running post and edit it, appending each new result, PR or question and keeping every earlier detail\. The running post is always your newest top-level post, the acknowledgement posted with a new thread included\. Before every edit, check whether the owner has written since that post \(in the main project chat, or in a work thread, in that thread\); if so, post fresh instead\. Start each appended update with its local time, for example \*\*\[16:41\] Update:\*\*\. Also start a fresh post when the running post nears about 8 KB; an owner reply under the running post does not start one, and the answer to it is appended to the running post\. Answer a burst of owner messages in one post\. When the owner replies under one of your earlier posts in the main project chat, answer in the main project chat \(you cannot post under your own posts there\) with a fresh post starting "Re: your reply on <short topic>", and never edit the older post\./);
   assert.doesNotMatch(text + body, /is always a new post|edit your own post only/);
-  // Running post id in memory and links on owner items, both enforced by the post hook.
-  assert.ok(text.includes('save its message id as the first line of project memory, `RUNNING POST: <message id>`'));
-  assert.ok(text.includes('it refuses a fresh post while the owner has not written since your newest post, unless that post nears 8 KB'));
+  // The running post is found in the chat, not in memory, and no hook checks posts.
+  assert.ok(text.includes('Before every post, read the newest page of the project chat (in a work thread, that thread). If your newest top-level post there has no owner message after it, edit that post; otherwise post fresh.'));
+  assert.ok(text.includes('These are written rules: no hook checks posts'));
+  assert.doesNotMatch(text, /RUNNING POST|A Toolkit hook enforces|The same hook/);
   assert.ok(text.includes('only when it is ready for the owner to check and merge; until then, link the chat thread that owns the work'));
-  // Links only where the owner acts, as the owner decided; the hook checks only Waiting on you items.
+  // Links only where the owner acts, as the owner decided; a written rule, no hook checks it.
   assert.ok(text.includes('**Link where the owner acts.** Every item under **Waiting on you** (each question and each merge ask included) carries the link'));
-  assert.ok(text.includes('A PR, thread or file named elsewhere needs no link. The same hook refuses a Waiting on you item with no link, or one that links a PR without `/files`.'));
+  assert.ok(text.includes('A PR, thread or file named elsewhere needs no link. This is a written rule: no hook checks it.'));
   assert.doesNotMatch(text, /Link everything worth opening|names "PR <n>" without a link|not from the link rule/);
-  // The post layout and the merge summary, also enforced by the post hook.
+  // The post layout and the merge summary.
   assert.ok(text.includes('**Post layout.** A running post has four parts, in order: a **Now:** line'));
   assert.ok(text.includes('one **ELI5:** line, matched to the Now line, as the very last line with nothing after it'));
   assert.ok(text.includes('one **[HH:MM] Update:** line per update, each followed by a line holding only `&nbsp;` as a spacer'));
@@ -205,16 +214,18 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.ok(text.includes('Each owner question is one numbered item under **Waiting on you**, written `1. **Question: <the ask>?**`'));
   assert.ok(text.includes('`    - **<Choice> (my pick).** <one-line reason>`'));
   assert.ok(text.includes('The next numbered item follows the last choice directly, with no spacer line.'));
+  // Plans, G0 plans, decision asks and explanations open with the problem, the fix and what skipping it costs.
+  assert.ok(text.includes('**Problem, fix, skip first.** Every plan, G0 plan, decision ask and explanation, from you and from every thread, opens with three lines'));
+  for (const label of ['**The problem:**', '**The fix:**', '**If we skip it:**']) assert.ok(text.includes(`  - \`${label}\``), label);
+  assert.ok(text.includes('In a running post the **Now:** line stays first: put them under it, or under the question they belong to.'));
+  assert.ok(text.includes('Every brief tells the thread to do the same, and a G0 brief to open its plan with them.'));
+  assert.ok(text.includes('Under it, indented four spaces, come its problem, fix and skip lines, then its choices'));
+  assert.ok(text.includes('for every approval or choice the coordinator acts on itself, opening with its problem, fix and skip lines'));
   assert.equal((text.match(/&nbsp;/g) || []).length, 1, 'only the Update log lines take an &nbsp; spacer');
   assert.ok(text.includes('Choices need no link of their own. Never write a question outside that list: no bare **Question:** label, bulleted question or question in an Update line, and never flatten its choices into plain bullets.'));
-  assert.ok(text.includes('the question guard (a line starting `**Question:` anywhere but as a numbered item under a line that is exactly `**Waiting on you (n):**`, or a choice left unindented after it, is refused)'));
-  assert.ok(text.includes('refuses any edit of a post the owner has written after (post fresh instead)'));
-  // The hook cannot read the chat, so it uses the session's own reads of it and counts queued owner messages.
-  assert.ok(text.includes('after a project chat read that reaches the last page, a newest top-level post of yours (one an earlier session wrote included) is the post to edit'));
-  assert.ok(text.includes('Owner messages that arrive while a turn runs count as soon as they are queued.'));
   assert.doesNotMatch(text, /put at most one \*\*Question:\*\* in a post|Use decision cards for questions, else group/);
-  assert.ok(text.includes('an edit keeps every earlier Update line word for word and adds at least one new one'));
-  // The merge-summary rule binds without a hook: the post hook no longer reads merges.
+  assert.ok(text.includes('An edit keeps every earlier Update line word for word and adds at least one new one.'));
+  // The merge-summary rule binds without a hook.
   assert.ok(text.includes('post a short summary of the merge\'s external effects'));
   assert.ok(!text.includes('the post hook refuses a PR merge'));
   assert.ok(!text.includes('It reads only the command text, so it is a tripwire, not a guarantee'));
@@ -279,7 +290,7 @@ test('Projects keeps its Toolkit base layer current without touching the project
     assert.ok(text.includes(required), required);
   }
   // The coordinator acts on every check-in prefix, in dependency order.
-  const prefixes = ['`SKILL UPDATE`', '`BLOCK OUTDATED`', '`BINDING STALE`', '`TOOLKIT CHANGED`', '`MEMORY FORMAT`', '`TASKS OUTDATED`', '`NUDGE NOT ARMED`', '`PROJECT TASKS MISSING`', '`PLUGIN BEHIND`'];
+  const prefixes = ['`GUIDEBOOK MISSING`', '`SKILL UPDATE`', '`BLOCK OUTDATED`', '`BINDING STALE`', '`TOOLKIT CHANGED`', '`MEMORY FORMAT`', '`TASKS OUTDATED`', '`NUDGE NOT ARMED`', '`PROJECT TASKS MISSING`', '`PLUGIN BEHIND`'];
   const section = text.slice(text.indexOf('## Daily check-in'), text.indexOf('## Hourly nudge'));
   const at = prefixes.map(prefix => section.indexOf(`  - ${prefix}`));
   assert.ok(at.every((position, index) => position > -1 && (index === 0 || position > at[index - 1])), at.join(','));
