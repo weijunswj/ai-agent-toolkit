@@ -45,6 +45,7 @@ Last reviewed against `main` `37877aedbadfc2baf1f70c2e6b9f2281430174b8`.
 | Full validation list | `repo/scripts/run-validation-gate.cjs` |
 | Plain-text check | Portable check `skills/secure-ci-cd/scripts/plain-text-check.cjs` and installer `skills/secure-ci-cd/scripts/install-plain-text-check.cjs`; Toolkit runs it through `repo/scripts/check-plain-references.cjs` (run by `validate-toolkit.cjs`) with settings `repo/contracts/plain-references/config.json` and baseline `repo/contracts/plain-references/baseline.json` |
 | Projects instructions block | `repo/scripts/toolkit-projects-instructions.cjs`, source `repo/contracts/claude-projects/web-controller-projects/project-instructions.md` |
+| Projects guidebook (library copy of the skill the coordinator reads) | `repo/scripts/toolkit-projects-guidebook.cjs`, copied from `repo/contracts/claude-projects/web-controller-projects/` |
 | Projects scheduled task prompts | `repo/scripts/toolkit-projects-tasks.cjs`, templates `repo/contracts/claude-projects/web-controller-projects/tasks/`, setup inventory `repo/contracts/claude-projects/web-controller-projects/setup-inventory.json` |
 | Shared executable resolution | `skills/github-program-reconciler/scripts/resolve-executable.cjs` |
 | Decision-trace audit | `skills/github-program-reconciler/scripts/decision-trace-audit.cjs` |

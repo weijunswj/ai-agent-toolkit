@@ -16,7 +16,7 @@ Reference for the `web-controller-projects` skill, opened when the coordinator r
    - (b) taking over from an existing controller (another chat, Claude Code session or project);
    - (c) a project with no repo.
 
-   State the skill Version you loaded and compare it with the Version line of main's SKILL.md. When main's is newer, have a read-only cloud thread compare the account copy with main as the daily check-in's SKILL DRIFT and SKILL CARD steps do; when a card would be due there, start a skill card thread (`SKILL BEHIND` in the skill) and carry on with step 1. The card changes nothing until the owner taps Save, whenever they like.
+   Read the guidebook's `VERSION` (**Guidebook copy** in the skill). When the folder or `VERSION` is missing, or a cloud thread's `toolkit-projects-guidebook.cjs --check` against it is not current, have that thread run the refresh, read `SKILL.md` from the library once it reports, and carry on with step 1.
 1. **Project and repos.**
    - Confirm this project is for one repo.
    - Have the user attach that repo, plus its transport store if Toolkit defines one.
@@ -57,4 +57,4 @@ Reference for the `web-controller-projects` skill, opened when the coordinator r
    - one decision card answered;
    - a test check-in and test nudge: each runs once now and reports to you, and the user confirms both tasks in the project's Scheduled tasks panel. Setup does not wait for the next run;
    - when step 8 armed the programme sweep, one run of it now, with its result line read back.
-10. **Done.** Post one line: setup complete, skill Version, bound commit and `CONTROLLER.md` blob, device and folder, check-in time, that the hourly nudge is on (and the programme sweep, when armed), where the recurring tasks live, the skill card waiting for Save (with its thread link) when one is, and the next work item.
+10. **Done.** Post one line: setup complete, skill Version, bound commit and `CONTROLLER.md` blob, device and folder, check-in time, that the hourly nudge is on (and the programme sweep, when armed), where the recurring tasks live, the guidebook's `VERSION` line, and the next work item.

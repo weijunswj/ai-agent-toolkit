@@ -1,5 +1,46 @@
 # Toolkit Changelog
 
+## 3.26.1
+
+### Changed
+
+- Gate rules: a writing gate's session opens in the folder it writes, never told to escalate its shells into another folder.
+- Host contract: a new gate workspace section says how Codex Desktop gives a builder chat its own writable worktree (`create_thread` with a worktree environment, or `create_worktree` from the builder), why a forwarded approval is refused by Codex's automatic reviewer, where Codex gates keep scratch, and the known limit for successors in an existing worktree.
+
+## 3.26.0 (the coordinator reads the latest Projects skill)
+
+### Projects guidebook
+
+- **Added:** `repo/scripts/toolkit-projects-guidebook.cjs`. `--out <folder>` copies the Projects controller skill (SKILL.md, its `reference/` and `tasks/` files) into a folder, writes `instructions-block.md` (main's project-instructions block with its real marker), then writes a one-line `VERSION` last and reads every file back. It prints `SKILL COPY REFRESHED <Version>`, plus `BLOCK CHANGED <version>` when the block changed, or `SKILL COPY FAILED <reason>`. `--check <folder>` only compares. It removes files a newer skill dropped and folders left empty, and it claims a folder only when its `VERSION` is in the exact format or its block file starts with the real marker, so it never takes over a folder it did not write.
+- **Changed:** the Projects coordinator's runtime loads no account skills, so the skill now reaches it as that copy in the project library, `/mnt/project-files/toolkit/web-controller-projects/`. The project-instructions block gains one guidebook line: read `VERSION` every turn, read `SKILL.md` when that Version is new to the session, start a refresh thread when the copy is missing or older than the block, and replace the block with `instructions-block.md` only when a refresh from a fresh clone of main reports `BLOCK CHANGED` that turn, never on its own comparison of the library files. The skill adds that the guidebook never relaxes the safety floor or the owner's instructions. The block's size limit rose to 5,600 bytes for that line.
+- **Changed:** the hourly nudge checks the copy against a fresh clone of main every run, so a stray write to the folder is caught within the hour, and refreshes a stale or changed copy itself, reporting `BLOCK CHANGED` or `SKILL COPY FAILED` on its first line. The daily check-in is the backstop: it refreshes a copy still stale two hours after main changed, or when the nudge is stopped or not armed, and reports `GUIDEBOOK MISSING` or `SKILL COPY STALE`. Its `SKILL UPDATE` now compares the copy's Version with the one on the BINDING line.
+- **Changed:** the merge step's closing checklist carries "coordinator: refresh the guidebook", and setup reads the guidebook before step 1.
+- **Removed:** the skill card route for the account copy of the Projects skill: the skill card thread brief (`reference/skill-card.md`), the check-in's `SKILL DRIFT`, `SKILL BEHIND` and `SKILL CARD` steps, the coordinator's card, Save and re-upload handling, and the account-copy setup inventory row. They kept an account copy current that the coordinator never loads.
+
+## 3.25.0 (Codex host contract)
+
+### Host contract
+
+- The host contract now has a Codex helper table next to the Claude Code one: hook event, blocking output, failure and timeout, trust step, helper definitions, admission, depth, route proof and known limits.
+- The first stored Codex helper result is in `repo/contracts/host-qualification/codex.json`: on Codex Desktop on Windows, the G1 helper served its pinned model and effort, and the hook refused a built-in agent and a model override.
+
+### Codex qualification runner
+
+- The unbound-launch cases now match the helper-launch rule: in governed work with no launcher binding, a named helper with no installed file is refused and one that matches the stack is admitted. They run against a scratch Codex home, so real helper files never decide them.
+
+## 3.24.0 (your keys in Notepad, with every save kept)
+
+### toolkit env
+
+- **Changed:** `toolkit env edit` opens your keys in Notepad as `NAME=value` lines with their real values, like a `.env` file, in your saved order with your comment lines. Change a value, add a line, or delete a line to remove that key, then save: a small helper started with the file applies each save within a few seconds. Saying "done" (or `apply`) applies a save not applied yet, deletes the file and lists what was changed, added and removed, by name only. Deleting a line no longer needs a separate `remove`.
+- **Safer saves:** a save is applied whole or not at all. Nothing is saved, and a `# Status:` line at the top of the file says why, for an unreadable line, a blank value, a key name used twice, a quoted value, a UTF-16 save, a save that would remove every key, or keys changed elsewhere while the tab was open, including straight in Credential Manager. A key added elsewhere during the edit is never removed. A value one line cannot show exactly appears as `<kept: change it with toolkit env set NAME>` and stays as it is.
+- **Fixed:** a second edit reused an open edit file younger than 30 minutes without refreshing it, so it could show a key you had removed. Every edit now writes a fresh file from the store and wipes the earlier one; a save from an older Notepad tab is ignored and wiped, and the result says to use the newest tab. Edit files of earlier versions are wiped, never applied.
+- **New:** every "done" says to close the Notepad tab without saving, because Notepad can keep its own copy of an open tab and bring it back, and how to stop that for good ("Start new session"). The file is deleted 30 minutes after its last save if "done" never comes.
+
+### Skill
+
+- The `toolkit-env` skill opens Notepad whenever you want to see or change your keys, in any words, keeps `status` for names-only questions, and tells agents never to open, read or search the edit file.
+
 ## 3.23.0 (hooks keep only the checks that stop real damage)
 
 ### Hooks cut down

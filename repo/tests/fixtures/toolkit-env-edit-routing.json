@@ -1,0 +1,24 @@
+{
+  "purpose": "Owner phrasings for the toolkit-env skill: which ones must open the keys in Notepad (toolkit env edit) and which must not. Run headless against the installed skill during agent UAT; the unit test only checks this list's shape.",
+  "open": [
+    "show env",
+    "let me see my keys",
+    "I need to update my OpenAI key",
+    "add the Stripe test key",
+    "remove the old n8n token",
+    "what's in my env",
+    "can I look at my API keys?",
+    "my Coolify token expired, I have a new one",
+    "open my env file",
+    "I want to tidy up my tokens and delete the ones I don't use",
+    "rotate my Neon key",
+    "edit my env"
+  ],
+  "not_open": [
+    "is my GitHub token set?",
+    "which keys does Codex use?",
+    "call the Cloudflare API to list my zones",
+    "connect the coolify MCP server to my Coolify token",
+    "how many keys do I have stored?"
+  ]
+}
