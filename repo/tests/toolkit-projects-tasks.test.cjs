@@ -416,17 +416,18 @@ test('the check-in carries every prefix in the fixed order and checks both Toolk
   assert.match(text, /bound-session or fresh-session when that differs from the entry/);
   const nudge = rendered('hourly-nudge');
   // The cheap check reads the last run's state first and skips the full sweep when nothing moved;
-  // the binding check is daily only, and the nudge clones Toolkit only in its guidebook step, after
-  // `git ls-remote` shows main moved past the commit it last found current.
+  // the binding check is daily only. The nudge clones Toolkit once, in its guidebook step, every run:
+  // the library folder can change while main is quiet, so the check never waits for a merge.
   assert.ok(nudge.indexOf('nudge-state.md') > -1 && nudge.indexOf('nudge-state.md') < nudge.indexOf('list_threads'), 'cheap compare before the sweep');
   assert.match(nudge, /no change since <time>/);
-  assert.doesNotMatch(nudge, /BINDING/);
+  assert.doesNotMatch(nudge, /BINDING|git ls-remote|guidebook checked/);
   assert.equal((nudge.match(/git clone/g) || []).length, 1);
   const guidebook = nudge.split('\n').find(line => line.startsWith('9. Guidebook'));
-  assert.ok(guidebook.indexOf('git ls-remote') < guidebook.indexOf('git clone'), 'ls-remote before the clone');
-  for (const required of ['When that commit equals the "guidebook checked" commit', 'toolkit-projects-guidebook.cjs --check /mnt/project-files/toolkit/web-controller-projects',
+  for (const required of ['runs every time, even when step 1 found no change', 'the library folder can change while main is quiet',
+    '`git clone --depth 1 https://github.com/weijunswj/ai-agent-toolkit TK` in your scratchpad (a fresh clone)',
+    'toolkit-projects-guidebook.cjs --check /mnt/project-files/toolkit/web-controller-projects',
     'run it again with `--out` in place of `--check`', '"BLOCK CHANGED <version> | "', '"SKILL COPY FAILED: <reason> | "']) assert.ok(guidebook.includes(required), required);
-  assert.match(nudge, /"guidebook checked <main commit>" \(only after a `current` check in step 9/);
+  assert.match(nudge, /report BLOCK CHANGED only when this run printed it/);
   assert.match(nudge, /plus steps 7, 8 and 9 \(and 5b when it applies\)/);
   assert.match(nudge, /CONTEXT RESET DUE \(weekly\)/);
   // Each task reports the other missing, so the coordinator recreates a deleted one.
@@ -553,7 +554,7 @@ test('every line that re-arms, updates, swaps, rebuilds, recreates or sets up a 
     // The attention check reads the programme with `attention --refresh`; it touches no task.
     '**Programme attention before gates, finality and settling.**',
     // The guidebook refresh rewrites the library copy of the skill and the block file; it touches no task.
-    '**Read it every turn**', '**One refresh, three routes.**', 'refreshes a stale copy itself', 'start a cloud thread for the refresh at once', 'The daily check-in is the backstop',
+    '**Read it every turn**', '**One refresh, three routes.**', 'refreshes a stale or changed copy itself', 'start a cloud thread for the refresh at once', 'The daily check-in is the backstop',
     '**BLOCK CHANGED:**', '**Missing folder:**', '`SKILL COPY FAILED`: start one fresh refresh thread', 'a guidebook refresh reports BLOCK CHANGED', '`GUIDEBOOK MISSING` or `SKILL COPY STALE`',
     '9. the guidebook:', 'coordinator: refresh the guidebook', 'the guidebook refresh brings both here', '- Projects guidebook:', "Read the guidebook's `VERSION`",
     'library copy of the Projects skill (the guidebook)', 'and the guidebook refresh (step 9)', '9. Guidebook (runs every time', 'With BLOCK CHANGED, the coordinator replaces the block',

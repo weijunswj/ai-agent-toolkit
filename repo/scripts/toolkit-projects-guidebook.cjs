@@ -13,7 +13,7 @@
 //
 // VERSION is one line: `Version: <skill Version> toolkit <x.y.z> main <commit7> copied <UTC>`.
 // It is removed first and written last, so a copy cut short never looks current. Files a newer
-// skill dropped are removed from the folder, which only this script writes.
+// skill dropped, and folders left empty, are removed from the folder, which only this script writes.
 const childProcess = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -37,6 +37,14 @@ function listFiles(dir, base = dir) {
     if (entry.isDirectory()) return listFiles(full, base);
     return [path.relative(base, full).split(path.sep).join('/')];
   }).sort();
+}
+
+// Folders a skill change emptied (the folder itself stays). Bottom-up, so nested empty folders go too.
+function removeEmptyDirs(dir, top = dir) {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (entry.isDirectory()) removeEmptyDirs(path.join(dir, entry.name), top);
+  }
+  if (dir !== top && !fs.readdirSync(dir).length) fs.rmdirSync(dir);
 }
 
 function gitCommit(root) {
@@ -106,6 +114,7 @@ class Guidebook {
     for (const rel of present) {
       if (rel !== VERSION_FILE && !writes.has(rel)) fs.rmSync(path.join(out, rel));
     }
+    if (exists) removeEmptyDirs(out);
     for (const [rel, bytes] of writes) {
       fs.mkdirSync(path.dirname(path.join(out, rel)), { recursive: true });
       fs.writeFileSync(path.join(out, rel), bytes);

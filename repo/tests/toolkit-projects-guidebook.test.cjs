@@ -70,8 +70,16 @@ test('a second refresh reports no block change, removes files the skill dropped 
   guidebook().refresh(out);
   fs.mkdirSync(path.join(out, 'reference'), { recursive: true });
   fs.writeFileSync(path.join(out, 'reference', 'skill-card.md'), 'a file an older skill had\n');
+  // A folder an older skill had, nested or not, is removed once the refresh empties it.
+  fs.mkdirSync(path.join(out, 'old', 'nested'), { recursive: true });
+  fs.writeFileSync(path.join(out, 'old', 'nested', 'gone.md'), 'dropped\n');
+  fs.mkdirSync(path.join(out, 'empty'));
   assert.equal(guidebook().refresh(out).blockChanged, false);
   assert.ok(!fs.existsSync(path.join(out, 'reference', 'skill-card.md')));
+  assert.ok(!fs.existsSync(path.join(out, 'old')));
+  assert.ok(!fs.existsSync(path.join(out, 'empty')));
+  assert.ok(fs.existsSync(path.join(out, 'reference')) && fs.existsSync(path.join(out, 'tasks')));
+  assert.equal(guidebook().check(out).state, 'current');
   // A changed block on the copy is reported as BLOCK CHANGED by the next refresh.
   fs.writeFileSync(path.join(out, 'instructions-block.md'), 'an older block\n');
   assert.equal(guidebook().refresh(out).blockChanged, true);
