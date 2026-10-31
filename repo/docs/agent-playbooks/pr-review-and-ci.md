@@ -47,6 +47,14 @@ node repo/scripts/toolkit-github-footer-sweep.cjs --repo <owner/name> --since <I
 
 On Windows the hourly `PROGRAMME SWEEP` scheduled task runs it with `--apply` over the bound repository and its evidence store, for posts changed since its last sweep that ended well, so nobody needs to run it by hand there (`node repo/scripts/toolkit-tasks.cjs` shows its last run). Without `--since` it scans the whole repository, which reads the reviews of every pull request. Exit codes: 0 no post with the footer, 3 posts with the footer found and none cleaned, 4 at least one cleaned and nothing failed, 1 a scan, edit or read-back failed, 2 bad arguments.
 
+## Before Asking To Merge
+
+Post a short summary of the merge's external effects (what changes on the user's machines, hooks, rules, setup defaults and other repositories) naming the pull request, before asking the owner for their own "merge N". The merge hold waits for that typed "merge N"; no hook checks the summary.
+
+## Plain-Text Findings
+
+The push check refuses only a credential in what a push or new pull request sends. Plain-text findings leak nothing, so CI's plain-text check is the gate for them: read its result on the pull request and fix what it lists.
+
 ## CI Honesty
 
 Do not claim CI passed unless checked. If checks are pending, failed, or inaccessible, say so and provide the exact command or user action needed.
