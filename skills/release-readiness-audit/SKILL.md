@@ -179,7 +179,7 @@ Start remediation only after the audit report exists.
 - Update the audit report after each remediation batch.
 - Record which findings were closed, partially closed, deferred, or newly found.
 - Commit to a non-main branch, push, and open or update a PR unless the user explicitly asks for local-only.
-- Check CI/status when accessible.
+- Check CI/status when accessible, and run the `secure-ci-cd` CI check-up so CI still covers the code; list its real gaps as findings.
 - Stop for ambiguous product decisions, live-system actions, deployment, secrets, external services, destructive actions, customer/private data, or security-sensitive operations requiring explicit approval.
 
 ## Safety Boundary
