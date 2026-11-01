@@ -88,7 +88,7 @@ const MAX_APPROVALS = 100;
 const MAX_PROMPT_CHARS = 8000;
 const MAX_COMMAND_CHARS = 1024 * 1024;
 
-const { SHELLS, SHELL_TOOLS, ShellCall, assignVariable, assignmentOf, folderWord, shellCommands, shellOf, shellPath, shellReadings } = require('./toolkit-shell-call.cjs');
+const { SHELLS, SHELL_TOOLS, ShellCall, assignVariable, assignmentOf, folderWord, plainGitLine, shellCommands, shellOf, shellPath, shellReadings } = require('./toolkit-shell-call.cjs');
 // A connector's merge or auto-merge tool, whatever its server is called (a claude.ai connector's
 // server name is a UUID): the tool name ends in one of these after a _ or -.
 const AUTO_MERGE_NAME = 'enable[_-]?(?:pr[_-]?|pull[_-]?request[_-]?)?auto[_-]?merge';
@@ -646,75 +646,83 @@ function shellRefusal(text, cwd, registryOptions = {}, shell = null) {
   return '';
 }
 
-// A push handed to another shell cannot have its target read reliably. Refuse it outright, and
-// encoded PowerShell commands unread. Scan command words, including after wrappers and assignments,
-// plus the raw text so braces, parentheses, quotes and a single & cannot hide a runner.
-function nestedRefusal(text) {
-  const message = 'this command runs a git push through another shell (bash -c, pwsh -Command, cmd /c or eval), so Toolkit cannot read where it pushes and refused it. Run the push as its own git command.';
-  const mentionsPush = /\bgit\b/i.test(text) && /\bpush\b/i.test(text);
-  const blocked = (word, tail) => {
-    const name = word.split(/[\\/]/).pop().replace(/\.exe$/i, '').toLowerCase();
-    const encoded = [...tail.matchAll(/(?:^|\s)(-[a-z]+)(?=\s|$)/gi)].some(match => '-encodedcommand'.startsWith(match[1].toLowerCase()) || /^-ec$/i.test(match[1]));
-    if (/^(?:pwsh|powershell)$/.test(name) && encoded) return true;
-    const script = name === 'cmd' ? tail.replace(/(^|\s)\/[ck]/i, '$1 ') : tail;
-    // Variables and substitutions in this runner's tail cannot be resolved here. If the line
-    // mentions a push anywhere, refuse that unreadable script with the same blanket message.
-    const unresolved = /\$(?:[A-Za-z_]|\{|\()|`[^`]*`|%[^%\s]+%/.test(tail);
-    if (!(mentionsPush && unresolved) && (!/\bgit\b/i.test(script) || !/\bpush\b/i.test(script))) return false;
-    if (/^(?:bash|sh|zsh|dash|ksh)$/.test(name)) return /(?:^|\s)-[a-z]*c[a-z]*(?=\s|$)/i.test(tail);
-    if (name === 'cmd') return /(?:^|\s)\/[ck]/i.test(tail);
-    return /^(?:pwsh|powershell|eval|iex|invoke-expression)$/.test(name);
-  };
-  for (const { words } of shellCommands(text)) {
-    for (let index = 0; index < words.length; index += 1) {
-      if (SHELLS.test(words[index]) && blocked(words[index], words.slice(index + 1).join(' '))) return refuse(message);
-      if (!/^(?:&|\.|env|exec|command|nohup|builtin)$/i.test(words[index])
-        && !/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[index])
-        && !(index > 0 && words[index].startsWith('-'))) break;
-    }
-  }
-  const runners = /(?:^|[\s;&|(){}"'=\\/])((?:bash|sh|zsh|dash|ksh|pwsh|powershell|cmd|eval|iex|invoke-expression)(?:\.exe)?)(?=$|[\s"'(){};&|])/gi;
-  let quoteAt = 0;
-  let outerQuote = '';
-  for (const match of text.matchAll(runners)) {
-    const start = match.index + match[0].length;
-    const runnerAt = start - match[1].length;
-    // Runner names inside quoted data are not commands. Keep the quoted tail of an actual runner.
-    for (; quoteAt < runnerAt; quoteAt += 1) {
-      const char = text[quoteAt];
-      const next = text[quoteAt + 1];
-      if (outerQuote !== "'" && (char === '\\' || char === '`') && next
-        && (char === '`' || (outerQuote === '"' ? '"\\$`'.includes(next) : /[\s"'\\;&|()]/.test(next)))) { quoteAt += 1; continue; }
-      if (outerQuote) {
-        if (char === outerQuote) {
-          if (outerQuote === "'" && next === "'") quoteAt += 1;
-          else outerQuote = '';
+// Ignore runner names in quoted prose, but keep whole quoted runner paths and executable
+// substitutions, including those inside double quotes. This is not command-position detection.
+function mentionsRunner(text) {
+  const visible = [];
+  const frames = [{ end: '', depth: 0, quote: '', start: 0 }];
+  for (let index = 0; index < text.length; index += 1) {
+    const frame = frames[frames.length - 1];
+    const char = text[index];
+    const next = text[index + 1];
+    if (frame.quote === "'") {
+      if (char === "'") {
+        if (next === "'") index += 1;
+        else {
+          if (SHELLS.test(text.slice(frame.start, index))) return true;
+          frame.quote = '';
         }
-      } else if (char === '"' || char === "'") outerQuote = char;
+      }
+      continue;
     }
-    if (outerQuote) continue;
-    // An expression runner can receive its script from the left side of a pipeline. Its tail
-    // alone says nothing about that script, so a push-bearing line is refused as a family.
-    if (mentionsPush && /^(?:iex|invoke-expression)(?:\.exe)?$/i.test(match[1])
-      && /\|\s*$/.test(text.slice(0, runnerAt))) return refuse(message);
-    let end = start;
-    let quote = '';
-    let depth = 0;
-    // Keep separators inside runner arguments, but leave later commands to their own checks.
-    for (; end < text.length; end += 1) {
-      const char = text[end];
-      if (quote) {
-        if (char === quote) quote = '';
+    if (char === '\\' && next && (frame.quote ? '"\\$`'.includes(next) : /[\s"'\\$`]/.test(next))) {
+      if (!frame.quote) visible.push(char, next);
+      index += 1;
+      continue;
+    }
+    if (char === '$' && next === '(') {
+      visible.push(' ');
+      frames.push({ end: ')', depth: 0, quote: '', start: 0 });
+      index += 1;
+      continue;
+    }
+    if (char === '`') {
+      if (frame.end === '`' && !frame.quote) {
+        frames.pop();
+        visible.push(' ');
         continue;
       }
-      if (char === '"' || char === "'") { quote = char; continue; }
-      if (char === '(' || char === '{') { depth += 1; continue; }
-      if (char === ')' || char === '}') { depth = Math.max(0, depth - 1); continue; }
-      if (depth === 0 && (char === ';' || char === '\n' || char === '|' || (char === '&' && text[end + 1] === '&'))) break;
+      if (text.indexOf('`', index + 1) !== -1) {
+        frames.push({ end: '`', depth: 0, quote: '', start: 0 });
+        visible.push(' ');
+        continue;
+      }
     }
-    if (blocked(match[1], text.slice(start, end))) return refuse(message);
+    if (frame.quote === '"') {
+      if (char === '"') {
+        if (SHELLS.test(text.slice(frame.start, index))) return true;
+        frame.quote = '';
+      }
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      frame.quote = char;
+      frame.start = index + 1;
+      visible.push(' ');
+    } else if (frame.end === ')' && char === ')' && frame.depth === 0) {
+      frames.pop();
+      visible.push(' ');
+    } else {
+      if (char === '(') frame.depth += 1;
+      else if (char === ')') frame.depth -= 1;
+      visible.push(char);
+    }
   }
-  return '';
+  return /\b(?:bash|sh|zsh|dash|ksh|pwsh|powershell|cmd|eval|iex|invoke-expression)(?:\.exe)?\b/i.test(visible.join(''));
+}
+
+// A non-plain line mentioning a runner outside quoted prose and a git push is refused as a family.
+// Plain git commands keep the default-branch check; encoded PowerShell stays unread.
+function nestedRefusal(text) {
+  if (plainGitLine(text)) return '';
+  const message = 'this command could run a git push through another shell (bash, pwsh, cmd or eval), so Toolkit cannot read where it pushes and refused it. Run the push as its own plain git command.';
+  // PowerShell accepts every prefix of -EncodedCommand from -e onward, plus -ec.
+  const encoded = /(?:^|[\s"'])-([a-z]+)(?=$|[\s"'])/gi;
+  if (/\b(?:pwsh|powershell)(?:\.exe)?\b/i.test(text)
+    && [...text.matchAll(encoded)].some(match => 'encodedcommand'.startsWith(match[1].toLowerCase()) || /^ec$/i.test(match[1]))) return refuse(message);
+  // cmd also spells its script's first word /cgit or /kgit, without a separating space.
+  const mentionsPush = /(?:\b|\/[ck])git\b/i.test(text) && /\bpush\b/i.test(text);
+  return mentionsPush && mentionsRunner(text) ? refuse(message) : '';
 }
 
 // The owner's standing answer for the repository of folder `cwd`: { repository, scope } when the
@@ -756,7 +764,7 @@ function decide(input, { registryOptions = {}, now, environment = process.env, h
     if (text.length > MAX_COMMAND_CHARS) return /merge|push/i.test(text) ? refuse('this command is too long to check for a merge or push, so it is refused. Split it.') : null;
     cwd = call.folder;
     // The host's shell wrapper is already unwrapped; only a runner inside its script is nested.
-    const nested = nestedRefusal(text);
+    const nested = nestedRefusal(call.text);
     if (nested) return nested;
     // An argument list is read both ways, as its words quoted and joined unquoted (as before the
     // shared reader), so a quoted program path such as `C:\Program Files\GitHub CLI\gh.exe` cannot

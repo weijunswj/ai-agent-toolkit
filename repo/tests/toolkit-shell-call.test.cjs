@@ -4,12 +4,37 @@ const assert = require('node:assert/strict');
 const os = require('node:os');
 const path = require('node:path');
 
-const { SHELL_TOOL_NAMES, UNREADABLE, ShellCall, argvText } = require('../scripts/toolkit-shell-call.cjs');
+const { SHELL_TOOL_NAMES, UNREADABLE, ShellCall, argvText, plainGitLine } = require('../scripts/toolkit-shell-call.cjs');
 const hostile = require('./support/hostile-inputs.cjs');
 
 const base = path.resolve(os.tmpdir(), 'toolkit-shell-call-session');
 const other = path.resolve(os.tmpdir(), 'toolkit-shell-call-other');
 const read = (tool, toolInput, extra = {}) => ShellCall.from({ tool_name: tool, cwd: base, tool_input: toolInput, ...extra });
+
+test('plain git lines are one git command with no substitutions or unquoted shell operators', () => {
+  const allowed = [
+    'git push origin feature', 'git push origin HEAD', 'git.exe push', '/usr/bin/git push',
+    String.raw`"C:\Program Files\Git\bin\git.exe" push origin feature`,
+    'git commit --allow-empty -m bash -m "Document -c git push handling"',
+    'git commit -m "Refuse bash -c git push wrappers"',
+    'git commit -m "literal ; & | ( ) { } %NAME%"', "git commit -m 'it''s quoted'",
+    'git commit -m "line one\nline two"', String.raw`git commit -m "quoted \"bash\""`,
+  ];
+  const refused = [
+    '', 'gitty push', '/usr/bin/notgit push', 'env git push', 'echo git push',
+    'git status; git push', 'git status && git push', 'git push & echo ready',
+    'git push | cat', '(git push)', '{git push}', 'git push\n', 'git push\r\n',
+    'git push %NAME%', 'git push "unfinished', "git push 'unfinished",
+    String.raw`git push \\; echo ready`, 'git push \\\norigin HEAD',
+    ...['$(run)', '${VALUE}', '`run`', '<(run)', '>(run)'].flatMap(value => [
+      `git push ${value}`, `git commit -m "${value}"`, `git commit -m '${value}'`,
+    ]),
+  ];
+  for (const command of allowed) assert.equal(plainGitLine(command), true, command);
+  for (const command of refused) assert.equal(plainGitLine(command), false, command);
+  hostile.expectDefaultDeny(assert, plainGitLine, hostile.cases(hostile.FAMILIES, ['shell']));
+  assert.equal(plainGitLine(read('shell', { command: ['bash', '-lc', 'git push origin work'] }).text), true, 'host wrapper is unwrapped first');
+});
 
 test('every host shape of a shell call gives the same text and the folder the command runs in', () => {
   const rows = [

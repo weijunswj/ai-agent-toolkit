@@ -321,83 +321,70 @@ test('force pushes are refused in governed and guarded repositories and to evide
   for (const command of forced) assert.equal(forceRefusal(command, repos.plain), '', `plain repository: ${command}`);
 });
 
-test('location options move both the force-push and outgoing-change checks to their target', (t) => {
+test('location options still move the separate force-push check to its target', (t) => {
   const repos = guardRepos(t);
   const forms = ['Set-Location -LiteralPath', 'Set-Location -Path', 'cd -P', 'cd -L', 'cd -e -@', 'cd /d', 'pushd', 'chdir', 'sl -Path'];
   for (const form of forms) {
     for (const target of ['../governed', repos.governed]) {
-      const location = `${form} "${target}"`;
-      const command = `${location}; git push origin HEAD`;
-      const confirmed = target === repos.governed;
-      assert.deepEqual(outgoingChanges(command, repos.plain, 0, [], false), [{
-        folder: repos.governed, remote: 'origin', sources: ['HEAD'],
-        ...(confirmed ? {} : { folderConfirmed: false, folderMoved: true }),
-      }], location);
-      assert.equal(forceRefusal(`${location}; git push --force origin feature`, repos.plain), FORCE_MESSAGE, location);
+      assert.equal(forceRefusal(form + ' "' + target + '"; git push --force origin feature', repos.plain), FORCE_MESSAGE, form);
     }
-    assert.equal(forceRefusal(`${form} "${repos.plain}"; git push --force origin feature`, repos.governed), '', `${form}: plain target`);
+    assert.equal(forceRefusal(form + ' "' + repos.plain + '"; git push --force origin feature', repos.governed), '', form);
   }
-  assert.deepEqual(outgoingChanges('Set-Location -LiteralPath ../governed -PassThru; git push', repos.plain, 0, [], false), [
-    { folder: repos.governed, remote: '', sources: [], folderConfirmed: false, folderMoved: true },
-  ]);
   assert.equal(forceRefusal('Set-Location -LiteralPath ../governed -PassThru; git push --force', repos.plain), FORCE_MESSAGE);
 });
 
-test('an unreadable location keeps an unknown starting folder moved and unconfirmed', () => {
+test('only a whole plain git line marks an unknown-folder push safe for checking every HEAD', () => {
   const folder = os.tmpdir();
-  for (const location of ['cd', 'pushd', 'chdir', 'Set-Location -LiteralPath', 'Set-Location -Path -PassThru',
-    'cd -P', 'cd -L', 'cd /d', 'sl -Path', 'Set-Location -LiteralPath $missing', 'cd "$missing"',
-    'cd "$(Get-Location)"', 'cd $(Get-Location)', 'cd "%MISSING%"', 'cd "/$missing"']) {
-    const [target] = outgoingChanges(`${location}; git push origin HEAD`, folder, 0, [], false);
-    assert.ok(target, location);
-    assert.equal(target.folderConfirmed, false, location);
-    assert.equal(target.folderMoved, true, location);
+  for (const command of ['git push', 'git push origin HEAD', 'git push origin feature', 'git.exe push origin HEAD']) {
+    assert.deepEqual(outgoingChanges(command, folder, 0, [], false), [{
+      folder, remote: command.includes('origin') ? 'origin' : '', sources: command.includes('HEAD') ? ['HEAD'] : command.includes('feature') ? ['feature'] : [],
+      plainGit: true, folderConfirmed: false,
+    }], command);
   }
-  for (const shell of ['posix', 'powershell']) {
-    const assignment = shell === 'posix' ? `d='${folder}'` : `$d = '${folder}'`;
-    assert.deepEqual(outgoingChanges(`${assignment}; Set-Location -LiteralPath $d; git push`, folder, 0, [], false, shell), [
-      { folder, remote: '', sources: [] },
-    ], shell);
-  }
-});
-
-test('unresolved location words fail closed across the Codex HEAD family', () => {
-  const folder = os.tmpdir();
   const forms = ['cd', 'pushd', 'popd', 'chdir', 'Set-Location', 'sl', 'Push-Location', 'Pop-Location'];
   const wrappers = ['', '& ', '&', '. ', '(', '{', 'env ', 'pwsh -Command "'];
+  const commands = [
+    "& 'Set-Location' -LiteralPath .\\other; git push origin HEAD:feature",
+    'Set-Location -LiteralPath ./other -PassThru; git push origin HEAD',
+    'cd -P ./other; git push origin HEAD', 'cd /d ./other; git push origin HEAD',
+    'git status; git push origin HEAD', 'echo "cd"; git push origin HEAD',
+    "echo 'sl other'; git push origin HEAD", 'git push origin HEAD; echo done',
+    'git push origin HEAD; git push origin HEAD',
+    'git push -o "$(run)" origin HEAD',
+    'git push origin HEAD %NAME%',
+  ];
   for (const form of forms) {
     for (const wrapper of wrappers) {
       const end = wrapper === '(' ? ')' : wrapper === '{' ? '}' : wrapper.includes('pwsh') ? '"' : '';
-      const command = `${wrapper}${form} -LiteralPath ./other${end}; git push origin HEAD`;
-      const [target] = outgoingChanges(command, folder, 0, [], false);
-      assert.equal(target?.folderConfirmed, false, command);
-      assert.equal(target?.folderMoved, true, command);
+      commands.push(wrapper + form + ' -LiteralPath ./other' + end + '; git push origin HEAD');
     }
   }
-  for (const command of [
-    '& Set-Location -LiteralPath ./other; git push origin HEAD:feature',
-    'pwsh -Command "bash -c \'cd other\'"; git push origin HEAD',
-    'pwsh -Command "popd"; git push origin HEAD',
-    'git push origin HEAD; & sl other',
-    `cd "${folder}"; & sl other; git push origin HEAD`,
-    `cd "${folder}"; cd "$missing"; git push origin HEAD`,
-    `cd "${folder}"; cd; git push origin HEAD`,
-    'git push origin HEAD; cd other',
-  ]) {
-    assert.equal(outgoingChanges(command, folder, 0, [], false)[0]?.folderMoved, true, command);
+  for (const command of commands) {
+    const [target] = outgoingChanges(command, folder, 0, [], false);
+    assert.equal(target?.folderConfirmed, false, command);
+    assert.equal(target?.plainGit, false, command);
+    assert.equal(Object.hasOwn(target, 'folderMoved'), false, 'superseded location flag is gone');
   }
-  for (const command of ['echo "cd"; git push origin HEAD', "echo 'sl other'; git push origin HEAD",
-    'git commit -m "Set-Location ./other"; git push origin HEAD',
-    'git commit -m "bash" -m "Document cd handling"; git push origin HEAD']) {
-    assert.equal(outgoingChanges(command, folder, 0, [], false)[0]?.folderMoved, undefined, command);
+  assert.equal(outgoingChanges('pwsh -Command "git push origin HEAD"', folder, 0, [], false)[0]?.plainGit, false, 'nested script cannot become a plain whole line');
+});
+
+test('absolute folder confirmation and host-confirmed calls keep their existing paths', () => {
+  const folder = os.tmpdir();
+  for (const command of ['cd "' + folder + '"; git push origin HEAD', 'git -C "' + folder + '" push origin HEAD',
+    '& sl other; cd "' + folder + '"; git push origin HEAD']) {
+    assert.deepEqual(outgoingChanges(command, folder, 0, [], false), [
+      { folder, remote: 'origin', sources: ['HEAD'] },
+    ], command);
   }
-  assert.deepEqual(outgoingChanges(`cd "${folder}"; git push origin HEAD`, folder, 0, [], false), [
+  for (const shell of ['posix', 'powershell']) {
+    const assignment = shell === 'posix' ? "d='" + folder + "'" : "$d = '" + folder + "'";
+    assert.deepEqual(outgoingChanges(assignment + '; Set-Location $d; git push', folder, 0, [], false, shell), [
+      { folder, remote: '', sources: [] },
+    ], shell);
+  }
+  assert.deepEqual(outgoingChanges('& sl other; git push origin HEAD', folder), [
     { folder, remote: 'origin', sources: ['HEAD'] },
   ]);
-  assert.deepEqual(outgoingChanges(`& sl other; cd "${folder}"; git push origin HEAD`, folder, 0, [], false), [
-    { folder, remote: 'origin', sources: ['HEAD'] },
-  ]);
-  assert.equal(outgoingChanges('& sl other; git push origin HEAD', folder)[0]?.folderMoved, undefined, 'a host-confirmed folder keeps its existing reading');
 });
 
 test('N3: an ENABLED repository is protected even before its governed block lands; a DISABLED one with a leftover block stays protected', (t) => {

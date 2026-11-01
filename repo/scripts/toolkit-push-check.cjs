@@ -231,9 +231,8 @@ function reachableTrees(trees, chatFolder) {
 // changes the push can carry: { root }, { roots } or { refusal }. It matters only when the same
 // command commits first or the source is HEAD, and only when more than one working tree is reachable
 // from the chat's folder (reachableTrees); otherwise the chat's folder is the one. With several, a
-// HEAD source with no earlier step in the same command is checked in every one of them (`roots`, each
-// working tree has its own HEAD); a HEAD source after an earlier step, or in a folder a relative `cd`
-// reached from the unknown one (`folderMoved`), is refused. After a commit
+// HEAD source is checked in every one of them (each working tree has its own HEAD) only when the
+// whole line is a single plain git command (`plainGit`); every other line is refused. After a commit
 // in the same command, each source must be a branch exactly one working tree has checked out, and
 // that working tree is read. Otherwise the commit's folder cannot be told and the push is refused: a
 // branch none has checked out (a `git checkout` or `git tag` earlier in the same command could put
@@ -245,7 +244,7 @@ function unconfirmedFolder(root, target, sources, deadline, spawn) {
   const trees = reachableTrees(workingTrees(root, deadline, spawn), target.folder);
   if (trees.length <= 1) return { root };
   // A working tree whose folder is gone (one `git worktree prune` would drop) is not where it runs.
-  if (head) return target.preceding?.length || target.folderMoved ? { refusal: FOLDER_UNCONFIRMED } : { roots: trees.map((tree) => tree.folder).filter(isFolder) };
+  if (head) return target.preceding?.length || !target.plainGit ? { refusal: FOLDER_UNCONFIRMED } : { roots: trees.map((tree) => tree.folder).filter(isFolder) };
   const folders = [];
   for (const source of sources) {
     if (REV_OPTIONS.has(source)) return { refusal: FOLDER_UNCONFIRMED };

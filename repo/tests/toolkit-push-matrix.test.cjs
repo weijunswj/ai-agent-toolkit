@@ -331,10 +331,18 @@ test('matrix: a Codex call that names no folder is checked in the working tree i
     ['clean lanes: push of HEAD', clean, 'git push uat HEAD', allowed],
     ['clean lanes: reset before a push of HEAD', clean, 'git reset --soft spare; git push uat HEAD', unconfirmed],
     ['clean lanes: stash pop before a push of HEAD', clean, 'git stash pop; git push uat HEAD', unconfirmed],
-    ['clean lanes: status before a push of HEAD', clean, 'git status; git push uat HEAD', allowed],
+    ['clean lanes: status before a push of HEAD', clean, 'git status; git push uat HEAD', unconfirmed],
+    ['clean lanes: output before a push of HEAD', clean, 'Write-Output ready; git push uat HEAD', unconfirmed],
+    ['clean lanes: output after a push of HEAD', clean, 'git push uat HEAD; Write-Output ready', unconfirmed],
+    ['clean lanes: quoted location call', clean, "& 'Set-Location' -LiteralPath .\\other; git push uat HEAD:feature", unconfirmed],
+    ['clean lanes: quoted cmd variable', clean, 'git push -o "%NAME%" uat HEAD', allowed],
+    ['clean lanes: unquoted cmd variable', clean, 'git push -o %NAME% uat HEAD', unconfirmed],
+    ['clean lanes: quoted substitution', clean, 'git push -o "$(run)" uat HEAD', unconfirmed],
+    ['clean lanes: pull request of HEAD', clean, 'gh pr create --title test', unconfirmed],
+    ['clean lanes: status before a named branch push', clean, 'git status; git push uat lane/one', allowed],
     ['lanes: a relative cd keeps the folder unconfirmed', repo, 'cd .tmp/worktrees/lane-one; git push', unconfirmed],
     ['lanes: Set-Location with an option keeps the folder unconfirmed', repo, 'Set-Location -LiteralPath .tmp/worktrees/lane-two; git push uat HEAD', unconfirmed],
-    ['lanes: cd -P to the full path checks its credential', repo, `cd -P "${path.join(repo, '.tmp', 'worktrees', 'lane-two')}"; git push uat HEAD`, committedKey],
+    ['lanes: cd to the full path checks its credential', repo, `cd "${path.join(repo, '.tmp', 'worktrees', 'lane-two')}"; git push uat HEAD`, committedKey],
     ['clean lanes: a relative cd keeps the folder unconfirmed', clean, 'cd .tmp/worktrees/lane-one; git push', unconfirmed],
     ['clean lanes: a commit before a push of HEAD', clean, 'git add -A; git commit -m x; git push uat HEAD', unconfirmed],
     ['lanes: git -C to the full path confirms it', repo, `git -C "${laneOne}" add -A; git -C "${laneOne}" commit -m x; git -C "${laneOne}" push uat lane/one`, pendingFile],
@@ -398,7 +406,7 @@ test('matrix: a Codex call that names no folder is checked in the working tree i
   // Codex hook turns into a refusal, never a pass.
   let calls = 0;
   const slow = (program, args, options) => (++calls > 4 ? { status: null, signal: 'SIGTERM', stdout: '', stderr: '' } : spawnSync(program, args, options));
-  assert.match(pushCheck.checkOutgoing({ folder: clean, folderConfirmed: false }, { spawn: slow }).note || '', /longer than 30 seconds/);
+  assert.match(pushCheck.checkOutgoing({ folder: clean, folderConfirmed: false, plainGit: true }, { spawn: slow }).note || '', /longer than 30 seconds/);
   assert.ok(calls > 4, 'the budget ran out inside the per-tree checks');
 });
 

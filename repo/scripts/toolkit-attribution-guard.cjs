@@ -24,7 +24,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { SHELLS, ShellCall, absoluteShellPath, assignVariable, assignmentOf, folderWord, shellCommands, shellOf, shellPath, shellReadings } = require('./toolkit-shell-call.cjs');
+const { SHELLS, ShellCall, absoluteShellPath, assignVariable, assignmentOf, folderWord, plainGitLine, shellCommands, shellOf, shellPath, shellReadings } = require('./toolkit-shell-call.cjs');
 
 const MESSAGE = 'Remove the AI attribution lines (Co-Authored-By or Claude-Session trailers, claude.ai session links, "Generated with" footers) and retry.';
 const ATTRIBUTION_PATTERNS = Object.freeze([
@@ -89,28 +89,11 @@ function withVariables(commands, shell = null) {
   return result;
 }
 
-// Location commands take their last non-option word as the folder. In particular, -Path and
+// The force-push check reads location commands by their last non-option folder word. -Path and
 // -LiteralPath name the following word, while flags such as -P, -L, /d and -PassThru do not.
 const LOCATION_COMMAND = /^(?:cd|pushd|chdir|set-location|sl)$/i;
 function locationTarget(words) {
   return words.slice(1).filter((word) => !word.startsWith('-') && !/^\/d$/i.test(word)).pop() || '';
-}
-
-// An unknown Codex folder cannot be recovered by checking reachable worktrees after any
-// unresolved location command. Screen the whole family, including invocation operators and
-// blocks, rather than trying to execute more shell syntax. Quoted data stays data; scripts
-// handed to a nested shell get the same screen with their own quotes read.
-function mentionsLocation({ words, offsets }, text) {
-  if (words.some((word, index) => !/^["']/.test(text.slice(offsets[index]))
-    && /^[&.{}]*(?:cd|pushd|popd|chdir|set-location|sl|push-location|pop-location)[{}]*$/i.test(word))) return true;
-  let runner = -1;
-  for (let index = 0; index < words.length; index += 1) {
-    if (SHELLS.test(words[index].replace(/^[&.{}]+/, ''))) { runner = index; break; }
-    if (!/^(?:&|\.|\{|env|exec|command|nohup|builtin)$/i.test(words[index])
-      && !/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[index])
-      && !(index > 0 && words[index].startsWith('-'))) break;
-  }
-  return runner !== -1 && words.slice(runner + 1).some(word => shellCommands(word).some(current => mentionsLocation(current, word)));
 }
 
 // Find the relevant subcommand after git's global options. Each -C is relative to the previous
@@ -493,37 +476,27 @@ function branchCreated(sub, args) {
 // `confirmed` false says the starting folder may not be where the command runs (a Codex call that
 // named no folder). A `cd`, `pushd` or `Set-Location` to a folder that stands on its own, or a git -C
 // or --work-tree one, confirms the folder from there on; a relative one keeps the state. Each push,
-// pull request and preceding step read from a folder not confirmed carries `folderConfirmed: false`,
-// and `folderMoved: true` once a relative one moved it (`moved`), since the folder it moved from is
-// not known either.
-function outgoingChanges(command, cwd, depth = 0, preceding = [], confirmed = true, shell = null, moved = false) {
+// pull request and preceding step read from a folder not confirmed carries `folderConfirmed: false`.
+// An unconfirmed push also carries `plainGit`: only a single plain git command can check HEAD in
+// every reachable working tree; no other command may run alongside it.
+function outgoingChanges(command, cwd, depth = 0, preceding = [], confirmed = true, shell = null) {
   const text = String(command || '');
   const found = [];
   if (text.length > MAX_COMMAND_CHARS || !/\b(?:git|gh)\b/i.test(text)) return found;
+  const plainGit = depth === 0 && plainGitLine(text);
   let root = cwd || process.cwd();
-  const unknownStart = !confirmed;
-  let unresolvedLocation = false;
   const withPreceding = (target) => (preceding.length ? { ...target, preceding: preceding.slice() } : target);
-  const marked = (entry, known) => (known ? entry : { ...entry, folderConfirmed: false, ...(moved ? { folderMoved: true } : {}) });
+  const marked = (entry, known) => (known ? entry : { ...entry, folderConfirmed: false });
   for (const current of withVariables(shellCommands(text), shell)) {
-    if (LOCATION_COMMAND.test(current.words[0])) {
-      const target = locationTarget(current.words);
-      if (target) root = shellPath(root, target);
-      if (unknownStart) {
-        confirmed = Boolean(target && !/[$`]|%[^%]+%/.test(target) && (confirmed || absoluteShellPath(target)));
-        if (!confirmed) { moved = true; unresolvedLocation = true; }
-      }
+    if (/^(?:cd|pushd|set-location|sl)$/i.test(current.words[0]) && current.words.length === 2) {
+      root = shellPath(root, current.words[1]);
+      confirmed ||= absoluteShellPath(current.words[1]);
       continue;
-    }
-    if (unknownStart && mentionsLocation(current, text)) {
-      unresolvedLocation = true;
-      confirmed = false;
-      moved = true;
     }
     const git = gitCommand(current, root);
     const known = confirmed || Boolean(git?.absolute);
     const push = git && !git.refusal && git.sub === 'push' ? pushTarget(git.args, git.base) : null;
-    if (push) found.push(withPreceding(marked(push, known)));
+    if (push) found.push(withPreceding(marked(known ? push : { ...push, plainGit }, known)));
     if (git && !git.refusal && COMMIT_STEPS.has(git.sub)) preceding.push(marked({ folder: git.base, sub: git.sub }, known));
     if (git && !git.refusal && BRANCH_STEPS.has(git.sub)) {
       const created = branchCreated(git.sub, git.args);
@@ -536,11 +509,11 @@ function outgoingChanges(command, cwd, depth = 0, preceding = [], confirmed = tr
     if (pullRequest) found.push(withPreceding(marked(pullRequest, confirmed)));
     if (depth < 2 && SHELLS.test(current.words[0])) {
       for (const word of current.words.slice(1)) {
-        if (/\s/.test(word) && /\b(?:git|gh)\b/i.test(word)) found.push(...outgoingChanges(word, root, depth + 1, preceding, confirmed, null, moved));
+        if (/\s/.test(word) && /\b(?:git|gh)\b/i.test(word)) found.push(...outgoingChanges(word, root, depth + 1, preceding, confirmed, null));
       }
     }
   }
-  return unresolvedLocation ? found.map(target => (target.folderConfirmed === false ? { ...target, folderMoved: true } : target)) : found;
+  return found;
 }
 
 // Returns the refusal reason for a push or new pull request that carries a credential

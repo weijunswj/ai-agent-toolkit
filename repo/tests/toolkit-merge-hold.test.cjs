@@ -363,7 +363,7 @@ test('shell argument lists allow plain feature pushes but refuse a shell nested 
     [['bash', '-c', '-e', 'git push origin work'], null],
     [['bash', '-lc', '--', 'git push origin work'], null],
     [['pwsh', '-NoProfile', '-Command', 'git push origin work'], null],
-    [['bash', '-lc', 'bash -c "git push origin work"'], 'Toolkit: this command runs a git push through another shell (bash -c, pwsh -Command, cmd /c or eval), so Toolkit cannot read where it pushes and refused it. Run the push as its own git command.'],
+    [['bash', '-lc', 'bash -c "git push origin work"'], 'Toolkit: this command could run a git push through another shell (bash, pwsh, cmd or eval), so Toolkit cannot read where it pushes and refused it. Run the push as its own plain git command.'],
   ];
   for (const [command, expected] of rows) {
     const result = decide(ctx, { cwd: feature, tool_name: 'shell', tool_input: { command } });
@@ -382,7 +382,7 @@ test('shell argument lists allow plain feature pushes but refuse a shell nested 
 test('pushes through another shell or expression runner are refused outright', (t) => {
   const ctx = context(t);
   const feature = repository(ctx.root, 'feature', { branch: 'work' });
-  const message = 'Toolkit: this command runs a git push through another shell (bash -c, pwsh -Command, cmd /c or eval), so Toolkit cannot read where it pushes and refused it. Run the push as its own git command.';
+  const message = 'Toolkit: this command could run a git push through another shell (bash, pwsh, cmd or eval), so Toolkit cannot read where it pushes and refused it. Run the push as its own plain git command.';
   const blocked = [
     'bash -c "git push origin feature"', 'bash -ce "git push origin HEAD:main"', 'bash -c -e "git push"',
     "sh -lc 'git push'", 'zsh -c "if true; then git push origin HEAD:main; fi"',
@@ -396,7 +396,7 @@ test('pushes through another shell or expression runner are refused outright', (
     '. powershell -c "git push"', 'exec command nohup builtin bash -ec "git push"', 'W=value bash -c "git push"',
     '{bash -c "git push"}', '(bash -c "git push")', '&bash -c "git push"',
     'dash -c "git push"', 'ksh -c "git push"', 'cmd /kgit push',
-    'pwsh -e ZwBpAHQA', 'pwsh -enc ZwBpAHQA', 'pwsh -ec ZwBpAHQA',
+    'pwsh -NoProfile -EncodedCommand ZwBpAHQA', 'pwsh -e ZwBpAHQA', 'pwsh -enc ZwBpAHQA', 'pwsh -ec ZwBpAHQA',
     'pwsh -Command "Set-Location -LiteralPath somewhere; git push"', 'bash -c "bash -c git push"',
     'pwsh -Command "Write-Output ready;" "git push origin HEAD:main"',
     'powershell -ExecutionPolicy Bypass "git push origin HEAD:main"',
@@ -413,23 +413,48 @@ test('pushes through another shell or expression runner are refused outright', (
     'iex $s; echo git push', 'Invoke-Expression ${CMD}; echo git push',
     "Write-Output 'git push origin HEAD:feature' | Invoke-Expression",
     "Write-Output 'git push origin HEAD:feature' | iex",
+    `Write-Output "$(powershell -Command 'git push origin HEAD:main')"`,
+    "Write-Output 'git push origin HEAD:main' | & Invoke-Expression",
+    "& 'pwsh' -Command { git push origin HEAD:main }",
+    "if ($true) { & 'bash' -c 'git push origin feature' }",
+    `& 'bash' -c "git push origin HEAD:main"`,
+    '& "pwsh.exe" -Command "git push origin feature"',
+    String.raw`& 'C:\Program Files\Git\bin\bash.exe' -c "git push origin feature"`,
+    '& "/usr/bin/bash" -c "git push origin feature"',
+    'git commit --allow-empty -m bash -m x && git push origin feature',
+    'Write-Output "`powershell -Command \'git push origin HEAD:main\'`"',
+    'Write-Output "$(Write-Output \"$(powershell -Command \'git push origin feature\')\")"',
+    'bash -c "npm test" && git push origin feature',
+    'bash -lc "make"; git push origin feature',
+    'pwsh -Command "Write-Output ok" | Out-Null; git push origin feature',
+    'bash "$SCRIPT"; echo git push',
+    'cmd /d %CMD% & echo git push',
+    'bash -c "npm test"; echo $PUSH git push',
   ];
   for (const command of blocked) assert.equal(decide(ctx, bash(feature, command))?.deny, message, command);
   const allowed = ['git push origin work', 'bash -c "git status"', 'pwsh -Command "Write-Output ready"',
-    'git commit -m "Refuse bash -c git push wrappers"', `rg -F 'bash -c "git push"' repo`,
-    'gh pr create --title "Block bash -c git push"',
+    'git commit -m "Refuse bash -c git push wrappers"',
     'git commit --allow-empty -m "bash" -m "Document -c git push handling"',
-    "Write-Output 'hello' | Invoke-Expression", "Write-Output 'hello' | iex",
+    'git commit --allow-empty -m bash -m "Document -c git push handling"',
+    'git commit -m "Document pwsh -EncodedCommand git push handling"',
+    'git commit -q -m "Refuse git push run through bash -c" && git push origin feature',
+    'git commit -m "Fix sh script" && git push origin feature',
+    'git commit -m "Add cmd support"; git push origin feature',
+    "git commit -m 'Fix sh script' && git push origin feature",
+    String.raw`git commit -m "Fix \"sh\" script" && git push origin feature`,
+    "git commit -m 'Fix ''sh'' script' && git push origin feature",
+    `rg -F 'bash -c "git push"' repo`,
+    'gh pr create --title "Block bash -c git push"',
     "Write-Output 'git push origin HEAD:feature | Invoke-Expression'",
+    `rg -F 'eval "$PUSH" # git push' repo`,
+    `Write-Output '$(powershell -Command "git push origin feature")'`,
+    'bash -c "npm test"',
+    "Write-Output 'hello' | Invoke-Expression", "Write-Output 'hello' | iex",
     String.raw`git commit -m "Refuse \"bash -c git push\" wrappers"`,
     'cmd /c echo push', 'eval echo git', 'bash script.sh',
-    'bash -c "npm test" && git push origin feature', 'bash -lc "make"; git push origin feature',
-    'pwsh -Command "Write-Output ok" | Out-Null; git push origin feature',
     'eval "$(ssh-agent -s)"', 'bash -c "cd $HOME && npm test"',
     'pwsh -Command "Write-Output $env:USERNAME"',
-    'eval "$(echo true)"', 'bash "$SCRIPT"; echo git push',
-    'cmd /d %CMD% & echo git push', 'bash -c "npm test"; echo $PUSH git push',
-    `rg -F 'eval "$PUSH" # git push' repo`,
+    'eval "$(echo true)"',
     'bash -c "$CMD"; echo git pushy', 'eval "$CMD"; echo digit push'];
   for (const command of allowed) assert.equal(decide(ctx, bash(feature, command)), null, command);
 });

@@ -98,10 +98,10 @@
         }
       },
       "expect": {
-        "decision": "allow"
+        "decision": "deny"
       },
       "status": "pass",
-      "note": "The plain feature push is a separate command after the runner, so it stays allowed."
+      "note": "Accepted false refusal: this non-plain line mentions a runner and git push. Run the push as its own plain git command."
     },
     {
       "id": "PUSH.committed-credential",
@@ -1521,7 +1521,7 @@
         "decision": "allow"
       },
       "status": "pass",
-      "note": "Quoted command examples in ordinary data arguments stay allowed."
+      "note": "Shell names inside quoted search text do not count as runners."
     },
     {
       "id": "CODEX.location-option-unconfirmed-folder",
@@ -1844,6 +1844,174 @@
       },
       "status": "pass",
       "note": "A quoted runner name in a data argument is not a command."
+    },
+    {
+      "id": "CODEX.quoted-location-call-operator",
+      "source": "Plain git rule: regression from repeated shell-family reviews",
+      "kind": "hostile",
+      "hosts": [
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "& 'Set-Location' -LiteralPath .\\other; git push origin HEAD:feature"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature",
+          "nested_worktrees": [
+            {
+              "branch": "lane-one"
+            },
+            {
+              "branch": "lane-two"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "Several clean reachable worktrees do not confirm the folder for a compound line, even when the location command name is quoted."
+    },
+    {
+      "id": "S1.quoted-powershell-substitution",
+      "source": "Plain git rule: regression from repeated shell-family reviews",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "Write-Output \"$(powershell -Command 'git push origin HEAD:main')\""
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "S1.pipeline-call-operator-invoke-expression",
+      "source": "Plain git rule: regression from repeated shell-family reviews",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "Write-Output 'git push origin HEAD:main' | & Invoke-Expression"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "S1.benign-unquoted-runner-commit-message",
+      "source": "Plain git rule: regression from repeated shell-family reviews",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "git commit --allow-empty -m bash -m \"Document -c git push handling\""
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass",
+      "note": "A plain git line may mention a runner and git push as message data."
+    },
+    {
+      "id": "PUSH.benign-quoted-shell-commit-then-push",
+      "source": "Owner correction: quoted shell names in commit messages must not block a feature push",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "git commit --allow-empty -q -m \"Fix sh script\" && git push origin feature"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass",
+      "note": "Shell names inside quoted commit text do not count as runners."
+    },
+    {
+      "id": "CODEX.read-before-head-push",
+      "source": "Plain git rule: regression from repeated shell-family reviews",
+      "kind": "hostile",
+      "hosts": [
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "git status; git push origin HEAD:feature"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature",
+          "nested_worktrees": [
+            {
+              "branch": "lane-one"
+            },
+            {
+              "branch": "lane-two"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "Even a read before HEAD makes the whole line non-plain; unknown-folder HEAD scanning is only allowed for one plain git command."
     }
   ]
 }

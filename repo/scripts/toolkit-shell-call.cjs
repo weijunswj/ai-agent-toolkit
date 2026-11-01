@@ -86,6 +86,33 @@ function shellCommands(text) {
   return commands;
 }
 
+// The shared safe subset for a push checked without interpreting shell syntax: exactly one git
+// command, no substitutions anywhere (even quoted), and no unquoted operators or cmd variables.
+function plainGitLine(text) {
+  if (/\$[({]|`|[<>]\(/.test(text)) return false;
+  let quote = '';
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    const next = text[index + 1];
+    if (quote !== "'" && char === '\\' && next
+      && (quote === '"' ? '"\\$'.includes(next) : /[\s"'\\]/.test(next))) {
+      if (!quote && /[\r\n]/.test(next)) return false;
+      index += 1;
+      continue;
+    }
+    if (quote) {
+      if (char === quote) {
+        if (quote === "'" && next === "'") index += 1;
+        else quote = '';
+      }
+    } else if (char === '"' || char === "'") quote = char;
+    else if (/[;&|(){}\r\n]/.test(char) || (char === '%' && /^%[^%\s]+%/.test(text.slice(index)))) return false;
+  }
+  if (quote) return false;
+  const commands = shellCommands(text);
+  return commands.length === 1 && /(?:^|[\\/])git(?:\.exe)?$/i.test(commands[0].words[0]);
+}
+
 // A folder or file a shell command names, resolved against `base` as the shell would: a leading `~`
 // (alone, `~/` or `~\`) is the home folder in every shell. On Windows a Git Bash drive path
 // (`/c/Users/...`, `/cygdrive/c/...`, any drive letter) names that drive and `/tmp` the user's temp
@@ -307,4 +334,4 @@ class ShellCall {
   }
 }
 
-module.exports = Object.freeze({ SHELLS, SHELL_TOOL_NAMES, SHELL_TOOLS, UNREADABLE, ShellCall, absoluteShellPath, argvText, assignVariable, assignmentOf, folderWord, quoteWords, shellCommands, shellOf, shellPath, shellReadings });
+module.exports = Object.freeze({ SHELLS, SHELL_TOOL_NAMES, SHELL_TOOLS, UNREADABLE, ShellCall, absoluteShellPath, argvText, assignVariable, assignmentOf, folderWord, plainGitLine, quoteWords, shellCommands, shellOf, shellPath, shellReadings });
