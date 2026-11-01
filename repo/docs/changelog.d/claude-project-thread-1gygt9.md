@@ -6,3 +6,4 @@
 - Projects links: posts link the chat thread that owns the work, UAT asks included. A direct PR link appears only on a merge ask for a merge-ready PR, and the hourly nudge flags any other PR link.
 - Projects posts: choices under a question are lettered (a., b.) because the owner picks one, and a device is named by the name the project instructions record for it.
 - Projects coordinator: relays every daily check-in and hourly nudge report with the waiting-on-you list, and keeps each owed decision-trace record on the promise list until it is posted and read back.
+- Projects posts: **Waiting on you** is always the last part of a post, after the ELI5 line.
