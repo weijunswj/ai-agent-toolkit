@@ -27,7 +27,9 @@ for (const level of ['major']) {
     const clone = path.join(scratch, fs.readdirSync(scratch).find(name => name.startsWith('rebump-')));
     assert.equal(f.git(clone, 'show', '-s', '--format=%P', 'HEAD~1'), `${oldHead} ${f.main}`);
     assert.equal(f.git(clone, 'merge-base', '--is-ancestor', oldHead, first.head), '');
-    assert.doesNotMatch(f.git(clone, 'log', '-2', '--format=%B'), /Co-Authored-By|Generated with|session|\bAI\b/i);
+    assert.deepEqual(f.git(clone, 'log', '-2', '--format=%an <%ae>|%cn <%ce>').split('\n'),
+      Array(2).fill('Release test <release@example.com>|Release test <release@example.com>'));
+    assert.doesNotMatch(f.git(clone, 'log', '-2', '--format=%B'), /Co-Authored-By|Generated[ -]with|session|\bAI\b/i);
     assert.equal(f.operation().process(f.pr()).status, 'unchanged');
     f.mainRelease(level === 'major' ? '4.1.0' : '3.2.0');
     const second = f.operation().process(f.pr());
@@ -61,6 +63,25 @@ test('source conflicts abort scratch merge and never change the branch', t => {
   assert.equal(result.status, 'held'); assert.match(result.reason, /source conflict/);
   assert.equal(f.pr().head.sha, head);
   assert.equal(fs.existsSync(path.join(result.scratch, '.git/MERGE_HEAD')), false);
+});
+
+test('failed merge abort holds for manual scratch recovery and never pushes', t => {
+  const f = fixture(t); const head = f.pr().head.sha;
+  let abortStatus, pushes = 0;
+  const result = f.operation(true, {
+    generate: cwd => { write(cwd, 'main.txt', 'unfinished generation\n'); throw new Error('generator refused'); },
+    git: (cwd, args) => {
+      if (args[0] === 'push') pushes += 1;
+      const response = f.raw(cwd, args);
+      if (args[0] === 'merge' && args[1] === '--abort') abortStatus = response.status;
+      return response;
+    },
+  }).process(f.pr());
+  assert.ok(Number.isInteger(abortStatus) && abortStatus !== 0);
+  assert.equal(result.status, 'held');
+  assert.match(result.reason, /generator refused; git merge --abort failed.*scratch checkout needs manual recovery/);
+  assert.equal(fs.existsSync(path.join(result.scratch, '.git/MERGE_HEAD')), true);
+  assert.equal(pushes, 0); assert.equal(f.pr().head.sha, head);
 });
 
 test('mechanical version conflicts preserve independent manifest fields from both sides', t => {

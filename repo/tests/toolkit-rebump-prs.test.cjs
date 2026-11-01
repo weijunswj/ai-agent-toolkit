@@ -69,7 +69,9 @@ for (const level of ['patch', 'minor']) {
     const clone = path.join(scratch, fs.readdirSync(scratch).find(name => name.startsWith('rebump-')));
     assert.equal(f.git(clone, 'show', '-s', '--format=%P', 'HEAD~1'), `${oldHead} ${f.main}`);
     assert.equal(f.git(clone, 'merge-base', '--is-ancestor', oldHead, first.head), '');
-    assert.doesNotMatch(f.git(clone, 'log', '-2', '--format=%B'), /Co-Authored-By|Generated with|session|\bAI\b/i);
+    assert.deepEqual(f.git(clone, 'log', '-2', '--format=%an <%ae>|%cn <%ce>').split('\n'),
+      Array(2).fill('Release test <release@example.com>|Release test <release@example.com>'));
+    assert.doesNotMatch(f.git(clone, 'log', '-2', '--format=%B'), /Co-Authored-By|Generated[ -]with|session|\bAI\b/i);
     assert.equal(f.operation().process(f.pr()).status, 'unchanged');
     f.mainRelease(level === 'major' ? '4.1.0' : '3.2.0');
     const second = f.operation().process(f.pr());
@@ -80,6 +82,26 @@ for (const level of ['patch', 'minor']) {
     assert.equal(f.git(f.repo, 'status', '--porcelain'), before);
   });
 }
+
+test('missing configured identity holds with a Git failure and never pushes', t => {
+  const f = fixture(t); const head = f.pr().head.sha;
+  let failure, pushes = 0;
+  const result = f.operation(true, { git: (cwd, args) => {
+    if (args[0] === 'push') pushes += 1;
+    const response = f.raw(cwd, args);
+    if (args[0] === 'clone' && response.status === 0) {
+      const clone = args.at(-1);
+      f.git(clone, 'config', 'user.useConfigOnly', 'true');
+      f.git(clone, 'config', 'user.name', '');
+      f.git(clone, 'config', 'user.email', '');
+    }
+    if (['merge', 'commit'].includes(args[0]) && response.status !== 0) failure = response;
+    return response;
+  } }).process(f.pr());
+  assert.equal(result.status, 'held'); assert.match(result.reason, /merge failed|commit failed/);
+  assert.ok(failure); assert.match(failure.stderr, /identity|ident|user\.name|user\.email/i);
+  assert.equal(pushes, 0); assert.equal(f.pr().head.sha, head);
+});
 
 test('report discovery verifies origin and account, pages PRs and executes no mutating git command', t => {
   const f = fixture(t); const commands = [], pages = [];

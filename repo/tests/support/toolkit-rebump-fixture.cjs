@@ -20,12 +20,20 @@ function fixture(t, level = 'minor') {
   t.after(() => fs.rmSync(temp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
   const repo = path.join(temp, 'writer'), remote = path.join(temp, 'remote.git');
   fs.mkdirSync(repo);
-  const raw = (cwd, args) => spawnSync('git', args, { cwd, encoding: 'utf8', windowsHide: true });
+  const raw = (cwd, args) => {
+    const result = spawnSync('git', args, { cwd, encoding: 'utf8', windowsHide: true });
+    // Clones do not inherit the writer's local identity; configure disposable repos only.
+    if (args[0] === 'clone' && result.status === 0) setIdentity(args.at(-1));
+    return result;
+  };
   const git = (cwd, ...args) => { const result = raw(cwd, args); assert.equal(result.status, 0, `${args.join(' ')}: ${result.stderr}`); return result.stdout.trim(); };
+  const setIdentity = cwd => {
+    git(cwd, 'config', 'user.name', 'Release test');
+    git(cwd, 'config', 'user.email', 'release@example.com');
+  };
   git(temp, 'init', '--bare', '-q', remote);
   git(repo, 'init', '-q', '-b', 'main');
-  git(repo, 'config', 'user.name', 'Release test');
-  git(repo, 'config', 'user.email', 'release@example.com');
+  setIdentity(repo);
   git(repo, 'config', 'core.autocrlf', 'false');
   git(repo, 'remote', 'add', 'origin', remote);
   for (const file of ['toolkit-version.cjs', 'toolkit-version-at-merge.cjs', 'bump-version.cjs']) {
@@ -76,6 +84,7 @@ function fixture(t, level = 'minor') {
   const main = mainRelease('3.1.1');
   const operation = (apply = true, overrides = {}) => {
     const op = new PrRebumpOperation({ workspace: repo, repo: 'example/toolkit', apply }, {
+      git: raw,
       github: args => {
         if (args[0] === 'auth') return '';
         if (args[1] === 'user') return JSON.stringify({ login: 'release-test' });

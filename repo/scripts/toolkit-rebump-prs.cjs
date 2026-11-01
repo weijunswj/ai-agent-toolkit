@@ -166,8 +166,6 @@ class PrRebumpOperation {
   prepare(cwd, pr, snapshot) {
     const s = snapshot;
     this.g(cwd, ['checkout', '-q', '-b', 'rebump-candidate', s.head]);
-    this.g(cwd, ['config', 'user.name', 'Toolkit release maintenance']);
-    this.g(cwd, ['config', 'user.email', 'release@example.com']);
     // Refuse links and gitlinks before any generator writes through a path.
     for (const sha of [s.base, s.head, s.main]) {
       const tree = this.g(cwd, ['ls-tree', '-r', sha]);
@@ -238,8 +236,12 @@ class PrRebumpOperation {
       return { number: pr.number, status: 'verified', main, oldHead: snapshot.head, head: candidate, level: snapshot.level, version: snapshot.target };
     } catch (error) {
       // Keep failed preparation for inspection; never retry a push here.
-      if (scratch && fs.existsSync(path.join(scratch, '.git', 'MERGE_HEAD'))) this.git(scratch, ['merge', '--abort']);
-      return { number: pr.number, status: 'held', reason: error.message, ...(scratch ? { scratch } : {}) };
+      let reason = error.message;
+      if (scratch && fs.existsSync(path.join(scratch, '.git', 'MERGE_HEAD'))) {
+        try { checked(this.git(scratch, ['merge', '--abort']), 'git merge --abort'); }
+        catch (abortError) { reason += `; ${abortError.message}; scratch checkout needs manual recovery`; }
+      }
+      return { number: pr.number, status: 'held', reason, ...(scratch ? { scratch } : {}) };
     }
   }
   run() {
