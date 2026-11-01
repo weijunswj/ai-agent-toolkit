@@ -1258,14 +1258,14 @@ class PromptHold {
     }
     const resumed = Boolean(answer || short) && this.#held.count(id, sessionId) > 0;
     const held = this.#held.add(id, prompt, sessionId, marks, verdict.state.root);
+    const question = count => local ? notGitHubText(verdict, count) : questionText(verdict, count);
+    const ask = notice => local ? { action: 'block', reason: notice } : this.#ask(notice, sessionId, marks);
     // Even a first, pre-question delivery must stay spent if the host delivers it again. It cannot
     // answer now; keeping its id also covers hosts whose timestamps have only second precision.
     if (!asked && message.wrapped && ownTyped(message)) {
       const claim = this.#claim(message, null, sessionId, marks);
-      if (claim && !claim.reason.startsWith(REPEAT_TEXT)) return claim;
+      if (claim && !claim.reason.startsWith(REPEAT_TEXT)) return ask(`${claim.reason}\n${question(1)}`);
     }
-    const question = count => local ? notGitHubText(verdict, count) : questionText(verdict, count);
-    const ask = notice => local ? { action: 'block', reason: notice } : this.#ask(notice, sessionId, marks);
     if (!asked && verdict.reason === 'undecided' && governance.readNotGitHubOk(governance.localRepositoryId(verdict.state.root), this.#registryOptions)) {
       return ask(`${REMOTE_CHANGED_LINE}\n${question(1)}`);
     }

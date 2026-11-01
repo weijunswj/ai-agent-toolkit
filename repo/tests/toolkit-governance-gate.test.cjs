@@ -177,6 +177,49 @@ for (const local of [false, true]) {
   });
 }
 
+for (const local of [false, true]) for (const picker of [false, true]) {
+  test(`closure initial receipt errors show the question: ${local ? 'not-github' : 'undecided'} / picker ${picker}`, t => {
+    for (const failure of ['damaged', 'full']) {
+      const f = answerFixture(t, local);
+      const file = path.join(path.dirname(f.ctx.registryPath), gate.TICKETS_BASENAME);
+      const stored = failure === 'damaged' ? '{broken' : JSON.stringify({
+        schema: 'toolkit.governance-reply-tickets.v2', sessions: {},
+        deliveries: Array.from({ length: 4096 }, (_, index) => ({
+          id: crypto.createHash('sha256').update(String(index)).digest('hex'), at: f.now().toISOString(),
+        })),
+      });
+      fs.writeFileSync(file, stored);
+      const initial = new gate.PromptHold({ ...f.options, picker }).decide({
+        cwd: f.cwd, prompt: projects.wake('yes', { now: f.now }), sessionId: 'owner',
+      });
+      assert.equal(initial.action, picker && !local ? 'pass' : 'block', failure);
+      const notice = initial.reason || noticeOf(initial.context);
+      assert.match(notice, failure === 'damaged' ? /reply could not be checked or kept \(REPLY_TICKETS_MALFORMED\)/ : /delivery-receipt store is full/);
+      const question = local
+        ? 'Toolkit: message held. This repository has no github.com origin remote, so GitHub governance will be off here; the coding rules still apply.\nReply ok to continue. Held messages follow your answer.'
+        : `${QUESTION_LINE}\nReply yes, no (never ask again) or later (ask next session). Held messages follow your answer.`;
+      assert.ok(notice.endsWith(`${question}\n${AGENT_LINE}`), notice);
+      if (picker && !local) {
+        assert.match(initial.notice, /pick an answer/);
+        assert.ok(initial.context.includes(JSON.stringify(gate.PICKER_INPUT)), 'the same governance card');
+      }
+      assert.equal(replyTicket(initial), undefined, 'the pre-question yes grants no ticket');
+      assert.equal(stateOf(f.ctx, f.target).state, 'UNDECIDED', 'the pre-question yes records nothing');
+      assert.equal(registryBytes(f.ctx), null);
+      f.tick(1);
+      assert.equal(f.say(projects.wake('yes', { now: f.now })).action, 'block', 'wrapped answers still need working receipts');
+      assert.equal(stateOf(f.ctx, f.target).state, 'UNDECIDED');
+      assert.equal(f.say('yes').action, 'pass', 'a bare answer works after the question was shown');
+      assert.equal(stateOf(f.ctx, f.target).state, local ? 'DISABLED' : 'ENABLED');
+      if (local) {
+        assert.equal(stateOf(f.ctx, f.target).rule, 'R8');
+        assert.equal(registryBytes(f.ctx), null, 'local yes acknowledges off only');
+      }
+      assert.equal(fs.readFileSync(file, 'utf8'), stored, 'spent receipts are preserved');
+    }
+  });
+}
+
 test('bare exact answers work with damaged receipts in either held repository kind', t => {
   for (const local of [false, true]) for (const answer of ['no', 'toolkit governance disable']) {
     const f = answerFixture(t, local); f.ask();

@@ -118,6 +118,22 @@
       "status": "pass"
     },
     {
+      "id": "GOV.initial-receipt-error-card",
+      "source": "governance receipt error: the first held Projects delivery must still show the question",
+      "kind": "state",
+      "hosts": ["claude"],
+      "event": "UserPromptSubmit",
+      "payload": {"prompt":"<wake reason=\"mention\" current-time=\"{now}\"><project id=\"chan_example\" type=\"project\"><thread ts=\"cmsg_thread\"><message trigger=\"true\" from=\"human\" trust=\"principal\" author-id=\"user_example\" id=\"cmsg_initial_reply\" sent-at=\"{now}\" mention=\"true\">yes</message></thread></project></wake>"},
+      "fixture": {
+        "repo": {"governance":"undecided","branch":"feature"},
+        "owner_session": true,
+        "files": {"../home/.ai-agent-toolkit/user-state/governance-reply-tickets.v1.json":"{broken"}
+      },
+      "expect": {"decision":"allow"},
+      "status": "pass",
+      "note": "Claude Code must let the turn show the receipt error and governance card. Text-only hosts still block, so their question text is checked in the closure unit matrix. The damaged state stays inside this row's isolated fixture home."
+    },
+    {
       "id": "GOV.off-own-words",
       "source": "owner thread reply closure matrix",
       "kind": "state",
