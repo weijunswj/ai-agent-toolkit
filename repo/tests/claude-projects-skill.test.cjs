@@ -18,14 +18,25 @@ const referenceFiles = () => fs.readdirSync(path.join(repoRoot, REFERENCE_DIR)).
   .map(name => `${REFERENCE_DIR}/${name}`);
 const bundle = () => [SKILL_REL, ...referenceFiles()].map(read).join('\n');
 
-test('the coordinator requests local release reconciliation and renewed review after main moves', () => {
+test('merging agents reconcile release versions with a computer handoff and renewed review', () => {
   const text = read(SKILL_REL);
   const periodic = read(`${REFERENCE_DIR}/periodic-runs.md`);
-  for (const surface of [text, periodic]) {
-    assert.ok(surface.includes('node repo/scripts/toolkit-rebump-prs.cjs'));
-    assert.ok(surface.includes('--apply'));
+  const root = read('AGENTS.md');
+  const guide = read('repo/docs/changelog.d/README.md');
+  const map = read('repo/ARCHITECTURE.md');
+  for (const surface of [text, periodic, root, guide]) {
+    assert.ok(surface.includes('node repo/scripts/toolkit-rebump-prs.cjs --apply'));
     assert.match(surface, /computer lane/);
   }
+  assert.match(root, /After merging any PR in this repository, the merging agent runs/);
+  assert.match(root, /after agreeing branch custody with the current builders; without a computer, it asks a computer lane to do so/);
+  assert.match(guide, /After each merge in this repository, the merging agent runs the apply command below, or asks a computer lane to run it if it has no computer/);
+  assert.match(guide, /Agree branch custody with the current builders before applying/);
+  assert.match(periodic, /After each merge in the Toolkit repository,.*ask an available computer lane to run `node repo\/scripts\/toolkit-rebump-prs\.cjs --apply`/);
+  assert.match(periodic, /Agree custody with the current builders before applying/);
+  assert.match(periodic, /Default mode only reports/);
+  assert.match(map, /`repo\/scripts\/toolkit-rebump-prs\.cjs` \(merging agent or requested computer lane;/);
+  assert.doesNotMatch(root + guide + map, /After each merge the coordinator|coordinator requests a computer lane/);
   // The skill points at the reference; holds, offline recovery and review live there.
   assert.match(periodic, /fresh G2|full delta G2/);
   assert.match(periodic, /offline/);
