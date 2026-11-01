@@ -1346,6 +1346,10 @@ class PromptHold {
     let pending = null;
     try { pending = this.#tickets.pending(sessionId, epoch); } catch { /* no authority from unreadable state */ }
     const question = previous || pending?.repositories[0];
+    if (pending && (pending.repositories.length !== 1 || !sameQuestion(pending.repositories[0], question))) {
+      this.#dropTicket(sessionId);
+      pending = null;
+    }
     if (!question) {
       try { return verdict.reason === 'no-git' ? { action: 'pass' } : this.#replayIfAny(verdict.state, sessionId); }
       catch { return { action: 'pass', context: 'Toolkit could not return this session\'s earlier held messages. Restore the local held-message store\'s read/write access and retry; the messages stay in that store.' }; }
@@ -1682,7 +1686,7 @@ class ToolGate {
       if (!previous || previous.reason !== 'not-github' || previous.root !== verdict.state.root) return null;
       this.#held.ask(verdict, sessionId, { session: this.#epochs.get(sessionId), repository: this.#epochs.repository(verdict.state.repository_id) });
       return { deny: `${REMOTE_CHANGED_LINE}\n${this.#reachedQuestion(verdict)}\n${NEVER_OWNER}` };
-    } catch (error) { return this.#bindingFailure(verdict, error); }
+    } catch (error) { return this.#bindingFailure(`Toolkit: this repository (${verdict.state.root}) is waiting for the user's governance answer, so nothing runs here.`, error); }
   }
 
   decide(input) {
@@ -1707,9 +1711,13 @@ class ToolGate {
       return { deny: `Toolkit: its user-state files (governance decisions and held messages) are changed only by Toolkit itself. ${NEVER_OWNER}` };
     }
     if (tool === PICKER_TOOL) return this.#picker(input, sessionId);
-    // A prompt the agent schedules for itself could arrive as bare text and read as the user's reply,
-    // so none is scheduled while this run has a reply ticket, confirmation or "later" answer open.
+    // A scheduled prompt can arrive as bare text. End the reached question and any confirmation
+    // without refusing scheduling or ending a "later" permission for ordinary work elsewhere.
     const scheduleVerdict = SCHEDULE_TOOLS.test(tool) ? this.#gate.evaluate(input && input.cwd, { sessionId }) : null;
+    if (scheduleVerdict && !scheduleVerdict.hold && scheduleVerdict.reason !== 'not-now' && sessionId) {
+      try { this.#held.clearQuestion(sessionId); this.#tickets.drop(sessionId); }
+      catch { this.#epochs.start(sessionId, 'schedule'); } // Failed cancellation must grant no answer.
+    }
     if (scheduleVerdict && (scheduleVerdict.hold || scheduleVerdict.reason === 'not-now') && this.#questionOpen(sessionId)) {
       return { deny: `Toolkit: this session has Toolkit's governance question open (or the user said "later" to it), so no prompt is scheduled for the rest of this run, unless the user answers it; after "later", only the full \`toolkit governance enable\` or \`disable\` sent as a message does. ${NEVER_OWNER}` };
     }
@@ -1740,8 +1748,11 @@ class ToolGate {
     } else if (EDIT_TOOLS.test(tool)) {
       targets = editTargets(input).map(target => path.dirname(resolveTarget(input, target)));
     }
-    const verdict = targets.map(target => this.#verdict(target, sessionId)).find(target => target?.hold);
-    if (!verdict) return null;
+    const reached = targets.find(target => this.#verdict(target, sessionId)?.hold);
+    if (reached === undefined) return null;
+    const verdict = this.#verdict(reached, sessionId);
+    if (!verdict?.hold) return null;
+    const refused = `Toolkit: this ${SHELL_TOOLS.test(tool) ? 'command works' : 'edit is'} in a repository that is waiting for the user's governance answer (${reached}), so it is refused.`;
     if (verdict.reason === 'state-unreadable') return { deny: unreadableText(verdict.state, this.#registryOptions) };
     try {
       const previous = this.#held.question(sessionId);
@@ -1752,8 +1763,8 @@ class ToolGate {
       const named = pending?.hold ? pending : verdict;
       if (!pending?.hold) this.#held.ask(named, sessionId, { session: this.#epochs.get(sessionId), repository: this.#epochs.repository(named.state.repository_id) });
       const flip = previous && previous.reason === 'not-github' && named.reason === 'undecided' && previous.root === named.state.root;
-      return { deny: `Toolkit: this ${SHELL_TOOLS.test(tool) ? 'command works' : 'edit is'} in ${verdict.state.root}, which is waiting for the user's governance answer, so it is refused.\n${flip ? `${REMOTE_CHANGED_LINE}\n` : ''}${this.#reachedQuestion(named)}\n${NEVER_OWNER}` };
-    } catch (error) { return this.#bindingFailure(verdict, error); }
+      return { deny: `${refused}\n${flip ? `${REMOTE_CHANGED_LINE}\n` : ''}${this.#reachedQuestion(named)}\n${NEVER_OWNER}` };
+    } catch (error) { return this.#bindingFailure(refused, error); }
   }
 
   #reachedQuestion(verdict) {
@@ -1761,8 +1772,8 @@ class ToolGate {
     return `Pass this question to the user word for word, then end your turn. Answer here for this one folder: ${verdict.state.root}.\n${asked}`;
   }
 
-  #bindingFailure(verdict, error) {
-    return { deny: `Toolkit: this command or edit is refused in ${verdict.state.root}, which still needs the user's governance answer. The answer could not be bound (${codeOf(error)}). Restore the local held-message store's read/write access, then retry the refused call to ask again. Work in other folders can carry on. ${NEVER_OWNER}` };
+  #bindingFailure(refused, error) {
+    return { deny: `${refused} The answer could not be bound (${codeOf(error)}). Restore the local held-message store's read/write access, then retry the refused call to ask again. Work in other folders can carry on. ${NEVER_OWNER}` };
   }
 
   // Whether this run has a live reply ticket or confirmation, or a "later" answer (after which the

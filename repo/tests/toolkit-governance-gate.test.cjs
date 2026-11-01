@@ -219,6 +219,73 @@ test('reached question stays with the first folder and success names it', t => {
   assert.equal(stateOf(f.ctx, other).state, 'UNDECIDED');
 });
 
+test('reached confirmation cannot retarget its command to a newer question', t => {
+  for (const localA of [false, true]) for (const localB of [false, true]) for (const wording of [false, true]) {
+    const f = answerFixture(t, localA, true); f.ask();
+    const original = replyTicket(f.say('probably leave it off'));
+    assert.ok(original);
+    assert.equal(f.prompts().answerTicket(original, 'confirm-no').ok, true);
+    const other = gitRepo(f.ctx, 'other', { remote: localB ? null : 'https://github.com/example-owner/other.git' });
+    const refused = new gate.ToolGate(f.options).decide({ cwd: f.cwd, session_id: 'owner', tool_name: 'Bash', tool_input: { command: `git -C "${other}" log` } });
+    assert.ok(refused.deny.includes(other));
+    assert.equal(new gate.HeldPrompts(f.options).question('owner').root, other);
+    f.tick(1);
+    const result = f.say(wording ? projects.wake('go with your recommendation', { now: f.now }) : 'yes');
+    assert.equal(result.action, 'pass');
+    assert.equal(stateOf(f.ctx, f.target).state, 'UNDECIDED', 'A is never answered by the reply to B');
+    assert.equal(f.prompts().answerTicket(original, 'no').ok, false, 'A cannot reuse its spent ticket');
+    if (wording) {
+      assert.equal(stateOf(f.ctx, other).state, 'UNDECIDED', 'wording alone records nothing');
+      const ticket = replyTicket(result);
+      const entry = new gate.ReplyTickets(f.options).peek(ticket, 'owner');
+      assert.equal(entry.repositories[0].root, other);
+      assert.equal(entry.command, undefined, 'B does not inherit A\'s disable command');
+      assert.equal(f.prompts().answerTicket(ticket, 'yes').ok, true);
+    } else assert.equal(replyTicket(result), undefined, 'B\'s exact answer needs no confirmation ticket');
+    assert.equal(stateOf(f.ctx, other).state, localB ? 'DISABLED' : 'ENABLED');
+    assert.equal(stateOf(f.ctx, f.target).state, 'UNDECIDED');
+  }
+});
+
+test('scheduling in an unheld folder ends reached answers and confirmations', t => {
+  for (const local of [false, true]) for (const confirm of [false, true]) for (const tool_name of ['CronCreate', 'ScheduleWakeup', 'RemoteTrigger']) {
+    const f = answerFixture(t, local, true); f.ask();
+    if (confirm) {
+      const ticket = replyTicket(f.say('probably leave it off'));
+      assert.equal(f.prompts().answerTicket(ticket, 'confirm-no').ok, true);
+    }
+    assert.equal(new gate.ToolGate(f.options).decide({ cwd: f.cwd, session_id: 'owner', tool_name, tool_input: { prompt: 'yes' } }), null, 'scheduling remains allowed');
+    assert.deepEqual(f.say('yes'), { action: 'pass' }, 'a bare scheduled delivery cannot answer');
+    assert.equal(stateOf(f.ctx, f.target).state, 'UNDECIDED');
+    assert.deepEqual(f.say('fix the parser'), { action: 'pass' });
+    f.ask();
+    assert.equal(f.say('yes').action, 'pass', 'a fresh refusal can ask again');
+    assert.equal(stateOf(f.ctx, f.target).state, local ? 'DISABLED' : 'ENABLED');
+  }
+  for (const tool_name of ['CronCreate', 'ScheduleWakeup', 'RemoteTrigger']) {
+    const f = answerFixture(t, false, true); f.ask(); f.say('later');
+    assert.equal(new gate.ToolGate(f.options).decide({ cwd: f.cwd, session_id: 'owner', tool_name, tool_input: { prompt: 'yes' } }), null);
+    assert.deepEqual(f.say('yes'), { action: 'pass' });
+    assert.equal(new gate.ToolGate(f.options).decide({ cwd: f.cwd, session_id: 'owner', tool_name: 'Bash', tool_input: { command: `git -C "${f.target}" log` } }), null, 'scheduling does not re-hold work after later');
+    assert.equal(stateOf(f.ctx, f.target).state, 'UNDECIDED');
+  }
+  for (const store of ['held', 'tickets']) {
+    const f = answerFixture(t, false, true); f.ask();
+    if (store === 'tickets') assert.equal(f.prompts().answerTicket(replyTicket(f.say('probably leave it off')), 'confirm-no').ok, true);
+    const blocked = store === 'held' ? f.ctx.heldPath : path.join(path.dirname(f.ctx.registryPath), gate.TICKETS_BASENAME);
+    const rename = fs.renameSync;
+    fs.renameSync = (from, to) => {
+      if (to === blocked) throw Object.assign(new Error('fixture cancellation write refused'), { code: 'EACCES' });
+      return rename(from, to);
+    };
+    try {
+      assert.equal(new gate.ToolGate(f.options).decide({ cwd: f.cwd, session_id: 'owner', tool_name: 'CronCreate', tool_input: { prompt: 'yes' } }), null);
+    } finally { fs.renameSync = rename; }
+    assert.deepEqual(f.say('yes'), { action: 'pass' }, 'a failed cancellation cannot leave answering authority');
+    assert.equal(stateOf(f.ctx, f.target).state, 'UNDECIDED');
+  }
+});
+
 test('reached questions never redirect prompts from a decided or later cwd into a hold', t => {
   for (const answer of ['no', 'later']) {
     const f = answerFixture(t, false, true);
@@ -811,13 +878,13 @@ test('from a parent folder: a refusal asks this run about one named repository, 
   const prompts = () => new gate.PromptHold({ registryOptions: ctx.options, environment: {} });
   const [siteA, siteB] = [site('site-a'), site('site-b')];
   gate.startSession({ session_id: 'parent', cwd: parent, source: 'startup' }, { registryOptions: ctx.options });
-  const WORKS = /this command works in [^\n]+which is waiting for the user's governance answer, so it is refused\.[\s\S]*Answer here for this one folder:/;
+  const WORKS = /this command works in a repository that is waiting for the user's governance answer \([^\n]+\), so it is refused\.[\s\S]*Answer here for this one folder:/;
   for (const command of [`git -C "${siteA}" status; Get-Content "${path.join(siteB, 'README.md')}"`, `git -C "${siteA}" status`, `cd "${siteB}"; git status`]) {
     const denied = reach('parent', command)?.deny || '';
     assert.match(denied, WORKS, command);
     assert.ok(denied.endsWith(gate.NEVER_OWNER), command);
   }
-  assert.match(new gate.ToolGate({ registryOptions: ctx.options }).decide({ tool_name: 'Write', cwd: parent, session_id: 'parent', tool_input: { file_path: path.join(siteA, 'index.php') } })?.deny || '', /this edit is in [^\n]+which is waiting/);
+  assert.match(new gate.ToolGate({ registryOptions: ctx.options }).decide({ tool_name: 'Write', cwd: parent, session_id: 'parent', tool_input: { file_path: path.join(siteA, 'index.php') } })?.deny || '', /this edit is in a repository that is waiting for the user's governance answer/);
   // The first live question remains site-a, even after reaching site-b. Only site-a is answered.
   assert.equal(new gate.HeldPrompts({ registryOptions: ctx.options }).count(stateOf(ctx, siteA).repository_id), 0, 'agent commands are never held owner text');
   assert.equal(prompts().decide({ cwd: parent, prompt: 'no', sessionId: 'parent' }).action, 'pass');
@@ -977,14 +1044,16 @@ test('reply tickets: only the exact answer command runs; newest only, half-hour 
   // Nothing recorded (the repository was decided elsewhere first) is a failure, and the script says so.
   const moved = site('moved');
   start('m', moved);
-  prompts().decide({ cwd: moved, prompt: 'first', sessionId: 'm' });
-  const late = ticketOf(prompts().decide({ cwd: moved, prompt: 'leave it off', sessionId: 'm' }).context);
   // Scheduling is held only in the held folder; the plain parent remains usable in either session.
   for (const tool_name of ['CronCreate', 'ScheduleWakeup', 'RemoteTrigger']) {
+    prompts().decide({ cwd: moved, prompt: 'first', sessionId: 'm' });
     assert.match(toolGate().decide({ tool_name, cwd: moved, session_id: 'm', tool_input: { prompt: 'yes' } })?.deny || '', /no prompt is scheduled for the rest of this run, unless the user answers it/, tool_name);
     assert.equal(toolGate().decide({ tool_name, cwd: parent, session_id: 'm', tool_input: { prompt: 'yes' } }), null, tool_name);
     assert.equal(toolGate().decide({ tool_name, cwd: parent, session_id: 'free', tool_input: { prompt: 'yes' } }), null, tool_name);
   }
+  // The plain-folder schedules ended each opportunity. Ask again for the separate decided-elsewhere check.
+  prompts().decide({ cwd: moved, prompt: 'first', sessionId: 'm' });
+  const late = ticketOf(prompts().decide({ cwd: moved, prompt: 'leave it off', sessionId: 'm' }).context);
   gate.writeGovernanceDecision(moved, 'enable', { registryOptions: ctx.options });
   const none = prompts().answerTicket(late, 'no');
   assert.equal(none.ok, false);
@@ -1000,7 +1069,7 @@ test('reply tickets: only the exact answer command runs; newest only, half-hour 
     : governance.governanceState(cwd, ctx.options));
   for (const [command, stateReader] of [[`git -C "${hub}" status; git -C "${local}" status`, null], [`git -C "${hub}" status; git -C "${broken}" status`, unreadable]]) {
     const denied = toolGate(stateReader ? { stateReader } : {}).decide({ tool_name: 'Bash', cwd: parent, session_id: 'mixed', tool_input: { command } })?.deny || '';
-    assert.match(denied, /works in [^\n]+which is waiting for the user's governance answer/, command);
+    assert.match(denied, /works in a repository that is waiting for the user's governance answer/, command);
   }
   // The reader: a trigger marked as carrying attachments is no answer even with no attachment inside.
   assert.equal(gate.ownerReply(REAL_CHAT_WAKE('no').replace('mention="true">', 'mention="true" has-attachments="true">')), '');
@@ -2162,7 +2231,7 @@ test('tools: a command that starts a host session in, or works in, a held reposi
   const plain = path.join(ctx.root, 'plain');
   fs.mkdirSync(plain);
   const QUESTION = /only the user answers the governance question.*Enable Toolkit's automated GitHub tracking governance/;
-  const WORKS = /this command works in [^\n]+which is waiting for the user's governance answer/;
+  const WORKS = /this command works in a repository that is waiting for the user's governance answer/;
   const HELD = /this repository has no governance decision yet, so nothing runs here/;
   const NOT_GITHUB = /GitHub governance will be off here, and nothing runs until the user says ok/;
   const rows = [
@@ -2242,7 +2311,7 @@ test('H2: edits cannot reach held repositories', (t) => {
   gate.writeGovernanceDecision(decided, 'enable', { registryOptions: ctx.options });
   const plain = path.join(ctx.root, 'plain');
   fs.mkdirSync(plain);
-  const EDIT = /this edit is in [^\n]+which is waiting for the user's governance answer/;
+  const EDIT = /this edit is in a repository that is waiting for the user's governance answer/;
   const binding = path.join(held, '.github', 'toolkit-programme.json');
   const edits = [
     ['Write', { file_path: path.join(held, 'AGENTS.md') }, EDIT],

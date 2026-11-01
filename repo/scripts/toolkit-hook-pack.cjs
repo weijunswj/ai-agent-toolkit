@@ -115,8 +115,9 @@ function rowErrors(row) {
     if (!Array.isArray(row.steps) || row.steps.length < 1 || row.steps.length > 24) errors.push('steps must list 1 to 24 preceding hook events');
     else row.steps.forEach((step, index) => {
       if (!step || typeof step !== 'object' || Array.isArray(step)) { errors.push(`step ${index + 1} must be an object`); return; }
-      for (const key of Object.keys(step)) if (!['event', 'payload', 'expect', 'expect_by_host', 'note', 'add_github_origin'].includes(key)) errors.push(`step ${index + 1} has unknown key ${key}`);
+      for (const key of Object.keys(step)) if (!['event', 'payload', 'expect', 'expect_by_host', 'note', 'add_github_origin', 'confirm_governance_no'].includes(key)) errors.push(`step ${index + 1} has unknown key ${key}`);
       if (step.add_github_origin !== undefined && (step.add_github_origin !== true || row.fixture?.repo?.governance !== 'none')) errors.push(`step ${index + 1} add_github_origin requires true and a local-only fixture repository`);
+      if (step.confirm_governance_no !== undefined && (step.confirm_governance_no !== true || step.event !== 'UserPromptSubmit')) errors.push(`step ${index + 1} confirm_governance_no requires true on UserPromptSubmit`);
       const candidate = { id: row.id, source: row.source, hosts: row.hosts, kind: row.kind, status: 'pass',
         event: step.event, payload: step.payload, expect: step.expect, expect_by_host: step.expect_by_host, note: step.note };
       errors.push(...rowErrors(candidate).map(error => `step ${index + 1}: ${error}`));
@@ -516,6 +517,13 @@ async function runOnHost(row, host, fixture, roots) {
     if (step.add_github_origin) fixture.addGitHubOrigin();
     const observed = await runOnHost({ ...row, steps: undefined, expect_by_host: undefined, ...step }, host, fixture, roots);
     if (!meets(step, host, observed)) return { ...observed, problems: [...observed.problems, `sequence step ${index + 1} did not meet its expectation`] };
+    // One bounded fixture action: use the actual hook-issued ticket to ask for confirmation of no.
+    // Run the candidate's answer CLI in this row's disposable home, including for revert proofs.
+    if (step.confirm_governance_no) {
+      if (!observed.governanceTicket) throw new Error('the preceding prompt did not issue a governance ticket');
+      const confirmed = spawnSync(process.execPath, [path.join(roots.base, 'repo', 'scripts', 'toolkit-governance-answer.cjs'), 'confirm-no', observed.governanceTicket], { env: fixture.env, cwd: fixture.work, encoding: 'utf8', windowsHide: true, timeout: DEFAULT_TIMEOUT_SECONDS * 1000 });
+      if (confirmed.status !== 0) throw new Error('the fixture could not ask for governance confirmation');
+    }
   }
   const pluginRoot = roots.forFault(row.fault);
   const event = row.event || 'PreToolUse';
@@ -526,11 +534,15 @@ async function runOnHost(row, host, fixture, roots) {
   const env = { ...fixture.env, ...(host === 'claude' ? { CLAUDE_PLUGIN_ROOT: pluginRoot, CLAUDE_PROJECT_DIR: fixture.work } : { PLUGIN_ROOT: pluginRoot }) };
   const before = fixture.snapshot();
   const decisions = [];
+  let governanceTicket;
   for (const hook of hooks) {
     const own = (hook.timeout || DEFAULT_TIMEOUT_SECONDS) * 1000;
     const timeout = row.fault?.type === 'stall-module' ? Math.min(own, STALL_TIMEOUT_MS) : own;
     const result = await startProcess({ file: shell.file, args: shell.args(hostCommand(host, hook, pluginRoot)), input, env, cwd: fixture.work, timeout });
     decisions.push(hookDecision(host, hook, result));
+    if (event === 'UserPromptSubmit' && result.status === 0) {
+      try { governanceTicket ||= / ANSWER ([0-9a-f]{32})\n/.exec(JSON.parse(result.stdout).hookSpecificOutput?.additionalContext || '')?.[1]; } catch { /* no valid ticket */ }
+    }
   }
   const problems = [];
   const expect = row.expect_by_host?.[host] || row.expect;
@@ -545,7 +557,7 @@ async function runOnHost(row, host, fixture, roots) {
   if (JSON.stringify(fixture.snapshot()) !== JSON.stringify(before)) problems.push('a fixture file changed');
   if (!hooks.length) problems.push(`no ${host} hook matches this call`);
   const deny = decisions.find(entry => entry.decision === 'deny');
-  return { decision: deny ? 'deny' : 'allow', reason: deny?.reason, text: deny ? deny.text : decisions.find(entry => entry.failed)?.text, failed: decisions.filter(entry => entry.failed).map(entry => entry.failed), problems };
+  return { decision: deny ? 'deny' : 'allow', reason: deny?.reason, text: deny ? deny.text : decisions.find(entry => entry.failed)?.text, failed: decisions.filter(entry => entry.failed).map(entry => entry.failed), problems, governanceTicket };
 }
 
 // The hosts a row is known to fail on (none for a passing row).

@@ -3,6 +3,98 @@
   "family": "governance",
   "rows": [
     {
+      "id": "GOV.reached-confirmation-new-question",
+      "source": "delta governance review: a confirmation for one folder cannot shape a newer question",
+      "kind": "state",
+      "hosts": ["claude", "codex"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup","cwd":"{dir}"},"expect":{"decision":"allow"}},
+        {"payload":{"cwd":"{dir}","tool_name":"Bash","tool_input":{"command":"git -C \"{work}\" log"}},"expect":{"decision":"deny"}},
+        {"event":"UserPromptSubmit","payload":{"cwd":"{dir}","prompt":"probably leave it off"},"expect":{"decision":"allow","held_messages":0},"confirm_governance_no":true},
+        {"payload":{"cwd":"{dir}","tool_name":"Bash","tool_input":{"command":"git -C \"{work}/second\" log"}},"expect":{"decision":"deny"}},
+        {"event":"UserPromptSubmit","payload":{"cwd":"{dir}","prompt":"yes"},"expect":{"decision":"allow","held_messages":0}},
+        {"payload":{"cwd":"{dir}","tool_name":"Bash","tool_input":{"command":"git -C \"{work}/second\" log"}},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"cwd":"{dir}","tool_name":"Bash","tool_input":{"command":"git -C \"{work}\" log"}},
+      "fixture": {"repo":{"governance":"undecided"},"files":{
+        "second/.git/HEAD":"ref: refs/heads/main\n",
+        "second/.git/config":"[core]\n\trepositoryformatversion = 0\n\tbare = false\n[remote \"origin\"]\n\turl = https://github.com/toolkit-test-fixture/second.git\n",
+        "second/.git/objects/.keep":"",
+        "second/.git/refs/heads/.keep":""
+      }},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "GOV.reached-cron-bare-reply",
+      "source": "delta governance review: a scheduled bare reply cannot answer the reached question",
+      "kind": "state",
+      "hosts": ["claude"],
+      "note": "Codex has no native scheduling matcher; unit tests cover all three shared-core tool names.",
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup","cwd":"{dir}"},"expect":{"decision":"allow"}},
+        {"payload":{"cwd":"{dir}","tool_name":"Bash","tool_input":{"command":"git -C \"{work}\" log"}},"expect":{"decision":"deny"}},
+        {"payload":{"cwd":"{dir}","tool_name":"CronCreate","tool_input":{"prompt":"yes"}},"expect":{"decision":"allow"}},
+        {"event":"UserPromptSubmit","payload":{"cwd":"{dir}","prompt":"yes"},"expect":{"decision":"allow","held_messages":0}}
+      ],
+      "payload": {"cwd":"{dir}","tool_name":"Bash","tool_input":{"command":"git -C \"{work}\" log"}},
+      "fixture": {"repo":{"governance":"undecided"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "GOV.reached-wakeup-bare-reply",
+      "source": "delta governance review: a scheduled bare reply cannot answer the reached question",
+      "kind": "state",
+      "hosts": ["claude"],
+      "note": "Codex has no native scheduling matcher; unit tests cover all three shared-core tool names.",
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup","cwd":"{dir}"},"expect":{"decision":"allow"}},
+        {"payload":{"cwd":"{dir}","tool_name":"Bash","tool_input":{"command":"git -C \"{work}\" log"}},"expect":{"decision":"deny"}},
+        {"payload":{"cwd":"{dir}","tool_name":"ScheduleWakeup","tool_input":{"prompt":"yes"}},"expect":{"decision":"allow"}},
+        {"event":"UserPromptSubmit","payload":{"cwd":"{dir}","prompt":"yes"},"expect":{"decision":"allow","held_messages":0}}
+      ],
+      "payload": {"cwd":"{dir}","tool_name":"Bash","tool_input":{"command":"git -C \"{work}\" log"}},
+      "fixture": {"repo":{"governance":"undecided"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "GOV.reached-trigger-bare-reply",
+      "source": "delta governance review: a scheduled bare reply cannot answer the reached question",
+      "kind": "state",
+      "hosts": ["claude"],
+      "note": "Codex has no native scheduling matcher; unit tests cover all three shared-core tool names.",
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup","cwd":"{dir}"},"expect":{"decision":"allow"}},
+        {"payload":{"cwd":"{dir}","tool_name":"Bash","tool_input":{"command":"git -C \"{work}\" log"}},"expect":{"decision":"deny"}},
+        {"payload":{"cwd":"{dir}","tool_name":"RemoteTrigger","tool_input":{"prompt":"yes"}},"expect":{"decision":"allow"}},
+        {"event":"UserPromptSubmit","payload":{"cwd":"{dir}","prompt":"yes"},"expect":{"decision":"allow","held_messages":0}}
+      ],
+      "payload": {"cwd":"{dir}","tool_name":"Bash","tool_input":{"command":"git -C \"{work}\" log"}},
+      "fixture": {"repo":{"governance":"undecided"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "GOV.reached-schedule-ends-confirmation",
+      "source": "delta governance review: scheduling also ends a consumed reached confirmation",
+      "kind": "state",
+      "hosts": ["claude"],
+      "note": "Codex has no native scheduling matcher; unit tests cover the shared core.",
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup","cwd":"{dir}"},"expect":{"decision":"allow"}},
+        {"payload":{"cwd":"{dir}","tool_name":"Bash","tool_input":{"command":"git -C \"{work}\" log"}},"expect":{"decision":"deny"}},
+        {"event":"UserPromptSubmit","payload":{"cwd":"{dir}","prompt":"probably leave it off"},"expect":{"decision":"allow","held_messages":0},"confirm_governance_no":true},
+        {"payload":{"cwd":"{dir}","tool_name":"CronCreate","tool_input":{"prompt":"toolkit governance disable"}},"expect":{"decision":"allow"}},
+        {"event":"UserPromptSubmit","payload":{"cwd":"{dir}","prompt":"toolkit governance disable"},"expect":{"decision":"allow","held_messages":0}}
+      ],
+      "payload": {"cwd":"{dir}","tool_name":"Bash","tool_input":{"command":"git -C \"{work}\" log"}},
+      "fixture": {"repo":{"governance":"undecided"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
       "id": "GOV.reached-unreadable-store",
       "source": "governance G2: saving a reached question must not allow the guarded command",
       "kind": "fault",

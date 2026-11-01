@@ -57,6 +57,10 @@ test('bounded sequences validate every preceding event and its expectation', () 
   for (const held_messages of [-1, 1.5, false, '0']) assert.match(pack.rowErrors(row({ expect: { decision: 'allow', held_messages } })).join('\n'), /held_messages must be a non-negative integer/);
   const step = { event: 'UserPromptSubmit', payload: { prompt: 'merge owner/a#9' }, expect: { decision: 'allow' } };
   assert.deepEqual(pack.rowErrors(row({ steps: [step] })), []);
+  assert.deepEqual(pack.rowErrors(row({ steps: [{ ...step, confirm_governance_no: true }] })), []);
+  for (const bad of [{ ...step, confirm_governance_no: 'no' }, { ...step, event: 'PreToolUse', confirm_governance_no: true }]) {
+    assert.match(pack.rowErrors(row({ steps: [bad] })).join('\n'), /requires true on UserPromptSubmit/);
+  }
   const transition = { ...step, add_github_origin: true };
   assert.deepEqual(pack.rowErrors(row({ fixture: { repo: { governance: 'none' } }, steps: [transition] })), []);
   for (const fixture of [undefined, { repo: { governance: 'enabled' } }, { repo: { governance: 'undecided' } }]) {
