@@ -3,6 +3,50 @@
   "family": "push",
   "rows": [
     {
+      "id": "PUSH.encoded-powershell-search-prose",
+      "source": "Review correction: searching for encoded PowerShell syntax is ordinary prose",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "rg -F 'pwsh -EncodedCommand' ."
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "PUSH.encoded-powershell-commit-prose",
+      "source": "Review correction: a commit message mentioning encoded PowerShell must allow a feature push",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "git commit --allow-empty -q -m \"Document pwsh -EncodedCommand handling\" && git push origin feature"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
       "id": "PUSH.variable-wrapped-push",
       "source": "Owner correction: a push assigned before a shell runner must be refused",
       "kind": "hostile",

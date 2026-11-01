@@ -101,7 +101,7 @@ const MAX_APPROVALS = 100;
 const MAX_PROMPT_CHARS = 8000;
 const MAX_COMMAND_CHARS = 1024 * 1024;
 
-const { SHELLS, SHELL_TOOLS, ShellCall, assignVariable, assignmentOf, folderWord, plainGitLine, shellCommands, shellOf, shellPath, shellReadings } = require('./toolkit-shell-call.cjs');
+const { SHELLS, SHELL_TOOLS, ShellCall, argvText, assignVariable, assignmentOf, folderWord, plainGitLine, shellCommands, shellOf, shellPath, shellReadings } = require('./toolkit-shell-call.cjs');
 // A connector's merge or auto-merge tool, whatever its server is called (a claude.ai connector's
 // server name is a UUID): the tool name ends in one of these after a _ or -.
 const AUTO_MERGE_NAME = 'enable[_-]?(?:pr[_-]?|pull[_-]?request[_-]?)?auto[_-]?merge';
@@ -690,18 +690,19 @@ function shellRefusal(text, cwd, registryOptions = {}, shell = null) {
 
 // Ignore runner names in quoted prose, but keep whole quoted runner paths and executable
 // substitutions, including those inside double quotes. This is not command-position detection.
-function mentionsRunner(text) {
-  const visible = [];
-  const frames = [{ end: '', depth: 0, quote: '', start: 0 }];
+function runnerText(text) {
+  const parts = [];
+  const frames = [{ end: '', depth: 0, quote: '', start: 0, visible: [] }];
   for (let index = 0; index < text.length; index += 1) {
     const frame = frames[frames.length - 1];
+    const visible = frame.visible;
     const char = text[index];
     const next = text[index + 1];
     if (frame.quote === "'") {
       if (char === "'") {
         if (next === "'") index += 1;
         else {
-          if (SHELLS.test(text.slice(frame.start, index))) return true;
+          if (SHELLS.test(text.slice(frame.start, index))) visible.push(text.slice(frame.start - 1, index + 1));
           frame.quote = '';
         }
       }
@@ -714,25 +715,25 @@ function mentionsRunner(text) {
     }
     if (char === '$' && next === '(') {
       visible.push(' ');
-      frames.push({ end: ')', depth: 0, quote: '', start: 0 });
+      frames.push({ end: ')', depth: 0, quote: '', start: 0, visible: [] });
       index += 1;
       continue;
     }
     if (char === '`') {
       if (frame.end === '`' && !frame.quote) {
         frames.pop();
-        visible.push(' ');
+        parts.push(visible.join(''));
         continue;
       }
       if (text.indexOf('`', index + 1) !== -1) {
-        frames.push({ end: '`', depth: 0, quote: '', start: 0 });
+        frames.push({ end: '`', depth: 0, quote: '', start: 0, visible: [] });
         visible.push(' ');
         continue;
       }
     }
     if (frame.quote === '"') {
       if (char === '"') {
-        if (SHELLS.test(text.slice(frame.start, index))) return true;
+        if (SHELLS.test(text.slice(frame.start, index))) visible.push(text.slice(frame.start - 1, index + 1));
         frame.quote = '';
       }
       continue;
@@ -743,14 +744,50 @@ function mentionsRunner(text) {
       visible.push(' ');
     } else if (frame.end === ')' && char === ')' && frame.depth === 0) {
       frames.pop();
-      visible.push(' ');
+      parts.push(visible.join(''));
     } else {
       if (char === '(') frame.depth += 1;
       else if (char === ')') frame.depth -= 1;
       visible.push(char);
     }
   }
-  return /\b(?:bash|sh|zsh|dash|ksh|pwsh|powershell|cmd|eval|iex|invoke-expression)(?:\.exe)?\b/i.test(visible.join(''));
+  // A substitution's options belong to its own command; keep the outer command intact.
+  return [...parts, ...frames.map(frame => frame.visible.join(''))].join('; ');
+}
+
+function mentionsRunner(text) {
+  return /\b(?:bash|sh|zsh|dash|ksh|pwsh|powershell|cmd|eval|iex|invoke-expression)(?:\.exe)?\b/i.test(runnerText(text));
+}
+
+function encodedPowerShell(text) {
+  for (const { words } of shellCommands(runnerText(text))) {
+    const start = words.findIndex(word => /(?:^|[\\/])(?:pwsh|powershell)(?:\.exe)?$/i.test(word));
+    if (start < 0) continue;
+    for (const word of words.slice(start + 1)) {
+      // After -Command or -File, options belong to the script, not to PowerShell itself.
+      if (/^-(?:c|co|com|comm|comma|comman|command|f|fi|fil|file)$/i.test(word)) break;
+      // PowerShell accepts every prefix of -EncodedCommand from -e onward, plus -ec.
+      if (/^-[a-z]+$/i.test(word) && ('encodedcommand'.startsWith(word.slice(1).toLowerCase()) || /^-ec$/i.test(word))) return true;
+    }
+  }
+  // A runner's quoted script is executable text. Read it with the same quoting rule,
+  // rather than treating every quoted argument or commit message as another script.
+  for (const { words } of shellCommands(text)) {
+    for (let index = 0; index < words.length; index += 1) {
+      if (!SHELLS.test(words[index])) continue;
+      const program = words[index].split(/[\\/]/).pop().replace(/\.exe$/i, '').toLowerCase();
+      const args = words.slice(index);
+      const expression = /^(?:eval|iex|invoke-expression)$/.test(program);
+      // The shared argument-list reader recognises POSIX option bundles ending in c.
+      // Here c can also precede other flags, as in bash -ce.
+      const normalized = /^(?:bash|sh|zsh|dash|ksh)$/.test(program)
+        ? args.map(word => /^-[a-z]*c[a-z]*$/i.test(word) ? '-c' : word) : args;
+      const script = expression ? args.slice(1).join(' ') : argvText(normalized);
+      if (!expression && script === normalized.join(' ')) continue;
+      if (script.length < text.length && encodedPowerShell(script)) return true;
+    }
+  }
+  return false;
 }
 
 // A non-plain line mentioning a runner outside quoted prose and a git push is refused as a family.
@@ -758,10 +795,7 @@ function mentionsRunner(text) {
 function nestedRefusal(text) {
   if (plainGitLine(text)) return '';
   const message = 'this command could run a git push through another shell (bash, pwsh, cmd or eval), so Toolkit cannot read where it pushes and refused it. Run the push as its own plain git command.';
-  // PowerShell accepts every prefix of -EncodedCommand from -e onward, plus -ec.
-  const encoded = /(?:^|[\s"'])-([a-z]+)(?=$|[\s"'])/gi;
-  if (/\b(?:pwsh|powershell)(?:\.exe)?\b/i.test(text)
-    && [...text.matchAll(encoded)].some(match => 'encodedcommand'.startsWith(match[1].toLowerCase()) || /^ec$/i.test(match[1]))) return refuse(message);
+  if (encodedPowerShell(text)) return refuse(message);
   // cmd also spells its script's first word /cgit or /kgit, without a separating space.
   const mentionsPush = /(?:\b|\/[ck])git\b/i.test(text) && /\bpush\b/i.test(text);
   return mentionsPush && mentionsRunner(text) ? refuse(message) : '';

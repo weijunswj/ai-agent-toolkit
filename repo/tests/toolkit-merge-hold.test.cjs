@@ -650,6 +650,40 @@ test('pushes through another shell or expression runner are refused outright', (
   for (const command of allowed) assert.equal(decide(ctx, bash(feature, command)), null, command);
 });
 
+test('encoded PowerShell refusals distinguish executable arguments from quoted prose', (t) => {
+  const ctx = context(t);
+  const feature = repository(ctx.root, 'feature', { branch: 'feature' });
+  const allowed = [
+    "rg -F 'pwsh -EncodedCommand' repo",
+    'git add -A && git commit -m "Document pwsh -EncodedCommand handling" && git push origin feature',
+    'pwsh "-EncodedCommand" ZwBpAHQA',
+    "powershell '-enc' ZwBpAHQA",
+    'pwsh -Command "Write-Output -e hello"',
+    'pwsh -NoProfile; rg -e hello repo',
+    'pwsh -NoProfile "$(echo -e hello)"',
+    'pwsh -NoProfile "unused" -Command "Write-Output ready"; rg -e hello repo',
+    "rg -F 'pwsh' repo; rg -e hello repo",
+    "Write-Output '$(pwsh -e ZwBp)'",
+    `bash -c "rg -F 'pwsh -EncodedCommand' repo"`,
+    `bash -ce "rg -F 'pwsh -EncodedCommand' repo"`,
+  ];
+  const blocked = [
+    'pwsh -EncodedCommand ZwBpAHQA',
+    "& 'powershell.exe' -enc ZwBpAHQA",
+    'bash -c "pwsh -e ZwBp"',
+    'bash -ce "pwsh -e ZwBp"',
+    "pwsh -ExecutionPolicy 'Bypass' -enc ZwBp",
+    'pwsh $(echo -NoProfile) -enc ZwBp',
+    '& "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -ec ZwBp',
+    'Write-Output "$(pwsh -e ZwBp)"',
+    'Write-Output "`powershell -enc ZwBp`"',
+    `bash -c "powershell -NoProfile -ec ZwBp"`,
+    `pwsh -Command 'pwsh -EncodedCommand ZwBp'`,
+  ];
+  for (const command of allowed) assert.equal(decide(ctx, bash(feature, command)), null, command);
+  for (const command of blocked) assert.match(decide(ctx, bash(feature, command))?.deny || '', /through another shell/, command);
+});
+
 test('a push names its folder through a variable the same command assigned, and an evidence store a binding names is not refused', (t) => {
   const ctx = context(t);
   const store = repository(ctx.root, 'store', { slug: 'owner/TRANSPORT-a' });
