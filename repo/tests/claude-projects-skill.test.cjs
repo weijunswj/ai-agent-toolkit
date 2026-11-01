@@ -91,7 +91,8 @@ test('Projects wires managed instructions, promises and fresh scheduled sessions
   assert.match(text, /Keep it pending until a check-in shows `\*\*Plugin:\*\* current`\./);
   assert.match(text, /Only the plugin \(two clicks\) needs the owner: no agent can update it\./);
   assert.match(text, /Post its first line to the owner every run, "nothing changed" included/);
-  assert.match(text, /The hourly nudge stays silent/);
+  assert.ok(text.includes('Relay each hourly nudge run too, one line when nothing needs the owner (**Communication**).'));
+  assert.doesNotMatch(text, /stays silent/);
   // The steps live once, in the check-in (toolkit-projects-tasks.test.cjs keeps them equal to Toolkit's shared Claude app steps).
   assert.match(text, /post one plugin card in the project chat with the check-in's steps, the four numbered steps it puts under \*\*Plugin:\*\*, copied as written\./);
   assert.doesNotMatch(text, /remove the Toolkit plugin only and let it reinstall/);
@@ -204,12 +205,12 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.ok(text.includes('This is a post rule only: a forwarded copy never stands in for words the owner must type themselves'));
   assert.doesNotMatch(text, /RUNNING POST|A Toolkit hook enforces|The same hook/);
   // The owner opens a PR only to merge it: every other ask, UAT included, links the chat thread.
-  assert.ok(text.includes('Link the chat thread that owns the work as much as possible, UAT asks included. A direct PR link appears only on a merge ask for a merge-ready PR (G2 PASS and green CI on its current head, version bump done)'));
+  assert.ok(text.includes('Link the chat thread that owns the work as much as possible, UAT asks included. A direct PR link appears only on a merge ask for a merge-ready PR (G2 PASS and green CI on its current head)'));
   assert.ok(text.includes('anywhere else, name the PR\'s work in plain words with no PR link.'));
   assert.ok(text.includes('- Relay CI in one line with the owning thread\'s link (a PR link only on a merge-ready merge ask).'));
   assert.ok(body.includes('each linking the card or thread (by its title), a PR only on a merge-ready merge ask,'));
   assert.doesNotMatch(text + body, /with the PR link|until then, link the chat thread|thread \(by its title\) or PR/);
-  assert.ok(read('repo/contracts/claude-projects/web-controller-projects/tasks/hourly-nudge.md').includes('names a thread, file or artifact without its link, or links a PR anywhere but a merge ask for a merge-ready PR.'));
+  assert.ok(read('repo/contracts/claude-projects/web-controller-projects/tasks/hourly-nudge.md').includes('with a **Waiting on you** item or relay that names its thread, file or artifact without its link, or that links a PR anywhere but a merge ask for a merge-ready PR.'));
   // Devices by their recorded name, every periodic report relayed, owed decision records kept as promises.
   assert.ok(text.includes('Name a device by the name the project instructions record for it, never a generic word'));
   assert.ok(text.includes('Relay each daily check-in and hourly nudge report there too, with the waiting-on-you reminder list every run, or one line when nothing is due.'));
