@@ -123,7 +123,7 @@ test('canonical wizard renderer is compact, aligned, and free of implementation 
   const text = core.renderSetupQuestionBank(planned.specs);
   const terminal = core.renderSetupQuestionBankTerminal(planned.specs);
   assert.match(text, /## 1\. Updates and reports[\s\S]*## 2\. Computer performance/);
-  assert.doesNotMatch(text, /## \d+\. Other coding apps/);
+  assert.doesNotMatch(text, /## \d+\. Toolkit in your coding apps/);
   assert.doesNotMatch(text, /Update report auto-open|MultiAgentV[12]|max_threads|max_concurrent|AI-AGENT-TOOLKIT|PR #|issue #|C:\\|restore command|migration/i);
   assert.doesNotMatch(text, /Codex helper agents|One helper at most|Use a custom number/i);
   assert.doesNotMatch(text, /\bAdvanced(?: options)?\b|Show advanced choices|More options/);
@@ -230,11 +230,11 @@ test('distinct piped answers follow the canonical question order without shifts'
   assert.doesNotMatch(bank, /\*\*\d+\.\d+\*\* Toolkit hooks in Codex|\| \d+\.\d+ \| Toolkit hooks in Codex/);
   assert.match(bank, /\nStatus \(nothing to answer\): Toolkit hooks in Codex: /);
   assert.doesNotMatch(bank, /Reply with either:|: all recommended/);
-  assert.match(result.stdout, /Setup choices confirmed before writes:[\s\S]*2\.2 Codex Toolkit maintenance: C - Keep current \(canonical: keep; effective: disable\)/);
+  assert.match(result.stdout, /Setup choices confirmed before writes:[\s\S]*2\.2 Codex Toolkit maintenance: A - Keep current \(canonical: keep; effective: disable\)/);
   // Reports are already kept for seven days, so "enable" and "default" name the hidden twins of the
   // recommended Keep current and apply as keep, with the same effect.
-  assert.match(result.stdout, /1\.3 Update reports: B - Keep current \(canonical: keep; effective: enable\)/);
-  assert.match(result.stdout, /1\.4 Report retention: B - Keep current \(canonical: keep; effective: 7 days\)/);
+  assert.match(result.stdout, /1\.3 Update reports: A - Keep current \(canonical: keep; effective: enable\)/);
+  assert.match(result.stdout, /1\.4 Report retention: A - Keep current \(canonical: keep; effective: 7 days\)/);
   assert.doesNotMatch(result.stdout, /Codex helper agents:/);
   assert.match(result.stdout, /Question answers initially required: yes/);
   assert.match(result.stdout, /Question answers supplied by complete stdin: yes/);
@@ -271,7 +271,7 @@ test('partial explicit flags reject concise input before writes and accept only 
     timeout: 300000,
   });
   assert.equal(accepted.status, 0, accepted.stderr || accepted.stdout);
-  assert.match(accepted.stdout, /1\.2 Automatic updates: B - Turn off/);
+  assert.match(accepted.stdout, /1\.2 Automatic updates: C - Turn off/);
 });
 
 test('multiple explicit flags render and accept one remaining ordered non-TTY answer', () => {
@@ -280,13 +280,14 @@ test('multiple explicit flags render and accept one remaining ordered non-TTY an
   const result = run([
     '--execute', '--repo-root', setupRepo, '--repo-remote', origin,
     '--enable-repo-auto-update', '--enable-update-reports', '--default-update-report-retention-days',
-  ], { env: isolatedHomeEnv(root), input: 'keep\nB\n', timeout: 300000 });
+  ], { env: isolatedHomeEnv(root), input: 'keep\nA\n', timeout: 300000 });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   const bank = result.stdout.split('<!-- setup-toolkit-question-bank:complete -->')[0];
   const guide = bank.slice(bank.indexOf('Some visible questions'));
-  assert.match(guide, /\*\*2\.2\*\* Codex Toolkit maintenance \[A-C\]/);
+  // Maintenance is off already, so Turn off folds into Keep current and A is Keep current.
+  assert.match(guide, /\*\*2\.2\*\* Codex Toolkit maintenance \[A-B\]/);
   assert.doesNotMatch(guide, /\*\*1\.2\*\* Automatic updates \[A-C\]|: all recommended/);
-  assert.match(result.stdout, /2\.2 Codex Toolkit maintenance: B - Turn off/);
+  assert.match(result.stdout, /2\.2 Codex Toolkit maintenance: A - Keep current \(canonical: keep; effective: disable\)/);
 });
 
 test('choice-activated custom checkout detail is rendered and consumed in the canonical post-answer block', () => {
@@ -295,7 +296,7 @@ test('choice-activated custom checkout detail is rendered and consumed in the ca
   const customPath = path.join(root, 'Chosen Managed Source');
   const result = run(['--execute', '--repo-remote', origin, '--enable-repo-auto-update'], {
     env: isolatedHomeEnv(root),
-    input: ['custom', 'B', 'B', 'keep', 'B', customPath].join('\n'),
+    input: ['custom', 'A', 'A', 'keep', 'A', customPath].join('\n'),
     timeout: 300000,
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
@@ -310,11 +311,11 @@ test('choice-activated custom retention detail follows the displayed canonical o
   const { origin } = createGitBackedSetupRepo(root);
   const result = run(['--execute', '--repo-remote', origin, '--enable-repo-auto-update'], {
     env: isolatedHomeEnv(root),
-    input: ['A', 'B', 'A', 'keep', 'B', '14'].join('\n'),
+    input: ['A', 'A', 'B', 'keep', 'A', '14'].join('\n'),
     timeout: 300000,
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /2\. 1\.4 Report retention: positive report-retention duration in days \(when 1\.4 is A\/custom/);
+  assert.match(result.stdout, /2\. 1\.4 Report retention: positive report-retention duration in days \(when 1\.4 is B\/custom/);
   assert.match(result.stdout, /Detail 2 1\.4 Report retention: positive report-retention duration in days - 14 days/);
 });
 
@@ -324,7 +325,7 @@ test('simultaneous custom checkout and retention consume details in displayed or
   const customPath = path.join(root, 'Two Detail Managed Source');
   const result = run(['--execute', '--repo-remote', origin, '--enable-repo-auto-update'], {
     env: isolatedHomeEnv(root),
-    input: ['custom', 'B', 'A', 'keep', 'B', customPath, '21'].join('\n'),
+    input: ['custom', 'A', 'B', 'keep', 'A', customPath, '21'].join('\n'),
     timeout: 300000,
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
@@ -345,7 +346,7 @@ test('preselected path and helper details share rendering consumption and summar
     '--approve-codex-config-proposal',
   ], {
     env: isolatedHomeEnv(root),
-    input: ['B', 'A', 'B', customPath, '30', '1'].join('\n'),
+    input: ['A', 'B', 'A', customPath, '30', '1'].join('\n'),
     timeout: 300000,
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);

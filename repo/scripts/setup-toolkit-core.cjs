@@ -222,18 +222,19 @@ function parseArgs(argv = process.argv.slice(2)) {
     else if (arg === '--yes-recommended') args.yesRecommended = true;
     else if (arg === '--codex-helper-capacity') {
       const choice = next().toLowerCase();
-      const normalized = { 'ram-safe': 'one-helper', advanced: 'custom' }[choice] || choice;
-      if (!['keep', 'one-helper', 'root-only', 'custom', 'migrate', 'remove', 'skip'].includes(normalized)) throw new Error(`Unsupported --codex-helper-capacity choice: ${choice}`);
+      // Legacy Skip answers write nothing, exactly like Keep current.
+      const normalized = { 'ram-safe': 'one-helper', advanced: 'custom', skip: 'keep' }[choice] || choice;
+      if (!['keep', 'one-helper', 'root-only', 'custom', 'migrate', 'remove'].includes(normalized)) throw new Error(`Unsupported --codex-helper-capacity choice: ${choice}`);
       args.setupChoices.codexHelperCapacity = normalized;
     } else if (arg === '--codex-delegation-control') {
       const legacyChoice = String(argv[++index] || '').toLowerCase();
-      const choice = { limit: 'one-helper', keep: 'keep', skip: 'skip' }[legacyChoice];
+      const choice = { limit: 'one-helper', keep: 'keep', skip: 'keep' }[legacyChoice];
       if (!choice) throw new Error(`Unsupported --codex-delegation-control choice: ${legacyChoice}`);
       args.setupChoices.codexHelperCapacity = choice;
     } else if (arg.startsWith('--codex-helper-capacity=')) {
       const choice = arg.slice('--codex-helper-capacity='.length).toLowerCase();
-      const normalized = { 'ram-safe': 'one-helper', advanced: 'custom' }[choice] || choice;
-      if (!['keep', 'one-helper', 'root-only', 'custom', 'migrate', 'remove', 'skip'].includes(normalized)) throw new Error(`Unsupported --codex-helper-capacity choice: ${choice}`);
+      const normalized = { 'ram-safe': 'one-helper', advanced: 'custom', skip: 'keep' }[choice] || choice;
+      if (!['keep', 'one-helper', 'root-only', 'custom', 'migrate', 'remove'].includes(normalized)) throw new Error(`Unsupported --codex-helper-capacity choice: ${choice}`);
       args.setupChoices.codexHelperCapacity = normalized;
     } else if (arg === '--codex-helper-count') {
       args.codexHelperCount = parseNonNegativeInteger(next(), arg);
@@ -1275,7 +1276,6 @@ function recommendedChoice(key, current, args) {
   if (key === 'claudeTopology') return 'root-only';
   if (key === 'claudePluginBehavior') return 'install';
   if (key === 'codexPluginBehavior') return codexPluginUnchanged(current, args) ? 'keep' : 'install';
-  if (CLAUDE_SETTING_KEYS.includes(key)) return claudeSettingsAnySet(current) ? 'keep' : 'enable';
   if (key === 'antigravitySkills') return current.antigravity?.copies ? 'copy' : 'keep';
   return 'keep';
 }
@@ -1284,18 +1284,16 @@ function wizardChoice(value, label, consequence) {
   return { value, label, consequence };
 }
 
-// currentChoice names the choice that would change nothing in the verified current state. When the
-// recommendation is that choice or keep, the two do the same thing, so the bank shows one recommended
-// Keep current. Usually keep stays and its twin is hidden. With keepAs (the twin also re-checks or
-// follows another answer, which keep would skip), the twin stays under the Keep current label with keepAs
-// as its effect, and keep is hidden. Either way the hidden choice's canonical name (a flag or a typed
-// word) still works and applies as the shown one. foldAlways hides the twin whatever is recommended,
-// for on/off rows where offering the state the setting is already in only repeats Keep current.
+// currentChoice names the choice that would change nothing in the verified current state. It does the
+// same as keep, so the bank shows the two as one Keep current, whatever is recommended, and the other
+// choices are only the ones that change something. Usually keep stays and its twin is hidden. With keepAs
+// (the twin also re-checks or follows another answer, which keep would skip), the twin stays under the
+// Keep current label with keepAs as its effect, and keep is hidden. Either way the hidden choice's
+// canonical name (a flag or a typed word) still works and applies as the shown one.
 function foldedTwin(definition) {
   const twin = definition.currentChoice;
   const has = (value) => definition.choices?.some((choice) => choice.value === value);
-  const recommended = definition.foldAlways || [twin, 'keep'].includes(definition.recommendation?.value);
-  return twin && twin !== 'keep' && has(twin) && has('keep') && recommended ? twin : '';
+  return twin && twin !== 'keep' && has(twin) && has('keep') ? twin : '';
 }
 
 function foldDefinition(definition, twin) {
@@ -1328,6 +1326,12 @@ function resolvedQuestion(definition) {
   if (!definition.choices.some((choice) => choice.value === recommendation.value)) {
     throw new Error(`Setup question ${definition.id} recommends an unavailable choice.`);
   }
+  // Order after folding so Keep current is always A, including keepAs rows.
+  const keepValue = fold?.folded_value === 'keep' ? fold.folded_into : 'keep';
+  const choices = [
+    ...definition.choices.filter((choice) => choice.value === keepValue),
+    ...definition.choices.filter((choice) => choice.value !== keepValue),
+  ];
   return {
     id: definition.id,
     key: definition.key,
@@ -1340,7 +1344,7 @@ function resolvedQuestion(definition) {
       verification: definition.currentVerification || 'verified',
     },
     recommendation: { ...recommendation },
-    choices: definition.choices.map((choice) => ({ ...choice })),
+    choices: choices.map((choice) => ({ ...choice })),
     afterApplying: definition.afterApplying || '',
     availability: definition.availability || { status: 'available', condition: 'Available for the detected setup state.' },
     privacySafeFallback: definition.privacySafeFallback || 'The effective state could not be verified safely; setup will not guess or expose private configuration.',
@@ -1627,7 +1631,7 @@ function antigravitySkillsQuestion(args, current) {
   return resolvedQuestion({
     id: 'antigravity-skills',
     key: 'antigravitySkills',
-    section: 'Other coding apps',
+    section: 'Toolkit in your coding apps',
     title: "Copy Toolkit's skills into Antigravity?",
     prompt: 'Antigravity skills choice',
     whatThisControls: "Whether setup copies Toolkit's portable skills, and the official n8n skills Toolkit ships, into Antigravity's global skills folder (~/.gemini/config/skills) and keeps them current on each setup. Toolkit-only skills (setup, env, controller and programme tools) stay out. Folders you copied yourself are never changed.",
@@ -2102,7 +2106,6 @@ function setupQuestionSpecs(args, current) {
         ...(current.delegation?.status === 'migration-required' ? [wizardChoice('migrate', 'Migrate legacy setting', 'Preview and approve migration of the exact Toolkit legacy block.')] : []),
         ...(migrateAfterCheck ? [wizardChoice('migrate', 'Migrate legacy setting', 'If Codex now runs the V2 (multi_agent_v2) helper feature, checked with Codex after you answer, preview and approve moving the V1 Toolkit block to it; otherwise setup stops before writing.')] : []),
         ...(String(current.delegation?.ownership || '').startsWith('toolkit-') ? [wizardChoice('remove', 'Remove Toolkit setting', 'Remove only the owned block after approval.')] : []),
-        wizardChoice('skip', 'Skip', 'Write no helper setting this run.'),
       ],
       // One helper is already configured for the known runtime, so setup would leave config.toml as
       // it is either way. With the runtime unknown, the same file can still need a change.
@@ -2120,7 +2123,7 @@ function setupQuestionSpecs(args, current) {
       section: 'Computer performance',
       title: 'Codex Toolkit maintenance',
       prompt: 'Codex plugin maintenance choice',
-      whatThisControls: 'Whether trusted Codex startup maintenance may refresh the installed Toolkit plugin cache from the verified managed source. It does not give Codex permission to update Claude Code.',
+      whatThisControls: 'Whether trusted Codex startup maintenance may refresh the installed Toolkit plugin cache from the verified managed source.',
       choices: [
         wizardChoice('enable', 'Turn on', 'Enable future native Toolkit cache refresh when maintenance detects stale or incompatible files.'),
         wizardChoice('disable', 'Turn off', 'Disable future automatic cache refresh; the installed Toolkit plugin is not uninstalled, and manual `setup toolkit` repair or refresh remains available.'),
@@ -2144,15 +2147,19 @@ function setupQuestionSpecs(args, current) {
       specs.push(resolvedQuestion({
         id: 'codex-toolkit-plugin',
         key: 'codexPluginBehavior',
-        section: 'Other coding apps',
+        section: 'Toolkit in your coding apps',
         title: 'Keep Toolkit available in Codex?',
         prompt: 'Codex Toolkit choice',
-        whatThisControls: 'Whether setup verifies and refreshes the Toolkit plugin in Codex this run, only shows the commands, or leaves it as it is. This row is read from the Codex files; the Codex plugin commands run only after you choose Install or refresh. This never changes Claude Code.',
+        whatThisControls: 'Whether setup verifies and refreshes the Toolkit plugin in Codex this run, only shows the commands, or leaves it as it is. This row is read from the Codex files; any plugin checks run only after you answer, including when Keep current retains the install check.',
         choices: [
           wizardChoice('install', 'Install or refresh', 'Run the Codex plugin commands to verify Toolkit in Codex, and refresh its cache from the update copy when it is missing, off, older or different.'),
           wizardChoice('instructions', 'Show instructions only', 'Make no plugin change and show the Codex plugin commands to run yourself.'),
           wizardChoice('keep', 'Keep current', `Make no plugin change and run no Codex command this run: ${codexPluginCurrent(current, args)}`),
         ],
+        // Keep the install action under Keep current: a later update-source answer can change the
+        // required marketplace binding, so the plugin and source must still be checked after answers.
+        currentChoice: unchanged ? 'install' : '',
+        keepAs: 'Keep it installed. Setup checks it against the update source chosen above after you answer, and refreshes it or corrects its marketplace binding only if needed.',
         recommendation: unchanged
           ? { value: 'keep', outcome: 'Leave the Codex plugin as it is.', reason: 'Codex already runs the current Toolkit from the update copy, so a refresh would change nothing.' }
           : { value: 'install', outcome: 'Verify and refresh the Toolkit plugin in Codex.', reason: notes.length ? `Codex does not run the current Toolkit from the update copy: ${notes.join('; ')}.` : 'Codex does not run the current Toolkit from the update copy.' },
@@ -2166,7 +2173,7 @@ function setupQuestionSpecs(args, current) {
       specs.push(reportOnlyRow({
         id: 'codex-toolkit-hooks',
         key: 'codexHooks',
-        section: 'Other coding apps',
+        section: 'Toolkit in your coding apps',
         title: 'Toolkit hooks in Codex',
         whatThisControls: "Whether Codex runs each Toolkit hook. Codex keeps this in ~/.codex/config.toml ([hooks.state]) and you change it in Codex's /hooks; setup only reports it and never edits it. A hook that is off or not reviewed does not run, so its check is skipped.",
         current: hooks.full,
@@ -2208,10 +2215,10 @@ function setupQuestionSpecs(args, current) {
     specs.push(resolvedQuestion({
       id: 'claude-toolkit-plugin',
       key: 'claudePluginBehavior',
-      section: 'Other coding apps',
+      section: 'Toolkit in your coding apps',
       title: 'Keep Toolkit available in Claude Code?',
       prompt: 'Claude Code Toolkit choice',
-      whatThisControls: 'Whether Claude Code installs or refreshes its own Toolkit plugin, shows manual instructions, or preserves current plugin state. This never changes Codex.',
+      whatThisControls: 'Whether Claude Code installs or refreshes its own Toolkit plugin, shows manual instructions, or preserves current plugin state.',
       choices: [wizardChoice('install', 'Install or refresh', 'Use Claude Code native plugin commands to verify and refresh its Toolkit cache when needed.'), wizardChoice('instructions', 'Show instructions only', 'Make no native plugin change and report the manual Claude Code action required.'), wizardChoice('keep', 'Keep current', 'Preserve the currently detected Claude Code plugin behavior and state.')],
       // Toolkit is installed, turned on and current, running in place from the update copy. Install or
       // refresh then only checks it, and re-enables or refreshes it if that check still finds a gap keep
@@ -2924,6 +2931,8 @@ function assertQuestionBankAnswerBinding(parsed, specs) {
 function resolveDisplayedChoiceAnswer(spec, answer) {
   const normalized = String(answer || '').trim();
   if (!normalized) return spec.recommended;
+  // Preserve old typed Skip answers after removing the duplicate helper choice.
+  if (spec.key === 'codexHelperCapacity' && normalized.toLowerCase() === 'skip') return 'keep';
   const presented = choiceByPresentationReference(spec, normalized);
   if (presented) return presented.value;
   const canonical = spec.choices.find((choice) => choice.value.toLowerCase() === normalized.toLowerCase());
@@ -3920,8 +3929,9 @@ function printFinalSummary({ args, current, managed, localClone, nativeCache, de
   if (n8nSkills) console.log(`Official n8n skills: ${n8nSkills}\n`);
   if (antigravitySkills) console.log(`Toolkit skills in Antigravity: ${antigravitySkills}\n`);
   if (localClone) console.log(`Your local Toolkit clone: ${localCloneSummary(localClone)}\n`);
-  console.log('## Codex native plugin');
+  // Each host's summary reports only its own native plugin.
   if (args.host === 'codex') {
+    console.log('## Codex native plugin');
     console.log('Codex plugin cache path: <Codex Toolkit cache>');
     console.log(`Codex expected Toolkit version: ${unknown(nativeCache.expected_version)}`);
     console.log(`Codex installed Toolkit version: ${unknown(nativeCache.installed_version)}`);
@@ -3938,13 +3948,10 @@ function printFinalSummary({ args, current, managed, localClone, nativeCache, de
     console.log(`Codex hook trust status: ${unknown(nativeCache.hook_trust_status)}`);
     console.log(`Codex hook execution status: ${unknown(nativeCache.hook_execution_status)}`);
     console.log(`Codex hook trust action: ${unknown(nativeCache.hook_trust_action)}`);
-  } else {
-    console.log('Codex plugin status: not checked for this host');
-    console.log('Codex plugin mutation: no');
+    console.log('');
   }
-  console.log('');
-  console.log('## Claude Code native plugin');
   if (args.host === 'claude-code') {
+    console.log('## Claude Code native plugin');
     console.log('Claude plugin manifest path: <managed-toolkit-checkout>/.claude-plugin/plugin.json');
     console.log(`Claude expected Toolkit version: ${unknown(nativeCache.expected_version)}`);
     console.log(`Claude manifest Toolkit version: ${unknown(nativeCache.manifest_version)}`);
@@ -3954,17 +3961,14 @@ function printFinalSummary({ args, current, managed, localClone, nativeCache, de
     console.log(`Claude app: ${claudeAppCopyLine(claudeAccountToolkitVersion(claudeAccountPluginFolders()), nativeCache.manifest_version)}`);
     console.log(`Claude new session needed: ${yesNo(nativeCache.restart_required === true)}`);
     console.log(`Claude hook trust action: ${unknown(nativeCache.hook_trust_action || 'none')}`);
-  } else {
-    console.log('Claude plugin status: not checked for this host');
-    console.log('Claude plugin mutation: no; Codex setup does not mutate Claude Code plugin cache.');
+    console.log('');
   }
-  console.log('');
   console.log('## Bridge state');
   console.log(`Repo auto-update enabled: ${yesNo(repo.enabled === true || args.repoAutoUpdate === true)}`);
   console.log('Repo auto-update path: <managed-toolkit-checkout>');
   console.log(`Repo auto-update status: ${args.repoAutoUpdate ? unknown(repo.last_status || 'configured') : 'disabled'}`);
   console.log(`Update report writes enabled: ${args.updateReports}`);
-  console.log(`Codex instruction limit kept raised: ${yesNo(args.codexDocLimit === true)}`);
+  if (args.host === 'codex') console.log(`Codex instruction limit kept raised: ${yesNo(args.codexDocLimit === true)}`);
   console.log('Update report opening behavior: action-required reports open automatically; successful reports stay closed');
   console.log(`Update report/log retention days: ${args.updateReportRetentionDays}`);
   console.log('Update report/log directory: <Toolkit update-report directory>');
@@ -4209,7 +4213,7 @@ const {
 });
 const {
   inspectClaudeNativePluginStatePreApproval, resolveClaudeTopology, claudeSettingsOutcome,
-  claudeSettingsAnySet, claudeSettingQuestions, applyClaudeUserSettings, applyClaudeSubagentDepth, applyClaudeAgentControl, setupClaudeArgs,
+  claudeSettingQuestions, applyClaudeUserSettings, applyClaudeSubagentDepth, applyClaudeAgentControl, setupClaudeArgs,
   runClaudeNativePluginSetup, verifyClaudeNativePluginMetadata, runClaudeInstallCheck
 } = defineClaudeSetup({
   CLAUDE_HOOK_TRUST_ACTION, SUBAGENT_DEPTH_FOR_TOPOLOGY, claudeSetupBudgets,
@@ -4265,6 +4269,7 @@ module.exports = {
   renderSetupQuestionBankTerminal,
   renderSetupQuestionDocumentation,
   setupQuestionDocumentationSpecs,
+  setupQuestionClaudeDocumentationSpecs,
   emitCompleteQuestionBank,
   runManagedQuestionBankChild,
   plannedQuestionBank,

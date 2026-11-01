@@ -4,7 +4,7 @@ description: "Use when running as a Claude Projects coordinator and the user app
 ---
 
 # Web Controller for Claude Projects
-Version: 2026-11-01.4
+Version: 2026-11-01.5
 
 Run Toolkit repos through Claude Projects. The global rules and coding gates apply in every project; GitHub governance (parent and child issues, records, decision traces, evidence custody) applies only to a github.com repo whose governance state is ENABLED. Keep project facts (repos, devices, lanes, pending work) in project memory; durable work state lives in the branch, the PR and the programme comments or evidence store, mirrored in memory, never only there.
 
@@ -118,6 +118,7 @@ Whenever the user asks for anything recurring (the daily check-in, a sweep, a re
 - **Moving a task or catching up:** a move to a time already passed today skips today's run unless it already ran today, so catch it up the same turn by messaging its home thread to run its prompt; never fire_trigger a bound task from another thread (it runs with no project tools, files or memory). Never catch up a task whose entry says `stopped by owner`. Details in `reference/recurring-tasks.md`.
 - On every coordinator turn, check that each recurring task is still armed with a future next run; re-arm a missed one before ending the turn, unless its entry says `stopped by owner`.
 - When a skill update changes what the daily check-in or hourly nudge does, update those tasks' prompts in the same turn (the swap above) and confirm each next run is armed, skipping a task whose entry says `stopped by owner`.
+- **Every task run reaches the project chat.** Skip tasks marked `stopped by owner`; relay and finish pending runs using `.relayed` and `.done` (**Task run relay** in `reference/recurring-tasks.md`).
 
 
 ## Daily check-in
@@ -131,7 +132,7 @@ Whenever the user asks for anything recurring (the daily check-in, a sweep, a re
 - **It is bound to its own home thread,** because a fresh-session task posts a run card in project chat every run. Start a thread named `<PROJECT>: Hourly nudge`; that thread creates the task bound to itself (a task fires into the session that creates it), fires it once and reports the trigger id. Its guards are under **Hourly nudge home thread** in `reference/periodic-runs.md`.
 - It fires hourly in the user's waking hours only, at a jittered minute (pick one at random, not :00 or :30, for example `CRON_TZ=<user zone> 23 8-23 * * *`), on the small tier at medium effort (`agent-cost-control`), and it is read-only apart from its programme sweep step, which brings the programme pages up to date. It does the cheap checks first and stops there, in one line, when nothing changed since its last run.
 - **The sweep, its report, `CHECK-IN NOT ARMED` and the Both gone check on the first wake of each day:** read **Acting on the nudge report** in `reference/periodic-runs.md` beside this skill and act on it the same turn.
-- Report to the coordinator only. The coordinator posts all waiting owner items as ONE reminder each run until each is answered; act on the rest in the same turn: verify/resolve candidates, reopen and relay unrelayed threads, post missing pointers, end finished Remote Control sessions, correct stale labels, act on overdue promises, nudge/reroute stuck work.
+- The coordinator relays each run, posts all waiting owner items as ONE reminder each run until each is answered; act on the rest in the same turn: verify/resolve candidates, reopen and relay unrelayed threads, post missing pointers, end finished Remote Control sessions, correct stale labels, act on overdue promises, nudge/reroute stuck work.
 - This is the only resolve pass for coordinator-driven resolution; each fresh scheduled run resolves its own thread after report delivery. Stop the nudge only when the user asks; mark its `SCHEDULED TASKS:` entry `stopped by owner`.
 
 ## Promises wiring

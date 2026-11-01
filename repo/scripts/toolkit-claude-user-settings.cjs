@@ -33,11 +33,11 @@ const hidesAllAttribution = (value) => value === false
 // JSON read-back checks integrity; host schema/behaviour still requires restart/turn UAT.
 // value is the on value. equivalent, when present, says which owner values do what it does; others compare
 // exactly. offValue, when present, is written by Turn off instead of removing the key, and defaultOn says a
-// missing key already behaves as on. recommend is the choice offered while none of these settings is set.
+// missing key already behaves as on.
 const SETTINGS = Object.freeze([
   Object.freeze({ id: 'attribution', keyPath: ['attribution'], value: false, equivalent: hidesAllAttribution, label: 'No AI attribution in commits and pull requests' }),
   Object.freeze({ id: 'cross-session-inbound', keyPath: ['crossSessionInbound'], value: 'accept', label: 'Messages from your other Claude sessions wake this one' }),
-  Object.freeze({ id: 'switch-models-on-flag', keyPath: ['switchModelsOnFlag'], value: true, offValue: false, defaultOn: true, recommend: 'disable', label: 'Switch models without asking when a request is flagged' }),
+  Object.freeze({ id: 'switch-models-on-flag', keyPath: ['switchModelsOnFlag'], value: true, offValue: false, defaultOn: true, label: 'Switch models without asking when a request is flagged' }),
   Object.freeze({ id: 'agents-md', keyPath: ['pluginConfigs', 'cc-plugin-agents-md@builtin', 'options', 'instructionFiles'], value: 'claude-md-and-agents-md', label: 'Read AGENTS.md as well as CLAUDE.md' })
 ]);
 const RECORD_SCHEMA = 'ai-agent-toolkit.claude-user-settings.v1';

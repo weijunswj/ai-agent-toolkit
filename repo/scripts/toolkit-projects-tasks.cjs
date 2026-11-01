@@ -19,6 +19,7 @@
 // Exit 0 current or printed, 1 needs a change, 2 malformed input or bad arguments.
 const fs = require('node:fs');
 const path = require('node:path');
+const { createHash } = require('node:crypto');
 const { renderBlock, findBlocks, blockState, normalizeBody } = require('./toolkit-managed-block.cjs');
 
 const TASKS_DIR = 'repo/contracts/claude-projects/web-controller-projects/tasks';
@@ -111,6 +112,13 @@ function taskName(kind, params) {
   return `${params.project}: ${title}`;
 }
 
+// Keep the kind visible and hash the complete identity, before any readable normalisation.
+function taskSlug(kind, params) {
+  const project = params.project.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  const digest = createHash('sha256').update(JSON.stringify([kind, params.project, params.report_dir])).digest('hex').slice(0, 10);
+  return `${kind}-${project}-${digest}`;
+}
+
 // Template lines may start with a condition tag: [repo], [no-repo], [parent], [toolkit], [fresh], [bound], [raised].
 // [toolkit] is the project whose repo is the Toolkit repo itself.
 // Placeholders are {{name}}; an unknown placeholder or tag is a broken source.
@@ -119,6 +127,7 @@ function fill(template, kind, params) {
   const values = {
     ...params,
     task_name: KINDS[kind].title ? taskName(kind, params) : 'this task',
+    task_slug: taskSlug(kind, params),
     checkin_name: `${params.project}: ${KINDS['daily-check-in'].title}`,
     nudge_name: `${params.project}: ${KINDS['hourly-nudge'].title}`
   };

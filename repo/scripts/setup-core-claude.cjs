@@ -55,18 +55,10 @@ function defineClaudeSetup({ CLAUDE_HOOK_TRUST_ACTION, SUBAGENT_DEPTH_FOR_TOPOLO
     return topology;
   }
 
-  // True when any managed Claude Code setting already has a value (yours or Toolkit's). Once any is set the
-  // owner has chosen, so every row recommends Keep current and a setting still missing counts as left out on purpose.
-  const hasValue = (entry) => [CLAUDE_SETTINGS_STATES.TOOLKIT, CLAUDE_SETTINGS_STATES.OWNER, CLAUDE_SETTINGS_STATES.OFF].includes(entry?.state);
   const specOf = (entry) => CLAUDE_SETTINGS.find((spec) => spec.id === entry?.id);
   // A missing key is on for a setting whose Claude Code default is on, and off otherwise.
   const defaultWord = (entry) => (specOf(entry)?.defaultOn ? 'On' : 'Off');
   const offSource = (entry) => (entry.toolkit ? 'set by setup' : 'in your settings');
-
-  function claudeSettingsAnySet(current) {
-    const entries = current?.claudeSettings;
-    return Array.isArray(entries) && entries.some(hasValue);
-  }
 
   // One setting's state: on (added by setup, or already in your settings), off, a different value, or missing.
   function claudeSettingOutcome(entry) {
@@ -129,21 +121,15 @@ function defineClaudeSetup({ CLAUDE_HOOK_TRUST_ACTION, SUBAGENT_DEPTH_FOR_TOPOLO
     return `Removes ${settingKeyName(spec)} from settings.json, whoever added it, so Claude Code uses its default.${trailers}`;
   }
 
-  // Why to pick the setting's recommended choice (none of the four set yet) or Keep current (some already
-  // set, so the owner has chosen).
-  function claudeSettingRecommendation(spec, entry, current) {
-    const pick = spec.recommend || 'enable';
-    if (!claudeSettingsAnySet(current)) {
-      const outcome = pick === 'disable' ? claudeSettingOffOutcome(spec, entry) : claudeSettingOnOutcome(spec, entry);
-      return { value: pick, outcome, reason: `${pick === 'disable' ? 'Turning it off' : 'It'} ${settingEffect(spec).benefit}.` };
-    }
-    const entries = current.claudeSettings;
-    const set = entries.filter(hasValue).length;
-    const label = pick === 'disable' ? 'Turn off' : 'Turn on';
-    const reason = entry?.state === CLAUDE_SETTINGS_STATES.DEFAULT
-      ? `${set} of the ${entries.length} recommended settings already have a value and this one does not, so it counts as left out on purpose. Pick ${label} to turn it ${pick === 'disable' ? 'off' : 'on'}.`
-      : 'This setting already has a value, so Keep current leaves it as it is.';
-    return { value: 'keep', outcome: 'Keep this setting as it is.', reason };
+  // Each row on its own, from its own inspected state: Turn on, unless it is already on, or setup
+  // cannot read or change it, in which case Keep current.
+  function claudeSettingRecommendation(spec, entry) {
+    const keep = (reason) => ({ value: 'keep', outcome: 'Keep this setting as it is.', reason });
+    if (!entry) return keep('The Claude Code user settings have not been read yet, so setup does not change them.');
+    if (entry.state === CLAUDE_SETTINGS_STATES.UNREADABLE) return keep('Setup could not read the Claude Code user settings file, so it does not change it.');
+    if (entry.blocked) return keep('Setup cannot change this setting, so Keep current leaves it as it is.');
+    if (claudeSettingCurrentChoice(entry) === 'enable') return keep('This setting is already on, so Keep current leaves it as it is.');
+    return { value: 'enable', outcome: claudeSettingOnOutcome(spec, entry), reason: `It ${settingEffect(spec).benefit}.` };
   }
 
   const CLAUDE_SETTING_EFFECTS = Object.freeze({
@@ -156,7 +142,7 @@ function defineClaudeSetup({ CLAUDE_HOOK_TRUST_ACTION, SUBAGENT_DEPTH_FOR_TOPOLO
       controls: '"crossSessionInbound": "accept", so messages from your other Claude sessions, such as a Claude Projects coordinator, wake this one. Messages still cannot approve actions or change settings.',
     },
     'switch-models-on-flag': {
-      short: 'Switch models without asking on a flag', benefit: 'keeps a flagged request on the model you chose until you say otherwise',
+      short: 'Switch models without asking on a flag', benefit: 'lets Claude Code switch models when a request is flagged, without stopping to ask',
       controls: '"switchModelsOnFlag": true (Claude Code\'s default when the line is missing) lets Claude Code switch models without asking when a request is flagged; false makes it pause and ask first.',
       off: 'Claude Code then pauses and asks before switching models when a request is flagged.',
     },
@@ -179,7 +165,7 @@ function defineClaudeSetup({ CLAUDE_HOOK_TRUST_ACTION, SUBAGENT_DEPTH_FOR_TOPOLO
       return resolvedQuestion({
         id: `claude-setting-${spec.id}`,
         key,
-        section: 'Other coding apps',
+        section: 'Toolkit in your coding apps',
         title: `Claude Code setting: ${effect.short}?`,
         prompt: `Claude Code setting choice: ${effect.short}`,
         whatThisControls: `One value in your Claude Code user settings (settings.json in your Claude Code config folder): ${effect.controls} ${Object.hasOwn(spec, 'offValue') ? 'Turn on and Turn off each write this one value' : 'Turn off removes this one setting whoever added it'}; the other settings are not touched.`,
@@ -191,8 +177,7 @@ function defineClaudeSetup({ CLAUDE_HOOK_TRUST_ACTION, SUBAGENT_DEPTH_FOR_TOPOLO
         // A row already on hides Turn on, and one already off hides Turn off: Keep current does the same.
         // A different value, a blocked parent or an unreadable file keeps all three.
         currentChoice: claudeSettingCurrentChoice(entry),
-        foldAlways: true,
-        recommendation: claudeSettingRecommendation(spec, entry, current),
+        recommendation: claudeSettingRecommendation(spec, entry),
         selected: args.setupChoices[key],
         current: claudeSettingOutcome(entry),
         currentShort: claudeSettingShort(entry),
@@ -360,7 +345,7 @@ function defineClaudeSetup({ CLAUDE_HOOK_TRUST_ACTION, SUBAGENT_DEPTH_FOR_TOPOLO
       throw new Error('Claude Code plugin hooks must block native Agent launches through toolkit-claude-agent-hook.cjs');
     }
     console.log('Claude Code native plugin metadata verified.');
-    console.log('If Claude Code reports the Toolkit plugin is missing, stale or disabled, refresh it through Claude Code native plugin UI/flow. Codex will not mutate Claude Code plugin cache.');
+    console.log('If Claude Code reports the Toolkit plugin is missing, stale or disabled, refresh it through Claude Code native plugin UI/flow.');
     return {
       status: 'metadata present',
       manifest_path: pluginPath,
@@ -399,7 +384,7 @@ function defineClaudeSetup({ CLAUDE_HOOK_TRUST_ACTION, SUBAGENT_DEPTH_FOR_TOPOLO
       projectDirectories: [path.join(process.cwd(), '.claude', 'agents')],
     });
   }
-  return { inspectClaudeNativePluginStatePreApproval, resolveClaudeTopology, claudeSettingsOutcome, claudeSettingsAnySet, claudeSettingQuestions, applyClaudeUserSettings, applyClaudeSubagentDepth, applyClaudeAgentControl, setupClaudeArgs, runClaudeNativePluginSetup, verifyClaudeNativePluginMetadata, runClaudeInstallCheck };
+  return { inspectClaudeNativePluginStatePreApproval, resolveClaudeTopology, claudeSettingsOutcome, claudeSettingQuestions, applyClaudeUserSettings, applyClaudeSubagentDepth, applyClaudeAgentControl, setupClaudeArgs, runClaudeNativePluginSetup, verifyClaudeNativePluginMetadata, runClaudeInstallCheck };
 }
 
 module.exports = { defineClaudeSetup, claudeSettingKey, CLAUDE_SETTING_KEYS };

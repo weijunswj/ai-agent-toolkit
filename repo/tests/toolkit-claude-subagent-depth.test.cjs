@@ -183,9 +183,9 @@ test('the topology question carries the one-layer depth: root-only sets it, broa
   assert.equal(claude.some(row => /subagent ?depth|one-layer/i.test(row.key) || row.id === 'claude-one-layer-subagents'), false, 'no separate depth question');
   const topology = claude.find(row => row.key === 'claudeTopology');
   assert.equal(topology.presentation.question_ref, '2.1');
-  assert.deepEqual(topology.choices.map(choice => choice.value), ['root-only', 'broader-native', 'keep']);
+  assert.deepEqual(topology.choices.map(choice => choice.value), ['keep', 'root-only', 'broader-native']);
   assert.equal(topology.recommended, 'root-only');
-  assert.equal(topology.choices[0].label, ONE_LAYER_LABEL);
+  assert.equal(topology.choices.find(choice => choice.value === 'root-only').label, ONE_LAYER_LABEL);
   assert.equal(topology.recommended_outcome, ONE_LAYER_LABEL);
   assert.match(topology.whatThisControls, /the main session may start subagents; subagents never start another/);
   assert.match(topology.current, /CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH is not set in your Claude Code user settings, so Claude Code's own default applies\. The Toolkit hook refuses nested launches in normal folders once/);
