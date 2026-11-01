@@ -27,6 +27,7 @@ class FakeGitHub {
     this.issues = new Map();
     this.files = new Map();
     this.prs = new Map();
+    this.issuePrLinks = new Map();
     this.commits = 0;
     this.snapshots = new Map();
     this.branchLag = false;
@@ -58,8 +59,8 @@ class FakeGitHub {
     this.issues.get(parent).updated_at = this.tick();
   }
 
-  addPr(number, { head, state = 'OPEN', isDraft = false, merged = false, contexts = [], rollupOid = head, hasNextPage = false, branch = null, body = '', base = 'main' } = {}) {
-    this.prs.set(number, { number, head, state, isDraft, merged, contexts, rollupOid, hasNextPage, branch, body, base });
+  addPr(number, { head, state = 'OPEN', isDraft = false, merged = false, mergedAt = merged ? this.tick() : null, contexts = [], rollupOid = head, hasNextPage = false, branch = null, body = '', base = 'main' } = {}) {
+    this.prs.set(number, { number, head, state, isDraft, merged, mergedAt, contexts, rollupOid, hasNextPage, branch, body, base });
   }
 
   // A comment on an issue, as `login` posted it; `created_at` defaults to the fake clock.
@@ -194,8 +195,11 @@ class FakeGitHub {
     }
     if (rest === 'pulls' && !params.get('head')) {
       const page = Number(params.get('page') || 1);
-      const open = [...this.prs.values()].filter(pr => pr.state === 'OPEN' || pr.state === 'DRAFT');
-      return ok(200, open.slice((page - 1) * 100, page * 100).map(pr => ({ number: pr.number, body: pr.body, draft: pr.isDraft })));
+      const closed = params.get('state') === 'closed';
+      const listed = [...this.prs.values()].filter(pr => closed ? pr.merged || pr.state === 'CLOSED' : !pr.merged && (pr.state === 'OPEN' || pr.state === 'DRAFT'));
+      if (closed) listed.sort((a, b) => b.number - a.number);
+      return ok(200, listed.slice((page - 1) * 100, page * 100).map(pr => ({ number: pr.number, body: pr.body, draft: pr.isDraft,
+        merged_at: pr.mergedAt, base: { repo: { full_name: this.repository } } })));
     }
     if (rest === 'pulls') {
       const branch = (params.get('head') || '').split(':')[1];
@@ -271,6 +275,21 @@ class FakeGitHub {
 
   graphqlRoute(body) {
     if (/issues\(states: OPEN/.test(body.query)) return this.inventoryRoute(body);
+    if (/closedByPullRequestsReferences/.test(body.query)) {
+      const repository = {};
+      const node = value => typeof value === 'object' ? value : (() => {
+        const pr = this.prs.get(value);
+        return { __typename: 'PullRequest', number: value, merged: pr?.merged || false, mergedAt: pr?.mergedAt || null, repository: { nameWithOwner: this.repository } };
+      })();
+      for (const [, alias, number] of body.query.matchAll(/(i\d+): issue\(number: (\d+)\)/g)) {
+        const links = this.issuePrLinks.get(Number(number)) || {};
+        repository[alias] = this.issues.has(Number(number)) ? {
+          closedByPullRequestsReferences: { pageInfo: { hasNextPage: links.closingTruncated || false }, nodes: (links.closing || []).map(node) },
+          timelineItems: { pageInfo: { hasNextPage: links.timelineTruncated || false }, nodes: (links.timeline || []).map(value => ({ source: node(value) })) },
+        } : null;
+      }
+      return ok(200, { data: { repository } });
+    }
     const pr = this.prs.get(body.variables.number);
     if (!pr) return ok(200, { data: { repository: { pullRequest: null } } });
     return ok(200, { data: { repository: { defaultBranchRef: { name: 'main' }, pullRequest: {

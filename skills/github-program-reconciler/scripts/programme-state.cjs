@@ -296,6 +296,8 @@ const FINDING_CODES = Object.freeze({
   TRACE_UNLINKED: { source: 'reconcile', next_action: 'Controller: link the decision comments with decision-trace-audit --repair' },
   TRACE_SUPERSEDED_UNMARKED: { source: 'reconcile', next_action: 'Controller: mark the superseded decision record' },
   PR_UNTRACKED: { source: 'reconcile', next_action: 'Controller: confirm the PR and record it with update --patch' },
+  COMPLETED_PR_MISSING: { source: 'reconcile', next_action: 'Controller: check the completed task references; no matching merged PR was found' },
+  PR_DISCOVERY_INCOMPLETE: { source: 'reconcile', next_action: 'Controller: retry reconciliation; merged PR discovery could not finish within its read limits' },
   RETURN_CAPTURED: { source: 'reconcile', next_action: 'Controller: give the waiting return its verdict' },
   STALE_ASSIGNMENT: { source: 'reconcile', next_action: 'Controller: check the late checkpoint from an ended assignment' },
   JOURNAL_ERROR: { source: 'reconcile', next_action: "Controller: check the executor's checkpoint failure" },
@@ -1298,7 +1300,7 @@ function renderParentBlockBody(parent, children, issues = new Map(), comments = 
   const rows = graphOrder(parent, children, issues).map(outcome => {
     const child = children.get(outcome.issue);
     const cls = graphClass(outcome, child);
-    const pr = child?.pr.number ? `#${child.pr.number}` : '-';
+    const pr = !isRetired(outcome, child) && child?.pr.number ? `#${child.pr.number}` : '-';
     const issue = issues.get(outcome.issue);
     return `| ${taskName(outcome, issue)} | ${descriptionText(outcome)} | #${outcome.issue} | ${pr} | ${cls} | ${statusText(outcome, child)} | ${lastUpdated(outcome, child, issue, comments.get(outcome.issue) || [])} |`;
   });
@@ -2552,6 +2554,56 @@ class ProgrammeGraphReader {
     throw new ProgrammeError('GH_FAILED', 'The repository has more open pull requests than this reader pages through.');
   }
 
+  // One shared scan per pass. A full final page is incomplete, even if it might be the last.
+  mergedPullRequests(spend) {
+    const all = [];
+    for (let page = 1; page <= 10; page += 1) {
+      spend();
+      const response = this.transport.request('GET', `repos/${this.repository}/pulls?state=closed&per_page=100&sort=created&direction=desc&page=${page}`);
+      if (response.status !== 200) throw ghFailure(response, 'Listing merged pull requests');
+      if (!Array.isArray(response.json)) throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE', 'The closed PR list was not readable.');
+      for (const pr of response.json) {
+        if (!pr.merged_at) continue;
+        const match = mergedCandidate({ number: pr.number, merged: true, mergedAt: pr.merged_at,
+          repository: pr.base?.repo ? { nameWithOwner: pr.base.repo.full_name } : { nameWithOwner: this.repository } }, this.repository);
+        if (match) all.push({ ...match, body: pr.body || '' });
+      }
+      if (response.json.length < 100) return all;
+    }
+    throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE', 'The closed PR scan reached ten full pages.');
+  }
+
+  // At most twenty aliases, each with two bounded issue connections. No partial GraphQL data is used.
+  issuePullRequestLinks(numbers, spend) {
+    const [owner, name] = this.repository.split('/');
+    const fields = numbers.map(number => `i${number}: issue(number: ${number}) {
+      closedByPullRequestsReferences(first: 100, includeClosedPrs: true) {
+        pageInfo { hasNextPage } nodes { number merged mergedAt repository { nameWithOwner } }
+      }
+      timelineItems(first: 100, itemTypes: [CROSS_REFERENCED_EVENT]) {
+        pageInfo { hasNextPage } nodes { ... on CrossReferencedEvent {
+          source { __typename ... on PullRequest { number merged mergedAt repository { nameWithOwner } } }
+        } }
+      }
+    }`).join('\n');
+    spend();
+    const response = this.transport.request('POST', 'graphql', {
+      query: `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { ${fields} } }`,
+      variables: { owner, name },
+    });
+    if (response.status !== 200) throw ghFailure(response, 'Reading issue PR references');
+    const repository = response.json?.data?.repository;
+    if (response.json?.errors?.length || !repository) throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE', 'The issue PR references were not fully readable.');
+    return new Map(numbers.map(number => {
+      const issue = repository[`i${number}`];
+      const closing = issue?.closedByPullRequestsReferences;
+      const timeline = issue?.timelineItems;
+      const complete = [closing, timeline].every(connection => connection?.pageInfo?.hasNextPage === false && Array.isArray(connection.nodes));
+      const nodes = complete ? [...closing.nodes, ...timeline.nodes.map(node => node?.source).filter(node => node?.__typename === 'PullRequest')] : [];
+      return [number, { complete, candidates: nodes.map(node => mergedCandidate(node, this.repository)).filter(Boolean) }];
+    }));
+  }
+
   pullRequestForBranch(branch) {
     const owner = this.repository.split('/')[0];
     const response = this.transport.request('GET', `repos/${this.repository}/pulls?head=${encodeURIComponent(`${owner}:${branch}`)}&state=all&per_page=10`);
@@ -2713,6 +2765,26 @@ function referencedIssues(prs) {
   return references;
 }
 
+function backfillEligible(outcome, child) {
+  return Boolean(outcome && isFinished(outcome, child) && !isRetired(outcome, child) && !child?.pr?.number);
+}
+
+function mergedCandidate(node, repository) {
+  if (!isObject(node) || typeof node.merged !== 'boolean' || !isText(node.repository?.nameWithOwner)) {
+    throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE', 'A PR reference was not fully readable.');
+  }
+  if (!node.merged || node.repository.nameWithOwner.toLowerCase() !== repository.toLowerCase()) return null;
+  if (!isInt(node.number, 1) || !isText(node.mergedAt) || !Number.isFinite(Date.parse(node.mergedAt))) {
+    throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE', 'A merged PR reference had no usable number or merge time.');
+  }
+  return { number: node.number, merged_at: node.mergedAt };
+}
+
+function mergedSelection(candidates) {
+  return [...new Map(candidates.map(pr => [pr.number, { number: pr.number, merged_at: pr.merged_at }])).values()]
+    .sort((a, b) => Date.parse(b.merged_at) - Date.parse(a.merged_at) || b.number - a.number);
+}
+
 // Native hierarchy and body mutations; each returns the raw status. Readback decides the outcome.
 class GitHubMutator {
   constructor({ transport, repository }) {
@@ -2821,7 +2893,10 @@ function staleParts(effect) {
   return names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
 }
 
-function describeEffect(effect) { return EFFECT_TEXT[effect.kind](effect); }
+function describeEffect(effect) {
+  const text = EFFECT_TEXT[effect.kind](effect);
+  return effect.backfill ? `${text}; select merged PR #${effect.backfill.selected} from ${effect.backfill.candidates.map(pr => `#${pr.number} (${pr.merged_at})`).join(', ')}. ${effect.backfill.reason}` : text;
+}
 
 // What a hold on an issue stops for the rest of a pass: its body, its links, or everything.
 function holdScope(kind) {
@@ -2861,13 +2936,19 @@ class Reconciler {
     const subIssues = new Map([...parents].filter(number => issues.get(number)).map(number => [number, this.reader.subIssues(number)]));
     const blockedBy = new Map();
     const prs = new Map();
+    const prCache = new Map();
+    const readPr = number => {
+      if (!prCache.has(number)) prCache.set(number, this.reader.pullRequest(number));
+      return prCache.get(number);
+    };
     for (const outcome of outcomes) {
       const issue = issues.get(outcome.issue);
       if (issue?.blocked_by_total > 0) blockedBy.set(outcome.issue, this.reader.blockedBy(outcome.issue));
       const doc = children.get(outcome.issue)?.doc;
-      const number = doc?.pr?.number || (doc?.candidate?.branch ? this.reader.pullRequestForBranch(doc.candidate.branch) : null);
-      if (number) prs.set(outcome.issue, this.reader.pullRequest(number));
+      const number = doc?.pr?.number || (!isFinished(outcome, doc) && doc?.candidate?.branch ? this.reader.pullRequestForBranch(doc.candidate.branch) : null);
+      if (number) prs.set(outcome.issue, readPr(number));
     }
+    const discovery = this.discoverMerged(outcomes.filter(outcome => backfillEligible(outcome, children.get(outcome.issue)?.doc)), prs, prCache, readPr);
     const journals = new Map();
     for (const outcome of outcomes) {
       const doc = children.get(outcome.issue)?.doc;
@@ -2886,7 +2967,53 @@ class Reconciler {
     }
     const prPages = new Map();
     for (const pr of prs.values()) if (pr && ['OPEN', 'DRAFT'].includes(pr.state)) prPages.set(pr.number, this.reader.issue(pr.number));
-    return { issues, subIssues, blockedBy, prs, outcomes, journals, references, comments, prPages };
+    return { issues, subIssues, blockedBy, prs, outcomes, journals, references, comments, prPages, discovery };
+  }
+
+  // Additional discovery reads share one hard budget. Ordinary tracking is outside this budget.
+  // Caches and results belong to this observation only; unresolved tasks are retried next pass.
+  discoverMerged(outcomes, prs, prCache, readPr) {
+    const results = new Map();
+    if (!outcomes.length) return results;
+    let requests = 0;
+    const spend = () => {
+      if (requests >= 60) throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE', 'Merged PR discovery reached its sixty-request budget.');
+      requests += 1;
+    };
+    const incomplete = (numbers, error) => {
+      if (error.code === 'GH_AUTH' || STOPS_PASS.has(error.code)) throw error;
+      for (const number of numbers) results.set(number, { complete: false, detail: 'Merged PR discovery failed, was truncated or reached its read budget; retry reconciliation.' });
+    };
+    let merged;
+    try { merged = this.reader.mergedPullRequests(spend); }
+    catch (error) { incomplete(outcomes.map(outcome => outcome.issue), error); return results; }
+    const references = referencedIssues(merged);
+    const byNumber = new Map(merged.map(pr => [pr.number, pr]));
+    // Finish every evidence batch before detail reads, so no winner is chosen from a partial set.
+    for (let start = 0; start < outcomes.length; start += 20) {
+      const numbers = outcomes.slice(start, start + 20).map(outcome => outcome.issue);
+      try {
+        for (const [number, links] of this.reader.issuePullRequestLinks(numbers, spend)) {
+          if (!links.complete) { incomplete([number], {}); continue; }
+          const candidates = mergedSelection([...links.candidates, ...(references.get(number) || []).map(pr => byNumber.get(pr))]);
+          results.set(number, { complete: true, candidates });
+        }
+      } catch (error) { incomplete(numbers, error); }
+    }
+    for (const [number, discovery] of results) {
+      if (!discovery.complete || !discovery.candidates.length) continue;
+      const selected = discovery.candidates[0].number;
+      try {
+        if (!prCache.has(selected)) spend();
+        const pr = readPr(selected);
+        if (pr?.state !== 'MERGED') throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE', 'The selected PR could not be confirmed as merged.');
+        prs.set(number, pr);
+        discovery.backfill = { expected_pr: null, expected_completed: true, expected_retired: false,
+          selected, candidates: discovery.candidates,
+          reason: 'Greatest merge time, then higher PR number on an exact timestamp tie.' };
+      } catch (error) { incomplete([number], error); }
+    }
+    return results;
   }
 
   // Report-only: an open PR that says "Refs #n" (or Completes, Closes, Fixes, Resolves) for an open
@@ -2935,15 +3062,19 @@ class Reconciler {
   diffChild(outcome, existing, desired, checks, observed, findings, effects, journals = null) {
     const issueNumber = outcome.issue;
     const issue = observed.issues.get(issueNumber);
+    const discovery = observed.discovery.get(issueNumber);
+    const backfill = discovery?.backfill;
+    if (discovery && !discovery.complete) findings.push({ code: 'PR_DISCOVERY_INCOMPLETE', issue: issueNumber, detail: discovery.detail });
+    else if (discovery && !backfill) findings.push({ code: 'COMPLETED_PR_MISSING', issue: issueNumber, detail: 'Complete discovery found no matching merged PR. Controller: check the completed task references.' });
     if (!issue || issue.is_pull_request) {
       findings.push({ code: 'ISSUE_MISSING', issue: issueNumber, detail: issue ? 'the number is a pull request' : 'the issue could not be read' });
       return;
     }
-    if (!existing) effects.push({ kind: 'create_state', target: { issue: issueNumber }, doc: desired });
+    if (!existing) effects.push({ kind: 'create_state', target: { issue: issueNumber }, doc: desired, ...(backfill ? { backfill } : {}) });
     else {
       const fields = Object.keys({ ...existing, ...desired }).filter(key => !['revision', 'volatile', 'pending_effects'].includes(key)
         && JSON.stringify(canonical(existing[key])) !== JSON.stringify(canonical(desired[key])));
-      if (fields.length) effects.push({ kind: 'update_state', target: { issue: issueNumber }, fields, doc: desired, ...(journals ? { journals } : {}) });
+      if (fields.length) effects.push({ kind: 'update_state', target: { issue: issueNumber }, fields, doc: desired, ...(journals ? { journals } : {}), ...(backfill ? { backfill } : {}) });
     }
     // Native parent.
     if (outcome.parent) {
@@ -3233,7 +3364,8 @@ class Reconciler {
   // shows them after this pass.
   planAttention(parent, projected, observed, only, override, inventory, effects, findings, holds, resolutions = []) {
     const folds = [];
-    if (!only && !override) folds.push({ source: 'reconcile', complete: true, seen: findings.filter(finding => ATTENTION.has(finding.code)).map(({ code, issue, head = null, since = null }) => ({ code, issue, head, ...(since ? { since } : {}) })), hold: this.oneTimeHolds(parent.attention, projected) });
+    if (!only && !override) folds.push({ source: 'reconcile', complete: true, seen: findings.filter(finding => ATTENTION.has(finding.code)).map(({ code, issue, head = null, since = null }) => ({ code, issue, head, ...(since ? { since } : {}) })),
+      hold: [...this.oneTimeHolds(parent.attention, projected), ...(parent.attention || []).filter(entry => entry.code === 'COMPLETED_PR_MISSING' && observed.discovery.get(entry.issue)?.complete === false).map(entry => entry.id)] });
     if (inventory) folds.push({ source: 'inventory', complete: inventory.complete, seen: inventory.findings });
     if (!folds.length) return;
     const now = this.now();
@@ -3424,6 +3556,14 @@ class Reconciler {
         const result = mutateDoc('child', effect.target.issue, {
           create: () => newChild({ repository: this.binding.repository, outcome: outcomes.get(effect.target.issue) }),
           change: doc => {
+            if (effect.backfill) {
+              // Recheck on every CAS retry as well as on the initial mutation read.
+              guard();
+              const outcome = parentDoc.outcomes.find(entry => entry.issue === effect.target.issue);
+              if (doc.pr.number !== effect.backfill.expected_pr || !backfillEligible(outcome, doc)) {
+                throw new ProgrammeError('PR_BACKFILL_STALE', 'The task PR or completion eligibility changed after planning; run reconciliation again.');
+              }
+            }
             for (const key of fields) {
               if (desired[key] === undefined) delete doc[key];
               else doc[key] = clone(desired[key]);
@@ -3590,7 +3730,7 @@ class Reconciler {
       parent_revision: plan.parent?.revision ?? null,
       findings: plan.findings,
       close_list: plan.findings.filter(finding => finding.code === 'READY_TO_CLOSE').map(({ issue, pr, head, gate, gate_accepted, accepted, closable, uat, review }) => ({ issue, pr, head, gate, gate_accepted, accepted, closable, uat, review })),
-      effects: plan.effects.map(effect => ({ kind: effect.kind, target: effect.target, text: effect.text })),
+      effects: plan.effects.map(effect => ({ kind: effect.kind, target: effect.target, text: effect.text, ...(effect.backfill ? { backfill: effect.backfill } : {}) })),
       recovered: plan.resolutions,
       holds: plan.holds,
       results: [],

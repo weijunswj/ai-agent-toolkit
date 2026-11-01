@@ -58,6 +58,282 @@ const codes = report => report.findings.map(finding => `${finding.code} #${findi
 const kinds = report => report.effects.map(effect => `${effect.kind} #${effect.target.issue}`);
 const patchCount = (github, number) => github.calls.filter(call => call.method === 'PATCH' && call.path.endsWith(`/issues/${number}`)).length;
 
+// Completed-task discovery fixtures use reserved fake repository identities and no live records.
+function completedFixture(count = 1) {
+  const outcomes = Array.from({ length: count }, (_, order) => ({ issue: 100 + order, class: 'COMPLETED', parent: 7, order }));
+  return setup({ repository: 'example.test/widgets', parentIssue: 7, outcomes, issues: github => {
+    for (const outcome of outcomes) github.addIssue(outcome.issue, { state: 'closed', parent: 7 });
+  } });
+}
+const discoveryCalls = calls => calls.filter(call => /pulls\?state=closed/.test(call.path) || call.path === 'graphql' && /closedByPullRequestsReferences/.test(call.body.query));
+
+test('completed discovery matches every reference verb, case and list without changing open-task parsing', () => {
+  for (const body of ['Refs #100', 'Completes #100', 'Closes #100', 'Fixes #100', 'Resolves #100', 'rEfS: #99, #100 and #101']) {
+    const { github, reconciler } = completedFixture();
+    github.addPr(200, { head: SHA_A, merged: true, body });
+    const plan = reconciler().plan();
+    assert.equal(plan.observed.prs.get(100)?.number, 200, body);
+    assert.equal(plan.effects.find(effect => effect.kind === 'create_state').backfill.selected, 200);
+  }
+});
+
+test('closing and timeline sources union with body matches; latest merge wins, then higher number', () => {
+  const { github, reconciler } = completedFixture(3);
+  for (const [number, mergedAt, body] of [
+    [200, '2026-10-24T18:46:46Z', 'Implements #100'],
+    [213, '2026-10-23T19:11:00Z', '- [x] #100'],
+    [204, '2026-10-31T08:03:58Z', 'Refs #101'],
+    [205, '2026-10-31T08:03:58Z', 'Refs #101'],
+    [206, '2026-10-22T00:00:00Z', 'No body reference'],
+  ]) github.addPr(number, { head: SHA_A, merged: true, mergedAt, body });
+  github.addPr(207, { head: SHA_A, state: 'CLOSED', body: 'Closes #100' });
+  github.addPr(208, { head: SHA_A, body: 'Refs #100' });
+  github.issuePrLinks.set(100, { timeline: [213, 200, 200, 207, 208,
+    { __typename: 'Issue', number: 999 },
+    { __typename: 'PullRequest', number: 999, merged: true, mergedAt: '2026-11-01T00:00:00Z', repository: { nameWithOwner: 'elsewhere.test/foreign' } }] });
+  github.issuePrLinks.set(101, { closing: [204] });
+  github.issuePrLinks.set(102, { closing: [206] });
+  const plan = reconciler().plan();
+  assert.deepEqual([...plan.observed.prs].map(([issue, pr]) => [issue, pr.number]), [[100, 200], [101, 205], [102, 206]]);
+  const effect = plan.effects.find(effect => effect.backfill?.selected === 200);
+  assert.deepEqual(effect.backfill.candidates.map(pr => pr.number), [200, 213]);
+  assert.match(effect.backfill.reason, /Greatest merge time.*higher PR number/);
+  for (const candidate of plan.effects.filter(entry => entry.backfill).flatMap(entry => entry.backfill.candidates)) {
+    assert.deepEqual(Object.keys(candidate).sort(), ['merged_at', 'number'], 'planned effects never copy PR bodies into their report');
+  }
+});
+
+// Closure matrix: command x role x state. No acceptance or finality follows a discovered PR.
+for (const row of [
+  { name: 'dry run by an observer', apply: false, role: 'observer', state: 'completed', expected: null },
+  { name: 'dry run by the holder', apply: false, role: 'holder', state: 'completed', expected: null },
+  { name: 'holder apply', apply: true, role: 'holder', state: 'completed', expected: 200 },
+  { name: 'non-holder apply', apply: true, role: 'observer', state: 'completed', refused: true },
+  { name: 'retired catalogue', apply: true, role: 'holder', state: 'retired', expected: null },
+  { name: 'retired child', apply: true, role: 'holder', state: 'retired-child', expected: null },
+  { name: 'recorded PR', apply: true, role: 'holder', state: 'recorded', expected: 201 },
+  { name: 'no match', apply: true, role: 'holder', state: 'no-match', expected: null, finding: 'COMPLETED_PR_MISSING' },
+  { name: 'partial discovery', apply: true, role: 'holder', state: 'partial', expected: null, finding: 'PR_DISCOVERY_INCOMPLETE' },
+]) test(`merged backfill invariant: ${row.name}`, () => {
+  const { github, store, reconciler } = completedFixture();
+  const run = reconciler(row.role === 'holder' ? writer : { session: 'observer', prefix: writer.prefix });
+  if (row.state !== 'no-match') github.addPr(200, { head: SHA_A, merged: true, body: 'Refs #100' });
+  if (row.state === 'retired') store.mutate('parent', 7, { writer, change: doc => { doc.outcomes[0].class = 'RETIRED'; return doc; } });
+  const child = state.newChild({ repository: github.repository, outcome: store.read('parent', 7).doc.outcomes[0] });
+  child.candidate.branch = 'retained-branch';
+  if (row.state === 'retired-child') child.lifecycle = 'RETIRED';
+  if (row.state === 'recorded') {
+    github.addPr(201, { head: SHA_A, merged: true });
+    child.pr.number = 201;
+  }
+  store.write('child', 100, child, { sha: null, previous: null });
+  if (row.state === 'partial') github.issuePrLinks.set(100, { closingTruncated: true });
+  const before = { commits: github.commits, writes: github.mutations() };
+  if (row.refused) assert.throws(() => run.run({ apply: true }), { code: 'STALE_WRITER' });
+  else {
+    const report = run.run({ apply: row.apply });
+    if (row.finding) assert.ok(report.findings.some(finding => finding.code === row.finding));
+    if (row.state.startsWith('retired') || row.state === 'recorded') assert.equal(discoveryCalls(github.calls).length, 0);
+    if (row.state.startsWith('retired')) assert.equal(report.findings.some(finding => /^(COMPLETED_PR_MISSING|PR_DISCOVERY_INCOMPLETE)$/.test(finding.code)), false);
+  }
+  if (!row.apply || row.refused) assert.deepEqual({ commits: github.commits, writes: github.mutations() }, before);
+  const saved = store.read('child', 100).doc;
+  assert.equal(saved.pr.number, row.expected ?? null);
+  assert.deepEqual(saved.uat, child.uat);
+  assert.deepEqual(saved.review, child.review);
+  assert.deepEqual(saved.gate, child.gate);
+  assert.equal(saved.lifecycle, child.lifecycle);
+});
+
+test('missing completed child is created with its merged PR and both projections settle in one pass', () => {
+  const { github, store, reconciler } = completedFixture();
+  github.addPr(200, { head: SHA_A, merged: true, body: 'Refs #100' });
+  const dry = reconciler().run();
+  assert.equal(store.read('child', 100).doc, null);
+  assert.equal(dry.effects.find(effect => effect.kind === 'create_state').backfill.expected_pr, null);
+  assert.deepEqual(reconciler().run({ apply: true }).holds, []);
+  assert.match(github.issues.get(7).body, /\| #100 \| #200 \| - \| COMPLETED/);
+  assert.match(github.issues.get(100).body, /PR.*#200/);
+  const before = { commits: github.commits, mutations: github.mutations(), revision: store.read('child', 100).doc.revision, calls: github.calls.length };
+  assert.equal(reconciler().run({ apply: true }).summary, 'No changes');
+  assert.deepEqual({ commits: github.commits, mutations: github.mutations(), revision: store.read('child', 100).doc.revision }, { commits: before.commits, mutations: before.mutations, revision: before.revision });
+  assert.equal(discoveryCalls(github.calls.slice(before.calls)).length, 0);
+});
+
+test('discovery budgets batch twenty aliases and cache shared and already tracked PR details', () => {
+  const { github, store, reconciler } = completedFixture(21);
+  github.addPr(200, { head: SHA_A, merged: true, body: `Refs ${Array.from({ length: 21 }, (_, i) => `#${100 + i}`).join(', ')}` });
+  const child = state.newChild({ repository: github.repository, outcome: store.read('parent', 7).doc.outcomes[0] });
+  child.pr.number = 200;
+  store.write('child', 100, child, { sha: null, previous: null });
+  const start = github.calls.length;
+  const plan = reconciler().plan();
+  assert.equal(plan.observed.prs.size, 21);
+  const calls = github.calls.slice(start);
+  assert.equal(discoveryCalls(calls).length, 2, 'one list page plus one batch for twenty eligible issues');
+  assert.equal(calls.filter(call => call.path === 'graphql' && call.body.variables.number === 200).length, 1, 'tracked and discovered PRs share a detail cache');
+  const batch = calls.find(call => call.body?.query?.includes('closedByPullRequestsReferences'));
+  assert.equal([...batch.body.query.matchAll(/i\d+: issue/g)].length, 20);
+  assert.match(batch.body.query, /includeClosedPrs: true/);
+});
+
+test('twenty-one eligible tasks use two alias batches and a shared winner is fetched once', () => {
+  const { github, reconciler } = completedFixture(21);
+  github.addPr(200, { head: SHA_A, merged: true, body: `Refs ${Array.from({ length: 21 }, (_, i) => `#${100 + i}`).join(', ')}` });
+  const plan = reconciler().plan();
+  assert.equal(plan.observed.prs.size, 21);
+  assert.equal(discoveryCalls(github.calls).length, 3);
+  assert.equal(github.calls.filter(call => call.body?.variables?.number === 200).length, 1);
+  assert.deepEqual(discoveryCalls(github.calls).filter(call => call.path === 'graphql').map(call => [...call.body.query.matchAll(/i\d+: issue/g)].length), [20, 1]);
+});
+
+test('a failed issue batch holds only its tasks while unrelated reconciliation continues', () => {
+  const { github, reconciler } = completedFixture(21);
+  github.addPr(200, { head: SHA_A, merged: true, body: 'Refs #100, #120' });
+  github.intercept(call => call.body?.query?.includes('i100: issue') ? { status: 503, json: {} } : undefined);
+  const plan = reconciler().plan();
+  assert.equal(plan.observed.prs.has(100), false);
+  assert.equal(plan.observed.prs.get(120).number, 200);
+  assert.equal(plan.findings.filter(finding => finding.code === 'PR_DISCOVERY_INCOMPLETE').length, 20);
+  assert.equal(plan.findings.some(finding => finding.code === 'COMPLETED_PR_MISSING'), false);
+});
+
+test('closed PR paging counts unmerged entries and refuses a full tenth page', () => {
+  for (const count of [105, 1000]) {
+    const { github, reconciler } = completedFixture();
+    for (let n = 0; n < count; n += 1) github.addPr(200 + n, { head: SHA_A, state: 'CLOSED', merged: n === 0, body: 'Refs #100' });
+    const plan = reconciler().plan();
+    assert.equal(discoveryCalls(github.calls).filter(call => call.method === 'GET').length, count === 105 ? 2 : 10);
+    if (count === 105) assert.equal(plan.observed.prs.get(100).number, 200);
+    else {
+      assert.equal(plan.observed.prs.has(100), false);
+      assert.ok(plan.findings.some(finding => finding.code === 'PR_DISCOVERY_INCOMPLETE'));
+      assert.equal(plan.findings.some(finding => finding.code === 'COMPLETED_PR_MISSING'), false);
+    }
+  }
+});
+
+test('discovery never exceeds sixty additional requests and leaves budget-limited tasks untouched', () => {
+  const { github, reconciler } = completedFixture(60);
+  for (let n = 0; n < 60; n += 1) github.addPr(200 + n, { head: SHA_A, merged: true, body: `Refs #${100 + n}` });
+  const start = github.calls.length;
+  const plan = reconciler().plan();
+  const calls = github.calls.slice(start);
+  assert.equal(discoveryCalls(calls).length, 4, 'one history page and three batches');
+  assert.equal(calls.filter(call => call.path === 'graphql' && call.body.variables.number).length, 56);
+  assert.equal(plan.observed.prs.size, 56);
+  assert.equal(plan.findings.filter(finding => finding.code === 'PR_DISCOVERY_INCOMPLETE').length, 4);
+  assert.equal(plan.findings.some(finding => finding.code === 'COMPLETED_PR_MISSING'), false);
+});
+
+test('incomplete evidence never selects a partial match or reports no match; auth and lock failures stop', () => {
+  for (const failure of ['closing', 'timeline', 'list', 'graphql', 'malformed', 'detail', 'unmerged-detail', 'auth', 'lock']) {
+    const { github, reconciler } = completedFixture();
+    github.addPr(200, { head: SHA_A, merged: true, body: 'Refs #100' });
+    if (['closing', 'timeline'].includes(failure)) github.issuePrLinks.set(100, { [`${failure}Truncated`]: true });
+    if (failure === 'malformed') github.issuePrLinks.set(100, { closing: [{ number: 201, merged: true, mergedAt: 'bad-time', repository: { nameWithOwner: github.repository } }] });
+    github.intercept(call => {
+      if (failure === 'list' && /pulls\?state=closed/.test(call.path)) return { status: 503, json: {} };
+      if (failure === 'graphql' && call.body?.query?.includes('closedByPullRequestsReferences')) return { status: 200, json: { errors: [{ message: 'partial' }], data: { repository: {} } } };
+      if (failure === 'detail' && call.body?.variables?.number === 200) return { status: 200, json: { data: { repository: { pullRequest: null } } } };
+      if (failure === 'unmerged-detail' && call.body?.variables?.number === 200) github.prs.get(200).merged = false;
+      if (failure === 'auth' && /pulls\?state=closed/.test(call.path)) throw new state.ProgrammeError('GH_AUTH', 'test authentication failure');
+      if (failure === 'lock' && /pulls\?state=closed/.test(call.path)) throw new state.ProgrammeError('PASS_LOCK_LOST', 'test lost lock');
+    });
+    if (['auth', 'lock'].includes(failure)) assert.throws(() => reconciler().plan(), { code: failure === 'auth' ? 'GH_AUTH' : 'PASS_LOCK_LOST' });
+    else {
+      const plan = reconciler().plan();
+      assert.equal(plan.observed.prs.has(100), false, failure);
+      assert.ok(plan.findings.some(finding => finding.code === 'PR_DISCOVERY_INCOMPLETE'), failure);
+      assert.equal(plan.findings.some(finding => finding.code === 'COMPLETED_PR_MISSING'), false, failure);
+    }
+  }
+});
+
+for (const change of ['pr', 'retire-parent', 'retire-child', 'reopen', 'takeover']) test(`backfill rechecks fresh eligibility before writing: ${change}`, () => {
+  const { github, store, reconciler } = completedFixture();
+  github.addPr(200, { head: SHA_A, merged: true, body: 'Refs #100' });
+  const child = state.newChild({ repository: github.repository, outcome: store.read('parent', 7).doc.outcomes[0] });
+  store.write('child', 100, child, { sha: null, previous: null });
+  const run = reconciler();
+  const plan = run.plan();
+  if (change === 'pr' || change === 'retire-child' || change === 'reopen') store.mutate('child', 100, { writer, parentDoc: plan.parent, change: doc => {
+    if (change === 'pr') doc.pr.number = 999;
+    else doc.lifecycle = change === 'reopen' ? 'ACTIVE' : 'RETIRED';
+    return doc;
+  } });
+  if (change === 'retire-parent' || change === 'reopen') store.mutate('parent', 7, { writer, change: doc => {
+    doc.outcomes[0].class = change === 'reopen' ? 'COMMITTED' : 'RETIRED'; return doc;
+  } });
+  if (change === 'takeover') {
+    const successor = { session: 'successor', prefix: writer.prefix };
+    store.mutate('parent', 7, { writer: successor, authorise: false, change: doc => state.claimDocument(doc, successor, { takeover: true }) });
+    const commits = github.commits;
+    assert.throws(() => run.apply(plan), { code: 'STALE_WRITER' });
+    assert.equal(github.commits, commits);
+  } else assert.ok(run.apply(plan).holds.some(hold => hold.code === 'PR_BACKFILL_STALE'));
+  assert.equal(store.read('child', 100).doc.pr.number, change === 'pr' ? 999 : null);
+});
+
+for (const change of ['overlap', 'disjoint', 'takeover']) test(`backfill preserves CAS and fence semantics on retry: ${change}`, () => {
+  const { github, store, reconciler } = completedFixture();
+  github.addPr(200, { head: SHA_A, merged: true, body: 'Refs #100' });
+  store.write('child', 100, state.newChild({ repository: github.repository, outcome: store.read('parent', 7).doc.outcomes[0] }), { sha: null, previous: null });
+  const run = reconciler();
+  const plan = run.plan();
+  let raced = false;
+  github.intercept(call => {
+    if (raced || call.method !== 'PUT' || !call.path.endsWith('issue-100.json')) return;
+    raced = true;
+    if (change === 'takeover') {
+      const parent = store.read('parent', 7).doc;
+      github.putFile(store.docPath('parent', 7), state.claimDocument(parent, { session: 'successor', prefix: writer.prefix }, { takeover: true }));
+      return { status: 409, json: { message: 'test retry' } };
+    }
+    const current = store.read('child', 100).doc;
+    if (change === 'overlap') current.pr.number = 999;
+    else current.next_action = 'Keep the concurrent note';
+    github.putFile(store.docPath('child', 100), current);
+  });
+  if (change === 'takeover') assert.throws(() => run.apply(plan), { code: 'STALE_WRITER' });
+  else {
+    const report = run.apply(plan);
+    assert.equal(report.holds.some(hold => hold.code === 'STATE_CONFLICT'), change === 'overlap');
+  }
+  const saved = store.read('child', 100).doc;
+  assert.equal(saved.pr.number, change === 'disjoint' ? 200 : change === 'overlap' ? 999 : null);
+  if (change === 'disjoint') assert.equal(saved.next_action, 'Keep the concurrent note');
+});
+
+test('backfill commit-pinned readback failure never reports success and interrupted projections recover', () => {
+  for (const failure of ['readback', 'projection']) {
+    const { github, store, reconciler } = completedFixture();
+    github.addPr(200, { head: SHA_A, merged: true, body: 'Refs #100' });
+    let failed = false;
+    github.intercept(call => {
+      if (failed) return;
+      if (failure === 'readback' && call.method === 'GET' && /issue-100\.json\?ref=c\d+$/.test(call.path)) {
+        failed = true;
+        return { status: 200, json: { sha: 'bad', encoding: 'base64', content: Buffer.from(github.files.get(store.docPath('child', 100)).text).toString('base64') } };
+      }
+      if (failure === 'projection' && call.method === 'PATCH' && call.path.endsWith('/issues/100')) {
+        failed = true;
+        return { status: 502, json: {} };
+      }
+    });
+    const report = reconciler().run({ apply: true });
+    assert.equal(failed, true);
+    assert.equal(store.read('child', 100).doc.pr.number, 200, 'the stored PR survives an interrupted projection');
+    if (failure === 'readback') {
+      assert.ok(report.holds.some(hold => hold.code === 'STATE_READBACK_MISMATCH'));
+      assert.equal(report.results.some(result => result.kind === 'create_state' && result.outcome === 'DONE'), false);
+    } else assert.ok(report.holds.length);
+    assert.deepEqual(reconciler().run({ apply: true }).holds, []);
+    assert.match(github.issues.get(7).body, /\| #100 \| #200 \| - \| COMPLETED/);
+    assert.equal(reconciler().run({ apply: true }).summary, 'No changes');
+  }
+});
+
 test('a dry run plans the native tree without writing; apply makes it agree and a second pass changes nothing', () => {
   const { github, reconciler } = setup();
   const commits = github.commits;
@@ -268,7 +544,7 @@ test('dependencies are shown but never set or imply a parent', () => {
   assert.equal(github.issues.get(499).parent, null);
   assert.equal(github.issues.get(425).parent, 421, 'an unexpected parent is reported, not removed');
   assert.equal(report.effects.some(effect => effect.target.issue === 499 && ['attach', 'reparent'].includes(effect.kind)), false);
-  assert.match(reconciler().run().next_action, /^Controller: decide on 3 finding\(s\) the reconciler does not change, starting with /);
+  assert.match(reconciler().run().next_action, /^Controller: decide on 4 finding\(s\) the reconciler does not change, starting with /, 'includes the completed task with no merged PR');
 });
 
 test('parent and child blocks are rendered from the same state revision', () => {
@@ -668,7 +944,7 @@ test('a second repository orders native sub-issues like the Programme Graph, inc
   assert.deepEqual(github.issues.get(8).subs, [17, 16]);
   const settled = reconciler().run();
   assert.equal(settled.summary, 'No changes');
-  assert.match(settled.next_action, /^Controller: decide on 3 finding\(s\) the reconciler does not change/, 'both priority ties wait on the controller');
+  assert.match(settled.next_action, /^Controller: decide on 4 finding\(s\) the reconciler does not change/, 'both priority ties and the completed task with no merged PR wait on the controller');
   assert.deepEqual(settled.findings.filter(finding => finding.code === 'ORDER_TIE').map(finding => finding.detail.split(' share')[0]), ['#12, #16', '#9, #14, #15']);
 });
 
