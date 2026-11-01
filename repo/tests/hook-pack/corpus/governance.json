@@ -3,6 +3,128 @@
   "family": "governance",
   "rows": [
     {
+      "id": "GOV.reached-unreadable-store",
+      "source": "governance G2: saving a reached question must not allow the guarded command",
+      "kind": "fault",
+      "hosts": ["claude", "codex"],
+      "steps": [{"event":"SessionStart","payload":{"source":"startup","cwd":"{dir}"},"expect":{"decision":"allow"}}],
+      "payload": {"tool_name":"Bash","cwd":"{dir}","tool_input":{"command":"git -C \"{work}\" commit -m example"}},
+      "fixture": {"repo":{"governance":"undecided"}},
+      "fault": {"type":"unreadable-held-store"},
+      "expect": {"decision":"deny","reason":"toolkit-governance-hook"},
+      "expect_by_host": {"codex":{"decision":"deny","reason":"toolkit-codex-helper-hook"}},
+      "note": "The same governance core runs behind each host's own adapter.",
+      "status": "pass"
+    },
+    {
+      "id": "GOV.reached-unrelated-work",
+      "source": "governance G2: a refused target must not hold unrelated work or markup in a plain folder",
+      "kind": "state",
+      "hosts": ["claude", "codex"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup","cwd":"{dir}"},"expect":{"decision":"allow"}},
+        {"event":"PreToolUse","payload":{"cwd":"{dir}","tool_name":"Bash","tool_input":{"command":"git -C \"{work}\" log"}},"expect":{"decision":"deny"}},
+        {"event":"UserPromptSubmit","payload":{"cwd":"{dir}","prompt":"skip that repo and fix the parser"},"expect":{"decision":"allow","held_messages":0}}
+      ],
+      "event": "UserPromptSubmit",
+      "payload": {"cwd":"{dir}","prompt":"fix <div class=a> in the parser"},
+      "fixture": {"repo":{"governance":"undecided"}},
+      "expect": {"decision":"allow","held_messages":0},
+      "status": "pass"
+    },
+    {
+      "id": "GOV.reached-resume-clears",
+      "source": "governance G2: resume ends a reached binding without holding the plain-folder message",
+      "kind": "state",
+      "hosts": ["claude", "codex"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup","cwd":"{dir}"},"expect":{"decision":"allow"}},
+        {"payload":{"cwd":"{dir}","tool_name":"Bash","tool_input":{"command":"git -C \"{work}\" log"}},"expect":{"decision":"deny"}},
+        {"event":"SessionStart","payload":{"source":"resume","cwd":"{dir}"},"expect":{"decision":"allow"}},
+        {"event":"UserPromptSubmit","payload":{"cwd":"{dir}","prompt":"carry on"},"expect":{"decision":"allow","held_messages":0}}
+      ],
+      "payload": {"cwd":"{dir}","tool_name":"Bash","tool_input":{"command":"git -C \"{work}\" log"}},
+      "fixture": {"repo":{"governance":"undecided"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "GOV.reached-schedule-passes",
+      "source": "governance G2: a reached question must not stall scheduling in the unheld folder",
+      "kind": "state",
+      "hosts": ["claude"],
+      "note": "Codex has no scheduling tool in its native PreToolUse matcher; unit coverage checks the shared core.",
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup","cwd":"{dir}"},"expect":{"decision":"allow"}},
+        {"payload":{"cwd":"{dir}","tool_name":"Bash","tool_input":{"command":"git -C \"{work}\" log"}},"expect":{"decision":"deny"}}
+      ],
+      "payload": {"cwd":"{dir}","tool_name":"CronCreate","tool_input":{"prompt":"carry on with parser work"}},
+      "fixture": {"repo":{"governance":"undecided"}},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "GOV.bare-answer-damaged-tickets",
+      "source": "governance G2: a bare typed answer does not depend on delivery-receipt state",
+      "kind": "fault",
+      "hosts": ["claude", "codex"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}},
+        {"event":"UserPromptSubmit","payload":{"prompt":"prepare work"},"expect":{"decision":"deny"}},
+        {"event":"UserPromptSubmit","payload":{"prompt":"no"},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"git status"}},
+      "fixture": {"repo":{"governance":"none"}},
+      "fault": {"type":"damaged-reply-store"},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "GOV.later-cwd-reached-question",
+      "source": "governance G2: a cwd that said later is unheld when a command reaches another held folder",
+      "kind": "state",
+      "hosts": ["claude", "codex"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}},
+        {"event":"UserPromptSubmit","payload":{"prompt":"prepare work"},"expect":{"decision":"deny"},"expect_by_host":{"claude":{"decision":"allow"}},"note":"Claude lets this held turn show the governance card; Codex blocks it."},
+        {"event":"UserPromptSubmit","payload":{"prompt":"later"},"expect":{"decision":"allow","held_messages":0}},
+        {"event":"PreToolUse","payload":{"tool_name":"Bash","tool_input":{"command":"git -C \"{work}/second\" log"}},"expect":{"decision":"deny"}},
+        {"event":"UserPromptSubmit","payload":{"prompt":"skip the second repo and fix the parser"},"expect":{"decision":"allow","held_messages":0}}
+      ],
+      "event": "UserPromptSubmit",
+      "payload": {"prompt":"fix <div class=a> in this parser"},
+      "fixture": {"repo":{"governance":"undecided"},"files":{
+        "second/.git/HEAD":"ref: refs/heads/main\n",
+        "second/.git/config":"[core]\n\trepositoryformatversion = 0\n\tbare = false\n[remote \"origin\"]\n\turl = https://github.com/toolkit-test-fixture/second.git\n",
+        "second/.git/objects/.keep":"",
+        "second/.git/refs/heads/.keep":""
+      }},
+      "expect": {"decision":"allow","held_messages":0},
+      "status": "pass"
+    },
+    {
+      "id": "GOV.reached-first-question-stays",
+      "source": "governance G2: reaching a second folder must not retarget the first live question",
+      "kind": "state",
+      "hosts": ["claude", "codex"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup","cwd":"{dir}"},"expect":{"decision":"allow"}},
+        {"payload":{"cwd":"{dir}","tool_name":"Bash","tool_input":{"command":"git -C \"{work}\" log"}},"expect":{"decision":"deny"}},
+        {"payload":{"cwd":"{dir}","tool_name":"Bash","tool_input":{"command":"git -C \"{work}/second\" log"}},"expect":{"decision":"deny"}},
+        {"event":"UserPromptSubmit","payload":{"cwd":"{dir}","prompt":"no"},"expect":{"decision":"allow"}},
+        {"payload":{"cwd":"{dir}","tool_name":"Bash","tool_input":{"command":"git -C \"{work}\" log"}},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"cwd":"{dir}","tool_name":"Bash","tool_input":{"command":"git -C \"{work}/second\" log"}},
+      "fixture": {"repo":{"governance":"undecided"},"files":{
+        "second/.git/HEAD":"ref: refs/heads/main\n",
+        "second/.git/config":"[core]\n\trepositoryformatversion = 0\n\tbare = false\n[remote \"origin\"]\n\turl = https://github.com/toolkit-test-fixture/second.git\n",
+        "second/.git/objects/.keep":"",
+        "second/.git/refs/heads/.keep":""
+      }},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
       "id": "GOV.read-in-governed-repo",
       "source": "hook pack seed: daily read",
       "kind": "benign",

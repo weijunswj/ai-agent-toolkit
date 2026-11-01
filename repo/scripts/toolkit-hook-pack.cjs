@@ -41,7 +41,7 @@ const HOSTS = Object.freeze(['claude', 'codex']);
 const KINDS = Object.freeze(['benign', 'hostile', 'fault', 'update', 'state', 'parity']);
 const EVENTS = Object.freeze(['PreToolUse', 'PostToolUse', 'UserPromptSubmit', 'SessionStart']);
 const STATUSES = Object.freeze(['pass', 'known-bad']);
-const FAULTS = Object.freeze(['deleted-plugin-root', 'remove-file', 'throw-module', 'stall-module', 'bad-json', 'empty-input']);
+const FAULTS = Object.freeze(['deleted-plugin-root', 'remove-file', 'throw-module', 'stall-module', 'bad-json', 'empty-input', 'unreadable-held-store', 'damaged-reply-store']);
 const GOVERNANCE = Object.freeze(['enabled', 'undecided', 'none']);
 // App-local task answers in each fixture home; the stale variant ages only its governance binding.
 const TASK_AUTO_MERGE = Object.freeze(['after-gates', 'after-gates-stale', 'off', 'codex-only', 'claude-code-only', 'unreadable']);
@@ -130,7 +130,8 @@ function expectErrors(expect, label) {
   const errors = [];
   if (!['allow', 'deny'].includes(expect.decision)) errors.push(`${label}.decision must be allow or deny`);
   if (expect.reason !== undefined && (typeof expect.reason !== 'string' || !/^[a-z0-9.-]+(?::failure)?$/.test(expect.reason))) errors.push(`${label}.reason is a hook name (the script file name without .cjs), with :failure when the host blocked because the hook itself failed`);
-  for (const key of Object.keys(expect)) if (!['decision', 'reason'].includes(key)) errors.push(`${label} has unknown key ${key}`);
+  if (expect.held_messages !== undefined && (!Number.isSafeInteger(expect.held_messages) || expect.held_messages < 0)) errors.push(`${label}.held_messages must be a non-negative integer`);
+  for (const key of Object.keys(expect)) if (!['decision', 'reason', 'held_messages'].includes(key)) errors.push(`${label} has unknown key ${key}`);
   return errors;
 }
 
@@ -446,6 +447,7 @@ function hookEnvironment(home) {
   }
   return {
     ...env, HOME: home, USERPROFILE: home, APPDATA: path.join(home, 'AppData', 'Roaming'), LOCALAPPDATA: path.join(home, 'AppData', 'Local'),
+    TOOLKIT_GOVERNANCE_OFFLINE: '1',
     CLAUDE_CONFIG_DIR: path.join(home, '.claude'), CODEX_HOME: path.join(home, '.codex'),
     GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: path.join(home, '.gitconfig'), GIT_TERMINAL_PROMPT: '0',
   };
@@ -481,6 +483,13 @@ function stopTree(child) {
 // so what one host's hooks record there never reaches the other's.
 async function runRow(row, hosts, { roots, scratch }) {
   const fixture = new Fixture(fs.mkdtempSync(path.join(scratch, `${row.id}-`)), row.fixture);
+  // Fixed faults touch only this row's disposable home, never the computer's real state.
+  const state = path.join(fixture.home, '.ai-agent-toolkit', 'user-state');
+  if (row.fault?.type === 'unreadable-held-store') fs.mkdirSync(path.join(state, 'held-prompts.v1.json'), { recursive: true });
+  if (row.fault?.type === 'damaged-reply-store') {
+    fs.mkdirSync(state, { recursive: true });
+    fs.writeFileSync(path.join(state, 'governance-reply-tickets.v1.json'), '{broken');
+  }
   const pristine = path.join(fixture.dir, 'home-as-built');
   fs.cpSync(fixture.home, pristine, { recursive: true });
   const results = [];
@@ -524,6 +533,15 @@ async function runOnHost(row, host, fixture, roots) {
     decisions.push(hookDecision(host, hook, result));
   }
   const problems = [];
+  const expect = row.expect_by_host?.[host] || row.expect;
+  if (expect.held_messages !== undefined) {
+    let held = 0;
+    try {
+      const data = JSON.parse(fs.readFileSync(path.join(fixture.home, '.ai-agent-toolkit', 'user-state', 'held-prompts.v1.json'), 'utf8'));
+      held = Object.values(data.repositories).reduce((count, list) => count + list.length, 0);
+    } catch (error) { if (error.code !== 'ENOENT') problems.push('the held-message count could not be read'); }
+    if (held !== expect.held_messages) problems.push(`${held} messages held, expected ${expect.held_messages}`);
+  }
   if (JSON.stringify(fixture.snapshot()) !== JSON.stringify(before)) problems.push('a fixture file changed');
   if (!hooks.length) problems.push(`no ${host} hook matches this call`);
   const deny = decisions.find(entry => entry.decision === 'deny');

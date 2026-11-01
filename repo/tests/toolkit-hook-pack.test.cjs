@@ -52,6 +52,9 @@ test('matchers read as the hosts read them: none matches all, a plain list exact
 });
 
 test('bounded sequences validate every preceding event and its expectation', () => {
+  for (const type of ['unreadable-held-store', 'damaged-reply-store']) assert.deepEqual(pack.rowErrors(row({ fault: { type } })), []);
+  assert.deepEqual(pack.rowErrors(row({ expect: { decision: 'allow', held_messages: 0 } })), []);
+  for (const held_messages of [-1, 1.5, false, '0']) assert.match(pack.rowErrors(row({ expect: { decision: 'allow', held_messages } })).join('\n'), /held_messages must be a non-negative integer/);
   const step = { event: 'UserPromptSubmit', payload: { prompt: 'merge owner/a#9' }, expect: { decision: 'allow' } };
   assert.deepEqual(pack.rowErrors(row({ steps: [step] })), []);
   const transition = { ...step, add_github_origin: true };

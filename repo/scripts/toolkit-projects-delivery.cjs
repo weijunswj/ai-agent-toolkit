@@ -12,7 +12,7 @@ const deliveryHash = id => crypto.createHash('sha256').update(id).digest('hex');
 
 function currentReceipts(receipts, now) {
   return receipts.filter(entry => entry && /^[0-9a-f]{64}$/.test(entry.id)
-    && Date.parse(entry.at) >= now.getTime() - MAX_DELIVERY_AGE_MS);
+    && Date.parse(entry.at) >= now.getTime() - MAX_DELIVERY_AGE_MS - CLOCK_SKEW_MS);
 }
 
 // Returns a new receipt, or null. No state is changed until its owner persists it. The host stamps

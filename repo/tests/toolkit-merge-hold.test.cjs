@@ -203,6 +203,19 @@ test('Projects delivery ids remain spent across sessions and age out only with t
   assert.equal(typed(ctx, projects.wake('merge owner/a#618', { at: new Date(clock.getTime() + 60000).toISOString(), id: 'host-clock-ahead' })), 1);
 });
 
+test('merge receipts cover the delivery lifetime plus allowed clock skew', t => {
+  const ctx = context(t);
+  let clock = new Date('2026-11-01T14:10:00Z');
+  const store = new hold.MergeApprovals({ ...ctx.options, now: () => clock });
+  const delivery = { id: 'clock-skew-replay', sentAt: new Date(clock.getTime() + 110000).toISOString() };
+  const approvals = [{ repository: 'owner/a', pr: 618 }];
+  assert.equal(store.add(approvals, delivery), 1);
+  clock = new Date(clock.getTime() + 24 * 60 * 60 * 1000 + 60000);
+  assert.equal(store.add(approvals, delivery), 0, 'same id is still spent while its stamp is fresh');
+  clock = new Date(clock.getTime() + 60001);
+  assert.equal(store.add(approvals, delivery), 0, 'expired messages cannot rearm after receipt expiry');
+});
+
 test('one Projects message keeps independent governance and merge receipts in either order', t => {
   for (const mergeFirst of [false, true]) {
     const ctx = context(t);

@@ -31,6 +31,8 @@
 //     next to the full answer phrase), and an edit to Toolkit's user-state files. From a plain folder
 //     or a decided repository, a command or edit that works in a held repository (after `cd`, with
 //     Codex's `-C`, or by its full path) is refused and asks that run about one named target.
+//     The next own reply can answer once without being held; resume clears the binding. Failed
+//     question saves still refuse the reaching call and do not change the session mark.
 //     Reading free text for a host launch with a short
 //     answer, or for a session resume or fork, is not a hook: it refused ordinary commands, and the
 //     written rule (safety-gates playbook) covers it. A session another session started never
@@ -451,7 +453,11 @@ function startSession(input, { registryOptions = {}, now, refreshBinding = null,
         try { require('../../skills/github-program-reconciler/scripts/programme-checkpoint.cjs').discardQueuesFor(current.root, programmeDeps); } catch { /* the next turn end discards it */ }
       }
     }
-    return new SessionEpochs({ registryOptions, now }).start(sessionIdOf(input), input && input.source, repositoryId);
+    const epoch = new SessionEpochs({ registryOptions, now }).start(sessionIdOf(input), input && input.source, repositoryId);
+    if (RESUMED_SOURCES.includes(input && input.source)) {
+      try { new HeldPrompts({ registryOptions, now }).clearQuestion(sessionIdOf(input)); } catch { /* stale epochs cannot answer */ }
+    }
+    return epoch;
   } catch { return null; }
 }
 
@@ -459,12 +465,11 @@ function startSession(input, { registryOptions = {}, now, refreshBinding = null,
 
 // Prompts held in undecided repositories, kept next to the registry, private to this computer.
 class HeldPrompts {
-  #file; #now; #registryOptions;
+  #file; #now;
 
   constructor({ registryOptions = {}, now = () => new Date() } = {}) {
     this.#file = path.join(path.dirname(governance.registryPathFor(registryOptions)), HELD_BASENAME);
     this.#now = now;
-    this.#registryOptions = registryOptions;
   }
 
   // A store that cannot be read holds (fail closed). A damaged or oversized one is moved aside, kept
@@ -545,11 +550,13 @@ class HeldPrompts {
       id: verdict.state.repository_id, root: verdict.state.root, reason: verdict.reason, origin: questionOrigin(verdict.state.root) };
     const same = previous && Object.entries(item).every(([key, value]) => previous[key] === value);
     const question = { ...item, at: same ? previous.at : this.#now().toISOString() };
-    data.questions = [...data.questions.filter(entry => entry.session_id !== sessionId), question].slice(-MAX_SESSIONS);
+    const before = data.questions;
+    data.questions = [...before.filter(entry => entry.session_id !== sessionId), question].slice(-MAX_SESSIONS);
     try { this.#write(data); } catch (error) {
-      // A rename can succeed before read-back fails. That binding was never shown: invalidate
-      // its run through the existing session-mark owner, even if the held file stays unreadable.
-      new SessionEpochs({ registryOptions: this.#registryOptions, now: this.#now }).start(sessionId, 'failed-question');
+      // Restore just the question after a failed read-back. Other run state, including "later"
+      // and tickets, keeps its marks. If storage remains inaccessible no reply can use it.
+      data.questions = before;
+      try { this.#write(data); } catch { /* recovery is best effort; the reaching call still refuses */ }
       throw error;
     }
     return question;
@@ -855,8 +862,8 @@ class ReplyTickets {
 
   // Claims a wrapped reply before any effect or ticket. Bare replies keep their existing route.
   acceptDelivery(message, notBefore) {
-    const data = this.#read();
     if (!message.wrapped) return true;
+    const data = this.#read();
     if (!message.approvalEligible) return false;
     // Legacy stores capped spent ids. No pre-conversion delivery may become fresh authority even
     // if its id had already fallen out of that cap.
@@ -926,7 +933,9 @@ function ticketContext(repositories, ticket) {
     `Toolkit governance: the user's message above came after Toolkit asked them ${repositories[0]?.reason === 'not-github' ? 'to acknowledge that GitHub governance will be off' : 'whether to turn on GitHub governance'} for the repository ${repositoryNames(repositories)}. Read what they mean before anything else.`,
     `- If it clearly answers ${repositories[0]?.reason === 'not-github' ? 'ok to governance being off' : 'yes, no or later'} (in any words, such as "ur rec" after your recommendation of no), record it by running exactly this once, with yes, no or later in place of ANSWER:\n  node "${ANSWER_SCRIPT}" ANSWER ${ticket}\n  Then tell the user in plain words what Toolkit recorded.`,
     `- If you think they mean one answer but are not sure, record nothing yet: run exactly this once, with yes, no or later in place of ANSWER:\n  node "${ANSWER_SCRIPT}" confirm-ANSWER ${ticket}\n  Toolkit then gives you the question to ask, naming exactly what it would record; their reply to it comes with a ticket that can record only that answer.`,
-    `- If it is unclear, a question, or about something else, record nothing: ask again in plain words, "${listedQuestion(repositories).replace(/^Toolkit: t/, 'T')}", and end your turn.`,
+    repositories[0]?.reached
+      ? '- If it is unclear, a question, or about something else, record nothing and carry on with the user\'s request. This folder is not held.'
+      : `- If it is unclear, a question, or about something else, record nothing: ask again in plain words, "${listedQuestion(repositories).replace(/^Toolkit: t/, 'T')}", and end your turn.`,
     `The ticket works once, only in this session, and only for this message. ${NEVER_OWNER}`,
   ].join('\n');
 }
@@ -943,7 +952,9 @@ function confirmTicketContext(repositories, command, ticket) {
   return [
     `Toolkit governance: the user's message above is their reply to the question "${confirmQuestion(repositories, command)}". Nothing is recorded yet.`,
     `- If it says yes to that question, run exactly this once:\n  node "${ANSWER_SCRIPT}" ${COMMAND_WORDS[command]} ${ticket}\n  Then tell the user in plain words what Toolkit recorded. This ticket records "${COMMAND_WORDS[command]}" and nothing else.`,
-    `- If it says no, is unclear, or is about something else, record nothing. To ask about governance again, ask in plain words, "${listedQuestion(repositories).replace(/^Toolkit: t/, 'T')}", and end your turn.`,
+    repositories[0]?.reached
+      ? '- If it says no, is unclear, or is about something else, record nothing and carry on with the user\'s request. This folder is not held.'
+      : `- If it says no, is unclear, or is about something else, record nothing. To ask about governance again, ask in plain words, "${listedQuestion(repositories).replace(/^Toolkit: t/, 'T')}", and end your turn.`,
     `The ticket works once, only in this session, and only for this message. ${NEVER_OWNER}`,
   ].join('\n');
 }
@@ -1241,39 +1252,20 @@ class PromptHold {
   }
 
   #decide({ cwd, prompt, sessionId = null }) {
-    let verdict = this.#gate.evaluate(cwd, { sessionId });
-    // A command refused elsewhere asks this run one named folder's question. Resolve that binding
-    // before returning from an unheld cwd, and re-evaluate its identity, verdict and marks below.
+    const verdict = this.#gate.evaluate(cwd, { sessionId });
+    // A question reached from another folder offers one reply, never a hold on that folder.
+    if (!verdict.hold) return this.#unheldReply(verdict, prompt, sessionId);
+    // A held cwd asks its own question. Questions reached from other folders never redirect it.
     let previous = this.#held.question(sessionId);
     if (previous && verdict.hold && previous.root !== verdict.state.root) {
       this.#held.clearQuestion(sessionId);
       previous = null;
-    }
-    if (previous && typeof previous.root === 'string') {
-      const target = this.#gate.evaluate(previous.root, { sessionId });
-      if (target.hold || target.reason === 'not-now') { cwd = previous.root; verdict = target; }
-      else if (previous.root !== verdict.state.root) {
-        this.#held.clearQuestion(sessionId);
-        previous = null;
-        const replay = this.#replayIfAny(target.state, sessionId);
-        if (replay.context) return replay;
-      }
     }
     const text = String(prompt || '');
     // Answers are read from the user's reply; what is held and handed back is the message as sent.
     const message = ownerMessage(text);
     const reply = message.text;
     const answer = ANSWER.exec(reply);
-    // After "not now", the full answer still decides in the same run, unless a session has started in
-    // the repository since; a short reply is an ordinary message there, since it may answer the
-    // agent's own question.
-    if (verdict.reason === 'not-now') {
-      if (!answer || !ownTyped(message)) return { action: 'pass' };
-      if (this.#launched(sessionId)) return { action: 'block', reason: LAUNCHED_TEXT };
-      const claim = this.#claim(message, previous, sessionId);
-      return claim || this.#afterNotNow(cwd, text, answer, verdict, sessionId);
-    }
-    if (!verdict.hold) return verdict.reason === 'no-git' ? { action: 'pass' } : this.#replayIfAny(verdict.state, sessionId);
     if (verdict.reason === 'state-unreadable') return { action: 'block', reason: unreadableText(verdict.state, this.#registryOptions) };
     // A session another session or a launcher started never answers and never adds to what is held.
     if (this.#launched(sessionId)) return { action: 'block', reason: answer || OK_ANSWER.test(reply) ? LAUNCHED_TEXT : LAUNCHED_HOLD_TEXT };
@@ -1290,7 +1282,7 @@ class PromptHold {
     // included, is read only as the reply to that question.
     if (asked && ownTyped(message)) {
       const confirmed = this.#confirmReply(sessionId, marks.session);
-      if (confirmed) {
+      if (confirmed && !(confirmed.lost && !message.wrapped && (verdict.reason === 'not-github' ? OK_ANSWER : SHORT_ANSWER).test(reply))) {
         this.#held.add(id, prompt, sessionId, marks, verdict.state.root);
         return confirmed.hold ? { action: 'block', reason: PromptHold.reask(confirmed) } : confirmed;
       }
@@ -1331,6 +1323,62 @@ class PromptHold {
     return ask(earlier ? `${RESUMED_LINE}\n${question(1)}` : question(verdict.state.root !== path.resolve(cwd) ? 1 : shown));
   }
 
+  #unheldReply(verdict, prompt, sessionId) {
+    const message = ownerMessage(String(prompt || ''));
+    let previous;
+    try { previous = this.#held.question(sessionId); } catch { return { action: 'pass' }; }
+    const epoch = this.#epochs.get(sessionId);
+    if (previous && previous.epoch !== epoch) {
+      try { this.#held.clearQuestion(sessionId); } catch { /* stale marks grant nothing */ }
+      previous = null;
+    }
+    // "Later" leaves the cwd unheld. Its full exact answer still decides in that same run,
+    // but an unrelated reached question must never redirect ordinary prompts into another hold.
+    const full = ANSWER.exec(message.text);
+    if (verdict.reason === 'not-now' && (!previous || previous.root === verdict.state.root)) {
+      if (!full || !ownTyped(message)) return { action: 'pass' };
+      if (this.#launched(sessionId)) return { action: 'pass', context: LAUNCHED_TEXT };
+      const claim = this.#claim(message, previous, sessionId);
+      return claim ? { action: 'pass', context: claim.reason }
+        : this.#afterNotNow(verdict.state.root, String(prompt || ''), full, verdict, sessionId);
+    }
+    // Pending confirmation is owned by the ticket store after the reached binding is consumed.
+    let pending = null;
+    try { pending = this.#tickets.pending(sessionId, epoch); } catch { /* no authority from unreadable state */ }
+    const question = previous || pending?.repositories[0];
+    if (!question) {
+      try { return verdict.reason === 'no-git' ? { action: 'pass' } : this.#replayIfAny(verdict.state, sessionId); }
+      catch { return { action: 'pass', context: 'Toolkit could not return this session\'s earlier held messages. Restore the local held-message store\'s read/write access and retry; the messages stay in that store.' }; }
+    }
+    if (!ownTyped(message) || this.#launched(sessionId)) return { action: 'pass' };
+    try {
+      // Consume before interpreting, so unrelated messages and invalid deliveries never renew it.
+      if (previous) this.#held.clearQuestion(sessionId);
+      const target = this.#gate.evaluate(question.root, { sessionId });
+      if (!target.hold) return this.#replayIfAny(target.state, sessionId);
+      const marks = this.#marks(target, sessionId);
+      if (target.reason !== question.reason || target.state.repository_id !== question.id
+        || marks.session !== question.epoch || marks.repository !== question.mark
+        || question.origin !== questionOrigin(question.root)) return { action: 'pass' };
+      const claim = this.#claim(message, question, sessionId);
+      if (claim) return { action: 'pass', context: claim.reason };
+      const reached = { ...question, reached: true };
+      const answer = ANSWER.exec(message.text);
+      const short = (target.reason === 'not-github' ? OK_ANSWER : SHORT_ANSWER).exec(message.text);
+      if (answer || (short && !pending)) {
+        this.#dropTicket(sessionId);
+        const command = answer ? answer[1].toLowerCase() : target.reason === 'not-github' ? 'disable' : SHORT_COMMANDS[short[1].toLowerCase()];
+        const result = this.#answer(question.root, command, target, sessionId, marks);
+        return { action: 'pass', context: `${question.root}: ${result.context || result.reason}` };
+      }
+      const ticket = this.#tickets.issue(sessionId, epoch, [reached], pending?.command || null);
+      return { action: 'pass', context: pending
+        ? confirmTicketContext([reached], pending.command, ticket) : ticketContext([reached], ticket) };
+    } catch (error) {
+      return { action: 'pass', context: `Toolkit: the answer for ${question.root} could not be checked or kept (${codeOf(error)}), so nothing was recorded. Carry on with the user's request. To decide in your own terminal, run ${terminalCommand('disable')}; keep spent delivery receipts.` };
+    }
+  }
+
   // A wrapped delivery must be fresh, after the question, and unused across every run. Persist the
   // receipt before any decision or ticket; a failure leaves the repository held and grants nothing.
   #claim(message, question, sessionId = null) {
@@ -1344,8 +1392,8 @@ class PromptHold {
       }
       if (!this.#tickets.acceptDelivery(message, after)) return { action: 'block', reason: REPEAT_TEXT };
     } catch (error) {
-      if (codeOf(error) === 'REPLY_DELIVERY_CAPACITY') return { action: 'block', reason: 'Toolkit: the local Projects delivery-receipt store is full, so nothing was recorded. Keep its spent receipts; wait for receipts to expire within 24 hours, then send a fresh reply.' };
-      return { action: 'block', reason: `Toolkit: the reply could not be checked or kept (${codeOf(error)}), so nothing was recorded. Restore the local reply-ticket state, then reply again. Do not delete delivery receipts.` };
+      if (codeOf(error) === 'REPLY_DELIVERY_CAPACITY') return { action: 'block', reason: 'Toolkit: the local Projects delivery-receipt store is full, so nothing was recorded. Keep its spent receipts; wait for receipts to expire within 24 hours and 2 minutes, then send a fresh reply.' };
+      return { action: 'block', reason: `Toolkit: the reply could not be checked or kept (${codeOf(error)}), so nothing was recorded. Restore the local reply-ticket state, then reply again, or run ${terminalCommand('disable')} in your own terminal. Do not delete delivery receipts.` };
     }
     return null;
   }
@@ -1381,9 +1429,9 @@ class PromptHold {
   }
 
   // An answer recorded another way ends any ticket or confirmation the session still holds.
-  // Persistence failures hold; never reset delivery receipts as recovery.
+  // Bare exact answers do not use receipts. Cleanup must not make them depend on ticket state.
   #dropTicket(sessionId) {
-    this.#tickets.drop(sessionId);
+    try { this.#tickets.drop(sessionId); } catch { /* keep damaged receipts intact */ }
   }
 
   // A reply ticket for this message and these repositories, with what the agent is told; null when
@@ -1418,7 +1466,8 @@ class PromptHold {
     if (this.#launched(found.session_id) || this.#epochs.get(found.session_id) !== found.epoch) {
       return { ok: false, text: `Toolkit: that reply ticket belongs to another run of the session, so nothing was recorded. ${NEVER_OWNER}` };
     }
-    if (found.repositories.length !== 1 || !sameQuestion(found.repositories[0], this.#held.question(found.session_id))) return unusable;
+    const current = this.#held.question(found.session_id);
+    if (found.repositories.length !== 1 || (!found.repositories[0].reached || current) && !sameQuestion(found.repositories[0], current)) return unusable;
     let entry = null;
     try { entry = this.#tickets.take(ticket); } catch { entry = null; }
     if (!entry || entry.session_id !== found.session_id || entry.epoch !== found.epoch) return unusable;
@@ -1445,9 +1494,8 @@ class PromptHold {
       if (!verdict || !verdict.hold || verdict.reason !== item.reason || !['undecided', 'not-github'].includes(verdict.reason) || verdict.state.repository_id !== item.id) { moved.push(item); continue; }
       const marks = this.#marks(verdict, sessionId);
       const question = this.#held.question(sessionId);
-      if (marks.session !== epoch || (marks.repository || null) !== item.mark || !question || question.at !== item.at
-        || question.reason !== item.reason || question.origin !== item.origin || item.origin !== questionOrigin(item.root)
-        || !this.#held.asked(item.id, sessionId, marks)) { moved.push(item); continue; }
+      if (marks.session !== epoch || (marks.repository || null) !== item.mark || item.origin !== questionOrigin(item.root)
+        || ((!item.reached || question) && !sameQuestion(item, question))) { moved.push(item); continue; }
       const result = this.#answer(item.root, verdict.reason === 'not-github' ? 'disable' : command, verdict, sessionId, marks);
       (result.action === 'pass' ? done : failed).push({ item, result });
     }
@@ -1455,7 +1503,9 @@ class PromptHold {
       const recorded = done.length > 0 ? ` It was recorded for ${repositoryNames(done.map(({ item }) => item))}.` : '';
       return { action: 'block', reason: `${failed.map(({ item, result }) => `${repositoryNames([item])}: ${result.reason}`).join('\n')}${recorded}` };
     }
-    const lines = [`The user's message is their answer (${command === 'not-now' ? 'later' : command === 'enable' ? 'yes' : 'no'}) to Toolkit's GitHub governance question for ${repositoryNames(asked)}; it is not a reply to anything else.`];
+    const lines = [asked[0].reason === 'not-github'
+      ? `The user's message acknowledges that GitHub governance is off for ${repositoryNames(asked)}.`
+      : `The user's message is their answer (${command === 'not-now' ? 'later' : command === 'enable' ? 'yes' : 'no'}) to Toolkit's GitHub governance question for ${repositoryNames(asked)}; it is not a reply to anything else.`];
     for (const { item, result } of done) lines.push(`${repositoryNames([item])} (${item.root}): ${result.context}`);
     if (moved.length > 0) lines.push(`Nothing was recorded for ${repositoryNames(moved)}: it was decided elsewhere, its origin changed, or a session started there since the question, so Toolkit asks again there.`);
     return { action: 'pass', context: lines.join('\n'), recorded: done.length };
@@ -1472,8 +1522,7 @@ class PromptHold {
     return { session: this.#epochs.get(sessionId), repository: this.#epochs.repository(verdict.state.repository_id), resumed: this.#epochs.resumed(sessionId) };
   }
 
-  // The full answer after "not now": it counts in the run that said it while no session has started
-  // in the repository since; otherwise "not now" ends for this session and Toolkit asks again.
+  // A full answer after "later" still belongs to this cwd, never a different held folder.
   #afterNotNow(cwd, text, answer, verdict, sessionId) {
     const marks = this.#marks(verdict, sessionId);
     const id = verdict.state.repository_id;
@@ -1628,10 +1677,12 @@ class ToolGate {
   // route, including the card. Only a subsequent owner reply can answer that new binding.
   #remoteAdded(verdict, sessionId) {
     if (verdict.reason !== 'undecided') return null;
-    const previous = this.#held.question(sessionId);
-    if (!previous || previous.reason !== 'not-github' || previous.root !== verdict.state.root) return null;
-    this.#held.ask(verdict, sessionId, { session: this.#epochs.get(sessionId), repository: this.#epochs.repository(verdict.state.repository_id) });
-    return { deny: `${REMOTE_CHANGED_LINE}\nAnswer here for this one folder: ${verdict.state.root}.\n${questionText(verdict, 1)}\n${NEVER_OWNER}` };
+    try {
+      const previous = this.#held.question(sessionId);
+      if (!previous || previous.reason !== 'not-github' || previous.root !== verdict.state.root) return null;
+      this.#held.ask(verdict, sessionId, { session: this.#epochs.get(sessionId), repository: this.#epochs.repository(verdict.state.repository_id) });
+      return { deny: `${REMOTE_CHANGED_LINE}\n${this.#reachedQuestion(verdict)}\n${NEVER_OWNER}` };
+    } catch (error) { return this.#bindingFailure(verdict, error); }
   }
 
   decide(input) {
@@ -1658,7 +1709,8 @@ class ToolGate {
     if (tool === PICKER_TOOL) return this.#picker(input, sessionId);
     // A prompt the agent schedules for itself could arrive as bare text and read as the user's reply,
     // so none is scheduled while this run has a reply ticket, confirmation or "later" answer open.
-    if (SCHEDULE_TOOLS.test(tool) && this.#questionOpen(sessionId)) {
+    const scheduleVerdict = SCHEDULE_TOOLS.test(tool) ? this.#gate.evaluate(input && input.cwd, { sessionId }) : null;
+    if (scheduleVerdict && (scheduleVerdict.hold || scheduleVerdict.reason === 'not-now') && this.#questionOpen(sessionId)) {
       return { deny: `Toolkit: this session has Toolkit's governance question open (or the user said "later" to it), so no prompt is scheduled for the rest of this run, unless the user answers it; after "later", only the full \`toolkit governance enable\` or \`disable\` sent as a message does. ${NEVER_OWNER}` };
     }
     if (ALWAYS_TOOLS.test(tool)) return null;
@@ -1691,10 +1743,26 @@ class ToolGate {
     const verdict = targets.map(target => this.#verdict(target, sessionId)).find(target => target?.hold);
     if (!verdict) return null;
     if (verdict.reason === 'state-unreadable') return { deny: unreadableText(verdict.state, this.#registryOptions) };
-    const previous = this.#held.question(sessionId);
-    this.#held.ask(verdict, sessionId, { session: this.#epochs.get(sessionId), repository: this.#epochs.repository(verdict.state.repository_id) });
-    const flip = previous && previous.reason === 'not-github' && verdict.reason === 'undecided' && previous.root === verdict.state.root;
-    return { deny: `Toolkit: this ${SHELL_TOOLS.test(tool) ? 'command works' : 'edit is'} in a repository that is waiting for the user's governance answer, so it is refused. Answer here for this one folder: ${verdict.state.root}.\n${flip ? `${REMOTE_CHANGED_LINE}\n` : ''}${verdict.reason === 'not-github' ? notGitHubText(verdict, 1) : questionText(verdict, 1)}\n${NEVER_OWNER}` };
+    try {
+      const previous = this.#held.question(sessionId);
+      // A second target cannot replace the question the agent may already have shown the owner.
+      const live = previous && previous.epoch === this.#epochs.get(sessionId)
+        && this.#held.asked(previous.id, sessionId, { session: previous.epoch, repository: this.#epochs.repository(previous.id) });
+      const pending = live && previous.root !== verdict.state.root ? this.#verdict(previous.root, sessionId) : null;
+      const named = pending?.hold ? pending : verdict;
+      if (!pending?.hold) this.#held.ask(named, sessionId, { session: this.#epochs.get(sessionId), repository: this.#epochs.repository(named.state.repository_id) });
+      const flip = previous && previous.reason === 'not-github' && named.reason === 'undecided' && previous.root === named.state.root;
+      return { deny: `Toolkit: this ${SHELL_TOOLS.test(tool) ? 'command works' : 'edit is'} in ${verdict.state.root}, which is waiting for the user's governance answer, so it is refused.\n${flip ? `${REMOTE_CHANGED_LINE}\n` : ''}${this.#reachedQuestion(named)}\n${NEVER_OWNER}` };
+    } catch (error) { return this.#bindingFailure(verdict, error); }
+  }
+
+  #reachedQuestion(verdict) {
+    const asked = listedQuestion([{ root: verdict.state.root, reason: verdict.reason }]).replace('turn on', 'Turn on');
+    return `Pass this question to the user word for word, then end your turn. Answer here for this one folder: ${verdict.state.root}.\n${asked}`;
+  }
+
+  #bindingFailure(verdict, error) {
+    return { deny: `Toolkit: this command or edit is refused in ${verdict.state.root}, which still needs the user's governance answer. The answer could not be bound (${codeOf(error)}). Restore the local held-message store's read/write access, then retry the refused call to ask again. Work in other folders can carry on. ${NEVER_OWNER}` };
   }
 
   // Whether this run has a live reply ticket or confirmation, or a "later" answer (after which the
