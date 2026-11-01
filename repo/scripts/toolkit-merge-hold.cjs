@@ -647,7 +647,7 @@ function shellRefusal(text, cwd, registryOptions = {}, shell = null) {
 }
 
 // A push handed to another shell cannot have its target read reliably. Refuse it outright, and
-// encoded PowerShell commands unread. Scan every word, including after wrappers and assignments,
+// encoded PowerShell commands unread. Scan command words, including after wrappers and assignments,
 // plus the raw text so braces, parentheses, quotes and a single & cannot hide a runner.
 function nestedRefusal(text) {
   const message = 'this command runs a git push through another shell (bash -c, pwsh -Command, cmd /c or eval), so Toolkit cannot read where it pushes and refused it. Run the push as its own git command.';
@@ -668,6 +668,9 @@ function nestedRefusal(text) {
   for (const { words } of shellCommands(text)) {
     for (let index = 0; index < words.length; index += 1) {
       if (SHELLS.test(words[index]) && blocked(words[index], words.slice(index + 1).join(' '))) return refuse(message);
+      if (!/^(?:&|\.|env|exec|command|nohup|builtin)$/i.test(words[index])
+        && !/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[index])
+        && !(index > 0 && words[index].startsWith('-'))) break;
     }
   }
   const runners = /(?:^|[\s;&|(){}"'=\\/])((?:bash|sh|zsh|dash|ksh|pwsh|powershell|cmd|eval|iex|invoke-expression)(?:\.exe)?)(?=$|[\s"'(){};&|])/gi;
@@ -690,6 +693,10 @@ function nestedRefusal(text) {
       } else if (char === '"' || char === "'") outerQuote = char;
     }
     if (outerQuote) continue;
+    // An expression runner can receive its script from the left side of a pipeline. Its tail
+    // alone says nothing about that script, so a push-bearing line is refused as a family.
+    if (mentionsPush && /^(?:iex|invoke-expression)(?:\.exe)?$/i.test(match[1])
+      && /\|\s*$/.test(text.slice(0, runnerAt))) return refuse(message);
     let end = start;
     let quote = '';
     let depth = 0;

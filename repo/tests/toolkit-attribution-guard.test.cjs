@@ -361,6 +361,45 @@ test('an unreadable location keeps an unknown starting folder moved and unconfir
   }
 });
 
+test('unresolved location words fail closed across the Codex HEAD family', () => {
+  const folder = os.tmpdir();
+  const forms = ['cd', 'pushd', 'popd', 'chdir', 'Set-Location', 'sl', 'Push-Location', 'Pop-Location'];
+  const wrappers = ['', '& ', '&', '. ', '(', '{', 'env ', 'pwsh -Command "'];
+  for (const form of forms) {
+    for (const wrapper of wrappers) {
+      const end = wrapper === '(' ? ')' : wrapper === '{' ? '}' : wrapper.includes('pwsh') ? '"' : '';
+      const command = `${wrapper}${form} -LiteralPath ./other${end}; git push origin HEAD`;
+      const [target] = outgoingChanges(command, folder, 0, [], false);
+      assert.equal(target?.folderConfirmed, false, command);
+      assert.equal(target?.folderMoved, true, command);
+    }
+  }
+  for (const command of [
+    '& Set-Location -LiteralPath ./other; git push origin HEAD:feature',
+    'pwsh -Command "bash -c \'cd other\'"; git push origin HEAD',
+    'pwsh -Command "popd"; git push origin HEAD',
+    'git push origin HEAD; & sl other',
+    `cd "${folder}"; & sl other; git push origin HEAD`,
+    `cd "${folder}"; cd "$missing"; git push origin HEAD`,
+    `cd "${folder}"; cd; git push origin HEAD`,
+    'git push origin HEAD; cd other',
+  ]) {
+    assert.equal(outgoingChanges(command, folder, 0, [], false)[0]?.folderMoved, true, command);
+  }
+  for (const command of ['echo "cd"; git push origin HEAD', "echo 'sl other'; git push origin HEAD",
+    'git commit -m "Set-Location ./other"; git push origin HEAD',
+    'git commit -m "bash" -m "Document cd handling"; git push origin HEAD']) {
+    assert.equal(outgoingChanges(command, folder, 0, [], false)[0]?.folderMoved, undefined, command);
+  }
+  assert.deepEqual(outgoingChanges(`cd "${folder}"; git push origin HEAD`, folder, 0, [], false), [
+    { folder, remote: 'origin', sources: ['HEAD'] },
+  ]);
+  assert.deepEqual(outgoingChanges(`& sl other; cd "${folder}"; git push origin HEAD`, folder, 0, [], false), [
+    { folder, remote: 'origin', sources: ['HEAD'] },
+  ]);
+  assert.equal(outgoingChanges('& sl other; git push origin HEAD', folder)[0]?.folderMoved, undefined, 'a host-confirmed folder keeps its existing reading');
+});
+
 test('N3: an ENABLED repository is protected even before its governed block lands; a DISABLED one with a leftover block stays protected', (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-bypass-state-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));

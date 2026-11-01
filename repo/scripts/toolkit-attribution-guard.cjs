@@ -96,6 +96,23 @@ function locationTarget(words) {
   return words.slice(1).filter((word) => !word.startsWith('-') && !/^\/d$/i.test(word)).pop() || '';
 }
 
+// An unknown Codex folder cannot be recovered by checking reachable worktrees after any
+// unresolved location command. Screen the whole family, including invocation operators and
+// blocks, rather than trying to execute more shell syntax. Quoted data stays data; scripts
+// handed to a nested shell get the same screen with their own quotes read.
+function mentionsLocation({ words, offsets }, text) {
+  if (words.some((word, index) => !/^["']/.test(text.slice(offsets[index]))
+    && /^[&.{}]*(?:cd|pushd|popd|chdir|set-location|sl|push-location|pop-location)[{}]*$/i.test(word))) return true;
+  let runner = -1;
+  for (let index = 0; index < words.length; index += 1) {
+    if (SHELLS.test(words[index].replace(/^[&.{}]+/, ''))) { runner = index; break; }
+    if (!/^(?:&|\.|\{|env|exec|command|nohup|builtin)$/i.test(words[index])
+      && !/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[index])
+      && !(index > 0 && words[index].startsWith('-'))) break;
+  }
+  return runner !== -1 && words.slice(runner + 1).some(word => shellCommands(word).some(current => mentionsLocation(current, word)));
+}
+
 // Find the relevant subcommand after git's global options. Each -C is relative to the previous
 // folder, while gh always uses the base folder. Option values cannot be mistaken for subcommands.
 function messageCommand({ words, offsets }, root) {
@@ -484,15 +501,24 @@ function outgoingChanges(command, cwd, depth = 0, preceding = [], confirmed = tr
   const found = [];
   if (text.length > MAX_COMMAND_CHARS || !/\b(?:git|gh)\b/i.test(text)) return found;
   let root = cwd || process.cwd();
+  const unknownStart = !confirmed;
+  let unresolvedLocation = false;
   const withPreceding = (target) => (preceding.length ? { ...target, preceding: preceding.slice() } : target);
   const marked = (entry, known) => (known ? entry : { ...entry, folderConfirmed: false, ...(moved ? { folderMoved: true } : {}) });
   for (const current of withVariables(shellCommands(text), shell)) {
     if (LOCATION_COMMAND.test(current.words[0])) {
       const target = locationTarget(current.words);
       if (target) root = shellPath(root, target);
-      confirmed ||= Boolean(target && !/[$`]|%[^%]+%/.test(target) && absoluteShellPath(target));
-      if (!confirmed) moved = true;
+      if (unknownStart) {
+        confirmed = Boolean(target && !/[$`]|%[^%]+%/.test(target) && (confirmed || absoluteShellPath(target)));
+        if (!confirmed) { moved = true; unresolvedLocation = true; }
+      }
       continue;
+    }
+    if (unknownStart && mentionsLocation(current, text)) {
+      unresolvedLocation = true;
+      confirmed = false;
+      moved = true;
     }
     const git = gitCommand(current, root);
     const known = confirmed || Boolean(git?.absolute);
@@ -514,7 +540,7 @@ function outgoingChanges(command, cwd, depth = 0, preceding = [], confirmed = tr
       }
     }
   }
-  return found;
+  return unresolvedLocation ? found.map(target => (target.folderConfirmed === false ? { ...target, folderMoved: true } : target)) : found;
 }
 
 // Returns the refusal reason for a push or new pull request that carries a credential

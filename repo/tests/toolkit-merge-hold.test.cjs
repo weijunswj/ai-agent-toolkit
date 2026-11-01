@@ -360,6 +360,8 @@ test('shell argument lists allow plain feature pushes but refuse a shell nested 
   const feature = repository(ctx.root, 'feature', { branch: 'work' });
   const rows = [
     [['bash', '-lc', 'git push origin work'], null],
+    [['bash', '-c', '-e', 'git push origin work'], null],
+    [['bash', '-lc', '--', 'git push origin work'], null],
     [['pwsh', '-NoProfile', '-Command', 'git push origin work'], null],
     [['bash', '-lc', 'bash -c "git push origin work"'], 'Toolkit: this command runs a git push through another shell (bash -c, pwsh -Command, cmd /c or eval), so Toolkit cannot read where it pushes and refused it. Run the push as its own git command.'],
   ];
@@ -368,9 +370,13 @@ test('shell argument lists allow plain feature pushes but refuse a shell nested 
     assert.equal(result?.deny || null, expected, JSON.stringify(command));
   }
   // The unwrapped script still gets the default-branch check.
-  for (const command of [['bash', '-lc', 'git push origin HEAD:main'], ['pwsh', '-NoProfile', '-Command', 'git fetch; git push origin work:main']]) {
+  for (const command of [['bash', '-lc', 'git push origin HEAD:main'],
+    ['bash', '-c', '-e', 'git push origin HEAD:main'], ['bash', '-lc', '--', 'git push origin HEAD:main'],
+    ['pwsh', '-NoProfile', '-Command', 'git fetch; git push origin work:main']]) {
     assert.match(decide(ctx, { cwd: feature, tool_name: 'shell', tool_input: { command } })?.deny || '', /default branch `main`/, JSON.stringify(command));
   }
+  const uncertain = ['bash', '-c', '-o', 'pipefail', 'git push origin work'];
+  assert.match(decide(ctx, { cwd: feature, tool_name: 'shell', tool_input: { command: uncertain } })?.deny || '', /through another shell/);
 });
 
 test('pushes through another shell or expression runner are refused outright', (t) => {
@@ -405,11 +411,16 @@ test('pushes through another shell or expression runner are refused outright', (
     'dash -c "`cat push.sh`"; echo git push', 'ksh -c "$PUSH"; echo git push',
     'powershell -Command $env:CMD; echo git push', 'cmd /k %CMD% & echo git push',
     'iex $s; echo git push', 'Invoke-Expression ${CMD}; echo git push',
+    "Write-Output 'git push origin HEAD:feature' | Invoke-Expression",
+    "Write-Output 'git push origin HEAD:feature' | iex",
   ];
   for (const command of blocked) assert.equal(decide(ctx, bash(feature, command))?.deny, message, command);
   const allowed = ['git push origin work', 'bash -c "git status"', 'pwsh -Command "Write-Output ready"',
     'git commit -m "Refuse bash -c git push wrappers"', `rg -F 'bash -c "git push"' repo`,
     'gh pr create --title "Block bash -c git push"',
+    'git commit --allow-empty -m "bash" -m "Document -c git push handling"',
+    "Write-Output 'hello' | Invoke-Expression", "Write-Output 'hello' | iex",
+    "Write-Output 'git push origin HEAD:feature | Invoke-Expression'",
     String.raw`git commit -m "Refuse \"bash -c git push\" wrappers"`,
     'cmd /c echo push', 'eval echo git', 'bash script.sh',
     'bash -c "npm test" && git push origin feature', 'bash -lc "make"; git push origin feature',

@@ -1555,6 +1555,295 @@
       },
       "status": "pass",
       "note": "Clean reachable worktrees cannot confirm where a relative location change started; before the fix this was incorrectly allowed."
+    },
+    {
+      "id": "CODEX.location-call-operator-unconfirmed-folder",
+      "source": "Consolidated location family closure",
+      "kind": "hostile",
+      "hosts": [
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "& Set-Location -LiteralPath .tmp/worktrees/lane-one; git push origin HEAD"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature",
+          "nested_worktrees": [
+            {
+              "branch": "lane-one"
+            },
+            {
+              "branch": "lane-two"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "Clean reachable worktrees do not confirm a folder after an unresolved location invocation."
+    },
+    {
+      "id": "S1.pipeline-invoke-expression-push",
+      "source": "Consolidated expression runner family closure",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "Write-Output 'git push origin HEAD:feature' | Invoke-Expression"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "A pipeline can feed a push into a runner whose own arguments contain no script."
+    },
+    {
+      "id": "S1.benign-pipeline-invoke-expression",
+      "source": "Consolidated expression runner family closure",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "Write-Output 'hello' | Invoke-Expression"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass",
+      "note": "An expression pipeline without a push stays allowed."
+    },
+    {
+      "id": "S1.pipeline-iex-push",
+      "source": "Consolidated expression runner family closure",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "Write-Output 'git push origin HEAD:feature' | iex"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "The expression runner alias has the same pipeline boundary."
+    },
+    {
+      "id": "S1.benign-pipeline-iex",
+      "source": "Consolidated expression runner family closure",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "Write-Output 'hello' | iex"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass",
+      "note": "The alias also allows an expression pipeline without a push."
+    },
+    {
+      "id": "CODEX.argv-shell-options-default-push",
+      "source": "Consolidated shell argument list family closure",
+      "kind": "hostile",
+      "hosts": [
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "shell",
+        "tool_input": {
+          "command": [
+            "bash",
+            "-c",
+            "-e",
+            "git push origin HEAD:main"
+          ]
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "An option before the script cannot hide a default-branch push."
+    },
+    {
+      "id": "CODEX.argv-shell-separator-default-push",
+      "source": "Consolidated shell argument list family closure",
+      "kind": "hostile",
+      "hosts": [
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "shell",
+        "tool_input": {
+          "command": [
+            "bash",
+            "-lc",
+            "--",
+            "git push origin HEAD:main"
+          ]
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "The option separator before the script cannot hide a default-branch push."
+    },
+    {
+      "id": "CODEX.argv-shell-options-feature-push",
+      "source": "Consolidated shell argument list family closure",
+      "kind": "benign",
+      "hosts": [
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "shell",
+        "tool_input": {
+          "command": [
+            "bash",
+            "-c",
+            "-e",
+            "git push origin work"
+          ]
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass",
+      "note": "The unwrapped script is a plain feature push."
+    },
+    {
+      "id": "CODEX.argv-shell-separator-feature-push",
+      "source": "Consolidated shell argument list family closure",
+      "kind": "benign",
+      "hosts": [
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "shell",
+        "tool_input": {
+          "command": [
+            "bash",
+            "-lc",
+            "--",
+            "git push origin work"
+          ]
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass",
+      "note": "The unwrapped script is a plain feature push."
+    },
+    {
+      "id": "S1.benign-runner-separate-commit-messages",
+      "source": "Consolidated runner command position closure",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "git commit --allow-empty -m \"bash\" -m \"Document -c git push handling\""
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass",
+      "note": "A quoted runner name in a data argument is not a command."
     }
   ]
 }

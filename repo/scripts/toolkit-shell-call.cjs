@@ -36,7 +36,7 @@ const GUARDED = [/\bgit\b[\s\S]*\b(?:commit|push)\b/i, /\bgh\s+pr\s+(?:create|ed
 // A shell program at the start of an argument list, and the option that hands it a script.
 const POSIX_SHELL = /^(?:bash|sh|zsh|dash|ksh)$/;
 const POWERSHELL = /^(?:pwsh|powershell)$/;
-const SCRIPT_OPTION = { posix: /^-[A-Za-z]*c$/, powershell: /^-(?:c|command)$/i, cmd: /^\/[ck]$/i };
+const SCRIPT_OPTION = { posix: /^-[A-Za-z]*c$/, powershell: /^-(?:c|co|com|comm|comma|comman|command)$/i, cmd: /^\/[ck]$/i };
 // Backslashes are quoted too: outside quotes, one before a space or quote escapes it.
 const PLAIN_WORD = /^[A-Za-z0-9_@%+=:,./-]+$/;
 // A command word that runs its quoted arguments as a further command line (bash -c "...",
@@ -198,15 +198,24 @@ function argvText(words) {
     for (let index = 1; index < words.length; index += 1) {
       const word = words[index];
       if (SCRIPT_OPTION[kind].test(word)) {
-        // bash -c takes one script word (later words are its arguments); PowerShell and cmd read the rest.
-        const script = kind === 'posix' ? words.slice(index + 1, index + 2) : words.slice(index + 1);
-        if (script.length) return script.join(' ');
-        break;
+        // POSIX shells can take more options and -- before the script. Later words are its
+        // arguments; PowerShell and cmd read the rest after their command option.
+        let start = index + 1;
+        if (kind === 'posix') {
+          while (start < words.length && /^[-+]/.test(words[start])) {
+            // Options with a separate value make the script boundary uncertain here.
+            if (/^(?:[-+][oO]|--(?:rcfile|init-file))$/.test(words[start])) return words.join(' ');
+            start += 1;
+          }
+        }
+        const script = kind === 'posix' ? words.slice(start, start + 1) : words.slice(start);
+        if (script.length && script[0]) return script.join(' ');
+        return words.join(' ');
       }
       if (!/^[-/]/.test(word)) break;
     }
   }
-  return quoteWords(words);
+  return kind ? words.join(' ') : quoteWords(words);
 }
 
 // Every key and string in the raw input, a line apart, with line continuations (\, a PowerShell

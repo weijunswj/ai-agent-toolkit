@@ -44,6 +44,16 @@ test('argument lists keep their words: quoting reads back, and a shell wrapper h
   assert.equal(argvText(['git', 'commit', '-m', '']), "git commit -m ''");
   assert.equal(argvText(['bash', '-c', 'git push', 'argument']), 'git push', 'later words are the script\'s own arguments');
   assert.equal(argvText(['/bin/zsh', '-ic', 'git push']), 'git push');
+  for (const options of [['-c', '-e'], ['-lc', '--']]) {
+    assert.equal(argvText(['bash', ...options, 'git push origin HEAD:main']), 'git push origin HEAD:main');
+  }
+  for (const option of ['-c', '-Co', '-Comm', '-Command']) {
+    assert.equal(argvText(['pwsh', '-NoProfile', option, 'git push']), 'git push', option);
+  }
+  for (const command of [['bash', '-c', '-e'], ['bash', '-c', '-o', 'pipefail', 'git push'],
+    ['bash', '--rcfile', 'config', '-c', 'git push'], ['bash', '-c', '-e', '']]) {
+    assert.equal(argvText(command), command.join(' '), 'an uncertain wrapper keeps every word');
+  }
   assert.equal(argvText(['bash', '--login']), 'bash --login', 'no script option: the words themselves');
   assert.equal(argvText(['bash', 'script.sh', '-c', 'x']), 'bash script.sh -c x', 'a script file ends the options');
   assert.equal(argvText(['powershell', '-c']), 'powershell -c', 'a script option with no script');
