@@ -9,7 +9,10 @@
 //
 //   programme-sweep  runs only when gh is signed in and `toolkit governance status` reads the
 //                    repository as ENABLED from a merged-binding read under 24 hours old; otherwise
-//                    it records "skipped: <reason>" and changes nothing. Then, in order:
+//                    it records "skipped: <reason>" and changes nothing. A failed `gh auth status`
+//                    is told apart by one short connection to github.com:443 (a node child, no
+//                    data sent): "skipped: offline" when it cannot connect, else "skipped: gh not
+//                    signed in". Then, in order:
 //                      1. programme.cjs refresh (the programme pages);
 //                      2. programme.cjs attention (its Attention: line is kept);
 //                      3. toolkit-github-footer-sweep.cjs --apply over the bound repository and the
@@ -22,8 +25,11 @@
 //
 // Each run writes ~/.ai-agent-toolkit/user-state/tasks/<id>/last-run.json (mode 600): started,
 // finished, exit, status (ok, held, skipped, failed) and a few summary lines with anything shaped like
-// a secret removed; no other command output is kept. Exit 0 ok, held or skipped; 1 failed; 2 bad
-// arguments.
+// a secret removed; no other command output is kept. A skipped run also keeps its reason and counts
+// the skips in a row (skipped_streak, from skipped_since); the first ok or held run after them says
+// "Resumed after N skipped runs since <time>" and clears both, and a failed run keeps them. The
+// session-start line and `toolkit tasks` read these fields, because Task Scheduler shows every skip
+// as success. Exit 0 ok, held or skipped; 1 failed; 2 bad arguments.
 
 const fs = require('node:fs');
 const os = require('node:os');
@@ -43,7 +49,10 @@ const FIRST_SWEEP_WINDOW_MS = 48 * 60 * 60 * 1000;
 // Footer sweep exits that mean it ended well: nothing found, found and left, cleaned.
 const SWEEP_OK = new Set([0, 3, 4]);
 const MINUTE = 60 * 1000;
-const TIMEOUT = Object.freeze({ check: 2 * MINUTE, refresh: 12 * MINUTE, attention: 2 * MINUTE, sweep: 12 * MINUTE, shards: 25 * MINUTE });
+const TIMEOUT = Object.freeze({ check: 2 * MINUTE, reach: 15 * 1000, refresh: 12 * MINUTE, attention: 2 * MINUTE, sweep: 12 * MINUTE, shards: 25 * MINUTE });
+// Exits 0 when a TCP connection to github.com:443 opens within 8 seconds, else 3. Sends nothing.
+const REACH_GITHUB = "const s=require('node:net').connect({host:'github.com',port:443,timeout:8000});"
+  + "s.on('connect',()=>{s.destroy();process.exit(0)});s.on('timeout',()=>process.exit(3));s.on('error',()=>process.exit(3));";
 const USAGE = `Usage: node repo/scripts/toolkit-scheduled-job.cjs <${JOBS.join('|')}> --repo-root <checkout> --task-id <id>`;
 
 function parseArgs(argv) {
@@ -104,11 +113,13 @@ class Job {
     return this.#gh;
   }
 
-  // null when gh is signed in, else the reason.
+  // null when gh is signed in, else the reason. `gh auth status` checks the token online, so a
+  // failure is "offline" when github.com cannot be reached at all.
   ghSignedOut() {
     let gh;
     try { gh = this.ghPath(); } catch { return 'gh is not installed'; }
-    return this.#exec(gh, ['auth', 'status'], TIMEOUT.check).status === 0 ? null : 'gh not signed in';
+    if (this.#exec(gh, ['auth', 'status'], TIMEOUT.check).status === 0) return null;
+    return this.node('-e', [REACH_GITHUB], TIMEOUT.reach).status === 0 ? 'gh not signed in' : 'offline';
   }
 
   // null when governance is ENABLED from a fresh merged-binding read, else the reason.
@@ -198,21 +209,36 @@ function shardTimings(job) {
   return { status: 'failed' };
 }
 
+// The skips in a row so far, from the previous record: { skipped_streak, skipped_since } or {}.
+function skipStreak(previous) {
+  const count = previous && Number.isInteger(previous.skipped_streak) && previous.skipped_streak > 0 ? previous.skipped_streak : 0;
+  const since = previous && typeof previous.skipped_since === 'string' && !Number.isNaN(Date.parse(previous.skipped_since)) ? previous.skipped_since : null;
+  return count && since ? { skipped_streak: count, skipped_since: since } : {};
+}
+
 function runJob(options, deps = {}) {
   const home = deps.home || os.homedir();
   const job = new Job(options, deps);
   const previous = tasks.readLastRun(options.taskId, home);
   const started = job.now().toISOString();
   const carried = previous && previous.footer_sweep_since ? { footer_sweep_since: previous.footer_sweep_since } : {};
+  const streak = skipStreak(previous);
   const base = { schema: 'toolkit.task-last-run.v1', id: options.taskId, job: options.job, started };
-  tasks.writeLastRun(options.taskId, { ...base, finished: null, exit: null, status: 'running', summary: [], ...carried }, home);
+  tasks.writeLastRun(options.taskId, { ...base, finished: null, exit: null, status: 'running', summary: [], ...carried, ...streak }, home);
   let outcome;
   try { outcome = options.job === 'programme-sweep' ? programmeSweep(job, previous) : shardTimings(job); }
   catch (error) { job.note(`The job stopped: ${error.message}`); outcome = { status: 'failed' }; }
   if (outcome.reason) job.note(`skipped: ${outcome.reason}`);
+  let skips = {};
+  if (outcome.status === 'skipped') {
+    skips = { reason: outcome.reason, skipped_streak: (streak.skipped_streak || 0) + 1, skipped_since: streak.skipped_since || started };
+  } else if (outcome.status === 'failed') skips = streak;
+  else if (streak.skipped_streak) {
+    job.note(`Resumed after ${streak.skipped_streak} skipped run${streak.skipped_streak === 1 ? '' : 's'} since ${streak.skipped_since.slice(0, 16).replace('T', ' ')} UTC.`);
+  }
   const exit = outcome.status === 'failed' ? 1 : 0;
   const record = { ...base, finished: job.now().toISOString(), exit, status: outcome.status, summary: job.summary, ...carried,
-    ...(outcome.footer_sweep_since ? { footer_sweep_since: outcome.footer_sweep_since } : {}) };
+    ...(outcome.footer_sweep_since ? { footer_sweep_since: outcome.footer_sweep_since } : {}), ...skips };
   tasks.writeLastRun(options.taskId, record, home);
   return record;
 }

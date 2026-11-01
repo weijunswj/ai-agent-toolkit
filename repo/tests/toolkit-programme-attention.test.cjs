@@ -16,6 +16,7 @@ const cli = require('../../skills/github-program-reconciler/scripts/programme.cj
 const cache = require('../../skills/github-program-reconciler/scripts/programme-attention-cache.cjs');
 const checkpoint = require('../../skills/github-program-reconciler/scripts/programme-checkpoint.cjs');
 const gate = require('../scripts/toolkit-governance-gate.cjs');
+const tasks = require('../scripts/toolkit-tasks.cjs');
 const hooks = require('../scripts/toolkit-hook-capability.cjs');
 const { FakeGitHub } = require('./toolkit-programme-fake-github.cjs');
 
@@ -357,7 +358,7 @@ test('E3: sessionLine appends the cached line and Checkpoint lines for an ENABLE
   const started = [];
   let now = '2026-10-28T10:00:00.000Z';
   const enabled = { state: 'ENABLED', rule: 'M1', materials_complete: true, root };
-  const programmeDeps = { attentionDir, sessionsDir, mergedBinding: () => ({ repository: 'acme/app' }), startRefresh: folder => started.push(folder), now: () => now };
+  const programmeDeps = { attentionDir, sessionsDir, home: tmp(), mergedBinding: () => ({ repository: 'acme/app' }), startRefresh: folder => started.push(folder), now: () => now };
   // The repository's state as decided, in place of reading it.
   const evaluate = (stateValue, deps = programmeDeps) => gate.sessionLine(root, { stateReader: () => stateValue, programmeDeps: deps });
   assert.match(evaluate(enabled), /Toolkit governance: ENABLED[^]*Attention: not checked on this computer yet; a refresh has started in the background\./);
@@ -385,6 +386,24 @@ test('E3: sessionLine appends the cached line and Checkpoint lines for an ENABLE
   assert.match(evaluate(enabled), new RegExp(`Checkpoint: last turn's record failed \\(GH_AUTH\\); see programme\\.cjs show --session <that session's id> \\(session ${hash.slice(0, 8)}\\)`));
   fs.writeFileSync(checkpoint.errorsFile(hash, { sessionsDir }), JSON.stringify({ pending: null, recent: [] }));
   assert.doesNotMatch(evaluate(enabled), /Checkpoint:/, 'gone after a later good checkpoint');
+});
+
+test('E3: sessionLine adds the Programme sweep line when this computer\'s hourly sweep skipped, from local files only', () => {
+  const root = tmp();
+  const home = tmp();
+  const now = new Date(2026, 10, 1, 12, 0, 0); // local noon, inside the sweep's hours
+  const programmeDeps = { attentionDir: tmp(), sessionsDir: tmp(), home, mergedBinding: () => ({ repository: 'acme/app' }), startRefresh: () => {}, now: () => now.toISOString() };
+  const enabled = { state: 'ENABLED', rule: 'M1', materials_complete: true, root };
+  const evaluate = (deps = programmeDeps, registryOptions) => gate.sessionLine(root, { stateReader: () => enabled, programmeDeps: deps, registryOptions });
+  assert.doesNotMatch(evaluate(), /Programme sweep:/, 'no task recorded here');
+  tasks.writeRegistry(home, [{ id: 'app-programme-sweep', name: 'APP - PROGRAMME SWEEP', host: 'windows', folder: 'APP', schedule: 'hourly, 08:00 to 23:59', model: null, effort: null,
+    purpose: 'Sweep.', repository: 'acme/app', created: '2026-10-30T00:00:00.000Z', created_by: 'toolkit-windows-tasks apply', job: 'programme-sweep', definition: '0123456789ab' }]);
+  const at = new Date(now.getTime() - 50 * 60000).toISOString();
+  tasks.writeLastRun('app-programme-sweep', { started: at, finished: at, exit: 0, status: 'skipped', reason: 'offline', skipped_streak: 3, skipped_since: new Date(now.getTime() - 170 * 60000).toISOString(), summary: ['skipped: offline'] }, home);
+  assert.match(evaluate(), /Toolkit governance: ENABLED[^]* Programme sweep: skipped \(offline\), 3 runs in a row since [^;]+; see toolkit tasks\./);
+  assert.doesNotMatch(evaluate({ ...programmeDeps, home: undefined }, { testOnly: true }), /Programme sweep:/, 'a test registry without its own home reads nothing');
+  tasks.writeLastRun('app-programme-sweep', { started: at, finished: at, exit: 0, status: 'ok', summary: [] }, home);
+  assert.doesNotMatch(evaluate(), /Programme sweep:/, 'gone after a good run');
 });
 
 test('E3: attention reports gh signed out as unknown, never clear', () => {
