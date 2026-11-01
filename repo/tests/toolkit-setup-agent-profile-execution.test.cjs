@@ -86,24 +86,65 @@ test('the recommended Claude Code settings are written to the temporary Claude s
   const base = ['--execute', '--host', 'claude-code', '--repo-root', setupRepo, '--repo-remote', origin,
     '--yes-recommended', '--claude-cli', fake.command, '--claude-plugin-behavior', 'instructions', '--claude-topology', 'broader-native'];
   const settingsPath = path.join(root, '.claude', 'settings.json');
+  const read = () => JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+  const agentsMd = { 'cc-plugin-agents-md@builtin': { options: { instructionFiles: 'claude-md-and-agents-md' } } };
+  // A fresh install: the three off rows turn on; model switching is on by default, so nothing is written for it.
   const on = run(base, { env, timeout: 300000 });
   assert.equal(on.status, 0, on.stderr || on.stdout);
   assert.match(on.stdout, /Claude Code settings this run: No AI attribution in commits and pull requests: on \(added by setup\)\./);
-  assert.deepEqual(JSON.parse(fs.readFileSync(settingsPath, 'utf8')), {
-    attribution: false,
-    crossSessionInbound: 'accept',
-    switchModelsOnFlag: false,
-    pluginConfigs: { 'cc-plugin-agents-md@builtin': { options: { instructionFiles: 'claude-md-and-agents-md' } } }
-  });
+  assert.deepEqual(read(), { attribution: false, crossSessionInbound: 'accept', pluginConfigs: agentsMd });
+  // A Claude Code run's bank, its Claude Code summary and its plugin summary talk only about Claude Code.
+  const section = (start, end) => on.stdout.slice(on.stdout.indexOf(start), on.stdout.indexOf(end, on.stdout.indexOf(start)));
+  for (const [start, end] of [['<!-- setup-toolkit-question-bank:begin -->', '<!-- setup-toolkit-question-bank:complete -->'],
+    ['## Claude Code agent topology', '## Bridge state'], ['# setup toolkit final summary', '## Install check']]) {
+    assert.ok(section(start, end).length > start.length, start);
+    assert.doesNotMatch(section(start, end), /codex/i, start);
+  }
   clearLogs(setupRepo);
-  // Turn off removes three lines; the model-switch row's off is the false it already holds.
+  // Turn off removes three lines and writes false for model switching.
   const off = run([...base, '--claude-settings', 'disable'], { env, timeout: 300000 });
   assert.equal(off.status, 0, off.stderr || off.stdout);
-  assert.deepEqual(JSON.parse(fs.readFileSync(settingsPath, 'utf8')), { switchModelsOnFlag: false });
+  assert.deepEqual(read(), { switchModelsOnFlag: false });
   clearLogs(setupRepo);
-  const allOn = run([...base, '--claude-settings', 'disable', '--claude-setting', 'switch-models-on-flag=enable'], { env, timeout: 300000 });
+  // All recommended from there: every row is off, so each recommends Turn on, and model switching becomes true.
+  const allOn = run(base, { env, timeout: 300000 });
   assert.equal(allOn.status, 0, allOn.stderr || allOn.stdout);
-  assert.deepEqual(JSON.parse(fs.readFileSync(settingsPath, 'utf8')), { switchModelsOnFlag: true });
+  assert.match(allOn.stdout, /\| Claude Code setting: Switch models without asking on a flag\? \| Off \(set by setup\) \| A\. Turn on[^|]*\| B\. Keep current \|/);
+  assert.deepEqual(read(), { switchModelsOnFlag: true, attribution: false, crossSessionInbound: 'accept', pluginConfigs: agentsMd });
+});
+
+test('All recommended applies each Claude Code setting row on its own, and an unreadable settings file is left alone', () => {
+  const root = tmpRoot();
+  const { origin, setupRepo } = createGitBackedSetupRepo(root);
+  const fake = recordingClaude(root);
+  const env = isolatedHomeEnv(root);
+  const base = ['--execute', '--host', 'claude-code', '--repo-root', setupRepo, '--repo-remote', origin,
+    '--yes-recommended', '--claude-cli', fake.command, '--claude-plugin-behavior', 'instructions', '--claude-topology', 'broader-native'];
+  const settingsPath = path.join(root, '.claude', 'settings.json');
+  const read = () => JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+  // Three rows set and model switching off: only the model-switch row recommends a change, so it alone is written.
+  writeFile(settingsPath, `${JSON.stringify({ attribution: false, crossSessionInbound: 'accept', switchModelsOnFlag: false }, null, 2)}\n`);
+  const missingOne = run(base, { env, timeout: 300000 });
+  assert.equal(missingOne.status, 0, missingOne.stderr || missingOne.stdout);
+  assert.deepEqual(read(), { attribution: false, crossSessionInbound: 'accept', switchModelsOnFlag: true,
+    pluginConfigs: { 'cc-plugin-agents-md@builtin': { options: { instructionFiles: 'claude-md-and-agents-md' } } } });
+  clearLogs(setupRepo);
+  // Keep current on 3.4 with the others on All recommended leaves model switching as it is.
+  writeFile(settingsPath, `${JSON.stringify({ switchModelsOnFlag: false }, null, 2)}\n`);
+  const kept = run([...base, '--claude-setting', 'switch-models-on-flag=keep'], { env, timeout: 300000 });
+  assert.equal(kept.status, 0, kept.stderr || kept.stdout);
+  assert.equal(read().switchModelsOnFlag, false);
+  assert.equal(read().attribution, false);
+  clearLogs(setupRepo);
+  // An unreadable file: every row recommends Keep current and nothing is written; the install check asks
+  // for the file to be fixed.
+  const broken = '{ "theme": ';
+  fs.writeFileSync(settingsPath, broken);
+  const unreadable = run(base, { env, timeout: 300000 });
+  assert.equal(unreadable.status, 24, unreadable.stderr || unreadable.stdout);
+  assert.match(unreadable.stdout, /\| Claude Code setting: Switch models without asking on a flag\? \| Could not read \| C\. Keep current<br>Selected: C\. Keep current \|/);
+  assert.match(unreadable.stdout, /Fix the Claude Code user settings file, then run `setup toolkit` again\./);
+  assert.equal(fs.readFileSync(settingsPath, 'utf8'), broken);
 });
 
 test('each Claude Code setting row is answered on its own: Turn on one, Turn off removes an object form you set, Turn on replaces a different value', () => {

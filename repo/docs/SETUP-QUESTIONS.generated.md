@@ -5,7 +5,7 @@ This reference uses a privacy-safe representative Codex state in which all curre
 
 Toolkit setup choices - 9 questions across 3 sections
 
-Bank reference: MY2G-N8WP-330G-JX9B
+Bank reference: NQ63-BW2H-407X-Z82E
 
 Quick index
 
@@ -16,7 +16,7 @@ Quick index
 1.5 Raise Codex's instruction limit - Recommended: B - Keep current
 2.1 Codex helper capacity - Recommended: A - One helper
 2.2 Codex Toolkit maintenance - Recommended: B - Keep current
-3.1 Keep Toolkit available in Codex? - Recommended: C - Keep current
+3.1 Keep Toolkit available in Codex? - Recommended: B - Keep current
 3.2 Copy Toolkit's skills into Antigravity? - Recommended: B - Keep current
 Status (nothing to answer): Toolkit hooks in Codex: All 6 on. Nothing to do.
 
@@ -183,7 +183,7 @@ Status (nothing to answer): Toolkit hooks in Codex: All 6 on. Nothing to do.
 
 ### 2.2 Codex Toolkit maintenance
 
-**What this controls:** Whether trusted Codex startup maintenance may refresh the installed Toolkit plugin cache from the verified managed source. It does not give Codex permission to update Claude Code.
+**What this controls:** Whether trusted Codex startup maintenance may refresh the installed Toolkit plugin cache from the verified managed source.
 
 **Current:** Automatic Codex Toolkit maintenance is on.
 
@@ -211,13 +211,13 @@ Status (nothing to answer): Toolkit hooks in Codex: All 6 on. Nothing to do.
 
 ### 3.1 Keep Toolkit available in Codex?
 
-**What this controls:** Whether setup verifies and refreshes the Toolkit plugin in Codex this run, only shows the commands, or leaves it as it is. This row is read from the Codex files; the Codex plugin commands run only after you choose Install or refresh. This never changes Claude Code.
+**What this controls:** Whether setup verifies and refreshes the Toolkit plugin in Codex this run, only shows the commands, or leaves it as it is. This row is read from the Codex files; the Codex plugin commands run only after you choose Install or refresh.
 
 **Current:** Codex runs Toolkit 1.0.0 (turned on); the update copy has 1.0.0.
 
 **Verification:** state-derived
 
-**Recommended:** C - Keep current
+**Recommended:** B - Keep current
 
 **Recommended outcome:** Leave the Codex plugin as it is.
 
@@ -225,13 +225,12 @@ Status (nothing to answer): Toolkit hooks in Codex: All 6 on. Nothing to do.
 
 **Choices:**
 
-- **A. Install or refresh** - Run the Codex plugin commands to verify Toolkit in Codex, and refresh its cache from the update copy when it is missing, off, older or different.
-- **B. Show instructions only** - Make no plugin change and show the Codex plugin commands to run yourself.
-- **C. Keep current** - Make no plugin change and run no Codex command this run: Codex runs Toolkit 1.0.0 (turned on); the update copy has 1.0.0.
+- **A. Show instructions only** - Make no plugin change and show the Codex plugin commands to run yourself.
+- **B. Keep current** - Make no plugin change and run no Codex command this run: Codex runs Toolkit 1.0.0 (turned on); the update copy has 1.0.0.
 
 **After applying:** If the plugin files change, fully restart Codex, then open `/hooks` and turn the Toolkit hooks on; Codex may ask you to review them again.
 
-**Selected:** C - Keep current
+**Selected:** B - Keep current
 
 ---
 
@@ -287,7 +286,7 @@ Setup run with `--host claude-code` shows this bank instead, for the same repres
 
 Toolkit setup choices - 11 questions across 3 sections
 
-Bank reference: 0DAY-MRD0-X8C5-ADDZ
+Bank reference: K34X-W5Z6-SHAF-2FG6
 
 Quick index
 
@@ -299,7 +298,7 @@ Quick index
 3.1 Keep Toolkit available in Claude Code? - Recommended: A - Install or refresh
 3.2 Claude Code setting: Hide AI credit in commits/PRs? - Recommended: A - Turn on
 3.3 Claude Code setting: Let other sessions wake this one? - Recommended: A - Turn on
-3.4 Claude Code setting: Switch models without asking on a flag? - Recommended: A - Turn off
+3.4 Claude Code setting: Switch models without asking on a flag? - Recommended: B - Keep current
 3.5 Claude Code setting: Read AGENTS.md too? - Recommended: A - Turn on
 3.6 Copy Toolkit's skills into Antigravity? - Recommended: B - Keep current
 
@@ -441,7 +440,7 @@ Quick index
 
 ### 3.1 Keep Toolkit available in Claude Code?
 
-**What this controls:** Whether Claude Code installs or refreshes its own Toolkit plugin, shows manual instructions, or preserves current plugin state. This never changes Codex.
+**What this controls:** Whether Claude Code installs or refreshes its own Toolkit plugin, shows manual instructions, or preserves current plugin state.
 
 **Current:** The Claude Code Toolkit plugin is current.
 
@@ -523,11 +522,11 @@ Quick index
 
 **Verification:** state-derived
 
-**Recommended:** A - Turn off
+**Recommended:** B - Keep current
 
-**Recommended outcome:** Sets "switchModelsOnFlag": false in settings.json. Claude Code then pauses and asks before switching models when a request is flagged.
+**Recommended outcome:** Keep this setting as it is.
 
-**Why:** Turning it off keeps a flagged request on the model you chose until you say otherwise.
+**Why:** This setting is already on, so Keep current leaves it as it is.
 
 **Choices:**
 
@@ -536,7 +535,7 @@ Quick index
 
 **After applying:** Start a new Claude Code session so it reads the changed settings.
 
-**Selected:** A - Turn off
+**Selected:** B - Keep current
 
 ---
 

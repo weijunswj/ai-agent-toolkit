@@ -604,9 +604,10 @@ test('display letters and canonical textual values resolve without becoming stor
   assert.equal(core.resolveDisplayedChoiceAnswer(reports, 'c'), 'c', 'a hidden choice has no letter');
 });
 
-// When the recommendation already matches the verified current state, the bank shows one recommended
-// Keep current and hides its twin; otherwise every choice shows as before.
-test('a recommendation that matches the current state shows one recommended Keep current', () => {
+// The choice that matches the verified current state does the same as Keep current, so the bank hides it
+// whatever is recommended: the other choices are only the ones that change something. A state that is
+// not verified shows every choice.
+test('the choice matching the current state folds into Keep current, whatever is recommended', () => {
   const rowFor = (id, change, argv = []) => {
     const current = stateWithManaged(managedState());
     change(current);
@@ -616,30 +617,48 @@ test('a recommendation that matches the current state shows one recommended Keep
   const cases = [
     // On, but with no saved source matching 1.1, Turn on would re-point updates, so nothing folds here
     // (the matching case is in the next test).
-    ['automatic-updates', (c) => { c.audit.repo_auto_update = { enabled: true }; }, '', ['enable', 'disable', 'keep']],
-    ['update-reports', (c) => { c.audit.update_report_enabled = true; }, 'enable', ['disable', 'keep']],
-    ['update-reports', (c) => { c.audit.update_report_enabled = false; }, '', ['enable', 'disable', 'keep']],
-    ['update-reports', () => {}, '', ['enable', 'disable', 'keep']],
-    ['report-retention', (c) => { c.audit.update_report_retention_days = 7; }, 'default', ['custom', 'keep']],
-    ['report-retention', (c) => { c.audit.update_report_retention_days = 14; }, '', ['default', 'custom', 'keep']],
+    ['automatic-updates', (c) => { c.audit.repo_auto_update = { enabled: true }; }, '', ['enable', 'disable', 'keep'], 'enable'],
+    ['update-reports', (c) => { c.audit.update_report_enabled = true; }, 'enable', ['disable', 'keep'], 'keep'],
+    // Off already: Do not keep reports is hidden and Keep reports stays recommended.
+    ['update-reports', (c) => { c.audit.update_report_enabled = false; }, 'disable', ['enable', 'keep'], 'enable'],
+    ['update-reports', () => {}, '', ['enable', 'disable', 'keep'], 'enable'],
+    ['report-retention', (c) => { c.audit.update_report_retention_days = 7; }, 'default', ['custom', 'keep'], 'keep'],
+    ['report-retention', (c) => { c.audit.update_report_retention_days = 14; }, '', ['default', 'custom', 'keep'], 'default'],
     // Folds only when config.toml has Toolkit's raised block too; the record alone is not enough.
-    ['codex-instruction-limit', (c) => { c.audit.codex_doc_limit_enabled = true; c.codexInstall = { config: 'read', docLimit: { value: 65536, toolkit: true } }; }, 'enable', ['disable', 'keep']],
-    ['codex-instruction-limit', (c) => { c.audit.codex_doc_limit_enabled = true; }, '', ['enable', 'disable', 'keep']],
-    ['codex-instruction-limit', () => {}, '', ['enable', 'disable', 'keep']],
-    ['codex-toolkit-maintenance', (c) => { c.audit.codex_plugin_auto_refresh_enabled = true; }, 'enable', ['disable', 'keep']],
+    ['codex-instruction-limit', (c) => { c.audit.codex_doc_limit_enabled = true; c.codexInstall = { config: 'read', docLimit: { value: 65536, toolkit: true } }; }, 'enable', ['disable', 'keep'], 'keep'],
+    ['codex-instruction-limit', (c) => { c.audit.codex_doc_limit_enabled = true; }, '', ['enable', 'disable', 'keep'], 'enable'],
+    ['codex-instruction-limit', () => {}, '', ['enable', 'disable', 'keep'], 'enable'],
+    // Left alone on record and in config.toml: Leave it is hidden, Raise it stays recommended.
+    ['codex-instruction-limit', (c) => { c.audit.codex_doc_limit_enabled = false; c.codexInstall = { config: 'read', docLimit: { value: null, toolkit: false } }; }, 'disable', ['enable', 'keep'], 'enable'],
+    ['codex-toolkit-maintenance', (c) => { c.audit.codex_plugin_auto_refresh_enabled = true; }, 'enable', ['disable', 'keep'], 'keep'],
+    ['codex-toolkit-maintenance', (c) => { c.audit.codex_plugin_auto_refresh_enabled = false; }, 'disable', ['enable', 'keep'], 'enable'],
+    ['codex-toolkit-maintenance', () => {}, '', ['enable', 'disable', 'keep'], 'enable'],
   ];
-  for (const [id, change, twin, visible] of cases) {
+  for (const [id, change, twin, visible, recommended] of cases) {
     const { row } = rowFor(id, change);
     const label = `${id} ${twin || 'not folded'}`;
     assert.deepEqual(row.choices.map((choice) => choice.value), visible, label);
     assert.equal(row.folded_value, twin || undefined, label);
+    assert.equal(row.recommended, recommended, label);
     if (!twin) continue;
-    assert.equal(row.recommended, 'keep', label);
     assert.equal(row.choices.find((choice) => choice.value === 'keep').label, 'Keep current', label);
+    if (recommended !== 'keep') continue;
     const table = core.renderSetupQuestionBank([row]);
     assert.match(table, new RegExp(`\\| ${row.presentation.recommended_choice_ref}\\. Keep current \\| `), label);
     assert.doesNotMatch(table, /Preserve this effective behavior/, `${label}: the Recommended cell does not repeat the current state`);
   }
+
+  // All recommended applies each row's displayed recommendation: reports off and maintenance off both
+  // turn on, while the folded choice is never applied.
+  const off = stateWithManaged(managedState());
+  off.audit.update_report_enabled = false;
+  off.audit.codex_plugin_auto_refresh_enabled = false;
+  const planned = core.plannedQuestionBank(core.parseArgs(['--plan', '--host', 'codex']), off);
+  const byId = Object.fromEntries(planned.specs.map((spec) => [spec.id, spec]));
+  assert.equal(planned.args.setupChoices.updateReports, 'enable');
+  assert.equal(planned.args.setupChoices.codexPluginAutoRefresh, 'enable');
+  assert.equal(byId['update-reports'].selected, 'enable');
+  assert.equal(byId['codex-toolkit-maintenance'].selected, 'enable');
 
   // A flag naming the hidden twin is accepted and applied as keep, which does the same thing.
   const { row, args } = rowFor('update-reports', (c) => { c.audit.update_report_enabled = true; }, ['--enable-update-reports']);
@@ -765,7 +784,7 @@ test('automatic updates, Claude agents, the Claude plugin and Codex helpers read
 
 const CLAUDE_SETTING_ROWS = ['claude-setting-attribution', 'claude-setting-cross-session-inbound', 'claude-setting-switch-models-on-flag', 'claude-setting-agents-md'];
 
-test('Claude Code settings show one row per setting, recommend Keep current on every row once any is set and hide the choice matching the state; agents and plugin questions keep every choice when their state is unread', () => {
+test('Claude Code settings show one row per setting, each recommending on its own from its own state and hiding the choice matching it; agents and plugin questions keep every choice when their state is unread', () => {
   const current = stateWithManaged(managedState({ currentPath: '', exists: false, git: false }));
   current.agentProfile = { supported: true, topology: 'root-only' };
   current.nativePlugin = { status: 'fresh' };
@@ -795,7 +814,7 @@ test('Claude Code settings show one row per setting, recommend Keep current on e
     assert.deepEqual(row.choices.map((choice) => [choice.value, choice.label]), [['disable', 'Turn off'], ['keep', 'Keep current']], row.id);
     assert.equal(row.recommended, 'keep', row.id);
     assert.deepEqual([row.folded_value, row.folded_into], ['enable', 'keep'], row.id);
-    assert.equal(row.recommendation_reason, 'This setting already has a value, so Keep current leaves it as it is.', row.id);
+    assert.equal(row.recommendation_reason, 'This setting is already on, so Keep current leaves it as it is.', row.id);
     assert.match(row.whatThisControls, /(Turn off removes this one setting whoever added it|Turn on and Turn off each write this one value); the other settings are not touched\.$/, row.id);
   }
   assert.doesNotMatch(core.renderSetupQuestionBank([settings[0]]), /Turn on/);
@@ -804,23 +823,24 @@ test('Claude Code settings show one row per setting, recommend Keep current on e
   assert.equal(settings[1].choices[0].consequence, 'Removes "crossSessionInbound" from settings.json, whoever added it, so Claude Code uses its default.');
   assert.equal(settings[0].choices[0].consequence, 'Removes "attribution" from settings.json, whoever added it, so Claude Code uses its default. Claude Code then adds its Co-Authored-By trailer, Generated with Claude Code line and session link to your commits and pull requests again.');
 
+  // Three set and one missing: the missing row recommends Turn on by itself, and the others stay on Keep current.
   current.claudeSettings[1] = { id: 'cross-session-inbound', state: 'claude-default' };
-  const leftOut = settingRows();
-  assert.ok(leftOut.every((row) => row.recommended === 'keep'), 'one left out on purpose keeps every row on Keep current');
-  assert.equal(leftOut[1].recommendation_reason, '3 of the 4 recommended settings already have a value and this one does not, so it counts as left out on purpose. Pick Turn on to turn it on.');
-  assert.equal(leftOut[1].current_short, 'Off (Claude Code default)');
+  const oneMissing = settingRows();
+  assert.deepEqual(oneMissing.map((row) => row.recommended), ['keep', 'enable', 'keep', 'keep']);
+  assert.equal(oneMissing[1].recommendation_reason, 'It lets a Projects coordinator wake Remote Control sessions on your computer.');
+  assert.equal(oneMissing[1].current_short, 'Off (Claude Code default)');
   // A row already off hides Turn off.
-  assert.deepEqual(leftOut[1].choices.map((choice) => choice.value), ['enable', 'keep']);
-  assert.deepEqual([leftOut[1].folded_value, leftOut[1].folded_into], ['disable', 'keep']);
+  assert.deepEqual(oneMissing[1].choices.map((choice) => choice.value), ['enable', 'keep']);
+  assert.deepEqual([oneMissing[1].folded_value, oneMissing[1].folded_into], ['disable', 'keep']);
 
   current.claudeSettings = current.claudeSettings.map((entry) => ({ id: entry.id, state: 'claude-default' }));
   const fresh = settingRows();
-  // None set yet: Turn on for three rows; the model-switch row is on by default and recommends Turn off.
-  assert.deepEqual(fresh.map((row) => row.recommended), ['enable', 'enable', 'disable', 'enable']);
+  // A fresh install: Turn on for the three off rows; the model-switch row is on by default, so Keep current.
+  assert.deepEqual(fresh.map((row) => row.recommended), ['enable', 'enable', 'keep', 'enable']);
   assert.deepEqual(fresh.map((row) => row.recommendation_reason), [
     'It keeps AI attribution out of your commits and pull requests.',
     'It lets a Projects coordinator wake Remote Control sessions on your computer.',
-    'Turning it off keeps a flagged request on the model you chose until you say otherwise.',
+    'This setting is already on, so Keep current leaves it as it is.',
     "It makes Claude Code read the repository's AGENTS.md.",
   ]);
   assert.equal(fresh[2].current_short, 'On (Claude Code default)');
@@ -828,6 +848,21 @@ test('Claude Code settings show one row per setting, recommend Keep current on e
   assert.match(fresh[2].whatThisControls, /Turn on and Turn off each write this one value; the other settings are not touched\.$/);
   // Each row hides the choice matching its state: off rows hide Turn off, the on-by-default row hides Turn on.
   assert.deepEqual(fresh.map((row) => row.choices.map((choice) => choice.value)), [['enable', 'keep'], ['enable', 'keep'], ['disable', 'keep'], ['enable', 'keep']]);
+
+  // Model switch off: Turn on is recommended, only Turn on and Keep current show, and Turn on writes true.
+  current.claudeSettings[2] = { id: 'switch-models-on-flag', state: 'off-value', value: false, toolkit: true };
+  const switchOff = settingRows()[2];
+  assert.equal(switchOff.recommended, 'enable');
+  assert.deepEqual(switchOff.choices.map((choice) => [choice.value, choice.label]), [['enable', 'Turn on'], ['keep', 'Keep current']]);
+  assert.equal(switchOff.recommended_outcome, 'Sets "switchModelsOnFlag": true in settings.json.');
+  assert.equal(switchOff.recommendation_reason, 'It lets Claude Code switch models when a request is flagged, without stopping to ask.');
+  // Model switch on (true written, by you or by setup): Keep current, with only Turn off beside it.
+  for (const entry of [{ state: 'toolkit-value' }, { state: 'owner-value', value: true, matches: true }]) {
+    current.claudeSettings[2] = { id: 'switch-models-on-flag', ...entry };
+    const switchOn = settingRows()[2];
+    assert.equal(switchOn.recommended, 'keep', entry.state);
+    assert.deepEqual(switchOn.choices.map((choice) => [choice.value, choice.label]), [['disable', 'Turn off'], ['keep', 'Keep current']], entry.state);
+  }
   for (const id of ['claude-agent-topology', 'claude-toolkit-plugin']) {
     const row = rows.find((spec) => spec.id === id);
     assert.equal(row.folded_value, undefined, id);
@@ -861,7 +896,9 @@ test('Claude Code setting rows tell a value in your settings equal to Toolkit\'s
     ['enable', 'Sets "switchModelsOnFlag": true in settings.json.'],
     ['keep', 'Preserve this effective behavior: Switch models without asking when a request is flagged: off (in your settings).'],
   ]);
-  assert.equal(switchRow.recommended, 'keep');
+  assert.equal(switchRow.recommended, 'enable');
+  // A different value is not on, so its row recommends Turn on.
+  assert.equal(attribution.recommended, 'enable');
   current.claudeSettings[2] = { ...current.claudeSettings[2], toolkit: true };
   assert.equal(rows()['claude-setting-switch-models-on-flag'].current_short, 'Off (set by setup)');
 
@@ -878,13 +915,45 @@ test('Claude Code setting rows tell a value in your settings equal to Toolkit\'s
   assert.equal(blocked.current_short, 'Cannot change: a parent entry is not an object');
   assert.deepEqual(blocked.choices.map((choice) => choice.value), ['enable', 'disable', 'keep']);
   for (const choice of blocked.choices.slice(0, 2)) assert.equal(choice.consequence, 'Nothing changes: setup cannot change this setting because a parent entry is not an object in settings.json.');
+  assert.equal(blocked.recommended, 'keep');
+  assert.equal(blocked.recommendation_reason, 'Setup cannot change this setting, so Keep current leaves it as it is.');
 
   // An unreadable file shows on every row and nothing is verified.
   current.claudeSettings = current.claudeSettings.map((entry) => ({ id: entry.id, label: entry.label, state: 'unreadable', detail: 'The Claude Code user settings file is not valid JSON.' }));
   for (const id of CLAUDE_SETTING_ROWS) {
     assert.equal(rows()[id].current_short, 'Could not read', id);
     assert.equal(rows()[id].currentState.verification, 'unverified', id);
+    assert.equal(rows()[id].recommended, 'keep', id);
+    assert.deepEqual(rows()[id].choices.map((choice) => choice.value), ['enable', 'disable', 'keep'], id);
   }
+});
+
+test('each bank talks only about its own app: the Claude Code bank never names Codex and the Codex bank never names Claude', () => {
+  for (const [host, specs, other] of [
+    ['claude-code', core.setupQuestionClaudeDocumentationSpecs(), /codex/i],
+    ['codex', core.setupQuestionDocumentationSpecs(), /claude/i],
+  ]) {
+    const text = [core.renderSetupQuestionBank(specs), core.renderSetupQuestionBankTerminal(specs), JSON.stringify(specs)].join('\n');
+    assert.doesNotMatch(text, other, host);
+  }
+});
+
+test('Keep Toolkit available in Codex? hides Install or refresh when Codex already runs the current Toolkit', () => {
+  // The documentation state: the standard update copy, which Codex runs Toolkit from at the same version.
+  const plugin = (change = () => {}) => {
+    const state = core.documentationFixtureState();
+    change(state);
+    return core.setupQuestionSpecs(core.parseArgs(['--plan', '--host', 'codex']), state).find((spec) => spec.id === 'codex-toolkit-plugin');
+  };
+  const unchanged = plugin();
+  assert.equal(unchanged.recommended, 'keep');
+  assert.deepEqual(unchanged.choices.map((choice) => choice.value), ['instructions', 'keep']);
+  assert.deepEqual([unchanged.folded_value, unchanged.folded_into], ['install', 'keep']);
+  // Typing the hidden choice applies Keep current, which runs no Codex command.
+  assert.equal(core.resolveDisplayedChoiceAnswer(unchanged, 'install'), 'keep');
+  const older = plugin((state) => { state.codexInstall = { ...state.codexInstall, version: '0.9.0', versions: ['0.9.0'], older: true }; });
+  assert.equal(older.recommended, 'install');
+  assert.deepEqual(older.choices.map((choice) => choice.value), ['install', 'instructions', 'keep']);
 });
 
 test('--claude-settings answers all four Claude Code setting rows and --claude-setting answers one', () => {
