@@ -250,6 +250,32 @@ test('incomplete evidence never selects a partial match or reports no match; aut
   }
 });
 
+test('an incomplete pass retains a missing PR finding recorded after it planned', () => {
+  const { github, store, reconciler } = completedFixture();
+  const incomplete = reconciler();
+  github.issuePrLinks.set(100, { timelineTruncated: true });
+  const plan = incomplete.plan();
+  assert.equal(plan.observed.discovery.get(100).complete, false);
+  assert.equal(plan.parent.attention?.some(entry => entry.code === 'COMPLETED_PR_MISSING') || false, false);
+
+  github.issuePrLinks.set(100, {});
+  const complete = reconciler();
+  complete.apply(complete.plan());
+  const entry = code => store.read('parent', 7).doc.attention.find(item => item.code === code);
+  const missing = entry('COMPLETED_PR_MISSING');
+  assert.equal(missing.state, 'new');
+
+  incomplete.apply(plan);
+  assert.deepEqual(entry('COMPLETED_PR_MISSING'), missing, 'a partial read must retain a concurrently added finding');
+  assert.equal(entry('PR_DISCOVERY_INCOMPLETE').state, 'new');
+
+  github.addPr(200, { head: SHA_A, merged: true, body: 'Refs #100' });
+  complete.apply(complete.plan());
+  assert.equal(store.read('child', 100).doc.pr.number, 200);
+  assert.equal(entry('COMPLETED_PR_MISSING').state, 'resolved');
+  assert.equal(entry('PR_DISCOVERY_INCOMPLETE').state, 'resolved');
+});
+
 // Fresh-state closure matrix: create/update x pre-apply/CAS drift x loss of eligibility/recorded PR.
 // Missing children supply no completion proof; an existing child's reopening must also persist.
 for (const childState of ['missing', 'existing']) for (const timing of ['before apply', 'CAS conflict']) {

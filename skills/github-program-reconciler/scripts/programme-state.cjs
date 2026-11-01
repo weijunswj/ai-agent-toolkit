@@ -3364,8 +3364,11 @@ class Reconciler {
   // shows them after this pass.
   planAttention(parent, projected, observed, only, override, inventory, effects, findings, holds, resolutions = []) {
     const folds = [];
+    // Hold by issue, even when another pass adds the finding after this snapshot was read.
+    const incompletePrHolds = [...observed.discovery].filter(([, discovery]) => discovery.complete === false)
+      .map(([issue]) => findingId(FINDING_CODES.COMPLETED_PR_MISSING.source, 'COMPLETED_PR_MISSING', issue));
     if (!only && !override) folds.push({ source: 'reconcile', complete: true, seen: findings.filter(finding => ATTENTION.has(finding.code)).map(({ code, issue, head = null, since = null }) => ({ code, issue, head, ...(since ? { since } : {}) })),
-      hold: [...this.oneTimeHolds(parent.attention, projected), ...(parent.attention || []).filter(entry => entry.code === 'COMPLETED_PR_MISSING' && observed.discovery.get(entry.issue)?.complete === false).map(entry => entry.id)] });
+      hold: [...this.oneTimeHolds(parent.attention, projected), ...incompletePrHolds] });
     if (inventory) folds.push({ source: 'inventory', complete: inventory.complete, seen: inventory.findings });
     if (!folds.length) return;
     const now = this.now();
