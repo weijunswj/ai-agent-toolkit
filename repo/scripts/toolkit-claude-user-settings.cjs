@@ -4,13 +4,15 @@
 // settings file (~/.claude/settings.json):
 //   attribution: false                      no Co-Authored-By trailers, PR footers or session links
 //   crossSessionInbound: "accept"           messages from your other sessions (a Projects coordinator) wake this one
-//   switchModelsOnFlag: false               pause and ask instead of switching models when a request is flagged
+//   switchModelsOnFlag: true / false        on (Claude Code's default) switches models without asking when a
+//                                           request is flagged; off pauses and asks first
 //   pluginConfigs["cc-plugin-agents-md@builtin"].options.instructionFiles: "claude-md-and-agents-md"
 //                                           read AGENTS.md as well as CLAUDE.md
 // Toolkit records, per setting and per settings file, that it wrote the value. A value the owner set by hand
-// (any value Toolkit did not record) is reported, with whether it matches Toolkit's value. Turning a setting on
-// sets Toolkit's value, replacing a different one; turning it off removes that one key whoever set it. Parent
-// objects and the file itself are removed only when they end up empty and Toolkit's record says Toolkit created them.
+// (any value Toolkit did not record) is reported, with whether it matches the on value. Turning a setting on
+// sets its on value, replacing a different one; turning it off removes that one key whoever set it, or, for a
+// setting with an offValue, writes that value. Parent objects and the file itself are removed only when they
+// end up empty and Toolkit's record says Toolkit created them.
 
 const fs = require('node:fs');
 const os = require('node:os');
@@ -29,15 +31,17 @@ const hidesAllAttribution = (value) => value === false
 
 // Existing Toolkit projections below are not a claim of host acceptance.
 // JSON read-back checks integrity; host schema/behaviour still requires restart/turn UAT.
-// equivalent, when present, says which owner values do what Toolkit's value does; others compare exactly.
+// value is the on value. equivalent, when present, says which owner values do what it does; others compare
+// exactly. offValue, when present, is written by Turn off instead of removing the key, and defaultOn says a
+// missing key already behaves as on. recommend is the choice offered while none of these settings is set.
 const SETTINGS = Object.freeze([
   Object.freeze({ id: 'attribution', keyPath: ['attribution'], value: false, equivalent: hidesAllAttribution, label: 'No AI attribution in commits and pull requests' }),
   Object.freeze({ id: 'cross-session-inbound', keyPath: ['crossSessionInbound'], value: 'accept', label: 'Messages from your other Claude sessions wake this one' }),
-  Object.freeze({ id: 'switch-models-on-flag', keyPath: ['switchModelsOnFlag'], value: false, label: 'Ask before switching models when a request is flagged' }),
+  Object.freeze({ id: 'switch-models-on-flag', keyPath: ['switchModelsOnFlag'], value: true, offValue: false, defaultOn: true, recommend: 'disable', label: 'Switch models without asking when a request is flagged' }),
   Object.freeze({ id: 'agents-md', keyPath: ['pluginConfigs', 'cc-plugin-agents-md@builtin', 'options', 'instructionFiles'], value: 'claude-md-and-agents-md', label: 'Read AGENTS.md as well as CLAUDE.md' })
 ]);
 const RECORD_SCHEMA = 'ai-agent-toolkit.claude-user-settings.v1';
-const STATES = Object.freeze({ TOOLKIT: 'toolkit-value', OWNER: 'owner-value', DEFAULT: 'claude-default', UNREADABLE: 'unreadable' });
+const STATES = Object.freeze({ TOOLKIT: 'toolkit-value', OWNER: 'owner-value', OFF: 'off-value', DEFAULT: 'claude-default', UNREADABLE: 'unreadable' });
 
 
 // Walks keyPath; returns { found, value } or { blocked } when a parent is not an object.
@@ -146,6 +150,8 @@ class ClaudeUserSettings {
     const found = lookup(read.settings, spec.keyPath);
     if (found.blocked) return { id: spec.id, label: spec.label, state: STATES.OWNER, value: null, matches: false, blocked: true, detail: 'a parent entry is not an object' };
     if (!found.found) return { id: spec.id, label: spec.label, state: STATES.DEFAULT };
+    // toolkit says whether setup wrote the off value; either way it is off.
+    if (Object.hasOwn(spec, 'offValue') && same(found.value, spec.offValue)) return { id: spec.id, label: spec.label, state: STATES.OFF, value: found.value, toolkit: Boolean(entry) && same(entry.value, found.value) };
     if (entry && same(entry.value, found.value) && same(found.value, spec.value)) return { id: spec.id, label: spec.label, state: STATES.TOOLKIT, value: found.value };
     // matches tells an owner value equal to Toolkit's pick (on already) apart from a different one.
     return { id: spec.id, label: spec.label, state: STATES.OWNER, value: found.value, matches: spec.equivalent ? spec.equivalent(found.value) : same(found.value, spec.value) };
@@ -179,7 +185,7 @@ class ClaudeUserSettings {
     const forget = () => { const now = this.#readRecord(); if (Object.hasOwn(now, key)) { delete now[key]; this.#saveRecord(now); } };
     if (before.state === STATES.UNREADABLE) return { status: 'held', changed: false, ...before };
     if (choice === 'keep') {
-      if (before.state !== STATES.TOOLKIT) forget();
+      if (before.state !== STATES.TOOLKIT && !before.toolkit) forget();
       return { status: 'kept', changed: false, ...before };
     }
     // Replacing or removing under a parent that is not an object would discard more than this one setting.
@@ -188,20 +194,32 @@ class ClaudeUserSettings {
     // setting turned off removes a file that holds nothing else.
     const pathSuffix = key.slice(spec.id.length);
     const fileCreated = Object.entries(entries).some(([other, value]) => other.endsWith(pathSuffix) && value?.created_file === true);
-    if (choice === 'enable') {
-      if (before.state === STATES.TOOLKIT) return { status: 'set', changed: false, ...before };
-      // An owner value that already does what Toolkit's does is on already, so it is not rewritten.
-      if (before.state === STATES.OWNER && before.matches === true) { forget(); return { status: 'set', changed: false, ...before }; }
-      // A different owner value is replaced; its parents already exist, so created stays empty.
-      const { settings, created } = withValue(read.settings, spec.keyPath, spec.value);
-      const entry = { settings_path: this.#settingsPath, value: spec.value, created_parents: created, created_file: read.text === null || fileCreated };
-      this.#saveRecord({ ...entries, [key]: entry });
+    // Writes value and records it; a value replacing another keeps its existing parents, so created stays empty.
+    const write = (value) => {
+      const { settings, created } = withValue(read.settings, spec.keyPath, value);
+      this.#saveRecord({ ...entries, [key]: { settings_path: this.#settingsPath, value, created_parents: created, created_file: read.text === null || fileCreated } });
       try { this.#writeSettings(read, settings); }
       catch (error) {
         try { forget(); } catch { /* the settings error is what the caller needs */ }
         throw error;
       }
+    };
+    if (choice === 'enable') {
+      if (before.state === STATES.TOOLKIT) return { status: 'set', changed: false, ...before };
+      // An owner value that already does what the on value does, or a missing key that defaults to on, is on
+      // already, so nothing is written.
+      if ((before.state === STATES.OWNER && before.matches === true) || (before.state === STATES.DEFAULT && spec.defaultOn)) {
+        forget();
+        return { status: 'set', changed: false, ...before };
+      }
+      write(spec.value);
       return { status: 'set', changed: true, id: spec.id, label: spec.label, state: STATES.TOOLKIT, value: spec.value };
+    }
+    if (Object.hasOwn(spec, 'offValue')) {
+      // Off is an explicit value here: a missing key would mean on.
+      if (before.state === STATES.OFF) return { status: 'off', changed: false, ...before };
+      write(spec.offValue);
+      return { status: 'off', changed: true, id: spec.id, label: spec.label, state: STATES.OFF, value: spec.offValue, toolkit: true };
     }
     if (before.state === STATES.DEFAULT) { forget(); return { status: 'claude-default', changed: false, ...before }; }
     // Off removes the key whoever set it; only a live Toolkit value's record names parents Toolkit created.

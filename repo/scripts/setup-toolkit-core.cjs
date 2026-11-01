@@ -602,7 +602,7 @@ function printHelp() {
     '                               Claude Code only; verify/report, show native refresh instructions, or install/enable via claude plugin marketplace add + install --scope user',
     '  --explain <ref>              print the full text of one setup question, for example --explain 1.2',
     '  --claude-settings enable|disable|keep',
-    '                               Claude Code only; answer all four recommended Claude Code user setting rows (attribution off, accept messages from your other sessions, ask before a model switch, read AGENTS.md) at once: enable turns each on, disable removes each from settings.json whoever added it, keep changes nothing',
+    '                               Claude Code only; answer all four Claude Code user setting rows (hide AI credit, let other sessions wake this one, switch models without asking on a flag, read AGENTS.md) at once with Turn on (enable), Turn off (disable) or Keep current (keep); Turn off removes the line whoever added it, except the model-switch row, which writes false',
     `  --claude-setting <name>=enable|disable|keep   answer one of those rows, overriding --claude-settings; names: ${CLAUDE_SETTINGS.map((spec) => spec.id).join(', ')}`,
     '  --antigravity-skills copy|remove|keep   copy Toolkit\'s portable skills into Antigravity\'s global skills folder',
     '  Antigravity uses portable workspace skills only; copy with toolkit-local-bridge.cjs --copy-antigravity-skills --antigravity-project-root <path> [--write]'
