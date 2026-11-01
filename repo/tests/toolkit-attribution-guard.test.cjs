@@ -481,8 +481,12 @@ test('outgoing changes retain earlier git mutations and leave reads out', () => 
       { folder, remote: 'uat', sources: ['HEAD'], preceding: [{ folder, sub: 'other' }] },
     ], command);
   }
-  for (const sub of ['status', 'log', 'diff', 'show', 'fetch', 'rev-parse', 'ls-files', 'ls-remote', 'describe']) {
+  for (const sub of ['status', 'log', 'diff', 'show', 'fetch', 'rev-parse', 'ls-files', 'ls-remote', 'describe', 'config --get remote.origin.url', 'config --list']) {
     assert.deepEqual(outgoingChanges(`git ${sub}; git push uat HEAD`, folder), [{ folder, remote: 'uat', sources: ['HEAD'] }], sub);
+  }
+  // A fetch that writes a local branch, and a config write, may move what HEAD sends.
+  for (const command of ['git fetch -u . spare:feature', 'git fetch origin main:feature', 'git config user.name x']) {
+    assert.deepEqual(outgoingChanges(`${command}; git push uat HEAD`, folder)[0].preceding, [{ folder, sub: 'other' }], command);
   }
   for (const folderConfirmed of [true, false]) {
     let calls = 0;

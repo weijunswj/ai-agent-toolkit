@@ -413,6 +413,13 @@ const BRANCH_STEPS = new Set(['checkout', 'switch', 'branch', 'worktree']);
 // git commands that leave HEAD, the index and the branches as they were; any other earlier step may
 // move them before an unconfirmed-folder push, so it is kept as `other`.
 const READ_STEPS = new Set(['status', 'log', 'diff', 'show', 'fetch', 'push', 'rev-parse', 'ls-files', 'ls-remote', 'describe']);
+// Whether a git step is a plain read: on READ_STEPS, except a fetch that writes a local branch (a
+// refspec with `:` or --update-head-ok), and `config` with only a read option.
+function readStep({ sub, args }) {
+  if (sub === 'config') return args.some((word) => /^(?:--get(?:-all|-regexp|-urlmatch)?|--list|-l)$/.test(word));
+  if (sub === 'fetch') return !args.some((word) => word === '-u' || word === '--update-head-ok' || (!word.startsWith('-') && word.includes(':')));
+  return READ_STEPS.has(sub);
+}
 
 // The branch a git step creates and its start point ({ name, start }, `HEAD` when none is named):
 // `checkout -b|-B <name> [<start>]`, `switch -c|-C <name> [<start>]`, `branch <name> [<start>]` with
@@ -473,7 +480,7 @@ function outgoingChanges(command, cwd, depth = 0, preceding = [], confirmed = tr
       const created = branchCreated(git.sub, git.args);
       preceding.push(marked(created ? { folder: git.base, sub: 'create', ...created } : { folder: git.base, sub: git.sub }, known));
     }
-    if (git && !git.refusal && !COMMIT_STEPS.has(git.sub) && !BRANCH_STEPS.has(git.sub) && !READ_STEPS.has(git.sub)) {
+    if (git && !git.refusal && !COMMIT_STEPS.has(git.sub) && !BRANCH_STEPS.has(git.sub) && !readStep(git)) {
       preceding.push(marked({ folder: git.base, sub: 'other' }, known));
     }
     const pullRequest = pullRequestCreate(current, root);

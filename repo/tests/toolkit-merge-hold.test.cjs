@@ -368,11 +368,17 @@ test('nested shells read only their script argument, including call operators an
   for (const command of ['pwsh -EncodedCommand Z2l0 push', '& powershell -encodedcommand "git push origin HEAD:main"', 'pwsh -enc Z2l0 push']) {
     assert.match(decide(ctx, bash(feature, command))?.deny || '', /encoded command/, command);
   }
-  for (const command of [String.raw`bash -c 'printf "%s\n" "$1"' -- 'git push origin HEAD:main'`,
-    'bash script.sh "git push origin main"', 'pwsh -File script.ps1 "git push origin main"',
-    'pwsh -Command "Write-Output $args[0]" "git push origin main"',
-    'bash -c "echo done" -- -c "git push origin main"', 'cmd script.cmd "git push origin main"',
-    'eval git push origin work', 'iex git push origin work']) {
+  // Options decide which words a shell runs (bundled, repeated, with values), so every argument with
+  // a space is read: these forms all run or may run the push.
+  for (const command of ['bash -ce "git push origin HEAD:main"', 'bash -c -e "git push origin HEAD:main"',
+    'pwsh -Command "Write-Output ready;" "git push origin HEAD:main"', 'powershell -ExecutionPolicy Bypass "git push origin HEAD:main"']) {
+    assert.match(decide(ctx, bash(feature, command))?.deny || '', /default branch `main`/, command);
+  }
+  // That reads a push passed as text to a script as a command too, which fails closed; ordinary
+  // shell calls and pushes to other branches still run.
+  assert.match(decide(ctx, bash(feature, String.raw`bash -c 'printf "%s\n" "$1"' -- 'git push origin HEAD:main'`))?.deny || '', /default branch `main`/);
+  for (const command of ['bash script.sh "git push origin work"', 'pwsh -File script.ps1 "git push origin work"', 'bash -c "echo done && git status"',
+    'cmd /c git push origin work', 'eval git push origin work', 'iex git push origin work', 'pwsh -Command "Write-Output ready"']) {
     assert.equal(decide(ctx, bash(feature, command)), null, command);
   }
 });
