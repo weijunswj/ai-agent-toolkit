@@ -65,10 +65,10 @@ test('the question shows only when Antigravity is installed or Toolkit copies ex
   }).find((row) => row.id === 'antigravity-skills');
   const fresh = spec({ installed: true, copies: false });
   assert.equal(fresh.recommended, 'keep');
-  assert.deepEqual(fresh.choices.map((choice) => choice.value), ['copy', 'keep']);
+  assert.deepEqual(fresh.choices.map((choice) => choice.value), ['keep', 'copy']);
   const kept = spec({ installed: true, copies: true });
   assert.equal(kept.recommended, 'copy');
-  assert.deepEqual(kept.choices.map((choice) => choice.value), ['copy', 'remove', 'keep']);
+  assert.deepEqual(kept.choices.map((choice) => choice.value), ['keep', 'copy', 'remove']);
   assert.throws(() => core.parseArgs(['--antigravity-skills', 'everything']), /Unsupported --antigravity-skills choice/);
   assert.equal(core.parseArgs(['--antigravity-skills', 'copy']).setupChoices.antigravitySkills, 'copy');
 });
