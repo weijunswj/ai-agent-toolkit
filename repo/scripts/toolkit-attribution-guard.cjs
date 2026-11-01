@@ -410,6 +410,9 @@ function pushTarget(args, folder) {
 const COMMIT_STEPS = new Set(['add', 'stage', 'commit', 'merge', 'cherry-pick', 'revert', 'am', 'rebase']);
 // git commands that can make or move the branch a later push in the same command line sends.
 const BRANCH_STEPS = new Set(['checkout', 'switch', 'branch', 'worktree']);
+// git commands that leave HEAD, the index and the branches as they were; any other earlier step may
+// move them before an unconfirmed-folder push, so it is kept as `other`.
+const READ_STEPS = new Set(['status', 'log', 'diff', 'show', 'fetch', 'push', 'rev-parse', 'ls-files', 'ls-remote', 'describe']);
 
 // The branch a git step creates and its start point ({ name, start }, `HEAD` when none is named):
 // `checkout -b|-B <name> [<start>]`, `switch -c|-C <name> [<start>]`, `branch <name> [<start>]` with
@@ -438,7 +441,7 @@ function branchCreated(sub, args) {
 // What a push or a new pull request sends, for each one in a command line, with the same cd,
 // git -C and nested-shell reading as the force-push check: push and pull-request targets as
 // toolkit-push-check.cjs reads them. A push that only deletes sends nothing to check. Each target
-// carries `preceding`, the commit steps earlier in the same command line ({ folder, sub }, in order),
+// carries `preceding`, the git steps earlier in the same command line ({ folder, sub }, in order),
 // because the check runs before any of them.
 //
 // `confirmed` false says the starting folder may not be where the command runs (a Codex call that
@@ -469,6 +472,9 @@ function outgoingChanges(command, cwd, depth = 0, preceding = [], confirmed = tr
     if (git && !git.refusal && BRANCH_STEPS.has(git.sub)) {
       const created = branchCreated(git.sub, git.args);
       preceding.push(marked(created ? { folder: git.base, sub: 'create', ...created } : { folder: git.base, sub: git.sub }, known));
+    }
+    if (git && !git.refusal && !COMMIT_STEPS.has(git.sub) && !BRANCH_STEPS.has(git.sub) && !READ_STEPS.has(git.sub)) {
+      preceding.push(marked({ folder: git.base, sub: 'other' }, known));
     }
     const pullRequest = pullRequestCreate(current, root);
     if (pullRequest) found.push(withPreceding(marked(pullRequest, confirmed)));

@@ -474,6 +474,28 @@ test('push check: every command form finds the folder, remote and branch it send
   assert.deepEqual(outgoingChanges('gh pr create --base=next', dir), [{ folder: dir, pullRequest: true, base: 'next', sources: [] }]);
 });
 
+test('outgoing changes retain earlier git mutations and leave reads out', () => {
+  const folder = os.tmpdir();
+  for (const command of ['git reset --soft spare', 'git stash pop', 'git update-ref HEAD spare', 'git read-tree spare', 'git apply patch.diff']) {
+    assert.deepEqual(outgoingChanges(`${command}; git push uat HEAD`, folder), [
+      { folder, remote: 'uat', sources: ['HEAD'], preceding: [{ folder, sub: 'other' }] },
+    ], command);
+  }
+  for (const sub of ['status', 'log', 'diff', 'show', 'fetch', 'rev-parse', 'ls-files', 'ls-remote', 'describe']) {
+    assert.deepEqual(outgoingChanges(`git ${sub}; git push uat HEAD`, folder), [{ folder, remote: 'uat', sources: ['HEAD'] }], sub);
+  }
+  for (const folderConfirmed of [true, false]) {
+    let calls = 0;
+    outgoingRefusal('git push uat HEAD; git reset --soft spare; git push uat HEAD', folder, { folderConfirmed, check: () => { calls += 1; return {}; } });
+    assert.equal(calls, 2, `a reset changes the target even with folderConfirmed=${folderConfirmed}`);
+  }
+  // An earlier push moves nothing local, so the same push twice is one target, checked once.
+  const targets = [];
+  outgoingRefusal('git push uat HEAD; git push uat HEAD', folder, { folderConfirmed: false, check: target => { targets.push(target); return {}; } });
+  assert.equal(targets.length, 1);
+  assert.equal(targets[0].preceding, undefined);
+});
+
 test('push check: what is sent is each pushed commit the target does not have', () => {
   const { git, commitAll, repos, withSettings } = pushFixtures();
   const repo = repos.range;

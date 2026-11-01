@@ -654,7 +654,7 @@ function shellRefusal(text, cwd, registryOptions = {}, shell = null, depth = 0) 
 // NESTED_LEVELS deep; '' when there is none. The inner shell is not known, so each inner command is
 // judged under every reading (shellReadings). A push nested deeper than that is refused unread.
 function nestedRefusal(text, cwd, registryOptions, shell, depth) {
-  if (!/\bgit\b/i.test(text)) return '';
+  if (!/\b(?:git|push)\b/i.test(text)) return '';
   let root = cwd || process.cwd();
   const variables = new Map();
   for (const { words } of shellCommands(text)) {
@@ -662,17 +662,35 @@ function nestedRefusal(text, cwd, registryOptions, shell, depth) {
     if (assigned) { assignVariable(variables, assigned); continue; }
     if (/^(?:cd|pushd|chdir|set-location|sl)$/i.test(words[0]) && words.length === 2) { root = shellPath(root, folderWord(words[1], variables, shell)); continue; }
     let index = 0;
-    while (index < words.length && (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[index]) || /^(?:env|exec|nohup|command|builtin)$/i.test(words[index]))) index += 1;
+    while (index < words.length && (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[index]) || /^(?:env|exec|nohup|command|builtin|&|\.)$/i.test(words[index]))) index += 1;
     if (!SHELLS.test(words[index] || '')) continue;
-    for (const word of words.slice(index + 1)) {
-      if (!/\s/.test(word) || !/\bgit\b/i.test(word)) continue;
-      if (depth >= NESTED_LEVELS) {
-        if (/\bpush\b/i.test(word)) return refuse(`this command hands a git push to a shell more than ${NESTED_LEVELS} levels deep, so Toolkit cannot read where it pushes and refused it. Run the push as its own command.`);
-        continue;
-      }
-      const reason = shellReadings(null).map(reading => shellRefusal(word, root, registryOptions, reading, depth + 1)).find(Boolean);
-      if (reason) return reason;
+    const name = words[index].split(/[\\/]/).pop().replace(/\.exe$/i, '').toLowerCase();
+    const args = words.slice(index + 1);
+    let inner = '';
+    if (/^(?:eval|iex|invoke-expression)$/.test(name)) inner = args.join(' ');
+    else if (/^(?:pwsh|powershell)$/.test(name)) {
+      // PowerShell takes any unique prefix of a parameter name (-c, -com, -Command; -e, -enc,
+      // -EncodedCommand; -f, -File). With neither, Windows PowerShell runs its other words as the
+      // command, so they are read too.
+      const at = args.findIndex(word => /^-(?:c(?:o(?:m(?:m(?:a(?:n(?:d)?)?)?)?)?)?|e(?:c|n\w*)?|f(?:i(?:l(?:e)?)?)?)$/i.test(word));
+      const flag = at >= 0 ? args[at].toLowerCase() : '';
+      if (flag.startsWith('-e') && /\bpush\b/i.test(text)) return refuse('this command hands a push to PowerShell as an encoded command, so Toolkit cannot read where it pushes and refused it. Run the push as its own command.');
+      if (flag.startsWith('-c')) inner = args[at + 1] || '';
+      else if (!flag) inner = args.filter(word => !word.startsWith('-')).join(' ');
+    } else if (name === 'cmd') {
+      const at = args.findIndex(word => /^\/[ck]$/i.test(word));
+      if (at >= 0) inner = args.slice(at + 1).join(' ');
+    } else {
+      const at = args.findIndex(word => /^-[A-Za-z]*c$/.test(word));
+      if (at >= 0) inner = args[at + 1] || '';
     }
+    if (!/\b(?:git|push)\b/i.test(inner)) continue;
+    if (depth >= NESTED_LEVELS) {
+      if (/\bpush\b/i.test(inner)) return refuse(`this command hands a git push to a shell more than ${NESTED_LEVELS} levels deep, so Toolkit cannot read where it pushes and refused it. Run the push as its own command.`);
+      continue;
+    }
+    const reason = shellReadings(null).map(reading => shellRefusal(inner, root, registryOptions, reading, depth + 1)).find(Boolean);
+    if (reason) return reason;
   }
   return '';
 }

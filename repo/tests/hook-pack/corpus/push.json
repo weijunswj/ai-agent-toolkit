@@ -795,6 +795,39 @@
       },
       "status": "pass",
       "note": "Before the fix this was refused as folder unknown; now the lane-two HEAD check refuses it for the credential."
+    },
+    {
+      "id": "CODEX.nested-worktrees-reset-head-push",
+      "source": "G2 finding: a reset before a HEAD push invalidates the current per-tree HEAD checks",
+      "kind": "hostile",
+      "hosts": [
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "git reset --soft spare; git push origin HEAD:feature"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature",
+          "nested_worktrees": [
+            {
+              "branch": "lane-one"
+            },
+            {
+              "branch": "lane-two"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "Codex names no folder and the earlier reset could move HEAD in any reachable working tree, so the push needs a named folder."
     }
   ]
 }

@@ -165,6 +165,8 @@ const HOOK_CASES = [
     { cwd: c => c.plain, setup: configureTopology('broader-native'), environment: NO_GATE }],
   ['A18', 'ENABLED repository outside a gate run, lead launches a built-in agent', launch('Explore'), 'pass', null, { environment: NO_GATE }],
   ['A18', 'ENABLED repository outside a gate run, a subagent launches another agent', { agent_id: 'sub-1', ...launch('Explore') }, 'deny', /one layer only/, { environment: NO_GATE }],
+  ['A18', 'ENABLED repository outside a gate run, broader native chosen, a subagent launches another agent', { agent_id: 'sub-1', ...launch('Explore') }, 'deny', /one layer only/,
+    { environment: NO_GATE, setup: configureTopology('broader-native') }],
   ['A21', 'installed definition rendered from another registry revision', launch(G1), 'deny', MISMATCH,
     { setup: editDefinition(G1, /\(SHA-256 `[0-9a-f]{64}`\)/, `(SHA-256 \`${'0'.repeat(64)}\`)`) }],
   ['A22', 'ENABLED repository is governed: a built-in agent is refused', launch('general-purpose'), 'deny', NOT_ALLOWED],

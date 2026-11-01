@@ -134,6 +134,9 @@ test('broader native behaviour lifts the normal-folder refusal; a missing or unr
     assert.deepEqual(nested(cwd), {}, cwd);
     assert.deepEqual(f.decide({ cwd, tool_name: 'Task', agent_id: 'a2', tool_input: {} }, f.open), {}, `${cwd} Task`);
   }
+  assert.equal(reason(nested(f.repo)), ONE_LAYER_REASON, 'a governed repository keeps one layer');
+  assert.equal(reason(f.decide({ tool_name: 'Task', agent_id: 'a2', tool_input: {} }, f.open)), ONE_LAYER_REASON, 'Task keeps one layer too');
+  assert.deepEqual(f.decide({ tool_input: { subagent_type: 'general-purpose' } }, f.open), {}, 'the main session may launch any agent');
   // A gate run under broader native without a launcher binding gets the named-helper policy:
   // a subagent caller is refused, the lead may launch a current Toolkit helper, and nothing else.
   assert.match(reason(await f.decide({ agent_id: 'a1', agent_type: 'Explore', tool_input: { subagent_type: 'toolkit-g0-helper' } })), /a helper cannot launch another agent/);

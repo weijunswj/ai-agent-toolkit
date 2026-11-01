@@ -355,6 +355,28 @@ test('a push to the default branch is refused; other branches and evidence store
   for (const [cwd, command] of allowed) assert.equal(decide(ctx, bash(cwd, command)), null, command);
 });
 
+test('nested shells read only their script argument, including call operators and expression words', (t) => {
+  const ctx = context(t);
+  const feature = repository(ctx.root, 'feature', { branch: 'work' });
+  for (const command of ['& pwsh -Command "git push origin HEAD:main"', '. powershell -c "git push origin HEAD:main"',
+    'eval git push origin HEAD:main', 'iex git push origin HEAD:main', 'Invoke-Expression git push origin HEAD:main',
+    'bash -ec "git push origin HEAD:main"', 'zsh -lc "git push origin HEAD:main"', 'dash -c "git push origin HEAD:main"',
+    'ksh -c "git push origin HEAD:main"', 'pwsh -COMMAND "git push origin HEAD:main"', 'pwsh -Comm "git push origin HEAD:main"',
+    'powershell "git push origin HEAD:main"', 'cmd /c git push origin HEAD:main', 'cmd /K git push origin HEAD:main']) {
+    assert.match(decide(ctx, bash(feature, command))?.deny || '', /default branch `main`/, command);
+  }
+  for (const command of ['pwsh -EncodedCommand Z2l0 push', '& powershell -encodedcommand "git push origin HEAD:main"', 'pwsh -enc Z2l0 push']) {
+    assert.match(decide(ctx, bash(feature, command))?.deny || '', /encoded command/, command);
+  }
+  for (const command of [String.raw`bash -c 'printf "%s\n" "$1"' -- 'git push origin HEAD:main'`,
+    'bash script.sh "git push origin main"', 'pwsh -File script.ps1 "git push origin main"',
+    'pwsh -Command "Write-Output $args[0]" "git push origin main"',
+    'bash -c "echo done" -- -c "git push origin main"', 'cmd script.cmd "git push origin main"',
+    'eval git push origin work', 'iex git push origin work']) {
+    assert.equal(decide(ctx, bash(feature, command)), null, command);
+  }
+});
+
 test('a push to the default branch in a quoted command handed to a shell is read, two levels deep', (t) => {
   const ctx = context(t);
   const feature = repository(ctx.root, 'feature', { branch: 'work' });

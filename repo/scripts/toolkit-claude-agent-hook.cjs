@@ -56,15 +56,15 @@ function decision(input, options = {}) {
   }
   // Outside a Toolkit gate run only one layer applies, in a governed repository too: the main
   // session launches any agent with no decision, and a subagent never launches another unless the
-  // owner chose broader native behaviour. A missing or unreadable profile reads as root-only, so the
-  // refusal stays. `agent_id` marks a subagent or teammate caller; `agent_type` alone also appears
-  // in a main session started with --agent.
+  // owner chose broader native behaviour outside governed repositories. A missing or unreadable
+  // profile reads as root-only, so the refusal stays. `agent_id` marks a subagent or teammate caller;
+  // `agent_type` alone also appears in a main session started with --agent.
   const environment = options.environment || process.env;
   const governance = options.governance || governedRepo().governedRepo(input.cwd, environment);
   const { readProfile, TOPOLOGIES } = control();
   if (!governance.governed || !gateRun(environment)) {
     if (!input.agent_id) return {};
-    return readProfile('claude-code', options).topology === TOPOLOGIES.BROADER_NATIVE ? {} : ONE_LAYER_DENIAL;
+    return !governance.governed && readProfile('claude-code', options).topology === TOPOLOGIES.BROADER_NATIVE ? {} : ONE_LAYER_DENIAL;
   }
   // The pinned binding path applies only when a launcher bound this session to a helper route
   // (it sets TOOLKIT_NATIVE_HELPER_BINDING). Setup writes no binding, so without one a broader-native
