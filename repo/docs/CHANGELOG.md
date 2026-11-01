@@ -1,15 +1,5 @@
 # Toolkit Changelog
 
-## 3.37.0 (every task run reaches the project chat)
-
-### Claude Projects
-
-- Each scheduled task run keeps its full report in `latest.md` and an immutable `runs/<run UTC>.md`, writes its own run stamp under `/mnt/project-files/toolkit/task-runs/<slug>/`, and posts one home-thread line naming the per-run report. Every slug includes its kind, a readable project prefix and a digest of the full kind, project and report folder. Stamps record the task name where known and the run's own thread link. The write guard permits only that task's reports, stamps and `.failed` receipts, never coordinator `.relayed` or `.done` files.
-- The coordinator skips tasks marked `stopped by owner`, relays each run from its exact per-run report with its originating thread link, writes `.relayed` immediately after a successful post, and writes `.done` only after all prefix actions. Notification replay and wake catch-up handle every run without `.done`, oldest first, skipping only the post when `.relayed` exists. A replacement home never changes an old run's origin link.
-- Unless a task is `stopped by owner`, the hourly nudge flags runs still unrelayed after 15 minutes (`UNRELAYED TASK RUNS`) and lists those posted but without `.done` as "relayed, actions not confirmed". It flags working lanes below the cap while work is queued (`LANES UNDER CAP`). Its quick check ignores home-thread lines and coordinator activity that only relays task runs; owner messages and other posts still count. The lane count excludes the extra lane for a sudden owner request, owner waits, and PRs waiting on CI or the review queue.
-- The daily check-in reports each task's last run and whether it was relayed, flags any run unrelayed for over an hour (`RELAY GAP`), even when a newer run was acknowledged, and advises opting a project's own tasks into the Toolkit shell to get the same line and stamp. Both health checks skip every stamp of tasks marked `stopped by owner`.
-- Existing task prompts check as outdated. The daily check-in swaps Toolkit-made tasks unless `stopped by owner`; custom shell updates still need the owner's OK. Until that task's update, the coordinator reads its old shell's `latest.md` immediately, relays and acts that turn only, with no stamp, catch-up or relay gap check. The check-in names this limitation under **Tasks:**.
-
 ## 3.36.0 (setup host check)
 
 ### Setup
