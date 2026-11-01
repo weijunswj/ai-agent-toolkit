@@ -1,5 +1,5 @@
 {
-  "purpose": "Owner phrasings for the toolkit-env skill: which ones must open the keys in Notepad (toolkit env edit) and which must not. Run headless against the installed skill during agent UAT; the unit test only checks this list's shape.",
+  "purpose": "Owner phrasings for the toolkit-env skill: which ones must open the keys in the edit file (toolkit env edit) and which must not. Run headless against the installed skill during agent UAT; the unit test only checks this list's shape.",
   "open": [
     "show env",
     "let me see my keys",

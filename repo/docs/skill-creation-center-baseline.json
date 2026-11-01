@@ -694,7 +694,7 @@
       "invocation_mode_reason": "Packaged metadata permits implicit discovery after the behavioural routing corpus proves positive, negative, and adversarial discrimination; discovery never grants mutation authority.",
       "decision": "new_product",
       "decision_reason": "Keys and tokens need a distinct safety boundary (values never in chat, logs or files) and their own OS-store, editor and app-connector code paths.",
-      "unique_value": "One OS-native store per computer, a Notepad edit flow, names-only status, use-time header helpers for Claude Code and Codex, and a checked move off ~/.codex/.env.",
+      "unique_value": "One OS-native store per computer, an edit flow in the .env editor, names-only status, use-time header helpers for Claude Code and Codex, and a checked move off ~/.codex/.env.",
       "runtime_footprint": "Instructions plus Node scripts that use only built-in Windows tools (Windows PowerShell); no packages or services.",
       "local_assets": "Canonical README, SKILL.md, host metadata, the toolkit-env scripts, an owner doc and focused tests.",
       "output_contract": "Report the command's own lines: key names, changed/added names, connected entries and the next step. Never a value, length or prefix.",
