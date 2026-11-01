@@ -4,7 +4,7 @@ Source: repo/contracts/agent-rules/repo-local
 Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.
 -->
 
-<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/repo-local/antigravity-bootstrap.template.md:BEGIN ANTIGRAVITY.BOOTSTRAP v2 toolkit=3.41.3 sha256=7ecb651cea1c -->
+<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/repo-local/antigravity-bootstrap.template.md:BEGIN ANTIGRAVITY.BOOTSTRAP v2 toolkit=3.42.0 sha256=7ecb651cea1c -->
 # Agent Toolkit Antigravity Bootstrap
 
 Root `AGENTS.md` is the canonical repo instruction file.

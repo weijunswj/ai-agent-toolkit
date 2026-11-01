@@ -1,12 +1,13 @@
 # Toolkit Changelog
 
-## 3.41.3
+## 3.42.0 (keys open in your .env editor)
 
-### Fixed
+### Changed
 
-- Let the owner's next own reply answer the governance question for the one folder named by a refused command, including a free-wording off acknowledgement outside github.com. Consume that binding once without holding unrelated work, clear it on resume or when scheduling a prompt, and keep the first question when another target is refused. Discard a pending confirmation when a newer question names a different target. A failed save still refuses the reaching command without changing the session mark; bare typed answers remain usable when reply-ticket state is damaged.
-- Require eligible, fresh Projects deliveries with independent hashed replay receipts for governance and merge approvals. Preserve spent ids during state conversion and keep launched sessions unable to answer governance questions. Both checks accept host timestamps up to 2 minutes ahead and retain receipts for 24 hours and 2 minutes.
-- Explain why adding a GitHub remote asks the question again, and prepare Remote Control lanes by creating the remote repository before cloning it.
+- `toolkit env edit` opens the key file in the app this computer uses for `.env` files, through the Windows shell by full path, instead of always in Notepad. VS Code, VS Code Insiders, VSCodium and Cursor start by their own path in a new window with no folder, so workspace extensions and IDE links to agents do not attach to it.
+- A deleted line no longer removes its key within seconds. It is marked (shown in the file's status line and in `status`), and "done" asks one yes/no that names every marked key before removing any; a no, no answer, a new edit or the 30-minute end keeps them. Putting the line back cancels it.
+- Every end of an edit removes the copies VS Code-style editors keep of Toolkit's own edit files (Local History and hot-exit backups), overwriting each with zeros first, and says how many. The closing note is worded for the app the file opened in, and the file's header warns that extensions can read an open tab.
+- The test guard that blocks Notepad launches also refuses opening an edit file in the shell or an editor, and is renamed to match.
 
 ## 3.41.2
 
