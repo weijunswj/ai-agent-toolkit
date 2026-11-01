@@ -7,6 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync, spawn } = require('node:child_process');
 const { TOOLKIT_VERSION } = require('../scripts/toolkit-version.cjs');
+const { AGENT_HOST_MARKER_NAMES } = require('../scripts/agent-host-markers.cjs');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'setup-toolkit.cjs');
@@ -42,8 +43,14 @@ function isolatedHomeEnv(root) {
     LOCALAPPDATA: path.join(root, 'local-app-data'),
     VIRTUAL_ENV: '',
     CONDA_PREFIX: '',
-    UV_PYTHON: ''
+    UV_PYTHON: '',
+    // Blanked: setup stops when the app that started it differs from --host, and tests run inside both apps.
+    ...noHostMarkers()
   };
+}
+
+function noHostMarkers() {
+  return Object.fromEntries(AGENT_HOST_MARKER_NAMES.map((name) => [name, '']));
 }
 
 function writeFile(filePath, text) {
@@ -103,7 +110,7 @@ function run(args, options = {}) {
   return spawnSync(process.execPath, [script, ...withDocLimitAnswer(args, options)], {
     cwd: repoRoot,
     encoding: 'utf8',
-    env: { ...process.env, ...(options.env || {}) },
+    env: { ...process.env, ...noHostMarkers(), ...(options.env || {}) },
     input: options.input,
     timeout: options.timeout || 120000,
     windowsHide: true
@@ -393,4 +400,4 @@ function parseConciseInFreshProcess(specs, input) {
   return child;
 }
 
-module.exports = { assert, fs, path, spawnSync, repoRoot, script, tmpRoot, isolatedHomeEnv, writeFile, createFakeCodexAppServer, run, runTestGit, createMinimalSetupRepo, createGitBackedSetupRepo, createGitBackedRealSetupRepo, escapeRegExp, createFakeManagedSetupScript, runWithUnclosedStdin, codexConfig, backupFiles, displayedBankReference, auditFixture, specsForAudit, parseConciseInFreshProcess };
+module.exports = { assert, fs, path, spawnSync, repoRoot, script, tmpRoot, isolatedHomeEnv, noHostMarkers, writeFile, createFakeCodexAppServer, run, runTestGit, createMinimalSetupRepo, createGitBackedSetupRepo, createGitBackedRealSetupRepo, escapeRegExp, createFakeManagedSetupScript, runWithUnclosedStdin, codexConfig, backupFiles, displayedBankReference, auditFixture, specsForAudit, parseConciseInFreshProcess };
