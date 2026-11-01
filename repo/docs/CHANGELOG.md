@@ -12,6 +12,12 @@
 
 - **Hook pack:** new rows for refused shell and expression-runner pushes, Codex pushes of the current branch with nested lane worktrees, and helper launches inside and outside a gate run. The evidence-store row now passes: its fixture gives another governed repository a cached binding that names the store, with a new row showing a same-named repository under another owner is still held. Fixtures can now set a gate role, nested worktrees with their own commits, a remote owner and a cached binding naming the store.
 
+## 3.41.2
+
+### Changed
+
+- **Projects post spacing:** every **[HH:MM] <zone> Update:** line, for example **[16:41] SGT Update:**, is its own paragraph with exactly one blank line before the next. Questions and labelled blocks take that same single blank line. The `&nbsp;` spacer line after Update lines is gone everywhere, in the Projects skill and the project instructions block.
+
 ## 3.41.1
 
 ### Fixed
