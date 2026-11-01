@@ -44,12 +44,42 @@
     },
     {
       "id": "MERGE.auto-yes-pinned",
-      "source": "task auto-merge G1: the owner's per-repository answer",
+      "source": "task auto-merge with no label: a head off the merge-authority list",
       "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "gh pr merge 5 --merge --match-head-commit {head}" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature", "task_auto_merge": "after-gates", "commits": [{ "files": { "README.md": "fixture\n" }, "message": "base" }, { "files": { "notes.md": "task change\n" }, "message": "task change" }] }, "owner_session": true },
+      "expect": { "decision": "allow" },
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.auto-yes-authority",
+      "source": "task auto-merge with no label: a head that changes the merge rules",
+      "kind": "hostile",
+      "hosts": ["claude", "codex"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "gh pr merge 5 --merge --match-head-commit {head}" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature", "task_auto_merge": "after-gates", "commits": [{ "files": { "README.md": "fixture\n" }, "message": "base" }, { "files": { ".github/workflows/ci.yml": "name: ci\n" }, "message": "loosen CI" }] }, "owner_session": true },
+      "expect": { "decision": "deny" },
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.auto-yes-connector-pinned",
+      "source": "task auto-merge with no label: a head off the merge-authority list",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "payload": { "tool_name": "mcp__github__merge_pull_request", "tool_input": { "owner": "toolkit-test-fixture", "repo": "hook-pack-fixture", "pullNumber": 5, "expectedHeadSha": "{head}", "merge_method": "merge" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature", "task_auto_merge": "after-gates", "commits": [{ "files": { "README.md": "fixture\n" }, "message": "base" }, { "files": { "notes.md": "task change\n" }, "message": "task change" }] }, "owner_session": true },
+      "expect": { "decision": "allow" },
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.auto-yes-unread-head",
+      "source": "task auto-merge with no label: a head this computer does not have",
+      "kind": "hostile",
       "hosts": ["claude", "codex"],
       "payload": { "tool_name": "Bash", "tool_input": { "command": "gh pr merge 5 --merge --match-head-commit 62405ebd4c27859d66036e18f13c856c645d366d" } },
       "fixture": { "repo": { "governance": "enabled", "branch": "feature", "task_auto_merge": "after-gates" }, "owner_session": true },
-      "expect": { "decision": "allow" },
+      "expect": { "decision": "deny" },
       "status": "pass"
     },
     {
@@ -107,18 +137,8 @@
       "source": "task auto-merge G1: the owner's per-repository answer",
       "kind": "state",
       "hosts": ["claude", "codex"],
-      "payload": { "tool_name": "Bash", "tool_input": { "command": "gh pr merge 5 --merge --match-head-commit 62405ebd4c27859d66036e18f13c856c645d366d" } },
-      "fixture": { "repo": { "governance": "enabled", "branch": "feature", "task_auto_merge": "after-gates" } },
-      "expect": { "decision": "deny" },
-      "status": "pass"
-    },
-    {
-      "id": "MERGE.auto-unenforced",
-      "source": "task auto-merge G1: the owner's per-repository answer",
-      "kind": "state",
-      "hosts": ["claude", "codex"],
-      "payload": { "tool_name": "Bash", "tool_input": { "command": "gh pr merge 5 --merge --match-head-commit 62405ebd4c27859d66036e18f13c856c645d366d" } },
-      "fixture": { "repo": { "governance": "enabled", "branch": "feature", "task_auto_merge": "unenforced" }, "owner_session": true },
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "gh pr merge 5 --merge --match-head-commit {head}" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature", "task_auto_merge": "after-gates", "commits": [{ "files": { "README.md": "fixture\n" }, "message": "base" }, { "files": { "notes.md": "task change\n" }, "message": "task change" }] } },
       "expect": { "decision": "deny" },
       "status": "pass"
     },
@@ -127,8 +147,8 @@
       "source": "task auto-merge G1: the owner's per-repository answer",
       "kind": "state",
       "hosts": ["claude", "codex"],
-      "payload": { "tool_name": "Bash", "tool_input": { "command": "gh pr merge 5 --merge --match-head-commit 62405ebd4c27859d66036e18f13c856c645d366d" } },
-      "fixture": { "repo": { "governance": "enabled", "branch": "feature", "task_auto_merge": "off" }, "owner_session": true },
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "gh pr merge 5 --merge --match-head-commit {head}" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature", "task_auto_merge": "off", "commits": [{ "files": { "README.md": "fixture\n" }, "message": "base" }, { "files": { "notes.md": "task change\n" }, "message": "task change" }] }, "owner_session": true },
       "expect": { "decision": "deny" },
       "status": "pass"
     },
@@ -163,31 +183,21 @@
       "status": "pass"
     },
     {
-      "id": "MERGE.owner-label-gh",
-      "source": "G2 on PR 708: task auto-merge route and shapes",
-      "kind": "hostile",
+      "id": "MERGE.old-label-gh",
+      "source": "task auto-merge with no label: the old label grants nothing, so naming it is not refused",
+      "kind": "benign",
       "hosts": ["claude", "codex"],
       "payload": { "tool_name": "Bash", "tool_input": { "command": "gh pr edit 5 --add-label toolkit-owner-merge" } },
       "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
-      "expect": { "decision": "deny" },
+      "expect": { "decision": "allow" },
       "status": "pass"
     },
     {
-      "id": "MERGE.owner-label-connector",
-      "source": "G2 on PR 708: task auto-merge route and shapes",
-      "kind": "hostile",
-      "hosts": ["claude", "codex"],
-      "payload": { "tool_name": "mcp__github__issue_write", "tool_input": { "method": "update", "owner": "toolkit-test-fixture", "repo": "hook-pack-fixture", "issue_number": 5, "labels": ["toolkit-owner-merge"] } },
-      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
-      "expect": { "decision": "deny" },
-      "status": "pass"
-    },
-    {
-      "id": "MERGE.owner-label-named-in-notes",
-      "source": "G2 on PR 708: task auto-merge route and shapes",
+      "id": "MERGE.old-label-connector",
+      "source": "task auto-merge with no label: the old label grants nothing, so naming it is not refused",
       "kind": "benign",
       "hosts": ["claude", "codex"],
-      "payload": { "tool_name": "mcp__notes__write_note", "tool_input": { "text": "Add the toolkit-owner-merge label in GitHub to merge this one." } },
+      "payload": { "tool_name": "mcp__github__issue_write", "tool_input": { "method": "update", "owner": "toolkit-test-fixture", "repo": "hook-pack-fixture", "issue_number": 5, "labels": ["toolkit-owner-merge"] } },
       "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
       "expect": { "decision": "allow" },
       "status": "pass"
@@ -197,8 +207,8 @@
       "source": "G2 recheck on PR 708: a yes read over a day ago",
       "kind": "state",
       "hosts": ["claude", "codex"],
-      "payload": { "tool_name": "Bash", "tool_input": { "command": "gh pr merge 5 --merge --match-head-commit 62405ebd4c27859d66036e18f13c856c645d366d" } },
-      "fixture": { "repo": { "governance": "enabled", "branch": "feature", "task_auto_merge": "after-gates-stale" }, "owner_session": true },
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "gh pr merge 5 --merge --match-head-commit {head}" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature", "task_auto_merge": "after-gates-stale", "commits": [{ "files": { "README.md": "fixture\n" }, "message": "base" }, { "files": { "notes.md": "task change\n" }, "message": "task change" }] }, "owner_session": true },
       "expect": { "decision": "deny" },
       "status": "pass"
     }

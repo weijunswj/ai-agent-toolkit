@@ -58,7 +58,7 @@
     "task_prs": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Whether finished task pull requests merge without the owner typing merge. Only the binding merged on the default branch counts, and a missing, unreadable or stale read counts as off. Rule-refresh pull requests and the always-manual list in the gate rules wait for the owner whatever this says.",
+      "description": "Whether finished task pull requests merge without the owner typing merge. Only the binding merged on the default branch counts, and a missing, unreadable or stale read counts as off. Pull requests that change the merge rules (the gate rules' task auto-merge list) wait for the owner's typed merge whatever this says.",
       "properties": {
         "auto_merge": { "enum": ["off", "after-gates"], "description": "off (the default): the owner types merge for each pull request. after-gates: the controller merges, merge commit and pinned head, once the gate rules' task auto-merge conditions hold on that head." }
       }
