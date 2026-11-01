@@ -127,6 +127,88 @@ test('apply shows state writes from the same pass on the parent without a second
   assert.equal(reconciler().run().summary, 'No changes', 'a PR link repair also updates the parent in the same pass');
 });
 
+test('an issue-scoped pass keeps every NOW task comment time and skips queued task comments', () => {
+  const outcomes = [423, 424, 425].map((issue, order) => ({ issue, name: `Task ${issue}`, class: 'COMMITTED', parent: 421, order }));
+  const { github, store, reconciler } = setup({ outcomes, issues: github => {
+    for (const outcome of outcomes) github.addIssue(outcome.issue, { parent: 421 });
+  } });
+  store.now = () => '2026-11-01T06:13:00Z';
+  reconciler().run({ apply: true });
+  for (const number of [423, 424]) store.mutate('child', number, { writer, parentDoc: store.read('parent', 421).doc,
+    change: doc => state.applyPatch('child', doc, { lifecycle: 'ACTIVE' }) });
+  comment(github, 423, 'First task update.', { createdAt: '2026-11-01T06:00:00Z' });
+  comment(github, 424, 'Second task update.', { createdAt: '2026-11-01T10:00:00Z' });
+  reconciler().run({ apply: true });
+  const parent = github.issues.get(421).body;
+  const sibling = '| Task 424 | - | #424 | - | NOW | IN PROGRESS | 2026-11-01 18:00 |';
+  assert.ok(parent.includes(sibling));
+  for (const apply of [false, true]) {
+    const start = github.calls.length;
+    const report = reconciler().run({ issue: 423, apply });
+    assert.equal(report.summary, 'No changes');
+    assert.deepEqual(report.writes, { state: 0, github: 0 });
+    const reads = github.calls.slice(start).filter(call => call.method === 'GET' && /\/comments\?/.test(call.path));
+    for (const number of [421, 423, 424]) assert.equal(reads.filter(call => call.path.includes(`/issues/${number}/comments?`)).length, 1, `#${number}'s comments are read once`);
+    assert.equal(reads.some(call => call.path.includes('/issues/425/comments?')), false, 'queued siblings need no comment fetch');
+  }
+  assert.equal(github.issues.get(421).body, parent);
+
+  comment(github, 423, 'A newer update.', { createdAt: '2026-11-01T11:00:00Z' });
+  const plan = reconciler().plan({ issue: 423 });
+  assert.ok(plan.effects.find(effect => effect.kind === 'replace_block' && effect.target.issue === 421).body.includes(sibling), 'the scoped plan keeps the sibling comment time');
+  const before = patchCount(github, 421);
+  assert.deepEqual(reconciler().run({ issue: 423, apply: true }).holds, []);
+  assert.ok(github.issues.get(421).body.includes(sibling), 'the scoped apply keeps the sibling comment time');
+  assert.equal(patchCount(github, 421) - before, 1);
+  assert.equal(reconciler().run({ issue: 423, apply: true }).summary, 'No changes');
+});
+
+test('recovering a PR link intent updates the NOW task time on the parent in the same pass', () => {
+  const outcomes = [{ issue: 423, class: 'COMMITTED', parent: 421, order: 1 }];
+  const { github, store, reconciler } = setup({ outcomes, issues: github => github.addIssue(423, { parent: 421 }) });
+  let minute = 0;
+  store.now = () => `2026-11-01T06:${String(minute += 1).padStart(2, '0')}:00Z`;
+  reconciler().run({ apply: true });
+  store.mutate('child', 423, { writer, parentDoc: store.read('parent', 421).doc,
+    change: doc => state.applyPatch('child', doc, { lifecycle: 'ACTIVE', candidate: { branch: 'feature' } }) });
+  github.addPr(540, { branch: 'feature', head: SHA_A, contexts: [green('validate')] });
+  reconciler().run({ apply: true });
+  assert.equal(reconciler().run().summary, 'No changes');
+
+  github.prs.get(540).body = 'Updated pull request details.';
+  const prPatches = patchCount(github, 540);
+  let failReadback = true;
+  github.intercept(call => {
+    if (failReadback && call.method === 'GET' && call.path.endsWith('/issues/540') && patchCount(github, 540) > prPatches) {
+      failReadback = false;
+      return { status: 502, json: { message: 'Bad gateway' } };
+    }
+    return undefined;
+  });
+  const interrupted = reconciler().run({ apply: true });
+  assert.ok(interrupted.holds.some(hold => hold.code === 'EFFECT_UNKNOWN' && hold.target === '#423'));
+  assert.equal(store.read('child', 423).doc.pending_effects[0].kind, 'replace_pr_nav');
+
+  const plan = reconciler().plan();
+  assert.deepEqual(plan.resolutions.map(entry => entry.outcome), ['DONE']);
+  assert.deepEqual(plan.effects.map(effect => [effect.kind, effect.target.issue]), [['replace_block', 421]], 'recovery alone schedules the parent refresh');
+  const before = patchCount(github, 421);
+  const recovered = reconciler().run({ apply: true });
+  assert.deepEqual(recovered.holds, []);
+  assert.deepEqual(recovered.recovered.map(entry => entry.outcome), ['DONE']);
+  const doc = store.read('child', 423).doc;
+  assert.deepEqual(doc.pending_effects, []);
+  const expected = new Date(Date.parse(doc.volatile.written_at) + 8 * 60 * 60 * 1000).toISOString().slice(0, 16).replace('T', ' ');
+  const parent = github.issues.get(421).body;
+  assert.ok(parent.includes(`| #423 | #540 | NOW | IN PROGRESS | ${expected} |`));
+  assert.equal(patchCount(github, 421) - before, 1, 'recovery edits the parent once');
+  assert.equal(patchCount(github, 540), prPatches + 1, 'the landed PR link write is not replayed');
+  const writes = { commits: github.commits, mutations: github.mutations() };
+  assert.equal(reconciler().run({ apply: true }).summary, 'No changes');
+  assert.equal(github.issues.get(421).body, parent);
+  assert.deepEqual({ commits: github.commits, mutations: github.mutations() }, writes);
+});
+
 test('a full apply finishes and settles while every branch read lags one commit behind', () => {
   const { github, reconciler } = setup();
   github.branchLag = true;

@@ -2880,6 +2880,10 @@ class Reconciler {
     });
     const references = untracked ? referencedIssues(this.reader.openPullRequests()) : new Map();
     const comments = new Map([parent.parent_issue, ...outcomes.map(outcome => outcome.issue)].filter(number => issues.get(number)).map(number => [number, this.reader.comments(number)]));
+    // Even an issue-scoped pass renders the whole parent, including every NOW task's comment time.
+    for (const outcome of parent.outcomes) {
+      if (!comments.has(outcome.issue) && graphClass(outcome, children.get(outcome.issue)?.doc) === 'NOW') comments.set(outcome.issue, this.reader.comments(outcome.issue));
+    }
     const prPages = new Map();
     for (const pr of prs.values()) if (pr && ['OPEN', 'DRAFT'].includes(pr.state)) prPages.set(pr.number, this.reader.issue(pr.number));
     return { issues, subIssues, blockedBy, prs, outcomes, journals, references, comments, prPages };
@@ -3112,7 +3116,7 @@ class Reconciler {
     effects.push({ kind: 'replace_pr_nav', target: { issue: number, pr: pr.number, digest: blockDigest(navBody) }, body: navBody });
   }
 
-  diffBlocks(parent, children, observed, only, effects, findings, holds, targetsOverride = null) {
+  diffBlocks(parent, children, observed, only, effects, findings, holds, targetsOverride = null, resolutions = []) {
     const blocks = this.renderAll(parent, children, observed.issues, observed.comments);
     const version = this.toolkitVersion || '0.0.0';
     const requested = targetsOverride || (only ? [only, parent.parent_issue] : [...blocks.keys()]);
@@ -3146,11 +3150,10 @@ class Reconciler {
       const topic = this.topicFor(parent, number, observed.issues);
       const traceBody = renderTraceBlockBody(number, traceEntries(comments, this.binding.record_prefix), this.binding.repository, topic);
       const traceCurrent = Boolean(traced.block) && normalizeBlockBody(traced.block.body) === normalizeBlockBody(traceBody) && !traced.block.tampered;
-      // Child effects write intent timestamps too, so plan the parent after those effects are known.
-      const timeWillChange = number === parent.parent_issue && effects.some(effect => {
-        const outcome = parent.outcomes.find(entry => entry.issue === effect.target.issue);
-        return outcome && graphClass(outcome, children.get(outcome.issue)) === 'NOW';
-      });
+      // New effects and settled intents write child timestamps, so the parent must follow both.
+      const timeWillChange = number === parent.parent_issue && parent.outcomes.some(outcome => graphClass(outcome, children.get(outcome.issue)) === 'NOW'
+        && (effects.some(effect => effect.target.issue === outcome.issue)
+          || resolutions.some(entry => entry.kind === 'child' && entry.number === outcome.issue && entry.outcome !== 'UNKNOWN')));
       // A current body at or over the threshold still moves its largest tag lists out.
       if (current && !move && traceCurrent && navCurrent && currentCurrent && !timeWillChange && issue.body.length < this.threshold) continue;
       if (!current || move) findings.push({ code: 'PROJECTION_STALE', issue: number, detail: !block ? 'no state block yet' : block.tampered ? 'the block was edited by hand' : current ? 'the block is not in its place on the page' : 'the block differs from the state documents' });
@@ -3228,7 +3231,7 @@ class Reconciler {
   // (a pass for one issue records none), and the inventory source when the pass carries an inventory.
   // When they change, the parent's CURRENT block is planned again with the new list, so the page
   // shows them after this pass.
-  planAttention(parent, projected, observed, only, override, inventory, effects, findings, holds) {
+  planAttention(parent, projected, observed, only, override, inventory, effects, findings, holds, resolutions = []) {
     const folds = [];
     if (!only && !override) folds.push({ source: 'reconcile', complete: true, seen: findings.filter(finding => ATTENTION.has(finding.code)).map(({ code, issue, head = null, since = null }) => ({ code, issue, head, ...(since ? { since } : {}) })), hold: this.oneTimeHolds(parent.attention, projected) });
     if (inventory) folds.push({ source: 'inventory', complete: inventory.complete, seen: inventory.findings });
@@ -3244,7 +3247,7 @@ class Reconciler {
     keep(effects, effect => ['replace_block', 'post_index_comment'].includes(effect.kind) && effect.target.issue === number);
     keep(findings, finding => finding.issue === number && blockFindings.has(finding.code));
     keep(holds, hold => hold.target === `#${number}` && ['BLOCK_NEWER_TOOLKIT', 'BODY_TOO_LARGE'].includes(hold.code));
-    this.diffBlocks({ ...parent, attention: next }, projected, observed, only, effects, findings, holds, [number]);
+    this.diffBlocks({ ...parent, attention: next }, projected, observed, only, effects, findings, holds, [number], resolutions);
   }
 
   plan({ issue: only = null, parentOverride = null, inventory = null } = {}) {
@@ -3285,14 +3288,14 @@ class Reconciler {
       copy.revision = existing ? existing.revision + (contentDigest(existing) === contentDigest(doc) ? 0 : 1) : 1;
       return [number, copy];
     }));
-    this.diffBlocks(parent, projected, observed, only, effects, findings, holds);
+    this.diffBlocks(parent, projected, observed, only, effects, findings, holds, null, resolutions);
     this.auditTraces(parent, observed, only, findings, effects);
     this.diffUntracked(parent, desiredDocs, observed, only, findings);
     const legacy = parent.outcomes.filter(outcome => LEGACY_CLASSES.includes(outcome.class) && (!only || outcome.issue === only));
     if (legacy.length) findings.push({ code: 'CLASS_LEGACY', issue: parent.parent_issue, patch: legacyMigrationPatch(parent),
       detail: `${legacy.map(outcome => `#${outcome.issue} ${outcome.class}`).join(', ')} read as COMMITTED and sort like any other task, by group, priority (order) and child number; to migrate, save this finding's patch (reconcile --json) and apply it whole with update-parent, which sets COMMITTED and renumbers order in the old CORE, HARDENING, LATER sequence` });
     if (!only) for (const tie of orderTies(parent, desiredDocs)) findings.push({ code: 'ORDER_TIE', issue: parent.parent_issue, detail: `${tie.map(outcome => `#${outcome.issue}`).join(', ')} share priority order ${tie[0].order}, so child number decides. Controller: set a distinct order with update-parent; if CLASS_LEGACY is reported too, migrate first, or set COMMITTED and the priority in one update-parent patch` });
-    this.planAttention(parent, projected, observed, only, Boolean(parentOverride), inventory, effects, findings, holds);
+    this.planAttention(parent, projected, observed, only, Boolean(parentOverride), inventory, effects, findings, holds, resolutions);
     for (const effect of effects) effect.text = describeEffect(effect);
     return { parent, parentSha: parentRead.sha, override: Boolean(parentRead.override), children, observed, findings, effects, holds, resolutions };
   }
