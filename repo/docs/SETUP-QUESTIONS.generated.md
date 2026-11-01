@@ -287,7 +287,7 @@ Setup run with `--host claude-code` shows this bank instead, for the same repres
 
 Toolkit setup choices - 11 questions across 3 sections
 
-Bank reference: 9BZ6-DGFK-G49K-R7KE
+Bank reference: 3N4J-RAFV-RJ93-JRX1
 
 Quick index
 
@@ -297,10 +297,10 @@ Quick index
 1.4 Report retention - Recommended: B - Keep current
 2.1 How should Claude Code use agents? - Recommended: A - Toolkit repos: main session + Toolkit planning and build helpers only. Elsewhere: one layer of subagents.
 3.1 Keep Toolkit available in Claude Code? - Recommended: A - Install or refresh
-3.2 Add Toolkit's recommended Claude Code setting: Hide AI credit in commits/PRs? - Recommended: A - Add
-3.3 Add Toolkit's recommended Claude Code setting: Let other sessions wake this one? - Recommended: A - Add
-3.4 Add Toolkit's recommended Claude Code setting: Ask before switching model on a flag? - Recommended: A - Add
-3.5 Add Toolkit's recommended Claude Code setting: Read AGENTS.md too? - Recommended: A - Add
+3.2 Claude Code setting: Hide AI credit in commits/PRs? - Recommended: A - Turn on
+3.3 Claude Code setting: Let other sessions wake this one? - Recommended: A - Turn on
+3.4 Claude Code setting: Ask before switching model on a flag? - Recommended: A - Turn on
+3.5 Claude Code setting: Read AGENTS.md too? - Recommended: A - Turn on
 3.6 Copy Toolkit's skills into Antigravity? - Recommended: B - Keep current
 
 
@@ -465,107 +465,107 @@ Quick index
 
 ---
 
-### 3.2 Add Toolkit's recommended Claude Code setting: Hide AI credit in commits/PRs?
+### 3.2 Claude Code setting: Hide AI credit in commits/PRs?
 
-**What this controls:** One value in your Claude Code user settings (settings.json in your Claude Code config folder): "attribution": false, so Claude Code adds no Co-Authored-By trailer, "Generated with Claude Code" line or claude.ai session link to your commits and pull requests (Claude Code 2.1.281 or later; earlier versions skip a settings file that holds it). If you set {"commit": "", "pr": "", "sessionUrl": false} yourself, that hides the same and counts as on. A value you set yourself is never changed.
+**What this controls:** One value in your Claude Code user settings (settings.json in your Claude Code config folder): "attribution": false, so Claude Code adds no Co-Authored-By trailer, "Generated with Claude Code" line or claude.ai session link to your commits and pull requests (Claude Code 2.1.281 or later; earlier versions skip a settings file that holds it). If you set {"commit": "", "pr": "", "sessionUrl": false} yourself, that hides the same and counts as on. Turn off removes this one setting whoever added it; the other settings are not touched.
 
-**Current:** No AI attribution in commits and pull requests: not set (Claude Code default).
+**Current:** No AI attribution in commits and pull requests: off (Claude Code default).
 
 **Verification:** state-derived
 
-**Recommended:** A - Add
+**Recommended:** A - Turn on
 
-**Recommended outcome:** Adds "attribution": false.
+**Recommended outcome:** Sets "attribution": false in settings.json.
 
 **Why:** It keeps AI attribution out of your commits and pull requests.
 
 **Choices:**
 
-- **A. Add** - Adds "attribution": false. Toolkit records a value it adds so it can remove it later.
-- **B. Remove Toolkit's value** - Removes this value only if Toolkit set it and it still matches what Toolkit recorded. A value you set yourself stays as it is.
-- **C. Keep current** - Preserve this effective behavior: No AI attribution in commits and pull requests: not set (Claude Code default).
+- **A. Turn on** - Sets "attribution": false in settings.json.
+- **B. Turn off** - Already off; nothing changes.
+- **C. Keep current** - Preserve this effective behavior: No AI attribution in commits and pull requests: off (Claude Code default).
 
 **After applying:** Start a new Claude Code session so it reads the changed settings.
 
-**Selected:** A - Add
+**Selected:** A - Turn on
 
 ---
 
-### 3.3 Add Toolkit's recommended Claude Code setting: Let other sessions wake this one?
+### 3.3 Claude Code setting: Let other sessions wake this one?
 
-**What this controls:** One value in your Claude Code user settings (settings.json in your Claude Code config folder): "crossSessionInbound": "accept", so messages from your other Claude sessions, such as a Claude Projects coordinator, wake this one. Messages still cannot approve actions or change settings. A value you set yourself is never changed.
+**What this controls:** One value in your Claude Code user settings (settings.json in your Claude Code config folder): "crossSessionInbound": "accept", so messages from your other Claude sessions, such as a Claude Projects coordinator, wake this one. Messages still cannot approve actions or change settings. Turn off removes this one setting whoever added it; the other settings are not touched.
 
-**Current:** Messages from your other Claude sessions wake this one: not set (Claude Code default).
+**Current:** Messages from your other Claude sessions wake this one: off (Claude Code default).
 
 **Verification:** state-derived
 
-**Recommended:** A - Add
+**Recommended:** A - Turn on
 
-**Recommended outcome:** Adds "crossSessionInbound": "accept".
+**Recommended outcome:** Sets "crossSessionInbound": "accept" in settings.json.
 
 **Why:** It lets a Projects coordinator wake Remote Control sessions on your computer.
 
 **Choices:**
 
-- **A. Add** - Adds "crossSessionInbound": "accept". Toolkit records a value it adds so it can remove it later.
-- **B. Remove Toolkit's value** - Removes this value only if Toolkit set it and it still matches what Toolkit recorded. A value you set yourself stays as it is.
-- **C. Keep current** - Preserve this effective behavior: Messages from your other Claude sessions wake this one: not set (Claude Code default).
+- **A. Turn on** - Sets "crossSessionInbound": "accept" in settings.json.
+- **B. Turn off** - Already off; nothing changes.
+- **C. Keep current** - Preserve this effective behavior: Messages from your other Claude sessions wake this one: off (Claude Code default).
 
 **After applying:** Start a new Claude Code session so it reads the changed settings.
 
-**Selected:** A - Add
+**Selected:** A - Turn on
 
 ---
 
-### 3.4 Add Toolkit's recommended Claude Code setting: Ask before switching model on a flag?
+### 3.4 Claude Code setting: Ask before switching model on a flag?
 
-**What this controls:** One value in your Claude Code user settings (settings.json in your Claude Code config folder): "switchModelsOnFlag": false, so Claude Code pauses and asks before switching models when a request is flagged. A value you set yourself is never changed.
+**What this controls:** One value in your Claude Code user settings (settings.json in your Claude Code config folder): "switchModelsOnFlag": false, so Claude Code pauses and asks before switching models when a request is flagged. Turn off removes this one setting whoever added it; the other settings are not touched.
 
-**Current:** Ask before switching models when a request is flagged: not set (Claude Code default).
+**Current:** Ask before switching models when a request is flagged: off (Claude Code default).
 
 **Verification:** state-derived
 
-**Recommended:** A - Add
+**Recommended:** A - Turn on
 
-**Recommended outcome:** Adds "switchModelsOnFlag": false.
+**Recommended outcome:** Sets "switchModelsOnFlag": false in settings.json.
 
 **Why:** It keeps a flagged request on the model you chose until you say otherwise.
 
 **Choices:**
 
-- **A. Add** - Adds "switchModelsOnFlag": false. Toolkit records a value it adds so it can remove it later.
-- **B. Remove Toolkit's value** - Removes this value only if Toolkit set it and it still matches what Toolkit recorded. A value you set yourself stays as it is.
-- **C. Keep current** - Preserve this effective behavior: Ask before switching models when a request is flagged: not set (Claude Code default).
+- **A. Turn on** - Sets "switchModelsOnFlag": false in settings.json.
+- **B. Turn off** - Already off; nothing changes.
+- **C. Keep current** - Preserve this effective behavior: Ask before switching models when a request is flagged: off (Claude Code default).
 
 **After applying:** Start a new Claude Code session so it reads the changed settings.
 
-**Selected:** A - Add
+**Selected:** A - Turn on
 
 ---
 
-### 3.5 Add Toolkit's recommended Claude Code setting: Read AGENTS.md too?
+### 3.5 Claude Code setting: Read AGENTS.md too?
 
-**What this controls:** One value in your Claude Code user settings (settings.json in your Claude Code config folder): Project instructions set to "claude-md-and-agents-md" (in pluginConfigs), so Claude Code reads AGENTS.md as well as CLAUDE.md (Claude Code 2.1.285 or later). A value you set yourself is never changed.
+**What this controls:** One value in your Claude Code user settings (settings.json in your Claude Code config folder): Project instructions set to "claude-md-and-agents-md" (in pluginConfigs), so Claude Code reads AGENTS.md as well as CLAUDE.md (Claude Code 2.1.285 or later). Turn off removes this one setting whoever added it; the other settings are not touched.
 
-**Current:** Read AGENTS.md as well as CLAUDE.md: not set (Claude Code default).
+**Current:** Read AGENTS.md as well as CLAUDE.md: off (Claude Code default).
 
 **Verification:** state-derived
 
-**Recommended:** A - Add
+**Recommended:** A - Turn on
 
-**Recommended outcome:** Adds "instructionFiles": "claude-md-and-agents-md".
+**Recommended outcome:** Sets "instructionFiles": "claude-md-and-agents-md" in settings.json.
 
 **Why:** It makes Claude Code read the repository's AGENTS.md.
 
 **Choices:**
 
-- **A. Add** - Adds "instructionFiles": "claude-md-and-agents-md". Toolkit records a value it adds so it can remove it later.
-- **B. Remove Toolkit's value** - Removes this value only if Toolkit set it and it still matches what Toolkit recorded. A value you set yourself stays as it is.
-- **C. Keep current** - Preserve this effective behavior: Read AGENTS.md as well as CLAUDE.md: not set (Claude Code default).
+- **A. Turn on** - Sets "instructionFiles": "claude-md-and-agents-md" in settings.json.
+- **B. Turn off** - Already off; nothing changes.
+- **C. Keep current** - Preserve this effective behavior: Read AGENTS.md as well as CLAUDE.md: off (Claude Code default).
 
 **After applying:** Start a new Claude Code session so it reads the changed settings.
 
-**Selected:** A - Add
+**Selected:** A - Turn on
 
 ---
 

@@ -784,38 +784,43 @@ test('Claude Code settings show one row per setting, recommend Keep current on e
   assert.equal(ids.includes('claude-recommended-settings'), false);
   const settings = settingRows();
   assert.deepEqual(settings.map((row) => row.title), [
-    "Add Toolkit's recommended Claude Code setting: Hide AI credit in commits/PRs?",
-    "Add Toolkit's recommended Claude Code setting: Let other sessions wake this one?",
-    "Add Toolkit's recommended Claude Code setting: Ask before switching model on a flag?",
-    "Add Toolkit's recommended Claude Code setting: Read AGENTS.md too?",
+    'Claude Code setting: Hide AI credit in commits/PRs?',
+    'Claude Code setting: Let other sessions wake this one?',
+    'Claude Code setting: Ask before switching model on a flag?',
+    'Claude Code setting: Read AGENTS.md too?',
   ]);
   assert.deepEqual(settings.map((row) => row.key), ['claudeSettingAttribution', 'claudeSettingCrossSessionInbound', 'claudeSettingSwitchModelsOnFlag', 'claudeSettingAgentsMd']);
   for (const row of settings) {
-    assert.deepEqual(row.choices.map((choice) => [choice.value, choice.label]), [['enable', 'Add'], ['disable', "Remove Toolkit's value"], ['keep', 'Keep current']], row.id);
+    assert.deepEqual(row.choices.map((choice) => [choice.value, choice.label]), [['enable', 'Turn on'], ['disable', 'Turn off'], ['keep', 'Keep current']], row.id);
     assert.equal(row.recommended, 'keep', row.id);
     assert.equal(row.folded_value, undefined, row.id);
     assert.equal(row.recommendation_reason, 'This setting already has a value, so Keep current leaves it as it is.', row.id);
+    assert.equal(row.choices[0].consequence, 'Already on; nothing changes.', row.id);
+    assert.match(row.whatThisControls, /Turn off removes this one setting whoever added it; the other settings are not touched\.$/, row.id);
   }
-  assert.match(core.renderSetupQuestionBank([settings[0]]), /\| C\. Keep current \| A\. Add<br>B\. Remove Toolkit's value \|/);
+  assert.match(core.renderSetupQuestionBank([settings[0]]), /\| C\. Keep current \| A\. Turn on<br>B\. Turn off \|/);
   // The Current column holds that one setting's state.
-  assert.deepEqual(settings.map((row) => row.current_short), ['On (Toolkit set it)', 'On (you set it)', 'On (Toolkit set it)', 'On (Toolkit set it)']);
+  assert.deepEqual(settings.map((row) => row.current_short), ['On (added by setup)', 'On (already in your settings)', 'On (added by setup)', 'On (added by setup)']);
+  assert.equal(settings[1].choices[1].consequence, 'Removes "crossSessionInbound" from settings.json, whoever added it, so Claude Code uses its default.');
+  assert.equal(settings[0].choices[1].consequence, 'Removes "attribution" from settings.json, whoever added it, so Claude Code uses its default. Claude Code then adds its Co-Authored-By trailer, Generated with Claude Code line and session link to your commits and pull requests again.');
 
   current.claudeSettings[1] = { id: 'cross-session-inbound', state: 'claude-default' };
   const leftOut = settingRows();
   assert.ok(leftOut.every((row) => row.recommended === 'keep'), 'one left out on purpose keeps every row on Keep current');
-  assert.equal(leftOut[1].recommendation_reason, '3 of the 4 recommended settings already have a value and this one does not, so it counts as left out on purpose. Pick Add to turn it on.');
-  assert.equal(leftOut[1].current_short, 'Not set (Claude Code default)');
+  assert.equal(leftOut[1].recommendation_reason, '3 of the 4 recommended settings already have a value and this one does not, so it counts as left out on purpose. Pick Turn on to turn it on.');
+  assert.equal(leftOut[1].current_short, 'Off (Claude Code default)');
+  assert.equal(leftOut[1].choices[1].consequence, 'Already off; nothing changes.');
 
   current.claudeSettings = current.claudeSettings.map((entry) => ({ id: entry.id, state: 'claude-default' }));
   const fresh = settingRows();
-  assert.ok(fresh.every((row) => row.recommended === 'enable'), 'none set yet recommends Add on every row');
+  assert.ok(fresh.every((row) => row.recommended === 'enable'), 'none set yet recommends Turn on on every row');
   assert.deepEqual(fresh.map((row) => row.recommendation_reason), [
     'It keeps AI attribution out of your commits and pull requests.',
     'It lets a Projects coordinator wake Remote Control sessions on your computer.',
     'It keeps a flagged request on the model you chose until you say otherwise.',
     "It makes Claude Code read the repository's AGENTS.md.",
   ]);
-  assert.equal(fresh[2].choices[0].consequence, 'Adds "switchModelsOnFlag": false. Toolkit records a value it adds so it can remove it later.');
+  assert.equal(fresh[2].choices[0].consequence, 'Sets "switchModelsOnFlag": false in settings.json.');
   for (const row of fresh) assert.deepEqual(row.choices.map((choice) => choice.value), ['enable', 'disable', 'keep'], row.id);
   for (const id of ['claude-agent-topology', 'claude-toolkit-plugin']) {
     const row = rows.find((spec) => spec.id === id);
@@ -824,7 +829,7 @@ test('Claude Code settings show one row per setting, recommend Keep current on e
   }
 });
 
-test('Claude Code setting rows tell a value you set to Toolkit\'s pick from a different one, count the full attribution object as on, and say Add has nothing to add', () => {
+test('Claude Code setting rows tell a value in your settings equal to Toolkit\'s pick from a different one, count the full attribution object as on, and say Turn on replaces a different value', () => {
   const current = stateWithManaged(managedState({ currentPath: '', exists: false, git: false }));
   current.agentProfile = { supported: true, topology: 'root-only' };
   current.nativePlugin = { status: 'fresh' };
@@ -837,19 +842,26 @@ test('Claude Code setting rows tell a value you set to Toolkit\'s pick from a di
   const rows = () => Object.fromEntries(core.setupQuestionSpecs(core.parseArgs(['--plan', '--host', 'claude-code']), current).map((spec) => [spec.id, spec]));
   const row = rows();
   const attribution = row['claude-setting-attribution'];
-  assert.equal(attribution.current_short, 'Different: you set true; Toolkit leaves it');
-  assert.equal(attribution.current, "No AI attribution in commits and pull requests: you set true instead of Toolkit's false; Toolkit leaves it.");
-  assert.equal(attribution.choices[0].consequence, 'Nothing to add: you set true, which Toolkit leaves as it is. Toolkit records a value it adds so it can remove it later.');
+  assert.equal(attribution.current_short, 'Different value in your settings: true');
+  assert.equal(attribution.current, "No AI attribution in commits and pull requests: different value in your settings: true (Toolkit's is false).");
+  assert.equal(attribution.choices[0].consequence, 'Replaces your true with false.');
   assert.match(attribution.whatThisControls, /\{"commit": "", "pr": "", "sessionUrl": false\} yourself, that hides the same and counts as on\./);
-  assert.equal(row['claude-setting-switch-models-on-flag'].current_short, 'Not set (Claude Code default)');
-  assert.equal(row['claude-setting-switch-models-on-flag'].choices[0].consequence, 'Adds "switchModelsOnFlag": false. Toolkit records a value it adds so it can remove it later.');
+  assert.equal(row['claude-setting-switch-models-on-flag'].current_short, 'Off (Claude Code default)');
+  assert.equal(row['claude-setting-switch-models-on-flag'].choices[0].consequence, 'Sets "switchModelsOnFlag": false in settings.json.');
   assert.equal(row['claude-setting-switch-models-on-flag'].recommended, 'keep');
 
   // The reader reports the full object form as matching, so the row shows it as on, whole.
   current.claudeSettings[0] = { id: 'attribution', label: 'No AI attribution in commits and pull requests', state: 'owner-value', value: { commit: '', pr: '', sessionUrl: false }, matches: true };
-  assert.equal(rows()['claude-setting-attribution'].current_short, 'On (you set it)');
+  assert.equal(rows()['claude-setting-attribution'].current_short, 'On (already in your settings)');
+  assert.equal(rows()['claude-setting-attribution'].choices[0].consequence, 'Already on; nothing changes.');
   current.claudeSettings[0] = { ...current.claudeSettings[0], value: { commit: '', pr: '' }, matches: false };
-  assert.equal(rows()['claude-setting-attribution'].current_short, 'Different: you set {"commit":"","pr":""}; Toolkit leaves it');
+  assert.equal(rows()['claude-setting-attribution'].current_short, 'Different value in your settings: {"commit":"","pr":""}');
+
+  // A parent entry that is not an object holds the row on both choices.
+  current.claudeSettings[3] = { id: 'agents-md', label: 'Read AGENTS.md as well as CLAUDE.md', state: 'owner-value', value: null, matches: false, blocked: true, detail: 'a parent entry is not an object' };
+  const blocked = rows()['claude-setting-agents-md'];
+  assert.equal(blocked.current_short, 'Cannot change: a parent entry is not an object');
+  for (const choice of blocked.choices.slice(0, 2)) assert.equal(choice.consequence, 'Nothing changes: setup cannot change this setting because a parent entry is not an object in settings.json.');
 
   // An unreadable file shows on every row and nothing is verified.
   current.claudeSettings = current.claudeSettings.map((entry) => ({ id: entry.id, label: entry.label, state: 'unreadable', detail: 'The Claude Code user settings file is not valid JSON.' }));
