@@ -464,3 +464,17 @@ test('independent lanes run side by side under the owner\'s lane cap', () => {
   assert.ok(read('repo/contracts/claude-projects/web-controller-projects/reference/setup.md').includes('Otherwise tell them once that the project runs 1 lane at a time, and that "lanes 3" changes it.'));
   assert.ok(read('repo/contracts/claude-projects/web-controller-projects/reference/instructions-sync.md').includes('the note adds: "This project now runs 1 lane at a time by default; say lanes N to change it."'));
 });
+
+// Task runs were invisible when the coordinator recycled: the skill now relays every run from its
+// home-thread line, stamps the relay, and catches up from the files on a new session's first wake.
+test('the coordinator relays every task run and catches up missed ones from the run stamps', () => {
+  const text = bundle();
+  const body = read('repo/contracts/claude-projects/web-controller-projects/project-instructions.md');
+  assert.ok(text.includes('- **Every task run reaches the project chat.** A run posts one line in its home thread'));
+  assert.ok(text.includes('overwrite `/mnt/project-files/toolkit/task-runs/<slug>.relayed` with `relayed <run UTC> at <UTC> | <post link>` and read it back; only you write that file'));
+  assert.ok(text.includes('- **Relay missed runs.** On the first wake of every coordinator session, and on every wake a task home thread starts'));
+  assert.ok(text.includes('one capped line in its home thread (first line and report path), with a capped short message to the coordinator with retry when that post fails'));
+  for (const prefix of ['`RELAY GAP`', '`UNRELAYED TASK RUNS`', '`LANES UNDER CAP`']) assert.ok(text.includes(prefix), prefix);
+  assert.doesNotMatch(text, /Report to the coordinator only/);
+  assert.ok(body.includes('Each run files its report and run stamp, then posts one line in its home thread.'));
+});

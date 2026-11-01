@@ -429,17 +429,43 @@ test('the check-in carries every prefix in the fixed order and checks both Toolk
     'toolkit-projects-guidebook.cjs --check /mnt/project-files/toolkit/web-controller-projects',
     'run it again with `--out` in place of `--check`', '"BLOCK CHANGED <version> | "', '"SKILL COPY FAILED: <reason> | "']) assert.ok(guidebook.includes(required), required);
   assert.match(nudge, /report BLOCK CHANGED only when this run printed it/);
-  assert.match(nudge, /plus steps 7, 8 and 9 \(and 5b when it applies\)/);
+  assert.match(nudge, /plus steps 7 to 11 \(and 5b when it applies\)/);
   assert.match(nudge, /CONTEXT RESET DUE \(weekly\)/);
   // Each task reports the other missing, so the coordinator recreates a deleted one.
   assert.ok(nudge.includes('is missing (no such trigger in list_triggers'), 'nudge sees a deleted check-in');
   assert.ok(rendered('daily-check-in').includes('is missing (no such trigger in list_triggers'), 'check-in sees a deleted nudge');
-  assert.match(nudge, /It runs silently: it never posts in its home thread except to report a failed delivery/);
+  assert.match(nudge, /Each run posts one line in its home thread \(DELIVERY\), and the coordinator relays it to the project chat\./);
+  assert.doesNotMatch(nudge, /It runs silently|read_project_chat \(limit 1\)/);
   for (const required of ['all three hold', 'Idleness is never a reason', 'Never list a task home thread', 'Unrelayed', 'Hidden reply',
     'state done', '"EXAMPLE: Daily check-in"', 'CHECK-IN NOT ARMED', 'limit 10', 'list all of them every run']) {
     assert.ok(nudge.includes(required), required);
   }
   assert.match(nudge, /not SUCCEEDED, or its home thread is resolved, start the first line with "CHECK-IN NOT ARMED/);
+});
+
+// Task runs once reported only to the coordinator by message, so a recycled coordinator dropped
+// them and the owner saw nothing. Each run now posts one line in its home thread and stamps a file
+// only it writes; the coordinator stamps the relay, and the nudge and check-in flag any gap. Any
+// template change already checks as outdated (the template-changed case above), so live prompts swap.
+test('every task run posts one home-thread line and stamps a run file the nudge and check-in watch', () => {
+  const stamps = { 'daily-check-in': 'example-daily-check-in', 'hourly-nudge': 'example-hourly-nudge', custom: 'example-sweep' };
+  for (const kind of Object.keys(stamps)) {
+    const text = rendered(kind);
+    for (const required of [`/mnt/project-files/toolkit/task-runs/${stamps[kind]}.md with one line`, `writes the matching ${stamps[kind]}.relayed`,
+      'Post exactly ONE message in this thread with mcp__hearthbot__post_message, at most about 300 characters', 'If that post fails, send ONE message with mcp__hearthbot__message_coordinator']) {
+      assert.ok(text.includes(required), `${kind}: ${required}`);
+    }
+  }
+  const nudge = rendered('hourly-nudge');
+  for (const required of ['10. Task runs (runs every time', 'every run more than 15 minutes old that is newer than its .relayed run time',
+    '"UNRELAYED TASK RUNS: <n> | "', '11. Lanes (runs every time', '"LANES UNDER CAP: <working> of <cap>, queue <n> | "', '**Lanes:**',
+    'no thread in list_threads other than this home thread has activity', 'page read_project_chat with limit 10 to its last page']) {
+    assert.ok(nudge.includes(required), required);
+  }
+  const checkIn = rendered('daily-check-in');
+  assert.ok(checkIn.includes('"RELAY GAP: <task name>[, <task name>] | "'));
+  assert.ok(checkIn.includes('advice: no home-thread line or run stamp; opt into the Toolkit shell (custom) to get both'));
+  assert.ok(checkIn.includes('TASKS OUTDATED, RELAY GAP, NUDGE NOT ARMED'));
 });
 
 test('memory check reads only the BINDING and SCHEDULED TASKS lines', () => {

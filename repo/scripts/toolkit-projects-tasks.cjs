@@ -111,6 +111,14 @@ function taskName(kind, params) {
   return `${params.project}: ${title}`;
 }
 
+// The run stamp's file name under task-runs/: the task name for a Toolkit task, and the project
+// plus its report folder for a custom one (whose name the prompt never carries), lower case with
+// every other run of characters as one hyphen.
+function taskSlug(kind, params) {
+  const source = KINDS[kind].title ? taskName(kind, params) : `${params.project} ${path.posix.basename(params.report_dir)}`;
+  return source.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+}
+
 // Template lines may start with a condition tag: [repo], [no-repo], [parent], [toolkit], [fresh], [bound], [raised].
 // [toolkit] is the project whose repo is the Toolkit repo itself.
 // Placeholders are {{name}}; an unknown placeholder or tag is a broken source.
@@ -119,6 +127,7 @@ function fill(template, kind, params) {
   const values = {
     ...params,
     task_name: KINDS[kind].title ? taskName(kind, params) : 'this task',
+    task_slug: taskSlug(kind, params),
     checkin_name: `${params.project}: ${KINDS['daily-check-in'].title}`,
     nudge_name: `${params.project}: ${KINDS['hourly-nudge'].title}`
   };
