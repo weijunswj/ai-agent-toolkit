@@ -280,7 +280,7 @@ test('Update source keep availability uses one verified preservation predicate',
   const custom = managedState();
   const customRow = updateSourceRow(custom);
   assert.equal(core.canPreserveManagedCheckout(stateWithManaged(custom), core.parseArgs(['--plan'])), true);
-  assert.deepEqual(customRow.choices.map((choice) => choice.value), ['default', 'keep', 'custom']);
+  assert.deepEqual(customRow.choices.map((choice) => choice.value), ['keep', 'default', 'custom']);
   assert.equal(customRow.recommended, 'default');
   assert.match(customRow.choices.find((choice) => choice.value === 'keep').consequence, /separate clean custom checkout/i);
 
@@ -1057,6 +1057,7 @@ test('both banks put Keep current first and keep the other choices in their orig
         assert.equal(core.resolveDisplayedChoiceAnswer(row, choice.presentation_ref), choice.value, row.id);
         assert.equal(core.resolveDisplayedChoiceAnswer(row, choice.value), choice.value, row.id);
       }
+      assert.equal(core.resolveDisplayedChoiceAnswer(row, ''), row.recommended, row.id);
     }
     assert.ok(specs.some((row) => row.id === 'antigravity-skills'));
     assert.ok(specs.filter((row) => /toolkit-plugin|claude-setting|antigravity-skills/.test(row.id)).every((row) => row.section === 'Toolkit in your coding apps'));
@@ -1099,10 +1100,14 @@ test('TTY all recommended and changed-only commands execute after exactly one co
 });
 
 test('TTY blank enters one-at-a-time mode and invalid answers are re-prompted', async () => {
-  const journey = await runInjectedTTY(['', 'Z', 'A', 'disable', 'enable', 'default', 'enable', 'keep', 'enable']);
+  // Keep current is A when available; use the recommendation's displayed letter.
+  const updateSource = core.setupQuestionSpecs(core.parseArgs(['--execute', '--host', 'codex']), injectedState()).find((row) => row.id === 'update-source');
+  const recommendedLetter = updateSource.presentation.recommended_choice_ref;
+  const journey = await runInjectedTTY(['', 'Z', recommendedLetter, 'disable', 'enable', 'default', 'enable', 'keep', 'enable']);
   assert.equal(journey.result.answer_source, 'interactive');
   assert.match(journey.prompts[0], /all recommended/);
   assert.match(journey.prompts[1], /1\.1 Update source/);
+  assert.ok(journey.prompts[1].includes(`Enter=${recommendedLetter}`));
   assert.match(journey.prompts[2], /1\.1 Update source/);
   assert.match(journey.prompts[3], /1\.2 Automatic updates/);
   assert.equal(journey.args.setupChoices.managedCheckout, 'default');
@@ -1112,7 +1117,8 @@ test('TTY blank enters one-at-a-time mode and invalid answers are re-prompted', 
 
 test('TTY one-at-a-time "all recommended" applies the recommendation to that question and the rest', async () => {
   const enters = await runInjectedTTY(['', ...Array(20).fill('')]);
-  const rest = await runInjectedTTY(['', 'A', 'disable', 'allrecommended.']);
+  const updateSource = core.setupQuestionSpecs(core.parseArgs(['--execute', '--host', 'codex']), injectedState()).find((row) => row.id === 'update-source');
+  const rest = await runInjectedTTY(['', updateSource.presentation.recommended_choice_ref, 'disable', 'allrecommended.']);
   assert.equal(rest.remaining.length, 0);
   assert.match(rest.prompts[1], /1\.1 Update source .*"all recommended" for the rest/);
   assert.equal(rest.prompts.length, 4, 'no question is asked after "all recommended"');
