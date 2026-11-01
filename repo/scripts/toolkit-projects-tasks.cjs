@@ -111,11 +111,10 @@ function taskName(kind, params) {
   return `${params.project}: ${title}`;
 }
 
-// The run stamp's file name under task-runs/: the task name for a Toolkit task, and the project
-// plus its report folder for a custom one (whose name the prompt never carries), lower case with
-// every other run of characters as one hyphen.
+// The run stamp's folder under task-runs/: the name slug for a Toolkit task, or custom- plus
+// the whole shared report path for a custom one (whose name the prompt never carries).
 function taskSlug(kind, params) {
-  const source = KINDS[kind].title ? taskName(kind, params) : `${params.project} ${path.posix.basename(params.report_dir)}`;
+  const source = KINDS[kind].title ? taskName(kind, params) : `custom-${params.report_dir.slice('/mnt/project-files/'.length)}`;
   return source.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 }
 

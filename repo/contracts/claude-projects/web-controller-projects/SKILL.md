@@ -118,7 +118,7 @@ Whenever the user asks for anything recurring (the daily check-in, a sweep, a re
 - **Moving a task or catching up:** a move to a time already passed today skips today's run unless it already ran today, so catch it up the same turn by messaging its home thread to run its prompt; never fire_trigger a bound task from another thread (it runs with no project tools, files or memory). Never catch up a task whose entry says `stopped by owner`. Details in `reference/recurring-tasks.md`.
 - On every coordinator turn, check that each recurring task is still armed with a future next run; re-arm a missed one before ending the turn, unless its entry says `stopped by owner`.
 - When a skill update changes what the daily check-in or hourly nudge does, update those tasks' prompts in the same turn (the swap above) and confirm each next run is armed, skipping a task whose entry says `stopped by owner`.
-- **Every task run reaches the project chat.** Relay each run's home-thread line there, stamp its `.relayed` file and, on a session's first wake, relay missed runs (**Task run relay** in `reference/recurring-tasks.md`).
+- **Every task run reaches the project chat.** Skip tasks marked `stopped by owner`; relay and catch up each unrelayed run by its own report and `.relayed` file (**Task run relay** in `reference/recurring-tasks.md`).
 
 
 ## Daily check-in
