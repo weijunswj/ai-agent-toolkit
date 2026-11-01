@@ -1,5 +1,23 @@
 # Toolkit Changelog
 
+## 3.31.1 (smaller Projects skill)
+
+### Changed
+
+- **Claude Projects controller skill fits a skill card again.** The skill's main file shrank from about 50 KB to about 41 KB, under the 48 KB a claude.ai skill card accepts. The detail for acting on check-in and nudge reports, refreshing the guidebook copy, device work and standing permission asks moved word for word into reference files beside it (`reference/periodic-runs.md`, `reference/guidebook.md`, `reference/device-work.md` and `reference/permission-asks.md`). The skill points to each one before the step that needs it, so no rule changed.
+- **No hand upload.** The install check no longer tells you to upload the Projects skill folder by hand. It offers a skill card when the file fits one, says when the file is too large for a card, and in every case notes that the coordinator reads the copy pulled from the repo, so a missed card changes nothing it does. An account copy with its own reference files still gets the card, which replaces only the main file.
+- **Size guard.** A test now keeps the skill's main file at or under 44,000 bytes, with the card's 48,000-byte body limit as a hard ceiling, and checks that every reference file the skill names exists.
+
+## 3.31.0 (Claude Code settings on and off)
+
+### Changed
+
+- The four Claude Code setting rows in setup now offer Turn on, Turn off and Keep current, and their titles read "Claude Code setting: <name>?".
+- Turn off removes that one setting from the Claude Code user settings file whoever added it, including the full attribution object form. Parent objects and the file itself are removed only when they end up empty and setup created them; the other settings are never touched.
+- Turn on sets Toolkit's value, replacing a different value already in the settings file. A value that already does what Toolkit's does is left as it is.
+- The Current column says where a value came from in plain words: On (added by setup), On (already in your settings), Different value in your settings, or Off (Claude Code default).
+- A setting whose parent entry is not an object is held unchanged on Turn on and Turn off, and the row says why.
+
 ## 3.30.2
 
 ### Fixed
