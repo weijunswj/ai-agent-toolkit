@@ -10,4 +10,3 @@ Title: hook review leftovers
 ### Tests
 
 - **Hook pack:** new rows for refused shell and expression-runner pushes, Codex pushes of the current branch with nested lane worktrees, and helper launches inside and outside a gate run. The evidence-store row now passes: its fixture gives another governed repository a cached binding that names the store, with a new row showing a same-named repository under another owner is still held. Fixtures can now set a gate role, nested worktrees with their own commits, a remote owner and a cached binding naming the store.
-
