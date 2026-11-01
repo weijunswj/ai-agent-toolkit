@@ -124,6 +124,21 @@ function ownerReply(prompt) { return ownerMessage(prompt).text; }
 // null for bare text; wrapped says the text came from a Projects envelope, and markup that bare text
 // carries tags (a relay, a reminder or another wrapped message), so it is not the user typing.
 const ANY_TAG = /<\/?[A-Za-z][\w-]*(?:\s[^<>]*)?\/?>/;
+// Decode only to detect frame markup, never to create an approval. Repeated encoding must not
+// hide a wrapper beside a valid approval line. Four passes bound the work on plain prompts.
+function hasFrameMarkup(text) {
+  let decoded = text;
+  for (let pass = 0; pass < 4; pass += 1) {
+    const next = decoded.replace(/&(amp|lt|gt|#\d+|#x[0-9a-f]+);/gi, (entity, name) => {
+      if (!name.startsWith('#')) return ({ amp: '&', lt: '<', gt: '>' })[name.toLowerCase()];
+      const point = name[1].toLowerCase() === 'x' ? parseInt(name.slice(2), 16) : Number(name.slice(1));
+      return point > 0 && point <= 0x10ffff && !(point >= 0xd800 && point <= 0xdfff) ? String.fromCodePoint(point) : entity;
+    });
+    if (next === decoded) break;
+    decoded = next;
+  }
+  return /<\/?(?:wake\b|[A-Za-z][\w-]*(?=[\s/>]|$))|&(?:lt|#0*60|#x0*3c);\/?[A-Za-z]/i.test(decoded);
+}
 // Whether a message is the user's own words that a reply ticket may be given for: the trigger
 // message of a Projects envelope from the person the session works for, or bare text with no tags
 // (a coordinator's relay, a reminder or a scheduled task is never one).
@@ -176,7 +191,8 @@ function ownerMessage(prompt) {
   const approvalEligible = wakeAttributes.reason === 'mention' && triggers[0].attributes.mention === 'true'
     && id !== null && /^[A-Za-z0-9_.:-]{1,256}$/.test(id)
     && !messages.some(message => message.attributes['has-attachments'] !== undefined)
-    && !body.includes('<attachment') && !/[<>]|&(?:#\w+|[a-z]+);/i.test(reply);
+    // Remaining non-tag entities are rejected per line by approvalsIn, preserving other lines.
+    && !body.includes('<attachment') && !/[<>]/.test(reply) && !hasFrameMarkup(reply);
   return { text: reply, id, sentAt: triggers[0].attributes['sent-at'] || null, wrapped: true, markup: false, approvalEligible };
 }
 // An agent's command that would answer for the user: the governance CLI script with a decision, or a
@@ -1674,6 +1690,7 @@ module.exports = Object.freeze({
   OK_ANSWER,
   ownerReply,
   ownerMessage,
+  hasFrameMarkup,
   SHORT_ANSWER,
   sessionIdOf,
   startSession,

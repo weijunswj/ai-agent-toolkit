@@ -123,9 +123,35 @@ test('relay, cited, historical, notification and malformed messages cannot grant
   assert.equal(decide(ctx, connector('merge_pull_request', { pullNumber: 618, expectedHeadSha: SHA })), null);
 });
 
+test('remaining entities discard only their approval line in plain and decoded Projects messages', (t) => {
+  const ctx = context(t);
+  const entities = ['&amp;', '&AMP;', '&copy;', '&NotEqualTilde;', '&unknown9;', '&#38;', '&#00038;', '&#x26;', '&#X26;', '&#x3B;', '&#0;', '&#99999999;'];
+  for (const [index, entity] of entities.entries()) {
+    const line = `merge owner/a#618 ${entity} owner/a#619`;
+    assert.deepEqual(hold.approvalsIn(line), [], entity);
+    assert.deepEqual(hold.approvalsIn(`${line}\nmerge owner/a#620`), [{ repository: 'owner/a', pr: 620, sha: null }], entity);
+    for (const wrapped of [false, true]) {
+      for (const mixed of [false, true]) {
+        const body = mixed ? `${line}\nmerge owner/a#620` : line;
+        const prompt = wrapped ? projects.wake(body, { id: `entity_${index}_${mixed}` }) : body;
+        assert.equal(typed(ctx, prompt), mixed ? 1 : 0, `${wrapped} ${mixed} ${entity}`);
+        const approvals = new hold.MergeApprovals(ctx.options);
+        for (const pr of [618, 619, 38, 26, 0]) assert.equal(approvals.find('owner/a', pr), null, `${entity} PR ${pr}`);
+        if (mixed) assert.equal(decide(ctx, connector('merge_pull_request', { pullNumber: 620, expectedHeadSha: SHA })), null);
+        if (fs.existsSync(ctx.file)) assert.deepEqual(JSON.parse(fs.readFileSync(ctx.file, 'utf8')).approvals, []);
+      }
+    }
+  }
+  // Literal ampersands and the reader's one decoding pass still allow an unambiguous list.
+  for (const prompt of ['merge owner/a#618 & owner/a#619', projects.wake('merge owner/a#618 & owner/a#619', { id: 'entity_once' })]) {
+    assert.equal(typed(ctx, prompt), 2);
+    for (const pr of [618, 619]) assert.equal(decide(ctx, connector('merge_pull_request', { pullNumber: pr, expectedHeadSha: SHA })), null);
+  }
+});
+
 test('plain prompts keep separate approval lines beside non-tag angle brackets and entities', (t) => {
   const ctx = context(t);
-  for (const text of ['Tests took < 2 seconds', 'Tests took > 2 seconds', 'Tests took &lt; 2 seconds', 'Tests took &gt; 2 seconds', 'Tests took &#60; 2 seconds', 'Tests took &#x3e; 2 seconds', 'Result: &#38;', 'Value <value?']) {
+  for (const text of ['Tests took < 2 seconds', 'Tests took > 2 seconds', 'Tests took &lt; 2 seconds', 'Tests took &gt; 2 seconds', 'Tests took &#60; 2 seconds', 'Tests took &#x3e; 2 seconds', 'Result: &#38;', 'Tests took &#38;lt; 2 seconds', 'Tests took &amp;#60; 2 seconds', 'Value <value?']) {
     assert.equal(typed(ctx, `${text}\nmerge owner/a#618`), 1, text);
     assert.equal(decide(ctx, connector('merge_pull_request', { pullNumber: 618, expectedHeadSha: SHA })), null);
   }
@@ -133,6 +159,17 @@ test('plain prompts keep separate approval lines beside non-tag angle brackets a
     assert.equal(typed(ctx, `merge owner/a#618 ${text}\nmerge owner/a#619`), 1, text);
     assert.equal(new hold.MergeApprovals(ctx.options).find('owner/a', 618), null, 'the angle-bracket line is still quoted');
     assert.equal(decide(ctx, connector('merge_pull_request', { pullNumber: 619, expectedHeadSha: SHA })), null);
+  }
+});
+
+test('repeatedly encoded wrappers refuse the whole plain prompt on either side of an approval', (t) => {
+  const ctx = context(t);
+  const frames = ['&#38;lt;relay&#38;gt;', '&amp;lt;relay&amp;gt;', '&AMP;#X3C;relay&AMP;#X3E;', '&#38;#60;relay&#38;#62;', '&#x26;#x3c;relay&#x26;#x3e;', '&#38;amp;lt;relay&#38;amp;gt;', '&amp;amp;amp;amp;lt;relay', '&#38;lt;wake?'];
+  for (const frame of frames) {
+    for (const prompt of [frame, `${frame}\nmerge owner/a#618`, `merge owner/a#618\n${frame}`]) {
+      assert.equal(typed(ctx, prompt), 0, prompt);
+      assert.equal(new hold.MergeApprovals(ctx.options).find('owner/a', 618), null);
+    }
   }
 });
 

@@ -3,6 +3,59 @@
   "family": "merge",
   "rows": [
     {
+      "id": "MERGE.remaining-entity-lines",
+      "source": "merge approval review: an entity must not supply a pull request number",
+      "kind": "state",
+      "hosts": ["claude", "codex"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}},
+        {"event":"UserPromptSubmit","payload":{"prompt":"merge owner/a#618 &#38; owner/a#619\nmerge owner/a#620"},"expect":{"decision":"allow"}},
+        {"payload":{"tool_name":"mcp__github__merge_pull_request","tool_input":{"repository_full_name":"toolkit-test-fixture/hook-pack-fixture","pr_number":38,"expected_head_sha":"{head}","merge_method":"merge"}},"expect":{"decision":"deny"}},
+        {"payload":{"tool_name":"mcp__github__merge_pull_request","tool_input":{"repository_full_name":"owner/a","pr_number":618,"expected_head_sha":"{head}","merge_method":"merge"}},"expect":{"decision":"deny"}},
+        {"payload":{"tool_name":"mcp__github__merge_pull_request","tool_input":{"repository_full_name":"owner/a","pr_number":619,"expected_head_sha":"{head}","merge_method":"merge"}},"expect":{"decision":"deny"}},
+        {"payload":{"tool_name":"mcp__github__merge_pull_request","tool_input":{"repository_full_name":"owner/a","pr_number":620,"expected_head_sha":"{head}","merge_method":"merge"}},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"mcp__github__merge_pull_request","tool_input":{"repository_full_name":"owner/a","pr_number":620,"expected_head_sha":"{head}","merge_method":"merge"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.projects-remaining-entity-lines",
+      "source": "merge approval review: a Projects body is decoded once and remaining entities invalidate only their line",
+      "kind": "state",
+      "hosts": ["claude", "codex"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}},
+        {"event":"UserPromptSubmit","payload":{"prompt":"<wake reason=\"mention\" current-time=\"{now}\"><project id=\"chan_example\" type=\"project\"><message trigger=\"true\" from=\"human\" trust=\"principal\" author-id=\"user_example\" id=\"cmsg_entity\" sent-at=\"{now}\" mention=\"true\">merge owner/a#618 &amp;#38; owner/a#619\nmerge owner/a#620</message></project></wake>"},"expect":{"decision":"allow"}},
+        {"payload":{"tool_name":"mcp__github__merge_pull_request","tool_input":{"repository_full_name":"toolkit-test-fixture/hook-pack-fixture","pr_number":38,"expected_head_sha":"{head}","merge_method":"merge"}},"expect":{"decision":"deny"}},
+        {"payload":{"tool_name":"mcp__github__merge_pull_request","tool_input":{"repository_full_name":"owner/a","pr_number":618,"expected_head_sha":"{head}","merge_method":"merge"}},"expect":{"decision":"deny"}},
+        {"payload":{"tool_name":"mcp__github__merge_pull_request","tool_input":{"repository_full_name":"owner/a","pr_number":619,"expected_head_sha":"{head}","merge_method":"merge"}},"expect":{"decision":"deny"}},
+        {"payload":{"tool_name":"mcp__github__merge_pull_request","tool_input":{"repository_full_name":"owner/a","pr_number":620,"expected_head_sha":"{head}","merge_method":"merge"}},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"mcp__github__merge_pull_request","tool_input":{"repository_full_name":"owner/a","pr_number":620,"expected_head_sha":"{head}","merge_method":"merge"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.repeated-encoded-wrapper",
+      "source": "merge approval review: repeated encoding must not hide a wrapper around approval text",
+      "kind": "state",
+      "hosts": ["claude", "codex"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}},
+        {"event":"UserPromptSubmit","payload":{"prompt":"&#38;lt;relay&#38;gt;\nmerge owner/a#618"},"expect":{"decision":"allow"}},
+        {"payload":{"tool_name":"mcp__github__merge_pull_request","tool_input":{"repository_full_name":"owner/a","pr_number":618,"expected_head_sha":"{head}","merge_method":"merge"}},"expect":{"decision":"deny"}},
+        {"event":"UserPromptSubmit","payload":{"prompt":"Tests took &#38;lt; 2 seconds\nmerge owner/a#619"},"expect":{"decision":"allow"}},
+        {"payload":{"tool_name":"mcp__github__merge_pull_request","tool_input":{"repository_full_name":"owner/a","pr_number":619,"expected_head_sha":"{head}","merge_method":"merge"}},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"mcp__github__merge_pull_request","tool_input":{"repository_full_name":"owner/a","pr_number":619,"expected_head_sha":"{head}","merge_method":"merge"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
       "id": "MERGE.plain-angle-brackets",
       "source": "merge approval review: non-tag angle brackets must not discard other lines",
       "kind": "state",
