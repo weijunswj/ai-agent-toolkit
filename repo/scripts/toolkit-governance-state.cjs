@@ -217,14 +217,12 @@ function readIdentity(cwd) {
   if (!root) return { root: null, valid: false, reason: 'no-git-root' };
   const configBytes = readSmallFile(gitConfigPath(root), GIT_CONFIG_READ_LIMIT, 'GIT_CONFIG_TOO_LARGE');
   const origins = configBytes ? gitConfigValues(configBytes.toString('utf8'), 'remote', 'origin', 'url') : [];
-  // Bind a shown question even when no origin is usable. Raw URLs stay out of question state.
-  const origin_digest = crypto.createHash('sha256').update(JSON.stringify(origins)).digest('hex');
-  if (origins.length === 0 || (origins.length === 1 && origins[0].trim() === '')) return { root, origin_digest, valid: false, reason: 'origin-missing' };
-  if (origins.length !== 1) return { root, origin_digest, valid: false, reason: 'origin-ambiguous' };
+  if (origins.length === 0 || (origins.length === 1 && origins[0].trim() === '')) return { root, valid: false, reason: 'origin-missing' };
+  if (origins.length !== 1) return { root, valid: false, reason: 'origin-ambiguous' };
   const remote = validateRemoteIdentity(origins[0]);
-  if (!remote.valid) return { root, origin_digest, valid: false, reason: 'origin-unsupported' };
+  if (!remote.valid) return { root, valid: false, reason: 'origin-unsupported' };
   return {
-    root, origin_digest, valid: true, reason: null, remote,
+    root, valid: true, reason: null, remote,
     repository_id: registry.repositoryIdForCanonicalRemote(remote.canonical),
     legacy_repository_ids: registry.legacyRepositoryIdsForCanonicalRemote(remote.canonical),
   };

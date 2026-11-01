@@ -41,7 +41,7 @@ const HOSTS = Object.freeze(['claude', 'codex']);
 const KINDS = Object.freeze(['benign', 'hostile', 'fault', 'update', 'state', 'parity']);
 const EVENTS = Object.freeze(['PreToolUse', 'PostToolUse', 'UserPromptSubmit', 'SessionStart']);
 const STATUSES = Object.freeze(['pass', 'known-bad']);
-const FAULTS = Object.freeze(['deleted-plugin-root', 'remove-file', 'throw-module', 'stall-module', 'bad-json', 'empty-input', 'unreadable-held-store', 'damaged-reply-store']);
+const FAULTS = Object.freeze(['deleted-plugin-root', 'remove-file', 'throw-module', 'stall-module', 'bad-json', 'empty-input']);
 const GOVERNANCE = Object.freeze(['enabled', 'undecided', 'none']);
 // App-local task answers in each fixture home; the stale variant ages only its governance binding.
 const TASK_AUTO_MERGE = Object.freeze(['after-gates', 'after-gates-stale', 'off', 'codex-only', 'claude-code-only', 'unreadable']);
@@ -115,9 +115,7 @@ function rowErrors(row) {
     if (!Array.isArray(row.steps) || row.steps.length < 1 || row.steps.length > 24) errors.push('steps must list 1 to 24 preceding hook events');
     else row.steps.forEach((step, index) => {
       if (!step || typeof step !== 'object' || Array.isArray(step)) { errors.push(`step ${index + 1} must be an object`); return; }
-      for (const key of Object.keys(step)) if (!['event', 'payload', 'expect', 'expect_by_host', 'note', 'add_github_origin', 'confirm_governance_no'].includes(key)) errors.push(`step ${index + 1} has unknown key ${key}`);
-      if (step.add_github_origin !== undefined && (step.add_github_origin !== true || row.fixture?.repo?.governance !== 'none')) errors.push(`step ${index + 1} add_github_origin requires true and a local-only fixture repository`);
-      if (step.confirm_governance_no !== undefined && (step.confirm_governance_no !== true || step.event !== 'UserPromptSubmit')) errors.push(`step ${index + 1} confirm_governance_no requires true on UserPromptSubmit`);
+      for (const key of Object.keys(step)) if (!['event', 'payload', 'expect', 'expect_by_host', 'note'].includes(key)) errors.push(`step ${index + 1} has unknown key ${key}`);
       const candidate = { id: row.id, source: row.source, hosts: row.hosts, kind: row.kind, status: 'pass',
         event: step.event, payload: step.payload, expect: step.expect, expect_by_host: step.expect_by_host, note: step.note };
       errors.push(...rowErrors(candidate).map(error => `step ${index + 1}: ${error}`));
@@ -131,8 +129,7 @@ function expectErrors(expect, label) {
   const errors = [];
   if (!['allow', 'deny'].includes(expect.decision)) errors.push(`${label}.decision must be allow or deny`);
   if (expect.reason !== undefined && (typeof expect.reason !== 'string' || !/^[a-z0-9.-]+(?::failure)?$/.test(expect.reason))) errors.push(`${label}.reason is a hook name (the script file name without .cjs), with :failure when the host blocked because the hook itself failed`);
-  if (expect.held_messages !== undefined && (!Number.isSafeInteger(expect.held_messages) || expect.held_messages < 0)) errors.push(`${label}.held_messages must be a non-negative integer`);
-  for (const key of Object.keys(expect)) if (!['decision', 'reason', 'held_messages'].includes(key)) errors.push(`${label} has unknown key ${key}`);
+  for (const key of Object.keys(expect)) if (!['decision', 'reason'].includes(key)) errors.push(`${label} has unknown key ${key}`);
   return errors;
 }
 
@@ -338,12 +335,6 @@ class Fixture {
 
   #git(cwd, args) { return git(cwd, args, { env: this.env }); }
 
-  // The one bounded fixture transition needed to test a local repository gaining a GitHub remote.
-  // It always targets this disposable work folder and a reserved fixture identity, never a URL
-  // supplied by a row or a live service. Hooks still may not mutate any fixture file themselves.
-  addGitHubOrigin() { this.#git(this.work, ['remote', 'add', 'origin', 'https://github.com/toolkit-test-fixture/remote-added.git']); }
-  resetOrigin() { this.#git(this.work, ['remote', 'remove', 'origin']); }
-
   #files(folder, files) {
     for (const [name, text] of Object.entries(files)) {
       const file = path.join(folder, ...name.split('/'));
@@ -447,8 +438,7 @@ function hookEnvironment(home) {
     env[key] = value;
   }
   return {
-    ...env, HOME: home, USERPROFILE: home, APPDATA: path.join(home, 'AppData', 'Roaming'), LOCALAPPDATA: path.join(home, 'AppData', 'Local'),
-    TOOLKIT_GOVERNANCE_OFFLINE: '1',
+    ...env, TOOLKIT_GOVERNANCE_OFFLINE: '1', HOME: home, USERPROFILE: home, APPDATA: path.join(home, 'AppData', 'Roaming'), LOCALAPPDATA: path.join(home, 'AppData', 'Local'),
     CLAUDE_CONFIG_DIR: path.join(home, '.claude'), CODEX_HOME: path.join(home, '.codex'),
     GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: path.join(home, '.gitconfig'), GIT_TERMINAL_PROMPT: '0',
   };
@@ -484,22 +474,12 @@ function stopTree(child) {
 // so what one host's hooks record there never reaches the other's.
 async function runRow(row, hosts, { roots, scratch }) {
   const fixture = new Fixture(fs.mkdtempSync(path.join(scratch, `${row.id}-`)), row.fixture);
-  // Fixed faults touch only this row's disposable home, never the computer's real state.
-  const state = path.join(fixture.home, '.ai-agent-toolkit', 'user-state');
-  if (row.fault?.type === 'unreadable-held-store') fs.mkdirSync(path.join(state, 'held-prompts.v1.json'), { recursive: true });
-  if (row.fault?.type === 'damaged-reply-store') {
-    fs.mkdirSync(state, { recursive: true });
-    fs.writeFileSync(path.join(state, 'governance-reply-tickets.v1.json'), '{broken');
-  }
   const pristine = path.join(fixture.dir, 'home-as-built');
   fs.cpSync(fixture.home, pristine, { recursive: true });
   const results = [];
   try {
     for (const [index, host] of hosts.entries()) {
-      if (index) {
-        fs.rmSync(fixture.home, { recursive: true, force: true }); fs.cpSync(pristine, fixture.home, { recursive: true });
-        if (row.steps?.some(step => step.add_github_origin)) fixture.resetOrigin();
-      }
+      if (index) { fs.rmSync(fixture.home, { recursive: true, force: true }); fs.cpSync(pristine, fixture.home, { recursive: true }); }
       let observed;
       try { observed = await runOnHost(row, host, fixture, roots); } catch (error) { observed = { decision: 'error', problems: [`the runner failed: ${error.message}`], failed: [] }; }
       results.push({ host, observed });
@@ -514,16 +494,8 @@ async function runOnHost(row, host, fixture, roots) {
   // Every event uses the real host matcher and process, sharing only this row's isolated home.
   // A mismatch in an earlier step fails the row, even if the final merge happens to be refused.
   for (const [index, step] of (row.steps || []).entries()) {
-    if (step.add_github_origin) fixture.addGitHubOrigin();
     const observed = await runOnHost({ ...row, steps: undefined, expect_by_host: undefined, ...step }, host, fixture, roots);
     if (!meets(step, host, observed)) return { ...observed, problems: [...observed.problems, `sequence step ${index + 1} did not meet its expectation`] };
-    // One bounded fixture action: use the actual hook-issued ticket to ask for confirmation of no.
-    // Run the candidate's answer CLI in this row's disposable home, including for revert proofs.
-    if (step.confirm_governance_no) {
-      if (!observed.governanceTicket) throw new Error('the preceding prompt did not issue a governance ticket');
-      const confirmed = spawnSync(process.execPath, [path.join(roots.base, 'repo', 'scripts', 'toolkit-governance-answer.cjs'), 'confirm-no', observed.governanceTicket], { env: fixture.env, cwd: fixture.work, encoding: 'utf8', windowsHide: true, timeout: DEFAULT_TIMEOUT_SECONDS * 1000 });
-      if (confirmed.status !== 0) throw new Error('the fixture could not ask for governance confirmation');
-    }
   }
   const pluginRoot = roots.forFault(row.fault);
   const event = row.event || 'PreToolUse';
@@ -534,30 +506,17 @@ async function runOnHost(row, host, fixture, roots) {
   const env = { ...fixture.env, ...(host === 'claude' ? { CLAUDE_PLUGIN_ROOT: pluginRoot, CLAUDE_PROJECT_DIR: fixture.work } : { PLUGIN_ROOT: pluginRoot }) };
   const before = fixture.snapshot();
   const decisions = [];
-  let governanceTicket;
   for (const hook of hooks) {
     const own = (hook.timeout || DEFAULT_TIMEOUT_SECONDS) * 1000;
     const timeout = row.fault?.type === 'stall-module' ? Math.min(own, STALL_TIMEOUT_MS) : own;
     const result = await startProcess({ file: shell.file, args: shell.args(hostCommand(host, hook, pluginRoot)), input, env, cwd: fixture.work, timeout });
     decisions.push(hookDecision(host, hook, result));
-    if (event === 'UserPromptSubmit' && result.status === 0) {
-      try { governanceTicket ||= / ANSWER ([0-9a-f]{32})\n/.exec(JSON.parse(result.stdout).hookSpecificOutput?.additionalContext || '')?.[1]; } catch { /* no valid ticket */ }
-    }
   }
   const problems = [];
-  const expect = row.expect_by_host?.[host] || row.expect;
-  if (expect.held_messages !== undefined) {
-    let held = 0;
-    try {
-      const data = JSON.parse(fs.readFileSync(path.join(fixture.home, '.ai-agent-toolkit', 'user-state', 'held-prompts.v1.json'), 'utf8'));
-      held = Object.values(data.repositories).reduce((count, list) => count + list.length, 0);
-    } catch (error) { if (error.code !== 'ENOENT') problems.push('the held-message count could not be read'); }
-    if (held !== expect.held_messages) problems.push(`${held} messages held, expected ${expect.held_messages}`);
-  }
   if (JSON.stringify(fixture.snapshot()) !== JSON.stringify(before)) problems.push('a fixture file changed');
   if (!hooks.length) problems.push(`no ${host} hook matches this call`);
   const deny = decisions.find(entry => entry.decision === 'deny');
-  return { decision: deny ? 'deny' : 'allow', reason: deny?.reason, text: deny ? deny.text : decisions.find(entry => entry.failed)?.text, failed: decisions.filter(entry => entry.failed).map(entry => entry.failed), problems, governanceTicket };
+  return { decision: deny ? 'deny' : 'allow', reason: deny?.reason, text: deny ? deny.text : decisions.find(entry => entry.failed)?.text, failed: decisions.filter(entry => entry.failed).map(entry => entry.failed), problems };
 }
 
 // The hosts a row is known to fail on (none for a passing row).

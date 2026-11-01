@@ -82,37 +82,33 @@ const oldCopy = folder => path.join(folder, OLD_FOLDER, 'governance.json');
 const writesNothingIn = folder => assert.equal(fs.existsSync(path.join(folder, OLD_FOLDER)), false, `nothing is written into ${folder}`);
 const registryBytes = ctx => (fs.existsSync(ctx.registryPath) ? fs.readFileSync(ctx.registryPath, 'utf8') : null);
 
-// G0 closure matrix: verdict x question location x actor/delivery. These use test registries only.
+// G0 closure matrix: held-repository verdict x actor/delivery. These use test registries only.
 const projects = require('./support/projects-approval.cjs');
 const hostile = require('./support/hostile-inputs.cjs');
 const replyTicket = result => (/ ANSWER ([0-9a-f]{32})\n/.exec(result.context || '') || [])[1];
-function answerFixture(t, local, reached) {
+function answerFixture(t, local) {
   const ctx = scratch(t);
   let clock = new Date();
   const now = () => clock;
   const target = gitRepo(ctx, 'target', { remote: local ? null : REMOTE });
-  const cwd = reached ? ctx.root : target;
+  const cwd = target;
   const options = { registryOptions: ctx.options, environment: {}, now };
   const start = (session = 'owner', source = 'startup', folder = cwd) => gate.startSession({ session_id: session, cwd: folder, source }, options);
   const prompts = environment => new gate.PromptHold({ ...options, environment: environment || {} });
   const say = (prompt, sessionId = 'owner', environment) => prompts(environment).decide({ cwd, prompt, sessionId });
   const ask = (session = 'owner') => {
-    if (reached) {
-      const result = new gate.ToolGate(options).decide({ cwd, session_id: session, tool_name: 'Bash', tool_input: { command: `git -C "${target}" status` } });
-      assert.ok(result.deny.includes(target));
-      assert.match(result.deny, /governance will be off|Turn on GitHub governance/);
-    } else assert.equal(say('', session).action, 'block');
+    assert.equal(say('', session).action, 'block');
     clock = new Date(clock.getTime() + 1);
   };
   start();
   return { ctx, target, cwd, options, start, say, ask, prompts, now, tick: ms => { clock = new Date(clock.getTime() + ms); } };
 }
 
-for (const local of [false, true]) for (const reached of [false, true]) {
-  const shape = `${local ? 'not-github' : 'github'} / ${reached ? 'reached folder' : 'held cwd'}`;
+for (const local of [false, true]) {
+  const shape = `${local ? 'not-github' : 'github'} / held cwd`;
   test(`closure answers: ${shape}`, t => {
     for (const answer of ['no', 'ur rec', 'confirm', 'bare']) {
-      const f = answerFixture(t, local, reached);
+      const f = answerFixture(t, local);
       f.ask();
       const result = f.say(answer === 'bare' ? 'no' : projects.wake(answer === 'confirm' ? 'probably your recommendation' : answer, { now: f.now }));
       assert.equal(result.action, 'pass', answer);
@@ -136,7 +132,7 @@ for (const local of [false, true]) for (const reached of [false, true]) {
   });
 
   test(`closure provenance and replay: ${shape}`, t => {
-    const f = answerFixture(t, local, reached);
+    const f = answerFixture(t, local);
     const initial = f.say(projects.wake('ur rec', { now: f.now }));
     assert.equal(replyTicket(initial), undefined, 'before the question there is no ticket');
     assert.equal(stateOf(f.ctx, f.target).state, 'UNDECIDED');
@@ -156,15 +152,13 @@ for (const local of [false, true]) for (const reached of [false, true]) {
       projects.wake('no', { at: new Date(f.now().getTime() - 2000).toISOString() }),
     ];
     for (const prompt of invalid) {
-      if (reached) f.ask();
       assert.equal(replyTicket(f.say(prompt)), undefined);
       assert.equal(stateOf(f.ctx, f.target).state, 'UNDECIDED');
     }
     for (const environment of [...gate.LAUNCHER_MARKERS.map(name => ({ [name]: 'fixture' })), { [gate.HOST_SESSION_VARIABLE]: 'another-run' }]) {
-      assert.equal(f.say(valid, 'owner', environment).action, reached ? 'pass' : 'block');
+      assert.equal(f.say(valid, 'owner', environment).action, 'block');
       assert.equal(stateOf(f.ctx, f.target).state, 'UNDECIDED');
     }
-    if (reached) f.ask();
     const reply = projects.wake('ur rec', { now: f.now });
     const ticket = replyTicket(f.say(reply));
     assert.ok(ticket);
@@ -172,7 +166,6 @@ for (const local of [false, true]) for (const reached of [false, true]) {
       assert.equal(f.prompts(environment).answerTicket(ticket, 'no').ok, false);
       assert.ok(new gate.ReplyTickets(f.options).peek(ticket, 'owner'), 'launched session never spends owner ticket');
     }
-    if (reached) f.ask();
     assert.equal(replyTicket(f.say(reply)), undefined);
     f.start('another'); f.ask('another');
     assert.equal(replyTicket(f.say(reply, 'another')), undefined, 'receipt shared across sessions');
@@ -184,128 +177,9 @@ for (const local of [false, true]) for (const reached of [false, true]) {
   });
 }
 
-test('reached replies never hold unrelated work, consume once and clear on resume', t => {
-  for (const local of [false, true]) for (const resume of [false, true]) {
-    const f = answerFixture(t, local, true);
-    assert.deepEqual(f.say('fix the parser'), { action: 'pass' });
-    f.ask();
-    if (resume) f.start('owner', 'resume');
-    const result = f.say('skip that repo and fix the parser');
-    assert.equal(result.action, 'pass');
-    if (!resume) assert.match(result.context, /about something else[\s\S]*carry on/);
-    assert.equal(new gate.HeldPrompts(f.options).question('owner'), null);
-    assert.equal(new gate.HeldPrompts(f.options).count(stateOf(f.ctx, f.target).repository_id), 0);
-    assert.deepEqual(f.say('a message containing <div class=a>'), { action: 'pass' });
-    assert.deepEqual(f.say('carry on'), { action: 'pass' });
-    assert.deepEqual(f.say('no'), { action: 'pass' }, 'consumed binding cannot answer again');
-    assert.equal(stateOf(f.ctx, f.target).state, 'UNDECIDED');
-    assert.equal(new gate.ToolGate(f.options).decide({ cwd: f.cwd, session_id: 'owner', tool_name: 'CronCreate', tool_input: { prompt: 'carry on' } }), null);
-    f.ask();
-    assert.equal(f.say('no').action, 'pass');
-    assert.equal(stateOf(f.ctx, f.target).state, 'DISABLED');
-  }
-});
-
-test('reached question stays with the first folder and success names it', t => {
-  const f = answerFixture(t, false, true); f.ask();
-  const other = gitRepo(f.ctx, 'other', { remote: 'https://github.com/example-owner/other.git' });
-  const refusal = new gate.ToolGate(f.options).decide({ cwd: f.cwd, session_id: 'owner', tool_name: 'Bash', tool_input: { command: `git -C "${other}" log` } });
-  assert.match(refusal.deny, /word for word[\s\S]*end your turn/);
-  assert.doesNotMatch(refusal.deny, /message held|Held messages/);
-  assert.equal(new gate.HeldPrompts(f.options).question('owner').root, f.target);
-  const result = f.say('yes');
-  assert.ok(result.context.includes(f.target));
-  assert.equal(stateOf(f.ctx, f.target).state, 'ENABLED');
-  assert.equal(stateOf(f.ctx, other).state, 'UNDECIDED');
-});
-
-test('reached confirmation cannot retarget its command to a newer question', t => {
-  for (const localA of [false, true]) for (const localB of [false, true]) for (const wording of [false, true]) {
-    const f = answerFixture(t, localA, true); f.ask();
-    const original = replyTicket(f.say('probably leave it off'));
-    assert.ok(original);
-    assert.equal(f.prompts().answerTicket(original, 'confirm-no').ok, true);
-    const other = gitRepo(f.ctx, 'other', { remote: localB ? null : 'https://github.com/example-owner/other.git' });
-    const refused = new gate.ToolGate(f.options).decide({ cwd: f.cwd, session_id: 'owner', tool_name: 'Bash', tool_input: { command: `git -C "${other}" log` } });
-    assert.ok(refused.deny.includes(other));
-    assert.equal(new gate.HeldPrompts(f.options).question('owner').root, other);
-    f.tick(1);
-    const result = f.say(wording ? projects.wake('go with your recommendation', { now: f.now }) : 'yes');
-    assert.equal(result.action, 'pass');
-    assert.equal(stateOf(f.ctx, f.target).state, 'UNDECIDED', 'A is never answered by the reply to B');
-    assert.equal(f.prompts().answerTicket(original, 'no').ok, false, 'A cannot reuse its spent ticket');
-    if (wording) {
-      assert.equal(stateOf(f.ctx, other).state, 'UNDECIDED', 'wording alone records nothing');
-      const ticket = replyTicket(result);
-      const entry = new gate.ReplyTickets(f.options).peek(ticket, 'owner');
-      assert.equal(entry.repositories[0].root, other);
-      assert.equal(entry.command, undefined, 'B does not inherit A\'s disable command');
-      assert.equal(f.prompts().answerTicket(ticket, 'yes').ok, true);
-    } else assert.equal(replyTicket(result), undefined, 'B\'s exact answer needs no confirmation ticket');
-    assert.equal(stateOf(f.ctx, other).state, localB ? 'DISABLED' : 'ENABLED');
-    assert.equal(stateOf(f.ctx, f.target).state, 'UNDECIDED');
-  }
-});
-
-test('scheduling in an unheld folder ends reached answers and confirmations', t => {
-  for (const local of [false, true]) for (const confirm of [false, true]) for (const tool_name of ['CronCreate', 'ScheduleWakeup', 'RemoteTrigger']) {
-    const f = answerFixture(t, local, true); f.ask();
-    if (confirm) {
-      const ticket = replyTicket(f.say('probably leave it off'));
-      assert.equal(f.prompts().answerTicket(ticket, 'confirm-no').ok, true);
-    }
-    assert.equal(new gate.ToolGate(f.options).decide({ cwd: f.cwd, session_id: 'owner', tool_name, tool_input: { prompt: 'yes' } }), null, 'scheduling remains allowed');
-    assert.deepEqual(f.say('yes'), { action: 'pass' }, 'a bare scheduled delivery cannot answer');
-    assert.equal(stateOf(f.ctx, f.target).state, 'UNDECIDED');
-    assert.deepEqual(f.say('fix the parser'), { action: 'pass' });
-    f.ask();
-    assert.equal(f.say('yes').action, 'pass', 'a fresh refusal can ask again');
-    assert.equal(stateOf(f.ctx, f.target).state, local ? 'DISABLED' : 'ENABLED');
-  }
-  for (const tool_name of ['CronCreate', 'ScheduleWakeup', 'RemoteTrigger']) {
-    const f = answerFixture(t, false, true); f.ask(); f.say('later');
-    assert.equal(new gate.ToolGate(f.options).decide({ cwd: f.cwd, session_id: 'owner', tool_name, tool_input: { prompt: 'yes' } }), null);
-    assert.deepEqual(f.say('yes'), { action: 'pass' });
-    assert.equal(new gate.ToolGate(f.options).decide({ cwd: f.cwd, session_id: 'owner', tool_name: 'Bash', tool_input: { command: `git -C "${f.target}" log` } }), null, 'scheduling does not re-hold work after later');
-    assert.equal(stateOf(f.ctx, f.target).state, 'UNDECIDED');
-  }
-  for (const store of ['held', 'tickets']) {
-    const f = answerFixture(t, false, true); f.ask();
-    if (store === 'tickets') assert.equal(f.prompts().answerTicket(replyTicket(f.say('probably leave it off')), 'confirm-no').ok, true);
-    const blocked = store === 'held' ? f.ctx.heldPath : path.join(path.dirname(f.ctx.registryPath), gate.TICKETS_BASENAME);
-    const rename = fs.renameSync;
-    fs.renameSync = (from, to) => {
-      if (to === blocked) throw Object.assign(new Error('fixture cancellation write refused'), { code: 'EACCES' });
-      return rename(from, to);
-    };
-    try {
-      assert.equal(new gate.ToolGate(f.options).decide({ cwd: f.cwd, session_id: 'owner', tool_name: 'CronCreate', tool_input: { prompt: 'yes' } }), null);
-    } finally { fs.renameSync = rename; }
-    assert.deepEqual(f.say('yes'), { action: 'pass' }, 'a failed cancellation cannot leave answering authority');
-    assert.equal(stateOf(f.ctx, f.target).state, 'UNDECIDED');
-  }
-});
-
-test('reached questions never redirect prompts from a decided or later cwd into a hold', t => {
-  for (const answer of ['no', 'later']) {
-    const f = answerFixture(t, false, true);
-    const cwd = gitRepo(f.ctx, 'own', { remote: 'https://github.com/example-owner/own.git' });
-    const say = prompt => f.prompts().decide({ cwd, prompt, sessionId: 'owner' });
-    assert.equal(say('prepare work').action, 'block');
-    assert.equal(say(answer).action, 'pass');
-    const refusal = new gate.ToolGate(f.options).decide({ cwd, session_id: 'owner', tool_name: 'Bash', tool_input: { command: `git -C "${f.target}" log` } });
-    assert.ok(refusal.deny);
-    assert.equal(say('skip that repo and fix the parser').action, 'pass');
-    assert.equal(say('fix <div class=a>').action, 'pass');
-    assert.equal(new gate.HeldPrompts(f.options).count(stateOf(f.ctx, f.target).repository_id), 0);
-    assert.equal(new gate.HeldPrompts(f.options).question('owner'), null);
-    assert.equal(stateOf(f.ctx, f.target).state, 'UNDECIDED');
-  }
-});
-
-test('bare exact answers work with damaged receipts in both folder shapes', t => {
-  for (const local of [false, true]) for (const reached of [false, true]) for (const answer of ['no', 'toolkit governance disable']) {
-    const f = answerFixture(t, local, reached); f.ask();
+test('bare exact answers work with damaged receipts in either held repository kind', t => {
+  for (const local of [false, true]) for (const answer of ['no', 'toolkit governance disable']) {
+    const f = answerFixture(t, local); f.ask();
     const file = path.join(path.dirname(f.ctx.registryPath), gate.TICKETS_BASENAME);
     fs.writeFileSync(file, '{broken');
     assert.equal(f.say(answer).action, 'pass');
@@ -314,51 +188,8 @@ test('bare exact answers work with damaged receipts in both folder shapes', t =>
   }
 });
 
-test('both host hooks refuse reaching calls from a plain cwd with an unreadable held store', t => {
-  for (const host of ['claude', 'codex']) for (const local of [false, true]) {
-    const f = answerFixture(t, local, true);
-    fs.mkdirSync(f.ctx.heldPath, { recursive: true });
-    const epoch = new gate.SessionEpochs(f.options).get('owner');
-    const env = { ...process.env, HOME: path.join(f.ctx.root, 'home'), USERPROFILE: path.join(f.ctx.root, 'home') };
-    delete env.CLAUDE_CODE_REMOTE;
-    for (const key of [...gate.LAUNCHER_MARKERS, gate.HOST_SESSION_VARIABLE]) delete env[key];
-    const payload = { hook_event_name: 'PreToolUse', cwd: f.cwd, session_id: 'owner', tool_name: 'Bash', tool_input: { command: `git -C "${f.target}" commit -m example` } };
-    const args = host === 'claude' ? ['toolkit-governance-hook.cjs', '--event', 'PreToolUse'] : ['toolkit-codex-helper-hook.cjs'];
-    const run = childProcess.spawnSync(process.execPath, [path.join(scripts, args[0]), ...args.slice(1)], { env, input: JSON.stringify(payload), encoding: 'utf8', windowsHide: true });
-    assert.equal(run.status, host === 'claude' ? 0 : 2, run.stderr);
-    const decision = JSON.parse(run.stdout).hookSpecificOutput;
-    assert.equal(decision.permissionDecision, 'deny');
-    assert.match(decision.permissionDecisionReason, /answer could not be bound/);
-    assert.equal(new gate.SessionEpochs(f.options).get('owner'), epoch);
-    assert.equal(f.say('unrelated work').action, 'pass');
-    assert.equal(stateOf(f.ctx, f.target).state, 'UNDECIDED');
-  }
-});
-
-test('remote-added save failures refuse without changing run marks', t => {
-  for (const failure of ['read', 'write', 'readback']) {
-    const f = answerFixture(t, true, false); f.ask(); f.say('ok');
-    git(f.target, ['remote', 'add', 'origin', REMOTE]);
-    const epoch = new gate.SessionEpochs(f.options).get('owner');
-    const { readFileSync, renameSync } = fs;
-    let written = false;
-    try {
-      fs.renameSync = (from, to) => {
-        if (to === f.ctx.heldPath && failure === 'write') throw Object.assign(new Error(), { code: 'EPERM' });
-        const result = renameSync(from, to); if (to === f.ctx.heldPath) written = true; return result;
-      };
-      fs.readFileSync = (file, ...args) => {
-        if (file === f.ctx.heldPath && (failure === 'read' || failure === 'readback' && written)) throw Object.assign(new Error(), { code: 'EIO' });
-        return readFileSync(file, ...args);
-      };
-      assert.match(new gate.ToolGate(f.options).decide({ cwd: f.cwd, session_id: 'owner', tool_name: 'Bash', tool_input: { command: 'git status' } }).deny, /answer could not be bound/);
-    } finally { fs.readFileSync = readFileSync; fs.renameSync = renameSync; }
-    assert.equal(new gate.SessionEpochs(f.options).get('owner'), epoch);
-  }
-});
-
 test('governance retains receipts through the allowed clock skew', t => {
-  const f = answerFixture(t, false, true);
+  const f = answerFixture(t, false);
   const store = new gate.ReplyTickets(f.options);
   const delivery = gate.ownerMessage(projects.wake('no', { id: 'clock-skew-replay', at: new Date(f.now().getTime() + 110000).toISOString() }));
   assert.equal(store.acceptDelivery(delivery, null), true);
@@ -368,13 +199,26 @@ test('governance retains receipts through the allowed clock skew', t => {
   assert.equal(store.acceptDelivery(delivery, null), false, 'delivery is expired once the receipt can expire');
 });
 
+test('Projects full answers after later still reject deliveries from before the question', t => {
+  const f = answerFixture(t, false);
+  const earlier = new Date(f.now().getTime() - 2000).toISOString();
+  f.ask();
+  assert.equal(f.say('later').action, 'pass');
+  assert.equal(fs.existsSync(f.ctx.heldPath), false, 'later returns the held messages');
+  const stale = f.say(projects.wake('toolkit governance enable', { at: earlier }));
+  assert.equal(stale.action, 'block');
+  assert.equal(stateOf(f.ctx, f.target).state, 'UNDECIDED');
+  assert.equal(f.say(projects.wake('toolkit governance enable', { now: f.now })).action, 'pass');
+  assert.equal(stateOf(f.ctx, f.target).state, 'ENABLED');
+});
+
 test('closure hostile reader: wrapped authority refuses hostile free-text quoting and shell shapes outside its frame', () => {
   hostile.expectDefaultDeny(assert, text => gate.ownerMessage(`${projects.wake('no')}\n${text}`).approvalEligible,
     hostile.cases(['free-text', 'quoting', 'continued-lines'], ['text', 'shell']));
 });
 
 test('closure off-only tickets, state conversion, capacity, missing marks and failed persistence', t => {
-  const f = answerFixture(t, true, false);
+  const f = answerFixture(t, true);
   f.ask();
   const ticket = replyTicket(f.say('ur rec'));
   const off = f.prompts().answerTicket(ticket, 'yes');
@@ -383,7 +227,7 @@ test('closure off-only tickets, state conversion, capacity, missing marks and fa
   assert.doesNotMatch(off.text, /their answer \(yes\)/);
   assert.equal(stateOf(f.ctx, f.target).rule, 'R8');
   assert.equal(registryBytes(f.ctx), null);
-  const g = answerFixture(t, false, true);
+  const g = answerFixture(t, false);
   g.ask();
   const file = path.join(path.dirname(g.ctx.registryPath), gate.TICKETS_BASENAME);
   fs.writeFileSync(file, JSON.stringify({ schema: 'toolkit.governance-reply-tickets.v1', sessions: {}, used: ['spent-before-conversion'] }));
@@ -396,7 +240,7 @@ test('closure off-only tickets, state conversion, capacity, missing marks and fa
   fs.writeFileSync(file, JSON.stringify(converted));
   g.tick(1);
   g.ask();
-  assert.match(g.say(projects.wake('no', { now: g.now })).context, /store is full[\s\S]*receipts to expire/);
+  assert.match(g.say(projects.wake('no', { now: g.now })).reason, /store is full[\s\S]*receipts to expire/);
   assert.equal(stateOf(g.ctx, g.target).state, 'UNDECIDED');
   assert.equal(JSON.parse(fs.readFileSync(file)).deliveries.length, 4096);
   const intact = fs.readFileSync(file);
@@ -408,7 +252,7 @@ test('closure off-only tickets, state conversion, capacity, missing marks and fa
   fs.writeFileSync(file, intact);
   const { renameSync, readFileSync } = fs;
   for (const failure of ['write', 'readback']) {
-    const fresh = answerFixture(t, false, false); fresh.ask();
+    const fresh = answerFixture(t, false); fresh.ask();
     const dest = path.join(path.dirname(fresh.ctx.registryPath), gate.TICKETS_BASENAME);
     try {
       if (failure === 'write') fs.renameSync = (from, to) => { if (to === dest) throw Object.assign(new Error(), { code: 'EPERM' }); return renameSync(from, to); };
@@ -417,7 +261,7 @@ test('closure off-only tickets, state conversion, capacity, missing marks and fa
       assert.equal(stateOf(fresh.ctx, fresh.target).state, 'UNDECIDED');
     } finally { fs.renameSync = renameSync; fs.readFileSync = readFileSync; }
   }
-  const unmarked = answerFixture(t, false, true);
+  const unmarked = answerFixture(t, false);
   unmarked.ask('missing-session');
   assert.equal(replyTicket(unmarked.say(projects.wake('ur rec', { now: unmarked.now }), 'missing-session')), undefined);
   assert.equal(stateOf(unmarked.ctx, unmarked.target).state, 'UNDECIDED');
@@ -425,7 +269,7 @@ test('closure off-only tickets, state conversion, capacity, missing marks and fa
 
 test('closure stale question bindings: resume, repository mark, changed origin and decision elsewhere', t => {
   for (const local of [false, true]) for (const change of ['resume', 'mark', 'origin', 'elsewhere']) {
-    const f = answerFixture(t, local, true); f.ask();
+    const f = answerFixture(t, local); f.ask();
     const ticket = replyTicket(f.say('ur rec'));
     if (change === 'resume') f.start('owner', 'resume');
     if (change === 'mark') f.start('other', 'startup', f.target);
@@ -434,38 +278,28 @@ test('closure stale question bindings: resume, repository mark, changed origin a
     assert.equal(f.prompts().answerTicket(ticket, 'no').ok, false, `${local} ${change}`);
     const before = stateOf(f.ctx, f.target).state;
     const reply = f.say(projects.wake('no', { now: f.now }));
-    assert.equal(reply.action, 'pass', 'an unheld folder never blocks a stale reply');
+    assert.equal(reply.action, change === 'elsewhere' ? 'pass' : 'block');
     assert.equal(stateOf(f.ctx, f.target).state, before, `${local} ${change}: stale question cannot decide`);
   }
 });
 
 test('closure remote flip: an acknowledgement never answers the new github.com question', t => {
-  for (const reached of [false, true]) {
-    const f = answerFixture(t, true, reached);
-    assert.equal(f.say('no').action, reached ? 'pass' : 'block');
-    f.ask();
-    assert.equal(f.say('ok').action, 'pass');
-    git(f.target, ['remote', 'add', 'origin', 'https://github.com/example-owner/new-origin.git']);
-    if (reached) {
-      assert.equal(f.say('no').action, 'pass');
-      assert.equal(stateOf(f.ctx, f.target).state, 'UNDECIDED');
-      f.ask();
-      assert.equal(f.say('no').action, 'pass');
-      assert.equal(stateOf(f.ctx, f.target).state, 'DISABLED');
-      continue;
-    }
-    const first = f.say('no');
-    assert.equal(first.action, 'block');
-    assert.match(first.reason, /adding the GitHub origin remote/);
-    assert.equal(stateOf(f.ctx, f.target).state, 'UNDECIDED');
-    assert.equal(f.say('no').action, 'pass');
-    assert.equal(stateOf(f.ctx, f.target).state, 'DISABLED');
-  }
+  const f = answerFixture(t, true);
+  assert.equal(f.say('no').action, 'block');
+  f.ask();
+  assert.equal(f.say('ok').action, 'pass');
+  git(f.target, ['remote', 'add', 'origin', 'https://github.com/example-owner/new-origin.git']);
+  const first = f.say('no');
+  assert.equal(first.action, 'block');
+  assert.match(first.reason, /adding the GitHub origin remote/);
+  assert.equal(stateOf(f.ctx, f.target).state, 'UNDECIDED');
+  assert.equal(f.say('no').action, 'pass');
+  assert.equal(stateOf(f.ctx, f.target).state, 'DISABLED');
 });
 
 test('closure exact deliveries: before the question and across targets they grant no renewed authority', t => {
   for (const local of [false, true]) {
-    const f = answerFixture(t, local, true);
+    const f = answerFixture(t, local);
     const early = projects.wake('no', { at: new Date(f.now().getTime() - 1000).toISOString() });
     f.say(early);
     f.ask();
@@ -476,61 +310,35 @@ test('closure exact deliveries: before the question and across targets they gran
     assert.equal(f.say(answer).action, 'pass');
     assert.equal(stateOf(f.ctx, f.target).state, 'DISABLED');
     const other = gitRepo(f.ctx, 'second', { remote: local ? null : 'https://github.com/example-owner/second.git' });
-    new gate.ToolGate(f.options).decide({ cwd: f.cwd, session_id: 'owner', tool_name: 'Bash', tool_input: { command: `git -C "${other}" status` } });
+    f.prompts().decide({ cwd: other, sessionId: 'owner', prompt: 'prepare work' });
     // Preserve the spent id but give it a fresh delivery time to isolate the replay check.
     f.tick(1);
     const id = gate.ownerMessage(answer).id;
-    f.say(projects.wake('no', { id, now: f.now }));
+    f.prompts().decide({ cwd: other, sessionId: 'owner', prompt: projects.wake('no', { id, now: f.now }) });
     assert.equal(stateOf(f.ctx, other).state, 'UNDECIDED');
   }
 });
 
 test('closure remote flip through PreToolUse explains the new question in the same folder', t => {
   for (const tool_name of ['Bash', 'AskUserQuestion']) {
-    const f = answerFixture(t, true, false); f.ask();
+    const f = answerFixture(t, true); f.ask();
     f.say('ok');
     git(f.target, ['remote', 'add', 'origin', 'https://github.com/example-owner/added-by-tool.git']);
     const refusal = new gate.ToolGate(f.options).decide({ cwd: f.cwd, session_id: 'owner', tool_name, tool_input: tool_name === 'Bash' ? { command: 'git status' } : structuredClone(gate.PICKER_INPUT) });
     assert.match(refusal.deny, /adding the GitHub origin remote/);
-    assert.ok(refusal.deny.includes(f.target));
     assert.match(refusal.deny, /Turn on GitHub governance/);
     assert.equal(stateOf(f.ctx, f.target).state, 'UNDECIDED');
     f.tick(1);
+    assert.equal(fs.existsSync(f.ctx.heldPath), false, 'the tool refusal does not create question state');
+    assert.equal(f.say('no').action, 'block', 'the new question must first be shown in this folder');
     assert.equal(f.say(projects.wake('no', { now: f.now })).action, 'pass');
     assert.equal(stateOf(f.ctx, f.target).state, 'DISABLED');
   }
 });
 
-test('closure failed question read-back never leaves a usable binding for an unseen question', t => {
-  const f = answerFixture(t, false, true);
-  const epoch = new gate.SessionEpochs(f.options).get('owner');
-  const other = gitRepo(f.ctx, 'later', { remote: 'https://github.com/example-owner/later.git' });
-  f.prompts().decide({ cwd: other, sessionId: 'owner', prompt: 'prepare work' });
-  assert.equal(f.prompts().decide({ cwd: other, sessionId: 'owner', prompt: 'later' }).action, 'pass');
-  const keptTicket = new gate.ReplyTickets(f.options).issue('owner', epoch, []);
-  const laterPath = path.join(path.dirname(f.ctx.registryPath), gate.NOT_NOW_BASENAME);
-  const later = fs.readFileSync(laterPath, 'utf8');
-  const { readFileSync, renameSync } = fs;
-  let written = false;
-  try {
-    fs.renameSync = (from, to) => { const result = renameSync(from, to); if (to === f.ctx.heldPath) written = true; return result; };
-    fs.readFileSync = (name, ...args) => { if (written && name === f.ctx.heldPath) throw Object.assign(new Error(), { code: 'EIO' }); return readFileSync(name, ...args); };
-    const refusal = new gate.ToolGate(f.options).decide({ cwd: f.cwd, session_id: 'owner', tool_name: 'Bash', tool_input: { command: `git -C "${f.target}" status` } });
-    assert.match(refusal.deny, /answer could not be bound/);
-    assert.equal(new gate.SessionEpochs(f.options).get('owner'), epoch);
-  } finally { fs.readFileSync = readFileSync; fs.renameSync = renameSync; }
-  assert.ok(new gate.ReplyTickets(f.options).peek(keptTicket, 'owner'));
-  assert.equal(fs.readFileSync(laterPath, 'utf8'), later);
-  assert.equal(f.say('no').action, 'pass', 'the failed question cannot decide or hold an unrelated folder');
-  assert.equal(stateOf(f.ctx, f.target).state, 'UNDECIDED');
-  f.ask();
-  assert.equal(f.say('no').action, 'pass', 'only a reply after that shown question can decide');
-  assert.equal(stateOf(f.ctx, f.target).state, 'DISABLED');
-});
-
 test('closure confirmation delivery must follow the confirmation question itself', t => {
   for (const local of [false, true]) {
-    const f = answerFixture(t, local, true); f.ask();
+    const f = answerFixture(t, local); f.ask();
     const earlier = f.now().toISOString();
     const ticket = replyTicket(f.say('probably your recommendation'));
     f.tick(1000);
@@ -547,37 +355,34 @@ test('closure confirmation delivery must follow the confirmation question itself
   }
 });
 
-test('closure conversion preserves held text and spent ids while fresh bare answers still work', t => {
-  for (const local of [false, true]) for (const reached of [false, true]) {
-    const f = answerFixture(t, local, reached); f.ask();
-    const current = JSON.parse(fs.readFileSync(f.ctx.heldPath));
-    const question = current.questions[0];
+test('receipt conversion preserves held messages, live tickets and confirmations', t => {
+  for (const local of [false, true]) for (const confirmation of [false, true]) {
+    const f = answerFixture(t, local); f.ask();
+    const held = fs.readFileSync(f.ctx.heldPath, 'utf8');
+    assert.equal(JSON.parse(held).schema, 'toolkit.held-prompts.v1');
+    assert.equal(Object.hasOwn(JSON.parse(held), 'questions'), false);
+    const ticket = 'a'.repeat(32);
+    const epoch = new gate.SessionEpochs(f.options).get('owner');
     const id = stateOf(f.ctx, f.target).repository_id;
-    fs.writeFileSync(f.ctx.heldPath, JSON.stringify({ schema: 'toolkit.held-prompts.v1', repositories: { [id]: [{
-      text: 'old owner request', at: f.now().toISOString(), session_id: 'owner', epoch: question.epoch,
-      repository_mark: question.mark, root: f.target,
-    }] } }));
+    const entry = { epoch, at: f.now().toISOString(), repositories: [{ id, root: f.target, mark: new gate.SessionEpochs(f.options).repository(id), reason: local ? 'not-github' : 'undecided' }],
+      ...(confirmation ? { pending: 'disable' } : { hash: crypto.createHash('sha256').update(ticket).digest('hex'), message: 'spent-old-id' }) };
     const file = path.join(path.dirname(f.ctx.registryPath), gate.TICKETS_BASENAME);
-    fs.writeFileSync(file, JSON.stringify({ schema: 'toolkit.governance-reply-tickets.v1', used: ['spent-old-id'], sessions: {
-      owner: { pending: 'disable', epoch: question.epoch, at: f.now().toISOString(), repositories: [{ id, root: f.target, mark: question.mark }] },
-    } }));
-    const before = f.say('yes');
-    assert.equal(before.action, reached ? 'pass' : 'block', 'an unheld parent stays ordinary until a new refusal asks its one target question');
-    assert.equal(replyTicket(before), undefined, 'old held messages never attest a newly bound question');
-    assert.equal(stateOf(f.ctx, f.target).state, 'UNDECIDED');
-    if (reached) f.ask();
-    const answer = f.say('yes');
-    assert.equal(answer.action, 'pass', 'a fresh bare answer after the shown question keeps its existing route');
-    assert.match(answer.context, /old owner request/);
-    assert.equal(stateOf(f.ctx, f.target).state, local ? 'DISABLED' : 'ENABLED');
-    const converted = JSON.parse(fs.readFileSync(file));
-    assert.ok(converted.converted_at);
-    assert.equal(converted.deliveries[0].id, crypto.createHash('sha256').update('spent-old-id').digest('hex'));
+    fs.writeFileSync(file, JSON.stringify({ schema: 'toolkit.governance-reply-tickets.v1', used: ['spent-old-id'], sessions: { owner: entry } }));
     const store = new gate.ReplyTickets(f.options);
+    assert.ok(confirmation ? store.pending('owner', epoch) : store.peek(ticket, 'owner'));
+    const converted = JSON.parse(fs.readFileSync(file));
+    assert.equal(fs.readFileSync(f.ctx.heldPath, 'utf8'), held, 'no held-store conversion');
+    assert.equal(converted.deliveries[0].id, crypto.createHash('sha256').update('spent-old-id').digest('hex'));
+    assert.doesNotMatch(fs.readFileSync(file, 'utf8'), /spent-old-id/);
     assert.equal(store.acceptDelivery(gate.ownerMessage(projects.wake('no', { id: 'spent-old-id', now: f.now })), 0), false);
-    assert.equal(store.acceptDelivery(gate.ownerMessage(projects.wake('no', { id: 'previously-evicted-id', at: new Date(Date.parse(converted.converted_at) - 1).toISOString() })), 0), false);
+    assert.equal(store.acceptDelivery(gate.ownerMessage(projects.wake('no', { id: 'evicted-old-id', at: new Date(Date.parse(converted.converted_at) - 1).toISOString() })), 0), false);
     f.tick(1);
-    assert.equal(store.acceptDelivery(gate.ownerMessage(projects.wake('no', { now: f.now })), 0), true, 'fresh wrapped replies also survive conversion');
+    if (confirmation) {
+      const bound = boundOf(f.say(projects.wake('yes', { now: f.now })).context);
+      assert.equal(bound.word, 'no');
+      assert.equal(f.prompts().answerTicket(bound.ticket, 'no').ok, true);
+    } else assert.equal(f.prompts().answerTicket(ticket, 'no').ok, true);
+    assert.equal(stateOf(f.ctx, f.target).state, 'DISABLED');
   }
 });
 
@@ -642,7 +447,7 @@ test('H-04: the answer is recorded in the user-state files only, nothing is writ
   writesNothingIn(repo);
   assert.equal(fs.existsSync(path.join(repo, '.gitignore')), false, 'the root .gitignore is never created');
   assert.equal(git(repo, ['status', '--porcelain', '--untracked-files=all']).split('\n').filter(Boolean).join('|'), '', 'git status stays clean');
-  assert.deepEqual(JSON.parse(fs.readFileSync(ctx.heldPath)).repositories, {}, 'held owner text is deleted after replay; question metadata stays separate');
+  assert.equal(fs.existsSync(ctx.heldPath), false, 'the held file is deleted when empty');
   assert.deepEqual(hold(ctx).decide({ cwd: repo, prompt: 'next request' }), { action: 'pass' });
 });
 
@@ -863,7 +668,7 @@ test('a real thread reply with the host\'s system note answers in the repository
   }
 });
 
-test('from a parent folder: a refusal asks this run about one named repository, and its answer decides only that target', (t) => {
+test('from a parent folder: a command or edit in a held repository is refused, and nothing is asked or answered from there', (t) => {
   const ctx = scratch(t);
   const parent = path.join(ctx.root, 'GitHub');
   fs.mkdirSync(parent);
@@ -878,19 +683,21 @@ test('from a parent folder: a refusal asks this run about one named repository, 
   const prompts = () => new gate.PromptHold({ registryOptions: ctx.options, environment: {} });
   const [siteA, siteB] = [site('site-a'), site('site-b')];
   gate.startSession({ session_id: 'parent', cwd: parent, source: 'startup' }, { registryOptions: ctx.options });
-  const WORKS = /this command works in a repository that is waiting for the user's governance answer \([^\n]+\), so it is refused\.[\s\S]*Answer here for this one folder:/;
+  const WORKS = /this command works in a repository that is waiting for the user's governance answer, so it is refused\. Ask the user to answer in that repository's own chat first/;
   for (const command of [`git -C "${siteA}" status; Get-Content "${path.join(siteB, 'README.md')}"`, `git -C "${siteA}" status`, `cd "${siteB}"; git status`]) {
     const denied = reach('parent', command)?.deny || '';
     assert.match(denied, WORKS, command);
     assert.ok(denied.endsWith(gate.NEVER_OWNER), command);
   }
-  assert.match(new gate.ToolGate({ registryOptions: ctx.options }).decide({ tool_name: 'Write', cwd: parent, session_id: 'parent', tool_input: { file_path: path.join(siteA, 'index.php') } })?.deny || '', /this edit is in a repository that is waiting for the user's governance answer/);
-  // The first live question remains site-a, even after reaching site-b. Only site-a is answered.
-  assert.equal(new gate.HeldPrompts({ registryOptions: ctx.options }).count(stateOf(ctx, siteA).repository_id), 0, 'agent commands are never held owner text');
-  assert.equal(prompts().decide({ cwd: parent, prompt: 'no', sessionId: 'parent' }).action, 'pass');
-  assert.equal(stateOf(ctx, siteA).state, 'DISABLED');
+  assert.match(new gate.ToolGate({ registryOptions: ctx.options }).decide({ tool_name: 'Write', cwd: parent, session_id: 'parent', tool_input: { file_path: path.join(siteA, 'index.php') } })?.deny || '', /this edit is in a repository that is waiting/);
+  // A reply in the parent folder is an ordinary message there: it answers nothing for either repository.
+  for (const reply of ['no', 'yes', 'toolkit governance disable', REAL_THREAD_WAKE('yes')]) {
+    assert.deepEqual(prompts().decide({ cwd: parent, prompt: reply, sessionId: 'parent' }), { action: 'pass' }, reply);
+  }
+  assert.equal(stateOf(ctx, siteA).state, 'UNDECIDED');
   assert.equal(stateOf(ctx, siteB).state, 'UNDECIDED');
-  // Once that one repository is decided, its command runs from the parent folder.
+  // Once a repository is decided in its own chat, the command runs from the parent folder.
+  gate.writeGovernanceDecision(siteA, 'enable', { registryOptions: ctx.options });
   assert.equal(reach('parent', `git -C "${siteA}" status`), null);
   writesNothingIn(siteA); writesNothingIn(siteB);
 });
@@ -1044,16 +851,13 @@ test('reply tickets: only the exact answer command runs; newest only, half-hour 
   // Nothing recorded (the repository was decided elsewhere first) is a failure, and the script says so.
   const moved = site('moved');
   start('m', moved);
-  // Scheduling is held only in the held folder; the plain parent remains usable in either session.
-  for (const tool_name of ['CronCreate', 'ScheduleWakeup', 'RemoteTrigger']) {
-    prompts().decide({ cwd: moved, prompt: 'first', sessionId: 'm' });
-    assert.match(toolGate().decide({ tool_name, cwd: moved, session_id: 'm', tool_input: { prompt: 'yes' } })?.deny || '', /no prompt is scheduled for the rest of this run, unless the user answers it/, tool_name);
-    assert.equal(toolGate().decide({ tool_name, cwd: parent, session_id: 'm', tool_input: { prompt: 'yes' } }), null, tool_name);
-    assert.equal(toolGate().decide({ tool_name, cwd: parent, session_id: 'free', tool_input: { prompt: 'yes' } }), null, tool_name);
-  }
-  // The plain-folder schedules ended each opportunity. Ask again for the separate decided-elsewhere check.
   prompts().decide({ cwd: moved, prompt: 'first', sessionId: 'm' });
   const late = ticketOf(prompts().decide({ cwd: moved, prompt: 'leave it off', sessionId: 'm' }).context);
+  // While the question and ticket are open, no prompt is scheduled for the session; another session schedules freely.
+  for (const tool_name of ['CronCreate', 'ScheduleWakeup', 'RemoteTrigger']) {
+    assert.match(toolGate().decide({ tool_name, cwd: parent, session_id: 'm', tool_input: { prompt: 'yes' } })?.deny || '', /no prompt is scheduled for the rest of this run, unless the user answers it/, tool_name);
+    assert.equal(toolGate().decide({ tool_name, cwd: parent, session_id: 'free', tool_input: { prompt: 'yes' } }), null, tool_name);
+  }
   gate.writeGovernanceDecision(moved, 'enable', { registryOptions: ctx.options });
   const none = prompts().answerTicket(late, 'no');
   assert.equal(none.ok, false);
@@ -1226,14 +1030,14 @@ test('confirmations: the reply records only the answer that was confirmed, and s
   say('left', 'go', leftover);
   assert.equal(prompts().answerTicket(ticketOf(say('left', 'hmm', leftover).context), 'confirm-no').ok, true);
   const cron = () => toolGate().decide({ tool_name: 'CronCreate', cwd: parent, session_id: 'left', tool_input: { prompt: 'check later' } });
-  assert.equal(cron(), null, 'a confirmation elsewhere does not hold scheduling in the plain folder');
+  assert.ok(cron()?.deny, 'refused while the confirmation is open');
   start('left', leftover, 'resume');
   assert.equal(cron(), null, 'a new run is not held up by the old confirmation');
   const resumedHold = say('left', 'carry on', leftover);
   assert.equal(resumedHold.action, 'block');
   assert.match(resumedHold.reason, /^Toolkit: this session was resumed[^\n]*\nToolkit: message held\. Turn on GitHub governance/);
   assert.equal(prompts().answerTicket(ticketOf(say('left', 'hmm', leftover).context), 'confirm-no').ok, true);
-  assert.equal(cron(), null, 'plain-folder scheduling continues while confirmation is open elsewhere');
+  assert.ok(cron()?.deny);
   gate.writeGovernanceDecision(leftover, 'enable', { registryOptions: ctx.options });
   assert.equal(cron(), null, 'decided elsewhere: the confirmation is over');
 
@@ -1287,9 +1091,7 @@ test('after "not now": the full answer still decides, and a short reply is an or
   const repo = gitRepo(ctx, 'after-not-now-launcher', { remote: 'https://github.com/example-owner/after-not-now-launcher.git' });
   hold(ctx).decide({ cwd: repo, prompt: 'go', sessionId: 's1' });
   hold(ctx).decide({ cwd: repo, prompt: 'not now', sessionId: 's1' });
-  const launched = hold(ctx, { TOOLKIT_GATE_ROLE: 'G1' }).decide({ cwd: repo, prompt: 'toolkit governance enable', sessionId: 's1' });
-  assert.equal(launched.action, 'pass', 'later leaves this cwd unheld');
-  assert.match(launched.context, /automated session cannot answer/);
+  assert.match(hold(ctx, { TOOLKIT_GATE_ROLE: 'G1' }).decide({ cwd: repo, prompt: 'toolkit governance enable', sessionId: 's1' }).reason, /automated session cannot answer/);
   assert.equal(stateOf(ctx, repo).state, 'UNDECIDED');
   assert.match(gate.sessionLine(repo, { registryOptions: ctx.options, sessionId: 's1' }), /send `toolkit governance enable` or `toolkit governance disable` as a message/);
 });
