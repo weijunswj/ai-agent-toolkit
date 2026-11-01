@@ -57,23 +57,30 @@ function defineClaudeSetup({ CLAUDE_HOOK_TRUST_ACTION, SUBAGENT_DEPTH_FOR_TOPOLO
 
   // True when any managed Claude Code setting already has a value (yours or Toolkit's). Once any is set the
   // owner has chosen, so every row recommends Keep current and a setting still missing counts as left out on purpose.
+  const hasValue = (entry) => [CLAUDE_SETTINGS_STATES.TOOLKIT, CLAUDE_SETTINGS_STATES.OWNER, CLAUDE_SETTINGS_STATES.OFF].includes(entry?.state);
+  const specOf = (entry) => CLAUDE_SETTINGS.find((spec) => spec.id === entry?.id);
+  // A missing key is on for a setting whose Claude Code default is on, and off otherwise.
+  const defaultWord = (entry) => (specOf(entry)?.defaultOn ? 'On' : 'Off');
+  const offSource = (entry) => (entry.toolkit ? 'set by setup' : 'in your settings');
+
   function claudeSettingsAnySet(current) {
     const entries = current?.claudeSettings;
-    return Array.isArray(entries) && entries.some((entry) => entry.state === CLAUDE_SETTINGS_STATES.TOOLKIT || entry.state === CLAUDE_SETTINGS_STATES.OWNER);
+    return Array.isArray(entries) && entries.some(hasValue);
   }
 
-  // One setting's state: added by setup, already in your settings with Toolkit's value or a different one, or off.
+  // One setting's state: on (added by setup, or already in your settings), off, a different value, or missing.
   function claudeSettingOutcome(entry) {
     if (!entry) return 'The Claude Code user settings have not been read yet.';
     if (entry.state === CLAUDE_SETTINGS_STATES.UNREADABLE) return `${entry.detail || 'The Claude Code user settings file could not be read.'} Toolkit will not change it.`;
     if (entry.state === CLAUDE_SETTINGS_STATES.TOOLKIT) return `${entry.label}: on (added by setup).`;
     if (entry.blocked) return `${entry.label}: setup cannot change it because ${entry.detail}.`;
+    if (entry.state === CLAUDE_SETTINGS_STATES.OFF) return `${entry.label}: off (${offSource(entry)}).`;
     if (entry.state === CLAUDE_SETTINGS_STATES.OWNER && entry.matches === true) return `${entry.label}: on (already in your settings).`;
     if (entry.state === CLAUDE_SETTINGS_STATES.OWNER) {
-      const recommended = CLAUDE_SETTINGS.find((spec) => spec.id === entry.id);
-      return `${entry.label}: different value in your settings: ${settingValue(entry.value)}${recommended ? ` (Toolkit's is ${settingValue(recommended.value)})` : ''}.`;
+      const spec = specOf(entry);
+      return `${entry.label}: different value in your settings: ${settingValue(entry.value)}${spec ? ` (Turn on sets ${settingValue(spec.value)})` : ''}.`;
     }
-    return `${entry.label}: off (Claude Code default).`;
+    return `${entry.label}: ${defaultWord(entry).toLowerCase()} (Claude Code default).`;
   }
 
   // Every setting, one sentence each, for the closing summary.
@@ -89,9 +96,19 @@ function defineClaudeSetup({ CLAUDE_HOOK_TRUST_ACTION, SUBAGENT_DEPTH_FOR_TOPOLO
     if (entry.state === CLAUDE_SETTINGS_STATES.UNREADABLE) return 'Could not read';
     if (entry.state === CLAUDE_SETTINGS_STATES.TOOLKIT) return 'On (added by setup)';
     if (entry.blocked) return `Cannot change: ${entry.detail}`;
+    if (entry.state === CLAUDE_SETTINGS_STATES.OFF) return `Off (${offSource(entry)})`;
     if (entry.state === CLAUDE_SETTINGS_STATES.OWNER && entry.matches === true) return 'On (already in your settings)';
     if (entry.state === CLAUDE_SETTINGS_STATES.OWNER) return `Different value in your settings: ${settingValue(entry.value)}`;
-    return 'Off (Claude Code default)';
+    return `${defaultWord(entry)} (Claude Code default)`;
+  }
+
+  // The choice that changes nothing for this setting: enable when it is on, disable when it is off.
+  function claudeSettingCurrentChoice(entry) {
+    if (!entry || entry.blocked) return '';
+    if (entry.state === CLAUDE_SETTINGS_STATES.TOOLKIT || (entry.state === CLAUDE_SETTINGS_STATES.OWNER && entry.matches === true)) return 'enable';
+    if (entry.state === CLAUDE_SETTINGS_STATES.OFF) return 'disable';
+    if (entry.state === CLAUDE_SETTINGS_STATES.DEFAULT) return specOf(entry)?.defaultOn ? 'enable' : 'disable';
+    return '';
   }
 
   const settingKeyName = (spec) => `"${spec.keyPath[spec.keyPath.length - 1]}"`;
@@ -100,26 +117,31 @@ function defineClaudeSetup({ CLAUDE_HOOK_TRUST_ACTION, SUBAGENT_DEPTH_FOR_TOPOLO
   // What Turn on changes for this one setting.
   function claudeSettingOnOutcome(spec, entry) {
     if (entry?.blocked) return blockedOutcome(entry);
-    if (entry?.state === CLAUDE_SETTINGS_STATES.TOOLKIT || (entry?.state === CLAUDE_SETTINGS_STATES.OWNER && entry.matches === true)) return 'Already on; nothing changes.';
-    if (entry?.state === CLAUDE_SETTINGS_STATES.OWNER) return `Replaces your ${settingValue(entry.value)} with ${settingValue(spec.value)}.`;
+    if (entry?.state === CLAUDE_SETTINGS_STATES.OWNER && entry.matches !== true) return `Replaces your ${settingValue(entry.value)} with ${settingValue(spec.value)}.`;
     return `Sets ${settingKeyName(spec)}: ${settingValue(spec.value)} in settings.json.`;
   }
 
   // What Turn off changes for this one setting.
   function claudeSettingOffOutcome(spec, entry) {
     if (entry?.blocked) return blockedOutcome(entry);
-    if (entry?.state === CLAUDE_SETTINGS_STATES.DEFAULT) return 'Already off; nothing changes.';
+    if (Object.hasOwn(spec, 'offValue')) return `Sets ${settingKeyName(spec)}: ${settingValue(spec.offValue)} in settings.json.${settingEffect(spec).off ? ` ${settingEffect(spec).off}` : ''}`;
     const trailers = spec.id === 'attribution' ? ' Claude Code then adds its Co-Authored-By trailer, Generated with Claude Code line and session link to your commits and pull requests again.' : '';
     return `Removes ${settingKeyName(spec)} from settings.json, whoever added it, so Claude Code uses its default.${trailers}`;
   }
 
-  // Why to Turn on (none of the four set yet) or Keep current (some already set, so the owner has chosen).
+  // Why to pick the setting's recommended choice (none of the four set yet) or Keep current (some already
+  // set, so the owner has chosen).
   function claudeSettingRecommendation(spec, entry, current) {
-    if (!claudeSettingsAnySet(current)) return { value: 'enable', outcome: claudeSettingOnOutcome(spec, entry), reason: `It ${settingEffect(spec).benefit}.` };
+    const pick = spec.recommend || 'enable';
+    if (!claudeSettingsAnySet(current)) {
+      const outcome = pick === 'disable' ? claudeSettingOffOutcome(spec, entry) : claudeSettingOnOutcome(spec, entry);
+      return { value: pick, outcome, reason: `${pick === 'disable' ? 'Turning it off' : 'It'} ${settingEffect(spec).benefit}.` };
+    }
     const entries = current.claudeSettings;
-    const set = entries.filter((other) => other.state === CLAUDE_SETTINGS_STATES.TOOLKIT || other.state === CLAUDE_SETTINGS_STATES.OWNER).length;
+    const set = entries.filter(hasValue).length;
+    const label = pick === 'disable' ? 'Turn off' : 'Turn on';
     const reason = entry?.state === CLAUDE_SETTINGS_STATES.DEFAULT
-      ? `${set} of the ${entries.length} recommended settings already have a value and this one does not, so it counts as left out on purpose. Pick Turn on to turn it on.`
+      ? `${set} of the ${entries.length} recommended settings already have a value and this one does not, so it counts as left out on purpose. Pick ${label} to turn it ${pick === 'disable' ? 'off' : 'on'}.`
       : 'This setting already has a value, so Keep current leaves it as it is.';
     return { value: 'keep', outcome: 'Keep this setting as it is.', reason };
   }
@@ -134,8 +156,9 @@ function defineClaudeSetup({ CLAUDE_HOOK_TRUST_ACTION, SUBAGENT_DEPTH_FOR_TOPOLO
       controls: '"crossSessionInbound": "accept", so messages from your other Claude sessions, such as a Claude Projects coordinator, wake this one. Messages still cannot approve actions or change settings.',
     },
     'switch-models-on-flag': {
-      short: 'Ask before switching model on a flag', benefit: 'keeps a flagged request on the model you chose until you say otherwise',
-      controls: '"switchModelsOnFlag": false, so Claude Code pauses and asks before switching models when a request is flagged.',
+      short: 'Switch models without asking on a flag', benefit: 'keeps a flagged request on the model you chose until you say otherwise',
+      controls: '"switchModelsOnFlag": true (Claude Code\'s default when the line is missing) lets Claude Code switch models without asking when a request is flagged; false makes it pause and ask first.',
+      off: 'Claude Code then pauses and asks before switching models when a request is flagged.',
     },
     'agents-md': {
       short: 'Read AGENTS.md too', benefit: "makes Claude Code read the repository's AGENTS.md",
@@ -159,13 +182,16 @@ function defineClaudeSetup({ CLAUDE_HOOK_TRUST_ACTION, SUBAGENT_DEPTH_FOR_TOPOLO
         section: 'Other coding apps',
         title: `Claude Code setting: ${effect.short}?`,
         prompt: `Claude Code setting choice: ${effect.short}`,
-        whatThisControls: `One value in your Claude Code user settings (settings.json in your Claude Code config folder): ${effect.controls} Turn off removes this one setting whoever added it; the other settings are not touched.`,
+        whatThisControls: `One value in your Claude Code user settings (settings.json in your Claude Code config folder): ${effect.controls} ${Object.hasOwn(spec, 'offValue') ? 'Turn on and Turn off each write this one value' : 'Turn off removes this one setting whoever added it'}; the other settings are not touched.`,
         choices: [
           wizardChoice('enable', 'Turn on', claudeSettingOnOutcome(spec, entry)),
           wizardChoice('disable', 'Turn off', claudeSettingOffOutcome(spec, entry)),
           wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${claudeSettingOutcome(entry)}`),
         ],
-        // No folded twin: all three choices stay listed whatever the state.
+        // A row already on hides Turn on, and one already off hides Turn off: Keep current does the same.
+        // A different value, a blocked parent or an unreadable file keeps all three.
+        currentChoice: claudeSettingCurrentChoice(entry),
+        foldAlways: true,
         recommendation: claudeSettingRecommendation(spec, entry, current),
         selected: args.setupChoices[key],
         current: claudeSettingOutcome(entry),

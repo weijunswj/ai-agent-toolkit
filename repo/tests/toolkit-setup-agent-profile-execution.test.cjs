@@ -96,9 +96,14 @@ test('the recommended Claude Code settings are written to the temporary Claude s
     pluginConfigs: { 'cc-plugin-agents-md@builtin': { options: { instructionFiles: 'claude-md-and-agents-md' } } }
   });
   clearLogs(setupRepo);
+  // Turn off removes three lines; the model-switch row's off is the false it already holds.
   const off = run([...base, '--claude-settings', 'disable'], { env, timeout: 300000 });
   assert.equal(off.status, 0, off.stderr || off.stdout);
-  assert.equal(fs.existsSync(settingsPath), false, 'the file Toolkit created is removed when nothing else is left');
+  assert.deepEqual(JSON.parse(fs.readFileSync(settingsPath, 'utf8')), { switchModelsOnFlag: false });
+  clearLogs(setupRepo);
+  const allOn = run([...base, '--claude-settings', 'disable', '--claude-setting', 'switch-models-on-flag=enable'], { env, timeout: 300000 });
+  assert.equal(allOn.status, 0, allOn.stderr || allOn.stdout);
+  assert.deepEqual(JSON.parse(fs.readFileSync(settingsPath, 'utf8')), { switchModelsOnFlag: true });
 });
 
 test('each Claude Code setting row is answered on its own: Turn on one, Turn off removes an object form you set, Turn on replaces a different value', () => {
@@ -112,7 +117,7 @@ test('each Claude Code setting row is answered on its own: Turn on one, Turn off
   const read = () => JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
   writeFile(settingsPath, `${JSON.stringify({ theme: 'dark' }, null, 2)}\n`);
 
-  const one = run([...base, '--claude-setting', 'switch-models-on-flag=enable'], { env, timeout: 300000 });
+  const one = run([...base, '--claude-setting', 'switch-models-on-flag=disable'], { env, timeout: 300000 });
   assert.equal(one.status, 0, one.stderr || one.stdout);
   assert.deepEqual(read(), { theme: 'dark', switchModelsOnFlag: false });
   clearLogs(setupRepo);
