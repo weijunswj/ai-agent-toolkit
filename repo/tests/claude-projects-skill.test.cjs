@@ -119,7 +119,7 @@ test('Projects wires managed instructions, promises and fresh scheduled sessions
   assert.match(text, /\| raised <tier>\/<effort> <YYYY-MM-DD>: <reason>\]/);
   assert.match(text, /a template update never lowers a recorded raise/);
   assert.match(text, /Write these requirements into every task prompt/);
-  for (const required of ['capped short message to the coordinator with retry', 'full report to a file',
+  for (const required of ['capped short message to the coordinator with retry', 'full report to `latest.md` and an immutable `runs/<run UTC>.md`',
     'only a fresh-session run resolves its own run thread after delivery', 'ALL unresolved threads and project-chat posts',
     'small page limits', 'ALL unanswered owner items with no reply or reaction', 'link and ask date',
     'ONE reminder each run', 'stale thread labels', '**Overdue promise:**', 'promise list in project memory as a plain list',
@@ -463,4 +463,103 @@ test('independent lanes run side by side under the owner\'s lane cap', () => {
   // Setup records a number only when the owner gives one, and a sync that brings the default says so once.
   assert.ok(read('repo/contracts/claude-projects/web-controller-projects/reference/setup.md').includes('Otherwise tell them once that the project runs 1 lane at a time, and that "lanes 3" changes it.'));
   assert.ok(read('repo/contracts/claude-projects/web-controller-projects/reference/instructions-sync.md').includes('the note adds: "This project now runs 1 lane at a time by default; say lanes N to change it."'));
+});
+
+// Task runs were invisible when the coordinator recycled: the skill now relays every run from its
+// home-thread line, stamps the relay, and catches up from the files on a new session's first wake.
+test('the coordinator relays every task run and catches up missed ones from the run stamps', () => {
+  const text = bundle();
+  const body = read('repo/contracts/claude-projects/web-controller-projects/project-instructions.md');
+  assert.match(text, /\*\*Every task run reaches the project chat\.\*\* Skip tasks marked `stopped by owner`; relay and finish pending runs using `\.relayed` and `\.done`/);
+  const recurring = read('repo/contracts/claude-projects/web-controller-projects/reference/recurring-tasks.md');
+  const relay = recurring.split('\n').find(line => line.startsWith('- On every task report'));
+  // The prompt is the runtime contract here. Check both paths and effect order, rather than
+  // simulating a coordinator in a test that would only prove its own invented implementation.
+  const order = ['skip the task if', 'before reading reports or acting on prefixes',
+    'skip it only if `<run UTC>.done` exists',
+    'Read its exact `/mnt/project-files/toolkit/task-runs/<slug>/<run UTC>.md`',
+    'the immutable per-run report path it names, never `latest.md`',
+    'Before posting, check `/mnt/project-files/toolkit/task-runs/<slug>/<run UTC>.relayed`',
+    'if it already exists, skip only the post', 'Otherwise post one Update line',
+    "Only after the post succeeds, write that run's `.relayed` file immediately", 'and read it back',
+    'With `.relayed` confirmed, act on every prefix of this run',
+    'even on a replayed notification', 'Only after every prefix has been acted on, write `<run UTC>.done`',
+    'and read it back, including reports with no prefixes'];
+  const positions = order.map(part => relay.indexOf(part));
+  assert.ok(positions.every((position, index) => position >= 0 && (index === 0 || position > positions[index - 1])), relay);
+  assert.match(relay, /Only the coordinator writes `\.relayed` or `\.done`; no task may write either file/);
+  assert.match(relay, /task name, run UTC, its first line and the originating thread link recorded in that run's stamp, never memory's current home/);
+  assert.match(relay, /A failed or unfinished action leaves `\.done` missing for retry/);
+  assert.ok(text.includes('- **Relay missed runs.** On the first wake of every coordinator session, and on every wake a task home thread starts'));
+  const catchUp = recurring.split('\n').find(line => line.startsWith('- **Relay missed runs.**'));
+  assert.match(catchUp, /every task except those whose `SCHEDULED TASKS:` entry says `stopped by owner`/);
+  assert.match(catchUp, /Handle every run whose matching `<run UTC>\.done` is missing, oldest first, including those already `\.relayed`/);
+  assert.match(catchUp, /same per-run report read, check-before-post and write-after-success rules above for each run/);
+  assert.match(catchUp, /post only when `\.relayed` is missing/);
+  assert.match(catchUp, /linking each run's originating thread from its stamp; then finish its prefix actions and write `\.done`/);
+  assert.match(catchUp, /Never use the memory line's current home as that link/);
+  assert.doesNotMatch(recurring, /<slug>\.md|<slug>\.relayed|newer than its `\.relayed` run time|overwrites its run stamp/);
+  assert.match(recurring, /A missing acknowledgement means pending, whatever a newer run's state/);
+  assert.match(recurring, /A successful post followed by a failed acknowledgement write remains pending/);
+  assert.match(recurring, /it does not make the post and file write atomic/);
+  assert.ok(text.includes('one capped line in its home thread (first line and per-run report path), with a capped short message to the coordinator with retry when that post fails'));
+  for (const prefix of ['`RELAY GAP`', '`UNRELAYED TASK RUNS`', '`LANES UNDER CAP`']) assert.ok(text.includes(prefix), prefix);
+  assert.doesNotMatch(text, /Report to the coordinator only/);
+  assert.ok(body.includes('Each run files its report and run stamp, then posts one line in its home thread.'));
+});
+
+test('recovery matrix covers replay, catch-up, interrupted actions, stop identity and old shells', () => {
+  const recurring = read('repo/contracts/claude-projects/web-controller-projects/reference/recurring-tasks.md');
+  // These are executable prompt contracts, not a second coordinator implementation. Assert the
+  // state table and both entrypoints so neither can skip an acknowledged but unfinished run.
+  const rows = [
+    ['Task is `stopped by owner`, in any state', 'Skip report reads, posts and prefix actions.', 'Never write `.relayed` or `.done`.'],
+    ['No `.relayed`, no `.done`, not `stopped by owner`', 'Read the exact report, post, write and read back `.relayed`, act on every prefix, then write and read back `.done`.', 'Never write `.relayed` or `.done`.'],
+    ['Post failed, not `stopped by owner`', 'Leave both receipts missing; retry the run on replay or catch-up.', 'Never write `.relayed` or `.done`.'],
+    ['Post succeeded but `.relayed` write failed, not `stopped by owner`', 'Report the write failure; keep pending. A retry may duplicate the post.', 'Never write `.relayed` or `.done`.'],
+    ['`.relayed` exists, no `.done`, not `stopped by owner`', 'Skip posting; act on every unfinished prefix, confirm prior effects and then write and read back `.done`.', 'Never write `.relayed` or `.done`.'],
+    ['Prefix action or `.done` write failed, not `stopped by owner`', 'Keep `.relayed`; retry unfinished actions on replay or catch-up without reposting.', 'Never write `.relayed` or `.done`.'],
+    ['`.done` exists, not `stopped by owner`', 'Skip the run on replay and catch-up.', 'Never write `.relayed` or `.done`.'],
+    ['`.failed` exists, not `stopped by owner`', 'Use the same receipt states above; link the origin from the immutable stamp.', 'Never amend the stamp.'],
+    ['Old custom shell, not `stopped by owner`', 'Read `latest.md`, relay and act in the reporting turn only; no catch-up or gap checks.', 'Keep the stored prompt until its owner-approved shell update.']
+  ];
+  for (const row of rows) assert.ok(recurring.includes(`| ${row.join(' | ')} |`), row[0]);
+  assert.match(recurring, /Each run is independent, even when a newer run is complete/);
+  const mapping = recurring.split('\n').find(line => line.startsWith('**Match the task before processing.**'));
+  for (const required of ['stopped by owner', 'exact task name', 'Built-in stamps carry that name',
+    "map the slug to its task from the saved trigger prompt's DELIVERY", 'Keep saved prompts for replaced tasks',
+    'mapping is missing or ambiguous, report the gap and hold that run',
+    '`mcp__hearthbot__read_thread` with no `thread_id`', 'replacement homes and fresh-session failures keep their own links']) {
+    assert.ok(mapping.includes(required), required);
+  }
+  const legacy = recurring.split('\n').find(line => line.startsWith('**Old custom shells.**'));
+  const order = ['first exclude a task marked `stopped by owner`', 'read its `latest.md` at once',
+    'relay the report to project chat', 'act on all its prefixes in that turn'];
+  const positions = order.map(part => legacy.indexOf(part));
+  assert.ok(positions.every((position, index) => position >= 0 && (index === 0 || position > positions[index - 1])), legacy);
+  for (const required of ['no stamp', 'no `.relayed` or `.done`', 'no catch-up and no relay gap check',
+    'overwritten reports cannot be recovered', 'The removal condition is that task\'s owner-approved shell update']) {
+    assert.ok(legacy.includes(required), required);
+  }
+  assert.doesNotMatch(recurring, /if it already exists, skip that run|Relay every run whose matching `<run UTC>\.relayed` is missing/);
+});
+
+test('task-run relay, catch-up and prefix actions all honour stopped by owner before sending', () => {
+  const base = 'repo/contracts/claude-projects/web-controller-projects/';
+  const routes = [
+    ['SKILL.md', ['- **Every task run reaches']],
+    ['reference/recurring-tasks.md', ['- A run with', '- On every task report', '- **Relay missed runs.**',
+      '**Run records.**', '**Match the task before processing.**', '**Old custom shells.**', '**Recovery matrix.**']],
+    ['reference/periodic-runs.md', ['  - `RELAY GAP`', '- `UNRELAYED TASK RUNS`']],
+    ['tasks/delivery.md', ['- Run stamp:', '- If that post fails,', '- Failure file:']],
+    ['tasks/hourly-nudge.md', ['10. Task runs']],
+    ['tasks/daily-check-in.md', ['   RELAY GAP:']]
+  ];
+  for (const [file, prefixes] of routes) {
+    for (const prefix of prefixes) {
+      const lines = read(base + file).split('\n').filter(line => line.startsWith(prefix));
+      assert.equal(lines.length, 1, `${file}: ${prefix}`);
+      assert.ok(lines[0].includes('stopped by owner'), `${file}: ${lines[0]}`);
+    }
+  }
 });
