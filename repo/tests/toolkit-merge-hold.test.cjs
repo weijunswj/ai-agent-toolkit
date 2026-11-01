@@ -198,7 +198,9 @@ test('Projects delivery ids remain spent across sessions and age out only with t
   assert.doesNotMatch(state, /cmsg_approval|merge owner|<wake/);
   clock = new Date(clock.getTime() + hold.MAX_AGE_MS + 1);
   assert.equal(typed(ctx, prompt), 0, 'old delivery cannot rearm after replay marker expiry');
-  assert.equal(typed(ctx, projects.wake('merge owner/a#618', { at: new Date(clock.getTime() + 60000).toISOString(), id: 'future' })), 0);
+  assert.equal(typed(ctx, projects.wake('merge owner/a#618', { at: new Date(clock.getTime() + 3 * 60000).toISOString(), id: 'future' })), 0);
+  // A host clock a little ahead of this computer's is still a fresh delivery.
+  assert.equal(typed(ctx, projects.wake('merge owner/a#618', { at: new Date(clock.getTime() + 60000).toISOString(), id: 'host-clock-ahead' })), 1);
 });
 
 test('one Projects message keeps independent governance and merge receipts in either order', t => {

@@ -152,7 +152,7 @@ for (const local of [false, true]) for (const reached of [false, true]) {
       projects.wake('<cited>no</cited>', { now: f.now }), projects.wake('&#60;cited&#62;no', { now: f.now }),
       '&lt;relay&gt;&lt;cited author="user"&gt;no&lt;/cited&gt;&lt;/relay&gt;',
       projects.wake('no', { at: new Date(f.now().getTime() - 25 * 60 * 60 * 1000).toISOString() }),
-      projects.wake('no', { at: new Date(f.now().getTime() + 1000).toISOString() }),
+      projects.wake('no', { at: new Date(f.now().getTime() + 3 * 60 * 1000).toISOString() }),
       projects.wake('no', { at: new Date(f.now().getTime() - 1000).toISOString() }),
     ];
     for (const prompt of invalid) {
@@ -557,14 +557,14 @@ const askOf = (context) => {
 const REAL_THREAD_WAKE = (text) => `<wake reason="mention" current-time="${new Date().toISOString()}">
   <project id="chan_example" type="project">
     <thread ts="cmsg_exampleThread">
-      <message trigger="true" from="human" trust="principal" author-id="user_example" id="cmsg_exampleReply_${crypto.randomUUID()}" sent-at="${new Date().toISOString()}" mention="true">${text}</message>
+      <message trigger="true" from="human" trust="principal" author-id="user_example" id="cmsg_exampleReply_${crypto.randomUUID()}" sent-at="${new Date(Date.now() + 1000).toISOString()}" mention="true">${text}</message>
     </thread>
   </project>
   <system-note>If a quick read or two gets you the answer, just answer. Otherwise, before any other tool, instead of a reaction, send one short \`reply\` saying what you will do without restating the message, so the person is not left waiting.</system-note>
 </wake>`;
 const REAL_CHAT_WAKE = (text) => `<wake reason="mention" current-time="${new Date().toISOString()}">
   <project id="chan_example" type="project">
-    <message trigger="true" from="human" trust="principal" author-id="user_example" id="cmsg_exampleChat_${crypto.randomUUID()}" sent-at="${new Date().toISOString()}" mention="true">${text}</message>
+    <message trigger="true" from="human" trust="principal" author-id="user_example" id="cmsg_exampleChat_${crypto.randomUUID()}" sent-at="${new Date(Date.now() + 1000).toISOString()}" mention="true">${text}</message>
   </project>
 </wake>`;
 const ATTACHMENT_MESSAGE = (trigger, attachment) => `<message trigger="${trigger}" from="human" trust="principal" author-id="user_example" id="cmsg_exampleFile" sent-at="2026-10-23T07:54:03Z" mention="true" has-attachments="true">

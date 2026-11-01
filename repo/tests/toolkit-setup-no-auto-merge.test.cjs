@@ -49,7 +49,7 @@ test('no script, skill or plugin hook runs a pull request merge', () => {
       if (path.relative(root, full).split(path.sep).join('/') === 'repo/scripts/toolkit-merge-hold.cjs') {
         const source = fs.readFileSync(full, 'utf8');
         const loads = [...source.matchAll(/\brequire\s*\(([^)]*)\)/g)].map((match) => match[1].trim());
-        assert.deepEqual(loads.sort(), ["'./toolkit-auto-merge-eligible.cjs'", "'./toolkit-governance-gate.cjs'", "'./toolkit-governance-state.cjs'", "'./toolkit-shell-call.cjs'", "'node:crypto'", "'node:fs'", "'node:path'"]);
+        assert.deepEqual(loads.sort(), ["'./toolkit-auto-merge-eligible.cjs'", "'./toolkit-governance-gate.cjs'", "'./toolkit-governance-state.cjs'", "'./toolkit-projects-delivery.cjs'", "'./toolkit-shell-call.cjs'", "'node:crypto'", "'node:fs'", "'node:path'"]);
         assert.doesNotMatch(source, /\bimport\s*\(|child_process|(?<![.\w])(?:spawn|exec|execFile|fork)(?:Sync)?\s*\(|\bfetch\s*\(|node:https?\b|node:net\b/);
         // The merge-scope check it loads starts only git, with read-only subcommands, and loads only
         // Node's process module.
