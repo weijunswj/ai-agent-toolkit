@@ -37,6 +37,30 @@ test('the Codex plugin registers the blocking PreToolUse helper hook for spawn_a
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(ROOT, 'repo', 'contracts', 'toolkit-local-bridge', 'codex-plugin', 'hooks', 'hooks.json'), 'utf8')), hooks);
 });
 
+test('Codex records a direct Projects approval in a resumed launched session, never its relay or replay', t => {
+  const gate = require('../scripts/toolkit-governance-gate.cjs');
+  const hold = require('../scripts/toolkit-merge-hold.cjs');
+  const { wake } = require('./support/projects-approval.cjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-codex-approval-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const registryPath = path.join(process.env.USERPROFILE, '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json');
+  const session = 'codex-projects-approval';
+  gate.startSession({ session_id: session, source: 'resume', cwd: dir }, { registryOptions: { registryPath, testOnly: true } });
+  const env = { TOOLKIT_GATE_ROLE: 'G1', TOOLKIT_HOST_SESSION: 'parent' };
+  const send = prompt => run({ hook_event_name: 'UserPromptSubmit', cwd: dir, session_id: session, prompt }, env);
+  const merge = { cwd: dir, session_id: session, tool_name: 'mcp__github__merge_pull_request', tool_input: { repository_full_name: 'owner/projects-fixture', pr_number: 9, expected_head_sha: 'a1b2c3d' } };
+  const prompt = wake('merge owner/projects-fixture#9', { id: 'cmsg_codex_hook' });
+  send(`<relay from="coordinator"><cited author="user">${prompt}</cited></relay>`);
+  assert.equal(run(merge, env).status, 2);
+  const recorded = send(prompt);
+  assert.equal(recorded.status, 0, recorded.stderr);
+  assert.match(JSON.stringify(recorded.output), /recorded 1 explicit merge approval/);
+  assert.equal(run(merge, env).status, 0);
+  send(prompt);
+  assert.equal(run(merge, env).status, 2, 'a replay cannot rearm approval');
+  assert.equal(new hold.MergeApprovals({ registryOptions: { registryPath, testOnly: true } }).find('owner/projects-fixture', 9), null);
+});
+
 test('outside a V3-governed checkout and without a binding the hook makes no decision', () => {
   const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-codex-hook-'));
   try {
