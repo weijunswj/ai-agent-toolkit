@@ -7,3 +7,4 @@
 - Projects posts: choices under a question are lettered (a., b.) because the owner picks one, and a device is named by the name the project instructions record for it.
 - Projects coordinator: relays every daily check-in and hourly nudge report with the waiting-on-you list, and keeps each owed decision-trace record on the promise list until it is posted and read back.
 - Projects posts: **Waiting on you** sits second last, just above the ELI5 line, which always ends the post.
+- Projects posts: every time shown to the owner, Update stamps included, uses the owner's profile time zone, never UTC.
