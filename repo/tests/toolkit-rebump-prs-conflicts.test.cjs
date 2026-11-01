@@ -96,4 +96,3 @@ test('non-version manifest conflicts and edited frozen notes hold without push',
   const conflict = f.operation().process(f.pr());
   assert.equal(conflict.status, 'held'); assert.match(conflict.reason, /conflicting non-version/);
 });
-

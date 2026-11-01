@@ -54,4 +54,3 @@ test('generation failure and symlink trees never reach a push', t => {
   assert.equal(linked.status, 'held'); assert.match(linked.reason, /symlinks/);
   assert.equal(f.pr().head.sha, linkHead);
 });
-

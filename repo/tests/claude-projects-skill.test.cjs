@@ -25,9 +25,10 @@ test('the coordinator requests local release reconciliation and renewed review a
     assert.ok(surface.includes('node repo/scripts/toolkit-rebump-prs.cjs'));
     assert.ok(surface.includes('--apply'));
     assert.match(surface, /computer lane/);
-    assert.match(surface, /fresh G2|full delta G2/);
-    assert.match(surface, /offline/);
   }
+  // The skill points at the reference; holds, offline recovery and review live there.
+  assert.match(periodic, /fresh G2|full delta G2/);
+  assert.match(periodic, /offline/);
   assert.doesNotMatch(text, /after "merge N" the lane merges `main`/);
 });
 
