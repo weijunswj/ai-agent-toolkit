@@ -38,7 +38,7 @@ test('each start and --host pair keeps or stops setup as planned', () => {
     [{ CODEX_THREAD_ID: 't' }, ['--plan'], null],
     [{ CODEX_THREAD_ID: 't' }, ['--plan', '--host', 'codex'], null],
     [{ CODEX_THREAD_ID: 't' }, ['--plan', '--host', 'claude-code'], /^SETUP STOPPED: setup was started from Codex, and this command is not the Codex setup\. Nothing was changed\.\nRun it again as: node "[^"]+setup-toolkit\.cjs" --plan$/],
-    [{ CODEX_THREAD_ID: 't' }, ['--execute', '--host=claude-code', '--json'], /Run it again as: node "[^"]+setup-toolkit\.cjs" --execute --json\n/],
+    [{ CODEX_THREAD_ID: 't' }, ['--execute', '--host=claude-code', '--json'], /Run it again as: node "[^"]+setup-toolkit\.cjs" --execute --json$/],
     [{ CLAUDECODE: '1' }, ['--plan', '--host', 'claude-code'], null],
     [{ CLAUDECODE: '1' }, ['--plan'], /^SETUP STOPPED: setup was started from Claude Code, and this command is not the Claude Code setup\. Nothing was changed\.\nRun it again as: node "[^"]+setup-toolkit\.cjs" --plan --host claude-code$/],
     [{ CLAUDECODE: '1' }, ['--plan', '--host', 'codex'], /Run it again as: node "[^"]+setup-toolkit\.cjs" --plan --host claude-code$/],
