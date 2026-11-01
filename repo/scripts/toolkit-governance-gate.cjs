@@ -1567,7 +1567,8 @@ function sessionLine(cwd, { registryOptions = {}, stateReader = null, now, sessi
   return [decided, ...programme].join(' ');
 }
 
-// For an ENABLED repository: the attention line from this computer's cache, and a Checkpoint line for
+// For an ENABLED repository: the attention line from this computer's cache, a Programme sweep line
+// when this computer's hourly sweep is not running well, and a Checkpoint line for
 // each session here whose last turn-end record failed. Reads local files only (no git, gh or network
 // call); a missing or old cache starts `programme.cjs refresh` in the background. Any failure only
 // drops these lines.
@@ -1586,6 +1587,13 @@ function programmeLines(state, registryOptions = {}, deps = {}) {
       try { (deps.startRefresh || require('../../skills/github-program-reconciler/scripts/programme-refresh-trigger.cjs').startRefresh)(state.root, deps); started = true; } catch { /* the hourly sweep covers it */ }
     }
     if (attention.line) lines.push(`${attention.line}${started ? '; a refresh has started in the background' : ''}.`);
+    // This computer's hourly sweep, when it skipped, failed or has not run for over 2 hours. A test
+    // registry without its own home reads nothing.
+    if (deps.home || registryOptions.testOnly !== true) {
+      const now = deps.now ? new Date(deps.now()) : new Date();
+      const sweep = require('./toolkit-tasks.cjs').sweepLine(binding.repository, { home: deps.home, now });
+      if (sweep) lines.push(sweep);
+    }
   } catch { /* no attention line */ }
   try {
     const checkpoint = require('../../skills/github-program-reconciler/scripts/programme-checkpoint.cjs');

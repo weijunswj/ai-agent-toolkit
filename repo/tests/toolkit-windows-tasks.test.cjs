@@ -359,7 +359,7 @@ function fakeRun(answers = {}) {
   const log = [];
   const run = (file, args) => {
     log.push([file, ...args]);
-    const name = file === GH ? `gh ${args[0]}` : path.basename(args[0]) === 'programme.cjs' ? `programme ${args[1]}` : path.basename(args[0]);
+    const name = file === GH ? `gh ${args[0]}` : args[0] === '-e' ? 'reach github' : path.basename(args[0]) === 'programme.cjs' ? `programme ${args[1]}` : path.basename(args[0]);
     const answer = answers[name] || { status: 0, stdout: '' };
     return { stdout: '', stderr: '', ...(typeof answer === 'function' ? answer(args) : answer) };
   };
@@ -403,7 +403,7 @@ test('J: gh signed out skips with no GitHub call; a stale binding skips before a
   const out = runSweep(t, { 'gh auth': { status: 1 } });
   assert.equal(out.record.status, 'skipped');
   assert.deepEqual(out.record.summary, ['skipped: gh not signed in']);
-  assert.deepEqual(out.log, [[GH, 'auth', 'status']]);
+  assert.deepEqual(out.log.map(entry => entry.slice(0, 2)), [[GH, 'auth'], [NODE, '-e']], 'gh auth status, then only the github.com connection check');
   const stale = runSweep(t, { 'toolkit-governance.cjs': { status: 0, stdout: JSON.stringify({ state: 'ENABLED', merged: { fresh: false } }) } });
   assert.deepEqual(stale.record.summary, ['skipped: binding not read in 24 h']);
   assert.equal(stale.log.some(entry => /programme\.cjs|footer-sweep/.test(entry[1] || '')), false);
@@ -412,6 +412,43 @@ test('J: gh signed out skips with no GitHub call; a stale binding skips before a
     assert.deepEqual(off.record.summary, [`skipped: governance is ${state}`]);
     assert.equal(off.record.exit, 0);
   }
+});
+
+test('J: offline is told apart from signed out, skips count up in a row, and the next good run notes the resume', (t) => {
+  const home = tempHome(t);
+  const OFFLINE = { 'gh auth': { status: 1 }, 'reach github': { status: 3 } };
+  const first = runSweep(t, OFFLINE, home, '2026-11-01T04:00:05.000Z');
+  assert.deepEqual([first.record.status, first.record.exit, first.record.reason, first.record.skipped_streak, first.record.skipped_since], ['skipped', 0, 'offline', 1, '2026-11-01T04:00:05.000Z']);
+  assert.deepEqual(first.record.summary, ['skipped: offline']);
+  const probe = first.log.find(entry => entry[1] === '-e');
+  assert.match(probe[2], /connect\(\{host:'github\.com',port:443,timeout:8000\}\)/, 'one connection to github.com, nothing sent');
+  const second = runSweep(t, OFFLINE, home, '2026-11-01T05:00:05.000Z');
+  assert.deepEqual([second.record.skipped_streak, second.record.skipped_since], [2, '2026-11-01T04:00:05.000Z']);
+  const signedOut = runSweep(t, { 'gh auth': { status: 1 } }, home, '2026-11-01T06:00:05.000Z');
+  assert.deepEqual([signedOut.record.reason, signedOut.record.skipped_streak, signedOut.record.summary], ['gh not signed in', 3, ['skipped: gh not signed in']]);
+  // A failed run is no resume: the count stays for the next good run to report.
+  const failed = runSweep(t, { 'programme refresh': { status: 2, stderr: 'boom' } }, home, '2026-11-01T07:00:05.000Z');
+  assert.deepEqual([failed.record.status, failed.record.skipped_streak, failed.record.skipped_since], ['failed', 3, '2026-11-01T04:00:05.000Z']);
+  assert.equal(failed.record.summary.some(line => /Resumed/.test(line)), false);
+  const good = runSweep(t, {}, home, '2026-11-01T08:00:05.000Z');
+  assert.equal(good.record.status, 'ok');
+  assert.equal(good.record.summary.at(-1), 'Resumed after 3 skipped runs since 2026-11-01 04:00 UTC.');
+  assert.equal('skipped_streak' in good.record || 'skipped_since' in good.record || 'reason' in good.record, false, 'cleared');
+  const next = runSweep(t, {}, home, '2026-11-01T09:00:05.000Z');
+  assert.equal(next.record.summary.some(line => /Resumed/.test(line)), false, 'said once');
+  // A held run also ends the streak; one skip reads in the singular.
+  runSweep(t, OFFLINE, home, '2026-11-01T10:00:05.000Z');
+  const held = runSweep(t, { 'programme refresh': { status: 1, stdout: JSON.stringify({ holds: [{ code: 'STORE_UNREACHABLE', target: 'store' }] }) } }, home, '2026-11-01T11:00:05.000Z');
+  assert.deepEqual([held.record.status, held.record.summary.at(-1), held.record.skipped_streak], ['held', 'Resumed after 1 skipped run since 2026-11-01 10:00 UTC.', undefined]);
+});
+
+test('J: a run stopped mid-way keeps the streak in its start record', (t) => {
+  const home = tempHome(t);
+  runSweep(t, { 'gh auth': { status: 1 }, 'reach github': { status: 3 } }, home, '2026-11-01T04:00:05.000Z');
+  const seen = [];
+  const fake = fakeRun({ 'toolkit-governance.cjs': () => { seen.push(tasks.readLastRun('toolkit-programme-sweep', home)); return GOVERNED; }, 'programme attention': ATTENTION });
+  job.runJob(options, { home, run: fake.run, ghPath: GH, nodePath: NODE, mergedBinding: BINDING, now: () => new Date('2026-11-01T05:00:05.000Z') });
+  assert.deepEqual([seen[0].status, seen[0].skipped_streak, seen[0].skipped_since], ['running', 1, '2026-11-01T04:00:05.000Z']);
 });
 
 test('J: a footer sweep MISMATCH fails the run with its code, and the next run retries from the same time', (t) => {
@@ -503,6 +540,49 @@ test('L: a run that stopped before writing its record is not shown as the previo
   tasks.writeLastRun('toolkit-programme-sweep', { started: '2026-10-29T05:00:01.000Z', finished: null, exit: null, status: 'running', summary: [] }, home);
   Object.assign(live, { last_run: '2026-10-29T05:00:00.000Z' });
   assert.equal(tasks.listTasks({ home, platform: 'win32', scheduler, folderFor: () => null }).rows.find(item => item.name === 'TOOLKIT - PROGRAMME SWEEP').result, 'running');
+});
+
+test('L: skipped runs show their reason and count in toolkit tasks', (t) => {
+  const { home, scheduler } = listedHome(t);
+  const live = scheduler.folders.get('TOOLKIT').find(task => task.name === 'TOOLKIT - PROGRAMME SWEEP');
+  Object.assign(live, { last_run: '2026-11-01T06:00:04.000Z', last_result: 0 });
+  tasks.writeLastRun('toolkit-programme-sweep', { started: '2026-11-01T06:00:05.000Z', finished: '2026-11-01T06:00:20.000Z', exit: 0, status: 'skipped', reason: 'offline',
+    skipped_streak: 3, skipped_since: '2026-11-01T04:00:05.000Z', summary: ['skipped: offline'] }, home);
+  const result = tasks.listTasks({ home, platform: 'win32', scheduler, folderFor: () => null });
+  const row = result.rows.find(item => item.name === 'TOOLKIT - PROGRAMME SWEEP');
+  assert.deepEqual([row.result, row.skipped_streak, row.skipped_since], ['skipped (offline), 3 runs in a row since 2026-11-01 04:00Z', 3, '2026-11-01T04:00:05.000Z']);
+  assert.match(tasks.formatList(result), /last run 2026-11-01 06:00 skipped \(offline\), 3 runs in a row since 2026-11-01 04:00Z\./);
+});
+
+test('L: the session sweep line names a skip, a failure or a gap of over 2 hours, in fixed words only', (t) => {
+  const { home } = listedHome(t);
+  const repository = 'weijunswj/ai-agent-toolkit';
+  const noon = new Date(2026, 10, 1, 12, 0, 0); // local time, inside the 08:00 to 23:59 hours
+  const ago = minutes => new Date(noon.getTime() - minutes * 60000).toISOString();
+  const hhmm = iso => `${iso.slice(11, 16)}Z`;
+  const write = record => tasks.writeLastRun('toolkit-programme-sweep', { exit: 0, summary: [], ...record }, home);
+  const line = (now = noon) => tasks.sweepLine(repository, { home, now });
+  write({ started: ago(5), finished: ago(4), status: 'ok' });
+  assert.equal(line(), null, 'a good recent run says nothing');
+  write({ started: ago(60), finished: ago(59), status: 'skipped', reason: 'offline', skipped_streak: 3, skipped_since: ago(180) });
+  const skipped = line();
+  assert.ok(skipped === `Programme sweep: skipped (offline), 3 runs in a row since ${hhmm(ago(180))}; see toolkit tasks.`
+    || skipped === `Programme sweep: skipped (offline), 3 runs in a row since ${ago(180).slice(0, 10)} ${hhmm(ago(180))}; see toolkit tasks.`, skipped);
+  assert.equal(tasks.sweepLine('WEIJUNSWJ/AI-AGENT-TOOLKIT', { home, now: noon }), skipped, 'the repository matches without case');
+  assert.equal(tasks.sweepLine('someone/else', { home, now: noon }), null);
+  write({ started: ago(60), finished: ago(59), status: 'skipped', reason: 'gh auth status said ghp_x at C:\\Users', skipped_streak: 1, skipped_since: ago(60) });
+  assert.match(line(), /^Programme sweep: skipped, 1 run in a row since /, 'a reason the job never writes is not shown');
+  write({ started: ago(30), finished: ago(29), status: 'failed' });
+  assert.match(line(), /^Programme sweep: last run failed at \d\d:\d\dZ; see toolkit tasks\.$/);
+  write({ started: ago(200), finished: ago(199), status: 'skipped', reason: 'offline', skipped_streak: 2, skipped_since: ago(260) });
+  assert.match(line(), /^Programme sweep: no run since (\d{4}-\d\d-\d\d )?\d\d:\d\dZ \(over 2 hours\); the last one skipped \(offline\), 2 runs in a row since .*; see toolkit tasks\.$/);
+  write({ started: ago(200), finished: ago(199), status: 'ok' });
+  assert.match(line(), /^Programme sweep: no run since .* \(over 2 hours\); see toolkit tasks\.$/);
+  // Outside its hours, or in its first 2 hours, a gap is expected.
+  assert.equal(line(new Date(2026, 10, 1, 3, 0, 0)), null);
+  assert.equal(line(new Date(2026, 10, 1, 9, 30, 0)), null);
+  // No task recorded for the repository on this computer: no line.
+  assert.equal(tasks.sweepLine(repository, { home: tempHome(t), now: noon }), null);
 });
 
 test('L: a recorded task deleted by hand shows missing; an unmarked task in the folder shows found, not recorded', (t) => {
