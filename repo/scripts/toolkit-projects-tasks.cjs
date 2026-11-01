@@ -19,6 +19,7 @@
 // Exit 0 current or printed, 1 needs a change, 2 malformed input or bad arguments.
 const fs = require('node:fs');
 const path = require('node:path');
+const { createHash } = require('node:crypto');
 const { renderBlock, findBlocks, blockState, normalizeBody } = require('./toolkit-managed-block.cjs');
 
 const TASKS_DIR = 'repo/contracts/claude-projects/web-controller-projects/tasks';
@@ -111,11 +112,11 @@ function taskName(kind, params) {
   return `${params.project}: ${title}`;
 }
 
-// The run stamp's folder under task-runs/: the name slug for a Toolkit task, or custom- plus
-// the whole shared report path for a custom one (whose name the prompt never carries).
+// Keep the kind visible and hash the complete identity, before any readable normalisation.
 function taskSlug(kind, params) {
-  const source = KINDS[kind].title ? taskName(kind, params) : `custom-${params.report_dir.slice('/mnt/project-files/'.length)}`;
-  return source.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  const project = params.project.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  const digest = createHash('sha256').update(JSON.stringify([kind, params.project, params.report_dir])).digest('hex').slice(0, 10);
+  return `${kind}-${project}-${digest}`;
 }
 
 // Template lines may start with a condition tag: [repo], [no-repo], [parent], [toolkit], [fresh], [bound], [raised].
