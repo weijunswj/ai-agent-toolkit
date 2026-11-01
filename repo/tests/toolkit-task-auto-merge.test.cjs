@@ -200,7 +200,7 @@ test('hold: without a fresh yes, or in a session the user did not start, the typ
   const { head: HEAD } = ctx;
   const command = `gh pr merge 7 --merge --match-head-commit ${HEAD}`;
   const session = userSession(ctx);
-  const notApproved = /has not approved a merge of owner\/a#7/;
+  const notApproved = /has no unused approval recorded for owner\/a#7/;
   merged(ctx, binding());
   machine(ctx, null);
   assert.match(decide(ctx, bash(ctx, command, session)).deny, notApproved, 'not answered');
@@ -216,6 +216,22 @@ test('hold: without a fresh yes, or in a session the user did not start, the typ
   gate.startSession({ session_id: 'resumed', source: 'resume', cwd: ctx.repo }, { registryOptions: ctx.registryOptions });
   assert.match(decide(ctx, bash(ctx, command, 'resumed')).deny, notApproved, 'a resumed run');
   assert.equal(decide(ctx, bash(ctx, command, session)), null, 'the user\'s own fresh session still passes');
+});
+
+test(`${HOST}: Projects approval in a resumed or launched session never grants standing task authority`, t => {
+  const { wake } = require('./support/projects-approval.cjs');
+  const ctx = context(t, HOST);
+  merged(ctx, YES);
+  for (const [index, environment] of [{}, { TOOLKIT_HOST_SESSION: 'parent' }, ...gate.LAUNCHER_MARKERS.map(key => ({ [key]: 'launcher' }))].entries()) {
+    const session = `projects-${index}`;
+    gate.startSession({ session_id: session, source: 'resume', cwd: ctx.repo }, { registryOptions: ctx.registryOptions });
+    const command = `gh pr merge 7 --merge --match-head-commit ${ctx.head}`;
+    assert.match(decide(ctx, bash(ctx, command, session), environment).deny, /no unused approval/);
+    assert.equal(hold.recordPrompt({ cwd: ctx.repo, session_id: session, prompt: wake('merge owner/a#7', { id: `cmsg_${HOST}_${index}` }) }, { environment, registryOptions: ctx.registryOptions }), 1);
+    assert.equal(decide(ctx, bash(ctx, command, session), environment), null);
+    assert.match(decide(ctx, bash(ctx, command, session), environment).deny, /no unused approval/, 'explicit approval used, standing answer still unavailable');
+    assert.match(decide(ctx, bash(ctx, command.replace('merge 7', 'merge 8'), session), environment).deny, /no unused approval/);
+  }
 });
 
 test('hold: with yes, a head that changes the merge rules, or one this computer cannot read, waits for a typed merge', (t) => {

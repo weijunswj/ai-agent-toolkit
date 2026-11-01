@@ -90,7 +90,7 @@ const OK_ANSWER = /^\s*(ok|okay|yes|y|no|n|not now|later)[.!]?\s*$/i;
 // trigger, from a human the session works for. Anything else in an envelope (a coordinator's relay
 // of the user's words, a scheduled task, another person, extra text, a broken envelope) reads as
 // no reply at all, so it never answers.
-const WAKE = /^\s*<wake(?:\s+[\w-]+="[^"<>]*")*\s*>([\s\S]*)<\/wake>\s*$/;
+const WAKE = /^\s*<wake((?:\s+[\w-]+="[^"<>]*")*)\s*>([\s\S]*)<\/wake>\s*$/;
 // The envelope's body is only `project` and `thread` tags and `message` elements whose text holds no
 // markup but the host's `attachment` elements (a file or image the person sent); it is matched whole,
 // as sent, so no other tag inside a message is ever read as part of the frame. The host may end the
@@ -109,10 +109,18 @@ function withoutNotes(body) {
   }
   return rest;
 }
-const WAKE_BODY = new RegExp(`^\\s*(?:(?:<\\/?(?:project|thread)${WAKE_ATTRIBUTES}\\s*>|<message${WAKE_ATTRIBUTES}\\s*>${WAKE_INNER}<\\/message>)\\s*)+$`);
 const WAKE_MESSAGE = new RegExp(`<message(${WAKE_ATTRIBUTES})\\s*>(${WAKE_INNER})<\\/message>`, 'g');
+function frameBody(body, name) {
+  const text = body.trim();
+  const open = new RegExp(`^<${name}${WAKE_ATTRIBUTES}\\s*>`).exec(text);
+  const close = `</${name}>`;
+  return open && text.endsWith(close) ? text.slice(open[0].length, -close.length).trim() : null;
+}
 function ownerReply(prompt) { return ownerMessage(prompt).text; }
-// The reply with where it came from: { text, id, wrapped, markup }. id is the thread message's id, or
+// The reply with where it came from: { text, id, wrapped, markup, approvalEligible, sentAt }.
+// approvalEligible is true only for a well-formed direct Projects mention with no decoded markup;
+// sentAt lets the approval store reject old deliveries after their replay markers expire.
+// id is the thread message's id, or
 // null for bare text; wrapped says the text came from a Projects envelope, and markup that bare text
 // carries tags (a relay, a reminder or another wrapped message), so it is not the user typing.
 const ANY_TAG = /<\/?[A-Za-z][\w-]*(?:\s[^<>]*)?\/?>/;
@@ -123,11 +131,29 @@ function ownTyped(message) { return message.text.trim() !== '' && (message.wrapp
 function ownerMessage(prompt) {
   const text = String(prompt || '');
   const wake = WAKE.exec(text);
-  if (!wake) return { text, id: null, wrapped: false, markup: ANY_TAG.test(text) };
+  if (!wake) return { text, id: null, wrapped: false, markup: ANY_TAG.test(text), approvalEligible: false };
   const none = { text: '', id: null, wrapped: true, markup: false };
-  const body = withoutNotes(wake[1]);
-  if (!WAKE_BODY.test(body)) return none;
-  const messages = [...body.matchAll(WAKE_MESSAGE)].map(([, attributes, inner]) => ({
+  if (text.length > 256 * 1024) return none;
+  // Check every frame attribute too: conflicting wake, project or thread attributes are ambiguous.
+  for (const tag of text.matchAll(/<[\w-]+((?:\s+[\w-]+="[^"<>]*")*)\s*\/?>/g)) {
+    const names = [...tag[1].matchAll(/([\w-]+)="/g)].map(match => match[1]);
+    if (new Set(names).size !== names.length) return none;
+  }
+  const body = withoutNotes(wake[2]);
+  let frame = frameBody(body, 'project');
+  if (frame === null) return none;
+  if (frame.startsWith('<thread')) frame = frameBody(frame, 'thread');
+  if (frame === null) return none;
+  // Scan messages once and check the gaps. A repeated whole-frame regexp can backtrack over long
+  // malformed whitespace; explicit frame boundaries keep that failure path bounded too.
+  const matches = [...frame.matchAll(WAKE_MESSAGE)];
+  let end = 0;
+  for (const match of matches) {
+    if (frame.slice(end, match.index).trim() !== '') return none;
+    end = match.index + match[0].length;
+  }
+  if (!matches.length || frame.slice(end).trim() !== '') return none;
+  const messages = matches.map(([, attributes, inner]) => ({
     attributes: [...attributes.matchAll(/([\w-]+)="([^"]*)"/g)].map(([, name, value]) => [name, value]),
     inner,
   }));
@@ -138,9 +164,20 @@ function ownerMessage(prompt) {
   if (triggers.length !== 1 || triggers[0].attributes.from !== 'human' || triggers[0].attributes.trust !== 'principal') return none;
   // A message that carries a file or image is not a typed reply, whatever text is beside it.
   if (triggers[0].attributes['has-attachments'] !== undefined || triggers[0].inner.includes('<')) return none;
-  const reply = triggers[0].inner.replace(/&(lt|gt|quot|#39|apos|amp);/g, (_, name) => ({ lt: '<', gt: '>', quot: '"', '#39': "'", apos: "'", amp: '&' })[name]);
+  const reply = triggers[0].inner.replace(/&(lt|gt|quot|apos|amp|#\d+|#x[0-9a-f]+);/gi, (entity, name) => {
+    if (!name.startsWith('#')) return ({ lt: '<', gt: '>', quot: '"', apos: "'", amp: '&' })[name] || entity;
+    const point = name[1].toLowerCase() === 'x' ? parseInt(name.slice(2), 16) : Number(name.slice(1));
+    return point > 0 && point <= 0x10ffff && !(point >= 0xd800 && point <= 0xdfff) ? String.fromCodePoint(point) : entity;
+  });
   const id = typeof triggers[0].attributes.id === 'string' && triggers[0].attributes.id !== '' ? triggers[0].attributes.id : null;
-  return { text: reply, id, wrapped: true, markup: false };
+  // Merge authority uses only a fresh direct mention with a bounded message id. Governance keeps
+  // its existing text reply API; decoded markup and attachments never confer merge authority.
+  const wakeAttributes = Object.fromEntries([...wake[1].matchAll(/([\w-]+)="([^"]*)"/g)].map(([, name, value]) => [name, value]));
+  const approvalEligible = wakeAttributes.reason === 'mention' && triggers[0].attributes.mention === 'true'
+    && id !== null && /^[A-Za-z0-9_.:-]{1,256}$/.test(id)
+    && !messages.some(message => message.attributes['has-attachments'] !== undefined)
+    && !body.includes('<attachment') && !/[<>]|&(?:#\w+|[a-z]+);/i.test(reply);
+  return { text: reply, id, sentAt: triggers[0].attributes['sent-at'] || null, wrapped: true, markup: false, approvalEligible };
 }
 // An agent's command that would answer for the user: the governance CLI script with a decision, or a
 // host name next to the full answer phrase. Both are exact matches. A command that only names Claude
@@ -1636,6 +1673,7 @@ module.exports = Object.freeze({
   NOT_GITHUB_BASENAME,
   OK_ANSWER,
   ownerReply,
+  ownerMessage,
   SHORT_ANSWER,
   sessionIdOf,
   startSession,
