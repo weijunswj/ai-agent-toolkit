@@ -230,7 +230,7 @@ test('distinct piped answers follow the canonical question order without shifts'
   assert.doesNotMatch(bank, /\*\*\d+\.\d+\*\* Toolkit hooks in Codex|\| \d+\.\d+ \| Toolkit hooks in Codex/);
   assert.match(bank, /\nStatus \(nothing to answer\): Toolkit hooks in Codex: /);
   assert.doesNotMatch(bank, /Reply with either:|: all recommended/);
-  assert.match(result.stdout, /Setup choices confirmed before writes:[\s\S]*2\.2 Codex Toolkit maintenance: C - Keep current \(canonical: keep; effective: disable\)/);
+  assert.match(result.stdout, /Setup choices confirmed before writes:[\s\S]*2\.2 Codex Toolkit maintenance: B - Keep current \(canonical: keep; effective: disable\)/);
   // Reports are already kept for seven days, so "enable" and "default" name the hidden twins of the
   // recommended Keep current and apply as keep, with the same effect.
   assert.match(result.stdout, /1\.3 Update reports: B - Keep current \(canonical: keep; effective: enable\)/);
@@ -284,9 +284,10 @@ test('multiple explicit flags render and accept one remaining ordered non-TTY an
   assert.equal(result.status, 0, result.stderr || result.stdout);
   const bank = result.stdout.split('<!-- setup-toolkit-question-bank:complete -->')[0];
   const guide = bank.slice(bank.indexOf('Some visible questions'));
-  assert.match(guide, /\*\*2\.2\*\* Codex Toolkit maintenance \[A-C\]/);
+  // Maintenance is off already, so Turn off folds into Keep current and B is Keep current.
+  assert.match(guide, /\*\*2\.2\*\* Codex Toolkit maintenance \[A-B\]/);
   assert.doesNotMatch(guide, /\*\*1\.2\*\* Automatic updates \[A-C\]|: all recommended/);
-  assert.match(result.stdout, /2\.2 Codex Toolkit maintenance: B - Turn off/);
+  assert.match(result.stdout, /2\.2 Codex Toolkit maintenance: B - Keep current \(canonical: keep; effective: disable\)/);
 });
 
 test('choice-activated custom checkout detail is rendered and consumed in the canonical post-answer block', () => {

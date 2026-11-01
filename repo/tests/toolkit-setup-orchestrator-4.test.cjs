@@ -89,7 +89,8 @@ test('changed-only piped answer applies recommendations except exact indexed cha
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /Question answer source: user-approved recommended except listed changes/);
   assert.match(result.stdout, /1\.2 Automatic updates: B - Turn off \(canonical: disable; effective: disable\)/);
-  assert.match(result.stdout, /2\.2 Codex Toolkit maintenance: B - Turn off \(canonical: disable; effective: disable\)/);
+  // Maintenance is off already, so Turn off folds into Keep current and B is Keep current.
+  assert.match(result.stdout, /2\.2 Codex Toolkit maintenance: B - Keep current \(canonical: keep; effective: disable\)/);
   // Reports are already kept, so the recommendation is the single Keep current.
   assert.match(result.stdout, /1\.3 Update reports: B - Keep current \(canonical: keep; effective: enable\)/);
 });
