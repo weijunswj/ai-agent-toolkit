@@ -357,13 +357,10 @@ function hostMismatch(args, environment = process.env) {
   }
   const rerun = ['node', `"${path.join(__dirname, 'setup-toolkit.cjs')}"`, ...[...rest, ...(detected === 'codex' ? [] : ['--host', detected])]
     .map((part) => (/^[\w./:=-]+$/.test(part) ? part : `"${part}"`))].join(' ');
-  const asked = args.argv.some((arg) => arg === '--host' || arg.startsWith('--host='))
-    ? `asked for the ${HOST_LABELS[args.host]} questions with --host ${args.host}`
-    : `ran without --host, which means the ${HOST_LABELS[args.host]} questions`;
+  // Names only the app that started setup: its chat never hears about the other app's questions.
   return [
-    `SETUP STOPPED: setup was started from ${HOST_LABELS[detected]} but ${asked}. Nothing was changed.`,
-    `Run it again as: ${rerun}`,
-    detected === 'codex' ? 'Codex never adds --host.' : 'Claude Code always adds --host claude-code.'
+    `SETUP STOPPED: setup was started from ${HOST_LABELS[detected]}, and this command is not the ${HOST_LABELS[detected]} setup. Nothing was changed.`,
+    `Run it again as: ${rerun}`
   ].join('\n');
 }
 

@@ -37,11 +37,11 @@ test('each start and --host pair keeps or stops setup as planned', () => {
   const rows = [
     [{ CODEX_THREAD_ID: 't' }, ['--plan'], null],
     [{ CODEX_THREAD_ID: 't' }, ['--plan', '--host', 'codex'], null],
-    [{ CODEX_THREAD_ID: 't' }, ['--plan', '--host', 'claude-code'], /started from Codex but asked for the Claude Code questions with --host claude-code\. Nothing was changed\.\nRun it again as: node "[^"]+setup-toolkit\.cjs" --plan\nCodex never adds --host\.$/],
+    [{ CODEX_THREAD_ID: 't' }, ['--plan', '--host', 'claude-code'], /^SETUP STOPPED: setup was started from Codex, and this command is not the Codex setup\. Nothing was changed\.\nRun it again as: node "[^"]+setup-toolkit\.cjs" --plan$/],
     [{ CODEX_THREAD_ID: 't' }, ['--execute', '--host=claude-code', '--json'], /Run it again as: node "[^"]+setup-toolkit\.cjs" --execute --json\n/],
     [{ CLAUDECODE: '1' }, ['--plan', '--host', 'claude-code'], null],
-    [{ CLAUDECODE: '1' }, ['--plan'], /started from Claude Code but ran without --host, which means the Codex questions\. Nothing was changed\.\nRun it again as: node "[^"]+setup-toolkit\.cjs" --plan --host claude-code\nClaude Code always adds --host claude-code\.$/],
-    [{ CLAUDECODE: '1' }, ['--plan', '--host', 'codex'], /asked for the Codex questions with --host codex\./],
+    [{ CLAUDECODE: '1' }, ['--plan'], /^SETUP STOPPED: setup was started from Claude Code, and this command is not the Claude Code setup\. Nothing was changed\.\nRun it again as: node "[^"]+setup-toolkit\.cjs" --plan --host claude-code$/],
+    [{ CLAUDECODE: '1' }, ['--plan', '--host', 'codex'], /Run it again as: node "[^"]+setup-toolkit\.cjs" --plan --host claude-code$/],
     [{}, ['--plan'], null],
     [{}, ['--plan', '--host', 'claude-code'], null],
     [{ CLAUDECODE: '1', CODEX_CI: '1' }, ['--plan'], null],
@@ -55,7 +55,7 @@ test('each start and --host pair keeps or stops setup as planned', () => {
 });
 
 test('a mismatched start stops with exit 2, no question bank and nothing written', () => {
-  for (const [marker, host, other] of [['CODEX_THREAD_ID', 'claude-code', 'Codex'], ['CLAUDECODE', 'codex', 'Claude Code']]) {
+  for (const [marker, host, app, otherApp] of [['CODEX_THREAD_ID', 'claude-code', 'Codex', 'Claude'], ['CLAUDECODE', 'codex', 'Claude Code', 'Codex']]) {
     const root = tmpRoot();
     try {
       const env = isolatedHomeEnv(root);
@@ -63,7 +63,9 @@ test('a mismatched start stops with exit 2, no question bank and nothing written
       const result = run(['--plan', '--host', host], { env: { ...env, [marker]: '1' }, codexDocLimitQuestion: true });
       assert.equal(result.status, core.SETUP_HOST_MISMATCH, result.stderr);
       assert.equal(core.SETUP_HOST_MISMATCH, 2);
-      assert.match(result.stderr, new RegExp(`SETUP STOPPED: setup was started from ${other} but`));
+      assert.match(result.stderr, new RegExp(`^SETUP STOPPED: setup was started from ${app}, and this command is not the ${app} setup`));
+      // The stop names only the app that started setup, never the other app.
+      assert.doesNotMatch(result.stderr, new RegExp(otherApp));
       assert.equal(result.stdout, '');
       assert.deepEqual(fs.readdirSync(root).sort(), before);
     } finally {
