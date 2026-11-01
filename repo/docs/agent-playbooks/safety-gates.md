@@ -109,6 +109,14 @@ The owner answered a card with a standing OK: on one computer, agents may replac
 - Do not skip a repository's own commit or push checks (`git commit -n` or `--no-verify`, `git push --no-verify`, a different `core.hooksPath`). Fix what they report; if a check is wrong, tell the owner. No hook checks this: CI is the backstop.
 - Never answer the governance question for the owner: do not run the governance CLI with a decision, start, resume or fork a session to answer it, feed a session an answer, or type or click an answer in a UI. Hooks check only the governance CLI and edits to Toolkit's user-state files; the rest of this rule is yours to keep.
 
+## Recovering A Governance Hold
+
+Show the actual question and the one folder it names. The owner's next own message in that run can answer, including when a refused command reached the folder from another working directory. An answer never applies to several folders. A reply in other words, such as "ur rec" after a recommendation of no, uses the existing one-use reply ticket: read the owner's meaning, record only a clear answer, or ask for confirmation of one named answer. For a repository outside github.com, the ticket records only acknowledgement that governance is off; it cannot enable governance.
+
+A direct Projects mention must carry an eligible owner message, a fresh delivery time after the question and an unused delivery id. Coordinator quotations, relays, attachments and launched sessions cannot answer. Answers sent before the question is shown do not count. If a GitHub origin remote was added after the off acknowledgement, explain that the new remote is why Toolkit asks again.
+
+If reply state cannot be read or saved, record nothing and explain the local state error. Restore the state from a known intact copy before asking for a fresh reply; never delete spent delivery receipts to clear a hold. State conversion preserves spent ids and asks again when an old ticket cannot be bound to a question. Installed host testing must still prove that the owner's real thread reply reaches this route.
+
 ## Reporting
 
 If approval is required, state the action, target, risk, and exact confirmation needed. If approval is not available, stop before the risky action and report the safe work completed.

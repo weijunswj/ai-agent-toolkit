@@ -115,7 +115,8 @@ function rowErrors(row) {
     if (!Array.isArray(row.steps) || row.steps.length < 1 || row.steps.length > 24) errors.push('steps must list 1 to 24 preceding hook events');
     else row.steps.forEach((step, index) => {
       if (!step || typeof step !== 'object' || Array.isArray(step)) { errors.push(`step ${index + 1} must be an object`); return; }
-      for (const key of Object.keys(step)) if (!['event', 'payload', 'expect', 'expect_by_host', 'note'].includes(key)) errors.push(`step ${index + 1} has unknown key ${key}`);
+      for (const key of Object.keys(step)) if (!['event', 'payload', 'expect', 'expect_by_host', 'note', 'add_github_origin'].includes(key)) errors.push(`step ${index + 1} has unknown key ${key}`);
+      if (step.add_github_origin !== undefined && (step.add_github_origin !== true || row.fixture?.repo?.governance !== 'none')) errors.push(`step ${index + 1} add_github_origin requires true and a local-only fixture repository`);
       const candidate = { id: row.id, source: row.source, hosts: row.hosts, kind: row.kind, status: 'pass',
         event: step.event, payload: step.payload, expect: step.expect, expect_by_host: step.expect_by_host, note: step.note };
       errors.push(...rowErrors(candidate).map(error => `step ${index + 1}: ${error}`));
@@ -335,6 +336,12 @@ class Fixture {
 
   #git(cwd, args) { return git(cwd, args, { env: this.env }); }
 
+  // The one bounded fixture transition needed to test a local repository gaining a GitHub remote.
+  // It always targets this disposable work folder and a reserved fixture identity, never a URL
+  // supplied by a row or a live service. Hooks still may not mutate any fixture file themselves.
+  addGitHubOrigin() { this.#git(this.work, ['remote', 'add', 'origin', 'https://github.com/toolkit-test-fixture/remote-added.git']); }
+  resetOrigin() { this.#git(this.work, ['remote', 'remove', 'origin']); }
+
   #files(folder, files) {
     for (const [name, text] of Object.entries(files)) {
       const file = path.join(folder, ...name.split('/'));
@@ -479,7 +486,10 @@ async function runRow(row, hosts, { roots, scratch }) {
   const results = [];
   try {
     for (const [index, host] of hosts.entries()) {
-      if (index) { fs.rmSync(fixture.home, { recursive: true, force: true }); fs.cpSync(pristine, fixture.home, { recursive: true }); }
+      if (index) {
+        fs.rmSync(fixture.home, { recursive: true, force: true }); fs.cpSync(pristine, fixture.home, { recursive: true });
+        if (row.steps?.some(step => step.add_github_origin)) fixture.resetOrigin();
+      }
       let observed;
       try { observed = await runOnHost(row, host, fixture, roots); } catch (error) { observed = { decision: 'error', problems: [`the runner failed: ${error.message}`], failed: [] }; }
       results.push({ host, observed });
@@ -494,6 +504,7 @@ async function runOnHost(row, host, fixture, roots) {
   // Every event uses the real host matcher and process, sharing only this row's isolated home.
   // A mismatch in an earlier step fails the row, even if the final merge happens to be refused.
   for (const [index, step] of (row.steps || []).entries()) {
+    if (step.add_github_origin) fixture.addGitHubOrigin();
     const observed = await runOnHost({ ...row, steps: undefined, expect_by_host: undefined, ...step }, host, fixture, roots);
     if (!meets(step, host, observed)) return { ...observed, problems: [...observed.problems, `sequence step ${index + 1} did not meet its expectation`] };
   }

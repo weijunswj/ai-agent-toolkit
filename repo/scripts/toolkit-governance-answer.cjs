@@ -7,11 +7,12 @@
 // it the question to ask; the user's reply then comes with a ticket that records only that answer.
 //
 // The ticket comes from the governance hook, which gives one only when the user's own message
-// arrived in the run of the session that was shown the question; it names the repositories asked
+// arrived in the run of the session that was shown the question; it names the one folder asked
 // about, works once and lapses after half an hour. This script records nothing without a live
 // ticket, prints what it recorded (or why not) for the agent to tell the user, and exits 0 only
 // when the answer was recorded, or, for `confirm-*`, when the confirmation was set up (nothing is
-// recorded then).
+// recorded then). Outside github.com it records only the off acknowledgement. Direct Projects
+// replies must be eligible, fresh and unused; launched sessions never receive or spend a ticket.
 
 const gate = require('./toolkit-governance-gate.cjs');
 
@@ -19,6 +20,7 @@ function main(argv) {
   const [word, ticket, ...rest] = argv;
   if (rest.length > 0 || typeof word !== 'string' || typeof ticket !== 'string') {
     process.stderr.write('Usage: node toolkit-governance-answer.cjs <yes|no|later|confirm-yes|confirm-no|confirm-later> <ticket>\n');
+    process.stderr.write('Use only the ticket from the owner\'s reply after Toolkit asked about one named folder. Outside github.com it can only acknowledge governance being off.\n');
     return 2;
   }
   let result;

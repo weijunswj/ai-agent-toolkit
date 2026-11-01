@@ -54,6 +54,12 @@ test('matchers read as the hosts read them: none matches all, a plain list exact
 test('bounded sequences validate every preceding event and its expectation', () => {
   const step = { event: 'UserPromptSubmit', payload: { prompt: 'merge owner/a#9' }, expect: { decision: 'allow' } };
   assert.deepEqual(pack.rowErrors(row({ steps: [step] })), []);
+  const transition = { ...step, add_github_origin: true };
+  assert.deepEqual(pack.rowErrors(row({ fixture: { repo: { governance: 'none' } }, steps: [transition] })), []);
+  for (const fixture of [undefined, { repo: { governance: 'enabled' } }, { repo: { governance: 'undecided' } }]) {
+    assert.match(pack.rowErrors(row({ fixture, steps: [transition] })).join('\n'), /local-only fixture/);
+  }
+  assert.match(pack.rowErrors(row({ fixture: { repo: { governance: 'none' } }, steps: [{ ...transition, add_github_origin: 'https://example.test' }] })).join('\n'), /requires true/);
   assert.deepEqual(pack.rowErrors(row({ steps: [{ event: 'SessionStart', payload: { source: 'resume' }, expect: { decision: 'allow' } }, step] })), []);
   for (const steps of [[], Array(25).fill(step), [{ ...step, steps: [step] }], [{ ...step, expect: { decision: 'maybe' } }], [null]]) {
     assert.notDeepEqual(pack.rowErrors(row({ steps })), [], JSON.stringify(steps));
