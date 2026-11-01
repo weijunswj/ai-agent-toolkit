@@ -1,7 +1,7 @@
 'use strict';
 
 // The Claude Projects controller skill lives in the Toolkit repo as its source of truth, outside
-// skills/, so no plugin ever offers it as a skill. The user uploads it to claude.ai by hand.
+// skills/, so no plugin ever offers it as a skill. The coordinator reads the copy pulled from the repo into the project library.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -10,8 +10,9 @@ const test = require('node:test');
 const repoRoot = path.resolve(__dirname, '..', '..');
 const SKILL_REL = 'repo/contracts/claude-projects/web-controller-projects/SKILL.md';
 const read = (rel) => fs.readFileSync(path.join(repoRoot, rel), 'utf8').replace(/\r\n/g, '\n');
-// SKILL.md keeps the always-needed rules; setup, instructions sync and recurring-task procedures
-// live in its reference files, uploaded with it. Content checks read the whole bundle.
+// SKILL.md keeps the always-needed rules; setup, instructions sync, recurring-task, periodic-run,
+// guidebook, device-work and permission-ask procedures live in its reference files beside it. Content
+// checks read the whole bundle.
 const REFERENCE_DIR = 'repo/contracts/claude-projects/web-controller-projects/reference';
 const referenceFiles = () => fs.readdirSync(path.join(repoRoot, REFERENCE_DIR)).filter(name => name.endsWith('.md')).sort()
   .map(name => `${REFERENCE_DIR}/${name}`);
@@ -291,9 +292,29 @@ test('Projects keeps its Toolkit base layer current without touching the project
   }
   // The coordinator acts on every check-in prefix, in dependency order.
   const prefixes = ['`GUIDEBOOK MISSING`', '`SKILL UPDATE`', '`BLOCK OUTDATED`', '`BINDING STALE`', '`TOOLKIT CHANGED`', '`MEMORY FORMAT`', '`TASKS OUTDATED`', '`NUDGE NOT ARMED`', '`PROJECT TASKS MISSING`', '`PLUGIN BEHIND`'];
-  const section = text.slice(text.indexOf('## Daily check-in'), text.indexOf('## Hourly nudge'));
+  // The prefix list moved word for word from the skill's Daily check-in section into reference/periodic-runs.md.
+  const section = text.slice(text.indexOf('## Acting on the check-in report'), text.indexOf('## Hourly nudge home thread'));
   const at = prefixes.map(prefix => section.indexOf(`  - ${prefix}`));
   assert.ok(at.every((position, index) => position > -1 && (index === 0 || position > at[index - 1])), at.join(','));
+});
+
+test('every reference or tasks file SKILL.md names exists, so a pointer cannot dangle after a move', () => {
+  const text = read(SKILL_REL);
+  const named = [...new Set([...text.matchAll(/`((?:reference|tasks)\/[a-z0-9-]+\.md)`/g)].map(match => match[1]))];
+  for (const rel of ['reference/guidebook.md', 'reference/periodic-runs.md', 'reference/device-work.md', 'reference/permission-asks.md']) {
+    assert.ok(named.includes(rel), `SKILL.md points to ${rel}`);
+  }
+  for (const rel of named) assert.ok(fs.existsSync(path.join(repoRoot, path.dirname(SKILL_REL), rel)), rel);
+});
+
+test('nothing tells the owner to upload the Projects skill by hand', () => {
+  // The owner never hand-uploads the skill: the coordinator reads the copy pulled from the repo.
+  const skillDir = path.dirname(SKILL_REL);
+  const files = [...fs.readdirSync(path.join(repoRoot, skillDir), { recursive: true })]
+    .filter(name => /\.(md|json)$/.test(name)).map(name => `${skillDir}/${String(name).replace(/\\/g, '/')}`);
+  for (const rel of [...files, 'repo/scripts/toolkit-install-health.cjs', 'skills/toolkit-setup/SKILL.md']) {
+    assert.doesNotMatch(read(rel), /upload the (folder|zip|skill)/i, rel);
+  }
 });
 
 test('device steps go to the Remote Control session, not the owner', () => {

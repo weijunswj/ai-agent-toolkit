@@ -92,7 +92,9 @@ test('both safety-gates playbooks carry the same procedure, every hard stop and 
 });
 
 test('the Projects skill uses a decision card, the same ledger and the playbook hard stops', () => {
-  const skill = read('repo/contracts/claude-projects/web-controller-projects/SKILL.md');
+  // The bullet moved word for word from SKILL.md into its reference file; SKILL.md points there and keeps the hard-stop line.
+  assert.match(read('repo/contracts/claude-projects/web-controller-projects/SKILL.md'), /read `reference\/permission-asks\.md` beside this skill before you ask\. Never offer or honour a hard stop\./);
+  const skill = read('repo/contracts/claude-projects/web-controller-projects/reference/permission-asks.md');
   assert.ok(skill.includes('`standing-permissions/ledger.json` in the transport store'));
   assert.ok(skill.includes('if nothing covers the step, posts one decision card: just this once, from now on for this exact scope, or no'));
   assert.match(skill, /Never offer or honour a hard stop \(the Toolkit safety-gates playbook list\)/);
