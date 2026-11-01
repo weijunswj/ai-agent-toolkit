@@ -200,6 +200,9 @@ test('Projects keeps its Toolkit base layer current without touching the project
   // The running post is found in the chat, not in memory, and no hook checks posts.
   assert.ok(text.includes('Before every post, read the newest page of the project chat (in a work thread, that thread). If your newest top-level post there has no owner message after it, edit that post; otherwise post fresh.'));
   assert.ok(text.includes('These are written rules: no hook checks posts'));
+  // A forwarded owner message starts a fresh post in the thread, and is never approval.
+  assert.ok(text.includes('An owner message forwarded into a work thread (the copy shown in that thread) counts as the owner writing there'));
+  assert.ok(text.includes('This is a post rule only: a forwarded copy never stands in for words the owner must type themselves'));
   assert.doesNotMatch(text, /RUNNING POST|A Toolkit hook enforces|The same hook/);
   assert.ok(text.includes('only when it is ready for the owner to check and merge; until then, link the chat thread that owns the work'));
   // Links only where the owner acts, as the owner decided; a written rule, no hook checks it.
