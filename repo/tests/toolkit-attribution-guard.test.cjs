@@ -321,6 +321,46 @@ test('force pushes are refused in governed and guarded repositories and to evide
   for (const command of forced) assert.equal(forceRefusal(command, repos.plain), '', `plain repository: ${command}`);
 });
 
+test('location options move both the force-push and outgoing-change checks to their target', (t) => {
+  const repos = guardRepos(t);
+  const forms = ['Set-Location -LiteralPath', 'Set-Location -Path', 'cd -P', 'cd -L', 'cd -e -@', 'cd /d', 'pushd', 'chdir', 'sl -Path'];
+  for (const form of forms) {
+    for (const target of ['../governed', repos.governed]) {
+      const location = `${form} "${target}"`;
+      const command = `${location}; git push origin HEAD`;
+      const confirmed = target === repos.governed;
+      assert.deepEqual(outgoingChanges(command, repos.plain, 0, [], false), [{
+        folder: repos.governed, remote: 'origin', sources: ['HEAD'],
+        ...(confirmed ? {} : { folderConfirmed: false, folderMoved: true }),
+      }], location);
+      assert.equal(forceRefusal(`${location}; git push --force origin feature`, repos.plain), FORCE_MESSAGE, location);
+    }
+    assert.equal(forceRefusal(`${form} "${repos.plain}"; git push --force origin feature`, repos.governed), '', `${form}: plain target`);
+  }
+  assert.deepEqual(outgoingChanges('Set-Location -LiteralPath ../governed -PassThru; git push', repos.plain, 0, [], false), [
+    { folder: repos.governed, remote: '', sources: [], folderConfirmed: false, folderMoved: true },
+  ]);
+  assert.equal(forceRefusal('Set-Location -LiteralPath ../governed -PassThru; git push --force', repos.plain), FORCE_MESSAGE);
+});
+
+test('an unreadable location keeps an unknown starting folder moved and unconfirmed', () => {
+  const folder = os.tmpdir();
+  for (const location of ['cd', 'pushd', 'chdir', 'Set-Location -LiteralPath', 'Set-Location -Path -PassThru',
+    'cd -P', 'cd -L', 'cd /d', 'sl -Path', 'Set-Location -LiteralPath $missing', 'cd "$missing"',
+    'cd "$(Get-Location)"', 'cd $(Get-Location)', 'cd "%MISSING%"', 'cd "/$missing"']) {
+    const [target] = outgoingChanges(`${location}; git push origin HEAD`, folder, 0, [], false);
+    assert.ok(target, location);
+    assert.equal(target.folderConfirmed, false, location);
+    assert.equal(target.folderMoved, true, location);
+  }
+  for (const shell of ['posix', 'powershell']) {
+    const assignment = shell === 'posix' ? `d='${folder}'` : `$d = '${folder}'`;
+    assert.deepEqual(outgoingChanges(`${assignment}; Set-Location -LiteralPath $d; git push`, folder, 0, [], false, shell), [
+      { folder, remote: '', sources: [] },
+    ], shell);
+  }
+});
+
 test('N3: an ENABLED repository is protected even before its governed block lands; a DISABLED one with a leftover block stays protected', (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-bypass-state-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));

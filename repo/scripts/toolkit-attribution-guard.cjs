@@ -89,6 +89,13 @@ function withVariables(commands, shell = null) {
   return result;
 }
 
+// Location commands take their last non-option word as the folder. In particular, -Path and
+// -LiteralPath name the following word, while flags such as -P, -L, /d and -PassThru do not.
+const LOCATION_COMMAND = /^(?:cd|pushd|chdir|set-location|sl)$/i;
+function locationTarget(words) {
+  return words.slice(1).filter((word) => !word.startsWith('-') && !/^\/d$/i.test(word)).pop() || '';
+}
+
 // Find the relevant subcommand after git's global options. Each -C is relative to the previous
 // folder, while gh always uses the base folder. Option values cannot be mistaken for subcommands.
 function messageCommand({ words, offsets }, root) {
@@ -331,8 +338,9 @@ function forceRefusal(command, cwd, depth = 0, registryOptions = {}, shell = nul
   const cache = new Map();
   for (const current of withVariables(shellCommands(text), shell)) {
     // A cd earlier in the same command line moves the folder later git commands run in.
-    if (/^(?:cd|pushd|set-location|sl)$/i.test(current.words[0]) && current.words.length === 2) {
-      root = shellPath(root, current.words[1]);
+    if (LOCATION_COMMAND.test(current.words[0])) {
+      const target = locationTarget(current.words);
+      if (target) root = shellPath(root, target);
       continue;
     }
     const git = gitCommand(current, root);
@@ -479,9 +487,10 @@ function outgoingChanges(command, cwd, depth = 0, preceding = [], confirmed = tr
   const withPreceding = (target) => (preceding.length ? { ...target, preceding: preceding.slice() } : target);
   const marked = (entry, known) => (known ? entry : { ...entry, folderConfirmed: false, ...(moved ? { folderMoved: true } : {}) });
   for (const current of withVariables(shellCommands(text), shell)) {
-    if (/^(?:cd|pushd|set-location|sl)$/i.test(current.words[0]) && current.words.length === 2) {
-      root = shellPath(root, current.words[1]);
-      confirmed ||= absoluteShellPath(current.words[1]);
+    if (LOCATION_COMMAND.test(current.words[0])) {
+      const target = locationTarget(current.words);
+      if (target) root = shellPath(root, target);
+      confirmed ||= Boolean(target && !/[$`]|%[^%]+%/.test(target) && absoluteShellPath(target));
       if (!confirmed) moved = true;
       continue;
     }

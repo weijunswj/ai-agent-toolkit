@@ -333,6 +333,8 @@ test('matrix: a Codex call that names no folder is checked in the working tree i
     ['clean lanes: stash pop before a push of HEAD', clean, 'git stash pop; git push uat HEAD', unconfirmed],
     ['clean lanes: status before a push of HEAD', clean, 'git status; git push uat HEAD', allowed],
     ['lanes: a relative cd keeps the folder unconfirmed', repo, 'cd .tmp/worktrees/lane-one; git push', unconfirmed],
+    ['lanes: Set-Location with an option keeps the folder unconfirmed', repo, 'Set-Location -LiteralPath .tmp/worktrees/lane-two; git push uat HEAD', unconfirmed],
+    ['lanes: cd -P to the full path checks its credential', repo, `cd -P "${path.join(repo, '.tmp', 'worktrees', 'lane-two')}"; git push uat HEAD`, committedKey],
     ['clean lanes: a relative cd keeps the folder unconfirmed', clean, 'cd .tmp/worktrees/lane-one; git push', unconfirmed],
     ['clean lanes: a commit before a push of HEAD', clean, 'git add -A; git commit -m x; git push uat HEAD', unconfirmed],
     ['lanes: git -C to the full path confirms it', repo, `git -C "${laneOne}" add -A; git -C "${laneOne}" commit -m x; git -C "${laneOne}" push uat lane/one`, pendingFile],

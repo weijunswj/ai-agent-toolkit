@@ -651,12 +651,16 @@ function shellRefusal(text, cwd, registryOptions = {}, shell = null) {
 // plus the raw text so braces, parentheses, quotes and a single & cannot hide a runner.
 function nestedRefusal(text) {
   const message = 'this command runs a git push through another shell (bash -c, pwsh -Command, cmd /c or eval), so Toolkit cannot read where it pushes and refused it. Run the push as its own git command.';
+  const mentionsPush = /\bgit\b/i.test(text) && /\bpush\b/i.test(text);
   const blocked = (word, tail) => {
     const name = word.split(/[\\/]/).pop().replace(/\.exe$/i, '').toLowerCase();
     const encoded = [...tail.matchAll(/(?:^|\s)(-[a-z]+)(?=\s|$)/gi)].some(match => '-encodedcommand'.startsWith(match[1].toLowerCase()) || /^-ec$/i.test(match[1]));
     if (/^(?:pwsh|powershell)$/.test(name) && encoded) return true;
     const script = name === 'cmd' ? tail.replace(/(^|\s)\/[ck]/i, '$1 ') : tail;
-    if (!/\bgit\b/i.test(script) || !/\bpush\b/i.test(script)) return false;
+    // Variables and substitutions in this runner's tail cannot be resolved here. If the line
+    // mentions a push anywhere, refuse that unreadable script with the same blanket message.
+    const unresolved = /\$(?:[A-Za-z_]|\{|\()|`[^`]*`|%[^%\s]+%/.test(tail);
+    if (!(mentionsPush && unresolved) && (!/\bgit\b/i.test(script) || !/\bpush\b/i.test(script))) return false;
     if (/^(?:bash|sh|zsh|dash|ksh)$/.test(name)) return /(?:^|\s)-[a-z]*c[a-z]*(?=\s|$)/i.test(tail);
     if (name === 'cmd') return /(?:^|\s)\/[ck]/i.test(tail);
     return /^(?:pwsh|powershell|eval|iex|invoke-expression)$/.test(name);
@@ -667,8 +671,25 @@ function nestedRefusal(text) {
     }
   }
   const runners = /(?:^|[\s;&|(){}"'=\\/])((?:bash|sh|zsh|dash|ksh|pwsh|powershell|cmd|eval|iex|invoke-expression)(?:\.exe)?)(?=$|[\s"'(){};&|])/gi;
+  let quoteAt = 0;
+  let outerQuote = '';
   for (const match of text.matchAll(runners)) {
     const start = match.index + match[0].length;
+    const runnerAt = start - match[1].length;
+    // Runner names inside quoted data are not commands. Keep the quoted tail of an actual runner.
+    for (; quoteAt < runnerAt; quoteAt += 1) {
+      const char = text[quoteAt];
+      const next = text[quoteAt + 1];
+      if (outerQuote !== "'" && (char === '\\' || char === '`') && next
+        && (char === '`' || (outerQuote === '"' ? '"\\$`'.includes(next) : /[\s"'\\;&|()]/.test(next)))) { quoteAt += 1; continue; }
+      if (outerQuote) {
+        if (char === outerQuote) {
+          if (outerQuote === "'" && next === "'") quoteAt += 1;
+          else outerQuote = '';
+        }
+      } else if (char === '"' || char === "'") outerQuote = char;
+    }
+    if (outerQuote) continue;
     let end = start;
     let quote = '';
     let depth = 0;

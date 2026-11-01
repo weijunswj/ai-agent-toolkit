@@ -395,13 +395,31 @@ test('pushes through another shell or expression runner are refused outright', (
     'pwsh -Command "Write-Output ready;" "git push origin HEAD:main"',
     'powershell -ExecutionPolicy Bypass "git push origin HEAD:main"',
     'bash -c "npm test" && bash -c "git push origin feature"',
+    `rg -F 'bash -c "git push"' .; {bash -c "git push origin feature"}`,
     String.raw`bash -c 'printf "%s\n" "$1"' -- 'git push origin HEAD:main'`,
+    `s='git push origin HEAD:main'; bash -c "$s"`,
+    "$s = 'git push origin HEAD:main'; pwsh -Command $s",
+    'bash -c "$(cat push.sh)"; echo git push',
+    'cmd /c %CMD% & echo git push', 'eval "$PUSH" # git push',
+    'sh -lc "${PUSH}"; echo git push', 'zsh -c "$(cat push.sh)"; echo git push',
+    'dash -c "`cat push.sh`"; echo git push', 'ksh -c "$PUSH"; echo git push',
+    'powershell -Command $env:CMD; echo git push', 'cmd /k %CMD% & echo git push',
+    'iex $s; echo git push', 'Invoke-Expression ${CMD}; echo git push',
   ];
   for (const command of blocked) assert.equal(decide(ctx, bash(feature, command))?.deny, message, command);
   const allowed = ['git push origin work', 'bash -c "git status"', 'pwsh -Command "Write-Output ready"',
+    'git commit -m "Refuse bash -c git push wrappers"', `rg -F 'bash -c "git push"' repo`,
+    'gh pr create --title "Block bash -c git push"',
+    String.raw`git commit -m "Refuse \"bash -c git push\" wrappers"`,
     'cmd /c echo push', 'eval echo git', 'bash script.sh',
     'bash -c "npm test" && git push origin feature', 'bash -lc "make"; git push origin feature',
-    'pwsh -Command "Write-Output ok" | Out-Null; git push origin feature'];
+    'pwsh -Command "Write-Output ok" | Out-Null; git push origin feature',
+    'eval "$(ssh-agent -s)"', 'bash -c "cd $HOME && npm test"',
+    'pwsh -Command "Write-Output $env:USERNAME"',
+    'eval "$(echo true)"', 'bash "$SCRIPT"; echo git push',
+    'cmd /d %CMD% & echo git push', 'bash -c "npm test"; echo $PUSH git push',
+    `rg -F 'eval "$PUSH" # git push' repo`,
+    'bash -c "$CMD"; echo git pushy', 'eval "$CMD"; echo digit push'];
   for (const command of allowed) assert.equal(decide(ctx, bash(feature, command)), null, command);
 });
 
