@@ -1,5 +1,11 @@
 # Toolkit Changelog
 
+## 3.30.2
+
+### Fixed
+
+- Projects skill: work threads post fresh below an owner message the coordinator forwards to them again, as before the post hook was removed. This counts only for choosing which post to edit, never as approval.
+
 ## 3.30.1
 
 ### Fixed
