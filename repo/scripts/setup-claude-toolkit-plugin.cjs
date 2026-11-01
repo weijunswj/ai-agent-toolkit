@@ -272,6 +272,7 @@ function validateInstalledEnforcement(installed, repoRoot, expectedVersion) {
     ["repo/scripts/toolkit-staging-generations.cjs",false],
     ["repo/scripts/setup-codex-toolkit-plugin.cjs",false],
     ["repo/scripts/setup-toolkit-core.cjs",false],
+    ["repo/scripts/agent-host-markers.cjs",false],
     ["repo/scripts/setup-core-claude.cjs",false],
     ["repo/scripts/setup-core-codex.cjs",false],
     ["repo/scripts/setup-toolkit.cjs",false],
