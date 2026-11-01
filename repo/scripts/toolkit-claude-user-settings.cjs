@@ -8,8 +8,9 @@
 //   pluginConfigs["cc-plugin-agents-md@builtin"].options.instructionFiles: "claude-md-and-agents-md"
 //                                           read AGENTS.md as well as CLAUDE.md
 // Toolkit records, per setting and per settings file, that it wrote the value. A value the owner set by hand
-// (any value Toolkit did not record) is reported, with whether it matches Toolkit's value, and never changed or removed. Turning a setting off removes
-// it only while it still holds the value Toolkit recorded, along with any parent objects Toolkit created.
+// (any value Toolkit did not record) is reported, with whether it matches Toolkit's value. Turning a setting on
+// sets Toolkit's value, replacing a different one; turning it off removes that one key whoever set it. Parent
+// objects and the file itself are removed only when they end up empty and Toolkit's record says Toolkit created them.
 
 const fs = require('node:fs');
 const os = require('node:os');
@@ -143,10 +144,10 @@ class ClaudeUserSettings {
   #stateOf(read, spec, entry) {
     if (read.error) return { id: spec.id, label: spec.label, state: STATES.UNREADABLE, detail: read.error };
     const found = lookup(read.settings, spec.keyPath);
-    if (found.blocked) return { id: spec.id, label: spec.label, state: STATES.OWNER, value: null, matches: false, detail: 'a parent entry is not an object' };
+    if (found.blocked) return { id: spec.id, label: spec.label, state: STATES.OWNER, value: null, matches: false, blocked: true, detail: 'a parent entry is not an object' };
     if (!found.found) return { id: spec.id, label: spec.label, state: STATES.DEFAULT };
     if (entry && same(entry.value, found.value) && same(found.value, spec.value)) return { id: spec.id, label: spec.label, state: STATES.TOOLKIT, value: found.value };
-    // matches tells an owner value equal to Toolkit's pick apart from a different one; both stay untouched.
+    // matches tells an owner value equal to Toolkit's pick (on already) apart from a different one.
     return { id: spec.id, label: spec.label, state: STATES.OWNER, value: found.value, matches: spec.equivalent ? spec.equivalent(found.value) : same(found.value, spec.value) };
   }
 
@@ -157,8 +158,8 @@ class ClaudeUserSettings {
   }
 
   // choices: enable | disable | keep for every managed setting, or { <setting id>: enable | disable | keep }
-  // where a setting left out is kept. Settings apply in order and each settles on its own: owner values stay,
-  // an unreadable file holds everything, and the record keeps only live Toolkit values.
+  // where a setting left out is kept. Settings apply in order and each settles on its own: an unreadable file
+  // or a parent entry that is not an object holds that setting, and the record keeps only live Toolkit values.
   apply(choices) {
     const byId = typeof choices === 'string' ? Object.fromEntries(SETTINGS.map((spec) => [spec.id, choices])) : choices;
     if (!isObject(byId)) throw new Error('Unsupported Claude settings choices.');
@@ -177,19 +178,23 @@ class ClaudeUserSettings {
     // Re-reads the record, so an entry saved earlier in this call is removed too.
     const forget = () => { const now = this.#readRecord(); if (Object.hasOwn(now, key)) { delete now[key]; this.#saveRecord(now); } };
     if (before.state === STATES.UNREADABLE) return { status: 'held', changed: false, ...before };
-    if (before.state === STATES.OWNER) { forget(); return { status: 'owner-value-kept', changed: false, ...before }; }
     if (choice === 'keep') {
       if (before.state !== STATES.TOOLKIT) forget();
       return { status: 'kept', changed: false, ...before };
     }
+    // Replacing or removing under a parent that is not an object would discard more than this one setting.
+    if (before.blocked) { forget(); return { status: 'held', changed: false, ...before }; }
+    // The file counts as Toolkit-created for every setting once any of them created it, so the last
+    // setting turned off removes a file that holds nothing else.
+    const pathSuffix = key.slice(spec.id.length);
+    const fileCreated = Object.entries(entries).some(([other, value]) => other.endsWith(pathSuffix) && value?.created_file === true);
     if (choice === 'enable') {
       if (before.state === STATES.TOOLKIT) return { status: 'set', changed: false, ...before };
+      // An owner value that already does what Toolkit's does is on already, so it is not rewritten.
+      if (before.state === STATES.OWNER && before.matches === true) { forget(); return { status: 'set', changed: false, ...before }; }
+      // A different owner value is replaced; its parents already exist, so created stays empty.
       const { settings, created } = withValue(read.settings, spec.keyPath, spec.value);
-      // The file counts as Toolkit-created for every setting once any of them created it, so the last
-      // setting turned off removes a file that holds nothing else.
-      const pathSuffix = key.slice(spec.id.length);
-      const fileCreated = read.text === null || Object.entries(entries).some(([other, value]) => other.endsWith(pathSuffix) && value?.created_file === true);
-      const entry = { settings_path: this.#settingsPath, value: spec.value, created_parents: created, created_file: fileCreated };
+      const entry = { settings_path: this.#settingsPath, value: spec.value, created_parents: created, created_file: read.text === null || fileCreated };
       this.#saveRecord({ ...entries, [key]: entry });
       try { this.#writeSettings(read, settings); }
       catch (error) {
@@ -199,9 +204,10 @@ class ClaudeUserSettings {
       return { status: 'set', changed: true, id: spec.id, label: spec.label, state: STATES.TOOLKIT, value: spec.value };
     }
     if (before.state === STATES.DEFAULT) { forget(); return { status: 'claude-default', changed: false, ...before }; }
-    const entry = entries[key];
-    const settings = withoutValue(read.settings, spec.keyPath, Array.isArray(entry.created_parents) ? entry.created_parents : []);
-    this.#writeSettings(read, entry.created_file === true && Object.keys(settings).length === 0 ? null : settings);
+    // Off removes the key whoever set it; only a live Toolkit value's record names parents Toolkit created.
+    const entry = before.state === STATES.TOOLKIT ? entries[key] : null;
+    const settings = withoutValue(read.settings, spec.keyPath, Array.isArray(entry?.created_parents) ? entry.created_parents : []);
+    this.#writeSettings(read, fileCreated && Object.keys(settings).length === 0 ? null : settings);
     forget();
     return { status: 'claude-default', changed: true, id: spec.id, label: spec.label, state: STATES.DEFAULT };
   }

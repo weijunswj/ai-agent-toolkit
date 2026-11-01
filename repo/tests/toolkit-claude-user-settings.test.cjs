@@ -51,15 +51,71 @@ test('enable writes every absent setting, keeps other keys, and disable removes 
   assert.ok(fs.existsSync(settingsPath));
 });
 
-test('an owner value is reported and never changed, on enable, disable or keep', (t) => {
-  const { owner, read } = fixture(t, { crossSessionInbound: 'accept', attribution: { commit: '' } });
-  for (const choice of ['enable', 'disable', 'keep']) {
-    const results = byId(owner.apply(choice));
-    assert.equal(results['cross-session-inbound'].status, 'owner-value-kept', choice);
-    assert.equal(results.attribution.status, 'owner-value-kept', choice);
+test('keep never changes an owner value; enable leaves an equal one alone', (t) => {
+  const { owner, settingsPath } = fixture(t, { crossSessionInbound: 'accept', attribution: { commit: '' } });
+  const before = fs.readFileSync(settingsPath, 'utf8');
+  const kept = byId(owner.apply('keep'));
+  assert.equal(kept['cross-session-inbound'].status, 'kept');
+  assert.equal(kept.attribution.status, 'kept');
+  const on = byId(owner.apply({ 'cross-session-inbound': 'enable' }));
+  assert.equal(on['cross-session-inbound'].status, 'set');
+  assert.equal(on['cross-session-inbound'].changed, false);
+  assert.equal(fs.readFileSync(settingsPath, 'utf8'), before, 'keep and an already-on enable write nothing');
+});
+
+test('disable removes an owner value whoever set it, equal or different, and only that key', (t) => {
+  const { owner, read } = fixture(t, { theme: 'dark', crossSessionInbound: 'accept', switchModelsOnFlag: true });
+  const equal = byId(owner.apply({ 'cross-session-inbound': 'disable' }));
+  assert.equal(equal['cross-session-inbound'].status, 'claude-default');
+  assert.equal(equal['cross-session-inbound'].changed, true);
+  assert.deepEqual(read(), { theme: 'dark', switchModelsOnFlag: true });
+  const different = byId(owner.apply({ 'switch-models-on-flag': 'disable' }));
+  assert.equal(different['switch-models-on-flag'].changed, true);
+  assert.deepEqual(read(), { theme: 'dark' });
+  assert.equal(byId(owner.apply({ attribution: 'disable' })).attribution.changed, false, 'already off changes nothing');
+});
+
+test('disable keeps parents and a file Toolkit did not create, even when they end up empty', (t) => {
+  const { owner, settingsPath, read } = fixture(t, { pluginConfigs: { 'cc-plugin-agents-md@builtin': { options: { instructionFiles: 'claude-md-and-agents-md' } } } });
+  assert.equal(byId(owner.apply({ 'agents-md': 'disable' }))['agents-md'].changed, true);
+  assert.deepEqual(read(), { pluginConfigs: { 'cc-plugin-agents-md@builtin': { options: {} } } });
+
+  const solo = fixture(t, { attribution: false });
+  solo.owner.apply({ attribution: 'disable' });
+  assert.ok(fs.existsSync(solo.settingsPath), 'an owner file stays even when empty');
+  assert.deepEqual(solo.read(), {});
+  assert.ok(fs.existsSync(settingsPath));
+});
+
+test('enable replaces a different owner value, and a following disable removes it and a file Toolkit created', (t) => {
+  const { owner, read, recordPath } = fixture(t, { crossSessionInbound: 'reject', theme: 'dark' });
+  const on = byId(owner.apply({ 'cross-session-inbound': 'enable' }));
+  assert.equal(on['cross-session-inbound'].status, 'set');
+  assert.equal(on['cross-session-inbound'].changed, true);
+  assert.deepEqual(read(), { crossSessionInbound: 'accept', theme: 'dark' });
+  assert.equal(byId(owner.inspect())['cross-session-inbound'].state, STATES.TOOLKIT);
+  const entry = Object.values(JSON.parse(fs.readFileSync(recordPath, 'utf8')).entries)[0];
+  assert.deepEqual([entry.created_parents, entry.created_file], [[], false]);
+  owner.apply({ 'cross-session-inbound': 'disable' });
+  assert.deepEqual(read(), { theme: 'dark' });
+
+  const created = fixture(t);
+  created.owner.apply({ attribution: 'enable' });
+  fs.writeFileSync(created.settingsPath, `${JSON.stringify({ attribution: false, crossSessionInbound: 'reject' }, null, 2)}\n`);
+  created.owner.apply({ 'cross-session-inbound': 'enable' });
+  created.owner.apply('disable');
+  assert.equal(fs.existsSync(created.settingsPath), false, 'a Toolkit-created file goes once emptied');
+});
+
+test('a parent entry that is not an object holds that setting on enable and disable', (t) => {
+  const { owner, settingsPath } = fixture(t, { pluginConfigs: 'x', theme: 'dark' });
+  const before = fs.readFileSync(settingsPath, 'utf8');
+  for (const choice of ['enable', 'disable']) {
+    const result = byId(owner.apply({ 'agents-md': choice }))['agents-md'];
+    assert.equal(result.status, 'held', choice);
+    assert.equal(result.blocked, true, choice);
   }
-  assert.equal(read().crossSessionInbound, 'accept');
-  assert.deepEqual(read().attribution, { commit: '' });
+  assert.equal(fs.readFileSync(settingsPath, 'utf8'), before);
 });
 
 test('an owner value reports whether it matches Toolkit\'s value; a blocked parent never matches', (t) => {
@@ -88,9 +144,12 @@ test('attribution hidden with the full object form counts as Toolkit\'s value; a
     const state = byId(owner.inspect()).attribution;
     assert.equal(state.state, STATES.OWNER, label);
     assert.equal(state.matches, matches, label);
-    // Matching or not, an owner value survives enable and disable untouched.
-    for (const choice of ['enable', 'disable']) assert.equal(byId(owner.apply(choice)).attribution.status, 'owner-value-kept', `${label} ${choice}`);
-    assert.deepEqual(read().attribution, value, label);
+    // A matching form is on already and is not rewritten; a different one is replaced. Disable removes either.
+    const on = byId(owner.apply({ attribution: 'enable' })).attribution;
+    assert.equal(on.changed, !matches, label);
+    assert.deepEqual(read().attribution, matches ? value : false, label);
+    assert.equal(byId(owner.apply({ attribution: 'disable' })).attribution.changed, true, label);
+    assert.deepEqual(read(), {}, label);
   }
 });
 
@@ -114,16 +173,18 @@ test('per-setting choices touch only the named settings; a setting left out is k
   assert.deepEqual(read(), { theme: 'dark', switchModelsOnFlag: false, crossSessionInbound: 'accept' }, 'a refused call writes nothing');
 });
 
-test('an owner edit after Toolkit wrote a value is kept on disable', (t) => {
-  const { owner, settingsPath, read } = fixture(t, {});
+test('an owner edit after Toolkit wrote a value is removed on disable, keeping parents Toolkit did not record', (t) => {
+  const { owner, settingsPath, read, recordPath } = fixture(t, {});
   owner.apply('enable');
   const edited = read();
   edited.crossSessionInbound = 'hold';
+  edited.pluginConfigs['cc-plugin-agents-md@builtin'].options.instructionFiles = 'claude-md';
   fs.writeFileSync(settingsPath, `${JSON.stringify(edited, null, 2)}\n`);
   const results = byId(owner.apply('disable'));
-  assert.equal(results['cross-session-inbound'].status, 'owner-value-kept');
-  assert.equal(read().crossSessionInbound, 'hold');
-  assert.equal(Object.hasOwn(read(), 'attribution'), false);
+  assert.equal(results['cross-session-inbound'].changed, true);
+  // The edited value is the owner's now, so the parents Toolkit once created stay and so does the file.
+  assert.deepEqual(read(), { pluginConfigs: { 'cc-plugin-agents-md@builtin': { options: {} } } });
+  assert.equal(fs.existsSync(recordPath), false);
 });
 
 test('a file Toolkit created is removed again when nothing else is left', (t) => {
