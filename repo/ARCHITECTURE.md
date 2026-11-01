@@ -38,7 +38,8 @@ Last reviewed against `main` `389c1c0608938da3ee3387adbe9235e2ef45784b`.
 | Governance gate hooks (hold prompts and tools until a repository has a decision) | `repo/scripts/toolkit-governance-gate.cjs` (the gate), `repo/scripts/toolkit-governance-answer.cjs` (records the user's reply the agent read, under a one-use reply ticket), `repo/scripts/toolkit-governance-hook.cjs` (Claude Code), `repo/scripts/toolkit-codex-helper-hook.cjs` and `repo/scripts/toolkit-codex-session-start.cjs` (Codex) |
 | Helper route guard and adapter | `repo/scripts/toolkit-v3-helper-guard.cjs`, `repo/scripts/toolkit-v3-native-helper-adapter.cjs` (shared core), `repo/scripts/toolkit-v3-native-helper-adapter-claude.cjs`, `repo/scripts/toolkit-v3-native-helper-adapter-codex.cjs` |
 | Claude helper agents | `repo/scripts/toolkit-claude-helper-agents.cjs`, `repo/scripts/toolkit-claude-helper-spec.cjs`, `repo/scripts/toolkit-claude-task-session.cjs` |
-| Version bump | `repo/scripts/bump-version.cjs` (`--next patch\|minor` at merge time; notes wait in `repo/docs/changelog.d/`) |
+| Version bump | `repo/scripts/bump-version.cjs` (`--next patch\|minor\|major`; folds notes from `repo/docs/changelog.d/`) |
+| Reconcile open release branches after main moves | `repo/scripts/toolkit-rebump-prs.cjs` (coordinator requests a computer lane; report by default, `--apply` prepares and fast-forwards eligible branches) |
 | Risk tier of a change | `repo/scripts/toolkit-risk-tier.cjs`, this repository's list `.github/toolkit-risk-tiers.json` |
 | Leftover worktrees and merged branches (read-only list) | `repo/scripts/workspace-residue-report.cjs` |
 | Instruction sync | `repo/scripts/sync-agent-instruction-shims.cjs`, `repo/scripts/sync-repo-doc-contract.cjs` |

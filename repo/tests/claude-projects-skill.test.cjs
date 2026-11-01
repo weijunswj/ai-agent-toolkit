@@ -18,6 +18,20 @@ const referenceFiles = () => fs.readdirSync(path.join(repoRoot, REFERENCE_DIR)).
   .map(name => `${REFERENCE_DIR}/${name}`);
 const bundle = () => [SKILL_REL, ...referenceFiles()].map(read).join('\n');
 
+test('the coordinator requests local release reconciliation and renewed review after main moves', () => {
+  const text = read(SKILL_REL);
+  const periodic = read(`${REFERENCE_DIR}/periodic-runs.md`);
+  for (const surface of [text, periodic]) {
+    assert.ok(surface.includes('node repo/scripts/toolkit-rebump-prs.cjs'));
+    assert.ok(surface.includes('--apply'));
+    assert.match(surface, /computer lane/);
+  }
+  // The skill points at the reference; holds, offline recovery and review live there.
+  assert.match(periodic, /fresh G2|full delta G2/);
+  assert.match(periodic, /offline/);
+  assert.doesNotMatch(text, /after "merge N" the lane merges `main`/);
+});
+
 test('the Projects controller skill has one source file with a Version line', () => {
   const text = read(SKILL_REL);
   assert.match(text, /^---\nname: "web-controller-projects"\n/);
