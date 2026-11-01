@@ -91,6 +91,42 @@ test('a dry run plans the native tree without writing; apply makes it agree and 
   assert.equal(github.mutations(), before.mutations, 'the second pass makes no GitHub write');
 });
 
+test('apply shows state writes from the same pass on the parent without a second edit', () => {
+  const outcomes = [{ issue: 423, class: 'COMMITTED', parent: 421, order: 1 }];
+  const { github, store, reconciler } = setup({ outcomes, issues: github => {
+    github.addIssue(423, { body: 'Task details.' });
+    github.link(421, 423);
+  } });
+  reconciler().run({ apply: true });
+  let minute = 0;
+  store.now = () => `2026-11-01T06:${String(minute += 1).padStart(2, '0')}:00Z`;
+  store.mutate('child', 423, { writer, parentDoc: store.read('parent', 421).doc,
+    change: doc => state.applyPatch('child', doc, { lifecycle: 'ACTIVE', candidate: { branch: 'feature' } }) });
+  github.addPr(540, { branch: 'feature', head: SHA_A, contexts: [green('validate')] });
+  comment(github, 423, 'Work is in progress.', { createdAt: '2026-11-01T06:00:00Z' });
+  const before = patchCount(github, 421);
+  const report = reconciler().run({ apply: true });
+  assert.deepEqual(report.holds, []);
+  assert.ok(report.results.some(entry => entry.kind === 'update_state' && entry.target.issue === 423 && entry.outcome === 'DONE'));
+  assert.ok(report.results.some(entry => entry.kind === 'replace_pr_nav' && entry.outcome === 'DONE'));
+  const doc = store.read('child', 423).doc;
+  const expected = new Date(Date.parse(doc.volatile.written_at) + 8 * 60 * 60 * 1000).toISOString().slice(0, 16).replace('T', ' ');
+  const parent = github.issues.get(421).body;
+  assert.ok(parent.includes(`| #423 | #540 | NOW | IN PROGRESS | ${expected} |`), 'the parent uses the final child state time, including body and PR link intents');
+  assert.equal(patchCount(github, 421) - before, 1, 'the parent is edited once in this pass');
+  const writes = { commits: github.commits, mutations: github.mutations() };
+  assert.equal(reconciler().run({ apply: true }).summary, 'No changes');
+  assert.equal(github.issues.get(421).body, parent);
+  assert.deepEqual({ commits: github.commits, mutations: github.mutations() }, writes, 'no second edit is needed');
+
+  // A PR link repair alone still writes the child state to settle its intent.
+  github.prs.get(540).body = 'Updated pull request details.';
+  const repaired = reconciler().run({ apply: true });
+  assert.deepEqual(repaired.holds, []);
+  assert.ok(repaired.results.some(entry => entry.kind === 'replace_pr_nav' && entry.outcome === 'DONE'));
+  assert.equal(reconciler().run().summary, 'No changes', 'a PR link repair also updates the parent in the same pass');
+});
+
 test('a full apply finishes and settles while every branch read lags one commit behind', () => {
   const { github, reconciler } = setup();
   github.branchLag = true;
@@ -179,9 +215,10 @@ test('a trace that would overflow the body moves whole into one index comment, t
   reconciler().run({ apply: true });
   const limit = Math.max(github.issues.get(421).body.length + 100, github.issues.get(423).body.length + 600);
   const run = apply => { const pass = reconciler(); pass.threshold = limit; return pass.run({ apply }); };
-  const early = Array.from({ length: 16 }, (unused, n) => comment(github, 423, `INT-TK421-2${String(n).padStart(2, '0')} a decision with a summary long enough to fill the body quickly ${'x'.repeat(40)}`));
+  // Keep enough links to overflow above the larger parent graph's minimum body size.
+  const early = Array.from({ length: 24 }, (unused, n) => comment(github, 423, `INT-TK421-2${String(n).padStart(2, '0')} a decision with a summary long enough to fill the body quickly ${'x'.repeat(40)}`));
   const dry = run(false);
-  assert.ok(dry.effects.some(effect => effect.text === "Move #423's \"Issue 423\" comment trace (16 link(s)) into a new index comment"));
+  assert.ok(dry.effects.some(effect => effect.text === "Move #423's \"Issue 423\" comment trace (24 link(s)) into a new index comment"));
   const applied = run(true);
   assert.deepEqual(applied.holds, []);
   const comments = github.commentsOf(423);
@@ -376,7 +413,7 @@ test('a moved PR head marks evidence STALE_HEAD and updates both projections tog
   assert.match(parentBlock, new RegExp(`423:${doc.revision}\\b`));
   assert.match(childBlock, new RegExp(`child=423@${doc.revision} -->`));
   assert.match(childBlock, new RegExp(`\\[bbbbbbb\\]\\(https://github.com/acme/app/commit/${SHA_B}\\) \`${SHA_B}\``), 'short link plus full SHA as text');
-  assert.match(parentBlock, /^\| Issue 423 \| - \| #423 \| #540 \| NOW \| IN PROGRESS \|$/m, 'an open PR means the work is in progress');
+  assert.match(parentBlock, /^\| Issue 423 \| - \| #423 \| #540 \| NOW \| IN PROGRESS \| - \|$/m, 'an open PR means the work is in progress');
 });
 
 test('a body edited between read and write is held, then completed on the next pass with the edit kept', () => {
