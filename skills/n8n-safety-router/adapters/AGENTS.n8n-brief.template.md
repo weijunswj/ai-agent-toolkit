@@ -3,7 +3,7 @@ Generated from repo/contracts/agent-rules/n8n-safety-router-adapter.md. Do not e
 Repair: node repo/scripts/sync-agent-instruction-shims.cjs --write
 -->
 
-<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/n8n-safety-router-adapter.md:BEGIN N8N-AGENT-RULES-ADAPTER v2 toolkit=3.30.2 sha256=332345e2a462 -->
+<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/n8n-safety-router-adapter.md:BEGIN N8N-AGENT-RULES-ADAPTER v2 toolkit=3.30.1 sha256=332345e2a462 -->
 ## n8n Safety Router Adapter
 
 If the task involves n8n workflows, workflow fixtures, helper scripts, MCP, import/export, live n8n, credentials, or workflow JSON, stop and load `skills/n8n-safety-router` before planning or editing.

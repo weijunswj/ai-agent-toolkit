@@ -1,13 +1,5 @@
 # Toolkit Changelog
 
-## 3.30.2 (smaller Projects skill)
-
-### Changed
-
-- **Claude Projects controller skill fits a skill card again.** The skill's main file shrank from about 50 KB to about 41 KB, under the 48 KB a claude.ai skill card accepts. The detail for acting on check-in and nudge reports, refreshing the guidebook copy, device work and standing permission asks moved word for word into reference files beside it (`reference/periodic-runs.md`, `reference/guidebook.md`, `reference/device-work.md` and `reference/permission-asks.md`). The skill points to each one before the step that needs it, so no rule changed.
-- **No hand upload.** The install check no longer tells you to upload the Projects skill folder by hand. It offers a skill card when the file fits one, says when the file is too large for a card, and in every case notes that the coordinator reads the copy pulled from the repo, so a missed card changes nothing it does. An account copy with its own reference files still gets the card, which replaces only the main file.
-- **Size guard.** A test now keeps the skill's main file at or under 44,000 bytes, with the card's 48,000-byte body limit as a hard ceiling, and checks that every reference file the skill names exists.
-
 ## 3.30.1
 
 ### Fixed
