@@ -79,7 +79,7 @@ async function decide(input, environment = process.env, { notes } = {}) {
 
 // The merge hold's decision, failing closed for a call that may merge when the module cannot run.
 function mergeDecision(input) {
-  try { return require('./toolkit-merge-hold.cjs').decide(input || {}); } catch {
+  try { return require('./toolkit-merge-hold.cjs').decide(input || {}, { host: 'codex' }); } catch {
     let mayMerge = true;
     try { mayMerge = require('./toolkit-merge-hold.cjs').mayMerge(input || {}); } catch { mayMerge = /merge|push/i.test(JSON.stringify(input || {})); }
     return mayMerge ? { deny: 'Toolkit: the merge check failed, so this merge or push is refused. Retry it; if this repeats, run `setup toolkit` to repair the Toolkit plugin.' } : null;

@@ -43,9 +43,8 @@ const EVENTS = Object.freeze(['PreToolUse', 'PostToolUse', 'UserPromptSubmit']);
 const STATUSES = Object.freeze(['pass', 'known-bad']);
 const FAULTS = Object.freeze(['deleted-plugin-root', 'remove-file', 'throw-module', 'stall-module', 'bad-json', 'empty-input']);
 const GOVERNANCE = Object.freeze(['enabled', 'undecided', 'none']);
-// A governed fixture's task auto-merge answer in its merged binding: yes (read now, or over a day
-// ago) or no.
-const TASK_AUTO_MERGE = Object.freeze(['after-gates', 'after-gates-stale', 'off']);
+// App-local task answers in each fixture home; the stale variant ages only its governance binding.
+const TASK_AUTO_MERGE = Object.freeze(['after-gates', 'after-gates-stale', 'off', 'codex-only', 'claude-code-only', 'unreadable']);
 // The gate role a Toolkit launcher marks a gate run with (TOOLKIT_GATE_ROLE).
 const GATE_ROLES = Object.freeze(['G0', 'G1', 'G2']);
 const ROW_KEYS = new Set(['id', 'source', 'kind', 'hosts', 'event', 'payload', 'fixture', 'fault', 'expect', 'expect_by_host', 'status', 'known_bad_on', 'lane', 'added', 'note']);
@@ -393,17 +392,26 @@ class Fixture {
     support.recordMerged(owner, { home: this.home, text });
   }
 
-  // A version 2 binding with the owner's task auto-merge answer, merged on the default branch.
+  // A fresh enabled binding plus separate app-local answers in this fixture's home.
   #taskAutoMerge(slug, answer, support) {
     const text = `${JSON.stringify({
       schema: 'toolkit.programme-binding.v2', repository: slug, governance: 'enabled',
       parents: [{ issue: 1, record_prefix: 'INT-FX', writer_prefix: 'FX' }],
       store: { kind: 'github', repository: 'toolkit-test-fixture/store', branch: 'main', path: 'state/' },
       required_checks: ['validate'],
-      task_prs: { auto_merge: answer === 'off' ? 'off' : 'after-gates' },
     }, null, 2)}
 `;
     fs.writeFileSync(path.join(this.work, '.github', 'toolkit-programme.json'), text);
+    const { TaskAutoMergePreferences } = require('./toolkit-task-auto-merge-preferences.cjs');
+    for (const host of ['codex', 'claude-code']) {
+      if (answer.endsWith('-only') && answer !== `${host}-only`) continue;
+      if (answer === 'unreadable') {
+        fs.writeFileSync(path.join(this.home, '.ai-agent-toolkit', 'user-state', `task-auto-merge.${host}.v1.json`), 'malformed');
+        continue;
+      }
+      const owner = new TaskAutoMergePreferences({ home: this.home, host });
+      owner.apply(answer === 'off' ? 'off' : 'after-gates', owner.inspect());
+    }
     // A stale read is one over a day old, as when this computer has not reached GitHub since.
     support.recordMerged(this.work, { home: this.home, text, ...(answer === 'after-gates-stale' ? { now: new Date(Date.now() - 25 * 60 * 60 * 1000) } : {}) });
   }

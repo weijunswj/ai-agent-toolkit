@@ -21,3 +21,8 @@ test('the map records its review commit and holds no rule text', () => {
   assert.match(MAP, /Last reviewed against `main` `[0-9a-f]{40}`/);
   assert.doesNotMatch(MAP, /MUST delegate|Finish authorised work before stopping|fresh executor contexts are mandatory/i);
 });
+
+test('the map locates the coordinator release reconciliation command', () => {
+  assert.ok(MAP.includes('repo/scripts/toolkit-rebump-prs.cjs'));
+  assert.ok(MAP.includes('report by default'));
+});

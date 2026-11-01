@@ -79,7 +79,7 @@ async function run(ctx, cwd, argv, { answer = 'yes', interactive = true, ruleset
   const cli = new ToolkitGovernanceCli({
     stdout, stderr, cwd, interactive,
     ask: async (question) => { asked.push(question); return answer; },
-    registryOptions: { registryPath: ctx.registryPath, testOnly: true },
+    registryOptions: { registryPath: ctx.registryPath, testOnly: true, home: ctx.root, host: 'codex' },
     // Fixture origins do not exist: discovery and the status refresh never reach GitHub here.
     discoveryGh: () => ({ ok: false, reason: 'offline' }),
     refresh: () => ({ refreshed: false, error: 'offline' }),
@@ -256,10 +256,10 @@ test('K-01: check exit codes and read-only behaviour', async (t) => {
     codes[name] = [result.code, parsed.status, parsed.findings.map(entry => entry.id).sort().join(',')];
   }
   assert.deepEqual(codes, {
-    // A governed binding with no task auto-merge answer gets the question once, as information only.
-    conformant: [0, 'conformant', 'TASK_AUTO_MERGE_UNANSWERED'],
-    stale: [1, 'drift', 'GOVERNED_BLOCK_STALE,TASK_AUTO_MERGE_UNANSWERED'],
-    edited: [1, 'drift', 'GOVERNED_BLOCK_EDITED,TASK_AUTO_MERGE_UNANSWERED'],
+    // A missing machine answer is reported Off without asking a question.
+    conformant: [0, 'conformant', 'TASK_AUTO_MERGE_OFF'],
+    stale: [1, 'drift', 'GOVERNED_BLOCK_STALE,TASK_AUTO_MERGE_OFF'],
+    edited: [1, 'drift', 'GOVERNED_BLOCK_EDITED,TASK_AUTO_MERGE_OFF'],
     unasked: [1, 'drift', 'DECISION_PENDING'],
     incomplete: [1, 'drift', 'DECISION_PENDING'],
     plain: [1, 'drift', 'DECISION_PENDING'],
@@ -273,7 +273,7 @@ test('K-01: check exit codes and read-only behaviour', async (t) => {
   fs.writeFileSync(ctx.registryPath, decisions);
   assert.deepEqual(treeDigest(ctx.root), snapshot, 'check wrote nothing');
 
-  // Task auto-merge's own finding (the question while unanswered) is covered in
+  // Task auto-merge's effective machine setting is covered in
   // toolkit-task-auto-merge.test.cjs; these lists leave it out.
   const notTaskAutoMerge = id => !id.startsWith('TASK_AUTO_MERGE');
   // An ENABLED repository without the no-force-push ruleset drifts; one GitHub cannot protect, or

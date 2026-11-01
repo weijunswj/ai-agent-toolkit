@@ -149,7 +149,10 @@ test('next versions count from the base', () => {
   assert.equal(nextSkillVersion('2026-10-25.9', '2026-10-26'), '2026-10-26.1');
   assert.equal(nextSkillVersion('2026-10-26.2', '2026-10-26'), '2026-10-26.3');
   assert.equal(nextSkillVersion('2026-10-27.1', '2026-10-26'), '2026-10-27.2', 'never older than the base');
-  assert.throws(() => parseArgs(['--next', 'major']), /--next takes patch or minor/);
+  assert.equal(nextVersion('3.15.4', 'major'), '4.0.0');
+  assert.equal(parseArgs(['--next', 'major']).next, 'major');
+  assert.throws(() => parseArgs(['--next', 'invalid']), /--next takes patch, minor or major/);
+  assert.throws(() => nextVersion('3.15.4', 'invalid'), /patch, minor or major/);
   assert.throws(() => parseArgs(['--next', 'patch', '1.2.3']), /not both/);
 });
 
@@ -164,6 +167,7 @@ test('--next sets the base version plus one, folds the fragment and bumps a chan
   assert.equal(result.status, 0, result.stderr || result.stdout);
   const expected = nextVersion(TOOLKIT_VERSION, 'minor');
   assert.ok(result.stdout.includes(`Toolkit version is now ${expected} `), result.stdout);
+  assert.ok(result.stdout.includes(`base at ${lane.run('rev-parse', 'base')} was ${TOOLKIT_VERSION}`), result.stdout);
   assert.equal(readToolkitVersion(path.join(lane.copy, ...VERSION_REL_PATH.split('/'))), expected);
   for (const rel of MANIFEST_REL_PATHS) assert.equal(JSON.parse(lane.read(rel)).version, expected, rel);
   assert.ok(lane.read('AGENTS.md').includes(`toolkit=${expected} `), 'markers carry the new version');
@@ -181,15 +185,16 @@ test('--next sets the base version plus one, folds the fragment and bumps a chan
   assert.equal(validation.status, 0, validation.stderr || validation.stdout);
 });
 
-test('--next leaves an unchanged Projects skill alone', (t) => {
+test('--next major leaves an unchanged Projects skill alone and passes the guard', (t) => {
   const lane = gitCopy(t);
   const skill = lane.read(SKILL);
   lane.write(FRAGMENT, '### Lane\n\n- **A change:** what it does.\n');
   lane.commit('lane work');
-  const result = lane.bump('--next', 'patch', '--base', 'base');
+  const result = lane.bump('--next', 'major', '--base', 'base');
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.equal(lane.read(SKILL), skill);
-  assert.ok(lane.read(CHANGELOG_REL_PATH).includes(`## ${nextVersion(TOOLKIT_VERSION, 'patch')}\n\n### Lane`), 'no title, plain heading');
+  assert.ok(lane.read(CHANGELOG_REL_PATH).includes(`## ${nextVersion(TOOLKIT_VERSION, 'major')}\n\n### Lane`), 'no title, plain heading');
+  assert.deepEqual(versionProblems({ workspace: lane.copy, base: 'base' }), []);
 });
 
 test('--next refuses without writing when the lane is not ready', (t) => {
@@ -250,7 +255,7 @@ test('--next refuses without writing when the lane is not ready', (t) => {
   const bumped = lane.bump('--next', 'patch', '--base', 'base');
   assert.equal(bumped.status, 0, bumped.stderr);
   lane.commit('bump');
-  refuse(/already bumped to .*revert that bump commit, merge base and run --next again/, 'a second --next', nextVersion(TOOLKIT_VERSION, 'patch'));
+  refuse(/already bumped to .*run toolkit-rebump-prs/, 'a second --next', nextVersion(TOOLKIT_VERSION, 'patch'));
   lane.run('reset', '-q', '--hard', 'HEAD~1');
 
   lane.run('checkout', '-q', 'main');

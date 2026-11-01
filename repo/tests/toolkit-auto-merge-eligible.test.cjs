@@ -21,20 +21,31 @@ test('merge-authority paths and a major bump wait for the owner; everything else
     'repo/contracts/programme-state/binding-v2.schema.json', 'skills/github-program-reconciler/scripts/programme-state.cjs',
     'repo/scripts/toolkit-merge-hold.cjs', 'repo/scripts/toolkit-shell-call.cjs', 'repo/scripts/toolkit-governance-gate.cjs',
     'repo/scripts/toolkit-governance-state.cjs', 'repo/scripts/toolkit-auto-merge-eligible.cjs',
+    'repo/scripts/toolkit-task-auto-merge-preferences.cjs', 'repo/scripts/setup-toolkit-core.cjs',
+    'repo/scripts/setup-core-codex.cjs', 'repo/scripts/setup-core-claude.cjs',
+    'repo/scripts/toolkit-capability-registry.cjs', 'repo/contracts/agent-rules/toolkit-governed-rules.md',
+    'repo/docs/agent-playbooks/safety-gates.md',
+    'skills/repository-agent-rules/repo-local/docs/agent-playbooks/safety-gates.md',
   ];
   for (const file of authority) {
     const result = verdict(['repo/docs/README.md', file]);
     assert.equal(result.eligible, false, file);
     assert.deepEqual(result.reasons.map(entry => entry.path), [file], file);
   }
-  // Hooks, setup, agent instructions and the rest of governance merge after their gates.
-  const gated = [
-    'AGENTS.md', 'sub/CLAUDE.md', '.github/copilot-instructions.md', '.agents/rules/00-bootstrap.md', 'skills/repository-agent-rules/SKILL.md',
-    'hooks/hooks.json', '.claude-plugin/hooks/hooks.json', 'repo/scripts/toolkit-governance-hook.cjs', 'repo/scripts/toolkit-codex-helper-hook.ps1',
-    '.claude/settings.json', '.codex/config.toml', 'repo/scripts/setup-codex-toolkit-plugin.cjs', 'repo/scripts/setup-claude-toolkit-plugin.cjs',
-    'repo/scripts/toolkit-governance-conformance.cjs', 'repo/scripts/toolkit-governance.cjs', 'repo/contracts/agent-rules/README.md',
+  // Both hook manifests/entrypoints, setup and governance require typed merge too.
+  const protectedPaths = [
+    'hooks/hooks.json', '.claude-plugin/hooks/hooks.json', '.codex-plugin/hooks/hooks.json',
+    'repo/contracts/toolkit-local-bridge/claude-plugin/hooks/hooks.json', 'repo/contracts/toolkit-local-bridge/codex-plugin/hooks/hooks.json',
+    'repo/scripts/toolkit-governance-hook.cjs', 'repo/scripts/toolkit-codex-helper-hook.cjs', 'repo/scripts/toolkit-codex-helper-hook.ps1',
+    'repo/scripts/toolkit-claude-agent-hook.cjs', 'repo/scripts/toolkit-claude-attribution-hook.cjs',
+    'repo/scripts/toolkit-local-bridge.cjs', 'repo/scripts/toolkit-codex-session-start.cjs', 'repo/scripts/toolkit-codex-session-start.ps1',
+    'repo/scripts/setup-codex-toolkit-plugin.cjs', 'repo/scripts/setup-claude-toolkit-plugin.cjs',
+    'repo/scripts/toolkit-governance-conformance.cjs', 'repo/scripts/toolkit-governance.cjs',
+    'repo/scripts/toolkit-governance-binding.cjs', 'repo/scripts/toolkit-governance-answer.cjs',
   ];
-  for (const file of gated) assert.equal(verdict([file]).eligible, true, file);
+  for (const file of protectedPaths) assert.equal(verdict([file]).eligible, false, file);
+  for (const file of ['AGENTS.md', 'sub/CLAUDE.md', '.github/copilot-instructions.md', '.agents/rules/00-bootstrap.md',
+    'skills/repository-agent-rules/SKILL.md', 'repo/contracts/agent-rules/README.md']) assert.equal(verdict([file]).eligible, true, file);
   assert.equal(verdict(['repo/CONTROLLER.md'], false).eligible, true, 'the Toolkit list applies only to the Toolkit repository');
   assert.equal(verdict(['.github/workflows/ci.yml'], false).eligible, false, 'the general list applies everywhere');
   assert.match(verdict([], true, { 'repo/contracts/toolkit-local-bridge/version.json': { before: '3.20.0', after: '4.0.0' } }).reasons[0].why, /major version bump/);
@@ -52,6 +63,39 @@ test('merge-authority paths and a major bump wait for the owner; everything else
   assert.equal(eligible.withoutStamps('{\n  "version": "3.21.0",\n}'), eligible.withoutStamps('{\n  "version": "3.22.0",\n}'));
   assert.equal(eligible.withoutStamps("const BRIDGE_VERSION = '3.21.0';\n"), eligible.withoutStamps("const BRIDGE_VERSION = '3.22.0';\n"));
   assert.notEqual(eligible.withoutStamps("const BRIDGE_VERSION = '3.21.0';\nhook();\n"), eligible.withoutStamps("const BRIDGE_VERSION = '3.22.0';\nother();\n"));
+});
+
+test('every script run by a host hook manifest, including Windows launchers, waits for typed merge', () => {
+  const root = path.join(__dirname, '..', '..');
+  const { renderInstalledWindowsHooks } = require('../scripts/setup-codex-toolkit-plugin.cjs');
+  const manifests = [
+    'repo/contracts/toolkit-local-bridge/claude-plugin/hooks/hooks.json',
+    'repo/contracts/toolkit-local-bridge/codex-plugin/hooks/hooks.json',
+    ...['hooks/hooks.json', '.claude-plugin/hooks/hooks.json', '.codex-plugin/hooks/hooks.json']
+      .filter(file => fs.existsSync(path.join(root, file))),
+  ];
+  for (const manifest of manifests) {
+    const scripts = new Set();
+    function visit(value) {
+      if (!value || typeof value !== 'object') return;
+      for (const [key, entry] of Object.entries(value)) {
+        if ((key === 'command' || key === 'commandWindows') && typeof entry === 'string') {
+          const matches = [...entry.replace(/\\/g, '/').matchAll(/\$\{(?:CLAUDE_PLUGIN_ROOT|PLUGIN_ROOT)\}\/([A-Za-z0-9_./-]+)/g)];
+          assert.ok(matches.length > 0, `${manifest}: ${key} must name a plugin script to check`);
+          for (const match of matches) scripts.add(match[1]);
+        } else visit(entry);
+      }
+    }
+    const hooks = JSON.parse(fs.readFileSync(path.join(root, manifest), 'utf8'));
+    // Check the actual commandWindows entries that setup adds to the installed Codex copy too.
+    visit(manifest.includes('codex-plugin/') ? renderInstalledWindowsHooks(hooks, 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe') : hooks);
+    assert.ok(scripts.size > 0, `${manifest}: hook scripts must be checked`);
+    for (const file of scripts) {
+      for (const toolkit of [false, true]) {
+        assert.equal(eligible.eligibility({ files: [file], toolkit }).eligible, false, `${manifest}: ${file} must require typed merge (toolkit=${toolkit})`);
+      }
+    }
+  }
 });
 
 test('a section runs from its heading to the next heading of the same or a higher level', () => {
@@ -95,7 +139,7 @@ test('the CLI reads the diff with git: exit 0 eligible, 1 waits for the owner, 2
   const io = { cwd: root, stdout: { write: text => out.push(text) }, stderr: { write: text => out.push(text) } };
   assert.equal(eligible.main(['--base', base, '--head', docs], io), 0);
   assert.match(out.at(-1), /^Auto-merge: yes/);
-  assert.equal(eligible.main(['--base', docs, '--head', hook], io), 0, 'a hook merges after its gates');
+  assert.equal(eligible.main(['--base', docs, '--head', hook], io), 1, 'a hook waits for typed merge');
   assert.equal(eligible.main(['--base', hook, '--head', workflow, '--json'], io), 1);
   assert.deepEqual(JSON.parse(out.at(-1)).reasons, [{ path: '.github/workflows/ci.yml', why: 'a CI workflow' }]);
   assert.equal(eligible.main(['--base', hook, '--head', workflow], io), 1);
@@ -107,6 +151,13 @@ test('the CLI reads the diff with git: exit 0 eligible, 1 waits for the owner, 2
   const reworded = commit('repo/CONTROLLER.md', '<!-- AI-AGENT-TOOLKIT:x:BEGIN Y v2 toolkit=3.20.0 sha256=59b80466f009 -->\nlooser rules\n');
   assert.equal(eligible.main(['--base', restamped, '--head', reworded], io), 1, 'a rules change is not');
   assert.equal(eligible.main(['--base', bump, '--head', stamped], io), 1, 'a new rules file is not stamp-only');
+  let previous = reworded;
+  for (const file of ['repo/scripts/toolkit-local-bridge.cjs', 'repo/scripts/toolkit-codex-session-start.cjs', 'repo/scripts/toolkit-codex-session-start.ps1']) {
+    const head = commit(file, 'hook entrypoint\n');
+    assert.equal(eligible.main(['--base', previous, '--head', head, '--json'], io), 1, `${file} waits for typed merge`);
+    assert.deepEqual(JSON.parse(out.at(-1)).reasons, [{ path: file, why: 'a host hook entrypoint' }]);
+    previous = head;
+  }
   // The Projects controller skill: only its Approvals section counts.
   const skill = 'repo/contracts/claude-projects/web-controller-projects/SKILL.md';
   const skillText = approvals => `# Skill\nVersion: 2026-10-30.2\n\n## Threads\n- threads\n\n## Approvals\n- ${approvals}\n\n## Live systems\n- live\n`;

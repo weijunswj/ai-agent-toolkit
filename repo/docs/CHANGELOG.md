@@ -1,16 +1,23 @@
 # Toolkit Changelog
 
-## 3.40.0 (hook review leftovers)
+## 3.41.0
+
+### Added
+
+- Each app asks its own task auto-merge question during setup, with On recommended and an accurate Current choice. Answers are stored separately on this computer, validated strictly and written atomically with read-back and recovery.
 
 ### Changed
 
-- **Pushes through another shell:** the merge hold now refuses any git push handed to another shell or expression runner (`bash -c`, `pwsh -Command`, `cmd /c`, `eval`, `iex` or `Invoke-Expression`), whatever branch it names. It checks runner words throughout the command, including shell option bundles, call operators, wrappers, blocks and unquoted expressions. Encoded PowerShell commands are refused unread, even without a visible push. Run each push as its own git command; plain git pushes keep the exact target check. The attribution guard and the merge hold share one shell-word reader.
-- **Codex pushes of the current branch with lane worktrees:** when Codex names no folder and several working trees are reachable from the chat's folder (lane worktrees nested under `.tmp/worktrees/`, for example), a push or pull request of the current branch is now checked in every one of those working trees within the same 30-second budget, and goes when each one passes, instead of being refused outright. It is still refused after any earlier git step of the same command other than a plain read (such as `git reset`, `git stash pop` or a commit), which could move the current branch, or after a relative `cd` from the unknown folder, and a check that runs out of time is still refused on Codex.
-- **Helper launches outside gate runs:** the Claude and Codex helper-launch hooks now apply the named-helper policy only in a Toolkit gate run, a session a Toolkit launcher started (a launcher marker). In any other session, governed repositories included, the main session may start any subagent, as the global rules already said, and on Claude a subagent still never starts another in a governed repository, whatever the topology choice.
+- The app-local answer is the only task auto-merge switch. Repository bindings no longer carry task permission, and governance reports the effective app setting without asking another question.
+- Hooks, setup, governance, bindings, preference readers and writers, and merge or approval rules always wait for an owner-typed merge, alongside CI workflows and major releases. Rule-refresh pull requests retain their typed-merge requirement.
 
-### Tests
+## 3.40.0 (Refresh open release branches)
 
-- **Hook pack:** new rows for refused shell and expression-runner pushes, Codex pushes of the current branch with nested lane worktrees, and helper launches inside and outside a gate run. The evidence-store row now passes: its fixture gives another governed repository a cached binding that names the store, with a new row showing a same-named repository under another owner is still held. Fixtures can now set a gate role, nested worktrees with their own commits, a remote owner and a cached binding naming the store.
+### Changed
+
+- Keep each open release branch's patch, minor or major bump when main moves. A coordinator-run local command reports eligible branches and can merge main, regenerate version stamps, preserve released notes and fast-forward the branch after validation.
+- Accept major version bumps in the release command and version guard, and report the resolved base commit used for a bump.
+- Document the local reconciliation trigger, conflict recovery and renewed CI and review required for each updated head.
 
 ## 3.39.0 (setup rows stand on their own)
 
@@ -153,7 +160,7 @@
 
 ### Added
 
-- Task auto-merge, a per-repository answer that is off unless the owner says yes. `toolkit governance check` asks once in each governed repository whose merged binding has no answer, with Yes recommended (a yes still takes effect only through a binding pull request and a required check the owner sets), and only once every Toolkit copy runs a version that knows the answer. The answer is `task_prs.auto_merge` (`off` or `after-gates`) in the programme binding and counts only once merged on the default branch and read within a day.
+- Task auto-merge for finished pull requests, bounded by governance, review, required checks and owner testing. See the gate rules for current permission storage and manual-merge exceptions.
 - The `auto-merge-eligible` check (`.github/workflows/auto-merge-eligible.yml`, running the default branch's `repo/scripts/toolkit-auto-merge-eligible.cjs`) fails a pull request on the always-manual list: the programme binding and merge rules, hooks and every module they load, setup that writes hook config, CI workflows, agent instruction files and a major version bump. A change that only moves version stamps does not count. Such a pull request merges once the owner adds the `toolkit-owner-merge` label in GitHub; a new push removes it, and the merge hold refuses an agent that sets it.
 
 ### Changed
