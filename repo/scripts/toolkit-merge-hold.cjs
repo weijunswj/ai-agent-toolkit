@@ -690,7 +690,8 @@ function shellRefusal(text, cwd, registryOptions = {}, shell = null) {
 
 // Ignore runner names in quoted prose, but keep whole quoted runner paths and executable
 // substitutions, including those inside double quotes. This is not command-position detection.
-function runnerText(text) {
+// Option readers retain quoted argument words too; shellCommands keeps prose as one word.
+function runnerText(text, quotedArguments = false) {
   const parts = [];
   const frames = [{ end: '', depth: 0, quote: '', start: 0, visible: [] }];
   for (let index = 0; index < text.length; index += 1) {
@@ -702,7 +703,7 @@ function runnerText(text) {
       if (char === "'") {
         if (next === "'") index += 1;
         else {
-          if (SHELLS.test(text.slice(frame.start, index))) visible.push(text.slice(frame.start - 1, index + 1));
+          if (quotedArguments || SHELLS.test(text.slice(frame.start, index))) visible.push(text.slice(frame.start - 1, index + 1));
           frame.quote = '';
         }
       }
@@ -733,7 +734,7 @@ function runnerText(text) {
     }
     if (frame.quote === '"') {
       if (char === '"') {
-        if (SHELLS.test(text.slice(frame.start, index))) visible.push(text.slice(frame.start - 1, index + 1));
+        if (quotedArguments || SHELLS.test(text.slice(frame.start, index))) visible.push(text.slice(frame.start - 1, index + 1));
         frame.quote = '';
       }
       continue;
@@ -760,7 +761,9 @@ function mentionsRunner(text) {
 }
 
 function encodedPowerShell(text) {
-  for (const { words } of shellCommands(runnerText(text))) {
+  // Keep each quoted argument as one shell word: prose is not a runner word, while a
+  // quoted encoded option after a real runner is still an option PowerShell reads.
+  for (const { words } of shellCommands(runnerText(text, true))) {
     const start = words.findIndex(word => /(?:^|[\\/])(?:pwsh|powershell)(?:\.exe)?$/i.test(word));
     if (start < 0) continue;
     for (const word of words.slice(start + 1)) {

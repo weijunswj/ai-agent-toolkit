@@ -655,9 +655,8 @@ test('encoded PowerShell refusals distinguish executable arguments from quoted p
   const feature = repository(ctx.root, 'feature', { branch: 'feature' });
   const allowed = [
     "rg -F 'pwsh -EncodedCommand' repo",
+    'git commit -m "Document pwsh -EncodedCommand handling" && git push origin feature',
     'git add -A && git commit -m "Document pwsh -EncodedCommand handling" && git push origin feature',
-    'pwsh "-EncodedCommand" ZwBpAHQA',
-    "powershell '-enc' ZwBpAHQA",
     'pwsh -Command "Write-Output -e hello"',
     'pwsh -NoProfile; rg -e hello repo',
     'pwsh -NoProfile "$(echo -e hello)"',
@@ -668,6 +667,13 @@ test('encoded PowerShell refusals distinguish executable arguments from quoted p
     `bash -ce "rg -F 'pwsh -EncodedCommand' repo"`,
   ];
   const blocked = [
+    'pwsh "-EncodedCommand" ZwBpAHQA',
+    "powershell '-enc' ZwBpAHQA",
+    'powershell.exe "-EncodedCommand" ZwBp',
+    "pwsh '-enc' ZwBp",
+    '& "pwsh" "-e" ZwBp',
+    'Write-Output "$(powershell.exe \'-enc\' ZwBp)"',
+    `bash -c "pwsh '-e' ZwBp"`,
     'pwsh -EncodedCommand ZwBpAHQA',
     "& 'powershell.exe' -enc ZwBpAHQA",
     'bash -c "pwsh -e ZwBp"',
