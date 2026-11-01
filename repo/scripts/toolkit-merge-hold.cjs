@@ -56,8 +56,8 @@
 //     to the remote's default branch (evidence stores excepted, by name), a merge whose target is
 //     moved by cd, pushd, Set-Location or GH_REPO, and a bare number in a folder with more than one
 //     remote or a gh default repository other than its own, unless --repo or a URL names it. A push
-//     in a quoted command handed to a shell (bash -c "...", pwsh -Command "...", eval "...") is read
-//     the same way, two levels deep; a push nested deeper is refused unread;
+//     run through another shell or expression runner (bash -c, pwsh -Command, cmd /c, eval) is
+//     refused whatever branch it names; encoded PowerShell commands are refused unread;
 //   - refused, as a tripwire against an agent approving for itself: a command that starts a Claude
 //     or Codex session and mentions merge, or that sets or clears TOOLKIT_HOST_SESSION, names
 //     Toolkit's user-state folder, or the hook scripts together with what would feed them a prompt.
@@ -67,7 +67,7 @@
 // prompt file fed to a hook script, pasted text outside a code fence that has a plain approval line, scripts or programs
 // that call git or the GitHub API themselves, curl and other HTTP clients, a sha= field put in a
 // comment or an echo on purpose, git and shell aliases,
-// commands inside files, pushes through a second remote or a wrapper, GH_REPO set outside the command
+// commands inside files, pushes through a second remote or a non-shell wrapper, GH_REPO set outside the command
 // (an env file, a profile or a long-lived shell), direct commits to the default branch through the
 // Contents API, GraphQL createCommitOnBranch or the connector's file-write tools (push_files,
 // create_or_update_file; a repository rule that requires a pull request refuses these), cloud
@@ -89,8 +89,6 @@ const MAX_PROMPT_CHARS = 8000;
 const MAX_COMMAND_CHARS = 1024 * 1024;
 
 const { SHELLS, SHELL_TOOLS, ShellCall, assignVariable, assignmentOf, folderWord, shellCommands, shellOf, shellPath, shellReadings } = require('./toolkit-shell-call.cjs');
-// How many levels of quoted commands handed to a shell (bash -c "...") the push check reads.
-const NESTED_LEVELS = 2;
 // A connector's merge or auto-merge tool, whatever its server is called (a claude.ai connector's
 // server name is a UUID): the tool name ends in one of these after a _ or -.
 const AUTO_MERGE_NAME = 'enable[_-]?(?:pr[_-]?|pull[_-]?request[_-]?)?auto[_-]?merge';
@@ -615,9 +613,8 @@ function judge(merge, approvals, standing = null) {
 }
 
 // A refusal for a shell command that could make an approval without the user, or merges outside
-// what an approval can allow; '' when there is none. `depth` counts the quoted shell commands
-// (nestedRefusal) this text sits inside.
-function shellRefusal(text, cwd, registryOptions = {}, shell = null, depth = 0) {
+// what an approval can allow; '' when there is none.
+function shellRefusal(text, cwd, registryOptions = {}, shell = null) {
   if (STATE_WORDS.test(text)) return refuse('Toolkit\'s user-state files (merge approvals and governance decisions) and its session variable must be read and changed only by Toolkit itself. Never act as the user.');
   if (HOOK_FEED.test(text) && FEED_WORDS.test(text)) return refuse('a merge approval must come from the user\'s own typed message, so commands that load Toolkit\'s hook scripts or feed them a prompt are refused.');
   const parts = segments(text);
@@ -646,45 +643,48 @@ function shellRefusal(text, cwd, registryOptions = {}, shell = null, depth = 0) 
     const reason = pushRefusal(words, root || process.cwd(), { registryOptions, variables, shell });
     if (reason) return refuse(reason);
   }
-  return nestedRefusal(text, cwd, registryOptions, shell, depth);
+  return '';
 }
 
-// The refusal for a command handed to a shell (bash -c "...", pwsh -Command "...", cmd /c ...,
-// eval ...), read as its own command line in the folder the outer command has reached, up to
-// NESTED_LEVELS deep; '' when there is none. Which words a shell runs depends on its options
-// (bundled, repeated, with values), so this reads more, not less: every argument with a space, and
-// the arguments from the first one that is not an option, joined (eval and cmd /c run unquoted
-// words). A push passed as text to a script
-// is therefore judged as a command too, and refused when it would push to the default branch. The
-// inner shell is not known, so each inner command is judged under every reading (shellReadings). A
-// push nested deeper than that, or in an encoded PowerShell command, is refused unread.
-function nestedRefusal(text, cwd, registryOptions, shell, depth) {
-  if (!/\b(?:git|push)\b/i.test(text)) return '';
-  let root = cwd || process.cwd();
-  const variables = new Map();
+// A push handed to another shell cannot have its target read reliably. Refuse it outright, and
+// encoded PowerShell commands unread. Scan every word, including after wrappers and assignments,
+// plus the raw text so braces, parentheses, quotes and a single & cannot hide a runner.
+function nestedRefusal(text) {
+  const message = 'this command runs a git push through another shell (bash -c, pwsh -Command, cmd /c or eval), so Toolkit cannot read where it pushes and refused it. Run the push as its own git command.';
+  const blocked = (word, tail) => {
+    const name = word.split(/[\\/]/).pop().replace(/\.exe$/i, '').toLowerCase();
+    const encoded = [...tail.matchAll(/(?:^|\s)(-[a-z]+)(?=\s|$)/gi)].some(match => '-encodedcommand'.startsWith(match[1].toLowerCase()) || /^-ec$/i.test(match[1]));
+    if (/^(?:pwsh|powershell)$/.test(name) && encoded) return true;
+    const script = name === 'cmd' ? tail.replace(/(^|\s)\/[ck]/i, '$1 ') : tail;
+    if (!/\bgit\b/i.test(script) || !/\bpush\b/i.test(script)) return false;
+    if (/^(?:bash|sh|zsh|dash|ksh)$/.test(name)) return /(?:^|\s)-[a-z]*c[a-z]*(?=\s|$)/i.test(tail);
+    if (name === 'cmd') return /(?:^|\s)\/[ck]/i.test(tail);
+    return /^(?:pwsh|powershell|eval|iex|invoke-expression)$/.test(name);
+  };
   for (const { words } of shellCommands(text)) {
-    const assigned = assignmentOf(words);
-    if (assigned) { assignVariable(variables, assigned); continue; }
-    if (/^(?:cd|pushd|chdir|set-location|sl)$/i.test(words[0]) && words.length === 2) { root = shellPath(root, folderWord(words[1], variables, shell)); continue; }
-    let index = 0;
-    while (index < words.length && (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[index]) || /^(?:env|exec|nohup|command|builtin|&|\.)$/i.test(words[index]))) index += 1;
-    if (!SHELLS.test(words[index] || '')) continue;
-    const name = words[index].split(/[\\/]/).pop().replace(/\.exe$/i, '').toLowerCase();
-    const args = words.slice(index + 1);
-    // PowerShell takes any unique prefix of a parameter name (-e, -enc, -EncodedCommand).
-    if (/^(?:pwsh|powershell)$/.test(name) && args.some(word => /^-e(?:c|n\w*)?$/i.test(word)) && /\bpush\b/i.test(text)) {
-      return refuse('this command hands a push to PowerShell as an encoded command, so Toolkit cannot read where it pushes and refused it. Run the push as its own command.');
+    for (let index = 0; index < words.length; index += 1) {
+      if (SHELLS.test(words[index]) && blocked(words[index], words.slice(index + 1).join(' '))) return refuse(message);
     }
-    const firstWord = args.findIndex(word => !/^[-/]/.test(word));
-    const inners = [...args.filter(word => /\s/.test(word)), firstWord >= 0 ? args.slice(firstWord).join(' ') : ''].filter(word => /\b(?:git|push)\b/i.test(word));
-    for (const inner of inners) {
-      if (depth >= NESTED_LEVELS) {
-        if (/\bpush\b/i.test(inner)) return refuse(`this command hands a git push to a shell more than ${NESTED_LEVELS} levels deep, so Toolkit cannot read where it pushes and refused it. Run the push as its own command.`);
+  }
+  const runners = /(?:^|[\s;&|(){}"'=\\/])((?:bash|sh|zsh|dash|ksh|pwsh|powershell|cmd|eval|iex|invoke-expression)(?:\.exe)?)(?=$|[\s"'(){};&|])/gi;
+  for (const match of text.matchAll(runners)) {
+    const start = match.index + match[0].length;
+    let end = start;
+    let quote = '';
+    let depth = 0;
+    // Keep separators inside runner arguments, but leave later commands to their own checks.
+    for (; end < text.length; end += 1) {
+      const char = text[end];
+      if (quote) {
+        if (char === quote) quote = '';
         continue;
       }
-      const reason = shellReadings(null).map(reading => shellRefusal(inner, root, registryOptions, reading, depth + 1)).find(Boolean);
-      if (reason) return reason;
+      if (char === '"' || char === "'") { quote = char; continue; }
+      if (char === '(' || char === '{') { depth += 1; continue; }
+      if (char === ')' || char === '}') { depth = Math.max(0, depth - 1); continue; }
+      if (depth === 0 && (char === ';' || char === '\n' || char === '|' || (char === '&' && text[end + 1] === '&'))) break;
     }
+    if (blocked(match[1], text.slice(start, end))) return refuse(message);
   }
   return '';
 }
@@ -727,6 +727,9 @@ function decide(input, { registryOptions = {}, now, environment = process.env, h
     const text = call.text.replace(/[\\`^]\r?\n/g, ' ');
     if (text.length > MAX_COMMAND_CHARS) return /merge|push/i.test(text) ? refuse('this command is too long to check for a merge or push, so it is refused. Split it.') : null;
     cwd = call.folder;
+    // The host's shell wrapper is already unwrapped; only a runner inside its script is nested.
+    const nested = nestedRefusal(text);
+    if (nested) return nested;
     // An argument list is read both ways, as its words quoted and joined unquoted (as before the
     // shared reader), so a quoted program path such as `C:\Program Files\GitHub CLI\gh.exe` cannot
     // hide a merge. A merge both readings find counts once.

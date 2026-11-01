@@ -28,6 +28,32 @@
       "status": "pass"
     },
     {
+      "id": "PUSH.tests-then-feature-push",
+      "source": "Runner tail false refusal: a separate plain feature push after tests",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "bash -c \"echo tests\" && git push origin feature"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass",
+      "note": "The plain feature push is a separate command after the runner, so it stays allowed."
+    },
+    {
       "id": "PUSH.committed-credential",
       "source": "push matrix C5",
       "kind": "hostile",
@@ -610,8 +636,8 @@
       "note": "The same shape with an unpushed credential on HEAD is still refused, now for the credential. Real-host smoke row 16."
     },
     {
-      "id": "S1.bash-c-default-push",
-      "source": "G2 report on PR 705 at 272d16f, S1 (Low): a push to the default branch wrapped in bash -c got past the default-branch guard",
+      "id": "S1.nested-feature-push",
+      "source": "Owner-selected blanket refusal of shell and expression-runner pushes",
       "kind": "hostile",
       "hosts": [
         "claude",
@@ -620,35 +646,7 @@
       "payload": {
         "tool_name": "Bash",
         "tool_input": {
-          "command": "bash -c \"git push origin HEAD:main\""
-        }
-      },
-      "fixture": {
-        "repo": {
-          "governance": "enabled",
-          "branch": "feature"
-        },
-        "files": {
-          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
-        }
-      },
-      "expect": {
-        "decision": "deny"
-      },
-      "status": "pass"
-    },
-    {
-      "id": "S1.pwsh-posix-assignment",
-      "source": "G2 report on PR 705 at 272d16f, S1 (Low): the inner shell of pwsh -Command is not known, so an assignment that names the folder is read as assigned too",
-      "kind": "hostile",
-      "hosts": [
-        "claude"
-      ],
-      "payload": {
-        "tool_name": "Bash",
-        "cwd": "{home}",
-        "tool_input": {
-          "command": "pwsh -Command \"W='{work}'; git -C $W push origin HEAD:main\""
+          "command": "bash -c \"git push origin feature\""
         }
       },
       "fixture": {
@@ -664,39 +662,11 @@
         "decision": "deny"
       },
       "status": "pass",
-      "note": "Claude Code only: from a folder that is no repository, Codex refuses this call as folder unknown whatever the merge hold reads, so it proves nothing about the nested reading there."
+      "note": "Changed from allow to deny: wrapped feature pushes are now refused too, because Toolkit cannot reliably read the nested target. Run the push as its own git command."
     },
     {
-      "id": "S1.nested-feature-push",
-      "source": "G2 report on PR 705 at 272d16f, S1 (Low): the nested reading must not refuse an ordinary push",
-      "kind": "benign",
-      "hosts": [
-        "claude",
-        "codex"
-      ],
-      "payload": {
-        "tool_name": "Bash",
-        "tool_input": {
-          "command": "bash -c \"git fetch --dry-run origin 2>/dev/null; git push origin HEAD:feature\""
-        }
-      },
-      "fixture": {
-        "repo": {
-          "governance": "enabled",
-          "branch": "feature"
-        },
-        "files": {
-          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
-        }
-      },
-      "expect": {
-        "decision": "allow"
-      },
-      "status": "pass"
-    },
-    {
-      "id": "S1.three-levels",
-      "source": "G2 report on PR 705 at 272d16f, S1 (Low): a push nested deeper than the guard reads fails closed",
+      "id": "S1.bash-ce-default-push",
+      "source": "Owner-selected blanket refusal of shell and expression-runner pushes",
       "kind": "hostile",
       "hosts": [
         "claude",
@@ -705,7 +675,7 @@
       "payload": {
         "tool_name": "Bash",
         "tool_input": {
-          "command": "bash -c \"bash -c \\\"bash -c 'git push origin HEAD:feature'\\\"\""
+          "command": "bash -ce \"git push origin HEAD:main\""
         }
       },
       "fixture": {
@@ -720,7 +690,588 @@
       "expect": {
         "decision": "deny"
       },
-      "status": "pass"
+      "status": "pass",
+      "note": "The merge hold refuses pushes through another shell or expression runner without trying to read the target."
+    },
+    {
+      "id": "S1.bash-c-e-push",
+      "source": "Owner-selected blanket refusal of shell and expression-runner pushes",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "bash -c -e \"git push\""
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "The merge hold refuses pushes through another shell or expression runner without trying to read the target."
+    },
+    {
+      "id": "S1.sh-lc-push",
+      "source": "Owner-selected blanket refusal of shell and expression-runner pushes",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "sh -lc 'git push'"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "The merge hold refuses pushes through another shell or expression runner without trying to read the target."
+    },
+    {
+      "id": "S1.zsh-if-then-push",
+      "source": "Owner-selected blanket refusal of shell and expression-runner pushes",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "zsh -c \"if true; then git push origin HEAD:main; fi\""
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "The merge hold refuses pushes through another shell or expression runner without trying to read the target."
+    },
+    {
+      "id": "S1.pwsh-command-push",
+      "source": "Owner-selected blanket refusal of shell and expression-runner pushes",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "pwsh -Command \"git push origin HEAD:main\""
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "The merge hold refuses pushes through another shell or expression runner without trying to read the target."
+    },
+    {
+      "id": "S1.pwsh-command-prefix",
+      "source": "Owner-selected blanket refusal of shell and expression-runner pushes",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "pwsh -Comm \"git push\""
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "The merge hold refuses pushes through another shell or expression runner without trying to read the target."
+    },
+    {
+      "id": "S1.powershell-option-value",
+      "source": "Owner-selected blanket refusal of shell and expression-runner pushes",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "powershell -ExecutionPolicy Bypass -Command git push origin HEAD:main"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "The merge hold refuses pushes through another shell or expression runner without trying to read the target."
+    },
+    {
+      "id": "S1.powershell-block",
+      "source": "Owner-selected blanket refusal of shell and expression-runner pushes",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "powershell -NoProfile -Command { git push origin HEAD:main }"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "The merge hold refuses pushes through another shell or expression runner without trying to read the target."
+    },
+    {
+      "id": "S1.powershell-no-flag",
+      "source": "Owner-selected blanket refusal of shell and expression-runner pushes",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "powershell \"git push origin HEAD:main\""
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "The merge hold refuses pushes through another shell or expression runner without trying to read the target."
+    },
+    {
+      "id": "S1.pwsh-encoded-command",
+      "source": "Owner-selected blanket refusal of shell and expression-runner pushes",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "pwsh -EncodedCommand ZwBpAHQA"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "Encoded PowerShell commands are refused unread, even without git or push in the visible text."
+    },
+    {
+      "id": "S1.pwsh-call-operator",
+      "source": "Owner-selected blanket refusal of shell and expression-runner pushes",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "& pwsh -c \"git push\""
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "The merge hold refuses pushes through another shell or expression runner without trying to read the target."
+    },
+    {
+      "id": "S1.cmd-c-push",
+      "source": "Owner-selected blanket refusal of shell and expression-runner pushes",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "cmd /c git push origin HEAD:main"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "The merge hold refuses pushes through another shell or expression runner without trying to read the target."
+    },
+    {
+      "id": "S1.cmd-c-attached-push",
+      "source": "Owner-selected blanket refusal of shell and expression-runner pushes",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "cmd /cgit push origin HEAD:main"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "The merge hold refuses pushes through another shell or expression runner without trying to read the target."
+    },
+    {
+      "id": "S1.cmd-c-attached-quote",
+      "source": "Owner-selected blanket refusal of shell and expression-runner pushes",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "cmd /c\"git push origin HEAD:main\""
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "The merge hold refuses pushes through another shell or expression runner without trying to read the target."
+    },
+    {
+      "id": "S1.cmd-single-ampersand",
+      "source": "Owner-selected blanket refusal of shell and expression-runner pushes",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "cmd /c \"echo ready & cmd /c git push\""
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "The merge hold refuses pushes through another shell or expression runner without trying to read the target."
+    },
+    {
+      "id": "S1.eval-unquoted-push",
+      "source": "Owner-selected blanket refusal of shell and expression-runner pushes",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "eval git push origin HEAD:main"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "The merge hold refuses pushes through another shell or expression runner without trying to read the target."
+    },
+    {
+      "id": "S1.eval-quoted-push",
+      "source": "Owner-selected blanket refusal of shell and expression-runner pushes",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "eval \"git push\""
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "The merge hold refuses pushes through another shell or expression runner without trying to read the target."
+    },
+    {
+      "id": "S1.iex-parentheses",
+      "source": "Owner-selected blanket refusal of shell and expression-runner pushes",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "iex ('git push origin HEAD:main')"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "The merge hold refuses pushes through another shell or expression runner without trying to read the target."
+    },
+    {
+      "id": "S1.invoke-expression-push",
+      "source": "Owner-selected blanket refusal of shell and expression-runner pushes",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "Invoke-Expression \"git push\""
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "The merge hold refuses pushes through another shell or expression runner without trying to read the target."
+    },
+    {
+      "id": "S1.env-options-push",
+      "source": "Owner-selected blanket refusal of shell and expression-runner pushes",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "env -i bash -c \"git push\""
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "The merge hold refuses pushes through another shell or expression runner without trying to read the target."
+    },
+    {
+      "id": "S1.benign-shell-status",
+      "source": "Owner-selected blanket refusal of shell and expression-runner pushes",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "bash -c \"git status\""
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass",
+      "note": "A shell command with no git push stays allowed."
     },
     {
       "id": "CODEX.nested-worktrees-head-push",

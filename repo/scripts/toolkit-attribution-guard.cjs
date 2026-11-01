@@ -414,10 +414,24 @@ const BRANCH_STEPS = new Set(['checkout', 'switch', 'branch', 'worktree']);
 // move them before an unconfirmed-folder push, so it is kept as `other`.
 const READ_STEPS = new Set(['status', 'log', 'diff', 'show', 'fetch', 'push', 'rev-parse', 'ls-files', 'ls-remote', 'describe']);
 // Whether a git step is a plain read: on READ_STEPS, except a fetch that writes a local branch (a
-// refspec with `:` or --update-head-ok), and `config` with only a read option.
+// refspec after the repository with `:` or --update-head-ok), and `config` with only a read option.
 function readStep({ sub, args }) {
   if (sub === 'config') return args.some((word) => /^(?:--get(?:-all|-regexp|-urlmatch)?|--list|-l)$/.test(word));
-  if (sub === 'fetch') return !args.some((word) => word === '-u' || word === '--update-head-ok' || (!word.startsWith('-') && word.includes(':')));
+  if (sub === 'fetch') {
+    const valueOptions = new Set(['--upload-pack', '--depth', '--deepen', '--shallow-since', '--shallow-exclude', '--negotiation-tip', '-j', '--jobs', '--filter', '--server-option', '-o', '--refmap', '--recurse-submodules-default', '--submodule-prefix']);
+    let repository = false;
+    let positional = false;
+    for (let index = 0; index < args.length; index += 1) {
+      const word = args[index];
+      if (!positional && (word === '-u' || word === '--update-head-ok')) return false;
+      if (!positional && word === '--') { positional = true; continue; }
+      if (!positional && valueOptions.has(word)) { index += 1; continue; }
+      if (!positional && word.startsWith('-')) continue;
+      if (!repository) repository = true;
+      else if (word.includes(':')) return false;
+    }
+    return true;
+  }
   return READ_STEPS.has(sub);
 }
 

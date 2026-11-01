@@ -474,6 +474,18 @@ test('push check: every command form finds the folder, remote and branch it send
   assert.deepEqual(outgoingChanges('gh pr create --base=next', dir), [{ folder: dir, pullRequest: true, base: 'next', sources: [] }]);
 });
 
+test('fetch repository URLs are reads, while local refspec writes are retained', () => {
+  const folder = os.tmpdir();
+  for (const command of ['git fetch https://example.com/repo.git main', 'git fetch git@example.com:repo.git main',
+    'git fetch --depth 1 https://example.com/repo.git main', 'git fetch --server-option key:value https://example.com/repo.git main']) {
+    assert.deepEqual(outgoingChanges(`${command}; git push uat HEAD`, folder), [{ folder, remote: 'uat', sources: ['HEAD'] }], command);
+  }
+  for (const command of ['git fetch https://example.com/repo.git main:feature', 'git fetch -u https://example.com/repo.git main',
+    'git fetch --update-head-ok https://example.com/repo.git main', 'git fetch --depth 1 https://example.com/repo.git main:feature']) {
+    assert.deepEqual(outgoingChanges(`${command}; git push uat HEAD`, folder)[0].preceding, [{ folder, sub: 'other' }], command);
+  }
+});
+
 test('outgoing changes retain earlier git mutations and leave reads out', () => {
   const folder = os.tmpdir();
   for (const command of ['git reset --soft spare', 'git stash pop', 'git update-ref HEAD spare', 'git read-tree spare', 'git apply patch.diff']) {

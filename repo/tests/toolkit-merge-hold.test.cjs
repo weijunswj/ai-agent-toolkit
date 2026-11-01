@@ -355,52 +355,54 @@ test('a push to the default branch is refused; other branches and evidence store
   for (const [cwd, command] of allowed) assert.equal(decide(ctx, bash(cwd, command)), null, command);
 });
 
-test('nested shells read only their script argument, including call operators and expression words', (t) => {
+test('shell argument lists allow plain feature pushes but refuse a shell nested in the script', (t) => {
   const ctx = context(t);
   const feature = repository(ctx.root, 'feature', { branch: 'work' });
-  for (const command of ['& pwsh -Command "git push origin HEAD:main"', '. powershell -c "git push origin HEAD:main"',
-    'eval git push origin HEAD:main', 'iex git push origin HEAD:main', 'Invoke-Expression git push origin HEAD:main',
-    'bash -ec "git push origin HEAD:main"', 'zsh -lc "git push origin HEAD:main"', 'dash -c "git push origin HEAD:main"',
-    'ksh -c "git push origin HEAD:main"', 'pwsh -COMMAND "git push origin HEAD:main"', 'pwsh -Comm "git push origin HEAD:main"',
-    'powershell "git push origin HEAD:main"', 'cmd /c git push origin HEAD:main', 'cmd /K git push origin HEAD:main']) {
-    assert.match(decide(ctx, bash(feature, command))?.deny || '', /default branch `main`/, command);
+  const rows = [
+    [['bash', '-lc', 'git push origin work'], null],
+    [['pwsh', '-NoProfile', '-Command', 'git push origin work'], null],
+    [['bash', '-lc', 'bash -c "git push origin work"'], 'Toolkit: this command runs a git push through another shell (bash -c, pwsh -Command, cmd /c or eval), so Toolkit cannot read where it pushes and refused it. Run the push as its own git command.'],
+  ];
+  for (const [command, expected] of rows) {
+    const result = decide(ctx, { cwd: feature, tool_name: 'shell', tool_input: { command } });
+    assert.equal(result?.deny || null, expected, JSON.stringify(command));
   }
-  for (const command of ['pwsh -EncodedCommand Z2l0 push', '& powershell -encodedcommand "git push origin HEAD:main"', 'pwsh -enc Z2l0 push']) {
-    assert.match(decide(ctx, bash(feature, command))?.deny || '', /encoded command/, command);
-  }
-  // Options decide which words a shell runs (bundled, repeated, with values), so every argument with
-  // a space is read: these forms all run or may run the push.
-  for (const command of ['bash -ce "git push origin HEAD:main"', 'bash -c -e "git push origin HEAD:main"',
-    'pwsh -Command "Write-Output ready;" "git push origin HEAD:main"', 'powershell -ExecutionPolicy Bypass "git push origin HEAD:main"']) {
-    assert.match(decide(ctx, bash(feature, command))?.deny || '', /default branch `main`/, command);
-  }
-  // That reads a push passed as text to a script as a command too, which fails closed; ordinary
-  // shell calls and pushes to other branches still run.
-  assert.match(decide(ctx, bash(feature, String.raw`bash -c 'printf "%s\n" "$1"' -- 'git push origin HEAD:main'`))?.deny || '', /default branch `main`/);
-  for (const command of ['bash script.sh "git push origin work"', 'pwsh -File script.ps1 "git push origin work"', 'bash -c "echo done && git status"',
-    'cmd /c git push origin work', 'eval git push origin work', 'iex git push origin work', 'pwsh -Command "Write-Output ready"']) {
-    assert.equal(decide(ctx, bash(feature, command)), null, command);
+  // The unwrapped script still gets the default-branch check.
+  for (const command of [['bash', '-lc', 'git push origin HEAD:main'], ['pwsh', '-NoProfile', '-Command', 'git fetch; git push origin work:main']]) {
+    assert.match(decide(ctx, { cwd: feature, tool_name: 'shell', tool_input: { command } })?.deny || '', /default branch `main`/, JSON.stringify(command));
   }
 });
 
-test('a push to the default branch in a quoted command handed to a shell is read, two levels deep', (t) => {
+test('pushes through another shell or expression runner are refused outright', (t) => {
   const ctx = context(t);
   const feature = repository(ctx.root, 'feature', { branch: 'work' });
-  const outside = path.join(ctx.root, 'outside');
-  fs.mkdirSync(outside, { recursive: true });
-  const featurePath = feature.replace(/\\/g, '/');
-  const refused = [
-    [feature, 'bash -c "git push origin HEAD:main"'], [feature, "sh -lc 'git push origin work:main'"],
-    [feature, 'pwsh -NoProfile -Command "git push origin HEAD:main"'], [feature, 'eval "git push origin main"'],
-    [ctx.root, 'cd feature && bash -c "git fetch && git push origin HEAD:main"'],
-    [feature, 'bash -c "bash -c \\"git push origin HEAD:main\\""'],
-    // The inner shell is not known, so an assignment that names the folder is read as assigned too.
-    [outside, `pwsh -Command "W=${featurePath}; git -C $W push origin HEAD:main"`],
+  const message = 'Toolkit: this command runs a git push through another shell (bash -c, pwsh -Command, cmd /c or eval), so Toolkit cannot read where it pushes and refused it. Run the push as its own git command.';
+  const blocked = [
+    'bash -c "git push origin feature"', 'bash -ce "git push origin HEAD:main"', 'bash -c -e "git push"',
+    "sh -lc 'git push'", 'zsh -c "if true; then git push origin HEAD:main; fi"',
+    'pwsh -Command "git push origin HEAD:main"', 'pwsh -Comm "git push"',
+    'powershell -ExecutionPolicy Bypass -Command git push origin HEAD:main',
+    'powershell -NoProfile -Command { git push origin HEAD:main }', 'powershell "git push origin HEAD:main"',
+    'pwsh -EncodedCommand ZwBpAHQA', '& pwsh -c "git push"',
+    'cmd /c git push origin HEAD:main', 'cmd /cgit push origin HEAD:main', 'cmd /c"git push origin HEAD:main"',
+    'cmd /c "echo ready & cmd /c git push"', 'eval git push origin HEAD:main', 'eval "git push"',
+    "iex ('git push origin HEAD:main')", 'Invoke-Expression "git push"', 'env -i bash -c "git push"',
+    '. powershell -c "git push"', 'exec command nohup builtin bash -ec "git push"', 'W=value bash -c "git push"',
+    '{bash -c "git push"}', '(bash -c "git push")', '&bash -c "git push"',
+    'dash -c "git push"', 'ksh -c "git push"', 'cmd /kgit push',
+    'pwsh -e ZwBpAHQA', 'pwsh -enc ZwBpAHQA', 'pwsh -ec ZwBpAHQA',
+    'pwsh -Command "Set-Location -LiteralPath somewhere; git push"', 'bash -c "bash -c git push"',
+    'pwsh -Command "Write-Output ready;" "git push origin HEAD:main"',
+    'powershell -ExecutionPolicy Bypass "git push origin HEAD:main"',
+    'bash -c "npm test" && bash -c "git push origin feature"',
+    String.raw`bash -c 'printf "%s\n" "$1"' -- 'git push origin HEAD:main'`,
   ];
-  for (const [cwd, command] of refused) assert.match(decide(ctx, bash(cwd, command))?.deny || '', /default branch `main`/, command);
-  assert.match(decide(ctx, bash(feature, 'bash -c "bash -c \\"bash -c \'git push origin work\'\\""'))?.deny || '', /more than 2 levels deep/, 'three levels');
-  const allowed = [[feature, 'bash -c "git push origin work"'], [feature, 'pwsh -Command "git push -u origin HEAD"'], [feature, 'bash -c "git status && echo done"'], [feature, 'bash -c "bash -c \\"git push origin work\\""']];
-  for (const [cwd, command] of allowed) assert.equal(decide(ctx, bash(cwd, command)), null, command);
+  for (const command of blocked) assert.equal(decide(ctx, bash(feature, command))?.deny, message, command);
+  const allowed = ['git push origin work', 'bash -c "git status"', 'pwsh -Command "Write-Output ready"',
+    'cmd /c echo push', 'eval echo git', 'bash script.sh',
+    'bash -c "npm test" && git push origin feature', 'bash -lc "make"; git push origin feature',
+    'pwsh -Command "Write-Output ok" | Out-Null; git push origin feature'];
+  for (const command of allowed) assert.equal(decide(ctx, bash(feature, command)), null, command);
 });
 
 test('a push names its folder through a variable the same command assigned, and an evidence store a binding names is not refused', (t) => {
