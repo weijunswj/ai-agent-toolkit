@@ -5,13 +5,18 @@ name: Auto-merge eligibility
 # bump; repo/scripts/toolkit-auto-merge-eligible.cjs). Where the owner turned task auto-merge on,
 # the programme binding and the default branch's rules require this check too, so such a pull
 # request merges only once the owner adds the toolkit-owner-merge label in GitHub. It is not part
-# of validate, so those pull requests still pass the main gate.
+# of validate, so those pull requests still pass the main gate. While the default branch's binding
+# does not turn task auto-merge on, nothing merges without the owner anyway, so the check passes and
+# only lists what would be always manual.
 #
-# The label counts only for the head it was added on: the run for that labeled event records a
-# toolkit-owner-merge commit status on that head with this workflow's own token, and every other
-# run passes only while the head carries that status from github-actions[bot]. A push, or a label
+# The label counts only when the repository owner's own user account adds it (the event's sender;
+# a bot, an app or anyone else adding it has it removed and fails), and only for the head it was
+# added on: the run for that labeled event records a toolkit-owner-merge commit status on that
+# head with this workflow's own token, and every other run passes only while the head carries that status from github-actions[bot]. A push, or a label
 # without the status on the current head (whichever runs were cancelled before), removes the label
-# and fails, so the owner's OK never covers commits they have not seen. Pushes run in their own
+# and fails, so the owner's OK never covers commits they have not seen. Taking the label off, or a
+# refused label, sets that status to failure, and only the newest one counts. In a repository an
+# organisation owns no user is the owner, so the label never counts there (it fails closed). Pushes run in their own
 # group that nothing cancels.
 #
 # pull_request_target runs this file and the eligibility script as they are on the default branch,
@@ -52,6 +57,9 @@ jobs:
         env:
           ACTION: ${{ github.event.action }}
           ADDED_LABEL: ${{ github.event.label.name }}
+          SENDER: ${{ github.event.sender.login }}
+          SENDER_TYPE: ${{ github.event.sender.type }}
+          OWNER: ${{ github.repository_owner }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
@@ -61,16 +69,22 @@ jobs:
         run: |
           auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
           git -c "http.https://github.com/.extraheader=$auth" fetch --no-tags --quiet origin "$HEAD_SHA" "$BASE_SHA"
-          STATUSES="$(gh api --paginate "repos/$GH_REPO/commits/$HEAD_SHA/statuses" --jq '.[] | {context, state, creator: .creator.login}' | jq -s -c .)"
+          STATUSES="$(gh api --paginate "repos/$GH_REPO/commits/$HEAD_SHA/statuses" --jq '.[] | {id, context, state, creator: .creator.login}' | jq -s -c .)"
           decision="$(STATUSES="$STATUSES" node repo/scripts/toolkit-auto-merge-eligible.cjs --label-decision)"
           echo "Owner label: $decision"
           owner=""
           case "$decision" in *record=1*)
             gh api -X POST "repos/$GH_REPO/statuses/$HEAD_SHA" -f state=success -f context=toolkit-owner-merge -f description="The owner's toolkit-owner-merge label, added on this head" > /dev/null ;;
           esac
+          case "$decision" in *withdraw=1*)
+            gh api -X POST "repos/$GH_REPO/statuses/$HEAD_SHA" -f state=failure -f context=toolkit-owner-merge -f description="The owner's OK for this head was withdrawn or refused" > /dev/null ;;
+          esac
           case "$decision" in *remove=1*)
             gh api -X DELETE "repos/$GH_REPO/issues/$NUMBER/labels/toolkit-owner-merge" > /dev/null || true
-            echo "The toolkit-owner-merge label did not belong to this head, so it was removed; the owner adds it again once they have seen it." ;;
+            case "$decision" in
+              *not_owner=1*) echo "The toolkit-owner-merge label was added by $SENDER ($SENDER_TYPE), not by the repository owner's own account, so it was removed and does not count." ;;
+              *) echo "The toolkit-owner-merge label did not belong to this head, so it was removed; the owner adds it again once they have seen it." ;;
+            esac ;;
           esac
           case "$decision" in *owner_merge=1*) owner="--owner-merge" ;; esac
-          node repo/scripts/toolkit-auto-merge-eligible.cjs --base "$BASE_SHA" --head "$HEAD_SHA" $owner
+          node repo/scripts/toolkit-auto-merge-eligible.cjs --base "$BASE_SHA" --head "$HEAD_SHA" --binding-at "$(git rev-parse HEAD)" $owner
