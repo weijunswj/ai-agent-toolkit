@@ -315,6 +315,7 @@ test('nothing tells the owner to upload the Projects skill by hand', () => {
   for (const rel of [...files, 'repo/scripts/toolkit-install-health.cjs', 'skills/toolkit-setup/SKILL.md']) {
     assert.doesNotMatch(read(rel), /upload the (folder|zip|skill)/i, rel);
   }
+  assert.doesNotMatch(read('repo/ARCHITECTURE.md'), /uploaded by hand/i, 'repo/ARCHITECTURE.md');
 });
 
 test('device steps go to the Remote Control session, not the owner', () => {
