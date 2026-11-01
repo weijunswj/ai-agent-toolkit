@@ -222,15 +222,16 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.doesNotMatch(text, /Link everything worth opening|names "PR <n>" without a link|not from the link rule/);
   // The post layout and the merge summary.
   assert.ok(text.includes('**Post layout.** A running post has four parts, in order: a **Now:** line'));
-  // The owner's call: Waiting on you is always the last part of a post, after the ELI5 line.
-  assert.ok(text.includes('one **ELI5:** line, matched to the Now line; and **Waiting on you (n):** as the very last part, with nothing after it'));
-  assert.ok(text.includes('With no owner items, the ELI5 line ends the post.'));
-  assert.ok(body.includes('one `**ELI5:**` line; `**Waiting on you (n):**` last, one numbered item'));
-  assert.doesNotMatch(text + body, /ELI5:\*\*` line last|as the very last line with nothing after it/);
+  // The owner's call: Waiting on you sits second last, just above the ELI5 line, which ends every post.
+  assert.ok(text.includes('**Waiting on you (n):** second last, just above the ELI5 line'));
+  assert.ok(text.includes('one **ELI5:** line, matched to the Now line, as the very last line with nothing after it'));
+  assert.ok(body.includes('`**Waiting on you (n):**` second last, one numbered item'));
+  assert.ok(body.includes('one `**ELI5:**` line last;'));
+  assert.doesNotMatch(text + body, /Waiting on you \(n\):\*\*`? (as the very )?last|the ELI5 line ends the post/);
   assert.ok(text.includes('one **[HH:MM] Update:** line per update, each followed by a line holding only `&nbsp;` as a spacer'));
   assert.ok(text.includes('(only Update lines take that spacer)'));
   // The owner's board rules: blank lines between blocks, nested problem lines, title links, open asks carried forward.
-  assert.ok(text.includes('One blank line separates each labelled block from the next: the Now line with its bullets, the update log, the ELI5 line and **Waiting on you**.'));
+  assert.ok(text.includes('One blank line separates each labelled block from the next: the Now line with its bullets, the update log, **Waiting on you** and the ELI5 line.'));
   assert.ok(text.includes('(**Problem, fix, skip first**) nested as bullets under it'));
   assert.ok(text.includes('answered items drop off, and a fresh post repeats every item still open'));
   assert.ok(text.includes('A thread link\'s text is the thread\'s title, never "here" or an id; an issue is linked by its URL.'));
