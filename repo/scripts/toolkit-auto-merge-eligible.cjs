@@ -8,11 +8,18 @@
 // branch's copy of this file, .github/workflows/auto-merge-eligible.yml) and for the controller
 // before a merge. It loads only Node's own modules, so that copy runs on its own.
 //
-//   node repo/scripts/toolkit-auto-merge-eligible.cjs --base <commit> --head <commit> [--owner-merge] [--json]
+//   node repo/scripts/toolkit-auto-merge-eligible.cjs --base <commit> --head <commit> [--owner-merge] [--binding-at <commit>] [--json]
 //   node repo/scripts/toolkit-auto-merge-eligible.cjs --label-decision   (the workflow's label step)
 //
+// --binding-at <commit> (the workflow passes its default-branch checkout) reads the programme
+// binding at that commit first. While it does not say `task_prs.auto_merge: after-gates`, nothing
+// merges without the owner, so the check passes and only lists what would be always manual; a
+// binding that cannot be read keeps the full check. Without the flag (the controller's own run
+// before a merge) the check is always the full one.
+//
 // Exit 0: eligible, or always manual and the owner allowed it (--owner-merge, which the workflow
-// passes when the label step allows it: the OWNER_LABEL label, tied to this head). Exit 1: always
+// passes when the label step allows it: the OWNER_LABEL label, added by the repository owner and
+// tied to this head). Exit 1: always
 // manual, with each reason.
 // Exit 2: the commits could not be read.
 //
@@ -196,6 +203,28 @@ function eligibilityOf(cwd, base, head) {
   return eligibility({ files, toolkit, hooks, stampOnly, versions });
 }
 
+const BINDING_FILES = Object.freeze(['.github/toolkit-programme.json', '.github/ai-agent-toolkit-programme.json']);
+
+// Whether the programme binding at `commit` turns task auto-merge on: 'on', 'off', or 'unknown'
+// when it cannot be read (which keeps the full check). No binding file at all is 'off'.
+function taskAutoMergeAt(cwd, commit) {
+  if (!/^[0-9a-f]{7,64}$/i.test(String(commit))) return 'unknown';
+  if (git(cwd, ['cat-file', '-e', `${commit}^{commit}`]) === null) return 'unknown';
+  for (const file of BINDING_FILES) {
+    const text = git(cwd, ['show', `${commit}:${file}`]);
+    if (text === null) continue;
+    let binding;
+    try { binding = JSON.parse(text); } catch { return 'unknown'; }
+    if (!binding || typeof binding !== 'object' || Array.isArray(binding)) return 'unknown';
+    const taskPrs = binding.task_prs;
+    if (taskPrs === undefined) return 'off';
+    if (!taskPrs || typeof taskPrs !== 'object' || Array.isArray(taskPrs)) return 'unknown';
+    if (taskPrs.auto_merge === 'after-gates') return 'on';
+    return taskPrs.auto_merge === undefined || taskPrs.auto_merge === 'off' ? 'off' : 'unknown';
+  }
+  return 'off';
+}
+
 // The commit status that ties the owner's label to the head it was added on. Only the workflow's own
 // token writes it, so it reads as made by github-actions[bot]; an agent working through the owner's
 // login would show as the owner.
@@ -203,21 +232,48 @@ const OWNER_STATUS_CREATOR = 'github-actions[bot]';
 
 // What the workflow does with the owner's label for one event, whatever runs were cancelled before:
 // { owner_merge, record, remove }. `labels` are the pull request's labels, `added` the label a
-// labeled event added, `statuses` the head commit's statuses ({ context, state, creator }).
-//   - the labeled event that adds it records the status on the head it was added on, and passes;
-//   - any other run passes only while the head carries that status from the workflow;
+// labeled event added, `sender` ({ login, type }) who sent that event, `owner` the repository
+// owner's login, `statuses` the head commit's statuses ({ context, state, creator }).
+//   - the labeled event that adds it records the status on the head it was added on, and passes,
+//     only when the repository owner's own user account added it; a bot, an app or anyone else
+//     adding it has the label removed and fails (an agent working through the owner's login still
+//     reads as the owner: the accepted gap the merge hold covers). In a repository an organisation
+//     owns, no user is the owner, so the label never counts there: it fails closed;
+//   - taking the label off, or a refused label, sets that status to failure on the head;
+//   - any other run passes only while the newest such status on the head, from the workflow, is a
+//     success;
 //   - a push, or a label with no status on this head (a run that recorded it was cancelled, or the
 //     label was added before a push the removal missed), removes the label and fails.
-function labelDecision({ action, labels = [], added = null, statuses = [] }) {
+function addedByOwner(sender, owner) {
+  return Boolean(sender && owner && typeof sender.login === 'string' && sender.login !== ''
+    && sender.login.toLowerCase() === String(owner).toLowerCase() && sender.type === 'User');
+}
+
+function labelDecision({ action, labels = [], added = null, sender = null, owner = null, statuses = [] }) {
+  // Taking the label off withdraws the owner's OK for this head: the run records a failure status,
+  // which is then the newest, so a label added back later (and its refusal cancelled) cannot reuse it.
+  if (action === 'unlabeled' && added === OWNER_LABEL && !labels.includes(OWNER_LABEL)) return { owner_merge: false, record: false, remove: false, withdraw: true };
   if (!labels.includes(OWNER_LABEL)) return { owner_merge: false, record: false, remove: false };
-  if (action === 'labeled' && added === OWNER_LABEL) return { owner_merge: true, record: true, remove: false };
-  const recorded = statuses.some(entry => entry && entry.context === OWNER_LABEL && entry.state === 'success' && entry.creator === OWNER_STATUS_CREATOR);
+  if (action === 'labeled' && added === OWNER_LABEL) {
+    return addedByOwner(sender, owner)
+      ? { owner_merge: true, record: true, remove: false }
+      : { owner_merge: false, record: false, remove: true, not_owner: true, withdraw: true };
+  }
+  // Only the newest status from the workflow counts: the highest id where ids are given, else the
+  // first, as GitHub lists a commit's statuses newest first.
+  const ours = statuses.filter(entry => entry && entry.context === OWNER_LABEL && entry.creator === OWNER_STATUS_CREATOR);
+  const newest = ours.every(entry => Number.isSafeInteger(entry.id))
+    ? ours.reduce((best, entry) => (!best || entry.id > best.id ? entry : best), null)
+    : ours[0];
+  const recorded = Boolean(newest && newest.state === 'success');
   if (action === 'synchronize' || !recorded) return { owner_merge: false, record: false, remove: true };
   return { owner_merge: true, record: false, remove: false };
 }
 
-// The workflow's label step: reads ACTION, LABELS, ADDED_LABEL and STATUSES (JSON) from the
-// environment and prints `owner_merge=0|1 record=0|1 remove=0|1`. Anything unreadable gives no
+// The workflow's label step: reads ACTION, LABELS, ADDED_LABEL, SENDER, SENDER_TYPE, OWNER and
+// STATUSES (JSON, newest first) from the environment and prints `owner_merge=0|1 record=0|1
+// remove=0|1`, plus `not_owner=1` when someone other than the owner added the label and
+// `withdraw=1` when the head's toolkit-owner-merge status is to be set to failure. Anything unreadable gives no
 // owner merge and removes nothing.
 function labelDecisionMain(environment, stdout) {
   let labels = [];
@@ -225,9 +281,18 @@ function labelDecisionMain(environment, stdout) {
   try { labels = JSON.parse(environment.LABELS || '[]'); } catch { labels = []; }
   try { statuses = JSON.parse(environment.STATUSES || '[]'); } catch { statuses = null; }
   const decision = Array.isArray(labels) && Array.isArray(statuses)
-    ? labelDecision({ action: environment.ACTION, labels, added: environment.ADDED_LABEL || null, statuses })
+    ? labelDecision({
+      action: environment.ACTION,
+      labels,
+      added: environment.ADDED_LABEL || null,
+      sender: { login: environment.SENDER || '', type: environment.SENDER_TYPE || '' },
+      owner: environment.OWNER || null,
+      statuses,
+    })
     : { owner_merge: false, record: false, remove: false };
-  stdout.write(`owner_merge=${Number(decision.owner_merge)} record=${Number(decision.record)} remove=${Number(decision.remove)}\n`);
+  const notOwner = decision.not_owner ? ' not_owner=1' : '';
+  const withdraw = decision.withdraw ? ' withdraw=1' : '';
+  stdout.write(`owner_merge=${Number(decision.owner_merge)} record=${Number(decision.record)} remove=${Number(decision.remove)}${notOwner}${withdraw}\n`);
   return 0;
 }
 
@@ -238,21 +303,28 @@ function main(argv, { cwd = process.cwd(), stdout = process.stdout, stderr = pro
   const ownerMerge = argv.includes('--owner-merge');
   const base = value('--base');
   const head = value('--head');
-  if (!base || !head) { stderr.write('Usage: node repo/scripts/toolkit-auto-merge-eligible.cjs --base <commit> --head <commit> [--owner-merge] [--json]\n'); return 2; }
+  if (!base || !head) { stderr.write('Usage: node repo/scripts/toolkit-auto-merge-eligible.cjs --base <commit> --head <commit> [--owner-merge] [--binding-at <commit>] [--json]\n'); return 2; }
+  const bindingAt = value('--binding-at');
+  if (argv.includes('--binding-at') && !bindingAt) { stderr.write('Usage: --binding-at needs a commit.\n'); return 2; }
+  const autoMerge = bindingAt ? taskAutoMergeAt(cwd, bindingAt) : 'on';
   const verdict = eligibilityOf(cwd, base, head);
   if (!verdict) { stderr.write('The pull request\'s changes could not be read from git, so its auto-merge eligibility is unknown. It waits for the owner.\n'); return 2; }
   const allowed = !verdict.eligible && ownerMerge;
-  if (json) stdout.write(`${JSON.stringify({ ...verdict, owner_merge: allowed }, null, 2)}\n`);
-  else if (verdict.eligible) stdout.write('Eligible for task auto-merge: nothing here is on the always-manual list.\n');
+  const off = autoMerge === 'off' && !verdict.eligible && !allowed;
+  if (json) stdout.write(`${JSON.stringify({ ...verdict, owner_merge: allowed, ...(bindingAt ? { task_auto_merge: autoMerge } : {}) }, null, 2)}\n`);
+  else if (off) {
+    const reasons = verdict.reasons.map(entry => `- ${entry.path}: ${entry.why}`).join('\n');
+    stdout.write(`Task auto-merge is off in this repository's merged programme binding, so every pull request merges by hand and this check passes. Were it on, this one would be always manual:\n${reasons}\n`);
+  } else if (verdict.eligible) stdout.write('Eligible for task auto-merge: nothing here is on the always-manual list.\n');
   else {
     const reasons = verdict.reasons.map(entry => `- ${entry.path}: ${entry.why}`).join('\n');
     stdout.write(allowed
       ? `Always manual, and the owner allowed this merge with the ${OWNER_LABEL} label.\n${reasons}\n`
       : `Always manual: this pull request merges once the owner adds the ${OWNER_LABEL} label in GitHub.\n${reasons}\n`);
   }
-  return verdict.eligible || allowed ? 0 : 1;
+  return verdict.eligible || allowed || off ? 0 : 1;
 }
 
 if (require.main === module) process.exitCode = main(process.argv.slice(2));
 
-module.exports = Object.freeze({ GENERAL, OWNER_LABEL, OWNER_STATUS_CREATOR, TOOLKIT, eligibility, eligibilityOf, hookModules, hookModulesAt, labelDecision, main, withoutStamps });
+module.exports = Object.freeze({ GENERAL, OWNER_LABEL, OWNER_STATUS_CREATOR, TOOLKIT, eligibility, eligibilityOf, hookModules, hookModulesAt, labelDecision, main, taskAutoMergeAt, withoutStamps });
