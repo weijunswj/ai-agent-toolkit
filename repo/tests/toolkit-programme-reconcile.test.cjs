@@ -127,6 +127,46 @@ test('apply shows state writes from the same pass on the parent without a second
   assert.equal(reconciler().run().summary, 'No changes', 'a PR link repair also updates the parent in the same pass');
 });
 
+test('a nested reorder updates the NOW task time on the parent once, even without a planned parent block', () => {
+  for (const plannedParent of [true, false]) {
+    const outcomes = [
+      { issue: 423, class: 'COMMITTED', parent: 421, order: 1 },
+      { issue: 424, class: 'COMMITTED', parent: 423, order: 2 },
+      { issue: 425, class: 'COMMITTED', parent: 423, order: 3 },
+    ];
+    const { github, store, reconciler } = setup({ outcomes, issues: github => {
+      for (const outcome of outcomes) github.addIssue(outcome.issue, { parent: outcome.parent });
+    } });
+    store.now = () => '2026-11-01T06:00:00Z';
+    reconciler().run({ apply: true });
+    store.mutate('child', 423, { writer, parentDoc: store.read('parent', 421).doc,
+      change: doc => state.applyPatch('child', doc, { lifecycle: 'ACTIVE' }) });
+    reconciler().run({ apply: true });
+    assert.equal(reconciler().run().summary, 'No changes');
+    assert.ok(github.issues.get(421).body.includes('| #423 | - | NOW | IN PROGRESS | 2026-11-01 14:00 |'));
+
+    github.issues.get(423).subs.reverse();
+    store.now = () => '2026-11-01T07:00:00Z';
+    const run = reconciler();
+    const plan = run.plan();
+    assert.ok(plan.effects.some(effect => effect.kind === 'reorder' && effect.target.parent === 423));
+    assert.ok(plan.effects.some(effect => effect.kind === 'replace_block' && effect.target.issue === 421), 'the dry run reports the intent owner time change');
+    if (!plannedParent) plan.effects = plan.effects.filter(effect => effect.kind !== 'replace_block' || effect.target.issue !== 421);
+    const before = patchCount(github, 421);
+    const report = run.apply(plan);
+    assert.deepEqual(report.holds, []);
+    assert.deepEqual(github.issues.get(423).subs, [424, 425]);
+    assert.equal(store.read('child', 423).doc.volatile.written_at, '2026-11-01T07:00:00Z');
+    assert.ok(github.issues.get(421).body.includes('| #423 | - | NOW | IN PROGRESS | 2026-11-01 15:00 |'), 'the first pass shows the final intent owner time');
+    assert.equal(patchCount(github, 421) - before, 1, 'the parent is edited once');
+    const writes = { commits: github.commits, mutations: github.mutations() };
+    const again = reconciler().run({ apply: true });
+    assert.equal(again.summary, 'No changes');
+    assert.deepEqual(again.writes, { state: 0, github: 0 });
+    assert.deepEqual({ commits: github.commits, mutations: github.mutations() }, writes);
+  }
+});
+
 test('an issue-scoped pass keeps every NOW task comment time and skips queued task comments', () => {
   const outcomes = [423, 424, 425].map((issue, order) => ({ issue, name: `Task ${issue}`, class: 'COMMITTED', parent: 421, order }));
   const { github, store, reconciler } = setup({ outcomes, issues: github => {

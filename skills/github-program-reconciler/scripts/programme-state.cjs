@@ -3150,9 +3150,9 @@ class Reconciler {
       const topic = this.topicFor(parent, number, observed.issues);
       const traceBody = renderTraceBlockBody(number, traceEntries(comments, this.binding.record_prefix), this.binding.repository, topic);
       const traceCurrent = Boolean(traced.block) && normalizeBlockBody(traced.block.body) === normalizeBlockBody(traceBody) && !traced.block.tampered;
-      // New effects and settled intents write child timestamps, so the parent must follow both.
+      // Dry runs include the time change on the document that holds each effect's intent.
       const timeWillChange = number === parent.parent_issue && parent.outcomes.some(outcome => graphClass(outcome, children.get(outcome.issue)) === 'NOW'
-        && (effects.some(effect => effect.target.issue === outcome.issue)
+        && (effects.some(effect => (effect.kind === 'reorder' ? effect.target.parent : effect.target.issue) === outcome.issue)
           || resolutions.some(entry => entry.kind === 'child' && entry.number === outcome.issue && entry.outcome !== 'UNKNOWN')));
       // A current body at or over the threshold still moves its largest tag lists out.
       if (current && !move && traceCurrent && navCurrent && currentCurrent && !timeWillChange && issue.body.length < this.threshold) continue;
@@ -3309,6 +3309,7 @@ class Reconciler {
     const parentNumber = plan.parent.parent_issue;
     let parentDoc = null;
     let docs = null;
+    const writtenChildren = new Set();
     // The parent fence is read again immediately before every state write and every GitHub change,
     // so a takeover stops this pass at its next effect (STALE_WRITER). An intent it leaves IN_FLIGHT
     // is settled by readback in the successor's next pass, never replayed.
@@ -3322,7 +3323,10 @@ class Reconciler {
       guard();
       const result = this.store.mutate(kind, number, { writer, parentDoc, ...options });
       if (kind === 'parent') parentDoc = result.doc;
-      else if (docs && result.doc) docs.set(number, result.doc);
+      else {
+        if (result.outcome === 'WRITTEN') writtenChildren.add(number);
+        if (docs && result.doc) docs.set(number, result.doc);
+      }
       return result;
     };
     const docOwner = number => (number === parentNumber ? 'parent' : 'child');
@@ -3505,17 +3509,21 @@ class Reconciler {
 
     // 5. Bodies, with the parent last so it shows state writes made earlier in this pass.
     const blockEffects = plan.effects.filter(entry => entry.kind === 'replace_block');
-    if (blockEffects.length) {
+    if (blockEffects.length || writtenChildren.size) {
       guard();
       docs = new Map(plan.parent.outcomes.map(outcome => [outcome.issue, this.store.read('child', outcome.issue).doc]).filter(([, doc]) => doc));
       const comments = new Map(plan.observed.comments);
       const blocks = this.renderAll(parentDoc, docs, plan.observed.issues, comments);
       const version = this.toolkitVersion;
-      const ordered = [...blockEffects.filter(effect => effect.target.issue !== parentNumber), ...blockEffects.filter(effect => effect.target.issue === parentNumber)];
+      // The final parent check follows actual child writes, even when planning found no body change.
+      const ordered = [...blockEffects.filter(effect => effect.target.issue !== parentNumber), blockEffects.find(effect => effect.target.issue === parentNumber) || null];
       for (const planned of ordered) {
-        const number = planned.target.issue;
+        if (!planned && !writtenChildren.size) continue;
+        const number = planned?.target.issue ?? parentNumber;
         const body = number === parentNumber ? renderParentBlockBody(parentDoc, docs, plan.observed.issues, comments) : blocks.get(number);
-        let effect = { ...planned, target: { ...planned.target, digest: blockDigest(body) } };
+        const candidate = planned || { kind: 'replace_block', target: { issue: number }, state: true };
+        let effect = { ...candidate, target: { ...candidate.target, digest: blockDigest(body) } };
+        if (!planned) effect.text = describeEffect(effect);
         if (isHeld(`#${number}`, 'body')) { record(effect, 'SKIPPED', 'held earlier in this pass'); continue; }
         if (!version) { record(effect, 'HELD', 'the Toolkit version could not be read'); hold(effect, 'TOOLKIT_VERSION_UNKNOWN', 'the Toolkit version could not be read, so no block was written'); continue; }
         const owner = docOwner(number);
