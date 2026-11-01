@@ -222,18 +222,19 @@ function parseArgs(argv = process.argv.slice(2)) {
     else if (arg === '--yes-recommended') args.yesRecommended = true;
     else if (arg === '--codex-helper-capacity') {
       const choice = next().toLowerCase();
-      const normalized = { 'ram-safe': 'one-helper', advanced: 'custom' }[choice] || choice;
-      if (!['keep', 'one-helper', 'root-only', 'custom', 'migrate', 'remove', 'skip'].includes(normalized)) throw new Error(`Unsupported --codex-helper-capacity choice: ${choice}`);
+      // Legacy Skip answers write nothing, exactly like Keep current.
+      const normalized = { 'ram-safe': 'one-helper', advanced: 'custom', skip: 'keep' }[choice] || choice;
+      if (!['keep', 'one-helper', 'root-only', 'custom', 'migrate', 'remove'].includes(normalized)) throw new Error(`Unsupported --codex-helper-capacity choice: ${choice}`);
       args.setupChoices.codexHelperCapacity = normalized;
     } else if (arg === '--codex-delegation-control') {
       const legacyChoice = String(argv[++index] || '').toLowerCase();
-      const choice = { limit: 'one-helper', keep: 'keep', skip: 'skip' }[legacyChoice];
+      const choice = { limit: 'one-helper', keep: 'keep', skip: 'keep' }[legacyChoice];
       if (!choice) throw new Error(`Unsupported --codex-delegation-control choice: ${legacyChoice}`);
       args.setupChoices.codexHelperCapacity = choice;
     } else if (arg.startsWith('--codex-helper-capacity=')) {
       const choice = arg.slice('--codex-helper-capacity='.length).toLowerCase();
-      const normalized = { 'ram-safe': 'one-helper', advanced: 'custom' }[choice] || choice;
-      if (!['keep', 'one-helper', 'root-only', 'custom', 'migrate', 'remove', 'skip'].includes(normalized)) throw new Error(`Unsupported --codex-helper-capacity choice: ${choice}`);
+      const normalized = { 'ram-safe': 'one-helper', advanced: 'custom', skip: 'keep' }[choice] || choice;
+      if (!['keep', 'one-helper', 'root-only', 'custom', 'migrate', 'remove'].includes(normalized)) throw new Error(`Unsupported --codex-helper-capacity choice: ${choice}`);
       args.setupChoices.codexHelperCapacity = normalized;
     } else if (arg === '--codex-helper-count') {
       args.codexHelperCount = parseNonNegativeInteger(next(), arg);
@@ -1325,6 +1326,12 @@ function resolvedQuestion(definition) {
   if (!definition.choices.some((choice) => choice.value === recommendation.value)) {
     throw new Error(`Setup question ${definition.id} recommends an unavailable choice.`);
   }
+  // Order after folding so Keep current is always A, including keepAs rows.
+  const keepValue = fold?.folded_value === 'keep' ? fold.folded_into : 'keep';
+  const choices = [
+    ...definition.choices.filter((choice) => choice.value === keepValue),
+    ...definition.choices.filter((choice) => choice.value !== keepValue),
+  ];
   return {
     id: definition.id,
     key: definition.key,
@@ -1337,7 +1344,7 @@ function resolvedQuestion(definition) {
       verification: definition.currentVerification || 'verified',
     },
     recommendation: { ...recommendation },
-    choices: definition.choices.map((choice) => ({ ...choice })),
+    choices: choices.map((choice) => ({ ...choice })),
     afterApplying: definition.afterApplying || '',
     availability: definition.availability || { status: 'available', condition: 'Available for the detected setup state.' },
     privacySafeFallback: definition.privacySafeFallback || 'The effective state could not be verified safely; setup will not guess or expose private configuration.',
@@ -1624,7 +1631,7 @@ function antigravitySkillsQuestion(args, current) {
   return resolvedQuestion({
     id: 'antigravity-skills',
     key: 'antigravitySkills',
-    section: 'Other coding apps',
+    section: 'Toolkit in your coding apps',
     title: "Copy Toolkit's skills into Antigravity?",
     prompt: 'Antigravity skills choice',
     whatThisControls: "Whether setup copies Toolkit's portable skills, and the official n8n skills Toolkit ships, into Antigravity's global skills folder (~/.gemini/config/skills) and keeps them current on each setup. Toolkit-only skills (setup, env, controller and programme tools) stay out. Folders you copied yourself are never changed.",
@@ -2099,7 +2106,6 @@ function setupQuestionSpecs(args, current) {
         ...(current.delegation?.status === 'migration-required' ? [wizardChoice('migrate', 'Migrate legacy setting', 'Preview and approve migration of the exact Toolkit legacy block.')] : []),
         ...(migrateAfterCheck ? [wizardChoice('migrate', 'Migrate legacy setting', 'If Codex now runs the V2 (multi_agent_v2) helper feature, checked with Codex after you answer, preview and approve moving the V1 Toolkit block to it; otherwise setup stops before writing.')] : []),
         ...(String(current.delegation?.ownership || '').startsWith('toolkit-') ? [wizardChoice('remove', 'Remove Toolkit setting', 'Remove only the owned block after approval.')] : []),
-        wizardChoice('skip', 'Skip', 'Write no helper setting this run.'),
       ],
       // One helper is already configured for the known runtime, so setup would leave config.toml as
       // it is either way. With the runtime unknown, the same file can still need a change.
@@ -2141,18 +2147,19 @@ function setupQuestionSpecs(args, current) {
       specs.push(resolvedQuestion({
         id: 'codex-toolkit-plugin',
         key: 'codexPluginBehavior',
-        section: 'Other coding apps',
+        section: 'Toolkit in your coding apps',
         title: 'Keep Toolkit available in Codex?',
         prompt: 'Codex Toolkit choice',
-        whatThisControls: 'Whether setup verifies and refreshes the Toolkit plugin in Codex this run, only shows the commands, or leaves it as it is. This row is read from the Codex files; the Codex plugin commands run only after you choose Install or refresh.',
+        whatThisControls: 'Whether setup verifies and refreshes the Toolkit plugin in Codex this run, only shows the commands, or leaves it as it is. This row is read from the Codex files; any plugin checks run only after you answer, including when Keep current retains the install check.',
         choices: [
           wizardChoice('install', 'Install or refresh', 'Run the Codex plugin commands to verify Toolkit in Codex, and refresh its cache from the update copy when it is missing, off, older or different.'),
           wizardChoice('instructions', 'Show instructions only', 'Make no plugin change and show the Codex plugin commands to run yourself.'),
           wizardChoice('keep', 'Keep current', `Make no plugin change and run no Codex command this run: ${codexPluginCurrent(current, args)}`),
         ],
-        // Codex already runs the current Toolkit from the update copy, so Install or refresh would only
-        // find nothing to do; it folds into Keep current, which runs no Codex command.
+        // Keep the install action under Keep current: a later update-source answer can change the
+        // required marketplace binding, so the plugin and source must still be checked after answers.
         currentChoice: unchanged ? 'install' : '',
+        keepAs: 'Keep it installed. Setup checks it against the update source chosen above after you answer, and refreshes it or corrects its marketplace binding only if needed.',
         recommendation: unchanged
           ? { value: 'keep', outcome: 'Leave the Codex plugin as it is.', reason: 'Codex already runs the current Toolkit from the update copy, so a refresh would change nothing.' }
           : { value: 'install', outcome: 'Verify and refresh the Toolkit plugin in Codex.', reason: notes.length ? `Codex does not run the current Toolkit from the update copy: ${notes.join('; ')}.` : 'Codex does not run the current Toolkit from the update copy.' },
@@ -2166,7 +2173,7 @@ function setupQuestionSpecs(args, current) {
       specs.push(reportOnlyRow({
         id: 'codex-toolkit-hooks',
         key: 'codexHooks',
-        section: 'Other coding apps',
+        section: 'Toolkit in your coding apps',
         title: 'Toolkit hooks in Codex',
         whatThisControls: "Whether Codex runs each Toolkit hook. Codex keeps this in ~/.codex/config.toml ([hooks.state]) and you change it in Codex's /hooks; setup only reports it and never edits it. A hook that is off or not reviewed does not run, so its check is skipped.",
         current: hooks.full,
@@ -2208,7 +2215,7 @@ function setupQuestionSpecs(args, current) {
     specs.push(resolvedQuestion({
       id: 'claude-toolkit-plugin',
       key: 'claudePluginBehavior',
-      section: 'Other coding apps',
+      section: 'Toolkit in your coding apps',
       title: 'Keep Toolkit available in Claude Code?',
       prompt: 'Claude Code Toolkit choice',
       whatThisControls: 'Whether Claude Code installs or refreshes its own Toolkit plugin, shows manual instructions, or preserves current plugin state.',
@@ -2924,6 +2931,8 @@ function assertQuestionBankAnswerBinding(parsed, specs) {
 function resolveDisplayedChoiceAnswer(spec, answer) {
   const normalized = String(answer || '').trim();
   if (!normalized) return spec.recommended;
+  // Preserve old typed Skip answers after removing the duplicate helper choice.
+  if (spec.key === 'codexHelperCapacity' && normalized.toLowerCase() === 'skip') return 'keep';
   const presented = choiceByPresentationReference(spec, normalized);
   if (presented) return presented.value;
   const canonical = spec.choices.find((choice) => choice.value.toLowerCase() === normalized.toLowerCase());

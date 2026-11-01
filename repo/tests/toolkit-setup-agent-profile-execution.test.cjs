@@ -41,8 +41,8 @@ test('recommended Claude execution writes a root-only profile and launches no Cl
   ], { env: isolatedHomeEnv(root), timeout: 300000 });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   // The recommendation's effect would only repeat its label, so the cell shows the label once.
-  assert.match(result.stdout, /\| 2\.1 \| How should Claude Code use agents\? \|[^\n]*\| A\. Toolkit repos: main session \+ Toolkit planning and build helpers only\. Elsewhere: one layer of subagents\.<br>Selected: /);
-  assert.match(result.stdout, /\| 2\.1 \|[^\n]*Selected: A\. Toolkit repos: main session \+ Toolkit planning and build helpers only\. Elsewhere: one layer of subagents\./);
+  assert.match(result.stdout, /\| 2\.1 \| How should Claude Code use agents\? \|[^\n]*\| B\. Toolkit repos: main session \+ Toolkit planning and build helpers only\. Elsewhere: one layer of subagents\.<br>Selected: /);
+  assert.match(result.stdout, /\| 2\.1 \|[^\n]*Selected: B\. Toolkit repos: main session \+ Toolkit planning and build helpers only\. Elsewhere: one layer of subagents\./);
   assert.doesNotMatch(result.stdout, /Direct Toolkit-managed|toolkit-direct|agent capacity choice|Manual maximum|Capacity mode/i);
   assert.match(result.stdout, /Helper-agent capacity questions shown: no/);
   assert.match(result.stdout, /Selected topology: root-only/);
@@ -109,7 +109,7 @@ test('the recommended Claude Code settings are written to the temporary Claude s
   // All recommended from there: every row is off, so each recommends Turn on, and model switching becomes true.
   const allOn = run(base, { env, timeout: 300000 });
   assert.equal(allOn.status, 0, allOn.stderr || allOn.stdout);
-  assert.match(allOn.stdout, /\| Claude Code setting: Switch models without asking on a flag\? \| Off \(set by setup\) \| A\. Turn on[^|]*\| B\. Keep current \|/);
+  assert.match(allOn.stdout, /\| Claude Code setting: Switch models without asking on a flag\? \| Off \(set by setup\) \| B\. Turn on[^|]*\| A\. Keep current \|/);
   assert.deepEqual(read(), { switchModelsOnFlag: true, attribution: false, crossSessionInbound: 'accept', pluginConfigs: agentsMd });
 });
 
@@ -142,7 +142,7 @@ test('All recommended applies each Claude Code setting row on its own, and an un
   fs.writeFileSync(settingsPath, broken);
   const unreadable = run(base, { env, timeout: 300000 });
   assert.equal(unreadable.status, 24, unreadable.stderr || unreadable.stdout);
-  assert.match(unreadable.stdout, /\| Claude Code setting: Switch models without asking on a flag\? \| Could not read \| C\. Keep current<br>Selected: C\. Keep current \|/);
+  assert.match(unreadable.stdout, /\| Claude Code setting: Switch models without asking on a flag\? \| Could not read \| A\. Keep current<br>Selected: A\. Keep current \|/);
   assert.match(unreadable.stdout, /Fix the Claude Code user settings file, then run `setup toolkit` again\./);
   assert.equal(fs.readFileSync(settingsPath, 'utf8'), broken);
 });
@@ -210,7 +210,7 @@ test('a piped toolkit-direct answer is not a topology choice and writes nothing'
     '--execute', '--host', 'claude-code', '--repo-root', setupRepo, '--repo-remote', origin, '--claude-cli', fake.command,
   ], { env: isolatedHomeEnv(root), timeout: 300000, input: ['enable', 'enable', 'default', 'enable', 'toolkit-direct', 'instructions', 'keep', ''].join('\n') });
   assert.notEqual(result.status, 0, result.stdout);
-  assert.match(`${result.stdout}\n${result.stderr}`, /must be one of: root-only, broader-native, keep/);
+  assert.match(`${result.stdout}\n${result.stderr}`, /must be one of: keep, root-only, broader-native/);
   assert.equal(fs.existsSync(control.profilePath('claude-code', { root: profileRootOf(root) })), false);
   assert.equal(sessions(fake).length, 0);
 });
@@ -235,7 +235,7 @@ test('keep current resolves a stored direct profile to root-only without probing
   assert.equal(kept.status, 24, kept.stderr || kept.stdout);
   assert.match(kept.stdout, /Install check: action required\n/);
   assert.match(kept.stdout, /Claude Code depth setting: Root-only is selected, but CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH is not set in your Claude Code user settings\./);
-  assert.match(kept.stdout, /\| 2\.1 \|[^\n]*Selected: C\. Keep current/);
+  assert.match(kept.stdout, /\| 2\.1 \|[^\n]*Selected: A\. Keep current/);
   assert.match(kept.stdout, /Selected topology: root-only/);
   assert.equal(sessions(fake).some((entry) => entry.args.includes('--print')), false);
   assert.equal(control.readProfile('claude-code', { root: profileRootOf(root) }).topology, control.TOPOLOGIES.ROOT_ONLY);

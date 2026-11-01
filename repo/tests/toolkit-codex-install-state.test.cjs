@@ -170,7 +170,7 @@ test('the read-only Codex setup plan launches no Codex command', (t) => {
   const result = support.run(['--plan', '--host', 'codex'], { env: { ...env, NODE_OPTIONS: `--require "${spy.file.replace(/\\/g, '/')}"` } });
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
   assert.equal(fs.existsSync(spy.log), false, fs.existsSync(spy.log) ? fs.readFileSync(spy.log, 'utf8') : '');
-  assert.match(result.stdout, /\| 3\.1 \| Keep Toolkit available in Codex\? \| On, 3\.19\.0 \([^|]*\) \| A\. Install or refresh/);
+  assert.match(result.stdout, /\| 3\.1 \| Keep Toolkit available in Codex\? \| On, 3\.19\.0 \([^|]*\) \| B\. Install or refresh/);
   assert.match(result.stdout, /\nStatus \(nothing to answer\): Toolkit hooks in Codex: Off: Shell and agent check, File edit check\. Turn them on in Codex: open \/hooks and turn on Shell and agent check and File edit check\. Codex may ask you to review the hooks again after a refresh; check \/hooks afterwards\.\n/);
 });
 
@@ -313,9 +313,9 @@ test('setup row 3.1 and the Codex hooks status line match the session-start line
   const same = codexRows({});
   assert.equal(same['codex-toolkit-plugin'].presentation.question_ref, '3.1');
   assert.equal(same['codex-toolkit-plugin'].current_short, 'On, 3.19.3');
-  assert.equal(same['codex-toolkit-plugin'].recommended, 'keep');
-  // Codex already runs this Toolkit, so Install or refresh would change nothing and folds into Keep current.
-  assert.deepEqual(same['codex-toolkit-plugin'].choices.map((choice) => choice.label), ['Show instructions only', 'Keep current']);
+  assert.equal(same['codex-toolkit-plugin'].recommended, 'install');
+  // Keep current retains verification against the chosen update source even when the cache is current.
+  assert.deepEqual(same['codex-toolkit-plugin'].choices.map((choice) => choice.label), ['Keep current', 'Show instructions only']);
   assert.equal(same['codex-toolkit-hooks'].presentation.question_ref, '');
   assert.equal(same['codex-toolkit-hooks'].current_short, 'All 6 on');
   assert.equal(same['codex-toolkit-hooks'].recommended_text, 'Nothing to do');
@@ -323,11 +323,11 @@ test('setup row 3.1 and the Codex hooks status line match the session-start line
   const older = codexRows({ versions: ['3.19.0'], version: '3.19.0', older: true, cacheFresh: null });
   assert.equal(older['codex-toolkit-plugin'].current_short, 'On, 3.19.0 (3.19.3 available)');
   assert.equal(older['codex-toolkit-plugin'].recommended, 'install');
-  assert.deepEqual(older['codex-toolkit-plugin'].choices.map((choice) => choice.label), ['Install or refresh', 'Show instructions only', 'Keep current']);
+  assert.deepEqual(older['codex-toolkit-plugin'].choices.map((choice) => choice.label), ['Keep current', 'Install or refresh', 'Show instructions only']);
   assert.equal(older['codex-toolkit-hooks'].recommended_text, 'Nothing to do. Codex may ask you to review the hooks again after a refresh; check /hooks afterwards');
 
   const off = codexRows({ hooks: { status: 'read', entries: ALL_NAMES.split(', ').map((name) => ({ name, state: 'off' })) } });
-  assert.equal(off['codex-toolkit-plugin'].recommended, 'keep');
+  assert.equal(off['codex-toolkit-plugin'].recommended, 'install');
   assert.equal(off['codex-toolkit-hooks'].current_short, 'All 6 off');
   assert.equal(off['codex-toolkit-hooks'].recommended_text, 'Turn them on in Codex: open /hooks and turn on Session start updates, Prompt check, Shell and agent check, File edit check, Checkpoint after tool use and Checkpoint at stop');
 

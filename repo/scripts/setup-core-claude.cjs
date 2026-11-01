@@ -165,7 +165,7 @@ function defineClaudeSetup({ CLAUDE_HOOK_TRUST_ACTION, SUBAGENT_DEPTH_FOR_TOPOLO
       return resolvedQuestion({
         id: `claude-setting-${spec.id}`,
         key,
-        section: 'Other coding apps',
+        section: 'Toolkit in your coding apps',
         title: `Claude Code setting: ${effect.short}?`,
         prompt: `Claude Code setting choice: ${effect.short}`,
         whatThisControls: `One value in your Claude Code user settings (settings.json in your Claude Code config folder): ${effect.controls} ${Object.hasOwn(spec, 'offValue') ? 'Turn on and Turn off each write this one value' : 'Turn off removes this one setting whoever added it'}; the other settings are not touched.`,

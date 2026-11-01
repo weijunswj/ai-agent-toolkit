@@ -5,19 +5,19 @@ This reference uses a privacy-safe representative Codex state in which all curre
 
 Toolkit setup choices - 9 questions across 3 sections
 
-Bank reference: NQ63-BW2H-407X-Z82E
+Bank reference: A96G-4XPC-7XK4-QK1R
 
 Quick index
 
 1.1 Update source - Recommended: A - Keep current
-1.2 Automatic updates - Recommended: A - Turn on
-1.3 Update reports - Recommended: B - Keep current
-1.4 Report retention - Recommended: B - Keep current
-1.5 Raise Codex's instruction limit - Recommended: B - Keep current
-2.1 Codex helper capacity - Recommended: A - One helper
-2.2 Codex Toolkit maintenance - Recommended: B - Keep current
-3.1 Keep Toolkit available in Codex? - Recommended: B - Keep current
-3.2 Copy Toolkit's skills into Antigravity? - Recommended: B - Keep current
+1.2 Automatic updates - Recommended: B - Turn on
+1.3 Update reports - Recommended: A - Keep current
+1.4 Report retention - Recommended: A - Keep current
+1.5 Raise Codex's instruction limit - Recommended: A - Keep current
+2.1 Codex helper capacity - Recommended: B - One helper
+2.2 Codex Toolkit maintenance - Recommended: A - Keep current
+3.1 Keep Toolkit available in Codex? - Recommended: A - Keep current
+3.2 Copy Toolkit's skills into Antigravity? - Recommended: A - Keep current
 Status (nothing to answer): Toolkit hooks in Codex: All 6 on. Nothing to do.
 
 
@@ -56,7 +56,7 @@ Status (nothing to answer): Toolkit hooks in Codex: All 6 on. Nothing to do.
 
 **Verification:** verified
 
-**Recommended:** A - Turn on
+**Recommended:** B - Turn on
 
 **Recommended outcome:** Turn on clean, verified automatic updates.
 
@@ -64,13 +64,13 @@ Status (nothing to answer): Toolkit hooks in Codex: All 6 on. Nothing to do.
 
 **Choices:**
 
-- **A. Turn on** - Store automatic maintenance as enabled so trusted startup maintenance checks for, verifies, and safely activates clean updates, and point automatic updates at the update source chosen above.
-- **B. Turn off** - Disable startup update checks and automatic hub synchronization; manual `setup toolkit` or explicit maintenance remains available.
-- **C. Keep current** - Preserve this effective behavior: Automatic startup update checks are on. The update source it checks stays as it is.
+- **A. Keep current** - Preserve this effective behavior: Automatic startup update checks are on. The update source it checks stays as it is.
+- **B. Turn on** - Store automatic maintenance as enabled so trusted startup maintenance checks for, verifies, and safely activates clean updates, and point automatic updates at the update source chosen above.
+- **C. Turn off** - Disable startup update checks and automatic hub synchronization; manual `setup toolkit` or explicit maintenance remains available.
 
 **After applying:** This changes Toolkit maintenance state and future trusted SessionStart behavior; it does not directly edit native host configuration and does not require a restart by itself.
 
-**Selected:** A - Turn on
+**Selected:** B - Turn on
 
 ---
 
@@ -82,7 +82,7 @@ Status (nothing to answer): Toolkit hooks in Codex: All 6 on. Nothing to do.
 
 **Verification:** verified
 
-**Recommended:** B - Keep current
+**Recommended:** A - Keep current
 
 **Recommended outcome:** Preserve this effective behavior: Meaningful maintenance reports are kept; only action-required reports open automatically.
 
@@ -90,12 +90,12 @@ Status (nothing to answer): Toolkit hooks in Codex: All 6 on. Nothing to do.
 
 **Choices:**
 
-- **A. Do not keep reports** - Stop creating normal Toolkit maintenance reports; concise failure or safety status still appears when action is required.
-- **B. Keep current** - Preserve this effective behavior: Meaningful maintenance reports are kept; only action-required reports open automatically.
+- **A. Keep current** - Preserve this effective behavior: Meaningful maintenance reports are kept; only action-required reports open automatically.
+- **B. Do not keep reports** - Stop creating normal Toolkit maintenance reports; concise failure or safety status still appears when action is required.
 
 **After applying:** This changes Toolkit report state only. It does not change native host configuration, and no restart is required.
 
-**Selected:** B - Keep current
+**Selected:** A - Keep current
 
 ---
 
@@ -107,7 +107,7 @@ Status (nothing to answer): Toolkit hooks in Codex: All 6 on. Nothing to do.
 
 **Verification:** verified
 
-**Recommended:** B - Keep current
+**Recommended:** A - Keep current
 
 **Recommended outcome:** Keep the effective seven-day retention window.
 
@@ -115,12 +115,12 @@ Status (nothing to answer): Toolkit hooks in Codex: All 6 on. Nothing to do.
 
 **Choices:**
 
-- **A. Choose another duration** - Use the approved positive day count for future Toolkit report cleanup; no unrelated logs or project files are considered.
-- **B. Keep current** - Preserve this effective behavior: Toolkit maintenance reports are currently kept for 7 day(s).
+- **A. Keep current** - Preserve this effective behavior: Toolkit maintenance reports are currently kept for 7 day(s).
+- **B. Choose another duration** - Use the approved positive day count for future Toolkit report cleanup; no unrelated logs or project files are considered.
 
 **After applying:** The approved duration is stored in Toolkit state. Eligible Toolkit maintenance-report cleanup runs during the approved setup and future maintenance; unrelated files are never included.
 
-**Selected:** B - Keep current
+**Selected:** A - Keep current
 
 ---
 
@@ -132,7 +132,7 @@ Status (nothing to answer): Toolkit hooks in Codex: All 6 on. Nothing to do.
 
 **Verification:** state-derived
 
-**Recommended:** B - Keep current
+**Recommended:** A - Keep current
 
 **Recommended outcome:** Preserve this effective behavior: Toolkit's record says keep Codex's instruction limit raised. Codex's config.toml: Raised (65536).
 
@@ -140,12 +140,12 @@ Status (nothing to answer): Toolkit hooks in Codex: All 6 on. Nothing to do.
 
 **Choices:**
 
-- **A. Leave it** - Do not raise it; if Toolkit raised it earlier, put the previous value back. Setup still reports the combined size.
-- **B. Keep current** - Preserve this effective behavior: Toolkit's record says keep Codex's instruction limit raised. Codex's config.toml: Raised (65536).
+- **A. Keep current** - Preserve this effective behavior: Toolkit's record says keep Codex's instruction limit raised. Codex's config.toml: Raised (65536).
+- **B. Leave it** - Do not raise it; if Toolkit raised it earlier, put the previous value back. Setup still reports the combined size.
 
 **After applying:** This stores your choice in Toolkit state and, on a yes, edits `~/.codex/config.toml` at the end of setup. Start a new Codex session to use the new limit.
 
-**Selected:** B - Keep current
+**Selected:** A - Keep current
 
 ---
 
@@ -160,7 +160,7 @@ Status (nothing to answer): Toolkit hooks in Codex: All 6 on. Nothing to do.
 
 **Verification:** verified
 
-**Recommended:** A - One helper
+**Recommended:** B - One helper
 
 **Recommended outcome:** Allow one helper.
 
@@ -168,16 +168,15 @@ Status (nothing to answer): Toolkit hooks in Codex: All 6 on. Nothing to do.
 
 **Choices:**
 
-- **A. One helper** - Allow one helper for planning (G0) and build (G1) evidence gathering and validation.
-- **B. No helpers** - Explicitly opt out of helpers.
-- **C. Choose a number** - Choose a non-negative helper count; more than one needs RAM-risk approval.
-- **D. Keep current** - Preserve this effective behavior: documentation fixture
+- **A. Keep current** - Preserve this effective behavior: documentation fixture
+- **B. One helper** - Allow one helper for planning (G0) and build (G1) evidence gathering and validation.
+- **C. No helpers** - Explicitly opt out of helpers.
+- **D. Choose a number** - Choose a non-negative helper count; more than one needs RAM-risk approval.
 - **E. Remove Toolkit setting** - Remove only the owned block after approval.
-- **F. Skip** - Write no helper setting this run.
 
 **After applying:** Setup presents any required replacement proposal before writing, backs up config.toml, and asks Codex to load it. Fully restart Codex and complete one successful turn.
 
-**Selected:** A - One helper
+**Selected:** B - One helper
 
 ---
 
@@ -189,7 +188,7 @@ Status (nothing to answer): Toolkit hooks in Codex: All 6 on. Nothing to do.
 
 **Verification:** verified
 
-**Recommended:** B - Keep current
+**Recommended:** A - Keep current
 
 **Recommended outcome:** Preserve this effective behavior: Automatic Codex Toolkit maintenance is on.
 
@@ -197,40 +196,40 @@ Status (nothing to answer): Toolkit hooks in Codex: All 6 on. Nothing to do.
 
 **Choices:**
 
-- **A. Turn off** - Disable future automatic cache refresh; the installed Toolkit plugin is not uninstalled, and manual `setup toolkit` repair or refresh remains available.
-- **B. Keep current** - Preserve this effective behavior: Automatic Codex Toolkit maintenance is on.
+- **A. Keep current** - Preserve this effective behavior: Automatic Codex Toolkit maintenance is on.
+- **B. Turn off** - Disable future automatic cache refresh; the installed Toolkit plugin is not uninstalled, and manual `setup toolkit` repair or refresh remains available.
 
 **After applying:** This is about later Codex session starts; "Keep Toolkit available in Codex?" decides what this run does to the plugin. If maintenance refreshes the plugin cache and Windows hook launchers, open `/hooks` in the Codex app and turn the updated Toolkit hooks on. Turning maintenance off only changes future Toolkit state and does not uninstall the plugin.
 
-**Selected:** B - Keep current
+**Selected:** A - Keep current
 
 ---
 
 
-## 3. Other coding apps
+## 3. Toolkit in your coding apps
 
 ### 3.1 Keep Toolkit available in Codex?
 
-**What this controls:** Whether setup verifies and refreshes the Toolkit plugin in Codex this run, only shows the commands, or leaves it as it is. This row is read from the Codex files; the Codex plugin commands run only after you choose Install or refresh.
+**What this controls:** Whether setup verifies and refreshes the Toolkit plugin in Codex this run, only shows the commands, or leaves it as it is. This row is read from the Codex files; any plugin checks run only after you answer, including when Keep current retains the install check.
 
 **Current:** Codex runs Toolkit 1.0.0 (turned on); the update copy has 1.0.0.
 
 **Verification:** state-derived
 
-**Recommended:** B - Keep current
+**Recommended:** A - Keep current
 
-**Recommended outcome:** Leave the Codex plugin as it is.
+**Recommended outcome:** Keep it installed. Setup checks it against the update source chosen above after you answer, and refreshes it or corrects its marketplace binding only if needed.
 
 **Why:** Codex already runs the current Toolkit from the update copy, so a refresh would change nothing.
 
 **Choices:**
 
-- **A. Show instructions only** - Make no plugin change and show the Codex plugin commands to run yourself.
-- **B. Keep current** - Make no plugin change and run no Codex command this run: Codex runs Toolkit 1.0.0 (turned on); the update copy has 1.0.0.
+- **A. Keep current** - Keep it installed. Setup checks it against the update source chosen above after you answer, and refreshes it or corrects its marketplace binding only if needed.
+- **B. Show instructions only** - Make no plugin change and show the Codex plugin commands to run yourself.
 
 **After applying:** If the plugin files change, fully restart Codex, then open `/hooks` and turn the Toolkit hooks on; Codex may ask you to review them again.
 
-**Selected:** B - Keep current
+**Selected:** A - Keep current
 
 ---
 
@@ -242,7 +241,7 @@ Status (nothing to answer): Toolkit hooks in Codex: All 6 on. Nothing to do.
 
 **Verification:** state-derived
 
-**Recommended:** B - Keep current
+**Recommended:** A - Keep current
 
 **Recommended outcome:** Leave Antigravity unchanged.
 
@@ -250,12 +249,12 @@ Status (nothing to answer): Toolkit hooks in Codex: All 6 on. Nothing to do.
 
 **Choices:**
 
-- **A. Copy and keep updated** - Copy Toolkit's portable skills and the official n8n skills into ~/.gemini/config/skills, update Toolkit's copies when they are out of date, and record them.
-- **B. Keep current** - Preserve this effective behavior: Toolkit's skills are not in Antigravity's global skills folder.
+- **A. Keep current** - Preserve this effective behavior: Toolkit's skills are not in Antigravity's global skills folder.
+- **B. Copy and keep updated** - Copy Toolkit's portable skills and the official n8n skills into ~/.gemini/config/skills, update Toolkit's copies when they are out of date, and record them.
 
 **After applying:** Start a new Antigravity session to load changed skills.
 
-**Selected:** B - Keep current
+**Selected:** A - Keep current
 
 ---
 
@@ -276,7 +275,7 @@ Status (nothing to answer): Toolkit hooks in Codex: All 6 on. Nothing to do.
 Reply with either:
 
 - `all recommended`
-- only your changes, for example: `1.2=B, 1.3=A`
+- only your changes, for example: `1.2=A, 1.3=B`
 
 Anything you do not list takes its recommendation.
 
@@ -286,21 +285,21 @@ Setup run with `--host claude-code` shows this bank instead, for the same repres
 
 Toolkit setup choices - 11 questions across 3 sections
 
-Bank reference: K34X-W5Z6-SHAF-2FG6
+Bank reference: 0M7J-V80J-ZYKB-3B59
 
 Quick index
 
 1.1 Update source - Recommended: A - Keep current
-1.2 Automatic updates - Recommended: A - Turn on
-1.3 Update reports - Recommended: B - Keep current
-1.4 Report retention - Recommended: B - Keep current
-2.1 How should Claude Code use agents? - Recommended: A - Toolkit repos: main session + Toolkit planning and build helpers only. Elsewhere: one layer of subagents.
-3.1 Keep Toolkit available in Claude Code? - Recommended: A - Install or refresh
-3.2 Claude Code setting: Hide AI credit in commits/PRs? - Recommended: A - Turn on
-3.3 Claude Code setting: Let other sessions wake this one? - Recommended: A - Turn on
-3.4 Claude Code setting: Switch models without asking on a flag? - Recommended: B - Keep current
-3.5 Claude Code setting: Read AGENTS.md too? - Recommended: A - Turn on
-3.6 Copy Toolkit's skills into Antigravity? - Recommended: B - Keep current
+1.2 Automatic updates - Recommended: B - Turn on
+1.3 Update reports - Recommended: A - Keep current
+1.4 Report retention - Recommended: A - Keep current
+2.1 How should Claude Code use agents? - Recommended: B - Toolkit repos: main session + Toolkit planning and build helpers only. Elsewhere: one layer of subagents.
+3.1 Keep Toolkit available in Claude Code? - Recommended: B - Install or refresh
+3.2 Claude Code setting: Hide AI credit in commits/PRs? - Recommended: B - Turn on
+3.3 Claude Code setting: Let other sessions wake this one? - Recommended: B - Turn on
+3.4 Claude Code setting: Switch models without asking on a flag? - Recommended: A - Keep current
+3.5 Claude Code setting: Read AGENTS.md too? - Recommended: B - Turn on
+3.6 Copy Toolkit's skills into Antigravity? - Recommended: A - Keep current
 
 
 ## 1. Updates and reports
@@ -338,7 +337,7 @@ Quick index
 
 **Verification:** verified
 
-**Recommended:** A - Turn on
+**Recommended:** B - Turn on
 
 **Recommended outcome:** Turn on clean, verified automatic updates.
 
@@ -346,13 +345,13 @@ Quick index
 
 **Choices:**
 
-- **A. Turn on** - Store automatic maintenance as enabled so trusted startup maintenance checks for, verifies, and safely activates clean updates, and point automatic updates at the update source chosen above.
-- **B. Turn off** - Disable startup update checks and automatic hub synchronization; manual `setup toolkit` or explicit maintenance remains available.
-- **C. Keep current** - Preserve this effective behavior: Automatic startup update checks are on. The update source it checks stays as it is.
+- **A. Keep current** - Preserve this effective behavior: Automatic startup update checks are on. The update source it checks stays as it is.
+- **B. Turn on** - Store automatic maintenance as enabled so trusted startup maintenance checks for, verifies, and safely activates clean updates, and point automatic updates at the update source chosen above.
+- **C. Turn off** - Disable startup update checks and automatic hub synchronization; manual `setup toolkit` or explicit maintenance remains available.
 
 **After applying:** This changes Toolkit maintenance state and future trusted SessionStart behavior; it does not directly edit native host configuration and does not require a restart by itself.
 
-**Selected:** A - Turn on
+**Selected:** B - Turn on
 
 ---
 
@@ -364,7 +363,7 @@ Quick index
 
 **Verification:** verified
 
-**Recommended:** B - Keep current
+**Recommended:** A - Keep current
 
 **Recommended outcome:** Preserve this effective behavior: Meaningful maintenance reports are kept; only action-required reports open automatically.
 
@@ -372,12 +371,12 @@ Quick index
 
 **Choices:**
 
-- **A. Do not keep reports** - Stop creating normal Toolkit maintenance reports; concise failure or safety status still appears when action is required.
-- **B. Keep current** - Preserve this effective behavior: Meaningful maintenance reports are kept; only action-required reports open automatically.
+- **A. Keep current** - Preserve this effective behavior: Meaningful maintenance reports are kept; only action-required reports open automatically.
+- **B. Do not keep reports** - Stop creating normal Toolkit maintenance reports; concise failure or safety status still appears when action is required.
 
 **After applying:** This changes Toolkit report state only. It does not change native host configuration, and no restart is required.
 
-**Selected:** B - Keep current
+**Selected:** A - Keep current
 
 ---
 
@@ -389,7 +388,7 @@ Quick index
 
 **Verification:** verified
 
-**Recommended:** B - Keep current
+**Recommended:** A - Keep current
 
 **Recommended outcome:** Keep the effective seven-day retention window.
 
@@ -397,12 +396,12 @@ Quick index
 
 **Choices:**
 
-- **A. Choose another duration** - Use the approved positive day count for future Toolkit report cleanup; no unrelated logs or project files are considered.
-- **B. Keep current** - Preserve this effective behavior: Toolkit maintenance reports are currently kept for 7 day(s).
+- **A. Keep current** - Preserve this effective behavior: Toolkit maintenance reports are currently kept for 7 day(s).
+- **B. Choose another duration** - Use the approved positive day count for future Toolkit report cleanup; no unrelated logs or project files are considered.
 
 **After applying:** The approved duration is stored in Toolkit state. Eligible Toolkit maintenance-report cleanup runs during the approved setup and future maintenance; unrelated files are never included.
 
-**Selected:** B - Keep current
+**Selected:** A - Keep current
 
 ---
 
@@ -417,7 +416,7 @@ Quick index
 
 **Verification:** state-derived
 
-**Recommended:** A - Toolkit repos: main session + Toolkit planning and build helpers only. Elsewhere: one layer of subagents.
+**Recommended:** B - Toolkit repos: main session + Toolkit planning and build helpers only. Elsewhere: one layer of subagents.
 
 **Recommended outcome:** Toolkit repos: main session + Toolkit planning and build helpers only. Elsewhere: one layer of subagents.
 
@@ -425,18 +424,18 @@ Quick index
 
 **Choices:**
 
-- **A. Toolkit repos: main session + Toolkit planning and build helpers only. Elsewhere: one layer of subagents.** - In Toolkit-governed repositories admit only the Toolkit planning (G0) and build (G1) leaf helpers. Also set the Toolkit-owned `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1` in the Claude Code user settings, which holds Claude Code 2.1.217 or later to one layer of subagents unless project, local or managed Claude settings override it in a folder; a value you set yourself is kept as it is.
-- **B. Broader native behaviour** - Permit native Claude agent behavior outside Toolkit control and its resource guarantees. Outside Toolkit repos Claude Code's own defaults apply: a Toolkit-set `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` is removed (a value you set yourself is kept), and the Toolkit hook no longer refuses a subagent that starts another.
-- **C. Keep current** - Preserve this effective behavior: Current topology: root-only. CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH is not set in your Claude Code user settings, so Claude Code's own default applies. The Toolkit hook refuses nested launches in normal folders once this Toolkit version's plugin is installed and active. Stale, unverifiable or retired topology state falls back safely to root-only, and the subagent depth setting is left as it is.
+- **A. Keep current** - Preserve this effective behavior: Current topology: root-only. CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH is not set in your Claude Code user settings, so Claude Code's own default applies. The Toolkit hook refuses nested launches in normal folders once this Toolkit version's plugin is installed and active. Stale, unverifiable or retired topology state falls back safely to root-only, and the subagent depth setting is left as it is.
+- **B. Toolkit repos: main session + Toolkit planning and build helpers only. Elsewhere: one layer of subagents.** - In Toolkit-governed repositories admit only the Toolkit planning (G0) and build (G1) leaf helpers. Also set the Toolkit-owned `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1` in the Claude Code user settings, which holds Claude Code 2.1.217 or later to one layer of subagents unless project, local or managed Claude settings override it in a folder; a value you set yourself is kept as it is.
+- **C. Broader native behaviour** - Permit native Claude agent behavior outside Toolkit control and its resource guarantees. Outside Toolkit repos Claude Code's own defaults apply: a Toolkit-set `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` is removed (a value you set yourself is kept), and the Toolkit hook no longer refuses a subagent that starts another.
 
 **After applying:** A changed choice updates the Claude Toolkit profile and the one Toolkit-owned `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` key in the Claude Code user settings (`settings.json` in your Claude Code config folder). Start a new Claude Code session before relying on it. Claude Code 2.1.217 or later reads the depth setting; earlier versions ignore it.
 
-**Selected:** A - Toolkit repos: main session + Toolkit planning and build helpers only. Elsewhere: one layer of subagents.
+**Selected:** B - Toolkit repos: main session + Toolkit planning and build helpers only. Elsewhere: one layer of subagents.
 
 ---
 
 
-## 3. Other coding apps
+## 3. Toolkit in your coding apps
 
 ### 3.1 Keep Toolkit available in Claude Code?
 
@@ -446,7 +445,7 @@ Quick index
 
 **Verification:** verified
 
-**Recommended:** A - Install or refresh
+**Recommended:** B - Install or refresh
 
 **Recommended outcome:** Let Claude Code install or refresh its own Toolkit plugin.
 
@@ -454,13 +453,13 @@ Quick index
 
 **Choices:**
 
-- **A. Install or refresh** - Use Claude Code native plugin commands to verify and refresh its Toolkit cache when needed.
-- **B. Show instructions only** - Make no native plugin change and report the manual Claude Code action required.
-- **C. Keep current** - Preserve the currently detected Claude Code plugin behavior and state.
+- **A. Keep current** - Preserve the currently detected Claude Code plugin behavior and state.
+- **B. Install or refresh** - Use Claude Code native plugin commands to verify and refresh its Toolkit cache when needed.
+- **C. Show instructions only** - Make no native plugin change and report the manual Claude Code action required.
 
 **After applying:** If native plugin files change, start a new Claude Code session (close sessions opened before the update) and complete any native trust or activation steps reported by setup.
 
-**Selected:** A - Install or refresh
+**Selected:** B - Install or refresh
 
 ---
 
@@ -472,7 +471,7 @@ Quick index
 
 **Verification:** state-derived
 
-**Recommended:** A - Turn on
+**Recommended:** B - Turn on
 
 **Recommended outcome:** Sets "attribution": false in settings.json.
 
@@ -480,12 +479,12 @@ Quick index
 
 **Choices:**
 
-- **A. Turn on** - Sets "attribution": false in settings.json.
-- **B. Keep current** - Preserve this effective behavior: No AI attribution in commits and pull requests: off (Claude Code default).
+- **A. Keep current** - Preserve this effective behavior: No AI attribution in commits and pull requests: off (Claude Code default).
+- **B. Turn on** - Sets "attribution": false in settings.json.
 
 **After applying:** Start a new Claude Code session so it reads the changed settings.
 
-**Selected:** A - Turn on
+**Selected:** B - Turn on
 
 ---
 
@@ -497,7 +496,7 @@ Quick index
 
 **Verification:** state-derived
 
-**Recommended:** A - Turn on
+**Recommended:** B - Turn on
 
 **Recommended outcome:** Sets "crossSessionInbound": "accept" in settings.json.
 
@@ -505,12 +504,12 @@ Quick index
 
 **Choices:**
 
-- **A. Turn on** - Sets "crossSessionInbound": "accept" in settings.json.
-- **B. Keep current** - Preserve this effective behavior: Messages from your other Claude sessions wake this one: off (Claude Code default).
+- **A. Keep current** - Preserve this effective behavior: Messages from your other Claude sessions wake this one: off (Claude Code default).
+- **B. Turn on** - Sets "crossSessionInbound": "accept" in settings.json.
 
 **After applying:** Start a new Claude Code session so it reads the changed settings.
 
-**Selected:** A - Turn on
+**Selected:** B - Turn on
 
 ---
 
@@ -522,7 +521,7 @@ Quick index
 
 **Verification:** state-derived
 
-**Recommended:** B - Keep current
+**Recommended:** A - Keep current
 
 **Recommended outcome:** Keep this setting as it is.
 
@@ -530,12 +529,12 @@ Quick index
 
 **Choices:**
 
-- **A. Turn off** - Sets "switchModelsOnFlag": false in settings.json. Claude Code then pauses and asks before switching models when a request is flagged.
-- **B. Keep current** - Preserve this effective behavior: Switch models without asking when a request is flagged: on (Claude Code default).
+- **A. Keep current** - Preserve this effective behavior: Switch models without asking when a request is flagged: on (Claude Code default).
+- **B. Turn off** - Sets "switchModelsOnFlag": false in settings.json. Claude Code then pauses and asks before switching models when a request is flagged.
 
 **After applying:** Start a new Claude Code session so it reads the changed settings.
 
-**Selected:** B - Keep current
+**Selected:** A - Keep current
 
 ---
 
@@ -547,7 +546,7 @@ Quick index
 
 **Verification:** state-derived
 
-**Recommended:** A - Turn on
+**Recommended:** B - Turn on
 
 **Recommended outcome:** Sets "instructionFiles": "claude-md-and-agents-md" in settings.json.
 
@@ -555,12 +554,12 @@ Quick index
 
 **Choices:**
 
-- **A. Turn on** - Sets "instructionFiles": "claude-md-and-agents-md" in settings.json.
-- **B. Keep current** - Preserve this effective behavior: Read AGENTS.md as well as CLAUDE.md: off (Claude Code default).
+- **A. Keep current** - Preserve this effective behavior: Read AGENTS.md as well as CLAUDE.md: off (Claude Code default).
+- **B. Turn on** - Sets "instructionFiles": "claude-md-and-agents-md" in settings.json.
 
 **After applying:** Start a new Claude Code session so it reads the changed settings.
 
-**Selected:** A - Turn on
+**Selected:** B - Turn on
 
 ---
 
@@ -572,7 +571,7 @@ Quick index
 
 **Verification:** state-derived
 
-**Recommended:** B - Keep current
+**Recommended:** A - Keep current
 
 **Recommended outcome:** Leave Antigravity unchanged.
 
@@ -580,11 +579,11 @@ Quick index
 
 **Choices:**
 
-- **A. Copy and keep updated** - Copy Toolkit's portable skills and the official n8n skills into ~/.gemini/config/skills, update Toolkit's copies when they are out of date, and record them.
-- **B. Keep current** - Preserve this effective behavior: Toolkit's skills are not in Antigravity's global skills folder.
+- **A. Keep current** - Preserve this effective behavior: Toolkit's skills are not in Antigravity's global skills folder.
+- **B. Copy and keep updated** - Copy Toolkit's portable skills and the official n8n skills into ~/.gemini/config/skills, update Toolkit's copies when they are out of date, and record them.
 
 **After applying:** Start a new Antigravity session to load changed skills.
 
-**Selected:** B - Keep current
+**Selected:** A - Keep current
 
 ---
