@@ -210,7 +210,7 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.ok(text.includes('- Relay CI in one line with the owning thread\'s link (a PR link only on a merge-ready merge ask).'));
   assert.ok(body.includes('each linking the card or thread (by its title), a PR only on a merge-ready merge ask,'));
   assert.doesNotMatch(text + body, /with the PR link|until then, link the chat thread|thread \(by its title\) or PR/);
-  assert.ok(read('repo/contracts/claude-projects/web-controller-projects/tasks/hourly-nudge.md').includes('with a **Waiting on you** item or relay that names its thread, file or artifact without its link, or that links a PR anywhere but a merge ask for a merge-ready PR.'));
+  assert.ok(read('repo/contracts/claude-projects/web-controller-projects/tasks/hourly-nudge.md').includes('with a **Waiting on you** item or relay that names its thread, file or artifact without its link, or that links a PR anywhere but a merge ask for a merge-ready PR;'));
   // Devices by their recorded name, every periodic report relayed, owed decision records kept as promises.
   assert.ok(text.includes('Name a device by the name the project instructions record for it, never a generic word'));
   assert.ok(text.includes('Relay each daily check-in and hourly nudge report there too, with the waiting-on-you reminder list every run, or one line when nothing is due.'));
