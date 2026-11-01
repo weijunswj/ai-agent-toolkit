@@ -323,6 +323,61 @@ for (const childState of ['missing', 'existing']) for (const timing of ['before 
   });
 }
 
+// PR preservation matrix: create/update x every discovery result x pre-apply/CAS drift.
+// The concurrent pass uses its own store, so cached observations cannot hide the new PR.
+for (const childState of ['missing', 'existing']) for (const discovery of ['selected', 'no-match', 'incomplete']) {
+  for (const timing of ['before apply', 'CAS conflict']) test(`stale plans preserve concurrent PRs: ${childState}, ${discovery}, ${timing}`, () => {
+    const { github, store, binding, reconciler } = completedFixture();
+    if (discovery !== 'no-match') github.addPr(200, { head: SHA_A, merged: true, body: 'Refs #100' });
+    if (discovery === 'incomplete') github.issuePrLinks.set(100, { timelineTruncated: true });
+    if (childState === 'existing') store.write('child', 100,
+      state.newChild({ repository: github.repository, outcome: store.read('parent', 7).doc.outcomes[0] }), { sha: null, previous: null });
+    const run = reconciler();
+    const plan = run.plan();
+    plan.effects = plan.effects.filter(effect => effect.kind === 'create_state' || effect.kind === 'update_state');
+    const kind = childState === 'missing' ? 'create_state' : 'update_state';
+    const effect = plan.effects.find(entry => entry.kind === kind);
+    assert.ok(effect);
+    assert.equal(effect.doc.pr.number, discovery === 'selected' ? 200 : null);
+    assert.equal(Boolean(effect.backfill), discovery === 'selected');
+    assert.equal(plan.observed.discovery.get(100).complete, discovery !== 'incomplete');
+
+    const concurrent = new state.StateStore({ transport: github, store: binding.store });
+    github.addPr(201, { head: SHA_A, merged: true });
+    let before = null;
+    let raced = false;
+    const savePr = () => {
+      concurrent.mutate('child', 100, { writer, parentDoc: concurrent.read('parent', 7).doc,
+        create: () => state.newChild({ repository: github.repository, outcome: plan.parent.outcomes[0] }),
+        change: doc => { doc.pr.number = 201; return doc; } });
+      before = { commits: github.commits, mutations: github.mutations(), files: new Map(github.files) };
+    };
+    if (timing === 'before apply') savePr();
+    else github.intercept(call => {
+      if (raced || call.method !== 'PUT' || !call.path.endsWith('issue-100.json')) return;
+      raced = true;
+      savePr();
+      return { status: 409, json: { message: 'test concurrent PR save' } };
+    });
+
+    const report = run.apply(plan);
+    assert.ok(before, 'the independent store saved the PR');
+    assert.ok(report.holds.some(hold => hold.code === 'PR_BACKFILL_STALE'));
+    assert.equal(report.results.find(result => result.kind === kind).outcome, 'HELD');
+    assert.equal(github.commits, before.commits, 'the stale apply writes no state or intents');
+    assert.equal(github.mutations(), before.mutations, 'the stale apply changes no projections');
+    assert.deepEqual(github.files, before.files);
+    assert.equal(concurrent.read('child', 100).doc.pr.number, 201);
+
+    assert.deepEqual(run.run({ apply: true }).holds, []);
+    assert.match(github.issues.get(7).body, /\| #100 \| #201 \| - \| COMPLETED/);
+    assert.match(github.issues.get(100).body, /PR.*#201/);
+    const settled = { commits: github.commits, mutations: github.mutations(), files: new Map(github.files) };
+    assert.equal(run.run({ apply: true }).summary, 'No changes');
+    assert.deepEqual({ commits: github.commits, mutations: github.mutations(), files: github.files }, settled);
+  });
+}
+
 for (const change of ['pr', 'retire-parent', 'retire-child', 'reopen', 'takeover']) test(`backfill rechecks fresh eligibility before writing: ${change}`, () => {
   const { github, store, reconciler } = completedFixture();
   github.addPr(200, { head: SHA_A, merged: true, body: 'Refs #100' });

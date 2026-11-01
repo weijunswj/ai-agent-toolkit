@@ -3549,13 +3549,18 @@ class Reconciler {
       }
     }
     for (const effect of plan.effects.filter(entry => entry.kind === 'create_state' || entry.kind === 'update_state')) {
-      const checkBackfill = () => {
-        if (!effect.backfill) return;
+      const checkFreshState = () => {
         guard();
         const outcome = parentDoc.outcomes.find(entry => entry.issue === effect.target.issue);
         // Keep an absent child absent: defaults from the planned outcome are not completion proof.
         const child = this.store.read('child', effect.target.issue).doc;
-        if ((child?.pr?.number ?? null) !== effect.backfill.expected_pr || !backfillEligible(outcome, child)) {
+        const freshPr = child?.pr?.number ?? null;
+        const expectedPr = plan.children.get(effect.target.issue)?.doc?.pr?.number ?? null;
+        // Even a plan with no discovered PR must keep one recorded since planning.
+        if (freshPr !== null && freshPr !== (effect.doc.pr?.number ?? null) && freshPr !== expectedPr) {
+          throw new ProgrammeError('PR_BACKFILL_STALE', 'The task PR changed after planning; run reconciliation again.');
+        }
+        if (effect.backfill && (freshPr !== effect.backfill.expected_pr || !backfillEligible(outcome, child))) {
           throw new ProgrammeError('PR_BACKFILL_STALE', 'The task PR or completion eligibility changed after planning; run reconciliation again.');
         }
       };
@@ -3570,7 +3575,7 @@ class Reconciler {
           create: () => newChild({ repository: this.binding.repository, outcome: outcomes.get(effect.target.issue) }),
           change: doc => {
             // Recheck on every CAS retry as well as on the initial mutation read.
-            checkBackfill();
+            checkFreshState();
             for (const key of fields) {
               if (desired[key] === undefined) delete doc[key];
               else doc[key] = clone(desired[key]);
@@ -3581,9 +3586,9 @@ class Reconciler {
         record(effect, result.outcome === 'NOOP' ? 'NOOP' : 'DONE');
       } catch (error) {
         // Creation and overlapping writes stop inside mutate before retrying the callback.
-        // Classify lost backfill eligibility there too, without weakening the CAS refusal.
-        if (error.code === 'STATE_CONFLICT' && effect.backfill) {
-          try { checkBackfill(); } catch (freshError) { error = freshError; }
+        // Classify a newly recorded PR or lost eligibility too, without weakening the CAS refusal.
+        if (error.code === 'STATE_CONFLICT') {
+          try { checkFreshState(); } catch (freshError) { error = freshError; }
         }
         if (STOPS_PASS.has(error.code)) throw error;
         record(effect, 'HELD', error.message);
