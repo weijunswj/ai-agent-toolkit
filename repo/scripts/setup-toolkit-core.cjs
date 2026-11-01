@@ -355,8 +355,8 @@ function hostMismatch(args, environment = process.env) {
     if (arg === '--host') index += 1;
     else if (!arg.startsWith('--host=')) rest.push(arg);
   }
-  const rerun = ['node', path.join(__dirname, 'setup-toolkit.cjs'), ...rest, ...(detected === 'codex' ? [] : ['--host', detected])]
-    .map((part) => (/^[\w./:=-]+$/.test(part) ? part : `"${part}"`)).join(' ');
+  const rerun = ['node', `"${path.join(__dirname, 'setup-toolkit.cjs')}"`, ...[...rest, ...(detected === 'codex' ? [] : ['--host', detected])]
+    .map((part) => (/^[\w./:=-]+$/.test(part) ? part : `"${part}"`))].join(' ');
   const asked = args.argv.some((arg) => arg === '--host' || arg.startsWith('--host='))
     ? `asked for the ${HOST_LABELS[args.host]} questions with --host ${args.host}`
     : `ran without --host, which means the ${HOST_LABELS[args.host]} questions`;
