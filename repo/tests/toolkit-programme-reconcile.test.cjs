@@ -323,10 +323,11 @@ for (const childState of ['missing', 'existing']) for (const timing of ['before 
   });
 }
 
-// PR preservation matrix: create/update x every discovery result x pre-apply/CAS drift.
+// PR preservation matrix: create/update x discovery result x pre-apply/CAS drift x read lag.
+// Only the CAS read is current; any separate guard-side read can return a 404 or older blob.
 // The concurrent pass uses its own store, so cached observations cannot hide the new PR.
 for (const childState of ['missing', 'existing']) for (const discovery of ['selected', 'no-match', 'incomplete']) {
-  for (const timing of ['before apply', 'CAS conflict']) test(`stale plans preserve concurrent PRs: ${childState}, ${discovery}, ${timing}`, () => {
+  for (const timing of ['before apply', 'CAS conflict']) for (const lag of ['none', '404', 'older blob']) test(`stale plans preserve concurrent PRs: ${childState}, ${discovery}, ${timing}, ${lag}`, () => {
     const { github, store, binding, reconciler } = completedFixture();
     if (discovery !== 'no-match') github.addPr(200, { head: SHA_A, merged: true, body: 'Refs #100' });
     if (discovery === 'incomplete') github.issuePrLinks.set(100, { timelineTruncated: true });
@@ -342,6 +343,9 @@ for (const childState of ['missing', 'existing']) for (const discovery of ['sele
     assert.equal(Boolean(effect.backfill), discovery === 'selected');
     assert.equal(plan.observed.discovery.get(100).complete, discovery !== 'incomplete');
 
+    const oldDoc = plan.children.get(100)?.doc || state.newChild({ repository: github.repository, outcome: plan.parent.outcomes[0] });
+    const oldBlob = { status: 200, json: { encoding: 'base64', sha: '0'.repeat(40),
+      content: Buffer.from(JSON.stringify(oldDoc)).toString('base64') } };
     const concurrent = new state.StateStore({ transport: github, store: binding.store });
     github.addPr(201, { head: SHA_A, merged: true });
     let before = null;
@@ -352,6 +356,12 @@ for (const childState of ['missing', 'existing']) for (const discovery of ['sele
         change: doc => { doc.pr.number = 201; return doc; } });
       before = { commits: github.commits, mutations: github.mutations(), files: new Map(github.files) };
     };
+    let childReads = 0;
+    github.intercept(call => {
+      if (!before || call.method !== 'GET' || call.path !== `${store.contentsPath('child', 100)}?ref=main`) return;
+      childReads += 1;
+      if (childReads === 2 && lag !== 'none') return lag === '404' ? { status: 404, json: {} } : oldBlob;
+    });
     if (timing === 'before apply') savePr();
     else github.intercept(call => {
       if (raced || call.method !== 'PUT' || !call.path.endsWith('issue-100.json')) return;
@@ -367,6 +377,8 @@ for (const childState of ['missing', 'existing']) for (const discovery of ['sele
     assert.equal(github.commits, before.commits, 'the stale apply writes no state or intents');
     assert.equal(github.mutations(), before.mutations, 'the stale apply changes no projections');
     assert.deepEqual(github.files, before.files);
+    assert.equal(childReads, 1, 'the guard uses the CAS input, with no separate child read');
+    github.hooks = [];
     assert.equal(concurrent.read('child', 100).doc.pr.number, 201);
 
     assert.deepEqual(run.run({ apply: true }).holds, []);
@@ -377,6 +389,67 @@ for (const childState of ['missing', 'existing']) for (const discovery of ['sele
     assert.deepEqual({ commits: github.commits, mutations: github.mutations(), files: github.files }, settled);
   });
 }
+
+for (const mode of ['create', 'update', 'disjoint retry']) test(`CAS change receives its input existence on every write: ${mode}`, () => {
+  const { github, store } = completedFixture();
+  const parent = store.read('parent', 7).doc;
+  const create = () => state.newChild({ repository: github.repository, outcome: parent.outcomes[0] });
+  if (mode !== 'create') store.write('child', 100, create(), { sha: null, previous: null });
+  const inputs = [];
+  let raced = false;
+  github.intercept(call => {
+    if (mode !== 'disjoint retry' || raced || call.method !== 'PUT') return;
+    raced = true;
+    const fresh = github.readFile(store.docPath('child', 100));
+    fresh.next_action = 'Keep the concurrent note';
+    github.putFile(store.docPath('child', 100), fresh);
+  });
+  const result = store.mutate('child', 100, { writer, parentDoc: parent, create,
+    change: (doc, context) => {
+      inputs.push({ doc: structuredClone(doc), context });
+      doc.pr.number = 200;
+      return doc;
+    } });
+  assert.equal(result.outcome, 'WRITTEN');
+  assert.deepEqual(inputs.map(input => input.context.created), mode === 'disjoint retry' ? [false, false] : [mode === 'create']);
+  assert.equal(inputs.at(-1).doc.next_action, result.doc.next_action, 'the successful write retains the guarded input');
+  if (mode === 'disjoint retry') assert.equal(result.doc.next_action, 'Keep the concurrent note');
+  assert.equal(result.doc.pr.number, 200);
+});
+
+for (const mode of ['creation', 'overlap', 'retry limit']) test(`CAS conflict classification cannot permit a refused write: ${mode}`, () => {
+  const { github, store } = completedFixture();
+  const parent = store.read('parent', 7).doc;
+  const create = () => state.newChild({ repository: github.repository, outcome: parent.outcomes[0] });
+  if (mode !== 'creation') store.write('child', 100, create(), { sha: null, previous: null });
+  let attempts = 0;
+  const conflicts = [];
+  const commits = github.commits;
+  const writes = store.writes;
+  github.intercept(call => {
+    if (call.method !== 'PUT') return;
+    attempts += 1;
+    const fresh = github.readFile(store.docPath('child', 100)) || create();
+    if (mode === 'retry limit') fresh.next_action = `Concurrent note ${attempts}`;
+    else fresh.pr.number = 201;
+    github.putFile(store.docPath('child', 100), fresh);
+    return { status: 409, json: { message: 'test conflict' } };
+  });
+  assert.throws(() => store.mutate('child', 100, { writer, parentDoc: parent, create,
+    change: doc => { doc.pr.number = 200; return doc; },
+    onConflict: (doc, context) => {
+      conflicts.push({ doc: structuredClone(doc), context });
+      doc.pr.number = 999; // A classifier receives a copy and cannot change the stored input.
+      return doc;
+    } }), { code: 'STATE_CONFLICT' });
+  assert.equal(attempts, mode === 'retry limit' ? 3 : 1);
+  assert.equal(conflicts.length, 1);
+  assert.equal(conflicts[0].context.created, false);
+  assert.equal(conflicts[0].doc.pr.number, mode === 'retry limit' ? null : 201);
+  assert.equal(github.readFile(store.docPath('child', 100)).pr.number, mode === 'retry limit' ? null : 201);
+  assert.equal(store.writes, writes, 'classification never writes or weakens the retry limit');
+  assert.equal(github.commits, commits + attempts, 'only the concurrent writer committed');
+});
 
 for (const change of ['pr', 'retire-parent', 'retire-child', 'reopen', 'takeover']) test(`backfill rechecks fresh eligibility before writing: ${change}`, () => {
   const { github, store, reconciler } = completedFixture();

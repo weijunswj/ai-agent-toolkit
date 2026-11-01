@@ -1878,8 +1878,10 @@ class StateStore {
 
   // Read, authorise, change and write with compare-and-swap. On a conflict the change is re-applied
   // to the new version only when the other writer touched different top-level fields and the fence
-  // did not move; otherwise STATE_CONFLICT or STALE_WRITER.
-  mutate(kind, number, { writer, parentDoc = null, change, create = null, authorise = true }) {
+  // did not move; otherwise STATE_CONFLICT or STALE_WRITER. Each change sees the exact write input
+  // and whether it came from create defaults. onConflict may classify a refusal using the conflict
+  // read, but returning from it never permits a refused CAS to write.
+  mutate(kind, number, { writer, parentDoc = null, change, create = null, authorise = true, onConflict = null }) {
     let { doc: base, sha } = this.read(kind, number);
     if (!base && create) base = null;
     else if (!base) throw new ProgrammeError('STATE_MISSING', `${this.docPath(kind, number)} does not exist yet.`);
@@ -1887,14 +1889,17 @@ class StateStore {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       if (authorise) authoriseWrite(kind, base, kind === 'parent' ? null : parentDoc, writer);
       const start = base || create();
-      const next = change(clone(start));
+      const next = change(clone(start), { created: base === null });
       if (!next) return { outcome: 'NOOP', doc: base, sha };
       try {
         return this.write(kind, number, next, { sha, previous: base });
       } catch (error) {
         if (error.code !== 'STATE_CONFLICT') throw error;
         const fresh = this.read(kind, number);
-        if (!fresh.doc) throw error;
+        if (!fresh.doc) {
+          if (onConflict) onConflict(null, { created: false });
+          throw error;
+        }
         if (origin && (fresh.doc.fence.epoch !== origin.fence.epoch || fresh.doc.fence.holder_session !== origin.fence.holder_session)) {
           throw new ProgrammeError('STALE_WRITER', `${this.docPath(kind, number)} is now held by the ${holderDescription(fresh.doc, kind, parentDoc)}; this write was refused.`);
         }
@@ -1904,12 +1909,14 @@ class StateStore {
           && JSON.stringify(canonical(origin?.[key])) !== JSON.stringify(canonical(fresh.doc[key])));
         const overlap = touched.filter(key => theirs.includes(key));
         if (!origin || overlap.length) {
+          if (onConflict) onConflict(clone(fresh.doc), { created: false });
           throw new ProgrammeError('STATE_CONFLICT', `${this.docPath(kind, number)} was changed by another writer in ${overlap.join(', ') || 'the same fields'}; held for the controller.`);
         }
         base = fresh.doc;
         sha = fresh.sha;
       }
     }
+    if (onConflict) onConflict(clone(base), { created: false });
     throw new ProgrammeError('STATE_CONFLICT', `${this.docPath(kind, number)} kept moving; held for the controller.`);
   }
 }
@@ -3549,11 +3556,11 @@ class Reconciler {
       }
     }
     for (const effect of plan.effects.filter(entry => entry.kind === 'create_state' || entry.kind === 'update_state')) {
-      const checkFreshState = () => {
+      const checkFreshState = (doc, { created }) => {
         guard();
         const outcome = parentDoc.outcomes.find(entry => entry.issue === effect.target.issue);
         // Keep an absent child absent: defaults from the planned outcome are not completion proof.
-        const child = this.store.read('child', effect.target.issue).doc;
+        const child = created ? null : doc;
         const freshPr = child?.pr?.number ?? null;
         const expectedPr = plan.children.get(effect.target.issue)?.doc?.pr?.number ?? null;
         // Even a plan with no discovered PR must keep one recorded since planning.
@@ -3573,9 +3580,10 @@ class Reconciler {
         const fields = effect.kind === 'create_state' ? ['pr', ...(desired.completed_at ? ['completed_at'] : [])] : effect.fields.filter(key => !effect.journals || !FOLD_FIELDS.includes(key));
         const result = mutateDoc('child', effect.target.issue, {
           create: () => newChild({ repository: this.binding.repository, outcome: outcomes.get(effect.target.issue) }),
-          change: doc => {
+          onConflict: checkFreshState,
+          change: (doc, context) => {
             // Recheck on every CAS retry as well as on the initial mutation read.
-            checkFreshState();
+            checkFreshState(doc, context);
             for (const key of fields) {
               if (desired[key] === undefined) delete doc[key];
               else doc[key] = clone(desired[key]);
@@ -3585,11 +3593,6 @@ class Reconciler {
         });
         record(effect, result.outcome === 'NOOP' ? 'NOOP' : 'DONE');
       } catch (error) {
-        // Creation and overlapping writes stop inside mutate before retrying the callback.
-        // Classify a newly recorded PR or lost eligibility too, without weakening the CAS refusal.
-        if (error.code === 'STATE_CONFLICT') {
-          try { checkFreshState(); } catch (freshError) { error = freshError; }
-        }
         if (STOPS_PASS.has(error.code)) throw error;
         record(effect, 'HELD', error.message);
         hold(effect, error.code || 'STATE_WRITE_FAILED', error.message);
