@@ -470,7 +470,8 @@ test('independent lanes run side by side under the owner\'s lane cap', () => {
 test('the coordinator relays every task run and catches up missed ones from the run stamps', () => {
   const text = bundle();
   const body = read('repo/contracts/claude-projects/web-controller-projects/project-instructions.md');
-  assert.ok(text.includes('- **Every task run reaches the project chat.** A run posts one line in its home thread'));
+  assert.ok(text.includes("- **Every task run reaches the project chat.** Relay each run's home-thread line there, stamp its `.relayed` file and, on a session's first wake, relay missed runs"));
+  assert.ok(text.includes('- A run posts one line in its home thread (its first line and `Full: <report path>`) and overwrites its run stamp'));
   assert.ok(text.includes('overwrite `/mnt/project-files/toolkit/task-runs/<slug>.relayed` with `relayed <run UTC> at <UTC> | <post link>` and read it back; only you write that file'));
   assert.ok(text.includes('- **Relay missed runs.** On the first wake of every coordinator session, and on every wake a task home thread starts'));
   assert.ok(text.includes('one capped line in its home thread (first line and report path), with a capped short message to the coordinator with retry when that post fails'));
