@@ -8,9 +8,11 @@
 //   node <Toolkit checkout>/repo/scripts/toolkit-env.cjs <command>
 //
 //   status                     key names, which apps use them, present or missing (never values)
-//   edit                       open a private file in Notepad listing every key as NAME=value; each
-//                              save is applied (changes, additions, deleted lines remove keys)
-//   apply                      "done": apply the last save, delete the file, report names only
+//   edit                       open a private file listing every key as NAME=value in the app this
+//                              computer uses for .env files; each save applies changes and additions,
+//                              and a deleted line marks that key for removal at "done"
+//   apply                      "done": apply the last save, remove marked keys after a yes, delete the
+//                              file and the editor's saved copies of it, report names only
 //   watch FILE                 (started by edit) the helper that applies each save of FILE
 //   set NAME                   save one value from a hidden prompt (or stdin)
 //   remove NAME                remove one key, after a yes/no that names it
@@ -22,8 +24,8 @@
 //   import-codex-env           copy the keys in ~/.codex/.env into the store (the file is unchanged)
 //   retire-codex-env           move ~/.codex/.env into a private backup once nothing needs it
 //
-// Values exist only in the store, in the edit file while it is open (and Notepad's own copy of
-// that tab), on the stdout of `header`,
+// Values exist only in the store, in the edit file while it is open (and the editor's own copies
+// of that tab, which Toolkit removes for VS Code-style editors at "done"), on the stdout of `header`,
 // in the environment of the program `run` starts, and in the owner's own terminal or clipboard
 // after `show`.
 
@@ -38,6 +40,7 @@ const { AGENT_HOST_MARKER_NAMES } = require('./agent-host-markers.cjs');
 const {
   EnvStoreError, MAX_VALUE_BYTES, PlatformStore, assertName, assertValue, nameProblem, supportReference,
 } = require('./toolkit-env-store.cjs');
+const editor = require('./toolkit-env-editor.cjs');
 const {
   ClaudeCodeFeeder, CodexFeeder, FeederError, HARNESSES, OPENCODE_SLOT, STATES, assertHeader, assertServer, helperCommand,
 } = require('./toolkit-env-feeders.cjs');
@@ -48,9 +51,9 @@ const EDIT_STABLE_MS = 1500;
 const EDIT_TICK_MS = 500;
 // Still accepted in commented-out key lines of a stored layout (written by earlier versions).
 const UNCHANGED = '<unchanged>';
-// Shown instead of a value that one Notepad line cannot hold exactly; the line keeps the value.
+// Shown instead of a value that one line of the edit file cannot hold exactly; the line keeps the value.
 const KEPT = /^<kept: change it with toolkit env set ([A-Za-z0-9_]+)>$/;
-// The edit file opens in Notepad by full path, so its .env name never picks the app.
+// The edit file is named .env so it opens in the app this computer uses for .env files.
 const EDIT_FILE = /^env-edit-([0-9a-f]{16})\.env$/;
 const editFileName = (id) => `env-edit-${id}.env`;
 // Edit files of earlier versions (named .txt, or with another id form): never applied, only wiped.
@@ -361,18 +364,11 @@ function storedLayout(layout, names) {
   return kept;
 }
 
-// The editor to open the edit file with, by full path: Windows looks for a bare program name in the
-// working folder first. Toolkit supports Windows computers only.
-function editorCommand(file, platform = process.platform, environment = process.env) {
-  if (platform !== 'win32') throw new EnvError(`toolkit env supports Windows only; this computer runs ${platform}.`);
-  const root = environment.SystemRoot || environment.SYSTEMROOT || 'C:\\Windows';
-  return [path.win32.join(root, 'System32', 'notepad.exe'), [file]];
-}
-
-function defaultOpener(file, platform = process.platform) {
-  const [command, args] = editorCommand(file, platform);
+// Opens the edit file in `app` (from editor.findEnvApp), by full path; see editor.editorCommand.
+function defaultOpener(file, app, platform = process.platform, environment = process.env) {
+  const [command, args] = editor.editorCommand(file, { platform, environment, app });
   return new Promise((resolve) => {
-    const child = spawn(command, args, { detached: true, stdio: 'ignore', windowsHide: false });
+    const child = spawn(command, args, { detached: true, stdio: 'ignore', windowsHide: false, env: editor.editorEnvironment(environment) });
     child.once('error', () => resolve(false));
     child.once('spawn', () => { child.unref(); resolve(true); });
   });
@@ -387,20 +383,22 @@ function defaultHelperStarter(file) {
   return true;
 }
 
-// The edit file's header, for the person reading it in Notepad. `command(sub)` gives the full line
-// to run. Its lines are matched by these fixed beginnings, so the header of a file made by an
+// The edit file's header, for the person reading it in their editor. `command(sub)` gives the full
+// line to run. Its lines are matched by these fixed beginnings, so the header of a file made by an
 // earlier Toolkit version (or for another script path) is never adopted as the user's comment.
 const EDIT_STATUS_START = '# Status:';
 const EDIT_HEADER_STARTS = Object.freeze([
   '# Toolkit env: your keys',
+  '# While this tab is open',
   '# Close any older Toolkit env tab',
   '# Change a value, add a NAME=value line',
-  '# Each save is applied within a few seconds',
+  '# Each save applies changes and additions',
   '# A line showing <kept:',
   '# Your own # comment and section lines are kept',
   '# When you are finished, save',
   EDIT_STATUS_START,
   // Earlier versions' headers.
+  '# Each save is applied within a few seconds',
   '# To change a key, replace <unchanged> with the new value',
   '# To add a key, add a line NAME=value.',
   '# Leaving <unchanged>, a blank value or a deleted line changes nothing.',
@@ -411,9 +409,10 @@ const EDIT_HEADER_STARTS = Object.freeze([
 function editHeader(id, command) {
   return [
     `# Toolkit env: your keys, with their real values (edit ${id}). Keep this file to yourself.`,
+    '# While this tab is open, extensions and apps that can read open tabs (such as AI assistants) can see these values.',
     '# Close any older Toolkit env tab: only this newest one is saved.',
     '# Change a value, add a NAME=value line, or delete a line to remove that key. No quotes; spaces at either end are dropped.',
-    '# Each save is applied within a few seconds. A save that would remove every key is not applied.',
+    '# Each save applies changes and additions within a few seconds. Deleted lines are removed only at "done", after you say yes. A save that would remove every key is not applied.',
     '# A line showing <kept: ...> holds a value one line cannot show exactly; leave it, and it stays as it is.',
     '# Your own # comment and section lines are kept (never put a key or token in one).',
     `# When you are finished, save, close this tab, then tell your agent "done", or in PowerShell run: ${command('apply')}`,
@@ -437,8 +436,22 @@ function sleepSync(ms) { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 
 
 // Windows 11 Notepad can keep the text of an open tab in its own tab-restore data after the file is
 // deleted, and bring the tab back. Toolkit cannot reliably see that data from an app's shell, so every
-// end of an edit says so.
+// end of an edit opened in Notepad says so.
 const NOTEPAD_COPY_NOTE = 'Close the Toolkit env tab in Notepad without saving: Notepad can keep its own copy of an open tab and bring it back. To stop that for good, set Notepad > Settings > When Notepad starts to "Start new session".';
+
+// What every end of an edit says, by the app the edit opened in (its program file name), and how
+// many saved copies of the edit file Toolkit removed from editors.
+function copyNotes(app, removed) {
+  const lines = [];
+  const label = editor.appLabel(app);
+  if (app === 'notepad.exe') lines.push(NOTEPAD_COPY_NOTE);
+  else if (label) lines.push(`Close the Toolkit env tab in ${label} without saving. Extensions in ${label}, such as AI assistants, could read the tab while it was open.`);
+  else lines.push('Close the Toolkit env tab without saving: your editor may keep its own copies of what you typed.');
+  if (removed) lines.push(`Removed ${removed} saved cop${removed === 1 ? 'y' : 'ies'} of the edit file from your editor's Local History and backups.`);
+  return lines;
+}
+
+function andList(names) { return names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`; }
 
 // The private edit folder: the open edit file, its names-only state (edit id, when it was made and
 // last saved, the key names it listed, a hash of the last content handled), the names-only result
@@ -538,18 +551,19 @@ class EnvEditSession {
   }
 
   // Writes a fresh edit file from `values` and records its state. The caller wipes any older file first.
-  create(values, { layout = [], header = () => [] } = {}) {
+  create(values, { layout = [], header = () => [], app = '' } = {}) {
     this.#privateDirectory(this.#directory);
     const id = crypto.randomBytes(8).toString('hex');
     const file = this.fileFor(id);
     const content = Buffer.from(`${[...header(id), ...editBody(values, layout)].join(os.EOL)}${os.EOL}`, 'utf8');
     fs.writeFileSync(file, content, { mode: 0o600, flag: 'wx' });
     const at = this.#now();
-    this.writeState({ id, created_at: at.toISOString(), baseline_at: at.toISOString(), last_save_ms: at.getTime(), snapshot: [...values.keys()].sort(), hashes: valueHashes(values), handled: sha256(content), refused: false });
+    this.writeState({ id, created_at: at.toISOString(), baseline_at: at.toISOString(), last_save_ms: at.getTime(), snapshot: [...values.keys()].sort(), hashes: valueHashes(values), handled: sha256(content), refused: false, pending: [], app });
     return { file, id };
   }
 
-  async open(file) { return this.#opener(file); }
+  // `app` is { program, name } from editor.findEnvApp.
+  async open(file, app) { return this.#opener(file, app); }
 
   startHelper(file) {
     try { return Boolean(this.#startHelper(file)); } catch { return false; }
@@ -560,9 +574,9 @@ class EnvEditSession {
   read(file, bytes = fs.readFileSync(file)) {
     const entries = new Map();
     const problems = [];
-    // Notepad's "UTF-16 LE/BE" encodings: every line would look wrong, so say what is wrong instead.
+    // An editor's "UTF-16 LE/BE" encodings: every line would look wrong, so say what is wrong instead.
     if (bytes.length >= 2 && ((bytes[0] === 0xff && bytes[1] === 0xfe) || (bytes[0] === 0xfe && bytes[1] === 0xff))) {
-      return { entries, problems: ['the file is saved as UTF-16; in Notepad use File > Save as with Encoding UTF-8, then save again'], layout: [], utf16: true };
+      return { entries, problems: ['the file is saved as UTF-16; save it again with Encoding UTF-8 (in Notepad File > Save as, in VS Code Save with Encoding)'], layout: [], utf16: true };
     }
     const lines = bytes.toString('utf8').replace(/^﻿/, '').split(/\r?\n/);
     const { layout, refused } = layoutOf(lines, { skip: isHeaderLine });
@@ -664,15 +678,21 @@ function listNames(names) { return names.length ? names.join(', ') : 'none'; }
 // directly. Every value-free message is safe to show; values never reach out or err.
 class ToolkitEnv {
   #store; #manifest; #edit; #feeders; #paths; #ask; #askHidden; #askTerminal; #commandFor; #platform; #spawnChild; #now;
-  #environment; #scriptPath; #tty; #clipboard;
+  #environment; #scriptPath; #tty; #clipboard; #findApp; #cleanCopies;
 
   // commandFor(binding) is the helper command an MCP entry runs; it is recorded with each connection.
   // scriptPath is the script people are told to run. askTerminal reads one visible line from a
   // terminal only, tty() says whether stdin and stdout are terminals, and clipboard(text) copies.
+  // findApp() gives the app that opens .env files ({ program, name }); cleanCopies({ keep }) removes
+  // editors' saved copies of edit files other than `keep` and returns how many. Both do nothing
+  // unless given (forUser gives the real ones).
   constructor({
     store, manifest, editSession, feeders, paths, ask, askHidden, askTerminal, commandFor, platform = process.platform, spawnChild = spawn, now = () => new Date(),
     environment = process.env, scriptPath = __filename, tty = () => ({ stdin: Boolean(process.stdin.isTTY), stdout: Boolean(process.stdout.isTTY) }), clipboard = copyToClipboard,
+    findApp = () => ({ program: '', name: '' }), cleanCopies = () => 0,
   }) {
+    this.#findApp = findApp;
+    this.#cleanCopies = cleanCopies;
     this.#store = store;
     this.#manifest = manifest;
     this.#edit = editSession;
@@ -711,14 +731,19 @@ class ToolkitEnv {
     }
     const scriptPath = path.join(root, 'repo', 'scripts', 'toolkit-env.cjs');
     const commandFor = (binding) => helperCommand({ nodePath: process.execPath, scriptPath, name: binding.name, header: binding.header, scheme: binding.scheme });
+    const isEditFile = (name) => ANY_EDIT_FILE.test(name);
     return new ToolkitEnv({
       environment,
       scriptPath,
       askTerminal,
+      findApp: () => editor.findEnvApp({ platform, environment }),
+      cleanCopies: ({ keep = '' } = {}) => editor.cleanEditorCopies({
+        editDir: paths.editDir, folders: editor.editorDataFolders({ platform, environment, homeDir }), isEditFile, keep, platform,
+      }),
       clipboard: (text) => copyToClipboard(text, { platform, environment }),
       store: new PlatformStore({ platform }),
       manifest: new EnvManifest({ file: paths.manifest }),
-      editSession: new EnvEditSession({ directory: paths.editDir, startHelper: defaultHelperStarter }),
+      editSession: new EnvEditSession({ directory: paths.editDir, startHelper: defaultHelperStarter, opener: (file, app) => defaultOpener(file, app, platform, environment) }),
       feeders: [
         new ClaudeCodeFeeder({ claudeJson: paths.claudeJson, commandFor }),
         new CodexFeeder({ codexHome: paths.codexHome, commandFor }),
@@ -757,8 +782,11 @@ class ToolkitEnv {
         differs = listed.filter((name) => current.get(name) !== entries.get(name).value).sort();
       } catch {}
       this.#edit.discard(file);
-      lines.push(`An older Notepad tab was saved and ignored. Use the newest tab; close the older one.${differs.length ? ` Its lines for ${differs.join(', ')} differ from what is stored; retype them in the newest tab if you still want them.` : ''}`);
+      lines.push(`An older Toolkit env tab was saved and ignored. Use the newest tab; close the older one.${differs.length ? ` Its lines for ${differs.join(', ')} differ from what is stored; retype them in the newest tab if you still want them.` : ''}`);
     }
+    // Wiped files of older tabs: their editor copies go too; the open edit's stay until it ends.
+    const wiped = earlier || earlierOpen || lines.length;
+    let closed = false;
     if (earlier) lines.push(`Deleted ${earlier} edit file${earlier === 1 ? '' : 's'} from an earlier Toolkit version; nothing in ${earlier === 1 ? 'it was' : 'them was'} saved.`);
     // The earlier version's helper may already have applied saves from the open edit's file; they are
     // reported with the edit's other saves.
@@ -768,10 +796,28 @@ class ToolkitEnv {
       const unapplied = file && (state.refused || this.#edit.hash(file) !== state.handled);
       if (file) this.#edit.discard(file);
       this.#edit.clearState();
+      closed = true;
       lines.push(`Closed your env edit 30 minutes after its last save${unapplied ? '; its last save was not applied' : ''}.`);
-      if (file) lines.push(NOTEPAD_COPY_NOTE);
+      lines.push(...this.#keptLines(state));
+      if (file) lines.push(...copyNotes(state.app, this.#cleanEditorCopies()));
+    }
+    if (wiped && !closed) {
+      const removed = this.#cleanEditorCopies({ keep: this.#edit.currentFile() || '' });
+      if (removed) lines.push(`Removed ${removed} saved cop${removed === 1 ? 'y' : 'ies'} of older edit files from your editor's Local History and backups.`);
     }
     return lines;
+  }
+
+  // Never stops an edit: a copy that cannot be removed is left, and the count says what was.
+  #cleanEditorCopies(options = {}) {
+    try { return this.#cleanCopies(options) || 0; } catch { return 0; }
+  }
+
+  // Keys marked for removal that an edit ended without removing.
+  #keptLines(state) {
+    const pending = state?.pending || [];
+    if (!pending.length) return [];
+    return [`Kept ${andList(pending)}: a deleted line is removed only at "done", after your yes. To remove ${pending.length === 1 ? 'it' : 'one'} now, run ${this.commandLine(`remove ${pending.length === 1 ? pending[0] : 'NAME'}`)}.`];
   }
 
   #sweep(out) { out.push(...this.#edit.withLock(() => this.#sweepEdits())); }
@@ -805,8 +851,10 @@ class ToolkitEnv {
       out.push(`  ${name}: ${stored.includes(name) ? 'present' : 'missing'}${users.length ? `, used by ${users.join(', ')}` : ''}`);
     }
     out.push(...this.#feederLines(record));
-    const pending = this.#edit.result();
-    if (pending) out.push(...this.#resultLines(pending, 'Saved from Notepad since the last "done"'));
+    const saved = this.#edit.result();
+    if (saved) out.push(...this.#resultLines(saved, 'Saved from the edit file since the last "done"'));
+    const marked = this.#edit.currentFile() ? this.#edit.state()?.pending || [] : [];
+    if (marked.length) out.push(`Waiting for "done" and your yes to remove: ${marked.join(', ')}`);
     out.push('Values are never shown.');
     return { code: 0, out, err: [] };
   }
@@ -815,6 +863,9 @@ class ToolkitEnv {
   // or merged), and its helper exits because its file has gone.
   async edit({ launch = true } = {}) {
     const out = [];
+    // Program file name only is kept; the full path is used for this one open.
+    let app = { program: '', name: '' };
+    if (launch) { try { app = this.#findApp() || app; } catch {} }
     const created = this.#edit.withLock(() => {
       out.push(...this.#sweepEdits());
       const state = this.#edit.state();
@@ -823,52 +874,98 @@ class ToolkitEnv {
         const unapplied = state.refused || this.#edit.hash(file) !== state.handled;
         this.#edit.discard(file);
         if (unapplied) out.push('Your last save in the earlier tab was not applied; the new file shows what is stored now.');
+        out.push(...this.#keptLines(state));
       }
       this.#edit.clearState();
+      if (file) {
+        const removed = this.#cleanEditorCopies();
+        if (removed) out.push(`Removed ${removed} saved cop${removed === 1 ? 'y' : 'ies'} of the earlier edit file from your editor's Local History and backups.`);
+      }
       out.push(...this.#resultLines(this.#edit.takeResult(), 'Saved from the earlier tab'));
       const names = this.#store.list();
       const values = this.#store.readAll(names);
-      const made = this.#edit.create(values, { layout: this.#manifest.read().layout, header: (id) => editHeader(id, (sub) => this.#personCommand(sub)) });
+      const made = this.#edit.create(values, { layout: this.#manifest.read().layout, header: (id) => editHeader(id, (sub) => this.#personCommand(sub)), app: app.name });
       return { ...made, count: values.size };
     });
     const watching = this.#edit.startHelper(created.file);
-    const opened = launch ? await this.#edit.open(created.file) : false;
+    const opened = launch ? await this.#edit.open(created.file, app) : false;
     const where = this.#paths.show(created.file);
+    const label = editor.appLabel(app.name);
     if (!launch) out.push(`Edit file: ${created.file}`);
-    else if (opened) out.push(`Opened ${where} with your ${created.count} key${created.count === 1 ? '' : 's'}. Close any older Toolkit env tab.`);
+    else if (opened) out.push(`Opened ${where} with your ${created.count} key${created.count === 1 ? '' : 's'}${label ? ` in a new ${label} window` : ''}. Close any older Toolkit env tab.`);
     else out.push(`Could not open an editor. Open this file yourself: ${created.file}`);
+    if (launch && opened && !app.name) out.push('If Windows asks which app to use, pick your editor for .env files.');
     out.push(watching
-      ? 'Change a value, add a NAME=value line, or delete a line to remove that key, then save: each save is applied within a few seconds.'
-      : 'Change a value, add a NAME=value line, or delete a line to remove that key, then save: your saves are applied when you finish.');
+      ? 'Change a value or add a NAME=value line, then save: each save is applied within a few seconds. To remove a key, delete its line; it is removed when you finish and say yes.'
+      : 'Change a value or add a NAME=value line, then save: your saves are applied when you finish. To remove a key, delete its line; it is removed when you finish and say yes.');
     out.push(agentContext(this.#environment) ? 'When finished, close the tab and say "done" (or run toolkit env apply).' : `When finished, close the tab and run: ${this.commandLine('apply')}`);
     return { code: 0, out, err: [] };
   }
 
-  // "done": applies the last save if it was not applied yet, deletes the edit file and reports, by
-  // name only, everything the edit changed, added and removed.
-  apply() {
-    return this.#edit.withLock(() => {
-      const out = this.#sweepEdits();
-      const state = this.#edit.state();
-      const file = this.#edit.currentFile();
-      if (!file) {
-        if (state) this.#edit.clearState();
-        const earlier = this.#edit.takeResult();
-        if (earlier) return { code: 0, out: [...out, ...this.#resultLines(earlier, 'Saved'), ...this.#feederLines()], err: [] };
-        return { code: 0, out: [...out, `There is no open edit. Ask your agent to show your keys, or run ${this.commandLine('edit')} first.`], err: [] };
-      }
-      if (state.refused || this.#edit.hash(file) !== state.handled) {
-        const outcome = this.#applySave(file, state);
-        if (!outcome.ok) return { code: 1, out, err: [...this.#refusalLines(outcome), `Edit file: ${file}`] };
-      }
-      this.#edit.discard(file);
-      this.#edit.clearState();
-      const result = this.#edit.takeResult();
-      out.push(...this.#resultLines(result, null));
-      out.push(NOTEPAD_COPY_NOTE);
-      out.push(...this.#feederLines());
-      return { code: 0, out, err: [] };
+  // "done": applies the last save if it was not applied yet, removes the keys whose lines were
+  // deleted after one yes/no that names them, deletes the edit file and the editor's saved copies of
+  // it, and reports, by name only, everything the edit changed, added and removed. The question is
+  // asked outside the lock, so the helper keeps working while the owner answers.
+  async apply() {
+    const first = this.#edit.withLock(() => {
+      const ready = this.#applyLatest(this.#sweepEdits());
+      if (ready.done || !ready.state.pending?.length) return ready.done ? ready : { done: this.#finishEdit(ready.out, ready.file, ready.state) };
+      return ready;
     });
+    if (first.done) return first.done;
+    const asked = first.state.pending;
+    const record = this.#manifest.read();
+    const users = record.bindings.filter((binding) => asked.includes(binding.name))
+      .map((binding) => `${this.#feeder(binding.harness)?.label || binding.harness} (${binding.server})`);
+    const warning = users.length ? ` ${users.join(' and ')} will stop connecting until you add ${asked.length === 1 ? 'it' : 'them'} again.` : '';
+    const answer = String(await this.#ask(`Remove ${andList(asked)} from the Toolkit env store?${warning} Type yes to remove ${asked.length === 1 ? 'it' : 'them'}: `) || '').trim().toLowerCase();
+    const yes = answer === 'yes' || answer === 'y';
+    return this.#edit.withLock(() => {
+      const ready = this.#applyLatest([...first.out, ...this.#sweepEdits()]);
+      if (ready.done) return ready.done;
+      if (ready.state.id !== first.state.id) return { code: 1, out: ready.out, err: ['The edit changed while you were answering, so nothing was removed. Say "done" again.'] };
+      const pending = ready.state.pending || [];
+      const removals = yes ? pending.filter((name) => asked.includes(name)) : [];
+      for (const name of removals) this.#store.remove(name);
+      const left = this.#store.list();
+      const stuck = removals.filter((name) => left.includes(name));
+      if (stuck.length) throw new EnvError(`The store did not remove ${stuck.join(', ')}; check it with ${this.commandLine('status')}.`);
+      if (removals.length) {
+        this.#manifest.update((current) => {
+          for (const name of removals) delete current.names[name];
+          current.layout = storedLayout(current.layout || [], left);
+        });
+        this.#edit.addResult({ removed: removals });
+      }
+      return this.#finishEdit(ready.out, ready.file, { ...ready.state, pending: pending.filter((name) => !removals.includes(name)) });
+    });
+  }
+
+  // Inside the lock: the open edit with its last save applied, or { done: result } when there is
+  // nothing to finish or the save was refused.
+  #applyLatest(out) {
+    const state = this.#edit.state();
+    const file = this.#edit.currentFile();
+    if (!file) {
+      if (state) this.#edit.clearState();
+      const earlier = this.#edit.takeResult();
+      if (earlier) return { done: { code: 0, out: [...out, ...this.#resultLines(earlier, 'Saved'), ...this.#feederLines()], err: [] } };
+      return { done: { code: 0, out: [...out, `There is no open edit. Ask your agent to show your keys, or run ${this.commandLine('edit')} first.`], err: [] } };
+    }
+    if (state.refused || this.#edit.hash(file) !== state.handled) {
+      const outcome = this.#applySave(file, state);
+      if (!outcome.ok) return { done: { code: 1, out, err: [...this.#refusalLines(outcome), `Edit file: ${file}`] } };
+    }
+    return { out, file, state: this.#edit.state() };
+  }
+
+  // Inside the lock: ends the open edit and reports it. `state.pending` holds the keys kept.
+  #finishEdit(out, file, state) {
+    this.#edit.discard(file);
+    this.#edit.clearState();
+    const removed = this.#cleanEditorCopies();
+    const result = this.#edit.takeResult();
+    return { code: 0, out: [...out, ...this.#resultLines(result, null), ...this.#keptLines(state), ...copyNotes(state.app, removed), ...this.#feederLines()], err: [] };
   }
 
   // The names-only lines for a result; `label` prefixes them when they report an earlier tab.
@@ -907,9 +1004,18 @@ class ToolkitEnv {
       this.#edit.writeState({ ...state, refused: true, handled: written || sha256(bytes), last_save_ms: now.getTime() });
       return outcome;
     }
-    this.#edit.writeState({ ...state, baseline_at: outcome.at, snapshot: outcome.snapshot, hashes: outcome.hashes, refused: false, handled: sha256(bytes), last_save_ms: now.getTime() });
+    // The status line is rewritten only when it has something to say or still shows an earlier
+    // refusal or marked key, so an ordinary save leaves the open tab alone.
+    const written = outcome.pending.length || state.refused || state.pending?.length
+      ? this.#edit.writeStatus(file, () => this.#savedText(outcome.pending), bytes) : null;
+    this.#edit.writeState({ ...state, baseline_at: outcome.at, snapshot: outcome.snapshot, hashes: outcome.hashes, refused: false, pending: outcome.pending, handled: written || sha256(bytes), last_save_ms: now.getTime() });
     this.#edit.addResult(outcome);
     return outcome;
+  }
+
+  #savedText(pending) {
+    const time = this.#now().toISOString().slice(11, 16);
+    return `saved (${time} UTC).${pending.length ? ` Will remove on "done", after your yes: ${pending.join(', ')}.` : ''}`;
   }
 
   // The save's changes, additions and removals, or why none can be made. A key listed when the tab
@@ -949,26 +1055,25 @@ class ToolkitEnv {
       const failed = [...writes.keys()].filter((name) => after.get(name) !== writes.get(name)).sort();
       if (failed.length) throw new EnvError(`The store did not keep ${failed.join(', ')}; check it with ${this.commandLine('status')}.`);
     }
-    for (const name of removals) this.#store.remove(name);
+    // A deleted line only marks its key: "done" removes it after a yes. The key stays in the
+    // snapshot, so putting the line back before then cancels it.
     const left = this.#store.list();
-    const stuck = removals.filter((name) => left.includes(name));
-    if (stuck.length) throw new EnvError(`The store did not remove ${stuck.join(', ')}; check it with ${this.commandLine('status')}.`);
     let at = '';
     this.#manifest.update((current, now) => {
       at = now;
       this.#manifest.touch(current, [...writes.keys()], now);
-      for (const name of removals) delete current.names[name];
       current.layout = storedLayout(parsed.layout, left);
     });
+    const kept = [...listed.filter((name) => left.includes(name)), ...removals];
     return {
       ok: true,
       at,
-      snapshot: listed.filter((name) => left.includes(name)).sort(),
-      // What each listed key now holds: this save's value, or the stored one it left alone.
-      hashes: valueHashes(new Map(listed.filter((name) => left.includes(name)).map((name) => [name, writes.has(name) ? writes.get(name) : current.get(name)]))),
+      snapshot: kept.sort(),
+      // What each listed or marked key now holds: this save's value, or the stored one it left alone.
+      hashes: valueHashes(new Map(kept.map((name) => [name, writes.has(name) ? writes.get(name) : current.get(name)]))),
       changed: [...writes.keys()].filter((name) => stored.has(name)).sort(),
       added: [...writes.keys()].filter((name) => !stored.has(name)).sort(),
-      removed: removals,
+      pending: removals,
     };
   }
 
@@ -1290,10 +1395,10 @@ class ToolkitEnv {
     out.push(`imported: ${toWrite.size} name${toWrite.size === 1 ? '' : 's'}${toWrite.size ? ` (${[...toWrite.keys()].sort().join(', ')})` : ''}`);
     if (already.length) out.push(`already in the store with the same value: ${already.sort().join(', ')}`);
     if (differs.length) out.push(`kept the store's value (it differs from the file): ${differs.sort().join(', ')}`);
-    if (notRule.length) out.push(`not imported, line${notRule.length === 1 ? '' : 's'} ${notRule.join(', ')}: the text before = is not a valid key name (names look like PROVIDER_SOLUTION_PURPOSE; check ${notRule.length === 1 ? 'it' : 'them'} in Notepad)`);
+    if (notRule.length) out.push(`not imported, line${notRule.length === 1 ? '' : 's'} ${notRule.join(', ')}: the text before = is not a valid key name (names look like PROVIDER_SOLUTION_PURPOSE; check ${notRule.length === 1 ? 'it' : 'them'} in your editor)`);
     if (empty.length) out.push(`not imported, empty value: ${empty.sort().join(', ')}`);
     if (tooLong.length) out.push(`not imported, value too long (max ${MAX_VALUE_BYTES} bytes): ${tooLong.sort().join(', ')}`);
-    if (skipped.length) out.push(`skipped lines: ${skipped.join(', ')} (not NAME=value; check them in Notepad before retiring the file)`);
+    if (skipped.length) out.push(`skipped lines: ${skipped.join(', ')} (not NAME=value; check them in your editor before retiring the file)`);
     out.push(...this.#adoptLayout(text));
     out.push(`${this.#paths.show(file)} was not changed.`);
     return { code: 0, out, err: [] };
@@ -1371,7 +1476,7 @@ function dumpsEnvironment(command, args) {
 const USAGE = [
   'toolkit env keeps your API keys and tokens in this computer\'s credential store.',
   '  status                       list keys and which apps use them (values are never shown)',
-  '  edit                         open your keys in Notepad as NAME=value lines; every save is applied',
+  '  edit                         open your keys as NAME=value lines in your .env editor; every save is applied',
   '  apply                        finish the edit: apply the last save, then delete the edit file',
   '  set NAME                     save one value from a hidden prompt',
   '  remove NAME                  remove one key (asks first)',
@@ -1429,7 +1534,7 @@ class ToolkitEnvCli {
       switch (command) {
         case 'status': noExtra(args, env); return this.#print(env.status());
         case 'edit': { const launch = !takeFlag(args, '--no-open'); noExtra(args, env); return this.#print(await env.edit({ launch })); }
-        case 'apply': noExtra(args, env); return this.#print(env.apply());
+        case 'apply': noExtra(args, env); return this.#print(await env.apply());
         case 'watch': { const [file, ...extra] = args; noExtra(extra, env); return await env.watch(file); }
         case 'set': { const [name, ...extra] = args; noExtra(extra, env); return this.#print(await env.set(name)); }
         case 'remove': { const [name, ...extra] = args; noExtra(extra, env); return this.#print(await env.remove(name)); }
@@ -1529,7 +1634,6 @@ module.exports = Object.freeze({
   ToolkitEnvCli,
   copyToClipboard,
   dumpsEnvironment,
-  editorCommand,
   ensurePrivateDirectory,
   parseDotEnv,
 });
