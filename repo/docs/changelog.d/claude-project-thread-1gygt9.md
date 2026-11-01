@@ -9,3 +9,4 @@
 - Projects posts: **Waiting on you** sits second last, just above the ELI5 line, which always ends the post.
 - Projects posts: every time shown to the owner, Update stamps included, uses the owner's profile time zone, never UTC.
 - Projects hourly nudge: flags a post whose ELI5 line is not last, whose Waiting on you list is not just above it, or whose Update stamps are not in the owner's time zone.
+- Projects daily check-in and hourly nudge: their reports give times in the owner's profile time zone; only their state files keep UTC.

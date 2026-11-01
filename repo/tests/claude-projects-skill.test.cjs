@@ -232,6 +232,7 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.ok(body.includes('add one `**[HH:MM] Update:**` line in the owner\'s time zone.'));
   assert.doesNotMatch(text, /with its local time/);
   // The hourly nudge checks the same order and time zone, so every project's posts agree.
+  for (const task of ['daily-check-in', 'hourly-nudge']) assert.ok(read(`repo/contracts/claude-projects/web-controller-projects/tasks/${task}.md`).includes("- Write every time in the report in the owner's profile time zone (from the project instructions or memory), never UTC; only the state file below keeps UTC."), task);
   assert.ok(read('repo/contracts/claude-projects/web-controller-projects/tasks/hourly-nudge.md').includes('(c) a coordinator post since the last run whose **ELI5:** line is not its last line, whose **Waiting on you** list is not just above that line, or whose Update stamps are not in the owner\'s profile time zone.'));
   assert.doesNotMatch(text + body, /Waiting on you \(n\):\*\*`? (as the very )?last|the ELI5 line ends the post/);
   assert.ok(text.includes('one **[HH:MM] Update:** line per update, each followed by a line holding only `&nbsp;` as a spacer'));
