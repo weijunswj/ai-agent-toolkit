@@ -233,7 +233,7 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.doesNotMatch(body, /one numbered item per owner ask/);
   assert.ok(body.includes('one `**ELI5:**` line last;'));
   // Times shown to the owner use their profile time zone, never UTC.
-  assert.ok(body.includes('add one `**[HH:MM] Update:**` line in the owner\'s time zone.'));
+  assert.ok(body.includes('add one `**[HH:MM] Update:**` line; all times in the owner\'s time zone.'));
   assert.doesNotMatch(text, /with its local time/);
   // The hourly nudge checks the same order and time zone, so every project's posts agree.
   for (const task of ['daily-check-in', 'hourly-nudge']) assert.ok(read(`repo/contracts/claude-projects/web-controller-projects/tasks/${task}.md`).includes("- Write every time in the report in the owner's profile time zone (from the project instructions or memory), never UTC; only the state file below keeps UTC."), task);
