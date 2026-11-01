@@ -18,6 +18,20 @@ const referenceFiles = () => fs.readdirSync(path.join(repoRoot, REFERENCE_DIR)).
   .map(name => `${REFERENCE_DIR}/${name}`);
 const bundle = () => [SKILL_REL, ...referenceFiles()].map(read).join('\n');
 
+test('the coordinator requests local release reconciliation and renewed review after main moves', () => {
+  const text = read(SKILL_REL);
+  const periodic = read(`${REFERENCE_DIR}/periodic-runs.md`);
+  for (const surface of [text, periodic]) {
+    assert.ok(surface.includes('node repo/scripts/toolkit-rebump-prs.cjs'));
+    assert.ok(surface.includes('--apply'));
+    assert.match(surface, /computer lane/);
+  }
+  // The skill points at the reference; holds, offline recovery and review live there.
+  assert.match(periodic, /fresh G2|full delta G2/);
+  assert.match(periodic, /offline/);
+  assert.doesNotMatch(text, /after "merge N" the lane merges `main`/);
+});
+
 test('the Projects controller skill has one source file with a Version line', () => {
   const text = read(SKILL_REL);
   assert.match(text, /^---\nname: "web-controller-projects"\n/);
@@ -196,7 +210,7 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.ok(body.includes('- Post layout: a `**Now:**` line first, its problem'));
   assert.ok(body.includes('- Problem, fix, skip first: every plan, G0 plan, decision ask and explanation opens with'));
   // Posts, in the main project chat, reply threads and work threads alike.
-  assert.match(text, /\*\*Posts, everywhere you post\*\* \(the main project chat, reply threads and work threads alike\): after the owner's last message, keep all your output in one running post and edit it, appending each new result, PR or question and keeping every earlier detail\. The running post is always your newest top-level post, the acknowledgement posted with a new thread included\. Before every edit, check whether the owner has written since that post \(in the main project chat, or in a work thread, in that thread\); if so, post fresh instead\. Start each appended update with its time in the owner's profile time zone, never UTC, for example \*\*\[16:41\] Update:\*\*; every other time shown to the owner uses that zone too\. Also start a fresh post when the running post nears about 8 KB\. Once the owner has written after a post, a reply under it included, never edit that post again: answer in a fresh post below their message, and carry every open owner item forward into it\. Answer a burst of owner messages in one post\. When the owner replies under one of your earlier posts in the main project chat, answer in the main project chat \(you cannot post under your own posts there\) with a fresh post starting "Re: your reply on <short topic>", and never edit the older post\./);
+  assert.match(text, /\*\*Posts, everywhere you post\*\* \(the main project chat, reply threads and work threads alike\): after the owner's last message, keep all your output in one running post and edit it, appending each new result, PR or question and keeping every earlier detail\. The running post is always your newest top-level post, the acknowledgement posted with a new thread included\. Before every edit, check whether the owner has written since that post \(in the main project chat, or in a work thread, in that thread\); if so, post fresh instead\. Start each appended update with its time in the owner's profile time zone, never UTC, for example \*\*\[16:41\] SGT Update:\*\*; every other time shown to the owner uses that zone too\. Also start a fresh post when the running post nears about 8 KB\. Once the owner has written after a post, a reply under it included, never edit that post again: answer in a fresh post below their message, and carry every open owner item forward into it\. Answer a burst of owner messages in one post\. When the owner replies under one of your earlier posts in the main project chat, answer in the main project chat \(you cannot post under your own posts there\) with a fresh post starting "Re: your reply on <short topic>", and never edit the older post\./);
   assert.doesNotMatch(text + body, /is always a new post|edit your own post only/);
   // The running post is found in the chat, not in memory, and no hook checks posts.
   assert.ok(text.includes('Before every post, read the newest page of the project chat (in a work thread, that thread). If your newest top-level post there has no owner message after it, edit that post; otherwise post fresh.'));
@@ -233,14 +247,16 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.doesNotMatch(body, /one numbered item per owner ask/);
   assert.ok(body.includes('one `**ELI5:**` line last;'));
   // Times shown to the owner use their profile time zone, never UTC.
-  assert.ok(body.includes('add one `**[HH:MM] Update:**` line; all times in the owner\'s time zone.'));
+  assert.ok(body.includes('add one Update line; all times in the owner\'s time zone.'));
   assert.doesNotMatch(text, /with its local time/);
   // The hourly nudge checks the same order and time zone, so every project's posts agree.
   for (const task of ['daily-check-in', 'hourly-nudge']) assert.ok(read(`repo/contracts/claude-projects/web-controller-projects/tasks/${task}.md`).includes("- Write every time in the report in the owner's profile time zone (from the project instructions or memory), never UTC; only the state file below keeps UTC."), task);
   assert.ok(read('repo/contracts/claude-projects/web-controller-projects/tasks/hourly-nudge.md').includes('(c) a coordinator post since the last run whose **ELI5:** line is not its last line, whose **Waiting on you** list is not just above that line, or whose Update stamps are not in the owner\'s profile time zone;'));
   assert.doesNotMatch(text + body, /Waiting on you \(n\):\*\*`? (as the very )?last|the ELI5 line ends the post/);
-  assert.ok(text.includes('one **[HH:MM] Update:** line per update, each followed by a line holding only `&nbsp;` as a spacer'));
-  assert.ok(text.includes('(only Update lines take that spacer)'));
+  // The owner's spacing: each Update line is its own paragraph with one blank line between, zone in the label, no spacer lines.
+  assert.ok(text.includes("one **[HH:MM] <zone> Update:** line per update (the owner's zone, e.g. SGT), each its own paragraph one blank line apart, no `&nbsp;` spacer,"));
+  assert.ok(body.includes('one-line `**[HH:MM] <zone> Update:**` entries, no questions;') && body.includes('a single blank line (no `&nbsp;`) between Update lines, questions and blocks.'));
+  assert.doesNotMatch(text + body, /followed by a line holding only `&nbsp;`|take that spacer/);
   // The owner's board rules: blank lines between blocks, nested problem lines, title links, open asks carried forward.
   assert.ok(text.includes('One blank line separates each labelled block from the next: the Now line with its bullets, the update log, **Waiting on you** and the ELI5 line.'));
   assert.ok(text.includes('(**Problem, fix, skip first**) nested as bullets under it'));
@@ -248,7 +264,7 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.ok(text.includes('A thread link\'s text is the thread\'s title, never "here" or an id; an issue is linked by its URL.'));
   assert.doesNotMatch(text, /the answer to it is appended to the running post|\(only Update lines take a spacer line\)/);
   for (const phrase of ['its problem, fix and skip lines nested as bullets under it', 'thread (by its title)', 'a fresh post carries every open ask forward',
-    'a blank line between labelled blocks', 'Otherwise post fresh, below the owner\'s message, and never edit the older post again.']) assert.ok(body.includes(phrase), phrase);
+    'a single blank line (no `&nbsp;`) between Update lines, questions and blocks', 'Otherwise post fresh, below the owner\'s message, and never edit the older post again.']) assert.ok(body.includes(phrase), phrase);
   // Questions: numbered items with indented choices and a "(my pick)" mark; no spacer after the last choice.
   assert.ok(text.includes('Each owner question is one numbered item under **Waiting on you**, written `1. **Question: <the ask>?**`'));
   assert.ok(text.includes('lettered in order because the owner picks one, `    a. **<Choice> (my pick).** <one-line reason>`'));
@@ -262,7 +278,7 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.ok(text.includes('Every brief tells the thread to do the same, and a G0 brief to open its plan with them.'));
   assert.ok(text.includes('Under it, indented four spaces, come its problem, fix and skip lines, then its choices'));
   assert.ok(text.includes('for every approval or choice the coordinator acts on itself, opening with its problem, fix and skip lines'));
-  assert.equal((text.match(/&nbsp;/g) || []).length, 1, 'only the Update log lines take an &nbsp; spacer');
+  assert.equal((text.match(/&nbsp;/g) || []).length, 1, 'the skill names the &nbsp; spacer only to forbid it');
   assert.ok(text.includes('Choices need no link of their own. Never write a question outside that list: no bare **Question:** label, bulleted question or question in an Update line, and never write its choices as bullets.'));
   assert.doesNotMatch(text, /put at most one \*\*Question:\*\* in a post|Use decision cards for questions, else group/);
   assert.ok(text.includes('An edit keeps every earlier Update line word for word and adds at least one new one.'));

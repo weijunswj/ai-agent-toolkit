@@ -1,12 +1,37 @@
 # Toolkit Changelog
 
-## 3.39.1
+## 3.41.2
+
+### Changed
+
+- **Projects post spacing:** every **[HH:MM] <zone> Update:** line, for example **[16:41] SGT Update:**, is its own paragraph with exactly one blank line before the next. Questions and labelled blocks take that same single blank line. The `&nbsp;` spacer line after Update lines is gone everywhere, in the Projects skill and the project instructions block.
+
+## 3.41.1
 
 ### Fixed
 
-- Automatically recover missing PR links for completed tasks from merged PR body references, closing links and timeline references. Select the latest merge, then the higher PR number on an exact timestamp tie.
-- Bound discovery requests, report missing or incomplete evidence, and preserve existing findings while reads are incomplete. Recheck eligibility through the guarded state writer before saving.
-- Keep retired tasks out of discovery and show their PR cell as a dash without discarding historical state.
+- Keep explicit merge approvals during the governance question, and recognise repository names containing dates or SHA-like words.
+- Read only the fresh human trigger in a supported Projects message, including after a session resumes, and prevent repeated delivery from restoring a used approval. Standing task auto-merge permissions are unchanged.
+- Explain missing recorded approvals accurately and test prompt-to-merge sequences on both hook adapters.
+
+## 3.41.0
+
+### Added
+
+- Each app asks its own task auto-merge question during setup, with On recommended and an accurate Current choice. Answers are stored separately on this computer, validated strictly and written atomically with read-back and recovery.
+
+### Changed
+
+- The app-local answer is the only task auto-merge switch. Repository bindings no longer carry task permission, and governance reports the effective app setting without asking another question.
+- Hooks, setup, governance, bindings, preference readers and writers, and merge or approval rules always wait for an owner-typed merge, alongside CI workflows and major releases. Rule-refresh pull requests retain their typed-merge requirement.
+
+## 3.40.0 (Refresh open release branches)
+
+### Changed
+
+- Keep each open release branch's patch, minor or major bump when main moves. A coordinator-run local command reports eligible branches and can merge main, regenerate version stamps, preserve released notes and fast-forward the branch after validation.
+- Accept major version bumps in the release command and version guard, and report the resolved base commit used for a bump.
+- Document the local reconciliation trigger, conflict recovery and renewed CI and review required for each updated head.
 
 ## 3.39.0 (setup rows stand on their own)
 
@@ -149,7 +174,7 @@
 
 ### Added
 
-- Task auto-merge, a per-repository answer that is off unless the owner says yes. `toolkit governance check` asks once in each governed repository whose merged binding has no answer, with Yes recommended (a yes still takes effect only through a binding pull request and a required check the owner sets), and only once every Toolkit copy runs a version that knows the answer. The answer is `task_prs.auto_merge` (`off` or `after-gates`) in the programme binding and counts only once merged on the default branch and read within a day.
+- Task auto-merge for finished pull requests, bounded by governance, review, required checks and owner testing. See the gate rules for current permission storage and manual-merge exceptions.
 - The `auto-merge-eligible` check (`.github/workflows/auto-merge-eligible.yml`, running the default branch's `repo/scripts/toolkit-auto-merge-eligible.cjs`) fails a pull request on the always-manual list: the programme binding and merge rules, hooks and every module they load, setup that writes hook config, CI workflows, agent instruction files and a major version bump. A change that only moves version stamps does not count. Such a pull request merges once the owner adds the `toolkit-owner-merge` label in GitHub; a new push removes it, and the merge hold refuses an agent that sets it.
 
 ### Changed

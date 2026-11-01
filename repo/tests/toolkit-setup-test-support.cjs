@@ -101,6 +101,9 @@ function createFakeCodexAppServer(root) {
 // Setup tests written before the Codex instruction limit question answer it with keep (nothing
 // recorded, so config.toml is left alone); tests of that question pass codexDocLimitQuestion: true.
 function withDocLimitAnswer(args, options) {
+  // Existing journeys keep the unrelated new setting; its own tests exercise the question.
+  if (!options.taskAutoMergeQuestion && !options.codexDocLimitQuestion && args.some(arg => arg === '--execute' || arg === '--plan')
+      && !args.some(arg => arg === '--task-auto-merge' || arg.startsWith('--task-auto-merge='))) args = [...args, '--task-auto-merge', 'keep'];
   if (options.codexDocLimitQuestion || !args.some((arg) => arg === '--execute' || arg === '--plan')
     || args.some((arg) => /^--(enable|disable|keep)-codex-doc-limit$/.test(arg))) return args;
   return [...args, '--keep-codex-doc-limit'];
@@ -265,7 +268,12 @@ function createGitBackedRealSetupRepo(root) {
       fs.readFileSync(path.join(repoRoot, 'repo', 'scripts', name), 'utf8')
     );
   }
-  runTestGit(result.setupRepo, ['add', 'repo/scripts']);
+  // Setup's shared task permission resolver loads the binding validator and its local helpers.
+  for (const name of ['programme-state.cjs', 'decision-trace-audit.cjs', 'decision-tags.cjs', 'resolve-executable.cjs']) {
+    const rel = path.join('skills', 'github-program-reconciler', 'scripts', name);
+    writeFile(path.join(result.setupRepo, rel), fs.readFileSync(path.join(repoRoot, rel), 'utf8'));
+  }
+  runTestGit(result.setupRepo, ['add', 'repo/scripts', 'skills']);
   runTestGit(result.setupRepo, ['commit', '-m', 'real setup scripts']);
   runTestGit(result.setupRepo, ['push', 'origin', 'main']);
   return result;

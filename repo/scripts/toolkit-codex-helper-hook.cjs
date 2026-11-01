@@ -77,7 +77,7 @@ async function decide(input, environment = process.env, { notes } = {}) {
 
 // The merge hold's decision, failing closed for a call that may merge when the module cannot run.
 function mergeDecision(input) {
-  try { return require('./toolkit-merge-hold.cjs').decide(input || {}); } catch {
+  try { return require('./toolkit-merge-hold.cjs').decide(input || {}, { host: 'codex' }); } catch {
     let mayMerge = true;
     try { mayMerge = require('./toolkit-merge-hold.cjs').mayMerge(input || {}); } catch { mayMerge = /merge|push/i.test(JSON.stringify(input || {})); }
     return mayMerge ? { deny: 'Toolkit: the merge check failed, so this merge or push is refused. Retry it; if this repeats, run `setup toolkit` to repair the Toolkit plugin.' } : null;
@@ -86,12 +86,15 @@ function mergeDecision(input) {
 
 // The UserPromptSubmit decision: { block: reason } or { context } or {}.
 function decidePrompt(input, environment = process.env) {
+  let approvalNote = '';
+  try {
+    const count = require('./toolkit-merge-hold.cjs').recordPrompt(input || {}, { environment });
+    if (count) approvalNote = `Toolkit recorded ${count} explicit merge approval(s). Any governance hold still applies.`;
+  } catch { approvalNote = 'Toolkit could not record merge approvals from this message. A later merge still needs an unused recorded approval.'; }
   const decision = new (gate().PromptHold)({ environment }).decide({ cwd: input?.cwd, prompt: input?.prompt, sessionId: gate().sessionIdOf(input) });
-  if (decision.action === 'block') return { block: decision.reason };
-  // A "merge N" the user types is kept for the merge hold, but not while the governance question holds
-  // the message: the user types it again after answering. A failure only means a later merge is refused.
-  try { require('./toolkit-merge-hold.cjs').recordPrompt(input || {}, { environment }); } catch { /* fail closed later */ }
-  return decision.context ? { context: decision.context } : {};
+  if (decision.action === 'block') return { block: [decision.reason, approvalNote].filter(Boolean).join('\n') };
+  const context = [decision.context, approvalNote].filter(Boolean).join('\n');
+  return context ? { context } : {};
 }
 
 const PROMPT_FAILED = `Toolkit: the governance check failed, so your message was held and not sent. If this keeps happening, open Codex in a folder outside any git repository and say \`setup toolkit\` to repair the installed hooks. ${NEVER_OWNER}`;

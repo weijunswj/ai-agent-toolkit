@@ -21,6 +21,7 @@ const expectedCodexRows = [
   ['antigravity-skills', "Copy Toolkit's skills into Antigravity?"],
   // A report-only row closes its section as an unnumbered status line.
   ['codex-toolkit-hooks', 'Toolkit hooks in Codex'],
+  ['task-auto-merge', 'May Codex merge finished task pull requests without you typing merge?'],
 ];
 // The rows that take an answer; the Codex hooks row only reports.
 const answerable = (rows) => rows.filter((row) => !row.report_only);
@@ -36,9 +37,45 @@ function allRows() {
   return core.setupQuestionDocumentationSpecs();
 }
 
+for (const host of ['codex', 'claude-code']) {
+  for (const [status, value, label] of [
+    ['missing', 'off', 'Off (no answer saved)'], ['saved', 'off', 'Off'],
+    ['saved', 'after-gates', 'On'], ['blocked', 'off', 'Could not read; automatic merging is blocked'],
+  ]) {
+    test(`${host}: task merge bank ${status}/${value} has current state, distinct choices and one app`, () => {
+      const args = core.parseArgs(['--plan', '--host', host]);
+      const current = { ...core.documentationFixtureState(), taskAutoMerge: { status, value, digest: 'inspected-bytes' } };
+      const rows = core.setupQuestionSpecs(args, current);
+      const row = rows.find(row => row.id === 'task-auto-merge');
+      assert.equal(rows.filter(row => row.id === 'task-auto-merge').length, 1);
+      assert.equal(row.current_short, label);
+      assert.equal(row.section, 'Toolkit settings');
+      assert.equal(row.recommended, value === 'after-gates' && status === 'saved' ? 'keep' : 'after-gates');
+      if (status !== 'blocked') assert.deepEqual(row.choices.map(choice => choice.value), value === 'after-gates' ? ['keep', 'off'] : ['keep', 'after-gates']);
+      const otherApp = host === 'codex' ? /Claude/ : /Codex|Antigravity/;
+      for (const text of [core.renderSetupQuestionBank(rows), core.renderSetupQuestionBankTerminal(rows),
+        core.renderQuestionRows(rows, row.presentation.question_ref)]) assert.doesNotMatch(text, otherApp);
+      const parsed = core.parseConciseQuestionBankAnswer(`${rows[0].presentation.bank_reference}: all recommended`, rows);
+      assert.equal(parsed.selections.find(selection => selection.question_id === row.id).canonical_value, row.recommended);
+      assert.equal(core.parseArgs(['--task-auto-merge=after-gates']).setupChoices.taskAutoMerge, 'after-gates');
+      if (status === 'blocked') assert.throws(() => core.applySetupChoices(args, current), /blocked/);
+      else {
+        args.setupChoices.taskAutoMerge = 'keep';
+        core.applySetupChoices(args, current);
+        assert.equal(args.taskAutoMerge, value);
+      }
+      const changed = core.setupQuestionSpecs(core.parseArgs(['--plan', '--host', host]), {
+        ...current, taskAutoMerge: { ...current.taskAutoMerge, digest: 'changed-bytes-same-value' },
+      });
+      assert.notEqual(changed[0].presentation.bank_reference, rows[0].presentation.bank_reference);
+      assert.throws(() => core.assertQuestionBankAnswerBinding(parsed, changed), /changed|match|stale/i);
+    });
+  }
+}
+
 function managedState(overrides = {}) {
-  const standardPath = path.resolve(repoRoot, '..', 'tk013-standard-source');
-  const customPath = path.resolve(repoRoot, '..', 'tk013-custom-source');
+  const standardPath = path.resolve(path.parse(repoRoot).root, 'toolkit-fixture', 'tk013-standard-source');
+  const customPath = path.resolve(path.parse(repoRoot).root, 'toolkit-fixture', 'tk013-custom-source');
   return {
     currentPath: customPath,
     selectedPath: customPath,
@@ -268,7 +305,7 @@ test('Update source keep availability uses one verified preservation predicate',
     assert.doesNotMatch(output, /example\.invalid|tk013-|\.tmp[\\/]managed-source/i, label);
   }
 
-  const standardPath = path.resolve(repoRoot, '..', 'tk013-standard-source');
+  const standardPath = path.resolve(path.parse(repoRoot).root, 'toolkit-fixture', 'tk013-standard-source');
   const standard = managedState({ currentPath: standardPath, selectedPath: standardPath, defaultPath: standardPath });
   const standardRow = updateSourceRow(standard);
   assert.equal(core.canPreserveManagedCheckout(stateWithManaged(standard), core.parseArgs(['--plan'])), true);
@@ -325,9 +362,9 @@ test('resolved Codex and Claude banks expose contiguous deterministic presentati
   const codexCurrent = stateWithManaged(managedState({ currentPath: '', exists: false, git: false }));
   codexCurrent.audit.codex_plugin_auto_refresh_enabled = false;
   const codex = core.setupQuestionSpecs(codexArgs, codexCurrent);
-  assert.equal(codex[0].presentation.total_visible_question_count, 7);
-  assert.equal(codex[0].presentation.total_visible_section_count, 2);
-  assert.deepEqual(codex.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '1.5', '2.1', '2.2']);
+  assert.equal(codex[0].presentation.total_visible_question_count, 8);
+  assert.equal(codex[0].presentation.total_visible_section_count, 3);
+  assert.deepEqual(codex.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '1.5', '2.1', '2.2', '3.1']);
 
   const claudeArgs = core.parseArgs(['--plan', '--host', 'claude-code']);
   const claudeCurrent = stateWithManaged(managedState({ currentPath: '', exists: false, git: false }));
@@ -335,9 +372,9 @@ test('resolved Codex and Claude banks expose contiguous deterministic presentati
   claudeCurrent.nativePlugin = { status: 'unknown', trusted: false, hook_active: false };
   const claude = core.setupQuestionSpecs(claudeArgs, claudeCurrent);
   // Claude Code setup does not ask about Codex's instruction limit.
-  assert.equal(claude[0].presentation.total_visible_question_count, 10);
-  assert.equal(claude[0].presentation.total_visible_section_count, 3);
-  assert.deepEqual(claude.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '2.1', '3.1', '3.2', '3.3', '3.4', '3.5']);
+  assert.equal(claude[0].presentation.total_visible_question_count, 11);
+  assert.equal(claude[0].presentation.total_visible_section_count, 4);
+  assert.deepEqual(claude.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '2.1', '3.1', '3.2', '3.3', '3.4', '3.5', '4.1']);
 });
 
 test('compact table, full text, recommendations, and choices share one indexed ordering', () => {
@@ -381,7 +418,7 @@ test('conditional questions renumber without gaps and change the bound bank iden
   const all = allRows();
   const withoutConditional = all.filter((row) => row.id !== 'report-retention');
   const renumbered = core.withPresentationMetadata(withoutConditional.map((row) => ({ ...row, presentation: undefined })));
-  assert.deepEqual(renumbered.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '2.1', '2.2', '3.1', '3.2', '']);
+  assert.deepEqual(renumbered.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '2.1', '2.2', '3.1', '3.2', '', '4.1']);
   assert.notEqual(renumbered[0].presentation.bank_identity, all[0].presentation.bank_identity);
 });
 
@@ -401,9 +438,9 @@ test('all recommended and changed-only answers resolve to canonical values', () 
   assert.equal(all.mode, 'all-recommended');
   assert.deepEqual(all.selections.map((selection) => selection.canonical_value), answerable(rows).map((row) => row.recommended));
   core.assertQuestionBankAnswerBinding(all, rows);
-  // The report-only hooks status line has no number and takes no answer; the numbers end at 3.2.
+  // The report-only hooks status line has no number and takes no answer; the new Toolkit settings section ends at 4.1.
   assert.equal(all.selections.some((selection) => selection.question_id === 'codex-toolkit-hooks'), false);
-  assert.equal(all.selections.at(-1).question_ref, '3.2');
+  assert.equal(all.selections.at(-1).question_ref, '4.1');
   assert.throws(() => core.parseConciseQuestionBankAnswer(`${reference}: 3.3=A`, rows), /unavailable question 3\.3/);
 
   const changed = core.parseConciseQuestionBankAnswer(`${reference}: 1.2=c, 2.2 = b`, rows);
@@ -514,7 +551,7 @@ test('canonical non-TTY answer plan owns question and conditional detail orderin
   const plan = core.buildNonTtyAnswerPlan(rows, args);
   assert.equal(plan.schema, 'ai-agent-toolkit.setup-question-answer-plan.v1');
   assert.deepEqual(plan.questions.map((entry) => entry.question_id), [
-    'update-source', 'update-reports', 'report-retention', 'codex-instruction-limit', 'codex-helper-capacity', 'codex-toolkit-maintenance',
+    'update-source', 'update-reports', 'report-retention', 'codex-instruction-limit', 'codex-helper-capacity', 'codex-toolkit-maintenance', 'task-auto-merge',
   ]);
   assert.deepEqual(plan.details.map((entry) => entry.detail_type), [
     'managed-checkout-path', 'report-retention-days', 'codex-helper-count', 'codex-helper-risk-approval',
@@ -550,7 +587,7 @@ test('bank reference covers host, order, recommendations and approval-visible se
   const payload = core.questionBankApprovalPayload(rows);
   assert.equal(payload.schema, 'ai-agent-toolkit.setup-question-bank-approval.v2');
   assert.equal(payload.host, 'codex');
-  assert.deepEqual(payload.sections.map((section) => section.title), ['Updates and reports', 'Computer performance', 'Toolkit in your coding apps']);
+  assert.deepEqual(payload.sections.map((section) => section.title), ['Updates and reports', 'Computer performance', 'Toolkit in your coding apps', 'Toolkit settings']);
   assert.ok(payload.questions.every((question) => question.what_this_controls));
   assert.ok(payload.questions.filter((question) => !question.report_only).every((question) => question.recommendation.choice_ref && question.recommendation.label));
   // The report-only row's state is bound too: a hooks change between plan and approval is a new bank.
@@ -1031,6 +1068,7 @@ test('source-dependent Keep current rows retain verification and source-followin
 
 test('both banks put Keep current first and keep the other choices in their original relative order', () => {
   const originalOrder = {
+    taskAutoMerge: ['after-gates', 'off', 'keep'],
     managedCheckout: ['default', 'keep', 'custom'],
     repoAutoUpdate: ['enable', 'disable', 'keep'],
     updateReports: ['enable', 'disable', 'keep'],
@@ -1059,7 +1097,7 @@ test('both banks put Keep current first and keep the other choices in their orig
       }
       assert.equal(core.resolveDisplayedChoiceAnswer(row, ''), row.recommended, row.id);
     }
-    assert.ok(specs.some((row) => row.id === 'antigravity-skills'));
+    assert.equal(specs.some((row) => row.id === 'antigravity-skills'), specs[0].presentation.host === 'codex');
     assert.ok(specs.filter((row) => /toolkit-plugin|claude-setting|antigravity-skills/.test(row.id)).every((row) => row.section === 'Toolkit in your coding apps'));
   }
 });
@@ -1103,7 +1141,7 @@ test('TTY blank enters one-at-a-time mode and invalid answers are re-prompted', 
   // Keep current is A when available; use the recommendation's displayed letter.
   const updateSource = core.setupQuestionSpecs(core.parseArgs(['--execute', '--host', 'codex']), injectedState()).find((row) => row.id === 'update-source');
   const recommendedLetter = updateSource.presentation.recommended_choice_ref;
-  const journey = await runInjectedTTY(['', 'Z', recommendedLetter, 'disable', 'enable', 'default', 'enable', 'keep', 'enable']);
+  const journey = await runInjectedTTY(['', 'Z', recommendedLetter, 'disable', 'enable', 'default', 'enable', 'keep', 'enable', 'after-gates']);
   assert.equal(journey.result.answer_source, 'interactive');
   assert.match(journey.prompts[0], /all recommended/);
   assert.match(journey.prompts[1], /1\.1 Update source/);
