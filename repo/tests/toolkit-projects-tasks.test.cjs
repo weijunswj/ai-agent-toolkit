@@ -260,8 +260,9 @@ test('model tier and effort: cheapest by default, medium floor, every raise carr
   const lowered = tasks().refresh('hourly-nudge', saved, { session: 'bound' });
   assert.match(lowered, /call mcp__hearthbot__set_effort_level with medium;/);
   assert.doesNotMatch(lowered, /Raised above/);
-  // Every rebuild renders the prompt the way the swap does, so a raise is carried.
-  const skill = fs.readFileSync(SKILL, 'utf8');
+  // Every rebuild renders the prompt the way the swap does, so a raise is carried. Both lines moved word for word
+  // from the skill's Hourly nudge section into reference/periodic-runs.md.
+  const skill = fs.readFileSync(path.join(path.dirname(SKILL), 'reference', 'periodic-runs.md'), 'utf8');
   assert.match(skill, /new home thread and task, with the prompt rendered as in the swap \(\*\*Recurring tasks\*\* step 2, so a recorded raise is carried\)/);
   assert.match(skill, /recreates it from the template on `main` \(rendered as in the swap, \*\*Recurring tasks\*\* step 2\)/);
   // A params reason follows the same rules as the memory reason.
@@ -558,6 +559,7 @@ test('every line that re-arms, updates, swaps, rebuilds, recreates or sets up a 
     '**BLOCK CHANGED:**', '**Missing folder:**', '`SKILL COPY FAILED`: start one fresh refresh thread', 'a guidebook refresh reports BLOCK CHANGED', '`GUIDEBOOK MISSING` or `SKILL COPY STALE`',
     '9. the guidebook:', 'coordinator: refresh the guidebook', 'the guidebook refresh brings both here', '- Projects guidebook:', "Read the guidebook's `VERSION`",
     'library copy of the Projects skill (the guidebook)', 'and the guidebook refresh (step 9)', '9. Guidebook (runs every time', 'With BLOCK CHANGED, the coordinator replaces the block',
+    '**Refresh routes, a missing folder and `SKILL COPY FAILED`:**', '# Web Controller for Claude Projects: guidebook refresh', '## Refreshing the guidebook copy',
   ];
   const unguarded = [];
   for (const rel of files) {

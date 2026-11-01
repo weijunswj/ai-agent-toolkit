@@ -58,6 +58,18 @@ test('each block stays inside its own budget', () => {
   assert.ok(crlfBytes(read('repo/contracts/agent-rules/gate-rules.md')) <= 13760, 'gate rules');
 });
 
+test('the Projects controller skill fits a claude.ai skill card, with room for lanes in flight', () => {
+  // The coordinator reads SKILL.md every turn, and the owner saves it to claude.ai with a skill card,
+  // which refuses a body over 48 KB. The exact cut is not published, so the hard ceiling uses the
+  // stricter 48,000-byte reading of the body (the text after the frontmatter) and is never raised.
+  // The budget keeps the raw file about 4 KB under it, for lanes already in flight: detail goes into
+  // the reference files beside it. Raise the budget only with a reason recorded here, and never above 47,000.
+  const skill = fs.readFileSync(path.join(ROOT, 'repo/contracts/claude-projects/web-controller-projects/SKILL.md'));
+  assert.ok(skill.length <= 44000, `Projects skill ${skill.length} bytes`);
+  const body = skill.toString('utf8').replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '');
+  assert.ok(Buffer.byteLength(body) < 48000, `Projects skill body ${Buffer.byteLength(body)} bytes`);
+});
+
 test('guidance moved out of root AGENTS.md is still reachable from a loaded layer', () => {
   const moved = [
     ['COMPLETE THE BASICS -> SHIP -> OBSERVE -> IMPROVE', GLOBAL],
