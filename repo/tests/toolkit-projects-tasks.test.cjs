@@ -429,17 +429,202 @@ test('the check-in carries every prefix in the fixed order and checks both Toolk
     'toolkit-projects-guidebook.cjs --check /mnt/project-files/toolkit/web-controller-projects',
     'run it again with `--out` in place of `--check`', '"BLOCK CHANGED <version> | "', '"SKILL COPY FAILED: <reason> | "']) assert.ok(guidebook.includes(required), required);
   assert.match(nudge, /report BLOCK CHANGED only when this run printed it/);
-  assert.match(nudge, /plus steps 7, 8 and 9 \(and 5b when it applies\)/);
+  assert.match(nudge, /plus steps 7 to 11 \(and 5b when it applies\)/);
   assert.match(nudge, /CONTEXT RESET DUE \(weekly\)/);
   // Each task reports the other missing, so the coordinator recreates a deleted one.
   assert.ok(nudge.includes('is missing (no such trigger in list_triggers'), 'nudge sees a deleted check-in');
   assert.ok(rendered('daily-check-in').includes('is missing (no such trigger in list_triggers'), 'check-in sees a deleted nudge');
-  assert.match(nudge, /It runs silently: it never posts in its home thread except to report a failed delivery/);
+  assert.match(nudge, /Each run posts one line in its home thread \(DELIVERY\), and the coordinator relays it to the project chat\./);
+  assert.doesNotMatch(nudge, /It runs silently|read_project_chat \(limit 1\)/);
   for (const required of ['all three hold', 'Idleness is never a reason', 'Never list a task home thread', 'Unrelayed', 'Hidden reply',
     'state done', '"EXAMPLE: Daily check-in"', 'CHECK-IN NOT ARMED', 'limit 10', 'list all of them every run']) {
     assert.ok(nudge.includes(required), required);
   }
   assert.match(nudge, /not SUCCEEDED, or its home thread is resolved, start the first line with "CHECK-IN NOT ARMED/);
+});
+
+// Task runs once reported only to the coordinator by message, so a recycled coordinator dropped
+// them and the owner saw nothing. Each run now posts one line in its home thread and stamps a file
+// only it writes; the coordinator stamps the relay, and the nudge and check-in flag any gap. Any
+// template change already checks as outdated (the template-changed case above), so live prompts swap.
+test('every kind and session keeps separate per-run reports and stamps, with scoped write permission', () => {
+  const stamps = { 'daily-check-in': 'daily-check-in-example-a9eaed51fb', 'hourly-nudge': 'hourly-nudge-example-65865a7fc8', custom: 'custom-example-54f6cccf2f' };
+  for (const [kind, slug] of Object.entries(stamps)) {
+    for (const session of ['bound', 'fresh']) {
+      const promptParams = validateParams(kind, { ...PARAMS[kind], session });
+      const text = tasks().render(kind, promptParams, kind === 'custom' ? OWN_TEXT : undefined);
+      const delivery = findBlocks(text).blocks.find(block => block.name === 'TASK-DELIVERY').body;
+      const guard = text.split('\n').find(line => line.startsWith('- Read-only,'));
+      const stamp = `/mnt/project-files/toolkit/task-runs/${slug}/<run UTC>.md`;
+      const report = `${promptParams.report_dir}/runs/<run UTC>.md`;
+      assert.ok(delivery.includes(report), `${kind} ${session}: per-run report`);
+      assert.ok(delivery.includes(stamp), `${kind} ${session}: per-run stamp`);
+      assert.ok(delivery.includes(`Full: ${report}`), 'home post names the immutable report');
+      assert.match(delivery, /YYYYMMDDTHHMMSSZ/);
+      assert.match(delivery, /Never overwrite an existing per-run report or stamp/);
+      assert.match(delivery, /wait for a new UTC second/, 'replacement runs cannot reuse the same second');
+      assert.ok(guard.includes(`report files under ${promptParams.report_dir}/`));
+      assert.ok(guard.includes(`this task's own new run stamp and .failed files under /mnt/project-files/toolkit/task-runs/${slug}/`));
+      assert.match(guard, /never a \.relayed file or a \.done file/);
+      assert.match(delivery, /never write a \.relayed file or a \.done file/);
+      const taskName = kind === 'custom' ? 'this task' : `EXAMPLE: ${kind === 'hourly-nudge' ? 'Hourly nudge' : 'Daily check-in'}`;
+      assert.ok(delivery.includes(`| ${slug} | task ${taskName} | thread <this run's thread link> | ${report} |`));
+      assert.match(delivery, /mcp__hearthbot__read_thread with no thread_id/);
+      assert.match(delivery, /Never take the link from memory's current home thread/);
+      assert.ok(delivery.indexOf('mcp__hearthbot__read_thread') < delivery.indexOf('Run stamp: create'));
+      assert.ok(delivery.indexOf('Run stamp: create') < delivery.indexOf('Post exactly ONE message'));
+      assert.doesNotMatch(delivery, /Full: [^\n]*\/latest\.md|overwrite \/mnt\/project-files\/toolkit\/task-runs\//);
+      assert.equal(tasks().check(kind, text).state, 'current');
+      assert.equal(tasks().refresh(kind, text), text, 'a refresh retains the current per-run contract');
+    }
+  }
+});
+
+test('all slugs hash the full identity and separate colliding paths, projects and kinds', () => {
+  const rows = [
+    ['custom', 'EXAMPLE', 'security/sweep', 'custom-example-04adabf650'],
+    ['custom', 'EXAMPLE', 'security-sweep', 'custom-example-e911db3420'],
+    ['custom', 'EXAMPLE', 'security_sweep', 'custom-example-dfc8560bc7'],
+    ['custom', 'EXAMPLE', 'finance/sweep', 'custom-example-2a2d78d396'],
+    ['custom', 'EXAMPLE', 'Security/Weekly__Sweep.v2', 'custom-example-15ad2d688f'],
+    ['hourly-nudge', 'EXAMPLE', 'hourly-nudge', 'hourly-nudge-example-65865a7fc8'],
+    ['daily-check-in', 'EXAMPLE', 'daily-check-in', 'daily-check-in-example-a9eaed51fb'],
+    ['hourly-nudge', 'CUSTOM', 'hourly-nudge', 'hourly-nudge-custom-c70242e7ff'],
+    ['custom', 'CUSTOM', 'hourly-nudge', 'custom-custom-5fc2496f87'],
+    ['custom', 'EXAMPLE A', 'sweep', 'custom-example-a-11aec7629c'],
+    ['custom', 'EXAMPLE-A', 'sweep', 'custom-example-a-a44b756653'],
+    ['custom', 'EXAMPLE_A', 'sweep', 'custom-example-a-5d8ab9f2f1']
+  ];
+  const folders = rows.map(([kind, project, reportFolder, slug]) => {
+    const promptParams = validateParams(kind, { ...PARAMS[kind], project, report_dir: `/mnt/project-files/${reportFolder}` });
+    const text = tasks().render(kind, promptParams, kind === 'custom' ? OWN_TEXT : undefined);
+    const folder = text.match(/Run stamp: create (\/mnt\/project-files\/toolkit\/task-runs\/[^/]+)\/<run UTC>\.md/)[1];
+    assert.equal(folder, `/mnt/project-files/toolkit/task-runs/${slug}`);
+    assert.equal(tasks().refresh(kind, text), text, 'replacement task retains its identity');
+    return folder;
+  });
+  assert.equal(new Set(folders).size, rows.length, 'custom/custom and custom/Toolkit folders stay distinct');
+});
+
+test('old custom shells remain outdated advice until the owner approves that task update', () => {
+  const old = new ProjectsTasks({ root: ROOT, readFile(target, encoding) {
+    if (target === path.join(TASKS, 'run-setup.md')) return 'RUN SETUP\n- Read-only except report files under {{report_dir}}/.';
+    if (target === path.join(TASKS, 'delivery.md')) return 'DELIVERY\n- Write the full report to {{report_dir}}/latest.md (overwrite), then read it back.\n- Send ONE message with mcp__hearthbot__message_coordinator: the first line, then "Full: {{report_dir}}/latest.md".';
+    return fs.readFileSync(target, encoding);
+  } });
+  for (const session of ['bound', 'fresh']) {
+    const promptParams = validateParams('custom', { ...PARAMS.custom, session });
+    const text = old.render('custom', promptParams, OWN_TEXT);
+    assert.equal(old.check('custom', text).state, 'current');
+    assert.equal(tasks().check('custom', text).state, 'outdated');
+    assert.match(text, /Full: \/mnt\/project-files\/sweep\/latest\.md/);
+    assert.doesNotMatch(text, /task-runs\/|Run stamp:|\.relayed|\.done/);
+    const updated = tasks().refresh('custom', text);
+    assert.equal(tasks().check('custom', updated).state, 'current');
+    assert.ok(updated.includes(OWN_TEXT));
+  }
+  const checkIn = rendered('daily-check-in');
+  assert.ok(checkIn.includes('old shell: no run stamp or catch-up until the owner OKs the shell update'));
+  assert.match(checkIn, /gets no catch-up or relay gap check/);
+  assert.match(checkIn, /Keep its stored prompt until that task's owner-approved shell update/);
+});
+
+test('delivery ending matrix covers all sends in every kind and session without claiming success', () => {
+  const endings = [
+    ['Home post succeeded:', true],
+    ['Home post failed but coordinator message succeeded:', false],
+    ['Every send failed:', false]
+  ];
+  for (const kind of Object.keys(PARAMS)) {
+    for (const session of ['bound', 'fresh']) {
+      const text = tasks().render(kind, validateParams(kind, { ...PARAMS[kind], session }), kind === 'custom' ? OWN_TEXT : undefined);
+      const delivery = findBlocks(text).blocks.find(block => block.name === 'TASK-DELIVERY').body;
+      const lines = delivery.split('\n');
+      for (const [label, homePostSucceeded] of endings) {
+        const matches = lines.filter(line => line.startsWith(`- ${label}`));
+        assert.equal(matches.length, 1, `${kind} ${session}: ${label}`);
+        const [ending] = matches;
+        if (session === 'fresh') {
+          assert.match(ending, /resolve this run's own thread with mcp__hearthbot__set_thread_resolved \(resolved: true\), then end with mcp__hearthbot__no_reply_needed/);
+        } else {
+          assert.doesNotMatch(ending, /set_thread_resolved/);
+          if (homePostSucceeded) {
+            assert.match(ending, /that post is the last call/);
+            assert.doesNotMatch(ending, /no_reply_needed/);
+          } else assert.match(ending, /end with mcp__hearthbot__no_reply_needed/);
+        }
+        if (label === 'Every send failed:') {
+          const failure = lines.find(line => line.startsWith('- Failure file:'));
+          const stampPath = delivery.match(/Run stamp: create ([^\n]+?) with one line/)[1];
+          assert.ok(failure.includes(stampPath.replace(/\.md$/, '.failed')));
+          assert.match(failure, /create .* exclusively with one line "DELIVERY FAILED \| <the report's first line>", then read it back/);
+          assert.match(failure, /Never overwrite it or amend the run stamp/);
+          assert.match(ending, /create the \.failed file above, state the failure in this turn's last text/);
+          assert.ok(delivery.indexOf("DELIVERY FAILED | <the report's first line>") < delivery.indexOf(ending) + ending.indexOf('no_reply_needed'));
+        }
+      }
+      assert.match(delivery, /at most 1,500 characters/);
+      assert.match(delivery, /retry once/);
+      assert.match(delivery, /never claim it was delivered/);
+      assert.doesNotMatch(delivery, /say plainly in this turn's last text|only when no post was made/);
+    }
+  }
+});
+
+test('old mutable delivery checks as outdated at the same version and refreshes in every mode', () => {
+  const oldDelivery = 'DELIVERY\n- Write the full report to {{report_dir}}/latest.md (overwrite), then read it back.\n- Run stamp: overwrite /mnt/project-files/toolkit/task-runs/{{task_slug}}.md with one line.';
+  const old = new ProjectsTasks({ root: ROOT, readFile(target, encoding) {
+    return target === path.join(TASKS, 'delivery.md') ? oldDelivery : fs.readFileSync(target, encoding);
+  } });
+  for (const kind of Object.keys(PARAMS)) {
+    for (const session of ['bound', 'fresh']) {
+      const promptParams = validateParams(kind, { ...PARAMS[kind], session });
+      const text = old.render(kind, promptParams, OWN_TEXT);
+      assert.equal(old.check(kind, text).state, 'current');
+      assert.equal(tasks().check(kind, text).state, 'outdated');
+      const updated = tasks().refresh(kind, text);
+      assert.equal(tasks().check(kind, updated).state, 'current');
+      assert.ok(updated.includes(OWN_TEXT), 'owner steps survive the refresh');
+      assert.ok(updated.includes(`${promptParams.report_dir}/runs/<run UTC>.md`));
+      assert.equal(updated.includes('mcp__hearthbot__set_thread_resolved'), session === 'fresh');
+    }
+  }
+});
+
+test('nudge and check-in watch every pending run, ignore stopped tasks and use the complete lane rule', () => {
+  const nudge = rendered('hourly-nudge');
+  for (const required of ['10. Task runs (runs every time', 'every run more than 15 minutes old whose .relayed is missing',
+    '"UNRELAYED TASK RUNS: <n> | "', '11. Lanes (runs every time', '"LANES UNDER CAP: <working> of <cap>, queue <n> | "', '**Lanes:**',
+    'no thread in list_threads other than this home thread has activity', 'page read_project_chat with limit 10 to its last page']) {
+    assert.ok(nudge.includes(required), required);
+  }
+  const checkIn = rendered('daily-check-in');
+  assert.ok(checkIn.includes('"RELAY GAP: <task name>[, <task name>] | "'));
+  assert.ok(checkIn.includes('advice: no home-thread line or run stamp; opt into the Toolkit shell (custom) to get both'));
+  assert.ok(checkIn.includes('TASKS OUTDATED, RELAY GAP, NUDGE NOT ARMED'));
+  assert.match(checkIn, /including tasks whose older runs are still unrelayed even if their latest run was relayed/);
+  assert.match(nudge, /Also list runs more than 15 minutes old with \.relayed but no \.done as "relayed, actions not confirmed"/);
+  assert.match(nudge, /originating thread link from its stamp, never memory's current home/);
+  assert.match(nudge, /with that same origin link/);
+  assert.match(nudge, /Old custom shells without a stamp have no catch-up or relay gap check until their owner-approved shell update/);
+  const quickCheck = nudge.split('\n').find(line => line.startsWith('1. Cheap check'));
+  assert.match(quickCheck, /ignore activity that is only the coordinator relaying a task run, whether a post or an Update line naming a task run/);
+  assert.match(quickCheck, /owner messages and other coordinator posts still count/);
+  const lanes = nudge.split('\n').find(line => line.startsWith('11. Lanes'));
+  for (const excluded of ['task home threads', "the coordinator's own", 'post reply threads',
+    'the one extra lane kept for a sudden owner request', 'work waiting on the owner', 'PRs waiting on CI or the review queue']) {
+    assert.ok(lanes.includes(excluded), excluded);
+  }
+  for (const line of [nudge.split('\n').find(line => line.startsWith('10. Task runs')),
+    checkIn.split('\n').find(line => line.startsWith('   RELAY GAP:'))]) {
+    assert.match(line, /skip(?:ping)? every run stamp of a task whose SCHEDULED TASKS entry says "stopped by owner"/);
+    assert.ok(line.indexOf('stopped by owner') < line.indexOf('.relayed'), 'stop filter precedes acknowledgement inspection');
+    assert.match(line, /Match built-in task names from their stamps and custom slugs from saved prompts' DELIVERY to that entry/);
+    assert.match(line, /hold and report an unknown or ambiguous mapping/);
+    assert.match(line, /<slug>\//);
+    assert.match(line, /<run UTC>\.md/);
+    assert.doesNotMatch(line, /newer than its \.relayed run time|<slug>\.md/);
+  }
 });
 
 test('memory check reads only the BINDING and SCHEDULED TASKS lines', () => {
@@ -546,6 +731,8 @@ test('every line that re-arms, updates, swaps, rebuilds, recreates or sets up a 
     'Toolkit-made task swaps under their safeguards', 'so the coordinator rebuilds this home thread', '2. Render the new prompt',
     // Lines about other things that happen to use one of the verbs: repos, setup, GitHub reads,
     // shared checkouts, Remote Control, the instructions sync and the repo map.
+    // These endings create only a receipt for the current run, never a task or schedule.
+    '- Every send failed: create the .failed file above,',
     '- A project with no repo attached gets this coordinator contract', 'Before any other work as a newly appointed controller', '**Threads do GitHub reads.**',
     '- Local sessions sharing one checkout must not clash', '**Remote Control wake.**', '4. Check the result: `--check` reads `current`', '5. Post one short note in project chat: block version',
     '- On undo, restore the saved copy and record `declined project-instructions', '**Dedupe in the same change.**', '**Evidence before "done":**',
