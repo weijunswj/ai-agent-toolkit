@@ -1,5 +1,13 @@
 # Toolkit Changelog
 
+## 3.42.1
+
+### Fixed
+
+- Let the owner's next own reply answer the governance question for the one folder named by a refused command, including a free-wording off acknowledgement outside github.com. Consume that binding once without holding unrelated work, clear it on resume or when scheduling a prompt, and keep the first question when another target is refused. Discard a pending confirmation when a newer question names a different target. A failed save still refuses the reaching command without changing the session mark; bare typed answers remain usable when reply-ticket state is damaged.
+- Require eligible, fresh Projects deliveries with independent hashed replay receipts for governance and merge approvals. Preserve spent ids during state conversion and keep launched sessions unable to answer governance questions. Both checks accept host timestamps up to 2 minutes ahead and retain receipts for 24 hours and 2 minutes.
+- Explain why adding a GitHub remote asks the question again, and prepare Remote Control lanes by creating the remote repository before cloning it.
+
 ## 3.42.0 (keys open in your .env editor)
 
 ### Changed
