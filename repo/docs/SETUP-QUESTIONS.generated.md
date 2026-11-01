@@ -3,9 +3,9 @@
 
 This reference uses a privacy-safe representative Codex state in which all current ordinary questions are available. Runtime output resolves Current, Recommended, Why, available choices, and After applying from the same canonical metadata and the actual inspected state.
 
-Toolkit setup choices - 9 questions across 3 sections
+Toolkit setup choices - 10 questions across 4 sections
 
-Bank reference: A96G-4XPC-7XK4-QK1R
+Bank reference: NDFT-9Y6E-6GQ6-W00N
 
 Quick index
 
@@ -19,6 +19,7 @@ Quick index
 3.1 Keep Toolkit available in Codex? - Recommended: A - Keep current
 3.2 Copy Toolkit's skills into Antigravity? - Recommended: A - Keep current
 Status (nothing to answer): Toolkit hooks in Codex: All 6 on. Nothing to do.
+4.1 May Codex merge finished task pull requests without you typing merge? - Recommended: B - On
 
 
 ## 1. Updates and reports
@@ -272,6 +273,34 @@ Status (nothing to answer): Toolkit hooks in Codex: All 6 on. Nothing to do.
 
 ---
 
+
+## 4. Toolkit settings
+
+### 4.1 May Codex merge finished task pull requests without you typing merge?
+
+**What this controls:** Sets this app's answer on this computer, only for repositories with Toolkit governance enabled, after review, required checks and your testing pass. Governance, hooks, setup and merge-rule changes still need your typed merge.
+
+**Current:** Off (no answer saved)
+
+**Verification:** verified
+
+**Recommended:** B - On
+
+**Recommended outcome:** On: merge finished tasks after their gates pass.
+
+**Why:** Finished tasks have passed review, checks and your testing; protected changes still wait for your typed merge.
+
+**Choices:**
+
+- **A. Keep current** - Keep Off (no answer saved); do not rewrite the saved answer.
+- **B. On** - Allow finished task pull requests to merge after the required gates pass.
+
+**After applying:** The app-local answer is saved separately from app settings. Rule-refresh pull requests always wait for your typed merge.
+
+**Selected:** B - On
+
+---
+
 Reply with either:
 
 - `all recommended`
@@ -283,9 +312,9 @@ Anything you do not list takes its recommendation.
 
 Setup run with `--host claude-code` shows this bank instead, for the same representative state with a supported root-only Claude profile and no subagent depth setting yet. Answers use the same format as above.
 
-Toolkit setup choices - 11 questions across 3 sections
+Toolkit setup choices - 11 questions across 4 sections
 
-Bank reference: 0M7J-V80J-ZYKB-3B59
+Bank reference: VJFN-VAX3-TMQ1-YFBX
 
 Quick index
 
@@ -299,7 +328,7 @@ Quick index
 3.3 Claude Code setting: Let other sessions wake this one? - Recommended: B - Turn on
 3.4 Claude Code setting: Switch models without asking on a flag? - Recommended: A - Keep current
 3.5 Claude Code setting: Read AGENTS.md too? - Recommended: B - Turn on
-3.6 Copy Toolkit's skills into Antigravity? - Recommended: A - Keep current
+4.1 May Claude Code merge finished task pull requests without you typing merge? - Recommended: B - On
 
 
 ## 1. Updates and reports
@@ -563,27 +592,30 @@ Quick index
 
 ---
 
-### 3.6 Copy Toolkit's skills into Antigravity?
 
-**What this controls:** Whether setup copies Toolkit's portable skills, and the official n8n skills Toolkit ships, into Antigravity's global skills folder (~/.gemini/config/skills) and keeps them current on each setup. Toolkit-only skills (setup, env, controller and programme tools) stay out. Folders you copied yourself are never changed.
+## 4. Toolkit settings
 
-**Current:** Toolkit's skills are not in Antigravity's global skills folder.
+### 4.1 May Claude Code merge finished task pull requests without you typing merge?
 
-**Verification:** state-derived
+**What this controls:** Sets this app's answer on this computer, only for repositories with Toolkit governance enabled, after review, required checks and your testing pass. Governance, hooks, setup and merge-rule changes still need your typed merge.
 
-**Recommended:** A - Keep current
+**Current:** Off (no answer saved)
 
-**Recommended outcome:** Leave Antigravity unchanged.
+**Verification:** verified
 
-**Why:** The copy is opt-in: choose it if you use Toolkit skills in Antigravity.
+**Recommended:** B - On
+
+**Recommended outcome:** On: merge finished tasks after their gates pass.
+
+**Why:** Finished tasks have passed review, checks and your testing; protected changes still wait for your typed merge.
 
 **Choices:**
 
-- **A. Keep current** - Preserve this effective behavior: Toolkit's skills are not in Antigravity's global skills folder.
-- **B. Copy and keep updated** - Copy Toolkit's portable skills and the official n8n skills into ~/.gemini/config/skills, update Toolkit's copies when they are out of date, and record them.
+- **A. Keep current** - Keep Off (no answer saved); do not rewrite the saved answer.
+- **B. On** - Allow finished task pull requests to merge after the required gates pass.
 
-**After applying:** Start a new Antigravity session to load changed skills.
+**After applying:** The app-local answer is saved separately from app settings. Rule-refresh pull requests always wait for your typed merge.
 
-**Selected:** A - Keep current
+**Selected:** B - On
 
 ---

@@ -40,6 +40,7 @@
 // arrive in the repository through a pull request you approve.
 
 const path = require('node:path');
+const { detectAgentHost } = require('./agent-host-markers.cjs');
 const readline = require('node:readline');
 
 const registry = require('./toolkit-capability-registry.cjs');
@@ -189,7 +190,7 @@ class ToolkitGovernanceCli {
   }
 
   #check(json, offline) {
-    const options = { ...this.#registryOptions, offline };
+    const options = { host: detectAgentHost(), ...this.#registryOptions, offline };
     if (this.#rulesetReader) options.rulesetReader = this.#rulesetReader;
     if (this.#protectionReader) options.protectionReader = this.#protectionReader;
     if (this.#securityReader) options.securityReader = this.#securityReader;

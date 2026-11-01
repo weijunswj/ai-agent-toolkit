@@ -24,8 +24,8 @@
 // It is for the repository the session is in, or the one the message names; a bare number typed
 // outside a GitHub repository records nothing.
 //
-// The owner's standing answer instead of a typed approval: when the binding merged on the default
-// branch says `task_prs.auto_merge: after-gates` (read from this computer's cache of it, under a day
+// The owner's app-local standing answer instead of a typed approval: On, with an enabled
+// governance binding merged on the default branch (read from this computer's cache, under a day
 // old), a merge with no typed approval passes only in a session the user started, in that
 // repository's own folder, for that repository, as a plain merge commit pinned to the full 40
 // character head SHA: `gh pr merge N --merge --match-head-commit <sha>`, or a connector merge tool
@@ -644,17 +644,17 @@ function shellRefusal(text, cwd, registryOptions = {}, shell = null) {
 }
 
 // The owner's standing answer for the repository of folder `cwd`: { repository, scope } when the
-// binding merged on its default branch turns task auto-merge on and the user started this session;
+// app-local answer is On, the merged binding enables governance and the user started this session;
 // else null. `scope(head)` is the merge-scope verdict for that head against this folder's copy of
 // the remote's default branch, or null when git cannot read it.
-function standingAnswer(input, cwd, { environment, registryOptions, now }) {
+function standingAnswer(input, cwd, { environment, registryOptions, now, host }) {
   if (typeof cwd !== 'string' || cwd === '') return null;
   const repository = repositoryOf(cwd);
   if (!repository) return null;
   let root;
   try { root = governance.findGitRoot(cwd); } catch { root = null; }
   if (!root) return null;
-  const answer = governance.taskAutoMerge(root, { ...registryOptions, ...(now ? { now } : {}) });
+  const answer = governance.taskAutoMerge(root, { ...registryOptions, host, ...(now ? { now } : {}) });
   if (answer.auto_merge !== 'after-gates') return null;
   const sessionId = input && typeof input.session_id === 'string' ? input.session_id : null;
   if (!startedByUser(sessionId, environment, registryOptions, now)) return null;
@@ -704,7 +704,7 @@ function decide(input, { registryOptions = {}, now, environment = process.env, h
   } else return null;
   if (merges.length === 0) return null;
   const approvals = new MergeApprovals({ registryOptions, now });
-  const standing = standingAnswer(input, cwd, { environment: environment || {}, registryOptions, now });
+  const standing = standingAnswer(input, cwd, { environment: environment || {}, registryOptions, now, host });
   const used = [];
   for (const merge of merges) {
     const { refusal, approval } = judge(merge, approvals, standing);

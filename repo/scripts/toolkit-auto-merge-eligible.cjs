@@ -2,7 +2,7 @@
 'use strict';
 
 // Task auto-merge scope: whether a pull request may merge on the owner's standing answer
-// (`task_prs.auto_merge: after-gates` in the merged programme binding), or changes the merge rules
+// (the app-local setup answer), or changes the merge rules
 // themselves and waits for the owner's typed merge whatever that answer says. It reads only the
 // pull request's commits through git, so the controller runs it on the merge head before a merge
 // and the merge hold (toolkit-merge-hold.cjs) runs it on this computer before letting a merge with
@@ -15,14 +15,14 @@
 //
 // The merge-authority list, each for the failure it prevents: a pull request that loosens the
 // rules for whether and how merges happen would otherwise merge itself on those looser rules.
-//   - the programme binding, its schema and its reader: they hold the owner's answer;
+//   - the programme binding, its schema and its reader: they bound governance scope;
 //   - the merge hold, its helpers and this check: they enforce it on this computer;
 //   - the controller, global and gate rules, and the Approvals section of the Projects controller
 //     skill: they say when a controller may merge;
 //   - CI workflows: they decide what "every required check is green" means;
 //   - a major version bump: a breaking release would go out unseen.
-// Everything else (hooks, setup, agent instructions, the rest of governance) merges after the
-// gates: its review tier and owner testing already hold the merge until they pass.
+// Hooks, setup, governance and the preference reader/writer also wait for a typed merge:
+// changing the enforcement or setup path must never authorise that same change.
 // A change that only moves version stamps (a managed block's toolkit=<version>, a "Version:
 // <date>.<n>" line, a "version" or BRIDGE_VERSION value), as the release bump at merge time does,
 // does not count. The rest of the gate conditions (review, CI, testing, one merge at a time, no
@@ -35,19 +35,25 @@ const GENERAL = Object.freeze([
   [/^\.github\/toolkit-programme\.json$/, 'the programme binding'],
   [/^\.github\/ai-agent-toolkit-programme\.json$/, 'the programme binding'],
   [/^\.github\/workflows\//, 'a CI workflow'],
+  [/^(?:\.(?:claude|codex)-plugin\/)?hooks\/hooks\.json$/, 'a host hook manifest'],
+  [/^repo\/scripts\/[^/]*-hook\.(?:cjs|ps1)$/, 'a host hook entrypoint'],
 ]);
 
 // The Toolkit repository's own merge rules (applied when the diff's repository is the Toolkit: it
 // has the global rules source).
 const TOOLKIT = Object.freeze([
-  [/^repo\/contracts\/agent-rules\/(?:global|gate)-rules\.md$/, 'the agent rules on merging'],
+  [/^repo\/contracts\/toolkit-local-bridge\/(?:claude|codex)-plugin\/hooks\/hooks\.json$/, 'a host hook manifest source'],
+  [/^repo\/contracts\/agent-rules\/(?:global|gate|toolkit-governed)-rules\.md$/, 'the agent rules on merging'],
   [/^repo\/CONTROLLER\.md$/, 'the controller rules'],
+  [/^repo\/scripts\/setup-[^/]+\.cjs$/, 'setup and its host bank helpers'],
+  [/^repo\/scripts\/toolkit-governance(?:-[^/]+)?\.cjs$/, 'governance runtime and state'],
+  [/^repo\/scripts\/toolkit-capability-registry\.cjs$/, 'governance decisions'],
+  [/^repo\/scripts\/toolkit-task-auto-merge-preferences\.cjs$/, 'the app-local merge answer'],
+  [/^(?:repo\/docs\/agent-playbooks|skills\/repository-agent-rules\/repo-local\/docs\/agent-playbooks)\/safety-gates\.md$/, 'approval rules'],
   [/^repo\/contracts\/programme-state\//, 'the programme binding schema'],
   [/^skills\/github-program-reconciler\/scripts\/programme-state\.cjs$/, 'the programme binding reader'],
   [/^repo\/scripts\/toolkit-merge-hold\.cjs$/, 'the merge hold'],
   [/^repo\/scripts\/toolkit-shell-call\.cjs$/, 'the merge hold'],
-  [/^repo\/scripts\/toolkit-governance-gate\.cjs$/, 'the merge hold'],
-  [/^repo\/scripts\/toolkit-governance-state\.cjs$/, 'the merge hold'],
   [/^repo\/scripts\/toolkit-auto-merge-eligible\.cjs$/, 'this merge-scope check'],
 ]);
 

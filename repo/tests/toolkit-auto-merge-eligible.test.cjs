@@ -21,20 +21,30 @@ test('merge-authority paths and a major bump wait for the owner; everything else
     'repo/contracts/programme-state/binding-v2.schema.json', 'skills/github-program-reconciler/scripts/programme-state.cjs',
     'repo/scripts/toolkit-merge-hold.cjs', 'repo/scripts/toolkit-shell-call.cjs', 'repo/scripts/toolkit-governance-gate.cjs',
     'repo/scripts/toolkit-governance-state.cjs', 'repo/scripts/toolkit-auto-merge-eligible.cjs',
+    'repo/scripts/toolkit-task-auto-merge-preferences.cjs', 'repo/scripts/setup-toolkit-core.cjs',
+    'repo/scripts/setup-core-codex.cjs', 'repo/scripts/setup-core-claude.cjs',
+    'repo/scripts/toolkit-capability-registry.cjs', 'repo/contracts/agent-rules/toolkit-governed-rules.md',
+    'repo/docs/agent-playbooks/safety-gates.md',
+    'skills/repository-agent-rules/repo-local/docs/agent-playbooks/safety-gates.md',
   ];
   for (const file of authority) {
     const result = verdict(['repo/docs/README.md', file]);
     assert.equal(result.eligible, false, file);
     assert.deepEqual(result.reasons.map(entry => entry.path), [file], file);
   }
-  // Hooks, setup, agent instructions and the rest of governance merge after their gates.
-  const gated = [
-    'AGENTS.md', 'sub/CLAUDE.md', '.github/copilot-instructions.md', '.agents/rules/00-bootstrap.md', 'skills/repository-agent-rules/SKILL.md',
-    'hooks/hooks.json', '.claude-plugin/hooks/hooks.json', 'repo/scripts/toolkit-governance-hook.cjs', 'repo/scripts/toolkit-codex-helper-hook.ps1',
-    '.claude/settings.json', '.codex/config.toml', 'repo/scripts/setup-codex-toolkit-plugin.cjs', 'repo/scripts/setup-claude-toolkit-plugin.cjs',
-    'repo/scripts/toolkit-governance-conformance.cjs', 'repo/scripts/toolkit-governance.cjs', 'repo/contracts/agent-rules/README.md',
+  // Both hook manifests/entrypoints, setup and governance require typed merge too.
+  const protectedPaths = [
+    'hooks/hooks.json', '.claude-plugin/hooks/hooks.json', '.codex-plugin/hooks/hooks.json',
+    'repo/contracts/toolkit-local-bridge/claude-plugin/hooks/hooks.json', 'repo/contracts/toolkit-local-bridge/codex-plugin/hooks/hooks.json',
+    'repo/scripts/toolkit-governance-hook.cjs', 'repo/scripts/toolkit-codex-helper-hook.cjs', 'repo/scripts/toolkit-codex-helper-hook.ps1',
+    'repo/scripts/toolkit-claude-agent-hook.cjs', 'repo/scripts/toolkit-claude-attribution-hook.cjs',
+    'repo/scripts/setup-codex-toolkit-plugin.cjs', 'repo/scripts/setup-claude-toolkit-plugin.cjs',
+    'repo/scripts/toolkit-governance-conformance.cjs', 'repo/scripts/toolkit-governance.cjs',
+    'repo/scripts/toolkit-governance-binding.cjs', 'repo/scripts/toolkit-governance-answer.cjs',
   ];
-  for (const file of gated) assert.equal(verdict([file]).eligible, true, file);
+  for (const file of protectedPaths) assert.equal(verdict([file]).eligible, false, file);
+  for (const file of ['AGENTS.md', 'sub/CLAUDE.md', '.github/copilot-instructions.md', '.agents/rules/00-bootstrap.md',
+    'skills/repository-agent-rules/SKILL.md', 'repo/contracts/agent-rules/README.md']) assert.equal(verdict([file]).eligible, true, file);
   assert.equal(verdict(['repo/CONTROLLER.md'], false).eligible, true, 'the Toolkit list applies only to the Toolkit repository');
   assert.equal(verdict(['.github/workflows/ci.yml'], false).eligible, false, 'the general list applies everywhere');
   assert.match(verdict([], true, { 'repo/contracts/toolkit-local-bridge/version.json': { before: '3.20.0', after: '4.0.0' } }).reasons[0].why, /major version bump/);
@@ -95,7 +105,7 @@ test('the CLI reads the diff with git: exit 0 eligible, 1 waits for the owner, 2
   const io = { cwd: root, stdout: { write: text => out.push(text) }, stderr: { write: text => out.push(text) } };
   assert.equal(eligible.main(['--base', base, '--head', docs], io), 0);
   assert.match(out.at(-1), /^Auto-merge: yes/);
-  assert.equal(eligible.main(['--base', docs, '--head', hook], io), 0, 'a hook merges after its gates');
+  assert.equal(eligible.main(['--base', docs, '--head', hook], io), 1, 'a hook waits for typed merge');
   assert.equal(eligible.main(['--base', hook, '--head', workflow, '--json'], io), 1);
   assert.deepEqual(JSON.parse(out.at(-1)).reasons, [{ path: '.github/workflows/ci.yml', why: 'a CI workflow' }]);
   assert.equal(eligible.main(['--base', hook, '--head', workflow], io), 1);
