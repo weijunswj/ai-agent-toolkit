@@ -22,6 +22,7 @@ const { STATUS: INSTALL_CHECK_STATUS, claudeAccountToolkitVersion } = require('.
 const { claudeAccountPluginFolders, claudeAppCopyLine } = require('./toolkit-claude-account-copy.cjs');
 const { CodexToolkitInstall, hookGaps } = require('./toolkit-codex-install-state.cjs');
 const { GlobalRules } = require('./toolkit-global-rules.cjs');
+const { HOST_LABELS, detectAgentHost } = require('./agent-host-markers.cjs');
 const { defineCodexSetup } = require('./setup-core-codex.cjs');
 const { defineClaudeSetup, claudeSettingKey, CLAUDE_SETTING_KEYS } = require('./setup-core-claude.cjs');
 
@@ -36,6 +37,8 @@ const SETUP_PAUSED_FOR_QUESTION_BANK = 23;
 const SETUP_START_FOLDER_ENV = 'AI_AGENT_TOOLKIT_SETUP_START_FOLDER';
 // Setup finished its steps, but the install check found something a person must fix.
 const SETUP_ACTION_REQUIRED = 24;
+// Setup was started from one app but asked for the other app's questions; nothing was read or written.
+const SETUP_HOST_MISMATCH = 2;
 const QUESTION_BANK_BEGIN = '<!-- setup-toolkit-question-bank:begin -->';
 const QUESTION_BANK_COMPLETE = '<!-- setup-toolkit-question-bank:complete -->';
 const MANAGED_QUESTION_BANK_PROTOCOL = 'setup-toolkit-managed-question-bank-v2';
@@ -338,6 +341,30 @@ function parseArgs(argv = process.argv.slice(2)) {
   args.repoRemote = args.repoRemote || DEFAULT_REPO_REMOTE;
   if (!SUPPORTED_HOSTS.includes(args.host)) throw new Error(`Unsupported host: ${args.host}`);
   return args;
+}
+
+// The bank shown must match the app that started setup: a Codex chat never gets the Claude Code
+// questions (and their Claude settings writes), and the reverse. Only a clear marker from one app
+// decides; no markers, or both apps' markers, keep --host as given.
+function hostMismatch(args, environment = process.env) {
+  const detected = detectAgentHost(environment);
+  if (detected === 'unknown' || detected === args.host) return null;
+  const rest = [];
+  for (let index = 0; index < args.argv.length; index += 1) {
+    const arg = args.argv[index];
+    if (arg === '--host') index += 1;
+    else if (!arg.startsWith('--host=')) rest.push(arg);
+  }
+  const rerun = ['node', path.join(__dirname, 'setup-toolkit.cjs'), ...rest, ...(detected === 'codex' ? [] : ['--host', detected])]
+    .map((part) => (/^[\w./:=-]+$/.test(part) ? part : `"${part}"`)).join(' ');
+  const asked = args.argv.some((arg) => arg === '--host' || arg.startsWith('--host='))
+    ? `asked for the ${HOST_LABELS[args.host]} questions with --host ${args.host}`
+    : `ran without --host, which means the ${HOST_LABELS[args.host]} questions`;
+  return [
+    `SETUP STOPPED: setup was started from ${HOST_LABELS[detected]} but ${asked}. Nothing was changed.`,
+    `Run it again as: ${rerun}`,
+    detected === 'codex' ? 'Codex never adds --host.' : 'Claude Code always adds --host claude-code.'
+  ].join('\n');
 }
 
 function relNodeCommand(relScript, extraArgs = []) {
@@ -4134,6 +4161,11 @@ async function main(argv = process.argv.slice(2), options = {}) {
     runClaudeNativePluginVerify(args);
     return 0;
   }
+  const mismatch = hostMismatch(args, options.environment || process.env);
+  if (mismatch) {
+    console.error(mismatch);
+    return SETUP_HOST_MISMATCH;
+  }
   const delegatedCode = await delegateToManagedSetupIfAvailable(args);
   if (delegatedCode !== null) return delegatedCode;
   if (args.plan) {
@@ -4204,6 +4236,8 @@ module.exports = {
   CODEX_AGENT_MAX_DEPTH,
   SETUP_PAUSED_FOR_QUESTION_BANK,
   SETUP_ACTION_REQUIRED,
+  SETUP_HOST_MISMATCH,
+  hostMismatch,
   QUESTION_BANK_BEGIN,
   QUESTION_BANK_COMPLETE,
   MANAGED_QUESTION_BANK_PROTOCOL,
