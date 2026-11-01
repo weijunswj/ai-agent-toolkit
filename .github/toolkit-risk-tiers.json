@@ -47,7 +47,6 @@
     "repo/contracts/host-qualification/**",
     "repo/contracts/topology-scope-policy.json",
     "repo/contracts/skill-product-migration-ledger.json",
-    "!repo/scripts/bump-version.cjs",
     "!repo/scripts/check-diff-whitespace.cjs",
     "!repo/scripts/check-test-durations.cjs",
     "!repo/scripts/generate-n8n-stack-launcher-flow.cjs",
