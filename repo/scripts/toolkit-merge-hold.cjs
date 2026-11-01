@@ -19,6 +19,10 @@
 // for a no, a doubt, a condition, a delay, a report or another kind of merge ("don't", "not yet",
 // "if CI is green", "later", "should we ...?", "merge main into 618", "merge conflicts in 618"),
 // nor does any line inside a fenced code block (``` or ~~~).
+// Plain text may put other prose on separate lines, including comparisons such as "Tests took < 2
+// seconds" or non-tag entities such as "&lt; 2". A stray angle bracket drops only its own line under
+// the quote rule. Element tags (including unfinished tags), encoded tags, and embedded or malformed
+// wakes refuse the whole plain prompt; keep approval lines free of host or agent frame markup.
 // Other wording may still count, so the list leans towards not counting. Bare text is recorded only
 // in a session the user started, not one another session or a Toolkit launcher started, and not a
 // resumed or forked run (the governance gate's session marks). A whole Projects wake may instead
@@ -326,10 +330,22 @@ function startedByUser(sessionId, environment, registryOptions, now) {
   return epochs.get(sessionId) !== null && !epochs.resumed(sessionId);
 }
 
+// Frame markup uses the same element names as the governance reader's ANY_TAG, also refusing
+// unfinished element tags and malformed wake openers. Decode entities only to check for markup,
+// never to turn encoded text into an approval.
+function hasFrameMarkup(text) {
+  const decoded = text.replace(/&(lt|gt|#\d+|#x[0-9a-f]+);/gi, (entity, name) => {
+    if (!name.startsWith('#')) return name.toLowerCase() === 'lt' ? '<' : '>';
+    const point = name[1].toLowerCase() === 'x' ? parseInt(name.slice(2), 16) : Number(name.slice(1));
+    return point > 0 && point <= 0x10ffff && !(point >= 0xd800 && point <= 0xdfff) ? String.fromCodePoint(point) : entity;
+  });
+  return /<\/?(?:wake\b|[A-Za-z][\w-]*(?=[\s/>]|$))/i.test(decoded);
+}
+
 // Keeps the approvals a typed message carries; returns how many were kept.
 function recordPrompt(input, { environment = process.env, registryOptions = {}, now } = {}) {
   const message = gate.ownerMessage(input && input.prompt);
-  if (message.wrapped ? !message.approvalEligible : message.markup || /[<>]|&(?:lt;|gt;|#)/.test(message.text)) return 0;
+  if (message.wrapped ? !message.approvalEligible : message.markup || hasFrameMarkup(message.text)) return 0;
   const found = approvalsIn(message.text);
   if (found.length === 0) return 0;
   const sessionId = input && typeof input.session_id === 'string' ? input.session_id : null;

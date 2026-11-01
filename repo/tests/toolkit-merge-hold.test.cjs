@@ -123,6 +123,30 @@ test('relay, cited, historical, notification and malformed messages cannot grant
   assert.equal(decide(ctx, connector('merge_pull_request', { pullNumber: 618, expectedHeadSha: SHA })), null);
 });
 
+test('plain prompts keep separate approval lines beside non-tag angle brackets and entities', (t) => {
+  const ctx = context(t);
+  for (const text of ['Tests took < 2 seconds', 'Tests took > 2 seconds', 'Tests took &lt; 2 seconds', 'Tests took &gt; 2 seconds', 'Tests took &#60; 2 seconds', 'Tests took &#x3e; 2 seconds', 'Result: &#38;', 'Value <value?']) {
+    assert.equal(typed(ctx, `${text}\nmerge owner/a#618`), 1, text);
+    assert.equal(decide(ctx, connector('merge_pull_request', { pullNumber: 618, expectedHeadSha: SHA })), null);
+  }
+  for (const text of ['<', '>', '< 2', '> 2']) {
+    assert.equal(typed(ctx, `merge owner/a#618 ${text}\nmerge owner/a#619`), 1, text);
+    assert.equal(new hold.MergeApprovals(ctx.options).find('owner/a', 618), null, 'the angle-bracket line is still quoted');
+    assert.equal(decide(ctx, connector('merge_pull_request', { pullNumber: 619, expectedHeadSha: SHA })), null);
+  }
+});
+
+test('plain prompts refuse element tags, encoded tags and embedded or malformed wakes as a whole', (t) => {
+  const ctx = context(t);
+  const frames = ['<relay', '<note>text</note>', '<cited/>', '<system-reminder>text</system-reminder>', '<project_claude_message>text</project_claude_message>', '<other-element attr="value">', '</other-element>', '<wake', '<wake?', '</wake', '&lt;relay', '&lt;note&gt;text&lt;/note&gt;', '&#60;cited&#62;', '&#x3c;other-element&#x3e;', '&lt;&#110;ote&gt;', '&lt;wake?', projects.wake('merge owner/a#618')];
+  for (const frame of frames) {
+    for (const prompt of [`${frame}\nmerge owner/a#618`, `merge owner/a#618\n${frame}`]) {
+      assert.equal(typed(ctx, prompt), 0, prompt);
+      assert.equal(new hold.MergeApprovals(ctx.options).find('owner/a', 618), null);
+    }
+  }
+});
+
 test('Projects delivery ids remain spent across sessions and age out only with the message', (t) => {
   const ctx = context(t);
   let clock = new Date('2026-11-01T14:10:00Z');
@@ -521,9 +545,29 @@ test('an unreadable approvals store refuses the merge, and a governance error ne
   const output = claudeHook.respond('PreToolUse', merge, { environment: {}, ...ctx.options });
   assert.match(output.hookSpecificOutput.permissionDecisionReason, /merge check failed/);
   fs.rmSync(ctx.file, { recursive: true, force: true });
-  const broken = { environment: {}, ...ctx.options, gate: { ToolGate: class { decide() { throw new Error('boom'); } }, insideRepository: () => false } };
-  const outside = claudeHook.respond('PreToolUse', { ...bash(ctx.root, `gh pr merge 618 --repo owner/a --match-head-commit ${SHA}`) }, broken);
+  let calls = 0;
+  const broken = { environment: {}, ...ctx.options, gate: { ToolGate: class { decide() { calls += 1; throw new Error('boom'); } }, insideRepository: () => false } };
+  const input = bash(ctx.root, `gh pr merge 618 --repo owner/a --match-head-commit ${SHA}`);
+  const outside = claudeHook.respond('PreToolUse', input, broken);
   assert.equal(outside.hookSpecificOutput?.permissionDecision, 'deny');
+  assert.equal(calls, 0, 'without approval the preliminary merge check refuses first');
+  assert.equal(typed(ctx, 'merge owner/a#618'), 1);
+  assert.ok(new hold.MergeApprovals(ctx.options).find('owner/a', 618));
+  assert.deepEqual(claudeHook.respond('PreToolUse', input, broken), {}, 'outside-repository failure allows the approved merge');
+  assert.equal(calls, 1, 'the injected governance failure ran');
+  assert.equal(new hold.MergeApprovals(ctx.options).find('owner/a', 618), null, 'allowed call consumes approval');
+  assert.equal(claudeHook.respond('PreToolUse', input, broken).hookSpecificOutput?.permissionDecision, 'deny', 'approval works exactly once');
+  assert.equal(calls, 1, 'second merge refuses before governance');
+
+  assert.equal(typed(ctx, 'merge owner/a#618'), 1);
+  const inside = { ...broken, gate: { ...broken.gate, insideRepository: () => true } };
+  const denied = claudeHook.respond('PreToolUse', { ...input, cwd: ctx.repo }, inside);
+  assert.equal(denied.hookSpecificOutput?.permissionDecision, 'deny');
+  assert.match(denied.hookSpecificOutput.permissionDecisionReason, /governance check failed/);
+  assert.equal(calls, 2, 'inside-repository injected failure ran too');
+  assert.ok(new hold.MergeApprovals(ctx.options).find('owner/a', 618), 'denied call leaves approval unused');
+  assert.equal(decide(ctx, input), null, 'the retained approval still allows one merge');
+  assert.equal(decide(ctx, input)?.deny.includes('no unused approval'), true);
 });
 
 test('a broken merge hold refuses state-changing tools that mention merge or push, never read-only ones', (t) => {

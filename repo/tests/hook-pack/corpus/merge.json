@@ -3,6 +3,22 @@
   "family": "merge",
   "rows": [
     {
+      "id": "MERGE.plain-angle-brackets",
+      "source": "merge approval review: non-tag angle brackets must not discard other lines",
+      "kind": "state",
+      "hosts": ["claude", "codex"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}},
+        {"event":"UserPromptSubmit","payload":{"prompt":"Tests took < 2 seconds and score > 0\nValues: &lt; 2, &#60; 2 and &#38;\nmerge owner/a#619 < 2\nmerge owner/a#618"},"expect":{"decision":"allow"}},
+        {"payload":{"tool_name":"mcp__github__merge_pull_request","tool_input":{"repository_full_name":"owner/a","pr_number":619,"expected_head_sha":"{head}","merge_method":"merge"}},"expect":{"decision":"deny"}},
+        {"payload":{"tool_name":"mcp__github__merge_pull_request","tool_input":{"repository_full_name":"owner/a","pr_number":618,"expected_head_sha":"{head}","merge_method":"merge"}},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"mcp__github__merge_pull_request","tool_input":{"repository_full_name":"owner/a","pr_number":618,"expected_head_sha":"{head}","merge_method":"merge"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
       "id": "MERGE.pr-view",
       "source": "hook pack seed: daily read",
       "kind": "benign",
