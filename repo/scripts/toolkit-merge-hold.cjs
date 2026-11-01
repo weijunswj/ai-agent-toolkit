@@ -19,8 +19,20 @@
 // for a no, a doubt, a condition, a delay, a report or another kind of merge ("don't", "not yet",
 // "if CI is green", "later", "should we ...?", "merge main into 618", "merge conflicts in 618"),
 // nor does any line inside a fenced code block (``` or ~~~).
-// Other wording may still count, so the list leans towards not counting. It is recorded only in a session the user started: not one another session or a
-// Toolkit launcher started, and not a resumed or forked run (the governance gate's session marks).
+// Plain text may put other prose on separate lines, including comparisons such as "Tests took < 2
+// seconds" or non-tag entities such as "&lt; 2". An entity drops its own line as unclear; a stray
+// angle bracket drops only its own line under the quote rule. Element tags (including unfinished
+// tags), encoded tags, and embedded or malformed
+// wakes refuse the whole plain prompt; keep approval lines free of host or agent frame markup.
+// Other wording may still count, so the list leans towards not counting. Bare text is recorded only
+// in a session the user started, not one another session or a Toolkit launcher started, and not a
+// resumed or forked run (the governance gate's session marks). A whole Projects wake may instead
+// supply one fresh human/principal trigger message, including in launched or resumed sessions. That
+// exception is for the verified message only, still needs a session mark, and never changes standing
+// auto-merge. Relays, citations, notes, notifications, attachments and malformed frames grant nothing.
+// Delivery ids are hashed and remembered for a day; expired deliveries cannot rearm approval after
+// their marker expires. No raw prompt text is stored. A valid explicit approval is kept at arrival
+// even during a governance hold; tools remain held and governance is not answered by it.
 // It is for the repository the session is in, or the one the message names; a bare number typed
 // outside a GitHub repository records nothing.
 //
@@ -64,7 +76,8 @@
 //
 // Not covered: wrapped or nested host launches (bash -lc, timeout, Start-Process and the like),
 // pushes wrapped in a program that is not a shell (timeout, Start-Process, xargs and the like), a
-// prompt file fed to a hook script, pasted text outside a code fence that has a plain approval line, scripts or programs
+// prompt file fed to a hook script, a fully forged top-level Projects wake with the right labels,
+// plain text containing an approval line, scripts or programs
 // that call git or the GitHub API themselves, curl and other HTTP clients, a sha= field put in a
 // comment or an echo on purpose, git and shell aliases,
 // commands inside files, pushes through a second remote or a non-shell wrapper, GH_REPO set outside the command
@@ -154,7 +167,7 @@ const HOST_WORD = /^(?:claude|codex)(?:-code)?(?:\.exe|\.cmd|\.ps1)?$|claude-cod
 const VALUE_FLAGS = new Set(['--repo', '-R', '--match-head-commit', '--subject', '-t', '--body', '-b', '--body-file', '-F', '--author-email', '-A']);
 const GIT_VALUE_OPTIONS = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--config-env', '--exec-path']);
 
-const ASK_TEXT = 'Ask the user to type, as plain text and not in quotes, a line with the word merge and the pull request number, such as merge N or merge owner/name#N, in their own chat, in a session opened in that repository\'s folder, after reading the merge summary. Never type it yourself, start a session or script to type it, or touch Toolkit\'s user-state files.';
+const ASK_TEXT = 'Ask the user to type, as plain text and not in quotes, a line with the word merge and the pull request number, such as merge owner/name#N, in their own chat after reading the merge summary. A fully named target works from any folder; merge N needs that repository\'s folder. Never type it yourself, start a session or script to type it, or touch Toolkit\'s user-state files.';
 
 class MergeHoldError extends Error {
   constructor(code) { super(code); this.name = 'MergeHoldError'; this.code = code; }
@@ -173,40 +186,58 @@ class MergeApprovals {
   #read() {
     let text;
     try { text = fs.readFileSync(this.#file, 'utf8'); } catch (error) {
-      if (error && error.code === 'ENOENT') return [];
+      if (error && error.code === 'ENOENT') return { approvals: [], deliveries: [] };
       throw new MergeHoldError('MERGE_APPROVALS_UNREADABLE');
     }
     let parsed = null;
     try { parsed = JSON.parse(text); } catch { parsed = null; }
-    if (!parsed || parsed.schema !== APPROVALS_SCHEMA || !Array.isArray(parsed.approvals)) return [];
+    if (!parsed || parsed.schema !== APPROVALS_SCHEMA || !Array.isArray(parsed.approvals)) return { approvals: [], deliveries: [] };
     const oldest = this.#now().getTime() - MAX_AGE_MS;
-    return parsed.approvals.filter(entry => entry && Number.isInteger(entry.pr) && typeof entry.repository === 'string' && Date.parse(entry.at) >= oldest);
+    return {
+      approvals: parsed.approvals.filter(entry => entry && Number.isInteger(entry.pr) && typeof entry.repository === 'string' && Date.parse(entry.at) >= oldest),
+      // Older stores have no deliveries. Message bodies and raw ids are never kept here.
+      deliveries: (Array.isArray(parsed.deliveries) ? parsed.deliveries : []).filter(entry => entry && /^[0-9a-f]{64}$/.test(entry.id) && Date.parse(entry.at) >= oldest),
+    };
   }
 
-  #write(approvals) {
+  #write({ approvals, deliveries }) {
     fs.mkdirSync(path.dirname(this.#file), { recursive: true });
     const temp = `${this.#file}.tmp-${process.pid}-${crypto.randomBytes(4).toString('hex')}`;
     try {
-      fs.writeFileSync(temp, `${JSON.stringify({ schema: APPROVALS_SCHEMA, approvals: approvals.slice(-MAX_APPROVALS) }, null, 2)}\n`, { mode: 0o600 });
+      fs.writeFileSync(temp, `${JSON.stringify({ schema: APPROVALS_SCHEMA, approvals: approvals.slice(-MAX_APPROVALS), deliveries }, null, 2)}\n`, { mode: 0o600 });
       fs.renameSync(temp, this.#file);
     } finally { fs.rmSync(temp, { force: true }); }
   }
 
-  add(entries) {
-    if (entries.length === 0) return;
+  add(entries, delivery = null) {
+    if (entries.length === 0) return 0;
     const at = this.#now().toISOString();
-    this.#write([...this.#read(), ...entries.map(entry => ({ ...entry, at }))]);
+    const state = this.#read();
+    if (delivery) {
+      const sent = Date.parse(delivery.sentAt);
+      // Expired messages cannot rearm approval after their replay marker ages out. At capacity,
+      // refuse new deliveries rather than discard a live replay marker.
+      if (!Number.isFinite(sent) || sent < this.#now().getTime() - MAX_AGE_MS || sent > this.#now().getTime()) return 0;
+      const id = crypto.createHash('sha256').update(delivery.id).digest('hex');
+      if (state.deliveries.some(entry => entry.id === id) || state.deliveries.length >= 4096) return 0;
+      state.deliveries.push({ id, at });
+    }
+    state.approvals.push(...entries.map(entry => ({ ...entry, at })));
+    this.#write(state);
+    return entries.length;
   }
 
   // The newest unused approval for exactly this repository ("owner/name", case-insensitive) and number.
   find(repository, pr) {
     if (typeof repository !== 'string') return null;
     const wanted = repository.toLowerCase();
-    return this.#read().reverse().find(entry => entry.pr === pr && entry.repository.toLowerCase() === wanted) || null;
+    return this.#read().approvals.reverse().find(entry => entry.pr === pr && entry.repository.toLowerCase() === wanted) || null;
   }
 
   use(approval) {
-    this.#write(this.#read().filter(entry => !(entry.pr === approval.pr && entry.at === approval.at && entry.repository === approval.repository)));
+    const state = this.#read();
+    state.approvals = state.approvals.filter(entry => !(entry.pr === approval.pr && entry.at === approval.at && entry.repository === approval.repository));
+    this.#write(state);
   }
 }
 
@@ -252,6 +283,9 @@ function approvalsIn(prompt) {
     }
     const marker = FENCE.exec(fenceText);
     if (marker) { fence = marker[1] || marker[2]; continue; }
+    // Entities left after the Projects reader's single decoding pass are unclear. In particular,
+    // the #38 in &#38; must never become a pull request. Other lines still count.
+    if (/&(?:[a-z][a-z0-9]*|#\d+|#x[0-9a-f]+);/i.test(raw)) continue;
     // More nested markers than that make the line unclear.
     if (LIST_MARKER.test(line)) continue;
     line = line.trim();
@@ -271,6 +305,10 @@ function approvalsIn(prompt) {
     if (line.length > MAX_APPROVAL_LINE || !/\bmerge\b/i.test(words) || HOLD_WORDS.test(words) || QUESTION.test(line) || QUOTED.test(raw.trim()) || QUOTED.test(line)) continue;
     const items = [...line.matchAll(APPROVAL_URL)].map(match => ({ repository: match[1], pr: Number(match[2]) }));
     let rest = line.replace(APPROVAL_URL, ' # ');
+    // Repository identifiers may contain dates, digits and SHA-like words. Remove the complete
+    // named targets before looking for separately typed head pins or unexplained long numbers.
+    for (const match of rest.matchAll(NAMED)) items.push({ repository: match[1] || null, pr: Number(match[2]) });
+    rest = rest.replace(NAMED, ' # ');
     const shas = [...rest.matchAll(APPROVAL_SHA)].map(match => match[0].toLowerCase());
     rest = rest.replace(APPROVAL_SHA, ' ');
     // A short SHA can be all digits ("at 7384901"); right after "at" it is read as one, since a pull
@@ -279,8 +317,7 @@ function approvalsIn(prompt) {
     rest = rest.replace(DIGIT_SHA, ' ');
     // A longer bare number is neither a pull request nor a SHA, so the line is unclear.
     if (/\d{7,}/.test(rest) || shas.length > 1) continue;
-    for (const match of rest.matchAll(NAMED)) items.push({ repository: match[1] || null, pr: Number(match[2]) });
-    const bare = rest.replace(NAMED, ' # ');
+    const bare = rest;
     for (const match of bare.matchAll(AFTER_MERGE)) for (const number of match[1].match(/\d+/g)) items.push({ repository: null, pr: Number(number) });
     for (const match of bare.matchAll(BEFORE_MERGE)) items.push({ repository: null, pr: Number(match[1]) });
     const sha = items.length === 1 ? shas[0] || null : null;
@@ -302,15 +339,20 @@ function startedByUser(sessionId, environment, registryOptions, now) {
 
 // Keeps the approvals a typed message carries; returns how many were kept.
 function recordPrompt(input, { environment = process.env, registryOptions = {}, now } = {}) {
-  const found = approvalsIn(input && input.prompt);
+  const message = gate.ownerMessage(input && input.prompt);
+  if (message.wrapped ? !message.approvalEligible : message.markup || gate.hasFrameMarkup(message.text)) return 0;
+  const found = approvalsIn(message.text);
   if (found.length === 0) return 0;
   const sessionId = input && typeof input.session_id === 'string' ? input.session_id : null;
-  if (!startedByUser(sessionId, environment || {}, registryOptions, now)) return 0;
+  // A direct Projects human trigger attests this message only. The standing-answer route still
+  // uses startedByUser unchanged. Even an attested message needs this host's session-start mark.
+  if (message.wrapped) {
+    if (!new gate.SessionEpochs({ registryOptions, now }).get(sessionId)) return 0;
+  } else if (!startedByUser(sessionId, environment || {}, registryOptions, now)) return 0;
   const here = repositoryOf(input && input.cwd);
   const entries = found.map(entry => ({ repository: entry.repository || here, pr: entry.pr, sha: entry.sha, session: sessionId }))
     .filter(entry => typeof entry.repository === 'string');
-  new MergeApprovals({ registryOptions, now }).add(entries);
-  return entries.length;
+  return new MergeApprovals({ registryOptions, now }).add(entries, message.wrapped ? message : null);
 }
 
 function wordsOf(text) {
@@ -584,7 +626,7 @@ function judge(merge, approvals, standing = null) {
   const name = `${merge.repository}#${merge.pr}`;
   const approval = approvals.find(merge.repository, merge.pr);
   if (!approval) {
-    if (!standing) return { refusal: deny(`the user has not approved a merge of ${name} in the last day, so this merge is refused.`) };
+    if (!standing) return { refusal: { deny: `Toolkit has no unused approval recorded for ${name} from the last day, so this merge is refused. ${ASK_TEXT}` } };
     const problem = standingProblem(merge, standing);
     if (problem) return { refusal: deny(`task auto-merge is on for ${standing.repository}, but this merge of ${name} ${problem}, so it needs the user's typed approval. A merge without one must be exactly \`gh pr merge ${merge.pr} --merge --match-head-commit <full head sha>\` from this repository's folder, or the connector's merge tool with merge_method "merge" and its head SHA field, once the gate rules' task auto-merge conditions hold.`) };
     const scope = standing.scope(merge.sha);
@@ -750,7 +792,7 @@ function standingAnswer(input, cwd, { environment, registryOptions, now, host })
 
 // The PreToolUse decision: { deny } or null.
 // `host` is the hook's own host ('claude' or 'codex'), set by the entry point, never read from the payload.
-function decide(input, { registryOptions = {}, now, environment = process.env, host = null } = {}) {
+function decide(input, { registryOptions = {}, now, environment = process.env, host = null, consume = true } = {}) {
   const tool = String(input && (input.tool_name || input.toolName) || '');
   let merges;
   let cwd = input && typeof input.cwd === 'string' ? input.cwd : null;
@@ -796,7 +838,7 @@ function decide(input, { registryOptions = {}, now, environment = process.env, h
     if (refusal) return refusal;
     if (approval) used.push(approval);
   }
-  for (const approval of used) approvals.use(approval);
+  if (consume) for (const approval of used) approvals.use(approval);
   return null;
 }
 

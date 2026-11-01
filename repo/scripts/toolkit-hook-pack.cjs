@@ -39,7 +39,7 @@ const CORPUS_REL = 'repo/tests/hook-pack/corpus';
 const SCHEMA = 'toolkit-hook-pack/v1';
 const HOSTS = Object.freeze(['claude', 'codex']);
 const KINDS = Object.freeze(['benign', 'hostile', 'fault', 'update', 'state', 'parity']);
-const EVENTS = Object.freeze(['PreToolUse', 'PostToolUse', 'UserPromptSubmit']);
+const EVENTS = Object.freeze(['PreToolUse', 'PostToolUse', 'UserPromptSubmit', 'SessionStart']);
 const STATUSES = Object.freeze(['pass', 'known-bad']);
 const FAULTS = Object.freeze(['deleted-plugin-root', 'remove-file', 'throw-module', 'stall-module', 'bad-json', 'empty-input']);
 const GOVERNANCE = Object.freeze(['enabled', 'undecided', 'none']);
@@ -47,7 +47,7 @@ const GOVERNANCE = Object.freeze(['enabled', 'undecided', 'none']);
 const TASK_AUTO_MERGE = Object.freeze(['after-gates', 'after-gates-stale', 'off', 'codex-only', 'claude-code-only', 'unreadable']);
 // The gate role a Toolkit launcher marks a gate run with (TOOLKIT_GATE_ROLE).
 const GATE_ROLES = Object.freeze(['G0', 'G1', 'G2']);
-const ROW_KEYS = new Set(['id', 'source', 'kind', 'hosts', 'event', 'payload', 'fixture', 'fault', 'expect', 'expect_by_host', 'status', 'known_bad_on', 'lane', 'added', 'note']);
+const ROW_KEYS = new Set(['id', 'source', 'kind', 'hosts', 'event', 'payload', 'fixture', 'fault', 'expect', 'expect_by_host', 'status', 'known_bad_on', 'lane', 'added', 'note', 'steps']);
 const ID = /^[A-Z][A-Za-z0-9._-]*$/;
 // The plugin content the hooks can reach: both host manifests, the scripts and contracts, and the
 // skill scripts the hook modules load.
@@ -113,6 +113,16 @@ function rowErrors(row) {
     else if (['remove-file', 'throw-module', 'stall-module'].includes(row.fault.type) && (typeof row.fault.file !== 'string' || !/^repo\/scripts\/[A-Za-z0-9._-]+$/.test(row.fault.file))) errors.push('this fault names a file under repo/scripts');
   }
   errors.push(...fixtureErrors(row.fixture));
+  if (row.steps !== undefined) {
+    if (!Array.isArray(row.steps) || row.steps.length < 1 || row.steps.length > 24) errors.push('steps must list 1 to 24 preceding hook events');
+    else row.steps.forEach((step, index) => {
+      if (!step || typeof step !== 'object' || Array.isArray(step)) { errors.push(`step ${index + 1} must be an object`); return; }
+      for (const key of Object.keys(step)) if (!['event', 'payload', 'expect', 'expect_by_host', 'note'].includes(key)) errors.push(`step ${index + 1} has unknown key ${key}`);
+      const candidate = { id: row.id, source: row.source, hosts: row.hosts, kind: row.kind, status: 'pass',
+        event: step.event, payload: step.payload, expect: step.expect, expect_by_host: step.expect_by_host, note: step.note };
+      errors.push(...rowErrors(candidate).map(error => `step ${index + 1}: ${error}`));
+    });
+  }
   return errors;
 }
 
@@ -193,7 +203,7 @@ function matches(matcher, value) {
 // The hooks a host starts for one call: [{ command, timeout, onFailure }] in file order.
 function selectHooks(hooksFile, event, toolName) {
   const groups = hooksFile?.hooks?.[event] || [];
-  const target = ['PreToolUse', 'PostToolUse'].includes(event) ? toolName : undefined;
+  const target = ['PreToolUse', 'PostToolUse', 'SessionStart'].includes(event) ? toolName : undefined;
   return groups.filter(group => target === undefined || matches(group.matcher, target))
     .flatMap(group => (group.hooks || []).filter(hook => hook.type === 'command'));
 }
@@ -427,7 +437,7 @@ class Fixture {
     if (typeof value === 'string') {
       return value.replaceAll('{work}', this.work).replaceAll('{home}', this.home).replaceAll('{dir}', this.dir)
         .replaceAll('{trees}', this.trees).replaceAll('{transcript}', this.transcript).replaceAll('{credential}', fakeCredential())
-        .replaceAll('{head}', this.head || '');
+        .replaceAll('{head}', this.head || '').replaceAll('{now}', new Date().toISOString());
     }
     if (Array.isArray(value)) return value.map(item => this.expand(item));
     if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, this.expand(item)]));
@@ -515,11 +525,17 @@ async function runRow(row, hosts, { roots, scratch }) {
 }
 
 async function runOnHost(row, host, fixture, roots) {
+  // Every event uses the real host matcher and process, sharing only this row's isolated home.
+  // A mismatch in an earlier step fails the row, even if the final merge happens to be refused.
+  for (const [index, step] of (row.steps || []).entries()) {
+    const observed = await runOnHost({ ...row, steps: undefined, expect_by_host: undefined, ...step }, host, fixture, roots);
+    if (!meets(step, host, observed)) return { ...observed, problems: [...observed.problems, `sequence step ${index + 1} did not meet its expectation`] };
+  }
   const pluginRoot = roots.forFault(row.fault);
   const event = row.event || 'PreToolUse';
   const payload = { session_id: 'hook-pack', transcript_path: fixture.transcript, cwd: fixture.work, hook_event_name: event, ...fixture.expand(row.payload) };
   const input = row.fault?.type === 'bad-json' ? '{broken' : row.fault?.type === 'empty-input' ? '{}' : JSON.stringify(payload);
-  const hooks = selectHooks(hostHooks(host, roots.base), event, payload.tool_name);
+  const hooks = selectHooks(hostHooks(host, roots.base), event, event === 'SessionStart' ? payload.source : payload.tool_name);
   const shell = shellFor(host);
   const env = { ...fixture.env, ...(host === 'claude' ? { CLAUDE_PLUGIN_ROOT: pluginRoot, CLAUDE_PROJECT_DIR: fixture.work } : { PLUGIN_ROOT: pluginRoot }) };
   const before = fixture.snapshot();
