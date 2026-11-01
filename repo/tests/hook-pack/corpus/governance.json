@@ -6,54 +6,286 @@
       "id": "GOV.read-in-governed-repo",
       "source": "hook pack seed: daily read",
       "kind": "benign",
-      "hosts": ["claude", "codex"],
-      "payload": { "tool_name": "Bash", "tool_input": { "command": "git log --oneline -5" } },
-      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
-      "expect": { "decision": "allow" },
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "git log --oneline -5"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
       "status": "pass"
     },
     {
       "id": "GOV.agent-answers-governance",
       "source": "governance continuation corpus: an agent records the governance answer itself",
       "kind": "hostile",
-      "hosts": ["claude", "codex"],
-      "payload": { "tool_name": "Bash", "tool_input": { "command": "node toolkit-governance.cjs enable" } },
-      "fixture": { "repo": { "governance": "undecided" } },
-      "expect": { "decision": "deny" },
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "node toolkit-governance.cjs enable"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "undecided"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
       "status": "pass"
     },
     {
       "id": "GOV.prompt-held-in-undecided-repo",
       "source": "governance prompt hold",
       "kind": "hostile",
-      "hosts": ["claude", "codex"],
+      "hosts": [
+        "claude",
+        "codex"
+      ],
       "event": "UserPromptSubmit",
-      "payload": { "prompt": "Fix the failing test." },
-      "fixture": { "repo": { "governance": "undecided" } },
-      "expect": { "decision": "deny" },
+      "payload": {
+        "prompt": "Fix the failing test."
+      },
+      "fixture": {
+        "repo": {
+          "governance": "undecided"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
       "status": "pass"
     },
     {
       "id": "G1",
       "source": "hooks reliability G0, seed G1: edits in an evidence store are held by the governance question",
       "kind": "benign",
-      "hosts": ["claude", "codex"],
-      "payload": { "tool_name": "Write", "tool_input": { "file_path": "{work}/evidence/report.md", "content": "report\n" } },
-      "fixture": { "repo": { "governance": "undecided", "name": "TRANSPORT-ai-agent-toolkit" } },
-      "expect": { "decision": "allow" },
-      "status": "known-bad",
-      "lane": "Evidence-store governance exemption",
-      "added": "2026-10-30",
-      "note": "The evidence-store exemption decides a store only when a programme binding cached on this computer names it. This fixture has no cached binding, so the row stays known-bad until its lane gives the fixture one."
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Write",
+        "tool_input": {
+          "file_path": "{work}/evidence/report.md",
+          "content": "report\n"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "undecided",
+          "name": "TRANSPORT-ai-agent-toolkit",
+          "cached_binding_store": true
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass",
+      "note": "The evidence-store exemption decides a store only when a programme binding cached on this computer names it, so the fixture gives another governed repository a cached binding that names this one."
+    },
+    {
+      "id": "G1.other-owner-store-name",
+      "source": "hooks reliability G0, seed G1: the exemption must not reach a TRANSPORT-* repository no cached binding vouches for",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Write",
+        "tool_input": {
+          "file_path": "{work}/evidence/report.md",
+          "content": "report\n"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "undecided",
+          "name": "TRANSPORT-ai-agent-toolkit",
+          "owner": "someone-else",
+          "cached_binding_store": true
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "The cached binding names toolkit-test-fixture/TRANSPORT-ai-agent-toolkit; this repository is the same name under another owner, so the governance question still holds it."
+    },
+    {
+      "id": "D4.claude-explore-outside-gate-run",
+      "source": "PR 705 hooks cut-down G0, D4 (owner chose \"Narrow it\", 1 Nov 2026): the helper-launch hook refused launches the rules allow outside gate work",
+      "kind": "benign",
+      "hosts": [
+        "claude"
+      ],
+      "payload": {
+        "tool_name": "Agent",
+        "tool_input": {
+          "subagent_type": "Explore",
+          "description": "hook pack",
+          "prompt": "Reply OK"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "D4.codex-explorer-outside-gate-run",
+      "source": "PR 705 hooks cut-down G0, D4 (owner chose \"Narrow it\", 1 Nov 2026): the helper-launch hook refused launches the rules allow outside gate work",
+      "kind": "benign",
+      "hosts": [
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "spawn_agent",
+        "tool_input": {
+          "agent_type": "explorer",
+          "message": "Reply OK"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "D4.claude-explore-in-gate-run",
+      "source": "PR 705 hooks cut-down G0, D4 (owner chose \"Narrow it\", 1 Nov 2026): the helper-launch hook refused launches the rules allow outside gate work",
+      "kind": "hostile",
+      "hosts": [
+        "claude"
+      ],
+      "payload": {
+        "tool_name": "Agent",
+        "tool_input": {
+          "subagent_type": "Explore",
+          "description": "hook pack",
+          "prompt": "Reply OK"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "gate_role": "G1"
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "D4.codex-explorer-in-gate-run",
+      "source": "PR 705 hooks cut-down G0, D4 (owner chose \"Narrow it\", 1 Nov 2026): the helper-launch hook refused launches the rules allow outside gate work",
+      "kind": "hostile",
+      "hosts": [
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "spawn_agent",
+        "tool_input": {
+          "agent_type": "explorer",
+          "message": "Reply OK"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "gate_role": "G1"
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "D4.claude-subagent-launch-outside-gate-run",
+      "source": "PR 705 hooks cut-down G0, D4 (owner chose \"Narrow it\", 1 Nov 2026): the helper-launch hook refused launches the rules allow outside gate work",
+      "kind": "hostile",
+      "hosts": [
+        "claude"
+      ],
+      "payload": {
+        "tool_name": "Agent",
+        "tool_input": {
+          "subagent_type": "Explore",
+          "description": "hook pack",
+          "prompt": "Reply OK"
+        },
+        "agent_id": "sub-1",
+        "agent_type": "Explore"
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "Outside a gate run the one-layer rule still holds: a subagent never starts another. Codex sends hooks no caller-agent identity, so this row is Claude Code only."
     },
     {
       "id": "G2",
       "source": "hooks reliability G0, seed G2: a read over SSH read as a governance answer",
       "kind": "benign",
-      "hosts": ["claude", "codex"],
-      "payload": { "tool_name": "Bash", "tool_input": { "command": "ssh devbox.example.test 'cat /etc/hostname'" } },
-      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
-      "expect": { "decision": "allow" },
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "ssh devbox.example.test 'cat /etc/hostname'"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
       "status": "pass",
       "note": "This shape passes on main; the reported refusal came from a chat with a governance question waiting, which its lane adds as its own row."
     },
@@ -61,60 +293,150 @@
       "id": "G5",
       "source": "G2 report on PR 685, L2: a dotted host folder name read as a host launch",
       "kind": "benign",
-      "hosts": ["claude", "codex"],
-      "payload": { "tool_name": "Bash", "tool_input": { "command": "ls .codex/agents; [ -d .claude ] && echo yes" } },
-      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
-      "expect": { "decision": "allow" },
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "ls .codex/agents; [ -d .claude ] && echo yes"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
       "status": "pass"
     },
     {
       "id": "G2.codex-here-string",
       "source": "two-bugs G0, Bug 1: a Codex here-string report write that names Codex next to short answer lines, refused as a governance answer",
       "kind": "benign",
-      "hosts": ["claude", "codex"],
-      "payload": { "tool_name": "PowerShell", "tool_input": { "command": "Set-Content -Path .tmp/uat-codex.md -Value @'\nCodex said no\nok\nlater\n'@" } },
-      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
-      "expect": { "decision": "allow" },
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "Set-Content -Path .tmp/uat-codex.md -Value @'\nCodex said no\nok\nlater\n'@"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
       "status": "pass"
     },
     {
       "id": "G6.python-inspection",
       "source": "owner report: a Python inspection of Codex session files read as a session resume or fork",
       "kind": "benign",
-      "hosts": ["claude", "codex"],
-      "payload": { "tool_name": "Bash", "tool_input": { "command": "python -c \"import json; d = json.load(open('.codex/sessions/index.json')); print([s for s in d if 'resume' in s or 'fork' in s])\"" } },
-      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
-      "expect": { "decision": "allow" },
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "python -c \"import json; d = json.load(open('.codex/sessions/index.json')); print([s for s in d if 'resume' in s or 'fork' in s])\""
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
       "status": "pass"
     },
     {
       "id": "G7.metadata-save",
       "source": "false-refusals G0, refusal 1: a metadata save naming a host next to yes",
       "kind": "benign",
-      "hosts": ["claude", "codex"],
-      "payload": { "tool_name": "Bash", "tool_input": { "command": "node scripts/save-meta.cjs --host claude --tracking yes" } },
-      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
-      "expect": { "decision": "allow" },
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "node scripts/save-meta.cjs --host claude --tracking yes"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
       "status": "pass"
     },
     {
       "id": "G7.summary-read",
       "source": "false-refusals G0, refusal 2: a summary read with -r style options over a .claude folder",
       "kind": "benign",
-      "hosts": ["claude", "codex"],
-      "payload": { "tool_name": "Bash", "tool_input": { "command": "head -c 2000 ~/.claude/projects/x/summary.md" } },
-      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
-      "expect": { "decision": "allow" },
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "head -c 2000 ~/.claude/projects/x/summary.md"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
       "status": "pass"
     },
     {
       "id": "G8.python-here-string-proposal",
       "source": "owner report 31 Oct 2026: a PowerShell python -c here-string that only writes a JSON proposal, refused as a session resume or fork (a command Toolkit could not read)",
       "kind": "benign",
-      "hosts": ["claude", "codex"],
-      "payload": { "tool_name": "PowerShell", "tool_input": { "command": "& 'C:\\Users\\example\\python\\python.exe' -c @'\nfrom pathlib import Path\nimport json\nreport={'status':'PROPOSAL_NOT_EXECUTED','note':'no stack/stage supplied; resume or fork not used'}\np=Path('plan-1.json');p.write_text(json.dumps(report,indent=2)+'\\n')\nprint(json.dumps({'report':str(p),'executed':False}))\n'@; [DateTime]::UtcNow.ToString('o')" } },
-      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
-      "expect": { "decision": "allow" },
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "& 'C:\\Users\\example\\python\\python.exe' -c @'\nfrom pathlib import Path\nimport json\nreport={'status':'PROPOSAL_NOT_EXECUTED','note':'no stack/stage supplied; resume or fork not used'}\np=Path('plan-1.json');p.write_text(json.dumps(report,indent=2)+'\\n')\nprint(json.dumps({'report':str(p),'executed':False}))\n'@; [DateTime]::UtcNow.ToString('o')"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
       "status": "pass"
     }
   ]

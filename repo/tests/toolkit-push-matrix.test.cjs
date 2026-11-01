@@ -271,8 +271,9 @@ test('a push whose folder does not exist is refused, not let through unchecked, 
 
 // A governed repository whose main checkout (on `feature`) has two lane worktrees under its ignored
 // .tmp/: lane/one with a new, uncommitted credential file, lane/two with a committed one. Its `uat`
-// remote is a bare copy made from `main`, so the merge hold's default-branch rule stays out.
-function laneRepos(t, { lanes = true } = {}) {
+// remote is a bare copy made from `main`, so the merge hold's default-branch rule stays out. With
+// `credentials: false` both lanes stay clean.
+function laneRepos(t, { lanes = true, credentials = true } = {}) {
   const support = require('./toolkit-governed-fixture-support.cjs');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-push-lanes-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -296,7 +297,7 @@ function laneRepos(t, { lanes = true } = {}) {
   git(repo, 'remote', 'add', 'uat', path.join(dir, 'uat.git'));
   git(repo, 'fetch', '--quiet', 'uat');
   git(repo, 'checkout', '--quiet', '-b', 'feature');
-  if (lanes) {
+  if (lanes && credentials) {
     writeFiles(lane('lane-two'), { 'uat-config.txt': `token = "${fakeToken()}"\n` });
     git(lane('lane-two'), 'add', '-A');
     git(lane('lane-two'), 'commit', '--quiet', '-m', 'key');
@@ -312,19 +313,25 @@ test('matrix: a Codex call that names no folder is checked in the working tree i
   const pushCheck = require('../scripts/toolkit-push-check.cjs');
   const { dir, repo, laneOne } = laneRepos(t);
   const single = laneRepos(t, { lanes: false }).repo;
+  const clean = laneRepos(t, { credentials: false }).repo;
   const plain = path.join(dir, 'plain');
   fs.mkdirSync(plain);
   const pendingFile = (reason) => /uat-new\.txt:1 \(not committed yet\)/.test(reason);
+  const committedKey = (reason) => /uat-config\.txt:1 \(commit [0-9a-f]{7}\)/.test(reason);
   const unconfirmed = (reason) => reason === pushCheck.FOLDER_UNCONFIRMED;
   const allowed = (reason) => reason === '';
   const rows = [
     ['lanes: add, commit, push a named branch', repo, 'git add -A; git commit -m t2; git push uat lane/one', pendingFile],
     ['lanes: the same in a nested pwsh -Command', repo, 'pwsh -Command "git add -A; git commit -m t2; git push uat lane/one"', pendingFile],
-    ['lanes: push a branch with a committed credential', repo, 'git push uat lane/two', (reason) => /uat-config\.txt:1 \(commit [0-9a-f]{7}\)/.test(reason)],
-    ['lanes: bare push', repo, 'git push', unconfirmed],
-    ['lanes: push of HEAD', repo, 'git push origin HEAD', unconfirmed],
-    ['lanes: pull request without --head', repo, 'gh pr create --fill', unconfirmed],
+    ['lanes: push a branch with a committed credential', repo, 'git push uat lane/two', committedKey],
+    // HEAD is checked in every reachable working tree: lane/two's committed credential refuses it.
+    ['lanes: bare push', repo, 'git push', committedKey],
+    ['lanes: push of HEAD', repo, 'git push uat HEAD', committedKey],
+    ['clean lanes: bare push', clean, 'git push', allowed],
+    ['clean lanes: push of HEAD', clean, 'git push uat HEAD', allowed],
     ['lanes: a relative cd keeps the folder unconfirmed', repo, 'cd .tmp/worktrees/lane-one; git push', unconfirmed],
+    ['clean lanes: a relative cd keeps the folder unconfirmed', clean, 'cd .tmp/worktrees/lane-one; git push', unconfirmed],
+    ['clean lanes: a commit before a push of HEAD', clean, 'git add -A; git commit -m x; git push uat HEAD', unconfirmed],
     ['lanes: git -C to the full path confirms it', repo, `git -C "${laneOne}" add -A; git -C "${laneOne}" commit -m x; git -C "${laneOne}" push uat lane/one`, pendingFile],
     ['lanes: cd to the full path confirms it', repo, `cd "${laneOne}"; git add -A; git commit -m x; git push`, pendingFile],
     ['lanes: a branch no working tree has checked out, after a commit', repo, 'git commit -m x; git push uat spare', unconfirmed],
@@ -339,7 +346,7 @@ test('matrix: a Codex call that names no folder is checked in the working tree i
   delete env.TOOLKIT_GIT_PATH;
   // The hook runs as a process for the first row of each outcome and for the folder-state rows, which
   // keeps the file inside its time budget.
-  const asProcess = new Set(['lanes: add, commit, push a named branch', 'lanes: push a branch with a committed credential', 'lanes: bare push', 'one working tree: add, commit, push, clean', 'chat folder not a repository', 'branch unknown in the chat repository']);
+  const asProcess = new Set(['lanes: add, commit, push a named branch', 'lanes: push a branch with a committed credential', 'lanes: bare push', 'clean lanes: bare push', 'one working tree: add, commit, push, clean', 'chat folder not a repository', 'branch unknown in the chat repository']);
   for (const [row, cwd, command, expected] of rows) {
     const codex = { tool_name: 'Bash', cwd, tool_input: { command } };
     const direct = attributionDecision(codex, { ...quiet(), sessionFolderOnly: true }).hookSpecificOutput?.permissionDecisionReason || '';
@@ -382,6 +389,12 @@ test('matrix: a Codex call that names no folder is checked in the working tree i
   const claude = runHook(claudeHook, 'Bash', repo, command, env);
   assert.deepEqual([claude.status, claude.stdout.trim()], [0, ''], `the Claude hook: ${claude.stderr}`);
   assert.match(pushCheck.FOLDER_UNCONFIRMED, /name the branch \(`git push <remote> <branch>`\), or name the folder first with `git -C <full path>` or `cd <full path>`/);
+  // Every reachable working tree shares the one budget: running out part way is a note, which the
+  // Codex hook turns into a refusal, never a pass.
+  let calls = 0;
+  const slow = (program, args, options) => (++calls > 4 ? { status: null, signal: 'SIGTERM', stdout: '', stderr: '' } : spawnSync(program, args, options));
+  assert.match(pushCheck.checkOutgoing({ folder: clean, folderConfirmed: false }, { spawn: slow }).note || '', /longer than 30 seconds/);
+  assert.ok(calls > 4, 'the budget ran out inside the per-tree checks');
 });
 
 test('push check: every target of one command shares one deadline', () => {

@@ -355,6 +355,26 @@ test('a push to the default branch is refused; other branches and evidence store
   for (const [cwd, command] of allowed) assert.equal(decide(ctx, bash(cwd, command)), null, command);
 });
 
+test('a push to the default branch in a quoted command handed to a shell is read, two levels deep', (t) => {
+  const ctx = context(t);
+  const feature = repository(ctx.root, 'feature', { branch: 'work' });
+  const outside = path.join(ctx.root, 'outside');
+  fs.mkdirSync(outside, { recursive: true });
+  const featurePath = feature.replace(/\\/g, '/');
+  const refused = [
+    [feature, 'bash -c "git push origin HEAD:main"'], [feature, "sh -lc 'git push origin work:main'"],
+    [feature, 'pwsh -NoProfile -Command "git push origin HEAD:main"'], [feature, 'eval "git push origin main"'],
+    [ctx.root, 'cd feature && bash -c "git fetch && git push origin HEAD:main"'],
+    [feature, 'bash -c "bash -c \\"git push origin HEAD:main\\""'],
+    // The inner shell is not known, so an assignment that names the folder is read as assigned too.
+    [outside, `pwsh -Command "W=${featurePath}; git -C $W push origin HEAD:main"`],
+  ];
+  for (const [cwd, command] of refused) assert.match(decide(ctx, bash(cwd, command))?.deny || '', /default branch `main`/, command);
+  assert.match(decide(ctx, bash(feature, 'bash -c "bash -c \\"bash -c \'git push origin work\'\\""'))?.deny || '', /more than 2 levels deep/, 'three levels');
+  const allowed = [[feature, 'bash -c "git push origin work"'], [feature, 'pwsh -Command "git push -u origin HEAD"'], [feature, 'bash -c "git status && echo done"'], [feature, 'bash -c "bash -c \\"git push origin work\\""']];
+  for (const [cwd, command] of allowed) assert.equal(decide(ctx, bash(cwd, command)), null, command);
+});
+
 test('a push names its folder through a variable the same command assigned, and an evidence store a binding names is not refused', (t) => {
   const ctx = context(t);
   const store = repository(ctx.root, 'store', { slug: 'owner/TRANSPORT-a' });

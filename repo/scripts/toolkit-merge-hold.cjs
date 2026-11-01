@@ -55,12 +55,15 @@
 //     writes to the default branch's ref, `gh repo sync`, gh aliases that mention merge, a `git push`
 //     to the remote's default branch (evidence stores excepted, by name), a merge whose target is
 //     moved by cd, pushd, Set-Location or GH_REPO, and a bare number in a folder with more than one
-//     remote or a gh default repository other than its own, unless --repo or a URL names it;
+//     remote or a gh default repository other than its own, unless --repo or a URL names it. A push
+//     in a quoted command handed to a shell (bash -c "...", pwsh -Command "...", eval "...") is read
+//     the same way, two levels deep; a push nested deeper is refused unread;
 //   - refused, as a tripwire against an agent approving for itself: a command that starts a Claude
 //     or Codex session and mentions merge, or that sets or clears TOOLKIT_HOST_SESSION, names
 //     Toolkit's user-state folder, or the hook scripts together with what would feed them a prompt.
 //
-// Not covered: wrapped or nested host launches (bash -lc, timeout, Start-Process and the like), a
+// Not covered: wrapped or nested host launches (bash -lc, timeout, Start-Process and the like),
+// pushes wrapped in a program that is not a shell (timeout, Start-Process, xargs and the like), a
 // prompt file fed to a hook script, pasted text outside a code fence that has a plain approval line, scripts or programs
 // that call git or the GitHub API themselves, curl and other HTTP clients, a sha= field put in a
 // comment or an echo on purpose, git and shell aliases,
@@ -85,7 +88,9 @@ const MAX_APPROVALS = 100;
 const MAX_PROMPT_CHARS = 8000;
 const MAX_COMMAND_CHARS = 1024 * 1024;
 
-const { SHELL_TOOLS, ShellCall, assignVariable, assignmentOf, folderWord, shellOf, shellPath, shellReadings } = require('./toolkit-shell-call.cjs');
+const { SHELLS, SHELL_TOOLS, ShellCall, assignVariable, assignmentOf, folderWord, shellCommands, shellOf, shellPath, shellReadings } = require('./toolkit-shell-call.cjs');
+// How many levels of quoted commands handed to a shell (bash -c "...") the push check reads.
+const NESTED_LEVELS = 2;
 // A connector's merge or auto-merge tool, whatever its server is called (a claude.ai connector's
 // server name is a UUID): the tool name ends in one of these after a _ or -.
 const AUTO_MERGE_NAME = 'enable[_-]?(?:pr[_-]?|pull[_-]?request[_-]?)?auto[_-]?merge';
@@ -610,8 +615,9 @@ function judge(merge, approvals, standing = null) {
 }
 
 // A refusal for a shell command that could make an approval without the user, or merges outside
-// what an approval can allow; '' when there is none.
-function shellRefusal(text, cwd, registryOptions = {}, shell = null) {
+// what an approval can allow; '' when there is none. `depth` counts the quoted shell commands
+// (nestedRefusal) this text sits inside.
+function shellRefusal(text, cwd, registryOptions = {}, shell = null, depth = 0) {
   if (STATE_WORDS.test(text)) return refuse('Toolkit\'s user-state files (merge approvals and governance decisions) and its session variable must be read and changed only by Toolkit itself. Never act as the user.');
   if (HOOK_FEED.test(text) && FEED_WORDS.test(text)) return refuse('a merge approval must come from the user\'s own typed message, so commands that load Toolkit\'s hook scripts or feed them a prompt are refused.');
   const parts = segments(text);
@@ -639,6 +645,34 @@ function shellRefusal(text, cwd, registryOptions = {}, shell = null) {
     if (/^(?:cd|pushd|chdir|set-location|sl)$/i.test(words[0]) && words.length >= 2) { root = shellPath(root || process.cwd(), folderWord(words[words.length - 1], variables, shell)); continue; }
     const reason = pushRefusal(words, root || process.cwd(), { registryOptions, variables, shell });
     if (reason) return refuse(reason);
+  }
+  return nestedRefusal(text, cwd, registryOptions, shell, depth);
+}
+
+// The refusal for a quoted command handed to a shell (bash -c "...", pwsh -Command "...", eval
+// "..."), read as its own command line in the folder the outer command has reached, up to
+// NESTED_LEVELS deep; '' when there is none. The inner shell is not known, so each inner command is
+// judged under every reading (shellReadings). A push nested deeper than that is refused unread.
+function nestedRefusal(text, cwd, registryOptions, shell, depth) {
+  if (!/\bgit\b/i.test(text)) return '';
+  let root = cwd || process.cwd();
+  const variables = new Map();
+  for (const { words } of shellCommands(text)) {
+    const assigned = assignmentOf(words);
+    if (assigned) { assignVariable(variables, assigned); continue; }
+    if (/^(?:cd|pushd|chdir|set-location|sl)$/i.test(words[0]) && words.length === 2) { root = shellPath(root, folderWord(words[1], variables, shell)); continue; }
+    let index = 0;
+    while (index < words.length && (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[index]) || /^(?:env|exec|nohup|command|builtin)$/i.test(words[index]))) index += 1;
+    if (!SHELLS.test(words[index] || '')) continue;
+    for (const word of words.slice(index + 1)) {
+      if (!/\s/.test(word) || !/\bgit\b/i.test(word)) continue;
+      if (depth >= NESTED_LEVELS) {
+        if (/\bpush\b/i.test(word)) return refuse(`this command hands a git push to a shell more than ${NESTED_LEVELS} levels deep, so Toolkit cannot read where it pushes and refused it. Run the push as its own command.`);
+        continue;
+      }
+      const reason = shellReadings(null).map(reading => shellRefusal(word, root, registryOptions, reading, depth + 1)).find(Boolean);
+      if (reason) return reason;
+    }
   }
   return '';
 }

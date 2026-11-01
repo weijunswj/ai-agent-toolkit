@@ -24,7 +24,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { ShellCall, absoluteShellPath, assignVariable, assignmentOf, folderWord, shellOf, shellPath, shellReadings } = require('./toolkit-shell-call.cjs');
+const { SHELLS, ShellCall, absoluteShellPath, assignVariable, assignmentOf, folderWord, shellCommands, shellOf, shellPath, shellReadings } = require('./toolkit-shell-call.cjs');
 
 const MESSAGE = 'Remove the AI attribution lines (Co-Authored-By or Claude-Session trailers, claude.ai session links, "Generated with" footers) and retry.';
 const ATTRIBUTION_PATTERNS = Object.freeze([
@@ -73,48 +73,6 @@ function hasAttribution(text) {
     return start !== -1 && /claude|anthropic\.com/.test(line.slice(start));
   });
   return trailer || ATTRIBUTION_PATTERNS.some((pattern) => pattern.test(value));
-}
-
-// Read shell words in one pass. Quotes protect separators; shell escapes and both Bash and
-// PowerShell line continuations stay inside the same command. Backslashes in Windows paths stay.
-function shellCommands(text) {
-  const commands = [];
-  let words = []; let offsets = []; let word = ''; let started = false; let quote = ''; let offset = 0;
-  const finishWord = () => { if (started) { words.push(word); offsets.push(offset); } word = ''; started = false; };
-  const finishCommand = () => { finishWord(); if (words.length) commands.push({ words, offsets }); words = []; offsets = []; };
-  for (let index = 0; index < text.length; index += 1) {
-    const char = text[index];
-    const next = text[index + 1];
-    if (!started) offset = index;
-    if (quote !== "'" && (char === '\\' || char === '`')) {
-      if (next === '\n' || (next === '\r' && text[index + 2] === '\n')) {
-        index += next === '\r' ? 2 : 1;
-        continue;
-      }
-      if (next && (char === '`' || (quote === '"' ? '"\\$`'.includes(next) : /[\s"'\\;&|()]/.test(next)))) {
-        word += next; started = true; index += 1; continue;
-      }
-    }
-    if (quote) {
-      if (char === quote) {
-        if (quote === "'" && next === "'") { word += char; index += 1; }
-        else quote = '';
-      } else word += char;
-      continue;
-    }
-    if (char === '"' || char === "'") { quote = char; started = true; continue; }
-    if (char === '#' && !started) {
-      while (index + 1 < text.length && text[index + 1] !== '\n') index += 1;
-      continue;
-    }
-    if (char === ';' || char === '|' || char === '\n' || char === '(' || char === ')' || (char === '&' && next === '&')) {
-      finishCommand();
-      if ((char === '|' || char === '&') && next === char) index += 1;
-    } else if (/\s/.test(char)) finishWord();
-    else { word += char; started = true; }
-  }
-  finishCommand();
-  return commands;
 }
 
 // The commands of one line with each whole-word variable an earlier command assigned a literal to
@@ -362,8 +320,6 @@ function repositoryKind(folder, cache, registryOptions = {}) {
   return answer;
 }
 
-const SHELLS = /(?:^|[\\/])(?:bash|sh|zsh|dash|ksh|pwsh|powershell|cmd|eval|invoke-expression|iex)(?:\.exe)?$/i;
-
 // Returns the refusal reason, or '' when the command may run. A quoted command handed to a
 // shell (bash -c "...", pwsh -Command "...") is read too, up to two levels deep.
 // `registryOptions` is for tests (the governance decisions file to read).
@@ -488,18 +444,21 @@ function branchCreated(sub, args) {
 // `confirmed` false says the starting folder may not be where the command runs (a Codex call that
 // named no folder). A `cd`, `pushd` or `Set-Location` to a folder that stands on its own, or a git -C
 // or --work-tree one, confirms the folder from there on; a relative one keeps the state. Each push,
-// pull request and preceding step read from a folder not confirmed carries `folderConfirmed: false`.
-function outgoingChanges(command, cwd, depth = 0, preceding = [], confirmed = true, shell = null) {
+// pull request and preceding step read from a folder not confirmed carries `folderConfirmed: false`,
+// and `folderMoved: true` once a relative one moved it (`moved`), since the folder it moved from is
+// not known either.
+function outgoingChanges(command, cwd, depth = 0, preceding = [], confirmed = true, shell = null, moved = false) {
   const text = String(command || '');
   const found = [];
   if (text.length > MAX_COMMAND_CHARS || !/\b(?:git|gh)\b/i.test(text)) return found;
   let root = cwd || process.cwd();
   const withPreceding = (target) => (preceding.length ? { ...target, preceding: preceding.slice() } : target);
-  const marked = (entry, known) => (known ? entry : { ...entry, folderConfirmed: false });
+  const marked = (entry, known) => (known ? entry : { ...entry, folderConfirmed: false, ...(moved ? { folderMoved: true } : {}) });
   for (const current of withVariables(shellCommands(text), shell)) {
     if (/^(?:cd|pushd|set-location|sl)$/i.test(current.words[0]) && current.words.length === 2) {
       root = shellPath(root, current.words[1]);
       confirmed ||= absoluteShellPath(current.words[1]);
+      if (!confirmed) moved = true;
       continue;
     }
     const git = gitCommand(current, root);
@@ -515,7 +474,7 @@ function outgoingChanges(command, cwd, depth = 0, preceding = [], confirmed = tr
     if (pullRequest) found.push(withPreceding(marked(pullRequest, confirmed)));
     if (depth < 2 && SHELLS.test(current.words[0])) {
       for (const word of current.words.slice(1)) {
-        if (/\s/.test(word) && /\b(?:git|gh)\b/i.test(word)) found.push(...outgoingChanges(word, root, depth + 1, preceding, confirmed, null));
+        if (/\s/.test(word) && /\b(?:git|gh)\b/i.test(word)) found.push(...outgoingChanges(word, root, depth + 1, preceding, confirmed, null, moved));
       }
     }
   }
