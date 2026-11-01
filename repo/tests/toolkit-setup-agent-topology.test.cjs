@@ -35,7 +35,7 @@ test('one canonical topology question offers only root-only, broader-native and 
     const args = core.parseArgs(['--plan', '--host', 'claude-code']);
     const specs = core.setupQuestionSpecs(args, current(enforced));
     const topology = specs.find((row) => row.key === 'claudeTopology');
-    assert.deepEqual(topology.choices.map((choice) => choice.value), ['root-only', 'broader-native', 'keep']);
+    assert.deepEqual(topology.choices.map((choice) => choice.value), ['keep', 'root-only', 'broader-native']);
     assert.equal(topology.recommended, 'root-only');
     assert.equal(specs.some((row) => /capacity/i.test(row.key) && row.key !== 'codexHelperCapacity'), false);
     const text = core.renderSetupQuestionBank(specs);

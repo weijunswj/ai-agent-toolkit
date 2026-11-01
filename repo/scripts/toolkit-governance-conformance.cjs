@@ -154,28 +154,17 @@ function checkConformance(cwd, options = {}) {
     });
     findings.push(...securityFindings(securityResult));
   }
-  if (state.state === 'ENABLED' && state.materials.binding && state.merged && state.merged.status === 'enabled') findings.push(...taskAutoMergeFindings(state.root, options, expectedGovernedBlock(toolkitRoot).version));
+  if (state.state === 'ENABLED' && state.materials.binding && state.merged && state.merged.status === 'enabled') findings.push(taskMergeSettingFinding(state.root, options));
   const drift = findings.some(entry => entry.severity === 'drift');
   return report(drift ? 1 : 0, state, findings, toolkitRoot, rulesetResult, protectionResult, securityResult);
 }
 
-// The owner's task auto-merge answer in the merged binding. Not answered asks the question once
-// (info, so it never blocks), but only once every Toolkit copy runs `version` or later, since older
-// copies treat a binding with the answer as invalid; a yes without the always-manual check required is
-// not enforceable, so the merge hold keeps asking for a typed merge until the binding and GitHub
-// require it.
-function taskAutoMergeFindings(root, options, version) {
+// Report the effective app-local setting; governance never asks or drafts an answer.
+function taskMergeSettingFinding(root, options) {
   const answer = governance.taskAutoMerge(root, options);
-  const question = governance.TASK_AUTO_MERGE_QUESTION;
-  const check = governance.TASK_AUTO_MERGE_CHECK;
-  if (!answer.answered) {
-    return [finding('TASK_AUTO_MERGE_UNANSWERED', 'info', `Task auto-merge: not answered, so it is off. Once every Toolkit copy, the Claude account copy included, runs ${version} or later (older copies treat an answered binding as invalid), ask the owner once: "${question.text}" A) ${question.yes} B) ${question.no}. ${question.reason} Record the answer as task_prs.auto_merge (off or after-gates) in ${governance.BINDING_FILE} through a pull request the owner merges; a yes also adds ${check} to required_checks there and to the default branch's required checks. Until then, ask nothing and merge no answer.`)];
-  }
-  if (answer.auto_merge !== 'after-gates') return [finding('TASK_AUTO_MERGE_OFF', 'info', 'Task auto-merge: off. The owner types merge for each pull request.')];
-  if (!answer.eligibility_required) {
-    return [finding('TASK_AUTO_MERGE_NOT_ENFORCEABLE', 'drift', `Task auto-merge: on, but not enforceable, because the merged binding's required_checks do not include ${check}. Until a pull request adds it there and to the default branch's required checks, every merge still needs the owner's typed merge.`)];
-  }
-  return [finding('TASK_AUTO_MERGE_ON', 'info', `Task auto-merge: on. Pull requests that pass the gate rules' task auto-merge conditions merge after the merge notice; ${check} keeps the always-manual list for the owner, who allows one by adding the toolkit-owner-merge label in GitHub.`)];
+  const on = answer.auto_merge === 'after-gates';
+  return finding(on ? 'TASK_AUTO_MERGE_ON' : 'TASK_AUTO_MERGE_OFF', 'info',
+    `Task auto-merge: ${on ? 'on' : 'off'}. Source: ${answer.source}; ${answer.reason}. Change this app's answer with setup toolkit. Governance, hooks, setup and merge-rule changes still wait for the owner's typed merge.`);
 }
 
 function rulesetFindings(result) {

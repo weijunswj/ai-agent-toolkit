@@ -626,13 +626,6 @@ function validateBinding(binding) {
       check(errors, isObject(updates) && Object.keys(updates).every(key => ['auto_merge', 'github_actions'].includes(key)), 'dependency_updates may hold only auto_merge and github_actions');
       check(errors, isObject(updates) && optional(updates.auto_merge, value => ['off', 'patch-minor'].includes(value)) && optional(updates.github_actions, value => ['auto-merge', 'owner'].includes(value)), 'dependency_updates.auto_merge must be off or patch-minor, and github_actions auto-merge or owner');
     }
-    // The owner's answer to "merge finished task pull requests without waiting for me?" (version 2 only).
-    const taskPrs = binding.task_prs;
-    if (taskPrs !== undefined) {
-      check(errors, v2, 'task_prs belongs to version 2 bindings');
-      check(errors, isObject(taskPrs) && Object.keys(taskPrs).every(key => key === 'auto_merge'), 'task_prs may hold only auto_merge');
-      check(errors, isObject(taskPrs) && optional(taskPrs.auto_merge, value => ['off', 'after-gates'].includes(value)), 'task_prs.auto_merge must be off or after-gates');
-    }
     // The Windows Task Scheduler folder for this repository's no-AI tasks (toolkit-windows-tasks.cjs).
     check(errors, optional(binding.schedule_folder, value => typeof value === 'string' && /^[A-Z0-9][A-Z0-9-]{0,31}$/.test(value)), 'schedule_folder must be 1 to 32 capital letters, digits or hyphens, starting with a letter or digit');
     const projection = binding.projection;
@@ -651,7 +644,7 @@ function validateBinding(binding) {
 }
 
 // The keys a version 2 binding may carry (binding-v2.schema.json); anything else makes it invalid.
-const BINDING_V2_KEYS = Object.freeze(['schema', 'repository', 'governance', 'parents', 'store', 'required_checks', 'paid_security', 'dependency_updates', 'task_prs', 'projection', 'schedule_folder', 'state']);
+const BINDING_V2_KEYS = Object.freeze(['schema', 'repository', 'governance', 'parents', 'store', 'required_checks', 'paid_security', 'dependency_updates', 'projection', 'schedule_folder', 'state']);
 
 // The public state branch of a version 2 binding: always this branch and folder on the bound
 // repository itself, and only beside a private store, which keeps the journals, the private sidecars
@@ -1201,7 +1194,7 @@ function revisionLine(parent, children) {
 // A finished outcome (class COMPLETED or RETIRED, or a DONE or RETIRED lifecycle) shows as COMPLETED,
 // and a retired one says so in its status. The gate a task is in shows on its own page, not here.
 const GRAPH_GROUPS = Object.freeze(['NOW', 'LATER', 'OPTIONAL']);
-const GRAPH_HEADER = ['| Task | Task Description | Child # | PR # | Class | Status |', '|---|---|---|---|---|---|'];
+const GRAPH_HEADER = ['| Task | Task Description | Child # | PR # | Class | Status | Last updated (SGT) |', '|---|---|---|---|---|---|---|'];
 
 function graphClass(outcome, child) {
   if (!outcome || isFinished(outcome, child)) return '-';
@@ -1251,6 +1244,13 @@ function completedAt(child, issue) {
   return child?.completed_at || issue?.closed_at || null;
 }
 
+function lastUpdated(outcome, child, issue, comments) {
+  const times = isFinished(outcome, child) ? [completedAt(child, issue)]
+    : graphClass(outcome, child) === 'NOW' ? [child?.volatile?.written_at, ...comments.filter(comment => !String(comment.body || '').includes('programme-trace intent=')).map(comment => comment.created_at)] : [];
+  const newest = Math.max(...times.filter(Boolean).map(value => Date.parse(value)).filter(Number.isFinite));
+  return Number.isFinite(newest) ? new Date(newest + 8 * 60 * 60 * 1000).toISOString().slice(0, 16).replace('T', ' ') : '-';
+}
+
 // Active rows by class (NOW, LATER, OPTIONAL), each by priority (`order`, lowest first) and then
 // child issue number, so the top LATER row starts next; then every finished row, oldest completion
 // first and the most recent last (unknown times last). Nested children sort like any other row.
@@ -1287,18 +1287,19 @@ function orderTies(parent, children) {
 }
 
 // `issues` maps an issue number to what GitHub shows for it (title, close time).
-function renderParentBlockBody(parent, children, issues = new Map()) {
+function renderParentBlockBody(parent, children, issues = new Map(), comments = new Map()) {
   const rows = graphOrder(parent, children, issues).map(outcome => {
     const child = children.get(outcome.issue);
     const cls = graphClass(outcome, child);
     const pr = child?.pr.number ? `#${child.pr.number}` : '-';
-    return `| ${taskName(outcome, issues.get(outcome.issue))} | ${descriptionText(outcome)} | #${outcome.issue} | ${pr} | ${cls} | ${statusText(outcome, child)} |`;
+    const issue = issues.get(outcome.issue);
+    return `| ${taskName(outcome, issue)} | ${descriptionText(outcome)} | #${outcome.issue} | ${pr} | ${cls} | ${statusText(outcome, child)} | ${lastUpdated(outcome, child, issue, comments.get(outcome.issue) || [])} |`;
   });
   return [
     revisionLine(parent, children),
     '## Programme Graph',
     '',
-    `Generated from the programme state documents (state revision ${parent.revision}), so edit those rather than this table. Sorted NOW (in progress), then LATER in priority order (the top one starts next), then OPTIONAL, then COMPLETED with the most recent last.`,
+    `Generated from the programme state documents (state revision ${parent.revision}) and task comments, so edit those rather than this table. Sorted NOW (in progress), then LATER in priority order (the top one starts next), then OPTIONAL, then COMPLETED with the most recent last. Last updated shows the completion time for finished tasks, or the latest state write or task comment for work in progress, excluding generated index comments; queued tasks show a dash.`,
     '',
     ...GRAPH_HEADER,
     ...rows,
@@ -2872,6 +2873,10 @@ class Reconciler {
     });
     const references = untracked ? referencedIssues(this.reader.openPullRequests()) : new Map();
     const comments = new Map([parent.parent_issue, ...outcomes.map(outcome => outcome.issue)].filter(number => issues.get(number)).map(number => [number, this.reader.comments(number)]));
+    // Even an issue-scoped pass renders the whole parent, including every NOW task's comment time.
+    for (const outcome of parent.outcomes) {
+      if (!comments.has(outcome.issue) && graphClass(outcome, children.get(outcome.issue)?.doc) === 'NOW') comments.set(outcome.issue, this.reader.comments(outcome.issue));
+    }
     const prPages = new Map();
     for (const pr of prs.values()) if (pr && ['OPEN', 'DRAFT'].includes(pr.state)) prPages.set(pr.number, this.reader.issue(pr.number));
     return { issues, subIssues, blockedBy, prs, outcomes, journals, references, comments, prPages };
@@ -3029,9 +3034,9 @@ class Reconciler {
     return renderNavBlockBody(chain, docs.get(number)?.pr?.number || null);
   }
 
-  renderAll(parent, children, issues) {
+  renderAll(parent, children, issues, comments) {
     const outcomes = new Map(parent.outcomes.map(outcome => [outcome.issue, outcome]));
-    const blocks = new Map([[parent.parent_issue, renderParentBlockBody(parent, children, issues)]]);
+    const blocks = new Map([[parent.parent_issue, renderParentBlockBody(parent, children, issues, comments)]]);
     for (const child of children.values()) blocks.set(child.issue, renderChildBlockBody(child, outcomes.get(child.issue)));
     return blocks;
   }
@@ -3104,10 +3109,11 @@ class Reconciler {
     effects.push({ kind: 'replace_pr_nav', target: { issue: number, pr: pr.number, digest: blockDigest(navBody) }, body: navBody });
   }
 
-  diffBlocks(parent, children, observed, only, effects, findings, holds, targetsOverride = null) {
-    const blocks = this.renderAll(parent, children, observed.issues);
+  diffBlocks(parent, children, observed, only, effects, findings, holds, targetsOverride = null, resolutions = []) {
+    const blocks = this.renderAll(parent, children, observed.issues, observed.comments);
     const version = this.toolkitVersion || '0.0.0';
-    const targets = targetsOverride || (only ? [only, parent.parent_issue] : [...blocks.keys()]);
+    const requested = targetsOverride || (only ? [only, parent.parent_issue] : [...blocks.keys()]);
+    const targets = [...requested.filter(number => number !== parent.parent_issue), ...requested.filter(number => number === parent.parent_issue)];
     for (const number of targets) {
       const issue = observed.issues.get(number);
       const body = blocks.get(number);
@@ -3137,8 +3143,12 @@ class Reconciler {
       const topic = this.topicFor(parent, number, observed.issues);
       const traceBody = renderTraceBlockBody(number, traceEntries(comments, this.binding.record_prefix), this.binding.repository, topic);
       const traceCurrent = Boolean(traced.block) && normalizeBlockBody(traced.block.body) === normalizeBlockBody(traceBody) && !traced.block.tampered;
+      // Dry runs include the time change on the document that holds each effect's intent.
+      const timeWillChange = number === parent.parent_issue && parent.outcomes.some(outcome => graphClass(outcome, children.get(outcome.issue)) === 'NOW'
+        && (effects.some(effect => (effect.kind === 'reorder' ? effect.target.parent : effect.target.issue) === outcome.issue)
+          || resolutions.some(entry => entry.kind === 'child' && entry.number === outcome.issue && entry.outcome !== 'UNKNOWN')));
       // A current body at or over the threshold still moves its largest tag lists out.
-      if (current && !move && traceCurrent && navCurrent && currentCurrent && issue.body.length < this.threshold) continue;
+      if (current && !move && traceCurrent && navCurrent && currentCurrent && !timeWillChange && issue.body.length < this.threshold) continue;
       if (!current || move) findings.push({ code: 'PROJECTION_STALE', issue: number, detail: !block ? 'no state block yet' : block.tampered ? 'the block was edited by hand' : current ? 'the block is not in its place on the page' : 'the block differs from the state documents' });
       if (!traceCurrent) findings.push({ code: 'TRACE_STALE', issue: number, detail: !traced.block ? 'no comment trace yet' : traced.block.tampered ? 'the comment trace was edited by hand' : 'the comment trace differs from the comments' });
       if (!navCurrent) findings.push({ code: 'PROJECTION_STALE', issue: number, detail: nav.block ? 'the parent and task links differ from the state' : 'no parent and task links yet' });
@@ -3214,7 +3224,7 @@ class Reconciler {
   // (a pass for one issue records none), and the inventory source when the pass carries an inventory.
   // When they change, the parent's CURRENT block is planned again with the new list, so the page
   // shows them after this pass.
-  planAttention(parent, projected, observed, only, override, inventory, effects, findings, holds) {
+  planAttention(parent, projected, observed, only, override, inventory, effects, findings, holds, resolutions = []) {
     const folds = [];
     if (!only && !override) folds.push({ source: 'reconcile', complete: true, seen: findings.filter(finding => ATTENTION.has(finding.code)).map(({ code, issue, head = null, since = null }) => ({ code, issue, head, ...(since ? { since } : {}) })), hold: this.oneTimeHolds(parent.attention, projected) });
     if (inventory) folds.push({ source: 'inventory', complete: inventory.complete, seen: inventory.findings });
@@ -3230,7 +3240,7 @@ class Reconciler {
     keep(effects, effect => ['replace_block', 'post_index_comment'].includes(effect.kind) && effect.target.issue === number);
     keep(findings, finding => finding.issue === number && blockFindings.has(finding.code));
     keep(holds, hold => hold.target === `#${number}` && ['BLOCK_NEWER_TOOLKIT', 'BODY_TOO_LARGE'].includes(hold.code));
-    this.diffBlocks({ ...parent, attention: next }, projected, observed, only, effects, findings, holds, [number]);
+    this.diffBlocks({ ...parent, attention: next }, projected, observed, only, effects, findings, holds, [number], resolutions);
   }
 
   plan({ issue: only = null, parentOverride = null, inventory = null } = {}) {
@@ -3271,19 +3281,19 @@ class Reconciler {
       copy.revision = existing ? existing.revision + (contentDigest(existing) === contentDigest(doc) ? 0 : 1) : 1;
       return [number, copy];
     }));
-    this.diffBlocks(parent, projected, observed, only, effects, findings, holds);
+    this.diffBlocks(parent, projected, observed, only, effects, findings, holds, null, resolutions);
     this.auditTraces(parent, observed, only, findings, effects);
     this.diffUntracked(parent, desiredDocs, observed, only, findings);
     const legacy = parent.outcomes.filter(outcome => LEGACY_CLASSES.includes(outcome.class) && (!only || outcome.issue === only));
     if (legacy.length) findings.push({ code: 'CLASS_LEGACY', issue: parent.parent_issue, patch: legacyMigrationPatch(parent),
       detail: `${legacy.map(outcome => `#${outcome.issue} ${outcome.class}`).join(', ')} read as COMMITTED and sort like any other task, by group, priority (order) and child number; to migrate, save this finding's patch (reconcile --json) and apply it whole with update-parent, which sets COMMITTED and renumbers order in the old CORE, HARDENING, LATER sequence` });
     if (!only) for (const tie of orderTies(parent, desiredDocs)) findings.push({ code: 'ORDER_TIE', issue: parent.parent_issue, detail: `${tie.map(outcome => `#${outcome.issue}`).join(', ')} share priority order ${tie[0].order}, so child number decides. Controller: set a distinct order with update-parent; if CLASS_LEGACY is reported too, migrate first, or set COMMITTED and the priority in one update-parent patch` });
-    this.planAttention(parent, projected, observed, only, Boolean(parentOverride), inventory, effects, findings, holds);
+    this.planAttention(parent, projected, observed, only, Boolean(parentOverride), inventory, effects, findings, holds, resolutions);
     for (const effect of effects) effect.text = describeEffect(effect);
     return { parent, parentSha: parentRead.sha, override: Boolean(parentRead.override), children, observed, findings, effects, holds, resolutions };
   }
 
-  // Runs the planned effects in order: state documents, native links, order, then bodies.
+  // Runs the planned effects in order: state documents, native links, order, PR links, then bodies.
   apply(plan) {
     if (plan.override) throw new ProgrammeError('USAGE', 'A parent document read from a file can only be used for a dry run.');
     const writer = this.writer;
@@ -3291,6 +3301,8 @@ class Reconciler {
     const holds = [...plan.holds];
     const parentNumber = plan.parent.parent_issue;
     let parentDoc = null;
+    let docs = null;
+    const writtenChildren = new Set();
     // The parent fence is read again immediately before every state write and every GitHub change,
     // so a takeover stops this pass at its next effect (STALE_WRITER). An intent it leaves IN_FLIGHT
     // is settled by readback in the successor's next pass, never replayed.
@@ -3304,6 +3316,10 @@ class Reconciler {
       guard();
       const result = this.store.mutate(kind, number, { writer, parentDoc, ...options });
       if (kind === 'parent') parentDoc = result.doc;
+      else {
+        if (result.outcome === 'WRITTEN') writtenChildren.add(number);
+        if (docs && result.doc) docs.set(number, result.doc);
+      }
       return result;
     };
     const docOwner = number => (number === parentNumber ? 'parent' : 'child');
@@ -3455,70 +3471,7 @@ class Reconciler {
       }
     }
 
-    // 4. Bodies, re-rendered from freshly read documents so the blocks show the final revisions.
-    const blockEffects = plan.effects.filter(entry => entry.kind === 'replace_block');
-    if (blockEffects.length) {
-      guard();
-      const docs = new Map(plan.parent.outcomes.map(outcome => [outcome.issue, this.store.read('child', outcome.issue).doc]).filter(([, doc]) => doc));
-      const blocks = this.renderAll(parentDoc, docs, plan.observed.issues);
-      const version = this.toolkitVersion;
-      const ordered = [...blockEffects.filter(effect => effect.target.issue !== parentNumber), ...blockEffects.filter(effect => effect.target.issue === parentNumber)];
-      for (const planned of ordered) {
-        const number = planned.target.issue;
-        const body = blocks.get(number);
-        let effect = { ...planned, target: { ...planned.target, digest: blockDigest(body) } };
-        if (isHeld(`#${number}`, 'body')) { record(effect, 'SKIPPED', 'held earlier in this pass'); continue; }
-        if (!version) { record(effect, 'HELD', 'the Toolkit version could not be read'); hold(effect, 'TOOLKIT_VERSION_UNKNOWN', 'the Toolkit version could not be read, so no block was written'); continue; }
-        const owner = docOwner(number);
-        if (owner === 'child' && !docs.has(number)) { record(effect, 'SKIPPED', 'no state document yet'); continue; }
-        // An overflowing tag's list first moves into its own new index comment, checked by reading it back.
-        for (const post of plan.effects.filter(entry => entry.kind === 'post_index_comment' && entry.target.issue === number)) {
-          if (isHeld(`#${number}`, 'body')) break;
-          withIntent(post, owner, number, () => {
-            const intent = intentId(post.kind, post.target);
-            const bodies = indexCommentBodies(number, post.lines, intent, post.target.tag, post.label);
-            guard();
-            for (const text of bodies) this.mutator.postComment(number, text);
-            const kept = this.reader.comments(number).filter(comment => String(comment.body || '').includes(`programme-trace intent=${intent} `)).length;
-            if (kept === bodies.length) return { outcome: 'DONE' };
-            return kept ? { outcome: 'UNKNOWN', detail: `${kept} of ${bodies.length} index comment part(s) read back` } : { outcome: 'NOT_DONE', detail: 'the index comment did not read back' };
-          });
-        }
-        if (isHeld(`#${number}`, 'body')) { record(effect, 'SKIPPED', 'the comment trace could not move to an index comment'); continue; }
-        // The new body is built from a fresh read, so earlier edits by people are kept. Refuse before
-        // writing an intent when the block is broken or the body would grow past the threshold.
-        const before = this.reader.issue(number);
-        if (!before) { record(effect, 'HELD', 'the issue could not be read'); hold(effect, 'ISSUE_MISSING', 'the issue could not be read'); continue; }
-        const newest = newestBlockVersion(before.body);
-        if (newest && versionNewer(newest, version)) { record(effect, 'HELD', `written by Toolkit ${newest}`); hold(effect, 'BLOCK_NEWER_TOOLKIT', `#${number} was written by Toolkit ${newest}, newer than this copy (${version}); update Toolkit on this computer, then run again`); continue; }
-        let next;
-        const navBody = this.navFor(parentDoc, number, docs);
-        const currentBody = number === parentNumber ? renderCurrentBlockBody(parentDoc, docs, plan.observed.issues) : null;
-        try { next = this.projectBody(number, before.body, body, this.reader.comments(number), version, navBody, currentBody, this.topicFor(parentDoc, number, plan.observed.issues)); }
-        catch (error) { record(effect, 'HELD', error.message); hold(effect, error.code, error.message); continue; }
-        effect = { ...effect, target: { ...effect.target, trace: blockDigest(next.traceBody), ...(navBody ? { nav: blockDigest(navBody) } : {}), ...(currentBody ? { current: blockDigest(currentBody) } : {}) } };
-        if (next.overflow.length || next.body.length >= this.threshold) {
-          record(effect, 'HELD', `the body would be ${next.body.length} characters`);
-          hold(effect, 'BODY_TOO_LARGE', `Controller: the body would reach ${next.body.length} characters (threshold ${this.threshold}); shorten it first`);
-          continue;
-        }
-        withIntent(effect, owner, number, () => {
-          // Issue PATCH has no compare-and-swap: re-read immediately before writing and refuse on change.
-          const latest = this.reader.issue(number);
-          if (!latest || latest.body !== before.body || latest.updated_at !== before.updated_at) {
-            return { outcome: 'NOT_DONE', code: 'BODY_MOVED', detail: 'the issue changed between the read and the write; the next pass re-plans it' };
-          }
-          guard();
-          const response = this.mutator.writeBody(number, next.body);
-          const after = this.reader.issue(number);
-          if (after && after.body === next.body) return { outcome: 'DONE' };
-          if (!okStatus(response.status) && after && after.body === before.body) return { outcome: 'NOT_DONE', detail: `GitHub answered ${response.status}` };
-          return { outcome: 'UNKNOWN', detail: 'the body did not read back exactly as written' };
-        });
-      }
-    }
-
-    // 5. The parent and task links at the top of each open or draft PR, built from a fresh read.
+    // 4. The parent and task links at the top of each open or draft PR, built from a fresh read.
     for (const effect of plan.effects.filter(entry => entry.kind === 'replace_pr_nav')) {
       const number = effect.target.issue;
       const pr = effect.target.pr;
@@ -3546,6 +3499,77 @@ class Reconciler {
         return { outcome: 'UNKNOWN', detail: 'the PR description did not read back exactly as written' };
       });
     }
+
+    // 5. Bodies, with the parent last so it shows state writes made earlier in this pass.
+    const blockEffects = plan.effects.filter(entry => entry.kind === 'replace_block');
+    if (blockEffects.length || writtenChildren.size) {
+      guard();
+      docs = new Map(plan.parent.outcomes.map(outcome => [outcome.issue, this.store.read('child', outcome.issue).doc]).filter(([, doc]) => doc));
+      const comments = new Map(plan.observed.comments);
+      const blocks = this.renderAll(parentDoc, docs, plan.observed.issues, comments);
+      const version = this.toolkitVersion;
+      // The final parent check follows actual child writes, even when planning found no body change.
+      const ordered = [...blockEffects.filter(effect => effect.target.issue !== parentNumber), blockEffects.find(effect => effect.target.issue === parentNumber) || null];
+      for (const planned of ordered) {
+        if (!planned && !writtenChildren.size) continue;
+        const number = planned?.target.issue ?? parentNumber;
+        const body = number === parentNumber ? renderParentBlockBody(parentDoc, docs, plan.observed.issues, comments) : blocks.get(number);
+        const candidate = planned || { kind: 'replace_block', target: { issue: number }, state: true };
+        let effect = { ...candidate, target: { ...candidate.target, digest: blockDigest(body) } };
+        if (!planned) effect.text = describeEffect(effect);
+        if (isHeld(`#${number}`, 'body')) { record(effect, 'SKIPPED', 'held earlier in this pass'); continue; }
+        if (!version) { record(effect, 'HELD', 'the Toolkit version could not be read'); hold(effect, 'TOOLKIT_VERSION_UNKNOWN', 'the Toolkit version could not be read, so no block was written'); continue; }
+        const owner = docOwner(number);
+        if (owner === 'child' && !docs.has(number)) { record(effect, 'SKIPPED', 'no state document yet'); continue; }
+        // An overflowing tag's list first moves into its own new index comment, checked by reading it back.
+        for (const post of plan.effects.filter(entry => entry.kind === 'post_index_comment' && entry.target.issue === number)) {
+          if (isHeld(`#${number}`, 'body')) break;
+          withIntent(post, owner, number, () => {
+            const intent = intentId(post.kind, post.target);
+            const bodies = indexCommentBodies(number, post.lines, intent, post.target.tag, post.label);
+            guard();
+            for (const text of bodies) this.mutator.postComment(number, text);
+            const kept = this.reader.comments(number).filter(comment => String(comment.body || '').includes(`programme-trace intent=${intent} `)).length;
+            if (kept === bodies.length) return { outcome: 'DONE' };
+            return kept ? { outcome: 'UNKNOWN', detail: `${kept} of ${bodies.length} index comment part(s) read back` } : { outcome: 'NOT_DONE', detail: 'the index comment did not read back' };
+          });
+        }
+        if (isHeld(`#${number}`, 'body')) { record(effect, 'SKIPPED', 'the comment trace could not move to an index comment'); continue; }
+        // The new body is built from a fresh read, so earlier edits by people are kept. Refuse before
+        // writing an intent when the block is broken or the body would grow past the threshold.
+        const before = this.reader.issue(number);
+        if (!before) { record(effect, 'HELD', 'the issue could not be read'); hold(effect, 'ISSUE_MISSING', 'the issue could not be read'); continue; }
+        const newest = newestBlockVersion(before.body);
+        if (newest && versionNewer(newest, version)) { record(effect, 'HELD', `written by Toolkit ${newest}`); hold(effect, 'BLOCK_NEWER_TOOLKIT', `#${number} was written by Toolkit ${newest}, newer than this copy (${version}); update Toolkit on this computer, then run again`); continue; }
+        let next;
+        const navBody = this.navFor(parentDoc, number, docs);
+        const currentBody = number === parentNumber ? renderCurrentBlockBody(parentDoc, docs, plan.observed.issues) : null;
+        comments.set(number, this.reader.comments(number));
+        try { next = this.projectBody(number, before.body, body, comments.get(number), version, navBody, currentBody, this.topicFor(parentDoc, number, plan.observed.issues)); }
+        catch (error) { record(effect, 'HELD', error.message); hold(effect, error.code, error.message); continue; }
+        effect = { ...effect, target: { ...effect.target, trace: blockDigest(next.traceBody), ...(navBody ? { nav: blockDigest(navBody) } : {}), ...(currentBody ? { current: blockDigest(currentBody) } : {}) } };
+        if (next.overflow.length || next.body.length >= this.threshold) {
+          record(effect, 'HELD', `the body would be ${next.body.length} characters`);
+          hold(effect, 'BODY_TOO_LARGE', `Controller: the body would reach ${next.body.length} characters (threshold ${this.threshold}); shorten it first`);
+          continue;
+        }
+        if (number === parentNumber && next.body === before.body) { record(effect, 'NOOP'); continue; }
+        withIntent(effect, owner, number, () => {
+          // Issue PATCH has no compare-and-swap: re-read immediately before writing and refuse on change.
+          const latest = this.reader.issue(number);
+          if (!latest || latest.body !== before.body || latest.updated_at !== before.updated_at) {
+            return { outcome: 'NOT_DONE', code: 'BODY_MOVED', detail: 'the issue changed between the read and the write; the next pass re-plans it' };
+          }
+          guard();
+          const response = this.mutator.writeBody(number, next.body);
+          const after = this.reader.issue(number);
+          if (after && after.body === next.body) return { outcome: 'DONE' };
+          if (!okStatus(response.status) && after && after.body === before.body) return { outcome: 'NOT_DONE', detail: `GitHub answered ${response.status}` };
+          return { outcome: 'UNKNOWN', detail: 'the body did not read back exactly as written' };
+        });
+      }
+    }
+
     return { results, holds };
   }
 

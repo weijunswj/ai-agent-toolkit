@@ -251,29 +251,56 @@ test('the Projects controller skill check compares the synced claude.ai copy wit
   const older = check();
   assert.equal(older.status, STATUS.PASSED);
   // The update is offered as a skill card, with the file's size and sha256 so the setup agent can confirm it passes it unchanged;
-  // uploading by hand is only the fallback without a card tool.
+  // no case asks the owner to upload by hand, because the coordinator reads the copy pulled from the repo.
   const body = fs.readFileSync(path.join(repoRoot, 'repo', 'contracts', 'claude-projects', 'web-controller-projects', 'SKILL.md'));
   const sha256 = require('node:crypto').createHash('sha256').update(body).digest('hex');
-  assert.match(older.summary, new RegExp(`Your uploaded copy is 2026-01-01\\.1; Toolkit has ${escapeRegExp(repoVersion)}\\. Skill card: offer \\S*web-controller-projects/SKILL\\.md \\(${body.length} bytes, sha256 ${sha256}\\) as a skill update card to save\\. Without a card tool, upload the folder \\S*web-controller-projects to claude\\.ai`));
+  assert.match(older.summary, new RegExp(`Your uploaded copy is 2026-01-01\\.1; Toolkit has ${escapeRegExp(repoVersion)}\\. Skill card: offer \\S*web-controller-projects/SKILL\\.md \\(${body.length} bytes, sha256 ${sha256}\\) as a skill update card to save\\. If no card can be offered, the coordinator reads the copy pulled from the repo, nothing to do\\.$`));
+  assert.doesNotMatch(older.summary, /upload (?:the|it)|by hand/i);
   const reference = path.join(synced, 'abc_def', 'web-controller-projects', 'reference');
   fs.cpSync(path.join(repoRoot, 'repo', 'contracts', 'claude-projects', 'web-controller-projects', 'reference'), reference, { recursive: true });
   assert.match(check().summary, /Skill card: offer/, 'reference files equal to Toolkit\'s: a card is enough');
   writeFile(path.join(reference, 'recurring-tasks.md'), 'edited on the account\n');
+  // The card replaces SKILL.md only, so the account's own reference files stay as they are; the card is still offered.
   const edited = check();
-  assert.match(edited.summary, /Your copy has its own reference files, so a skill card is not enough: upload the folder \S*web-controller-projects to claude\.ai/);
-  assert.doesNotMatch(edited.summary, /Skill card: offer/);
+  assert.match(edited.summary, /Skill card: offer \S*web-controller-projects\/SKILL\.md \(\d+ bytes, sha256 [0-9a-f]{64}\) as a skill update card to save\. Your copy has its own reference files: the card replaces SKILL\.md only, so they stay as they are\./);
+  assert.doesNotMatch(edited.summary, /upload (?:the|it)|by hand/i);
   writeFile(path.join(synced, 'abc_def', 'web-controller-projects', 'SKILL.md'), `Version: ${repoVersion}\n`);
   assert.match(check().summary, /Your uploaded copy is current/);
 });
 
-test('the setup skill turns the Projects skill notice into a skill card, with the hand upload only as the fallback', () => {
+test('a Projects skill body too large for a skill card gets no card and no hand upload', (t) => {
+  // The card refuses a body over 48 KB; the stricter 48,000-byte reading counts the text after the frontmatter.
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-projects-skill-large-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const toolkitRoot = path.join(root, 'toolkit');
+  const skillFile = path.join(toolkitRoot, 'repo', 'contracts', 'claude-projects', 'web-controller-projects', 'SKILL.md');
+  const synced = path.join(root, 'synced');
+  writeFile(path.join(synced, 'abc_def', 'web-controller-projects', 'SKILL.md'), 'Version: 2026-01-01.1\n');
+  const check = () => new ToolkitInstallHealthCheck({ toolkitRoot, expectedVersion: VERSION, hubPath: path.join(root, 'hub'),
+    helperDefinitions: { refresh: () => ({ status: 'current' }), check: () => ({ status: 'current', project_overrides: [], detail: '' }) },
+    globalRules: fakeGlobalRules(), depthSetting: { inspect: () => ({ state: 'toolkit-one-layer', value: '1' }) }, syncedSkillsDir: synced })
+    .run({ refreshHelpers: false }).checks.find((entry) => entry.id === 'projects-skill');
+  const frontmatter = '---\nname: "web-controller-projects"\ndescription: "' + 'd'.repeat(500) + '"\n---\n';
+  const head = 'Version: 2026-02-01.1\n';
+  writeFile(skillFile, frontmatter + head + 'x'.repeat(48000 - head.length));
+  const large = check();
+  assert.equal(large.status, STATUS.PASSED);
+  assert.match(large.summary, /Your uploaded copy is 2026-01-01\.1; Toolkit has 2026-02-01\.1\. Too large for a skill card \(48000 bytes\); the coordinator reads the copy pulled from the repo, nothing to do\.$/);
+  assert.doesNotMatch(large.summary, /Skill card: offer|upload (?:the|it)|by hand/i);
+  // One byte under the limit, the frontmatter not counted, the card is offered.
+  writeFile(skillFile, frontmatter + head + 'x'.repeat(47999 - head.length));
+  assert.match(check().summary, /Skill card: offer/);
+});
+
+test('the setup skill turns the Projects skill notice into a skill card and never asks for a hand upload', () => {
   const text = fs.readFileSync(path.join(repoRoot, 'skills', 'toolkit-setup', 'SKILL.md'), 'utf8').replace(/\r\n/g, '\n');
   assert.match(text, /line says `Skill card: offer <SKILL\.md path> \(<bytes> bytes, sha256 <hash>\)`, offer the update as a card the owner saves rather than asking them to upload it\. First check that file: its byte size and sha256 equal the line's, its Version line is the one the line says Toolkit has, its frontmatter `name` is `web-controller-projects`, and it holds no `&lt;`, `&gt;`, `&amp;` or `&quot;`; if any check fails, say so and stop\./);
   assert.match(text, /Then, in this session \(never through a subagent or helper\), load `propose_skills` \(ToolSearch\) and call it with one proposal: kind `improvement`, target and name `web-controller-projects`, the description copied from that SKILL\.md's frontmatter, and `skillMd` set to that file's text exactly as read \(never retyped\)\./);
   assert.match(text, /The card must carry main's SKILL\.md: when this Toolkit copy is behind main, refresh Toolkit and run the install check again first\./);
   assert.match(text, /Then tell the owner to tap Save on the card, and that saving replaces any edits made directly to their claude\.ai copy\./);
-  assert.match(text, /Only when `propose_skills` does not exist in this session, or the call fails, say so and give the owner the line's hand-upload step\./);
-  assert.match(text, /When the line says the copy has its own reference files, a card is not enough: give only the folder upload step\./);
+  assert.match(text, /Only when `propose_skills` does not exist in this session, or the call fails, say so in one line and offer no hand upload, because the coordinator reads the copy pulled from the repo\./);
+  assert.match(text, /When the line says too large for a skill card, offer no card\./);
+  assert.doesNotMatch(text, /hand-upload step|folder upload step/);
 });
 
 test('the Claude app account copy check reports an older claude.ai copy with the fix, reads only, and blocks nothing', (t) => {

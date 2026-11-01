@@ -4,12 +4,10 @@
 // Sets the Toolkit version in one step: writes version.json (the one version source) and the four
 // plugin manifests hosts read, then refreshes the generated surfaces that carry the version
 // (managed-block markers, the README contract block and the published-surface baseline).
-// An open branch keeps main's version and writes its notes in its own changelog fragment
-// (repo/docs/changelog.d/<branch>.md). At merge time `--next patch|minor` reads the base's version,
-// sets the next one, folds the fragments into the CHANGELOG and bumps the Projects skill Version
-// line when the branch changed that skill, so every merge takes a distinct number in one step.
+// A PR prepares its own bump from main and folds its changelog fragments. When main
+// moves, toolkit-rebump-prs.cjs preserves that bump level and reapplies it above main.
 // Usage: node repo/scripts/bump-version.cjs <x.y.z> [--workspace <repo root>]
-//        node repo/scripts/bump-version.cjs --next patch|minor [--base <ref>] [--workspace <repo root>]
+//        node repo/scripts/bump-version.cjs --next patch|minor|major [--base <ref>] [--workspace <repo root>]
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -33,7 +31,7 @@ const REFRESH_COMMANDS = Object.freeze([
   ['repo/scripts/sync-repo-doc-contract.cjs', '--write'],
   ['repo/scripts/audit-published-surfaces.cjs', '--write-baseline'],
 ]);
-const USAGE = 'usage: node repo/scripts/bump-version.cjs <x.y.z> [--workspace <repo root>], or --next patch|minor [--base <ref>]';
+const USAGE = 'usage: node repo/scripts/bump-version.cjs <x.y.z> [--workspace <repo root>], or --next patch|minor|major [--base <ref>]';
 
 function parseArgs(argv) {
   const args = { version: '', next: '', base: 'origin/main', workspace: path.resolve(__dirname, '..', '..') };
@@ -50,7 +48,7 @@ function parseArgs(argv) {
   }
   if (args.next) {
     if (args.version) throw new Error(`give a version or --next, not both; ${USAGE}`);
-    if (!LEVELS.includes(args.next)) throw new Error(`--next takes patch or minor; ${USAGE}`);
+    if (!LEVELS.includes(args.next)) throw new Error(`--next takes patch, minor or major; ${USAGE}`);
     if (!args.base) throw new Error(`--base needs a ref; ${USAGE}`);
   } else if (!SEMVER.test(args.version)) throw new Error(USAGE);
   return args;
@@ -96,7 +94,7 @@ function bumpNext({ level, base, workspace, today = new Date().toISOString().sli
   const changelog = fs.readFileSync(changelogFile, 'utf8');
   if (current !== baseVersion) {
     if (LEVELS.some((next) => nextVersion(baseVersion, next) === current) && topChangelogVersion(changelog) === current) {
-      throw new Error(`this branch is already bumped to ${current}; if ${base} moved since, revert that bump commit, merge ${base} and run --next again`);
+      throw new Error(`this branch is already bumped to ${current}; if ${base} moved since, run toolkit-rebump-prs.cjs to report and reconcile the open PR`);
     }
     throw new Error(`this branch sets ${current} but ${base} is at ${baseVersion}; take ${base}'s version lines and run --next again`);
   }
@@ -136,7 +134,7 @@ function bumpNext({ level, base, workspace, today = new Date().toISOString().sli
   fs.writeFileSync(changelogFile, foldFragments(unreleased.text, version, notes));
   for (const rel of fragmentRels) fs.rmSync(path.join(workspace, ...rel.split('/')));
   const result = bumpVersion(version, workspace);
-  return { ...result, baseVersion, folded: [...fragmentRels, ...(unreleased.notes ? [`the "${UNRELEASED_HEADING}" section`] : [])], skillVersion };
+  return { ...result, baseSha, baseVersion, folded: [...fragmentRels, ...(unreleased.notes ? [`the "${UNRELEASED_HEADING}" section`] : [])], skillVersion };
 }
 
 function main() {
@@ -144,7 +142,7 @@ function main() {
     const args = parseArgs(process.argv.slice(2));
     if (args.next) {
       const result = bumpNext({ level: args.next, base: args.base, workspace: args.workspace });
-      console.log(`Toolkit version is now ${result.version} (${args.base} was ${result.baseVersion}). Wrote ${result.files.join(', ')}; refreshed ${result.refreshed.join(', ')}.`);
+      console.log(`Toolkit version is now ${result.version} (${args.base} at ${result.baseSha} was ${result.baseVersion}). Wrote ${result.files.join(', ')}; refreshed ${result.refreshed.join(', ')}.`);
       console.log(`Folded ${result.folded.join(', ')} into ${CHANGELOG_REL_PATH}.${result.skillVersion ? ` Projects skill Version is now ${result.skillVersion}.` : ''}`);
       console.log('Review the diff, commit it as the last commit, push and wait for green CI before the merge.');
       return;

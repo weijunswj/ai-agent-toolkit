@@ -1,12 +1,11 @@
 'use strict';
 
 // Rule-refresh pull requests always stop for the owner to merge. No setup question, default,
-// "all recommended" answer or flag may turn on any automatic merge.
+// "all recommended" answer or flag may authorise a rule-refresh merge.
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const core = require('../scripts/setup-toolkit-core.cjs');
 
-const MERGE = /merge/i;
 
 function bankFor(host, extra = []) {
   const current = {
@@ -17,23 +16,13 @@ function bankFor(host, extra = []) {
 }
 
 for (const host of ['codex', 'claude-code']) {
-  test(`${host}: no question, choice or recommendation is about merging`, () => {
-    const { specs } = bankFor(host);
-    for (const spec of specs) {
-      const text = [spec.id, spec.key, spec.title, spec.whatThisControls, spec.recommended_outcome, spec.recommendation_reason,
-        ...spec.choices.flatMap((choice) => [choice.value, choice.label, choice.consequence])].join('\n');
-      assert.doesNotMatch(text, /auto-?merge|merge the (?:refresh )?pull request/i, spec.id);
-    }
-  });
-
-  for (const extra of [[], ['--auto-main'], ['--profile', 'auto-main']]) test(`${host} ${extra.join(' ') || '(no profile)'}: "all recommended" leaves no merge setting on`, () => {
-    const { args } = bankFor(host, extra);
-    for (const [key, value] of Object.entries(args.setupChoices)) assert.equal(MERGE.test(key), false, key);
-    for (const [key, value] of Object.entries(args)) {
-      if (MERGE.test(key)) assert.notEqual(value, true, key);
-    }
-    const plan = JSON.stringify(core.setupPlan({ ...args, questionBank: [] }));
-    assert.doesNotMatch(plan, /auto-?merge.{0,40}(?:true|enable)/i);
+  test(`${host}: only the task merge question is offered; refresh merging stays owner-only`, () => {
+    const { specs, args } = bankFor(host);
+    const rows = specs.filter(spec => /auto-?merge/i.test(spec.id));
+    assert.deepEqual(rows.map(row => row.id), ['task-auto-merge']);
+    assert.equal(args.setupChoices.taskAutoMerge, 'after-gates');
+    assert.match(rows[0].afterApplying, /Rule-refresh.*typed merge/);
+    assert.doesNotMatch(JSON.stringify(args), /refreshPrAutoMerge/);
   });
 }
 
@@ -60,8 +49,16 @@ test('no script, skill or plugin hook runs a pull request merge', () => {
       if (path.relative(root, full).split(path.sep).join('/') === 'repo/scripts/toolkit-merge-hold.cjs') {
         const source = fs.readFileSync(full, 'utf8');
         const loads = [...source.matchAll(/\brequire\s*\(([^)]*)\)/g)].map((match) => match[1].trim());
-        assert.deepEqual(loads.sort(), ["'./toolkit-governance-gate.cjs'", "'./toolkit-governance-state.cjs'", "'./toolkit-shell-call.cjs'", "'node:crypto'", "'node:fs'", "'node:path'"]);
+        assert.deepEqual(loads.sort(), ["'./toolkit-auto-merge-eligible.cjs'", "'./toolkit-governance-gate.cjs'", "'./toolkit-governance-state.cjs'", "'./toolkit-shell-call.cjs'", "'node:crypto'", "'node:fs'", "'node:path'"]);
         assert.doesNotMatch(source, /\bimport\s*\(|child_process|(?<![.\w])(?:spawn|exec|execFile|fork)(?:Sync)?\s*\(|\bfetch\s*\(|node:https?\b|node:net\b/);
+        // The merge-scope check it loads starts only git, with read-only subcommands, and loads only
+        // Node's process module.
+        const scope = fs.readFileSync(path.join(root, 'repo', 'scripts', 'toolkit-auto-merge-eligible.cjs'), 'utf8');
+        assert.deepEqual([...scope.matchAll(/\brequire\s*\(([^)]*)\)/g)].map((match) => match[1].trim()), ["'node:child_process'"]);
+        assert.deepEqual([...scope.matchAll(/(?<![.\w])(?:spawn|exec|execFile|fork)(?:Sync)?\s*\(([^,]*)/g)].map((match) => match[1].trim()), ["'git'"]);
+        const subcommands = new Set([...scope.matchAll(/\bgit\(cwd, \['([\w-]+)'/g)].map((match) => match[1]));
+        assert.deepEqual([...subcommands].sort(), ['cat-file', 'diff', 'merge-base', 'rev-parse', 'show']);
+        assert.doesNotMatch(scope, /\bimport\s*\(|\bfetch\s*\(|node:https?\b|node:net\b/);
         // The shell-call reader it loads only reads its input.
         const reader = fs.readFileSync(path.join(root, 'repo', 'scripts', 'toolkit-shell-call.cjs'), 'utf8');
         assert.deepEqual([...reader.matchAll(/\brequire\s*\(([^)]*)\)/g)].map((match) => match[1].trim()), ["'node:os'", "'node:path'"]);

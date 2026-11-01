@@ -41,8 +41,8 @@ test('recommended Claude execution writes a root-only profile and launches no Cl
   ], { env: isolatedHomeEnv(root), timeout: 300000 });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   // The recommendation's effect would only repeat its label, so the cell shows the label once.
-  assert.match(result.stdout, /\| 2\.1 \| How should Claude Code use agents\? \|[^\n]*\| A\. Toolkit repos: main session \+ Toolkit planning and build helpers only\. Elsewhere: one layer of subagents\.<br>Selected: /);
-  assert.match(result.stdout, /\| 2\.1 \|[^\n]*Selected: A\. Toolkit repos: main session \+ Toolkit planning and build helpers only\. Elsewhere: one layer of subagents\./);
+  assert.match(result.stdout, /\| 2\.1 \| How should Claude Code use agents\? \|[^\n]*\| B\. Toolkit repos: main session \+ Toolkit planning and build helpers only\. Elsewhere: one layer of subagents\.<br>Selected: /);
+  assert.match(result.stdout, /\| 2\.1 \|[^\n]*Selected: B\. Toolkit repos: main session \+ Toolkit planning and build helpers only\. Elsewhere: one layer of subagents\./);
   assert.doesNotMatch(result.stdout, /Direct Toolkit-managed|toolkit-direct|agent capacity choice|Manual maximum|Capacity mode/i);
   assert.match(result.stdout, /Helper-agent capacity questions shown: no/);
   assert.match(result.stdout, /Selected topology: root-only/);
@@ -86,22 +86,68 @@ test('the recommended Claude Code settings are written to the temporary Claude s
   const base = ['--execute', '--host', 'claude-code', '--repo-root', setupRepo, '--repo-remote', origin,
     '--yes-recommended', '--claude-cli', fake.command, '--claude-plugin-behavior', 'instructions', '--claude-topology', 'broader-native'];
   const settingsPath = path.join(root, '.claude', 'settings.json');
+  const read = () => JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+  const agentsMd = { 'cc-plugin-agents-md@builtin': { options: { instructionFiles: 'claude-md-and-agents-md' } } };
+  // A fresh install: the three off rows turn on; model switching is on by default, so nothing is written for it.
   const on = run(base, { env, timeout: 300000 });
   assert.equal(on.status, 0, on.stderr || on.stdout);
-  assert.match(on.stdout, /Claude Code settings this run: No AI attribution in commits and pull requests: on \(set by Toolkit\)\./);
-  assert.deepEqual(JSON.parse(fs.readFileSync(settingsPath, 'utf8')), {
-    attribution: false,
-    crossSessionInbound: 'accept',
-    switchModelsOnFlag: false,
-    pluginConfigs: { 'cc-plugin-agents-md@builtin': { options: { instructionFiles: 'claude-md-and-agents-md' } } }
-  });
+  assert.match(on.stdout, /Claude Code settings this run: No AI attribution in commits and pull requests: on \(added by setup\)\./);
+  assert.deepEqual(read(), { attribution: false, crossSessionInbound: 'accept', pluginConfigs: agentsMd });
+  // A Claude Code run's bank, its Claude Code summary and its plugin summary talk only about Claude Code.
+  const section = (start, end) => on.stdout.slice(on.stdout.indexOf(start), on.stdout.indexOf(end, on.stdout.indexOf(start)));
+  for (const [start, end] of [['<!-- setup-toolkit-question-bank:begin -->', '<!-- setup-toolkit-question-bank:complete -->'],
+    ['## Claude Code agent topology', '## Bridge state'], ['# setup toolkit final summary', '## Install check']]) {
+    assert.ok(section(start, end).length > start.length, start);
+    assert.doesNotMatch(section(start, end), /codex/i, start);
+  }
   clearLogs(setupRepo);
+  // Turn off removes three lines and writes false for model switching.
   const off = run([...base, '--claude-settings', 'disable'], { env, timeout: 300000 });
   assert.equal(off.status, 0, off.stderr || off.stdout);
-  assert.equal(fs.existsSync(settingsPath), false, 'the file Toolkit created is removed when nothing else is left');
+  assert.deepEqual(read(), { switchModelsOnFlag: false });
+  clearLogs(setupRepo);
+  // All recommended from there: every row is off, so each recommends Turn on, and model switching becomes true.
+  const allOn = run(base, { env, timeout: 300000 });
+  assert.equal(allOn.status, 0, allOn.stderr || allOn.stdout);
+  assert.match(allOn.stdout, /\| Claude Code setting: Switch models without asking on a flag\? \| Off \(set by setup\) \| B\. Turn on[^|]*\| A\. Keep current \|/);
+  assert.deepEqual(read(), { switchModelsOnFlag: true, attribution: false, crossSessionInbound: 'accept', pluginConfigs: agentsMd });
 });
 
-test('each Claude Code setting row is answered on its own: Add one, remove only Toolkit\'s attribution, keep an object form you set', () => {
+test('All recommended applies each Claude Code setting row on its own, and an unreadable settings file is left alone', () => {
+  const root = tmpRoot();
+  const { origin, setupRepo } = createGitBackedSetupRepo(root);
+  const fake = recordingClaude(root);
+  const env = isolatedHomeEnv(root);
+  const base = ['--execute', '--host', 'claude-code', '--repo-root', setupRepo, '--repo-remote', origin,
+    '--yes-recommended', '--claude-cli', fake.command, '--claude-plugin-behavior', 'instructions', '--claude-topology', 'broader-native'];
+  const settingsPath = path.join(root, '.claude', 'settings.json');
+  const read = () => JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+  // Three rows set and model switching off: only the model-switch row recommends a change, so it alone is written.
+  writeFile(settingsPath, `${JSON.stringify({ attribution: false, crossSessionInbound: 'accept', switchModelsOnFlag: false }, null, 2)}\n`);
+  const missingOne = run(base, { env, timeout: 300000 });
+  assert.equal(missingOne.status, 0, missingOne.stderr || missingOne.stdout);
+  assert.deepEqual(read(), { attribution: false, crossSessionInbound: 'accept', switchModelsOnFlag: true,
+    pluginConfigs: { 'cc-plugin-agents-md@builtin': { options: { instructionFiles: 'claude-md-and-agents-md' } } } });
+  clearLogs(setupRepo);
+  // Keep current on 3.4 with the others on All recommended leaves model switching as it is.
+  writeFile(settingsPath, `${JSON.stringify({ switchModelsOnFlag: false }, null, 2)}\n`);
+  const kept = run([...base, '--claude-setting', 'switch-models-on-flag=keep'], { env, timeout: 300000 });
+  assert.equal(kept.status, 0, kept.stderr || kept.stdout);
+  assert.equal(read().switchModelsOnFlag, false);
+  assert.equal(read().attribution, false);
+  clearLogs(setupRepo);
+  // An unreadable file: every row recommends Keep current and nothing is written; the install check asks
+  // for the file to be fixed.
+  const broken = '{ "theme": ';
+  fs.writeFileSync(settingsPath, broken);
+  const unreadable = run(base, { env, timeout: 300000 });
+  assert.equal(unreadable.status, 24, unreadable.stderr || unreadable.stdout);
+  assert.match(unreadable.stdout, /\| Claude Code setting: Switch models without asking on a flag\? \| Could not read \| A\. Keep current<br>Selected: A\. Keep current \|/);
+  assert.match(unreadable.stdout, /Fix the Claude Code user settings file, then run `setup toolkit` again\./);
+  assert.equal(fs.readFileSync(settingsPath, 'utf8'), broken);
+});
+
+test('each Claude Code setting row is answered on its own: Turn on one, Turn off removes an object form you set, Turn on replaces a different value', () => {
   const root = tmpRoot();
   const { origin, setupRepo } = createGitBackedSetupRepo(root);
   const fake = recordingClaude(root);
@@ -112,7 +158,7 @@ test('each Claude Code setting row is answered on its own: Add one, remove only 
   const read = () => JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
   writeFile(settingsPath, `${JSON.stringify({ theme: 'dark' }, null, 2)}\n`);
 
-  const one = run([...base, '--claude-setting', 'switch-models-on-flag=enable'], { env, timeout: 300000 });
+  const one = run([...base, '--claude-setting', 'switch-models-on-flag=disable'], { env, timeout: 300000 });
   assert.equal(one.status, 0, one.stderr || one.stdout);
   assert.deepEqual(read(), { theme: 'dark', switchModelsOnFlag: false });
   clearLogs(setupRepo);
@@ -123,14 +169,19 @@ test('each Claude Code setting row is answered on its own: Add one, remove only 
   assert.equal(removed.status, 0, removed.stderr || removed.stdout);
   assert.deepEqual(read(), { theme: 'dark', switchModelsOnFlag: false });
 
-  // An attribution object that hides everything shows as on and survives Remove.
+  // An attribution object you set that hides everything shows as on, and Turn off removes only that key.
   const hidden = { commit: '', pr: '', sessionUrl: false };
-  writeFile(settingsPath, `${JSON.stringify({ ...read(), attribution: hidden }, null, 2)}\n`);
+  writeFile(settingsPath, `${JSON.stringify({ ...read(), attribution: hidden, crossSessionInbound: 'reject' }, null, 2)}\n`);
   clearLogs(setupRepo);
-  const kept = run([...base, '--claude-setting', 'attribution=disable'], { env, timeout: 300000 });
-  assert.equal(kept.status, 0, kept.stderr || kept.stdout);
-  assert.match(kept.stdout, /\| Add Toolkit's recommended Claude Code setting: Hide AI credit in commits\/PRs\? \| On \(you set it\) \|/);
-  assert.deepEqual(read(), { theme: 'dark', switchModelsOnFlag: false, attribution: hidden });
+  const off = run([...base, '--claude-setting', 'attribution=disable'], { env, timeout: 300000 });
+  assert.equal(off.status, 0, off.stderr || off.stdout);
+  assert.match(off.stdout, /\| Claude Code setting: Hide AI credit in commits\/PRs\? \| On \(already in your settings\) \|/);
+  assert.deepEqual(read(), { theme: 'dark', switchModelsOnFlag: false, crossSessionInbound: 'reject' });
+
+  clearLogs(setupRepo);
+  const replaced = run([...base, '--claude-setting', 'cross-session-inbound=enable'], { env, timeout: 300000 });
+  assert.equal(replaced.status, 0, replaced.stderr || replaced.stdout);
+  assert.deepEqual(read(), { theme: 'dark', switchModelsOnFlag: false, crossSessionInbound: 'accept' });
 });
 
 test('the retired Toolkit direct topology and capacity flags fail before any setup write', () => {
@@ -159,7 +210,7 @@ test('a piped toolkit-direct answer is not a topology choice and writes nothing'
     '--execute', '--host', 'claude-code', '--repo-root', setupRepo, '--repo-remote', origin, '--claude-cli', fake.command,
   ], { env: isolatedHomeEnv(root), timeout: 300000, input: ['enable', 'enable', 'default', 'enable', 'toolkit-direct', 'instructions', 'keep', ''].join('\n') });
   assert.notEqual(result.status, 0, result.stdout);
-  assert.match(`${result.stdout}\n${result.stderr}`, /must be one of: root-only, broader-native, keep/);
+  assert.match(`${result.stdout}\n${result.stderr}`, /must be one of: keep, root-only, broader-native/);
   assert.equal(fs.existsSync(control.profilePath('claude-code', { root: profileRootOf(root) })), false);
   assert.equal(sessions(fake).length, 0);
 });
@@ -184,7 +235,7 @@ test('keep current resolves a stored direct profile to root-only without probing
   assert.equal(kept.status, 24, kept.stderr || kept.stdout);
   assert.match(kept.stdout, /Install check: action required\n/);
   assert.match(kept.stdout, /Claude Code depth setting: Root-only is selected, but CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH is not set in your Claude Code user settings\./);
-  assert.match(kept.stdout, /\| 2\.1 \|[^\n]*Selected: C\. Keep current/);
+  assert.match(kept.stdout, /\| 2\.1 \|[^\n]*Selected: A\. Keep current/);
   assert.match(kept.stdout, /Selected topology: root-only/);
   assert.equal(sessions(fake).some((entry) => entry.args.includes('--print')), false);
   assert.equal(control.readProfile('claude-code', { root: profileRootOf(root) }).topology, control.TOPOLOGIES.ROOT_ONLY);

@@ -43,9 +43,8 @@ const EVENTS = Object.freeze(['PreToolUse', 'PostToolUse', 'UserPromptSubmit']);
 const STATUSES = Object.freeze(['pass', 'known-bad']);
 const FAULTS = Object.freeze(['deleted-plugin-root', 'remove-file', 'throw-module', 'stall-module', 'bad-json', 'empty-input']);
 const GOVERNANCE = Object.freeze(['enabled', 'undecided', 'none']);
-// A governed fixture's task auto-merge answer in its merged binding: yes with the always-manual check
-// required (read now, or over a day ago), yes without it, or no.
-const TASK_AUTO_MERGE = Object.freeze(['after-gates', 'after-gates-stale', 'unenforced', 'off']);
+// App-local task answers in each fixture home; the stale variant ages only its governance binding.
+const TASK_AUTO_MERGE = Object.freeze(['after-gates', 'after-gates-stale', 'off', 'codex-only', 'claude-code-only', 'unreadable']);
 const ROW_KEYS = new Set(['id', 'source', 'kind', 'hosts', 'event', 'payload', 'fixture', 'fault', 'expect', 'expect_by_host', 'status', 'known_bad_on', 'lane', 'added', 'note']);
 const ID = /^[A-Z][A-Za-z0-9._-]*$/;
 // The plugin content the hooks can reach: both host manifests, the scripts and contracts, and the
@@ -350,22 +349,35 @@ class Fixture {
       this.#files(this.work, commit.files);
       this.#git(this.work, ['add', '-A']);
       this.#git(this.work, ['commit', '--quiet', '--allow-empty', '-m', commit.message || 'fixture commit']);
+      // Under task auto-merge, the first commit is this folder's copy of the remote's default
+      // branch, so the merge hold's scope check reads the later commits as the pull request.
+      if (spec.task_auto_merge && commit === commits[0]) this.#git(this.work, ['update-ref', 'refs/remotes/origin/main', 'HEAD']);
     }
+    this.head = this.#git(this.work, ['rev-parse', 'HEAD']).trim();
     for (const branch of spec.worktrees || []) this.#git(this.work, ['worktree', 'add', '--quiet', '-b', branch, path.join(this.trees, branch)]);
     if (spec.staged) { this.#files(this.work, spec.staged); this.#git(this.work, ['add', '-A']); }
   }
 
-  // A version 2 binding with the owner's task auto-merge answer, merged on the default branch.
+  // A fresh enabled binding plus separate app-local answers in this fixture's home.
   #taskAutoMerge(slug, answer, support) {
     const text = `${JSON.stringify({
       schema: 'toolkit.programme-binding.v2', repository: slug, governance: 'enabled',
       parents: [{ issue: 1, record_prefix: 'INT-FX', writer_prefix: 'FX' }],
       store: { kind: 'github', repository: 'toolkit-test-fixture/store', branch: 'main', path: 'state/' },
-      required_checks: answer.startsWith('after-gates') ? ['validate', 'auto-merge-eligible'] : ['validate'],
-      task_prs: { auto_merge: answer === 'off' ? 'off' : 'after-gates' },
+      required_checks: ['validate'],
     }, null, 2)}
 `;
     fs.writeFileSync(path.join(this.work, '.github', 'toolkit-programme.json'), text);
+    const { TaskAutoMergePreferences } = require('./toolkit-task-auto-merge-preferences.cjs');
+    for (const host of ['codex', 'claude-code']) {
+      if (answer.endsWith('-only') && answer !== `${host}-only`) continue;
+      if (answer === 'unreadable') {
+        fs.writeFileSync(path.join(this.home, '.ai-agent-toolkit', 'user-state', `task-auto-merge.${host}.v1.json`), 'malformed');
+        continue;
+      }
+      const owner = new TaskAutoMergePreferences({ home: this.home, host });
+      owner.apply(answer === 'off' ? 'off' : 'after-gates', owner.inspect());
+    }
     // A stale read is one over a day old, as when this computer has not reached GitHub since.
     support.recordMerged(this.work, { home: this.home, text, ...(answer === 'after-gates-stale' ? { now: new Date(Date.now() - 25 * 60 * 60 * 1000) } : {}) });
   }
@@ -380,7 +392,8 @@ class Fixture {
   expand(value) {
     if (typeof value === 'string') {
       return value.replaceAll('{work}', this.work).replaceAll('{home}', this.home).replaceAll('{dir}', this.dir)
-        .replaceAll('{trees}', this.trees).replaceAll('{transcript}', this.transcript).replaceAll('{credential}', fakeCredential());
+        .replaceAll('{trees}', this.trees).replaceAll('{transcript}', this.transcript).replaceAll('{credential}', fakeCredential())
+        .replaceAll('{head}', this.head || '');
     }
     if (Array.isArray(value)) return value.map(item => this.expand(item));
     if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, this.expand(item)]));

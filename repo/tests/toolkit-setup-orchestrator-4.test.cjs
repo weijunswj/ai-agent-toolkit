@@ -14,8 +14,8 @@ test('missing and misordered conditional details fail before every setup write',
     const { origin, setupRepo } = createGitBackedSetupRepo(root);
     const customPath = path.join(root, 'Must Not Be Written');
     const input = mode === 'missing'
-      ? ['custom', 'B', 'B', 'keep', 'B'].join('\n')
-      : ['custom', 'B', 'A', 'keep', 'B', '14', customPath].join('\n');
+      ? ['custom', 'A', 'A', 'keep', 'A'].join('\n')
+      : ['custom', 'A', 'B', 'keep', 'A', '14', customPath].join('\n');
     const result = run(['--execute', '--repo-remote', origin, '--enable-repo-auto-update'], {
       env: isolatedHomeEnv(root), input, timeout: 300000,
     });
@@ -83,15 +83,16 @@ test('changed-only piped answer applies recommendations except exact indexed cha
   const reference = displayedBankReference(preview.stdout);
   const result = run(['--execute', '--repo-remote', origin], { codexDocLimitQuestion: true,
     env,
-    input: `${reference}: 1.2=b, 2.2=B\n`,
+    input: `${reference}: 1.2=c, 2.2=A\n`,
     timeout: 300000,
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /Question answer source: user-approved recommended except listed changes/);
-  assert.match(result.stdout, /1\.2 Automatic updates: B - Turn off \(canonical: disable; effective: disable\)/);
-  assert.match(result.stdout, /2\.2 Codex Toolkit maintenance: B - Turn off \(canonical: disable; effective: disable\)/);
+  assert.match(result.stdout, /1\.2 Automatic updates: C - Turn off \(canonical: disable; effective: disable\)/);
+  // Maintenance is off already, so Turn off folds into Keep current and A is Keep current.
+  assert.match(result.stdout, /2\.2 Codex Toolkit maintenance: A - Keep current \(canonical: keep; effective: disable\)/);
   // Reports are already kept, so the recommendation is the single Keep current.
-  assert.match(result.stdout, /1\.3 Update reports: B - Keep current \(canonical: keep; effective: enable\)/);
+  assert.match(result.stdout, /1\.3 Update reports: A - Keep current \(canonical: keep; effective: enable\)/);
 });
 
 test('cross-process concise replay fails before mapping across a host change', () => {

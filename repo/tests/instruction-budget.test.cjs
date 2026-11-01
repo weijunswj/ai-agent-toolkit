@@ -52,8 +52,22 @@ test('each block stays inside its own budget', () => {
   // to 11,900 for the gate workspace rule (a writing gate opens in the folder it writes), then to
   // 13,450 for the task auto-merge rule (the owner's answer, when the controller merges, the
   // always-manual list and the owner's label for it), then to 13,600 for the release-plan CI
-  // check-up clause in the G0 bullet (it had moved to TOOLKIT-DELIVERY.md while this file was full).
-  assert.ok(crlfBytes(read('repo/contracts/agent-rules/gate-rules.md')) <= 13600, 'gate rules');
+  // check-up clause in the G0 bullet (it had moved to TOOLKIT-DELIVERY.md while this file was full),
+  // then to 13,760 for the controller's own eligibility run before a task auto-merge (the CI check
+  // passes while auto-merge is off, and that green can outlive the off period).
+  assert.ok(crlfBytes(read('repo/contracts/agent-rules/gate-rules.md')) <= 13760, 'gate rules');
+});
+
+test('the Projects controller skill fits a claude.ai skill card, with room for lanes in flight', () => {
+  // The coordinator reads SKILL.md every turn, and the owner saves it to claude.ai with a skill card,
+  // which refuses a body over 48 KB. The exact cut is not published, so the hard ceiling uses the
+  // stricter 48,000-byte reading of the body (the text after the frontmatter) and is never raised.
+  // The budget keeps the raw file about 4 KB under it, for lanes already in flight: detail goes into
+  // the reference files beside it. Raise the budget only with a reason recorded here, and never above 47,000.
+  const skill = fs.readFileSync(path.join(ROOT, 'repo/contracts/claude-projects/web-controller-projects/SKILL.md'));
+  assert.ok(skill.length <= 44000, `Projects skill ${skill.length} bytes`);
+  const body = skill.toString('utf8').replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '');
+  assert.ok(Buffer.byteLength(body) < 48000, `Projects skill body ${Buffer.byteLength(body)} bytes`);
 });
 
 test('guidance moved out of root AGENTS.md is still reachable from a loaded layer', () => {

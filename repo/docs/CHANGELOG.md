@@ -1,13 +1,146 @@
 # Toolkit Changelog
 
-## 3.31.0 (keys open in your .env editor)
+## 3.41.0
+
+### Added
+
+- Each app asks its own task auto-merge question during setup, with On recommended and an accurate Current choice. Answers are stored separately on this computer, validated strictly and written atomically with read-back and recovery.
 
 ### Changed
 
-- `toolkit env edit` opens the key file in the app this computer uses for `.env` files, through the Windows shell by full path, instead of always in Notepad. VS Code, VS Code Insiders, VSCodium and Cursor start by their own path in a new window with no folder, so workspace extensions and IDE links to agents do not attach to it.
-- A deleted line no longer removes its key within seconds. It is marked (shown in the file's status line and in `status`), and "done" asks one yes/no that names every marked key before removing any; a no, no answer, a new edit or the 30-minute end keeps them. Putting the line back cancels it.
-- Every end of an edit removes the copies VS Code-style editors keep of Toolkit's own edit files (Local History and hot-exit backups), overwriting each with zeros first, and says how many. The closing note is worded for the app the file opened in, and the file's header warns that extensions can read an open tab.
-- The test guard that blocks Notepad launches also refuses opening an edit file in the shell or an editor, and is renamed to match.
+- The app-local answer is the only task auto-merge switch. Repository bindings no longer carry task permission, and governance reports the effective app setting without asking another question.
+- Hooks, setup, governance, bindings, preference readers and writers, and merge or approval rules always wait for an owner-typed merge, alongside CI workflows and major releases. Rule-refresh pull requests retain their typed-merge requirement.
+
+## 3.40.0 (Refresh open release branches)
+
+### Changed
+
+- Keep each open release branch's patch, minor or major bump when main moves. A coordinator-run local command reports eligible branches and can merge main, regenerate version stamps, preserve released notes and fast-forward the branch after validation.
+- Accept major version bumps in the release command and version guard, and report the resolved base commit used for a bump.
+- Document the local reconciliation trigger, conflict recovery and renewed CI and review required for each updated head.
+
+## 3.39.0 (setup rows stand on their own)
+
+### Setup
+
+- **Each Claude Code setting row recommends on its own.** A row recommends Turn on unless it is already on, or setup cannot read or change it, in which case it recommends Keep current. One row with a value no longer holds the other three on Keep current, so "All recommended" now turns on a setting that is still off.
+- **Model switching is recommended on.** "Switch models without asking on a flag" recommends Turn on, which writes `"switchModelsOnFlag": true`; Turn off still writes `false`.
+- **Choices list only what changes something.** In every row, the choice that matches the current state folds into Keep current whatever is recommended, so a row shows Keep current plus the choices that change something. "Keep Toolkit available in Codex?" retains its verification action under Keep current when Codex already runs the current Toolkit from the update copy.
+- **Each app's setup talks only about that app.** The Claude Code question bank and summary no longer mention Codex, and the Codex ones no longer mention Claude Code.
+- **Codex checks the chosen update source.** Keep current still checks the installed plugin and marketplace binding after the answers, so choosing another update copy cannot silently skip verification. Automatic updates and the Claude Code plugin also retain their source-following or verification action.
+- **Keep current is always A.** Both setup banks put it first wherever it is available, including rows where another choice folds into it.
+- **The coding apps section includes the current app.** Both banks call it "Toolkit in your coding apps", with the current app's plugin and settings alongside Antigravity.
+- **Codex helper capacity has one way to keep things as they are.** The duplicate Skip choice is removed; old Skip flags and typed answers still mean Keep current. Migrate and Remove remain available only for matching Toolkit settings.
+
+## 3.38.0 (every task run reaches the project chat)
+
+### Claude Projects
+
+- Each scheduled task run keeps its full report in `latest.md` and an immutable `runs/<run UTC>.md`, writes its own run stamp under `/mnt/project-files/toolkit/task-runs/<slug>/`, and posts one home-thread line naming the per-run report. Every slug includes its kind, a readable project prefix and a digest of the full kind, project and report folder. Stamps record the task name where known and the run's own thread link. The write guard permits only that task's reports, stamps and `.failed` receipts, never coordinator `.relayed` or `.done` files.
+- The coordinator skips tasks marked `stopped by owner`, relays each run from its exact per-run report with its originating thread link, writes `.relayed` immediately after a successful post, and writes `.done` only after all prefix actions. Notification replay and wake catch-up handle every run without `.done`, oldest first, skipping only the post when `.relayed` exists. A replacement home never changes an old run's origin link.
+- Unless a task is `stopped by owner`, the hourly nudge flags runs still unrelayed after 15 minutes (`UNRELAYED TASK RUNS`) and lists those posted but without `.done` as "relayed, actions not confirmed". It flags working lanes below the cap while work is queued (`LANES UNDER CAP`). Its quick check ignores home-thread lines and coordinator activity that only relays task runs; owner messages and other posts still count. The lane count excludes the extra lane for a sudden owner request, owner waits, and PRs waiting on CI or the review queue.
+- The daily check-in reports each task's last run and whether it was relayed, flags any run unrelayed for over an hour (`RELAY GAP`), even when a newer run was acknowledged, and advises opting a project's own tasks into the Toolkit shell to get the same line and stamp. Both health checks skip every stamp of tasks marked `stopped by owner`.
+- Existing task prompts check as outdated. The daily check-in swaps Toolkit-made tasks unless `stopped by owner`; custom shell updates still need the owner's OK. Until that task's update, the coordinator reads its old shell's `latest.md` immediately, relays and acts that turn only, with no stamp, catch-up or relay gap check. The check-in names this limitation under **Tasks:**.
+
+## 3.37.0
+
+### Added
+
+- Show when each Programme Graph task last changed in Singapore time, using completion times for finished tasks and state writes or task comments for work in progress. Queued tasks show a dash.
+
+### Fixed
+
+- Render the parent graph from state documents written during the same reconcile pass, including task page and pull request link updates.
+
+## 3.36.0 (setup host check)
+
+### Setup
+
+- Setup now works out which app started it. When Codex runs it with `--host claude-code`, or Claude Code runs it without, it stops with exit code 2 before any question, says which app started it, changes nothing and prints the command to run instead. The stop names only that app, never the other one. With no app markers, or both apps' markers, `--host` is used as before.
+- The setup skill and setup docs now say that only Claude Code adds `--host claude-code`, Codex never adds `--host`, and agents show only the question bank setup prints, never questions copied from the setup question reference.
+
+### Internals
+
+- The exact Codex and Claude Code shell marker names live in one module, `repo/scripts/agent-host-markers.cjs`, used by setup and `toolkit-env`.
+
+## 3.35.0
+
+### Fixed
+
+- The hourly programme sweep tells "offline" apart from "gh not signed in": when `gh auth status` fails, one short connection to github.com decides which, so a network outage no longer reads as a sign-out.
+- Skipped sweep runs are no longer invisible. Each skip is counted in a row in the run's record, the session-start line in that repository shows `Programme sweep: skipped (<reason>), N runs in a row since <time>; see toolkit tasks.` (also for a failed run or no run for over 2 hours inside the sweep's hours), `toolkit tasks` shows the reason and count, and the first good run after them notes `Resumed after N skipped runs since <time> UTC.` Skips still exit 0.
+
+## 3.34.0
+
+### Changed
+
+- Projects: every project now runs 1 working lane by default, with one extra lane always kept free for the owner's sudden asks. The owner sets another number with one project line outside the managed block, and an existing lane cap line still counts. Work waiting on the owner no longer counts, so the coordinator starts the next item instead of idling.
+- Projects posts: one blank line between labelled blocks, the problem, fix and skip lines nested as bullets under Now, thread links titled by the thread's name, and every open owner ask carried into a fresh post. Once the owner writes after a post, that post is never edited again.
+- Projects setup records a lane line only when the owner gives a number, and an instructions sync that brings in the 1-lane default says so once in its note.
+- Projects links: posts link the chat thread that owns the work, UAT asks included. A direct PR link appears only on a merge ask for a merge-ready PR, and the hourly nudge flags any other PR link.
+- Projects posts: choices under a question are lettered (a., b.) because the owner picks one, and a device is named by the name the project instructions record for it.
+- Projects coordinator: relays every daily check-in and hourly nudge report with the waiting-on-you list, and keeps each owed decision-trace record on the promise list until it is posted and read back.
+- Projects posts: **Waiting on you** sits second last, just above the ELI5 line, which always ends the post.
+- Projects posts: every time shown to the owner, Update stamps included, uses the owner's profile time zone, never UTC.
+- Projects hourly nudge: flags a post whose ELI5 line is not last, whose Waiting on you list is not just above it, or whose Update stamps are not in the owner's time zone.
+- Projects daily check-in and hourly nudge: their reports give times in the owner's profile time zone; only their state files keep UTC.
+- Projects posts: **Waiting on you** lists only items the owner can act on right now; work still being built or reviewed stays off it, and the hourly nudge flags any that slip on.
+
+## 3.33.0
+
+### Changed
+
+- Each Claude Code setting row in setup lists only the choices that change something: a setting already on shows Turn off and Keep current, and one already off shows Turn on and Keep current. A different value, a blocked parent entry or an unreadable settings file still shows all three. The hidden choice's flag value still works and does the same as Keep current.
+- The model-switch row now reads "Switch models without asking on a flag", so on means `"switchModelsOnFlag": true`, which is also Claude Code's default when the line is missing. Turn off writes `false` instead of removing the line, and setup still recommends Turn off. An existing `false` shows as off, so nothing in the settings file changes.
+
+## 3.32.0 (auto-merge without a label)
+
+### Changed
+
+- Task auto-merge no longer uses a label. With the owner's yes merged in the programme binding, the controller merges any pull request once the gate conditions hold on one head. Only pull requests that change the merge rules themselves (the programme binding, its schema and reader, the merge hold and its helpers, the scope check, the controller, global and gate rules, the Approvals section of the Projects controller skill, CI workflows) or make a major version bump wait for the owner's typed `merge N`. Hooks, setup and agent instruction files leave that list: their risk tier already holds them for full review and owner testing.
+- The merge hold runs the merge-scope check on this computer, on the head a no-typed-approval merge names, before letting it through. A head it has not fetched, or a scope it cannot read, needs a typed merge.
+- The task auto-merge answer no longer needs a required `auto-merge-eligible` check, so `toolkit governance check` no longer reports a yes as not enforceable.
+
+### Removed
+
+- The `auto-merge-eligible` workflow, its `toolkit-owner-merge` label, the commit status that tied the label to a head, and the merge hold's refusal of commands that name the label.
+
+## 3.31.1 (smaller Projects skill)
+
+### Changed
+
+- **Claude Projects controller skill fits a skill card again.** The skill's main file shrank from about 50 KB to about 41 KB, under the 48 KB a claude.ai skill card accepts. The detail for acting on check-in and nudge reports, refreshing the guidebook copy, device work and standing permission asks moved word for word into reference files beside it (`reference/periodic-runs.md`, `reference/guidebook.md`, `reference/device-work.md` and `reference/permission-asks.md`). The skill points to each one before the step that needs it, so no rule changed.
+- **No hand upload.** The install check no longer tells you to upload the Projects skill folder by hand. It offers a skill card when the file fits one, says when the file is too large for a card, and in every case notes that the coordinator reads the copy pulled from the repo, so a missed card changes nothing it does. An account copy with its own reference files still gets the card, which replaces only the main file.
+- **Size guard.** A test now keeps the skill's main file at or under 44,000 bytes, with the card's 48,000-byte body limit as a hard ceiling, and checks that every reference file the skill names exists.
+
+## 3.31.0 (Claude Code settings on and off)
+
+### Changed
+
+- The four Claude Code setting rows in setup now offer Turn on, Turn off and Keep current, and their titles read "Claude Code setting: <name>?".
+- Turn off removes that one setting from the Claude Code user settings file whoever added it, including the full attribution object form. Parent objects and the file itself are removed only when they end up empty and setup created them; the other settings are never touched.
+- Turn on sets Toolkit's value, replacing a different value already in the settings file. A value that already does what Toolkit's does is left as it is.
+- The Current column says where a value came from in plain words: On (added by setup), On (already in your settings), Different value in your settings, or Off (Claude Code default).
+- A setting whose parent entry is not an object is held unchanged on Turn on and Turn off, and the row says why.
+
+## 3.30.2
+
+### Fixed
+
+- Projects skill: work threads post fresh below an owner message the coordinator forwards to them again, as before the post hook was removed. This counts only for choosing which post to edit, never as approval.
+
+## 3.30.1
+
+### Fixed
+
+- The `auto-merge-eligible` check no longer shows red on every always-manual pull request while task auto-merge is off. It reads the default branch's programme binding and, unless that says `after-gates`, passes and only lists what would be always manual. A binding it cannot read keeps the full check.
+
+### Security
+
+- The `toolkit-owner-merge` label now counts only when the repository owner's own user account adds it. A label added by a bot, an app or anyone else is removed and the check fails. A push after the label still removes it and turns the check red.
+- Taking the `toolkit-owner-merge` label off, or a refused label, sets the head's `toolkit-owner-merge` status to failure, and only the newest status counts, so a label added back later cannot reuse an earlier OK.
+- Before a task auto-merge, the controller runs the eligibility check itself, without `--binding-at`, on the head it merges, and merges only on exit 0 or when the head's newest `toolkit-owner-merge` status is success. This covers a pull request whose check went green while auto-merge was off.
+- In a repository an organisation owns, no user is the owner, so the label never counts there (it fails closed).
 
 ## 3.30.0
 
@@ -27,7 +160,7 @@
 
 ### Added
 
-- Task auto-merge, a per-repository answer that is off unless the owner says yes. `toolkit governance check` asks once in each governed repository whose merged binding has no answer, with Yes recommended (a yes still takes effect only through a binding pull request and a required check the owner sets), and only once every Toolkit copy runs a version that knows the answer. The answer is `task_prs.auto_merge` (`off` or `after-gates`) in the programme binding and counts only once merged on the default branch and read within a day.
+- Task auto-merge for finished pull requests, bounded by governance, review, required checks and owner testing. See the gate rules for current permission storage and manual-merge exceptions.
 - The `auto-merge-eligible` check (`.github/workflows/auto-merge-eligible.yml`, running the default branch's `repo/scripts/toolkit-auto-merge-eligible.cjs`) fails a pull request on the always-manual list: the programme binding and merge rules, hooks and every module they load, setup that writes hook config, CI workflows, agent instruction files and a major version bump. A change that only moves version stamps does not count. Such a pull request merges once the owner adds the `toolkit-owner-merge` label in GitHub; a new push removes it, and the merge hold refuses an agent that sets it.
 
 ### Changed

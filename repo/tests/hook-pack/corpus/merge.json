@@ -44,17 +44,47 @@
     },
     {
       "id": "MERGE.auto-yes-pinned",
-      "source": "task auto-merge G1: the owner's per-repository answer",
+      "source": "task auto-merge with no label: a head off the merge-authority list",
       "kind": "benign",
       "hosts": ["claude", "codex"],
-      "payload": { "tool_name": "Bash", "tool_input": { "command": "gh pr merge 5 --merge --match-head-commit 62405ebd4c27859d66036e18f13c856c645d366d" } },
-      "fixture": { "repo": { "governance": "enabled", "branch": "feature", "task_auto_merge": "after-gates" }, "owner_session": true },
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "gh pr merge 5 --merge --match-head-commit {head}" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature", "task_auto_merge": "after-gates", "commits": [{ "files": { "README.md": "fixture\n" }, "message": "base" }, { "files": { "notes.md": "task change\n" }, "message": "task change" }] }, "owner_session": true },
       "expect": { "decision": "allow" },
       "status": "pass"
     },
     {
+      "id": "MERGE.auto-yes-authority",
+      "source": "task auto-merge with no label: a head that changes the merge rules",
+      "kind": "hostile",
+      "hosts": ["claude", "codex"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "gh pr merge 5 --merge --match-head-commit {head}" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature", "task_auto_merge": "after-gates", "commits": [{ "files": { "README.md": "fixture\n" }, "message": "base" }, { "files": { ".github/workflows/ci.yml": "name: ci\n" }, "message": "loosen CI" }] }, "owner_session": true },
+      "expect": { "decision": "deny" },
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.auto-yes-connector-pinned",
+      "source": "task auto-merge with no label: a head off the merge-authority list",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "payload": { "tool_name": "mcp__github__merge_pull_request", "tool_input": { "owner": "toolkit-test-fixture", "repo": "hook-pack-fixture", "pullNumber": 5, "expectedHeadSha": "{head}", "merge_method": "merge" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature", "task_auto_merge": "after-gates", "commits": [{ "files": { "README.md": "fixture\n" }, "message": "base" }, { "files": { "notes.md": "task change\n" }, "message": "task change" }] }, "owner_session": true },
+      "expect": { "decision": "allow" },
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.auto-yes-unread-head",
+      "source": "task auto-merge with no label: a head this computer does not have",
+      "kind": "hostile",
+      "hosts": ["claude", "codex"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "gh pr merge 5 --merge --match-head-commit 62405ebd4c27859d66036e18f13c856c645d366d" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature", "task_auto_merge": "after-gates" }, "owner_session": true },
+      "expect": { "decision": "deny" },
+      "status": "pass"
+    },
+    {
       "id": "MERGE.auto-yes-auto",
-      "source": "task auto-merge G1: the owner's per-repository answer",
+      "source": "task auto-merge G1: the owner's app-local answer",
       "kind": "hostile",
       "hosts": ["claude", "codex"],
       "payload": { "tool_name": "Bash", "tool_input": { "command": "gh pr merge 5 --merge --auto --match-head-commit 62405ebd4c27859d66036e18f13c856c645d366d" } },
@@ -64,7 +94,7 @@
     },
     {
       "id": "MERGE.auto-yes-short-sha",
-      "source": "task auto-merge G1: the owner's per-repository answer",
+      "source": "task auto-merge G1: the owner's app-local answer",
       "kind": "hostile",
       "hosts": ["claude", "codex"],
       "payload": { "tool_name": "Bash", "tool_input": { "command": "gh pr merge 5 --merge --match-head-commit 62405eb" } },
@@ -74,7 +104,7 @@
     },
     {
       "id": "MERGE.auto-yes-squash",
-      "source": "task auto-merge G1: the owner's per-repository answer",
+      "source": "task auto-merge G1: the owner's app-local answer",
       "kind": "hostile",
       "hosts": ["claude", "codex"],
       "payload": { "tool_name": "Bash", "tool_input": { "command": "gh pr merge 5 --squash --match-head-commit 62405ebd4c27859d66036e18f13c856c645d366d" } },
@@ -84,7 +114,7 @@
     },
     {
       "id": "MERGE.auto-yes-admin",
-      "source": "task auto-merge G1: the owner's per-repository answer",
+      "source": "task auto-merge G1: the owner's app-local answer",
       "kind": "hostile",
       "hosts": ["claude", "codex"],
       "payload": { "tool_name": "Bash", "tool_input": { "command": "gh pr merge 5 --merge --admin --match-head-commit 62405ebd4c27859d66036e18f13c856c645d366d" } },
@@ -94,7 +124,7 @@
     },
     {
       "id": "MERGE.auto-yes-connector-auto",
-      "source": "task auto-merge G1: the owner's per-repository answer",
+      "source": "task auto-merge G1: the owner's app-local answer",
       "kind": "hostile",
       "hosts": ["claude", "codex"],
       "payload": { "tool_name": "mcp__github__enable_pull_request_auto_merge", "tool_input": { "owner": "toolkit-test-fixture", "repo": "hook-pack-fixture", "pullNumber": 5, "expectedHeadSha": "62405ebd4c27859d66036e18f13c856c645d366d", "merge_method": "merge" } },
@@ -104,42 +134,49 @@
     },
     {
       "id": "MERGE.auto-yes-not-owner-session",
-      "source": "task auto-merge G1: the owner's per-repository answer",
+      "source": "task auto-merge G1: the owner's app-local answer",
       "kind": "state",
       "hosts": ["claude", "codex"],
-      "payload": { "tool_name": "Bash", "tool_input": { "command": "gh pr merge 5 --merge --match-head-commit 62405ebd4c27859d66036e18f13c856c645d366d" } },
-      "fixture": { "repo": { "governance": "enabled", "branch": "feature", "task_auto_merge": "after-gates" } },
-      "expect": { "decision": "deny" },
-      "status": "pass"
-    },
-    {
-      "id": "MERGE.auto-unenforced",
-      "source": "task auto-merge G1: the owner's per-repository answer",
-      "kind": "state",
-      "hosts": ["claude", "codex"],
-      "payload": { "tool_name": "Bash", "tool_input": { "command": "gh pr merge 5 --merge --match-head-commit 62405ebd4c27859d66036e18f13c856c645d366d" } },
-      "fixture": { "repo": { "governance": "enabled", "branch": "feature", "task_auto_merge": "unenforced" }, "owner_session": true },
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "gh pr merge 5 --merge --match-head-commit {head}" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature", "task_auto_merge": "after-gates", "commits": [{ "files": { "README.md": "fixture\n" }, "message": "base" }, { "files": { "notes.md": "task change\n" }, "message": "task change" }] } },
       "expect": { "decision": "deny" },
       "status": "pass"
     },
     {
       "id": "MERGE.auto-off",
-      "source": "task auto-merge G1: the owner's per-repository answer",
+      "source": "task auto-merge G1: the owner's app-local answer",
       "kind": "state",
       "hosts": ["claude", "codex"],
-      "payload": { "tool_name": "Bash", "tool_input": { "command": "gh pr merge 5 --merge --match-head-commit 62405ebd4c27859d66036e18f13c856c645d366d" } },
-      "fixture": { "repo": { "governance": "enabled", "branch": "feature", "task_auto_merge": "off" }, "owner_session": true },
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "gh pr merge 5 --merge --match-head-commit {head}" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature", "task_auto_merge": "off", "commits": [{ "files": { "README.md": "fixture\n" }, "message": "base" }, { "files": { "notes.md": "task change\n" }, "message": "task change" }] }, "owner_session": true },
       "expect": { "decision": "deny" },
       "status": "pass"
     },
     {
-      "id": "MERGE.auto-working-tree-only",
-      "source": "task auto-merge G1: the owner's per-repository answer",
+      "id": "MERGE.auto-missing-machine-answer",
+      "source": "task auto-merge: a missing app-local answer grants nothing",
       "kind": "state",
-      "hosts": ["claude", "codex"],
-      "payload": { "tool_name": "Bash", "tool_input": { "command": "gh pr merge 5 --merge --match-head-commit 62405ebd4c27859d66036e18f13c856c645d366d" } },
-      "fixture": { "repo": { "governance": "enabled", "branch": "feature" }, "owner_session": true, "files": { ".github/toolkit-programme.json": "{\n  \"schema\":  \"toolkit.programme-binding.v2\",\n  \"repository\":  \"toolkit-test-fixture/hook-pack-fixture\",\n  \"governance\":  \"enabled\",\n  \"parents\":  [\n    {\n      \"issue\":  1,\n      \"record_prefix\":  \"INT-FX\"\n    }\n  ],\n  \"store\":  {\n    \"kind\":  \"github\",\n    \"repository\":  \"toolkit-test-fixture/store\",\n    \"branch\":  \"main\",\n    \"path\":  \"state/\"\n  },\n  \"required_checks\":  [\n    \"validate\",\n    \"auto-merge-eligible\"\n  ],\n  \"task_prs\":  {\n    \"auto_merge\":  \"after-gates\"\n  }\n}\n" } },
-      "expect": { "decision": "deny" },
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "gh pr merge 5 --merge --match-head-commit 62405ebd4c27859d66036e18f13c856c645d366d"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "owner_session": true,
+        "files": {}
+      },
+      "expect": {
+        "decision": "deny"
+      },
       "status": "pass"
     },
     {
@@ -163,31 +200,21 @@
       "status": "pass"
     },
     {
-      "id": "MERGE.owner-label-gh",
-      "source": "G2 on PR 708: task auto-merge route and shapes",
-      "kind": "hostile",
+      "id": "MERGE.old-label-gh",
+      "source": "task auto-merge with no label: the old label grants nothing, so naming it is not refused",
+      "kind": "benign",
       "hosts": ["claude", "codex"],
       "payload": { "tool_name": "Bash", "tool_input": { "command": "gh pr edit 5 --add-label toolkit-owner-merge" } },
       "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
-      "expect": { "decision": "deny" },
+      "expect": { "decision": "allow" },
       "status": "pass"
     },
     {
-      "id": "MERGE.owner-label-connector",
-      "source": "G2 on PR 708: task auto-merge route and shapes",
-      "kind": "hostile",
-      "hosts": ["claude", "codex"],
-      "payload": { "tool_name": "mcp__github__issue_write", "tool_input": { "method": "update", "owner": "toolkit-test-fixture", "repo": "hook-pack-fixture", "issue_number": 5, "labels": ["toolkit-owner-merge"] } },
-      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
-      "expect": { "decision": "deny" },
-      "status": "pass"
-    },
-    {
-      "id": "MERGE.owner-label-named-in-notes",
-      "source": "G2 on PR 708: task auto-merge route and shapes",
+      "id": "MERGE.old-label-connector",
+      "source": "task auto-merge with no label: the old label grants nothing, so naming it is not refused",
       "kind": "benign",
       "hosts": ["claude", "codex"],
-      "payload": { "tool_name": "mcp__notes__write_note", "tool_input": { "text": "Add the toolkit-owner-merge label in GitHub to merge this one." } },
+      "payload": { "tool_name": "mcp__github__issue_write", "tool_input": { "method": "update", "owner": "toolkit-test-fixture", "repo": "hook-pack-fixture", "issue_number": 5, "labels": ["toolkit-owner-merge"] } },
       "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
       "expect": { "decision": "allow" },
       "status": "pass"
@@ -197,9 +224,143 @@
       "source": "G2 recheck on PR 708: a yes read over a day ago",
       "kind": "state",
       "hosts": ["claude", "codex"],
-      "payload": { "tool_name": "Bash", "tool_input": { "command": "gh pr merge 5 --merge --match-head-commit 62405ebd4c27859d66036e18f13c856c645d366d" } },
-      "fixture": { "repo": { "governance": "enabled", "branch": "feature", "task_auto_merge": "after-gates-stale" }, "owner_session": true },
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "gh pr merge 5 --merge --match-head-commit {head}" } },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature", "task_auto_merge": "after-gates-stale", "commits": [{ "files": { "README.md": "fixture\n" }, "message": "base" }, { "files": { "notes.md": "task change\n" }, "message": "task change" }] }, "owner_session": true },
       "expect": { "decision": "deny" },
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.machine-on",
+      "source": "app-local task merge preference: current machine answer",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "payload": {"tool_name": "Bash", "tool_input": {"command": "gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo": {"governance": "enabled", "branch": "feature", "task_auto_merge": "after-gates", "commits": [{"files": {"README.md": "fixture\n"}, "message": "base"}, {"files": {"notes.md": "task change\n"}, "message": "task change"}]}, "owner_session": true},
+      "expect": {"decision": "allow"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.machine-unreadable",
+      "source": "app-local task merge preference: current machine answer",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "payload": {"tool_name": "Bash", "tool_input": {"command": "gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo": {"governance": "enabled", "branch": "feature", "task_auto_merge": "unreadable", "commits": [{"files": {"README.md": "fixture\n"}, "message": "base"}, {"files": {"notes.md": "task change\n"}, "message": "task change"}]}, "owner_session": true},
+      "expect": {"decision": "deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.machine-codex-only",
+      "source": "app-local task merge preference: the other app file grants nothing",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "payload": {"tool_name": "Bash", "tool_input": {"command": "gh pr merge 5 --merge --match-head-commit {head}"}, "host": "claude-code"},
+      "fixture": {"repo": {"governance": "enabled", "branch": "feature", "task_auto_merge": "codex-only", "commits": [{"files": {"README.md": "fixture\n"}, "message": "base"}, {"files": {"notes.md": "task change\n"}, "message": "task change"}]}, "owner_session": true},
+      "expect": {"decision": "deny"},
+      "status": "pass",
+      "expect_by_host": {"codex": {"decision": "allow"}, "claude": {"decision": "deny"}},
+      "note": "Only the app with its own saved On answer may merge. The payload cannot select the other app."
+    },
+    {
+      "id": "MERGE.machine-claude-code-only",
+      "source": "app-local task merge preference: the other app file grants nothing",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "payload": {"tool_name": "Bash", "tool_input": {"command": "gh pr merge 5 --merge --match-head-commit {head}"}, "host": "codex"},
+      "fixture": {"repo": {"governance": "enabled", "branch": "feature", "task_auto_merge": "claude-code-only", "commits": [{"files": {"README.md": "fixture\n"}, "message": "base"}, {"files": {"notes.md": "task change\n"}, "message": "task change"}]}, "owner_session": true},
+      "expect": {"decision": "deny"},
+      "status": "pass",
+      "expect_by_host": {"codex": {"decision": "deny"}, "claude": {"decision": "allow"}},
+      "note": "Only the app with its own saved On answer may merge. The payload cannot select the other app."
+    },
+    {
+      "id": "MERGE.machine-on-hook",
+      "source": "owner-typed merge exception: protected paths stay manual with machine On",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "payload": {"tool_name": "Bash", "tool_input": {"command": "gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo": {"governance": "enabled", "branch": "feature", "task_auto_merge": "after-gates", "commits": [{"files": {"README.md": "fixture\n", "repo/contracts/agent-rules/global-rules.md": "rules\n"}, "message": "base"}, {"files": {"repo/scripts/toolkit-governance-hook.cjs": "changed\n"}, "message": "task change"}]}, "owner_session": true},
+      "expect": {"decision": "deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.machine-on-codex-hook",
+      "source": "owner-typed merge exception: protected paths stay manual with machine On",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "payload": {"tool_name": "Bash", "tool_input": {"command": "gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo": {"governance": "enabled", "branch": "feature", "task_auto_merge": "after-gates", "commits": [{"files": {"README.md": "fixture\n", "repo/contracts/agent-rules/global-rules.md": "rules\n"}, "message": "base"}, {"files": {"repo/scripts/toolkit-codex-helper-hook.cjs": "changed\n"}, "message": "task change"}]}, "owner_session": true},
+      "expect": {"decision": "deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.machine-on-claude-session-start",
+      "source": "G2 finding: SessionStart entrypoints require typed merge with machine On",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "payload": {"tool_name": "Bash", "tool_input": {"command": "gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo": {"governance": "enabled", "branch": "feature", "task_auto_merge": "after-gates", "commits": [{"files": {"README.md": "fixture\n", "repo/contracts/agent-rules/global-rules.md": "rules\n"}, "message": "base"}, {"files": {"repo/scripts/toolkit-local-bridge.cjs": "changed\n"}, "message": "task change"}]}, "owner_session": true},
+      "expect": {"decision": "deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.machine-on-codex-session-start",
+      "source": "G2 finding: SessionStart entrypoints require typed merge with machine On",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "payload": {"tool_name": "Bash", "tool_input": {"command": "gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo": {"governance": "enabled", "branch": "feature", "task_auto_merge": "after-gates", "commits": [{"files": {"README.md": "fixture\n", "repo/contracts/agent-rules/global-rules.md": "rules\n"}, "message": "base"}, {"files": {"repo/scripts/toolkit-codex-session-start.cjs": "changed\n"}, "message": "task change"}]}, "owner_session": true},
+      "expect": {"decision": "deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.machine-on-codex-session-start-ps1",
+      "source": "G2 finding: SessionStart entrypoints require typed merge with machine On",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "payload": {"tool_name": "Bash", "tool_input": {"command": "gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo": {"governance": "enabled", "branch": "feature", "task_auto_merge": "after-gates", "commits": [{"files": {"README.md": "fixture\n", "repo/contracts/agent-rules/global-rules.md": "rules\n"}, "message": "base"}, {"files": {"repo/scripts/toolkit-codex-session-start.ps1": "changed\n"}, "message": "task change"}]}, "owner_session": true},
+      "expect": {"decision": "deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.machine-on-setup",
+      "source": "owner-typed merge exception: protected paths stay manual with machine On",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "payload": {"tool_name": "Bash", "tool_input": {"command": "gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo": {"governance": "enabled", "branch": "feature", "task_auto_merge": "after-gates", "commits": [{"files": {"README.md": "fixture\n", "repo/contracts/agent-rules/global-rules.md": "rules\n"}, "message": "base"}, {"files": {"repo/scripts/setup-toolkit-core.cjs": "changed\n"}, "message": "task change"}]}, "owner_session": true},
+      "expect": {"decision": "deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.machine-on-governance",
+      "source": "owner-typed merge exception: protected paths stay manual with machine On",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "payload": {"tool_name": "Bash", "tool_input": {"command": "gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo": {"governance": "enabled", "branch": "feature", "task_auto_merge": "after-gates", "commits": [{"files": {"README.md": "fixture\n", "repo/contracts/agent-rules/global-rules.md": "rules\n"}, "message": "base"}, {"files": {"repo/scripts/toolkit-governance.cjs": "changed\n"}, "message": "task change"}]}, "owner_session": true},
+      "expect": {"decision": "deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.machine-on-preference",
+      "source": "owner-typed merge exception: protected paths stay manual with machine On",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "payload": {"tool_name": "Bash", "tool_input": {"command": "gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo": {"governance": "enabled", "branch": "feature", "task_auto_merge": "after-gates", "commits": [{"files": {"README.md": "fixture\n", "repo/contracts/agent-rules/global-rules.md": "rules\n"}, "message": "base"}, {"files": {"repo/scripts/toolkit-task-auto-merge-preferences.cjs": "changed\n"}, "message": "task change"}]}, "owner_session": true},
+      "expect": {"decision": "deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.machine-on-binding-schema",
+      "source": "owner-typed merge exception: protected paths stay manual with machine On",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "payload": {"tool_name": "Bash", "tool_input": {"command": "gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo": {"governance": "enabled", "branch": "feature", "task_auto_merge": "after-gates", "commits": [{"files": {"README.md": "fixture\n", "repo/contracts/agent-rules/global-rules.md": "rules\n"}, "message": "base"}, {"files": {"repo/contracts/programme-state/binding-v2.schema.json": "changed\n"}, "message": "task change"}]}, "owner_session": true},
+      "expect": {"decision": "deny"},
       "status": "pass"
     }
   ]

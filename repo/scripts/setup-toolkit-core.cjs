@@ -22,6 +22,9 @@ const { STATUS: INSTALL_CHECK_STATUS, claudeAccountToolkitVersion } = require('.
 const { claudeAccountPluginFolders, claudeAppCopyLine } = require('./toolkit-claude-account-copy.cjs');
 const { CodexToolkitInstall, hookGaps } = require('./toolkit-codex-install-state.cjs');
 const { GlobalRules } = require('./toolkit-global-rules.cjs');
+const { HOST_LABELS, detectAgentHost } = require('./agent-host-markers.cjs');
+const { TaskAutoMergePreferences } = require('./toolkit-task-auto-merge-preferences.cjs');
+const { taskAutoMerge } = require('./toolkit-governance-state.cjs');
 const { defineCodexSetup } = require('./setup-core-codex.cjs');
 const { defineClaudeSetup, claudeSettingKey, CLAUDE_SETTING_KEYS } = require('./setup-core-claude.cjs');
 
@@ -36,6 +39,8 @@ const SETUP_PAUSED_FOR_QUESTION_BANK = 23;
 const SETUP_START_FOLDER_ENV = 'AI_AGENT_TOOLKIT_SETUP_START_FOLDER';
 // Setup finished its steps, but the install check found something a person must fix.
 const SETUP_ACTION_REQUIRED = 24;
+// Setup was started from one app but asked for the other app's questions; nothing was read or written.
+const SETUP_HOST_MISMATCH = 2;
 const QUESTION_BANK_BEGIN = '<!-- setup-toolkit-question-bank:begin -->';
 const QUESTION_BANK_COMPLETE = '<!-- setup-toolkit-question-bank:complete -->';
 const MANAGED_QUESTION_BANK_PROTOCOL = 'setup-toolkit-managed-question-bank-v2';
@@ -116,6 +121,7 @@ function parseNonNegativeInteger(value, flagName) {
 
 function emptySetupChoices() {
   return {
+    taskAutoMerge: '',
     managedCheckout: '',
     repoAutoUpdate: '',
     updateReports: '',
@@ -216,21 +222,27 @@ function parseArgs(argv = process.argv.slice(2)) {
     else if (arg === '--hub') args.hub = next();
     else if (arg.startsWith('--hub=')) args.hub = arg.slice('--hub='.length);
     else if (arg === '--verify-claude-plugin') args.verifyClaudePlugin = true;
+    else if (arg === '--task-auto-merge' || arg.startsWith('--task-auto-merge=')) {
+      const choice = (arg.includes('=') ? arg.slice('--task-auto-merge='.length) : next()).toLowerCase();
+      if (!['keep', 'off', 'after-gates'].includes(choice)) throw new Error(`Unsupported --task-auto-merge choice: ${choice}`);
+      args.setupChoices.taskAutoMerge = choice;
+    }
     else if (arg === '--yes-recommended') args.yesRecommended = true;
     else if (arg === '--codex-helper-capacity') {
       const choice = next().toLowerCase();
-      const normalized = { 'ram-safe': 'one-helper', advanced: 'custom' }[choice] || choice;
-      if (!['keep', 'one-helper', 'root-only', 'custom', 'migrate', 'remove', 'skip'].includes(normalized)) throw new Error(`Unsupported --codex-helper-capacity choice: ${choice}`);
+      // Legacy Skip answers write nothing, exactly like Keep current.
+      const normalized = { 'ram-safe': 'one-helper', advanced: 'custom', skip: 'keep' }[choice] || choice;
+      if (!['keep', 'one-helper', 'root-only', 'custom', 'migrate', 'remove'].includes(normalized)) throw new Error(`Unsupported --codex-helper-capacity choice: ${choice}`);
       args.setupChoices.codexHelperCapacity = normalized;
     } else if (arg === '--codex-delegation-control') {
       const legacyChoice = String(argv[++index] || '').toLowerCase();
-      const choice = { limit: 'one-helper', keep: 'keep', skip: 'skip' }[legacyChoice];
+      const choice = { limit: 'one-helper', keep: 'keep', skip: 'keep' }[legacyChoice];
       if (!choice) throw new Error(`Unsupported --codex-delegation-control choice: ${legacyChoice}`);
       args.setupChoices.codexHelperCapacity = choice;
     } else if (arg.startsWith('--codex-helper-capacity=')) {
       const choice = arg.slice('--codex-helper-capacity='.length).toLowerCase();
-      const normalized = { 'ram-safe': 'one-helper', advanced: 'custom' }[choice] || choice;
-      if (!['keep', 'one-helper', 'root-only', 'custom', 'migrate', 'remove', 'skip'].includes(normalized)) throw new Error(`Unsupported --codex-helper-capacity choice: ${choice}`);
+      const normalized = { 'ram-safe': 'one-helper', advanced: 'custom', skip: 'keep' }[choice] || choice;
+      if (!['keep', 'one-helper', 'root-only', 'custom', 'migrate', 'remove'].includes(normalized)) throw new Error(`Unsupported --codex-helper-capacity choice: ${choice}`);
       args.setupChoices.codexHelperCapacity = normalized;
     } else if (arg === '--codex-helper-count') {
       args.codexHelperCount = parseNonNegativeInteger(next(), arg);
@@ -340,6 +352,27 @@ function parseArgs(argv = process.argv.slice(2)) {
   return args;
 }
 
+// The bank shown must match the app that started setup: a Codex chat never gets the Claude Code
+// questions (and their Claude settings writes), and the reverse. Only a clear marker from one app
+// decides; no markers, or both apps' markers, keep --host as given.
+function hostMismatch(args, environment = process.env) {
+  const detected = detectAgentHost(environment);
+  if (detected === 'unknown' || detected === args.host) return null;
+  const rest = [];
+  for (let index = 0; index < args.argv.length; index += 1) {
+    const arg = args.argv[index];
+    if (arg === '--host') index += 1;
+    else if (!arg.startsWith('--host=')) rest.push(arg);
+  }
+  const rerun = ['node', `"${path.join(__dirname, 'setup-toolkit.cjs')}"`, ...[...rest, ...(detected === 'codex' ? [] : ['--host', detected])]
+    .map((part) => (/^[\w./:=-]+$/.test(part) ? part : `"${part}"`))].join(' ');
+  // Names only the app that started setup: its chat never hears about the other app's questions.
+  return [
+    `SETUP STOPPED: setup was started from ${HOST_LABELS[detected]}, and this command is not the ${HOST_LABELS[detected]} setup. Nothing was changed.`,
+    `Run it again as: ${rerun}`
+  ].join('\n');
+}
+
 function relNodeCommand(relScript, extraArgs = []) {
   return ['node', slash(relScript), ...extraArgs].join(' ');
 }
@@ -347,6 +380,7 @@ function relNodeCommand(relScript, extraArgs = []) {
 function preferenceSummary(options) {
   const choices = options.setupChoices || emptySetupChoices();
   return {
+    task_auto_merge: choices.taskAutoMerge || 'question-required',
     repo_backed_auto_update: choices.repoAutoUpdate || 'question-required',
     host_native_plugin_cache_auto_refresh: options.host === 'codex'
       ? (choices.codexPluginAutoRefresh || 'question-required')
@@ -602,7 +636,7 @@ function printHelp() {
     '                               Claude Code only; verify/report, show native refresh instructions, or install/enable via claude plugin marketplace add + install --scope user',
     '  --explain <ref>              print the full text of one setup question, for example --explain 1.2',
     '  --claude-settings enable|disable|keep',
-    '                               Claude Code only; answer all four recommended Claude Code user setting rows (attribution off, accept messages from your other sessions, ask before a model switch, read AGENTS.md) at once; values you set yourself are kept',
+    '                               Claude Code only; answer all four Claude Code user setting rows (hide AI credit, let other sessions wake this one, switch models without asking on a flag, read AGENTS.md) at once with Turn on (enable), Turn off (disable) or Keep current (keep); Turn off removes the line whoever added it, except the model-switch row, which writes false',
     `  --claude-setting <name>=enable|disable|keep   answer one of those rows, overriding --claude-settings; names: ${CLAUDE_SETTINGS.map((spec) => spec.id).join(', ')}`,
     '  --antigravity-skills copy|remove|keep   copy Toolkit\'s portable skills into Antigravity\'s global skills folder',
     '  Antigravity uses portable workspace skills only; copy with toolkit-local-bridge.cjs --copy-antigravity-skills --antigravity-project-root <path> [--write]'
@@ -1194,6 +1228,7 @@ function collectCurrentState(args) {
     delegation: delegationState,
     delegationMigrationPreview,
     agentProfile,
+    taskAutoMerge: taskAutoMerge(null, { host: args.host }).preference,
     ...(args.host === 'claude-code' ? { claudeSubagentDepth: new ClaudeSubagentDepthSetting().inspect(), claudeSettings: new ClaudeUserSettings().inspect() } : {}),
     antigravity: antigravityState(args),
     nativePlugin: args.host === 'claude-code'
@@ -1236,6 +1271,7 @@ function recommendedChoice(key, current, args) {
   if (key === 'managedCheckout') {
     return canPreserveManagedCheckout(current, args) && isStandardManagedCheckout(current) ? 'keep' : 'default';
   }
+  if (key === 'taskAutoMerge') return 'after-gates';
   if (key === 'repoAutoUpdate') return 'enable';
   if (key === 'updateReports') return 'enable';
   if (key === 'codexDocLimit') return 'enable';
@@ -1251,7 +1287,6 @@ function recommendedChoice(key, current, args) {
   if (key === 'claudeTopology') return 'root-only';
   if (key === 'claudePluginBehavior') return 'install';
   if (key === 'codexPluginBehavior') return codexPluginUnchanged(current, args) ? 'keep' : 'install';
-  if (CLAUDE_SETTING_KEYS.includes(key)) return claudeSettingsAnySet(current) ? 'keep' : 'enable';
   if (key === 'antigravitySkills') return current.antigravity?.copies ? 'copy' : 'keep';
   return 'keep';
 }
@@ -1260,16 +1295,16 @@ function wizardChoice(value, label, consequence) {
   return { value, label, consequence };
 }
 
-// currentChoice names the choice that would change nothing in the verified current state. When the
-// recommendation is that choice or keep, the two do the same thing, so the bank shows one recommended
-// Keep current. Usually keep stays and its twin is hidden. With keepAs (the twin also re-checks or
-// follows another answer, which keep would skip), the twin stays under the Keep current label with keepAs
-// as its effect, and keep is hidden. Either way the hidden choice's canonical name (a flag or a typed
-// word) still works and applies as the shown one.
+// currentChoice names the choice that would change nothing in the verified current state. It does the
+// same as keep, so the bank shows the two as one Keep current, whatever is recommended, and the other
+// choices are only the ones that change something. Usually keep stays and its twin is hidden. With keepAs
+// (the twin also re-checks or follows another answer, which keep would skip), the twin stays under the
+// Keep current label with keepAs as its effect, and keep is hidden. Either way the hidden choice's
+// canonical name (a flag or a typed word) still works and applies as the shown one.
 function foldedTwin(definition) {
   const twin = definition.currentChoice;
   const has = (value) => definition.choices?.some((choice) => choice.value === value);
-  return twin && twin !== 'keep' && has(twin) && has('keep') && [twin, 'keep'].includes(definition.recommendation?.value) ? twin : '';
+  return twin && twin !== 'keep' && has(twin) && has('keep') ? twin : '';
 }
 
 function foldDefinition(definition, twin) {
@@ -1277,7 +1312,7 @@ function foldDefinition(definition, twin) {
   const [hidden, shown] = definition.keepAs ? ['keep', twin] : [twin, 'keep'];
   const choices = definition.choices.filter((choice) => choice.value !== hidden)
     .map((choice) => (definition.keepAs && choice.value === twin ? { ...choice, label: keep.label, consequence: definition.keepAs } : choice));
-  const recommendation = definition.recommendation.value === shown && !definition.keepAs ? definition.recommendation
+  const recommendation = definition.recommendation.value !== hidden && !definition.keepAs ? definition.recommendation
     : { ...definition.recommendation, value: shown, outcome: choices.find((choice) => choice.value === shown).consequence };
   return {
     definition: { ...definition, choices, recommendation, selected: definition.selected === hidden ? shown : definition.selected },
@@ -1302,6 +1337,12 @@ function resolvedQuestion(definition) {
   if (!definition.choices.some((choice) => choice.value === recommendation.value)) {
     throw new Error(`Setup question ${definition.id} recommends an unavailable choice.`);
   }
+  // Order after folding so Keep current is always A, including keepAs rows.
+  const keepValue = fold?.folded_value === 'keep' ? fold.folded_into : 'keep';
+  const choices = [
+    ...definition.choices.filter((choice) => choice.value === keepValue),
+    ...definition.choices.filter((choice) => choice.value !== keepValue),
+  ];
   return {
     id: definition.id,
     key: definition.key,
@@ -1312,9 +1353,10 @@ function resolvedQuestion(definition) {
     currentState: {
       effectiveBehavior: definition.current,
       verification: definition.currentVerification || 'verified',
+      ...(definition.recordDigest ? { record_digest: definition.recordDigest } : {}),
     },
     recommendation: { ...recommendation },
-    choices: definition.choices.map((choice) => ({ ...choice })),
+    choices: choices.map((choice) => ({ ...choice })),
     afterApplying: definition.afterApplying || '',
     availability: definition.availability || { status: 'available', condition: 'Available for the detected setup state.' },
     privacySafeFallback: definition.privacySafeFallback || 'The effective state could not be verified safely; setup will not guess or expose private configuration.',
@@ -1397,6 +1439,7 @@ function questionBankApprovalPayload(specs) {
           displayed_text: spec.current,
           table_text: spec.current_short || spec.current,
           verification: spec.currentState?.verification || 'unverified',
+          ...(spec.currentState?.record_digest ? { record_digest: spec.currentState.record_digest } : {}),
         },
         availability: {
           status: spec.availability?.status || 'available',
@@ -1601,7 +1644,7 @@ function antigravitySkillsQuestion(args, current) {
   return resolvedQuestion({
     id: 'antigravity-skills',
     key: 'antigravitySkills',
-    section: 'Other coding apps',
+    section: 'Toolkit in your coding apps',
     title: "Copy Toolkit's skills into Antigravity?",
     prompt: 'Antigravity skills choice',
     whatThisControls: "Whether setup copies Toolkit's portable skills, and the official n8n skills Toolkit ships, into Antigravity's global skills folder (~/.gemini/config/skills) and keeps them current on each setup. Toolkit-only skills (setup, env, controller and programme tools) stay out. Folders you copied yourself are never changed.",
@@ -1907,6 +1950,33 @@ const answerable = (specs) => specs.filter((spec) => !spec.report_only);
 const statusLine = (spec) => `Status (nothing to answer): ${spec.title}: ${spec.current_short || spec.current}. ${spec.recommended_text}.`;
 const unanswered = (specs, args) => answerable(specs).filter((spec) => !choiceForKey(args, spec.key));
 
+function taskAutoMergeQuestion(args, current) {
+  const saved = current.taskAutoMerge || { status: 'missing', value: 'off', digest: null };
+  const blocked = saved.status === 'blocked';
+  const on = saved.value === 'after-gates' && saved.status === 'saved';
+  const label = args.host === 'codex' ? 'Codex' : 'Claude Code';
+  const state = blocked ? 'Could not read; automatic merging is blocked' : on ? 'On' : saved.status === 'missing' ? 'Off (no answer saved)' : 'Off';
+  return resolvedQuestion({
+    id: 'task-auto-merge', key: 'taskAutoMerge', section: 'Toolkit settings',
+    title: `May ${label} merge finished task pull requests without you typing merge?`,
+    prompt: `${label} task auto-merge choice`,
+    whatThisControls: "Sets this app's answer on this computer, only for repositories with Toolkit governance enabled, after review, required checks and your testing pass. Governance, hooks, setup and merge-rule changes still need your typed merge.",
+    choices: [
+      wizardChoice('after-gates', 'On', 'Allow finished task pull requests to merge after the required gates pass.'),
+      wizardChoice('off', 'Off', 'Wait for your typed merge for every task pull request.'),
+      wizardChoice('keep', 'Keep current', `Keep ${state}; do not rewrite the saved answer.`),
+    ],
+    currentChoice: blocked ? '' : on ? 'after-gates' : 'off',
+    recommendation: { value: recommendedChoice('taskAutoMerge', current, args), outcome: 'On: merge finished tasks after their gates pass.', reason: 'Finished tasks have passed review, checks and your testing; protected changes still wait for your typed merge.' },
+    selected: args.setupChoices.taskAutoMerge,
+    current: state, currentShort: state,
+    currentVerification: blocked ? 'unverified' : 'verified',
+    recordDigest: saved.digest || saved.status,
+    availability: { status: blocked ? 'blocked' : 'available', condition: blocked ? 'Repair the unreadable answer before setup writes anything.' : 'Available for this app on this computer.' },
+    afterApplying: 'The app-local answer is saved separately from app settings. Rule-refresh pull requests always wait for your typed merge.',
+  });
+}
+
 function setupQuestionSpecs(args, current) {
   const managedRecommendation = recommendedChoice('managedCheckout', current, args);
   const managedCurrent = currentManagedSourceOutcome(current, args);
@@ -2076,7 +2146,6 @@ function setupQuestionSpecs(args, current) {
         ...(current.delegation?.status === 'migration-required' ? [wizardChoice('migrate', 'Migrate legacy setting', 'Preview and approve migration of the exact Toolkit legacy block.')] : []),
         ...(migrateAfterCheck ? [wizardChoice('migrate', 'Migrate legacy setting', 'If Codex now runs the V2 (multi_agent_v2) helper feature, checked with Codex after you answer, preview and approve moving the V1 Toolkit block to it; otherwise setup stops before writing.')] : []),
         ...(String(current.delegation?.ownership || '').startsWith('toolkit-') ? [wizardChoice('remove', 'Remove Toolkit setting', 'Remove only the owned block after approval.')] : []),
-        wizardChoice('skip', 'Skip', 'Write no helper setting this run.'),
       ],
       // One helper is already configured for the known runtime, so setup would leave config.toml as
       // it is either way. With the runtime unknown, the same file can still need a change.
@@ -2094,7 +2163,7 @@ function setupQuestionSpecs(args, current) {
       section: 'Computer performance',
       title: 'Codex Toolkit maintenance',
       prompt: 'Codex plugin maintenance choice',
-      whatThisControls: 'Whether trusted Codex startup maintenance may refresh the installed Toolkit plugin cache from the verified managed source. It does not give Codex permission to update Claude Code.',
+      whatThisControls: 'Whether trusted Codex startup maintenance may refresh the installed Toolkit plugin cache from the verified managed source.',
       choices: [
         wizardChoice('enable', 'Turn on', 'Enable future native Toolkit cache refresh when maintenance detects stale or incompatible files.'),
         wizardChoice('disable', 'Turn off', 'Disable future automatic cache refresh; the installed Toolkit plugin is not uninstalled, and manual `setup toolkit` repair or refresh remains available.'),
@@ -2118,15 +2187,19 @@ function setupQuestionSpecs(args, current) {
       specs.push(resolvedQuestion({
         id: 'codex-toolkit-plugin',
         key: 'codexPluginBehavior',
-        section: 'Other coding apps',
+        section: 'Toolkit in your coding apps',
         title: 'Keep Toolkit available in Codex?',
         prompt: 'Codex Toolkit choice',
-        whatThisControls: 'Whether setup verifies and refreshes the Toolkit plugin in Codex this run, only shows the commands, or leaves it as it is. This row is read from the Codex files; the Codex plugin commands run only after you choose Install or refresh. This never changes Claude Code.',
+        whatThisControls: 'Whether setup verifies and refreshes the Toolkit plugin in Codex this run, only shows the commands, or leaves it as it is. This row is read from the Codex files; any plugin checks run only after you answer, including when Keep current retains the install check.',
         choices: [
           wizardChoice('install', 'Install or refresh', 'Run the Codex plugin commands to verify Toolkit in Codex, and refresh its cache from the update copy when it is missing, off, older or different.'),
           wizardChoice('instructions', 'Show instructions only', 'Make no plugin change and show the Codex plugin commands to run yourself.'),
           wizardChoice('keep', 'Keep current', `Make no plugin change and run no Codex command this run: ${codexPluginCurrent(current, args)}`),
         ],
+        // Keep the install action under Keep current: a later update-source answer can change the
+        // required marketplace binding, so the plugin and source must still be checked after answers.
+        currentChoice: unchanged ? 'install' : '',
+        keepAs: 'Keep it installed. Setup checks it against the update source chosen above after you answer, and refreshes it or corrects its marketplace binding only if needed.',
         recommendation: unchanged
           ? { value: 'keep', outcome: 'Leave the Codex plugin as it is.', reason: 'Codex already runs the current Toolkit from the update copy, so a refresh would change nothing.' }
           : { value: 'install', outcome: 'Verify and refresh the Toolkit plugin in Codex.', reason: notes.length ? `Codex does not run the current Toolkit from the update copy: ${notes.join('; ')}.` : 'Codex does not run the current Toolkit from the update copy.' },
@@ -2140,7 +2213,7 @@ function setupQuestionSpecs(args, current) {
       specs.push(reportOnlyRow({
         id: 'codex-toolkit-hooks',
         key: 'codexHooks',
-        section: 'Other coding apps',
+        section: 'Toolkit in your coding apps',
         title: 'Toolkit hooks in Codex',
         whatThisControls: "Whether Codex runs each Toolkit hook. Codex keeps this in ~/.codex/config.toml ([hooks.state]) and you change it in Codex's /hooks; setup only reports it and never edits it. A hook that is off or not reviewed does not run, so its check is skipped.",
         current: hooks.full,
@@ -2182,10 +2255,10 @@ function setupQuestionSpecs(args, current) {
     specs.push(resolvedQuestion({
       id: 'claude-toolkit-plugin',
       key: 'claudePluginBehavior',
-      section: 'Other coding apps',
+      section: 'Toolkit in your coding apps',
       title: 'Keep Toolkit available in Claude Code?',
       prompt: 'Claude Code Toolkit choice',
-      whatThisControls: 'Whether Claude Code installs or refreshes its own Toolkit plugin, shows manual instructions, or preserves current plugin state. This never changes Codex.',
+      whatThisControls: 'Whether Claude Code installs or refreshes its own Toolkit plugin, shows manual instructions, or preserves current plugin state.',
       choices: [wizardChoice('install', 'Install or refresh', 'Use Claude Code native plugin commands to verify and refresh its Toolkit cache when needed.'), wizardChoice('instructions', 'Show instructions only', 'Make no native plugin change and report the manual Claude Code action required.'), wizardChoice('keep', 'Keep current', 'Preserve the currently detected Claude Code plugin behavior and state.')],
       // Toolkit is installed, turned on and current, running in place from the update copy. Install or
       // refresh then only checks it, and re-enables or refreshes it if that check still finds a gap keep
@@ -2200,7 +2273,8 @@ function setupQuestionSpecs(args, current) {
     }));
     specs.push(...claudeSettingQuestions(args, current));
   }
-  if (current.antigravity?.installed || current.antigravity?.copies) specs.push(antigravitySkillsQuestion(args, current));
+  if (args.host === 'codex' && (current.antigravity?.installed || current.antigravity?.copies)) specs.push(antigravitySkillsQuestion(args, current));
+  specs.push(taskAutoMergeQuestion(args, current));
   foldTwinSelections(args, answerable(specs));
 
   return withPresentationMetadata(specs.filter((spec) => args.host === 'codex' || spec.key !== 'codexDocLimit').map((spec) => ({
@@ -2680,7 +2754,8 @@ function emitCompleteQuestionBank(specs, options = {}) {
 }
 
 function assignChoice(args, key, choice) {
-  if (key === 'managedCheckout') args.setupChoices.managedCheckout = choice;
+  if (key === 'taskAutoMerge') args.setupChoices.taskAutoMerge = choice;
+  else if (key === 'managedCheckout') args.setupChoices.managedCheckout = choice;
   else if (key === 'repoAutoUpdate') args.setupChoices.repoAutoUpdate = choice;
   else if (key === 'updateReports') args.setupChoices.updateReports = choice;
   else if (key === 'updateReportRetention') args.setupChoices.updateReportRetention = choice;
@@ -2695,6 +2770,7 @@ function assignChoice(args, key, choice) {
 }
 
 function choiceForKey(args, key) {
+  if (key === 'taskAutoMerge') return args.setupChoices.taskAutoMerge;
   if (key === 'managedCheckout') return args.setupChoices.managedCheckout;
   if (key === 'repoAutoUpdate') return args.setupChoices.repoAutoUpdate;
   if (key === 'updateReports') return args.setupChoices.updateReports;
@@ -2898,6 +2974,8 @@ function assertQuestionBankAnswerBinding(parsed, specs) {
 function resolveDisplayedChoiceAnswer(spec, answer) {
   const normalized = String(answer || '').trim();
   if (!normalized) return spec.recommended;
+  // Preserve old typed Skip answers after removing the duplicate helper choice.
+  if (spec.key === 'codexHelperCapacity' && normalized.toLowerCase() === 'skip') return 'keep';
   const presented = choiceByPresentationReference(spec, normalized);
   if (presented) return presented.value;
   const canonical = spec.choices.find((choice) => choice.value.toLowerCase() === normalized.toLowerCase());
@@ -3027,6 +3105,7 @@ async function consumeNonTtyAnswerPlan(answerPlan, specs, args, lines) {
 }
 
 function effectiveChoiceSummary(args, current, spec, value) {
+  if (spec.key === 'taskAutoMerge') return args.taskAutoMerge;
   if (spec.key === 'repoAutoUpdate') return args.repoAutoUpdate ? 'enable' : 'disable';
   if (spec.key === 'updateReports') return args.updateReports ? 'enable' : 'disable';
   if (spec.key === 'updateReportRetention') return `${args.updateReportRetentionDays} days`;
@@ -3252,6 +3331,8 @@ async function answerSetupQuestionBank(args, current, options = {}) {
 
 function applySetupChoices(args, current) {
   const choices = args.setupChoices;
+  if (current.taskAutoMerge?.status === 'blocked') throw new Error('Task auto-merge answer is unreadable; setup is blocked before writing.');
+  args.taskAutoMerge = choices.taskAutoMerge === 'keep' ? current.taskAutoMerge?.value || 'off' : choices.taskAutoMerge || 'off';
   if (choices.managedCheckout === 'keep') {
     if (!canPreserveManagedCheckout(current, args)) {
       throw new Error('The current Toolkit update source cannot be preserved safely. Choose the dedicated clean update copy or another location.');
@@ -3894,8 +3975,9 @@ function printFinalSummary({ args, current, managed, localClone, nativeCache, de
   if (n8nSkills) console.log(`Official n8n skills: ${n8nSkills}\n`);
   if (antigravitySkills) console.log(`Toolkit skills in Antigravity: ${antigravitySkills}\n`);
   if (localClone) console.log(`Your local Toolkit clone: ${localCloneSummary(localClone)}\n`);
-  console.log('## Codex native plugin');
+  // Each host's summary reports only its own native plugin.
   if (args.host === 'codex') {
+    console.log('## Codex native plugin');
     console.log('Codex plugin cache path: <Codex Toolkit cache>');
     console.log(`Codex expected Toolkit version: ${unknown(nativeCache.expected_version)}`);
     console.log(`Codex installed Toolkit version: ${unknown(nativeCache.installed_version)}`);
@@ -3912,13 +3994,10 @@ function printFinalSummary({ args, current, managed, localClone, nativeCache, de
     console.log(`Codex hook trust status: ${unknown(nativeCache.hook_trust_status)}`);
     console.log(`Codex hook execution status: ${unknown(nativeCache.hook_execution_status)}`);
     console.log(`Codex hook trust action: ${unknown(nativeCache.hook_trust_action)}`);
-  } else {
-    console.log('Codex plugin status: not checked for this host');
-    console.log('Codex plugin mutation: no');
+    console.log('');
   }
-  console.log('');
-  console.log('## Claude Code native plugin');
   if (args.host === 'claude-code') {
+    console.log('## Claude Code native plugin');
     console.log('Claude plugin manifest path: <managed-toolkit-checkout>/.claude-plugin/plugin.json');
     console.log(`Claude expected Toolkit version: ${unknown(nativeCache.expected_version)}`);
     console.log(`Claude manifest Toolkit version: ${unknown(nativeCache.manifest_version)}`);
@@ -3928,27 +4007,26 @@ function printFinalSummary({ args, current, managed, localClone, nativeCache, de
     console.log(`Claude app: ${claudeAppCopyLine(claudeAccountToolkitVersion(claudeAccountPluginFolders()), nativeCache.manifest_version)}`);
     console.log(`Claude new session needed: ${yesNo(nativeCache.restart_required === true)}`);
     console.log(`Claude hook trust action: ${unknown(nativeCache.hook_trust_action || 'none')}`);
-  } else {
-    console.log('Claude plugin status: not checked for this host');
-    console.log('Claude plugin mutation: no; Codex setup does not mutate Claude Code plugin cache.');
+    console.log('');
   }
-  console.log('');
   console.log('## Bridge state');
   console.log(`Repo auto-update enabled: ${yesNo(repo.enabled === true || args.repoAutoUpdate === true)}`);
   console.log('Repo auto-update path: <managed-toolkit-checkout>');
   console.log(`Repo auto-update status: ${args.repoAutoUpdate ? unknown(repo.last_status || 'configured') : 'disabled'}`);
   console.log(`Update report writes enabled: ${args.updateReports}`);
-  console.log(`Codex instruction limit kept raised: ${yesNo(args.codexDocLimit === true)}`);
+  if (args.host === 'codex') console.log(`Codex instruction limit kept raised: ${yesNo(args.codexDocLimit === true)}`);
   console.log('Update report opening behavior: action-required reports open automatically; successful reports stay closed');
   console.log(`Update report/log retention days: ${args.updateReportRetentionDays}`);
   console.log('Update report/log directory: <Toolkit update-report directory>');
   console.log(`Update report cleanup deleted count: ${cleanup.deleted_count ?? 0}`);
   console.log(`Update report cleanup error count: ${cleanup.error_count ?? 0}`);
   console.log('');
-  console.log('## Antigravity portable skills');
-  console.log('Setup question "Copy Toolkit\'s skills into Antigravity?" manages the global copy in ~/.gemini/config/skills. For one project only, copy into <project>/.agents/skills:');
-  console.log('Command: node repo/scripts/toolkit-local-bridge.cjs --copy-antigravity-skills --antigravity-project-root <project> [--write]');
-  console.log('');
+  if (args.host === 'codex') {
+    console.log('## Antigravity portable skills');
+    console.log('Setup question "Copy Toolkit\'s skills into Antigravity?" manages the global copy in ~/.gemini/config/skills. For one project only, copy into <project>/.agents/skills:');
+    console.log('Command: node repo/scripts/toolkit-local-bridge.cjs --copy-antigravity-skills --antigravity-project-root <project> [--write]');
+    console.log('');
+  }
   console.log('## Validation');
   printValidationSummary(validationResults);
   if (installCheck) printInstallCheck(installCheck);
@@ -4000,6 +4078,7 @@ class ToolkitSetupExecution {
     this.#questionBank = await answerSetupQuestionBank(args, this.#current);
     if (args.host === 'codex') this.#current = await detectCodexRuntimeAfterApproval(args, this.#current);
     await confirmSelectedDelegationProposal(args, this.#current, this.#questionBank);
+    new TaskAutoMergePreferences({ host: args.host }).verify(this.#current.taskAutoMerge);
   }
 
   #announcePlan() {
@@ -4021,6 +4100,8 @@ class ToolkitSetupExecution {
 
   async execute() {
     const args = this.#args;
+    const mergePreference = taskAutoMerge(null, { host: args.host }).preference;
+    if (mergePreference.status === 'blocked') throw new Error(mergePreference.detail);
     const early = updateBeforeChoices(args);
     if (early?.rerun) {
       console.log(early.rerun);
@@ -4038,6 +4119,8 @@ class ToolkitSetupExecution {
     if (early?.managed.update_action === 'fast-forwarded' && managed.update_action === 'already up to date') {
       managed = { ...managed, commit_before: early.managed.commit_before, update_action: 'fast-forwarded' };
     }
+    const taskMerge = new TaskAutoMergePreferences({ host: args.host }).apply(args.setupChoices.taskAutoMerge, this.#current.taskAutoMerge);
+    console.log(`${HOST_LABELS[args.host] || args.host} task auto-merge: ${taskMerge.value === 'after-gates' ? 'On' : 'Off'} (${taskMerge.changed ? 'saved and read back' : 'kept'}).`);
     const localClone = fastForwardLocalClone(args);
     // The owned V1 zero cap prevents Codex's plugin CLI from loading config.
     // Apply only this already-approved repair before invoking that CLI; ordinary
@@ -4132,6 +4215,11 @@ async function main(argv = process.argv.slice(2), options = {}) {
     runClaudeNativePluginVerify(args);
     return 0;
   }
+  const mismatch = hostMismatch(args, options.environment || process.env);
+  if (mismatch) {
+    console.error(mismatch);
+    return SETUP_HOST_MISMATCH;
+  }
   const delegatedCode = await delegateToManagedSetupIfAvailable(args);
   if (delegatedCode !== null) return delegatedCode;
   if (args.plan) {
@@ -4178,7 +4266,7 @@ const {
 });
 const {
   inspectClaudeNativePluginStatePreApproval, resolveClaudeTopology, claudeSettingsOutcome,
-  claudeSettingsAnySet, claudeSettingQuestions, applyClaudeUserSettings, applyClaudeSubagentDepth, applyClaudeAgentControl, setupClaudeArgs,
+  claudeSettingQuestions, applyClaudeUserSettings, applyClaudeSubagentDepth, applyClaudeAgentControl, setupClaudeArgs,
   runClaudeNativePluginSetup, verifyClaudeNativePluginMetadata, runClaudeInstallCheck
 } = defineClaudeSetup({
   CLAUDE_HOOK_TRUST_ACTION, SUBAGENT_DEPTH_FOR_TOPOLOGY, claudeSetupBudgets,
@@ -4202,6 +4290,8 @@ module.exports = {
   CODEX_AGENT_MAX_DEPTH,
   SETUP_PAUSED_FOR_QUESTION_BANK,
   SETUP_ACTION_REQUIRED,
+  SETUP_HOST_MISMATCH,
+  hostMismatch,
   QUESTION_BANK_BEGIN,
   QUESTION_BANK_COMPLETE,
   MANAGED_QUESTION_BANK_PROTOCOL,
@@ -4232,6 +4322,7 @@ module.exports = {
   renderSetupQuestionBankTerminal,
   renderSetupQuestionDocumentation,
   setupQuestionDocumentationSpecs,
+  setupQuestionClaudeDocumentationSpecs,
   emitCompleteQuestionBank,
   runManagedQuestionBankChild,
   plannedQuestionBank,

@@ -7,6 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync, spawn } = require('node:child_process');
 const { TOOLKIT_VERSION } = require('../scripts/toolkit-version.cjs');
+const { AGENT_HOST_MARKER_NAMES } = require('../scripts/agent-host-markers.cjs');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'setup-toolkit.cjs');
@@ -42,8 +43,14 @@ function isolatedHomeEnv(root) {
     LOCALAPPDATA: path.join(root, 'local-app-data'),
     VIRTUAL_ENV: '',
     CONDA_PREFIX: '',
-    UV_PYTHON: ''
+    UV_PYTHON: '',
+    // Blanked: setup stops when the app that started it differs from --host, and tests run inside both apps.
+    ...noHostMarkers()
   };
+}
+
+function noHostMarkers() {
+  return Object.fromEntries(AGENT_HOST_MARKER_NAMES.map((name) => [name, '']));
 }
 
 function writeFile(filePath, text) {
@@ -94,6 +101,9 @@ function createFakeCodexAppServer(root) {
 // Setup tests written before the Codex instruction limit question answer it with keep (nothing
 // recorded, so config.toml is left alone); tests of that question pass codexDocLimitQuestion: true.
 function withDocLimitAnswer(args, options) {
+  // Existing journeys keep the unrelated new setting; its own tests exercise the question.
+  if (!options.taskAutoMergeQuestion && !options.codexDocLimitQuestion && args.some(arg => arg === '--execute' || arg === '--plan')
+      && !args.some(arg => arg === '--task-auto-merge' || arg.startsWith('--task-auto-merge='))) args = [...args, '--task-auto-merge', 'keep'];
   if (options.codexDocLimitQuestion || !args.some((arg) => arg === '--execute' || arg === '--plan')
     || args.some((arg) => /^--(enable|disable|keep)-codex-doc-limit$/.test(arg))) return args;
   return [...args, '--keep-codex-doc-limit'];
@@ -103,7 +113,7 @@ function run(args, options = {}) {
   return spawnSync(process.execPath, [script, ...withDocLimitAnswer(args, options)], {
     cwd: repoRoot,
     encoding: 'utf8',
-    env: { ...process.env, ...(options.env || {}) },
+    env: { ...process.env, ...noHostMarkers(), ...(options.env || {}) },
     input: options.input,
     timeout: options.timeout || 120000,
     windowsHide: true
@@ -258,7 +268,12 @@ function createGitBackedRealSetupRepo(root) {
       fs.readFileSync(path.join(repoRoot, 'repo', 'scripts', name), 'utf8')
     );
   }
-  runTestGit(result.setupRepo, ['add', 'repo/scripts']);
+  // Setup's shared task permission resolver loads the binding validator and its local helpers.
+  for (const name of ['programme-state.cjs', 'decision-trace-audit.cjs', 'decision-tags.cjs', 'resolve-executable.cjs']) {
+    const rel = path.join('skills', 'github-program-reconciler', 'scripts', name);
+    writeFile(path.join(result.setupRepo, rel), fs.readFileSync(path.join(repoRoot, rel), 'utf8'));
+  }
+  runTestGit(result.setupRepo, ['add', 'repo/scripts', 'skills']);
   runTestGit(result.setupRepo, ['commit', '-m', 'real setup scripts']);
   runTestGit(result.setupRepo, ['push', 'origin', 'main']);
   return result;
@@ -393,4 +408,4 @@ function parseConciseInFreshProcess(specs, input) {
   return child;
 }
 
-module.exports = { assert, fs, path, spawnSync, repoRoot, script, tmpRoot, isolatedHomeEnv, writeFile, createFakeCodexAppServer, run, runTestGit, createMinimalSetupRepo, createGitBackedSetupRepo, createGitBackedRealSetupRepo, escapeRegExp, createFakeManagedSetupScript, runWithUnclosedStdin, codexConfig, backupFiles, displayedBankReference, auditFixture, specsForAudit, parseConciseInFreshProcess };
+module.exports = { assert, fs, path, spawnSync, repoRoot, script, tmpRoot, isolatedHomeEnv, noHostMarkers, writeFile, createFakeCodexAppServer, run, runTestGit, createMinimalSetupRepo, createGitBackedSetupRepo, createGitBackedRealSetupRepo, escapeRegExp, createFakeManagedSetupScript, runWithUnclosedStdin, codexConfig, backupFiles, displayedBankReference, auditFixture, specsForAudit, parseConciseInFreshProcess };

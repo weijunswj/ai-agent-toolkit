@@ -1,10 +1,8 @@
 'use strict';
 
-// Version at merge time: an open branch keeps its base's Toolkit version and writes its notes in its
-// own changelog fragment (repo/docs/changelog.d/<branch>.md); bump-version.cjs --next sets the next
-// version at merge time. This module holds the shared reading rules and the CI guard
-// (validate-toolkit.cjs), which accepts a branch that holds its base's version, or one that sets
-// exactly the next patch or minor version with its notes folded under that heading.
+// Shared PR release rules and the CI guard. A PR carries its own next patch, minor
+// or major version and folded notes. A branch without a bump may retain the base's
+// version. toolkit-rebump-prs.cjs reconciles bumped PRs after main moves.
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -15,11 +13,12 @@ const CHANGELOG_REL_PATH = 'repo/docs/CHANGELOG.md';
 const FRAGMENT_DIR_REL_PATH = 'repo/docs/changelog.d';
 const PROJECTS_SKILL_DIR_REL_PATH = 'repo/contracts/claude-projects/web-controller-projects';
 const PROJECTS_SKILL_REL_PATH = `${PROJECTS_SKILL_DIR_REL_PATH}/SKILL.md`;
-const LEVELS = Object.freeze(['patch', 'minor']);
+const LEVELS = Object.freeze(['patch', 'minor', 'major']);
 
 function nextVersion(version, level) {
+  if (!SEMVER.test(version) || !LEVELS.includes(level)) throw new Error('expected a semver version and patch, minor or major');
   const [major, minor, patch] = version.split('.').map(Number);
-  return level === 'minor' ? `${major}.${minor + 1}.0` : `${major}.${minor}.${patch + 1}`;
+  return level === 'major' ? `${major + 1}.0.0` : level === 'minor' ? `${major}.${minor + 1}.0` : `${major}.${minor}.${patch + 1}`;
 }
 
 function git(workspace, args) {
@@ -251,7 +250,7 @@ function versionProblems({ workspace, base }) {
   }
   const allowed = LEVELS.map((level) => nextVersion(baseVersion, level));
   if (!allowed.includes(current)) {
-    problems.push(`version ${current} is not the next version after the base's ${baseVersion} (${allowed.join(' or ')}); keep ${baseVersion} until merge time, then run bump-version.cjs --next`);
+    problems.push(`version ${current} is not the next version after the base's ${baseVersion} (${allowed.join(' or ')}); prepare a bump from the base or run toolkit-rebump-prs.cjs after main moves`);
     return problems;
   }
   if (topChangelogVersion(headHeadings[0] || '') !== current) {

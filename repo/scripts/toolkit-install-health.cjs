@@ -12,7 +12,7 @@
 // record in the Toolkit hub, the Toolkit helper definitions and global rules (each refreshed
 // when stale), the Toolkit-owned Claude Code depth setting against the selected topology, and,
 // once toolkit env is in use, its store and connected MCP entries (by key name only).
-// Notices that block nothing: an older uploaded Projects controller skill, an older Toolkit copy
+// Notices that block nothing: an older saved Projects controller skill, an older Toolkit copy
 // from the user's claude.ai account in the Claude desktop app (read only; claude.ai alone updates it),
 // and Codex running an older Toolkit or with Toolkit hooks off (read from the Codex files only).
 //
@@ -53,6 +53,10 @@ function slash(value) { return String(value || '').replace(/\\/g, '/'); }
 const PROJECTS_SKILL_REL = path.join('repo', 'contracts', 'claude-projects', 'web-controller-projects', 'SKILL.md');
 const QUALIFICATION_REL = path.join('repo', 'contracts', 'host-qualification', 'claude-code.json');
 const PLATFORM_NAMES = Object.freeze({ win32: 'Windows', darwin: 'macOS', linux: 'Linux' });
+// The claude.ai skill card refuses a SKILL.md body over 48 KB; the exact cut is not published, so the
+// stricter 48,000-byte reading is used. The body is the text after the frontmatter.
+const SKILL_CARD_LIMIT = 48000;
+const skillBody = (buffer) => buffer.toString('utf8').replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '');
 const skillVersion = (text) => /^Version:\s*(\d{4}-\d{2}-\d{2}\.\d+)\s*$/m.exec(String(text || ''))?.[1] || '';
 // Versions look like 2026-10-23.6: the date, then a counter for that day.
 function compareSkillVersions(left, right) {
@@ -122,9 +126,10 @@ class ToolkitInstallHealthCheck {
 
   // Shown only when a copy of the Projects controller skill is synced from claude.ai (the user runs a
   // Claude Project as controller). An older copy is reported with Toolkit's SKILL.md, its size and sha256,
-  // which the setup agent offers as a skill card the owner saves; it blocks nothing. A card carries SKILL.md only, so
-  // when the account copy holds reference files that differ from Toolkit's, the whole folder is
-  // uploaded by hand instead.
+  // which the setup agent offers as a skill card the owner saves; it blocks nothing. The coordinator reads
+  // the copy pulled from the repo, never the account copy, so no case asks the owner to upload by hand:
+  // a body too large for a card gets no offer, and an account copy with its own reference files keeps
+  // them (a card replaces SKILL.md only).
   #projectsSkillCheck() {
     if (!this.#syncedSkillsDir) return null;
     let copies = [];
@@ -142,20 +147,22 @@ class ToolkitInstallHealthCheck {
     const label = 'Claude Projects controller skill';
     if (uploaded && compareSkillVersions(uploaded, repoVersion) >= 0) return this.#check('projects-skill', label, STATUS.PASSED, `Your uploaded copy is current (${uploaded}).`);
     const behind = `Your uploaded copy is ${uploaded || 'missing its Version line'}; Toolkit has ${repoVersion}.`;
-    const folder = slash(path.dirname(source));
-    if (copies.some((file) => this.#referenceFilesDiffer(path.dirname(file), path.dirname(source)))) {
-      return this.#check('projects-skill', label, STATUS.PASSED,
-        `${behind} Your copy has its own reference files, so a skill card is not enough: upload the folder ${folder} to claude.ai (Customize > Skills, replace web-controller-projects).`);
+    const repoCopy = 'the coordinator reads the copy pulled from the repo, nothing to do.';
+    const body = fs.readFileSync(source);
+    const cardBytes = Buffer.byteLength(skillBody(body));
+    if (cardBytes >= SKILL_CARD_LIMIT) {
+      return this.#check('projects-skill', label, STATUS.PASSED, `${behind} Too large for a skill card (${cardBytes} bytes); ${repoCopy}`);
     }
     // The size and sha256 let the setup agent confirm it passes the file it read, unchanged.
-    const body = fs.readFileSync(source);
     const sha256 = crypto.createHash('sha256').update(body).digest('hex');
+    const ownReference = copies.some((file) => this.#referenceFilesDiffer(path.dirname(file), path.dirname(source)))
+      ? ' Your copy has its own reference files: the card replaces SKILL.md only, so they stay as they are.' : '';
     return this.#check('projects-skill', label, STATUS.PASSED,
-      `${behind} Skill card: offer ${slash(source)} (${body.length} bytes, sha256 ${sha256}) as a skill update card to save. Without a card tool, upload the folder ${folder} to claude.ai (Customize > Skills, replace web-controller-projects).`);
+      `${behind} Skill card: offer ${slash(source)} (${body.length} bytes, sha256 ${sha256}) as a skill update card to save.${ownReference} If no card can be offered, ${repoCopy}`);
   }
 
   // Whether an account copy holds a reference/*.md file that is not byte-equal to Toolkit's. A folder
-  // that cannot be read counts as differing, so the notice asks for the whole folder.
+  // that cannot be read counts as differing, so the notice says those files stay as they are.
   #referenceFilesDiffer(copyDir, sourceDir) {
     const referenceDir = path.join(copyDir, 'reference');
     let names;

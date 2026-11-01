@@ -12,7 +12,8 @@
 //                 which hold a name and description only, so the schedule comes from the registry;
 //   Codex and Claude cloud tasks   from the registry only, marked "from record, not checked live".
 // A registry entry the host no longer has shows "missing"; a task in a Toolkit folder that is neither
-// marked nor recorded shows "found, not recorded (not Toolkit's)".
+// marked nor recorded shows "found, not recorded (not Toolkit's)". A Toolkit task whose runs are being
+// skipped shows the reason and how many in a row; sweepLine() gives the session-start line for it.
 //
 // The registry is ~/.ai-agent-toolkit/user-state/tasks.json (toolkit.tasks.v1). Only
 // toolkit-windows-tasks.cjs writes its Windows entries; the only writes this script makes are
@@ -138,6 +139,50 @@ function writeLastRun(id, record, home) {
   fs.renameSync(temp, file);
 }
 
+// ---- skipped runs ------------------------------------------------------------------------------
+
+// The skip reasons the job runner writes. Anything else is shown as a bare "skipped", so no command
+// output reaches a session line.
+const SKIP_REASON = /^(offline|gh not signed in|gh is not installed|binding not read in 24 h|governance status could not be read|governance is [A-Z]+|this checkout has no CI shards to time)$/;
+const STALE_MS = 2 * 60 * 60 * 1000;
+
+// HH:MMZ on now's UTC date, else with the date (always with it when now is null).
+function shortTime(iso, now) {
+  const text = new Date(iso).toISOString();
+  return now && text.slice(0, 10) === now.toISOString().slice(0, 10) ? `${text.slice(11, 16)}Z` : `${text.slice(0, 10)} ${text.slice(11, 16)}Z`;
+}
+
+// "skipped (offline), 3 runs in a row since 04:00Z" for a skipped record, else null.
+function skipText(last, now = null) {
+  if (!last || last.status !== 'skipped') return null;
+  const reason = SKIP_REASON.test(String(last.reason || '')) ? ` (${last.reason})` : '';
+  const count = Number.isInteger(last.skipped_streak) && last.skipped_streak > 0 ? last.skipped_streak : 1;
+  const since = typeof last.skipped_since === 'string' && !Number.isNaN(Date.parse(last.skipped_since)) ? last.skipped_since : last.started;
+  const when = typeof since === 'string' && !Number.isNaN(Date.parse(since)) ? ` since ${shortTime(since, now)}` : '';
+  return `skipped${reason}, ${count} run${count === 1 ? '' : 's'} in a row${when}`;
+}
+
+// The session-start line for this computer's programme sweep of a repository, or null when it is
+// fine or there is none: its last run skipped or failed, or there has been no run for over 2 hours
+// inside its hours. Fixed wording only.
+function sweepLine(repository, { home = os.homedir(), now = new Date() } = {}) {
+  const registry = readRegistry(home);
+  if (registry.status !== 'ok' || typeof repository !== 'string') return null;
+  const entry = registry.tasks.find(item => item.host === 'windows' && item.job === 'programme-sweep' && !item.adopted
+    && String(item.repository || '').toLowerCase() === repository.toLowerCase());
+  if (!entry) return null;
+  const last = readLastRun(entry.id, home);
+  const at = last && [last.finished, last.started].find(value => typeof value === 'string' && !Number.isNaN(Date.parse(value)));
+  const { schedule } = require('./toolkit-windows-tasks.cjs').JOBS['programme-sweep'];
+  const [hour, minute] = schedule.at.split(':').map(Number);
+  const intoWindow = ((now.getHours() * 60 + now.getMinutes()) - (hour * 60 + minute) + 1440) % 1440;
+  const stale = intoWindow >= STALE_MS / 60000 && intoWindow < schedule.hours * 60 && (!at || now.getTime() - Date.parse(at) > STALE_MS);
+  const status = skipText(last, now) || (last && last.status === 'failed' && at ? `failed at ${shortTime(at, now)}` : null);
+  if (stale) return `Programme sweep: no run ${at ? `since ${shortTime(at, now)} ` : 'recorded '}(over 2 hours)${status ? `; the last one ${status}` : ''}; see toolkit tasks.`;
+  if (status) return `Programme sweep: ${status.startsWith('failed') ? 'last run ' : ''}${status}; see toolkit tasks.`;
+  return null;
+}
+
 // ---- record and forget -----------------------------------------------------------------------
 
 function recordTask(options, { home, now = () => new Date() } = {}) {
@@ -213,7 +258,10 @@ function windowsRows(registry, folders, scheduler, home) {
         // Windows time too; that run's record ends after it and still counts.
         const windowsTime = task.last_run ? Date.parse(task.last_run) : NaN;
         const fresh = last && (!Number.isFinite(windowsTime) || Date.parse(last.finished || last.started) >= windowsTime - 2000);
-        if (fresh) Object.assign(row, { last_run: last.finished || last.started || row.last_run, result: safeText(last.status), summary: (Array.isArray(last.summary) ? last.summary : []).slice(0, 4).map(line => safeText(line)) });
+        if (fresh) {
+          Object.assign(row, { last_run: last.finished || last.started || row.last_run, result: safeText(skipText(last) || last.status), summary: (Array.isArray(last.summary) ? last.summary : []).slice(0, 4).map(line => safeText(line)) });
+          if (Number.isInteger(last.skipped_streak) && last.skipped_streak > 0) Object.assign(row, { skipped_streak: last.skipped_streak, skipped_since: safeText(last.skipped_since) });
+        }
         else if (Number.isFinite(windowsTime)) row.result = 'no result recorded (the run stopped before writing one)';
       } else if (adopted) row.state = 'adopted (recorded, never changed by Toolkit)';
       else row.state = "found, not recorded (not Toolkit's)";
@@ -360,5 +408,5 @@ if (require.main === module) process.exitCode = main();
 
 module.exports = {
   SCHEMA, HOSTS, ID, TasksError, userStateDir, registryPath, lastRunPath, readRegistry, writeRegistry, updateRegistry, readLastRun, writeLastRun,
-  entryProblem, looksSecret, safeText, recordTask, forgetTask, listTasks, formatList, parseArgs, main, LIVE, PRESENCE, RECORD,
+  entryProblem, looksSecret, safeText, skipText, sweepLine, recordTask, forgetTask, listTasks, formatList, parseArgs, main, LIVE, PRESENCE, RECORD,
 };

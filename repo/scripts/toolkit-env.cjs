@@ -36,6 +36,7 @@ const path = require('node:path');
 const readline = require('node:readline');
 const { spawn, spawnSync } = require('node:child_process');
 const processLaunch = require('./claude-process-launch.cjs');
+const { AGENT_HOST_MARKER_NAMES } = require('./agent-host-markers.cjs');
 const {
   EnvStoreError, MAX_VALUE_BYTES, PlatformStore, assertName, assertValue, nameProblem, supportReference,
 } = require('./toolkit-env-store.cjs');
@@ -67,12 +68,8 @@ const MAX_COMMENT_CHARS = 200;
 const SCHEMES = new Set(['Bearer', 'none']);
 const DUMP_COMMANDS = new Set(['env', 'printenv', 'set', 'export', 'declare', 'typeset', 'compgen']);
 const SHELLS = new Set(['cmd', 'powershell', 'pwsh', 'bash', 'sh', 'zsh', 'dash', 'fish']);
-// Set (non-empty) in shells that a coding agent starts. Exact names only: a whole prefix such as
-// CODEX_ or CLAUDE_ would also match CODEX_HOME or CLAUDE_CONFIG_DIR in the owner's own profile.
-const AGENT_MARKERS = Object.freeze([
-  'CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'AI_AGENT',
-  'CODEX_THREAD_ID', 'CODEX_CI', 'CODEX_SANDBOX', 'CODEX_SANDBOX_NETWORK_DISABLED',
-]);
+// Set (non-empty) in shells that a coding agent starts: each app's exact markers, plus the generic AI_AGENT.
+const AGENT_MARKERS = Object.freeze([...AGENT_HOST_MARKER_NAMES, 'AI_AGENT']);
 
 function agentContext(environment) { return AGENT_MARKERS.some((name) => Boolean(environment[name])); }
 

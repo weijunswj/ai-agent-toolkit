@@ -326,36 +326,25 @@ function bindingRequiredChecks(root, options = {}) {
   return binding ? [...binding.required_checks] : null;
 }
 
-// The owner's answer on task auto-merge in the binding merged on the default branch:
-// { auto_merge: 'off' | 'after-gates', answered, fresh, eligibility_required }. It is 'after-gates'
-// only when this computer's read of that binding is valid, governs, names this repository and is
-// under 24 hours old; a missing answer, a stale or failed read, a version 1 binding or a working-tree
-// edit is 'off'. `answered` says whether the merged binding holds an answer at all.
-// `eligibility_required` says whether its required checks include the always-manual check
-// (ELIGIBILITY_CHECK): without it a yes is not enforceable, and the merge hold keeps asking.
-const ELIGIBILITY_CHECK = 'auto-merge-eligible';
-// The question for the owner, asked once per governed repository. Yes is recommended (the owner's
-// choice): a yes still takes effect only through a binding pull request and a required check the
-// owner sets, and pull requests on the always-manual list keep waiting for the owner's label.
-const TASK_AUTO_MERGE_QUESTION = Object.freeze({
-  text: "When a task's pull request has passed review, CI and your testing, should it merge without waiting for you to type merge?",
-  yes: 'Yes, merge it once every check has passed (recommended); a pull request that changes hooks or merge rules still waits until you add the toolkit-owner-merge label in GitHub.',
-  no: 'No, I type merge for each one.',
-  reason: 'A finished pull request has already passed review, CI and your testing, so waiting for you to type merge only slows it down; anything that changes hooks or merge rules still waits for you.',
-});
+// One resolver for setup, reporting and enforcement. The selected app's local answer is
+// the only switch. A fresh enabled v2 merged binding still bounds its repository scope.
+// Setup passes no root and displays `preference`; that never grants a repository merge.
 function taskAutoMerge(root, options = {}) {
-  const off = { auto_merge: 'off', answered: false, fresh: false, eligibility_required: false };
+  const { TaskAutoMergePreferences } = require('./toolkit-task-auto-merge-preferences.cjs');
+  const preference = new TaskAutoMergePreferences({ host: options.host, ...(options.home ? { home: options.home } : {}) }).inspect();
+  const off = { auto_merge: 'off', answered: preference.status === 'saved', fresh: false,
+    source: preference.host ? `machine:${preference.host}` : 'unavailable', preference };
+  if (preference.status === 'blocked') return { ...off, reason: preference.host ? 'preference-blocked' : 'unknown-host' };
+  if (!root) return { ...off, reason: 'repository-required' };
   try {
     const identity = readIdentity(root);
-    if (!identity.valid) return off;
+    if (!identity.valid) return { ...off, reason: 'repository-invalid' };
     const now = typeof options.now === 'function' ? options.now() : new Date();
     const judged = judgeMerged(bindingCache.readBindingCache(identity, registryPathFor(options)), identity, now);
-    if (judged.status !== 'enabled') return off;
-    const value = judged.binding.task_prs && judged.binding.task_prs.auto_merge;
-    const answered = value === 'off' || value === 'after-gates';
-    const eligibilityRequired = Array.isArray(judged.binding.required_checks) && judged.binding.required_checks.includes(ELIGIBILITY_CHECK);
-    return { auto_merge: value === 'after-gates' && judged.fresh === true ? 'after-gates' : 'off', answered, fresh: judged.fresh === true, eligibility_required: eligibilityRequired };
-  } catch { return off; }
+    if (judged.status !== 'enabled' || judged.binding.schema !== 'toolkit.programme-binding.v2' || judged.fresh !== true) return { ...off, reason: 'fresh-enabled-binding-required' };
+    return { ...off, fresh: true, auto_merge: preference.value,
+      reason: preference.status === 'missing' ? 'no-answer-saved' : preference.value === 'off' ? 'machine-off' : 'machine-on' };
+  } catch { return { ...off, reason: 'binding-unreadable' }; }
 }
 
 // The dependency policy of a parsed binding: { auto_merge, github_actions }. Missing keys take the
@@ -808,8 +797,6 @@ module.exports = Object.freeze({
   bindingRequiredChecks,
   workingBindingRequiredChecks,
   taskAutoMerge,
-  TASK_AUTO_MERGE_CHECK: ELIGIBILITY_CHECK,
-  TASK_AUTO_MERGE_QUESTION,
   committedBindingPolicy,
   workingBindingPolicy,
   readDecision,

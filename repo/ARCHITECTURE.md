@@ -2,7 +2,7 @@
 
 A compact, pointer-only map of this repository. Rules live in [CONTROLLER.md](CONTROLLER.md), the root `AGENTS.md` and the sources named below; this file only says where things are. Update it in the change that moves what it describes; `repo/tests/repo-map.test.cjs` checks that every path listed here exists.
 
-Last reviewed against `main` `37877aedbadfc2baf1f70c2e6b9f2281430174b8`.
+Last reviewed against `main` `389c1c0608938da3ee3387adbe9235e2ef45784b`.
 
 ## Parts
 
@@ -11,7 +11,7 @@ Last reviewed against `main` `37877aedbadfc2baf1f70c2e6b9f2281430174b8`.
 | Skills | `skills/` | The copyable product: one folder per skill, edited directly |
 | Agent-rule sources | `repo/contracts/agent-rules/` | Global rules, gate rules, governed-repository rules, n8n safety rules, skill routing |
 | Repo-local templates | `repo/contracts/agent-rules/repo-local/` | Managed `AGENTS.md` template, the one-line `CLAUDE.md` and the Antigravity bootstrap, projected into `skills/repository-agent-rules/repo-local/` |
-| Projects controller skill | `repo/contracts/claude-projects/web-controller-projects/` | Source of the Claude Projects coordinator skill and its `reference/` files, updated on claude.ai from a skill card the owner saves (or uploaded by hand where no card tool exists), the managed project-instructions block it places and its scheduled task templates; never offered as a plugin skill |
+| Projects controller skill | `repo/contracts/claude-projects/web-controller-projects/` | Source of the Claude Projects coordinator skill and its `reference/` files, read by the coordinator from the copy pulled from the repo into the project library and saved on claude.ai from a skill card when it fits one, the managed project-instructions block it places and its scheduled task templates; never offered as a plugin skill |
 | Controller kernel | `repo/contracts/controller-kernel/` | Stack registry, controller decision, gate IR and Codex adapter schemas |
 | Bridge contract | `repo/contracts/toolkit-local-bridge/` | Package version and native plugin inputs |
 | Lane map | `repo/contracts/lanes/lane-map.json` | Which files the Claude and Codex lanes own and which stay integration-owned |
@@ -20,7 +20,7 @@ Last reviewed against `main` `37877aedbadfc2baf1f70c2e6b9f2281430174b8`.
 | Docs | `repo/docs/` | Human and agent docs, routed by `repo/docs/agent-playbooks/INDEX.md` |
 | Provenance | `repo/source-watch/` | Third-party source locks and the notification-only source watch |
 | Native plugins | `.claude-plugin/`, `.codex-plugin/` | Claude Code and Codex plugin metadata and hooks |
-| CI | `.github/workflows/` | `validate.yml` is the full gate: test shards on Linux and Windows, the `hook-pack` job on both and the `personal-data` check (config `.github/personal-data-guard.json`), then the `validate` job checks and verifies them (the Windows shards include the env store tests on the real Credential Manager); it runs again when a pull request's title or body is edited. `auto-merge-eligible.yml` runs the default branch's `repo/scripts/toolkit-auto-merge-eligible.cjs` on every pull request and fails one on the task auto-merge always-manual list |
+| CI | `.github/workflows/` | `validate.yml` is the full gate: test shards on Linux and Windows, the `hook-pack` job on both and the `personal-data` check (config `.github/personal-data-guard.json`), then the `validate` job checks and verifies them (the Windows shards include the env store tests on the real Credential Manager); it runs again when a pull request's title or body is edited. |
 
 ## Entry points
 
@@ -38,7 +38,8 @@ Last reviewed against `main` `37877aedbadfc2baf1f70c2e6b9f2281430174b8`.
 | Governance gate hooks (hold prompts and tools until a repository has a decision) | `repo/scripts/toolkit-governance-gate.cjs` (the gate), `repo/scripts/toolkit-governance-answer.cjs` (records the user's reply the agent read, under a one-use reply ticket), `repo/scripts/toolkit-governance-hook.cjs` (Claude Code), `repo/scripts/toolkit-codex-helper-hook.cjs` and `repo/scripts/toolkit-codex-session-start.cjs` (Codex) |
 | Helper route guard and adapter | `repo/scripts/toolkit-v3-helper-guard.cjs`, `repo/scripts/toolkit-v3-native-helper-adapter.cjs` (shared core), `repo/scripts/toolkit-v3-native-helper-adapter-claude.cjs`, `repo/scripts/toolkit-v3-native-helper-adapter-codex.cjs` |
 | Claude helper agents | `repo/scripts/toolkit-claude-helper-agents.cjs`, `repo/scripts/toolkit-claude-helper-spec.cjs`, `repo/scripts/toolkit-claude-task-session.cjs` |
-| Version bump | `repo/scripts/bump-version.cjs` (`--next patch\|minor` at merge time; notes wait in `repo/docs/changelog.d/`) |
+| Version bump | `repo/scripts/bump-version.cjs` (`--next patch\|minor\|major`; folds notes from `repo/docs/changelog.d/`) |
+| Reconcile open release branches after main moves | `repo/scripts/toolkit-rebump-prs.cjs` (coordinator requests a computer lane; report by default, `--apply` prepares and fast-forwards eligible branches) |
 | Risk tier of a change | `repo/scripts/toolkit-risk-tier.cjs`, this repository's list `.github/toolkit-risk-tiers.json` |
 | Leftover worktrees and merged branches (read-only list) | `repo/scripts/workspace-residue-report.cjs` |
 | Instruction sync | `repo/scripts/sync-agent-instruction-shims.cjs`, `repo/scripts/sync-repo-doc-contract.cjs` |
@@ -52,7 +53,7 @@ Last reviewed against `main` `37877aedbadfc2baf1f70c2e6b9f2281430174b8`.
 | Comment tags and G0 decision history | `skills/github-program-reconciler/scripts/decision-tags.cjs`, `skills/github-program-reconciler/scripts/decision-history.cjs` |
 | Personal-data guard and installer | `skills/secure-ci-cd/scripts/personal-data-guard.cjs`, `skills/secure-ci-cd/scripts/install-personal-data-guard.cjs` |
 | Governance state (`toolkit-governance.cjs`) | `repo/scripts/toolkit-governance-state.cjs` (the one state function), `repo/scripts/toolkit-governance.cjs` (CLI), `repo/scripts/toolkit-governance-conformance.cjs`, `repo/scripts/toolkit-governance-migration.cjs`, `repo/scripts/toolkit-governance-ruleset.cjs`, `repo/scripts/toolkit-governance-protection.cjs` (default-branch protection), `repo/scripts/toolkit-governance-catalogue.cjs` |
-| Task auto-merge (the owner's per-repository answer, `task_prs.auto_merge` in the merged binding) | `repo/scripts/toolkit-governance-state.cjs` (`taskAutoMerge` and the question), `repo/scripts/toolkit-merge-hold.cjs` (the pinned merge it lets through), `repo/scripts/toolkit-auto-merge-eligible.cjs` (the always-manual list), `repo/contracts/agent-rules/gate-rules.md` (when the controller merges) |
+| Task auto-merge (the current app's machine-level setup answer; enabled governance required) | `repo/scripts/toolkit-task-auto-merge-preferences.cjs` (strict per-app persistence), `repo/scripts/toolkit-governance-state.cjs` (`taskAutoMerge`, shared by setup, reporting and enforcement), `repo/scripts/toolkit-merge-hold.cjs` (the pinned merge it lets through, after the scope check), `repo/scripts/toolkit-auto-merge-eligible.cjs` (the merge-authority list that waits for a typed merge), `repo/contracts/agent-rules/gate-rules.md` (when the controller merges) |
 | Programme state and reconcile pass | `skills/github-program-reconciler/scripts/programme.cjs`, `skills/github-program-reconciler/scripts/programme-state.cjs` |
 | No-AI Windows scheduled tasks (hourly programme sweep, weekly shard timings), their job runner and the list of every scheduled task | `repo/scripts/toolkit-windows-tasks.cjs` (the only code that changes Windows tasks), `repo/scripts/toolkit-scheduled-job.cjs`, `repo/scripts/toolkit-tasks.cjs`; registry `~/.ai-agent-toolkit/user-state/tasks.json` |
 | Cloud "Generated by Claude Code" footer: after-tool hook and device sweep | `repo/scripts/toolkit-github-footer-guard.cjs`, `repo/scripts/toolkit-github-footer-hook.cjs`, `repo/scripts/toolkit-github-footer-sweep.cjs` |
