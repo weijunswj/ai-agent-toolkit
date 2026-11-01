@@ -55,27 +55,31 @@ function respond(event, input, options = {}) {
   }
   // The merge hold runs first and on its own, so an error in the governance check never skips it.
   if (event === 'PreToolUse') {
-    const merge = mergeDecision(input, options);
+    const merge = mergeDecision(input, { ...options, consume: false });
     if (merge) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: merge.deny } };
   }
   let gate;
   try {
     gate = options.gate || require('./toolkit-governance-gate.cjs');
     if (event === 'UserPromptSubmit') {
+      // Recording explicit merge authority is independent of answering governance. Only this live
+      // prompt is ingested, never the held context later attached to an answer.
+      let approvalNote = '';
+      try {
+        const count = (options.mergeHold || mergeHold()).recordPrompt(input, { environment: options.environment || process.env, registryOptions: options.registryOptions, now: options.now });
+        if (count) approvalNote = `Toolkit recorded ${count} explicit merge approval(s). Any governance hold still applies.`;
+      } catch { approvalNote = 'Toolkit could not record merge approvals from this message. A later merge still needs an unused recorded approval.'; }
       const decision = new gate.PromptHold({ ...options, picker: true }).decide({ cwd: input.cwd, prompt: input.prompt, sessionId: gate.sessionIdOf(input) });
-      if (decision.action === 'block') return { decision: 'block', reason: decision.reason };
-      // A "merge N" the user types is kept for the merge hold, but not while the governance question
-      // holds the message: the user types it again after answering. A failure only means a later
-      // merge is refused.
-      if (!decision.notice) {
-        try { (options.mergeHold || mergeHold()).recordPrompt(input, { environment: options.environment || process.env, registryOptions: options.registryOptions, now: options.now }); } catch { /* fail closed later */ }
-      }
-      const context = decision.context ? { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: decision.context } } : {};
+      if (decision.action === 'block') return { decision: 'block', reason: [decision.reason, approvalNote].filter(Boolean).join('\n') };
+      const text = [decision.context, approvalNote].filter(Boolean).join('\n');
+      const context = text ? { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: text } } : {};
       return decision.notice ? { systemMessage: decision.notice, ...context } : context;
     }
     if (event === 'PreToolUse') {
       const decision = new gate.ToolGate(options).decide(input);
-      return decision ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: decision.deny } } : {};
+      if (decision) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: decision.deny } };
+      const merge = mergeDecision(input, options);
+      return merge ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: merge.deny } } : {};
     }
     if (event === 'PostToolUse') {
       if (input.tool_name !== 'AskUserQuestion') return {};
@@ -87,7 +91,14 @@ function respond(event, input, options = {}) {
     const line = gate.sessionLine(input.cwd, { ...options, sessionId: gate.sessionIdOf(input) });
     return line ? { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: line } } : {};
   } catch {
-    return failed(event, input, gate);
+    // A failed governance check outside a repository may still allow a merge there. Consume its
+    // approval only if that failure path actually allows the call.
+    const failure = failed(event, input, gate);
+    if (event === 'PreToolUse' && !failure.hookSpecificOutput) {
+      const merge = mergeDecision(input, options);
+      if (merge) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: merge.deny } };
+    }
+    return failure;
   }
 }
 
@@ -96,7 +107,7 @@ const mergeHold = () => require('./toolkit-merge-hold.cjs');
 // The merge hold's decision (toolkit-merge-hold.cjs), failing closed for a call that may merge
 // when the module cannot run.
 function mergeDecision(input, options = {}) {
-  try { return (options.mergeHold || mergeHold()).decide(input, { registryOptions: options.registryOptions, now: options.now, environment: options.environment || process.env, host: 'claude' }); } catch {
+  try { return (options.mergeHold || mergeHold()).decide(input, { registryOptions: options.registryOptions, now: options.now, environment: options.environment || process.env, host: 'claude', consume: options.consume !== false }); } catch {
     let mayMerge = true;
     try { mayMerge = (options.mergeHold || mergeHold()).mayMerge(input); } catch { mayMerge = STATE_CHANGING_TOOLS.test(String(input && input.tool_name || '')) && /merge|push/i.test(JSON.stringify(input || {})); }
     return mayMerge ? { deny: MERGE_CHECK_FAILED } : null;

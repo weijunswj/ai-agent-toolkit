@@ -51,6 +51,23 @@ test('matchers read as the hosts read them: none matches all, a plain list exact
   assert.equal(pack.matches('^mcp__.*[Mm][Ee][Rr][Gg][Ee].*$', 'mcp__github__merge_pull_request'), true);
 });
 
+test('bounded sequences validate every preceding event and its expectation', () => {
+  const step = { event: 'UserPromptSubmit', payload: { prompt: 'merge owner/a#9' }, expect: { decision: 'allow' } };
+  assert.deepEqual(pack.rowErrors(row({ steps: [step] })), []);
+  assert.deepEqual(pack.rowErrors(row({ steps: [{ event: 'SessionStart', payload: { source: 'resume' }, expect: { decision: 'allow' } }, step] })), []);
+  for (const steps of [[], Array(25).fill(step), [{ ...step, steps: [step] }], [{ ...step, expect: { decision: 'maybe' } }], [null]]) {
+    assert.notDeepEqual(pack.rowErrors(row({ steps })), [], JSON.stringify(steps));
+  }
+  assert.ok(pack.expectationChanges([row({ steps: [step] })], [row({ steps: [{ ...step, payload: { prompt: 'changed' } }] })]).length);
+});
+
+test('end to end: a recorded date-name approval reaches the final allowed merge through preceding hook events', async () => {
+  let text = '';
+  const code = await pack.main(['run', '--rows', 'MERGE.date-name-lines', '--host', 'claude'], { write(chunk) { text += chunk; } });
+  assert.equal(code, 0, text);
+  assert.match(text, /1 case\(s\)/);
+});
+
 test('the hooks a host starts for a call come from its real hooks.json', () => {
   const names = (host, event, tool) => pack.selectHooks(hooksOf(host), event, tool).map(hook => /([a-z-]+)\.cjs/.exec(hook.command)[1]);
   assert.deepEqual(names('claude', 'PreToolUse', 'Bash'), ['toolkit-claude-attribution-hook', 'toolkit-governance-hook']);
