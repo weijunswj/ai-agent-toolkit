@@ -254,7 +254,7 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.ok(read('repo/contracts/claude-projects/web-controller-projects/tasks/hourly-nudge.md').includes('(c) a coordinator post since the last run whose **ELI5:** line is not its last line, whose **Waiting on you** list is not just above that line, or whose Update stamps are not in the owner\'s profile time zone;'));
   assert.doesNotMatch(text + body, /Waiting on you \(n\):\*\*`? (as the very )?last|the ELI5 line ends the post/);
   // The owner's spacing: each Update line is its own paragraph with one blank line between, zone in the label, no spacer lines.
-  assert.ok(text.includes("one **[HH:MM] <zone> Update:** line per update (bold label with the owner's time zone abbreviation, for example **[16:41] SGT Update:**), each its own paragraph with exactly one blank line before the next and never an `&nbsp;` spacer line"));
+  assert.ok(text.includes("one **[HH:MM] <zone> Update:** line per update (the owner's zone, e.g. SGT), each its own paragraph one blank line apart, no `&nbsp;` spacer,"));
   assert.ok(body.includes('one-line `**[HH:MM] <zone> Update:**` entries, no questions;') && body.includes('a single blank line (no `&nbsp;`) between Update lines, questions and blocks.'));
   assert.doesNotMatch(text + body, /followed by a line holding only `&nbsp;`|take that spacer/);
   // The owner's board rules: blank lines between blocks, nested problem lines, title links, open asks carried forward.
