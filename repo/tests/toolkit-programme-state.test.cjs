@@ -205,7 +205,7 @@ test('rendered blocks never contain private values and use the Toolkit marker fo
   assert.equal(managedBlock.blockState(blocks[0], { source: state.BLOCK_SOURCE, name: state.BLOCK_NAME, version: '3.9.1', body: childBody }), 'current');
 });
 
-test('the Programme Graph has six columns, works out NOW, LATER and OPTIONAL, sorts each by priority order then child number, then COMPLETED by completion, then RETIRED, and flattens nesting', () => {
+test('the Programme Graph has seven columns, works out NOW, LATER and OPTIONAL, sorts each by priority order then child number, then COMPLETED by completion, then RETIRED, and flattens nesting', () => {
   const outcomes = [
     { issue: 8, class: 'COMMITTED', parent: 7, order: 9, name: 'Shared host contract', description: 'One contract for both hosts' },
     { issue: 9, class: 'RETIRED', parent: 7, order: 0, description: 'Old predecessor' },
@@ -243,7 +243,7 @@ test('the Programme Graph has six columns, works out NOW, LATER and OPTIONAL, so
   const body = state.renderParentBlockBody(parent, children, issues);
   const lines = body.split('\n');
   assert.equal(lines[1], '## Programme Graph');
-  assert.ok(lines.includes('| Task | Task Description | Child # | PR # | Class | Status |'));
+  assert.ok(lines.includes('| Task | Task Description | Child # | PR # | Class | Status | Last updated (SGT) |'));
   assert.equal(/CORE|HARDENING/.test(body), false, 'the old classes never show');
   const rows = lines.filter(line => /^\| [^|]+ \| [^|]+ \| #\d+ \|/.test(line)).map(line => line.split(' | ').map(cell => cell.replace(/^\| | \|$/g, '')));
   assert.deepEqual(rows.map(row => Number(row[2].slice(1))), [11, 8, 17, 10, 21, 14, 15, 13, 18, 19, 12, 16, 9], 'NOW, LATER, OPTIONAL by priority order and child number; finished oldest first');
@@ -261,14 +261,54 @@ test('the Programme Graph has six columns, works out NOW, LATER and OPTIONAL, so
     ['#12', '-', 'finished rows carry no class'],
     ['#9', '-', 'retired rows carry no class'],
   ]) assert.equal(classOf[issue], expected, `${issue}: ${why}`);
-  assert.deepEqual(rows[1], ['Shared host contract', 'One contract for both hosts', '#8', '#549', 'NOW', 'IN PROGRESS'], 'the description follows the task, and the gate is not a column');
+  assert.deepEqual(rows[1], ['Shared host contract', 'One contract for both hosts', '#8', '#549', 'NOW', 'IN PROGRESS', '-'], 'the description follows the task, and the gate is not a column');
   assert.deepEqual([rows[5][0], rows[5][2]], ['per-repository governance states', '#14'], 'a release prefix is not part of the name');
   assert.deepEqual([rows[6][0], rows[6][2]], ['Toolkit temporary-resource hygiene', '#15'], 'a code prefix is not part of the name');
-  assert.deepEqual(rows[2].slice(4), ['NOW', 'IN PROGRESS']);
-  assert.deepEqual([rows[12][1], ...rows[12].slice(4)], ['Old predecessor', '-', 'RETIRED'], 'retired is its own group below COMPLETED');
-  assert.deepEqual(rows[11].slice(4), ['-', 'COMPLETED'], 'a finished nested child goes down to COMPLETED');
+  assert.deepEqual(rows[2].slice(4), ['NOW', 'IN PROGRESS', '-']);
+  assert.deepEqual([rows[12][1], ...rows[12].slice(4)], ['Old predecessor', '-', 'RETIRED', '2026-10-01 08:00'], 'retired is its own group below COMPLETED');
+  assert.deepEqual(rows[11].slice(4), ['-', 'COMPLETED', '2026-10-20 08:00'], 'a finished nested child goes down to COMPLETED');
   assert.equal(rows[10][0], 'External Operation Authority');
   assert.equal(body.includes('Roadmap') || body.includes('<details>'), false, 'one table, nothing else');
+});
+
+test('the Programme Graph renders deterministic Singapore update times from task state and comments', () => {
+  const cases = [
+    { class: 'COMPLETED', completed_at: '2026-11-01T06:38:59Z', closed_at: '2026-11-02T00:00:00Z', expected: '2026-11-01 14:38' },
+    { class: 'COMPLETED', closed_at: '2026-10-31T16:30:00Z', expected: '2026-11-01 00:30' },
+    { class: 'RETIRED', completed_at: '2026-10-31T16:30:00Z', expected: '2026-11-01 00:30' },
+    { lifecycle: 'DONE', expected: '-' },
+    { lifecycle: 'RETIRED', expected: '-' },
+    { lifecycle: 'ACTIVE', written_at: '2026-11-01T06:38:59Z', expected: '2026-11-01 14:38' },
+    { lifecycle: 'ACTIVE', written_at: '2026-11-01T06:38:59Z', comments: [
+      { body: 'New update', created_at: '2026-11-01T07:01:00Z' },
+      { body: 'Older update', created_at: '2026-11-01T06:00:00Z' },
+    ], expected: '2026-11-01 15:01' },
+    { lifecycle: 'ACTIVE', written_at: '2026-10-31T16:30:00Z', comments: [
+      { body: 'Topic\n<!-- programme-trace intent=own-index -->', created_at: '2026-11-02T00:00:00Z' },
+      { body: 'Older update', created_at: '2026-10-31T15:00:00Z' },
+    ], expected: '2026-11-01 00:30' },
+    { lifecycle: 'ACTIVE', comments: [{ body: 'First update', created_at: '2026-10-31T16:30:00Z' }], expected: '2026-11-01 00:30' },
+    { lifecycle: 'ACTIVE', expected: '-' },
+    { class: 'COMMITTED', written_at: '2026-11-01T06:38:59Z', comments: [{ body: 'Queued', created_at: '2026-11-02T00:00:00Z' }], expected: '-' },
+    { class: 'OPTIONAL', written_at: '2026-11-01T06:38:59Z', comments: [{ body: 'Optional', created_at: '2026-11-02T00:00:00Z' }], expected: '-' },
+  ];
+  const outcomes = cases.map((entry, index) => ({ issue: index + 10, class: entry.class || 'COMMITTED', parent: 7, order: index }));
+  const parent = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes });
+  const children = new Map(outcomes.map((outcome, index) => {
+    const entry = cases[index];
+    return [outcome.issue, { ...state.newChild({ repository: 'acme/app', outcome }),
+      ...(entry.lifecycle ? { lifecycle: entry.lifecycle } : {}), ...(entry.completed_at ? { completed_at: entry.completed_at } : {}),
+      ...(entry.written_at ? { volatile: { written_at: entry.written_at } } : {}) }];
+  }));
+  const issues = new Map(outcomes.map((outcome, index) => [outcome.issue, { closed_at: cases[index].closed_at }]));
+  const comments = new Map(outcomes.map((outcome, index) => [outcome.issue, cases[index].comments || []]));
+  const render = () => state.renderBlock(state.renderParentBlockBody(parent, children, issues, comments), '3.9.1');
+  const body = render();
+  assert.equal(render(), body, 'the same input renders the same block twice');
+  for (const [index, outcome] of outcomes.entries()) {
+    const row = body.split('\n').find(line => line.startsWith(`| #${outcome.issue} |`));
+    assert.equal(row.split(' | ')[6], `${cases[index].expected} |`, `task #${outcome.issue}`);
+  }
 });
 
 test('a priority tie is named only among queued rows of one group', () => {
@@ -296,7 +336,7 @@ test('older class names are read as COMMITTED and anything else is refused', () 
     const parent = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes: [{ issue: 8, class: cls, parent: 7, order: 0 }] });
     assert.deepEqual(state.validateParent(parent), [], `${cls} still reads`);
     const body = state.renderParentBlockBody(parent, new Map(), new Map());
-    assert.match(body, /^\| #8 \| - \| #8 \| - \| LATER \| QUEUED \|$/m, `${cls} shows as LATER with no release`);
+    assert.match(body, /^\| #8 \| - \| #8 \| - \| LATER \| QUEUED \| - \|$/m, `${cls} shows as LATER with no release`);
   }
   const bad = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes: [{ issue: 8, class: 'NOW', parent: 7, order: 0 }] });
   assert.match(state.validateParent(bad).join('\n'), /class must be one of COMMITTED, OPTIONAL, COMPLETED, RETIRED/, 'the bucket is never stored');
