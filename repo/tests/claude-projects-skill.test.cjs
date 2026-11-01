@@ -226,14 +226,18 @@ test('Projects keeps its Toolkit base layer current without touching the project
   // The owner's call: Waiting on you sits second last, just above the ELI5 line, which ends every post.
   assert.ok(text.includes('**Waiting on you (n):** second last, just above the ELI5 line'));
   assert.ok(text.includes('one **ELI5:** line, matched to the Now line, as the very last line with nothing after it'));
-  assert.ok(body.includes('`**Waiting on you (n):**` second last, one numbered item'));
+  assert.ok(body.includes('`**Waiting on you (n):**` second last, one numbered item per ask actionable now,'));
+  // Waiting on you holds only what the owner can act on now; work not ready for them stays off it.
+  assert.ok(text.includes('one numbered line per item the owner can act on right now (work still being built, reviewed or otherwise not ready for them stays off the list until it is;'));
+  assert.ok(read('repo/contracts/claude-projects/web-controller-projects/tasks/hourly-nudge.md').includes('(d) a **Waiting on you** item the owner cannot act on yet, such as work still being built or reviewed.'));
+  assert.doesNotMatch(body, /one numbered item per owner ask/);
   assert.ok(body.includes('one `**ELI5:**` line last;'));
   // Times shown to the owner use their profile time zone, never UTC.
   assert.ok(body.includes('add one `**[HH:MM] Update:**` line in the owner\'s time zone.'));
   assert.doesNotMatch(text, /with its local time/);
   // The hourly nudge checks the same order and time zone, so every project's posts agree.
   for (const task of ['daily-check-in', 'hourly-nudge']) assert.ok(read(`repo/contracts/claude-projects/web-controller-projects/tasks/${task}.md`).includes("- Write every time in the report in the owner's profile time zone (from the project instructions or memory), never UTC; only the state file below keeps UTC."), task);
-  assert.ok(read('repo/contracts/claude-projects/web-controller-projects/tasks/hourly-nudge.md').includes('(c) a coordinator post since the last run whose **ELI5:** line is not its last line, whose **Waiting on you** list is not just above that line, or whose Update stamps are not in the owner\'s profile time zone.'));
+  assert.ok(read('repo/contracts/claude-projects/web-controller-projects/tasks/hourly-nudge.md').includes('(c) a coordinator post since the last run whose **ELI5:** line is not its last line, whose **Waiting on you** list is not just above that line, or whose Update stamps are not in the owner\'s profile time zone;'));
   assert.doesNotMatch(text + body, /Waiting on you \(n\):\*\*`? (as the very )?last|the ELI5 line ends the post/);
   assert.ok(text.includes('one **[HH:MM] Update:** line per update, each followed by a line holding only `&nbsp;` as a spacer'));
   assert.ok(text.includes('(only Update lines take that spacer)'));
