@@ -287,7 +287,7 @@ Setup run with `--host claude-code` shows this bank instead, for the same repres
 
 Toolkit setup choices - 11 questions across 3 sections
 
-Bank reference: 3N4J-RAFV-RJ93-JRX1
+Bank reference: 8T7P-W33X-GY83-YCTA
 
 Quick index
 
@@ -482,8 +482,7 @@ Quick index
 **Choices:**
 
 - **A. Turn on** - Sets "attribution": false in settings.json.
-- **B. Turn off** - Already off; nothing changes.
-- **C. Keep current** - Preserve this effective behavior: No AI attribution in commits and pull requests: off (Claude Code default).
+- **B. Keep current** - Preserve this effective behavior: No AI attribution in commits and pull requests: off (Claude Code default).
 
 **After applying:** Start a new Claude Code session so it reads the changed settings.
 
@@ -508,8 +507,7 @@ Quick index
 **Choices:**
 
 - **A. Turn on** - Sets "crossSessionInbound": "accept" in settings.json.
-- **B. Turn off** - Already off; nothing changes.
-- **C. Keep current** - Preserve this effective behavior: Messages from your other Claude sessions wake this one: off (Claude Code default).
+- **B. Keep current** - Preserve this effective behavior: Messages from your other Claude sessions wake this one: off (Claude Code default).
 
 **After applying:** Start a new Claude Code session so it reads the changed settings.
 
@@ -534,8 +532,7 @@ Quick index
 **Choices:**
 
 - **A. Turn on** - Sets "switchModelsOnFlag": false in settings.json.
-- **B. Turn off** - Already off; nothing changes.
-- **C. Keep current** - Preserve this effective behavior: Ask before switching models when a request is flagged: off (Claude Code default).
+- **B. Keep current** - Preserve this effective behavior: Ask before switching models when a request is flagged: off (Claude Code default).
 
 **After applying:** Start a new Claude Code session so it reads the changed settings.
 
@@ -560,8 +557,7 @@ Quick index
 **Choices:**
 
 - **A. Turn on** - Sets "instructionFiles": "claude-md-and-agents-md" in settings.json.
-- **B. Turn off** - Already off; nothing changes.
-- **C. Keep current** - Preserve this effective behavior: Read AGENTS.md as well as CLAUDE.md: off (Claude Code default).
+- **B. Keep current** - Preserve this effective behavior: Read AGENTS.md as well as CLAUDE.md: off (Claude Code default).
 
 **After applying:** Start a new Claude Code session so it reads the changed settings.
 

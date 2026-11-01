@@ -1265,11 +1265,13 @@ function wizardChoice(value, label, consequence) {
 // Keep current. Usually keep stays and its twin is hidden. With keepAs (the twin also re-checks or
 // follows another answer, which keep would skip), the twin stays under the Keep current label with keepAs
 // as its effect, and keep is hidden. Either way the hidden choice's canonical name (a flag or a typed
-// word) still works and applies as the shown one.
+// word) still works and applies as the shown one. foldAlways hides the twin whatever is recommended,
+// for on/off rows where offering the state the setting is already in only repeats Keep current.
 function foldedTwin(definition) {
   const twin = definition.currentChoice;
   const has = (value) => definition.choices?.some((choice) => choice.value === value);
-  return twin && twin !== 'keep' && has(twin) && has('keep') && [twin, 'keep'].includes(definition.recommendation?.value) ? twin : '';
+  const recommended = definition.foldAlways || [twin, 'keep'].includes(definition.recommendation?.value);
+  return twin && twin !== 'keep' && has(twin) && has('keep') && recommended ? twin : '';
 }
 
 function foldDefinition(definition, twin) {
@@ -1277,7 +1279,7 @@ function foldDefinition(definition, twin) {
   const [hidden, shown] = definition.keepAs ? ['keep', twin] : [twin, 'keep'];
   const choices = definition.choices.filter((choice) => choice.value !== hidden)
     .map((choice) => (definition.keepAs && choice.value === twin ? { ...choice, label: keep.label, consequence: definition.keepAs } : choice));
-  const recommendation = definition.recommendation.value === shown && !definition.keepAs ? definition.recommendation
+  const recommendation = definition.recommendation.value !== hidden && !definition.keepAs ? definition.recommendation
     : { ...definition.recommendation, value: shown, outcome: choices.find((choice) => choice.value === shown).consequence };
   return {
     definition: { ...definition, choices, recommendation, selected: definition.selected === hidden ? shown : definition.selected },

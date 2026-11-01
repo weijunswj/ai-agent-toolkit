@@ -94,21 +94,26 @@ function defineClaudeSetup({ CLAUDE_HOOK_TRUST_ACTION, SUBAGENT_DEPTH_FOR_TOPOLO
     return 'Off (Claude Code default)';
   }
 
+  // The choice that changes nothing for this setting: enable when it is on, disable when it is off.
+  function claudeSettingCurrentChoice(entry) {
+    if (!entry || entry.blocked) return '';
+    if (entry.state === CLAUDE_SETTINGS_STATES.TOOLKIT || (entry.state === CLAUDE_SETTINGS_STATES.OWNER && entry.matches === true)) return 'enable';
+    return entry.state === CLAUDE_SETTINGS_STATES.DEFAULT ? 'disable' : '';
+  }
+
   const settingKeyName = (spec) => `"${spec.keyPath[spec.keyPath.length - 1]}"`;
   const blockedOutcome = (entry) => `Nothing changes: setup cannot change this setting because ${entry.detail} in settings.json.`;
 
   // What Turn on changes for this one setting.
   function claudeSettingOnOutcome(spec, entry) {
     if (entry?.blocked) return blockedOutcome(entry);
-    if (entry?.state === CLAUDE_SETTINGS_STATES.TOOLKIT || (entry?.state === CLAUDE_SETTINGS_STATES.OWNER && entry.matches === true)) return 'Already on; nothing changes.';
-    if (entry?.state === CLAUDE_SETTINGS_STATES.OWNER) return `Replaces your ${settingValue(entry.value)} with ${settingValue(spec.value)}.`;
+    if (entry?.state === CLAUDE_SETTINGS_STATES.OWNER && entry.matches !== true) return `Replaces your ${settingValue(entry.value)} with ${settingValue(spec.value)}.`;
     return `Sets ${settingKeyName(spec)}: ${settingValue(spec.value)} in settings.json.`;
   }
 
   // What Turn off changes for this one setting.
   function claudeSettingOffOutcome(spec, entry) {
     if (entry?.blocked) return blockedOutcome(entry);
-    if (entry?.state === CLAUDE_SETTINGS_STATES.DEFAULT) return 'Already off; nothing changes.';
     const trailers = spec.id === 'attribution' ? ' Claude Code then adds its Co-Authored-By trailer, Generated with Claude Code line and session link to your commits and pull requests again.' : '';
     return `Removes ${settingKeyName(spec)} from settings.json, whoever added it, so Claude Code uses its default.${trailers}`;
   }
@@ -165,7 +170,10 @@ function defineClaudeSetup({ CLAUDE_HOOK_TRUST_ACTION, SUBAGENT_DEPTH_FOR_TOPOLO
           wizardChoice('disable', 'Turn off', claudeSettingOffOutcome(spec, entry)),
           wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${claudeSettingOutcome(entry)}`),
         ],
-        // No folded twin: all three choices stay listed whatever the state.
+        // A row already on hides Turn on, and one already off hides Turn off: Keep current does the same.
+        // A different value, a blocked parent or an unreadable file keeps all three.
+        currentChoice: claudeSettingCurrentChoice(entry),
+        foldAlways: true,
         recommendation: claudeSettingRecommendation(spec, entry, current),
         selected: args.setupChoices[key],
         current: claudeSettingOutcome(entry),
