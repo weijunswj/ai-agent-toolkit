@@ -37,6 +37,7 @@ Reference for the `web-controller-projects` skill, opened when the coordinator r
 5. **Project instructions.**
    - Have a cloud thread run `node repo/scripts/toolkit-projects-instructions.cjs --render` from bound Toolkit `main`, save the block to the shared folder and read it back. Every project on one Toolkit version gets the same block.
    - Draft the project lines from the setup answers: repos and transport store, device and folder, where work runs, owner-granted approvals, project-specific roles. Only facts that differ by project, nothing the block says.
+   - Lanes: write `- Lanes: <n> working lanes (owner, <date>)` only when the user gives a number. Otherwise tell them once that the project runs 1 lane at a time, and that "lanes 3" changes it.
    - Write the instructions as the block first, one blank line, then the project lines; text a project already had goes below the block, deduped. Apply it with the safeguards in **Managed project-instructions sync** (`reference/instructions-sync.md`). Read the saved instructions back to verify them; record the block's toolkit version in project memory.
 6. **Takeover** (mode b only).
    - There is no handover packet: ask where the outgoing controller's work lives (its branches and PRs, the programme issue comments when ENABLED, its evidence store and, for a Projects controller, its project memory).

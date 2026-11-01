@@ -92,7 +92,8 @@ test('Projects wires managed instructions, promises and fresh scheduled sessions
   assert.match(text, /Keep it pending until a check-in shows `\*\*Plugin:\*\* current`\./);
   assert.match(text, /Only the plugin \(two clicks\) needs the owner: no agent can update it\./);
   assert.match(text, /Post its first line to the owner every run, "nothing changed" included/);
-  assert.match(text, /The hourly nudge stays silent/);
+  assert.ok(text.includes('Relay each hourly nudge run too, one line when nothing needs the owner (**Communication**).'));
+  assert.doesNotMatch(text, /stays silent/);
   // The steps live once, in the check-in (toolkit-projects-tasks.test.cjs keeps them equal to Toolkit's shared Claude app steps).
   assert.match(text, /post one plugin card in the project chat with the check-in's steps, the four numbered steps it puts under \*\*Plugin:\*\*, copied as written\./);
   assert.doesNotMatch(text, /remove the Toolkit plugin only and let it reinstall/);
@@ -192,10 +193,10 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.match(body, /Never resolve a home thread; a fresh-session run resolves its own thread after delivery/);
   assert.ok(body.includes('- Posts: before every post, read the newest page where you post (the project chat, or your thread).'));
   assert.ok(body.includes('Decide from the chat itself, never from a memory line.'));
-  assert.ok(body.includes('- Post layout: a `**Now:**` line first;'));
+  assert.ok(body.includes('- Post layout: a `**Now:**` line first, its problem'));
   assert.ok(body.includes('- Problem, fix, skip first: every plan, G0 plan, decision ask and explanation opens with'));
   // Posts, in the main project chat, reply threads and work threads alike.
-  assert.match(text, /\*\*Posts, everywhere you post\*\* \(the main project chat, reply threads and work threads alike\): after the owner's last message, keep all your output in one running post and edit it, appending each new result, PR or question and keeping every earlier detail\. The running post is always your newest top-level post, the acknowledgement posted with a new thread included\. Before every edit, check whether the owner has written since that post \(in the main project chat, or in a work thread, in that thread\); if so, post fresh instead\. Start each appended update with its local time, for example \*\*\[16:41\] Update:\*\*\. Also start a fresh post when the running post nears about 8 KB; an owner reply under the running post does not start one, and the answer to it is appended to the running post\. Answer a burst of owner messages in one post\. When the owner replies under one of your earlier posts in the main project chat, answer in the main project chat \(you cannot post under your own posts there\) with a fresh post starting "Re: your reply on <short topic>", and never edit the older post\./);
+  assert.match(text, /\*\*Posts, everywhere you post\*\* \(the main project chat, reply threads and work threads alike\): after the owner's last message, keep all your output in one running post and edit it, appending each new result, PR or question and keeping every earlier detail\. The running post is always your newest top-level post, the acknowledgement posted with a new thread included\. Before every edit, check whether the owner has written since that post \(in the main project chat, or in a work thread, in that thread\); if so, post fresh instead\. Start each appended update with its time in the owner's profile time zone, never UTC, for example \*\*\[16:41\] Update:\*\*; every other time shown to the owner uses that zone too\. Also start a fresh post when the running post nears about 8 KB\. Once the owner has written after a post, a reply under it included, never edit that post again: answer in a fresh post below their message, and carry every open owner item forward into it\. Answer a burst of owner messages in one post\. When the owner replies under one of your earlier posts in the main project chat, answer in the main project chat \(you cannot post under your own posts there\) with a fresh post starting "Re: your reply on <short topic>", and never edit the older post\./);
   assert.doesNotMatch(text + body, /is always a new post|edit your own post only/);
   // The running post is found in the chat, not in memory, and no hook checks posts.
   assert.ok(text.includes('Before every post, read the newest page of the project chat (in a work thread, that thread). If your newest top-level post there has no owner message after it, edit that post; otherwise post fresh.'));
@@ -204,19 +205,55 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.ok(text.includes('An owner message forwarded into a work thread (the copy shown in that thread) counts as the owner writing there'));
   assert.ok(text.includes('This is a post rule only: a forwarded copy never stands in for words the owner must type themselves'));
   assert.doesNotMatch(text, /RUNNING POST|A Toolkit hook enforces|The same hook/);
-  assert.ok(text.includes('only when it is ready for the owner to check and merge; until then, link the chat thread that owns the work'));
+  // The owner opens a PR only to merge it: every other ask, UAT included, links the chat thread.
+  assert.ok(text.includes('Link the chat thread that owns the work as much as possible, UAT asks included. A direct PR link appears only on a merge ask for a merge-ready PR (G2 PASS and green CI on its current head)'));
+  assert.ok(text.includes('anywhere else, name the PR\'s work in plain words with no PR link.'));
+  assert.ok(text.includes('- Relay CI in one line with the owning thread\'s link (a PR link only on a merge-ready merge ask).'));
+  assert.ok(body.includes('each linking the card or thread (by its title), a PR only on a merge-ready merge ask,'));
+  assert.doesNotMatch(text + body, /with the PR link|until then, link the chat thread|thread \(by its title\) or PR/);
+  assert.ok(read('repo/contracts/claude-projects/web-controller-projects/tasks/hourly-nudge.md').includes('with a **Waiting on you** item or relay that names its thread, file or artifact without its link, or that links a PR anywhere but a merge ask for a merge-ready PR;'));
+  // Devices by their recorded name, every periodic report relayed, owed decision records kept as promises.
+  assert.ok(text.includes('Name a device by the name the project instructions record for it, never a generic word'));
+  assert.ok(text.includes('Relay each daily check-in and hourly nudge report there too, with the waiting-on-you reminder list every run, or one line when nothing is due.'));
+  assert.ok(text.includes('**Owed records are promises.** With GitHub governance ENABLED, each owner decision or plan OK owes its decision-trace record the same turn'));
+  assert.ok(text.includes('the nudge lists it under **Overdue promise:** until then.'));
   // Links only where the owner acts, as the owner decided; a written rule, no hook checks it.
-  assert.ok(text.includes('**Link where the owner acts.** Every item under **Waiting on you** (each question and each merge ask included) carries the link'));
-  assert.ok(text.includes('A PR, thread or file named elsewhere needs no link. This is a written rule: no hook checks it.'));
+  assert.ok(text.includes('**Link where the owner acts.** Every item under **Waiting on you** (each question and each merge ask included) carries the link to the card or chat thread where the owner acts.'));
+  assert.ok(text.includes('A thread or file named elsewhere needs no link. This is a written rule: no hook checks it.'));
   assert.doesNotMatch(text, /Link everything worth opening|names "PR <n>" without a link|not from the link rule/);
   // The post layout and the merge summary.
   assert.ok(text.includes('**Post layout.** A running post has four parts, in order: a **Now:** line'));
+  // The owner's call: Waiting on you sits second last, just above the ELI5 line, which ends every post.
+  assert.ok(text.includes('**Waiting on you (n):** second last, just above the ELI5 line'));
   assert.ok(text.includes('one **ELI5:** line, matched to the Now line, as the very last line with nothing after it'));
+  assert.ok(body.includes('`**Waiting on you (n):**` second last, one numbered item per ask actionable now,'));
+  // Waiting on you holds only what the owner can act on now; work not ready for them stays off it.
+  assert.ok(text.includes('one numbered line per item the owner can act on right now (work still being built, reviewed or otherwise not ready for them stays off the list until it is;'));
+  assert.ok(read('repo/contracts/claude-projects/web-controller-projects/tasks/hourly-nudge.md').includes('(d) a **Waiting on you** item the owner cannot act on yet, such as work still being built or reviewed.'));
+  assert.doesNotMatch(body, /one numbered item per owner ask/);
+  assert.ok(body.includes('one `**ELI5:**` line last;'));
+  // Times shown to the owner use their profile time zone, never UTC.
+  assert.ok(body.includes('add one `**[HH:MM] Update:**` line; all times in the owner\'s time zone.'));
+  assert.doesNotMatch(text, /with its local time/);
+  // The hourly nudge checks the same order and time zone, so every project's posts agree.
+  for (const task of ['daily-check-in', 'hourly-nudge']) assert.ok(read(`repo/contracts/claude-projects/web-controller-projects/tasks/${task}.md`).includes("- Write every time in the report in the owner's profile time zone (from the project instructions or memory), never UTC; only the state file below keeps UTC."), task);
+  assert.ok(read('repo/contracts/claude-projects/web-controller-projects/tasks/hourly-nudge.md').includes('(c) a coordinator post since the last run whose **ELI5:** line is not its last line, whose **Waiting on you** list is not just above that line, or whose Update stamps are not in the owner\'s profile time zone;'));
+  assert.doesNotMatch(text + body, /Waiting on you \(n\):\*\*`? (as the very )?last|the ELI5 line ends the post/);
   assert.ok(text.includes('one **[HH:MM] Update:** line per update, each followed by a line holding only `&nbsp;` as a spacer'));
-  assert.ok(text.includes('(only Update lines take a spacer line)'));
+  assert.ok(text.includes('(only Update lines take that spacer)'));
+  // The owner's board rules: blank lines between blocks, nested problem lines, title links, open asks carried forward.
+  assert.ok(text.includes('One blank line separates each labelled block from the next: the Now line with its bullets, the update log, **Waiting on you** and the ELI5 line.'));
+  assert.ok(text.includes('(**Problem, fix, skip first**) nested as bullets under it'));
+  assert.ok(text.includes('answered items drop off, and a fresh post repeats every item still open'));
+  assert.ok(text.includes('A thread link\'s text is the thread\'s title, never "here" or an id; an issue is linked by its URL.'));
+  assert.doesNotMatch(text, /the answer to it is appended to the running post|\(only Update lines take a spacer line\)/);
+  for (const phrase of ['its problem, fix and skip lines nested as bullets under it', 'thread (by its title)', 'a fresh post carries every open ask forward',
+    'a blank line between labelled blocks', 'Otherwise post fresh, below the owner\'s message, and never edit the older post again.']) assert.ok(body.includes(phrase), phrase);
   // Questions: numbered items with indented choices and a "(my pick)" mark; no spacer after the last choice.
   assert.ok(text.includes('Each owner question is one numbered item under **Waiting on you**, written `1. **Question: <the ask>?**`'));
-  assert.ok(text.includes('`    - **<Choice> (my pick).** <one-line reason>`'));
+  assert.ok(text.includes('lettered in order because the owner picks one, `    a. **<Choice> (my pick).** <one-line reason>`'));
+  assert.ok(body.includes('with its choices lettered (a., b.) under it'));
+  assert.doesNotMatch(text, /`    - \*\*<Choice>|flatten its choices into plain bullets/);
   assert.ok(text.includes('The next numbered item follows the last choice directly, with no spacer line.'));
   // Plans, G0 plans, decision asks and explanations open with the problem, the fix and what skipping it costs.
   assert.ok(text.includes('**Problem, fix, skip first.** Every plan, G0 plan, decision ask and explanation, from you and from every thread, opens with three lines'));
@@ -226,7 +263,7 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.ok(text.includes('Under it, indented four spaces, come its problem, fix and skip lines, then its choices'));
   assert.ok(text.includes('for every approval or choice the coordinator acts on itself, opening with its problem, fix and skip lines'));
   assert.equal((text.match(/&nbsp;/g) || []).length, 1, 'only the Update log lines take an &nbsp; spacer');
-  assert.ok(text.includes('Choices need no link of their own. Never write a question outside that list: no bare **Question:** label, bulleted question or question in an Update line, and never flatten its choices into plain bullets.'));
+  assert.ok(text.includes('Choices need no link of their own. Never write a question outside that list: no bare **Question:** label, bulleted question or question in an Update line, and never write its choices as bullets.'));
   assert.doesNotMatch(text, /put at most one \*\*Question:\*\* in a post|Use decision cards for questions, else group/);
   assert.ok(text.includes('An edit keeps every earlier Update line word for word and adds at least one new one.'));
   // The merge-summary rule binds without a hook.
@@ -406,16 +443,24 @@ test('independent lanes run side by side under the owner\'s lane cap', () => {
   assert.ok(lanes, 'Keep moving carries the lanes bullet');
   assert.ok(text.indexOf(lanes) > text.indexOf('## Keep moving') && text.indexOf(lanes) < text.indexOf('## Threads'));
   for (const phrase of ['Never hold a ready or working PR for an independent PR', 'Only merges land one at a time',
-    'at most 3 lanes actively working, of any type', 'unless the owner sets another number', 'no per-type limit',
-    'open one extra lane for it alone', 'Queued or coordinator-started work never takes that extra lane',
+    'Keep the project\'s lane number actively working, of any type', '1 lane by default, or the number the owner sets',
+    '`- Lanes: <n> working lanes (owner, <date>)`', 'an owner line that already sets a lane cap counts, and no line means 1', 'no per-type limit',
+    'Work waiting on the owner does not count (a G0 plan waiting for an OK, a thread waiting for an answer, a PR waiting for UAT or merge)',
+    'so start the next queued item to keep that many actually working',
+    'open one extra lane for it alone: that lane is always kept free, outside the count', 'Queued or coordinator-started work never takes that extra lane',
     'any usage limit the owner records in project instructions', 'counts toward the cap']) {
     assert.ok(lanes.includes(phrase), phrase);
   }
   const block = read('repo/contracts/claude-projects/web-controller-projects/project-instructions.md');
   const line = block.split('\n').find(entry => entry.startsWith('- Lanes:'));
   assert.ok(line, 'the block carries the lanes line');
-  for (const phrase of ['never holding one for another', 'at most 3 working lanes of any type',
-    'unless the owner sets a cap', 'one extra lane only for one needing thread work', 'owner usage limits']) {
+  for (const phrase of ['never holding one for another', '1 working lane by default, or the number the owner sets in a project line outside this block',
+    'work waiting on the owner does not count, so keep that many actually working',
+    'one extra lane always kept free for one needing thread work, never for queued work', 'owner usage limits']) {
     assert.ok(line.includes(phrase), phrase);
   }
+  assert.doesNotMatch(text + block, /at most 3 (working )?lanes/);
+  // Setup records a number only when the owner gives one, and a sync that brings the default says so once.
+  assert.ok(read('repo/contracts/claude-projects/web-controller-projects/reference/setup.md').includes('Otherwise tell them once that the project runs 1 lane at a time, and that "lanes 3" changes it.'));
+  assert.ok(read('repo/contracts/claude-projects/web-controller-projects/reference/instructions-sync.md').includes('the note adds: "This project now runs 1 lane at a time by default; say lanes N to change it."'));
 });

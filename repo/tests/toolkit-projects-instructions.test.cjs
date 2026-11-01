@@ -220,10 +220,12 @@ test('owner reads only injected source/version dependencies and rejects malforme
 // load the skill, so the block is the one place they reach it. It rose to 5600 for the guidebook
 // line, the one line that points the coordinator at the full skill in the project library, then to
 // 5850 for the lanes line: the coordinator does not load the skill, so the cap and the never-hold rule
-// must sit in the block.
-test('source body, measured without the two marker lines, stays under 5850 CRLF bytes and contains no marker lines or front matter', () => {
+// must sit in the block, then to 6200 for the owner's 1-lane default and board rules (blank lines between blocks,
+// nested problem lines, title links, open asks carried forward), after trimming other lines: every project gets
+// them only through the block.
+test('source body, measured without the two marker lines, stays under 6200 CRLF bytes and contains no marker lines or front matter', () => {
   const text = fs.readFileSync(BODY, 'utf8').replace(/\r\n/g, '\n');
-  assert.ok(Buffer.byteLength(text.replace(/\n/g, '\r\n')) < 5850);
+  assert.ok(Buffer.byteLength(text.replace(/\n/g, '\r\n')) < 6200);
   assert.match(text, /^- Roles:/);
   assert.doesNotMatch(text, /AI-AGENT-TOOLKIT:|^---$/m);
   assert.deepEqual(findBlocks(text), { blocks: [], errors: [] });
