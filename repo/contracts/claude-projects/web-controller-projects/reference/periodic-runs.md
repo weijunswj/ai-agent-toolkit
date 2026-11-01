@@ -25,6 +25,12 @@ Reference for the `web-controller-projects` skill, opened when the coordinator a
   - For a template update (never for a nudge marked `stopped by owner`), ask the home thread to update its own task's prompt, then read it back with `get_trigger` and `--check`; if that fails, rebuild.
   - If the bound nudge dies twice in 7 days, switch that project to a fresh-session nudge every 2 hours (rendered with `session` `fresh`, its entry saying fresh) and tell the owner; never for a nudge marked `stopped by owner`.
 
+## Reconcile Toolkit release branches
+
+After each release merge, and on a check-in or nudge when main differs from the last reconciled commit, request `node repo/scripts/toolkit-rebump-prs.cjs` through an available computer lane. Default mode only reports. Agree custody with the current builders before requesting `--apply`. While the computer is offline, keep reconciliation pending until its next wake; there is no Actions trigger. Follow **Approvals** for the existing GitHub permissions and branch writes.
+
+The script compares the merge-base version with the head to prove exactly one patch, minor or major step and reapplies that level above main. It verifies the signed-in GitHub account and origin, using existing read and branch-write permissions without creating credentials. It skips drafts, forks, non-main targets and branches without a bump; queued auto-merge holds. In an isolated clone it resolves only version fields, generated stamps and the branch's new release entry through the fragment flow, keeping main's released entries byte for byte. Ambiguous versions, source conflicts, edited historical notes, failed validation or changed main/head hold the affected branch. Successful apply only fast-forwards the existing branch and never merges or accepts the pull request. Return holds to their builders, then run a fresh report after repair. Never blindly retry an uncertain push. Track the returned head, rerun CI there and request fresh G2 review of the complete delta. Keep old reviews on their old heads and record retained or affected UAT separately. Record the reconciled main commit only after accounting for every result.
+
 ## Acting on the nudge report
 - The nudge is the sweep: review ALL unresolved threads and project-chat posts. Include top-level posts with replies from coordinator or user: the thread list omits them, so also page through project chat with small page limits (large pages overflow). List:
   1. threads that are blocked, failed or stopped, or working but idle for over 45 minutes;
