@@ -3546,6 +3546,16 @@ class Reconciler {
       }
     }
     for (const effect of plan.effects.filter(entry => entry.kind === 'create_state' || entry.kind === 'update_state')) {
+      const checkBackfill = () => {
+        if (!effect.backfill) return;
+        guard();
+        const outcome = parentDoc.outcomes.find(entry => entry.issue === effect.target.issue);
+        // Keep an absent child absent: defaults from the planned outcome are not completion proof.
+        const child = this.store.read('child', effect.target.issue).doc;
+        if ((child?.pr?.number ?? null) !== effect.backfill.expected_pr || !backfillEligible(outcome, child)) {
+          throw new ProgrammeError('PR_BACKFILL_STALE', 'The task PR or completion eligibility changed after planning; run reconciliation again.');
+        }
+      };
       try {
         const desired = effect.doc;
         // The controller may have written the child after planning. Only PR observations, a
@@ -3556,14 +3566,8 @@ class Reconciler {
         const result = mutateDoc('child', effect.target.issue, {
           create: () => newChild({ repository: this.binding.repository, outcome: outcomes.get(effect.target.issue) }),
           change: doc => {
-            if (effect.backfill) {
-              // Recheck on every CAS retry as well as on the initial mutation read.
-              guard();
-              const outcome = parentDoc.outcomes.find(entry => entry.issue === effect.target.issue);
-              if (doc.pr.number !== effect.backfill.expected_pr || !backfillEligible(outcome, doc)) {
-                throw new ProgrammeError('PR_BACKFILL_STALE', 'The task PR or completion eligibility changed after planning; run reconciliation again.');
-              }
-            }
+            // Recheck on every CAS retry as well as on the initial mutation read.
+            checkBackfill();
             for (const key of fields) {
               if (desired[key] === undefined) delete doc[key];
               else doc[key] = clone(desired[key]);
@@ -3573,6 +3577,11 @@ class Reconciler {
         });
         record(effect, result.outcome === 'NOOP' ? 'NOOP' : 'DONE');
       } catch (error) {
+        // Creation and overlapping writes stop inside mutate before retrying the callback.
+        // Classify lost backfill eligibility there too, without weakening the CAS refusal.
+        if (error.code === 'STATE_CONFLICT' && effect.backfill) {
+          try { checkBackfill(); } catch (freshError) { error = freshError; }
+        }
         if (STOPS_PASS.has(error.code)) throw error;
         record(effect, 'HELD', error.message);
         hold(effect, error.code || 'STATE_WRITE_FAILED', error.message);

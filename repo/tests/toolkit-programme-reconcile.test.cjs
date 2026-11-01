@@ -250,6 +250,53 @@ test('incomplete evidence never selects a partial match or reports no match; aut
   }
 });
 
+// Fresh-state closure matrix: create/update x pre-apply/CAS drift x loss of eligibility/recorded PR.
+// Missing children supply no completion proof; an existing child's reopening must also persist.
+for (const childState of ['missing', 'existing']) for (const timing of ['before apply', 'CAS conflict']) {
+  for (const change of ['COMMITTED', 'OPTIONAL', 'RETIRED', 'record PR']) test(`backfill refuses stale state: ${childState}, ${timing}, ${change}`, () => {
+    const { github, store, reconciler } = completedFixture();
+    github.addPr(200, { head: SHA_A, merged: true, body: 'Refs #100' });
+    if (childState === 'existing') store.write('child', 100,
+      state.newChild({ repository: github.repository, outcome: store.read('parent', 7).doc.outcomes[0] }), { sha: null, previous: null });
+    const run = reconciler();
+    const plan = run.plan();
+    // Exercise the state-write boundary alone; projections have their own parent intents.
+    plan.effects = plan.effects.filter(effect => effect.kind === 'create_state' || effect.kind === 'update_state');
+    const kind = childState === 'missing' ? 'create_state' : 'update_state';
+    assert.equal(plan.effects.find(effect => effect.kind === kind).backfill.selected, 200);
+    let before = null;
+    const drift = () => {
+      const parent = store.read('parent', 7).doc;
+      let child = store.read('child', 100).doc;
+      if (change === 'record PR') {
+        child ||= state.newChild({ repository: github.repository, outcome: parent.outcomes[0] });
+        child.pr.number = 999;
+      } else {
+        parent.outcomes[0].class = change;
+        github.putFile(store.docPath('parent', 7), parent);
+        if (child && change !== 'RETIRED') child.lifecycle = 'ACTIVE';
+      }
+      if (child) github.putFile(store.docPath('child', 100), child);
+      before = { commits: github.commits, files: new Map(github.files) };
+    };
+    if (timing === 'before apply') drift();
+    else github.intercept(call => {
+      if (before || call.method !== 'PUT' || !call.path.endsWith('issue-100.json')) return;
+      drift();
+      return { status: 409, json: { message: 'test retry' } };
+    });
+    const report = run.apply(plan);
+    assert.ok(before, 'the concurrent change ran');
+    assert.ok(report.holds.some(hold => hold.code === 'PR_BACKFILL_STALE'));
+    assert.equal(report.results.find(result => result.kind === kind).outcome, 'HELD');
+    assert.equal(github.commits, before.commits, 'the stale apply writes no state or intents');
+    assert.deepEqual(github.files, before.files);
+    const saved = store.read('child', 100).doc;
+    assert.equal(saved?.pr.number ?? null, change === 'record PR' ? 999 : null);
+    if (childState === 'missing' && change !== 'record PR') assert.equal(saved, null);
+  });
+}
+
 for (const change of ['pr', 'retire-parent', 'retire-child', 'reopen', 'takeover']) test(`backfill rechecks fresh eligibility before writing: ${change}`, () => {
   const { github, store, reconciler } = completedFixture();
   github.addPr(200, { head: SHA_A, merged: true, body: 'Refs #100' });
@@ -298,7 +345,7 @@ for (const change of ['overlap', 'disjoint', 'takeover']) test(`backfill preserv
   if (change === 'takeover') assert.throws(() => run.apply(plan), { code: 'STALE_WRITER' });
   else {
     const report = run.apply(plan);
-    assert.equal(report.holds.some(hold => hold.code === 'STATE_CONFLICT'), change === 'overlap');
+    assert.equal(report.holds.some(hold => hold.code === 'PR_BACKFILL_STALE'), change === 'overlap');
   }
   const saved = store.read('child', 100).doc;
   assert.equal(saved.pr.number, change === 'disjoint' ? 200 : change === 'overlap' ? 999 : null);
