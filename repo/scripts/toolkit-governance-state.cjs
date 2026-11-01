@@ -327,24 +327,21 @@ function bindingRequiredChecks(root, options = {}) {
 }
 
 // The owner's answer on task auto-merge in the binding merged on the default branch:
-// { auto_merge: 'off' | 'after-gates', answered, fresh, eligibility_required }. It is 'after-gates'
+// { auto_merge: 'off' | 'after-gates', answered, fresh }. It is 'after-gates'
 // only when this computer's read of that binding is valid, governs, names this repository and is
 // under 24 hours old; a missing answer, a stale or failed read, a version 1 binding or a working-tree
 // edit is 'off'. `answered` says whether the merged binding holds an answer at all.
-// `eligibility_required` says whether its required checks include the always-manual check
-// (ELIGIBILITY_CHECK): without it a yes is not enforceable, and the merge hold keeps asking.
-const ELIGIBILITY_CHECK = 'auto-merge-eligible';
 // The question for the owner, asked once per governed repository. Yes is recommended (the owner's
-// choice): a yes still takes effect only through a binding pull request and a required check the
-// owner sets, and pull requests on the always-manual list keep waiting for the owner's label.
+// choice): a yes still takes effect only through a binding pull request the owner merges, and pull
+// requests that change the merge rules keep waiting for the owner's typed merge.
 const TASK_AUTO_MERGE_QUESTION = Object.freeze({
   text: "When a task's pull request has passed review, CI and your testing, should it merge without waiting for you to type merge?",
-  yes: 'Yes, merge it once every check has passed (recommended); a pull request that changes hooks or merge rules still waits until you add the toolkit-owner-merge label in GitHub.',
+  yes: 'Yes, merge it once every check has passed (recommended); a pull request that changes the merge rules themselves still waits for you to type merge.',
   no: 'No, I type merge for each one.',
-  reason: 'A finished pull request has already passed review, CI and your testing, so waiting for you to type merge only slows it down; anything that changes hooks or merge rules still waits for you.',
+  reason: 'A finished pull request has already passed review, CI and your testing, so waiting for you to type merge only slows it down; anything that changes the merge rules themselves still waits for you.',
 });
 function taskAutoMerge(root, options = {}) {
-  const off = { auto_merge: 'off', answered: false, fresh: false, eligibility_required: false };
+  const off = { auto_merge: 'off', answered: false, fresh: false };
   try {
     const identity = readIdentity(root);
     if (!identity.valid) return off;
@@ -353,8 +350,7 @@ function taskAutoMerge(root, options = {}) {
     if (judged.status !== 'enabled') return off;
     const value = judged.binding.task_prs && judged.binding.task_prs.auto_merge;
     const answered = value === 'off' || value === 'after-gates';
-    const eligibilityRequired = Array.isArray(judged.binding.required_checks) && judged.binding.required_checks.includes(ELIGIBILITY_CHECK);
-    return { auto_merge: value === 'after-gates' && judged.fresh === true ? 'after-gates' : 'off', answered, fresh: judged.fresh === true, eligibility_required: eligibilityRequired };
+    return { auto_merge: value === 'after-gates' && judged.fresh === true ? 'after-gates' : 'off', answered, fresh: judged.fresh === true };
   } catch { return off; }
 }
 
@@ -808,7 +804,6 @@ module.exports = Object.freeze({
   bindingRequiredChecks,
   workingBindingRequiredChecks,
   taskAutoMerge,
-  TASK_AUTO_MERGE_CHECK: ELIGIBILITY_CHECK,
   TASK_AUTO_MERGE_QUESTION,
   committedBindingPolicy,
   workingBindingPolicy,

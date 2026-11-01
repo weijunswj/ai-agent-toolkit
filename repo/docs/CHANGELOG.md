@@ -1,5 +1,48 @@
 # Toolkit Changelog
 
+## 3.34.0
+
+### Changed
+
+- Projects: every project now runs 1 working lane by default, with one extra lane always kept free for the owner's sudden asks. The owner sets another number with one project line outside the managed block, and an existing lane cap line still counts. Work waiting on the owner no longer counts, so the coordinator starts the next item instead of idling.
+- Projects posts: one blank line between labelled blocks, the problem, fix and skip lines nested as bullets under Now, thread links titled by the thread's name, and every open owner ask carried into a fresh post. Once the owner writes after a post, that post is never edited again.
+- Projects setup records a lane line only when the owner gives a number, and an instructions sync that brings in the 1-lane default says so once in its note.
+- Projects links: posts link the chat thread that owns the work, UAT asks included. A direct PR link appears only on a merge ask for a merge-ready PR, and the hourly nudge flags any other PR link.
+- Projects posts: choices under a question are lettered (a., b.) because the owner picks one, and a device is named by the name the project instructions record for it.
+- Projects coordinator: relays every daily check-in and hourly nudge report with the waiting-on-you list, and keeps each owed decision-trace record on the promise list until it is posted and read back.
+- Projects posts: **Waiting on you** sits second last, just above the ELI5 line, which always ends the post.
+- Projects posts: every time shown to the owner, Update stamps included, uses the owner's profile time zone, never UTC.
+- Projects hourly nudge: flags a post whose ELI5 line is not last, whose Waiting on you list is not just above it, or whose Update stamps are not in the owner's time zone.
+- Projects daily check-in and hourly nudge: their reports give times in the owner's profile time zone; only their state files keep UTC.
+- Projects posts: **Waiting on you** lists only items the owner can act on right now; work still being built or reviewed stays off it, and the hourly nudge flags any that slip on.
+
+## 3.33.0
+
+### Changed
+
+- Each Claude Code setting row in setup lists only the choices that change something: a setting already on shows Turn off and Keep current, and one already off shows Turn on and Keep current. A different value, a blocked parent entry or an unreadable settings file still shows all three. The hidden choice's flag value still works and does the same as Keep current.
+- The model-switch row now reads "Switch models without asking on a flag", so on means `"switchModelsOnFlag": true`, which is also Claude Code's default when the line is missing. Turn off writes `false` instead of removing the line, and setup still recommends Turn off. An existing `false` shows as off, so nothing in the settings file changes.
+
+## 3.32.0 (auto-merge without a label)
+
+### Changed
+
+- Task auto-merge no longer uses a label. With the owner's yes merged in the programme binding, the controller merges any pull request once the gate conditions hold on one head. Only pull requests that change the merge rules themselves (the programme binding, its schema and reader, the merge hold and its helpers, the scope check, the controller, global and gate rules, the Approvals section of the Projects controller skill, CI workflows) or make a major version bump wait for the owner's typed `merge N`. Hooks, setup and agent instruction files leave that list: their risk tier already holds them for full review and owner testing.
+- The merge hold runs the merge-scope check on this computer, on the head a no-typed-approval merge names, before letting it through. A head it has not fetched, or a scope it cannot read, needs a typed merge.
+- The task auto-merge answer no longer needs a required `auto-merge-eligible` check, so `toolkit governance check` no longer reports a yes as not enforceable.
+
+### Removed
+
+- The `auto-merge-eligible` workflow, its `toolkit-owner-merge` label, the commit status that tied the label to a head, and the merge hold's refusal of commands that name the label.
+
+## 3.31.1 (smaller Projects skill)
+
+### Changed
+
+- **Claude Projects controller skill fits a skill card again.** The skill's main file shrank from about 50 KB to about 41 KB, under the 48 KB a claude.ai skill card accepts. The detail for acting on check-in and nudge reports, refreshing the guidebook copy, device work and standing permission asks moved word for word into reference files beside it (`reference/periodic-runs.md`, `reference/guidebook.md`, `reference/device-work.md` and `reference/permission-asks.md`). The skill points to each one before the step that needs it, so no rule changed.
+- **No hand upload.** The install check no longer tells you to upload the Projects skill folder by hand. It offers a skill card when the file fits one, says when the file is too large for a card, and in every case notes that the coordinator reads the copy pulled from the repo, so a missed card changes nothing it does. An account copy with its own reference files still gets the card, which replaces only the main file.
+- **Size guard.** A test now keeps the skill's main file at or under 44,000 bytes, with the card's 48,000-byte body limit as a hard ceiling, and checks that every reference file the skill names exists.
+
 ## 3.31.0 (Claude Code settings on and off)
 
 ### Changed
