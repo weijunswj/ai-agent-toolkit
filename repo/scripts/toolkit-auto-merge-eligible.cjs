@@ -37,6 +37,10 @@ const GENERAL = Object.freeze([
   [/^\.github\/workflows\//, 'a CI workflow'],
   [/^(?:\.(?:claude|codex)-plugin\/)?hooks\/hooks\.json$/, 'a host hook manifest'],
   [/^repo\/scripts\/[^/]*-hook\.(?:cjs|ps1)$/, 'a host hook entrypoint'],
+  // SessionStart commands do not use the -hook suffix. Keep these in step with both host manifests;
+  // the eligibility tests also check Codex's installed PowerShell launchers.
+  [/^repo\/scripts\/toolkit-local-bridge\.cjs$/, 'a host hook entrypoint'],
+  [/^repo\/scripts\/toolkit-codex-session-start\.(?:cjs|ps1)$/, 'a host hook entrypoint'],
 ]);
 
 // The Toolkit repository's own merge rules (applied when the diff's repository is the Toolkit: it

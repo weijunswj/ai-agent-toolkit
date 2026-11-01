@@ -38,6 +38,7 @@ test('merge-authority paths and a major bump wait for the owner; everything else
     'repo/contracts/toolkit-local-bridge/claude-plugin/hooks/hooks.json', 'repo/contracts/toolkit-local-bridge/codex-plugin/hooks/hooks.json',
     'repo/scripts/toolkit-governance-hook.cjs', 'repo/scripts/toolkit-codex-helper-hook.cjs', 'repo/scripts/toolkit-codex-helper-hook.ps1',
     'repo/scripts/toolkit-claude-agent-hook.cjs', 'repo/scripts/toolkit-claude-attribution-hook.cjs',
+    'repo/scripts/toolkit-local-bridge.cjs', 'repo/scripts/toolkit-codex-session-start.cjs', 'repo/scripts/toolkit-codex-session-start.ps1',
     'repo/scripts/setup-codex-toolkit-plugin.cjs', 'repo/scripts/setup-claude-toolkit-plugin.cjs',
     'repo/scripts/toolkit-governance-conformance.cjs', 'repo/scripts/toolkit-governance.cjs',
     'repo/scripts/toolkit-governance-binding.cjs', 'repo/scripts/toolkit-governance-answer.cjs',
@@ -62,6 +63,39 @@ test('merge-authority paths and a major bump wait for the owner; everything else
   assert.equal(eligible.withoutStamps('{\n  "version": "3.21.0",\n}'), eligible.withoutStamps('{\n  "version": "3.22.0",\n}'));
   assert.equal(eligible.withoutStamps("const BRIDGE_VERSION = '3.21.0';\n"), eligible.withoutStamps("const BRIDGE_VERSION = '3.22.0';\n"));
   assert.notEqual(eligible.withoutStamps("const BRIDGE_VERSION = '3.21.0';\nhook();\n"), eligible.withoutStamps("const BRIDGE_VERSION = '3.22.0';\nother();\n"));
+});
+
+test('every script run by a host hook manifest, including Windows launchers, waits for typed merge', () => {
+  const root = path.join(__dirname, '..', '..');
+  const { renderInstalledWindowsHooks } = require('../scripts/setup-codex-toolkit-plugin.cjs');
+  const manifests = [
+    'repo/contracts/toolkit-local-bridge/claude-plugin/hooks/hooks.json',
+    'repo/contracts/toolkit-local-bridge/codex-plugin/hooks/hooks.json',
+    ...['hooks/hooks.json', '.claude-plugin/hooks/hooks.json', '.codex-plugin/hooks/hooks.json']
+      .filter(file => fs.existsSync(path.join(root, file))),
+  ];
+  for (const manifest of manifests) {
+    const scripts = new Set();
+    function visit(value) {
+      if (!value || typeof value !== 'object') return;
+      for (const [key, entry] of Object.entries(value)) {
+        if ((key === 'command' || key === 'commandWindows') && typeof entry === 'string') {
+          const matches = [...entry.replace(/\\/g, '/').matchAll(/\$\{(?:CLAUDE_PLUGIN_ROOT|PLUGIN_ROOT)\}\/([A-Za-z0-9_./-]+)/g)];
+          assert.ok(matches.length > 0, `${manifest}: ${key} must name a plugin script to check`);
+          for (const match of matches) scripts.add(match[1]);
+        } else visit(entry);
+      }
+    }
+    const hooks = JSON.parse(fs.readFileSync(path.join(root, manifest), 'utf8'));
+    // Check the actual commandWindows entries that setup adds to the installed Codex copy too.
+    visit(manifest.includes('codex-plugin/') ? renderInstalledWindowsHooks(hooks, 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe') : hooks);
+    assert.ok(scripts.size > 0, `${manifest}: hook scripts must be checked`);
+    for (const file of scripts) {
+      for (const toolkit of [false, true]) {
+        assert.equal(eligible.eligibility({ files: [file], toolkit }).eligible, false, `${manifest}: ${file} must require typed merge (toolkit=${toolkit})`);
+      }
+    }
+  }
 });
 
 test('a section runs from its heading to the next heading of the same or a higher level', () => {
@@ -117,6 +151,13 @@ test('the CLI reads the diff with git: exit 0 eligible, 1 waits for the owner, 2
   const reworded = commit('repo/CONTROLLER.md', '<!-- AI-AGENT-TOOLKIT:x:BEGIN Y v2 toolkit=3.20.0 sha256=59b80466f009 -->\nlooser rules\n');
   assert.equal(eligible.main(['--base', restamped, '--head', reworded], io), 1, 'a rules change is not');
   assert.equal(eligible.main(['--base', bump, '--head', stamped], io), 1, 'a new rules file is not stamp-only');
+  let previous = reworded;
+  for (const file of ['repo/scripts/toolkit-local-bridge.cjs', 'repo/scripts/toolkit-codex-session-start.cjs', 'repo/scripts/toolkit-codex-session-start.ps1']) {
+    const head = commit(file, 'hook entrypoint\n');
+    assert.equal(eligible.main(['--base', previous, '--head', head, '--json'], io), 1, `${file} waits for typed merge`);
+    assert.deepEqual(JSON.parse(out.at(-1)).reasons, [{ path: file, why: 'a host hook entrypoint' }]);
+    previous = head;
+  }
   // The Projects controller skill: only its Approvals section counts.
   const skill = 'repo/contracts/claude-projects/web-controller-projects/SKILL.md';
   const skillText = approvals => `# Skill\nVersion: 2026-10-30.2\n\n## Threads\n- threads\n\n## Approvals\n- ${approvals}\n\n## Live systems\n- live\n`;

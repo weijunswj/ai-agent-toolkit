@@ -294,6 +294,36 @@
       "status": "pass"
     },
     {
+      "id": "MERGE.machine-on-claude-session-start",
+      "source": "G2 finding: SessionStart entrypoints require typed merge with machine On",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "payload": {"tool_name": "Bash", "tool_input": {"command": "gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo": {"governance": "enabled", "branch": "feature", "task_auto_merge": "after-gates", "commits": [{"files": {"README.md": "fixture\n", "repo/contracts/agent-rules/global-rules.md": "rules\n"}, "message": "base"}, {"files": {"repo/scripts/toolkit-local-bridge.cjs": "changed\n"}, "message": "task change"}]}, "owner_session": true},
+      "expect": {"decision": "deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.machine-on-codex-session-start",
+      "source": "G2 finding: SessionStart entrypoints require typed merge with machine On",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "payload": {"tool_name": "Bash", "tool_input": {"command": "gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo": {"governance": "enabled", "branch": "feature", "task_auto_merge": "after-gates", "commits": [{"files": {"README.md": "fixture\n", "repo/contracts/agent-rules/global-rules.md": "rules\n"}, "message": "base"}, {"files": {"repo/scripts/toolkit-codex-session-start.cjs": "changed\n"}, "message": "task change"}]}, "owner_session": true},
+      "expect": {"decision": "deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.machine-on-codex-session-start-ps1",
+      "source": "G2 finding: SessionStart entrypoints require typed merge with machine On",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "payload": {"tool_name": "Bash", "tool_input": {"command": "gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo": {"governance": "enabled", "branch": "feature", "task_auto_merge": "after-gates", "commits": [{"files": {"README.md": "fixture\n", "repo/contracts/agent-rules/global-rules.md": "rules\n"}, "message": "base"}, {"files": {"repo/scripts/toolkit-codex-session-start.ps1": "changed\n"}, "message": "task change"}]}, "owner_session": true},
+      "expect": {"decision": "deny"},
+      "status": "pass"
+    },
+    {
       "id": "MERGE.machine-on-setup",
       "source": "owner-typed merge exception: protected paths stay manual with machine On",
       "kind": "benign",
