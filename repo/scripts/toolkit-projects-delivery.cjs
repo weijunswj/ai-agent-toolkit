@@ -15,12 +15,13 @@ function currentReceipts(receipts, now) {
     && Date.parse(entry.at) >= now.getTime() - MAX_DELIVERY_AGE_MS);
 }
 
-// Returns a new receipt, or null. No state is changed until its owner persists it.
+// Returns a new receipt, or null. No state is changed until its owner persists it. The host stamps
+// sent-at in whole seconds, so a reply sent in the same second as its question still follows it.
 function deliveryReceipt(delivery, receipts, now, notBefore = null) {
   const sent = Date.parse(delivery.sentAt);
   if (typeof delivery.id !== 'string' || !/^[A-Za-z0-9_.:-]{1,256}$/.test(delivery.id)
     || !Number.isFinite(sent) || sent < now.getTime() - MAX_DELIVERY_AGE_MS || sent > now.getTime() + CLOCK_SKEW_MS
-    || (notBefore !== null && (!Number.isFinite(notBefore) || sent <= notBefore))) return null;
+    || (notBefore !== null && (!Number.isFinite(notBefore) || sent < Math.floor(notBefore / 1000) * 1000))) return null;
   const id = deliveryHash(delivery.id);
   if (receipts.some(entry => entry.id === id) || receipts.length >= MAX_DELIVERIES) return null;
   return { id, at: now.toISOString() };

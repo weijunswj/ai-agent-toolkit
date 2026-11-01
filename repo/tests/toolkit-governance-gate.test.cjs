@@ -264,11 +264,11 @@ test('closure remote flip: an acknowledgement never answers the new github.com q
 test('closure exact deliveries: before the question and across targets they grant no renewed authority', t => {
   for (const local of [false, true]) {
     const f = answerFixture(t, local, true);
-    const early = projects.wake('no', { now: f.now });
+    const early = projects.wake('no', { at: new Date(f.now().getTime() - 1000).toISOString() });
     f.say(early);
     f.ask();
     f.say(early);
-    assert.equal(stateOf(f.ctx, f.target).state, 'UNDECIDED', 'equal timestamps never turn an earlier reply into an answer');
+    assert.equal(stateOf(f.ctx, f.target).state, 'UNDECIDED', 'a reply from before the question never becomes an answer');
     const answer = projects.wake('no', { now: f.now });
     assert.equal(f.say(answer).action, 'pass');
     assert.equal(stateOf(f.ctx, f.target).state, 'DISABLED');
@@ -557,14 +557,14 @@ const askOf = (context) => {
 const REAL_THREAD_WAKE = (text) => `<wake reason="mention" current-time="${new Date().toISOString()}">
   <project id="chan_example" type="project">
     <thread ts="cmsg_exampleThread">
-      <message trigger="true" from="human" trust="principal" author-id="user_example" id="cmsg_exampleReply_${crypto.randomUUID()}" sent-at="${new Date(Date.now() + 1000).toISOString()}" mention="true">${text}</message>
+      <message trigger="true" from="human" trust="principal" author-id="user_example" id="cmsg_exampleReply_${crypto.randomUUID()}" sent-at="${new Date().toISOString()}" mention="true">${text}</message>
     </thread>
   </project>
   <system-note>If a quick read or two gets you the answer, just answer. Otherwise, before any other tool, instead of a reaction, send one short \`reply\` saying what you will do without restating the message, so the person is not left waiting.</system-note>
 </wake>`;
 const REAL_CHAT_WAKE = (text) => `<wake reason="mention" current-time="${new Date().toISOString()}">
   <project id="chan_example" type="project">
-    <message trigger="true" from="human" trust="principal" author-id="user_example" id="cmsg_exampleChat_${crypto.randomUUID()}" sent-at="${new Date(Date.now() + 1000).toISOString()}" mention="true">${text}</message>
+    <message trigger="true" from="human" trust="principal" author-id="user_example" id="cmsg_exampleChat_${crypto.randomUUID()}" sent-at="${new Date().toISOString()}" mention="true">${text}</message>
   </project>
 </wake>`;
 const ATTACHMENT_MESSAGE = (trigger, attachment) => `<message trigger="${trigger}" from="human" trust="principal" author-id="user_example" id="cmsg_exampleFile" sent-at="2026-10-23T07:54:03Z" mention="true" has-attachments="true">
