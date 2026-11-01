@@ -287,7 +287,7 @@ Setup run with `--host claude-code` shows this bank instead, for the same repres
 
 Toolkit setup choices - 11 questions across 3 sections
 
-Bank reference: 3N4J-RAFV-RJ93-JRX1
+Bank reference: 0DAY-MRD0-X8C5-ADDZ
 
 Quick index
 
@@ -299,7 +299,7 @@ Quick index
 3.1 Keep Toolkit available in Claude Code? - Recommended: A - Install or refresh
 3.2 Claude Code setting: Hide AI credit in commits/PRs? - Recommended: A - Turn on
 3.3 Claude Code setting: Let other sessions wake this one? - Recommended: A - Turn on
-3.4 Claude Code setting: Ask before switching model on a flag? - Recommended: A - Turn on
+3.4 Claude Code setting: Switch models without asking on a flag? - Recommended: A - Turn off
 3.5 Claude Code setting: Read AGENTS.md too? - Recommended: A - Turn on
 3.6 Copy Toolkit's skills into Antigravity? - Recommended: B - Keep current
 
@@ -482,8 +482,7 @@ Quick index
 **Choices:**
 
 - **A. Turn on** - Sets "attribution": false in settings.json.
-- **B. Turn off** - Already off; nothing changes.
-- **C. Keep current** - Preserve this effective behavior: No AI attribution in commits and pull requests: off (Claude Code default).
+- **B. Keep current** - Preserve this effective behavior: No AI attribution in commits and pull requests: off (Claude Code default).
 
 **After applying:** Start a new Claude Code session so it reads the changed settings.
 
@@ -508,8 +507,7 @@ Quick index
 **Choices:**
 
 - **A. Turn on** - Sets "crossSessionInbound": "accept" in settings.json.
-- **B. Turn off** - Already off; nothing changes.
-- **C. Keep current** - Preserve this effective behavior: Messages from your other Claude sessions wake this one: off (Claude Code default).
+- **B. Keep current** - Preserve this effective behavior: Messages from your other Claude sessions wake this one: off (Claude Code default).
 
 **After applying:** Start a new Claude Code session so it reads the changed settings.
 
@@ -517,29 +515,28 @@ Quick index
 
 ---
 
-### 3.4 Claude Code setting: Ask before switching model on a flag?
+### 3.4 Claude Code setting: Switch models without asking on a flag?
 
-**What this controls:** One value in your Claude Code user settings (settings.json in your Claude Code config folder): "switchModelsOnFlag": false, so Claude Code pauses and asks before switching models when a request is flagged. Turn off removes this one setting whoever added it; the other settings are not touched.
+**What this controls:** One value in your Claude Code user settings (settings.json in your Claude Code config folder): "switchModelsOnFlag": true (Claude Code's default when the line is missing) lets Claude Code switch models without asking when a request is flagged; false makes it pause and ask first. Turn on and Turn off each write this one value; the other settings are not touched.
 
-**Current:** Ask before switching models when a request is flagged: off (Claude Code default).
+**Current:** Switch models without asking when a request is flagged: on (Claude Code default).
 
 **Verification:** state-derived
 
-**Recommended:** A - Turn on
+**Recommended:** A - Turn off
 
-**Recommended outcome:** Sets "switchModelsOnFlag": false in settings.json.
+**Recommended outcome:** Sets "switchModelsOnFlag": false in settings.json. Claude Code then pauses and asks before switching models when a request is flagged.
 
-**Why:** It keeps a flagged request on the model you chose until you say otherwise.
+**Why:** Turning it off keeps a flagged request on the model you chose until you say otherwise.
 
 **Choices:**
 
-- **A. Turn on** - Sets "switchModelsOnFlag": false in settings.json.
-- **B. Turn off** - Already off; nothing changes.
-- **C. Keep current** - Preserve this effective behavior: Ask before switching models when a request is flagged: off (Claude Code default).
+- **A. Turn off** - Sets "switchModelsOnFlag": false in settings.json. Claude Code then pauses and asks before switching models when a request is flagged.
+- **B. Keep current** - Preserve this effective behavior: Switch models without asking when a request is flagged: on (Claude Code default).
 
 **After applying:** Start a new Claude Code session so it reads the changed settings.
 
-**Selected:** A - Turn on
+**Selected:** A - Turn off
 
 ---
 
@@ -560,8 +557,7 @@ Quick index
 **Choices:**
 
 - **A. Turn on** - Sets "instructionFiles": "claude-md-and-agents-md" in settings.json.
-- **B. Turn off** - Already off; nothing changes.
-- **C. Keep current** - Preserve this effective behavior: Read AGENTS.md as well as CLAUDE.md: off (Claude Code default).
+- **B. Keep current** - Preserve this effective behavior: Read AGENTS.md as well as CLAUDE.md: off (Claude Code default).
 
 **After applying:** Start a new Claude Code session so it reads the changed settings.
 
