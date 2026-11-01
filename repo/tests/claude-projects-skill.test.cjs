@@ -203,10 +203,21 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.ok(text.includes('An owner message forwarded into a work thread (the copy shown in that thread) counts as the owner writing there'));
   assert.ok(text.includes('This is a post rule only: a forwarded copy never stands in for words the owner must type themselves'));
   assert.doesNotMatch(text, /RUNNING POST|A Toolkit hook enforces|The same hook/);
-  assert.ok(text.includes('only when it is ready for the owner to check and merge; until then, link the chat thread that owns the work'));
+  // The owner opens a PR only to merge it: every other ask, UAT included, links the chat thread.
+  assert.ok(text.includes('Link the chat thread that owns the work as much as possible, UAT asks included. A direct PR link appears only on a merge ask for a merge-ready PR (G2 PASS and green CI on its current head, version bump done)'));
+  assert.ok(text.includes('anywhere else, name the PR\'s work in plain words with no PR link.'));
+  assert.ok(text.includes('- Relay CI in one line with the owning thread\'s link (a PR link only on a merge-ready merge ask).'));
+  assert.ok(body.includes('each linking the card or thread (by its title), a PR only on a merge-ready merge ask,'));
+  assert.doesNotMatch(text + body, /with the PR link|until then, link the chat thread|thread \(by its title\) or PR/);
+  assert.ok(read('repo/contracts/claude-projects/web-controller-projects/tasks/hourly-nudge.md').includes('names a thread, file or artifact without its link, or links a PR anywhere but a merge ask for a merge-ready PR.'));
+  // Devices by their recorded name, every periodic report relayed, owed decision records kept as promises.
+  assert.ok(text.includes('Name a device by the name the project instructions record for it, never a generic word'));
+  assert.ok(text.includes('Relay each daily check-in and hourly nudge report there too, with the waiting-on-you reminder list every run, or one line when nothing is due.'));
+  assert.ok(text.includes('**Owed records are promises.** With GitHub governance ENABLED, each owner decision or plan OK owes its decision-trace record the same turn'));
+  assert.ok(text.includes('the nudge lists it under **Overdue promise:** until then.'));
   // Links only where the owner acts, as the owner decided; a written rule, no hook checks it.
-  assert.ok(text.includes('**Link where the owner acts.** Every item under **Waiting on you** (each question and each merge ask included) carries the link'));
-  assert.ok(text.includes('A PR, thread or file named elsewhere needs no link. This is a written rule: no hook checks it.'));
+  assert.ok(text.includes('**Link where the owner acts.** Every item under **Waiting on you** (each question and each merge ask included) carries the link to the card or chat thread where the owner acts.'));
+  assert.ok(text.includes('A thread or file named elsewhere needs no link. This is a written rule: no hook checks it.'));
   assert.doesNotMatch(text, /Link everything worth opening|names "PR <n>" without a link|not from the link rule/);
   // The post layout and the merge summary.
   assert.ok(text.includes('**Post layout.** A running post has four parts, in order: a **Now:** line'));
@@ -217,13 +228,15 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.ok(text.includes('One blank line separates each labelled block from the next: the Now line with its bullets, the update log, **Waiting on you** and the ELI5 line.'));
   assert.ok(text.includes('(**Problem, fix, skip first**) nested as bullets under it'));
   assert.ok(text.includes('answered items drop off, and a fresh post repeats every item still open'));
-  assert.ok(text.includes('A thread link\'s text is the thread\'s title, never "here" or an id; a PR or issue is linked by its URL.'));
+  assert.ok(text.includes('A thread link\'s text is the thread\'s title, never "here" or an id; an issue is linked by its URL.'));
   assert.doesNotMatch(text, /the answer to it is appended to the running post|\(only Update lines take a spacer line\)/);
   for (const phrase of ['its problem, fix and skip lines nested as bullets under it', 'thread (by its title)', 'a fresh post carries every open ask forward',
     'a blank line between labelled blocks', 'Otherwise post fresh, below the owner\'s message, and never edit the older post again.']) assert.ok(body.includes(phrase), phrase);
   // Questions: numbered items with indented choices and a "(my pick)" mark; no spacer after the last choice.
   assert.ok(text.includes('Each owner question is one numbered item under **Waiting on you**, written `1. **Question: <the ask>?**`'));
-  assert.ok(text.includes('`    - **<Choice> (my pick).** <one-line reason>`'));
+  assert.ok(text.includes('lettered in order because the owner picks one, `    a. **<Choice> (my pick).** <one-line reason>`'));
+  assert.ok(body.includes('with its choices lettered (a., b.) under it'));
+  assert.doesNotMatch(text, /`    - \*\*<Choice>|flatten its choices into plain bullets/);
   assert.ok(text.includes('The next numbered item follows the last choice directly, with no spacer line.'));
   // Plans, G0 plans, decision asks and explanations open with the problem, the fix and what skipping it costs.
   assert.ok(text.includes('**Problem, fix, skip first.** Every plan, G0 plan, decision ask and explanation, from you and from every thread, opens with three lines'));
@@ -233,7 +246,7 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.ok(text.includes('Under it, indented four spaces, come its problem, fix and skip lines, then its choices'));
   assert.ok(text.includes('for every approval or choice the coordinator acts on itself, opening with its problem, fix and skip lines'));
   assert.equal((text.match(/&nbsp;/g) || []).length, 1, 'only the Update log lines take an &nbsp; spacer');
-  assert.ok(text.includes('Choices need no link of their own. Never write a question outside that list: no bare **Question:** label, bulleted question or question in an Update line, and never flatten its choices into plain bullets.'));
+  assert.ok(text.includes('Choices need no link of their own. Never write a question outside that list: no bare **Question:** label, bulleted question or question in an Update line, and never write its choices as bullets.'));
   assert.doesNotMatch(text, /put at most one \*\*Question:\*\* in a post|Use decision cards for questions, else group/);
   assert.ok(text.includes('An edit keeps every earlier Update line word for word and adds at least one new one.'));
   // The merge-summary rule binds without a hook.
