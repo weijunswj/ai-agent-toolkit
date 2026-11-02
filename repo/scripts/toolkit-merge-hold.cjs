@@ -87,6 +87,7 @@
 // sessions (the governance hook skips them) and stale plugin copies.
 
 const crypto = require('node:crypto');
+const { currentReceipts, deliveryReceipt } = require('./toolkit-projects-delivery.cjs');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -196,7 +197,7 @@ class MergeApprovals {
     return {
       approvals: parsed.approvals.filter(entry => entry && Number.isInteger(entry.pr) && typeof entry.repository === 'string' && Date.parse(entry.at) >= oldest),
       // Older stores have no deliveries. Message bodies and raw ids are never kept here.
-      deliveries: (Array.isArray(parsed.deliveries) ? parsed.deliveries : []).filter(entry => entry && /^[0-9a-f]{64}$/.test(entry.id) && Date.parse(entry.at) >= oldest),
+      deliveries: currentReceipts(Array.isArray(parsed.deliveries) ? parsed.deliveries : [], this.#now()),
     };
   }
 
@@ -214,13 +215,11 @@ class MergeApprovals {
     const at = this.#now().toISOString();
     const state = this.#read();
     if (delivery) {
-      const sent = Date.parse(delivery.sentAt);
       // Expired messages cannot rearm approval after their replay marker ages out. At capacity,
       // refuse new deliveries rather than discard a live replay marker.
-      if (!Number.isFinite(sent) || sent < this.#now().getTime() - MAX_AGE_MS || sent > this.#now().getTime()) return 0;
-      const id = crypto.createHash('sha256').update(delivery.id).digest('hex');
-      if (state.deliveries.some(entry => entry.id === id) || state.deliveries.length >= 4096) return 0;
-      state.deliveries.push({ id, at });
+      const receipt = deliveryReceipt(delivery, state.deliveries, this.#now());
+      if (!receipt) return 0;
+      state.deliveries.push(receipt);
     }
     state.approvals.push(...entries.map(entry => ({ ...entry, at })));
     this.#write(state);

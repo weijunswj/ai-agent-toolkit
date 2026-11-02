@@ -100,7 +100,7 @@ test('only the direct Projects trigger grants the message-specific session excep
 
 test('relay, cited, historical, notification and malformed messages cannot grant approval', (t) => {
   const ctx = context(t);
-  const good = projects.wake('merge owner/a#618');
+  const good = projects.wake('merge owner/a#618', { id: 'cmsg_approval' });
   const refused = [
     `<relay from="coordinator">${good}</relay>`, `<cited author="user">merge owner/a#618</cited>`,
     `<relay from="coordinator"><cited author="user">${good}</cited></relay>`,
@@ -198,7 +198,47 @@ test('Projects delivery ids remain spent across sessions and age out only with t
   assert.doesNotMatch(state, /cmsg_approval|merge owner|<wake/);
   clock = new Date(clock.getTime() + hold.MAX_AGE_MS + 1);
   assert.equal(typed(ctx, prompt), 0, 'old delivery cannot rearm after replay marker expiry');
-  assert.equal(typed(ctx, projects.wake('merge owner/a#618', { at: new Date(clock.getTime() + 60000).toISOString(), id: 'future' })), 0);
+  assert.equal(typed(ctx, projects.wake('merge owner/a#618', { at: new Date(clock.getTime() + 3 * 60000).toISOString(), id: 'future' })), 0);
+  // A host clock a little ahead of this computer's is still a fresh delivery.
+  assert.equal(typed(ctx, projects.wake('merge owner/a#618', { at: new Date(clock.getTime() + 60000).toISOString(), id: 'host-clock-ahead' })), 1);
+});
+
+test('merge receipts cover the delivery lifetime plus allowed clock skew', t => {
+  const ctx = context(t);
+  let clock = new Date('2026-11-01T14:10:00Z');
+  const store = new hold.MergeApprovals({ ...ctx.options, now: () => clock });
+  const delivery = { id: 'clock-skew-replay', sentAt: new Date(clock.getTime() + 110000).toISOString() };
+  const approvals = [{ repository: 'owner/a', pr: 618 }];
+  assert.equal(store.add(approvals, delivery), 1);
+  clock = new Date(clock.getTime() + 24 * 60 * 60 * 1000 + 60000);
+  assert.equal(store.add(approvals, delivery), 0, 'same id is still spent while its stamp is fresh');
+  clock = new Date(clock.getTime() + 60001);
+  assert.equal(store.add(approvals, delivery), 0, 'expired messages cannot rearm after receipt expiry');
+});
+
+test('one Projects message keeps independent governance and merge receipts in either order', t => {
+  for (const mergeFirst of [false, true]) {
+    const ctx = context(t);
+    const session = userSession(ctx);
+    const options = { ...ctx.options, environment: {} };
+    const prompts = new gate.PromptHold(options);
+    prompts.decide({ cwd: ctx.repo, sessionId: session, prompt: 'prepare work' });
+    const prompt = projects.wake('ur rec\nmerge owner/a#618');
+    const governanceReply = () => prompts.decide({ cwd: ctx.repo, sessionId: session, prompt });
+    const mergeReply = () => typed(ctx, prompt, { session });
+    let reply;
+    if (mergeFirst) { assert.equal(mergeReply(), 1); reply = governanceReply(); }
+    else { reply = governanceReply(); assert.equal(mergeReply(), 1); }
+    const ticket = (/ ANSWER ([0-9a-f]{32})\n/.exec(reply.context || '') || [])[1];
+    assert.ok(ticket);
+    assert.equal(prompts.answerTicket(ticket, 'no').ok, true);
+    assert.ok(new hold.MergeApprovals(ctx.options).find('owner/a', 618));
+    assert.equal(mergeReply(), 0);
+    assert.equal(new gate.ReplyTickets(ctx.options).acceptDelivery(gate.ownerMessage(prompt), 0), false);
+    const receipts = JSON.parse(fs.readFileSync(ctx.file)).deliveries;
+    const governanceFile = path.join(path.dirname(ctx.file), gate.TICKETS_BASENAME);
+    assert.deepEqual(JSON.parse(fs.readFileSync(governanceFile)).deliveries.map(entry => entry.id), receipts.map(entry => entry.id));
+  }
 });
 
 test('legacy approval stores remain usable and replay capacity never evicts a live delivery', t => {
