@@ -39,6 +39,8 @@
 // The owner's app-local standing answer instead of a typed approval: On, with an enabled
 // governance binding merged on the default branch (read from this computer's cache, under a day
 // old), a merge with no typed approval passes only in a session the user started, in that
+// same session after a resume if its startup recorded user-started origin (never a fork or an
+// unknown or automation origin), with launcher and host-session checks still passing, in that
 // repository's own folder, for that repository, as a plain merge commit pinned to the full 40
 // character head SHA: `gh pr merge N --merge --match-head-commit <sha>`, or a connector merge tool
 // call with merge_method "merge" and the head SHA field, and only when the merge-scope check
@@ -48,6 +50,9 @@
 // --delete-branch, the API endpoint, connector auto-merge and any other repository still need a typed
 // approval. The other gate conditions (review, CI, testing) are the controller's to check before it
 // merges; this hold cannot read them.
+// `node repo/scripts/toolkit-merge-hold.cjs check` reports the standing checks through the hook's
+// native session context. The hook stops that shell call after reporting; it writes nothing and
+// consumes no approval. Outside a hook, the command has no native session context.
 //
 // What one approval allows: one merge, of that pull request in that repository, within a day, by any
 // session on this computer. A typed SHA pins the head commit; without one the merge must still name
@@ -325,15 +330,25 @@ function approvalsIn(prompt) {
   return found;
 }
 
-// Whether this session was started by the user: not by another session or a Toolkit launcher, and
-// with a session-start mark from a run that was not resumed or forked.
-function startedByUser(sessionId, environment, registryOptions, now) {
-  if (typeof sessionId !== 'string' || sessionId === '') return false;
-  if (gate.LAUNCHER_MARKERS.some(name => typeof environment[name] === 'string' && environment[name] !== '')) return false;
+function sessionChecks(sessionId, environment, registryOptions, now) {
   const host = environment[gate.HOST_SESSION_VARIABLE];
-  if (typeof host === 'string' && host !== '' && host !== sessionId) return false;
   const epochs = new gate.SessionEpochs({ registryOptions, now });
-  return epochs.get(sessionId) !== null && !epochs.resumed(sessionId);
+  return {
+    nativeSessionContext: typeof sessionId === 'string' && sessionId !== '',
+    sessionMarked: epochs.get(sessionId) !== null,
+    launcherMarker: gate.LAUNCHER_MARKERS.some(name => typeof environment[name] === 'string' && environment[name] !== ''),
+    hostSessionMatches: !(typeof host === 'string' && host !== '' && host !== sessionId),
+    resumed: epochs.resumed(sessionId),
+    userStartedOrigin: epochs.origin(sessionId) === 'user-started',
+    forked: epochs.forked(sessionId),
+  };
+}
+
+// Bare prompt approvals keep the original fresh-run rule. Only standing merges use recorded
+// origin to accept a resume; neither Projects delivery nor prompt text can establish origin.
+function startedByUser(checks, standing = false) {
+  return checks.sessionMarked && !checks.launcherMarker && checks.hostSessionMatches
+    && (standing ? checks.userStartedOrigin && !checks.forked : !checks.resumed);
 }
 
 // Keeps the approvals a typed message carries; returns how many were kept.
@@ -347,7 +362,7 @@ function recordPrompt(input, { environment = process.env, registryOptions = {}, 
   // uses startedByUser unchanged. Even an attested message needs this host's session-start mark.
   if (message.wrapped) {
     if (!new gate.SessionEpochs({ registryOptions, now }).get(sessionId)) return 0;
-  } else if (!startedByUser(sessionId, environment || {}, registryOptions, now)) return 0;
+  } else if (!startedByUser(sessionChecks(sessionId, environment || {}, registryOptions, now))) return 0;
   const here = repositoryOf(input && input.cwd);
   const entries = found.map(entry => ({ repository: entry.repository || here, pr: entry.pr, sha: entry.sha, session: sessionId }))
     .filter(entry => typeof entry.repository === 'string');
@@ -616,7 +631,7 @@ function standingProblem(merge, standing) {
 }
 
 // The refusal for one requested merge, or the approval it uses. `standing` is the owner's standing
-// answer for this folder's repository ({ repository }) when it is on, or null.
+// answer evaluation for this folder's repository, including a safe reason when unavailable.
 function judge(merge, approvals, standing = null) {
   const unreadable = merge.connector ? connectorRefusal(merge) : null;
   if (unreadable) return { refusal: unreadable };
@@ -625,7 +640,7 @@ function judge(merge, approvals, standing = null) {
   const name = `${merge.repository}#${merge.pr}`;
   const approval = approvals.find(merge.repository, merge.pr);
   if (!approval) {
-    if (!standing) return { refusal: { deny: `Toolkit has no unused approval recorded for ${name} from the last day, so this merge is refused. ${ASK_TEXT}` } };
+    if (!standing?.eligible) return { refusal: { deny: `Toolkit has no unused approval recorded for ${name} from the last day, so this merge is refused. Standing task auto-merge is unavailable: ${standingReason(standing?.reason)}. ${ASK_TEXT}` } };
     const problem = standingProblem(merge, standing);
     if (problem) return { refusal: deny(`task auto-merge is on for ${standing.repository}, but this merge of ${name} ${problem}, so it needs the user's typed approval. A merge without one must be exactly \`gh pr merge ${merge.pr} --merge --match-head-commit <full head sha>\` from this repository's folder, or the connector's merge tool with merge_method "merge" and its head SHA field, once the gate rules' task auto-merge conditions hold.`) };
     const scope = standing.scope(merge.sha);
@@ -805,25 +820,68 @@ function nestedRefusal(text) {
 
 // The owner's standing answer for the repository of folder `cwd`: { repository, scope } when the
 // app-local answer is On, the merged binding enables governance and the user started this session;
-// else null. `scope(head)` is the merge-scope verdict for that head against this folder's copy of
+// otherwise a structured failure. `scope(head)` is the merge-scope verdict against this folder's copy of
 // the remote's default branch, or null when git cannot read it.
-function standingAnswer(input, cwd, { environment, registryOptions, now, host }) {
-  if (typeof cwd !== 'string' || cwd === '') return null;
-  const repository = repositoryOf(cwd);
-  if (!repository) return null;
+function standingAnswer(input, cwd, { environment = process.env, registryOptions = {}, now, host = null } = {}) {
+  const repository = typeof cwd === 'string' && cwd ? repositoryOf(cwd) : null;
   let root;
-  try { root = governance.findGitRoot(cwd); } catch { root = null; }
-  if (!root) return null;
-  const answer = governance.taskAutoMerge(root, { ...registryOptions, host, ...(now ? { now } : {}) });
-  if (answer.auto_merge !== 'after-gates') return null;
+  try { root = repository ? governance.findGitRoot(cwd) : null; } catch { root = null; }
+  const answer = root ? governance.taskAutoMerge(root, { ...registryOptions, host, ...(now ? { now } : {}) }) : null;
   const sessionId = input && typeof input.session_id === 'string' ? input.session_id : null;
-  if (!startedByUser(sessionId, environment, registryOptions, now)) return null;
+  const checks = {
+    repositoryValid: Boolean(repository && root),
+    autoMergeOn: answer?.preference?.status === 'saved' && answer.preference.value === 'after-gates',
+    bindingFresh: answer?.fresh === true,
+    ...sessionChecks(sessionId, environment || {}, registryOptions, now),
+  };
+  const reason = !checks.repositoryValid ? 'no-repository'
+    : !checks.autoMergeOn ? 'auto-merge-off'
+    : !checks.bindingFresh ? 'binding-not-fresh'
+    : !checks.sessionMarked ? 'no-session-mark'
+    : checks.launcherMarker ? 'launcher-marker'
+    : !checks.hostSessionMatches ? 'host-session-mismatch'
+    : checks.forked ? 'fork'
+    : !startedByUser(checks, true) ? (checks.resumed ? 'resumed-without-user-started-origin' : 'user-started-origin-required') : null;
+  if (reason) return { eligible: false, reason, checks };
   const scope = head => {
     const branch = pushTarget(root, 'origin', registryOptions)?.default;
     const base = branch ? mergeScope.commitOf(root, `refs/remotes/origin/${branch}`) : null;
     return base ? mergeScope.eligibilityOf(root, base, head) : null;
   };
-  return { repository, scope };
+  return { eligible: true, reason: null, checks, repository, scope };
+}
+
+function standingReason(reason) {
+  return {
+    'no-repository': 'this folder has no usable GitHub repository',
+    'auto-merge-off': "this app's task auto-merge answer is not On or cannot be read",
+    'binding-not-fresh': 'the enabled merged governance binding is missing, invalid or not fresh',
+    'no-session-mark': 'this session has no readable session-start mark',
+    'launcher-marker': 'a Toolkit launcher marker is present',
+    'host-session-mismatch': 'the host session does not match this session',
+    'fork': 'this session is a fork',
+    'resumed-without-user-started-origin': 'this resumed session has no recorded user-started origin',
+    'user-started-origin-required': 'this session has no recorded user-started origin',
+  }[reason] || 'the standing answer is unavailable';
+}
+
+function check(input, cwd, options = {}) {
+  const { eligible, reason, checks } = standingAnswer(input, cwd, options);
+  return { eligible, reason, explanation: eligible ? 'the standing session and repository checks pass; merge scope and gate conditions still apply' : standingReason(reason), ...checks };
+}
+
+function checkText(input, cwd, options) {
+  return `Toolkit standing merge check (read-only; no approval consumed):\n${JSON.stringify(check(input, cwd, options), null, 2)}`;
+}
+
+// Exact command only: no flags, chaining or supplied session identity. The hook supplies its own
+// native event, so a shell cannot substitute another session's id for this diagnostic.
+function isCheckCommand(text, cwd) {
+  const words = wordsOf(text.trim());
+  return words.length === 3 && /^(?:node|node\.exe)$/i.test(path.basename(words[0]))
+    && (words[1].replace(/\\/g, '/') === 'repo/scripts/toolkit-merge-hold.cjs'
+      || path.resolve(cwd || process.cwd(), words[1]) === __filename) && words[2] === 'check'
+    && !/[\r\n;&|`$<>]/.test(text);
 }
 
 // The PreToolUse decision: { deny } or null.
@@ -851,6 +909,7 @@ function decide(input, { registryOptions = {}, now, environment = process.env, h
     // An unknown shell is judged under each reading (shellReadings); the first refusal stands.
     const refusal = shellReadings(shellOf(input, host)).map(shell => shellRefusal(joined ? `${text}\n${joined}` : text, cwd, registryOptions, shell)).find(Boolean);
     if (refusal) return refusal;
+    if (isCheckCommand(text, cwd)) return { deny: checkText(input, cwd, { environment, registryOptions, now, host }) };
     merges = shellMerges(text, cwd, environment || {});
     if (joined) {
       const key = merge => JSON.stringify([merge.repository, merge.pr, merge.sha, merge.auto, merge.explicit]);
@@ -892,7 +951,18 @@ function mayMerge(input) {
 
 const CHECK_FAILED = 'Toolkit: the merge check failed, so this merge or push is refused. Retry it; if this repeats, run `setup toolkit` to repair the Toolkit plugin.';
 
+function main(argv = process.argv.slice(2)) {
+  if (argv.length !== 1 || argv[0] !== 'check') {
+    process.stderr.write('Usage: node repo/scripts/toolkit-merge-hold.cjs check\n');
+    return 1;
+  }
+  process.stdout.write(`${checkText({}, process.cwd(), {})}\n`);
+  return 0;
+}
+
+if (require.main === module) process.exitCode = main();
+
 module.exports = Object.freeze({
   APPROVALS_BASENAME, APPROVALS_SCHEMA, CHECK_FAILED, CONNECTOR_MERGE, MAX_AGE_MS, MAX_COMMAND_CHARS, MergeApprovals, MergeHoldError,
-  approvalsIn, connectorMergeArgs, decide, mayMerge, recordPrompt, shellMerges,
+  approvalsIn, check, connectorMergeArgs, decide, main, mayMerge, recordPrompt, shellMerges, standingAnswer,
 });

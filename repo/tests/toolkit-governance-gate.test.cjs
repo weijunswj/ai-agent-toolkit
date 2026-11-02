@@ -1243,6 +1243,50 @@ test('nested sessions: a short reply counts only in the session that was shown t
   }
 });
 
+test('session origin closure: only a qualifying startup survives same-id resume, never a fork or unknown origin', t => {
+  const ctx = scratch(t);
+  const rows = [
+    { name: 'user', source: 'startup', origin: 'user-started', environment: {} },
+    { name: 'matching-host', source: 'startup', origin: 'user-started', environment: { TOOLKIT_HOST_SESSION: 'matching-host' } },
+    { name: 'other-host', source: 'startup', origin: 'automation', environment: { TOOLKIT_HOST_SESSION: 'parent' } },
+    ...gate.LAUNCHER_MARKERS.map(name => ({ name, source: 'startup', origin: 'automation', environment: { [name]: 'launcher' } })),
+    ...['resume', 'fork', 'clear', 'compact', 'other', null].map(source => ({ name: `unknown-${source}`, source, origin: 'unknown', environment: {} })),
+  ];
+  for (const row of rows) {
+    const options = { registryOptions: ctx.options, environment: row.environment };
+    const epochs = new gate.SessionEpochs(options);
+    const first = gate.startSession({ session_id: row.name, source: row.source }, options);
+    assert.ok(first, row.name);
+    assert.equal(epochs.origin(row.name), row.origin, row.name);
+    assert.equal(epochs.resumed(row.name), ['resume', 'fork'].includes(row.source), row.name);
+    for (const source of ['clear', 'compact']) assert.equal(epochs.start(row.name, source), first, row.name);
+    const next = gate.startSession({ session_id: row.name, source: 'resume', prompt: 'user started this session' }, { ...options, environment: {} });
+    assert.notEqual(next, first, row.name);
+    assert.equal(epochs.resumed(row.name), true, row.name);
+    assert.equal(epochs.origin(row.name), row.origin, row.name);
+    assert.equal(epochs.forked(row.name), row.source === 'fork', row.name);
+    assert.notEqual(epochs.start(row.name, 'resume'), next, 'every resume still rotates its epoch');
+  }
+  const epochs = new gate.SessionEpochs({ registryOptions: ctx.options, environment: {} });
+  epochs.start('user', 'fork');
+  assert.equal(epochs.origin('user'), 'unknown', 'even a fork reporting the same id drops origin');
+  epochs.start('user', 'resume');
+  assert.equal(epochs.forked('user'), true, 'a fork cannot gain origin by resuming');
+  for (const value of [undefined, 'unrecognised', true]) {
+    const id = `legacy-${value}`;
+    epochs.start(id, 'startup');
+    const file = path.join(path.dirname(ctx.registryPath), gate.SESSIONS_FOLDER, `s-${crypto.createHash('sha256').update(id).digest('hex').slice(0, 32)}.json`);
+    const mark = JSON.parse(fs.readFileSync(file, 'utf8'));
+    delete mark.origin;
+    if (value !== undefined) mark.origin = value;
+    fs.writeFileSync(file, JSON.stringify(mark));
+    epochs.start(id, 'resume');
+    assert.equal(epochs.origin(id), 'unknown', 'legacy and unknown fields never become user origin');
+  }
+  epochs.start('another-id', 'resume');
+  assert.equal(epochs.origin('another-id'), 'unknown', 'origin belongs to one native session id only');
+});
+
 test('session marks: a later process that resumes the session cannot answer, on both hosts, however it was started', (t) => {
   const ctx = scratch(t);
   const home = path.join(ctx.root, 'home');
