@@ -24,7 +24,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { ShellCall, absoluteShellPath, assignVariable, assignmentOf, folderWord, shellOf, shellPath, shellReadings } = require('./toolkit-shell-call.cjs');
+const { SHELLS, ShellCall, absoluteShellPath, assignVariable, assignmentOf, folderWord, plainGitLine, shellCommands, shellOf, shellPath, shellReadings } = require('./toolkit-shell-call.cjs');
 
 const MESSAGE = 'Remove the AI attribution lines (Co-Authored-By or Claude-Session trailers, claude.ai session links, "Generated with" footers) and retry.';
 const ATTRIBUTION_PATTERNS = Object.freeze([
@@ -75,48 +75,6 @@ function hasAttribution(text) {
   return trailer || ATTRIBUTION_PATTERNS.some((pattern) => pattern.test(value));
 }
 
-// Read shell words in one pass. Quotes protect separators; shell escapes and both Bash and
-// PowerShell line continuations stay inside the same command. Backslashes in Windows paths stay.
-function shellCommands(text) {
-  const commands = [];
-  let words = []; let offsets = []; let word = ''; let started = false; let quote = ''; let offset = 0;
-  const finishWord = () => { if (started) { words.push(word); offsets.push(offset); } word = ''; started = false; };
-  const finishCommand = () => { finishWord(); if (words.length) commands.push({ words, offsets }); words = []; offsets = []; };
-  for (let index = 0; index < text.length; index += 1) {
-    const char = text[index];
-    const next = text[index + 1];
-    if (!started) offset = index;
-    if (quote !== "'" && (char === '\\' || char === '`')) {
-      if (next === '\n' || (next === '\r' && text[index + 2] === '\n')) {
-        index += next === '\r' ? 2 : 1;
-        continue;
-      }
-      if (next && (char === '`' || (quote === '"' ? '"\\$`'.includes(next) : /[\s"'\\;&|()]/.test(next)))) {
-        word += next; started = true; index += 1; continue;
-      }
-    }
-    if (quote) {
-      if (char === quote) {
-        if (quote === "'" && next === "'") { word += char; index += 1; }
-        else quote = '';
-      } else word += char;
-      continue;
-    }
-    if (char === '"' || char === "'") { quote = char; started = true; continue; }
-    if (char === '#' && !started) {
-      while (index + 1 < text.length && text[index + 1] !== '\n') index += 1;
-      continue;
-    }
-    if (char === ';' || char === '|' || char === '\n' || char === '(' || char === ')' || (char === '&' && next === '&')) {
-      finishCommand();
-      if ((char === '|' || char === '&') && next === char) index += 1;
-    } else if (/\s/.test(char)) finishWord();
-    else { word += char; started = true; }
-  }
-  finishCommand();
-  return commands;
-}
-
 // The commands of one line with each whole-word variable an earlier command assigned a literal to
 // read as its value, and a leading home variable as `~` (toolkit-shell-call.cjs folderWord), the way
 // the merge hold reads them. The assignments themselves are dropped.
@@ -129,6 +87,13 @@ function withVariables(commands, shell = null) {
     result.push({ ...current, words: current.words.map((word) => folderWord(word, variables, shell)) });
   }
   return result;
+}
+
+// The force-push check reads location commands by their last non-option folder word. -Path and
+// -LiteralPath name the following word, while flags such as -P, -L, /d and -PassThru do not.
+const LOCATION_COMMAND = /^(?:cd|pushd|chdir|set-location|sl)$/i;
+function locationTarget(words) {
+  return words.slice(1).filter((word) => !word.startsWith('-') && !/^\/d$/i.test(word)).pop() || '';
 }
 
 // Find the relevant subcommand after git's global options. Each -C is relative to the previous
@@ -362,8 +327,6 @@ function repositoryKind(folder, cache, registryOptions = {}) {
   return answer;
 }
 
-const SHELLS = /(?:^|[\\/])(?:bash|sh|zsh|dash|ksh|pwsh|powershell|cmd|eval|invoke-expression|iex)(?:\.exe)?$/i;
-
 // Returns the refusal reason, or '' when the command may run. A quoted command handed to a
 // shell (bash -c "...", pwsh -Command "...") is read too, up to two levels deep.
 // `registryOptions` is for tests (the governance decisions file to read).
@@ -375,8 +338,9 @@ function forceRefusal(command, cwd, depth = 0, registryOptions = {}, shell = nul
   const cache = new Map();
   for (const current of withVariables(shellCommands(text), shell)) {
     // A cd earlier in the same command line moves the folder later git commands run in.
-    if (/^(?:cd|pushd|set-location|sl)$/i.test(current.words[0]) && current.words.length === 2) {
-      root = shellPath(root, current.words[1]);
+    if (LOCATION_COMMAND.test(current.words[0])) {
+      const target = locationTarget(current.words);
+      if (target) root = shellPath(root, target);
       continue;
     }
     const git = gitCommand(current, root);
@@ -454,6 +418,30 @@ function pushTarget(args, folder) {
 const COMMIT_STEPS = new Set(['add', 'stage', 'commit', 'merge', 'cherry-pick', 'revert', 'am', 'rebase']);
 // git commands that can make or move the branch a later push in the same command line sends.
 const BRANCH_STEPS = new Set(['checkout', 'switch', 'branch', 'worktree']);
+// git commands that leave HEAD, the index and the branches as they were; any other earlier step may
+// move them before an unconfirmed-folder push, so it is kept as `other`.
+const READ_STEPS = new Set(['status', 'log', 'diff', 'show', 'fetch', 'push', 'rev-parse', 'ls-files', 'ls-remote', 'describe']);
+// Whether a git step is a plain read: on READ_STEPS, except a fetch that writes a local branch (a
+// refspec after the repository with `:` or --update-head-ok), and `config` with only a read option.
+function readStep({ sub, args }) {
+  if (sub === 'config') return args.some((word) => /^(?:--get(?:-all|-regexp|-urlmatch)?|--list|-l)$/.test(word));
+  if (sub === 'fetch') {
+    const valueOptions = new Set(['--upload-pack', '--depth', '--deepen', '--shallow-since', '--shallow-exclude', '--negotiation-tip', '-j', '--jobs', '--filter', '--server-option', '-o', '--refmap', '--recurse-submodules-default', '--submodule-prefix']);
+    let repository = false;
+    let positional = false;
+    for (let index = 0; index < args.length; index += 1) {
+      const word = args[index];
+      if (!positional && (word === '-u' || word === '--update-head-ok')) return false;
+      if (!positional && word === '--') { positional = true; continue; }
+      if (!positional && valueOptions.has(word)) { index += 1; continue; }
+      if (!positional && word.startsWith('-')) continue;
+      if (!repository) repository = true;
+      else if (word.includes(':')) return false;
+    }
+    return true;
+  }
+  return READ_STEPS.has(sub);
+}
 
 // The branch a git step creates and its start point ({ name, start }, `HEAD` when none is named):
 // `checkout -b|-B <name> [<start>]`, `switch -c|-C <name> [<start>]`, `branch <name> [<start>]` with
@@ -482,17 +470,20 @@ function branchCreated(sub, args) {
 // What a push or a new pull request sends, for each one in a command line, with the same cd,
 // git -C and nested-shell reading as the force-push check: push and pull-request targets as
 // toolkit-push-check.cjs reads them. A push that only deletes sends nothing to check. Each target
-// carries `preceding`, the commit steps earlier in the same command line ({ folder, sub }, in order),
+// carries `preceding`, the git steps earlier in the same command line ({ folder, sub }, in order),
 // because the check runs before any of them.
 //
 // `confirmed` false says the starting folder may not be where the command runs (a Codex call that
 // named no folder). A `cd`, `pushd` or `Set-Location` to a folder that stands on its own, or a git -C
 // or --work-tree one, confirms the folder from there on; a relative one keeps the state. Each push,
 // pull request and preceding step read from a folder not confirmed carries `folderConfirmed: false`.
+// An unconfirmed push also carries `plainGit`: only a single plain git command can check HEAD in
+// every reachable working tree; no other command may run alongside it.
 function outgoingChanges(command, cwd, depth = 0, preceding = [], confirmed = true, shell = null) {
   const text = String(command || '');
   const found = [];
   if (text.length > MAX_COMMAND_CHARS || !/\b(?:git|gh)\b/i.test(text)) return found;
+  const plainGit = depth === 0 && plainGitLine(text);
   let root = cwd || process.cwd();
   const withPreceding = (target) => (preceding.length ? { ...target, preceding: preceding.slice() } : target);
   const marked = (entry, known) => (known ? entry : { ...entry, folderConfirmed: false });
@@ -505,11 +496,14 @@ function outgoingChanges(command, cwd, depth = 0, preceding = [], confirmed = tr
     const git = gitCommand(current, root);
     const known = confirmed || Boolean(git?.absolute);
     const push = git && !git.refusal && git.sub === 'push' ? pushTarget(git.args, git.base) : null;
-    if (push) found.push(withPreceding(marked(push, known)));
+    if (push) found.push(withPreceding(marked(known ? push : { ...push, plainGit }, known)));
     if (git && !git.refusal && COMMIT_STEPS.has(git.sub)) preceding.push(marked({ folder: git.base, sub: git.sub }, known));
     if (git && !git.refusal && BRANCH_STEPS.has(git.sub)) {
       const created = branchCreated(git.sub, git.args);
       preceding.push(marked(created ? { folder: git.base, sub: 'create', ...created } : { folder: git.base, sub: git.sub }, known));
+    }
+    if (git && !git.refusal && !COMMIT_STEPS.has(git.sub) && !BRANCH_STEPS.has(git.sub) && !readStep(git)) {
+      preceding.push(marked({ folder: git.base, sub: 'other' }, known));
     }
     const pullRequest = pullRequestCreate(current, root);
     if (pullRequest) found.push(withPreceding(marked(pullRequest, confirmed)));

@@ -138,20 +138,23 @@ test('Codex and Claude profile state is isolated', () => {
   assert.equal(control.readProfile('claude-code', { root: work }).topology, control.TOPOLOGIES.BROADER_NATIVE);
 });
 
-test('the Claude hook denies a default Agent launch in governed work under root-only, retired direct and unbound broader-native profiles', async () => {
+test('the Claude hook denies a default Agent launch in a gate run under root-only, retired direct and unbound broader-native profiles', async () => {
+  // A Toolkit launcher marks a gate run; outside one the main session launches any agent.
+  const environment = { TOOLKIT_GATE_ROLE: 'G1' };
   const rootOnlyRoot = root();
   control.configureProfile('claude-code', rootOnly(), { root: rootOnlyRoot });
-  const denied = hook.decision({ tool_name: 'Agent' }, { root: rootOnlyRoot }).hookSpecificOutput;
+  assert.deepEqual(hook.decision({ tool_name: 'Agent' }, { root: rootOnlyRoot, environment: {} }), {}, 'no gate run');
+  const denied = hook.decision({ tool_name: 'Agent' }, { root: rootOnlyRoot, environment }).hookSpecificOutput;
   assert.equal(denied.permissionDecision, 'deny');
   assert.doesNotMatch(denied.permissionDecisionReason, /toolkit-agent-control|launch-spec|direct/i);
 
   const directRoot = root();
   writeProfile(directRoot, storedProfile({ topology: RETIRED_DIRECT, capacity_mode: control.CAPACITY_MODES.AUTO, enforcement: 'toolkit-launch-boundary' }));
-  assert.equal(hook.decision({ tool_name: 'Agent' }, { root: directRoot }).hookSpecificOutput.permissionDecision, 'deny');
+  assert.equal(hook.decision({ tool_name: 'Agent' }, { root: directRoot, environment }).hookSpecificOutput.permissionDecision, 'deny');
 
   const broaderRoot = root();
   control.configureProfile('claude-code', { topology: control.TOPOLOGIES.BROADER_NATIVE, capacity_mode: control.CAPACITY_MODES.ROOT_ONLY }, { root: broaderRoot });
-  assert.equal((await hook.decision({ tool_name: 'Agent' }, { root: broaderRoot })).hookSpecificOutput.permissionDecision, 'deny');
+  assert.equal((await hook.decision({ tool_name: 'Agent' }, { root: broaderRoot, environment })).hookSpecificOutput.permissionDecision, 'deny');
 });
 
 test('agent control is a profile library: no command runs and nothing is written', () => {
@@ -178,7 +181,7 @@ test('no launch-capable, core or retired-history API remains exported', () => {
   }
 });
 
-test('a Claude Agent hook call whose input cannot be read is refused in governed work and left alone elsewhere', () => {
+test('a Claude Agent hook call whose input cannot be read is refused in a gate run and left alone elsewhere', () => {
   // The hook runs only for the Agent|Task matcher, so unreadable input is an agent launch Toolkit cannot check.
   const HOOK = path.join(__dirname, '..', 'scripts', 'toolkit-claude-agent-hook.cjs');
   const CHECKOUT = path.resolve(__dirname, '..', '..');
@@ -192,15 +195,17 @@ test('a Claude Agent hook call whose input cannot be read is refused in governed
   };
   const READ_DENIAL = /^Toolkit could not read this agent launch, so it cannot check it; do the work in this session\.$/;
   try {
+    const gate = { ...clean, TOOLKIT_GATE_ROLE: 'G1' };
     for (const input of ['{ not json', 'null', '[]', '"Agent"', JSON.stringify({ hook_event_name: 'PreToolUse', tool_input: {} })]) {
-      const governed = call(input, CHECKOUT).hookSpecificOutput;
-      assert.equal(governed?.permissionDecision, 'deny', `governed: ${input}`);
-      assert.match(governed.permissionDecisionReason, READ_DENIAL);
+      const marked = call(input, CHECKOUT, gate).hookSpecificOutput;
+      assert.equal(marked?.permissionDecision, 'deny', `gate run: ${input}`);
+      assert.match(marked.permissionDecisionReason, READ_DENIAL);
+      assert.deepEqual(call(input, CHECKOUT), {}, `governed checkout, no gate run: ${input}`);
       assert.deepEqual(call(input, dir), {}, `normal folder: ${input}`);
-      assert.equal(call(input, dir, { ...clean, TOOLKIT_GATE_ROLE: 'G1' }).hookSpecificOutput?.permissionDecision, 'deny', `launcher marker: ${input}`);
+      assert.equal(call(input, dir, gate).hookSpecificOutput?.permissionDecision, 'deny', `launcher marker: ${input}`);
     }
-    // A readable input names its own working folder; it decides governance.
-    const named = call(JSON.stringify({ hook_event_name: 'PreToolUse', cwd: CHECKOUT }), dir).hookSpecificOutput;
+    // A readable input that names no tool is refused in a gate run wherever it runs.
+    const named = call(JSON.stringify({ hook_event_name: 'PreToolUse', cwd: CHECKOUT }), dir, gate).hookSpecificOutput;
     assert.equal(named?.permissionDecision, 'deny');
     assert.deepEqual(call(JSON.stringify({ tool_name: 'Read', cwd: CHECKOUT }), CHECKOUT), {}, 'other tools are untouched');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
@@ -209,8 +214,8 @@ test('a Claude Agent hook call whose input cannot be read is refused in governed
 test('a Claude hook whose decision modules cannot load still denies Agent and Task as a handled decision', () => {
   // Claude Code treats a hook process error (crash, non-zero exit other than 2) as non-blocking,
   // so a missing or broken module must surface as the hook's own deny, not as a crash.
-  // In governed work (here the Toolkit checkout) a missing decision module denies; without the shared
-  // predicate only a launcher marker gates, so ordinary work is never blocked by a broken install.
+  // In a gate run (a launcher marker, here in the Toolkit checkout) a missing decision module denies;
+  // without one nothing gates, so ordinary work is never blocked by a broken install.
   // The test preload makes the named modules fail to load inside the real hook file.
   const HOOK = path.join(__dirname, '..', 'scripts', 'toolkit-claude-agent-hook.cjs');
   const PRELOAD = path.join(__dirname, 'toolkit-test-module-blocker-preload.cjs');
@@ -222,16 +227,20 @@ test('a Claude hook whose decision modules cannot load still denies Agent and Ta
   for (const key of ['TOOLKIT_GATE_ROLE', 'TOOLKIT_NATIVE_HELPER_BINDING', 'TOOLKIT_CLAUDE_TASK_PROFILE_SHA256']) delete clean[key];
   const call = (blockedModules, input, env = clean) => spawnSync(process.execPath, blockedModules ? ['--require', PRELOAD, HOOK] : [HOOK],
     { input: JSON.stringify(input), encoding: 'utf8', windowsHide: true, env: blockedModules ? { ...env, TOOLKIT_TEST_BLOCKED_MODULES: blockedModules } : env });
+  const gate = { ...clean, TOOLKIT_GATE_ROLE: 'G1' };
   try {
     for (const tool of ['Agent', 'Task']) {
-      const broken = call(DECISION_MODULES, { tool_name: tool, hook_event_name: 'PreToolUse', cwd: CHECKOUT, tool_input: { subagent_type: 'toolkit-g1-helper' } });
+      const broken = call(DECISION_MODULES, { tool_name: tool, hook_event_name: 'PreToolUse', cwd: CHECKOUT, tool_input: { subagent_type: 'toolkit-g1-helper' } }, gate);
       assert.equal(broken.status, 0, broken.stderr);
       const output = JSON.parse(broken.stdout).hookSpecificOutput;
       assert.equal(output.permissionDecision, 'deny', tool);
       assert.match(output.permissionDecisionReason, /could not check this helper launch safely/);
     }
+    // The governed checkout outside a gate run: a broken install blocks nothing.
+    const ungated = call(DECISION_MODULES, { tool_name: 'Agent', hook_event_name: 'PreToolUse', cwd: CHECKOUT, tool_input: {} });
+    assert.deepEqual(JSON.parse(ungated.stdout), {}, 'no gate run');
     // Same boundary, intact modules: the named-helper policy decides.
-    const intact = call(null, { tool_name: 'Agent', hook_event_name: 'PreToolUse', cwd: CHECKOUT, tool_input: {} });
+    const intact = call(null, { tool_name: 'Agent', hook_event_name: 'PreToolUse', cwd: CHECKOUT, tool_input: {} }, gate);
     assert.equal(intact.status, 0, intact.stderr);
     assert.match(JSON.parse(intact.stdout).hookSpecificOutput.permissionDecisionReason, /allows only the toolkit-g0-helper and toolkit-g1-helper agents/);
     const outside = call(DECISION_MODULES, { tool_name: 'Agent', hook_event_name: 'PreToolUse', cwd: dir, tool_input: {} });

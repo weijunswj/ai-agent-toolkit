@@ -69,12 +69,20 @@ test('outside a V3-governed checkout and without a binding the hook makes no dec
   } finally { fs.rmSync(elsewhere, { recursive: true, force: true }); }
 });
 
-test('inside the V3-governed Toolkit checkout a helper request without installed agent files is blocked before dispatch', () => {
+// A Toolkit launcher marks a gate run; only those get the named-helper policy.
+const GATE = { TOOLKIT_GATE_ROLE: 'G1' };
+
+test('in a gate run in the V3-governed Toolkit checkout a helper request without installed agent files is blocked before dispatch', () => {
   for (const tool of ['spawn_agent', 'Agent', 'collaborationspawn_agent']) {
-    const r = run({ tool_name: tool, hook_event_name: 'PreToolUse', cwd: ROOT, tool_input: { agent_type: 'toolkit-g1-helper', fork_turns: 'none' } });
+    const r = run({ tool_name: tool, hook_event_name: 'PreToolUse', cwd: ROOT, tool_input: { agent_type: 'toolkit-g1-helper', fork_turns: 'none' } }, GATE);
     assert.equal(r.status, 2, tool);
     assert.equal(r.output.hookSpecificOutput.permissionDecision, 'deny');
     assert.match(r.stderr, /no toolkit-g1-helper agent file is installed/);
+  }
+  // Outside a gate run the rules let the main session start any agent, in a governed repository too.
+  for (const agent of ['toolkit-g1-helper', 'explorer', undefined]) {
+    const open = run({ tool_name: 'spawn_agent', hook_event_name: 'PreToolUse', cwd: ROOT, tool_input: { agent_type: agent, fork_turns: 'none' } });
+    assert.deepEqual([open.status, open.output], [0, {}], `no gate run: ${agent}`);
   }
   assert.deepEqual(run({ tool_name: 'view_image', cwd: ROOT }).output, {}, 'other tools are untouched');
   assert.deepEqual(run({ tool_name: 'shell', cwd: ROOT }).output, {}, 'a shell call with no command has nothing to refuse');
@@ -89,7 +97,7 @@ test('F1: an unbound spawn under any host-valid Codex namespace, hyphenated ones
   const contract = JSON.parse(fs.readFileSync(path.join(ROOT, 'repo', 'contracts', 'toolkit-local-bridge', 'codex-plugin', 'hooks', 'hooks.json'), 'utf8'));
   for (const tool of ['multi-agentspawn_agent', 'collab-v2spawn_agent', 'Team_Alpha-2spawn_agent', '-spawn_agent']) {
     for (const hooks of [plugin, contract]) assert.ok(new CodexHookMatcher(hooks.hooks.PreToolUse[0].matcher).matches(tool), `registered matcher reaches ${tool}`);
-    const r = run({ tool_name: tool, hook_event_name: 'PreToolUse', cwd: ROOT, tool_input: { task_name: 'leaf', message: 'x', fork_turns: 'none' } });
+    const r = run({ tool_name: tool, hook_event_name: 'PreToolUse', cwd: ROOT, tool_input: { task_name: 'leaf', message: 'x', fork_turns: 'none' } }, GATE);
     assert.equal(r.status, 2, tool);
     assert.equal(r.output.hookSpecificOutput.permissionDecision, 'deny', tool);
     assert.match(r.stderr, /allows only the toolkit-g0-helper and toolkit-g1-helper agents/, tool);
@@ -212,11 +220,27 @@ test('R12: a one-command add, commit and push from a lane worktree is checked in
     const sent = run(captured(cwd, 'git add -A; git commit -m t2; git push uat lane/one'), env);
     assert.equal(sent.status, 2, `${cwd}: ${sent.stderr}`);
     assert.match(sent.output.hookSpecificOutput.permissionDecisionReason, /uat-new\.txt:1 \(not committed yet\)/, cwd);
-    // A push of HEAD cannot tell which working tree's HEAD it sends.
+    // A push of HEAD is checked in every working tree it could run in: nothing committed carries
+    // the new file, so it runs; once the lane commits it, the lane's HEAD refuses it.
     const bare = run(captured(cwd, 'git push uat'), env);
-    assert.equal(bare.status, 2, `${cwd}: ${bare.stderr}`);
-    assert.match(bare.output.hookSpecificOutput.permissionDecisionReason, /Codex did not say which folder this command runs in/, cwd);
+    assert.deepEqual([bare.status, bare.output], [0, {}], `${cwd}: ${bare.stderr}`);
   }
+  assert.equal(git(lane, 'add', '-A').status, 0);
+  assert.equal(git(lane, 'commit', '--quiet', '-m', 'key').status, 0);
+  const committed = run(captured(repo, 'git push uat'), env);
+  assert.equal(committed.status, 2, committed.stderr);
+  assert.match(committed.output.hookSpecificOutput.permissionDecisionReason, /uat-new\.txt:1 \(commit [0-9a-f]{7}\)/);
+});
+
+test('input that is not JSON is refused in governed work and in a gate run, and left alone elsewhere', t => {
+  const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-codex-hook-unreadable-'));
+  t.after(() => fs.rmSync(elsewhere, { recursive: true, force: true }));
+  const clean = { ...process.env, CODEX_HOME: EMPTY_CODEX_HOME }; for (const key of MARKERS) delete clean[key];
+  const raw = (cwd, env = clean) => spawnSync(process.execPath, [HOOK], { input: '{broken', cwd, env, encoding: 'utf8', timeout: 20000 });
+  const governedCall = raw(ROOT);
+  assert.equal(governedCall.status, 2, governedCall.stderr); assert.match(governedCall.stderr, /could not read this tool call/);
+  assert.deepEqual([raw(elsewhere).status, raw(elsewhere).stdout], [0, ''], 'a plain folder');
+  assert.equal(raw(elsewhere, { ...clean, ...GATE }).status, 2, 'a gate run');
 });
 
 test('a drifted pinned binding is blocked wherever it is supplied', () => {
@@ -236,24 +260,25 @@ test('a hook whose decision modules cannot load blocks a governed spawn with exi
   try {
     const event = { tool_name: 'collaborationspawn_agent', hook_event_name: 'PreToolUse', cwd: ROOT, tool_input: { fork_turns: 'none' } };
     const clean = { ...process.env }; for (const key of MARKERS) delete clean[key];
-    const blocked = (modules, input = event, env = clean) => spawnSync(process.execPath, ['--require', PRELOAD, HOOK],
+    const gate = { ...clean, ...GATE };
+    const blocked = (modules, input = event, env = gate) => spawnSync(process.execPath, ['--require', PRELOAD, HOOK],
       { input: JSON.stringify(input), env: { ...env, TOOLKIT_TEST_BLOCKED_MODULES: modules }, encoding: 'utf8', timeout: 20000 });
     const ADAPTER = 'toolkit-v3-native-helper-adapter.cjs';
     const broken = blocked(ADAPTER);
     assert.equal(broken.status, 2); assert.match(broken.stderr, /Toolkit helper guard failed\. Never act as the user/);
     assert.equal(JSON.parse(broken.stdout).hookSpecificOutput.permissionDecision, 'deny');
     // Same boundary, intact modules: the guard itself decides.
-    const intact = run(event);
+    const intact = run(event, GATE);
     assert.equal(intact.status, 2); assert.match(intact.stderr, /allows only the toolkit-g0-helper and toolkit-g1-helper agents/);
-    // Outside a governed checkout the broken copy still makes no decision for other repositories.
-    const elsewhere = blocked(ADAPTER, { ...event, cwd: dir });
-    assert.equal(elsewhere.status, 0); assert.equal(elsewhere.stdout, '');
+    // Outside a gate run the broken adapter is never reached, in the governed checkout too.
+    const ungated = blocked(ADAPTER, event, clean);
+    assert.equal(ungated.status, 0); assert.equal(ungated.stdout, '');
     // Without the governance gate, a repository holds (fail closed, #542) and a plain folder does not.
-    const noGate = blocked(`${ADAPTER},toolkit-governance-gate.cjs`);
+    const noGate = blocked(`${ADAPTER},toolkit-governance-gate.cjs`, event, clean);
     assert.equal(noGate.status, 2); assert.match(noGate.stderr, /governance check failed/);
-    assert.equal(blocked(`${ADAPTER},toolkit-governance-gate.cjs`, { ...event, cwd: dir }).status, 0);
+    assert.equal(blocked(`${ADAPTER},toolkit-governance-gate.cjs`, { ...event, cwd: dir }, clean).status, 0);
     // Without the predicate itself, only a launcher marker gates.
-    const unknown = blocked(`${ADAPTER},toolkit-governed-repo.cjs`);
+    const unknown = blocked(`${ADAPTER},toolkit-governed-repo.cjs`, event, clean);
     assert.equal(unknown.status, 0); assert.equal(unknown.stdout, '');
     const marked = blocked(`${ADAPTER},toolkit-governed-repo.cjs`, event, { ...clean, TOOLKIT_GATE_ROLE: 'G1' });
     assert.equal(marked.status, 2); assert.match(marked.stderr, /Toolkit helper guard failed/);
@@ -278,9 +303,11 @@ test('A19: a repository with the Toolkit-governed rules block is governed on Cod
     assert.equal(waiting.status, 2); assert.match(waiting.stderr, /nothing runs until the user says ok/);
     // Same predicate as the Claude hook: the managed block makes the repository governed.
     assert.equal(require('../scripts/toolkit-governed-repo.cjs').governedRepo(nested, {}).governed, true);
+    // In a gate run there the named-helper policy holds; outside one the main session's launch runs.
     for (const cwd of [managed, nested, ROOT]) {
-      const held = run(spawn(cwd));
+      const held = run(spawn(cwd), GATE);
       assert.equal(held.status, 2, cwd); assert.match(held.stderr, /allows only the toolkit-g0-helper and toolkit-g1-helper agents/, cwd);
+      assert.deepEqual(run(spawn(cwd)).output, {}, `${cwd}: no gate run`);
     }
     const marked = run(spawn(plain), { TOOLKIT_GATE_ROLE: 'G1' });
     assert.equal(marked.status, 2); assert.match(marked.stderr, /allows only the toolkit-g0-helper/);

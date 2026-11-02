@@ -32,9 +32,11 @@ function fixture(t, { install = true } = {}) {
   return { base, repo, home, agents, plain };
 }
 
-function hook(input, env) {
-  const clean = { ...process.env, ...env };
-  for (const key of MARKERS) if (!(key in env)) delete clean[key];
+// The policy applies in a Toolkit gate run, which a launcher marks; each call here is one (a G1 lead)
+// unless `env` names its own role or `gate: false` leaves the marker out.
+function hook(input, { gate = true, ...env }) {
+  const clean = { ...process.env, ...(gate ? { TOOLKIT_GATE_ROLE: 'G1' } : {}), ...env };
+  for (const key of MARKERS) if (!(key in env) && !(gate && key === 'TOOLKIT_GATE_ROLE')) delete clean[key];
   const r = spawnSync(process.execPath, [HOOK], { input: JSON.stringify({ hook_event_name: 'PreToolUse', ...input }), env: clean, encoding: 'utf8', timeout: 20000 });
   return { status: r.status, output: JSON.parse(r.stdout.trim() || '{}'), stderr: r.stderr };
 }
@@ -125,10 +127,11 @@ test('a G2 session launches no helpers, and a caller agent id is refused', t => 
   assert.equal(leaf.output.hookSpecificOutput.permissionDecisionReason, 'Toolkit: a helper cannot launch another agent. Only the main session launches helpers.');
 });
 
-test('outside governed work the policy is not consulted: any agent launches with no decision', t => {
+test('outside a gate run the policy is not consulted, in a governed repository too: any agent launches with no decision', t => {
   const f = fixture(t, { install: false });
-  for (const input of [v1(f.plain, { agent_type: 'worker', model: 'x' }), v2(f.plain, {}), { tool_name: 'spawn_agent', cwd: f.base, tool_input: {} }]) {
-    const r = hook(input, { CODEX_HOME: f.home });
+  for (const input of [v1(f.plain, { agent_type: 'worker', model: 'x' }), v2(f.plain, {}), { tool_name: 'spawn_agent', cwd: f.base, tool_input: {} },
+    v1(f.repo, { agent_type: 'worker', model: 'x' }), v2(f.repo, {}), { ...v1(f.repo, { agent_type: 'explorer' }), tool_name: 'Agent' }]) {
+    const r = hook(input, { CODEX_HOME: f.home, gate: false });
     assert.equal(r.status, 0); assert.deepEqual(r.output, {});
   }
 });
