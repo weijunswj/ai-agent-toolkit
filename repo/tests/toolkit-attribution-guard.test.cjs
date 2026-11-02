@@ -321,6 +321,72 @@ test('force pushes are refused in governed and guarded repositories and to evide
   for (const command of forced) assert.equal(forceRefusal(command, repos.plain), '', `plain repository: ${command}`);
 });
 
+test('location options still move the separate force-push check to its target', (t) => {
+  const repos = guardRepos(t);
+  const forms = ['Set-Location -LiteralPath', 'Set-Location -Path', 'cd -P', 'cd -L', 'cd -e -@', 'cd /d', 'pushd', 'chdir', 'sl -Path'];
+  for (const form of forms) {
+    for (const target of ['../governed', repos.governed]) {
+      assert.equal(forceRefusal(form + ' "' + target + '"; git push --force origin feature', repos.plain), FORCE_MESSAGE, form);
+    }
+    assert.equal(forceRefusal(form + ' "' + repos.plain + '"; git push --force origin feature', repos.governed), '', form);
+  }
+  assert.equal(forceRefusal('Set-Location -LiteralPath ../governed -PassThru; git push --force', repos.plain), FORCE_MESSAGE);
+});
+
+test('only a whole plain git line marks an unknown-folder push safe for checking every HEAD', () => {
+  const folder = os.tmpdir();
+  for (const command of ['git push', 'git push origin HEAD', 'git push origin feature', 'git.exe push origin HEAD']) {
+    assert.deepEqual(outgoingChanges(command, folder, 0, [], false), [{
+      folder, remote: command.includes('origin') ? 'origin' : '', sources: command.includes('HEAD') ? ['HEAD'] : command.includes('feature') ? ['feature'] : [],
+      plainGit: true, folderConfirmed: false,
+    }], command);
+  }
+  const forms = ['cd', 'pushd', 'popd', 'chdir', 'Set-Location', 'sl', 'Push-Location', 'Pop-Location'];
+  const wrappers = ['', '& ', '&', '. ', '(', '{', 'env ', 'pwsh -Command "'];
+  const commands = [
+    "& 'Set-Location' -LiteralPath .\\other; git push origin HEAD:feature",
+    'Set-Location -LiteralPath ./other -PassThru; git push origin HEAD',
+    'cd -P ./other; git push origin HEAD', 'cd /d ./other; git push origin HEAD',
+    'git status; git push origin HEAD', 'echo "cd"; git push origin HEAD',
+    "echo 'sl other'; git push origin HEAD", 'git push origin HEAD; echo done',
+    'git push origin HEAD; git push origin HEAD',
+    'git push -o "$(run)" origin HEAD',
+    'git push origin HEAD %NAME%',
+  ];
+  for (const form of forms) {
+    for (const wrapper of wrappers) {
+      const end = wrapper === '(' ? ')' : wrapper === '{' ? '}' : wrapper.includes('pwsh') ? '"' : '';
+      commands.push(wrapper + form + ' -LiteralPath ./other' + end + '; git push origin HEAD');
+    }
+  }
+  for (const command of commands) {
+    const [target] = outgoingChanges(command, folder, 0, [], false);
+    assert.equal(target?.folderConfirmed, false, command);
+    assert.equal(target?.plainGit, false, command);
+    assert.equal(Object.hasOwn(target, 'folderMoved'), false, 'superseded location flag is gone');
+  }
+  assert.equal(outgoingChanges('pwsh -Command "git push origin HEAD"', folder, 0, [], false)[0]?.plainGit, false, 'nested script cannot become a plain whole line');
+});
+
+test('absolute folder confirmation and host-confirmed calls keep their existing paths', () => {
+  const folder = os.tmpdir();
+  for (const command of ['cd "' + folder + '"; git push origin HEAD', 'git -C "' + folder + '" push origin HEAD',
+    '& sl other; cd "' + folder + '"; git push origin HEAD']) {
+    assert.deepEqual(outgoingChanges(command, folder, 0, [], false), [
+      { folder, remote: 'origin', sources: ['HEAD'] },
+    ], command);
+  }
+  for (const shell of ['posix', 'powershell']) {
+    const assignment = shell === 'posix' ? "d='" + folder + "'" : "$d = '" + folder + "'";
+    assert.deepEqual(outgoingChanges(assignment + '; Set-Location $d; git push', folder, 0, [], false, shell), [
+      { folder, remote: '', sources: [] },
+    ], shell);
+  }
+  assert.deepEqual(outgoingChanges('& sl other; git push origin HEAD', folder), [
+    { folder, remote: 'origin', sources: ['HEAD'] },
+  ]);
+});
+
 test('N3: an ENABLED repository is protected even before its governed block lands; a DISABLED one with a leftover block stays protected', (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-bypass-state-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -472,6 +538,44 @@ test('push check: every command form finds the folder, remote and branch it send
   assert.deepEqual(outgoingChanges('gh pr create --base release --head owner:topic --title x', dir), [{ folder: dir, pullRequest: true, base: 'release', sources: ['topic'] }]);
   assert.deepEqual(outgoingChanges('gh pr create -Bnext -Htopic', dir), [{ folder: dir, pullRequest: true, base: 'next', sources: ['topic'] }]);
   assert.deepEqual(outgoingChanges('gh pr create --base=next', dir), [{ folder: dir, pullRequest: true, base: 'next', sources: [] }]);
+});
+
+test('fetch repository URLs are reads, while local refspec writes are retained', () => {
+  const folder = os.tmpdir();
+  for (const command of ['git fetch https://example.com/repo.git main', 'git fetch git@example.com:repo.git main',
+    'git fetch --depth 1 https://example.com/repo.git main', 'git fetch --server-option key:value https://example.com/repo.git main']) {
+    assert.deepEqual(outgoingChanges(`${command}; git push uat HEAD`, folder), [{ folder, remote: 'uat', sources: ['HEAD'] }], command);
+  }
+  for (const command of ['git fetch https://example.com/repo.git main:feature', 'git fetch -u https://example.com/repo.git main',
+    'git fetch --update-head-ok https://example.com/repo.git main', 'git fetch --depth 1 https://example.com/repo.git main:feature']) {
+    assert.deepEqual(outgoingChanges(`${command}; git push uat HEAD`, folder)[0].preceding, [{ folder, sub: 'other' }], command);
+  }
+});
+
+test('outgoing changes retain earlier git mutations and leave reads out', () => {
+  const folder = os.tmpdir();
+  for (const command of ['git reset --soft spare', 'git stash pop', 'git update-ref HEAD spare', 'git read-tree spare', 'git apply patch.diff']) {
+    assert.deepEqual(outgoingChanges(`${command}; git push uat HEAD`, folder), [
+      { folder, remote: 'uat', sources: ['HEAD'], preceding: [{ folder, sub: 'other' }] },
+    ], command);
+  }
+  for (const sub of ['status', 'log', 'diff', 'show', 'fetch', 'rev-parse', 'ls-files', 'ls-remote', 'describe', 'config --get remote.origin.url', 'config --list']) {
+    assert.deepEqual(outgoingChanges(`git ${sub}; git push uat HEAD`, folder), [{ folder, remote: 'uat', sources: ['HEAD'] }], sub);
+  }
+  // A fetch that writes a local branch, and a config write, may move what HEAD sends.
+  for (const command of ['git fetch -u . spare:feature', 'git fetch origin main:feature', 'git config user.name x']) {
+    assert.deepEqual(outgoingChanges(`${command}; git push uat HEAD`, folder)[0].preceding, [{ folder, sub: 'other' }], command);
+  }
+  for (const folderConfirmed of [true, false]) {
+    let calls = 0;
+    outgoingRefusal('git push uat HEAD; git reset --soft spare; git push uat HEAD', folder, { folderConfirmed, check: () => { calls += 1; return {}; } });
+    assert.equal(calls, 2, `a reset changes the target even with folderConfirmed=${folderConfirmed}`);
+  }
+  // An earlier push moves nothing local, so the same push twice is one target, checked once.
+  const targets = [];
+  outgoingRefusal('git push uat HEAD; git push uat HEAD', folder, { folderConfirmed: false, check: target => { targets.push(target); return {}; } });
+  assert.equal(targets.length, 1);
+  assert.equal(targets[0].preceding, undefined);
 });
 
 test('push check: what is sent is each pushed commit the target does not have', () => {

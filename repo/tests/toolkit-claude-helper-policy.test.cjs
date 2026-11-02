@@ -22,6 +22,8 @@ function scratch(t) {
 }
 
 // A governed repository, a Claude config directory with the rendered helpers, and an empty control root.
+// `environment` is a Toolkit gate run (a launcher marker, a G1 lead), the only session the named-helper
+// policy applies to; `open` is any other session.
 function fixture(t, { install = true } = {}) {
   const dir = scratch(t);
   const repo = path.join(dir, 'repo'), plain = path.join(dir, 'plain'), configDir = path.join(dir, 'claude'), controlRoot = path.join(dir, 'control');
@@ -31,10 +33,11 @@ function fixture(t, { install = true } = {}) {
   fs.mkdirSync(path.join(configDir, 'agents'), { recursive: true });
   const renderer = ClaudeHelperAgentRenderer.fromRepository('owner-claude', ROOT);
   if (install) for (const role of ['G0', 'G1']) { const { file, text } = renderer.render(role); fs.writeFileSync(path.join(configDir, 'agents', file), text); }
-  const environment = { CLAUDE_CONFIG_DIR: configDir };
+  const open = { CLAUDE_CONFIG_DIR: configDir };
+  const environment = { ...open, TOOLKIT_GATE_ROLE: 'G1' };
   const decide = (input, env = environment) => hook.decision({ tool_name: 'Agent', hook_event_name: 'PreToolUse', cwd: repo, ...input },
     { root: controlRoot, environment: env, helper_policy: { toolkitRoot: ROOT } });
-  return { dir, repo, plain, configDir, controlRoot, environment, decide };
+  return { dir, repo, plain, configDir, controlRoot, environment, open, decide };
 }
 
 const denied = output => output?.hookSpecificOutput?.permissionDecision === 'deny';
@@ -81,40 +84,42 @@ test('the governed-repo predicate walks to the first .git and follows the govern
   assert.equal(governedRepo(ROOT, {}).governed, false, 'the Toolkit checkout is asked like any other repository');
 });
 
-test('outside governed work every main-session agent launch is left to Claude Code', t => {
+test('outside a gate run every main-session agent launch is left to Claude Code, in a governed repository too', t => {
   const f = fixture(t);
-  for (const cwd of [f.plain, f.dir]) {
+  for (const cwd of [f.plain, f.dir, f.repo]) {
     for (const tool_input of [{ subagent_type: 'general-purpose' }, {}, { subagent_type: 'Explore', model: 'opus' }]) {
-      assert.deepEqual(f.decide({ cwd, tool_input }), {}, `${cwd} ${JSON.stringify(tool_input)}`);
-      assert.deepEqual(f.decide({ cwd, tool_name: 'Task', tool_input }), {}, `${cwd} Task ${JSON.stringify(tool_input)}`);
+      assert.deepEqual(f.decide({ cwd, tool_input }, f.open), {}, `${cwd} ${JSON.stringify(tool_input)}`);
+      assert.deepEqual(f.decide({ cwd, tool_name: 'Task', tool_input }, f.open), {}, `${cwd} Task ${JSON.stringify(tool_input)}`);
     }
     // A main session started with --agent carries agent_type but no agent_id; it is still the main session.
-    assert.deepEqual(f.decide({ cwd, agent_type: 'security-reviewer', tool_input: { subagent_type: 'Explore' } }), {}, `${cwd} --agent main session`);
+    assert.deepEqual(f.decide({ cwd, agent_type: 'security-reviewer', tool_input: { subagent_type: 'Explore' } }, f.open), {}, `${cwd} --agent main session`);
   }
+  // The same launch in a gate run there gets the named-helper policy.
+  assert.match(reason(f.decide({ tool_input: { subagent_type: 'Explore' } })), /allows only the toolkit-g0-helper and toolkit-g1-helper agents \(requested: Explore\)/);
   assert.deepEqual(hook.decision({ tool_name: 'Read', cwd: f.repo }, { root: f.controlRoot, environment: f.environment }), {});
 });
 
 const ONE_LAYER_REASON = "Toolkit: a subagent can't start another agent (one layer only). Do the work in this subagent, or hand it back to the main session.";
 
-test('outside governed work a subagent cannot launch another agent, with a plain one-layer reason', t => {
+test('outside a gate run a subagent cannot launch another agent, with a plain one-layer reason, in a governed repository too', t => {
   const f = fixture(t);
-  for (const cwd of [f.plain, f.dir]) {
+  for (const cwd of [f.plain, f.dir, f.repo]) {
     for (const tool_name of ['Agent', 'Task']) {
       for (const caller of [{ agent_id: 'a1', agent_type: 'Explore' }, { agent_id: 'a2' }]) {
-        const output = f.decide({ cwd, tool_name, ...caller, tool_input: { subagent_type: 'general-purpose', prompt: 'y' } });
+        const output = f.decide({ cwd, tool_name, ...caller, tool_input: { subagent_type: 'general-purpose', prompt: 'y' } }, f.open);
         assert.ok(denied(output), `${cwd} ${tool_name} ${JSON.stringify(caller)}`);
         assert.equal(reason(output), ONE_LAYER_REASON);
         assert.doesNotMatch(reason(output), /G0|G1|helper/);
       }
     }
     // Non-agent tools inside a subagent are untouched.
-    assert.deepEqual(f.decide({ cwd, tool_name: 'Read', agent_id: 'a1', agent_type: 'Explore', tool_input: {} }), {});
+    assert.deepEqual(f.decide({ cwd, tool_name: 'Read', agent_id: 'a1', agent_type: 'Explore', tool_input: {} }, f.open), {});
   }
 });
 
-test('broader native behaviour lifts the normal-folder refusal; a missing or unreadable profile keeps it; governed work is unchanged', async t => {
+test('broader native behaviour lifts the normal-folder refusal; a missing or unreadable profile keeps it; a gate run is unchanged', async t => {
   const f = fixture(t);
-  const nested = cwd => f.decide({ cwd, agent_id: 'a1', agent_type: 'Explore', tool_input: { subagent_type: 'general-purpose' } });
+  const nested = cwd => f.decide({ cwd, agent_id: 'a1', agent_type: 'Explore', tool_input: { subagent_type: 'general-purpose' } }, f.open);
   // Missing profile: unconfigured reads as root-only, so the one-layer refusal stays.
   assert.equal(reason(nested(f.plain)), ONE_LAYER_REASON);
   // Unreadable profile: same fail-safe.
@@ -127,9 +132,12 @@ test('broader native behaviour lifts the normal-folder refusal; a missing or unr
   assert.equal(control.readProfile('claude-code', { root: f.controlRoot }).topology, control.TOPOLOGIES.BROADER_NATIVE);
   for (const cwd of [f.plain, f.dir]) {
     assert.deepEqual(nested(cwd), {}, cwd);
-    assert.deepEqual(f.decide({ cwd, tool_name: 'Task', agent_id: 'a2', tool_input: {} }), {}, `${cwd} Task`);
+    assert.deepEqual(f.decide({ cwd, tool_name: 'Task', agent_id: 'a2', tool_input: {} }, f.open), {}, `${cwd} Task`);
   }
-  // Governed work under broader native without a launcher binding gets the named-helper policy:
+  assert.equal(reason(nested(f.repo)), ONE_LAYER_REASON, 'a governed repository keeps one layer');
+  assert.equal(reason(f.decide({ tool_name: 'Task', agent_id: 'a2', tool_input: {} }, f.open)), ONE_LAYER_REASON, 'Task keeps one layer too');
+  assert.deepEqual(f.decide({ tool_input: { subagent_type: 'general-purpose' } }, f.open), {}, 'the main session may launch any agent');
+  // A gate run under broader native without a launcher binding gets the named-helper policy:
   // a subagent caller is refused, the lead may launch a current Toolkit helper, and nothing else.
   assert.match(reason(await f.decide({ agent_id: 'a1', agent_type: 'Explore', tool_input: { subagent_type: 'toolkit-g0-helper' } })), /a helper cannot launch another agent/);
   assert.deepEqual(await f.decide({ tool_input: { subagent_type: 'toolkit-g0-helper', prompt: 'y' } }), {});

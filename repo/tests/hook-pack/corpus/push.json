@@ -3,63 +3,340 @@
   "family": "push",
   "rows": [
     {
+      "id": "PUSH.quoted-powershell-encoded-option",
+      "source": "Review correction: quoted encoded options still launch unread PowerShell commands",
+      "kind": "hostile",
+      "hosts": ["claude", "codex"],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "powershell.exe \"-EncodedCommand\" ZwBp"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "PUSH.quoted-pwsh-encoded-abbreviation",
+      "source": "Review correction: a single-quoted encoded abbreviation is still a PowerShell option",
+      "kind": "hostile",
+      "hosts": ["claude", "codex"],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "pwsh '-enc' ZwBp"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "PUSH.encoded-powershell-search-prose",
+      "source": "Review correction: searching for encoded PowerShell syntax is ordinary prose",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "rg -F 'pwsh -EncodedCommand' ."
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "PUSH.encoded-powershell-commit-prose",
+      "source": "Review correction: a commit message mentioning encoded PowerShell must allow a feature push",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "git commit --allow-empty -q -m \"Document pwsh -EncodedCommand handling\" && git push origin feature"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "PUSH.variable-wrapped-push",
+      "source": "Owner correction: a push assigned before a shell runner must be refused",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "s='git push origin HEAD:feature'; bash -c \"$s\""
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "PUSH.benign-eval-substitution",
+      "source": "Owner correction: an expression without a push mention remains allowed",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "eval \"$(echo true)\""
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
       "id": "PUSH.clean-feature-branch",
       "source": "hook pack seed: daily push of clean work",
       "kind": "benign",
-      "hosts": ["claude", "codex"],
-      "payload": { "tool_name": "Bash", "tool_input": { "command": "git push origin feature" } },
-      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
-      "expect": { "decision": "allow" },
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "git push origin feature"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
       "status": "pass"
+    },
+    {
+      "id": "PUSH.tests-then-feature-push",
+      "source": "Runner tail false refusal: a separate plain feature push after tests",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "bash -c \"echo tests\" && git push origin feature"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "Accepted false refusal: this non-plain line mentions a runner and git push. Run the push as its own plain git command."
     },
     {
       "id": "PUSH.committed-credential",
       "source": "push matrix C5",
       "kind": "hostile",
-      "hosts": ["claude", "codex"],
-      "payload": { "tool_name": "Bash", "tool_input": { "command": "git push origin feature" } },
-      "fixture": { "repo": { "governance": "enabled", "branch": "feature", "commits": [{ "files": { "uat-config.txt": "token = \"{credential}\"\n" }, "message": "fixture" }] } },
-      "expect": { "decision": "deny" },
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "git push origin feature"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature",
+          "commits": [
+            {
+              "files": {
+                "uat-config.txt": "token = \"{credential}\"\n"
+              },
+              "message": "fixture"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
       "status": "pass"
     },
     {
       "id": "P1",
       "source": "G2 report on PR 686 recheck, INFO 5",
       "kind": "hostile",
-      "hosts": ["claude", "codex"],
-      "payload": { "tool_name": "Bash", "tool_input": { "command": "git checkout -b fix; git push -u origin fix" } },
-      "fixture": { "repo": { "governance": "enabled", "commits": [{ "files": { "uat-config.txt": "token = \"{credential}\"\n" }, "message": "unpushed commit on main" }] } },
-      "expect": { "decision": "deny" },
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "git checkout -b fix; git push -u origin fix"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "commits": [
+            {
+              "files": {
+                "uat-config.txt": "token = \"{credential}\"\n"
+              },
+              "message": "unpushed commit on main"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
       "status": "pass"
     },
     {
       "id": "P2",
       "source": "hooks reliability G0, seed P2",
       "kind": "benign",
-      "hosts": ["claude", "codex"],
-      "payload": { "tool_name": "PowerShell", "tool_input": { "command": "$d = '{work}'; git -C $d push origin feature" } },
-      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
-      "expect": { "decision": "allow" },
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "$d = '{work}'; git -C $d push origin feature"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
       "status": "pass"
     },
     {
       "id": "P3",
       "source": "G2 report on PR 686, INFO 1",
       "kind": "benign",
-      "hosts": ["claude", "codex"],
-      "payload": { "tool_name": "Bash", "tool_input": { "command": "git add -A; git push uat spare" } },
-      "fixture": { "repo": { "governance": "enabled", "worktrees": ["spare", "other"] } },
-      "expect": { "decision": "allow" },
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "git add -A; git push uat spare"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "worktrees": [
+            "spare",
+            "other"
+          ]
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
       "status": "pass"
     },
     {
       "id": "CODEX.folder-unknown-step-2",
       "source": "Codex mini4 tryout, step 2: refused as folder unknown although the agent named the folder",
       "kind": "benign",
-      "hosts": ["codex"],
-      "payload": { "tool_name": "Bash", "tool_input": { "command": "git add -A; git commit -m \"Step 2\"; git push origin HEAD" } },
-      "fixture": { "repo": { "governance": "enabled", "branch": "feature", "worktrees": ["spare"] }, "files": { "step2.txt": "step two\n" } },
-      "expect": { "decision": "allow" },
+      "hosts": [
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "git add -A; git commit -m \"Step 2\"; git push origin HEAD"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature",
+          "worktrees": [
+            "spare"
+          ]
+        },
+        "files": {
+          "step2.txt": "step two\n"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
       "status": "pass",
       "note": "The tryout supplied workdir, but Codex Desktop delivers the call to the hook as Bash with no workdir and the chat's folder as cwd, so the row sends that shape. The fix decides the allowed outcome; the row expects clean work to go through."
     },
@@ -67,81 +344,255 @@
       "id": "F1.posix-variable-case",
       "source": "G2 report on PR 697, F1 (Medium): POSIX variables D and d read as one",
       "kind": "hostile",
-      "hosts": ["claude", "codex"],
-      "payload": { "tool_name": "Bash", "tool_input": { "command": "D='{work}'; d='{home}'; git -C \"$D\" push origin HEAD:main" } },
-      "fixture": { "repo": { "governance": "enabled", "branch": "feature" }, "files": { ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n" } },
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "D='{work}'; d='{home}'; git -C \"$D\" push origin HEAD:main"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
+        }
+      },
       "note": "The origin HEAD file names main as the default branch. D is the governed repository and d a folder outside it; read as one variable, the push would be judged from d and let through.",
-      "expect": { "decision": "deny" },
+      "expect": {
+        "decision": "deny"
+      },
       "status": "pass"
     },
     {
       "id": "P1.switch-create",
       "source": "hooks one-PR G0, 4.2: a branch made by switch -c earlier in the command",
       "kind": "hostile",
-      "hosts": ["claude", "codex"],
-      "payload": { "tool_name": "Bash", "tool_input": { "command": "git switch -c fix; git push -u origin fix" } },
-      "fixture": { "repo": { "governance": "enabled", "branch": "feature", "commits": [{ "files": { "uat-config.txt": "token = \"{credential}\"\n" }, "message": "unpushed commit with a credential" }] } },
-      "expect": { "decision": "deny" },
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "git switch -c fix; git push -u origin fix"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature",
+          "commits": [
+            {
+              "files": {
+                "uat-config.txt": "token = \"{credential}\"\n"
+              },
+              "message": "unpushed commit with a credential"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
       "status": "pass"
     },
     {
       "id": "P1.branch-start",
       "source": "hooks one-PR G0, 4.2: a branch made by git branch with a start point earlier in the command",
       "kind": "hostile",
-      "hosts": ["claude", "codex"],
-      "payload": { "tool_name": "Bash", "tool_input": { "command": "git branch fix feature; git push origin fix" } },
-      "fixture": { "repo": { "governance": "enabled", "branch": "feature", "commits": [{ "files": { "uat-config.txt": "token = \"{credential}\"\n" }, "message": "unpushed commit with a credential" }] } },
-      "expect": { "decision": "deny" },
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "git branch fix feature; git push origin fix"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature",
+          "commits": [
+            {
+              "files": {
+                "uat-config.txt": "token = \"{credential}\"\n"
+              },
+              "message": "unpushed commit with a credential"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
       "status": "pass"
     },
     {
       "id": "PUSH.dry-run",
       "source": "hooks one-PR G0, 4.1: a dry-run push sends nothing but was checked, and Codex refused it",
       "kind": "benign",
-      "hosts": ["claude", "codex"],
-      "payload": { "tool_name": "Bash", "tool_input": { "command": "git push --dry-run origin feature" } },
-      "fixture": { "repo": { "governance": "enabled", "branch": "feature", "commits": [{ "files": { "uat-config.txt": "token = \"{credential}\"\n" }, "message": "unpushed commit with a credential" }] } },
-      "expect": { "decision": "allow" },
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "git push --dry-run origin feature"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature",
+          "commits": [
+            {
+              "files": {
+                "uat-config.txt": "token = \"{credential}\"\n"
+              },
+              "message": "unpushed commit with a credential"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
       "status": "pass"
     },
     {
       "id": "PUSH.dry-run-short",
       "source": "hooks one-PR G0, 4.1: git push -n is a dry run too",
       "kind": "benign",
-      "hosts": ["claude", "codex"],
-      "payload": { "tool_name": "Bash", "tool_input": { "command": "git push -n -u origin feature" } },
-      "fixture": { "repo": { "governance": "enabled", "branch": "feature", "commits": [{ "files": { "uat-config.txt": "token = \"{credential}\"\n" }, "message": "unpushed commit with a credential" }] } },
-      "expect": { "decision": "allow" },
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "git push -n -u origin feature"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature",
+          "commits": [
+            {
+              "files": {
+                "uat-config.txt": "token = \"{credential}\"\n"
+              },
+              "message": "unpushed commit with a credential"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
       "status": "pass"
     },
     {
       "id": "PUSH.missing-remote",
       "source": "hooks one-PR G0, 4.1: a remote name that is no configured remote sends nothing (git refuses it)",
       "kind": "benign",
-      "hosts": ["claude", "codex"],
-      "payload": { "tool_name": "Bash", "tool_input": { "command": "git push nowhere feature" } },
-      "fixture": { "repo": { "governance": "enabled", "branch": "feature", "commits": [{ "files": { "uat-config.txt": "token = \"{credential}\"\n" }, "message": "unpushed commit with a credential" }] } },
-      "expect": { "decision": "allow" },
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "git push nowhere feature"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature",
+          "commits": [
+            {
+              "files": {
+                "uat-config.txt": "token = \"{credential}\"\n"
+              },
+              "message": "unpushed commit with a credential"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
       "status": "pass"
     },
     {
       "id": "PUSH.empty-remote-credential",
       "source": "hooks one-PR G0, 4.1: a configured remote with no tracking refs still gets every unpushed commit checked",
       "kind": "hostile",
-      "hosts": ["claude", "codex"],
-      "payload": { "tool_name": "Bash", "tool_input": { "command": "git push origin feature" } },
-      "fixture": { "repo": { "governance": "enabled", "branch": "feature", "commits": [{ "files": { "uat-config.txt": "token = \"{credential}\"\n" }, "message": "unpushed commit with a credential" }] } },
-      "expect": { "decision": "deny" },
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "git push origin feature"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature",
+          "commits": [
+            {
+              "files": {
+                "uat-config.txt": "token = \"{credential}\"\n"
+              },
+              "message": "unpushed commit with a credential"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
       "status": "pass"
     },
     {
       "id": "N1.powershell-reads-powershell",
       "source": "G2 report on PR 705 at 272d16f, N1 (Medium): a variable assigned in the other shell's form was read",
       "kind": "hostile",
-      "hosts": ["claude", "codex"],
-      "payload": { "tool_name": "PowerShell", "tool_input": { "command": "$x = '{work}' ; x={home} ; git -C $x push origin HEAD:main" } },
-      "fixture": { "repo": { "governance": "enabled", "branch": "feature" }, "files": { ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n" } },
-      "expect": { "decision": "deny" },
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "$x = '{work}' ; x={home} ; git -C $x push origin HEAD:main"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
       "status": "pass",
       "note": "PowerShell sets $x to the governed repository; the POSIX-looking x=... line fails there and must not be read. On Codex the shell is unknown, so a name assigned in both forms is left unread and the check fails closed."
     },
@@ -149,10 +600,28 @@
       "id": "N1.bash-reads-posix",
       "source": "G2 report on PR 705 at 272d16f, N1 (Medium): a variable assigned in the other shell's form was read",
       "kind": "hostile",
-      "hosts": ["claude", "codex"],
-      "payload": { "tool_name": "Bash", "tool_input": { "command": "x='{work}'; $x = '{home}'; git -C \"$x\" push origin HEAD:main" } },
-      "fixture": { "repo": { "governance": "enabled", "branch": "feature" }, "files": { ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n" } },
-      "expect": { "decision": "deny" },
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "x='{work}'; $x = '{home}'; git -C \"$x\" push origin HEAD:main"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
       "status": "pass",
       "note": "Bash sets x to the governed repository; the PowerShell-looking line runs as a command there and must not be read. On Codex the shell is unknown, so a name assigned in both forms is left unread and the check fails closed."
     },
@@ -160,10 +629,27 @@
       "id": "N1.reassigned-unknown-shell",
       "source": "G2 report on PR 705 at 272d16f, N1 (Medium): a variable assigned in the other shell's form was read",
       "kind": "hostile",
-      "hosts": ["codex"],
-      "payload": { "tool_name": "Bash", "tool_input": { "command": "x='{work}'; x='{home}'; git -C \"$x\" push origin HEAD:main" } },
-      "fixture": { "repo": { "governance": "enabled", "branch": "feature" }, "files": { ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n" } },
-      "expect": { "decision": "deny" },
+      "hosts": [
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "x='{work}'; x='{home}'; git -C \"$x\" push origin HEAD:main"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
       "status": "pass",
       "note": "With the shell unknown (Codex), a name assigned twice is left unread, so the push is judged from the session folder and refused."
     },
@@ -171,10 +657,27 @@
       "id": "R1.posix-assignment-unknown-shell",
       "source": "G2 recheck on PR 705 at 94f5123, R1 (Medium): with the shell unknown, one assignment in the other shell's form steered the guard",
       "kind": "hostile",
-      "hosts": ["codex"],
-      "payload": { "tool_name": "Bash", "tool_input": { "command": "x='{home}' ; git -C \"$x\" push origin HEAD:main" } },
-      "fixture": { "repo": { "governance": "enabled", "branch": "feature" }, "files": { ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n" } },
-      "expect": { "decision": "deny" },
+      "hosts": [
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "x='{home}' ; git -C \"$x\" push origin HEAD:main"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
       "status": "pass",
       "note": "Codex names no shell. If PowerShell runs it, the x= line fails, $x is empty and git pushes the session folder (the governed repository) to main; the guard judges that reading too."
     },
@@ -182,10 +685,27 @@
       "id": "R1.powershell-assignment-unknown-shell",
       "source": "G2 recheck on PR 705 at 94f5123, R1 (Medium): with the shell unknown, one assignment in the other shell's form steered the guard",
       "kind": "hostile",
-      "hosts": ["codex"],
-      "payload": { "tool_name": "Bash", "tool_input": { "command": "$x = '{home}' ; git -C \"$x\" push origin HEAD:main" } },
-      "fixture": { "repo": { "governance": "enabled", "branch": "feature" }, "files": { ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n" } },
-      "expect": { "decision": "deny" },
+      "hosts": [
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "$x = '{home}' ; git -C \"$x\" push origin HEAD:main"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
       "status": "pass",
       "note": "Codex names no shell. If bash runs it, the $x = line fails, $x is empty and git pushes the session folder (the governed repository) to main; the guard judges that reading too."
     },
@@ -193,10 +713,27 @@
       "id": "CODEX.sibling-worktree-head-push",
       "source": "PR 705 real-host smoke on Codex Desktop, 31 Oct 2026: a sibling worktree counted as a folder the chat could run in",
       "kind": "benign",
-      "hosts": ["codex"],
-      "payload": { "tool_name": "Bash", "tool_input": { "command": "git push origin HEAD:feature" } },
-      "fixture": { "repo": { "governance": "enabled", "branch": "feature", "worktrees": ["spare"] } },
-      "expect": { "decision": "allow" },
+      "hosts": [
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "git push origin HEAD:feature"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature",
+          "worktrees": [
+            "spare"
+          ]
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
       "status": "pass",
       "note": "Codex Desktop names no folder and refuses a workdir outside the chat folder, so a sibling working tree of the same repository is not where the command runs. Real-host smoke row 14 was refused this way before the fix."
     },
@@ -204,12 +741,1365 @@
       "id": "CODEX.sibling-worktree-leak",
       "source": "PR 705 real-host smoke on Codex Desktop, 31 Oct 2026: a sibling worktree counted as a folder the chat could run in",
       "kind": "hostile",
-      "hosts": ["codex"],
-      "payload": { "tool_name": "Bash", "tool_input": { "command": "git checkout -b fix; git push -u origin fix" } },
-      "fixture": { "repo": { "governance": "enabled", "branch": "feature", "worktrees": ["spare"], "commits": [{ "files": { "uat-config.txt": "token = \"{credential}\"\n" }, "message": "unpushed commit with a credential" }] } },
-      "expect": { "decision": "deny" },
+      "hosts": [
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "git checkout -b fix; git push -u origin fix"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature",
+          "worktrees": [
+            "spare"
+          ],
+          "commits": [
+            {
+              "files": {
+                "uat-config.txt": "token = \"{credential}\"\n"
+              },
+              "message": "unpushed commit with a credential"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
       "status": "pass",
       "note": "The same shape with an unpushed credential on HEAD is still refused, now for the credential. Real-host smoke row 16."
+    },
+    {
+      "id": "S1.nested-feature-push",
+      "source": "Owner-selected blanket refusal of shell and expression-runner pushes",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "bash -c \"git push origin feature\""
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "Changed from allow to deny: wrapped feature pushes are now refused too, because Toolkit cannot reliably read the nested target. Run the push as its own git command."
+    },
+    {
+      "id": "S1.bash-ce-default-push",
+      "source": "Owner-selected blanket refusal of shell and expression-runner pushes",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "bash -ce \"git push origin HEAD:main\""
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "The merge hold refuses pushes through another shell or expression runner without trying to read the target."
+    },
+    {
+      "id": "S1.bash-c-e-push",
+      "source": "Owner-selected blanket refusal of shell and expression-runner pushes",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "bash -c -e \"git push\""
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "The merge hold refuses pushes through another shell or expression runner without trying to read the target."
+    },
+    {
+      "id": "S1.sh-lc-push",
+      "source": "Owner-selected blanket refusal of shell and expression-runner pushes",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "sh -lc 'git push'"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "The merge hold refuses pushes through another shell or expression runner without trying to read the target."
+    },
+    {
+      "id": "S1.zsh-if-then-push",
+      "source": "Owner-selected blanket refusal of shell and expression-runner pushes",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "zsh -c \"if true; then git push origin HEAD:main; fi\""
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "The merge hold refuses pushes through another shell or expression runner without trying to read the target."
+    },
+    {
+      "id": "S1.pwsh-command-push",
+      "source": "Owner-selected blanket refusal of shell and expression-runner pushes",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "pwsh -Command \"git push origin HEAD:main\""
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "The merge hold refuses pushes through another shell or expression runner without trying to read the target."
+    },
+    {
+      "id": "S1.pwsh-command-prefix",
+      "source": "Owner-selected blanket refusal of shell and expression-runner pushes",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "pwsh -Comm \"git push\""
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "The merge hold refuses pushes through another shell or expression runner without trying to read the target."
+    },
+    {
+      "id": "S1.powershell-option-value",
+      "source": "Owner-selected blanket refusal of shell and expression-runner pushes",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "powershell -ExecutionPolicy Bypass -Command git push origin HEAD:main"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "The merge hold refuses pushes through another shell or expression runner without trying to read the target."
+    },
+    {
+      "id": "S1.powershell-block",
+      "source": "Owner-selected blanket refusal of shell and expression-runner pushes",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "powershell -NoProfile -Command { git push origin HEAD:main }"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "The merge hold refuses pushes through another shell or expression runner without trying to read the target."
+    },
+    {
+      "id": "S1.powershell-no-flag",
+      "source": "Owner-selected blanket refusal of shell and expression-runner pushes",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "powershell \"git push origin HEAD:main\""
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "The merge hold refuses pushes through another shell or expression runner without trying to read the target."
+    },
+    {
+      "id": "S1.pwsh-encoded-command",
+      "source": "Owner-selected blanket refusal of shell and expression-runner pushes",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "pwsh -EncodedCommand ZwBpAHQA"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "Encoded PowerShell commands are refused unread, even without git or push in the visible text."
+    },
+    {
+      "id": "S1.pwsh-call-operator",
+      "source": "Owner-selected blanket refusal of shell and expression-runner pushes",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "& pwsh -c \"git push\""
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "The merge hold refuses pushes through another shell or expression runner without trying to read the target."
+    },
+    {
+      "id": "S1.cmd-c-push",
+      "source": "Owner-selected blanket refusal of shell and expression-runner pushes",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "cmd /c git push origin HEAD:main"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "The merge hold refuses pushes through another shell or expression runner without trying to read the target."
+    },
+    {
+      "id": "S1.cmd-c-attached-push",
+      "source": "Owner-selected blanket refusal of shell and expression-runner pushes",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "cmd /cgit push origin HEAD:main"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "The merge hold refuses pushes through another shell or expression runner without trying to read the target."
+    },
+    {
+      "id": "S1.cmd-c-attached-quote",
+      "source": "Owner-selected blanket refusal of shell and expression-runner pushes",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "cmd /c\"git push origin HEAD:main\""
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "The merge hold refuses pushes through another shell or expression runner without trying to read the target."
+    },
+    {
+      "id": "S1.cmd-single-ampersand",
+      "source": "Owner-selected blanket refusal of shell and expression-runner pushes",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "cmd /c \"echo ready & cmd /c git push\""
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "The merge hold refuses pushes through another shell or expression runner without trying to read the target."
+    },
+    {
+      "id": "S1.eval-unquoted-push",
+      "source": "Owner-selected blanket refusal of shell and expression-runner pushes",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "eval git push origin HEAD:main"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "The merge hold refuses pushes through another shell or expression runner without trying to read the target."
+    },
+    {
+      "id": "S1.eval-quoted-push",
+      "source": "Owner-selected blanket refusal of shell and expression-runner pushes",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "eval \"git push\""
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "The merge hold refuses pushes through another shell or expression runner without trying to read the target."
+    },
+    {
+      "id": "S1.iex-parentheses",
+      "source": "Owner-selected blanket refusal of shell and expression-runner pushes",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "iex ('git push origin HEAD:main')"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "The merge hold refuses pushes through another shell or expression runner without trying to read the target."
+    },
+    {
+      "id": "S1.invoke-expression-push",
+      "source": "Owner-selected blanket refusal of shell and expression-runner pushes",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "Invoke-Expression \"git push\""
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "The merge hold refuses pushes through another shell or expression runner without trying to read the target."
+    },
+    {
+      "id": "S1.env-options-push",
+      "source": "Owner-selected blanket refusal of shell and expression-runner pushes",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "env -i bash -c \"git push\""
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "The merge hold refuses pushes through another shell or expression runner without trying to read the target."
+    },
+    {
+      "id": "S1.benign-shell-status",
+      "source": "Owner-selected blanket refusal of shell and expression-runner pushes",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "bash -c \"git status\""
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass",
+      "note": "A shell command with no git push stays allowed."
+    },
+    {
+      "id": "CODEX.nested-worktrees-head-push",
+      "source": "G2 recheck on PR 705 at bb3847b, nested-worktree residual: a push of HEAD was refused in a checkout with lane worktrees nested under .tmp/worktrees",
+      "kind": "benign",
+      "hosts": [
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "git push origin HEAD"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature",
+          "nested_worktrees": [
+            {
+              "branch": "lane-one"
+            },
+            {
+              "branch": "lane-two"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass",
+      "note": "Codex names no folder, so the push could run in the main checkout or either lane; each one is checked and all are clean."
+    },
+    {
+      "id": "CODEX.nested-worktree-credential",
+      "source": "G2 recheck on PR 705 at bb3847b, nested-worktree residual: checking every reachable tree must still find a credential on one lane",
+      "kind": "hostile",
+      "hosts": [
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "git push origin HEAD"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature",
+          "nested_worktrees": [
+            {
+              "branch": "lane-one"
+            },
+            {
+              "branch": "lane-two",
+              "commits": [
+                {
+                  "files": {
+                    "uat-config.txt": "token = \"{credential}\"\n"
+                  },
+                  "message": "unpushed commit with a credential"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "Before the fix this was refused as folder unknown; now the lane-two HEAD check refuses it for the credential."
+    },
+    {
+      "id": "CODEX.nested-worktrees-reset-head-push",
+      "source": "G2 finding: a reset before a HEAD push invalidates the current per-tree HEAD checks",
+      "kind": "hostile",
+      "hosts": [
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "git reset --soft spare; git push origin HEAD:feature"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature",
+          "nested_worktrees": [
+            {
+              "branch": "lane-one"
+            },
+            {
+              "branch": "lane-two"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "Codex names no folder and the earlier reset could move HEAD in any reachable working tree, so the push needs a named folder."
+    },
+    {
+      "id": "CODEX.location-option-nested-worktree",
+      "source": "G2 finding: location options must mark an unknown Codex folder as moved",
+      "kind": "hostile",
+      "hosts": [
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "Set-Location -LiteralPath .tmp/worktrees/lane-two; git push origin HEAD"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature",
+          "nested_worktrees": [
+            {
+              "branch": "lane-one"
+            },
+            {
+              "branch": "lane-two",
+              "commits": [
+                {
+                  "files": {
+                    "uat-config.txt": "token = \"{credential}\"\n"
+                  },
+                  "message": "unpushed commit with a credential"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "A relative location change with an option leaves the starting folder unknown, so HEAD needs a named folder."
+    },
+    {
+      "id": "S1.benign-runner-in-commit-message",
+      "source": "G2 finding: runner names inside quoted data are not executable shell wrappers",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "git commit --allow-empty -m \"Refuse bash -c git push wrappers\""
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass",
+      "note": "Quoted command examples in ordinary data arguments stay allowed."
+    },
+    {
+      "id": "S1.benign-runner-in-search-pattern",
+      "source": "G2 finding: runner names inside quoted data are not executable shell wrappers",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "rg -F 'bash -c \"git push\"' ."
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass",
+      "note": "Shell names inside quoted search text do not count as runners."
+    },
+    {
+      "id": "CODEX.location-option-unconfirmed-folder",
+      "source": "G2 finding: location options must mark an unknown Codex folder as moved",
+      "kind": "hostile",
+      "hosts": [
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "Set-Location -LiteralPath .tmp/worktrees/lane-two; git push origin HEAD"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature",
+          "nested_worktrees": [
+            {
+              "branch": "lane-one"
+            },
+            {
+              "branch": "lane-two"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "Clean reachable worktrees cannot confirm where a relative location change started; before the fix this was incorrectly allowed."
+    },
+    {
+      "id": "CODEX.location-call-operator-unconfirmed-folder",
+      "source": "Consolidated location family closure",
+      "kind": "hostile",
+      "hosts": [
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "& Set-Location -LiteralPath .tmp/worktrees/lane-one; git push origin HEAD"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature",
+          "nested_worktrees": [
+            {
+              "branch": "lane-one"
+            },
+            {
+              "branch": "lane-two"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "Clean reachable worktrees do not confirm a folder after an unresolved location invocation."
+    },
+    {
+      "id": "S1.pipeline-invoke-expression-push",
+      "source": "Consolidated expression runner family closure",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "Write-Output 'git push origin HEAD:feature' | Invoke-Expression"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "A pipeline can feed a push into a runner whose own arguments contain no script."
+    },
+    {
+      "id": "S1.benign-pipeline-invoke-expression",
+      "source": "Consolidated expression runner family closure",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "Write-Output 'hello' | Invoke-Expression"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass",
+      "note": "An expression pipeline without a push stays allowed."
+    },
+    {
+      "id": "S1.pipeline-iex-push",
+      "source": "Consolidated expression runner family closure",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "Write-Output 'git push origin HEAD:feature' | iex"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "The expression runner alias has the same pipeline boundary."
+    },
+    {
+      "id": "S1.benign-pipeline-iex",
+      "source": "Consolidated expression runner family closure",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "Write-Output 'hello' | iex"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass",
+      "note": "The alias also allows an expression pipeline without a push."
+    },
+    {
+      "id": "CODEX.argv-shell-options-default-push",
+      "source": "Consolidated shell argument list family closure",
+      "kind": "hostile",
+      "hosts": [
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "shell",
+        "tool_input": {
+          "command": [
+            "bash",
+            "-c",
+            "-e",
+            "git push origin HEAD:main"
+          ]
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "An option before the script cannot hide a default-branch push."
+    },
+    {
+      "id": "CODEX.argv-shell-separator-default-push",
+      "source": "Consolidated shell argument list family closure",
+      "kind": "hostile",
+      "hosts": [
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "shell",
+        "tool_input": {
+          "command": [
+            "bash",
+            "-lc",
+            "--",
+            "git push origin HEAD:main"
+          ]
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "The option separator before the script cannot hide a default-branch push."
+    },
+    {
+      "id": "CODEX.argv-shell-options-feature-push",
+      "source": "Consolidated shell argument list family closure",
+      "kind": "benign",
+      "hosts": [
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "shell",
+        "tool_input": {
+          "command": [
+            "bash",
+            "-c",
+            "-e",
+            "git push origin work"
+          ]
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass",
+      "note": "The unwrapped script is a plain feature push."
+    },
+    {
+      "id": "CODEX.argv-shell-separator-feature-push",
+      "source": "Consolidated shell argument list family closure",
+      "kind": "benign",
+      "hosts": [
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "shell",
+        "tool_input": {
+          "command": [
+            "bash",
+            "-lc",
+            "--",
+            "git push origin work"
+          ]
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass",
+      "note": "The unwrapped script is a plain feature push."
+    },
+    {
+      "id": "S1.benign-runner-separate-commit-messages",
+      "source": "Consolidated runner command position closure",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "git commit --allow-empty -m \"bash\" -m \"Document -c git push handling\""
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass",
+      "note": "A quoted runner name in a data argument is not a command."
+    },
+    {
+      "id": "CODEX.quoted-location-call-operator",
+      "source": "Plain git rule: regression from repeated shell-family reviews",
+      "kind": "hostile",
+      "hosts": [
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "& 'Set-Location' -LiteralPath .\\other; git push origin HEAD:feature"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature",
+          "nested_worktrees": [
+            {
+              "branch": "lane-one"
+            },
+            {
+              "branch": "lane-two"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "Several clean reachable worktrees do not confirm the folder for a compound line, even when the location command name is quoted."
+    },
+    {
+      "id": "S1.quoted-powershell-substitution",
+      "source": "Plain git rule: regression from repeated shell-family reviews",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "Write-Output \"$(powershell -Command 'git push origin HEAD:main')\""
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "S1.pipeline-call-operator-invoke-expression",
+      "source": "Plain git rule: regression from repeated shell-family reviews",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "Write-Output 'git push origin HEAD:main' | & Invoke-Expression"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "S1.benign-unquoted-runner-commit-message",
+      "source": "Plain git rule: regression from repeated shell-family reviews",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "git commit --allow-empty -m bash -m \"Document -c git push handling\""
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass",
+      "note": "A plain git line may mention a runner and git push as message data."
+    },
+    {
+      "id": "PUSH.benign-quoted-shell-commit-then-push",
+      "source": "Owner correction: quoted shell names in commit messages must not block a feature push",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "git commit --allow-empty -q -m \"Fix sh script\" && git push origin feature"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass",
+      "note": "Shell names inside quoted commit text do not count as runners."
+    },
+    {
+      "id": "CODEX.read-before-head-push",
+      "source": "Plain git rule: regression from repeated shell-family reviews",
+      "kind": "hostile",
+      "hosts": [
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "git status; git push origin HEAD:feature"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature",
+          "nested_worktrees": [
+            {
+              "branch": "lane-one"
+            },
+            {
+              "branch": "lane-two"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "note": "Even a read before HEAD makes the whole line non-plain; unknown-folder HEAD scanning is only allowed for one plain git command."
     }
   ]
 }

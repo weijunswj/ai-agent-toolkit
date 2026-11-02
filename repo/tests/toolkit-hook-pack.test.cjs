@@ -37,7 +37,13 @@ test('a row with a wrong shape is refused with the reason', () => {
     [row({ fixture: { repo: { governance: 'maybe' } } }), /governance must be one of/],
     [row({ expect_by_host: { codex: { decision: 'deny' } } }), /does not run on/],
     [row({ extra: true }), /unknown key extra/],
+    [row({ fixture: { gate_role: 'G3' } }), /gate_role is one of G0, G1, G2/],
+    [row({ fixture: { repo: { governance: 'enabled', cached_binding_store: true } } }), /cached_binding_store needs governance undecided/],
+    [row({ fixture: { repo: { governance: 'enabled', owner: 'someone' } } }), /owner needs governance undecided/],
+    [row({ fixture: { repo: { governance: 'enabled', nested_worktrees: ['lane'] } } }), /nested_worktrees lists \{ branch, commits \} objects/],
+    [row({ fixture: { repo: { governance: 'enabled', nested_worktrees: [{ branch: 'lane', commits: [{}] }] } } }), /nested_worktrees lists/],
   ];
+  assert.deepEqual(pack.rowErrors(row({ fixture: { gate_role: 'G1', repo: { governance: 'undecided', owner: 'someone', cached_binding_store: true, nested_worktrees: [{ branch: 'lane', commits: [{ files: {} }] }] } } })), []);
   for (const [bad, reason] of cases) assert.match(pack.rowErrors(bad).join('\n'), reason, JSON.stringify(bad));
   const parsed = pack.parseCorpusFile(JSON.stringify({ schema: pack.SCHEMA, family: 'other', rows: [] }), 'push.json');
   assert.match(parsed.errors.join('\n'), /family must be "push"/);

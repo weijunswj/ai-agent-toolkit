@@ -45,6 +45,8 @@ const FAULTS = Object.freeze(['deleted-plugin-root', 'remove-file', 'throw-modul
 const GOVERNANCE = Object.freeze(['enabled', 'undecided', 'none']);
 // App-local task answers in each fixture home; the stale variant ages only its governance binding.
 const TASK_AUTO_MERGE = Object.freeze(['after-gates', 'after-gates-stale', 'off', 'codex-only', 'claude-code-only', 'unreadable']);
+// The gate role a Toolkit launcher marks a gate run with (TOOLKIT_GATE_ROLE).
+const GATE_ROLES = Object.freeze(['G0', 'G1', 'G2']);
 const ROW_KEYS = new Set(['id', 'source', 'kind', 'hosts', 'event', 'payload', 'fixture', 'fault', 'expect', 'expect_by_host', 'status', 'known_bad_on', 'lane', 'added', 'note', 'steps']);
 const ID = /^[A-Z][A-Za-z0-9._-]*$/;
 // The plugin content the hooks can reach: both host manifests, the scripts and contracts, and the
@@ -137,13 +139,18 @@ function fixtureErrors(fixture) {
   if (fixture === undefined) return [];
   if (!fixture || typeof fixture !== 'object' || Array.isArray(fixture)) return ['fixture must be an object'];
   const errors = [];
-  for (const key of Object.keys(fixture)) if (!['repo', 'transcript', 'files', 'owner_session'].includes(key)) errors.push(`fixture has unknown key ${key}`);
+  for (const key of Object.keys(fixture)) if (!['repo', 'transcript', 'files', 'owner_session', 'gate_role'].includes(key)) errors.push(`fixture has unknown key ${key}`);
   if (fixture.owner_session !== undefined && fixture.owner_session !== true) errors.push('fixture.owner_session is true or left out');
+  if (fixture.gate_role !== undefined && !GATE_ROLES.includes(fixture.gate_role)) errors.push(`fixture.gate_role is one of ${GATE_ROLES.join(', ')}`);
   const repo = fixture.repo;
   if (repo !== undefined) {
     if (!repo || typeof repo !== 'object') errors.push('fixture.repo must be an object');
     else {
-      for (const key of Object.keys(repo)) if (!['governance', 'name', 'commits', 'worktrees', 'staged', 'branch', 'task_auto_merge'].includes(key)) errors.push(`fixture.repo has unknown key ${key}`);
+      for (const key of Object.keys(repo)) if (!['governance', 'name', 'owner', 'commits', 'worktrees', 'nested_worktrees', 'staged', 'branch', 'task_auto_merge', 'cached_binding_store'].includes(key)) errors.push(`fixture.repo has unknown key ${key}`);
+      if (repo.owner !== undefined && (repo.governance !== 'undecided' || !/^[A-Za-z0-9-]+$/.test(repo.owner))) errors.push('fixture.repo.owner needs governance undecided and is a plain owner name');
+      if (repo.cached_binding_store !== undefined && (repo.cached_binding_store !== true || repo.governance !== 'undecided')) errors.push('fixture.repo.cached_binding_store needs governance undecided and is true or left out');
+      if (repo.nested_worktrees !== undefined && (!Array.isArray(repo.nested_worktrees) || repo.nested_worktrees.some(tree => !tree || !/^[a-z0-9-]+$/.test(tree.branch || '')
+        || (tree.commits !== undefined && (!Array.isArray(tree.commits) || tree.commits.some(commit => !commit || typeof commit.files !== 'object')))))) errors.push('fixture.repo.nested_worktrees lists { branch, commits } objects');
       if (repo.task_auto_merge !== undefined && (repo.governance !== 'enabled' || !TASK_AUTO_MERGE.includes(repo.task_auto_merge))) errors.push(`fixture.repo.task_auto_merge needs governance enabled and is one of ${TASK_AUTO_MERGE.join(', ')}`);
       if (!GOVERNANCE.includes(repo.governance)) errors.push(`fixture.repo.governance must be one of ${GOVERNANCE.join(', ')}`);
       if (repo.name !== undefined && !/^[A-Za-z0-9._-]+$/.test(repo.name)) errors.push('fixture.repo.name must be a plain repository name');
@@ -327,6 +334,8 @@ class Fixture {
     for (const folder of [this.home, this.work, path.dirname(this.transcript)]) fs.mkdirSync(folder, { recursive: true });
     fs.writeFileSync(path.join(this.home, '.gitconfig'), '[user]\n\tname = Fixture Author\n\temail = fixture@example.test\n[commit]\n\tgpgsign = false\n[init]\n\tdefaultBranch = main\n[core]\n\tfsmonitor = false\n');
     this.env = hookEnvironment(this.home);
+    // A session a Toolkit launcher started for a gate carries its role.
+    if (spec.gate_role) this.env.TOOLKIT_GATE_ROLE = spec.gate_role;
     if (spec.repo) this.#repo(spec.repo);
     if (spec.owner_session) this.#ownerSession();
     this.#files(this.work, spec.files || {});
@@ -351,7 +360,8 @@ class Fixture {
       if (spec.task_auto_merge) this.#taskAutoMerge(`toolkit-test-fixture/hook-pack-${name}`, spec.task_auto_merge, support);
     } else {
       this.#git(this.work, ['init', '--quiet']);
-      if (spec.governance === 'undecided') this.#git(this.work, ['remote', 'add', 'origin', `https://github.com/toolkit-test-fixture/${name}.git`]);
+      if (spec.governance === 'undecided') this.#git(this.work, ['remote', 'add', 'origin', `https://github.com/${spec.owner || 'toolkit-test-fixture'}/${name}.git`]);
+      if (spec.cached_binding_store) this.#bindingNamingStore(`toolkit-test-fixture/${name}`);
     }
     this.#git(this.work, ['checkout', '--quiet', '-B', spec.branch || 'main']);
     const commits = spec.commits || [{ files: { 'README.md': 'fixture\n' }, message: 'base' }];
@@ -365,7 +375,31 @@ class Fixture {
     }
     this.head = this.#git(this.work, ['rev-parse', 'HEAD']).trim();
     for (const branch of spec.worktrees || []) this.#git(this.work, ['worktree', 'add', '--quiet', '-b', branch, path.join(this.trees, branch)]);
+    // Lane worktrees nested in the working folder's ignored .tmp/, as a controller's checkout has
+    // them, each with its own commits.
+    if (spec.nested_worktrees?.length) fs.appendFileSync(path.join(this.work, '.git', 'info', 'exclude'), '.tmp/\n');
+    for (const tree of spec.nested_worktrees || []) {
+      const folder = path.join(this.work, '.tmp', 'worktrees', tree.branch);
+      this.#git(this.work, ['worktree', 'add', '--quiet', '-b', tree.branch, folder]);
+      for (const commit of tree.commits || []) {
+        this.#files(folder, commit.files);
+        this.#git(folder, ['add', '-A']);
+        this.#git(folder, ['commit', '--quiet', '-m', commit.message || 'fixture commit']);
+      }
+    }
     if (spec.staged) { this.#files(this.work, spec.staged); this.#git(this.work, ['add', '-A']); }
+  }
+
+  // Another governed repository on this computer whose cached programme binding (the copy a refresh
+  // writes) names `store` as its evidence store, under the same owner.
+  #bindingNamingStore(store) {
+    const support = require(path.join(ROOT, 'repo', 'tests', 'toolkit-governed-fixture-support.cjs'));
+    const owner = support.makeGoverned(path.join(this.dir, 'binding-owner'), 'hook-pack-binding-owner', { home: this.home });
+    const text = `${JSON.stringify({
+      schema: 'toolkit.programme-binding.v1', repository: 'toolkit-test-fixture/hook-pack-binding-owner', parent_issue: 1, record_prefix: 'INT-FX', writer_prefix: 'FX',
+      store: { kind: 'github', repository: store, branch: 'main', path: 'state/' }, required_checks: ['validate'],
+    }, null, 2)}\n`;
+    support.recordMerged(owner, { home: this.home, text });
   }
 
   // A fresh enabled binding plus separate app-local answers in this fixture's home.
