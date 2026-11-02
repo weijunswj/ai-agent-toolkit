@@ -36,9 +36,82 @@ const GUARDED = [/\bgit\b[\s\S]*\b(?:commit|push)\b/i, /\bgh\s+pr\s+(?:create|ed
 // A shell program at the start of an argument list, and the option that hands it a script.
 const POSIX_SHELL = /^(?:bash|sh|zsh|dash|ksh)$/;
 const POWERSHELL = /^(?:pwsh|powershell)$/;
-const SCRIPT_OPTION = { posix: /^-[A-Za-z]*c$/, powershell: /^-(?:c|command)$/i, cmd: /^\/[ck]$/i };
+const SCRIPT_OPTION = { posix: /^-[A-Za-z]*c$/, powershell: /^-(?:c|co|com|comm|comma|comman|command)$/i, cmd: /^\/[ck]$/i };
 // Backslashes are quoted too: outside quotes, one before a space or quote escapes it.
 const PLAIN_WORD = /^[A-Za-z0-9_@%+=:,./-]+$/;
+// A command word that runs its quoted arguments as a further command line (bash -c "...",
+// pwsh -Command "...", eval "..."), which the checks read up to two levels deep.
+const SHELLS = /(?:^|[\\/])(?:bash|sh|zsh|dash|ksh|pwsh|powershell|cmd|eval|invoke-expression|iex)(?:\.exe)?$/i;
+
+// Read shell words in one pass: [{ words, offsets }] per command. Quotes protect separators; shell
+// escapes and both Bash and PowerShell line continuations stay inside the same command. Backslashes
+// in Windows paths stay.
+function shellCommands(text) {
+  const commands = [];
+  let words = []; let offsets = []; let word = ''; let started = false; let quote = ''; let offset = 0;
+  const finishWord = () => { if (started) { words.push(word); offsets.push(offset); } word = ''; started = false; };
+  const finishCommand = () => { finishWord(); if (words.length) commands.push({ words, offsets }); words = []; offsets = []; };
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    const next = text[index + 1];
+    if (!started) offset = index;
+    if (quote !== "'" && (char === '\\' || char === '`')) {
+      if (next === '\n' || (next === '\r' && text[index + 2] === '\n')) {
+        index += next === '\r' ? 2 : 1;
+        continue;
+      }
+      if (next && (char === '`' || (quote === '"' ? '"\\$`'.includes(next) : /[\s"'\\;&|()]/.test(next)))) {
+        word += next; started = true; index += 1; continue;
+      }
+    }
+    if (quote) {
+      if (char === quote) {
+        if (quote === "'" && next === "'") { word += char; index += 1; }
+        else quote = '';
+      } else word += char;
+      continue;
+    }
+    if (char === '"' || char === "'") { quote = char; started = true; continue; }
+    if (char === '#' && !started) {
+      while (index + 1 < text.length && text[index + 1] !== '\n') index += 1;
+      continue;
+    }
+    if (char === ';' || char === '|' || char === '\n' || char === '(' || char === ')' || (char === '&' && next === '&')) {
+      finishCommand();
+      if ((char === '|' || char === '&') && next === char) index += 1;
+    } else if (/\s/.test(char)) finishWord();
+    else { word += char; started = true; }
+  }
+  finishCommand();
+  return commands;
+}
+
+// The shared safe subset for a push checked without interpreting shell syntax: exactly one git
+// command, no substitutions anywhere (even quoted), and no unquoted operators or cmd variables.
+function plainGitLine(text) {
+  if (/\$[({]|`|[<>]\(/.test(text)) return false;
+  let quote = '';
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    const next = text[index + 1];
+    if (quote !== "'" && char === '\\' && next
+      && (quote === '"' ? '"\\$'.includes(next) : /[\s"'\\]/.test(next))) {
+      if (!quote && /[\r\n]/.test(next)) return false;
+      index += 1;
+      continue;
+    }
+    if (quote) {
+      if (char === quote) {
+        if (quote === "'" && next === "'") index += 1;
+        else quote = '';
+      }
+    } else if (char === '"' || char === "'") quote = char;
+    else if (/[;&|(){}\r\n]/.test(char) || (char === '%' && /^%[^%\s]+%/.test(text.slice(index)))) return false;
+  }
+  if (quote) return false;
+  const commands = shellCommands(text);
+  return commands.length === 1 && /(?:^|[\\/])git(?:\.exe)?$/i.test(commands[0].words[0]);
+}
 
 // A folder or file a shell command names, resolved against `base` as the shell would: a leading `~`
 // (alone, `~/` or `~\`) is the home folder in every shell. On Windows a Git Bash drive path
@@ -138,7 +211,7 @@ function programName(word) {
   return path.win32.basename(path.posix.basename(word)).replace(/\.exe$/i, '').toLowerCase();
 }
 
-// An argument list as one command line that shellCommands-style parsing reads back word for word:
+// An argument list as one command line that shellCommands reads back word for word:
 // plain words as they are, others in single quotes with each quote doubled.
 function quoteWords(words) {
   return words.map(word => (word && PLAIN_WORD.test(word) ? word : `'${word.replace(/'/g, "''")}'`)).join(' ');
@@ -152,15 +225,24 @@ function argvText(words) {
     for (let index = 1; index < words.length; index += 1) {
       const word = words[index];
       if (SCRIPT_OPTION[kind].test(word)) {
-        // bash -c takes one script word (later words are its arguments); PowerShell and cmd read the rest.
-        const script = kind === 'posix' ? words.slice(index + 1, index + 2) : words.slice(index + 1);
-        if (script.length) return script.join(' ');
-        break;
+        // POSIX shells can take more options and -- before the script. Later words are its
+        // arguments; PowerShell and cmd read the rest after their command option.
+        let start = index + 1;
+        if (kind === 'posix') {
+          while (start < words.length && /^[-+]/.test(words[start])) {
+            // Options with a separate value make the script boundary uncertain here.
+            if (/^(?:[-+][oO]|--(?:rcfile|init-file))$/.test(words[start])) return words.join(' ');
+            start += 1;
+          }
+        }
+        const script = kind === 'posix' ? words.slice(start, start + 1) : words.slice(start);
+        if (script.length && script[0]) return script.join(' ');
+        return words.join(' ');
       }
       if (!/^[-/]/.test(word)) break;
     }
   }
-  return quoteWords(words);
+  return kind ? words.join(' ') : quoteWords(words);
 }
 
 // Every key and string in the raw input, a line apart, with line continuations (\, a PowerShell
@@ -252,4 +334,4 @@ class ShellCall {
   }
 }
 
-module.exports = Object.freeze({ SHELL_TOOL_NAMES, SHELL_TOOLS, UNREADABLE, ShellCall, absoluteShellPath, argvText, assignVariable, assignmentOf, folderWord, quoteWords, shellOf, shellPath, shellReadings });
+module.exports = Object.freeze({ SHELLS, SHELL_TOOL_NAMES, SHELL_TOOLS, UNREADABLE, ShellCall, absoluteShellPath, argvText, assignVariable, assignmentOf, folderWord, plainGitLine, quoteWords, shellCommands, shellOf, shellPath, shellReadings });

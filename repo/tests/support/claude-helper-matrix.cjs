@@ -93,11 +93,13 @@ class ClaudeMatrixContext {
 
 // Runs the hook command as Claude Code does: a fresh process, the event JSON on stdin.
 // `blocked` names decision modules the test preload makes unloadable; `args` follow the hook file.
+// Each case is a Toolkit gate run (a G1 lead's launcher marker), the only session the named-helper
+// policy applies to, unless its `environment` sets TOOLKIT_GATE_ROLE (empty for no gate run).
 function runHook(context, event, { environment = {}, hook = AGENT_HOOK, args = [], blocked = null } = {}) {
   const input = { hook_event_name: 'PreToolUse', session_id: 'matrix-session', tool_name: 'Agent', cwd: context.repo, ...event };
   const started = process.hrtime.bigint();
   const argv = blocked ? ['--require', MODULE_BLOCKER, hook, ...args] : [hook, ...args];
-  const env = { ...context.environment, ...environment, ...(blocked ? { TOOLKIT_TEST_BLOCKED_MODULES: blocked } : {}) };
+  const env = { ...context.environment, TOOLKIT_GATE_ROLE: 'G1', ...environment, ...(blocked ? { TOOLKIT_TEST_BLOCKED_MODULES: blocked } : {}) };
   const result = spawnSync(process.execPath, argv, { input: JSON.stringify(input), env, encoding: 'utf8', timeout: 20000 });
   const elapsed_ms = Number(process.hrtime.bigint() - started) / 1e6;
   let output = null;
@@ -110,6 +112,8 @@ function runHook(context, event, { environment = {}, hook = AGENT_HOOK, args = [
 const launch = (name, extra = {}) => ({ tool_input: { subagent_type: name, description: 'matrix', prompt: 'Reply OK', ...extra } });
 const G0 = 'toolkit-g0-helper', G1 = 'toolkit-g1-helper';
 const NOT_ALLOWED = /allows only the toolkit-g0-helper and toolkit-g1-helper agents/;
+// A session no Toolkit launcher started: no launcher marker.
+const NO_GATE = Object.freeze({ TOOLKIT_GATE_ROLE: '' });
 const MISMATCH = /does not match the one rendered from the selected stack/;
 const editDefinition = (name, from, to) => c => { const file = c.definitionFile(name); fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace(from, to)); };
 const projectCopy = (folder, name, change) => c => {
@@ -155,14 +159,18 @@ const HOOK_CASES = [
   ['A17', 'default agent (no subagent_type)', { tool_input: { prompt: 'Reply OK' } }, 'deny', /requested: the default agent/],
   ['A17', 'broader-native profile without a launcher binding: a built-in agent is refused', launch('general-purpose'), 'deny', NOT_ALLOWED,
     { setup: configureTopology('broader-native') }],
-  ['A18', 'ungoverned folder, lead launches any agent', launch('general-purpose'), 'pass', null, { cwd: c => c.plain }],
-  ['A18', 'ungoverned folder, a subagent launches another agent', { agent_id: 'sub-1', ...launch('general-purpose') }, 'deny', /one layer only/, { cwd: c => c.plain }],
+  ['A18', 'ungoverned folder, lead launches any agent', launch('general-purpose'), 'pass', null, { cwd: c => c.plain, environment: NO_GATE }],
+  ['A18', 'ungoverned folder, a subagent launches another agent', { agent_id: 'sub-1', ...launch('general-purpose') }, 'deny', /one layer only/, { cwd: c => c.plain, environment: NO_GATE }],
   ['A18', 'ungoverned folder, broader native behaviour chosen', { agent_id: 'sub-1', ...launch('general-purpose') }, 'pass', null,
-    { cwd: c => c.plain, setup: configureTopology('broader-native') }],
+    { cwd: c => c.plain, setup: configureTopology('broader-native'), environment: NO_GATE }],
+  ['A18', 'ENABLED repository outside a gate run, lead launches a built-in agent', launch('Explore'), 'pass', null, { environment: NO_GATE }],
+  ['A18', 'ENABLED repository outside a gate run, a subagent launches another agent', { agent_id: 'sub-1', ...launch('Explore') }, 'deny', /one layer only/, { environment: NO_GATE }],
+  ['A18', 'ENABLED repository outside a gate run, broader native chosen, a subagent launches another agent', { agent_id: 'sub-1', ...launch('Explore') }, 'deny', /one layer only/,
+    { environment: NO_GATE, setup: configureTopology('broader-native') }],
   ['A21', 'installed definition rendered from another registry revision', launch(G1), 'deny', MISMATCH,
     { setup: editDefinition(G1, /\(SHA-256 `[0-9a-f]{64}`\)/, `(SHA-256 \`${'0'.repeat(64)}\`)`) }],
   ['A22', 'ENABLED repository is governed: a built-in agent is refused', launch('general-purpose'), 'deny', NOT_ALLOWED],
-  ['A22', 'DISABLED repository is ungoverned: the lead launches any agent', launch('general-purpose'), 'pass', null, { cwd: c => c.declined }],
+  ['A22', 'DISABLED repository is ungoverned: the lead launches any agent', launch('general-purpose'), 'pass', null, { cwd: c => c.declined, environment: NO_GATE }],
   ['A22', 'UNDECIDED repository is the hard block: the governance gate refuses the launch', launch(G0), 'deny', /no governance decision yet/,
     { cwd: c => c.undecided, gate: true }],
   ['A22', 'ENABLED repository passes the governance gate', launch(G0), 'pass', null, { gate: true }],

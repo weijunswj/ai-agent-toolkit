@@ -24,10 +24,12 @@
 // A Codex call that names no folder (no `workdir`, and no `cd` or `git -C` to a full path) gives only
 // the chat's folder, and the command may run in another working tree of the same repository. Then
 // (`folderConfirmed: false`) a folder that is not a repository is refused (FOLDER_UNCONFIRMED). With
-// more than one working tree (`git worktree list`), so is a source the chat's folder cannot find and
-// a push or pull request of HEAD; when the same command commits first, what it could commit is read
-// in the working tree that has the pushed branch checked out, and any other source is refused. With
-// one working tree, the check runs as for a named folder.
+// more than one working tree reachable from it (the one holding it and any nested below it), so is a
+// source the chat's folder cannot find; a push or pull request of HEAD is checked in every one of
+// those working trees and goes only when each passes, unless an earlier step of the same command
+// could move HEAD or a relative `cd` moved the unknown folder, which is refused; when the same command commits first, what it could commit is
+// read in the working tree that has the pushed branch checked out, and any other source is refused.
+// With one working tree, the check runs as for a named folder.
 //
 // It fails open: when git is not found or cannot run, the check takes longer than 30 seconds for one
 // shell command, or a setting cannot be read, the command runs and one note is returned for the user. A broken check must
@@ -225,21 +227,24 @@ function reachableTrees(trees, chatFolder) {
   return trees.filter((tree) => within(chatFolder, tree.folder) || within(tree.folder, chatFolder));
 }
 
-// For a target whose folder Codex did not name (`folderConfirmed: false`), the working tree whose
-// changes the push can carry: { root } or { refusal }. It matters only when the same command commits
-// first or the source is HEAD, and only when more than one working tree is reachable from the chat's
-// folder (reachableTrees); otherwise the chat's folder is the one. With several, a HEAD source is refused (each working tree has its
-// own). After a commit in the same command, each source must be a branch exactly one working tree
-// has checked out, and that working tree is read. Otherwise the commit's folder cannot be told and the
-// push is refused: a branch none has checked out (a `git checkout` or `git tag` earlier in the same
-// command could put the commit on it wherever the command runs), `--all` or `--tags`, and sources
-// held in more than one working tree.
+// For a target whose folder Codex did not name (`folderConfirmed: false`), the working trees whose
+// changes the push can carry: { root }, { roots } or { refusal }. It matters only when the same
+// command commits first or the source is HEAD, and only when more than one working tree is reachable
+// from the chat's folder (reachableTrees); otherwise the chat's folder is the one. With several, a
+// HEAD source is checked in every one of them (each working tree has its own HEAD) only when the
+// whole line is a single plain git command (`plainGit`); every other line is refused. After a commit
+// in the same command, each source must be a branch exactly one working tree has checked out, and
+// that working tree is read. Otherwise the commit's folder cannot be told and the push is refused: a
+// branch none has checked out (a `git checkout` or `git tag` earlier in the same command could put
+// the commit on it wherever the command runs), `--all` or `--tags`, and sources held in more than one
+// working tree.
 function unconfirmedFolder(root, target, sources, deadline, spawn) {
   const head = sources.some(followsHead);
   if (!head && !target.preceding?.length) return { root };
   const trees = reachableTrees(workingTrees(root, deadline, spawn), target.folder);
   if (trees.length <= 1) return { root };
-  if (head) return { refusal: FOLDER_UNCONFIRMED };
+  // A working tree whose folder is gone (one `git worktree prune` would drop) is not where it runs.
+  if (head) return target.preceding?.length || !target.plainGit ? { refusal: FOLDER_UNCONFIRMED } : { roots: trees.map((tree) => tree.folder).filter(isFolder) };
   const folders = [];
   for (const source of sources) {
     if (REV_OPTIONS.has(source)) return { refusal: FOLDER_UNCONFIRMED };
@@ -366,6 +371,17 @@ function checkOutgoing(target, {
     if (target.folderConfirmed === false) {
       const found = unconfirmedFolder(root, target, sources, deadline, spawn);
       if (found.refusal) return { refusal: found.refusal };
+      // The command may run in any of these working trees, so each one is checked within the same
+      // budget, and the push goes only when every one passes: a refusal wins, then a note.
+      if (found.roots) {
+        const results = [];
+        for (const folder of found.roots) {
+          const result = checkOutgoing({ ...target, folder, folderConfirmed: true, sources }, { spawn: spawnProgram, patterns, deadline, git });
+          if (result.refusal) return result;
+          results.push(result);
+        }
+        return results.find((result) => result.note) || {};
+      }
       root = found.root;
     }
     // Earlier git commands in the same shell command, in this repository: a commit Toolkit cannot

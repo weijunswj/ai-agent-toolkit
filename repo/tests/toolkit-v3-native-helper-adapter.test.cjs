@@ -157,9 +157,9 @@ test('Codex namespaced MultiAgentV2 spawns are guarded like spawn_agent, and onl
   for(const change of [{model:'other-model'},{reasoning_effort:'low'},{subagent_type:'unchecked-helper'}]){
     assert.equal((await commandDecision(v2({fork_turns:'none',...change}),'codex',options)).hookSpecificOutput.permissionDecision,'deny',JSON.stringify(change));
   }
-  // Without a binding the V2 name meets the named-helper policy in the governed checkout, through
-  // the real hook process: an unnamed agent is refused before any agent file is read.
-  const script=path.resolve(__dirname,'../scripts/toolkit-codex-helper-hook.cjs'),env={...process.env};delete env.TOOLKIT_NATIVE_HELPER_BINDING;delete env.TOOLKIT_NATIVE_HELPER_BINDING_SHA256;
+  // Without a binding the V2 name meets the named-helper policy in a gate run in the governed
+  // checkout, through the real hook process: an unnamed agent is refused before any agent file is read.
+  const script=path.resolve(__dirname,'../scripts/toolkit-codex-helper-hook.cjs'),env={...process.env,TOOLKIT_GATE_ROLE:'G1'};delete env.TOOLKIT_NATIVE_HELPER_BINDING;delete env.TOOLKIT_NATIVE_HELPER_BINDING_SHA256;
   const r=spawnSync(process.execPath,[script],{input:JSON.stringify({hook_event_name:'PreToolUse',tool_name:'collaborationspawn_agent',cwd:path.resolve(__dirname,'../..'),tool_input:{task_name:'x',message:'x',fork_turns:'none'}}),encoding:'utf8',env,timeout:10000});
   assert.equal(r.status,2);assert.match(r.stderr,/allows only the toolkit-g0-helper and toolkit-g1-helper agents \(requested: the default agent\)/);
 });

@@ -15,8 +15,8 @@ const ONE_LAYER_DENIAL = Object.freeze({ hookSpecificOutput: Object.freeze({ hoo
   permissionDecisionReason: "Toolkit: a subagent can't start another agent (one layer only). Do the work in this subagent, or hand it back to the main session." }) });
 
 // Claude Code runs this hook only for the Agent|Task matcher, so input that is not a JSON object,
-// or names no tool, is an agent launch Toolkit cannot check. Governed work refuses it; elsewhere
-// it is left to Claude Code, as any main-session launch is.
+// or names no tool, is an agent launch Toolkit cannot check. A Toolkit gate run refuses it;
+// elsewhere it is left to Claude Code, as any main-session launch is.
 const UNREADABLE_DENIAL = Object.freeze({ hookSpecificOutput: Object.freeze({ hookEventName: 'PreToolUse', permissionDecision: 'deny',
   permissionDecisionReason: 'Toolkit could not read this agent launch, so it cannot check it; do the work in this session.' }) });
 const LAUNCHER_MARKERS = Object.freeze(['TOOLKIT_GATE_ROLE', 'TOOLKIT_NATIVE_HELPER_BINDING', 'TOOLKIT_CLAUDE_TASK_PROFILE_SHA256']);
@@ -28,15 +28,16 @@ function readInput() {
   } catch { return {}; }
 }
 
-// Governed work, or a launcher marker when the shared predicate cannot load or answer.
-function governedOrMarked(cwd, environment = process.env) {
-  try { return governedRepo().governedRepo(cwd || process.cwd(), environment).governed; }
-  catch { return LAUNCHER_MARKERS.some(name => Boolean(environment[name])); }
+// A Toolkit gate run: a session a Toolkit launcher started, which sets a launcher marker. Only
+// these get the named-helper policy; in any other session, governed repository or not, the rules
+// let the main session start subagents.
+function gateRun(environment = process.env) {
+  return LAUNCHER_MARKERS.some(name => Boolean(environment[name]));
 }
 
 function decision(input, options = {}) {
   const toolName = String(input.tool_name || input.toolName || '');
-  if (!toolName) return governedOrMarked(input.cwd, options.environment || process.env) ? UNREADABLE_DENIAL : {};
+  if (!toolName) return gateRun(options.environment || process.env) ? UNREADABLE_DENIAL : {};
   if (!/^(Agent|Task)$/.test(toolName)) return {};
   const taskPin = options.task_profile_sha256 || process.env.TOOLKIT_CLAUDE_TASK_PROFILE_SHA256;
   if (taskPin) {
@@ -53,17 +54,17 @@ function decision(input, options = {}) {
     }, authority_pins: authorityPins, context_observation: context,
       expected_launch_fingerprint: options.expected_launch_fingerprint || process.env.TOOLKIT_CLAUDE_LAUNCH_FINGERPRINT });
   }
-  // Outside Toolkit-governed work only one layer applies: the main session launches any agent
-  // with no decision, and a subagent never launches another unless the owner chose broader
-  // native behaviour. A missing or unreadable profile reads as root-only, so the refusal stays.
-  // `agent_id` marks a subagent or teammate caller; `agent_type` alone also appears in a main
-  // session started with --agent.
+  // Outside a Toolkit gate run only one layer applies, in a governed repository too: the main
+  // session launches any agent with no decision, and a subagent never launches another unless the
+  // owner chose broader native behaviour outside governed repositories. A missing or unreadable
+  // profile reads as root-only, so the refusal stays. `agent_id` marks a subagent or teammate caller;
+  // `agent_type` alone also appears in a main session started with --agent.
   const environment = options.environment || process.env;
   const governance = options.governance || governedRepo().governedRepo(input.cwd, environment);
   const { readProfile, TOPOLOGIES } = control();
-  if (!governance.governed) {
+  if (!governance.governed || !gateRun(environment)) {
     if (!input.agent_id) return {};
-    return readProfile('claude-code', options).topology === TOPOLOGIES.BROADER_NATIVE ? {} : ONE_LAYER_DENIAL;
+    return !governance.governed && readProfile('claude-code', options).topology === TOPOLOGIES.BROADER_NATIVE ? {} : ONE_LAYER_DENIAL;
   }
   // The pinned binding path applies only when a launcher bound this session to a helper route
   // (it sets TOOLKIT_NATIVE_HELPER_BINDING). Setup writes no binding, so without one a broader-native
@@ -78,7 +79,7 @@ function decision(input, options = {}) {
     ...options.native_guard
   });
   // Root-only, named-helpers, unconfigured and unbound broader-native profiles all admit only the
-  // Toolkit's own leaf helpers in governed work.
+  // Toolkit's own leaf helpers in a gate run.
   const { ClaudeNamedHelperPolicy } = helperPolicy();
   return new ClaudeNamedHelperPolicy({ environment, ...options.helper_policy }).decide(input, governance);
 }
@@ -87,13 +88,12 @@ const CHECK_FAILED_DENIAL = Object.freeze({ hookSpecificOutput: Object.freeze({ 
   permissionDecisionReason: 'Toolkit could not check this helper launch safely; do the work in this session.' }) });
 
 // After a decision failure, refuse only what a working hook could refuse: an Agent/Task call, or
-// one whose tool name is unreadable, in a governed repository, or with a launcher marker when
-// governance cannot be determined; elsewhere a subagent's call gets the plain one-layer reason,
-// since the profile that could lift it was not read.
+// one whose tool name is unreadable, in a gate run; elsewhere a subagent's call gets the plain
+// one-layer reason, since the profile that could lift it was not read.
 function outputAfterFailure(input) {
   const toolName = String(input?.tool_name || input?.toolName || '');
   if (toolName && !/^(Agent|Task)$/.test(toolName)) return {};
-  if (governedOrMarked(input?.cwd)) return toolName ? CHECK_FAILED_DENIAL : UNREADABLE_DENIAL;
+  if (gateRun()) return toolName ? CHECK_FAILED_DENIAL : UNREADABLE_DENIAL;
   return input?.agent_id ? ONE_LAYER_DENIAL : {};
 }
 

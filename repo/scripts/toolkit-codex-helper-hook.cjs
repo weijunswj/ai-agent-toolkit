@@ -6,16 +6,17 @@ const fs = require('node:fs');
 // denies with the blocking exit status instead of crashing as a non-blocking failure.
 const adapter = () => require('./toolkit-v3-native-helper-adapter.cjs');
 
-// Enforcement applies in Toolkit-governed work: a repository whose governance state is ENABLED
-// with the governed rules in force, or a session a Toolkit launcher started (launcher marker),
-// the same predicate the Claude hook uses. Elsewhere the hook makes no
-// decision. Helper depth on Codex stays instruction-level: PreToolUse carries no caller-agent identity.
+// Helper-launch enforcement applies in a Toolkit gate run: a session a Toolkit launcher started
+// (launcher marker), the same rule the Claude hook uses. Elsewhere, governed repositories included,
+// the hook makes no helper decision, since the rules let the main session start subagents outside
+// gate work. Helper depth on Codex stays instruction-level: PreToolUse carries no caller-agent identity.
 const LAUNCHER_MARKERS = ['TOOLKIT_GATE_ROLE', 'TOOLKIT_NATIVE_HELPER_BINDING', 'TOOLKIT_CLAUDE_TASK_PROFILE_SHA256'];
 function governance(input, environment = process.env) {
   try { return require('./toolkit-governed-repo.cjs').governedRepo(input?.cwd, environment); }
-  // Without the predicate, gate only when a launcher marker says this is governed work.
+  // Without the predicate, gate only when a launcher marker says this is a gate run.
   catch { return { governed: LAUNCHER_MARKERS.some(name => Boolean(environment[name])), root: null, gate_role: environment.TOOLKIT_GATE_ROLE || null }; }
 }
+function gateRun(environment = process.env) { return LAUNCHER_MARKERS.some(name => Boolean(environment[name])); }
 function governed(input, environment = process.env) { return governance(input, environment).governed; }
 
 // Governance: the same script is Codex's UserPromptSubmit hook, so it shares the helper
@@ -60,6 +61,7 @@ async function decide(input, environment = process.env, { notes } = {}) {
   // commits and pull requests, force pushes and pushes that carry a credential.
   // Codex's top-level cwd is the chat's folder, which may not be where a call with no workdir runs.
   if (require('./toolkit-shell-call.cjs').ShellCall.isShellTool(input?.tool_name)) return require('./toolkit-attribution-guard.cjs').attributionDecision(input, { notes, sessionFolderOnly: true });
+  if (!gateRun(environment)) return {};
   const state = governance(input, environment);
   if (!state.governed) return {};
   const { CodexDialect, commandDecision } = adapter();
@@ -129,7 +131,12 @@ async function main() {
   }
   let input;
   try { input = JSON.parse(fs.readFileSync(0, 'utf8')); }
-  catch { input = { tool_name: 'spawn_agent' }; }
+  catch {
+    // Input that is not JSON could be any call, a push or a helper launch among them, so it is
+    // refused in governed work and in a gate run, and left alone elsewhere.
+    if (governed({})) return deny(`Toolkit could not read this tool call, so it cannot check it; retry it. ${NEVER_OWNER}`);
+    return;
+  }
   if (promptEvent(input)) {
     let output;
     try { output = decidePrompt(input); } catch { return promptFailure(input); }

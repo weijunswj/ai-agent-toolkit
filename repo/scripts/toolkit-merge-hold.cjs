@@ -67,17 +67,20 @@
 //     writes to the default branch's ref, `gh repo sync`, gh aliases that mention merge, a `git push`
 //     to the remote's default branch (evidence stores excepted, by name), a merge whose target is
 //     moved by cd, pushd, Set-Location or GH_REPO, and a bare number in a folder with more than one
-//     remote or a gh default repository other than its own, unless --repo or a URL names it;
+//     remote or a gh default repository other than its own, unless --repo or a URL names it. A push
+//     run through another shell or expression runner (bash -c, pwsh -Command, cmd /c, eval) is
+//     refused whatever branch it names; encoded PowerShell commands are refused unread;
 //   - refused, as a tripwire against an agent approving for itself: a command that starts a Claude
 //     or Codex session and mentions merge, or that sets or clears TOOLKIT_HOST_SESSION, names
 //     Toolkit's user-state folder, or the hook scripts together with what would feed them a prompt.
 //
-// Not covered: wrapped or nested host launches (bash -lc, timeout, Start-Process and the like), a
+// Not covered: wrapped or nested host launches (bash -lc, timeout, Start-Process and the like),
+// pushes wrapped in a program that is not a shell (timeout, Start-Process, xargs and the like), a
 // prompt file fed to a hook script, a fully forged top-level Projects wake with the right labels,
 // plain text containing an approval line, scripts or programs
 // that call git or the GitHub API themselves, curl and other HTTP clients, a sha= field put in a
 // comment or an echo on purpose, git and shell aliases,
-// commands inside files, pushes through a second remote or a wrapper, GH_REPO set outside the command
+// commands inside files, pushes through a second remote or a non-shell wrapper, GH_REPO set outside the command
 // (an env file, a profile or a long-lived shell), direct commits to the default branch through the
 // Contents API, GraphQL createCommitOnBranch or the connector's file-write tools (push_files,
 // create_or_update_file; a repository rule that requires a pull request refuses these), cloud
@@ -99,7 +102,7 @@ const MAX_APPROVALS = 100;
 const MAX_PROMPT_CHARS = 8000;
 const MAX_COMMAND_CHARS = 1024 * 1024;
 
-const { SHELL_TOOLS, ShellCall, assignVariable, assignmentOf, folderWord, shellOf, shellPath, shellReadings } = require('./toolkit-shell-call.cjs');
+const { SHELLS, SHELL_TOOLS, ShellCall, argvText, assignVariable, assignmentOf, folderWord, plainGitLine, shellCommands, shellOf, shellPath, shellReadings } = require('./toolkit-shell-call.cjs');
 // A connector's merge or auto-merge tool, whatever its server is called (a claude.ai connector's
 // server name is a UUID): the tool name ends in one of these after a _ or -.
 const AUTO_MERGE_NAME = 'enable[_-]?(?:pr[_-]?|pull[_-]?request[_-]?)?auto[_-]?merge';
@@ -684,6 +687,122 @@ function shellRefusal(text, cwd, registryOptions = {}, shell = null) {
   return '';
 }
 
+// Ignore runner names in quoted prose, but keep whole quoted runner paths and executable
+// substitutions, including those inside double quotes. This is not command-position detection.
+// Option readers retain quoted argument words too; shellCommands keeps prose as one word.
+function runnerText(text, quotedArguments = false) {
+  const parts = [];
+  const frames = [{ end: '', depth: 0, quote: '', start: 0, visible: [] }];
+  for (let index = 0; index < text.length; index += 1) {
+    const frame = frames[frames.length - 1];
+    const visible = frame.visible;
+    const char = text[index];
+    const next = text[index + 1];
+    if (frame.quote === "'") {
+      if (char === "'") {
+        if (next === "'") index += 1;
+        else {
+          if (quotedArguments || SHELLS.test(text.slice(frame.start, index))) visible.push(text.slice(frame.start - 1, index + 1));
+          frame.quote = '';
+        }
+      }
+      continue;
+    }
+    if (char === '\\' && next && (frame.quote ? '"\\$`'.includes(next) : /[\s"'\\$`]/.test(next))) {
+      if (!frame.quote) visible.push(char, next);
+      index += 1;
+      continue;
+    }
+    if (char === '$' && next === '(') {
+      visible.push(' ');
+      frames.push({ end: ')', depth: 0, quote: '', start: 0, visible: [] });
+      index += 1;
+      continue;
+    }
+    if (char === '`') {
+      if (frame.end === '`' && !frame.quote) {
+        frames.pop();
+        parts.push(visible.join(''));
+        continue;
+      }
+      if (text.indexOf('`', index + 1) !== -1) {
+        frames.push({ end: '`', depth: 0, quote: '', start: 0, visible: [] });
+        visible.push(' ');
+        continue;
+      }
+    }
+    if (frame.quote === '"') {
+      if (char === '"') {
+        if (quotedArguments || SHELLS.test(text.slice(frame.start, index))) visible.push(text.slice(frame.start - 1, index + 1));
+        frame.quote = '';
+      }
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      frame.quote = char;
+      frame.start = index + 1;
+      visible.push(' ');
+    } else if (frame.end === ')' && char === ')' && frame.depth === 0) {
+      frames.pop();
+      parts.push(visible.join(''));
+    } else {
+      if (char === '(') frame.depth += 1;
+      else if (char === ')') frame.depth -= 1;
+      visible.push(char);
+    }
+  }
+  // A substitution's options belong to its own command; keep the outer command intact.
+  return [...parts, ...frames.map(frame => frame.visible.join(''))].join('; ');
+}
+
+function mentionsRunner(text) {
+  return /\b(?:bash|sh|zsh|dash|ksh|pwsh|powershell|cmd|eval|iex|invoke-expression)(?:\.exe)?\b/i.test(runnerText(text));
+}
+
+function encodedPowerShell(text) {
+  // Keep each quoted argument as one shell word: prose is not a runner word, while a
+  // quoted encoded option after a real runner is still an option PowerShell reads.
+  for (const { words } of shellCommands(runnerText(text, true))) {
+    const start = words.findIndex(word => /(?:^|[\\/])(?:pwsh|powershell)(?:\.exe)?$/i.test(word));
+    if (start < 0) continue;
+    for (const word of words.slice(start + 1)) {
+      // After -Command or -File, options belong to the script, not to PowerShell itself.
+      if (/^-(?:c|co|com|comm|comma|comman|command|f|fi|fil|file)$/i.test(word)) break;
+      // PowerShell accepts every prefix of -EncodedCommand from -e onward, plus -ec.
+      if (/^-[a-z]+$/i.test(word) && ('encodedcommand'.startsWith(word.slice(1).toLowerCase()) || /^-ec$/i.test(word))) return true;
+    }
+  }
+  // A runner's quoted script is executable text. Read it with the same quoting rule,
+  // rather than treating every quoted argument or commit message as another script.
+  for (const { words } of shellCommands(text)) {
+    for (let index = 0; index < words.length; index += 1) {
+      if (!SHELLS.test(words[index])) continue;
+      const program = words[index].split(/[\\/]/).pop().replace(/\.exe$/i, '').toLowerCase();
+      const args = words.slice(index);
+      const expression = /^(?:eval|iex|invoke-expression)$/.test(program);
+      // The shared argument-list reader recognises POSIX option bundles ending in c.
+      // Here c can also precede other flags, as in bash -ce.
+      const normalized = /^(?:bash|sh|zsh|dash|ksh)$/.test(program)
+        ? args.map(word => /^-[a-z]*c[a-z]*$/i.test(word) ? '-c' : word) : args;
+      const script = expression ? args.slice(1).join(' ') : argvText(normalized);
+      if (!expression && script === normalized.join(' ')) continue;
+      if (script.length < text.length && encodedPowerShell(script)) return true;
+    }
+  }
+  return false;
+}
+
+// A non-plain line mentioning a runner outside quoted prose and a git push is refused as a family.
+// Plain git commands keep the default-branch check; encoded PowerShell stays unread.
+function nestedRefusal(text) {
+  if (plainGitLine(text)) return '';
+  const message = 'this command could run a git push through another shell (bash, pwsh, cmd or eval), so Toolkit cannot read where it pushes and refused it. Run the push as its own plain git command.';
+  if (encodedPowerShell(text)) return refuse(message);
+  // cmd also spells its script's first word /cgit or /kgit, without a separating space.
+  const mentionsPush = /(?:\b|\/[ck])git\b/i.test(text) && /\bpush\b/i.test(text);
+  return mentionsPush && mentionsRunner(text) ? refuse(message) : '';
+}
+
 // The owner's standing answer for the repository of folder `cwd`: { repository, scope } when the
 // app-local answer is On, the merged binding enables governance and the user started this session;
 // else null. `scope(head)` is the merge-scope verdict for that head against this folder's copy of
@@ -722,6 +841,9 @@ function decide(input, { registryOptions = {}, now, environment = process.env, h
     const text = call.text.replace(/[\\`^]\r?\n/g, ' ');
     if (text.length > MAX_COMMAND_CHARS) return /merge|push/i.test(text) ? refuse('this command is too long to check for a merge or push, so it is refused. Split it.') : null;
     cwd = call.folder;
+    // The host's shell wrapper is already unwrapped; only a runner inside its script is nested.
+    const nested = nestedRefusal(call.text);
+    if (nested) return nested;
     // An argument list is read both ways, as its words quoted and joined unquoted (as before the
     // shared reader), so a quoted program path such as `C:\Program Files\GitHub CLI\gh.exe` cannot
     // hide a merge. A merge both readings find counts once.
