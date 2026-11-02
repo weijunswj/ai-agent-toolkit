@@ -1,5 +1,11 @@
 # Toolkit Changelog
 
+## 3.43.1
+
+### Fixed
+
+- Env editing now says the editor is opening and tells you to open the file yourself if no window appears.
+
 ## 3.43.0 (hook review leftovers)
 
 ### Changed
