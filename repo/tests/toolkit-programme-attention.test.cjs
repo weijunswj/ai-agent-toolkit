@@ -65,6 +65,36 @@ function fixture({ catalogue = [{ issue: 423, class: 'COMMITTED', parent: 421, o
 
 // ---- E1. Inventory ------------------------------------------------------------------------------
 
+test('completed PR attention is stable, can be acknowledged, survives incomplete discovery and resolves on backfill', () => {
+  const fx = fixture({ parents: [421], catalogue: [{ issue: 423, class: 'COMPLETED', parent: 421, order: 1 }] });
+  fx.github.issues.get(423).state = 'closed';
+  const reconcile = () => fx.ctrl(['reconcile', '--apply']);
+  assert.equal(reconcile().error, null);
+  const entry = code => fx.parentDoc().attention.find(item => item.code === code);
+  const first = entry('COMPLETED_PR_MISSING');
+  assert.equal(first.state, 'new');
+  const commits = fx.github.commits;
+  assert.equal(reconcile().result.summary, 'No changes');
+  assert.equal(fx.github.commits, commits);
+  assert.deepEqual(entry('COMPLETED_PR_MISSING'), first);
+  assert.equal(fx.ctrl(['ack', '--finding', first.id]).error, null);
+  assert.equal(entry('COMPLETED_PR_MISSING').state, 'acknowledged');
+  fx.github.issuePrLinks.set(423, { timelineTruncated: true });
+  assert.equal(reconcile().error, null);
+  assert.equal(entry('COMPLETED_PR_MISSING').state, 'acknowledged', 'an incomplete read must not resolve an earlier missing PR');
+  assert.equal(entry('PR_DISCOVERY_INCOMPLETE').state, 'new');
+  const partialCommits = fx.github.commits;
+  assert.equal(reconcile().result.summary, 'No changes');
+  assert.equal(fx.github.commits, partialCommits);
+  fx.github.issuePrLinks.set(423, {});
+  fx.github.addPr(800, { head: SHA_A, merged: true, body: 'Refs #423' });
+  assert.equal(reconcile().error, null);
+  assert.equal(fx.store.read('child', 423).doc.pr.number, 800);
+  assert.equal(entry('COMPLETED_PR_MISSING').state, 'resolved');
+  assert.equal(entry('PR_DISCOVERY_INCOMPLETE').state, 'resolved');
+  assert.equal(reconcile().result.summary, 'No changes');
+});
+
 test('E1: 250 open issues over three pages are each classified once, and no pull request is listed', () => {
   const fx = fixture();
   for (let n = 1000; n < 1250; n += 1) fx.github.addIssue(n, { parent: n % 2 ? 421 : null });
