@@ -17,6 +17,8 @@ Reference for the `web-controller-projects` skill, opened when the coordinator a
   - `PROJECT TASKS MISSING` (Toolkit project only): another project lost its check-in or nudge, not one its entry marks `stopped by owner`. Tell the owner once which; that project's coordinator recreates them on its next wake (**Both gone**), never this one.
   - `PLUGIN BEHIND`: the Toolkit plugin on the user's claude.ai account is more than a day behind `main`. No agent can update it: once per version, post one plugin card in the project chat with the check-in's steps, the four numbered steps it puts under **Plugin:**, copied as written. Keep it pending until a check-in shows `**Plugin:** current`. Also confirm the account copy after each release merge.
 
+- **Sessions:** the Toolkit-only digest check is report-only advice under **Sessions:**, never a task or context-reset prefix. For flagged Codex and Claude Code controllers and non-gate test sessions, follow the bound [Controller owner-led renewal rule](../../../../CONTROLLER.md#evidence-progress-and-finish): verified evidence and retrieval first, then the owner starts a fresh session. Saving or retrieval failure holds the handoff; preserve source state and report recovery. Never launch, terminate or archive sessions or mutate tasks from a digest recommendation. Keep missing fields as "not reported by this digest" and current activity unknown unless evidenced; a historical flag is not proof of a running session. Gate renewal and Projects task home-thread rules still apply.
+
 ## Hourly nudge home thread
 - Guards for the nudge's home thread:
   - Never resolve the home thread or list it as a resolve candidate; the nudge never resolves it either.

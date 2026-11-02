@@ -177,3 +177,53 @@ test('the contract keeps the three-role workflow current and leaves dated histor
   assert.deepEqual(directive.match(/\bpackets?\b/gi), ['packet'], 'the only packet mention is the rule that there is none');
   assert.match(section(directive, 7), /There is no handover packet/);
 });
+
+// Owner-led advice has a separate home from mandatory gate renewal. These are text-contract
+// controls, not proof that either installed host has saved or retrieved a handoff.
+function ownerRenewalContract(text) {
+  const rule = text.split('\n').find(line => line.startsWith('- **Owner-led renewal:**')) || '';
+  const rows = [
+    ['supported sessions', /Codex\/Claude Code controllers and non-gate test sessions/],
+    ['milestone with open work', /at a milestone with work left/],
+    ['second observed compaction', /or second observed compaction/],
+    ['verified custody', /short handoff index in the verified evidence store/],
+    ['recoverable contents', /state, open work, pending\/uncertain effects, links, next action/],
+    ['retrieval before owner action', /Reuse records; verify retrieval, then tell the owner to start a fresh session from it/],
+    ['failed save or retrieval', /Save\/retrieval failure: preserve source state; report recovery hold/],
+    ['no automatic effects', /No automatic launch, termination, archive or task replacement/],
+    ['owner takeover', /Owner switch: apply takeover and writer reconciliation/],
+    ['gate and Projects boundary', /Gates\/Projects keep their rules/]
+  ];
+  for (const [name, pattern] of rows) assert.match(rule, pattern, name);
+  const takeover = text.match(/## Takeover\n([\s\S]*?)(?=\n## )/)?.[1] || '';
+  assert.match(takeover, /verify custody and stop the old writer/);
+  assert.match(takeover, /read it back before acting/);
+}
+
+test('owner-led renewal closure matrix preserves recovery, takeover and existing session rules', () => {
+  const controller = fs.readFileSync(path.join(__dirname, '..', 'CONTROLLER.md'), 'utf8').replace(/\r\n/g, '\n');
+  ownerRenewalContract(controller);
+  const rows = [
+    ['completed milestone only', 'at a milestone with work left', 'at any milestone'],
+    ['threshold', 'or second observed compaction', 'or any long session'],
+    ['custody', 'in the verified evidence store: state', 'in session memory: state'],
+    ['pending effects', 'pending/uncertain effects, links, next action', 'links only'],
+    ['retrieval', 'verify retrieval, then tell', 'assume retrieval, then tell'],
+    ['failed save', 'preserve source state; report recovery hold', 'discard source state; continue'],
+    ['automatic actions', 'No automatic launch, termination, archive or task replacement', 'Automatic launch and task replacement'],
+    ['owner action', 'tell the owner to start a fresh session from it', 'start fresh automatically'],
+    ['writer reconciliation', 'apply takeover and writer reconciliation', 'skip takeover and writer reconciliation'],
+    ['gate and Projects rules', 'Gates/Projects keep their rules', 'Gates/Projects use this rule instead'],
+    ['stop previous writer', 'verify custody and stop the old writer', 'verify custody and retain competing writers']
+  ];
+  for (const [name, before, after] of rows) {
+    assert.ok(controller.includes(before), `mutation exists: ${name}`);
+    assert.throws(() => ownerRenewalContract(controller.replace(before, after)), name);
+  }
+  const cost = fs.readFileSync(path.join(__dirname, '../../skills/agent-cost-control/SKILL.md'), 'utf8');
+  assert.match(cost, /controllers and non-gate test sessions are outside automatic worker rotation/);
+  assert.match(cost, /CONTROLLER\.md#evidence-progress-and-finish/);
+  assert.match(cost, /Claude Projects keeps its task home-thread rules/);
+  const routing = fs.readFileSync(path.join(__dirname, '../contracts/agent-rules/toolkit-skill-routing.md'), 'utf8');
+  assert.match(routing.split('\n').find(line => line.startsWith('| `agent-cost-control`')), /controllers and non-gate test sessions use the owner-led renewal rule in CONTROLLER\.md, outside automatic worker rotation/);
+});
