@@ -116,6 +116,68 @@
       "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
       "expect": { "decision": "allow" },
       "status": "pass"
+    },
+    {
+      "id": "GOV.initial-receipt-error-card",
+      "source": "governance receipt error: the first held Projects delivery must still show the question",
+      "kind": "state",
+      "hosts": ["claude"],
+      "event": "UserPromptSubmit",
+      "payload": {"prompt":"<wake reason=\"mention\" current-time=\"{now}\"><project id=\"chan_example\" type=\"project\"><thread ts=\"cmsg_thread\"><message trigger=\"true\" from=\"human\" trust=\"principal\" author-id=\"user_example\" id=\"cmsg_initial_reply\" sent-at=\"{now}\" mention=\"true\">yes</message></thread></project></wake>"},
+      "fixture": {
+        "repo": {"governance":"undecided","branch":"feature"},
+        "owner_session": true,
+        "files": {"../home/.ai-agent-toolkit/user-state/governance-reply-tickets.v1.json":"{broken"}
+      },
+      "expect": {"decision":"allow"},
+      "status": "pass",
+      "note": "Claude Code must let the turn show the receipt error and governance card. Text-only hosts still block, so their question text is checked in the closure unit matrix. The damaged state stays inside this row's isolated fixture home."
+    },
+    {
+      "id": "GOV.off-own-words",
+      "source": "owner thread reply closure matrix",
+      "kind": "state",
+      "hosts": ["claude","codex"],
+      "event": "UserPromptSubmit",
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}},
+        {"event":"UserPromptSubmit","payload":{"prompt":"Please prepare this work."},"expect":{"decision":"deny"}}
+      ],
+      "payload": {"prompt":"<wake reason=\"mention\" current-time=\"{now}\"><project id=\"chan_example\" type=\"project\"><thread ts=\"cmsg_thread\"><message trigger=\"true\" from=\"human\" trust=\"principal\" author-id=\"user_example\" id=\"cmsg_owner_reply\" sent-at=\"{now}\" mention=\"true\">ur rec</message></thread></project></wake>"},
+      "fixture": {"repo":{"governance":"none","branch":"feature"}},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "GOV.off-replayed-delivery",
+      "source": "owner thread reply closure matrix",
+      "kind": "state",
+      "hosts": ["claude","codex"],
+      "event": "UserPromptSubmit",
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}},
+        {"event":"UserPromptSubmit","payload":{"prompt":"Please prepare this work."},"expect":{"decision":"deny"}},
+        {"event":"UserPromptSubmit","payload":{"prompt":"<wake reason=\"mention\" current-time=\"{now}\"><project id=\"chan_example\" type=\"project\"><thread ts=\"cmsg_thread\"><message trigger=\"true\" from=\"human\" trust=\"principal\" author-id=\"user_example\" id=\"cmsg_owner_reply\" sent-at=\"{now}\" mention=\"true\">ur rec</message></thread></project></wake>"},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"prompt":"<wake reason=\"mention\" current-time=\"{now}\"><project id=\"chan_example\" type=\"project\"><thread ts=\"cmsg_thread\"><message trigger=\"true\" from=\"human\" trust=\"principal\" author-id=\"user_example\" id=\"cmsg_owner_reply\" sent-at=\"{now}\" mention=\"true\">ur rec</message></thread></project></wake>"},
+      "fixture": {"repo":{"governance":"none","branch":"feature"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "GOV.off-ineligible-wake",
+      "source": "owner thread reply closure matrix: a notification is not an eligible direct mention",
+      "kind": "state",
+      "hosts": ["claude","codex"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}},
+        {"event":"UserPromptSubmit","payload":{"prompt":"Prepare this work."},"expect":{"decision":"deny"}},
+        {"event":"UserPromptSubmit","payload":{"prompt":"<wake reason=\"notification\" current-time=\"{now}\"><project id=\"chan_example\" type=\"project\"><message trigger=\"true\" from=\"human\" trust=\"principal\" id=\"cmsg_notification\" sent-at=\"{now}\" mention=\"true\">no</message></project></wake>"},"expect":{"decision":"deny"}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"git status"}},
+      "fixture": {"repo":{"governance":"none","branch":"feature"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
     }
   ]
 }

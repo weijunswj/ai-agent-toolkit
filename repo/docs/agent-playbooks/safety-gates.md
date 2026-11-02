@@ -109,6 +109,14 @@ The owner answered a card with a standing OK: on one computer, agents may replac
 - Do not skip a repository's own commit or push checks (`git commit -n` or `--no-verify`, `git push --no-verify`, a different `core.hooksPath`). Fix what they report; if a check is wrong, tell the owner. No hook checks this: CI is the backstop.
 - Never answer the governance question for the owner: do not run the governance CLI with a decision, start, resume or fork a session to answer it, feed a session an answer, or type or click an answer in a UI. Hooks check only the governance CLI and edits to Toolkit's user-state files; the rest of this rule is yours to keep.
 
+## Recovering A Governance Hold
+
+Show the actual governance question in the held repository's own chat. A command or edit from another folder that works in the held repository is refused; ask the user to answer in that repository's own chat. The refusal binds no question or answer to the other session. A reply in other words, such as "ur rec" after a recommendation of no, uses the existing one-use reply ticket: read the owner's meaning, record only a clear answer, or ask for confirmation of one named answer. For a repository outside github.com, the ticket records only acknowledgement that governance is off; it cannot enable governance.
+
+A direct Projects mention must carry an eligible owner message, a fresh delivery time at or after the question in whole seconds, and an unused delivery id. The host clock may be up to 2 minutes ahead. Hashed receipts last 24 hours and 2 minutes; governance and merge approvals keep independent receipts with the same checks. Coordinator quotations, relays, attachments and launched sessions cannot answer. Answers sent before the question is shown do not count. If a GitHub origin remote was added after the off acknowledgement, explain in that repository's own chat that the new remote is why Toolkit asks again.
+
+If a wrapped reply cannot be checked or saved, record nothing and explain the local state error. Restore the state from a known intact copy before asking for a fresh reply; never delete spent delivery receipts to clear a hold. Bare typed exact answers do not depend on delivery receipts or ticket cleanup; the owner can also run `toolkit-governance.cjs disable` in their own terminal. Reply-ticket conversion preserves live tickets, confirmations and spent ids. The held-message format does not change.
+
 ## Reporting
 
 If approval is required, state the action, target, risk, and exact confirmation needed. If approval is not available, stop before the risky action and report the safe work completed.
