@@ -312,12 +312,13 @@ function writeGovernanceDecision(cwd, command, { registryOptions = {}, registry 
 // all. Neither host's hook input says whether a run is headless or who is typing, so this is the
 // signal; one process an agent feeds several messages is the known limit.
 class SessionEpochs {
-  #folder; #now; #registryOptions;
+  #folder; #now; #registryOptions; #environment;
 
-  constructor({ registryOptions = {}, now = () => new Date() } = {}) {
+  constructor({ registryOptions = {}, now = () => new Date(), environment = process.env } = {}) {
     this.#folder = path.join(path.dirname(governance.registryPathFor(registryOptions)), SESSIONS_FOLDER);
     this.#now = now;
     this.#registryOptions = registryOptions;
+    this.#environment = environment;
   }
 
   static #valid(key) { return typeof key === 'string' && key !== ''; }
@@ -344,7 +345,19 @@ class SessionEpochs {
     const temp = `${file}.tmp-${process.pid}-${crypto.randomBytes(4).toString('hex')}`;
     try {
       const resumed = kind === 's' && RESUMED_SOURCES.includes(source) ? { resumed: true } : {};
-      fs.writeFileSync(temp, `${JSON.stringify({ schema: SESSION_SCHEMA, epoch, at: this.#now().toISOString(), ...resumed })}\n`, { mode: 0o600 });
+      let provenance = {};
+      if (kind === 's') {
+        // Only a fresh native startup establishes origin. Resume reads only this same session's
+        // previous mark; a fork, missing legacy field or unknown source cannot promote it.
+        const previous = source === 'resume' ? this.#record(kind, key) : null;
+        const launched = LAUNCHER_MARKERS.some(name => typeof this.#environment[name] === 'string' && this.#environment[name] !== '');
+        const host = this.#environment[HOST_SESSION_VARIABLE];
+        const mismatch = typeof host === 'string' && host !== '' && host !== key;
+        const origin = source === 'startup' ? (launched || mismatch ? 'automation' : 'user-started')
+          : previous && ['user-started', 'automation'].includes(previous.origin) ? previous.origin : 'unknown';
+        provenance = { origin, ...(source === 'fork' || previous?.forked === true ? { forked: true } : {}) };
+      }
+      fs.writeFileSync(temp, `${JSON.stringify({ schema: SESSION_SCHEMA, epoch, at: this.#now().toISOString(), ...resumed, ...provenance })}\n`, { mode: 0o600 });
       fs.renameSync(temp, file);
     } finally {
       fs.rmSync(temp, { force: true });
@@ -358,6 +371,14 @@ class SessionEpochs {
 
   // Whether this run's session mark was written by a resume or a fork.
   resumed(sessionId) { return this.#record('s', sessionId)?.resumed === true; }
+
+  // Origin is authority only for standing merges, never for prompt or governance answers.
+  origin(sessionId) {
+    const origin = this.#record('s', sessionId)?.origin;
+    return ['user-started', 'automation'].includes(origin) ? origin : 'unknown';
+  }
+
+  forked(sessionId) { return this.#record('s', sessionId)?.forked === true; }
 
   // The repository's current mark, or null when no session has started in it since this version.
   repository(repositoryId) { return this.#read('r', repositoryId); }
@@ -431,7 +452,7 @@ class SessionEpochs {
 // the repository it starts in, after refreshing this computer's read of the binding merged on that
 // repository's default branch (bounded; offline keeps the last read). Never throws. `refreshBinding`
 // is for tests; a test registry or test run never reaches the network (refreshMergedBinding).
-function startSession(input, { registryOptions = {}, now, refreshBinding = null, programmeDeps = {} } = {}) {
+function startSession(input, { registryOptions = {}, now, environment = process.env, refreshBinding = null, programmeDeps = {} } = {}) {
   try {
     let repositoryId = null;
     if (input && typeof input.cwd === 'string' && input.cwd && input.source !== 'clear' && input.source !== 'compact') {
@@ -445,7 +466,7 @@ function startSession(input, { registryOptions = {}, now, refreshBinding = null,
         try { require('../../skills/github-program-reconciler/scripts/programme-checkpoint.cjs').discardQueuesFor(current.root, programmeDeps); } catch { /* the next turn end discards it */ }
       }
     }
-    return new SessionEpochs({ registryOptions, now }).start(sessionIdOf(input), input && input.source, repositoryId);
+    return new SessionEpochs({ registryOptions, now, environment }).start(sessionIdOf(input), input && input.source, repositoryId);
   } catch { return null; }
 }
 
