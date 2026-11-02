@@ -58,11 +58,88 @@ const decide = (ctx, input, environment = {}) => hold.decide(input, { ...ctx.opt
 
 // The user's own session: marked at session start, not resumed, not started by another session.
 function userSession(ctx, id = 'user', source = 'startup') {
-  gate.startSession({ session_id: id, source, cwd: ctx.repo }, ctx.options);
+  gate.startSession({ session_id: id, source, cwd: ctx.repo }, { ...ctx.options, environment: {} });
   return id;
 }
 const typed = (ctx, prompt, { cwd = ctx.repo, session = userSession(ctx), environment = {} } = {}) =>
   hold.recordPrompt({ cwd, prompt, session_id: session }, { environment, ...ctx.options });
+
+test('the check command uses native hook context, writes nothing and leaves approval unused', t => {
+  const ctx = context(t);
+  const session = userSession(ctx, 'private-native-session');
+  const environment = { TOOLKIT_HOST_SESSION: session };
+  assert.equal(typed(ctx, projects.wake('merge owner/a#618', { id: 'private-delivery' }), { session, environment }), 1);
+  const snapshot = () => {
+    const files = {};
+    const walk = folder => {
+      for (const entry of fs.readdirSync(folder, { withFileTypes: true })) {
+        const file = path.join(folder, entry.name);
+        if (entry.isDirectory()) walk(file);
+        else files[path.relative(ctx.root, file)] = fs.readFileSync(file).toString('base64');
+      }
+    };
+    walk(ctx.root);
+    return files;
+  };
+  const before = snapshot();
+  for (const command of ['node repo/scripts/toolkit-merge-hold.cjs check', `node "${path.join(__dirname, '..', 'scripts', 'toolkit-merge-hold.cjs')}" check`]) {
+    for (const [tool_name, field] of [['Bash', 'command'], ['exec_command', 'cmd']]) {
+      const input = { cwd: ctx.root, session_id: session, tool_name, tool_input: { [field]: command, workdir: ctx.repo } };
+      const verdict = decide(ctx, input, environment);
+      assert.match(verdict.deny, /^Toolkit standing merge check \(read-only; no approval consumed\):/);
+      const report = JSON.parse(verdict.deny.slice(verdict.deny.indexOf('\n') + 1));
+      assert.equal(report.repositoryValid, true, 'uses tool workdir, not session cwd');
+      assert.equal(report.nativeSessionContext, true);
+      assert.equal(report.sessionMarked, true);
+      assert.equal(report.userStartedOrigin, true);
+      assert.equal(report.hostSessionMatches, true);
+      assert.equal(report.resumed, false);
+      assert.equal(report.launcherMarker, false);
+      assert.equal(report.forked, false);
+      assert.equal(report.eligible, false, 'no app answer in this fixture');
+      assert.equal(report.reason, 'auto-merge-off');
+      assert.doesNotMatch(verdict.deny, /private-|owner\/a|618|62405eb|prompt|epoch|user-state/);
+      assert.deepEqual(snapshot(), before);
+    }
+  }
+  // Neither a lookalike script nor text that merely names the command is intercepted.
+  for (const command of ['node elsewhere/toolkit-merge-hold.cjs check', 'echo node repo/scripts/toolkit-merge-hold.cjs check']) {
+    assert.equal(decide(ctx, { ...bash(ctx.repo, command), session_id: session }, environment), null);
+  }
+  const home = path.join(ctx.root, 'home');
+  const run = spawnSync(process.execPath, [path.join(__dirname, '..', 'scripts', 'toolkit-merge-hold.cjs'), 'check'], {
+    cwd: ctx.repo, encoding: 'utf8',
+    env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, NODE_PATH: process.env.NODE_PATH,
+      HOME: home, USERPROFILE: home, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: path.join(home, '.gitconfig') },
+  });
+  assert.equal(run.status, 0, run.stderr);
+  const terminalReport = JSON.parse(run.stdout.slice(run.stdout.indexOf('\n') + 1));
+  assert.equal(terminalReport.nativeSessionContext, false, 'an unhooked terminal cannot supply session identity');
+  assert.equal(terminalReport.sessionMarked, false);
+  assert.equal(terminalReport.eligible, false);
+  assert.deepEqual(snapshot(), before);
+  assert.ok(new hold.MergeApprovals(ctx.options).find('owner/a', 618), 'approval still available');
+  assert.equal(decide(ctx, connector('merge_pull_request', { pullNumber: 618, expectedHeadSha: SHA })), null);
+  assert.match(decide(ctx, connector('merge_pull_request', { pullNumber: 618, expectedHeadSha: SHA })).deny, /no unused approval/);
+});
+
+test('a direct Projects merge wake in a user-origin resume grants one approval; a relay grants none', t => {
+  const ctx = context(t);
+  const session = userSession(ctx);
+  userSession(ctx, session, 'resume');
+  const epochs = new gate.SessionEpochs(ctx.options);
+  assert.equal(epochs.origin(session), 'user-started');
+  const mark = epochs.get(session);
+  const prompt = projects.wake('merge owner/a#618', { id: 'cmsg_resume' });
+  assert.equal(typed(ctx, `<relay from="coordinator">${prompt}</relay>`, { session }), 0);
+  assert.equal(typed(ctx, prompt, { session }), 1);
+  assert.equal(typed(ctx, prompt, { session }), 0, 'delivery cannot rearm');
+  assert.equal(typed(ctx, 'merge owner/a#619', { session }), 0, 'bare prompt rule unchanged');
+  assert.equal(epochs.get(session), mark);
+  assert.equal(epochs.origin(session), 'user-started');
+  assert.equal(decide(ctx, connector('merge_pull_request', { pullNumber: 618, expectedHeadSha: SHA })), null);
+  assert.match(decide(ctx, connector('merge_pull_request', { pullNumber: 618, expectedHeadSha: SHA })).deny, /no unused approval/);
+});
 
 test('date, numeric and SHA-like repository names are targets, not head pins or stray numbers', (t) => {
   const ctx = context(t);

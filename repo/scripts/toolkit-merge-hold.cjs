@@ -347,8 +347,8 @@ function sessionChecks(sessionId, environment, registryOptions, now) {
 // Bare prompt approvals keep the original fresh-run rule. Only standing merges use recorded
 // origin to accept a resume; neither Projects delivery nor prompt text can establish origin.
 function startedByUser(checks, standing = false) {
-  return checks.sessionMarked && !checks.launcherMarker && checks.hostSessionMatches && !checks.forked
-    && (standing ? checks.userStartedOrigin : !checks.resumed);
+  return checks.sessionMarked && !checks.launcherMarker && checks.hostSessionMatches
+    && (standing ? checks.userStartedOrigin && !checks.forked : !checks.resumed);
 }
 
 // Keeps the approvals a typed message carries; returns how many were kept.
@@ -876,10 +876,11 @@ function checkText(input, cwd, options) {
 
 // Exact command only: no flags, chaining or supplied session identity. The hook supplies its own
 // native event, so a shell cannot substitute another session's id for this diagnostic.
-function isCheckCommand(text) {
+function isCheckCommand(text, cwd) {
   const words = wordsOf(text.trim());
   return words.length === 3 && /^(?:node|node\.exe)$/i.test(path.basename(words[0]))
-    && words[1].replace(/\\/g, '/').endsWith('/toolkit-merge-hold.cjs') && words[2] === 'check'
+    && (words[1].replace(/\\/g, '/') === 'repo/scripts/toolkit-merge-hold.cjs'
+      || path.resolve(cwd || process.cwd(), words[1]) === __filename) && words[2] === 'check'
     && !/[\r\n;&|`$<>]/.test(text);
 }
 
@@ -908,7 +909,7 @@ function decide(input, { registryOptions = {}, now, environment = process.env, h
     // An unknown shell is judged under each reading (shellReadings); the first refusal stands.
     const refusal = shellReadings(shellOf(input, host)).map(shell => shellRefusal(joined ? `${text}\n${joined}` : text, cwd, registryOptions, shell)).find(Boolean);
     if (refusal) return refusal;
-    if (isCheckCommand(text)) return { deny: checkText(input, cwd, { environment, registryOptions, now, host }) };
+    if (isCheckCommand(text, cwd)) return { deny: checkText(input, cwd, { environment, registryOptions, now, host }) };
     merges = shellMerges(text, cwd, environment || {});
     if (joined) {
       const key = merge => JSON.stringify([merge.repository, merge.pr, merge.sha, merge.auto, merge.explicit]);

@@ -250,12 +250,22 @@ test(`${HOST}: standing resume closure and diagnostic reasons`, t => {
   assert.equal(hold.recordPrompt({ cwd: ctx.repo, session_id: session, prompt: 'merge 8' }, options), 0, 'bare prompt rules still reject resumed runs');
   start(session, 'resume');
   assert.equal(decide(ctx, bash(ctx, command, session)), null, 'another reconnect keeps origin');
+  assert.equal(hold.check(bash(ctx, command, session), ctx.repo, options).eligible, true);
+  for (const [attempt, words] of [
+    [command.replace(ctx.head, ctx.head.slice(0, 7)), /40 character/],
+    [`${command} --squash`, /--merge|--squash/],
+    [`${command} --auto`, /--auto/],
+    [`${command} --repo owner/b`, /another repository/],
+    [command.replace(ctx.head, ctx.authority), /changes the merge rules/],
+    [command.replace(ctx.head, UNKNOWN), /cannot read the changes/],
+  ]) assert.match(decide(ctx, bash(ctx, attempt, session)).deny, words, 'resume keeps every merge guard');
   const rows = [
     { id: 'unmarked', reason: 'no-session-mark', words: /no readable session-start mark/ },
     { id: 'unknown', source: 'resume', reason: 'resumed-without-user-started-origin', words: /resumed session.*no recorded user-started origin/ },
     { id: 'fork', source: 'fork', reason: 'fork', words: /session is a fork/ },
     { id: 'legacy', source: 'startup', legacy: true, reason: 'resumed-without-user-started-origin', words: /resumed session.*no recorded user-started origin/ },
     { id: 'automation', source: 'startup', startupEnv: { TOOLKIT_GATE_ROLE: 'G1' }, reason: 'resumed-without-user-started-origin', words: /no recorded user-started origin/ },
+    { id: 'other-origin', source: 'startup', startupEnv: { TOOLKIT_HOST_SESSION: 'parent' }, reason: 'resumed-without-user-started-origin', words: /no recorded user-started origin/ },
     { id: session, environment: { TOOLKIT_HOST_SESSION: 'another-native-session' }, reason: 'host-session-mismatch', words: /host session does not match/ },
     ...gate.LAUNCHER_MARKERS.map(name => ({ id: session, environment: { [name]: 'launcher' }, reason: 'launcher-marker', words: /launcher marker is present/ })),
   ];
@@ -275,10 +285,13 @@ test(`${HOST}: standing resume closure and diagnostic reasons`, t => {
     const refusal = decide(ctx, input, row.environment);
     assert.match(refusal.deny, /no unused approval/, row.id);
     assert.match(refusal.deny, row.words, row.id);
-    assert.doesNotMatch(refusal.deny, /another-native-session|automation|legacy|TOOLKIT_|epoch|user-state/);
+    assert.doesNotMatch(refusal.deny, /another-native-session|automation|legacy|TOOLKIT_|epoch/);
   }
   const input = bash(ctx, command, session);
   assert.equal(hold.check(input, ctx.root, options).reason, 'no-repository');
+  const absent = hold.check({}, ctx.repo, options);
+  assert.equal(absent.nativeSessionContext, false);
+  assert.equal(absent.reason, 'no-session-mark');
   machine(ctx, 'off');
   assert.equal(hold.check(input, ctx.repo, options).reason, 'auto-merge-off');
   machine(ctx, 'after-gates');

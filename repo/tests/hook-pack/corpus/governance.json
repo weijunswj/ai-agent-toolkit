@@ -3,6 +3,22 @@
   "family": "governance",
   "rows": [
     {
+      "id": "GOV.user-origin-resume-answer",
+      "source": "same-session reconnect: retained merge origin must not answer a governance question from an earlier epoch",
+      "kind": "state",
+      "hosts": ["claude", "codex"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}},
+        {"event":"UserPromptSubmit","payload":{"prompt":"Prepare this work."},"expect":{"decision":"deny"},"expect_by_host":{"claude":{"decision":"allow"}},"note":"Claude lets the first turn display its governance card; Codex holds the prompt as text."},
+        {"event":"SessionStart","payload":{"source":"resume"},"expect":{"decision":"allow"}},
+        {"event":"UserPromptSubmit","payload":{"prompt":"yes"},"expect":{"decision":"deny"},"expect_by_host":{"claude":{"decision":"allow"}},"note":"Claude lets the renewed question display as a card; its tools remain held and no answer is recorded."}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"git status"}},
+      "fixture": {"repo":{"governance":"undecided","branch":"feature"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
       "id": "GOV.read-in-governed-repo",
       "source": "hook pack seed: daily read",
       "kind": "benign",

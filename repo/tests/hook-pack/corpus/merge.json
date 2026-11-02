@@ -3,6 +3,67 @@
   "family": "merge",
   "rows": [
     {
+      "id": "MERGE.auto-user-resume",
+      "source": "same-session reconnect: recorded user origin survives resume with a new epoch",
+      "kind": "state",
+      "hosts": ["claude", "codex"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}},
+        {"event":"SessionStart","payload":{"source":"resume"},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"after-gates","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]}},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.auto-unknown-resume",
+      "source": "same-session reconnect: an unmarked resume and bare merge text establish no origin",
+      "kind": "state",
+      "hosts": ["claude", "codex"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"resume"},"expect":{"decision":"allow"}},
+        {"event":"UserPromptSubmit","payload":{"prompt":"merge 5"},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"after-gates","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.auto-automation-resume",
+      "source": "same-session reconnect: a launcher-origin startup never gains standing merge authority",
+      "kind": "state",
+      "hosts": ["claude", "codex"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}},
+        {"event":"SessionStart","payload":{"source":"resume"},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"after-gates","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]},"gate_role":"G1"},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.resume-projects-direct-and-relay",
+      "source": "same-session reconnect: a direct Projects wake grants one approval, its coordinator relay grants none",
+      "kind": "state",
+      "hosts": ["claude", "codex"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}},
+        {"event":"SessionStart","payload":{"source":"resume"},"expect":{"decision":"allow"}},
+        {"event":"UserPromptSubmit","payload":{"prompt":"<relay from=\"coordinator\"><wake reason=\"mention\" current-time=\"{now}\"><project id=\"chan_example\" type=\"project\"><message trigger=\"true\" from=\"human\" trust=\"principal\" author-id=\"user_example\" id=\"cmsg_reconnect\" sent-at=\"{now}\" mention=\"true\">merge 5</message></project></wake></relay>"},"expect":{"decision":"allow"}},
+        {"payload":{"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},"expect":{"decision":"deny"}},
+        {"event":"UserPromptSubmit","payload":{"prompt":"<wake reason=\"mention\" current-time=\"{now}\"><project id=\"chan_example\" type=\"project\"><message trigger=\"true\" from=\"human\" trust=\"principal\" author-id=\"user_example\" id=\"cmsg_reconnect\" sent-at=\"{now}\" mention=\"true\">merge 5</message></project></wake>"},"expect":{"decision":"allow"}},
+        {"payload":{"tool_name":"Bash","tool_input":{"command":"node repo/scripts/toolkit-merge-hold.cjs check"}},"expect":{"decision":"deny"}},
+        {"payload":{"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
       "id": "MERGE.remaining-entity-lines",
       "source": "merge approval review: an entity must not supply a pull request number",
       "kind": "state",

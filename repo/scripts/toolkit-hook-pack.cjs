@@ -429,7 +429,7 @@ class Fixture {
   // The session-start mark of a session the user opened (not resumed, not launched by another).
   #ownerSession() {
     const registryPath = path.join(this.home, '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json');
-    require(path.join(ROOT, 'repo', 'scripts', 'toolkit-governance-gate.cjs')).startSession({ session_id: 'hook-pack', source: 'startup', cwd: this.work }, { registryOptions: { registryPath, testOnly: true } });
+    require(path.join(ROOT, 'repo', 'scripts', 'toolkit-governance-gate.cjs')).startSession({ session_id: 'hook-pack', source: 'startup', cwd: this.work }, { registryOptions: { registryPath, testOnly: true }, environment: {} });
   }
 
   // Writes the fixture's paths into a payload or transcript value.
