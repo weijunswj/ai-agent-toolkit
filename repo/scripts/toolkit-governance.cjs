@@ -69,8 +69,8 @@ const RULES_TEXT = Object.freeze({
   ENABLED_INCOMPLETE: 'Global rules and coding gates. GitHub governance starts once the setup pull request with the programme binding merges on the default branch.',
   ERROR: 'Global rules and coding gates. The binding merged on the default branch cannot be used, so governed records, gate admission and finality hold until a pull request fixes it.',
   DISABLED: 'Global rules and coding gates, without GitHub governance. A governed block in AGENTS.md is not followed.',
-  UNDECIDED: `GitHub governance is not decided yet. Toolkit asks in chat (yes, no or later) and records your reply; in your own terminal, ${CMD('enable')} or ${CMD('disable')} also works.`,
-  NOT_GITHUB: `GitHub governance works only for github.com repositories, so it will be DISABLED here once you say ok. Toolkit asks in chat; in your own terminal, ${CMD('disable')} also works.`,
+  UNDECIDED: `GitHub governance is not decided yet. After Toolkit shows the question, answer yes, no or later in that repository's own chat run. Other wording uses a one-use reply ticket; in your own terminal, ${CMD('enable')} or ${CMD('disable')} also works.`,
+  NOT_GITHUB: `GitHub governance works only for github.com repositories, so it will be DISABLED here once you say ok. Reply after the notice in that same chat run; other wording uses a ticket that can only acknowledge governance being off. In your own terminal, ${CMD('disable')} also works.`,
 });
 
 class GovernanceCliError extends Error {
