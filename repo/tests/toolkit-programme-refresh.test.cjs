@@ -60,6 +60,28 @@ test('refresh runs the full pass as the parent holder, with no session or contro
   assert.equal(fx.run(['refresh']).result.summary, 'No changes', 'a second pass writes nothing');
 });
 
+test('refresh automatically backfills a completed task and the next sweep makes no writes', () => {
+  const fx = fixture();
+  fx.store.mutate('parent', 421, { writer: controller, change: doc => { doc.outcomes[0].class = 'COMPLETED'; return doc; } });
+  fx.github.issues.get(423).state = 'closed';
+  fx.github.addPr(800, { head: 'a'.repeat(40), merged: true, body: 'Implements the task' });
+  fx.github.issuePrLinks.set(423, { timeline: [800] });
+  const first = fx.run(['refresh']);
+  assert.equal(first.error, null);
+  assert.deepEqual(first.result.holds, []);
+  const saved = fx.store.read('child', 423).doc;
+  assert.equal(saved.pr.number, 800);
+  assert.equal(saved.lifecycle, 'DONE');
+  assert.equal(saved.gate.role, null, 'refresh records observations without gate acceptance');
+  assert.equal(fx.store.read('parent', 421).doc.fence.holder_session, controller.session);
+  assert.match(fx.github.issues.get(421).body, /\| #423 \| #800 \| - \| COMPLETED/);
+  const before = { commits: fx.github.commits, mutations: fx.github.mutations(), calls: fx.github.calls.length };
+  assert.equal(fx.run(['refresh']).result.summary, 'No changes');
+  assert.equal(fx.github.commits, before.commits);
+  assert.equal(fx.github.mutations(), before.mutations);
+  assert.equal(fx.github.calls.slice(before.calls).some(call => /pulls\?state=closed/.test(call.path) || call.body?.query?.includes('closedByPullRequestsReferences')), false);
+});
+
 test('refresh also runs for a session a Toolkit launcher started', () => {
   const fx = fixture();
   const { error } = fx.run(['refresh'], { environment: { TOOLKIT_GATE_ROLE: 'G1' } });

@@ -36,6 +36,14 @@ test('the JSON schemas and the runtime validator agree on valid and invalid docu
   const parent = state.newParent({ repository: 'acme/app', parentIssue: 421, outcomes: [outcome], releasePlan: { record: 'INT-TK421-058', comment_id: 5 } });
   assert.equal(validateParent(parent), true, JSON.stringify(validateParent.errors));
   assert.deepEqual(state.validateParent(parent), []);
+  const backfilled = child({ lifecycle: 'DONE', pr: { number: 800, state: 'MERGED', head: SHA_A,
+    checks: { state: 'UNKNOWN', required_total: 0, required_passed: 0, at_head: SHA_A } } });
+  assert.equal(validateChild(backfilled), true, JSON.stringify(validateChild.errors));
+  assert.deepEqual(state.validateChild(backfilled), [], 'merged observations need no schema change');
+  const missing = { ...parent, attention: state.foldAttention([], { source: 'reconcile', complete: true,
+    seen: ['COMPLETED_PR_MISSING', 'PR_DISCOVERY_INCOMPLETE'].map(code => ({ code, issue: 423 })), now: '2026-11-01T00:00:00Z' }) };
+  assert.equal(validateParent(missing), true, JSON.stringify(validateParent.errors));
+  assert.deepEqual(state.validateParent(missing), []);
   const binding = JSON.parse(fs.readFileSync(path.join(ROOT, '.github', 'toolkit-programme.json'), 'utf8'));
   assert.equal(validateBinding(binding), true, JSON.stringify(validateBinding.errors));
   const normalized = state.validateBinding(binding);
@@ -226,7 +234,7 @@ test('the Programme Graph has seven columns, works out NOW, LATER and OPTIONAL, 
   const pr = (number, prState) => ({ number, state: prState, head: null, checks: { state: 'UNKNOWN', required_total: 0, required_passed: 0, at_head: null } });
   const children = new Map([
     [8, doc(8, { lifecycle: 'ACTIVE', release: 'Lane B', gate: { role: 'G1', state: 'ACTIVE', session_id: null, route: null, returns: [] }, pr: pr(549, 'DRAFT') })],
-    [9, doc(9, { completed_at: '2026-10-01T00:00:00Z' })],
+    [9, doc(9, { completed_at: '2026-10-01T00:00:00Z', pr: pr(553, 'MERGED') })],
     [10, doc(10, { release: 'Lane B' })],
     [11, doc(11, { pr: pr(550, 'OPEN') })],
     [12, doc(12)],
@@ -266,6 +274,8 @@ test('the Programme Graph has seven columns, works out NOW, LATER and OPTIONAL, 
   assert.deepEqual([rows[6][0], rows[6][2]], ['Toolkit temporary-resource hygiene', '#15'], 'a code prefix is not part of the name');
   assert.deepEqual(rows[2].slice(4), ['NOW', 'IN PROGRESS', '-']);
   assert.deepEqual([rows[12][1], ...rows[12].slice(4)], ['Old predecessor', '-', 'RETIRED', '2026-10-01 08:00'], 'retired is its own group below COMPLETED');
+  assert.equal(rows[12][3], '-', 'retired PR cell is empty even when its historical PR is stored');
+  assert.equal(children.get(9).pr.number, 553, 'rendering preserves historical state');
   assert.deepEqual(rows[11].slice(4), ['-', 'COMPLETED', '2026-10-20 08:00'], 'a finished nested child goes down to COMPLETED');
   assert.equal(rows[10][0], 'External Operation Authority');
   assert.equal(body.includes('Roadmap') || body.includes('<details>'), false, 'one table, nothing else');
